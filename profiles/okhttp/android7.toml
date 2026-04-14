@@ -1,0 +1,41 @@
+[meta]
+name = "OkHttp4 Android 7-9"
+browser = "okhttp"
+version = 7
+family = "okhttp"
+verified_against = "tls.peet.ws"
+
+[tls]
+ciphers = [
+    "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256", "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+    "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384", "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+    "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256", "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
+    "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA", "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA",
+    "TLS_RSA_WITH_AES_128_GCM_SHA256", "TLS_RSA_WITH_AES_256_GCM_SHA384",
+    "TLS_RSA_WITH_AES_128_CBC_SHA", "TLS_RSA_WITH_AES_256_CBC_SHA",
+]
+curves = ["X25519", "SECP256R1", "SECP384R1"]
+sigalgs = [
+    "ecdsa_secp256r1_sha256", "rsa_pss_rsae_sha256", "rsa_pkcs1_sha256",
+    "ecdsa_secp384r1_sha384", "rsa_pss_rsae_sha384", "rsa_pkcs1_sha384",
+    "rsa_pss_rsae_sha512", "rsa_pkcs1_sha512",
+]
+ocsp_stapling = true
+signed_cert_timestamps = true
+
+[h2]
+initial_stream_window_size = 16777216
+initial_connection_window_size = 16777216
+pseudo_order = ["method", "path", "authority", "scheme"]
+settings_order = [
+    "initial_window_size", "header_table_size", "enable_push",
+    "max_concurrent_streams", "max_frame_size", "max_header_list_size",
+    "unknown8", "unknown9",
+]
+
+[h2.fingerprint]
+akamai = "4:16777216|16711681|0|m,p,a,s"
+
+[identity.android]
+user_agent = "okhttp/4.12.0"
+sec_ch_ua = ""

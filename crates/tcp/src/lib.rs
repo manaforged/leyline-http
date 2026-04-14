@@ -1,0 +1,125 @@
+//! JA4T TCP fingerprinting via socket2.
+//!
+//! Sets per-connection TCP socket options (TTL, MSS, window size, DF bit,
+//! window scale, TCP_NODELAY) to match the claimed operating system's
+//! TCP/IP stack fingerprint.
+
+use std::sync::Mutex;
+
+use socket2::Socket;
+
+mod platform;
+
+/// TCP/IP stack fingerprint parameters for JA4T matching.
+#[derive(Debug, Clone, Copy)]
+pub struct TcpProfile {
+    /// IP TTL: 128 for Windows, 64 for macOS/Linux.
+    pub ttl: u32,
+    /// TCP Max Segment Size: 1460 for standard Ethernet.
+    pub mss: u32,
+    /// TCP receive window size: 64240 (Windows), 65535 (macOS/Linux).
+    pub window_size: u32,
+    /// Don't Fragment bit.
+    pub df: bool,
+    /// TCP window scale factor: 8 (Windows), 6 (macOS), 7 (Linux). 0 = skip.
+    pub window_scale: u32,
+    /// TCP_NODELAY (disables Nagle's algorithm).
+    pub no_delay: bool,
+}
+
+impl TcpProfile {
+    pub const WINDOWS: Self = Self {
+        ttl: 128,
+        mss: 1460,
+        window_size: 64240,
+        df: true,
+        window_scale: 8,
+        no_delay: true,
+    };
+
+    pub const MACOS: Self = Self {
+        ttl: 64,
+        mss: 1460,
+        window_size: 65535,
+        df: true,
+        window_scale: 6,
+        no_delay: true,
+    };
+
+    pub const LINUX: Self = Self {
+        ttl: 64,
+        mss: 1460,
+        window_size: 65535,
+        df: true,
+        window_scale: 7,
+        no_delay: true,
+    };
+
+    pub const IOS: Self = Self {
+        ttl: 64,
+        mss: 1460,
+        window_size: 65535,
+        df: true,
+        window_scale: 0,
+        no_delay: false,
+    };
+
+    /// Apply this TCP profile to a socket before connect().
+    pub fn apply(&self, socket: &Socket) {
+        if self.ttl > 0 {
+            if let Err(e) = socket.set_ttl(self.ttl) {
+                log_once("IP_TTL", &e);
+            }
+        }
+
+        if self.window_size > 0 {
+            if let Err(e) = socket.set_recv_buffer_size(self.window_size as usize) {
+                log_once("SO_RCVBUF", &e);
+            }
+        }
+
+        if self.no_delay {
+            if let Err(e) = socket.set_nodelay(true) {
+                log_once("TCP_NODELAY", &e);
+            }
+        }
+
+        platform::apply_platform_options(socket, self);
+    }
+}
+
+static LOGGED: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
+
+fn log_once(option: &'static str, err: &std::io::Error) {
+    let mut logged = LOGGED.lock().expect("tcp log lock poisoned");
+    if !logged.contains(&option) {
+        logged.push(option);
+        tracing::warn!(option, error = %err, "setsockopt failed (non-fatal)");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn profile_constants() {
+        assert_eq!(TcpProfile::WINDOWS.ttl, 128);
+        assert_eq!(TcpProfile::MACOS.ttl, 64);
+        assert_eq!(TcpProfile::LINUX.window_scale, 7);
+    }
+
+    #[test]
+    fn apply_does_not_panic() {
+        let socket = Socket::new(
+            socket2::Domain::IPV4,
+            socket2::Type::STREAM,
+            Some(socket2::Protocol::TCP),
+        )
+        .unwrap();
+        TcpProfile::WINDOWS.apply(&socket);
+        TcpProfile::LINUX.apply(&socket);
+        TcpProfile::MACOS.apply(&socket);
+        TcpProfile::IOS.apply(&socket);
+    }
+}

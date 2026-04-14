@@ -1,0 +1,24 @@
+[package]
+name = "leyline-tls"
+description = "BoringSSL TLS connector with fingerprint control"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+leyline-tcp = { path = "../tcp" }
+leyline-profile = { path = "../profile" }
+boring2 = { workspace = true }
+boring-sys2 = { workspace = true }
+tokio-boring2 = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+socket2 = { workspace = true }
+libc = "0.2"
+brotli = "8"
+
+[lints]
+workspace = true

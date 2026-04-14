@@ -1,0 +1,64 @@
+[meta]
+name = "Firefox 148"
+browser = "firefox"
+version = 148
+family = "gecko"
+verified_against = "tls.peet.ws"
+
+[tls]
+ciphers = [
+    "TLS_AES_128_GCM_SHA256", "TLS_CHACHA20_POLY1305_SHA256", "TLS_AES_256_GCM_SHA384",
+    "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256", "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+    "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256", "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
+    "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384", "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+    "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA", "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA",
+    "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA", "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA",
+    "TLS_RSA_WITH_AES_128_GCM_SHA256", "TLS_RSA_WITH_AES_256_GCM_SHA384",
+    "TLS_RSA_WITH_AES_128_CBC_SHA", "TLS_RSA_WITH_AES_256_CBC_SHA",
+]
+curves = ["X25519_MLKEM768", "X25519", "SECP256R1", "SECP384R1", "SECP521R1"]
+sigalgs = [
+    "ecdsa_secp256r1_sha256", "ecdsa_secp384r1_sha384", "ecdsa_secp521r1_sha512",
+    "rsa_pss_rsae_sha256", "rsa_pss_rsae_sha384", "rsa_pss_rsae_sha512",
+    "rsa_pkcs1_sha256", "rsa_pkcs1_sha384", "rsa_pkcs1_sha512",
+    "ecdsa_sha1", "rsa_pkcs1_sha1",
+]
+delegated_credentials = "ecdsa_secp256r1_sha256:ecdsa_secp384r1_sha384:ecdsa_secp521r1_sha512:rsa_pss_rsae_sha256:rsa_pss_rsae_sha384:rsa_pss_rsae_sha512:rsa_pkcs1_sha256:rsa_pkcs1_sha384:rsa_pkcs1_sha512:ecdsa_sha1:rsa_pkcs1_sha1"
+record_size_limit = 16385
+ocsp_stapling = true
+signed_cert_timestamps = true
+cert_compression = ["brotli"]
+extension_permutation = [0, 2, 3, 4, 5, 6, 7, 8, 22, 11, 14, 17, 9, 15, 21, 1, 10, 12, 13, 16, 18, 19, 20, 23]
+ech_grease = true
+pre_shared_key = true
+
+[tls.fingerprint]
+ja4 = "t13d1716h2_5b57614c22b0_36c4f964cab1"
+
+[h2]
+header_table_size = 65536
+enable_push = false
+initial_stream_window_size = 131072
+initial_connection_window_size = 12582912
+max_frame_size = 16384
+pseudo_order = ["method", "path", "authority", "scheme"]
+settings_order = [
+    "header_table_size", "enable_push", "initial_window_size",
+    "max_frame_size", "max_header_list_size", "max_concurrent_streams",
+    "unknown8", "unknown9",
+]
+
+[h2.fingerprint]
+akamai = "1:65536;2:0;4:131072;5:16384|12517377|0|m,p,a,s"
+
+[identity.windows]
+user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:148.0) Gecko/20100101 Firefox/148.0"
+sec_ch_ua = ""
+
+[identity.macos]
+user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:148.0) Gecko/20100101 Firefox/148.0"
+sec_ch_ua = ""
+
+[identity.linux]
+user_agent = "Mozilla/5.0 (X11; Linux x86_64; rv:148.0) Gecko/20100101 Firefox/148.0"
+sec_ch_ua = ""

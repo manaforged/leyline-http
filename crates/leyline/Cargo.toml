@@ -1,0 +1,27 @@
+[package]
+name = "leyline"
+description = "Browser-accurate TLS fingerprinting for Rust"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+leyline-core = { path = "../core" }
+leyline-profile = { path = "../profile" }
+leyline-tcp = { path = "../tcp" }
+leyline-cookies = { path = "../cookies" }
+leyline-h2 = { path = "../h2" }
+
+[dev-dependencies]
+leyline-profile = { path = "../profile" }
+leyline-h2 = { path = "../h2" }
+tokio = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

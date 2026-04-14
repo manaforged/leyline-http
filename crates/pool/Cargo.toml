@@ -1,0 +1,15 @@
+[package]
+name = "leyline-pool"
+description = "HTTP connection pool with H1/H2 awareness"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[lints]
+workspace = true

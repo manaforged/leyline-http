@@ -1,0 +1,15 @@
+[package]
+name = "leyline-cookies"
+description = "RFC 6265 cookie jar"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+cookie_store = "0.21"
+url = { workspace = true }
+
+[lints]
+workspace = true

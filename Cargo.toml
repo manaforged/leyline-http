@@ -1,0 +1,57 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/leyline",
+    "crates/core",
+    "crates/tls",
+    "crates/h2",
+    "crates/pool",
+    "crates/profile",
+    "crates/tcp",
+    "crates/cookies",
+]
+exclude = [
+    "vendor/ssl-sys",
+    "vendor/ssl",
+    "vendor/tokio-ssl",
+    "wrappers/*",
+]
+
+[workspace.package]
+version = "2.0.0-alpha.1"
+edition = "2024"
+rust-version = "1.85" # MSRV
+authors = ["Manaforge Technologies, LLC"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/manaforged/leyline-http"
+homepage = "https://github.com/manaforged/leyline-http"
+keywords = ["tls", "fingerprint", "http", "browser", "ja4"]
+categories = ["web-programming::http-client", "cryptography"]
+
+[workspace.lints.rust]
+missing_docs = "warn"
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["net", "rt", "rt-multi-thread", "time", "io-util", "macros"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+tracing = "0.1"
+thiserror = "2"
+url = "2"
+sha2 = "0.10"
+boring2 = "5.0.0-alpha.13"
+boring-sys2 = "5.0.0-alpha.13"
+tokio-boring2 = "5.0.0-alpha.13"
+hyper2 = { version = "1.5", features = ["client", "http1", "http2"] }
+http-body-util = "0.1"
+pin-project-lite = "0.2"
+socket2 = "0.5"
+http = "1"
+bytes = "1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+opt-level = 3

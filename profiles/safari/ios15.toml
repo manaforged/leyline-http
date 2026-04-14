@@ -1,0 +1,55 @@
+[meta]
+name = "Safari iOS 15"
+browser = "safari-ios"
+version = 15
+family = "webkit"
+verified_against = "tls.peet.ws"
+
+[tls]
+ciphers = [
+    "TLS_AES_128_GCM_SHA256", "TLS_AES_256_GCM_SHA384", "TLS_CHACHA20_POLY1305_SHA256",
+    "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384", "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+    "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256",
+    "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384", "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+    "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
+    "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA", "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA",
+    "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA", "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA",
+    "TLS_RSA_WITH_AES_256_GCM_SHA384", "TLS_RSA_WITH_AES_128_GCM_SHA256",
+    "TLS_RSA_WITH_AES_256_CBC_SHA", "TLS_RSA_WITH_AES_128_CBC_SHA",
+    "TLS_ECDHE_ECDSA_WITH_3DES_EDE_CBC_SHA", "TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA",
+    "TLS_RSA_WITH_3DES_EDE_CBC_SHA",
+]
+curves = ["X25519", "SECP256R1", "SECP384R1", "SECP521R1"]
+sigalgs = [
+    "ecdsa_secp256r1_sha256", "rsa_pss_rsae_sha256", "rsa_pkcs1_sha256",
+    "ecdsa_secp384r1_sha384", "ecdsa_sha1",
+    "rsa_pss_rsae_sha384", "rsa_pss_rsae_sha512",
+    "rsa_pkcs1_sha384", "rsa_pkcs1_sha512", "rsa_pkcs1_sha1",
+]
+alps = "h2"
+ocsp_stapling = true
+signed_cert_timestamps = true
+cert_compression = ["brotli"]
+extension_permutation = [0, 2, 3, 4, 5, 7, 8, 9, 11, 14, 15, 17, 21, 1, 6, 10, 12, 13, 16, 18, 19, 20, 22, 23]
+pre_shared_key = true
+
+[h2]
+enable_push = false
+max_concurrent_streams = 100
+initial_stream_window_size = 2097152
+initial_connection_window_size = 10485760
+unknown_setting8 = 1
+unknown_setting9 = 1
+pseudo_order = ["method", "scheme", "authority", "path"]
+settings_order = [
+    "enable_push", "max_concurrent_streams", "initial_window_size",
+    "unknown8", "unknown9", "header_table_size",
+    "max_frame_size", "max_header_list_size",
+]
+
+[h2.fingerprint]
+akamai = "2:0;3:100;4:2097152;8:1;9:1|10420225|0|m,s,a,p"
+
+[identity.ios]
+user_agent = "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1"
+sec_ch_ua = ""

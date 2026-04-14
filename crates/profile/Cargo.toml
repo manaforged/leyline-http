@@ -1,0 +1,17 @@
+[package]
+name = "leyline-profile"
+description = "Browser profile loader and registry"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+leyline-tcp = { path = "../tcp" }
+serde = { workspace = true }
+toml = { workspace = true }
+tracing = { workspace = true }
+
+[lints]
+workspace = true
