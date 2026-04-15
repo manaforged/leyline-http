@@ -1,0 +1,391 @@
+//! Set-Cookie header parser (RFC 6265bis).
+
+use std::time::{Duration, SystemTime};
+
+use crate::cookie::{Cookie, SameSite};
+
+/// Max cookie lifetime: 400 days (Chrome enforcement).
+const MAX_LIFETIME: Duration = Duration::from_secs(400 * 24 * 60 * 60);
+
+/// Parse a Set-Cookie header value into a Cookie.
+///
+/// Returns None if the cookie is malformed or should be rejected.
+pub fn parse_set_cookie(header: &str, request_url: &url::Url) -> Option<Cookie> {
+    let now = SystemTime::now();
+
+    // Split on first '=' to get name=value.
+    let (name_value, attrs_str) = match header.find(';') {
+        Some(i) => (&header[..i], &header[i + 1..]),
+        None => (header, ""),
+    };
+
+    let (name, value) = match name_value.find('=') {
+        Some(i) => {
+            let v = name_value[i + 1..].trim();
+            // Strip surrounding double-quotes (Chrome behavior).
+            let v = v
+                .strip_prefix('"')
+                .and_then(|v| v.strip_suffix('"'))
+                .unwrap_or(v);
+            (name_value[..i].trim(), v)
+        }
+        None => return None, // malformed
+    };
+
+    if name.is_empty() {
+        return None;
+    }
+
+    // Parse attributes.
+    let mut domain = None;
+    let mut path = None;
+    let mut secure = false;
+    let mut http_only = false;
+    let mut same_site = None;
+    let mut max_age = None;
+    let mut expires = None;
+
+    for attr in attrs_str.split(';') {
+        let attr = attr.trim();
+        if attr.is_empty() {
+            continue;
+        }
+        let (attr_name, attr_value) = match attr.find('=') {
+            Some(i) => (attr[..i].trim(), Some(attr[i + 1..].trim())),
+            None => (attr, None),
+        };
+
+        match attr_name.to_lowercase().as_str() {
+            "domain" => {
+                if let Some(v) = attr_value {
+                    let d = v.strip_prefix('.').unwrap_or(v);
+                    if !d.is_empty() {
+                        domain = Some(d.to_lowercase());
+                    }
+                }
+            }
+            "path" => {
+                if let Some(v) = attr_value {
+                    if v.starts_with('/') {
+                        path = Some(v.to_string());
+                    }
+                }
+            }
+            "secure" => secure = true,
+            "httponly" => http_only = true,
+            "samesite" => {
+                if let Some(v) = attr_value {
+                    same_site = match v.to_lowercase().as_str() {
+                        "strict" => Some(SameSite::Strict),
+                        "lax" => Some(SameSite::Lax),
+                        "none" => Some(SameSite::None),
+                        _ => None,
+                    };
+                }
+            }
+            "max-age" => {
+                if let Some(v) = attr_value {
+                    if let Ok(secs) = v.parse::<i64>() {
+                        if secs <= 0 {
+                            max_age = Some(Duration::ZERO); // expire immediately
+                        } else {
+                            max_age = Some(Duration::from_secs(secs as u64));
+                        }
+                    }
+                }
+            }
+            "expires" => {
+                if let Some(v) = attr_value {
+                    expires = parse_cookie_date(v);
+                }
+            }
+            _ => {} // ignore unknown attributes
+        }
+    }
+
+    // SameSite=None requires Secure (Chrome enforcement).
+    let same_site = match same_site {
+        Some(SameSite::None) if !secure => return None, // reject
+        Some(s) => s,
+        None => SameSite::Lax, // Chrome default
+    };
+
+    // Cookie prefix validation.
+    if name.starts_with("__Secure-") && !secure {
+        return None;
+    }
+    if name.starts_with("__Host-") {
+        if !secure || domain.is_some() {
+            return None;
+        }
+        // __Host- cookies must have path=/
+        if path.as_deref() != Some("/") {
+            return None;
+        }
+    }
+
+    // Compute expiry.
+    let computed_expires = if let Some(ma) = max_age {
+        // Max-Age takes precedence over Expires.
+        if ma == Duration::ZERO {
+            Some(now) // expire immediately
+        } else {
+            let capped = ma.min(MAX_LIFETIME);
+            Some(now + capped)
+        }
+    } else if let Some(exp) = expires {
+        // Cap at 400 days from now.
+        let max_time = now + MAX_LIFETIME;
+        Some(exp.min(max_time))
+    } else {
+        None // session cookie
+    };
+
+    // Default domain to request host (host-only cookie).
+    let request_host = request_url.host_str().unwrap_or("").to_lowercase();
+    let host_only = domain.is_none();
+    let cookie_domain = domain.unwrap_or_else(|| request_host.clone());
+
+    // Reject cookies set on public suffixes (basic check).
+    if !host_only && is_public_suffix(&cookie_domain) {
+        return None;
+    }
+
+    // RFC 6265bis Section 5.3.6: Domain must match the request host.
+    // The cookie domain must be equal to or a parent domain of the request host.
+    if !host_only {
+        let cd = cookie_domain.to_lowercase();
+        let rh = request_host.to_lowercase();
+        if rh != cd && !rh.ends_with(&format!(".{cd}")) {
+            return None; // Cross-domain cookie injection blocked.
+        }
+    }
+
+    // Default path from request URL.
+    let cookie_path = path.unwrap_or_else(|| default_path(request_url.path()));
+
+    // Size limit: 4096 bytes.
+    if name.len() + value.len() > 4096 {
+        return None;
+    }
+
+    Some(Cookie {
+        name: name.to_string(),
+        value: value.to_string(),
+        domain: cookie_domain,
+        path: cookie_path,
+        secure,
+        http_only,
+        same_site,
+        expires: computed_expires,
+        creation_time: now,
+        last_access: now,
+        host_only,
+    })
+}
+
+/// Check if a domain is a public suffix (should not accept cookies).
+/// This is a basic check covering common TLDs. For full PSL compliance,
+/// use the publicsuffix crate.
+fn is_public_suffix(domain: &str) -> bool {
+    // Single-label domains (no dots) are always public suffixes.
+    if !domain.contains('.') {
+        return true;
+    }
+    // Common two-letter TLDs and multi-part suffixes.
+    const SUFFIXES: &[&str] = &[
+        "com", "org", "net", "edu", "gov", "mil", "int", "co.uk", "org.uk", "ac.uk", "gov.uk",
+        "co.jp", "or.jp", "ac.jp", "go.jp", "com.au", "net.au", "org.au", "edu.au", "co.nz",
+        "net.nz", "org.nz", "com.br", "org.br", "net.br", "co.in", "net.in", "org.in", "co.za",
+        "org.za", "web.za", "com.cn", "net.cn", "org.cn", "co.kr", "or.kr", "com.mx", "org.mx",
+        "com.ar", "org.ar", "co.il", "com.tr", "org.tr", "com.sg", "org.sg", "com.hk", "org.hk",
+    ];
+    let lower = domain.to_lowercase();
+    SUFFIXES.iter().any(|s| lower == *s)
+}
+
+/// Default cookie path from request URI (RFC 6265bis Section 5.1.4).
+fn default_path(request_path: &str) -> String {
+    if !request_path.starts_with('/') {
+        return "/".to_string();
+    }
+    match request_path.rfind('/') {
+        Some(i) if i > 0 => request_path[..i].to_string(),
+        _ => "/".to_string(),
+    }
+}
+
+/// Basic cookie date parser (handles common formats).
+fn parse_cookie_date(s: &str) -> Option<SystemTime> {
+    // Try RFC 1123: "Thu, 01 Dec 2025 00:00:00 GMT"
+    // Try RFC 850: "Thursday, 01-Dec-25 00:00:00 GMT"
+    // Try asctime: "Thu Dec  1 00:00:00 2025"
+    // For robustness, we try to extract year/month/day/time components.
+    let s = s.trim();
+
+    // Quick heuristic parse — extract numbers and month name.
+    let mut day = 0u32;
+    let mut month = 0u32;
+    let mut year = 0u32;
+    let mut hour = 0u32;
+    let mut minute = 0u32;
+    let mut second = 0u32;
+    let mut found_time = false;
+
+    for token in s.split(|c: char| c == ' ' || c == '-' || c == ',') {
+        let token = token.trim();
+        if token.is_empty() {
+            continue;
+        }
+
+        if !found_time && token.contains(':') {
+            // Time component: HH:MM:SS
+            let parts: Vec<&str> = token.split(':').collect();
+            if parts.len() >= 2 {
+                hour = parts[0].parse().unwrap_or(0);
+                minute = parts[1].parse().unwrap_or(0);
+                second = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+                found_time = true;
+            }
+            continue;
+        }
+
+        if let Ok(n) = token.parse::<u32>() {
+            if n > 99 {
+                year = n;
+            } else if day == 0 {
+                day = n;
+            } else if year == 0 {
+                year = if n > 68 { 1900 + n } else { 2000 + n };
+            }
+            continue;
+        }
+
+        // Month name.
+        let m = match token.get(..3).map(|s| s.to_lowercase()).as_deref() {
+            Some("jan") => 1,
+            Some("feb") => 2,
+            Some("mar") => 3,
+            Some("apr") => 4,
+            Some("may") => 5,
+            Some("jun") => 6,
+            Some("jul") => 7,
+            Some("aug") => 8,
+            Some("sep") => 9,
+            Some("oct") => 10,
+            Some("nov") => 11,
+            Some("dec") => 12,
+            _ => 0,
+        };
+        if m > 0 {
+            month = m;
+        }
+    }
+
+    if day == 0 || month == 0 || year == 0 {
+        return None;
+    }
+
+    // Convert to SystemTime (rough — no full calendar math, but sufficient for cookies).
+    let days_from_epoch = days_since_epoch(year, month, day)?;
+    let secs =
+        days_from_epoch as u64 * 86400 + hour as u64 * 3600 + minute as u64 * 60 + second as u64;
+    Some(SystemTime::UNIX_EPOCH + Duration::from_secs(secs))
+}
+
+/// Days since Unix epoch for a given date.
+fn days_since_epoch(year: u32, month: u32, day: u32) -> Option<i64> {
+    if month < 1 || month > 12 || day < 1 || day > 31 {
+        return None;
+    }
+    // Simplified: use a basic formula.
+    let y = if month <= 2 { year - 1 } else { year } as i64;
+    let m = if month <= 2 { month + 9 } else { month - 3 } as i64;
+    let d = day as i64;
+    Some(365 * y + y / 4 - y / 100 + y / 400 + (m * 306 + 5) / 10 + d - 719469)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_url(s: &str) -> url::Url {
+        url::Url::parse(s).unwrap()
+    }
+
+    #[test]
+    fn parse_basic_cookie() {
+        let url = test_url("https://example.com/path");
+        let c = parse_set_cookie("name=value", &url).unwrap();
+        assert_eq!(c.name, "name");
+        assert_eq!(c.value, "value");
+        assert_eq!(c.domain, "example.com");
+        assert_eq!(c.path, "/");
+        assert_eq!(c.same_site, SameSite::Lax); // default
+        assert!(c.host_only);
+    }
+
+    #[test]
+    fn parse_full_attributes() {
+        let url = test_url("https://example.com/app/page");
+        let c = parse_set_cookie(
+            "tok=abc; Domain=example.com; Path=/app; Secure; HttpOnly; SameSite=None; Max-Age=3600",
+            &url,
+        )
+        .unwrap();
+        assert_eq!(c.name, "tok");
+        assert_eq!(c.value, "abc");
+        assert_eq!(c.domain, "example.com");
+        assert_eq!(c.path, "/app");
+        assert!(c.secure);
+        assert!(c.http_only);
+        assert_eq!(c.same_site, SameSite::None);
+        assert!(!c.host_only);
+        assert!(c.expires.is_some()); // from Max-Age
+    }
+
+    #[test]
+    fn samesite_none_requires_secure() {
+        let url = test_url("https://example.com/");
+        let result = parse_set_cookie("bad=val; SameSite=None", &url);
+        assert!(result.is_none()); // rejected
+    }
+
+    #[test]
+    fn host_prefix_validation() {
+        let url = test_url("https://example.com/");
+        // Valid __Host- cookie.
+        let c = parse_set_cookie("__Host-id=1; Secure; Path=/", &url);
+        assert!(c.is_some());
+
+        // Invalid: __Host- with Domain.
+        let c = parse_set_cookie("__Host-id=1; Secure; Path=/; Domain=example.com", &url);
+        assert!(c.is_none());
+
+        // Invalid: __Host- without Secure.
+        let c = parse_set_cookie("__Host-id=1; Path=/", &url);
+        assert!(c.is_none());
+    }
+
+    #[test]
+    fn max_age_caps_at_400_days() {
+        let url = test_url("https://example.com/");
+        let c = parse_set_cookie("x=1; Max-Age=999999999", &url).unwrap();
+        let max_400_days = SystemTime::now() + Duration::from_secs(400 * 86400 + 1);
+        assert!(c.expires.unwrap() < max_400_days);
+    }
+
+    #[test]
+    fn value_with_equals() {
+        let url = test_url("https://example.com/");
+        let c = parse_set_cookie("token=abc=def=ghi; Path=/", &url).unwrap();
+        assert_eq!(c.name, "token");
+        assert_eq!(c.value, "abc=def=ghi");
+    }
+
+    #[test]
+    fn cookie_date_parsing() {
+        let t = parse_cookie_date("Thu, 01 Jan 2026 00:00:00 GMT");
+        assert!(t.is_some());
+    }
+}

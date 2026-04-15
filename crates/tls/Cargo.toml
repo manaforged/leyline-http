@@ -10,15 +10,17 @@ authors.workspace = true
 [dependencies]
 leyline-tcp = { path = "../tcp" }
 leyline-profile = { path = "../profile" }
-boring2 = { workspace = true }
-boring-sys2 = { workspace = true }
-tokio-boring2 = { workspace = true }
+boring = { workspace = true }
+boring-sys = { workspace = true }
+tokio-boring = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 socket2 = { workspace = true }
 libc = "0.2"
+lru = "0.16.3" # RUSTSEC-2026-0002 fix
 brotli = "8"
+url = { workspace = true }
 
 [lints]
 workspace = true

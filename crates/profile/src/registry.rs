@@ -145,7 +145,10 @@ mod tests {
         assert_eq!(profile.tls.curves.len(), 4);
         assert!(profile.tls.permute_extensions);
         assert!(profile.tls.ech_grease);
-        assert_eq!(profile.h2.pseudo_order, vec!["method", "authority", "scheme", "path"]);
+        assert_eq!(
+            profile.h2.pseudo_order,
+            vec!["method", "authority", "scheme", "path"]
+        );
         assert!(profile.identity.contains_key("windows"));
     }
 
@@ -155,6 +158,9 @@ mod tests {
         let profile = reg.get("firefox", 148).expect("firefox 148 not found");
         assert!(profile.tls.extension_permutation.is_some());
         assert_eq!(profile.tls.ciphers.len(), 17);
-        assert_eq!(profile.h2.pseudo_order, vec!["method", "path", "authority", "scheme"]);
+        assert_eq!(
+            profile.h2.pseudo_order,
+            vec!["method", "path", "authority", "scheme"]
+        );
     }
 }

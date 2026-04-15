@@ -1,12 +1,23 @@
+//! Print the observed TLS extension list for a Chrome-profiled request.
+
 use leyline::Session;
 
 #[tokio::main]
 async fn main() {
     let session = Session::chrome().expect("failed to build session");
-    let resp = session.navigate("https://tls.peet.ws/api/all").await.expect("request failed");
+    let resp = session
+        .navigate("https://tls.peet.ws/api/all")
+        .await
+        .expect("request failed");
     let v: serde_json::Value = resp.json().expect("invalid json");
 
-    println!("Extensions we send ({}):", v["tls"]["extensions"].as_array().map(|a| a.len()).unwrap_or(0));
+    println!(
+        "Extensions we send ({}):",
+        v["tls"]["extensions"]
+            .as_array()
+            .map(|a| a.len())
+            .unwrap_or(0)
+    );
     for ext in v["tls"]["extensions"].as_array().unwrap() {
         let name = ext["name"].as_str().unwrap_or("?");
         println!("  {name}");

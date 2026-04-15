@@ -46,6 +46,10 @@ settings_order = [
     "max_header_list_size", "unknown8",
 ]
 
+[tls.fingerprint]
+# Pinned to leyline's wire; not yet checked against a real iOS 18 Safari ClientHello.
+ja4 = "t13d2016h2_a09f3c656075_f5267530a778"
+
 [h2.fingerprint]
 akamai = "2:0;3:100;4:2097152;9:1|10420225|0|m,s,a,p"
 

@@ -55,6 +55,9 @@ pub struct TlsProfile {
     pub extension_permutation: Option<Vec<u8>>,
     #[serde(default)]
     pub ech_grease: bool,
+    /// Fixed ECH GREASE payload length in bytes (Chrome 131+ uses a fixed length).
+    #[serde(default)]
+    pub ech_grease_payload_len: Option<u16>,
     #[serde(default)]
     pub pre_shared_key: bool,
     #[serde(default)]

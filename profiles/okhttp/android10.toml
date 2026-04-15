@@ -34,6 +34,10 @@ settings_order = [
     "unknown8", "unknown9",
 ]
 
+[tls.fingerprint]
+# Pinned to leyline's wire; not yet checked against a real OkHttp 4.12 ClientHello.
+ja4 = "t13d1514h2_8daaf6152771_1eb89897b454"
+
 [h2.fingerprint]
 akamai = "4:16777216|16711681|0|m,p,a,s"
 

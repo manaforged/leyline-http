@@ -28,6 +28,7 @@ pub struct TcpProfile {
 }
 
 impl TcpProfile {
+    /// TCP profile matching Windows defaults (TTL 128, window scale 8).
     pub const WINDOWS: Self = Self {
         ttl: 128,
         mss: 1460,
@@ -37,6 +38,7 @@ impl TcpProfile {
         no_delay: true,
     };
 
+    /// TCP profile matching macOS defaults (TTL 64, window scale 6).
     pub const MACOS: Self = Self {
         ttl: 64,
         mss: 1460,
@@ -46,6 +48,7 @@ impl TcpProfile {
         no_delay: true,
     };
 
+    /// TCP profile matching Linux defaults (TTL 64, window scale 7).
     pub const LINUX: Self = Self {
         ttl: 64,
         mss: 1460,
@@ -55,6 +58,7 @@ impl TcpProfile {
         no_delay: true,
     };
 
+    /// TCP profile matching iOS defaults (TTL 64, Nagle enabled).
     pub const IOS: Self = Self {
         ttl: 64,
         mss: 1460,

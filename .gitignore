@@ -3,3 +3,5 @@ Cargo.lock
 *.swp
 *.swo
 .DS_Store
+wrappers/node/node_modules/
+wrappers/python/leyline/__pycache__/

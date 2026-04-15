@@ -1,78 +1,200 @@
 # Leyline
 
-**Browser-accurate TLS fingerprinting for Rust.**
+[![Crates.io][crates-badge]][crates-url]
+[![Docs.rs][docs-badge]][docs-url]
+[![MSRV][msrv-badge]][msrv-url]
+[![License][license-badge]][license-url]
 
-Leyline makes HTTP requests that are indistinguishable from real browsers at every network layer. Built on a patched BoringSSL fork with APIs no other TLS library exposes.
+Browser-profiled HTTP client for Rust with byte-level control over the TLS
+ClientHello, HTTP/2 frame shape, HTTP/3 transport parameters, and TCP socket
+options.
 
-## Quick start
+> **Status:** `2.0.0-alpha.1`. The public API will change before 1.0 — pin an
+> exact version and watch [releases][releases-url].
 
-```rust
-use leyline::Session;
+Default Rust stacks (`reqwest` + `rustls`, `hyper` + `native-tls`) emit their
+own TLS fingerprint. Leyline instead vendors a BoringSSL fork and ships a
+ground-up HTTP/2 implementation so the emitted ClientHello, SETTINGS frame,
+and `WINDOW_UPDATE` match the selected browser profile. You get `async` /
+`tokio`, a reqwest-shaped request builder, a connection pool, a per-response
+audit API returning JA3 / JA4 / JA4T / JA4H / H2 fingerprints, and a `leyline`
+CLI for ad-hoc work.
 
-// One line — Chrome 147 on Windows, perfect fingerprint
-let session = Session::chrome()?;
-let resp = session.navigate("https://example.com").await?;
-println!("{}", resp.text());
+## Example
 
-// Or Firefox, Safari
-let session = Session::firefox()?;
-let session = Session::safari()?;
+Leyline runs on [tokio]. Add it to your `Cargo.toml`:
 
-// Full control
-let session = Session::builder()
-    .browser(Browser::Chrome147)
-    .platform(Platform::Linux)
-    .proxy("socks5://user:pass@host:port")
-    .grease_seed(b"seed")  // deterministic fingerprint
-    .build()?;
-
-let resp = session.post_json("https://api.example.com", &data).await?;
+```toml
+[dependencies]
+leyline = "2.0.0-alpha.1"
+tokio = { version = "1", features = ["full"] }
 ```
 
-## What it controls
+And then:
 
-Every TLS library gives you cipher suites. Leyline controls these layers:
+```rust,no_run
+use leyline::{Browser, Platform, Session};
+use std::time::Duration;
 
-| Layer | What | Status |
-|-------|------|--------|
-| TLS ClientHello | Ciphers, extensions, curves, GREASE, key shares, ECH | Full |
-| HTTP/2 SETTINGS | Frame values, ordering, WINDOW_UPDATE, pseudo-headers | Full |
-| TCP SYN | TTL, MSS, window size, DF bit, window scale (JA4T) | Full |
-| HTTP Headers | sec-fetch-*, accept, ordering via presets | Full |
+#[tokio::main]
+async fn main() -> leyline::Result<()> {
+    let session = Session::builder()
+        .browser(Browser::Chrome147)
+        .platform(Platform::Linux)
+        .timeout(Duration::from_secs(15))
+        .build()?;
 
-## Browser profiles
+    let resp = session.get("https://tls.peet.ws/api/all").send().await?;
+    println!("{} {}", resp.status(), resp.audit().unwrap().ja4);
+    Ok(())
+}
+```
 
-Profiles are TOML data files — adding Chrome 148 is copy-paste, not code:
+More examples: [`crates/leyline/examples/`][examples-url] · [API docs][docs-url].
 
-| Profile | JA4 | H2 Fingerprint |
-|---------|-----|----------------|
-| Chrome 147 | `t13d1516h2_8daaf6152771_d8a2da3f94cd` | `1:65536;2:0;4:6291456;6:262144\|15663105\|0\|m,a,s,p` |
-| Chrome 146 | same | same |
-| Chrome 145 | same | `1:65536;2:0;3:1000;4:6291456;6:262144\|15663105\|0\|m,a,s,p` |
-| Firefox 148 | `t13d1716h2_5b57614c22b0_36c4f964cab1` | `1:65536;2:0;4:131072;5:16384\|12517377\|0\|m,p,a,s` |
-| Safari 18 | `t13d2015h2_a09f3c656075_2a10bb534ace` | `2:0;3:100;4:2097152;8:1;9:1\|10420225\|0\|m,s,a,p` |
+## Features
 
-Plus: OkHttp Android 7/10, Safari iOS 15/17/18, Edge.
+- **Profile-driven TLS ClientHello** — cipher and extension order, deterministic GREASE, ALPS, X25519MLKEM768 PQ key agreement.
+- **Ground-up HTTP/2** — `leyline-h2` is RFC 9113, HPACK, flow control, profile-exact SETTINGS. No `hyper` / `h2` dependency.
+- **HTTP/3 over [quiche]** — browser-profiled QUIC transport parameters, QPACK, H3 SETTINGS. Shares the H2 ClientHello path.
+- **TCP-layer fingerprint** — TTL, MSS, window scale, DF bit, per-OS (JA4T).
+- **Per-response audit** — JA3, JA4, JA4T, JA4H, H2 Akamai fingerprint on every `Response`.
+- **Proxies** — HTTP `CONNECT` and SOCKS5, username/password auth.
+- **Pooling** — H2 multiplexing, keepalive, TLS 1.3 session resumption.
+- **Multi-language bindings** — Python, Node.js, Go wrappers over a shared BoringSSL core (C FFI).
+
+## Supported profiles
+
+| Profile         | Versions    | `Browser::` variants                              |
+| --------------- | ----------- | ------------------------------------------------- |
+| Chrome          | 145, 146, 147 | `Chrome145`, `Chrome146`, `Chrome147`           |
+| Firefox         | 148         | `Firefox148`                                       |
+| Safari (macOS)  | 18          | `Safari18`                                         |
+| Safari (iOS)    | 15, 17, 18  | `SafariiOS15`, `SafariiOS17`, `SafariiOS18`        |
+| OkHttp (Android)| 7, 10       | `OkHttpAndroid7`, `OkHttpAndroid10`                |
+
+Adding a new version is a TOML copy-and-edit — see [`CONTRIBUTING.md`][contributing-url].
+
+## Command-line interface
+
+`leyline` is a fingerprint-aware HTTP client built on the library — httpie
+shaped, profile-aware. Install with `cargo install --path crates/cli`:
+
+```console
+$ leyline inspect -b firefox148 https://example.com
+$ leyline get https://api.example.com -H 'x-debug: 1' --json '{"q":1}'
+$ leyline profile diff chrome146 chrome147
+```
+
+Verbs `get` / `post` / `put` / `patch` / `delete` / `head`; `fetch` prints
+the full audit block; `inspect` dumps fingerprint / cert / wire for a `HEAD`;
+`profile list|show|diff|audit` for offline introspection; `completions` emits
+shell completions.
+
+## Protocol policy
+
+`https://` URLs go over HTTP/2 by default and fall back to HTTP/1.1 when TLS
+ALPN does not negotiate H2. Force a protocol when you need to:
+
+```rust,ignore
+let h1 = Session::builder().http1().build()?;
+let h2 = Session::builder().http2().build()?;
+let h3 = Session::builder().http3().build()?;
+let race = Session::builder().race().build()?; // sequential H3 -> H2/H1 fallback
+```
+
+Every response carries `resp.version()` and `resp.tls_alpn()` so you can see
+which path actually served it.
+
+## Testing and verification
+
+Every wire-level claim is locked in by a test. The live suite runs against
+`tls.peet.ws`, Cloudflare QUIC, and local mock proxies.
+
+- **TLS fingerprint** — `live_ja4_exact_match_{chrome145,chrome146,chrome147,firefox148,safari18}` assert exact JA4 against `tls.peet.ws`.
+- **HTTP/2 Akamai fingerprint** — `h2_fingerprints_match_toml_expectations`, `live_h2_akamai_every_profile` across all 10 profiles.
+- **Post-quantum distinctness** — `chrome_pq_key_shares_use_distinct_x25519_ephemerals` guards against [utls#342] ephemeral-key reuse.
+- **HTTP/3 reachability** — `live_h3_cloudflare`, `live_h3_google`, `live_h3_cloudflare_firefox_profile`.
+- **JA4T per-OS** — `live_tcp_linux_ttl_is_64`, `live_tcp_windows_ttl_is_128`, `live_tcp_windows_distinguishable_from_linux`.
+- **Proxy wire bytes** — `offline_http_connect_proxy_wire_bytes`, `offline_socks5_proxy_wire_bytes` pin RFC 7231 / RFC 1928 byte shapes.
+
+```bash
+cargo test --workspace
+cargo test -p leyline --test tls_peet -- --ignored
+cargo run -p leyline --example smoke
+```
+
+The smoke suite runs 17 end-to-end gates in one binary. Full evidence matrix and every test name: [TESTING.md][testing-url].
+
+## Security and supply chain
+
+- **MSRV pinned to 1.85** in the workspace `Cargo.toml`.
+- **`cargo deny`** — advisories, licenses, bans, and sources gates in [`deny.toml`][deny-url]. The bans list refuses `rustls`, `openssl`, `native-tls`, `hyper`, and `h2` — anything that would route around the BoringSSL pin or the ground-up H2 impl.
+- **Tracing instrumentation** — `#[tracing::instrument]` on the full request hot path, `level = "debug"`, scalar fields only. Never bodies or headers.
+- **Audit-grep convention** — any method that disables a security property is prefixed `danger_`.
+
+Report vulnerabilities through GitHub private security advisories — see
+[SECURITY.md][security-url].
+
+## Language bindings
+
+The BoringSSL core is exposed through a C FFI and consumed by three language
+wrappers, each shipping separately:
+
+- **Python** — `pip install leyline` · [`wrappers/python`][wrappers-py]
+- **Node.js** — `npm install leyline` · [`wrappers/node`][wrappers-node]
+- **Go** — `go get github.com/manaforged/leyline-http/wrappers/go` · [`wrappers/go`][wrappers-go]
+
+Each wrapper mirrors the Rust API: `leyline.get(url)` returns a response with
+the same `status`, `text`, and `audit` surface.
 
 ## Architecture
 
 ```
-leyline              Facade — use this
-  core               Session, request builder, response
-  profile            TOML-driven browser profiles + registry
-  h2                 HTTP/2 SETTINGS ordering + fingerprint
-  tcp                JA4T TCP fingerprinting via socket2
-  cookies            RFC 6265 cookie jar
+leyline     Facade crate (use this)
+  core      Session, request builder, response, WebSocket
+  tls       BoringSSL connector with fingerprint control
+  h2        Ground-up HTTP/2 (RFC 9113, HPACK, flow control)
+  quic      HTTP/3 over QUIC (quiche + BoringSSL)
+  pool      H2 connection pool
+  profile   TOML browser profiles and registry
+  tcp       JA4T TCP socket options via socket2
+  cookies   RFC 6265 cookie jar
+  audit     JA3, JA4, JA4H, JA4T computation
+  ffi       C shared library for language bindings
+  cli       `leyline` command-line binary
 ```
 
-## Adding a new browser version
+## Contributing
 
-1. Copy a TOML profile: `cp profiles/chrome/147.toml profiles/chrome/148.toml`
-2. Edit version, user-agent, sec-ch-ua
-3. Add 2 lines to the Browser enum
-
-Zero core code changes. The profile is self-documenting.
+See [CONTRIBUTING.md][contributing-url]. All changes run through
+`cargo test --workspace` on pre-commit and are scanned by `claim_guard` for
+unsupported marketing claims. Adding a new browser profile is a TOML
+copy-and-edit — the guide walks the three-step recipe.
 
 ## License
 
-MIT OR Apache-2.0
+Dual-licensed under [Apache-2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT) at
+your option. Contributions are dual-licensed on the same terms per
+Apache-2.0 §5.
+
+[crates-badge]: https://img.shields.io/crates/v/leyline.svg
+[crates-url]: https://crates.io/crates/leyline
+[docs-badge]: https://docs.rs/leyline/badge.svg
+[docs-url]: https://docs.rs/leyline
+[msrv-badge]: https://img.shields.io/crates/msrv/leyline?logo=rust
+[msrv-url]: https://github.com/manaforged/leyline-http/blob/main/Cargo.toml
+[license-badge]: https://img.shields.io/crates/l/leyline.svg
+[license-url]: https://github.com/manaforged/leyline-http#license
+[releases-url]: https://github.com/manaforged/leyline-http/releases
+[examples-url]: https://github.com/manaforged/leyline-http/tree/main/crates/leyline/examples
+[testing-url]: TESTING.md
+[security-url]: SECURITY.md
+[contributing-url]: CONTRIBUTING.md
+[deny-url]: deny.toml
+[wrappers-py]: https://github.com/manaforged/leyline-http/tree/main/wrappers/python
+[wrappers-node]: https://github.com/manaforged/leyline-http/tree/main/wrappers/node
+[wrappers-go]: https://github.com/manaforged/leyline-http/tree/main/wrappers/go
+[tokio]: https://tokio.rs
+[quiche]: https://github.com/cloudflare/quiche
+[utls#342]: https://github.com/refraction-networking/utls/issues/342

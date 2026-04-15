@@ -6,10 +6,15 @@ use leyline_tcp::TcpProfile;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Platform {
+    /// Microsoft Windows (`Sec-CH-UA-Platform: "Windows"`).
     Windows,
+    /// Apple macOS (`Sec-CH-UA-Platform: "macOS"`).
     MacOS,
+    /// Linux desktop (`Sec-CH-UA-Platform: "Linux"`).
     Linux,
+    /// Google Android (mobile flag `?1`).
     Android,
+    /// Apple iOS / iPadOS (mobile flag `?1`).
     IOS,
 }
 

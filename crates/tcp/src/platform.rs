@@ -43,7 +43,10 @@ pub fn apply_platform_options(socket: &Socket, profile: &TcpProfile) {
 
     if profile.window_scale > 0 {
         const TCP_WINDOW_CLAMP: libc::c_int = 10;
-        let clamp = (profile.window_size << profile.window_scale) as libc::c_int;
+        let clamp = (profile.window_size as u64)
+            .checked_shl(profile.window_scale)
+            .unwrap_or(u32::MAX as u64)
+            .min(i32::MAX as u64) as libc::c_int;
         let ret = unsafe {
             libc::setsockopt(
                 fd,
@@ -103,8 +106,13 @@ pub fn apply_platform_options(socket: &Socket, profile: &TcpProfile) {
 
     if profile.df {
         extern "system" {
-            fn setsockopt(s: usize, level: i32, optname: i32, optval: *const u8, optlen: i32)
-                -> i32;
+            fn setsockopt(
+                s: usize,
+                level: i32,
+                optname: i32,
+                optval: *const u8,
+                optlen: i32,
+            ) -> i32;
         }
         let val: u32 = 1;
         let ret = unsafe {

@@ -1,0 +1,109 @@
+# cargo-deny supply-chain gate for the Leyline workspace.
+#
+# Run locally with:
+#   cargo install --locked cargo-deny
+#   cargo deny --all-features check
+#
+# Checks run:
+#   - advisories  — RustSec advisory DB, yanked crates, unmaintained
+#   - licenses    — allowlist of SPDX identifiers
+#   - bans        — duplicate versions, wildcard deps
+#   - sources     — only crates.io (vendored crypto lives in-repo)
+
+[graph]
+all-features = true
+# Exclude dev-only doc/bench targets if they pull in exotic deps later.
+exclude-dev = false
+
+[output]
+feature-depth = 1
+
+# ─── Advisories ─────────────────────────────────────────────────────────
+
+[advisories]
+version = 2
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+yanked = "deny"
+ignore = [
+    # RUSTSEC-2026-0097 — rand 0.8.x `ThreadRng` soundness issue that
+    # only triggers when a custom `log` logger calls `rand::rng()` from
+    # inside the logger implementation (reseed path). Leyline does not
+    # install a custom logger that touches rand, and the rand pull is
+    # transitive via quiche's QUIC internals where it is used for
+    # connection-ID generation — not log-reentrant. Re-evaluate when
+    # quiche bumps rand to >=0.9.3.
+    { id = "RUSTSEC-2026-0097", reason = "transitive via quiche; not triggered by our call path" },
+]
+
+# ─── Licenses ───────────────────────────────────────────────────────────
+
+[licenses]
+version = 2
+# SPDX identifiers we accept for dependencies. Leyline itself is
+# dual-licensed MIT OR Apache-2.0 and we only pull in OSS-compatible
+# crates.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-DFS-2016",
+    "Unicode-3.0",
+    "Zlib",
+    "MPL-2.0",
+    "CC0-1.0",
+    "OpenSSL",
+    "BSL-1.0",
+]
+confidence-threshold = 0.9
+
+# The vendored BoringSSL fork carries ISC + OpenSSL + BSD — accept via
+# the blanket allow list above. If we ever clarify the vendored license
+# file, switch this to a targeted clarification instead.
+[[licenses.exceptions]]
+allow = ["OpenSSL"]
+name = "ring"
+
+# ─── Bans ───────────────────────────────────────────────────────────────
+
+[bans]
+multiple-versions = "warn"
+# Wildcards are warn, not deny: the workspace crates publish to
+# crates.io and depend on each other via `path = ...` without a
+# version (intentional — the workspace version is bumped in a single
+# place). cargo-deny counts those as wildcards even with
+# `allow-wildcard-paths = true` because the crates are marked
+# publishable. Real crates.io `"*"` wildcards would still show up in
+# output as warnings.
+wildcards = "warn"
+allow-wildcard-paths = true
+highlight = "all"
+workspace-default-features = "allow"
+external-default-features = "allow"
+# Crates we never want to pull in transitively — these would indicate a
+# TLS backend being dragged in that would defeat the BoringSSL pin.
+deny = [
+    { name = "openssl" },
+    { name = "openssl-sys" },
+    { name = "rustls" },
+    { name = "rustls-native-certs" },
+    { name = "native-tls" },
+    { name = "schannel" },
+    { name = "security-framework" },
+    # Leftover hyper/h2 — we ship our own HTTP/2 implementation; any
+    # transitive pull means something is silently routing around it.
+    { name = "h2" },
+    { name = "hyper" },
+]
+skip = []
+
+# ─── Sources ────────────────────────────────────────────────────────────
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

@@ -8,15 +8,25 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Browser {
+    /// Google Chrome 145 (Windows/macOS/Linux/Android).
     Chrome145,
+    /// Google Chrome 146 (Windows/macOS/Linux/Android).
     Chrome146,
+    /// Google Chrome 147 (Windows/macOS/Linux/Android) — current default.
     Chrome147,
+    /// Mozilla Firefox 148 (Windows/macOS/Linux/Android).
     Firefox148,
+    /// Safari 18 on macOS.
     Safari18,
+    /// OkHttp 4.x as shipped on Android 10+.
     OkHttpAndroid10,
+    /// OkHttp 4.x as shipped on Android 7-9 (TLS 1.2 only).
     OkHttpAndroid7,
+    /// Safari on iOS 15.
     SafariiOS15,
+    /// Safari on iOS 17.
     SafariiOS17,
+    /// Safari on iOS 18.
     SafariiOS18,
 }
 

@@ -6,11 +6,11 @@
 pub enum TlsError {
     /// BoringSSL configuration error.
     #[error("ssl config: {0}")]
-    SslConfig(#[from] boring2::ssl::Error),
+    SslConfig(#[from] boring::ssl::Error),
 
     /// BoringSSL handshake error.
     #[error("ssl handshake: {0}")]
-    Handshake(#[from] boring2::error::ErrorStack),
+    Handshake(#[from] boring::error::ErrorStack),
 
     /// TCP connection failed.
     #[error("tcp connect: {0}")]

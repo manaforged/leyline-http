@@ -20,12 +20,19 @@ pub enum Preset {
 
 /// Context needed to build preset headers.
 pub struct HeaderContext<'a> {
+    /// Full `User-Agent` string.
     pub user_agent: &'a str,
+    /// `Sec-CH-UA` brand list, already quoted per Chrome's format.
     pub sec_ch_ua: &'a str,
+    /// `Sec-CH-UA-Mobile` flag (`?0` for desktop, `?1` for mobile).
     pub sec_ch_ua_mobile: &'a str,
+    /// Platform label used in `Sec-CH-UA-Platform` (quoted downstream).
     pub sec_ch_ua_platform: &'a str,
+    /// `Accept-Language` header value.
     pub accept_language: &'a str,
+    /// Origin of the current request (`scheme://host[:port]`).
     pub origin: &'a str,
+    /// `Referer` header value, or empty if none.
     pub referer: &'a str,
 }
 
@@ -66,14 +73,20 @@ impl Preset {
         vec![
             ("sec-ch-ua".into(), ctx.sec_ch_ua.to_string()),
             ("sec-ch-ua-mobile".into(), ctx.sec_ch_ua_mobile.to_string()),
-            ("sec-ch-ua-platform".into(), format!("\"{}\"", ctx.sec_ch_ua_platform)),
+            (
+                "sec-ch-ua-platform".into(),
+                format!("\"{}\"", ctx.sec_ch_ua_platform),
+            ),
             ("user-agent".into(), ctx.user_agent.to_string()),
             ("accept".into(), "*/*".to_string()),
             ("sec-fetch-site".into(), "same-origin".to_string()),
             ("sec-fetch-mode".into(), "no-cors".to_string()),
             ("sec-fetch-dest".into(), "script".to_string()),
             ("referer".into(), ctx.referer.to_string()),
-            ("accept-encoding".into(), "gzip, deflate, br, zstd".to_string()),
+            (
+                "accept-encoding".into(),
+                "gzip, deflate, br, zstd".to_string(),
+            ),
             ("accept-language".into(), ctx.accept_language.to_string()),
         ]
     }
@@ -82,15 +95,24 @@ impl Preset {
         vec![
             ("sec-ch-ua".into(), ctx.sec_ch_ua.to_string()),
             ("sec-ch-ua-mobile".into(), ctx.sec_ch_ua_mobile.to_string()),
-            ("sec-ch-ua-platform".into(), format!("\"{}\"", ctx.sec_ch_ua_platform)),
+            (
+                "sec-ch-ua-platform".into(),
+                format!("\"{}\"", ctx.sec_ch_ua_platform),
+            ),
             ("user-agent".into(), ctx.user_agent.to_string()),
-            ("accept".into(), "application/json, text/plain, */*".to_string()),
+            (
+                "accept".into(),
+                "application/json, text/plain, */*".to_string(),
+            ),
             ("origin".into(), ctx.origin.to_string()),
             ("sec-fetch-site".into(), "same-origin".to_string()),
             ("sec-fetch-mode".into(), "cors".to_string()),
             ("sec-fetch-dest".into(), "empty".to_string()),
             ("referer".into(), ctx.referer.to_string()),
-            ("accept-encoding".into(), "gzip, deflate, br, zstd".to_string()),
+            (
+                "accept-encoding".into(),
+                "gzip, deflate, br, zstd".to_string(),
+            ),
             ("accept-language".into(), ctx.accept_language.to_string()),
         ]
     }
@@ -99,16 +121,28 @@ impl Preset {
         vec![
             ("sec-ch-ua".into(), ctx.sec_ch_ua.to_string()),
             ("sec-ch-ua-mobile".into(), ctx.sec_ch_ua_mobile.to_string()),
-            ("sec-ch-ua-platform".into(), format!("\"{}\"", ctx.sec_ch_ua_platform)),
+            (
+                "sec-ch-ua-platform".into(),
+                format!("\"{}\"", ctx.sec_ch_ua_platform),
+            ),
             ("user-agent".into(), ctx.user_agent.to_string()),
-            ("accept".into(), "application/json, text/plain, */*".to_string()),
-            ("content-type".into(), "application/x-www-form-urlencoded".to_string()),
+            (
+                "accept".into(),
+                "application/json, text/plain, */*".to_string(),
+            ),
+            (
+                "content-type".into(),
+                "application/x-www-form-urlencoded".to_string(),
+            ),
             ("origin".into(), ctx.origin.to_string()),
             ("sec-fetch-site".into(), "same-origin".to_string()),
             ("sec-fetch-mode".into(), "cors".to_string()),
             ("sec-fetch-dest".into(), "empty".to_string()),
             ("referer".into(), ctx.referer.to_string()),
-            ("accept-encoding".into(), "gzip, deflate, br, zstd".to_string()),
+            (
+                "accept-encoding".into(),
+                "gzip, deflate, br, zstd".to_string(),
+            ),
             ("accept-language".into(), ctx.accept_language.to_string()),
         ]
     }
@@ -117,15 +151,24 @@ impl Preset {
         vec![
             ("sec-ch-ua".into(), ctx.sec_ch_ua.to_string()),
             ("sec-ch-ua-mobile".into(), ctx.sec_ch_ua_mobile.to_string()),
-            ("sec-ch-ua-platform".into(), format!("\"{}\"", ctx.sec_ch_ua_platform)),
+            (
+                "sec-ch-ua-platform".into(),
+                format!("\"{}\"", ctx.sec_ch_ua_platform),
+            ),
             ("user-agent".into(), ctx.user_agent.to_string()),
-            ("accept".into(), "application/json, text/plain, */*".to_string()),
+            (
+                "accept".into(),
+                "application/json, text/plain, */*".to_string(),
+            ),
             ("origin".into(), ctx.origin.to_string()),
             ("sec-fetch-site".into(), "cross-site".to_string()),
             ("sec-fetch-mode".into(), "cors".to_string()),
             ("sec-fetch-dest".into(), "empty".to_string()),
             ("referer".into(), ctx.referer.to_string()),
-            ("accept-encoding".into(), "gzip, deflate, br, zstd".to_string()),
+            (
+                "accept-encoding".into(),
+                "gzip, deflate, br, zstd".to_string(),
+            ),
             ("accept-language".into(), ctx.accept_language.to_string()),
         ]
     }
@@ -134,15 +177,24 @@ impl Preset {
         vec![
             ("sec-ch-ua".into(), ctx.sec_ch_ua.to_string()),
             ("sec-ch-ua-mobile".into(), ctx.sec_ch_ua_mobile.to_string()),
-            ("sec-ch-ua-platform".into(), format!("\"{}\"", ctx.sec_ch_ua_platform)),
+            (
+                "sec-ch-ua-platform".into(),
+                format!("\"{}\"", ctx.sec_ch_ua_platform),
+            ),
             ("user-agent".into(), ctx.user_agent.to_string()),
-            ("accept".into(), "application/json, text/plain, */*".to_string()),
+            (
+                "accept".into(),
+                "application/json, text/plain, */*".to_string(),
+            ),
             ("origin".into(), ctx.origin.to_string()),
             ("sec-fetch-site".into(), "same-site".to_string()),
             ("sec-fetch-mode".into(), "cors".to_string()),
             ("sec-fetch-dest".into(), "empty".to_string()),
             ("referer".into(), ctx.referer.to_string()),
-            ("accept-encoding".into(), "gzip, deflate, br, zstd".to_string()),
+            (
+                "accept-encoding".into(),
+                "gzip, deflate, br, zstd".to_string(),
+            ),
             ("accept-language".into(), ctx.accept_language.to_string()),
         ]
     }

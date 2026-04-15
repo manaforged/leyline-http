@@ -1,19 +1,29 @@
-//! BoringSSL TLS connector with full fingerprint control.
+//! BoringSSL TLS connector with profile-driven fingerprint control.
 //!
-//! Creates TLS connections that match real browser ClientHello fingerprints
-//! by configuring BoringSSL with exact cipher suites, curves, extensions,
-//! GREASE behavior, and ALPS settings from TOML browser profiles.
+//! Creates TLS connections from TOML browser profiles by configuring
+//! BoringSSL with the profile's cipher suites, curves, extensions, GREASE
+//! behavior, and ALPS settings.
 
+mod builder;
 mod connector;
 mod error;
 
+pub use builder::{build_ssl_context, TlsMinVersion};
 pub use connector::FingerprintConnector;
 pub use error::TlsError;
 
 /// A connected TLS stream with ALPN result.
 pub struct TlsStream {
     /// The async TLS stream.
-    pub stream: tokio_boring2::SslStream<tokio::net::TcpStream>,
+    pub stream: tokio_boring::SslStream<tokio::net::TcpStream>,
     /// Negotiated ALPN protocol (e.g. "h2" or "http/1.1").
     pub alpn: Option<Vec<u8>>,
+    /// Peer certificate in DER encoding, captured at handshake time.
+    /// `None` if the peer presented no certificate or DER
+    /// serialization failed.
+    pub peer_cert_der: Option<Vec<u8>>,
+    /// Negotiated TLS protocol version (e.g. `"TLS 1.3"`).
+    pub tls_version: Option<String>,
+    /// Negotiated TLS cipher suite name (e.g. `"TLS_AES_128_GCM_SHA256"`).
+    pub tls_cipher: Option<String>,
 }

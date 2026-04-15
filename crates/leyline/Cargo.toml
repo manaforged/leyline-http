@@ -13,13 +13,19 @@ categories.workspace = true
 [dependencies]
 leyline-core = { path = "../core" }
 leyline-profile = { path = "../profile" }
+leyline-tls = { path = "../tls" }
 leyline-tcp = { path = "../tcp" }
 leyline-cookies = { path = "../cookies" }
 leyline-h2 = { path = "../h2" }
+leyline-audit = { path = "../audit" }
+boring = { workspace = true }
+serde = { workspace = true }
 
 [dev-dependencies]
 leyline-profile = { path = "../profile" }
 leyline-h2 = { path = "../h2" }
+leyline-quic = { path = "../quic" }
+bytes = { workspace = true }
 tokio = { workspace = true }
 serde_json = { workspace = true }
 

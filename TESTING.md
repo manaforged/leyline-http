@@ -1,0 +1,86 @@
+# Testing Leyline
+
+Every wire-level property Leyline claims is gated by a test in this repo. The
+README's `## Testing and verification` section points here for the full
+matrix. This document is the canonical evidence table.
+
+## Running the suites
+
+```bash
+cargo test --workspace                                    # offline suite + PQ gate + claim guard
+cargo test -p leyline --test tls_peet -- --ignored        # live fingerprint tests
+cargo run -p leyline --example smoke                      # 17-gate smoke suite
+cargo deny --all-features check                           # supply chain gate
+```
+
+The pre-commit hook runs `cargo test --workspace` on every commit.
+
+## Evidence matrix
+
+| Property | How it is proved | Where |
+|---|---|---|
+| TLS ClientHello matches profile JA4 | Live capture from tls.peet.ws compared against TOML expectation, per browser | `live_ja4_exact_match_{chrome145,chrome146,chrome147,firefox148,safari18}` |
+| Every profile's H2 fingerprint matches its TOML value | Akamai H2 fingerprint asserted for all 10 profiles | `h2_fingerprints_match_toml_expectations`, `live_h2_akamai_every_profile` |
+| HTTP/2 pseudo-header order matches browser | Live capture, per browser | `live_chrome147_pseudo_header_order`, `live_firefox148_pseudo_header_order` |
+| TCP SYN differs by OS (JA4T) | TTL 64 on Linux, 128 on Windows, three-way distinguishable | `live_tcp_linux_ttl_is_64`, `live_tcp_windows_ttl_is_128`, `live_tcp_windows_distinguishable_from_linux` |
+| ALPS / cert compression / ALPN extensions present | Live tls.peet.ws inspection, per extension | `live_chrome147_has_alps_extension`, `live_chrome147_has_cert_compression` |
+| Cipher order matches profile | tls.peet.ws cipher list compared to TOML order | `live_chrome147_ciphers_match_profile_order` |
+| Post-quantum ephemeral keys are distinct (utls#342 regression) | Local TCP capture of Chrome 147 ClientHello, parse `key_share`, assert X25519 ≠ X25519 inside X25519MLKEM768 | `chrome_pq_key_shares_use_distinct_x25519_ephemerals` |
+| GREASE seed determinism | Two handshakes with the same seed produce the same GREASE slot | `live_grease_seed_deterministic` |
+| TLS 1.3 session resumption works end-to-end | Two requests, second presents a valid pre-shared key | `live_session_resumption_pre_shared_key` |
+| Peer certificate is reachable on the response | Response exposes DER-encoded cert + version + cipher | `live_tls_peer_certificate_exposed` |
+| HTTP/3 reachable against real QUIC servers | Direct H3 GET against Cloudflare and Google | `live_h3_cloudflare`, `live_h3_cloudflare_firefox_profile`, `live_h3_google` |
+| HTTP/2 connection reuse through the pool | Three sequential requests on one session, second/third are warm | `live_h2_connection_reuse` |
+| Cookies persist and flow back | Set-Cookie captured, jar replays it on the next hop | `live_cookies_set_then_sent` |
+| Redirects follow and strip auth cross-origin | Chain of 302s, Authorization dropped on origin change | `live_redirect_follows_and_rewrites_url`, `live_redirect_strips_auth_cross_origin` |
+| Decompression for gzip / brotli / deflate | Full body decodes to valid JSON | `live_decompression_gzip`, `live_decompression_brotli`, `live_decompression_deflate` |
+| JSON / form / query / bearer auth round-trip | Echoed fields come back unchanged | `live_post_json_body_roundtrip`, `live_post_form_body_roundtrip` |
+| HTTP CONNECT and SOCKS5 proxy wire shape | Local mock proxies assert exact bytes per RFC 1928 / RFC 7231 | `offline_http_connect_proxy_wire_bytes`, `offline_socks5_proxy_wire_bytes`, `live_http_connect_proxy`, `live_socks5_proxy` |
+| WebSocket upgrade succeeds on a fingerprinted H1 stream | Live echo round-trip | `live_websocket_echo` |
+| Identity headers vary correctly by platform | UA, sec-ch-ua, sec-ch-ua-platform per Windows / Linux / Android | `live_chrome147_windows_identity_headers`, `live_chrome147_linux_identity_headers`, `live_chrome147_android_identity_headers` |
+
+## The 17-gate smoke suite
+
+`cargo run -p leyline --example smoke` runs all of the gates below end-to-end
+against public infrastructure in a single binary. Source:
+[`crates/leyline/examples/smoke.rs`](crates/leyline/examples/smoke.rs).
+
+| Gate | Assertion |
+|---|---|
+| Chrome 147 exact JA4 + H2 | JA4 and H2 match profile expectations |
+| Firefox 148 exact JA4 + H2 | JA4 and H2 match profile expectations |
+| Connection reuse (3 requests) | All requests succeed through one session |
+| Brotli/gzip decompression | Response decodes to valid JSON |
+| HTTP/2 CDN GET (httpbin.org) | Request succeeds over HTTPS |
+| POST JSON | Body echoes through the server |
+| POST form | Form fields echo through the server |
+| GET with query params | Query fields echo through the server |
+| Bearer auth header | Authorization header reaches the server |
+| `error_for_status` on 404 | 404 maps to an error |
+| Redirect following (302 x2) | Redirect chain is recorded |
+| Chrome/Firefox/Safari differ | Three profiles produce three H2 fingerprints |
+| HTTP/1.1 browser wire shape | `Host`, `User-Agent`, `Accept-Encoding`, keep-alive |
+| HTTP/3 Chrome QUIC GET | Direct H3 request succeeds |
+| HTTP/3 Firefox QUIC GET | Direct H3 request succeeds |
+| HTTP/3 POST body round-trip | Body echoes over H3 |
+| Large response (50KB) | Full body is received |
+
+## Offline unit coverage
+
+| Crate | What they cover |
+|---|---|
+| `leyline-h2` | Frame encode/decode, HPACK roundtrip, Huffman coverage, SETTINGS fingerprint |
+| `leyline-cookies` | Set-Cookie parsing, jar ordering, eviction, SameSite, prefix validation |
+| `leyline-audit` | JA3/JA4 section computation, cipher ID mapping, GREASE detection |
+| `leyline-profile` | Profile loading, builder combinations, browser shortcuts |
+| `leyline-core` | Request building, response handling, protocol policy, HTTP/1.1 wire shape |
+| `leyline-tcp` | Platform profiles apply correctly |
+| `leyline-pool` | Connection reuse |
+
+## Regression gates
+
+| Test | What it guards |
+|---|---|
+| `chrome_pq_key_shares_use_distinct_x25519_ephemerals` | `crates/leyline/tests/pq_key_shares.rs` — utls#342 PQ ephemeral-key reuse distinguisher |
+| `public_claims_stay_bounded` | `crates/leyline/tests/claim_guard.rs` — scans README and every public lib.rs for marketing superlatives |
+| `readme_keeps_public_evidence_commands` | `crates/leyline/tests/claim_guard.rs` — pins the three `cargo test` / `cargo run` commands in the README |

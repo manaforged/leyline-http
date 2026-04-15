@@ -9,11 +9,12 @@ members = [
     "crates/profile",
     "crates/tcp",
     "crates/cookies",
+    "crates/audit",
+    "crates/ffi",
+    "crates/quic",
+    "crates/cli",
 ]
 exclude = [
-    "vendor/ssl-sys",
-    "vendor/ssl",
-    "vendor/tokio-ssl",
     "wrappers/*",
 ]
 
@@ -40,18 +41,33 @@ tracing = "0.1"
 thiserror = "2"
 url = "2"
 sha2 = "0.10"
-boring2 = "5.0.0-alpha.13"
-boring-sys2 = "5.0.0-alpha.13"
-tokio-boring2 = "5.0.0-alpha.13"
-hyper2 = { version = "1.5", features = ["client", "http1", "http2"] }
-http-body-util = "0.1"
-pin-project-lite = "0.2"
+boring = { path = "vendor/leyline-ssl" }
+boring-sys = { path = "vendor/leyline-ssl-sys" }
+tokio-boring = { path = "vendor/tokio-leyline-ssl" }
 socket2 = "0.5"
-http = "1"
 bytes = "1"
+tungstenite = "0.26"
+tokio-tungstenite = "0.26"
+sha1 = "0.10"
+# CLI-only deps (only pulled by crates/cli; keep them out of the library path)
+clap = { version = "4.5", features = ["derive", "wrap_help", "env"] }
+clap_complete = "4.5"
+anstream = "0.6"
+owo-colors = { version = "4", features = ["supports-colors"] }
+humantime = "2.1"
+anyhow = "1"
+base64 = "0.22"
 
 [profile.release]
 lto = "thin"
 codegen-units = 1
 strip = "symbols"
 opt-level = 3
+
+# Route every crate in the graph (including quiche) through our patched
+# BoringSSL fork. Without this, quiche would pull stock cloudflare/boring
+# from crates.io and its QUIC ClientHello would diverge from our H2 one.
+[patch.crates-io]
+boring = { path = "vendor/leyline-ssl" }
+boring-sys = { path = "vendor/leyline-ssl-sys" }
+tokio-boring = { path = "vendor/tokio-leyline-ssl" }

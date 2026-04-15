@@ -25,11 +25,22 @@ pub enum Error {
 
     /// TLS handshake or connection error.
     #[error("tls: {0}")]
-    Tls(String),
+    Tls(#[from] leyline_tls::TlsError),
 
     /// HTTP protocol error.
     #[error("http: {0}")]
     Http(String),
+
+    /// HTTP status code error (4xx/5xx from `error_for_status()`).
+    #[error("HTTP {code} for {url}")]
+    Status {
+        /// HTTP status code.
+        code: u16,
+        /// Request URL.
+        url: String,
+        /// Response body (for debugging 403s, rate limits, etc).
+        body: Vec<u8>,
+    },
 
     /// IO error.
     #[error("io: {0}")]

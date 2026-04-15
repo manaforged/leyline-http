@@ -10,20 +10,28 @@ authors.workspace = true
 [dependencies]
 leyline-tls = { path = "../tls" }
 leyline-h2 = { path = "../h2" }
+leyline-pool = { path = "../pool" }
 leyline-profile = { path = "../profile" }
 leyline-tcp = { path = "../tcp" }
 leyline-cookies = { path = "../cookies" }
+leyline-audit = { path = "../audit" }
+leyline-quic = { path = "../quic" }
+tokio-tungstenite = { workspace = true }
+tungstenite = { workspace = true }
+sha1 = { workspace = true }
+futures-util = "0.3"
+http = "1"
+tokio-boring = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-tracing = { workspace = true }
 thiserror = { workspace = true }
 url = { workspace = true }
-http = { workspace = true }
 bytes = { workspace = true }
-hyper2 = { workspace = true }
-http-body-util = { workspace = true }
-h2 = { version = "0.4", package = "http2", features = ["unstable"] }
+tracing = { workspace = true }
+flate2 = "1"
+brotli = "8"
+zstd = "0.13"
 
 [lints]
 workspace = true

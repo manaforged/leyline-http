@@ -52,6 +52,7 @@ enable_push = false
 initial_stream_window_size = 6291456
 initial_connection_window_size = 15728640
 max_header_list_size = 262144
+unknown_setting8 = 1
 pseudo_order = ["method", "authority", "scheme", "path"]
 settings_order = [
     "header_table_size", "enable_push",
@@ -61,7 +62,7 @@ settings_order = [
 ]
 
 [h2.fingerprint]
-akamai = "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p"
+akamai = "1:65536;2:0;4:6291456;6:262144;8:1|15663105|0|m,a,s,p"
 
 [identity.windows]
 user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
@@ -73,4 +74,8 @@ sec_ch_ua = '"Google Chrome";v="147", "Not.A/Brand";v="8", "Chromium";v="147"'
 
 [identity.linux]
 user_agent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
+sec_ch_ua = '"Google Chrome";v="147", "Not.A/Brand";v="8", "Chromium";v="147"'
+
+[identity.android]
+user_agent = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Mobile Safari/537.36"
 sec_ch_ua = '"Google Chrome";v="147", "Not.A/Brand";v="8", "Chromium";v="147"'

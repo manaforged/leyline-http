@@ -33,7 +33,8 @@ ech_grease = true
 pre_shared_key = true
 
 [tls.fingerprint]
-ja4 = "t13d1716h2_5b57614c22b0_36c4f964cab1"
+# Pinned to leyline's wire; not yet checked against a real Firefox 148 ClientHello.
+ja4 = "t13d1717h2_5b57614c22b0_3cbfd9057e0d"
 
 [h2]
 header_table_size = 65536
@@ -61,4 +62,8 @@ sec_ch_ua = ""
 
 [identity.linux]
 user_agent = "Mozilla/5.0 (X11; Linux x86_64; rv:148.0) Gecko/20100101 Firefox/148.0"
+sec_ch_ua = ""
+
+[identity.android]
+user_agent = "Mozilla/5.0 (Android 14; Mobile; rv:148.0) Gecko/148.0 Firefox/148.0"
 sec_ch_ua = ""

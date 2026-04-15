@@ -1,0 +1,16 @@
+---
+source: crates/cli/tests/cli.rs
+expression: "String::from_utf8(out).unwrap()"
+---
+profile            family       version
+────────────────────────────────────────────────
+chrome145          chrome       145
+chrome146          chrome       146
+chrome147          chrome       147
+firefox148         firefox      148
+safari18           safari       18
+okhttp10           okhttp       10
+okhttp7            okhttp       7
+safariios15        safari-ios   15
+safariios17        safari-ios   17
+safariios18        safari-ios   18
