@@ -34,3 +34,13 @@ within 72 hours and coordinate a fix and disclosure timeline with you.
 Leyline is pre-1.0. Security fixes are only backported to the latest
 `2.0.0-alpha.*` release. Pin a version and watch
 [releases](https://github.com/manaforged/leyline-http/releases).
+
+## Upstream coordination
+
+The vendored TLS stack is derived from
+[`0x676e67/boring2`](https://github.com/0x676e67/boring2), which in turn
+tracks Google BoringSSL. When BoringSSL publishes a CVE, the pinned
+commit in `vendor/leyline-ssl-sys/REVISION` is the source of truth for
+whether Leyline is affected. See `CONTRIBUTING.md → "Syncing the
+vendored TLS stack"` for the resync procedure. Full attribution is in
+[`NOTICE`](NOTICE).

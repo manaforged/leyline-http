@@ -212,6 +212,25 @@ impl CookieJar {
         self.cookie_header(&url).unwrap_or_default()
     }
 
+    /// Remove every cookie from the jar. Useful for re-using a
+    /// [`super::CookieJar`] across logically distinct sessions on the
+    /// same `Session` without constructing a new pool or TLS connector.
+    pub fn clear(&self) {
+        let mut jar = lock(&self.inner);
+        jar.cookies.clear();
+        jar.total = 0;
+    }
+
+    /// True if the jar holds no cookies.
+    pub fn is_empty(&self) -> bool {
+        lock(&self.inner).total == 0
+    }
+
+    /// Number of cookies currently in the jar.
+    pub fn len(&self) -> usize {
+        lock(&self.inner).total
+    }
+
     fn remove(&self, domain: &str, name: &str, path: &str) {
         let mut jar = lock(&self.inner);
         let domain = domain.to_lowercase();

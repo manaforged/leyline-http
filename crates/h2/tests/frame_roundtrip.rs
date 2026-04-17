@@ -144,6 +144,46 @@ fn headers_with_priority_roundtrip() {
 }
 
 #[test]
+fn headers_with_chrome_priority_roundtrip() {
+    // Chrome's legacy RFC 7540 priority: exclusive=true, dep=0, weight=255
+    // (carrying weight 256). Firefox uses exclusive=false, dep varies.
+    let params = leyline_h2::PriorityParams {
+        exclusive: true,
+        stream_dependency: 0,
+        weight: 255,
+    };
+    let frame = HeadersFrame {
+        stream_id: 1,
+        end_stream: false,
+        end_headers: true,
+        priority: Some(StreamDependency {
+            exclusive: params.exclusive,
+            dependency_id: params.stream_dependency,
+            weight: params.weight,
+        }),
+        fragment: bytes::Bytes::from_static(b"\x82\x86\x84"),
+    };
+    let mut buf = roundtrip_buf();
+    frame.encode(&mut buf);
+
+    // Expect PRIORITY flag in the wire flags byte (bit 0x20).
+    let header_bytes: [u8; 9] = buf[..9].try_into().unwrap();
+    let flags = header_bytes[4];
+    assert_eq!(flags & 0x20, 0x20, "PRIORITY flag not set in HEADERS");
+    // Payload should include 5-byte priority block before the fragment.
+    assert_eq!(header_bytes[2] as usize, 5 + 3); // length = 5 + fragment
+
+    let header = FrameHeader::parse(&header_bytes);
+    let payload = bytes::Bytes::copy_from_slice(&buf[9..]);
+    let parsed = HeadersFrame::parse(header, payload).unwrap();
+    let dep = parsed.priority.unwrap();
+    assert!(dep.exclusive);
+    assert_eq!(dep.dependency_id, 0);
+    assert_eq!(dep.weight, 255);
+    assert_eq!(&parsed.fragment[..], b"\x82\x86\x84");
+}
+
+#[test]
 fn window_update_roundtrip() {
     let frame = WindowUpdateFrame {
         stream_id: 0,

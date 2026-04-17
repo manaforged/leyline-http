@@ -10,7 +10,8 @@ authors.workspace = true
 [dependencies]
 leyline-profile = { path = "../profile" }
 bytes = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 

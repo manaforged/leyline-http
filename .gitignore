@@ -5,3 +5,8 @@ Cargo.lock
 .DS_Store
 wrappers/node/node_modules/
 wrappers/python/leyline/__pycache__/
+# cargo-fuzz build output (corpus is tracked, target/artifacts aren't)
+fuzz/target/
+fuzz/artifacts/
+# benches sub-workspace build output
+benches/target/

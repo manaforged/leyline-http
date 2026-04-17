@@ -69,13 +69,70 @@ against public infrastructure in a single binary. Source:
 
 | Crate | What they cover |
 |---|---|
-| `leyline-h2` | Frame encode/decode, HPACK roundtrip, Huffman coverage, SETTINGS fingerprint |
+| `leyline-h2` | Frame encode/decode, HPACK roundtrip, Huffman coverage, SETTINGS fingerprint, **stream state machine (42 tests in `tests/stream_state.rs`)**, **CONNECT / extended CONNECT pseudo-header shape (`tests/connect_method.rs`)**, **RST_STREAM flood guard (`tests/rst_flood.rs`)**, **outbound PRIORITY on HEADERS (`tests/frame_roundtrip.rs`)** |
 | `leyline-cookies` | Set-Cookie parsing, jar ordering, eviction, SameSite, prefix validation |
 | `leyline-audit` | JA3/JA4 section computation, cipher ID mapping, GREASE detection |
 | `leyline-profile` | Profile loading, builder combinations, browser shortcuts |
 | `leyline-core` | Request building, response handling, protocol policy, HTTP/1.1 wire shape |
 | `leyline-tcp` | Platform profiles apply correctly |
 | `leyline-pool` | Connection reuse |
+
+## HTTP/2 correctness surface
+
+`leyline-h2` is intentionally small. What it currently guarantees:
+
+- Per-stream state tracking (RFC 9113 §5.1): `Idle` → `Open` →
+  `HalfClosedLocal` → `Closed`, with illegal transitions surfaced as
+  `H2Error::Stream { code: ProtocolError }`. See
+  `crates/h2/src/stream_state.rs` and `tests/stream_state.rs`.
+- `MAX_CONCURRENT_STREAMS` enforced outbound against the peer's
+  advertised value.
+- Inbound RST_STREAM flood guard — default 100 RSTs in 10 seconds
+  trips an `EnhanceYourCalm` connection error. Defense-in-depth
+  against CVE-2023-44487-shaped server behaviour. Configurable via
+  `H2Config::rst_stream_flood_threshold` /
+  `rst_stream_flood_window`.
+- Outbound PRIORITY field on the first HEADERS frame, driven by
+  `H2Config::default_priority`. Needed for Chrome/Firefox fingerprint
+  parity; can be left `None` for a clean minimal HEADERS.
+- Outbound trailers via `send_request_with_trailers`. Tiny trailer
+  blocks only — blocks larger than `max_frame_size` return
+  `InternalError` rather than splitting to CONTINUATION.
+- Classic CONNECT (RFC 9113 §8.5) and extended CONNECT (RFC 8441)
+  pseudo-header shapes. `:scheme` / `:path` are dropped for classic
+  CONNECT; `:protocol` is emitted for extended.
+
+**Concurrent multiplexing.** `H2Client` is a cloneable handle to a
+driver task that owns the connection. Two concurrent
+`H2Client::send_request` calls run over independent streams on the
+same TCP connection; a stream parked on flow control does not block
+other streams. See `crates/h2/src/client.rs` and
+`tests/multiplex.rs` for the four concurrency gates:
+
+- Concurrent responses delivered out of order.
+- Parked-on-WINDOW_UPDATE stream does not block sibling stream.
+- Graceful GOAWAY on last-handle-drop.
+- Reader EOF fans an error out to every pending request.
+
+What `leyline-h2` explicitly does **not** do:
+- Server-side support or server-initiated streams.
+- PUSH_PROMISE accepts. Any PUSH_PROMISE is RST_STREAM'd with
+  `Cancel`. This matches Chrome's `SETTINGS_ENABLE_PUSH = 0` policy.
+- Streaming request bodies. `send_request` takes `Option<Bytes>`; a
+  streaming `AsyncRead` body is a future alpha bump.
+
+## Fuzzing
+
+[`fuzz/`](fuzz/) provides four `cargo-fuzz` targets (nightly):
+
+- `hpack_integer` / `hpack_header_block` — HPACK decoder,
+  single-block and two-block-with-shared-table scenarios.
+- `h2_frame` — `Frame::parse` across every frame type.
+- `cookie_set` — `CookieJar::store_set_cookie` parsing.
+
+See `fuzz/README.md` for run instructions. These are defensive
+targets for panics and integer overflows; correctness is covered by
+the unit and round-trip tests above.
 
 ## Regression gates
 

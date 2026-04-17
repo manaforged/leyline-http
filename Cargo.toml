@@ -13,16 +13,19 @@ members = [
     "crates/ffi",
     "crates/quic",
     "crates/cli",
+    "crates/tower",
 ]
 exclude = [
     "wrappers/*",
+    "fuzz",
+    "benches",
 ]
 
 [workspace.package]
 version = "2.0.0-alpha.1"
 edition = "2024"
 rust-version = "1.85" # MSRV
-authors = ["Manaforge Technologies, LLC"]
+authors = ["Thomas Gardiner"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/manaforged/leyline-http"
 homepage = "https://github.com/manaforged/leyline-http"
@@ -30,7 +33,10 @@ keywords = ["tls", "fingerprint", "http", "browser", "ja4"]
 categories = ["web-programming::http-client", "cryptography"]
 
 [workspace.lints.rust]
-missing_docs = "warn"
+missing_docs = "deny"
+
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "deny"
 
 [workspace.dependencies]
 tokio = { version = "1", features = ["net", "rt", "rt-multi-thread", "time", "io-util", "macros"] }
@@ -41,6 +47,14 @@ tracing = "0.1"
 thiserror = "2"
 url = "2"
 sha2 = "0.10"
+md-5 = "0.10"
+# Vendored BoringSSL bindings. Package names are kept as upstream
+# (`boring` / `boring-sys` / `tokio-boring`) so cargo's `[patch.crates-io]`
+# table below can redirect quiche's transitive pull to this fork — cargo
+# patches require the patched package name to match. Upstream attribution
+# is in /NOTICE; the vendored tree is a fork of 0x676e67/boring2. Publishing
+# these under Leyline-scoped names is a future release story (see
+# CONTRIBUTING.md → Releasing).
 boring = { path = "vendor/leyline-ssl" }
 boring-sys = { path = "vendor/leyline-ssl-sys" }
 tokio-boring = { path = "vendor/tokio-leyline-ssl" }
@@ -64,9 +78,12 @@ codegen-units = 1
 strip = "symbols"
 opt-level = 3
 
-# Route every crate in the graph (including quiche) through our patched
-# BoringSSL fork. Without this, quiche would pull stock cloudflare/boring
-# from crates.io and its QUIC ClientHello would diverge from our H2 one.
+# Route quiche's crates.io `boring`/`boring-sys` deps to our vendored fork
+# so the QUIC ClientHello shares the same extension set as the H2 one.
+# This patch applies to the Leyline workspace only — downstream workspaces
+# that consume Leyline do NOT inherit patches, so users who depend on real
+# `cloudflare/boring` alongside Leyline see their own `boring`, not ours.
+# See /NOTICE and vendor/leyline-ssl-sys/REVISION.
 [patch.crates-io]
 boring = { path = "vendor/leyline-ssl" }
 boring-sys = { path = "vendor/leyline-ssl-sys" }

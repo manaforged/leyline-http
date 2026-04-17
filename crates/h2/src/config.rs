@@ -3,6 +3,8 @@
 //! Defines the configuration types for HTTP/2 fingerprinting. These are
 //! resolved from TOML browser profiles and applied to hyper2 connections.
 
+use std::time::Duration;
+
 /// HTTP/2 SETTINGS parameter ID.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u16)]
@@ -24,6 +26,16 @@ pub enum SettingId {
     /// Unknown setting 9.
     Unknown9 = 9,
 }
+
+/// RFC 8441 §3 — `SETTINGS_ENABLE_CONNECT_PROTOCOL` identifier (0x8).
+///
+/// Value `1` on the server side means "I accept extended CONNECT with a
+/// `:protocol` pseudo-header" (e.g. WebSocket over HTTP/2); value `0`
+/// (or the setting missing entirely) means the server only speaks the
+/// classic CONNECT tunnel shape from RFC 9113 §8.5. Per RFC 8441 §3
+/// the setting is sticky — once the server advertises `1` it cannot
+/// revert to `0` on the same connection.
+pub const SETTINGS_ENABLE_CONNECT_PROTOCOL: u16 = 0x8;
 
 impl SettingId {
     /// Parse from the key string used in TOML profiles.
@@ -78,6 +90,23 @@ impl PseudoOrder {
     }
 }
 
+/// Priority fields emitted alongside a client-initiated HEADERS frame.
+///
+/// RFC 9113 deprecated the PRIORITY flag, but Chrome and Firefox still emit
+/// stream-dependency data on initial HEADERS for fingerprint parity. Weight
+/// is carried on the wire as `weight - 1`, so the range `0..=255` maps to
+/// priorities `1..=256`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PriorityParams {
+    /// Exclusive dependency bit (E) — when set, the new stream becomes the
+    /// sole dependency of `stream_dependency`.
+    pub exclusive: bool,
+    /// Stream ID this new stream depends on (0 = root of the tree).
+    pub stream_dependency: u32,
+    /// Weight on the wire (`actual_weight - 1`); range `0..=255`.
+    pub weight: u8,
+}
+
 /// Resolved HTTP/2 fingerprint configuration.
 #[derive(Debug, Clone)]
 pub struct H2Config {
@@ -89,6 +118,30 @@ pub struct H2Config {
     pub pseudo_order: [PseudoOrder; 4],
     /// Initial connection-level window size (for WINDOW_UPDATE after preface).
     pub initial_connection_window_size: u32,
+    /// Optional PRIORITY fields to emit on the initial HEADERS frame of
+    /// each request. `None` (the default) sends no priority data — matches
+    /// non-browser HTTP/2 clients. Set to `Some(..)` to match Chrome /
+    /// Firefox fingerprints.
+    pub default_priority: Option<PriorityParams>,
+    /// Threshold for the inbound RST_STREAM flood guard — more than this
+    /// many RST_STREAM frames inside `rst_stream_flood_window` causes the
+    /// connection to tear down with `ENHANCE_YOUR_CALM` (CVE-2023-44487
+    /// defense-in-depth).
+    pub rst_stream_flood_threshold: u32,
+    /// Sliding window over which `rst_stream_flood_threshold` is measured.
+    pub rst_stream_flood_window: Duration,
+    /// Max time to wait for the peer to ACK our SETTINGS frame during
+    /// handshake (RFC 9113 §6.5.3). On timeout, the handshake fails
+    /// with a `SettingsTimeout` connection error. Default: 10 s.
+    pub settings_ack_timeout: Duration,
+    /// Hard cap on the size of a response body. Requests that exceed
+    /// this value fail with a stream-level error; existing streams on
+    /// the same connection continue. Default: 100 MiB.
+    pub max_response_body_bytes: usize,
+    /// Hard cap on the total size of a single inbound header block
+    /// (HEADERS + all subsequent CONTINUATION fragments). Exceeding it
+    /// is a `CompressionError`. Default: 256 KiB (Chrome's ceiling).
+    pub max_header_block_bytes: usize,
 }
 
 impl H2Config {
@@ -157,6 +210,12 @@ impl H2Config {
             settings_order,
             pseudo_order,
             initial_connection_window_size,
+            default_priority: None,
+            rst_stream_flood_threshold: 100,
+            rst_stream_flood_window: Duration::from_secs(10),
+            settings_ack_timeout: Duration::from_secs(10),
+            max_response_body_bytes: 100 * 1024 * 1024,
+            max_header_block_bytes: 256 * 1024,
         }
     }
 

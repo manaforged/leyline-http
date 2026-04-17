@@ -8,11 +8,10 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
-# Cloudflare quiche — BoringSSL-native QUIC + HTTP/3. Via the
-# `boringssl-boring-crate` feature and the workspace's `[patch.crates-io]`,
-# quiche's `boring` dep resolves to our vendored Leyline fork, so the exact
-# same patched BoringSSL emits both the H2 TCP ClientHello and the H3 QUIC
-# ClientHello.
+# Cloudflare quiche — BoringSSL-native QUIC + HTTP/3. Quiche asks crates.io
+# for a dep named `boring`; the workspace root `[patch.crates-io]` redirects
+# that to our vendored `leyline-ssl` package so the H2 and H3 ClientHellos
+# come from the same patched BoringSSL.
 quiche = { version = "0.23", default-features = false, features = [
     "boringssl-boring-crate",
 ] }

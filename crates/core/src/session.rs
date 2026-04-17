@@ -13,6 +13,7 @@ use leyline_tls::FingerprintConnector;
 
 static PROFILES: LazyLock<ProfileRegistry> = LazyLock::new(ProfileRegistry::builtin);
 
+use crate::body::Body;
 use crate::error::{Error, Result};
 use crate::headers::HeaderList;
 use crate::request::RequestBuilder;
@@ -330,22 +331,56 @@ impl Session {
         SessionBuilder::new()
     }
 
-    /// Shortcut: latest Chrome, Windows.
-    pub fn chrome() -> Result<Self> {
+    /// Shortcut to the latest bundled Chrome profile (currently Chrome 147
+    /// on Windows). Bumps silently when a new Chrome profile is added —
+    /// pin [`Browser::Chrome147`] via the builder if you need a specific
+    /// version across releases.
+    pub fn chrome_latest() -> Result<Self> {
         Self::builder().build()
     }
 
-    /// Shortcut: Firefox 148, Windows.
-    pub fn firefox() -> Result<Self> {
+    /// Shortcut to the latest bundled Firefox profile (currently Firefox
+    /// 148 on Windows). Bumps silently on new releases — pin via the
+    /// builder for stability.
+    pub fn firefox_latest() -> Result<Self> {
         Self::builder().browser(Browser::Firefox148).build()
     }
 
-    /// Shortcut: Safari 18, macOS.
-    pub fn safari() -> Result<Self> {
+    /// Shortcut to the latest bundled Safari profile (currently Safari
+    /// 18 on macOS). Bumps silently on new releases — pin via the
+    /// builder for stability.
+    pub fn safari_latest() -> Result<Self> {
         Self::builder()
             .browser(Browser::Safari18)
             .platform(Platform::MacOS)
             .build()
+    }
+
+    /// Deprecated alias for [`Session::chrome_latest`].
+    #[deprecated(
+        since = "2.0.0-alpha.1",
+        note = "use `Session::chrome_latest` (renamed to make silent-upgrade behaviour obvious) or pin a specific `Browser::ChromeN` via `Session::builder`."
+    )]
+    pub fn chrome() -> Result<Self> {
+        Self::chrome_latest()
+    }
+
+    /// Deprecated alias for [`Session::firefox_latest`].
+    #[deprecated(
+        since = "2.0.0-alpha.1",
+        note = "use `Session::firefox_latest` or pin a specific `Browser::FirefoxN` via `Session::builder`."
+    )]
+    pub fn firefox() -> Result<Self> {
+        Self::firefox_latest()
+    }
+
+    /// Deprecated alias for [`Session::safari_latest`].
+    #[deprecated(
+        since = "2.0.0-alpha.1",
+        note = "use `Session::safari_latest` or pin a specific `Browser::SafariN` via `Session::builder`."
+    )]
+    pub fn safari() -> Result<Self> {
+        Self::safari_latest()
     }
 
     /// Access the cookie jar.
@@ -449,8 +484,25 @@ impl Session {
 
     /// Connect to a WebSocket URL with TLS fingerprinting.
     ///
-    /// The TLS handshake uses the same browser fingerprint as HTTP requests.
-    /// Returns a `WsConnection` for sending and receiving messages.
+    /// Path selection is two-tier:
+    ///
+    /// 1. **HTTP/2 extended CONNECT** (RFC 8441) is attempted first.
+    ///    It piggybacks on whatever pooled H2 connection the session
+    ///    already maintains to the destination (or opens a fresh one
+    ///    with the standard ALPN list). If the peer advertises
+    ///    `SETTINGS_ENABLE_CONNECT_PROTOCOL = 1` the WebSocket runs as
+    ///    a bidirectional stream inside the existing H2 connection,
+    ///    sharing its TLS session and TCP connection.
+    /// 2. **HTTP/1.1 Upgrade** is used as a fallback when either the
+    ///    peer doesn't advertise extended CONNECT, the ALPN doesn't
+    ///    negotiate `h2`, or the H2 attempt errors. A fresh TLS
+    ///    connection with `http/1.1` ALPN is negotiated and
+    ///    tokio-tungstenite drives the classic RFC 6455 handshake.
+    ///
+    /// In both cases the returned [`WsConnection`](
+    /// crate::websocket::WsConnection) looks identical to the caller.
+    /// Use [`websocket_http1`](Self::websocket_http1) to force the
+    /// legacy H1 path — useful for testing servers that speak both.
     ///
     /// ```rust,ignore
     /// let mut ws = session.websocket("wss://echo.example.com/ws").await?;
@@ -461,21 +513,72 @@ impl Session {
     /// ws.close().await?;
     /// ```
     pub async fn websocket(&self, url: &str) -> Result<crate::websocket::WsConnection> {
-        let parsed = url::Url::parse(url)?;
-        let origin = format!(
-            "{}://{}",
-            parsed
-                .scheme()
-                .replace("wss", "https")
-                .replace("ws", "http"),
-            parsed.host_str().unwrap_or("")
-        );
-        crate::websocket::WsConnection::connect(
+        let origin = ws_origin(url)?;
+
+        // Try H2 first. The pool helper handles the TLS handshake +
+        // ALPN check; if the connection already existed we just clone
+        // its handle. Failures that look like "peer didn't enable
+        // CONNECT protocol" fall through to the H1 upgrade path.
+        match crate::websocket::WsConnection::connect_h2(
+            &self.pool,
+            &self.connector,
+            &self.h2_config,
+            url,
+            self.proxy.as_deref(),
+            &self.user_agent,
+            &origin,
+        )
+        .await
+        {
+            Ok(conn) => return Ok(conn),
+            Err(e) if crate::websocket::WsConnection::is_h2_fallback_trigger(&e) => {
+                tracing::debug!(
+                    error = %e,
+                    "H2 extended CONNECT not available, falling back to H1 Upgrade"
+                );
+            }
+            Err(e) => {
+                tracing::debug!(
+                    error = %e,
+                    "H2 WebSocket path failed, falling back to H1 Upgrade"
+                );
+            }
+        }
+
+        self.websocket_http1(url).await
+    }
+
+    /// Force the HTTP/1.1 Upgrade WebSocket path, skipping the
+    /// HTTP/2 extended CONNECT probe. Useful against servers that
+    /// speak both protocols but whose H2 WebSocket implementation is
+    /// known-broken, or for deterministic test setups.
+    pub async fn websocket_http1(&self, url: &str) -> Result<crate::websocket::WsConnection> {
+        let origin = ws_origin(url)?;
+        crate::websocket::WsConnection::connect_h1(
             &self.connector,
             url,
             self.proxy.as_deref(),
             &self.user_agent,
             &origin,
+        )
+        .await
+    }
+
+    /// Dispatch a standalone [`crate::Request`] value. Used by
+    /// adapters that can't borrow the session (e.g. the `tower::Service`
+    /// implementation in `leyline-tower`).
+    ///
+    /// For most code, prefer the fluent [`Self::get`] / [`Self::post`]
+    /// / [`Self::request`] builders — they're borrow-cheap and avoid
+    /// an extra allocation of the `Request` value.
+    pub async fn execute_request(&self, req: crate::Request) -> Result<Response> {
+        let headers = if req.headers.is_empty() {
+            None
+        } else {
+            Some(req.headers)
+        };
+        self.execute_with_timeout(
+            &req.method, &req.url, None, req.body, headers, req.timeout, false,
         )
         .await
     }
@@ -490,9 +593,10 @@ impl Session {
         method: &str,
         raw_url: &str,
         preset: Option<Preset>,
-        body: Option<Vec<u8>>,
+        body: Body,
         extra_headers: Option<HeaderList>,
         override_timeout: Option<std::time::Duration>,
+        stream_response: bool,
     ) -> Result<Response> {
         let timeout = override_timeout.unwrap_or(self.timeout);
         // Box the inner future to move its state to the heap. Without this,
@@ -501,7 +605,14 @@ impl Session {
         // stack when a test awaits two requests sequentially.
         let inner: std::pin::Pin<
             Box<dyn std::future::Future<Output = Result<Response>> + Send + '_>,
-        > = Box::pin(self.execute_inner(method, raw_url, preset, body, extra_headers));
+        > = Box::pin(self.execute_inner(
+            method,
+            raw_url,
+            preset,
+            body,
+            extra_headers,
+            stream_response,
+        ));
         match tokio::time::timeout(timeout, inner).await {
             Ok(result) => result,
             Err(_) => Err(Error::Timeout),
@@ -519,12 +630,18 @@ impl Session {
         method: &str,
         raw_url: &str,
         preset: Option<Preset>,
-        body: Option<Vec<u8>>,
+        body: Body,
         extra_headers: Option<HeaderList>,
+        stream_response: bool,
     ) -> Result<Response> {
         let mut current_url = url::Url::parse(raw_url)?;
         let original_origin = url_origin(&current_url);
         let mut current_method = method.to_string();
+        // Carry the body through the redirect loop. A streaming body is
+        // placed in `current_body` for the first hop; on a method- or
+        // body-preserving redirect (307/308) we cannot replay a stream,
+        // so a cross-redirect stream becomes an explicit error. Buffered
+        // bodies replay fine because `Body::Bytes` is `Clone`-like.
         let mut current_body = body;
         let mut redirect_chain = Vec::new();
         let mut all_cookies = HashMap::new();
@@ -583,9 +700,14 @@ impl Session {
                 }
             }
 
-            // Content-Length for requests with body (Chrome sends this).
-            if let Some(ref b) = current_body {
-                headers.push(("content-length".into(), b.len().to_string()));
+            // Content-Length for requests with a known-length body.
+            // For length-unknown streams we leave it out and let the
+            // transport pick `Transfer-Encoding: chunked` (H1) or native
+            // framing (H2/H3).
+            if let Some(len) = current_body.len_hint() {
+                if !matches!(current_body, Body::Empty) || len > 0 {
+                    headers.push(("content-length".into(), len.to_string()));
+                }
             }
 
             // Cookies.
@@ -595,13 +717,25 @@ impl Session {
 
             let audit_headers = headers.clone();
 
+            // Take the body for this hop. Streams are one-shot; we replace
+            // `current_body` with `Body::Empty` so a follow-up redirect
+            // sees there's nothing to replay (and fails loudly).
+            let hop_body = std::mem::take(&mut current_body);
+            let hop_body_was_stream = hop_body.is_stream();
+
             // Send via the configured protocol policy.
             let transport_resp = self
-                .send_with_policy(&current_method, &current_url, headers, current_body.clone())
+                .send_with_policy(
+                    &current_method,
+                    &current_url,
+                    headers,
+                    hop_body,
+                    stream_response,
+                )
                 .await?;
             let status = transport_resp.status;
             let resp_headers = transport_resp.headers;
-            let resp_body = transport_resp.body;
+            let resp_body_shape = transport_resp.body;
             let final_url = transport_resp.final_url;
             let response_version = transport_resp.version;
             let tls_alpn = transport_resp.tls_alpn;
@@ -635,44 +769,95 @@ impl Session {
                     .find(|(k, _)| k.eq_ignore_ascii_case("location"))
                     .map(|(_, v)| v.clone())
                 {
+                    // Drain and discard the intermediate response body.
+                    drop(resp_body_shape);
                     redirect_chain.push(current_url.to_string());
                     current_url = current_url.join(&location)?;
 
                     // 301/302/303: switch to GET, drop body.
-                    // 307/308: preserve method and body.
+                    // 307/308: preserve method and body. A streaming
+                    // request body cannot be replayed — fail clearly.
                     if matches!(status, 301 | 302 | 303) {
                         current_method = "GET".to_string();
-                        current_body = None;
+                        current_body = Body::Empty;
+                    } else if hop_body_was_stream {
+                        return Err(Error::Http(format!(
+                            "cannot follow {status} redirect: streaming request bodies are \
+                             not replayable. Either buffer the body before sending or set \
+                             max_redirects(0)."
+                        )));
                     }
                     continue;
                 }
             }
 
-            // Decompress body.
-            let content_encoding = resp_headers
-                .iter()
-                .find(|(k, _)| k.eq_ignore_ascii_case("content-encoding"))
-                .map(|(_, v)| v.to_lowercase());
-            let resp_body = decompress_body(resp_body, content_encoding.as_deref())?;
-
-            // Strip Content-Encoding and Content-Length after decompression
-            // so resp.content_length() matches resp.bytes().len().
-            let resp_headers: Vec<(String, String)> = if content_encoding.is_some() {
-                resp_headers
-                    .into_iter()
-                    .filter(|(k, _)| {
-                        !k.eq_ignore_ascii_case("content-encoding")
-                            && !k.eq_ignore_ascii_case("content-length")
-                    })
-                    .collect()
-            } else {
-                resp_headers
+            // If the caller opted into streaming, deliver as-is WITHOUT
+            // decompression. Otherwise materialise and decompress as today.
+            let (final_body, final_headers) = match resp_body_shape {
+                crate::transport::TransportBody::Streaming(bs) if stream_response => (
+                    crate::response::ResponseBody::Streaming(bs),
+                    resp_headers,
+                ),
+                crate::transport::TransportBody::Streaming(bs) => {
+                    // Transport returned a stream but caller wanted
+                    // buffering. Drain it fully here, then run normal
+                    // decompression.
+                    let buf = drain_stream_into_vec(bs).await?;
+                    let content_encoding = resp_headers
+                        .iter()
+                        .find(|(k, _)| k.eq_ignore_ascii_case("content-encoding"))
+                        .map(|(_, v)| v.to_lowercase());
+                    let buf = decompress_body(buf, content_encoding.as_deref())?;
+                    let resp_headers: Vec<(String, String)> = if content_encoding.is_some() {
+                        resp_headers
+                            .into_iter()
+                            .filter(|(k, _)| {
+                                !k.eq_ignore_ascii_case("content-encoding")
+                                    && !k.eq_ignore_ascii_case("content-length")
+                            })
+                            .collect()
+                    } else {
+                        resp_headers
+                    };
+                    (crate::response::ResponseBody::Buffered(buf), resp_headers)
+                }
+                crate::transport::TransportBody::Buffered(buf) => {
+                    if stream_response {
+                        // Transport buffered (H1 / H3 path). Preserve
+                        // content-encoding and hand the buffer over as a
+                        // single-chunk stream so the API is uniform.
+                        (
+                            crate::response::ResponseBody::Streaming(
+                                crate::body_stream::BodyStream::from_bytes(bytes::Bytes::from(buf)),
+                            ),
+                            resp_headers,
+                        )
+                    } else {
+                        let content_encoding = resp_headers
+                            .iter()
+                            .find(|(k, _)| k.eq_ignore_ascii_case("content-encoding"))
+                            .map(|(_, v)| v.to_lowercase());
+                        let buf = decompress_body(buf, content_encoding.as_deref())?;
+                        let resp_headers: Vec<(String, String)> = if content_encoding.is_some() {
+                            resp_headers
+                                .into_iter()
+                                .filter(|(k, _)| {
+                                    !k.eq_ignore_ascii_case("content-encoding")
+                                        && !k.eq_ignore_ascii_case("content-length")
+                                })
+                                .collect()
+                        } else {
+                            resp_headers
+                        };
+                        (crate::response::ResponseBody::Buffered(buf), resp_headers)
+                    }
+                }
             };
 
             return Ok(Response {
                 status,
-                headers: resp_headers,
-                body: resp_body,
+                headers: final_headers,
+                body: final_body,
                 cookies: all_cookies,
                 url: final_url,
                 redirect_chain,
@@ -711,7 +896,8 @@ impl Session {
         method: &str,
         url: &url::Url,
         headers: Vec<(String, String)>,
-        body: Option<Vec<u8>>,
+        body: Body,
+        stream_response: bool,
     ) -> Result<crate::transport::TransportResponse> {
         match self.protocol_policy {
             ProtocolPolicy::Auto => {
@@ -724,6 +910,7 @@ impl Session {
                     headers,
                     body,
                     self.proxy.as_deref(),
+                    stream_response,
                 )
                 .await
             }
@@ -735,6 +922,7 @@ impl Session {
                     headers,
                     body,
                     self.proxy.as_deref(),
+                    stream_response,
                 )
                 .await
             }
@@ -748,6 +936,7 @@ impl Session {
                     headers,
                     body,
                     self.proxy.as_deref(),
+                    stream_response,
                 )
                 .await
             }
@@ -764,18 +953,44 @@ impl Session {
                     url,
                     headers,
                     body,
+                    stream_response,
                 )
                 .await
             }
             ProtocolPolicy::Race => {
+                // Race doesn't interact well with streaming bodies — we
+                // can only try H3 first if we have a buffered body to
+                // keep for the fallback. Streaming bodies run straight
+                // through the Auto path.
+                if body.is_stream() || stream_response {
+                    return crate::transport::send_request_auto(
+                        &self.pool,
+                        &self.connector,
+                        &self.h2_config,
+                        method,
+                        url,
+                        headers,
+                        body,
+                        self.proxy.as_deref(),
+                        stream_response,
+                    )
+                    .await;
+                }
                 if self.proxy.is_none() && url.scheme() == "https" {
+                    // We have a buffered body — clone for the retry.
+                    let retained = match &body {
+                        Body::Empty => Body::Empty,
+                        Body::Bytes(b) => Body::Bytes(b.clone()),
+                        Body::Stream { .. } => unreachable!(),
+                    };
                     match crate::transport::send_request_h3(
                         &self.h3_config,
                         self.profile,
                         method,
                         url,
                         headers.clone(),
-                        body.clone(),
+                        retained,
+                        stream_response,
                     )
                     .await
                     {
@@ -792,6 +1007,7 @@ impl Session {
                     headers,
                     body,
                     self.proxy.as_deref(),
+                    stream_response,
                 )
                 .await
             }
@@ -825,6 +1041,19 @@ impl std::fmt::Display for Session {
     }
 }
 
+/// Build a WebSocket `Origin` header value from a `ws://` or `wss://`
+/// URL by mapping the scheme to `http`/`https`. Used by the WebSocket
+/// entry points to keep Origin consistent between H1 and H2 paths.
+fn ws_origin(url: &str) -> Result<String> {
+    let parsed = url::Url::parse(url)?;
+    let scheme = match parsed.scheme() {
+        "wss" => "https",
+        "ws" => "http",
+        other => other,
+    };
+    Ok(format!("{}://{}", scheme, parsed.host_str().unwrap_or("")))
+}
+
 /// Extract origin (scheme://host:port) from a URL for same-origin comparison.
 fn url_origin(url: &url::Url) -> String {
     let host = url.host_str().unwrap_or("");
@@ -856,6 +1085,21 @@ fn decompress_body(body: Vec<u8>, encoding: Option<&str>) -> Result<Vec<u8>> {
 
 /// Max decompressed body size (100 MB, same as wire limit).
 const MAX_DECOMPRESSED: usize = 100 * 1024 * 1024;
+
+async fn drain_stream_into_vec(mut bs: crate::body_stream::BodyStream) -> Result<Vec<u8>> {
+    use futures_util::StreamExt;
+    let mut out = Vec::new();
+    while let Some(chunk) = bs.next().await {
+        let chunk = chunk.map_err(Error::Io)?;
+        if out.len() + chunk.len() > MAX_DECOMPRESSED {
+            return Err(Error::Http(format!(
+                "response body exceeds {MAX_DECOMPRESSED} bytes"
+            )));
+        }
+        out.extend_from_slice(&chunk);
+    }
+    Ok(out)
+}
 
 fn decompress_single(body: Vec<u8>, encoding: &str) -> Result<Vec<u8>> {
     match encoding {

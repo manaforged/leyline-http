@@ -287,9 +287,21 @@ fn parse_cookie_date(s: &str) -> Option<SystemTime> {
     }
 
     // Convert to SystemTime (rough — no full calendar math, but sufficient for cookies).
+    //
+    // Pre-1970 `Expires` values (e.g. `Expires=Wed, 21 Oct 1013 ...` which
+    // the cookie fuzzer actually produced) yield a negative
+    // `days_from_epoch`. Cookies with a pre-epoch expiry are already
+    // expired — collapse them to `UNIX_EPOCH` rather than panicking on
+    // `(negative as u64) * 86400` overflow under `debug_assertions`.
     let days_from_epoch = days_since_epoch(year, month, day)?;
-    let secs =
-        days_from_epoch as u64 * 86400 + hour as u64 * 3600 + minute as u64 * 60 + second as u64;
+    if days_from_epoch < 0 {
+        return Some(SystemTime::UNIX_EPOCH);
+    }
+    let secs = (days_from_epoch as u64)
+        .checked_mul(86400)?
+        .checked_add(hour as u64 * 3600)?
+        .checked_add(minute as u64 * 60)?
+        .checked_add(second as u64)?;
     Some(SystemTime::UNIX_EPOCH + Duration::from_secs(secs))
 }
 
@@ -387,5 +399,27 @@ mod tests {
     fn cookie_date_parsing() {
         let t = parse_cookie_date("Thu, 01 Jan 2026 00:00:00 GMT");
         assert!(t.is_some());
+    }
+
+    /// Regression gate for a cookie_set fuzzer finding:
+    /// pre-epoch `Expires` dates produced a negative `days_from_epoch`
+    /// that was cast to `u64`, then multiplied by 86400, panicking on
+    /// overflow under `debug_assertions`. Such cookies are already
+    /// expired and should resolve to `UNIX_EPOCH` (or be silently
+    /// discarded by the jar's normal expiry logic) — never panic.
+    #[test]
+    fn pre_epoch_expires_does_not_overflow() {
+        let url = test_url("https://example.com/");
+        // The fuzzer's minimised input:
+        let header = "session=deadbeef; Expires=Wed, 21 Oct 1013 07:28:00 GMT; Path=/";
+        // Must not panic. The cookie is already expired, so the jar
+        // may drop it; either way we want a Result not a crash.
+        let _ = parse_set_cookie(header, &url);
+
+        // A closer edge case — exactly 1 Jan 1970 boundary.
+        let t = parse_cookie_date("Thu, 01 Jan 1970 00:00:00 GMT");
+        assert!(t.is_some());
+        let t = parse_cookie_date("Wed, 31 Dec 1969 23:59:59 GMT");
+        assert_eq!(t, Some(SystemTime::UNIX_EPOCH));
     }
 }

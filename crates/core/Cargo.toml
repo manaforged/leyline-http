@@ -19,6 +19,8 @@ leyline-quic = { path = "../quic" }
 tokio-tungstenite = { workspace = true }
 tungstenite = { workspace = true }
 sha1 = { workspace = true }
+sha2 = { workspace = true }
+md-5 = { workspace = true }
 futures-util = "0.3"
 http = "1"
 tokio-boring = { workspace = true }
@@ -32,6 +34,7 @@ tracing = { workspace = true }
 flate2 = "1"
 brotli = "8"
 zstd = "0.13"
+base64 = { workspace = true }
 
 [lints]
 workspace = true

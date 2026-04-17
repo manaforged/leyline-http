@@ -42,7 +42,9 @@ ignore = [
 version = 2
 # SPDX identifiers we accept for dependencies. Leyline itself is
 # dual-licensed MIT OR Apache-2.0 and we only pull in OSS-compatible
-# crates.
+# crates. `OpenSSL` is intentionally omitted here — it applies only to
+# the vendored BoringSSL tree and is asserted via a scoped clarification
+# below rather than blanket-allowed for the whole graph.
 allow = [
     "MIT",
     "Apache-2.0",
@@ -55,17 +57,36 @@ allow = [
     "Zlib",
     "MPL-2.0",
     "CC0-1.0",
-    "OpenSSL",
     "BSL-1.0",
 ]
 confidence-threshold = 0.9
 
-# The vendored BoringSSL fork carries ISC + OpenSSL + BSD — accept via
-# the blanket allow list above. If we ever clarify the vendored license
-# file, switch this to a targeted clarification instead.
-[[licenses.exceptions]]
-allow = ["OpenSSL"]
-name = "ring"
+# The vendored BoringSSL bindings ship under ISC + OpenSSL + MIT (Google
+# + fiat). Scope the OpenSSL grant to the exact crates where it applies;
+# if a future dep drags in `openssl` proper, cargo-deny will fail rather
+# than silently accept it.
+[[licenses.clarify]]
+name = "boring"
+expression = "Apache-2.0 AND ISC AND OpenSSL"
+license-files = [
+    { path = "LICENSE", hash = 0 },
+]
+
+[[licenses.clarify]]
+name = "boring-sys"
+expression = "MIT AND ISC AND OpenSSL"
+license-files = [
+    { path = "LICENSE-MIT", hash = 0 },
+    { path = "deps/boringssl/LICENSE", hash = 0 },
+]
+
+[[licenses.clarify]]
+name = "tokio-boring"
+expression = "MIT OR Apache-2.0"
+license-files = [
+    { path = "LICENSE-MIT", hash = 0 },
+    { path = "LICENSE-APACHE", hash = 0 },
+]
 
 # ─── Bans ───────────────────────────────────────────────────────────────
 

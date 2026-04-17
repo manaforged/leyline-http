@@ -52,13 +52,18 @@
 //! println!("{}", audit.ja4);
 //! ```
 
-use std::sync::LazyLock;
+use std::sync::{LazyLock, OnceLock};
 
 // Core types
 pub use leyline_core::{
-    Error, HeaderList, HttpVersion, ProtocolPolicy, RequestBuilder, Response, Result, Session,
-    SessionBuilder,
+    Body, BodyStream, DigestAuth, Error, HeaderList, HttpVersion, ProtocolPolicy, Request,
+    RequestBuilder, Response, Result, RetryPolicy, RetryTrigger, Session, SessionBuilder,
 };
+
+/// `multipart/form-data` bodies (re-exported from `leyline-core`).
+pub mod multipart {
+    pub use leyline_core::multipart::{Form, Part};
+}
 
 // Profile types
 pub use leyline_profile::{Browser, BrowserProfile, Platform, Preset, ALL_BROWSERS, PROFILE_COUNT};
@@ -97,6 +102,12 @@ static PROFILES: LazyLock<leyline_profile::ProfileRegistry> =
     LazyLock::new(leyline_profile::ProfileRegistry::builtin);
 
 /// Look up the static built-in profile for a browser variant.
+///
+/// # Panics
+/// The built-in registry contains a profile for every [`Browser`] variant
+/// and the integrity test `every_browser_variant_has_a_profile` fails the
+/// build if that invariant is ever broken. A panic here would indicate a
+/// bug in Leyline itself, not in caller input.
 ///
 /// ```rust,ignore
 /// let chrome = leyline::profile(Browser::Chrome147);
@@ -139,45 +150,44 @@ pub fn quic_context(browser: Browser) -> Result<SslContextBuilder> {
 
 // ─── Level 1: Zero-config functions ─────────────────────────────────────
 
-static DEFAULT_SESSION: LazyLock<Session> =
-    LazyLock::new(|| Session::chrome().expect("failed to create default leyline session"));
+/// Lazily-built shared session behind the module-level helpers below.
+/// Construction failures are surfaced as a `Result` — the zero-config
+/// surface never panics on its own.
+fn default_session() -> Result<&'static Session> {
+    static DEFAULT: OnceLock<Session> = OnceLock::new();
+    if let Some(session) = DEFAULT.get() {
+        return Ok(session);
+    }
+    let built = Session::chrome_latest()?;
+    Ok(DEFAULT.get_or_init(|| built))
+}
 
-/// GET a URL. Uses Chrome 147 defaults. No setup needed.
+/// GET a URL. Uses the latest bundled Chrome profile.
 ///
-/// **Note:** All `leyline::get/post_json/post_form` calls share a single
-/// session and cookie jar. For isolated requests, create a `Session`.
+/// All `leyline::get`/`post_json`/`post_form`/`fetch` calls share a single
+/// session and cookie jar. For isolation, create your own [`Session`].
 ///
 /// ```rust,ignore
 /// let resp = leyline::get("https://example.com").await?;
 /// println!("{}", resp.text());
 /// ```
 pub async fn get(url: &str) -> Result<Response> {
-    DEFAULT_SESSION.navigate(url).await
+    default_session()?.navigate(url).await
 }
 
-/// POST JSON to a URL. Uses Chrome 147 defaults.
-///
-/// ```rust,ignore
-/// let resp = leyline::post_json("https://api.example.com", &data).await?;
-/// ```
+/// POST JSON to a URL. Uses the latest bundled Chrome profile.
 pub async fn post_json(url: &str, body: &impl serde::Serialize) -> Result<Response> {
-    DEFAULT_SESSION.post_json(url, body).await
+    default_session()?.post_json(url, body).await
 }
 
-/// POST form data to a URL. Uses Chrome 147 defaults.
-///
-/// ```rust,ignore
-/// let resp = leyline::post_form("https://example.com/login", &[("user", "a"), ("pass", "b")]).await?;
-/// ```
+/// POST form data to a URL. Uses the latest bundled Chrome profile.
 pub async fn post_form(url: &str, params: &[(&str, &str)]) -> Result<Response> {
-    DEFAULT_SESSION.post_form(url, params).await
+    default_session()?.post_form(url, params).await
 }
 
-/// Raw GET with no preset headers applied. Uses Chrome 147 defaults.
-///
-/// Prefer [`get`] for the common browser-like GET — `get` installs the
-/// Navigate preset (Sec-Fetch-Mode: navigate etc.) the way a browser
-/// document-fetch would, which is what you almost always want.
+/// Raw GET with no preset headers applied. Prefer [`get`] for the common
+/// browser-like GET — `get` installs the Navigate preset (Sec-Fetch-Mode:
+/// navigate etc.) the way a browser document-fetch would.
 pub async fn fetch(url: &str) -> Result<Response> {
-    DEFAULT_SESSION.get(url).send().await
+    default_session()?.get(url).send().await
 }

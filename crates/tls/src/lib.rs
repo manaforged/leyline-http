@@ -7,10 +7,14 @@
 mod builder;
 mod connector;
 mod error;
+mod happy_eyeballs;
+mod resolver;
 
 pub use builder::{build_ssl_context, TlsMinVersion};
 pub use connector::FingerprintConnector;
 pub use error::TlsError;
+pub use happy_eyeballs::HappyEyeballsConfig;
+pub use resolver::{ResolveFuture, Resolver, SystemResolver};
 
 /// A connected TLS stream with ALPN result.
 pub struct TlsStream {

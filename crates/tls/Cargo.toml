@@ -21,6 +21,10 @@ libc = "0.2"
 lru = "0.16.3" # RUSTSEC-2026-0002 fix
 brotli = "8"
 url = { workspace = true }
+futures-util = "0.3"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["net", "rt", "rt-multi-thread", "time", "io-util", "macros", "test-util"] }
 
 [lints]
 workspace = true

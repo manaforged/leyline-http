@@ -2,6 +2,35 @@
 
 use std::collections::HashMap;
 
+use crate::body_stream::BodyStream;
+use crate::error::{Error, Result};
+
+/// Internal body representation. Either already buffered, or a
+/// streaming receiver the caller asked for via `RequestBuilder::stream`.
+pub(crate) enum ResponseBody {
+    /// Fully-materialised bytes. The default.
+    Buffered(Vec<u8>),
+    /// Streaming delivery. Takes over once the caller opts in.
+    Streaming(BodyStream),
+    /// Streaming body that has already been taken via `into_stream`.
+    Taken,
+}
+
+impl std::fmt::Debug for ResponseBody {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Buffered(b) => f
+                .debug_struct("ResponseBody::Buffered")
+                .field("len", &b.len())
+                .finish(),
+            Self::Streaming(_) => f
+                .debug_struct("ResponseBody::Streaming")
+                .finish_non_exhaustive(),
+            Self::Taken => f.debug_struct("ResponseBody::Taken").finish(),
+        }
+    }
+}
+
 /// HTTP protocol version used for the response.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -45,7 +74,7 @@ pub struct Response {
     pub(crate) version: HttpVersion,
     pub(crate) headers: Vec<(String, String)>,
     pub(crate) trailers: Vec<(String, String)>,
-    pub(crate) body: Vec<u8>,
+    pub(crate) body: ResponseBody,
     pub(crate) cookies: HashMap<String, String>,
     pub(crate) url: String,
     pub(crate) redirect_chain: Vec<String>,
@@ -154,25 +183,39 @@ impl Response {
     /// for a zero-copy borrowing variant that fails on non-UTF-8, or
     /// [`Response::into_text`] to consume `self` and skip the copy
     /// when the body is already valid UTF-8.
+    ///
+    /// Returns an empty string when the body was delivered as a stream
+    /// (the caller opted into streaming and has not drained the body).
     pub fn text(&self) -> String {
-        String::from_utf8_lossy(&self.body).to_string()
+        String::from_utf8_lossy(self.bytes()).to_string()
     }
 
     /// Response body as a borrowed UTF-8 string slice. Returns
     /// `Err` if the body contains invalid UTF-8.
     pub fn text_utf8(&self) -> std::result::Result<&str, std::str::Utf8Error> {
-        std::str::from_utf8(&self.body)
+        std::str::from_utf8(self.bytes())
     }
 
-    /// Response body as raw bytes.
+    /// Response body as raw bytes. Returns `&[]` for a streaming body
+    /// that has not been drained into memory — use
+    /// [`Response::into_stream`] instead.
     pub fn bytes(&self) -> &[u8] {
-        &self.body
+        match &self.body {
+            ResponseBody::Buffered(b) => b,
+            ResponseBody::Streaming(_) | ResponseBody::Taken => &[],
+        }
     }
 
     /// Take ownership of the response body as raw bytes. Consumes
     /// `self` — use when you need to move the body without a copy.
+    ///
+    /// Returns `Vec::new()` when the body was delivered as a stream
+    /// (opt in with `.stream()` and consume via [`Response::into_stream`]).
     pub fn into_bytes(self) -> Vec<u8> {
-        self.body
+        match self.body {
+            ResponseBody::Buffered(b) => b,
+            ResponseBody::Streaming(_) | ResponseBody::Taken => Vec::new(),
+        }
     }
 
     /// Take ownership of the response body as a UTF-8 string.
@@ -180,7 +223,7 @@ impl Response {
     /// reuses the existing allocation; otherwise invalid sequences
     /// are replaced with U+FFFD and a new allocation is made.
     pub fn into_text(self) -> String {
-        match String::from_utf8(self.body) {
+        match String::from_utf8(self.into_bytes()) {
             Ok(s) => s,
             Err(e) => String::from_utf8_lossy(&e.into_bytes()).into_owned(),
         }
@@ -188,7 +231,29 @@ impl Response {
 
     /// Deserialize the response body as JSON.
     pub fn json<T: serde::de::DeserializeOwned>(&self) -> crate::Result<T> {
-        Ok(serde_json::from_slice(&self.body)?)
+        Ok(serde_json::from_slice(self.bytes())?)
+    }
+
+    /// Take ownership of the streaming response body.
+    ///
+    /// Available only when the caller opted in with
+    /// [`RequestBuilder::stream`](crate::RequestBuilder::stream) *and*
+    /// the transport actually delivered the body as a stream. On the
+    /// buffered default path — or when the transport fell back to
+    /// buffering — this wraps the buffered bytes as a single-chunk
+    /// stream so the caller API stays uniform.
+    ///
+    /// Decompression is NOT applied automatically when streaming is
+    /// enabled: the `content-encoding` header is preserved and the
+    /// caller is responsible for decompressing the stream.
+    pub fn into_stream(mut self) -> Result<BodyStream> {
+        match std::mem::replace(&mut self.body, ResponseBody::Taken) {
+            ResponseBody::Streaming(s) => Ok(s),
+            ResponseBody::Buffered(b) => Ok(BodyStream::from_bytes(bytes::Bytes::from(b))),
+            ResponseBody::Taken => Err(Error::Http(
+                "response body has already been taken as a stream".into(),
+            )),
+        }
     }
 
     /// Content-Length from the response headers, if present.
@@ -233,10 +298,13 @@ impl Response {
     /// ```
     pub fn error_for_status(self) -> crate::Result<Self> {
         if self.status >= 400 {
+            let status = self.status;
+            let url = self.url.clone();
+            let body = self.into_bytes();
             Err(crate::Error::Status {
-                code: self.status,
-                url: self.url,
-                body: self.body,
+                code: status,
+                url,
+                body,
             })
         } else {
             Ok(self)

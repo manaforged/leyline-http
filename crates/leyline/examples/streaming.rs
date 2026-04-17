@@ -1,0 +1,56 @@
+//! Stream a large upload and download without buffering the whole body.
+//!
+//! Reads a local file, streams it as a request body over HTTP/2, then
+//! streams the response back chunk-by-chunk to stdout.
+//!
+//! Run: `cargo run --example streaming -- https://httpbin.org/post ./input.bin`
+
+use bytes::Bytes;
+use futures_util::StreamExt;
+use leyline::{Body, Browser, Session};
+use tokio::io::AsyncWriteExt;
+
+#[tokio::main]
+async fn main() -> leyline::Result<()> {
+    let url = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "https://httpbin.org/post".to_string());
+    let file_path = std::env::args().nth(2);
+
+    let session = Session::builder().browser(Browser::Chrome147).build()?;
+
+    // ── Streaming upload ────────────────────────────────────────────
+    let body = if let Some(path) = file_path {
+        let meta = tokio::fs::metadata(&path).await.expect("stat input file");
+        let file = tokio::fs::File::open(&path).await.expect("open input file");
+        let reader = tokio_util::io::ReaderStream::new(file).map(|r| r.map(Bytes::from));
+        Body::stream_with_length(reader, meta.len())
+    } else {
+        // Synthetic 1 MiB stream of A's for demo.
+        let chunks = (0..16).map(|_| Ok::<Bytes, std::io::Error>(Bytes::from(vec![b'A'; 65536])));
+        let stream = futures_util::stream::iter(chunks);
+        Body::stream_with_length(stream, 16 * 65536)
+    };
+
+    // ── Streaming download ──────────────────────────────────────────
+    let resp = session
+        .post(&url)
+        .body(body)
+        .header("content-type", "application/octet-stream")
+        .stream()
+        .send()
+        .await?;
+
+    eprintln!("status {}", resp.status());
+
+    let mut stream = resp.into_stream()?;
+    let mut stdout = tokio::io::stdout();
+    let mut total = 0u64;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(leyline::Error::from)?;
+        total += chunk.len() as u64;
+        stdout.write_all(&chunk).await.expect("stdout");
+    }
+    eprintln!("\nreceived {total} bytes");
+    Ok(())
+}

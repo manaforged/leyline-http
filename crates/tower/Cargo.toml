@@ -1,0 +1,21 @@
+[package]
+name = "leyline-tower"
+description = "tower::Service adapter for Leyline sessions"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+leyline = { path = "../leyline" }
+tower = "0.5"
+futures-util = "0.3"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "io-util", "net", "time"] }
+tower = { version = "0.5", features = ["util"] }
+
+[lints]
+workspace = true

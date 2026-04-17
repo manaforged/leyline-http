@@ -1,13 +1,32 @@
 //! C FFI for Leyline.
 //!
-//! Exposes Leyline's full API through opaque handles and C-compatible functions.
-//! Owns a tokio runtime internally — all async operations block from the caller's
-//! perspective. Language wrappers add their own async on top.
+//! Exposes Leyline's API through opaque handles and C-compatible functions.
+//! Owns a tokio runtime internally — all async operations block from the
+//! caller's perspective. Language wrappers add their own async on top.
 //!
 //! # Memory rules
-//! - Strings returned by `leyline_*` functions are heap-allocated. Free with `leyline_free_string`.
-//! - Session and Response handles are reference-counted. Free with `leyline_session_free` / `leyline_response_free`.
-//! - Errors are stored per-call. Check with `leyline_last_error`.
+//! - Strings returned by `leyline_*` functions are heap-allocated. Free
+//!   with `leyline_free_string`.
+//! - Session, Response, and WebSocket handles are heap-allocated. Free
+//!   with `leyline_session_free` / `leyline_response_free` /
+//!   `leyline_ws_free`.
+//! - All handles are internally `Send + Sync` and safe to share across
+//!   threads once constructed.
+//!
+//! # Error handling
+//! `leyline_last_error` is **thread-local**. Every `leyline_*` function
+//! clears and possibly sets the error slot on the calling thread. Read
+//! the error on the same thread that produced it; otherwise the read
+//! returns null even when the call failed. Language wrappers that
+//! schedule FFI calls onto a worker thread must marshal the error off
+//! that thread immediately after each call returns.
+//!
+//! # Runtime failures
+//! The tokio runtime is initialised lazily on first use. If construction
+//! fails (extremely rare — only on a broken host), functions that need
+//! the runtime set `leyline_last_error` and return a null handle (or 0
+//! for numeric returns, -1 for status codes). The FFI never aborts the
+//! host process.
 
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
@@ -30,15 +49,53 @@ macro_rules! check_null {
 
 // ─── Runtime ────────────────────────────────────────────────────────────
 
-static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+static RUNTIME: OnceLock<Option<tokio::runtime::Runtime>> = OnceLock::new();
 
-fn rt() -> &'static tokio::runtime::Runtime {
-    RUNTIME.get_or_init(|| {
-        tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .expect("failed to create tokio runtime")
-    })
+/// Return the lazily-initialised tokio runtime, or set an error and return
+/// `None` if construction failed. Callers that return `*mut T` should use
+/// [`rt_or_null`]; callers that return a status code should inspect the
+/// return and bail out.
+fn rt() -> Option<&'static tokio::runtime::Runtime> {
+    RUNTIME
+        .get_or_init(|| {
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| set_error(format!("failed to create tokio runtime: {e}")))
+                .ok()
+        })
+        .as_ref()
+}
+
+/// Shorthand for FFI entry points that return `*mut T`: get the runtime
+/// or set the last error and early-return a null pointer.
+macro_rules! rt_or_null {
+    () => {
+        match rt() {
+            Some(rt) => rt,
+            None => {
+                if LAST_ERROR.with(|e| e.borrow().is_none()) {
+                    set_error("tokio runtime unavailable".into());
+                }
+                return std::ptr::null_mut();
+            }
+        }
+    };
+}
+
+/// Shorthand for FFI entry points that return a numeric status code.
+macro_rules! rt_or_status {
+    ($fail:expr) => {
+        match rt() {
+            Some(rt) => rt,
+            None => {
+                if LAST_ERROR.with(|e| e.borrow().is_none()) {
+                    set_error("tokio runtime unavailable".into());
+                }
+                return $fail;
+            }
+        }
+    };
 }
 
 // ─── Error handling ─────────────────────────────────────────────────────
@@ -95,11 +152,14 @@ pub struct LeylineSession {
     inner: Session,
 }
 
-/// Create a Chrome session. Returns null on error (check `leyline_last_error`).
+/// Create a session using the latest bundled Chrome profile. Returns null
+/// on error (check `leyline_last_error`). The resolved browser version
+/// drifts as profiles are added — pass a pinned browser string to
+/// [`leyline_session_new`] when you need version stability.
 #[no_mangle]
 pub extern "C" fn leyline_session_chrome() -> *mut LeylineSession {
     clear_error();
-    match Session::chrome() {
+    match Session::chrome_latest() {
         Ok(s) => Box::into_raw(Box::new(LeylineSession { inner: s })),
         Err(e) => {
             set_error(e.to_string());
@@ -108,11 +168,11 @@ pub extern "C" fn leyline_session_chrome() -> *mut LeylineSession {
     }
 }
 
-/// Create a Firefox session.
+/// Create a session using the latest bundled Firefox profile.
 #[no_mangle]
 pub extern "C" fn leyline_session_firefox() -> *mut LeylineSession {
     clear_error();
-    match Session::firefox() {
+    match Session::firefox_latest() {
         Ok(s) => Box::into_raw(Box::new(LeylineSession { inner: s })),
         Err(e) => {
             set_error(e.to_string());
@@ -121,11 +181,11 @@ pub extern "C" fn leyline_session_firefox() -> *mut LeylineSession {
     }
 }
 
-/// Create a Safari session.
+/// Create a session using the latest bundled Safari profile.
 #[no_mangle]
 pub extern "C" fn leyline_session_safari() -> *mut LeylineSession {
     clear_error();
-    match Session::safari() {
+    match Session::safari_latest() {
         Ok(s) => Box::into_raw(Box::new(LeylineSession { inner: s })),
         Err(e) => {
             set_error(e.to_string());
@@ -212,6 +272,7 @@ pub extern "C" fn leyline_session_get(
 ) -> *mut LeylineResponse {
     clear_error();
     check_null!(session);
+    let rt = rt_or_null!();
     let session = unsafe { &(*session).inner };
     let url = match cstr_to_str(url) {
         Some(s) => s,
@@ -221,7 +282,7 @@ pub extern "C" fn leyline_session_get(
         }
     };
 
-    match rt().block_on(session.navigate(url)) {
+    match rt.block_on(session.navigate(url)) {
         Ok(r) => Box::into_raw(Box::new(LeylineResponse { inner: r })),
         Err(e) => {
             set_error(e.to_string());
@@ -239,6 +300,7 @@ pub extern "C" fn leyline_session_post_json(
 ) -> *mut LeylineResponse {
     clear_error();
     check_null!(session);
+    let rt = rt_or_null!();
     let session = unsafe { &(*session).inner };
     let url = match cstr_to_str(url) {
         Some(s) => s,
@@ -255,7 +317,6 @@ pub extern "C" fn leyline_session_post_json(
         }
     };
 
-    // Parse the JSON string to a serde_json::Value so post_json can serialize it.
     let value: serde_json::Value = match serde_json::from_str(body_str) {
         Ok(v) => v,
         Err(e) => {
@@ -264,7 +325,7 @@ pub extern "C" fn leyline_session_post_json(
         }
     };
 
-    match rt().block_on(session.post_json(url, &value)) {
+    match rt.block_on(session.post_json(url, &value)) {
         Ok(r) => Box::into_raw(Box::new(LeylineResponse { inner: r })),
         Err(e) => {
             set_error(e.to_string());
@@ -282,6 +343,7 @@ pub extern "C" fn leyline_session_post_form(
 ) -> *mut LeylineResponse {
     clear_error();
     check_null!(session);
+    let rt = rt_or_null!();
     let session = unsafe { &(*session).inner };
     let url = match cstr_to_str(url) {
         Some(s) => s,
@@ -298,7 +360,7 @@ pub extern "C" fn leyline_session_post_form(
         }
     };
 
-    match rt().block_on(session.post_form_str(url, data_str)) {
+    match rt.block_on(session.post_form_str(url, data_str)) {
         Ok(r) => Box::into_raw(Box::new(LeylineResponse { inner: r })),
         Err(e) => {
             set_error(e.to_string());
@@ -353,6 +415,34 @@ pub extern "C" fn leyline_response_text(response: *const LeylineResponse) -> *mu
 pub extern "C" fn leyline_response_body_len(response: *const LeylineResponse) -> usize {
     check_null!(response, 0);
     unsafe { (*response).inner.bytes().len() }
+}
+
+/// Copy up to `buf_len` bytes of the response body into the caller-owned
+/// buffer `buf`, starting at byte `offset` in the body. Returns the number
+/// of bytes copied (0 if `offset` is at or past the body end, or on null
+/// handle). Use [`leyline_response_body_len`] first to size the buffer.
+///
+/// # Safety
+/// `buf` must point to writeable memory of at least `buf_len` bytes. The
+/// FFI does not retain the buffer pointer.
+#[no_mangle]
+pub unsafe extern "C" fn leyline_response_body_copy(
+    response: *const LeylineResponse,
+    offset: usize,
+    buf: *mut u8,
+    buf_len: usize,
+) -> usize {
+    if response.is_null() || buf.is_null() || buf_len == 0 {
+        return 0;
+    }
+    let body = (*response).inner.bytes();
+    if offset >= body.len() {
+        return 0;
+    }
+    let available = body.len() - offset;
+    let n = available.min(buf_len);
+    std::ptr::copy_nonoverlapping(body.as_ptr().add(offset), buf, n);
+    n
 }
 
 /// Get the final URL (after redirects). Caller must free.
@@ -454,6 +544,7 @@ pub extern "C" fn leyline_response_audit_json(response: *const LeylineResponse) 
 #[no_mangle]
 pub extern "C" fn leyline_get(url: *const c_char) -> *mut LeylineResponse {
     clear_error();
+    let rt = rt_or_null!();
     let url = match cstr_to_str(url) {
         Some(s) => s,
         None => {
@@ -462,7 +553,7 @@ pub extern "C" fn leyline_get(url: *const c_char) -> *mut LeylineResponse {
         }
     };
 
-    match rt().block_on(leyline::get(url)) {
+    match rt.block_on(leyline::get(url)) {
         Ok(r) => Box::into_raw(Box::new(LeylineResponse { inner: r })),
         Err(e) => {
             set_error(e.to_string());
@@ -486,6 +577,7 @@ pub extern "C" fn leyline_session_websocket(
 ) -> *mut LeylineWebSocket {
     clear_error();
     check_null!(session);
+    let rt = rt_or_null!();
     let session = unsafe { &(*session).inner };
     let url = match cstr_to_str(url) {
         Some(s) => s,
@@ -494,7 +586,7 @@ pub extern "C" fn leyline_session_websocket(
             return std::ptr::null_mut();
         }
     };
-    match rt().block_on(session.websocket(url)) {
+    match rt.block_on(session.websocket(url)) {
         Ok(ws) => Box::into_raw(Box::new(LeylineWebSocket { inner: ws })),
         Err(e) => {
             set_error(e.to_string());
@@ -508,6 +600,7 @@ pub extern "C" fn leyline_session_websocket(
 pub extern "C" fn leyline_ws_send(ws: *mut LeylineWebSocket, msg: *const c_char) -> i32 {
     clear_error();
     check_null!(ws, -1);
+    let rt = rt_or_status!(-1);
     let ws = unsafe { &mut (*ws).inner };
     let msg = match cstr_to_str(msg) {
         Some(s) => s,
@@ -516,7 +609,7 @@ pub extern "C" fn leyline_ws_send(ws: *mut LeylineWebSocket, msg: *const c_char)
             return -1;
         }
     };
-    match rt().block_on(ws.send(msg)) {
+    match rt.block_on(ws.send(msg)) {
         Ok(()) => 0,
         Err(e) => {
             set_error(e.to_string());
@@ -530,8 +623,9 @@ pub extern "C" fn leyline_ws_send(ws: *mut LeylineWebSocket, msg: *const c_char)
 pub extern "C" fn leyline_ws_recv(ws: *mut LeylineWebSocket) -> *mut c_char {
     clear_error();
     check_null!(ws);
+    let rt = rt_or_null!();
     let ws = unsafe { &mut (*ws).inner };
-    match rt().block_on(ws.recv()) {
+    match rt.block_on(ws.recv()) {
         Ok(Some(msg)) => to_c_string(&msg.to_string()),
         Ok(None) => std::ptr::null_mut(),
         Err(e) => {
@@ -546,8 +640,9 @@ pub extern "C" fn leyline_ws_recv(ws: *mut LeylineWebSocket) -> *mut c_char {
 pub extern "C" fn leyline_ws_close(ws: *mut LeylineWebSocket) -> i32 {
     clear_error();
     check_null!(ws, -1);
+    let rt = rt_or_status!(-1);
     let ws = unsafe { &mut (*ws).inner };
-    match rt().block_on(ws.close()) {
+    match rt.block_on(ws.close()) {
         Ok(()) => 0,
         Err(e) => {
             set_error(e.to_string());

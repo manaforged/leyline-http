@@ -6,23 +6,34 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
+use bytes::Bytes;
+use futures_util::StreamExt;
 use leyline_h2::config::H2Config;
 use leyline_h2::connection::PseudoHeaders;
 use leyline_pool::Pool;
 use leyline_tls::FingerprintConnector;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
+use crate::body::Body;
+use crate::body_stream::BodyStream;
 use crate::error::{Error, Result};
 use crate::response::HttpVersion;
 
 const MAX_H1_HEADER_BYTES: usize = 64 * 1024;
 const MAX_H1_BODY_BYTES: usize = 100 * 1024 * 1024;
 
-/// Buffered response returned by a transport.
+/// Body shape returned by a transport. Either fully buffered, or a
+/// receiver the caller drains via `BodyStream`.
+pub(crate) enum TransportBody {
+    Buffered(Vec<u8>),
+    Streaming(BodyStream),
+}
+
+/// Response returned by a transport.
 pub(crate) struct TransportResponse {
     pub(crate) status: u16,
     pub(crate) headers: Vec<(String, String)>,
-    pub(crate) body: Vec<u8>,
+    pub(crate) body: TransportBody,
     pub(crate) final_url: String,
     pub(crate) version: HttpVersion,
     pub(crate) tls_alpn: Option<String>,
@@ -50,12 +61,28 @@ pub(crate) async fn send_request_auto(
     method: &str,
     url: &url::Url,
     headers: Vec<(String, String)>,
-    body: Option<Vec<u8>>,
+    body: Body,
     proxy: Option<&str>,
+    stream_response: bool,
 ) -> Result<TransportResponse> {
     if url.scheme() == "http" {
-        return send_request_h1(connector, method, url, headers, body, proxy).await;
+        return send_request_h1(connector, method, url, headers, body, proxy, stream_response)
+            .await;
     }
+
+    // To support the H1 fallback on ALPN mismatch we need to retain the
+    // body. Streaming bodies are one-shot, so eagerly materialise them.
+    // Callers who want hard streaming over H2 should pin `.http2()`.
+    let (h2_body, fallback_buf): (Body, Option<Bytes>) = if body.is_stream() {
+        let buf = materialise_stream_body(body).await?;
+        (Body::from(buf.clone()), Some(buf))
+    } else {
+        match body {
+            Body::Empty => (Body::Empty, None),
+            Body::Bytes(b) => (Body::Bytes(b.clone()), Some(b)),
+            Body::Stream { .. } => unreachable!("stream branch handled above"),
+        }
+    };
 
     match send_request_h2(
         pool,
@@ -64,17 +91,54 @@ pub(crate) async fn send_request_auto(
         method,
         url,
         headers.clone(),
-        body.clone(),
+        h2_body,
         proxy,
+        stream_response,
     )
     .await
     {
         Ok(resp) => Ok(resp),
         Err(e) if is_h2_alpn_mismatch(&e) => {
             tracing::debug!(error = %e, "H2 ALPN mismatch, falling back to HTTP/1.1");
-            send_request_h1(connector, method, url, headers, body, proxy).await
+            let fallback_body = match fallback_buf {
+                Some(buf) => Body::from(buf),
+                None => Body::Empty,
+            };
+            send_request_h1(
+                connector,
+                method,
+                url,
+                headers,
+                fallback_body,
+                proxy,
+                stream_response,
+            )
+            .await
         }
         Err(e) => Err(e),
+    }
+}
+
+/// Drain a streaming body into a single `Bytes` buffer. Used when the
+/// transport can't accept streams (H3) or needs to retain the body for
+/// a fallback retry.
+async fn materialise_stream_body(body: Body) -> Result<Bytes> {
+    match body {
+        Body::Empty => Ok(Bytes::new()),
+        Body::Bytes(b) => Ok(b),
+        Body::Stream { mut stream, .. } => {
+            let mut buf: Vec<u8> = Vec::new();
+            while let Some(chunk) = stream.next().await {
+                let chunk = chunk.map_err(Error::Io)?;
+                buf.extend_from_slice(&chunk);
+                if buf.len() > MAX_H1_BODY_BYTES {
+                    return Err(Error::Http(format!(
+                        "streaming request body exceeded {MAX_H1_BODY_BYTES} bytes"
+                    )));
+                }
+            }
+            Ok(Bytes::from(buf))
+        }
     }
 }
 
@@ -92,8 +156,9 @@ pub(crate) async fn send_request_h2(
     method: &str,
     url: &url::Url,
     headers: Vec<(String, String)>,
-    body: Option<Vec<u8>>,
+    body: Body,
     proxy: Option<&str>,
+    stream_response: bool,
 ) -> Result<TransportResponse> {
     if url.scheme() != "https" {
         return Err(Error::Config("HTTP/2 requires an https:// URL".into()));
@@ -120,21 +185,37 @@ pub(crate) async fn send_request_h2(
             }
         },
         path: format!("{path}{query}"),
+        protocol: None,
     };
 
-    let body_bytes = body.map(bytes::Bytes::from);
+    // Translate Body → h2 request body representation.
+    let h2_req_body = body_to_h2_request(body);
 
     // Send via pool (reuses connection or creates new one).
     let (resp, tls) = leyline_pool::send_request(
-        pool, connector, h2_config, pseudo, headers, body_bytes, proxy,
+        pool,
+        connector,
+        h2_config,
+        pseudo,
+        headers,
+        h2_req_body,
+        proxy,
+        stream_response,
     )
     .await
     .map_err(|e| Error::Http(e))?;
 
+    let transport_body = match resp.body {
+        leyline_h2::client::ResponseBody::Buffered(b) => TransportBody::Buffered(b),
+        leyline_h2::client::ResponseBody::Streaming(rx) => {
+            TransportBody::Streaming(BodyStream::new(rx))
+        }
+    };
+
     Ok(TransportResponse {
         status: resp.status,
         headers: resp.headers,
-        body: resp.body,
+        body: transport_body,
         final_url: url.to_string(),
         version: HttpVersion::Http2,
         tls_alpn: Some("h2".to_string()),
@@ -142,6 +223,21 @@ pub(crate) async fn send_request_h2(
         tls_version: tls.version,
         tls_cipher: tls.cipher,
     })
+}
+
+/// Translate a [`Body`] into the h2-crate request body shape.
+fn body_to_h2_request(body: Body) -> leyline_h2::client::RequestBody {
+    match body {
+        Body::Empty => leyline_h2::client::RequestBody::None,
+        Body::Bytes(b) => leyline_h2::client::RequestBody::Buffered(b),
+        Body::Stream {
+            stream,
+            length_hint,
+        } => leyline_h2::client::RequestBody::Streaming {
+            stream,
+            length_hint,
+        },
+    }
 }
 
 /// Send an HTTP/1.1 request over plaintext TCP or TLS.
@@ -160,8 +256,9 @@ pub(crate) async fn send_request_h1(
     method: &str,
     url: &url::Url,
     headers: Vec<(String, String)>,
-    body: Option<Vec<u8>>,
+    body: Body,
     proxy: Option<&str>,
+    _stream_response: bool,
 ) -> Result<TransportResponse> {
     let host = url
         .host_str()
@@ -170,6 +267,9 @@ pub(crate) async fn send_request_h1(
         .port_or_known_default()
         .ok_or_else(|| Error::Config(format!("no default port for scheme {}", url.scheme())))?;
 
+    // Streaming responses over H1 are not yet wired through — the body
+    // is buffered, then wrapped in a single-chunk stream by the core on
+    // `into_stream()`. Streaming requests are handled here directly.
     match url.scheme() {
         "https" => {
             let tls_stream = connector
@@ -262,8 +362,27 @@ pub(crate) async fn send_request_h3(
     method: &str,
     url: &url::Url,
     headers: Vec<(String, String)>,
-    body: Option<Vec<u8>>,
+    body: Body,
+    stream_response: bool,
 ) -> Result<TransportResponse> {
+    // H3 streaming (request or response) is deferred — quiche-level
+    // pump/pull plumbing is a separate piece of work. Reject the
+    // request so callers see a clear error, not silent buffering.
+    if body.is_stream() {
+        return Err(Error::Config(
+            "HTTP/3 streaming request bodies are not yet implemented; use .http2() or buffer \
+             the body before sending"
+                .into(),
+        ));
+    }
+    if stream_response {
+        return Err(Error::Config(
+            "HTTP/3 streaming response bodies are not yet implemented; use .http2() or drop \
+             .stream()"
+                .into(),
+        ));
+    }
+
     let host = url
         .host_str()
         .ok_or_else(|| Error::Config("no host in URL".into()))?;
@@ -272,7 +391,11 @@ pub(crate) async fn send_request_h3(
     let query = url.query().map(|q| format!("?{q}")).unwrap_or_default();
     let full_path = format!("{path}{query}");
 
-    let body_bytes = body.map(bytes::Bytes::from);
+    let body_bytes = match body {
+        Body::Empty => None,
+        Body::Bytes(b) => Some(b),
+        Body::Stream { .. } => unreachable!("rejected above"),
+    };
 
     let resp = leyline_quic::H3Connection::request(
         h3_config, profile, method, host, port, &full_path, headers, body_bytes,
@@ -283,7 +406,7 @@ pub(crate) async fn send_request_h3(
     Ok(TransportResponse {
         status: resp.status,
         headers: resp.headers,
-        body: resp.body,
+        body: TransportBody::Buffered(resp.body),
         final_url: url.to_string(),
         version: HttpVersion::Http3,
         tls_alpn: Some("h3".to_string()),
@@ -307,7 +430,7 @@ async fn send_h1_on_stream<S>(
     method: &str,
     url: &url::Url,
     mut headers: Vec<(String, String)>,
-    body: Option<Vec<u8>>,
+    body: Body,
     target: RequestTarget,
 ) -> Result<TransportResponse>
 where
@@ -329,16 +452,68 @@ where
     if !contains_header(&headers, "host") {
         headers.insert(0, ("Host".into(), authority));
     }
-    if body.is_some() && !contains_header(&headers, "content-length") {
-        headers.push((
-            "Content-Length".into(),
-            body.as_ref().map_or(0, |b| b.len()).to_string(),
-        ));
+
+    // Pick framing strategy: buffered body → Content-Length (including 0);
+    // length-known stream → Content-Length; length-unknown stream →
+    // Transfer-Encoding: chunked (RFC 9112 §7.1). Callers that already
+    // set either header are respected and we trust them.
+    let has_cl = contains_header(&headers, "content-length");
+    let has_te = contains_header(&headers, "transfer-encoding");
+
+    enum Framing {
+        None,
+        Buffered(Bytes),
+        FixedStream {
+            stream: std::pin::Pin<
+                Box<dyn futures_util::Stream<Item = std::io::Result<Bytes>> + Send + 'static>,
+            >,
+            length: u64,
+        },
+        ChunkedStream {
+            stream: std::pin::Pin<
+                Box<dyn futures_util::Stream<Item = std::io::Result<Bytes>> + Send + 'static>,
+            >,
+        },
     }
+
+    let framing = match body {
+        Body::Empty => {
+            if method_typically_has_body(method) && !has_cl && !has_te {
+                headers.push(("Content-Length".into(), "0".into()));
+            }
+            Framing::None
+        }
+        Body::Bytes(b) => {
+            if !has_cl && !has_te {
+                headers.push(("Content-Length".into(), b.len().to_string()));
+            }
+            Framing::Buffered(b)
+        }
+        Body::Stream {
+            stream,
+            length_hint: Some(length),
+        } => {
+            if !has_cl && !has_te {
+                headers.push(("Content-Length".into(), length.to_string()));
+            }
+            Framing::FixedStream { stream, length }
+        }
+        Body::Stream {
+            stream,
+            length_hint: None,
+        } => {
+            if !has_te {
+                headers.push(("Transfer-Encoding".into(), "chunked".into()));
+            }
+            Framing::ChunkedStream { stream }
+        }
+    };
+
     if !contains_header(&headers, "connection") {
         headers.push(("Connection".into(), "keep-alive".into()));
     }
 
+    // Write request head first.
     let mut req = Vec::new();
     req.extend_from_slice(format!("{method} {request_target} HTTP/1.1\r\n").as_bytes());
     for (name, value) in &headers {
@@ -349,18 +524,59 @@ where
         req.extend_from_slice(b"\r\n");
     }
     req.extend_from_slice(b"\r\n");
-    if let Some(body) = &body {
-        req.extend_from_slice(body);
+    stream.write_all(&req).await?;
+
+    // Body.
+    match framing {
+        Framing::None => {}
+        Framing::Buffered(b) => {
+            stream.write_all(&b).await?;
+        }
+        Framing::FixedStream {
+            stream: mut body_stream,
+            length,
+        } => {
+            let mut sent: u64 = 0;
+            while let Some(chunk) = body_stream.next().await {
+                let chunk: Bytes = chunk.map_err(Error::Io)?;
+                if sent + chunk.len() as u64 > length {
+                    return Err(Error::Http(
+                        "streaming body exceeded declared content-length".into(),
+                    ));
+                }
+                stream.write_all(&chunk).await?;
+                sent += chunk.len() as u64;
+            }
+            if sent != length {
+                return Err(Error::Http(format!(
+                    "streaming body ended before declared content-length ({sent}/{length})"
+                )));
+            }
+        }
+        Framing::ChunkedStream {
+            stream: mut body_stream,
+        } => {
+            while let Some(chunk) = body_stream.next().await {
+                let chunk: Bytes = chunk.map_err(Error::Io)?;
+                if chunk.is_empty() {
+                    continue;
+                }
+                let hdr = format!("{:X}\r\n", chunk.len());
+                stream.write_all(hdr.as_bytes()).await?;
+                stream.write_all(&chunk).await?;
+                stream.write_all(b"\r\n").await?;
+            }
+            stream.write_all(b"0\r\n\r\n").await?;
+        }
     }
 
-    stream.write_all(&req).await?;
     stream.flush().await?;
 
     let (status, resp_headers, body) = read_h1_response(&mut stream, method).await?;
     Ok(TransportResponse {
         status,
         headers: resp_headers,
-        body,
+        body: TransportBody::Buffered(body),
         final_url: url.to_string(),
         version: HttpVersion::Http1_1,
         tls_alpn: None,
@@ -370,6 +586,13 @@ where
         tls_version: None,
         tls_cipher: None,
     })
+}
+
+fn method_typically_has_body(method: &str) -> bool {
+    matches!(
+        method.to_ascii_uppercase().as_str(),
+        "POST" | "PUT" | "PATCH"
+    )
 }
 
 async fn read_h1_response<S>(

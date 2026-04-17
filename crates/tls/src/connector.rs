@@ -1,6 +1,5 @@
 //! TLS connector that creates fingerprinted connections from browser profiles.
 
-use std::net::ToSocketAddrs;
 use std::sync::{Arc, Mutex};
 
 use boring::ssl::{NameType, SslConnector, SslSession, SslSessionCacheMode, SslVerifyMode};
@@ -12,6 +11,8 @@ use leyline_tcp::TcpProfile;
 
 use crate::builder::{apply_profile, TlsMinVersion};
 use crate::error::TlsError;
+use crate::happy_eyeballs::{happy_eyeballs_connect, HappyEyeballsConfig};
+use crate::resolver::{Resolver, SystemResolver};
 use crate::TlsStream;
 
 /// Creates TLS connections matching a browser's fingerprint.
@@ -41,6 +42,12 @@ pub struct FingerprintConnector {
     /// `-k/--insecure` flag and explicit test fixtures should turn
     /// this on.
     accept_invalid_certs: bool,
+    /// DNS resolver for direct connections. Defaults to
+    /// [`SystemResolver`] which wraps blocking `getaddrinfo(3)` in
+    /// [`tokio::task::spawn_blocking`].
+    resolver: Arc<dyn Resolver>,
+    /// Happy Eyeballs (RFC 8305) tunables for the dual-stack race.
+    happy_eyeballs: HappyEyeballsConfig,
 }
 
 impl FingerprintConnector {
@@ -89,6 +96,8 @@ impl FingerprintConnector {
             ech_grease_payload_len: tls.ech_grease_payload_len,
             session_cache,
             accept_invalid_certs: false,
+            resolver: Arc::new(SystemResolver),
+            happy_eyeballs: HappyEyeballsConfig::default(),
         })
     }
 
@@ -97,6 +106,25 @@ impl FingerprintConnector {
     /// controlled test fixtures.
     pub fn set_accept_invalid_certs(&mut self, accept: bool) {
         self.accept_invalid_certs = accept;
+    }
+
+    /// Swap the DNS resolver. Takes effect on the next direct
+    /// connection; proxied paths (HTTP CONNECT / SOCKS5) never call
+    /// the resolver because address lookup is delegated to the proxy.
+    ///
+    /// Supply an [`Arc<dyn Resolver>`] so the same resolver can be
+    /// shared across many connectors (or cloned into a pool).
+    pub fn with_resolver(mut self, resolver: Arc<dyn Resolver>) -> Self {
+        self.resolver = resolver;
+        self
+    }
+
+    /// Override the Happy Eyeballs (RFC 8305) stagger and attempt
+    /// cap. Defaults to 250 ms / 8 attempts as specified in
+    /// [`HappyEyeballsConfig::default`].
+    pub fn with_happy_eyeballs_config(mut self, config: HappyEyeballsConfig) -> Self {
+        self.happy_eyeballs = config;
+        self
     }
 
     /// Connect to a host:port, optionally through a proxy.
@@ -126,8 +154,8 @@ impl FingerprintConnector {
         port: u16,
         proxy: Option<&str>,
     ) -> Result<TlsStream, TlsError> {
-        // For now, reuse the same connect path — the ALPN override
-        // happens in the per-connection SSL configuration below.
+        // ALPN override happens in the per-connection SSL configuration
+        // reached via connect_direct_h1 / connect_proxied_h1.
         if let Some(proxy_url) = proxy {
             return self.connect_proxied_h1(host, port, proxy_url).await;
         }
@@ -163,50 +191,34 @@ impl FingerprintConnector {
         port: u16,
         alpn_override: Option<&[u8]>,
     ) -> Result<TlsStream, TlsError> {
-        // Resolve DNS.
-        let addr_str = format!("{}:{}", host, port);
-        let sock_addr = tokio::task::spawn_blocking(move || {
-            addr_str
-                .to_socket_addrs()
-                .map_err(TlsError::Dns)?
-                .next()
-                .ok_or_else(|| {
-                    TlsError::Dns(std::io::Error::new(
-                        std::io::ErrorKind::NotFound,
-                        "no addresses resolved",
-                    ))
-                })
-        })
+        // Resolve host. The resolver is pluggable — default
+        // [`SystemResolver`] runs blocking `getaddrinfo(3)` off-thread;
+        // tests and /etc/hosts-style overrides can substitute their own.
+        let addrs = self
+            .resolver
+            .resolve(host, port)
+            .await
+            .map_err(TlsError::Dns)?;
+
+        if addrs.is_empty() {
+            return Err(TlsError::Dns(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "no addresses resolved",
+            )));
+        }
+
+        // Race TCP connects across resolved addresses with RFC 8305
+        // staggering so IPv6-broken networks still reach IPv4 hosts
+        // within one `resolve_delay`. `TcpProfile` is `Copy`, so each
+        // attempt gets its own value without a heap clone.
+        let tcp_profile = self.tcp_profile;
+        let (tcp_stream, _addr) = happy_eyeballs_connect(
+            addrs,
+            self.happy_eyeballs,
+            move |sock_addr| async move { connect_one(sock_addr, &tcp_profile).await },
+        )
         .await
-        .map_err(|e| TlsError::Dns(std::io::Error::other(e)))??;
-
-        // Create socket via socket2 for TCP fingerprinting.
-        let domain = match sock_addr {
-            std::net::SocketAddr::V4(_) => socket2::Domain::IPV4,
-            std::net::SocketAddr::V6(_) => socket2::Domain::IPV6,
-        };
-        let socket =
-            socket2::Socket::new(domain, socket2::Type::STREAM, Some(socket2::Protocol::TCP))
-                .map_err(TlsError::TcpConnect)?;
-
-        // Apply TCP fingerprint before connect.
-        self.tcp_profile.apply(&socket);
-        socket.set_nonblocking(true).map_err(TlsError::TcpConnect)?;
-
-        // TCP connect.
-        match socket.connect(&sock_addr.into()) {
-            Ok(()) => {}
-            Err(e) if e.raw_os_error() == Some(libc::EINPROGRESS) => {}
-            Err(e) => return Err(TlsError::TcpConnect(e)),
-        }
-        let std_stream: std::net::TcpStream = socket.into();
-        let tcp_stream = TcpStream::from_std(std_stream).map_err(TlsError::TcpConnect)?;
-
-        // Wait for TCP connect to complete.
-        tcp_stream.writable().await.map_err(TlsError::TcpConnect)?;
-        if let Some(e) = tcp_stream.take_error().map_err(TlsError::TcpConnect)? {
-            return Err(TlsError::TcpConnect(e));
-        }
+        .map_err(TlsError::TcpConnect)?;
 
         // TLS handshake with all per-connection fingerprint settings.
         self.tls_handshake(tcp_stream, host, alpn_override.is_none())
@@ -582,6 +594,40 @@ impl FingerprintConnector {
         // TLS handshake with full fingerprint settings.
         self.tls_handshake(tcp_stream, host, include_alps).await
     }
+}
+
+/// Build a fingerprinted TCP connection to a single resolved address.
+///
+/// Extracted so [`happy_eyeballs_connect`] can invoke it per candidate
+/// without cloning the whole [`FingerprintConnector`]. The TCP profile
+/// is applied *before* `connect` so SYN options (MSS, window scale,
+/// TFO, …) match the browser fingerprint.
+async fn connect_one(
+    sock_addr: std::net::SocketAddr,
+    tcp_profile: &TcpProfile,
+) -> Result<TcpStream, std::io::Error> {
+    let domain = match sock_addr {
+        std::net::SocketAddr::V4(_) => socket2::Domain::IPV4,
+        std::net::SocketAddr::V6(_) => socket2::Domain::IPV6,
+    };
+    let socket = socket2::Socket::new(domain, socket2::Type::STREAM, Some(socket2::Protocol::TCP))?;
+    tcp_profile.apply(&socket);
+    socket.set_nonblocking(true)?;
+
+    match socket.connect(&sock_addr.into()) {
+        Ok(()) => {}
+        Err(e) if e.raw_os_error() == Some(libc::EINPROGRESS) => {}
+        Err(e) => return Err(e),
+    }
+    let std_stream: std::net::TcpStream = socket.into();
+    let tcp_stream = TcpStream::from_std(std_stream)?;
+
+    // Wait for the non-blocking connect to complete (or error out).
+    tcp_stream.writable().await?;
+    if let Some(e) = tcp_stream.take_error()? {
+        return Err(e);
+    }
+    Ok(tcp_stream)
 }
 
 /// Simple base64 encoding for proxy auth.

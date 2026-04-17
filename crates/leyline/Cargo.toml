@@ -26,7 +26,9 @@ leyline-profile = { path = "../profile" }
 leyline-h2 = { path = "../h2" }
 leyline-quic = { path = "../quic" }
 bytes = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tokio-util = { version = "0.7", features = ["io"] }
+futures-util = "0.3"
 serde_json = { workspace = true }
 
 [lints]

@@ -96,6 +96,14 @@ char *leyline_response_version(const LeylineResponse *response);    /* free with
 char *leyline_response_tls_alpn(const LeylineResponse *response);   /* free, NULL if unavailable */
 char *leyline_response_text(const LeylineResponse *response);       /* free with leyline_free_string */
 size_t leyline_response_body_len(const LeylineResponse *response);
+
+/* Copy up to buf_len bytes of the body into caller-owned buf starting at
+ * offset. Returns number of bytes copied. Pair with leyline_response_body_len
+ * to size the buffer; safe for binary payloads (text accessor is lossy). */
+size_t leyline_response_body_copy(const LeylineResponse *response,
+                                  size_t offset,
+                                  uint8_t *buf,
+                                  size_t buf_len);
 char *leyline_response_url(const LeylineResponse *response);        /* free with leyline_free_string */
 char *leyline_response_header(const LeylineResponse *response, const char *name); /* free */
 char *leyline_response_headers_json(const LeylineResponse *response);  /* free, object; duplicates become arrays */

@@ -1,0 +1,71 @@
+Leyline
+Copyright 2025-2026 Thomas Gardiner and Leyline contributors.
+
+This product includes software developed by third parties. Each upstream
+component retains its own license; the grants below are informative.
+
+================================================================================
+Vendored TLS stack (`vendor/leyline-ssl/`, `vendor/leyline-ssl-sys/`,
+`vendor/tokio-leyline-ssl/`)
+================================================================================
+
+The vendored BoringSSL Rust bindings are derived from `0x676e67/boring2`
+(https://github.com/0x676e67/boring2), which is itself a fork of Cloudflare's
+`boring` crate (https://github.com/cloudflare/boring).
+
+The TLS-extension work that makes browser fingerprinting possible —
+in particular MLKEM768 key agreement, ALPS, deterministic GREASE wiring,
+and cipher/extension ordering hooks — originates in `boring2`.
+
+Licenses: Apache-2.0 and MIT, dual-licensed per upstream. License files
+preserved in `vendor/leyline-ssl/LICENSE`, `vendor/leyline-ssl-sys/LICENSE-MIT`,
+and `vendor/tokio-leyline-ssl/LICENSE-{APACHE,MIT}`.
+
+Original authors (non-exhaustive):
+- Alex Crichton <alex@alexcrichton.com>
+- Steven Fackler <sfackler@gmail.com>
+- Ivan Nikulin <ifaaan@gmail.com>
+- Jack Lloyd
+
+================================================================================
+Vendored BoringSSL (`vendor/leyline-ssl-sys/deps/boringssl/`)
+================================================================================
+
+BoringSSL is a fork of OpenSSL maintained by Google. Large parts fall under
+OpenSSL licensing; files that are wholly new carry a Google copyright and an
+ISC license. The full text is preserved at
+`vendor/leyline-ssl-sys/deps/boringssl/LICENSE`.
+
+Third-party components inside BoringSSL retain their own licenses, notably:
+- `src/third_party/fiat/` (MIT)
+- `src/third_party/googletest/` (BSD-3-Clause) — used only by upstream tests
+
+================================================================================
+Vendored BoringSSL patches (`vendor/leyline-ssl-sys/patches/`)
+================================================================================
+
+- `boring-pq.patch` — post-quantum key agreements (MLKEM768, Kyber draft
+  codepoints). Authored by Bas Westerbaan <bas@cloudflare.com>, Cloudflare,
+  commit `b98d803dbecc9d6848d8cbffa62b5c943fb75f70`, 2022-07-22.
+- `underscore-wildcards.patch` — permit underscores in DNS wildcards under
+  `X509_CHECK_FLAG_UNDERSCORE_WILDCARDS`. Cloudflare BoringSSL branch
+  (`cloudflare:boringssl:underscore-wildcards`).
+- `boringssl-loongarch.patch` — LoongArch architecture support.
+  Authored by WANG Rui <wangrui@loongson.cn>, commit
+  `d39506c373dc03b1bfab2c01abc2232e36d13ed6`, 2025-04-27.
+
+================================================================================
+Runtime dependencies pulled from crates.io
+================================================================================
+
+Full third-party license inventory is enforced by `cargo deny` (see
+`deny.toml`) and rendered by `cargo about generate` if you want a
+per-dependency breakdown.
+
+================================================================================
+HTTP/3 transport
+================================================================================
+
+HTTP/3 and QUIC are provided by `quiche`
+(https://github.com/cloudflare/quiche), Copyright Cloudflare, Inc.,
+licensed under BSD-2-Clause.
