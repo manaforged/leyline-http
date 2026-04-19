@@ -35,11 +35,8 @@ async fn chrome_pq_key_shares_use_distinct_x25519_ephemerals() {
         let mut tmp = [0u8; 2048];
         // Read until we have the full TLS record, or the client gives up.
         loop {
-            match tokio::time::timeout(
-                std::time::Duration::from_millis(750),
-                stream.read(&mut tmp),
-            )
-            .await
+            match tokio::time::timeout(std::time::Duration::from_millis(750), stream.read(&mut tmp))
+                .await
             {
                 Ok(Ok(0)) | Err(_) => break,
                 Ok(Ok(n)) => {
@@ -106,12 +103,14 @@ async fn chrome_pq_key_shares_use_distinct_x25519_ephemerals() {
     let hybrid_head = &hybrid[..X25519_PUB_LEN];
     let hybrid_tail = &hybrid[hybrid.len() - X25519_PUB_LEN..];
     assert_ne!(
-        hybrid_head, &x25519[..],
+        hybrid_head,
+        &x25519[..],
         "standalone X25519 ephemeral matches the head of the X25519MLKEM768 \
          share — utls#342 ephemeral reuse distinguisher"
     );
     assert_ne!(
-        hybrid_tail, &x25519[..],
+        hybrid_tail,
+        &x25519[..],
         "standalone X25519 ephemeral matches the tail of the X25519MLKEM768 \
          share — utls#342 ephemeral reuse distinguisher"
     );

@@ -10,8 +10,8 @@
 //! profile in the registry produces exactly the fingerprint its TOML
 //! claims. If ANY of these assertions fail, we're shipping a lie.
 
+use leyline::profile::{ALL_BROWSERS, PROFILE_COUNT};
 use leyline::{Browser, Platform};
-use leyline_profile::{ALL_BROWSERS, PROFILE_COUNT};
 use serde_json::Value;
 
 const PEET_URL: &str = "https://tls.peet.ws/api/all";
@@ -20,13 +20,13 @@ const PEET_URL: &str = "https://tls.peet.ws/api/all";
 
 #[test]
 fn profile_count_matches_constant() {
-    let reg = leyline_profile::ProfileRegistry::builtin();
+    let reg = leyline::profile::ProfileRegistry::builtin();
     assert_eq!(reg.len(), PROFILE_COUNT);
 }
 
 #[test]
 fn every_browser_variant_has_profile() {
-    let reg = leyline_profile::ProfileRegistry::builtin();
+    let reg = leyline::profile::ProfileRegistry::builtin();
     for browser in ALL_BROWSERS {
         assert!(
             reg.get_browser(browser).is_some(),
@@ -37,7 +37,7 @@ fn every_browser_variant_has_profile() {
 
 #[test]
 fn every_profile_has_fingerprint_expectation() {
-    let reg = leyline_profile::ProfileRegistry::builtin();
+    let reg = leyline::profile::ProfileRegistry::builtin();
     for browser in ALL_BROWSERS {
         let profile = reg.get_browser(browser).unwrap();
         let has_ja4 = profile.expected_ja4().is_some();
@@ -51,12 +51,12 @@ fn every_profile_has_fingerprint_expectation() {
 
 #[test]
 fn h2_fingerprints_match_toml_expectations() {
-    let reg = leyline_profile::ProfileRegistry::builtin();
+    let reg = leyline::profile::ProfileRegistry::builtin();
     let mut checked = 0;
     for browser in ALL_BROWSERS {
         let profile = reg.get_browser(browser).unwrap();
         if let Some(expected) = profile.expected_h2_fingerprint() {
-            let h2 = leyline_h2::H2Config::from_profile(&profile.h2);
+            let h2 = leyline::h2::H2Config::from_profile(&profile.h2);
             let actual = h2.akamai_fingerprint();
             assert_eq!(actual, expected, "H2 mismatch for {browser}");
             checked += 1;
@@ -172,15 +172,15 @@ async fn request_builder_timeout_overrides_session_default() {
 
 #[test]
 fn session_shortcuts_work() {
-    let chrome = leyline::Session::chrome();
+    let chrome = leyline::Session::chrome_latest();
     assert!(chrome.is_ok());
     assert_eq!(chrome.unwrap().browser(), Browser::Chrome147);
 
-    let firefox = leyline::Session::firefox();
+    let firefox = leyline::Session::firefox_latest();
     assert!(firefox.is_ok());
     assert_eq!(firefox.unwrap().browser(), Browser::Firefox148);
 
-    let safari = leyline::Session::safari();
+    let safari = leyline::Session::safari_latest();
     assert!(safari.is_ok());
     assert_eq!(safari.unwrap().browser(), Browser::Safari18);
 }
@@ -435,11 +435,11 @@ fn denormalize_peet_quotes(raw: &str) -> String {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_ja4_exact_match_chrome147() {
-    let session = leyline::Session::chrome().unwrap();
+    let session = leyline::Session::chrome_latest().unwrap();
     let json = peet(&session).await;
     let ja4 = json["tls"]["ja4"].as_str().expect("no tls.ja4");
 
-    let reg = leyline_profile::ProfileRegistry::builtin();
+    let reg = leyline::profile::ProfileRegistry::builtin();
     let profile = reg.get_browser(Browser::Chrome147).unwrap();
     let expected = profile.expected_ja4().expect("Chrome 147 TOML missing JA4");
 
@@ -457,7 +457,7 @@ async fn live_ja4_exact_match_chrome146() {
     let json = peet(&session).await;
     let ja4 = json["tls"]["ja4"].as_str().expect("no tls.ja4");
 
-    let reg = leyline_profile::ProfileRegistry::builtin();
+    let reg = leyline::profile::ProfileRegistry::builtin();
     let profile = reg.get_browser(Browser::Chrome146).unwrap();
     let expected = profile.expected_ja4().expect("Chrome 146 TOML missing JA4");
 
@@ -475,7 +475,7 @@ async fn live_ja4_exact_match_chrome145() {
     let json = peet(&session).await;
     let ja4 = json["tls"]["ja4"].as_str().expect("no tls.ja4");
 
-    let reg = leyline_profile::ProfileRegistry::builtin();
+    let reg = leyline::profile::ProfileRegistry::builtin();
     let profile = reg.get_browser(Browser::Chrome145).unwrap();
     let expected = profile.expected_ja4().expect("Chrome 145 TOML missing JA4");
 
@@ -486,11 +486,11 @@ async fn live_ja4_exact_match_chrome145() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_ja4_exact_match_firefox148() {
-    let session = leyline::Session::firefox().unwrap();
+    let session = leyline::Session::firefox_latest().unwrap();
     let json = peet(&session).await;
     let ja4 = json["tls"]["ja4"].as_str().expect("no tls.ja4");
 
-    let reg = leyline_profile::ProfileRegistry::builtin();
+    let reg = leyline::profile::ProfileRegistry::builtin();
     let profile = reg.get_browser(Browser::Firefox148).unwrap();
     let expected = profile
         .expected_ja4()
@@ -503,11 +503,11 @@ async fn live_ja4_exact_match_firefox148() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_ja4_exact_match_safari18() {
-    let session = leyline::Session::safari().unwrap();
+    let session = leyline::Session::safari_latest().unwrap();
     let json = peet(&session).await;
     let ja4 = json["tls"]["ja4"].as_str().expect("no tls.ja4");
 
-    let reg = leyline_profile::ProfileRegistry::builtin();
+    let reg = leyline::profile::ProfileRegistry::builtin();
     let profile = reg.get_browser(Browser::Safari18).unwrap();
     let expected = profile.expected_ja4().expect("Safari 18 TOML missing JA4");
 
@@ -521,7 +521,7 @@ async fn live_ja4_exact_match_safari18() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_ja4_exact_match_every_profile_with_expectation() {
-    let reg = leyline_profile::ProfileRegistry::builtin();
+    let reg = leyline::profile::ProfileRegistry::builtin();
     let mut checked = 0;
     let mut skipped: Vec<String> = Vec::new();
 
@@ -572,7 +572,7 @@ async fn live_ja4_exact_match_every_profile_with_expectation() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_h2_akamai_every_profile() {
-    let reg = leyline_profile::ProfileRegistry::builtin();
+    let reg = leyline::profile::ProfileRegistry::builtin();
     let mut checked = 0;
 
     for browser in ALL_BROWSERS {
@@ -682,10 +682,10 @@ async fn live_tcp_windows_distinguishable_from_linux() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_chrome147_ciphers_match_profile_order() {
-    let session = leyline::Session::chrome().unwrap();
+    let session = leyline::Session::chrome_latest().unwrap();
     let json = peet(&session).await;
 
-    let reg = leyline_profile::ProfileRegistry::builtin();
+    let reg = leyline::profile::ProfileRegistry::builtin();
     let profile = reg.get_browser(Browser::Chrome147).unwrap();
     let expected_ciphers: Vec<&str> = profile.tls.ciphers.iter().map(|s| s.as_str()).collect();
 
@@ -716,7 +716,7 @@ async fn live_chrome147_ciphers_match_profile_order() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_chrome147_has_alps_extension() {
-    let session = leyline::Session::chrome().unwrap();
+    let session = leyline::Session::chrome_latest().unwrap();
     let json = peet(&session).await;
 
     let extensions = json["tls"]["extensions"]
@@ -739,7 +739,7 @@ async fn live_chrome147_has_alps_extension() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_chrome147_has_cert_compression() {
-    let session = leyline::Session::chrome().unwrap();
+    let session = leyline::Session::chrome_latest().unwrap();
     let json = peet(&session).await;
 
     let extensions = json["tls"]["extensions"]
@@ -858,7 +858,7 @@ async fn live_chrome147_linux_identity_headers() {
 #[ignore = "live: needs network"]
 async fn live_chrome147_pseudo_header_order() {
     // Chrome sends pseudo-headers in the order method, authority, scheme, path.
-    let session = leyline::Session::chrome().unwrap();
+    let session = leyline::Session::chrome_latest().unwrap();
     let json = peet(&session).await;
     let headers = extract_sent_headers(&json);
 
@@ -880,7 +880,7 @@ async fn live_chrome147_pseudo_header_order() {
 #[ignore = "live: needs network"]
 async fn live_firefox148_pseudo_header_order() {
     // Firefox sends pseudo-headers in the order method, path, authority, scheme.
-    let session = leyline::Session::firefox().unwrap();
+    let session = leyline::Session::firefox_latest().unwrap();
     let json = peet(&session).await;
     let headers = extract_sent_headers(&json);
 
@@ -903,7 +903,7 @@ async fn live_firefox148_pseudo_header_order() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_decompression_gzip() {
-    let session = leyline::Session::chrome().unwrap();
+    let session = leyline::Session::chrome_latest().unwrap();
     let resp = session.navigate("https://httpbin.org/gzip").await.unwrap();
     assert_eq!(resp.status(), 200);
     let json: Value = serde_json::from_str(&resp.text()).expect("gzip-decoded body not JSON");
@@ -914,7 +914,7 @@ async fn live_decompression_gzip() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_decompression_brotli() {
-    let session = leyline::Session::chrome().unwrap();
+    let session = leyline::Session::chrome_latest().unwrap();
     let resp = session
         .navigate("https://httpbin.org/brotli")
         .await
@@ -928,7 +928,7 @@ async fn live_decompression_brotli() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_decompression_deflate() {
-    let session = leyline::Session::chrome().unwrap();
+    let session = leyline::Session::chrome_latest().unwrap();
     let resp = session
         .navigate("https://httpbin.org/deflate")
         .await
@@ -944,7 +944,7 @@ async fn live_decompression_deflate() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_cookies_set_then_sent() {
-    let session = leyline::Session::chrome().unwrap();
+    let session = leyline::Session::chrome_latest().unwrap();
     // Set a cookie via Set-Cookie redirect chain.
     let resp1 = session
         .navigate("https://httpbin.org/cookies/set?token=abc123")
@@ -972,7 +972,7 @@ async fn live_cookies_set_then_sent() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_redirect_follows_and_rewrites_url() {
-    let session = leyline::Session::chrome().unwrap();
+    let session = leyline::Session::chrome_latest().unwrap();
     let resp = session
         .navigate("https://httpbin.org/redirect/3")
         .await
@@ -996,7 +996,7 @@ async fn live_redirect_follows_and_rewrites_url() {
 async fn live_redirect_strips_auth_cross_origin() {
     // Set up bearer auth header and redirect to a different host.
     // httpbin doesn't easily cross-host redirect, but we can check same-host preserves.
-    let session = leyline::Session::chrome().unwrap();
+    let session = leyline::Session::chrome_latest().unwrap();
     let resp = session
         .get("https://httpbin.org/redirect-to?url=https://httpbin.org/headers")
         .bearer_auth("secret-token-xyz")
@@ -1021,8 +1021,8 @@ async fn live_redirect_strips_auth_cross_origin() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_h3_cloudflare() {
-    use leyline_quic::{H3Config, H3Connection};
-    let reg = leyline_profile::ProfileRegistry::builtin();
+    use leyline::quic::{H3Config, H3Connection};
+    let reg = leyline::profile::ProfileRegistry::builtin();
     let profile = reg.get_browser(Browser::Chrome147).unwrap();
     let config = H3Config::chrome();
     let resp = H3Connection::request(
@@ -1056,8 +1056,8 @@ async fn live_h3_cloudflare() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_h3_cloudflare_firefox_profile() {
-    use leyline_quic::{H3Config, H3Connection};
-    let reg = leyline_profile::ProfileRegistry::builtin();
+    use leyline::quic::{H3Config, H3Connection};
+    let reg = leyline::profile::ProfileRegistry::builtin();
     let profile = reg.get_browser(Browser::Firefox148).unwrap();
     let config = H3Config::firefox();
     let resp = H3Connection::request(
@@ -1087,8 +1087,8 @@ async fn live_h3_cloudflare_firefox_profile() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_h3_google() {
-    use leyline_quic::{H3Config, H3Connection};
-    let reg = leyline_profile::ProfileRegistry::builtin();
+    use leyline::quic::{H3Config, H3Connection};
+    let reg = leyline::profile::ProfileRegistry::builtin();
     let profile = reg.get_browser(Browser::Chrome147).unwrap();
     let config = H3Config::chrome();
     let resp = H3Connection::request(
@@ -1162,7 +1162,7 @@ async fn live_session_resumption_pre_shared_key() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_h2_connection_reuse() {
-    let session = leyline::Session::chrome().unwrap();
+    let session = leyline::Session::chrome_latest().unwrap();
     let resp1 = session.navigate(PEET_URL).await.unwrap();
     assert_eq!(resp1.status(), 200);
     let resp2 = session.navigate(PEET_URL).await.unwrap();
@@ -1180,7 +1180,7 @@ async fn live_h2_connection_reuse() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_tls_peer_certificate_exposed() {
-    let session = leyline::Session::chrome().unwrap();
+    let session = leyline::Session::chrome_latest().unwrap();
     let resp = session.navigate(PEET_URL).await.unwrap();
     assert_eq!(resp.status(), 200);
     let cert = resp
@@ -1229,7 +1229,7 @@ async fn live_grease_seed_deterministic() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_post_json_body_roundtrip() {
-    let session = leyline::Session::chrome().unwrap();
+    let session = leyline::Session::chrome_latest().unwrap();
     let body = serde_json::json!({"test": "leyline", "n": 42});
     let resp = session
         .post_json("https://httpbin.org/post", &body)
@@ -1245,7 +1245,7 @@ async fn live_post_json_body_roundtrip() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_post_form_body_roundtrip() {
-    let session = leyline::Session::chrome().unwrap();
+    let session = leyline::Session::chrome_latest().unwrap();
     let resp = session
         .post_form(
             "https://httpbin.org/post",
@@ -1338,7 +1338,7 @@ async fn live_socks5_proxy() {
 #[ignore = "live: needs network"]
 async fn live_websocket_echo() {
     // Postman's public echo server echoes text frames verbatim.
-    let session = leyline::Session::chrome().unwrap();
+    let session = leyline::Session::chrome_latest().unwrap();
     let mut ws = session
         .websocket("wss://ws.postman-echo.com/raw")
         .await

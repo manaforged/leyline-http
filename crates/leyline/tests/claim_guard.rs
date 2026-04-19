@@ -61,12 +61,15 @@ fn public_claim_surfaces() -> Vec<PathBuf> {
         "README.md",
         "crates/leyline/Cargo.toml",
         "crates/leyline/src/lib.rs",
-        "crates/core/src/lib.rs",
-        "crates/tls/src/lib.rs",
-        "crates/h2/src/lib.rs",
-        "crates/quic/src/lib.rs",
-        "crates/cookies/src/lib.rs",
-        "crates/audit/src/lib.rs",
+        "crates/leyline/src/audit/mod.rs",
+        "crates/leyline/src/cookies/mod.rs",
+        "crates/leyline/src/core/mod.rs",
+        "crates/leyline/src/h2/mod.rs",
+        "crates/leyline/src/pool/mod.rs",
+        "crates/leyline/src/profile/mod.rs",
+        "crates/leyline/src/quic/mod.rs",
+        "crates/leyline/src/tcp/mod.rs",
+        "crates/leyline/src/tls/mod.rs",
     ]
     .into_iter()
     .map(|path| root.join(path))

@@ -1,0 +1,1008 @@
+//! HTTP/1.1 keep-alive pool entry point.
+//!
+//! Owns the request-serialisation + response-parsing logic shared
+//! between fresh and reused connections. Each successful
+//! request/response exchange ends with a reusability check; reusable
+//! streams are parked back in the pool, everything else is dropped so
+//! the next request starts clean.
+
+use std::borrow::Cow;
+use std::pin::Pin;
+use std::sync::Arc;
+
+use bytes::Bytes;
+use futures_util::StreamExt;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::net::TcpStream;
+
+use crate::tls::FingerprintConnector;
+
+use crate::pool::{make_key, H1Slot, Pool, TlsInfo};
+
+/// Maximum request-line + headers size. Matches the core transport
+/// limit that pre-dated the pool refactor.
+pub const MAX_H1_HEADER_BYTES: usize = 64 * 1024;
+
+/// Maximum body size the H1 pool will accept or send. 100 MiB is the
+/// same cap the core transport enforced before the move.
+pub const MAX_H1_BODY_BYTES: usize = 100 * 1024 * 1024;
+
+/// Marker trait for the two concrete I/O types we hold in the pool:
+/// `TlsStream` over TCP for `https://` and bare `TcpStream` for
+/// `http://`. Kept as a trait object so [`Pool`] can service both
+/// schemes behind a single key.
+pub trait H1Io: AsyncRead + AsyncWrite + Send + Unpin + 'static {}
+impl<T> H1Io for T where T: AsyncRead + AsyncWrite + Send + Unpin + 'static {}
+
+/// Request-target style: origin-form `/path?q=1` for direct
+/// connections, absolute-form `http://host/path?q=1` for plaintext
+/// HTTP proxies. Mirrors the old core-transport enum.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum H1Target {
+    /// `GET /path?q=1 HTTP/1.1`
+    OriginForm,
+    /// `GET http://host/path?q=1 HTTP/1.1`
+    AbsoluteForm,
+}
+
+/// Request body shape accepted by [`send_request_h1_pooled`].
+///
+/// Mirrors the core `Body` enum without depending on it, so the pool
+/// stays agnostic of the caller's body type.
+pub enum H1Body {
+    /// No body.
+    Empty,
+    /// A fully-materialised byte buffer. `Content-Length` is set
+    /// automatically when absent.
+    Buffered(Bytes),
+    /// A streaming body with a known exact content length.
+    /// `Content-Length` is set automatically when absent.
+    FixedStream {
+        /// The stream of body chunks.
+        stream: Pin<Box<dyn futures_util::Stream<Item = std::io::Result<Bytes>> + Send + 'static>>,
+        /// Exact body length in bytes.
+        length: u64,
+    },
+    /// A streaming body with unknown length. Framed as
+    /// `Transfer-Encoding: chunked` when absent.
+    ChunkedStream {
+        /// The stream of body chunks.
+        stream: Pin<Box<dyn futures_util::Stream<Item = std::io::Result<Bytes>> + Send + 'static>>,
+    },
+}
+
+impl H1Body {
+    fn is_stream(&self) -> bool {
+        matches!(
+            self,
+            H1Body::FixedStream { .. } | H1Body::ChunkedStream { .. }
+        )
+    }
+}
+
+/// Buffered response body produced by the H1 pool.
+pub enum H1ResponseBody {
+    /// The fully-drained response body.
+    Buffered(Vec<u8>),
+}
+
+/// Response returned by [`send_request_h1_pooled`].
+pub struct H1Response {
+    /// HTTP status code.
+    pub status: u16,
+    /// Response headers in wire order.
+    pub headers: Vec<(String, String)>,
+    /// Response body. H1 streaming responses are a future extension
+    /// — today every response is fully drained so the connection is
+    /// either reusable or dropped before this function returns.
+    pub body: H1ResponseBody,
+    /// TLS handshake snapshot for the connection that served the
+    /// request, or `None` for plaintext HTTP.
+    pub tls: Option<TlsInfo>,
+}
+
+/// Errors surfaced by [`send_request_h1_pooled`].
+#[derive(Debug, thiserror::Error)]
+pub enum H1PooledError {
+    /// Caller misconfiguration (bad URL, unsupported scheme, …).
+    #[error("{0}")]
+    Config(String),
+    /// TLS handshake failure.
+    #[error("tls: {0}")]
+    Tls(String),
+    /// Plain I/O error during connect, send, or receive.
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    /// Protocol-level error parsing a response (bad status line,
+    /// oversize headers, malformed chunked body, …).
+    #[error("http: {0}")]
+    Http(String),
+}
+
+// thiserror brings the Display/Error impls; nothing else needed.
+
+/// Send an HTTP/1.1 request over a pooled connection, opening a
+/// fresh TCP + TLS handshake on miss.
+///
+/// On a cache hit the owned stream is taken out of the pool via
+/// `Option::take()` (single-checkout semantics — H1 cannot multiplex).
+/// After the response body is fully drained, the stream is reinstated
+/// under the same key when it's still reusable; otherwise it is
+/// dropped.
+///
+/// On any I/O error mid-exchange the stream is dropped and the entry
+/// is invalidated so the next request opens a fresh connection.
+#[tracing::instrument(
+    name = "pool.send_request_h1",
+    level = "debug",
+    skip_all,
+    fields(
+        http.method = method,
+        http.host = host,
+        http.port = port,
+        proxied = proxy.is_some(),
+        pool.hit = tracing::field::Empty,
+    )
+)]
+#[allow(clippy::too_many_arguments)]
+pub async fn send_request_h1_pooled(
+    pool: &Arc<Pool>,
+    connector: &FingerprintConnector,
+    scheme: &str,
+    host: &str,
+    port: u16,
+    method: &str,
+    url: &url::Url,
+    headers: Vec<(String, String)>,
+    body: H1Body,
+    proxy: Option<&str>,
+    target: H1Target,
+) -> Result<H1Response, H1PooledError> {
+    // Wire-shape validation happens BEFORE any TCP connect so an
+    // attacker-controlled header / method / URL never causes a real
+    // network side effect. CWE-93 request-smuggling defence.
+    if !is_valid_token(method) {
+        return Err(H1PooledError::Config(format!(
+            "invalid HTTP method `{method}`: non-token bytes not allowed"
+        )));
+    }
+    for (name, value) in &headers {
+        if !is_valid_token(name) {
+            return Err(H1PooledError::Config(format!(
+                "invalid header name `{name}`: non-token bytes not allowed"
+            )));
+        }
+        if !is_valid_header_value(value) {
+            return Err(H1PooledError::Config(format!(
+                "invalid value for header `{name}`: control characters not allowed"
+            )));
+        }
+    }
+
+    pool.evict_idle();
+
+    let key = make_key(host, port, proxy);
+
+    // Streaming bodies are one-shot — no retry possible. For
+    // buffered bodies we keep a clone in case the pooled attempt
+    // fails before any bytes reach the server and we need a fresh
+    // connection.
+    let body_is_stream = body.is_stream();
+    let retry_buf: Option<Bytes> = match &body {
+        H1Body::Buffered(b) => Some(b.clone()),
+        _ => None,
+    };
+    let mut body = body;
+
+    // Try pooled connection first.
+    if let Some((slot, tls)) = pool.checkout_h1(&key) {
+        let pooled_body = std::mem::replace(&mut body, H1Body::Empty);
+        let mut io = slot.io;
+        match exchange_on_stream(
+            io.as_mut(),
+            method,
+            url,
+            headers.clone(),
+            pooled_body,
+            target,
+        )
+        .await
+        {
+            Ok((resp, reusable)) => {
+                tracing::Span::current().record("pool.hit", true);
+                if reusable {
+                    pool.install_h1(key.clone(), H1Slot { io }, tls.clone(), false);
+                } else {
+                    // Drop `io` — deliberately non-reusable.
+                    pool.invalidate(&key);
+                }
+                return Ok(H1Response {
+                    status: resp.status,
+                    headers: resp.headers,
+                    body: H1ResponseBody::Buffered(resp.body),
+                    tls: tls_for_scheme(scheme, &tls),
+                });
+            }
+            Err(e) => {
+                tracing::debug!(error = %e, "pooled H1 stream failed, opening fresh");
+                pool.invalidate(&key);
+                if body_is_stream {
+                    return Err(e);
+                }
+                if let Some(buf) = &retry_buf {
+                    body = H1Body::Buffered(buf.clone());
+                }
+            }
+        }
+    }
+    tracing::Span::current().record("pool.hit", false);
+
+    // Miss — fresh connection.
+    let (io, tls): (Box<dyn H1Io>, TlsInfo) =
+        open_new(connector, scheme, host, port, proxy).await?;
+
+    let mut slot = H1Slot { io };
+    let result = exchange_on_stream(slot.io.as_mut(), method, url, headers, body, target).await;
+
+    match result {
+        Ok((resp, reusable)) => {
+            if reusable {
+                pool.install_h1(key, slot, tls.clone(), true);
+            }
+            // If not reusable, drop the slot so it closes cleanly.
+            Ok(H1Response {
+                status: resp.status,
+                headers: resp.headers,
+                body: H1ResponseBody::Buffered(resp.body),
+                tls: tls_for_scheme(scheme, &tls),
+            })
+        }
+        Err(e) => Err(e),
+    }
+}
+
+fn tls_for_scheme(scheme: &str, tls: &TlsInfo) -> Option<TlsInfo> {
+    if scheme == "https" {
+        Some(tls.clone())
+    } else {
+        None
+    }
+}
+
+/// Open a fresh TCP (+ optional TLS) stream for the given destination
+/// and return it as a boxed `H1Io` alongside the TLS snapshot.
+async fn open_new(
+    connector: &FingerprintConnector,
+    scheme: &str,
+    host: &str,
+    port: u16,
+    proxy: Option<&str>,
+) -> Result<(Box<dyn H1Io>, TlsInfo), H1PooledError> {
+    match scheme {
+        "https" => {
+            let tls_stream = connector
+                .connect_h1(host, port, proxy)
+                .await
+                .map_err(|e| H1PooledError::Tls(e.to_string()))?;
+            let tls = TlsInfo {
+                peer_cert_der: tls_stream.peer_cert_der.clone(),
+                version: tls_stream.tls_version.clone(),
+                cipher: tls_stream.tls_cipher.clone(),
+            };
+            let io: Box<dyn H1Io> = Box::new(tls_stream.stream);
+            Ok((io, tls))
+        }
+        "http" => {
+            let stream = if let Some(proxy_url) = proxy {
+                let parsed = url::Url::parse(proxy_url)
+                    .map_err(|e| H1PooledError::Config(format!("invalid proxy URL: {e}")))?;
+                if parsed.scheme() != "http" {
+                    return Err(H1PooledError::Config(
+                        "plaintext HTTP currently supports http:// proxies only".into(),
+                    ));
+                }
+                let proxy_host = parsed
+                    .host_str()
+                    .ok_or_else(|| H1PooledError::Config("proxy has no host".into()))?;
+                // `port()` returns None for a scheme's default port, so
+                // `http://host:80` would silently resolve to 8080. See
+                // `leyline-tls::proxy::http::connect` for the same fix.
+                let proxy_port = parsed.port_or_known_default().unwrap_or(8080);
+                TcpStream::connect((proxy_host, proxy_port)).await?
+            } else {
+                TcpStream::connect((host, port)).await?
+            };
+            let io: Box<dyn H1Io> = Box::new(stream);
+            Ok((io, TlsInfo::default()))
+        }
+        other => Err(H1PooledError::Config(format!(
+            "unsupported URL scheme for HTTP/1.1: {other}"
+        ))),
+    }
+}
+
+/// Wire-level response carried back by the exchange helper.
+struct WireResponse {
+    status: u16,
+    headers: Vec<(String, String)>,
+    body: Vec<u8>,
+}
+
+/// Run a single HTTP/1.1 request/response exchange on `stream`.
+/// Returns the parsed response plus a `reusable` flag telling the
+/// caller whether the stream may be reinstated in the pool.
+async fn exchange_on_stream(
+    stream: &mut dyn H1Io,
+    method: &str,
+    url: &url::Url,
+    mut headers: Vec<(String, String)>,
+    body: H1Body,
+    target: H1Target,
+) -> Result<(WireResponse, bool), H1PooledError> {
+    // ─── Wire-shape validation (CWE-93, request smuggling) ──────────
+    //
+    // Every caller-supplied byte that lands on the keep-alive socket
+    // must be rejected for CR/LF/NUL before we serialise it. A
+    // single `\r\n` in a header value or method splits the request
+    // and lets an attacker smuggle a second request into the reused
+    // pool connection.
+    if !is_valid_token(method) {
+        return Err(H1PooledError::Config(format!(
+            "invalid HTTP method `{method}`: non-token bytes not allowed"
+        )));
+    }
+    for (name, value) in &headers {
+        if !is_valid_token(name) {
+            return Err(H1PooledError::Config(format!(
+                "invalid header name `{name}`: non-token bytes not allowed"
+            )));
+        }
+        if !is_valid_header_value(value) {
+            return Err(H1PooledError::Config(format!(
+                "invalid value for header `{name}`: control characters not allowed"
+            )));
+        }
+    }
+    let host = url
+        .host_str()
+        .ok_or_else(|| H1PooledError::Config("no host in URL".into()))?;
+    let port = url.port_or_known_default().ok_or_else(|| {
+        H1PooledError::Config(format!("no default port for scheme {}", url.scheme()))
+    })?;
+    let authority = authority_for(url, host, port);
+    let path = path_and_query(url);
+    let request_target = match target {
+        H1Target::OriginForm => path,
+        H1Target::AbsoluteForm => url.as_str().to_string(),
+    };
+    // URL parsing rejects CR/LF in host, but the path / query can
+    // contain percent-encoded bytes. Validate the final target
+    // string as a defence-in-depth: no raw CR/LF/SP/NUL/HTAB. The
+    // `request_target` is what goes on the request-line, so any
+    // control char here is a smuggling vector.
+    if !is_valid_request_target(&request_target) {
+        return Err(H1PooledError::Config(format!(
+            "invalid request target `{request_target}`: control characters not allowed"
+        )));
+    }
+
+    if !contains_header(&headers, "host") {
+        headers.insert(0, ("Host".into(), authority));
+    }
+
+    let has_cl = contains_header(&headers, "content-length");
+    let has_te = contains_header(&headers, "transfer-encoding");
+
+    enum Framing {
+        None,
+        Buffered(Bytes),
+        FixedStream {
+            stream:
+                Pin<Box<dyn futures_util::Stream<Item = std::io::Result<Bytes>> + Send + 'static>>,
+            length: u64,
+        },
+        ChunkedStream {
+            stream:
+                Pin<Box<dyn futures_util::Stream<Item = std::io::Result<Bytes>> + Send + 'static>>,
+        },
+    }
+
+    let framing = match body {
+        H1Body::Empty => {
+            if method_typically_has_body(method) && !has_cl && !has_te {
+                headers.push(("Content-Length".into(), "0".into()));
+            }
+            Framing::None
+        }
+        H1Body::Buffered(b) => {
+            if !has_cl && !has_te {
+                headers.push(("Content-Length".into(), b.len().to_string()));
+            }
+            Framing::Buffered(b)
+        }
+        H1Body::FixedStream { stream, length } => {
+            if !has_cl && !has_te {
+                headers.push(("Content-Length".into(), length.to_string()));
+            }
+            Framing::FixedStream { stream, length }
+        }
+        H1Body::ChunkedStream { stream } => {
+            if !has_te {
+                headers.push(("Transfer-Encoding".into(), "chunked".into()));
+            }
+            Framing::ChunkedStream { stream }
+        }
+    };
+
+    if !contains_header(&headers, "connection") {
+        headers.push(("Connection".into(), "keep-alive".into()));
+    }
+
+    // Serialise + send the request head.
+    let mut req = Vec::new();
+    req.extend_from_slice(format!("{method} {request_target} HTTP/1.1\r\n").as_bytes());
+    for (name, value) in &headers {
+        let name = h1_header_name(name);
+        req.extend_from_slice(name.as_bytes());
+        req.extend_from_slice(b": ");
+        req.extend_from_slice(value.as_bytes());
+        req.extend_from_slice(b"\r\n");
+    }
+    req.extend_from_slice(b"\r\n");
+    stream.write_all(&req).await?;
+
+    match framing {
+        Framing::None => {}
+        Framing::Buffered(b) => {
+            stream.write_all(&b).await?;
+        }
+        Framing::FixedStream {
+            stream: mut body_stream,
+            length,
+        } => {
+            let mut sent: u64 = 0;
+            while let Some(chunk) = body_stream.next().await {
+                let chunk: Bytes = chunk?;
+                if sent + chunk.len() as u64 > length {
+                    return Err(H1PooledError::Http(
+                        "streaming body exceeded declared content-length".into(),
+                    ));
+                }
+                stream.write_all(&chunk).await?;
+                sent += chunk.len() as u64;
+            }
+            if sent != length {
+                return Err(H1PooledError::Http(format!(
+                    "streaming body ended before declared content-length ({sent}/{length})"
+                )));
+            }
+        }
+        Framing::ChunkedStream {
+            stream: mut body_stream,
+        } => {
+            while let Some(chunk) = body_stream.next().await {
+                let chunk: Bytes = chunk?;
+                if chunk.is_empty() {
+                    continue;
+                }
+                let hdr = format!("{:X}\r\n", chunk.len());
+                stream.write_all(hdr.as_bytes()).await?;
+                stream.write_all(&chunk).await?;
+                stream.write_all(b"\r\n").await?;
+            }
+            stream.write_all(b"0\r\n\r\n").await?;
+        }
+    }
+
+    stream.flush().await?;
+
+    // The request-side framing is set — whether the response was
+    // sent under chunked or buffered framing has no bearing on the
+    // response reuse decision. `reusable_request` captures whether
+    // the caller explicitly asked us to close the connection via
+    // `Connection: close`.
+    let client_asked_close = header_contains_token(&headers, "connection", "close");
+
+    let (status, resp_headers, resp_body, http_version_minor) =
+        read_h1_response(stream, method).await?;
+
+    // Per RFC 9112: HTTP/1.1 defaults to keep-alive unless
+    // `Connection: close` is sent by either side. HTTP/1.0 defaults
+    // to close unless `Connection: keep-alive` is present.
+    let server_says_close = header_contains_token(&resp_headers, "connection", "close");
+    let server_says_keepalive = header_contains_token(&resp_headers, "connection", "keep-alive");
+    let reusable = if client_asked_close || server_says_close {
+        false
+    } else if http_version_minor >= 1 {
+        true
+    } else {
+        server_says_keepalive
+    };
+
+    Ok((
+        WireResponse {
+            status,
+            headers: resp_headers,
+            body: resp_body,
+        },
+        reusable,
+    ))
+}
+
+fn method_typically_has_body(method: &str) -> bool {
+    matches!(
+        method.to_ascii_uppercase().as_str(),
+        "POST" | "PUT" | "PATCH"
+    )
+}
+
+/// Parsed HTTP/1.x response head: status + headers + http/1.x minor
+/// version (`1` for HTTP/1.1, `0` for HTTP/1.0).
+type ParsedHead = (u16, Vec<(String, String)>, u8);
+
+/// Parsed HTTP/1.x response: status + headers + body + http/1.x
+/// minor version.
+type ParsedResponse = (u16, Vec<(String, String)>, Vec<u8>, u8);
+
+/// Returns `(status, headers, body, http_minor_version)`. The minor
+/// version is `1` for HTTP/1.1 and `0` for HTTP/1.0.
+async fn read_h1_response<S>(stream: &mut S, method: &str) -> Result<ParsedResponse, H1PooledError>
+where
+    S: AsyncRead + Unpin + ?Sized,
+{
+    loop {
+        let mut buf = read_h1_headers(stream).await?;
+        let header_end = find_header_end(&buf).ok_or_else(|| {
+            H1PooledError::Http("HTTP/1.1 response missing header terminator".into())
+        })?;
+        let body_start = header_end + 4;
+        let head = String::from_utf8_lossy(&buf[..header_end]);
+        let (status, headers, minor) = parse_h1_head(&head)?;
+        let initial_body = buf.split_off(body_start);
+
+        // 1xx informational (except 101 Switching Protocols) — read again.
+        if (100..200).contains(&status) && status != 101 {
+            continue;
+        }
+
+        // RFC 9112 §6.1: reject multiple or conflicting framing
+        // headers up-front. With a keep-alive pool an ambiguous
+        // framing decision is a request-smuggling vector — the
+        // parser and the server might disagree on where the body
+        // ends, and the next pooled request lands in the wrong
+        // place on the wire.
+        validate_framing_headers(&headers)?;
+
+        if method.eq_ignore_ascii_case("HEAD") || matches!(status, 101 | 204 | 304) {
+            return Ok((status, headers, Vec::new(), minor));
+        }
+
+        let body = if header_contains_token(&headers, "transfer-encoding", "chunked") {
+            read_chunked_body(stream, initial_body).await?
+        } else if let Some(len) =
+            header_first(&headers, "content-length").and_then(|v| v.trim().parse::<usize>().ok())
+        {
+            read_fixed_body(stream, initial_body, len).await?
+        } else {
+            read_to_close(stream, initial_body).await?
+        };
+
+        return Ok((status, headers, body, minor));
+    }
+}
+
+/// RFC 9112 §6.1 framing validation.
+///
+/// Rejects response header sets with any of:
+/// - Multiple `Content-Length` header lines (even if values agree) —
+///   some servers/proxies concatenate into `CL: 10, 10` which real
+///   clients will parse as "10" while intermediaries see the first,
+///   creating a desync vector.
+/// - Both `Content-Length` AND `Transfer-Encoding` present. RFC 9112
+///   says TE wins, but the safe move with a keep-alive pool is to
+///   refuse the connection entirely — request smuggling against
+///   older intermediaries has shipped CVEs against every HTTP client
+///   that accepted this combination.
+/// - `Transfer-Encoding` where `chunked` is present but not the
+///   final coding. RFC 9112: chunked MUST be last; otherwise body
+///   length is undefined and the connection MUST close. Safer to
+///   reject.
+fn validate_framing_headers(headers: &[(String, String)]) -> Result<(), H1PooledError> {
+    let cl_count = headers
+        .iter()
+        .filter(|(k, _)| k.eq_ignore_ascii_case("content-length"))
+        .count();
+    if cl_count > 1 {
+        return Err(H1PooledError::Http(
+            "response has multiple Content-Length headers (RFC 9112 §6.1)".into(),
+        ));
+    }
+    // A single CL header may still carry a comma-separated value —
+    // that's the other flavour of the same attack.
+    if let Some(v) = header_first(headers, "content-length") {
+        if v.contains(',') {
+            return Err(H1PooledError::Http(
+                "response Content-Length contains multiple values".into(),
+            ));
+        }
+        // RFC 9112 §8.6: Content-Length MUST be a non-negative decimal
+        // integer. A present-but-unparseable value (`+10`, `10 foo`,
+        // tab-prefixed, hex, anything but `[0-9]+`) previously fell
+        // through to read-to-close — a smuggling vector when an
+        // upstream parses leniently and disagrees with us on body
+        // length. Require clean ASCII digits.
+        let trimmed = v.trim();
+        if trimmed.is_empty()
+            || !trimmed.bytes().all(|b| b.is_ascii_digit())
+            || trimmed.parse::<u64>().is_err()
+        {
+            return Err(H1PooledError::Http(format!(
+                "response Content-Length `{v}` is not a valid decimal integer (RFC 9112 §8.6)"
+            )));
+        }
+    }
+
+    let te = header_first(headers, "transfer-encoding");
+    if te.is_some() && cl_count > 0 {
+        return Err(H1PooledError::Http(
+            "response has both Content-Length and Transfer-Encoding (RFC 9112 §6.1)".into(),
+        ));
+    }
+    if let Some(te) = te {
+        // Last coding must be `chunked`. Split on commas, ignore
+        // whitespace, compare last token.
+        let last = te
+            .split(',')
+            .map(|t| t.trim())
+            .rfind(|t| !t.is_empty())
+            .unwrap_or("");
+        if !last.eq_ignore_ascii_case("chunked") {
+            return Err(H1PooledError::Http(format!(
+                "response Transfer-Encoding `{te}`: `chunked` must be the final coding"
+            )));
+        }
+    }
+    Ok(())
+}
+
+async fn read_h1_headers<S>(stream: &mut S) -> Result<Vec<u8>, H1PooledError>
+where
+    S: AsyncRead + Unpin + ?Sized,
+{
+    let mut buf = Vec::with_capacity(4096);
+    let mut tmp = [0u8; 2048];
+    loop {
+        let n = stream.read(&mut tmp).await?;
+        if n == 0 {
+            return Err(H1PooledError::Http(
+                "connection closed before HTTP/1.1 headers".into(),
+            ));
+        }
+        buf.extend_from_slice(&tmp[..n]);
+        if buf.len() > MAX_H1_HEADER_BYTES {
+            return Err(H1PooledError::Http(format!(
+                "HTTP/1.1 headers exceed {MAX_H1_HEADER_BYTES} bytes"
+            )));
+        }
+        if find_header_end(&buf).is_some() {
+            return Ok(buf);
+        }
+    }
+}
+
+fn parse_h1_head(head: &str) -> Result<ParsedHead, H1PooledError> {
+    let mut lines = head.split("\r\n");
+    let status_line = lines
+        .next()
+        .ok_or_else(|| H1PooledError::Http("missing HTTP/1.1 status line".into()))?;
+    let mut parts = status_line.splitn(3, ' ');
+    let version = parts.next().unwrap_or_default();
+    if !version.starts_with("HTTP/1.") {
+        return Err(H1PooledError::Http(format!(
+            "invalid HTTP/1.1 status line: {status_line}"
+        )));
+    }
+    let minor = match version.as_bytes().get(7) {
+        Some(b'0') => 0,
+        Some(b'1') => 1,
+        _ => {
+            return Err(H1PooledError::Http(format!(
+                "unknown HTTP/1.x minor version in status line: {status_line}"
+            )))
+        }
+    };
+    let status = parts
+        .next()
+        .ok_or_else(|| H1PooledError::Http("missing HTTP status code".into()))?
+        .parse::<u16>()
+        .map_err(|e| H1PooledError::Http(format!("invalid HTTP status code: {e}")))?;
+
+    let mut headers = Vec::new();
+    for line in lines {
+        if line.is_empty() {
+            continue;
+        }
+        let Some((name, value)) = line.split_once(':') else {
+            continue;
+        };
+        headers.push((name.trim().to_string(), value.trim_start().to_string()));
+    }
+    Ok((status, headers, minor))
+}
+
+async fn read_fixed_body<S>(
+    stream: &mut S,
+    mut body: Vec<u8>,
+    len: usize,
+) -> Result<Vec<u8>, H1PooledError>
+where
+    S: AsyncRead + Unpin + ?Sized,
+{
+    if len > MAX_H1_BODY_BYTES {
+        return Err(H1PooledError::Http(format!(
+            "HTTP/1.1 body exceeds {MAX_H1_BODY_BYTES} bytes"
+        )));
+    }
+    while body.len() < len {
+        let remaining = len - body.len();
+        let mut tmp = vec![0u8; remaining.min(8192)];
+        let n = stream.read(&mut tmp).await?;
+        if n == 0 {
+            return Err(H1PooledError::Http(
+                "connection closed before HTTP/1.1 body completed".into(),
+            ));
+        }
+        body.extend_from_slice(&tmp[..n]);
+    }
+    body.truncate(len);
+    Ok(body)
+}
+
+async fn read_to_close<S>(stream: &mut S, mut body: Vec<u8>) -> Result<Vec<u8>, H1PooledError>
+where
+    S: AsyncRead + Unpin + ?Sized,
+{
+    let mut tmp = [0u8; 8192];
+    loop {
+        let n = stream.read(&mut tmp).await?;
+        if n == 0 {
+            return Ok(body);
+        }
+        body.extend_from_slice(&tmp[..n]);
+        if body.len() > MAX_H1_BODY_BYTES {
+            return Err(H1PooledError::Http(format!(
+                "HTTP/1.1 body exceeds {MAX_H1_BODY_BYTES} bytes"
+            )));
+        }
+    }
+}
+
+async fn read_chunked_body<S>(stream: &mut S, mut buf: Vec<u8>) -> Result<Vec<u8>, H1PooledError>
+where
+    S: AsyncRead + Unpin + ?Sized,
+{
+    let mut out = Vec::new();
+    loop {
+        let line_end = read_until_crlf(stream, &mut buf).await?;
+        let size_line = String::from_utf8_lossy(&buf[..line_end]);
+        let size_token = size_line.split(';').next().unwrap_or("").trim();
+        // Reject oversized chunk declarations up front. See
+        // `read_chunked_body` in the old core-transport code for the
+        // rationale — this guard prevents a malicious peer from
+        // overflowing `size + 2` or forcing an uncontrolled read.
+        let size_u64 = u64::from_str_radix(size_token, 16)
+            .map_err(|e| H1PooledError::Http(format!("invalid chunk size: {e}")))?;
+        if size_u64 > MAX_H1_BODY_BYTES as u64 {
+            return Err(H1PooledError::Http(format!(
+                "HTTP/1.1 chunk size {size_u64} exceeds {MAX_H1_BODY_BYTES}-byte body cap"
+            )));
+        }
+        let size = size_u64 as usize;
+        buf.drain(..line_end + 2);
+
+        if size == 0 {
+            read_chunk_trailers(stream, &mut buf).await?;
+            return Ok(out);
+        }
+
+        read_until_available(stream, &mut buf, size + 2).await?;
+        out.extend_from_slice(&buf[..size]);
+        if out.len() > MAX_H1_BODY_BYTES {
+            return Err(H1PooledError::Http(format!(
+                "HTTP/1.1 body exceeds {MAX_H1_BODY_BYTES} bytes"
+            )));
+        }
+        if &buf[size..size + 2] != b"\r\n" {
+            return Err(H1PooledError::Http("chunk missing CRLF terminator".into()));
+        }
+        buf.drain(..size + 2);
+    }
+}
+
+async fn read_chunk_trailers<S>(stream: &mut S, buf: &mut Vec<u8>) -> Result<(), H1PooledError>
+where
+    S: AsyncRead + Unpin + ?Sized,
+{
+    loop {
+        let line_end = read_until_crlf(stream, buf).await?;
+        let empty = line_end == 0;
+        buf.drain(..line_end + 2);
+        if empty {
+            return Ok(());
+        }
+    }
+}
+
+async fn read_until_crlf<S>(stream: &mut S, buf: &mut Vec<u8>) -> Result<usize, H1PooledError>
+where
+    S: AsyncRead + Unpin + ?Sized,
+{
+    loop {
+        if let Some(pos) = buf.windows(2).position(|w| w == b"\r\n") {
+            return Ok(pos);
+        }
+        read_more(stream, buf).await?;
+    }
+}
+
+async fn read_until_available<S>(
+    stream: &mut S,
+    buf: &mut Vec<u8>,
+    len: usize,
+) -> Result<(), H1PooledError>
+where
+    S: AsyncRead + Unpin + ?Sized,
+{
+    while buf.len() < len {
+        read_more(stream, buf).await?;
+    }
+    Ok(())
+}
+
+async fn read_more<S>(stream: &mut S, buf: &mut Vec<u8>) -> Result<(), H1PooledError>
+where
+    S: AsyncRead + Unpin + ?Sized,
+{
+    let mut tmp = [0u8; 8192];
+    let n = stream.read(&mut tmp).await?;
+    if n == 0 {
+        return Err(H1PooledError::Http(
+            "connection closed during chunked body".into(),
+        ));
+    }
+    buf.extend_from_slice(&tmp[..n]);
+    if buf.len() > MAX_H1_BODY_BYTES {
+        return Err(H1PooledError::Http(format!(
+            "HTTP/1.1 body exceeds {MAX_H1_BODY_BYTES} bytes"
+        )));
+    }
+    Ok(())
+}
+
+fn path_and_query(url: &url::Url) -> String {
+    let path = if url.path().is_empty() {
+        "/"
+    } else {
+        url.path()
+    };
+    match url.query() {
+        Some(query) => format!("{path}?{query}"),
+        None => path.to_string(),
+    }
+}
+
+fn authority_for(url: &url::Url, host: &str, port: u16) -> String {
+    let is_default_port =
+        (url.scheme() == "https" && port == 443) || (url.scheme() == "http" && port == 80);
+    if is_default_port {
+        host.to_string()
+    } else {
+        format!("{host}:{port}")
+    }
+}
+
+fn contains_header(headers: &[(String, String)], name: &str) -> bool {
+    headers.iter().any(|(k, _)| k.eq_ignore_ascii_case(name))
+}
+
+/// Predicate: `s` is a non-empty sequence of RFC 9110 `tchar`s — the
+/// byte set permitted for HTTP method names and header names. Used to
+/// reject header-injection payloads at the wire boundary (CWE-93).
+fn is_valid_token(s: &str) -> bool {
+    if s.is_empty() {
+        return false;
+    }
+    s.bytes().all(|b| {
+        // RFC 9110 §5.6.2 token = 1*tchar.
+        // tchar = "!" / "#" / "$" / "%" / "&" / "'" / "*" / "+" /
+        //         "-" / "." / "^" / "_" / "`" / "|" / "~" / DIGIT / ALPHA
+        matches!(
+            b,
+            b'!' | b'#'
+                | b'$'
+                | b'%'
+                | b'&'
+                | b'\''
+                | b'*'
+                | b'+'
+                | b'-'
+                | b'.'
+                | b'^'
+                | b'_'
+                | b'`'
+                | b'|'
+                | b'~'
+                | b'0'..=b'9'
+                | b'A'..=b'Z'
+                | b'a'..=b'z'
+        )
+    })
+}
+
+/// Predicate: `s` is a valid HTTP header field-value.
+///
+/// RFC 9110 §5.5: `field-value = *( field-content / obs-text )`,
+/// where `field-content = field-vchar [ 1*( SP / HTAB / field-vchar )
+/// field-vchar ]` and `field-vchar = VCHAR / obs-text`. We permit
+/// visible ASCII, SP, HTAB, and 0x80..=0xFF (obs-text for UTF-8 etc.)
+/// but reject CR / LF / NUL and the remaining control characters —
+/// the exact bytes an attacker needs for header-splitting.
+fn is_valid_header_value(s: &str) -> bool {
+    s.bytes()
+        .all(|b| matches!(b, b'\t' | b' '..=b'~' | 0x80..=0xFF))
+}
+
+/// Predicate: `s` is a valid HTTP request-target.
+///
+/// URL parsing blocks raw CR/LF in the authority, but origin-form
+/// and absolute-form targets are serialised via the percent-encoded
+/// path + query which a malicious-but-accepted URL could in
+/// principle still smuggle through. Defence-in-depth: the request
+/// line is `METHOD SP TARGET SP HTTP/1.1 CRLF`, so any CR/LF/SP/NUL
+/// inside `TARGET` splits it.
+fn is_valid_request_target(s: &str) -> bool {
+    if s.is_empty() {
+        return false;
+    }
+    s.bytes().all(|b| b > 0x20 && b != 0x7F)
+}
+
+fn h1_header_name(name: &str) -> Cow<'_, str> {
+    match name {
+        _ if name.eq_ignore_ascii_case("host") => Cow::Borrowed("Host"),
+        _ if name.eq_ignore_ascii_case("connection") => Cow::Borrowed("Connection"),
+        _ if name.eq_ignore_ascii_case("user-agent") => Cow::Borrowed("User-Agent"),
+        _ if name.eq_ignore_ascii_case("accept") => Cow::Borrowed("Accept"),
+        _ if name.eq_ignore_ascii_case("accept-encoding") => Cow::Borrowed("Accept-Encoding"),
+        _ if name.eq_ignore_ascii_case("accept-language") => Cow::Borrowed("Accept-Language"),
+        _ if name.eq_ignore_ascii_case("content-length") => Cow::Borrowed("Content-Length"),
+        _ if name.eq_ignore_ascii_case("content-type") => Cow::Borrowed("Content-Type"),
+        _ if name.eq_ignore_ascii_case("cookie") => Cow::Borrowed("Cookie"),
+        _ if name.eq_ignore_ascii_case("authorization") => Cow::Borrowed("Authorization"),
+        _ if name.eq_ignore_ascii_case("proxy-authorization") => {
+            Cow::Borrowed("Proxy-Authorization")
+        }
+        _ if name.eq_ignore_ascii_case("origin") => Cow::Borrowed("Origin"),
+        _ if name.eq_ignore_ascii_case("referer") => Cow::Borrowed("Referer"),
+        _ if name.eq_ignore_ascii_case("upgrade") => Cow::Borrowed("Upgrade"),
+        _ => Cow::Borrowed(name),
+    }
+}
+
+fn header_first<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
+    headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case(name))
+        .map(|(_, v)| v.as_str())
+}
+
+fn header_contains_token(headers: &[(String, String)], name: &str, token: &str) -> bool {
+    header_first(headers, name).is_some_and(|v| {
+        v.split(',')
+            .any(|part| part.trim().eq_ignore_ascii_case(token))
+    })
+}
+
+fn find_header_end(buf: &[u8]) -> Option<usize> {
+    buf.windows(4).position(|w| w == b"\r\n\r\n")
+}

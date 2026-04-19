@@ -23,7 +23,7 @@ async fn main() -> leyline::Result<()> {
     let body = if let Some(path) = file_path {
         let meta = tokio::fs::metadata(&path).await.expect("stat input file");
         let file = tokio::fs::File::open(&path).await.expect("open input file");
-        let reader = tokio_util::io::ReaderStream::new(file).map(|r| r.map(Bytes::from));
+        let reader = tokio_util::io::ReaderStream::new(file).map(|r| r);
         Body::stream_with_length(reader, meta.len())
     } else {
         // Synthetic 1 MiB stream of A's for demo.

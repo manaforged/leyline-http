@@ -2,27 +2,11 @@
 resolver = "2"
 members = [
     "crates/leyline",
-    "crates/core",
-    "crates/tls",
-    "crates/h2",
-    "crates/pool",
-    "crates/profile",
-    "crates/tcp",
-    "crates/cookies",
-    "crates/audit",
-    "crates/ffi",
-    "crates/quic",
-    "crates/cli",
-    "crates/tower",
-]
-exclude = [
-    "wrappers/*",
-    "fuzz",
-    "benches",
+    "crates/leyline-quiche",
 ]
 
 [workspace.package]
-version = "2.0.0-alpha.1"
+version = "1.0.0-alpha.1"
 edition = "2024"
 rust-version = "1.85" # MSRV
 authors = ["Thomas Gardiner"]
@@ -48,16 +32,13 @@ thiserror = "2"
 url = "2"
 sha2 = "0.10"
 md-5 = "0.10"
-# Vendored BoringSSL bindings. Package names are kept as upstream
-# (`boring` / `boring-sys` / `tokio-boring`) so cargo's `[patch.crates-io]`
-# table below can redirect quiche's transitive pull to this fork — cargo
-# patches require the patched package name to match. Upstream attribution
-# is in /NOTICE; the vendored tree is a fork of 0x676e67/boring2. Publishing
-# these under Leyline-scoped names is a future release story (see
-# CONTRIBUTING.md → Releasing).
-boring = { path = "vendor/leyline-ssl" }
-boring-sys = { path = "vendor/leyline-ssl-sys" }
-tokio-boring = { path = "vendor/tokio-leyline-ssl" }
+# BoringSSL bindings from crates.io. btls is a fork of 0x676e67/boring2 that
+# carries the Firefox-specific C patches (set_record_size_limit,
+# set_delegated_credentials) we need for browser-accurate TLS fingerprinting.
+# Upstream attribution is in /NOTICE.
+btls = "0.5"
+btls-sys = "0.5"
+tokio-btls = "0.5"
 socket2 = "0.5"
 bytes = "1"
 tungstenite = "0.26"
@@ -78,13 +59,3 @@ codegen-units = 1
 strip = "symbols"
 opt-level = 3
 
-# Route quiche's crates.io `boring`/`boring-sys` deps to our vendored fork
-# so the QUIC ClientHello shares the same extension set as the H2 one.
-# This patch applies to the Leyline workspace only — downstream workspaces
-# that consume Leyline do NOT inherit patches, so users who depend on real
-# `cloudflare/boring` alongside Leyline see their own `boring`, not ours.
-# See /NOTICE and vendor/leyline-ssl-sys/REVISION.
-[patch.crates-io]
-boring = { path = "vendor/leyline-ssl" }
-boring-sys = { path = "vendor/leyline-ssl-sys" }
-tokio-boring = { path = "vendor/tokio-leyline-ssl" }

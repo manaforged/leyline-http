@@ -4,7 +4,7 @@ use leyline::Session;
 
 #[tokio::main]
 async fn main() {
-    let session = Session::chrome().expect("failed to build session");
+    let session = Session::chrome_latest().expect("failed to build session");
     let resp = session
         .navigate("https://tls.peet.ws/api/all")
         .await

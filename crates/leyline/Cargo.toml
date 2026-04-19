@@ -11,25 +11,74 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-leyline-core = { path = "../core" }
-leyline-profile = { path = "../profile" }
-leyline-tls = { path = "../tls" }
-leyline-tcp = { path = "../tcp" }
-leyline-cookies = { path = "../cookies" }
-leyline-h2 = { path = "../h2" }
-leyline-audit = { path = "../audit" }
-boring = { workspace = true }
+# External deps absorbed from sub-crates
+# -- from leyline-quiche (external BSD-2 fork, stays as path dep)
+leyline-quiche = { path = "../leyline-quiche", version = "1.0.0-alpha.1", default-features = false, features = [
+    "boringssl-btls-crate",
+] }
+
+# -- BoringSSL
+btls = { workspace = true }
+btls-sys = { workspace = true }
+tokio-btls = { workspace = true }
+
+# -- async runtime
+tokio = { workspace = true, features = ["net", "rt", "rt-multi-thread", "time", "io-util", "macros", "fs", "sync"] }
+
+# -- serialization
 serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+
+# -- networking / TLS
+socket2 = { workspace = true }
+url = { workspace = true }
+
+# -- tracing
+tracing = { workspace = true }
+
+# -- errors
+thiserror = { workspace = true }
+
+# -- crypto / hashing
+sha2 = { workspace = true }
+md-5 = { workspace = true }
+sha1 = { workspace = true }
+hex = "0.4"
+md5_legacy = { package = "md5", version = "0.7" }
+base64 = { workspace = true }
+
+# -- HTTP / WebSocket
+tungstenite = { workspace = true }
+tokio-tungstenite = { workspace = true }
+http = "1"
+
+# -- misc
+bytes = { workspace = true }
+futures-util = "0.3"
+async-stream = "0.3"
+tokio-util = { version = "0.7", features = ["io"] }
+lru = "0.16.3"
+rand = "0.8"
+libc = "0.2"
+
+# -- compression
+flate2 = "1"
+brotli = "8"
+zstd = "0.13"
+
+# Windows: read the platform trust store via Win32 crypto API.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Security_Cryptography", "Win32_Foundation"] }
 
 [dev-dependencies]
-leyline-profile = { path = "../profile" }
-leyline-h2 = { path = "../h2" }
-leyline-quic = { path = "../quic" }
 bytes = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-util = { version = "0.7", features = ["io"] }
 futures-util = "0.3"
 serde_json = { workspace = true }
+url = { workspace = true }
+base64 = { workspace = true }
 
 [lints]
 workspace = true

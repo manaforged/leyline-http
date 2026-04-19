@@ -54,52 +54,57 @@
 
 use std::sync::{LazyLock, OnceLock};
 
+// ─── Internal modules (formerly separate crates) ────────────────────────────
+pub mod audit;
+pub mod cookies;
+pub mod core;
+pub mod h2;
+pub mod pool;
+pub mod profile;
+pub mod quic;
+pub mod tcp;
+pub mod tls;
+
+// ─── Public API re-exports ───────────────────────────────────────────────────
+
 // Core types
-pub use leyline_core::{
+pub use crate::core::{
     Body, BodyStream, DigestAuth, Error, HeaderList, HttpVersion, ProtocolPolicy, Request,
     RequestBuilder, Response, Result, RetryPolicy, RetryTrigger, Session, SessionBuilder,
 };
 
-/// `multipart/form-data` bodies (re-exported from `leyline-core`).
+/// `multipart/form-data` bodies.
 pub mod multipart {
-    pub use leyline_core::multipart::{Form, Part};
+    pub use crate::core::multipart::{Form, Part};
 }
 
 // Profile types
-pub use leyline_profile::{Browser, BrowserProfile, Platform, Preset, ALL_BROWSERS, PROFILE_COUNT};
+pub use crate::profile::{
+    BrandOverlay, BrandOverlayError, Browser, BrowserProfile, ChromiumBrand, Platform, Preset,
+    ALL_BROWSERS, PROFILE_COUNT,
+};
 
 // TCP fingerprinting
-pub use leyline_tcp::TcpProfile;
+pub use crate::tcp::TcpProfile;
 
 // Cookies
-pub use leyline_cookies::CookieJar;
+pub use crate::cookies::CookieJar;
 
-// Audit
-pub use leyline_audit::AuditData;
-
-/// Fingerprint computation primitives (`compute_ja3`, `compute_ja4`,
-/// `compute_ja4h`, `compute_ja4t`, and input types). Re-exported so
-/// downstream code can compute fingerprints offline from a
-/// [`BrowserProfile`] without depending on `leyline-audit` directly.
-pub mod audit {
-    pub use leyline_audit::{
-        chrome_extension_ids, compute_ja3, compute_ja4, compute_ja4h, compute_ja4t, AuditData,
-        Ja3Input, Ja4Input, Ja4hInput,
-    };
-}
+// Audit data type (top-level re-export)
+pub use crate::audit::AuditData;
 
 // WebSocket
-pub use leyline_core::WsConnection;
+pub use crate::core::WsConnection;
 
 // TLS context factory (re-exported so users don't need `leyline-tls` or
 // `boring` as separate deps). Start with `tls_context` / `quic_context`
 // for the 95% case; drop down to `build_ssl_context` only when you need
 // the full `TlsMinVersion` knob against a profile you already hold.
-pub use boring::ssl::SslContextBuilder;
-pub use leyline_tls::{build_ssl_context, TlsError, TlsMinVersion};
+pub use crate::tls::{build_ssl_context, TlsError, TlsMinVersion};
+pub use btls::ssl::SslContextBuilder;
 
-static PROFILES: LazyLock<leyline_profile::ProfileRegistry> =
-    LazyLock::new(leyline_profile::ProfileRegistry::builtin);
+static PROFILES: LazyLock<crate::profile::ProfileRegistry> =
+    LazyLock::new(crate::profile::ProfileRegistry::builtin);
 
 /// Look up the static built-in profile for a browser variant.
 ///
@@ -141,14 +146,14 @@ pub fn tls_context(browser: Browser) -> Result<SslContextBuilder> {
 /// ```rust,ignore
 /// use leyline::{quic_context, Browser};
 /// let ctx = quic_context(Browser::Chrome147)?;
-/// let mut cfg = quiche::Config::with_boring_ssl_ctx_builder(
-///     quiche::PROTOCOL_VERSION, ctx)?;
+/// let mut cfg = leyline_quiche::Config::with_boring_ssl_ctx_builder(
+///     leyline_quiche::PROTOCOL_VERSION, ctx)?;
 /// ```
 pub fn quic_context(browser: Browser) -> Result<SslContextBuilder> {
     build_ssl_context(profile(browser), TlsMinVersion::Tls13).map_err(Error::from)
 }
 
-// ─── Level 1: Zero-config functions ─────────────────────────────────────
+// ─── Level 1: Zero-config functions ─────────────────────────────────────────
 
 /// Lazily-built shared session behind the module-level helpers below.
 /// Construction failures are surfaced as a `Result` — the zero-config

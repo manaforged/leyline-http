@@ -1,0 +1,108 @@
+name: Build BoringSSL prebuilt libs
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/build-prebuilt.yml"
+      - "vendor/leyline-ssl-sys/build/**"
+      - "vendor/leyline-ssl-sys/cmake/**"
+      - "vendor/leyline-ssl-sys/deps/boringssl/**"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            ssl_lib: libssl.a
+            crypto_lib: libcrypto.a
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            ssl_lib: libssl.a
+            crypto_lib: libcrypto.a
+          - os: macos-13
+            target: x86_64-apple-darwin
+            ssl_lib: libssl.a
+            crypto_lib: libcrypto.a
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            ssl_lib: ssl.lib
+            crypto_lib: crypto.lib
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y cmake ninja-build
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install cmake ninja
+
+      - name: Configure MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Build BoringSSL
+        shell: bash
+        run: |
+          cd vendor/leyline-ssl-sys/deps/boringssl
+          mkdir -p build
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --target ssl crypto --parallel
+
+      - name: Copy prebuilt libs
+        shell: bash
+        run: |
+          mkdir -p vendor/leyline-ssl-sys/prebuilt/${{ matrix.target }}
+          cp vendor/leyline-ssl-sys/deps/boringssl/build/${{ matrix.ssl_lib }} vendor/leyline-ssl-sys/prebuilt/${{ matrix.target }}/
+          cp vendor/leyline-ssl-sys/deps/boringssl/build/${{ matrix.crypto_lib }} vendor/leyline-ssl-sys/prebuilt/${{ matrix.target }}/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: prebuilt-${{ matrix.target }}
+          path: vendor/leyline-ssl-sys/prebuilt/${{ matrix.target }}/
+
+  commit:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: vendor/leyline-ssl-sys/prebuilt
+          merge-multiple: false
+
+      - name: Move artifacts into correct structure
+        run: |
+          for dir in vendor/leyline-ssl-sys/prebuilt/prebuilt-*/; do
+            target="${dir#vendor/leyline-ssl-sys/prebuilt/prebuilt-}"
+            target="${target%/}"
+            mkdir -p "vendor/leyline-ssl-sys/prebuilt/$target"
+            mv "$dir"* "vendor/leyline-ssl-sys/prebuilt/$target/"
+            rmdir "$dir"
+          done
+
+      - name: Commit prebuilt libs
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add vendor/leyline-ssl-sys/prebuilt/
+          git commit -m "chore: add BoringSSL prebuilt libs" || echo "nothing to commit"
+          git push

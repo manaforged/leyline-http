@@ -4,7 +4,7 @@ use leyline::Session;
 
 #[tokio::main]
 async fn main() {
-    let session = Session::chrome().unwrap();
+    let session = Session::chrome_latest().unwrap();
 
     println!("=== WebSocket Smoke Test ===\n");
 

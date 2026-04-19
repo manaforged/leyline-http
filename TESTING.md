@@ -30,6 +30,7 @@ The pre-commit hook runs `cargo test --workspace` on every commit.
 | TLS 1.3 session resumption works end-to-end | Two requests, second presents a valid pre-shared key | `live_session_resumption_pre_shared_key` |
 | Peer certificate is reachable on the response | Response exposes DER-encoded cert + version + cipher | `live_tls_peer_certificate_exposed` |
 | HTTP/3 reachable against real QUIC servers | Direct H3 GET against Cloudflare and Google | `live_h3_cloudflare`, `live_h3_cloudflare_firefox_profile`, `live_h3_google` |
+| Wire-fidelity: caller-set headers | Raw TCP captures assert caller header replacement, duplicate preservation, redirect auth stripping/preservation, and brand overlay precedence | `crates/core/tests/wire_fidelity.rs` |
 | HTTP/2 connection reuse through the pool | Three sequential requests on one session, second/third are warm | `live_h2_connection_reuse` |
 | Cookies persist and flow back | Set-Cookie captured, jar replays it on the next hop | `live_cookies_set_then_sent` |
 | Redirects follow and strip auth cross-origin | Chain of 302s, Authorization dropped on origin change | `live_redirect_follows_and_rewrites_url`, `live_redirect_strips_auth_cross_origin` |
@@ -118,8 +119,6 @@ What `leyline-h2` explicitly does **not** do:
 - Server-side support or server-initiated streams.
 - PUSH_PROMISE accepts. Any PUSH_PROMISE is RST_STREAM'd with
   `Cancel`. This matches Chrome's `SETTINGS_ENABLE_PUSH = 0` policy.
-- Streaming request bodies. `send_request` takes `Option<Bytes>`; a
-  streaming `AsyncRead` body is a future alpha bump.
 
 ## Fuzzing
 

@@ -31,8 +31,8 @@ within 72 hours and coordinate a fix and disclosure timeline with you.
 
 ## Supported versions
 
-Leyline is pre-1.0. Security fixes are only backported to the latest
-`2.0.0-alpha.*` release. Pin a version and watch
+Leyline is pre-1.0. Security fixes land on the latest `1.0.0-alpha.*`
+release only — no backports to older alphas. Pin a version and watch
 [releases](https://github.com/manaforged/leyline-http/releases).
 
 ## Upstream coordination

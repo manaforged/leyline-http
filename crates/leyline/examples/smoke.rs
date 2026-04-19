@@ -3,8 +3,8 @@
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
+use leyline::quic::{H3Config, H3Connection};
 use leyline::{Browser, Error, Result, Session};
-use leyline_quic::{H3Config, H3Connection};
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -24,7 +24,7 @@ async fn main() {
         "Chrome 147 exact JA4 + H2",
         &mut passed,
         &mut failed,
-        async { exact_fingerprint(Session::chrome()?, Browser::Chrome147).await },
+        async { exact_fingerprint(Session::chrome_latest()?, Browser::Chrome147).await },
     )
     .await;
 
@@ -32,7 +32,7 @@ async fn main() {
         "Firefox 148 exact JA4 + H2",
         &mut passed,
         &mut failed,
-        async { exact_fingerprint(Session::firefox()?, Browser::Firefox148).await },
+        async { exact_fingerprint(Session::firefox_latest()?, Browser::Firefox148).await },
     )
     .await;
 
@@ -41,7 +41,7 @@ async fn main() {
         &mut passed,
         &mut failed,
         async {
-            let s = Session::chrome()?;
+            let s = Session::chrome_latest()?;
             let t = Instant::now();
             let r1 = s.navigate(PEET_URL).await?;
             let t1 = t.elapsed();
@@ -70,7 +70,7 @@ async fn main() {
         &mut passed,
         &mut failed,
         async {
-            let s = Session::chrome()?;
+            let s = Session::chrome_latest()?;
             let r = s.navigate(PEET_URL).await?;
             let body = r.text();
             let _: Value = serde_json::from_str(&body)?;
@@ -88,7 +88,7 @@ async fn main() {
         &mut passed,
         &mut failed,
         async {
-            let s = Session::chrome()?;
+            let s = Session::chrome_latest()?;
             let r = s.navigate("https://httpbin.org/get").await?;
             ensure(r.status() == 200, format!("status={}", r.status()))?;
             ensure(r.text().contains("headers"), "httpbin body missing headers")?;
@@ -102,7 +102,7 @@ async fn main() {
         &mut passed,
         &mut failed,
         async {
-            let s = Session::chrome()?;
+            let s = Session::chrome_latest()?;
             let payload = serde_json::json!({"test": "leyline", "v": 2});
             let r = s.post_json("https://httpbin.org/post", &payload).await?;
             let v: Value = r.json()?;
@@ -118,7 +118,7 @@ async fn main() {
         &mut passed,
         &mut failed,
         async {
-            let s = Session::chrome()?;
+            let s = Session::chrome_latest()?;
             let r = s
                 .post_form(
                     "https://httpbin.org/post",
@@ -138,21 +138,21 @@ async fn main() {
     .await;
 
     run("GET with query params", &mut passed, &mut failed, async {
-        let s = Session::chrome()?;
+        let s = Session::chrome_latest()?;
         let r = s
             .get("https://httpbin.org/get")
             .query(&[("foo", "bar"), ("n", "42")])
             .send()
             .await?;
         let v: Value = r.json()?;
-        let foo = json_str(&v["args"]["foo"], "args.foo")?;
-        ensure(foo == "bar", format!("foo={foo}"))?;
-        Ok(format!("foo={foo}"))
+        let arg_foo = json_str(&v["args"]["foo"], "args.foo")?;
+        ensure(arg_foo == "bar", format!("foo={arg_foo}"))?;
+        Ok(format!("foo={arg_foo}"))
     })
     .await;
 
     run("Bearer auth header", &mut passed, &mut failed, async {
-        let s = Session::chrome()?;
+        let s = Session::chrome_latest()?;
         let r = s
             .get("https://httpbin.org/get")
             .bearer_auth("test-token-123")
@@ -166,7 +166,7 @@ async fn main() {
     .await;
 
     run("error_for_status on 404", &mut passed, &mut failed, async {
-        let s = Session::chrome()?;
+        let s = Session::chrome_latest()?;
         let r = s.navigate("https://httpbin.org/status/404").await?;
         ensure(r.status() == 404, format!("status={}", r.status()))?;
         ensure(r.error_for_status().is_err(), "404 should be error")?;
@@ -179,7 +179,7 @@ async fn main() {
         &mut passed,
         &mut failed,
         async {
-            let s = Session::chrome()?;
+            let s = Session::chrome_latest()?;
             let r = s.navigate("https://httpbin.org/redirect/2").await?;
             ensure(r.status() == 200, format!("status={}", r.status()))?;
             ensure(!r.redirect_chain().is_empty(), "redirect chain empty")?;
@@ -193,9 +193,9 @@ async fn main() {
         &mut passed,
         &mut failed,
         async {
-            let c = Session::chrome()?.navigate(PEET_URL).await?;
-            let f = Session::firefox()?.navigate(PEET_URL).await?;
-            let s = Session::safari()?.navigate(PEET_URL).await?;
+            let c = Session::chrome_latest()?.navigate(PEET_URL).await?;
+            let f = Session::firefox_latest()?.navigate(PEET_URL).await?;
+            let s = Session::safari_latest()?.navigate(PEET_URL).await?;
             let ch: Value = c.json()?;
             let fh: Value = f.json()?;
             let sh: Value = s.json()?;
@@ -247,7 +247,7 @@ async fn main() {
     .await;
 
     run("Large response (50KB)", &mut passed, &mut failed, async {
-        let s = Session::chrome()?;
+        let s = Session::chrome_latest()?;
         let r = s.navigate("https://httpbin.org/bytes/50000").await?;
         ensure(r.status() == 200, format!("status={}", r.status()))?;
         ensure(
@@ -328,7 +328,7 @@ async fn h1_wire_shape() -> Result<String> {
         Ok::<_, String>(String::from_utf8_lossy(&req).into_owned())
     });
 
-    let session = Session::chrome()?;
+    let session = Session::chrome_latest()?;
     let resp = session
         .get(&format!("http://{addr}/wire?q=1"))
         .append_header("x-proof", "smoke")
