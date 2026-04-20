@@ -176,8 +176,7 @@ impl RecvBuf {
 
                     // New buffer's end overlaps existing buffer.
                     if off < b.off() && buf.max_off() > b.off() {
-                        tmp_bufs
-                            .push_back(buf.split_off((b.off() - off) as usize));
+                        tmp_bufs.push_back(buf.split_off((b.off() - off) as usize));
                     }
                 }
             }

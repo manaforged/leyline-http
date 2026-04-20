@@ -104,8 +104,12 @@ struct LossDetectionResult {
 
 impl RecoveryEpoch {
     fn detect_and_remove_acked_packets(
-        &mut self, now: Instant, acked: &RangeSet, newly_acked: &mut Vec<Acked>,
-        rtt_stats: &RttStats, trace_id: &str,
+        &mut self,
+        now: Instant,
+        acked: &RangeSet,
+        newly_acked: &mut Vec<Acked>,
+        rtt_stats: &RttStats,
+        trace_id: &str,
     ) -> AckedDetectionResult {
         newly_acked.clear();
 
@@ -144,8 +148,7 @@ impl RecoveryEpoch {
                 } else if unacked.time_lost.is_some() {
                     // An acked packet was already declared lost.
                     spurious_losses += 1;
-                    spurious_pkt_thresh
-                        .get_or_insert(largest_acked - unacked.pkt_num + 1);
+                    spurious_pkt_thresh.get_or_insert(largest_acked - unacked.pkt_num + 1);
                     unacked.time_acked = Some(now);
 
                     if unacked.in_flight {
@@ -192,8 +195,12 @@ impl RecoveryEpoch {
     }
 
     fn detect_lost_packets(
-        &mut self, loss_delay: Duration, pkt_thresh: u64, now: Instant,
-        trace_id: &str, epoch: Epoch,
+        &mut self,
+        loss_delay: Duration,
+        pkt_thresh: u64,
+        now: Instant,
+        trace_id: &str,
+        epoch: Epoch,
     ) -> LossDetectionResult {
         self.loss_time = None;
 
@@ -210,17 +217,17 @@ impl RecoveryEpoch {
 
         let mut largest_lost_pkt = None;
 
-        let unacked_iter = self.sent_packets
-        .iter_mut()
-        // Skip packets that follow the largest acked packet.
-        .take_while(|p| p.pkt_num <= largest_acked)
-        // Skip packets that have already been acked or lost.
-        .filter(|p| p.time_acked.is_none() && p.time_lost.is_none());
+        let unacked_iter = self
+            .sent_packets
+            .iter_mut()
+            // Skip packets that follow the largest acked packet.
+            .take_while(|p| p.pkt_num <= largest_acked)
+            // Skip packets that have already been acked or lost.
+            .filter(|p| p.time_acked.is_none() && p.time_lost.is_none());
 
         for unacked in unacked_iter {
             // Mark packet as lost, or set time when it should be marked.
-            if unacked.time_sent <= lost_send_time ||
-                largest_acked >= unacked.pkt_num + pkt_thresh
+            if unacked.time_sent <= lost_send_time || largest_acked >= unacked.pkt_num + pkt_thresh
             {
                 self.lost_frames.extend(unacked.frames.drain(..));
 
@@ -256,8 +263,7 @@ impl RecoveryEpoch {
                 let loss_time = match self.loss_time {
                     None => unacked.time_sent + loss_delay,
 
-                    Some(loss_time) =>
-                        cmp::min(loss_time, unacked.time_sent + loss_delay),
+                    Some(loss_time) => cmp::min(loss_time, unacked.time_sent + loss_delay),
                 };
 
                 self.loss_time = Some(loss_time);
@@ -391,7 +397,9 @@ impl LegacyRecovery {
     }
 
     fn pto_time_and_space(
-        &self, handshake_status: HandshakeStatus, now: Instant,
+        &self,
+        handshake_status: HandshakeStatus,
+        now: Instant,
     ) -> (Option<Instant>, packet::Epoch) {
         let mut duration = self.pto() * 2_u32.pow(self.pto_count);
 
@@ -425,8 +433,7 @@ impl LegacyRecovery {
                 }
 
                 // Include max_ack_delay and backoff for Application Data.
-                duration +=
-                    self.rtt_stats.max_ack_delay * 2_u32.pow(self.pto_count);
+                duration += self.rtt_stats.max_ack_delay * 2_u32.pow(self.pto_count);
             }
 
             let new_time = epoch
@@ -442,9 +449,7 @@ impl LegacyRecovery {
         (pto_timeout, pto_space)
     }
 
-    fn set_loss_detection_timer(
-        &mut self, handshake_status: HandshakeStatus, now: Instant,
-    ) {
+    fn set_loss_detection_timer(&mut self, handshake_status: HandshakeStatus, now: Instant) {
         let (earliest_loss_time, _) = self.loss_time_and_space();
 
         if let Some(to) = earliest_loss_time {
@@ -459,17 +464,18 @@ impl LegacyRecovery {
         }
 
         // PTO timer.
-        if let (Some(timeout), _) = self.pto_time_and_space(handshake_status, now)
-        {
+        if let (Some(timeout), _) = self.pto_time_and_space(handshake_status, now) {
             self.loss_timer.update(timeout);
         }
     }
 
     fn detect_lost_packets(
-        &mut self, epoch: packet::Epoch, now: Instant, trace_id: &str,
+        &mut self,
+        epoch: packet::Epoch,
+        now: Instant,
+        trace_id: &str,
     ) -> (usize, usize) {
-        let loss_delay = cmp::max(self.rtt_stats.latest_rtt, self.rtt())
-            .mul_f64(self.time_thresh);
+        let loss_delay = cmp::max(self.rtt_stats.latest_rtt, self.rtt()).mul_f64(self.time_thresh);
 
         let loss = self.epochs[epoch].detect_lost_packets(
             loss_delay,
@@ -497,8 +503,7 @@ impl LegacyRecovery {
 
         self.bytes_in_flight -= loss.pmtud_lost_bytes;
 
-        self.epochs[epoch]
-            .drain_acked_and_lost_packets(now - self.rtt_stats.rtt());
+        self.epochs[epoch].drain_acked_and_lost_packets(now - self.rtt_stats.rtt());
 
         self.congestion.lost_count += loss.lost_packets;
 
@@ -510,9 +515,8 @@ impl RecoveryOps for LegacyRecovery {
     /// Returns whether or not we should elicit an ACK even if we wouldn't
     /// otherwise have constructed an ACK eliciting packet.
     fn should_elicit_ack(&self, epoch: packet::Epoch) -> bool {
-        self.epochs[epoch].loss_probes > 0 ||
-            self.outstanding_non_ack_eliciting >=
-                MAX_OUTSTANDING_NON_ACK_ELICITING
+        self.epochs[epoch].loss_probes > 0
+            || self.outstanding_non_ack_eliciting >= MAX_OUTSTANDING_NON_ACK_ELICITING
     }
 
     fn get_acked_frames(&mut self, epoch: packet::Epoch) -> Vec<frame::Frame> {
@@ -541,13 +545,16 @@ impl RecoveryOps for LegacyRecovery {
     }
 
     fn ping_sent(&mut self, epoch: packet::Epoch) {
-        self.epochs[epoch].loss_probes =
-            self.epochs[epoch].loss_probes.saturating_sub(1);
+        self.epochs[epoch].loss_probes = self.epochs[epoch].loss_probes.saturating_sub(1);
     }
 
     fn on_packet_sent(
-        &mut self, mut pkt: Sent, epoch: packet::Epoch,
-        handshake_status: HandshakeStatus, now: Instant, trace_id: &str,
+        &mut self,
+        mut pkt: Sent,
+        epoch: packet::Epoch,
+        handshake_status: HandshakeStatus,
+        now: Instant,
+        trace_id: &str,
     ) {
         let ack_eliciting = pkt.ack_eliciting;
         let in_flight = pkt.in_flight;
@@ -593,8 +600,12 @@ impl RecoveryOps for LegacyRecovery {
 
     #[allow(clippy::too_many_arguments)]
     fn on_ack_received(
-        &mut self, ranges: &ranges::RangeSet, ack_delay: u64,
-        epoch: packet::Epoch, handshake_status: HandshakeStatus, now: Instant,
+        &mut self,
+        ranges: &ranges::RangeSet,
+        ack_delay: u64,
+        epoch: packet::Epoch,
+        handshake_status: HandshakeStatus,
+        now: Instant,
         trace_id: &str,
     ) -> (usize, usize, usize) {
         let largest_acked = ranges.last().unwrap();
@@ -623,8 +634,7 @@ impl RecoveryOps for LegacyRecovery {
 
         self.lost_spurious_count += spurious_losses;
         if let Some(thresh) = spurious_pkt_thresh {
-            self.pkt_thresh =
-                self.pkt_thresh.max(thresh.min(MAX_PACKET_THRESHOLD));
+            self.pkt_thresh = self.pkt_thresh.max(thresh.min(MAX_PACKET_THRESHOLD));
         }
 
         // Undo congestion window update.
@@ -666,14 +676,15 @@ impl RecoveryOps for LegacyRecovery {
 
         self.set_loss_detection_timer(handshake_status, now);
 
-        self.epochs[epoch]
-            .drain_acked_and_lost_packets(now - self.rtt_stats.rtt());
+        self.epochs[epoch].drain_acked_and_lost_packets(now - self.rtt_stats.rtt());
 
         (loss.0, loss.1, acked_bytes)
     }
 
     fn on_loss_detection_timeout(
-        &mut self, handshake_status: HandshakeStatus, now: Instant,
+        &mut self,
+        handshake_status: HandshakeStatus,
+        now: Instant,
         trace_id: &str,
     ) -> (usize, usize) {
         let (earliest_loss_time, epoch) = self.loss_time_and_space();
@@ -709,10 +720,10 @@ impl RecoveryOps for LegacyRecovery {
 
         let epoch = &mut self.epochs[epoch];
 
-        epoch.loss_probes =
-            cmp::min(self.pto_count as usize, MAX_PTO_PROBES_COUNT);
+        epoch.loss_probes = cmp::min(self.pto_count as usize, MAX_PTO_PROBES_COUNT);
 
-        let unacked_iter = epoch.sent_packets
+        let unacked_iter = epoch
+            .sent_packets
             .iter_mut()
             // Skip packets that have already been acked or lost, and packets
             // that don't contain either CRYPTO or STREAM frames.
@@ -740,7 +751,9 @@ impl RecoveryOps for LegacyRecovery {
     }
 
     fn on_pkt_num_space_discarded(
-        &mut self, epoch: packet::Epoch, handshake_status: HandshakeStatus,
+        &mut self,
+        epoch: packet::Epoch,
+        handshake_status: HandshakeStatus,
         now: Instant,
     ) {
         let epoch = &mut self.epochs[epoch];
@@ -748,9 +761,7 @@ impl RecoveryOps for LegacyRecovery {
         let unacked_bytes = epoch
             .sent_packets
             .iter()
-            .filter(|p| {
-                p.in_flight && p.time_acked.is_none() && p.time_lost.is_none()
-            })
+            .filter(|p| p.in_flight && p.time_acked.is_none() && p.time_lost.is_none())
             .fold(0, |acc, p| acc + p.size);
 
         self.bytes_in_flight -= unacked_bytes;
@@ -768,7 +779,10 @@ impl RecoveryOps for LegacyRecovery {
     }
 
     fn on_path_change(
-        &mut self, epoch: packet::Epoch, now: Instant, trace_id: &str,
+        &mut self,
+        epoch: packet::Epoch,
+        now: Instant,
+        trace_id: &str,
     ) -> (usize, usize) {
         // Time threshold loss detection.
         self.detect_lost_packets(epoch, now, trace_id)
@@ -789,8 +803,7 @@ impl RecoveryOps for LegacyRecovery {
         }
 
         // Open more space (snd_cnt) for PRR when allowed.
-        self.cwnd().saturating_sub(self.bytes_in_flight) +
-            self.congestion.prr.snd_cnt
+        self.cwnd().saturating_sub(self.bytes_in_flight) + self.congestion.prr.snd_cnt
     }
 
     fn rtt(&self) -> Duration {
@@ -820,12 +833,10 @@ impl RecoveryOps for LegacyRecovery {
     fn pmtud_update_max_datagram_size(&mut self, new_max_datagram_size: usize) {
         // Congestion Window is updated only when it's not updated already.
         // Update cwnd if it hasn't been updated yet.
-        if self.cwnd() ==
-            self.max_datagram_size *
-                self.congestion.initial_congestion_window_packets
+        if self.cwnd() == self.max_datagram_size * self.congestion.initial_congestion_window_packets
         {
-            self.congestion.congestion_window = new_max_datagram_size *
-                self.congestion.initial_congestion_window_packets;
+            self.congestion.congestion_window =
+                new_max_datagram_size * self.congestion.initial_congestion_window_packets;
         }
 
         self.congestion.pacer = pacer::Pacer::new(
@@ -840,9 +851,7 @@ impl RecoveryOps for LegacyRecovery {
     }
 
     fn update_max_datagram_size(&mut self, new_max_datagram_size: usize) {
-        self.pmtud_update_max_datagram_size(
-            self.max_datagram_size.min(new_max_datagram_size),
-        )
+        self.pmtud_update_max_datagram_size(self.max_datagram_size.min(new_max_datagram_size))
     }
 
     #[cfg(test)]
@@ -882,7 +891,9 @@ impl RecoveryOps for LegacyRecovery {
 
     #[cfg(test)]
     fn detect_lost_packets_for_test(
-        &mut self, epoch: packet::Epoch, now: Instant,
+        &mut self,
+        epoch: packet::Epoch,
+        now: Instant,
     ) -> (usize, usize) {
         self.detect_lost_packets(epoch, now, "")
     }

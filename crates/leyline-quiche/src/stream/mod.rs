@@ -164,9 +164,7 @@ pub struct StreamMap {
 }
 
 impl StreamMap {
-    pub fn new(
-        max_streams_bidi: u64, max_streams_uni: u64, max_stream_window: u64,
-    ) -> StreamMap {
+    pub fn new(max_streams_bidi: u64, max_streams_uni: u64, max_stream_window: u64) -> StreamMap {
         StreamMap {
             local_max_streams_bidi: max_streams_bidi,
             local_max_streams_bidi_next: max_streams_bidi,
@@ -203,8 +201,12 @@ impl StreamMap {
     /// count limits. If one of these limits is violated, the `StreamLimit`
     /// error is returned.
     pub(crate) fn get_or_create(
-        &mut self, id: u64, local_params: &crate::TransportParams,
-        peer_params: &crate::TransportParams, local: bool, is_server: bool,
+        &mut self,
+        id: u64,
+        local_params: &crate::TransportParams,
+        peer_params: &crate::TransportParams,
+        local: bool,
+        is_server: bool,
     ) -> Result<&mut Stream> {
         let (stream, is_new_and_writable) = match self.streams.entry(id) {
             hash_map::Entry::Vacant(v) => {
@@ -234,8 +236,7 @@ impl StreamMap {
                     ),
 
                     // Remotely-initiated unidirectional stream.
-                    (false, false) =>
-                        (local_params.initial_max_stream_data_uni, 0),
+                    (false, false) => (local_params.initial_max_stream_data_uni, 0),
                 };
 
                 // The two least significant bits from a stream id identify the
@@ -246,56 +247,44 @@ impl StreamMap {
                 // Enforce stream count limits.
                 match (is_local(id, is_server), is_bidi(id)) {
                     (true, true) => {
-                        let n = std::cmp::max(
-                            self.local_opened_streams_bidi,
-                            stream_sequence + 1,
-                        );
+                        let n = std::cmp::max(self.local_opened_streams_bidi, stream_sequence + 1);
 
                         if n > self.peer_max_streams_bidi {
                             return Err(Error::StreamLimit);
                         }
 
                         self.local_opened_streams_bidi = n;
-                    },
+                    }
 
                     (true, false) => {
-                        let n = std::cmp::max(
-                            self.local_opened_streams_uni,
-                            stream_sequence + 1,
-                        );
+                        let n = std::cmp::max(self.local_opened_streams_uni, stream_sequence + 1);
 
                         if n > self.peer_max_streams_uni {
                             return Err(Error::StreamLimit);
                         }
 
                         self.local_opened_streams_uni = n;
-                    },
+                    }
 
                     (false, true) => {
-                        let n = std::cmp::max(
-                            self.peer_opened_streams_bidi,
-                            stream_sequence + 1,
-                        );
+                        let n = std::cmp::max(self.peer_opened_streams_bidi, stream_sequence + 1);
 
                         if n > self.local_max_streams_bidi {
                             return Err(Error::StreamLimit);
                         }
 
                         self.peer_opened_streams_bidi = n;
-                    },
+                    }
 
                     (false, false) => {
-                        let n = std::cmp::max(
-                            self.peer_opened_streams_uni,
-                            stream_sequence + 1,
-                        );
+                        let n = std::cmp::max(self.peer_opened_streams_uni, stream_sequence + 1);
 
                         if n > self.local_max_streams_uni {
                             return Err(Error::StreamLimit);
                         }
 
                         self.peer_opened_streams_uni = n;
-                    },
+                    }
                 };
 
                 let s = Stream::new(
@@ -310,7 +299,7 @@ impl StreamMap {
                 let is_writable = s.is_writable();
 
                 (v.insert(s), is_writable)
-            },
+            }
 
             hash_map::Entry::Occupied(v) => (v.into_mut(), false),
         };
@@ -404,9 +393,7 @@ impl StreamMap {
     }
 
     /// Updates the priorities of a stream.
-    pub fn update_priority(
-        &mut self, old: &Arc<StreamPriorityKey>, new: &Arc<StreamPriorityKey>,
-    ) {
+    pub fn update_priority(&mut self, old: &Arc<StreamPriorityKey>, new: &Arc<StreamPriorityKey>) {
         if old.readable.is_linked() {
             self.remove_readable(old);
             self.readable.insert(Arc::clone(new));
@@ -452,9 +439,7 @@ impl StreamMap {
     /// given error code and final size values.
     ///
     /// If the stream was already in the list, this does nothing.
-    pub fn insert_reset(
-        &mut self, stream_id: u64, error_code: u64, final_size: u64,
-    ) {
+    pub fn insert_reset(&mut self, stream_id: u64, error_code: u64, final_size: u64) {
         self.reset.insert(stream_id, (error_code, final_size));
     }
 
@@ -535,8 +520,7 @@ impl StreamMap {
                 self.local_max_streams_bidi_next =
                     self.local_max_streams_bidi_next.saturating_add(1);
             } else {
-                self.local_max_streams_uni_next =
-                    self.local_max_streams_uni_next.saturating_add(1);
+                self.local_max_streams_uni_next = self.local_max_streams_uni_next.saturating_add(1);
             }
         }
 
@@ -626,17 +610,17 @@ impl StreamMap {
     /// Returns true if the max bidirectional streams count needs to be updated
     /// by sending a MAX_STREAMS frame to the peer.
     pub fn should_update_max_streams_bidi(&self) -> bool {
-        self.local_max_streams_bidi_next != self.local_max_streams_bidi &&
-            self.local_max_streams_bidi_next / 2 >
-                self.local_max_streams_bidi - self.peer_opened_streams_bidi
+        self.local_max_streams_bidi_next != self.local_max_streams_bidi
+            && self.local_max_streams_bidi_next / 2
+                > self.local_max_streams_bidi - self.peer_opened_streams_bidi
     }
 
     /// Returns true if the max unidirectional streams count needs to be updated
     /// by sending a MAX_STREAMS frame to the peer.
     pub fn should_update_max_streams_uni(&self) -> bool {
-        self.local_max_streams_uni_next != self.local_max_streams_uni &&
-            self.local_max_streams_uni_next / 2 >
-                self.local_max_streams_uni - self.peer_opened_streams_uni
+        self.local_max_streams_uni_next != self.local_max_streams_uni
+            && self.local_max_streams_uni_next / 2
+                > self.local_max_streams_uni - self.peer_opened_streams_uni
     }
 
     /// Returns the number of active streams in the map.
@@ -674,7 +658,11 @@ pub struct Stream {
 impl Stream {
     /// Creates a new stream with the given flow control limits.
     pub fn new(
-        id: u64, max_rx_data: u64, max_tx_data: u64, bidi: bool, local: bool,
+        id: u64,
+        max_rx_data: u64,
+        max_tx_data: u64,
+        bidi: bool,
+        local: bool,
         max_window: u64,
     ) -> Stream {
         let priority_key = Arc::new(StreamPriorityKey {
@@ -702,10 +690,9 @@ impl Stream {
     /// Returns true if the stream has enough flow control capacity to be
     /// written to, and is not finished.
     pub fn is_writable(&self) -> bool {
-        !self.send.is_shutdown() &&
-            !self.send.is_fin() &&
-            (self.send.off_back() + self.send_lowat as u64) <
-                self.send.max_off()
+        !self.send.is_shutdown()
+            && !self.send.is_fin()
+            && (self.send.off_back() + self.send_lowat as u64) < self.send.max_off()
     }
 
     /// Returns true if the stream has data to send and is allowed to send at
@@ -713,9 +700,7 @@ impl Stream {
     pub fn is_flushable(&self) -> bool {
         let off_front = self.send.off_front();
 
-        !self.send.is_empty() &&
-            off_front < self.send.off_back() &&
-            off_front < self.send.max_off()
+        !self.send.is_empty() && off_front < self.send.off_back() && off_front < self.send.max_off()
     }
 
     /// Returns true if the stream is complete.
@@ -1393,8 +1378,7 @@ mod tests {
 
     #[test]
     fn stream_complete() {
-        let mut stream =
-            Stream::new(0, 30, 30, true, true, DEFAULT_STREAM_WINDOW);
+        let mut stream = Stream::new(0, 30, 30, true, true, DEFAULT_STREAM_WINDOW);
 
         assert_eq!(stream.send.write(b"hello", false), Ok(5));
         assert_eq!(stream.send.write(b"world", false), Ok(5));
@@ -1459,8 +1443,7 @@ mod tests {
     }
 
     fn stream_send_ready(stream: &Stream) -> bool {
-        !stream.send.is_empty() &&
-            stream.send.off_front() < stream.send.off_back()
+        !stream.send.is_empty() && stream.send.off_front() < stream.send.off_back()
     }
 
     #[test]
@@ -1991,10 +1974,8 @@ mod tests {
                 ..Default::default()
             });
 
-            let old_priority_key = std::mem::replace(
-                &mut stream.priority_key,
-                new_priority_key.clone(),
-            );
+            let old_priority_key =
+                std::mem::replace(&mut stream.priority_key, new_priority_key.clone());
 
             streams.update_priority(&old_priority_key, &new_priority_key);
         }
@@ -2019,10 +2000,8 @@ mod tests {
                 ..Default::default()
             });
 
-            let old_priority_key = std::mem::replace(
-                &mut stream.priority_key,
-                new_priority_key.clone(),
-            );
+            let old_priority_key =
+                std::mem::replace(&mut stream.priority_key, new_priority_key.clone());
 
             streams.update_priority(&old_priority_key, &new_priority_key);
         }
@@ -2093,10 +2072,8 @@ mod tests {
                 ..Default::default()
             });
 
-            let old_priority_key = std::mem::replace(
-                &mut stream.priority_key,
-                new_priority_key.clone(),
-            );
+            let old_priority_key =
+                std::mem::replace(&mut stream.priority_key, new_priority_key.clone());
 
             streams.update_priority(&old_priority_key, &new_priority_key);
         }
@@ -2180,8 +2157,7 @@ mod tests {
 
     #[test]
     fn priority_tree_dupes() {
-        let mut prioritized_writable: RBTree<StreamWritablePriorityAdapter> =
-            Default::default();
+        let mut prioritized_writable: RBTree<StreamWritablePriorityAdapter> = Default::default();
 
         for id in [0, 4, 8, 12] {
             let s = Arc::new(StreamPriorityKey {
@@ -2194,8 +2170,7 @@ mod tests {
             prioritized_writable.insert(s);
         }
 
-        let walk_1: Vec<u64> =
-            prioritized_writable.iter().map(|s| s.id).collect();
+        let walk_1: Vec<u64> = prioritized_writable.iter().map(|s| s.id).collect();
         assert_eq!(walk_1, vec![0, 4, 8, 12]);
 
         // Default keys could cause duplicate entries, this is normally protected
@@ -2211,8 +2186,7 @@ mod tests {
             prioritized_writable.insert(s);
         }
 
-        let walk_2: Vec<u64> =
-            prioritized_writable.iter().map(|s| s.id).collect();
+        let walk_2: Vec<u64> = prioritized_writable.iter().map(|s| s.id).collect();
         assert_eq!(walk_2, vec![0, 0, 4, 4, 8, 8, 12, 12]);
     }
 }

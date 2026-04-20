@@ -521,8 +521,7 @@ impl State {
 fn bbr2_enter_recovery(r: &mut Congestion, in_flight: usize, now: Instant) {
     r.bbr2_state.prior_cwnd = per_ack::bbr2_save_cwnd(r);
 
-    r.congestion_window =
-        in_flight + r.bbr2_state.newly_acked_bytes.max(r.max_datagram_size);
+    r.congestion_window = in_flight + r.bbr2_state.newly_acked_bytes.max(r.max_datagram_size);
     r.congestion_recovery_start_time = Some(now);
 
     r.bbr2_state.packet_conservation = true;
@@ -548,15 +547,16 @@ fn on_init(r: &mut Congestion) {
     init::bbr2_init(r);
 }
 
-fn on_packet_sent(
-    r: &mut Congestion, _sent_bytes: usize, bytes_in_flight: usize, now: Instant,
-) {
+fn on_packet_sent(r: &mut Congestion, _sent_bytes: usize, bytes_in_flight: usize, now: Instant) {
     per_transmit::bbr2_on_transmit(r, bytes_in_flight, now);
 }
 
 fn on_packets_acked(
-    r: &mut Congestion, bytes_in_flight: usize, packets: &mut Vec<Acked>,
-    now: Instant, _rtt_stats: &RttStats,
+    r: &mut Congestion,
+    bytes_in_flight: usize,
+    packets: &mut Vec<Acked>,
+    now: Instant,
+    _rtt_stats: &RttStats,
 ) {
     r.bbr2_state.newly_acked_bytes = 0;
 
@@ -587,8 +587,11 @@ fn on_packets_acked(
 }
 
 fn congestion_event(
-    r: &mut Congestion, bytes_in_flight: usize, lost_bytes: usize,
-    largest_lost_pkt: &Sent, now: Instant,
+    r: &mut Congestion,
+    bytes_in_flight: usize,
+    lost_bytes: usize,
+    largest_lost_pkt: &Sent,
+    now: Instant,
 ) {
     r.bbr2_state.newly_lost_bytes = lost_bytes;
 

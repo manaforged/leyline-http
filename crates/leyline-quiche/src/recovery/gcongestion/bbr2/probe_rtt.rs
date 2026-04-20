@@ -58,7 +58,9 @@ impl ProbeRTT {
     }
 
     fn into_probe_bw(
-        mut self, now: Instant, congestion_event: Option<&BBRv2CongestionEvent>,
+        mut self,
+        now: Instant,
+        congestion_event: Option<&BBRv2CongestionEvent>,
     ) -> Mode {
         self.leave(now, congestion_event);
         let mut next_mode = Mode::probe_bw(self.model, self.cycle);
@@ -80,26 +82,28 @@ impl ModeImpl for ProbeRTT {
     }
 
     fn on_congestion_event(
-        mut self, _prior_in_flight: usize, event_time: Instant,
-        _acked_packets: &[Acked], _lost_packets: &[Lost],
+        mut self,
+        _prior_in_flight: usize,
+        event_time: Instant,
+        _acked_packets: &[Acked],
+        _lost_packets: &[Lost],
         congestion_event: &mut BBRv2CongestionEvent,
         _target_bytes_inflight: usize,
     ) -> Mode {
         match self.exit_time {
             None => {
                 if congestion_event.bytes_in_flight <= self.inflight_target() {
-                    self.exit_time = Some(
-                        congestion_event.event_time + PARAMS.probe_rtt_duration,
-                    )
+                    self.exit_time = Some(congestion_event.event_time + PARAMS.probe_rtt_duration)
                 }
                 Mode::ProbeRTT(self)
-            },
-            Some(exit_time) =>
+            }
+            Some(exit_time) => {
                 if congestion_event.event_time > exit_time {
                     self.into_probe_bw(event_time, Some(congestion_event))
                 } else {
                     Mode::ProbeRTT(self)
-                },
+                }
+            }
         }
     }
 
@@ -111,9 +115,7 @@ impl ModeImpl for ProbeRTT {
         Limits::no_greater_than(inflight_upper_bound.min(self.inflight_target()))
     }
 
-    fn on_exit_quiescence(
-        self, now: Instant, _quiescence_start_time: Instant,
-    ) -> Mode {
+    fn on_exit_quiescence(self, now: Instant, _quiescence_start_time: Instant) -> Mode {
         match self.exit_time {
             None => self.into_probe_bw(now, None),
             Some(exit_time) if now > exit_time => self.into_probe_bw(now, None),
@@ -121,18 +123,11 @@ impl ModeImpl for ProbeRTT {
         }
     }
 
-    fn enter(
-        &mut self, _now: Instant,
-        _congestion_event: Option<&BBRv2CongestionEvent>,
-    ) {
+    fn enter(&mut self, _now: Instant, _congestion_event: Option<&BBRv2CongestionEvent>) {
         self.model.set_pacing_gain(1.0);
         self.model.set_cwnd_gain(1.0);
         self.exit_time = None;
     }
 
-    fn leave(
-        &mut self, _now: Instant,
-        _congestion_event: Option<&BBRv2CongestionEvent>,
-    ) {
-    }
+    fn leave(&mut self, _now: Instant, _congestion_event: Option<&BBRv2CongestionEvent>) {}
 }

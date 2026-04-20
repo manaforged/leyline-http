@@ -109,10 +109,7 @@ impl FlowControl {
     pub fn autotune_window(&mut self, now: Instant, rtt: Duration) {
         if let Some(last_update) = self.last_update {
             if now - last_update < rtt * WINDOW_TRIGGER_FACTOR {
-                self.window = std::cmp::min(
-                    self.window * WINDOW_INCREASE_FACTOR,
-                    self.max_window,
-                );
+                self.window = std::cmp::min(self.window * WINDOW_INCREASE_FACTOR, self.max_window);
             }
         }
     }

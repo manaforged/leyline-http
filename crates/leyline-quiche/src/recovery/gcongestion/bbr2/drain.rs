@@ -53,8 +53,11 @@ impl ModeImpl for Drain {
     }
 
     fn on_congestion_event(
-        mut self, _prior_in_flight: usize, event_time: Instant,
-        _acked_packets: &[Acked], _lost_packets: &[Lost],
+        mut self,
+        _prior_in_flight: usize,
+        event_time: Instant,
+        _acked_packets: &[Acked],
+        _lost_packets: &[Lost],
         congestion_event: &mut BBRv2CongestionEvent,
         _target_bytes_inflight: usize,
     ) -> Mode {
@@ -78,9 +81,7 @@ impl ModeImpl for Drain {
         }
     }
 
-    fn on_exit_quiescence(
-        self, _now: Instant, _quiescence_start_time: Instant,
-    ) -> Mode {
+    fn on_exit_quiescence(self, _now: Instant, _quiescence_start_time: Instant) -> Mode {
         Mode::Drain(self)
     }
 
@@ -91,7 +92,9 @@ impl ModeImpl for Drain {
 
 impl Drain {
     fn into_probe_bw(
-        mut self, now: Instant, congestion_event: Option<&BBRv2CongestionEvent>,
+        mut self,
+        now: Instant,
+        congestion_event: Option<&BBRv2CongestionEvent>,
     ) -> Mode {
         self.leave(now, congestion_event);
         let mut next_mode = Mode::probe_bw(self.model, self.cycle);

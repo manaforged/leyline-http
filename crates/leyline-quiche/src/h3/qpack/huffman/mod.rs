@@ -55,9 +55,7 @@ pub fn decode(b: &mut octets::Octets) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-pub fn encode<const LOWER_CASE: bool>(
-    src: &[u8], out: &mut octets::OctetsMut,
-) -> Result<()> {
+pub fn encode<const LOWER_CASE: bool>(src: &[u8], out: &mut octets::OctetsMut) -> Result<()> {
     let mut bits: u64 = 0;
     let mut pending = 0;
 

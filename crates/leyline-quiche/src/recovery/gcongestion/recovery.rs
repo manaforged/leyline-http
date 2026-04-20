@@ -153,7 +153,10 @@ impl RecoveryEpoch {
     }
 
     fn detect_and_remove_acked_packets(
-        &mut self, acked: &RangeSet, newly_acked: &mut Vec<Acked>, trace_id: &str,
+        &mut self,
+        acked: &RangeSet,
+        newly_acked: &mut Vec<Acked>,
+        trace_id: &str,
     ) -> AckedDetectionResult {
         // Update the largest acked packet
         self.largest_acked_packet.replace(
@@ -188,9 +191,7 @@ impl RecoveryEpoch {
                     .unwrap_or_else(|e| e)
             };
 
-            for SentPacket { pkt_num, status } in
-                self.sent_packets.range_mut(start..)
-            {
+            for SentPacket { pkt_num, status } in self.sent_packets.range_mut(start..) {
                 if *pkt_num < ack.end {
                     match status.ack() {
                         SentStatus::Sent {
@@ -215,15 +216,14 @@ impl RecoveryEpoch {
                             has_ack_eliciting |= ack_eliciting;
 
                             trace!("{} packet newly acked {}", trace_id, pkt_num);
-                        },
+                        }
 
-                        SentStatus::Acked => {},
+                        SentStatus::Acked => {}
                         SentStatus::Lost => {
                             // An acked packet was already declared lost
                             spurious_losses += 1;
-                            spurious_pkt_thresh
-                                .get_or_insert(largest_acked - *pkt_num + 1);
-                        },
+                            spurious_pkt_thresh.get_or_insert(largest_acked - *pkt_num + 1);
+                        }
                     }
                 } else {
                     break;
@@ -242,7 +242,10 @@ impl RecoveryEpoch {
     }
 
     fn detect_and_remove_lost_packets(
-        &mut self, loss_delay: Duration, pkt_thresh: u64, now: Instant,
+        &mut self,
+        loss_delay: Duration,
+        pkt_thresh: u64,
+        now: Instant,
         newly_lost: &mut Vec<Lost>,
     ) -> LossDetectionResult {
         newly_lost.clear();
@@ -260,9 +263,7 @@ impl RecoveryEpoch {
             }
 
             if let SentStatus::Sent { time_sent, .. } = status {
-                if *time_sent <= lost_send_time ||
-                    largest_acked >= *pkt_num + pkt_thresh
-                {
+                if *time_sent <= lost_send_time || largest_acked >= *pkt_num + pkt_thresh {
                     if let SentStatus::Sent {
                         in_flight,
                         sent_bytes,
@@ -424,7 +425,9 @@ impl GRecovery {
     }
 
     fn detect_and_remove_lost_packets(
-        &mut self, epoch: packet::Epoch, now: Instant,
+        &mut self,
+        epoch: packet::Epoch,
+        now: Instant,
     ) -> (usize, usize) {
         let lost = &mut self.lost_reuse;
 
@@ -467,7 +470,9 @@ impl GRecovery {
     }
 
     fn pto_time_and_space(
-        &self, handshake_status: HandshakeStatus, now: Instant,
+        &self,
+        handshake_status: HandshakeStatus,
+        now: Instant,
     ) -> (Option<Instant>, packet::Epoch) {
         let mut duration = self.pto() * (1 << self.pto_count);
 
@@ -484,9 +489,7 @@ impl GRecovery {
         let mut pto_space = packet::Epoch::Initial;
 
         // Iterate over all packet number spaces.
-        for &e in packet::Epoch::epochs(
-            packet::Epoch::Initial..=packet::Epoch::Application,
-        ) {
+        for &e in packet::Epoch::epochs(packet::Epoch::Initial..=packet::Epoch::Application) {
             if self.epochs[e].pkts_in_flight == 0 {
                 continue;
             }
@@ -498,8 +501,7 @@ impl GRecovery {
                 }
 
                 // Include max_ack_delay and backoff for Application Data.
-                duration +=
-                    self.rtt_stats.max_ack_delay * 2_u32.pow(self.pto_count);
+                duration += self.rtt_stats.max_ack_delay * 2_u32.pow(self.pto_count);
             }
 
             let new_time = self.epochs[e]
@@ -515,9 +517,7 @@ impl GRecovery {
         (pto_timeout, pto_space)
     }
 
-    fn set_loss_detection_timer(
-        &mut self, handshake_status: HandshakeStatus, now: Instant,
-    ) {
+    fn set_loss_detection_timer(&mut self, handshake_status: HandshakeStatus, now: Instant) {
         if let (Some(earliest_loss_time), _) = self.loss_time_and_space() {
             // Time threshold loss detection.
             self.loss_timer.update(earliest_loss_time);
@@ -530,8 +530,7 @@ impl GRecovery {
         }
 
         // PTO timer.
-        if let (Some(timeout), _) = self.pto_time_and_space(handshake_status, now)
-        {
+        if let (Some(timeout), _) = self.pto_time_and_space(handshake_status, now) {
             self.loss_timer.update(timeout);
         }
     }
@@ -547,9 +546,8 @@ impl RecoveryOps for GRecovery {
     }
 
     fn should_elicit_ack(&self, epoch: packet::Epoch) -> bool {
-        self.epochs[epoch].loss_probes > 0 ||
-            self.outstanding_non_ack_eliciting >=
-                MAX_OUTSTANDING_NON_ACK_ELICITING
+        self.epochs[epoch].loss_probes > 0
+            || self.outstanding_non_ack_eliciting >= MAX_OUTSTANDING_NON_ACK_ELICITING
     }
 
     fn get_acked_frames(&mut self, epoch: packet::Epoch) -> Vec<frame::Frame> {
@@ -578,13 +576,16 @@ impl RecoveryOps for GRecovery {
     }
 
     fn ping_sent(&mut self, epoch: packet::Epoch) {
-        self.epochs[epoch].loss_probes =
-            self.epochs[epoch].loss_probes.saturating_sub(1);
+        self.epochs[epoch].loss_probes = self.epochs[epoch].loss_probes.saturating_sub(1);
     }
 
     fn on_packet_sent(
-        &mut self, pkt: Sent, epoch: packet::Epoch,
-        handshake_status: HandshakeStatus, now: Instant, trace_id: &str,
+        &mut self,
+        pkt: Sent,
+        epoch: packet::Epoch,
+        handshake_status: HandshakeStatus,
+        now: Instant,
+        trace_id: &str,
     ) {
         let time_sent = self.get_next_release_time().time(now).unwrap_or(now);
 
@@ -644,8 +645,13 @@ impl RecoveryOps for GRecovery {
     }
 
     fn on_ack_received(
-        &mut self, ranges: &RangeSet, ack_delay: u64, epoch: packet::Epoch,
-        handshake_status: HandshakeStatus, now: Instant, trace_id: &str,
+        &mut self,
+        ranges: &RangeSet,
+        ack_delay: u64,
+        epoch: packet::Epoch,
+        handshake_status: HandshakeStatus,
+        now: Instant,
+        trace_id: &str,
     ) -> (usize, usize, usize) {
         let prior_in_flight = self.bytes_in_flight;
 
@@ -662,8 +668,7 @@ impl RecoveryOps for GRecovery {
 
         self.lost_spurious_count += spurious_losses;
         if let Some(thresh) = spurious_pkt_thresh {
-            self.pkt_thresh =
-                self.pkt_thresh.max(thresh.min(MAX_PACKET_THRESHOLD));
+            self.pkt_thresh = self.pkt_thresh.max(thresh.min(MAX_PACKET_THRESHOLD));
         }
 
         if self.newly_acked.is_empty() {
@@ -674,9 +679,8 @@ impl RecoveryOps for GRecovery {
 
         // Check if largest packet is newly acked.
         let largest_newly_acked = self.newly_acked.last().unwrap();
-        let update_rtt: bool = largest_newly_acked.pkt_num ==
-            ranges.last().unwrap() &&
-            has_ack_eliciting;
+        let update_rtt: bool =
+            largest_newly_acked.pkt_num == ranges.last().unwrap() && has_ack_eliciting;
         if update_rtt {
             let latest_rtt = now - largest_newly_acked.time_sent;
             self.rtt_stats.update_rtt(
@@ -687,8 +691,7 @@ impl RecoveryOps for GRecovery {
             );
         }
 
-        let (lost_bytes, lost_packets) =
-            self.detect_and_remove_lost_packets(epoch, now);
+        let (lost_bytes, lost_packets) = self.detect_and_remove_lost_packets(epoch, now);
 
         self.pacer.on_congestion_event(
             update_rtt,
@@ -712,7 +715,9 @@ impl RecoveryOps for GRecovery {
     }
 
     fn on_loss_detection_timeout(
-        &mut self, handshake_status: HandshakeStatus, now: Instant,
+        &mut self,
+        handshake_status: HandshakeStatus,
+        now: Instant,
         trace_id: &str,
     ) -> (usize, usize) {
         let (earliest_loss_time, epoch) = self.loss_time_and_space();
@@ -720,8 +725,7 @@ impl RecoveryOps for GRecovery {
         if earliest_loss_time.is_some() {
             let prior_in_flight = self.bytes_in_flight;
 
-            let (lost_bytes, lost_packets) =
-                self.detect_and_remove_lost_packets(epoch, now);
+            let (lost_bytes, lost_packets) = self.detect_and_remove_lost_packets(epoch, now);
 
             self.pacer.on_congestion_event(
                 false,
@@ -806,7 +810,9 @@ impl RecoveryOps for GRecovery {
     }
 
     fn on_pkt_num_space_discarded(
-        &mut self, epoch: packet::Epoch, handshake_status: HandshakeStatus,
+        &mut self,
+        epoch: packet::Epoch,
+        handshake_status: HandshakeStatus,
         now: Instant,
     ) {
         let epoch = &mut self.epochs[epoch];
@@ -817,10 +823,12 @@ impl RecoveryOps for GRecovery {
     }
 
     fn on_path_change(
-        &mut self, epoch: packet::Epoch, now: Instant, _trace_id: &str,
+        &mut self,
+        epoch: packet::Epoch,
+        now: Instant,
+        _trace_id: &str,
     ) -> (usize, usize) {
-        let (lost_bytes, lost_packets) =
-            self.detect_and_remove_lost_packets(epoch, now);
+        let (lost_bytes, lost_packets) = self.detect_and_remove_lost_packets(epoch, now);
 
         (lost_packets, lost_bytes)
     }
@@ -875,9 +883,7 @@ impl RecoveryOps for GRecovery {
     }
 
     fn update_max_datagram_size(&mut self, new_max_datagram_size: usize) {
-        self.pmtud_update_max_datagram_size(
-            self.max_datagram_size.min(new_max_datagram_size),
-        )
+        self.pmtud_update_max_datagram_size(self.max_datagram_size.min(new_max_datagram_size))
     }
 
     fn on_app_limited(&mut self) {
@@ -923,7 +929,9 @@ impl RecoveryOps for GRecovery {
 
     #[cfg(test)]
     fn detect_lost_packets_for_test(
-        &mut self, epoch: packet::Epoch, now: Instant,
+        &mut self,
+        epoch: packet::Epoch,
+        now: Instant,
     ) -> (usize, usize) {
         let ret = self.detect_and_remove_lost_packets(epoch, now);
         self.epochs[epoch].drain_acked_and_lost_packets();

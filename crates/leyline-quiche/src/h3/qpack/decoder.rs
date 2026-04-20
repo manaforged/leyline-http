@@ -119,7 +119,7 @@ impl Decoder {
 
                     let hdr = Header::new(name, value);
                     out.push(hdr);
-                },
+                }
 
                 Representation::IndexedWithPostBase => {
                     let index = decode_int(&mut b, 4)?;
@@ -128,7 +128,7 @@ impl Decoder {
 
                     // TODO: implement dynamic table
                     return Err(Error::InvalidHeaderValue);
-                },
+                }
 
                 Representation::Literal => {
                     let name_huff = b.as_ref()[0] & 0x08 == 0x08;
@@ -159,7 +159,7 @@ impl Decoder {
                     // from `name` and `value`, which are already String.
                     let hdr = Header(name, value);
                     out.push(hdr);
-                },
+                }
 
                 Representation::LiteralWithNameRef => {
                     const STATIC: u8 = 0x10;
@@ -191,14 +191,14 @@ impl Decoder {
                     // as it is just a reference.
                     let hdr = Header(name.to_vec(), value);
                     out.push(hdr);
-                },
+                }
 
                 Representation::LiteralWithPostBase => {
                     trace!("Literal With Post Base");
 
                     // TODO: implement dynamic table
                     return Err(Error::InvalidHeaderValue);
-                },
+                }
             }
         }
 

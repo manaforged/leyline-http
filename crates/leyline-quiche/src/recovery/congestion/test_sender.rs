@@ -103,12 +103,8 @@ impl TestSender {
     pub(crate) fn inject_ack(&mut self, acked: Acked, now: Instant) {
         let _ = self.sent_packets.pop_front().unwrap();
 
-        self.cc.on_packets_acked(
-            self.bytes_in_flight,
-            &mut vec![acked],
-            &self.rtt_stats,
-            now,
-        );
+        self.cc
+            .on_packets_acked(self.bytes_in_flight, &mut vec![acked], &self.rtt_stats, now);
     }
 
     pub(crate) fn ack_n_packets(&mut self, n: usize, bytes: usize) {
@@ -132,19 +128,13 @@ impl TestSender {
             self.next_ack += 1;
         }
 
-        self.cc.on_packets_acked(
-            self.bytes_in_flight,
-            &mut acked,
-            &self.rtt_stats,
-            self.time,
-        );
+        self.cc
+            .on_packets_acked(self.bytes_in_flight, &mut acked, &self.rtt_stats, self.time);
 
         self.bytes_in_flight -= n * bytes;
     }
 
-    pub(crate) fn lose_n_packets(
-        &mut self, n: usize, bytes: usize, time_sent: Option<Instant>,
-    ) {
+    pub(crate) fn lose_n_packets(&mut self, n: usize, bytes: usize, time_sent: Option<Instant>) {
         let mut unacked = None;
 
         for _ in 0..n {

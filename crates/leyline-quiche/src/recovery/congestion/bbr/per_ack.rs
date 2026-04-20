@@ -45,7 +45,10 @@ fn bbr_min_pipe_cwnd(r: &mut Congestion) -> usize {
 // BBR Functions when ACK is received.
 //
 pub fn bbr_update_model_and_state(
-    r: &mut Congestion, packet: &Acked, bytes_in_flight: usize, now: Instant,
+    r: &mut Congestion,
+    packet: &Acked,
+    bytes_in_flight: usize,
+    now: Instant,
 ) {
     bbr_update_btlbw(r, packet, bytes_in_flight);
     bbr_check_cycle_phase(r, now);
@@ -55,9 +58,7 @@ pub fn bbr_update_model_and_state(
     bbr_check_probe_rtt(r, bytes_in_flight, now);
 }
 
-pub fn bbr_update_control_parameters(
-    r: &mut Congestion, bytes_in_flight: usize, now: Instant,
-) {
+pub fn bbr_update_control_parameters(r: &mut Congestion, bytes_in_flight: usize, now: Instant) {
     pacing::bbr_set_pacing_rate(r);
     bbr_set_send_quantum(r);
 
@@ -75,9 +76,7 @@ pub fn bbr_update_control_parameters(
 fn bbr_update_btlbw(r: &mut Congestion, packet: &Acked, _bytes_in_flight: usize) {
     bbr_update_round(r, packet);
 
-    if r.delivery_rate() >= r.bbr_state.btlbw ||
-        !r.delivery_rate.sample_is_app_limited()
-    {
+    if r.delivery_rate() >= r.bbr_state.btlbw || !r.delivery_rate.sample_is_app_limited() {
         // Since minmax filter is based on time,
         // start_time + (round_count as seconds) is used instead.
         r.bbr_state.btlbw = r.bbr_state.btlbwfilter.running_max(
@@ -148,8 +147,7 @@ fn bbr_update_target_cwnd(r: &mut Congestion) {
 
 // 4.2.3.4 Modulating cwnd in Loss Recovery
 pub fn bbr_save_cwnd(r: &mut Congestion) -> usize {
-    if !r.bbr_state.in_recovery && r.bbr_state.state != BBRStateMachine::ProbeRTT
-    {
+    if !r.bbr_state.in_recovery && r.bbr_state.state != BBRStateMachine::ProbeRTT {
         r.congestion_window
     } else {
         r.congestion_window.max(r.bbr_state.prior_cwnd)
@@ -173,8 +171,7 @@ fn bbr_modulate_cwnd_for_recovery(r: &mut Congestion, bytes_in_flight: usize) {
     }
 
     if r.bbr_state.packet_conservation {
-        r.congestion_window =
-            r.congestion_window.max(bytes_in_flight + acked_bytes);
+        r.congestion_window = r.congestion_window.max(bytes_in_flight + acked_bytes);
     }
 }
 
@@ -194,13 +191,11 @@ fn bbr_set_cwnd(r: &mut Congestion, bytes_in_flight: usize) {
 
     if !r.bbr_state.packet_conservation {
         if r.bbr_state.filled_pipe {
-            r.congestion_window = cmp::min(
-                r.congestion_window + acked_bytes,
-                r.bbr_state.target_cwnd,
-            )
-        } else if r.congestion_window < r.bbr_state.target_cwnd ||
-            r.delivery_rate.delivered() <
-                r.max_datagram_size * r.initial_congestion_window_packets
+            r.congestion_window =
+                cmp::min(r.congestion_window + acked_bytes, r.bbr_state.target_cwnd)
+        } else if r.congestion_window < r.bbr_state.target_cwnd
+            || r.delivery_rate.delivered()
+                < r.max_datagram_size * r.initial_congestion_window_packets
         {
             r.congestion_window += acked_bytes;
         }
@@ -214,17 +209,15 @@ fn bbr_set_cwnd(r: &mut Congestion, bytes_in_flight: usize) {
 // 4.3.2.2.  Estimating When Startup has Filled the Pipe
 fn bbr_check_full_pipe(r: &mut Congestion) {
     // No need to check for a full pipe now.
-    if r.bbr_state.filled_pipe ||
-        !r.bbr_state.round_start ||
-        r.delivery_rate.sample_is_app_limited()
+    if r.bbr_state.filled_pipe
+        || !r.bbr_state.round_start
+        || r.delivery_rate.sample_is_app_limited()
     {
         return;
     }
 
     // BBR.BtlBw still growing?
-    if r.bbr_state.btlbw >=
-        (r.bbr_state.full_bw as f64 * BTLBW_GROWTH_TARGET) as u64
-    {
+    if r.bbr_state.btlbw >= (r.bbr_state.full_bw as f64 * BTLBW_GROWTH_TARGET) as u64 {
         // record new baseline level
         r.bbr_state.full_bw = r.bbr_state.btlbw;
         r.bbr_state.full_bw_count = 0;
@@ -257,8 +250,8 @@ fn bbr_check_drain(r: &mut Congestion, bytes_in_flight: usize, now: Instant) {
         bbr_enter_drain(r);
     }
 
-    if r.bbr_state.state == BBRStateMachine::Drain &&
-        bbr_bytes_in_net(r, bytes_in_flight, now) <= bbr_inflight(r, 1.0)
+    if r.bbr_state.state == BBRStateMachine::Drain
+        && bbr_bytes_in_net(r, bytes_in_flight, now) <= bbr_inflight(r, 1.0)
     {
         // we estimate queue is drained
         bbr_enter_probe_bw(r, now);
@@ -302,9 +295,8 @@ fn bbr_enter_probe_bw(r: &mut Congestion, now: Instant) {
     // increase cycle_index by 1, the actual cycle_index in the
     // beginning of ProbeBW will be one of (2, 3, 4, 5, 6, 7, 0)
     // to avoid index 1 (pacing_gain=3/4). See 4.3.4.2 for details.
-    bbr.cycle_index = BBR_GAIN_CYCLE_LEN -
-        1 -
-        (rand::rand_u64_uniform(BBR_GAIN_CYCLE_LEN as u64 - 1) as usize);
+    bbr.cycle_index =
+        BBR_GAIN_CYCLE_LEN - 1 - (rand::rand_u64_uniform(BBR_GAIN_CYCLE_LEN as u64 - 1) as usize);
 
     bbr_advance_cycle_phase(r, now);
 }
@@ -341,9 +333,8 @@ fn bbr_is_next_cycle_phase(r: &mut Congestion, now: Instant) -> bool {
     }
 
     if pacing_gain > 1.0 {
-        return is_full_length &&
-            (lost_bytes > 0 ||
-                prior_in_flight >= bbr_inflight(r, pacing_gain));
+        return is_full_length
+            && (lost_bytes > 0 || prior_in_flight >= bbr_inflight(r, pacing_gain));
     }
 
     is_full_length || prior_in_flight <= bbr_inflight(r, 1.0)
@@ -351,9 +342,9 @@ fn bbr_is_next_cycle_phase(r: &mut Congestion, now: Instant) -> bool {
 
 // 4.3.5.  ProbeRTT
 fn bbr_check_probe_rtt(r: &mut Congestion, bytes_in_flight: usize, now: Instant) {
-    if r.bbr_state.state != BBRStateMachine::ProbeRTT &&
-        r.bbr_state.rtprop_expired &&
-        !r.bbr_state.idle_restart
+    if r.bbr_state.state != BBRStateMachine::ProbeRTT
+        && r.bbr_state.rtprop_expired
+        && !r.bbr_state.idle_restart
     {
         bbr_enter_probe_rtt(r);
 
@@ -376,9 +367,7 @@ fn bbr_enter_probe_rtt(r: &mut Congestion) {
     bbr.cwnd_gain = 1.0;
 }
 
-fn bbr_handle_probe_rtt(
-    r: &mut Congestion, bytes_in_flight: usize, now: Instant,
-) {
+fn bbr_handle_probe_rtt(r: &mut Congestion, bytes_in_flight: usize, now: Instant) {
     // Ignore low rate samples during ProbeRTT.
     r.delivery_rate.update_app_limited(true);
 

@@ -53,9 +53,7 @@ pub(crate) struct PacketKey {
 }
 
 impl PacketKey {
-    pub fn new(
-        alg: Algorithm, key: Vec<u8>, iv: Vec<u8>, enc: u32,
-    ) -> Result<Self> {
+    pub fn new(alg: Algorithm, key: Vec<u8>, iv: Vec<u8>, enc: u32) -> Result<Self> {
         Ok(Self {
             alg,
             ctx: make_evp_cipher_ctx_basic(alg, true, enc)?,
@@ -77,9 +75,7 @@ impl PacketKey {
         Self::new(aead, key, iv, enc)
     }
 
-    pub fn open_with_u64_counter(
-        &self, counter: u64, ad: &[u8], buf: &mut [u8],
-    ) -> Result<usize> {
+    pub fn open_with_u64_counter(&self, counter: u64, ad: &[u8], buf: &mut [u8]) -> Result<usize> {
         let tag_len = self.alg.tag_len();
 
         let in_buf = buf.to_owned(); // very inefficient
@@ -171,13 +167,7 @@ impl PacketKey {
             return Err(Error::CryptoFail);
         }
 
-        rc = unsafe {
-            EVP_CipherFinal_ex(
-                self.ctx,
-                buf[plaintext_len..].as_mut_ptr(),
-                &mut olen,
-            )
-        };
+        rc = unsafe { EVP_CipherFinal_ex(self.ctx, buf[plaintext_len..].as_mut_ptr(), &mut olen) };
 
         if rc != 1 {
             return Err(Error::CryptoFail);
@@ -187,7 +177,11 @@ impl PacketKey {
     }
 
     pub fn seal_with_u64_counter(
-        &self, counter: u64, ad: &[u8], buf: &mut [u8], in_len: usize,
+        &self,
+        counter: u64,
+        ad: &[u8],
+        buf: &mut [u8],
+        in_len: usize,
         _extra_in: Option<&[u8]>,
     ) -> Result<usize> {
         let tag_len = self.alg.tag_len();
@@ -265,9 +259,7 @@ impl PacketKey {
         ciphertext_len += olen as usize;
 
         let len = olen as usize;
-        rc = unsafe {
-            EVP_CipherFinal_ex(self.ctx, buf[len..].as_mut_ptr(), &mut olen)
-        };
+        rc = unsafe { EVP_CipherFinal_ex(self.ctx, buf[len..].as_mut_ptr(), &mut olen) };
 
         if rc != 1 {
             return Err(Error::CryptoFail);
@@ -389,9 +381,7 @@ impl Drop for HeaderProtectionKey {
 unsafe impl std::marker::Send for HeaderProtectionKey {}
 unsafe impl std::marker::Sync for HeaderProtectionKey {}
 
-fn make_evp_cipher_ctx_basic(
-    alg: Algorithm, aead: bool, enc: u32,
-) -> Result<*mut EVP_CIPHER_CTX> {
+fn make_evp_cipher_ctx_basic(alg: Algorithm, aead: bool, enc: u32) -> Result<*mut EVP_CIPHER_CTX> {
     let ctx: *mut EVP_CIPHER_CTX = unsafe {
         let cipher: *const EVP_AEAD = if aead {
             alg.get_evp_aead()
@@ -425,7 +415,10 @@ fn make_evp_cipher_ctx_basic(
 }
 
 pub(crate) fn hkdf_extract(
-    alg: Algorithm, out: &mut [u8], secret: &[u8], salt: &[u8],
+    alg: Algorithm,
+    out: &mut [u8],
+    secret: &[u8],
+    salt: &[u8],
 ) -> Result<()> {
     let mut out_len = out.len();
 
@@ -437,14 +430,14 @@ pub(crate) fn hkdf_extract(
             std::ptr::null_mut(),
         );
 
-        if EVP_PKEY_derive_init(ctx) != 1 ||
-            EVP_PKEY_CTX_set_hkdf_mode(
+        if EVP_PKEY_derive_init(ctx) != 1
+            || EVP_PKEY_CTX_set_hkdf_mode(
                 ctx, 1, // EVP_PKEY_HKDF_MODE_EXTRACT_ONLY
-            ) != 1 ||
-            EVP_PKEY_CTX_set_hkdf_md(ctx, prf) != 1 ||
-            EVP_PKEY_CTX_set1_hkdf_salt(ctx, salt.as_ptr(), salt.len()) != 1 ||
-            EVP_PKEY_CTX_set1_hkdf_key(ctx, secret.as_ptr(), secret.len()) != 1 ||
-            EVP_PKEY_derive(ctx, out.as_mut_ptr(), &mut out_len) != 1
+            ) != 1
+            || EVP_PKEY_CTX_set_hkdf_md(ctx, prf) != 1
+            || EVP_PKEY_CTX_set1_hkdf_salt(ctx, salt.as_ptr(), salt.len()) != 1
+            || EVP_PKEY_CTX_set1_hkdf_key(ctx, secret.as_ptr(), secret.len()) != 1
+            || EVP_PKEY_derive(ctx, out.as_mut_ptr(), &mut out_len) != 1
         {
             EVP_PKEY_CTX_free(ctx);
             return Err(Error::CryptoFail);
@@ -457,7 +450,10 @@ pub(crate) fn hkdf_extract(
 }
 
 pub(crate) fn hkdf_expand(
-    alg: Algorithm, out: &mut [u8], secret: &[u8], info: &[u8],
+    alg: Algorithm,
+    out: &mut [u8],
+    secret: &[u8],
+    info: &[u8],
 ) -> Result<()> {
     let mut out_len = out.len();
 
@@ -469,14 +465,14 @@ pub(crate) fn hkdf_expand(
             std::ptr::null_mut(),
         );
 
-        if EVP_PKEY_derive_init(ctx) != 1 ||
-            EVP_PKEY_CTX_set_hkdf_mode(
+        if EVP_PKEY_derive_init(ctx) != 1
+            || EVP_PKEY_CTX_set_hkdf_mode(
                 ctx, 2, // EVP_PKEY_HKDF_MODE_EXPAND_ONLY
-            ) != 1 ||
-            EVP_PKEY_CTX_set_hkdf_md(ctx, prf) != 1 ||
-            EVP_PKEY_CTX_set1_hkdf_key(ctx, secret.as_ptr(), secret.len()) != 1 ||
-            EVP_PKEY_CTX_add1_hkdf_info(ctx, info.as_ptr(), info.len()) != 1 ||
-            EVP_PKEY_derive(ctx, out.as_mut_ptr(), &mut out_len) != 1
+            ) != 1
+            || EVP_PKEY_CTX_set_hkdf_md(ctx, prf) != 1
+            || EVP_PKEY_CTX_set1_hkdf_key(ctx, secret.as_ptr(), secret.len()) != 1
+            || EVP_PKEY_CTX_add1_hkdf_info(ctx, info.as_ptr(), info.len()) != 1
+            || EVP_PKEY_derive(ctx, out.as_mut_ptr(), &mut out_len) != 1
         {
             EVP_PKEY_CTX_free(ctx);
             return Err(Error::CryptoFail);
@@ -507,45 +503,51 @@ extern "C" {
     fn EVP_CIPHER_CTX_free(ctx: *mut EVP_CIPHER_CTX);
 
     fn EVP_CipherInit_ex2(
-        ctx: *mut EVP_CIPHER_CTX, cipher: *const EVP_AEAD, key: *const c_uchar,
-        iv: *const c_uchar, enc: c_int, params: *const OSSL_PARAM,
+        ctx: *mut EVP_CIPHER_CTX,
+        cipher: *const EVP_AEAD,
+        key: *const c_uchar,
+        iv: *const c_uchar,
+        enc: c_int,
+        params: *const OSSL_PARAM,
     ) -> c_int;
 
     fn EVP_CIPHER_CTX_ctrl(
-        ctx: *mut EVP_CIPHER_CTX, type_: i32, arg: i32, ptr: *mut c_void,
+        ctx: *mut EVP_CIPHER_CTX,
+        type_: i32,
+        arg: i32,
+        ptr: *mut c_void,
     ) -> c_int;
 
     fn EVP_CipherUpdate(
-        ctx: *mut EVP_CIPHER_CTX, out: *mut c_uchar, outl: *mut c_int,
-        in_: *const c_uchar, inl: i32,
+        ctx: *mut EVP_CIPHER_CTX,
+        out: *mut c_uchar,
+        outl: *mut c_int,
+        in_: *const c_uchar,
+        inl: i32,
     ) -> c_int;
 
-    fn EVP_CipherFinal_ex(
-        ctx: *mut EVP_CIPHER_CTX, out: *mut c_uchar, outl: *mut c_int,
-    ) -> c_int;
+    fn EVP_CipherFinal_ex(ctx: *mut EVP_CIPHER_CTX, out: *mut c_uchar, outl: *mut c_int) -> c_int;
 
     // EVP_PKEY
     fn EVP_PKEY_CTX_new_id(id: c_int, e: *mut c_void) -> *mut EVP_PKEY_CTX;
 
     fn EVP_PKEY_CTX_set_hkdf_mode(ctx: *mut EVP_PKEY_CTX, mode: c_int) -> c_int;
-    fn EVP_PKEY_CTX_set_hkdf_md(
-        ctx: *mut EVP_PKEY_CTX, md: *const EVP_MD,
-    ) -> c_int;
+    fn EVP_PKEY_CTX_set_hkdf_md(ctx: *mut EVP_PKEY_CTX, md: *const EVP_MD) -> c_int;
     fn EVP_PKEY_CTX_set1_hkdf_salt(
-        ctx: *mut EVP_PKEY_CTX, salt: *const u8, salt_len: usize,
+        ctx: *mut EVP_PKEY_CTX,
+        salt: *const u8,
+        salt_len: usize,
     ) -> c_int;
-    fn EVP_PKEY_CTX_set1_hkdf_key(
-        ctx: *mut EVP_PKEY_CTX, key: *const u8, key_len: usize,
-    ) -> c_int;
+    fn EVP_PKEY_CTX_set1_hkdf_key(ctx: *mut EVP_PKEY_CTX, key: *const u8, key_len: usize) -> c_int;
     fn EVP_PKEY_CTX_add1_hkdf_info(
-        ctx: *mut EVP_PKEY_CTX, info: *const u8, info_len: usize,
+        ctx: *mut EVP_PKEY_CTX,
+        info: *const u8,
+        info_len: usize,
     ) -> c_int;
 
     fn EVP_PKEY_derive_init(ctx: *mut EVP_PKEY_CTX) -> c_int;
 
-    fn EVP_PKEY_derive(
-        ctx: *mut EVP_PKEY_CTX, key: *mut u8, key_len: *mut usize,
-    ) -> c_int;
+    fn EVP_PKEY_derive(ctx: *mut EVP_PKEY_CTX, key: *mut u8, key_len: *mut usize) -> c_int;
 
     fn EVP_PKEY_CTX_free(ctx: *mut EVP_PKEY_CTX);
 }

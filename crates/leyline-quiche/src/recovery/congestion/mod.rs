@@ -84,8 +84,8 @@ pub struct Congestion {
 
 impl Congestion {
     pub(crate) fn from_config(recovery_config: &RecoveryConfig) -> Self {
-        let initial_congestion_window = recovery_config.max_send_udp_payload_size *
-            recovery_config.initial_congestion_window_packets;
+        let initial_congestion_window = recovery_config.max_send_udp_payload_size
+            * recovery_config.initial_congestion_window_packets;
 
         let mut cc = Congestion {
             congestion_window: initial_congestion_window,
@@ -106,8 +106,7 @@ impl Congestion {
 
             lost_count: 0,
 
-            initial_congestion_window_packets: recovery_config
-                .initial_congestion_window_packets,
+            initial_congestion_window_packets: recovery_config.initial_congestion_window_packets,
 
             max_datagram_size: recovery_config.max_send_udp_payload_size,
 
@@ -139,8 +138,7 @@ impl Congestion {
 
     pub(crate) fn in_congestion_recovery(&self, sent_time: Instant) -> bool {
         match self.congestion_recovery_start_time {
-            Some(congestion_recovery_start_time) =>
-                sent_time <= congestion_recovery_start_time,
+            Some(congestion_recovery_start_time) => sent_time <= congestion_recovery_start_time,
 
             None => false,
         }
@@ -168,13 +166,17 @@ impl Congestion {
 
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn on_packet_sent(
-        &mut self, bytes_in_flight: usize, sent_bytes: usize, now: Instant,
-        pkt: &mut Sent, rtt_stats: &RttStats, bytes_lost: u64, in_flight: bool,
+        &mut self,
+        bytes_in_flight: usize,
+        sent_bytes: usize,
+        now: Instant,
+        pkt: &mut Sent,
+        rtt_stats: &RttStats,
+        bytes_lost: u64,
+        in_flight: bool,
     ) {
         if in_flight {
-            self.update_app_limited(
-                (bytes_in_flight + sent_bytes) < self.congestion_window,
-            );
+            self.update_app_limited((bytes_in_flight + sent_bytes) < self.congestion_window);
 
             (self.cc_ops.on_packet_sent)(self, sent_bytes, bytes_in_flight, now);
 
@@ -187,11 +189,9 @@ impl Congestion {
         }
 
         // Pacing: Set the pacing rate if CC doesn't do its own.
-        if !(self.cc_ops.has_custom_pacing)() &&
-            rtt_stats.first_rtt_sample.is_some()
-        {
-            let rate = PACING_MULTIPLIER * self.congestion_window as f64 /
-                rtt_stats.smoothed_rtt.as_secs_f64();
+        if !(self.cc_ops.has_custom_pacing)() && rtt_stats.first_rtt_sample.is_some() {
+            let rate = PACING_MULTIPLIER * self.congestion_window as f64
+                / rtt_stats.smoothed_rtt.as_secs_f64();
             self.set_pacing_rate(rate as u64, now);
         }
 
@@ -205,8 +205,11 @@ impl Congestion {
     }
 
     pub(crate) fn on_packets_acked(
-        &mut self, bytes_in_flight: usize, acked: &mut Vec<Acked>,
-        rtt_stats: &RttStats, now: Instant,
+        &mut self,
+        bytes_in_flight: usize,
+        acked: &mut Vec<Acked>,
+        rtt_stats: &RttStats,
+        now: Instant,
     ) {
         // Update delivery rate sample per acked packet.
         for pkt in acked.iter() {
@@ -217,13 +220,7 @@ impl Congestion {
         self.delivery_rate.generate_rate_sample(*rtt_stats.min_rtt);
 
         // Call congestion control hooks.
-        (self.cc_ops.on_packets_acked)(
-            self,
-            bytes_in_flight,
-            acked,
-            now,
-            rtt_stats,
-        );
+        (self.cc_ops.on_packets_acked)(self, bytes_in_flight, acked, now, rtt_stats);
     }
 
     fn schedule_next_packet(&mut self, now: Instant, packet_size: usize) {
@@ -231,8 +228,8 @@ impl Congestion {
         //   * Packet contains no data.
         //   * The congestion window is within initcwnd.
 
-        let in_initcwnd = self.congestion_window <
-            self.max_datagram_size * self.initial_congestion_window_packets;
+        let in_initcwnd = self.congestion_window
+            < self.max_datagram_size * self.initial_congestion_window_packets;
 
         let sent_bytes = if !self.pacer.enabled() || in_initcwnd {
             0
@@ -251,12 +248,8 @@ impl Congestion {
 pub(crate) struct CongestionControlOps {
     pub on_init: fn(r: &mut Congestion),
 
-    pub on_packet_sent: fn(
-        r: &mut Congestion,
-        sent_bytes: usize,
-        bytes_in_flight: usize,
-        now: Instant,
-    ),
+    pub on_packet_sent:
+        fn(r: &mut Congestion, sent_bytes: usize, bytes_in_flight: usize, now: Instant),
 
     pub on_packets_acked: fn(
         r: &mut Congestion,
@@ -280,10 +273,7 @@ pub(crate) struct CongestionControlOps {
 
     pub has_custom_pacing: fn() -> bool,
 
-    pub debug_fmt: fn(
-        r: &Congestion,
-        formatter: &mut std::fmt::Formatter,
-    ) -> std::fmt::Result,
+    pub debug_fmt: fn(r: &Congestion, formatter: &mut std::fmt::Formatter) -> std::fmt::Result,
 }
 
 impl From<CongestionControlAlgorithm> for &'static CongestionControlOps {
@@ -296,7 +286,7 @@ impl From<CongestionControlAlgorithm> for &'static CongestionControlOps {
             CongestionControlAlgorithm::Bbr2Gcongestion => {
                 debug_panic!("legacy implementation, not gcongestion");
                 &bbr2::BBR2
-            },
+            }
         }
     }
 }

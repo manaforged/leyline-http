@@ -73,7 +73,7 @@ impl DatagramQueue {
 
                 buf[..len].copy_from_slice(&d[..len]);
                 Ok(len)
-            },
+            }
 
             None => Err(Error::Done),
         }

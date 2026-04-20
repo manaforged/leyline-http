@@ -35,6 +35,7 @@ use crate::h2::connection::{ClientConnection, PseudoHeaders};
 use crate::tls::FingerprintConnector;
 
 mod h1;
+#[allow(clippy::module_inception)]
 mod pool;
 mod types;
 

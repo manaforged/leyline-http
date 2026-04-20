@@ -100,7 +100,7 @@ pub(crate) fn apply_extra_headers(
 
     // Highest target index first so every remaining insert operates
     // on indices that are still valid in the original list.
-    insertions.sort_by(|a, b| b.0.cmp(&a.0));
+    insertions.sort_by_key(|b| std::cmp::Reverse(b.0));
     for (idx, bucket) in insertions {
         for (offset, item) in bucket.into_iter().enumerate() {
             let insert_at = (idx + offset).min(headers.len());

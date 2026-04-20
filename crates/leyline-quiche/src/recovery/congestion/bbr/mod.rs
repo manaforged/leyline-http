@@ -281,26 +281,26 @@ fn on_init(r: &mut Congestion) {
     init::bbr_init(r);
 }
 
-fn on_packet_sent(
-    r: &mut Congestion, _sent_bytes: usize, bytes_in_flight: usize, _now: Instant,
-) {
+fn on_packet_sent(r: &mut Congestion, _sent_bytes: usize, bytes_in_flight: usize, _now: Instant) {
     per_transmit::bbr_on_transmit(r, bytes_in_flight);
 }
 
 fn on_packets_acked(
-    r: &mut Congestion, bytes_in_flight: usize, packets: &mut Vec<Acked>,
-    now: Instant, _rtt_stats: &RttStats,
+    r: &mut Congestion,
+    bytes_in_flight: usize,
+    packets: &mut Vec<Acked>,
+    now: Instant,
+    _rtt_stats: &RttStats,
 ) {
     r.bbr_state.prior_bytes_in_flight = bytes_in_flight;
 
-    r.bbr_state.newly_acked_bytes =
-        packets.drain(..).fold(0, |acked_bytes, p| {
-            r.bbr_state.prior_bytes_in_flight -= p.size;
+    r.bbr_state.newly_acked_bytes = packets.drain(..).fold(0, |acked_bytes, p| {
+        r.bbr_state.prior_bytes_in_flight -= p.size;
 
-            per_ack::bbr_update_model_and_state(r, &p, bytes_in_flight, now);
+        per_ack::bbr_update_model_and_state(r, &p, bytes_in_flight, now);
 
-            acked_bytes + p.size
-        });
+        acked_bytes + p.size
+    });
 
     if let Some(pkt) = packets.last() {
         if !r.in_congestion_recovery(pkt.time_sent) && r.bbr_state.in_recovery {
@@ -315,8 +315,11 @@ fn on_packets_acked(
 }
 
 fn congestion_event(
-    r: &mut Congestion, bytes_in_flight: usize, lost_bytes: usize,
-    largest_lost_pkt: &Sent, now: Instant,
+    r: &mut Congestion,
+    bytes_in_flight: usize,
+    lost_bytes: usize,
+    largest_lost_pkt: &Sent,
+    now: Instant,
 ) {
     r.bbr_state.newly_lost_bytes = lost_bytes;
 

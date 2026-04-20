@@ -76,7 +76,10 @@ pub struct Pacer {
 
 impl Pacer {
     pub fn new(
-        enabled: bool, capacity: usize, rate: u64, max_datagram_size: usize,
+        enabled: bool,
+        capacity: usize,
+        rate: u64,
+        max_datagram_size: usize,
         max_pacing_rate: Option<u64>,
     ) -> Self {
         // Round capacity to MSS.
@@ -169,8 +172,7 @@ impl Pacer {
             self.iv = Duration::ZERO;
         }
 
-        let interval =
-            Duration::from_secs_f64(self.capacity as f64 / self.rate() as f64);
+        let interval = Duration::from_secs_f64(self.capacity as f64 / self.rate() as f64);
 
         let elapsed = now.saturating_duration_since(self.last_update);
 
@@ -190,8 +192,7 @@ impl Pacer {
         self.last_packet_size = Some(packet_size);
 
         if self.used >= self.capacity || !same_size {
-            self.iv =
-                Duration::from_secs_f64(self.used as f64 / self.rate() as f64);
+            self.iv = Duration::from_secs_f64(self.used as f64 / self.rate() as f64);
 
             self.used = 0;
 

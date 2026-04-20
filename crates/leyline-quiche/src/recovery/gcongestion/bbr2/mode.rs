@@ -113,28 +113,25 @@ impl Default for Cycle {
 
 #[enum_dispatch::enum_dispatch]
 pub(super) trait ModeImpl: Debug {
-    fn enter(
-        &mut self, now: Instant, congestion_event: Option<&BBRv2CongestionEvent>,
-    );
+    fn enter(&mut self, now: Instant, congestion_event: Option<&BBRv2CongestionEvent>);
 
-    fn leave(
-        &mut self, now: Instant, congestion_event: Option<&BBRv2CongestionEvent>,
-    );
+    fn leave(&mut self, now: Instant, congestion_event: Option<&BBRv2CongestionEvent>);
 
     fn is_probing_for_bandwidth(&self) -> bool;
 
     fn on_congestion_event(
-        self, prior_in_flight: usize, event_time: Instant,
-        acked_packets: &[Acked], lost_packets: &[Lost],
+        self,
+        prior_in_flight: usize,
+        event_time: Instant,
+        acked_packets: &[Acked],
+        lost_packets: &[Lost],
         congestion_event: &mut BBRv2CongestionEvent,
         target_bytes_inflight: usize,
     ) -> Mode;
 
     fn get_cwnd_limits(&self) -> Limits<usize>;
 
-    fn on_exit_quiescence(
-        self, now: Instant, quiescence_start_time: Instant,
-    ) -> Mode;
+    fn on_exit_quiescence(self, now: Instant, quiescence_start_time: Instant) -> Mode;
 }
 
 #[enum_dispatch::enum_dispatch(ModeImpl)]
@@ -174,8 +171,11 @@ impl Mode {
     }
 
     pub(super) fn do_on_congestion_event(
-        &mut self, prior_in_flight: usize, event_time: Instant,
-        acked_packets: &[Acked], lost_packets: &[Lost],
+        &mut self,
+        prior_in_flight: usize,
+        event_time: Instant,
+        acked_packets: &[Acked],
+        lost_packets: &[Lost],
         congestion_event: &mut BBRv2CongestionEvent,
         target_bytes_inflight: usize,
     ) -> bool {
@@ -195,11 +195,8 @@ impl Mode {
         mode_before != mode_after
     }
 
-    pub(super) fn do_on_exit_quiescence(
-        &mut self, now: Instant, quiescence_start_time: Instant,
-    ) {
-        *self =
-            std::mem::take(self).on_exit_quiescence(now, quiescence_start_time)
+    pub(super) fn do_on_exit_quiescence(&mut self, now: Instant, quiescence_start_time: Instant) {
+        *self = std::mem::take(self).on_exit_quiescence(now, quiescence_start_time)
     }
 }
 
@@ -246,8 +243,13 @@ impl ModeImpl for Placeholder {
     }
 
     fn on_congestion_event(
-        self, _: usize, _: Instant, _: &[Acked], _: &[Lost],
-        _: &mut BBRv2CongestionEvent, _: usize,
+        self,
+        _: usize,
+        _: Instant,
+        _: &[Acked],
+        _: &[Lost],
+        _: &mut BBRv2CongestionEvent,
+        _: usize,
     ) -> Mode {
         unreachable!()
     }

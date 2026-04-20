@@ -42,7 +42,10 @@ fn bbr2_min_pipe_cwnd(r: &mut Congestion) -> usize {
 // BBR2 Functions when ACK is received.
 //
 pub fn bbr2_update_model_and_state(
-    r: &mut Congestion, packet: &Acked, in_flight: usize, now: Instant,
+    r: &mut Congestion,
+    packet: &Acked,
+    in_flight: usize,
+    now: Instant,
 ) {
     per_loss::bbr2_update_latest_delivery_signals(r);
     per_loss::bbr2_update_congestion_signals(r, packet);
@@ -56,9 +59,7 @@ pub fn bbr2_update_model_and_state(
     per_loss::bbr2_bound_bw_for_model(r);
 }
 
-pub fn bbr2_update_control_parameters(
-    r: &mut Congestion, in_flight: usize, now: Instant,
-) {
+pub fn bbr2_update_control_parameters(r: &mut Congestion, in_flight: usize, now: Instant) {
     pacing::bbr2_set_pacing_rate(r);
     bbr2_set_send_quantum(r);
 
@@ -77,26 +78,23 @@ fn bbr2_check_startup_done(r: &mut Congestion) {
     bbr2_check_startup_full_bandwidth(r);
     bbr2_check_startup_high_loss(r);
 
-    if r.bbr2_state.state == BBR2StateMachine::Startup && r.bbr2_state.filled_pipe
-    {
+    if r.bbr2_state.state == BBR2StateMachine::Startup && r.bbr2_state.filled_pipe {
         bbr2_enter_drain(r);
     }
 }
 
 // 4.3.1.2.  Exiting Startup Based on Bandwidth Plateau
 fn bbr2_check_startup_full_bandwidth(r: &mut Congestion) {
-    if r.bbr2_state.filled_pipe ||
-        !r.bbr2_state.round_start ||
-        r.delivery_rate.sample_is_app_limited()
+    if r.bbr2_state.filled_pipe
+        || !r.bbr2_state.round_start
+        || r.delivery_rate.sample_is_app_limited()
     {
         // No need to check for a full pipe now.
         return;
     }
 
     // Still growing?
-    if r.bbr2_state.max_bw >=
-        (r.bbr2_state.full_bw as f64 * MAX_BW_GROWTH_THRESHOLD) as u64
-    {
+    if r.bbr2_state.max_bw >= (r.bbr2_state.full_bw as f64 * MAX_BW_GROWTH_THRESHOLD) as u64 {
         // Record new baseline level
         r.bbr2_state.full_bw = r.bbr2_state.max_bw;
         r.bbr2_state.full_bw_count = 0;
@@ -114,10 +112,10 @@ fn bbr2_check_startup_full_bandwidth(r: &mut Congestion) {
 // 4.3.1.3.  Exiting Startup Based on Packet Loss
 fn bbr2_check_startup_high_loss(r: &mut Congestion) {
     // TODO: this is not implemented (not in the draft)
-    if r.bbr2_state.loss_round_start &&
-        r.bbr2_state.in_recovery &&
-        r.bbr2_state.loss_events_in_round >= FULL_LOSS_COUNT as usize &&
-        per_loss::bbr2_is_inflight_too_high(r)
+    if r.bbr2_state.loss_round_start
+        && r.bbr2_state.in_recovery
+        && r.bbr2_state.loss_events_in_round >= FULL_LOSS_COUNT as usize
+        && per_loss::bbr2_is_inflight_too_high(r)
     {
         bbr2_handle_queue_too_high_in_startup(r);
     }
@@ -145,8 +143,8 @@ fn bbr2_enter_drain(r: &mut Congestion) {
 }
 
 fn bbr2_check_drain(r: &mut Congestion, in_flight: usize, now: Instant) {
-    if r.bbr2_state.state == BBR2StateMachine::Drain &&
-        in_flight <= bbr2_inflight(r, r.bbr2_state.max_bw, 1.0)
+    if r.bbr2_state.state == BBR2StateMachine::Drain
+        && in_flight <= bbr2_inflight(r, r.bbr2_state.max_bw, 1.0)
     {
         // BBR estimates the queue was drained
         bbr2_enter_probe_bw(r, now);
@@ -157,8 +155,8 @@ fn bbr2_check_drain(r: &mut Congestion, in_flight: usize, now: Instant) {
 // 4.3.3.5.3.  Design Considerations for Choosing Constant Parameters
 fn bbr2_check_time_to_probe_bw(r: &mut Congestion, now: Instant) -> bool {
     // Is it time to transition from DOWN or CRUISE to REFILL?
-    if bbr2_has_elapsed_in_phase(r, r.bbr2_state.bw_probe_wait, now) ||
-        bbr2_is_reno_coexistence_probe_time(r)
+    if bbr2_has_elapsed_in_phase(r, r.bbr2_state.bw_probe_wait, now)
+        || bbr2_is_reno_coexistence_probe_time(r)
     {
         bbr2_start_probe_bw_refill(r);
 
@@ -177,9 +175,8 @@ fn bbr2_pick_probe_wait(r: &mut Congestion) {
     bbr.rounds_since_probe = rand::rand_u8() as usize % 2;
 
     // Decide the random wall clock bound for wait
-    bbr.bw_probe_wait = Duration::from_secs_f64(
-        2.0 + rand::rand_u64_uniform(1000000) as f64 / 1000000.0,
-    );
+    bbr.bw_probe_wait =
+        Duration::from_secs_f64(2.0 + rand::rand_u64_uniform(1000000) as f64 / 1000000.0);
 }
 
 fn bbr2_is_reno_coexistence_probe_time(r: &mut Congestion) -> bool {
@@ -256,9 +253,7 @@ fn bbr2_start_probe_bw_up(r: &mut Congestion, now: Instant) {
 }
 
 // The core state machine logic for ProbeBW
-fn bbr2_update_probe_bw_cycle_phase(
-    r: &mut Congestion, in_flight: usize, now: Instant,
-) {
+fn bbr2_update_probe_bw_cycle_phase(r: &mut Congestion, in_flight: usize, now: Instant) {
     if !r.bbr2_state.filled_pipe {
         // only handling steady-state behavior here
         return;
@@ -281,11 +276,11 @@ fn bbr2_update_probe_bw_cycle_phase(
             if bbr2_check_time_to_cruise(r, in_flight) {
                 bbr2_start_probe_bw_cruise(r);
             }
-        },
+        }
 
         BBR2StateMachine::ProbeBWCRUISE => {
             bbr2_check_time_to_probe_bw(r, now);
-        },
+        }
 
         BBR2StateMachine::ProbeBWREFILL => {
             // After one round of REFILL, start UP.
@@ -294,15 +289,15 @@ fn bbr2_update_probe_bw_cycle_phase(
 
                 bbr2_start_probe_bw_up(r, now);
             }
-        },
+        }
 
         BBR2StateMachine::ProbeBWUP => {
-            if bbr2_has_elapsed_in_phase(r, r.bbr2_state.min_rtt, now) &&
-                in_flight > bbr2_inflight(r, r.bbr2_state.max_bw, 1.25)
+            if bbr2_has_elapsed_in_phase(r, r.bbr2_state.min_rtt, now)
+                && in_flight > bbr2_inflight(r, r.bbr2_state.max_bw, 1.25)
             {
                 bbr2_start_probe_bw_down(r, now);
             }
-        },
+        }
 
         _ => (),
     }
@@ -311,10 +306,10 @@ fn bbr2_update_probe_bw_cycle_phase(
 pub fn bbr2_is_in_a_probe_bw_state(r: &mut Congestion) -> bool {
     let state = r.bbr2_state.state;
 
-    state == BBR2StateMachine::ProbeBWDOWN ||
-        state == BBR2StateMachine::ProbeBWCRUISE ||
-        state == BBR2StateMachine::ProbeBWREFILL ||
-        state == BBR2StateMachine::ProbeBWUP
+    state == BBR2StateMachine::ProbeBWDOWN
+        || state == BBR2StateMachine::ProbeBWCRUISE
+        || state == BBR2StateMachine::ProbeBWREFILL
+        || state == BBR2StateMachine::ProbeBWUP
 }
 
 fn bbr2_check_time_to_cruise(r: &mut Congestion, in_flight: usize) -> bool {
@@ -331,9 +326,7 @@ fn bbr2_check_time_to_cruise(r: &mut Congestion, in_flight: usize) -> bool {
     false
 }
 
-fn bbr2_has_elapsed_in_phase(
-    r: &mut Congestion, interval: Duration, now: Instant,
-) -> bool {
+fn bbr2_has_elapsed_in_phase(r: &mut Congestion, interval: Duration, now: Instant) -> bool {
     now > r.bbr2_state.cycle_stamp + interval
 }
 
@@ -393,32 +386,24 @@ fn bbr2_probe_inflight_hi_upward(r: &mut Congestion) {
 // Track ACK state and update bbr.max_bw window and
 // bbr.inflight_hi and bbr.bw_hi.
 fn bbr2_adapt_upper_bounds(r: &mut Congestion, now: Instant) {
-    if r.bbr2_state.ack_phase == BBR2AckPhase::ProbeStarting &&
-        r.bbr2_state.round_start
-    {
+    if r.bbr2_state.ack_phase == BBR2AckPhase::ProbeStarting && r.bbr2_state.round_start {
         // Starting to get bw probing samples.
         r.bbr2_state.ack_phase = BBR2AckPhase::ProbeFeedback;
     }
 
-    if r.bbr2_state.ack_phase == BBR2AckPhase::ProbeStopping &&
-        r.bbr2_state.round_start
-    {
+    if r.bbr2_state.ack_phase == BBR2AckPhase::ProbeStopping && r.bbr2_state.round_start {
         r.bbr2_state.bw_probe_samples = false;
         r.bbr2_state.ack_phase = BBR2AckPhase::Init;
 
         // End of samples from bw probing phase.
-        if bbr2_is_in_a_probe_bw_state(r) &&
-            !r.delivery_rate.sample_is_app_limited()
-        {
+        if bbr2_is_in_a_probe_bw_state(r) && !r.delivery_rate.sample_is_app_limited() {
             bbr2_advance_max_bw_filter(r);
         }
     }
 
     if !per_loss::bbr2_check_inflight_too_high(r, now) {
         // Loss rate is safe. Adjust upper bounds upward.
-        if r.bbr2_state.inflight_hi == usize::MAX ||
-            r.bbr2_state.bw_hi == u64::MAX
-        {
+        if r.bbr2_state.inflight_hi == usize::MAX || r.bbr2_state.bw_hi == u64::MAX {
             // No upper bounds to raise.
             return;
         }
@@ -447,15 +432,12 @@ fn bbr2_update_min_rtt(r: &mut Congestion, now: Instant) {
 
     let rs_rtt = r.delivery_rate.sample_rtt();
 
-    if !rs_rtt.is_zero() &&
-        (rs_rtt < bbr.probe_rtt_min_delay || bbr.probe_rtt_expired)
-    {
+    if !rs_rtt.is_zero() && (rs_rtt < bbr.probe_rtt_min_delay || bbr.probe_rtt_expired) {
         bbr.probe_rtt_min_delay = rs_rtt;
         bbr.probe_rtt_min_stamp = now;
     }
 
-    let min_rtt_expired =
-        now > bbr.min_rtt_stamp + rs_rtt.saturating_mul(MIN_RTT_FILTER_LEN);
+    let min_rtt_expired = now > bbr.min_rtt_stamp + rs_rtt.saturating_mul(MIN_RTT_FILTER_LEN);
 
     // To do: Figure out Probe RTT logic
     // if bbr.probe_rtt_min_delay < bbr.min_rtt ||  bbr.min_rtt == INITIAL_RTT ||
@@ -469,9 +451,9 @@ fn bbr2_update_min_rtt(r: &mut Congestion, now: Instant) {
 }
 
 fn bbr2_check_probe_rtt(r: &mut Congestion, in_flight: usize, now: Instant) {
-    if r.bbr2_state.state != BBR2StateMachine::ProbeRTT &&
-        r.bbr2_state.probe_rtt_expired &&
-        !r.bbr2_state.idle_restart
+    if r.bbr2_state.state != BBR2StateMachine::ProbeRTT
+        && r.bbr2_state.probe_rtt_expired
+        && !r.bbr2_state.idle_restart
     {
         bbr2_enter_probe_rtt(r);
 
@@ -569,9 +551,7 @@ fn bbr2_start_round(r: &mut Congestion) {
 pub fn bbr2_update_max_bw(r: &mut Congestion, packet: &Acked) {
     bbr2_update_round(r, packet);
 
-    if r.delivery_rate() >= r.bbr2_state.max_bw ||
-        !r.delivery_rate.sample_is_app_limited()
-    {
+    if r.delivery_rate() >= r.bbr2_state.max_bw || !r.delivery_rate.sample_is_app_limited() {
         let max_bw_filter_len = r
             .delivery_rate
             .sample_rtt()
@@ -579,8 +559,7 @@ pub fn bbr2_update_max_bw(r: &mut Congestion, packet: &Acked) {
 
         r.bbr2_state.max_bw = r.bbr2_state.max_bw_filter.running_max(
             max_bw_filter_len,
-            r.bbr2_state.start_time +
-                Duration::from_secs(r.bbr2_state.cycle_count),
+            r.bbr2_state.start_time + Duration::from_secs(r.bbr2_state.cycle_count),
             r.delivery_rate(),
         );
     }
@@ -602,8 +581,7 @@ fn bbr2_update_ack_aggregation(r: &mut Congestion, packet: &Acked, now: Instant)
 
     // Find excess ACKed beyond expected amount over this interval.
     let interval = now - bbr.extra_acked_interval_start;
-    let mut expected_delivered =
-        (bbr.bw as f64 * interval.as_secs_f64()) as usize;
+    let mut expected_delivered = (bbr.bw as f64 * interval.as_secs_f64()) as usize;
 
     // Reset interval if ACK rate is below expected rate.
     if bbr.extra_acked_delivered <= expected_delivered {
@@ -683,8 +661,7 @@ fn bbr2_update_max_inflight(r: &mut Congestion) {
     // TODO: not implemented (not in the draft)
     // bbr2_update_aggregation_budget(r);
 
-    let inflight =
-        bbr2_bdp_multiple(r, r.bbr2_state.max_bw, r.bbr2_state.cwnd_gain);
+    let inflight = bbr2_bdp_multiple(r, r.bbr2_state.max_bw, r.bbr2_state.cwnd_gain);
     let inflight = inflight + r.bbr2_state.extra_acked;
 
     r.bbr2_state.max_inflight = bbr2_quantization_budget(r, inflight);
@@ -692,9 +669,7 @@ fn bbr2_update_max_inflight(r: &mut Congestion) {
 
 // 4.6.4.4.  Modulating cwnd in Loss Recovery
 pub fn bbr2_save_cwnd(r: &mut Congestion) -> usize {
-    if !r.bbr2_state.in_recovery &&
-        r.bbr2_state.state != BBR2StateMachine::ProbeRTT
-    {
+    if !r.bbr2_state.in_recovery && r.bbr2_state.state != BBR2StateMachine::ProbeRTT {
         r.congestion_window
     } else {
         r.congestion_window.max(r.bbr2_state.prior_cwnd)
@@ -724,8 +699,7 @@ fn bbr2_modulate_cwnd_for_recovery(r: &mut Congestion, in_flight: usize) {
 
 // 4.6.4.5.  Modulating cwnd in ProbeRTT
 fn bbr2_probe_rtt_cwnd(r: &mut Congestion) -> usize {
-    let probe_rtt_cwnd =
-        bbr2_bdp_multiple(r, r.bbr2_state.bw, PROBE_RTT_CWND_GAIN);
+    let probe_rtt_cwnd = bbr2_bdp_multiple(r, r.bbr2_state.bw, PROBE_RTT_CWND_GAIN);
 
     probe_rtt_cwnd.max(bbr2_min_pipe_cwnd(r))
 }
@@ -745,13 +719,11 @@ fn bbr2_set_cwnd(r: &mut Congestion, in_flight: usize) {
 
     if !r.bbr2_state.packet_conservation {
         if r.bbr2_state.filled_pipe {
-            r.congestion_window = cmp::min(
-                r.congestion_window + acked_bytes,
-                r.bbr2_state.max_inflight,
-            )
-        } else if r.congestion_window < r.bbr2_state.max_inflight ||
-            r.delivery_rate.delivered() <
-                r.max_datagram_size * r.initial_congestion_window_packets
+            r.congestion_window =
+                cmp::min(r.congestion_window + acked_bytes, r.bbr2_state.max_inflight)
+        } else if r.congestion_window < r.bbr2_state.max_inflight
+            || r.delivery_rate.delivered()
+                < r.max_datagram_size * r.initial_congestion_window_packets
         {
             r.congestion_window += acked_bytes;
         }
@@ -767,12 +739,10 @@ fn bbr2_set_cwnd(r: &mut Congestion, in_flight: usize) {
 fn bbr2_bound_cwnd_for_model(r: &mut Congestion) {
     let mut cap = usize::MAX;
 
-    if bbr2_is_in_a_probe_bw_state(r) &&
-        r.bbr2_state.state != BBR2StateMachine::ProbeBWCRUISE
-    {
+    if bbr2_is_in_a_probe_bw_state(r) && r.bbr2_state.state != BBR2StateMachine::ProbeBWCRUISE {
         cap = r.bbr2_state.inflight_hi;
-    } else if r.bbr2_state.state == BBR2StateMachine::ProbeRTT ||
-        r.bbr2_state.state == BBR2StateMachine::ProbeBWCRUISE
+    } else if r.bbr2_state.state == BBR2StateMachine::ProbeRTT
+        || r.bbr2_state.state == BBR2StateMachine::ProbeBWCRUISE
     {
         cap = bbr2_inflight_with_headroom(r);
     }

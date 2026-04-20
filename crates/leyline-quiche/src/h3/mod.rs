@@ -334,14 +334,11 @@ const PRIORITY_URGENCY_DEFAULT: u8 = 3;
 const PRIORITY_INCREMENTAL_DEFAULT: bool = false;
 
 #[cfg(feature = "qlog")]
-const QLOG_FRAME_CREATED: EventType =
-    EventType::Http3EventType(Http3EventType::FrameCreated);
+const QLOG_FRAME_CREATED: EventType = EventType::Http3EventType(Http3EventType::FrameCreated);
 #[cfg(feature = "qlog")]
-const QLOG_FRAME_PARSED: EventType =
-    EventType::Http3EventType(Http3EventType::FrameParsed);
+const QLOG_FRAME_PARSED: EventType = EventType::Http3EventType(Http3EventType::FrameParsed);
 #[cfg(feature = "qlog")]
-const QLOG_STREAM_TYPE_SET: EventType =
-    EventType::Http3EventType(Http3EventType::StreamTypeSet);
+const QLOG_STREAM_TYPE_SET: EventType = EventType::Http3EventType(Http3EventType::StreamTypeSet);
 
 /// A specialized [`Result`] type for quiche HTTP/3 operations.
 ///
@@ -430,50 +427,50 @@ pub enum Error {
 pub enum WireErrorCode {
     /// No error. This is used when the connection or stream needs to be closed,
     /// but there is no error to signal.
-    NoError              = 0x100,
+    NoError = 0x100,
     /// Peer violated protocol requirements in a way that does not match a more
     /// specific error code or endpoint declines to use the more specific
     /// error code.
     GeneralProtocolError = 0x101,
     /// An internal error has occurred in the HTTP stack.
-    InternalError        = 0x102,
+    InternalError = 0x102,
     /// The endpoint detected that its peer created a stream that it will not
     /// accept.
-    StreamCreationError  = 0x103,
+    StreamCreationError = 0x103,
     /// A stream required by the HTTP/3 connection was closed or reset.
     ClosedCriticalStream = 0x104,
     /// A frame was received that was not permitted in the current state or on
     /// the current stream.
-    FrameUnexpected      = 0x105,
+    FrameUnexpected = 0x105,
     /// A frame that fails to satisfy layout requirements or with an invalid
     /// size was received.
-    FrameError           = 0x106,
+    FrameError = 0x106,
     /// The endpoint detected that its peer is exhibiting a behavior that might
     /// be generating excessive load.
-    ExcessiveLoad        = 0x107,
+    ExcessiveLoad = 0x107,
     /// A stream ID or push ID was used incorrectly, such as exceeding a limit,
     /// reducing a limit, or being reused.
-    IdError              = 0x108,
+    IdError = 0x108,
     /// An endpoint detected an error in the payload of a SETTINGS frame.
-    SettingsError        = 0x109,
+    SettingsError = 0x109,
     /// No SETTINGS frame was received at the beginning of the control stream.
-    MissingSettings      = 0x10a,
+    MissingSettings = 0x10a,
     /// A server rejected a request without performing any application
     /// processing.
-    RequestRejected      = 0x10b,
+    RequestRejected = 0x10b,
     /// The request or its response (including pushed response) is cancelled.
-    RequestCancelled     = 0x10c,
+    RequestCancelled = 0x10c,
     /// The client's stream terminated without containing a fully formed
     /// request.
-    RequestIncomplete    = 0x10d,
+    RequestIncomplete = 0x10d,
     /// An HTTP message was malformed and cannot be processed.
-    MessageError         = 0x10e,
+    MessageError = 0x10e,
     /// The TCP connection established in response to a CONNECT request was
     /// reset or abnormally closed.
-    ConnectError         = 0x10f,
+    ConnectError = 0x10f,
     /// The requested operation cannot be served over HTTP/3. The peer should
     /// retry over HTTP/1.1.
-    VersionFallback      = 0x110,
+    VersionFallback = 0x110,
 }
 
 impl Error {
@@ -481,10 +478,8 @@ impl Error {
         match self {
             Error::Done => WireErrorCode::NoError as u64,
             Error::InternalError => WireErrorCode::InternalError as u64,
-            Error::StreamCreationError =>
-                WireErrorCode::StreamCreationError as u64,
-            Error::ClosedCriticalStream =>
-                WireErrorCode::ClosedCriticalStream as u64,
+            Error::StreamCreationError => WireErrorCode::StreamCreationError as u64,
+            Error::ClosedCriticalStream => WireErrorCode::ClosedCriticalStream as u64,
             Error::FrameUnexpected => WireErrorCode::FrameUnexpected as u64,
             Error::FrameError => WireErrorCode::FrameError as u64,
             Error::ExcessiveLoad => WireErrorCode::ExcessiveLoad as u64,
@@ -640,9 +635,7 @@ impl Config {
     /// the method will return the [`Error::SettingsError`] error.
     ///
     /// [`Error::SettingsError`]: enum.Error.html#variant.SettingsError
-    pub fn set_additional_settings(
-        &mut self, additional_settings: Vec<(u64, u64)>,
-    ) -> Result<()> {
+    pub fn set_additional_settings(&mut self, additional_settings: Vec<(u64, u64)>) -> Result<()> {
         let explicit_quiche_settings = HashSet::from([
             frame::SETTINGS_QPACK_MAX_TABLE_CAPACITY,
             frame::SETTINGS_MAX_FIELD_SECTION_SIZE,
@@ -655,8 +648,8 @@ impl Config {
         let dedup_settings: HashSet<u64> =
             additional_settings.iter().map(|(key, _)| *key).collect();
 
-        if dedup_settings.len() != additional_settings.len() ||
-            !explicit_quiche_settings.is_disjoint(&dedup_settings)
+        if dedup_settings.len() != additional_settings.len()
+            || !explicit_quiche_settings.is_disjoint(&dedup_settings)
         {
             return Err(Error::SettingsError);
         }
@@ -869,15 +862,14 @@ impl TryFrom<&[u8]> for Priority {
             // other streams.
             Some(sfv::ListEntry::Item(item)) => match item.bare_item.as_int() {
                 Some(v) => {
-                    if !(PRIORITY_URGENCY_LOWER_BOUND as i64..=
-                        PRIORITY_URGENCY_UPPER_BOUND as i64)
+                    if !(PRIORITY_URGENCY_LOWER_BOUND as i64..=PRIORITY_URGENCY_UPPER_BOUND as i64)
                         .contains(&v)
                     {
                         PRIORITY_URGENCY_UPPER_BOUND
                     } else {
                         v as u8
                     }
-                },
+                }
 
                 None => return Err(Error::Done),
             },
@@ -889,8 +881,7 @@ impl TryFrom<&[u8]> for Priority {
         };
 
         let incremental = match dict.get("i") {
-            Some(sfv::ListEntry::Item(item)) =>
-                item.bare_item.as_bool().ok_or(Error::Done)?,
+            Some(sfv::ListEntry::Item(item)) => item.bare_item.as_bool().ok_or(Error::Done)?,
 
             // Omitted so use default value.
             _ => false,
@@ -942,7 +933,8 @@ fn close_conn_critical_stream(conn: &mut super::Connection) -> Result<()> {
 }
 
 fn close_conn_if_critical_stream_finished(
-    conn: &mut super::Connection, stream_id: u64,
+    conn: &mut super::Connection,
+    stream_id: u64,
 ) -> Result<()> {
     if conn.stream_finished(stream_id) {
         close_conn_critical_stream(conn)?;
@@ -983,9 +975,7 @@ pub struct Connection {
 }
 
 impl Connection {
-    fn new(
-        config: &Config, is_server: bool, enable_dgram: bool,
-    ) -> Result<Connection> {
+    fn new(config: &Config, is_server: bool, enable_dgram: bool) -> Result<Connection> {
         let initial_uni_stream_id = if is_server { 0x3 } else { 0x2 };
         let h3_datagram = if enable_dgram { Some(1) } else { None };
 
@@ -1054,17 +1044,14 @@ impl Connection {
     ///
     /// [`StreamLimit`]: ../enum.Error.html#variant.StreamLimit
     /// [`InternalError`]: ../enum.Error.html#variant.InternalError
-    pub fn with_transport(
-        conn: &mut super::Connection, config: &Config,
-    ) -> Result<Connection> {
+    pub fn with_transport(conn: &mut super::Connection, config: &Config) -> Result<Connection> {
         let is_client = !conn.is_server;
         if is_client && !(conn.is_established() || conn.is_in_early_data()) {
             trace!("{} QUIC connection must be established or in early data before creating an HTTP/3 connection", conn.trace_id());
             return Err(Error::InternalError);
         }
 
-        let mut http3_conn =
-            Connection::new(config, conn.is_server, conn.dgram_enabled())?;
+        let mut http3_conn = Connection::new(config, conn.is_server, conn.dgram_enabled())?;
 
         match http3_conn.send_settings(conn) {
             Ok(_) => (),
@@ -1072,7 +1059,7 @@ impl Connection {
             Err(e) => {
                 conn.close(true, e.to_wire(), b"Error opening control stream")?;
                 return Err(e);
-            },
+            }
         };
 
         // Try opening QPACK streams, but ignore errors if it fails since we
@@ -1106,7 +1093,10 @@ impl Connection {
     /// [`send_body()`]: struct.Connection.html#method.send_body
     /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
     pub fn send_request<T: NameValue>(
-        &mut self, conn: &mut super::Connection, headers: &[T], fin: bool,
+        &mut self,
+        conn: &mut super::Connection,
+        headers: &[T],
+        fin: bool,
     ) -> Result<u64> {
         // If we received a GOAWAY from the peer, MUST NOT initiate new
         // requests.
@@ -1183,14 +1173,15 @@ impl Connection {
     /// [`FrameUnexpected`]: enum.Error.html#variant.FrameUnexpected
     /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
     pub fn send_response<T: NameValue>(
-        &mut self, conn: &mut super::Connection, stream_id: u64, headers: &[T],
+        &mut self,
+        conn: &mut super::Connection,
+        stream_id: u64,
+        headers: &[T],
         fin: bool,
     ) -> Result<()> {
         let priority = Default::default();
 
-        self.send_response_with_priority(
-            conn, stream_id, headers, &priority, fin,
-        )?;
+        self.send_response_with_priority(conn, stream_id, headers, &priority, fin)?;
 
         Ok(())
     }
@@ -1239,8 +1230,12 @@ impl Connection {
     /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
     /// [Extensible Priority]: https://www.rfc-editor.org/rfc/rfc9218.html#section-4.
     pub fn send_response_with_priority<T: NameValue>(
-        &mut self, conn: &mut super::Connection, stream_id: u64, headers: &[T],
-        priority: &Priority, fin: bool,
+        &mut self,
+        conn: &mut super::Connection,
+        stream_id: u64,
+        headers: &[T],
+        priority: &Priority,
+        fin: bool,
     ) -> Result<()> {
         match self.streams.get(&stream_id) {
             Some(s) => {
@@ -1250,7 +1245,7 @@ impl Connection {
                 }
 
                 s
-            },
+            }
 
             None => return Err(Error::FrameUnexpected),
         };
@@ -1260,8 +1255,8 @@ impl Connection {
         // Clamp and shift urgency into quiche-priority space
         let urgency = priority
             .urgency
-            .clamp(PRIORITY_URGENCY_LOWER_BOUND, PRIORITY_URGENCY_UPPER_BOUND) +
-            PRIORITY_URGENCY_OFFSET;
+            .clamp(PRIORITY_URGENCY_LOWER_BOUND, PRIORITY_URGENCY_UPPER_BOUND)
+            + PRIORITY_URGENCY_OFFSET;
 
         conn.stream_priority(stream_id, urgency, priority.incremental)?;
 
@@ -1295,8 +1290,12 @@ impl Connection {
     /// [Section 4.1 of RFC 9114]:
     ///     https://www.rfc-editor.org/rfc/rfc9114.html#section-4.1.
     pub fn send_additional_headers<T: NameValue>(
-        &mut self, conn: &mut super::Connection, stream_id: u64, headers: &[T],
-        is_trailer_section: bool, fin: bool,
+        &mut self,
+        conn: &mut super::Connection,
+        stream_id: u64,
+        headers: &[T],
+        is_trailer_section: bool,
+        fin: bool,
     ) -> Result<()> {
         // Clients can only send trailer headers.
         if !self.is_server && !is_trailer_section {
@@ -1316,7 +1315,7 @@ impl Connection {
                 }
 
                 s
-            },
+            }
 
             None => return Err(Error::FrameUnexpected),
         };
@@ -1334,9 +1333,7 @@ impl Connection {
         Ok(())
     }
 
-    fn encode_header_block<T: NameValue>(
-        &mut self, headers: &[T],
-    ) -> Result<Vec<u8>> {
+    fn encode_header_block<T: NameValue>(&mut self, headers: &[T]) -> Result<Vec<u8>> {
         let headers_len = headers
             .iter()
             .fold(0, |acc, h| acc + h.value().len() + h.name().len() + 32);
@@ -1353,7 +1350,10 @@ impl Connection {
     }
 
     fn send_headers<T: NameValue>(
-        &mut self, conn: &mut super::Connection, stream_id: u64, headers: &[T],
+        &mut self,
+        conn: &mut super::Connection,
+        stream_id: u64,
+        headers: &[T],
         fin: bool,
     ) -> Result<()> {
         let mut d = [42; 10];
@@ -1366,8 +1366,8 @@ impl Connection {
 
         let header_block = self.encode_header_block(headers)?;
 
-        let overhead = octets::varint_len(frame::HEADERS_FRAME_TYPE_ID) +
-            octets::varint_len(header_block.len() as u64);
+        let overhead = octets::varint_len(frame::HEADERS_FRAME_TYPE_ID)
+            + octets::varint_len(header_block.len() as u64);
 
         // Headers need to be sent atomically, so make sure the stream has
         // enough capacity.
@@ -1382,7 +1382,7 @@ impl Connection {
                 }
 
                 return Err(e.into());
-            },
+            }
         };
 
         b.put_varint(frame::HEADERS_FRAME_TYPE_ID)?;
@@ -1449,7 +1449,10 @@ impl Connection {
     ///
     /// [`Done`]: enum.Error.html#variant.Done
     pub fn send_body(
-        &mut self, conn: &mut super::Connection, stream_id: u64, body: &[u8],
+        &mut self,
+        conn: &mut super::Connection,
+        stream_id: u64,
+        body: &[u8],
         fin: bool,
     ) -> Result<usize> {
         let mut d = [42; 10];
@@ -1469,11 +1472,11 @@ impl Connection {
                 if s.trailers_sent() {
                     return Err(Error::FrameUnexpected);
                 }
-            },
+            }
 
             None => {
                 return Err(Error::FrameUnexpected);
-            },
+            }
         };
 
         // Avoid sending 0-length DATA frames when the fin flag is false.
@@ -1481,8 +1484,8 @@ impl Connection {
             return Err(Error::Done);
         }
 
-        let overhead = octets::varint_len(frame::DATA_FRAME_TYPE_ID) +
-            octets::varint_len(body.len() as u64);
+        let overhead =
+            octets::varint_len(frame::DATA_FRAME_TYPE_ID) + octets::varint_len(body.len() as u64);
 
         let stream_cap = match conn.stream_capacity(stream_id) {
             Ok(v) => v,
@@ -1493,7 +1496,7 @@ impl Connection {
                 }
 
                 return Err(e.into());
-            },
+            }
         };
 
         // Make sure there is enough capacity to send the DATA frame header.
@@ -1569,8 +1572,7 @@ impl Connection {
     ///
     /// [`poll()`]: struct.Connection.html#method.poll
     pub fn dgram_enabled_by_peer(&self, conn: &super::Connection) -> bool {
-        self.peer_settings.h3_datagram == Some(1) &&
-            conn.dgram_max_writable_len().is_some()
+        self.peer_settings.h3_datagram == Some(1) && conn.dgram_max_writable_len().is_some()
     }
 
     /// Returns whether the peer enabled extended CONNECT support.
@@ -1596,7 +1598,10 @@ impl Connection {
     /// [`Data`]: enum.Event.html#variant.Data
     /// [`Done`]: enum.Error.html#variant.Done
     pub fn recv_body(
-        &mut self, conn: &mut super::Connection, stream_id: u64, out: &mut [u8],
+        &mut self,
+        conn: &mut super::Connection,
+        stream_id: u64,
+        out: &mut [u8],
     ) -> Result<usize> {
         let mut total = 0;
 
@@ -1609,14 +1614,13 @@ impl Connection {
                 break;
             }
 
-            let (read, fin) =
-                match stream.try_consume_data(conn, &mut out[total..]) {
-                    Ok(v) => v,
+            let (read, fin) = match stream.try_consume_data(conn, &mut out[total..]) {
+                Ok(v) => v,
 
-                    Err(Error::Done) => break,
+                Err(Error::Done) => break,
 
-                    Err(e) => return Err(e),
-                };
+                Err(e) => return Err(e),
+            };
 
             total += read;
 
@@ -1670,7 +1674,9 @@ impl Connection {
     /// [`StreamBlocked`]: enum.Error.html#variant.StreamBlocked
     /// [Extensible Priority]: https://www.rfc-editor.org/rfc/rfc9218.html#section-4.
     pub fn send_priority_update_for_request(
-        &mut self, conn: &mut super::Connection, stream_id: u64,
+        &mut self,
+        conn: &mut super::Connection,
+        stream_id: u64,
         priority: &Priority,
     ) -> Result<()> {
         let mut d = [42; 20];
@@ -1685,8 +1691,7 @@ impl Connection {
             return Err(Error::FrameUnexpected);
         }
 
-        let control_stream_id =
-            self.control_stream_id.ok_or(Error::FrameUnexpected)?;
+        let control_stream_id = self.control_stream_id.ok_or(Error::FrameUnexpected)?;
 
         let urgency = priority
             .urgency
@@ -1699,26 +1704,21 @@ impl Connection {
         }
 
         let priority_field_value = field_value.as_bytes();
-        let frame_payload_len =
-            octets::varint_len(stream_id) + priority_field_value.len();
+        let frame_payload_len = octets::varint_len(stream_id) + priority_field_value.len();
 
-        let overhead =
-            octets::varint_len(frame::PRIORITY_UPDATE_FRAME_REQUEST_TYPE_ID) +
-                octets::varint_len(stream_id) +
-                octets::varint_len(frame_payload_len as u64);
+        let overhead = octets::varint_len(frame::PRIORITY_UPDATE_FRAME_REQUEST_TYPE_ID)
+            + octets::varint_len(stream_id)
+            + octets::varint_len(frame_payload_len as u64);
 
         // Make sure the control stream has enough capacity.
-        match conn.stream_writable(
-            control_stream_id,
-            overhead + priority_field_value.len(),
-        ) {
+        match conn.stream_writable(control_stream_id, overhead + priority_field_value.len()) {
             Ok(true) => (),
 
             Ok(false) => return Err(Error::StreamBlocked),
 
             Err(e) => {
                 return Err(e.into());
-            },
+            }
         }
 
         b.put_varint(frame::PRIORITY_UPDATE_FRAME_REQUEST_TYPE_ID)?;
@@ -1771,9 +1771,7 @@ impl Connection {
     /// [`poll()`]: struct.Connection.html#method.poll
     /// [`PriorityUpdate`]: enum.Event.html#variant.PriorityUpdate
     /// [`Done`]: enum.Error.html#variant.Done
-    pub fn take_last_priority_update(
-        &mut self, prioritized_element_id: u64,
-    ) -> Result<Vec<u8>> {
+    pub fn take_last_priority_update(&mut self, prioritized_element_id: u64) -> Result<Vec<u8>> {
         if let Some(stream) = self.streams.get_mut(&prioritized_element_id) {
             return stream.take_last_priority_update().ok_or(Error::Done);
         }
@@ -1873,8 +1871,9 @@ impl Connection {
 
                 // Return early if the stream was reset, to avoid returning
                 // a Finished event later as well.
-                Err(Error::TransportError(crate::Error::StreamReset(e))) =>
-                    return Ok((s, Event::Reset(e))),
+                Err(Error::TransportError(crate::Error::StreamReset(e))) => {
+                    return Ok((s, Event::Reset(e)))
+                }
 
                 Err(e) => return Err(e),
             };
@@ -1896,9 +1895,7 @@ impl Connection {
             if conn.stream_readable(finished) {
                 // The stream is finished, but is still readable, it may
                 // indicate that there is a pending error, such as reset.
-                if let Err(crate::Error::StreamReset(e)) =
-                    conn.stream_recv(finished, &mut [])
-                {
+                if let Err(crate::Error::StreamReset(e)) = conn.stream_recv(finished, &mut []) {
                     return Ok((finished, Event::Reset(e)));
                 }
             }
@@ -1919,9 +1916,7 @@ impl Connection {
     /// required to call [`close()`] themselves.
     ///
     /// [`close()`]: ../struct.Connection.html#method.close
-    pub fn send_goaway(
-        &mut self, conn: &mut super::Connection, id: u64,
-    ) -> Result<()> {
+    pub fn send_goaway(&mut self, conn: &mut super::Connection, id: u64) -> Result<()> {
         let mut id = id;
 
         // TODO: server push
@@ -1983,9 +1978,7 @@ impl Connection {
         self.peer_settings.raw.as_deref()
     }
 
-    fn open_uni_stream(
-        &mut self, conn: &mut super::Connection, ty: u64,
-    ) -> Result<u64> {
+    fn open_uni_stream(&mut self, conn: &mut super::Connection, ty: u64) -> Result<u64> {
         let stream_id = self.next_uni_stream_id;
 
         let mut d = [0; 8];
@@ -1993,11 +1986,11 @@ impl Connection {
 
         match ty {
             // Control and QPACK streams are the most important to schedule.
-            stream::HTTP3_CONTROL_STREAM_TYPE_ID |
-            stream::QPACK_ENCODER_STREAM_TYPE_ID |
-            stream::QPACK_DECODER_STREAM_TYPE_ID => {
+            stream::HTTP3_CONTROL_STREAM_TYPE_ID
+            | stream::QPACK_ENCODER_STREAM_TYPE_ID
+            | stream::QPACK_DECODER_STREAM_TYPE_ID => {
                 conn.stream_priority(stream_id, 0, false)?;
-            },
+            }
 
             // TODO: Server push
             stream::HTTP3_PUSH_STREAM_TYPE_ID => (),
@@ -2005,7 +1998,7 @@ impl Connection {
             // Anything else is a GREASE stream, so make it the least important.
             _ => {
                 conn.stream_priority(stream_id, 255, false)?;
-            },
+            }
         }
 
         conn.stream_send(stream_id, b.put_varint(ty)?, false)?;
@@ -2020,11 +2013,8 @@ impl Connection {
         Ok(stream_id)
     }
 
-    fn open_qpack_encoder_stream(
-        &mut self, conn: &mut super::Connection,
-    ) -> Result<()> {
-        let stream_id =
-            self.open_uni_stream(conn, stream::QPACK_ENCODER_STREAM_TYPE_ID)?;
+    fn open_qpack_encoder_stream(&mut self, conn: &mut super::Connection) -> Result<()> {
+        let stream_id = self.open_uni_stream(conn, stream::QPACK_ENCODER_STREAM_TYPE_ID)?;
 
         self.local_qpack_streams.encoder_stream_id = Some(stream_id);
 
@@ -2042,11 +2032,8 @@ impl Connection {
         Ok(())
     }
 
-    fn open_qpack_decoder_stream(
-        &mut self, conn: &mut super::Connection,
-    ) -> Result<()> {
-        let stream_id =
-            self.open_uni_stream(conn, stream::QPACK_DECODER_STREAM_TYPE_ID)?;
+    fn open_qpack_decoder_stream(&mut self, conn: &mut super::Connection) -> Result<()> {
+        let stream_id = self.open_uni_stream(conn, stream::QPACK_DECODER_STREAM_TYPE_ID)?;
 
         self.local_qpack_streams.decoder_stream_id = Some(stream_id);
 
@@ -2065,9 +2052,7 @@ impl Connection {
     }
 
     /// Send GREASE frames on the provided stream ID.
-    fn send_grease_frames(
-        &mut self, conn: &mut super::Connection, stream_id: u64,
-    ) -> Result<()> {
+    fn send_grease_frames(&mut self, conn: &mut super::Connection, stream_id: u64) -> Result<()> {
         let mut d = [0; 8];
 
         let stream_cap = match conn.stream_capacity(stream_id) {
@@ -2079,7 +2064,7 @@ impl Connection {
                 }
 
                 return Err(e.into());
-            },
+            }
         };
 
         let grease_frame1 = grease_value();
@@ -2177,13 +2162,13 @@ impl Connection {
 
                     q.add_event_data_now(ev_data).ok();
                 });
-            },
+            }
 
             Err(Error::IdError) => {
                 trace!("{} GREASE stream blocked", conn.trace_id(),);
 
                 return Ok(());
-            },
+            }
 
             Err(e) => return Err(e),
         };
@@ -2193,9 +2178,7 @@ impl Connection {
 
     /// Sends SETTINGS frame based on HTTP/3 configuration.
     fn send_settings(&mut self, conn: &mut super::Connection) -> Result<()> {
-        let stream_id = match self
-            .open_uni_stream(conn, stream::HTTP3_CONTROL_STREAM_TYPE_ID)
-        {
+        let stream_id = match self.open_uni_stream(conn, stream::HTTP3_CONTROL_STREAM_TYPE_ID) {
             Ok(v) => v,
 
             Err(e) => {
@@ -2206,7 +2189,7 @@ impl Connection {
                 }
 
                 return Err(e);
-            },
+            }
         };
 
         self.control_stream_id = Some(stream_id);
@@ -2230,13 +2213,9 @@ impl Connection {
 
         let frame = frame::Frame::Settings {
             max_field_section_size: self.local_settings.max_field_section_size,
-            qpack_max_table_capacity: self
-                .local_settings
-                .qpack_max_table_capacity,
+            qpack_max_table_capacity: self.local_settings.qpack_max_table_capacity,
             qpack_blocked_streams: self.local_settings.qpack_blocked_streams,
-            connect_protocol_enabled: self
-                .local_settings
-                .connect_protocol_enabled,
+            connect_protocol_enabled: self.local_settings.connect_protocol_enabled,
             h3_datagram: self.local_settings.h3_datagram,
             grease,
             additional_settings: self.local_settings.additional_settings.clone(),
@@ -2277,7 +2256,9 @@ impl Connection {
     }
 
     fn process_control_stream(
-        &mut self, conn: &mut super::Connection, stream_id: u64,
+        &mut self,
+        conn: &mut super::Connection,
+        stream_id: u64,
     ) -> Result<(u64, Event)> {
         close_conn_if_critical_stream_finished(conn, stream_id)?;
 
@@ -2299,7 +2280,10 @@ impl Connection {
     }
 
     fn process_readable_stream(
-        &mut self, conn: &mut super::Connection, stream_id: u64, polling: bool,
+        &mut self,
+        conn: &mut super::Connection,
+        stream_id: u64,
+        polling: bool,
     ) -> Result<(u64, Event)> {
         self.streams
             .entry(stream_id)
@@ -2334,14 +2318,13 @@ impl Connection {
                             None
                         };
 
-                        let ev_data =
-                            EventData::H3StreamTypeSet(H3StreamTypeSet {
-                                stream_id,
-                                owner: Some(H3Owner::Remote),
-                                stream_type: ty.to_qlog(),
-                                stream_type_value: ty_val,
-                                ..Default::default()
-                            });
+                        let ev_data = EventData::H3StreamTypeSet(H3StreamTypeSet {
+                            stream_id,
+                            owner: Some(H3Owner::Remote),
+                            stream_type: ty.to_qlog(),
+                            stream_type_value: ty_val,
+                            ..Default::default()
+                        });
 
                         q.add_event_data_now(ev_data).ok();
                     });
@@ -2365,12 +2348,10 @@ impl Connection {
                                 stream_id
                             );
 
-                            close_conn_if_critical_stream_finished(
-                                conn, stream_id,
-                            )?;
+                            close_conn_if_critical_stream_finished(conn, stream_id)?;
 
                             self.peer_control_stream_id = Some(stream_id);
-                        },
+                        }
 
                         stream::Type::Push => {
                             // Only clients can receive push stream.
@@ -2383,12 +2364,11 @@ impl Connection {
 
                                 return Err(Error::StreamCreationError);
                             }
-                        },
+                        }
 
                         stream::Type::QpackEncoder => {
                             // Only one qpack encoder stream allowed.
-                            if self.peer_qpack_streams.encoder_stream_id.is_some()
-                            {
+                            if self.peer_qpack_streams.encoder_stream_id.is_some() {
                                 conn.close(
                                     true,
                                     Error::StreamCreationError.to_wire(),
@@ -2398,18 +2378,14 @@ impl Connection {
                                 return Err(Error::StreamCreationError);
                             }
 
-                            close_conn_if_critical_stream_finished(
-                                conn, stream_id,
-                            )?;
+                            close_conn_if_critical_stream_finished(conn, stream_id)?;
 
-                            self.peer_qpack_streams.encoder_stream_id =
-                                Some(stream_id);
-                        },
+                            self.peer_qpack_streams.encoder_stream_id = Some(stream_id);
+                        }
 
                         stream::Type::QpackDecoder => {
                             // Only one qpack decoder allowed.
-                            if self.peer_qpack_streams.decoder_stream_id.is_some()
-                            {
+                            if self.peer_qpack_streams.decoder_stream_id.is_some() {
                                 conn.close(
                                     true,
                                     Error::StreamCreationError.to_wire(),
@@ -2419,22 +2395,19 @@ impl Connection {
                                 return Err(Error::StreamCreationError);
                             }
 
-                            close_conn_if_critical_stream_finished(
-                                conn, stream_id,
-                            )?;
+                            close_conn_if_critical_stream_finished(conn, stream_id)?;
 
-                            self.peer_qpack_streams.decoder_stream_id =
-                                Some(stream_id);
-                        },
+                            self.peer_qpack_streams.decoder_stream_id = Some(stream_id);
+                        }
 
                         stream::Type::Unknown => {
                             // Unknown stream types are ignored.
                             // TODO: we MAY send STOP_SENDING
-                        },
+                        }
 
                         stream::Type::Request => unreachable!(),
                     }
-                },
+                }
 
                 stream::State::PushId => {
                     stream.try_fill_buffer(conn)?;
@@ -2449,7 +2422,7 @@ impl Connection {
                         conn.close(true, e.to_wire(), b"")?;
                         return Err(e);
                     }
-                },
+                }
 
                 stream::State::FrameType => {
                     stream.try_fill_buffer(conn)?;
@@ -2464,28 +2437,20 @@ impl Connection {
                         Err(Error::FrameUnexpected) => {
                             let msg = format!("Unexpected frame type {varint}");
 
-                            conn.close(
-                                true,
-                                Error::FrameUnexpected.to_wire(),
-                                msg.as_bytes(),
-                            )?;
+                            conn.close(true, Error::FrameUnexpected.to_wire(), msg.as_bytes())?;
 
                             return Err(Error::FrameUnexpected);
-                        },
+                        }
 
                         Err(e) => {
-                            conn.close(
-                                true,
-                                e.to_wire(),
-                                b"Error handling frame.",
-                            )?;
+                            conn.close(true, e.to_wire(), b"Error handling frame.")?;
 
                             return Err(e);
-                        },
+                        }
 
                         _ => (),
                     }
-                },
+                }
 
                 stream::State::FramePayloadLen => {
                     stream.try_fill_buffer(conn)?;
@@ -2509,13 +2474,12 @@ impl Connection {
                         qlog_with_type!(QLOG_FRAME_PARSED, conn.qlog, q, {
                             let frame = Http3Frame::Data { raw: None };
 
-                            let ev_data =
-                                EventData::H3FrameParsed(H3FrameParsed {
-                                    stream_id,
-                                    length: Some(payload_len),
-                                    frame,
-                                    ..Default::default()
-                                });
+                            let ev_data = EventData::H3FrameParsed(H3FrameParsed {
+                                stream_id,
+                                length: Some(payload_len),
+                                frame,
+                                ..Default::default()
+                            });
 
                             q.add_event_data_now(ev_data).ok();
                         });
@@ -2525,7 +2489,7 @@ impl Connection {
                         conn.close(true, e.to_wire(), b"")?;
                         return Err(e);
                     }
-                },
+                }
 
                 stream::State::FramePayload => {
                     // Do not emit events when not polling.
@@ -2541,18 +2505,13 @@ impl Connection {
                         Err(Error::Done) => return Err(Error::Done),
 
                         Err(e) => {
-                            conn.close(
-                                true,
-                                e.to_wire(),
-                                b"Error handling frame.",
-                            )?;
+                            conn.close(true, e.to_wire(), b"Error handling frame.")?;
 
                             return Err(e);
-                        },
+                        }
                     };
 
-                    match self.process_frame(conn, stream_id, frame, payload_len)
-                    {
+                    match self.process_frame(conn, stream_id, frame, payload_len) {
                         Ok(ev) => return Ok(ev),
 
                         Err(Error::Done) => {
@@ -2563,11 +2522,11 @@ impl Connection {
                             if conn.stream_finished(stream_id) {
                                 break;
                             }
-                        },
+                        }
 
                         Err(e) => return Err(e),
                     };
-                },
+                }
 
                 stream::State::Data => {
                     // Do not emit events when not polling.
@@ -2580,7 +2539,7 @@ impl Connection {
                     }
 
                     return Ok((stream_id, Event::Data));
-                },
+                }
 
                 stream::State::QpackInstruction => {
                     let mut d = [0; 4096];
@@ -2590,12 +2549,12 @@ impl Connection {
                         let (recv, fin) = conn.stream_recv(stream_id, &mut d)?;
 
                         match stream.ty() {
-                            Some(stream::Type::QpackEncoder) =>
-                                self.peer_qpack_streams.encoder_stream_bytes +=
-                                    recv as u64,
-                            Some(stream::Type::QpackDecoder) =>
-                                self.peer_qpack_streams.decoder_stream_bytes +=
-                                    recv as u64,
+                            Some(stream::Type::QpackEncoder) => {
+                                self.peer_qpack_streams.encoder_stream_bytes += recv as u64
+                            }
+                            Some(stream::Type::QpackDecoder) => {
+                                self.peer_qpack_streams.decoder_stream_bytes += recv as u64
+                            }
                             _ => unreachable!(),
                         };
 
@@ -2603,18 +2562,14 @@ impl Connection {
                             close_conn_critical_stream(conn)?;
                         }
                     }
-                },
+                }
 
                 stream::State::Drain => {
                     // Discard incoming data on the stream.
-                    conn.stream_shutdown(
-                        stream_id,
-                        crate::Shutdown::Read,
-                        0x100,
-                    )?;
+                    conn.stream_shutdown(stream_id, crate::Shutdown::Read, 0x100)?;
 
                     break;
-                },
+                }
 
                 stream::State::Finished => break,
             }
@@ -2639,15 +2594,18 @@ impl Connection {
                 stream.finished();
 
                 self.finished_streams.push_back(stream_id);
-            },
+            }
 
             _ => (),
         };
     }
 
     fn process_frame(
-        &mut self, conn: &mut super::Connection, stream_id: u64,
-        frame: frame::Frame, payload_len: u64,
+        &mut self,
+        conn: &mut super::Connection,
+        stream_id: u64,
+        frame: frame::Frame,
+        payload_len: u64,
     ) -> Result<(u64, Event)> {
         trace!(
             "{} rx frm {:?} stream={} payload_len={}",
@@ -2705,7 +2663,7 @@ impl Connection {
                         return Err(Error::SettingsError);
                     }
                 }
-            },
+            }
 
             frame::Frame::Headers { header_block } => {
                 if Some(stream_id) == self.peer_control_stream_id {
@@ -2739,16 +2697,12 @@ impl Connection {
                     .max_field_section_size
                     .unwrap_or(u64::MAX);
 
-                let headers = match self
-                    .qpack_decoder
-                    .decode(&header_block[..], max_size)
-                {
+                let headers = match self.qpack_decoder.decode(&header_block[..], max_size) {
                     Ok(v) => v,
 
                     Err(e) => {
                         let e = match e {
-                            qpack::Error::HeaderListTooLarge =>
-                                Error::ExcessiveLoad,
+                            qpack::Error::HeaderListTooLarge => Error::ExcessiveLoad,
 
                             _ => Error::QpackDecompressionFailed,
                         };
@@ -2756,7 +2710,7 @@ impl Connection {
                         conn.close(true, e.to_wire(), b"Error parsing headers.")?;
 
                         return Err(e);
-                    },
+                    }
                 };
 
                 qlog_with_type!(QLOG_FRAME_PARSED, conn.qlog, q, {
@@ -2764,8 +2718,7 @@ impl Connection {
                         .iter()
                         .map(|h| qlog::events::h3::HttpHeader {
                             name: String::from_utf8_lossy(h.name()).into_owned(),
-                            value: String::from_utf8_lossy(h.value())
-                                .into_owned(),
+                            value: String::from_utf8_lossy(h.value()).into_owned(),
                         })
                         .collect();
 
@@ -2785,11 +2738,14 @@ impl Connection {
 
                 let more_frames = !conn.stream_finished(stream_id);
 
-                return Ok((stream_id, Event::Headers {
-                    list: headers,
-                    more_frames,
-                }));
-            },
+                return Ok((
+                    stream_id,
+                    Event::Headers {
+                        list: headers,
+                        more_frames,
+                    },
+                ));
+            }
 
             frame::Frame::Data { .. } => {
                 if Some(stream_id) == self.peer_control_stream_id {
@@ -2803,7 +2759,7 @@ impl Connection {
                 }
 
                 // Do nothing. The Data event is returned separately.
-            },
+            }
 
             frame::Frame::GoAway { id } => {
                 if Some(stream_id) != self.peer_control_stream_id {
@@ -2841,7 +2797,7 @@ impl Connection {
                 self.peer_goaway_id = Some(id);
 
                 return Ok((id, Event::GoAway));
-            },
+            }
 
             frame::Frame::MaxPushId { push_id } => {
                 if Some(stream_id) != self.peer_control_stream_id {
@@ -2865,17 +2821,13 @@ impl Connection {
                 }
 
                 if push_id < self.max_push_id {
-                    conn.close(
-                        true,
-                        Error::IdError.to_wire(),
-                        b"MAX_PUSH_ID reduced limit",
-                    )?;
+                    conn.close(true, Error::IdError.to_wire(), b"MAX_PUSH_ID reduced limit")?;
 
                     return Err(Error::IdError);
                 }
 
                 self.max_push_id = push_id;
-            },
+            }
 
             frame::Frame::PushPromise { .. } => {
                 if self.is_server {
@@ -2899,7 +2851,7 @@ impl Connection {
                 }
 
                 // TODO: implement more checks and PUSH_PROMISE event
-            },
+            }
 
             frame::Frame::CancelPush { .. } => {
                 if Some(stream_id) != self.peer_control_stream_id {
@@ -2913,7 +2865,7 @@ impl Connection {
                 }
 
                 // TODO: implement CANCEL_PUSH frame
-            },
+            }
 
             frame::Frame::PriorityUpdateRequest {
                 prioritized_element_id,
@@ -2970,10 +2922,10 @@ impl Connection {
                 }
 
                 // If the stream did not yet exist, create it and store.
-                let stream =
-                    self.streams.entry(prioritized_element_id).or_insert_with(
-                        || stream::Stream::new(prioritized_element_id, false),
-                    );
+                let stream = self
+                    .streams
+                    .entry(prioritized_element_id)
+                    .or_insert_with(|| stream::Stream::new(prioritized_element_id, false));
 
                 let had_priority_update = stream.has_last_priority_update();
                 stream.set_last_priority_update(Some(priority_field_value));
@@ -2985,7 +2937,7 @@ impl Connection {
                 } else {
                     return Err(Error::Done);
                 }
-            },
+            }
 
             frame::Frame::PriorityUpdatePush {
                 prioritized_element_id,
@@ -3022,7 +2974,7 @@ impl Connection {
                 }
 
                 // TODO: we only implement this if we implement server push
-            },
+            }
 
             frame::Frame::Unknown { .. } => (),
         }
@@ -3034,12 +2986,8 @@ impl Connection {
     #[inline]
     pub fn stats(&self) -> Stats {
         Stats {
-            qpack_encoder_stream_recv_bytes: self
-                .peer_qpack_streams
-                .encoder_stream_bytes,
-            qpack_decoder_stream_recv_bytes: self
-                .peer_qpack_streams
-                .decoder_stream_bytes,
+            qpack_encoder_stream_recv_bytes: self.peer_qpack_streams.encoder_stream_bytes,
+            qpack_decoder_stream_recv_bytes: self.peer_qpack_streams.decoder_stream_bytes,
         }
     }
 }
@@ -3079,21 +3027,18 @@ pub mod testing {
     impl Session {
         pub fn new() -> Result<Session> {
             fn path_relative_to_manifest_dir(path: &str) -> String {
-                std::fs::canonicalize(
-                    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(path),
-                )
-                .unwrap()
-                .to_string_lossy()
-                .into_owned()
+                std::fs::canonicalize(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(path))
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
             }
 
             let mut config = crate::Config::new(crate::PROTOCOL_VERSION)?;
-            config.load_cert_chain_from_pem_file(
-                &path_relative_to_manifest_dir("examples/cert.crt"),
-            )?;
-            config.load_priv_key_from_pem_file(
-                &path_relative_to_manifest_dir("examples/cert.key"),
-            )?;
+            config.load_cert_chain_from_pem_file(&path_relative_to_manifest_dir(
+                "examples/cert.crt",
+            ))?;
+            config
+                .load_priv_key_from_pem_file(&path_relative_to_manifest_dir("examples/cert.key"))?;
             config.set_application_protos(&[b"h3"])?;
             config.set_initial_max_data(1500);
             config.set_initial_max_stream_data_bidi_local(150);
@@ -3109,9 +3054,7 @@ pub mod testing {
             Session::with_configs(&mut config, &h3_config)
         }
 
-        pub fn with_configs(
-            config: &mut crate::Config, h3_config: &Config,
-        ) -> Result<Session> {
+        pub fn with_configs(config: &mut crate::Config, h3_config: &Config) -> Result<Session> {
             let pipe = testing::Pipe::with_config(config)?;
             let client_dgram = pipe.client.dgram_enabled();
             let server_dgram = pipe.server.dgram_enabled();
@@ -3200,8 +3143,7 @@ pub mod testing {
                 Header::new(b"user-agent", b"quiche-test"),
             ];
 
-            let stream =
-                self.client.send_request(&mut self.pipe.client, &req, fin)?;
+            let stream = self.client.send_request(&mut self.pipe.client, &req, fin)?;
 
             self.advance().ok();
 
@@ -3211,20 +3153,14 @@ pub mod testing {
         /// Sends a response from server with default headers.
         ///
         /// On success it returns the headers.
-        pub fn send_response(
-            &mut self, stream: u64, fin: bool,
-        ) -> Result<Vec<Header>> {
+        pub fn send_response(&mut self, stream: u64, fin: bool) -> Result<Vec<Header>> {
             let resp = vec![
                 Header::new(b":status", b"200"),
                 Header::new(b"server", b"quiche-test"),
             ];
 
-            self.server.send_response(
-                &mut self.pipe.server,
-                stream,
-                &resp,
-                fin,
-            )?;
+            self.server
+                .send_response(&mut self.pipe.server, stream, &resp, fin)?;
 
             self.advance().ok();
 
@@ -3234,9 +3170,7 @@ pub mod testing {
         /// Sends some default payload from client.
         ///
         /// On success it returns the payload.
-        pub fn send_body_client(
-            &mut self, stream: u64, fin: bool,
-        ) -> Result<Vec<u8>> {
+        pub fn send_body_client(&mut self, stream: u64, fin: bool) -> Result<Vec<u8>> {
             let bytes = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
             self.client
@@ -3250,18 +3184,14 @@ pub mod testing {
         /// Fetches DATA payload from the server.
         ///
         /// On success it returns the number of bytes received.
-        pub fn recv_body_client(
-            &mut self, stream: u64, buf: &mut [u8],
-        ) -> Result<usize> {
+        pub fn recv_body_client(&mut self, stream: u64, buf: &mut [u8]) -> Result<usize> {
             self.client.recv_body(&mut self.pipe.client, stream, buf)
         }
 
         /// Sends some default payload from server.
         ///
         /// On success it returns the payload.
-        pub fn send_body_server(
-            &mut self, stream: u64, fin: bool,
-        ) -> Result<Vec<u8>> {
+        pub fn send_body_server(&mut self, stream: u64, fin: bool) -> Result<Vec<u8>> {
             let bytes = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
             self.server
@@ -3275,15 +3205,16 @@ pub mod testing {
         /// Fetches DATA payload from the client.
         ///
         /// On success it returns the number of bytes received.
-        pub fn recv_body_server(
-            &mut self, stream: u64, buf: &mut [u8],
-        ) -> Result<usize> {
+        pub fn recv_body_server(&mut self, stream: u64, buf: &mut [u8]) -> Result<usize> {
             self.server.recv_body(&mut self.pipe.server, stream, buf)
         }
 
         /// Sends a single HTTP/3 frame from the client.
         pub fn send_frame_client(
-            &mut self, frame: frame::Frame, stream_id: u64, fin: bool,
+            &mut self,
+            frame: frame::Frame,
+            stream_id: u64,
+            fin: bool,
         ) -> Result<()> {
             let mut d = [42; 65535];
 
@@ -3322,9 +3253,7 @@ pub mod testing {
         ///
         /// On success it returns the DATAGRAM length, flow ID and flow ID
         /// length.
-        pub fn recv_dgram_client(
-            &mut self, buf: &mut [u8],
-        ) -> Result<(usize, u64, usize)> {
+        pub fn recv_dgram_client(&mut self, buf: &mut [u8]) -> Result<(usize, u64, usize)> {
             let len = self.pipe.client.dgram_recv(buf)?;
             let mut b = octets::Octets::with_slice(buf);
             let flow_id = b.get_varint()?;
@@ -3355,9 +3284,7 @@ pub mod testing {
         ///
         /// On success it returns the DATAGRAM length, flow ID and flow ID
         /// length.
-        pub fn recv_dgram_server(
-            &mut self, buf: &mut [u8],
-        ) -> Result<(usize, u64, usize)> {
+        pub fn recv_dgram_server(&mut self, buf: &mut [u8]) -> Result<(usize, u64, usize)> {
             let len = self.pipe.server.dgram_recv(buf)?;
             let mut b = octets::Octets::with_slice(buf);
             let flow_id = b.get_varint()?;
@@ -3367,7 +3294,10 @@ pub mod testing {
 
         /// Sends a single HTTP/3 frame from the server.
         pub fn send_frame_server(
-            &mut self, frame: frame::Frame, stream_id: u64, fin: bool,
+            &mut self,
+            frame: frame::Frame,
+            stream_id: u64,
+            fin: bool,
         ) -> Result<()> {
             let mut d = [42; 65535];
 
@@ -3385,7 +3315,10 @@ pub mod testing {
 
         /// Sends an arbitrary buffer of HTTP/3 stream data from the client.
         pub fn send_arbitrary_stream_data_client(
-            &mut self, data: &[u8], stream_id: u64, fin: bool,
+            &mut self,
+            data: &[u8],
+            stream_id: u64,
+            fin: bool,
         ) -> Result<()> {
             self.pipe.client.stream_send(stream_id, data, fin)?;
 
@@ -3396,7 +3329,10 @@ pub mod testing {
 
         /// Sends an arbitrary buffer of HTTP/3 stream data from the server.
         pub fn send_arbitrary_stream_data_server(
-            &mut self, data: &[u8], stream_id: u64, fin: bool,
+            &mut self,
+            data: &[u8],
+            stream_id: u64,
+            fin: bool,
         ) -> Result<()> {
             self.pipe.server.stream_send(stream_id, data, fin)?;
 
@@ -3932,18 +3868,12 @@ mod tests {
         );
 
         assert_eq!(
-            s.send_body_client(
-                s.client.peer_qpack_streams.encoder_stream_id.unwrap(),
-                true
-            ),
+            s.send_body_client(s.client.peer_qpack_streams.encoder_stream_id.unwrap(), true),
             Err(Error::FrameUnexpected)
         );
 
         assert_eq!(
-            s.send_body_client(
-                s.client.peer_qpack_streams.decoder_stream_id.unwrap(),
-                true
-            ),
+            s.send_body_client(s.client.peer_qpack_streams.decoder_stream_id.unwrap(), true),
             Err(Error::FrameUnexpected)
         );
     }
@@ -3984,18 +3914,12 @@ mod tests {
         );
 
         assert_eq!(
-            s.send_body_server(
-                s.server.peer_qpack_streams.encoder_stream_id.unwrap(),
-                true
-            ),
+            s.send_body_server(s.server.peer_qpack_streams.encoder_stream_id.unwrap(), true),
             Err(Error::FrameUnexpected)
         );
 
         assert_eq!(
-            s.send_body_server(
-                s.server.peer_qpack_streams.decoder_stream_id.unwrap(),
-                true
-            ),
+            s.send_body_server(s.server.peer_qpack_streams.decoder_stream_id.unwrap(), true),
             Err(Error::FrameUnexpected)
         );
     }
@@ -4015,13 +3939,7 @@ mod tests {
         let req_trailers = vec![Header::new(b"foo", b"bar")];
 
         s.client
-            .send_additional_headers(
-                &mut s.pipe.client,
-                stream,
-                &req_trailers,
-                true,
-                true,
-            )
+            .send_additional_headers(&mut s.pipe.client, stream, &req_trailers, true, true)
             .unwrap();
 
         s.advance().ok();
@@ -4078,13 +3996,7 @@ mod tests {
             .unwrap();
 
         s.server
-            .send_additional_headers(
-                &mut s.pipe.server,
-                stream,
-                &resp,
-                false,
-                true,
-            )
+            .send_additional_headers(&mut s.pipe.server, stream, &resp, false, true)
             .unwrap();
 
         s.advance().ok();
@@ -4180,13 +4092,8 @@ mod tests {
 
         assert_eq!(
             Err(Error::FrameUnexpected),
-            s.server.send_additional_headers(
-                &mut s.pipe.server,
-                stream,
-                &info_resp,
-                false,
-                false
-            )
+            s.server
+                .send_additional_headers(&mut s.pipe.server, stream, &info_resp, false, false)
         );
 
         s.advance().ok();
@@ -4205,13 +4112,8 @@ mod tests {
         let req_trailer = vec![Header::new(b"goodbye", b"world")];
 
         assert_eq!(
-            s.client.send_additional_headers(
-                &mut s.pipe.client,
-                stream,
-                &req_trailer,
-                true,
-                false
-            ),
+            s.client
+                .send_additional_headers(&mut s.pipe.client, stream, &req_trailer, true, false),
             Ok(())
         );
 
@@ -4247,13 +4149,7 @@ mod tests {
         let req_trailers = vec![Header::new(b"foo", b"bar")];
 
         s.client
-            .send_additional_headers(
-                &mut s.pipe.client,
-                stream,
-                &req_trailers,
-                true,
-                false,
-            )
+            .send_additional_headers(&mut s.pipe.client, stream, &req_trailers, true, false)
             .unwrap();
 
         s.advance().ok();
@@ -4308,12 +4204,8 @@ mod tests {
 
         let (stream, req) = s.send_request(false).unwrap();
 
-        s.send_frame_client(
-            frame::Frame::MaxPushId { push_id: 2 },
-            stream,
-            false,
-        )
-        .unwrap();
+        s.send_frame_client(frame::Frame::MaxPushId { push_id: 2 }, stream, false)
+            .unwrap();
 
         let ev_headers = Event::Headers {
             list: req,
@@ -4417,12 +4309,8 @@ mod tests {
 
         let (stream, req) = s.send_request(false).unwrap();
 
-        s.send_frame_client(
-            frame::Frame::CancelPush { push_id: 2 },
-            stream,
-            false,
-        )
-        .unwrap();
+        s.send_frame_client(frame::Frame::CancelPush { push_id: 2 }, stream, false)
+            .unwrap();
 
         let ev_headers = Event::Headers {
             list: req,
@@ -4626,10 +4514,14 @@ mod tests {
         s.handshake().unwrap();
 
         s.client
-            .send_priority_update_for_request(&mut s.pipe.client, 0, &Priority {
-                urgency: 3,
-                incremental: false,
-            })
+            .send_priority_update_for_request(
+                &mut s.pipe.client,
+                0,
+                &Priority {
+                    urgency: 3,
+                    incremental: false,
+                },
+            )
             .unwrap();
         s.advance().ok();
 
@@ -4644,10 +4536,14 @@ mod tests {
         s.handshake().unwrap();
 
         s.client
-            .send_priority_update_for_request(&mut s.pipe.client, 0, &Priority {
-                urgency: 3,
-                incremental: false,
-            })
+            .send_priority_update_for_request(
+                &mut s.pipe.client,
+                0,
+                &Priority {
+                    urgency: 3,
+                    incremental: false,
+                },
+            )
             .unwrap();
         s.advance().ok();
 
@@ -4655,10 +4551,14 @@ mod tests {
         assert_eq!(s.poll_server(), Err(Error::Done));
 
         s.client
-            .send_priority_update_for_request(&mut s.pipe.client, 0, &Priority {
-                urgency: 5,
-                incremental: false,
-            })
+            .send_priority_update_for_request(
+                &mut s.pipe.client,
+                0,
+                &Priority {
+                    urgency: 5,
+                    incremental: false,
+                },
+            )
             .unwrap();
         s.advance().ok();
 
@@ -4670,10 +4570,14 @@ mod tests {
         assert_eq!(s.server.take_last_priority_update(0), Err(Error::Done));
 
         s.client
-            .send_priority_update_for_request(&mut s.pipe.client, 0, &Priority {
-                urgency: 7,
-                incremental: false,
-            })
+            .send_priority_update_for_request(
+                &mut s.pipe.client,
+                0,
+                &Priority {
+                    urgency: 7,
+                    incremental: false,
+                },
+            )
             .unwrap();
         s.advance().ok();
 
@@ -4692,10 +4596,14 @@ mod tests {
         s.handshake().unwrap();
 
         s.client
-            .send_priority_update_for_request(&mut s.pipe.client, 0, &Priority {
-                urgency: 3,
-                incremental: false,
-            })
+            .send_priority_update_for_request(
+                &mut s.pipe.client,
+                0,
+                &Priority {
+                    urgency: 3,
+                    incremental: false,
+                },
+            )
             .unwrap();
         s.advance().ok();
 
@@ -4703,10 +4611,14 @@ mod tests {
         assert_eq!(s.poll_server(), Err(Error::Done));
 
         s.client
-            .send_priority_update_for_request(&mut s.pipe.client, 4, &Priority {
-                urgency: 1,
-                incremental: false,
-            })
+            .send_priority_update_for_request(
+                &mut s.pipe.client,
+                4,
+                &Priority {
+                    urgency: 1,
+                    incremental: false,
+                },
+            )
             .unwrap();
         s.advance().ok();
 
@@ -4714,10 +4626,14 @@ mod tests {
         assert_eq!(s.poll_server(), Err(Error::Done));
 
         s.client
-            .send_priority_update_for_request(&mut s.pipe.client, 8, &Priority {
-                urgency: 2,
-                incremental: false,
-            })
+            .send_priority_update_for_request(
+                &mut s.pipe.client,
+                8,
+                &Priority {
+                    urgency: 2,
+                    incremental: false,
+                },
+            )
             .unwrap();
         s.advance().ok();
 
@@ -4788,10 +4704,14 @@ mod tests {
         s.handshake().unwrap();
 
         s.client
-            .send_priority_update_for_request(&mut s.pipe.client, 0, &Priority {
-                urgency: 3,
-                incremental: false,
-            })
+            .send_priority_update_for_request(
+                &mut s.pipe.client,
+                0,
+                &Priority {
+                    urgency: 3,
+                    incremental: false,
+                },
+            )
             .unwrap();
         s.advance().ok();
 
@@ -4823,10 +4743,14 @@ mod tests {
 
         // Now send a PRIORITY_UPDATE for the completed request stream.
         s.client
-            .send_priority_update_for_request(&mut s.pipe.client, 0, &Priority {
-                urgency: 3,
-                incremental: false,
-            })
+            .send_priority_update_for_request(
+                &mut s.pipe.client,
+                0,
+                &Priority {
+                    urgency: 3,
+                    incremental: false,
+                },
+            )
             .unwrap();
         s.advance().ok();
 
@@ -4842,10 +4766,14 @@ mod tests {
         s.handshake().unwrap();
 
         s.client
-            .send_priority_update_for_request(&mut s.pipe.client, 0, &Priority {
-                urgency: 3,
-                incremental: false,
-            })
+            .send_priority_update_for_request(
+                &mut s.pipe.client,
+                0,
+                &Priority {
+                    urgency: 3,
+                    incremental: false,
+                },
+            )
             .unwrap();
         s.advance().ok();
 
@@ -4879,10 +4807,14 @@ mod tests {
 
         // Now send a PRIORITY_UPDATE for the closed request stream.
         s.client
-            .send_priority_update_for_request(&mut s.pipe.client, 0, &Priority {
-                urgency: 3,
-                incremental: false,
-            })
+            .send_priority_update_for_request(
+                &mut s.pipe.client,
+                0,
+                &Priority {
+                    urgency: 3,
+                    incremental: false,
+                },
+            )
             .unwrap();
         s.advance().ok();
 
@@ -5246,11 +5178,11 @@ mod tests {
             Err(Error::Done) => {
                 assert_eq!(s.server.peer_qpack_streams.encoder_stream_bytes, 20);
                 assert_eq!(s.server.peer_qpack_streams.decoder_stream_bytes, 20);
-            },
+            }
 
             Err(_) => {
                 panic!();
-            },
+            }
         }
 
         let stats = s.server.stats();
@@ -5364,10 +5296,7 @@ mod tests {
         assert_eq!(s.poll_server(), Err(Error::Done));
 
         for _ in 0..total_data_frames {
-            assert_eq!(
-                s.recv_body_server(stream, &mut recv_buf),
-                Ok(bytes.len())
-            );
+            assert_eq!(s.recv_body_server(stream, &mut recv_buf), Ok(bytes.len()));
         }
 
         assert_eq!(
@@ -6126,10 +6055,7 @@ mod tests {
 
         s.client.control_stream_id = Some(
             s.client
-                .open_uni_stream(
-                    &mut s.pipe.client,
-                    stream::HTTP3_CONTROL_STREAM_TYPE_ID,
-                )
+                .open_uni_stream(&mut s.pipe.client, stream::HTTP3_CONTROL_STREAM_TYPE_ID)
                 .unwrap(),
         );
 
@@ -6178,19 +6104,13 @@ mod tests {
 
         s.client.control_stream_id = Some(
             s.client
-                .open_uni_stream(
-                    &mut s.pipe.client,
-                    stream::HTTP3_CONTROL_STREAM_TYPE_ID,
-                )
+                .open_uni_stream(&mut s.pipe.client, stream::HTTP3_CONTROL_STREAM_TYPE_ID)
                 .unwrap(),
         );
 
         s.server.control_stream_id = Some(
             s.server
-                .open_uni_stream(
-                    &mut s.pipe.server,
-                    stream::HTTP3_CONTROL_STREAM_TYPE_ID,
-                )
+                .open_uni_stream(&mut s.pipe.server, stream::HTTP3_CONTROL_STREAM_TYPE_ID)
                 .unwrap(),
         );
 
@@ -6202,19 +6122,11 @@ mod tests {
             1,
         ];
 
-        s.send_arbitrary_stream_data_client(
-            &settings,
-            s.client.control_stream_id.unwrap(),
-            false,
-        )
-        .unwrap();
+        s.send_arbitrary_stream_data_client(&settings, s.client.control_stream_id.unwrap(), false)
+            .unwrap();
 
-        s.send_arbitrary_stream_data_server(
-            &settings,
-            s.server.control_stream_id.unwrap(),
-            false,
-        )
-        .unwrap();
+        s.send_arbitrary_stream_data_server(&settings, s.server.control_stream_id.unwrap(), false)
+            .unwrap();
 
         assert_eq!(s.pipe.advance(), Ok(()));
 
@@ -6228,36 +6140,23 @@ mod tests {
     fn set_prohibited_additional_settings() {
         let mut h3_config = Config::new().unwrap();
         assert_eq!(
-            h3_config.set_additional_settings(vec![(
-                frame::SETTINGS_QPACK_MAX_TABLE_CAPACITY,
-                43
-            )]),
+            h3_config.set_additional_settings(vec![(frame::SETTINGS_QPACK_MAX_TABLE_CAPACITY, 43)]),
             Err(Error::SettingsError)
         );
         assert_eq!(
-            h3_config.set_additional_settings(vec![(
-                frame::SETTINGS_MAX_FIELD_SECTION_SIZE,
-                43
-            )]),
+            h3_config.set_additional_settings(vec![(frame::SETTINGS_MAX_FIELD_SECTION_SIZE, 43)]),
             Err(Error::SettingsError)
         );
         assert_eq!(
-            h3_config.set_additional_settings(vec![(
-                frame::SETTINGS_QPACK_BLOCKED_STREAMS,
-                43
-            )]),
+            h3_config.set_additional_settings(vec![(frame::SETTINGS_QPACK_BLOCKED_STREAMS, 43)]),
             Err(Error::SettingsError)
         );
         assert_eq!(
-            h3_config.set_additional_settings(vec![(
-                frame::SETTINGS_ENABLE_CONNECT_PROTOCOL,
-                43
-            )]),
+            h3_config.set_additional_settings(vec![(frame::SETTINGS_ENABLE_CONNECT_PROTOCOL, 43)]),
             Err(Error::SettingsError)
         );
         assert_eq!(
-            h3_config
-                .set_additional_settings(vec![(frame::SETTINGS_H3_DATAGRAM, 43)]),
+            h3_config.set_additional_settings(vec![(frame::SETTINGS_H3_DATAGRAM, 43)]),
             Err(Error::SettingsError)
         );
     }
@@ -6729,10 +6628,7 @@ mod tests {
             let off = b.off();
             s.pipe.client.stream_send(r1_id, &d[..off], false).unwrap();
 
-            assert_eq!(
-                s.pipe.client.stream_send(r1_id, &bytes[..5], false),
-                Ok(5)
-            );
+            assert_eq!(s.pipe.client.stream_send(r1_id, &bytes[..5], false), Ok(5));
 
             s.advance().ok();
         }

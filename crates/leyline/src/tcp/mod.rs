@@ -69,10 +69,20 @@ impl TcpProfile {
     };
 
     /// Apply this TCP profile to a socket before connect().
-    pub fn apply(&self, socket: &Socket) {
+    ///
+    /// `is_v6` must match the socket's address family — on Windows and Linux,
+    /// IP-level options (`IP_TTL`, `IP_DONTFRAGMENT`, `IP_MTU_DISCOVER`) return
+    /// `EINVAL` on IPv6 sockets; the IPv6 equivalents at `IPPROTO_IPV6` must be
+    /// used instead.
+    pub fn apply(&self, socket: &Socket, is_v6: bool) {
         if self.ttl > 0 {
-            if let Err(e) = socket.set_ttl(self.ttl) {
-                log_once("IP_TTL", &e);
+            let result = if is_v6 {
+                socket.set_unicast_hops_v6(self.ttl)
+            } else {
+                socket.set_ttl(self.ttl)
+            };
+            if let Err(e) = result {
+                log_once(if is_v6 { "IPV6_UNICAST_HOPS" } else { "IP_TTL" }, &e);
             }
         }
 
@@ -88,7 +98,7 @@ impl TcpProfile {
             }
         }
 
-        platform::apply_platform_options(socket, self);
+        platform::apply_platform_options(socket, self, is_v6);
     }
 }
 
@@ -121,9 +131,20 @@ mod tests {
             Some(socket2::Protocol::TCP),
         )
         .unwrap();
-        TcpProfile::WINDOWS.apply(&socket);
-        TcpProfile::LINUX.apply(&socket);
-        TcpProfile::MACOS.apply(&socket);
-        TcpProfile::IOS.apply(&socket);
+        TcpProfile::WINDOWS.apply(&socket, false);
+        TcpProfile::LINUX.apply(&socket, false);
+        TcpProfile::MACOS.apply(&socket, false);
+        TcpProfile::IOS.apply(&socket, false);
+
+        let socket_v6 = Socket::new(
+            socket2::Domain::IPV6,
+            socket2::Type::STREAM,
+            Some(socket2::Protocol::TCP),
+        )
+        .unwrap();
+        TcpProfile::WINDOWS.apply(&socket_v6, true);
+        TcpProfile::LINUX.apply(&socket_v6, true);
+        TcpProfile::MACOS.apply(&socket_v6, true);
+        TcpProfile::IOS.apply(&socket_v6, true);
     }
 }

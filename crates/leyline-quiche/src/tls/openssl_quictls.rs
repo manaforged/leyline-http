@@ -39,9 +39,7 @@ pub(super) struct SSL_QUIC_METHOD {
 
     flush_flight: Option<extern "C" fn(ssl: *mut SSL) -> c_int>,
 
-    send_alert: Option<
-        extern "C" fn(ssl: *mut SSL, level: crypto::Level, alert: u8) -> c_int,
-    >,
+    send_alert: Option<extern "C" fn(ssl: *mut SSL, level: crypto::Level, alert: u8) -> c_int>,
 }
 
 pub(super) static QUICHE_STREAM_METHOD: SSL_QUIC_METHOD = SSL_QUIC_METHOD {
@@ -86,8 +84,7 @@ impl Handshake {
         // If ssl is server then the leaf will not be included,
         // SSL_get0_peer_certificate should be called.
         let cert_chain = unsafe {
-            let chain =
-                map_result_ptr(SSL_get_peer_cert_chain(self.as_ptr())).ok()?;
+            let chain = map_result_ptr(SSL_get_peer_cert_chain(self.as_ptr())).ok()?;
 
             let num = sk_X509_num(chain);
             if num == 0 {
@@ -96,8 +93,7 @@ impl Handshake {
 
             let mut cert_chain = vec![];
             for i in 0..num {
-                let cert =
-                    map_result_ptr(sk_X509_value(chain, i) as *mut X509).ok()?;
+                let cert = map_result_ptr(sk_X509_value(chain, i) as *mut X509).ok()?;
 
                 let mut out: *mut u8 = std::ptr::null_mut();
                 let len = i2d_X509(cert, &mut out);
@@ -121,8 +117,7 @@ impl Handshake {
             // certificate as in bssl. SSL_peer_certificate does
             // returns the object representing a certificate used as
             // the local peer's identity.
-            let cert =
-                map_result_ptr(SSL_get0_peer_certificate(self.as_ptr())).ok()?;
+            let cert = map_result_ptr(SSL_get0_peer_certificate(self.as_ptr())).ok()?;
             let mut out: *mut u8 = std::ptr::null_mut();
             let len = i2d_X509(cert, &mut out);
             if len < 0 {
@@ -178,14 +173,15 @@ impl Handshake {
 }
 
 extern "C" fn set_encryption_secrets(
-    ssl: *mut SSL, level: crypto::Level, read_secret: *const u8,
-    write_secret: *const u8, secret_len: usize,
+    ssl: *mut SSL,
+    level: crypto::Level,
+    read_secret: *const u8,
+    write_secret: *const u8,
+    secret_len: usize,
 ) -> c_int {
     let cipher = map_result_ptr(unsafe { SSL_get_current_cipher(ssl) });
-    let _write_ret =
-        set_write_secret(ssl, level, cipher.unwrap(), write_secret, secret_len);
-    let _read_ret =
-        set_read_secret(ssl, level, cipher.unwrap(), read_secret, secret_len);
+    let _write_ret = set_write_secret(ssl, level, cipher.unwrap(), write_secret, secret_len);
+    let _read_ret = set_read_secret(ssl, level, cipher.unwrap(), read_secret, secret_len);
 
     1
 }
@@ -206,9 +202,7 @@ unsafe fn sk_X509_value(stack: *const STACK_OF, idx: usize) -> *mut c_void {
 }
 
 #[allow(non_snake_case)]
-pub(super) unsafe fn SSL_CTX_set_session_cache_mode(
-    ctx: *mut SSL_CTX, mode: c_int,
-) -> c_int {
+pub(super) unsafe fn SSL_CTX_set_session_cache_mode(ctx: *mut SSL_CTX, mode: c_int) -> c_int {
     const SSL_CTRL_SET_SESS_CACHE_MODE: c_int = 44;
 
     SSL_CTX_ctrl(
@@ -221,7 +215,9 @@ pub(super) unsafe fn SSL_CTX_set_session_cache_mode(
 
 #[allow(non_snake_case)]
 pub(super) unsafe fn SSL_CTX_set_tlsext_ticket_keys(
-    ctx: *mut SSL_CTX, key: *const u8, key_len: usize,
+    ctx: *mut SSL_CTX,
+    key: *const u8,
+    key_len: usize,
 ) -> c_int {
     const SSL_CTRL_SET_TLSEXT_TICKET_KEYS: c_int = 59;
 
@@ -234,9 +230,7 @@ pub(super) unsafe fn SSL_CTX_set_tlsext_ticket_keys(
 }
 
 #[allow(non_snake_case)]
-pub(super) unsafe fn SSL_set_min_proto_version(
-    s: *mut SSL, version: u16,
-) -> c_int {
+pub(super) unsafe fn SSL_set_min_proto_version(s: *mut SSL, version: u16) -> c_int {
     const SSL_CTRL_SET_MIN_PROTO_VERSION: c_int = 123;
 
     SSL_ctrl(
@@ -248,9 +242,7 @@ pub(super) unsafe fn SSL_set_min_proto_version(
 }
 
 #[allow(non_snake_case)]
-pub(super) unsafe fn SSL_set_max_proto_version(
-    s: *mut SSL, version: u16,
-) -> c_int {
+pub(super) unsafe fn SSL_set_max_proto_version(s: *mut SSL, version: u16) -> c_int {
     const SSL_CTRL_SET_MAX_PROTO_VERSION: c_int = 124;
 
     SSL_ctrl(
@@ -262,9 +254,7 @@ pub(super) unsafe fn SSL_set_max_proto_version(
 }
 
 #[allow(non_snake_case)]
-pub(super) unsafe fn SSL_set_tlsext_host_name(
-    s: *mut SSL, name: *const c_char,
-) -> c_int {
+pub(super) unsafe fn SSL_set_tlsext_host_name(s: *mut SSL, name: *const c_char) -> c_int {
     const SSL_CTRL_SET_TLSEXT_HOSTNAME: c_int = 55;
 
     #[allow(non_upper_case_globals)]
@@ -280,7 +270,10 @@ pub(super) unsafe fn SSL_set_tlsext_host_name(
 
 #[allow(non_snake_case)]
 pub(super) unsafe fn SSL_get_ex_new_index(
-    argl: c_long, argp: *const c_void, newf: *const c_void, dupf: *const c_void,
+    argl: c_long,
+    argp: *const c_void,
+    newf: *const c_void,
+    dupf: *const c_void,
     freef: *const c_void,
 ) -> c_int {
     const CRYPTO_EX_INDEX_SSL: c_int = 0;
@@ -309,9 +302,7 @@ pub(super) fn get_session_bytes(session: *mut SSL_SESSION) -> Result<Vec<u8>> {
         let mut out: Vec<c_uchar> = Vec::with_capacity(out_len as usize);
 
         let out_len = i2d_SSL_SESSION(session, &mut out.as_mut_ptr());
-        let session_bytes =
-            std::slice::from_raw_parts(out.as_mut_ptr(), out_len as usize)
-                .to_vec();
+        let session_bytes = std::slice::from_raw_parts(out.as_mut_ptr(), out_len as usize).to_vec();
         session_bytes
     };
 
@@ -321,17 +312,13 @@ pub(super) const TLS_ERROR: c_int = 2;
 
 extern "C" {
 
-    fn SSL_CTX_ctrl(
-        ctx: *mut SSL_CTX, cmd: c_int, larg: c_long, parg: *mut c_void,
-    ) -> c_long;
+    fn SSL_CTX_ctrl(ctx: *mut SSL_CTX, cmd: c_int, larg: c_long, parg: *mut c_void) -> c_long;
 
     fn SSL_get_peer_cert_chain(ssl: *const SSL) -> *mut STACK_OF;
 
     fn SSL_get0_peer_certificate(ssl: *const SSL) -> *mut X509;
 
-    fn SSL_ctrl(
-        ssl: *const SSL, cmd: c_int, larg: c_long, parg: *mut c_void,
-    ) -> c_long;
+    fn SSL_ctrl(ssl: *const SSL, cmd: c_int, larg: c_long, parg: *mut c_void) -> c_long;
 
     fn i2d_X509(px: *const X509, out: *mut *mut c_uchar) -> c_int;
 
@@ -342,18 +329,21 @@ extern "C" {
     // CRYPTO
 
     fn CRYPTO_get_ex_new_index(
-        class_index: c_int, argl: c_long, argp: *const c_void,
-        new_func: *const c_void, dup_func: *const c_void,
+        class_index: c_int,
+        argl: c_long,
+        argp: *const c_void,
+        new_func: *const c_void,
+        dup_func: *const c_void,
         free_func: *const c_void,
     ) -> c_int;
 
     fn d2i_SSL_SESSION(
-        a: *mut *mut SSL_SESSION, pp: *mut *const c_uchar, len: c_long,
+        a: *mut *mut SSL_SESSION,
+        pp: *mut *const c_uchar,
+        len: c_long,
     ) -> *mut SSL_SESSION;
 
-    pub(super) fn i2d_SSL_SESSION(
-        in_: *mut SSL_SESSION, pp: *mut *mut c_uchar,
-    ) -> c_int;
+    pub(super) fn i2d_SSL_SESSION(in_: *mut SSL_SESSION, pp: *mut *mut c_uchar) -> c_int;
 
     fn SSL_group_to_name(ssl: *const SSL, id: c_int) -> *const c_char;
 }

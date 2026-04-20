@@ -268,7 +268,7 @@ impl std::fmt::Debug for CookieJar {
 /// Evict the N least-recently-accessed cookies from a domain's list.
 fn evict_lru(cookies: &mut Vec<Cookie>, count: usize) {
     // Sort by last_access ascending, remove the oldest.
-    cookies.sort_by(|a, b| a.last_access.cmp(&b.last_access));
+    cookies.sort_by_key(|a| a.last_access);
     cookies.drain(..count.min(cookies.len()));
 }
 
@@ -281,7 +281,7 @@ fn evict_global(all: &mut HashMap<String, Vec<Cookie>>, count: usize) {
             all_cookies.push((domain.clone(), i, cookie.last_access));
         }
     }
-    all_cookies.sort_by(|a, b| a.2.cmp(&b.2));
+    all_cookies.sort_by_key(|a| a.2);
 
     // Remove the oldest `count` cookies.
     let to_remove = count.min(all_cookies.len());

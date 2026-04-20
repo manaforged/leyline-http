@@ -42,7 +42,7 @@ unsafe fn set_int_opt(
 }
 
 #[cfg(target_os = "linux")]
-pub fn apply_platform_options(socket: &Socket, profile: &TcpProfile) {
+pub fn apply_platform_options(socket: &Socket, profile: &TcpProfile, is_v6: bool) {
     use std::os::unix::io::AsRawFd;
     let fd = socket.as_raw_fd();
 
@@ -60,15 +60,18 @@ pub fn apply_platform_options(socket: &Socket, profile: &TcpProfile) {
     }
 
     if profile.df {
+        let (level, opt, label) = if is_v6 {
+            (
+                libc::IPPROTO_IPV6,
+                libc::IPV6_MTU_DISCOVER,
+                "IPV6_MTU_DISCOVER",
+            )
+        } else {
+            (libc::IPPROTO_IP, libc::IP_MTU_DISCOVER, "IP_MTU_DISCOVER")
+        };
         // SAFETY: see module-level SAFETY.
         unsafe {
-            set_int_opt(
-                fd,
-                libc::IPPROTO_IP,
-                libc::IP_MTU_DISCOVER,
-                2, // IP_PMTUDISC_DO
-                "IP_MTU_DISCOVER",
-            )
+            set_int_opt(fd, level, opt, 2 /* PMTUDISC_DO */, label)
         };
     }
 
@@ -92,7 +95,7 @@ pub fn apply_platform_options(socket: &Socket, profile: &TcpProfile) {
 }
 
 #[cfg(target_os = "macos")]
-pub fn apply_platform_options(socket: &Socket, profile: &TcpProfile) {
+pub fn apply_platform_options(socket: &Socket, profile: &TcpProfile, is_v6: bool) {
     use std::os::unix::io::AsRawFd;
     let fd = socket.as_raw_fd();
 
@@ -109,14 +112,20 @@ pub fn apply_platform_options(socket: &Socket, profile: &TcpProfile) {
         };
     }
 
+    // macOS: IP_DONTFRAG = 28 (IPPROTO_IP), IPV6_DONTFRAG = 62 (IPPROTO_IPV6).
     if profile.df {
-        // SAFETY: see module-level SAFETY. macOS IP_DONTFRAG = 67.
-        unsafe { set_int_opt(fd, libc::IPPROTO_IP, 67, 1, "IP_DONTFRAG") };
+        let (level, opt, label) = if is_v6 {
+            (libc::IPPROTO_IPV6, 62, "IPV6_DONTFRAG")
+        } else {
+            (libc::IPPROTO_IP, 28, "IP_DONTFRAG")
+        };
+        // SAFETY: see module-level SAFETY.
+        unsafe { set_int_opt(fd, level, opt, 1, label) };
     }
 }
 
 #[cfg(target_os = "windows")]
-pub fn apply_platform_options(socket: &Socket, profile: &TcpProfile) {
+pub fn apply_platform_options(socket: &Socket, profile: &TcpProfile, is_v6: bool) {
     use std::os::windows::io::AsRawSocket;
 
     if profile.df {
@@ -129,6 +138,14 @@ pub fn apply_platform_options(socket: &Socket, profile: &TcpProfile) {
                 optlen: i32,
             ) -> i32;
         }
+        // Winsock: IP_DONTFRAGMENT = 14 at IPPROTO_IP (0); IPV6_DONTFRAG = 14
+        // at IPPROTO_IPV6 (41). Using IPPROTO_IP on a v6 socket returns
+        // WSAEINVAL (10022).
+        let (level, optname, label) = if is_v6 {
+            (41, 14, "IPV6_DONTFRAG")
+        } else {
+            (0, 14, "IP_DONTFRAGMENT")
+        };
         let val: u32 = 1;
         // SAFETY: `socket` is a live `Socket`, so `as_raw_socket()` is a
         // valid open SOCKET handle for the duration of this call. `val`
@@ -137,14 +154,14 @@ pub fn apply_platform_options(socket: &Socket, profile: &TcpProfile) {
         let ret = unsafe {
             setsockopt(
                 socket.as_raw_socket() as usize,
-                0,  // IPPROTO_IP
-                14, // IP_DONTFRAGMENT
+                level,
+                optname,
                 &val as *const u32 as *const u8,
                 std::mem::size_of::<u32>() as i32,
             )
         };
         if ret != 0 {
-            log_once("IP_DONTFRAGMENT", &std::io::Error::last_os_error());
+            log_once(label, &std::io::Error::last_os_error());
         }
     }
 }

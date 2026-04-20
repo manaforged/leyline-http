@@ -13,8 +13,8 @@ fn main() {
     // directives for the same symbols cause linker errors on Windows/MSVC.
 
     // MacOS: allow cdylib to link with undefined symbols.
-    let target_os = std::env::var("CARGO_CFG_TARGET_OS")
-        .expect("CARGO_CFG_TARGET_OS must be set by cargo");
+    let target_os =
+        std::env::var("CARGO_CFG_TARGET_OS").expect("CARGO_CFG_TARGET_OS must be set by cargo");
     if target_os == "macos" {
         println!("cargo:rustc-cdylib-link-arg=-Wl,-undefined,dynamic_lookup");
     }

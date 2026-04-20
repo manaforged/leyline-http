@@ -50,8 +50,11 @@ impl ModeImpl for Startup {
     }
 
     fn on_congestion_event(
-        mut self, _prior_in_flight: usize, event_time: std::time::Instant,
-        _acked_packets: &[Acked], _lost_packets: &[Lost],
+        mut self,
+        _prior_in_flight: usize,
+        event_time: std::time::Instant,
+        _acked_packets: &[Acked],
+        _lost_packets: &[Lost],
         congestion_event: &mut BBRv2CongestionEvent,
         _target_bytes_inflight: usize,
     ) -> Mode {
@@ -63,8 +66,7 @@ impl ModeImpl for Startup {
             return Mode::Startup(self);
         }
 
-        let has_bandwidth_growth =
-            self.model.has_bandwidth_growth(congestion_event);
+        let has_bandwidth_growth = self.model.has_bandwidth_growth(congestion_event);
 
         #[allow(clippy::absurd_extreme_comparisons)]
         if PARAMS.max_startup_queue_rounds > 0 && !has_bandwidth_growth {
@@ -76,9 +78,7 @@ impl ModeImpl for Startup {
         // TCP BBR always exits upon excessive losses. QUIC BBRv1 does not exit
         // upon excessive losses, if enough bandwidth growth is observed or if the
         // sample was app limited.
-        if !congestion_event.last_packet_send_state.is_app_limited &&
-            !has_bandwidth_growth
-        {
+        if !congestion_event.last_packet_send_state.is_app_limited && !has_bandwidth_growth {
             self.check_excessive_losses(congestion_event);
         }
 
@@ -96,55 +96,42 @@ impl ModeImpl for Startup {
         }
     }
 
-    fn on_exit_quiescence(
-        self, _now: Instant, _quiescence_start_time: Instant,
-    ) -> Mode {
+    fn on_exit_quiescence(self, _now: Instant, _quiescence_start_time: Instant) -> Mode {
         Mode::Startup(self)
     }
 
-    fn enter(
-        &mut self, _now: Instant,
-        _congestion_event: Option<&BBRv2CongestionEvent>,
-    ) {
+    fn enter(&mut self, _now: Instant, _congestion_event: Option<&BBRv2CongestionEvent>) {
         unreachable!("Enter should never be called for startup")
     }
 
-    fn leave(
-        &mut self, _now: Instant,
-        _congestion_event: Option<&BBRv2CongestionEvent>,
-    ) {
+    fn leave(&mut self, _now: Instant, _congestion_event: Option<&BBRv2CongestionEvent>) {
         // Clear bandwidth_lo if it's set during STARTUP.
         self.model.clear_bandwidth_lo();
     }
 }
 
 impl Startup {
-    fn into_drain(
-        mut self, now: Instant, congestion_event: Option<&BBRv2CongestionEvent>,
-    ) -> Mode {
+    fn into_drain(mut self, now: Instant, congestion_event: Option<&BBRv2CongestionEvent>) -> Mode {
         self.leave(now, congestion_event);
         let mut next_mode = Mode::drain(self.model);
         next_mode.enter(now, congestion_event);
         next_mode
     }
 
-    fn check_excessive_losses(
-        &mut self, congestion_event: &mut BBRv2CongestionEvent,
-    ) {
+    fn check_excessive_losses(&mut self, congestion_event: &mut BBRv2CongestionEvent) {
         if self.model.full_bandwidth_reached() {
             return;
         }
 
         // At the end of a round trip. Check if loss is too high in this round.
-        if self.model.is_inflight_too_high(
-            congestion_event,
-            PARAMS.startup_full_loss_count,
-        ) {
+        if self
+            .model
+            .is_inflight_too_high(congestion_event, PARAMS.startup_full_loss_count)
+        {
             let mut new_inflight_hi = self.model.bdp0();
 
             if PARAMS.startup_loss_exit_use_max_delivered_for_inflight_hi {
-                new_inflight_hi = new_inflight_hi
-                    .max(self.model.max_bytes_delivered_in_round());
+                new_inflight_hi = new_inflight_hi.max(self.model.max_bytes_delivered_in_round());
             }
 
             self.model.set_inflight_hi(new_inflight_hi);

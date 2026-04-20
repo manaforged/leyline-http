@@ -31,16 +31,12 @@ use std::time::Instant;
 // BBR2 Functions when trasmitting packets.
 //
 // 4.2.2.  Per-Transmit Steps
-pub fn bbr2_on_transmit(
-    r: &mut Congestion, bytes_in_flight: usize, now: Instant,
-) {
+pub fn bbr2_on_transmit(r: &mut Congestion, bytes_in_flight: usize, now: Instant) {
     bbr2_handle_restart_from_idle(r, bytes_in_flight, now);
 }
 
 // 4.4.3.  Logic
-fn bbr2_handle_restart_from_idle(
-    r: &mut Congestion, bytes_in_flight: usize, now: Instant,
-) {
+fn bbr2_handle_restart_from_idle(r: &mut Congestion, bytes_in_flight: usize, now: Instant) {
     if bytes_in_flight == 0 && r.delivery_rate.app_limited() {
         r.bbr2_state.idle_restart = true;
         r.bbr2_state.extra_acked_interval_start = now;

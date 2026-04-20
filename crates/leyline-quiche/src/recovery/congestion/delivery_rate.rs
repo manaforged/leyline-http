@@ -79,9 +79,7 @@ impl Default for Rate {
 }
 
 impl Rate {
-    pub fn on_packet_sent(
-        &mut self, pkt: &mut Sent, bytes_in_flight: usize, bytes_lost: u64,
-    ) {
+    pub fn on_packet_sent(&mut self, pkt: &mut Sent, bytes_in_flight: usize, bytes_lost: u64) {
         // No packets in flight.
         if bytes_in_flight == 0 {
             self.first_sent_time = pkt.time_sent;
@@ -105,8 +103,7 @@ impl Rate {
 
         // Update info using the newest packet. If rate_sample is not yet
         // initialized, initialize with the first packet.
-        if self.rate_sample.prior_time.is_none() ||
-            pkt.delivered > self.rate_sample.prior_delivered
+        if self.rate_sample.prior_time.is_none() || pkt.delivered > self.rate_sample.prior_delivered
         {
             self.rate_sample.prior_delivered = pkt.delivered;
             self.rate_sample.prior_time = Some(pkt.delivered_time);
@@ -136,8 +133,7 @@ impl Rate {
                 .send_elapsed
                 .max(self.rate_sample.ack_elapsed);
 
-            self.rate_sample.delivered =
-                self.delivered - self.rate_sample.prior_delivered;
+            self.rate_sample.delivered = self.delivered - self.rate_sample.prior_delivered;
             self.rate_sample.interval = interval;
 
             if interval < min_rtt {
@@ -150,8 +146,7 @@ impl Rate {
             if !interval.is_zero() {
                 // Fill in rate_sample with a rate sample.
                 self.rate_sample.delivery_rate =
-                    (self.rate_sample.delivered as f64 / interval.as_secs_f64())
-                        as u64;
+                    (self.rate_sample.delivered as f64 / interval.as_secs_f64()) as u64;
             }
         }
     }

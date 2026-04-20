@@ -133,23 +133,18 @@ impl State {
     fn w_cubic(&self, t: Duration, max_datagram_size: usize) -> f64 {
         let w_max = self.w_max / max_datagram_size as f64;
 
-        (C * (t.as_secs_f64() - self.k).powi(3) + w_max) *
-            max_datagram_size as f64
+        (C * (t.as_secs_f64() - self.k).powi(3) + w_max) * max_datagram_size as f64
     }
 
     // W_est = W_est + alpha_aimd * (segments_acked / cwnd)  (Eq. 4)
-    fn w_est_inc(
-        &self, acked: usize, cwnd: usize, max_datagram_size: usize,
-    ) -> f64 {
+    fn w_est_inc(&self, acked: usize, cwnd: usize, max_datagram_size: usize) -> f64 {
         self.alpha_aimd * (acked as f64 / cwnd as f64) * max_datagram_size as f64
     }
 }
 
 fn on_init(_r: &mut Congestion) {}
 
-fn on_packet_sent(
-    r: &mut Congestion, sent_bytes: usize, bytes_in_flight: usize, now: Instant,
-) {
+fn on_packet_sent(r: &mut Congestion, sent_bytes: usize, bytes_in_flight: usize, now: Instant) {
     // See https://github.com/torvalds/linux/commit/30927520dbae297182990bb21d08762bcc35ce1d
     // First transmit when no packets in flight
     let cubic = &mut r.cubic_state;
@@ -162,8 +157,7 @@ fn on_packet_sent(
             // Shift epoch start to keep cwnd growth to cubic curve.
             if let Some(recovery_start_time) = r.congestion_recovery_start_time {
                 if delta.as_nanos() > 0 {
-                    r.congestion_recovery_start_time =
-                        Some(recovery_start_time + delta);
+                    r.congestion_recovery_start_time = Some(recovery_start_time + delta);
                 }
             }
         }
@@ -175,8 +169,11 @@ fn on_packet_sent(
 }
 
 fn on_packets_acked(
-    r: &mut Congestion, bytes_in_flight: usize, packets: &mut Vec<Acked>,
-    now: Instant, rtt_stats: &RttStats,
+    r: &mut Congestion,
+    bytes_in_flight: usize,
+    packets: &mut Vec<Acked>,
+    now: Instant,
+    rtt_stats: &RttStats,
 ) {
     for pkt in packets.drain(..) {
         on_packet_acked(r, bytes_in_flight, &pkt, now, rtt_stats);
@@ -184,7 +181,10 @@ fn on_packets_acked(
 }
 
 fn on_packet_acked(
-    r: &mut Congestion, bytes_in_flight: usize, packet: &Acked, now: Instant,
+    r: &mut Congestion,
+    bytes_in_flight: usize,
+    packet: &Acked,
+    now: Instant,
     rtt_stats: &RttStats,
 ) {
     let in_congestion_recovery = r.in_congestion_recovery(packet.time_sent);
@@ -213,9 +213,8 @@ fn on_packet_acked(
     if r.congestion_recovery_start_time.is_some() {
         let new_lost = r.lost_count - r.cubic_state.prior.lost_count;
 
-        let rollback_threshold = (r.congestion_window / r.max_datagram_size) *
-            ROLLBACK_THRESHOLD_PERCENT /
-            100;
+        let rollback_threshold =
+            (r.congestion_window / r.max_datagram_size) * ROLLBACK_THRESHOLD_PERCENT / 100;
 
         let rollback_threshold = rollback_threshold.max(MIN_ROLLBACK_THRESHOLD);
 
@@ -234,8 +233,7 @@ fn on_packet_acked(
 
         if r.bytes_acked_sl >= r.max_datagram_size {
             if r.hystart.in_css() {
-                r.congestion_window +=
-                    r.hystart.css_cwnd_inc(r.max_datagram_size);
+                r.congestion_window += r.hystart.css_cwnd_inc(r.max_datagram_size);
             } else {
                 r.congestion_window += r.max_datagram_size;
             }
@@ -277,7 +275,7 @@ fn on_packet_acked(
 
                     r.cubic_state.w_est = r.congestion_window as f64;
                     r.cubic_state.alpha_aimd = ALPHA_AIMD;
-                },
+                }
             }
         }
 
@@ -293,11 +291,9 @@ fn on_packet_acked(
         let target = f64::min(target, r.congestion_window as f64 * 1.5);
 
         // Update w_est.
-        let w_est_inc = r.cubic_state.w_est_inc(
-            packet.size,
-            r.congestion_window,
-            r.max_datagram_size,
-        );
+        let w_est_inc =
+            r.cubic_state
+                .w_est_inc(packet.size, r.congestion_window, r.max_datagram_size);
         r.cubic_state.w_est += w_est_inc;
 
         if r.cubic_state.w_est >= r.cubic_state.w_max {
@@ -311,8 +307,7 @@ fn on_packet_acked(
             cubic_cwnd = cmp::max(cubic_cwnd, r.cubic_state.w_est as usize);
         } else {
             // Concave region or convex region use same increment.
-            let cubic_inc =
-                r.max_datagram_size * (target as usize - cubic_cwnd) / cubic_cwnd;
+            let cubic_inc = r.max_datagram_size * (target as usize - cubic_cwnd) / cubic_cwnd;
 
             cubic_cwnd += cubic_inc;
         }
@@ -328,8 +323,11 @@ fn on_packet_acked(
 }
 
 fn congestion_event(
-    r: &mut Congestion, bytes_in_flight: usize, _lost_bytes: usize,
-    largest_lost_pkt: &Sent, now: Instant,
+    r: &mut Congestion,
+    bytes_in_flight: usize,
+    _lost_bytes: usize,
+    largest_lost_pkt: &Sent,
+    now: Instant,
 ) {
     let time_sent = largest_lost_pkt.time_sent;
     let in_congestion_recovery = r.in_congestion_recovery(time_sent);
@@ -341,15 +339,13 @@ fn congestion_event(
 
         // Fast convergence
         if (r.congestion_window as f64) < r.cubic_state.w_max {
-            r.cubic_state.w_max =
-                r.congestion_window as f64 * (1.0 + BETA_CUBIC) / 2.0;
+            r.cubic_state.w_max = r.congestion_window as f64 * (1.0 + BETA_CUBIC) / 2.0;
         } else {
             r.cubic_state.w_max = r.congestion_window as f64;
         }
 
         r.ssthresh = (r.congestion_window as f64 * BETA_CUBIC) as usize;
-        r.ssthresh =
-            cmp::max(r.ssthresh, r.max_datagram_size * MINIMUM_WINDOW_PACKETS);
+        r.ssthresh = cmp::max(r.ssthresh, r.max_datagram_size * MINIMUM_WINDOW_PACKETS);
         r.congestion_window = r.ssthresh;
 
         r.cubic_state.k = if r.cubic_state.w_max < r.congestion_window as f64 {
@@ -359,8 +355,7 @@ fn congestion_event(
                 .cubic_k(r.congestion_window, r.max_datagram_size)
         };
 
-        r.cubic_state.cwnd_inc =
-            (r.cubic_state.cwnd_inc as f64 * BETA_CUBIC) as usize;
+        r.cubic_state.cwnd_inc = (r.cubic_state.cwnd_inc as f64 * BETA_CUBIC) as usize;
 
         r.cubic_state.w_est = r.congestion_window as f64;
         r.cubic_state.alpha_aimd = ALPHA_AIMD;
@@ -611,8 +606,7 @@ mod tests {
         assert!(sender.hystart.css_start_time().is_none());
         assert_eq!(
             sender.congestion_window(),
-            cwnd_prev +
-                size / hystart::CSS_GROWTH_DIVISOR * hystart::N_RTT_SAMPLE
+            cwnd_prev + size / hystart::CSS_GROWTH_DIVISOR * hystart::N_RTT_SAMPLE
         );
     }
 

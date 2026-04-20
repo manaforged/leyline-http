@@ -29,9 +29,7 @@ use super::*;
 // BBR2 Functions on every packet loss event.
 //
 // 4.2.4.  Per-Loss Steps
-pub fn bbr2_update_on_loss(
-    r: &mut Congestion, packet: &Sent, lost_bytes: usize, now: Instant,
-) {
+pub fn bbr2_update_on_loss(r: &mut Congestion, packet: &Sent, lost_bytes: usize, now: Instant) {
     bbr2_handle_lost_packet(r, packet, lost_bytes, now);
 }
 
@@ -71,9 +69,7 @@ fn bbr2_handle_inflight_too_high(r: &mut Congestion, now: Instant) {
     }
 }
 
-fn bbr2_handle_lost_packet(
-    r: &mut Congestion, packet: &Sent, lost_bytes: usize, now: Instant,
-) {
+fn bbr2_handle_lost_packet(r: &mut Congestion, packet: &Sent, lost_bytes: usize, now: Instant) {
     if !r.bbr2_state.bw_probe_samples {
         return;
     }
@@ -94,8 +90,7 @@ fn bbr2_inflight_hi_from_lost_packet(r: &mut Congestion, packet: &Sent) -> usize
     let size = packet.size;
     let inflight_prev = r.bbr2_state.tx_in_flight - size;
     let lost_prev = r.bbr2_state.lost - size;
-    let lost_prefix = (LOSS_THRESH * inflight_prev as f64 - lost_prev as f64) /
-        (1.0 - LOSS_THRESH);
+    let lost_prefix = (LOSS_THRESH * inflight_prev as f64 - lost_prev as f64) / (1.0 - LOSS_THRESH);
 
     inflight_prev + lost_prefix as usize
 }
@@ -107,8 +102,7 @@ pub fn bbr2_update_latest_delivery_signals(r: &mut Congestion) {
     // Near start of ACK processing.
     bbr.loss_round_start = false;
     bbr.bw_latest = bbr.bw_latest.max(r.delivery_rate.sample_delivery_rate());
-    bbr.inflight_latest =
-        bbr.inflight_latest.max(r.delivery_rate.sample_delivered());
+    bbr.inflight_latest = bbr.inflight_latest.max(r.delivery_rate.sample_delivered());
 
     if r.delivery_rate.sample_prior_delivered() >= bbr.loss_round_delivered {
         bbr.loss_round_delivered = r.delivery_rate.delivered();
@@ -207,7 +201,7 @@ pub fn bbr2_bound_bw_for_model(r: &mut Congestion) {
 fn bbr2_is_probing_bw(r: &mut Congestion) -> bool {
     let state = r.bbr2_state.state;
 
-    state == BBR2StateMachine::Startup ||
-        state == BBR2StateMachine::ProbeBWREFILL ||
-        state == BBR2StateMachine::ProbeBWUP
+    state == BBR2StateMachine::Startup
+        || state == BBR2StateMachine::ProbeBWREFILL
+        || state == BBR2StateMachine::ProbeBWUP
 }

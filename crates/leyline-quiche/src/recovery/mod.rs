@@ -86,7 +86,7 @@ impl std::fmt::Debug for LossDetectionTimer {
                 } else {
                     write!(f, "exp")
                 }
-            },
+            }
             None => write!(f, "none"),
         }
     }
@@ -112,8 +112,7 @@ impl RecoveryConfig {
             hystart: config.hystart,
             pacing: config.pacing,
             max_pacing_rate: config.max_pacing_rate,
-            initial_congestion_window_packets: config
-                .initial_congestion_window_packets,
+            initial_congestion_window_packets: config.initial_congestion_window_packets,
         }
     }
 }
@@ -149,26 +148,42 @@ pub trait RecoveryOps {
     fn ping_sent(&mut self, epoch: packet::Epoch);
 
     fn on_packet_sent(
-        &mut self, pkt: Sent, epoch: packet::Epoch,
-        handshake_status: HandshakeStatus, now: Instant, trace_id: &str,
+        &mut self,
+        pkt: Sent,
+        epoch: packet::Epoch,
+        handshake_status: HandshakeStatus,
+        now: Instant,
+        trace_id: &str,
     );
     fn get_packet_send_time(&self) -> Instant;
 
     fn on_ack_received(
-        &mut self, ranges: &RangeSet, ack_delay: u64, epoch: packet::Epoch,
-        handshake_status: HandshakeStatus, now: Instant, trace_id: &str,
+        &mut self,
+        ranges: &RangeSet,
+        ack_delay: u64,
+        epoch: packet::Epoch,
+        handshake_status: HandshakeStatus,
+        now: Instant,
+        trace_id: &str,
     ) -> (usize, usize, usize);
 
     fn on_loss_detection_timeout(
-        &mut self, handshake_status: HandshakeStatus, now: Instant,
+        &mut self,
+        handshake_status: HandshakeStatus,
+        now: Instant,
         trace_id: &str,
     ) -> (usize, usize);
     fn on_pkt_num_space_discarded(
-        &mut self, epoch: packet::Epoch, handshake_status: HandshakeStatus,
+        &mut self,
+        epoch: packet::Epoch,
+        handshake_status: HandshakeStatus,
         now: Instant,
     );
     fn on_path_change(
-        &mut self, epoch: packet::Epoch, now: Instant, _trace_id: &str,
+        &mut self,
+        epoch: packet::Epoch,
+        now: Instant,
+        _trace_id: &str,
     ) -> (usize, usize);
     fn loss_detection_timer(&self) -> Option<Instant>;
     fn cwnd(&self) -> usize;
@@ -217,7 +232,9 @@ pub trait RecoveryOps {
 
     #[cfg(test)]
     fn detect_lost_packets_for_test(
-        &mut self, epoch: packet::Epoch, now: Instant,
+        &mut self,
+        epoch: packet::Epoch,
+        now: Instant,
     ) -> (usize, usize);
 
     fn update_app_limited(&mut self, v: bool);
@@ -259,13 +276,13 @@ impl Recovery {
 #[repr(C)]
 pub enum CongestionControlAlgorithm {
     /// Reno congestion control algorithm. `reno` in a string form.
-    Reno            = 0,
+    Reno = 0,
     /// CUBIC congestion control algorithm (default). `cubic` in a string form.
-    CUBIC           = 1,
+    CUBIC = 1,
     /// BBR congestion control algorithm. `bbr` in a string form.
-    BBR             = 2,
+    BBR = 2,
     /// BBRv2 congestion control algorithm. `bbr2` in a string form.
-    BBR2            = 3,
+    BBR2 = 3,
     /// BBRv2 congestion control algorithm implementation from gcongestion
     /// branch. `bbr2_gcongestion` in a string form.
     Bbr2Gcongestion = 4,
@@ -432,14 +449,13 @@ impl QlogMetrics {
             None
         };
 
-        let new_bytes_in_flight =
-            if self.bytes_in_flight != latest.bytes_in_flight {
-                self.bytes_in_flight = latest.bytes_in_flight;
-                emit_event = true;
-                Some(latest.bytes_in_flight)
-            } else {
-                None
-            };
+        let new_bytes_in_flight = if self.bytes_in_flight != latest.bytes_in_flight {
+            self.bytes_in_flight = latest.bytes_in_flight;
+            emit_event = true;
+            Some(latest.bytes_in_flight)
+        } else {
+            None
+        };
 
         let new_ssthresh = if self.ssthresh != latest.ssthresh {
             self.ssthresh = latest.ssthresh;
@@ -497,7 +513,7 @@ impl ReleaseTime {
     #[allow(dead_code)]
     fn inc(&mut self, delay: Duration) {
         match self {
-            ReleaseTime::Immediate => {},
+            ReleaseTime::Immediate => {}
             ReleaseTime::At(time) => *time += delay,
         }
     }
@@ -582,8 +598,7 @@ mod tests {
         assert_eq!(algo, CongestionControlAlgorithm::BBR2);
         assert!(!recovery_for_alg(algo).gcongestion_enabled());
 
-        let algo =
-            CongestionControlAlgorithm::from_str("bbr2_gcongestion").unwrap();
+        let algo = CongestionControlAlgorithm::from_str("bbr2_gcongestion").unwrap();
         assert_eq!(algo, CongestionControlAlgorithm::Bbr2Gcongestion);
         assert!(recovery_for_alg(algo).gcongestion_enabled());
     }

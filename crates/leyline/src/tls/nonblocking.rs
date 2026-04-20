@@ -14,12 +14,14 @@ pub(crate) async fn connect_one(
     sock_addr: std::net::SocketAddr,
     tcp_profile: &TcpProfile,
 ) -> Result<TcpStream, std::io::Error> {
-    let domain = match sock_addr {
-        std::net::SocketAddr::V4(_) => socket2::Domain::IPV4,
-        std::net::SocketAddr::V6(_) => socket2::Domain::IPV6,
+    let is_v6 = matches!(sock_addr, std::net::SocketAddr::V6(_));
+    let domain = if is_v6 {
+        socket2::Domain::IPV6
+    } else {
+        socket2::Domain::IPV4
     };
     let socket = socket2::Socket::new(domain, socket2::Type::STREAM, Some(socket2::Protocol::TCP))?;
-    tcp_profile.apply(&socket);
+    tcp_profile.apply(&socket, is_v6);
     socket.set_nonblocking(true)?;
 
     match socket.connect(&sock_addr.into()) {

@@ -317,7 +317,9 @@ struct BBRv2CongestionEvent {
 
 impl BBRv2CongestionEvent {
     fn new(
-        event_time: Instant, prior_cwnd: usize, prior_bytes_in_flight: usize,
+        event_time: Instant,
+        prior_cwnd: usize,
+        prior_bytes_in_flight: usize,
         is_probing_for_bandwidth: bool,
     ) -> Self {
         BBRv2CongestionEvent {
@@ -338,8 +340,10 @@ impl BBRv2CongestionEvent {
 
 impl BBRv2 {
     pub fn new(
-        initial_congestion_window: usize, max_congestion_window: usize,
-        max_segment_size: usize, smoothed_rtt: Duration,
+        initial_congestion_window: usize,
+        max_congestion_window: usize,
+        max_segment_size: usize,
+        smoothed_rtt: Duration,
     ) -> Self {
         let cwnd = initial_congestion_window * max_segment_size;
         BBRv2 {
@@ -349,8 +353,7 @@ impl BBRv2 {
                 PARAMS.overestimate_avoidance,
             )),
             cwnd,
-            pacing_rate: Bandwidth::from_bytes_and_time_delta(cwnd, smoothed_rtt) *
-                2.885,
+            pacing_rate: Bandwidth::from_bytes_and_time_delta(cwnd, smoothed_rtt) * 2.885,
             cwnd_limits: Limits {
                 lo: initial_congestion_window * max_segment_size,
                 hi: max_congestion_window * max_segment_size,
@@ -383,10 +386,7 @@ impl BBRv2 {
 
         if self.mode.total_bytes_acked() == bytes_acked {
             // After the first ACK, cwnd is still the initial congestion window.
-            self.pacing_rate = Bandwidth::from_bytes_and_time_delta(
-                self.cwnd,
-                self.mode.min_rtt(),
-            );
+            self.pacing_rate = Bandwidth::from_bytes_and_time_delta(self.cwnd, self.mode.min_rtt());
             return;
         }
 
@@ -396,16 +396,14 @@ impl BBRv2 {
             return;
         }
 
-        if PARAMS.decrease_startup_pacing_at_end_of_round &&
-            self.mode.pacing_gain() < PARAMS.startup_pacing_gain
+        if PARAMS.decrease_startup_pacing_at_end_of_round
+            && self.mode.pacing_gain() < PARAMS.startup_pacing_gain
         {
             self.pacing_rate = target_rate;
             return;
         }
 
-        if PARAMS.bw_lo_mode != BwLoMode::Default &&
-            self.mode.loss_events_in_round() > 0
-        {
+        if PARAMS.bw_lo_mode != BwLoMode::Default && self.mode.loss_events_in_round() > 0 {
             self.pacing_rate = target_rate;
             return;
         }
@@ -415,8 +413,7 @@ impl BBRv2 {
     }
 
     fn update_congestion_window(&mut self, bytes_acked: usize) {
-        let mut target_cwnd =
-            self.get_target_congestion_window(self.mode.cwnd_gain());
+        let mut target_cwnd = self.get_target_congestion_window(self.mode.cwnd_gain());
 
         let prior_cwnd = self.cwnd;
         if self.mode.full_bandwidth_reached() {
@@ -454,8 +451,12 @@ impl CongestionControl for BBRv2 {
     }
 
     fn on_packet_sent(
-        &mut self, sent_time: std::time::Instant, bytes_in_flight: usize,
-        packet_number: u64, bytes: usize, is_retransmissible: bool,
+        &mut self,
+        sent_time: std::time::Instant,
+        bytes_in_flight: usize,
+        packet_number: u64,
+        bytes: usize,
+        is_retransmissible: bool,
         rtt_stats: &RttStats,
     ) {
         if bytes_in_flight == 0 && PARAMS.avoid_unnecessary_probe_rtt {
@@ -473,9 +474,15 @@ impl CongestionControl for BBRv2 {
     }
 
     fn on_congestion_event(
-        &mut self, _rtt_updated: bool, prior_in_flight: usize,
-        _bytes_in_flight: usize, event_time: Instant, acked_packets: &[Acked],
-        lost_packets: &[Lost], least_unacked: u64, _rtt_stats: &RttStats,
+        &mut self,
+        _rtt_updated: bool,
+        prior_in_flight: usize,
+        _bytes_in_flight: usize,
+        event_time: Instant,
+        acked_packets: &[Acked],
+        lost_packets: &[Lost],
+        least_unacked: u64,
+        _rtt_stats: &RttStats,
     ) {
         let mut congestion_event = BBRv2CongestionEvent::new(
             event_time,
@@ -484,16 +491,13 @@ impl CongestionControl for BBRv2 {
             self.mode.is_probing_for_bandwidth(),
         );
 
-        self.mode.on_congestion_event_start(
-            acked_packets,
-            lost_packets,
-            &mut congestion_event,
-        );
+        self.mode
+            .on_congestion_event_start(acked_packets, lost_packets, &mut congestion_event);
 
         // Number of mode changes allowed for this congestion event.
         let mut mode_changes_allowed = MAX_MODE_CHANGES_PER_CONGESTION_EVENT;
-        while mode_changes_allowed > 0 &&
-            self.mode.do_on_congestion_event(
+        while mode_changes_allowed > 0
+            && self.mode.do_on_congestion_event(
                 prior_in_flight,
                 event_time,
                 acked_packets,
@@ -511,14 +515,11 @@ impl CongestionControl for BBRv2 {
 
         self.mode
             .on_congestion_event_finish(least_unacked, &congestion_event);
-        self.last_sample_is_app_limited =
-            congestion_event.last_packet_send_state.is_app_limited;
+        self.last_sample_is_app_limited = congestion_event.last_packet_send_state.is_app_limited;
         if !self.last_sample_is_app_limited {
             self.has_non_app_limited_sample = true;
         }
-        if congestion_event.bytes_in_flight == 0 &&
-            PARAMS.avoid_unnecessary_probe_rtt
-        {
+        if congestion_event.bytes_in_flight == 0 && PARAMS.avoid_unnecessary_probe_rtt {
             self.on_enter_quiescence(event_time);
         }
     }
@@ -540,9 +541,7 @@ impl CongestionControl for BBRv2 {
         bytes_in_flight >= self.get_congestion_window()
     }
 
-    fn pacing_rate(
-        &self, _bytes_in_flight: usize, _rtt_stats: &super::RttStats,
-    ) -> Bandwidth {
+    fn pacing_rate(&self, _bytes_in_flight: usize, _rtt_stats: &super::RttStats) -> Bandwidth {
         self.pacing_rate
     }
 

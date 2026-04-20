@@ -60,7 +60,8 @@ pub(crate) enum Congestion {
 
 impl Congestion {
     pub(super) fn bbrv2(
-        initial_tcp_congestion_window: usize, max_congestion_window: usize,
+        initial_tcp_congestion_window: usize,
+        max_congestion_window: usize,
         max_segment_size: usize,
     ) -> Self {
         Congestion::BBRv2(bbr2::BBRv2::new(
@@ -93,8 +94,12 @@ pub(super) trait CongestionControl: Debug {
     /// before the packet was sent. Note: this function must be called for
     /// every packet sent to the wire.
     fn on_packet_sent(
-        &mut self, sent_time: Instant, bytes_in_flight: usize,
-        packet_number: u64, bytes: usize, is_retransmissible: bool,
+        &mut self,
+        sent_time: Instant,
+        bytes_in_flight: usize,
+        packet_number: u64,
+        bytes: usize,
+        is_retransmissible: bool,
         rtt_stats: &RttStats,
     );
 
@@ -109,9 +114,15 @@ pub(super) trait CongestionControl: Debug {
     /// congestion event.
     #[allow(clippy::too_many_arguments)]
     fn on_congestion_event(
-        &mut self, rtt_updated: bool, prior_in_flight: usize,
-        bytes_in_flight: usize, event_time: Instant, acked_packets: &[Acked],
-        lost_packets: &[Lost], least_unacked: u64, rtt_stats: &RttStats,
+        &mut self,
+        rtt_updated: bool,
+        prior_in_flight: usize,
+        bytes_in_flight: usize,
+        event_time: Instant,
+        acked_packets: &[Acked],
+        lost_packets: &[Lost],
+        least_unacked: u64,
+        rtt_stats: &RttStats,
     );
 
     /// Called when an RTO fires.  Resets the retransmission alarm if there are
@@ -135,9 +146,7 @@ pub(super) trait CongestionControl: Debug {
         !self.is_cwnd_limited(bytes_in_flight)
     }
 
-    fn pacing_rate(
-        &self, bytes_in_flight: usize, rtt_stats: &RttStats,
-    ) -> Bandwidth;
+    fn pacing_rate(&self, bytes_in_flight: usize, rtt_stats: &RttStats) -> Bandwidth;
 
     fn bandwidth_estimate(&self, rtt_stats: &RttStats) -> Bandwidth;
 
