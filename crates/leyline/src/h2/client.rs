@@ -946,6 +946,11 @@ where
     reader.set_max_frame_size(peer_settings.max_frame_size);
 
     // HPACK codecs.
+    //
+    // RFC 7541 §4.2 / RFC 9113 §6.5.2: SETTINGS_HEADER_TABLE_SIZE bounds the
+    // peer's encoder, so *our* decoder's ceiling is what *we* advertised —
+    // never what the peer advertised. The encoder's ceiling is set mid-
+    // connection from peer SETTINGS.
     let encoder = hpack::Encoder::new();
     let mut decoder = hpack::Decoder::new();
     let max_hdr = config
@@ -954,8 +959,14 @@ where
         .find(|(id, _)| matches!(id, crate::h2::config::SettingId::MaxHeaderListSize))
         .map(|(_, v)| *v as usize)
         .unwrap_or(256 * 1024);
+    let our_header_table_size = config
+        .settings
+        .iter()
+        .find(|(id, _)| matches!(id, crate::h2::config::SettingId::HeaderTableSize))
+        .map(|(_, v)| *v as usize)
+        .unwrap_or(4096);
     decoder.set_max_header_list_size(max_hdr);
-    decoder.set_max_table_size(peer_settings.header_table_size as usize);
+    decoder.set_max_table_size(our_header_table_size);
 
     // Publish snapshot.
     let snapshot = Arc::new(PeerSettingsSnapshot::new());
@@ -2260,8 +2271,11 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 self.writer.write_settings_ack().await?;
                 self.reader
                     .set_max_frame_size(self.peer_settings.max_frame_size);
-                self.decoder
-                    .set_max_table_size(self.peer_settings.header_table_size as usize);
+                // Only the encoder tracks the peer's HEADER_TABLE_SIZE (it
+                // bounds how large a dynamic table *we* may push toward the
+                // peer's decoder). Our decoder's ceiling is whatever we
+                // advertised at connection setup and does not change when
+                // the peer updates its own SETTINGS.
                 self.encoder
                     .set_max_table_size(self.peer_settings.header_table_size as usize);
             }

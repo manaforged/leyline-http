@@ -158,6 +158,23 @@ impl CookieJar {
         Some(header)
     }
 
+    /// Look up a cookie value by name without a URL filter. Returns the
+    /// first non-expired cookie across every stored domain that matches
+    /// `name`. Useful when code only needs to know whether a tracked
+    /// cookie landed (for example `session_id`) without caring which
+    /// exact URL scope it came in on.
+    pub fn get_tracked(&self, name: &str) -> Option<String> {
+        let jar = lock(&self.inner);
+        for entries in jar.cookies.values() {
+            for cookie in entries {
+                if cookie.name == name && !cookie.is_expired() {
+                    return Some(cookie.value.clone());
+                }
+            }
+        }
+        None
+    }
+
     /// Get a single cookie value by name for a URL.
     pub fn get_cookie(&self, url: &str, name: &str) -> Option<String> {
         let url = Url::parse(url).ok()?;

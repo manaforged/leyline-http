@@ -47,18 +47,35 @@ impl Session {
         Self::builder().brand(ChromiumBrand::Brave).build()
     }
 
-    /// Opera on the latest Chromium profile we've verified against a
-    /// live capture (Chrome 145 / Opera 129).
+    /// Opera on the latest Chromium profile we have a verified overlay
+    /// for (currently Chrome 147 / Opera 131). Track the Opera anchor
+    /// table in [`crate::profile::ChromiumBrand`] when bumping.
     pub fn opera_latest() -> Result<Self> {
-        Self::builder()
-            .browser(Browser::Chrome145)
-            .brand(ChromiumBrand::Opera)
-            .build()
+        Self::builder().brand(ChromiumBrand::Opera).build()
+    }
+
+    /// Vivaldi on the latest Chromium profile we have a verified
+    /// overlay for (currently Chrome 147 / Vivaldi 7.9). Vivaldi
+    /// deliberately omits its own brand from `sec-ch-ua` by default;
+    /// the overlay reflects that.
+    pub fn vivaldi_latest() -> Result<Self> {
+        Self::builder().brand(ChromiumBrand::Vivaldi).build()
     }
 
     /// Access the cookie jar.
     pub fn cookies(&self) -> &CookieJar {
         &self.cookie_jar
+    }
+
+    /// Derive a new session from this one that shares the TLS connector,
+    /// H2/H3 config, and connection pool, but uses an independent cookie
+    /// jar. The original session's jar is untouched. Use this when you want
+    /// many short-lived cookie scopes while
+    /// amortising TLS-handshake cost across them.
+    pub fn with_cookie_jar(&self, cookie_jar: CookieJar) -> Self {
+        let mut s = self.clone();
+        s.cookie_jar = cookie_jar;
+        s
     }
 
     /// The browser profile in use.
@@ -150,6 +167,11 @@ impl Session {
     /// builder you can chain on.
     pub async fn navigate(&self, url: &str) -> Result<Response> {
         self.get(url).preset(Preset::Navigate).send().await
+    }
+
+    /// GET with the Script preset applied.
+    pub async fn get_script(&self, url: &str) -> Result<Response> {
+        self.get(url).preset(Preset::Script).send().await
     }
 
     /// POST a JSON body with the XHR preset applied.

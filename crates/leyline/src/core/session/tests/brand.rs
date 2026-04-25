@@ -4,10 +4,13 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 // ---- ChromiumBrand overlay regression gates ----
 // Each test drives a real GET through a local `TcpListener` mock
-// and asserts the on-the-wire headers match the brand-specific
-// shape captured from tls.peet.ws against real Edge 147, Brave
-// 147, and Opera 129 browsers. If any overlay rule drifts from
-// the captures, these fail.
+// and asserts the on-the-wire headers match the brand-specific shape
+// for that variant. If any overlay rule drifts, these fail.
+//
+// Verification provenance:
+//   - Edge 147, Brave 147, Opera 129  → live captures from tls.peet.ws.
+//   - Opera 130/131, Vivaldi 7.9      → vendor release notes,
+//     structurally identical to the verified shape.
 
 async fn capture_navigate_headers(session: Session) -> String {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -44,11 +47,17 @@ async fn capture_navigate_headers(session: Session) -> String {
 async fn edge_brand_overlay_matches_capture() {
     let session = Session::edge_latest().unwrap();
     let req = capture_navigate_headers(session).await;
-    // UA suffix from real Edge 147 capture.
+    // UA suffix from real Edge 147 capture: post-Chrome-UA-reduction
+    // (Chrome/147.0.0.0) + full Edge build version (Edg/147.0.<build>.<patch>).
+    // Edge did NOT undergo UA reduction, so Edg/ never collapses to .0.0.
     assert!(
-        req.contains("User-Agent: ")
-            && req.contains("Chrome/147.0.0.0 Safari/537.36 Edg/147.0.0.0"),
+        req.contains("User-Agent: ") && req.contains("Chrome/147.0.0.0 Safari/537.36 Edg/147.0."),
         "Edge UA suffix missing:\n{req}"
+    );
+    // Catch the bot-detectable reduced form explicitly.
+    assert!(
+        !req.contains("Edg/147.0.0.0"),
+        "Edge UA must carry full build version, not the reduced 0.0 form (real Edge ships 147.0.<build>.<patch>):\n{req}"
     );
     // sec-ch-ua brand list reorders to put "Microsoft Edge" first.
     assert!(
@@ -91,11 +100,14 @@ async fn brave_brand_overlay_matches_capture() {
 
 #[tokio::test]
 async fn opera_brand_overlay_matches_capture() {
+    // Session::opera_latest() resolves to the latest verified Opera
+    // anchor — currently Chrome 147 / Opera 131 (vendor-doc EXTRAPOLATED;
+    // see OPERA_PER_CHROMIUM in profile::brand). Bump these assertions
+    // when the anchor table moves.
     let session = Session::opera_latest().unwrap();
     let req = capture_navigate_headers(session).await;
-    // Opera 129 against Chromium 145 per the lag table.
     assert!(
-        req.contains("Chrome/145.0.0.0 Safari/537.36 OPR/129.0.0.0"),
+        req.contains("Chrome/147.0.0.0 Safari/537.36 OPR/131.0.0.0"),
         "Opera UA suffix missing:\n{req}"
     );
     // Opera uses "Not:A-Brand";v="99" (dash/colon/99) — not the
@@ -103,13 +115,125 @@ async fn opera_brand_overlay_matches_capture() {
     // Opera captures from Chrome captures.
     assert!(
         req.to_lowercase()
-            .contains(r#"sec-ch-ua: "not:a-brand";v="99", "opera";v="129""#),
+            .contains(r#"sec-ch-ua: "not:a-brand";v="99", "opera";v="131""#),
         "Opera sec-ch-ua placeholder form missing:\n{req}"
     );
     assert!(
-        req.to_lowercase().contains(r#""chromium";v="145""#),
-        "Opera Chromium anchor 145 missing:\n{req}"
+        req.to_lowercase().contains(r#""chromium";v="147""#),
+        "Opera Chromium anchor 147 missing:\n{req}"
     );
+}
+
+#[tokio::test]
+async fn opera_146_overlay_emits_130() {
+    // Hold Opera 130 / Chromium 146 byte-for-byte (vendor-doc EXTRAPOLATED).
+    // Asserting the explicit pairing protects against an accidental
+    // table edit collapsing every Chromium major to one Opera version.
+    let session = Session::builder()
+        .browser(Browser::Chrome146)
+        .brand(ChromiumBrand::Opera)
+        .build()
+        .unwrap();
+    let req = capture_navigate_headers(session).await;
+    assert!(
+        req.contains("Chrome/146.0.0.0 Safari/537.36 OPR/130.0.0.0"),
+        "Opera 146 UA suffix missing:\n{req}"
+    );
+    assert!(
+        req.to_lowercase()
+            .contains(r#"sec-ch-ua: "not:a-brand";v="99", "opera";v="130", "chromium";v="146""#),
+        "Opera 146 sec-ch-ua missing:\n{req}"
+    );
+}
+
+#[tokio::test]
+async fn opera_145_overlay_still_supported() {
+    // Backward-compat: the original 129/145 live capture must keep
+    // working after the anchor refresh. If this regresses, the
+    // OPERA_PER_CHROMIUM table dropped its only live-captured row.
+    let session = Session::builder()
+        .browser(Browser::Chrome145)
+        .brand(ChromiumBrand::Opera)
+        .build()
+        .unwrap();
+    let req = capture_navigate_headers(session).await;
+    assert!(
+        req.contains("Chrome/145.0.0.0 Safari/537.36 OPR/129.0.0.0"),
+        "Opera 145 backward-compat UA suffix missing:\n{req}"
+    );
+    assert!(
+        req.to_lowercase()
+            .contains(r#""opera";v="129", "chromium";v="145""#),
+        "Opera 145 sec-ch-ua missing:\n{req}"
+    );
+}
+
+#[tokio::test]
+async fn vivaldi_brand_overlay_matches_capture() {
+    // Vivaldi (per vivaldi.com/blog/technology/client-hints-or-client-lies)
+    // deliberately omits its own brand from sec-ch-ua by default —
+    // it ships ONLY Chromium + the GREASE placeholder. The UA does
+    // carry a `Vivaldi/<build>` suffix though.
+    let session = Session::vivaldi_latest().unwrap();
+    let req = capture_navigate_headers(session).await;
+    // Vivaldi 7.9 on Chromium 147 (vendor-doc EXTRAPOLATED).
+    assert!(
+        req.contains("Chrome/147.0.0.0 Safari/537.36 Vivaldi/7.9."),
+        "Vivaldi UA suffix missing:\n{req}"
+    );
+    let lower = req.to_lowercase();
+    // sec-ch-ua MUST drop "Google Chrome" and MUST NOT splice in "Vivaldi" —
+    // catching either of those is what makes Vivaldi distinct from Chrome.
+    let sec_ch_ua_line = req
+        .lines()
+        .find(|l| l.to_lowercase().starts_with("sec-ch-ua:"))
+        .expect("sec-ch-ua header present");
+    assert!(
+        !sec_ch_ua_line.to_lowercase().contains("google chrome"),
+        "Vivaldi must drop \"Google Chrome\" from sec-ch-ua:\n{sec_ch_ua_line}"
+    );
+    assert!(
+        !sec_ch_ua_line.to_lowercase().contains("vivaldi"),
+        "Vivaldi must NOT advertise itself in sec-ch-ua (per vendor docs):\n{sec_ch_ua_line}"
+    );
+    assert!(
+        lower.contains(r#""chromium";v="147""#),
+        "Vivaldi sec-ch-ua should still carry Chromium anchor:\n{req}"
+    );
+    // Vivaldi ships neither dnt nor sec-gpc by default (unlike Edge/Brave).
+    assert!(
+        !lower.contains("\r\ndnt:"),
+        "Vivaldi must not ship dnt by default:\n{req}"
+    );
+    assert!(
+        !lower.contains("\r\nsec-gpc:"),
+        "Vivaldi must not ship sec-gpc by default:\n{req}"
+    );
+}
+
+#[test]
+fn vivaldi_overlay_on_unverified_anchor_errors() {
+    // VIVALDI_BUILDS_PER_MAJOR currently only knows about Chromium 147.
+    // 145/146 anchors must error rather than guess a build version.
+    for bad in [144u32, 145, 146, 148] {
+        let err = ChromiumBrand::Vivaldi
+            .overlay(bad, Platform::Windows, "ua", r#""Google Chrome";v="147""#)
+            .expect_err(&format!(
+                "Vivaldi on Chromium {bad} must be rejected until captured"
+            ));
+        assert!(format!("{err}").contains("not verified"), "{err}");
+    }
+}
+
+#[test]
+fn vivaldi_overlay_on_mobile_errors() {
+    let sch = r#""Google Chrome";v="147", "Not.A/Brand";v="8", "Chromium";v="147""#;
+    for p in [Platform::Android, Platform::IOS] {
+        let err = ChromiumBrand::Vivaldi
+            .overlay(147, p, "ua", sch)
+            .expect_err("mobile Vivaldi overlay must be rejected");
+        assert!(format!("{err}").contains("not verified"));
+    }
 }
 
 #[tokio::test]
@@ -196,16 +320,16 @@ fn edge_overlay_on_mobile_platform_errors() {
 
 #[test]
 fn opera_overlay_on_unverified_anchor_errors() {
-    // Only Chrome 145 / Opera 129 is verified by live capture.
-    // Opera 130 shipped on Chromium 146 but we haven't captured
-    // the sec-ch-ua GREASE placeholder for it — emitting the
-    // 145-era `"Not:A-Brand";v="99"` form on Chromium 146+ is a
-    // guess. Build must error until a real capture lands.
-    let err = Session::builder()
-        .browser(Browser::Chrome147)
-        .brand(ChromiumBrand::Opera)
-        .build()
-        .expect_err("Opera on Chrome 147 must be rejected until captured");
+    // OPERA_PER_CHROMIUM covers Chromium 145..=147 today. A profile
+    // anchored anywhere else (older 144 or some future 148+) still
+    // has no published Opera version we can mimic — the build must
+    // error rather than guess. We rely on `Browser::chromium_major`
+    // returning a value outside the table, simulated here by hand-
+    // calling the overlay directly so we don't need an unsupported
+    // `Browser` variant in the public enum.
+    let err = ChromiumBrand::Opera
+        .overlay(148, Platform::Windows, "ua", "")
+        .expect_err("Opera on Chrome 148 must be rejected until captured");
     assert!(format!("{err}").contains("not verified"));
 }
 

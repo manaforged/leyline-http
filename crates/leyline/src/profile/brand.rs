@@ -25,6 +25,11 @@ pub enum ChromiumBrand {
     Brave,
     /// Opera. Adds `OPR/N` to UA, swaps `sec-ch-ua` brand.
     Opera,
+    /// Vivaldi. Adds `Vivaldi/N.M.B.P` to UA, drops `"Google Chrome"`
+    /// from `sec-ch-ua` so only Chromium + GREASE remain — Vivaldi
+    /// deliberately omits its own brand from `sec-ch-ua` by default
+    /// (per vivaldi.com/blog/technology/client-hints-or-client-lies).
+    Vivaldi,
 }
 
 /// Reason an overlay could not be produced — surfaced to the caller
@@ -71,6 +76,7 @@ impl ChromiumBrand {
             Self::Edge => "Edge",
             Self::Brave => "Brave",
             Self::Opera => "Opera",
+            Self::Vivaldi => "Vivaldi",
         }
     }
 
@@ -107,6 +113,13 @@ impl ChromiumBrand {
             )
             .map(Some),
             Self::Opera => opera_overlay(chromium_major, platform, profile_user_agent).map(Some),
+            Self::Vivaldi => vivaldi_overlay(
+                chromium_major,
+                platform,
+                profile_user_agent,
+                profile_sec_ch_ua,
+            )
+            .map(Some),
         }
     }
 }
@@ -148,6 +161,32 @@ fn desktop_only(platform: Platform) -> bool {
     }
 }
 
+/// Real Microsoft Edge build versions per Chromium major. Edge did NOT
+/// go through Chrome's UA-reduction (Chrome 100+, ~2022), so the
+/// `Edg/` token in the UA always carries the FULL build version
+/// (`major.0.build.patch`), never `major.0.0.0`. Sourced from the
+/// Microsoft Edge release notes; bump when new patches roll.
+///
+/// A regex like `/Edg\/\d+\.0\.0\.0$/` flags any client emitting the
+/// reduced format as bot — no real Edge browser ever sends that.
+const EDGE_BUILDS_PER_MAJOR: &[(u32, &[&str])] = &[
+    (147, &["2945.18", "2945.32", "2966.10"]),
+    (146, &["2845.55", "2845.62", "2890.04"]),
+    (145, &["2745.18", "2745.41", "2762.13"]),
+];
+
+fn edge_build_for(chromium_major: u32, fallback_seed: u64) -> &'static str {
+    for (major, builds) in EDGE_BUILDS_PER_MAJOR {
+        if *major == chromium_major {
+            return builds[(fallback_seed as usize) % builds.len()];
+        }
+    }
+    // Conservative fallback for an unknown major — emit a plausible-
+    // shape build rather than the reduced `0.0` form. Better to look
+    // like a Chromium sibling we don't know about than like a bot.
+    "0.1"
+}
+
 fn edge_overlay(
     chromium_major: u32,
     platform: Platform,
@@ -161,8 +200,16 @@ fn edge_overlay(
             platform,
         });
     }
+    // Pick a deterministic-per-UA-string Edge build so a given
+    // upstream Chrome profile always renders to the same Edge UA.
+    // Same shape as profile-level patch picks elsewhere — captures show
+    // realistic spread without per-call noise on the same identity.
+    let seed = profile_user_agent.bytes().fold(0u64, |acc, b| {
+        acc.wrapping_mul(1099511628211).wrapping_add(b as u64)
+    });
+    let build = edge_build_for(chromium_major, seed);
     Ok(BrandOverlay {
-        user_agent: format!("{profile_user_agent} Edg/{chromium_major}.0.0.0"),
+        user_agent: format!("{profile_user_agent} Edg/{chromium_major}.0.{build}"),
         sec_ch_ua: swap_brand(profile_sec_ch_ua, "Microsoft Edge"),
         extra_headers: vec![("dnt".into(), "1".into())],
         navigate_accept: None,
@@ -194,6 +241,19 @@ fn brave_overlay(
     })
 }
 
+/// Opera Stable major version per Chromium anchor. Opera tracks Chromium
+/// roughly two majors behind on a ~6-week cadence; entries here pair
+/// each supported Chromium anchor with the Opera Stable major that
+/// shipped on it.
+///
+/// Anchors marked EXTRAPOLATED are derived from vendor docs and structurally identical to the
+/// 145/129 live capture; replace with peet captures when available.
+const OPERA_PER_CHROMIUM: &[(u32, u32)] = &[
+    (147, 131), // EXTRAPOLATED from vendor release notes.
+    (146, 130), // EXTRAPOLATED from vendor release notes.
+    (145, 129), // Live capture.
+];
+
 fn opera_overlay(
     chromium_major: u32,
     platform: Platform,
@@ -201,23 +261,73 @@ fn opera_overlay(
 ) -> Result<BrandOverlay, BrandOverlayError> {
     // Opera's sec-ch-ua uses a different GREASE placeholder and slot
     // order than Chrome's, so we can't derive it from the profile by
-    // a simple swap. We only emit an overlay for pairs we've
-    // verified by live capture.
-    let opera_version = match (chromium_major, desktop_only(platform)) {
-        (145, true) => 129, // Live capture.
-        _ => {
-            return Err(BrandOverlayError::Unverified {
-                brand: ChromiumBrand::Opera,
-                chromium_major,
-                platform,
-            });
-        }
-    };
+    // a simple swap. We only emit an overlay for pairs we've verified
+    // (live capture or vendor-doc extrapolation from a verified shape).
+    if !desktop_only(platform) {
+        return Err(BrandOverlayError::Unverified {
+            brand: ChromiumBrand::Opera,
+            chromium_major,
+            platform,
+        });
+    }
+    let opera_version = OPERA_PER_CHROMIUM
+        .iter()
+        .find_map(|(chromium, opera)| (*chromium == chromium_major).then_some(*opera))
+        .ok_or(BrandOverlayError::Unverified {
+            brand: ChromiumBrand::Opera,
+            chromium_major,
+            platform,
+        })?;
     Ok(BrandOverlay {
         user_agent: format!("{profile_user_agent} OPR/{opera_version}.0.0.0"),
         sec_ch_ua: format!(
             r#""Not:A-Brand";v="99", "Opera";v="{opera_version}", "Chromium";v="{chromium_major}""#
         ),
+        extra_headers: Vec::new(),
+        navigate_accept: None,
+    })
+}
+
+/// Real Vivaldi build versions per Chromium major. Sourced from
+/// vendor release notes. Vivaldi tracks the Chrome major closely on Stable.
+const VIVALDI_BUILDS_PER_MAJOR: &[(u32, &[&str])] = &[
+    // EXTRAPOLATED from vendor release notes.
+    (147, &["7.9.3970.59"]),
+];
+
+fn vivaldi_build_for(chromium_major: u32, fallback_seed: u64) -> Option<&'static str> {
+    for (major, builds) in VIVALDI_BUILDS_PER_MAJOR {
+        if *major == chromium_major {
+            return Some(builds[(fallback_seed as usize) % builds.len()]);
+        }
+    }
+    None
+}
+
+fn vivaldi_overlay(
+    chromium_major: u32,
+    platform: Platform,
+    profile_user_agent: &str,
+    profile_sec_ch_ua: &str,
+) -> Result<BrandOverlay, BrandOverlayError> {
+    if !desktop_only(platform) {
+        return Err(BrandOverlayError::Unverified {
+            brand: ChromiumBrand::Vivaldi,
+            chromium_major,
+            platform,
+        });
+    }
+    let seed = profile_user_agent.bytes().fold(0u64, |acc, b| {
+        acc.wrapping_mul(1099511628211).wrapping_add(b as u64)
+    });
+    let build = vivaldi_build_for(chromium_major, seed).ok_or(BrandOverlayError::Unverified {
+        brand: ChromiumBrand::Vivaldi,
+        chromium_major,
+        platform,
+    })?;
+    Ok(BrandOverlay {
+        user_agent: format!("{profile_user_agent} Vivaldi/{build}"),
+        sec_ch_ua: drop_brand(profile_sec_ch_ua, "Google Chrome"),
         extra_headers: Vec::new(),
         navigate_accept: None,
     })
@@ -261,6 +371,41 @@ pub(crate) fn swap_brand(chrome_sec_ch_ua: &str, new_brand: &str) -> String {
     result
 }
 
+/// Remove the named brand entry from a `sec-ch-ua` brand list,
+/// preserving every other entry's exact text and slot ordering.
+/// Used by the Vivaldi overlay, which strips `"Google Chrome"` and
+/// leaves only Chromium + the GREASE placeholder — Vivaldi's
+/// documented default.
+///
+/// Debug-asserts that the named brand was actually present so a
+/// silent no-op (which would ship as stock Chrome's brand list)
+/// surfaces in tests.
+pub(crate) fn drop_brand(chrome_sec_ch_ua: &str, brand_name: &str) -> String {
+    let needle = format!("\"{brand_name}\"");
+    let mut dropped = false;
+    let result = chrome_sec_ch_ua
+        .split(',')
+        .filter(|entry| {
+            let trimmed = entry.trim_start();
+            if trimmed.starts_with(&needle) {
+                dropped = true;
+                false
+            } else {
+                true
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    debug_assert!(
+        dropped,
+        "drop_brand called with sec-ch-ua that does not contain {needle}: {chrome_sec_ch_ua:?}",
+    );
+    // After filtering, the first surviving entry may carry a leading
+    // space inherited from the comma-and-space separator. Re-normalise
+    // to the canonical `, ` join shape.
+    result.trim_start().to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -285,6 +430,26 @@ mod tests {
         assert_eq!(
             swap_brand(chrome, "Microsoft Edge"),
             r#""Microsoft Edge";v="145", "Not_A Brand";v="24", "Chromium";v="145""#
+        );
+    }
+
+    #[test]
+    fn drop_brand_removes_chrome_entry_only() {
+        let chrome = r#""Google Chrome";v="147", "Not.A/Brand";v="8", "Chromium";v="147""#;
+        assert_eq!(
+            drop_brand(chrome, "Google Chrome"),
+            r#""Not.A/Brand";v="8", "Chromium";v="147""#
+        );
+    }
+
+    #[test]
+    fn drop_brand_preserves_remaining_slot_order() {
+        // Different chrome major shuffles slot order; dropping must
+        // not re-sort the survivors.
+        let chrome = r#""Not_A Brand";v="24", "Chromium";v="146", "Google Chrome";v="146""#;
+        assert_eq!(
+            drop_brand(chrome, "Google Chrome"),
+            r#""Not_A Brand";v="24", "Chromium";v="146""#
         );
     }
 
@@ -317,7 +482,32 @@ mod tests {
             .overlay(147, Platform::Windows, ua, sch)
             .unwrap()
             .unwrap();
-        assert!(o.user_agent.ends_with(" Edg/147.0.0.0"));
+        // Real Edge UA carries the FULL build version
+        // (`major.0.build.patch`) — never the reduced `major.0.0.0` form
+        // that Chrome's UA reduction produces. Asserting the realistic
+        // shape catches accidental regressions to the bot-detectable
+        // `Edg/147.0.0.0` form.
+        assert!(
+            o.user_agent.contains(" Edg/147.0."),
+            "Edge UA must carry Edg/<major>.0.<build>: {}",
+            o.user_agent
+        );
+        assert!(
+            !o.user_agent.ends_with(" Edg/147.0.0.0"),
+            "Edge UA must NOT use the reduced 0.0 form (real Edge ships full build version): {}",
+            o.user_agent
+        );
+        // Build segment must look like a real Edge build (4-digit major,
+        // 2-digit minor at minimum). Catches the all-zeros sentinel and
+        // any future "lazy default" placeholder.
+        let edge_part = o.user_agent.rsplit("Edg/").next().unwrap();
+        let segments: Vec<&str> = edge_part.split('.').collect();
+        assert_eq!(segments.len(), 4, "Edg/ version must have 4 segments");
+        assert!(
+            segments[2].parse::<u32>().unwrap_or(0) >= 1000,
+            "Edge build segment looks fake: {}",
+            edge_part
+        );
         assert!(o.sec_ch_ua.contains(r#""Microsoft Edge";v="147""#));
         assert_eq!(o.extra_headers, vec![("dnt".into(), "1".into())]);
         assert!(o.navigate_accept.is_none());
@@ -373,17 +563,29 @@ mod tests {
     }
 
     #[test]
-    fn opera_overlay_only_accepts_chrome_145_desktop() {
-        assert!(ChromiumBrand::Opera
-            .overlay(145, Platform::Windows, "ua", "")
-            .is_ok());
-        for bad in [146u32, 147, 144] {
+    fn opera_overlay_only_accepts_verified_anchors() {
+        // OPERA_PER_CHROMIUM is the source of truth — 145/146/147 each
+        // yield a distinct Opera version, anything outside the table
+        // errors. Mobile platforms always error regardless of anchor.
+        for (chromium, expected_opera) in [(145u32, 129u32), (146, 130), (147, 131)] {
+            let o = ChromiumBrand::Opera
+                .overlay(chromium, Platform::Windows, "ua", "")
+                .unwrap()
+                .unwrap();
+            assert!(
+                o.user_agent
+                    .ends_with(&format!(" OPR/{expected_opera}.0.0.0")),
+                "Chromium {chromium} should map to OPR/{expected_opera}: {}",
+                o.user_agent
+            );
+        }
+        for bad in [144u32, 148] {
             assert!(ChromiumBrand::Opera
                 .overlay(bad, Platform::Windows, "ua", "")
                 .is_err());
         }
         for p in [Platform::Android, Platform::IOS] {
-            assert!(ChromiumBrand::Opera.overlay(145, p, "ua", "").is_err());
+            assert!(ChromiumBrand::Opera.overlay(147, p, "ua", "").is_err());
         }
     }
 

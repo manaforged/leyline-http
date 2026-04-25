@@ -64,6 +64,7 @@ pub mod profile;
 pub mod quic;
 pub mod tcp;
 pub mod tls;
+pub mod tls_selftest;
 
 // ─── Public API re-exports ───────────────────────────────────────────────────
 

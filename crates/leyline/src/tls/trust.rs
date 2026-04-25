@@ -113,9 +113,17 @@ pub(crate) fn wire_env_trust(builder: &mut SslContextBuilder) -> bool {
 /// Load the platform's system trust store into the builder's
 /// `X509_STORE`.
 ///
-/// Unix: BoringSSL's `set_default_verify_paths` points at the
+/// Linux: BoringSSL's `set_default_verify_paths` points at the
 /// canonical `/etc/ssl/certs` / `/etc/pki/tls/certs` locations shipped
-/// with every mainstream distro and macOS (via OpenSSL compat dirs).
+/// with every mainstream distro.
+///
+/// macOS: BoringSSL's compiled-in paths point at a Homebrew-style
+/// `/usr/local/etc/openssl/` that does not exist on a default macOS
+/// install, so `set_default_verify_paths` silently yields zero roots.
+/// We try the OpenSSL-compat bundle at `/etc/ssl/cert.pem` (shipped by
+/// Apple since 10.13, rebuilt from the System Keychain on every OS
+/// update), falling back to the default-paths call as a last resort
+/// so a non-standard macOS layout still loads *something*.
 ///
 /// Windows: BoringSSL's default paths point at Unix-style directories
 /// that do not exist, so without a bridge the process ends up with
@@ -132,11 +140,53 @@ pub(crate) fn wire_system_trust(builder: &mut SslContextBuilder) -> Result<(), T
     {
         wire_windows_system_trust(builder)
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        wire_macos_system_trust(builder)
+    }
+    #[cfg(all(not(windows), not(target_os = "macos")))]
     {
         builder.set_default_verify_paths()?;
         Ok(())
     }
+}
+
+/// macOS-only: load Apple's rebuilt-on-every-update OpenSSL bundle at
+/// `/etc/ssl/cert.pem`, which mirrors the System Keychain roots. Falls
+/// back to `set_default_verify_paths` if the file is missing so an
+/// unusual macOS layout still loads *something* instead of silently
+/// leaving the process with zero trust anchors.
+///
+/// We deliberately do not bind `security-framework` / the Keychain
+/// APIs directly: `/etc/ssl/cert.pem` already holds the same trust set
+/// and is rebuilt by the OS, so the binding would add a Foundation
+/// runtime dependency and a round-trip through CF for no material
+/// upside over reading a PEM file.
+#[cfg(target_os = "macos")]
+fn wire_macos_system_trust(builder: &mut SslContextBuilder) -> Result<(), TlsError> {
+    const APPLE_BUNDLE: &str = "/etc/ssl/cert.pem";
+    if std::path::Path::new(APPLE_BUNDLE).exists() {
+        match builder.set_ca_file(APPLE_BUNDLE) {
+            Ok(()) => {
+                tracing::info!(
+                    target: "leyline::tls::trust",
+                    path = APPLE_BUNDLE,
+                    "macOS system trust loaded from Apple OpenSSL-compat bundle"
+                );
+                return Ok(());
+            }
+            Err(e) => {
+                tracing::warn!(
+                    target: "leyline::tls::trust",
+                    path = APPLE_BUNDLE,
+                    err = %e,
+                    "macOS system trust bundle parse failed; falling back to default paths"
+                );
+            }
+        }
+    }
+    builder.set_default_verify_paths()?;
+    Ok(())
 }
 
 /// Windows-only: enumerate the `"ROOT"` system store via Win32 crypto
