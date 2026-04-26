@@ -62,7 +62,7 @@ fn public_claim_surfaces() -> Vec<PathBuf> {
         "crates/leyline/Cargo.toml",
         "crates/leyline/src/lib.rs",
         "crates/leyline/src/audit/mod.rs",
-        "crates/leyline/src/cookies/mod.rs",
+        "crates/leyline/src/cookie/mod.rs",
         "crates/leyline/src/core/mod.rs",
         "crates/leyline/src/h2/mod.rs",
         "crates/leyline/src/pool/mod.rs",

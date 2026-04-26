@@ -3,11 +3,15 @@
 /// Identifies a browser for TLS profile selection.
 ///
 /// Each variant maps 1:1 to a TOML profile in `profiles/`. There are exactly
-/// 10 profiles. Chromium siblings (Edge, Brave, Opera) are NOT separate
-/// variants — their TLS ClientHello is byte-identical to Chrome's. Pick a
-/// `ChromeNNN` anchor and apply `ChromiumBrand::{Edge, Brave, Opera}` via
-/// `SessionBuilder::brand(..)` to swap HTTP identity headers without
+/// 12 profiles. Most Chromium siblings (Edge, Opera, Vivaldi) are NOT
+/// separate variants — their TLS ClientHello is byte-identical to Chrome's.
+/// Pick a `ChromeNNN` anchor and apply `ChromiumBrand::{Edge, Opera, Vivaldi}`
+/// via `SessionBuilder::brand(..)` to swap HTTP identity headers without
 /// changing the JA4 or Akamai fingerprint.
+///
+/// Brave is the exception: it diverges from Chrome on H2 SETTINGS, header
+/// order, and several HTTP headers, so it ships as the first-class
+/// [`Browser::Brave146`] variant rather than a brand overlay.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Browser {
@@ -17,6 +21,10 @@ pub enum Browser {
     Chrome146,
     /// Google Chrome 147 (Windows/macOS/Linux/Android) — current default.
     Chrome147,
+    /// Aloha 4.17 — Chromium-138-based privacy browser (Windows/macOS).
+    Aloha138,
+    /// Brave 1.x — Chromium-146-based privacy browser (macOS only today).
+    Brave146,
     /// Mozilla Firefox 148 (Windows/macOS/Linux/Android).
     Firefox148,
     /// Safari 18 on macOS.
@@ -34,13 +42,15 @@ pub enum Browser {
 }
 
 /// Canonical profile count. Tests assert against this.
-pub const PROFILE_COUNT: usize = 10;
+pub const PROFILE_COUNT: usize = 12;
 
 /// All browser variants, for iteration.
 pub const ALL_BROWSERS: [Browser; PROFILE_COUNT] = [
     Browser::Chrome145,
     Browser::Chrome146,
     Browser::Chrome147,
+    Browser::Aloha138,
+    Browser::Brave146,
     Browser::Firefox148,
     Browser::Safari18,
     Browser::OkHttpAndroid10,
@@ -57,6 +67,8 @@ impl Browser {
             Self::Chrome145 => ("chrome", 145),
             Self::Chrome146 => ("chrome", 146),
             Self::Chrome147 => ("chrome", 147),
+            Self::Aloha138 => ("aloha", 138),
+            Self::Brave146 => ("brave", 146),
             Self::Firefox148 => ("firefox", 148),
             Self::Safari18 => ("safari", 18),
             Self::OkHttpAndroid10 => ("okhttp", 10),
@@ -91,6 +103,8 @@ impl Browser {
             Self::Chrome145 => Some(145),
             Self::Chrome146 => Some(146),
             Self::Chrome147 => Some(147),
+            Self::Aloha138 => Some(138),
+            Self::Brave146 => Some(146),
             _ => None,
         }
     }
@@ -108,6 +122,8 @@ impl std::fmt::Display for Browser {
             Self::Chrome145 => write!(f, "Chrome 145"),
             Self::Chrome146 => write!(f, "Chrome 146"),
             Self::Chrome147 => write!(f, "Chrome 147"),
+            Self::Aloha138 => write!(f, "Aloha 4.17 (Chromium 138)"),
+            Self::Brave146 => write!(f, "Brave (Chromium 146)"),
             Self::Firefox148 => write!(f, "Firefox 148"),
             Self::Safari18 => write!(f, "Safari 18"),
             Self::OkHttpAndroid10 => write!(f, "OkHttp4 Android 10+"),

@@ -41,7 +41,7 @@ fn extract(req: &str, header: &str) -> String {
             l.to_lowercase()
                 .starts_with(&format!("{}:", header.to_lowercase()))
         })
-        .map(|l| l.splitn(2, ':').nth(1).unwrap_or("").trim().to_string())
+        .map(|l| l.split_once(':').map_or("", |x| x.1).trim().to_string())
         .unwrap_or_else(|| "<missing>".into())
 }
 

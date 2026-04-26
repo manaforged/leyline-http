@@ -1,7 +1,7 @@
 [meta]
-name = "Chrome 147"
-browser = "chrome"
-version = 147
+name = "Aloha 4.17 (Chromium 138)"
+browser = "aloha"
+version = 138
 family = "chromium"
 verified_against = "tls.peet.ws"
 
@@ -44,7 +44,7 @@ ech_grease = true
 pre_shared_key = true
 
 [tls.fingerprint]
-ja4 = "t13d1516h2_8daaf6152771_d8a2da3f94cd"
+ja4 = "t13d1517h2_8daaf6152771_b6f405a00624"
 
 [h2]
 header_table_size = 65536
@@ -52,40 +52,21 @@ enable_push = false
 initial_stream_window_size = 6291456
 initial_connection_window_size = 15728640
 max_header_list_size = 262144
-unknown_setting8 = 1
 pseudo_order = ["method", "authority", "scheme", "path"]
 settings_order = [
-    "header_table_size", "enable_push",
-    "initial_window_size", "max_frame_size",
-    "max_header_list_size", "unknown8", "unknown9",
-    "max_concurrent_streams",
+    "header_table_size",
+    "enable_push",
+    "initial_window_size",
+    "max_header_list_size",
 ]
 
 [h2.fingerprint]
-akamai = "1:65536;2:0;4:6291456;6:262144;8:1|15663105|0|m,a,s,p"
-
-# Chromium-on-macOS doesn't emit SETTINGS parameter 8
-# (SETTINGS_ENABLE_CONNECT_PROTOCOL). Verified against tls.peet.ws on
-# 2026-04-25 with Chrome 147 / Brave 146 / Opera 129 / Edge 147 — all
-# four send the same 4-setting frame on Mac.
-[h2.platforms.macos]
-omit_settings = ["unknown_setting8"]
-
-[h2.platforms.macos.fingerprint]
 akamai = "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p"
 
 [identity.windows]
-user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
-sec_ch_ua = '"Google Chrome";v="147", "Not.A/Brand";v="8", "Chromium";v="147"'
+user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 AlohaBrowser/4.17.0.0 Safari/537.36"
+sec_ch_ua = '"Not)A;Brand";v="8", "Chromium";v="138"'
 
 [identity.macos]
-user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
-sec_ch_ua = '"Google Chrome";v="147", "Not.A/Brand";v="8", "Chromium";v="147"'
-
-[identity.linux]
-user_agent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
-sec_ch_ua = '"Google Chrome";v="147", "Not.A/Brand";v="8", "Chromium";v="147"'
-
-[identity.android]
-user_agent = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Mobile Safari/537.36"
-sec_ch_ua = '"Google Chrome";v="147", "Not.A/Brand";v="8", "Chromium";v="147"'
+user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 AlohaBrowser/4.17.0.0 Safari/537.36"
+sec_ch_ua = '"Not)A;Brand";v="8", "Chromium";v="138"'

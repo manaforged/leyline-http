@@ -26,6 +26,11 @@ impl ProfileRegistry {
         reg.load_toml(include_str!("../../../../profiles/chrome/145.toml"));
         reg.load_toml(include_str!("../../../../profiles/chrome/146.toml"));
         reg.load_toml(include_str!("../../../../profiles/chrome/147.toml"));
+        // Aloha (Chromium-based)
+        reg.load_toml(include_str!("../../../../profiles/aloha/138.toml"));
+        // Brave (Chromium-based, first-class because of header-order +
+        // sec-gpc + accept SXG-strip deltas)
+        reg.load_toml(include_str!("../../../../profiles/brave/146.toml"));
         // Firefox
         reg.load_toml(include_str!("../../../../profiles/firefox/148.toml"));
         // Safari

@@ -1,4 +1,4 @@
-use crate::cookies::CookieJar;
+use crate::cookie::Jar as CookieJar;
 use crate::profile::{Browser, ChromiumBrand, Platform, Preset};
 
 use super::{Session, SessionBuilder};
@@ -42,9 +42,13 @@ impl Session {
         Self::builder().brand(ChromiumBrand::Edge).build()
     }
 
-    /// Brave on the latest Chromium profile.
+    /// Brave on the latest verified Chromium profile (currently Brave
+    /// 146 on macOS — see [`Browser::Brave146`]).
     pub fn brave_latest() -> Result<Self> {
-        Self::builder().brand(ChromiumBrand::Brave).build()
+        Self::builder()
+            .browser(Browser::Brave146)
+            .platform(Platform::MacOS)
+            .build()
     }
 
     /// Opera on the latest Chromium profile we have a verified overlay

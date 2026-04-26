@@ -36,6 +36,7 @@ impl<'a> RequestBuilder<'a> {
         let retry_policy = self.retry_policy.clone();
         let allow_non_idempotent_retry = self.allow_non_idempotent_retry;
         let digest_auth = self.digest_auth.clone();
+        let request_proxy = self.proxy.take();
         let mut body = std::mem::take(&mut self.body);
 
         // Quick-path: no retry, no digest — route through the existing
@@ -57,6 +58,7 @@ impl<'a> RequestBuilder<'a> {
                     headers,
                     timeout,
                     stream_response,
+                    request_proxy.as_deref(),
                 )
                 .await;
         }
@@ -110,6 +112,7 @@ impl<'a> RequestBuilder<'a> {
                     this_headers,
                     attempt_timeout,
                     stream_response,
+                    request_proxy.as_deref(),
                 )
                 .await;
 
@@ -183,6 +186,7 @@ impl<'a> RequestBuilder<'a> {
                                     hop_headers,
                                     Some(digest_remaining),
                                     stream_response,
+                                    request_proxy.as_deref(),
                                 )
                                 .await;
                         }

@@ -1,11 +1,18 @@
-//! Chromium-family identity overlays (Edge, Brave, Opera).
+//! Chromium-family identity overlays (Edge, Opera, Vivaldi).
 //!
-//! Edge, Brave, and Opera ship the same Chromium codebase as Chrome —
+//! Edge, Opera, and Vivaldi ship the same Chromium codebase as Chrome —
 //! same TLS ClientHello, same H2 SETTINGS. They differ only in HTTP
 //! identity headers (`User-Agent` suffix, `sec-ch-ua` brand, a
 //! privacy header or two). A [`ChromiumBrand`] is overlaid on an
 //! existing Chrome profile at `Session` build time; JA4 and Akamai
 //! fingerprint stay bit-for-bit Chromium.
+//!
+//! Brave is the exception: it diverges from Chrome on H2 SETTINGS
+//! (drops `unknown_setting8`), `sec-ch-ua` slot order, GREASE form,
+//! request-header order, and `accept-language` q-factor — far enough
+//! that the overlay model can't represent it accurately. Brave ships
+//! as the first-class [`Browser::Brave146`](super::Browser::Brave146)
+//! profile instead.
 
 use crate::profile::Platform;
 
@@ -20,9 +27,6 @@ pub enum ChromiumBrand {
     /// Microsoft Edge. Adds `Edg/N` to UA, swaps `sec-ch-ua` brand,
     /// ships `dnt: 1`.
     Edge,
-    /// Brave. Keeps Chrome's UA, swaps `sec-ch-ua` brand, ships
-    /// `sec-gpc: 1`, drops `signed-exchange` from the Navigate Accept.
-    Brave,
     /// Opera. Adds `OPR/N` to UA, swaps `sec-ch-ua` brand.
     Opera,
     /// Vivaldi. Adds `Vivaldi/N.M.B.P` to UA, drops `"Google Chrome"`
@@ -74,7 +78,6 @@ impl ChromiumBrand {
         match self {
             Self::Chrome => "Chrome",
             Self::Edge => "Edge",
-            Self::Brave => "Brave",
             Self::Opera => "Opera",
             Self::Vivaldi => "Vivaldi",
         }
@@ -99,13 +102,6 @@ impl ChromiumBrand {
         match self {
             Self::Chrome => Ok(None),
             Self::Edge => edge_overlay(
-                chromium_major,
-                platform,
-                profile_user_agent,
-                profile_sec_ch_ua,
-            )
-            .map(Some),
-            Self::Brave => brave_overlay(
                 chromium_major,
                 platform,
                 profile_user_agent,
@@ -161,32 +157,6 @@ fn desktop_only(platform: Platform) -> bool {
     }
 }
 
-/// Real Microsoft Edge build versions per Chromium major. Edge did NOT
-/// go through Chrome's UA-reduction (Chrome 100+, ~2022), so the
-/// `Edg/` token in the UA always carries the FULL build version
-/// (`major.0.build.patch`), never `major.0.0.0`. Sourced from the
-/// Microsoft Edge release notes; bump when new patches roll.
-///
-/// A regex like `/Edg\/\d+\.0\.0\.0$/` flags any client emitting the
-/// reduced format as bot — no real Edge browser ever sends that.
-const EDGE_BUILDS_PER_MAJOR: &[(u32, &[&str])] = &[
-    (147, &["2945.18", "2945.32", "2966.10"]),
-    (146, &["2845.55", "2845.62", "2890.04"]),
-    (145, &["2745.18", "2745.41", "2762.13"]),
-];
-
-fn edge_build_for(chromium_major: u32, fallback_seed: u64) -> &'static str {
-    for (major, builds) in EDGE_BUILDS_PER_MAJOR {
-        if *major == chromium_major {
-            return builds[(fallback_seed as usize) % builds.len()];
-        }
-    }
-    // Conservative fallback for an unknown major — emit a plausible-
-    // shape build rather than the reduced `0.0` form. Better to look
-    // like a Chromium sibling we don't know about than like a bot.
-    "0.1"
-}
-
 fn edge_overlay(
     chromium_major: u32,
     platform: Platform,
@@ -200,44 +170,14 @@ fn edge_overlay(
             platform,
         });
     }
-    // Pick a deterministic-per-UA-string Edge build so a given
-    // upstream Chrome profile always renders to the same Edge UA.
-    // Same shape as profile-level patch picks elsewhere — captures show
-    // realistic spread without per-call noise on the same identity.
-    let seed = profile_user_agent.bytes().fold(0u64, |acc, b| {
-        acc.wrapping_mul(1099511628211).wrapping_add(b as u64)
-    });
-    let build = edge_build_for(chromium_major, seed);
+    // UA-reduced `Edg/{major}.0.0.0` form. Verified against tls.peet.ws
+    // 2026-04-25 with Microsoft Edge 147 on macOS — Microsoft now
+    // ships the same reduced format Chrome adopted in 2022.
     Ok(BrandOverlay {
-        user_agent: format!("{profile_user_agent} Edg/{chromium_major}.0.{build}"),
+        user_agent: format!("{profile_user_agent} Edg/{chromium_major}.0.0.0"),
         sec_ch_ua: swap_brand(profile_sec_ch_ua, "Microsoft Edge"),
         extra_headers: vec![("dnt".into(), "1".into())],
         navigate_accept: None,
-    })
-}
-
-fn brave_overlay(
-    chromium_major: u32,
-    platform: Platform,
-    profile_user_agent: &str,
-    profile_sec_ch_ua: &str,
-) -> Result<BrandOverlay, BrandOverlayError> {
-    if !desktop_only(platform) {
-        return Err(BrandOverlayError::Unverified {
-            brand: ChromiumBrand::Brave,
-            chromium_major,
-            platform,
-        });
-    }
-    Ok(BrandOverlay {
-        user_agent: profile_user_agent.to_string(),
-        sec_ch_ua: swap_brand(profile_sec_ch_ua, "Brave"),
-        extra_headers: vec![("sec-gpc".into(), "1".into())],
-        navigate_accept: Some(
-            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,\
-             image/webp,image/apng,*/*;q=0.8"
-                .into(),
-        ),
     })
 }
 
@@ -482,53 +422,17 @@ mod tests {
             .overlay(147, Platform::Windows, ua, sch)
             .unwrap()
             .unwrap();
-        // Real Edge UA carries the FULL build version
-        // (`major.0.build.patch`) — never the reduced `major.0.0.0` form
-        // that Chrome's UA reduction produces. Asserting the realistic
-        // shape catches accidental regressions to the bot-detectable
-        // `Edg/147.0.0.0` form.
+        // Real Edge ships the UA-reduced `Edg/{major}.0.0.0` form on
+        // current versions. Verified against tls.peet.ws on 2026-04-25
+        // with Edge 147 on macOS.
         assert!(
-            o.user_agent.contains(" Edg/147.0."),
-            "Edge UA must carry Edg/<major>.0.<build>: {}",
+            o.user_agent.ends_with(" Edg/147.0.0.0"),
+            "Edge UA must end with reduced Edg/{{major}}.0.0.0: {}",
             o.user_agent
-        );
-        assert!(
-            !o.user_agent.ends_with(" Edg/147.0.0.0"),
-            "Edge UA must NOT use the reduced 0.0 form (real Edge ships full build version): {}",
-            o.user_agent
-        );
-        // Build segment must look like a real Edge build (4-digit major,
-        // 2-digit minor at minimum). Catches the all-zeros sentinel and
-        // any future "lazy default" placeholder.
-        let edge_part = o.user_agent.rsplit("Edg/").next().unwrap();
-        let segments: Vec<&str> = edge_part.split('.').collect();
-        assert_eq!(segments.len(), 4, "Edg/ version must have 4 segments");
-        assert!(
-            segments[2].parse::<u32>().unwrap_or(0) >= 1000,
-            "Edge build segment looks fake: {}",
-            edge_part
         );
         assert!(o.sec_ch_ua.contains(r#""Microsoft Edge";v="147""#));
         assert_eq!(o.extra_headers, vec![("dnt".into(), "1".into())]);
         assert!(o.navigate_accept.is_none());
-    }
-
-    #[test]
-    fn brave_overlay_matches_chrome_ua() {
-        let ua = "Mozilla/5.0 ... Chrome/147.0.0.0 Safari/537.36";
-        let sch = r#""Google Chrome";v="147", "Not.A/Brand";v="8", "Chromium";v="147""#;
-        let o = ChromiumBrand::Brave
-            .overlay(147, Platform::Windows, ua, sch)
-            .unwrap()
-            .unwrap();
-        assert_eq!(o.user_agent, ua);
-        assert!(o.sec_ch_ua.contains(r#""Brave";v="147""#));
-        assert_eq!(o.extra_headers, vec![("sec-gpc".into(), "1".into())]);
-        assert!(o
-            .navigate_accept
-            .as_deref()
-            .map(|v| !v.contains("signed-exchange"))
-            .unwrap_or(false));
     }
 
     #[test]

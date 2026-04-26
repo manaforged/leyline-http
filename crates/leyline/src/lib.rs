@@ -56,7 +56,7 @@ use std::sync::{LazyLock, OnceLock};
 
 // ─── Internal modules (formerly separate crates) ────────────────────────────
 pub mod audit;
-pub mod cookies;
+pub mod cookie;
 pub mod core;
 pub mod h2;
 pub mod pool;
@@ -88,8 +88,10 @@ pub use crate::profile::{
 // TCP fingerprinting
 pub use crate::tcp::TcpProfile;
 
-// Cookies
-pub use crate::cookies::CookieJar;
+// Cookie jar — re-export at crate root for the high-traffic case.
+// Prefer `leyline::cookie::Jar` in module signatures; `leyline::CookieJar`
+// is kept as a convenience alias.
+pub use crate::cookie::Jar as CookieJar;
 
 // Audit data type (top-level re-export)
 pub use crate::audit::AuditData;

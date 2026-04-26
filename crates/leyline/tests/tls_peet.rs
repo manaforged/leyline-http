@@ -68,6 +68,28 @@ fn h2_fingerprints_match_toml_expectations() {
     );
 }
 
+/// Per-platform H2 overrides resolve to the right Akamai fingerprint.
+/// Currently exercises Chrome 145/146/147 macOS, which all drop
+/// `unknown_setting8` (and Chrome 145 also drops `max_concurrent_streams`).
+#[test]
+fn h2_per_platform_overrides_resolve() {
+    let reg = leyline::profile::ProfileRegistry::builtin();
+    for browser in [Browser::Chrome145, Browser::Chrome146, Browser::Chrome147] {
+        let profile = reg.get_browser(browser).unwrap();
+        let resolved = profile.h2.resolve_for_platform("macos");
+        let h2 = leyline::h2::H2Config::from_profile(&resolved);
+        let actual = h2.akamai_fingerprint();
+        let expected = profile
+            .expected_h2_fingerprint_for("macos")
+            .unwrap_or_else(|| panic!("{browser} has no macos H2 fingerprint expectation"));
+        assert_eq!(actual, expected, "{browser} macOS H2 fingerprint mismatch");
+        assert!(
+            !actual.contains(";8:1"),
+            "{browser} macOS Akamai must omit setting 8: {actual}"
+        );
+    }
+}
+
 #[test]
 fn session_builder_resolves_all_valid_combos() {
     let combos: Vec<(Browser, Platform)> = vec![
@@ -79,6 +101,9 @@ fn session_builder_resolves_all_valid_combos() {
         (Browser::Chrome146, Platform::Android),
         (Browser::Chrome145, Platform::Windows),
         (Browser::Chrome145, Platform::Android),
+        (Browser::Aloha138, Platform::Windows),
+        (Browser::Aloha138, Platform::MacOS),
+        (Browser::Brave146, Platform::MacOS),
         (Browser::Firefox148, Platform::Windows),
         (Browser::Firefox148, Platform::Linux),
         (Browser::Firefox148, Platform::Android),

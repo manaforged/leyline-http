@@ -2,7 +2,7 @@
 
 use std::time::{Duration, SystemTime};
 
-use crate::cookies::cookie::{Cookie, SameSite};
+use crate::cookie::record::{Cookie, SameSite};
 
 /// Max cookie lifetime: 400 days (Chrome enforcement).
 const MAX_LIFETIME: Duration = Duration::from_secs(400 * 24 * 60 * 60);

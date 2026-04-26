@@ -47,17 +47,12 @@ async fn capture_navigate_headers(session: Session) -> String {
 async fn edge_brand_overlay_matches_capture() {
     let session = Session::edge_latest().unwrap();
     let req = capture_navigate_headers(session).await;
-    // UA suffix from real Edge 147 capture: post-Chrome-UA-reduction
-    // (Chrome/147.0.0.0) + full Edge build version (Edg/147.0.<build>.<patch>).
-    // Edge did NOT undergo UA reduction, so Edg/ never collapses to .0.0.
+    // Real Edge ships the UA-reduced `Edg/{major}.0.0.0` form on
+    // current versions. Verified against tls.peet.ws on 2026-04-25
+    // with Edge 147 on macOS.
     assert!(
-        req.contains("User-Agent: ") && req.contains("Chrome/147.0.0.0 Safari/537.36 Edg/147.0."),
-        "Edge UA suffix missing:\n{req}"
-    );
-    // Catch the bot-detectable reduced form explicitly.
-    assert!(
-        !req.contains("Edg/147.0.0.0"),
-        "Edge UA must carry full build version, not the reduced 0.0 form (real Edge ships 147.0.<build>.<patch>):\n{req}"
+        req.contains("Chrome/147.0.0.0 Safari/537.36 Edg/147.0.0.0"),
+        "Edge UA must carry reduced Edg/147.0.0.0 suffix:\n{req}"
     );
     // sec-ch-ua brand list reorders to put "Microsoft Edge" first.
     assert!(
@@ -73,28 +68,49 @@ async fn edge_brand_overlay_matches_capture() {
 }
 
 #[tokio::test]
-async fn brave_brand_overlay_matches_capture() {
+async fn brave_first_class_profile_matches_capture() {
+    // Brave 146 on macOS — Browser::Brave146 ships the full set of
+    // captured deltas: header reorder, accept SXG-strip, sec-gpc,
+    // accept-language q=0.8, custom sec-ch-ua slot order. Verified
+    // against tls.peet.ws on 2026-04-25.
     let session = Session::brave_latest().unwrap();
     let req = capture_navigate_headers(session).await;
-    // Brave keeps Chrome's UA byte-for-byte — no `Edg/` or `OPR/` suffix.
+    // No Edg/ or OPR/ suffix — Brave keeps Chrome's UA suffix-free.
     assert!(
         !req.contains("Edg/") && !req.contains("OPR/"),
         "Brave UA must not contain sibling suffixes:\n{req}"
     );
-    // Brand list reorders to put "Brave" first.
+    // Brave-specific sec-ch-ua: Chromium leads, then GREASE, then Brave.
     assert!(
-        req.to_lowercase().contains(r#"sec-ch-ua: "brave";v="147""#),
-        "Brave sec-ch-ua brand missing:\n{req}"
+        req.to_lowercase()
+            .contains(r#"sec-ch-ua: "chromium";v="146", "not-a.brand";v="24", "brave";v="146""#),
+        "Brave sec-ch-ua slot order / GREASE form missing:\n{req}"
     );
-    // Brave ships sec-gpc: 1 for Global Privacy Control.
+    // sec-gpc: 1 for Global Privacy Control.
     assert!(
         req.to_lowercase().contains("\r\nsec-gpc: 1\r\n"),
         "Brave sec-gpc missing:\n{req}"
     );
-    // Brave drops application/signed-exchange from the Navigate accept.
+    // Navigate accept drops application/signed-exchange.
     assert!(
         !req.to_lowercase().contains("application/signed-exchange"),
         "Brave navigate accept should drop signed-exchange:\n{req}"
+    );
+    // accept-language uses q=0.8 (Brave specific).
+    assert!(
+        req.to_lowercase()
+            .contains("accept-language: en-us,en;q=0.8"),
+        "Brave accept-language q=0.8 missing:\n{req}"
+    );
+    // Header order: accept-language sits between sec-gpc and sec-fetch-site.
+    let lower = req.to_lowercase();
+    let pos = |needle: &str| lower.find(needle);
+    let p_sec_gpc = pos("\r\nsec-gpc:").unwrap_or(usize::MAX);
+    let p_lang = pos("\r\naccept-language:").unwrap_or(usize::MAX);
+    let p_site = pos("\r\nsec-fetch-site:").unwrap_or(usize::MAX);
+    assert!(
+        p_sec_gpc < p_lang && p_lang < p_site,
+        "Brave header order wrong (sec-gpc < accept-language < sec-fetch-site):\n{req}"
     );
 }
 

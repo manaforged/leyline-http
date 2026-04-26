@@ -40,6 +40,12 @@ pub struct RequestBuilder<'a> {
     pub(super) retry_policy: RetryPolicy,
     pub(super) allow_non_idempotent_retry: bool,
     pub(super) digest_auth: Option<DigestAuth>,
+    /// Per-request proxy override. When `Some`, this proxy is used
+    /// instead of the session's default proxy for this request only.
+    /// Other requests on the same session are unaffected — the pool
+    /// keys connections by `(host, port, proxy)` so the session can
+    /// multiplex traffic across multiple proxies.
+    pub(super) proxy: Option<String>,
 }
 
 impl<'a> RequestBuilder<'a> {
@@ -58,6 +64,7 @@ impl<'a> RequestBuilder<'a> {
             retry_policy: RetryPolicy::none(),
             allow_non_idempotent_retry: false,
             digest_auth: None,
+            proxy: None,
         }
     }
 
@@ -219,6 +226,24 @@ impl<'a> RequestBuilder<'a> {
     pub fn multipart(mut self, form: Form) -> Self {
         self.headers.set("content-type", form.content_type());
         self.body = form.into_stream_body();
+        self
+    }
+
+    /// Override the session's proxy for this single request.
+    ///
+    /// The session's connection pool keys connections by
+    /// `(host, port, proxy)`, so a session can multiplex requests
+    /// across multiple proxies cheaply — the first request through a
+    /// new proxy pays one TLS handshake, subsequent requests through
+    /// the same proxy reuse the cached connection.
+    ///
+    /// Pass `http://user:pass@host:port` for HTTP proxies or
+    /// `socks5://user:pass@host:port` for SOCKS5. The session's
+    /// `NO_PROXY` rules still apply — if the URL host matches a
+    /// `NO_PROXY` pattern, the override is ignored just like the
+    /// session-default proxy would be.
+    pub fn proxy(mut self, proxy_url: &str) -> Self {
+        self.proxy = Some(proxy_url.to_string());
         self
     }
 }

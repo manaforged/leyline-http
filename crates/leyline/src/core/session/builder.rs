@@ -1,6 +1,6 @@
 use std::sync::{Arc, LazyLock};
 
-use crate::cookies::CookieJar;
+use crate::cookie::Jar as CookieJar;
 use crate::h2::H2Config;
 use crate::pool::Pool;
 use crate::profile::{Browser, ChromiumBrand, Platform, ProfileRegistry};
@@ -263,8 +263,10 @@ impl SessionBuilder {
             connector.set_accept_invalid_certs(true);
         }
 
-        // Build H2 config from profile.
-        let h2_config = H2Config::from_profile(&profile.h2);
+        // Build H2 config from profile, applying any per-platform
+        // override (e.g. Chromium-on-macOS drops `unknown_setting8`).
+        let resolved_h2 = profile.h2.resolve_for_platform(identity_key);
+        let h2_config = H2Config::from_profile(&resolved_h2);
 
         // Pre-compute audit data from profile.
         let extension_ids = crate::audit::chrome_extension_ids(&profile.tls);
@@ -309,6 +311,9 @@ impl SessionBuilder {
                 .unwrap_or_else(|| "en-US,en;q=0.9".to_string()),
             brand_extra_headers,
             brand_navigate_accept,
+            identity_extra_headers: identity.extra_headers.clone(),
+            identity_navigate_accept: identity.navigate_accept_override.clone(),
+            identity_request_header_order: identity.request_header_order.clone(),
             proxy: self.proxy,
             timeout: self.timeout,
             max_redirects: self.max_redirects,

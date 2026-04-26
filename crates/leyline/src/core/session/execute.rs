@@ -15,6 +15,8 @@ impl Session {
 
     /// Execute a request with an optional per-request timeout override.
     /// When `override_timeout` is `None`, the session-level timeout applies.
+    /// `request_proxy`, when `Some`, overrides the session's default proxy
+    /// for this single request (and any redirects it follows).
     /// Handles redirects, decompression, cookies.
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn execute_with_timeout(
@@ -26,6 +28,7 @@ impl Session {
         extra_headers: Option<HeaderList>,
         override_timeout: Option<std::time::Duration>,
         stream_response: bool,
+        request_proxy: Option<&str>,
     ) -> Result<Response> {
         let timeout = override_timeout.unwrap_or(self.timeout);
         // Box the inner future to move its state to the heap. Without this,
@@ -41,6 +44,7 @@ impl Session {
             body,
             extra_headers,
             stream_response,
+            request_proxy,
         ));
         match tokio::time::timeout(timeout, inner).await {
             Ok(result) => result,
@@ -54,6 +58,7 @@ impl Session {
         skip_all,
         fields(http.method = method, http.url = raw_url)
     )]
+    #[allow(clippy::too_many_arguments)]
     async fn execute_inner(
         &self,
         method: &str,
@@ -62,6 +67,7 @@ impl Session {
         body: Body,
         extra_headers: Option<HeaderList>,
         stream_response: bool,
+        request_proxy: Option<&str>,
     ) -> Result<Response> {
         let mut current_url = url::Url::parse(raw_url)?;
         let original_origin = url_origin(&current_url);
@@ -110,15 +116,17 @@ impl Session {
                 ]
             };
 
-            // Apply Chromium-sibling overlays: Brave's trimmed
-            // Navigate `accept`, and per-brand extra headers (Edge's
-            // `dnt: 1`, Brave's `sec-gpc: 1`). These only run when
-            // the builder's `.brand(..)` was set to a non-Chrome
-            // variant AND the active profile is Chromium — both
-            // gates were applied at build time, so here we only
-            // need to splice the cached values in.
+            // Apply Chromium-sibling brand overlays AND identity-level
+            // overrides for first-class profiles. Both apply the same
+            // shape of edits (Navigate `accept` swap, extra headers);
+            // only one of the two paths fires for any given session
+            // because brand overlays are off when Brave is first-class.
+            let navigate_accept_override = self
+                .identity_navigate_accept
+                .as_deref()
+                .or(self.brand_navigate_accept.as_deref());
             if let (Some(accept_override), Some(Preset::Navigate)) =
-                (self.brand_navigate_accept.as_deref(), preset)
+                (navigate_accept_override, preset)
             {
                 for (name, value) in headers.iter_mut() {
                     if name == "accept" {
@@ -128,13 +136,17 @@ impl Session {
                 }
             }
             // User's `.header(..)` / `.append_header(..)` always
-            // wins over a brand's default — e.g. a caller on an
+            // wins over a brand or identity default — e.g. a caller on an
             // Edge session setting `.header("dnt", "0")` must not
             // see both `dnt: 1` (brand) and `dnt: 0` (user) on the
             // wire. We also skip any name that the active preset
             // already emitted, so a future preset shipping `dnt` or
             // `sec-gpc` by default doesn't collide with the overlay.
-            for (k, v) in &self.brand_extra_headers {
+            for (k, v) in self
+                .brand_extra_headers
+                .iter()
+                .chain(self.identity_extra_headers.iter())
+            {
                 let user_has_it = extra_headers
                     .as_ref()
                     .map(|h| h.iter().any(|(uk, _)| uk.eq_ignore_ascii_case(k)))
@@ -188,6 +200,16 @@ impl Session {
                 headers.push(("cookie".into(), cookie_val));
             }
 
+            // Identity-level header reordering. Browsers like Brave ship
+            // a non-Chrome request-header sequence (e.g. accept-language
+            // repositioned after sec-gpc, between accept and sec-fetch-*).
+            // When the active identity declares a `request_header_order`,
+            // sort the assembled headers to that order; names not in the
+            // list keep their relative position at the tail.
+            if let Some(order) = self.identity_request_header_order.as_deref() {
+                reorder_headers(&mut headers, order);
+            }
+
             let audit_headers = headers.clone();
 
             // Take the body for this hop. Streams are one-shot; we replace
@@ -196,7 +218,11 @@ impl Session {
             let hop_body = std::mem::take(&mut current_body);
             let hop_body_was_stream = hop_body.is_stream();
 
-            // Send via the configured protocol policy.
+            // Send via the configured protocol policy. The per-request
+            // proxy override (if any) carries through every redirect
+            // hop in this `execute_inner` call — once a caller picks a
+            // proxy for a request, all redirects of that request go
+            // through the same proxy.
             let transport_resp = self
                 .send_with_policy(
                     &current_method,
@@ -204,6 +230,7 @@ impl Session {
                     headers,
                     hop_body,
                     stream_response,
+                    request_proxy,
                 )
                 .await?;
             let status = transport_resp.status;
@@ -378,5 +405,86 @@ fn url_origin(url: &url::Url) -> String {
     match url.port() {
         Some(port) => format!("{}://{}:{}", url.scheme(), host, port),
         None => format!("{}://{}", url.scheme(), host),
+    }
+}
+
+/// Reorder `headers` in place so that, for each name in `order`, all
+/// matching headers (case-insensitive) appear in `order`'s position.
+/// Headers whose name does not appear in `order` keep their relative
+/// insertion order at the tail.
+///
+/// Stable: multiple values for the same header keep their original
+/// relative order. Unknown / dynamic names (`content-length`, `cookie`,
+/// caller-anchored extras) end up at the tail untouched.
+fn reorder_headers(headers: &mut Vec<(String, String)>, order: &[String]) {
+    let lc_order: Vec<String> = order.iter().map(|s| s.to_ascii_lowercase()).collect();
+    let mut buckets: Vec<Vec<(String, String)>> = vec![Vec::new(); lc_order.len()];
+    let mut tail: Vec<(String, String)> = Vec::new();
+    for h in std::mem::take(headers) {
+        let lc = h.0.to_ascii_lowercase();
+        match lc_order.iter().position(|n| *n == lc) {
+            Some(idx) => buckets[idx].push(h),
+            None => tail.push(h),
+        }
+    }
+    for b in buckets {
+        headers.extend(b);
+    }
+    headers.extend(tail);
+}
+
+#[cfg(test)]
+mod reorder_tests {
+    use super::reorder_headers;
+
+    fn h(name: &str, value: &str) -> (String, String) {
+        (name.into(), value.into())
+    }
+
+    #[test]
+    fn moves_named_headers_to_declared_order() {
+        let mut headers = vec![
+            h("user-agent", "u"),
+            h("accept", "a"),
+            h("sec-fetch-site", "s"),
+            h("accept-language", "al"),
+            h("sec-gpc", "1"),
+        ];
+        let order = vec![
+            "accept".into(),
+            "sec-gpc".into(),
+            "accept-language".into(),
+            "sec-fetch-site".into(),
+        ];
+        reorder_headers(&mut headers, &order);
+        let names: Vec<&str> = headers.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(
+            names,
+            vec![
+                "accept",
+                "sec-gpc",
+                "accept-language",
+                "sec-fetch-site",
+                "user-agent",
+            ]
+        );
+    }
+
+    #[test]
+    fn missing_names_in_order_are_skipped() {
+        let mut headers = vec![h("accept", "a"), h("user-agent", "u")];
+        let order = vec!["accept".into(), "sec-gpc".into(), "user-agent".into()];
+        reorder_headers(&mut headers, &order);
+        let names: Vec<&str> = headers.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, vec!["accept", "user-agent"]);
+    }
+
+    #[test]
+    fn case_insensitive_matching() {
+        let mut headers = vec![h("User-Agent", "u"), h("Accept", "a")];
+        let order = vec!["accept".into(), "user-agent".into()];
+        reorder_headers(&mut headers, &order);
+        let names: Vec<&str> = headers.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, vec!["Accept", "User-Agent"]);
     }
 }

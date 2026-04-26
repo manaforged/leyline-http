@@ -16,7 +16,7 @@ pub use builder::SessionBuilder;
 
 use std::sync::Arc;
 
-use crate::cookies::CookieJar;
+use crate::cookie::Jar as CookieJar;
 use crate::h2::H2Config;
 use crate::pool::Pool;
 use crate::profile::{Browser, ChromiumBrand, Platform};
@@ -59,6 +59,15 @@ pub struct Session {
     /// Brand-specific Navigate `accept` override (Brave drops
     /// signed-exchange). `None` means use the preset's default.
     brand_navigate_accept: Option<String>,
+    /// Identity-level extra headers from the active `[identity.*]`
+    /// block (e.g. Brave's `sec-gpc: 1` once Brave is a first-class
+    /// profile). Same precedence rules as `brand_extra_headers`.
+    identity_extra_headers: Vec<(String, String)>,
+    /// Identity-level Navigate `accept` override.
+    identity_navigate_accept: Option<String>,
+    /// Identity-level explicit request-header order. When set,
+    /// the assembled header list is reordered to match.
+    identity_request_header_order: Option<Vec<String>>,
     proxy: Option<String>,
     timeout: std::time::Duration,
     max_redirects: usize,

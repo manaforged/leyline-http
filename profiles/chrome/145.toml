@@ -52,6 +52,15 @@ settings_order = [
 [h2.fingerprint]
 akamai = "1:65536;2:0;3:1000;4:6291456;6:262144;8:1|15663105|0|m,a,s,p"
 
+# Chromium-on-macOS sends only the 4 core SETTINGS (1, 2, 4, 6).
+# `max_concurrent_streams` (setting 3) and `unknown_setting8` are both
+# absent.
+[h2.platforms.macos]
+omit_settings = ["max_concurrent_streams", "unknown_setting8"]
+
+[h2.platforms.macos.fingerprint]
+akamai = "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p"
+
 [identity.windows]
 user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
 sec_ch_ua = '"Google Chrome";v="145", "Not_A Brand";v="24", "Chromium";v="145"'

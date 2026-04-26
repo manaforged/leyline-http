@@ -4,17 +4,35 @@ use crate::core::body::Body;
 use crate::core::error::{Error, Result};
 
 impl Session {
-    /// Return the session's configured proxy, gated by `NO_PROXY` —
-    /// hosts matching a `NO_PROXY` pattern bypass the configured
-    /// proxy entirely.
-    fn effective_proxy_for(&self, url: &url::Url) -> Option<&str> {
-        let proxy = self.proxy.as_deref()?;
+    /// Resolve the proxy URL to use for this request, honoring
+    /// (in order of preference): a per-request override, then the
+    /// session's default proxy. The result is gated by `NO_PROXY` —
+    /// hosts matching a `NO_PROXY` pattern bypass any proxy entirely.
+    ///
+    /// The lifetime is bounded by the shorter of the two inputs so
+    /// borrows from either source remain valid.
+    fn effective_proxy_for<'a>(
+        &'a self,
+        url: &url::Url,
+        request_proxy: Option<&'a str>,
+    ) -> Option<&'a str> {
+        let proxy = request_proxy.or(self.proxy.as_deref())?;
         let host = url.host_str().unwrap_or("");
         if host_bypasses_proxy(host) {
             None
         } else {
             Some(proxy)
         }
+    }
+
+    /// `true` iff *any* proxy was requested for this call (session
+    /// default OR per-request override) — regardless of `NO_PROXY`
+    /// filtering. Used by the H3 / Race guards: an explicit caller
+    /// `.proxy(...)` must suppress H3 even when `NO_PROXY` would have
+    /// bypassed the proxy, because the caller's intent is "route
+    /// through this specific egress, not H3."
+    fn proxy_requested(&self, request_proxy: Option<&str>) -> bool {
+        request_proxy.is_some() || self.proxy.is_some()
     }
 
     pub(super) async fn send_with_policy(
@@ -24,8 +42,9 @@ impl Session {
         headers: Vec<(String, String)>,
         body: Body,
         stream_response: bool,
+        request_proxy: Option<&str>,
     ) -> Result<crate::core::transport::TransportResponse> {
-        let proxy = self.effective_proxy_for(url);
+        let proxy = self.effective_proxy_for(url, request_proxy);
         match self.protocol_policy {
             ProtocolPolicy::Auto => {
                 crate::core::transport::send_request_auto(
@@ -69,7 +88,7 @@ impl Session {
                 .await
             }
             ProtocolPolicy::Http3 => {
-                if self.proxy.is_some() {
+                if self.proxy_requested(request_proxy) {
                     return Err(Error::Config(
                         "HTTP/3 over proxies is not implemented; use Auto or Http2".into(),
                     ));
@@ -104,7 +123,7 @@ impl Session {
                     )
                     .await;
                 }
-                if self.proxy.is_none() && url.scheme() == "https" {
+                if !self.proxy_requested(request_proxy) && url.scheme() == "https" {
                     // We have a buffered body — clone for the retry.
                     let retained = match &body {
                         Body::Empty => Body::Empty,
