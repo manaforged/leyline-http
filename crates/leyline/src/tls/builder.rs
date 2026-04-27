@@ -144,19 +144,22 @@ fn boring_curve_name(name: &str) -> &str {
 #[derive(Debug)]
 struct BrotliDecompressor;
 
+// btls 0.5.6 reshaped CertificateCompressor: `algorithm()` became the
+// associated const `ALGORITHM`, `CAN_COMPRESS` / `CAN_DECOMPRESS` were
+// added as required const flags, and `compress` / `decompress` take a
+// generic writer instead of `&mut dyn io::Write`. We only need
+// decompression; the trait's default `compress` impl (returns "not
+// implemented") is fine, and the `CAN_COMPRESS = false` flag is enough
+// for btls to skip registering us on the compress side.
 impl CertificateCompressor for BrotliDecompressor {
-    fn algorithm(&self) -> CertificateCompressionAlgorithm {
-        CertificateCompressionAlgorithm::BROTLI
-    }
+    const ALGORITHM: CertificateCompressionAlgorithm = CertificateCompressionAlgorithm::BROTLI;
+    const CAN_COMPRESS: bool = false;
+    const CAN_DECOMPRESS: bool = true;
 
-    fn compress(&self, _input: &[u8], _output: &mut dyn std::io::Write) -> std::io::Result<()> {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
-            "BrotliDecompressor does not support compression",
-        ))
-    }
-
-    fn decompress(&self, input: &[u8], output: &mut dyn std::io::Write) -> std::io::Result<()> {
+    fn decompress<W>(&self, input: &[u8], output: &mut W) -> std::io::Result<()>
+    where
+        W: std::io::Write,
+    {
         let mut decoder = brotli::Decompressor::new(input, 4096);
         std::io::copy(&mut decoder, output)?;
         Ok(())

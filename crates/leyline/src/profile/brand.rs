@@ -18,7 +18,7 @@ use crate::profile::Platform;
 
 /// Chromium-family browser skin applied on top of a Chrome profile.
 /// Affects only HTTP identity headers — never TLS or HTTP/2.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[non_exhaustive]
 pub enum ChromiumBrand {
     /// Stock Chrome. No overlay.
