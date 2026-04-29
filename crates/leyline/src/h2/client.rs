@@ -452,8 +452,7 @@ impl H2Client {
 /// Bidirectional stream over an HTTP/2 connection opened via
 /// RFC 8441 extended CONNECT.
 ///
-/// Implements [`AsyncRead`](tokio::io::AsyncRead) and
-/// [`AsyncWrite`](tokio::io::AsyncWrite) so higher layers
+/// Implements `tokio::io::AsyncRead` and `tokio::io::AsyncWrite` so higher layers
 /// (tokio-tungstenite, an arbitrary framed protocol) can run on top.
 /// Writes are chunked through the H2 driver's flow-control machinery;
 /// reads drain DATA frames the driver pushes into the inbound channel.
@@ -869,16 +868,16 @@ where
     }
     writer.flush().await?;
 
-    // 4. Read the server's SETTINGS and wait for the server's ACK of
-    //    our own SETTINGS (RFC 9113 §6.5.3: SETTINGS_TIMEOUT if the
-    //    peer fails to ACK within a reasonable window).
+    // 4. Read the server's SETTINGS. Some real servers delay or omit the
+    //    ACK for our initial SETTINGS until after request traffic starts;
+    //    browser clients do not block request dispatch on that ACK. The
+    //    driver still accepts a later ACK once it is running.
     let mut peer_settings = PeerSettings::default();
     let mut got_settings = false;
-    let mut our_settings_acked = false;
     let mut initial_send_window: i64 = 65535;
     let deadline = tokio::time::Instant::now() + config.settings_ack_timeout;
 
-    while !(got_settings && our_settings_acked) {
+    while !got_settings {
         let next = match tokio::time::timeout_at(deadline, reader.next()).await {
             Ok(inner) => inner?,
             Err(_) => {
@@ -886,13 +885,12 @@ where
                     target: "leyline::h2::handshake",
                     timeout_ms = config.settings_ack_timeout.as_millis() as u64,
                     got_peer_settings = got_settings,
-                    our_settings_acked,
-                    "SETTINGS_TIMEOUT (RFC 9113 §6.5.3) — peer did not ACK our SETTINGS; tearing down connection"
+                    "SETTINGS_TIMEOUT — peer did not send SETTINGS; tearing down connection"
                 );
                 return Err(H2Error::Connection {
                     code: ErrorCode::SettingsTimeout,
                     reason: format!(
-                        "peer did not ACK our SETTINGS within {:?}",
+                        "peer did not send SETTINGS within {:?}",
                         config.settings_ack_timeout
                     ),
                 });
@@ -910,9 +908,7 @@ where
                 writer.flush().await?;
                 got_settings = true;
             }
-            Frame::Settings(s) if s.ack => {
-                our_settings_acked = true;
-            }
+            Frame::Settings(_s) if _s.ack => {}
             Frame::WindowUpdate(w) if w.stream_id == 0 => {
                 // §6.9.1 overflow check during handshake as well;
                 // a malicious peer sending WU(0, 2^31-1) twice must
@@ -2215,7 +2211,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         // id the client didn't originate — is a connection error. We
         // catch this at the entry point rather than in every handler.
         let enforce_odd = |sid: u32| -> Result<(), H2Error> {
-            if sid == 0 || sid.is_multiple_of(2) {
+            if sid == 0 || sid % 2 == 0 {
                 return Err(H2Error::Connection {
                     code: ErrorCode::ProtocolError,
                     reason: format!(

@@ -13,10 +13,12 @@ mod websocket;
 mod tests;
 
 pub use builder::SessionBuilder;
+pub use websocket::WebSocketBuilder;
 
 use std::sync::Arc;
 
 use crate::cookie::Jar as CookieJar;
+use crate::core::{CompressionConfig, ProxyConfig, RedirectPolicy, TimeoutConfig, WebSocketConfig};
 use crate::h2::H2Config;
 use crate::pool::Pool;
 use crate::profile::{Browser, ChromiumBrand, Platform};
@@ -71,6 +73,12 @@ pub struct Session {
     proxy: Option<String>,
     timeout: std::time::Duration,
     max_redirects: usize,
+    proxy_config: ProxyConfig,
+    timeouts: TimeoutConfig,
+    redirect_policy: RedirectPolicy,
+    compression: CompressionConfig,
+    websocket_config: WebSocketConfig,
+    https_only: bool,
     cookie_jar: CookieJar,
     connector: FingerprintConnector,
     h2_config: H2Config,

@@ -20,6 +20,7 @@ pub use connector::FingerprintConnector;
 pub use error::TlsError;
 pub use happy_eyeballs::HappyEyeballsConfig;
 pub use resolver::{ResolveFuture, Resolver, SystemResolver};
+pub use trust::{ClientIdentity, TlsTrustConfig};
 
 /// A connected TLS stream with ALPN result.
 pub struct TlsStream {

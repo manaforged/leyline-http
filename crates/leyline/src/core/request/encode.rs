@@ -1,7 +1,7 @@
 //! URL-encoding and Base64 helpers used by the request builder.
 
 /// URL-encode key-value pairs.
-pub(crate) fn url_encode_pairs(params: &[(&str, &str)]) -> String {
+pub(crate) fn url_encode_pairs(params: &[(String, String)]) -> String {
     params
         .iter()
         .map(|(k, v)| format!("{}={}", url_encode(k), url_encode(v)))
@@ -56,7 +56,10 @@ mod tests {
 
     #[test]
     fn url_encode_pairs_works() {
-        let pairs = url_encode_pairs(&[("user", "alice"), ("pass", "s3cr3t!")]);
+        let pairs = url_encode_pairs(&[
+            ("user".to_string(), "alice".to_string()),
+            ("pass".to_string(), "s3cr3t!".to_string()),
+        ]);
         assert_eq!(pairs, "user=alice&pass=s3cr3t%21");
     }
 

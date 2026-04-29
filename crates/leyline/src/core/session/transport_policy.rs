@@ -1,4 +1,3 @@
-use super::proxy::host_bypasses_proxy;
 use super::{ProtocolPolicy, Session};
 use crate::core::body::Body;
 use crate::core::error::{Error, Result};
@@ -16,13 +15,8 @@ impl Session {
         url: &url::Url,
         request_proxy: Option<&'a str>,
     ) -> Option<&'a str> {
-        let proxy = request_proxy.or(self.proxy.as_deref())?;
-        let host = url.host_str().unwrap_or("");
-        if host_bypasses_proxy(host) {
-            None
-        } else {
-            Some(proxy)
-        }
+        self.proxy_config
+            .proxy_for(url, request_proxy, self.proxy.as_deref())
     }
 
     /// `true` iff *any* proxy was requested for this call (session
@@ -32,7 +26,7 @@ impl Session {
     /// bypassed the proxy, because the caller's intent is "route
     /// through this specific egress, not H3."
     fn proxy_requested(&self, request_proxy: Option<&str>) -> bool {
-        request_proxy.is_some() || self.proxy.is_some()
+        request_proxy.is_some() || self.proxy.is_some() || self.proxy_config.first_proxy().is_some()
     }
 
     pub(super) async fn send_with_policy(
@@ -44,6 +38,11 @@ impl Session {
         stream_response: bool,
         request_proxy: Option<&str>,
     ) -> Result<crate::core::transport::TransportResponse> {
+        if self.https_only && url.scheme() != "https" {
+            return Err(Error::Config(
+                "https_only session rejected non-HTTPS URL".into(),
+            ));
+        }
         let proxy = self.effective_proxy_for(url, request_proxy);
         match self.protocol_policy {
             ProtocolPolicy::Auto => {

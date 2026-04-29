@@ -71,6 +71,7 @@ where
 ///   before comparison — conventional behaviour ignores port.
 /// - IDN pattern + ASCII host (and vice versa) compare equal after
 ///   punycode normalisation.
+#[allow(dead_code)]
 pub(crate) fn host_bypasses_proxy(host: &str) -> bool {
     let raw = std::env::var("NO_PROXY")
         .ok()
@@ -82,6 +83,7 @@ pub(crate) fn host_bypasses_proxy(host: &str) -> bool {
 /// Pure-function core of [`host_bypasses_proxy`] that takes the
 /// `NO_PROXY` string directly — easier to unit-test than the env-var
 /// reading wrapper.
+#[allow(dead_code)]
 pub(crate) fn host_matches_no_proxy(host: &str, raw: &str) -> bool {
     let host = normalise_host(host);
     for token in raw.split(',') {
@@ -134,6 +136,7 @@ pub(crate) fn host_matches_no_proxy(host: &str, raw: &str) -> bool {
 /// Canonicalise a host for `NO_PROXY` comparison: lowercase, strip
 /// trailing dot, punycode IDNs so Unicode and A-label forms compare
 /// equal. Falls back to the ASCII-lowered form on IDN failure.
+#[allow(dead_code)]
 fn normalise_host(host: &str) -> String {
     let stripped = host.trim().trim_end_matches('.');
     // Strip a matching pair of `[` `]` around IPv6 literals —

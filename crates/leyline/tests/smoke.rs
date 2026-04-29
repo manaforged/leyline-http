@@ -1,5 +1,7 @@
 //! Live smoke suite for Leyline's proof gates.
 
+use std::future::Future;
+use std::pin::Pin;
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
@@ -12,9 +14,14 @@ const PEET_URL: &str = "https://tls.peet.ws/api/all";
 const H3_GET_HOST: &str = "cloudflare-quic.com";
 const H3_ECHO_HOST: &str = "httpbin.agrd.workers.dev";
 const SMOKE_TIMEOUT: Duration = Duration::from_secs(25);
+type SmokeFuture<'a> = Pin<Box<dyn Future<Output = Result<String>> + 'a>>;
 
-#[tokio::main]
-async fn main() {
+// Live competitive smoke suite. Hits external services (tls.peet.ws, httpbin,
+// cloudflare-quic). Opt-in: `cargo test -p leyline --test smoke -- --ignored
+// --nocapture`.
+#[tokio::test]
+#[ignore]
+async fn smoke_suite() {
     println!("=== Leyline Smoke Suite ===\n");
 
     let mut passed = 0u32;
@@ -24,15 +31,15 @@ async fn main() {
         "Chrome 147 exact JA4 + H2",
         &mut passed,
         &mut failed,
-        async { exact_fingerprint(Session::chrome_latest()?, Browser::Chrome147).await },
+        smoke(async { exact_fingerprint(Session::chrome_latest()?, Browser::Chrome147).await }),
     )
     .await;
 
     run(
-        "Firefox 148 exact JA4 + H2",
+        "Firefox 150 exact JA4 + H2",
         &mut passed,
         &mut failed,
-        async { exact_fingerprint(Session::firefox_latest()?, Browser::Firefox148).await },
+        smoke(async { exact_fingerprint(Session::firefox_latest()?, Browser::Firefox150).await }),
     )
     .await;
 
@@ -40,7 +47,7 @@ async fn main() {
         "Connection reuse (3 sequential requests)",
         &mut passed,
         &mut failed,
-        async {
+        smoke(async {
             let s = Session::chrome_latest()?;
             let t = Instant::now();
             let r1 = s.navigate(PEET_URL).await?;
@@ -61,7 +68,7 @@ async fn main() {
                 },
             )?;
             Ok(format!("1st={t1:?} 2nd={:?} 3rd={:?}", t2 - t1, t3 - t2))
-        },
+        }),
     )
     .await;
 
@@ -69,7 +76,7 @@ async fn main() {
         "Decompression (brotli/gzip/zstd advertised)",
         &mut passed,
         &mut failed,
-        async {
+        smoke(async {
             let s = Session::chrome_latest()?;
             let r = s.navigate(PEET_URL).await?;
             let body = r.text();
@@ -79,7 +86,7 @@ async fn main() {
                 "tls.peet response missing protocol sections",
             )?;
             Ok(format!("{}B valid JSON", body.len()))
-        },
+        }),
     )
     .await;
 
@@ -87,13 +94,13 @@ async fn main() {
         "HTTP/2 CDN GET (httpbin.org)",
         &mut passed,
         &mut failed,
-        async {
+        smoke(async {
             let s = Session::chrome_latest()?;
             let r = s.navigate("https://httpbin.org/get").await?;
             ensure(r.status() == 200, format!("status={}", r.status()))?;
             ensure(r.text().contains("headers"), "httpbin body missing headers")?;
             Ok(format!("status={} body={}B", r.status(), r.bytes().len()))
-        },
+        }),
     )
     .await;
 
@@ -101,7 +108,7 @@ async fn main() {
         "POST JSON body round-trip",
         &mut passed,
         &mut failed,
-        async {
+        smoke(async {
             let s = Session::chrome_latest()?;
             let payload = serde_json::json!({"test": "leyline", "v": 2});
             let r = s.post_json("https://httpbin.org/post", &payload).await?;
@@ -109,7 +116,7 @@ async fn main() {
             let echoed = json_str(&v["json"]["test"], "json.test")?;
             ensure(echoed == "leyline", format!("echoed={echoed}"))?;
             Ok(format!("echoed={echoed}"))
-        },
+        }),
     )
     .await;
 
@@ -117,7 +124,7 @@ async fn main() {
         "POST form body round-trip",
         &mut passed,
         &mut failed,
-        async {
+        smoke(async {
             let s = Session::chrome_latest()?;
             let r = s
                 .post_form(
@@ -133,58 +140,73 @@ async fn main() {
                 format!("user={user} pass={pass}"),
             )?;
             Ok(format!("user={user} pass={pass}"))
-        },
+        }),
     )
     .await;
 
-    run("GET with query params", &mut passed, &mut failed, async {
-        let s = Session::chrome_latest()?;
-        let r = s
-            .get("https://httpbin.org/get")
-            .query(&[("foo", "bar"), ("n", "42")])
-            .send()
-            .await?;
-        let v: Value = r.json()?;
-        let arg_foo = json_str(&v["args"]["foo"], "args.foo")?;
-        ensure(arg_foo == "bar", format!("foo={arg_foo}"))?;
-        Ok(format!("foo={arg_foo}"))
-    })
+    run(
+        "GET with query params",
+        &mut passed,
+        &mut failed,
+        smoke(async {
+            let s = Session::chrome_latest()?;
+            let r = s
+                .get("https://httpbin.org/get")
+                .query([("foo", "bar"), ("n", "42")])
+                .send()
+                .await?;
+            let v: Value = r.json()?;
+            let arg_foo = json_str(&v["args"]["foo"], "args.foo")?;
+            ensure(arg_foo == "bar", format!("foo={arg_foo}"))?;
+            Ok(format!("foo={arg_foo}"))
+        }),
+    )
     .await;
 
-    run("Bearer auth header", &mut passed, &mut failed, async {
-        let s = Session::chrome_latest()?;
-        let r = s
-            .get("https://httpbin.org/get")
-            .bearer_auth("test-token-123")
-            .send()
-            .await?;
-        let v: Value = r.json()?;
-        let auth = json_str(&v["headers"]["Authorization"], "headers.Authorization")?;
-        ensure(auth.contains("test-token-123"), format!("auth={auth}"))?;
-        Ok(format!("auth={auth}"))
-    })
+    run(
+        "Bearer auth header",
+        &mut passed,
+        &mut failed,
+        smoke(async {
+            let s = Session::chrome_latest()?;
+            let r = s
+                .get("https://httpbin.org/get")
+                .bearer_auth("test-token-123")
+                .send()
+                .await?;
+            let v: Value = r.json()?;
+            let auth = json_str(&v["headers"]["Authorization"], "headers.Authorization")?;
+            ensure(auth.contains("test-token-123"), format!("auth={auth}"))?;
+            Ok(format!("auth={auth}"))
+        }),
+    )
     .await;
 
-    run("error_for_status on 404", &mut passed, &mut failed, async {
-        let s = Session::chrome_latest()?;
-        let r = s.navigate("https://httpbin.org/status/404").await?;
-        ensure(r.status() == 404, format!("status={}", r.status()))?;
-        ensure(r.error_for_status().is_err(), "404 should be error")?;
-        Ok("404 -> Err".to_string())
-    })
+    run(
+        "error_for_status on 404",
+        &mut passed,
+        &mut failed,
+        smoke(async {
+            let s = Session::chrome_latest()?;
+            let r = s.navigate("https://httpbin.org/status/404").await?;
+            ensure(r.status() == 404, format!("status={}", r.status()))?;
+            ensure(r.error_for_status().is_err(), "404 should be error")?;
+            Ok("404 -> Err".to_string())
+        }),
+    )
     .await;
 
     run(
         "Redirect following (302 x2)",
         &mut passed,
         &mut failed,
-        async {
+        smoke(async {
             let s = Session::chrome_latest()?;
             let r = s.navigate("https://httpbin.org/redirect/2").await?;
             ensure(r.status() == 200, format!("status={}", r.status()))?;
             ensure(!r.redirect_chain().is_empty(), "redirect chain empty")?;
             Ok(format!("{} hops", r.redirect_chain().len()))
-        },
+        }),
     )
     .await;
 
@@ -192,7 +214,7 @@ async fn main() {
         "Chrome -> Firefox -> Safari fingerprints differ",
         &mut passed,
         &mut failed,
-        async {
+        smoke(async {
             let c = Session::chrome_latest()?.navigate(PEET_URL).await?;
             let f = Session::firefox_latest()?.navigate(PEET_URL).await?;
             let s = Session::safari_latest()?.navigate(PEET_URL).await?;
@@ -216,7 +238,7 @@ async fn main() {
                 "fingerprints should be unique",
             )?;
             Ok("all 3 unique".to_string())
-        },
+        }),
     )
     .await;
 
@@ -224,38 +246,49 @@ async fn main() {
         "HTTP/1.1 browser wire shape",
         &mut passed,
         &mut failed,
-        h1_wire_shape(),
+        smoke(h1_wire_shape()),
     )
     .await;
 
-    run("HTTP/3 Chrome QUIC GET", &mut passed, &mut failed, async {
-        h3_get(Browser::Chrome147, H3Config::chrome()).await
-    })
+    run(
+        "HTTP/3 Chrome QUIC GET",
+        &mut passed,
+        &mut failed,
+        smoke(async { h3_get(Browser::Chrome147, H3Config::chrome()).await }),
+    )
     .await;
 
-    run("HTTP/3 Firefox QUIC GET", &mut passed, &mut failed, async {
-        h3_get(Browser::Firefox148, H3Config::firefox()).await
-    })
+    run(
+        "HTTP/3 Firefox QUIC GET",
+        &mut passed,
+        &mut failed,
+        smoke(async { h3_get(Browser::Firefox150, H3Config::firefox()).await }),
+    )
     .await;
 
     run(
         "HTTP/3 POST body round-trip",
         &mut passed,
         &mut failed,
-        h3_post_body(),
+        smoke(h3_post_body()),
     )
     .await;
 
-    run("Large response (50KB)", &mut passed, &mut failed, async {
-        let s = Session::chrome_latest()?;
-        let r = s.navigate("https://httpbin.org/bytes/50000").await?;
-        ensure(r.status() == 200, format!("status={}", r.status()))?;
-        ensure(
-            r.bytes().len() == 50_000,
-            format!("got {} bytes", r.bytes().len()),
-        )?;
-        Ok(format!("{}B", r.bytes().len()))
-    })
+    run(
+        "Large response (50KB)",
+        &mut passed,
+        &mut failed,
+        smoke(async {
+            let s = Session::chrome_latest()?;
+            let r = s.navigate("https://httpbin.org/bytes/50000").await?;
+            ensure(r.status() == 200, format!("status={}", r.status()))?;
+            ensure(
+                r.bytes().len() == 50_000,
+                format!("got {} bytes", r.bytes().len()),
+            )?;
+            Ok(format!("{}B", r.bytes().len()))
+        }),
+    )
     .await;
 
     println!("\n  ────────────────────────────────────────");
@@ -263,9 +296,7 @@ async fn main() {
         "  {passed} passed, {failed} failed, {} total",
         passed + failed
     );
-    if failed > 0 {
-        std::process::exit(1);
-    }
+    assert!(failed == 0, "{failed} smoke subtest(s) failed");
 }
 
 async fn exact_fingerprint(session: Session, browser: Browser) -> Result<String> {
@@ -407,12 +438,11 @@ async fn h3_post_body() -> Result<String> {
     Ok(format!("status={} echoed={}B", resp.status, payload.len()))
 }
 
-async fn run(
-    name: &str,
-    passed: &mut u32,
-    failed: &mut u32,
-    fut: impl std::future::Future<Output = Result<String>>,
-) {
+fn smoke<'a>(fut: impl Future<Output = Result<String>> + 'a) -> SmokeFuture<'a> {
+    Box::pin(fut)
+}
+
+async fn run(name: &str, passed: &mut u32, failed: &mut u32, fut: SmokeFuture<'_>) {
     let t = Instant::now();
     match tokio::time::timeout(SMOKE_TIMEOUT, fut).await {
         Ok(Ok(detail)) => {

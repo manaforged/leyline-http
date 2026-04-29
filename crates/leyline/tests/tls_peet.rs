@@ -107,6 +107,12 @@ fn session_builder_resolves_all_valid_combos() {
         (Browser::Firefox148, Platform::Windows),
         (Browser::Firefox148, Platform::Linux),
         (Browser::Firefox148, Platform::Android),
+        (Browser::Firefox150, Platform::Windows),
+        (Browser::Firefox150, Platform::Linux),
+        (Browser::Firefox150, Platform::Android),
+        (Browser::Firefox151, Platform::Windows),
+        (Browser::Firefox151, Platform::Linux),
+        (Browser::Firefox151, Platform::Android),
         (Browser::Safari18, Platform::MacOS),
         (Browser::OkHttpAndroid10, Platform::Android),
         (Browser::OkHttpAndroid7, Platform::Android),
@@ -203,7 +209,7 @@ fn session_shortcuts_work() {
 
     let firefox = leyline::Session::firefox_latest();
     assert!(firefox.is_ok());
-    assert_eq!(firefox.unwrap().browser(), Browser::Firefox148);
+    assert_eq!(firefox.unwrap().browser(), Browser::Firefox150);
 
     let safari = leyline::Session::safari_latest();
     assert!(safari.is_ok());
@@ -510,19 +516,19 @@ async fn live_ja4_exact_match_chrome145() {
 
 #[tokio::test]
 #[ignore = "live: needs network"]
-async fn live_ja4_exact_match_firefox148() {
+async fn live_ja4_exact_match_firefox150() {
     let session = leyline::Session::firefox_latest().unwrap();
     let json = peet(&session).await;
     let ja4 = json["tls"]["ja4"].as_str().expect("no tls.ja4");
 
     let reg = leyline::profile::ProfileRegistry::builtin();
-    let profile = reg.get_browser(Browser::Firefox148).unwrap();
+    let profile = reg.get_browser(Browser::Firefox150).unwrap();
     let expected = profile
         .expected_ja4()
-        .expect("Firefox 148 TOML missing JA4");
+        .expect("Firefox 150 TOML missing JA4");
 
-    assert_eq!(ja4, expected, "Firefox 148 JA4 mismatch");
-    println!("✓ Firefox 148 JA4 exact match: {ja4}");
+    assert_eq!(ja4, expected, "Firefox 150 JA4 mismatch");
+    println!("✓ Firefox 150 JA4 exact match: {ja4}");
 }
 
 #[tokio::test]
@@ -903,7 +909,7 @@ async fn live_chrome147_pseudo_header_order() {
 
 #[tokio::test]
 #[ignore = "live: needs network"]
-async fn live_firefox148_pseudo_header_order() {
+async fn live_firefox150_pseudo_header_order() {
     // Firefox sends pseudo-headers in the order method, path, authority, scheme.
     let session = leyline::Session::firefox_latest().unwrap();
     let json = peet(&session).await;
@@ -920,7 +926,7 @@ async fn live_firefox148_pseudo_header_order() {
         vec![":method", ":path", ":authority", ":scheme"],
         "Firefox pseudo-header order wrong"
     );
-    println!("✓ Firefox 148 pseudo-header order: method,path,authority,scheme");
+    println!("✓ Firefox 150 pseudo-header order: method,path,authority,scheme");
 }
 
 // ─── Live: decompression ─────────────────────────────────────────────────
@@ -1071,7 +1077,7 @@ async fn live_h3_cloudflare() {
     );
 }
 
-/// Same H3 endpoint, but driven from the Firefox 148 profile. If the H3
+/// Same H3 endpoint, but driven from the Firefox 150 profile. If the H3
 /// path had its own hand-rolled context, swapping the profile would have
 /// no effect and this test would be redundant with the Chrome one. Instead
 /// it exercises the shared `build_ssl_context` factory end-to-
@@ -1083,7 +1089,7 @@ async fn live_h3_cloudflare() {
 async fn live_h3_cloudflare_firefox_profile() {
     use leyline::quic::{H3Config, H3Connection};
     let reg = leyline::profile::ProfileRegistry::builtin();
-    let profile = reg.get_browser(Browser::Firefox148).unwrap();
+    let profile = reg.get_browser(Browser::Firefox150).unwrap();
     let config = H3Config::firefox();
     let resp = H3Connection::request(
         &config,
@@ -1103,7 +1109,7 @@ async fn live_h3_cloudflare_firefox_profile() {
         resp.status
     );
     println!(
-        "✓ HTTP/3 to cloudflare-quic.com (Firefox 148 profile): status {}, {} bytes",
+        "✓ HTTP/3 to cloudflare-quic.com (Firefox 150 profile): status {}, {} bytes",
         resp.status,
         resp.body.len()
     );

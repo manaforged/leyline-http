@@ -2,9 +2,13 @@
 resolver = "2"
 members = [
     "crates/leyline",
+    "crates/leyline-node",
     "crates/leyline-quiche",
 ]
 
+exclude = [
+    "crates/btls-sys",
+]
 [workspace.package]
 version = "1.0.0-alpha.1"
 edition = "2024"
@@ -58,4 +62,8 @@ lto = "thin"
 codegen-units = 1
 strip = "symbols"
 opt-level = 3
+
+[patch.crates-io]
+# Keep normal developer builds off CMake/bindgen/libclang; see crates/btls-sys.
+btls-sys = { path = "crates/btls-sys" }
 

@@ -5,6 +5,7 @@ mod raw_server;
 
 use leyline::core::Session;
 use leyline::profile::{ChromiumBrand, HeaderAnchor, Preset};
+use leyline::{Browser, Client, Platform};
 use raw_server::{RawResponse, RawServer};
 
 #[tokio::test]
@@ -34,7 +35,7 @@ async fn bulk_headers_replace_all_no_preset_defaults() {
 
     let resp = session
         .get(&server.url("/defaults"))
-        .headers(&[
+        .headers([
             ("user-agent", "ua-x"),
             ("accept", "accept-y"),
             ("accept-encoding", "encoding-z"),
@@ -54,6 +55,73 @@ async fn bulk_headers_replace_all_no_preset_defaults() {
     assert_eq!(req.header_count("accept"), 1, "{}", req.text());
     assert_eq!(req.header_count("accept-encoding"), 1, "{}", req.text());
     assert_eq!(req.header_count("accept-language"), 1, "{}", req.text());
+    server.finish().await;
+}
+
+#[tokio::test]
+async fn dx_helpers_accept_common_pair_shapes_and_header_shortcuts() {
+    let mut server = RawServer::start(vec![RawResponse::ok(), RawResponse::ok()]).await;
+
+    let client = Client::builder().http1().build().unwrap();
+    let _explicit = Session::profile(Browser::Chrome147, Platform::Windows).unwrap();
+    let _default = Client::new().unwrap();
+    let _chrome = Session::chrome().unwrap();
+    let _firefox = Client::builder().firefox().http1().build().unwrap();
+
+    let owned_headers = vec![
+        ("x-owned".to_string(), "yes".to_string()),
+        ("x-second".to_string(), "also".to_string()),
+    ];
+
+    let resp = client
+        .get(&server.url("/dx"))
+        .query([("a", "1"), ("space", "hello world")])
+        .headers(&owned_headers)
+        .accept("application/json")
+        .accept_language("en-US,en;q=0.9")
+        .referer("https://example.test/from")
+        .origin("https://example.test")
+        .cache_control("no-cache")
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200);
+    let req = server.next_request().await;
+    assert!(req
+        .request_line
+        .starts_with("GET /dx?a=1&space=hello+world HTTP/1.1"));
+    assert_eq!(req.header_values("x-owned"), vec!["yes"]);
+    assert_eq!(req.header_values("x-second"), vec!["also"]);
+    assert_eq!(req.header_values("accept"), vec!["application/json"]);
+    assert_eq!(req.header_values("accept-language"), vec!["en-US,en;q=0.9"]);
+    assert_eq!(
+        req.header_values("referer"),
+        vec!["https://example.test/from"]
+    );
+    assert_eq!(req.header_values("origin"), vec!["https://example.test"]);
+    assert_eq!(req.header_values("cache-control"), vec!["no-cache"]);
+
+    let form_pairs = [
+        ("email".to_string(), "a b@example.test".to_string()),
+        ("password".to_string(), "s3cr3t!".to_string()),
+    ];
+
+    let resp = client
+        .post(&server.url("/login"))
+        .form(&form_pairs)
+        .content_type("application/x-www-form-urlencoded; charset=UTF-8")
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200);
+    let req = server.next_request().await;
+    assert!(req.request_line.starts_with("POST /login HTTP/1.1"));
+    assert_eq!(
+        req.header_values("content-type"),
+        vec!["application/x-www-form-urlencoded; charset=UTF-8"]
+    );
     server.finish().await;
 }
 

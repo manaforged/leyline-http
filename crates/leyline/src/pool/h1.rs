@@ -224,7 +224,14 @@ pub async fn send_request_h1_pooled(
                 });
             }
             Err(e) => {
-                tracing::debug!(error = %e, "pooled H1 stream failed, opening fresh");
+                tracing::info!(
+                    target: "leyline::pool",
+                    host = %key.host,
+                    port = key.port,
+                    proxied = key.proxy.is_some(),
+                    error = %e,
+                    "pool stale hit -- pooled h1 stream failed mid-request, opening fresh"
+                );
                 pool.invalidate(&key);
                 if body_is_stream {
                     return Err(e);

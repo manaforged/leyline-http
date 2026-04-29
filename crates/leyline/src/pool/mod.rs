@@ -4,7 +4,7 @@
 //! flavours:
 //!
 //! - **HTTP/2** — one connection per destination; the pooled handle
-//!   is [`H2Client`], which is cloneable and multiplexes concurrent
+//!   is [`crate::h2::H2Client`], which is cloneable and multiplexes concurrent
 //!   requests over the same TCP connection. Checkout is a cheap
 //!   `clone` and many in-flight requests share the connection
 //!   without serialisation.
@@ -57,7 +57,7 @@ pub(crate) fn make_key(host: &str, port: u16, proxy: Option<&str>) -> PoolKey {
     }
 }
 
-/// Obtain a cloneable [`H2Client`] handle for `(host, port, proxy)`,
+/// Obtain a cloneable [`crate::h2::H2Client`] handle for `(host, port, proxy)`,
 /// reusing an existing pooled connection when available and otherwise
 /// establishing a fresh TLS + H2 handshake.
 #[tracing::instrument(
@@ -168,7 +168,22 @@ pub async fn send_request(
                 return Ok((resp, tls));
             }
             Err(e) => {
-                tracing::debug!(error = %e, "pooled connection dead, opening fresh");
+                // Pool returned an entry the checkout-side `is_dead`
+                // probe couldn't catch — the connection looked alive but
+                // the next request errored at the transport layer. This
+                // is the "silent stale hit" failure mode and the signal
+                // a tuned `pool_idle_timeout` should be evaluated against.
+                // Emitted at `info` so callers running at default filter
+                // levels can grep for it without flipping pool logging
+                // to debug.
+                tracing::info!(
+                    target: "leyline::pool",
+                    host = %key.host,
+                    port = key.port,
+                    proxied = key.proxy.is_some(),
+                    error = %e,
+                    "pool stale hit -- pooled h2 connection failed mid-request, opening fresh"
+                );
                 pool.invalidate(&key);
                 if body_is_stream {
                     return Err(format!(

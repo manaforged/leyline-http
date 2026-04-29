@@ -70,6 +70,10 @@ pub struct TlsProfile {
 pub struct TlsFingerprint {
     #[serde(default)]
     pub ja4: Option<String>,
+    /// JA4 observed on a resumed TLS 1.3 handshake that carries
+    /// `pre_shared_key` (41). Cold first-flight JA4 remains in [`Self::ja4`].
+    #[serde(default)]
+    pub resumed_ja4: Option<String>,
     /// Per-platform JA4 overrides. Resolves Windows / macOS variation when
     /// the same browser ships different ClientHello configurations per
     /// host OS.
@@ -207,6 +211,11 @@ impl BrowserProfile {
     /// use [`Self::expected_ja4_for`].
     pub fn expected_ja4(&self) -> Option<&str> {
         self.tls.fingerprint.as_ref()?.ja4.as_deref()
+    }
+
+    /// Expected JA4 for a resumed TLS 1.3 handshake, if captured.
+    pub fn expected_resumed_ja4(&self) -> Option<&str> {
+        self.tls.fingerprint.as_ref()?.resumed_ja4.as_deref()
     }
 
     /// Expected JA4 for a specific platform key (`"windows"`, `"macos"`,

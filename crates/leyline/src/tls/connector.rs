@@ -8,19 +8,22 @@
 //!   - Happy-Eyeballs dual-stack racing for direct connects.
 
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use btls::ssl::{NameType, SslConnector, SslSession, SslSessionCacheMode, SslVerifyMode};
 use lru::LruCache;
 use tokio::net::TcpStream;
 
+use crate::core::SocketConfig;
 use crate::profile::BrowserProfile;
 use crate::tcp::TcpProfile;
 
-use crate::tls::builder::{apply_profile, TlsMinVersion};
+use crate::tls::builder::{apply_profile_with_trust, TlsMinVersion};
 use crate::tls::error::TlsError;
 use crate::tls::happy_eyeballs::{happy_eyeballs_connect, HappyEyeballsConfig};
 use crate::tls::nonblocking::connect_one;
 use crate::tls::resolver::{Resolver, SystemResolver};
+use crate::tls::trust::TlsTrustConfig;
 use crate::tls::TlsStream;
 
 /// Creates TLS connections matching a browser's fingerprint.
@@ -57,6 +60,10 @@ pub struct FingerprintConnector {
     resolver: Arc<dyn Resolver>,
     /// Happy Eyeballs (RFC 8305) tunables for the dual-stack race.
     happy_eyeballs: HappyEyeballsConfig,
+    /// Optional timeout around DNS + TCP + TLS connect.
+    connect_timeout: Option<Duration>,
+    /// Optional socket-level direct-connect overrides.
+    socket_config: SocketConfig,
 }
 
 impl FingerprintConnector {
@@ -66,10 +73,20 @@ impl FingerprintConnector {
         tcp: TcpProfile,
         grease_seed: Option<&[u8]>,
     ) -> Result<Self, TlsError> {
+        Self::new_with_trust(profile, tcp, grease_seed, &TlsTrustConfig::default())
+    }
+
+    /// Build a connector with explicit trust-root and mTLS settings.
+    pub fn new_with_trust(
+        profile: &BrowserProfile,
+        tcp: TcpProfile,
+        grease_seed: Option<&[u8]>,
+        trust: &TlsTrustConfig,
+    ) -> Result<Self, TlsError> {
         let mut builder = SslConnector::builder(btls::ssl::SslMethod::tls())?;
 
         // Drive every TLS-level knob from the profile via the shared factory.
-        apply_profile(&mut builder, profile, TlsMinVersion::Tls12)?;
+        apply_profile_with_trust(&mut builder, profile, TlsMinVersion::Tls12, trust)?;
 
         let tls = &profile.tls;
 
@@ -107,6 +124,8 @@ impl FingerprintConnector {
             accept_invalid_certs: false,
             resolver: Arc::new(SystemResolver),
             happy_eyeballs: HappyEyeballsConfig::default(),
+            connect_timeout: None,
+            socket_config: SocketConfig::default(),
         })
     }
 
@@ -130,6 +149,18 @@ impl FingerprintConnector {
         self
     }
 
+    /// Apply a timeout around DNS + TCP + TLS connection setup.
+    pub fn with_connect_timeout(mut self, timeout: Duration) -> Self {
+        self.connect_timeout = Some(timeout);
+        self
+    }
+
+    /// Apply low-level socket options for direct TCP connects.
+    pub fn with_socket_config(mut self, config: SocketConfig) -> Self {
+        self.socket_config = config;
+        self
+    }
+
     /// Connect to `host:port`, optionally through `proxy_url`. Default
     /// ALPN (h2 preferred).
     pub async fn connect(
@@ -138,12 +169,16 @@ impl FingerprintConnector {
         port: u16,
         proxy: Option<&str>,
     ) -> Result<TlsStream, TlsError> {
-        match proxy {
-            Some(proxy_url) => {
-                crate::tls::proxy::connect_through_proxy(self, host, port, proxy_url, true).await
+        let fut = async {
+            match proxy {
+                Some(proxy_url) => {
+                    crate::tls::proxy::connect_through_proxy(self, host, port, proxy_url, true)
+                        .await
+                }
+                None => self.connect_direct_with_alpn(host, port, None).await,
             }
-            None => self.connect_direct_with_alpn(host, port, None).await,
-        }
+        };
+        self.with_timeout(fut).await
     }
 
     /// Connect with HTTP/1.1 ALPN only (for WebSocket upgrade). Same
@@ -154,14 +189,33 @@ impl FingerprintConnector {
         port: u16,
         proxy: Option<&str>,
     ) -> Result<TlsStream, TlsError> {
-        match proxy {
-            Some(proxy_url) => {
-                crate::tls::proxy::connect_through_proxy(self, host, port, proxy_url, false).await
+        let fut = async {
+            match proxy {
+                Some(proxy_url) => {
+                    crate::tls::proxy::connect_through_proxy(self, host, port, proxy_url, false)
+                        .await
+                }
+                None => {
+                    self.connect_direct_with_alpn(host, port, Some(b"\x08http/1.1"))
+                        .await
+                }
             }
-            None => {
-                self.connect_direct_with_alpn(host, port, Some(b"\x08http/1.1"))
-                    .await
-            }
+        };
+        self.with_timeout(fut).await
+    }
+
+    async fn with_timeout<F>(&self, fut: F) -> Result<TlsStream, TlsError>
+    where
+        F: std::future::Future<Output = Result<TlsStream, TlsError>>,
+    {
+        match self.connect_timeout {
+            Some(timeout) => tokio::time::timeout(timeout, fut).await.map_err(|_| {
+                TlsError::TcpConnect(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "connect timeout",
+                ))
+            })?,
+            None => fut.await,
         }
     }
 
@@ -193,9 +247,11 @@ impl FingerprintConnector {
         // within one `resolve_delay`. `TcpProfile` is `Copy`, so each
         // attempt gets its own value without a heap clone.
         let tcp_profile = self.tcp_profile;
+        let socket_config = self.socket_config.clone();
         let (tcp_stream, _addr) =
-            happy_eyeballs_connect(addrs, self.happy_eyeballs, move |sock_addr| async move {
-                connect_one(sock_addr, &tcp_profile).await
+            happy_eyeballs_connect(addrs, self.happy_eyeballs, move |sock_addr| {
+                let socket_config = socket_config.clone();
+                async move { connect_one(sock_addr, &tcp_profile, &socket_config).await }
             })
             .await
             .map_err(TlsError::TcpConnect)?;

@@ -16,6 +16,7 @@ use leyline::tcp::TcpProfile;
 use leyline::tls::{
     FingerprintConnector, HappyEyeballsConfig, ResolveFuture, Resolver, SystemResolver,
 };
+use leyline::{Browser, Session, TlsTrustConfig};
 
 /// Mock resolver that returns a fixed list.
 struct StaticResolver(Vec<SocketAddr>);
@@ -37,7 +38,7 @@ impl Resolver for FailingResolver {
 }
 
 fn load_profile() -> BrowserProfile {
-    let toml_str = include_str!("../../../profiles/chrome/146.toml");
+    let toml_str = include_str!("../profiles/chrome/146.toml");
     BrowserProfile::from_toml(toml_str).expect("chrome 146 profile should parse")
 }
 
@@ -73,4 +74,42 @@ async fn default_happy_eyeballs_is_250ms() {
 async fn failing_resolver_is_pluggable() {
     // Compile-time check: FailingResolver satisfies Resolver.
     let _: Arc<dyn Resolver> = Arc::new(FailingResolver);
+}
+
+#[test]
+fn session_builder_exposes_dns_controls() {
+    let resolver = Arc::new(StaticResolver(vec!["127.0.0.1:443".parse().unwrap()]));
+    let _session = Session::builder()
+        .browser(Browser::Chrome146)
+        .resolver(resolver)
+        .happy_eyeballs(HappyEyeballsConfig {
+            resolve_delay: Duration::from_millis(25),
+            attempt_limit: 2,
+        })
+        .build()
+        .expect("session build");
+}
+
+#[test]
+fn session_builder_exposes_trust_controls() {
+    let _session = Session::builder()
+        .browser(Browser::Chrome146)
+        .tls_trust(
+            TlsTrustConfig::new()
+                .without_env_roots()
+                .without_system_roots()
+                .add_pinned_leaf_sha256([7; 32]),
+        )
+        .build()
+        .expect("session build");
+}
+
+#[test]
+fn invalid_der_root_is_rejected_at_build_time() {
+    let err = Session::builder()
+        .browser(Browser::Chrome146)
+        .add_root_certificate_der([1, 2, 3, 4])
+        .build()
+        .expect_err("invalid DER CA should fail TLS setup");
+    assert!(err.to_string().contains("ssl handshake"));
 }

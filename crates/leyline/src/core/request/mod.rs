@@ -15,6 +15,36 @@ use crate::core::multipart::Form;
 use crate::core::retry::RetryPolicy;
 use crate::core::session::Session;
 
+/// A key-value pair that can be used by request helper methods.
+///
+/// This lets `.query(...)`, `.form(...)`, `.headers(...)`, and
+/// `.append_headers(...)` accept arrays, vectors, slices, and `String`
+/// pairs without making callers reshape their data first.
+pub trait IntoParamPair {
+    /// Convert into owned `(name, value)` strings.
+    fn into_param_pair(self) -> (String, String);
+}
+
+impl<K, V> IntoParamPair for (K, V)
+where
+    K: AsRef<str>,
+    V: AsRef<str>,
+{
+    fn into_param_pair(self) -> (String, String) {
+        (self.0.as_ref().to_string(), self.1.as_ref().to_string())
+    }
+}
+
+impl<K, V> IntoParamPair for &(K, V)
+where
+    K: AsRef<str>,
+    V: AsRef<str>,
+{
+    fn into_param_pair(self) -> (String, String) {
+        (self.0.as_ref().to_string(), self.1.as_ref().to_string())
+    }
+}
+
 /// Fluent builder for constructing and sending HTTP requests.
 ///
 /// ```rust,ignore
@@ -106,8 +136,20 @@ impl<'a> RequestBuilder<'a> {
     }
 
     /// Set the request body as URL-encoded form data. Sets content-type automatically.
-    pub fn form(mut self, params: &[(&str, &str)]) -> Self {
-        let encoded = encode::url_encode_pairs(params);
+    ///
+    /// Accepts arrays, vectors, slices, and owned `String` pairs:
+    ///
+    /// ```rust,ignore
+    /// session.post(url).form([("email", email), ("password", password)]);
+    /// session.post(url).form(&params);
+    /// ```
+    pub fn form<I, P>(mut self, params: I) -> Self
+    where
+        I: IntoIterator<Item = P>,
+        P: IntoParamPair,
+    {
+        let pairs = collect_pairs(params);
+        let encoded = encode::url_encode_pairs(&pairs);
         self.headers
             .set("content-type", "application/x-www-form-urlencoded");
         self.body = Body::from(encoded.into_bytes());
@@ -129,9 +171,15 @@ impl<'a> RequestBuilder<'a> {
     }
 
     /// Add URL query parameters. Can be called multiple times.
-    pub fn query(mut self, params: &[(&str, &str)]) -> Self {
-        for &(k, v) in params {
-            self.query_params.push((k.to_string(), v.to_string()));
+    ///
+    /// Accepts arrays, vectors, slices, and owned `String` pairs.
+    pub fn query<I, P>(mut self, params: I) -> Self
+    where
+        I: IntoIterator<Item = P>,
+        P: IntoParamPair,
+    {
+        for pair in params {
+            self.query_params.push(pair.into_param_pair());
         }
         self
     }
@@ -155,19 +203,73 @@ impl<'a> RequestBuilder<'a> {
     }
 
     /// Set multiple headers at once.
-    pub fn headers(mut self, headers: &[(&str, &str)]) -> Self {
-        for &(k, v) in headers {
+    pub fn headers<I, P>(mut self, headers: I) -> Self
+    where
+        I: IntoIterator<Item = P>,
+        P: IntoParamPair,
+    {
+        for pair in headers {
+            let (k, v) = pair.into_param_pair();
             self.headers.set(k, v);
         }
         self
     }
 
     /// Append multiple headers, preserving duplicate names and order.
-    pub fn append_headers(mut self, headers: &[(&str, &str)]) -> Self {
-        for &(k, v) in headers {
+    pub fn append_headers<I, P>(mut self, headers: I) -> Self
+    where
+        I: IntoIterator<Item = P>,
+        P: IntoParamPair,
+    {
+        for pair in headers {
+            let (k, v) = pair.into_param_pair();
             self.headers.append(k, v);
         }
         self
+    }
+
+    /// Set `accept`.
+    pub fn accept(self, value: &str) -> Self {
+        self.header("accept", value)
+    }
+
+    /// Set `accept-language`.
+    pub fn accept_language(self, value: &str) -> Self {
+        self.header("accept-language", value)
+    }
+
+    /// Set `user-agent`.
+    ///
+    /// This overrides the profile's default user-agent for this
+    /// request only. Use sparingly: changing it without also changing
+    /// the TLS/H2 profile can make the request less browser-consistent.
+    pub fn user_agent(self, value: &str) -> Self {
+        self.header("user-agent", value)
+    }
+
+    /// Set `referer`.
+    pub fn referer(self, value: &str) -> Self {
+        self.header("referer", value)
+    }
+
+    /// Alias for [`referer`](Self::referer).
+    pub fn referrer(self, value: &str) -> Self {
+        self.referer(value)
+    }
+
+    /// Set `origin`.
+    pub fn origin(self, value: &str) -> Self {
+        self.header("origin", value)
+    }
+
+    /// Set `content-type`.
+    pub fn content_type(self, value: &str) -> Self {
+        self.header("content-type", value)
+    }
+
+    /// Set `cache-control`.
+    pub fn cache_control(self, value: &str) -> Self {
+        self.header("cache-control", value)
     }
 
     /// Append a header at a caller-specified anchor slot.
@@ -246,4 +348,15 @@ impl<'a> RequestBuilder<'a> {
         self.proxy = Some(proxy_url.to_string());
         self
     }
+}
+
+fn collect_pairs<I, P>(params: I) -> Vec<(String, String)>
+where
+    I: IntoIterator<Item = P>,
+    P: IntoParamPair,
+{
+    params
+        .into_iter()
+        .map(IntoParamPair::into_param_pair)
+        .collect()
 }

@@ -6,7 +6,7 @@
 //! chunked producers).
 //!
 //! Existing callers keep working unchanged: `.body(vec![..])`,
-//! `.json(&v)`, `.form(&[..])` all produce buffered bodies via the
+//! `.json(&v)`, `.form([...])` all produce buffered bodies via the
 //! `From<Vec<u8>> for Body` impl.
 
 use std::fmt;

@@ -3,12 +3,57 @@ name = "leyline"
 description = "Browser-accurate TLS fingerprinting for Rust"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
 homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
+documentation = "https://docs.rs/leyline"
+readme = "README.md"
+
+[features]
+default = [
+    "cookies",
+    "compression-gzip",
+    "compression-brotli",
+    "compression-deflate",
+    "compression-zstd",
+    "multipart",
+    "stream",
+    "websocket",
+    "http3",
+    "system-trust",
+]
+cookies = []
+compression-gzip = ["dep:flate2"]
+compression-brotli = []
+compression-deflate = ["dep:flate2"]
+compression-zstd = ["dep:zstd"]
+multipart = []
+stream = []
+websocket = []
+http3 = []
+socks = []
+system-trust = []
+native-interface-bind = []
+tower = ["dep:tower-service"]
+full = [
+    "cookies",
+    "compression-gzip",
+    "compression-brotli",
+    "compression-deflate",
+    "compression-zstd",
+    "multipart",
+    "stream",
+    "websocket",
+    "http3",
+    "tower",
+    "socks",
+    "system-trust",
+    "native-interface-bind",
+]
 
 [dependencies]
 # External deps absorbed from sub-crates
@@ -61,11 +106,12 @@ tokio-util = { version = "0.7", features = ["io"] }
 lru = "0.17"
 rand = "0.8"
 libc = "0.2"
+tower-service = { version = "0.3", optional = true }
 
 # -- compression
-flate2 = "1"
+flate2 = { version = "1", optional = true }
 brotli = "8"
-zstd = "0.13"
+zstd = { version = "0.13", optional = true }
 
 # Windows: read the platform trust store via Win32 crypto API.
 [target.'cfg(windows)'.dependencies]

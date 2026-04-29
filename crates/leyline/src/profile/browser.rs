@@ -2,8 +2,9 @@
 
 /// Identifies a browser for TLS profile selection.
 ///
-/// Each variant maps 1:1 to a TOML profile in `profiles/`. There are exactly
-/// 12 profiles. Most Chromium siblings (Edge, Opera, Vivaldi) are NOT
+/// Each variant maps 1:1 to a TOML profile in `crates/leyline/profiles/`.
+/// There are exactly
+/// 14 profiles. Most Chromium siblings (Edge, Opera, Vivaldi) are NOT
 /// separate variants — their TLS ClientHello is byte-identical to Chrome's.
 /// Pick a `ChromeNNN` anchor and apply `ChromiumBrand::{Edge, Opera, Vivaldi}`
 /// via `SessionBuilder::brand(..)` to swap HTTP identity headers without
@@ -27,6 +28,10 @@ pub enum Browser {
     Brave146,
     /// Mozilla Firefox 148 (Windows/macOS/Linux/Android).
     Firefox148,
+    /// Mozilla Firefox 150 (Windows/macOS/Linux/Android) - current release.
+    Firefox150,
+    /// Mozilla Firefox 151 (Windows/macOS/Linux/Android) - available prerelease/canary capture.
+    Firefox151,
     /// Safari 18 on macOS.
     Safari18,
     /// OkHttp 4.x as shipped on Android 10+.
@@ -42,7 +47,7 @@ pub enum Browser {
 }
 
 /// Canonical profile count. Tests assert against this.
-pub const PROFILE_COUNT: usize = 12;
+pub const PROFILE_COUNT: usize = 14;
 
 /// All browser variants, for iteration.
 pub const ALL_BROWSERS: [Browser; PROFILE_COUNT] = [
@@ -52,6 +57,8 @@ pub const ALL_BROWSERS: [Browser; PROFILE_COUNT] = [
     Browser::Aloha138,
     Browser::Brave146,
     Browser::Firefox148,
+    Browser::Firefox150,
+    Browser::Firefox151,
     Browser::Safari18,
     Browser::OkHttpAndroid10,
     Browser::OkHttpAndroid7,
@@ -70,6 +77,8 @@ impl Browser {
             Self::Aloha138 => ("aloha", 138),
             Self::Brave146 => ("brave", 146),
             Self::Firefox148 => ("firefox", 148),
+            Self::Firefox150 => ("firefox", 150),
+            Self::Firefox151 => ("firefox", 151),
             Self::Safari18 => ("safari", 18),
             Self::OkHttpAndroid10 => ("okhttp", 10),
             Self::OkHttpAndroid7 => ("okhttp", 7),
@@ -125,6 +134,8 @@ impl std::fmt::Display for Browser {
             Self::Aloha138 => write!(f, "Aloha 4.17 (Chromium 138)"),
             Self::Brave146 => write!(f, "Brave (Chromium 146)"),
             Self::Firefox148 => write!(f, "Firefox 148"),
+            Self::Firefox150 => write!(f, "Firefox 150"),
+            Self::Firefox151 => write!(f, "Firefox 151"),
             Self::Safari18 => write!(f, "Safari 18"),
             Self::OkHttpAndroid10 => write!(f, "OkHttp4 Android 10+"),
             Self::OkHttpAndroid7 => write!(f, "OkHttp4 Android 7-9"),

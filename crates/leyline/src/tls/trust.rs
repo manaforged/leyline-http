@@ -14,9 +14,105 @@
 //!   honoured. Dispatches to the platform-specific bridge (Windows
 //!   cert store) or to BoringSSL's `set_default_verify_paths` on Unix.
 
-use btls::ssl::SslContextBuilder;
+use std::path::PathBuf;
+
+use btls::ssl::{SslAlert, SslContextBuilder, SslFiletype, SslVerifyError, SslVerifyMode};
+use btls::x509::{X509StoreContext, X509};
+use sha2::{Digest, Sha256};
 
 use crate::tls::error::TlsError;
+
+/// TLS trust and client-certificate configuration.
+///
+/// Defaults match Leyline's existing behavior: honour `SSL_CERT_FILE` /
+/// `SSL_CERT_DIR` when present, otherwise load the platform system roots.
+/// Explicit roots are additive, so callers can trust a private CA without
+/// losing the normal public web PKI.
+#[derive(Debug, Clone)]
+pub struct TlsTrustConfig {
+    use_env_roots: bool,
+    use_system_roots: bool,
+    ca_files: Vec<PathBuf>,
+    ca_der: Vec<Vec<u8>>,
+    client_identity: Option<ClientIdentity>,
+    pinned_leaf_sha256: Vec<[u8; 32]>,
+}
+
+impl Default for TlsTrustConfig {
+    fn default() -> Self {
+        Self {
+            use_env_roots: true,
+            use_system_roots: true,
+            ca_files: Vec::new(),
+            ca_der: Vec::new(),
+            client_identity: None,
+            pinned_leaf_sha256: Vec::new(),
+        }
+    }
+}
+
+impl TlsTrustConfig {
+    /// Create a trust config with Leyline's default env/system root behavior.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Do not honour `SSL_CERT_FILE` / `SSL_CERT_DIR`.
+    pub fn without_env_roots(mut self) -> Self {
+        self.use_env_roots = false;
+        self
+    }
+
+    /// Do not load platform system roots.
+    pub fn without_system_roots(mut self) -> Self {
+        self.use_system_roots = false;
+        self
+    }
+
+    /// Add a PEM CA file or bundle to the trust store.
+    pub fn add_ca_file(mut self, path: impl Into<PathBuf>) -> Self {
+        self.ca_files.push(path.into());
+        self
+    }
+
+    /// Add a DER-encoded CA certificate to the trust store.
+    pub fn add_ca_der(mut self, der: impl Into<Vec<u8>>) -> Self {
+        self.ca_der.push(der.into());
+        self
+    }
+
+    /// Add a SHA-256 pin for the DER-encoded leaf certificate.
+    ///
+    /// Pinning is additive to normal certificate validation: the chain
+    /// must still verify against the configured roots, and the leaf
+    /// certificate must match one of the configured hashes.
+    pub fn add_pinned_leaf_sha256(mut self, sha256: [u8; 32]) -> Self {
+        self.pinned_leaf_sha256.push(sha256);
+        self
+    }
+
+    /// Use a PEM client certificate chain and private key for mTLS.
+    pub fn client_identity_files(
+        mut self,
+        certificate_chain_file: impl Into<PathBuf>,
+        private_key_file: impl Into<PathBuf>,
+    ) -> Self {
+        self.client_identity = Some(ClientIdentity {
+            certificate_chain_file: certificate_chain_file.into(),
+            private_key_file: private_key_file.into(),
+        });
+        self
+    }
+}
+
+/// PEM client identity used for mutual TLS.
+#[derive(Debug, Clone)]
+pub struct ClientIdentity {
+    /// PEM certificate chain sent to the server.
+    pub certificate_chain_file: PathBuf,
+    /// PEM private key matching the leaf certificate.
+    pub private_key_file: PathBuf,
+}
 
 /// Honour `SSL_CERT_FILE` / `SSL_CERT_DIR` if set. Returns `true` when
 /// at least one trust root was loaded from the environment, in which
@@ -108,6 +204,69 @@ pub(crate) fn wire_env_trust(builder: &mut SslContextBuilder) -> bool {
         }
     }
     env_trust_wired
+}
+
+/// Apply Leyline's configured trust behavior to an SSL context.
+pub(crate) fn wire_configured_trust(
+    builder: &mut SslContextBuilder,
+    config: &TlsTrustConfig,
+) -> Result<(), TlsError> {
+    let env_trust_wired = config.use_env_roots && wire_env_trust(builder);
+    if config.use_system_roots && !env_trust_wired {
+        wire_system_trust(builder)?;
+    }
+
+    for path in &config.ca_files {
+        builder.set_ca_file(path)?;
+    }
+
+    if !config.ca_der.is_empty() {
+        let store = builder.cert_store_mut();
+        for der in &config.ca_der {
+            store.add_cert(X509::from_der(der)?)?;
+        }
+    }
+
+    if let Some(identity) = &config.client_identity {
+        builder.set_certificate_chain_file(&identity.certificate_chain_file)?;
+        builder.set_private_key_file(&identity.private_key_file, SslFiletype::PEM)?;
+    }
+
+    if !config.pinned_leaf_sha256.is_empty() {
+        let pins = config.pinned_leaf_sha256.clone();
+        builder.set_custom_verify_callback(SslVerifyMode::PEER, move |ssl| {
+            let store = ssl.ssl_context().cert_store();
+            let cert = ssl
+                .peer_certificate()
+                .ok_or(SslVerifyError::Invalid(SslAlert::CERTIFICATE_UNKNOWN))?;
+            let chain = ssl
+                .peer_cert_chain()
+                .ok_or(SslVerifyError::Invalid(SslAlert::CERTIFICATE_UNKNOWN))?;
+
+            let chain_ok = X509StoreContext::new()
+                .map_err(|_| SslVerifyError::Invalid(SslAlert::INTERNAL_ERROR))?
+                .init(store, &cert, chain, |store_ctx| {
+                    let verified = store_ctx.verify_cert()?;
+                    Ok(verified && store_ctx.verify_result().is_ok())
+                })
+                .map_err(|_| SslVerifyError::Invalid(SslAlert::INTERNAL_ERROR))?;
+            if !chain_ok {
+                return Err(SslVerifyError::Invalid(SslAlert::UNKNOWN_CA));
+            }
+
+            let der = cert
+                .to_der()
+                .map_err(|_| SslVerifyError::Invalid(SslAlert::INTERNAL_ERROR))?;
+            let digest: [u8; 32] = Sha256::digest(&der).into();
+            if pins.iter().any(|pin| pin == &digest) {
+                Ok(())
+            } else {
+                Err(SslVerifyError::Invalid(SslAlert::CERTIFICATE_UNKNOWN))
+            }
+        });
+    }
+
+    Ok(())
 }
 
 /// Load the platform's system trust store into the builder's

@@ -4,6 +4,7 @@ Cargo.lock
 *.swo
 .DS_Store
 wrappers/node/node_modules/
+wrappers/node/native/
 wrappers/python/leyline/__pycache__/
 # cargo-fuzz build output (corpus is tracked, target/artifacts aren't)
 fuzz/target/

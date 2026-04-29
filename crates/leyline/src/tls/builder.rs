@@ -19,6 +19,7 @@ use btls::ssl::{
 use crate::profile::BrowserProfile;
 
 use crate::tls::error::TlsError;
+use crate::tls::trust::TlsTrustConfig;
 
 /// Minimum TLS version pinned on the context. The TCP path allows 1.2+ to
 /// match real browser behaviour against legacy servers; the QUIC path must
@@ -54,6 +55,16 @@ pub(crate) fn apply_profile(
     builder: &mut SslContextBuilder,
     profile: &BrowserProfile,
     min_version: TlsMinVersion,
+) -> Result<(), TlsError> {
+    apply_profile_with_trust(builder, profile, min_version, &TlsTrustConfig::default())
+}
+
+/// Apply every profile-driven TLS knob with explicit trust settings.
+pub(crate) fn apply_profile_with_trust(
+    builder: &mut SslContextBuilder,
+    profile: &BrowserProfile,
+    min_version: TlsMinVersion,
+    trust: &TlsTrustConfig,
 ) -> Result<(), TlsError> {
     let tls = &profile.tls;
 
@@ -120,9 +131,7 @@ pub(crate) fn apply_profile(
     // (`SSL_CERT_FILE` / `SSL_CERT_DIR`), the Windows system-store
     // bridge, and the Unix `set_default_verify_paths` fallback are all
     // concentrated there.
-    if !crate::tls::trust::wire_env_trust(builder) {
-        crate::tls::trust::wire_system_trust(builder)?;
-    }
+    crate::tls::trust::wire_configured_trust(builder, trust)?;
     builder.set_verify(SslVerifyMode::PEER);
 
     Ok(())
@@ -144,24 +153,21 @@ fn boring_curve_name(name: &str) -> &str {
 #[derive(Debug)]
 struct BrotliDecompressor;
 
-// btls 0.5.6 reshaped CertificateCompressor: `algorithm()` became the
-// associated const `ALGORITHM`, `CAN_COMPRESS` / `CAN_DECOMPRESS` were
-// added as required const flags, and `compress` / `decompress` take a
-// generic writer instead of `&mut dyn io::Write`. We only need
-// decompression; the trait's default `compress` impl (returns "not
-// implemented") is fine, and the `CAN_COMPRESS = false` flag is enough
-// for btls to skip registering us on the compress side.
 impl CertificateCompressor for BrotliDecompressor {
-    const ALGORITHM: CertificateCompressionAlgorithm = CertificateCompressionAlgorithm::BROTLI;
-    const CAN_COMPRESS: bool = false;
-    const CAN_DECOMPRESS: bool = true;
+    fn compress(&self, _input: &[u8], _output: &mut dyn std::io::Write) -> std::io::Result<()> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "brotli certificate compression is decompression-only",
+        ))
+    }
 
-    fn decompress<W>(&self, input: &[u8], output: &mut W) -> std::io::Result<()>
-    where
-        W: std::io::Write,
-    {
+    fn decompress(&self, input: &[u8], output: &mut dyn std::io::Write) -> std::io::Result<()> {
         let mut decoder = brotli::Decompressor::new(input, 4096);
         std::io::copy(&mut decoder, output)?;
         Ok(())
+    }
+
+    fn algorithm(&self) -> CertificateCompressionAlgorithm {
+        CertificateCompressionAlgorithm::BROTLI
     }
 }

@@ -1,27 +1,40 @@
 # Testing Leyline
 
 Every wire-level property Leyline claims is gated by a test in this repo. The
-README's `## Testing and verification` section points here for the full
-matrix. This document is the canonical evidence table.
+README's `## Testing` section points here for the full matrix. This document
+is the canonical evidence table.
 
 ## Running the suites
 
+First-clone developer check:
+
 ```bash
-cargo test --workspace                                    # offline suite + PQ gate + claim guard
+./scripts/dev-setup.sh       # Linux / macOS / Git Bash
+.\scripts\dev-setup.ps1      # Windows PowerShell
+.\scripts\verify.ps1 -Quick  # Windows PowerShell local gate
+```
+
+Release and regression gates:
+
+```bash
+cargo test --workspace --exclude leyline-quiche           # offline Leyline suite + PQ gate + claim guard
 cargo test -p leyline --test tls_peet -- --ignored        # live fingerprint tests
-cargo run -p leyline --example smoke                      # 17-gate smoke suite
+cargo test -p leyline --test smoke -- --ignored --nocapture # 17-gate smoke suite
 cargo deny --all-features check                           # supply chain gate
 ```
 
-The pre-commit hook runs `cargo test --workspace` on every commit.
+The pre-commit hook runs the offline Leyline workspace suite on every commit.
+`leyline-quiche` is a vendored Cloudflare quiche fork; its upstream lib tests
+are not part of Leyline's release gate, but Leyline's H3 integration path is
+covered by the smoke and transport tests below.
 
 ## Evidence matrix
 
 | Property | How it is proved | Where |
 |---|---|---|
-| TLS ClientHello matches profile JA4 | Live capture from tls.peet.ws compared against TOML expectation, per browser | `live_ja4_exact_match_{chrome145,chrome146,chrome147,firefox148,safari18}` |
+| TLS ClientHello matches profile JA4 | Live capture from tls.peet.ws compared against TOML expectation, per browser | `live_ja4_exact_match_{chrome145,chrome146,chrome147,firefox150,safari18}` |
 | Every profile's H2 fingerprint matches its TOML value | Akamai H2 fingerprint asserted for all 10 profiles | `h2_fingerprints_match_toml_expectations`, `live_h2_akamai_every_profile` |
-| HTTP/2 pseudo-header order matches browser | Live capture, per browser | `live_chrome147_pseudo_header_order`, `live_firefox148_pseudo_header_order` |
+| HTTP/2 pseudo-header order matches browser | Live capture, per browser | `live_chrome147_pseudo_header_order`, `live_firefox150_pseudo_header_order` |
 | TCP SYN differs by OS (JA4T) | TTL 64 on Linux, 128 on Windows, three-way distinguishable | `live_tcp_linux_ttl_is_64`, `live_tcp_windows_ttl_is_128`, `live_tcp_windows_distinguishable_from_linux` |
 | ALPS / cert compression / ALPN extensions present | Live tls.peet.ws inspection, per extension | `live_chrome147_has_alps_extension`, `live_chrome147_has_cert_compression` |
 | Cipher order matches profile | tls.peet.ws cipher list compared to TOML order | `live_chrome147_ciphers_match_profile_order` |
@@ -30,7 +43,7 @@ The pre-commit hook runs `cargo test --workspace` on every commit.
 | TLS 1.3 session resumption works end-to-end | Two requests, second presents a valid pre-shared key | `live_session_resumption_pre_shared_key` |
 | Peer certificate is reachable on the response | Response exposes DER-encoded cert + version + cipher | `live_tls_peer_certificate_exposed` |
 | HTTP/3 reachable against real QUIC servers | Direct H3 GET against Cloudflare and Google | `live_h3_cloudflare`, `live_h3_cloudflare_firefox_profile`, `live_h3_google` |
-| Wire-fidelity: caller-set headers | Raw TCP captures assert caller header replacement, duplicate preservation, redirect auth stripping/preservation, and brand overlay precedence | `crates/core/tests/wire_fidelity.rs` |
+| Wire-fidelity: caller-set headers | Raw TCP captures assert caller header replacement, duplicate preservation, redirect auth stripping/preservation, and brand overlay precedence | `crates/leyline/tests/core_wire_fidelity.rs` |
 | HTTP/2 connection reuse through the pool | Three sequential requests on one session, second/third are warm | `live_h2_connection_reuse` |
 | Cookies persist and flow back | Set-Cookie captured, jar replays it on the next hop | `live_cookies_set_then_sent` |
 | Redirects follow and strip auth cross-origin | Chain of 302s, Authorization dropped on origin change | `live_redirect_follows_and_rewrites_url`, `live_redirect_strips_auth_cross_origin` |
@@ -42,14 +55,14 @@ The pre-commit hook runs `cargo test --workspace` on every commit.
 
 ## The 17-gate smoke suite
 
-`cargo run -p leyline --example smoke` runs all of the gates below end-to-end
-against public infrastructure in a single binary. Source:
-[`crates/leyline/examples/smoke.rs`](crates/leyline/examples/smoke.rs).
+`cargo test -p leyline --test smoke -- --ignored --nocapture` runs all of the
+gates below end-to-end against public infrastructure. Source:
+[`crates/leyline/tests/smoke.rs`](crates/leyline/tests/smoke.rs).
 
 | Gate | Assertion |
 |---|---|
 | Chrome 147 exact JA4 + H2 | JA4 and H2 match profile expectations |
-| Firefox 148 exact JA4 + H2 | JA4 and H2 match profile expectations |
+| Firefox 150 exact JA4 + H2 | JA4 and H2 match profile expectations |
 | Connection reuse (3 requests) | All requests succeed through one session |
 | Brotli/gzip decompression | Response decodes to valid JSON |
 | HTTP/2 CDN GET (httpbin.org) | Request succeeds over HTTPS |
@@ -70,7 +83,7 @@ against public infrastructure in a single binary. Source:
 
 | Crate | What they cover |
 |---|---|
-| `leyline-h2` | Frame encode/decode, HPACK roundtrip, Huffman coverage, SETTINGS fingerprint, **stream state machine (42 tests in `tests/stream_state.rs`)**, **CONNECT / extended CONNECT pseudo-header shape (`tests/connect_method.rs`)**, **RST_STREAM flood guard (`tests/rst_flood.rs`)**, **outbound PRIORITY on HEADERS (`tests/frame_roundtrip.rs`)** |
+| `leyline-h2` | Frame encode/decode, HPACK roundtrip, Huffman coverage, SETTINGS fingerprint, **stream state machine (42 tests in `crates/leyline/src/h2/stream_state.rs` unit tests)**, **CONNECT / extended CONNECT pseudo-header shape (`crates/leyline/tests/h2_connect_method.rs`)**, **RST_STREAM flood guard (`crates/leyline/tests/h2_rst_flood.rs`)**, **outbound PRIORITY on HEADERS (`crates/leyline/tests/h2_frame_roundtrip.rs`)** |
 | `leyline-cookies` | Set-Cookie parsing, jar ordering, eviction, SameSite, prefix validation |
 | `leyline-audit` | JA3/JA4 section computation, cipher ID mapping, GREASE detection |
 | `leyline-profile` | Profile loading, builder combinations, browser shortcuts |
@@ -85,7 +98,7 @@ against public infrastructure in a single binary. Source:
 - Per-stream state tracking (RFC 9113 §5.1): `Idle` → `Open` →
   `HalfClosedLocal` → `Closed`, with illegal transitions surfaced as
   `H2Error::Stream { code: ProtocolError }`. See
-  `crates/h2/src/stream_state.rs` and `tests/stream_state.rs`.
+  `crates/leyline/src/h2/stream_state.rs`.
 - `MAX_CONCURRENT_STREAMS` enforced outbound against the peer's
   advertised value.
 - Inbound RST_STREAM flood guard — default 100 RSTs in 10 seconds
@@ -107,8 +120,8 @@ against public infrastructure in a single binary. Source:
 driver task that owns the connection. Two concurrent
 `H2Client::send_request` calls run over independent streams on the
 same TCP connection; a stream parked on flow control does not block
-other streams. See `crates/h2/src/client.rs` and
-`tests/multiplex.rs` for the four concurrency gates:
+other streams. See `crates/leyline/src/h2/client.rs` and
+`crates/leyline/tests/h2_multiplex.rs` for the four concurrency gates:
 
 - Concurrent responses delivered out of order.
 - Parked-on-WINDOW_UPDATE stream does not block sibling stream.
@@ -122,16 +135,16 @@ What `leyline-h2` explicitly does **not** do:
 
 ## Fuzzing
 
-[`fuzz/`](fuzz/) provides four `cargo-fuzz` targets (nightly):
+When present, `fuzz/` provides four `cargo-fuzz` targets (nightly):
 
 - `hpack_integer` / `hpack_header_block` — HPACK decoder,
   single-block and two-block-with-shared-table scenarios.
 - `h2_frame` — `Frame::parse` across every frame type.
 - `cookie_set` — `CookieJar::store_set_cookie` parsing.
 
-See `fuzz/README.md` for run instructions. These are defensive
-targets for panics and integer overflows; correctness is covered by
-the unit and round-trip tests above.
+See `fuzz/README.md` for run instructions in branches that carry the fuzz
+workspace. These are defensive targets for panics and integer overflows;
+correctness is covered by the unit and round-trip tests above.
 
 ## Regression gates
 

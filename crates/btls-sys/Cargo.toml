@@ -1,0 +1,49 @@
+[package]
+name = "btls-sys"
+version = "0.5.5"
+edition = "2024"
+rust-version = "1.85"
+authors = [
+    "0x676e67 <gngppz@gmail.com>",
+    "Alex Crichton <alex@alexcrichton.com>",
+    "Steven Fackler <sfackler@gmail.com>",
+    "Ivan Nikulin <ifaaan@gmail.com>",
+    "Thomas Gardiner",
+]
+description = "Prebuilt BoringSSL FFI bindings for Leyline"
+license = "MIT"
+repository = "https://github.com/0x676e67/btls"
+build = "build.rs"
+links = "boringssl"
+autolib = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
+include = [
+    "/Cargo.toml",
+    "/README.md",
+    "/build.rs",
+    "/src/lib.rs",
+    "/src/bindings/x86_64-pc-windows-msvc.rs",
+    "/native/x86_64-pc-windows-msvc/lib/crypto.lib",
+    "/native/x86_64-pc-windows-msvc/lib/ssl.lib",
+]
+
+[features]
+fips = []
+mlkem = []
+prefix-symbols = []
+underscore-wildcards = []
+
+[lib]
+name = "btls_sys"
+path = "src/lib.rs"
+
+[lints.rust.unexpected_cfgs]
+level = "allow"
+priority = 0
+check-cfg = ["cfg(const_fn)"]
+
+[workspace]
+

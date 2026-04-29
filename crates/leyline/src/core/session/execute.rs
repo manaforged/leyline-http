@@ -9,6 +9,7 @@ use crate::core::body::Body;
 use crate::core::error::{Error, Result};
 use crate::core::headers::HeaderList;
 use crate::core::response::Response;
+use crate::core::{RedirectAction, RedirectAttempt};
 
 impl Session {
     // â”€â”€â”€ Core execution â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -30,7 +31,7 @@ impl Session {
         stream_response: bool,
         request_proxy: Option<&str>,
     ) -> Result<Response> {
-        let timeout = override_timeout.unwrap_or(self.timeout);
+        let timeout = override_timeout.unwrap_or(self.timeouts.total);
         // Box the inner future to move its state to the heap. Without this,
         // the combined RequestBuilder â†’ execute_with_timeout â†’ execute_inner
         // state machine is large enough to blow the default 2 MB thread
@@ -81,7 +82,8 @@ impl Session {
         let mut redirect_chain = Vec::new();
         let mut all_cookies = HashMap::new();
 
-        for _ in 0..=self.max_redirects {
+        let redirect_cap = self.redirect_policy.max_redirects_hint();
+        for _ in 0..=redirect_cap {
             let origin = url_origin(&current_url);
             let referer = if redirect_chain.is_empty() {
                 format!("{}/", origin)
@@ -269,25 +271,35 @@ impl Session {
                     .find(|(k, _)| k.eq_ignore_ascii_case("location"))
                     .map(|(_, v)| v.clone())
                 {
-                    // Drain and discard the intermediate response body.
-                    drop(resp_body_shape);
-                    redirect_chain.push(current_url.to_string());
-                    current_url = current_url.join(&location)?;
+                    let action = self.redirect_policy.action(RedirectAttempt {
+                        status,
+                        url: &current_url,
+                        location: Some(location.as_str()),
+                        previous: &redirect_chain,
+                    });
+                    if action == RedirectAction::Stop {
+                        // Fall through and return the redirect response as-is.
+                    } else {
+                        // Drain and discard the intermediate response body.
+                        drop(resp_body_shape);
+                        redirect_chain.push(current_url.to_string());
+                        current_url = current_url.join(&location)?;
 
-                    // 301/302/303: switch to GET, drop body.
-                    // 307/308: preserve method and body. A streaming
-                    // request body cannot be replayed — fail clearly.
-                    if matches!(status, 301..=303) {
-                        current_method = "GET".to_string();
-                        current_body = Body::Empty;
-                    } else if hop_body_was_stream {
-                        return Err(Error::Http(format!(
-                            "cannot follow {status} redirect: streaming request bodies are \
+                        // 301/302/303: switch to GET, drop body.
+                        // 307/308: preserve method and body. A streaming
+                        // request body cannot be replayed — fail clearly.
+                        if matches!(status, 301..=303) {
+                            current_method = "GET".to_string();
+                            current_body = Body::Empty;
+                        } else if hop_body_was_stream {
+                            return Err(Error::Http(format!(
+                                "cannot follow {status} redirect: streaming request bodies are \
                              not replayable. Either buffer the body before sending or set \
                              max_redirects(0)."
-                        )));
+                            )));
+                        }
+                        continue;
                     }
-                    continue;
                 }
             }
 
@@ -302,13 +314,21 @@ impl Session {
                     // Transport returned a stream but caller wanted
                     // buffering. Drain it fully here, then run normal
                     // decompression.
-                    let buf = drain_stream_into_vec(bs).await?;
+                    let drain = drain_stream_into_vec(bs);
+                    let buf = if let Some(read_timeout) = self.timeouts.read {
+                        tokio::time::timeout(read_timeout, drain)
+                            .await
+                            .map_err(|_| Error::Timeout)??
+                    } else {
+                        drain.await?
+                    };
                     let content_encoding = resp_headers
                         .iter()
                         .find(|(k, _)| k.eq_ignore_ascii_case("content-encoding"))
                         .map(|(_, v)| v.to_lowercase());
-                    let buf = decompress_body(buf, content_encoding.as_deref())?;
-                    let resp_headers: Vec<(String, String)> = if content_encoding.is_some() {
+                    let (buf, decoded) =
+                        decompress_body(buf, content_encoding.as_deref(), &self.compression)?;
+                    let resp_headers: Vec<(String, String)> = if decoded {
                         resp_headers
                             .into_iter()
                             .filter(|(k, _)| {
@@ -342,8 +362,9 @@ impl Session {
                             .iter()
                             .find(|(k, _)| k.eq_ignore_ascii_case("content-encoding"))
                             .map(|(_, v)| v.to_lowercase());
-                        let buf = decompress_body(buf, content_encoding.as_deref())?;
-                        let resp_headers: Vec<(String, String)> = if content_encoding.is_some() {
+                        let (buf, decoded) =
+                            decompress_body(buf, content_encoding.as_deref(), &self.compression)?;
+                        let resp_headers: Vec<(String, String)> = if decoded {
                             resp_headers
                                 .into_iter()
                                 .filter(|(k, _)| {
@@ -361,6 +382,27 @@ impl Session {
                     }
                 }
             };
+
+            // Fire the global response observer (if registered) before
+            // handing the assembled response back to the caller. Streamed
+            // responses pass an empty body slice — the observer cannot
+            // drain a stream without changing semantics, and a dump-style
+            // observer wouldn't get useful bytes anyway.
+            {
+                let body_slice: &[u8] = match &final_body {
+                    crate::core::response::ResponseBody::Buffered(buf) => buf.as_slice(),
+                    _ => &[],
+                };
+                crate::observe::notify_response(&crate::observe::ResponseSnapshot {
+                    method: &current_method,
+                    url: raw_url,
+                    final_url: &final_url,
+                    status,
+                    request_headers: &audit_headers,
+                    response_headers: &final_headers,
+                    body: body_slice,
+                });
+            }
 
             return Ok(Response {
                 status,
@@ -395,7 +437,7 @@ impl Session {
 
         Err(Error::Http(format!(
             "too many redirects (max {})",
-            self.max_redirects
+            redirect_cap
         )))
     }
 }

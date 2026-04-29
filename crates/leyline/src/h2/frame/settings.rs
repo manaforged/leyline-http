@@ -40,7 +40,7 @@ impl SettingsFrame {
             });
         }
 
-        if !payload.len().is_multiple_of(6) {
+        if payload.len() % 6 != 0 {
             return Err(H2Error::Connection {
                 code: ErrorCode::FrameSizeError,
                 reason: "SETTINGS payload not multiple of 6".into(),

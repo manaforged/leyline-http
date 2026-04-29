@@ -35,6 +35,14 @@ done
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_root"
+if [[ -n "${USERPROFILE:-}" ]] && command -v cygpath >/dev/null 2>&1; then
+    export PATH="$(cygpath "$USERPROFILE")/.cargo/bin:$PATH"
+fi
+export PATH="$HOME/.cargo/bin:$PATH"
+if ! command -v cargo >/dev/null 2>&1 && command -v cargo.exe >/dev/null 2>&1; then
+    cargo() { cargo.exe "$@"; }
+fi
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$repo_root/target/verify}"
 
 step() { printf '\n\033[1;34m== %s ==\033[0m\n' "$*"; }
 ok()   { printf '\033[1;32m✓ %s\033[0m\n'  "$*"; }
@@ -62,31 +70,30 @@ cargo fmt --all -- --check || fail "rustfmt found formatting issues"
 ok "format clean"
 
 # -- clippy --------------------------------------------------------------
-# Vendored forks of boring/boring-sys/tokio-boring carry upstream warnings
-# we don't own. Gate clippy strictly on Leyline's own crates, with
-# `--no-deps` so bindgen-generated code (function-pointer comparisons in
-# boring's generated bindings.rs) doesn't pollute our gate.
-step "cargo clippy (workspace, excluding vendored boring*, --no-deps)"
+# `leyline-quiche` is a vendored upstream fork. Gate clippy strictly on
+# Leyline's own crates, with `--no-deps` so generated or vendored code
+# does not pollute our release signal.
+step "cargo clippy (workspace, excluding vendored leyline-quiche, --no-deps)"
 cargo clippy \
     --workspace \
-    --exclude boring --exclude boring-sys --exclude tokio-boring \
+    --exclude leyline-quiche \
     --all-targets --no-deps \
     -- -D warnings \
     || fail "clippy produced warnings"
 ok "clippy clean"
 
 # -- docs ----------------------------------------------------------------
-step "cargo doc (workspace, excluding vendored boring*)"
+step "cargo doc (workspace, excluding vendored leyline-quiche)"
 RUSTDOCFLAGS="-D warnings" cargo doc \
     --workspace \
-    --exclude boring --exclude boring-sys --exclude tokio-boring \
+    --exclude leyline-quiche \
     --no-deps \
     || fail "rustdoc warnings"
 ok "docs clean"
 
 # -- tests ---------------------------------------------------------------
-step "cargo test --workspace"
-cargo test --workspace --exclude boring --exclude boring-sys --exclude tokio-boring || fail "tests failed"
+step "cargo test --workspace --exclude leyline-quiche"
+cargo test --workspace --exclude leyline-quiche || fail "tests failed"
 ok "tests pass"
 
 if [[ $quick -eq 0 ]]; then
@@ -94,8 +101,8 @@ if [[ $quick -eq 0 ]]; then
     cargo test -p leyline --test tls_peet -- --ignored || fail "live tls_peet tests failed"
     ok "live tls_peet pass"
 
-    step "cargo run -p leyline --example smoke"
-    cargo run --release -p leyline --example smoke || fail "smoke suite failed"
+    step "cargo test -p leyline --test smoke -- --ignored --nocapture"
+    cargo test -p leyline --test smoke -- --ignored --nocapture || fail "smoke suite failed"
     ok "smoke pass"
 fi
 
@@ -109,8 +116,12 @@ ok "cargo-deny clean"
 
 # -- benches compile -----------------------------------------------------
 step "benches compile (sub-workspace)"
-( cd benches && cargo bench --no-run ) || fail "benches fail to compile"
-ok "benches compile"
+if [[ -d benches ]]; then
+    ( cd benches && cargo bench --no-run ) || fail "benches fail to compile"
+    ok "benches compile"
+else
+    echo "  (benches/ not present; skipping bench compile gate)"
+fi
 
 # -- fuzz corpus replay --------------------------------------------------
 # The four `cargo fuzz` targets have seeded
@@ -128,7 +139,9 @@ FUZZ_TARGETS=(hpack_integer hpack_header_block h2_frame cookie_set)
 
 if [[ $quick -eq 0 ]]; then
     step "fuzz corpus replay (cargo fuzz, -runs=0)"
-    if ! command -v cargo-fuzz >/dev/null; then
+    if [[ ! -d fuzz ]]; then
+        echo "  (fuzz/ not present; skipping corpus replay)"
+    elif ! command -v cargo-fuzz >/dev/null; then
         echo "  (cargo-fuzz not installed; skipping corpus replay — install with"
         echo "   'cargo install --locked cargo-fuzz' to enable this gate)"
     elif ! command -v rustc >/dev/null || ! rustup toolchain list 2>/dev/null | grep -q nightly; then
@@ -149,6 +162,9 @@ fi
 
 if [[ $fuzz -eq 1 ]]; then
     step "fuzz (time-bounded, ${fuzz_seconds}s per target)"
+    if [[ ! -d fuzz ]]; then
+        fail "fuzz/ not present; cannot run --fuzz"
+    fi
     if ! command -v cargo-fuzz >/dev/null; then
         fail "cargo-fuzz not installed: cargo install --locked cargo-fuzz"
     fi

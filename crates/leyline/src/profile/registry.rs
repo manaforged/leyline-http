@@ -23,24 +23,26 @@ impl ProfileRegistry {
     pub fn builtin() -> Self {
         let mut reg = Self::new();
         // Chrome
-        reg.load_toml(include_str!("../../../../profiles/chrome/145.toml"));
-        reg.load_toml(include_str!("../../../../profiles/chrome/146.toml"));
-        reg.load_toml(include_str!("../../../../profiles/chrome/147.toml"));
+        reg.load_toml(include_str!("../../profiles/chrome/145.toml"));
+        reg.load_toml(include_str!("../../profiles/chrome/146.toml"));
+        reg.load_toml(include_str!("../../profiles/chrome/147.toml"));
         // Aloha (Chromium-based)
-        reg.load_toml(include_str!("../../../../profiles/aloha/138.toml"));
+        reg.load_toml(include_str!("../../profiles/aloha/138.toml"));
         // Brave (Chromium-based, first-class because of header-order +
         // sec-gpc + accept SXG-strip deltas)
-        reg.load_toml(include_str!("../../../../profiles/brave/146.toml"));
+        reg.load_toml(include_str!("../../profiles/brave/146.toml"));
         // Firefox
-        reg.load_toml(include_str!("../../../../profiles/firefox/148.toml"));
+        reg.load_toml(include_str!("../../profiles/firefox/148.toml"));
+        reg.load_toml(include_str!("../../profiles/firefox/150.toml"));
+        reg.load_toml(include_str!("../../profiles/firefox/151.toml"));
         // Safari
-        reg.load_toml(include_str!("../../../../profiles/safari/18.toml"));
-        reg.load_toml(include_str!("../../../../profiles/safari/ios15.toml"));
-        reg.load_toml(include_str!("../../../../profiles/safari/ios17.toml"));
-        reg.load_toml(include_str!("../../../../profiles/safari/ios18.toml"));
+        reg.load_toml(include_str!("../../profiles/safari/18.toml"));
+        reg.load_toml(include_str!("../../profiles/safari/ios15.toml"));
+        reg.load_toml(include_str!("../../profiles/safari/ios17.toml"));
+        reg.load_toml(include_str!("../../profiles/safari/ios18.toml"));
         // OkHttp
-        reg.load_toml(include_str!("../../../../profiles/okhttp/android10.toml"));
-        reg.load_toml(include_str!("../../../../profiles/okhttp/android7.toml"));
+        reg.load_toml(include_str!("../../profiles/okhttp/android10.toml"));
+        reg.load_toml(include_str!("../../profiles/okhttp/android7.toml"));
         reg
     }
 
@@ -166,6 +168,42 @@ mod tests {
         assert_eq!(
             profile.h2.pseudo_order,
             vec!["method", "path", "authority", "scheme"]
+        );
+    }
+
+    #[test]
+    fn firefox151_profile_parses() {
+        let reg = ProfileRegistry::builtin();
+        let profile = reg.get("firefox", 151).expect("firefox 151 not found");
+        assert_eq!(profile.meta.name, "Firefox 151");
+        assert_eq!(profile.tls.ciphers.len(), 15);
+        assert_eq!(
+            profile.h2.pseudo_order,
+            vec!["method", "path", "authority", "scheme"]
+        );
+        assert_eq!(
+            profile.expected_ja4(),
+            Some("t13d1517h2_8daaf6152771_68c5a8c2958d")
+        );
+    }
+
+    #[test]
+    fn firefox150_profile_parses() {
+        let reg = ProfileRegistry::builtin();
+        let profile = reg.get("firefox", 150).expect("firefox 150 not found");
+        assert_eq!(profile.meta.name, "Firefox 150");
+        assert_eq!(profile.tls.ciphers.len(), 17);
+        assert_eq!(
+            profile.h2.pseudo_order,
+            vec!["method", "path", "authority", "scheme"]
+        );
+        assert_eq!(
+            profile.expected_ja4(),
+            Some("t13d1717h2_5b57614c22b0_3cbfd9057e0d")
+        );
+        assert_eq!(
+            profile.expected_resumed_ja4(),
+            Some("t13d1717h2_5b57614c22b0_e6dcd7ae0a9e")
         );
     }
 }

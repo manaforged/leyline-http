@@ -312,7 +312,7 @@ pub struct PseudoHeaders {
     pub method: String,
     /// `:scheme` pseudo-header value (typically `https`).
     pub scheme: String,
-    /// `:authority` pseudo-header value (host[:port]).
+    /// `:authority` pseudo-header value (`host` with optional port).
     pub authority: String,
     /// `:path` pseudo-header value, including the query string.
     pub path: String,

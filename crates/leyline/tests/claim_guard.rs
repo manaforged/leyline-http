@@ -44,8 +44,8 @@ fn readme_keeps_public_evidence_commands() {
     let readme = std::fs::read_to_string(repo_root().join("README.md")).unwrap();
 
     for required in [
-        "cargo run -p leyline --example smoke",
-        "cargo test --workspace",
+        "cargo test -p leyline --test smoke -- --ignored --nocapture",
+        "cargo test --workspace --exclude leyline-quiche",
         "cargo test -p leyline --test tls_peet -- --ignored",
     ] {
         assert!(

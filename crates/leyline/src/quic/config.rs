@@ -76,7 +76,7 @@ impl H3Config {
         }
     }
 
-    /// Firefox 148 QUIC/H3 configuration.
+    /// Firefox QUIC/H3 configuration.
     pub fn firefox() -> Self {
         Self {
             initial_max_data: 25_165_824,

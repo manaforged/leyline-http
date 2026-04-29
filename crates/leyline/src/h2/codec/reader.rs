@@ -22,7 +22,7 @@ use super::DEFAULT_MAX_FRAME_SIZE;
 /// cancel-safe: `read_exact` loops internally and can lose bytes that
 /// were already pulled off the socket when the enclosing future is
 /// dropped. The result was wire-level desync, surfacing as
-/// "frame size <random u24> exceeds max 16384" — the "length" was three
+/// `frame size <random u24> exceeds max 16384` — the "length" was three
 /// arbitrary payload bytes read back as a frame header.
 ///
 /// The fix is to do incremental reads via single `AsyncReadExt::read`

@@ -1,11 +1,15 @@
 use std::sync::{Arc, LazyLock};
 
 use crate::cookie::Jar as CookieJar;
+use crate::core::{
+    CompressionConfig, DnsConfig, NoProxy, PoolConfig, ProxyConfig, ProxyRule, RedirectPolicy,
+    SocketConfig, TimeoutConfig, WebSocketConfig,
+};
 use crate::h2::H2Config;
 use crate::pool::Pool;
 use crate::profile::{Browser, ChromiumBrand, Platform, ProfileRegistry};
 use crate::tcp::TcpProfile;
-use crate::tls::FingerprintConnector;
+use crate::tls::{FingerprintConnector, HappyEyeballsConfig, Resolver, TlsTrustConfig};
 
 use super::proxy::env_proxy;
 use super::{AuditTlsCache, ProtocolPolicy, Session};
@@ -21,11 +25,24 @@ pub struct SessionBuilder {
     proxy: Option<String>,
     timeout: std::time::Duration,
     max_redirects: usize,
+    proxy_config: ProxyConfig,
+    dns_config: DnsConfig,
+    timeouts: TimeoutConfig,
+    pool_config: PoolConfig,
+    socket_config: SocketConfig,
+    redirect_policy: RedirectPolicy,
+    compression: CompressionConfig,
+    websocket_config: WebSocketConfig,
+    https_only: bool,
     cookie_jar: Option<CookieJar>,
     tcp_profile: Option<TcpProfile>,
     protocol_policy: ProtocolPolicy,
     grease_seed: Option<Vec<u8>>,
     accept_invalid_certs: bool,
+    pool_idle_timeout: Option<std::time::Duration>,
+    resolver: Option<Arc<dyn Resolver>>,
+    happy_eyeballs: Option<HappyEyeballsConfig>,
+    tls_trust: TlsTrustConfig,
 }
 
 impl SessionBuilder {
@@ -37,23 +54,115 @@ impl SessionBuilder {
             proxy: None,
             timeout: std::time::Duration::from_secs(30),
             max_redirects: 10,
+            proxy_config: ProxyConfig::default(),
+            dns_config: DnsConfig::default(),
+            timeouts: TimeoutConfig::default(),
+            pool_config: PoolConfig::default(),
+            socket_config: SocketConfig::default(),
+            redirect_policy: RedirectPolicy::default(),
+            compression: CompressionConfig::default(),
+            websocket_config: WebSocketConfig::default(),
+            https_only: false,
             cookie_jar: None,
             tcp_profile: None,
             protocol_policy: ProtocolPolicy::Auto,
             grease_seed: None,
             accept_invalid_certs: false,
+            pool_idle_timeout: None,
+            resolver: None,
+            happy_eyeballs: None,
+            tls_trust: TlsTrustConfig::default(),
         }
     }
 
     /// Set a proxy URL (http:// with CONNECT tunnel).
     pub fn proxy(mut self, proxy: impl Into<String>) -> Self {
-        self.proxy = Some(proxy.into());
+        let proxy = proxy.into();
+        self.proxy_config = self.proxy_config.with_rule(ProxyRule::all(proxy.clone()));
+        self.proxy = Some(proxy);
+        self
+    }
+
+    /// Replace the full proxy configuration.
+    pub fn proxies(mut self, config: ProxyConfig) -> Self {
+        self.proxy = config.first_proxy().map(ToOwned::to_owned);
+        self.proxy_config = config;
+        self
+    }
+
+    /// Replace the proxy bypass matcher.
+    pub fn no_proxy(mut self, no_proxy: NoProxy) -> Self {
+        self.proxy_config = self.proxy_config.no_proxy(no_proxy);
+        self
+    }
+
+    /// Do not honour `HTTP_PROXY` / `HTTPS_PROXY` for this session.
+    pub fn disable_env_proxies(mut self) -> Self {
+        self.proxy_config = self.proxy_config.without_env();
         self
     }
 
     /// Set request timeout (default: 30s).
     pub fn timeout(mut self, timeout: std::time::Duration) -> Self {
         self.timeout = timeout;
+        self.timeouts.total = timeout;
+        self
+    }
+
+    /// Replace timeout configuration.
+    pub fn timeouts(mut self, config: TimeoutConfig) -> Self {
+        self.timeout = config.total;
+        self.timeouts = config;
+        self
+    }
+
+    /// Set DNS + TCP + TLS connect timeout.
+    pub fn connect_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.timeouts.connect = Some(timeout);
+        self
+    }
+
+    /// Set buffered response-body read timeout.
+    pub fn read_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.timeouts.read = Some(timeout);
+        self
+    }
+
+    /// Override the connection pool's idle-eviction timeout (default: 90s).
+    ///
+    /// Pool entries whose `last_use` is older than this duration are
+    /// evicted on the next `evict_idle` pass. Raise this when a caller has
+    /// its own keep-warm cadence (e.g. a 30-minute heartbeat) and wants
+    /// the pooled TLS connection to survive between ticks instead of
+    /// being torn down at the default 90 seconds.
+    pub fn pool_idle_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.pool_idle_timeout = Some(timeout);
+        self.pool_config.idle_timeout = timeout;
+        self
+    }
+
+    /// Replace connection-pool configuration.
+    pub fn pool_config(mut self, config: PoolConfig) -> Self {
+        self.pool_idle_timeout = Some(config.idle_timeout);
+        self.pool_config = config;
+        self
+    }
+
+    /// Set pool idle timeout and maximum pooled destinations.
+    pub fn pool_limits(
+        mut self,
+        idle_timeout: std::time::Duration,
+        max_connections: usize,
+    ) -> Self {
+        self.pool_idle_timeout = Some(idle_timeout);
+        self.pool_config.idle_timeout = idle_timeout;
+        self.pool_config.max_connections = max_connections.max(1);
+        self
+    }
+
+    /// Disable connection reuse for this session.
+    pub fn disable_keepalive(mut self) -> Self {
+        self.pool_config.keepalive = false;
         self
     }
 
@@ -61,6 +170,26 @@ impl SessionBuilder {
     pub fn browser(mut self, browser: Browser) -> Self {
         self.browser = browser;
         self
+    }
+
+    /// Use the latest bundled Chrome profile.
+    pub fn chrome(self) -> Self {
+        self.browser(Browser::Chrome147)
+    }
+
+    /// Use the latest bundled Firefox profile.
+    pub fn firefox(self) -> Self {
+        self.browser(Browser::Firefox150)
+    }
+
+    /// Use the latest bundled Safari/macOS profile.
+    pub fn safari(self) -> Self {
+        self.browser(Browser::Safari18).platform(Platform::MacOS)
+    }
+
+    /// Use a browser/platform pair in one call.
+    pub fn profile(self, browser: Browser, platform: Platform) -> Self {
+        self.browser(browser).platform(platform)
     }
 
     /// Apply a Chromium-family identity overlay (Edge, Brave, Opera).
@@ -90,6 +219,26 @@ impl SessionBuilder {
         self
     }
 
+    /// Use the latest bundled Microsoft Edge identity.
+    pub fn edge(self) -> Self {
+        self.brand(ChromiumBrand::Edge)
+    }
+
+    /// Use the latest bundled Brave identity.
+    pub fn brave(self) -> Self {
+        self.browser(Browser::Brave146).platform(Platform::MacOS)
+    }
+
+    /// Use the latest bundled Opera identity.
+    pub fn opera(self) -> Self {
+        self.brand(ChromiumBrand::Opera)
+    }
+
+    /// Use the latest bundled Vivaldi identity.
+    pub fn vivaldi(self) -> Self {
+        self.brand(ChromiumBrand::Vivaldi)
+    }
+
     /// Set the target platform.
     pub fn platform(mut self, platform: Platform) -> Self {
         self.platform = platform;
@@ -99,6 +248,14 @@ impl SessionBuilder {
     /// Set maximum number of redirects to follow.
     pub fn max_redirects(mut self, n: usize) -> Self {
         self.max_redirects = n;
+        self.redirect_policy = RedirectPolicy::limited(n);
+        self
+    }
+
+    /// Replace redirect follow policy.
+    pub fn redirect_policy(mut self, policy: RedirectPolicy) -> Self {
+        self.max_redirects = policy.max_redirects_hint();
+        self.redirect_policy = policy;
         self
     }
 
@@ -111,6 +268,136 @@ impl SessionBuilder {
     /// Set a custom TCP fingerprint profile.
     pub fn tcp_profile(mut self, profile: TcpProfile) -> Self {
         self.tcp_profile = Some(profile);
+        self
+    }
+
+    /// Use a custom DNS resolver for direct connections.
+    ///
+    /// Proxy connections still resolve at the proxy unless the proxy
+    /// protocol itself requires local resolution.
+    pub fn resolver(mut self, resolver: Arc<dyn Resolver>) -> Self {
+        self.resolver = Some(resolver.clone());
+        self.dns_config = self.dns_config.resolver(resolver);
+        self
+    }
+
+    /// Replace direct-connect DNS configuration.
+    pub fn dns(mut self, config: DnsConfig) -> Self {
+        self.dns_config = config;
+        self
+    }
+
+    /// Override one host to one socket address for direct connects.
+    pub fn resolve_host(mut self, host: impl AsRef<str>, addr: std::net::SocketAddr) -> Self {
+        self.dns_config = self.dns_config.resolve_host(host, addr);
+        self
+    }
+
+    /// Override one host to multiple socket addresses for direct connects.
+    pub fn resolve_host_to_addrs<I>(mut self, host: impl AsRef<str>, addrs: I) -> Self
+    where
+        I: IntoIterator<Item = std::net::SocketAddr>,
+    {
+        self.dns_config = self.dns_config.resolve_host_to_addrs(host, addrs);
+        self
+    }
+
+    /// Override Happy Eyeballs dual-stack connect tunables.
+    pub fn happy_eyeballs(mut self, config: HappyEyeballsConfig) -> Self {
+        self.happy_eyeballs = Some(config);
+        self
+    }
+
+    /// Replace TLS trust-root and client-certificate configuration.
+    pub fn tls_trust(mut self, trust: TlsTrustConfig) -> Self {
+        self.tls_trust = trust;
+        self
+    }
+
+    /// Replace low-level socket options for direct connects.
+    pub fn socket_config(mut self, config: SocketConfig) -> Self {
+        self.socket_config = config;
+        self
+    }
+
+    /// Bind direct sockets to a local IP address.
+    pub fn local_address(mut self, address: std::net::IpAddr) -> Self {
+        self.socket_config.local_address = Some(address);
+        self
+    }
+
+    /// Override TCP_NODELAY.
+    pub fn tcp_nodelay(mut self, enabled: bool) -> Self {
+        self.socket_config.tcp_nodelay = Some(enabled);
+        self
+    }
+
+    /// Set TCP keepalive idle time.
+    pub fn tcp_keepalive(mut self, idle: std::time::Duration) -> Self {
+        self.socket_config.tcp_keepalive = Some(idle);
+        self
+    }
+
+    /// Replace response decompression policy.
+    pub fn compression(mut self, config: CompressionConfig) -> Self {
+        self.compression = config;
+        self
+    }
+
+    /// Replace WebSocket defaults.
+    pub fn websocket_config(mut self, config: WebSocketConfig) -> Self {
+        self.websocket_config = config;
+        self
+    }
+
+    /// Reject non-HTTPS request URLs at execution time.
+    pub fn https_only(mut self, enabled: bool) -> Self {
+        self.https_only = enabled;
+        self
+    }
+
+    /// Add a PEM CA file or bundle to the TLS trust store.
+    pub fn add_root_certificate_file(mut self, path: impl Into<std::path::PathBuf>) -> Self {
+        self.tls_trust = self.tls_trust.add_ca_file(path);
+        self
+    }
+
+    /// Add a DER-encoded CA certificate to the TLS trust store.
+    pub fn add_root_certificate_der(mut self, der: impl Into<Vec<u8>>) -> Self {
+        self.tls_trust = self.tls_trust.add_ca_der(der);
+        self
+    }
+
+    /// Add a SHA-256 pin for the DER-encoded leaf certificate.
+    ///
+    /// The certificate chain must still validate against configured
+    /// roots; this adds a leaf hash requirement on top.
+    pub fn add_pinned_leaf_sha256(mut self, sha256: [u8; 32]) -> Self {
+        self.tls_trust = self.tls_trust.add_pinned_leaf_sha256(sha256);
+        self
+    }
+
+    /// Do not honour `SSL_CERT_FILE` / `SSL_CERT_DIR` for this session.
+    pub fn without_env_roots(mut self) -> Self {
+        self.tls_trust = self.tls_trust.without_env_roots();
+        self
+    }
+
+    /// Do not load platform system roots for this session.
+    pub fn without_system_roots(mut self) -> Self {
+        self.tls_trust = self.tls_trust.without_system_roots();
+        self
+    }
+
+    /// Use a PEM client certificate chain and private key for mTLS.
+    pub fn client_identity_files(
+        mut self,
+        certificate_chain_file: impl Into<std::path::PathBuf>,
+        private_key_file: impl Into<std::path::PathBuf>,
+    ) -> Self {
+        self.tls_trust = self
+            .tls_trust
+            .client_identity_files(certificate_chain_file, private_key_file);
         self
     }
 
@@ -195,14 +482,17 @@ impl SessionBuilder {
         // `NO_PROXY` is honoured per-request in the transport layer
         // — building the session with a proxy plus `NO_PROXY`
         // patterns means some hosts bypass it.
-        if self.proxy.is_none() {
+        if self.proxy.is_none() && self.proxy_config.uses_env() {
             if let Some(p) = env_proxy() {
+                self.proxy_config = self.proxy_config.with_rule(ProxyRule::all(p.clone()));
                 self.proxy = Some(p);
             }
         }
         // HTTP/3 forbids proxies today — fail fast at build time instead of
         // deferring to first request.
-        if self.proxy.is_some() && matches!(self.protocol_policy, ProtocolPolicy::Http3) {
+        if (self.proxy.is_some() || self.proxy_config.first_proxy().is_some())
+            && matches!(self.protocol_policy, ProtocolPolicy::Http3)
+        {
             return Err(Error::Config(
                 "HTTP/3 over proxies is not implemented; drop `.http3()` or `.proxy(...)`".into(),
             ));
@@ -256,11 +546,24 @@ impl SessionBuilder {
         let cookie_jar = self.cookie_jar.unwrap_or_default();
 
         // Build TLS connector from profile.
-        let mut connector =
-            FingerprintConnector::new(profile, tcp_profile, self.grease_seed.as_deref())
-                .map_err(Error::Tls)?;
+        let mut connector = FingerprintConnector::new_with_trust(
+            profile,
+            tcp_profile,
+            self.grease_seed.as_deref(),
+            &self.tls_trust,
+        )
+        .map_err(Error::Tls)?;
         if self.accept_invalid_certs {
             connector.set_accept_invalid_certs(true);
+        }
+        let _ = self.resolver;
+        connector = connector.with_resolver(self.dns_config.clone().into_resolver());
+        connector = connector.with_socket_config(self.socket_config.clone());
+        if let Some(connect_timeout) = self.timeouts.connect {
+            connector = connector.with_connect_timeout(connect_timeout);
+        }
+        if let Some(config) = self.happy_eyeballs {
+            connector = connector.with_happy_eyeballs_config(config);
         }
 
         // Build H2 config from profile, applying any per-platform
@@ -317,10 +620,23 @@ impl SessionBuilder {
             proxy: self.proxy,
             timeout: self.timeout,
             max_redirects: self.max_redirects,
+            proxy_config: self.proxy_config,
+            timeouts: self.timeouts,
+            redirect_policy: self.redirect_policy,
+            compression: self.compression,
+            websocket_config: self.websocket_config,
+            https_only: self.https_only,
             cookie_jar,
             connector,
             h2_config,
-            pool: Arc::new(Pool::new()),
+            pool: Arc::new(if self.pool_config.keepalive {
+                Pool::with_limits(
+                    self.pool_config.idle_timeout,
+                    self.pool_config.max_connections.max(1),
+                )
+            } else {
+                Pool::with_limits(std::time::Duration::ZERO, 1)
+            }),
             audit_tls: AuditTlsCache {
                 ja4,
                 ja3,

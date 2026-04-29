@@ -1,5 +1,6 @@
 use super::Session;
 use crate::core::error::Result;
+use crate::core::WebSocketConfig;
 
 impl Session {
     // Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬ WebSocket Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬
@@ -35,39 +36,73 @@ impl Session {
     /// ws.close().await?;
     /// ```
     pub async fn websocket(&self, url: &str) -> Result<crate::core::websocket::WsConnection> {
+        self.websocket_builder(url).connect().await
+    }
+
+    /// Create a configurable WebSocket connector for this URL.
+    pub fn websocket_builder<'a>(&'a self, url: &'a str) -> WebSocketBuilder<'a> {
+        WebSocketBuilder {
+            session: self,
+            url,
+            config: self.websocket_config,
+            force_http1: false,
+            proxy: None,
+        }
+    }
+
+    async fn websocket_with_options(
+        &self,
+        url: &str,
+        config: WebSocketConfig,
+        force_http1: bool,
+        request_proxy: Option<&str>,
+    ) -> Result<crate::core::websocket::WsConnection> {
         let origin = ws_origin(url)?;
+        let parsed = url::Url::parse(url)?;
+        let proxy = self
+            .proxy_config
+            .proxy_for(&parsed, request_proxy, self.proxy.as_deref());
 
         // Try H2 first. The pool helper handles the TLS handshake +
         // ALPN check; if the connection already existed we just clone
         // its handle. Failures that look like "peer didn't enable
         // CONNECT protocol" fall through to the H1 upgrade path.
-        match crate::core::websocket::WsConnection::connect_h2(
-            &self.pool,
+        if config.prefer_http2 && !force_http1 {
+            match crate::core::websocket::WsConnection::connect_h2(
+                &self.pool,
+                &self.connector,
+                &self.h2_config,
+                url,
+                proxy,
+                &self.user_agent,
+                &origin,
+            )
+            .await
+            {
+                Ok(conn) => return Ok(conn),
+                Err(e) if crate::core::websocket::WsConnection::is_h2_fallback_trigger(&e) => {
+                    tracing::debug!(
+                        error = %e,
+                        "H2 extended CONNECT not available, falling back to H1 Upgrade"
+                    );
+                }
+                Err(e) => {
+                    tracing::debug!(
+                        error = %e,
+                        "H2 WebSocket path failed, falling back to H1 Upgrade"
+                    );
+                }
+            }
+        }
+
+        crate::core::websocket::WsConnection::connect_h1(
             &self.connector,
-            &self.h2_config,
             url,
-            self.proxy.as_deref(),
+            proxy,
             &self.user_agent,
             &origin,
         )
         .await
-        {
-            Ok(conn) => return Ok(conn),
-            Err(e) if crate::core::websocket::WsConnection::is_h2_fallback_trigger(&e) => {
-                tracing::debug!(
-                    error = %e,
-                    "H2 extended CONNECT not available, falling back to H1 Upgrade"
-                );
-            }
-            Err(e) => {
-                tracing::debug!(
-                    error = %e,
-                    "H2 WebSocket path failed, falling back to H1 Upgrade"
-                );
-            }
-        }
-
-        self.websocket_http1(url).await
     }
 
     /// Force the HTTP/1.1 Upgrade WebSocket path, skipping the
@@ -75,15 +110,49 @@ impl Session {
     /// speak both protocols but whose H2 WebSocket implementation is
     /// known-broken, or for deterministic test setups.
     pub async fn websocket_http1(&self, url: &str) -> Result<crate::core::websocket::WsConnection> {
-        let origin = ws_origin(url)?;
-        crate::core::websocket::WsConnection::connect_h1(
-            &self.connector,
-            url,
-            self.proxy.as_deref(),
-            &self.user_agent,
-            &origin,
-        )
-        .await
+        self.websocket_with_options(url, self.websocket_config, true, None)
+            .await
+    }
+}
+
+/// Builder returned by [`Session::websocket_builder`].
+pub struct WebSocketBuilder<'a> {
+    session: &'a Session,
+    url: &'a str,
+    config: WebSocketConfig,
+    force_http1: bool,
+    proxy: Option<String>,
+}
+
+impl<'a> WebSocketBuilder<'a> {
+    /// Replace WebSocket limits/preferences for this connection.
+    pub fn config(mut self, config: WebSocketConfig) -> Self {
+        self.config = config;
+        self
+    }
+
+    /// Force the HTTP/1.1 Upgrade path.
+    pub fn http1(mut self) -> Self {
+        self.force_http1 = true;
+        self
+    }
+
+    /// Override the session proxy for this WebSocket connection.
+    pub fn proxy(mut self, proxy_url: impl Into<String>) -> Self {
+        self.proxy = Some(proxy_url.into());
+        self
+    }
+
+    /// Connect.
+    pub async fn connect(self) -> Result<crate::core::websocket::WsConnection> {
+        self.session
+            .websocket_with_options(
+                self.url,
+                self.config,
+                self.force_http1,
+                self.proxy.as_deref(),
+            )
+            .await
     }
 }
 

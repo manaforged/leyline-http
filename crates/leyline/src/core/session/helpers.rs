@@ -4,12 +4,20 @@ use crate::profile::{Browser, ChromiumBrand, Platform, Preset};
 use super::{Session, SessionBuilder};
 use crate::core::request::RequestBuilder;
 use crate::core::response::Response;
-use crate::core::Result;
+use crate::core::{IntoParamPair, Result};
 
 impl Session {
     /// Create a new session builder.
     pub fn builder() -> SessionBuilder {
         SessionBuilder::new()
+    }
+
+    /// Build a default Chrome session.
+    ///
+    /// This mirrors the `Client::new()` shape while still
+    /// returning `Result` because Leyline builds real TLS/profile state.
+    pub fn new() -> Result<Self> {
+        Self::chrome_latest()
     }
 
     /// Shortcut to the latest bundled Chrome profile (currently Chrome 147
@@ -20,11 +28,21 @@ impl Session {
         Self::builder().build()
     }
 
+    /// Alias for [`Session::chrome_latest`].
+    pub fn chrome() -> Result<Self> {
+        Self::chrome_latest()
+    }
+
     /// Shortcut to the latest bundled Firefox profile (currently Firefox
-    /// 148 on Windows). Bumps silently on new releases — pin via the
+    /// 150 on Windows). Bumps silently on new releases — pin via the
     /// builder for stability.
     pub fn firefox_latest() -> Result<Self> {
-        Self::builder().browser(Browser::Firefox148).build()
+        Self::builder().browser(Browser::Firefox150).build()
+    }
+
+    /// Alias for [`Session::firefox_latest`].
+    pub fn firefox() -> Result<Self> {
+        Self::firefox_latest()
     }
 
     /// Shortcut to the latest bundled Safari profile (currently Safari
@@ -37,9 +55,19 @@ impl Session {
             .build()
     }
 
+    /// Alias for [`Session::safari_latest`].
+    pub fn safari() -> Result<Self> {
+        Self::safari_latest()
+    }
+
     /// Microsoft Edge on the latest Chromium profile.
     pub fn edge_latest() -> Result<Self> {
         Self::builder().brand(ChromiumBrand::Edge).build()
+    }
+
+    /// Alias for [`Session::edge_latest`].
+    pub fn edge() -> Result<Self> {
+        Self::edge_latest()
     }
 
     /// Brave on the latest verified Chromium profile (currently Brave
@@ -51,11 +79,21 @@ impl Session {
             .build()
     }
 
+    /// Alias for [`Session::brave_latest`].
+    pub fn brave() -> Result<Self> {
+        Self::brave_latest()
+    }
+
     /// Opera on the latest Chromium profile we have a verified overlay
     /// for (currently Chrome 147 / Opera 131). Track the Opera anchor
     /// table in [`crate::profile::ChromiumBrand`] when bumping.
     pub fn opera_latest() -> Result<Self> {
         Self::builder().brand(ChromiumBrand::Opera).build()
+    }
+
+    /// Alias for [`Session::opera_latest`].
+    pub fn opera() -> Result<Self> {
+        Self::opera_latest()
     }
 
     /// Vivaldi on the latest Chromium profile we have a verified
@@ -64,6 +102,23 @@ impl Session {
     /// the overlay reflects that.
     pub fn vivaldi_latest() -> Result<Self> {
         Self::builder().brand(ChromiumBrand::Vivaldi).build()
+    }
+
+    /// Alias for [`Session::vivaldi_latest`].
+    pub fn vivaldi() -> Result<Self> {
+        Self::vivaldi_latest()
+    }
+
+    /// Build a session for an explicit browser and platform in one call.
+    ///
+    /// ```rust,ignore
+    /// let session = leyline::Session::profile(
+    ///     leyline::Browser::Firefox150,
+    ///     leyline::Platform::Windows,
+    /// )?;
+    /// ```
+    pub fn profile(browser: Browser, platform: Platform) -> Result<Self> {
+        Self::builder().browser(browser).platform(platform).build()
     }
 
     /// Access the cookie jar.
@@ -79,6 +134,49 @@ impl Session {
     pub fn with_cookie_jar(&self, cookie_jar: CookieJar) -> Self {
         let mut s = self.clone();
         s.cookie_jar = cookie_jar;
+        s
+    }
+
+    /// Derive a new session from this one that preserves every piece of
+    /// state — cookie jar, TLS connector, BoringSSL session cache, H2/H3
+    /// config, browser/platform identity, header overlays — and only swaps
+    /// the bound proxy. Use this when one identity needs to rotate egress
+    /// IPs across many short-lived clones (e.g. per-chunk monitor probes
+    /// or sticky-session refresh) without
+    /// re-handshaking or losing cookie state.
+    ///
+    /// The pool keys connections by `(host, port, proxy)`, so the first
+    /// request through each (clone, proxy) pair pays one TLS handshake;
+    /// subsequent requests through the same proxy reuse the cached
+    /// connection on the shared pool.
+    ///
+    /// For per-request rotation (override the bound proxy on a single
+    /// request, e.g. retrying a 429 through a different exit), prefer
+    /// [`RequestBuilder::proxy`](crate::RequestBuilder::proxy) — this
+    /// method is for cases where a logical scope (one cycle, one chunk,
+    /// one retry attempt) wants a stable proxy across many requests.
+    pub fn with_proxy(&self, proxy_url: &str) -> Self {
+        let mut s = self.clone();
+        s.proxy = Some(proxy_url.to_string());
+        s.proxy_config = s
+            .proxy_config
+            .clone()
+            .with_rule(crate::core::ProxyRule::all(proxy_url));
+        s
+    }
+
+    /// Derive a new session that preserves every piece of state and only
+    /// changes the redirect-follow cap. Cheap clone (shares the pool /
+    /// connector / TLS cache); intended for one-shot calls that want the
+    /// raw 3xx response without leyline auto-following — e.g. an order
+    /// placement POST where the success signal is the redirect target
+    /// itself and the followed body would be a multi-MB confirmation
+    /// page wasting bandwidth and time.
+    #[must_use]
+    pub fn with_max_redirects(&self, n: usize) -> Self {
+        let mut s = self.clone();
+        s.max_redirects = n;
+        s.redirect_policy = crate::core::RedirectPolicy::limited(n);
         s
     }
 
@@ -103,7 +201,7 @@ impl Session {
     /// to compute the overall wall-clock deadline across attempts so a
     /// caller's `timeout` bound is never exceeded by backoff.
     pub fn default_timeout(&self) -> std::time::Duration {
-        self.timeout
+        self.timeouts.total
     }
 
     /// Observability snapshot of the underlying connection pool.
@@ -112,6 +210,18 @@ impl Session {
     /// from any thread; counters are atomic.
     pub fn pool_stats(&self) -> crate::pool::PoolStats {
         self.pool.stats()
+    }
+
+    /// True iff `self` and `other` share the same underlying connection
+    /// pool (`Arc::ptr_eq` on the inner pool). Cheap pointer comparison;
+    /// useful for tests asserting that derivation paths like
+    /// [`Session::clone`], [`Session::with_cookie_jar`], and
+    /// [`Session::with_proxy`] preserve the pool identity. Two
+    /// independently `build()`-ed sessions never share — this check
+    /// returns false for them.
+    #[must_use]
+    pub fn shares_pool(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.pool, &other.pool)
     }
 
     // Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬ Fluent request builders Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬Ã¢”â‚¬
@@ -184,7 +294,11 @@ impl Session {
     }
 
     /// POST URL-encoded form data with the Form preset applied.
-    pub async fn post_form(&self, url: &str, params: &[(&str, &str)]) -> Result<Response> {
+    pub async fn post_form<I, P>(&self, url: &str, params: I) -> Result<Response>
+    where
+        I: IntoIterator<Item = P>,
+        P: IntoParamPair,
+    {
         self.post(url)
             .preset(Preset::Form)
             .form(params)

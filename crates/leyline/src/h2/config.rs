@@ -280,9 +280,9 @@ mod tests {
     }
 
     #[test]
-    fn firefox148_h2_fingerprint() {
+    fn firefox150_h2_fingerprint() {
         let reg = crate::profile::ProfileRegistry::builtin();
-        let profile = reg.get("firefox", 148).unwrap();
+        let profile = reg.get("firefox", 150).unwrap();
         let h2 = H2Config::from_profile(&profile.h2);
         let fp = h2.akamai_fingerprint();
         assert_eq!(fp, "1:65536;2:0;4:131072;5:16384|12517377|0|m,p,a,s");

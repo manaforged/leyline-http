@@ -91,9 +91,9 @@ impl PooledConn {
     }
 }
 
-/// Observability snapshot of a [`Pool`].
+/// Observability snapshot of a [`super::Pool`].
 ///
-/// Returned by [`Pool::stats`]. All counters are monotonically
+/// Returned by [`super::Pool::stats`]. All counters are monotonically
 /// increasing over the lifetime of the pool; divide by a wall-clock
 /// interval to get rates. `entries` is the instantaneous live-entry
 /// count at the moment stats were read.

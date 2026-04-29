@@ -1,23 +1,37 @@
+#[cfg(any(
+    feature = "compression-gzip",
+    feature = "compression-brotli",
+    feature = "compression-deflate",
+    feature = "compression-zstd"
+))]
 use std::io::Read;
 
 use crate::core::error::{Error, Result};
+use crate::core::CompressionConfig;
 
-pub(super) fn decompress_body(body: Vec<u8>, encoding: Option<&str>) -> Result<Vec<u8>> {
+pub(super) fn decompress_body(
+    body: Vec<u8>,
+    encoding: Option<&str>,
+    config: &CompressionConfig,
+) -> Result<(Vec<u8>, bool)> {
     let encoding = match encoding {
         Some(e) => e,
-        None => return Ok(body),
+        None => return Ok((body, false)),
     };
 
     // Split on comma for multi-encoding, apply in reverse order.
     // "gzip, br" means gzip was applied first and br second; decode br then gzip.
     let encodings: Vec<&str> = encoding.split(',').map(|s| s.trim()).collect();
+    if !encodings.iter().all(|enc| config.allows(enc)) {
+        return Ok((body, false));
+    }
     let mut data = body;
 
     for enc in encodings.iter().rev() {
         data = decompress_single(data, enc)?;
     }
 
-    Ok(data)
+    Ok((data, true))
 }
 
 /// Max decompressed body size (100 MB, same as wire limit).
@@ -43,36 +57,64 @@ pub(super) async fn drain_stream_into_vec(
 fn decompress_single(body: Vec<u8>, encoding: &str) -> Result<Vec<u8>> {
     match encoding {
         "gzip" | "x-gzip" => {
-            let mut decoder = flate2::read::GzDecoder::new(&body[..]);
-            read_limited(&mut decoder, "gzip")
+            #[cfg(feature = "compression-gzip")]
+            {
+                let mut decoder = flate2::read::GzDecoder::new(&body[..]);
+                read_limited(&mut decoder, "gzip")
+            }
+            #[cfg(not(feature = "compression-gzip"))]
+            {
+                Ok(body)
+            }
         }
         "br" => {
-            let mut decoder = brotli::Decompressor::new(&body[..], 4096);
-            read_limited(&mut decoder, "brotli")
+            #[cfg(feature = "compression-brotli")]
+            {
+                let mut decoder = brotli::Decompressor::new(&body[..], 4096);
+                read_limited(&mut decoder, "brotli")
+            }
+            #[cfg(not(feature = "compression-brotli"))]
+            {
+                Ok(body)
+            }
         }
         "zstd" => {
-            let mut decoder =
-                zstd::Decoder::new(&body[..]).map_err(|e| Error::Http(format!("zstd: {e}")))?;
-            read_limited(&mut decoder, "zstd")
+            #[cfg(feature = "compression-zstd")]
+            {
+                let mut decoder =
+                    zstd::Decoder::new(&body[..]).map_err(|e| Error::Http(format!("zstd: {e}")))?;
+                read_limited(&mut decoder, "zstd")
+            }
+            #[cfg(not(feature = "compression-zstd"))]
+            {
+                Ok(body)
+            }
         }
         "deflate" => {
-            // HTTP `Content-Encoding: deflate` is notoriously ambiguous: some
-            // servers send raw DEFLATE, most (IIS, nginx, httpbin) send zlib-
-            // wrapped DEFLATE. Real Chrome tries zlib first and falls back to
-            // raw. Detect zlib by its magic byte (CMF): high nibble is the
-            // compression method (8 = deflate), so 0x78 is the common CMF.
-            let looks_like_zlib = body.first() == Some(&0x78);
-            if looks_like_zlib {
-                let mut decoder = flate2::read::ZlibDecoder::new(&body[..]);
-                match read_limited(&mut decoder, "deflate") {
-                    Ok(v) => return Ok(v),
-                    Err(_) => {
-                        // Fall through to raw DEFLATE.
+            #[cfg(feature = "compression-deflate")]
+            {
+                // HTTP `Content-Encoding: deflate` is notoriously ambiguous: some
+                // servers send raw DEFLATE, most (IIS, nginx, httpbin) send zlib-
+                // wrapped DEFLATE. Real Chrome tries zlib first and falls back to
+                // raw. Detect zlib by its magic byte (CMF): high nibble is the
+                // compression method (8 = deflate), so 0x78 is the common CMF.
+                let looks_like_zlib = body.first() == Some(&0x78);
+                if looks_like_zlib {
+                    let mut decoder = flate2::read::ZlibDecoder::new(&body[..]);
+                    match read_limited(&mut decoder, "deflate") {
+                        Ok(v) => return Ok(v),
+                        Err(_) => {
+                            // Fall through to raw DEFLATE.
+                        }
                     }
                 }
+                let mut decoder = flate2::read::DeflateDecoder::new(&body[..]);
+                read_limited(&mut decoder, "deflate")
             }
-            let mut decoder = flate2::read::DeflateDecoder::new(&body[..]);
-            read_limited(&mut decoder, "deflate")
+            #[cfg(not(feature = "compression-deflate"))]
+            {
+                Ok(body)
+            }
         }
         "identity" | "" => Ok(body),
         _ => Ok(body),
@@ -80,6 +122,12 @@ fn decompress_single(body: Vec<u8>, encoding: &str) -> Result<Vec<u8>> {
 }
 
 /// Read from a decoder with a size limit (decompression bomb protection).
+#[cfg(any(
+    feature = "compression-gzip",
+    feature = "compression-brotli",
+    feature = "compression-deflate",
+    feature = "compression-zstd"
+))]
 fn read_limited(reader: &mut impl Read, name: &str) -> Result<Vec<u8>> {
     let mut out = Vec::new();
     let mut buf = [0u8; 8192];
@@ -103,8 +151,10 @@ fn read_limited(reader: &mut impl Read, name: &str) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(all(feature = "compression-gzip", feature = "compression-brotli"))]
     use std::io::Write;
 
+    #[cfg(all(feature = "compression-gzip", feature = "compression-brotli"))]
     #[test]
     fn decompress_multi_encoding_in_reverse_order() {
         let body = b"browser-shaped bytes";
@@ -117,7 +167,9 @@ mod tests {
         let mut encoded = Vec::new();
         br.read_to_end(&mut encoded).unwrap();
 
-        let decoded = decompress_body(encoded, Some("gzip, br")).unwrap();
+        let (decoded, decoded_flag) =
+            decompress_body(encoded, Some("gzip, br"), &CompressionConfig::default()).unwrap();
+        assert!(decoded_flag);
         assert_eq!(decoded, body);
     }
 }

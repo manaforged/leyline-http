@@ -45,6 +45,25 @@
 //! ws.send("hello").await?;
 //! ```
 //!
+//! ## Custom headers
+//!
+//! ```rust,ignore
+//! let resp = session.get("https://example.com")
+//!     .header("x-request-id", "abc")
+//!     .bearer_auth("token")
+//!     .send().await?;
+//! ```
+//!
+//! ## Cookies
+//!
+//! ```rust,ignore
+//! use leyline::CookieJar;
+//! let session = Session::builder()
+//!     .cookie_jar(CookieJar::new())
+//!     .build()?;
+//! // Set-Cookie headers update the jar; later requests send them back.
+//! ```
+//!
 //! ## Fingerprint audit
 //!
 //! ```rust,ignore
@@ -59,6 +78,7 @@ pub mod audit;
 pub mod cookie;
 pub mod core;
 pub mod h2;
+pub mod observe;
 pub mod pool;
 pub mod profile;
 pub mod quic;
@@ -69,10 +89,18 @@ pub mod tls_selftest;
 // ─── Public API re-exports ───────────────────────────────────────────────────
 
 // Core types
+#[cfg(feature = "tower")]
+pub use crate::core::LeylineService;
 pub use crate::core::{
-    Body, BodyStream, DigestAuth, Error, HeaderList, HttpVersion, ProtocolPolicy, Request,
-    RequestBuilder, Response, Result, RetryPolicy, RetryTrigger, Session, SessionBuilder,
+    Body, BodyStream, CompressionConfig, DigestAuth, DnsConfig, Error, HeaderList, HttpVersion,
+    IntoParamPair, NoProxy, PoolConfig, ProtocolPolicy, ProxyConfig, ProxyRule, RedirectAction,
+    RedirectAttempt, RedirectPolicy, Request, RequestBuilder, Response, Result, RetryPolicy,
+    RetryTrigger, Session, SessionBuilder, SocketConfig, TimeoutConfig, WebSocketBuilder,
+    WebSocketConfig,
 };
+
+/// Alias for users coming from `reqwest`/`wreq`.
+pub type Client = Session;
 
 /// `multipart/form-data` bodies.
 pub mod multipart {
@@ -103,7 +131,10 @@ pub use crate::core::WsConnection;
 // `boring` as separate deps). Start with `tls_context` / `quic_context`
 // for the 95% case; drop down to `build_ssl_context` only when you need
 // the full `TlsMinVersion` knob against a profile you already hold.
-pub use crate::tls::{build_ssl_context, TlsError, TlsMinVersion};
+pub use crate::tls::{
+    build_ssl_context, ClientIdentity, HappyEyeballsConfig, ResolveFuture, Resolver,
+    SystemResolver, TlsError, TlsMinVersion, TlsTrustConfig,
+};
 pub use btls::ssl::SslContextBuilder;
 
 static PROFILES: LazyLock<crate::profile::ProfileRegistry> =
@@ -189,7 +220,11 @@ pub async fn post_json(url: &str, body: &impl serde::Serialize) -> Result<Respon
 }
 
 /// POST form data to a URL. Uses the latest bundled Chrome profile.
-pub async fn post_form(url: &str, params: &[(&str, &str)]) -> Result<Response> {
+pub async fn post_form<I, P>(url: &str, params: I) -> Result<Response>
+where
+    I: IntoIterator<Item = P>,
+    P: IntoParamPair,
+{
     default_session()?.post_form(url, params).await
 }
 

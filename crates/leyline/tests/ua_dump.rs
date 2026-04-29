@@ -45,8 +45,12 @@ fn extract(req: &str, header: &str) -> String {
         .unwrap_or_else(|| "<missing>".into())
 }
 
-#[tokio::main]
-async fn main() {
+// Spawns a local TCP server and dumps on-the-wire UA / sec-ch-ua headers per
+// ChromiumBrand. Opt-in: `cargo test -p leyline --test ua_dump -- --ignored
+// --nocapture`.
+#[tokio::test]
+#[ignore]
+async fn ua_dump() {
     for (name, sess) in [
         ("Chrome", Session::chrome_latest().unwrap()),
         ("Edge", Session::edge_latest().unwrap()),

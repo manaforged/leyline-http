@@ -16,7 +16,7 @@
 //! use std::net::SocketAddr;
 //! use std::pin::Pin;
 //! use std::future::Future;
-//! use crate::tls::{Resolver, ResolveFuture};
+//! use leyline::tls::{ResolveFuture, Resolver};
 //!
 //! struct LoopbackResolver;
 //!
@@ -60,7 +60,7 @@ pub trait Resolver: Send + Sync + 'static {
 /// other libc resolver knob — exactly the behaviour most production
 /// callers want.
 ///
-/// [`FingerprintConnector`]: crate::FingerprintConnector
+/// [`FingerprintConnector`]: crate::tls::FingerprintConnector
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SystemResolver;
 
