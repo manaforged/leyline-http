@@ -1,16 +1,17 @@
 use std::env;
 use std::path::{Path, PathBuf};
 
-const SUPPORTED_TARGET: &str = "x86_64-pc-windows-msvc";
+const SUPPORTED_TARGETS: &[&str] = &["x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu"];
 
 fn main() {
     println!("cargo:rerun-if-env-changed=BORING_BSSL_PATH");
     println!("cargo:rerun-if-env-changed=BORING_BSSL_RUST_CPPLIB");
 
     let target = env::var("TARGET").expect("Cargo should set TARGET");
-    if target != SUPPORTED_TARGET {
+    if !SUPPORTED_TARGETS.iter().any(|t| *t == target) {
         panic!(
-            "Leyline's local btls-sys shim has prebuilt BoringSSL artifacts only for {SUPPORTED_TARGET}; target {target} still needs a pregenerated binding/native-lib bundle."
+            "Leyline's local btls-sys shim has prebuilt BoringSSL artifacts only for {:?}; target {target} still needs a pregenerated binding/native-lib bundle.",
+            SUPPORTED_TARGETS
         );
     }
 
@@ -25,7 +26,7 @@ fn main() {
     }
 
     if env::var_os("CARGO_FEATURE_PREFIX_SYMBOLS").is_some() {
-        println!("cargo:warning=btls-sys prefix-symbols is ignored by Leyline's prebuilt Windows/MSVC shim.");
+        println!("cargo:warning=btls-sys prefix-symbols is ignored by Leyline's prebuilt shim.");
     }
 
     let lib_dir = match env::var_os("BORING_BSSL_PATH") {
@@ -34,10 +35,7 @@ fn main() {
             let manifest_dir = PathBuf::from(
                 env::var_os("CARGO_MANIFEST_DIR").expect("Cargo should set CARGO_MANIFEST_DIR"),
             );
-            manifest_dir
-                .join("native")
-                .join(SUPPORTED_TARGET)
-                .join("lib")
+            manifest_dir.join("native").join(&target).join("lib")
         }
     };
 
@@ -50,7 +48,14 @@ fn main() {
     }
     println!("cargo:rustc-link-lib=static=crypto");
     println!("cargo:rustc-link-lib=static=ssl");
-    println!("cargo:rustc-link-lib=advapi32");
+    if target.ends_with("msvc") {
+        println!("cargo:rustc-link-lib=advapi32");
+    } else {
+        // Linux: BoringSSL needs libstdc++ (or libc++) for the small amount
+        // of C++ inside it, and pthread for sync primitives.
+        println!("cargo:rustc-link-lib=stdc++");
+        println!("cargo:rustc-link-lib=pthread");
+    }
 }
 
 fn find_lib_dir(root: PathBuf, target: &str) -> PathBuf {

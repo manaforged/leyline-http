@@ -154,20 +154,16 @@ fn boring_curve_name(name: &str) -> &str {
 struct BrotliDecompressor;
 
 impl CertificateCompressor for BrotliDecompressor {
-    fn compress(&self, _input: &[u8], _output: &mut dyn std::io::Write) -> std::io::Result<()> {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
-            "brotli certificate compression is decompression-only",
-        ))
-    }
+    const ALGORITHM: CertificateCompressionAlgorithm = CertificateCompressionAlgorithm::BROTLI;
+    const CAN_COMPRESS: bool = false;
+    const CAN_DECOMPRESS: bool = true;
 
-    fn decompress(&self, input: &[u8], output: &mut dyn std::io::Write) -> std::io::Result<()> {
+    fn decompress<W>(&self, input: &[u8], output: &mut W) -> std::io::Result<()>
+    where
+        W: std::io::Write,
+    {
         let mut decoder = brotli::Decompressor::new(input, 4096);
         std::io::copy(&mut decoder, output)?;
         Ok(())
-    }
-
-    fn algorithm(&self) -> CertificateCompressionAlgorithm {
-        CertificateCompressionAlgorithm::BROTLI
     }
 }

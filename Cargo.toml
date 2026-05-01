@@ -43,7 +43,7 @@ md-5 = "0.10"
 btls = "0.5"
 btls-sys = "0.5"
 tokio-btls = "0.5"
-socket2 = "0.5"
+socket2 = { version = "0.5", features = ["all"] }
 bytes = "1"
 tungstenite = "0.26"
 tokio-tungstenite = "0.26"

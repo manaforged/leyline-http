@@ -26,8 +26,16 @@ mod generated {
     include!("bindings/x86_64-pc-windows-msvc.rs");
 }
 
-#[cfg(not(all(target_arch = "x86_64", target_os = "windows", target_env = "msvc")))]
-compile_error!("Leyline's local btls-sys shim currently includes pregenerated bindings only for x86_64-pc-windows-msvc.");
+#[cfg(all(target_arch = "x86_64", target_os = "linux", target_env = "gnu"))]
+mod generated {
+    include!("bindings/x86_64-unknown-linux-gnu.rs");
+}
+
+#[cfg(not(any(
+    all(target_arch = "x86_64", target_os = "windows", target_env = "msvc"),
+    all(target_arch = "x86_64", target_os = "linux", target_env = "gnu"),
+)))]
+compile_error!("Leyline's local btls-sys shim currently includes pregenerated bindings only for x86_64-pc-windows-msvc and x86_64-unknown-linux-gnu.");
 
 // explicitly require presence of some symbols to check if the bindings worked
 pub use generated::{ssl_compliance_policy_t, ERR_add_error_data, SSL_set1_groups}; // if these are missing, your include path is incorrect or has a wrong version of boringssl
