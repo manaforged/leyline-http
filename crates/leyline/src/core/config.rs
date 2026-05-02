@@ -7,6 +7,102 @@ use std::time::Duration;
 
 use crate::tls::{Resolver, SystemResolver};
 
+/// A validated proxy URL.
+///
+/// Leyline accepts `http://`, `https://`, `socks5://`, and `socks5h://`
+/// proxy URLs. SOCKS URLs require the `socks` feature at connection time.
+/// This type lets callers validate and carry proxy strings without
+/// accidentally feeding an empty host or unsupported scheme into the
+/// connection layer.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ProxyUrl(String);
+
+impl ProxyUrl {
+    /// Validate a proxy URL.
+    pub fn parse(raw: impl AsRef<str>) -> crate::core::Result<Self> {
+        let raw = raw.as_ref().trim();
+        let parsed = Self::parse_inner(raw)?;
+        match parsed.scheme() {
+            "http" | "https" | "socks5" | "socks5h" => {}
+            other => {
+                return Err(crate::core::Error::Config(format!(
+                    "unsupported proxy scheme {other:?}; expected http, https, socks5, or socks5h"
+                )));
+            }
+        }
+        if parsed.host_str().is_none() {
+            return Err(crate::core::Error::Config(
+                "proxy URL must include a host".into(),
+            ));
+        }
+        Ok(Self(raw.to_string()))
+    }
+
+    fn parse_inner(raw: &str) -> crate::core::Result<url::Url> {
+        url::Url::parse(raw)
+            .map_err(|e| crate::core::Error::Config(format!("invalid proxy URL: {e}")))
+    }
+
+    fn parse_scheme(raw: impl AsRef<str>, expected: &'static str) -> crate::core::Result<Self> {
+        let raw = raw.as_ref().trim();
+        let parsed = Self::parse_inner(raw)?;
+        if parsed.scheme() != expected {
+            return Err(crate::core::Error::Config(format!(
+                "expected {expected} proxy URL, got {:?}",
+                parsed.scheme()
+            )));
+        }
+        if parsed.host_str().is_none() {
+            return Err(crate::core::Error::Config(
+                "proxy URL must include a host".into(),
+            ));
+        }
+        Ok(Self(raw.to_string()))
+    }
+
+    /// Build an HTTP proxy URL.
+    pub fn http(raw: impl AsRef<str>) -> crate::core::Result<Self> {
+        Self::parse_scheme(raw, "http")
+    }
+
+    /// Build an HTTPS proxy URL.
+    pub fn https(raw: impl AsRef<str>) -> crate::core::Result<Self> {
+        Self::parse_scheme(raw, "https")
+    }
+
+    /// Build a SOCKS5 proxy URL.
+    pub fn socks5(raw: impl AsRef<str>) -> crate::core::Result<Self> {
+        Self::parse_scheme(raw, "socks5")
+    }
+
+    /// Build a SOCKS5H proxy URL where DNS resolution happens at the proxy.
+    pub fn socks5h(raw: impl AsRef<str>) -> crate::core::Result<Self> {
+        Self::parse_scheme(raw, "socks5h")
+    }
+
+    /// Borrow as a string.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Consume into the validated string.
+    pub fn into_string(self) -> String {
+        self.0
+    }
+}
+
+impl std::fmt::Display for ProxyUrl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl From<ProxyUrl> for String {
+    fn from(value: ProxyUrl) -> Self {
+        value.0
+    }
+}
+
 /// Proxy configuration for a session.
 #[derive(Clone)]
 pub struct ProxyConfig {
@@ -78,13 +174,13 @@ impl ProxyConfig {
     /// Select a proxy URL for a request.
     ///
     /// Resolution order (after NO_PROXY filtering):
-    ///   1. `request_override` — caller passed `.proxy(...)` on the
+    ///   1. `request_override` - caller passed `.proxy(...)` on the
     ///      RequestBuilder; that's an explicit per-request choice and
     ///      wins over any rule or session default. This is what enables
     ///      per-request rotation: each call can pick its own egress
     ///      regardless of the session's bound proxy.
     ///   2. Configured `rules` matching the URL scheme.
-    ///   3. `session_default` — the session's `.proxy(...)` value, used
+    ///   3. `session_default` - the session's `.proxy(...)` value, used
     ///      only when no rule matched.
     pub(crate) fn proxy_for<'a>(
         &'a self,
@@ -304,7 +400,7 @@ pub struct TimeoutConfig {
 impl Default for TimeoutConfig {
     fn default() -> Self {
         Self {
-            total: Duration::from_secs(30),
+            total: Duration::from_secs(300),
             connect: None,
             read: None,
         }
@@ -608,5 +704,32 @@ mod tests {
         assert!(!cfg.allows("gzip"));
         assert!(!cfg.allows("br"));
         assert!(cfg.allows("identity"));
+    }
+
+    #[test]
+    fn default_timeout_matches_browser_scale_patience() {
+        assert_eq!(TimeoutConfig::default().total, Duration::from_secs(300));
+    }
+
+    #[test]
+    fn proxy_url_validates_supported_schemes_and_hosts() {
+        assert_eq!(
+            ProxyUrl::parse(" http://proxy.example:8080 ")
+                .unwrap()
+                .as_str(),
+            "http://proxy.example:8080"
+        );
+        assert!(ProxyUrl::parse("ftp://proxy.example:21").is_err());
+        assert!(ProxyUrl::parse("http://").is_err());
+    }
+
+    #[test]
+    fn proxy_url_constructors_enforce_scheme() {
+        assert!(ProxyUrl::http("http://proxy.example:8080").is_ok());
+        assert!(ProxyUrl::https("https://proxy.example:8443").is_ok());
+        assert!(ProxyUrl::socks5("socks5://proxy.example:1080").is_ok());
+        assert!(ProxyUrl::socks5h("socks5h://proxy.example:1080").is_ok());
+        assert!(ProxyUrl::http("socks5://proxy.example:1080").is_err());
+        assert!(ProxyUrl::socks5("http://proxy.example:8080").is_err());
     }
 }

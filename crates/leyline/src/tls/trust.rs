@@ -103,6 +103,36 @@ impl TlsTrustConfig {
         });
         self
     }
+
+    /// Whether `SSL_CERT_FILE` / `SSL_CERT_DIR` are honoured.
+    pub fn uses_env_roots(&self) -> bool {
+        self.use_env_roots
+    }
+
+    /// Whether platform system roots are loaded.
+    pub fn uses_system_roots(&self) -> bool {
+        self.use_system_roots
+    }
+
+    /// Additional PEM CA files configured by the caller.
+    pub fn ca_files(&self) -> &[PathBuf] {
+        &self.ca_files
+    }
+
+    /// Number of in-memory DER CA certificates configured by the caller.
+    pub fn ca_der_count(&self) -> usize {
+        self.ca_der.len()
+    }
+
+    /// Configured mTLS identity, if any.
+    pub fn client_identity(&self) -> Option<&ClientIdentity> {
+        self.client_identity.as_ref()
+    }
+
+    /// SHA-256 leaf certificate pins.
+    pub fn pinned_leaf_sha256(&self) -> &[[u8; 32]] {
+        &self.pinned_leaf_sha256
+    }
 }
 
 /// PEM client identity used for mutual TLS.

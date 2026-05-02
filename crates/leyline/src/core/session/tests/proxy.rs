@@ -18,7 +18,7 @@ fn no_proxy_ipv6_literal_matches_bare_host() {
 
 #[test]
 fn no_proxy_ipv6_bracketed_host_matches_pattern() {
-    // `url::Host::parse` rejects brackets — the
+    // `url::Host::parse` rejects brackets - the
     // normaliser now strips them so `[::1]` on either side
     // compares equal to `::1`.
     assert!(host_matches_no_proxy("[::1]", "::1"));
@@ -96,6 +96,23 @@ fn env_proxy_trims_whitespace_and_skips_empty() {
     assert_eq!(v, Some("http://trim.example:3128".to_string()));
 }
 
+#[test]
+fn env_proxy_uses_all_proxy_as_fallback() {
+    let pairs = &[("ALL_PROXY", "socks5://proxy.example:1080")];
+    let v = env_proxy_from(mock_env(pairs), mock_env_has(pairs));
+    assert_eq!(v, Some("socks5://proxy.example:1080".to_string()));
+}
+
+#[test]
+fn env_proxy_prefers_scheme_specific_proxy_over_all_proxy() {
+    let pairs = &[
+        ("ALL_PROXY", "socks5://fallback.example:1080"),
+        ("HTTPS_PROXY", "http://https.example:3128"),
+    ];
+    let v = env_proxy_from(mock_env(pairs), mock_env_has(pairs));
+    assert_eq!(v, Some("http://https.example:3128".to_string()));
+}
+
 /// httpoxy: when any CGI-style variable is set AND `HTTP_PROXY`
 /// is also set, `HTTP_PROXY` MUST be ignored. `HTTPS_PROXY` is
 /// not spoofable via HTTP request headers (no `Https-Proxy:`
@@ -129,15 +146,15 @@ fn env_proxy_under_cgi_still_honours_https_proxy() {
 /// Exercise the asymmetry between `get_var` and
 /// `has_var` that the dependency-injected helper explicitly
 /// permits. A non-UTF-8 value in the real env has
-/// `env::var(k) == Err` (â†’ `get_var` returns None) but
-/// `env::var_os(k) == Some` (â†’ `has_var` returns true). The
-/// candidate MUST be treated as unreadable — skipped by the
+/// `env::var(k) == Err` (`get_var` returns None) but
+/// `env::var_os(k) == Some` (`has_var` returns true). The
+/// candidate MUST be treated as unreadable - skipped by the
 /// candidate loop but still honoured for the CGI sniff.
 #[test]
 fn env_proxy_skips_present_but_unreadable_vars() {
     // Simulate: both HTTPS_PROXY and HTTP_PROXY *present* but
     // unreadable as UTF-8. Non-CGI; neither candidate should
-    // yield a proxy URL — NOT an empty-string fallback that
+    // yield a proxy URL - NOT an empty-string fallback that
     // quietly disables proxying without telling the caller.
     let get_var = |k: &str| -> Option<String> {
         let _ = k;
@@ -152,7 +169,7 @@ fn env_proxy_under_cgi_with_unreadable_http_proxy() {
     // httpoxy mitigation must still trigger when HTTP_PROXY is
     // present-but-unreadable under CGI. The candidate list
     // excludes uppercase HTTP_PROXY; `get_var` returning None
-    // for the remaining candidates â†’ overall None.
+    // for the remaining candidates, so the overall result is None.
     let get_var = |k: &str| -> Option<String> {
         let _ = k;
         None
@@ -164,7 +181,7 @@ fn env_proxy_under_cgi_with_unreadable_http_proxy() {
 #[test]
 fn env_proxy_under_cgi_with_unreadable_http_proxy_but_readable_https() {
     // Even under CGI with a suspicious unreadable HTTP_PROXY,
-    // a legitimately readable HTTPS_PROXY must still win —
+    // a legitimately readable HTTPS_PROXY must still win -
     // HTTPS_PROXY is not spoofable via HTTP request headers.
     let legit = "http://legit.example:3128";
     let get_var = move |k: &str| -> Option<String> {

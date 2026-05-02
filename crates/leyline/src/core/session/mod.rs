@@ -7,18 +7,22 @@ mod header_merge;
 mod helpers;
 mod proxy;
 mod transport_policy;
+#[cfg(feature = "websocket")]
 mod websocket;
 
 #[cfg(test)]
 mod tests;
 
 pub use builder::SessionBuilder;
+#[cfg(feature = "websocket")]
 pub use websocket::WebSocketBuilder;
 
 use std::sync::Arc;
 
 use crate::cookie::Jar as CookieJar;
-use crate::core::{CompressionConfig, ProxyConfig, RedirectPolicy, TimeoutConfig, WebSocketConfig};
+#[cfg(feature = "websocket")]
+use crate::core::WebSocketConfig;
+use crate::core::{CompressionConfig, ProxyConfig, RedirectPolicy, TimeoutConfig};
 use crate::h2::H2Config;
 use crate::pool::Pool;
 use crate::profile::{Browser, ChromiumBrand, Platform};
@@ -36,9 +40,11 @@ pub enum ProtocolPolicy {
     /// Force HTTP/2 over TLS.
     Http2,
     /// Force HTTP/3 over QUIC.
+    #[cfg(feature = "http3")]
     Http3,
     /// Prefer H3 and fall back to H2/H1. This is currently sequential, not a
     /// true parallel Chrome-style race.
+    #[cfg(feature = "http3")]
     Race,
 }
 
@@ -77,6 +83,7 @@ pub struct Session {
     timeouts: TimeoutConfig,
     redirect_policy: RedirectPolicy,
     compression: CompressionConfig,
+    #[cfg(feature = "websocket")]
     websocket_config: WebSocketConfig,
     https_only: bool,
     cookie_jar: CookieJar,
@@ -88,9 +95,11 @@ pub struct Session {
     /// Request protocol selection policy.
     protocol_policy: ProtocolPolicy,
     /// H3 config (transport params + QPACK + SETTINGS).
+    #[cfg(feature = "http3")]
     h3_config: crate::quic::H3Config,
     /// Reference to the static browser profile — passed through to the H3
     /// path so QUIC ClientHello is built from the same factory as H2.
+    #[cfg(feature = "http3")]
     profile: &'static crate::profile::BrowserProfile,
 }
 

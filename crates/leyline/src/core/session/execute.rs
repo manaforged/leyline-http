@@ -12,7 +12,7 @@ use crate::core::response::Response;
 use crate::core::{RedirectAction, RedirectAttempt};
 
 impl Session {
-    // â”€â”€â”€ Core execution â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // Core execution.
 
     /// Execute a request with an optional per-request timeout override.
     /// When `override_timeout` is `None`, the session-level timeout applies.
@@ -33,7 +33,7 @@ impl Session {
     ) -> Result<Response> {
         let timeout = override_timeout.unwrap_or(self.timeouts.total);
         // Box the inner future to move its state to the heap. Without this,
-        // the combined RequestBuilder â†’ execute_with_timeout â†’ execute_inner
+        // the combined RequestBuilder -> execute_with_timeout -> execute_inner
         // state machine is large enough to blow the default 2 MB thread
         // stack when a test awaits two requests sequentially.
         let inner: std::pin::Pin<
@@ -292,7 +292,7 @@ impl Session {
                             current_method = "GET".to_string();
                             current_body = Body::Empty;
                         } else if hop_body_was_stream {
-                            return Err(Error::Http(format!(
+                            return Err(Error::Redirect(format!(
                                 "cannot follow {status} redirect: streaming request bodies are \
                              not replayable. Either buffer the body before sending or set \
                              max_redirects(0)."
@@ -435,7 +435,7 @@ impl Session {
             });
         }
 
-        Err(Error::Http(format!(
+        Err(Error::Redirect(format!(
             "too many redirects (max {})",
             redirect_cap
         )))

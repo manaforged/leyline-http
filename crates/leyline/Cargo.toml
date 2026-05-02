@@ -31,10 +31,10 @@ compression-gzip = ["dep:flate2"]
 compression-brotli = []
 compression-deflate = ["dep:flate2"]
 compression-zstd = ["dep:zstd"]
-multipart = []
+multipart = ["stream", "dep:async-stream", "dep:tokio-util"]
 stream = []
-websocket = []
-http3 = []
+websocket = ["dep:tungstenite", "dep:tokio-tungstenite"]
+http3 = ["dep:leyline-quiche"]
 socks = []
 system-trust = []
 native-interface-bind = []
@@ -58,7 +58,7 @@ full = [
 [dependencies]
 # External deps absorbed from sub-crates
 # -- from leyline-quiche (external BSD-2 fork, stays as path dep)
-leyline-quiche = { path = "../leyline-quiche", version = "1.0.0-alpha.1", default-features = false, features = [
+leyline-quiche = { path = "../leyline-quiche", version = "1.0.0-alpha.1", default-features = false, optional = true, features = [
     "boringssl-btls-crate",
 ] }
 
@@ -94,15 +94,15 @@ md5_legacy = { package = "md5", version = "0.7" }
 base64 = { workspace = true }
 
 # -- HTTP / WebSocket
-tungstenite = { workspace = true }
-tokio-tungstenite = { workspace = true }
+tungstenite = { workspace = true, optional = true }
+tokio-tungstenite = { workspace = true, optional = true }
 http = "1"
 
 # -- misc
 bytes = { workspace = true }
 futures-util = "0.3"
-async-stream = "0.3"
-tokio-util = { version = "0.7", features = ["io"] }
+async-stream = { version = "0.3", optional = true }
+tokio-util = { version = "0.7", features = ["io"], optional = true }
 lru = "0.17"
 rand = "0.8"
 libc = "0.2"

@@ -1,7 +1,7 @@
 # Leyline
 
 A Rust HTTP client that sends requests that look, on the wire, like a real
-browser. Chrome, Firefox, Safari, OkHttp — pick a profile, get its TLS,
+browser. Chrome, Firefox, Safari, OkHttp - pick a profile, get its TLS,
 HTTP/2, and TCP shape.
 
 Status: `1.0.0-alpha.1`. API is still changing; pin exact versions.
@@ -58,11 +58,11 @@ offline build/test pass. Once that is green, use `./scripts/verify.sh --quick`
 or `.\scripts\verify.ps1 -Quick` for the normal local gate and reserve live
 tests for release validation.
 
-The API is shaped like `reqwest`, async on tokio. Streaming bodies, multipart
+The API is Leyline-native and async on tokio. Streaming bodies, multipart
 uploads, digest auth, retry with backoff, cookie jar, proxy + SOCKS5, a
 `tower::Service` adapter, WebSocket (both HTTP/1.1 upgrade and RFC 8441
 extended CONNECT over H2). Every response carries a per-connection audit
-block — JA3, JA4, JA4T, JA4H, H2 Akamai fingerprint — so you can check what
+block - JA3, JA4, JA4T, JA4H, H2 Akamai fingerprint - so you can check what
 actually went on the wire.
 
 Concurrent requests share one H2 connection through a cloneable `H2Client`.
@@ -74,12 +74,14 @@ siblings.
 | Profile          | Versions        |
 | ---------------- | --------------- |
 | Chrome           | 145, 146, 147   |
+| Aloha            | 138             |
+| Brave            | 146             |
 | Firefox          | 148, 150, 151   |
 | Safari (macOS)   | 18              |
 | Safari (iOS)     | 15, 17, 18      |
 | OkHttp (Android) | 7, 10           |
 
-Adding a version is a TOML copy-and-edit — see [CONTRIBUTING.md](CONTRIBUTING.md).
+Adding a version is a TOML copy-and-edit - see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Platform support
 
@@ -135,12 +137,12 @@ for detail.
 The TLS layer wraps [`0x676e67/boring2`][boring2], a BoringSSL fork that
 already had the browser-shaped extensions (MLKEM768, ALPS, deterministic
 GREASE, cert compression) wired up. Full attribution in [NOTICE](NOTICE).
-HTTP/3 goes through [quiche] — we drive the transport parameters and H3
+HTTP/3 goes through [quiche] - we drive the transport parameters and H3
 SETTINGS from the profile; quiche handles the rest.
 
 The HTTP/2 implementation in [`crates/leyline/src/h2`](crates/leyline/src/h2)
 is ours. Client-only, but real:
-RFC 9113 §5.1 stream state machine, concurrent multiplexing, flow control
+RFC 9113 section 5.1 stream state machine, concurrent multiplexing, flow control
 with per-stream parking, inbound RST_STREAM flood guard, classic and
 extended CONNECT. Not a full server-capable stack.
 
@@ -148,10 +150,10 @@ Fingerprints drift. A Chrome 147 profile matches the Chrome 147 we captured;
 re-verify against a fresh capture before you rely on it for anything
 important.
 
-## Wreq Parity Map
+## Capability Map
 
-Leyline does not copy wreq's method names; it exposes the same capability
-surface through browser-fidelity-first configuration.
+Leyline's API is organized around browser-fidelity-first configuration and a
+small set of explicit policy objects.
 
 | Capability | Leyline API |
 | ---------- | ----------- |
@@ -164,7 +166,7 @@ surface through browser-fidelity-first configuration.
 | Response decompression toggles | `CompressionConfig`, `compression` |
 | WebSocket options | `WebSocketConfig`, `websocket_config`, `websocket_builder` |
 | Tower middleware integration | `LeylineService` behind the `tower` feature |
-| Feature surface | `default`, `full`, and granular flags for cookies, compression, multipart, stream, websocket, HTTP/3, Tower, SOCKS, system trust, and native interface binding |
+| Feature surface | `default`, `full`, and granular flags for cookies, compression, multipart, stream, websocket, HTTP/3, Tower, SOCKS, system trust, and native interface binding. H3, WebSocket, multipart, and SOCKS gate their heavy transport surface; Brotli remains in the minimal graph for TLS certificate compression. |
 
 ## Testing
 
@@ -211,7 +213,7 @@ responses.
 
 ## License
 
-Dual MIT / Apache-2.0. Third-party pieces keep their upstream licenses —
+Dual MIT / Apache-2.0. Third-party pieces keep their upstream licenses -
 see [NOTICE](NOTICE).
 
 [boring2]: https://github.com/0x676e67/boring2

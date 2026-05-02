@@ -40,9 +40,22 @@ where
         // Skip the uppercase `HTTP_PROXY` variant that CGI collides
         // with. `HTTPS_PROXY` isn't an HTTP request header so it's
         // safe; `http_proxy` (lowercase) isn't populated by CGI.
-        &["HTTPS_PROXY", "https_proxy", "http_proxy"]
+        &[
+            "HTTPS_PROXY",
+            "https_proxy",
+            "http_proxy",
+            "ALL_PROXY",
+            "all_proxy",
+        ]
     } else {
-        &["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"]
+        &[
+            "HTTPS_PROXY",
+            "https_proxy",
+            "HTTP_PROXY",
+            "http_proxy",
+            "ALL_PROXY",
+            "all_proxy",
+        ]
     };
 
     for name in candidates {

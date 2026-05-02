@@ -92,6 +92,16 @@ fn legacy_builder_methods_feed_new_configs() {
     assert_eq!(session.pool_stats().max_connections, 3);
 }
 
+#[test]
+fn default_session_timeout_is_five_minutes() {
+    let session = Session::builder()
+        .disable_env_proxies()
+        .build()
+        .expect("default session builds");
+
+    assert_eq!(session.default_timeout(), Duration::from_secs(300));
+}
+
 #[cfg(feature = "tower")]
 #[test]
 fn tower_service_adapter_compiles() {

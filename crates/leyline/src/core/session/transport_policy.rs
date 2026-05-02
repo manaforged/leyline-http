@@ -25,6 +25,7 @@ impl Session {
     /// `.proxy(...)` must suppress H3 even when `NO_PROXY` would have
     /// bypassed the proxy, because the caller's intent is "route
     /// through this specific egress, not H3."
+    #[cfg(feature = "http3")]
     fn proxy_requested(&self, request_proxy: Option<&str>) -> bool {
         request_proxy.is_some() || self.proxy.is_some() || self.proxy_config.first_proxy().is_some()
     }
@@ -86,6 +87,7 @@ impl Session {
                 )
                 .await
             }
+            #[cfg(feature = "http3")]
             ProtocolPolicy::Http3 => {
                 if self.proxy_requested(request_proxy) {
                     return Err(Error::Config(
@@ -103,6 +105,7 @@ impl Session {
                 )
                 .await
             }
+            #[cfg(feature = "http3")]
             ProtocolPolicy::Race => {
                 // Race doesn't interact well with streaming bodies — we
                 // can only try H3 first if we have a buffered body to

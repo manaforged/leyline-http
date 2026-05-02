@@ -33,7 +33,7 @@ covered by the smoke and transport tests below.
 | Property | How it is proved | Where |
 |---|---|---|
 | TLS ClientHello matches profile JA4 | Live capture from tls.peet.ws compared against TOML expectation, per browser | `live_ja4_exact_match_{chrome145,chrome146,chrome147,firefox150,safari18}` |
-| Every profile's H2 fingerprint matches its TOML value | Akamai H2 fingerprint asserted for all 10 profiles | `h2_fingerprints_match_toml_expectations`, `live_h2_akamai_every_profile` |
+| Every profile's H2 fingerprint matches its TOML value | Akamai H2 fingerprint asserted for all 14 profiles | `h2_fingerprints_match_toml_expectations`, `live_h2_akamai_every_profile` |
 | HTTP/2 pseudo-header order matches browser | Live capture, per browser | `live_chrome147_pseudo_header_order`, `live_firefox150_pseudo_header_order` |
 | TCP SYN differs by OS (JA4T) | TTL 64 on Linux, 128 on Windows, three-way distinguishable | `live_tcp_linux_ttl_is_64`, `live_tcp_windows_ttl_is_128`, `live_tcp_windows_distinguishable_from_linux` |
 | ALPS / cert compression / ALPN extensions present | Live tls.peet.ws inspection, per extension | `live_chrome147_has_alps_extension`, `live_chrome147_has_cert_compression` |

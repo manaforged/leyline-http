@@ -45,7 +45,7 @@ pub(super) async fn drain_stream_into_vec(
     while let Some(chunk) = bs.next().await {
         let chunk = chunk.map_err(Error::Io)?;
         if out.len() + chunk.len() > MAX_DECOMPRESSED {
-            return Err(Error::Http(format!(
+            return Err(Error::Body(format!(
                 "response body exceeds {MAX_DECOMPRESSED} bytes"
             )));
         }
@@ -81,8 +81,8 @@ fn decompress_single(body: Vec<u8>, encoding: &str) -> Result<Vec<u8>> {
         "zstd" => {
             #[cfg(feature = "compression-zstd")]
             {
-                let mut decoder =
-                    zstd::Decoder::new(&body[..]).map_err(|e| Error::Http(format!("zstd: {e}")))?;
+                let mut decoder = zstd::Decoder::new(&body[..])
+                    .map_err(|e| Error::Decode(format!("zstd: {e}")))?;
                 read_limited(&mut decoder, "zstd")
             }
             #[cfg(not(feature = "compression-zstd"))]
@@ -134,13 +134,13 @@ fn read_limited(reader: &mut impl Read, name: &str) -> Result<Vec<u8>> {
     loop {
         let n = reader
             .read(&mut buf)
-            .map_err(|e| Error::Http(format!("{name}: {e}")))?;
+            .map_err(|e| Error::Decode(format!("{name}: {e}")))?;
         if n == 0 {
             break;
         }
         out.extend_from_slice(&buf[..n]);
         if out.len() > MAX_DECOMPRESSED {
-            return Err(Error::Http(format!(
+            return Err(Error::Decode(format!(
                 "{name}: decompressed size exceeds {MAX_DECOMPRESSED} bytes"
             )));
         }

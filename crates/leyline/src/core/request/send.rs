@@ -6,6 +6,7 @@ use crate::core::error::Error;
 use crate::core::response::Response;
 use crate::core::retry::is_idempotent;
 use crate::core::Result;
+use crate::tls::TlsError;
 
 impl<'a> RequestBuilder<'a> {
     /// Send the request and return a buffered response.
@@ -210,6 +211,9 @@ impl<'a> RequestBuilder<'a> {
                     retry_policy.matches_connection_error()
                 }
                 Err(Error::Timeout) => retry_policy.matches_timeout(),
+                Err(Error::Tls(
+                    TlsError::TcpConnect(_) | TlsError::Dns(_) | TlsError::SslConnect(_),
+                )) => retry_policy.matches_connection_error(),
                 _ => false,
             };
 

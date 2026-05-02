@@ -11,6 +11,7 @@ use crate::core::body::Body;
 use crate::core::digest::DigestAuth;
 use crate::core::error::Error;
 use crate::core::headers::HeaderList;
+#[cfg(feature = "multipart")]
 use crate::core::multipart::Form;
 use crate::core::retry::RetryPolicy;
 use crate::core::session::Session;
@@ -325,6 +326,7 @@ impl<'a> RequestBuilder<'a> {
     }
 
     /// Send the request as `multipart/form-data`.
+    #[cfg(feature = "multipart")]
     pub fn multipart(mut self, form: Form) -> Self {
         self.headers.set("content-type", form.content_type());
         self.body = form.into_stream_body();
@@ -346,6 +348,12 @@ impl<'a> RequestBuilder<'a> {
     /// session-default proxy would be.
     pub fn proxy(mut self, proxy_url: &str) -> Self {
         self.proxy = Some(proxy_url.to_string());
+        self
+    }
+
+    /// Override the session proxy with a validated [`ProxyUrl`](crate::ProxyUrl).
+    pub fn proxy_url(mut self, proxy_url: crate::ProxyUrl) -> Self {
+        self.proxy = Some(proxy_url.into_string());
         self
     }
 }

@@ -141,7 +141,7 @@ async fn materialise_stream_body(body: Body) -> Result<Bytes> {
                 let chunk = chunk.map_err(Error::Io)?;
                 buf.extend_from_slice(&chunk);
                 if buf.len() > MAX_H1_BODY_BYTES {
-                    return Err(Error::Http(format!(
+                    return Err(Error::Body(format!(
                         "streaming request body exceeded {MAX_H1_BODY_BYTES} bytes"
                     )));
                 }
@@ -213,7 +213,7 @@ pub(crate) async fn send_request_h2(
         stream_response,
     )
     .await
-    .map_err(Error::Http)?;
+    .map_err(Error::Http2)?;
 
     let transport_body = match resp.body {
         crate::h2::client::ResponseBody::Buffered(b) => TransportBody::Buffered(b),
@@ -367,13 +367,14 @@ pub(crate) async fn send_request_h1(
 fn h1_error_to_core(e: H1PooledError) -> Error {
     match e {
         H1PooledError::Config(m) => Error::Config(m),
-        H1PooledError::Tls(m) => Error::Http(format!("tls: {m}")),
+        H1PooledError::Tls(m) => Error::Tls(crate::tls::TlsError::SslConnect(m)),
         H1PooledError::Io(io) => Error::Io(io),
         H1PooledError::Http(m) => Error::Http(m),
     }
 }
 
 /// Send an HTTP/3 request over QUIC.
+#[cfg(feature = "http3")]
 #[tracing::instrument(
     name = "transport.h3",
     level = "debug",
@@ -425,7 +426,7 @@ pub(crate) async fn send_request_h3(
         h3_config, profile, method, host, port, &full_path, headers, body_bytes,
     )
     .await
-    .map_err(Error::Http)?;
+    .map_err(Error::Http3)?;
 
     Ok(TransportResponse {
         status: resp.status,

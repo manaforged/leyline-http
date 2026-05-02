@@ -2,8 +2,8 @@ use std::sync::{Arc, LazyLock};
 
 use crate::cookie::Jar as CookieJar;
 use crate::core::{
-    CompressionConfig, DnsConfig, NoProxy, PoolConfig, ProxyConfig, ProxyRule, RedirectPolicy,
-    SocketConfig, TimeoutConfig, WebSocketConfig,
+    CompressionConfig, DnsConfig, NoProxy, PoolConfig, ProxyConfig, ProxyRule, ProxyUrl,
+    RedirectPolicy, SocketConfig, TimeoutConfig, WebSocketConfig,
 };
 use crate::h2::H2Config;
 use crate::pool::Pool;
@@ -16,6 +16,7 @@ use super::{AuditTlsCache, ProtocolPolicy, Session};
 use crate::core::error::{Error, Result};
 
 static PROFILES: LazyLock<ProfileRegistry> = LazyLock::new(ProfileRegistry::builtin);
+const DEFAULT_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
 /// Session builder - configure browser, platform, proxy, timeout, cookies.
 pub struct SessionBuilder {
@@ -37,7 +38,10 @@ pub struct SessionBuilder {
     cookie_jar: Option<CookieJar>,
     tcp_profile: Option<TcpProfile>,
     protocol_policy: ProtocolPolicy,
+    config_error: Option<String>,
     grease_seed: Option<Vec<u8>>,
+    accept_language_override: Option<String>,
+    extra_identity_headers: Vec<(String, String)>,
     accept_invalid_certs: bool,
     pool_idle_timeout: Option<std::time::Duration>,
     resolver: Option<Arc<dyn Resolver>>,
@@ -52,7 +56,7 @@ impl SessionBuilder {
             platform: Platform::default(),
             brand: ChromiumBrand::default(),
             proxy: None,
-            timeout: std::time::Duration::from_secs(30),
+            timeout: DEFAULT_REQUEST_TIMEOUT,
             max_redirects: 10,
             proxy_config: ProxyConfig::default(),
             dns_config: DnsConfig::default(),
@@ -66,7 +70,10 @@ impl SessionBuilder {
             cookie_jar: None,
             tcp_profile: None,
             protocol_policy: ProtocolPolicy::Auto,
+            config_error: None,
             grease_seed: None,
+            accept_language_override: None,
+            extra_identity_headers: Vec::new(),
             accept_invalid_certs: false,
             pool_idle_timeout: None,
             resolver: None,
@@ -78,6 +85,14 @@ impl SessionBuilder {
     /// Set a proxy URL (http:// with CONNECT tunnel).
     pub fn proxy(mut self, proxy: impl Into<String>) -> Self {
         let proxy = proxy.into();
+        self.proxy_config = self.proxy_config.with_rule(ProxyRule::all(proxy.clone()));
+        self.proxy = Some(proxy);
+        self
+    }
+
+    /// Set a validated proxy URL.
+    pub fn proxy_url(mut self, proxy: ProxyUrl) -> Self {
+        let proxy = proxy.into_string();
         self.proxy_config = self.proxy_config.with_rule(ProxyRule::all(proxy.clone()));
         self.proxy = Some(proxy);
         self
@@ -102,7 +117,7 @@ impl SessionBuilder {
         self
     }
 
-    /// Set request timeout (default: 30s).
+    /// Set request timeout (default: 5 minutes).
     pub fn timeout(mut self, timeout: std::time::Duration) -> Self {
         self.timeout = timeout;
         self.timeouts.total = timeout;
@@ -194,24 +209,24 @@ impl SessionBuilder {
 
     /// Apply a Chromium-family identity overlay (Edge, Brave, Opera).
     ///
-    /// Leaves TLS ClientHello and HTTP/2 SETTINGS untouched — those
+    /// Leaves TLS ClientHello and HTTP/2 SETTINGS untouched - those
     /// are byte-identical across Chromium siblings at a given
     /// Chromium version. What changes is a small set of HTTP
     /// identity headers:
     ///
-    /// - `user-agent` suffix — `Edg/NNN` for Edge, `OPR/NNN` for
+    /// - `user-agent` suffix - `Edg/NNN` for Edge, `OPR/NNN` for
     ///   Opera, unchanged for Brave (Brave matches Chrome's UA by
     ///   design).
-    /// - `sec-ch-ua` brand list — `"Microsoft Edge"`, `"Brave"`, or
+    /// - `sec-ch-ua` brand list - `"Microsoft Edge"`, `"Brave"`, or
     ///   `"Opera"` in place of `"Google Chrome"`. Opera additionally
     ///   uses the `"Not:A-Brand"` placeholder form.
-    /// - Extra privacy headers — `dnt: 1` for Edge, `sec-gpc: 1`
+    /// - Extra privacy headers - `dnt: 1` for Edge, `sec-gpc: 1`
     ///   for Brave.
-    /// - Navigation `accept` — Brave drops `signed-exchange;v=b3`
+    /// - Navigation `accept` - Brave drops `signed-exchange;v=b3`
     ///   because it disables signed exchanges by default.
     ///
     /// The brand setter is a no-op when applied to non-Chromium
-    /// profiles (Firefox, Safari, OkHttp) — the overlay only
+    /// profiles (Firefox, Safari, OkHttp) - the overlay only
     /// affects Chrome profiles. Opera is typically based on
     /// `Chromium N-2`; pair with `Browser::Chrome145` for Opera 129.
     pub fn brand(mut self, brand: ChromiumBrand) -> Self {
@@ -410,8 +425,19 @@ impl SessionBuilder {
     ///     .build()?;
     /// ```
     pub fn http3(mut self) -> Self {
-        self.protocol_policy = ProtocolPolicy::Http3;
-        self
+        #[cfg(not(feature = "http3"))]
+        {
+            self.config_error = Some(
+                "HTTP/3 support requires the `http3` feature; rebuild leyline with feature `http3`"
+                    .into(),
+            );
+            return self;
+        }
+        #[cfg(feature = "http3")]
+        {
+            self.protocol_policy = ProtocolPolicy::Http3;
+            self
+        }
     }
 
     /// Force HTTP/1.1.
@@ -431,8 +457,19 @@ impl SessionBuilder {
     /// This is a sequential compatibility policy today. It reserves the API
     /// shape for a future true parallel H2/H3 race.
     pub fn race(mut self) -> Self {
-        self.protocol_policy = ProtocolPolicy::Race;
-        self
+        #[cfg(not(feature = "http3"))]
+        {
+            self.config_error = Some(
+                "HTTP/3 race support requires the `http3` feature; rebuild leyline with feature `http3`"
+                    .into(),
+            );
+            return self;
+        }
+        #[cfg(feature = "http3")]
+        {
+            self.protocol_policy = ProtocolPolicy::Race;
+            self
+        }
     }
 
     /// Set the protocol selection policy.
@@ -455,14 +492,31 @@ impl SessionBuilder {
         self
     }
 
-    /// Disable peer certificate verification. **Dangerous** — any
+    /// Override the session's `accept-language` header for every request.
+    /// When not called, the browser profile's TOML identity value is used.
+    pub fn accept_language(mut self, lang: impl Into<String>) -> Self {
+        self.accept_language_override = Some(lang.into());
+        self
+    }
+
+    /// Append session-level default headers injected on every request after
+    /// the preset identity block. Use this to carry per-account client hints
+    /// (`device-memory`, `viewport-width`, `dpr`, etc.) without touching
+    /// every request site in the module. Per-request `.header()` calls and
+    /// preset-emitted names take precedence over these defaults.
+    pub fn extra_headers(mut self, headers: impl IntoIterator<Item = (String, String)>) -> Self {
+        self.extra_identity_headers.extend(headers);
+        self
+    }
+
+    /// Disable peer certificate verification. **Dangerous** - any
     /// man-in-the-middle between the client and the target can serve
     /// arbitrary content without detection. Intended only for the
     /// `leyline` CLI's `-k/--insecure` flag and controlled test
     /// fixtures against self-signed local servers.
     ///
     /// The method is named with a `danger_` prefix so it is grep-able
-    /// in audit reviews — if you see this called in production code,
+    /// in audit reviews - if you see this called in production code,
     /// that is itself a finding.
     pub fn danger_accept_invalid_certs(mut self, accept: bool) -> Self {
         self.accept_invalid_certs = accept;
@@ -471,16 +525,19 @@ impl SessionBuilder {
 
     /// Build the session.
     pub fn build(mut self) -> Result<Session> {
+        if let Some(error) = self.config_error.take() {
+            return Err(Error::Config(error));
+        }
+
         // Honour standard proxy environment variables when no explicit
-        // `proxy(..)` has been set. Matches reqwest / curl / Python
-        // requests behaviour: a CLI user exporting `HTTPS_PROXY` gets
-        // it picked up without re-plumbing the session. The
+        // `proxy(..)` has been set. A CLI user exporting `HTTPS_PROXY`
+        // gets it picked up without re-plumbing the session. The
         // precedence order is:
         //   1. Explicit `SessionBuilder::proxy(..)` (highest).
         //   2. `HTTPS_PROXY` (upper or lower case).
         //   3. `HTTP_PROXY` (upper or lower case).
         // `NO_PROXY` is honoured per-request in the transport layer
-        // — building the session with a proxy plus `NO_PROXY`
+        // Building the session with a proxy plus `NO_PROXY`
         // patterns means some hosts bypass it.
         if self.proxy.is_none() && self.proxy_config.uses_env() {
             if let Some(p) = env_proxy() {
@@ -488,14 +545,18 @@ impl SessionBuilder {
                 self.proxy = Some(p);
             }
         }
-        // HTTP/3 forbids proxies today — fail fast at build time instead of
+        // HTTP/3 forbids proxies today; fail fast at build time instead of
         // deferring to first request.
-        if (self.proxy.is_some() || self.proxy_config.first_proxy().is_some())
-            && matches!(self.protocol_policy, ProtocolPolicy::Http3)
+        #[cfg(feature = "http3")]
         {
-            return Err(Error::Config(
-                "HTTP/3 over proxies is not implemented; drop `.http3()` or `.proxy(...)`".into(),
-            ));
+            if (self.proxy.is_some() || self.proxy_config.first_proxy().is_some())
+                && matches!(self.protocol_policy, ProtocolPolicy::Http3)
+            {
+                return Err(Error::Config(
+                    "HTTP/3 over proxies is not implemented; drop `.http3()` or `.proxy(...)"
+                        .into(),
+                ));
+            }
         }
 
         let profile = PROFILES
@@ -609,12 +670,18 @@ impl SessionBuilder {
             brand: self.brand,
             user_agent: identity.user_agent,
             sec_ch_ua: identity.sec_ch_ua,
-            accept_language: identity
-                .accept_language
-                .unwrap_or_else(|| "en-US,en;q=0.9".to_string()),
+            accept_language: self.accept_language_override.unwrap_or_else(|| {
+                identity
+                    .accept_language
+                    .unwrap_or_else(|| "en-US,en;q=0.9".to_string())
+            }),
             brand_extra_headers,
             brand_navigate_accept,
-            identity_extra_headers: identity.extra_headers.clone(),
+            identity_extra_headers: {
+                let mut h = identity.extra_headers.clone();
+                h.extend(self.extra_identity_headers);
+                h
+            },
             identity_navigate_accept: identity.navigate_accept_override.clone(),
             identity_request_header_order: identity.request_header_order.clone(),
             proxy: self.proxy,
@@ -624,6 +691,7 @@ impl SessionBuilder {
             timeouts: self.timeouts,
             redirect_policy: self.redirect_policy,
             compression: self.compression,
+            #[cfg(feature = "websocket")]
             websocket_config: self.websocket_config,
             https_only: self.https_only,
             cookie_jar,
@@ -644,12 +712,14 @@ impl SessionBuilder {
                 ja4t,
             },
             protocol_policy: self.protocol_policy,
+            #[cfg(feature = "http3")]
             h3_config: match profile.meta.family.as_str() {
                 "chromium" => crate::quic::H3Config::chrome(),
                 "firefox" => crate::quic::H3Config::firefox(),
                 "safari" | "webkit" => crate::quic::H3Config::safari(),
                 _ => crate::quic::H3Config::chrome(),
             },
+            #[cfg(feature = "http3")]
             profile,
         })
     }

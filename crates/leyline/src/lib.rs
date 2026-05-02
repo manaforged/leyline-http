@@ -73,7 +73,7 @@
 
 use std::sync::{LazyLock, OnceLock};
 
-// ─── Internal modules (formerly separate crates) ────────────────────────────
+// Internal modules.
 pub mod audit;
 pub mod cookie;
 pub mod core;
@@ -81,28 +81,32 @@ pub mod h2;
 pub mod observe;
 pub mod pool;
 pub mod profile;
+#[cfg(feature = "http3")]
 pub mod quic;
 pub mod tcp;
 pub mod tls;
 pub mod tls_selftest;
 
-// ─── Public API re-exports ───────────────────────────────────────────────────
+// Public API re-exports.
 
 // Core types
 #[cfg(feature = "tower")]
 pub use crate::core::LeylineService;
+#[cfg(feature = "websocket")]
+pub use crate::core::WebSocketBuilder;
 pub use crate::core::{
     Body, BodyStream, CompressionConfig, DigestAuth, DnsConfig, Error, HeaderList, HttpVersion,
-    IntoParamPair, NoProxy, PoolConfig, ProtocolPolicy, ProxyConfig, ProxyRule, RedirectAction,
-    RedirectAttempt, RedirectPolicy, Request, RequestBuilder, Response, Result, RetryPolicy,
-    RetryTrigger, Session, SessionBuilder, SocketConfig, TimeoutConfig, WebSocketBuilder,
+    IntoParamPair, NoProxy, PoolConfig, ProtocolPolicy, ProxyConfig, ProxyRule, ProxyUrl,
+    RedirectAction, RedirectAttempt, RedirectPolicy, Request, RequestBuilder, Response, Result,
+    RetryPolicy, RetryTrigger, Session, SessionBuilder, SocketConfig, TimeoutConfig,
     WebSocketConfig,
 };
 
-/// Alias for users coming from `reqwest`/`wreq`.
+/// Short alias for the primary Leyline session type.
 pub type Client = Session;
 
 /// `multipart/form-data` bodies.
+#[cfg(feature = "multipart")]
 pub mod multipart {
     pub use crate::core::multipart::{Form, Part};
 }
@@ -116,7 +120,7 @@ pub use crate::profile::{
 // TCP fingerprinting
 pub use crate::tcp::TcpProfile;
 
-// Cookie jar — re-export at crate root for the high-traffic case.
+// Cookie jar - re-export at crate root for the high-traffic case.
 // Prefer `leyline::cookie::Jar` in module signatures; `leyline::CookieJar`
 // is kept as a convenience alias.
 pub use crate::cookie::Jar as CookieJar;
@@ -125,6 +129,7 @@ pub use crate::cookie::Jar as CookieJar;
 pub use crate::audit::AuditData;
 
 // WebSocket
+#[cfg(feature = "websocket")]
 pub use crate::core::WsConnection;
 
 // TLS context factory (re-exported so users don't need `leyline-tls` or
@@ -154,7 +159,7 @@ static PROFILES: LazyLock<crate::profile::ProfileRegistry> =
 /// ```
 pub fn profile(browser: Browser) -> &'static BrowserProfile {
     PROFILES.get_browser(browser).expect(
-        "built-in profile missing — registry integrity check in tests would have caught this",
+        "built-in profile missing - registry integrity check in tests would have caught this",
     )
 }
 
@@ -175,7 +180,7 @@ pub fn tls_context(browser: Browser) -> Result<SslContextBuilder> {
 
 /// Build a BoringSSL `SslContextBuilder` that produces a ClientHello
 /// matching the given browser over QUIC (HTTP/3). TLS 1.3 is pinned
-/// per RFC 9001 §4.2.
+/// per RFC 9001 section 4.2.
 ///
 /// ```rust,ignore
 /// use leyline::{quic_context, Browser};
@@ -183,14 +188,15 @@ pub fn tls_context(browser: Browser) -> Result<SslContextBuilder> {
 /// let mut cfg = leyline_quiche::Config::with_boring_ssl_ctx_builder(
 ///     leyline_quiche::PROTOCOL_VERSION, ctx)?;
 /// ```
+#[cfg(feature = "http3")]
 pub fn quic_context(browser: Browser) -> Result<SslContextBuilder> {
     build_ssl_context(profile(browser), TlsMinVersion::Tls13).map_err(Error::from)
 }
 
-// ─── Level 1: Zero-config functions ─────────────────────────────────────────
+// Zero-config functions.
 
 /// Lazily-built shared session behind the module-level helpers below.
-/// Construction failures are surfaced as a `Result` — the zero-config
+/// Construction failures are surfaced as a `Result`; the zero-config
 /// surface never panics on its own.
 fn default_session() -> Result<&'static Session> {
     static DEFAULT: OnceLock<Session> = OnceLock::new();
@@ -229,7 +235,7 @@ where
 }
 
 /// Raw GET with no preset headers applied. Prefer [`get`] for the common
-/// browser-like GET — `get` installs the Navigate preset (Sec-Fetch-Mode:
+/// browser-like GET - `get` installs the Navigate preset (Sec-Fetch-Mode:
 /// navigate etc.) the way a browser document-fetch would.
 pub async fn fetch(url: &str) -> Result<Response> {
     default_session()?.get(url).send().await
