@@ -27,10 +27,13 @@ include = [
     "/src/lib.rs",
     "/src/bindings/x86_64-pc-windows-msvc.rs",
     "/src/bindings/x86_64-unknown-linux-gnu.rs",
+    "/src/bindings/aarch64-apple-darwin.rs",
     "/native/x86_64-pc-windows-msvc/lib/crypto.lib",
     "/native/x86_64-pc-windows-msvc/lib/ssl.lib",
     "/native/x86_64-unknown-linux-gnu/lib/libcrypto.a",
     "/native/x86_64-unknown-linux-gnu/lib/libssl.a",
+    "/native/aarch64-apple-darwin/lib/libcrypto.a",
+    "/native/aarch64-apple-darwin/lib/libssl.a",
 ]
 
 [features]

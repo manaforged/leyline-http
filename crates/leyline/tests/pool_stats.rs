@@ -63,6 +63,6 @@ fn stats_snapshot_is_copy_and_comparable() {
 
 #[test]
 fn default_constants_are_sane() {
-    assert_eq!(DEFAULT_MAX_CONNECTIONS, 256);
+    assert_eq!(DEFAULT_MAX_CONNECTIONS, 2048);
     assert!(DEFAULT_IDLE_TIMEOUT >= Duration::from_secs(30));
 }

@@ -1,7 +1,11 @@
 use std::env;
 use std::path::{Path, PathBuf};
 
-const SUPPORTED_TARGETS: &[&str] = &["x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu"];
+const SUPPORTED_TARGETS: &[&str] = &[
+    "x86_64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-apple-darwin",
+];
 
 fn main() {
     println!("cargo:rerun-if-env-changed=BORING_BSSL_PATH");
@@ -50,6 +54,10 @@ fn main() {
     println!("cargo:rustc-link-lib=static=ssl");
     if target.ends_with("msvc") {
         println!("cargo:rustc-link-lib=advapi32");
+    } else if target.contains("apple") {
+        // macOS: BoringSSL pulls in libc++ (Apple's default) and pthreads
+        // are part of libSystem so no explicit pthread link needed.
+        println!("cargo:rustc-link-lib=c++");
     } else {
         // Linux: BoringSSL needs libstdc++ (or libc++) for the small amount
         // of C++ inside it, and pthread for sync primitives.
