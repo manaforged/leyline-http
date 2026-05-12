@@ -47,10 +47,18 @@ impl Session {
             stream_response,
             request_proxy,
         ));
-        match tokio::time::timeout(timeout, inner).await {
+        let result = match tokio::time::timeout(timeout, inner).await {
             Ok(result) => result,
             Err(_) => Err(Error::Timeout),
+        };
+        if let Err(ref e) = result {
+            crate::observe::notify_request_error(&crate::observe::RequestErrorSnapshot {
+                method,
+                url: raw_url,
+                error: &e.to_string(),
+            });
         }
+        result
     }
 
     #[tracing::instrument(

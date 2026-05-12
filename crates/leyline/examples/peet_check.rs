@@ -9,7 +9,7 @@ async fn main() {
         eprintln!("\n=== {browser:?} ===");
         let session = Session::builder().browser(browser).build().expect("build");
         let resp = session
-            .get("https://tls.browserleaks.com/json")
+            .get("https://tls.peet.ws/api/all")
             .send()
             .await
             .expect("fetch");

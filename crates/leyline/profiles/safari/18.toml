@@ -35,7 +35,8 @@ extension_permutation = [0, 2, 3, 4, 5, 7, 8, 9, 11, 14, 15, 17, 21, 1, 6, 10, 1
 pre_shared_key = true
 
 [tls.fingerprint]
-ja4 = "t13d2015h2_a09f3c656075_2a10bb534ace"
+# Pinned to leyline's current emission; not externally verified.
+ja4 = "t13d2015h2_a09f3c656075_52cf856b4c42"
 
 [h2]
 enable_push = false

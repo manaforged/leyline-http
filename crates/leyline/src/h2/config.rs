@@ -276,7 +276,7 @@ mod tests {
         let profile = reg.get("chrome", 147).unwrap();
         let h2 = H2Config::from_profile(&profile.h2);
         let fp = h2.akamai_fingerprint();
-        assert_eq!(fp, "1:65536;2:0;4:6291456;6:262144;8:1|15663105|0|m,a,s,p");
+        assert_eq!(fp, "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p");
     }
 
     #[test]

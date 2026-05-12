@@ -44,7 +44,11 @@ ech_grease = true
 pre_shared_key = true
 
 [tls.fingerprint]
-ja4 = "t13d1517h2_8daaf6152771_b6f405a00624"
+# Cold (no PSK cached) form — what a fresh test run produces. The warm
+# (with PSK) form `t13d1517h2_8daaf6152771_b6f405a00624` is what an
+# already-resumed connection observes. Live tests run cold, so the cold
+# form is the load-bearing assertion.
+ja4 = "t13d1516h2_8daaf6152771_d8a2da3f94cd"
 
 [h2]
 header_table_size = 65536

@@ -82,3 +82,44 @@ pub(crate) fn notify_response(snap: &ResponseSnapshot<'_>) {
         obs(snap);
     }
 }
+
+/// Snapshot of a request *failure* handed to the error observer. Fires
+/// for any `Err` returned by `execute_with_timeout` — TLS handshake
+/// failure, ALPN mismatch, H2 driver error, DNS, timeout, redirect
+/// policy break, body-replay refusal, etc. This is the diagnostic
+/// counterpart to [`ResponseSnapshot`]: when the request never reaches
+/// the response stage, callers still need to see *which* method+url
+/// failed and *with what error string*, not a truncated toast.
+#[derive(Debug)]
+pub struct RequestErrorSnapshot<'a> {
+    /// HTTP method as the caller requested it.
+    pub method: &'a str,
+    /// URL the caller tried to reach (pre-redirect).
+    pub url: &'a str,
+    /// `Display`-formatted error from `core::error::Error`.
+    pub error: &'a str,
+}
+
+/// Type alias for the request-error observer callback. Held in `Arc` so
+/// cheap to share across the global slot and any callers that want to
+/// keep a handle.
+pub type ErrorObserver = Arc<dyn Fn(&RequestErrorSnapshot<'_>) + Send + Sync + 'static>;
+
+static ERROR_OBSERVER: OnceLock<ErrorObserver> = OnceLock::new();
+
+/// Register the global request-error observer. First write wins;
+/// subsequent calls are no-ops.
+pub fn set_request_error_observer<F>(f: F)
+where
+    F: Fn(&RequestErrorSnapshot<'_>) + Send + Sync + 'static,
+{
+    let _ = ERROR_OBSERVER.set(Arc::new(f));
+}
+
+/// Internal: fire the error observer if one is registered. Called from
+/// the session execute path on every `Err` exit.
+pub(crate) fn notify_request_error(snap: &RequestErrorSnapshot<'_>) {
+    if let Some(obs) = ERROR_OBSERVER.get() {
+        obs(snap);
+    }
+}

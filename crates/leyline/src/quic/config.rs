@@ -68,8 +68,22 @@ impl H3Config {
             max_udp_payload_size: 1472,
             active_connection_id_limit: 4,
             dcid_length: 8,
-            qpack_max_table_capacity: 4096,
-            qpack_blocked_streams: 10,
+            // Advertised as 0 because leyline-quiche's QPACK decoder
+            // (h3/qpack/decoder.rs) is stubbed for the dynamic-table
+            // path — four `// TODO: implement dynamic table` branches
+            // return InvalidHeaderValue → QpackDecompressionFailed.
+            // Real Chrome advertises 65536/100, but we cannot until the
+            // fork's decoder lands dynamic-table support. RFC 9204 §3.1
+            // says an encoder MUST NOT emit dynamic-table references
+            // when the peer's advertised capacity is zero, so this
+            // forces Google's H3 server to use only static-table refs
+            // (which our decoder handles). Cloudflare's server happens
+            // to do that anyway — that's why live_h3_cloudflare passes
+            // either way and only live_h3_google exposed the gap.
+            // Once the fork's QPACK decoder is finished, bump these
+            // back to 65536/100 and reverify against Google.
+            qpack_max_table_capacity: 0,
+            qpack_blocked_streams: 0,
             max_field_section_size: 262_144,
             // 100 MiB default, same as the H1 path's cap.
             max_response_body_bytes: 100 * 1024 * 1024,

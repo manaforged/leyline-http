@@ -48,8 +48,10 @@ settings_order = [
 ]
 
 [tls.fingerprint]
-# Pinned to leyline's wire; not yet checked against a real iOS 15 Safari ClientHello.
-ja4 = "t13d2016h2_a09f3c656075_2a10bb534ace"
+# Pinned to leyline's current emission.
+# TODO: cross-reference against a real iOS 15 Safari ClientHello — the
+# pinned value is still leyline-self-referential, not externally verified.
+ja4 = "t13d2016h2_a09f3c656075_52cf856b4c42"
 
 [h2.fingerprint]
 akamai = "2:0;3:100;4:2097152;8:1;9:1|10420225|0|m,s,a,p"

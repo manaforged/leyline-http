@@ -303,6 +303,13 @@ async fn offline_http_connect_proxy_wire_bytes() {
 
 /// Stand up a SOCKS5 mock proxy on localhost, walk the client through the
 /// auth negotiation + CONNECT command, and verify the bytes match RFC 1928.
+///
+/// Gated on `feature = "socks"` because leyline compiles the SOCKS5 path
+/// out by default — without the gate the client returns
+/// `"SOCKS proxy support requires the 'socks' feature"` instantly and the
+/// spawned mock-server task hangs forever waiting on an `accept()` that
+/// never comes, deadlocking the test runner.
+#[cfg(feature = "socks")]
 #[tokio::test]
 async fn offline_socks5_proxy_wire_bytes() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -1331,6 +1338,10 @@ async fn live_http_connect_proxy() {
 
 /// SOCKS5 proxy: set $LEYLINE_TEST_SOCKS5_PROXY=socks5://user:pass@host:port
 /// to exercise this path. Uses the same assertion as the HTTP CONNECT variant.
+/// Gated on the `socks` feature for the same reason as
+/// `offline_socks5_proxy_wire_bytes` — the code path is compiled out by
+/// default.
+#[cfg(feature = "socks")]
 #[tokio::test]
 #[ignore = "live: needs network + $LEYLINE_TEST_SOCKS5_PROXY"]
 async fn live_socks5_proxy() {
