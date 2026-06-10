@@ -12,10 +12,20 @@ fn main() {
     println!("cargo:rerun-if-env-changed=BORING_BSSL_RUST_CPPLIB");
 
     let target = env::var("TARGET").expect("Cargo should set TARGET");
-    if !SUPPORTED_TARGETS.iter().any(|t| *t == target) {
+    if !SUPPORTED_TARGETS.iter().any(|t| *t == target) && env::var_os("BORING_BSSL_PATH").is_none()
+    {
         panic!(
-            "Leyline's local btls-sys shim has prebuilt BoringSSL artifacts only for {:?}; target {target} still needs a pregenerated binding/native-lib bundle.",
-            SUPPORTED_TARGETS
+            "\n\
+             Leyline's local btls-sys shim ships prebuilt BoringSSL only for {SUPPORTED_TARGETS:?},\n\
+             and the current target `{target}` is not one of them.\n\n\
+             To build for `{target}`, pick one:\n\
+               1. Point BORING_BSSL_PATH at a BoringSSL build for this target, e.g.\n\
+                    BORING_BSSL_PATH=/path/to/boringssl cargo build\n\
+               2. Fall back to the upstream source build: remove the\n\
+                  `[patch.crates-io] btls-sys = {{ path = \"crates/btls-sys\" }}` line from the\n\
+                  root Cargo.toml (this needs CMake, Perl, libclang, and Go on PATH).\n\
+               3. Add a prebuilt bundle for this target by running\n\
+                  scripts/package-bssl.sh on a host of this target.\n"
         );
     }
 

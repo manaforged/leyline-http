@@ -301,7 +301,7 @@ impl<'a> RequestBuilder<'a> {
 
     /// Set Basic auth for the Authorization header.
     pub fn basic_auth(mut self, username: &str, password: &str) -> Self {
-        let encoded = encode::base64_encode(&format!("{username}:{password}"));
+        let encoded = crate::util::base64_encode(&format!("{username}:{password}"));
         self.headers
             .set("authorization", format!("Basic {encoded}"));
         self

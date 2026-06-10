@@ -164,7 +164,7 @@ impl H2Config {
     ///
     /// Settings are stored in the order specified by `settings_order` so the
     /// wire format matches the profile's declared ordering.
-    pub fn from_profile(h2: &crate::profile::H2Profile) -> Self {
+    pub fn from_profile(h2: &crate::profile::H2Profile) -> Result<Self, crate::Error> {
         use std::collections::HashMap;
 
         // Collect all available settings into a lookup map.
@@ -194,33 +194,65 @@ impl H2Config {
             available.insert(SettingId::Unknown9, v);
         }
 
-        // Build settings in the declared order.
+        // Reject typo'd keys; a silently dropped key ships the wrong SETTINGS frame.
         let settings_order: Vec<SettingId> = h2
             .settings_order
             .iter()
-            .filter_map(|s| SettingId::parse_key(s))
-            .collect();
+            .map(|s| {
+                SettingId::parse_key(s).ok_or_else(|| {
+                    crate::Error::Config(format!("unknown H2 settings_order key: {s:?}"))
+                })
+            })
+            .collect::<Result<_, _>>()?;
 
+        // A valueless key is an ordering-only entry (e.g. Chrome 147 lists
+        // max_frame_size / max_concurrent_streams with no value); it is omitted.
         let settings: Vec<(SettingId, u32)> = settings_order
             .iter()
             .filter_map(|id| available.get(id).map(|v| (*id, *v)))
             .collect();
 
+        // pseudo_order must be exactly 4 known tokens; a short/typo'd list would
+        // silently keep a Chrome default slot, mis-fingerprinting Firefox/Safari.
+        if h2.pseudo_order.len() != 4 {
+            return Err(crate::Error::Config(format!(
+                "H2 pseudo_order must have exactly 4 entries, got {}",
+                h2.pseudo_order.len()
+            )));
+        }
         let mut pseudo_order = [
             PseudoOrder::Method,
             PseudoOrder::Authority,
             PseudoOrder::Scheme,
             PseudoOrder::Path,
         ];
-        for (i, s) in h2.pseudo_order.iter().enumerate().take(4) {
-            if let Some(p) = PseudoOrder::parse_key(s) {
-                pseudo_order[i] = p;
+        for (slot, s) in pseudo_order.iter_mut().zip(h2.pseudo_order.iter()) {
+            *slot = PseudoOrder::parse_key(s).ok_or_else(|| {
+                crate::Error::Config(format!("unknown H2 pseudo_order token: {s:?}"))
+            })?;
+        }
+        // Four *known* tokens is not enough — a duplicate means another
+        // pseudo-header is missing, and `build_pseudo_list` would emit
+        // one twice and drop the other (a malformed request, not just a
+        // wrong fingerprint).
+        for i in 1..pseudo_order.len() {
+            if pseudo_order[..i].contains(&pseudo_order[i]) {
+                return Err(crate::Error::Config(format!(
+                    "duplicate H2 pseudo_order token: {:?}",
+                    h2.pseudo_order[i]
+                )));
             }
         }
 
-        let initial_connection_window_size = h2.initial_connection_window_size.unwrap_or(65535);
+        // Missing window → no WINDOW_UPDATE (increment 0) → Akamai shows |0|.
+        let initial_connection_window_size =
+            h2.initial_connection_window_size.ok_or_else(|| {
+                crate::Error::Config(
+                    "H2 profile missing initial_connection_window_size".to_string(),
+                )
+            })?;
 
-        Self {
+        Ok(Self {
             settings,
             settings_order,
             pseudo_order,
@@ -233,7 +265,7 @@ impl H2Config {
             max_header_block_bytes: 256 * 1024,
             settings_flood_threshold: 20,
             settings_flood_window: Duration::from_secs(10),
-        }
+        })
     }
 
     /// Compute the Akamai-style H2 fingerprint string.
@@ -274,7 +306,16 @@ mod tests {
     fn chrome147_h2_fingerprint() {
         let reg = crate::profile::ProfileRegistry::builtin();
         let profile = reg.get("chrome", 147).unwrap();
-        let h2 = H2Config::from_profile(&profile.h2);
+        let h2 = H2Config::from_profile(&profile.h2).unwrap();
+        let fp = h2.akamai_fingerprint();
+        assert_eq!(fp, "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p");
+    }
+
+    #[test]
+    fn chrome148_h2_fingerprint() {
+        let reg = crate::profile::ProfileRegistry::builtin();
+        let profile = reg.get("chrome", 148).unwrap();
+        let h2 = H2Config::from_profile(&profile.h2).unwrap();
         let fp = h2.akamai_fingerprint();
         assert_eq!(fp, "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p");
     }
@@ -283,7 +324,7 @@ mod tests {
     fn firefox150_h2_fingerprint() {
         let reg = crate::profile::ProfileRegistry::builtin();
         let profile = reg.get("firefox", 150).unwrap();
-        let h2 = H2Config::from_profile(&profile.h2);
+        let h2 = H2Config::from_profile(&profile.h2).unwrap();
         let fp = h2.akamai_fingerprint();
         assert_eq!(fp, "1:65536;2:0;4:131072;5:16384|12517377|0|m,p,a,s");
     }
@@ -292,7 +333,7 @@ mod tests {
     fn okhttp_h2_fingerprint() {
         let reg = crate::profile::ProfileRegistry::builtin();
         let profile = reg.get("okhttp", 10).unwrap();
-        let h2 = H2Config::from_profile(&profile.h2);
+        let h2 = H2Config::from_profile(&profile.h2).unwrap();
         let fp = h2.akamai_fingerprint();
         assert_eq!(fp, "4:16777216|16711681|0|m,p,a,s");
     }
@@ -301,7 +342,7 @@ mod tests {
     fn safari18_h2_fingerprint() {
         let reg = crate::profile::ProfileRegistry::builtin();
         let profile = reg.get("safari", 18).unwrap();
-        let h2 = H2Config::from_profile(&profile.h2);
+        let h2 = H2Config::from_profile(&profile.h2).unwrap();
         let fp = h2.akamai_fingerprint();
         assert_eq!(fp, "2:0;3:100;4:2097152;8:1;9:1|10420225|0|m,s,a,p");
     }
@@ -310,7 +351,7 @@ mod tests {
     fn safari_ios18_h2_fingerprint() {
         let reg = crate::profile::ProfileRegistry::builtin();
         let profile = reg.get("safari-ios", 18).unwrap();
-        let h2 = H2Config::from_profile(&profile.h2);
+        let h2 = H2Config::from_profile(&profile.h2).unwrap();
         let fp = h2.akamai_fingerprint();
         assert_eq!(fp, "2:0;3:100;4:2097152;9:1|10420225|0|m,s,a,p");
     }
@@ -322,6 +363,7 @@ mod tests {
             ("chrome", 145),
             ("chrome", 146),
             ("chrome", 147),
+            ("chrome", 148),
             ("firefox", 148),
             ("safari", 18),
             ("safari-ios", 15),
@@ -334,7 +376,7 @@ mod tests {
                 .get(browser.0, browser.1)
                 .unwrap_or_else(|| panic!("missing profile: {} {}", browser.0, browser.1));
             if let Some(expected) = profile.expected_h2_fingerprint() {
-                let h2 = H2Config::from_profile(&profile.h2);
+                let h2 = H2Config::from_profile(&profile.h2).unwrap();
                 let actual = h2.akamai_fingerprint();
                 assert_eq!(
                     actual, expected,

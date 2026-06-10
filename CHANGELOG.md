@@ -9,7 +9,74 @@ until 1.0 — pin exact versions.
 
 ## Unreleased
 
+### Added
+
+- **Chrome 148 profile (`Browser::Chrome148`).** Verified against
+  tls.peet.ws on 2026-06-09 (Windows capture): wire-identical to Chrome
+  147 — same cipher list, extension set, signature algorithms, supported
+  groups, JA4 (`t13d1516h2_8daaf6152771_d8a2da3f94cd` cold), and Akamai-H2
+  fingerprint (`1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p`). Only
+  HTTP identity differs: the `Chrome/148` UA token and the rotated
+  `sec-ch-ua` brand list (`"Chromium";v="148", "Google Chrome";v="148",
+  "Not/A)Brand";v="99"`). `Browser::default_browser()` /
+  `Session::chrome_latest()` / `Session::new()` now resolve to Chrome 148;
+  pin `Browser::Chrome147` via the builder for the prior version.
+
+### Changed
+
+- **Response fingerprint introspection is now opt-in (`SessionBuilder::audit`).**
+  Off by default. When off, the execute path skips cloning the request
+  headers, `Response::request_headers()` returns empty, and
+  `Response::audit()` returns `None` — so high-throughput callers that never
+  introspect pay nothing on the hot path (previously every response cloned its
+  request header vec and built the audit block eagerly). Call
+  `Session::builder().audit(true)` to populate `audit()` (JA3/JA4/JA4H/JA4T/H2)
+  and `request_headers()`. A registered `observe` response observer implies
+  header retention regardless, since its snapshot borrows them. **Migration:**
+  any caller that reads `resp.audit()` or `resp.request_headers()` must now set
+  `.audit(true)` on the session builder.
+
+- **Pool + socket defaults tuned for long-lived sessions.**
+  `DEFAULT_IDLE_TIMEOUT` 90s → 300s (matches Chrome's
+  `kUsedIdleSocketTimeout`), `DEFAULT_MAX_CONNECTIONS` 256 → 2048, and
+  `SocketConfig` now enables kernel TCP keepalive by default
+  (60s idle / 30s interval / 3 probes). Long-lived /
+  persistent client workloads keep one pool entry per
+  `(host, proxy)` pair and previously had to run app-level keep-alive
+  pings just to outrun the 90s reaper and the 256-entry LRU. Override
+  via `Session::builder().pool_limits(idle, max)` /
+  `.tcp_keepalive(..)`, or set `SocketConfig.tcp_keepalive = None` to
+  disable kernel keepalive. ~2048 × ~50 KB ≈ 100 MB pool ceiling per
+  session.
+
 ### Fixed
+
+- **Env-inherited `NO_PROXY` no longer bypasses explicitly-set proxies.**
+  `ProxyConfig::proxy_for` checked the no-proxy matcher before any proxy
+  resolution, and the matcher defaults to the `NO_PROXY` env var — so a
+  stray `NO_PROXY` on the box silently turned per-request and session
+  proxies DIRECT (a real-IP leak for proxied traffic). No-proxy gating is
+  now scoped by provenance: env-inherited patterns only bypass
+  env-discovered proxies; a matcher set via `.no_proxy(...)` keeps the
+  old bypass-everything semantics.
+
+- **`danger_accept_invalid_certs` builds even when the system trust
+  store is unloadable.** The Windows trust-store hard-fail introduced in
+  the hardening wave ran during context build, before
+  `set_accept_invalid_certs` was applied — so a machine with a broken
+  ROOT hive could not build a `-k` session at all. Verification-disabled
+  sessions now skip system trust wiring entirely.
+
+- **TLS session-ticket cache recovers from mutex poison on the write
+  side too.** The read side recovered but the `new_session_callback`
+  still dropped tickets on a poisoned lock, so one poison event
+  permanently downgraded every later handshake to the cold
+  (non-resumed) JA4. Both sites now share one recovering lock helper.
+
+- **`H2Config::from_profile` rejects duplicate `pseudo_order` tokens.**
+  Four known tokens with a duplicate (e.g. `:method` twice, no
+  `:authority`) passed validation and would emit a malformed
+  pseudo-header list.
 
 - **h2: `FrameReader::next` is now cancel-safe.** The actor-model
   driver polls `reader.next()` in a biased `tokio::select!` alongside a

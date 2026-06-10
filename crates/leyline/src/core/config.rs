@@ -108,6 +108,11 @@ impl From<ProxyUrl> for String {
 pub struct ProxyConfig {
     rules: Vec<ProxyRule>,
     no_proxy: NoProxy,
+    /// `true` when the matcher was set via [`Self::no_proxy`] (deliberate
+    /// caller config) rather than inherited from the `NO_PROXY` env var.
+    /// Env-derived patterns only gate env-derived proxies — they must
+    /// never silently turn an explicitly-proxied request DIRECT.
+    no_proxy_explicit: bool,
     use_env: bool,
 }
 
@@ -116,6 +121,7 @@ impl std::fmt::Debug for ProxyConfig {
         f.debug_struct("ProxyConfig")
             .field("rules", &self.rules)
             .field("no_proxy", &self.no_proxy)
+            .field("no_proxy_explicit", &self.no_proxy_explicit)
             .field("use_env", &self.use_env)
             .finish()
     }
@@ -126,6 +132,7 @@ impl Default for ProxyConfig {
         Self {
             rules: Vec::new(),
             no_proxy: NoProxy::from_env().unwrap_or_default(),
+            no_proxy_explicit: false,
             use_env: true,
         }
     }
@@ -149,9 +156,13 @@ impl ProxyConfig {
         self
     }
 
-    /// Replace the no-proxy matcher.
+    /// Replace the no-proxy matcher. A matcher set here is *explicit*:
+    /// it bypasses any configured proxy, including per-request overrides.
+    /// (The env-inherited `NO_PROXY` default only gates env-derived
+    /// proxies — see [`Self::proxy_for`].)
     pub fn no_proxy(mut self, no_proxy: NoProxy) -> Self {
         self.no_proxy = no_proxy;
+        self.no_proxy_explicit = true;
         self
     }
 
@@ -173,7 +184,7 @@ impl ProxyConfig {
 
     /// Select a proxy URL for a request.
     ///
-    /// Resolution order (after NO_PROXY filtering):
+    /// Resolution order:
     ///   1. `request_override` - caller passed `.proxy(...)` on the
     ///      RequestBuilder; that's an explicit per-request choice and
     ///      wins over any rule or session default. This is what enables
@@ -182,24 +193,41 @@ impl ProxyConfig {
     ///   2. Configured `rules` matching the URL scheme.
     ///   3. `session_default` - the session's `.proxy(...)` value, used
     ///      only when no rule matched.
+    ///
+    /// No-proxy gating is scoped by provenance: a matcher set via
+    /// [`Self::no_proxy`] bypasses any of the three; the env-inherited
+    /// `NO_PROXY` default only bypasses proxies that were themselves
+    /// discovered from the environment (`session_proxy_from_env`). A
+    /// stray `NO_PROXY` on the box must never silently turn an
+    /// explicitly-proxied request DIRECT — for proxied traffic that is a
+    /// real-IP leak, not a convenience.
     pub(crate) fn proxy_for<'a>(
         &'a self,
         url: &url::Url,
         request_override: Option<&'a str>,
         session_default: Option<&'a str>,
+        session_proxy_from_env: bool,
     ) -> Option<&'a str> {
         let host = url.host_str().unwrap_or("");
-        if self.no_proxy.matches(host) {
-            return None;
-        }
         if let Some(p) = request_override {
+            if self.no_proxy_explicit && self.no_proxy.matches(host) {
+                return None;
+            }
             return Some(p);
         }
-        self.rules
+        let winner = self
+            .rules
             .iter()
             .find(|rule| rule.matches(url.scheme()))
             .map(|rule| rule.url.as_str())
-            .or(session_default)
+            .or(session_default)?;
+        // When the env proxy was injected at session build, it is the
+        // only rule and the session default (injection is skipped as
+        // soon as any explicit proxy exists) — so one flag covers both.
+        if (self.no_proxy_explicit || session_proxy_from_env) && self.no_proxy.matches(host) {
+            return None;
+        }
+        Some(winner)
     }
 }
 
@@ -443,7 +471,7 @@ impl PoolConfig {
 }
 
 /// Socket-level direct-connect options.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SocketConfig {
     /// Bind every direct socket to this local address.
     pub local_address: Option<IpAddr>,
@@ -453,11 +481,19 @@ pub struct SocketConfig {
     pub local_ipv6: Option<Ipv6Addr>,
     /// Override TCP_NODELAY after the browser TCP profile is applied.
     pub tcp_nodelay: Option<bool>,
-    /// TCP keepalive idle time.
+    /// TCP keepalive idle time. Default 60s — kernel sends a
+    /// keepalive probe after the socket has been idle this long.
+    /// Cheap (one packet, no syscall on our side) and keeps NAT /
+    /// load-balancer flow tables from pruning the connection
+    /// during idle gaps that happen between long-lived requests
+    /// (long-lived pools).
+    /// Set to `None` to disable kernel keepalive entirely.
     pub tcp_keepalive: Option<Duration>,
-    /// TCP keepalive interval.
+    /// TCP keepalive interval between probes once idle expires.
+    /// Default 30s.
     pub tcp_keepalive_interval: Option<Duration>,
-    /// TCP keepalive probe count.
+    /// TCP keepalive probe count before the kernel drops the
+    /// connection. Default 3 probes (matches Linux default).
     pub tcp_keepalive_retries: Option<u32>,
     /// TCP user timeout.
     pub tcp_user_timeout: Option<Duration>,
@@ -469,6 +505,29 @@ pub struct SocketConfig {
     pub interface: Option<String>,
     /// Treat socket-option failures as hard errors.
     pub strict: bool,
+}
+
+impl Default for SocketConfig {
+    fn default() -> Self {
+        Self {
+            local_address: None,
+            local_ipv4: None,
+            local_ipv6: None,
+            tcp_nodelay: None,
+            // Kernel-level keepalive on by default — long-lived
+            // sessions (long-lived pools) need their
+            // sockets to survive idle gaps without app-level pings,
+            // and one keepalive probe every 60s is invisibly cheap.
+            tcp_keepalive: Some(Duration::from_secs(60)),
+            tcp_keepalive_interval: Some(Duration::from_secs(30)),
+            tcp_keepalive_retries: Some(3),
+            tcp_user_timeout: None,
+            send_buffer_size: None,
+            recv_buffer_size: None,
+            interface: None,
+            strict: false,
+        }
+    }
 }
 
 /// Redirect follow policy.
@@ -664,25 +723,54 @@ impl WebSocketConfig {
 }
 
 fn normalize_host(host: &str) -> String {
-    host.trim()
-        .trim_start_matches('[')
-        .trim_end_matches(']')
-        .split(':')
-        .next()
-        .unwrap_or(host)
-        .trim_matches('.')
-        .to_ascii_lowercase()
+    let stripped = host.trim().trim_end_matches('.');
+    // Strip a matching `[` `]` pair around IPv6 literals — `url::Host`
+    // rejects bracketed input, and NO_PROXY accepts both `[::1]` and
+    // `::1` forms. Only strip when both brackets are present.
+    let stripped = stripped
+        .strip_prefix('[')
+        .and_then(|s| s.strip_suffix(']'))
+        .unwrap_or(stripped);
+    let lowered = stripped.to_ascii_lowercase();
+    // `url::Host` canonicalises IP literals (collapsing `::` runs) and
+    // IDN domains, so `::1`/`fe80::1` survive instead of being mangled
+    // by a naive `split(':')`.
+    match url::Host::parse(&lowered) {
+        Ok(url::Host::Domain(d)) => d,
+        Ok(url::Host::Ipv4(a)) => a.to_string(),
+        Ok(url::Host::Ipv6(a)) => a.to_string(),
+        Err(_) => lowered,
+    }
 }
 
 fn pattern_matches(host: &str, raw: &str) -> bool {
-    let pattern = normalize_host(raw);
-    if pattern == "*" {
+    let mut pat = raw.trim().to_string();
+    if pat.is_empty() {
+        return false;
+    }
+    if pat == "*" {
         return true;
     }
-    if let Some(suffix) = pattern.strip_prefix('.') {
-        return host == suffix || host.ends_with(&format!(".{suffix}"));
+    // Strip a `:port` suffix while leaving bare IPv6 literals (two or
+    // more colons, unbracketed) untouched — `[::1]:8080` and
+    // `example.com:443` lose the port; `::1` does not.
+    if pat.starts_with('[') {
+        if let Some(end) = pat.find("]:") {
+            let suffix = &pat[end + 2..];
+            if !suffix.is_empty() && suffix.bytes().all(|b| b.is_ascii_digit()) {
+                pat.truncate(end + 1); // keep the trailing `]`
+            }
+        }
+    } else if pat.matches(':').count() == 1 {
+        if let Some(idx) = pat.rfind(':') {
+            if pat[idx + 1..].bytes().all(|b| b.is_ascii_digit()) {
+                pat.truncate(idx);
+            }
+        }
     }
-    host == pattern || host.ends_with(&format!(".{pattern}"))
+    let pat = normalize_host(&pat);
+    let needle = pat.strip_prefix('.').unwrap_or(&pat);
+    host == needle || host.ends_with(&format!(".{needle}"))
 }
 
 #[cfg(test)]
@@ -696,6 +784,123 @@ mod tests {
         assert!(no_proxy.matches("127.0.0.1"));
         assert!(no_proxy.matches("[::1]"));
         assert!(!no_proxy.matches("other.test"));
+    }
+
+    #[test]
+    fn no_proxy_ipv6_literal_matches_bare_host() {
+        // Naive `split(':')` truncation collapsed `::1` to an empty
+        // string, silently breaking loopback bypass for IPv6. The
+        // bracketed and bare pattern forms must match a bracketless
+        // IPv6 URL host.
+        assert!(NoProxy::from_string("::1").unwrap().matches("::1"));
+        assert!(NoProxy::from_string("[::1]").unwrap().matches("::1"));
+        assert!(NoProxy::from_string("[::1]:8080").unwrap().matches("::1"));
+        assert!(NoProxy::from_string("fe80::1").unwrap().matches("fe80::1"));
+        assert!(NoProxy::from_string("2001:db8::1,192.0.2.0")
+            .unwrap()
+            .matches("2001:db8::1"));
+    }
+
+    #[test]
+    fn no_proxy_ipv6_bracketed_host_matches_pattern() {
+        // `url::Host::parse` rejects brackets; the normaliser strips
+        // them so `[::1]` on either side compares equal to `::1`.
+        assert!(NoProxy::from_string("::1").unwrap().matches("[::1]"));
+        assert!(NoProxy::from_string("[::1]").unwrap().matches("[::1]"));
+    }
+
+    #[test]
+    fn no_proxy_ipv4_port_stripping_still_works() {
+        assert!(NoProxy::from_string("192.0.2.1:8080")
+            .unwrap()
+            .matches("192.0.2.1"));
+        assert!(NoProxy::from_string("example.com:443")
+            .unwrap()
+            .matches("example.com"));
+        assert!(NoProxy::from_string(".example.com:443")
+            .unwrap()
+            .matches("sub.example.com"));
+    }
+
+    #[test]
+    fn no_proxy_does_not_match_unrelated_ipv6() {
+        // Critical negative: `::1` must NOT match `::2`. Guard against
+        // bare IPv6 patterns collapsing to a value that matches every
+        // IPv6 host.
+        assert!(!NoProxy::from_string("::1").unwrap().matches("::2"));
+        assert!(!NoProxy::from_string("2001:db8::1")
+            .unwrap()
+            .matches("2001:db8::2"));
+    }
+
+    // ── no-proxy provenance gates ──
+    //
+    // Env-inherited NO_PROXY may only bypass env-discovered proxies. A
+    // stray NO_PROXY on the box silently turning explicitly-proxied
+    // proxied traffic DIRECT is a real-IP leak, not a convenience.
+
+    /// A config whose `no_proxy` came from the environment (not the
+    /// `.no_proxy()` builder).
+    fn cfg_with_env_no_proxy(patterns: &str) -> ProxyConfig {
+        ProxyConfig {
+            rules: Vec::new(),
+            no_proxy: NoProxy::from_string(patterns).unwrap(),
+            no_proxy_explicit: false,
+            use_env: true,
+        }
+    }
+
+    #[test]
+    fn env_no_proxy_never_bypasses_explicit_proxies() {
+        let cfg = cfg_with_env_no_proxy("target.test");
+        let url = url::Url::parse("https://target.test/x").unwrap();
+        assert_eq!(
+            cfg.proxy_for(&url, Some("http://req:1"), None, false),
+            Some("http://req:1"),
+            "env NO_PROXY bypassed a per-request proxy override"
+        );
+        assert_eq!(
+            cfg.proxy_for(&url, None, Some("http://sess:1"), false),
+            Some("http://sess:1"),
+            "env NO_PROXY bypassed an explicit session proxy"
+        );
+        let cfg = cfg_with_env_no_proxy("target.test").all("http://rule:1");
+        assert_eq!(
+            cfg.proxy_for(&url, None, None, false),
+            Some("http://rule:1"),
+            "env NO_PROXY bypassed an explicit proxy rule"
+        );
+    }
+
+    #[test]
+    fn env_no_proxy_bypasses_env_derived_proxy() {
+        let cfg = cfg_with_env_no_proxy("target.test");
+        let url = url::Url::parse("https://target.test/x").unwrap();
+        assert_eq!(cfg.proxy_for(&url, None, Some("http://env:1"), true), None);
+        // Non-matching hosts still go through the env proxy.
+        let other = url::Url::parse("https://other.test/x").unwrap();
+        assert_eq!(
+            cfg.proxy_for(&other, None, Some("http://env:1"), true),
+            Some("http://env:1")
+        );
+    }
+
+    #[test]
+    fn explicit_no_proxy_bypasses_all_proxies() {
+        // Set via the builder method → deliberate config → gates
+        // everything, per-request overrides included (curl --noproxy
+        // semantics, and the pre-fix behaviour for explicit users).
+        let cfg = ProxyConfig::new().no_proxy(NoProxy::from_string("target.test").unwrap());
+        let url = url::Url::parse("https://target.test/x").unwrap();
+        assert_eq!(cfg.proxy_for(&url, Some("http://req:1"), None, false), None);
+        assert_eq!(
+            cfg.proxy_for(&url, None, Some("http://sess:1"), false),
+            None
+        );
+        assert_eq!(
+            cfg.all("http://rule:1").proxy_for(&url, None, None, false),
+            None
+        );
     }
 
     #[test]

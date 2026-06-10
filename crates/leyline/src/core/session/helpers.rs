@@ -4,7 +4,7 @@ use crate::profile::{Browser, ChromiumBrand, Platform, Preset};
 use super::{Session, SessionBuilder};
 use crate::core::request::RequestBuilder;
 use crate::core::response::Response;
-use crate::core::{IntoParamPair, Result};
+use crate::core::{Body, IntoParamPair, Result};
 
 impl Session {
     /// Create a new session builder.
@@ -20,7 +20,7 @@ impl Session {
         Self::chrome_latest()
     }
 
-    /// Shortcut to the latest bundled Chrome profile (currently Chrome 147
+    /// Shortcut to the latest bundled Chrome profile (currently Chrome 148
     /// on Windows). Bumps silently when a new Chrome profile is added —
     /// pin [`Browser::Chrome147`] via the builder if you need a specific
     /// version across releases.
@@ -60,9 +60,16 @@ impl Session {
         Self::safari_latest()
     }
 
-    /// Microsoft Edge on the latest Chromium profile.
+    /// Microsoft Edge on the latest Chromium profile we have a verified
+    /// overlay for (currently Chrome 147). Pinned to the verified sibling
+    /// anchor rather than the global Chrome default (148) — we have no
+    /// Edge 148 capture, and the overlay must not guess its GREASE brand
+    /// token.
     pub fn edge_latest() -> Result<Self> {
-        Self::builder().brand(ChromiumBrand::Edge).build()
+        Self::builder()
+            .browser(Browser::Chrome147)
+            .brand(ChromiumBrand::Edge)
+            .build()
     }
 
     /// Alias for [`Session::edge_latest`].
@@ -88,7 +95,10 @@ impl Session {
     /// for (currently Chrome 147 / Opera 131). Track the Opera anchor
     /// table in [`crate::profile::ChromiumBrand`] when bumping.
     pub fn opera_latest() -> Result<Self> {
-        Self::builder().brand(ChromiumBrand::Opera).build()
+        Self::builder()
+            .browser(Browser::Chrome147)
+            .brand(ChromiumBrand::Opera)
+            .build()
     }
 
     /// Alias for [`Session::opera_latest`].
@@ -101,7 +111,10 @@ impl Session {
     /// deliberately omits its own brand from `sec-ch-ua` by default;
     /// the overlay reflects that.
     pub fn vivaldi_latest() -> Result<Self> {
-        Self::builder().brand(ChromiumBrand::Vivaldi).build()
+        Self::builder()
+            .browser(Browser::Chrome147)
+            .brand(ChromiumBrand::Vivaldi)
+            .build()
     }
 
     /// Alias for [`Session::vivaldi_latest`].
@@ -283,14 +296,39 @@ impl Session {
         self.get(url).preset(Preset::Navigate).send().await
     }
 
-    /// GET with the Script preset applied.
+    /// GET a sub-resource with the Script preset applied — the request
+    /// looks like a browser `<script src=…>` / stylesheet load
+    /// (Sec-Fetch-Dest: script, no-cors). Returns a fully-executed
+    /// `Response`; use [`get`](Self::get) + `.preset(Preset::Script)` if
+    /// you need to chain extra headers first.
+    ///
+    /// ```rust,ignore
+    /// let js = session.get_script(url).await?.text();
+    /// ```
     pub async fn get_script(&self, url: &str) -> Result<Response> {
         self.get(url).preset(Preset::Script).send().await
+    }
+
+    /// GET with the XHR preset applied — the request looks like a
+    /// browser `fetch()` / `XMLHttpRequest` (Sec-Fetch-Mode: cors,
+    /// Sec-Fetch-Dest: empty). Returns a fully-executed `Response`; use
+    /// [`get`](Self::get) + `.preset(Preset::Xhr)` to chain headers first.
+    pub async fn get_xhr(&self, url: &str) -> Result<Response> {
+        self.get(url).preset(Preset::Xhr).send().await
     }
 
     /// POST a JSON body with the XHR preset applied.
     pub async fn post_json(&self, url: &str, body: &impl serde::Serialize) -> Result<Response> {
         self.post(url).preset(Preset::Xhr).json(body).send().await
+    }
+
+    /// POST a raw body with the XHR preset applied — the non-JSON
+    /// `fetch()`/`XMLHttpRequest` case (e.g. a `text/plain`
+    /// payload). Returns a fully-executed `Response`; use
+    /// [`post`](Self::post) + `.preset(Preset::Xhr)` to chain a custom
+    /// content-type / referer before sending.
+    pub async fn post_xhr(&self, url: &str, body: impl Into<Body>) -> Result<Response> {
+        self.post(url).preset(Preset::Xhr).body(body).send().await
     }
 
     /// POST URL-encoded form data with the Form preset applied.

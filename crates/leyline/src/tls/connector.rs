@@ -104,12 +104,29 @@ impl FingerprintConnector {
         builder.set_new_session_callback(move |ssl, session| {
             if let Some(hostname) = ssl.servername(NameType::HOST_NAME) {
                 if let Ok(der) = session.to_der() {
-                    if let Ok(mut cache) = cache_clone.lock() {
-                        cache.put(hostname.to_string(), der);
-                    }
+                    // Recover from poison like the read side does — a
+                    // silently-dropped ticket means every later handshake
+                    // to this host presents the cold (non-resumed) JA4.
+                    lock_unpoisoned(&cache_clone).put(hostname.to_string(), der);
                 }
             }
         });
+
+        // btls-sys 0.5.5 can't apply these profile knobs (no FFI symbol); warn
+        // once so the wire-vs-profile gap is observable.
+        if tls.extension_permutation.is_some()
+            || grease_seed.is_some()
+            || tls.ech_grease_payload_len.is_some()
+        {
+            tracing::warn!(
+                target: "leyline::tls",
+                extension_permutation = tls.extension_permutation.is_some(),
+                grease_seed = grease_seed.is_some(),
+                ech_grease_payload_len = tls.ech_grease_payload_len.is_some(),
+                "profile requests TLS fingerprint knobs btls-sys 0.5.5 cannot apply; \
+                 wire ClientHello will differ from the profile"
+            );
+        }
 
         Ok(Self {
             ssl_connector: builder.build(),
@@ -306,7 +323,10 @@ impl FingerprintConnector {
         }
 
         // Session resumption — install cached session ticket before handshake.
-        if let Ok(mut cache) = self.session_cache.lock() {
+        // Recover from a poisoned lock rather than silently skipping resumption
+        // (a skip downgrades a resumed JA4 to the cold form, changing the fp).
+        {
+            let mut cache = lock_unpoisoned(&self.session_cache);
             if let Some(der) = cache.get(host).cloned() {
                 if let Ok(session) = SslSession::from_der(&der) {
                     // SAFETY: BoringSSL requires `set_session` to be
@@ -328,21 +348,14 @@ impl FingerprintConnector {
             ssl.set_enable_ech_grease(true);
         }
 
-        // Fixed extension permutation (Firefox/Safari deterministic order).
-        // btls-unimplemented: SSL_set_extension_permutation_fixed is a C patch
-        // present in our former vendor tree but absent from btls-sys 0.5.5.
-        // The context-level set_permute_extensions (random order, wired in
-        // builder.rs) remains active; fixed per-connection ordering is a no-op
-        // until btls exposes the symbol.
-        let _ = &self.extension_permutation;
-
-        // Deterministic GREASE seed (stable fingerprint per identity).
-        // btls-unimplemented: SSL_set_grease_seed absent from btls-sys 0.5.5.
-        let _ = &self.grease_seed;
-
-        // Fixed ECH GREASE payload length.
-        // btls-unimplemented: SSL_set_ech_grease_payload_len absent from btls-sys 0.5.5.
-        let _ = &self.ech_grease_payload_len;
+        // extension_permutation / grease_seed / ech_grease_payload_len are
+        // profile knobs btls-sys 0.5.5 can't apply (warned at construction,
+        // ); read here so the fields aren't flagged dead.
+        let _ = (
+            &self.extension_permutation,
+            &self.grease_seed,
+            &self.ech_grease_payload_len,
+        );
 
         // TLS handshake. tokio-btls::SslStream::connect requires Pin<&mut Self>;
         // TcpStream is Unpin so we can pin on the stack.
@@ -377,5 +390,44 @@ impl std::fmt::Debug for FingerprintConnector {
             .field("tcp_profile", &self.tcp_profile)
             .field("ech_grease", &self.ech_grease)
             .finish_non_exhaustive()
+    }
+}
+
+/// Lock the session-ticket cache, recovering from a poisoned mutex.
+///
+/// Both cache sites must use this: the read side (skipping = cold JA4 on
+/// a connection that should resume) and the write side (skipping = every
+/// later handshake to that host presents the cold JA4). The cache holds
+/// plain DER blobs, so the worst poison outcome is a stale ticket — far
+/// better than a permanent fingerprint downgrade.
+fn lock_unpoisoned<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|poisoned| {
+        tracing::warn!(
+            target: "leyline::tls",
+            "session cache mutex was poisoned; recovering"
+        );
+        poisoned.into_inner()
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::lock_unpoisoned;
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn lock_unpoisoned_recovers_after_panic() {
+        let cache = Arc::new(Mutex::new(vec![1u8]));
+        let poisoner = cache.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = poisoner.lock().unwrap();
+            panic!("poison the mutex");
+        })
+        .join();
+        assert!(cache.is_poisoned(), "test setup failed to poison the mutex");
+
+        // Both the read and write paths must keep working.
+        lock_unpoisoned(&cache).push(2);
+        assert_eq!(*lock_unpoisoned(&cache), vec![1, 2]);
     }
 }

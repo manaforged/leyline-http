@@ -17,7 +17,6 @@ use crate::h2::client::{self, DriverTask, H2Client};
 use crate::h2::config::{H2Config, PseudoOrder, SettingId};
 use crate::h2::error::{ErrorCode, H2Error};
 use crate::h2::hpack;
-use crate::h2::stream_state::StreamState;
 
 /// Peer SETTINGS (received from server).
 #[derive(Debug, Clone)]
@@ -141,20 +140,6 @@ pub struct H2Response {
     pub body: Vec<u8>,
     /// Trailer headers, if any.
     pub trailers: Option<Vec<(String, String)>>,
-}
-
-/// Per-stream bookkeeping: RFC 9113 state plus flow-control windows.
-///
-/// Retained for API compatibility with callers that inspect stream info;
-/// the active driver keeps its own equivalent state internally.
-#[derive(Debug, Clone)]
-pub struct StreamInfo {
-    /// Current stream state per the RFC 9113 §5.1 state machine.
-    pub state: StreamState,
-    /// Our send-side flow-control window for this stream.
-    pub send_window: i64,
-    /// Our recv-side flow-control window for this stream.
-    pub recv_window: i64,
 }
 
 /// Sliding-window flood detector shared by the RST_STREAM and

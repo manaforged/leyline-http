@@ -5,8 +5,10 @@ use crate::core::error::{Error, Result};
 impl Session {
     /// Resolve the proxy URL to use for this request, honoring
     /// (in order of preference): a per-request override, then the
-    /// session's default proxy. The result is gated by `NO_PROXY` —
-    /// hosts matching a `NO_PROXY` pattern bypass any proxy entirely.
+    /// session's default proxy. The result is gated by the no-proxy
+    /// matcher, scoped by provenance: an explicit `.no_proxy(...)`
+    /// bypasses any proxy; the env-inherited `NO_PROXY` default only
+    /// bypasses an env-discovered proxy (see `ProxyConfig::proxy_for`).
     ///
     /// The lifetime is bounded by the shorter of the two inputs so
     /// borrows from either source remain valid.
@@ -15,8 +17,12 @@ impl Session {
         url: &url::Url,
         request_proxy: Option<&'a str>,
     ) -> Option<&'a str> {
-        self.proxy_config
-            .proxy_for(url, request_proxy, self.proxy.as_deref())
+        self.proxy_config.proxy_for(
+            url,
+            request_proxy,
+            self.proxy.as_deref(),
+            self.proxy_from_env,
+        )
     }
 
     /// `true` iff *any* proxy was requested for this call (session
@@ -94,8 +100,11 @@ impl Session {
                         "HTTP/3 over proxies is not implemented; use Auto or Http2".into(),
                     ));
                 }
+                let h3_config = self.h3_config.as_ref().ok_or_else(|| {
+                    Error::Config("this browser profile has no HTTP/3 fingerprint".into())
+                })?;
                 crate::core::transport::send_request_h3(
-                    &self.h3_config,
+                    h3_config,
                     self.profile,
                     method,
                     url,
@@ -126,24 +135,28 @@ impl Session {
                     .await;
                 }
                 if !self.proxy_requested(request_proxy) && url.scheme() == "https" {
-                    // We have a buffered body — clone for the retry.
-                    let retained = match &body {
-                        Body::Empty => Body::Empty,
-                        Body::Bytes(b) => Body::Bytes(b.clone()),
-                        Body::Stream { .. } => unreachable!(),
-                    };
-                    if let Ok(resp) = crate::core::transport::send_request_h3(
-                        &self.h3_config,
-                        self.profile,
-                        method,
-                        url,
-                        headers.clone(),
-                        retained,
-                        stream_response,
-                    )
-                    .await
-                    {
-                        return Ok(resp);
+                    // Race the H3 attempt only if this profile has an H3
+                    // fingerprint; otherwise fall straight through to H2.
+                    if let Some(h3_config) = self.h3_config.as_ref() {
+                        // We have a buffered body — clone for the retry.
+                        let retained = match &body {
+                            Body::Empty => Body::Empty,
+                            Body::Bytes(b) => Body::Bytes(b.clone()),
+                            Body::Stream { .. } => unreachable!(),
+                        };
+                        if let Ok(resp) = crate::core::transport::send_request_h3(
+                            h3_config,
+                            self.profile,
+                            method,
+                            url,
+                            headers.clone(),
+                            retained,
+                            stream_response,
+                        )
+                        .await
+                        {
+                            return Ok(resp);
+                        }
                     }
                 }
                 crate::core::transport::send_request_auto(

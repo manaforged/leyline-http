@@ -86,6 +86,7 @@ pub mod quic;
 pub mod tcp;
 pub mod tls;
 pub mod tls_selftest;
+mod util;
 
 // Public API re-exports.
 
@@ -223,6 +224,12 @@ pub async fn get(url: &str) -> Result<Response> {
 /// POST JSON to a URL. Uses the latest bundled Chrome profile.
 pub async fn post_json(url: &str, body: &impl serde::Serialize) -> Result<Response> {
     default_session()?.post_json(url, body).await
+}
+
+/// POST a raw body to a URL with the XHR preset. Uses the latest bundled
+/// Chrome profile. For JSON use [`post_json`]; for form data [`post_form`].
+pub async fn post(url: &str, body: impl Into<crate::core::Body>) -> Result<Response> {
+    default_session()?.post_xhr(url, body).await
 }
 
 /// POST form data to a URL. Uses the latest bundled Chrome profile.

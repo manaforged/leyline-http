@@ -1,4 +1,4 @@
-//! URL-encoding and Base64 helpers used by the request builder.
+//! URL-encoding helpers used by the request builder.
 
 /// URL-encode key-value pairs.
 pub(crate) fn url_encode_pairs(params: &[(String, String)]) -> String {
@@ -33,16 +33,6 @@ fn url_encode(s: &str) -> String {
     out
 }
 
-/// Base64-encode a string for `Authorization: Basic` headers.
-///
-/// Thin wrapper over `base64::Engine::encode` with the STANDARD alphabet
-/// and `=` padding. Exists only so upstream call sites stay string-shaped;
-/// prefer the `base64` crate directly when writing new code.
-pub(crate) fn base64_encode(input: &str) -> String {
-    use base64::Engine;
-    base64::engine::general_purpose::STANDARD.encode(input.as_bytes())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -61,12 +51,5 @@ mod tests {
             ("pass".to_string(), "s3cr3t!".to_string()),
         ]);
         assert_eq!(pairs, "user=alice&pass=s3cr3t%21");
-    }
-
-    #[test]
-    fn base64_encode_works() {
-        assert_eq!(base64_encode("user:pass"), "dXNlcjpwYXNz");
-        assert_eq!(base64_encode("a"), "YQ==");
-        assert_eq!(base64_encode("ab"), "YWI=");
     }
 }

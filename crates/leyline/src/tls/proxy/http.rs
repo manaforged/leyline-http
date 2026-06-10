@@ -24,7 +24,7 @@ use crate::tls::connector::FingerprintConnector;
 use crate::tls::error::TlsError;
 use crate::tls::TlsStream;
 
-use super::{base64_encode, percent_decode};
+use crate::util::{base64_encode, percent_decode};
 
 /// Open a TLS-over-HTTP-CONNECT tunnel through `proxy` and return the
 /// wrapped TLS stream. Fingerprint settings come from `connector`.

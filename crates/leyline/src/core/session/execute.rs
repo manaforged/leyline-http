@@ -220,7 +220,16 @@ impl Session {
                 reorder_headers(&mut headers, order);
             }
 
-            let audit_headers = headers.clone();
+            // Only retain a copy of the request headers when something will
+            // read them: audit introspection is enabled, or a response
+            // observer is registered (its snapshot borrows them). The default
+            // hot path skips this clone entirely.
+            let want_introspect = self.audit_enabled || crate::observe::has_observer();
+            let audit_headers = if want_introspect {
+                headers.clone()
+            } else {
+                Vec::new()
+            };
 
             // Take the body for this hop. Streams are one-shot; we replace
             // `current_body` with `Body::Empty` so a follow-up redirect
@@ -421,25 +430,26 @@ impl Session {
                 redirect_chain,
                 version: response_version,
                 trailers: Vec::new(),
-                request_headers: audit_headers.clone(),
+                // Move (not clone) the retained headers into the response —
+                // empty when introspection is off.
+                request_headers: audit_headers,
                 tls_alpn,
                 tls_peer_certificate: peer_cert_der,
                 tls_version,
                 tls_cipher,
-                audit_data: Some(crate::audit::AuditData {
-                    ja4: self.audit_tls.ja4.clone(),
-                    ja3: self.audit_tls.ja3.clone(),
-                    h2_fingerprint: self.audit_tls.h2_fingerprint.clone(),
-                    ja4t: self.audit_tls.ja4t.clone(),
-                    ja4h: {
-                        let input = crate::audit::Ja4hInput {
-                            method: &current_method,
-                            http_version: response_version.ja4h_token(),
-                            headers: &audit_headers,
-                        };
-                        crate::audit::compute_ja4h(&input)
-                    },
-                }),
+                // Audit is opt-in: when off, `audit()` returns None and we
+                // store neither the cache handle nor the request method. When
+                // on, the Arc clone is one refcount bump and JA4H is still
+                // deferred to the first `audit()` call.
+                request_method: if self.audit_enabled {
+                    current_method.clone()
+                } else {
+                    String::new()
+                },
+                audit_tls: self
+                    .audit_enabled
+                    .then(|| std::sync::Arc::clone(&self.audit_tls)),
+                audit_cache: std::sync::OnceLock::new(),
             });
         }
 

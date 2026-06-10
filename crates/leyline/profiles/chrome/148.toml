@@ -1,0 +1,96 @@
+[meta]
+name = "Chrome 148"
+browser = "chrome"
+version = 148
+family = "chromium"
+verified_against = "tls.peet.ws"
+verified_at = "2026-06-09"
+
+# Chrome 148 is wire-identical to Chrome 147. The 2026-06-09 Windows capture
+# from tls.peet.ws produced the same cipher list, extension set, signature
+# algorithms, supported groups, and Akamai-H2 fingerprint as Chrome 147. The
+# only differences are HTTP identity: the `Chrome/148` UA token and the
+# `sec-ch-ua` brand list (Chromium now leads the slot order and the GREASE
+# brand rotated to `"Not/A)Brand";v="99"`). Keeping the TLS/H2 blocks in lockstep
+# with 147 is intentional — any drift here would be a real fingerprint bug.
+
+[tls]
+ciphers = [
+    "TLS_AES_128_GCM_SHA256",
+    "TLS_AES_256_GCM_SHA384",
+    "TLS_CHACHA20_POLY1305_SHA256",
+    "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+    "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+    "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
+    "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+    "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256",
+    "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
+    "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA",
+    "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA",
+    "TLS_RSA_WITH_AES_128_GCM_SHA256",
+    "TLS_RSA_WITH_AES_256_GCM_SHA384",
+    "TLS_RSA_WITH_AES_128_CBC_SHA",
+    "TLS_RSA_WITH_AES_256_CBC_SHA",
+]
+curves = ["X25519_MLKEM768", "X25519", "SECP256R1", "SECP384R1"]
+sigalgs = [
+    "ecdsa_secp256r1_sha256",
+    "rsa_pss_rsae_sha256",
+    "rsa_pkcs1_sha256",
+    "ecdsa_secp384r1_sha384",
+    "rsa_pss_rsae_sha384",
+    "rsa_pkcs1_sha384",
+    "rsa_pss_rsae_sha512",
+    "rsa_pkcs1_sha512",
+]
+alps = "h2"
+alps_new_codepoint = true
+ocsp_stapling = true
+signed_cert_timestamps = true
+cert_compression = ["brotli"]
+permute_extensions = true
+ech_grease = true
+pre_shared_key = true
+
+[tls.fingerprint]
+# Cold (no PSK cached) form — what a fresh live test run produces. The warm
+# (resumed) form `t13d1517h2_8daaf6152771_b6f405a00624` adds the
+# pre_shared_key (0x0029) extension and is what the 2026-06-09 capture shows
+# (it was a resumed session). Live tests run cold, so the cold form is the
+# load-bearing assertion. Identical to Chrome 147.
+ja4 = "t13d1516h2_8daaf6152771_d8a2da3f94cd"
+
+[h2]
+header_table_size = 65536
+enable_push = false
+initial_stream_window_size = 6291456
+initial_connection_window_size = 15728640
+max_header_list_size = 262144
+pseudo_order = ["method", "authority", "scheme", "path"]
+settings_order = [
+    "header_table_size", "enable_push",
+    "initial_window_size", "max_frame_size",
+    "max_header_list_size", "max_concurrent_streams",
+]
+
+# Like Chrome 147, Chrome 148 omits SETTINGS parameter 8
+# (SETTINGS_ENABLE_CONNECT_PROTOCOL) on all platforms. The 2026-06-09 Windows
+# capture's SETTINGS frame carries only the 4 standard parameters.
+[h2.fingerprint]
+akamai = "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p"
+
+[identity.windows]
+user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+sec_ch_ua = '"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"'
+
+[identity.macos]
+user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+sec_ch_ua = '"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"'
+
+[identity.linux]
+user_agent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+sec_ch_ua = '"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"'
+
+[identity.android]
+user_agent = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Mobile Safari/537.36"
+sec_ch_ua = '"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"'

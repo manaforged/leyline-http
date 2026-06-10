@@ -1,7 +1,6 @@
 //! Profile registry — loads and indexes browser profiles.
 
 use std::collections::HashMap;
-use std::path::Path;
 
 use crate::profile::types::BrowserProfile;
 use crate::profile::Browser;
@@ -26,6 +25,7 @@ impl ProfileRegistry {
         reg.load_toml(include_str!("../../profiles/chrome/145.toml"));
         reg.load_toml(include_str!("../../profiles/chrome/146.toml"));
         reg.load_toml(include_str!("../../profiles/chrome/147.toml"));
+        reg.load_toml(include_str!("../../profiles/chrome/148.toml"));
         // Aloha (Chromium-based)
         reg.load_toml(include_str!("../../profiles/aloha/138.toml"));
         // Brave (Chromium-based, first-class because of header-order +
@@ -57,23 +57,6 @@ impl ProfileRegistry {
                 tracing::error!(error = %e, "failed to parse built-in profile");
             }
         }
-    }
-
-    /// Load additional profiles from a directory at runtime.
-    pub fn load_dir(&mut self, path: &Path) -> std::io::Result<()> {
-        for entry in std::fs::read_dir(path)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.extension().is_some_and(|e| e == "toml") {
-                let content = std::fs::read_to_string(&path)?;
-                self.load_toml(&content);
-            }
-            // Recurse into subdirectories.
-            if path.is_dir() {
-                self.load_dir(&path)?;
-            }
-        }
-        Ok(())
     }
 
     /// Look up a profile by browser name and version.

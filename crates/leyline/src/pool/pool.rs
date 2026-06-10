@@ -10,11 +10,26 @@ use crate::h2::client::{DriverTask, H2Client};
 use crate::pool::types::{H1Slot, PoolCounters, PoolKey, PoolStats, PooledConn, TlsInfo};
 
 /// Default idle-timeout for pooled connections.
-pub const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(90);
+///
+/// Matches real Chrome's `kUsedIdleSocketTimeout` (5 minutes) — the
+/// timeout Chromium applies to a pooled socket that has already
+/// served at least one request. The original 90s default was
+/// significantly tighter than browser behavior and forced every
+/// long-lived caller (long-lived pools,
+/// persistent clients) into 60s app-level keep-alive pings
+/// just to outrun the pool reaper. At 5 minutes leyline behaves
+/// like a real Chrome network stack: idle but not yet abandoned
+/// connections sit in the pool, ready for the next request, until
+/// either a server-side GOAWAY closes them or the LRU cap evicts
+/// them.
+///
+/// Override via `Session::builder().pool_idle_timeout(...)` when
+/// the caller has a different reuse profile (e.g. one-shot
+/// clients).
+pub const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
 
-/// Default LRU cap. Chosen for a "a few hundred distinct destinations"
-/// workload — raise it for workloads with many hosts.
-pub const DEFAULT_MAX_CONNECTIONS: usize = 256;
+/// Default LRU cap: 2048 entries.
+pub const DEFAULT_MAX_CONNECTIONS: usize = 2048;
 
 /// HTTP connection pool.
 ///
@@ -37,16 +52,6 @@ impl Pool {
         Self {
             inner: Mutex::new(HashMap::new()),
             idle_timeout: DEFAULT_IDLE_TIMEOUT,
-            max_connections: DEFAULT_MAX_CONNECTIONS,
-            counters: PoolCounters::default(),
-        }
-    }
-
-    /// Create a pool with a custom idle timeout (LRU cap stays default).
-    pub fn with_idle_timeout(timeout: Duration) -> Self {
-        Self {
-            inner: Mutex::new(HashMap::new()),
-            idle_timeout: timeout,
             max_connections: DEFAULT_MAX_CONNECTIONS,
             counters: PoolCounters::default(),
         }

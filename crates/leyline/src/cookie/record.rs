@@ -60,12 +60,6 @@ impl Cookie {
         }
     }
 
-    /// Size in bytes (name + value, used for size limit enforcement).
-    #[allow(dead_code)]
-    pub fn size(&self) -> usize {
-        self.name.len() + self.value.len()
-    }
-
     /// Whether this cookie matches a request URL.
     pub fn matches(&self, url_domain: &str, url_path: &str, is_secure: bool) -> bool {
         // Secure check.

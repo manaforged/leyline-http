@@ -12,7 +12,8 @@ use crate::tcp::TcpProfile;
 use crate::tls::{FingerprintConnector, HappyEyeballsConfig, Resolver, TlsTrustConfig};
 
 use super::proxy::env_proxy;
-use super::{AuditTlsCache, ProtocolPolicy, Session};
+use super::{ProtocolPolicy, Session};
+use crate::audit::AuditTlsCache;
 use crate::core::error::{Error, Result};
 
 static PROFILES: LazyLock<ProfileRegistry> = LazyLock::new(ProfileRegistry::builtin);
@@ -24,6 +25,9 @@ pub struct SessionBuilder {
     platform: Platform,
     brand: ChromiumBrand,
     proxy: Option<String>,
+    /// Set when `proxy` was discovered from the environment at build
+    /// time (vs an explicit `.proxy(...)` call).
+    proxy_from_env: bool,
     timeout: std::time::Duration,
     max_redirects: usize,
     proxy_config: ProxyConfig,
@@ -35,6 +39,7 @@ pub struct SessionBuilder {
     compression: CompressionConfig,
     websocket_config: WebSocketConfig,
     https_only: bool,
+    audit: bool,
     cookie_jar: Option<CookieJar>,
     tcp_profile: Option<TcpProfile>,
     protocol_policy: ProtocolPolicy,
@@ -56,6 +61,7 @@ impl SessionBuilder {
             platform: Platform::default(),
             brand: ChromiumBrand::default(),
             proxy: None,
+            proxy_from_env: false,
             timeout: DEFAULT_REQUEST_TIMEOUT,
             max_redirects: 10,
             proxy_config: ProxyConfig::default(),
@@ -67,6 +73,7 @@ impl SessionBuilder {
             compression: CompressionConfig::default(),
             websocket_config: WebSocketConfig::default(),
             https_only: false,
+            audit: false,
             cookie_jar: None,
             tcp_profile: None,
             protocol_policy: ProtocolPolicy::Auto,
@@ -371,6 +378,25 @@ impl SessionBuilder {
         self
     }
 
+    /// Enable per-response fingerprint introspection.
+    ///
+    /// Off by default. When off, the execute path skips cloning the request
+    /// headers, responses don't retain them, and [`Response::audit`] returns
+    /// `None` — so high-throughput callers that never introspect pay nothing.
+    /// Turn this on to populate [`Response::audit`] (JA3/JA4/JA4H/JA4T/H2) and
+    /// [`Response::request_headers`].
+    ///
+    /// A registered [`observe`](crate::observe) response observer implies
+    /// header retention regardless of this flag, since its snapshot needs
+    /// them; this flag additionally gates the `audit()` fingerprint block.
+    ///
+    /// [`Response::audit`]: crate::Response::audit
+    /// [`Response::request_headers`]: crate::Response::request_headers
+    pub fn audit(mut self, enabled: bool) -> Self {
+        self.audit = enabled;
+        self
+    }
+
     /// Add a PEM CA file or bundle to the TLS trust store.
     pub fn add_root_certificate_file(mut self, path: impl Into<std::path::PathBuf>) -> Self {
         self.tls_trust = self.tls_trust.add_ca_file(path);
@@ -518,6 +544,10 @@ impl SessionBuilder {
     /// The method is named with a `danger_` prefix so it is grep-able
     /// in audit reviews - if you see this called in production code,
     /// that is itself a finding.
+    ///
+    /// Also skips system trust-store wiring at build time (the roots
+    /// would never be consulted), so a machine with an unloadable
+    /// system store can still build a session with this flag set.
     pub fn danger_accept_invalid_certs(mut self, accept: bool) -> Self {
         self.accept_invalid_certs = accept;
         self
@@ -543,6 +573,9 @@ impl SessionBuilder {
             if let Some(p) = env_proxy() {
                 self.proxy_config = self.proxy_config.with_rule(ProxyRule::all(p.clone()));
                 self.proxy = Some(p);
+                // Provenance matters: env-inherited NO_PROXY patterns may
+                // bypass this proxy, but never an explicitly-set one.
+                self.proxy_from_env = true;
             }
         }
         // HTTP/3 forbids proxies today; fail fast at build time instead of
@@ -563,11 +596,13 @@ impl SessionBuilder {
             .get_browser(self.browser)
             .ok_or_else(|| Error::Config(format!("no profile for {}", self.browser)))?;
 
-        let identity_key = self.platform.identity_key();
         let mut identity = profile
-            .identity_for(identity_key)
+            .identity_for(self.platform)
             .ok_or_else(|| {
-                Error::Config(format!("no {} identity for {}", identity_key, self.browser))
+                Error::Config(format!(
+                    "no {} identity for {}",
+                    self.platform, self.browser
+                ))
             })?
             .clone();
 
@@ -606,12 +641,22 @@ impl SessionBuilder {
 
         let cookie_jar = self.cookie_jar.unwrap_or_default();
 
-        // Build TLS connector from profile.
+        // Build TLS connector from profile. When peer verification is
+        // disabled, skip system trust-store wiring entirely: loading roots
+        // we will never verify against is pointless, and an unloadable
+        // store (e.g. a broken Windows ROOT hive) would otherwise fail the
+        // build before `set_accept_invalid_certs` ever runs — killing the
+        // `-k` escape hatch on exactly the machines that need it.
+        let tls_trust = if self.accept_invalid_certs {
+            self.tls_trust.clone().without_system_roots()
+        } else {
+            self.tls_trust.clone()
+        };
         let mut connector = FingerprintConnector::new_with_trust(
             profile,
             tcp_profile,
             self.grease_seed.as_deref(),
-            &self.tls_trust,
+            &tls_trust,
         )
         .map_err(Error::Tls)?;
         if self.accept_invalid_certs {
@@ -629,8 +674,8 @@ impl SessionBuilder {
 
         // Build H2 config from profile, applying any per-platform
         // override (e.g. Chromium-on-macOS drops `unknown_setting8`).
-        let resolved_h2 = profile.h2.resolve_for_platform(identity_key);
-        let h2_config = H2Config::from_profile(&resolved_h2);
+        let resolved_h2 = profile.h2.resolve_for_platform(self.platform)?;
+        let h2_config = H2Config::from_profile(&resolved_h2)?;
 
         // Pre-compute audit data from profile.
         let extension_ids = crate::audit::chrome_extension_ids(&profile.tls);
@@ -685,6 +730,7 @@ impl SessionBuilder {
             identity_navigate_accept: identity.navigate_accept_override.clone(),
             identity_request_header_order: identity.request_header_order.clone(),
             proxy: self.proxy,
+            proxy_from_env: self.proxy_from_env,
             timeout: self.timeout,
             max_redirects: self.max_redirects,
             proxy_config: self.proxy_config,
@@ -705,19 +751,27 @@ impl SessionBuilder {
             } else {
                 Pool::with_limits(std::time::Duration::ZERO, 1)
             }),
-            audit_tls: AuditTlsCache {
+            audit_tls: Arc::new(AuditTlsCache {
                 ja4,
                 ja3,
                 h2_fingerprint: h2_fp,
                 ja4t,
-            },
+            }),
+            audit_enabled: self.audit,
             protocol_policy: self.protocol_policy,
             #[cfg(feature = "http3")]
-            h3_config: match profile.meta.family.as_str() {
-                "chromium" => crate::quic::H3Config::chrome(),
-                "firefox" => crate::quic::H3Config::firefox(),
-                "safari" | "webkit" => crate::quic::H3Config::safari(),
-                _ => crate::quic::H3Config::chrome(),
+            h3_config: match crate::quic::H3Config::for_family(&profile.meta.family) {
+                Ok(cfg) => Some(cfg),
+                // No H3 fingerprint for this family — only fatal if HTTP/3 was requested.
+                Err(e)
+                    if matches!(
+                        self.protocol_policy,
+                        ProtocolPolicy::Http3 | ProtocolPolicy::Race
+                    ) =>
+                {
+                    return Err(e)
+                }
+                Err(_) => None,
             },
             #[cfg(feature = "http3")]
             profile,

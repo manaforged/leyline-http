@@ -27,4 +27,8 @@ pub enum TlsError {
     /// Invalid profile configuration.
     #[error("profile: {0}")]
     Profile(String),
+
+    /// System trust store could not be loaded (no roots available).
+    #[error("trust store: {0}")]
+    TrustStore(String),
 }

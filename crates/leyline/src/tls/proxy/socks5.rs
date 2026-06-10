@@ -7,7 +7,7 @@ use crate::tls::connector::FingerprintConnector;
 use crate::tls::error::TlsError;
 use crate::tls::TlsStream;
 
-use super::percent_decode;
+use crate::util::percent_decode;
 
 /// Open a TLS-over-SOCKS5 tunnel through `proxy` and return the
 /// wrapped TLS stream.

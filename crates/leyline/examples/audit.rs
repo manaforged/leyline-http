@@ -15,6 +15,9 @@ async fn main() -> leyline::Result<()> {
     let session = Session::builder()
         .browser(Browser::Chrome147)
         .platform(Platform::Linux)
+        // Audit is opt-in — without this, `resp.audit()` returns None and the
+        // hot path skips retaining request headers.
+        .audit(true)
         .build()?;
 
     let resp = session.get(URL).send().await?;

@@ -50,29 +50,45 @@ uname_s="$(uname -s 2>/dev/null || echo unknown)"
 if command -v cmd.exe >/dev/null 2>&1 || command -v powershell.exe >/dev/null 2>&1; then
     uname_s="Windows"
 fi
-case "$uname_s" in
-    Darwin)
-        need cmake || warn "install with: brew install cmake"
-        need perl || warn "install Xcode command line tools and Perl"
-        ;;
-    Linux)
-        need cmake || warn "Debian/Ubuntu: sudo apt-get install cmake"
-        need perl || warn "Debian/Ubuntu: sudo apt-get install perl"
-        need pkg-config || warn "Debian/Ubuntu: sudo apt-get install pkg-config"
-        ;;
-    Windows|MINGW*|MSYS*|CYGWIN*)
-        if [[ -f crates/btls-sys/native/x86_64-pc-windows-msvc/lib/ssl.lib ]]; then
-            echo "Windows prebuilt BoringSSL shim found; CMake/Perl only needed to refresh it."
-        else
-            need cmake || warn "install Visual Studio Build Tools or CMake"
-            need perl || warn "install Strawberry Perl"
-        fi
-        ;;
-    *)
-        need cmake || true
-        need perl || true
-        ;;
+
+# Map host OS/arch to the Rust target triple the prebuilt shim is keyed on,
+# then check whether crates/btls-sys ships a prebuilt for it. If it does, the
+# in-workspace build links it directly and needs no CMake/Perl/libclang/Go.
+uname_m="$(uname -m 2>/dev/null || echo unknown)"
+case "$uname_m" in
+    arm64|aarch64) arch="aarch64" ;;
+    x86_64|amd64)  arch="x86_64" ;;
+    *)             arch="$uname_m" ;;
 esac
+case "$uname_s" in
+    Darwin)            triple="$arch-apple-darwin" ;;
+    Linux)             triple="$arch-unknown-linux-gnu" ;;
+    Windows|MINGW*|MSYS*|CYGWIN*) triple="x86_64-pc-windows-msvc" ;;
+    *)                 triple="" ;;
+esac
+
+prebuilt_dir="crates/btls-sys/native/$triple/lib"
+if [[ -n "$triple" ]] \
+    && { [[ -f "$prebuilt_dir/ssl.lib" ]] || [[ -f "$prebuilt_dir/libssl.a" ]]; }; then
+    ok "prebuilt BoringSSL shim found for $triple — no CMake/Perl/libclang/Go needed"
+else
+    warn "no prebuilt BoringSSL shim for target '${triple:-$uname_s/$uname_m}'"
+    echo "  The in-workspace build will fail for this target. To proceed:"
+    echo "    - set BORING_BSSL_PATH to a BoringSSL build for it, OR"
+    echo "    - drop the [patch.crates-io] btls-sys line from Cargo.toml to source-build."
+    echo "  Source build needs these tools:"
+    case "$uname_s" in
+        Darwin)  need cmake || warn "install with: brew install cmake"
+                 need perl  || warn "install Xcode command line tools and Perl" ;;
+        Linux)   need cmake || warn "Debian/Ubuntu: sudo apt-get install cmake"
+                 need perl  || warn "Debian/Ubuntu: sudo apt-get install perl"
+                 need pkg-config || warn "Debian/Ubuntu: sudo apt-get install pkg-config" ;;
+        Windows|MINGW*|MSYS*|CYGWIN*)
+                 need cmake || warn "install Visual Studio Build Tools or CMake"
+                 need perl  || warn "install Strawberry Perl" ;;
+        *)       need cmake || true; need perl || true ;;
+    esac
+fi
 ok "prerequisite scan complete"
 
 step "fast offline build"

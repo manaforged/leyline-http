@@ -1,48 +1,7 @@
-use super::super::proxy::{env_proxy_from, host_matches_no_proxy, CGI_SIGNAL_ENV_VARS};
+use super::super::proxy::{env_proxy_from, CGI_SIGNAL_ENV_VARS};
 
-// ---- NO_PROXY regression gates
-// ----
-
-#[test]
-fn no_proxy_ipv6_literal_matches_bare_host() {
-    // H-2: naive `rfind(':')` port-strip turned `::1` into
-    // `::`, silently breaking loopback bypass for IPv6. Both
-    // the bracketed and bare pattern must match a bracketless
-    // IPv6 URL host.
-    assert!(host_matches_no_proxy("::1", "::1"));
-    assert!(host_matches_no_proxy("::1", "[::1]"));
-    assert!(host_matches_no_proxy("::1", "[::1]:8080"));
-    assert!(host_matches_no_proxy("fe80::1", "fe80::1"));
-    assert!(host_matches_no_proxy("2001:db8::1", "2001:db8::1,192.0.2.0"));
-}
-
-#[test]
-fn no_proxy_ipv6_bracketed_host_matches_pattern() {
-    // `url::Host::parse` rejects brackets - the
-    // normaliser now strips them so `[::1]` on either side
-    // compares equal to `::1`.
-    assert!(host_matches_no_proxy("[::1]", "::1"));
-    assert!(host_matches_no_proxy("[::1]", "[::1]"));
-}
-
-#[test]
-fn no_proxy_ipv4_port_stripping_still_works() {
-    // Regression: don't break the single-colon `host:port`
-    // port-strip convention we already ship.
-    assert!(host_matches_no_proxy("192.0.2.1", "192.0.2.1:8080"));
-    assert!(host_matches_no_proxy("example.com", "example.com:443"));
-    assert!(host_matches_no_proxy("sub.example.com", ".example.com:443"));
-}
-
-#[test]
-fn no_proxy_does_not_match_unrelated_ipv6() {
-    // Critical negative: `::1` pattern must NOT match `::2`
-    // after the fix. Guard against the pattern accidentally
-    // becoming `::` (the all-zeros wildcard) which would
-    // match every IPv6 host.
-    assert!(!host_matches_no_proxy("::2", "::1"));
-    assert!(!host_matches_no_proxy("2001:db8::2", "2001:db8::1"));
-}
+// NO_PROXY host-matching gates live next to `NoProxy` in
+// `core::config` (the dead duplicate matcher was removed).
 
 // ---- httpoxy regression gates ----
 //

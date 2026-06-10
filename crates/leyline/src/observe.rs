@@ -83,6 +83,13 @@ pub(crate) fn notify_response(snap: &ResponseSnapshot<'_>) {
     }
 }
 
+/// Internal: whether a response observer is registered. Used by the execute
+/// path to decide whether it needs to retain a copy of the request headers
+/// (the observer snapshot borrows them). Cheap atomic load.
+pub(crate) fn has_observer() -> bool {
+    OBSERVER.get().is_some()
+}
+
 /// Snapshot of a request *failure* handed to the error observer. Fires
 /// for any `Err` returned by `execute_with_timeout` — TLS handshake
 /// failure, ALPN mismatch, H2 driver error, DNS, timeout, redirect

@@ -4,7 +4,7 @@
 //! SETTINGS ordering, pseudo-header ordering, and connection preface
 //! timing are first-class concepts, not afterthoughts.
 
-pub mod client;
+pub(crate) mod client;
 pub mod codec;
 pub mod config;
 pub mod connection;

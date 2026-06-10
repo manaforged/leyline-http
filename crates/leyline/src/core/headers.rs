@@ -90,13 +90,6 @@ impl HeaderList {
             .retain(|entry| !entry.name.eq_ignore_ascii_case(name));
     }
 
-    /// Return true if a header name is present.
-    pub fn contains_name(&self, name: &str) -> bool {
-        self.inner
-            .iter()
-            .any(|entry| entry.name.eq_ignore_ascii_case(name))
-    }
-
     /// Iterate over ordered (name, value) pairs.
     pub fn iter(&self) -> impl Iterator<Item = (&String, &String)> {
         self.inner.iter().map(|entry| (&entry.name, &entry.value))
@@ -105,14 +98,6 @@ impl HeaderList {
     /// Iterate over entries with anchor metadata (internal use).
     pub(crate) fn entries(&self) -> impl Iterator<Item = &HeaderEntry> {
         self.inner.iter()
-    }
-
-    /// Consume into ordered (name, value) pairs.
-    pub fn into_vec(self) -> Vec<(String, String)> {
-        self.inner
-            .into_iter()
-            .map(|entry| (entry.name, entry.value))
-            .collect()
     }
 }
 

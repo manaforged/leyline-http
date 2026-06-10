@@ -202,13 +202,12 @@ impl BrowserProfile {
     }
 
     /// Get the identity for a given platform.
-    pub fn identity_for(&self, platform: &str) -> Option<&PlatformIdentity> {
-        self.identity.get(platform)
+    pub fn identity_for(&self, platform: crate::profile::Platform) -> Option<&PlatformIdentity> {
+        self.identity.get(platform.identity_key())
     }
 
     /// Expected JA4 hash, if specified. Returns the base profile's JA4
-    /// (typically the Windows form). For platform-specific expectations,
-    /// use [`Self::expected_ja4_for`].
+    /// (typically the Windows form).
     pub fn expected_ja4(&self) -> Option<&str> {
         self.tls.fingerprint.as_ref()?.ja4.as_deref()
     }
@@ -216,19 +215,6 @@ impl BrowserProfile {
     /// Expected JA4 for a resumed TLS 1.3 handshake, if captured.
     pub fn expected_resumed_ja4(&self) -> Option<&str> {
         self.tls.fingerprint.as_ref()?.resumed_ja4.as_deref()
-    }
-
-    /// Expected JA4 for a specific platform key (`"windows"`, `"macos"`,
-    /// …). Falls back to the base expectation when no platform-specific
-    /// override is declared.
-    pub fn expected_ja4_for(&self, platform: &str) -> Option<&str> {
-        let fp = self.tls.fingerprint.as_ref()?;
-        if let Some(p) = fp.platforms.get(platform) {
-            if let Some(ref s) = p.ja4 {
-                return Some(s.as_str());
-            }
-        }
-        fp.ja4.as_deref()
     }
 
     /// Expected Akamai H2 fingerprint, if specified. Returns the base
@@ -240,8 +226,8 @@ impl BrowserProfile {
 
     /// Expected Akamai H2 fingerprint for a specific platform key.
     /// Falls back to the base expectation when no override is declared.
-    pub fn expected_h2_fingerprint_for(&self, platform: &str) -> Option<&str> {
-        if let Some(p) = self.h2.platforms.get(platform) {
+    pub fn expected_h2_fingerprint_for(&self, platform: crate::profile::Platform) -> Option<&str> {
+        if let Some(p) = self.h2.platforms.get(platform.identity_key()) {
             if let Some(ref fp) = p.fingerprint {
                 if let Some(ref s) = fp.akamai {
                     return Some(s.as_str());
@@ -257,9 +243,12 @@ impl H2Profile {
     /// override exists, return a new H2Profile with the override applied
     /// (per-field `Some` wins; names in `omit_settings` clear the matching
     /// base field). Returns `self.clone()` when no override is declared.
-    pub fn resolve_for_platform(&self, platform: &str) -> H2Profile {
-        let Some(over) = self.platforms.get(platform) else {
-            return self.clone();
+    pub fn resolve_for_platform(
+        &self,
+        platform: crate::profile::Platform,
+    ) -> Result<H2Profile, crate::Error> {
+        let Some(over) = self.platforms.get(platform.identity_key()) else {
+            return Ok(self.clone());
         };
         let mut out = self.clone();
 
@@ -308,15 +297,50 @@ impl H2Profile {
                 "unknown_setting8" => out.unknown_setting8 = None,
                 "unknown_setting9" => out.unknown_setting9 = None,
                 other => {
-                    tracing::warn!(
-                        omit = other,
-                        platform = platform,
-                        "unknown name in [h2.platforms.X].omit_settings; ignoring"
-                    );
+                    return Err(crate::Error::Config(format!(
+                        "unknown name in [h2.platforms.{}].omit_settings: {other:?}",
+                        platform.identity_key()
+                    )))
                 }
             }
         }
 
-        out
+        Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::profile::{Browser, Platform, ProfileRegistry};
+
+    fn chrome_h2(version: Browser) -> H2Profile {
+        ProfileRegistry::builtin()
+            .get_browser(version)
+            .expect("built-in profile")
+            .h2
+            .clone()
+    }
+
+    #[test]
+    fn unknown_omit_settings_name_is_rejected() {
+        let mut h2 = chrome_h2(Browser::Chrome147);
+        let over = H2PlatformOverride {
+            omit_settings: vec!["not_a_setting".into()],
+            ..Default::default()
+        };
+        h2.platforms
+            .insert(Platform::Windows.identity_key().to_string(), over);
+        assert!(
+            h2.resolve_for_platform(Platform::Windows).is_err(),
+            "a bogus omit_settings name was silently ignored instead of rejected"
+        );
+    }
+
+    #[test]
+    fn builtin_platform_overrides_resolve_ok() {
+        // Chrome 145 macOS override drops max_concurrent_streams + unknown_setting8.
+        let h2 = chrome_h2(Browser::Chrome145);
+        assert!(h2.resolve_for_platform(Platform::MacOS).is_ok());
     }
 }

@@ -1,6 +1,7 @@
 //! HTTP response types.
 
 use std::collections::HashMap;
+use std::sync::{Arc, OnceLock};
 
 use crate::core::body_stream::BodyStream;
 use crate::core::error::{Error, Result};
@@ -83,7 +84,16 @@ pub struct Response {
     pub(crate) tls_peer_certificate: Option<Vec<u8>>,
     pub(crate) tls_version: Option<String>,
     pub(crate) tls_cipher: Option<String>,
-    pub(crate) audit_data: Option<crate::audit::AuditData>,
+    /// Request method, kept for lazy JA4H computation in [`Response::audit`].
+    pub(crate) request_method: String,
+    /// Shared connection-level fingerprints (JA4/JA3/H2/JA4T). `None` for
+    /// responses built outside the TLS path (e.g. tests). Cloning this into
+    /// the response is one atomic refcount bump — no string copies.
+    pub(crate) audit_tls: Option<Arc<crate::audit::AuditTlsCache>>,
+    /// Memoised full audit block. Populated on the first `audit()` call so the
+    /// per-request JA4H hash + string clones never run for callers that don't
+    /// introspect the fingerprint.
+    pub(crate) audit_cache: OnceLock<crate::audit::AuditData>,
 }
 
 impl Response {
@@ -318,6 +328,12 @@ impl Response {
     /// Returns JA3, JA4, JA4H, JA4T, and H2 fingerprints computed from
     /// the session's browser profile and the request headers sent.
     ///
+    /// Computed lazily and memoised: the connection-level fingerprints
+    /// (JA4/JA3/H2/JA4T) are precomputed once per session and shared by
+    /// `Arc`; the request-dependent JA4H is hashed on the first call to this
+    /// method and cached. Responses that never call `audit()` pay nothing
+    /// beyond an atomic refcount bump at construction.
+    ///
     /// ```rust,ignore
     /// let resp = session.navigate(url).await?;
     /// if let Some(audit) = resp.audit() {
@@ -329,7 +345,21 @@ impl Response {
     /// }
     /// ```
     pub fn audit(&self) -> Option<&crate::audit::AuditData> {
-        self.audit_data.as_ref()
+        let tls = self.audit_tls.as_ref()?;
+        Some(self.audit_cache.get_or_init(|| {
+            let ja4h = crate::audit::compute_ja4h(&crate::audit::Ja4hInput {
+                method: &self.request_method,
+                http_version: self.version.ja4h_token(),
+                headers: &self.request_headers,
+            });
+            crate::audit::AuditData {
+                ja4: tls.ja4.clone(),
+                ja3: tls.ja3.clone(),
+                h2_fingerprint: tls.h2_fingerprint.clone(),
+                ja4t: tls.ja4t.clone(),
+                ja4h,
+            }
+        }))
     }
 
     // ─── Header access ─────────────────────────────────────────────
@@ -349,5 +379,77 @@ impl Response {
             .filter(|(k, _)| k.eq_ignore_ascii_case(name))
             .map(|(_, v)| v.as_str())
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn bare_response(audit_tls: Option<Arc<crate::audit::AuditTlsCache>>) -> Response {
+        Response {
+            status: 200,
+            version: HttpVersion::Http2,
+            headers: Vec::new(),
+            trailers: Vec::new(),
+            body: ResponseBody::Buffered(Vec::new()),
+            cookies: HashMap::new(),
+            url: "https://example.test/".to_string(),
+            redirect_chain: Vec::new(),
+            request_headers: vec![
+                (":method".to_string(), "GET".to_string()),
+                ("accept-language".to_string(), "en-US,en;q=0.9".to_string()),
+                ("referer".to_string(), "https://example.test/".to_string()),
+            ],
+            tls_alpn: None,
+            tls_peer_certificate: None,
+            tls_version: None,
+            tls_cipher: None,
+            request_method: "GET".to_string(),
+            audit_tls,
+            audit_cache: OnceLock::new(),
+        }
+    }
+
+    fn sample_cache() -> Arc<crate::audit::AuditTlsCache> {
+        Arc::new(crate::audit::AuditTlsCache {
+            ja4: "t13d1516h2_8daaf6152771_d8a2da3f94cd".to_string(),
+            ja3: "771,4865-4866,0-23,29-23,0".to_string(),
+            h2_fingerprint: "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p".to_string(),
+            ja4t: "64240_2-1-3-1-1-4_1460_8".to_string(),
+        })
+    }
+
+    #[test]
+    fn audit_is_none_without_tls_context() {
+        let resp = bare_response(None);
+        assert!(resp.audit().is_none());
+    }
+
+    #[test]
+    fn audit_surfaces_cached_connection_fingerprints() {
+        let cache = sample_cache();
+        let resp = bare_response(Some(cache.clone()));
+        let audit = resp.audit().expect("audit present when tls context set");
+        assert_eq!(audit.ja4, cache.ja4);
+        assert_eq!(audit.ja3, cache.ja3);
+        assert_eq!(audit.h2_fingerprint, cache.h2_fingerprint);
+        assert_eq!(audit.ja4t, cache.ja4t);
+        // JA4H is request-derived, so it must be non-empty and shaped a_b_c_d.
+        assert_eq!(
+            audit.ja4h.split('_').count(),
+            4,
+            "JA4H shape: {}",
+            audit.ja4h
+        );
+    }
+
+    #[test]
+    fn audit_memoises_across_calls() {
+        let resp = bare_response(Some(sample_cache()));
+        let first = resp.audit().unwrap() as *const _;
+        let second = resp.audit().unwrap() as *const _;
+        // Same allocation on the second call — JA4H is hashed once, not per call.
+        assert_eq!(first, second, "audit() must memoise, not recompute");
     }
 }

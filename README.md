@@ -8,11 +8,21 @@ Status: `1.0.0-alpha.1`. API is still changing; pin exact versions.
 
 ## Example
 
+Leyline is not on crates.io yet — depend on it by git until the first
+published release:
+
 ```toml
 [dependencies]
-leyline = "1.0.0-alpha.1"
+# No release tags exist yet — pin a specific commit for reproducible builds.
+leyline = { git = "https://github.com/manaforged/leyline-http", rev = "<commit-sha>" }
 tokio = { version = "1", features = ["full"] }
 ```
+
+> **Heads up:** a plain `leyline = "1.0.0-alpha.1"` (crates.io) does **not**
+> resolve yet. A git dependency pulls the upstream `btls-sys` source-build
+> path, which compiles BoringSSL on first build (CMake/Perl/libclang/Go
+> required — see [Platform support](#platform-support)). For the zero-compile
+> prebuilt experience, clone the repo and build inside the workspace.
 
 ```rust,no_run
 use leyline::Client;
@@ -71,9 +81,9 @@ siblings.
 
 ## Profiles
 
-| Profile          | Versions        |
-| ---------------- | --------------- |
-| Chrome           | 145, 146, 147   |
+| Profile          | Versions             |
+| ---------------- | -------------------- |
+| Chrome           | 145, 146, 147, 148   |
 | Aloha            | 138             |
 | Brave            | 146             |
 | Firefox          | 148, 150, 151   |
@@ -85,22 +95,34 @@ Adding a version is a TOML copy-and-edit - see [CONTRIBUTING.md](CONTRIBUTING.md
 
 ## Platform support
 
-The checked-in developer workspace is optimized for
-`x86_64-pc-windows-msvc`: it patches `btls-sys` to a local prebuilt shim so a
-Windows developer can build without CMake, Perl, bindgen, or libclang. Crates.io
-consumers use the upstream `btls-sys` source-build path unless they opt into
-their own patch.
+**Cloning the repo: zero-compile on tier-1 targets.** The workspace patches
+`btls-sys` to a local shim that ships prebuilt BoringSSL artifacts, so
+`cargo build` links them directly — no CMake, Perl, bindgen, libclang, or Go.
+This covers:
 
-The library code is intended to support `aarch64-apple-darwin`,
-`x86_64-apple-darwin`, `x86_64-unknown-linux-gnu`, and
-`aarch64-unknown-linux-gnu`, but this repository's local `btls-sys` shim only
-ships Windows/MSVC artifacts today. Non-Windows source checkouts need either a
-matching local BoringSSL shim bundle for their target or a workspace without the
-local `[patch.crates-io] btls-sys` override.
+| Target | In-workspace build |
+| ------ | ------------------ |
+| `x86_64-pc-windows-msvc` | prebuilt — instant |
+| `x86_64-unknown-linux-gnu` | prebuilt — instant |
+| `aarch64-apple-darwin` (Apple Silicon) | prebuilt — instant |
 
-Leyline transitively depends on `btls-sys`, which builds BoringSSL from
-source on the first `cargo build`. Plan for ~5–15 minutes for that
-initial build; subsequent builds are cached by Cargo.
+Other targets — notably `x86_64-apple-darwin` (Intel Mac),
+`aarch64-unknown-linux-gnu`, and musl — have **no** checked-in prebuilt yet, so
+the local shim's `build.rs` errors out (with the remedies inline). To build for
+them, either point `BORING_BSSL_PATH` at a BoringSSL build for that target, or
+remove the `[patch.crates-io] btls-sys` line from the root `Cargo.toml` to fall
+back to the upstream `btls-sys` source build (next paragraph).
+
+To add a target to the prebuilt set permanently, run
+[`scripts/package-bssl.sh`](scripts/package-bssl.sh) on a host of that target —
+it source-builds upstream BoringSSL once and checks the static libs + bindgen
+output into `crates/btls-sys/`, then prints the two code edits needed to
+register the triple (see also [`crates/btls-sys/README.md`](crates/btls-sys/README.md)).
+
+**Depending on Leyline from another crate (git dependency).** External
+consumers don't inherit the local shim, so they use the upstream `btls-sys`,
+which builds BoringSSL from source on the first `cargo build`. Plan for
+~5–15 minutes for that initial build; subsequent builds are cached by Cargo.
 
 Build dependencies, one-time per machine:
 

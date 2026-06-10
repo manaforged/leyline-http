@@ -56,7 +56,7 @@ fn h2_fingerprints_match_toml_expectations() {
     for browser in ALL_BROWSERS {
         let profile = reg.get_browser(browser).unwrap();
         if let Some(expected) = profile.expected_h2_fingerprint() {
-            let h2 = leyline::h2::H2Config::from_profile(&profile.h2);
+            let h2 = leyline::h2::H2Config::from_profile(&profile.h2).unwrap();
             let actual = h2.akamai_fingerprint();
             assert_eq!(actual, expected, "H2 mismatch for {browser}");
             checked += 1;
@@ -76,11 +76,11 @@ fn h2_per_platform_overrides_resolve() {
     let reg = leyline::profile::ProfileRegistry::builtin();
     for browser in [Browser::Chrome145, Browser::Chrome146, Browser::Chrome147] {
         let profile = reg.get_browser(browser).unwrap();
-        let resolved = profile.h2.resolve_for_platform("macos");
-        let h2 = leyline::h2::H2Config::from_profile(&resolved);
+        let resolved = profile.h2.resolve_for_platform(Platform::MacOS).unwrap();
+        let h2 = leyline::h2::H2Config::from_profile(&resolved).unwrap();
         let actual = h2.akamai_fingerprint();
         let expected = profile
-            .expected_h2_fingerprint_for("macos")
+            .expected_h2_fingerprint_for(Platform::MacOS)
             .unwrap_or_else(|| panic!("{browser} has no macos H2 fingerprint expectation"));
         assert_eq!(actual, expected, "{browser} macOS H2 fingerprint mismatch");
         assert!(
@@ -205,7 +205,7 @@ async fn request_builder_timeout_overrides_session_default() {
 fn session_shortcuts_work() {
     let chrome = leyline::Session::chrome_latest();
     assert!(chrome.is_ok());
-    assert_eq!(chrome.unwrap().browser(), Browser::Chrome147);
+    assert_eq!(chrome.unwrap().browser(), Browser::Chrome148);
 
     let firefox = leyline::Session::firefox_latest();
     assert!(firefox.is_ok());
@@ -468,12 +468,92 @@ fn denormalize_peet_quotes(raw: &str) -> String {
     s
 }
 
+// ─── Live: full wire fingerprint audit — every dimension peet.ws exposes ────
+//
+// The single "where do we actually sit on the wire" test. For every profile it
+// fetches the real peet.ws observation and reports every wire fingerprint
+// dimension: JA4, JA3, peetprint, Akamai-H2. It HARD-ASSERTS the dimensions that
+// have a golden in the TOML (ja4, akamai); the others (ja3, peetprint) are
+// printed as the real wire values so they can be frozen into goldens next.
+#[tokio::test]
+#[ignore = "live: needs network"]
+async fn live_wire_audit_every_profile() {
+    let reg = leyline::profile::ProfileRegistry::builtin();
+    let mut checked = 0;
+
+    for browser in ALL_BROWSERS {
+        // OkHttp Android 7-9 is TLS 1.2-only; tls.peet.ws requires TLS 1.3.
+        if matches!(browser, Browser::OkHttpAndroid7) {
+            println!("- {browser:30} skipped (TLS 1.2 — tls.peet.ws requires 1.3)");
+            continue;
+        }
+        let platform = match browser {
+            Browser::SafariiOS15 | Browser::SafariiOS17 | Browser::SafariiOS18 => Platform::IOS,
+            Browser::OkHttpAndroid10 => Platform::Android,
+            Browser::Safari18 => Platform::MacOS,
+            _ => Platform::Windows,
+        };
+        let session = leyline::Session::builder()
+            .browser(browser)
+            .platform(platform)
+            .build()
+            .unwrap();
+        let json = peet(&session).await;
+        let profile = reg.get_browser(browser).unwrap();
+
+        let wire_ja4 = json["tls"]["ja4"].as_str().unwrap_or("?");
+        let wire_ja3 = json["tls"]["ja3_hash"].as_str().unwrap_or("?");
+        let wire_peet = json["tls"]["peetprint_hash"].as_str().unwrap_or("?");
+        let wire_akamai =
+            normalize_akamai(json["http2"]["akamai_fingerprint"].as_str().unwrap_or("?"));
+
+        println!("\n## {browser} ({platform:?})");
+        println!("  wire JA4       = {wire_ja4}");
+        println!("  wire JA3 hash  = {wire_ja3}");
+        println!("  wire peetprint = {wire_peet}");
+        println!("  wire Akamai-H2 = {wire_akamai}");
+
+        // Hard-assert the dimensions that have a captured golden.
+        if let Some(exp) = profile.expected_ja4() {
+            assert_eq!(wire_ja4, exp, "{browser} JA4 wire != golden");
+        }
+        if let Some(exp) = profile.expected_h2_fingerprint() {
+            assert_eq!(
+                wire_akamai,
+                normalize_akamai(exp),
+                "{browser} Akamai wire != golden"
+            );
+        }
+        checked += 1;
+    }
+    assert!(checked >= 9, "expected >=9 profiles audited, got {checked}");
+}
+
 // ─── Live: TLS fingerprint verification — every profile with expected JA4 ──
 
 #[tokio::test]
 #[ignore = "live: needs network"]
-async fn live_ja4_exact_match_chrome147() {
+async fn live_ja4_exact_match_chrome148() {
+    // chrome_latest() resolves to Chrome 148 (the current default).
     let session = leyline::Session::chrome_latest().unwrap();
+    let json = peet(&session).await;
+    let ja4 = json["tls"]["ja4"].as_str().expect("no tls.ja4");
+
+    let reg = leyline::profile::ProfileRegistry::builtin();
+    let profile = reg.get_browser(Browser::Chrome148).unwrap();
+    let expected = profile.expected_ja4().expect("Chrome 148 TOML missing JA4");
+
+    assert_eq!(ja4, expected, "Chrome 148 JA4 mismatch");
+    println!("✓ Chrome 148 JA4 exact match: {ja4}");
+}
+
+#[tokio::test]
+#[ignore = "live: needs network"]
+async fn live_ja4_exact_match_chrome147() {
+    let session = leyline::Session::builder()
+        .browser(Browser::Chrome147)
+        .build()
+        .unwrap();
     let json = peet(&session).await;
     let ja4 = json["tls"]["ja4"].as_str().expect("no tls.ja4");
 

@@ -391,12 +391,11 @@ fn wire_windows_system_trust(builder: &mut SslContextBuilder) -> Result<(), TlsE
     let roots = match crate::tls::windows_trust::load_system_roots() {
         Ok(r) => r,
         Err(e) => {
-            tracing::error!(
-                target: "leyline::tls::trust",
-                err = %e,
-                "failed to open Windows system ROOT store; HTTPS requests will fail"
-            );
-            return Ok(());
+            // A connector with no roots fails every handshake later with an
+            // opaque cert error; fail at build time instead of swallowing.
+            return Err(TlsError::TrustStore(format!(
+                "failed to open Windows system ROOT store: {e}"
+            )));
         }
     };
 
@@ -428,19 +427,17 @@ fn wire_windows_system_trust(builder: &mut SslContextBuilder) -> Result<(), TlsE
     }
 
     if loaded == 0 {
-        tracing::error!(
-            target: "leyline::tls::trust",
-            skipped,
-            "Windows system ROOT store bridged zero certificates; HTTPS requests will fail"
-        );
-    } else {
-        tracing::info!(
-            target: "leyline::tls::trust",
-            loaded,
-            skipped,
-            "Windows system ROOT store bridged into BoringSSL"
-        );
+        // Empty store + PEER verify mode = every handshake fails opaquely.
+        return Err(TlsError::TrustStore(format!(
+            "Windows system ROOT store bridged zero certificates ({skipped} skipped)"
+        )));
     }
+    tracing::info!(
+        target: "leyline::tls::trust",
+        loaded,
+        skipped,
+        "Windows system ROOT store bridged into BoringSSL"
+    );
     Ok(())
 }
 

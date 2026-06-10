@@ -28,10 +28,10 @@ async fn smoke_suite() {
     let mut failed = 0u32;
 
     run(
-        "Chrome 147 exact JA4 + H2",
+        "Chrome 148 exact JA4 + H2",
         &mut passed,
         &mut failed,
-        smoke(async { exact_fingerprint(Session::chrome_latest()?, Browser::Chrome147).await }),
+        smoke(async { exact_fingerprint(Session::chrome_latest()?, Browser::Chrome148).await }),
     )
     .await;
 

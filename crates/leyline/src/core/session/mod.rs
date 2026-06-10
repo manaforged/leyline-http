@@ -77,6 +77,10 @@ pub struct Session {
     /// the assembled header list is reordered to match.
     identity_request_header_order: Option<Vec<String>>,
     proxy: Option<String>,
+    /// `true` when `proxy` was discovered from `HTTPS_PROXY`/`HTTP_PROXY`
+    /// at build time rather than set explicitly. Env-inherited `NO_PROXY`
+    /// patterns only bypass env-discovered proxies.
+    proxy_from_env: bool,
     timeout: std::time::Duration,
     max_redirects: usize,
     proxy_config: ProxyConfig,
@@ -90,24 +94,22 @@ pub struct Session {
     connector: FingerprintConnector,
     h2_config: H2Config,
     pool: Arc<Pool>,
-    /// Cached audit data computed from the profile (TLS + TCP parts).
-    audit_tls: AuditTlsCache,
+    /// Cached connection-level audit data computed from the profile, shared
+    /// with every response by `Arc` clone (no per-request recompute).
+    audit_tls: Arc<crate::audit::AuditTlsCache>,
+    /// When set, responses retain their request headers and expose
+    /// `Response::audit()`. Off by default so the hot path skips the
+    /// per-request header clone for callers that never introspect.
+    audit_enabled: bool,
     /// Request protocol selection policy.
     protocol_policy: ProtocolPolicy,
-    /// H3 config (transport params + QPACK + SETTINGS).
+    /// H3 config (transport params + QPACK + SETTINGS). `None` when the
+    /// profile family has no HTTP/3 fingerprint (e.g. okhttp); requesting
+    /// HTTP/3 on such a profile errors rather than borrowing another's.
     #[cfg(feature = "http3")]
-    h3_config: crate::quic::H3Config,
+    h3_config: Option<crate::quic::H3Config>,
     /// Reference to the static browser profile — passed through to the H3
     /// path so QUIC ClientHello is built from the same factory as H2.
     #[cfg(feature = "http3")]
     profile: &'static crate::profile::BrowserProfile,
-}
-
-/// Pre-computed TLS/TCP audit data from the profile.
-#[derive(Debug, Clone)]
-struct AuditTlsCache {
-    ja4: String,
-    ja3: String,
-    h2_fingerprint: String,
-    ja4t: String,
 }

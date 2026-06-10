@@ -59,9 +59,12 @@ impl Session {
     ) -> Result<crate::core::websocket::WsConnection> {
         let origin = ws_origin(url)?;
         let parsed = url::Url::parse(url)?;
-        let proxy = self
-            .proxy_config
-            .proxy_for(&parsed, request_proxy, self.proxy.as_deref());
+        let proxy = self.proxy_config.proxy_for(
+            &parsed,
+            request_proxy,
+            self.proxy.as_deref(),
+            self.proxy_from_env,
+        );
 
         // Try H2 first. The pool helper handles the TLS handshake +
         // ALPN check; if the connection already existed we just clone

@@ -95,10 +95,23 @@ pub(crate) fn apply_profile_with_trust(
         builder.enable_signed_cert_timestamps();
     }
 
-    // Certificate compression (Brotli is the only one real browsers use).
+    // Certificate compression. btls only ships a Brotli decompressor; the
+    // other real RFC 8879 codepoints (zlib, zstd — Firefox advertises all
+    // three) are a known advertise-vs-apply gap, warned so the
+    // drop is observable. A genuinely unknown name is a profile typo → error.
     for algo in &tls.cert_compression {
-        if algo == "brotli" {
-            builder.add_certificate_compression_algorithm(BrotliDecompressor)?;
+        match algo.as_str() {
+            "brotli" => builder.add_certificate_compression_algorithm(BrotliDecompressor)?,
+            "zlib" | "zstd" => tracing::warn!(
+                target: "leyline::tls",
+                algo = %algo,
+                "cert compression algorithm in profile not applied (btls lacks a decompressor)"
+            ),
+            other => {
+                return Err(TlsError::Profile(format!(
+                    "unknown cert compression algorithm: {other:?}"
+                )))
+            }
         }
     }
 

@@ -55,6 +55,21 @@ pub struct H3Config {
 }
 
 impl H3Config {
+    /// Select the H3 transport config for a profile family (`meta.family` in
+    /// the TOML). Unknown or empty families are rejected, not defaulted — a
+    /// wrong QUIC transport fingerprint is a soft-block risk. Keys are the
+    /// family strings the profiles use (`gecko`, `webkit`), not browser names.
+    pub fn for_family(family: &str) -> Result<Self, crate::Error> {
+        match family {
+            "chromium" => Ok(Self::chrome()),
+            "gecko" => Ok(Self::firefox()),
+            "webkit" => Ok(Self::safari()),
+            other => Err(crate::Error::Config(format!(
+                "no HTTP/3 config for profile family {other:?}"
+            ))),
+        }
+    }
+
     /// Chrome 147 QUIC/H3 configuration.
     pub fn chrome() -> Self {
         Self {

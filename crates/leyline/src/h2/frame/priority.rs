@@ -2,7 +2,7 @@
 //!
 //! Deprecated in RFC 9113 but must be accepted without error.
 
-use bytes::{BufMut, Bytes};
+use bytes::Bytes;
 
 use super::headers::StreamDependency;
 use super::FrameHeader;
@@ -47,22 +47,5 @@ impl PriorityFrame {
                 weight: payload[4],
             },
         })
-    }
-
-    /// Encode to bytes.
-    pub fn encode(&self, buf: &mut impl BufMut) {
-        let header = FrameHeader {
-            length: 5,
-            frame_type: 0x2,
-            flags: 0,
-            stream_id: self.stream_id,
-        };
-        header.encode(buf);
-        let mut dep = self.dependency.dependency_id & 0x7FFF_FFFF;
-        if self.dependency.exclusive {
-            dep |= 0x8000_0000;
-        }
-        buf.put_u32(dep);
-        buf.put_u8(self.dependency.weight);
     }
 }

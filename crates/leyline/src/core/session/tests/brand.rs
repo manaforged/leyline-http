@@ -263,9 +263,24 @@ async fn chrome_default_has_no_brand_overlay() {
     assert!(!req.contains("OPR/"));
     assert!(!req.to_lowercase().contains("\r\ndnt: 1\r\n"));
     assert!(!req.to_lowercase().contains("\r\nsec-gpc: 1\r\n"));
+    // Chrome 148's sec-ch-ua leads with "Chromium" (slot order changed
+    // from 147), so match the brand anywhere in the header value rather
+    // than at the start. Intent: stock Chrome identifies as Google
+    // Chrome and carries no sibling-brand token.
+    let sec_ch_ua_line = req
+        .lines()
+        .find(|l| l.to_lowercase().starts_with("sec-ch-ua:"))
+        .expect("sec-ch-ua header present")
+        .to_lowercase();
     assert!(
-        req.to_lowercase().contains(r#"sec-ch-ua: "google chrome""#),
-        "Chrome sec-ch-ua should identify as Google Chrome:\n{req}"
+        sec_ch_ua_line.contains(r#""google chrome";v="148""#),
+        "Chrome sec-ch-ua should identify as Google Chrome 148:\n{req}"
+    );
+    assert!(
+        !sec_ch_ua_line.contains("microsoft edge")
+            && !sec_ch_ua_line.contains("opera")
+            && !sec_ch_ua_line.contains("brave"),
+        "stock Chrome sec-ch-ua must not carry a sibling-brand token:\n{req}"
     );
 }
 

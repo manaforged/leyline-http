@@ -1,0 +1,73 @@
+[package]
+name = "leyline-benches"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Standalone package — deliberately its own workspace (see `[workspace]` below)
+# so `cargo build` at the repo root stays fast and criterion's transitive deps
+# (plotters, tinytemplate, rayon) don't get pulled into every library build.
+# Run with:
+#
+#     cargo bench -p leyline-benches --manifest-path benches/Cargo.toml
+#
+# or from this directory: `cargo bench`.
+[workspace]
+
+# Mirror the repo-root `[patch.crates-io]` so btls-sys resolves to the local
+# prebuilt BoringSSL shim instead of source-building it (no CMake/Perl/Go).
+# Patches don't cross workspace boundaries — this excluded workspace needs its
+# own copy. See ../crates/btls-sys.
+[patch.crates-io]
+btls-sys = { path = "../crates/btls-sys" }
+
+[dependencies]
+# Post-collapse: audit / h2 / pool / profile are all submodules of the single
+# `leyline` crate (pub mod audit/h2/pool/profile), so one path dep replaces the
+# old leyline-audit / leyline-h2 / leyline-pool / leyline-profile crates.
+leyline = { path = "../crates/leyline" }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+bytes = "1"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+tokio = { version = "1", features = ["rt-multi-thread", "rt", "macros", "io-util", "sync", "time"] }
+# Peer for HPACK head-to-head. h2 keeps its HPACK primitives private, so the
+# comparison bench gracefully degrades to a note (see hpack_vs_h2.rs).
+h2 = "0.4"
+
+[[bench]]
+name = "hpack"
+harness = false
+
+[[bench]]
+name = "audit"
+harness = false
+
+[[bench]]
+name = "frames"
+harness = false
+
+[[bench]]
+name = "profile"
+harness = false
+
+[[bench]]
+name = "session"
+harness = false
+
+[[bench]]
+name = "multiplex"
+harness = false
+
+[[bench]]
+name = "hpack_vs_h2"
+harness = false
+
+[[bench]]
+name = "allocs"
+harness = false
+
+[[bench]]
+name = "pool"
+harness = false

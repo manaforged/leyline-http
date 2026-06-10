@@ -40,3 +40,18 @@ pub struct AuditData {
     /// JA4H HTTP request fingerprint.
     pub ja4h: String,
 }
+
+/// Connection-level fingerprints, precomputed once per [`Session`] from the
+/// profile. JA4/JA3/Akamai-H2/JA4T are all determined by the TLS+H2+TCP
+/// profile, not the individual request, so they're computed at session build
+/// and shared by every response via an `Arc`. The request-dependent JA4H is
+/// computed lazily in `Response::audit()` — see that method.
+///
+/// [`Session`]: crate::Session
+#[derive(Debug, Clone)]
+pub(crate) struct AuditTlsCache {
+    pub(crate) ja4: String,
+    pub(crate) ja3: String,
+    pub(crate) h2_fingerprint: String,
+    pub(crate) ja4t: String,
+}

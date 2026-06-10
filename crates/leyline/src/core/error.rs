@@ -70,3 +70,35 @@ pub enum Error {
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
 }
+
+impl Error {
+    /// True if this error is a request timeout. Mirrors
+    /// `reqwest::Error::is_timeout` so retry/backoff code ports across.
+    pub fn is_timeout(&self) -> bool {
+        matches!(self, Error::Timeout)
+    }
+
+    /// True if this is a connection-establishment failure (TCP, TLS
+    /// handshake, proxy tunnel, or low-level IO) rather than a protocol
+    /// or status error. Mirrors `reqwest::Error::is_connect`.
+    pub fn is_connect(&self) -> bool {
+        matches!(self, Error::Io(_) | Error::Tls(_) | Error::Proxy(_))
+    }
+
+    /// True if this error carries an HTTP status (from
+    /// [`Response::error_for_status`](crate::Response::error_for_status)).
+    /// Mirrors `reqwest::Error::is_status`.
+    pub fn is_status(&self) -> bool {
+        matches!(self, Error::Status { .. })
+    }
+
+    /// The HTTP status code, when this error carries one. Returns `u16`
+    /// to match [`Response::status`](crate::Response::status) (reqwest
+    /// returns `Option<StatusCode>`); `None` for non-status errors.
+    pub fn status(&self) -> Option<u16> {
+        match self {
+            Error::Status { code, .. } => Some(*code),
+            _ => None,
+        }
+    }
+}
