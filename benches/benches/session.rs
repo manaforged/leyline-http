@@ -18,10 +18,11 @@ fn bench_session_build_chrome147(c: &mut Criterion) {
     });
 }
 
-fn bench_session_build_chrome_latest(c: &mut Criterion) {
-    c.bench_function("session::chrome_latest", |b| {
+fn bench_session_build_chrome(c: &mut Criterion) {
+    c.bench_function("session::chrome", |b| {
         b.iter(|| {
-            let session = Session::chrome_latest().expect("chrome_latest should build");
+            // Infallible default-Chrome constructor.
+            let session = Session::chrome();
             black_box(session);
         });
     });
@@ -30,6 +31,6 @@ fn bench_session_build_chrome_latest(c: &mut Criterion) {
 criterion_group!(
     session_benches,
     bench_session_build_chrome147,
-    bench_session_build_chrome_latest
+    bench_session_build_chrome
 );
 criterion_main!(session_benches);

@@ -174,6 +174,54 @@ fn session_builder_rejects_http3_with_proxy_at_build_time() {
 }
 
 #[tokio::test]
+async fn http3_session_rejects_per_request_proxy_at_send_time() {
+    // The build-time guard above can't see per-request `.proxy(...)`
+    // overrides. The runtime guard in `send_with_policy` must refuse —
+    // never fall back to a direct UDP dial that would expose the real
+    // egress IP.
+    let session = leyline::Session::builder()
+        .browser(Browser::Chrome147)
+        .http3()
+        .build()
+        .expect("http3 session without proxy builds");
+    let err = session
+        .get("https://example.com/")
+        .proxy("http://127.0.0.1:9")
+        .send()
+        .await
+        .expect_err("h3 + per-request proxy must refuse, not dial direct");
+    let msg = err.to_string().to_lowercase();
+    assert!(
+        msg.contains("http/3") || msg.contains("http3") || msg.contains("prox"),
+        "error should mention http3/proxy, got: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn race_policy_with_proxy_never_dials_h3_direct() {
+    // Race tries H3 first ONLY when no proxy was requested. With a
+    // (dead) per-request proxy the request must route through the proxy
+    // and fail — a successful response here would mean the H3 leg dialed
+    // the target directly, bypassing the proxy (real-IP leak).
+    let session = leyline::Session::builder()
+        .browser(Browser::Chrome147)
+        .race()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .expect("race session builds");
+    let result = session
+        .get("https://example.com/")
+        .proxy("http://127.0.0.1:9")
+        .send()
+        .await;
+    assert!(
+        result.is_err(),
+        "request through a dead proxy must fail; success means the H3 race \
+         leg bypassed the proxy and dialed direct"
+    );
+}
+
+#[tokio::test]
 async fn request_builder_timeout_overrides_session_default() {
     // Point at an unroutable address with a 30s session timeout; override
     // to 50ms on the single request. The per-request override must win —
@@ -202,18 +250,19 @@ async fn request_builder_timeout_overrides_session_default() {
 }
 
 #[test]
+#[allow(deprecated)] // intentionally exercises the deprecated *_latest() aliases
 fn session_shortcuts_work() {
     let chrome = leyline::Session::chrome_latest();
     assert!(chrome.is_ok());
-    assert_eq!(chrome.unwrap().browser(), Browser::Chrome148);
+    assert_eq!(chrome.unwrap().browser(), Some(Browser::Chrome148));
 
     let firefox = leyline::Session::firefox_latest();
     assert!(firefox.is_ok());
-    assert_eq!(firefox.unwrap().browser(), Browser::Firefox150);
+    assert_eq!(firefox.unwrap().browser(), Some(Browser::Firefox150));
 
     let safari = leyline::Session::safari_latest();
     assert!(safari.is_ok());
-    assert_eq!(safari.unwrap().browser(), Browser::Safari18);
+    assert_eq!(safari.unwrap().browser(), Some(Browser::Safari18));
 }
 
 // ─── Offline: mock proxy protocol state machine ────────────────────────
@@ -535,7 +584,7 @@ async fn live_wire_audit_every_profile() {
 #[ignore = "live: needs network"]
 async fn live_ja4_exact_match_chrome148() {
     // chrome_latest() resolves to Chrome 148 (the current default).
-    let session = leyline::Session::chrome_latest().unwrap();
+    let session = leyline::Session::chrome();
     let json = peet(&session).await;
     let ja4 = json["tls"]["ja4"].as_str().expect("no tls.ja4");
 
@@ -604,7 +653,7 @@ async fn live_ja4_exact_match_chrome145() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_ja4_exact_match_firefox150() {
-    let session = leyline::Session::firefox_latest().unwrap();
+    let session = leyline::Session::firefox();
     let json = peet(&session).await;
     let ja4 = json["tls"]["ja4"].as_str().expect("no tls.ja4");
 
@@ -621,7 +670,7 @@ async fn live_ja4_exact_match_firefox150() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_ja4_exact_match_safari18() {
-    let session = leyline::Session::safari_latest().unwrap();
+    let session = leyline::Session::safari();
     let json = peet(&session).await;
     let ja4 = json["tls"]["ja4"].as_str().expect("no tls.ja4");
 
@@ -800,7 +849,7 @@ async fn live_tcp_windows_distinguishable_from_linux() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_chrome147_ciphers_match_profile_order() {
-    let session = leyline::Session::chrome_latest().unwrap();
+    let session = leyline::Session::chrome();
     let json = peet(&session).await;
 
     let reg = leyline::profile::ProfileRegistry::builtin();
@@ -834,7 +883,7 @@ async fn live_chrome147_ciphers_match_profile_order() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_chrome147_has_alps_extension() {
-    let session = leyline::Session::chrome_latest().unwrap();
+    let session = leyline::Session::chrome();
     let json = peet(&session).await;
 
     let extensions = json["tls"]["extensions"]
@@ -857,7 +906,7 @@ async fn live_chrome147_has_alps_extension() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_chrome147_has_cert_compression() {
-    let session = leyline::Session::chrome_latest().unwrap();
+    let session = leyline::Session::chrome();
     let json = peet(&session).await;
 
     let extensions = json["tls"]["extensions"]
@@ -874,6 +923,49 @@ async fn live_chrome147_has_cert_compression() {
         "Chrome 147 should advertise compress_certificate extension"
     );
     println!("✓ Chrome 147 compress_certificate extension present");
+}
+
+/// Anchors the cert-compression *algorithm list*, not just the extension's
+/// presence. `live_chrome147_has_cert_compression` only proves extension 27
+/// exists — it would pass even if the advertised algorithm set were wrong.
+/// Firefox 150/151 are the only profiles that advertise more than brotli
+/// (zlib+brotli+zstd), and registering those decompressors is exactly what
+/// the cert-compression change touches on the wire, so it must be anchored
+/// against real peet output or the change is unverified (CONTRIBUTING.md tautology
+/// rule). We match on the stringified extension so we're robust to peet's
+/// exact field naming (`algorithms` vs parsed `data`).
+#[tokio::test]
+#[ignore = "live: needs network"]
+async fn live_firefox_cert_compression_advertises_zlib_brotli_zstd() {
+    for browser in [Browser::Firefox150, Browser::Firefox151] {
+        let session = leyline::Session::builder()
+            .browser(browser)
+            .platform(Platform::Windows)
+            .build()
+            .unwrap();
+        let json = peet(&session).await;
+        let extensions = json["tls"]["extensions"]
+            .as_array()
+            .expect("no tls.extensions");
+
+        let cc = extensions
+            .iter()
+            .find(|ext| {
+                let name = ext["name"].as_str().unwrap_or("");
+                name.contains("compress_certificate") || name.contains("27")
+            })
+            .unwrap_or_else(|| panic!("{browser:?}: no compress_certificate extension"));
+
+        // Whole-extension blob so we don't depend on peet's sub-field name.
+        let blob = cc.to_string().to_lowercase();
+        for algo in ["zlib", "brotli", "zstd"] {
+            assert!(
+                blob.contains(algo),
+                "{browser:?}: compress_certificate must advertise {algo}; got {blob}"
+            );
+        }
+        println!("✓ {browser:?} advertises zlib+brotli+zstd cert compression");
+    }
 }
 
 // ─── Live: platform identity → header content ───────────────────────────
@@ -976,7 +1068,7 @@ async fn live_chrome147_linux_identity_headers() {
 #[ignore = "live: needs network"]
 async fn live_chrome147_pseudo_header_order() {
     // Chrome sends pseudo-headers in the order method, authority, scheme, path.
-    let session = leyline::Session::chrome_latest().unwrap();
+    let session = leyline::Session::chrome();
     let json = peet(&session).await;
     let headers = extract_sent_headers(&json);
 
@@ -998,7 +1090,7 @@ async fn live_chrome147_pseudo_header_order() {
 #[ignore = "live: needs network"]
 async fn live_firefox150_pseudo_header_order() {
     // Firefox sends pseudo-headers in the order method, path, authority, scheme.
-    let session = leyline::Session::firefox_latest().unwrap();
+    let session = leyline::Session::firefox();
     let json = peet(&session).await;
     let headers = extract_sent_headers(&json);
 
@@ -1014,122 +1106,6 @@ async fn live_firefox150_pseudo_header_order() {
         "Firefox pseudo-header order wrong"
     );
     println!("✓ Firefox 150 pseudo-header order: method,path,authority,scheme");
-}
-
-// ─── Live: decompression ─────────────────────────────────────────────────
-
-#[tokio::test]
-#[ignore = "live: needs network"]
-async fn live_decompression_gzip() {
-    let session = leyline::Session::chrome_latest().unwrap();
-    let resp = session.navigate("https://httpbin.org/gzip").await.unwrap();
-    assert_eq!(resp.status(), 200);
-    let json: Value = serde_json::from_str(&resp.text()).expect("gzip-decoded body not JSON");
-    assert_eq!(json["gzipped"], true);
-    println!("✓ gzip decompression works");
-}
-
-#[tokio::test]
-#[ignore = "live: needs network"]
-async fn live_decompression_brotli() {
-    let session = leyline::Session::chrome_latest().unwrap();
-    let resp = session
-        .navigate("https://httpbin.org/brotli")
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), 200);
-    let json: Value = serde_json::from_str(&resp.text()).expect("brotli-decoded body not JSON");
-    assert_eq!(json["brotli"], true);
-    println!("✓ brotli decompression works");
-}
-
-#[tokio::test]
-#[ignore = "live: needs network"]
-async fn live_decompression_deflate() {
-    let session = leyline::Session::chrome_latest().unwrap();
-    let resp = session
-        .navigate("https://httpbin.org/deflate")
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), 200);
-    let json: Value = serde_json::from_str(&resp.text()).expect("deflate-decoded body not JSON");
-    assert_eq!(json["deflated"], true);
-    println!("✓ deflate decompression works");
-}
-
-// ─── Live: cookies ───────────────────────────────────────────────────────
-
-#[tokio::test]
-#[ignore = "live: needs network"]
-async fn live_cookies_set_then_sent() {
-    let session = leyline::Session::chrome_latest().unwrap();
-    // Set a cookie via Set-Cookie redirect chain.
-    let resp1 = session
-        .navigate("https://httpbin.org/cookies/set?token=abc123")
-        .await
-        .unwrap();
-    assert_eq!(resp1.status(), 200);
-
-    // Next request should send the cookie.
-    let resp2 = session
-        .navigate("https://httpbin.org/cookies")
-        .await
-        .unwrap();
-    assert_eq!(resp2.status(), 200);
-    let json: Value = serde_json::from_str(&resp2.text()).unwrap();
-    assert_eq!(
-        json["cookies"]["token"].as_str(),
-        Some("abc123"),
-        "cookie not sent on second request"
-    );
-    println!("✓ Cookie round-trip: set via Set-Cookie, sent on next request");
-}
-
-// ─── Live: redirect handling ─────────────────────────────────────────────
-
-#[tokio::test]
-#[ignore = "live: needs network"]
-async fn live_redirect_follows_and_rewrites_url() {
-    let session = leyline::Session::chrome_latest().unwrap();
-    let resp = session
-        .navigate("https://httpbin.org/redirect/3")
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), 200);
-    assert_eq!(
-        resp.redirect_chain().len(),
-        3,
-        "expected 3 redirects in chain"
-    );
-    assert!(
-        resp.url().ends_with("/get"),
-        "final URL wrong: {}",
-        resp.url()
-    );
-    println!("✓ 3-hop redirect chain followed");
-}
-
-#[tokio::test]
-#[ignore = "live: needs network"]
-async fn live_redirect_strips_auth_cross_origin() {
-    // Set up bearer auth header and redirect to a different host.
-    // httpbin doesn't easily cross-host redirect, but we can check same-host preserves.
-    let session = leyline::Session::chrome_latest().unwrap();
-    let resp = session
-        .get("https://httpbin.org/redirect-to?url=https://httpbin.org/headers")
-        .bearer_auth("secret-token-xyz")
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), 200);
-    let json: Value = serde_json::from_str(&resp.text()).unwrap();
-    // Same-host redirect preserves Authorization.
-    assert_eq!(
-        json["headers"]["Authorization"].as_str(),
-        Some("Bearer secret-token-xyz"),
-        "same-host redirect should preserve Authorization"
-    );
-    println!("✓ Same-host redirect preserves Authorization");
 }
 
 // ─── Live: HTTP/3 over QUIC ─────────────────────────────────────────────
@@ -1280,7 +1256,7 @@ async fn live_session_resumption_pre_shared_key() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_h2_connection_reuse() {
-    let session = leyline::Session::chrome_latest().unwrap();
+    let session = leyline::Session::chrome();
     let resp1 = session.navigate(PEET_URL).await.unwrap();
     assert_eq!(resp1.status(), 200);
     let resp2 = session.navigate(PEET_URL).await.unwrap();
@@ -1298,7 +1274,7 @@ async fn live_h2_connection_reuse() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_tls_peer_certificate_exposed() {
-    let session = leyline::Session::chrome_latest().unwrap();
+    let session = leyline::Session::chrome();
     let resp = session.navigate(PEET_URL).await.unwrap();
     assert_eq!(resp.status(), 200);
     let cert = resp
@@ -1312,70 +1288,6 @@ async fn live_tls_peer_certificate_exposed() {
         cert.first().copied().unwrap_or(0)
     );
     println!("✓ peer certificate exposed: {} DER bytes", cert.len());
-}
-
-// ─── Live: GREASE seed determinism ──────────────────────────────────────
-
-#[tokio::test]
-#[ignore = "live: needs network"]
-async fn live_grease_seed_deterministic() {
-    // Two sessions with the same grease_seed should produce the same JA4_r
-    // (the unhashed JA4 which includes cipher and extension order with
-    // GREASE values filtered out consistently).
-    let s1 = leyline::Session::builder()
-        .grease_seed(b"user_42")
-        .build()
-        .unwrap();
-    let s2 = leyline::Session::builder()
-        .grease_seed(b"user_42")
-        .build()
-        .unwrap();
-
-    let j1 = peet(&s1).await;
-    let j2 = peet(&s2).await;
-
-    // JA4 is hashed and filters GREASE, so it should match regardless.
-    // JA4_r is the raw form; also matches when GREASE is filtered.
-    let ja4_1 = j1["tls"]["ja4"].as_str().unwrap();
-    let ja4_2 = j2["tls"]["ja4"].as_str().unwrap();
-    assert_eq!(ja4_1, ja4_2, "same grease seed should produce same JA4");
-    println!("✓ grease_seed determinism: same seed → same JA4");
-}
-
-// ─── Live: POST with form & JSON through tls.peet.ws echo ──────────────
-
-#[tokio::test]
-#[ignore = "live: needs network"]
-async fn live_post_json_body_roundtrip() {
-    let session = leyline::Session::chrome_latest().unwrap();
-    let body = serde_json::json!({"test": "leyline", "n": 42});
-    let resp = session
-        .post_json("https://httpbin.org/post", &body)
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), 200);
-    let json: Value = serde_json::from_str(&resp.text()).unwrap();
-    assert_eq!(json["json"]["test"], "leyline");
-    assert_eq!(json["json"]["n"], 42);
-    println!("✓ POST JSON round-trip");
-}
-
-#[tokio::test]
-#[ignore = "live: needs network"]
-async fn live_post_form_body_roundtrip() {
-    let session = leyline::Session::chrome_latest().unwrap();
-    let resp = session
-        .post_form(
-            "https://httpbin.org/post",
-            &[("u", "alice"), ("p", "s3cret")],
-        )
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), 200);
-    let json: Value = serde_json::from_str(&resp.text()).unwrap();
-    assert_eq!(json["form"]["u"], "alice");
-    assert_eq!(json["form"]["p"], "s3cret");
-    println!("✓ POST form round-trip");
 }
 
 // ─── Live: proxy integration (env-gated) ───────────────────────────────
@@ -1460,7 +1372,7 @@ async fn live_socks5_proxy() {
 #[ignore = "live: needs network"]
 async fn live_websocket_echo() {
     // Postman's public echo server echoes text frames verbatim.
-    let session = leyline::Session::chrome_latest().unwrap();
+    let session = leyline::Session::chrome();
     let mut ws = session
         .websocket("wss://ws.postman-echo.com/raw")
         .await

@@ -1,10 +1,13 @@
 # Leyline
 
-A Rust HTTP client that sends requests that look, on the wire, like a real
-browser. Chrome, Firefox, Safari, OkHttp - pick a profile, get its TLS,
-HTTP/2, and TCP shape.
+An HTTP client for Rust. By default it's plain and honest — a
+`leyline/<version>` user agent, host OS, nothing exotic on the wire — so
+use it for ordinary API calls the way you'd use reqwest. Ask for a browser
+and it puts that browser's exact TLS, HTTP/2, and TCP shape on the wire:
+Chrome, Firefox, Safari, OkHttp. That's the path for servers that fingerprint
+the client and hand a plain one a 403.
 
-Status: `1.0.0-alpha.1`. API is still changing; pin exact versions.
+Status: `1.0.0-alpha.1`. The API still moves; pin exact versions.
 
 ## Example
 
@@ -25,19 +28,35 @@ tokio = { version = "1", features = ["full"] }
 > prebuilt experience, clone the repo and build inside the workspace.
 
 ```rust,no_run
-use leyline::Client;
+use leyline::Session;
 
 #[tokio::main]
 async fn main() -> leyline::Result<()> {
-    let client = Client::chrome()?;
+    // Bare by default — a plain client, no browser fingerprint.
+    let resp = leyline::get("https://api.example.com/v1").await?;
+    println!("{}", resp.status());
 
-    let resp = client
-        .get("https://tls.peet.ws/api/all")
-        .query([("view", "all")])
-        .accept("application/json")
-        .send()
-        .await?;
-    println!("{} {}", resp.status(), resp.audit().unwrap().ja4);
+    // Ask for Chrome when you need to look like a browser.
+    let chrome = Session::chrome();
+    let page = chrome.navigate("https://example.com").await?;
+    println!("{}", page.status());
+    Ok(())
+}
+```
+
+Auditing what actually went on the wire is opt-in — turn it on and the
+response carries the fingerprint Leyline sent:
+
+```rust,no_run
+use leyline::Session;
+
+#[tokio::main]
+async fn main() -> leyline::Result<()> {
+    let session = Session::builder().chrome().audit(true).build()?;
+    let resp = session.navigate("https://tls.peet.ws/api/all").await?;
+    if let Some(audit) = resp.audit() {
+        println!("JA4: {}", audit.ja4);
+    }
     Ok(())
 }
 ```
@@ -71,9 +90,10 @@ tests for release validation.
 The API is Leyline-native and async on tokio. Streaming bodies, multipart
 uploads, digest auth, retry with backoff, cookie jar, proxy + SOCKS5, a
 `tower::Service` adapter, WebSocket (both HTTP/1.1 upgrade and RFC 8441
-extended CONNECT over H2). Every response carries a per-connection audit
-block - JA3, JA4, JA4T, JA4H, H2 Akamai fingerprint - so you can check what
-actually went on the wire.
+extended CONNECT over H2). Turn on auditing (`SessionBuilder::audit(true)`)
+and each response carries a per-connection audit block - JA3, JA4, JA4T,
+JA4H, H2 Akamai fingerprint - so you can check what actually went on the
+wire.
 
 Concurrent requests share one H2 connection through a cloneable `H2Client`.
 No per-request handshake. A stream parked on flow control doesn't block

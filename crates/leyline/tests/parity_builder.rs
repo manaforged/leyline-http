@@ -67,7 +67,7 @@ fn builder_accepts_wreq_parity_transport_knobs() {
         .build()
         .expect("builder accepts parity knobs");
 
-    assert_eq!(session.browser(), Browser::Chrome147);
+    assert_eq!(session.browser(), Some(Browser::Chrome147));
     assert_eq!(session.default_timeout(), Duration::from_secs(5));
     assert_eq!(session.pool_stats().max_connections, 8);
 }
@@ -107,4 +107,42 @@ fn default_session_timeout_is_five_minutes() {
 fn tower_service_adapter_compiles() {
     let session = Session::builder().build().unwrap();
     let _svc = leyline::LeylineService::new(session);
+}
+
+/// The request builder must be owned + `Send` so it can be built up front
+/// and moved into a `tokio::spawn` / stored in a struct — the common
+/// fan-out/worker pattern. Before the `Arc<SessionInner>` refactor the
+/// builder borrowed `&Session` and this would not compile.
+#[test]
+fn request_builder_is_send_and_movable_into_spawn() {
+    fn assert_send<T: Send>(_: &T) {}
+
+    let session = Session::builder()
+        .disable_env_proxies()
+        .build()
+        .expect("session builds");
+
+    // Build the request, then move it across a thread/task boundary.
+    let req = session
+        .post("https://example.test/")
+        .header("x-worker", "1")
+        .body("payload");
+    assert_send(&req);
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    rt.block_on(async move {
+        // `req` is owned + Send: a spawned task can take it. The await
+        // fails fast (no network) but it must *compile and move*, which is
+        // the property under test.
+        let handle = tokio::spawn(async move {
+            let _ = req.timeout(Duration::from_millis(10)).send().await;
+        });
+        let _ = handle.await;
+    });
+
+    // The session is independently usable afterwards — the builder owned a
+    // cheap Arc clone, it did not borrow the session.
+    assert!(session.pool_stats().max_connections >= 1);
 }

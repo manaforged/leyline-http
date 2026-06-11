@@ -28,27 +28,45 @@ The pre-commit hook runs the offline Leyline workspace suite on every commit.
 are not part of Leyline's release gate, but Leyline's H3 integration path is
 covered by the smoke and transport tests below.
 
+## What a plain `cargo test` does and doesn't prove
+
+Rows below whose test is named `live_*` run **only** under `-- --ignored` and
+talk to real infrastructure (tls.peet.ws, Cloudflare, Google QUIC). The
+pre-commit and pre-push hooks run them; a plain `cargo test` does **not**.
+That means an offline run does not anchor Leyline's wire output against an
+external browser — the offline fingerprint tests compare the emitter to
+Leyline's own TOML (necessary, but tautological by construction). Only the
+`live_*` suite, and `chrome_pq_key_shares_use_distinct_x25519_ephemerals`
+(a real local ClientHello capture), check against ground truth. JA4 is
+externally anchored for the six profiles with a `live_ja4_exact_match_*`
+test; the other shipped profiles are TOML-asserted, not live-verified.
+
+Offline rows whose test lives in `tests/http_semantics.rs` run against an
+**in-process httpbin-lite mock** (no network) — deterministic, but they
+prove Leyline's HTTP semantics, not behaviour against any real server.
+
 ## Evidence matrix
 
 | Property | How it is proved | Where |
 |---|---|---|
-| TLS ClientHello matches profile JA4 | Live capture from tls.peet.ws compared against TOML expectation, per browser | `live_ja4_exact_match_{chrome145,chrome146,chrome147,firefox150,safari18}` |
-| Every profile's H2 fingerprint matches its TOML value | Akamai H2 fingerprint asserted for all 14 profiles | `h2_fingerprints_match_toml_expectations`, `live_h2_akamai_every_profile` |
+| TLS ClientHello matches profile JA4 | Live capture from tls.peet.ws compared against TOML expectation, per browser | `live_ja4_exact_match_{chrome145,chrome146,chrome147,chrome148,firefox150,safari18}` |
+| Every profile's H2 fingerprint matches its TOML value | Akamai H2 fingerprint asserted for all 15 profiles | `h2_fingerprints_match_toml_expectations` (offline, emitter↔TOML), `live_h2_akamai_every_profile` (live anchor) |
 | HTTP/2 pseudo-header order matches browser | Live capture, per browser | `live_chrome147_pseudo_header_order`, `live_firefox150_pseudo_header_order` |
 | TCP SYN differs by OS (JA4T) | TTL 64 on Linux, 128 on Windows, three-way distinguishable | `live_tcp_linux_ttl_is_64`, `live_tcp_windows_ttl_is_128`, `live_tcp_windows_distinguishable_from_linux` |
 | ALPS / cert compression / ALPN extensions present | Live tls.peet.ws inspection, per extension | `live_chrome147_has_alps_extension`, `live_chrome147_has_cert_compression` |
+| Cert-compression algorithm set matches profile | Firefox 150/151 advertise zlib+brotli+zstd (not just brotli) | `live_firefox_cert_compression_advertises_zlib_brotli_zstd` |
 | Cipher order matches profile | tls.peet.ws cipher list compared to TOML order | `live_chrome147_ciphers_match_profile_order` |
 | Post-quantum ephemeral keys are distinct (utls#342 regression) | Local TCP capture of Chrome 147 ClientHello, parse `key_share`, assert X25519 ≠ X25519 inside X25519MLKEM768 | `chrome_pq_key_shares_use_distinct_x25519_ephemerals` |
-| GREASE seed determinism | Two handshakes with the same seed produce the same GREASE slot | `live_grease_seed_deterministic` |
 | TLS 1.3 session resumption works end-to-end | Two requests, second presents a valid pre-shared key | `live_session_resumption_pre_shared_key` |
 | Peer certificate is reachable on the response | Response exposes DER-encoded cert + version + cipher | `live_tls_peer_certificate_exposed` |
 | HTTP/3 reachable against real QUIC servers | Direct H3 GET against Cloudflare and Google | `live_h3_cloudflare`, `live_h3_cloudflare_firefox_profile`, `live_h3_google` |
 | Wire-fidelity: caller-set headers | Raw TCP captures assert caller header replacement, duplicate preservation, redirect auth stripping/preservation, and brand overlay precedence | `crates/leyline/tests/core_wire_fidelity.rs` |
 | HTTP/2 connection reuse through the pool | Three sequential requests on one session, second/third are warm | `live_h2_connection_reuse` |
-| Cookies persist and flow back | Set-Cookie captured, jar replays it on the next hop | `live_cookies_set_then_sent` |
-| Redirects follow and strip auth cross-origin | Chain of 302s, Authorization dropped on origin change | `live_redirect_follows_and_rewrites_url`, `live_redirect_strips_auth_cross_origin` |
-| Decompression for gzip / brotli / deflate | Full body decodes to valid JSON | `live_decompression_gzip`, `live_decompression_brotli`, `live_decompression_deflate` |
-| JSON / form / query / bearer auth round-trip | Echoed fields come back unchanged | `live_post_json_body_roundtrip`, `live_post_form_body_roundtrip` |
+| Cookies persist and flow back | Set-Cookie captured, jar replays it on the next hop (offline mock) | `cookies_set_then_sent` |
+| Redirects follow and rewrite the URL | Chain of 302s recorded, final URL is the destination (offline mock) | `redirect_follows_and_rewrites_url`, `redirect_preserves_auth_same_host` |
+| Authorization stripped on cross-origin redirect | Raw-TCP capture: header present on hop 1, absent after the origin changes; preserved same-origin | `redirect_cross_origin_strips_authorization_after_first_hop`, `redirect_same_origin_preserves_authorization` (`core_wire_fidelity.rs`) |
+| Decompression for gzip / brotli / deflate | Mock compresses the body; full body decodes to valid JSON (offline mock) | `decompression_gzip`, `decompression_brotli`, `decompression_deflate` |
+| JSON / form body round-trip | Echoed fields come back unchanged (offline mock) | `post_json_body_roundtrip`, `post_form_body_roundtrip` |
 | HTTP CONNECT and SOCKS5 proxy wire shape | Local mock proxies assert exact bytes per RFC 1928 / RFC 7231 | `offline_http_connect_proxy_wire_bytes`, `offline_socks5_proxy_wire_bytes`, `live_http_connect_proxy`, `live_socks5_proxy` |
 | WebSocket upgrade succeeds on a fingerprinted H1 stream | Live echo round-trip | `live_websocket_echo` |
 | Identity headers vary correctly by platform | UA, sec-ch-ua, sec-ch-ua-platform per Windows / Linux / Android | `live_chrome147_windows_identity_headers`, `live_chrome147_linux_identity_headers`, `live_chrome147_android_identity_headers` |
@@ -61,7 +79,7 @@ gates below end-to-end against public infrastructure. Source:
 
 | Gate | Assertion |
 |---|---|
-| Chrome 147 exact JA4 + H2 | JA4 and H2 match profile expectations |
+| Chrome 148 exact JA4 + H2 | JA4 and H2 match profile expectations |
 | Firefox 150 exact JA4 + H2 | JA4 and H2 match profile expectations |
 | Connection reuse (3 requests) | All requests succeed through one session |
 | Brotli/gzip decompression | Response decodes to valid JSON |

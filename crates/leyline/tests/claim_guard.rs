@@ -55,6 +55,168 @@ fn readme_keeps_public_evidence_commands() {
     }
 }
 
+/// Every test name printed in TESTING.md / README.md must actually exist.
+/// This is the guard that would have caught the stale `live_decompression_*`
+/// citations left behind when those tests were renamed and moved offline:
+/// a cited name that exists nowhere in the source is a broken promise of proof.
+#[test]
+fn cited_test_names_exist() {
+    let known = source_identifiers();
+    let mut missing = Vec::new();
+
+    for doc in ["TESTING.md", "README.md"] {
+        let raw = std::fs::read_to_string(repo_root().join(doc)).unwrap();
+        // The `## Fuzzing` section names cargo-fuzz targets that live in an
+        // optional `fuzz/` workspace, absent on most branches — not a
+        // proof-promise about a test in this tree.
+        let text = strip_section(&raw, "## Fuzzing");
+        for name in cited_test_candidates(&text) {
+            if !known.contains(&name) {
+                missing.push(format!(
+                    "{doc} cites `{name}`, which exists nowhere in src/ or tests/"
+                ));
+            }
+        }
+    }
+
+    assert!(
+        missing.is_empty(),
+        "documentation cites test/identifier names that do not exist:\n{}",
+        missing.join("\n")
+    );
+}
+
+/// Doc examples must not reintroduce two known footguns: `?` on an infallible
+/// constructor (won't compile) and `resp.audit().unwrap()` (panics unless
+/// audit was enabled on the session). The crate README is also compiled as a
+/// doctest, which catches the first at compile time; this catches both across
+/// every claim surface, including the un-doctested root README.
+#[test]
+fn examples_avoid_known_footguns() {
+    const FORBIDDEN_SNIPPETS: &[&str] = &[
+        "chrome()?",
+        "firefox()?",
+        "safari()?",
+        "edge()?",
+        "brave()?",
+        "opera()?",
+        "vivaldi()?",
+        ".audit().unwrap()",
+    ];
+    let mut hits = Vec::new();
+    let mut surfaces = public_claim_surfaces();
+    surfaces.push(repo_root().join("crates/leyline/README.md"));
+
+    for path in surfaces {
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        for (idx, line) in text.lines().enumerate() {
+            for snip in FORBIDDEN_SNIPPETS {
+                if line.contains(snip) {
+                    hits.push(format!(
+                        "{}:{} reintroduces footgun `{}`: {}",
+                        display_path(&path),
+                        idx + 1,
+                        snip,
+                        line.trim()
+                    ));
+                }
+            }
+        }
+    }
+
+    assert!(
+        hits.is_empty(),
+        "doc examples contain known-broken patterns:\n{}",
+        hits.join("\n")
+    );
+}
+
+/// Drop a markdown section (the `## Heading` line through the line before the
+/// next `## ` heading) so its contents are excluded from scanning.
+fn strip_section(text: &str, heading: &str) -> String {
+    let mut out = String::new();
+    let mut in_section = false;
+    for line in text.lines() {
+        if line.starts_with("## ") {
+            in_section = line.trim_end() == heading;
+        }
+        if !in_section {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    out
+}
+
+/// Backticked tokens in a doc that look like a test/function name. Handles the
+/// brace-expansion shorthand `live_ja4_exact_match_{chrome148,firefox150}`.
+fn cited_test_candidates(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    // Odd-indexed split segments are the contents between backticks.
+    for (i, span) in text.split('`').enumerate() {
+        if i % 2 == 0 {
+            continue;
+        }
+        if let Some((prefix, rest)) = span.split_once('{') {
+            // `prefix{a,b,c}` -> prefix+a, prefix+b, prefix+c
+            if let Some(items) = rest.strip_suffix('}') {
+                if is_snake_ident(prefix) {
+                    for item in items.split(',') {
+                        out.push(format!("{prefix}{}", item.trim()));
+                    }
+                }
+            }
+        } else if is_snake_ident(span) {
+            out.push(span.to_string());
+        }
+    }
+    out
+}
+
+/// Lowercase snake_case with at least one underscore — the shape of test fn
+/// names and lowercase API methods, but not paths (`foo.rs`), types
+/// (`H2Config`), or `Type::method` citations.
+fn is_snake_ident(s: &str) -> bool {
+    s.contains('_')
+        && !s.is_empty()
+        && s.chars().next().is_some_and(|c| c.is_ascii_lowercase())
+        && s.chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+}
+
+/// Every identifier-shaped token that appears in the crate's `src/` or
+/// `tests/` Rust sources (test fn names included).
+fn source_identifiers() -> std::collections::HashSet<String> {
+    let mut set = std::collections::HashSet::new();
+    let crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    for sub in ["src", "tests"] {
+        collect_identifiers(&crate_dir.join(sub), &mut set);
+    }
+    set
+}
+
+fn collect_identifiers(dir: &Path, set: &mut std::collections::HashSet<String>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_identifiers(&path, set);
+        } else if path.extension().is_some_and(|e| e == "rs") {
+            if let Ok(text) = std::fs::read_to_string(&path) {
+                for token in text.split(|c: char| !c.is_ascii_alphanumeric() && c != '_') {
+                    if is_snake_ident(token) {
+                        set.insert(token.to_string());
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn public_claim_surfaces() -> Vec<PathBuf> {
     let root = repo_root();
     [

@@ -50,11 +50,36 @@ pub enum ProtocolPolicy {
 
 /// A Leyline session - browser-fingerprinted HTTP client with cookies.
 ///
-/// `Session` is cheaply cloneable: clones share the same connection pool,
-/// cookie jar, TLS connector, and BoringSSL session cache.
+/// `Session` is an `Arc` over its inner state, so cloning is a refcount
+/// bump (O(1)) — clones share the same connection pool, cookie jar, TLS
+/// connector, and BoringSSL session cache. This is what lets every
+/// per-request [`RequestBuilder`](crate::RequestBuilder) own its session
+/// cheaply instead of borrowing it.
 #[derive(Clone)]
 pub struct Session {
-    browser: Browser,
+    inner: Arc<SessionInner>,
+}
+
+impl std::ops::Deref for Session {
+    type Target = SessionInner;
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+/// Inner session state, held behind an `Arc` by [`Session`]. Field access
+/// goes through `Session`'s `Deref`; the only writers are the builder (at
+/// construction) and the `with_*` derive methods (via `Arc::make_mut`).
+///
+/// `pub` only because it is the public `Deref::Target` of [`Session`]; all
+/// fields are private and there are no public methods, so it carries no
+/// usable surface of its own. Treat it as an implementation detail.
+#[doc(hidden)]
+#[derive(Clone)]
+pub struct SessionInner {
+    /// The impersonated browser, or `None` for a bare (non-impersonating)
+    /// session.
+    browser: Option<Browser>,
     platform: Platform,
     brand: ChromiumBrand,
     user_agent: String,

@@ -12,17 +12,33 @@ use crate::tcp::TcpProfile;
 use crate::tls::{FingerprintConnector, HappyEyeballsConfig, Resolver, TlsTrustConfig};
 
 use super::proxy::env_proxy;
-use super::{ProtocolPolicy, Session};
+use super::{ProtocolPolicy, Session, SessionInner};
 use crate::audit::AuditTlsCache;
 use crate::core::error::{Error, Result};
 
 static PROFILES: LazyLock<ProfileRegistry> = LazyLock::new(ProfileRegistry::builtin);
+
+/// The synthetic bare profile, materialised once. Backs the default
+/// (no-impersonation) session so `&'static crate::profile::BrowserProfile`
+/// is available to the connector and the H3 path, exactly like the
+/// registry-backed browser profiles.
+static BARE_PROFILE: LazyLock<crate::profile::BrowserProfile> =
+    LazyLock::new(crate::profile::BrowserProfile::bare);
 const DEFAULT_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
 /// Session builder - configure browser, platform, proxy, timeout, cookies.
 pub struct SessionBuilder {
-    browser: Browser,
+    /// The browser to impersonate. `None` (the default) means **bare** —
+    /// no impersonation, a plain `leyline/<version>` client. `.browser(b)`
+    /// opts into a browser fingerprint.
+    browser: Option<Browser>,
     platform: Platform,
+    /// `true` once `.platform(...)` (or a platform-pinning convenience like
+    /// `.safari()`) was called. When still `false` at build time the
+    /// platform is chosen by default: an impersonation profile defaults to
+    /// Windows (the dominant real-user OS; a one-time notice fires), while a
+    /// bare session follows the host OS.
+    platform_explicit: bool,
     brand: ChromiumBrand,
     proxy: Option<String>,
     /// Set when `proxy` was discovered from the environment at build
@@ -44,7 +60,6 @@ pub struct SessionBuilder {
     tcp_profile: Option<TcpProfile>,
     protocol_policy: ProtocolPolicy,
     config_error: Option<String>,
-    grease_seed: Option<Vec<u8>>,
     accept_language_override: Option<String>,
     extra_identity_headers: Vec<(String, String)>,
     accept_invalid_certs: bool,
@@ -57,8 +72,9 @@ pub struct SessionBuilder {
 impl SessionBuilder {
     pub(super) fn new() -> Self {
         Self {
-            browser: Browser::default(),
+            browser: None,
             platform: Platform::default(),
+            platform_explicit: false,
             brand: ChromiumBrand::default(),
             proxy: None,
             proxy_from_env: false,
@@ -78,7 +94,6 @@ impl SessionBuilder {
             tcp_profile: None,
             protocol_policy: ProtocolPolicy::Auto,
             config_error: None,
-            grease_seed: None,
             accept_language_override: None,
             extra_identity_headers: Vec::new(),
             accept_invalid_certs: false,
@@ -188,9 +203,12 @@ impl SessionBuilder {
         self
     }
 
-    /// Set the browser TLS profile.
+    /// Impersonate a specific browser. Without this call the session is
+    /// **bare** — a plain `leyline/<version>` client with no browser
+    /// fingerprint. Call this (or a convenience like [`Self::chrome`]) to
+    /// opt into browser parity.
     pub fn browser(mut self, browser: Browser) -> Self {
-        self.browser = browser;
+        self.browser = Some(browser);
         self
     }
 
@@ -262,8 +280,15 @@ impl SessionBuilder {
     }
 
     /// Set the target platform.
+    ///
+    /// When never called, the session defaults to [`Platform::Windows`]
+    /// (the dominant real-user OS) regardless of the host it builds on — a
+    /// Mac/Linux build that forgets this ships a Windows TLS+TCP+UA
+    /// fingerprint. The default is deliberate; build emits a one-time
+    /// `tracing::info` so the silent choice is observable.
     pub fn platform(mut self, platform: Platform) -> Self {
         self.platform = platform;
+        self.platform_explicit = true;
         self
     }
 
@@ -504,20 +529,6 @@ impl SessionBuilder {
         self
     }
 
-    /// Set a deterministic GREASE seed. Ensures the same GREASE values
-    /// are used across connections, creating a stable fingerprint per
-    /// identity. Without this, GREASE is random per connection.
-    ///
-    /// ```rust,ignore
-    /// let session = Session::builder()
-    ///     .grease_seed(b"user_42")
-    ///     .build()?;
-    /// ```
-    pub fn grease_seed(mut self, seed: impl Into<Vec<u8>>) -> Self {
-        self.grease_seed = Some(seed.into());
-        self
-    }
-
     /// Override the session's `accept-language` header for every request.
     /// When not called, the browser profile's TOML identity value is used.
     pub fn accept_language(mut self, lang: impl Into<String>) -> Self {
@@ -559,6 +570,27 @@ impl SessionBuilder {
             return Err(Error::Config(error));
         }
 
+        // Resolve the effective platform:
+        //  - explicit `.platform(...)` always wins (resolving `Host` if set);
+        //  - an impersonation profile with no explicit platform defaults to
+        //    Windows (dominant real-user OS) and warns once;
+        //  - a bare session follows the host OS (honest for internal calls).
+        self.platform = if self.platform_explicit {
+            self.platform.resolve()
+        } else if self.browser.is_some() {
+            static NOTICE: std::sync::Once = std::sync::Once::new();
+            NOTICE.call_once(|| {
+                tracing::info!(
+                    target: "leyline::session",
+                    "no .platform() set on an impersonation profile — defaulting to \
+                     Windows; call .platform(...) to pin the OS identity"
+                );
+            });
+            Platform::Windows
+        } else {
+            Platform::detect_host()
+        };
+
         // Honour standard proxy environment variables when no explicit
         // `proxy(..)` has been set. A CLI user exporting `HTTPS_PROXY`
         // gets it picked up without re-plumbing the session. The
@@ -592,17 +624,24 @@ impl SessionBuilder {
             }
         }
 
-        let profile = PROFILES
-            .get_browser(self.browser)
-            .ok_or_else(|| Error::Config(format!("no profile for {}", self.browser)))?;
+        // `None` browser = bare (the default): a synthetic, non-impersonating
+        // profile. `Some(b)` = impersonate that browser from the registry.
+        let profile: &'static crate::profile::BrowserProfile = match self.browser {
+            Some(b) => PROFILES
+                .get_browser(b)
+                .ok_or_else(|| Error::Config(format!("no profile for {b}")))?,
+            None => &BARE_PROFILE,
+        };
+
+        let browser_label = self
+            .browser
+            .map(|b| b.to_string())
+            .unwrap_or_else(|| "bare".to_string());
 
         let mut identity = profile
             .identity_for(self.platform)
             .ok_or_else(|| {
-                Error::Config(format!(
-                    "no {} identity for {}",
-                    self.platform, self.browser
-                ))
+                Error::Config(format!("no {} identity for {browser_label}", self.platform))
             })?
             .clone();
 
@@ -616,7 +655,9 @@ impl SessionBuilder {
         let mut brand_extra_headers: Vec<(String, String)> = Vec::new();
         let mut brand_navigate_accept: Option<String> = None;
         if self.brand != ChromiumBrand::Chrome {
-            if let Some(chromium_major) = self.browser.chromium_major() {
+            // A brand overlay only applies to an explicit Chromium browser;
+            // bare sessions have no browser and never carry brand headers.
+            if let Some(chromium_major) = self.browser.and_then(|b| b.chromium_major()) {
                 let overlay = self
                     .brand
                     .overlay(
@@ -652,13 +693,8 @@ impl SessionBuilder {
         } else {
             self.tls_trust.clone()
         };
-        let mut connector = FingerprintConnector::new_with_trust(
-            profile,
-            tcp_profile,
-            self.grease_seed.as_deref(),
-            &tls_trust,
-        )
-        .map_err(Error::Tls)?;
+        let mut connector = FingerprintConnector::new_with_trust(profile, tcp_profile, &tls_trust)
+            .map_err(Error::Tls)?;
         if self.accept_invalid_certs {
             connector.set_accept_invalid_certs(true);
         }
@@ -710,71 +746,73 @@ impl SessionBuilder {
         );
 
         Ok(Session {
-            browser: self.browser,
-            platform: self.platform,
-            brand: self.brand,
-            user_agent: identity.user_agent,
-            sec_ch_ua: identity.sec_ch_ua,
-            accept_language: self.accept_language_override.unwrap_or_else(|| {
-                identity
-                    .accept_language
-                    .unwrap_or_else(|| "en-US,en;q=0.9".to_string())
+            inner: std::sync::Arc::new(SessionInner {
+                browser: self.browser,
+                platform: self.platform,
+                brand: self.brand,
+                user_agent: identity.user_agent,
+                sec_ch_ua: identity.sec_ch_ua,
+                accept_language: self.accept_language_override.unwrap_or_else(|| {
+                    identity
+                        .accept_language
+                        .unwrap_or_else(|| "en-US,en;q=0.9".to_string())
+                }),
+                brand_extra_headers,
+                brand_navigate_accept,
+                identity_extra_headers: {
+                    let mut h = identity.extra_headers.clone();
+                    h.extend(self.extra_identity_headers);
+                    h
+                },
+                identity_navigate_accept: identity.navigate_accept_override.clone(),
+                identity_request_header_order: identity.request_header_order.clone(),
+                proxy: self.proxy,
+                proxy_from_env: self.proxy_from_env,
+                timeout: self.timeout,
+                max_redirects: self.max_redirects,
+                proxy_config: self.proxy_config,
+                timeouts: self.timeouts,
+                redirect_policy: self.redirect_policy,
+                compression: self.compression,
+                #[cfg(feature = "websocket")]
+                websocket_config: self.websocket_config,
+                https_only: self.https_only,
+                cookie_jar,
+                connector,
+                h2_config,
+                pool: Arc::new(if self.pool_config.keepalive {
+                    Pool::with_limits(
+                        self.pool_config.idle_timeout,
+                        self.pool_config.max_connections.max(1),
+                    )
+                } else {
+                    Pool::with_limits(std::time::Duration::ZERO, 1)
+                }),
+                audit_tls: Arc::new(AuditTlsCache {
+                    ja4,
+                    ja3,
+                    h2_fingerprint: h2_fp,
+                    ja4t,
+                }),
+                audit_enabled: self.audit,
+                protocol_policy: self.protocol_policy,
+                #[cfg(feature = "http3")]
+                h3_config: match crate::quic::H3Config::for_family(&profile.meta.family) {
+                    Ok(cfg) => Some(cfg),
+                    // No H3 fingerprint for this family — only fatal if HTTP/3 was requested.
+                    Err(e)
+                        if matches!(
+                            self.protocol_policy,
+                            ProtocolPolicy::Http3 | ProtocolPolicy::Race
+                        ) =>
+                    {
+                        return Err(e)
+                    }
+                    Err(_) => None,
+                },
+                #[cfg(feature = "http3")]
+                profile,
             }),
-            brand_extra_headers,
-            brand_navigate_accept,
-            identity_extra_headers: {
-                let mut h = identity.extra_headers.clone();
-                h.extend(self.extra_identity_headers);
-                h
-            },
-            identity_navigate_accept: identity.navigate_accept_override.clone(),
-            identity_request_header_order: identity.request_header_order.clone(),
-            proxy: self.proxy,
-            proxy_from_env: self.proxy_from_env,
-            timeout: self.timeout,
-            max_redirects: self.max_redirects,
-            proxy_config: self.proxy_config,
-            timeouts: self.timeouts,
-            redirect_policy: self.redirect_policy,
-            compression: self.compression,
-            #[cfg(feature = "websocket")]
-            websocket_config: self.websocket_config,
-            https_only: self.https_only,
-            cookie_jar,
-            connector,
-            h2_config,
-            pool: Arc::new(if self.pool_config.keepalive {
-                Pool::with_limits(
-                    self.pool_config.idle_timeout,
-                    self.pool_config.max_connections.max(1),
-                )
-            } else {
-                Pool::with_limits(std::time::Duration::ZERO, 1)
-            }),
-            audit_tls: Arc::new(AuditTlsCache {
-                ja4,
-                ja3,
-                h2_fingerprint: h2_fp,
-                ja4t,
-            }),
-            audit_enabled: self.audit,
-            protocol_policy: self.protocol_policy,
-            #[cfg(feature = "http3")]
-            h3_config: match crate::quic::H3Config::for_family(&profile.meta.family) {
-                Ok(cfg) => Some(cfg),
-                // No H3 fingerprint for this family — only fatal if HTTP/3 was requested.
-                Err(e)
-                    if matches!(
-                        self.protocol_policy,
-                        ProtocolPolicy::Http3 | ProtocolPolicy::Race
-                    ) =>
-                {
-                    return Err(e)
-                }
-                Err(_) => None,
-            },
-            #[cfg(feature = "http3")]
-            profile,
         })
     }
 }

@@ -25,7 +25,7 @@ fn connector() -> FingerprintConnector {
     let profiles = ProfileRegistry::builtin();
     let profile = profiles.get_browser(Browser::Chrome147).unwrap();
     let tcp_profile = Platform::default().tcp_profile();
-    FingerprintConnector::new(profile, tcp_profile, None).unwrap()
+    FingerprintConnector::new(profile, tcp_profile).unwrap()
 }
 
 async fn run_against(server_response: &'static [u8]) -> String {

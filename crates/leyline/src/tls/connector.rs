@@ -29,9 +29,11 @@ use crate::tls::TlsStream;
 /// Creates TLS connections matching a browser's fingerprint.
 ///
 /// Configures BoringSSL with exact cipher suites, curves, extensions,
-/// GREASE behavior, ALPS, extension permutation, and ECH from TOML
-/// browser profiles. Every field in the profile is wired — nothing
-/// is silently ignored.
+/// GREASE behavior, ALPS, cert compression (zlib/brotli/zstd), and ECH
+/// from TOML browser profiles. Every applied field is wired from the
+/// profile; the one knob not yet applied — the fixed Firefox/Safari
+/// `extension_permutation` — is logged loudly at construction, never
+/// dropped silently (see the warn in `new_with_trust`).
 #[derive(Clone)]
 pub struct FingerprintConnector {
     ssl_connector: SslConnector,
@@ -41,12 +43,6 @@ pub struct FingerprintConnector {
     alps_proto: Option<Vec<u8>>,
     /// Use new ALPS codepoint (0x4469 for Chrome 131+).
     alps_new_codepoint: bool,
-    /// Fixed extension permutation indices (Firefox/Safari deterministic order).
-    extension_permutation: Option<Vec<u8>>,
-    /// Deterministic GREASE seed (7 bytes, one per GREASE type).
-    grease_seed: Option<Vec<u8>>,
-    /// Fixed ECH GREASE payload length.
-    ech_grease_payload_len: Option<u16>,
     /// Per-host session ticket cache for TLS resumption (DER-encoded).
     session_cache: Arc<Mutex<LruCache<String, Vec<u8>>>>,
     /// When `true`, skip peer certificate verification entirely.
@@ -67,20 +63,15 @@ pub struct FingerprintConnector {
 }
 
 impl FingerprintConnector {
-    /// Build a connector from a browser profile, TCP profile, and optional GREASE seed.
-    pub fn new(
-        profile: &BrowserProfile,
-        tcp: TcpProfile,
-        grease_seed: Option<&[u8]>,
-    ) -> Result<Self, TlsError> {
-        Self::new_with_trust(profile, tcp, grease_seed, &TlsTrustConfig::default())
+    /// Build a connector from a browser profile and TCP profile.
+    pub fn new(profile: &BrowserProfile, tcp: TcpProfile) -> Result<Self, TlsError> {
+        Self::new_with_trust(profile, tcp, &TlsTrustConfig::default())
     }
 
     /// Build a connector with explicit trust-root and mTLS settings.
     pub fn new_with_trust(
         profile: &BrowserProfile,
         tcp: TcpProfile,
-        grease_seed: Option<&[u8]>,
         trust: &TlsTrustConfig,
     ) -> Result<Self, TlsError> {
         let mut builder = SslConnector::builder(btls::ssl::SslMethod::tls())?;
@@ -112,19 +103,25 @@ impl FingerprintConnector {
             }
         });
 
-        // btls-sys 0.5.5 can't apply these profile knobs (no FFI symbol); warn
-        // once so the wire-vs-profile gap is observable.
-        if tls.extension_permutation.is_some()
-            || grease_seed.is_some()
-            || tls.ech_grease_payload_len.is_some()
-        {
+        // `extension_permutation` (the fixed Firefox/Safari extension order)
+        // is the one remaining knob whose profile data is not yet applied to
+        // the wire: the TOML stores 0-based ordinals, but BoringSSL's
+        // `SSL_CTX_set_extension_order` consumes real TLS extension type IDs,
+        // so the arrays can't be passed through until the profiles are
+        // re-captured as type-ID orders and anchored by a JA4_r live test.
+        // Chrome-family permutation IS applied (`set_permute_extensions`);
+        // these families fall back to BoringSSL's default order. JA4 sorts
+        // extensions so it's unaffected — the gap is JA4_r only. Warn so the
+        // drop stays observable rather than silent, but only
+        // once per profile per process — Firefox/Safari sessions are built
+        // routinely and a per-build warn would train operators to ignore it.
+        if tls.extension_permutation.is_some() && warn_permutation_once(&profile.meta.name) {
             tracing::warn!(
                 target: "leyline::tls",
-                extension_permutation = tls.extension_permutation.is_some(),
-                grease_seed = grease_seed.is_some(),
-                ech_grease_payload_len = tls.ech_grease_payload_len.is_some(),
-                "profile requests TLS fingerprint knobs btls-sys 0.5.5 cannot apply; \
-                 wire ClientHello will differ from the profile"
+                profile = %profile.meta.name,
+                "profile declares a fixed extension_permutation that is not yet \
+                 applied (needs type-ID re-capture); wire extension order falls \
+                 back to BoringSSL default — JA4_r will differ from the real browser"
             );
         }
 
@@ -134,9 +131,6 @@ impl FingerprintConnector {
             ech_grease: tls.ech_grease,
             alps_proto: tls.alps.as_ref().map(|s| s.as_bytes().to_vec()),
             alps_new_codepoint: tls.alps_new_codepoint,
-            extension_permutation: tls.extension_permutation.clone(),
-            grease_seed: grease_seed.map(|s| s.to_vec()),
-            ech_grease_payload_len: tls.ech_grease_payload_len,
             session_cache,
             accept_invalid_certs: false,
             resolver: Arc::new(SystemResolver),
@@ -348,15 +342,6 @@ impl FingerprintConnector {
             ssl.set_enable_ech_grease(true);
         }
 
-        // extension_permutation / grease_seed / ech_grease_payload_len are
-        // profile knobs btls-sys 0.5.5 can't apply (warned at construction,
-        // ); read here so the fields aren't flagged dead.
-        let _ = (
-            &self.extension_permutation,
-            &self.grease_seed,
-            &self.ech_grease_payload_len,
-        );
-
         // TLS handshake. tokio-btls::SslStream::connect requires Pin<&mut Self>;
         // TcpStream is Unpin so we can pin on the stack.
         let mut stream = tokio_btls::SslStream::new(ssl, tcp_stream)
@@ -408,6 +393,17 @@ fn lock_unpoisoned<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
         );
         poisoned.into_inner()
     })
+}
+
+/// Returns `true` the first time it sees a given profile name this process,
+/// `false` thereafter — so the unapplied-`extension_permutation` warning
+/// fires once per profile instead of on every Firefox/Safari session build.
+fn warn_permutation_once(profile_name: &str) -> bool {
+    use std::collections::HashSet;
+    use std::sync::OnceLock;
+    static SEEN: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    let seen = SEEN.get_or_init(|| Mutex::new(HashSet::new()));
+    lock_unpoisoned(seen).insert(profile_name.to_string())
 }
 
 #[cfg(test)]

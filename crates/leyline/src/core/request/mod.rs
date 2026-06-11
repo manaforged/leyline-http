@@ -57,8 +57,8 @@ where
 ///     .send()
 ///     .await?;
 /// ```
-pub struct RequestBuilder<'a> {
-    pub(super) session: &'a Session,
+pub struct RequestBuilder {
+    pub(super) session: Session,
     pub(super) method: String,
     pub(super) url: String,
     pub(super) preset: Option<Preset>,
@@ -79,10 +79,13 @@ pub struct RequestBuilder<'a> {
     pub(super) proxy: Option<String>,
 }
 
-impl<'a> RequestBuilder<'a> {
-    pub(crate) fn new(session: &'a Session, method: &str, url: &str) -> Self {
+impl RequestBuilder {
+    pub(crate) fn new(session: &Session, method: &str, url: &str) -> Self {
         Self {
-            session,
+            // Cheap: `Session` is an `Arc` newtype, so this is a refcount
+            // bump. Owning the session (vs borrowing it) is what makes the
+            // builder `Send` and movable into `tokio::spawn` / structs.
+            session: session.clone(),
             method: method.to_string(),
             url: url.to_string(),
             preset: None,

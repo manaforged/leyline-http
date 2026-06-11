@@ -16,7 +16,7 @@ fn connector() -> FingerprintConnector {
     let profiles = ProfileRegistry::builtin();
     let profile = profiles.get_browser(Browser::Chrome147).unwrap();
     let tcp_profile = Platform::default().tcp_profile();
-    FingerprintConnector::new(profile, tcp_profile, None).unwrap()
+    FingerprintConnector::new(profile, tcp_profile).unwrap()
 }
 
 /// The mock server we never reach — every injection attempt must be

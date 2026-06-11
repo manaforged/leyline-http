@@ -30,7 +30,7 @@ fn bare_connector() -> FingerprintConnector {
     let profile = registry
         .get_browser(Browser::Chrome147)
         .expect("chrome147 profile is bundled");
-    FingerprintConnector::new(profile, Platform::Windows.tcp_profile(), None)
+    FingerprintConnector::new(profile, Platform::Windows.tcp_profile())
         .expect("build fingerprint connector")
 }
 

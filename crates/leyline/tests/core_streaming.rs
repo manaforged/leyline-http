@@ -6,6 +6,7 @@ use bytes::Bytes;
 use futures_util::stream;
 use futures_util::StreamExt;
 use leyline::core::{Body, ProtocolPolicy, Session};
+use leyline::Browser;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[tokio::test]
@@ -210,6 +211,46 @@ async fn response_into_stream_on_buffered_returns_single_chunk() {
 }
 
 #[tokio::test]
+async fn download_to_writes_body_to_file() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let payload = vec![0xABu8; 100_000];
+    let payload_for_server = payload.clone();
+
+    let server = tokio::spawn(async move {
+        let (mut sock, _) = listener.accept().await.unwrap();
+        let mut buf = [0u8; 1024];
+        loop {
+            let n = sock.read(&mut buf).await.unwrap();
+            if n == 0 || buf[..n].windows(4).any(|w| w == b"\r\n\r\n") {
+                break;
+            }
+        }
+        let head = format!(
+            "HTTP/1.1 200 OK\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+            payload_for_server.len()
+        );
+        sock.write_all(head.as_bytes()).await.unwrap();
+        sock.write_all(&payload_for_server).await.unwrap();
+    });
+
+    let path = std::env::temp_dir().join(format!("leyline-dl-{}.bin", addr.port()));
+    let session = Session::builder().http1().build().unwrap();
+    let resp = session
+        .get(&format!("http://{addr}/file"))
+        .send()
+        .await
+        .unwrap();
+    let n = resp.download_to(&path).await.unwrap();
+    assert_eq!(n, payload.len() as u64);
+
+    let on_disk = tokio::fs::read(&path).await.unwrap();
+    assert_eq!(on_disk, payload, "downloaded bytes must match the body");
+    let _ = tokio::fs::remove_file(&path).await;
+    server.await.unwrap();
+}
+
+#[tokio::test]
 async fn into_stream_twice_returns_error() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -294,9 +335,21 @@ async fn redirect_with_streaming_body_errors() {
     server.await.unwrap();
 }
 
+// H3 streaming asymmetry:
+//  - a streaming REQUEST body over H3 can't be sent incrementally, so it
+//    errors early (before any handshake) with a descriptive message;
+//  - a `.stream()` RESPONSE over H3 degrades gracefully to buffering (no
+//    error — the body is still reachable via `into_stream()`), so there's
+//    nothing to assert here offline. Verifying the graceful-buffer needs a
+//    live QUIC server (and `--release`, per the debug-build H3 handshake
+//    stack-overflow note in CONTRIBUTING.md), so it isn't unit-tested.
 #[tokio::test]
 async fn h3_streaming_request_returns_descriptive_error() {
-    let session = Session::builder().http3().build().unwrap();
+    let session = Session::builder()
+        .browser(Browser::default_browser())
+        .http3()
+        .build()
+        .unwrap();
     let chunks: Vec<std::io::Result<Bytes>> = vec![Ok(Bytes::from_static(b"x"))];
     let body = Body::stream(stream::iter(chunks));
     let err = session
@@ -309,23 +362,6 @@ async fn h3_streaming_request_returns_descriptive_error() {
     let msg = format!("{err}");
     assert!(
         msg.contains("HTTP/3 streaming request bodies"),
-        "got: {msg}"
-    );
-}
-
-#[tokio::test]
-async fn h3_streaming_response_returns_descriptive_error() {
-    let session = Session::builder().http3().build().unwrap();
-    let err = session
-        .get("https://example.invalid/download")
-        .stream()
-        .timeout(Duration::from_secs(2))
-        .send()
-        .await
-        .unwrap_err();
-    let msg = format!("{err}");
-    assert!(
-        msg.contains("HTTP/3 streaming response bodies"),
         "got: {msg}"
     );
 }

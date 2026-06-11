@@ -95,18 +95,17 @@ pub(crate) fn apply_profile_with_trust(
         builder.enable_signed_cert_timestamps();
     }
 
-    // Certificate compression. btls only ships a Brotli decompressor; the
-    // other real RFC 8879 codepoints (zlib, zstd — Firefox advertises all
-    // three) are a known advertise-vs-apply gap, warned so the
-    // drop is observable. A genuinely unknown name is a profile typo → error.
+    // Certificate compression (RFC 8879 `compress_certificate` extension).
+    // The set and order of advertised codepoints is fingerprint-bearing —
+    // Firefox advertises zlib(1), brotli(2), zstd(3). Each algorithm is
+    // registered with a real decompressor so the advertisement is honest and
+    // a server that actually compresses its certificate is handled. A
+    // genuinely unknown name is a profile typo → error.
     for algo in &tls.cert_compression {
         match algo.as_str() {
             "brotli" => builder.add_certificate_compression_algorithm(BrotliDecompressor)?,
-            "zlib" | "zstd" => tracing::warn!(
-                target: "leyline::tls",
-                algo = %algo,
-                "cert compression algorithm in profile not applied (btls lacks a decompressor)"
-            ),
+            "zlib" => builder.add_certificate_compression_algorithm(ZlibDecompressor)?,
+            "zstd" => builder.add_certificate_compression_algorithm(ZstdDecompressor)?,
             other => {
                 return Err(TlsError::Profile(format!(
                     "unknown cert compression algorithm: {other:?}"
@@ -178,5 +177,76 @@ impl CertificateCompressor for BrotliDecompressor {
         let mut decoder = brotli::Decompressor::new(input, 4096);
         std::io::copy(&mut decoder, output)?;
         Ok(())
+    }
+}
+
+/// zlib (RFC 1950) cert decompression — advertises codepoint 1, which
+/// Firefox sends first in its `compress_certificate` extension.
+#[derive(Debug)]
+struct ZlibDecompressor;
+
+impl CertificateCompressor for ZlibDecompressor {
+    const ALGORITHM: CertificateCompressionAlgorithm = CertificateCompressionAlgorithm::ZLIB;
+    const CAN_COMPRESS: bool = false;
+    const CAN_DECOMPRESS: bool = true;
+
+    fn decompress<W>(&self, input: &[u8], output: &mut W) -> std::io::Result<()>
+    where
+        W: std::io::Write,
+    {
+        let mut decoder = flate2::read::ZlibDecoder::new(input);
+        std::io::copy(&mut decoder, output)?;
+        Ok(())
+    }
+}
+
+/// zstd (RFC 8878) cert decompression — advertises codepoint 3.
+#[derive(Debug)]
+struct ZstdDecompressor;
+
+impl CertificateCompressor for ZstdDecompressor {
+    const ALGORITHM: CertificateCompressionAlgorithm = CertificateCompressionAlgorithm::ZSTD;
+    const CAN_COMPRESS: bool = false;
+    const CAN_DECOMPRESS: bool = true;
+
+    fn decompress<W>(&self, input: &[u8], output: &mut W) -> std::io::Result<()>
+    where
+        W: std::io::Write,
+    {
+        let mut decoder = zstd::stream::read::Decoder::new(input)?;
+        std::io::copy(&mut decoder, output)?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use btls::ssl::CertificateCompressor;
+    use std::io::Write;
+
+    // The decompressors aren't decorative: a server that compresses its
+    // certificate with the codepoint we advertise must actually be
+    // decodable. Round-trip a known payload through each.
+    #[test]
+    fn zlib_decompressor_round_trips() {
+        let original = b"-----BEGIN CERTIFICATE----- leyline zlib roundtrip";
+        let mut enc = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        enc.write_all(original).unwrap();
+        let compressed = enc.finish().unwrap();
+
+        let mut out = Vec::new();
+        ZlibDecompressor.decompress(&compressed, &mut out).unwrap();
+        assert_eq!(out, original);
+    }
+
+    #[test]
+    fn zstd_decompressor_round_trips() {
+        let original = b"-----BEGIN CERTIFICATE----- leyline zstd roundtrip";
+        let compressed = zstd::stream::encode_all(&original[..], 3).unwrap();
+
+        let mut out = Vec::new();
+        ZstdDecompressor.decompress(&compressed, &mut out).unwrap();
+        assert_eq!(out, original);
     }
 }

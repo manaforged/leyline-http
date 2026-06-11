@@ -45,7 +45,7 @@ async fn capture_navigate_headers(session: Session) -> String {
 
 #[tokio::test]
 async fn edge_brand_overlay_matches_capture() {
-    let session = Session::edge_latest().unwrap();
+    let session = Session::edge();
     let req = capture_navigate_headers(session).await;
     // Real Edge ships the UA-reduced `Edg/{major}.0.0.0` form on
     // current versions. Verified against tls.peet.ws on 2026-04-25
@@ -73,7 +73,7 @@ async fn brave_first_class_profile_matches_capture() {
     // captured deltas: header reorder, accept SXG-strip, sec-gpc,
     // accept-language q=0.8, custom sec-ch-ua slot order. Verified
     // against tls.peet.ws on 2026-04-25.
-    let session = Session::brave_latest().unwrap();
+    let session = Session::brave();
     let req = capture_navigate_headers(session).await;
     // No Edg/ or OPR/ suffix — Brave keeps Chrome's UA suffix-free.
     assert!(
@@ -120,7 +120,7 @@ async fn opera_brand_overlay_matches_capture() {
     // anchor — currently Chrome 147 / Opera 131 (vendor-doc EXTRAPOLATED;
     // see OPERA_PER_CHROMIUM in profile::brand). Bump these assertions
     // when the anchor table moves.
-    let session = Session::opera_latest().unwrap();
+    let session = Session::opera();
     let req = capture_navigate_headers(session).await;
     assert!(
         req.contains("Chrome/147.0.0.0 Safari/537.36 OPR/131.0.0.0"),
@@ -190,7 +190,7 @@ async fn vivaldi_brand_overlay_matches_capture() {
     // deliberately omits its own brand from sec-ch-ua by default —
     // it ships ONLY Chromium + the GREASE placeholder. The UA does
     // carry a `Vivaldi/<build>` suffix though.
-    let session = Session::vivaldi_latest().unwrap();
+    let session = Session::vivaldi();
     let req = capture_navigate_headers(session).await;
     // Vivaldi 7.9 on Chromium 147 (vendor-doc EXTRAPOLATED).
     assert!(
@@ -257,7 +257,7 @@ async fn chrome_default_has_no_brand_overlay() {
     // Smoke check: stock Chrome session should NOT ship any of
     // the sibling-brand-specific headers. If it does, the
     // overlay's gate in `SessionBuilder::build` leaked.
-    let session = Session::chrome_latest().unwrap();
+    let session = Session::chrome();
     let req = capture_navigate_headers(session).await;
     assert!(!req.contains("Edg/"));
     assert!(!req.contains("OPR/"));
@@ -370,7 +370,7 @@ async fn user_dnt_override_wins_over_edge_default() {
     // NOT see both `dnt: 1` (brand default) and `dnt: 0` (user)
     // on the wire. Before the fix the two headers both shipped
     // and some intermediaries coalesced them to `dnt: 1, 0`.
-    let session = Session::edge_latest().unwrap();
+    let session = Session::edge();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {

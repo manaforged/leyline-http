@@ -154,6 +154,10 @@ fn desktop_only(platform: Platform) -> bool {
     match platform {
         Platform::Windows | Platform::MacOS | Platform::Linux => true,
         Platform::Android | Platform::IOS => false,
+        // Resolve to the concrete host OS; brand overlays only run for an
+        // explicit Chromium browser, where the platform is already resolved,
+        // so this is a belt-and-suspenders arm rather than a live path.
+        Platform::Host => desktop_only(Platform::detect_host()),
     }
 }
 

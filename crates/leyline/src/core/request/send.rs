@@ -8,7 +8,7 @@ use crate::core::retry::is_idempotent;
 use crate::core::Result;
 use crate::tls::TlsError;
 
-impl<'a> RequestBuilder<'a> {
+impl RequestBuilder {
     /// Send the request and return a buffered response.
     pub async fn send(mut self) -> Result<Response> {
         if let Some(err) = self.builder_error {

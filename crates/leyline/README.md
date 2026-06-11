@@ -1,10 +1,12 @@
 # Leyline
 
-A Rust HTTP client that sends requests that look, on the wire, like a real
-browser. Chrome, Firefox, Safari, OkHttp — pick a profile, get its TLS,
-HTTP/2, and TCP shape.
+An HTTP client for Rust. Plain and honest by default — a `leyline/<version>`
+client on the host OS, for ordinary API calls. Ask for a browser and it
+matches that browser's TLS, HTTP/2, and TCP shape on the wire: Chrome,
+Firefox, Safari, OkHttp. That's the path for servers that fingerprint the
+client and block a plain one.
 
-Status: `1.0.0-alpha.1`. API is still changing; pin exact versions.
+Status: `1.0.0-alpha.1`. The API still moves; pin exact versions.
 
 ## Example
 
@@ -16,20 +18,24 @@ tokio = { version = "1", features = ["full"] }
 ```
 
 ```rust,no_run
-use leyline::Client;
+use leyline::Session;
 
 #[tokio::main]
 async fn main() -> leyline::Result<()> {
-    let client = Client::chrome()?;
+    // Bare by default — no browser fingerprint.
+    let resp = leyline::get("https://api.example.com/v1").await?;
+    println!("{}", resp.status());
 
-    let resp = client
+    // Browser parity when you want it. Constructors are infallible.
+    let session = Session::chrome();
+    let resp = session
         .post("https://example.com/api")
         .json(&serde_json::json!({ "hello": "world" }))
         .bearer_auth("token")
         .send()
         .await?
         .error_for_status()?;
-    println!("{} {}", resp.status(), resp.audit().unwrap().ja4);
+    println!("{}", resp.status());
     Ok(())
 }
 ```
@@ -53,13 +59,17 @@ to skip the source compile.
 
 ## Profiles
 
-| Profile          | Versions      |
-| ---------------- | ------------- |
-| Chrome           | 145, 146, 147 |
-| Firefox          | 148, 150, 151 |
-| Safari (macOS)   | 18            |
-| Safari (iOS)     | 15, 17, 18    |
-| OkHttp (Android) | 7, 10         |
+| Profile          | Versions           |
+| ---------------- | ------------------ |
+| Chrome           | 145, 146, 147, 148 |
+| Aloha            | 138                |
+| Brave            | 146                |
+| Firefox          | 148, 150, 151      |
+| Safari (macOS)   | 18                 |
+| Safari (iOS)     | 15, 17, 18         |
+| OkHttp (Android) | 7, 10              |
+
+The default `Session::chrome()` tracks the newest Chrome here (148).
 
 ## More
 

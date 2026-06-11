@@ -39,7 +39,7 @@ async fn plaintext_http_uses_h1_and_preserves_duplicate_headers() {
                 .unwrap();
     });
 
-    let session = Session::chrome_latest().unwrap();
+    let session = Session::chrome();
     let resp = session
         .get(&format!("http://{addr}/wire?q=1"))
         .append_header("x-dup", "one")
@@ -135,7 +135,7 @@ async fn json_builder_returns_error_instead_of_panicking() {
         }
     }
 
-    let session = Session::chrome_latest().unwrap();
+    let session = Session::chrome();
     let err = session
         .post("http://127.0.0.1:9/no-network")
         .json(&BadJson)

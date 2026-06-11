@@ -12,126 +12,139 @@ impl Session {
         SessionBuilder::new()
     }
 
-    /// Build a default Chrome session.
+    // ── Infallible constructors ─────────────────────────────────
+    //
+    // The common entry points return `Session`, not `Result<Session>` —
+    // built-in profiles are statically valid (enforced by the
+    // `profile_validation` tests), so the only way these fail is an
+    // unrecoverable environment fault (e.g. a corrupt OS trust store), which
+    // they surface as a panic exactly like `reqwest::Client::new()`. For a
+    // configuration that can genuinely fail (custom trust roots, etc.) use
+    // the fallible [`Session::builder`]`.build()`.
+
+    /// A default **bare** session — no browser impersonation, a plain
+    /// `leyline/<version>` client on the host OS. Mirrors the
+    /// `Client::new()` shape. Opt into a browser with [`Session::chrome`]
+    /// or `Session::builder().browser(...)`.
+    pub fn new() -> Self {
+        Self::builder()
+            .build()
+            .expect("bare session profile is always valid")
+    }
+
+    /// The latest bundled Chrome profile (currently Chrome 148 on Windows).
+    /// Bumps silently when a new Chrome profile is added — pin
+    /// [`Browser::Chrome147`] via the builder for a fixed version.
     ///
-    /// This mirrors the `Client::new()` shape while still
-    /// returning `Result` because Leyline builds real TLS/profile state.
-    pub fn new() -> Result<Self> {
-        Self::chrome_latest()
+    /// Note: this does not enable fingerprint auditing — `resp.audit()` will
+    /// return `None`. If you want JA4/H2 introspection, build via
+    /// `Session::builder().chrome().audit(true).build()` instead.
+    pub fn chrome() -> Self {
+        Self::builder()
+            .browser(Browser::default_browser())
+            .build()
+            .expect("built-in Chrome profile is always valid")
     }
 
-    /// Shortcut to the latest bundled Chrome profile (currently Chrome 148
-    /// on Windows). Bumps silently when a new Chrome profile is added —
-    /// pin [`Browser::Chrome147`] via the builder if you need a specific
-    /// version across releases.
-    pub fn chrome_latest() -> Result<Self> {
-        Self::builder().build()
+    /// The latest bundled Firefox profile (currently Firefox 150 on Windows).
+    pub fn firefox() -> Self {
+        Self::builder()
+            .browser(Browser::Firefox150)
+            .build()
+            .expect("built-in Firefox profile is always valid")
     }
 
-    /// Alias for [`Session::chrome_latest`].
-    pub fn chrome() -> Result<Self> {
-        Self::chrome_latest()
-    }
-
-    /// Shortcut to the latest bundled Firefox profile (currently Firefox
-    /// 150 on Windows). Bumps silently on new releases — pin via the
-    /// builder for stability.
-    pub fn firefox_latest() -> Result<Self> {
-        Self::builder().browser(Browser::Firefox150).build()
-    }
-
-    /// Alias for [`Session::firefox_latest`].
-    pub fn firefox() -> Result<Self> {
-        Self::firefox_latest()
-    }
-
-    /// Shortcut to the latest bundled Safari profile (currently Safari
-    /// 18 on macOS). Bumps silently on new releases — pin via the
-    /// builder for stability.
-    pub fn safari_latest() -> Result<Self> {
+    /// The latest bundled Safari profile (currently Safari 18 on macOS).
+    pub fn safari() -> Self {
         Self::builder()
             .browser(Browser::Safari18)
             .platform(Platform::MacOS)
             .build()
-    }
-
-    /// Alias for [`Session::safari_latest`].
-    pub fn safari() -> Result<Self> {
-        Self::safari_latest()
+            .expect("built-in Safari profile is always valid")
     }
 
     /// Microsoft Edge on the latest Chromium profile we have a verified
     /// overlay for (currently Chrome 147). Pinned to the verified sibling
-    /// anchor rather than the global Chrome default (148) — we have no
-    /// Edge 148 capture, and the overlay must not guess its GREASE brand
-    /// token.
-    pub fn edge_latest() -> Result<Self> {
+    /// anchor rather than the global Chrome default (148).
+    pub fn edge() -> Self {
         Self::builder()
             .browser(Browser::Chrome147)
             .brand(ChromiumBrand::Edge)
             .build()
+            .expect("built-in Edge overlay is always valid")
     }
 
-    /// Alias for [`Session::edge_latest`].
-    pub fn edge() -> Result<Self> {
-        Self::edge_latest()
-    }
-
-    /// Brave on the latest verified Chromium profile (currently Brave
-    /// 146 on macOS — see [`Browser::Brave146`]).
-    pub fn brave_latest() -> Result<Self> {
+    /// Brave on the latest verified Chromium profile (currently Brave 146).
+    pub fn brave() -> Self {
         Self::builder()
             .browser(Browser::Brave146)
             .platform(Platform::MacOS)
             .build()
+            .expect("built-in Brave profile is always valid")
     }
 
-    /// Alias for [`Session::brave_latest`].
-    pub fn brave() -> Result<Self> {
-        Self::brave_latest()
-    }
-
-    /// Opera on the latest Chromium profile we have a verified overlay
-    /// for (currently Chrome 147 / Opera 131). Track the Opera anchor
-    /// table in [`crate::profile::ChromiumBrand`] when bumping.
-    pub fn opera_latest() -> Result<Self> {
+    /// Opera on the latest verified Chromium overlay (Chrome 147 / Opera 131).
+    pub fn opera() -> Self {
         Self::builder()
             .browser(Browser::Chrome147)
             .brand(ChromiumBrand::Opera)
             .build()
+            .expect("built-in Opera overlay is always valid")
     }
 
-    /// Alias for [`Session::opera_latest`].
-    pub fn opera() -> Result<Self> {
-        Self::opera_latest()
-    }
-
-    /// Vivaldi on the latest Chromium profile we have a verified
-    /// overlay for (currently Chrome 147 / Vivaldi 7.9). Vivaldi
-    /// deliberately omits its own brand from `sec-ch-ua` by default;
-    /// the overlay reflects that.
-    pub fn vivaldi_latest() -> Result<Self> {
+    /// Vivaldi on the latest verified Chromium overlay (Chrome 147 / Vivaldi 7.9).
+    pub fn vivaldi() -> Self {
         Self::builder()
             .browser(Browser::Chrome147)
             .brand(ChromiumBrand::Vivaldi)
             .build()
+            .expect("built-in Vivaldi overlay is always valid")
     }
 
-    /// Alias for [`Session::vivaldi_latest`].
-    pub fn vivaldi() -> Result<Self> {
-        Self::vivaldi_latest()
+    /// A session for an explicit browser and platform in one call.
+    pub fn profile(browser: Browser, platform: Platform) -> Self {
+        Self::builder()
+            .browser(browser)
+            .platform(platform)
+            .build()
+            .expect("built-in profile is always valid")
     }
 
-    /// Build a session for an explicit browser and platform in one call.
-    ///
-    /// ```rust,ignore
-    /// let session = leyline::Session::profile(
-    ///     leyline::Browser::Firefox150,
-    ///     leyline::Platform::Windows,
-    /// )?;
-    /// ```
-    pub fn profile(browser: Browser, platform: Platform) -> Result<Self> {
-        Self::builder().browser(browser).platform(platform).build()
+    // ── Deprecated fallible aliases (prefer the infallible names above) ──
+    #[deprecated(since = "1.0.0", note = "use the infallible Session::chrome()")]
+    #[doc(hidden)]
+    pub fn chrome_latest() -> Result<Self> {
+        Ok(Self::chrome())
+    }
+    #[deprecated(since = "1.0.0", note = "use the infallible Session::firefox()")]
+    #[doc(hidden)]
+    pub fn firefox_latest() -> Result<Self> {
+        Ok(Self::firefox())
+    }
+    #[deprecated(since = "1.0.0", note = "use the infallible Session::safari()")]
+    #[doc(hidden)]
+    pub fn safari_latest() -> Result<Self> {
+        Ok(Self::safari())
+    }
+    #[deprecated(since = "1.0.0", note = "use the infallible Session::edge()")]
+    #[doc(hidden)]
+    pub fn edge_latest() -> Result<Self> {
+        Ok(Self::edge())
+    }
+    #[deprecated(since = "1.0.0", note = "use the infallible Session::brave()")]
+    #[doc(hidden)]
+    pub fn brave_latest() -> Result<Self> {
+        Ok(Self::brave())
+    }
+    #[deprecated(since = "1.0.0", note = "use the infallible Session::opera()")]
+    #[doc(hidden)]
+    pub fn opera_latest() -> Result<Self> {
+        Ok(Self::opera())
+    }
+    #[deprecated(since = "1.0.0", note = "use the infallible Session::vivaldi()")]
+    #[doc(hidden)]
+    pub fn vivaldi_latest() -> Result<Self> {
+        Ok(Self::vivaldi())
     }
 
     /// Access the cookie jar.
@@ -146,7 +159,10 @@ impl Session {
     /// amortising TLS-handshake cost across them.
     pub fn with_cookie_jar(&self, cookie_jar: CookieJar) -> Self {
         let mut s = self.clone();
-        s.cookie_jar = cookie_jar;
+        // `make_mut` clones the inner state once (this Arc is shared), then
+        // mutates the unique copy — the original session is untouched. This
+        // is a config-time derive, not the per-request hot path.
+        std::sync::Arc::make_mut(&mut s.inner).cookie_jar = cookie_jar;
         s
     }
 
@@ -170,8 +186,9 @@ impl Session {
     /// one retry attempt) wants a stable proxy across many requests.
     pub fn with_proxy(&self, proxy_url: &str) -> Self {
         let mut s = self.clone();
-        s.proxy = Some(proxy_url.to_string());
-        s.proxy_config = s
+        let inner = std::sync::Arc::make_mut(&mut s.inner);
+        inner.proxy = Some(proxy_url.to_string());
+        inner.proxy_config = inner
             .proxy_config
             .clone()
             .with_rule(crate::core::ProxyRule::all(proxy_url));
@@ -188,13 +205,15 @@ impl Session {
     #[must_use]
     pub fn with_max_redirects(&self, n: usize) -> Self {
         let mut s = self.clone();
-        s.max_redirects = n;
-        s.redirect_policy = crate::core::RedirectPolicy::limited(n);
+        let inner = std::sync::Arc::make_mut(&mut s.inner);
+        inner.max_redirects = n;
+        inner.redirect_policy = crate::core::RedirectPolicy::limited(n);
         s
     }
 
-    /// The browser profile in use.
-    pub fn browser(&self) -> Browser {
+    /// The impersonated browser, or `None` for a bare (non-impersonating)
+    /// session — the default when no `.browser(...)` was set.
+    pub fn browser(&self) -> Option<Browser> {
         self.browser
     }
 
@@ -248,7 +267,7 @@ impl Session {
     /// ```rust,ignore
     /// session.request("PATCH", url).json(&body).send().await?;
     /// ```
-    pub fn request(&self, method: &str, url: &str) -> RequestBuilder<'_> {
+    pub fn request(&self, method: &str, url: &str) -> RequestBuilder {
         RequestBuilder::new(self, method, url)
     }
 
@@ -257,32 +276,32 @@ impl Session {
     /// ```rust,ignore
     /// let resp = session.get(url).send().await?;
     /// ```
-    pub fn get(&self, url: &str) -> RequestBuilder<'_> {
+    pub fn get(&self, url: &str) -> RequestBuilder {
         RequestBuilder::new(self, "GET", url)
     }
 
     /// Start a POST request.
-    pub fn post(&self, url: &str) -> RequestBuilder<'_> {
+    pub fn post(&self, url: &str) -> RequestBuilder {
         RequestBuilder::new(self, "POST", url)
     }
 
     /// Start a PUT request.
-    pub fn put(&self, url: &str) -> RequestBuilder<'_> {
+    pub fn put(&self, url: &str) -> RequestBuilder {
         RequestBuilder::new(self, "PUT", url)
     }
 
     /// Start a PATCH request.
-    pub fn patch(&self, url: &str) -> RequestBuilder<'_> {
+    pub fn patch(&self, url: &str) -> RequestBuilder {
         RequestBuilder::new(self, "PATCH", url)
     }
 
     /// Start a DELETE request.
-    pub fn delete(&self, url: &str) -> RequestBuilder<'_> {
+    pub fn delete(&self, url: &str) -> RequestBuilder {
         RequestBuilder::new(self, "DELETE", url)
     }
 
     /// Start a HEAD request.
-    pub fn head(&self, url: &str) -> RequestBuilder<'_> {
+    pub fn head(&self, url: &str) -> RequestBuilder {
         RequestBuilder::new(self, "HEAD", url)
     }
 
@@ -393,6 +412,13 @@ impl Session {
     }
 }
 
+impl Default for Session {
+    /// The default session is **bare** — see [`Session::new`].
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl std::fmt::Debug for Session {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Session")
@@ -409,12 +435,20 @@ impl std::fmt::Debug for Session {
 
 impl std::fmt::Display for Session {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Session({}, {}, proxy={})",
-            self.browser,
-            self.platform,
-            self.proxy.as_deref().unwrap_or("none")
-        )
+        match self.browser {
+            Some(b) => write!(
+                f,
+                "Session({}, {}, proxy={})",
+                b,
+                self.platform,
+                self.proxy.as_deref().unwrap_or("none")
+            ),
+            None => write!(
+                f,
+                "Session(bare, {}, proxy={})",
+                self.platform,
+                self.proxy.as_deref().unwrap_or("none")
+            ),
+        }
     }
 }

@@ -8,7 +8,7 @@ const URL: &str = "https://example.com/protected";
 
 #[tokio::main]
 async fn main() -> leyline::Result<()> {
-    let session = Client::chrome()?;
+    let session = Client::chrome();
 
     let resp = session
         .get(URL)

@@ -63,9 +63,9 @@ async fn dx_helpers_accept_common_pair_shapes_and_header_shortcuts() {
     let mut server = RawServer::start(vec![RawResponse::ok(), RawResponse::ok()]).await;
 
     let client = Client::builder().http1().build().unwrap();
-    let _explicit = Session::profile(Browser::Chrome147, Platform::Windows).unwrap();
-    let _default = Client::new().unwrap();
-    let _chrome = Session::chrome().unwrap();
+    let _explicit = Session::profile(Browser::Chrome147, Platform::Windows);
+    let _default = Client::new();
+    let _chrome = Session::chrome();
     let _firefox = Client::builder().firefox().http1().build().unwrap();
 
     let owned_headers = vec![

@@ -292,6 +292,12 @@ pub(crate) async fn send_request_h1(
     headers: Vec<(String, String)>,
     body: Body,
     proxy: Option<&str>,
+    // H1 response bodies are buffered today; `.stream()` callers still get a
+    // working `Response::into_stream()` (the buffer is handed back as one
+    // chunk). Memory-incremental H1 streaming (chunk-by-chunk pump off a
+    // dedicated, non-pooled connection) is a scoped follow-up — see the
+    // generalist-gap plan. The flag is accepted here so the signature is
+    // uniform with the H2 path.
     _stream_response: bool,
 ) -> Result<TransportResponse> {
     let host = url
@@ -391,9 +397,12 @@ pub(crate) async fn send_request_h3(
     body: Body,
     stream_response: bool,
 ) -> Result<TransportResponse> {
-    // H3 streaming (request or response) is deferred — quiche-level
-    // pump/pull plumbing is a separate piece of work. Reject the
-    // request so callers see a clear error, not silent buffering.
+    // H3 incremental streaming (quiche-level pump/pull) is deferred. A
+    // streaming REQUEST body still can't be sent as a stream, so reject that
+    // explicitly. A `.stream()` RESPONSE request, however, degrades
+    // gracefully: we buffer the body and hand it back through the same
+    // `into_stream()` surface (as a single chunk) rather than hard-erroring,
+    // so `.stream()` behaves consistently across H1/H2/H3 for callers.
     if body.is_stream() {
         return Err(Error::Config(
             "HTTP/3 streaming request bodies are not yet implemented; use .http2() or buffer \
@@ -402,11 +411,11 @@ pub(crate) async fn send_request_h3(
         ));
     }
     if stream_response {
-        return Err(Error::Config(
-            "HTTP/3 streaming response bodies are not yet implemented; use .http2() or drop \
-             .stream()"
-                .into(),
-        ));
+        tracing::debug!(
+            target: "leyline::h3",
+            "response streaming over HTTP/3 is not yet incremental; buffering the body \
+             (it is still available via Response::into_stream())"
+        );
     }
 
     let host = url

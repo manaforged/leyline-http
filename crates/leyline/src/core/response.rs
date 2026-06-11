@@ -266,6 +266,48 @@ impl Response {
         }
     }
 
+    /// Stream the response body into `writer`, returning the number of
+    /// bytes written. Works on every response (a buffered body is written
+    /// in one shot); pair it with [`RequestBuilder::stream`](crate::RequestBuilder::stream)
+    /// to avoid holding the whole body in memory on the streaming transports.
+    ///
+    /// Like [`into_stream`](Self::into_stream), this does NOT decompress —
+    /// the bytes are written as received (honouring `content-encoding`).
+    ///
+    /// ```rust,ignore
+    /// let mut file = tokio::fs::File::create("out.bin").await?;
+    /// let n = session.get(url).stream().send().await?.copy_to(&mut file).await?;
+    /// ```
+    pub async fn copy_to<W>(self, writer: &mut W) -> Result<u64>
+    where
+        W: tokio::io::AsyncWrite + Unpin,
+    {
+        use futures_util::StreamExt;
+        use tokio::io::AsyncWriteExt;
+
+        let mut stream = self.into_stream()?;
+        let mut total: u64 = 0;
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(Error::Io)?;
+            writer.write_all(&chunk).await.map_err(Error::Io)?;
+            total += chunk.len() as u64;
+        }
+        writer.flush().await.map_err(Error::Io)?;
+        Ok(total)
+    }
+
+    /// Stream the response body to a file at `path`, returning the number of
+    /// bytes written. Convenience over [`copy_to`](Self::copy_to) — creates
+    /// (or truncates) the file and streams the body into it.
+    ///
+    /// ```rust,ignore
+    /// let n = leyline::get(url).await?.download_to("out.bin").await?;
+    /// ```
+    pub async fn download_to(self, path: impl AsRef<std::path::Path>) -> Result<u64> {
+        let mut file = tokio::fs::File::create(path).await.map_err(Error::Io)?;
+        self.copy_to(&mut file).await
+    }
+
     /// Content-Length from the response headers, if present.
     pub fn content_length(&self) -> Option<u64> {
         self.header("content-length").and_then(|v| v.parse().ok())
@@ -324,6 +366,11 @@ impl Response {
     // ─── Audit ──────────────────────────────────────────────────────
 
     /// Get fingerprint audit data for this response.
+    ///
+    /// **Returns `None` unless audit was enabled on the session.** It is off
+    /// by default (and not enabled by the `Session::chrome()`/etc. shortcuts)
+    /// so the hot path pays nothing. Turn it on with
+    /// `Session::builder().browser(...).audit(true).build()`.
     ///
     /// Returns JA3, JA4, JA4H, JA4T, and H2 fingerprints computed from
     /// the session's browser profile and the request headers sent.

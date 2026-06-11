@@ -147,8 +147,9 @@ fn unknown_cert_compression_algorithm_is_rejected() {
     );
 }
 
-// Real RFC 8879 codepoints (Firefox advertises zlib + brotli + zstd) must NOT
-// break the build even though btls can only apply brotli today — they warn.
+// Real RFC 8879 codepoints (Firefox advertises zlib + brotli + zstd) must all
+// build — each is now registered with a working decompressor, so the advertised
+// `compress_certificate` extension is honest.
 #[test]
 fn real_cert_compression_codepoints_still_build() {
     let mut profile = chrome_profile();
@@ -157,6 +158,26 @@ fn real_cert_compression_codepoints_still_build() {
         build_ssl_context(&profile, TlsMinVersion::Tls13).is_ok(),
         "a real RFC 8879 cert-compression list (as Firefox ships) failed to build"
     );
+}
+
+// ── verified_at: every shipping profile must name what it was anchored to ────
+// The convention used to be doc-only (CONTRIBUTING.md TODO). A profile whose
+// fingerprint was never anchored against live browser output is exactly how the
+// wrong fingerprint shipped — so a missing `verified_against` is now a
+// test failure. (Date-staleness enforcement is the weekly fingerprint-cron's
+// job — it re-anchors against live truth; backfilling capture dates here would
+// mean inventing dates we don't have, which is the false-anchor this guards.)
+#[test]
+fn every_builtin_profile_declares_verified_against() {
+    let reg = ProfileRegistry::builtin();
+    for browser in ALL_BROWSERS {
+        let profile = reg.get_browser(browser).expect("built-in profile");
+        assert!(
+            !profile.meta.verified_against.trim().is_empty(),
+            "{browser}: [meta] verified_against is empty — the profile fingerprint \
+             was never anchored against a live capture (see CONTRIBUTING.md)"
+        );
+    }
 }
 
 // ── Positive guard: every shipping profile must build an SSL context ─────────

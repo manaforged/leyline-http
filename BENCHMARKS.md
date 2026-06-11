@@ -27,7 +27,7 @@ Numbers below come from `cargo bench -p leyline-benches`. Reproduce:
 | Profile lookup (Chrome147) | 27.8 ns | `profile::lookup_chrome147` |
 | Profile lookup (all 15 browser variants) | 466.0 ns | `profile::lookup_all_browsers` |
 | Session build (Chrome147) | 16.24 ms | `session::build_chrome147` |
-| Session build (`Session::chrome_latest`) | 17.18 ms | `session::chrome_latest` |
+| Session build (`Session::chrome`) | 17.18 ms | `session::chrome` |
 | `Pool::new()` | 15.13 ns | `pool::new` |
 | `Pool::with_limits(...)` | 14.89 ns | `pool::with_limits` |
 | Pool checkout-hit equivalent (`H2Client::clone`) | 46.6 ns | `pool::checkout_hit_equivalent` |
@@ -80,7 +80,7 @@ To add a new bench:
 | `benches/audit.rs` | `compute_ja3`, `compute_ja4`, `compute_ja4t`, `chrome_extension_ids`, `compute_ja4h` |
 | `benches/frames.rs` | `parse_mix`, `parse_header` |
 | `benches/profile.rs` | `lookup_chrome147`, `lookup_all_browsers` |
-| `benches/session.rs` | `build_chrome147`, `chrome_latest` |
+| `benches/session.rs` | `build_chrome147`, `chrome` |
 | `benches/multiplex.rs` | `handle_clone`, `serial_1k_requests`, `concurrent_100_inflight` |
 | `benches/hpack_vs_h2.rs` | `leyline_encode`, `leyline_decode`, `h2_peer_status` (deferred) |
 | `benches/allocs.rs` | `per_request`, `concurrent_footprint`, `session_build` |

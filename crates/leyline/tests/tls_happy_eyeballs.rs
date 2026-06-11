@@ -46,7 +46,7 @@ fn load_profile() -> BrowserProfile {
 async fn builder_accepts_custom_resolver() {
     let profile = load_profile();
     let resolver = Arc::new(StaticResolver(vec!["127.0.0.1:443".parse().unwrap()]));
-    let _connector = FingerprintConnector::new(&profile, TcpProfile::LINUX, None)
+    let _connector = FingerprintConnector::new(&profile, TcpProfile::LINUX)
         .expect("connector build")
         .with_resolver(resolver)
         .with_happy_eyeballs_config(HappyEyeballsConfig {
@@ -58,7 +58,7 @@ async fn builder_accepts_custom_resolver() {
 #[tokio::test]
 async fn builder_accepts_system_resolver() {
     let profile = load_profile();
-    let _connector = FingerprintConnector::new(&profile, TcpProfile::LINUX, None)
+    let _connector = FingerprintConnector::new(&profile, TcpProfile::LINUX)
         .expect("connector build")
         .with_resolver(Arc::new(SystemResolver));
 }

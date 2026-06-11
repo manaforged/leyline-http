@@ -52,11 +52,11 @@ fn extract(req: &str, header: &str) -> String {
 #[ignore]
 async fn ua_dump() {
     for (name, sess) in [
-        ("Chrome", Session::chrome_latest().unwrap()),
-        ("Edge", Session::edge_latest().unwrap()),
-        ("Brave", Session::brave_latest().unwrap()),
-        ("Opera", Session::opera_latest().unwrap()),
-        ("Vivaldi", Session::vivaldi_latest().unwrap()),
+        ("Chrome", Session::chrome()),
+        ("Edge", Session::edge()),
+        ("Brave", Session::brave()),
+        ("Opera", Session::opera()),
+        ("Vivaldi", Session::vivaldi()),
     ] {
         let req = capture(sess).await;
         println!("=== {name} ===");

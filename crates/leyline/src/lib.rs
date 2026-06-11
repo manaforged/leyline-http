@@ -1,15 +1,27 @@
 //! # Leyline
 //!
-//! Browser-profiled TLS fingerprinting for Rust. Makes HTTP requests from
-//! explicit browser profiles and exposes verification data for the TLS,
-//! HTTP/2, TCP, and header layers. Supports HTTP/3 over QUIC and
-//! fingerprinted WebSocket.
+//! An easy, full-spectrum HTTP client for Rust — from a plain one-line GET to
+//! byte-exact browser TLS/HTTP/2/HTTP/3 parity, with verification data for the
+//! TLS, HTTP/2, TCP, and header layers.
 //!
-//! ## One-liner
+//! **The default is bare.** A `Session` does *not* impersonate a browser
+//! unless you ask: `leyline::get(...)` and `Session::new()` give a plain,
+//! honest `leyline/<version>` client on the host OS — ideal for internal and
+//! third-party API calls. To look like a real browser,
+//! opt in explicitly with [`Session::chrome`] / [`Session::builder`]`.browser(...)`.
+//!
+//! ## One-liner (bare)
 //!
 //! ```rust,ignore
-//! let resp = leyline::get("https://example.com").await?;
+//! let resp = leyline::get("https://api.example.com/v1").await?;
 //! println!("{}", resp.text());
+//! ```
+//!
+//! ## Browser parity (opt in)
+//!
+//! ```rust,ignore
+//! let session = Session::chrome();              // infallible
+//! let resp = session.navigate("https://example.com").await?;
 //! ```
 //!
 //! ## Session with full control
@@ -66,12 +78,26 @@
 //!
 //! ## Fingerprint audit
 //!
+//! Auditing is opt-in (`SessionBuilder::audit(true)`); without it `audit()`
+//! returns `None`.
+//!
 //! ```rust,ignore
-//! let audit = resp.audit().unwrap();
-//! println!("{}", audit.ja4);
+//! let session = Session::builder().chrome().audit(true).build()?;
+//! let resp = session.navigate("https://example.com").await?;
+//! if let Some(audit) = resp.audit() {
+//!     println!("{}", audit.ja4);
+//! }
 //! ```
 
 use std::sync::{LazyLock, OnceLock};
+
+// Compile-checks the crate README's `rust` code blocks as doctests, so an
+// example that stops matching the real API (e.g. `?` on an infallible
+// constructor) fails `cargo test`. `cfg(doctest)` means this item exists
+// only during doc-testing — it is not part of normal builds or rendered docs.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+pub struct ReadmeDoctests;
 
 // Internal modules.
 pub mod audit;
@@ -196,54 +222,66 @@ pub fn quic_context(browser: Browser) -> Result<SslContextBuilder> {
 
 // Zero-config functions.
 
-/// Lazily-built shared session behind the module-level helpers below.
-/// Construction failures are surfaced as a `Result`; the zero-config
-/// surface never panics on its own.
-fn default_session() -> Result<&'static Session> {
+/// Lazily-built shared **bare** session behind the module-level helpers
+/// below. Bare = no browser impersonation (a plain `leyline/<version>`
+/// client). Built infallibly (the bare profile is statically valid), so the
+/// zero-config surface only ever returns a `Result` for the network call.
+fn default_session() -> &'static Session {
     static DEFAULT: OnceLock<Session> = OnceLock::new();
-    if let Some(session) = DEFAULT.get() {
-        return Ok(session);
-    }
-    let built = Session::chrome_latest()?;
-    Ok(DEFAULT.get_or_init(|| built))
+    DEFAULT.get_or_init(Session::new)
 }
 
-/// GET a URL. Uses the latest bundled Chrome profile.
+/// A ready-to-use **bare** session (no impersonation). Hold and reuse it —
+/// clones are cheap and share its pool and cookie jar. For an isolated
+/// cookie scope build another with [`Session::new`]. To impersonate a
+/// browser use [`Session::chrome`] / [`Session::builder`]`.browser(...)`.
 ///
-/// All `leyline::get`/`post_json`/`post_form`/`fetch` calls share a single
-/// session and cookie jar. For isolation, create your own [`Session`].
+/// ```rust,ignore
+/// let client = leyline::client();
+/// let resp = client.get("https://api.example.com/v1").send().await?;
+/// ```
+pub fn client() -> Session {
+    Session::new()
+}
+
+/// GET a URL with the shared bare default session — a plain, honest request
+/// (no browser fingerprint).
+///
+/// All `leyline::get`/`post_json`/`post_form`/`post`/`fetch` calls share one
+/// session and cookie jar. For an isolated jar, hold your own
+/// [`client`]/[`Session::new`]. To look like a browser, build a
+/// [`Session::chrome`] and call its methods.
 ///
 /// ```rust,ignore
 /// let resp = leyline::get("https://example.com").await?;
 /// println!("{}", resp.text());
 /// ```
 pub async fn get(url: &str) -> Result<Response> {
-    default_session()?.navigate(url).await
+    default_session().get(url).send().await
 }
 
-/// POST JSON to a URL. Uses the latest bundled Chrome profile.
+/// POST JSON with the shared bare default session. Sets `content-type:
+/// application/json`.
 pub async fn post_json(url: &str, body: &impl serde::Serialize) -> Result<Response> {
-    default_session()?.post_json(url, body).await
+    default_session().post(url).json(body).send().await
 }
 
-/// POST a raw body to a URL with the XHR preset. Uses the latest bundled
-/// Chrome profile. For JSON use [`post_json`]; for form data [`post_form`].
+/// POST a raw body with the shared bare default session. For JSON use
+/// [`post_json`]; for form data [`post_form`].
 pub async fn post(url: &str, body: impl Into<crate::core::Body>) -> Result<Response> {
-    default_session()?.post_xhr(url, body).await
+    default_session().post(url).body(body).send().await
 }
 
-/// POST form data to a URL. Uses the latest bundled Chrome profile.
+/// POST URL-encoded form data with the shared bare default session.
 pub async fn post_form<I, P>(url: &str, params: I) -> Result<Response>
 where
     I: IntoIterator<Item = P>,
     P: IntoParamPair,
 {
-    default_session()?.post_form(url, params).await
+    default_session().post(url).form(params).send().await
 }
 
-/// Raw GET with no preset headers applied. Prefer [`get`] for the common
-/// browser-like GET - `get` installs the Navigate preset (Sec-Fetch-Mode:
-/// navigate etc.) the way a browser document-fetch would.
+/// Alias for [`get`] — a plain GET on the shared bare default session.
 pub async fn fetch(url: &str) -> Result<Response> {
-    default_session()?.get(url).send().await
+    default_session().get(url).send().await
 }
