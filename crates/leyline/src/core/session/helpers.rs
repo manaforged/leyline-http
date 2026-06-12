@@ -188,10 +188,7 @@ impl Session {
         let mut s = self.clone();
         let inner = std::sync::Arc::make_mut(&mut s.inner);
         inner.proxy = Some(proxy_url.to_string());
-        inner.proxy_config = inner
-            .proxy_config
-            .clone()
-            .with_rule(crate::core::ProxyRule::all(proxy_url));
+        inner.proxy_config = inner.proxy_config.clone().set_default_proxy(proxy_url);
         s
     }
 
@@ -425,7 +422,7 @@ impl std::fmt::Debug for Session {
             .field("browser", &self.browser)
             .field("platform", &self.platform)
             .field("proxy", &self.proxy)
-            .field("timeout", &self.timeout)
+            .field("timeout", &self.timeouts.total)
             .field("max_redirects", &self.max_redirects)
             .field("protocol_policy", &self.protocol_policy)
             .field("ja4", &self.audit_tls.ja4)

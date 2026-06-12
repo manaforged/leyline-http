@@ -60,14 +60,22 @@ pub fn decode(
         let byte = src[i];
         i += 1;
 
-        // Overflow check: shift > 28 means we'd exceed u32, which is way
-        // beyond any valid HPACK integer.
+        // Continuation-length check: shift > 28 means a sixth byte,
+        // which no value we accept can need.
         if shift > 28 {
             return Err("integer overflow");
         }
 
         result += ((byte & 0x7F) as usize) << shift;
         shift += 7;
+
+        // Value check: five bytes within the shift guard can still
+        // assemble past 2^31-1 on 64-bit. HPACK integers index tables
+        // and size strings; the HTTP/2 ceiling is 2^31-1 and anything
+        // larger is an attacker-chosen allocation size.
+        if result > 0x7FFF_FFFF {
+            return Err("integer overflow");
+        }
 
         if byte & 0x80 == 0 {
             break;
@@ -154,5 +162,30 @@ mod tests {
         let src = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x0F];
         let result = decode(0x1F, 5, &src, 0);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn decode_rejects_values_past_u31_max() {
+        // Five continuation bytes all clear the shift<=28 guard yet can
+        // assemble a value past 2^31-1 on a 64-bit usize. HPACK integers
+        // index tables and size strings; nothing legitimate exceeds the
+        // HTTP/2 2^31-1 ceiling, and letting 2^32+ through hands
+        // downstream code an attacker-chosen allocation size.
+        let mut src = Vec::new();
+        let mut rem: u64 = (1u64 << 32) - 31; // encodes 2^32 with a 5-bit prefix
+        while rem >= 128 {
+            src.push((rem & 0x7F) as u8 | 0x80);
+            rem >>= 7;
+        }
+        src.push(rem as u8);
+        assert!(decode(0x1F, 5, &src, 0).is_err(), "2^32 must be rejected");
+    }
+
+    #[test]
+    fn decode_accepts_max_legal_value() {
+        let mut buf = Vec::new();
+        encode(0x7FFF_FFFF, 5, 0x00, &mut buf);
+        let (val, _) = decode(buf[0], 5, &buf[1..], 0).unwrap();
+        assert_eq!(val, 0x7FFF_FFFF);
     }
 }

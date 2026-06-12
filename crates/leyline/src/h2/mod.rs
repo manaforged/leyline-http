@@ -13,7 +13,7 @@ pub mod frame;
 pub mod hpack;
 pub mod stream_state;
 
-pub use client::{DriverTask, H2Client, H2ConnectStream};
+pub use client::{DriverTask, H2Client, H2ConnectStream, H2ResponseEx, RequestBody, ResponseBody};
 pub use config::{
     H2Config, PriorityParams, PseudoOrder, SettingId, SETTINGS_ENABLE_CONNECT_PROTOCOL,
 };

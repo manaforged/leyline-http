@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::profile::Preset;
 
-use super::decompress::{decompress_body, drain_stream_into_vec};
+use super::decompress::{decompress_and_strip, drain_stream_into_vec};
 use super::header_merge::apply_extra_headers;
 use super::Session;
 use crate::core::body::Body;
@@ -339,23 +339,8 @@ impl Session {
                     } else {
                         drain.await?
                     };
-                    let content_encoding = resp_headers
-                        .iter()
-                        .find(|(k, _)| k.eq_ignore_ascii_case("content-encoding"))
-                        .map(|(_, v)| v.to_lowercase());
-                    let (buf, decoded) =
-                        decompress_body(buf, content_encoding.as_deref(), &self.compression)?;
-                    let resp_headers: Vec<(String, String)> = if decoded {
-                        resp_headers
-                            .into_iter()
-                            .filter(|(k, _)| {
-                                !k.eq_ignore_ascii_case("content-encoding")
-                                    && !k.eq_ignore_ascii_case("content-length")
-                            })
-                            .collect()
-                    } else {
-                        resp_headers
-                    };
+                    let (buf, resp_headers) =
+                        decompress_and_strip(buf, resp_headers, &self.compression)?;
                     (
                         crate::core::response::ResponseBody::Buffered(buf),
                         resp_headers,
@@ -375,23 +360,8 @@ impl Session {
                             resp_headers,
                         )
                     } else {
-                        let content_encoding = resp_headers
-                            .iter()
-                            .find(|(k, _)| k.eq_ignore_ascii_case("content-encoding"))
-                            .map(|(_, v)| v.to_lowercase());
-                        let (buf, decoded) =
-                            decompress_body(buf, content_encoding.as_deref(), &self.compression)?;
-                        let resp_headers: Vec<(String, String)> = if decoded {
-                            resp_headers
-                                .into_iter()
-                                .filter(|(k, _)| {
-                                    !k.eq_ignore_ascii_case("content-encoding")
-                                        && !k.eq_ignore_ascii_case("content-length")
-                                })
-                                .collect()
-                        } else {
-                            resp_headers
-                        };
+                        let (buf, resp_headers) =
+                            decompress_and_strip(buf, resp_headers, &self.compression)?;
                         (
                             crate::core::response::ResponseBody::Buffered(buf),
                             resp_headers,

@@ -58,7 +58,10 @@ pub fn compute_ja3_raw(input: &Ja3Input<'_>) -> String {
         .collect::<Vec<_>>()
         .join("-");
 
-    // Field 5: EC point formats (always "0" for uncompressed in modern TLS).
+    // Field 5: EC point formats. Hardcoded, not a profile input: every
+    // bundled profile's TLS stack advertises uncompressed(0) only, like
+    // every modern browser. If a future profile diverges, this must
+    // become a `Ja3Input` field.
     let point_formats = "0";
 
     format!("{version},{ciphers},{extensions},{curves},{point_formats}")

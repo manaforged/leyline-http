@@ -150,6 +150,19 @@ impl ProxyConfig {
         self
     }
 
+    /// Replace the session-default all-scheme proxy. Any existing
+    /// all-scheme rule is removed before the new one is appended;
+    /// scheme-specific rules are preserved and keep outranking the
+    /// catch-all (`proxy_for` is first-match). Session-level setters
+    /// (`SessionBuilder::proxy`, `Session::with_proxy`) must use this
+    /// instead of `with_rule`: appending leaves the older all-scheme
+    /// rule winning first-match and the new proxy silently ignored.
+    pub(crate) fn set_default_proxy(mut self, proxy_url: impl Into<String>) -> Self {
+        self.rules.retain(|r| r.scheme != ProxyRuleScheme::All);
+        self.rules.push(ProxyRule::all(proxy_url));
+        self
+    }
+
     /// Add a proxy URL that applies to all supported schemes.
     pub fn all(mut self, proxy_url: impl Into<String>) -> Self {
         self.rules.push(ProxyRule::all(proxy_url));
@@ -159,7 +172,7 @@ impl ProxyConfig {
     /// Replace the no-proxy matcher. A matcher set here is *explicit*:
     /// it bypasses any configured proxy, including per-request overrides.
     /// (The env-inherited `NO_PROXY` default only gates env-derived
-    /// proxies — see [`Self::proxy_for`].)
+    /// proxies — see `Self::proxy_for`.)
     pub fn no_proxy(mut self, no_proxy: NoProxy) -> Self {
         self.no_proxy = no_proxy;
         self.no_proxy_explicit = true;

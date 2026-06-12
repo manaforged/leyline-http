@@ -18,17 +18,7 @@ pub(crate) async fn connect(
     proxy: &url::Url,
     include_alps: bool,
 ) -> Result<TlsStream, TlsError> {
-    let proxy_host = proxy
-        .host_str()
-        .ok_or_else(|| TlsError::Profile("socks5 proxy has no host".into()))?;
-    // `port_or_known_default()` is defensive — `url` only knows http/https/ws/wss
-    // defaults, so socks5 still falls through to `unwrap_or(1080)`.
-    let proxy_port = proxy.port_or_known_default().unwrap_or(1080);
-
-    let proxy_addr = format!("{proxy_host}:{proxy_port}");
-    let mut tcp_stream = TcpStream::connect(&proxy_addr)
-        .await
-        .map_err(TlsError::TcpConnect)?;
+    let mut tcp_stream = super::connect_to_proxy(proxy, 1080).await?;
 
     let has_auth = !proxy.username().is_empty();
 
@@ -104,6 +94,15 @@ async fn authenticate(tcp_stream: &mut TcpStream, proxy: &url::Url) -> Result<()
         .read_exact(&mut auth_resp)
         .await
         .map_err(TlsError::TcpConnect)?;
+    // RFC 1929 §2: VER must be 0x01. A wrong version byte means the
+    // peer is not speaking the sub-negotiation protocol — treat any
+    // status it carries as garbage rather than trusting byte 1 alone.
+    if auth_resp[0] != 0x01 {
+        return Err(TlsError::Profile(format!(
+            "socks5: invalid auth sub-negotiation version 0x{:02x}",
+            auth_resp[0]
+        )));
+    }
     if auth_resp[1] != 0x00 {
         return Err(TlsError::Profile("socks5: authentication failed".into()));
     }
@@ -112,6 +111,15 @@ async fn authenticate(tcp_stream: &mut TcpStream, proxy: &url::Url) -> Result<()
 
 async fn send_connect(tcp_stream: &mut TcpStream, host: &str, port: u16) -> Result<(), TlsError> {
     let host_bytes = host.as_bytes();
+    // RFC 1928 §5: domain-name address type carries a one-byte length.
+    // Without this guard the `as u8` below silently truncates and the
+    // proxy misparses the request.
+    if host_bytes.len() > 255 {
+        return Err(TlsError::Profile(format!(
+            "socks5: hostname too long ({} bytes, max 255)",
+            host_bytes.len()
+        )));
+    }
     let mut connect_req = Vec::with_capacity(7 + host_bytes.len());
     connect_req.push(0x05); // Version.
     connect_req.push(0x01); // CONNECT command.
@@ -194,4 +202,58 @@ async fn send_connect(tcp_stream: &mut TcpStream, host: &str, port: u16) -> Resu
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+    use tokio::net::TcpListener;
+
+    async fn pair() -> (TcpStream, TcpStream) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (client, server) = tokio::join!(TcpStream::connect(addr), listener.accept());
+        (client.unwrap(), server.unwrap().0)
+    }
+
+    // RFC 1929 §2: the auth sub-negotiation response is VER STATUS and
+    // VER MUST be 0x01. A proxy (or in-path injector) replying with a
+    // garbage version byte and a success status must not be accepted.
+    #[tokio::test]
+    async fn authenticate_rejects_wrong_subnegotiation_version() {
+        let (mut client, mut server) = pair().await;
+        let proxy: url::Url = "socks5://user:pass@127.0.0.1:1080".parse().unwrap();
+        let server_task = tokio::spawn(async move {
+            let mut buf = vec![0u8; 64];
+            let _ = server.read(&mut buf).await.unwrap();
+            server.write_all(&[0x05, 0x00]).await.unwrap();
+            server // keep the socket open until the client is done
+        });
+        let res = authenticate(&mut client, &proxy).await;
+        assert!(
+            res.is_err(),
+            "malformed auth VER byte must be rejected, got {res:?}"
+        );
+        let _ = server_task.await;
+    }
+
+    // RFC 1928 §5: the domain-name address type carries a one-byte
+    // length, so hostnames past 255 bytes cannot be encoded. The old
+    // code truncated the length with `as u8` and sent a malformed
+    // CONNECT that the proxy misparses.
+    #[tokio::test]
+    async fn send_connect_rejects_hostname_longer_than_255_bytes() {
+        let (mut client, _server) = pair().await;
+        let long_host = "a".repeat(256);
+        let res = tokio::time::timeout(
+            Duration::from_secs(1),
+            send_connect(&mut client, &long_host, 443),
+        )
+        .await;
+        assert!(
+            matches!(res, Ok(Err(_))),
+            "256-byte hostname must error immediately, got {res:?}"
+        );
+    }
 }

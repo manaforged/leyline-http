@@ -121,6 +121,68 @@ async fn sha256_challenge_round_trip() {
 }
 
 #[tokio::test]
+async fn stale_nonce_is_retried_transparently() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let server = tokio::spawn(async move {
+        // Round 1: initial challenge.
+        let (mut sock, _) = listener.accept().await.unwrap();
+        let _ = read_headers(&mut sock).await;
+        sock.write_all(
+            b"HTTP/1.1 401 Unauthorized\r\n\
+              WWW-Authenticate: Digest realm=\"r\", nonce=\"n1\", qop=\"auth\", algorithm=MD5\r\n\
+              content-length: 0\r\nconnection: close\r\n\r\n",
+        )
+        .await
+        .unwrap();
+        sock.flush().await.unwrap();
+        drop(sock);
+
+        // Round 2: credentials were fine but the nonce expired in
+        // flight — answer 401 stale=true with a fresh nonce.
+        let (mut sock, _) = listener.accept().await.unwrap();
+        let headers = read_headers(&mut sock).await;
+        let auth = extract_authorization(&headers).expect("auth on first retry");
+        assert!(auth.contains("nonce=\"n1\""), "{auth}");
+        sock.write_all(
+            b"HTTP/1.1 401 Unauthorized\r\n\
+              WWW-Authenticate: Digest realm=\"r\", nonce=\"n2\", qop=\"auth\", algorithm=MD5, stale=true\r\n\
+              content-length: 0\r\nconnection: close\r\n\r\n",
+        )
+        .await
+        .unwrap();
+        sock.flush().await.unwrap();
+        drop(sock);
+
+        // Round 3: RFC 7616 §3.3 — the client must retry with the
+        // fresh nonce without surfacing the 401 to the caller.
+        let (mut sock, _) = listener.accept().await.unwrap();
+        let headers = read_headers(&mut sock).await;
+        let auth = extract_authorization(&headers).expect("auth on stale retry");
+        assert!(auth.contains("nonce=\"n2\""), "{auth}");
+        sock.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\nok")
+            .await
+            .unwrap();
+        sock.flush().await.unwrap();
+    });
+
+    let session = Session::builder().http1().build().unwrap();
+    let resp = session
+        .get(&format!("http://{addr}/protected"))
+        .digest_auth(DigestAuth::new("u", "p"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        200,
+        "stale=true 401 must be retried transparently with the fresh nonce"
+    );
+    server.await.unwrap();
+}
+
+#[tokio::test]
 async fn non_digest_401_is_passed_through() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

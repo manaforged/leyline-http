@@ -47,16 +47,18 @@ impl ProfileRegistry {
     }
 
     /// Parse and insert a TOML profile string.
+    ///
+    /// Panics on parse failure: every caller feeds `include_str!`
+    /// compile-time constants, so a bad profile is a programmer error
+    /// (merge conflict, hand-edit). The old `tracing::error!` + skip
+    /// deferred the failure to a misleading "built-in profile missing"
+    /// panic at the `profile()` call site, with the parse error buried
+    /// in trace output.
     fn load_toml(&mut self, toml_str: &str) {
-        match BrowserProfile::from_toml(toml_str) {
-            Ok(profile) => {
-                let key = (profile.meta.browser.clone(), profile.meta.version);
-                self.profiles.insert(key, profile);
-            }
-            Err(e) => {
-                tracing::error!(error = %e, "failed to parse built-in profile");
-            }
-        }
+        let profile = BrowserProfile::from_toml(toml_str)
+            .unwrap_or_else(|e| panic!("built-in profile failed to parse: {e}"));
+        let key = (profile.meta.browser.clone(), profile.meta.version);
+        self.profiles.insert(key, profile);
     }
 
     /// Look up a profile by browser name and version.
@@ -90,6 +92,17 @@ impl Default for ProfileRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Built-ins are include_str! compile-time constants — a parse
+    // failure is a programmer error (bad merge, hand-edit) and must
+    // fail at load with the parse error, not surface 30 calls later
+    // as a misleading "built-in profile missing" panic.
+    #[test]
+    #[should_panic(expected = "built-in profile failed to parse")]
+    fn malformed_builtin_toml_panics_at_load() {
+        let mut reg = ProfileRegistry::new();
+        reg.load_toml("this is not a browser profile");
+    }
 
     #[test]
     fn builtin_loads_all_profiles() {

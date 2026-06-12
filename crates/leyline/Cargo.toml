@@ -35,7 +35,7 @@ compression-gzip = []
 compression-brotli = []
 compression-deflate = []
 compression-zstd = []
-multipart = ["stream", "dep:async-stream", "dep:tokio-util"]
+multipart = ["stream", "dep:async-stream"]
 stream = []
 websocket = ["dep:tungstenite", "dep:tokio-tungstenite"]
 http3 = ["dep:leyline-quiche"]
@@ -106,7 +106,9 @@ http = "1"
 bytes = { workspace = true }
 futures-util = "0.3"
 async-stream = { version = "0.3", optional = true }
-tokio-util = { version = "0.7", features = ["io"], optional = true }
+# Non-optional: h2::client::H2ConnectStream needs PollSender for
+# cancel-safe AsyncWrite backpressure (waker survives across polls).
+tokio-util = { version = "0.7", features = ["io"] }
 lru = "0.17"
 rand = "0.8"
 libc = "0.2"
@@ -124,6 +126,10 @@ windows-sys = { version = "0.61", features = ["Win32_Security_Cryptography", "Wi
 
 [dev-dependencies]
 bytes = { workspace = true }
+# In-test cert generation + a localhost TLS acceptor for the
+# pinning hostname-verification integration test.
+btls = { workspace = true }
+tokio-btls = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-util = { version = "0.7", features = ["io"] }
 futures-util = "0.3"

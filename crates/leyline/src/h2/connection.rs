@@ -1,8 +1,8 @@
 //! HTTP/2 client connection — handshake, settings exchange, stream dispatch.
 //!
 //! This module retains the legacy `ClientConnection` API as a thin shell
-//! around the concurrent driver living in [`crate::h2::client`]. New code
-//! should prefer [`crate::h2::client::H2Client`] directly — it is cloneable
+//! around the concurrent driver living in the `h2::client` module. New
+//! code should prefer [`crate::h2::H2Client`] directly — it is cloneable
 //! and multiplexes concurrent requests over one TCP connection without
 //! head-of-line blocking. `ClientConnection` remains for backward
 //! compatibility with tests and callers that want a single-owner handle.

@@ -106,9 +106,10 @@ pub struct SessionInner {
     /// at build time rather than set explicitly. Env-inherited `NO_PROXY`
     /// patterns only bypass env-discovered proxies.
     proxy_from_env: bool,
-    timeout: std::time::Duration,
     max_redirects: usize,
     proxy_config: ProxyConfig,
+    /// Single source of truth for all timeouts; the total request
+    /// timeout is `timeouts.total`.
     timeouts: TimeoutConfig,
     redirect_policy: RedirectPolicy,
     compression: CompressionConfig,

@@ -47,7 +47,7 @@ pub struct Pool {
 }
 
 impl Pool {
-    /// Create a pool with default 90 s idle timeout and a 256-entry LRU cap.
+    /// Create a pool with default 300 s idle timeout and a 2048-entry LRU cap.
     pub fn new() -> Self {
         Self {
             inner: Mutex::new(HashMap::new()),

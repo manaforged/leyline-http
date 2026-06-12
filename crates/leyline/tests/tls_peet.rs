@@ -116,9 +116,9 @@ fn session_builder_resolves_all_valid_combos() {
         (Browser::Safari18, Platform::MacOS),
         (Browser::OkHttpAndroid10, Platform::Android),
         (Browser::OkHttpAndroid7, Platform::Android),
-        (Browser::SafariiOS15, Platform::IOS),
-        (Browser::SafariiOS17, Platform::IOS),
-        (Browser::SafariiOS18, Platform::IOS),
+        (Browser::SafariIOS15, Platform::IOS),
+        (Browser::SafariIOS17, Platform::IOS),
+        (Browser::SafariIOS18, Platform::IOS),
     ];
     for (browser, platform) in combos {
         let result = leyline::Session::builder()
@@ -537,7 +537,7 @@ async fn live_wire_audit_every_profile() {
             continue;
         }
         let platform = match browser {
-            Browser::SafariiOS15 | Browser::SafariiOS17 | Browser::SafariiOS18 => Platform::IOS,
+            Browser::SafariIOS15 | Browser::SafariIOS17 | Browser::SafariIOS18 => Platform::IOS,
             Browser::OkHttpAndroid10 => Platform::Android,
             Browser::Safari18 => Platform::MacOS,
             _ => Platform::Windows,
@@ -708,7 +708,7 @@ async fn live_ja4_exact_match_every_profile_with_expectation() {
         };
 
         let platform = match browser {
-            Browser::SafariiOS15 | Browser::SafariiOS17 | Browser::SafariiOS18 => Platform::IOS,
+            Browser::SafariIOS15 | Browser::SafariIOS17 | Browser::SafariIOS18 => Platform::IOS,
             Browser::OkHttpAndroid10 => Platform::Android,
             Browser::Safari18 => Platform::MacOS,
             _ => Platform::Windows,
@@ -751,7 +751,7 @@ async fn live_h2_akamai_every_profile() {
         }
 
         let platform = match browser {
-            Browser::SafariiOS15 | Browser::SafariiOS17 | Browser::SafariiOS18 => Platform::IOS,
+            Browser::SafariIOS15 | Browser::SafariIOS17 | Browser::SafariIOS18 => Platform::IOS,
             Browser::OkHttpAndroid10 | Browser::OkHttpAndroid7 => Platform::Android,
             Browser::Safari18 => Platform::MacOS,
             _ => Platform::Windows,

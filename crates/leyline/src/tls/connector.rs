@@ -60,6 +60,11 @@ pub struct FingerprintConnector {
     connect_timeout: Option<Duration>,
     /// Optional socket-level direct-connect overrides.
     socket_config: SocketConfig,
+    /// `true` when leaf pins are configured. Pinning replaces
+    /// BoringSSL's built-in verifier with a custom callback that does
+    /// chain + pin but NOT the `X509_check_host` SAN match — so the
+    /// hostname is re-verified explicitly after the handshake.
+    pins_active: bool,
 }
 
 impl FingerprintConnector {
@@ -137,6 +142,7 @@ impl FingerprintConnector {
             happy_eyeballs: HappyEyeballsConfig::default(),
             connect_timeout: None,
             socket_config: SocketConfig::default(),
+            pins_active: !trust.pinned_leaf_sha256().is_empty(),
         })
     }
 
@@ -350,6 +356,25 @@ impl FingerprintConnector {
             .connect()
             .await
             .map_err(|e| TlsError::SslConnect(e.to_string()))?;
+
+        // Pinning replaced BoringSSL's built-in verifier, which skips
+        // its hostname (SAN) check. Re-verify the leaf against the
+        // requested host so a CA-trusted, correctly-pinned cert issued
+        // for a different name can't be accepted here. Skipped only
+        // when the caller explicitly opted out of verification.
+        if self.pins_active && !self.accept_invalid_certs {
+            let leaf = stream.ssl().peer_certificate().ok_or_else(|| {
+                TlsError::SslConnect("pinned connection presented no peer certificate".into())
+            })?;
+            let matches = leaf
+                .check_host(host)
+                .map_err(|e| TlsError::SslConnect(format!("hostname check failed: {e}")))?;
+            if !matches {
+                return Err(TlsError::SslConnect(format!(
+                    "certificate is valid and pinned but its SAN does not match {host}"
+                )));
+            }
+        }
 
         let alpn = stream.ssl().selected_alpn_protocol().map(|p| p.to_vec());
         let peer_cert_der = stream

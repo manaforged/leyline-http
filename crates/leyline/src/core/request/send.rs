@@ -141,24 +141,6 @@ impl RequestBuilder {
                                 Some(q) => format!("{}?{}", parsed.path(), q),
                                 None => parsed.path().to_string(),
                             };
-                            let cnonce = crate::core::digest::generate_cnonce();
-                            let nc = crate::core::digest::next_nc_for_nonce(&challenge.nonce);
-                            let auth_header = match crate::core::digest::build_auth_header(
-                                &challenge, auth, &method, &uri_path, nc, &cnonce,
-                            ) {
-                                Some(h) => h,
-                                None => {
-                                    return Err(Error::Http(
-                                        "digest auth: server offered only qop=auth-int, \
-                                         which Leyline does not implement (RFC 7616 §3.4.3 \
-                                         requires the entity-body hash in HA2). Pass through \
-                                         the 401 or remove digest_auth()."
-                                            .into(),
-                                    ));
-                                }
-                            };
-                            let mut digest_headers = base_headers.clone();
-                            digest_headers.set("authorization", auth_header);
                             if is_stream_body {
                                 return Err(Error::Http(
                                     "digest auth: cannot replay streaming request body. \
@@ -166,30 +148,78 @@ impl RequestBuilder {
                                         .into(),
                                 ));
                             }
-                            let replay_body = match &retry_body_template {
-                                Some(Body::Empty) => Body::Empty,
-                                Some(Body::Bytes(b)) => Body::Bytes(b.clone()),
-                                _ => Body::Empty,
-                            };
-                            let hop_headers = Some(digest_headers);
-                            let digest_remaining =
-                                deadline.saturating_duration_since(tokio::time::Instant::now());
-                            if digest_remaining.is_zero() {
-                                return Err(Error::Timeout);
+                            let mut challenge = challenge;
+                            let mut stale_retried = false;
+                            loop {
+                                let cnonce = crate::core::digest::generate_cnonce();
+                                let nc = crate::core::digest::next_nc_for_nonce(&challenge.nonce);
+                                let auth_header = match crate::core::digest::build_auth_header(
+                                    &challenge, auth, &method, &uri_path, nc, &cnonce,
+                                ) {
+                                    Some(h) => h,
+                                    None => {
+                                        return Err(Error::Http(
+                                            "digest auth: server offered only qop=auth-int, \
+                                             which Leyline does not implement (RFC 7616 §3.4.3 \
+                                             requires the entity-body hash in HA2). Pass through \
+                                             the 401 or remove digest_auth()."
+                                                .into(),
+                                        ));
+                                    }
+                                };
+                                let mut digest_headers = base_headers.clone();
+                                digest_headers.set("authorization", auth_header);
+                                let replay_body = match &retry_body_template {
+                                    Some(Body::Empty) => Body::Empty,
+                                    Some(Body::Bytes(b)) => Body::Bytes(b.clone()),
+                                    _ => Body::Empty,
+                                };
+                                let digest_remaining =
+                                    deadline.saturating_duration_since(tokio::time::Instant::now());
+                                if digest_remaining.is_zero() {
+                                    return Err(Error::Timeout);
+                                }
+                                let resp = self
+                                    .session
+                                    .execute_with_timeout(
+                                        &method,
+                                        &url,
+                                        preset,
+                                        replay_body,
+                                        Some(digest_headers),
+                                        Some(digest_remaining),
+                                        stream_response,
+                                        request_proxy.as_deref(),
+                                    )
+                                    .await?;
+                                // RFC 7616 §3.3: stale=true means the
+                                // credentials were accepted but the nonce
+                                // expired — retry once with the fresh nonce,
+                                // never re-prompting. Single-retry cap so a
+                                // hostile server cannot loop us.
+                                if resp.status() == 401 && !stale_retried {
+                                    let next = resp
+                                        .headers()
+                                        .iter()
+                                        .find(|(k, _)| k.eq_ignore_ascii_case("www-authenticate"))
+                                        .and_then(|(_, v)| {
+                                            crate::core::digest::parse_challenge(v).ok()
+                                        });
+                                    if let Some(next) = next {
+                                        if next.stale {
+                                            tracing::debug!(
+                                                target: "leyline::digest",
+                                                nonce = %next.nonce,
+                                                "stale nonce — retrying with fresh challenge"
+                                            );
+                                            challenge = next;
+                                            stale_retried = true;
+                                            continue;
+                                        }
+                                    }
+                                }
+                                return Ok(resp);
                             }
-                            return self
-                                .session
-                                .execute_with_timeout(
-                                    &method,
-                                    &url,
-                                    preset,
-                                    replay_body,
-                                    hop_headers,
-                                    Some(digest_remaining),
-                                    stream_response,
-                                    request_proxy.as_deref(),
-                                )
-                                .await;
                         }
                     }
                 }

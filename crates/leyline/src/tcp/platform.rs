@@ -167,4 +167,4 @@ pub fn apply_platform_options(socket: &Socket, profile: &TcpProfile, is_v6: bool
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-pub fn apply_platform_options(_socket: &Socket, _profile: &TcpProfile) {}
+pub fn apply_platform_options(_socket: &Socket, _profile: &TcpProfile, _is_v6: bool) {}

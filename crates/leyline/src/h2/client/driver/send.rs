@@ -1,0 +1,460 @@
+//! Outbound DATA / HEADERS frame emission and flow-control drain.
+
+use bytes::{Bytes, BytesMut};
+use tokio::io::{AsyncRead, AsyncWrite};
+
+use crate::h2::error::{ErrorCode, H2Error};
+use crate::h2::stream_state::StreamEvent;
+
+use super::*;
+
+impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
+    pub(super) async fn on_body_chunk(&mut self, chunk: BodyChunkIn) -> Result<(), H2Error> {
+        match chunk {
+            BodyChunkIn::Chunk { stream_id, data } => {
+                let should_try_write = if let Some(actor) = self.streams.get_mut(&stream_id) {
+                    if let SendBodyInput::Streaming { pending_buf, .. } = &mut actor.send_body_input
+                    {
+                        pending_buf.push_back(data);
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+                if should_try_write {
+                    self.try_pump_streaming_body(stream_id).await?;
+                }
+            }
+            BodyChunkIn::Eof { stream_id, error } => {
+                let should_try_write = if let Some(actor) = self.streams.get_mut(&stream_id) {
+                    if let SendBodyInput::Streaming {
+                        closed, error: e, ..
+                    } = &mut actor.send_body_input
+                    {
+                        *closed = true;
+                        if let Some(err) = error {
+                            *e = Some(err);
+                        }
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+                if should_try_write {
+                    self.try_pump_streaming_body(stream_id).await?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Drain as much of the per-stream streaming body buffer as the flow
+    /// control window permits; emit DATA frames accordingly. Marks
+    /// END_STREAM on the final frame when the producer has EOF'd.
+    pub(super) async fn try_pump_streaming_body(&mut self, stream_id: u32) -> Result<(), H2Error> {
+        loop {
+            // Take the next chunk out of the actor's buffer (if any).
+            let next_chunk: Option<Bytes> =
+                self.streams
+                    .get_mut(&stream_id)
+                    .and_then(|a| match &mut a.send_body_input {
+                        SendBodyInput::Streaming { pending_buf, .. } => pending_buf.pop_front(),
+                        _ => None,
+                    });
+
+            let (closed, stream_err) = self
+                .streams
+                .get(&stream_id)
+                .and_then(|a| match &a.send_body_input {
+                    SendBodyInput::Streaming { closed, error, .. } => {
+                        Some((*closed, error.as_ref().map(|e| e.to_string())))
+                    }
+                    _ => None,
+                })
+                .unwrap_or((false, None));
+
+            let already_closed = self
+                .streams
+                .get(&stream_id)
+                .map(|a| a.send_closed)
+                .unwrap_or(true);
+            if already_closed {
+                return Ok(());
+            }
+
+            if stream_err.is_some() && next_chunk.is_none() {
+                // Cancel the stream — producer errored.
+                let _ = self
+                    .writer
+                    .write_rst_stream(stream_id, ErrorCode::InternalError)
+                    .await;
+                let err = H2Error::Stream {
+                    stream_id,
+                    code: ErrorCode::InternalError,
+                };
+                self.fail_stream(stream_id, err);
+                return Ok(());
+            }
+
+            match next_chunk {
+                Some(chunk) if !chunk.is_empty() => {
+                    // Write as much as possible, park on flow control.
+                    self.write_streaming_chunk(stream_id, chunk, closed).await?;
+                    // If we parked (pending_send set), stop pumping —
+                    // resumption happens via try_drain_pending.
+                    let parked = self
+                        .streams
+                        .get(&stream_id)
+                        .map(|a| a.pending_send.is_some())
+                        .unwrap_or(false);
+                    if parked {
+                        return Ok(());
+                    }
+                }
+                _ => {
+                    if closed {
+                        // No more chunks and producer closed: emit an
+                        // empty END_STREAM DATA frame if we haven't yet.
+                        if !already_closed {
+                            if let Some(actor) = self.streams.get_mut(&stream_id) {
+                                if let Err(e) = actor
+                                    .state
+                                    .transition(StreamEvent::SendData { end_stream: true })
+                                {
+                                    return Err(map_state_err(stream_id, e));
+                                }
+                                actor.send_closed = true;
+                            }
+                            self.writer
+                                .write_data(&DataFrame {
+                                    stream_id,
+                                    end_stream: true,
+                                    data: Bytes::new(),
+                                })
+                                .await?;
+                            let _ = self.writer.flush().await;
+                        }
+                    }
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    pub(super) async fn write_streaming_chunk(
+        &mut self,
+        stream_id: u32,
+        mut chunk: Bytes,
+        producer_closed: bool,
+    ) -> Result<(), H2Error> {
+        while !chunk.is_empty() {
+            let window = self.effective_send_window(stream_id);
+            if window == 0 {
+                // Park — stash the remainder in `pending_send`. The
+                // next WINDOW_UPDATE will resume via try_drain_pending.
+                if let Some(actor) = self.streams.get_mut(&stream_id) {
+                    actor.pending_send = Some(PendingSend {
+                        remaining: chunk.clone(),
+                        trailers: Vec::new(),
+                    });
+                    if !self.buffered_pending.contains(&stream_id) {
+                        self.buffered_pending.push_back(stream_id);
+                    }
+                }
+                return Ok(());
+            }
+            let max_frame = self.peer_settings.max_frame_size as usize;
+            let chunk_size = chunk.len().min(max_frame).min(window);
+            let piece = chunk.slice(0..chunk_size);
+            chunk = chunk.slice(chunk_size..);
+
+            // Is this the last DATA frame? Only if producer has EOF'd
+            // AND no more buffered chunks follow.
+            let no_more_buffered = self
+                .streams
+                .get(&stream_id)
+                .map(|a| match &a.send_body_input {
+                    SendBodyInput::Streaming { pending_buf, .. } => pending_buf.is_empty(),
+                    _ => true,
+                })
+                .unwrap_or(true);
+            let is_last = chunk.is_empty() && producer_closed && no_more_buffered;
+
+            if let Some(actor) = self.streams.get_mut(&stream_id) {
+                if let Err(e) = actor.state.transition(StreamEvent::SendData {
+                    end_stream: is_last,
+                }) {
+                    return Err(map_state_err(stream_id, e));
+                }
+                if is_last {
+                    actor.send_closed = true;
+                }
+            }
+
+            self.writer
+                .write_data(&DataFrame {
+                    stream_id,
+                    end_stream: is_last,
+                    data: piece,
+                })
+                .await?;
+
+            self.conn_send_window -= chunk_size as i64;
+            if let Some(actor) = self.streams.get_mut(&stream_id) {
+                actor.send_window -= chunk_size as i64;
+            }
+            if is_last {
+                let _ = self.writer.flush().await;
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) async fn write_headers_block(
+        &mut self,
+        stream_id: u32,
+        end_stream: bool,
+        fragment: Vec<u8>,
+        with_priority: bool,
+    ) -> Result<(), H2Error> {
+        let max_frame = self.peer_settings.max_frame_size as usize;
+        let priority = if with_priority {
+            self.config.default_priority.map(|p| StreamDependency {
+                exclusive: p.exclusive,
+                dependency_id: p.stream_dependency,
+                weight: p.weight,
+            })
+        } else {
+            None
+        };
+        let prio_overhead = if priority.is_some() { 5 } else { 0 };
+
+        if fragment.len() + prio_overhead <= max_frame {
+            self.writer
+                .write_headers(&HeadersFrame {
+                    stream_id,
+                    end_stream,
+                    end_headers: true,
+                    priority,
+                    fragment: Bytes::from(fragment),
+                })
+                .await?;
+        } else {
+            let first_cap = max_frame.saturating_sub(prio_overhead).max(1);
+            let first_len = first_cap.min(fragment.len());
+            let first = &fragment[..first_len];
+            self.writer
+                .write_headers(&HeadersFrame {
+                    stream_id,
+                    end_stream,
+                    end_headers: false,
+                    priority,
+                    fragment: Bytes::copy_from_slice(first),
+                })
+                .await?;
+            self.write_continuations(stream_id, &fragment, first_len, max_frame)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Write the remainder of a header block (from `offset`) as
+    /// CONTINUATION frames, END_HEADERS on the last (RFC 9113 §6.10).
+    /// Shared by the request-headers and trailers paths.
+    pub(super) async fn write_continuations(
+        &mut self,
+        stream_id: u32,
+        fragment: &[u8],
+        mut offset: usize,
+        max_frame: usize,
+    ) -> Result<(), H2Error> {
+        while offset < fragment.len() {
+            let end = (offset + max_frame).min(fragment.len());
+            let is_last = end == fragment.len();
+            let chunk = &fragment[offset..end];
+            let mut buf = BytesMut::with_capacity(9 + chunk.len());
+            let header = crate::h2::frame::FrameHeader {
+                length: chunk.len() as u32,
+                frame_type: 0x9,
+                flags: if is_last { 0x4 } else { 0 },
+                stream_id,
+            };
+            header.encode(&mut buf);
+            buf.extend_from_slice(chunk);
+            self.writer.write_raw(&buf).await?;
+            offset = end;
+        }
+        Ok(())
+    }
+
+    /// Try to write `body` for `stream_id`; on flow-control exhaustion,
+    /// stash the remainder in the actor's pending_send and return.
+    pub(super) async fn write_body_or_park(
+        &mut self,
+        stream_id: u32,
+        body: Bytes,
+        has_trailers: bool,
+        trailers: Vec<(String, String)>,
+    ) -> Result<(), H2Error> {
+        // Attempt to write as much as flow control allows.
+        let mut remaining = body;
+        while !remaining.is_empty() {
+            let window = self.effective_send_window(stream_id);
+            if window == 0 {
+                // Park.
+                self.park_stream(
+                    stream_id,
+                    PendingSend {
+                        remaining,
+                        trailers,
+                    },
+                );
+                return Ok(());
+            }
+            let max_frame = self.peer_settings.max_frame_size as usize;
+            let chunk_size = remaining.len().min(max_frame).min(window);
+            let chunk = remaining.slice(0..chunk_size);
+            remaining = remaining.slice(chunk_size..);
+            let is_last = remaining.is_empty();
+            let data_end_stream = is_last && !has_trailers;
+
+            // Drive state machine.
+            if let Some(actor) = self.streams.get_mut(&stream_id) {
+                if let Err(e) = actor.state.transition(StreamEvent::SendData {
+                    end_stream: data_end_stream,
+                }) {
+                    return Err(map_state_err(stream_id, e));
+                }
+            }
+
+            self.writer
+                .write_data(&DataFrame {
+                    stream_id,
+                    end_stream: data_end_stream,
+                    data: chunk,
+                })
+                .await?;
+
+            self.conn_send_window -= chunk_size as i64;
+            if let Some(actor) = self.streams.get_mut(&stream_id) {
+                actor.send_window -= chunk_size as i64;
+            }
+        }
+
+        // Body fully written. Send trailers if present.
+        if has_trailers {
+            self.write_trailers(stream_id, trailers).await?;
+        }
+        Ok(())
+    }
+
+    pub(super) async fn write_trailers(
+        &mut self,
+        stream_id: u32,
+        trailers: Vec<(String, String)>,
+    ) -> Result<(), H2Error> {
+        if let Some(actor) = self.streams.get_mut(&stream_id) {
+            if let Err(e) = actor.state.transition(StreamEvent::SendTrailers) {
+                return Err(map_state_err(stream_id, e));
+            }
+        }
+        let mut list: Vec<(&str, &str)> = Vec::with_capacity(trailers.len());
+        for (n, v) in &trailers {
+            list.push((n, v));
+        }
+        let fragment = self.encoder.encode_header_block(&list);
+        let max_frame = self.peer_settings.max_frame_size as usize;
+        // RFC 9113 §6.10: a block past max_frame_size continues in
+        // CONTINUATION frames — END_STREAM rides the first HEADERS
+        // frame, END_HEADERS the last frame of the block. Mirrors
+        // write_headers_block; erroring here used to kill the whole
+        // connection on any large trailer set.
+        let first_len = max_frame.min(fragment.len());
+        let end_headers = first_len == fragment.len();
+        self.writer
+            .write_headers(&HeadersFrame {
+                stream_id,
+                end_stream: true,
+                end_headers,
+                priority: None,
+                fragment: Bytes::copy_from_slice(&fragment[..first_len]),
+            })
+            .await?;
+        if !end_headers {
+            self.write_continuations(stream_id, &fragment, first_len, max_frame)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Try to resume each parked stream that now has flow-control credit.
+    pub(super) async fn try_drain_pending(&mut self) -> Result<(), H2Error> {
+        if self.buffered_pending.is_empty() {
+            return Ok(());
+        }
+        // Drain by repeatedly popping the front; re-park if still blocked.
+        let mut progress_count = self.buffered_pending.len();
+        while progress_count > 0 && !self.buffered_pending.is_empty() {
+            progress_count -= 1;
+            let sid = match self.buffered_pending.pop_front() {
+                Some(s) => s,
+                None => break,
+            };
+            // Extract pending.
+            let pending = match self
+                .streams
+                .get_mut(&sid)
+                .and_then(|a| a.pending_send.take())
+            {
+                Some(p) => p,
+                None => continue,
+            };
+
+            // Streaming input? Push the pending.remaining back into the
+            // front of the streaming buffer and let the streaming pump
+            // handle it (it understands END_STREAM timing relative to
+            // the producer's EOF signal).
+            let is_streaming = self
+                .streams
+                .get(&sid)
+                .map(|a| matches!(a.send_body_input, SendBodyInput::Streaming { .. }))
+                .unwrap_or(false);
+            if is_streaming {
+                if let Some(actor) = self.streams.get_mut(&sid) {
+                    if let SendBodyInput::Streaming { pending_buf, .. } = &mut actor.send_body_input
+                    {
+                        if !pending.remaining.is_empty() {
+                            pending_buf.push_front(pending.remaining);
+                        }
+                    }
+                }
+                if let Err(e) = self.try_pump_streaming_body(sid).await {
+                    self.fail_stream(sid, e);
+                } else {
+                    let _ = self.writer.flush().await;
+                }
+                continue;
+            }
+
+            let has_trailers = !pending.trailers.is_empty();
+            let result = self
+                .write_body_or_park(sid, pending.remaining, has_trailers, pending.trailers)
+                .await;
+            match result {
+                Ok(()) => {
+                    // If the stream is still parked, we already pushed it
+                    // back via park_stream. Otherwise it's done sending.
+                    let _ = self.writer.flush().await;
+                }
+                Err(e) => {
+                    self.fail_stream(sid, e);
+                }
+            }
+        }
+        Ok(())
+    }
+}

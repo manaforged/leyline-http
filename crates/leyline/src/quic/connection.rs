@@ -78,12 +78,7 @@ impl H3Connection {
         config.set_active_connection_id_limit(h3_cfg.active_connection_id_limit);
         config.set_disable_active_migration(true);
 
-        // Resolve the peer. Prefer IPv4 since we bind 0.0.0.0.
-        let peer_addr = format!("{host}:{port}")
-            .to_socket_addrs()
-            .map_err(|e| format!("dns: {e}"))?
-            .find(|a| a.is_ipv4())
-            .ok_or("no IPv4 address resolved")?;
+        let peer_addr = resolve_peer(host, port).await?;
 
         let bind = match peer_addr {
             std::net::SocketAddr::V4(_) => "0.0.0.0:0",
@@ -336,6 +331,35 @@ impl H3Connection {
     }
 }
 
+/// Resolve the QUIC peer off the async runtime.
+///
+/// `getaddrinfo` is a blocking libc call (multi-second on failing
+/// lookups), so it runs under `spawn_blocking` — the H2 path's
+/// `SystemResolver` already does the same. IPv4 is preferred because
+/// the UDP socket binds `0.0.0.0` by default, with an IPv6 fallback
+/// instead of the old hard error on IPv6-only hosts (the bind match
+/// in `request` already handles both families).
+async fn resolve_peer(host: &str, port: u16) -> Result<std::net::SocketAddr, String> {
+    // Bare IPv6 literals need brackets for `to_socket_addrs`.
+    let addr_str = if host.contains(':') {
+        format!("[{host}]:{port}")
+    } else {
+        format!("{host}:{port}")
+    };
+    let addrs = tokio::task::spawn_blocking(move || {
+        addr_str.to_socket_addrs().map(|i| i.collect::<Vec<_>>())
+    })
+    .await
+    .map_err(|e| format!("dns task: {e}"))?
+    .map_err(|e| format!("dns: {e}"))?;
+    addrs
+        .iter()
+        .find(|a| a.is_ipv4())
+        .or_else(|| addrs.first())
+        .copied()
+        .ok_or_else(|| "no address resolved".to_string())
+}
+
 fn validate_connection_id_len(len: usize) -> Result<(), String> {
     if len == 0 || len > quiche::MAX_CONN_ID_LEN {
         return Err(format!(
@@ -367,7 +391,25 @@ pub(crate) fn check_body_budget(already: usize, n: usize, max: u64) -> Result<()
 
 #[cfg(test)]
 mod tests {
-    use super::{check_body_budget, validate_connection_id_len};
+    use super::{check_body_budget, resolve_peer, validate_connection_id_len};
+
+    #[tokio::test]
+    async fn resolve_peer_prefers_ipv4_for_localhost() {
+        let addr = resolve_peer("localhost", 443)
+            .await
+            .expect("resolve localhost");
+        // When both families are published, IPv4 must win because the
+        // UDP socket binds 0.0.0.0 by default.
+        assert!(addr.is_ipv4(), "got {addr}");
+    }
+
+    #[tokio::test]
+    async fn resolve_peer_falls_back_on_ipv6_only_hosts() {
+        // A bare IPv6 literal resolves to exactly one V6 addr — the
+        // old inline code errored with "no IPv4 address resolved".
+        let addr = resolve_peer("::1", 443).await.expect("resolve ::1");
+        assert!(addr.is_ipv6(), "got {addr}");
+    }
 
     #[test]
     fn validates_profile_connection_id_lengths() {

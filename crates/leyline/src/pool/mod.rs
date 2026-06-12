@@ -16,9 +16,9 @@
 //!
 //! ## Eviction
 //! - **Idle timeout**: entries untouched for longer than the configured
-//!   window (default 90 s) are dropped.
+//!   window (default 300 s) are dropped.
 //! - **LRU cap**: the pool carries at most `max_connections` entries
-//!   (default 256). H1 and H2 share the cap — no per-protocol limit.
+//!   (default 2048). H1 and H2 share the cap — no per-protocol limit.
 //!   When inserting a new entry would exceed the cap, the
 //!   least-recently-used entry is evicted. Dropping an H2 entry's
 //!   `DriverTask` triggers a graceful GOAWAY; dropping an H1 entry's
@@ -57,6 +57,44 @@ pub(crate) fn make_key(host: &str, port: u16, proxy: Option<&str>) -> PoolKey {
     }
 }
 
+/// Establish a fresh TLS + H2 connection to `(host, port, proxy)`, require
+/// that ALPN negotiated `h2`, install the driver into `pool` under `key`,
+/// and return the cloneable client handle plus its TLS metadata.
+async fn open_fresh_h2(
+    pool: &Arc<Pool>,
+    connector: &FingerprintConnector,
+    h2_config: &H2Config,
+    key: PoolKey,
+    host: &str,
+    port: u16,
+    proxy: Option<&str>,
+) -> Result<(crate::h2::client::H2Client, TlsInfo), String> {
+    let tls_stream = connector
+        .connect(host, port, proxy)
+        .await
+        .map_err(|e| format!("tls: {e}"))?;
+    if tls_stream.alpn.as_deref() != Some(b"h2") {
+        let negotiated = tls_stream
+            .alpn
+            .as_ref()
+            .map(|p| String::from_utf8_lossy(p).to_string())
+            .unwrap_or_else(|| "none".to_string());
+        return Err(format!("alpn: negotiated {negotiated}, expected h2"));
+    }
+
+    let tls = TlsInfo {
+        peer_cert_der: tls_stream.peer_cert_der.clone(),
+        version: tls_stream.tls_version.clone(),
+        cipher: tls_stream.tls_cipher.clone(),
+    };
+    let (handle, driver) = ClientConnection::<H2Io>::start(tls_stream.stream, h2_config.clone())
+        .await
+        .map_err(|e| format!("h2: {e}"))?;
+
+    pool.install_h2(key, handle.clone(), driver, tls.clone());
+    Ok((handle, tls))
+}
+
 /// Obtain a cloneable [`crate::h2::H2Client`] handle for `(host, port, proxy)`,
 /// reusing an existing pooled connection when available and otherwise
 /// establishing a fresh TLS + H2 handshake.
@@ -82,30 +120,7 @@ pub async fn checkout_handle(
         return Ok((handle, tls));
     }
 
-    let tls_stream = connector
-        .connect(host, port, proxy)
-        .await
-        .map_err(|e| format!("tls: {e}"))?;
-    if tls_stream.alpn.as_deref() != Some(b"h2") {
-        let negotiated = tls_stream
-            .alpn
-            .as_ref()
-            .map(|p| String::from_utf8_lossy(p).to_string())
-            .unwrap_or_else(|| "none".to_string());
-        return Err(format!("alpn: negotiated {negotiated}, expected h2"));
-    }
-
-    let tls = TlsInfo {
-        peer_cert_der: tls_stream.peer_cert_der.clone(),
-        version: tls_stream.tls_version.clone(),
-        cipher: tls_stream.tls_cipher.clone(),
-    };
-    let (handle, driver) = ClientConnection::<H2Io>::start(tls_stream.stream, h2_config.clone())
-        .await
-        .map_err(|e| format!("h2: {e}"))?;
-
-    pool.install_h2(key, handle.clone(), driver, tls.clone());
-    Ok((handle, tls))
+    open_fresh_h2(pool, connector, h2_config, key, host, port, proxy).await
 }
 
 /// Send a request, reusing a pooled H2 connection when available.
@@ -198,29 +213,16 @@ pub async fn send_request(
     }
     tracing::Span::current().record("pool.hit", false);
 
-    let tls_stream = connector
-        .connect(connect_host, connect_port, proxy)
-        .await
-        .map_err(|e| format!("tls: {e}"))?;
-    if tls_stream.alpn.as_deref() != Some(b"h2") {
-        let negotiated = tls_stream
-            .alpn
-            .as_ref()
-            .map(|p| String::from_utf8_lossy(p).to_string())
-            .unwrap_or_else(|| "none".to_string());
-        return Err(format!("alpn: negotiated {negotiated}, expected h2"));
-    }
-
-    let tls = TlsInfo {
-        peer_cert_der: tls_stream.peer_cert_der.clone(),
-        version: tls_stream.tls_version.clone(),
-        cipher: tls_stream.tls_cipher.clone(),
-    };
-    let (handle, driver) = ClientConnection::<H2Io>::start(tls_stream.stream, h2_config.clone())
-        .await
-        .map_err(|e| format!("h2: {e}"))?;
-
-    pool.install_h2(key.clone(), handle.clone(), driver, tls.clone());
+    let (handle, tls) = open_fresh_h2(
+        pool,
+        connector,
+        h2_config,
+        key.clone(),
+        connect_host,
+        connect_port,
+        proxy,
+    )
+    .await?;
 
     let resp = match handle
         .send_request_ex(pseudo, headers, body, stream_response)

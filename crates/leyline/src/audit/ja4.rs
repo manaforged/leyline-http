@@ -129,8 +129,16 @@ fn compute_section_c(input: &Ja4Input<'_>) -> String {
     hash12(&combined)
 }
 
-/// Build the list of extension IDs that Chrome sends in its ClientHello.
-/// This is derived from the TLS profile configuration.
+/// Build the list of extension IDs that **Chrome** sends in its
+/// ClientHello, derived from the TLS profile configuration.
+///
+/// Chrome-only advisory: the session builder feeds this into the
+/// precomputed `audit()` JA4/JA3 for *every* profile, including Firefox
+/// and Safari, which order and select extensions differently. There is
+/// no firefox/safari equivalent yet, so for non-Chromium profiles the
+/// precomputed audit hashes are approximations. The wire fingerprint is
+/// the source of truth — `tests/tls_peet.rs` validates the *observed*
+/// JA4 against each profile TOML's `expected_ja4`, not this precompute.
 pub fn chrome_extension_ids(tls: &crate::profile::TlsProfile) -> Vec<u16> {
     // Chrome's extension order (before permutation) based on BoringSSL defaults.
     // These are the extensions we configure in connector.rs.

@@ -18,7 +18,6 @@
 //! message triggered by the same-read body bytes of a `407`.
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
 
 use crate::tls::connector::FingerprintConnector;
 use crate::tls::error::TlsError;
@@ -35,20 +34,7 @@ pub(crate) async fn connect(
     proxy: &url::Url,
     include_alps: bool,
 ) -> Result<TlsStream, TlsError> {
-    let proxy_host = proxy
-        .host_str()
-        .ok_or_else(|| TlsError::Profile("proxy has no host".into()))?;
-    // `Url::port()` returns None when the port equals the scheme's
-    // default (80 for http), so `http://host:80` would silently
-    // resolve to 8080. `port_or_known_default()` preserves explicit
-    // default ports — for example a gateway at `proxy.example.com:80`
-    // gateway.
-    let proxy_port = proxy.port_or_known_default().unwrap_or(8080);
-
-    let proxy_addr = format!("{proxy_host}:{proxy_port}");
-    let mut tcp_stream = TcpStream::connect(&proxy_addr)
-        .await
-        .map_err(TlsError::TcpConnect)?;
+    let mut tcp_stream = super::connect_to_proxy(proxy, 8080).await?;
 
     let connect_req = if let Some(password) = proxy.password() {
         let username = percent_decode(proxy.username());

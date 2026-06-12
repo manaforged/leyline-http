@@ -160,6 +160,21 @@ pub struct H2Config {
 }
 
 impl H2Config {
+    /// The per-stream receive window we advertise to the peer via
+    /// `SETTINGS_INITIAL_WINDOW_SIZE`, falling back to the RFC 9113
+    /// §6.5.2 default when the profile omits the setting. This is the
+    /// only correct basis for seeding and replenishing a stream's
+    /// receive window — `initial_connection_window_size` is the
+    /// connection-level value and `peer_settings.initial_window_size`
+    /// governs the send direction.
+    pub(crate) fn advertised_initial_window_size(&self) -> u32 {
+        self.settings
+            .iter()
+            .find(|(id, _)| *id == SettingId::InitialWindowSize)
+            .map(|(_, v)| *v)
+            .unwrap_or(65_535)
+    }
+
     /// Build from a TOML H2Profile.
     ///
     /// Settings are stored in the order specified by `settings_order` so the

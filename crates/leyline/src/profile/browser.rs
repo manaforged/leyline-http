@@ -46,11 +46,11 @@ pub enum Browser {
     /// OkHttp 4.x as shipped on Android 7-9 (TLS 1.2 only).
     OkHttpAndroid7,
     /// Safari on iOS 15.
-    SafariiOS15,
+    SafariIOS15,
     /// Safari on iOS 17.
-    SafariiOS17,
+    SafariIOS17,
     /// Safari on iOS 18.
-    SafariiOS18,
+    SafariIOS18,
 }
 
 /// Canonical profile count. Tests assert against this.
@@ -70,9 +70,9 @@ pub const ALL_BROWSERS: [Browser; PROFILE_COUNT] = [
     Browser::Safari18,
     Browser::OkHttpAndroid10,
     Browser::OkHttpAndroid7,
-    Browser::SafariiOS15,
-    Browser::SafariiOS17,
-    Browser::SafariiOS18,
+    Browser::SafariIOS15,
+    Browser::SafariIOS17,
+    Browser::SafariIOS18,
 ];
 
 impl Browser {
@@ -91,9 +91,9 @@ impl Browser {
             Self::Safari18 => ("safari", 18),
             Self::OkHttpAndroid10 => ("okhttp", 10),
             Self::OkHttpAndroid7 => ("okhttp", 7),
-            Self::SafariiOS15 => ("safari-ios", 15),
-            Self::SafariiOS17 => ("safari-ios", 17),
-            Self::SafariiOS18 => ("safari-ios", 18),
+            Self::SafariIOS15 => ("safari-ios", 15),
+            Self::SafariIOS17 => ("safari-ios", 17),
+            Self::SafariIOS18 => ("safari-ios", 18),
         }
     }
 
@@ -150,9 +150,9 @@ impl std::fmt::Display for Browser {
             Self::Safari18 => write!(f, "Safari 18"),
             Self::OkHttpAndroid10 => write!(f, "OkHttp4 Android 10+"),
             Self::OkHttpAndroid7 => write!(f, "OkHttp4 Android 7-9"),
-            Self::SafariiOS15 => write!(f, "Safari iOS 15"),
-            Self::SafariiOS17 => write!(f, "Safari iOS 17"),
-            Self::SafariiOS18 => write!(f, "Safari iOS 18"),
+            Self::SafariIOS15 => write!(f, "Safari iOS 15"),
+            Self::SafariIOS17 => write!(f, "Safari iOS 17"),
+            Self::SafariIOS18 => write!(f, "Safari iOS 18"),
         }
     }
 }

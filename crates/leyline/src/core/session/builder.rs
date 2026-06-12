@@ -2,8 +2,8 @@ use std::sync::{Arc, LazyLock};
 
 use crate::cookie::Jar as CookieJar;
 use crate::core::{
-    CompressionConfig, DnsConfig, NoProxy, PoolConfig, ProxyConfig, ProxyRule, ProxyUrl,
-    RedirectPolicy, SocketConfig, TimeoutConfig, WebSocketConfig,
+    CompressionConfig, DnsConfig, NoProxy, PoolConfig, ProxyConfig, ProxyUrl, RedirectPolicy,
+    SocketConfig, TimeoutConfig, WebSocketConfig,
 };
 use crate::h2::H2Config;
 use crate::pool::Pool;
@@ -24,7 +24,6 @@ static PROFILES: LazyLock<ProfileRegistry> = LazyLock::new(ProfileRegistry::buil
 /// registry-backed browser profiles.
 static BARE_PROFILE: LazyLock<crate::profile::BrowserProfile> =
     LazyLock::new(crate::profile::BrowserProfile::bare);
-const DEFAULT_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
 /// Session builder - configure browser, platform, proxy, timeout, cookies.
 pub struct SessionBuilder {
@@ -44,7 +43,6 @@ pub struct SessionBuilder {
     /// Set when `proxy` was discovered from the environment at build
     /// time (vs an explicit `.proxy(...)` call).
     proxy_from_env: bool,
-    timeout: std::time::Duration,
     max_redirects: usize,
     proxy_config: ProxyConfig,
     dns_config: DnsConfig,
@@ -64,7 +62,6 @@ pub struct SessionBuilder {
     extra_identity_headers: Vec<(String, String)>,
     accept_invalid_certs: bool,
     pool_idle_timeout: Option<std::time::Duration>,
-    resolver: Option<Arc<dyn Resolver>>,
     happy_eyeballs: Option<HappyEyeballsConfig>,
     tls_trust: TlsTrustConfig,
 }
@@ -78,7 +75,6 @@ impl SessionBuilder {
             brand: ChromiumBrand::default(),
             proxy: None,
             proxy_from_env: false,
-            timeout: DEFAULT_REQUEST_TIMEOUT,
             max_redirects: 10,
             proxy_config: ProxyConfig::default(),
             dns_config: DnsConfig::default(),
@@ -98,7 +94,6 @@ impl SessionBuilder {
             extra_identity_headers: Vec::new(),
             accept_invalid_certs: false,
             pool_idle_timeout: None,
-            resolver: None,
             happy_eyeballs: None,
             tls_trust: TlsTrustConfig::default(),
         }
@@ -107,7 +102,7 @@ impl SessionBuilder {
     /// Set a proxy URL (http:// with CONNECT tunnel).
     pub fn proxy(mut self, proxy: impl Into<String>) -> Self {
         let proxy = proxy.into();
-        self.proxy_config = self.proxy_config.with_rule(ProxyRule::all(proxy.clone()));
+        self.proxy_config = self.proxy_config.set_default_proxy(proxy.clone());
         self.proxy = Some(proxy);
         self
     }
@@ -115,7 +110,7 @@ impl SessionBuilder {
     /// Set a validated proxy URL.
     pub fn proxy_url(mut self, proxy: ProxyUrl) -> Self {
         let proxy = proxy.into_string();
-        self.proxy_config = self.proxy_config.with_rule(ProxyRule::all(proxy.clone()));
+        self.proxy_config = self.proxy_config.set_default_proxy(proxy.clone());
         self.proxy = Some(proxy);
         self
     }
@@ -141,14 +136,12 @@ impl SessionBuilder {
 
     /// Set request timeout (default: 5 minutes).
     pub fn timeout(mut self, timeout: std::time::Duration) -> Self {
-        self.timeout = timeout;
         self.timeouts.total = timeout;
         self
     }
 
     /// Replace timeout configuration.
     pub fn timeouts(mut self, config: TimeoutConfig) -> Self {
-        self.timeout = config.total;
         self.timeouts = config;
         self
     }
@@ -165,13 +158,13 @@ impl SessionBuilder {
         self
     }
 
-    /// Override the connection pool's idle-eviction timeout (default: 90s).
+    /// Override the connection pool's idle-eviction timeout (default: 300s).
     ///
     /// Pool entries whose `last_use` is older than this duration are
     /// evicted on the next `evict_idle` pass. Raise this when a caller has
     /// its own keep-warm cadence (e.g. a 30-minute heartbeat) and wants
     /// the pooled TLS connection to survive between ticks instead of
-    /// being torn down at the default 90 seconds.
+    /// being torn down at the default 300 seconds.
     pub fn pool_idle_timeout(mut self, timeout: std::time::Duration) -> Self {
         self.pool_idle_timeout = Some(timeout);
         self.pool_config.idle_timeout = timeout;
@@ -323,7 +316,6 @@ impl SessionBuilder {
     /// Proxy connections still resolve at the proxy unless the proxy
     /// protocol itself requires local resolution.
     pub fn resolver(mut self, resolver: Arc<dyn Resolver>) -> Self {
-        self.resolver = Some(resolver.clone());
         self.dns_config = self.dns_config.resolver(resolver);
         self
     }
@@ -603,7 +595,7 @@ impl SessionBuilder {
         // patterns means some hosts bypass it.
         if self.proxy.is_none() && self.proxy_config.uses_env() {
             if let Some(p) = env_proxy() {
-                self.proxy_config = self.proxy_config.with_rule(ProxyRule::all(p.clone()));
+                self.proxy_config = self.proxy_config.set_default_proxy(p.clone());
                 self.proxy = Some(p);
                 // Provenance matters: env-inherited NO_PROXY patterns may
                 // bypass this proxy, but never an explicitly-set one.
@@ -698,7 +690,6 @@ impl SessionBuilder {
         if self.accept_invalid_certs {
             connector.set_accept_invalid_certs(true);
         }
-        let _ = self.resolver;
         connector = connector.with_resolver(self.dns_config.clone().into_resolver());
         connector = connector.with_socket_config(self.socket_config.clone());
         if let Some(connect_timeout) = self.timeouts.connect {
@@ -768,7 +759,6 @@ impl SessionBuilder {
                 identity_request_header_order: identity.request_header_order.clone(),
                 proxy: self.proxy,
                 proxy_from_env: self.proxy_from_env,
-                timeout: self.timeout,
                 max_redirects: self.max_redirects,
                 proxy_config: self.proxy_config,
                 timeouts: self.timeouts,
