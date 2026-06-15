@@ -26,7 +26,7 @@ use crate::core::{CompressionConfig, ProxyConfig, RedirectPolicy, TimeoutConfig}
 use crate::h2::H2Config;
 use crate::pool::Pool;
 use crate::profile::{Browser, ChromiumBrand, Platform};
-use crate::tls::FingerprintConnector;
+use crate::tls::ConnectorVariant;
 
 /// Protocol selection policy for requests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -117,7 +117,7 @@ pub struct SessionInner {
     websocket_config: WebSocketConfig,
     https_only: bool,
     cookie_jar: CookieJar,
-    connector: FingerprintConnector,
+    connector: ConnectorVariant,
     h2_config: H2Config,
     pool: Arc<Pool>,
     /// Cached connection-level audit data computed from the profile, shared

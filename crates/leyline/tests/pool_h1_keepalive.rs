@@ -18,20 +18,22 @@ use std::time::Duration;
 
 use leyline::pool::{send_request_h1_pooled, H1Body, H1ResponseBody, H1Target, Pool};
 use leyline::profile::{Browser, Platform, ProfileRegistry};
-use leyline::tls::FingerprintConnector;
+use leyline::tls::{ConnectorVariant, FingerprintConnector};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 /// Spin up a bare `FingerprintConnector` so we can exercise the
 /// plaintext-HTTP path without standing up a full `Session`. The TLS
 /// fields never fire for `http://` destinations.
-fn bare_connector() -> FingerprintConnector {
+fn bare_connector() -> ConnectorVariant {
     let registry = ProfileRegistry::builtin();
     let profile = registry
         .get_browser(Browser::Chrome147)
         .expect("chrome147 profile is bundled");
-    FingerprintConnector::new(profile, Platform::Windows.tcp_profile())
-        .expect("build fingerprint connector")
+    ConnectorVariant::Fingerprint(
+        FingerprintConnector::new(profile, Platform::Windows.tcp_profile())
+            .expect("build fingerprint connector"),
+    )
 }
 
 /// A tiny mock server that accepts TCP connections, reads one
@@ -109,7 +111,7 @@ where
 }
 
 /// Shared setup: pool, connector, URL.
-fn setup() -> (Arc<Pool>, FingerprintConnector) {
+fn setup() -> (Arc<Pool>, ConnectorVariant) {
     (Arc::new(Pool::new()), bare_connector())
 }
 

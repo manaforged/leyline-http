@@ -4,14 +4,16 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Mutex;
 use std::time::Instant;
 
-use tokio::net::TcpStream;
-
 use crate::h2::client::{DriverTask, H2Client};
 
 use crate::pool::h1::H1Io;
+use crate::tls::TlsIo;
 
-/// Concrete I/O type used during H2 handshake — BoringSSL over TCP.
-pub(crate) type H2Io = tokio_btls::SslStream<TcpStream>;
+/// I/O type used during the H2 handshake — the backend-agnostic TLS
+/// stream ([`TlsIo`]). Today that resolves to BoringSSL over TCP; a
+/// future TLS backend slots in as a new `TlsIo` arm without changing
+/// this alias or the H2 driver above it.
+pub(crate) type H2Io = TlsIo;
 
 /// TLS handshake result carried alongside pooled connections.
 /// Every field is per-connection (it's the same for every request

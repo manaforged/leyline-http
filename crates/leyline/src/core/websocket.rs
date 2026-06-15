@@ -30,20 +30,20 @@ use crate::h2::client::H2ConnectStream;
 use crate::h2::config::H2Config;
 use crate::h2::connection::PseudoHeaders;
 use crate::pool::Pool;
-use crate::tls::FingerprintConnector;
+use crate::tls::{ConnectorVariant, TlsIo};
 
 use crate::core::error::{Error, Result};
 
 /// Transport variant carried inside a connected [`WsConnection`].
 ///
 /// Boxed because the two sides have different sizes (an H1 TLS stream
-/// is a concrete `SslStream<TcpStream>`; an H2 CONNECT stream is an
-/// `H2ConnectStream`). Keeping the enum behind an inner field also
-/// lets us evolve the list without breaking the public `WsConnection`
-/// API.
+/// is a [`TlsIo`]; an H2 CONNECT stream is an `H2ConnectStream`).
+/// Keeping the enum behind an inner field also lets us evolve the list
+/// without breaking the public `WsConnection` API.
+#[allow(clippy::large_enum_variant)]
 enum WsInner {
     /// Classic HTTP/1.1 Upgrade (RFC 6455) over TLS.
-    H1(WebSocketStream<tokio_btls::SslStream<tokio::net::TcpStream>>),
+    H1(WebSocketStream<TlsIo>),
     /// RFC 8441 extended CONNECT over HTTP/2.
     H2(WebSocketStream<H2ConnectStream>),
 }
@@ -65,7 +65,7 @@ impl WsConnection {
     /// connection is established with `http/1.1` ALPN and
     /// tokio-tungstenite performs the Upgrade handshake.
     pub(crate) async fn connect_h1(
-        connector: &FingerprintConnector,
+        connector: &ConnectorVariant,
         url: &str,
         proxy: Option<&str>,
         user_agent: &str,
@@ -129,7 +129,7 @@ impl WsConnection {
     /// peer has not advertised `SETTINGS_ENABLE_CONNECT_PROTOCOL=1`.
     pub(crate) async fn connect_h2(
         pool: &Arc<Pool>,
-        connector: &FingerprintConnector,
+        connector: &ConnectorVariant,
         h2_config: &H2Config,
         url: &str,
         proxy: Option<&str>,

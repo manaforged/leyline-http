@@ -18,14 +18,14 @@ use std::time::Duration;
 
 use leyline::pool::{send_request_h1_pooled, H1Body, H1Target, Pool};
 use leyline::profile::{Browser, Platform, ProfileRegistry};
-use leyline::tls::FingerprintConnector;
+use leyline::tls::{ConnectorVariant, FingerprintConnector};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-fn connector() -> FingerprintConnector {
+fn connector() -> ConnectorVariant {
     let profiles = ProfileRegistry::builtin();
     let profile = profiles.get_browser(Browser::Chrome147).unwrap();
     let tcp_profile = Platform::default().tcp_profile();
-    FingerprintConnector::new(profile, tcp_profile).unwrap()
+    ConnectorVariant::Fingerprint(FingerprintConnector::new(profile, tcp_profile).unwrap())
 }
 
 async fn run_against(server_response: &'static [u8]) -> String {

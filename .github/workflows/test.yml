@@ -32,12 +32,39 @@ jobs:
       - name: cargo test (workspace, lib + tests)
         run: cargo test --workspace --exclude leyline-quiche --lib --tests
 
+  # Coverage for the optional pure-Rust rustls backend (`tls-rustls`). The
+  # default `test` job builds BoringSSL-only, so without this the entire
+  # rustls path (RustlsConnector, rustls_trust, the ConnectorVariant
+  # dispatch, the generic proxy) would merge untested by CI.
+  test-rustls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo clippy (tls-rustls)
+        run: cargo clippy -p leyline --features tls-rustls --all-targets -- -D warnings
+
+      - name: cargo test (tls-rustls, lib + tests)
+        run: cargo test -p leyline --features tls-rustls --lib --tests
+
   # Live wire-fingerprint verification against tls.peet.ws. Only runs for
   # explicit invocations (workflow_dispatch and the weekly cron in
   # fingerprint-cron.yml) — flaky network shouldn't block PRs. The
   # rusty-hook pre-commit already runs this on profile/h2/tls/btls-sys
   # changes locally, and pre-push runs the full matrix unconditionally,
-  # so this is the third backstop, not the primary gate.
+  # so this is the third backstop, not the primary gate. Built with
+  # `--features tls-rustls` so the matrix proves BoringSSL parity holds
+  # with the rustls backend compiled in (the ConnectorVariant path).
   live-fingerprint:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -54,4 +81,4 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: cargo test (live tls.peet.ws matrix)
-        run: cargo test -p leyline --test tls_peet --release -- --ignored
+        run: cargo test -p leyline --test tls_peet --features tls-rustls --release -- --ignored

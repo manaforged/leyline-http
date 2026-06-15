@@ -42,6 +42,12 @@ http3 = ["dep:leyline-quiche"]
 socks = []
 system-trust = []
 native-interface-bind = []
+# Second TLS backend: rustls (pure-Rust handshake) for the bare/non-fingerprint
+# path. Additive + opt-in — bare Session::new() routes through rustls when enabled;
+# parity (chrome/profile) sessions stay on BoringSSL. Default crypto provider is
+# aws-lc-rs (rustls default). A future tls-rustls-rustcrypto flag will swap in the
+# pure-Rust provider for a zero-C / musl-cross build.
+tls-rustls = ["dep:rustls", "dep:tokio-rustls", "dep:rustls-native-certs", "dep:rustls-pemfile"]
 tower = ["dep:tower-service"]
 full = [
     "cookies",
@@ -82,6 +88,12 @@ toml = { workspace = true }
 # -- networking / TLS
 socket2 = { workspace = true }
 url = { workspace = true }
+
+# -- rustls (optional second TLS backend; bare path only — see the tls-rustls feature)
+rustls = { version = "0.23", optional = true }
+tokio-rustls = { version = "0.26", optional = true }
+rustls-native-certs = { version = "0.8", optional = true }
+rustls-pemfile = { version = "2", optional = true }
 
 # -- tracing
 tracing = { workspace = true }

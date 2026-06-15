@@ -32,7 +32,7 @@ use std::sync::Arc;
 use crate::h2::client::{H2ResponseEx, RequestBody};
 use crate::h2::config::H2Config;
 use crate::h2::connection::{ClientConnection, PseudoHeaders};
-use crate::tls::FingerprintConnector;
+use crate::tls::ConnectorVariant;
 
 mod h1;
 #[allow(clippy::module_inception)]
@@ -62,7 +62,7 @@ pub(crate) fn make_key(host: &str, port: u16, proxy: Option<&str>) -> PoolKey {
 /// and return the cloneable client handle plus its TLS metadata.
 async fn open_fresh_h2(
     pool: &Arc<Pool>,
-    connector: &FingerprintConnector,
+    connector: &ConnectorVariant,
     h2_config: &H2Config,
     key: PoolKey,
     host: &str,
@@ -106,7 +106,7 @@ async fn open_fresh_h2(
 )]
 pub async fn checkout_handle(
     pool: &Arc<Pool>,
-    connector: &FingerprintConnector,
+    connector: &ConnectorVariant,
     h2_config: &H2Config,
     host: &str,
     port: u16,
@@ -143,7 +143,7 @@ pub async fn checkout_handle(
 #[allow(clippy::too_many_arguments)]
 pub async fn send_request(
     pool: &Arc<Pool>,
-    connector: &FingerprintConnector,
+    connector: &ConnectorVariant,
     h2_config: &H2Config,
     pseudo: PseudoHeaders,
     headers: Vec<(String, String)>,

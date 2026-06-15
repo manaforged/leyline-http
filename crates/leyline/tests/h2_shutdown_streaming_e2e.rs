@@ -182,7 +182,7 @@ async fn streaming_upload_completes_after_last_handle_drops() {
     }
     assert_eq!(got, b"done");
 
-    let _ = tokio::time::timeout(Duration::from_secs(5), driver.join())
+    tokio::time::timeout(Duration::from_secs(5), driver.join())
         .await
         .expect("driver hung")
         .expect("driver errored");

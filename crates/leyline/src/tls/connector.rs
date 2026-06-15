@@ -24,7 +24,7 @@ use crate::tls::happy_eyeballs::{happy_eyeballs_connect, HappyEyeballsConfig};
 use crate::tls::nonblocking::connect_one;
 use crate::tls::resolver::{Resolver, SystemResolver};
 use crate::tls::trust::TlsTrustConfig;
-use crate::tls::TlsStream;
+use crate::tls::{TlsIo, TlsStream};
 
 /// Creates TLS connections matching a browser's fingerprint.
 ///
@@ -385,7 +385,10 @@ impl FingerprintConnector {
         let tls_cipher = stream.ssl().current_cipher().map(|c| c.name().to_string());
 
         Ok(TlsStream {
-            stream,
+            // Wrap the handshaked BoringSSL stream into the backend arm.
+            // A future backend constructs its own `TlsIo` variant here;
+            // the handshake logic above is unchanged.
+            stream: TlsIo::Boring(stream),
             alpn,
             peer_cert_der,
             tls_version,

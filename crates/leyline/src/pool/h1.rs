@@ -15,7 +15,7 @@ use futures_util::StreamExt;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-use crate::tls::FingerprintConnector;
+use crate::tls::ConnectorVariant;
 
 use crate::pool::{make_key, H1Slot, Pool, TlsInfo};
 
@@ -147,7 +147,7 @@ pub enum H1PooledError {
 #[allow(clippy::too_many_arguments)]
 pub async fn send_request_h1_pooled(
     pool: &Arc<Pool>,
-    connector: &FingerprintConnector,
+    connector: &ConnectorVariant,
     scheme: &str,
     host: &str,
     port: u16,
@@ -279,7 +279,7 @@ fn tls_for_scheme(scheme: &str, tls: &TlsInfo) -> Option<TlsInfo> {
 /// Open a fresh TCP (+ optional TLS) stream for the given destination
 /// and return it as a boxed `H1Io` alongside the TLS snapshot.
 async fn open_new(
-    connector: &FingerprintConnector,
+    connector: &ConnectorVariant,
     scheme: &str,
     host: &str,
     port: u16,

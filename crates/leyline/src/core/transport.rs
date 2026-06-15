@@ -9,7 +9,7 @@ use std::sync::Arc;
 use crate::h2::config::H2Config;
 use crate::h2::connection::PseudoHeaders;
 use crate::pool::{H1Body, H1PooledError, H1ResponseBody, H1Target, Pool};
-use crate::tls::FingerprintConnector;
+use crate::tls::ConnectorVariant;
 use crate::util::{base64_encode, percent_decode};
 use bytes::Bytes;
 use futures_util::StreamExt;
@@ -56,7 +56,7 @@ pub(crate) struct TransportResponse {
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn send_request_auto(
     pool: &Arc<Pool>,
-    connector: &FingerprintConnector,
+    connector: &ConnectorVariant,
     h2_config: &H2Config,
     method: &str,
     url: &url::Url,
@@ -162,7 +162,7 @@ async fn materialise_stream_body(body: Body) -> Result<Bytes> {
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn send_request_h2(
     pool: &Arc<Pool>,
-    connector: &FingerprintConnector,
+    connector: &ConnectorVariant,
     h2_config: &H2Config,
     method: &str,
     url: &url::Url,
@@ -286,7 +286,7 @@ fn body_to_h1(body: Body) -> H1Body {
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn send_request_h1(
     pool: &Arc<Pool>,
-    connector: &FingerprintConnector,
+    connector: &ConnectorVariant,
     method: &str,
     url: &url::Url,
     headers: Vec<(String, String)>,

@@ -4,7 +4,6 @@ use std::time::Duration;
 
 use tokio::net::TcpStream;
 
-use crate::tls::connector::FingerprintConnector;
 use crate::tls::error::TlsError;
 use crate::tls::TlsStream;
 
@@ -50,8 +49,8 @@ pub(crate) async fn connect_to_proxy(
 /// `include_alps` matches the direct-path ALPN policy: `true` for h2,
 /// `false` for HTTP/1.1-only (WebSocket upgrade). The caller decides
 /// which based on the connection it is ultimately establishing.
-pub(crate) async fn connect_through_proxy(
-    connector: &FingerprintConnector,
+pub(crate) async fn connect_through_proxy<C: crate::tls::TlsHandshake>(
+    connector: &C,
     host: &str,
     port: u16,
     proxy_url: &str,

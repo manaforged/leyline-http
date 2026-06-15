@@ -19,7 +19,6 @@
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::tls::connector::FingerprintConnector;
 use crate::tls::error::TlsError;
 use crate::tls::TlsStream;
 
@@ -27,8 +26,8 @@ use crate::util::{base64_encode, percent_decode};
 
 /// Open a TLS-over-HTTP-CONNECT tunnel through `proxy` and return the
 /// wrapped TLS stream. Fingerprint settings come from `connector`.
-pub(crate) async fn connect(
-    connector: &FingerprintConnector,
+pub(crate) async fn connect<C: crate::tls::TlsHandshake>(
+    connector: &C,
     host: &str,
     port: u16,
     proxy: &url::Url,
@@ -77,7 +76,7 @@ pub(crate) async fn connect(
     validate_connect_response(&response_buf, end_idx)?;
 
     connector
-        .tls_handshake(tcp_stream, host, include_alps)
+        .do_tls_handshake(tcp_stream, host, include_alps)
         .await
 }
 
