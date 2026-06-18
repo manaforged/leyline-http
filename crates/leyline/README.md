@@ -6,13 +6,13 @@ matches that browser's TLS, HTTP/2, and TCP shape on the wire: Chrome,
 Firefox, Safari, OkHttp. That's the path for servers that fingerprint the
 client and block a plain one.
 
-Status: `1.0.0-alpha.1`. The API still moves; pin exact versions.
+Status: `1.0.0-alpha.2`. The API still moves; pin exact versions.
 
 ## Example
 
 ```toml
 [dependencies]
-leyline = "1.0.0-alpha.1"
+leyline = "1.0.0-alpha.2"
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 ```

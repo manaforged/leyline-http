@@ -26,6 +26,18 @@ pub use window_update::WindowUpdateFrame;
 use bytes::BytesMut;
 use bytes::{BufMut, Bytes};
 
+/// Decode a big-endian `u16` from the first two bytes of `b`.
+#[inline]
+pub(crate) fn be_u16(b: &[u8]) -> u16 {
+    u16::from_be_bytes([b[0], b[1]])
+}
+
+/// Decode a big-endian `u32` from the first four bytes of `b`.
+#[inline]
+pub(crate) fn be_u32(b: &[u8]) -> u32 {
+    u32::from_be_bytes([b[0], b[1], b[2], b[3]])
+}
+
 /// Frame type IDs (RFC 9113 Section 6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -103,10 +115,7 @@ impl FrameHeader {
         let length = ((buf[0] as u32) << 16) | ((buf[1] as u32) << 8) | (buf[2] as u32);
         let frame_type = buf[3];
         let flags = buf[4];
-        let stream_id = ((buf[5] as u32) << 24)
-            | ((buf[6] as u32) << 16)
-            | ((buf[7] as u32) << 8)
-            | (buf[8] as u32);
+        let stream_id = be_u32(&buf[5..9]);
         // Clear the R bit (MSB of stream_id).
         let stream_id = stream_id & 0x7FFF_FFFF;
 

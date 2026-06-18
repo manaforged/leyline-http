@@ -1,12 +1,24 @@
 //! Small shared encoding helpers used across the TLS proxy and HTTP layers.
 //!
-//! These were previously hand-rolled and duplicated in three modules; this is
-//! the single source of truth.
+//! Single source of truth for these encodings, shared by every module that
+//! needs them.
 
 /// Standard (padded) base64 encode. Used for HTTP Basic / proxy CONNECT auth.
 pub(crate) fn base64_encode(input: &str) -> String {
     use base64::Engine;
     base64::engine::general_purpose::STANDARD.encode(input.as_bytes())
+}
+
+/// Generate a random lowercase-hex token from `bytes` cryptographically random
+/// bytes (so the output is `2 * bytes` hex chars).
+///
+/// Shared by the digest `cnonce` and the multipart boundary, which both want a
+/// fresh, unpredictable hex string from the process RNG via `rand::thread_rng`.
+pub(crate) fn random_hex_token(bytes: usize) -> String {
+    use rand::RngCore;
+    let mut buf = vec![0u8; bytes];
+    rand::thread_rng().fill_bytes(&mut buf);
+    hex::encode(buf)
 }
 
 /// Decode a percent-encoded URL component (e.g. proxy username/password).

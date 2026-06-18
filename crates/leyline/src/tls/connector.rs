@@ -30,10 +30,10 @@ use crate::tls::{TlsIo, TlsStream};
 ///
 /// Configures BoringSSL with exact cipher suites, curves, extensions,
 /// GREASE behavior, ALPS, cert compression (zlib/brotli/zstd), and ECH
-/// from TOML browser profiles. Every applied field is wired from the
-/// profile; the one knob not yet applied — the fixed Firefox/Safari
-/// `extension_permutation` — is logged loudly at construction, never
-/// dropped silently (see the warn in `new_with_trust`).
+/// from TOML browser profiles. The fixed Firefox/Safari
+/// `extension_permutation` is the one knob whose profile data is not
+/// wired to the wire; its absence is logged loudly at construction rather
+/// than dropped silently (see the warn in `new_with_trust`).
 #[derive(Clone)]
 pub struct FingerprintConnector {
     ssl_connector: SslConnector,
@@ -109,11 +109,11 @@ impl FingerprintConnector {
         });
 
         // `extension_permutation` (the fixed Firefox/Safari extension order)
-        // is the one remaining knob whose profile data is not yet applied to
-        // the wire: the TOML stores 0-based ordinals, but BoringSSL's
+        // is the one knob whose profile data is not applied to the wire: the
+        // TOML stores 0-based ordinals, but BoringSSL's
         // `SSL_CTX_set_extension_order` consumes real TLS extension type IDs,
-        // so the arrays can't be passed through until the profiles are
-        // re-captured as type-ID orders and anchored by a JA4_r live test.
+        // so the arrays cannot be passed through directly — they require
+        // type-ID orders anchored by a JA4_r live test.
         // Chrome-family permutation IS applied (`set_permute_extensions`);
         // these families fall back to BoringSSL's default order. JA4 sorts
         // extensions so it's unaffected — the gap is JA4_r only. Warn so the

@@ -5,8 +5,8 @@ use std::pin::Pin;
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
-use leyline::quic::{H3Config, H3Connection};
 use leyline::{Browser, Error, Result, Session};
+use leyline::{H3Config, H3Connection};
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 

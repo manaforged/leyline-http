@@ -196,8 +196,8 @@ impl Jar {
     /// Look up a cookie value by name without a URL filter. Returns the
     /// first non-expired cookie across every stored domain that matches
     /// `name`. Useful when code only needs to know whether a tracked
-    /// cookie landed (for example `session_id`) without caring which
-    /// exact URL scope it came in on.
+    /// cookie landed (for example a named session cookie)
+    /// without caring which exact URL scope it came in on.
     pub fn get_named(&self, name: &str) -> Option<String> {
         let jar = lock(&self.inner);
         for entries in jar.cookies.values() {
@@ -655,12 +655,12 @@ mod tests {
             "zeta=r; alpha=i; mid=v",
             "https://www.example.com/page",
         );
-        jar.set_cookie("https://www.example.com/", "late", "v");
+        jar.set_cookie("https://www.example.com/", "late", "abc123");
 
         let export = jar.export_cookies("https://www.example.com/cart/items");
         assert_eq!(
             export,
-            "zeta=r; alpha=i; mid=v; late=v"
+            "zeta=r; alpha=i; mid=v; late=abc123"
         );
     }
 
@@ -821,14 +821,13 @@ mod tests {
         assert_eq!(a.get_named("shared").as_deref(), Some("b_value"));
     }
 
-    // ─── Persistence (the user-visible win) ─────────────────────────────────
+    // ─── Persistence ─────────────────────────────────
 
     #[test]
     fn serde_round_trip_preserves_cross_subdomain_attribution() {
-        // The bug we're fixing: a host-only cookie on `api.example.com`
-        // was getting silently dropped by the old `String`-shaped export
-        // because the export filtered against `https://www.example.com`.
-        // After the fix, it must round-trip losslessly through serde.
+        // A host-only cookie on `api.example.com` must round-trip
+        // losslessly through serde. A `String`-shaped export that filtered
+        // against `https://www.example.com` would silently drop it.
         let jar = Jar::new();
         jar.store_set_cookie(
             "auth=secret; Path=/; Secure",
@@ -893,14 +892,13 @@ mod tests {
         assert_eq!(b.get_named("k").as_deref(), Some("1"));
     }
 
-    // ─── Regression gates ──
+    // ─── set_named / merge invariants ───────────────────────────────────────────
 
     #[test]
     fn set_named_updates_every_match_across_domains() {
-        // Regression: `set_named` used to stop at the first match returned
-        // by HashMap iteration, which is non-deterministic when the same
-        // cookie name lives on multiple domains. New contract: update every
-        // match, return true if any.
+        // `set_named` must update every match and return true if any. Stopping
+        // at the first match returned by HashMap iteration is non-deterministic
+        // when the same cookie name lives on multiple domains.
         let jar = Jar::new();
         jar.set_cookie("https://example.com", "token", "old1");
         jar.set_cookie("https://api.example.com", "token", "old2");
@@ -921,10 +919,11 @@ mod tests {
 
     #[test]
     fn set_named_on_updates_existing_path_not_just_root() {
-        // Regression: `set_named_on` matched only `Path=/`. A cookie minted
-        // by the server on `Path=/auth` would never be matched, and a
-        // duplicate would be inserted on `Path=/`, producing two entries
-        // with the same name and silently emitting both in the Cookie header.
+        // `set_named_on` must match cookies on any path, not just `Path=/`. A
+        // cookie minted by the server on `Path=/auth` would otherwise go
+        // unmatched, and a duplicate would be inserted on `Path=/`, producing
+        // two entries with the same name and silently emitting both in the
+        // Cookie header.
         let jar = Jar::new();
         let url = Url::parse("https://example.com/auth/redirect").unwrap();
         jar.store_set_cookie("accessToken=initial; Path=/auth", &url);
@@ -947,9 +946,9 @@ mod tests {
 
     #[test]
     fn set_named_bumps_last_access() {
-        // Regression: `set_named` used to leave `last_access` stale, which
-        // meant a recently-rotated auth token could be evicted before
-        // truly-cold cookies under LRU pressure.
+        // `set_named` must bump `last_access`; leaving it stale would let a
+        // recently-rotated auth token be evicted before truly-cold cookies
+        // under LRU pressure.
         let jar = Jar::new();
         jar.set_cookie("https://example.com", "tok", "old");
         let before = {
@@ -967,10 +966,9 @@ mod tests {
 
     #[test]
     fn merge_drops_expired_cookies() {
-        // Regression: `merge` accepted expired cookies, so a deserialized
-        // jar containing a session that had aged past `expires` would
-        // silently keep dead cookies in the live HTTP jar. `store_set_cookie`
-        // already filters these; `merge` now matches.
+        // `merge` must drop expired cookies, matching `store_set_cookie`'s
+        // filtering. Accepting them lets a deserialized jar whose session has
+        // aged past `expires` silently keep dead cookies in the live HTTP jar.
         let live = Jar::new();
         let stale = Jar::new();
         let url = Url::parse("https://example.com/").unwrap();
@@ -1003,7 +1001,7 @@ mod tests {
 
     #[test]
     fn merge_enforces_per_domain_eviction_cap() {
-        // Regression: `merge` used to skip eviction, letting long-lived
+        // `merge` must enforce eviction; skipping it lets long-lived
         // sessions blow past Chrome's 180-cookie per-domain ceiling.
         let live = Jar::new();
         let bulk = Jar::new();
@@ -1026,9 +1024,10 @@ mod tests {
 
     #[test]
     fn serialize_order_is_stable_across_runs() {
-        // Regression: `Serialize` used to emit `HashMap.values().flatten()`
-        // which gave a fresh ordering every run, breaking diff-based
-        // session change detection and on-disk equality checks.
+        // `Serialize` must emit a stable order. Emitting
+        // `HashMap.values().flatten()` gives a fresh ordering every run,
+        // breaking diff-based session change detection and on-disk equality
+        // checks.
         let jar = Jar::new();
         // Populate across multiple domains/paths so a HashMap shuffle
         // would actually change the serialization.

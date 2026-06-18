@@ -23,11 +23,11 @@ async fn main() -> leyline::Result<()> {
     let api = session.get_xhr("https://example.com/api/state").await?;
     println!("xhr get:  {}", api.status());
 
-    // fetch()/XHR POST with a raw, non-JSON body.
-    let sensor = session
+    // fetch()/XHR POST with a raw, non-JSON body (e.g. a telemetry beacon).
+    let beacon = session
         .post_xhr("https://example.com/collect", "payload=p%3D1")
         .await?;
-    println!("xhr post: {}", sensor.status());
+    println!("xhr post: {}", posted.status());
 
     // fetch()/XHR POST with a JSON body.
     let created = session

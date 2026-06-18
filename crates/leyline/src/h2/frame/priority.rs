@@ -5,7 +5,7 @@
 use bytes::Bytes;
 
 use super::headers::StreamDependency;
-use super::FrameHeader;
+use super::{be_u32, FrameHeader};
 use crate::h2::error::ErrorCode;
 use crate::h2::H2Error;
 
@@ -34,10 +34,7 @@ impl PriorityFrame {
             });
         }
 
-        let dep_raw = ((payload[0] as u32) << 24)
-            | ((payload[1] as u32) << 16)
-            | ((payload[2] as u32) << 8)
-            | (payload[3] as u32);
+        let dep_raw = be_u32(&payload[..4]);
 
         Ok(Self {
             stream_id: header.stream_id,

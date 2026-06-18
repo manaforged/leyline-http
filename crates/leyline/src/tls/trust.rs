@@ -1,8 +1,8 @@
 //! Trust-root wiring for BoringSSL `SslContextBuilder`.
 //!
-//! Split from `builder.rs` so the PEM-env and system-store logic can
-//! grow (Windows bridge, planned macOS Keychain bridge) without pushing
-//! the profile-application file over its hygiene line cap.
+//! Separate from `builder.rs` so the PEM-env and system-store logic
+//! (including the Windows certificate-store bridge) stays isolated from
+//! profile application.
 //!
 //! Two entry points:
 //!
@@ -352,8 +352,8 @@ pub(crate) fn wire_system_trust(builder: &mut SslContextBuilder) -> Result<(), T
 /// unusual macOS layout still loads *something* instead of silently
 /// leaving the process with zero trust anchors.
 ///
-/// We deliberately do not bind `security-framework` / the Keychain
-/// APIs directly: `/etc/ssl/cert.pem` already holds the same trust set
+/// `security-framework` / the Keychain APIs are deliberately not bound
+/// directly: `/etc/ssl/cert.pem` already holds the same trust set
 /// and is rebuilt by the OS, so the binding would add a Foundation
 /// runtime dependency and a round-trip through CF for no material
 /// upside over reading a PEM file.
@@ -480,9 +480,9 @@ pub(crate) fn collect_ca_dir_candidates(dir: &std::path::Path) -> Vec<std::path:
         // `fs::metadata` follows symlinks — crucial for the
         // Debian/Ubuntu/RHEL `/etc/ssl/certs` layout which is
         // entirely symlinks pointing into
-        // `/usr/share/ca-certificates/`. A previous version had a bug
-        // where `DirEntry::metadata()` (non-following) rejected
-        // every symlink and left the process with zero CAs.
+        // `/usr/share/ca-certificates/`. `DirEntry::metadata()`
+        // (non-following) would reject every symlink and leave the
+        // process with zero CAs.
         let Ok(resolved) = std::fs::metadata(&p) else {
             continue;
         };
@@ -496,10 +496,9 @@ pub(crate) fn collect_ca_dir_candidates(dir: &std::path::Path) -> Vec<std::path:
 
 #[cfg(test)]
 mod ca_dir_tests {
-    //! Coverage gate: SSL_CERT_DIR regression (SSL_CERT_DIR silently
-    //! disabled trust on Debian/Ubuntu/RHEL because all entries
-    //! in `/etc/ssl/certs` are symlinks) shipped without a test.
-    //! These gates guard the symlink-following, extension-filter,
+    //! Guards against SSL_CERT_DIR silently disabling trust on
+    //! Debian/Ubuntu/RHEL, where all entries in `/etc/ssl/certs` are
+    //! symlinks. These gates cover the symlink-following, extension-filter,
     //! and file-type-after-resolve semantics directly. If a future
     //! refactor re-introduces `DirEntry::metadata()` or drops the
     //! symlink-follow, these tests fail.

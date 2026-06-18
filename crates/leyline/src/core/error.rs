@@ -33,7 +33,14 @@ pub enum Error {
 
     /// HTTP/2 protocol or transport error.
     #[error("http2: {0}")]
-    Http2(String),
+    Http2(#[from] crate::h2::H2Error),
+
+    /// ALPN negotiated a protocol other than `h2` when `h2` was required.
+    #[error("alpn: negotiated {negotiated}, expected h2")]
+    AlpnMismatch {
+        /// The protocol the peer negotiated (or `none` if none was offered).
+        negotiated: String,
+    },
 
     /// HTTP/3 / QUIC protocol or transport error.
     #[error("http3: {0}")]
@@ -99,6 +106,29 @@ impl Error {
         match self {
             Error::Status { code, .. } => Some(*code),
             _ => None,
+        }
+    }
+
+    /// True if the error indicates the connection went away (peer closed,
+    /// graceful GOAWAY, or a transport-level EOF/reset) and the request can
+    /// be safely retried on a fresh connection.
+    pub fn is_connection_closed(&self) -> bool {
+        use crate::h2::error::ErrorCode;
+        use crate::h2::H2Error;
+        match self {
+            Error::Io(e) => matches!(
+                e.kind(),
+                std::io::ErrorKind::UnexpectedEof
+                    | std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::ConnectionAborted
+                    | std::io::ErrorKind::BrokenPipe
+            ),
+            Error::Http2(H2Error::Io(_)) => true,
+            Error::Http2(H2Error::Connection {
+                code: ErrorCode::NoError,
+                ..
+            }) => true,
+            _ => false,
         }
     }
 }

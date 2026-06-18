@@ -458,8 +458,8 @@ mod tests {
     #[test]
     fn roundtrip_all_bytes() {
         // Every byte value 0-255 must roundtrip correctly.
-        // This exercises 30-bit codes (bytes 10, 13, 22) that caused
-        // overflow in the old u32 accumulator.
+        // This exercises 30-bit codes (bytes 10, 13, 22) that overflow a
+        // u32 accumulator — decoding must use wider arithmetic.
         for byte in 0u8..=255 {
             let input = [byte];
             let mut encoded = Vec::new();
@@ -472,7 +472,8 @@ mod tests {
     #[test]
     fn roundtrip_control_chars() {
         // CR (13) and LF (10) have 30-bit codes — the longest in the table.
-        // These triggered u32 overflow in the old decoder.
+        // These overflow a u32 accumulator, so the decoder must use wider
+        // arithmetic.
         let input = b"\r\n\r\n";
         let mut encoded = Vec::new();
         encode(input, &mut encoded);

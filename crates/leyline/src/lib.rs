@@ -99,19 +99,37 @@ use std::sync::{LazyLock, OnceLock};
 #[doc = include_str!("../README.md")]
 pub struct ReadmeDoctests;
 
-// Internal modules.
+// Public modules — the supported surface.
 pub mod audit;
 pub mod cookie;
-pub mod core;
-pub mod h2;
-pub mod observe;
-pub mod pool;
 pub mod profile;
-#[cfg(feature = "http3")]
-pub mod quic;
-pub mod tcp;
 pub mod tls;
 pub mod tls_selftest;
+
+// Response-introspection hooks. The global-observer shape is slated for a
+// `tracing`-based redesign; treat it as unstable.
+pub mod observe;
+
+// Protocol internals — **not public API**, exempt from semver, hidden from the
+// docs. `core` (session machinery), the hand-written HTTP/2 stack, and the
+// connection pool carry `#[doc(hidden)] pub` rather than `pub(crate)` for one
+// reason: this crate's own white-box integration tests and benches are separate
+// compilation units that drive these modules directly (build raw frames, run
+// the connection driver, assert flow control) and can only reach a `pub` item.
+// `#[doc(hidden)]` is the standard signal for "reachable across the crate
+// boundary for our own tooling, but off-limits and unstable" — rustdoc omits
+// it and semver tooling (cargo-semver-checks) ignores it. Users go through
+// `Session` and the types re-exported at the crate root. The TCP-fingerprint
+// applier and the QUIC transport have no such test reach and are fully private.
+#[doc(hidden)]
+pub mod core;
+#[doc(hidden)]
+pub mod h2;
+#[doc(hidden)]
+pub mod pool;
+#[cfg(feature = "http3")]
+pub(crate) mod quic;
+pub(crate) mod tcp;
 mod util;
 
 // Public API re-exports.
@@ -147,6 +165,17 @@ pub use crate::profile::{
 // TCP fingerprinting
 pub use crate::tcp::TcpProfile;
 
+// Connection-pool statistics (via `Session::pool_stats`) and the tuning
+// defaults a caller would reference when overriding `pool_limits`.
+pub use crate::pool::{PoolStats, DEFAULT_IDLE_TIMEOUT, DEFAULT_MAX_CONNECTIONS};
+
+// HTTP/2 protocol error type returned by the HTTP/2 layer.
+pub use crate::h2::H2Error;
+
+// HTTP/3 connection types (behind the `http3` feature).
+#[cfg(feature = "http3")]
+pub use crate::quic::{H3Config, H3Connection, H3Response};
+
 // Cookie jar - re-export at crate root for the high-traffic case.
 // Prefer `leyline::cookie::Jar` in module signatures; `leyline::CookieJar`
 // is kept as a convenience alias.
@@ -159,15 +188,25 @@ pub use crate::audit::AuditData;
 #[cfg(feature = "websocket")]
 pub use crate::core::WsConnection;
 
-// TLS context factory (re-exported so users don't need `leyline-tls` or
-// `boring` as separate deps). Start with `tls_context` / `quic_context`
-// for the 95% case; drop down to `build_ssl_context` only when you need
-// the full `TlsMinVersion` knob against a profile you already hold.
+// TLS context surface. `tls_context` / `quic_context` cover the common case;
+// for a profile you already hold, build a `TlsContext::from_profile` with the
+// `TlsMinVersion` knob.
 pub use crate::tls::{
-    build_ssl_context, ClientIdentity, HappyEyeballsConfig, ResolveFuture, Resolver,
-    SystemResolver, TlsError, TlsMinVersion, TlsTrustConfig,
+    ClientIdentity, HappyEyeballsConfig, ResolveFuture, Resolver, SystemResolver, TlsContext,
+    TlsError, TlsMinVersion, TlsTrustConfig,
 };
-pub use btls::ssl::SslContextBuilder;
+
+/// The handful of imports a typical caller wants: `use leyline::prelude::*;`.
+///
+/// Brings [`Session`], [`SessionBuilder`], the [`Browser`] / [`Platform`] /
+/// [`Preset`] selectors, [`Request`] / [`RequestBuilder`] / [`Response`], and
+/// the crate [`Error`] / [`Result`] into scope.
+pub mod prelude {
+    pub use crate::{
+        Browser, Error, Platform, Preset, Request, RequestBuilder, Response, Result, Session,
+        SessionBuilder,
+    };
+}
 
 static PROFILES: LazyLock<crate::profile::ProfileRegistry> =
     LazyLock::new(crate::profile::ProfileRegistry::builtin);
@@ -190,34 +229,32 @@ pub fn profile(browser: Browser) -> &'static BrowserProfile {
     )
 }
 
-/// Build a BoringSSL `SslContextBuilder` that produces a ClientHello
-/// matching the given browser over TCP+TLS (h2 / http/1.1 / WebSocket).
-/// TLS 1.2 is allowed so real-browser behaviour against legacy servers
-/// is preserved.
+/// Build a [`TlsContext`] that produces a ClientHello matching the given
+/// browser over TCP+TLS (h2 / http/1.1 / WebSocket). TLS 1.2 is allowed so
+/// real-browser behaviour against legacy servers is preserved.
 ///
 /// ```rust,ignore
 /// use leyline::{tls_context, Browser};
 /// let mut ctx = tls_context(Browser::Chrome147)?;
-/// ctx.set_alpn_protos(b"\x02h2")?;
-/// let ctx = ctx.build();
+/// ctx.builder_mut().set_alpn_protos(b"\x02h2")?;
+/// let ctx = ctx.into_inner().build();
 /// ```
-pub fn tls_context(browser: Browser) -> Result<SslContextBuilder> {
-    build_ssl_context(profile(browser), TlsMinVersion::Tls12).map_err(Error::from)
+pub fn tls_context(browser: Browser) -> Result<TlsContext> {
+    TlsContext::from_profile(profile(browser), TlsMinVersion::Tls12).map_err(Error::from)
 }
 
-/// Build a BoringSSL `SslContextBuilder` that produces a ClientHello
-/// matching the given browser over QUIC (HTTP/3). TLS 1.3 is pinned
-/// per RFC 9001 section 4.2.
+/// Build a [`TlsContext`] that produces a ClientHello matching the given
+/// browser over QUIC (HTTP/3). TLS 1.3 is pinned per RFC 9001 section 4.2.
 ///
 /// ```rust,ignore
 /// use leyline::{quic_context, Browser};
 /// let ctx = quic_context(Browser::Chrome147)?;
 /// let mut cfg = leyline_quiche::Config::with_boring_ssl_ctx_builder(
-///     leyline_quiche::PROTOCOL_VERSION, ctx)?;
+///     leyline_quiche::PROTOCOL_VERSION, ctx.into_inner())?;
 /// ```
 #[cfg(feature = "http3")]
-pub fn quic_context(browser: Browser) -> Result<SslContextBuilder> {
-    build_ssl_context(profile(browser), TlsMinVersion::Tls13).map_err(Error::from)
+pub fn quic_context(browser: Browser) -> Result<TlsContext> {
+    TlsContext::from_profile(profile(browser), TlsMinVersion::Tls13).map_err(Error::from)
 }
 
 // Zero-config functions.

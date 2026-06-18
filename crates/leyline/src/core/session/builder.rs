@@ -9,11 +9,11 @@ use crate::h2::H2Config;
 use crate::pool::Pool;
 use crate::profile::{Browser, ChromiumBrand, Platform, ProfileRegistry};
 use crate::tcp::TcpProfile;
+#[cfg(feature = "tls-rustls")]
+use crate::tls::RustlsConnector;
 use crate::tls::{
     ConnectorVariant, FingerprintConnector, HappyEyeballsConfig, Resolver, TlsTrustConfig,
 };
-#[cfg(feature = "tls-rustls")]
-use crate::tls::RustlsConnector;
 
 use super::proxy::env_proxy;
 use super::{ProtocolPolicy, Session, SessionInner};
@@ -472,19 +472,18 @@ impl SessionBuilder {
     ///     .build()?;
     /// ```
     pub fn http3(mut self) -> Self {
+        #[cfg(feature = "http3")]
+        {
+            self.protocol_policy = ProtocolPolicy::Http3;
+        }
         #[cfg(not(feature = "http3"))]
         {
             self.config_error = Some(
                 "HTTP/3 support requires the `http3` feature; rebuild leyline with feature `http3`"
                     .into(),
             );
-            return self;
         }
-        #[cfg(feature = "http3")]
-        {
-            self.protocol_policy = ProtocolPolicy::Http3;
-            self
-        }
+        self
     }
 
     /// Force HTTP/1.1.
@@ -504,19 +503,18 @@ impl SessionBuilder {
     /// This is a sequential compatibility policy today. It reserves the API
     /// shape for a future true parallel H2/H3 race.
     pub fn race(mut self) -> Self {
+        #[cfg(feature = "http3")]
+        {
+            self.protocol_policy = ProtocolPolicy::Race;
+        }
         #[cfg(not(feature = "http3"))]
         {
             self.config_error = Some(
                 "HTTP/3 race support requires the `http3` feature; rebuild leyline with feature `http3`"
                     .into(),
             );
-            return self;
         }
-        #[cfg(feature = "http3")]
-        {
-            self.protocol_policy = ProtocolPolicy::Race;
-            self
-        }
+        self
     }
 
     /// Set the protocol selection policy.
@@ -715,9 +713,8 @@ impl SessionBuilder {
         // BoringSSL. With the feature off, every session uses BoringSSL.
         #[cfg(feature = "tls-rustls")]
         let connector = if self.browser.is_none() {
-            let mut c =
-                RustlsConnector::new(tcp_profile, &tls_trust, self.accept_invalid_certs)
-                    .map_err(Error::Tls)?;
+            let mut c = RustlsConnector::new(tcp_profile, &tls_trust, self.accept_invalid_certs)
+                .map_err(Error::Tls)?;
             c = c.with_resolver(self.dns_config.clone().into_resolver());
             c = c.with_socket_config(self.socket_config.clone());
             if let Some(connect_timeout) = self.timeouts.connect {

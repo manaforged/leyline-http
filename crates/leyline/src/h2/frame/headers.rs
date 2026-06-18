@@ -2,7 +2,7 @@
 
 use bytes::{BufMut, Bytes};
 
-use super::FrameHeader;
+use super::{be_u32, FrameHeader, FrameType};
 use crate::h2::error::ErrorCode;
 use crate::h2::H2Error;
 
@@ -89,10 +89,7 @@ impl HeadersFrame {
                     reason: "HEADERS PRIORITY flag but insufficient payload".into(),
                 });
             }
-            let dep_raw = ((payload[offset] as u32) << 24)
-                | ((payload[offset + 1] as u32) << 16)
-                | ((payload[offset + 2] as u32) << 8)
-                | (payload[offset + 3] as u32);
+            let dep_raw = be_u32(&payload[offset..offset + 4]);
             let exclusive = dep_raw & 0x8000_0000 != 0;
             let dependency_id = dep_raw & 0x7FFF_FFFF;
             let weight = payload[offset + 4];
@@ -135,7 +132,7 @@ impl HeadersFrame {
 
         let header = FrameHeader {
             length,
-            frame_type: 0x1,
+            frame_type: FrameType::Headers as u8,
             flags,
             stream_id: self.stream_id,
         };

@@ -50,8 +50,8 @@ impl ProfileRegistry {
     ///
     /// Panics on parse failure: every caller feeds `include_str!`
     /// compile-time constants, so a bad profile is a programmer error
-    /// (merge conflict, hand-edit). The old `tracing::error!` + skip
-    /// deferred the failure to a misleading "built-in profile missing"
+    /// (merge conflict, hand-edit). Logging the error and skipping would
+    /// defer the failure to a misleading "built-in profile missing"
     /// panic at the `profile()` call site, with the parse error buried
     /// in trace output.
     fn load_toml(&mut self, toml_str: &str) {

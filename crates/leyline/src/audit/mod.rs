@@ -16,6 +16,38 @@ pub use ja4t::compute_ja4t;
 
 use sha2::{Digest, Sha256};
 
+use cipher_map::{cipher_id, curve_id, is_grease};
+
+/// Map cipher-suite names to their IANA IDs, dropping unrecognized names and
+/// GREASE values. Preserves input order. Shared by JA3 and JA4.
+fn non_grease_cipher_ids(ciphers: &[String]) -> Vec<u16> {
+    ciphers
+        .iter()
+        .filter_map(|c| cipher_id(c))
+        .filter(|id| !is_grease(*id))
+        .collect()
+}
+
+/// Filter a list of extension IDs to the non-GREASE ones, preserving order.
+/// Shared by JA3 and JA4.
+fn non_grease_ext_ids(extension_ids: &[u16]) -> Vec<u16> {
+    extension_ids
+        .iter()
+        .copied()
+        .filter(|id| !is_grease(*id))
+        .collect()
+}
+
+/// Map named-curve / supported-group names to their IANA IDs, dropping
+/// unrecognized names and GREASE values. Preserves input order. Used by JA3.
+fn non_grease_curve_ids(curves: &[String]) -> Vec<u16> {
+    curves
+        .iter()
+        .filter_map(|c| curve_id(c))
+        .filter(|id| !is_grease(*id))
+        .collect()
+}
+
 /// SHA-256, take first 12 hex chars. Used by all JA4+ fingerprints.
 fn hash12(s: &str) -> String {
     if s.is_empty() {

@@ -40,8 +40,8 @@ until 1.0 — pin exact versions.
   `DEFAULT_IDLE_TIMEOUT` 90s → 300s (matches Chrome's
   `kUsedIdleSocketTimeout`), `DEFAULT_MAX_CONNECTIONS` 256 → 2048, and
   `SocketConfig` now enables kernel TCP keepalive by default
-  (60s idle / 30s interval / 3 probes). Long-lived /
-  persistent client workloads keep one pool entry per
+  (60s idle / 30s interval / 3 probes). Long-lived, session-persistent
+  pooled workloads keep one pool entry per
   `(host, proxy)` pair and previously had to run app-level keep-alive
   pings just to outrun the 90s reaper and the 256-entry LRU. Override
   via `Session::builder().pool_limits(idle, max)` /
@@ -55,7 +55,7 @@ until 1.0 — pin exact versions.
   `ProxyConfig::proxy_for` checked the no-proxy matcher before any proxy
   resolution, and the matcher defaults to the `NO_PROXY` env var — so a
   stray `NO_PROXY` on the box silently turned per-request and session
-  proxies DIRECT (a real-IP leak for proxied traffic). No-proxy gating is
+  proxies DIRECT (a real-IP leak). No-proxy gating is
   now scoped by provenance: env-inherited patterns only bypass
   env-discovered proxies; a matcher set via `.no_proxy(...)` keeps the
   old bypass-everything semantics.
@@ -102,8 +102,8 @@ until 1.0 — pin exact versions.
   §8.1.2.6 requires peers to treat uppercase names as a stream error
   (`PROTOCOL_ERROR`). The previous `Encoder::encode_header` passed the
   caller's name through unchanged, which meant a caller with a
-  vendor-supplied mixed-case header (for example `X-Extra-*`)
-  sent a malformed frame and the peer returned
+  vendor-supplied mixed-case header name (some SDKs emit non-lowercase
+  header names) sent a malformed frame and the peer returned
   400 with `"found an invalid character in header name"`. The
   encoder now lowercases names at the top of `encode_header`,
   allocating only when an uppercase byte is present.

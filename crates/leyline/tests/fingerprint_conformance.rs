@@ -168,7 +168,7 @@ fn fingerprint_conformance() {
         #[cfg(feature = "http3")]
         {
             let fam = &p.meta.family;
-            let detail = match leyline::quic::H3Config::for_family(fam) {
+            let detail = match leyline::H3Config::for_family(fam) {
                 Ok(_) => format!("family {fam:?} → H3Config; no QUIC-capture golden"),
                 Err(_) => format!("family {fam:?} → no H3 config (HTTP/3 unsupported)"),
             };

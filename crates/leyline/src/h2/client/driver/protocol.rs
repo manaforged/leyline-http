@@ -121,12 +121,10 @@ pub(crate) enum DriverCommand {
 
 #[cfg(test)]
 mod flow_control_tests {
-    //! Coverage gate: an integration test covers `WINDOW_UPDATE`
-    //! overflow via integration test but the SETTINGS path and
-    //! the handshake path reused the same math inline. Extracting
-    //! `checked_window_add` gives all three call sites a single
-    //! unit-test gate. If this helper ever returns `Ok` for a
-    //! post-cap value, three RFC 9113 §6.9 invariants collapse
+    //! `WINDOW_UPDATE`, SETTINGS, and the handshake path all reuse the
+    //! same flow-window math via `checked_window_add`, giving all three
+    //! call sites a single unit-test gate. If this helper ever returns
+    //! `Ok` for a post-cap value, three RFC 9113 §6.9 invariants collapse
     //! simultaneously.
 
     use super::{checked_window_add, MAX_FLOW_WINDOW};

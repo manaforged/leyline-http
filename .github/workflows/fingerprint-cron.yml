@@ -3,8 +3,9 @@ name: fingerprint-drift-watch
 # Weekly live-fingerprint check against tls.peet.ws to catch upstream
 # browser drift between manual re-captures. The pre-commit hook catches
 # regressions we introduce; this cron catches drift the upstream browsers
-# introduce (e.g. Chrome 147 dropping SETTINGS parameter 8 between
-# (e.g. Chrome dropping SETTINGS parameter 8).
+# introduce (e.g. Chrome 147 dropping a SETTINGS parameter between two
+# captures, which manifested as a CDN edge soft-blocking affected hosts
+# days later as `http2: alpn: negotiated none`).
 #
 # On failure: opens an issue tagged `fingerprint-drift` so the assignee
 # can recapture against real browsers and update the affected TOMLs.

@@ -212,7 +212,7 @@ impl ProxyConfig {
     /// `NO_PROXY` default only bypasses proxies that were themselves
     /// discovered from the environment (`session_proxy_from_env`). A
     /// stray `NO_PROXY` on the box must never silently turn an
-    /// explicitly-proxied request DIRECT — for proxied traffic that is a
+    /// explicitly-proxied request DIRECT — that is a
     /// real-IP leak, not a convenience.
     pub(crate) fn proxy_for<'a>(
         &'a self,
@@ -499,7 +499,7 @@ pub struct SocketConfig {
     /// Cheap (one packet, no syscall on our side) and keeps NAT /
     /// load-balancer flow tables from pruning the connection
     /// during idle gaps that happen between long-lived requests
-    /// (long-lived pools).
+    /// (long-lived / session-persistent pooled workloads).
     /// Set to `None` to disable kernel keepalive entirely.
     pub tcp_keepalive: Option<Duration>,
     /// TCP keepalive interval between probes once idle expires.
@@ -528,7 +528,7 @@ impl Default for SocketConfig {
             local_ipv6: None,
             tcp_nodelay: None,
             // Kernel-level keepalive on by default — long-lived
-            // sessions (long-lived pools) need their
+            // sessions (session-persistent pooled workloads) need their
             // sockets to survive idle gaps without app-level pings,
             // and one keepalive probe every 60s is invisibly cheap.
             tcp_keepalive: Some(Duration::from_secs(60)),
@@ -846,11 +846,11 @@ mod tests {
             .matches("2001:db8::2"));
     }
 
-    // ── no-proxy provenance gates ──
+    // ── no-proxy provenance gates ──────────────
     //
     // Env-inherited NO_PROXY may only bypass env-discovered proxies. A
     // stray NO_PROXY on the box silently turning explicitly-proxied
-    // proxied traffic DIRECT is a real-IP leak, not a convenience.
+    // traffic DIRECT is a real-IP leak, not a convenience.
 
     /// A config whose `no_proxy` came from the environment (not the
     /// `.no_proxy()` builder).

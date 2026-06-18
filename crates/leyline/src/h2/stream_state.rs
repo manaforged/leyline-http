@@ -1,9 +1,10 @@
 //! Per-stream state machine for an HTTP/2 client (RFC 9113 §5.1).
 //!
 //! This module models stream lifecycle from the client's perspective only.
-//! We never reach `ReservedLocal` / `ReservedRemote`: the client disables
-//! `SETTINGS_ENABLE_PUSH` (or RST_STREAMs any PUSH_PROMISE it sees), so
-//! server-initiated reserved states cannot arise during a client session.
+//! The `ReservedLocal` / `ReservedRemote` states are never reached: the
+//! client disables `SETTINGS_ENABLE_PUSH` (or RST_STREAMs any PUSH_PROMISE
+//! it sees), so server-initiated reserved states cannot arise during a
+//! client session.
 
 use crate::h2::error::ErrorCode;
 
@@ -16,7 +17,7 @@ use crate::h2::error::ErrorCode;
 pub enum ClosedReason {
     /// Stream closed cleanly because both sides sent END_STREAM.
     EndStream,
-    /// We sent RST_STREAM to cancel the stream.
+    /// The client sent RST_STREAM to cancel the stream.
     RstLocal(ErrorCode),
     /// Peer sent RST_STREAM to cancel the stream.
     RstRemote(ErrorCode),
@@ -31,9 +32,9 @@ pub enum StreamState {
     Idle,
     /// Both endpoints may send frames freely.
     Open,
-    /// We sent END_STREAM; server is still sending.
+    /// The client sent END_STREAM; the server is still sending.
     HalfClosedLocal,
-    /// Server sent END_STREAM; we are still sending. Rare for a client.
+    /// The server sent END_STREAM; the client is still sending. Rare for a client.
     HalfClosedRemote,
     /// Stream is finished; no further frames are valid.
     Closed {
@@ -50,33 +51,33 @@ pub enum StreamState {
 /// `ClientConnection` directly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StreamEvent {
-    /// We sent a HEADERS frame (request headers, not trailers).
+    /// The client sent a HEADERS frame (request headers, not trailers).
     SendHeaders {
         /// Whether the HEADERS frame carried END_STREAM.
         end_stream: bool,
     },
-    /// We sent a DATA frame.
+    /// The client sent a DATA frame.
     SendData {
         /// Whether the DATA frame carried END_STREAM.
         end_stream: bool,
     },
-    /// We sent request trailers (a HEADERS frame after DATA, with END_STREAM).
+    /// The client sent request trailers (a HEADERS frame after DATA, with END_STREAM).
     SendTrailers,
-    /// We sent a RST_STREAM frame with the given error code.
+    /// The client sent a RST_STREAM frame with the given error code.
     SendRstStream(ErrorCode),
-    /// We received a HEADERS frame (response headers).
+    /// Received a HEADERS frame (response headers).
     RecvHeaders {
         /// Whether the HEADERS frame carried END_STREAM.
         end_stream: bool,
     },
-    /// We received a DATA frame.
+    /// Received a DATA frame.
     RecvData {
         /// Whether the DATA frame carried END_STREAM.
         end_stream: bool,
     },
-    /// We received response trailers (a HEADERS frame after DATA, implicitly ending the stream).
+    /// Received response trailers (a HEADERS frame after DATA, implicitly ending the stream).
     RecvTrailers,
-    /// We received a RST_STREAM frame with the given error code.
+    /// Received a RST_STREAM frame with the given error code.
     RecvRstStream(ErrorCode),
 }
 

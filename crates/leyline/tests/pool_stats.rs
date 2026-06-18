@@ -63,7 +63,7 @@ fn stats_snapshot_is_copy_and_comparable() {
 
 #[test]
 fn default_constants_are_sane() {
-    // Bumped to 2048 for long-lived workloads that keep one
+    // Bumped to 2048 for session-persistent pooled workloads that keep one
     // pool entry per (host, proxy) pair; idle timeout matches Chrome's
     // kUsedIdleSocketTimeout (5 min). See pool::pool docs.
     assert_eq!(DEFAULT_MAX_CONNECTIONS, 2048);

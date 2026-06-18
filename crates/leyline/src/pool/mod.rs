@@ -68,18 +68,18 @@ async fn open_fresh_h2(
     host: &str,
     port: u16,
     proxy: Option<&str>,
-) -> Result<(crate::h2::client::H2Client, TlsInfo), String> {
+) -> Result<(crate::h2::client::H2Client, TlsInfo), crate::Error> {
     let tls_stream = connector
         .connect(host, port, proxy)
         .await
-        .map_err(|e| format!("tls: {e}"))?;
+        .map_err(crate::Error::from)?;
     if tls_stream.alpn.as_deref() != Some(b"h2") {
         let negotiated = tls_stream
             .alpn
             .as_ref()
             .map(|p| String::from_utf8_lossy(p).to_string())
             .unwrap_or_else(|| "none".to_string());
-        return Err(format!("alpn: negotiated {negotiated}, expected h2"));
+        return Err(crate::Error::AlpnMismatch { negotiated });
     }
 
     let tls = TlsInfo {
@@ -89,7 +89,7 @@ async fn open_fresh_h2(
     };
     let (handle, driver) = ClientConnection::<H2Io>::start(tls_stream.stream, h2_config.clone())
         .await
-        .map_err(|e| format!("h2: {e}"))?;
+        .map_err(crate::Error::from)?;
 
     pool.install_h2(key, handle.clone(), driver, tls.clone());
     Ok((handle, tls))
@@ -111,7 +111,7 @@ pub async fn checkout_handle(
     host: &str,
     port: u16,
     proxy: Option<&str>,
-) -> Result<(crate::h2::client::H2Client, TlsInfo), String> {
+) -> Result<(crate::h2::client::H2Client, TlsInfo), crate::Error> {
     let key = make_key(host, port, proxy);
 
     pool.evict_idle();
@@ -150,7 +150,7 @@ pub async fn send_request(
     body: RequestBody,
     proxy: Option<&str>,
     stream_response: bool,
-) -> Result<(H2ResponseEx, TlsInfo), String> {
+) -> Result<(H2ResponseEx, TlsInfo), crate::Error> {
     let host = &pseudo.authority;
     let port = if pseudo.scheme == "https" { 443 } else { 80 };
 
@@ -201,9 +201,9 @@ pub async fn send_request(
                 );
                 pool.invalidate(&key);
                 if body_is_stream {
-                    return Err(format!(
+                    return Err(crate::Error::Body(format!(
                         "pooled connection died and streaming body cannot be retried: {e}"
-                    ));
+                    )));
                 }
                 if let Some(buf) = &retry_buf {
                     body = RequestBody::Buffered(buf.clone());
@@ -231,7 +231,7 @@ pub async fn send_request(
         Ok(r) => r,
         Err(e) => {
             pool.invalidate(&key);
-            return Err(format!("request: {e}"));
+            return Err(crate::Error::Http2(e));
         }
     };
 

@@ -179,9 +179,9 @@ impl Session {
 #[cfg(test)]
 mod tests {
     /// `with_proxy` must actually override a proxy set at build time.
-    /// Regression: the derive appended an all-scheme rule while
-    /// `proxy_for` returns the FIRST matching rule, so the original
-    /// build-time proxy kept winning and the rotation silently no-oped.
+    /// `proxy_for` returns the FIRST matching rule, so appending an
+    /// all-scheme rule would let the original build-time proxy keep
+    /// winning and silently no-op the rotation.
     #[test]
     fn with_proxy_overrides_build_time_proxy() {
         let session = crate::Session::builder()

@@ -207,11 +207,10 @@ mod tests {
         assert!(format!("{err}").contains("proxy CONNECT failed"));
     }
 
-    /// Regression: a proxy can return `407` with a `Content-Length: 121`
-    /// body and the body often arrives in the same TCP read as the
-    /// headers. The old ordering reported "trailing bytes after
-    /// headers" — an actionable 407 became a scary TLS-injection
-    /// message. Now the status-line check fires first.
+    /// Some proxies return `407` with a `Content-Length` body that arrives
+    /// in the same TCP read as the headers. Checking the status line first
+    /// keeps an actionable 407 from being masked as a "trailing bytes after
+    /// headers" TLS-injection warning.
     #[test]
     fn non_200_with_trailing_body_reports_status_not_injection() {
         let full = b"HTTP/1.1 407 Proxy Authentication Required\r\n\

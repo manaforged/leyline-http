@@ -2,7 +2,7 @@
 
 use bytes::{BufMut, Bytes};
 
-use super::FrameHeader;
+use super::{FrameHeader, FrameType};
 use crate::h2::error::ErrorCode;
 use crate::h2::H2Error;
 
@@ -66,7 +66,7 @@ impl DataFrame {
         }
         let header = FrameHeader {
             length: self.data.len() as u32,
-            frame_type: 0x0,
+            frame_type: FrameType::Data as u8,
             flags: flag,
             stream_id: self.stream_id,
         };

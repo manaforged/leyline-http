@@ -161,9 +161,7 @@ impl WsConnection {
 
         // Grab (or open) a pooled H2 handle for this destination.
         let (h2_client, _tls) =
-            crate::pool::checkout_handle(pool, connector, h2_config, &host, port, proxy)
-                .await
-                .map_err(|e| Error::Http(format!("h2 pool: {e}")))?;
+            crate::pool::checkout_handle(pool, connector, h2_config, &host, port, proxy).await?;
 
         if !h2_client.peer_enables_connect_protocol() {
             return Err(Error::Http(H2_NO_CONNECT_PROTOCOL.into()));

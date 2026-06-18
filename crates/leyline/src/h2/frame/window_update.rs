@@ -2,7 +2,7 @@
 
 use bytes::{BufMut, Bytes};
 
-use super::FrameHeader;
+use super::{be_u32, FrameHeader, FrameType};
 use crate::h2::error::ErrorCode;
 use crate::h2::H2Error;
 
@@ -28,10 +28,7 @@ impl WindowUpdateFrame {
             });
         }
 
-        let increment = ((payload[0] as u32) << 24)
-            | ((payload[1] as u32) << 16)
-            | ((payload[2] as u32) << 8)
-            | (payload[3] as u32);
+        let increment = be_u32(&payload[..4]);
         let increment = increment & 0x7FFF_FFFF; // clear R bit
 
         if increment == 0 {
@@ -60,7 +57,7 @@ impl WindowUpdateFrame {
     pub fn encode(&self, buf: &mut impl BufMut) {
         let header = FrameHeader {
             length: 4,
-            frame_type: 0x8,
+            frame_type: FrameType::WindowUpdate as u8,
             flags: 0,
             stream_id: self.stream_id,
         };

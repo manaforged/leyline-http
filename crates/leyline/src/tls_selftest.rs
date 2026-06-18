@@ -9,15 +9,15 @@
 //! traffic fails.
 //!
 //! `spawn_canary` closes that gap: immediately after the listener binds,
-//! each client spawns a one-shot task that performs a real TLS GET to
+//! the service spawns a one-shot task that performs a real TLS GET to
 //! a known-good HTTPS endpoint. Failure logs at `error!` so grep-alerts
 //! on `tls_selftest: handshake failed` catch trust-store regressions
 //! before they page anyone.
 //!
 //! Deliberately fire-and-forget:
-//! - Non-fatal: a canary miss shouldn't prevent the client from
+//! - Non-fatal: a canary miss shouldn't prevent the service from
 //!   starting up, because the canary target may itself be down while
-//!   the operator's target stays reachable.
+//!   the workload's real destinations stay reachable.
 //! - Single attempt: retries would obscure whether the underlying
 //!   trust store is broken or the network is flaky.
 

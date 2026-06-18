@@ -371,7 +371,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         // RFC 9113 §6.10: a block past max_frame_size continues in
         // CONTINUATION frames — END_STREAM rides the first HEADERS
         // frame, END_HEADERS the last frame of the block. Mirrors
-        // write_headers_block; erroring here used to kill the whole
+        // write_headers_block; erroring here would kill the whole
         // connection on any large trailer set.
         let first_len = max_frame.min(fragment.len());
         let end_headers = first_len == fragment.len();

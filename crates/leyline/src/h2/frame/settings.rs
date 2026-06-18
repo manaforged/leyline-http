@@ -2,7 +2,7 @@
 
 use bytes::{BufMut, Bytes};
 
-use super::FrameHeader;
+use super::{be_u16, be_u32, FrameHeader, FrameType};
 use crate::h2::error::ErrorCode;
 use crate::h2::H2Error;
 
@@ -50,11 +50,8 @@ impl SettingsFrame {
         let mut params = Vec::with_capacity(payload.len() / 6);
         let mut i = 0;
         while i + 6 <= payload.len() {
-            let id = ((payload[i] as u16) << 8) | (payload[i + 1] as u16);
-            let val = ((payload[i + 2] as u32) << 24)
-                | ((payload[i + 3] as u32) << 16)
-                | ((payload[i + 4] as u32) << 8)
-                | (payload[i + 5] as u32);
+            let id = be_u16(&payload[i..i + 2]);
+            let val = be_u32(&payload[i + 2..i + 6]);
             params.push((id, val));
             i += 6;
         }
@@ -75,7 +72,7 @@ impl SettingsFrame {
         let payload_len = if self.ack { 0 } else { self.params.len() * 6 };
         let header = FrameHeader {
             length: payload_len as u32,
-            frame_type: 0x4,
+            frame_type: FrameType::Settings as u8,
             flags: if self.ack { flags::ACK } else { 0 },
             stream_id: 0,
         };

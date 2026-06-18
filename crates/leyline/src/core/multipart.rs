@@ -292,9 +292,8 @@ impl FormStream {
 /// quoted-strings over HTTP-header syntax. CR / LF / NUL must be
 /// rejected because they terminate or concatenate headers (CWE-93
 /// response-splitting / header injection). DQUOTE and BACKSLASH must
-/// be backslash-escaped per RFC 7230 §3.2.6's `quoted-pair` rule. A
-/// prior revision of this file emitted these fields verbatim —
-/// It was a user-reachable injection hole via
+/// be backslash-escaped per RFC 7230 §3.2.6's `quoted-pair` rule.
+/// Emitting these fields verbatim is a user-reachable injection hole via
 /// `Form::file(..., path)` where `path.file_name()` could be
 /// attacker-controlled.
 ///
@@ -457,16 +456,11 @@ impl Stream for FormStream {
 /// heap_addr` was correlated enough for two fast concurrent calls to
 /// produce related outputs.
 fn random_boundary() -> String {
-    use rand::RngCore;
-    let mut bytes = [0u8; 16];
-    rand::thread_rng().fill_bytes(&mut bytes);
-    let mut hex = String::with_capacity(2 * bytes.len() + "----LeylineFormBoundary".len());
-    hex.push_str("----LeylineFormBoundary");
-    for b in &bytes {
-        use std::fmt::Write;
-        let _ = write!(hex, "{b:02x}");
-    }
-    hex
+    // 16 random bytes → 32 hex chars, behind the Leyline boundary prefix.
+    format!(
+        "----LeylineFormBoundary{}",
+        crate::util::random_hex_token(16)
+    )
 }
 
 #[cfg(test)]

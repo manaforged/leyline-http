@@ -308,10 +308,8 @@ async fn edge_overlay_on_chrome_145_preserves_chrome_145_grease_token() {
     // Chrome 145 ships `"Not_A Brand";v="24"` (space, v=24), not
     // the Chrome-147 `"Not.A/Brand";v="8"` form. The overlay must
     // derive its sec-ch-ua from the profile, not a hardcoded
-    // 147-era template. This test closes
-    // a BLOCKER: the earlier overlay hardcoded v="8" regardless
-    // of anchor, so `.browser(Chrome145).brand(Edge)` shipped a
-    // provably-wrong sec-ch-ua.
+    // 147-era template: hardcoding v="8" regardless of anchor makes
+    // `.browser(Chrome145).brand(Edge)` ship a provably-wrong sec-ch-ua.
     let session = Session::builder()
         .browser(Browser::Chrome145)
         .brand(ChromiumBrand::Edge)
@@ -368,8 +366,8 @@ fn opera_overlay_on_unverified_anchor_errors() {
 async fn user_dnt_override_wins_over_edge_default() {
     // A caller on an Edge session who explicitly sets dnt=0 MUST
     // NOT see both `dnt: 1` (brand default) and `dnt: 0` (user)
-    // on the wire. Before the fix the two headers both shipped
-    // and some intermediaries coalesced them to `dnt: 1, 0`.
+    // on the wire: shipping both lets some intermediaries coalesce
+    // them to `dnt: 1, 0`.
     let session = Session::edge();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

@@ -198,11 +198,10 @@ impl tokio::io::AsyncWrite for H2ConnectStream {
                     // licence for the peer to stream unbounded bytes
                     // into our memory. When the cap is hit, surface
                     // an IO error so callers see the truncation
-                    // instead of a silent clean-EOF — the prior
-                    // revision returned Ready(Ok(())), which for
-                    // WebSocket or binary-download workloads looked
-                    // like a successful close and silently dropped
-                    // tail bytes.
+                    // instead of a silent clean-EOF — returning
+                    // Ready(Ok(())) here would, for WebSocket or
+                    // binary-download workloads, look like a successful
+                    // close and silently drop tail bytes.
                     if self.read_leftover.len() >= H2_CONNECT_LEFTOVER_CAP {
                         self.read_eof = true;
                         return Poll::Ready(Err(io::Error::other(
@@ -281,11 +280,11 @@ mod connect_stream_tests {
         }
     }
 
-    // Regression gate for the lost-wakeup bug: `poll_write` used to
-    // build a fresh `reserve()` future on every poll, so returning
-    // `Pending` dropped the future and deregistered our waker from the
-    // channel's waitlist — the task was never repolled when capacity
-    // freed and the write hung forever under backpressure.
+    // Lost-wakeup gate: `poll_write` must not build a fresh `reserve()`
+    // future on every poll. Doing so means returning `Pending` drops the
+    // future and deregisters the waker from the channel's waitlist — the
+    // task is never repolled when capacity frees and the write hangs
+    // forever under backpressure.
     #[test]
     fn poll_write_backpressure_wakes_when_capacity_frees() {
         let (write_tx, mut write_rx) = mpsc::channel::<io::Result<Bytes>>(1);

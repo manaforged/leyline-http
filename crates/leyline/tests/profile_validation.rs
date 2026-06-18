@@ -1,15 +1,15 @@
 //! Negative-path validation for browser profiles.
 //!
 //! A fingerprinting library must fail loudly when profile data is malformed:
-//! a silently-substituted default ships a wrong wire fingerprint, which edge
-//! edges soft-block. Each test mutates
+//! a silently-substituted default ships a wrong wire fingerprint, which CDN/WAF
+//! edges soft-block (a profile-drift soft-block incident). Each test mutates
 //! one field of a real built-in profile and asserts `H2Config::from_profile`
 //! rejects it instead of degrading silently. The positive guard proves the
 //! stricter validation does not reject any shipping profile.
 
 use leyline::h2::H2Config;
 use leyline::profile::{BrowserProfile, H2Profile, ProfileRegistry, ALL_BROWSERS};
-use leyline::{build_ssl_context, Browser, Platform, TlsMinVersion};
+use leyline::{Browser, Platform, TlsContext, TlsMinVersion};
 
 const ALL_PLATFORMS: [Platform; 5] = [
     Platform::Windows,
@@ -103,7 +103,7 @@ fn missing_connection_window_is_rejected() {
 #[cfg(feature = "http3")]
 #[test]
 fn unknown_profile_family_has_no_h3_config() {
-    use leyline::quic::H3Config;
+    use leyline::H3Config;
     // okhttp ships no HTTP/3 fingerprint; it must error, not borrow Chrome's.
     assert!(
         H3Config::for_family("okhttp").is_err(),
@@ -119,7 +119,7 @@ fn unknown_profile_family_has_no_h3_config() {
 #[cfg(feature = "http3")]
 #[test]
 fn gecko_family_maps_to_firefox_h3_not_chrome() {
-    use leyline::quic::H3Config;
+    use leyline::H3Config;
     // Firefox profiles declare family="gecko" (not "firefox"); the old match
     // arm tested "firefox" and never fired, silently shipping Chrome's H3.
     let gecko = H3Config::for_family("gecko").expect("gecko maps to an H3 config");
@@ -142,7 +142,7 @@ fn unknown_cert_compression_algorithm_is_rejected() {
     // Not an RFC 8879 codepoint — a typo, not a real algorithm.
     profile.tls.cert_compression = vec!["frobnicate".into()];
     assert!(
-        build_ssl_context(&profile, TlsMinVersion::Tls13).is_err(),
+        TlsContext::from_profile(&profile, TlsMinVersion::Tls13).is_err(),
         "a garbage cert-compression algorithm name was silently dropped from the ClientHello"
     );
 }
@@ -155,7 +155,7 @@ fn real_cert_compression_codepoints_still_build() {
     let mut profile = chrome_profile();
     profile.tls.cert_compression = vec!["zlib".into(), "brotli".into(), "zstd".into()];
     assert!(
-        build_ssl_context(&profile, TlsMinVersion::Tls13).is_ok(),
+        TlsContext::from_profile(&profile, TlsMinVersion::Tls13).is_ok(),
         "a real RFC 8879 cert-compression list (as Firefox ships) failed to build"
     );
 }
@@ -163,7 +163,7 @@ fn real_cert_compression_codepoints_still_build() {
 // ── verified_at: every shipping profile must name what it was anchored to ────
 // The convention used to be doc-only (CONTRIBUTING.md TODO). A profile whose
 // fingerprint was never anchored against live browser output is exactly how the
-// wrong fingerprint shipped — so a missing `verified_against` is now a
+// profile-drift soft-block incident shipped — so a missing `verified_against` is now a
 // test failure. (Date-staleness enforcement is the weekly fingerprint-cron's
 // job — it re-anchors against live truth; backfilling capture dates here would
 // mean inventing dates we don't have, which is the false-anchor this guards.)
@@ -187,8 +187,10 @@ fn every_builtin_profile_builds_ssl_context() {
     for browser in ALL_BROWSERS {
         let profile = reg.get_browser(browser).expect("built-in profile");
         for min in [TlsMinVersion::Tls12, TlsMinVersion::Tls13] {
-            build_ssl_context(profile, min).unwrap_or_else(|e| {
-                panic!("{browser} failed build_ssl_context (min {min:?}) after hardening: {e}")
+            TlsContext::from_profile(profile, min).unwrap_or_else(|e| {
+                panic!(
+                    "{browser} failed TlsContext::from_profile (min {min:?}) after hardening: {e}"
+                )
             });
         }
     }

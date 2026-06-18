@@ -447,14 +447,32 @@ async fn offline_socks5_proxy_wire_bytes() {
 
 // ─── Live: helpers ──────────────────────────────────────────────────────
 
-/// Fetch tls.peet.ws/api/all with the given session and parse JSON.
+/// Fetch tls.peet.ws/api/all with the given session and parse JSON. Retries
+/// transient failures (network error, non-200, truncated/non-JSON body) — the
+/// pre-push gate makes ~29 live calls, so a single blip must not fail it.
 async fn peet(session: &leyline::Session) -> Value {
-    let resp = session
-        .navigate(PEET_URL)
-        .await
-        .expect("tls.peet.ws request failed");
-    assert_eq!(resp.status(), 200, "tls.peet.ws returned {}", resp.status());
-    serde_json::from_str(&resp.text()).expect("tls.peet.ws returned non-JSON")
+    let mut last_err = String::new();
+    for attempt in 0..4 {
+        if attempt > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(500 * attempt as u64)).await;
+        }
+        let resp = match session.navigate(PEET_URL).await {
+            Ok(r) => r,
+            Err(e) => {
+                last_err = format!("request error: {e}");
+                continue;
+            }
+        };
+        if resp.status() != 200 {
+            last_err = format!("status {}", resp.status());
+            continue;
+        }
+        match serde_json::from_str(&resp.text()) {
+            Ok(v) => return v,
+            Err(e) => last_err = format!("non-JSON: {e}"),
+        }
+    }
+    panic!("tls.peet.ws failed after retries: {last_err}");
 }
 
 /// Normalize an Akamai fingerprint for comparison: tls.peet.ws has a display
@@ -803,16 +821,37 @@ async fn observe_ttl(browser: Browser, platform: Platform) -> i64 {
         .expect("no tcpip.ip.ttl")
 }
 
+/// Recover the initial TTL from an observed (per-hop-decremented) value by
+/// rounding up to the nearest standard initial TTL. Route-robust: a Linux 64
+/// stays ≤64 → 64 for any realistic hop count; Windows 128 → 65..=128 → 128.
+fn initial_ttl(observed: i64) -> i64 {
+    [64, 128, 255]
+        .into_iter()
+        .find(|&t| observed <= t)
+        .unwrap_or(255)
+}
+
+#[test]
+fn initial_ttl_buckets_to_standard_values() {
+    // Linux 64 survives any realistic hop count (observed 34 == 30 hops → 64).
+    assert_eq!(initial_ttl(63), 64);
+    assert_eq!(initial_ttl(34), 64);
+    assert_eq!(initial_ttl(64), 64);
+    // Windows 128 likewise (observed 88 == 40 hops → 128).
+    assert_eq!(initial_ttl(65), 128);
+    assert_eq!(initial_ttl(110), 128);
+    assert_eq!(initial_ttl(128), 128);
+}
+
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_tcp_windows_ttl_is_128() {
     let ttl = observe_ttl(Browser::Chrome147, Platform::Windows).await;
-    // Initial 128, minus ~10-20 hops → expect 98..=127.
-    assert!(
-        (98..=127).contains(&ttl),
-        "Windows TTL out of expected range (98..=127): {ttl}. \
-         Initial TTL should be 128 but socket is sending {}",
-        ttl + 13
+    assert_eq!(
+        initial_ttl(ttl),
+        128,
+        "Windows initial TTL should be 128, observed {ttl} (rounded to {})",
+        initial_ttl(ttl)
     );
     println!("✓ Windows TCP TTL: observed {ttl} (initial 128)");
 }
@@ -821,10 +860,11 @@ async fn live_tcp_windows_ttl_is_128() {
 #[ignore = "live: needs network"]
 async fn live_tcp_linux_ttl_is_64() {
     let ttl = observe_ttl(Browser::Chrome147, Platform::Linux).await;
-    // Initial 64, minus ~10-20 hops → expect 34..=63.
-    assert!(
-        (34..=63).contains(&ttl),
-        "Linux TTL out of expected range (34..=63): {ttl}"
+    assert_eq!(
+        initial_ttl(ttl),
+        64,
+        "Linux initial TTL should be 64, observed {ttl} (rounded to {})",
+        initial_ttl(ttl)
     );
     println!("✓ Linux TCP TTL: observed {ttl} (initial 64)");
 }
@@ -1115,7 +1155,7 @@ async fn live_firefox150_pseudo_header_order() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_h3_cloudflare() {
-    use leyline::quic::{H3Config, H3Connection};
+    use leyline::{H3Config, H3Connection};
     let reg = leyline::profile::ProfileRegistry::builtin();
     let profile = reg.get_browser(Browser::Chrome147).unwrap();
     let config = H3Config::chrome();
@@ -1150,7 +1190,7 @@ async fn live_h3_cloudflare() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_h3_cloudflare_firefox_profile() {
-    use leyline::quic::{H3Config, H3Connection};
+    use leyline::{H3Config, H3Connection};
     let reg = leyline::profile::ProfileRegistry::builtin();
     let profile = reg.get_browser(Browser::Firefox150).unwrap();
     let config = H3Config::firefox();
@@ -1181,7 +1221,7 @@ async fn live_h3_cloudflare_firefox_profile() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_h3_google() {
-    use leyline::quic::{H3Config, H3Connection};
+    use leyline::{H3Config, H3Connection};
     let reg = leyline::profile::ProfileRegistry::builtin();
     let profile = reg.get_browser(Browser::Chrome147).unwrap();
     let config = H3Config::chrome();

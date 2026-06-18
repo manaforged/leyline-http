@@ -3,7 +3,7 @@
 //! Format: MD5 of `{version},{ciphers},{extensions},{curves},{point_formats}`
 //! where values within fields are hyphen-separated decimal integers.
 
-use crate::audit::cipher_map::{cipher_id, curve_id, is_grease};
+use crate::audit::{non_grease_cipher_ids, non_grease_curve_ids, non_grease_ext_ids};
 
 /// Input data for JA3 computation.
 pub struct Ja3Input<'a> {
@@ -30,30 +30,22 @@ pub fn compute_ja3_raw(input: &Ja3Input<'_>) -> String {
     let version = input.tls_record_version;
 
     // Field 2: Cipher suites (decimal, hyphen-separated, GREASE excluded).
-    let ciphers: String = input
-        .ciphers
+    let ciphers: String = non_grease_cipher_ids(input.ciphers)
         .iter()
-        .filter_map(|c| cipher_id(c))
-        .filter(|id| !is_grease(*id))
         .map(|id| id.to_string())
         .collect::<Vec<_>>()
         .join("-");
 
     // Field 3: Extensions (decimal, hyphen-separated, GREASE excluded).
-    let extensions: String = input
-        .extension_ids
+    let extensions: String = non_grease_ext_ids(input.extension_ids)
         .iter()
-        .filter(|id| !is_grease(**id))
         .map(|id| id.to_string())
         .collect::<Vec<_>>()
         .join("-");
 
     // Field 4: Elliptic curves (decimal, hyphen-separated, GREASE excluded).
-    let curves: String = input
-        .curves
+    let curves: String = non_grease_curve_ids(input.curves)
         .iter()
-        .filter_map(|c| curve_id(c))
-        .filter(|id| !is_grease(*id))
         .map(|id| id.to_string())
         .collect::<Vec<_>>()
         .join("-");

@@ -11,27 +11,68 @@ mod happy_eyeballs;
 mod nonblocking;
 mod proxy;
 mod resolver;
-mod stream;
-mod trust;
-#[cfg(feature = "tls-rustls")]
-mod rustls_trust;
 #[cfg(feature = "tls-rustls")]
 mod rustls_connector;
+#[cfg(feature = "tls-rustls")]
+mod rustls_trust;
+mod stream;
+mod trust;
 #[cfg(windows)]
 mod windows_trust;
 
-pub use builder::{build_ssl_context, TlsMinVersion};
-pub use connector::FingerprintConnector;
+pub use builder::TlsMinVersion;
 pub use error::TlsError;
 pub use happy_eyeballs::HappyEyeballsConfig;
 pub use resolver::{ResolveFuture, Resolver, SystemResolver};
 pub use trust::{ClientIdentity, TlsTrustConfig};
 
-pub(crate) use stream::TlsIo;
+// Connector internals: reachable for the crate's own white-box tests, but not
+// public API (see the `#[doc(hidden)]` note on the internal modules in lib.rs).
+#[doc(hidden)]
+pub use connector::FingerprintConnector;
 #[cfg(feature = "tls-rustls")]
+#[doc(hidden)]
 pub use rustls_connector::RustlsConnector;
 
+pub(crate) use builder::build_ssl_context;
+pub(crate) use stream::TlsIo;
+
+/// A BoringSSL TLS context preconfigured to a browser profile's fingerprint.
+///
+/// Returned by [`tls_context`](crate::tls_context) and
+/// [`quic_context`](crate::quic_context). It wraps the BoringSSL builder so
+/// Leyline's public surface does not name a third-party type in the common
+/// path. Advanced callers reach the builder through [`builder_mut`] to add
+/// transport knobs (ALPN, custom verification) or [`into_inner`] to take
+/// ownership; both expose the underlying BoringSSL type and are therefore the
+/// one place a `btls` major bump can affect a dependent.
+///
+/// [`builder_mut`]: Self::builder_mut
+/// [`into_inner`]: Self::into_inner
+pub struct TlsContext(btls::ssl::SslContextBuilder);
+
+impl TlsContext {
+    /// Build a context matching `profile`, pinned to `min_version`.
+    pub fn from_profile(
+        profile: &crate::profile::BrowserProfile,
+        min_version: TlsMinVersion,
+    ) -> Result<Self, TlsError> {
+        build_ssl_context(profile, min_version).map(Self)
+    }
+
+    /// Mutable access to the underlying BoringSSL `SslContextBuilder`.
+    pub fn builder_mut(&mut self) -> &mut btls::ssl::SslContextBuilder {
+        &mut self.0
+    }
+
+    /// Consume the wrapper and return the underlying BoringSSL builder.
+    pub fn into_inner(self) -> btls::ssl::SslContextBuilder {
+        self.0
+    }
+}
+
 /// A connected TLS stream with ALPN result.
+#[doc(hidden)]
 pub struct TlsStream {
     /// The async TLS stream, behind the backend-agnostic [`TlsIo`] seam.
     /// `pub(crate)` because the concrete backend is an internal detail —
@@ -53,6 +94,7 @@ pub struct TlsStream {
 /// Bare `Session::new()` sessions use the pure-Rust [`RustlsConnector`];
 /// browser/profile sessions use the BoringSSL [`FingerprintConnector`].
 /// The rest of the stack dispatches `connect`/`connect_h1` through here.
+#[doc(hidden)]
 #[derive(Clone, Debug)]
 #[allow(clippy::large_enum_variant)]
 pub enum ConnectorVariant {

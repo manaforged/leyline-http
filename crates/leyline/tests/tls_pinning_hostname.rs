@@ -30,8 +30,8 @@ use btls::rsa::Rsa;
 use btls::x509::extension::{BasicConstraints, SubjectAlternativeName};
 use btls::x509::{X509NameBuilder, X509};
 use leyline::profile::BrowserProfile;
-use leyline::tcp::TcpProfile;
 use leyline::tls::{FingerprintConnector, ResolveFuture, Resolver, TlsTrustConfig};
+use leyline::TcpProfile;
 use sha2::{Digest, Sha256};
 use tokio::net::TcpListener;
 

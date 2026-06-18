@@ -12,10 +12,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use leyline::profile::BrowserProfile;
-use leyline::tcp::TcpProfile;
 use leyline::tls::{
     FingerprintConnector, HappyEyeballsConfig, ResolveFuture, Resolver, SystemResolver,
 };
+use leyline::TcpProfile;
 use leyline::{Browser, Session, TlsTrustConfig};
 
 /// Mock resolver that returns a fixed list.

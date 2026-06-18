@@ -15,8 +15,8 @@ use crate::pool::types::{H1Slot, PoolCounters, PoolKey, PoolStats, PooledConn, T
 /// timeout Chromium applies to a pooled socket that has already
 /// served at least one request. The original 90s default was
 /// significantly tighter than browser behavior and forced every
-/// long-lived caller (long-lived pools,
-/// persistent clients) into 60s app-level keep-alive pings
+/// long-lived caller (long-lived / session-persistent pooled
+/// workloads) into 60s app-level keep-alive pings
 /// just to outrun the pool reaper. At 5 minutes leyline behaves
 /// like a real Chrome network stack: idle but not yet abandoned
 /// connections sit in the pool, ready for the next request, until

@@ -5,7 +5,7 @@
 
 use bytes::Bytes;
 
-use super::FrameHeader;
+use super::{be_u32, FrameHeader};
 use crate::h2::error::ErrorCode;
 use crate::h2::H2Error;
 
@@ -63,10 +63,7 @@ impl PushPromiseFrame {
             });
         }
 
-        let promised = ((payload[offset] as u32) << 24)
-            | ((payload[offset + 1] as u32) << 16)
-            | ((payload[offset + 2] as u32) << 8)
-            | (payload[offset + 3] as u32);
+        let promised = be_u32(&payload[offset..offset + 4]);
         let promised_stream_id = promised & 0x7FFF_FFFF;
         offset += 4;
 

@@ -193,8 +193,9 @@ impl RequestBuilder {
     /// For headers with a well-known Chrome slot (`origin`,
     /// `authorization`, `x-csrf-token`, `x-requested-with`, etc.) the
     /// profile picks the anchor automatically. For site-specific
-    /// headers with no universal rule (for example `x-extra-*`),
-    /// use [`anchored`](Self::anchored) and name the slot explicitly.
+    /// headers with no universal rule (for example
+    /// `x-extra-*`), use [`anchored`](Self::anchored) and name
+    /// the slot explicitly.
     pub fn header(mut self, name: &str, value: &str) -> Self {
         self.headers.set(name, value);
         self

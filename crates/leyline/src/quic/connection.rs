@@ -337,7 +337,7 @@ impl H3Connection {
 /// lookups), so it runs under `spawn_blocking` — the H2 path's
 /// `SystemResolver` already does the same. IPv4 is preferred because
 /// the UDP socket binds `0.0.0.0` by default, with an IPv6 fallback
-/// instead of the old hard error on IPv6-only hosts (the bind match
+/// so IPv6-only hosts resolve rather than hard-erroring (the bind match
 /// in `request` already handles both families).
 async fn resolve_peer(host: &str, port: u16) -> Result<std::net::SocketAddr, String> {
     // Bare IPv6 literals need brackets for `to_socket_addrs`.
@@ -376,10 +376,10 @@ fn validate_connection_id_len(len: usize) -> Result<(), String> {
 /// within budget and `Err(new_total)` when it would exceed the cap,
 /// so the caller can emit a diagnostic carrying the proposed size.
 ///
-/// Extracted from the H3 recv loop so the cap semantics have a unit-
+/// Kept separate from the H3 recv loop so the cap semantics have a unit-
 /// test gate — the recv loop itself needs a live QUIC peer, which is
 /// infeasible in cargo test. Any refactor that loses this guard
-/// regresses the OOM guard.
+/// reopens the H3 response-body OOM DoS.
 pub(crate) fn check_body_budget(already: usize, n: usize, max: u64) -> Result<(), u64> {
     let new_total = already.saturating_add(n) as u64;
     if new_total > max {
@@ -418,12 +418,11 @@ mod tests {
         assert!(validate_connection_id_len(leyline_quiche::MAX_CONN_ID_LEN + 1).is_err());
     }
 
-    // ---- Coverage gate: the H3 response body
-    // cap) shipped without a regression test. These unit tests
-    // cover the body-budget arithmetic directly. If the H3 recv
-    // loop stops calling check_body_budget, or if the helper
-    // ever returns Ok for an overflow case, the OOM DoS fix is
-    // silently disabled. ----
+    // ---- H3 response-body cap: these unit tests cover the
+    // body-budget arithmetic directly. If the H3 recv loop stops
+    // calling check_body_budget, or if the helper ever returns Ok
+    // for an overflow case, the OOM DoS protection is silently
+    // disabled. ----
 
     #[test]
     fn body_budget_allows_zero_chunks() {

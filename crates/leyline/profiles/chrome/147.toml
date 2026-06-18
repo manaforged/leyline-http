@@ -64,9 +64,9 @@ settings_order = [
 # Chrome 147 on Windows: SETTINGS frame carries only the 4 standard
 # parameters (HEADER_TABLE_SIZE, ENABLE_PUSH, INITIAL_WINDOW_SIZE,
 # MAX_HEADER_LIST_SIZE). Keeping `;8:1` in the Akamai fingerprint is what
-# trips a CDN edge's JA4+H2 join check — it
-# completes the TLS handshake and replies with no ALPN extension as a
-# soft-block, surfacing in leyline as `alpn: negotiated none, expected h2`.
+# trips a CDN/WAF edge's JA4+H2 join check — it completes the TLS handshake
+# and replies with no ALPN extension as a soft-block, surfacing in leyline
+# as `alpn: negotiated none, expected h2`.
 [h2.fingerprint]
 akamai = "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p"
 

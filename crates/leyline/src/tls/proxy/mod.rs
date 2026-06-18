@@ -23,8 +23,9 @@ const PROXY_CONNECT_CEILING: Duration = Duration::from_secs(30);
 /// `Url::port()` returns `None` when the port equals the scheme's
 /// default (80 for http), so `http://host:80` would silently fall
 /// through to the scheme fallback; `port_or_known_default()` preserves
-/// explicit default ports (for example a proxy on
-/// `proxy.example.com:80`). `fallback_port` covers schemes the `url` crate has no
+/// explicit default ports — required for a proxy gateway given with an
+/// explicit default port, e.g. `proxy.example:80`. `fallback_port`
+/// covers schemes the `url` crate has no
 /// default for (socks5 → 1080, http-proxy convention → 8080).
 pub(crate) async fn connect_to_proxy(
     proxy: &url::Url,

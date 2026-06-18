@@ -362,7 +362,7 @@ pub(crate) fn id_to_u16(id: &SettingId) -> u16 {
 /// backward-compat path that needs a ready-to-ship fragment.
 ///
 /// Takes ownership of nothing — both `pseudo_list` and `headers` must
-/// outlive the call. Internally we copy into a scratch `Vec` so the
+/// outlive the call. Internally copies into a scratch `Vec` so the
 /// input lifetimes don't have to be unified by the caller.
 pub(crate) fn encode_request_pseudos<'a>(
     encoder: &mut hpack::Encoder,

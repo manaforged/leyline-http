@@ -3,12 +3,11 @@ use super::super::proxy::{env_proxy_from, CGI_SIGNAL_ENV_VARS};
 // NO_PROXY host-matching gates live next to `NoProxy` in
 // `core::config` (the dead duplicate matcher was removed).
 
-// ---- httpoxy regression gates ----
+// ---- httpoxy mitigation regression gates ----
 //
-// The env_proxy logic takes
-// getters as parameters so we can test it without mutating
-// `std::env`. If a refactor ever re-couples this to the
-// process environment, these tests should scream first.
+// The env_proxy logic takes its environment getters as parameters so it
+// can be tested without mutating `std::env`. If a refactor ever re-couples
+// this to the process environment, these tests should scream first.
 
 use std::collections::HashMap;
 

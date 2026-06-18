@@ -3,8 +3,8 @@
 //! Format: `{section_a}_{section_b}_{section_c}`
 //! Computed from the TLS profile data (cipher suites, extensions, sigalgs).
 
-use crate::audit::cipher_map::{cipher_id, is_grease, sigalg_id};
-use crate::audit::hash12;
+use crate::audit::cipher_map::sigalg_id;
+use crate::audit::{hash12, non_grease_cipher_ids, non_grease_ext_ids};
 
 /// Input data for JA4 computation. Extracted from a browser profile.
 pub struct Ja4Input<'a> {
@@ -49,21 +49,10 @@ fn compute_section_a(input: &Ja4Input<'_>) -> String {
     let sni = if input.has_sni { "d" } else { "i" };
 
     // Count ciphers excluding GREASE
-    let cipher_count = input
-        .ciphers
-        .iter()
-        .filter_map(|c| cipher_id(c))
-        .filter(|id| !is_grease(*id))
-        .count()
-        .min(99);
+    let cipher_count = non_grease_cipher_ids(input.ciphers).len().min(99);
 
     // Count extensions excluding GREASE
-    let ext_count = input
-        .extension_ids
-        .iter()
-        .filter(|id| !is_grease(**id))
-        .count()
-        .min(99);
+    let ext_count = non_grease_ext_ids(input.extension_ids).len().min(99);
 
     // ALPN: first and last char of first ALPN value
     let alpn = if input.alpn.is_empty() {
@@ -80,12 +69,7 @@ fn compute_section_a(input: &Ja4Input<'_>) -> String {
 
 /// Section B: sorted cipher suites hash (12 hex chars).
 fn compute_section_b(input: &Ja4Input<'_>) -> String {
-    let mut ids: Vec<u16> = input
-        .ciphers
-        .iter()
-        .filter_map(|c| cipher_id(c))
-        .filter(|id| !is_grease(*id))
-        .collect();
+    let mut ids = non_grease_cipher_ids(input.ciphers);
 
     ids.sort();
 
@@ -101,11 +85,9 @@ fn compute_section_b(input: &Ja4Input<'_>) -> String {
 /// Section C: sorted extensions + sigalgs hash (12 hex chars).
 fn compute_section_c(input: &Ja4Input<'_>) -> String {
     // Extensions: exclude GREASE, SNI (0x0000), ALPN (0x0010), then sort.
-    let mut ext_ids: Vec<u16> = input
-        .extension_ids
-        .iter()
-        .copied()
-        .filter(|id| !is_grease(*id) && *id != 0x0000 && *id != 0x0010)
+    let mut ext_ids: Vec<u16> = non_grease_ext_ids(input.extension_ids)
+        .into_iter()
+        .filter(|id| *id != 0x0000 && *id != 0x0010)
         .collect();
     ext_ids.sort();
 
@@ -220,9 +202,9 @@ pub fn chrome_extension_ids(tls: &crate::profile::TlsProfile) -> Vec<u16> {
         exts.push(0xfe0d); // encrypted_client_hello (65037)
     }
 
-    // Note: pre_shared_key (41) is only sent when a session ticket is available
-    // for resumption. On first connection, it's absent. Don't include it in the
-    // extension list since we don't have session resumption yet.
+    // pre_shared_key (41) is only sent when a session ticket is available
+    // for resumption. On first connection it is absent, and leyline does not
+    // do session resumption, so it is omitted from the extension list.
 
     exts
 }
@@ -266,9 +248,9 @@ mod tests {
         assert_eq!(&a[..3], "t13"); // TLS 1.3
         assert_eq!(&a[3..4], "d"); // SNI present
         assert_eq!(&a[4..6], "15"); // 15 ciphers
-                                    // 17 extensions in our list (all non-GREASE). Real Chrome has 16
-                                    // because we include extended_master_secret which Chrome 147 may omit.
-                                    // The exact count depends on the BoringSSL configuration.
+                                    // 17 extensions in the list (all non-GREASE). Real Chrome has 16
+                                    // because the list includes extended_master_secret, which Chrome 147
+                                    // may omit. The exact count depends on the BoringSSL configuration.
         assert!(
             a[6..8].parse::<u32>().unwrap() >= 16,
             "ext count: {}",

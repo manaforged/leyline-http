@@ -2,7 +2,7 @@
 
 use bytes::{BufMut, Bytes};
 
-use super::FrameHeader;
+use super::{be_u32, FrameHeader, FrameType};
 use crate::h2::error::ErrorCode;
 use crate::h2::H2Error;
 
@@ -33,16 +33,10 @@ impl GoAwayFrame {
             });
         }
 
-        let last_stream_id = ((payload[0] as u32) << 24)
-            | ((payload[1] as u32) << 16)
-            | ((payload[2] as u32) << 8)
-            | (payload[3] as u32);
+        let last_stream_id = be_u32(&payload[..4]);
         let last_stream_id = last_stream_id & 0x7FFF_FFFF;
 
-        let error_code = ((payload[4] as u32) << 24)
-            | ((payload[5] as u32) << 16)
-            | ((payload[6] as u32) << 8)
-            | (payload[7] as u32);
+        let error_code = be_u32(&payload[4..8]);
 
         let debug_data = if payload.len() > 8 {
             payload.slice(8..)
@@ -62,7 +56,7 @@ impl GoAwayFrame {
         let length = 8 + self.debug_data.len() as u32;
         let header = FrameHeader {
             length,
-            frame_type: 0x7,
+            frame_type: FrameType::GoAway as u8,
             flags: 0,
             stream_id: 0,
         };

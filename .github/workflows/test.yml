@@ -13,6 +13,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Fast guard: package.json / pyproject.toml must not drift from the
+  # workspace version (the single source of truth in Cargo.toml). No Rust
+  # toolchain needed — just checkout + a bash string compare.
+  version-parity:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: check package versions match workspace
+        run: |
+          WS=$(grep -m1 '^version = ' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')
+          NPM=$(grep -m1 '"version"' package.json | sed -E 's/.*"([^"]+)".*/\1/')
+          PY=$(grep -m1 '^version = ' wrappers/python/pyproject.toml | sed -E 's/.*"([^"]+)".*/\1/')
+          PY_EXPECT=$(echo "$WS" | sed 's/-alpha\./a/')
+          [ "$NPM" = "$WS" ] || { echo "package.json $NPM != workspace $WS"; exit 1; }
+          [ "$PY"  = "$PY_EXPECT" ] || { echo "pyproject $PY != $PY_EXPECT"; exit 1; }
+          echo "version parity OK: $WS"
+
   # Workspace unit + integration tests (no live network). Same scope as the
   # rusty-hook pre-commit, so CI catches anything a contributor merged with
   # `--no-verify` or without rusty-hook installed locally.

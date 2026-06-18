@@ -3,8 +3,8 @@
 //! Chrome emits headers from three sources — Chrome-native, JS
 //! `setRequestHeader`, and Chrome finalizers — interleaved at
 //! well-defined positions. A caller that wants to emit a header at a
-//! specific slot (for example `x-extra-6` that must appear
-//! right after `user-agent`) names the slot with a `HeaderAnchor`.
+//! specific slot (for example `x-extra-6` that
+//! must appear right after `user-agent`) names the slot with a `HeaderAnchor`.
 //!
 //! For well-known Chrome headers (`origin`, `x-requested-with`,
 //! `x-csrf-token`, ...) the profile already knows the anchor, so
@@ -14,8 +14,8 @@
 //!
 //! ## Example
 //!
-//! A site can emit seven headers at five different anchors in
-//! its XHR order:
+//! A site can emit seven headers at five different
+//! anchors in a site's XHR order:
 //!
 //! ```text
 //! sec-ch-ua
@@ -163,7 +163,7 @@ mod tests {
     #[test]
     fn infer_anchor_none_for_custom_headers() {
         assert_eq!(infer_anchor("x-extra-6"), None);
-        assert_eq!(infer_anchor("x-other-whatever"), None);
+        assert_eq!(infer_anchor("x-vendor-whatever"), None);
         assert_eq!(infer_anchor("x-custom"), None);
     }
 

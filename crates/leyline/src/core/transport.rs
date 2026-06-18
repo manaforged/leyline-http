@@ -213,8 +213,7 @@ pub(crate) async fn send_request_h2(
         proxy,
         stream_response,
     )
-    .await
-    .map_err(Error::Http2)?;
+    .await?;
 
     let transport_body = match resp.body {
         crate::h2::client::ResponseBody::Buffered(b) => TransportBody::Buffered(b),
@@ -454,6 +453,43 @@ pub(crate) async fn send_request_h3(
     })
 }
 
+/// True when the H2 attempt failed because the server declined the `h2` ALPN
+/// (e.g. some CDN/WAF edges serve a cookieless interstitial over HTTP/1.1,
+/// replying with no ALPN). Real Chrome falls back to HTTP/1.1 in this case, so
+/// the transport retries on h1 instead of erroring out.
+///
+/// The pool path surfaces this as `Error::AlpnMismatch` (see
+/// `pool::open_fresh_h2`); the transport keys the HTTP/1.1 fallback off that
+/// typed variant so an unrelated H2 or HTTP error never trips it.
 fn is_h2_alpn_mismatch(err: &Error) -> bool {
-    matches!(err, Error::Http(msg) if msg.contains("expected h2"))
+    matches!(err, Error::AlpnMismatch { .. })
+}
+
+#[cfg(test)]
+mod alpn_fallback_tests {
+    use super::*;
+
+    #[test]
+    fn alpn_mismatch_detected() {
+        // The pool surfaces the ALPN decline as the typed Error::AlpnMismatch,
+        // which must trip the HTTP/1.1 fallback regardless of which protocol
+        // (or none) the peer negotiated. Without it, proxyless navigations to
+        // hosts that decline h2 ALPN on a cookieless interstitial hard-error
+        // instead of falling back.
+        assert!(is_h2_alpn_mismatch(&Error::AlpnMismatch {
+            negotiated: "none".into()
+        }));
+        assert!(is_h2_alpn_mismatch(&Error::AlpnMismatch {
+            negotiated: "http/1.1".into()
+        }));
+        // Unrelated errors must NOT trigger a fallback — neither a generic
+        // HTTP error nor a non-ALPN HTTP/2 transport error.
+        assert!(!is_h2_alpn_mismatch(&Error::Http("404 not found".into())));
+        assert!(!is_h2_alpn_mismatch(&Error::Http2(
+            crate::h2::H2Error::Stream {
+                stream_id: 1,
+                code: crate::h2::error::ErrorCode::RefusedStream,
+            }
+        )));
+    }
 }

@@ -2,7 +2,9 @@
 resolver = "2"
 members = [
     "crates/leyline",
+    "crates/leyline-ffi",
     "crates/leyline-node",
+    "crates/leyline-python",
     "crates/leyline-quiche",
 ]
 
@@ -10,7 +12,7 @@ exclude = [
     "crates/btls-sys",
 ]
 [workspace.package]
-version = "1.0.0-alpha.1"
+version = "1.0.0-alpha.2"
 edition = "2024"
 rust-version = "1.85" # MSRV
 authors = ["Thomas Gardiner"]
@@ -48,13 +50,6 @@ bytes = "1"
 tungstenite = "0.26"
 tokio-tungstenite = "0.26"
 sha1 = "0.10"
-# CLI-only deps (only pulled by crates/cli; keep them out of the library path)
-clap = { version = "4.5", features = ["derive", "wrap_help", "env"] }
-clap_complete = "4.5"
-anstream = "0.6"
-owo-colors = { version = "4", features = ["supports-colors"] }
-humantime = "2.1"
-anyhow = "1"
 base64 = "0.22"
 
 [profile.release]

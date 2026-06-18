@@ -109,11 +109,7 @@ external-default-features = "allow"
 deny = [
     { name = "openssl" },
     { name = "openssl-sys" },
-    { name = "rustls" },
-    { name = "rustls-native-certs" },
     { name = "native-tls" },
-    { name = "schannel" },
-    { name = "security-framework" },
     # Leftover hyper/h2 — we ship our own HTTP/2 implementation; any
     # transitive pull means something is silently routing around it.
     { name = "h2" },

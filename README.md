@@ -7,7 +7,7 @@ and it puts that browser's exact TLS, HTTP/2, and TCP shape on the wire:
 Chrome, Firefox, Safari, OkHttp. That's the path for servers that fingerprint
 the client and hand a plain one a 403.
 
-Status: `1.0.0-alpha.1`. The API still moves; pin exact versions.
+Status: `1.0.0-alpha.2`. The API still moves; pin exact versions.
 
 ## Example
 
@@ -21,7 +21,7 @@ leyline = { git = "https://github.com/manaforged/leyline-http", rev = "<commit-s
 tokio = { version = "1", features = ["full"] }
 ```
 
-> **Heads up:** a plain `leyline = "1.0.0-alpha.1"` (crates.io) does **not**
+> **Heads up:** a plain `leyline = "1.0.0-alpha.2"` (crates.io) does **not**
 > resolve yet. A git dependency pulls the upstream `btls-sys` source-build
 > path, which compiles BoringSSL on first build (CMake/Perl/libclang/Go
 > required — see [Platform support](#platform-support)). For the zero-compile
@@ -238,20 +238,54 @@ Vulnerabilities go through GitHub private security advisories. Process in
 [SECURITY.md](SECURITY.md). Supply-chain posture and the why of the vendored
 crypto tree are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## Node.js
+## Language bindings
 
-The Node.js wrapper lives in `wrappers/node` and builds a native N-API addon
-from the `leyline-node` crate:
+Leyline ships first-class **Node.js** and **Python** wrappers over the same Rust
+core, so the browser-fidelity fingerprints and audit data are identical in all
+three languages. Each wrapper feels like the HTTP client you already reach for.
 
-```bash
-cd wrappers/node
-npm run build
-npm test
+### Node.js
+
+```js
+const { Client } = require('@manaforged/leyline');
+
+const client = Client.chrome();                  // real Chrome TLS + HTTP/2
+const resp = await client.get('https://api.example.com/v1');
+
+resp.ok;                 // true
+resp.json();             // parsed JSON body
+resp.header('x-id');     // case-insensitive header lookup
+resp.audit.ja4;          // the fingerprint we actually sent
+
+// POST JSON — serialized and content-typed for you
+await client.post('https://api.example.com/items', { json: { name: 'ada' } });
 ```
 
-It exposes pinned browser-profile clients such as
-`Client.withProfile("chrome147")` and returns Leyline audit fingerprints on
-responses.
+### Python
+
+```python
+from leyline import Client
+
+client = Client.chrome()                         # real Chrome TLS + HTTP/2
+resp = client.get("https://api.example.com/v1")
+
+resp.ok                  # True
+resp.json()              # parsed JSON body
+resp.header("x-id")      # case-insensitive header lookup
+resp.audit.ja4           # the fingerprint we actually sent
+
+# POST JSON
+client.post("https://api.example.com/items", json={"name": "ada"})
+```
+
+`asyncio` works too — swap `Client` for `AsyncClient` and `await` the calls.
+
+Pick a profile (`Client.chrome()`, `Client.firefox()`, `Client.withProfile("chrome147")`),
+route through a proxy, set timeouts, or pass `audit=false`/`{ audit: false }` for
+the zero-cost hot path — the surface mirrors the Rust API. Both wrappers are
+consumed from source by git rev (no npm/PyPI registry yet); full install and API
+docs live in [`wrappers/node`](wrappers/node/README.md) and
+[`wrappers/python`](wrappers/python/README.md).
 
 ## License
 

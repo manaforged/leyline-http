@@ -2,7 +2,7 @@
 
 use bytes::{BufMut, Bytes};
 
-use super::FrameHeader;
+use super::{FrameHeader, FrameType};
 use crate::h2::error::ErrorCode;
 use crate::h2::H2Error;
 
@@ -47,7 +47,7 @@ impl PingFrame {
     pub fn encode(&self, buf: &mut impl BufMut) {
         let header = FrameHeader {
             length: 8,
-            frame_type: 0x6,
+            frame_type: FrameType::Ping as u8,
             flags: if self.ack { flags::ACK } else { 0 },
             stream_id: 0,
         };

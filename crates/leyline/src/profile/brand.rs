@@ -175,8 +175,9 @@ fn edge_overlay(
         });
     }
     // UA-reduced `Edg/{major}.0.0.0` form. Verified against tls.peet.ws
-    // 2026-04-25 with Microsoft Edge 147 on macOS — Microsoft now
-    // ships the same reduced format Chrome adopted in 2022.
+    // 2026-04-25 with Microsoft Edge 147 on macOS — Microsoft ships the
+    // same reduced format Chrome adopted in 2022. Seeding a fake build
+    // version from a hardcoded table would be a real fingerprint mismatch.
     Ok(BrandOverlay {
         user_agent: format!("{profile_user_agent} Edg/{chromium_major}.0.0.0"),
         sec_ch_ua: swap_brand(profile_sec_ch_ua, "Microsoft Edge"),

@@ -36,7 +36,7 @@ impl<T> H1Io for T where T: AsyncRead + AsyncWrite + Send + Unpin + 'static {}
 
 /// Request-target style: origin-form `/path?q=1` for direct
 /// connections, absolute-form `http://host/path?q=1` for plaintext
-/// HTTP proxies. Mirrors the old core-transport enum.
+/// HTTP proxies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum H1Target {
     /// `GET /path?q=1 HTTP/1.1`
@@ -634,10 +634,10 @@ fn validate_framing_headers(headers: &[(String, String)]) -> Result<(), H1Pooled
         }
         // RFC 9112 §8.6: Content-Length MUST be a non-negative decimal
         // integer. A present-but-unparseable value (`+10`, `10 foo`,
-        // tab-prefixed, hex, anything but `[0-9]+`) previously fell
-        // through to read-to-close — a smuggling vector when an
-        // upstream parses leniently and disagrees with us on body
-        // length. Require clean ASCII digits.
+        // tab-prefixed, hex, anything but `[0-9]+`) must be rejected:
+        // falling through to read-to-close is a smuggling vector when an
+        // upstream parses leniently and disagrees on body length. Require
+        // clean ASCII digits.
         let trimmed = v.trim();
         if trimmed.is_empty()
             || !trimmed.bytes().all(|b| b.is_ascii_digit())
@@ -793,10 +793,9 @@ where
         let line_end = read_until_crlf(stream, &mut buf).await?;
         let size_line = String::from_utf8_lossy(&buf[..line_end]);
         let size_token = size_line.split(';').next().unwrap_or("").trim();
-        // Reject oversized chunk declarations up front. See
-        // `read_chunked_body` in the old core-transport code for the
-        // rationale — this guard prevents a malicious peer from
-        // overflowing `size + 2` or forcing an uncontrolled read.
+        // Reject oversized chunk declarations up front: this guard
+        // prevents a malicious peer from overflowing `size + 2` or
+        // forcing an uncontrolled read.
         let size_u64 = u64::from_str_radix(size_token, 16)
             .map_err(|e| H1PooledError::Http(format!("invalid chunk size: {e}")))?;
         if size_u64 > MAX_H1_BODY_BYTES as u64 {

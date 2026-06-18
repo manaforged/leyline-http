@@ -2,9 +2,9 @@
 //!
 //! Digest is alive and well in enterprise / on-prem stacks (routers,
 //! NASes, many embedded server SDKs, and some SOAP endpoints). Browsers
-//! still support it, and `curl` + `reqwest` both wire it in. Leyline
-//! used to expect callers to pre-compute the `Authorization: Digest`
-//! header themselves, which is brittle — this module closes that gap.
+//! still support it, and `curl` + `reqwest` both wire it in. This module
+//! computes the `Authorization: Digest` header from the server challenge
+//! so callers do not have to.
 //!
 //! The flow is a challenge/response:
 //!
@@ -17,8 +17,8 @@
 //!
 //! Leyline supports `MD5`, `SHA-256`, and `SHA-512-256` (plus their
 //! `-sess` variants) with `qop=auth`. Username-hashing (`userhash=true`)
-//! is not implemented — callers that need it will have to compute the
-//! Authorization header themselves for now.
+//! is not supported; callers that need it must compute the Authorization
+//! header themselves.
 
 use md5::{Digest as Md5Digest, Md5};
 use sha2::{Sha256, Sha512_256};
@@ -116,13 +116,7 @@ impl Algorithm {
 }
 
 fn hex(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        out.push(HEX[(b >> 4) as usize] as char);
-        out.push(HEX[(b & 0x0f) as usize] as char);
-    }
-    out
+    hex::encode(bytes)
 }
 
 /// Parse a `WWW-Authenticate: Digest ...` challenge into its fields.
@@ -303,15 +297,8 @@ pub(crate) fn pick_supported_qop(qop: &str) -> Option<&'static str> {
 /// given server nonce. We sample 8 random bytes so an observer cannot
 /// predict the cnonce from a timing-correlated counter.
 pub(crate) fn generate_cnonce() -> String {
-    use rand::RngCore;
-    let mut bytes = [0u8; 8];
-    rand::thread_rng().fill_bytes(&mut bytes);
-    let mut hex = String::with_capacity(16);
-    for b in &bytes {
-        use std::fmt::Write;
-        let _ = write!(hex, "{b:02x}");
-    }
-    hex
+    // 8 random bytes → 16 hex chars.
+    crate::util::random_hex_token(8)
 }
 
 /// Monotonic nonce-count per server-nonce string, per process.

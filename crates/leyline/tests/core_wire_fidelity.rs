@@ -257,17 +257,17 @@ async fn caller_dnt_wins_over_edge_brand_overlay() {
     server.finish().await;
 }
 
-/// A site can emit 7 headers at 5 different anchor points. The
-/// caller uses `.anchored(...)` to declare each slot; the wire
-/// must show them spliced into the preset Form layout in exactly
-/// the expected XHR order.
+/// A site can emit 7 headers at 5 different anchor
+/// points. The caller uses `.anchored(...)` to declare each slot;
+/// the wire must show them spliced into the preset Form layout in
+/// declared order.
 #[tokio::test]
 async fn anchored_headers_interleave_at_preset_slots() {
     let mut server = RawServer::start(vec![RawResponse::ok()]).await;
     let session = Session::builder().http1().build().unwrap();
 
     let resp = session
-        .post(&server.url("/submit"))
+        .post(&server.url("/collect"))
         .preset(Preset::Form)
         .anchored(HeaderAnchor::AfterCchUa, "x-extra-1", "f")
         .anchored(HeaderAnchor::AfterCchUaMobile, "x-extra-2", "a0")

@@ -278,8 +278,15 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                         .push((header.name.clone(), header.value.clone()));
                 }
             }
+            // 1xx informational (except 101) is provisional — discard and await
+            // the real final HEADERS (mirrors H1 read_h1_response). Keep HPACK state.
+            if matches!(actor.status, 100..=199) && actor.status != 101 && !h.end_stream {
+                actor.status = 0;
+                actor.resp_headers.clear();
+                return Ok(());
+            }
             actor.got_headers = true;
-            if matches!(actor.status, 100..=199 | 204 | 304) {
+            if matches!(actor.status, 204 | 304) {
                 actor.drop_body = true;
             }
             // Streaming-response sinks deliver headers immediately.
@@ -314,13 +321,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         // its `conn_send_window` to put these bytes on the wire, so we
         // must always account for them against our `conn_recv_window`
         // and eventually send a WINDOW_UPDATE, *regardless* of what
-        // happens to the payload below. A prior revision of this
-        // function early-returned on stream-local errors (unknown id,
-        // bad state, max-body exceeded, consumer overflow) without
-        // crediting back the conn window — over a session with
-        // repeated slow-consumer RSTs the peer's `conn_send_window`
-        // would drain to zero and every stream on the connection
-        // would stall.
+        // happens to the payload below. Early-returning on stream-local
+        // errors (unknown id, bad state, max-body exceeded, consumer
+        // overflow) without crediting back the conn window means that,
+        // over a session with repeated slow-consumer RSTs, the peer's
+        // `conn_send_window` drains to zero and every stream on the
+        // connection would stall.
         self.conn_recv_window -= len;
 
         let complete;

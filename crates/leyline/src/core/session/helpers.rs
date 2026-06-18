@@ -36,8 +36,8 @@ impl Session {
     /// Bumps silently when a new Chrome profile is added — pin
     /// [`Browser::Chrome147`] via the builder for a fixed version.
     ///
-    /// Note: this does not enable fingerprint auditing — `resp.audit()` will
-    /// return `None`. If you want JA4/H2 introspection, build via
+    /// This does not enable fingerprint auditing — `resp.audit()` returns
+    /// `None`. For JA4/H2 introspection, build via
     /// `Session::builder().chrome().audit(true).build()` instead.
     pub fn chrome() -> Self {
         Self::builder()

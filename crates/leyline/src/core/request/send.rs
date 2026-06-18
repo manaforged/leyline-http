@@ -40,9 +40,9 @@ impl RequestBuilder {
         let request_proxy = self.proxy.take();
         let mut body = std::mem::take(&mut self.body);
 
-        // Quick-path: no retry, no digest — route through the existing
-        // single-shot execution. This preserves the old behaviour
-        // bit-for-bit for callers who haven't opted in.
+        // Quick-path: no retry, no digest — route through the
+        // single-shot execution path, the bit-for-bit behaviour for
+        // callers who have not opted into retry or digest.
         if retry_policy.is_none() && digest_auth.is_none() {
             let headers = if base_headers.is_empty() {
                 None
@@ -243,6 +243,21 @@ impl RequestBuilder {
                 Err(Error::Timeout) => retry_policy.matches_timeout(),
                 Err(Error::Tls(
                     TlsError::TcpConnect(_) | TlsError::Dns(_) | TlsError::SslConnect(_),
+                )) => retry_policy.matches_connection_error(),
+                // Safely-retryable HTTP/2 transport failures: a transport-level
+                // IO error, a graceful GOAWAY (NoError), or a server-side
+                // REFUSED_STREAM (the request never began processing). Other
+                // H2 errors (FrameTooLarge, ProtocolError, …) are NOT retried.
+                Err(Error::Http2(
+                    crate::h2::H2Error::Io(_)
+                    | crate::h2::H2Error::Connection {
+                        code: crate::h2::error::ErrorCode::NoError,
+                        ..
+                    }
+                    | crate::h2::H2Error::Stream {
+                        code: crate::h2::error::ErrorCode::RefusedStream,
+                        ..
+                    },
                 )) => retry_policy.matches_connection_error(),
                 _ => false,
             };

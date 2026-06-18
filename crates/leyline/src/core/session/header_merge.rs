@@ -208,7 +208,8 @@ mod tests {
 
     #[test]
     fn anchored_headers_interleave_at_each_anchor() {
-    // Seven headers at five anchors.
+        // Seven caller headers at five anchors.
+        //
         let mut headers = vec![
             ("sec-ch-ua".into(), "chrome".into()),
             ("sec-ch-ua-mobile".into(), "?0".into()),

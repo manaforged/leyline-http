@@ -1,0 +1,46 @@
+{
+  "name": "@manaforged/leyline",
+  "version": "1.0.0-alpha.2",
+  "description": "Node.js bindings for Leyline — browser-fidelity TLS/HTTP fingerprint sessions",
+  "license": "MIT OR Apache-2.0",
+  "homepage": "https://github.com/manaforged/leyline-http",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/manaforged/leyline-http.git"
+  },
+  "main": "wrappers/node/leyline.js",
+  "types": "wrappers/node/leyline.d.ts",
+  "engines": {
+    "node": ">=18"
+  },
+  "napi": {
+    "name": "leyline",
+    "triples": {
+      "defaults": false,
+      "additional": [
+        "x86_64-unknown-linux-gnu",
+        "x86_64-pc-windows-msvc",
+        "aarch64-apple-darwin"
+      ]
+    }
+  },
+  "scripts": {
+    "build": "napi build --platform --release --cargo-cwd crates/leyline-node wrappers/node",
+    "build:debug": "napi build --platform --cargo-cwd crates/leyline-node wrappers/node",
+    "prepare": "napi build --platform --release --cargo-cwd crates/leyline-node wrappers/node",
+    "test": "node wrappers/node/test/smoke.js"
+  },
+  "files": [
+    "wrappers/node/leyline.js",
+    "wrappers/node/leyline.d.ts",
+    "wrappers/node/index.js",
+    "wrappers/node/index.d.ts",
+    "wrappers/node/*.node",
+    "wrappers/node/README.md",
+    "crates",
+    "Cargo.toml"
+  ],
+  "devDependencies": {
+    "@napi-rs/cli": "^2.18.4"
+  }
+}

@@ -61,7 +61,7 @@ impl Encoder {
         // A request with uppercase names is malformed and MUST be treated as a
         // stream error (§8.1.2.6). Normalise here so callers can pass
         // conventionally-cased names without each site-module having to
-        // lowercase caller-provided header names itself.
+        // lowercase vendor-provided header names itself.
         // Pseudo-headers (`:method`, `:path`, …) are already lowercase.
         let lowered;
         let name: &str = if name.bytes().any(|b| b.is_ascii_uppercase()) {
@@ -242,15 +242,15 @@ mod tests {
     fn uppercase_name_encoded_as_lowercase() {
         // RFC 7540 §8.1.2 — HTTP/2 header names must be lowercase. A request
         // with uppercase names is malformed and the peer MUST treat it as a
-        // stream error. Caller headers can arrive uppercase; this
-        // encoder must normalise them regardless of caller hygiene.
+        // stream error. Some caller headers arrive in mixed case;
+        // this encoder must normalise them regardless of caller hygiene.
         let mut mixed = Encoder::new();
-        let mixed_block = mixed.encode_header_block(&[("X-Extra-4", "val")]);
+        let mixed_block = mixed.encode_header_block(&[("X-Extra", "val")]);
 
         let mut lower = Encoder::new();
-        let lower_block = lower.encode_header_block(&[("x-extra-4", "val")]);
+        let lower_block = lower.encode_header_block(&[("x-extra", "val")]);
 
         assert_eq!(mixed_block, lower_block);
-        assert_eq!(mixed.dynamic.get(0).unwrap().0, "x-extra-4");
+        assert_eq!(mixed.dynamic.get(0).unwrap().0, "x-extra");
     }
 }
