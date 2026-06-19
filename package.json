@@ -8,8 +8,17 @@
     "type": "git",
     "url": "git+https://github.com/manaforged/leyline-http.git"
   },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
   "main": "wrappers/node/leyline.js",
   "types": "wrappers/node/leyline.d.ts",
+  "exports": {
+    ".": {
+      "types": "./wrappers/node/leyline.d.ts",
+      "default": "./wrappers/node/leyline.js"
+    }
+  },
   "engines": {
     "node": ">=18"
   },
@@ -27,19 +36,25 @@
   "scripts": {
     "build": "napi build --platform --release --cargo-cwd crates/leyline-node wrappers/node",
     "build:debug": "napi build --platform --cargo-cwd crates/leyline-node wrappers/node",
-    "prepare": "napi build --platform --release --cargo-cwd crates/leyline-node wrappers/node",
-    "test": "node wrappers/node/test/smoke.js"
+    "artifacts": "napi artifacts --dir artifacts --dist npm",
+    "test": "node wrappers/node/test/offline.js && node wrappers/node/test/smoke.js"
   },
   "files": [
     "wrappers/node/leyline.js",
     "wrappers/node/leyline.d.ts",
     "wrappers/node/index.js",
     "wrappers/node/index.d.ts",
-    "wrappers/node/*.node",
     "wrappers/node/README.md",
-    "crates",
-    "Cargo.toml"
+    "LICENSE",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+    "NOTICE"
   ],
+  "optionalDependencies": {
+    "@manaforged/leyline-darwin-arm64": "1.0.0-alpha.2",
+    "@manaforged/leyline-linux-x64-gnu": "1.0.0-alpha.2",
+    "@manaforged/leyline-win32-x64-msvc": "1.0.0-alpha.2"
+  },
   "devDependencies": {
     "@napi-rs/cli": "^2.18.4"
   }

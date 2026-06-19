@@ -232,14 +232,13 @@ impl RequestBuilder {
 
             let should_retry = match &result {
                 Ok(resp) => retry_policy.matches_status(resp.status()),
+                // Transport-level connection loss is typed: a mid-exchange H1
+                // EOF surfaces as Io(UnexpectedEof) (see h1_error_to_core), so
+                // the typed Io arm covers it. `Error::Http(_)` framing/protocol
+                // errors are deliberately NOT retried — their message can carry
+                // attacker-controlled header bytes, so substring-matching it
+                // into a retry was a request-smuggling hazard.
                 Err(Error::Io(_)) => retry_policy.matches_connection_error(),
-                Err(Error::Http(msg))
-                    if msg.contains("connection")
-                        || msg.contains("closed")
-                        || msg.contains("eof") =>
-                {
-                    retry_policy.matches_connection_error()
-                }
                 Err(Error::Timeout) => retry_policy.matches_timeout(),
                 Err(Error::Tls(
                     TlsError::TcpConnect(_) | TlsError::Dns(_) | TlsError::SslConnect(_),

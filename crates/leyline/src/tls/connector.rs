@@ -292,29 +292,22 @@ impl FingerprintConnector {
         host: &str,
         include_alps: bool,
     ) -> Result<TlsStream, TlsError> {
-        let mut config = self
-            .ssl_connector
-            .configure()
-            .map_err(TlsError::Handshake)?;
+        let mut config = self.ssl_connector.configure()?;
 
         // ALPS — only when negotiating h2 (not for h1-only WebSocket).
         if include_alps {
             if let Some(ref alps) = self.alps_proto {
-                config
-                    .add_application_settings(alps)
-                    .map_err(TlsError::Handshake)?;
+                config.add_application_settings(alps)?;
                 if self.alps_new_codepoint {
                     config.set_alps_use_new_codepoint(true);
                 }
             }
         } else {
             // WebSocket: override ALPN to http/1.1 only.
-            config
-                .set_alpn_protos(b"\x08http/1.1")
-                .map_err(TlsError::Handshake)?;
+            config.set_alpn_protos(b"\x08http/1.1")?;
         }
 
-        let mut ssl = config.into_ssl(host).map_err(TlsError::Handshake)?;
+        let mut ssl = config.into_ssl(host)?;
 
         // Danger mode: skip peer verification entirely. Only wired
         // through the CLI's -k/--insecure flag; off by default.

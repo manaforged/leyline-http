@@ -114,9 +114,17 @@ pub enum H1PooledError {
     #[error(transparent)]
     Io(#[from] std::io::Error),
     /// Protocol-level error parsing a response (bad status line,
-    /// oversize headers, malformed chunked body, …).
+    /// oversize headers, malformed chunked body, …). NOT retryable — the
+    /// message can interpolate attacker-controlled header bytes, so it must
+    /// never feed a retry decision.
     #[error("http: {0}")]
     Http(String),
+    /// The connection closed before the response was fully received — a
+    /// transport-level EOF mid-exchange, distinct from a framing error.
+    /// Safe to retry on a fresh connection (mapped to `Error::Io`
+    /// `UnexpectedEof` at the core boundary).
+    #[error("connection closed: {0}")]
+    ConnectionClosed(String),
 }
 
 // thiserror brings the Display/Error impls; nothing else needed.
@@ -681,8 +689,8 @@ where
     loop {
         let n = stream.read(&mut tmp).await?;
         if n == 0 {
-            return Err(H1PooledError::Http(
-                "connection closed before HTTP/1.1 headers".into(),
+            return Err(H1PooledError::ConnectionClosed(
+                "before HTTP/1.1 headers".into(),
             ));
         }
         buf.extend_from_slice(&tmp[..n]);
@@ -755,8 +763,8 @@ where
         let mut tmp = vec![0u8; remaining.min(8192)];
         let n = stream.read(&mut tmp).await?;
         if n == 0 {
-            return Err(H1PooledError::Http(
-                "connection closed before HTTP/1.1 body completed".into(),
+            return Err(H1PooledError::ConnectionClosed(
+                "before HTTP/1.1 body completed".into(),
             ));
         }
         body.extend_from_slice(&tmp[..n]);
@@ -872,8 +880,8 @@ where
     let mut tmp = [0u8; 8192];
     let n = stream.read(&mut tmp).await?;
     if n == 0 {
-        return Err(H1PooledError::Http(
-            "connection closed during chunked body".into(),
+        return Err(H1PooledError::ConnectionClosed(
+            "during chunked body".into(),
         ));
     }
     buf.extend_from_slice(&tmp[..n]);

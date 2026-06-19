@@ -1,0 +1,153 @@
+name: release-node
+
+# Build the prebuilt N-API addon for every supported target and publish the
+# main package plus one per-platform binary package, so `npm install
+# @manaforged/leyline` resolves a prebuilt `.node` with ZERO compile on the
+# consumer side (the napi-rs optionalDependencies pattern — see
+# wrappers/node/README.md "Install").
+#
+# Targets: the three for which btls-sys ships prebuilt BoringSSL
+# (crates/btls-sys/native/<target>/lib). No BORING_BSSL_PATH needed — the
+# static libs are in-tree, so each matrix leg builds against them directly.
+#
+# Registry: GitHub Packages (npm.pkg.github.com), authed by the built-in
+# GITHUB_TOKEN. To publish on npmjs.com
+# on npmjs.com, see docs/RELEASING.md ("Switching to the public npm registry").
+#
+# Publishing is deliberate, never automatic: a `v*` tag (or a dispatch left at
+# the dry_run default) only does a `npm publish --dry-run` rehearsal — it uploads
+# nothing. A real publish requires a manual workflow_dispatch with dry_run
+# UNCHECKED.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build + pack + validate only (no publish). Uncheck to actually publish."
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  packages: write # publish to npm.pkg.github.com via GITHUB_TOKEN
+
+concurrency:
+  group: release-node-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Gate the publish on version + optionalDependencies parity at the tag commit,
+  # so a dangling pin can never produce a root that resolves a missing platform
+  # package.
+  version-parity:
+    uses: ./.github/workflows/version-parity.yml
+
+  build:
+    name: build ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: macos-14 # Apple Silicon
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Configure MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      # No build runs on install (the package has no `prepare`); install only
+      # the @napi-rs/cli devDependency, then build explicitly.
+      - name: install @napi-rs/cli
+        run: npm install --ignore-scripts
+      - name: build prebuilt addon (release)
+        # Release, not debug: the Chrome 147 cold handshake overflows the
+        # default Windows main-thread stack in a debug build (see CONTRIBUTING.md).
+        run: npm run build
+      - name: upload .node
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-${{ matrix.target }}
+          path: wrappers/node/*.node
+          if-no-files-found: error
+      # The JS loader (index.js / index.d.ts) is platform-independent and
+      # napi-generated; capture it once for the root package tarball.
+      - name: upload JS loader
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        uses: actions/upload-artifact@v4
+        with:
+          name: js-loader
+          path: |
+            wrappers/node/index.js
+            wrappers/node/index.d.ts
+          if-no-files-found: error
+
+  publish:
+    name: publish (GitHub Packages)
+    needs: [build, version-parity]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@manaforged"
+      - name: install @napi-rs/cli
+        run: npm install --ignore-scripts
+      - name: download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: restore JS loader into wrappers/node
+        run: cp artifacts/js-loader/index.js artifacts/js-loader/index.d.ts wrappers/node/
+      # Regenerate npm/<platform>/package.json from the (single-sourced) root
+      # version so every per-platform package version tracks the root exactly.
+      - name: sync per-platform package metadata
+        run: npx napi create-npm-dir -t .
+      # Copy each leyline.<platform>.node into its npm/<platform>/ package.
+      - name: distribute .node binaries into per-platform packages
+        run: npm run artifacts
+      # The per-platform packages statically link BoringSSL; ship the umbrella
+      # LICENSE in each so the redistributed binary carries its obligations.
+      # npm auto-includes a file literally named LICENSE regardless of files[],
+      # and create-npm-dir (above) regenerated these dirs, so copy it in now.
+      - name: bundle LICENSE into per-platform packages
+        run: for dir in npm/*/; do cp LICENSE "$dir"; done
+      - name: publish per-platform packages, then the root
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # A real publish happens ONLY on a manual workflow_dispatch with
+          # dry_run UNCHECKED. A `v*` tag — or any dispatch left at the
+          # dry_run=true default — builds + packs + `npm publish --dry-run`, a
+          # publish-nothing dress rehearsal. This mirrors release-crates.yml
+          # (dispatch-only) and release-python.yml (publish gated on an explicit
+          # input): no tag push can ever auto-publish to the registry.
+          DRY_RUN: ${{ (github.event_name == 'workflow_dispatch' && !inputs.dry_run) && '' || '--dry-run' }}
+        run: |
+          set -euo pipefail
+          # Per-platform binary packages first — the root's optionalDependencies
+          # reference them, so they must exist before the root is published.
+          for dir in npm/*/; do
+            echo "::group::publish ${dir}"
+            npm publish "${dir}" ${DRY_RUN}
+            echo "::endgroup::"
+          done
+          echo "::group::publish root @manaforged/leyline"
+          npm publish ${DRY_RUN}
+          echo "::endgroup::"

@@ -376,6 +376,13 @@ fn h1_error_to_core(e: H1PooledError) -> Error {
         H1PooledError::Tls(m) => Error::Tls(crate::tls::TlsError::SslConnect(m)),
         H1PooledError::Io(io) => Error::Io(io),
         H1PooledError::Http(m) => Error::Http(m),
+        // Transport-level EOF mid-exchange → typed Io(UnexpectedEof), so the
+        // retry engine treats it as a connection error via the typed `Io` arm
+        // (no substring sniffing of an attacker-influenceable message).
+        H1PooledError::ConnectionClosed(ctx) => Error::Io(std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            format!("connection closed {ctx}"),
+        )),
     }
 }
 
@@ -491,5 +498,27 @@ mod alpn_fallback_tests {
                 code: crate::h2::error::ErrorCode::RefusedStream,
             }
         )));
+    }
+
+    #[test]
+    fn h1_connection_closed_is_typed_retryable_but_framing_is_not() {
+        use crate::pool::H1PooledError;
+        // Mid-exchange EOF → typed Io(UnexpectedEof), classified as a
+        // connection-closed (so the retry engine's typed Io arm retries it).
+        let closed = h1_error_to_core(H1PooledError::ConnectionClosed("before headers".into()));
+        assert!(
+            matches!(&closed, Error::Io(e) if e.kind() == std::io::ErrorKind::UnexpectedEof),
+            "ConnectionClosed must map to Io(UnexpectedEof), got {closed:?}"
+        );
+        assert!(closed.is_connection_closed());
+        // A framing error whose message interpolates attacker-controlled header
+        // bytes containing "connection" must NOT be classified as
+        // connection-closed — the old substring match would have retried it
+        // (a request-smuggling hazard); the typed path does not.
+        let framing = h1_error_to_core(H1PooledError::Http(
+            "invalid Transfer-Encoding: connection-close".into(),
+        ));
+        assert!(matches!(framing, Error::Http(_)));
+        assert!(!framing.is_connection_closed());
     }
 }

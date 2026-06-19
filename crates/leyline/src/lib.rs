@@ -169,8 +169,10 @@ pub use crate::tcp::TcpProfile;
 // defaults a caller would reference when overriding `pool_limits`.
 pub use crate::pool::{PoolStats, DEFAULT_IDLE_TIMEOUT, DEFAULT_MAX_CONNECTIONS};
 
-// HTTP/2 protocol error type returned by the HTTP/2 layer.
-pub use crate::h2::H2Error;
+// HTTP/2 protocol error type returned by the HTTP/2 layer, with the error code
+// it carries (both render at the crate root — `ErrorCode` appears in the public
+// `H2Error` signature, so it must be nameable here, not only via h2::error).
+pub use crate::h2::{ErrorCode, H2Error};
 
 // HTTP/3 connection types (behind the `http3` feature).
 #[cfg(feature = "http3")]

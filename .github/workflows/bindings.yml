@@ -1,10 +1,12 @@
 name: bindings
 
-# Build + smoke-test the Node and Python wrappers on the three prebuilt-BoringSSL
-# targets. No publishing — the wrappers are consumed from source by git rev
-# (see wrappers/{node,python}/README.md). The live JA4 wire-parity smoke runs
-# only on manual dispatch (network flake shouldn't block PRs); PRs run the
-# offline surface tests via LEYLINE_SKIP_LIVE=1.
+# PR/CI test + smoke for the Node and Python wrappers on the three
+# prebuilt-BoringSSL targets (lib tests + clippy, then build & smoke each
+# binding). This workflow does NOT publish or produce release artifacts —
+# prebuilt distribution is handled by release-node.yml (npm/GitHub Packages)
+# and release-python.yml (wheels/PyPI); see docs/RELEASING.md. The live JA4
+# wire-parity smoke runs only on manual dispatch (network flake shouldn't
+# block PRs); PRs run the offline surface tests via LEYLINE_SKIP_LIVE=1.
 
 on:
   push:

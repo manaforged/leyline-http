@@ -128,6 +128,13 @@ impl Error {
                 code: ErrorCode::NoError,
                 ..
             }) => true,
+            // Server refused the stream before processing it — the request
+            // never began, so it is safe to retry. Mirrors the retry engine
+            // in core/request/send.rs.
+            Error::Http2(H2Error::Stream {
+                code: ErrorCode::RefusedStream,
+                ..
+            }) => true,
             _ => false,
         }
     }

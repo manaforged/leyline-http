@@ -9,8 +9,6 @@ use crate::h2::H2Config;
 use crate::pool::Pool;
 use crate::profile::{Browser, ChromiumBrand, Platform, ProfileRegistry};
 use crate::tcp::TcpProfile;
-#[cfg(feature = "tls-rustls")]
-use crate::tls::RustlsConnector;
 use crate::tls::{
     ConnectorVariant, FingerprintConnector, HappyEyeballsConfig, Resolver, TlsTrustConfig,
 };
@@ -687,48 +685,23 @@ impl SessionBuilder {
         } else {
             self.tls_trust.clone()
         };
-        // Fingerprint (BoringSSL) connector builder — used for every
-        // browser/profile session, and for all sessions when the
-        // `tls-rustls` feature is off.
-        let build_fp = || -> Result<FingerprintConnector> {
-            let mut connector =
-                FingerprintConnector::new_with_trust(profile, tcp_profile, &tls_trust)
-                    .map_err(Error::Tls)?;
-            if self.accept_invalid_certs {
-                connector.set_accept_invalid_certs(true);
-            }
-            connector = connector.with_resolver(self.dns_config.clone().into_resolver());
-            connector = connector.with_socket_config(self.socket_config.clone());
-            if let Some(connect_timeout) = self.timeouts.connect {
-                connector = connector.with_connect_timeout(connect_timeout);
-            }
-            if let Some(config) = self.happy_eyeballs {
-                connector = connector.with_happy_eyeballs_config(config);
-            }
-            Ok(connector)
-        };
-
-        // Bare `Session::new()` routes through the pure-Rust rustls
-        // backend when `tls-rustls` is enabled; profile sessions stay on
-        // BoringSSL. With the feature off, every session uses BoringSSL.
-        #[cfg(feature = "tls-rustls")]
-        let connector = if self.browser.is_none() {
-            let mut c = RustlsConnector::new(tcp_profile, &tls_trust, self.accept_invalid_certs)
-                .map_err(Error::Tls)?;
-            c = c.with_resolver(self.dns_config.clone().into_resolver());
-            c = c.with_socket_config(self.socket_config.clone());
-            if let Some(connect_timeout) = self.timeouts.connect {
-                c = c.with_connect_timeout(connect_timeout);
-            }
-            if let Some(config) = self.happy_eyeballs {
-                c = c.with_happy_eyeballs_config(config);
-            }
-            ConnectorVariant::Bare(c)
-        } else {
-            ConnectorVariant::Fingerprint(build_fp()?)
-        };
-        #[cfg(not(feature = "tls-rustls"))]
-        let connector = ConnectorVariant::Fingerprint(build_fp()?);
+        // Every session uses the BoringSSL fingerprint connector: browser/
+        // profile sessions impersonate that browser, and a bare
+        // `Session::new()` uses the synthetic `BARE_PROFILE` resolved above.
+        let mut fp = FingerprintConnector::new_with_trust(profile, tcp_profile, &tls_trust)
+            .map_err(Error::Tls)?;
+        if self.accept_invalid_certs {
+            fp.set_accept_invalid_certs(true);
+        }
+        fp = fp.with_resolver(self.dns_config.clone().into_resolver());
+        fp = fp.with_socket_config(self.socket_config.clone());
+        if let Some(connect_timeout) = self.timeouts.connect {
+            fp = fp.with_connect_timeout(connect_timeout);
+        }
+        if let Some(config) = self.happy_eyeballs {
+            fp = fp.with_happy_eyeballs_config(config);
+        }
+        let connector = ConnectorVariant::Fingerprint(fp);
 
         // Build H2 config from profile, applying any per-platform
         // override (e.g. Chromium-on-macOS drops `unknown_setting8`).

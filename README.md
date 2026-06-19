@@ -280,10 +280,14 @@ client.post("https://api.example.com/items", json={"name": "ada"})
 
 `asyncio` works too — swap `Client` for `AsyncClient` and `await` the calls.
 
-Pick a profile (`Client.chrome()`, `Client.firefox()`, `Client.withProfile("chrome147")`),
-route through a proxy, set timeouts, or pass `audit=false`/`{ audit: false }` for
-the zero-cost hot path — the surface mirrors the Rust API. Both wrappers are
-consumed from source by git rev (no npm/PyPI registry yet); full install and API
+Pick a profile (Node: `Client.chrome()` / `Client.withProfile("chrome147")`;
+Python: `Client.chrome()` / `Client(profile="chrome147")`), route through a
+proxy, set timeouts, or pass `audit=false`/`{ audit: false }` for the zero-cost
+hot path — the surface mirrors the Rust API. Both wrappers ship **prebuilt** for
+the common targets — `npm install @manaforged/leyline` (Node, via GitHub
+Packages during the alpha) and a prebuilt abi3 wheel for Python — so no Rust
+toolchain or BoringSSL build is needed on supported platforms; source builds
+remain the fallback for other targets. Full install (registry/auth) and API
 docs live in [`wrappers/node`](wrappers/node/README.md) and
 [`wrappers/python`](wrappers/python/README.md).
 

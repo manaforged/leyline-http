@@ -11,10 +11,6 @@ mod happy_eyeballs;
 mod nonblocking;
 mod proxy;
 mod resolver;
-#[cfg(feature = "tls-rustls")]
-mod rustls_connector;
-#[cfg(feature = "tls-rustls")]
-mod rustls_trust;
 mod stream;
 mod trust;
 #[cfg(windows)]
@@ -30,9 +26,6 @@ pub use trust::{ClientIdentity, TlsTrustConfig};
 // public API (see the `#[doc(hidden)]` note on the internal modules in lib.rs).
 #[doc(hidden)]
 pub use connector::FingerprintConnector;
-#[cfg(feature = "tls-rustls")]
-#[doc(hidden)]
-pub use rustls_connector::RustlsConnector;
 
 pub(crate) use builder::build_ssl_context;
 pub(crate) use stream::TlsIo;
@@ -91,18 +84,16 @@ pub struct TlsStream {
 }
 
 /// The active connector backend, selected once by the session builder.
-/// Bare `Session::new()` sessions use the pure-Rust [`RustlsConnector`];
-/// browser/profile sessions use the BoringSSL [`FingerprintConnector`].
-/// The rest of the stack dispatches `connect`/`connect_h1` through here.
+/// Every session — bare `Session::new()` (via the synthetic `BARE_PROFILE`)
+/// and browser/profile sessions alike — uses the BoringSSL
+/// [`FingerprintConnector`]. The rest of the stack dispatches
+/// `connect`/`connect_h1` through here. One variant today; the enum is the
+/// seam where a future TLS backend slots in.
 #[doc(hidden)]
 #[derive(Clone, Debug)]
-#[allow(clippy::large_enum_variant)]
 pub enum ConnectorVariant {
-    /// BoringSSL fingerprinting connector — browser/profile sessions.
+    /// BoringSSL fingerprinting connector.
     Fingerprint(FingerprintConnector),
-    /// Pure-Rust rustls connector — bare `Session::new()` sessions.
-    #[cfg(feature = "tls-rustls")]
-    Bare(RustlsConnector),
 }
 
 impl ConnectorVariant {
@@ -114,8 +105,6 @@ impl ConnectorVariant {
     ) -> Result<TlsStream, TlsError> {
         match self {
             ConnectorVariant::Fingerprint(c) => c.connect(host, port, proxy).await,
-            #[cfg(feature = "tls-rustls")]
-            ConnectorVariant::Bare(c) => c.connect(host, port, proxy).await,
         }
     }
 
@@ -127,8 +116,6 @@ impl ConnectorVariant {
     ) -> Result<TlsStream, TlsError> {
         match self {
             ConnectorVariant::Fingerprint(c) => c.connect_h1(host, port, proxy).await,
-            #[cfg(feature = "tls-rustls")]
-            ConnectorVariant::Bare(c) => c.connect_h1(host, port, proxy).await,
         }
     }
 }

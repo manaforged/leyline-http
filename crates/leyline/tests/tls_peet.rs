@@ -1362,7 +1362,7 @@ async fn live_http_connect_proxy() {
     let h2 = json["http2"]["akamai_fingerprint"].as_str().unwrap();
     assert_eq!(
         normalize_akamai(h2),
-        "1:65536;2:0;4:6291456;6:262144;8:1|15663105|0|m,a,s,p",
+        "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p",
         "H2 fingerprint changed through HTTP CONNECT proxy"
     );
     println!("✓ HTTP CONNECT proxy: tunneled request preserved Chrome 147 H2 fingerprint");
@@ -1400,7 +1400,7 @@ async fn live_socks5_proxy() {
     let h2 = json["http2"]["akamai_fingerprint"].as_str().unwrap();
     assert_eq!(
         normalize_akamai(h2),
-        "1:65536;2:0;4:6291456;6:262144;8:1|15663105|0|m,a,s,p",
+        "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p",
         "H2 fingerprint changed through SOCKS5 proxy"
     );
     println!("✓ SOCKS5 proxy: tunneled request preserved Chrome 147 H2 fingerprint");

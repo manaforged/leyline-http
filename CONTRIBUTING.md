@@ -82,8 +82,13 @@ The verify script runs:
 - `cargo deny --all-features check`
 - `cd benches && cargo bench --no-run` when `benches/` is present
 
-The verify script is the CI. Run it before every PR and before tagging a
-release.
+GitHub Actions runs CI: `test.yml` runs version/optionalDependencies parity,
+`cargo deny`, and the workspace test suite on every push and PR to `main`; the
+live tls.peet.ws fingerprint matrix runs only on `workflow_dispatch` / the
+weekly `fingerprint-cron.yml` (flaky network must not block PRs). The
+`release-{node,python,crates}.yml` workflows publish on `v*` tags. `scripts/verify.sh`
+is the local pre-PR/pre-tag gate that mirrors these checks — run it before
+opening a PR and before tagging.
 
 The pre-commit hook runs the offline Leyline workspace suite automatically. If
 it fails, fix the cause - do not bypass the hook.
@@ -116,35 +121,21 @@ profile carries a fingerprint expectation.
 
 ## Releasing
 
-1. Bump `workspace.package.version` in the root `Cargo.toml` and add an
-   entry to `CHANGELOG.md` (`## x.y.z — YYYY-MM-DD`).
-2. Run the full preflight:
-   ```
-   cargo fmt --all --check
-   cargo clippy --workspace --exclude leyline-quiche --all-targets --no-deps -- -D warnings
-   RUSTDOCFLAGS="-D warnings" cargo doc --workspace --exclude leyline-quiche --no-deps
-   cargo test --workspace --exclude leyline-quiche
-   cargo test -p leyline --test tls_peet -- --ignored
-   cargo test -p leyline --test smoke -- --ignored --nocapture
-   cargo deny --all-features check
-   ./scripts/package.sh
-   ```
-3. Package/publish crates in dependency order. `leyline` cannot package until
-   the same-version `leyline-quiche` is visible in the crates.io index:
-   ```
-   cargo publish -p leyline-quiche
-   # wait for crates.io index propagation, then:
-   ./scripts/package.sh
-   cargo publish -p leyline
-   ```
-4. Tag: `git tag -s vX.Y.Z -m "leyline vX.Y.Z"`; push tag.
-5. Build FFI artifacts locally per target (Linux x86_64, macOS arm64,
-   Windows x86_64) with `cargo build --release -p leyline-ffi`. Hash
-   each artifact (`sha256sum` / `shasum -a 256`) and attach to the
-   GitHub release alongside a signed `SHA256SUMS` file. The repo does
-   not ship pre-compiled binaries in-tree — release artifacts are the
-   only distribution channel for them.
-6. The FFI crate ships separately under `leyline-ffi`.
+A release ships from one `v*` tag: the Rust crate (crates.io), the Node addon
+(npm/GitHub Packages), and the Python wheels. **[docs/RELEASING.md](docs/RELEASING.md)
+is the source of truth** for the procedure and registry details — follow it, not
+a hand-run `cargo publish`.
+
+In brief:
+
+1. Bump `workspace.package.version` in the root `Cargo.toml` and mirror it into
+   `package.json` (`version` + the three `optionalDependencies`),
+   `wrappers/python/pyproject.toml`, and the READMEs — CI's `version-parity` job
+   enforces this. Add a `CHANGELOG.md` entry.
+2. Run `scripts/verify.sh` (the local preflight) and merge to `main`.
+3. `git tag -s vX.Y.Z -m "leyline vX.Y.Z" && git push origin vX.Y.Z`. The tag
+   fires `release-node.yml` and `release-python.yml`; `release-crates.yml` is
+   `workflow_dispatch`-only (public crates.io is a deliberate, manual go-live).
 
 ## Commit shape
 

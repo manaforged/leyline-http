@@ -133,12 +133,6 @@ impl TlsTrustConfig {
     pub fn pinned_leaf_sha256(&self) -> &[[u8; 32]] {
         &self.pinned_leaf_sha256
     }
-
-    /// In-memory DER CA certificates configured by the caller (rustls bridge).
-    #[cfg(feature = "tls-rustls")]
-    pub(crate) fn ca_der(&self) -> &[Vec<u8>] {
-        &self.ca_der
-    }
 }
 
 /// PEM client identity used for mutual TLS.

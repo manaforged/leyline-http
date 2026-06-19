@@ -11,7 +11,9 @@ authors = [
     "Thomas Gardiner",
 ]
 description = "Prebuilt BoringSSL FFI bindings for Leyline"
-license = "MIT"
+# MIT FFI binding glue + prebuilt BoringSSL static libs (Apache-2.0, with a
+# BSD-3-Clause notice for unlinked Go test tooling). See LICENSE-BORINGSSL.
+license = "MIT AND Apache-2.0 AND BSD-3-Clause"
 repository = "https://github.com/0x676e67/btls"
 build = "build.rs"
 links = "boringssl"
@@ -23,6 +25,8 @@ autobenches = false
 include = [
     "/Cargo.toml",
     "/README.md",
+    "/LICENSE-MIT",
+    "/LICENSE-BORINGSSL",
     "/build.rs",
     "/src/lib.rs",
     "/src/bindings/x86_64-pc-windows-msvc.rs",

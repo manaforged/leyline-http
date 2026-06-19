@@ -13,6 +13,14 @@ categories.workspace = true
 documentation = "https://docs.rs/leyline"
 readme = "README.md"
 
+[package.metadata.docs.rs]
+# docs.rs builds the published crate, where the workspace
+# `[patch.crates-io] btls-sys` does not apply — so btls-sys builds BoringSSL
+# from source (cmake/perl/go must be present on the builder). Document the
+# default feature set on one target to stay within docs.rs build limits.
+# Zero-compile docs via a prebuilt-BoringSSL btls fork are a tracked follow-up.
+targets = ["x86_64-unknown-linux-gnu"]
+
 [features]
 default = [
     "cookies",
@@ -42,12 +50,6 @@ http3 = ["dep:leyline-quiche"]
 socks = []
 system-trust = []
 native-interface-bind = []
-# Second TLS backend: rustls (pure-Rust handshake) for the bare/non-fingerprint
-# path. Additive + opt-in — bare Session::new() routes through rustls when enabled;
-# parity (chrome/profile) sessions stay on BoringSSL. Default crypto provider is
-# aws-lc-rs (rustls default). A future tls-rustls-rustcrypto flag will swap in the
-# pure-Rust provider for a zero-C / musl-cross build.
-tls-rustls = ["dep:rustls", "dep:tokio-rustls", "dep:rustls-native-certs", "dep:rustls-pemfile"]
 tower = ["dep:tower-service"]
 full = [
     "cookies",
@@ -89,12 +91,6 @@ toml = { workspace = true }
 socket2 = { workspace = true }
 url = { workspace = true }
 
-# -- rustls (optional second TLS backend; bare path only — see the tls-rustls feature)
-rustls = { version = "0.23", optional = true }
-tokio-rustls = { version = "0.26", optional = true }
-rustls-native-certs = { version = "0.8", optional = true }
-rustls-pemfile = { version = "2", optional = true }
-
 # -- tracing
 tracing = { workspace = true }
 
@@ -121,7 +117,7 @@ async-stream = { version = "0.3", optional = true }
 # Non-optional: h2::client::H2ConnectStream needs PollSender for
 # cancel-safe AsyncWrite backpressure (waker survives across polls).
 tokio-util = { version = "0.7", features = ["io"] }
-lru = "0.17"
+lru = "0.18"
 rand = "0.8"
 libc = "0.2"
 tower-service = { version = "0.3", optional = true }

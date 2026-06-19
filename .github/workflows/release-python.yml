@@ -1,0 +1,130 @@
+name: release-python
+
+# Build abi3 wheels (one wheel per platform covers CPython >= 3.8, via
+# pyo3's abi3-py38 feature) for the three prebuilt-BoringSSL targets and an
+# sdist, then optionally publish to PyPI via Trusted Publishing (OIDC).
+#
+# Scope note: wheels cover the same three targets as the Node addon
+# (manylinux x86_64-gnu, windows x64, macOS arm64) — the targets for which
+# btls-sys vendors prebuilt BoringSSL (crates/btls-sys/native/<target>/lib).
+# Other targets (aarch64-linux, musllinux, intel-mac) need a source build with
+# BORING_BSSL_PATH — see wrappers/python/README.md.
+#
+# PyPI has no private tier, so during the private alpha this workflow BUILDS
+# and validates wheels (artifacts) but does not publish. The PyPI upload job
+# runs only on an explicit workflow_dispatch with publish_pypi=true, after the
+# `leyline` name is reserved and a Trusted Publisher is configured on PyPI —
+# see docs/RELEASING.md.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      publish_pypi:
+        description: "Upload to PyPI (public). Off = build + validate only."
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-python-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Gate the PyPI publish on version parity at the tag commit.
+  version-parity:
+    uses: ./.github/workflows/version-parity.yml
+
+  wheels:
+    name: wheel ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: macos-14 # Apple Silicon
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: wrappers/python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Configure MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: install maturin
+        run: python -m pip install --upgrade maturin
+      - name: build abi3 wheel (release)
+        run: maturin build --release --target ${{ matrix.target }} --out dist
+      - name: smoke (install wheel + offline tests, no Rust)
+        shell: bash
+        env:
+          LEYLINE_SKIP_LIVE: "1"
+        run: |
+          python -m pip install --force-reinstall --no-deps dist/*.whl
+          python -m pytest tests -q
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.target }}
+          path: wrappers/python/dist/*.whl
+          if-no-files-found: error
+
+  sdist:
+    name: sdist
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: wrappers/python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: install maturin
+        run: python -m pip install --upgrade maturin
+      - name: build sdist
+        run: maturin sdist --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: wrappers/python/dist/*.tar.gz
+          if-no-files-found: error
+
+  pypi:
+    name: publish to PyPI (Trusted Publishing)
+    needs: [wheels, sdist, version-parity]
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_pypi }}
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write # OIDC token for PyPI Trusted Publishing — no API token
+    steps:
+      - name: download wheels
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: wheels-*
+          merge-multiple: true
+      - name: download sdist
+        uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist
+      - name: publish
+        uses: pypa/gh-action-pypi-publish@release/v1
