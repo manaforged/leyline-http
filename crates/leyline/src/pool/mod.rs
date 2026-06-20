@@ -8,11 +8,14 @@
 //!   requests over the same TCP connection. Checkout is a cheap
 //!   `clone` and many in-flight requests share the connection
 //!   without serialisation.
-//! - **HTTP/1.1 keep-alive** — one connection per destination, but
-//!   single-checkout semantics (H1 cannot multiplex). The owned
-//!   stream is taken out of the pool for the duration of a
-//!   request/response exchange and reinstated on clean completion
-//!   when the response is reusable.
+//! - **HTTP/1.1 keep-alive** — a pool of warm connections per destination.
+//!   H1 cannot multiplex, so per-host concurrency needs several connections;
+//!   the live count is capped at `max_h1_conns_per_host` (default 256,
+//!   throughput-favouring; set 6 to mirror a browser's per-host socket limit)
+//!   by a per-host semaphore. A checkout takes one warm connection out of the
+//!   deque for a request/response exchange and returns it on a reusable
+//!   completion; requests beyond the cap wait on the semaphore for a
+//!   connection to free, rather than opening unbounded sockets.
 //!
 //! ## Eviction
 //! - **Idle timeout**: entries untouched for longer than the configured
@@ -43,7 +46,9 @@ pub use h1::{
     send_request_h1_pooled, H1Body, H1Io, H1PooledError, H1Response, H1ResponseBody, H1Target,
     MAX_H1_BODY_BYTES, MAX_H1_HEADER_BYTES,
 };
-pub use pool::{Pool, DEFAULT_IDLE_TIMEOUT, DEFAULT_MAX_CONNECTIONS};
+pub use pool::{
+    Pool, DEFAULT_IDLE_TIMEOUT, DEFAULT_MAX_CONNECTIONS, DEFAULT_MAX_H1_CONNS_PER_HOST,
+};
 pub use types::{H1Slot, PoolStats, TlsInfo};
 
 use types::{H2Io, PoolKey};
@@ -95,6 +100,77 @@ async fn open_fresh_h2(
     Ok((handle, tls))
 }
 
+/// Establish — or join an already in-progress — H2 connection to `(host, port, proxy)`,
+/// single-flighting concurrent first-requests so they share ONE TLS+H2 handshake instead of each
+/// opening their own. This eliminates the connection storm a one-conn-per-host pool otherwise
+/// triggers when N requests hit a cold destination at once, and (because the connect runs inside a
+/// boxed `Shared` future) keeps the large handshake state machine off every caller's per-request
+/// future. H2-only: H1 keeps opening parallel connections via its own path.
+///
+/// The connect future removes its own in-flight entry on completion, so a cancelled leader cannot
+/// strand waiters and the next miss after a connection dies starts a fresh connect.
+async fn open_h2_coalesced(
+    pool: &Arc<Pool>,
+    connector: &ConnectorVariant,
+    h2_config: &H2Config,
+    key: PoolKey,
+    host: &str,
+    port: u16,
+    proxy: Option<&str>,
+) -> Result<(crate::h2::client::H2Client, TlsInfo), crate::Error> {
+    use futures_util::FutureExt;
+
+    // A connect may have finished between the caller's pool miss and now.
+    if let Some(hit) = pool.checkout_h2(&key) {
+        return Ok(hit);
+    }
+
+    let shared = pool.inflight_h2_get_or_insert_with(key.clone(), || {
+        let pool = Arc::clone(pool);
+        let cleanup_pool = Arc::clone(&pool);
+        let connector = connector.clone();
+        let h2_config = h2_config.clone();
+        let connect_key = key.clone();
+        let cleanup_key = key.clone();
+        let host = host.to_string();
+        let proxy = proxy.map(|s| s.to_string());
+        async move {
+            let result = open_fresh_h2(
+                &pool,
+                &connector,
+                &h2_config,
+                connect_key,
+                &host,
+                port,
+                proxy.as_deref(),
+            )
+            .await
+            .map_err(Arc::new);
+            // On completion (success or failure, driven by whichever task), drop our in-flight
+            // entry. On success the connection is already installed in the pool by
+            // `open_fresh_h2`, so subsequent callers checkout-hit rather than re-connect.
+            cleanup_pool.inflight_h2_remove(&cleanup_key);
+            result
+        }
+        .boxed()
+        .shared()
+    });
+
+    match shared.await {
+        Ok(pair) => Ok(pair),
+        Err(_shared_err) => {
+            // The shared connect failed; its error is `Arc`-shared (one failure
+            // fanned out to every waiter). Rather than surface that already-stale,
+            // shared failure we make our own single fresh attempt — concurrent
+            // failures degrade to sequential retries, never a permanent storm.
+            Box::pin(open_fresh_h2(
+                pool, connector, h2_config, key, host, port, proxy,
+            ))
+            .await
+        }
+    }
+}
+
 /// Obtain a cloneable [`crate::h2::H2Client`] handle for `(host, port, proxy)`,
 /// reusing an existing pooled connection when available and otherwise
 /// establishing a fresh TLS + H2 handshake.
@@ -120,7 +196,7 @@ pub async fn checkout_handle(
         return Ok((handle, tls));
     }
 
-    open_fresh_h2(pool, connector, h2_config, key, host, port, proxy).await
+    open_h2_coalesced(pool, connector, h2_config, key, host, port, proxy).await
 }
 
 /// Send a request, reusing a pooled H2 connection when available.
@@ -213,7 +289,7 @@ pub async fn send_request(
     }
     tracing::Span::current().record("pool.hit", false);
 
-    let (handle, tls) = open_fresh_h2(
+    let (handle, tls) = open_h2_coalesced(
         pool,
         connector,
         h2_config,

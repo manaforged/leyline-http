@@ -462,6 +462,11 @@ pub struct PoolConfig {
     pub idle_timeout: Duration,
     /// Maximum pooled entries.
     pub max_connections: usize,
+    /// Maximum simultaneous HTTP/1.1 connections per destination
+    /// `(host, port, proxy)`. Defaults to 256 (throughput-favouring; H1 is the
+    /// rare ALPN fallback) — set to 6 to mirror a browser's per-host socket
+    /// limit. The HTTP/2 path (one multiplexed connection) is unaffected.
+    pub max_h1_conns_per_host: usize,
     /// Whether keepalive pooling is enabled.
     pub keepalive: bool,
 }
@@ -471,6 +476,7 @@ impl Default for PoolConfig {
         Self {
             idle_timeout: crate::pool::DEFAULT_IDLE_TIMEOUT,
             max_connections: crate::pool::DEFAULT_MAX_CONNECTIONS,
+            max_h1_conns_per_host: crate::pool::DEFAULT_MAX_H1_CONNS_PER_HOST,
             keepalive: true,
         }
     }

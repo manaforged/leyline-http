@@ -102,8 +102,16 @@ impl H3Connection {
         rand::rngs::OsRng.fill_bytes(scid_bytes.as_mut_slice());
         let scid = quiche::ConnectionId::from_ref(&scid_bytes);
 
-        let mut conn = quiche::connect(Some(host), &scid, local_addr, peer_addr, &mut config)
-            .map_err(|e| format!("quic connect: {e}"))?;
+        // Heap-box the quiche `Connection` (~14.7 KB by value). It lives across
+        // every `await` in the drive loop below, so inline it would sit in this
+        // request future's state machine for the connection's whole lifetime.
+        // Boxing keeps the H3 request future small; `&mut conn` deref-coerces to
+        // `&mut quiche::Connection` at every quiche call site, so the loop body
+        // is otherwise unchanged.
+        let mut conn = Box::new(
+            quiche::connect(Some(host), &scid, local_addr, peer_addr, &mut config)
+                .map_err(|e| format!("quic connect: {e}"))?,
+        );
 
         let mut h3_config = quiche::h3::Config::new().map_err(|e| format!("h3 config: {e}"))?;
         h3_config.set_qpack_max_table_capacity(h3_cfg.qpack_max_table_capacity);
@@ -131,7 +139,13 @@ impl H3Connection {
         let mut resp_body: Vec<u8> = Vec::new();
 
         let mut out = vec![0u8; h3_cfg.max_udp_payload_size as usize];
-        let mut buf = [0u8; 65_535];
+        // Heap-allocated receive buffer. As a `[0u8; 65_535]` stack array this
+        // was the single largest term in the whole request future — 64 KB held
+        // by value across `socket.recv(&mut buf).await` — and it propagated all
+        // the way up to size every leyline request's per-request allocation
+        // (even pure-H2 traffic, via the H3 match arm). A heap `Vec` is a 24-byte
+        // handle in the future; `&mut buf` / `&buf[..n]` slice exactly as before.
+        let mut buf = vec![0u8; 65_535];
         let mut iter = 0u32;
 
         // Drive the handshake + request loop.

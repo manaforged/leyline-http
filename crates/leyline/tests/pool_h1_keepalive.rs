@@ -311,3 +311,206 @@ async fn h1_pool_recovers_when_server_drops_connection() {
         "dead-stream eviction should have been counted (got {stats:?})"
     );
 }
+
+/// A mock server that delays each response and tracks the PEAK number of
+/// connections open at once — so a test can assert the per-host connection
+/// cap actually bounds concurrency. Returns `(addr, accepts, peak, handle)`.
+async fn spawn_peak_tracking_server(
+    delay: Duration,
+) -> (
+    std::net::SocketAddr,
+    Arc<AtomicUsize>,
+    Arc<AtomicUsize>,
+    tokio::task::JoinHandle<()>,
+) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let accepts = Arc::new(AtomicUsize::new(0));
+    let live = Arc::new(AtomicUsize::new(0));
+    let peak = Arc::new(AtomicUsize::new(0));
+    let accepts_c = accepts.clone();
+    let live_c = live.clone();
+    let peak_c = peak.clone();
+
+    let handle = tokio::spawn(async move {
+        loop {
+            let Ok((mut socket, _)) = listener.accept().await else {
+                break;
+            };
+            accepts_c.fetch_add(1, Ordering::SeqCst);
+            // Bump the live gauge and record the high-water mark.
+            let now_live = live_c.fetch_add(1, Ordering::SeqCst) + 1;
+            peak_c.fetch_max(now_live, Ordering::SeqCst);
+            let live_task = live_c.clone();
+            let delay = delay;
+            tokio::spawn(async move {
+                let mut tmp = [0u8; 1024];
+                loop {
+                    let mut req = Vec::new();
+                    let done = loop {
+                        match socket.read(&mut tmp).await {
+                            Ok(0) | Err(_) => break true,
+                            Ok(n) => {
+                                req.extend_from_slice(&tmp[..n]);
+                                if req.windows(4).any(|w| w == b"\r\n\r\n") {
+                                    break false;
+                                }
+                            }
+                        }
+                    };
+                    if done {
+                        break;
+                    }
+                    // Hold the connection busy so concurrent requests overlap.
+                    tokio::time::sleep(delay).await;
+                    if socket
+                        .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                // Connection closed — decrement the live gauge.
+                live_task.fetch_sub(1, Ordering::SeqCst);
+            });
+        }
+    });
+
+    (addr, accepts, peak, handle)
+}
+
+/// The per-host H1 cap must bound the number of connections open at once,
+/// and the warm connections must be reused for the queued overflow rather
+/// than each request opening (and discarding) a fresh socket.
+#[tokio::test]
+async fn h1_cap_bounds_concurrency_and_reuses_warm_connections() {
+    const CAP: usize = 3;
+    const REQUESTS: usize = 12;
+    let (addr, accepts, peak, _server) =
+        spawn_peak_tracking_server(Duration::from_millis(40)).await;
+    // Generous idle timeout + LRU so warm connections survive for reuse.
+    let pool = Arc::new(Pool::with_limits(Duration::from_secs(30), 2048, CAP));
+    let connector = bare_connector();
+    let host = "127.0.0.1".to_string();
+    let port = addr.port();
+    let url = url::Url::parse(&format!("http://{addr}/")).unwrap();
+
+    let mut handles = Vec::new();
+    for _ in 0..REQUESTS {
+        let pool = Arc::clone(&pool);
+        let connector = connector.clone();
+        let host = host.clone();
+        let url = url.clone();
+        handles.push(tokio::spawn(async move {
+            send_request_h1_pooled(
+                &pool,
+                &connector,
+                "http",
+                &host,
+                port,
+                "GET",
+                &url,
+                vec![],
+                H1Body::Empty,
+                None,
+                H1Target::OriginForm,
+            )
+            .await
+            .map(|r| r.status)
+        }));
+    }
+    for h in handles {
+        let status = h.await.unwrap().expect("request succeeds");
+        assert_eq!(status, 200);
+    }
+
+    // THE cap test: a broken/missing semaphore would let all 12 run at once.
+    assert!(
+        peak.load(Ordering::SeqCst) <= CAP,
+        "concurrent connections ({}) must never exceed the cap ({CAP})",
+        peak.load(Ordering::SeqCst)
+    );
+    // Reuse: at most CAP sockets were opened for all REQUESTS requests.
+    assert!(
+        accepts.load(Ordering::SeqCst) <= CAP,
+        "at most {CAP} sockets should be opened (got {})",
+        accepts.load(Ordering::SeqCst)
+    );
+    let stats = pool.stats();
+    assert!(
+        stats.h1_hits >= (REQUESTS - CAP) as u64,
+        "the {} queued requests should reuse warm connections (h1_hits={}, stats={stats:?})",
+        REQUESTS - CAP,
+        stats.h1_hits
+    );
+}
+
+/// A request cancelled mid-exchange (its future dropped) must release its
+/// per-host permit, or a later request to the same host deadlocks. With a
+/// cap of 1 this is unambiguous: if the permit leaked, request B never
+/// acquires it and times out.
+#[tokio::test]
+async fn h1_cancelled_request_releases_permit() {
+    // 500ms server delay so we can cancel request A while it holds the permit.
+    let (addr, _accepts, _peak, _server) =
+        spawn_peak_tracking_server(Duration::from_millis(500)).await;
+    let pool = Arc::new(Pool::with_limits(Duration::from_secs(30), 2048, 1));
+    let connector = bare_connector();
+    let host = "127.0.0.1".to_string();
+    let port = addr.port();
+    let url = url::Url::parse(&format!("http://{addr}/")).unwrap();
+
+    // Request A acquires the only permit, then we cancel it mid-exchange by
+    // letting the timeout drop its future.
+    let a = {
+        let pool = Arc::clone(&pool);
+        let connector = connector.clone();
+        let host = host.clone();
+        let url = url.clone();
+        async move {
+            send_request_h1_pooled(
+                &pool,
+                &connector,
+                "http",
+                &host,
+                port,
+                "GET",
+                &url,
+                vec![],
+                H1Body::Empty,
+                None,
+                H1Target::OriginForm,
+            )
+            .await
+        }
+    };
+    // Drop A's future after 50ms (it is still blocked in the 500ms exchange).
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), a)
+            .await
+            .is_err(),
+        "request A should still be in-flight (cancelled by timeout)"
+    );
+
+    // Request B must acquire the now-released permit and complete. If the
+    // permit leaked, this hangs and the 3s timeout fires.
+    let b = send_request_h1_pooled(
+        &pool,
+        &connector,
+        "http",
+        &host,
+        port,
+        "GET",
+        &url,
+        vec![],
+        H1Body::Empty,
+        None,
+        H1Target::OriginForm,
+    );
+    let resp = tokio::time::timeout(Duration::from_secs(3), b)
+        .await
+        .expect("request B must not deadlock — the cancelled request must release its permit")
+        .expect("request B succeeds");
+    assert_eq!(resp.status, 200);
+}

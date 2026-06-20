@@ -191,6 +191,15 @@ pub async fn send_request_h1_pooled(
 
     let key = make_key(host, port, proxy);
 
+    // Acquire one of this destination's H1 connection permits before any pool
+    // work. This caps concurrent H1 connections per host at
+    // `max_h1_conns_per_host` (default 6 — a browser's per-host socket limit)
+    // and queues the overflow here instead of opening unbounded sockets. Held
+    // for the whole exchange: dropping `_permit` at function exit frees the
+    // slot — and the warm connection we return to the pool just below — for a
+    // queued request, so the next waiter reuses it rather than handshaking.
+    let _permit = pool.acquire_h1_permit(&key).await;
+
     // Streaming bodies are one-shot — no retry possible. For
     // buffered bodies we keep a clone in case the pooled attempt
     // fails before any bytes reach the server and we need a fresh
@@ -219,11 +228,11 @@ pub async fn send_request_h1_pooled(
             Ok((resp, reusable)) => {
                 tracing::Span::current().record("pool.hit", true);
                 if reusable {
-                    pool.install_h1(key.clone(), H1Slot { io }, tls.clone(), false);
-                } else {
-                    // Drop `io` — deliberately non-reusable.
-                    pool.invalidate(&key);
+                    pool.return_h1(key.clone(), H1Slot { io }, tls.clone());
                 }
+                // else: drop `io` (deliberately non-reusable). We touch only
+                // the connection we checked out — sibling warm connections to
+                // this host stay pooled.
                 return Ok(H1Response {
                     status: resp.status,
                     headers: resp.headers,
@@ -240,7 +249,11 @@ pub async fn send_request_h1_pooled(
                     error = %e,
                     "pool stale hit -- pooled h1 stream failed mid-request, opening fresh"
                 );
-                pool.invalidate(&key);
+                // The checked-out connection is already removed from the pool;
+                // drop it and fall through to a fresh connection (still under
+                // our permit). Sibling pooled connections to this host are left
+                // intact — each is validated on its own checkout.
+                pool.note_h1_dead();
                 if body_is_stream {
                     return Err(e);
                 }
@@ -252,7 +265,7 @@ pub async fn send_request_h1_pooled(
     }
     tracing::Span::current().record("pool.hit", false);
 
-    // Miss — fresh connection.
+    // Miss — fresh connection (still under our permit).
     let (io, tls): (Box<dyn H1Io>, TlsInfo) =
         open_new(connector, scheme, host, port, proxy).await?;
 
@@ -262,7 +275,11 @@ pub async fn send_request_h1_pooled(
     match result {
         Ok((resp, reusable)) => {
             if reusable {
-                pool.install_h1(key, slot, tls.clone(), true);
+                pool.return_h1(key, slot, tls.clone());
+                // Count the install only once the fresh connection is actually
+                // pooled — a non-reusable completion (e.g. framing conflict) is
+                // opened but never installed and must not be counted.
+                pool.note_h1_install();
             }
             // If not reusable, drop the slot so it closes cleanly.
             Ok(H1Response {

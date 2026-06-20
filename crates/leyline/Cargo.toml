@@ -78,6 +78,9 @@ leyline-quiche = { path = "../leyline-quiche", version = "1.0.0-alpha.2", defaul
 btls = { workspace = true }
 btls-sys = { workspace = true }
 tokio-btls = { workspace = true }
+# Raw SSL* access for FFI not yet wrapped by btls (trust_anchors extension).
+# Pinned to btls's foreign-types version so the trait impls apply.
+foreign-types = "0.5"
 
 # -- async runtime
 tokio = { workspace = true, features = ["net", "rt", "rt-multi-thread", "time", "io-util", "macros", "fs", "sync"] }

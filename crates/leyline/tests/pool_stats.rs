@@ -43,7 +43,7 @@ fn empty_pool_stats_are_zero() {
 
 #[test]
 fn with_limits_reflects_in_stats() {
-    let pool = Pool::with_limits(Duration::from_secs(10), 4);
+    let pool = Pool::with_limits(Duration::from_secs(10), 4, 6);
     let s = pool.stats();
     assert_eq!(s.max_connections, 4);
     assert_eq!(s.entries, 0);

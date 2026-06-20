@@ -31,7 +31,7 @@
 
 use std::future::Future;
 use std::io;
-use std::net::{SocketAddr, ToSocketAddrs};
+use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::pin::Pin;
 
 /// A boxed future returned by [`Resolver::resolve`].
@@ -66,6 +66,14 @@ pub struct SystemResolver;
 
 impl Resolver for SystemResolver {
     fn resolve<'a>(&'a self, host: &'a str, port: u16) -> ResolveFuture<'a> {
+        // Fast path for IP literals: parsing avoids a `getaddrinfo(3)` call entirely, so we
+        // do NOT pay a `spawn_blocking` hop (and the tokio blocking-pool thread it spawns).
+        // Under connection churn at concurrency this otherwise inflates the blocking pool to
+        // a dozen-plus threads, each costing a stack and a fresh glibc malloc arena.
+        if let Ok(ip) = host.parse::<IpAddr>() {
+            let addr = SocketAddr::new(ip, port);
+            return Box::pin(async move { Ok(vec![addr]) });
+        }
         let host = host.to_owned();
         Box::pin(async move {
             let addr = format!("{host}:{port}");

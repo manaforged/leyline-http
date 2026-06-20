@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use btls::ssl::{NameType, SslConnector, SslSession, SslSessionCacheMode, SslVerifyMode};
+use foreign_types::ForeignType;
 use lru::LruCache;
 use tokio::net::TcpStream;
 
@@ -43,6 +44,9 @@ pub struct FingerprintConnector {
     alps_proto: Option<Vec<u8>>,
     /// Use new ALPS codepoint (0x4469 for Chrome 131+).
     alps_new_codepoint: bool,
+    /// Advertise Trust Anchor Identifiers (ext 0xCA34/51764) with an empty
+    /// list, as Chrome 148+ does — keeps the ClientHello JA4 at t13d1517.
+    request_trust_anchors: bool,
     /// Per-host session ticket cache for TLS resumption (DER-encoded).
     session_cache: Arc<Mutex<LruCache<String, Vec<u8>>>>,
     /// When `true`, skip peer certificate verification entirely.
@@ -136,6 +140,7 @@ impl FingerprintConnector {
             ech_grease: tls.ech_grease,
             alps_proto: tls.alps.as_ref().map(|s| s.as_bytes().to_vec()),
             alps_new_codepoint: tls.alps_new_codepoint,
+            request_trust_anchors: tls.request_trust_anchors,
             session_cache,
             accept_invalid_certs: false,
             resolver: Arc::new(SystemResolver),
@@ -339,6 +344,30 @@ impl FingerprintConnector {
         // ECH GREASE.
         if self.ech_grease {
             ssl.set_enable_ech_grease(true);
+        }
+
+        // Trust Anchor Identifiers (extension 0xCA34 / 51764). Chrome 148+ sends
+        // an empty `TrustAnchorIdentifierList` to advertise support; emit the
+        // same so the ClientHello JA4 matches real Chrome (t13d1517). Without it
+        // leyline sends t13d1516 and a CDN edge's JA4+H2 join check soft-blocks
+        // the connection — TLS completes but ALPN is stripped, surfacing here as
+        // `alpn: negotiated none, expected h2`. btls 0.5 doesn't wrap this call,
+        // so reach the raw SSL* via foreign-types.
+        if self.request_trust_anchors {
+            let ids: [u8; 0] = [];
+            // SAFETY: `ssl` is freshly built by `into_ssl` and not yet driven
+            // through `connect()`; BoringSSL copies `ids` (a valid empty buffer),
+            // so the pointer need only be valid for the call.
+            let rc = unsafe {
+                btls_sys::SSL_set1_requested_trust_anchors(ssl.as_ptr(), ids.as_ptr(), ids.len())
+            };
+            if rc != 1 {
+                tracing::warn!(
+                    target: "leyline::tls",
+                    "SSL_set1_requested_trust_anchors returned {rc}; trust_anchors \
+                     extension may be absent and JA4 will not match Chrome 148"
+                );
+            }
         }
 
         // TLS handshake. tokio-btls::SslStream::connect requires Pin<&mut Self>;

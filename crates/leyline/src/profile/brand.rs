@@ -73,6 +73,24 @@ impl std::fmt::Display for BrandOverlayError {
 impl std::error::Error for BrandOverlayError {}
 
 impl ChromiumBrand {
+    /// The brand's OWN major version on this Chromium anchor — the value the
+    /// overlay encodes — for callers that need the version outside the HTTP
+    /// overlay (e.g. the browser's `userAgentData`). Chrome/Edge ship in lockstep
+    /// so they share the Chromium major; Opera versions separately (the
+    /// `OPERA_PER_CHROMIUM` registry); Vivaldi is versioned by build string, not a
+    /// bare major, so it has no answer here. `None` = no verified version for this
+    /// anchor (same gate as `overlay`). This is THE source of truth — callers must
+    /// not hardcode a parallel value.
+    pub fn version_for(self, chromium_major: u32) -> Option<u32> {
+        match self {
+            Self::Chrome | Self::Edge => Some(chromium_major),
+            Self::Opera => OPERA_PER_CHROMIUM
+                .iter()
+                .find_map(|(chromium, opera)| (*chromium == chromium_major).then_some(*opera)),
+            Self::Vivaldi => None,
+        }
+    }
+
     /// Human-readable label, e.g. for logs.
     pub fn label(self) -> &'static str {
         match self {
@@ -186,14 +204,18 @@ fn edge_overlay(
     })
 }
 
-/// Opera Stable major version per Chromium anchor. Opera tracks Chromium
-/// roughly two majors behind on a ~6-week cadence; entries here pair
-/// each supported Chromium anchor with the Opera Stable major that
-/// shipped on it.
+/// Opera Stable major version per Chromium anchor. Opera Stable numbers its
+/// major a fixed 16 below the Chromium it rebases on (148→132, 147→131,
+/// 146→130, 145→129) and ships on a contemporaneous cadence; entries here pair
+/// each supported Chromium anchor with the Opera Stable major that shipped on
+/// it.
 ///
-/// Anchors marked EXTRAPOLATED are derived from vendor docs and structurally identical to the
-/// 145/129 live capture; replace with peet captures when available.
+/// The 148/132 pairing is sourced from Opera's official desktop release blog
+/// (Opera 132 Stable on Chromium 148.0.7778.97); its sec-ch-ua wire shape reuses
+/// the verified 129 template. Anchors marked EXTRAPOLATED are derived from
+/// vendor release notes, structurally identical to theÌ5/129 live capture.
 const OPERA_PER_CHROMIUM: &[(u32, u32)] = &[
+    (148, 132), // Opera 132 Stable = Chromium 148.0.7778.97 — blogs.opera.com/desktop, 2026.
     (147, 131), // EXTRAPOLATED from vendor release notes.
     (146, 130), // EXTRAPOLATED from vendor release notes.
     (145, 129), // Live capture.
@@ -473,10 +495,10 @@ mod tests {
 
     #[test]
     fn opera_overlay_only_accepts_verified_anchors() {
-        // OPERA_PER_CHROMIUM is the source of truth — 145/146/147 each
+        // OPERA_PER_CHROMIUM is the source of truth — 145/146/147/148 each
         // yield a distinct Opera version, anything outside the table
         // errors. Mobile platforms always error regardless of anchor.
-        for (chromium, expected_opera) in [(145u32, 129u32), (146, 130), (147, 131)] {
+        for (chromium, expected_opera) in [(145u32, 129u32), (146, 130), (147, 131), (148, 132)] {
             let o = ChromiumBrand::Opera
                 .overlay(chromium, Platform::Windows, "ua", "")
                 .unwrap()
@@ -488,7 +510,7 @@ mod tests {
                 o.user_agent
             );
         }
-        for bad in [144u32, 148] {
+        for bad in [144u32, 149] {
             assert!(ChromiumBrand::Opera
                 .overlay(bad, Platform::Windows, "ua", "")
                 .is_err());

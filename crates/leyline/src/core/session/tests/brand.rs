@@ -163,6 +163,29 @@ async fn opera_146_overlay_emits_130() {
 }
 
 #[tokio::test]
+async fn opera_148_overlay_emits_132() {
+    // Opera 132 / Chromium 148 — the anchor a recorded Opera build pins
+    // to. Sourced from Opera's official desktop release blog (Opera 132 Stable
+    // on Chromium 148.0.7778.97); sec-ch-ua shape reuses the verified 129
+    // template. Pin the explicit pairing so a table edit can't collapse it.
+    let session = Session::builder()
+        .browser(Browser::Chrome148)
+        .brand(ChromiumBrand::Opera)
+        .build()
+        .unwrap();
+    let req = capture_navigate_headers(session).await;
+    assert!(
+        req.contains("Chrome/148.0.0.0 Safari/537.36 OPR/132.0.0.0"),
+        "Opera 148 UA suffix missing:\n{req}"
+    );
+    assert!(
+        req.to_lowercase()
+            .contains(r#"sec-ch-ua: "not:a-brand";v="99", "opera";v="132", "chromium";v="148""#),
+        "Opera 148 sec-ch-ua missing:\n{req}"
+    );
+}
+
+#[tokio::test]
 async fn opera_145_overlay_still_supported() {
     // Backward-compat: the original 129/145 live capture must keep
     // working after the anchor refresh. If this regresses, the
@@ -349,16 +372,16 @@ fn edge_overlay_on_mobile_platform_errors() {
 
 #[test]
 fn opera_overlay_on_unverified_anchor_errors() {
-    // OPERA_PER_CHROMIUM covers Chromium 145..=147 today. A profile
-    // anchored anywhere else (older 144 or some future 148+) still
+    // OPERA_PER_CHROMIUM covers Chromium 145..=148 today. A profile
+    // anchored anywhere else (older 144 or some future 149+) still
     // has no published Opera version we can mimic — the build must
     // error rather than guess. We rely on `Browser::chromium_major`
     // returning a value outside the table, simulated here by hand-
     // calling the overlay directly so we don't need an unsupported
     // `Browser` variant in the public enum.
     let err = ChromiumBrand::Opera
-        .overlay(148, Platform::Windows, "ua", "")
-        .expect_err("Opera on Chrome 148 must be rejected until captured");
+        .overlay(149, Platform::Windows, "ua", "")
+        .expect_err("Opera on Chrome 149 must be rejected until captured");
     assert!(format!("{err}").contains("not verified"));
 }
 

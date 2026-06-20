@@ -66,7 +66,11 @@ pub(crate) async fn send_request_auto(
     stream_response: bool,
 ) -> Result<TransportResponse> {
     if url.scheme() == "http" {
-        return send_request_h1(
+        // Boxed cold arm: for an `https://` request (the hot path) this branch
+        // is never taken, yet inline it would size `send_request_auto`'s future
+        // to the ~10 KB H1 transport. Box it so plaintext HTTP heap-allocates
+        // its H1 state only when actually used.
+        return Box::pin(send_request_h1(
             pool,
             connector,
             method,
@@ -75,7 +79,7 @@ pub(crate) async fn send_request_auto(
             body,
             proxy,
             stream_response,
-        )
+        ))
         .await;
     }
 
@@ -83,7 +87,9 @@ pub(crate) async fn send_request_auto(
     // body. Streaming bodies are one-shot, so eagerly materialise them.
     // Callers who want hard streaming over H2 should pin `.http2()`.
     let (h2_body, fallback_buf): (Body, Option<Bytes>) = if body.is_stream() {
-        let buf = materialise_stream_body(body).await?;
+        // Boxed cold arm: stream materialisation only runs for `.stream()`
+        // request bodies; keep its drain buffer off the buffered-body hot path.
+        let buf = Box::pin(materialise_stream_body(body)).await?;
         (Body::from(buf.clone()), Some(buf))
     } else {
         match body {
@@ -113,7 +119,11 @@ pub(crate) async fn send_request_auto(
                 Some(buf) => Body::from(buf),
                 None => Body::Empty,
             };
-            send_request_h1(
+            // Boxed cold arm: the HTTP/1.1 fallback runs only after an H2 ALPN
+            // mismatch (rare CDN/interstitial behaviour). Inline it would size
+            // the H2 success path — the hot path — to the ~10 KB H1 future. Box
+            // it so the H1 state is heap-allocated only when the fallback fires.
+            Box::pin(send_request_h1(
                 pool,
                 connector,
                 method,
@@ -122,7 +132,7 @@ pub(crate) async fn send_request_auto(
                 fallback_body,
                 proxy,
                 stream_response,
-            )
+            ))
             .await
         }
         Err(e) => Err(e),

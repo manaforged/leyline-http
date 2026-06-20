@@ -26,6 +26,7 @@ fn builder_accepts_wreq_parity_transport_knobs() {
     let pool = PoolConfig {
         idle_timeout: Duration::from_secs(30),
         max_connections: 8,
+        max_h1_conns_per_host: 6,
         keepalive: true,
     };
     let socket = SocketConfig {

@@ -192,6 +192,21 @@ impl SessionBuilder {
         self
     }
 
+    /// Set the maximum simultaneous HTTP/1.1 connections per destination
+    /// `(host, port, proxy)`.
+    ///
+    /// HTTP/1.1 cannot multiplex, so per-host concurrency comes from opening
+    /// several connections. The default is 256 (throughput-favouring — H1 is
+    /// the rare ALPN fallback, so the per-host socket *count* is a fingerprint
+    /// signal that is already moot once you are off HTTP/2). Set it to **6** to
+    /// strictly mirror a real Chrome's per-host socket limit
+    /// (`kMaxSocketsPerGroup`). Has no effect on HTTP/2 (one multiplexed
+    /// connection per host).
+    pub fn h1_max_conns_per_host(mut self, max: usize) -> Self {
+        self.pool_config.max_h1_conns_per_host = max.max(1);
+        self
+    }
+
     /// Disable connection reuse for this session.
     pub fn disable_keepalive(mut self) -> Self {
         self.pool_config.keepalive = false;
@@ -778,9 +793,19 @@ impl SessionBuilder {
                     Pool::with_limits(
                         self.pool_config.idle_timeout,
                         self.pool_config.max_connections.max(1),
+                        self.pool_config.max_h1_conns_per_host.max(1),
                     )
                 } else {
-                    Pool::with_limits(std::time::Duration::ZERO, 1)
+                    // Keepalive disabled: zero idle timeout means connections are
+                    // never reused. The per-host H1 cap still applies (it governs
+                    // concurrency, not reuse), so honour the configured value
+                    // rather than forcing it to 1 — disabling reuse must not
+                    // silently serialise concurrent H1 requests to a host.
+                    Pool::with_limits(
+                        std::time::Duration::ZERO,
+                        1,
+                        self.pool_config.max_h1_conns_per_host.max(1),
+                    )
                 }),
                 audit_tls: Arc::new(AuditTlsCache {
                     ja4,

@@ -5,7 +5,7 @@ use leyline::Session;
 
 #[tokio::main]
 async fn main() {
-    for browser in [Browser::Chrome147, Browser::Chrome146, Browser::Chrome145] {
+    for browser in [Browser::Chrome148, Browser::Chrome147] {
         eprintln!("\n=== {browser:?} ===");
         let session = Session::builder().browser(browser).build().expect("build");
         let resp = session
@@ -17,26 +17,36 @@ async fn main() {
         eprintln!("  RAW: {body}");
         let json: serde_json::Value = serde_json::from_str(&body).expect("parse json");
         // Trim to the fingerprint-relevant fields so we can eyeball the diff.
-        let ja3 = json.pointer("/ja3").and_then(|v| v.as_str()).unwrap_or("?");
-        let ja3_hash = json
-            .pointer("/ja3_hash")
+        let ja3 = json
+            .pointer("/tls/ja3")
             .and_then(|v| v.as_str())
             .unwrap_or("?");
-        let ja4 = json.pointer("/ja4").and_then(|v| v.as_str()).unwrap_or("?");
+        let ja3_hash = json
+            .pointer("/tls/ja3_hash")
+            .and_then(|v| v.as_str())
+            .unwrap_or("?");
+        let ja4 = json
+            .pointer("/tls/ja4")
+            .and_then(|v| v.as_str())
+            .unwrap_or("?");
+        let ja4_r = json
+            .pointer("/tls/ja4_r")
+            .and_then(|v| v.as_str())
+            .unwrap_or("?");
         let peetprint = json
-            .pointer("/peetprint")
+            .pointer("/tls/peetprint")
             .and_then(|v| v.as_str())
             .unwrap_or("?");
         let peetprint_hash = json
-            .pointer("/peetprint_hash")
+            .pointer("/tls/peetprint_hash")
             .and_then(|v| v.as_str())
             .unwrap_or("?");
         let h2_fp = json
-            .pointer("/akamai_fingerprint")
+            .pointer("/http2/akamai_fingerprint")
             .and_then(|v| v.as_str())
             .unwrap_or("?");
         let h2_hash = json
-            .pointer("/akamai_fingerprint_hash")
+            .pointer("/http2/akamai_fingerprint_hash")
             .and_then(|v| v.as_str())
             .unwrap_or("?");
         let ua = json
@@ -47,6 +57,7 @@ async fn main() {
         eprintln!("  ja3:         {ja3}");
         eprintln!("  ja3_hash:    {ja3_hash}");
         eprintln!("  ja4:         {ja4}");
+        eprintln!("  ja4_r:       {ja4_r}");
         eprintln!("  peetprint:   {peetprint}");
         eprintln!("  peet_hash:   {peetprint_hash}");
         eprintln!("  h2_akamai:   {h2_fp}");

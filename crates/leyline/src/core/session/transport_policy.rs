@@ -67,7 +67,14 @@ impl Session {
                 .await
             }
             ProtocolPolicy::Http1 => {
-                crate::core::transport::send_request_h1(
+                // Boxed cold arm. The H1 transport future is ~10 KB; left
+                // inline it would size THIS `match`'s state machine — and
+                // therefore every request's per-request future, including the
+                // H2 hot path that never selects Http1 — to that 10 KB. Boxing
+                // moves the H1 state to the heap, allocated only when an
+                // explicit `.http1()` policy actually runs this arm. The H2/Auto
+                // hot path pays nothing and the wire bytes are unchanged.
+                Box::pin(crate::core::transport::send_request_h1(
                     &self.pool,
                     &self.connector,
                     method,
@@ -76,7 +83,7 @@ impl Session {
                     body,
                     proxy,
                     stream_response,
-                )
+                ))
                 .await
             }
             ProtocolPolicy::Http2 => {
@@ -103,7 +110,18 @@ impl Session {
                 let h3_config = self.h3_config.as_ref().ok_or_else(|| {
                     Error::Config("this browser profile has no HTTP/3 fingerprint".into())
                 })?;
-                crate::core::transport::send_request_h3(
+                // Boxed cold arm (defense-in-depth). The companion change in
+                // this same commit (`quic::connection`) already moves the H3
+                // future's 64 KB datagram buffer + quiche Connection to the
+                // heap, so the H3 future is now ~2.5 KB — not the ~82 KB it was
+                // when, inlined, it became >97% of every request's allocation.
+                // We still box the arm on principle: heavyweight cold protocol
+                // machinery must never size the hot per-request future, so
+                // future growth in the H3 path cannot silently re-inflate the
+                // H2/Auto hot path (this mirrors wreq's boxed-protocol
+                // dispatch). The ~10 KB H1 arm above is the larger remaining
+                // payoff of arm-boxing today.
+                Box::pin(crate::core::transport::send_request_h3(
                     h3_config,
                     self.profile,
                     method,
@@ -111,7 +129,7 @@ impl Session {
                     headers,
                     body,
                     stream_response,
-                )
+                ))
                 .await
             }
             #[cfg(feature = "http3")]
@@ -144,7 +162,13 @@ impl Session {
                             Body::Bytes(b) => Body::Bytes(b.clone()),
                             Body::Stream { .. } => unreachable!(),
                         };
-                        if let Ok(resp) = crate::core::transport::send_request_h3(
+                        // Boxed cold arm (defense-in-depth, as in the Http3
+                        // arm). The common outcome here is the H2 fallback
+                        // below, so the H3 attempt's state stays off the inline
+                        // Race future. The QUIC future is already ~2.5 KB after
+                        // this commit's `quic::connection` change; boxing keeps
+                        // it that way on principle.
+                        if let Ok(resp) = Box::pin(crate::core::transport::send_request_h3(
                             h3_config,
                             self.profile,
                             method,
@@ -152,7 +176,7 @@ impl Session {
                             headers.clone(),
                             retained,
                             stream_response,
-                        )
+                        ))
                         .await
                         {
                             return Ok(resp);

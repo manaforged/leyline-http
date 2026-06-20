@@ -57,6 +57,13 @@ pub struct TlsProfile {
     pub ech_grease: bool,
     #[serde(default)]
     pub pre_shared_key: bool,
+    /// Advertise the TLS Trust Anchor Identifiers extension (0xCA34/51764) with
+    /// an empty list, as Chrome 148+ does. Required for the ClientHello JA4 to
+    /// match real Chrome (t13d1517); omitting it yields t13d1516 and trips
+    /// a CDN edge's JA4+H2 join check (soft-block surfacing as `alpn: negotiated
+    /// none`).
+    #[serde(default)]
+    pub request_trust_anchors: bool,
     #[serde(default)]
     pub fingerprint: Option<TlsFingerprint>,
 }
@@ -269,6 +276,7 @@ impl BrowserProfile {
                 extension_permutation: None,
                 ech_grease: false,
                 pre_shared_key: false,
+                request_trust_anchors: false,
                 fingerprint: None,
             },
             h2: H2Profile {

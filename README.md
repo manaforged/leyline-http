@@ -210,6 +210,117 @@ small set of explicit policy objects.
 | Tower middleware integration | `LeylineService` behind the `tower` feature |
 | Feature surface | `default`, `full`, and granular flags for cookies, compression, multipart, stream, websocket, HTTP/3, Tower, SOCKS, system trust, and native interface binding. H3, WebSocket, multipart, and SOCKS gate their heavy transport surface; Brotli remains in the minimal graph for TLS certificate compression. |
 
+## Performance
+
+Full-stack throughput and memory against the other browser-impersonating
+HTTP/TLS clients — **wreq** (Rust + BoringSSL), **azuretls** and
+**bogdanfinn/tls-client** (Go + uTLS) — measured over a **real loopback TLS
+socket** (not an in-process mock peer). Each client impersonates its own
+newest Chrome, and the fingerprints are verified equivalent via a JA4 /
+Akamai-H2 sidecar before timing. The harness runs an 18-cell matrix (`warm`/`cold` ×
+`h2`/`h1` × 1 KiB/100 KiB × concurrency 1/8/64; cold is H2-only),
+**5 trials per cell**, pinned cores, shuffled interleaved reps, medians +
+95 % bootstrap CIs.
+
+Each table is one test. **req/s is the median across 5 reps** at concurrency
+1 / 8 / 64; RSS and CPU-s/1M are reported at the c64 peak. Full per-cell
+detail (p50/p99/p99.9 latency, bootstrap CIs, every RSS/CPU point) is in
+the per-run comparison tables.
+
+### HTTP/2 (one multiplexed connection — the default path)
+
+**warm · 1 KiB body**
+
+| Client | req/s c1 | req/s c8 | req/s c64 | RSS MiB (c64) | CPU-s/1M (c64) |
+| ------ | -------: | -------: | --------: | ------------: | -------------: |
+| **leyline** | **3,093** | **16,771** | 25,396 | 11.4 | **56** |
+| wreq | 2,873 | 14,223 | **27,253** | 8.8 | 71 |
+| azuretls | 2,856 | 11,355 | 18,265 | 32.5 | 103 |
+| bogdanfinn | 2,866 | 14,758 | 24,582 | 19.5 | 81 |
+
+**warm · 100 KiB body**
+
+| Client | req/s c1 | req/s c8 | req/s c64 | RSS MiB (c64) | CPU-s/1M (c64) |
+| ------ | -------: | -------: | --------: | ------------: | -------------: |
+| **leyline** | 1,469 | 4,103 | **5,250** | 30.5 | **226** |
+| wreq | 1,317 | 4,030 | 4,344 | 19.3 | 328 |
+| azuretls | 1,338 | 2,361 | 2,378 | 43.8 | 837 |
+| bogdanfinn | **1,576** | **4,878** | 4,921 | 28.5 | 452 |
+
+**cold · fresh handshake per request · 1 KiB body**
+
+| Client | req/s c1 | req/s c8 | req/s c64 | RSS MiB (c64) | CPU-s/1M (c64) |
+| ------ | -------: | -------: | --------: | ------------: | -------------: |
+| **leyline** | 847 | 5,887 | 29,318 † | 11.0 | **68** |
+| wreq | **987** | **6,196** | 11,876 | 14.4 | 446 |
+| azuretls | 765 | 4,529 | 7,626 | 64.2 | 915 |
+| bogdanfinn | 722 | 3,311 | 5,711 | 37.8 | 1,178 |
+
+**cold · fresh handshake per request · 100 KiB body**
+
+| Client | req/s c1 | req/s c8 | req/s c64 | RSS MiB (c64) | CPU-s/1M (c64) |
+| ------ | -------: | -------: | --------: | ------------: | -------------: |
+| **leyline** | 635 | 2,729 | **10,547** | 20.7 | **233** |
+| wreq | **724** | **4,791** | 9,728 | 14.6 | 592 |
+| azuretls | 555 | 3,544 | 5,653 | 70.9 | 1,272 |
+| bogdanfinn | 573 | 2,052 | 3,551 | 54.6 | 1,570 |
+
+leyline leads warm H2 at low/mid concurrency and on large bodies, at the
+lowest CPU cost and RSS at parity with wreq (the other Rust + BoringSSL
+stack); wreq edges the small-body c64 cell (CIs overlap → a tie). wreq wins
+the low-concurrency cold-handshake cells. † leyline's cold c64 / 1 KiB cell
+is **flagged by the harness** (cold÷warm rps = 1.15 > 0.6 ⇒ keep-alive reuse
+leaked into cold mode at that concurrency); treat it as suspect, not a win.
+
+### HTTP/1.1 (per-host connection pool)
+
+H1 cannot multiplex, so per-host concurrency needs several connections.
+leyline runs a **per-host H1 connection pool** (default cap 256) that, like
+its peers, opens as many connections as concurrency demands — and now
+**leads every warm H1 cell**:
+
+**warm · 1 KiB body**
+
+| Client | req/s c1 | req/s c8 | req/s c64 | RSS MiB (c64) | CPU-s/1M (c64) |
+| ------ | -------: | -------: | --------: | ------------: | -------------: |
+| **leyline** | **4,988** | **32,098** | **124,249** | 16.2 | 33 |
+| wreq | 4,589 | 30,276 | 105,050 | 14.4 | **32** |
+| azuretls | 3,384 | 15,459 | 19,118 | 58.2 | 365 |
+| bogdanfinn | 3,641 | 15,792 | 47,151 | 48.0 | 88 |
+
+**warm · 100 KiB body**
+
+| Client | req/s c1 | req/s c8 | req/s c64 | RSS MiB (c64) | CPU-s/1M (c64) |
+| ------ | -------: | -------: | --------: | ------------: | -------------: |
+| **leyline** | **4,063** | **23,068** | **67,212** | 15.8 | **90** |
+| wreq | 2,724 | 17,608 | 52,137 | 25.0 | 122 |
+| azuretls | 2,647 | 9,833 | 10,367 | 67.8 | 596 |
+| bogdanfinn | 2,720 | 5,830 | 10,924 | 31.3 | 411 |
+
+For strict browser fidelity — exactly Chrome's 6 sockets per host
+(`kMaxSocketsPerGroup`) — set `Session::builder().h1_max_conns_per_host(6)`.
+HTTP/2 (one multiplexed connection) remains the default and primary path.
+
+### Who wins each cell (CI-overlap = tie)
+
+| Client | outright cell wins | tied-for-lead |
+| ------ | -----------------: | ------------: |
+| **leyline** | **6** | 8 |
+| wreq | 3 | 7 |
+| bogdanfinn | 1 | 3 |
+| azuretls | 0 | — |
+
+(One of leyline's six is the flagged cold c64 / 1 KiB cell above — five are
+clean. Counts apply CI-overlap-as-tie, so they are more conservative than a
+raw top-median tally.)
+
+Numbers are loopback on WSL2 (no NIC offload, no host thermal control), so
+absolute figures are machine-specific and real networks compress the
+relative gaps — see the methodology notes for the fairness
+controls. (The 238K req/s figure in [BENCHMARKS.md](BENCHMARKS.md) is an
+in-process mock peer with no TLS or kernel socket and is *not* comparable
+to the cross-client numbers above.)
+
 ## Testing
 
 ```bash

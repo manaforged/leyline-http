@@ -1,7 +1,7 @@
 //! Pool-internal types: keys, connection entries, TLS metadata, and stats.
 
+use std::collections::VecDeque;
 use std::sync::atomic::AtomicU64;
-use std::sync::Mutex;
 use std::time::Instant;
 
 use crate::h2::client::{DriverTask, H2Client};
@@ -60,12 +60,17 @@ pub(crate) enum PooledConn {
         last_use: Instant,
         tls: TlsInfo,
     },
-    /// An HTTP/1.1 keep-alive entry. The stream is parked inside a
-    /// `Mutex<Option<_>>`; a successful checkout drains it with
-    /// `Option::take()`, and the caller reinstates the stream via
-    /// [`Pool::return_h1`] on a reusable completion.
+    /// An HTTP/1.1 keep-alive entry. Holds a deque of warm idle
+    /// connections to this destination. H1 cannot multiplex, so per-host
+    /// concurrency comes from several parallel connections (browsers open
+    /// up to ~6 per host); a checkout pops one warm connection and a
+    /// reusable completion returns it via [`super::Pool::return_h1`]. The
+    /// live connection count per host is bounded by the pool's per-host
+    /// semaphore (`max_h1_conns_per_host`), so this deque never exceeds
+    /// that cap. Each connection carries the `Instant` it was last
+    /// returned, for per-connection idle eviction.
     H1 {
-        conn: Mutex<Option<H1Slot>>,
+        idle: VecDeque<(H1Slot, Instant)>,
         last_use: Instant,
         tls: TlsInfo,
     },
@@ -88,7 +93,7 @@ impl PooledConn {
     pub(crate) fn is_dead(&self) -> bool {
         match self {
             PooledConn::H2 { handle, .. } => handle.is_closed(),
-            PooledConn::H1 { conn, .. } => conn.lock().map(|guard| guard.is_none()).unwrap_or(true),
+            PooledConn::H1 { idle, .. } => idle.is_empty(),
         }
     }
 }
@@ -109,7 +114,10 @@ pub struct PoolStats {
     pub h2_hits: u64,
     /// Cumulative H2 checkout misses (no entry, or entry was dead).
     pub h2_misses: u64,
-    /// Cumulative successful H1 checkouts (stream reused).
+    /// Cumulative H1 checkouts that popped a pooled connection. There is no
+    /// liveness probe at checkout, so a counted hit may still prove stale on
+    /// use (the exchange then fails and bumps `evictions_dead`); a hit means
+    /// "a warm connection was handed out", not "a request succeeded on it".
     pub h1_hits: u64,
     /// Cumulative H1 checkout misses (no entry, dead slot, or idle
     /// window exceeded).
