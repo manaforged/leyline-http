@@ -3,7 +3,7 @@
 //!
 //! [`TlsIo`] decouples the transport / h2 / pool / WebSocket layers from
 //! the concrete TLS backend. Today it has a single arm — BoringSSL via
-//! `tokio-btls` — so it is monomorphic and the `match` compiles to a
+//! `leyline-bssl-tokio` — so it is monomorphic and the `match` compiles to a
 //! direct call with zero dispatch cost. A future TLS backend slots in as a
 //! new arm; nothing in the layers above moves.
 //!
@@ -26,8 +26,8 @@ use tokio::net::TcpStream;
 /// [`H1Io`](crate::pool::h1::H1Io) bound and `WebSocketStream<_>`'s
 /// `S: AsyncRead + AsyncWrite + Unpin` requirement for free.
 pub(crate) enum TlsIo {
-    /// BoringSSL over TCP, via `tokio-btls`.
-    Boring(tokio_btls::SslStream<TcpStream>),
+    /// BoringSSL over TCP, via `leyline-bssl-tokio`.
+    Boring(leyline_bssl_tokio::SslStream<TcpStream>),
     // future: an in-house `leyline-tls` arm slots in the same way.
 }
 
@@ -75,7 +75,7 @@ impl AsyncWrite for TlsIo {
     }
 
     // `poll_write_vectored` / `is_write_vectored` are intentionally left
-    // to the `AsyncWrite` default. `tokio-btls`'s `SslStream` does not
+    // to the `AsyncWrite` default. `leyline-bssl-tokio`'s `SslStream` does not
     // override them either, so the default (write the first non-empty
     // buffer via `poll_write`, `is_write_vectored() == false`) reproduces
     // the pre-seam behavior byte-for-byte. A future backend with genuine

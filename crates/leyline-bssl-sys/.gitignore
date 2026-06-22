@@ -1,0 +1,4 @@
+/target
+Cargo.lock
+# BoringSSL source-build scratch (CI populates deps/boringssl from the submodule)
+/build/out

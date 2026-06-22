@@ -39,7 +39,7 @@ version = 2
 unused-allowed-license = "allow"
 # SPDX identifiers we accept for dependencies. Leyline itself is
 # dual-licensed MIT OR Apache-2.0 and we only pull in OSS-compatible
-# crates. Modern BoringSSL (shipped prebuilt by btls-sys) was relicensed
+# crates. Modern BoringSSL (shipped prebuilt by leyline-bssl-sys) was relicensed
 # by Google to Apache-2.0, already in this list; `OpenSSL` is intentionally
 # omitted — nothing in the graph requires it, so a future `openssl` pull
 # fails the gate.
@@ -59,15 +59,14 @@ allow = [
 ]
 confidence-threshold = 0.9
 
-# btls-sys is the local shim (patched in via [patch.crates-io], so cargo-deny
-# evaluates crates/btls-sys, not the registry tarball). It ships the MIT FFI
-# binding glue plus prebuilt BoringSSL static libs. Modern BoringSSL is
-# Apache-2.0 (Google relicense), with a BSD-3-Clause notice for unlinked Go
-# test tooling — both already allow-listed. The shim now carries LICENSE-MIT +
-# LICENSE-BORINGSSL so this clarification resolves against real text.
-# (btls / tokio-btls classify correctly on their own and need no clarify.)
+# leyline-bssl-sys is the in-repo FFI crate (a workspace-excluded path
+# dependency). It ships the MIT FFI binding glue plus prebuilt BoringSSL static
+# libs. Modern BoringSSL is Apache-2.0 (Google relicense), with a BSD-3-Clause
+# notice for unlinked Go test tooling — both already allow-listed. The crate
+# carries LICENSE-MIT + LICENSE-BORINGSSL so this clarification resolves against
+# real text. (leyline-bssl / leyline-bssl-tokio classify correctly on their own.)
 [[licenses.clarify]]
-name = "btls-sys"
+name = "leyline-bssl-sys"
 expression = "MIT AND Apache-2.0 AND BSD-3-Clause"
 license-files = [
     { path = "LICENSE-MIT", hash = 0 },
@@ -96,7 +95,7 @@ deny = [
     { name = "openssl" },
     { name = "openssl-sys" },
     { name = "native-tls" },
-    # rustls + its trust-store helpers. BoringSSL (btls) is the only TLS
+    # rustls + its trust-store helpers. BoringSSL (leyline-bssl) is the only TLS
     # backend; a transitive rustls pull means an alternative stack slipped
     # in. schannel / security-framework are the OS trust crates that path
     # used — Leyline reads the platform store directly (windows-sys), so

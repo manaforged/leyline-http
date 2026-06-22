@@ -16,8 +16,8 @@
 
 use std::path::PathBuf;
 
-use btls::ssl::{SslAlert, SslContextBuilder, SslFiletype, SslVerifyError, SslVerifyMode};
-use btls::x509::{X509StoreContext, X509};
+use leyline_bssl::ssl::{SslAlert, SslContextBuilder, SslFiletype, SslVerifyError, SslVerifyMode};
+use leyline_bssl::x509::{X509StoreContext, X509};
 use sha2::{Digest, Sha256};
 
 use crate::tls::error::TlsError;
@@ -386,7 +386,7 @@ fn wire_macos_system_trust(builder: &mut SslContextBuilder) -> Result<(), TlsErr
 /// backends.
 #[cfg(windows)]
 fn wire_windows_system_trust(builder: &mut SslContextBuilder) -> Result<(), TlsError> {
-    use btls::x509::X509;
+    use leyline_bssl::x509::X509;
 
     let roots = match crate::tls::windows_trust::load_system_roots() {
         Ok(r) => r,

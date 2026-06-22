@@ -6,7 +6,7 @@ name: release-python
 #
 # Scope note: wheels cover the same three targets as the Node addon
 # (manylinux x86_64-gnu, windows x64, macOS arm64) — the targets for which
-# btls-sys vendors prebuilt BoringSSL (crates/btls-sys/native/<target>/lib).
+# leyline-bssl-sys vendors prebuilt BoringSSL (crates/leyline-bssl-sys/native/<target>/lib).
 # Other targets (aarch64-linux, musllinux, intel-mac) need a source build with
 # BORING_BSSL_PATH — see wrappers/python/README.md.
 #

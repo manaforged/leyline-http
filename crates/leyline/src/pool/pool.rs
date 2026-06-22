@@ -9,6 +9,8 @@ use futures_util::future::{BoxFuture, Shared};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use crate::h2::client::{DriverTask, H2Client};
+#[cfg(feature = "http3")]
+use crate::quic::{H3Client, H3DriverTask};
 
 use crate::pool::types::{H1Slot, PoolCounters, PoolKey, PoolStats, PooledConn, TlsInfo};
 
@@ -167,6 +169,8 @@ impl Pool {
             h2_misses: self.counters.h2_misses.load(Ordering::Relaxed),
             h1_hits: self.counters.h1_hits.load(Ordering::Relaxed),
             h1_misses: self.counters.h1_misses.load(Ordering::Relaxed),
+            h3_hits: self.counters.h3_hits.load(Ordering::Relaxed),
+            h3_misses: self.counters.h3_misses.load(Ordering::Relaxed),
             evictions_idle: self.counters.evictions_idle.load(Ordering::Relaxed),
             evictions_lru: self.counters.evictions_lru.load(Ordering::Relaxed),
             evictions_dead: self.counters.evictions_dead.load(Ordering::Relaxed),
@@ -204,6 +208,17 @@ impl Pool {
                     !idle.is_empty() || before == idle.len()
                 }
                 PooledConn::H2 {
+                    handle, last_use, ..
+                } => {
+                    let keep =
+                        !handle.is_closed() && now.duration_since(*last_use) < self.idle_timeout;
+                    if !keep {
+                        idle_evicted += 1;
+                    }
+                    keep
+                }
+                #[cfg(feature = "http3")]
+                PooledConn::H3 {
                     handle, last_use, ..
                 } => {
                     let keep =
@@ -279,6 +294,102 @@ impl Pool {
                 None
             }
         }
+    }
+
+    /// Look up a live H3 handle for `key`, touching its last-use timestamp.
+    /// Mirrors [`Self::checkout_h2`]: a clone of the multiplexing handle, or a
+    /// miss when the connection is absent or its driver has shut down.
+    #[cfg(feature = "http3")]
+    pub(crate) fn checkout_h3(&self, key: &PoolKey) -> Option<(H3Client, TlsInfo)> {
+        let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let dead = map.get(key).is_some_and(PooledConn::is_dead);
+        if dead {
+            map.remove(key);
+            self.counters.evictions_dead.fetch_add(1, Ordering::Relaxed);
+            self.counters.h3_misses.fetch_add(1, Ordering::Relaxed);
+            return None;
+        }
+        match map.get_mut(key) {
+            Some(entry @ PooledConn::H3 { .. }) => {
+                entry.set_last_use(Instant::now());
+                if let PooledConn::H3 { handle, tls, .. } = entry {
+                    let out = (handle.clone(), tls.clone());
+                    self.counters.h3_hits.fetch_add(1, Ordering::Relaxed);
+                    Some(out)
+                } else {
+                    unreachable!()
+                }
+            }
+            _ => {
+                self.counters.h3_misses.fetch_add(1, Ordering::Relaxed);
+                None
+            }
+        }
+    }
+
+    /// Install a freshly-opened H3 connection, or — if a live one already
+    /// exists for `key` (a concurrent cold request beat us) — keep the
+    /// existing one and return its handle, dropping ours. Returns the
+    /// canonical handle the caller must use.
+    ///
+    /// The check-and-set is what makes the pool safe without H2-style connect
+    /// single-flighting: concurrent cold requests each open a connection, but
+    /// only the first is pooled; the losers' `H3DriverTask`s drop here and
+    /// tear down their (unused) connections cleanly, so no in-flight request
+    /// ever races a teardown of the connection it is about to use.
+    ///
+    /// Note: redundant handshakes on a concurrent cold burst; add
+    /// inflight-H3 single-flighting (mirror `inflight_h2`) if that burst
+    /// proves a fingerprint or cost problem.
+    ///
+    /// Note: H2 and H3 share `PoolKey = (host, port, proxy)`, so an H3
+    /// install replaces an H2 entry (and vice versa in `install_h2`). In
+    /// practice only `Race` can install both protocols at one key, and within
+    /// a race only the winner installs — so this is reachable only on a rare
+    /// same-tick connect tie, costing a wasted handshake (self-healing, the
+    /// clobbered driver closes cleanly; never a double-send, since the H3 send
+    /// path only replays a provably-unsent request). Upgrade path if the race
+    /// connection churn matters: protocol-key the pool so H2/H3 coexist.
+    #[cfg(feature = "http3")]
+    pub(crate) fn install_or_get_h3(
+        &self,
+        key: PoolKey,
+        handle: H3Client,
+        driver: H3DriverTask,
+        tls: TlsInfo,
+    ) -> (H3Client, TlsInfo) {
+        let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(PooledConn::H3 {
+            handle: existing,
+            tls: existing_tls,
+            ..
+        }) = map.get(&key)
+        {
+            if !existing.is_closed() {
+                self.counters.h3_hits.fetch_add(1, Ordering::Relaxed);
+                return (existing.clone(), existing_tls.clone());
+            }
+        }
+        if !map.contains_key(&key) {
+            let evicted = Self::evict_lru_if_needed(&mut map, self.max_connections);
+            if evicted > 0 {
+                self.counters
+                    .evictions_lru
+                    .fetch_add(evicted, Ordering::Relaxed);
+            }
+        }
+        let out = (handle.clone(), tls.clone());
+        map.insert(
+            key,
+            PooledConn::H3 {
+                handle,
+                _driver: Some(driver),
+                last_use: Instant::now(),
+                tls,
+            },
+        );
+        self.counters.installs.fetch_add(1, Ordering::Relaxed);
+        out
     }
 
     /// Pop a warm idle H1 connection for `key`, if one is pooled.
@@ -363,8 +474,10 @@ impl Pool {
                 *last_use = Instant::now();
                 return;
             }
-            // Key holds an H2 entry (protocol flip) — don't clobber it; drop.
+            // Key holds an H2 (or H3) entry (protocol flip) — don't clobber it; drop.
             Some(PooledConn::H2 { .. }) => return,
+            #[cfg(feature = "http3")]
+            Some(PooledConn::H3 { .. }) => return,
             None => {}
         }
         // First connection to this destination — create the entry.

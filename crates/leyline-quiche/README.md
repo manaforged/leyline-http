@@ -1,7 +1,7 @@
 # leyline-quiche
 
 A vendored fork of [`cloudflare/quiche`](https://github.com/cloudflare/quiche)
-v0.23.7 that links against [`btls`](https://crates.io/crates/btls) instead
+v0.23.7 that links against [`leyline-bssl`](../leyline-bssl) instead
 of `boring`, so [`leyline`](https://crates.io/crates/leyline)'s HTTP/2 and
 HTTP/3 ClientHellos share the same patched BoringSSL build.
 

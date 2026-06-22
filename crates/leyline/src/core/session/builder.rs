@@ -66,6 +66,8 @@ pub struct SessionBuilder {
     pool_idle_timeout: Option<std::time::Duration>,
     happy_eyeballs: Option<HappyEyeballsConfig>,
     tls_trust: TlsTrustConfig,
+    /// Session-wide default retry policy (none unless set via `retry`).
+    default_retry: crate::core::retry::RetryPolicy,
 }
 
 impl SessionBuilder {
@@ -98,6 +100,7 @@ impl SessionBuilder {
             pool_idle_timeout: None,
             happy_eyeballs: None,
             tls_trust: TlsTrustConfig::default(),
+            default_retry: crate::core::retry::RetryPolicy::none(),
         }
     }
 
@@ -139,6 +142,14 @@ impl SessionBuilder {
     /// Set request timeout (default: 5 minutes).
     pub fn timeout(mut self, timeout: std::time::Duration) -> Self {
         self.timeouts.total = timeout;
+        self
+    }
+
+    /// Set a session-wide default retry policy, inherited by every request that
+    /// does not override it via [`crate::RequestBuilder::retry`]. Default: no
+    /// retries.
+    pub fn retry(mut self, policy: crate::core::retry::RetryPolicy) -> Self {
+        self.default_retry = policy;
         self
     }
 
@@ -511,10 +522,9 @@ impl SessionBuilder {
         self
     }
 
-    /// Prefer HTTP/3 and fall back to HTTP/2/HTTP/1.1.
-    ///
-    /// This is a sequential compatibility policy today. It reserves the API
-    /// shape for a future true parallel H2/H3 race.
+    /// Race the HTTP/3 (QUIC) and HTTP/2 (TCP+TLS) handshakes, Chrome-style:
+    /// whichever connection establishes first carries the request (sent once),
+    /// with HTTP/1.1 fallback via the Auto path when neither comes up.
     pub fn race(mut self) -> Self {
         #[cfg(feature = "http3")]
         {
@@ -815,6 +825,7 @@ impl SessionBuilder {
                 }),
                 audit_enabled: self.audit,
                 protocol_policy: self.protocol_policy,
+                default_retry: self.default_retry,
                 #[cfg(feature = "http3")]
                 h3_config: match crate::quic::H3Config::for_family(&profile.meta.family) {
                     Ok(cfg) => Some(cfg),

@@ -6,7 +6,6 @@ use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use leyline::{Browser, Error, Result, Session};
-use leyline::{H3Config, H3Connection};
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -254,7 +253,7 @@ async fn smoke_suite() {
         "HTTP/3 Chrome QUIC GET",
         &mut passed,
         &mut failed,
-        smoke(async { h3_get(Browser::Chrome147, H3Config::chrome()).await }),
+        smoke(async { h3_get(Browser::Chrome147).await }),
     )
     .await;
 
@@ -262,7 +261,7 @@ async fn smoke_suite() {
         "HTTP/3 Firefox QUIC GET",
         &mut passed,
         &mut failed,
-        smoke(async { h3_get(Browser::Firefox150, H3Config::firefox()).await }),
+        smoke(async { h3_get(Browser::Firefox150).await }),
     )
     .await;
 
@@ -391,51 +390,45 @@ async fn h1_wire_shape() -> Result<String> {
     Ok(format!("{} request bytes", text.len()))
 }
 
-async fn h3_get(browser: Browser, config: H3Config) -> Result<String> {
-    let resp = H3Connection::request(
-        &config,
-        leyline::profile(browser),
-        "GET",
-        H3_GET_HOST,
-        443,
-        "/",
-        vec![("accept".into(), "text/html,application/xhtml+xml".into())],
-        None,
-    )
-    .await
-    .map_err(Error::Http)?;
+async fn h3_get(browser: Browser) -> Result<String> {
+    let session = Session::builder().browser(browser).http3().build()?;
+    let url = format!("https://{H3_GET_HOST}/");
+    let resp = session
+        .get(&url)
+        .header("accept", "text/html,application/xhtml+xml")
+        .send()
+        .await?;
 
-    ensure(resp.status == 200, format!("status={}", resp.status))?;
-    ensure(!resp.body.is_empty(), "empty H3 body")?;
-    Ok(format!("status={} body={}B", resp.status, resp.body.len()))
+    let status = resp.status();
+    let body = resp.bytes();
+    ensure(status == 200, format!("status={status}"))?;
+    ensure(!body.is_empty(), "empty H3 body")?;
+    Ok(format!("status={status} body={}B", body.len()))
 }
 
 async fn h3_post_body() -> Result<String> {
     let payload = br#"{"proof":"leyline-h3-body","n":42}"#;
-    let resp = H3Connection::request(
-        &H3Config::chrome(),
-        leyline::profile(Browser::Chrome147),
-        "POST",
-        H3_ECHO_HOST,
-        443,
-        "/post",
-        vec![
-            ("accept".into(), "application/json".into()),
-            ("content-type".into(), "application/json".into()),
-            ("content-length".into(), payload.len().to_string()),
-        ],
-        Some(Bytes::copy_from_slice(payload)),
-    )
-    .await
-    .map_err(Error::Http)?;
+    let session = Session::builder()
+        .browser(Browser::Chrome147)
+        .http3()
+        .build()?;
+    let url = format!("https://{H3_ECHO_HOST}/post");
+    let resp = session
+        .post(&url)
+        .header("accept", "application/json")
+        .header("content-type", "application/json")
+        .body(Bytes::copy_from_slice(payload))
+        .send()
+        .await?;
 
-    ensure(resp.status == 200, format!("status={}", resp.status))?;
-    let body = String::from_utf8_lossy(&resp.body);
+    let status = resp.status();
+    let body = String::from_utf8_lossy(resp.bytes()).into_owned();
+    ensure(status == 200, format!("status={status}"))?;
     ensure(
         body.contains("leyline-h3-body"),
         format!("H3 POST echo missing payload, body={body}"),
     )?;
-    Ok(format!("status={} echoed={}B", resp.status, payload.len()))
+    Ok(format!("status={status} echoed={}B", payload.len()))
 }
 
 fn smoke<'a>(fut: impl Future<Output = Result<String>> + 'a) -> SmokeFuture<'a> {

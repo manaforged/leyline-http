@@ -9,11 +9,13 @@ use crate::tls::{Resolver, SystemResolver};
 
 /// A validated proxy URL.
 ///
-/// Leyline accepts `http://`, `https://`, `socks5://`, and `socks5h://`
-/// proxy URLs. SOCKS URLs require the `socks` feature at connection time.
-/// This type lets callers validate and carry proxy strings without
-/// accidentally feeding an empty host or unsupported scheme into the
-/// connection layer.
+/// Leyline accepts `http://`, `socks5://`, and `socks5h://` proxy URLs.
+/// SOCKS URLs require the `socks` feature at connection time. An `https://`
+/// proxy (TLS to the proxy itself) is rejected: leyline does not yet perform a
+/// TLS handshake to the proxy, so honoring it would send the CONNECT request —
+/// including any credentials — in cleartext. This type lets callers validate
+/// and carry proxy strings without accidentally feeding an empty host or
+/// unsupported scheme into the connection layer.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ProxyUrl(String);
 
@@ -23,10 +25,17 @@ impl ProxyUrl {
         let raw = raw.as_ref().trim();
         let parsed = Self::parse_inner(raw)?;
         match parsed.scheme() {
-            "http" | "https" | "socks5" | "socks5h" => {}
+            "http" | "socks5" | "socks5h" => {}
+            "https" => {
+                return Err(crate::core::Error::Config(
+                    "https:// proxies are not supported: leyline does not yet TLS-handshake to the \
+                     proxy, so CONNECT would be sent in cleartext. Use http:// or socks5://."
+                        .into(),
+                ));
+            }
             other => {
                 return Err(crate::core::Error::Config(format!(
-                    "unsupported proxy scheme {other:?}; expected http, https, socks5, or socks5h"
+                    "unsupported proxy scheme {other:?}; expected http, socks5, or socks5h"
                 )));
             }
         }
@@ -63,11 +72,6 @@ impl ProxyUrl {
     /// Build an HTTP proxy URL.
     pub fn http(raw: impl AsRef<str>) -> crate::core::Result<Self> {
         Self::parse_scheme(raw, "http")
-    }
-
-    /// Build an HTTPS proxy URL.
-    pub fn https(raw: impl AsRef<str>) -> crate::core::Result<Self> {
-        Self::parse_scheme(raw, "https")
     }
 
     /// Build a SOCKS5 proxy URL.
@@ -434,7 +438,10 @@ pub struct TimeoutConfig {
     pub total: Duration,
     /// DNS + TCP + TLS connect timeout.
     pub connect: Option<Duration>,
-    /// Timeout for buffered response body reads.
+    /// Per-chunk idle timeout for streaming response bodies (and the drain of
+    /// a streamed body that the caller buffers). Resets after each chunk, so a
+    /// steady stream never trips it; a stalled connection errors with
+    /// `TimedOut` well before the request-wide `total` timeout.
     pub read: Option<Duration>,
 }
 
@@ -945,12 +952,15 @@ mod tests {
         );
         assert!(ProxyUrl::parse("ftp://proxy.example:21").is_err());
         assert!(ProxyUrl::parse("http://").is_err());
+        // https:// proxies are rejected at construction: leyline cannot yet
+        // TLS-handshake to the proxy, so honoring one would leak CONNECT in
+        // cleartext (see connect_through_proxy).
+        assert!(ProxyUrl::parse("https://proxy.example:8443").is_err());
     }
 
     #[test]
     fn proxy_url_constructors_enforce_scheme() {
         assert!(ProxyUrl::http("http://proxy.example:8080").is_ok());
-        assert!(ProxyUrl::https("https://proxy.example:8443").is_ok());
         assert!(ProxyUrl::socks5("socks5://proxy.example:1080").is_ok());
         assert!(ProxyUrl::socks5h("socks5h://proxy.example:1080").is_ok());
         assert!(ProxyUrl::http("socks5://proxy.example:1080").is_err());

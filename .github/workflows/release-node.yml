@@ -6,8 +6,8 @@ name: release-node
 # consumer side (the napi-rs optionalDependencies pattern — see
 # wrappers/node/README.md "Install").
 #
-# Targets: the three for which btls-sys ships prebuilt BoringSSL
-# (crates/btls-sys/native/<target>/lib). No BORING_BSSL_PATH needed — the
+# Targets: the three for which leyline-bssl-sys ships prebuilt BoringSSL
+# (crates/leyline-bssl-sys/native/<target>/lib). No BORING_BSSL_PATH needed — the
 # static libs are in-tree, so each matrix leg builds against them directly.
 #
 # Registry: GitHub Packages (npm.pkg.github.com), authed by the built-in

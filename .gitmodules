@@ -1,0 +1,4 @@
+[submodule "crates/leyline-bssl-sys/deps/boringssl"]
+	path = crates/leyline-bssl-sys/deps/boringssl
+	url = https://github.com/google/boringssl.git
+	ignore = dirty

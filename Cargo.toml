@@ -9,10 +9,12 @@ members = [
 ]
 
 exclude = [
-    "crates/btls-sys",
+    "crates/leyline-bssl-sys",
+    "crates/leyline-bssl",
+    "crates/leyline-bssl-tokio",
 ]
 [workspace.package]
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.3"
 edition = "2024"
 rust-version = "1.85" # MSRV
 authors = ["Thomas Gardiner"]
@@ -38,13 +40,12 @@ thiserror = "2"
 url = "2"
 sha2 = "0.10"
 md-5 = "0.10"
-# BoringSSL bindings from crates.io. btls is a fork of 0x676e67/boring2 that
-# carries the Firefox-specific C patches (set_record_size_limit,
-# set_delegated_credentials) we need for browser-accurate TLS fingerprinting.
-# Upstream attribution is in /NOTICE.
-btls = "0.5.6"
-btls-sys = "0.5.6"
-tokio-btls = "0.5.6"
+# Leyline's owned BoringSSL stack (vendored fork of 0x676e67/btls). Carries the
+# Firefox-specific C patches (record_size_limit, delegated_credentials, FFDHE,
+# 3DES) and pins the BoringSSL revision per Chrome era. Attribution in /NOTICE.
+leyline-bssl = { path = "crates/leyline-bssl" }
+leyline-bssl-sys = { path = "crates/leyline-bssl-sys" }
+leyline-bssl-tokio = { path = "crates/leyline-bssl-tokio" }
 socket2 = { version = "0.5", features = ["all"] }
 bytes = "1"
 tungstenite = "0.26"
@@ -57,7 +58,3 @@ lto = "thin"
 codegen-units = 1
 strip = "symbols"
 opt-level = 3
-
-[patch.crates-io]
-# Keep normal developer builds off CMake/bindgen/libclang; see crates/btls-sys.
-btls-sys = { path = "crates/btls-sys" }

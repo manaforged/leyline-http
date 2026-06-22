@@ -361,7 +361,7 @@
 //!
 //! * `boringssl-vendored` (default): Build the vendored BoringSSL library.
 //!
-//! * `boringssl-btls-crate`: Use the BoringSSL library provided by the
+//! * `boringssl-bssl-crate`: Use the BoringSSL library provided by the
 //!   [boring] crate. It takes precedence over `boringssl-vendored` if both
 //!   features are enabled.
 //!
@@ -372,7 +372,7 @@
 //! * `qlog`: Enable support for the [qlog] logging format.
 //!
 //! [feature flags]: https://doc.rust-lang.org/cargo/reference/manifest.html#the-features-section
-//! [btls]: https://crates.io/crates/btls
+//! [leyline_bssl]: https://crates.io/crates/leyline_bssl
 //! [qlog]: https://datatracker.ietf.org/doc/html/draft-ietf-quic-qlog-main-schema
 
 #![allow(clippy::upper_case_acronyms)]
@@ -846,13 +846,13 @@ impl Config {
     /// [`SslContextBuilder`].
     ///
     /// [`SslContextBuilder`]: https://docs.rs/boring/latest/boring/ssl/struct.SslContextBuilder.html
-    #[cfg(feature = "boringssl-btls-crate")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-btls-crate")))]
+    #[cfg(feature = "boringssl-bssl-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-bssl-crate")))]
     pub fn with_boring_ssl_ctx_builder(
         version: u32,
-        tls_ctx_builder: btls::ssl::SslContextBuilder,
+        tls_ctx_builder: leyline_bssl::ssl::SslContextBuilder,
     ) -> Result<Config> {
-        Self::with_tls_ctx(version, tls::Context::from_btls(tls_ctx_builder))
+        Self::with_tls_ctx(version, tls::Context::from_bssl(tls_ctx_builder))
     }
 
     fn with_tls_ctx(version: u32, tls_ctx: tls::Context) -> Result<Config> {
@@ -2256,10 +2256,10 @@ impl Connection {
     /// See [`Config::set_cc_algorithm()`].
     ///
     /// [`Config::set_cc_algorithm()`]: struct.Config.html#method.set_cc_algorithm
-    #[cfg(feature = "boringssl-btls-crate")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-btls-crate")))]
+    #[cfg(feature = "boringssl-bssl-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-bssl-crate")))]
     pub fn set_cc_algorithm_in_handshake(
-        ssl: &mut btls::ssl::SslRef,
+        ssl: &mut leyline_bssl::ssl::SslRef,
         algo: CongestionControlAlgorithm,
     ) -> Result<()> {
         let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
@@ -2278,10 +2278,10 @@ impl Connection {
     /// See [`Config::set_cc_algorithm_name()`].
     ///
     /// [`Config::set_cc_algorithm_name()`]: struct.Config.html#method.set_cc_algorithm_name
-    #[cfg(feature = "boringssl-btls-crate")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-btls-crate")))]
+    #[cfg(feature = "boringssl-bssl-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-bssl-crate")))]
     pub fn set_cc_algorithm_name_in_handshake(
-        ssl: &mut btls::ssl::SslRef,
+        ssl: &mut leyline_bssl::ssl::SslRef,
         name: &str,
     ) -> Result<()> {
         let cc_algo = CongestionControlAlgorithm::from_str(name)?;
@@ -2297,10 +2297,10 @@ impl Connection {
     /// See [`Config::set_initial_congestion_window_packets()`].
     ///
     /// [`Config::set_initial_congestion_window_packets()`]: struct.Config.html#method.set_initial_congestion_window_packets
-    #[cfg(feature = "boringssl-btls-crate")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-btls-crate")))]
+    #[cfg(feature = "boringssl-bssl-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-bssl-crate")))]
     pub fn set_initial_congestion_window_packets_in_handshake(
-        ssl: &mut btls::ssl::SslRef,
+        ssl: &mut leyline_bssl::ssl::SslRef,
         packets: usize,
     ) -> Result<()> {
         let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
@@ -2319,9 +2319,9 @@ impl Connection {
     /// See [`Config::enable_hystart()`].
     ///
     /// [`Config::enable_hystart()`]: struct.Config.html#method.enable_hystart
-    #[cfg(feature = "boringssl-btls-crate")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-btls-crate")))]
-    pub fn set_hystart_in_handshake(ssl: &mut btls::ssl::SslRef, v: bool) -> Result<()> {
+    #[cfg(feature = "boringssl-bssl-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-bssl-crate")))]
+    pub fn set_hystart_in_handshake(ssl: &mut leyline_bssl::ssl::SslRef, v: bool) -> Result<()> {
         let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
 
         ex_data.recovery_config.hystart = v;
@@ -2338,9 +2338,9 @@ impl Connection {
     /// See [`Config::enable_pacing()`].
     ///
     /// [`Config::enable_pacing()`]: struct.Config.html#method.enable_pacing
-    #[cfg(feature = "boringssl-btls-crate")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-btls-crate")))]
-    pub fn set_pacing_in_handshake(ssl: &mut btls::ssl::SslRef, v: bool) -> Result<()> {
+    #[cfg(feature = "boringssl-bssl-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-bssl-crate")))]
+    pub fn set_pacing_in_handshake(ssl: &mut leyline_bssl::ssl::SslRef, v: bool) -> Result<()> {
         let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
 
         ex_data.recovery_config.pacing = v;
@@ -2357,10 +2357,10 @@ impl Connection {
     /// See [`Config::set_max_pacing_rate()`].
     ///
     /// [`Config::set_max_pacing_rate()`]: struct.Config.html#method.set_max_pacing_rate
-    #[cfg(feature = "boringssl-btls-crate")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-btls-crate")))]
+    #[cfg(feature = "boringssl-bssl-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-bssl-crate")))]
     pub fn set_max_pacing_rate_in_handshake(
-        ssl: &mut btls::ssl::SslRef,
+        ssl: &mut leyline_bssl::ssl::SslRef,
         v: Option<u64>,
     ) -> Result<()> {
         let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
@@ -2379,10 +2379,10 @@ impl Connection {
     /// See [`Config::set_max_send_udp_payload_size()`].
     ///
     /// [`Config::set_max_send_udp_payload_size()`]: struct.Config.html#method.set_max_send_udp_payload_size
-    #[cfg(feature = "boringssl-btls-crate")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-btls-crate")))]
+    #[cfg(feature = "boringssl-bssl-crate")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "boringssl-bssl-crate")))]
     pub fn set_max_send_udp_payload_size_in_handshake(
-        ssl: &mut btls::ssl::SslRef,
+        ssl: &mut leyline_bssl::ssl::SslRef,
         v: usize,
     ) -> Result<()> {
         let ex_data = tls::ExData::from_ssl_ref(ssl).ok_or(Error::TlsFail)?;
@@ -6517,6 +6517,19 @@ impl Connection {
         self.handshake.peer_cert_chain()
     }
 
+    /// Returns the negotiated TLS 1.3 cipher suite as its IANA name, once the
+    /// handshake has completed. QUIC always negotiates TLS 1.3 (RFC 9001 §4.2),
+    /// so the result is one of the three TLS 1.3 AEAD suites.
+    #[inline]
+    pub fn cipher(&self) -> Option<&'static str> {
+        use crate::crypto::Algorithm;
+        Some(match self.handshake.cipher()? {
+            Algorithm::AES128_GCM => "TLS_AES_128_GCM_SHA256",
+            Algorithm::AES256_GCM => "TLS_AES_256_GCM_SHA384",
+            Algorithm::ChaCha20_Poly1305 => "TLS_CHACHA20_POLY1305_SHA256",
+        })
+    }
+
     /// Returns the serialized cryptographic session for the connection.
     ///
     /// This can be used by a client to cache a connection's session, and resume
@@ -8015,9 +8028,9 @@ impl Connection {
     }
 }
 
-#[cfg(feature = "boringssl-btls-crate")]
-impl AsMut<btls::ssl::SslRef> for Connection {
-    fn as_mut(&mut self) -> &mut btls::ssl::SslRef {
+#[cfg(feature = "boringssl-bssl-crate")]
+impl AsMut<leyline_bssl::ssl::SslRef> for Connection {
+    fn as_mut(&mut self) -> &mut leyline_bssl::ssl::SslRef {
         self.handshake.ssl_mut()
     }
 }
@@ -15478,17 +15491,17 @@ mod tests {
         assert_eq!(pipe.advance(), Ok(()));
     }
 
-    #[cfg(feature = "boringssl-btls-crate")]
+    #[cfg(feature = "boringssl-bssl-crate")]
     #[test]
     fn user_provided_boring_ctx() -> Result<()> {
         // Manually construct `SSlContextBuilder` for the server.
         let mut server_tls_ctx_builder =
-            btls::ssl::SslContextBuilder::new(btls::ssl::SslMethod::tls()).unwrap();
+            leyline_bssl::ssl::SslContextBuilder::new(leyline_bssl::ssl::SslMethod::tls()).unwrap();
         server_tls_ctx_builder
             .set_certificate_chain_file("examples/cert.crt")
             .unwrap();
         server_tls_ctx_builder
-            .set_private_key_file("examples/cert.key", btls::ssl::SslFiletype::PEM)
+            .set_private_key_file("examples/cert.key", leyline_bssl::ssl::SslFiletype::PEM)
             .unwrap();
 
         let mut server_config =
@@ -15518,7 +15531,7 @@ mod tests {
         Ok(())
     }
 
-    #[cfg(feature = "boringssl-btls-crate")]
+    #[cfg(feature = "boringssl-bssl-crate")]
     #[test]
     fn in_handshake_config() -> Result<()> {
         let mut buf = [0; 65535];
@@ -15527,12 +15540,12 @@ mod tests {
 
         // Manually construct `SSlContextBuilder` for the server.
         let mut server_tls_ctx_builder =
-            btls::ssl::SslContextBuilder::new(btls::ssl::SslMethod::tls()).unwrap();
+            leyline_bssl::ssl::SslContextBuilder::new(leyline_bssl::ssl::SslMethod::tls()).unwrap();
         server_tls_ctx_builder
             .set_certificate_chain_file("examples/cert.crt")
             .unwrap();
         server_tls_ctx_builder
-            .set_private_key_file("examples/cert.key", btls::ssl::SslFiletype::PEM)
+            .set_private_key_file("examples/cert.key", leyline_bssl::ssl::SslFiletype::PEM)
             .unwrap();
         server_tls_ctx_builder.set_select_certificate_callback(|mut hello| {
             Connection::set_initial_congestion_window_packets_in_handshake(

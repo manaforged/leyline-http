@@ -23,13 +23,13 @@ use futures_util::future::join_all;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt, DuplexStream};
 use tokio::runtime::Runtime;
 
-use leyline::{Browser, Session};
 use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
 use leyline::h2::connection::{ClientConnection, PseudoHeaders};
 use leyline::h2::frame::{
     DataFrame, FrameHeader, FrameType, HeadersFrame, SettingsFrame, FRAME_HEADER_LEN,
 };
 use leyline::h2::hpack;
+use leyline::{Browser, Session};
 
 // ---------------------------------------------------------------------------
 // Counting allocator.
@@ -80,7 +80,8 @@ unsafe impl GlobalAlloc for Counting {
         if !new.is_null() {
             ALLOCS.fetch_add(1, Ordering::Relaxed);
             LIVE_BYTES.fetch_sub(layout.size() as u64, Ordering::Relaxed);
-            let new_live = LIVE_BYTES.fetch_add(new_size as u64, Ordering::Relaxed) + new_size as u64;
+            let new_live =
+                LIVE_BYTES.fetch_add(new_size as u64, Ordering::Relaxed) + new_size as u64;
             let mut peak = PEAK_BYTES.load(Ordering::Relaxed);
             while new_live > peak {
                 match PEAK_BYTES.compare_exchange_weak(
@@ -160,7 +161,11 @@ async fn run_mock_server(mut io: DuplexStream) {
         let _ = read_exact(&mut io, &mut body).await;
     }
     let mut out = BytesMut::new();
-    SettingsFrame { ack: false, params: vec![] }.encode(&mut out);
+    SettingsFrame {
+        ack: false,
+        params: vec![],
+    }
+    .encode(&mut out);
     if io.write_all(&out).await.is_err() {
         return;
     }
@@ -236,7 +241,9 @@ fn bench_per_request(c: &mut Criterion) {
     let (handle, server_task, _driver) = rt.block_on(async {
         let (cio, sio) = tokio::io::duplex(1024 * 1024);
         let server = tokio::spawn(run_mock_server(sio));
-        let (h, d) = ClientConnection::start(cio, test_config()).await.expect("handshake");
+        let (h, d) = ClientConnection::start(cio, test_config())
+            .await
+            .expect("handshake");
         // Warm the driver by doing 1 request first.
         let (p, hh) = req();
         let _ = h.send_request(p, hh, None).await.unwrap();

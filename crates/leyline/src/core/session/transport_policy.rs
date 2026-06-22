@@ -122,6 +122,7 @@ impl Session {
                 // dispatch). The ~10 KB H1 arm above is the larger remaining
                 // payoff of arm-boxing today.
                 Box::pin(crate::core::transport::send_request_h3(
+                    &self.pool,
                     h3_config,
                     self.profile,
                     method,
@@ -134,56 +135,143 @@ impl Session {
             }
             #[cfg(feature = "http3")]
             ProtocolPolicy::Race => {
-                // Race doesn't interact well with streaming bodies — we
-                // can only try H3 first if we have a buffered body to
-                // keep for the fallback. Streaming bodies run straight
-                // through the Auto path.
-                if body.is_stream() || stream_response {
-                    return crate::core::transport::send_request_auto(
-                        &self.pool,
-                        &self.connector,
-                        &self.h2_config,
-                        method,
-                        url,
-                        headers,
-                        body,
-                        proxy,
-                        stream_response,
-                    )
-                    .await;
-                }
-                if !self.proxy_requested(request_proxy) && url.scheme() == "https" {
-                    // Race the H3 attempt only if this profile has an H3
-                    // fingerprint; otherwise fall straight through to H2.
-                    if let Some(h3_config) = self.h3_config.as_ref() {
-                        // We have a buffered body — clone for the retry.
-                        let retained = match &body {
-                            Body::Empty => Body::Empty,
-                            Body::Bytes(b) => Body::Bytes(b.clone()),
-                            Body::Stream { .. } => unreachable!(),
-                        };
-                        // Boxed cold arm (defense-in-depth, as in the Http3
-                        // arm). The common outcome here is the H2 fallback
-                        // below, so the H3 attempt's state stays off the inline
-                        // Race future. The QUIC future is already ~2.5 KB after
-                        // this commit's `quic::connection` change; boxing keeps
-                        // it that way on principle.
-                        if let Ok(resp) = Box::pin(crate::core::transport::send_request_h3(
-                            h3_config,
-                            self.profile,
+                // A buffered HTTPS request with an H3 fingerprint and no proxy
+                // can be raced. Anything else (streaming body/response, an
+                // explicit proxy, plaintext, or a profile without H3) runs
+                // straight through Auto.
+                let raceable = !body.is_stream()
+                    && !stream_response
+                    && !self.proxy_requested(request_proxy)
+                    && url.scheme() == "https";
+                match (raceable, self.h3_config.as_ref()) {
+                    (true, Some(h3_config)) => {
+                        self.send_raced(h3_config, method, url, headers, body, proxy)
+                            .await
+                    }
+                    _ => {
+                        crate::core::transport::send_request_auto(
+                            &self.pool,
+                            &self.connector,
+                            &self.h2_config,
                             method,
                             url,
-                            headers.clone(),
-                            retained,
+                            headers,
+                            body,
+                            proxy,
                             stream_response,
-                        ))
+                        )
                         .await
-                        {
-                            return Ok(resp);
-                        }
                     }
                 }
-                crate::core::transport::send_request_auto(
+            }
+        }
+    }
+
+    /// True connection-level H2/H3 race (Chrome-style happy-eyeballs).
+    ///
+    /// Races the QUIC handshake against TCP+TLS+H2 — the **connections**, not
+    /// the requests. Whichever establishes first wins, and the request is sent
+    /// exactly once on the winner via the normal pooled send path (which
+    /// reuses the just-warmed connection). A naive parallel race of the two
+    /// `send_request_*` futures would connect *and* send on both, double-
+    /// sending the request to the origin — a load anomaly; racing
+    /// the connect-only checkouts is what avoids it.
+    ///
+    /// If one connection errors, the other still wins (fall-forward); if both
+    /// error, Auto runs and surfaces a proper error. The loser's in-flight
+    /// connect is cancelled when its future drops at the end of the race.
+    #[cfg(feature = "http3")]
+    async fn send_raced(
+        &self,
+        h3_config: &crate::quic::H3Config,
+        method: &str,
+        url: &url::Url,
+        headers: Vec<(String, String)>,
+        body: Body,
+        proxy: Option<&str>,
+    ) -> Result<crate::core::transport::TransportResponse> {
+        use crate::core::transport::{send_request_auto, send_request_h2, send_request_h3};
+
+        let Some(host) = url.host_str() else {
+            return send_request_auto(
+                &self.pool,
+                &self.connector,
+                &self.h2_config,
+                method,
+                url,
+                headers,
+                body,
+                proxy,
+                false,
+            )
+            .await;
+        };
+        let port = url.port_or_known_default().unwrap_or(443);
+
+        enum Winner {
+            H3,
+            H2,
+        }
+
+        // Connect-only: each future returns once its connection is established
+        // (or reuses a pooled one) without opening a request stream.
+        let h3_connect =
+            crate::pool::checkout_h3_handle(&self.pool, h3_config, self.profile, host, port);
+        let h2_connect = crate::pool::checkout_handle(
+            &self.pool,
+            &self.connector,
+            &self.h2_config,
+            host,
+            port,
+            proxy,
+        );
+        tokio::pin!(h3_connect, h2_connect);
+
+        let mut h3_done = false;
+        let mut h2_done = false;
+        let winner = loop {
+            tokio::select! {
+                r = &mut h3_connect, if !h3_done => match r {
+                    Ok(_) => break Some(Winner::H3),
+                    Err(_) => {
+                        h3_done = true;
+                        if h2_done {
+                            break None;
+                        }
+                    }
+                },
+                r = &mut h2_connect, if !h2_done => match r {
+                    Ok(_) => break Some(Winner::H2),
+                    Err(_) => {
+                        h2_done = true;
+                        if h3_done {
+                            break None;
+                        }
+                    }
+                },
+            }
+        };
+
+        // The winning connection is now warm in the pool; dispatch through the
+        // normal per-protocol send path, which checks it back out and sends
+        // the request exactly once. Dropping the pinned futures here cancels
+        // the loser's connect.
+        match winner {
+            Some(Winner::H3) => {
+                Box::pin(send_request_h3(
+                    &self.pool,
+                    h3_config,
+                    self.profile,
+                    method,
+                    url,
+                    headers,
+                    body,
+                    false,
+                ))
+                .await
+            }
+            Some(Winner::H2) => {
+                send_request_h2(
                     &self.pool,
                     &self.connector,
                     &self.h2_config,
@@ -192,7 +280,21 @@ impl Session {
                     headers,
                     body,
                     proxy,
-                    stream_response,
+                    false,
+                )
+                .await
+            }
+            None => {
+                send_request_auto(
+                    &self.pool,
+                    &self.connector,
+                    &self.h2_config,
+                    method,
+                    url,
+                    headers,
+                    body,
+                    proxy,
+                    false,
                 )
                 .await
             }

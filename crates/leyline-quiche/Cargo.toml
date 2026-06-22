@@ -1,8 +1,8 @@
 [package]
 name = "leyline-quiche"
-# Fork of cloudflare/quiche v0.23.7 that links against btls instead of boring,
-# so leyline's H2 and H3 ClientHellos share the same patched BoringSSL.
-description = "Fork of cloudflare/quiche (v0.23.7) that links against btls instead of boring, so leyline's H2 and H3 ClientHellos share the same patched BoringSSL."
+# Fork of cloudflare/quiche v0.23.7 that links against leyline-bssl instead of
+# boring, so leyline's H2 and H3 ClientHellos share the same patched BoringSSL.
+description = "Fork of cloudflare/quiche (v0.23.7) that links against leyline-bssl instead of boring, so leyline's H2 and H3 ClientHellos share the same patched BoringSSL."
 version.workspace = true
 edition.workspace = true
 license = "BSD-2-Clause"
@@ -27,15 +27,15 @@ include = [
 vendored = true
 
 [features]
-default = ["boringssl-btls-crate"]
+default = ["boringssl-bssl-crate"]
 
-# Use the BoringSSL library provided by the btls crate (replaces upstream
-# boringssl-boring-crate). This is the only supported mode in leyline-quiche;
-# we do not vendor BoringSSL separately — btls-sys owns the BoringSSL build.
-boringssl-btls-crate = ["btls", "foreign-types-shared"]
+# Use the BoringSSL library provided by the leyline-bssl crate (replaces
+# upstream boringssl-boring-crate). This is the only supported mode in
+# leyline-quiche; leyline-bssl-sys owns the BoringSSL build.
+boringssl-bssl-crate = ["leyline-bssl", "foreign-types-shared"]
 
 [dependencies]
-btls = { workspace = true, optional = true }
+leyline-bssl = { workspace = true, optional = true }
 debug_panic = "0.2.1"
 either = { version = "1.8", default-features = false }
 foreign-types-shared = { version = "0.3.0", optional = true }

@@ -5,6 +5,8 @@ use std::sync::atomic::AtomicU64;
 use std::time::Instant;
 
 use crate::h2::client::{DriverTask, H2Client};
+#[cfg(feature = "http3")]
+use crate::quic::{H3Client, H3DriverTask};
 
 use crate::pool::h1::H1Io;
 use crate::tls::TlsIo;
@@ -74,18 +76,34 @@ pub(crate) enum PooledConn {
         last_use: Instant,
         tls: TlsInfo,
     },
+    /// An HTTP/3 entry. Like H2, the [`H3Client`] handle is cloneable and
+    /// multiplexes concurrent requests over the one QUIC connection; checkout
+    /// is a clone, never a check-out/in. The `H3DriverTask` stays here so
+    /// dropping the pool entry tears the connection down.
+    #[cfg(feature = "http3")]
+    H3 {
+        handle: H3Client,
+        /// Wrapped in `Option` so we can take it on eviction.
+        _driver: Option<H3DriverTask>,
+        last_use: Instant,
+        tls: TlsInfo,
+    },
 }
 
 impl PooledConn {
     pub(crate) fn last_use(&self) -> Instant {
         match self {
             PooledConn::H2 { last_use, .. } | PooledConn::H1 { last_use, .. } => *last_use,
+            #[cfg(feature = "http3")]
+            PooledConn::H3 { last_use, .. } => *last_use,
         }
     }
 
     pub(crate) fn set_last_use(&mut self, now: Instant) {
         match self {
             PooledConn::H2 { last_use, .. } | PooledConn::H1 { last_use, .. } => *last_use = now,
+            #[cfg(feature = "http3")]
+            PooledConn::H3 { last_use, .. } => *last_use = now,
         }
     }
 
@@ -94,6 +112,8 @@ impl PooledConn {
         match self {
             PooledConn::H2 { handle, .. } => handle.is_closed(),
             PooledConn::H1 { idle, .. } => idle.is_empty(),
+            #[cfg(feature = "http3")]
+            PooledConn::H3 { handle, .. } => handle.is_closed(),
         }
     }
 }
@@ -122,6 +142,10 @@ pub struct PoolStats {
     /// Cumulative H1 checkout misses (no entry, dead slot, or idle
     /// window exceeded).
     pub h1_misses: u64,
+    /// Cumulative successful H3 checkouts (QUIC connection alive + reused).
+    pub h3_hits: u64,
+    /// Cumulative H3 checkout misses (no entry, or entry was dead).
+    pub h3_misses: u64,
     /// Cumulative evictions from the idle timeout sweep.
     pub evictions_idle: u64,
     /// Cumulative evictions triggered by the LRU cap.
@@ -140,6 +164,8 @@ pub(crate) struct PoolCounters {
     pub(crate) h2_misses: AtomicU64,
     pub(crate) h1_hits: AtomicU64,
     pub(crate) h1_misses: AtomicU64,
+    pub(crate) h3_hits: AtomicU64,
+    pub(crate) h3_misses: AtomicU64,
     pub(crate) evictions_idle: AtomicU64,
     pub(crate) evictions_lru: AtomicU64,
     pub(crate) evictions_dead: AtomicU64,

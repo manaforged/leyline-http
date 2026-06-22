@@ -22,16 +22,16 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use btls::asn1::Asn1Time;
-use btls::bn::{BigNum, MsbOption};
-use btls::hash::MessageDigest;
-use btls::pkey::PKey;
-use btls::rsa::Rsa;
-use btls::x509::extension::{BasicConstraints, SubjectAlternativeName};
-use btls::x509::{X509NameBuilder, X509};
 use leyline::profile::BrowserProfile;
 use leyline::tls::{FingerprintConnector, ResolveFuture, Resolver, TlsTrustConfig};
 use leyline::TcpProfile;
+use leyline_bssl::asn1::Asn1Time;
+use leyline_bssl::bn::{BigNum, MsbOption};
+use leyline_bssl::hash::MessageDigest;
+use leyline_bssl::pkey::PKey;
+use leyline_bssl::rsa::Rsa;
+use leyline_bssl::x509::extension::{BasicConstraints, SubjectAlternativeName};
+use leyline_bssl::x509::{X509NameBuilder, X509};
 use sha2::{Digest, Sha256};
 use tokio::net::TcpListener;
 
@@ -133,7 +133,7 @@ fn load_profile() -> BrowserProfile {
 /// Spawn a one-shot BoringSSL acceptor presenting `leaf` + `ca`. Returns
 /// the bound address; the task serves a single handshake then exits.
 async fn spawn_tls_server(gen: &Generated) -> SocketAddr {
-    use btls::ssl::{SslAcceptor, SslMethod};
+    use leyline_bssl::ssl::{SslAcceptor, SslMethod};
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -157,8 +157,8 @@ async fn spawn_tls_server(gen: &Generated) -> SocketAddr {
             let Ok((tcp, _)) = listener.accept().await else {
                 return;
             };
-            let ssl = btls::ssl::Ssl::new(acceptor.context()).unwrap();
-            let mut stream = match tokio_btls::SslStream::new(ssl, tcp) {
+            let ssl = leyline_bssl::ssl::Ssl::new(acceptor.context()).unwrap();
+            let mut stream = match leyline_bssl_tokio::SslStream::new(ssl, tcp) {
                 Ok(s) => s,
                 Err(_) => continue,
             };

@@ -33,18 +33,18 @@ pub enum TlsError {
     TrustStore(String),
 }
 
-// btls errors are stringified at the boundary so no `btls` type is nameable in
-// the public `TlsError` enum (a btls major bump can change these impls without
+// leyline_bssl errors are stringified at the boundary so no `leyline_bssl` type is nameable in
+// the public `TlsError` enum (a leyline_bssl major bump can change these impls without
 // breaking the variants consumers match on). These conversions keep `?`
 // ergonomic across the BoringSSL build/handshake paths.
-impl From<btls::ssl::Error> for TlsError {
-    fn from(e: btls::ssl::Error) -> Self {
+impl From<leyline_bssl::ssl::Error> for TlsError {
+    fn from(e: leyline_bssl::ssl::Error) -> Self {
         TlsError::SslConfig(e.to_string())
     }
 }
 
-impl From<btls::error::ErrorStack> for TlsError {
-    fn from(e: btls::error::ErrorStack) -> Self {
+impl From<leyline_bssl::error::ErrorStack> for TlsError {
+    fn from(e: leyline_bssl::error::ErrorStack) -> Self {
         TlsError::Handshake(e.to_string())
     }
 }

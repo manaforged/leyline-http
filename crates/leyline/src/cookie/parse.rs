@@ -184,30 +184,26 @@ pub fn parse_set_cookie(header: &str, request_url: &url::Url) -> Option<Cookie> 
     })
 }
 
-/// Is the given domain a public suffix (per the rules in RFC 6265bis §5.2
-/// that forbid cookies from being set on one)?
-///
-/// Returns `true` only for the single-label case (e.g. `localhost`, `.io`,
-/// `.de` — domains with no dots, which every browser rejects) plus the
-/// obvious gTLDs (`com`, `org`, `net`, `edu`, `gov`, `mil`, `int`). These
-/// are the cases where returning `false` would actively break the cookie
-/// security model — a cookie with `Domain=com` would attach to every
-/// `*.com` site.
-///
-/// A full public-suffix check (e.g. `.co.uk`, `.github.io`, `.vercel.app`
-/// — thousands of entries maintained by the Mozilla PSL) is out of scope.
-/// Callers that need real PSL behaviour should wire the `publicsuffix`
-/// crate over the jar. The previous partial allow-list here was a fig
-/// leaf — it caught `.co.uk` but missed `.app`, `.dev`, `.page`,
-/// `.github.io`, `.vercel.app`, and thousands of others, giving a false
-/// sense of protection.
+/// Is `domain` a public suffix (per RFC 6265bis §5.2, which forbids setting a
+/// cookie on one)? Resolves against the Mozilla Public Suffix List via
+/// [`psl`], so it catches `co.uk`, `github.io`, `vercel.app`, and the
+/// thousands of entries a gTLD allow-list misses.
 fn is_public_suffix(domain: &str) -> bool {
+    // A single-label domain (no dot) has no registrable parent — every browser
+    // rejects `Domain=com` / `Domain=localhost`.
     if !domain.contains('.') {
         return true;
     }
-    const GTLDS: &[&str] = &["com", "org", "net", "edu", "gov", "mil", "int"];
-    let lower = domain.to_ascii_lowercase();
-    GTLDS.iter().any(|s| lower == *s)
+    // It is a public suffix iff the PSL resolves it to itself.
+    psl::suffix(domain.as_bytes())
+        .is_some_and(|s| s.as_bytes().eq_ignore_ascii_case(domain.as_bytes()))
+}
+
+/// The registrable domain (eTLD+1) of `host` per the Public Suffix List —
+/// e.g. `www.example.co.uk` → `example.co.uk`. `None` when `host` is itself a
+/// public suffix or has no registrable parent (an IP literal, `localhost`).
+pub(crate) fn registrable_domain(host: &str) -> Option<String> {
+    psl::domain(host.as_bytes()).map(|d| String::from_utf8_lossy(d.as_bytes()).into_owned())
 }
 
 /// Default cookie path from request URI (RFC 6265bis Section 5.1.4).
@@ -360,6 +356,47 @@ mod tests {
         assert_eq!(c.same_site, SameSite::None);
         assert!(!c.host_only);
         assert!(c.expires.is_some()); // from Max-Age
+    }
+
+    #[test]
+    fn psl_public_suffix_uses_real_list() {
+        // Multi-label suffixes the old gTLD allow-list missed.
+        assert!(is_public_suffix("co.uk"));
+        assert!(is_public_suffix("github.io"));
+        assert!(is_public_suffix("com"));
+        assert!(is_public_suffix("localhost")); // single-label
+                                                // Registrable domains are not public suffixes.
+        assert!(!is_public_suffix("example.co.uk"));
+        assert!(!is_public_suffix("example.com"));
+        assert!(!is_public_suffix("foo.github.io"));
+    }
+
+    #[test]
+    fn psl_registrable_domain() {
+        assert_eq!(
+            registrable_domain("www.example.co.uk").as_deref(),
+            Some("example.co.uk")
+        );
+        assert_eq!(
+            registrable_domain("a.b.example.com").as_deref(),
+            Some("example.com")
+        );
+        assert_eq!(
+            registrable_domain("example.com").as_deref(),
+            Some("example.com")
+        );
+        // A bare public suffix / single label has no registrable parent.
+        assert_eq!(registrable_domain("co.uk"), None);
+        assert_eq!(registrable_domain("localhost"), None);
+    }
+
+    #[test]
+    fn set_cookie_on_public_suffix_is_rejected() {
+        let url = test_url("https://example.co.uk/");
+        // A Domain attribute pointing at the public suffix is a supercookie.
+        assert!(parse_set_cookie("evil=1; Domain=co.uk", &url).is_none());
+        // The registrable domain is fine.
+        assert!(parse_set_cookie("ok=1; Domain=example.co.uk", &url).is_some());
     }
 
     #[test]

@@ -27,6 +27,34 @@ impl RequestBuilder {
             self.url = url.to_string();
         }
 
+        // Request-body compression (opt-in via `.compress(..)`). Compress the
+        // buffered body and declare `Content-Encoding` before the headers and
+        // body are read below, so both the quick-path and retry-path see it.
+        if let Some(encoding) = self.compress {
+            match &self.body {
+                Body::Bytes(b) => {
+                    let compressed = encoding.encode(b)?;
+                    self.headers
+                        .set("content-encoding", encoding.header_value());
+                    // The body length changes; content-length is recomputed
+                    // authoritatively from the compressed bytes in `execute`,
+                    // which strips any caller-supplied content-length first.
+                    self.body = Body::from(compressed);
+                }
+                // An empty body has nothing to compress; emit no header.
+                Body::Empty => {}
+                // A streaming body cannot be compressed in place — refuse
+                // rather than send raw bytes under a compressed header.
+                Body::Stream { .. } => {
+                    return Err(Error::Body(
+                        "request-body compression is not supported for streaming bodies; \
+                         buffer the body via `Body::Bytes` before calling `.compress(..)`"
+                            .into(),
+                    ));
+                }
+            }
+        }
+
         // Consume the builder up-front so we own the fields we need.
         let method = self.method.clone();
         let url = self.url.clone();
@@ -278,8 +306,20 @@ impl RequestBuilder {
                 ));
             }
 
-            let sleep = retry_policy.backoff(attempt);
-            tokio::time::sleep(sleep).await;
+            // A server-directed `Retry-After` (delta-seconds) overrides our own
+            // exponential backoff; bound it by the overall deadline so a hostile
+            // or absent value can never exceed the caller's timeout.
+            let sleep = match &result {
+                Ok(resp) => resp
+                    .headers()
+                    .iter()
+                    .find(|(k, _)| k.eq_ignore_ascii_case("retry-after"))
+                    .and_then(|(_, v)| crate::core::retry::parse_retry_after(v)),
+                _ => None,
+            }
+            .unwrap_or_else(|| retry_policy.backoff(attempt));
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            tokio::time::sleep(sleep.min(remaining)).await;
             attempt += 1;
             body = match &retry_body_template {
                 Some(Body::Empty) => Body::Empty,

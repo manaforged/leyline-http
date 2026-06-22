@@ -52,8 +52,8 @@ if command -v cmd.exe >/dev/null 2>&1 || command -v powershell.exe >/dev/null 2>
 fi
 
 # Map host OS/arch to the Rust target triple the prebuilt shim is keyed on,
-# then check whether crates/btls-sys ships a prebuilt for it. If it does, the
-# in-workspace build links it directly and needs no CMake/Perl/libclang/Go.
+# then check whether crates/leyline-bssl-sys ships a prebuilt for it. If it
+# does, the in-workspace build links it directly — no CMake/Perl/libclang/Go.
 uname_m="$(uname -m 2>/dev/null || echo unknown)"
 case "$uname_m" in
     arm64|aarch64) arch="aarch64" ;;
@@ -67,7 +67,7 @@ case "$uname_s" in
     *)                 triple="" ;;
 esac
 
-prebuilt_dir="crates/btls-sys/native/$triple/lib"
+prebuilt_dir="crates/leyline-bssl-sys/native/$triple/lib"
 if [[ -n "$triple" ]] \
     && { [[ -f "$prebuilt_dir/ssl.lib" ]] || [[ -f "$prebuilt_dir/libssl.a" ]]; }; then
     ok "prebuilt BoringSSL shim found for $triple — no CMake/Perl/libclang/Go needed"
@@ -75,7 +75,7 @@ else
     warn "no prebuilt BoringSSL shim for target '${triple:-$uname_s/$uname_m}'"
     echo "  The in-workspace build will fail for this target. To proceed:"
     echo "    - set BORING_BSSL_PATH to a BoringSSL build for it, OR"
-    echo "    - drop the [patch.crates-io] btls-sys line from Cargo.toml to source-build."
+    echo "    - source-build via: (cd crates/leyline-bssl-sys && cargo build --features source-build)."
     echo "  Source build needs these tools:"
     case "$uname_s" in
         Darwin)  need cmake || warn "install with: brew install cmake"

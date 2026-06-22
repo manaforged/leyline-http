@@ -1150,33 +1150,46 @@ async fn live_firefox150_pseudo_header_order() {
 
 // ─── Live: HTTP/3 over QUIC ─────────────────────────────────────────────
 
-/// Sanity: HTTP/3 works end-to-end against a known H3 server. This guards
-/// against regressions in the quiche + BoringSSL stack.
+/// Sanity: HTTP/3 works end-to-end against a known H3 server through the
+/// pooled Session path. This guards against regressions in the quiche +
+/// BoringSSL stack and in the H3 connection pool / driver.
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_h3_cloudflare() {
-    use leyline::{H3Config, H3Connection};
-    let reg = leyline::profile::ProfileRegistry::builtin();
-    let profile = reg.get_browser(Browser::Chrome147).unwrap();
-    let config = H3Config::chrome();
-    let resp = H3Connection::request(
-        &config,
-        profile,
-        "GET",
-        "cloudflare-quic.com",
-        443,
-        "/",
-        vec![],
-        None,
-    )
-    .await
-    .expect("H3 request failed");
-    assert_eq!(resp.status, 200, "H3 status: {}", resp.status);
-    assert!(!resp.body.is_empty(), "H3 body is empty");
+    let session = leyline::Session::builder()
+        .browser(Browser::Chrome147)
+        .http3()
+        .build()
+        .expect("h3 session builds");
+    let resp = session
+        .get("https://cloudflare-quic.com/")
+        .send()
+        .await
+        .expect("H3 request failed");
+    assert_eq!(resp.status(), 200, "H3 status: {}", resp.status());
+    // H3 now surfaces the QUIC handshake TLS detail (was all None before).
+    assert_eq!(resp.tls_alpn(), Some("h3"), "H3 ALPN");
+    assert_eq!(
+        resp.tls_version(),
+        Some("TLSv1.3"),
+        "QUIC is always TLS 1.3 (RFC 9001 §4.2)"
+    );
+    assert!(
+        resp.tls_cipher()
+            .is_some_and(|c| c.starts_with("TLS_") && c.contains("_SHA")),
+        "expected a TLS 1.3 cipher suite, got {:?}",
+        resp.tls_cipher()
+    );
+    assert!(
+        resp.tls_peer_certificate().is_some_and(|c| !c.is_empty()),
+        "H3 peer certificate should be exposed"
+    );
+    let body = resp.bytes();
+    assert!(!body.is_empty(), "H3 body is empty");
     println!(
-        "✓ HTTP/3 to cloudflare-quic.com: status {}, {} bytes",
-        resp.status,
-        resp.body.len()
+        "✓ HTTP/3 to cloudflare-quic.com: status 200, {} bytes, cipher {:?}",
+        body.len(),
+        resp.tls_cipher()
     );
 }
 
@@ -1190,58 +1203,148 @@ async fn live_h3_cloudflare() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_h3_cloudflare_firefox_profile() {
-    use leyline::{H3Config, H3Connection};
-    let reg = leyline::profile::ProfileRegistry::builtin();
-    let profile = reg.get_browser(Browser::Firefox150).unwrap();
-    let config = H3Config::firefox();
-    let resp = H3Connection::request(
-        &config,
-        profile,
-        "GET",
-        "cloudflare-quic.com",
-        443,
-        "/",
-        vec![],
-        None,
-    )
-    .await
-    .expect("H3 request failed (firefox profile)");
+    let session = leyline::Session::builder()
+        .browser(Browser::Firefox150)
+        .http3()
+        .build()
+        .expect("h3 session builds");
+    let resp = session
+        .get("https://cloudflare-quic.com/")
+        .send()
+        .await
+        .expect("H3 request failed (firefox profile)");
     assert_eq!(
-        resp.status, 200,
+        resp.status(),
+        200,
         "H3 status with Firefox profile: {}",
-        resp.status
+        resp.status()
     );
-    println!(
-        "✓ HTTP/3 to cloudflare-quic.com (Firefox 150 profile): status {}, {} bytes",
-        resp.status,
-        resp.body.len()
-    );
+    println!("✓ HTTP/3 to cloudflare-quic.com (Firefox 150 profile): status 200");
 }
 
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_h3_google() {
-    use leyline::{H3Config, H3Connection};
-    let reg = leyline::profile::ProfileRegistry::builtin();
-    let profile = reg.get_browser(Browser::Chrome147).unwrap();
-    let config = H3Config::chrome();
-    let resp = H3Connection::request(
-        &config,
-        profile,
-        "GET",
-        "www.google.com",
-        443,
-        "/",
-        vec![("accept".into(), "text/html".into())],
-        None,
-    )
-    .await
-    .expect("H3 request failed");
-    assert_eq!(resp.status, 200, "H3 status: {}", resp.status);
+    let session = leyline::Session::builder()
+        .browser(Browser::Chrome147)
+        .http3()
+        .build()
+        .expect("h3 session builds");
+    let resp = session
+        .get("https://www.google.com/")
+        .header("accept", "text/html")
+        .send()
+        .await
+        .expect("H3 request failed");
+    assert_eq!(resp.status(), 200, "H3 status: {}", resp.status());
+    println!("✓ HTTP/3 to www.google.com: status 200");
+}
+
+/// HTTP/3 connection pooling: two sequential requests on one Session must
+/// reuse the same QUIC connection. The first request opens + installs the
+/// connection (an `installs` bump, no `h3_hits`); the second must check the
+/// pooled connection back out (`h3_hits >= 1`), proving the driver kept it
+/// alive between requests rather than re-handshaking.
+#[tokio::test]
+#[ignore = "live: needs network"]
+async fn live_h3_pool_reuse() {
+    let session = leyline::Session::builder()
+        .browser(Browser::Chrome147)
+        .http3()
+        .build()
+        .expect("h3 session builds");
+
+    let r1 = session
+        .get("https://cloudflare-quic.com/")
+        .send()
+        .await
+        .expect("first H3 request failed");
+    assert_eq!(r1.status(), 200);
+    let _ = r1.bytes();
+    let after_first = session.pool_stats();
+
+    let r2 = session
+        .get("https://cloudflare-quic.com/")
+        .send()
+        .await
+        .expect("second H3 request failed");
+    assert_eq!(r2.status(), 200);
+    let _ = r2.bytes();
+    let after_second = session.pool_stats();
+
+    assert_eq!(
+        after_first.h3_hits, 0,
+        "first request should open a fresh connection, not hit the pool"
+    );
+    assert!(
+        after_second.h3_hits >= 1,
+        "second request must reuse the pooled QUIC connection (h3_hits={}, entries={})",
+        after_second.h3_hits,
+        after_second.entries
+    );
+    assert_eq!(
+        after_second.entries, 1,
+        "exactly one pooled H3 connection expected, got {}",
+        after_second.entries
+    );
     println!(
-        "✓ HTTP/3 to www.google.com: status {}, {} bytes",
-        resp.status,
-        resp.body.len()
+        "✓ HTTP/3 pool reuse: h3_hits={}, installs={}, entries={}",
+        after_second.h3_hits, after_second.installs, after_second.entries
+    );
+}
+
+/// True connection-level H2/H3 race: `.race()` to an origin that speaks both
+/// (cloudflare-quic.com) must succeed and leave **exactly one** pooled
+/// connection — proving the request was sent once on the winner, not on both
+/// transports. A second raced request must reuse that winner.
+#[tokio::test]
+#[ignore = "live: needs network"]
+async fn live_race_sends_once_on_winner() {
+    let session = leyline::Session::builder()
+        .browser(Browser::Chrome147)
+        .race()
+        .build()
+        .expect("race session builds");
+
+    let r1 = session
+        .get("https://cloudflare-quic.com/")
+        .send()
+        .await
+        .expect("first raced request failed");
+    assert_eq!(r1.status(), 200, "race status: {}", r1.status());
+    let _ = r1.bytes();
+
+    let after_first = session.pool_stats();
+    assert_eq!(
+        after_first.entries, 1,
+        "race must warm exactly one connection (the winner), got {} \
+         (h2_misses={}, h3_misses={})",
+        after_first.entries, after_first.h2_misses, after_first.h3_misses
+    );
+
+    let r2 = session
+        .get("https://cloudflare-quic.com/")
+        .send()
+        .await
+        .expect("second raced request failed");
+    assert_eq!(r2.status(), 200);
+    let _ = r2.bytes();
+
+    let after_second = session.pool_stats();
+    assert!(
+        after_second.h2_hits + after_second.h3_hits >= 1,
+        "second raced request must reuse the winning connection \
+         (h2_hits={}, h3_hits={})",
+        after_second.h2_hits,
+        after_second.h3_hits
+    );
+    let won_h3 = after_second.h3_hits >= 1;
+    println!(
+        "✓ race: won={}, entries={}, h2_hits={}, h3_hits={}",
+        if won_h3 { "H3" } else { "H2" },
+        after_second.entries,
+        after_second.h2_hits,
+        after_second.h3_hits
     );
 }
 

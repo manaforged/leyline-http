@@ -301,13 +301,7 @@ pub(crate) async fn send_request_h1(
     headers: Vec<(String, String)>,
     body: Body,
     proxy: Option<&str>,
-    // H1 response bodies are buffered today; `.stream()` callers still get a
-    // working `Response::into_stream()` (the buffer is handed back as one
-    // chunk). Memory-incremental H1 streaming (chunk-by-chunk pump off a
-    // dedicated, non-pooled connection) is a scoped follow-up — see the
-    // generalist-gap plan. The flag is accepted here so the signature is
-    // uniform with the H2 path.
-    _stream_response: bool,
+    stream_response: bool,
 ) -> Result<TransportResponse> {
     let host = url
         .host_str()
@@ -347,12 +341,26 @@ pub(crate) async fn send_request_h1(
     let h1_body = body_to_h1(body);
 
     let resp = crate::pool::send_request_h1_pooled(
-        pool, connector, scheme, host, port, method, url, headers, h1_body, proxy, target,
+        pool,
+        connector,
+        scheme,
+        host,
+        port,
+        method,
+        url,
+        headers,
+        h1_body,
+        proxy,
+        target,
+        stream_response,
     )
     .await
     .map_err(h1_error_to_core)?;
 
-    let H1ResponseBody::Buffered(body_buf) = resp.body;
+    let transport_body = match resp.body {
+        H1ResponseBody::Buffered(b) => TransportBody::Buffered(b),
+        H1ResponseBody::Streaming(s) => TransportBody::Streaming(s),
+    };
 
     let (tls_alpn, peer_cert_der, tls_version, tls_cipher) = match resp.tls {
         Some(info) => (
@@ -370,7 +378,7 @@ pub(crate) async fn send_request_h1(
     Ok(TransportResponse {
         status: resp.status,
         headers: resp.headers,
-        body: TransportBody::Buffered(body_buf),
+        body: transport_body,
         final_url: url.to_string(),
         version: HttpVersion::Http1_1,
         tls_alpn,
@@ -404,7 +412,9 @@ fn h1_error_to_core(e: H1PooledError) -> Error {
     skip_all,
     fields(http.method = method, http.host = url.host_str().unwrap_or(""))
 )]
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn send_request_h3(
+    pool: &Arc<Pool>,
     h3_config: &crate::quic::H3Config,
     profile: &crate::profile::BrowserProfile,
     method: &str,
@@ -448,11 +458,10 @@ pub(crate) async fn send_request_h3(
         Body::Stream { .. } => unreachable!("rejected above"),
     };
 
-    let resp = crate::quic::H3Connection::request(
-        h3_config, profile, method, host, port, &full_path, headers, body_bytes,
+    let (resp, tls) = crate::pool::send_request_h3_pooled(
+        pool, h3_config, profile, host, port, method, host, &full_path, &headers, body_bytes,
     )
-    .await
-    .map_err(Error::Http3)?;
+    .await?;
 
     Ok(TransportResponse {
         status: resp.status,
@@ -461,12 +470,10 @@ pub(crate) async fn send_request_h3(
         final_url: url.to_string(),
         version: HttpVersion::Http3,
         tls_alpn: Some("h3".to_string()),
-        // H3/QUIC peer-cert extraction and TLS details are a separate
-        // piece of work — the quiche path doesn't currently expose the
-        // handshake result through the connection handle.
-        peer_cert_der: None,
-        tls_version: None,
-        tls_cipher: None,
+        // Captured from the QUIC handshake (TLS 1.3 per RFC 9001 §4.2).
+        peer_cert_der: tls.peer_cert_der,
+        tls_version: tls.version,
+        tls_cipher: tls.cipher,
     })
 }
 

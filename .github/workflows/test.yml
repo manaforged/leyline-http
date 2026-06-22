@@ -53,7 +53,7 @@ jobs:
   # Live wire-fingerprint verification against tls.peet.ws. Only runs for
   # explicit invocations (workflow_dispatch and the weekly cron in
   # fingerprint-cron.yml) — flaky network shouldn't block PRs. The
-  # rusty-hook pre-commit already runs this on profile/h2/tls/btls-sys
+  # rusty-hook pre-commit already runs this on profile/h2/tls/leyline-bssl-sys
   # changes locally, and pre-push runs the full matrix unconditionally,
   # so this is the third backstop, not the primary gate.
   live-fingerprint:

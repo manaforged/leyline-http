@@ -1,0 +1,15 @@
+[package]
+name = "wreq-cmp-client"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Detached workspace: wreq vendors its own BoringSSL (links = "boring"), which
+# would collide with leyline-bssl-sys (links = "boringssl") if linked into one
+# binary — so wreq lives in its own process, never the same build graph.
+[workspace]
+
+[dependencies]
+wreq = "5.3.0"
+wreq-util = "2.2.6"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

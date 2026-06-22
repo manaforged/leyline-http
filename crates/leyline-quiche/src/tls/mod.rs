@@ -146,8 +146,8 @@ impl Context {
         }
     }
 
-    #[cfg(feature = "boringssl-btls-crate")]
-    pub fn from_btls(ssl_ctx_builder: btls::ssl::SslContextBuilder) -> Context {
+    #[cfg(feature = "boringssl-bssl-crate")]
+    pub fn from_bssl(ssl_ctx_builder: leyline_bssl::ssl::SslContextBuilder) -> Context {
         use foreign_types_shared::ForeignType;
 
         let mut ctx = Context(ssl_ctx_builder.build().into_ptr() as _);
@@ -597,11 +597,11 @@ impl Handshake {
         }
     }
 
-    #[cfg(feature = "boringssl-btls-crate")]
-    pub(crate) fn ssl_mut(&mut self) -> &mut btls::ssl::SslRef {
+    #[cfg(feature = "boringssl-bssl-crate")]
+    pub(crate) fn ssl_mut(&mut self) -> &mut leyline_bssl::ssl::SslRef {
         use foreign_types_shared::ForeignTypeRef;
 
-        unsafe { btls::ssl::SslRef::from_ptr_mut(self.as_mut_ptr() as _) }
+        unsafe { leyline_bssl::ssl::SslRef::from_ptr_mut(self.as_mut_ptr() as _) }
     }
 }
 
@@ -642,13 +642,14 @@ impl<'a> ExData<'a> {
         get_ex_data_from_ptr::<ExData>(ptr, *QUICHE_EX_DATA_INDEX)
     }
 
-    #[cfg(feature = "boringssl-btls-crate")]
-    pub fn from_ssl_ref(ssl: &mut btls::ssl::SslRef) -> Option<&mut Self> {
-        use btls::ex_data::Index;
+    #[cfg(feature = "boringssl-bssl-crate")]
+    pub fn from_ssl_ref(ssl: &mut leyline_bssl::ssl::SslRef) -> Option<&mut Self> {
+        use leyline_bssl::ex_data::Index;
 
         // SAFETY: the QUICHE_EX_DATA_INDEX index is guaranteed to be created,
         // and the associated data is always `ExData`.
-        let idx: Index<btls::ssl::Ssl, ExData> = unsafe { Index::from_raw(*QUICHE_EX_DATA_INDEX) };
+        let idx: Index<leyline_bssl::ssl::Ssl, ExData> =
+            unsafe { Index::from_raw(*QUICHE_EX_DATA_INDEX) };
 
         ssl.ex_data_mut(idx)
     }

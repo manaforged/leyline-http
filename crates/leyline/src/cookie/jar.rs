@@ -151,6 +151,23 @@ impl Jar {
     ///   1. Path length descending
     ///   2. Creation time ascending (oldest first)
     pub fn cookie_header(&self, url: &Url) -> Option<String> {
+        // No cross-site context (e.g. a direct API call) — treat the request as
+        // same-site, so every domain/path-matching cookie is eligible.
+        self.cookie_header_for(url, false, true)
+    }
+
+    /// Build the Cookie header, enforcing SameSite for the request's
+    /// cross-site context. On a cross-site request, `Strict` cookies are
+    /// withheld and `Lax` cookies are sent only for a safe top-level
+    /// navigation (`GET`/`HEAD`); `None` cookies always go (storage already
+    /// required `Secure`). Same-site requests apply no SameSite filtering.
+    pub(crate) fn cookie_header_for(
+        &self,
+        url: &Url,
+        cross_site: bool,
+        safe_method: bool,
+    ) -> Option<String> {
+        use crate::cookie::record::SameSite;
         let domain = url.host_str().unwrap_or("");
         let path = url.path();
         let is_secure = url.scheme() == "https";
@@ -165,10 +182,18 @@ impl Jar {
                 if cookie.is_expired() {
                     continue;
                 }
-                if cookie.matches(domain, path, is_secure) {
-                    cookie.last_access = now;
-                    matching.push(cookie);
+                if !cookie.matches(domain, path, is_secure) {
+                    continue;
                 }
+                if cross_site {
+                    match cookie.same_site {
+                        SameSite::Strict => continue,
+                        SameSite::Lax if !safe_method => continue,
+                        _ => {}
+                    }
+                }
+                cookie.last_access = now;
+                matching.push(cookie);
             }
         }
 
@@ -736,6 +761,31 @@ mod tests {
             jar.get_cookie("https://example.com", "good"),
             Some("val".into())
         );
+    }
+
+    #[test]
+    fn samesite_enforced_on_cross_site_requests() {
+        let jar = Jar::new();
+        let set = Url::parse("https://example.com/").unwrap();
+        jar.store_set_cookie("strict=1; SameSite=Strict", &set);
+        jar.store_set_cookie("lax=1; SameSite=Lax", &set);
+        jar.store_set_cookie("none=1; SameSite=None; Secure", &set);
+
+        let req = Url::parse("https://example.com/page").unwrap();
+
+        // Same-site: all three are eligible.
+        let same = jar.cookie_header_for(&req, false, true).unwrap();
+        assert!(same.contains("strict=1") && same.contains("lax=1") && same.contains("none=1"));
+
+        // Cross-site safe navigation (GET): Strict withheld; Lax + None sent.
+        let cross_get = jar.cookie_header_for(&req, true, true).unwrap();
+        assert!(!cross_get.contains("strict=1"), "{cross_get}");
+        assert!(cross_get.contains("lax=1") && cross_get.contains("none=1"));
+
+        // Cross-site unsafe navigation (POST): only None sent.
+        let cross_post = jar.cookie_header_for(&req, true, false).unwrap();
+        assert!(!cross_post.contains("strict=1") && !cross_post.contains("lax=1"));
+        assert!(cross_post.contains("none=1"));
     }
 
     #[test]

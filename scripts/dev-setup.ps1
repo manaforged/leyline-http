@@ -51,7 +51,7 @@ if ($Msrv) {
 }
 
 Step "native build prerequisites"
-if (Test-Path "crates/btls-sys/native/x86_64-pc-windows-msvc/lib/ssl.lib") {
+if (Test-Path "crates/leyline-bssl-sys/native/x86_64-pc-windows-msvc/lib/ssl.lib") {
     Write-Host "Windows prebuilt BoringSSL shim found; CMake/Perl only needed to refresh it."
 } else {
     Need "cmake" "Install Visual Studio Build Tools with C++ CMake tools, or install CMake separately." | Out-Null

@@ -22,10 +22,11 @@ cd leyline
 .\scripts\dev-setup.ps1
 ```
 
-MSRV is `1.85`. Leyline uses `btls` / `btls-sys` for BoringSSL. This repo
-patches `btls-sys` to a local Windows/MSVC shim for developer builds; public
-crates.io consumers use the upstream source-build path unless they provide
-their own patch. Upstream credit and license accounting is in [`NOTICE`](NOTICE).
+MSRV is `1.85`. Leyline vendors its BoringSSL stack in-repo as `leyline-bssl` /
+`leyline-bssl-sys` / `leyline-bssl-tokio`. `leyline-bssl-sys` ships prebuilt
+BoringSSL for the tier-1 targets, so developer (and git-consumer) builds link it
+directly — no source build. Upstream credit and license accounting is in
+[`NOTICE`](NOTICE).
 
 The setup script is intentionally smaller than the release gate: it checks
 toolchain prerequisites, runs `cargo check -p leyline --all-features`, and
@@ -43,26 +44,29 @@ PowerShell:
 
 Windows note: use an MSVC Rust toolchain (`stable-x86_64-pc-windows-msvc`),
 Visual Studio Build Tools with the C++ workload, CMake, and Strawberry Perl.
-The in-repo `crates/btls-sys` shim carries prebuilt MSVC BoringSSL libraries
-for this target, so a normal Windows developer should not wait on a BoringSSL
-source build.
+The in-repo `crates/leyline-bssl-sys` crate carries prebuilt MSVC BoringSSL
+libraries for this target, so a normal Windows developer should not wait on a
+BoringSSL source build.
 
 ## Syncing the TLS stack
 
-The BoringSSL-facing Rust bindings are provided by `btls` / `btls-sys`. To pull
-an upstream update:
+The BoringSSL-facing Rust bindings live in the in-repo `leyline-bssl-sys` crate,
+which pins an exact BoringSSL revision (the `crates/leyline-bssl-sys/deps/boringssl`
+submodule) plus the patches in `crates/leyline-bssl-sys/patches/`. To pull a
+BoringSSL update:
 
-1. Bump the `btls`, `btls-sys`, and `tokio-btls` workspace dependency versions
-   together.
-2. If the local shim still applies, refresh `crates/btls-sys` against the same
-   upstream release and regenerate any prebuilt bindings/artifacts it carries.
+1. Move the submodule to the new revision and rebase the patches
+   (`git am --3way`); see `crates/leyline-bssl-sys/patches/SERIES`.
+2. Rebuild the prebuilt libs + bindings for each target — run
+   `scripts/package-bssl.sh` on a host of that target, or use
+   `.github/workflows/build-prebuilt.yml`.
 3. Run `cargo test --workspace --exclude leyline-quiche` and
    `cargo test -p leyline --test tls_peet -- --ignored`. Fingerprint
    tests will catch any regression in cipher order, extension order, or
-   GREASE wiring introduced by the resync.
+   GREASE wiring introduced by the bump.
 
-When upstream BoringSSL publishes a CVE, check whether the pinned `btls-sys`
-release includes the fix, then update the workspace dependency set together.
+When upstream BoringSSL publishes a CVE, check whether the pinned revision
+includes the fix, then bump the submodule + rebuild.
 
 ## Before you open a PR
 

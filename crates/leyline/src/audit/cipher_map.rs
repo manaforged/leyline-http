@@ -63,6 +63,11 @@ pub fn sigalg_id(name: &str) -> Option<u16> {
         "rsa_pkcs1_sha512" => 0x0601,
         "rsa_pkcs1_sha1" => 0x0201,
         "ecdsa_sha1" => 0x0203,
+        // ML-DSA (draft-ietf-tls-mldsa) — Chrome 150+. BoringSSL has no name
+        // for these, so they reach the wire only via the raw-codepoint path.
+        "mldsa44" => 0x0904,
+        "mldsa65" => 0x0905,
+        "mldsa87" => 0x0906,
         _ => return None,
     })
 }

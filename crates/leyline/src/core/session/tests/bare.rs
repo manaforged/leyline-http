@@ -89,6 +89,24 @@ async fn bare_session_sends_generic_ua_and_no_client_hints() {
 }
 
 #[test]
+fn session_retry_default_is_inherited_by_requests() {
+    use crate::RetryPolicy;
+    let policy = RetryPolicy::default().with_max_retries(7);
+    let session = Session::builder().retry(policy).build().unwrap();
+    // A request that does not call .retry(..) inherits the session default.
+    let req = session.get("https://example.test/");
+    assert_eq!(req.retry_policy.max_retries, 7);
+    // A per-request override still wins over the session default.
+    let overridden = session
+        .get("https://example.test/")
+        .retry(RetryPolicy::none());
+    assert_eq!(overridden.retry_policy.max_retries, 0);
+    // A session with no default leaves requests at no-retry.
+    let bare = Session::new().get("https://example.test/");
+    assert_eq!(bare.retry_policy.max_retries, 0);
+}
+
+#[test]
 fn platform_host_resolves_and_never_leaks() {
     assert_eq!(Platform::Host.resolve(), Platform::detect_host());
     assert_ne!(Platform::detect_host(), Platform::Host);

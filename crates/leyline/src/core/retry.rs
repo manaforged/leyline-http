@@ -192,6 +192,13 @@ fn cheap_jitter() -> f64 {
     rand::thread_rng().gen_range(0.0..=1.0)
 }
 
+/// Parse a `Retry-After` header value into a delay. Honors the
+/// delta-seconds form (`Retry-After: 120`). The HTTP-date form is not parsed
+/// here; callers fall back to the policy's own exponential backoff for it.
+pub(crate) fn parse_retry_after(value: &str) -> Option<Duration> {
+    value.trim().parse::<u64>().ok().map(Duration::from_secs)
+}
+
 /// Whether a method is idempotent per RFC 9110 §9.2.2 — safe to retry
 /// automatically without caller opt-in.
 pub(crate) fn is_idempotent(method: &str) -> bool {
@@ -246,6 +253,16 @@ mod tests {
         let p = RetryPolicy::none();
         assert!(p.is_none());
         assert_eq!(p.max_retries, 0);
+    }
+
+    #[test]
+    fn retry_after_parses_delta_seconds_only() {
+        assert_eq!(parse_retry_after("120"), Some(Duration::from_secs(120)));
+        assert_eq!(parse_retry_after("  5 "), Some(Duration::from_secs(5)));
+        assert_eq!(parse_retry_after("0"), Some(Duration::ZERO));
+        // HTTP-date form is not parsed here — falls through to backoff.
+        assert_eq!(parse_retry_after("Wed, 21 Oct 2025 07:28:00 GMT"), None);
+        assert_eq!(parse_retry_after("soon"), None);
     }
 
     #[test]

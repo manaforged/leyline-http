@@ -25,13 +25,13 @@ use futures_util::future::join_all;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt, DuplexStream};
 use tokio::runtime::Runtime;
 
-use leyline::h2::client::H2Client;
 use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
 use leyline::h2::connection::{ClientConnection, PseudoHeaders};
 use leyline::h2::frame::{
     DataFrame, FrameHeader, FrameType, HeadersFrame, SettingsFrame, FRAME_HEADER_LEN,
 };
 use leyline::h2::hpack;
+use leyline::h2::H2Client;
 
 const MOCK_PREFACE: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
 
@@ -173,7 +173,11 @@ fn req() -> (PseudoHeaders, Vec<(String, String)>) {
 
 /// Build a connected (H2Client, server task, _driver) triple. Must be
 /// called inside a tokio runtime context.
-async fn build_client() -> (H2Client, tokio::task::JoinHandle<()>, leyline::h2::client::DriverTask) {
+async fn build_client() -> (
+    H2Client,
+    tokio::task::JoinHandle<()>,
+    leyline::h2::DriverTask,
+) {
     let (client_io, server_io) = tokio::io::duplex(1024 * 1024);
     let server = tokio::spawn(run_mock_server(server_io));
     let (handle, driver) = ClientConnection::start(client_io, test_config())

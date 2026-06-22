@@ -1,7 +1,10 @@
 //! Fluent request builder.
 
+mod compress;
 mod encode;
 mod send;
+
+pub use compress::ContentEncoding;
 
 use std::time::Duration;
 
@@ -68,6 +71,9 @@ pub struct RequestBuilder {
     pub(super) timeout: Option<Duration>,
     pub(super) builder_error: Option<Error>,
     pub(super) stream_response: bool,
+    /// When `Some`, the buffered body is compressed with this codec and a
+    /// matching `Content-Encoding` header is set at send time.
+    pub(super) compress: Option<ContentEncoding>,
     pub(super) retry_policy: RetryPolicy,
     pub(super) allow_non_idempotent_retry: bool,
     pub(super) digest_auth: Option<DigestAuth>,
@@ -95,7 +101,10 @@ impl RequestBuilder {
             timeout: None,
             builder_error: None,
             stream_response: false,
-            retry_policy: RetryPolicy::none(),
+            compress: None,
+            // Inherit the session-wide default (none unless set via
+            // `SessionBuilder::retry`); a per-request `.retry(..)` overrides it.
+            retry_policy: session.default_retry().clone(),
             allow_non_idempotent_retry: false,
             digest_auth: None,
             proxy: None,
@@ -171,6 +180,18 @@ impl RequestBuilder {
     /// Opt into streaming response delivery.
     pub fn stream(mut self) -> Self {
         self.stream_response = true;
+        self
+    }
+
+    /// Compress the request body with `encoding` and set the matching
+    /// `Content-Encoding` header. Applied at send time, so the call order
+    /// relative to `.body(..)` / `.json(..)` / `.form(..)` does not matter.
+    ///
+    /// Only buffered bodies are compressed; an empty body is left as-is and
+    /// a streaming body is rejected (buffer it via `Body::Bytes` first). The
+    /// codec must be compiled in via the matching `compression-*` feature.
+    pub fn compress(mut self, encoding: ContentEncoding) -> Self {
+        self.compress = Some(encoding);
         self
     }
 

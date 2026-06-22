@@ -1,18 +1,17 @@
 name: release-crates
 
 # Publish the Rust crates to crates.io in dependency order:
-#   leyline-quiche  →  leyline
+#   leyline-bssl-sys → leyline-bssl → leyline-bssl-tokio → leyline-quiche → leyline
 #
 # The binding crates (leyline-ffi, leyline-node, leyline-python) are
-# `publish = false`, and btls-sys is the workspace's local shim (excluded from
-# the workspace, patched in via [patch.crates-io]) — a published `leyline`
-# depends on the real btls/btls-sys 0.5.6 from crates.io.
+# `publish = false`. The owned BoringSSL stack (leyline-bssl-sys, leyline-bssl,
+# leyline-bssl-tokio) is excluded from the workspace and published ahead of
+# leyline.
 #
-# crates.io verifies each crate by compiling the packaged tarball in isolation,
-# where the workspace `[patch.crates-io] btls-sys` does NOT apply. So the verify
-# build source-builds BoringSSL and needs cmake/perl/go/clang on the runner.
-# Consumers' `cargo add leyline` source-builds BoringSSL the same way — the
-# zero-compile path for Rust (a prebuilt-BoringSSL btls fork) is a follow-up.
+# leyline-bssl-sys ships prebuilt BoringSSL in its published tarball, so the
+# crates.io isolation verify links the static libs directly — no source build,
+# no cmake/perl/go. Consumers' `cargo add leyline` is zero-compile for the same
+# reason.
 
 on:
   # Manual only. Publishing to crates.io is public and irreversible (no private
@@ -41,10 +40,6 @@ jobs:
           submodules: recursive
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: BoringSSL build prerequisites (for the crates.io verify build)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build perl golang clang libclang-dev
       - name: publish in dependency order
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
@@ -52,28 +47,28 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run && '--dry-run' || '' }}
         run: |
           set -euo pipefail
-          # leyline-quiche is self-contained and verifies standalone. Treat an
-          # already-published version as success so a partial first publish can
-          # be resumed (set -e would otherwise abort the re-run).
-          if ! cargo publish -p leyline-quiche ${DRY_RUN} 2>publish.err; then
-            cat publish.err
-            grep -qiE "already (uploaded|exists)" publish.err || exit 1
-            echo "leyline-quiche already published — continuing"
-          fi
-          # leyline depends on leyline-quiche by version; on a real publish, poll
-          # the index until the just-published version resolves before publishing
-          # leyline (replaces a fixed sleep).
+          # Publish each crate, then (on a real publish) poll the index until the
+          # just-published version resolves before the next crate depends on it.
+          # Treat an already-published version as success so a partial first
+          # publish can be resumed (set -e would otherwise abort the re-run).
           #
-          # NOTE: on the very first release, a --dry-run of leyline FAILS because
-          # leyline-quiche is not yet on crates.io to resolve against. That is
-          # expected — run a real (non-dry) publish for the first cut.
-          if [ -z "${DRY_RUN}" ]; then
-            QV=$(cargo metadata --no-deps --format-version 1 \
-              | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const m=JSON.parse(s);console.log((m.packages.find(p=>p.name==="leyline-quiche")||{}).version||"")})')
-            echo "waiting for crates.io to index leyline-quiche ${QV}..."
-            for _ in $(seq 1 30); do
-              if cargo search leyline-quiche | grep -q "leyline-quiche = \"${QV}\""; then break; fi
-              sleep 10
-            done
-          fi
-          cargo publish -p leyline ${DRY_RUN}
+          # NOTE: on the very first release, a --dry-run of a downstream crate
+          # FAILS because its just-built dependency is not yet on crates.io to
+          # resolve against. That is expected — run a real (non-dry) publish for
+          # the first cut.
+          for crate in leyline-bssl-sys leyline-bssl leyline-bssl-tokio leyline-quiche leyline; do
+            if ! cargo publish -p "$crate" ${DRY_RUN} 2>publish.err; then
+              cat publish.err
+              grep -qiE "already (uploaded|exists)" publish.err || exit 1
+              echo "$crate already published — continuing"
+            fi
+            if [ -z "${DRY_RUN}" ] && [ "$crate" != "leyline" ]; then
+              V=$(cargo metadata --no-deps --format-version 1 \
+                | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const m=JSON.parse(s);const c=process.argv[1];console.log((m.packages.find(p=>p.name===c)||{}).version||"")})' "$crate")
+              echo "waiting for crates.io to index $crate ${V}..."
+              for _ in $(seq 1 30); do
+                if cargo search "$crate" | grep -q "$crate = \"${V}\""; then break; fi
+                sleep 10
+              done
+            fi
+          done

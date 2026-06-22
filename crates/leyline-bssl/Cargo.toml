@@ -1,0 +1,43 @@
+[package]
+name = "leyline-bssl"
+version = "1.0.0-alpha.3"
+edition = "2024"
+rust-version = "1.85"
+authors = [
+    "Thomas Gardiner",
+    "0x676e67 <gngppz@gmail.com>",
+    "Steven Fackler <sfackler@gmail.com>",
+    "Ivan Nikulin <ifaaan@gmail.com>",
+]
+description = "Leyline's owned safe BoringSSL wrapper: the SslConnector / SslContextBuilder surface leyline's TLS fingerprinting needs, over leyline-bssl-sys"
+license = "Apache-2.0"
+repository = "https://github.com/manaforged/leyline-http"
+
+[features]
+default = []
+fips = ["leyline-bssl-sys/fips"]
+mlkem = []
+prf = []
+credential = []
+# Deprecated no-op compat gate carried from upstream; some `cfg(not(...))`
+# blocks reference it, so it must remain a declared feature.
+legacy-compat-deprecated = []
+underscore-wildcards = ["leyline-bssl-sys/underscore-wildcards"]
+prefix-symbols = ["leyline-bssl-sys/prefix-symbols"]
+
+[dependencies]
+bitflags = "2.11.1"
+foreign-types = "0.5"
+openssl-macros = "0.1.1"
+libc = "0.2.185"
+leyline-bssl-sys = { path = "../leyline-bssl-sys" }
+
+[dev-dependencies]
+hex = "0.4"
+brotli = "8.0.2"
+
+[lib]
+name = "leyline_bssl"
+path = "src/lib.rs"
+
+[workspace]

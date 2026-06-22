@@ -233,6 +233,12 @@ impl Session {
         self.timeouts.total
     }
 
+    /// The session-wide default retry policy, inherited by every request that
+    /// does not override it via [`crate::RequestBuilder::retry`].
+    pub(crate) fn default_retry(&self) -> &crate::core::retry::RetryPolicy {
+        &self.default_retry
+    }
+
     /// Observability snapshot of the underlying connection pool.
     ///
     /// Cumulative counters plus the instantaneous entry count. Poll

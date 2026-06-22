@@ -7,7 +7,12 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughpu
 use leyline::h2::frame::{Frame, FrameHeader};
 
 fn hdr(length: u32, frame_type: u8, flags: u8, stream_id: u32) -> FrameHeader {
-    FrameHeader { length, frame_type, flags, stream_id }
+    FrameHeader {
+        length,
+        frame_type,
+        flags,
+        stream_id,
+    }
 }
 
 /// (FrameHeader, payload) pairs covering the common mid-connection frames.
@@ -20,20 +25,33 @@ fn build_frame_mix() -> Vec<(FrameHeader, Bytes)> {
     // SETTINGS with 6 Chrome-ish params.
     let mut settings = Vec::with_capacity(36);
     for (id, val) in [
-        (0x1u16, 65536u32), (0x2, 0), (0x3, 1000),
-        (0x4, 6291456), (0x5, 16384), (0x6, 262144),
+        (0x1u16, 65536u32),
+        (0x2, 0),
+        (0x3, 1000),
+        (0x4, 6291456),
+        (0x5, 16384),
+        (0x6, 262144),
     ] {
         settings.extend_from_slice(&id.to_be_bytes());
         settings.extend_from_slice(&val.to_be_bytes());
     }
 
     vec![
-        (hdr(headers_payload.len() as u32, 0x1, 0x4 | 0x1, 1), headers_payload),
+        (
+            hdr(headers_payload.len() as u32, 0x1, 0x4 | 0x1, 1),
+            headers_payload,
+        ),
         (hdr(data_payload.len() as u32, 0x0, 0x1, 1), data_payload),
         (hdr(settings.len() as u32, 0x4, 0, 0), Bytes::from(settings)),
-        (hdr(4, 0x8, 0, 0), Bytes::from_static(&[0x00, 0x0F, 0x00, 0x00])), // WINDOW_UPDATE
-        (hdr(8, 0x6, 0, 0), Bytes::from_static(&[0, 1, 2, 3, 4, 5, 6, 7])), // PING
-        (hdr(4, 0x3, 0, 3), Bytes::from_static(&[0, 0, 0, 0x08])),         // RST_STREAM CANCEL
+        (
+            hdr(4, 0x8, 0, 0),
+            Bytes::from_static(&[0x00, 0x0F, 0x00, 0x00]),
+        ), // WINDOW_UPDATE
+        (
+            hdr(8, 0x6, 0, 0),
+            Bytes::from_static(&[0, 1, 2, 3, 4, 5, 6, 7]),
+        ), // PING
+        (hdr(4, 0x3, 0, 3), Bytes::from_static(&[0, 0, 0, 0x08])), // RST_STREAM CANCEL
     ]
 }
 

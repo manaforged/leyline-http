@@ -1,0 +1,72 @@
+[package]
+name = "leyline-bssl-sys"
+version = "1.0.0-alpha.3"
+edition = "2024"
+rust-version = "1.85"
+authors = [
+    "Thomas Gardiner",
+    "0x676e67 <gngppz@gmail.com>",
+    "Alex Crichton <alex@alexcrichton.com>",
+    "Steven Fackler <sfackler@gmail.com>",
+    "Ivan Nikulin <ifaaan@gmail.com>",
+]
+description = "Leyline's owned BoringSSL FFI: a pinned BoringSSL revision + carried patches, shipped prebuilt"
+license = "MIT"
+repository = "https://github.com/manaforged/leyline-http"
+build = "build.rs"
+links = "boringssl"
+autolib = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
+# Prebuilt artifacts are the dev/release path (no CMake/bindgen). The source
+# tree (deps/boringssl submodule + patches/ + build/ + cmake/) is the CI path:
+# .github/workflows/build-prebuilt.yml rebuilds the libs + bindings from it.
+include = [
+    "/Cargo.toml",
+    "/README.md",
+    "/LICENSE-MIT",
+    "/LICENSE-BORINGSSL",
+    "/build.rs",
+    "/src/lib.rs",
+    "/src/bindings/x86_64-pc-windows-msvc.rs",
+    "/src/bindings/x86_64-unknown-linux-gnu.rs",
+    "/src/bindings/aarch64-apple-darwin.rs",
+    "/native/x86_64-pc-windows-msvc/lib/crypto.lib",
+    "/native/x86_64-pc-windows-msvc/lib/ssl.lib",
+    "/native/x86_64-unknown-linux-gnu/lib/libcrypto.a",
+    "/native/x86_64-unknown-linux-gnu/lib/libssl.a",
+    "/native/aarch64-apple-darwin/lib/libcrypto.a",
+    "/native/aarch64-apple-darwin/lib/libssl.a",
+]
+
+[features]
+fips = []
+mlkem = []
+prefix-symbols = []
+underscore-wildcards = []
+# Rebuild BoringSSL from the deps/boringssl submodule (cmake + bindgen) instead
+# of linking the committed prebuilt libs. CI-only — pulls the heavy build
+# toolchain. Used with `build = "build/main.rs"`; see build-prebuilt.yml. Off by
+# default so normal dev/release builds stay on the prebuilt path (no CMake/Go).
+source-build = ["dep:bindgen", "dep:cmake", "dep:fs_extra", "dep:fslock"]
+
+# Source-build toolchain — optional, pulled only by the `source-build` feature,
+# so the default prebuilt build never downloads or compiles them.
+[build-dependencies]
+bindgen = { version = "0.72.0", default-features = false, features = ["runtime"], optional = true }
+cmake = { version = "0.1.58", optional = true }
+fs_extra = { version = "1.3.0", optional = true }
+fslock = { version = "0.2", optional = true }
+
+[lib]
+name = "leyline_bssl_sys"
+path = "src/lib.rs"
+
+[lints.rust.unexpected_cfgs]
+level = "allow"
+priority = 0
+check-cfg = ["cfg(const_fn)"]
+
+[workspace]

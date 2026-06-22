@@ -140,10 +140,10 @@ pub use crate::core::LeylineService;
 #[cfg(feature = "websocket")]
 pub use crate::core::WebSocketBuilder;
 pub use crate::core::{
-    Body, BodyStream, CompressionConfig, DigestAuth, DnsConfig, Error, HeaderList, HttpVersion,
-    IntoParamPair, NoProxy, PoolConfig, ProtocolPolicy, ProxyConfig, ProxyRule, ProxyUrl,
-    RedirectAction, RedirectAttempt, RedirectPolicy, Request, RequestBuilder, Response, Result,
-    RetryPolicy, RetryTrigger, Session, SessionBuilder, SocketConfig, TimeoutConfig,
+    Body, BodyStream, CompressionConfig, ContentEncoding, DigestAuth, DnsConfig, Error, HeaderList,
+    HttpVersion, IntoParamPair, NoProxy, PoolConfig, ProtocolPolicy, ProxyConfig, ProxyRule,
+    ProxyUrl, RedirectAction, RedirectAttempt, RedirectPolicy, Request, RequestBuilder, Response,
+    Result, RetryPolicy, RetryTrigger, Session, SessionBuilder, SocketConfig, TimeoutConfig,
     WebSocketConfig,
 };
 
@@ -176,7 +176,7 @@ pub use crate::h2::{ErrorCode, H2Error};
 
 // HTTP/3 connection types (behind the `http3` feature).
 #[cfg(feature = "http3")]
-pub use crate::quic::{H3Config, H3Connection, H3Response};
+pub use crate::quic::{H3Config, H3Response};
 
 // Cookie jar - re-export at crate root for the high-traffic case.
 // Prefer `leyline::cookie::Jar` in module signatures; `leyline::CookieJar`

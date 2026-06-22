@@ -14,13 +14,6 @@ publish = false
 # or from this directory: `cargo bench`.
 [workspace]
 
-# Mirror the repo-root `[patch.crates-io]` so btls-sys resolves to the local
-# prebuilt BoringSSL shim instead of source-building it (no CMake/Perl/Go).
-# Patches don't cross workspace boundaries — this excluded workspace needs its
-# own copy. See ../crates/btls-sys.
-[patch.crates-io]
-btls-sys = { path = "../crates/btls-sys" }
-
 [dependencies]
 # Post-collapse: audit / h2 / pool / profile are all submodules of the single
 # `leyline` crate (pub mod audit/h2/pool/profile), so one path dep replaces the
@@ -31,10 +24,14 @@ bytes = "1"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
-tokio = { version = "1", features = ["rt-multi-thread", "rt", "macros", "io-util", "sync", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "rt", "macros", "io-util", "net", "sync", "time"] }
 # Peer for HPACK head-to-head. h2 keeps its HPACK primitives private, so the
 # comparison bench gracefully degrades to a note (see hpack_vs_h2.rs).
 h2 = "0.4"
+# Peer for the bare HTTP/1.1 head-to-head (http_vs_reqwest.rs). default-features
+# off strips reqwest's TLS backends / h2 / gzip — we only need the bare hyper
+# H1 client over plaintext loopback.
+reqwest = { version = "0.12", default-features = false }
 
 [[bench]]
 name = "hpack"
@@ -62,6 +59,10 @@ harness = false
 
 [[bench]]
 name = "hpack_vs_h2"
+harness = false
+
+[[bench]]
+name = "http_vs_reqwest"
 harness = false
 
 [[bench]]

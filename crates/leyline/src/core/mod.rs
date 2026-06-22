@@ -10,7 +10,7 @@ mod headers;
 pub mod multipart;
 mod request;
 mod response;
-mod retry;
+pub(crate) mod retry;
 #[cfg(feature = "tower")]
 mod service;
 mod session;
@@ -28,7 +28,7 @@ pub use config::{
 pub use digest::DigestAuth;
 pub use error::{Error, Result};
 pub use headers::HeaderList;
-pub use request::{IntoParamPair, RequestBuilder};
+pub use request::{ContentEncoding, IntoParamPair, RequestBuilder};
 pub use response::{HttpVersion, Response};
 pub use retry::{RetryPolicy, RetryTrigger};
 #[cfg(feature = "tower")]

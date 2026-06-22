@@ -11,7 +11,7 @@
 //!
 //! [`FingerprintConnector`]: crate::FingerprintConnector
 
-use btls::ssl::{
+use leyline_bssl::ssl::{
     CertificateCompressionAlgorithm, CertificateCompressor, SslContextBuilder, SslMethod,
     SslVerifyMode,
 };
@@ -81,9 +81,17 @@ pub(crate) fn apply_profile_with_trust(
         .join(":");
     builder.set_curves_list(&curves_str)?;
 
-    // Signature algorithms.
-    let sigalgs_str = tls.sigalgs.join(":");
-    builder.set_sigalgs_list(&sigalgs_str)?;
+    // Signature algorithms — raw codepoints so ML-DSA (0x0904/05/06), which
+    // BoringSSL has no name for, advertises by value. The same map feeds JA4.
+    let sigalgs = tls
+        .sigalgs
+        .iter()
+        .map(|name| {
+            crate::audit::sigalg_id(name)
+                .ok_or_else(|| TlsError::Profile(format!("unknown signature algorithm: {name}")))
+        })
+        .collect::<Result<Vec<u16>, _>>()?;
+    builder.set_sigalgs(&sigalgs)?;
 
     // OCSP stapling (status_request extension).
     if tls.ocsp_stapling {
@@ -134,8 +142,8 @@ pub(crate) fn apply_profile_with_trust(
 
     // Minimum TLS version.
     let min = match min_version {
-        TlsMinVersion::Tls12 => btls::ssl::SslVersion::TLS1_2,
-        TlsMinVersion::Tls13 => btls::ssl::SslVersion::TLS1_3,
+        TlsMinVersion::Tls12 => leyline_bssl::ssl::SslVersion::TLS1_2,
+        TlsMinVersion::Tls13 => leyline_bssl::ssl::SslVersion::TLS1_3,
     };
     builder.set_min_proto_version(Some(min))?;
 
@@ -222,7 +230,7 @@ impl CertificateCompressor for ZstdDecompressor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use btls::ssl::CertificateCompressor;
+    use leyline_bssl::ssl::CertificateCompressor;
     use std::io::Write;
 
     // The decompressors aren't decorative: a server that compresses its

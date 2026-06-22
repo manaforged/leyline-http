@@ -38,11 +38,11 @@ pub(crate) use stream::TlsIo;
 /// path. Advanced callers reach the builder through [`builder_mut`] to add
 /// transport knobs (ALPN, custom verification) or [`into_inner`] to take
 /// ownership; both expose the underlying BoringSSL type and are therefore the
-/// one place a `btls` major bump can affect a dependent.
+/// one place a `leyline_bssl` major bump can affect a dependent.
 ///
 /// [`builder_mut`]: Self::builder_mut
 /// [`into_inner`]: Self::into_inner
-pub struct TlsContext(btls::ssl::SslContextBuilder);
+pub struct TlsContext(leyline_bssl::ssl::SslContextBuilder);
 
 impl TlsContext {
     /// Build a context matching `profile`, pinned to `min_version`.
@@ -54,12 +54,12 @@ impl TlsContext {
     }
 
     /// Mutable access to the underlying BoringSSL `SslContextBuilder`.
-    pub fn builder_mut(&mut self) -> &mut btls::ssl::SslContextBuilder {
+    pub fn builder_mut(&mut self) -> &mut leyline_bssl::ssl::SslContextBuilder {
         &mut self.0
     }
 
     /// Consume the wrapper and return the underlying BoringSSL builder.
-    pub fn into_inner(self) -> btls::ssl::SslContextBuilder {
+    pub fn into_inner(self) -> leyline_bssl::ssl::SslContextBuilder {
         self.0
     }
 }

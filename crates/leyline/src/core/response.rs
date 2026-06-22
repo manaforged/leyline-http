@@ -188,16 +188,48 @@ impl Response {
 
     // ─── Body access ───────────────────────────────────────────────
 
-    /// Response body as a UTF-8 string. Always allocates; invalid
-    /// sequences are replaced with U+FFFD. See [`Response::text_utf8`]
-    /// for a zero-copy borrowing variant that fails on non-UTF-8, or
-    /// [`Response::into_text`] to consume `self` and skip the copy
-    /// when the body is already valid UTF-8.
+    /// Response body decoded to a `String`, honoring the `charset` of the
+    /// `Content-Type` header (default UTF-8); invalid sequences are replaced
+    /// with U+FFFD and a leading BOM overrides the declared charset (WHATWG
+    /// behavior). See [`Response::text_utf8`] for a zero-copy borrowing variant
+    /// that fails on non-UTF-8, or [`Response::into_text`] to consume `self`.
+    ///
+    /// With the `charset` feature off this is UTF-8 lossy only.
     ///
     /// Returns an empty string when the body was delivered as a stream
     /// (the caller opted into streaming and has not drained the body).
     pub fn text(&self) -> String {
+        self.text_with_charset("utf-8")
+    }
+
+    /// Like [`text`](Self::text) but uses `default_encoding` (a WHATWG/IANA
+    /// label, e.g. `"utf-8"`, `"windows-1252"`, `"shift_jis"`) when the
+    /// response declares no charset. An unrecognized label falls back to UTF-8.
+    #[cfg(feature = "charset")]
+    pub fn text_with_charset(&self, default_encoding: &str) -> String {
+        let label = self.charset_label();
+        let encoding =
+            encoding_rs::Encoding::for_label(label.unwrap_or(default_encoding).as_bytes())
+                .unwrap_or(encoding_rs::UTF_8);
+        encoding.decode(self.bytes()).0.into_owned()
+    }
+
+    /// UTF-8-lossy fallback when the `charset` feature is disabled.
+    #[cfg(not(feature = "charset"))]
+    pub fn text_with_charset(&self, _default_encoding: &str) -> String {
         String::from_utf8_lossy(self.bytes()).to_string()
+    }
+
+    /// The `charset` parameter of the `Content-Type` header, if present.
+    #[cfg(feature = "charset")]
+    fn charset_label(&self) -> Option<&str> {
+        let ct = self.content_type()?;
+        ct.split(';').skip(1).find_map(|param| {
+            let (k, v) = param.split_once('=')?;
+            k.trim()
+                .eq_ignore_ascii_case("charset")
+                .then(|| v.trim().trim_matches('"'))
+        })
     }
 
     /// Response body as a borrowed UTF-8 string slice. Returns
@@ -228,11 +260,23 @@ impl Response {
         }
     }
 
-    /// Take ownership of the response body as a UTF-8 string.
-    /// Consumes `self`. If the body is already valid UTF-8 this
-    /// reuses the existing allocation; otherwise invalid sequences
-    /// are replaced with U+FFFD and a new allocation is made.
+    /// Take ownership of the response body as a `String`, honoring the
+    /// `Content-Type` charset (default UTF-8). Consumes `self`. When the
+    /// charset is UTF-8 and the body is valid this reuses the existing
+    /// allocation; otherwise invalid sequences are replaced with U+FFFD.
     pub fn into_text(self) -> String {
+        #[cfg(feature = "charset")]
+        let encoding = {
+            let label = self.charset_label();
+            label
+                .and_then(|l| encoding_rs::Encoding::for_label(l.as_bytes()))
+                .unwrap_or(encoding_rs::UTF_8)
+        };
+        #[cfg(feature = "charset")]
+        if encoding != encoding_rs::UTF_8 {
+            return encoding.decode(&self.into_bytes()).0.into_owned();
+        }
+        // UTF-8 fast path: reuse the existing allocation when valid.
         match String::from_utf8(self.into_bytes()) {
             Ok(s) => s,
             Err(e) => String::from_utf8_lossy(&e.into_bytes()).into_owned(),
@@ -498,5 +542,55 @@ mod tests {
         let second = resp.audit().unwrap() as *const _;
         // Same allocation on the second call — JA4H is hashed once, not per call.
         assert_eq!(first, second, "audit() must memoise, not recompute");
+    }
+
+    #[cfg(feature = "charset")]
+    #[test]
+    fn text_decodes_declared_charset() {
+        let mut resp = bare_response(None);
+        resp.headers = vec![(
+            "content-type".to_string(),
+            "text/html; charset=windows-1252".to_string(),
+        )];
+        // windows-1252: 0xE9 -> 'é', 0xA9 -> '©'. As raw UTF-8 these bytes are
+        // invalid and would become U+FFFD without charset handling.
+        resp.body = ResponseBody::Buffered(vec![0xE9, 0xA9]);
+        assert_eq!(resp.text(), "é©");
+        assert_eq!(resp.into_text(), "é©");
+    }
+
+    #[cfg(feature = "charset")]
+    #[test]
+    fn text_charset_param_is_case_insensitive_and_unquoted() {
+        let mut resp = bare_response(None);
+        resp.headers = vec![(
+            "content-type".to_string(),
+            "text/plain; Charset=\"Shift_JIS\"".to_string(),
+        )];
+        // Shift_JIS 0x82 0xA0 -> 'あ' (U+3042).
+        resp.body = ResponseBody::Buffered(vec![0x82, 0xA0]);
+        assert_eq!(resp.text(), "あ");
+    }
+
+    #[cfg(feature = "charset")]
+    #[test]
+    fn text_defaults_to_utf8_without_charset() {
+        let mut resp = bare_response(None);
+        resp.body = ResponseBody::Buffered("héllo".as_bytes().to_vec());
+        // No declared charset -> text() uses UTF-8.
+        assert_eq!(resp.text(), "héllo");
+    }
+
+    #[cfg(feature = "charset")]
+    #[test]
+    fn declared_charset_overrides_text_with_charset_default() {
+        let mut resp = bare_response(None);
+        resp.headers = vec![(
+            "content-type".to_string(),
+            "text/plain; charset=utf-8".to_string(),
+        )];
+        resp.body = ResponseBody::Buffered("héllo".as_bytes().to_vec());
+        // The declared utf-8 wins over the windows-1252 caller default.
+        assert_eq!(resp.text_with_charset("windows-1252"), "héllo");
     }
 }

@@ -201,12 +201,24 @@ impl Session {
             // framing (H2/H3).
             if let Some(len) = current_body.len_hint() {
                 if !matches!(current_body, Body::Empty) || len > 0 {
+                    // The computed length is authoritative for a known-length
+                    // body. Drop any caller-supplied content-length so we never
+                    // emit two (a request-smuggling shape) or a stale value.
+                    headers.retain(|(k, _)| !k.eq_ignore_ascii_case("content-length"));
                     headers.push(("content-length".into(), len.to_string()));
                 }
             }
 
-            // Cookies.
-            if let Some(cookie_val) = self.cookie_jar.cookie_header(&current_url) {
+            // Cookies. SameSite is enforced against the request's cross-site
+            // context: a cross-site redirect withholds `Strict` cookies (and
+            // `Lax` on non-safe methods), matching a real browser navigation.
+            let cross_site = crate::cookie::is_cross_site(&current_url, &redirect_chain);
+            let safe_method =
+                matches!(current_method.to_ascii_uppercase().as_str(), "GET" | "HEAD");
+            if let Some(cookie_val) =
+                self.cookie_jar
+                    .cookie_header_for(&current_url, cross_site, safe_method)
+            {
                 headers.push(("cookie".into(), cookie_val));
             }
 
@@ -323,10 +335,15 @@ impl Session {
             // If the caller opted into streaming, deliver as-is WITHOUT
             // decompression. Otherwise materialise and decompress as today.
             let (final_body, final_headers) = match resp_body_shape {
-                crate::core::transport::TransportBody::Streaming(bs) if stream_response => (
-                    crate::core::response::ResponseBody::Streaming(bs),
-                    resp_headers,
-                ),
+                crate::core::transport::TransportBody::Streaming(mut bs) if stream_response => {
+                    // The session read_timeout becomes a per-chunk idle timeout
+                    // on the delivered stream.
+                    bs.set_read_timeout(self.timeouts.read);
+                    (
+                        crate::core::response::ResponseBody::Streaming(bs),
+                        resp_headers,
+                    )
+                }
                 crate::core::transport::TransportBody::Streaming(bs) => {
                     // Transport returned a stream but caller wanted
                     // buffering. Drain it fully here, then run normal

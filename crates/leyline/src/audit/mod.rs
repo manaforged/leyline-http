@@ -16,6 +16,7 @@ pub use ja4t::compute_ja4t;
 
 use sha2::{Digest, Sha256};
 
+pub(crate) use cipher_map::sigalg_id;
 use cipher_map::{cipher_id, curve_id, is_grease};
 
 /// Map cipher-suite names to their IANA IDs, dropping unrecognized names and

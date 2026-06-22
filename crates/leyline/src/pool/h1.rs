@@ -7,6 +7,7 @@
 //! the next request starts clean.
 
 use std::borrow::Cow;
+use std::io;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -14,9 +15,12 @@ use bytes::Bytes;
 use futures_util::StreamExt;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio::sync::{mpsc, OwnedSemaphorePermit};
 
+use crate::core::BodyStream;
 use crate::tls::ConnectorVariant;
 
+use crate::pool::types::PoolKey;
 use crate::pool::{make_key, H1Slot, Pool, TlsInfo};
 
 /// Maximum request-line + headers size. Matches the core transport
@@ -80,10 +84,14 @@ impl H1Body {
     }
 }
 
-/// Buffered response body produced by the H1 pool.
+/// Response body produced by the H1 pool.
 pub enum H1ResponseBody {
     /// The fully-drained response body.
     Buffered(Vec<u8>),
+    /// An incrementally-streamed body. A background pump task owns the
+    /// connection, forwards framed chunks to the consumer, and reinstates
+    /// the connection to the pool on a clean full drain (or drops it).
+    Streaming(BodyStream),
 }
 
 /// Response returned by [`send_request_h1_pooled`].
@@ -165,6 +173,7 @@ pub async fn send_request_h1_pooled(
     body: H1Body,
     proxy: Option<&str>,
     target: H1Target,
+    stream: bool,
 ) -> Result<H1Response, H1PooledError> {
     // Wire-shape validation happens BEFORE any TCP connect so an
     // attacker-controlled header / method / URL never causes a real
@@ -199,6 +208,17 @@ pub async fn send_request_h1_pooled(
     // slot — and the warm connection we return to the pool just below — for a
     // queued request, so the next waiter reuses it rather than handshaking.
     let _permit = pool.acquire_h1_permit(&key).await;
+
+    // Streaming responses hand the connection to a background pump that owns
+    // it for the body's lifetime — route there before the buffered retry
+    // setup, moving the permit and key into the pump.
+    if stream {
+        return send_request_h1_streaming(
+            pool, connector, scheme, host, port, method, url, headers, body, proxy, target,
+            _permit, key,
+        )
+        .await;
+    }
 
     // Streaming bodies are one-shot — no retry possible. For
     // buffered bodies we keep a clone in case the pooled attempt
@@ -360,17 +380,18 @@ struct WireResponse {
     body: Vec<u8>,
 }
 
-/// Run a single HTTP/1.1 request/response exchange on `stream`.
-/// Returns the parsed response plus a `reusable` flag telling the
-/// caller whether the stream may be reinstated in the pool.
-async fn exchange_on_stream(
+/// Serialise and send an HTTP/1.1 request head + body on `stream`.
+/// Returns whether the caller asked to close the connection
+/// (`Connection: close`), which feeds the post-response reuse decision.
+/// Shared by the buffered exchange and the streaming head exchange.
+async fn send_h1_request(
     stream: &mut dyn H1Io,
     method: &str,
     url: &url::Url,
     mut headers: Vec<(String, String)>,
     body: H1Body,
     target: H1Target,
-) -> Result<(WireResponse, bool), H1PooledError> {
+) -> Result<bool, H1PooledError> {
     // ─── Wire-shape validation (CWE-93, request smuggling) ──────────
     //
     // Every caller-supplied byte that lands on the keep-alive socket
@@ -528,29 +549,45 @@ async fn exchange_on_stream(
 
     stream.flush().await?;
 
-    // The request-side framing is set — whether the response was
-    // sent under chunked or buffered framing has no bearing on the
-    // response reuse decision. `reusable_request` captures whether
-    // the caller explicitly asked us to close the connection via
-    // `Connection: close`.
-    let client_asked_close = header_contains_token(&headers, "connection", "close");
+    // Whether the caller explicitly asked us to close the connection via
+    // `Connection: close` — feeds the post-response reuse decision.
+    Ok(header_contains_token(&headers, "connection", "close"))
+}
 
-    let (status, resp_headers, resp_body, http_version_minor) =
-        read_h1_response(stream, method).await?;
-
-    // Per RFC 9112: HTTP/1.1 defaults to keep-alive unless
-    // `Connection: close` is sent by either side. HTTP/1.0 defaults
-    // to close unless `Connection: keep-alive` is present.
-    let server_says_close = header_contains_token(&resp_headers, "connection", "close");
-    let server_says_keepalive = header_contains_token(&resp_headers, "connection", "keep-alive");
-    let reusable = if client_asked_close || server_says_close {
+/// Decide whether a keep-alive connection may be reinstated after a
+/// response. Per RFC 9112: HTTP/1.1 defaults to keep-alive unless
+/// `Connection: close` is sent by either side; HTTP/1.0 defaults to close
+/// unless `Connection: keep-alive` is present.
+fn compute_reusable(
+    client_asked_close: bool,
+    resp_headers: &[(String, String)],
+    minor: u8,
+) -> bool {
+    let server_says_close = header_contains_token(resp_headers, "connection", "close");
+    let server_says_keepalive = header_contains_token(resp_headers, "connection", "keep-alive");
+    if client_asked_close || server_says_close {
         false
-    } else if http_version_minor >= 1 {
+    } else if minor >= 1 {
         true
     } else {
         server_says_keepalive
-    };
+    }
+}
 
+/// Run a single buffered HTTP/1.1 request/response exchange on `stream`.
+/// Returns the parsed response plus a `reusable` flag telling the caller
+/// whether the stream may be reinstated in the pool.
+async fn exchange_on_stream(
+    stream: &mut dyn H1Io,
+    method: &str,
+    url: &url::Url,
+    headers: Vec<(String, String)>,
+    body: H1Body,
+    target: H1Target,
+) -> Result<(WireResponse, bool), H1PooledError> {
+    let client_asked_close = send_h1_request(stream, method, url, headers, body, target).await?;
+    let (status, resp_headers, resp_body, minor) = read_h1_response(stream, method).await?;
+    let reusable = compute_reusable(client_asked_close, &resp_headers, minor);
     Ok((
         WireResponse {
             status,
@@ -559,6 +596,424 @@ async fn exchange_on_stream(
         },
         reusable,
     ))
+}
+
+/// Bounded backpressure for the streaming pump: the pump blocks on `send`
+/// when the consumer is behind, so a slow reader naturally rate-limits the
+/// socket reads instead of buffering an unbounded body in memory.
+const STREAM_CHANNEL_DEPTH: usize = 16;
+
+/// How a response body is delimited on the wire.
+#[derive(Debug, Clone, Copy)]
+enum BodyFraming {
+    /// No body (HEAD, 101, 204, 304).
+    None,
+    /// Exact length from `Content-Length`.
+    Fixed(u64),
+    /// `Transfer-Encoding: chunked`.
+    Chunked,
+    /// No framing — the body ends when the server closes the connection.
+    ToClose,
+}
+
+/// Parsed response head plus the framing of the not-yet-read body and the
+/// body bytes already buffered while reading the header block.
+struct H1Head {
+    status: u16,
+    headers: Vec<(String, String)>,
+    minor: u8,
+    framing: BodyFraming,
+    initial_body: Vec<u8>,
+}
+
+/// Read and parse the response head only, deciding the body framing but
+/// leaving the body on the wire. Skips 1xx informational responses, the
+/// same as [`read_h1_response`].
+async fn read_h1_head<S>(stream: &mut S, method: &str) -> Result<H1Head, H1PooledError>
+where
+    S: AsyncRead + Unpin + ?Sized,
+{
+    loop {
+        let mut buf = read_h1_headers(stream).await?;
+        let header_end = find_header_end(&buf).ok_or_else(|| {
+            H1PooledError::Http("HTTP/1.1 response missing header terminator".into())
+        })?;
+        let body_start = header_end + 4;
+        let head = String::from_utf8_lossy(&buf[..header_end]);
+        let (status, headers, minor) = parse_h1_head(&head)?;
+        let initial_body = buf.split_off(body_start);
+
+        if (100..200).contains(&status) && status != 101 {
+            continue;
+        }
+
+        validate_framing_headers(&headers)?;
+
+        let framing = if method.eq_ignore_ascii_case("HEAD") || matches!(status, 101 | 204 | 304) {
+            BodyFraming::None
+        } else if header_contains_token(&headers, "transfer-encoding", "chunked") {
+            BodyFraming::Chunked
+        } else if let Some(len) =
+            header_first(&headers, "content-length").and_then(|v| v.trim().parse::<u64>().ok())
+        {
+            BodyFraming::Fixed(len)
+        } else {
+            BodyFraming::ToClose
+        };
+
+        return Ok(H1Head {
+            status,
+            headers,
+            minor,
+            framing,
+            initial_body,
+        });
+    }
+}
+
+/// Send the request and read only the response head, leaving the body on the
+/// wire for a streaming pump. Returns the head and whether the connection may
+/// be reinstated after a clean full drain (a `ToClose` body delimits by EOF,
+/// so its connection is spent and never reusable).
+async fn exchange_head_on_stream(
+    stream: &mut dyn H1Io,
+    method: &str,
+    url: &url::Url,
+    headers: Vec<(String, String)>,
+    body: H1Body,
+    target: H1Target,
+) -> Result<(H1Head, bool), H1PooledError> {
+    let client_asked_close = send_h1_request(stream, method, url, headers, body, target).await?;
+    let head = read_h1_head(stream, method).await?;
+    let reusable = compute_reusable(client_asked_close, &head.headers, head.minor)
+        && !matches!(head.framing, BodyFraming::ToClose);
+    Ok((head, reusable))
+}
+
+/// Owns the H1 connection for the lifetime of a streamed response body and
+/// reinstates it to the pool after a clean full drain.
+struct H1StreamPump {
+    io: Box<dyn H1Io>,
+    permit: OwnedSemaphorePermit,
+    pool: Arc<Pool>,
+    key: PoolKey,
+    tls: TlsInfo,
+    framing: BodyFraming,
+    initial_body: Vec<u8>,
+    reusable: bool,
+    /// Count a pool install only for a fresh connection — a reused one was
+    /// already counted when first installed.
+    count_install: bool,
+    tx: mpsc::Sender<io::Result<Bytes>>,
+}
+
+/// Stream the response body to the consumer, then reinstate the connection on
+/// a clean full drain (or drop it). The permit releases when this task ends.
+async fn run_h1_stream_pump(mut pump: H1StreamPump) {
+    let initial = std::mem::take(&mut pump.initial_body);
+    let drained_clean = stream_body_into(pump.io.as_mut(), pump.framing, initial, &pump.tx).await;
+    if drained_clean && pump.reusable {
+        pump.pool
+            .return_h1(pump.key, H1Slot { io: pump.io }, pump.tls);
+        if pump.count_install {
+            pump.pool.note_h1_install();
+        }
+    }
+    // Otherwise the socket is dropped: an early consumer drop or a mid-body
+    // error leaves unread/partial bytes on the wire, so the connection cannot
+    // be safely reused.
+    //
+    // Release the per-host permit now that streaming has finished, freeing the
+    // slot for a queued request. The permit is held purely for its `Drop`;
+    // this makes the release point explicit.
+    drop(pump.permit);
+}
+
+/// Drive the body into `tx` per `framing`. Returns `true` only on a clean
+/// full drain; `false` if the consumer dropped the stream or an error
+/// occurred (the error is forwarded to the consumer first).
+async fn stream_body_into(
+    stream: &mut dyn H1Io,
+    framing: BodyFraming,
+    initial: Vec<u8>,
+    tx: &mpsc::Sender<io::Result<Bytes>>,
+) -> bool {
+    let result = match framing {
+        BodyFraming::None => Ok(true),
+        BodyFraming::Fixed(len) => stream_fixed_into(stream, initial, len, tx).await,
+        BodyFraming::Chunked => stream_chunked_into(stream, initial, tx).await,
+        BodyFraming::ToClose => stream_to_close_into(stream, initial, tx).await,
+    };
+    match result {
+        Ok(clean) => clean,
+        Err(e) => {
+            let _ = tx.send(Err(e)).await;
+            false
+        }
+    }
+}
+
+async fn stream_fixed_into(
+    stream: &mut dyn H1Io,
+    initial: Vec<u8>,
+    len: u64,
+    tx: &mpsc::Sender<io::Result<Bytes>>,
+) -> io::Result<bool> {
+    if len > MAX_H1_BODY_BYTES as u64 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("HTTP/1.1 body exceeds {MAX_H1_BODY_BYTES} bytes"),
+        ));
+    }
+    let mut remaining = len;
+    if !initial.is_empty() {
+        let take = (initial.len() as u64).min(remaining) as usize;
+        if take > 0 {
+            if tx
+                .send(Ok(Bytes::copy_from_slice(&initial[..take])))
+                .await
+                .is_err()
+            {
+                return Ok(false);
+            }
+            remaining -= take as u64;
+        }
+    }
+    let mut tmp = vec![0u8; 8192];
+    while remaining > 0 {
+        let want = remaining.min(tmp.len() as u64) as usize;
+        let n = stream.read(&mut tmp[..want]).await?;
+        if n == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "connection closed before HTTP/1.1 body completed",
+            ));
+        }
+        if tx
+            .send(Ok(Bytes::copy_from_slice(&tmp[..n])))
+            .await
+            .is_err()
+        {
+            return Ok(false);
+        }
+        remaining -= n as u64;
+    }
+    Ok(true)
+}
+
+async fn stream_to_close_into(
+    stream: &mut dyn H1Io,
+    initial: Vec<u8>,
+    tx: &mpsc::Sender<io::Result<Bytes>>,
+) -> io::Result<bool> {
+    let mut total = initial.len();
+    if total > MAX_H1_BODY_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("HTTP/1.1 body exceeds {MAX_H1_BODY_BYTES} bytes"),
+        ));
+    }
+    if !initial.is_empty() && tx.send(Ok(Bytes::from(initial))).await.is_err() {
+        return Ok(false);
+    }
+    let mut tmp = vec![0u8; 8192];
+    loop {
+        let n = stream.read(&mut tmp).await?;
+        if n == 0 {
+            return Ok(true);
+        }
+        total += n;
+        if total > MAX_H1_BODY_BYTES {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("HTTP/1.1 body exceeds {MAX_H1_BODY_BYTES} bytes"),
+            ));
+        }
+        if tx
+            .send(Ok(Bytes::copy_from_slice(&tmp[..n])))
+            .await
+            .is_err()
+        {
+            return Ok(false);
+        }
+    }
+}
+
+async fn stream_chunked_into(
+    stream: &mut dyn H1Io,
+    mut buf: Vec<u8>,
+    tx: &mpsc::Sender<io::Result<Bytes>>,
+) -> io::Result<bool> {
+    let mut total: usize = 0;
+    loop {
+        let line_end = read_until_crlf(stream, &mut buf)
+            .await
+            .map_err(h1err_to_io)?;
+        let size_line = String::from_utf8_lossy(&buf[..line_end]);
+        let size_token = size_line.split(';').next().unwrap_or("").trim();
+        let size_u64 = u64::from_str_radix(size_token, 16).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("invalid chunk size: {e}"),
+            )
+        })?;
+        if size_u64 > MAX_H1_BODY_BYTES as u64 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("HTTP/1.1 chunk size {size_u64} exceeds {MAX_H1_BODY_BYTES}-byte body cap"),
+            ));
+        }
+        let size = size_u64 as usize;
+        buf.drain(..line_end + 2);
+
+        if size == 0 {
+            read_chunk_trailers(stream, &mut buf)
+                .await
+                .map_err(h1err_to_io)?;
+            return Ok(true);
+        }
+
+        read_until_available(stream, &mut buf, size + 2)
+            .await
+            .map_err(h1err_to_io)?;
+        total += size;
+        if total > MAX_H1_BODY_BYTES {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("HTTP/1.1 body exceeds {MAX_H1_BODY_BYTES} bytes"),
+            ));
+        }
+        if &buf[size..size + 2] != b"\r\n" {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "chunk missing CRLF terminator",
+            ));
+        }
+        let chunk = Bytes::copy_from_slice(&buf[..size]);
+        buf.drain(..size + 2);
+        if tx.send(Ok(chunk)).await.is_err() {
+            return Ok(false);
+        }
+    }
+}
+
+/// Map a pool error to the `io::Error` the streaming consumer receives.
+fn h1err_to_io(e: H1PooledError) -> io::Error {
+    match e {
+        H1PooledError::Io(io) => io,
+        H1PooledError::ConnectionClosed(m) => io::Error::new(io::ErrorKind::UnexpectedEof, m),
+        other => io::Error::new(io::ErrorKind::InvalidData, other.to_string()),
+    }
+}
+
+/// Streaming variant of [`send_request_h1_pooled`]: reads the response head,
+/// then hands the connection to a background pump that forwards body chunks
+/// and reinstates the connection on a clean full drain. The permit moves into
+/// the pump and releases when streaming ends.
+#[allow(clippy::too_many_arguments)]
+async fn send_request_h1_streaming(
+    pool: &Arc<Pool>,
+    connector: &ConnectorVariant,
+    scheme: &str,
+    host: &str,
+    port: u16,
+    method: &str,
+    url: &url::Url,
+    headers: Vec<(String, String)>,
+    body: H1Body,
+    proxy: Option<&str>,
+    target: H1Target,
+    permit: OwnedSemaphorePermit,
+    key: PoolKey,
+) -> Result<H1Response, H1PooledError> {
+    let body_is_stream = body.is_stream();
+    let retry_buf: Option<Bytes> = match &body {
+        H1Body::Buffered(b) => Some(b.clone()),
+        _ => None,
+    };
+    let mut body = body;
+
+    // Try a pooled connection first.
+    if let Some((slot, tls)) = pool.checkout_h1(&key) {
+        let pooled_body = std::mem::replace(&mut body, H1Body::Empty);
+        let mut io = slot.io;
+        match exchange_head_on_stream(
+            io.as_mut(),
+            method,
+            url,
+            headers.clone(),
+            pooled_body,
+            target,
+        )
+        .await
+        {
+            Ok((head, reusable)) => {
+                tracing::Span::current().record("pool.hit", true);
+                let (tx, rx) = mpsc::channel(STREAM_CHANNEL_DEPTH);
+                tokio::spawn(run_h1_stream_pump(H1StreamPump {
+                    io,
+                    permit,
+                    pool: pool.clone(),
+                    key,
+                    tls: tls.clone(),
+                    framing: head.framing,
+                    initial_body: head.initial_body,
+                    reusable,
+                    count_install: false,
+                    tx,
+                }));
+                return Ok(H1Response {
+                    status: head.status,
+                    headers: head.headers,
+                    body: H1ResponseBody::Streaming(BodyStream::new(rx)),
+                    tls: tls_for_scheme(scheme, &tls),
+                });
+            }
+            Err(e) => {
+                tracing::info!(
+                    target: "leyline::pool",
+                    host = %key.host,
+                    port = key.port,
+                    error = %e,
+                    "pool stale hit -- pooled h1 stream failed before response, opening fresh"
+                );
+                pool.note_h1_dead();
+                if body_is_stream {
+                    return Err(e);
+                }
+                if let Some(buf) = &retry_buf {
+                    body = H1Body::Buffered(buf.clone());
+                }
+            }
+        }
+    }
+    tracing::Span::current().record("pool.hit", false);
+
+    // Miss — fresh connection under the same permit.
+    let (io, tls): (Box<dyn H1Io>, TlsInfo) =
+        open_new(connector, scheme, host, port, proxy).await?;
+    let mut slot = H1Slot { io };
+    let (head, reusable) =
+        exchange_head_on_stream(slot.io.as_mut(), method, url, headers, body, target).await?;
+    let (tx, rx) = mpsc::channel(STREAM_CHANNEL_DEPTH);
+    tokio::spawn(run_h1_stream_pump(H1StreamPump {
+        io: slot.io,
+        permit,
+        pool: pool.clone(),
+        key,
+        tls: tls.clone(),
+        framing: head.framing,
+        initial_body: head.initial_body,
+        reusable,
+        count_install: true,
+        tx,
+    }));
+    Ok(H1Response {
+        status: head.status,
+        headers: head.headers,
+        body: H1ResponseBody::Streaming(BodyStream::new(rx)),
+        tls: tls_for_scheme(scheme, &tls),
+    })
 }
 
 fn method_typically_has_body(method: &str) -> bool {

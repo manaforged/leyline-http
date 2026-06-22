@@ -20,6 +20,7 @@ pub use websocket::WebSocketBuilder;
 use std::sync::Arc;
 
 use crate::cookie::Jar as CookieJar;
+use crate::core::retry::RetryPolicy;
 #[cfg(feature = "websocket")]
 use crate::core::WebSocketConfig;
 use crate::core::{CompressionConfig, ProxyConfig, RedirectPolicy, TimeoutConfig};
@@ -42,8 +43,10 @@ pub enum ProtocolPolicy {
     /// Force HTTP/3 over QUIC.
     #[cfg(feature = "http3")]
     Http3,
-    /// Prefer H3 and fall back to H2/H1. This is currently sequential, not a
-    /// true parallel Chrome-style race.
+    /// Race the QUIC (H3) handshake against TCP+TLS (H2): a Chrome-style
+    /// happy-eyeballs race of the connections. Whichever establishes first
+    /// wins and carries the request (sent exactly once); on error of one, the
+    /// other wins; on error of both, falls back to Auto.
     #[cfg(feature = "http3")]
     Race,
 }
@@ -129,6 +132,9 @@ pub struct SessionInner {
     audit_enabled: bool,
     /// Request protocol selection policy.
     protocol_policy: ProtocolPolicy,
+    /// Session-wide default retry policy, inherited by every request that does
+    /// not set its own via [`crate::RequestBuilder::retry`].
+    default_retry: RetryPolicy,
     /// H3 config (transport params + QPACK + SETTINGS). `None` when the
     /// profile family has no HTTP/3 fingerprint (e.g. okhttp); requesting
     /// HTTP/3 on such a profile errors rather than borrowing another's.

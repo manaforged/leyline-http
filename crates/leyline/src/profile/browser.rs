@@ -4,7 +4,7 @@
 ///
 /// Each variant maps 1:1 to a TOML profile in `crates/leyline/profiles/`.
 /// There are exactly
-/// 15 profiles. Most Chromium siblings (Edge, Opera, Vivaldi) are NOT
+/// 16 profiles. Most Chromium siblings (Edge, Opera, Vivaldi) are NOT
 /// separate variants — their TLS ClientHello is byte-identical to Chrome's.
 /// Pick a `ChromeNNN` anchor and apply `ChromiumBrand::{Edge, Opera, Vivaldi}`
 /// via `SessionBuilder::brand(..)` to swap HTTP identity headers without
@@ -29,6 +29,12 @@ pub enum Browser {
     /// the only divergence is the `Chrome/148` UA token and the `sec-ch-ua`
     /// brand list.
     Chrome148,
+    /// Google Chrome 150 (Windows/macOS/Linux/Android).
+    ///
+    /// Prepends the ML-DSA post-quantum signature schemes (mldsa44/65/87 =
+    /// 0x0904/0905/0906) to the sigalgs list (JA4_3 `cb7bf5808d99`). Requires a
+    /// BoringSSL revision with ML-DSA support (>= 3a9254f).
+    Chrome150,
     /// Aloha 4.17 — Chromium-138-based privacy browser (Windows/macOS).
     Aloha138,
     /// Brave 1.x — Chromium-146-based privacy browser (macOS only today).
@@ -54,7 +60,7 @@ pub enum Browser {
 }
 
 /// Canonical profile count. Tests assert against this.
-pub const PROFILE_COUNT: usize = 15;
+pub const PROFILE_COUNT: usize = 16;
 
 /// All browser variants, for iteration.
 pub const ALL_BROWSERS: [Browser; PROFILE_COUNT] = [
@@ -62,6 +68,7 @@ pub const ALL_BROWSERS: [Browser; PROFILE_COUNT] = [
     Browser::Chrome146,
     Browser::Chrome147,
     Browser::Chrome148,
+    Browser::Chrome150,
     Browser::Aloha138,
     Browser::Brave146,
     Browser::Firefox148,
@@ -83,6 +90,7 @@ impl Browser {
             Self::Chrome146 => ("chrome", 146),
             Self::Chrome147 => ("chrome", 147),
             Self::Chrome148 => ("chrome", 148),
+            Self::Chrome150 => ("chrome", 150),
             Self::Aloha138 => ("aloha", 138),
             Self::Brave146 => ("brave", 146),
             Self::Firefox148 => ("firefox", 148),
@@ -122,6 +130,7 @@ impl Browser {
             Self::Chrome146 => Some(146),
             Self::Chrome147 => Some(147),
             Self::Chrome148 => Some(148),
+            Self::Chrome150 => Some(150),
             Self::Aloha138 => Some(138),
             Self::Brave146 => Some(146),
             _ => None,
@@ -142,6 +151,7 @@ impl std::fmt::Display for Browser {
             Self::Chrome146 => write!(f, "Chrome 146"),
             Self::Chrome147 => write!(f, "Chrome 147"),
             Self::Chrome148 => write!(f, "Chrome 148"),
+            Self::Chrome150 => write!(f, "Chrome 150"),
             Self::Aloha138 => write!(f, "Aloha 4.17 (Chromium 138)"),
             Self::Brave146 => write!(f, "Brave (Chromium 146)"),
             Self::Firefox148 => write!(f, "Firefox 148"),

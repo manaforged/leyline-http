@@ -22,10 +22,10 @@ tokio = { version = "1", features = ["full"] }
 ```
 
 > **Heads up:** a plain `leyline = "1.0.0-alpha.2"` (crates.io) does **not**
-> resolve yet. A git dependency pulls the upstream `btls-sys` source-build
-> path, which compiles BoringSSL on first build (CMake/Perl/libclang/Go
-> required — see [Platform support](#platform-support)). For the zero-compile
-> prebuilt experience, clone the repo and build inside the workspace.
+> resolve yet — leyline isn't published. A git dependency on a tier-1 target
+> links leyline's checked-in prebuilt BoringSSL (zero-compile); on other targets
+> it source-builds BoringSSL on first build (CMake/Perl/libclang/Go required —
+> see [Platform support](#platform-support)).
 
 ```rust,no_run
 use leyline::Session;
@@ -115,10 +115,10 @@ Adding a version is a TOML copy-and-edit - see [CONTRIBUTING.md](CONTRIBUTING.md
 
 ## Platform support
 
-**Cloning the repo: zero-compile on tier-1 targets.** The workspace patches
-`btls-sys` to a local shim that ships prebuilt BoringSSL artifacts, so
-`cargo build` links them directly — no CMake, Perl, bindgen, libclang, or Go.
-This covers:
+**Cloning the repo: zero-compile on tier-1 targets.** Leyline vendors its
+BoringSSL FFI as the in-repo `leyline-bssl-sys` crate, which ships prebuilt
+BoringSSL artifacts, so `cargo build` links them directly — no CMake, Perl,
+bindgen, libclang, or Go. This covers:
 
 | Target | In-workspace build |
 | ------ | ------------------ |
@@ -128,21 +128,21 @@ This covers:
 
 Other targets — notably `x86_64-apple-darwin` (Intel Mac),
 `aarch64-unknown-linux-gnu`, and musl — have **no** checked-in prebuilt yet, so
-the local shim's `build.rs` errors out (with the remedies inline). To build for
-them, either point `BORING_BSSL_PATH` at a BoringSSL build for that target, or
-remove the `[patch.crates-io] btls-sys` line from the root `Cargo.toml` to fall
-back to the upstream `btls-sys` source build (next paragraph).
+`leyline-bssl-sys`'s `build.rs` errors out (with the remedies inline). To build
+for them, either point `BORING_BSSL_PATH` at a BoringSSL build for that target,
+or source-build `leyline-bssl-sys` (next paragraph).
 
 To add a target to the prebuilt set permanently, run
 [`scripts/package-bssl.sh`](scripts/package-bssl.sh) on a host of that target —
-it source-builds upstream BoringSSL once and checks the static libs + bindgen
-output into `crates/btls-sys/`, then prints the two code edits needed to
-register the triple (see also [`crates/btls-sys/README.md`](crates/btls-sys/README.md)).
+it source-builds BoringSSL once and checks the static libs + bindgen output into
+`crates/leyline-bssl-sys/`, then prints the two code edits needed to register the
+triple (see also [`crates/leyline-bssl-sys/README.md`](crates/leyline-bssl-sys/README.md)).
 
-**Depending on Leyline from another crate (git dependency).** External
-consumers don't inherit the local shim, so they use the upstream `btls-sys`,
-which builds BoringSSL from source on the first `cargo build`. Plan for
-~5–15 minutes for that initial build; subsequent builds are cached by Cargo.
+**Depending on Leyline from another crate (git dependency).** External consumers
+get the same checked-in prebuilt BoringSSL, so on a tier-1 target the first
+`cargo build` links it directly — zero-compile. On an unsupported target,
+`leyline-bssl-sys` source-builds BoringSSL once (~5–15 minutes); subsequent
+builds are cached by Cargo.
 
 Build dependencies, one-time per machine:
 
@@ -170,8 +170,8 @@ the MSVC toolchain and CMake) plus [Strawberry Perl][strawberry]
 (`choco install strawberryperl`).
 
 If you already have BoringSSL built (CI cache, prior project), set the
-`BORING_BSSL_PATH` env var to that directory and `btls-sys` will skip the
-source compile and just link. See the upstream [`boring2`][boring2] docs
+`BORING_BSSL_PATH` env var to that directory and `leyline-bssl-sys` will skip
+the source compile and just link. See the upstream [`boring2`][boring2] docs
 for detail.
 
 ## What we built on

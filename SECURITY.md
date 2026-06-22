@@ -37,9 +37,10 @@ release only — no backports to older alphas. Pin a version and watch
 
 ## Upstream coordination
 
-The TLS stack is provided by [`0x676e67/btls`](https://github.com/0x676e67/btls)
-(formerly `boring2`), which in turn tracks Google BoringSSL. When BoringSSL
-publishes a CVE, the pinned `btls-sys` release in the workspace `Cargo.toml`
-(and `Cargo.lock`) is the source of truth for whether Leyline is affected. See
+The TLS stack is leyline's vendored `leyline-bssl` (forked from
+[`0x676e67/btls`](https://github.com/0x676e67/btls), itself a `boring2` fork),
+which tracks Google BoringSSL. When BoringSSL publishes a CVE, the pinned
+BoringSSL revision in `crates/leyline-bssl-sys` (submodule + `patches/SERIES`) is
+the source of truth for whether Leyline is affected. See
 `CONTRIBUTING.md → "Syncing the TLS stack"` for the resync procedure. Full
 attribution is in [`NOTICE`](NOTICE).

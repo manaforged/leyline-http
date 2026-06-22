@@ -60,16 +60,40 @@ pub(crate) async fn connect_through_proxy<C: crate::tls::TlsHandshake>(
     let proxy = url::Url::parse(proxy_url)
         .map_err(|e| TlsError::Profile(format!("invalid proxy URL: {e}")))?;
 
-    if proxy.scheme() == "socks5" || proxy.scheme() == "socks5h" {
-        #[cfg(feature = "socks")]
-        return socks5::connect(connector, host, port, &proxy, include_alps).await;
-        #[cfg(not(feature = "socks"))]
-        return Err(TlsError::Profile(
-            "SOCKS proxy support requires the `socks` feature".into(),
-        ));
+    // Scheme is an allowlist, not a fallthrough: `http::connect` writes the
+    // CONNECT request (and any `Proxy-Authorization` credentials) in cleartext,
+    // which is only correct for an `http://` CONNECT proxy. `RequestBuilder::
+    // proxy(&str)` and env-derived proxies are NOT validated through
+    // `ProxyUrl`, so any other scheme — `https`, `socks4`, a typo — would
+    // otherwise reach the cleartext path and leak credentials. Reject every
+    // scheme we cannot tunnel safely, before opening a socket.
+    match proxy.scheme() {
+        "socks5" | "socks5h" => {
+            #[cfg(feature = "socks")]
+            return socks5::connect(connector, host, port, &proxy, include_alps).await;
+            #[cfg(not(feature = "socks"))]
+            return Err(TlsError::Profile(
+                "SOCKS proxy support requires the `socks` feature".into(),
+            ));
+        }
+        "http" => http::connect(connector, host, port, &proxy, include_alps).await,
+        // An `https://` proxy means the client→proxy leg must itself be TLS —
+        // the CONNECT request travels *inside* that TLS. Leyline does not yet
+        // perform a TLS handshake to the proxy, so honoring it here would send
+        // CONNECT (and credentials) in cleartext.
+        "https" => Err(TlsError::Profile(
+            "https:// proxies (TLS to the proxy itself) are not supported: leyline does not yet \
+             perform a TLS handshake to the proxy, so the CONNECT request — including any \
+             Proxy-Authorization credentials — would be sent in cleartext. Use an http:// CONNECT \
+             proxy or a socks5:// proxy."
+                .into(),
+        )),
+        other => Err(TlsError::Profile(format!(
+            "unsupported proxy scheme `{other}`: leyline tunnels only through http:// CONNECT or \
+             socks5:// proxies. Sending CONNECT to a `{other}` proxy would transmit it — including \
+             any Proxy-Authorization credentials — in cleartext."
+        ))),
     }
-
-    http::connect(connector, host, port, &proxy, include_alps).await
 }
 
 #[cfg(test)]

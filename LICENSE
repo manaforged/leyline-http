@@ -16,5 +16,5 @@ the Python wheel — statically link BoringSSL, Google's TLS library. Modern
 BoringSSL is licensed under Apache-2.0, with a BSD-3-Clause notice for
 Go-derived test tooling that is not linked into the shipped libraries. The
 full BoringSSL license text is preserved alongside the prebuilt libraries at
-crates/btls-sys/LICENSE-BORINGSSL in the source tree. See NOTICE for the
+crates/leyline-bssl-sys/LICENSE-BORINGSSL in the source tree. See NOTICE for the
 complete third-party attribution.

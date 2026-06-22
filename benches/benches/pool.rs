@@ -21,14 +21,16 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt, DuplexStream};
 use tokio::runtime::Runtime;
 
-use leyline::h2::client::H2Client;
 use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
 use leyline::h2::connection::{ClientConnection, PseudoHeaders};
 use leyline::h2::frame::{
     DataFrame, FrameHeader, FrameType, HeadersFrame, SettingsFrame, FRAME_HEADER_LEN,
 };
 use leyline::h2::hpack;
-use leyline::pool::{Pool, DEFAULT_IDLE_TIMEOUT, DEFAULT_MAX_CONNECTIONS};
+use leyline::h2::H2Client;
+use leyline::pool::{
+    Pool, DEFAULT_IDLE_TIMEOUT, DEFAULT_MAX_CONNECTIONS, DEFAULT_MAX_H1_CONNS_PER_HOST,
+};
 
 fn bench_pool_new(c: &mut Criterion) {
     c.bench_function("pool::new", |b| {
@@ -42,7 +44,11 @@ fn bench_pool_new(c: &mut Criterion) {
 fn bench_pool_with_limits(c: &mut Criterion) {
     c.bench_function("pool::with_limits", |b| {
         b.iter(|| {
-            let p = Pool::with_limits(DEFAULT_IDLE_TIMEOUT, DEFAULT_MAX_CONNECTIONS);
+            let p = Pool::with_limits(
+                DEFAULT_IDLE_TIMEOUT,
+                DEFAULT_MAX_CONNECTIONS,
+                DEFAULT_MAX_H1_CONNS_PER_HOST,
+            );
             black_box(p);
         });
     });
@@ -103,7 +109,11 @@ async fn run_mock_server(mut io: DuplexStream) {
         let _ = read_exact(&mut io, &mut body).await;
     }
     let mut out = BytesMut::new();
-    SettingsFrame { ack: false, params: vec![] }.encode(&mut out);
+    SettingsFrame {
+        ack: false,
+        params: vec![],
+    }
+    .encode(&mut out);
     if io.write_all(&out).await.is_err() {
         return;
     }
@@ -160,7 +170,9 @@ fn bench_handle_clone_warm(c: &mut Criterion) {
     let (handle, server, _driver): (H2Client, _, _) = rt.block_on(async {
         let (cio, sio) = tokio::io::duplex(1024 * 1024);
         let server = tokio::spawn(run_mock_server(sio));
-        let (h, d) = ClientConnection::start(cio, test_config()).await.expect("handshake");
+        let (h, d) = ClientConnection::start(cio, test_config())
+            .await
+            .expect("handshake");
         // One warmup request so the driver is fully rolling.
         let (p, hh) = (
             PseudoHeaders {

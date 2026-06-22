@@ -14,16 +14,15 @@ documentation = "https://docs.rs/leyline"
 readme = "README.md"
 
 [package.metadata.docs.rs]
-# docs.rs builds the published crate, where the workspace
-# `[patch.crates-io] btls-sys` does not apply — so btls-sys builds BoringSSL
-# from source (cmake/perl/go must be present on the builder). Document the
-# default feature set on one target to stay within docs.rs build limits.
-# Zero-compile docs via a prebuilt-BoringSSL btls fork are a tracked follow-up.
+# leyline-bssl-sys ships prebuilt BoringSSL for x86_64-unknown-linux-gnu, so
+# docs.rs links the committed libs (no cmake/source build). Document the default
+# feature set on one target to stay within docs.rs build limits.
 targets = ["x86_64-unknown-linux-gnu"]
 
 [features]
 default = [
     "cookies",
+    "charset",
     "compression-gzip",
     "compression-brotli",
     "compression-deflate",
@@ -35,6 +34,9 @@ default = [
     "system-trust",
 ]
 cookies = []
+# Charset-aware response-body text decoding (Content-Type charset + BOM, via
+# encoding_rs). Off → Response::text falls back to UTF-8 lossy.
+charset = ["dep:encoding_rs"]
 # Body decompression markers. flate2/zstd are non-optional because the TLS
 # layer needs them unconditionally for RFC 8879 certificate decompression
 # (zlib/zstd codepoints are fingerprint-bearing); these flags only gate the
@@ -65,22 +67,20 @@ full = [
     "socks",
     "system-trust",
     "native-interface-bind",
+    "charset",
 ]
 
 [dependencies]
 # External deps absorbed from sub-crates
 # -- from leyline-quiche (external BSD-2 fork, stays as path dep)
-leyline-quiche = { path = "../leyline-quiche", version = "1.0.0-alpha.2", default-features = false, optional = true, features = [
-    "boringssl-btls-crate",
+leyline-quiche = { path = "../leyline-quiche", version = "1.0.0-alpha.3", default-features = false, optional = true, features = [
+    "boringssl-bssl-crate",
 ] }
 
-# -- BoringSSL
-btls = { workspace = true }
-btls-sys = { workspace = true }
-tokio-btls = { workspace = true }
-# Raw SSL* access for FFI not yet wrapped by btls (trust_anchors extension).
-# Pinned to btls's foreign-types version so the trait impls apply.
-foreign-types = "0.5"
+# -- BoringSSL (leyline-owned stack). leyline talks only to the safe wrapper;
+# the FFI crate (leyline-bssl-sys) is pulled transitively by leyline-bssl.
+leyline-bssl = { workspace = true }
+leyline-bssl-tokio = { workspace = true }
 
 # -- async runtime
 tokio = { workspace = true, features = ["net", "rt", "rt-multi-thread", "time", "io-util", "macros", "fs", "sync"] }
@@ -115,6 +115,11 @@ http = "1"
 
 # -- misc
 bytes = { workspace = true }
+encoding_rs = { version = "0.8", optional = true }
+# Mozilla Public Suffix List (compile-time embedded) for cookie
+# registrable-domain + public-suffix checks. Non-optional: the cookie module
+# compiles unconditionally and the list cannot be hand-rolled.
+psl = "2"
 futures-util = "0.3"
 async-stream = { version = "0.3", optional = true }
 # Non-optional: h2::client::H2ConnectStream needs PollSender for
@@ -139,8 +144,8 @@ windows-sys = { version = "0.61", features = ["Win32_Security_Cryptography", "Wi
 bytes = { workspace = true }
 # In-test cert generation + a localhost TLS acceptor for the
 # pinning hostname-verification integration test.
-btls = { workspace = true }
-tokio-btls = { workspace = true }
+leyline-bssl = { workspace = true }
+leyline-bssl-tokio = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-util = { version = "0.7", features = ["io"] }
 futures-util = "0.3"

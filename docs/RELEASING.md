@@ -25,8 +25,8 @@ prebuilt-BoringSSL targets (`x86_64-unknown-linux-gnu`, `x86_64-pc-windows-msvc`
   `optionalDependencies` pull the matching binary at install time.
 
 No `BORING_BSSL_PATH` is needed: the static BoringSSL libs are vendored in-tree
-under `crates/btls-sys/native/<target>/lib`, so each matrix leg links them
-directly.
+under `crates/leyline-bssl-sys/native/<target>/lib`, so each matrix leg links
+them directly.
 
 ### Cutting a release
 
@@ -148,26 +148,23 @@ leyline-quiche  →  leyline
 ```
 
 The binding crates (`leyline-ffi`, `leyline-node`, `leyline-python`) are
-`publish = false`. `btls-sys` is the workspace's local shim — excluded from the
-workspace and patched in via `[patch.crates-io]`; a published `leyline` depends
-on the real `btls`/`btls-sys 0.5.6` from crates.io.
+`publish = false`. The owned BoringSSL stack (`leyline-bssl-sys`, `leyline-bssl`,
+`leyline-bssl-tokio`) is excluded from the workspace and published ahead of
+`leyline` in dependency order.
 
-### BoringSSL build on the verify path
+### BoringSSL on the verify path
 
-crates.io verifies each crate by compiling the packaged tarball **in
-isolation**, where the workspace `[patch.crates-io] btls-sys` does not apply. So
-the verify build (and a consumer's `cargo add leyline`) source-builds BoringSSL
-and needs `cmake`, `perl`, `go`, and `clang`/`libclang` — the workflow installs
-them. The zero-compile-for-Rust path (a prebuilt-BoringSSL `btls` fork) is a
-tracked follow-up.
+`leyline-bssl-sys` ships prebuilt BoringSSL in its published tarball, so the
+crates.io isolation verify (and a consumer's `cargo add leyline`) links the
+static libs directly — no source build, no `cmake`/`perl`/`go`. The libs are
+checked in only for the three tier-1 targets; other targets source-build.
 
 ### docs.rs
 
 `crates/leyline/Cargo.toml` carries `[package.metadata.docs.rs]` pinning a
-single target. docs.rs has no workspace patch either, so it also source-builds
-BoringSSL; the build succeeds only if the docs.rs builder provides
-cmake/perl/go. Until the prebuilt-BoringSSL `btls` fork lands, expect docs.rs
-to need that toolchain (or host the rustdoc output ourselves).
+single target (`x86_64-unknown-linux-gnu`). `leyline-bssl-sys` ships a prebuilt
+for that target, so docs.rs links it directly — no cmake/perl/go on the docs
+builder.
 
 ### First release
 

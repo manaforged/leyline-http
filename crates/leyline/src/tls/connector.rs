@@ -10,8 +10,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use btls::ssl::{NameType, SslConnector, SslSession, SslSessionCacheMode, SslVerifyMode};
-use foreign_types::ForeignType;
+use leyline_bssl::ssl::{NameType, SslConnector, SslSession, SslSessionCacheMode, SslVerifyMode};
 use lru::LruCache;
 use tokio::net::TcpStream;
 
@@ -83,7 +82,7 @@ impl FingerprintConnector {
         tcp: TcpProfile,
         trust: &TlsTrustConfig,
     ) -> Result<Self, TlsError> {
-        let mut builder = SslConnector::builder(btls::ssl::SslMethod::tls())?;
+        let mut builder = SslConnector::builder(leyline_bssl::ssl::SslMethod::tls())?;
 
         // Drive every TLS-level knob from the profile via the shared factory.
         apply_profile_with_trust(&mut builder, profile, TlsMinVersion::Tls12, trust)?;
@@ -121,7 +120,7 @@ impl FingerprintConnector {
         // Chrome-family permutation IS applied (`set_permute_extensions`);
         // these families fall back to BoringSSL's default order. JA4 sorts
         // extensions so it's unaffected — the gap is JA4_r only. Warn so the
-        // drop stays observable rather than silent, but only
+        // drop stays observable rather than silent (DR-leyline_bssl-gaps), but only
         // once per profile per process — Firefox/Safari sessions are built
         // routinely and a per-build warn would train operators to ignore it.
         if tls.extension_permutation.is_some() && warn_permutation_once(&profile.meta.name) {
@@ -331,7 +330,7 @@ impl FingerprintConnector {
                     // called on an Ssl not yet handed to `connect()`.
                     // `ssl` was just constructed via `config.into_ssl`
                     // and has not started its handshake; it will be
-                    // driven via `tokio_btls::connect` below. The
+                    // driven via `leyline_bssl_tokio::connect` below. The
                     // `SslSession` is owned for the duration of this
                     // block. No concurrent access.
                     unsafe {
@@ -351,28 +350,20 @@ impl FingerprintConnector {
         // same so the ClientHello JA4 matches real Chrome (t13d1517). Without it
         // leyline sends t13d1516 and a CDN edge's JA4+H2 join check soft-blocks
         // the connection — TLS completes but ALPN is stripped, surfacing here as
-        // `alpn: negotiated none, expected h2`. btls 0.5 doesn't wrap this call,
-        // so reach the raw SSL* via foreign-types.
+        // `alpn: negotiated none, expected h2`.
         if self.request_trust_anchors {
-            let ids: [u8; 0] = [];
-            // SAFETY: `ssl` is freshly built by `into_ssl` and not yet driven
-            // through `connect()`; BoringSSL copies `ids` (a valid empty buffer),
-            // so the pointer need only be valid for the call.
-            let rc = unsafe {
-                btls_sys::SSL_set1_requested_trust_anchors(ssl.as_ptr(), ids.as_ptr(), ids.len())
-            };
-            if rc != 1 {
+            if let Err(e) = ssl.set_requested_trust_anchors(&[]) {
                 tracing::warn!(
                     target: "leyline::tls",
-                    "SSL_set1_requested_trust_anchors returned {rc}; trust_anchors \
+                    "set_requested_trust_anchors failed ({e}); trust_anchors \
                      extension may be absent and JA4 will not match Chrome 148"
                 );
             }
         }
 
-        // TLS handshake. tokio-btls::SslStream::connect requires Pin<&mut Self>;
+        // TLS handshake. leyline-bssl-tokio::SslStream::connect requires Pin<&mut Self>;
         // TcpStream is Unpin so we can pin on the stack.
-        let mut stream = tokio_btls::SslStream::new(ssl, tcp_stream)
+        let mut stream = leyline_bssl_tokio::SslStream::new(ssl, tcp_stream)
             .map_err(|e| TlsError::SslConnect(e.to_string()))?;
         std::pin::Pin::new(&mut stream)
             .connect()

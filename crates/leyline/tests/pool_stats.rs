@@ -31,6 +31,8 @@ fn empty_pool_stats_are_zero() {
             h2_misses: 0,
             h1_hits: 0,
             h1_misses: 0,
+            h3_hits: 0,
+            h3_misses: 0,
             evictions_idle: 0,
             evictions_lru: 0,
             evictions_dead: 0,

@@ -141,11 +141,14 @@ async fn h1_pool_reuses_connection_for_sequential_requests() {
             H1Body::Empty,
             None,
             H1Target::OriginForm,
+            false,
         )
         .await
         .expect("request succeeds");
         assert_eq!(resp.status, 200);
-        let H1ResponseBody::Buffered(body) = resp.body;
+        let H1ResponseBody::Buffered(body) = resp.body else {
+            unreachable!("buffered request returns a buffered body");
+        };
         assert_eq!(body, b"ok");
     }
 
@@ -193,6 +196,7 @@ async fn h1_pool_honours_connection_close() {
             H1Body::Empty,
             None,
             H1Target::OriginForm,
+            false,
         )
         .await
         .expect("request succeeds");
@@ -269,6 +273,7 @@ async fn h1_pool_recovers_when_server_drops_connection() {
         H1Body::Empty,
         None,
         H1Target::OriginForm,
+        false,
     )
     .await
     .expect("first request succeeds");
@@ -293,6 +298,7 @@ async fn h1_pool_recovers_when_server_drops_connection() {
         H1Body::Empty,
         None,
         H1Target::OriginForm,
+        false,
     )
     .await
     .expect("second request recovers on fresh TCP");
@@ -415,6 +421,7 @@ async fn h1_cap_bounds_concurrency_and_reuses_warm_connections() {
                 H1Body::Empty,
                 None,
                 H1Target::OriginForm,
+                false,
             )
             .await
             .map(|r| r.status)
@@ -481,6 +488,7 @@ async fn h1_cancelled_request_releases_permit() {
                 H1Body::Empty,
                 None,
                 H1Target::OriginForm,
+                false,
             )
             .await
         }
@@ -507,6 +515,7 @@ async fn h1_cancelled_request_releases_permit() {
         H1Body::Empty,
         None,
         H1Target::OriginForm,
+        false,
     );
     let resp = tokio::time::timeout(Duration::from_secs(3), b)
         .await

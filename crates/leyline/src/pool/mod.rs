@@ -199,6 +199,98 @@ pub async fn checkout_handle(
     open_h2_coalesced(pool, connector, h2_config, key, host, port, proxy).await
 }
 
+/// Obtain a cloneable [`crate::quic::H3Client`] for `(host, port)`, reusing a
+/// live pooled QUIC connection when one exists and otherwise driving a fresh
+/// QUIC + HTTP/3 handshake. H3 has no proxy support, so the key proxy is
+/// always `None`.
+///
+/// Connection-only: returns once the connection is usable, before any request
+/// stream is opened. The transport sends the request on the returned handle;
+/// the [`ProtocolPolicy::Race`](crate::ProtocolPolicy) path races this against
+/// [`checkout_handle`] (H2) and sends on whichever connection comes up first.
+#[cfg(feature = "http3")]
+pub async fn checkout_h3_handle(
+    pool: &Arc<Pool>,
+    h3_config: &crate::quic::H3Config,
+    profile: &crate::profile::BrowserProfile,
+    host: &str,
+    port: u16,
+) -> Result<(crate::quic::H3Client, TlsInfo), crate::Error> {
+    let key = make_key(host, port, None);
+
+    pool.evict_idle();
+
+    if let Some(hit) = pool.checkout_h3(&key) {
+        return Ok(hit);
+    }
+
+    let (handle, driver, tls) = crate::quic::open_fresh_h3(h3_config, profile, host, port)
+        .await
+        .map_err(crate::Error::Http3)?;
+    Ok(pool.install_or_get_h3(key, handle, driver, tls))
+}
+
+/// Send an HTTP/3 request, reusing a pooled QUIC connection when alive.
+///
+/// A pool hit may be stale (the connection died since last use). The request
+/// is retried once on a guaranteed-fresh connection **only** when the failure
+/// proves the request never left the client (`H3SendError::NotSent`) — the
+/// quintessential stale-idle case. A failure
+/// that may have reached the origin (stream reset, mid-response loss) is
+/// surfaced as-is, never replayed, so a non-idempotent request is never sent
+/// to the origin twice. A fresh connection's failure is likewise never retried.
+#[cfg(feature = "http3")]
+#[allow(clippy::too_many_arguments)]
+pub async fn send_request_h3_pooled(
+    pool: &Arc<Pool>,
+    h3_config: &crate::quic::H3Config,
+    profile: &crate::profile::BrowserProfile,
+    host: &str,
+    port: u16,
+    method: &str,
+    authority: &str,
+    path: &str,
+    headers: &[(String, String)],
+    body: Option<bytes::Bytes>,
+) -> Result<(crate::quic::H3Response, TlsInfo), crate::Error> {
+    let key = make_key(host, port, None);
+
+    pool.evict_idle();
+
+    if let Some((handle, tls)) = pool.checkout_h3(&key) {
+        match handle
+            .send_request(method, authority, path, headers, body.clone())
+            .await
+        {
+            Ok(resp) => return Ok((resp, tls)),
+            // Ambiguous failure (may have reached the origin): do not replay.
+            Err(e) if !e.is_retryable() => {
+                return Err(crate::Error::Http3(e.message().to_string()));
+            }
+            Err(e) => {
+                tracing::info!(
+                    target: "leyline::pool",
+                    host = %key.host,
+                    port = key.port,
+                    error = %e.message(),
+                    "pool stale hit -- pooled h3 connection unsent, opening fresh"
+                );
+                pool.invalidate(&key);
+            }
+        }
+    }
+
+    let (handle, driver, tls) = crate::quic::open_fresh_h3(h3_config, profile, host, port)
+        .await
+        .map_err(crate::Error::Http3)?;
+    let (handle, tls) = pool.install_or_get_h3(key, handle, driver, tls);
+    let resp = handle
+        .send_request(method, authority, path, headers, body)
+        .await
+        .map_err(|e| crate::Error::Http3(e.message().to_string()))?;
+    Ok((resp, tls))
+}
+
 /// Send a request, reusing a pooled H2 connection when available.
 ///
 /// If a pooled handle exists for the destination, it is cloned and the
@@ -280,6 +372,23 @@ pub async fn send_request(
                     return Err(crate::Error::Body(format!(
                         "pooled connection died and streaming body cannot be retried: {e}"
                     )));
+                }
+                // The retry path is the ambiguous "silent stale hit" — a handle
+                // that looked alive at checkout but failed mid-request, where it
+                // is unknown whether the origin processed the request. Replay
+                // only when it is provably safe: the server signalled
+                // REFUSED_STREAM (RFC 9113 §7 — not processed), or the method is
+                // idempotent (RFC 9110 §9.2.2). Otherwise surface the error
+                // rather than risk executing a non-idempotent request twice.
+                let refused = matches!(
+                    &e,
+                    crate::h2::H2Error::Stream {
+                        code: crate::h2::ErrorCode::RefusedStream,
+                        ..
+                    }
+                );
+                if !refused && !crate::core::retry::is_idempotent(&pseudo.method) {
+                    return Err(crate::Error::Http2(e));
                 }
                 if let Some(buf) = &retry_buf {
                     body = RequestBody::Buffered(buf.clone());
