@@ -135,11 +135,11 @@ pub struct H2Response {
     /// HTTP status code.
     pub status: u16,
     /// Response headers (name, value pairs in order).
-    pub headers: Vec<(String, String)>,
+    pub headers: Vec<(crate::core::HeaderStr, crate::core::HeaderStr)>,
     /// Response body.
     pub body: Vec<u8>,
     /// Trailer headers, if any.
-    pub trailers: Option<Vec<(String, String)>>,
+    pub trailers: Option<Vec<(crate::core::HeaderStr, crate::core::HeaderStr)>>,
 }
 
 /// Sliding-window flood detector shared by the RST_STREAM and
@@ -265,7 +265,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> ClientConnection<T> {
     pub async fn send_request(
         &mut self,
         pseudo: PseudoHeaders,
-        headers: Vec<(String, String)>,
+        headers: Vec<HeaderPair>,
         body: Option<Bytes>,
     ) -> Result<H2Response, H2Error> {
         self.handle.send_request(pseudo, headers, body).await
@@ -280,7 +280,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> ClientConnection<T> {
     pub async fn send_request_with_trailers(
         &mut self,
         pseudo: PseudoHeaders,
-        headers: Vec<(String, String)>,
+        headers: Vec<HeaderPair>,
         body: Option<Bytes>,
         trailers: Vec<(String, String)>,
     ) -> Result<H2Response, H2Error> {
@@ -289,6 +289,15 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> ClientConnection<T> {
             .await
     }
 }
+
+/// A single request header name/value pair. Both parts are
+/// `Cow<'static, str>`: a Chrome-constant header borrows its literal
+/// (zero allocation) while a session/request value owns its string. The
+/// `'static` bound lets the assembled list cross the driver's command channel.
+pub(crate) type HeaderPair = (
+    std::borrow::Cow<'static, str>,
+    std::borrow::Cow<'static, str>,
+);
 
 /// Pseudo-headers for a request.
 #[derive(Debug, Clone, Default)]
@@ -367,14 +376,13 @@ pub(crate) fn id_to_u16(id: &SettingId) -> u16 {
 pub(crate) fn encode_request_pseudos<'a>(
     encoder: &mut hpack::Encoder,
     pseudo_list: Vec<(&'a str, &'a str)>,
-    headers: &'a [(String, String)],
+    headers: &'a [HeaderPair],
 ) -> Vec<u8> {
-    let mut combined: Vec<(&str, &str)> = Vec::with_capacity(pseudo_list.len() + headers.len());
-    for (n, v) in &pseudo_list {
-        combined.push((*n, *v));
-    }
-    for (name, value) in headers {
-        combined.push((name.as_str(), value.as_str()));
-    }
-    encoder.encode_header_block(&combined)
+    let count = pseudo_list.len() + headers.len();
+    // Lazily chain pseudos + headers — no intermediate `combined` Vec.
+    let pairs = pseudo_list
+        .iter()
+        .map(|&(n, v)| (n, v))
+        .chain(headers.iter().map(|(n, v)| (n.as_ref(), v.as_ref())));
+    encoder.encode_header_block_iter(pairs, count)
 }

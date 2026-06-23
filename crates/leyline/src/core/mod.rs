@@ -5,6 +5,7 @@ mod body_stream;
 mod config;
 mod digest;
 mod error;
+mod header_str;
 mod headers;
 #[cfg(feature = "multipart")]
 pub mod multipart;
@@ -27,6 +28,7 @@ pub use config::{
 };
 pub use digest::DigestAuth;
 pub use error::{Error, Result};
+pub use header_str::HeaderStr;
 pub use headers::HeaderList;
 pub use request::{ContentEncoding, IntoParamPair, RequestBuilder};
 pub use response::{HttpVersion, Response};

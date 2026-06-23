@@ -21,6 +21,7 @@ use crate::core::BodyStream;
 use crate::tls::ConnectorVariant;
 
 use crate::pool::types::PoolKey;
+use crate::pool::types::Transport;
 use crate::pool::{make_key, H1Slot, Pool, TlsInfo};
 
 /// Maximum request-line + headers size. Matches the core transport
@@ -198,7 +199,7 @@ pub async fn send_request_h1_pooled(
 
     pool.evict_idle();
 
-    let key = make_key(host, port, proxy);
+    let key = make_key(host, port, proxy, Transport::Tcp);
 
     // Acquire one of this destination's H1 connection permits before any pool
     // work. This caps concurrent H1 connections per host at
@@ -1017,10 +1018,9 @@ async fn send_request_h1_streaming(
 }
 
 fn method_typically_has_body(method: &str) -> bool {
-    matches!(
-        method.to_ascii_uppercase().as_str(),
-        "POST" | "PUT" | "PATCH"
-    )
+    ["POST", "PUT", "PATCH"]
+        .iter()
+        .any(|m| method.eq_ignore_ascii_case(m))
 }
 
 /// Parsed HTTP/1.x response head: status + headers + http/1.x minor

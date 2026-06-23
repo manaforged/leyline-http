@@ -50,7 +50,7 @@ pub struct ResponseSnapshot<'a> {
     /// gives no diagnostic detail.
     pub request_headers: &'a [(String, String)],
     /// Response headers as received from the wire.
-    pub response_headers: &'a [(String, String)],
+    pub response_headers: &'a [(crate::core::HeaderStr, crate::core::HeaderStr)],
     /// Response body bytes, **after** decompression. Empty when the
     /// caller opted into streaming, which the observer cannot drain
     /// without changing semantics.

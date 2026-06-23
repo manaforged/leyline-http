@@ -40,7 +40,7 @@ impl Session {
         &self,
         method: &str,
         url: &url::Url,
-        headers: Vec<(String, String)>,
+        headers: Vec<crate::h2::connection::HeaderPair>,
         body: Body,
         stream_response: bool,
         request_proxy: Option<&str>,
@@ -186,7 +186,7 @@ impl Session {
         h3_config: &crate::quic::H3Config,
         method: &str,
         url: &url::Url,
-        headers: Vec<(String, String)>,
+        headers: Vec<crate::h2::connection::HeaderPair>,
         body: Body,
         proxy: Option<&str>,
     ) -> Result<crate::core::transport::TransportResponse> {

@@ -627,15 +627,22 @@ impl SessionBuilder {
                 self.proxy_from_env = true;
             }
         }
-        // HTTP/3 forbids proxies today; fail fast at build time instead of
-        // deferring to first request.
+        // HTTP/3 and proxies are mutually exclusive by design. Tunnelling QUIC
+        // (UDP) through a forward proxy requires MASQUE (RFC 9298 — UDP over
+        // HTTP), a large separate protocol effort no mainstream proxy speaks; an
+        // HTTP CONNECT / SOCKS proxy carries only TCP. So when a proxy is set,
+        // the correct path is HTTP/2 over the proxy's TCP tunnel — request that
+        // explicitly rather than silently dialing UDP direct (which would leak
+        // the real egress IP past the proxy). Fail fast at build time.
         #[cfg(feature = "http3")]
         {
             if (self.proxy.is_some() || self.proxy_config.first_proxy().is_some())
                 && matches!(self.protocol_policy, ProtocolPolicy::Http3)
             {
                 return Err(Error::Config(
-                    "HTTP/3 over proxies is not implemented; drop `.http3()` or `.proxy(...)"
+                    "HTTP/3 cannot run over a proxy (QUIC/UDP needs MASQUE, which proxies don't \
+                     speak): drop `.http3()` to use HTTP/2 over the proxy's CONNECT tunnel, or \
+                     drop `.proxy(...)` to dial HTTP/3 direct"
                         .into(),
                 ));
             }

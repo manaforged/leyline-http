@@ -1,5 +1,7 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 
+use crate::profile::preset::HeaderPair;
 use crate::profile::Preset;
 
 use super::decompress::{decompress_and_strip, drain_stream_into_vec};
@@ -103,7 +105,7 @@ impl Session {
             };
 
             // Build headers.
-            let mut headers: Vec<(String, String)> = if let Some(preset) = preset {
+            let mut headers: Vec<HeaderPair> = if let Some(preset) = preset {
                 let ctx = crate::profile::preset::HeaderContext {
                     user_agent: &self.user_agent,
                     sec_ch_ua: &self.sec_ch_ua,
@@ -116,13 +118,16 @@ impl Session {
                 preset.build_headers(&ctx)
             } else {
                 vec![
-                    ("user-agent".into(), self.user_agent.clone()),
-                    ("accept".into(), "*/*".to_string()),
+                    ("user-agent".into(), Cow::Owned(self.user_agent.clone())),
+                    ("accept".into(), Cow::Borrowed("*/*")),
                     (
                         "accept-encoding".into(),
-                        "gzip, deflate, br, zstd".to_string(),
+                        Cow::Borrowed("gzip, deflate, br, zstd"),
                     ),
-                    ("accept-language".into(), self.accept_language.clone()),
+                    (
+                        "accept-language".into(),
+                        Cow::Owned(self.accept_language.clone()),
+                    ),
                 ]
             };
 
@@ -140,7 +145,7 @@ impl Session {
             {
                 for (name, value) in headers.iter_mut() {
                     if name == "accept" {
-                        *value = accept_override.to_string();
+                        *value = Cow::Owned(accept_override.to_string());
                         break;
                     }
                 }
@@ -163,7 +168,7 @@ impl Session {
                     .unwrap_or(false);
                 let preset_has_it = headers.iter().any(|(hk, _)| hk.eq_ignore_ascii_case(k));
                 if !user_has_it && !preset_has_it {
-                    headers.push((k.clone(), v.clone()));
+                    headers.push((Cow::Owned(k.clone()), Cow::Owned(v.clone())));
                 }
             }
 
@@ -205,7 +210,7 @@ impl Session {
                     // body. Drop any caller-supplied content-length so we never
                     // emit two (a request-smuggling shape) or a stale value.
                     headers.retain(|(k, _)| !k.eq_ignore_ascii_case("content-length"));
-                    headers.push(("content-length".into(), len.to_string()));
+                    headers.push(("content-length".into(), Cow::Owned(len.to_string())));
                 }
             }
 
@@ -213,13 +218,14 @@ impl Session {
             // context: a cross-site redirect withholds `Strict` cookies (and
             // `Lax` on non-safe methods), matching a real browser navigation.
             let cross_site = crate::cookie::is_cross_site(&current_url, &redirect_chain);
-            let safe_method =
-                matches!(current_method.to_ascii_uppercase().as_str(), "GET" | "HEAD");
+            let safe_method = ["GET", "HEAD"]
+                .iter()
+                .any(|m| current_method.eq_ignore_ascii_case(m));
             if let Some(cookie_val) =
                 self.cookie_jar
                     .cookie_header_for(&current_url, cross_site, safe_method)
             {
-                headers.push(("cookie".into(), cookie_val));
+                headers.push(("cookie".into(), Cow::Owned(cookie_val)));
             }
 
             // Identity-level header reordering. Browsers like Brave ship
@@ -237,8 +243,13 @@ impl Session {
             // observer is registered (its snapshot borrows them). The default
             // hot path skips this clone entirely.
             let want_introspect = self.audit_enabled || crate::observe::has_observer();
-            let audit_headers = if want_introspect {
-                headers.clone()
+            // Owned snapshot only for the opt-in audit/observe boundary; the
+            // hot path skips it. The request header list itself stays `Cow`.
+            let audit_headers: Vec<(String, String)> = if want_introspect {
+                headers
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect()
             } else {
                 Vec::new()
             };
@@ -463,10 +474,10 @@ fn url_origin(url: &url::Url) -> String {
 /// Stable: multiple values for the same header keep their original
 /// relative order. Unknown / dynamic names (`content-length`, `cookie`,
 /// caller-anchored extras) end up at the tail untouched.
-fn reorder_headers(headers: &mut Vec<(String, String)>, order: &[String]) {
+fn reorder_headers(headers: &mut Vec<HeaderPair>, order: &[String]) {
     let lc_order: Vec<String> = order.iter().map(|s| s.to_ascii_lowercase()).collect();
-    let mut buckets: Vec<Vec<(String, String)>> = vec![Vec::new(); lc_order.len()];
-    let mut tail: Vec<(String, String)> = Vec::new();
+    let mut buckets: Vec<Vec<HeaderPair>> = vec![Vec::new(); lc_order.len()];
+    let mut tail: Vec<HeaderPair> = Vec::new();
     for h in std::mem::take(headers) {
         let lc = h.0.to_ascii_lowercase();
         match lc_order.iter().position(|n| *n == lc) {
@@ -483,9 +494,10 @@ fn reorder_headers(headers: &mut Vec<(String, String)>, order: &[String]) {
 #[cfg(test)]
 mod reorder_tests {
     use super::reorder_headers;
+    use super::{Cow, HeaderPair};
 
-    fn h(name: &str, value: &str) -> (String, String) {
-        (name.into(), value.into())
+    fn h(name: &str, value: &str) -> HeaderPair {
+        (Cow::Owned(name.to_string()), Cow::Owned(value.to_string()))
     }
 
     #[test]
@@ -504,7 +516,7 @@ mod reorder_tests {
             "sec-fetch-site".into(),
         ];
         reorder_headers(&mut headers, &order);
-        let names: Vec<&str> = headers.iter().map(|(n, _)| n.as_str()).collect();
+        let names: Vec<&str> = headers.iter().map(|(n, _)| n.as_ref()).collect();
         assert_eq!(
             names,
             vec![
@@ -522,7 +534,7 @@ mod reorder_tests {
         let mut headers = vec![h("accept", "a"), h("user-agent", "u")];
         let order = vec!["accept".into(), "sec-gpc".into(), "user-agent".into()];
         reorder_headers(&mut headers, &order);
-        let names: Vec<&str> = headers.iter().map(|(n, _)| n.as_str()).collect();
+        let names: Vec<&str> = headers.iter().map(|(n, _)| n.as_ref()).collect();
         assert_eq!(names, vec!["accept", "user-agent"]);
     }
 
@@ -531,7 +543,7 @@ mod reorder_tests {
         let mut headers = vec![h("User-Agent", "u"), h("Accept", "a")];
         let order = vec!["accept".into(), "user-agent".into()];
         reorder_headers(&mut headers, &order);
-        let names: Vec<&str> = headers.iter().map(|(n, _)| n.as_str()).collect();
+        let names: Vec<&str> = headers.iter().map(|(n, _)| n.as_ref()).collect();
         assert_eq!(names, vec!["Accept", "User-Agent"]);
     }
 }

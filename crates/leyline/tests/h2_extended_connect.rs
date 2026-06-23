@@ -59,7 +59,13 @@ fn test_config() -> H2Config {
     }
 }
 
-fn connect_pseudo() -> (PseudoHeaders, Vec<(String, String)>) {
+fn connect_pseudo() -> (
+    PseudoHeaders,
+    Vec<(
+        std::borrow::Cow<'static, str>,
+        std::borrow::Cow<'static, str>,
+    )>,
+) {
     (
         PseudoHeaders {
             method: "CONNECT".into(),
@@ -130,7 +136,12 @@ where
     let decoded = dec.decode_header_block(&fragment).expect("hpack decode");
     let list = decoded
         .into_iter()
-        .map(|h| (h.name, h.value))
+        .map(|h| {
+            (
+                String::from_utf8_lossy(&h.name).into_owned(),
+                String::from_utf8_lossy(&h.value).into_owned(),
+            )
+        })
         .collect::<Vec<_>>();
     (stream_id, end_stream, list)
 }

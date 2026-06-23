@@ -8,11 +8,27 @@ use wreq::Client;
 use wreq_util::Emulation;
 
 fn build() -> Client {
-    Client::builder()
+    let mut b = Client::builder()
         .emulation(Emulation::Chrome137)
-        .cert_verification(false)
-        .build()
-        .expect("wreq client builds")
+        .cert_verification(false);
+    // Optional egress proxy, mirroring leyline-client (`PROXY=http://…`).
+    if let Ok(p) = std::env::var("PROXY") {
+        if !p.is_empty() {
+            b = b.proxy(wreq::Proxy::all(p).expect("proxy url"));
+        }
+    }
+    b.build().expect("wreq client builds")
+}
+
+/// 64-bit FNV-1a body fingerprint — identical to leyline-client so the
+/// equivalence gate compares like for like.
+fn fnv1a(bytes: &[u8]) -> u64 {
+    let mut h = 0xcbf2_9ce4_8422_2325u64;
+    for &b in bytes {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
 }
 
 #[tokio::main]
@@ -26,6 +42,18 @@ async fn main() {
     if args.get(2).map(|s| s.as_str()) == Some("print") {
         let resp = build().get(url.as_str()).send().await.expect("print req");
         println!("{}", resp.text().await.expect("body"));
+        return;
+    }
+
+    if args.get(2).map(|s| s.as_str()) == Some("equiv") {
+        let resp = build().get(url.as_str()).send().await.expect("equiv req");
+        let status = resp.status().as_u16();
+        let body = resp.text().await.expect("body");
+        println!(
+            "EQUIV wreq status={status} fnv={:016x} len={}",
+            fnv1a(body.as_bytes()),
+            body.len()
+        );
         return;
     }
 

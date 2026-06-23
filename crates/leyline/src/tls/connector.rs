@@ -68,6 +68,10 @@ pub struct FingerprintConnector {
     /// chain + pin but NOT the `X509_check_host` SAN match — so the
     /// hostname is re-verified explicitly after the handshake.
     pins_active: bool,
+    /// `true` when a client certificate (mTLS identity) is configured. Like
+    /// pins, it is origin-specific and must never be presented to an `https://`
+    /// proxy — see [`Self::has_origin_tls_identity`].
+    has_client_identity: bool,
 }
 
 impl FingerprintConnector {
@@ -147,7 +151,17 @@ impl FingerprintConnector {
             connect_timeout: None,
             socket_config: SocketConfig::default(),
             pins_active: !trust.pinned_leaf_sha256().is_empty(),
+            has_client_identity: trust.client_identity().is_some(),
         })
+    }
+
+    /// `true` when this connector carries an origin-specific TLS identity — a
+    /// client certificate (mTLS) or leaf pins — that must NOT be presented to,
+    /// or applied against, an `https://` CONNECT proxy. The proxy is a separate
+    /// peer: leaking the origin client cert to it, or checking its cert against
+    /// the origin's pins, would be wrong (and the pin check would fail).
+    pub(crate) fn has_origin_tls_identity(&self) -> bool {
+        self.pins_active || self.has_client_identity
     }
 
     /// Skip peer certificate verification. **Dangerous** — off by
@@ -296,6 +310,37 @@ impl FingerprintConnector {
         host: &str,
         include_alps: bool,
     ) -> Result<TlsStream, TlsError> {
+        let (stream, meta) = self.handshake_over(tcp_stream, host, include_alps).await?;
+        Ok(meta.into_tls_stream(TlsIo::Boring(stream)))
+    }
+
+    /// Drive the same fingerprinted TLS handshake over an already-established
+    /// TLS stream — the inner (origin-facing) leg of an `https://` CONNECT
+    /// proxy, so the origin TLS nests inside the proxy TLS.
+    pub(crate) async fn tls_handshake_nested(
+        &self,
+        inner: TlsIo,
+        host: &str,
+        include_alps: bool,
+    ) -> Result<TlsStream, TlsError> {
+        let (stream, meta) = self.handshake_over(inner, host, include_alps).await?;
+        Ok(meta.into_tls_stream(TlsIo::Nested(Box::new(stream))))
+    }
+
+    /// The fingerprint-bearing TLS handshake, generic over the byte stream so
+    /// the direct path (`TcpStream`) and the `https://`-proxy inner leg
+    /// (`TlsIo`) share ONE ClientHello — the single source of truth for the
+    /// JA4. Returns the handshaked stream plus negotiated metadata; the caller
+    /// wraps it in the matching [`TlsIo`] arm.
+    async fn handshake_over<S>(
+        &self,
+        io: S,
+        host: &str,
+        include_alps: bool,
+    ) -> Result<(leyline_bssl_tokio::SslStream<S>, TlsMeta), TlsError>
+    where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    {
         let mut config = self.ssl_connector.configure()?;
 
         // ALPS — only when negotiating h2 (not for h1-only WebSocket).
@@ -361,9 +406,9 @@ impl FingerprintConnector {
             }
         }
 
-        // TLS handshake. leyline-bssl-tokio::SslStream::connect requires Pin<&mut Self>;
-        // TcpStream is Unpin so we can pin on the stack.
-        let mut stream = leyline_bssl_tokio::SslStream::new(ssl, tcp_stream)
+        // TLS handshake. leyline-bssl-tokio::SslStream::connect requires
+        // Pin<&mut Self>; `S: Unpin` lets us pin on the stack.
+        let mut stream = leyline_bssl_tokio::SslStream::new(ssl, io)
             .map_err(|e| TlsError::SslConnect(e.to_string()))?;
         std::pin::Pin::new(&mut stream)
             .connect()
@@ -397,16 +442,37 @@ impl FingerprintConnector {
         let tls_version = Some(stream.ssl().version_str().to_string());
         let tls_cipher = stream.ssl().current_cipher().map(|c| c.name().to_string());
 
-        Ok(TlsStream {
-            // Wrap the handshaked BoringSSL stream into the backend arm.
-            // A future backend constructs its own `TlsIo` variant here;
-            // the handshake logic above is unchanged.
-            stream: TlsIo::Boring(stream),
-            alpn,
-            peer_cert_der,
-            tls_version,
-            tls_cipher,
-        })
+        Ok((
+            stream,
+            TlsMeta {
+                alpn,
+                peer_cert_der,
+                tls_version,
+                tls_cipher,
+            },
+        ))
+    }
+}
+
+/// Negotiated TLS metadata captured at handshake, paired with the handshaked
+/// stream so [`FingerprintConnector::handshake_over`] can stay generic over the
+/// byte stream while each caller wraps the stream in its own [`TlsIo`] arm.
+struct TlsMeta {
+    alpn: Option<Vec<u8>>,
+    peer_cert_der: Option<Vec<u8>>,
+    tls_version: Option<String>,
+    tls_cipher: Option<String>,
+}
+
+impl TlsMeta {
+    fn into_tls_stream(self, stream: TlsIo) -> TlsStream {
+        TlsStream {
+            stream,
+            alpn: self.alpn,
+            peer_cert_der: self.peer_cert_der,
+            tls_version: self.tls_version,
+            tls_cipher: self.tls_cipher,
+        }
     }
 }
 

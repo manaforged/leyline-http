@@ -3,6 +3,8 @@
 //! Encodes headers into the wire format that matches what real browsers produce.
 //! Uses indexed representations where possible, Huffman-encodes values when shorter.
 
+use bytes::Bytes;
+
 use super::huffman;
 use super::integer;
 use super::table::{self, DynamicTable};
@@ -33,14 +35,28 @@ impl Encoder {
     /// Encode a header block (list of name-value pairs).
     /// Returns the HPACK-encoded bytes.
     pub fn encode_header_block(&mut self, headers: &[(&str, &str)]) -> Vec<u8> {
-        let mut dst = Vec::new();
+        self.encode_header_block_iter(headers.iter().copied(), headers.len())
+    }
+
+    /// Encode an ordered sequence of header pairs in one pass, without the
+    /// caller first collecting them into a single slice. The request path
+    /// uses this to encode pseudo-headers then regular headers with no
+    /// intermediate `Vec`; `count` presizes the output so the encode does
+    /// not realloc as it grows.
+    pub fn encode_header_block_iter<'a>(
+        &mut self,
+        headers: impl Iterator<Item = (&'a str, &'a str)>,
+        count: usize,
+    ) -> Vec<u8> {
+        // ~32 bytes/header is a generous average for Chrome request headers.
+        let mut dst = Vec::with_capacity(count.saturating_mul(32).max(64));
 
         // Signal any pending table size update (RFC 7541 Section 6.3).
         if let Some(size) = self.pending_size_update.take() {
             integer::encode(size, 5, 0x20, &mut dst);
         }
 
-        for &(name, value) in headers {
+        for (name, value) in headers {
             self.encode_header(name, value, &mut dst);
         }
 
@@ -106,8 +122,8 @@ impl Encoder {
         let mut dyn_name = None;
         for i in 0..self.dynamic.len() {
             if let Some((n, v)) = self.dynamic.get(i) {
-                if n == name {
-                    if v == value {
+                if n.as_ref() == name.as_bytes() {
+                    if v.as_ref() == value.as_bytes() {
                         dyn_exact = Some(dyn_offset + i);
                         break;
                     }
@@ -138,7 +154,8 @@ impl Encoder {
         encode_string(value, dst);
         // Add to dynamic table.
         let name = self.resolve_name(name_index);
-        self.dynamic.insert(name, value.to_string());
+        self.dynamic
+            .insert(name, Bytes::copy_from_slice(value.as_bytes()));
     }
 
     /// Literal header with incremental indexing, new name.
@@ -148,17 +165,20 @@ impl Encoder {
         encode_string(name, dst);
         encode_string(value, dst);
         // Add to dynamic table.
-        self.dynamic.insert(name.to_string(), value.to_string());
+        self.dynamic.insert(
+            Bytes::copy_from_slice(name.as_bytes()),
+            Bytes::copy_from_slice(value.as_bytes()),
+        );
     }
 
-    fn resolve_name(&self, index: usize) -> String {
+    fn resolve_name(&self, index: usize) -> Bytes {
         if index < table::STATIC_TABLE.len() {
-            table::STATIC_TABLE[index].0.to_string()
+            Bytes::from_static(table::STATIC_TABLE[index].0.as_bytes())
         } else {
             let dyn_idx = index - table::STATIC_TABLE.len();
             self.dynamic
                 .get(dyn_idx)
-                .map(|(n, _)| n.to_string())
+                .map(|(n, _)| n.clone())
                 .unwrap_or_default()
         }
     }

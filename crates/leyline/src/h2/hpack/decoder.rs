@@ -2,6 +2,8 @@
 //!
 //! Decodes header blocks from the wire format back into name-value pairs.
 
+use bytes::Bytes;
+
 use super::huffman;
 use super::integer;
 use super::table::{self, DynamicTable};
@@ -16,11 +18,14 @@ pub struct Decoder {
     max_header_list_size: usize,
 }
 
-/// A decoded header.
+/// A decoded header. Both parts are `Bytes`: an indexed header (static or
+/// dynamic table hit) materializes by refcount/`from_static` with no heap
+/// copy; only a literal value allocates. Values are validated UTF-8 at
+/// decode, so `str::from_utf8` on them never fails downstream.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Header {
-    pub name: String,
-    pub value: String,
+    pub name: Bytes,
+    pub value: Bytes,
 }
 
 impl Decoder {
@@ -66,10 +71,7 @@ impl Decoder {
 
                 let (name, value) = table::lookup(index, &self.dynamic)
                     .ok_or_else(|| format!("invalid index {index}"))?;
-                headers.push(Header {
-                    name: name.to_string(),
-                    value: value.to_string(),
-                });
+                headers.push(Header { name, value });
             } else if byte & 0xC0 == 0x40 {
                 // Literal with incremental indexing (Section 6.2.1): 01xxxxxx
                 let (header, consumed) = self.decode_literal(src, pos, 6, 0x3F, true)?;
@@ -140,10 +142,10 @@ impl Decoder {
             offset += consumed;
             s
         } else {
-            // Indexed name.
+            // Indexed name (static or dynamic table) — refcount/from_static.
             let (n, _) = table::lookup(name_index, &self.dynamic)
                 .ok_or_else(|| format!("invalid name index {name_index}"))?;
-            n.to_string()
+            n
         };
 
         // Decode value (always literal).
@@ -165,7 +167,11 @@ impl Default for Decoder {
 }
 
 /// Decode a string literal (RFC 7541 Section 5.2).
-fn decode_string(src: &[u8]) -> Result<(String, usize), String> {
+///
+/// Returns the bytes validated as UTF-8 (so callers can `str::from_utf8`
+/// infallibly) without allocating a `String`: a raw literal is copied into
+/// `Bytes`, a Huffman literal decodes into a `Vec` wrapped as `Bytes`.
+fn decode_string(src: &[u8]) -> Result<(Bytes, usize), String> {
     if src.is_empty() {
         return Err("unexpected end of string".into());
     }
@@ -183,9 +189,11 @@ fn decode_string(src: &[u8]) -> Result<(String, usize), String> {
 
     let value = if huffman_encoded {
         let decoded = huffman::decode(raw).map_err(|e| e.to_string())?;
-        String::from_utf8(decoded).map_err(|e| e.to_string())?
+        std::str::from_utf8(&decoded).map_err(|e| e.to_string())?;
+        Bytes::from(decoded)
     } else {
-        String::from_utf8(raw.to_vec()).map_err(|e| e.to_string())?
+        std::str::from_utf8(raw).map_err(|e| e.to_string())?;
+        Bytes::copy_from_slice(raw)
     };
 
     Ok((value, end))

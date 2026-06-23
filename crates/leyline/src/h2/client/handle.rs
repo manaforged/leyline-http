@@ -41,7 +41,7 @@ impl H2Client {
     pub async fn send_request(
         &self,
         pseudo: PseudoHeaders,
-        headers: Vec<(String, String)>,
+        headers: Vec<crate::h2::connection::HeaderPair>,
         body: Option<Bytes>,
     ) -> Result<H2Response, H2Error> {
         self.send_request_with_trailers(pseudo, headers, body, Vec::new())
@@ -56,7 +56,7 @@ impl H2Client {
     pub async fn send_request_with_trailers(
         &self,
         pseudo: PseudoHeaders,
-        headers: Vec<(String, String)>,
+        headers: Vec<crate::h2::connection::HeaderPair>,
         body: Option<Bytes>,
         trailers: Vec<(String, String)>,
     ) -> Result<H2Response, H2Error> {
@@ -104,7 +104,7 @@ impl H2Client {
     pub async fn send_request_ex(
         &self,
         pseudo: PseudoHeaders,
-        headers: Vec<(String, String)>,
+        headers: Vec<crate::h2::connection::HeaderPair>,
         body: RequestBody,
         stream_response: bool,
     ) -> Result<H2ResponseEx, H2Error> {
@@ -204,7 +204,7 @@ impl H2Client {
     pub async fn open_extended_connect(
         &self,
         pseudo: PseudoHeaders,
-        headers: Vec<(String, String)>,
+        headers: Vec<crate::h2::connection::HeaderPair>,
     ) -> Result<H2ConnectStream, H2Error> {
         if !self.peer_enables_connect_protocol() {
             return Err(H2Error::Connection {
@@ -258,7 +258,11 @@ impl H2Client {
         Ok(H2ConnectStream {
             shutdown_state: ShutdownState::Open,
             status: resp.status,
-            response_headers: resp.headers,
+            response_headers: resp
+                .headers
+                .into_iter()
+                .map(|(k, v)| (k.as_str().to_owned(), v.as_str().to_owned()))
+                .collect(),
             write_tx: Some(PollSender::new(write_tx)),
             read_rx: body_rx,
             read_leftover: Bytes::new(),

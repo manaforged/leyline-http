@@ -7,7 +7,7 @@
 use std::io::Read;
 
 use crate::core::error::{Error, Result};
-use crate::core::CompressionConfig;
+use crate::core::{CompressionConfig, HeaderStr};
 
 pub(super) fn decompress_body(
     body: Vec<u8>,
@@ -35,7 +35,7 @@ pub(super) fn decompress_body(
 }
 
 /// Response headers as `(name, value)` pairs in wire order.
-type HeaderPairs = Vec<(String, String)>;
+type HeaderPairs = Vec<(HeaderStr, HeaderStr)>;
 
 /// Decompress `body` per its `content-encoding` header and, when bytes were
 /// actually decoded, drop the now-stale `content-encoding`/`content-length`
@@ -272,9 +272,18 @@ mod tests {
         let gzip_body = gzip.finish().unwrap();
 
         let headers = vec![
-            ("Content-Encoding".to_string(), "gzip".to_string()),
-            ("Content-Length".to_string(), gzip_body.len().to_string()),
-            ("Content-Type".to_string(), "text/plain".to_string()),
+            (
+                HeaderStr::from_static("Content-Encoding"),
+                HeaderStr::from_static("gzip"),
+            ),
+            (
+                HeaderStr::from_static("Content-Length"),
+                HeaderStr::from(gzip_body.len().to_string()),
+            ),
+            (
+                HeaderStr::from_static("Content-Type"),
+                HeaderStr::from_static("text/plain"),
+            ),
         ];
         let (decoded, headers) =
             decompress_and_strip(gzip_body, headers, &CompressionConfig::default()).unwrap();
@@ -296,8 +305,14 @@ mod tests {
     #[test]
     fn decompress_and_strip_preserves_headers_when_not_decoded() {
         let headers = vec![
-            ("Content-Length".to_string(), "5".to_string()),
-            ("Content-Type".to_string(), "text/plain".to_string()),
+            (
+                HeaderStr::from_static("Content-Length"),
+                HeaderStr::from_static("5"),
+            ),
+            (
+                HeaderStr::from_static("Content-Type"),
+                HeaderStr::from_static("text/plain"),
+            ),
         ];
         let (body, out) = decompress_and_strip(
             b"plain".to_vec(),

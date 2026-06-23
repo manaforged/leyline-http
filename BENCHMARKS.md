@@ -1,48 +1,59 @@
 # Leyline — measured performance
 
-Generated: 2026-06-21
-Host: 8-core x86_64 desktop, Linux under WSL2
-(kernel `6.6.87.2-microsoft-standard-WSL2`)
-Toolchain: `rustc 1.89.0 (29483883e 2025-08-04)`
+Generated: 2026-06-22
+Host: 8-core x86_64 desktop, Windows 11
+(10.0.26200), native (no WSL2)
+Toolchain: `rustc 1.95.0 (59807616e 2026-04-14)`
 Criterion version: 0.5
 
-Numbers below come from `cargo bench -p leyline-benches` at commit `5018d4b`. Reproduce:
+Numbers below come from `cargo bench -p leyline-benches` at commit `2802f6c`. Reproduce:
 
     cd benches
     cargo bench -p leyline-benches
+
+Same physical CPU as earlier revisions of this file, now measured on native
+Windows rather than WSL2. Two consequences for compute-bound rows: allocation-
+heavy benches (HPACK encode, JA3/JA4 audit) run slower than the prior Linux
+numbers because the Windows system allocator is costlier for small allocations
+than glibc; conversely the duplex-pipe IO benches and `Session::build` run far
+faster without WSL2's per-syscall overhead. The controlled before/after
+sections below git-toggle each change on this one host, so they isolate the
+real per-change deltas independent of these cross-host shifts.
 
 ## Headline numbers
 
 | Metric | Value | Bench |
 |---|---|---|
-| HPACK encode (16 Chrome-147 headers) | 1.54 µs (≈406 MiB/s) | `hpack::encode_chrome_headers` |
-| HPACK decode (same header block) | 7.13 µs (≈64 MiB/s) | `hpack::decode_chrome_headers` |
-| HPACK roundtrip (encode + decode) | 9.26 µs | `hpack::roundtrip_chrome_headers` |
-| JA3 compute | 1.29 µs | `audit::compute_ja3` |
-| JA4 compute | 2.38 µs | `audit::compute_ja4` |
-| JA4T compute | 126.6 ns | `audit::compute_ja4t` |
-| JA4H compute (16 Chrome-147 nav headers) | 733.4 ns | `audit::compute_ja4h` |
-| Chrome extension id derivation | 51.6 ns | `audit::chrome_extension_ids` |
-| Frame parse (mixed 6-frame batch, 1082 B) | 163.7 ns (≈6.51 GiB/s) | `frames::parse_mix` |
-| Frame header parse (9 B, no payload) | 1.25 ns | `frames::parse_header` |
-| Profile lookup (Chrome147) | 27.6 ns | `profile::lookup_chrome147` |
-| Profile lookup (all 16 browser variants) | 451.1 ns | `profile::lookup_all_browsers` |
-| Session build (Chrome147) | 9.61 ms | `session::build_chrome147` |
-| Session build (`Session::chrome`) | 9.59 ms | `session::chrome` |
-| `Pool::new()` | 20.9 ns | `pool::new` |
-| `Pool::with_limits(...)` | 27.0 ns | `pool::with_limits` |
-| Pool checkout-hit equivalent (`H2Client::clone`) | 35.9 ns | `pool::checkout_hit_equivalent` |
-| `H2Client::clone` (standalone) | 36.7 ns | `multiplex::handle_clone` |
-| Multiplex 1 000 sequential requests (mock peer) | 97.22 ms total / **10 286 req/s** | `multiplex::serial_1k_requests` |
-| Multiplex 100 concurrent inflight (mock peer) | 437.6 µs total / **228 520 req/s** | `multiplex::concurrent_100_inflight` |
-| Allocations per `send_request` (warm, serial) | **33 allocations** / 95.7 µs | `allocs::per_request` |
-| Peak live-byte delta, 100 concurrent streams | **≈222 KiB (0.21 MiB)** | `allocs::concurrent_footprint` |
-| Allocations per `Session::builder().build()?` | **1 412 allocations** | `allocs::session_build` |
-| HPACK encode (via `hpack_vs_h2`) | 1.88 µs (≈334 MiB/s) | `hpack_vs_h2::leyline_encode` |
-| HPACK decode (via `hpack_vs_h2`) | 7.22 µs (≈63 MiB/s) | `hpack_vs_h2::leyline_decode` |
+| HPACK encode (16 Chrome-147 headers) | 2.21 µs (≈219 MiB/s) | `hpack::encode_chrome_headers` |
+| HPACK decode (same header block) | 5.06 µs (≈96 MiB/s) | `hpack::decode_chrome_headers` |
+| HPACK roundtrip (encode + decode) | 7.18 µs | `hpack::roundtrip_chrome_headers` |
+| JA3 compute | 2.17 µs | `audit::compute_ja3` |
+| JA4 compute | 4.18 µs | `audit::compute_ja4` |
+| JA4T compute | 146.3 ns | `audit::compute_ja4t` |
+| JA4H compute (16 Chrome-147 nav headers) | 881.7 ns | `audit::compute_ja4h` |
+| Chrome extension id derivation | 96.4 ns | `audit::chrome_extension_ids` |
+| Frame parse (mixed 6-frame batch, 1082 B) | 153.4 ns (≈6.73 GiB/s) | `frames::parse_mix` |
+| Frame header parse (9 B, no payload) | 1.01 ns | `frames::parse_header` |
+| Profile lookup (Chrome147) | 41.3 ns | `profile::lookup_chrome147` |
+| Profile lookup (all 16 browser variants) | 717.2 ns | `profile::lookup_all_browsers` |
+| Session build (Chrome147) | 53.6 µs | `session::build_chrome147` |
+| Session build (`Session::chrome`) | 46.3 µs | `session::chrome` |
+| `Pool::new()` | 77.5 ns | `pool::new` |
+| `Pool::with_limits(...)` | 89.5 ns | `pool::with_limits` |
+| Pool checkout-hit equivalent (`H2Client::clone`) | 34.2 ns | `pool::checkout_hit_equivalent` |
+| Pool warm checkout at occupancy 1 / 2048 | 169.9 ns / 172.8 ns (flat — O(1)) | `pool::checkout_at_occupancy` |
+| `H2Client::clone` (standalone) | 32.5 ns | `multiplex::handle_clone` |
+| Multiplex 1 000 sequential requests (mock peer) | 16.09 ms total / **62 150 req/s** | `multiplex::serial_1k_requests` |
+| Multiplex 100 concurrent inflight (mock peer) | 249.8 µs total / **400 400 req/s** | `multiplex::concurrent_100_inflight` |
+| Allocations per `send_request` (warm), tiny / Chrome-sized response | **20 / 61 allocations** | `allocs::per_request_{tiny,realistic}` |
+| Peak live-byte delta, 100 concurrent streams | **≈226 KiB (0.22 MiB)** | `allocs::concurrent_footprint` |
+| Allocations per `Session::builder().build()?` | **203 allocations** | `allocs::session_build` |
+| Response-header materialize (8-header response), clone / move | **29 / 29 allocations** | `allocs::response_headers_*` |
+| HPACK encode (via `hpack_vs_h2`) | 2.02 µs (≈239 MiB/s) | `hpack_vs_h2::leyline_encode` |
+| HPACK decode (via `hpack_vs_h2`) | 6.69 µs (≈68 MiB/s) | `hpack_vs_h2::leyline_decode` |
 | Peer comparison vs `h2` crate | deferred — h2 crate does not expose HPACK primitives publicly | `hpack_vs_h2::h2_peer_status` |
 
-The multiplex pair is the headline proof of real multiplexing: 100 concurrent requests complete in ~438 µs where 100 sequential requests would take ~9.7 ms; concurrent throughput is **~22× serial throughput**, confirming the driver multiplexes streams rather than serialising them.
+The multiplex pair is the headline proof of real multiplexing: 100 concurrent requests complete in ~250 µs where 100 sequential requests would take ~1.6 ms; concurrent throughput is **~6.4× serial throughput**, confirming the driver multiplexes streams rather than serialising them. (The ratio is smaller than on the prior WSL2 host because native serial IO is much faster — WSL2's per-wakeup overhead inflated the serial baseline; it does not mean multiplexing helps less.)
 
 ## Bare HTTP/1.1 vs `reqwest`
 
@@ -56,16 +67,20 @@ build + H1 codec + pool checkout + response parse).
 
 | Scenario | Leyline | reqwest | Ratio |
 |---|---|---|---|
-| 1 000 sequential GETs, one reused client | 125.84 ms (**7 947 req/s**) | 162.84 ms (**6 141 req/s**) | Leyline 1.29× |
-| 100 concurrent GETs | 591.84 µs (**168 960 req/s**) | 668.41 µs (**149 610 req/s**) | Leyline 1.13× |
+| 1 000 sequential GETs, one reused client | 46.73 ms (**21 400 req/s**) | 58.78 ms (**17 010 req/s**) | Leyline 1.26× |
+| 100 concurrent GETs | 1.27 ms (**78 700 req/s**) | 1.11 ms (**90 100 req/s**) | reqwest 1.15× |
 
-Both clients ran in the same process, on the same host, in the same run, so the
-**ratio** is host-independent even though the absolute numbers are not. The
-serial number is the per-request stack cost (full connection reuse, no
+Both clients ran in the same process, on the same host, in the same run. The
+**serial** result — the per-request client-stack cost — favours Leyline by
+1.26×, consistent with the 1.29× measured on the prior Linux host. The
+**concurrent** result is close and host-sensitive: on this Windows host reqwest
+edges ahead by 1.15× where Leyline led on Linux, because the two pools fan out
+across real loopback TCP sockets whose contention behaves differently per OS.
+The serial number is the per-request stack cost (full connection reuse, no
 multiplexing — H1 is one request per connection); the concurrent number fans out
 across each client's connection pool. This is a loopback measurement with no
-network latency and no TLS handshake: it isolates the code each client runs per
-request. Over a real network, round-trip time dominates and the two converge.
+network latency and no TLS handshake. Over a real network, round-trip time
+dominates and the two converge.
 
 ## HTTP/2 vs the impersonation libraries
 
@@ -88,54 +103,168 @@ All four negotiate HTTP/2 and emit a Chrome-class JA4 with an **identical cipher
 hash** (`8daaf6152771`) — the same Chrome cipher list, i.e. equal work. They
 differ only in the extension component because each library tracks a different
 newest Chrome (no Chrome major is supported by all four). Three metrics, each the
-median of repeated runs on the 8-core desktop / WSL2 host:
+median of 3 interleaved runs on the 8-core desktop under WSL2, with the leyline and
+wreq clients rebuilt from source at commit `e80fa9d`:
 
 | Client | warm (seq latency) | **concurrent throughput** | cold (handshake) |
 |---|---|---|---|
-| leyline | 2 690 req/s | **40 400 req/s** | 672 req/s |
-| wreq | 2 700 req/s | **42 200 req/s** | 781 req/s |
-| bogdanfinn/tls-client | 3 330 req/s | 24 100 req/s | 755 req/s |
-| azuretls | 3 260 req/s | 16 250 req/s | 741 req/s |
+| leyline | 2 934 req/s | **46 724 req/s** | 746 req/s |
+| wreq | 2 950 req/s | **42 880 req/s** | 861 req/s |
+| bogdanfinn/tls-client | 3 537 req/s | 23 776 req/s | 756 req/s |
+| azuretls | 3 462 req/s | 17 578 req/s | 809 req/s |
 
 - **Concurrent throughput** — 64 requests in flight over one multiplexed H2
   connection — is the metric that compares these clients at the scale they are
   actually used. The two Rust BoringSSL clients lead: leyline sustains
-  **~40 400 req/s, ~1.7× bogdanfinn/tls-client and ~2.5× azuretls**, and lands
-  within ~4% of wreq (its closest peer, same BoringSSL lineage; wreq is marginally
-  ahead). The two Go utls clients trail.
+  **~46 700 req/s, ~2.0× bogdanfinn/tls-client and ~2.7× azuretls**, neck-and-neck
+  with wreq (its closest peer, same BoringSSL lineage). leyline and wreq are a
+  statistical tie at the top: leyline takes the median this measurement (46.7k vs
+  42.9k) and is faster in 2 of 3 interleaved rounds, but their ranges overlap
+  (leyline 41.7–49.1k, wreq 42.8–48.0k), so the per-round lead trades inside the
+  variance. The equivalence gate confirms leyline and wreq returned a
+  byte-identical body (FNV-1a `5df04559e15e1bf4`, status 200), so the throughput
+  is a comparison of equal work. Absolute throughput is host- and
+  kernel-sensitive — the portable result is the **relative** standing (the two
+  BoringSSL clients tied at the top, both clear of the Go utls clients), not the
+  raw req/s. For a drift-cancelled, deployment-representative number the **paired
+  harness** (`benches/comparison/paired.sh`) runs interleaved ABAB rounds with a
+  paired t-test + 95% CI and the same equivalence gate against a real remote
+  target through a real proxy (`TARGET_URL` + `PROXY`).
 - **warm** is single-request-at-a-time latency. All four cluster in a narrow band
   and the Go clients edge ahead, but this number is **server-bound** — against its
-  own mock peer leyline does a request in ~97 µs vs ~370 µs here, so most of the
+  own mock peer leyline does a request in ~97 µs vs ~340 µs here, so most of the
   warm time is the shared Go server + socket + TLS, not the client. It is reported
   for completeness, not as a client ranking; sequential is the wrong regime for
   HTTP/2, whose entire purpose is multiplexing.
 - **cold** builds a fresh client and a new TLS handshake per request. leyline is a
-  touch behind: a fresh `Session` rebuilds its connector each time. With the
-  reuse-a-client norm this never shows; it matters only if you discard clients.
+  touch behind. Against real public servers the per-build cost is cut sharply by
+  the cached system-trust store (see the controlled A/B section above), but this
+  harness hits a local self-signed server with non-system trust, so that path is
+  not exercised here and the TLS handshake itself dominates. With the
+  reuse-a-client norm cold never shows; it matters only if you discard clients.
 
 Combined with the reqwest result: leyline tracks wreq on impersonated H2
-throughput (within ~4%), beats the Go utls clients by 1.7–2.5×, and beats reqwest
-on plain HTTP — one library that stays in the leading group at both jobs, so a
-bare-HTTP path and an impersonation path don't need two different clients.
+throughput (statistical tie), beats the Go utls clients by 2.0–2.7×, and leads
+reqwest on plain-HTTP serial — one library in the leading group at both jobs.
+leyline's allocation and HPACK optimizations target specific per-request costs;
+they are proven in the controlled A/B and allocation sections above and do not
+visibly move this concurrent-loopback comparison, which is bottlenecked on the
+shared TLS / socket / scheduler path the four clients exercise alike — the
+deterministic alloc counts, not this number, are their receipt.
 
 Caveats: loopback only (no network RTT, no real-world TLS endpoints); each library
 impersonates its own newest Chrome, so the JA4s are Chrome-class but not identical;
 warm/cold are sequential and warm is server-bound as noted. Reproduce with
 [`benches/comparison/run.sh`](benches/comparison/run.sh).
 
+## Connection-pool checkout scaling (controlled A/B)
+
+`pool::checkout_at_occupancy/{1,64,512,2048}` drives `checkout_handle`'s exact
+per-request body — `make_key` → `evict_idle` → `checkout_h2` — against a pool
+pre-filled with N live entries (one mock H2 driver, handle cloned into every
+entry, so each reports live and the idle sweep keeps them all). `evict_idle`
+runs on every checkout and gates its O(entries) idle sweep behind a 250 ms reap
+deadline, so warm checkout is **O(1) in pool occupancy**:
+
+| Pool occupancy | Throttled (default) | Sweep-every-checkout (control) | Cost removed |
+|---|---|---|---|
+| 1 | 165.7 ns | 184.8 ns | −5.9% |
+| 64 | 161.3 ns | 405.4 ns | −60% (2.5×) |
+| 512 | 160.9 ns | 2 089 ns | −92.5% (13×) |
+| 2 048 | 162.3 ns | 8 070 ns | −98.0% (50×) |
+
+The control column disables the reap deadline so `evict_idle` scans on every
+checkout; the gap is the per-request scan cost the throttle elides. At the
+2048-entry LRU default — the warm-proxy fan-out the cap is sized for
+([`pool.rs`](crates/leyline/src/pool/pool.rs)) — checkout holds flat at ~162 ns
+(≈6.1 M checkouts/s) instead of climbing to ~8 µs.
+
+Controlled A/B: both columns are measured back-to-back in one session via
+`--save-baseline`, toggling only the throttle. The `pool::new` (≈53 ns),
+`pool::with_limits` (≈53 ns), and `checkout_hit_equivalent` (≈32 ns) controls —
+none of which touch the sweep — stay within ±3% across both runs, so the deltas
+are attributable to the throttle, not host drift. Absolute ns here are from the
+same native Windows host as the headline table; the **ratio** is host-independent
+regardless.
+
+## HPACK Huffman decode fast table (controlled A/B)
+
+The HPACK Huffman decoder resolves codes of length 5..=8 — the common ASCII
+case in URLs, tokens, and header text — through an 8-bit fast table (one index
+per symbol), falling back to a per-length binary search only for the rare long
+codes. Decode runs on every inbound response and carries no fingerprint surface
+(leyline emits encoded headers, never decoded ones), so the only questions are
+speed and byte-exact output.
+
+| Bench (16 Chrome-147 headers) | Fast table | Per-length search (control) | Change |
+|---|---|---|---|
+| `hpack::decode_chrome_headers` | 5.18 µs | 7.45 µs | **−30.1%** |
+| `hpack::roundtrip_chrome_headers` | 7.34 µs | 9.80 µs | −24.7% |
+| `hpack::encode_chrome_headers` (control) | 2.25 µs | 2.22 µs | +1.3% (within noise) |
+
+Controlled A/B: both sides measured back-to-back via `--save-baseline` with the
+decoder git-toggled. `encode` — which the decode change does not touch — holds
+within noise across both runs, so the decode delta is attributable to the fast
+table, not host drift. Output is byte-identical, proven by encode→decode
+roundtrip over all 256 bytes, all 65 536 byte pairs, control chars (30-bit
+codes), and realistic header strings. Absolute µs are from the same native
+Windows host as the headline table; the ratio is host-independent.
+
+## Response-header materialization allocations
+
+The HPACK dynamic/static table stores `Bytes`, so an indexed (table-hit)
+response header materializes by a refcount clone (dynamic) or `Bytes::from_static`
+(static) with no heap copy; only a literal value allocates. Response headers
+flow to `Response::headers()` as `HeaderStr` (a `Bytes`-backed, `Deref<str>`
+type), so the per-header `String` allocation is gone end-to-end. Counts are
+exact and host-independent.
+
+| Materializing an 8-header response (fresh decoder) | Allocations |
+|---|---|
+| `allocs::response_headers_clone` | 29 |
+| `allocs::response_headers_move` | 29 |
+
+Clone and move now cost the same — a `Bytes` clone is an atomic refcount bump,
+not a buffer copy — so the old clone-vs-move gap (57 vs 43) collapses. On a
+**warm** connection the win is larger: repeated response headers become
+dynamic-table hits, dropping `per_request_realistic` (12 headers + 2 KiB body)
+from 101 to **61 allocations** — measured against a persistent driver decoder
+(the Bytes decoder plus fusing the request encode into one presized pass).
+
+## Session build: cached system trust store (controlled A/B, Windows)
+
+`Session::build` loads the OS trust roots into the connector. On Windows that
+enumerates the system ROOT store via Win32 and DER-parses every cert — a
+per-build cost dominated by the store walk, not allocation. Sharing one
+pre-parsed, refcounted root store across builds (pure system trust, no additive
+roots) collapses it.
+
+| `Session::builder().browser(Chrome147).build()` | Cached | Per-build load (control) |
+|---|---|---|
+| `session::build_chrome147` (time) | 49 µs | 3.09 ms |
+| `allocs::session_build` (count) | 203 | 279 |
+
+Time drops ~63×; the gap is the Win32 ROOT-store enumeration the cache elides.
+Controlled A/B with the cache git-toggled, same session. The shared store holds
+only public CA roots (no per-session state) and trust roots are never on the
+wire, so JA4 is unchanged — the live 16-profile JA4 + Akamai matrix passes with
+the cache active. Absolute numbers are from a Windows 11 native host.
+
 ## Host sensitivity
 
-These numbers are from an 8-core desktop under WSL2. Two classes of bench scale
-differently with the host:
+These numbers are from an 8-core desktop on native Windows. Two classes of bench
+scale differently with the host:
 
-- **Compute-bound** (HPACK, JA3/JA4 audit math, frame parsing, `Session::build`)
-  scale with single-thread CPU performance and are unaffected by virtualization.
-- **Async-scheduler / IO-bound** (`multiplex::serial_1k_requests`,
-  `allocs::per_request` wall-time) carry WSL2's per-wakeup overhead on the
-  `tokio::io::duplex` round-trips; on bare metal the serial multiplex throughput
-  is materially higher. The allocation **counts** these benches report (33 per
-  request, 1 412 per session build) are host-independent and are the figures to
-  track for regressions — wall-time is not comparable across hosts.
+- **Allocation-bound** (HPACK encode, JA3/JA4 audit math — these build strings)
+  run somewhat slower than the same CPU under Linux because the Windows system
+  allocator is costlier for small allocations. Pure-compute benches (frame
+  parsing, `H2Client::clone`) are unaffected.
+- **IO-bound** (`multiplex::serial_1k_requests`, `concurrent_100_inflight`) run
+  materially faster than under WSL2, which carried per-wakeup overhead on the
+  `tokio::io::duplex` round-trips. The allocation **counts** these benches
+  report (33 per request, 203 per session build) are host-independent and are
+  the figures to track for regressions — wall-time is not comparable across
+  hosts.
 
 ## Scope and caveats
 
@@ -144,7 +273,7 @@ differently with the host:
 - HPACK figures are for a realistic Chrome-147 navigation request header set (16 headers, ≈508 B raw). Larger or smaller header blocks scale roughly linearly.
 - Peer comparison against the `h2` crate's HPACK is **deferred** — see `benches/benches/hpack_vs_h2.rs`. The `h2` crate (v0.4) keeps its HPACK module private, so a real peer bench would require either forking `h2` or running the full `h2::client::handshake` (which measures far more than HPACK).
 - The `reqwest` comparison is plaintext HTTP/1.1 only. It does not compare TLS handshake, HTTP/2, or fingerprint control — leyline's reason to exist — because reqwest does not expose those as a like-for-like surface. It answers one question: bare HTTP request overhead, client stack vs client stack.
-- `allocs::session_build` records 6 497 allocations on iteration 1 (`LazyLock` profile-registry materialisation) and drops to a stable 1 412 allocations on every subsequent iteration. The headline value is the steady-state number.
+- `allocs::session_build` records 5 364 allocations on iteration 1 (`LazyLock` profile-registry materialisation plus the one-time system-trust-store cache population) and drops to a stable 203 allocations on every subsequent iteration. The headline value is the steady-state number.
 - `allocs::concurrent_footprint` reports the **delta in live bytes** from just-before-fanout to peak during 100 concurrent streams; it excludes the fixed cost of the connection itself. Absolute RSS is not reported — use `heaptrack` or `dhat` if you need that.
 
 ## Methodology
@@ -177,5 +306,5 @@ To add a new bench:
 | `benches/multiplex.rs` | `handle_clone`, `serial_1k_requests`, `concurrent_100_inflight` |
 | `benches/hpack_vs_h2.rs` | `leyline_encode`, `leyline_decode`, `h2_peer_status` (deferred) |
 | `benches/http_vs_reqwest.rs` | `leyline_serial_1k`, `reqwest_serial_1k`, `leyline_concurrent_100`, `reqwest_concurrent_100` |
-| `benches/allocs.rs` | `per_request`, `concurrent_footprint`, `session_build` |
-| `benches/pool.rs` | `new`, `with_limits`, `checkout_hit_equivalent` |
+| `benches/allocs.rs` | `per_request_tiny`, `per_request_realistic`, `concurrent_footprint`, `session_build`, `response_headers_clone`, `response_headers_move` |
+| `benches/pool.rs` | `new`, `with_limits`, `checkout_hit_equivalent`, `checkout_at_occupancy/{1,64,512,2048}` |

@@ -79,7 +79,7 @@ pub(crate) enum DriverRequestBody {
 pub(crate) enum DriverCommand {
     SendRequest {
         pseudo: PseudoHeaders,
-        headers: Vec<(String, String)>,
+        headers: Vec<crate::h2::connection::HeaderPair>,
         body: Option<Bytes>,
         /// Empty = no trailers.
         trailers: Vec<(String, String)>,
@@ -87,7 +87,7 @@ pub(crate) enum DriverCommand {
     },
     SendRequestEx {
         pseudo: PseudoHeaders,
-        headers: Vec<(String, String)>,
+        headers: Vec<crate::h2::connection::HeaderPair>,
         body: DriverRequestBody,
         stream_response: bool,
         response_tx: oneshot::Sender<Result<H2ResponseEx, H2Error>>,
@@ -104,7 +104,7 @@ pub(crate) enum DriverCommand {
     /// flow in both directions for the lifetime of the stream.
     OpenConnect {
         pseudo: PseudoHeaders,
-        headers: Vec<(String, String)>,
+        headers: Vec<crate::h2::connection::HeaderPair>,
         /// Outbound (user-side) data: a relay task forwards chunks
         /// read from here into the driver's internal body-chunk
         /// channel, which drives DATA-frame emission.

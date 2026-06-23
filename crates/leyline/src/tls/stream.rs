@@ -28,6 +28,10 @@ use tokio::net::TcpStream;
 pub(crate) enum TlsIo {
     /// BoringSSL over TCP, via `leyline-bssl-tokio`.
     Boring(leyline_bssl_tokio::SslStream<TcpStream>),
+    /// Nested TLS: the inner handshake (to the origin) runs over an outer TLS
+    /// stream (to an `https://` CONNECT proxy). Boxed to break the recursive
+    /// type (`SslStream<TlsIo>` would otherwise be infinitely sized).
+    Nested(Box<leyline_bssl_tokio::SslStream<TlsIo>>),
     // future: an in-house `leyline-tls` arm slots in the same way.
 }
 
@@ -44,6 +48,7 @@ impl AsyncRead for TlsIo {
     ) -> Poll<io::Result<()>> {
         match self.get_mut() {
             TlsIo::Boring(s) => Pin::new(s).poll_read(cx, buf),
+            TlsIo::Nested(s) => Pin::new(s.as_mut()).poll_read(cx, buf),
         }
     }
 }
@@ -57,6 +62,7 @@ impl AsyncWrite for TlsIo {
     ) -> Poll<io::Result<usize>> {
         match self.get_mut() {
             TlsIo::Boring(s) => Pin::new(s).poll_write(cx, buf),
+            TlsIo::Nested(s) => Pin::new(s.as_mut()).poll_write(cx, buf),
         }
     }
 
@@ -64,6 +70,7 @@ impl AsyncWrite for TlsIo {
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         match self.get_mut() {
             TlsIo::Boring(s) => Pin::new(s).poll_flush(cx),
+            TlsIo::Nested(s) => Pin::new(s.as_mut()).poll_flush(cx),
         }
     }
 
@@ -71,6 +78,7 @@ impl AsyncWrite for TlsIo {
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         match self.get_mut() {
             TlsIo::Boring(s) => Pin::new(s).poll_shutdown(cx),
+            TlsIo::Nested(s) => Pin::new(s.as_mut()).poll_shutdown(cx),
         }
     }
 

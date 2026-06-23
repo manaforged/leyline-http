@@ -338,6 +338,29 @@ impl Jar {
         removed
     }
 
+    /// Remove cookies named `name` whose domain is `host` itself or a parent
+    /// suffix of it (e.g. removing for `store.example.com` also clears a stale
+    /// entry mis-hosted on `example.com`), while preserving same-named cookies
+    /// on sibling hosts like `www.example.com`. Returns the number removed.
+    ///
+    /// This is the host-scoped counterpart to [`Jar::remove_all_named`]: use it
+    /// to refresh a host-bound cookie (e.g. `session`) on one host without
+    /// evicting an independent sibling host's copy.
+    pub fn remove_named_for_host(&self, host: &str, name: &str) -> usize {
+        let mut jar = lock(&self.inner);
+        let host = host.to_lowercase();
+        let mut removed = 0;
+        for (domain, entries) in jar.cookies.iter_mut() {
+            if host == *domain || host.ends_with(&format!(".{domain}")) {
+                let before = entries.len();
+                entries.retain(|c| c.name != name);
+                removed += before - entries.len();
+            }
+        }
+        jar.total -= removed;
+        removed
+    }
+
     /// Snapshot every cookie in the jar, sorted by domain then name.
     /// Includes expired cookies — filter with `Cookie::is_expired` if needed.
     /// Useful for debug logs, diffing across runs, and structured inspection.
@@ -853,6 +876,36 @@ mod tests {
         assert_eq!(jar.remove_all_named("k"), 2);
         assert_eq!(jar.len(), 1);
         assert!(jar.contains_named("other"));
+    }
+
+    #[test]
+    fn remove_named_for_host_spares_siblings() {
+        let jar = Jar::new();
+        jar.set_cookie("https://store.example.com", "session", "store");
+        jar.set_cookie("https://www.example.com", "session", "www");
+        jar.set_cookie("https://example.com", "session", "apex");
+        jar.set_cookie("https://store.example.com", "other", "keep");
+
+        // Clears the store host + the parent-domain (apex) mis-host, but leaves
+        // the sibling www zone and unrelated cookies untouched.
+        assert_eq!(
+            jar.remove_named_for_host("store.example.com", "session"),
+            2
+        );
+        let store_view = jar.export_cookies("https://store.example.com");
+        assert!(
+            !store_view.contains("session"),
+            "store clearance removed, got {store_view:?}"
+        );
+        assert!(
+            store_view.contains("other=keep"),
+            "unrelated cookie kept, got {store_view:?}"
+        );
+        assert!(
+            jar.export_cookies("https://www.example.com")
+                .contains("session=www"),
+            "sibling www zone must survive"
+        );
     }
 
     #[test]

@@ -146,7 +146,53 @@ async fn read_exact<S: AsyncRead + Unpin>(s: &mut S, buf: &mut [u8]) -> std::io:
     s.read_exact(buf).await.map(|_| ())
 }
 
-async fn run_mock_server(mut io: DuplexStream) {
+/// Response shape the mock peer replies with. `Tiny` is a near-empty
+/// response (`:status` + 10-byte body); `Realistic` is a Chrome-typical
+/// response (12 headers + 2 KiB body) so the per-request numbers isolate
+/// response materialization on real traffic from the empty case.
+#[derive(Clone, Copy)]
+enum RespProfile {
+    Tiny,
+    Realistic,
+}
+
+/// Chrome-typical response header set (names lowercase, HTTP/2 form).
+const REALISTIC_HEADERS: &[(&str, &str)] = &[
+    (":status", "200"),
+    ("content-type", "text/html; charset=utf-8"),
+    ("date", "Sat, 21 Jun 2026 12:00:00 GMT"),
+    ("server", "cloudflare"),
+    ("cache-control", "private, max-age=0, no-cache"),
+    ("vary", "Accept-Encoding"),
+    ("x-frame-options", "SAMEORIGIN"),
+    ("strict-transport-security", "max-age=31536000"),
+    ("x-content-type-options", "nosniff"),
+    ("referrer-policy", "strict-origin-when-cross-origin"),
+    (
+        "set-cookie",
+        "sid=abc123def456ghi789; Path=/; Secure; HttpOnly; SameSite=Lax",
+    ),
+    ("cf-ray", "8fa1b2c3d4e5f6a7-IAD"),
+    ("alt-svc", "h3=\":443\"; ma=86400"),
+];
+
+const REALISTIC_BODY: &[u8] = &[b'x'; 2048];
+
+fn resp_headers(profile: RespProfile) -> &'static [(&'static str, &'static str)] {
+    match profile {
+        RespProfile::Tiny => &[(":status", "200")],
+        RespProfile::Realistic => REALISTIC_HEADERS,
+    }
+}
+
+fn resp_body(profile: RespProfile) -> &'static [u8] {
+    match profile {
+        RespProfile::Tiny => b"ok-10byte!",
+        RespProfile::Realistic => REALISTIC_BODY,
+    }
+}
+
+async fn run_mock_server(mut io: DuplexStream, profile: RespProfile) {
     let mut preface = [0u8; 24];
     if read_exact(&mut io, &mut preface).await.is_err() {
         return;
@@ -177,6 +223,12 @@ async fn run_mock_server(mut io: DuplexStream) {
     if read_exact(&mut io, &mut hdr_buf).await.is_err() {
         return;
     }
+    // Persistent encoder + static body keep per-request server-side allocs
+    // near-constant so the tiny-vs-realistic delta is client-dominated.
+    let mut enc = hpack::Encoder::new();
+    let headers = resp_headers(profile);
+    let body = resp_body(profile);
+    let mut bo = BytesMut::new();
     loop {
         let mut hb = [0u8; FRAME_HEADER_LEN];
         if read_exact(&mut io, &mut hb).await.is_err() {
@@ -189,9 +241,8 @@ async fn run_mock_server(mut io: DuplexStream) {
         }
         if h.frame_type == FrameType::Headers as u8 {
             let sid = h.stream_id;
-            let mut enc = hpack::Encoder::new();
-            let frag = enc.encode_header_block(&[(":status", "200")]);
-            let mut bo = BytesMut::new();
+            let frag = enc.encode_header_block(headers);
+            bo.clear();
             HeadersFrame {
                 stream_id: sid,
                 end_stream: false,
@@ -207,7 +258,7 @@ async fn run_mock_server(mut io: DuplexStream) {
             DataFrame {
                 stream_id: sid,
                 end_stream: true,
-                data: bytes::Bytes::from_static(b"ok-10byte!"),
+                data: bytes::Bytes::from_static(body),
             }
             .encode(&mut bo);
             if io.write_all(&bo).await.is_err() {
@@ -217,7 +268,13 @@ async fn run_mock_server(mut io: DuplexStream) {
     }
 }
 
-fn req() -> (PseudoHeaders, Vec<(String, String)>) {
+fn req() -> (
+    PseudoHeaders,
+    Vec<(
+        std::borrow::Cow<'static, str>,
+        std::borrow::Cow<'static, str>,
+    )>,
+) {
     (
         PseudoHeaders {
             method: "GET".into(),
@@ -235,12 +292,25 @@ fn req() -> (PseudoHeaders, Vec<(String, String)>) {
 // ---------------------------------------------------------------------------
 
 fn bench_per_request(c: &mut Criterion) {
+    let mut g = c.benchmark_group("allocs");
+    g.sample_size(10);
+    g.measurement_time(Duration::from_secs(5));
+    per_request_profile(&mut g, "per_request_tiny", RespProfile::Tiny);
+    per_request_profile(&mut g, "per_request_realistic", RespProfile::Realistic);
+    g.finish();
+}
+
+fn per_request_profile(
+    g: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
+    label: &str,
+    profile: RespProfile,
+) {
     let rt = Runtime::new().expect("tokio runtime");
 
     // Build the warm connection outside the measurement window.
     let (handle, server_task, _driver) = rt.block_on(async {
         let (cio, sio) = tokio::io::duplex(1024 * 1024);
-        let server = tokio::spawn(run_mock_server(sio));
+        let server = tokio::spawn(run_mock_server(sio, profile));
         let (h, d) = ClientConnection::start(cio, test_config())
             .await
             .expect("handshake");
@@ -251,15 +321,12 @@ fn bench_per_request(c: &mut Criterion) {
     });
 
     const N: u64 = 100;
-    let mut g = c.benchmark_group("allocs");
-    g.sample_size(10);
-    g.measurement_time(Duration::from_secs(5));
-    g.bench_function("per_request", |b| {
+    g.bench_function(label, |b| {
         b.iter_custom(|iters| {
             rt.block_on(async {
                 // Snapshot total alloc count over `iters * N` requests and
                 // divide out. Reports time in ns-per-request; the allocation
-                // count is emitted to stderr once (see end-of-suite print).
+                // count is emitted to stderr once per call.
                 let start_allocs = ALLOCS.load(Ordering::Relaxed);
                 let t0 = std::time::Instant::now();
                 for _ in 0..iters {
@@ -271,19 +338,15 @@ fn bench_per_request(c: &mut Criterion) {
                 }
                 let elapsed = t0.elapsed();
                 let end_allocs = ALLOCS.load(Ordering::Relaxed);
-                let allocs_per_req =
-                    (end_allocs - start_allocs) as f64 / (iters * N) as f64;
-                // Store in a once-cell-style global so the summary at the
-                // end can print it; simpler to just eprintln here per call.
+                let allocs_per_req = (end_allocs - start_allocs) as f64 / (iters * N) as f64;
                 eprintln!(
-                    "[allocs::per_request] iters={iters} total_reqs={} allocs/req={allocs_per_req:.1}",
+                    "[allocs::{label}] iters={iters} total_reqs={} allocs/req={allocs_per_req:.1}",
                     iters * N
                 );
                 elapsed / (N as u32)
             })
         })
     });
-    g.finish();
 
     drop(handle);
     server_task.abort();
@@ -310,7 +373,7 @@ fn bench_concurrent_footprint(c: &mut Criterion) {
                 let mut peaks: Vec<u64> = Vec::with_capacity(iters as usize);
                 for _ in 0..iters {
                     let (cio, sio) = tokio::io::duplex(1024 * 1024);
-                    let server = tokio::spawn(run_mock_server(sio));
+                    let server = tokio::spawn(run_mock_server(sio, RespProfile::Tiny));
                     let (handle, _driver) =
                         ClientConnection::start(cio, test_config()).await.expect("handshake");
 
@@ -377,10 +440,82 @@ fn bench_session_build_allocs(c: &mut Criterion) {
     g.finish();
 }
 
+// ---------------------------------------------------------------------------
+// Bench: allocations to decode + materialize a response header block.
+// ---------------------------------------------------------------------------
+
+// Decode a realistic response header block, then materialize the non-pseudo
+// headers into a `Vec<(String, String)>` — what the H2 driver does per response
+// (recv.rs `on_headers`). `clone` mirrors copying each decoded String into the
+// destination; `move` consumes the decoded headers so their Strings move in.
+// The gap is the per-header allocation the move path eliminates.
+fn bench_response_header_materialize(c: &mut Criterion) {
+    let mut enc = hpack::Encoder::new();
+    let block = enc.encode_header_block(&[
+        (":status", "200"),
+        ("content-type", "text/html; charset=utf-8"),
+        ("date", "Mon, 21 Jun 2026 12:00:00 GMT"),
+        ("server", "nginx"),
+        ("cache-control", "max-age=3600"),
+        ("content-length", "1234"),
+        ("vary", "Accept-Encoding"),
+        ("x-frame-options", "DENY"),
+    ]);
+
+    let mut g = c.benchmark_group("allocs");
+    g.sample_size(10);
+
+    g.bench_function("response_headers_clone", |b| {
+        b.iter_custom(|iters| {
+            let start = ALLOCS.load(Ordering::Relaxed);
+            let t0 = std::time::Instant::now();
+            for _ in 0..iters {
+                let mut dec = hpack::Decoder::new();
+                let decoded = dec.decode_header_block(&block).unwrap();
+                let mut dest: Vec<(bytes::Bytes, bytes::Bytes)> = Vec::new();
+                for h in &decoded {
+                    if h.name.as_ref() != b":status" && !h.name.starts_with(b":") {
+                        dest.push((h.name.clone(), h.value.clone()));
+                    }
+                }
+                black_box((decoded, dest));
+            }
+            let el = t0.elapsed();
+            let per = (ALLOCS.load(Ordering::Relaxed) - start) as f64 / iters as f64;
+            eprintln!("[allocs::response_headers_clone] allocs/response={per:.1}");
+            el
+        })
+    });
+
+    g.bench_function("response_headers_move", |b| {
+        b.iter_custom(|iters| {
+            let start = ALLOCS.load(Ordering::Relaxed);
+            let t0 = std::time::Instant::now();
+            for _ in 0..iters {
+                let mut dec = hpack::Decoder::new();
+                let decoded = dec.decode_header_block(&block).unwrap();
+                let mut dest: Vec<(bytes::Bytes, bytes::Bytes)> = Vec::new();
+                for h in decoded {
+                    if h.name.as_ref() != b":status" && !h.name.starts_with(b":") {
+                        dest.push((h.name, h.value));
+                    }
+                }
+                black_box(dest);
+            }
+            let el = t0.elapsed();
+            let per = (ALLOCS.load(Ordering::Relaxed) - start) as f64 / iters as f64;
+            eprintln!("[allocs::response_headers_move] allocs/response={per:.1}");
+            el
+        })
+    });
+    g.finish();
+}
+
 criterion_group!(
     alloc_benches,
     bench_per_request,
     bench_concurrent_footprint,
-    bench_session_build_allocs
+    bench_session_build_allocs,
+    bench_response_header_materialize
 );
 criterion_main!(alloc_benches);

@@ -162,6 +162,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         let mut sweep_tick = tokio::time::interval(std::time::Duration::from_millis(100));
         sweep_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
+            // Only the periodic tick triggers the O(streams) cancel sweep —
+            // running it after every frame/command/chunk made cleanup
+            // O(event-rate × streams) on the single driver. A dropped caller's
+            // slot is reclaimed within one tick (100 ms), which is the bounded
+            // cadence the sweep was designed for.
+            let mut tick_fired = false;
             tokio::select! {
                 biased;
                 frame = self.reader.next() => {
@@ -195,7 +201,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                     }
                 }
                 _ = sweep_tick.tick() => {
-                    // Fall through to the post-select sweep below.
+                    tick_fired = true;
                 }
             }
 
@@ -210,8 +216,11 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             // lingers, consuming a MAX_CONCURRENT_STREAMS slot and
             // flow-control window until the server closes from its
             // side. Under aggressive cancellation this pegs the
-            // connection at the concurrent-stream limit.
-            self.sweep_cancelled_streams().await?;
+            // connection at the concurrent-stream limit. Gated to the tick so
+            // it costs O(streams) at ~10 Hz, not O(streams) per event.
+            if tick_fired {
+                self.sweep_cancelled_streams().await?;
+            }
         }
     }
 

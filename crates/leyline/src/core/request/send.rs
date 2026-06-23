@@ -55,7 +55,34 @@ impl RequestBuilder {
             }
         }
 
-        // Consume the builder up-front so we own the fields we need.
+        // Quick-path: no retry, no digest — the bit-for-bit behaviour for
+        // callers who have not opted in. Move/borrow straight out of `self`
+        // so the hot path clones neither the method, the URL, nor the header
+        // list (the retry path below still clones, as it must replay them).
+        if self.retry_policy.is_none() && self.digest_auth.is_none() {
+            let body = std::mem::take(&mut self.body);
+            let request_proxy = self.proxy.take();
+            let headers = if self.headers.is_empty() {
+                None
+            } else {
+                Some(std::mem::take(&mut self.headers))
+            };
+            return self
+                .session
+                .execute_with_timeout(
+                    &self.method,
+                    &self.url,
+                    self.preset,
+                    body,
+                    headers,
+                    self.timeout,
+                    self.stream_response,
+                    request_proxy.as_deref(),
+                )
+                .await;
+        }
+
+        // Retry / digest path — clone the fields we must replay across attempts.
         let method = self.method.clone();
         let url = self.url.clone();
         let preset = self.preset;
@@ -67,30 +94,6 @@ impl RequestBuilder {
         let digest_auth = self.digest_auth.clone();
         let request_proxy = self.proxy.take();
         let mut body = std::mem::take(&mut self.body);
-
-        // Quick-path: no retry, no digest — route through the
-        // single-shot execution path, the bit-for-bit behaviour for
-        // callers who have not opted into retry or digest.
-        if retry_policy.is_none() && digest_auth.is_none() {
-            let headers = if base_headers.is_empty() {
-                None
-            } else {
-                Some(base_headers)
-            };
-            return self
-                .session
-                .execute_with_timeout(
-                    &method,
-                    &url,
-                    preset,
-                    body,
-                    headers,
-                    timeout,
-                    stream_response,
-                    request_proxy.as_deref(),
-                )
-                .await;
-        }
 
         // Retry / digest path. Both are request-level concerns: retry
         // re-runs the full `execute_inner`, and digest needs one extra
@@ -150,12 +153,7 @@ impl RequestBuilder {
             // header, retry ONCE with the computed response.
             if let (Some(auth), Ok(resp)) = (&digest_auth, result.as_ref()) {
                 if resp.status() == 401 && attempt == 0 {
-                    if let Some(header) = resp
-                        .headers()
-                        .iter()
-                        .find(|(k, _)| k.eq_ignore_ascii_case("www-authenticate"))
-                        .map(|(_, v)| v.as_str())
-                    {
+                    if let Some(header) = resp.header("www-authenticate") {
                         if let Ok(challenge) = crate::core::digest::parse_challenge(header) {
                             tracing::debug!(
                                 target: "leyline::digest",
@@ -227,12 +225,8 @@ impl RequestBuilder {
                                 // hostile server cannot loop us.
                                 if resp.status() == 401 && !stale_retried {
                                     let next = resp
-                                        .headers()
-                                        .iter()
-                                        .find(|(k, _)| k.eq_ignore_ascii_case("www-authenticate"))
-                                        .and_then(|(_, v)| {
-                                            crate::core::digest::parse_challenge(v).ok()
-                                        });
+                                        .header("www-authenticate")
+                                        .and_then(|v| crate::core::digest::parse_challenge(v).ok());
                                     if let Some(next) = next {
                                         if next.stale {
                                             tracing::debug!(
@@ -311,10 +305,8 @@ impl RequestBuilder {
             // or absent value can never exceed the caller's timeout.
             let sleep = match &result {
                 Ok(resp) => resp
-                    .headers()
-                    .iter()
-                    .find(|(k, _)| k.eq_ignore_ascii_case("retry-after"))
-                    .and_then(|(_, v)| crate::core::retry::parse_retry_after(v)),
+                    .header("retry-after")
+                    .and_then(crate::core::retry::parse_retry_after),
                 _ => None,
             }
             .unwrap_or_else(|| retry_policy.backoff(attempt));

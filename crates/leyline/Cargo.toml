@@ -52,6 +52,9 @@ http3 = ["dep:leyline-quiche"]
 socks = []
 system-trust = []
 native-interface-bind = []
+# Exposes pub bench-only probes into otherwise pub(crate) pool internals
+# (checkout + evict path). Off by default; only leyline-benches enables it.
+bench-internals = []
 tower = ["dep:tower-service"]
 full = [
     "cookies",
@@ -152,12 +155,13 @@ futures-util = "0.3"
 serde_json = { workspace = true }
 url = { workspace = true }
 base64 = { workspace = true }
-# Encoders for the in-process httpbin-lite mock (tests/http_semantics.rs) —
-# the live tests used to lean on httpbin.org, which flakes (503s); the mock
-# compresses real gzip/deflate/brotli so leyline's decompression path is
-# genuinely exercised offline.
+# Codecs for the in-process httpbin-lite mock (tests/http_semantics.rs) and the
+# live H3 streaming test, which decodes the raw streamed body per its
+# content-encoding. zstd is a normal dep of leyline but integration tests only
+# see dev-deps, so it is restated here.
 flate2 = "1"
 brotli = "8"
+zstd = "0.13"
 
 [lints]
 workspace = true

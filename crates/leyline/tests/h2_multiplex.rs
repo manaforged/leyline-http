@@ -53,7 +53,15 @@ fn test_config() -> H2Config {
     }
 }
 
-fn get_req(path: &str) -> (PseudoHeaders, Vec<(String, String)>) {
+fn get_req(
+    path: &str,
+) -> (
+    PseudoHeaders,
+    Vec<(
+        std::borrow::Cow<'static, str>,
+        std::borrow::Cow<'static, str>,
+    )>,
+) {
     (
         PseudoHeaders {
             method: "GET".into(),

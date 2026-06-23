@@ -18,7 +18,7 @@ publish = false
 # Post-collapse: audit / h2 / pool / profile are all submodules of the single
 # `leyline` crate (pub mod audit/h2/pool/profile), so one path dep replaces the
 # old leyline-audit / leyline-h2 / leyline-pool / leyline-profile crates.
-leyline = { path = "../crates/leyline" }
+leyline = { path = "../crates/leyline", features = ["bench-internals"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 bytes = "1"
 

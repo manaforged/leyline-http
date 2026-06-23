@@ -62,7 +62,7 @@ pub struct H2ResponseEx {
     /// HTTP status code.
     pub status: u16,
     /// Response headers in wire order.
-    pub headers: Vec<(String, String)>,
+    pub headers: Vec<(crate::core::HeaderStr, crate::core::HeaderStr)>,
     /// Response body — buffered or streaming.
     pub body: ResponseBody,
     /// Trailers, if any. Only populated for buffered responses; in the
@@ -70,7 +70,7 @@ pub struct H2ResponseEx {
     /// chunk followed by close of the channel. (Trailer delivery over
     /// the streaming API is not exposed yet — callers that need
     /// trailers should use the buffered path.)
-    pub trailers: Option<Vec<(String, String)>>,
+    pub trailers: Option<Vec<(crate::core::HeaderStr, crate::core::HeaderStr)>>,
 }
 
 /// Response body shape delivered alongside an [`H2ResponseEx`].

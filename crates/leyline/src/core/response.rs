@@ -73,8 +73,8 @@ impl HttpVersion {
 pub struct Response {
     pub(crate) status: u16,
     pub(crate) version: HttpVersion,
-    pub(crate) headers: Vec<(String, String)>,
-    pub(crate) trailers: Vec<(String, String)>,
+    pub(crate) headers: Vec<(crate::core::HeaderStr, crate::core::HeaderStr)>,
+    pub(crate) trailers: Vec<(crate::core::HeaderStr, crate::core::HeaderStr)>,
     pub(crate) body: ResponseBody,
     pub(crate) cookies: HashMap<String, String>,
     pub(crate) url: String,
@@ -120,21 +120,21 @@ impl Response {
         &self.redirect_chain
     }
 
-    /// Response headers in wire order. Duplicates (e.g. multiple
-    /// `Set-Cookie` headers) are preserved.
+    /// Response headers in wire order, as `(name, value)` pairs.
+    /// Duplicates (e.g. multiple `Set-Cookie` headers) are preserved.
     ///
     /// Header name casing reflects the wire: HTTP/2 and HTTP/3
     /// responses are lowercase, HTTP/1.1 responses are mixed. Prefer
     /// [`Response::header`] for lookups — it is case-insensitive.
-    /// If you iterate this slice yourself, compare names with
-    /// `eq_ignore_ascii_case`.
-    pub fn headers(&self) -> &[(String, String)] {
-        &self.headers
+    /// If you iterate yourself, compare names with `eq_ignore_ascii_case`.
+    pub fn headers(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.headers.iter().map(|(k, v)| (k.as_str(), v.as_str()))
     }
 
-    /// Response trailers in wire order, if the transport exposed them.
-    pub fn trailers(&self) -> &[(String, String)] {
-        &self.trailers
+    /// Response trailers in wire order, as `(name, value)` pairs, if the
+    /// transport exposed them.
+    pub fn trailers(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.trailers.iter().map(|(k, v)| (k.as_str(), v.as_str()))
     }
 
     /// Iterate cookies collected from `Set-Cookie` headers. Yields
@@ -549,8 +549,8 @@ mod tests {
     fn text_decodes_declared_charset() {
         let mut resp = bare_response(None);
         resp.headers = vec![(
-            "content-type".to_string(),
-            "text/html; charset=windows-1252".to_string(),
+            crate::core::HeaderStr::from_static("content-type"),
+            crate::core::HeaderStr::from_static("text/html; charset=windows-1252"),
         )];
         // windows-1252: 0xE9 -> 'é', 0xA9 -> '©'. As raw UTF-8 these bytes are
         // invalid and would become U+FFFD without charset handling.
@@ -564,8 +564,8 @@ mod tests {
     fn text_charset_param_is_case_insensitive_and_unquoted() {
         let mut resp = bare_response(None);
         resp.headers = vec![(
-            "content-type".to_string(),
-            "text/plain; Charset=\"Shift_JIS\"".to_string(),
+            crate::core::HeaderStr::from_static("content-type"),
+            crate::core::HeaderStr::from_static("text/plain; Charset=\"Shift_JIS\""),
         )];
         // Shift_JIS 0x82 0xA0 -> 'あ' (U+3042).
         resp.body = ResponseBody::Buffered(vec![0x82, 0xA0]);
@@ -586,8 +586,8 @@ mod tests {
     fn declared_charset_overrides_text_with_charset_default() {
         let mut resp = bare_response(None);
         resp.headers = vec![(
-            "content-type".to_string(),
-            "text/plain; charset=utf-8".to_string(),
+            crate::core::HeaderStr::from_static("content-type"),
+            crate::core::HeaderStr::from_static("text/plain; charset=utf-8"),
         )];
         resp.body = ResponseBody::Buffered("héllo".as_bytes().to_vec());
         // The declared utf-8 wins over the windows-1252 caller default.

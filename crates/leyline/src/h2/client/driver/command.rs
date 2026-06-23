@@ -93,7 +93,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     pub(super) async fn start_request(
         &mut self,
         pseudo: PseudoHeaders,
-        headers: Vec<(String, String)>,
+        headers: Vec<crate::h2::connection::HeaderPair>,
         body: Option<Bytes>,
         trailers: Vec<(String, String)>,
         sink: ResponseSink,
@@ -171,7 +171,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     pub(super) async fn start_request_ex(
         &mut self,
         pseudo: PseudoHeaders,
-        headers: Vec<(String, String)>,
+        headers: Vec<crate::h2::connection::HeaderPair>,
         body: DriverRequestBody,
         sink: ResponseSink,
     ) -> Result<(), H2Error> {
@@ -266,7 +266,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     pub(super) async fn start_extended_connect(
         &mut self,
         pseudo: PseudoHeaders,
-        headers: Vec<(String, String)>,
+        headers: Vec<crate::h2::connection::HeaderPair>,
         write_rx: mpsc::Receiver<io::Result<Bytes>>,
         sink: ResponseSink,
     ) -> Result<(), H2Error> {

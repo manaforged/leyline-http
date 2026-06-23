@@ -157,9 +157,9 @@ struct StreamActor {
     response_tx: Option<ResponseSink>,
     status: u16,
     got_headers: bool,
-    resp_headers: Vec<(String, String)>,
+    resp_headers: Vec<(crate::core::HeaderStr, crate::core::HeaderStr)>,
     body: Vec<u8>,
-    trailers: Option<Vec<(String, String)>>,
+    trailers: Option<Vec<(crate::core::HeaderStr, crate::core::HeaderStr)>>,
     /// HEAD/1xx/204/304: drain DATA without buffering.
     drop_body: bool,
     /// Remaining outbound body (set when flow-control parks us mid-body).

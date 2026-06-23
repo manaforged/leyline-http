@@ -133,6 +133,21 @@ pub(crate) trait TlsHandshake {
         host: &str,
         include_alps: bool,
     ) -> impl std::future::Future<Output = Result<TlsStream, TlsError>> + Send;
+
+    /// Drive the same fingerprinted handshake over an already-established TLS
+    /// stream — the origin-facing inner leg of an `https://` CONNECT proxy,
+    /// where the origin TLS nests inside the client→proxy TLS.
+    fn do_tls_handshake_nested(
+        &self,
+        inner: TlsIo,
+        host: &str,
+        include_alps: bool,
+    ) -> impl std::future::Future<Output = Result<TlsStream, TlsError>> + Send;
+
+    /// `true` when the connector carries an origin-specific TLS identity
+    /// (client certificate / leaf pins) that must not be presented to, or
+    /// applied against, an `https://` proxy.
+    fn has_origin_tls_identity(&self) -> bool;
 }
 
 impl TlsHandshake for FingerprintConnector {
@@ -143,5 +158,18 @@ impl TlsHandshake for FingerprintConnector {
         include_alps: bool,
     ) -> Result<TlsStream, TlsError> {
         self.tls_handshake(tcp_stream, host, include_alps).await
+    }
+
+    async fn do_tls_handshake_nested(
+        &self,
+        inner: TlsIo,
+        host: &str,
+        include_alps: bool,
+    ) -> Result<TlsStream, TlsError> {
+        self.tls_handshake_nested(inner, host, include_alps).await
+    }
+
+    fn has_origin_tls_identity(&self) -> bool {
+        FingerprintConnector::has_origin_tls_identity(self)
     }
 }

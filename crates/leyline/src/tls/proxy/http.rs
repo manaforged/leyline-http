@@ -24,8 +24,8 @@ use crate::tls::TlsStream;
 
 use crate::util::{base64_encode, percent_decode};
 
-/// Open a TLS-over-HTTP-CONNECT tunnel through `proxy` and return the
-/// wrapped TLS stream. Fingerprint settings come from `connector`.
+/// Open a TLS-over-HTTP-CONNECT tunnel through a cleartext `http://` proxy and
+/// return the wrapped TLS stream. Fingerprint settings come from `connector`.
 pub(crate) async fn connect<C: crate::tls::TlsHandshake>(
     connector: &C,
     host: &str,
@@ -34,7 +34,71 @@ pub(crate) async fn connect<C: crate::tls::TlsHandshake>(
     include_alps: bool,
 ) -> Result<TlsStream, TlsError> {
     let mut tcp_stream = super::connect_to_proxy(proxy, 8080).await?;
+    write_connect_and_validate(&mut tcp_stream, host, port, proxy).await?;
+    connector
+        .do_tls_handshake(tcp_stream, host, include_alps)
+        .await
+}
 
+/// Open a CONNECT tunnel through an `https://` proxy: the client→proxy leg is
+/// itself TLS, so the CONNECT request and any `Proxy-Authorization` credentials
+/// travel encrypted (never in cleartext). The origin handshake then nests
+/// inside the proxy TLS.
+pub(crate) async fn connect_via_tls<C: crate::tls::TlsHandshake>(
+    connector: &C,
+    host: &str,
+    port: u16,
+    proxy: &url::Url,
+    include_alps: bool,
+) -> Result<TlsStream, TlsError> {
+    // The proxy is a separate peer from the origin. If this connector carries an
+    // origin-specific TLS identity — a client certificate or leaf pins — refuse
+    // rather than present the origin client cert to the proxy (identity leak) or
+    // check the proxy's cert against the origin's pins (which would fail). A
+    // fingerprinted proxy-specific TLS context is the upgrade path.
+    if connector.has_origin_tls_identity() {
+        return Err(TlsError::Profile(
+            "https:// proxy is not supported together with a client certificate or certificate \
+             pins: the origin TLS identity must not be presented to the proxy. Use an http:// \
+             CONNECT or socks5:// proxy, or drop the client cert / pins."
+                .into(),
+        ));
+    }
+
+    let proxy_host = proxy
+        .host_str()
+        .ok_or_else(|| TlsError::Profile("https proxy has no host".into()))?;
+    let tcp_stream = super::connect_to_proxy(proxy, 443).await?;
+
+    // Proxy leg: TLS to the proxy itself. The CONNECT exchange is HTTP/1.1, so
+    // offer only http/1.1 on this leg (h2 over the proxy is a separate feature).
+    let proxy_tls = connector
+        .do_tls_handshake(tcp_stream, proxy_host, false)
+        .await?;
+    let mut tunnel = proxy_tls.stream;
+    write_connect_and_validate(&mut tunnel, host, port, proxy).await?;
+
+    // Origin leg: the real fingerprinted handshake to the target, nested inside
+    // the proxy TLS.
+    connector
+        .do_tls_handshake_nested(tunnel, host, include_alps)
+        .await
+}
+
+/// Write the `CONNECT host:port` request (with `Proxy-Authorization` when the
+/// proxy URL carries credentials) over `stream`, then read and validate the
+/// proxy's response. Shared by the cleartext and TLS-wrapped CONNECT paths —
+/// when `stream` is the client→proxy TLS, the request and credentials are
+/// encrypted on the wire.
+async fn write_connect_and_validate<S>(
+    stream: &mut S,
+    host: &str,
+    port: u16,
+    proxy: &url::Url,
+) -> Result<(), TlsError>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
     let connect_req = if let Some(password) = proxy.password() {
         let username = percent_decode(proxy.username());
         let password = percent_decode(password);
@@ -46,7 +110,7 @@ pub(crate) async fn connect<C: crate::tls::TlsHandshake>(
         format!("CONNECT {host}:{port} HTTP/1.1\r\nHost: {host}:{port}\r\n\r\n")
     };
 
-    tcp_stream
+    stream
         .write_all(connect_req.as_bytes())
         .await
         .map_err(TlsError::TcpConnect)?;
@@ -55,10 +119,7 @@ pub(crate) async fn connect<C: crate::tls::TlsHandshake>(
     let mut response_buf = Vec::with_capacity(1024);
     let mut tmp = [0u8; 256];
     let end_idx = loop {
-        let n = tcp_stream
-            .read(&mut tmp)
-            .await
-            .map_err(TlsError::TcpConnect)?;
+        let n = stream.read(&mut tmp).await.map_err(TlsError::TcpConnect)?;
         if n == 0 {
             return Err(TlsError::Profile(
                 "proxy closed connection before CONNECT response".into(),
@@ -73,11 +134,7 @@ pub(crate) async fn connect<C: crate::tls::TlsHandshake>(
         }
     };
 
-    validate_connect_response(&response_buf, end_idx)?;
-
-    connector
-        .do_tls_handshake(tcp_stream, host, include_alps)
-        .await
+    validate_connect_response(&response_buf, end_idx)
 }
 
 /// Validate a proxy CONNECT response header block. `buf` is the bytes

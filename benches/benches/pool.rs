@@ -17,7 +17,7 @@
 use std::time::Duration;
 
 use bytes::BytesMut;
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt, DuplexStream};
 use tokio::runtime::Runtime;
 
@@ -202,10 +202,63 @@ fn bench_handle_clone_warm(c: &mut Criterion) {
     });
 }
 
+// The real per-request hot path is `checkout_handle`: make_key -> evict_idle
+// -> checkout_h2. `evict_idle` scans every pooled entry, so its cost grows
+// with pool occupancy. This bench drives that exact body (`Pool::bench_probe`)
+// against pools pre-filled with N live entries, isolating how checkout cost
+// scales with occupancy. One live mock connection backs all N entries (the
+// handle is cloned), so every entry reports `is_closed() == false` and
+// `evict_idle` keeps them all — the worst-case scan.
+fn bench_checkout_scale(c: &mut Criterion) {
+    let rt = Runtime::new().expect("tokio runtime");
+    let (handle, server, _driver): (H2Client, _, _) = rt.block_on(async {
+        let (cio, sio) = tokio::io::duplex(1024 * 1024);
+        let server = tokio::spawn(run_mock_server(sio));
+        let (h, d) = ClientConnection::start(cio, test_config())
+            .await
+            .expect("handshake");
+        let p = PseudoHeaders {
+            method: "GET".into(),
+            scheme: "https".into(),
+            authority: "mock".into(),
+            path: "/warmup".into(),
+            protocol: None,
+        };
+        let _ = h
+            .send_request(p, vec![("ua".into(), "bench".into())], None)
+            .await
+            .unwrap();
+        (h, server, d)
+    });
+
+    let mut group = c.benchmark_group("pool::checkout_at_occupancy");
+    for n in [1usize, 64, 512, 2048] {
+        let pool = Pool::with_limits(
+            DEFAULT_IDLE_TIMEOUT,
+            n.max(DEFAULT_MAX_CONNECTIONS),
+            DEFAULT_MAX_H1_CONNS_PER_HOST,
+        );
+        pool.bench_populate_h2(n, &handle);
+        assert!(pool.bench_probe(), "occupancy {n}: probe must hit");
+        group.throughput(Throughput::Elements(1));
+        group.bench_with_input(BenchmarkId::from_parameter(n), &pool, |b, pool| {
+            b.iter(|| black_box(pool.bench_probe()));
+        });
+    }
+    group.finish();
+
+    drop(handle);
+    server.abort();
+    rt.block_on(async move {
+        let _ = server.await;
+    });
+}
+
 criterion_group!(
     pool_benches,
     bench_pool_new,
     bench_pool_with_limits,
-    bench_handle_clone_warm
+    bench_handle_clone_warm,
+    bench_checkout_scale
 );
 criterion_main!(pool_benches);

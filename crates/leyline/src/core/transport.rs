@@ -9,6 +9,7 @@ use std::sync::Arc;
 use crate::h2::config::H2Config;
 use crate::h2::connection::PseudoHeaders;
 use crate::pool::{H1Body, H1PooledError, H1ResponseBody, H1Target, Pool};
+use crate::profile::preset::HeaderPair;
 use crate::tls::ConnectorVariant;
 use crate::util::{base64_encode, percent_decode};
 use bytes::Bytes;
@@ -31,7 +32,7 @@ pub(crate) enum TransportBody {
 /// Response returned by a transport.
 pub(crate) struct TransportResponse {
     pub(crate) status: u16,
-    pub(crate) headers: Vec<(String, String)>,
+    pub(crate) headers: Vec<(crate::core::HeaderStr, crate::core::HeaderStr)>,
     pub(crate) body: TransportBody,
     pub(crate) final_url: String,
     pub(crate) version: HttpVersion,
@@ -60,7 +61,7 @@ pub(crate) async fn send_request_auto(
     h2_config: &H2Config,
     method: &str,
     url: &url::Url,
-    headers: Vec<(String, String)>,
+    headers: Vec<HeaderPair>,
     body: Body,
     proxy: Option<&str>,
     stream_response: bool,
@@ -176,7 +177,7 @@ pub(crate) async fn send_request_h2(
     h2_config: &H2Config,
     method: &str,
     url: &url::Url,
-    headers: Vec<(String, String)>,
+    headers: Vec<HeaderPair>,
     body: Body,
     proxy: Option<&str>,
     stream_response: bool,
@@ -298,7 +299,7 @@ pub(crate) async fn send_request_h1(
     connector: &ConnectorVariant,
     method: &str,
     url: &url::Url,
-    headers: Vec<(String, String)>,
+    headers: Vec<HeaderPair>,
     body: Body,
     proxy: Option<&str>,
     stream_response: bool,
@@ -331,7 +332,10 @@ pub(crate) async fn send_request_h1(
                     percent_decode(parsed.username()),
                     percent_decode(password)
                 ));
-                headers.push(("Proxy-Authorization".into(), format!("Basic {credentials}")));
+                headers.push((
+                    "Proxy-Authorization".into(),
+                    std::borrow::Cow::Owned(format!("Basic {credentials}")),
+                ));
             }
             (H1Target::AbsoluteForm, headers)
         }
@@ -348,7 +352,10 @@ pub(crate) async fn send_request_h1(
         port,
         method,
         url,
-        headers,
+        headers
+            .into_iter()
+            .map(|(k, v)| (k.into_owned(), v.into_owned()))
+            .collect(),
         h1_body,
         proxy,
         target,
@@ -377,7 +384,13 @@ pub(crate) async fn send_request_h1(
 
     Ok(TransportResponse {
         status: resp.status,
-        headers: resp.headers,
+        // H1 parses headers into owned `String`s; `Bytes::from(String)`
+        // takes the buffer, so this is a move per header, not a copy.
+        headers: resp
+            .headers
+            .into_iter()
+            .map(|(k, v)| (k.into(), v.into()))
+            .collect(),
         body: transport_body,
         final_url: url.to_string(),
         version: HttpVersion::Http1_1,
@@ -419,31 +432,10 @@ pub(crate) async fn send_request_h3(
     profile: &crate::profile::BrowserProfile,
     method: &str,
     url: &url::Url,
-    headers: Vec<(String, String)>,
+    headers: Vec<HeaderPair>,
     body: Body,
     stream_response: bool,
 ) -> Result<TransportResponse> {
-    // H3 incremental streaming (quiche-level pump/pull) is deferred. A
-    // streaming REQUEST body still can't be sent as a stream, so reject that
-    // explicitly. A `.stream()` RESPONSE request, however, degrades
-    // gracefully: we buffer the body and hand it back through the same
-    // `into_stream()` surface (as a single chunk) rather than hard-erroring,
-    // so `.stream()` behaves consistently across H1/H2/H3 for callers.
-    if body.is_stream() {
-        return Err(Error::Config(
-            "HTTP/3 streaming request bodies are not yet implemented; use .http2() or buffer \
-             the body before sending"
-                .into(),
-        ));
-    }
-    if stream_response {
-        tracing::debug!(
-            target: "leyline::h3",
-            "response streaming over HTTP/3 is not yet incremental; buffering the body \
-             (it is still available via Response::into_stream())"
-        );
-    }
-
     let host = url
         .host_str()
         .ok_or_else(|| Error::Config("no host in URL".into()))?;
@@ -452,21 +444,48 @@ pub(crate) async fn send_request_h3(
     let query = url.query().map(|q| format!("?{q}")).unwrap_or_default();
     let full_path = format!("{path}{query}");
 
-    let body_bytes = match body {
-        Body::Empty => None,
-        Body::Bytes(b) => Some(b),
-        Body::Stream { .. } => unreachable!("rejected above"),
+    // A streaming request body is pumped into the request stream incrementally;
+    // a buffered body is sent whole. `content-length` (for a length-known
+    // stream) is already on `headers` from the execute layer.
+    let (body_bytes, body_stream) = match body {
+        Body::Empty => (None, None),
+        Body::Bytes(b) => (Some(b), None),
+        Body::Stream { stream, .. } => (None, Some(stream)),
     };
 
     let (resp, tls) = crate::pool::send_request_h3_pooled(
-        pool, h3_config, profile, host, port, method, host, &full_path, &headers, body_bytes,
+        pool,
+        h3_config,
+        profile,
+        host,
+        port,
+        method,
+        host,
+        &full_path,
+        &headers
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect::<Vec<_>>(),
+        body_bytes,
+        body_stream,
+        stream_response,
     )
     .await?;
 
+    let transport_body = match resp.body {
+        crate::quic::H3RespBody::Buffered(b) => TransportBody::Buffered(b),
+        crate::quic::H3RespBody::Streaming(rx) => TransportBody::Streaming(BodyStream::new(rx)),
+    };
+
     Ok(TransportResponse {
         status: resp.status,
-        headers: resp.headers,
-        body: TransportBody::Buffered(resp.body),
+        // H3/QPACK yields owned `String`s; move them into `HeaderStr`.
+        headers: resp
+            .headers
+            .into_iter()
+            .map(|(k, v)| (k.into(), v.into()))
+            .collect(),
+        body: transport_body,
         final_url: url.to_string(),
         version: HttpVersion::Http3,
         tls_alpn: Some("h3".to_string()),

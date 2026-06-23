@@ -202,10 +202,9 @@ pub(crate) fn parse_retry_after(value: &str) -> Option<Duration> {
 /// Whether a method is idempotent per RFC 9110 §9.2.2 — safe to retry
 /// automatically without caller opt-in.
 pub(crate) fn is_idempotent(method: &str) -> bool {
-    matches!(
-        method.to_ascii_uppercase().as_str(),
-        "GET" | "HEAD" | "OPTIONS" | "PUT" | "DELETE" | "TRACE"
-    )
+    ["GET", "HEAD", "OPTIONS", "PUT", "DELETE", "TRACE"]
+        .iter()
+        .any(|m| method.eq_ignore_ascii_case(m))
 }
 
 #[cfg(test)]

@@ -3,6 +3,9 @@
 //! Separated from `execute.rs` so the redirect / cookie / retry code
 //! doesn't have to carry the anchor-resolution details inline.
 
+use std::borrow::Cow;
+
+use crate::profile::preset::HeaderPair;
 use crate::profile::{infer_anchor, HeaderAnchor};
 
 use crate::core::headers::HeaderList;
@@ -23,7 +26,7 @@ use crate::core::headers::HeaderList;
 /// `sensitive` is passed as a closure so the caller owns both the
 /// sensitive-name set and the cross-origin strip decision.
 pub(crate) fn apply_extra_headers(
-    headers: &mut Vec<(String, String)>,
+    headers: &mut Vec<HeaderPair>,
     extra: &HeaderList,
     strip_sensitive: bool,
     sensitive: &dyn Fn(&str) -> bool,
@@ -57,10 +60,10 @@ pub(crate) fn apply_extra_headers(
         // were not already grouped; the `contains` check above does
         // the dedup, so we just skip non-first siblings.
         let _ = i;
-        let values_in_order: Vec<(String, String)> = kept
+        let values_in_order: Vec<HeaderPair> = kept
             .iter()
             .filter(|e| e.anchor.is_none() && e.name.eq_ignore_ascii_case(&lower))
-            .map(|e| (e.name.clone(), e.value.clone()))
+            .map(|e| (Cow::Owned(e.name.clone()), Cow::Owned(e.value.clone())))
             .collect();
         if let Some(pos) = headers
             .iter()
@@ -83,14 +86,17 @@ pub(crate) fn apply_extra_headers(
     // within a single anchor is preserved by inserting entries at
     // the same target index in caller-reversed order but advancing
     // the offset — see the loop body below.
-    let mut insertions: Vec<(usize, Vec<(String, String)>)> = Vec::new();
+    let mut insertions: Vec<(usize, Vec<HeaderPair>)> = Vec::new();
     for entry in &kept {
         if entry.anchor.is_none() && consumed_names.contains(&entry.name.to_ascii_lowercase()) {
             continue;
         }
         let anchor = entry.anchor.or_else(|| infer_anchor(&entry.name));
         let target_idx = anchor_target_index(headers, anchor);
-        let item = (entry.name.clone(), entry.value.clone());
+        let item = (
+            Cow::Owned(entry.name.clone()),
+            Cow::Owned(entry.value.clone()),
+        );
         if let Some((_, bucket)) = insertions.iter_mut().find(|(i, _)| *i == target_idx) {
             bucket.push(item);
         } else {
@@ -112,7 +118,7 @@ pub(crate) fn apply_extra_headers(
 /// Compute the target insertion index for a header at the given
 /// anchor. Missing anchors and absent target headers both fall back
 /// to `headers.len()` (append at end).
-fn anchor_target_index(headers: &[(String, String)], anchor: Option<HeaderAnchor>) -> usize {
+fn anchor_target_index(headers: &[HeaderPair], anchor: Option<HeaderAnchor>) -> usize {
     let Some(anchor) = anchor else {
         return headers.len();
     };
@@ -133,7 +139,7 @@ fn anchor_target_index(headers: &[(String, String)], anchor: Option<HeaderAnchor
 mod tests {
     use super::*;
 
-    fn preset_xhr() -> Vec<(String, String)> {
+    fn preset_xhr() -> Vec<HeaderPair> {
         vec![
             ("sec-ch-ua".into(), "chrome".into()),
             ("sec-ch-ua-mobile".into(), "?0".into()),
@@ -190,7 +196,7 @@ mod tests {
         extra.append_anchored(HeaderAnchor::AfterCchUaMobile, "x-b", "b");
         extra.append_anchored(HeaderAnchor::AfterCchUaMobile, "x-a", "a");
         apply_extra_headers(&mut headers, &extra, false, &never_sensitive);
-        let names: Vec<&str> = headers.iter().map(|(k, _)| k.as_str()).collect();
+        let names: Vec<&str> = headers.iter().map(|(k, _)| k.as_ref()).collect();
         let mobile = names.iter().position(|&n| n == "sec-ch-ua-mobile").unwrap();
         assert_eq!(&names[mobile + 1..mobile + 4], &["x-a0", "x-b", "x-a"]);
     }
@@ -229,7 +235,7 @@ mod tests {
         extra.append_anchored(HeaderAnchor::AfterUserAgent, "x-extra-6", "c");
         extra.append_anchored(HeaderAnchor::AfterContentType, "x-extra-7", "d");
         apply_extra_headers(&mut headers, &extra, false, &never_sensitive);
-        let names: Vec<&str> = headers.iter().map(|(k, _)| k.as_str()).collect();
+        let names: Vec<&str> = headers.iter().map(|(k, _)| k.as_ref()).collect();
         assert_eq!(
             names,
             vec![

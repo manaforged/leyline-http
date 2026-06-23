@@ -295,12 +295,14 @@ async fn compress_strips_stale_caller_content_length() {
 }
 
 #[tokio::test]
-async fn https_scheme_proxy_is_refused_not_sent_in_cleartext() {
-    // `ProxyUrl` advertises `https` as a valid scheme, but leyline cannot yet
-    // TLS-handshake to the proxy — so an https:// proxy must error rather than
-    // send the CONNECT request (and Proxy-Authorization) in cleartext. The
-    // refusal fires on scheme inspection, before any socket is opened, so the
-    // unroutable :1 port is never dialed.
+async fn https_scheme_proxy_is_accepted_and_dialed_over_tls() {
+    // An https:// proxy is supported: the client→proxy leg is TLS, so the
+    // CONNECT (and any Proxy-Authorization) is encrypted. The request is no
+    // longer refused at scheme inspection — it proceeds to dial the proxy. With
+    // an unroutable proxy port the attempt fails with a connection-level error,
+    // NOT the old "https proxies unsupported / cleartext" refusal. (The
+    // encrypted-credential guarantee is verified end-to-end by the live
+    // mock-proxy test in tests/https_proxy.rs.)
     let err = Session::chrome()
         .get("https://example.test/")
         .proxy("https://user:secret@127.0.0.1:1")
@@ -309,8 +311,8 @@ async fn https_scheme_proxy_is_refused_not_sent_in_cleartext() {
         .unwrap_err();
     let msg = format!("{err}").to_lowercase();
     assert!(
-        msg.contains("https://") && msg.contains("cleartext"),
-        "expected an https-proxy cleartext-refusal error, got: {msg}"
+        !msg.contains("cleartext") && !msg.contains("unsupported proxy scheme"),
+        "https proxy must no longer be refused as unsupported, got: {msg}"
     );
 }
 

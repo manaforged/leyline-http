@@ -1,7 +1,7 @@
 //! [`Pool`] struct — thread-safe connection map with LRU eviction.
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -21,6 +21,14 @@ use crate::pool::types::{H1Slot, PoolCounters, PoolKey, PoolStats, PooledConn, T
 /// cheap clones; the error is `Arc`-wrapped) as `Shared` requires.
 pub(crate) type SharedConnect =
     Shared<BoxFuture<'static, Result<(H2Client, TlsInfo), Arc<crate::Error>>>>;
+
+/// The H3 analogue of [`SharedConnect`]: a shared, awaitable in-progress QUIC +
+/// HTTP/3 connect. Concurrent first-requests (and `Race` legs) to one
+/// destination join ONE handshake instead of each opening their own QUIC
+/// connection and dropping all but the first at install.
+#[cfg(feature = "http3")]
+pub(crate) type SharedH3Connect =
+    Shared<BoxFuture<'static, Result<(H3Client, TlsInfo), Arc<crate::Error>>>>;
 
 /// Default idle-timeout for pooled connections.
 ///
@@ -67,18 +75,34 @@ pub const DEFAULT_MAX_CONNECTIONS: usize = 2048;
 /// unaffected (one multiplexed connection per host).
 pub const DEFAULT_MAX_H1_CONNS_PER_HOST: usize = 256;
 
+/// Minimum spacing between full idle/permit sweeps. `evict_idle` is called on
+/// every checkout, but its O(entries) `retain` reclaims connections idle past a
+/// 300 s timeout — sub-second precision is meaningless. Gating the sweep behind
+/// this deadline turns a per-request O(pool-size) scan into an amortized O(1)
+/// check; a dead pooled connection is still dropped lazily on checkout, and the
+/// LRU cap still bounds memory on every install, so nothing here affects
+/// correctness or wire behavior — only when idle reclamation runs.
+const POOL_REAP_INTERVAL: Duration = Duration::from_millis(250);
+
 /// HTTP connection pool.
 ///
 /// Thread-safe (`Arc<Mutex<>>`) — a `Session` holds `Arc<Pool>` so
 /// cloned sessions share the same pool. Entries are keyed by
-/// `(host, port, proxy)` and may be either HTTP/2 (multiplexed
-/// clone-handle) or HTTP/1.1 keep-alive (single-checkout owned
-/// stream).
+/// `(host, port, proxy, transport)` and may be HTTP/2 (multiplexed
+/// clone-handle), HTTP/1.1 keep-alive (single-checkout owned stream),
+/// or HTTP/3 (multiplexed clone-handle over QUIC). The `transport`
+/// tag keeps the TCP (H1/H2) and QUIC (H3) keyspaces separate.
 pub struct Pool {
     pub(crate) inner: Mutex<HashMap<PoolKey, PooledConn>>,
     /// In-progress H2 connects, keyed like `inner`. Single-flights connection establishment so
     /// concurrent first-requests to one destination share a single TLS+H2 handshake.
     pub(crate) inflight_h2: Mutex<HashMap<PoolKey, SharedConnect>>,
+    /// In-progress H3 connects, keyed like `inner` (with `Transport::Quic`).
+    /// Single-flights the QUIC + HTTP/3 handshake so a cold burst (or both
+    /// `Race` legs) shares one connection instead of opening N and dropping
+    /// all but the first at install.
+    #[cfg(feature = "http3")]
+    pub(crate) inflight_h3: Mutex<HashMap<PoolKey, SharedH3Connect>>,
     pub(crate) idle_timeout: Duration,
     /// LRU cap.
     pub(crate) max_connections: usize,
@@ -92,6 +116,12 @@ pub struct Pool {
     /// `inner` or closed, so the live-connection count never exceeds the cap.
     pub(crate) h1_permits: Mutex<HashMap<PoolKey, Arc<Semaphore>>>,
     pub(crate) counters: PoolCounters,
+    /// Monotonic base for the idle-sweep throttle.
+    created: Instant,
+    /// Earliest `created.elapsed()` millis at which the next full idle/permit
+    /// sweep may run. Lets `evict_idle` skip its O(pool-size) scan on the vast
+    /// majority of checkouts (see [`POOL_REAP_INTERVAL`]).
+    next_reap_ms: AtomicU64,
 }
 
 impl Pool {
@@ -101,11 +131,15 @@ impl Pool {
         Self {
             inner: Mutex::new(HashMap::new()),
             inflight_h2: Mutex::new(HashMap::new()),
+            #[cfg(feature = "http3")]
+            inflight_h3: Mutex::new(HashMap::new()),
             idle_timeout: DEFAULT_IDLE_TIMEOUT,
             max_connections: DEFAULT_MAX_CONNECTIONS,
             max_h1_conns_per_host: DEFAULT_MAX_H1_CONNS_PER_HOST,
             h1_permits: Mutex::new(HashMap::new()),
             counters: PoolCounters::default(),
+            created: Instant::now(),
+            next_reap_ms: AtomicU64::new(0),
         }
     }
 
@@ -124,11 +158,15 @@ impl Pool {
         Self {
             inner: Mutex::new(HashMap::new()),
             inflight_h2: Mutex::new(HashMap::new()),
+            #[cfg(feature = "http3")]
+            inflight_h3: Mutex::new(HashMap::new()),
             idle_timeout,
             max_connections,
             max_h1_conns_per_host,
             h1_permits: Mutex::new(HashMap::new()),
             counters: PoolCounters::default(),
+            created: Instant::now(),
+            next_reap_ms: AtomicU64::new(0),
         }
     }
 
@@ -154,6 +192,33 @@ impl Pool {
     /// Remove the in-progress connect entry for `key` (idempotent).
     pub(crate) fn inflight_h2_remove(&self, key: &PoolKey) {
         self.inflight_h2
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(key);
+    }
+
+    /// H3 analogue of [`Self::inflight_h2_get_or_insert_with`]. `make` runs only
+    /// on a miss, under the lock, and must not await; the connect future removes
+    /// its own entry on completion (see [`Self::inflight_h3_remove`]).
+    #[cfg(feature = "http3")]
+    pub(crate) fn inflight_h3_get_or_insert_with(
+        &self,
+        key: PoolKey,
+        make: impl FnOnce() -> SharedH3Connect,
+    ) -> SharedH3Connect {
+        let mut map = self.inflight_h3.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(existing) = map.get(&key) {
+            return existing.clone();
+        }
+        let shared = make();
+        map.insert(key, shared.clone());
+        shared
+    }
+
+    /// Remove the in-progress H3 connect entry for `key` (idempotent).
+    #[cfg(feature = "http3")]
+    pub(crate) fn inflight_h3_remove(&self, key: &PoolKey) {
+        self.inflight_h3
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .remove(key);
@@ -191,6 +256,17 @@ impl Pool {
     /// evict whole, as before.
     pub(crate) fn evict_idle(&self) {
         let now = Instant::now();
+        // Throttle: skip the O(pool-size) sweep unless the reap deadline passed.
+        // Racy by design (Relaxed) — a rare double- or skipped-sweep at the
+        // boundary is harmless since idle reclamation tolerates ms-scale slack.
+        let now_ms = now.duration_since(self.created).as_millis() as u64;
+        if now_ms < self.next_reap_ms.load(Ordering::Relaxed) {
+            return;
+        }
+        self.next_reap_ms.store(
+            now_ms + POOL_REAP_INTERVAL.as_millis() as u64,
+            Ordering::Relaxed,
+        );
         let mut idle_evicted = 0u64;
         {
             let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
@@ -332,24 +408,16 @@ impl Pool {
     /// existing one and return its handle, dropping ours. Returns the
     /// canonical handle the caller must use.
     ///
-    /// The check-and-set is what makes the pool safe without H2-style connect
-    /// single-flighting: concurrent cold requests each open a connection, but
-    /// only the first is pooled; the losers' `H3DriverTask`s drop here and
-    /// tear down their (unused) connections cleanly, so no in-flight request
-    /// ever races a teardown of the connection it is about to use.
+    /// `open_h3_coalesced` single-flights the common cold burst, so usually
+    /// only one connect reaches here. This check-and-set is the backstop for
+    /// the paths that bypass coalescing (the shared-failure fallback): a loser's
+    /// `H3DriverTask` drops here and tears down its unused connection cleanly,
+    /// so no in-flight request ever races a teardown of the connection it is
+    /// about to use.
     ///
-    /// Note: redundant handshakes on a concurrent cold burst; add
-    /// inflight-H3 single-flighting (mirror `inflight_h2`) if that burst
-    /// proves a fingerprint or cost problem.
-    ///
-    /// Note: H2 and H3 share `PoolKey = (host, port, proxy)`, so an H3
-    /// install replaces an H2 entry (and vice versa in `install_h2`). In
-    /// practice only `Race` can install both protocols at one key, and within
-    /// a race only the winner installs — so this is reachable only on a rare
-    /// same-tick connect tie, costing a wasted handshake (self-healing, the
-    /// clobbered driver closes cleanly; never a double-send, since the H3 send
-    /// path only replays a provably-unsent request). Upgrade path if the race
-    /// connection churn matters: protocol-key the pool so H2/H3 coexist.
+    /// H2 and H3 keep separate `PoolKey`s (`Transport::Tcp` vs `Quic`), so a
+    /// `Race` that brings up both protocols to one host pools each rather than
+    /// clobbering — this never overwrites a live entry of the other transport.
     #[cfg(feature = "http3")]
     pub(crate) fn install_or_get_h3(
         &self,
@@ -554,6 +622,44 @@ impl Pool {
         if map.remove(key).is_some() {
             self.counters.evictions_dead.fetch_add(1, Ordering::Relaxed);
         }
+    }
+
+    /// Fill with `n` synthetic live H2 entries sharing `handle` (driver: None;
+    /// liveness via the shared driver). Bench-only. Key `h0.bench` is present.
+    #[cfg(feature = "bench-internals")]
+    pub fn bench_populate_h2(&self, n: usize, handle: &H2Client) {
+        let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        map.clear();
+        for i in 0..n {
+            map.insert(
+                PoolKey {
+                    host: format!("h{i}.bench"),
+                    port: 443,
+                    proxy: None,
+                    transport: crate::pool::types::Transport::Tcp,
+                },
+                PooledConn::H2 {
+                    handle: handle.clone(),
+                    _driver: None,
+                    last_use: Instant::now(),
+                    tls: TlsInfo::default(),
+                },
+            );
+        }
+    }
+
+    /// `checkout_handle`'s hot-path body: make_key + evict_idle + checkout_h2.
+    /// Returns whether the checkout hit. Bench-only.
+    #[cfg(feature = "bench-internals")]
+    pub fn bench_probe(&self) -> bool {
+        let key = PoolKey {
+            host: "h0.bench".to_string(),
+            port: 443,
+            proxy: None,
+            transport: crate::pool::types::Transport::Tcp,
+        };
+        self.evict_idle();
+        self.checkout_h2(&key).is_some()
     }
 }
 

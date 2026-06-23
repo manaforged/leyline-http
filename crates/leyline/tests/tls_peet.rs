@@ -1293,10 +1293,49 @@ async fn live_h3_pool_reuse() {
     );
 }
 
+/// Single-flight: N concurrent first-requests to a cold H3 destination share
+/// ONE QUIC handshake (one `install`), instead of each opening its own
+/// connection and dropping all but the first at install. Without `inflight_h3`
+/// coalescing every request handshakes independently and `installs` would be N.
+#[tokio::test]
+#[ignore = "live: needs network"]
+async fn live_h3_concurrent_cold_requests_single_flight() {
+    use futures_util::future::join_all;
+
+    let session = leyline::Session::builder()
+        .browser(Browser::Chrome147)
+        .http3()
+        .build()
+        .expect("h3 session builds");
+
+    // Fire concurrently on a cold pool: each request misses the pool and joins
+    // the single in-flight connect rather than starting its own.
+    let futs = (0..8).map(|_| session.get("https://cloudflare-quic.com/").send());
+    for r in join_all(futs).await {
+        assert_eq!(r.expect("concurrent H3 request failed").status(), 200);
+    }
+
+    let stats = session.pool_stats();
+    assert_eq!(
+        stats.installs, 1,
+        "8 concurrent cold H3 requests must share ONE handshake, got {} installs \
+         (entries={}, h3_hits={}, h3_misses={})",
+        stats.installs, stats.entries, stats.h3_hits, stats.h3_misses
+    );
+    assert_eq!(stats.entries, 1, "exactly one pooled QUIC connection");
+    println!(
+        "✓ H3 single-flight: installs={}, entries={}, h3_hits={}",
+        stats.installs, stats.entries, stats.h3_hits
+    );
+}
+
 /// True connection-level H2/H3 race: `.race()` to an origin that speaks both
-/// (cloudflare-quic.com) must succeed and leave **exactly one** pooled
-/// connection — proving the request was sent once on the winner, not on both
-/// transports. A second raced request must reuse that winner.
+/// (cloudflare-quic.com) must succeed, send the request exactly once on the
+/// winning transport, and reuse a warm connection on the next request. Each
+/// connect runs to completion on its own task (so a cancelled leg can't strand
+/// the in-flight map or leak the pool), so the race warms the winner and may
+/// also warm the loser leg — 1 or 2 entries, both idle-evictable. The request
+/// still goes on the winner only; the reuse check is the observable guarantee.
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_race_sends_once_on_winner() {
@@ -1315,11 +1354,18 @@ async fn live_race_sends_once_on_winner() {
     let _ = r1.bytes();
 
     let after_first = session.pool_stats();
-    assert_eq!(
-        after_first.entries, 1,
-        "race must warm exactly one connection (the winner), got {} \
+    // The race warms the winner and may also warm the loser leg (each connect
+    // completes on its own task and pools under its own transport key), so 1 or
+    // 2 entries — both idle-evictable. The request was sent once: only the
+    // winner's handle receives a `send`. The reuse check below is the
+    // observable guarantee that a warm connection is ready for the next request.
+    assert!(
+        (1..=2).contains(&after_first.entries),
+        "race must warm the winner (and optionally the loser leg), got {} entries \
          (h2_misses={}, h3_misses={})",
-        after_first.entries, after_first.h2_misses, after_first.h3_misses
+        after_first.entries,
+        after_first.h2_misses,
+        after_first.h3_misses
     );
 
     let r2 = session
@@ -1346,6 +1392,191 @@ async fn live_race_sends_once_on_winner() {
         after_second.h2_hits,
         after_second.h3_hits
     );
+}
+
+/// Incremental H3 response streaming: a `.stream()` request over HTTP/3 must
+/// deliver the body in multiple chunks as they arrive, not as one buffered
+/// blob. cloudflare-quic.com returns a brotli/zstd-compressed page that spans
+/// several QUIC packets, so the body arrives in several chunks — proving the
+/// driver streams rather than buffering then handing back a single chunk. The
+/// streamed bytes are raw (content-encoding preserved); decompressing them must
+/// reproduce the buffered, auto-decompressed body exactly.
+#[tokio::test]
+#[ignore = "live: needs network"]
+async fn live_h3_response_streaming_is_incremental() {
+    use futures_util::StreamExt;
+
+    let session = leyline::Session::builder()
+        .browser(Browser::Chrome147)
+        .http3()
+        .build()
+        .expect("h3 session builds");
+
+    // Buffered baseline (auto-decompressed) for the same resource, to compare
+    // the streamed body against after decompressing it.
+    let expected = session
+        .get("https://cloudflare-quic.com/")
+        .send()
+        .await
+        .expect("buffered H3 request failed")
+        .into_bytes();
+
+    let resp = session
+        .get("https://cloudflare-quic.com/")
+        .stream()
+        .send()
+        .await
+        .expect("streamed H3 request failed");
+    assert_eq!(resp.status(), 200);
+    // Streaming preserves content-encoding (no auto-decompress); capture it
+    // before into_stream consumes the response.
+    let encoding = resp.header("content-encoding").map(str::to_ascii_lowercase);
+
+    let mut stream = resp.into_stream().expect("into_stream");
+    let mut chunks = 0usize;
+    let mut compressed: Vec<u8> = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.expect("h3 body chunk");
+        chunks += 1;
+        compressed.extend_from_slice(&chunk);
+    }
+
+    // The streamed body is delivered raw (compressed). Decompress it per its
+    // content-encoding and compare to the buffered (decompressed) baseline: a
+    // body truncated at the idle timeout neither decodes cleanly nor matches
+    // the full length. Comparing the *compressed* streamed length against the
+    // *decompressed* buffered length is meaningless (~9× apart for HTML).
+    let decoded = decode_content_encoding(&compressed, encoding.as_deref());
+    assert_eq!(
+        decoded, expected,
+        "streamed H3 body differs from buffered: {} decoded bytes (from {} compressed, encoding={encoding:?}) in {chunks} chunks vs {} buffered",
+        decoded.len(),
+        compressed.len(),
+        expected.len(),
+    );
+    // ... and arrived incrementally (multiple chunks), not as one buffered blob.
+    assert!(
+        chunks > 1,
+        "expected incremental H3 delivery, got {chunks} chunk(s) for {} bytes",
+        compressed.len()
+    );
+    println!(
+        "✓ H3 incremental streaming: {chunks} chunks, {} compressed → {} bytes ({encoding:?})",
+        compressed.len(),
+        decoded.len()
+    );
+}
+
+/// A streaming REQUEST body over H3 is pumped into the request stream chunk by
+/// chunk and the terminating FIN rides the last chunk — never an interior one.
+/// POST a large multi-chunk body (no content-length, so the driver delimits it
+/// by HTTP/3 framing alone) to an echo origin and assert it round-trips exactly:
+/// a body finished early (premature FIN) or reordered would not echo intact, and
+/// one large enough to span many QUIC packets exercises flow-control parking and
+/// the write-retry path.
+#[tokio::test]
+#[ignore = "live: needs network"]
+async fn live_h3_streaming_request_body_roundtrips() {
+    use bytes::Bytes;
+    use futures_util::stream;
+    use leyline::core::Body;
+
+    let session = leyline::Session::builder()
+        .browser(Browser::Chrome147)
+        .http3()
+        .build()
+        .expect("h3 session builds");
+
+    // 320 KB of a deterministic, order-sensitive a–z pattern, fed as 1 KB
+    // chunks. Larger than the 256 KB per-stream upload window, so the pump's
+    // byte-credit must recycle (driver `add_permits` as bytes hit the wire) —
+    // a broken credit cycle would deadlock the upload at the window and time the
+    // test out. A correct, byte-exact echo proves ordered, complete delivery. A
+    // known length is supplied so a `content-length` rides the request (the body
+    // is still pumped incrementally) — the common file-upload shape.
+    let total = 320 * 1024;
+    let expected: Vec<u8> = (0..total).map(|i| b'a' + (i % 26) as u8).collect();
+    let chunks: Vec<std::io::Result<Bytes>> = expected
+        .chunks(1024)
+        .map(|c| Ok(Bytes::copy_from_slice(c)))
+        .collect();
+    let chunk_count = chunks.len();
+    let body = Body::stream_with_length(stream::iter(chunks), total as u64);
+
+    let resp = session
+        .post("https://httpbin.agrd.workers.dev/post")
+        .header("content-type", "text/plain")
+        .body(body)
+        .send()
+        .await
+        .expect("streamed H3 POST failed");
+    assert_eq!(resp.status(), 200, "echo origin returned non-200");
+
+    let raw = resp.bytes();
+    let v: Value = serde_json::from_slice(raw).expect("echo response is JSON");
+    let expected_str = std::str::from_utf8(&expected).unwrap();
+    // This echo origin reflects the raw request body in `body` (its schema also
+    // echoes `headers`, so a correct `content-length` there is a second witness
+    // the whole body landed).
+    let echoed = match v["body"].as_str() {
+        Some(s) => s,
+        None => {
+            let keys: Vec<&String> = v
+                .as_object()
+                .map(|o| o.keys().collect())
+                .unwrap_or_default();
+            let head: String = String::from_utf8_lossy(raw).chars().take(400).collect();
+            panic!("echo `body` is not a string; response keys={keys:?}; head={head}");
+        }
+    };
+    assert_eq!(
+        echoed.len(),
+        expected_str.len(),
+        "echoed body length {} != sent {} (truncated upload — premature FIN?)",
+        echoed.len(),
+        expected_str.len()
+    );
+    assert_eq!(
+        echoed, expected_str,
+        "echoed streaming H3 body differs from sent (corrupt or reordered upload)"
+    );
+    println!(
+        "✓ H3 streaming request body: {} bytes in {chunk_count} chunks round-tripped exactly",
+        expected.len()
+    );
+}
+
+/// Decompress a response body per its `content-encoding`. Used by the H3
+/// streaming test, which receives the body raw (leyline's streaming path
+/// preserves `content-encoding` and leaves decompression to the caller).
+fn decode_content_encoding(body: &[u8], encoding: Option<&str>) -> Vec<u8> {
+    use std::io::Read;
+    match encoding {
+        Some("br") => {
+            let mut out = Vec::new();
+            brotli::Decompressor::new(body, 4096)
+                .read_to_end(&mut out)
+                .expect("brotli decode");
+            out
+        }
+        Some("gzip") | Some("x-gzip") => {
+            let mut out = Vec::new();
+            flate2::read::GzDecoder::new(body)
+                .read_to_end(&mut out)
+                .expect("gzip decode");
+            out
+        }
+        Some("zstd") => zstd::decode_all(body).expect("zstd decode"),
+        Some("deflate") => {
+            let mut out = Vec::new();
+            flate2::read::ZlibDecoder::new(body)
+                .read_to_end(&mut out)
+                .expect("deflate decode");
+            out
+        }
+        // identity / absent / unknown → already plaintext.
+        _ => body.to_vec(),
+    }
 }
 
 // ─── Live: session resumption ───────────────────────

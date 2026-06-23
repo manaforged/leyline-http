@@ -1,7 +1,8 @@
 //! HTTP connection pool.
 //!
-//! Keys entries by `(host, port, proxy)` and supports two protocol
-//! flavours:
+//! Keys entries by `(host, port, proxy, transport)` — the `transport` tag
+//! (`Tcp`/`Quic`) lets an H2 and an H3 connection to the same destination
+//! coexist rather than clobber. It supports three protocol flavours:
 //!
 //! - **HTTP/2** — one connection per destination; the pooled handle
 //!   is [`crate::h2::H2Client`], which is cloneable and multiplexes concurrent
@@ -16,6 +17,10 @@
 //!   deque for a request/response exchange and returns it on a reusable
 //!   completion; requests beyond the cap wait on the semaphore for a
 //!   connection to free, rather than opening unbounded sockets.
+//! - **HTTP/3** — one QUIC connection per destination (feature `http3`); the
+//!   pooled handle is [`crate::quic::H3Client`], cloneable and multiplexing
+//!   like H2. Keyed under `Transport::Quic` so it never collides with a TCP
+//!   (H1/H2) entry to the same host.
 //!
 //! ## Eviction
 //! - **Idle timeout**: entries untouched for longer than the configured
@@ -51,14 +56,20 @@ pub use pool::{
 };
 pub use types::{H1Slot, PoolStats, TlsInfo};
 
-use types::{H2Io, PoolKey};
+use types::{H2Io, PoolKey, Transport};
 
-/// Construct a pool key. Visible to the `h1` submodule.
-pub(crate) fn make_key(host: &str, port: u16, proxy: Option<&str>) -> PoolKey {
+/// Construct a pool key for a transport family. Visible to the `h1` submodule.
+pub(crate) fn make_key(
+    host: &str,
+    port: u16,
+    proxy: Option<&str>,
+    transport: Transport,
+) -> PoolKey {
     PoolKey {
         host: host.to_string(),
         port,
         proxy: proxy.map(|s| s.to_string()),
+        transport,
     }
 }
 
@@ -103,12 +114,13 @@ async fn open_fresh_h2(
 /// Establish — or join an already in-progress — H2 connection to `(host, port, proxy)`,
 /// single-flighting concurrent first-requests so they share ONE TLS+H2 handshake instead of each
 /// opening their own. This eliminates the connection storm a one-conn-per-host pool otherwise
-/// triggers when N requests hit a cold destination at once, and (because the connect runs inside a
-/// boxed `Shared` future) keeps the large handshake state machine off every caller's per-request
+/// triggers when N requests hit a cold destination at once, and (because the connect runs on its
+/// own spawned task) keeps the large handshake state machine off every caller's per-request
 /// future. H2-only: H1 keeps opening parallel connections via its own path.
 ///
-/// The connect future removes its own in-flight entry on completion, so a cancelled leader cannot
-/// strand waiters and the next miss after a connection dies starts a fresh connect.
+/// The spawned connect always runs to completion and removes its own in-flight entry, so a
+/// cancelled leader cannot strand waiters (or leak the pool), and the next miss after a connection
+/// dies starts a fresh connect.
 async fn open_h2_coalesced(
     pool: &Arc<Pool>,
     connector: &ConnectorVariant,
@@ -127,14 +139,18 @@ async fn open_h2_coalesced(
 
     let shared = pool.inflight_h2_get_or_insert_with(key.clone(), || {
         let pool = Arc::clone(pool);
-        let cleanup_pool = Arc::clone(&pool);
         let connector = connector.clone();
         let h2_config = h2_config.clone();
         let connect_key = key.clone();
         let cleanup_key = key.clone();
         let host = host.to_string();
         let proxy = proxy.map(|s| s.to_string());
-        async move {
+        // Spawn so the connect is DRIVEN TO COMPLETION — and always runs its
+        // cleanup — even if every awaiter cancels. A `Shared` future is lazy:
+        // held only in the in-flight map and never polled, it would otherwise
+        // strand the half-open connect and leak the whole `Pool` through the
+        // `Arc<Pool>` it captures (a Pool→Shared→Pool cycle the cleanup never breaks).
+        let handle = tokio::spawn(async move {
             let result = open_fresh_h2(
                 &pool,
                 &connector,
@@ -146,11 +162,21 @@ async fn open_h2_coalesced(
             )
             .await
             .map_err(Arc::new);
-            // On completion (success or failure, driven by whichever task), drop our in-flight
-            // entry. On success the connection is already installed in the pool by
+            // On completion (success or failure) drop our in-flight entry. On
+            // success the connection is already installed in the pool by
             // `open_fresh_h2`, so subsequent callers checkout-hit rather than re-connect.
-            cleanup_pool.inflight_h2_remove(&cleanup_key);
+            pool.inflight_h2_remove(&cleanup_key);
             result
+        });
+        async move {
+            handle.await.unwrap_or_else(|e| {
+                Err(Arc::new(crate::Error::Http2(
+                    crate::h2::error::H2Error::Connection {
+                        code: crate::h2::error::ErrorCode::InternalError,
+                        reason: format!("h2 connect task failed: {e}"),
+                    },
+                )))
+            })
         }
         .boxed()
         .shared()
@@ -160,9 +186,12 @@ async fn open_h2_coalesced(
         Ok(pair) => Ok(pair),
         Err(_shared_err) => {
             // The shared connect failed; its error is `Arc`-shared (one failure
-            // fanned out to every waiter). Rather than surface that already-stale,
-            // shared failure we make our own single fresh attempt — concurrent
-            // failures degrade to sequential retries, never a permanent storm.
+            // fanned out to every waiter). Rather than surface that already-stale
+            // failure, each waiter makes its own fresh attempt. These run
+            // concurrently, but the pool keeps a single entry per key (a later
+            // `install_h2` overwrites, GOAWAY-closing the displaced driver), so a
+            // shared failure costs a burst of reconnects, not a permanent storm.
+            // Note: re-single-flight the retry if that burst is ever a problem.
             Box::pin(open_fresh_h2(
                 pool, connector, h2_config, key, host, port, proxy,
             ))
@@ -188,7 +217,7 @@ pub async fn checkout_handle(
     port: u16,
     proxy: Option<&str>,
 ) -> Result<(crate::h2::client::H2Client, TlsInfo), crate::Error> {
-    let key = make_key(host, port, proxy);
+    let key = make_key(host, port, proxy, Transport::Tcp);
 
     pool.evict_idle();
 
@@ -197,6 +226,100 @@ pub async fn checkout_handle(
     }
 
     open_h2_coalesced(pool, connector, h2_config, key, host, port, proxy).await
+}
+
+/// Open a fresh QUIC + HTTP/3 connection and install it into `pool` under
+/// `key`, returning the cloneable handle plus TLS metadata. The H3 analogue of
+/// [`open_fresh_h2`]; `install_or_get_h3` keeps an existing live entry if a
+/// concurrent connect beat us, dropping ours cleanly.
+#[cfg(feature = "http3")]
+async fn open_fresh_h3_installed(
+    pool: &Arc<Pool>,
+    h3_config: &crate::quic::H3Config,
+    profile: &crate::profile::BrowserProfile,
+    key: PoolKey,
+    host: &str,
+    port: u16,
+) -> Result<(crate::quic::H3Client, TlsInfo), crate::Error> {
+    let (handle, driver, tls) = crate::quic::open_fresh_h3(h3_config, profile, host, port)
+        .await
+        .map_err(crate::Error::Http3)?;
+    Ok(pool.install_or_get_h3(key, handle, driver, tls))
+}
+
+/// Establish — or join an already in-progress — QUIC + HTTP/3 connection to
+/// `(host, port)`, single-flighting concurrent first-requests (and both `Race`
+/// legs) so they share ONE handshake instead of each opening their own QUIC
+/// connection and dropping all but the first at install. Mirrors
+/// [`open_h2_coalesced`]: the connect runs inside a boxed `Shared` future that
+/// removes its own in-flight entry on completion, so a cancelled leader cannot
+/// strand waiters and the next miss after a connection dies starts fresh.
+#[cfg(feature = "http3")]
+async fn open_h3_coalesced(
+    pool: &Arc<Pool>,
+    h3_config: &crate::quic::H3Config,
+    profile: &crate::profile::BrowserProfile,
+    key: PoolKey,
+    host: &str,
+    port: u16,
+) -> Result<(crate::quic::H3Client, TlsInfo), crate::Error> {
+    use futures_util::FutureExt;
+
+    // A connect may have finished between the caller's pool miss and now.
+    if let Some(hit) = pool.checkout_h3(&key) {
+        return Ok(hit);
+    }
+
+    let shared = pool.inflight_h3_get_or_insert_with(key.clone(), || {
+        let pool = Arc::clone(pool);
+        let h3_config = h3_config.clone();
+        let profile = profile.clone();
+        let connect_key = key.clone();
+        let cleanup_key = key.clone();
+        let host = host.to_string();
+        // Spawn so the connect is DRIVEN TO COMPLETION — and always runs its
+        // cleanup — even if every awaiter cancels (e.g. the losing leg of a
+        // `Race`). A `Shared` future is lazy: held only in the in-flight map
+        // and never polled, it would otherwise strand the half-open connect
+        // (and its UDP socket) and leak the whole `Pool` through the `Arc<Pool>`
+        // the connect captures (a Pool→Shared→Pool cycle the cleanup never breaks).
+        let handle = tokio::spawn(async move {
+            let result =
+                open_fresh_h3_installed(&pool, &h3_config, &profile, connect_key, &host, port)
+                    .await
+                    .map_err(Arc::new);
+            // On completion (success or failure) drop our in-flight entry. On
+            // success the connection is already installed, so later callers
+            // checkout-hit rather than re-connect.
+            pool.inflight_h3_remove(&cleanup_key);
+            result
+        });
+        async move {
+            handle.await.unwrap_or_else(|e| {
+                Err(Arc::new(crate::Error::Http3(format!(
+                    "h3 connect task failed: {e}"
+                ))))
+            })
+        }
+        .boxed()
+        .shared()
+    });
+
+    match shared.await {
+        Ok(pair) => Ok(pair),
+        Err(_shared_err) => {
+            // The shared connect failed (one failure fanned out to every
+            // waiter); each makes its own fresh attempt rather than surface a
+            // stale shared error. These run concurrently, but `install_or_get_h3`
+            // keeps the first live connection and drops the rest, so a shared
+            // failure costs a burst of reconnects, not a permanent storm.
+            // Note: re-single-flight the retry if that burst is ever a problem.
+            Box::pin(open_fresh_h3_installed(
+                pool, h3_config, profile, key, host, port,
+            ))
+            .await
+        }
+    }
 }
 
 /// Obtain a cloneable [`crate::quic::H3Client`] for `(host, port)`, reusing a
@@ -216,7 +339,7 @@ pub async fn checkout_h3_handle(
     host: &str,
     port: u16,
 ) -> Result<(crate::quic::H3Client, TlsInfo), crate::Error> {
-    let key = make_key(host, port, None);
+    let key = make_key(host, port, None, Transport::Quic);
 
     pool.evict_idle();
 
@@ -224,10 +347,7 @@ pub async fn checkout_h3_handle(
         return Ok(hit);
     }
 
-    let (handle, driver, tls) = crate::quic::open_fresh_h3(h3_config, profile, host, port)
-        .await
-        .map_err(crate::Error::Http3)?;
-    Ok(pool.install_or_get_h3(key, handle, driver, tls))
+    open_h3_coalesced(pool, h3_config, profile, key, host, port).await
 }
 
 /// Send an HTTP/3 request, reusing a pooled QUIC connection when alive.
@@ -252,14 +372,30 @@ pub async fn send_request_h3_pooled(
     path: &str,
     headers: &[(String, String)],
     body: Option<bytes::Bytes>,
-) -> Result<(crate::quic::H3Response, TlsInfo), crate::Error> {
-    let key = make_key(host, port, None);
+    body_stream: Option<crate::quic::H3RequestBodyStream>,
+    stream_response: bool,
+) -> Result<(crate::quic::H3ResponseParts, TlsInfo), crate::Error> {
+    let key = make_key(host, port, None, Transport::Quic);
 
     pool.evict_idle();
 
+    // A streaming request body is one-shot: it can be handed to a single send
+    // attempt only, so a stale pooled connection can't be transparently retried
+    // (mirrors the H2 path). `take` moves it into the pool-hit attempt below.
+    let body_is_stream = body_stream.is_some();
+    let mut body_stream = body_stream;
+
     if let Some((handle, tls)) = pool.checkout_h3(&key) {
         match handle
-            .send_request(method, authority, path, headers, body.clone())
+            .send_request(
+                method,
+                authority,
+                path,
+                headers,
+                body.clone(),
+                body_stream.take(),
+                stream_response,
+            )
             .await
         {
             Ok(resp) => return Ok((resp, tls)),
@@ -276,16 +412,27 @@ pub async fn send_request_h3_pooled(
                     "pool stale hit -- pooled h3 connection unsent, opening fresh"
                 );
                 pool.invalidate(&key);
+                if body_is_stream {
+                    return Err(crate::Error::Body(format!(
+                        "pooled h3 connection died and a streaming request body cannot be retried: {}",
+                        e.message()
+                    )));
+                }
             }
         }
     }
 
-    let (handle, driver, tls) = crate::quic::open_fresh_h3(h3_config, profile, host, port)
-        .await
-        .map_err(crate::Error::Http3)?;
-    let (handle, tls) = pool.install_or_get_h3(key, handle, driver, tls);
+    let (handle, tls) = open_h3_coalesced(pool, h3_config, profile, key, host, port).await?;
     let resp = handle
-        .send_request(method, authority, path, headers, body)
+        .send_request(
+            method,
+            authority,
+            path,
+            headers,
+            body,
+            body_stream,
+            stream_response,
+        )
         .await
         .map_err(|e| crate::Error::Http3(e.message().to_string()))?;
     Ok((resp, tls))
@@ -314,7 +461,7 @@ pub async fn send_request(
     connector: &ConnectorVariant,
     h2_config: &H2Config,
     pseudo: PseudoHeaders,
-    headers: Vec<(String, String)>,
+    headers: Vec<crate::h2::connection::HeaderPair>,
     body: RequestBody,
     proxy: Option<&str>,
     stream_response: bool,
@@ -324,7 +471,7 @@ pub async fn send_request(
 
     let (connect_host, connect_port) = parse_authority(host, port);
 
-    let key = make_key(connect_host, connect_port, proxy);
+    let key = make_key(connect_host, connect_port, proxy, Transport::Tcp);
 
     pool.evict_idle();
 
@@ -432,4 +579,29 @@ fn parse_authority(authority: &str, default_port: u16) -> (&str, u16) {
         }
     }
     (authority, default_port)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The keystone of H2/H3 coexistence: the same destination under different
+    // transports must be DISTINCT pool keys, or an H3 install clobbers a live
+    // H2 entry (and vice versa). If this ever asserts equal, the pool collapsed
+    // back to one-entry-per-host and the collision is back.
+    #[test]
+    fn transport_separates_the_keyspace() {
+        let tcp = make_key("example.com", 443, None, Transport::Tcp);
+        let quic = make_key("example.com", 443, None, Transport::Quic);
+        assert_ne!(tcp, quic, "H2 (Tcp) and H3 (Quic) must not share a key");
+
+        // Same transport + destination → same key (so reuse still works).
+        assert_eq!(tcp, make_key("example.com", 443, None, Transport::Tcp));
+
+        // The proxy leg still participates in identity.
+        assert_ne!(
+            tcp,
+            make_key("example.com", 443, Some("p:8080"), Transport::Tcp)
+        );
+    }
 }

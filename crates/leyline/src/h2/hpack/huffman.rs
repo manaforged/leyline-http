@@ -292,9 +292,9 @@ pub fn encode(src: &[u8], dst: &mut Vec<u8>) {
 
 /// Huffman-decode a byte slice. Returns an error if padding is invalid.
 ///
-/// Uses a canonical Huffman decode table for O(code_length) per symbol
-/// instead of O(257) linear scan. The accumulator is u64 to safely handle
-/// 30-bit codes (CR, LF, control chars) without overflow.
+/// Common codes (length 5..=8) resolve via an 8-bit fast table in one lookup;
+/// longer codes fall back to a per-length binary search. The accumulator is
+/// u64 to safely handle 30-bit codes (CR, LF, control chars) without overflow.
 pub fn decode(src: &[u8]) -> Result<Vec<u8>, &'static str> {
     let table = decode_table();
     let mut dst = Vec::new();
@@ -336,17 +336,23 @@ pub fn decode(src: &[u8]) -> Result<Vec<u8>, &'static str> {
     Ok(dst)
 }
 
-/// Decode lookup table: HashMap<(code, len), symbol>, built once.
-/// Uses FxHashMap-style direct indexing by code length for fast lookup.
-///
-/// Layout: for each code length (5..=30), a HashMap of code→symbol.
-/// We try each length starting from shortest (5), extract that many bits
-/// from the accumulator, and check the map. ~15 length checks max, each
-/// is a single HashMap lookup instead of 257 linear comparisons.
+/// One entry of the 8-bit fast table: the short code (length 5..=8) that
+/// begins at this 8-bit prefix. `len == 0` means the prefix is part of a
+/// longer code — fall back to `by_length`.
+#[derive(Clone, Copy)]
+struct Fast8 {
+    sym: u16,
+    len: u8,
+}
+
+/// Decode lookup table, built once. Two tiers:
+/// - `fast8`: a direct 8-bit index resolving every code of length 5..=8 (the
+///   common ASCII case) in one lookup.
+/// - `by_length`: per-length buckets (code-sorted for binary search), the
+///   fallback for codes longer than 8 bits.
 struct DecodeTable {
-    /// Maps indexed by (code_length - 5). Each entry is a Vec of (code, symbol)
-    /// pairs sorted by code for binary search.
     by_length: [Vec<(u32, u16)>; 26], // lengths 5..=30
+    fast8: [Fast8; 256],
 }
 
 impl DecodeTable {
@@ -361,7 +367,27 @@ impl DecodeTable {
         for bucket in &mut by_length {
             bucket.sort_unstable_by_key(|&(code, _)| code);
         }
-        Self { by_length }
+        // Build the 8-bit fast table. For each 8-bit prefix, find the unique
+        // short code (length 5..=8) that starts it. Prefix-free codes mean
+        // shortest-first finds the one valid code; a miss leaves len == 0.
+        let lookup = |code: u32, len: u8| -> Option<u16> {
+            let bucket = &by_length[(len - 5) as usize];
+            bucket
+                .binary_search_by_key(&code, |&(c, _)| c)
+                .ok()
+                .map(|idx| bucket[idx].1)
+        };
+        let mut fast8 = [Fast8 { sym: 0, len: 0 }; 256];
+        for (v, slot) in fast8.iter_mut().enumerate() {
+            for len in 5u8..=8 {
+                let candidate = (v as u32) >> (8 - len);
+                if let Some(sym) = lookup(candidate, len) {
+                    *slot = Fast8 { sym, len };
+                    break;
+                }
+            }
+        }
+        Self { by_length, fast8 }
     }
 
     fn lookup(&self, code: u32, len: u8) -> Option<u16> {
@@ -383,13 +409,24 @@ fn decode_table() -> &'static DecodeTable {
     &TABLE
 }
 
-/// Decode one symbol from the accumulator.
-/// Tries each code length from shortest (5) to longest (30).
-/// Each attempt is a binary search in a small bucket — O(log n) per length.
+/// Decode one symbol from the accumulator. With >=8 bits buffered, the 8-bit
+/// fast table resolves codes of length 5..=8 in one lookup; longer codes (and
+/// the <8-bit stream tail) fall back to a shortest-first binary search per
+/// length.
 fn decode_symbol(table: &DecodeTable, acc: u64, acc_bits: u8) -> Option<(u16, u8)> {
-    // Try each code length from shortest to longest.
+    let start = if acc_bits >= 8 {
+        let top8 = ((acc >> (acc_bits - 8)) & 0xff) as usize;
+        let f = table.fast8[top8];
+        if f.len != 0 {
+            return Some((f.sym, f.len));
+        }
+        // Fast-table miss => the prefix belongs to a code longer than 8 bits.
+        9
+    } else {
+        5
+    };
     let max_len = acc_bits.min(30);
-    for len in 5..=max_len {
+    for len in start..=max_len {
         let shift = acc_bits - len;
         let candidate = (acc >> shift) as u32;
         if let Some(symbol) = table.lookup(candidate, len) {
@@ -466,6 +503,37 @@ mod tests {
             encode(&input, &mut encoded);
             let decoded = decode(&encoded).unwrap();
             assert_eq!(decoded, input, "roundtrip failed for byte {byte}");
+        }
+    }
+
+    #[test]
+    fn roundtrip_all_byte_pairs() {
+        // Every two-byte sequence exercises symbol-to-symbol transitions and
+        // the 8-bit fast-path / long-code fallback boundary across all codes.
+        let mut encoded = Vec::new();
+        for a in 0u8..=255 {
+            for b in 0u8..=255 {
+                encoded.clear();
+                let input = [a, b];
+                encode(&input, &mut encoded);
+                let decoded = decode(&encoded).unwrap();
+                assert_eq!(decoded, input, "roundtrip failed for [{a}, {b}]");
+            }
+        }
+    }
+
+    #[test]
+    fn roundtrip_realistic_headers() {
+        for s in &[
+            b"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36" as &[u8],
+            b"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            b"https://www.example.com/path/to/resource?query=value&other=thing",
+            b"gzip, deflate, br, zstd",
+        ] {
+            let mut encoded = Vec::new();
+            encode(s, &mut encoded);
+            let decoded = decode(&encoded).unwrap();
+            assert_eq!(&decoded, s, "roundtrip failed for {:?}", std::str::from_utf8(s));
         }
     }
 

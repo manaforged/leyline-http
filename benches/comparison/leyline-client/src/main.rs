@@ -11,12 +11,31 @@ use std::time::Instant;
 use leyline::{Browser, Session};
 
 fn build() -> Session {
-    Session::builder()
+    let mut b = Session::builder()
         .browser(Browser::Chrome150)
         .http2()
-        .danger_accept_invalid_certs(true)
-        .build()
-        .expect("leyline session builds")
+        .danger_accept_invalid_certs(true);
+    // Optional egress proxy (`PROXY=http://user:pass@host:port` or socks5://…)
+    // so the paired comparison can run through a real proxy against a remote
+    // target, not just the loopback server.
+    if let Ok(p) = std::env::var("PROXY") {
+        if !p.is_empty() {
+            b = b.proxy(p);
+        }
+    }
+    b.build().expect("leyline session builds")
+}
+
+/// 64-bit FNV-1a — a dependency-free body fingerprint for the equivalence
+/// gate. The paired harness asserts leyline and wreq see the same status +
+/// body hash for the same URL, so the rps numbers compare equal work.
+fn fnv1a(bytes: &[u8]) -> u64 {
+    let mut h = 0xcbf2_9ce4_8422_2325u64;
+    for &b in bytes {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
 }
 
 #[tokio::main]
@@ -30,6 +49,20 @@ async fn main() {
     if args.get(2).map(|s| s.as_str()) == Some("print") {
         let resp = build().get(url.as_str()).send().await.expect("print req");
         println!("{}", resp.text());
+        return;
+    }
+
+    // Equivalence gate: one GET, emit status + body fingerprint so the
+    // orchestrator can assert leyline and wreq fetched identical bytes.
+    if args.get(2).map(|s| s.as_str()) == Some("equiv") {
+        let resp = build().get(url.as_str()).send().await.expect("equiv req");
+        let status = resp.status();
+        let body = resp.text();
+        println!(
+            "EQUIV leyline status={status} fnv={:016x} len={}",
+            fnv1a(body.as_bytes()),
+            body.len()
+        );
         return;
     }
 

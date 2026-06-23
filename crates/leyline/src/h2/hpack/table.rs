@@ -2,6 +2,8 @@
 
 use std::collections::VecDeque;
 
+use bytes::Bytes;
+
 /// Static table: 61 pre-defined header entries (RFC 7541 Appendix A).
 /// Index 1-61. Index 0 is unused.
 pub static STATIC_TABLE: &[(&str, &str)] = &[
@@ -73,8 +75,11 @@ pub static STATIC_TABLE: &[(&str, &str)] = &[
 ///
 /// Entries are indexed starting at STATIC_TABLE.len() (62).
 /// Newest entries have the lowest dynamic index.
+///
+/// Entries are stored as `Bytes` so a table hit materializes a decoded
+/// header by a refcount clone — no heap copy of the name/value.
 pub struct DynamicTable {
-    entries: VecDeque<(String, String)>,
+    entries: VecDeque<(Bytes, Bytes)>,
     /// Current size in bytes (name.len() + value.len() + 32 per entry).
     size: usize,
     /// Maximum size (set by SETTINGS_HEADER_TABLE_SIZE).
@@ -107,7 +112,7 @@ impl DynamicTable {
     }
 
     /// Insert a new entry at the front. Evicts old entries if needed.
-    pub fn insert(&mut self, name: String, value: String) {
+    pub fn insert(&mut self, name: Bytes, value: Bytes) {
         let entry_size = name.len() + value.len() + 32;
 
         // If the entry is larger than the table, clear everything.
@@ -130,11 +135,11 @@ impl DynamicTable {
         self.size += entry_size;
     }
 
-    /// Get an entry by dynamic index (0 = newest).
-    pub fn get(&self, index: usize) -> Option<(&str, &str)> {
-        self.entries
-            .get(index)
-            .map(|(n, v)| (n.as_str(), v.as_str()))
+    /// Get an entry by dynamic index (0 = newest). Borrows the stored
+    /// `Bytes` so a comparison scan does not refcount-churn; callers that
+    /// materialize clone explicitly (a refcount bump, no heap alloc).
+    pub fn get(&self, index: usize) -> Option<(&Bytes, &Bytes)> {
+        self.entries.get(index).map(|(n, v)| (n, v))
     }
 
     /// Number of entries.
@@ -171,13 +176,21 @@ impl Default for DynamicTable {
 
 /// Look up a header by index across static + dynamic tables.
 /// Static: 1-61. Dynamic: 62+.
-pub fn lookup(index: usize, dynamic: &DynamicTable) -> Option<(&str, &str)> {
+///
+/// Returns owned `Bytes`: a static entry borrows its `'static` literal via
+/// `Bytes::from_static` (no allocation), a dynamic entry refcount-clones the
+/// stored `Bytes` (no allocation). Either way the indexed-header decode path
+/// materializes a header without a heap copy.
+pub fn lookup(index: usize, dynamic: &DynamicTable) -> Option<(Bytes, Bytes)> {
     if index < STATIC_TABLE.len() {
         let (name, value) = STATIC_TABLE[index];
-        Some((name, value))
+        Some((
+            Bytes::from_static(name.as_bytes()),
+            Bytes::from_static(value.as_bytes()),
+        ))
     } else {
         let dyn_index = index - STATIC_TABLE.len();
-        dynamic.get(dyn_index)
+        dynamic.get(dyn_index).map(|(n, v)| (n.clone(), v.clone()))
     }
 }
 
@@ -202,6 +215,20 @@ pub fn find_static(name: &str, value: &str) -> Option<(usize, bool)> {
 mod tests {
     use super::*;
 
+    /// `(&str, &str)` view of a dynamic-table entry for assertions.
+    fn entry(dt: &DynamicTable, i: usize) -> Option<(&str, &str)> {
+        dt.get(i).map(|(n, v)| {
+            (
+                std::str::from_utf8(n).unwrap(),
+                std::str::from_utf8(v).unwrap(),
+            )
+        })
+    }
+
+    fn b(s: &str) -> Bytes {
+        Bytes::copy_from_slice(s.as_bytes())
+    }
+
     #[test]
     fn static_table_size() {
         assert_eq!(STATIC_TABLE.len(), 62); // 0-61
@@ -219,8 +246,8 @@ mod tests {
     #[test]
     fn dynamic_table_insert_and_get() {
         let mut dt = DynamicTable::new();
-        dt.insert("custom-header".into(), "value1".into());
-        assert_eq!(dt.get(0), Some(("custom-header", "value1")));
+        dt.insert(b("custom-header"), b("value1"));
+        assert_eq!(entry(&dt, 0), Some(("custom-header", "value1")));
         assert_eq!(dt.len(), 1);
     }
 
@@ -228,32 +255,40 @@ mod tests {
     fn dynamic_table_eviction() {
         // "aa" + "bb" + 32 = 36 bytes per entry. Max 70 = room for 1, not 2.
         let mut dt = DynamicTable::with_max_size(70);
-        dt.insert("aa".into(), "bb".into()); // 36 bytes
+        dt.insert(b("aa"), b("bb")); // 36 bytes
         assert_eq!(dt.len(), 1);
 
-        dt.insert("cc".into(), "dd".into()); // 36 bytes, total would be 72 > 70, evicts first
+        dt.insert(b("cc"), b("dd")); // 36 bytes, total would be 72 > 70, evicts first
         assert_eq!(dt.len(), 1);
-        assert_eq!(dt.get(0), Some(("cc", "dd")));
+        assert_eq!(entry(&dt, 0), Some(("cc", "dd")));
     }
 
     #[test]
     fn dynamic_table_oversized_entry_clears() {
         let mut dt = DynamicTable::with_max_size(32); // too small for any entry
-        dt.insert("x".into(), "y".into()); // 1+1+32 = 34, exceeds 32
+        dt.insert(b("x"), b("y")); // 1+1+32 = 34, exceeds 32
         assert_eq!(dt.len(), 0);
     }
 
     #[test]
     fn lookup_static_and_dynamic() {
         let mut dt = DynamicTable::new();
-        dt.insert("x-custom".into(), "val".into());
+        dt.insert(b("x-custom"), b("val"));
 
         // Static lookup.
-        assert_eq!(lookup(2, &dt), Some((":method", "GET")));
+        let (n, v) = lookup(2, &dt).unwrap();
+        assert_eq!(
+            (n.as_ref(), v.as_ref()),
+            (b"\x3amethod".as_ref(), b"GET".as_ref())
+        );
         // Dynamic lookup (index 62 = first dynamic entry).
-        assert_eq!(lookup(62, &dt), Some(("x-custom", "val")));
+        let (n, v) = lookup(62, &dt).unwrap();
+        assert_eq!(
+            (n.as_ref(), v.as_ref()),
+            (b"x-custom".as_ref(), b"val".as_ref())
+        );
         // Out of range.
-        assert_eq!(lookup(63, &dt), None);
+        assert!(lookup(63, &dt).is_none());
     }
 
     #[test]

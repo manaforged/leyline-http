@@ -30,12 +30,24 @@ pub struct TlsInfo {
     pub cipher: Option<String>,
 }
 
-/// Pool key — uniquely identifies a destination.
+/// Transport family a pool entry rides on. Separates the keyspace so an H2
+/// (TCP) and an H3 (QUIC) connection to the same destination coexist rather
+/// than clobbering each other. H1 and H2 share `Tcp`: they negotiate over the
+/// same TCP+TLS handshake (ALPN picks one), so a destination pools one or the
+/// other under that key, never both at once.
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub(crate) enum Transport {
+    Tcp,
+    Quic,
+}
+
+/// Pool key — uniquely identifies a destination and its transport family.
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub(crate) struct PoolKey {
     pub(crate) host: String,
     pub(crate) port: u16,
     pub(crate) proxy: Option<String>,
+    pub(crate) transport: Transport,
 }
 
 /// An owned HTTP/1.1 keep-alive slot. Carries the TLS-over-TCP or

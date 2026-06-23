@@ -7,6 +7,7 @@ use bytes::Bytes;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::mpsc;
 
+use crate::core::HeaderStr;
 use crate::h2::error::{ErrorCode, H2Error};
 use crate::h2::stream_state::StreamEvent;
 
@@ -266,16 +267,17 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 self.fail_stream(stream_id, err);
                 return Ok(());
             }
-            for header in &decoded {
-                if header.name == ":status" {
-                    actor.status = header
-                        .value
-                        .parse()
-                        .map_err(|_| H2Error::Hpack("invalid :status".into()))?;
-                } else if !header.name.starts_with(':') {
-                    actor
-                        .resp_headers
-                        .push((header.name.clone(), header.value.clone()));
+            for header in decoded {
+                if header.name.as_ref() == b":status" {
+                    actor.status = std::str::from_utf8(&header.value)
+                        .ok()
+                        .and_then(|v| v.parse().ok())
+                        .ok_or_else(|| H2Error::Hpack("invalid :status".into()))?;
+                } else if !header.name.starts_with(b":") {
+                    actor.resp_headers.push((
+                        HeaderStr::from_utf8_unchecked(header.name),
+                        HeaderStr::from_utf8_unchecked(header.value),
+                    ));
                 }
             }
             // 1xx informational (except 101) is provisional — discard and await
@@ -304,8 +306,11 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 return Ok(());
             }
             let mut th = Vec::new();
-            for header in &decoded {
-                th.push((header.name.clone(), header.value.clone()));
+            for header in decoded {
+                th.push((
+                    HeaderStr::from_utf8_unchecked(header.name),
+                    HeaderStr::from_utf8_unchecked(header.value),
+                ));
             }
             actor.trailers = Some(th);
             self.complete_stream(stream_id);

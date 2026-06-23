@@ -1,0 +1,47 @@
+name: public-api
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Diff leyline's whole public API surface against the PR base and fail on a
+  # BREAKING change (a changed or removed public item) so it is reviewed, not
+  # silently shipped. A breaking return-type change to headers()/trailers() — the
+  # kind that broke downstream header consumers — fails here before it reaches a
+  # consumer's next leyline bump. The compile-time guard in
+  # crates/leyline/tests/public_api_contract.rs covers the header accessors in the
+  # normal test run; this job covers the entire surface, cross-checked vs base.
+  #
+  # cargo-public-api needs nightly rustdoc JSON. The nightly is pinned so diffs
+  # are reproducible; bump it deliberately. The repo's rust-toolchain.toml pins
+  # stable, so the ephemeral CI checkout drops it for this job.
+  public-api-diff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0 # the base branch must be present for the diff
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-06-22
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-public-api@0.52.0
+
+      - name: Diff public API vs base, deny breaking changes
+        run: |
+          rm -f rust-toolchain.toml
+          cargo public-api -p leyline diff "origin/${{ github.base_ref }}" \
+            --deny changed --deny removed

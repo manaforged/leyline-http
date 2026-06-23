@@ -189,7 +189,13 @@ impl WsConnection {
         };
 
         let stream = h2_client
-            .open_extended_connect(pseudo, headers)
+            .open_extended_connect(
+                pseudo,
+                headers
+                    .into_iter()
+                    .map(|(k, v)| (std::borrow::Cow::Owned(k), std::borrow::Cow::Owned(v)))
+                    .collect(),
+            )
             .await
             .map_err(|e| Error::Http(format!("h2 ws: {e}")))?;
 

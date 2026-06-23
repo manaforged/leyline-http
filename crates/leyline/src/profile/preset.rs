@@ -1,5 +1,7 @@
 //! Request presets — Chrome-accurate header templates for each request type.
 
+use std::borrow::Cow;
+
 /// Request type preset that determines sec-fetch-* headers and ordering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
@@ -43,7 +45,24 @@ pub struct HeaderContext<'a> {
 }
 
 /// A single header name-value pair, in insertion order.
-pub type HeaderPair = (String, String);
+///
+/// Both parts are `Cow<'static, str>`: header names and Chrome-constant values
+/// are `Borrowed` static literals (zero allocation), while session- or
+/// request-derived values (UA, origin, referer) are `Owned`. The `'static`
+/// bound lets the assembled list move into the H2 driver's command channel.
+pub type HeaderPair = (Cow<'static, str>, Cow<'static, str>);
+
+/// Borrowed (zero-alloc) header part from a static literal.
+#[inline]
+fn b(s: &'static str) -> Cow<'static, str> {
+    Cow::Borrowed(s)
+}
+
+/// Owned header part from a runtime string (the session UA, an origin, …).
+#[inline]
+fn o(s: &str) -> Cow<'static, str> {
+    Cow::Owned(s.to_string())
+}
 
 impl Preset {
     /// Build the ordered header list for this preset.
@@ -63,113 +82,98 @@ impl Preset {
     /// every preset so the quoting lives in exactly one place.
     fn sec_ch_ua_platform(ctx: &HeaderContext<'_>) -> HeaderPair {
         (
-            "sec-ch-ua-platform".into(),
-            format!("\"{}\"", ctx.sec_ch_ua_platform),
+            b("sec-ch-ua-platform"),
+            Cow::Owned(format!("\"{}\"", ctx.sec_ch_ua_platform)),
         )
     }
 
     /// `accept-encoding` value shared by every Chrome-shaped preset.
     fn accept_encoding() -> HeaderPair {
-        (
-            "accept-encoding".into(),
-            "gzip, deflate, br, zstd".to_string(),
-        )
+        (b("accept-encoding"), b("gzip, deflate, br, zstd"))
     }
 
     fn navigate_headers(ctx: &HeaderContext<'_>) -> Vec<HeaderPair> {
         vec![
-            ("sec-ch-ua".into(), ctx.sec_ch_ua.to_string()),
-            ("sec-ch-ua-mobile".into(), ctx.sec_ch_ua_mobile.to_string()),
+            (b("sec-ch-ua"), o(ctx.sec_ch_ua)),
+            (b("sec-ch-ua-mobile"), o(ctx.sec_ch_ua_mobile)),
             Self::sec_ch_ua_platform(ctx),
-            ("upgrade-insecure-requests".into(), "1".to_string()),
-            ("user-agent".into(), ctx.user_agent.to_string()),
-            ("accept".into(), "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7".to_string()),
-            ("sec-fetch-site".into(), "none".to_string()),
-            ("sec-fetch-mode".into(), "navigate".to_string()),
-            ("sec-fetch-user".into(), "?1".to_string()),
-            ("sec-fetch-dest".into(), "document".to_string()),
+            (b("upgrade-insecure-requests"), b("1")),
+            (b("user-agent"), o(ctx.user_agent)),
+            (b("accept"), b("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")),
+            (b("sec-fetch-site"), b("none")),
+            (b("sec-fetch-mode"), b("navigate")),
+            (b("sec-fetch-user"), b("?1")),
+            (b("sec-fetch-dest"), b("document")),
             Self::accept_encoding(),
-            ("accept-language".into(), ctx.accept_language.to_string()),
+            (b("accept-language"), o(ctx.accept_language)),
         ]
     }
 
     fn script_headers(ctx: &HeaderContext<'_>) -> Vec<HeaderPair> {
         vec![
-            ("sec-ch-ua".into(), ctx.sec_ch_ua.to_string()),
-            ("sec-ch-ua-mobile".into(), ctx.sec_ch_ua_mobile.to_string()),
+            (b("sec-ch-ua"), o(ctx.sec_ch_ua)),
+            (b("sec-ch-ua-mobile"), o(ctx.sec_ch_ua_mobile)),
             Self::sec_ch_ua_platform(ctx),
-            ("user-agent".into(), ctx.user_agent.to_string()),
-            ("accept".into(), "*/*".to_string()),
-            ("sec-fetch-site".into(), "same-origin".to_string()),
-            ("sec-fetch-mode".into(), "no-cors".to_string()),
-            ("sec-fetch-dest".into(), "script".to_string()),
-            ("referer".into(), ctx.referer.to_string()),
+            (b("user-agent"), o(ctx.user_agent)),
+            (b("accept"), b("*/*")),
+            (b("sec-fetch-site"), b("same-origin")),
+            (b("sec-fetch-mode"), b("no-cors")),
+            (b("sec-fetch-dest"), b("script")),
+            (b("referer"), o(ctx.referer)),
             Self::accept_encoding(),
-            ("accept-language".into(), ctx.accept_language.to_string()),
+            (b("accept-language"), o(ctx.accept_language)),
         ]
     }
 
     fn xhr_headers(ctx: &HeaderContext<'_>) -> Vec<HeaderPair> {
         vec![
-            ("sec-ch-ua".into(), ctx.sec_ch_ua.to_string()),
-            ("sec-ch-ua-mobile".into(), ctx.sec_ch_ua_mobile.to_string()),
+            (b("sec-ch-ua"), o(ctx.sec_ch_ua)),
+            (b("sec-ch-ua-mobile"), o(ctx.sec_ch_ua_mobile)),
             Self::sec_ch_ua_platform(ctx),
-            ("user-agent".into(), ctx.user_agent.to_string()),
-            (
-                "accept".into(),
-                "application/json, text/plain, */*".to_string(),
-            ),
-            ("origin".into(), ctx.origin.to_string()),
-            ("sec-fetch-site".into(), "same-origin".to_string()),
-            ("sec-fetch-mode".into(), "cors".to_string()),
-            ("sec-fetch-dest".into(), "empty".to_string()),
-            ("referer".into(), ctx.referer.to_string()),
+            (b("user-agent"), o(ctx.user_agent)),
+            (b("accept"), b("application/json, text/plain, */*")),
+            (b("origin"), o(ctx.origin)),
+            (b("sec-fetch-site"), b("same-origin")),
+            (b("sec-fetch-mode"), b("cors")),
+            (b("sec-fetch-dest"), b("empty")),
+            (b("referer"), o(ctx.referer)),
             Self::accept_encoding(),
-            ("accept-language".into(), ctx.accept_language.to_string()),
+            (b("accept-language"), o(ctx.accept_language)),
         ]
     }
 
     fn form_headers(ctx: &HeaderContext<'_>) -> Vec<HeaderPair> {
         vec![
-            ("sec-ch-ua".into(), ctx.sec_ch_ua.to_string()),
-            ("sec-ch-ua-mobile".into(), ctx.sec_ch_ua_mobile.to_string()),
+            (b("sec-ch-ua"), o(ctx.sec_ch_ua)),
+            (b("sec-ch-ua-mobile"), o(ctx.sec_ch_ua_mobile)),
             Self::sec_ch_ua_platform(ctx),
-            ("user-agent".into(), ctx.user_agent.to_string()),
-            (
-                "accept".into(),
-                "application/json, text/plain, */*".to_string(),
-            ),
-            (
-                "content-type".into(),
-                "application/x-www-form-urlencoded".to_string(),
-            ),
-            ("origin".into(), ctx.origin.to_string()),
-            ("sec-fetch-site".into(), "same-origin".to_string()),
-            ("sec-fetch-mode".into(), "cors".to_string()),
-            ("sec-fetch-dest".into(), "empty".to_string()),
-            ("referer".into(), ctx.referer.to_string()),
+            (b("user-agent"), o(ctx.user_agent)),
+            (b("accept"), b("application/json, text/plain, */*")),
+            (b("content-type"), b("application/x-www-form-urlencoded")),
+            (b("origin"), o(ctx.origin)),
+            (b("sec-fetch-site"), b("same-origin")),
+            (b("sec-fetch-mode"), b("cors")),
+            (b("sec-fetch-dest"), b("empty")),
+            (b("referer"), o(ctx.referer)),
             Self::accept_encoding(),
-            ("accept-language".into(), ctx.accept_language.to_string()),
+            (b("accept-language"), o(ctx.accept_language)),
         ]
     }
 
     fn cross_origin_headers(ctx: &HeaderContext<'_>) -> Vec<HeaderPair> {
         vec![
-            ("sec-ch-ua".into(), ctx.sec_ch_ua.to_string()),
-            ("sec-ch-ua-mobile".into(), ctx.sec_ch_ua_mobile.to_string()),
+            (b("sec-ch-ua"), o(ctx.sec_ch_ua)),
+            (b("sec-ch-ua-mobile"), o(ctx.sec_ch_ua_mobile)),
             Self::sec_ch_ua_platform(ctx),
-            ("user-agent".into(), ctx.user_agent.to_string()),
-            (
-                "accept".into(),
-                "application/json, text/plain, */*".to_string(),
-            ),
-            ("origin".into(), ctx.origin.to_string()),
-            ("sec-fetch-site".into(), "cross-site".to_string()),
-            ("sec-fetch-mode".into(), "cors".to_string()),
-            ("sec-fetch-dest".into(), "empty".to_string()),
-            ("referer".into(), ctx.referer.to_string()),
+            (b("user-agent"), o(ctx.user_agent)),
+            (b("accept"), b("application/json, text/plain, */*")),
+            (b("origin"), o(ctx.origin)),
+            (b("sec-fetch-site"), b("cross-site")),
+            (b("sec-fetch-mode"), b("cors")),
+            (b("sec-fetch-dest"), b("empty")),
+            (b("referer"), o(ctx.referer)),
             Self::accept_encoding(),
-            ("accept-language".into(), ctx.accept_language.to_string()),
+            (b("accept-language"), o(ctx.accept_language)),
         ]
     }
 
@@ -183,45 +187,39 @@ impl Preset {
         // because a form button click is always referred from a page on
         // the form's own origin.
         vec![
-            ("cache-control".into(), "max-age=0".to_string()),
-            ("sec-ch-ua".into(), ctx.sec_ch_ua.to_string()),
-            ("sec-ch-ua-mobile".into(), ctx.sec_ch_ua_mobile.to_string()),
+            (b("cache-control"), b("max-age=0")),
+            (b("sec-ch-ua"), o(ctx.sec_ch_ua)),
+            (b("sec-ch-ua-mobile"), o(ctx.sec_ch_ua_mobile)),
             Self::sec_ch_ua_platform(ctx),
-            ("upgrade-insecure-requests".into(), "1".to_string()),
-            ("user-agent".into(), ctx.user_agent.to_string()),
-            (
-                "content-type".into(),
-                "application/x-www-form-urlencoded".to_string(),
-            ),
-            ("accept".into(), "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7".to_string()),
-            ("origin".into(), ctx.origin.to_string()),
-            ("sec-fetch-site".into(), "same-origin".to_string()),
-            ("sec-fetch-mode".into(), "navigate".to_string()),
-            ("sec-fetch-user".into(), "?1".to_string()),
-            ("sec-fetch-dest".into(), "document".to_string()),
-            ("referer".into(), ctx.referer.to_string()),
+            (b("upgrade-insecure-requests"), b("1")),
+            (b("user-agent"), o(ctx.user_agent)),
+            (b("content-type"), b("application/x-www-form-urlencoded")),
+            (b("accept"), b("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")),
+            (b("origin"), o(ctx.origin)),
+            (b("sec-fetch-site"), b("same-origin")),
+            (b("sec-fetch-mode"), b("navigate")),
+            (b("sec-fetch-user"), b("?1")),
+            (b("sec-fetch-dest"), b("document")),
+            (b("referer"), o(ctx.referer)),
             Self::accept_encoding(),
-            ("accept-language".into(), ctx.accept_language.to_string()),
+            (b("accept-language"), o(ctx.accept_language)),
         ]
     }
 
     fn same_site_headers(ctx: &HeaderContext<'_>) -> Vec<HeaderPair> {
         vec![
-            ("sec-ch-ua".into(), ctx.sec_ch_ua.to_string()),
-            ("sec-ch-ua-mobile".into(), ctx.sec_ch_ua_mobile.to_string()),
+            (b("sec-ch-ua"), o(ctx.sec_ch_ua)),
+            (b("sec-ch-ua-mobile"), o(ctx.sec_ch_ua_mobile)),
             Self::sec_ch_ua_platform(ctx),
-            ("user-agent".into(), ctx.user_agent.to_string()),
-            (
-                "accept".into(),
-                "application/json, text/plain, */*".to_string(),
-            ),
-            ("origin".into(), ctx.origin.to_string()),
-            ("sec-fetch-site".into(), "same-site".to_string()),
-            ("sec-fetch-mode".into(), "cors".to_string()),
-            ("sec-fetch-dest".into(), "empty".to_string()),
-            ("referer".into(), ctx.referer.to_string()),
+            (b("user-agent"), o(ctx.user_agent)),
+            (b("accept"), b("application/json, text/plain, */*")),
+            (b("origin"), o(ctx.origin)),
+            (b("sec-fetch-site"), b("same-site")),
+            (b("sec-fetch-mode"), b("cors")),
+            (b("sec-fetch-dest"), b("empty")),
+            (b("referer"), o(ctx.referer)),
             Self::accept_encoding(),
-            ("accept-language".into(), ctx.accept_language.to_string()),
+            (b("accept-language"), o(ctx.accept_language)),
         ]
     }
 }

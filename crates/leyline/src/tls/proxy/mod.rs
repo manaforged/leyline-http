@@ -77,17 +77,10 @@ pub(crate) async fn connect_through_proxy<C: crate::tls::TlsHandshake>(
             ));
         }
         "http" => http::connect(connector, host, port, &proxy, include_alps).await,
-        // An `https://` proxy means the client→proxy leg must itself be TLS —
-        // the CONNECT request travels *inside* that TLS. Leyline does not yet
-        // perform a TLS handshake to the proxy, so honoring it here would send
-        // CONNECT (and credentials) in cleartext.
-        "https" => Err(TlsError::Profile(
-            "https:// proxies (TLS to the proxy itself) are not supported: leyline does not yet \
-             perform a TLS handshake to the proxy, so the CONNECT request — including any \
-             Proxy-Authorization credentials — would be sent in cleartext. Use an http:// CONNECT \
-             proxy or a socks5:// proxy."
-                .into(),
-        )),
+        // An `https://` proxy means the client→proxy leg is itself TLS — the
+        // CONNECT request (and any `Proxy-Authorization` credentials) travels
+        // encrypted inside that TLS, and the origin handshake nests within it.
+        "https" => http::connect_via_tls(connector, host, port, &proxy, include_alps).await,
         other => Err(TlsError::Profile(format!(
             "unsupported proxy scheme `{other}`: leyline tunnels only through http:// CONNECT or \
              socks5:// proxies. Sending CONNECT to a `{other}` proxy would transmit it — including \

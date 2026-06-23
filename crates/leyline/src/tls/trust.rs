@@ -243,7 +243,7 @@ pub(crate) fn wire_configured_trust(
 ) -> Result<(), TlsError> {
     let env_trust_wired = config.use_env_roots && wire_env_trust(builder);
     if config.use_system_roots && !env_trust_wired {
-        wire_system_trust(builder)?;
+        wire_system_trust_cached(builder, config)?;
     }
 
     for path in &config.ca_files {
@@ -338,6 +338,75 @@ pub(crate) fn wire_system_trust(builder: &mut SslContextBuilder) -> Result<(), T
         builder.set_default_verify_paths()?;
         Ok(())
     }
+}
+
+/// System trust with a process-wide cache for the common pure-system case.
+///
+/// On Windows the bridge enumerates and DER-parses the entire OS ROOT store —
+/// expensive, and identical for every connector. With no additive roots
+/// (`ca_files` / `ca_der` empty), share one pre-parsed, refcounted root store
+/// across builders instead of rebuilding it each time. The store holds only
+/// public CA roots, so sharing carries no per-session identity. Configs with
+/// extra roots keep a mutable per-builder store (a shared store cannot be
+/// mutated).
+#[cfg(windows)]
+fn wire_system_trust_cached(
+    builder: &mut SslContextBuilder,
+    config: &TlsTrustConfig,
+) -> Result<(), TlsError> {
+    if config.ca_files.is_empty() && config.ca_der.is_empty() {
+        builder.set_cert_store_ref(cached_windows_system_store()?);
+        return Ok(());
+    }
+    wire_system_trust(builder)
+}
+
+#[cfg(not(windows))]
+fn wire_system_trust_cached(
+    builder: &mut SslContextBuilder,
+    _config: &TlsTrustConfig,
+) -> Result<(), TlsError> {
+    wire_system_trust(builder)
+}
+
+/// Build once and share the parsed Windows system ROOT store. The first
+/// connector pays the OS enumeration + DER parse; every later one shares the
+/// same refcounted `X509_STORE`.
+#[cfg(windows)]
+fn cached_windows_system_store() -> Result<&'static leyline_bssl::x509::store::X509Store, TlsError>
+{
+    use leyline_bssl::x509::store::{X509Store, X509StoreBuilder};
+    use std::sync::OnceLock;
+
+    static STORE: OnceLock<X509Store> = OnceLock::new();
+    if let Some(s) = STORE.get() {
+        return Ok(s);
+    }
+
+    let roots = crate::tls::windows_trust::load_system_roots().map_err(|e| {
+        TlsError::TrustStore(format!("failed to open Windows system ROOT store: {e}"))
+    })?;
+    let mut store = X509StoreBuilder::new()
+        .map_err(|e| TlsError::TrustStore(format!("X509 store allocation failed: {e}")))?;
+    let mut loaded = 0usize;
+    for der in &roots {
+        if let Ok(cert) = X509::from_der(der) {
+            if store.add_cert(cert).is_ok() {
+                loaded += 1;
+            }
+        }
+    }
+    if loaded == 0 {
+        return Err(TlsError::TrustStore(
+            "Windows system ROOT store bridged zero certificates".into(),
+        ));
+    }
+    tracing::info!(
+        target: "leyline::tls::trust",
+        loaded,
+        "Windows system ROOT store parsed and cached for reuse"
+    );
+    Ok(STORE.get_or_init(|| store.build()))
 }
 
 /// macOS-only: load Apple's rebuilt-on-every-update OpenSSL bundle at

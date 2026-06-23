@@ -158,7 +158,13 @@ async fn run_mock_server(mut io: DuplexStream) {
     }
 }
 
-fn req() -> (PseudoHeaders, Vec<(String, String)>) {
+fn req() -> (
+    PseudoHeaders,
+    Vec<(
+        std::borrow::Cow<'static, str>,
+        std::borrow::Cow<'static, str>,
+    )>,
+) {
     (
         PseudoHeaders {
             method: "GET".into(),

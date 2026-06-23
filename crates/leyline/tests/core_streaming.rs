@@ -6,7 +6,6 @@ use bytes::Bytes;
 use futures_util::stream;
 use futures_util::StreamExt;
 use leyline::core::{Body, ProtocolPolicy, Session};
-use leyline::Browser;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[tokio::test]
@@ -335,36 +334,14 @@ async fn redirect_with_streaming_body_errors() {
     server.await.unwrap();
 }
 
-// H3 streaming asymmetry:
-//  - a streaming REQUEST body over H3 can't be sent incrementally, so it
-//    errors early (before any handshake) with a descriptive message;
-//  - a `.stream()` RESPONSE over H3 degrades gracefully to buffering (no
-//    error — the body is still reachable via `into_stream()`), so there's
-//    nothing to assert here offline. Verifying the graceful-buffer needs a
-//    live QUIC server (and `--release`, per the debug-build H3 handshake
-//    stack-overflow note in CONTRIBUTING.md), so it isn't unit-tested.
-#[tokio::test]
-async fn h3_streaming_request_returns_descriptive_error() {
-    let session = Session::builder()
-        .browser(Browser::default_browser())
-        .http3()
-        .build()
-        .unwrap();
-    let chunks: Vec<std::io::Result<Bytes>> = vec![Ok(Bytes::from_static(b"x"))];
-    let body = Body::stream(stream::iter(chunks));
-    let err = session
-        .post("https://example.invalid/upload")
-        .body(body)
-        .timeout(Duration::from_secs(2))
-        .send()
-        .await
-        .unwrap_err();
-    let msg = format!("{err}");
-    assert!(
-        msg.contains("HTTP/3 streaming request bodies"),
-        "got: {msg}"
-    );
-}
+// Streaming over H3 — both directions — is exercised against a live QUIC
+// server, not here: a streaming REQUEST body is pumped into the request stream
+// incrementally (`live_h3_streaming_request_body_roundtrips` in tls_peet.rs),
+// and a `.stream()` RESPONSE is delivered incrementally too. Both need a real
+// QUIC peer (and `--release`, per the debug-build H3 handshake stack-overflow
+// note in CONTRIBUTING.md), so neither is unit-tested offline. The driver's
+// request-body FIN-timing state machine has direct offline coverage in
+// `quic::pool::tests`.
 
 #[tokio::test]
 async fn body_ergonomics_from_impls_unchanged() {
