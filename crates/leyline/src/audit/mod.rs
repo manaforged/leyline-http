@@ -61,6 +61,7 @@ fn hash12(s: &str) -> String {
 
 /// Per-response fingerprint data. Returned by `resp.audit()`.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct AuditData {
     /// JA4 TLS fingerprint.
     pub ja4: String,

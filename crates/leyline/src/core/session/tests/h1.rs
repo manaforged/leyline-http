@@ -96,7 +96,7 @@ async fn audit_is_off_by_default() {
         "audit() should be None unless opted in"
     );
     assert!(
-        resp.request_headers().is_empty(),
+        resp.request_headers().next().is_none(),
         "request headers should not be retained unless opted in"
     );
 }
@@ -115,9 +115,7 @@ async fn audit_opt_in_populates_fingerprints_and_headers() {
         audit.ja4h
     );
     assert!(
-        resp.request_headers()
-            .iter()
-            .any(|(k, _)| k == "user-agent"),
+        resp.request_headers().any(|(k, _)| k == "user-agent"),
         "request headers should be retained when audit is on"
     );
 }

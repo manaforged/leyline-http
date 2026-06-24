@@ -127,6 +127,10 @@ impl Response {
     /// responses are lowercase, HTTP/1.1 responses are mixed. Prefer
     /// [`Response::header`] for lookups — it is case-insensitive.
     /// If you iterate yourself, compare names with `eq_ignore_ascii_case`.
+    ///
+    /// Values are UTF-8: a non-UTF-8 obs-text byte (rare — e.g. a raw `0xFF`) is
+    /// replaced with U+FFFD and is not recoverable through this `&str` API. The
+    /// HPACK/QPACK tables keep the original wire bytes; only this view is coerced.
     pub fn headers(&self) -> impl Iterator<Item = (&str, &str)> {
         self.headers.iter().map(|(k, v)| (k.as_str(), v.as_str()))
     }
@@ -138,7 +142,8 @@ impl Response {
     }
 
     /// Iterate cookies collected from `Set-Cookie` headers. Yields
-    /// `(name, value)` pairs; for duplicates the last value wins.
+    /// `(name, value)` pairs; for duplicates the last value wins. Iteration
+    /// order is unspecified (cookies are keyed in a map, not wire-ordered).
     ///
     /// For the raw `Set-Cookie` header strings (with attributes like
     /// `Path=`, `HttpOnly`, etc.) use
@@ -175,15 +180,26 @@ impl Response {
         self.tls_cipher.as_deref()
     }
 
-    /// Request headers **as they were sent on the wire** — after the
-    /// session's preset headers, user-agent, sec-fetch hints,
-    /// content-length, and cookie jar have all been merged with any
-    /// caller-supplied headers.
+    /// Request headers as the session assembled them, in send order — preset
+    /// headers, user-agent, sec-fetch hints, content-length, and the cookie jar
+    /// merged with any caller-supplied headers.
     ///
-    /// Use this for fingerprint debugging: the order and casing here
-    /// is exactly what the peer observed.
-    pub fn request_headers(&self) -> &[(String, String)] {
-        &self.request_headers
+    /// These are the *application* headers. Transport-level fields synthesized at
+    /// serialization are NOT included: the HTTP/2/3 `:method` / `:scheme` /
+    /// `:authority` / `:path` pseudo-headers and the HTTP/1 `Host` line. This is
+    /// also exactly the set JA4H hashes (which excludes pseudo-headers).
+    ///
+    /// Populated only when audit is enabled ([`SessionBuilder::audit`]) or a
+    /// response observer is registered; otherwise the iterator is empty, since
+    /// the hot path keeps no copy.
+    ///
+    /// Yields `(name, value)` as `&str` pairs — representation-independent, like
+    /// [`Response::headers`], so the internal storage can evolve without breaking
+    /// callers.
+    pub fn request_headers(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.request_headers
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
     }
 
     // ─── Body access ───────────────────────────────────────────────
@@ -386,14 +402,15 @@ impl Response {
 
     /// Turn a 4xx/5xx response into an error.
     ///
-    /// Returns `Ok(self)` for 1xx/2xx/3xx, `Err` for 4xx/5xx.
+    /// Returns `Ok(self)` for 1xx/2xx/3xx, `Err` for 4xx/5xx and for a
+    /// malformed status below 100 (e.g. a response that carried no `:status`).
     ///
     /// ```rust,ignore
     /// let resp = session.navigate(url).await?.error_for_status()?;
     /// // If we get here, status is 2xx (or 1xx/3xx).
     /// ```
     pub fn error_for_status(self) -> crate::core::Result<Self> {
-        if self.status >= 400 {
+        if self.status >= 400 || self.status < 100 {
             let status = self.status;
             let url = self.url.clone();
             let body = self.into_bytes();

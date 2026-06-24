@@ -250,19 +250,19 @@ async fn request_builder_timeout_overrides_session_default() {
 }
 
 #[test]
-#[allow(deprecated)] // intentionally exercises the deprecated *_latest() aliases
 fn session_shortcuts_work() {
-    let chrome = leyline::Session::chrome_latest();
-    assert!(chrome.is_ok());
-    assert_eq!(chrome.unwrap().browser(), Some(Browser::Chrome148));
-
-    let firefox = leyline::Session::firefox_latest();
-    assert!(firefox.is_ok());
-    assert_eq!(firefox.unwrap().browser(), Some(Browser::Firefox150));
-
-    let safari = leyline::Session::safari_latest();
-    assert!(safari.is_ok());
-    assert_eq!(safari.unwrap().browser(), Some(Browser::Safari18));
+    assert_eq!(
+        leyline::Session::chrome().browser(),
+        Some(Browser::Chrome148)
+    );
+    assert_eq!(
+        leyline::Session::firefox().browser(),
+        Some(Browser::Firefox150)
+    );
+    assert_eq!(
+        leyline::Session::safari().browser(),
+        Some(Browser::Safari18)
+    );
 }
 
 // ─── Offline: mock proxy protocol state machine ────────────────────────

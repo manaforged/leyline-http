@@ -28,7 +28,7 @@ pub use config::{
 };
 pub use digest::DigestAuth;
 pub use error::{Error, Result};
-pub use header_str::HeaderStr;
+pub(crate) use header_str::HeaderStr;
 pub use headers::HeaderList;
 pub use request::{ContentEncoding, IntoParamPair, RequestBuilder};
 pub use response::{HttpVersion, Response};

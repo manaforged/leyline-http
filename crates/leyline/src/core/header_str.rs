@@ -33,12 +33,16 @@ impl HeaderStr {
         Self(Bytes::from_static(s.as_bytes()))
     }
 
-    /// Wrap bytes whose UTF-8 validity the caller guarantees — the
-    /// HPACK/QPACK decoder validates each field at decode time. Debug
-    /// builds assert the invariant.
-    pub(crate) fn from_utf8_unchecked(bytes: Bytes) -> Self {
-        debug_assert!(std::str::from_utf8(&bytes).is_ok());
-        Self(bytes)
+    /// Wrap raw header bytes, coercing to UTF-8 at this boundary: valid input
+    /// is wrapped zero-copy; non-UTF-8 obs-text is replaced with U+FFFD
+    /// (matching the H1/QPACK read paths). The HPACK decoder keeps the original
+    /// wire bytes in its dynamic table so table-size accounting stays in lockstep
+    /// with the peer; the lossy `&str` view is materialized only here.
+    pub(crate) fn from_bytes_lossy(bytes: Bytes) -> Self {
+        match std::str::from_utf8(&bytes) {
+            Ok(_) => Self(bytes),
+            Err(_) => Self(Bytes::from(String::from_utf8_lossy(&bytes).into_owned())),
+        }
     }
 
     /// Wrap bytes, validating UTF-8.

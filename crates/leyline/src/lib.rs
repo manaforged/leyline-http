@@ -106,8 +106,11 @@ pub mod profile;
 pub mod tls;
 pub mod tls_selftest;
 
-// Response-introspection hooks. The global-observer shape is slated for a
-// `tracing`-based redesign; treat it as unstable.
+// Response-introspection hooks. `#[doc(hidden)]` like `core`/`h2`/`pool`:
+// reachable for our own dev tooling (response-body dumps) but deliberately NOT
+// part of the 1.0 stable surface — the process-global, first-write-wins observer
+// shape is slated for a `tracing`-based redesign, so it must not be frozen.
+#[doc(hidden)]
 pub mod observe;
 
 // Protocol internals — **not public API**, exempt from semver, hidden from the
@@ -141,10 +144,10 @@ pub use crate::core::LeylineService;
 pub use crate::core::WebSocketBuilder;
 pub use crate::core::{
     Body, BodyStream, CompressionConfig, ContentEncoding, DigestAuth, DnsConfig, Error, HeaderList,
-    HeaderStr, HttpVersion, IntoParamPair, NoProxy, PoolConfig, ProtocolPolicy, ProxyConfig,
-    ProxyRule, ProxyUrl, RedirectAction, RedirectAttempt, RedirectPolicy, Request, RequestBuilder,
-    Response, Result, RetryPolicy, RetryTrigger, Session, SessionBuilder, SocketConfig,
-    TimeoutConfig, WebSocketConfig,
+    HttpVersion, IntoParamPair, NoProxy, PoolConfig, ProtocolPolicy, ProxyConfig, ProxyRule,
+    ProxyUrl, RedirectAction, RedirectAttempt, RedirectPolicy, Request, RequestBuilder, Response,
+    Result, RetryPolicy, RetryTrigger, Session, SessionBuilder, SocketConfig, TimeoutConfig,
+    WebSocketConfig,
 };
 
 /// Short alias for the primary Leyline session type.
@@ -318,9 +321,4 @@ where
     P: IntoParamPair,
 {
     default_session().post(url).form(params).send().await
-}
-
-/// Alias for [`get`] — a plain GET on the shared bare default session.
-pub async fn fetch(url: &str) -> Result<Response> {
-    default_session().get(url).send().await
 }

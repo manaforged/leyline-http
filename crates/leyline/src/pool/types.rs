@@ -137,6 +137,7 @@ impl PooledConn {
 /// interval to get rates. `entries` is the instantaneous live-entry
 /// count at the moment stats were read.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct PoolStats {
     /// Live entries in the pool at observation time (H1 + H2 combined).
     pub entries: usize,

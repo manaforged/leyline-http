@@ -22,23 +22,11 @@ use std::time::Duration;
 fn empty_pool_stats_are_zero() {
     let pool = Pool::new();
     let s = pool.stats();
-    assert_eq!(
-        s,
-        PoolStats {
-            entries: 0,
-            max_connections: DEFAULT_MAX_CONNECTIONS,
-            h2_hits: 0,
-            h2_misses: 0,
-            h1_hits: 0,
-            h1_misses: 0,
-            h3_hits: 0,
-            h3_misses: 0,
-            evictions_idle: 0,
-            evictions_lru: 0,
-            evictions_dead: 0,
-            installs: 0,
-        }
-    );
+    // PoolStats is #[non_exhaustive]; build the expected via Default (all zero)
+    // and set the one non-zero field.
+    let mut expected = PoolStats::default();
+    expected.max_connections = DEFAULT_MAX_CONNECTIONS;
+    assert_eq!(s, expected);
     assert!(pool.is_empty());
     assert_eq!(pool.len(), 0);
 }

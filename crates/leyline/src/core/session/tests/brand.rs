@@ -116,10 +116,10 @@ async fn brave_first_class_profile_matches_capture() {
 
 #[tokio::test]
 async fn opera_brand_overlay_matches_capture() {
-    // Session::opera_latest() resolves to the latest verified Opera
-    // anchor — currently Chrome 147 / Opera 131 (vendor-doc EXTRAPOLATED;
-    // see OPERA_PER_CHROMIUM in profile::brand). Bump these assertions
-    // when the anchor table moves.
+    // Session::opera() resolves to the latest verified Opera anchor —
+    // currently Chrome 147 / Opera 131 (vendor-doc EXTRAPOLATED; see
+    // OPERA_PER_CHROMIUM in profile::brand). Bump these assertions when the
+    // anchor table moves.
     let session = Session::opera();
     let req = capture_navigate_headers(session).await;
     assert!(

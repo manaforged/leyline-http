@@ -414,7 +414,7 @@ impl Session {
                     final_url: &final_url,
                     status,
                     request_headers: &audit_headers,
-                    response_headers: &final_headers,
+                    response_headers_raw: &final_headers,
                     body: body_slice,
                 });
             }

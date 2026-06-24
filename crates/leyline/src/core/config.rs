@@ -635,6 +635,7 @@ impl RedirectPolicy {
 
 /// Information passed to a custom redirect policy.
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub struct RedirectAttempt<'a> {
     /// Response status code.
     pub status: u16,
@@ -648,6 +649,7 @@ pub struct RedirectAttempt<'a> {
 
 /// Decision returned by a redirect policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RedirectAction {
     /// Follow the redirect.
     Follow,

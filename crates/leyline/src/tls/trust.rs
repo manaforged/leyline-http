@@ -137,6 +137,7 @@ impl TlsTrustConfig {
 
 /// PEM client identity used for mutual TLS.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ClientIdentity {
     /// PEM certificate chain sent to the server.
     pub certificate_chain_file: PathBuf,

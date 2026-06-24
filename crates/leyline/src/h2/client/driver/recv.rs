@@ -275,8 +275,8 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                         .ok_or_else(|| H2Error::Hpack("invalid :status".into()))?;
                 } else if !header.name.starts_with(b":") {
                     actor.resp_headers.push((
-                        HeaderStr::from_utf8_unchecked(header.name),
-                        HeaderStr::from_utf8_unchecked(header.value),
+                        HeaderStr::from_bytes_lossy(header.name),
+                        HeaderStr::from_bytes_lossy(header.value),
                     ));
                 }
             }
@@ -308,8 +308,8 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             let mut th = Vec::new();
             for header in decoded {
                 th.push((
-                    HeaderStr::from_utf8_unchecked(header.name),
-                    HeaderStr::from_utf8_unchecked(header.value),
+                    HeaderStr::from_bytes_lossy(header.name),
+                    HeaderStr::from_bytes_lossy(header.value),
                 ));
             }
             actor.trailers = Some(th);

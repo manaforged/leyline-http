@@ -30,6 +30,10 @@ fn _response_header_api_is_pinned(r: &Response) {
     // Cookies: the precedent the header iterators match.
     let _cookies: std::option::Option<(&str, &str)> = r.cookies().next();
     let _cookie: std::option::Option<&str> = r.cookie("sid");
+
+    // Request-side headers: same representation-independent iterator as the
+    // response side (audit/observer-gated). Symmetric on purpose.
+    let _req: std::option::Option<(&str, &str)> = r.request_headers().next();
 }
 
 #[test]

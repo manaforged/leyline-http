@@ -110,43 +110,6 @@ impl Session {
             .expect("built-in profile is always valid")
     }
 
-    // ── Deprecated fallible aliases (prefer the infallible names above) ──
-    #[deprecated(since = "1.0.0", note = "use the infallible Session::chrome()")]
-    #[doc(hidden)]
-    pub fn chrome_latest() -> Result<Self> {
-        Ok(Self::chrome())
-    }
-    #[deprecated(since = "1.0.0", note = "use the infallible Session::firefox()")]
-    #[doc(hidden)]
-    pub fn firefox_latest() -> Result<Self> {
-        Ok(Self::firefox())
-    }
-    #[deprecated(since = "1.0.0", note = "use the infallible Session::safari()")]
-    #[doc(hidden)]
-    pub fn safari_latest() -> Result<Self> {
-        Ok(Self::safari())
-    }
-    #[deprecated(since = "1.0.0", note = "use the infallible Session::edge()")]
-    #[doc(hidden)]
-    pub fn edge_latest() -> Result<Self> {
-        Ok(Self::edge())
-    }
-    #[deprecated(since = "1.0.0", note = "use the infallible Session::brave()")]
-    #[doc(hidden)]
-    pub fn brave_latest() -> Result<Self> {
-        Ok(Self::brave())
-    }
-    #[deprecated(since = "1.0.0", note = "use the infallible Session::opera()")]
-    #[doc(hidden)]
-    pub fn opera_latest() -> Result<Self> {
-        Ok(Self::opera())
-    }
-    #[deprecated(since = "1.0.0", note = "use the infallible Session::vivaldi()")]
-    #[doc(hidden)]
-    pub fn vivaldi_latest() -> Result<Self> {
-        Ok(Self::vivaldi())
-    }
-
     /// Access the cookie jar.
     pub fn cookies(&self) -> &CookieJar {
         &self.cookie_jar

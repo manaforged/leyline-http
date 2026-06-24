@@ -25,6 +25,7 @@ use crate::tls::trust::TlsTrustConfig;
 /// match real browser behaviour against legacy servers; the QUIC path must
 /// pin 1.3 per RFC 9001 §4.2.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum TlsMinVersion {
     /// Allow TLS 1.2+. Used for the H1/H2 path.
     Tls12,

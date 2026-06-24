@@ -142,6 +142,7 @@ impl ChromiumBrand {
 /// profile. All fields are already computed against the active
 /// profile — the caller copies them in without further transformation.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct BrandOverlay {
     /// Final `User-Agent` string (base profile UA plus any
     /// brand-specific suffix). For Brave this equals the input UA.

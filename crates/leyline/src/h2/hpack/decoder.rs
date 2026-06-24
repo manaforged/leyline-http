@@ -18,10 +18,12 @@ pub struct Decoder {
     max_header_list_size: usize,
 }
 
-/// A decoded header. Both parts are `Bytes`: an indexed header (static or
-/// dynamic table hit) materializes by refcount/`from_static` with no heap
-/// copy; only a literal value allocates. Values are validated UTF-8 at
-/// decode, so `str::from_utf8` on them never fails downstream.
+/// A decoded header. Both parts are the **original wire `Bytes`**: an indexed
+/// header (static or dynamic table hit) materializes by refcount/`from_static`
+/// with no heap copy; only a literal value allocates. Bytes are kept verbatim —
+/// no UTF-8 coercion here — so the dynamic table sizes entries by their true
+/// octet length and stays in lockstep with the peer's table. The lossy `&str`
+/// view is materialized later at the `HeaderStr` boundary.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Header {
     pub name: Bytes,
@@ -166,11 +168,12 @@ impl Default for Decoder {
     }
 }
 
-/// Decode a string literal (RFC 7541 Section 5.2).
-///
-/// Returns the bytes validated as UTF-8 (so callers can `str::from_utf8`
-/// infallibly) without allocating a `String`: a raw literal is copied into
-/// `Bytes`, a Huffman literal decodes into a `Vec` wrapped as `Bytes`.
+/// Decode a string literal (RFC 7541 Section 5.2) into the **original wire
+/// `Bytes`**. A raw literal is copied verbatim; a Huffman literal decodes into a
+/// `Vec`. No UTF-8 coercion happens here: the bytes feed the dynamic table at
+/// their true octet length so eviction stays in lockstep with the peer. Any
+/// non-UTF-8 obs-text is coerced lossily (U+FFFD) only later, at the `HeaderStr`
+/// boundary ([`crate::core::HeaderStr::from_bytes_lossy`]).
 fn decode_string(src: &[u8]) -> Result<(Bytes, usize), String> {
     if src.is_empty() {
         return Err("unexpected end of string".into());
@@ -188,11 +191,8 @@ fn decode_string(src: &[u8]) -> Result<(Bytes, usize), String> {
     let raw = &src[start..end];
 
     let value = if huffman_encoded {
-        let decoded = huffman::decode(raw).map_err(|e| e.to_string())?;
-        std::str::from_utf8(&decoded).map_err(|e| e.to_string())?;
-        Bytes::from(decoded)
+        Bytes::from(huffman::decode(raw).map_err(|e| e.to_string())?)
     } else {
-        std::str::from_utf8(raw).map_err(|e| e.to_string())?;
         Bytes::copy_from_slice(raw)
     };
 
@@ -212,6 +212,52 @@ mod tests {
         assert_eq!(headers.len(), 1);
         assert_eq!(headers[0].name, ":method");
         assert_eq!(headers[0].value, "GET");
+    }
+
+    #[test]
+    fn non_utf8_literal_preserves_raw_bytes_for_table_accounting() {
+        // A raw string literal carrying non-UTF-8 obs-text must decode to the
+        // ORIGINAL bytes (no U+FFFD substitution here): the dynamic table sizes
+        // entries by true octet length, so any in-decoder coercion would diverge
+        // our table from the peer's. The lossy &str view happens later, at the
+        // HeaderStr boundary.
+        let (value, consumed) = decode_string(&[0x02, 0xff, 0xfe]).expect("decodes, not error");
+        assert_eq!(consumed, 3);
+        assert_eq!(
+            value.as_ref(),
+            &[0xff, 0xfe],
+            "raw wire bytes preserved verbatim"
+        );
+    }
+
+    #[test]
+    fn non_utf8_indexed_value_keeps_table_in_lockstep_with_peer() {
+        // Eviction-boundary check for the lossy-decode fix: a non-UTF-8 value
+        // inserted with incremental indexing must size the dynamic table by its
+        // RAW octet length (2 bytes here), not a U+FFFD-expanded length (which
+        // would be 6 bytes for two replacement chars) — otherwise our table
+        // evicts on a different schedule than the encoder's and later indices
+        // resolve wrong. Encode a literal-with-incremental-indexing field whose
+        // value is the 2 raw octets 0xFF 0xFE under a literal name.
+        let mut dec = Decoder::new();
+        // 0x40 = literal w/ incremental indexing, name index 0 (literal name).
+        // name: len 1 "x"; value: len 2, raw 0xFF 0xFE.
+        let block = [0x40, 0x01, b'x', 0x02, 0xff, 0xfe];
+        let headers = dec.decode_header_block(&block).expect("decodes");
+        assert_eq!(headers.len(), 1);
+        assert_eq!(
+            headers[0].value.as_ref(),
+            &[0xff, 0xfe],
+            "raw value preserved"
+        );
+        // Entry size = name.len(1) + value.len(2) + 32 = 35 — computed from the
+        // raw octets, matching what the peer's encoder accounted for.
+        assert_eq!(dec.dynamic.size(), 1 + 2 + 32);
+        // And the indexed entry round-trips back to the same raw bytes. The
+        // newest dynamic entry is HPACK index `STATIC_TABLE.len()`.
+        let (n, v) = table::lookup(table::STATIC_TABLE.len(), &dec.dynamic).expect("indexed");
+        assert_eq!(n.as_ref(), b"x");
+        assert_eq!(v.as_ref(), &[0xff, 0xfe]);
     }
 
     #[test]

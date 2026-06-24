@@ -49,12 +49,23 @@ pub struct ResponseSnapshot<'a> {
     /// actually send" — invaluable when debugging a 4xx/5xx whose body
     /// gives no diagnostic detail.
     pub request_headers: &'a [(String, String)],
-    /// Response headers as received from the wire.
-    pub response_headers: &'a [(crate::core::HeaderStr, crate::core::HeaderStr)],
+    /// Response headers (crate-private storage; read via the
+    /// [`response_headers`](ResponseSnapshot::response_headers) accessor so the
+    /// storage type never leaks into the public API).
+    pub(crate) response_headers_raw: &'a [(crate::core::HeaderStr, crate::core::HeaderStr)],
     /// Response body bytes, **after** decompression. Empty when the
     /// caller opted into streaming, which the observer cannot drain
     /// without changing semantics.
     pub body: &'a [u8],
+}
+
+impl<'a> ResponseSnapshot<'a> {
+    /// Response headers as received from the wire, in order.
+    pub fn response_headers(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.response_headers_raw
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+    }
 }
 
 /// Type alias for the observer callback. Held in `Arc` so cheap to share
