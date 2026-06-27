@@ -1,8 +1,9 @@
 name: test
 
 on:
-  push:
-    branches: [main]
+  # PR-only (plus manual dispatch). The merge-to-main push was a duplicate of
+  # what the PR already validated — same code, billed twice. Pre-push hooks +
+  # the self-hosted gate cover main HEAD; this is the PR backstop.
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -24,7 +25,7 @@ jobs:
   # checks only — advisories need the network and run on the cron/dispatch path,
   # so a flaky DB fetch never blocks a PR.
   deny:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     steps:
       - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v2
@@ -35,7 +36,7 @@ jobs:
   # rusty-hook pre-commit, so CI catches anything a contributor merged with
   # `--no-verify` or without rusty-hook installed locally.
   test:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 30
 
     steps:
@@ -58,7 +59,7 @@ jobs:
   # so this is the third backstop, not the primary gate.
   live-fingerprint:
     if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 15
     needs: test
 
