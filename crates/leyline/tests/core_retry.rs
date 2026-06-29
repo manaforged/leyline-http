@@ -1,8 +1,8 @@
 //! Integration tests for the `RetryPolicy` — exercises the retry
 //! loop against a mock H1 server that can return flaky responses.
 
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use bytes::Bytes;

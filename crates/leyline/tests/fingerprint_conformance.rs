@@ -26,12 +26,12 @@
 //! Run: `cargo nextest run -p leyline fingerprint_conformance --nocapture`
 //! (also written to `$CARGO_TARGET_TMPDIR/fingerprint-conformance.md`).
 
+use leyline::Platform;
 use leyline::audit::{
-    chrome_extension_ids, compute_ja3, compute_ja4, compute_ja4t, Ja3Input, Ja4Input,
+    Ja3Input, Ja4Input, chrome_extension_ids, compute_ja3, compute_ja4, compute_ja4t,
 };
 use leyline::h2::H2Config;
-use leyline::profile::{ProfileRegistry, ALL_BROWSERS};
-use leyline::Platform;
+use leyline::profile::{ALL_BROWSERS, ProfileRegistry};
 
 #[derive(PartialEq, Clone, Copy)]
 enum Status {

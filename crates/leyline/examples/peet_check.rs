@@ -1,7 +1,7 @@
 //! TLS fingerprint diagnostic — compare leyline Chrome 147 against tls.peet.ws.
 #![allow(missing_docs)]
-use leyline::profile::Browser;
 use leyline::Session;
+use leyline::profile::Browser;
 
 #[tokio::main]
 async fn main() {

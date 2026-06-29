@@ -2,9 +2,9 @@
 
 use bytes::{BufMut, Bytes};
 
-use super::{be_u32, FrameHeader, FrameType};
-use crate::h2::error::ErrorCode;
+use super::{FrameHeader, FrameType, be_u32};
 use crate::h2::H2Error;
+use crate::h2::error::ErrorCode;
 
 /// RST_STREAM frame — abruptly terminates a stream.
 #[derive(Debug)]

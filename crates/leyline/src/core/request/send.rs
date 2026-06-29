@@ -1,11 +1,11 @@
 //! Request dispatch — quick-path, digest auth, and retry loop.
 
 use super::RequestBuilder;
+use crate::core::Result;
 use crate::core::body::Body;
 use crate::core::error::Error;
 use crate::core::response::Response;
 use crate::core::retry::is_idempotent;
-use crate::core::Result;
 use crate::tls::TlsError;
 
 impl RequestBuilder {

@@ -5,6 +5,7 @@ const SUPPORTED_TARGETS: &[&str] = &[
     "x86_64-pc-windows-msvc",
     "x86_64-unknown-linux-gnu",
     "aarch64-apple-darwin",
+    "aarch64-unknown-linux-gnu",
 ];
 
 fn main() {
@@ -36,7 +37,9 @@ fn main() {
     }
 
     if env::var_os("CARGO_FEATURE_PREFIX_SYMBOLS").is_some() {
-        println!("cargo:warning=leyline-bssl-sys prefix-symbols is ignored by Leyline's prebuilt shim.");
+        println!(
+            "cargo:warning=leyline-bssl-sys prefix-symbols is ignored by Leyline's prebuilt shim."
+        );
     }
 
     let lib_dir = match env::var_os("BORING_BSSL_PATH") {

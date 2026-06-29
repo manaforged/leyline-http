@@ -13,9 +13,9 @@ pub mod preset;
 mod registry;
 mod types;
 
-pub use anchor::{infer_anchor, HeaderAnchor};
+pub use anchor::{HeaderAnchor, infer_anchor};
 pub use brand::{BrandOverlay, BrandOverlayError, ChromiumBrand};
-pub use browser::{Browser, ALL_BROWSERS, PROFILE_COUNT};
+pub use browser::{ALL_BROWSERS, Browser, PROFILE_COUNT};
 pub use platform::Platform;
 pub use preset::Preset;
 pub use registry::ProfileRegistry;

@@ -17,7 +17,7 @@
 use std::path::PathBuf;
 
 use leyline_bssl::ssl::{SslAlert, SslContextBuilder, SslFiletype, SslVerifyError, SslVerifyMode};
-use leyline_bssl::x509::{X509StoreContext, X509};
+use leyline_bssl::x509::{X509, X509StoreContext};
 use sha2::{Digest, Sha256};
 
 use crate::tls::error::TlsError;

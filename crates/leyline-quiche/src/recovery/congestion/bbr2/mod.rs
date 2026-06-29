@@ -630,7 +630,12 @@ fn debug_fmt(r: &Congestion, f: &mut std::fmt::Formatter) -> std::fmt::Result {
     write!(
         f,
         "state={:?} in_recovery={} ack_phase={:?} filled_pipe={} full_bw_count={} loss_events_in_round={} ",
-        bbr.state, bbr.in_recovery, bbr.ack_phase, bbr.filled_pipe, bbr.full_bw_count, bbr.loss_events_in_round
+        bbr.state,
+        bbr.in_recovery,
+        bbr.ack_phase,
+        bbr.filled_pipe,
+        bbr.full_bw_count,
+        bbr.loss_events_in_round
     )?;
     write!(
         f,
@@ -666,12 +671,12 @@ mod tests {
 
     use smallvec::smallvec;
 
+    use crate::CongestionControlAlgorithm;
     use crate::packet;
     use crate::ranges;
-    use crate::recovery::congestion::recovery::LegacyRecovery;
     use crate::recovery::HandshakeStatus;
     use crate::recovery::RecoveryOps;
-    use crate::CongestionControlAlgorithm;
+    use crate::recovery::congestion::recovery::LegacyRecovery;
 
     #[test]
     fn bbr_init() {

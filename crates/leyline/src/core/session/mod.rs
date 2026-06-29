@@ -20,9 +20,9 @@ pub use websocket::WebSocketBuilder;
 use std::sync::Arc;
 
 use crate::cookie::Jar as CookieJar;
-use crate::core::retry::RetryPolicy;
 #[cfg(feature = "websocket")]
 use crate::core::WebSocketConfig;
+use crate::core::retry::RetryPolicy;
 use crate::core::{CompressionConfig, ProxyConfig, RedirectPolicy, TimeoutConfig};
 use crate::h2::H2Config;
 use crate::pool::Pool;

@@ -4,8 +4,8 @@
 //! the first are pure HashMap dispatch. The first iteration pays the
 //! registry-build cost — criterion's warm-up handles that automatically.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use leyline::{profile, Browser};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use leyline::{Browser, profile};
 
 fn bench_profile_lookup_chrome147(c: &mut Criterion) {
     c.bench_function("profile::lookup_chrome147", |b| {

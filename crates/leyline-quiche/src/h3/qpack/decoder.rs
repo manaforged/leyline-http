@@ -147,8 +147,7 @@ impl Decoder {
 
                     trace!(
                         "Literal Without Name Reference name={:?} value={:?}",
-                        name,
-                        value,
+                        name, value,
                     );
 
                     left = left
@@ -170,9 +169,7 @@ impl Decoder {
 
                     trace!(
                         "Literal name_idx={} static={} value={:?}",
-                        name_idx,
-                        s,
-                        value
+                        name_idx, s, value
                     );
 
                     if !s {

@@ -50,18 +50,18 @@ use crate::ranges;
 #[cfg(feature = "qlog")]
 use qlog::events::EventData;
 
-use super::pacer;
 use super::Congestion;
-use crate::recovery::rtt::RttStats;
-use crate::recovery::LossDetectionTimer;
-use crate::recovery::ReleaseDecision;
-use crate::recovery::ReleaseTime;
+use super::pacer;
 use crate::recovery::GRANULARITY;
 use crate::recovery::INITIAL_PACKET_THRESHOLD;
 use crate::recovery::INITIAL_TIME_THRESHOLD;
+use crate::recovery::LossDetectionTimer;
 use crate::recovery::MAX_OUTSTANDING_NON_ACK_ELICITING;
 use crate::recovery::MAX_PACKET_THRESHOLD;
 use crate::recovery::MAX_PTO_PROBES_COUNT;
+use crate::recovery::ReleaseDecision;
+use crate::recovery::ReleaseTime;
+use crate::recovery::rtt::RttStats;
 
 #[derive(Default)]
 struct RecoveryEpoch {
@@ -252,9 +252,7 @@ impl RecoveryEpoch {
 
                     trace!(
                         "{} packet {} lost on epoch {}",
-                        trace_id,
-                        unacked.pkt_num,
-                        epoch
+                        trace_id, unacked.pkt_num, epoch
                     );
                 }
 

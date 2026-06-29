@@ -118,7 +118,7 @@ pub(crate) fn apply_profile_with_trust(
             other => {
                 return Err(TlsError::Profile(format!(
                     "unknown cert compression algorithm: {other:?}"
-                )))
+                )));
             }
         }
     }

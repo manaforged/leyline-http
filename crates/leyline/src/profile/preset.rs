@@ -99,7 +99,12 @@ impl Preset {
             Self::sec_ch_ua_platform(ctx),
             (b("upgrade-insecure-requests"), b("1")),
             (b("user-agent"), o(ctx.user_agent)),
-            (b("accept"), b("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")),
+            (
+                b("accept"),
+                b(
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+                ),
+            ),
             (b("sec-fetch-site"), b("none")),
             (b("sec-fetch-mode"), b("navigate")),
             (b("sec-fetch-user"), b("?1")),
@@ -194,7 +199,12 @@ impl Preset {
             (b("upgrade-insecure-requests"), b("1")),
             (b("user-agent"), o(ctx.user_agent)),
             (b("content-type"), b("application/x-www-form-urlencoded")),
-            (b("accept"), b("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")),
+            (
+                b("accept"),
+                b(
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+                ),
+            ),
             (b("origin"), o(ctx.origin)),
             (b("sec-fetch-site"), b("same-origin")),
             (b("sec-fetch-mode"), b("navigate")),

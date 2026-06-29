@@ -5,8 +5,8 @@
 //! and the host OS rather than a hardcoded Windows fingerprint. Opting into
 //! a browser is the explicit, named action.
 
-use crate::profile::{Browser, Platform};
 use crate::Session;
+use crate::profile::{Browser, Platform};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 async fn capture_get_headers(session: Session) -> String {

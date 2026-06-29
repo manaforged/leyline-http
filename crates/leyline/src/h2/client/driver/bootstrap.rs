@@ -3,8 +3,8 @@
 use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::pin::Pin;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use bytes::Bytes;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -12,7 +12,7 @@ use tokio::sync::mpsc;
 
 use crate::h2::codec::{FrameReader, FrameWriter};
 use crate::h2::config::H2Config;
-use crate::h2::connection::{id_to_u16, PeerSettings, RstFloodDetector};
+use crate::h2::connection::{PeerSettings, RstFloodDetector, id_to_u16};
 use crate::h2::error::{ErrorCode, H2Error};
 use crate::h2::hpack;
 

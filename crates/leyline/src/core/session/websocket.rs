@@ -1,6 +1,6 @@
 use super::Session;
-use crate::core::error::Result;
 use crate::core::WebSocketConfig;
+use crate::core::error::Result;
 
 impl Session {
     // WebSocket.

@@ -19,7 +19,7 @@ use crate::ssl::{
 use crate::ssl::{HandshakeError, SslVersion};
 use crate::x509::store::X509StoreBuilder;
 use crate::x509::verify::X509CheckFlags;
-use crate::x509::{X509Name, X509};
+use crate::x509::{X509, X509Name};
 
 use super::CompliancePolicy;
 
@@ -821,12 +821,14 @@ fn connector_no_hostname_still_verifies() {
     let connector = SslConnector::builder(SslMethod::tls()).unwrap().build();
 
     let s = server.connect_tcp();
-    assert!(connector
-        .configure()
-        .unwrap()
-        .verify_hostname(false)
-        .connect("fizzbuzz.com", s)
-        .is_err());
+    assert!(
+        connector
+            .configure()
+            .unwrap()
+            .verify_hostname(false)
+            .connect("fizzbuzz.com", s)
+            .is_err()
+    );
 }
 
 #[test]
@@ -1276,9 +1278,9 @@ fn test_ssl_set_compliance() {
 #[test]
 fn ex_data_drop() {
     use crate::ssl::SslContextBuilder;
+    use std::sync::Arc;
     use std::sync::atomic::AtomicU32;
     use std::sync::atomic::Ordering::Relaxed;
-    use std::sync::Arc;
 
     struct TrackDrop(Arc<AtomicU32>);
     impl Drop for TrackDrop {

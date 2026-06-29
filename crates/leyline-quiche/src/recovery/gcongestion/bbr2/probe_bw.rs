@@ -35,16 +35,16 @@ use std::time::Instant;
 use crate::recovery::gcongestion::Acked;
 use crate::recovery::gcongestion::Lost;
 
+use super::BBRv2CongestionEvent;
+use super::BwLoMode;
+use super::Limits;
+use super::PARAMS;
 use super::mode::Cycle;
 use super::mode::CyclePhase;
 use super::mode::Mode;
 use super::mode::ModeImpl;
 use super::network_model::BBRv2NetworkModel;
 use super::network_model::DEFAULT_MSS;
-use super::BBRv2CongestionEvent;
-use super::BwLoMode;
-use super::Limits;
-use super::PARAMS;
 
 #[derive(Debug)]
 pub(super) struct ProbeBW {

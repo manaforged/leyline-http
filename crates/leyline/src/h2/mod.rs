@@ -15,7 +15,7 @@ pub mod stream_state;
 
 pub use client::{DriverTask, H2Client, H2ConnectStream, H2ResponseEx, RequestBody, ResponseBody};
 pub use config::{
-    H2Config, PriorityParams, PseudoOrder, SettingId, SETTINGS_ENABLE_CONNECT_PROTOCOL,
+    H2Config, PriorityParams, PseudoOrder, SETTINGS_ENABLE_CONNECT_PROTOCOL, SettingId,
 };
 pub use error::{ErrorCode, H2Error};
 pub use stream_state::{StreamEvent, StreamState, StreamStateError};

@@ -5,9 +5,9 @@
 use bytes::Bytes;
 
 use super::headers::StreamDependency;
-use super::{be_u32, FrameHeader};
-use crate::h2::error::ErrorCode;
+use super::{FrameHeader, be_u32};
 use crate::h2::H2Error;
+use crate::h2::error::ErrorCode;
 
 /// PRIORITY frame — stream dependency (deprecated, parse only).
 #[derive(Debug)]

@@ -10,8 +10,8 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::io;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use bytes::Bytes;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -38,7 +38,7 @@ mod send;
 pub(super) use self::bootstrap::pump_request_body;
 pub(crate) use self::bootstrap::start;
 pub use protocol::DriverTask;
-pub(crate) use protocol::{checked_window_add, DriverCommand, DriverRequestBody};
+pub(crate) use protocol::{DriverCommand, DriverRequestBody, checked_window_add};
 
 /// Max number of outstanding SendRequest commands the driver will buffer
 /// before applying back-pressure on callers. Generous — real workloads

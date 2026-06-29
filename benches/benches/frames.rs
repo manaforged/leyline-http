@@ -3,7 +3,7 @@
 //! RST_STREAM. Raw bytes built once, then parsed in the timed loop.
 
 use bytes::Bytes;
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
 use leyline::h2::frame::{Frame, FrameHeader};
 
 fn hdr(length: u32, frame_type: u8, flags: u8, stream_id: u32) -> FrameHeader {

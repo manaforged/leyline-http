@@ -15,7 +15,7 @@
 //! A full integration-level test (hits on a real driver) is already
 //! covered by `crates/h2/tests/multiplex.rs` + the e2e tower test.
 
-use leyline::pool::{Pool, PoolStats, DEFAULT_IDLE_TIMEOUT, DEFAULT_MAX_CONNECTIONS};
+use leyline::pool::{DEFAULT_IDLE_TIMEOUT, DEFAULT_MAX_CONNECTIONS, Pool, PoolStats};
 use std::time::Duration;
 
 #[test]

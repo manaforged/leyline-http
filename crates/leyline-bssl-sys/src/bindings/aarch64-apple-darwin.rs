@@ -12672,7 +12672,7 @@ pub type __uint128_t = u128;
 pub struct CRYPTO_dynlock_value {
     pub _address: u8,
 }
-extern "C" {
+unsafe extern "C" {
     pub fn signal(
         arg1: ::std::os::raw::c_int,
         arg2: ::std::option::Option<unsafe extern "C" fn(arg1: ::std::os::raw::c_int)>,

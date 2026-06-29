@@ -509,8 +509,8 @@ async fn streamed_read_timeout_fires_on_stall() {
 #[tokio::test]
 async fn streamed_connection_dropped_when_consumer_drops_early() {
     use futures_util::StreamExt;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

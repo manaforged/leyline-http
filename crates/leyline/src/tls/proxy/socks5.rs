@@ -3,8 +3,8 @@
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-use crate::tls::error::TlsError;
 use crate::tls::TlsStream;
+use crate::tls::error::TlsError;
 
 use crate::util::percent_decode;
 
@@ -53,12 +53,12 @@ pub(crate) async fn connect<C: crate::tls::TlsHandshake>(
         0xFF => {
             return Err(TlsError::Profile(
                 "socks5: no acceptable auth method".into(),
-            ))
+            ));
         }
         other => {
             return Err(TlsError::Profile(format!(
                 "socks5: unsupported auth method 0x{other:02x}"
-            )))
+            )));
         }
     }
 

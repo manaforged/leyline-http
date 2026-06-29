@@ -88,9 +88,10 @@ async fn dx_helpers_accept_common_pair_shapes_and_header_shortcuts() {
 
     assert_eq!(resp.status(), 200);
     let req = server.next_request().await;
-    assert!(req
-        .request_line
-        .starts_with("GET /dx?a=1&space=hello+world HTTP/1.1"));
+    assert!(
+        req.request_line
+            .starts_with("GET /dx?a=1&space=hello+world HTTP/1.1")
+    );
     assert_eq!(req.header_values("x-owned"), vec!["yes"]);
     assert_eq!(req.header_values("x-second"), vec!["also"]);
     assert_eq!(req.header_values("accept"), vec!["application/json"]);

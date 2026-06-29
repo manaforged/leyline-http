@@ -14,8 +14,8 @@
 use std::ffi::CStr;
 
 use crate::ffi::{
-    OpenSSL_version, OpenSSL_version_num, OPENSSL_BUILT_ON, OPENSSL_CFLAGS, OPENSSL_DIR,
-    OPENSSL_PLATFORM, OPENSSL_VERSION,
+    OPENSSL_BUILT_ON, OPENSSL_CFLAGS, OPENSSL_DIR, OPENSSL_PLATFORM, OPENSSL_VERSION,
+    OpenSSL_version, OpenSSL_version_num,
 };
 
 /// OPENSSL_VERSION_NUMBER is a numeric release version identifier:

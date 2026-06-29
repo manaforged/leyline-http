@@ -17,14 +17,14 @@
 
 use std::sync::Arc;
 
-use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use futures_util::{SinkExt, StreamExt};
+use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::{HeaderValue, Uri};
 use tokio_tungstenite::tungstenite::protocol::Role;
-use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::WebSocketStream;
 
 use crate::h2::client::H2ConnectStream;
 use crate::h2::config::H2Config;

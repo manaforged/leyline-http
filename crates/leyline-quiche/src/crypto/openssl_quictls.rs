@@ -484,7 +484,7 @@ pub(crate) fn hkdf_expand(
     Ok(())
 }
 
-extern "C" {
+unsafe extern "C" {
     // EVP
     fn EVP_aes_128_ctr() -> *const EVP_AEAD;
     fn EVP_aes_128_gcm() -> *const EVP_AEAD;

@@ -86,7 +86,7 @@ fn encode_rst_stream(stream_id: u32, code: u32) -> Vec<u8> {
     v.extend_from_slice(&[0x00, 0x00, 0x04, 0x03, 0x00]);
     v.extend_from_slice(&stream_id.to_be_bytes());
     v[5] &= 0x7F; // clear reserved bit per RFC 9113 §4.1
-                  // 4-byte payload: error code.
+    // 4-byte payload: error code.
     v.extend_from_slice(&code.to_be_bytes());
     v
 }

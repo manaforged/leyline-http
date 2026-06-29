@@ -30,14 +30,14 @@
 
 use std::time::Instant;
 
-use super::mode::Mode;
-use super::mode::ModeImpl;
-use super::network_model::BBRv2NetworkModel;
 use super::Acked;
 use super::BBRv2CongestionEvent;
 use super::Limits;
 use super::Lost;
 use super::PARAMS;
+use super::mode::Mode;
+use super::mode::ModeImpl;
+use super::network_model::BBRv2NetworkModel;
 
 #[derive(Debug)]
 pub(super) struct Startup {

@@ -32,11 +32,11 @@ use std::ops::Add;
 use std::time::Duration;
 use std::time::Instant;
 
+use crate::recovery::gcongestion::Lost;
 use crate::recovery::gcongestion::bandwidth::Bandwidth;
 use crate::recovery::gcongestion::bbr::BandwidthSampler;
-use crate::recovery::gcongestion::Lost;
-use crate::recovery::rtt::RttStats;
 use crate::recovery::rtt::INITIAL_RTT;
+use crate::recovery::rtt::RttStats;
 
 use super::Acked;
 use super::BBRv2CongestionEvent;

@@ -3,8 +3,8 @@
 use std::time::Duration;
 
 use bytes::Bytes;
-use futures_util::stream;
 use futures_util::StreamExt;
+use futures_util::stream;
 use leyline::core::{Body, ProtocolPolicy, Session};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 

@@ -36,15 +36,15 @@ use std::time::Instant;
 
 use crate::recovery::gcongestion::Lost;
 
+use super::Acked;
+use super::BBRv2CongestionEvent;
+use super::Limits;
+use super::PARAMS;
 use super::drain::Drain;
 use super::network_model::BBRv2NetworkModel;
 use super::probe_bw::ProbeBW;
 use super::probe_rtt::ProbeRTT;
 use super::startup::Startup;
-use super::Acked;
-use super::BBRv2CongestionEvent;
-use super::Limits;
-use super::PARAMS;
 
 #[derive(Debug, Default, PartialEq)]
 pub(super) enum CyclePhase {

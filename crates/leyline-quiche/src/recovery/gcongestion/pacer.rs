@@ -30,15 +30,15 @@
 
 use std::time::Instant;
 
-use crate::recovery::rtt::RttStats;
 use crate::recovery::ReleaseDecision;
 use crate::recovery::ReleaseTime;
+use crate::recovery::rtt::RttStats;
 
-use super::bandwidth::Bandwidth;
 use super::Acked;
 use super::Congestion;
 use super::CongestionControl;
 use super::Lost;
+use super::bandwidth::Bandwidth;
 
 /// Congestion window fraction that the pacing sender allows in bursts during
 /// pacing.

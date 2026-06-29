@@ -344,9 +344,18 @@ fn debug_fmt(r: &Congestion, f: &mut std::fmt::Formatter) -> std::fmt::Result {
     let bbr = &r.bbr_state;
 
     write!(
-         f,
-         "bbr={{ state={:?} btlbw={} rtprop={:?} pacing_rate={} pacing_gain={} cwnd_gain={} target_cwnd={} send_quantum={} filled_pipe={} round_count={} }}",
-         bbr.state, bbr.btlbw, bbr.rtprop, bbr.pacing_rate, bbr.pacing_gain, bbr.cwnd_gain, bbr.target_cwnd, r.send_quantum(), bbr.filled_pipe, bbr.round_count
+        f,
+        "bbr={{ state={:?} btlbw={} rtprop={:?} pacing_rate={} pacing_gain={} cwnd_gain={} target_cwnd={} send_quantum={} filled_pipe={} round_count={} }}",
+        bbr.state,
+        bbr.btlbw,
+        bbr.rtprop,
+        bbr.pacing_rate,
+        bbr.pacing_gain,
+        bbr.cwnd_gain,
+        bbr.target_cwnd,
+        r.send_quantum(),
+        bbr.filled_pipe,
+        bbr.round_count
     )
 }
 
@@ -356,10 +365,10 @@ mod tests {
 
     use crate::packet;
     use crate::ranges;
-    use crate::recovery::congestion::recovery::LegacyRecovery;
-    use crate::recovery::congestion::test_sender::TestSender;
     use crate::recovery::HandshakeStatus;
     use crate::recovery::RecoveryOps;
+    use crate::recovery::congestion::recovery::LegacyRecovery;
+    use crate::recovery::congestion::test_sender::TestSender;
 
     use smallvec::smallvec;
 

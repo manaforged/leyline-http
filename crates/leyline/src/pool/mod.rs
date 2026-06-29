@@ -48,11 +48,11 @@ mod pool;
 mod types;
 
 pub use h1::{
-    send_request_h1_pooled, H1Body, H1Io, H1PooledError, H1Response, H1ResponseBody, H1Target,
-    MAX_H1_BODY_BYTES, MAX_H1_HEADER_BYTES,
+    H1Body, H1Io, H1PooledError, H1Response, H1ResponseBody, H1Target, MAX_H1_BODY_BYTES,
+    MAX_H1_HEADER_BYTES, send_request_h1_pooled,
 };
 pub use pool::{
-    Pool, DEFAULT_IDLE_TIMEOUT, DEFAULT_MAX_CONNECTIONS, DEFAULT_MAX_H1_CONNS_PER_HOST,
+    DEFAULT_IDLE_TIMEOUT, DEFAULT_MAX_CONNECTIONS, DEFAULT_MAX_H1_CONNS_PER_HOST, Pool,
 };
 pub use types::{H1Slot, PoolStats, TlsInfo};
 

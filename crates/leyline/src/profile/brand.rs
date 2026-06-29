@@ -436,10 +436,12 @@ mod tests {
     fn chrome_brand_has_no_overlay() {
         let ua = "Mozilla/5.0 ...";
         let sch = r#""Google Chrome";v="147", "Not.A/Brand";v="8", "Chromium";v="147""#;
-        assert!(ChromiumBrand::Chrome
-            .overlay(147, Platform::Windows, ua, sch)
-            .unwrap()
-            .is_none());
+        assert!(
+            ChromiumBrand::Chrome
+                .overlay(147, Platform::Windows, ua, sch)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -512,9 +514,11 @@ mod tests {
             );
         }
         for bad in [144u32, 149] {
-            assert!(ChromiumBrand::Opera
-                .overlay(bad, Platform::Windows, "ua", "")
-                .is_err());
+            assert!(
+                ChromiumBrand::Opera
+                    .overlay(bad, Platform::Windows, "ua", "")
+                    .is_err()
+            );
         }
         for p in [Platform::Android, Platform::IOS] {
             assert!(ChromiumBrand::Opera.overlay(147, p, "ua", "").is_err());

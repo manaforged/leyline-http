@@ -950,11 +950,11 @@ impl std::fmt::Debug for PathStats {
 
 #[cfg(test)]
 mod tests {
-    use crate::rand;
     use crate::MIN_CLIENT_INITIAL_LEN;
+    use crate::rand;
 
-    use crate::recovery::RecoveryConfig;
     use crate::Config;
+    use crate::recovery::RecoveryConfig;
 
     use super::*;
 

@@ -30,9 +30,9 @@ use std::time::Instant;
 use self::recovery::Acked;
 use super::RecoveryConfig;
 use super::Sent;
+use crate::recovery::CongestionControlAlgorithm;
 use crate::recovery::rtt;
 use crate::recovery::rtt::RttStats;
-use crate::recovery::CongestionControlAlgorithm;
 
 pub const PACING_MULTIPLIER: f64 = 1.25;
 pub struct Congestion {

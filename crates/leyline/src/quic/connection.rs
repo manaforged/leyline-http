@@ -14,7 +14,7 @@ use std::net::ToSocketAddrs;
 use leyline_quiche as quiche;
 
 use crate::profile::BrowserProfile;
-use crate::tls::{build_ssl_context, TlsMinVersion};
+use crate::tls::{TlsMinVersion, build_ssl_context};
 
 use crate::quic::config::H3Config;
 

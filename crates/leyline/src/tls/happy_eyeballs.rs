@@ -186,8 +186,8 @@ where
 mod tests {
     use super::*;
     use std::net::Ipv6Addr;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::net::TcpListener;
     use tokio::time::Instant;
 

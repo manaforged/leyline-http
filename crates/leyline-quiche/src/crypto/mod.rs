@@ -502,7 +502,7 @@ pub fn verify_slices_are_equal(a: &[u8], b: &[u8]) -> Result<()> {
     Err(Error::CryptoFail)
 }
 
-extern "C" {
+unsafe extern "C" {
     fn EVP_sha256() -> *const EVP_MD;
 
     fn EVP_sha384() -> *const EVP_MD;

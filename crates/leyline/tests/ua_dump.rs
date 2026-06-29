@@ -1,7 +1,7 @@
 //! Dumps on-the-wire UA / sec-ch-ua / dnt / sec-gpc for each ChromiumBrand.
 #![allow(missing_docs)]
-use leyline::profile::Preset;
 use leyline::Session;
+use leyline::profile::Preset;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 async fn capture(session: Session) -> String {

@@ -1,14 +1,14 @@
 use super::server::Server;
-use crate::ssl::test::MessageDigest;
 use crate::ssl::HmacCtxRef;
 use crate::ssl::SslRef;
 use crate::ssl::SslSession;
 use crate::ssl::SslSessionCacheMode;
 use crate::ssl::TicketKeyCallbackResult;
+use crate::ssl::test::MessageDigest;
 use crate::symm::Cipher;
 use crate::symm::CipherCtxRef;
-use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU8, Ordering};
 
 static SUCCESS_ENCRYPTION_CALLED_BACK: AtomicU8 = AtomicU8::new(0);
 static SUCCESS_DECRYPTION_CALLED_BACK: AtomicU8 = AtomicU8::new(0);

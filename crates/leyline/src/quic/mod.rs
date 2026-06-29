@@ -12,5 +12,5 @@ mod pool;
 pub use config::H3Config;
 pub use connection::H3Response;
 pub(crate) use pool::{
-    open_fresh_h3, H3Client, H3DriverTask, H3RequestBodyStream, H3RespBody, H3ResponseParts,
+    H3Client, H3DriverTask, H3RequestBodyStream, H3RespBody, H3ResponseParts, open_fresh_h3,
 };

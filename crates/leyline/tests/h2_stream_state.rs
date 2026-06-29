@@ -387,14 +387,18 @@ fn is_closed_flags() {
     assert!(!open().is_closed());
     assert!(!half_closed_local().is_closed());
     assert!(!half_closed_remote().is_closed());
-    assert!(StreamState::Closed {
-        reason: ClosedReason::EndStream
-    }
-    .is_closed());
-    assert!(StreamState::Closed {
-        reason: ClosedReason::Error
-    }
-    .is_closed());
+    assert!(
+        StreamState::Closed {
+            reason: ClosedReason::EndStream
+        }
+        .is_closed()
+    );
+    assert!(
+        StreamState::Closed {
+            reason: ClosedReason::Error
+        }
+        .is_closed()
+    );
 }
 
 #[test]
@@ -403,10 +407,12 @@ fn can_send_data_only_when_local_side_open() {
     assert!(open().can_send_data());
     assert!(!half_closed_local().can_send_data());
     assert!(half_closed_remote().can_send_data());
-    assert!(!StreamState::Closed {
-        reason: ClosedReason::EndStream
-    }
-    .can_send_data());
+    assert!(
+        !StreamState::Closed {
+            reason: ClosedReason::EndStream
+        }
+        .can_send_data()
+    );
 }
 
 #[test]
@@ -415,10 +421,12 @@ fn can_recv_data_only_when_remote_side_open() {
     assert!(open().can_recv_data());
     assert!(half_closed_local().can_recv_data());
     assert!(!half_closed_remote().can_recv_data());
-    assert!(!StreamState::Closed {
-        reason: ClosedReason::EndStream
-    }
-    .can_recv_data());
+    assert!(
+        !StreamState::Closed {
+            reason: ClosedReason::EndStream
+        }
+        .can_recv_data()
+    );
 }
 
 #[test]

@@ -9,9 +9,9 @@ mod ja4;
 mod ja4h;
 mod ja4t;
 
-pub use ja3::{compute_ja3, Ja3Input};
-pub use ja4::{chrome_extension_ids, compute_ja4, Ja4Input};
-pub use ja4h::{compute_ja4h, Ja4hInput};
+pub use ja3::{Ja3Input, compute_ja3};
+pub use ja4::{Ja4Input, chrome_extension_ids, compute_ja4};
+pub use ja4h::{Ja4hInput, compute_ja4h};
 pub use ja4t::compute_ja4t;
 
 use sha2::{Digest, Sha256};

@@ -28,14 +28,14 @@ use std::cmp;
 
 use std::sync::Arc;
 
-use std::collections::hash_map;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::collections::hash_map;
 
-use intrusive_collections::intrusive_adapter;
 use intrusive_collections::KeyAdapter;
 use intrusive_collections::RBTree;
 use intrusive_collections::RBTreeAtomicLink;
+use intrusive_collections::intrusive_adapter;
 
 use smallvec::SmallVec;
 
@@ -1825,9 +1825,11 @@ mod tests {
         for stream_id in [8, 12, 4] {
             assert!(is_local(stream_id, false), "stream id is client initiated");
             assert!(is_bidi(stream_id), "stream id is bidirectional");
-            assert!(streams
-                .get_or_create(stream_id, &local_tp, &peer_tp, false, true)
-                .is_ok());
+            assert!(
+                streams
+                    .get_or_create(stream_id, &local_tp, &peer_tp, false, true)
+                    .is_ok()
+            );
         }
     }
 
@@ -1841,9 +1843,11 @@ mod tests {
 
         // Highest permitted
         let stream_id = 8;
-        assert!(streams
-            .get_or_create(stream_id, &local_tp, &peer_tp, false, true)
-            .is_ok());
+        assert!(
+            streams
+                .get_or_create(stream_id, &local_tp, &peer_tp, false, true)
+                .is_ok()
+        );
 
         // One more than highest permitted
         let stream_id = 12;
@@ -1872,9 +1876,11 @@ mod tests {
         let mut streams = StreamMap::new(100, 100, 100);
 
         for id in [0, 4, 8, 12] {
-            assert!(streams
-                .get_or_create(id, &local_tp, &peer_tp, false, true)
-                .is_ok());
+            assert!(
+                streams
+                    .get_or_create(id, &local_tp, &peer_tp, false, true)
+                    .is_ok()
+            );
         }
 
         let walk_1: Vec<u64> = streams.writable().collect();
@@ -1910,9 +1916,11 @@ mod tests {
         // Inserting same-urgency incremental streams in a "random" order yields
         // same order to start with.
         for id in [12, 4, 8, 0] {
-            assert!(streams
-                .get_or_create(id, &local_tp, &peer_tp, false, true)
-                .is_ok());
+            assert!(
+                streams
+                    .get_or_create(id, &local_tp, &peer_tp, false, true)
+                    .is_ok()
+            );
         }
 
         let walk_1: Vec<u64> = streams.writable().collect();

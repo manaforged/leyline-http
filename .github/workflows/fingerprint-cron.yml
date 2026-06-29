@@ -20,7 +20,7 @@ on:
 
 jobs:
   live:
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: [self-hosted, Linux]
     timeout-minutes: 20
 
     steps:

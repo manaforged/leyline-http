@@ -2,9 +2,9 @@
 
 use super::{
     AlpnError, CertificateCompressor, ClientHello, GetSessionPendingError, PrivateKeyMethod,
-    PrivateKeyMethodError, SelectCertError, SniError, Ssl, SslAlert, SslContext, SslContextRef,
-    SslInfoCallbackAlert, SslInfoCallbackMode, SslInfoCallbackValue, SslRef, SslSession,
-    SslSessionRef, SslSignatureAlgorithm, SslVerifyError, SESSION_CTX_INDEX,
+    PrivateKeyMethodError, SESSION_CTX_INDEX, SelectCertError, SniError, Ssl, SslAlert, SslContext,
+    SslContextRef, SslInfoCallbackAlert, SslInfoCallbackMode, SslInfoCallbackValue, SslRef,
+    SslSession, SslSessionRef, SslSignatureAlgorithm, SslVerifyError,
 };
 use crate::error::ErrorStack;
 use crate::ffi;

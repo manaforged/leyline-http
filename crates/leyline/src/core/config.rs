@@ -824,9 +824,11 @@ mod tests {
         assert!(NoProxy::from_string("[::1]").unwrap().matches("::1"));
         assert!(NoProxy::from_string("[::1]:8080").unwrap().matches("::1"));
         assert!(NoProxy::from_string("fe80::1").unwrap().matches("fe80::1"));
-        assert!(NoProxy::from_string("2001:db8::1,192.0.2.0")
-            .unwrap()
-            .matches("2001:db8::1"));
+        assert!(
+            NoProxy::from_string("2001:db8::1,192.0.2.0")
+                .unwrap()
+                .matches("2001:db8::1")
+        );
     }
 
     #[test]
@@ -839,15 +841,21 @@ mod tests {
 
     #[test]
     fn no_proxy_ipv4_port_stripping_still_works() {
-        assert!(NoProxy::from_string("192.0.2.1:8080")
-            .unwrap()
-            .matches("192.0.2.1"));
-        assert!(NoProxy::from_string("example.com:443")
-            .unwrap()
-            .matches("example.com"));
-        assert!(NoProxy::from_string(".example.com:443")
-            .unwrap()
-            .matches("sub.example.com"));
+        assert!(
+            NoProxy::from_string("192.0.2.1:8080")
+                .unwrap()
+                .matches("192.0.2.1")
+        );
+        assert!(
+            NoProxy::from_string("example.com:443")
+                .unwrap()
+                .matches("example.com")
+        );
+        assert!(
+            NoProxy::from_string(".example.com:443")
+                .unwrap()
+                .matches("sub.example.com")
+        );
     }
 
     #[test]
@@ -856,9 +864,11 @@ mod tests {
         // bare IPv6 patterns collapsing to a value that matches every
         // IPv6 host.
         assert!(!NoProxy::from_string("::1").unwrap().matches("::2"));
-        assert!(!NoProxy::from_string("2001:db8::1")
-            .unwrap()
-            .matches("2001:db8::2"));
+        assert!(
+            !NoProxy::from_string("2001:db8::1")
+                .unwrap()
+                .matches("2001:db8::2")
+        );
     }
 
     // ── no-proxy provenance gates ──────────────

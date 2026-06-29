@@ -36,8 +36,8 @@ use std::time::Instant;
 use self::bandwidth::Bandwidth;
 pub use self::recovery::GRecovery;
 
-use crate::recovery::rtt::RttStats;
 use crate::recovery::rtt::INITIAL_RTT;
+use crate::recovery::rtt::RttStats;
 
 #[derive(Debug)]
 pub struct Lost {

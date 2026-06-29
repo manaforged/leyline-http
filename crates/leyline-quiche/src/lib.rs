@@ -386,14 +386,6 @@ extern crate log;
 
 use octets::BufferTooShortError;
 #[cfg(feature = "qlog")]
-use qlog::events::connectivity::ConnectivityEventType;
-#[cfg(feature = "qlog")]
-use qlog::events::connectivity::TransportOwner;
-#[cfg(feature = "qlog")]
-use qlog::events::quic::RecoveryEventType;
-#[cfg(feature = "qlog")]
-use qlog::events::quic::TransportEventType;
-#[cfg(feature = "qlog")]
 use qlog::events::DataRecipient;
 #[cfg(feature = "qlog")]
 use qlog::events::Event;
@@ -405,6 +397,14 @@ use qlog::events::EventImportance;
 use qlog::events::EventType;
 #[cfg(feature = "qlog")]
 use qlog::events::RawInfo;
+#[cfg(feature = "qlog")]
+use qlog::events::connectivity::ConnectivityEventType;
+#[cfg(feature = "qlog")]
+use qlog::events::connectivity::TransportOwner;
+#[cfg(feature = "qlog")]
+use qlog::events::quic::RecoveryEventType;
+#[cfg(feature = "qlog")]
+use qlog::events::quic::TransportEventType;
 use stream::StreamPriorityKey;
 
 use std::cmp;
@@ -2465,8 +2465,7 @@ impl Connection {
             // the client MUST discard these packets.
             trace!(
                 "{} client received packet from unknown address {:?}, dropping",
-                self.trace_id,
-                info,
+                self.trace_id, info,
             );
 
             return Ok(len);
@@ -5359,7 +5358,7 @@ impl Connection {
                             self.streams.remove_writable(&priority_key);
 
                             Some(priority_key.id)
-                        }
+                        };
                     }
                 };
 
@@ -6930,14 +6929,16 @@ impl Connection {
             // 0-RTT packets anymore, so clear the buffer now.
             self.undecryptable_pkts.clear();
 
-            trace!("{} connection established: proto={:?} cipher={:?} curve={:?} sigalg={:?} resumed={} {:?}",
-                   &self.trace_id,
-                   std::str::from_utf8(self.application_proto()),
-                   self.handshake.cipher(),
-                   self.handshake.curve(),
-                   self.handshake.sigalg(),
-                   self.handshake.is_resumed(),
-                   self.peer_transport_params);
+            trace!(
+                "{} connection established: proto={:?} cipher={:?} curve={:?} sigalg={:?} resumed={} {:?}",
+                &self.trace_id,
+                std::str::from_utf8(self.application_proto()),
+                self.handshake.cipher(),
+                self.handshake.curve(),
+                self.handshake.sigalg(),
+                self.handshake.is_resumed(),
+                self.peer_transport_params
+            );
         }
 
         Ok(())
@@ -6970,7 +6971,7 @@ impl Connection {
                     packet::Epoch::Handshake
                         if self.pkt_num_spaces[packet::Epoch::Initial].has_keys() =>
                     {
-                        return Ok(packet::Type::Initial)
+                        return Ok(packet::Type::Initial);
                     }
 
                     _ => (),
@@ -7419,10 +7420,7 @@ impl Connection {
 
                         trace!(
                             "{} path ID {} changed DCID: old seq num {} new seq num {}",
-                            self.trace_id,
-                            pid,
-                            dcid_seq,
-                            new_dcid_seq,
+                            self.trace_id, pid, dcid_seq, new_dcid_seq,
                         );
                     } else {
                         // We cannot use this path anymore for now.
@@ -7430,9 +7428,7 @@ impl Connection {
 
                         trace!(
                             "{} path ID {} cannot be used; DCID seq num {} has been retired",
-                            self.trace_id,
-                            pid,
-                            dcid_seq,
+                            self.trace_id, pid, dcid_seq,
                         );
                     }
                 }
@@ -7700,10 +7696,7 @@ impl Connection {
                 if prev_recv_pid != recv_pid {
                     trace!(
                         "{} peer reused CID {:?} from path {} on path {}",
-                        self.trace_id,
-                        dcid,
-                        prev_recv_pid,
-                        recv_pid
+                        self.trace_id, dcid, prev_recv_pid, recv_pid
                     );
 
                     // TODO: reset congestion control.
@@ -7711,9 +7704,7 @@ impl Connection {
 
                 trace!(
                     "{} path ID {} now see SCID with seq num {}",
-                    self.trace_id,
-                    recv_pid,
-                    in_scid_seq
+                    self.trace_id, recv_pid, in_scid_seq
                 );
 
                 recv_path.active_scid_seq = Some(in_scid_seq);
@@ -13478,13 +13469,14 @@ mod tests {
         assert_eq!(pipe.advance(), Ok(()));
 
         // app_limited should be true because we send less than cwnd.
-        assert!(pipe
-            .server
-            .paths
-            .get_active()
-            .expect("no active")
-            .recovery
-            .app_limited());
+        assert!(
+            pipe.server
+                .paths
+                .get_active()
+                .expect("no active")
+                .recovery
+                .app_limited()
+        );
     }
 
     #[test]
@@ -13519,13 +13511,15 @@ mod tests {
 
         // We can't create a new packet header because there is no room by cwnd.
         // app_limited should be false because we can't send more by cwnd.
-        assert!(!pipe
-            .server
-            .paths
-            .get_active()
-            .expect("no active")
-            .recovery
-            .app_limited());
+        assert!(
+            !pipe
+                .server
+                .paths
+                .get_active()
+                .expect("no active")
+                .recovery
+                .app_limited()
+        );
     }
 
     #[test]
@@ -13702,13 +13696,15 @@ mod tests {
 
         // We can't create a new packet header because there is no room by cwnd.
         // app_limited should be false because we can't send more by cwnd.
-        assert!(!pipe
-            .server
-            .paths
-            .get_active()
-            .expect("no active")
-            .recovery
-            .app_limited());
+        assert!(
+            !pipe
+                .server
+                .paths
+                .get_active()
+                .expect("no active")
+                .recovery
+                .app_limited()
+        );
     }
 
     #[test]
@@ -13743,13 +13739,15 @@ mod tests {
 
         // We can't create a new frame because there is no room by cwnd.
         // app_limited should be false because we can't send more by cwnd.
-        assert!(!pipe
-            .server
-            .paths
-            .get_active()
-            .expect("no active")
-            .recovery
-            .app_limited());
+        assert!(
+            !pipe
+                .server
+                .paths
+                .get_active()
+                .expect("no active")
+                .recovery
+                .app_limited()
+        );
     }
 
     #[test]
@@ -13778,25 +13776,27 @@ mod tests {
 
         // Client's app_limited is true because its bytes-in-flight
         // is much smaller than the current cwnd.
-        assert!(pipe
-            .client
-            .paths
-            .get_active()
-            .expect("no active")
-            .recovery
-            .app_limited());
+        assert!(
+            pipe.client
+                .paths
+                .get_active()
+                .expect("no active")
+                .recovery
+                .app_limited()
+        );
 
         // Client has no new frames to send - returns Done.
         assert_eq!(testing::emit_flight(&mut pipe.client), Err(Error::Done));
 
         // Client's app_limited should remain the same.
-        assert!(pipe
-            .client
-            .paths
-            .get_active()
-            .expect("no active")
-            .recovery
-            .app_limited());
+        assert!(
+            pipe.client
+                .paths
+                .get_active()
+                .expect("no active")
+                .recovery
+                .app_limited()
+        );
     }
 
     #[test]
@@ -14644,26 +14644,30 @@ mod tests {
             assert_eq!(pipe.client.dgram_send(&send_buf), Ok(()));
         }
 
-        assert!(!pipe
-            .client
-            .paths
-            .get_active()
-            .expect("no active")
-            .recovery
-            .app_limited());
+        assert!(
+            !pipe
+                .client
+                .paths
+                .get_active()
+                .expect("no active")
+                .recovery
+                .app_limited()
+        );
         assert_eq!(pipe.client.dgram_send_queue.byte_size(), 1_000_000);
 
         let (len, _) = pipe.client.send(&mut buf).unwrap();
 
         assert_ne!(pipe.client.dgram_send_queue.byte_size(), 0);
         assert_ne!(pipe.client.dgram_send_queue.byte_size(), 1_000_000);
-        assert!(!pipe
-            .client
-            .paths
-            .get_active()
-            .expect("no active")
-            .recovery
-            .app_limited());
+        assert!(
+            !pipe
+                .client
+                .paths
+                .get_active()
+                .expect("no active")
+                .recovery
+                .app_limited()
+        );
 
         assert_eq!(pipe.server_recv(&mut buf[..len]), Ok(len));
 
@@ -14676,13 +14680,15 @@ mod tests {
         assert_ne!(pipe.client.dgram_send_queue.byte_size(), 0);
         assert_ne!(pipe.client.dgram_send_queue.byte_size(), 1_000_000);
 
-        assert!(!pipe
-            .client
-            .paths
-            .get_active()
-            .expect("no active")
-            .recovery
-            .app_limited());
+        assert!(
+            !pipe
+                .client
+                .paths
+                .get_active()
+                .expect("no active")
+                .recovery
+                .app_limited()
+        );
     }
 
     #[test]
@@ -17579,10 +17585,12 @@ mod tests {
             .expect("server receive path challenge");
 
         // Show that the new path is not considered a destination path by quiche
-        assert!(!pipe
-            .server
-            .paths_iter(server_addr)
-            .any(|path| path == client_addr_2));
+        assert!(
+            !pipe
+                .server
+                .paths_iter(server_addr)
+                .any(|path| path == client_addr_2)
+        );
     }
 
     #[test]

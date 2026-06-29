@@ -5,9 +5,9 @@
 
 use bytes::Bytes;
 
-use super::{be_u32, FrameHeader};
-use crate::h2::error::ErrorCode;
+use super::{FrameHeader, be_u32};
 use crate::h2::H2Error;
+use crate::h2::error::ErrorCode;
 
 /// PUSH_PROMISE frame — server push.
 #[derive(Debug)]

@@ -36,16 +36,24 @@ mod generated {
     include!("bindings/aarch64-apple-darwin.rs");
 }
 
+#[cfg(all(target_arch = "aarch64", target_os = "linux", target_env = "gnu"))]
+mod generated {
+    include!("bindings/aarch64-unknown-linux-gnu.rs");
+}
+
 #[cfg(not(any(
     all(target_arch = "x86_64", target_os = "windows", target_env = "msvc"),
     all(target_arch = "x86_64", target_os = "linux", target_env = "gnu"),
     all(target_arch = "aarch64", target_os = "macos"),
+    all(target_arch = "aarch64", target_os = "linux", target_env = "gnu"),
 )))]
-compile_error!("leyline-bssl-sys ships prebuilt bindings only for x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu, and aarch64-apple-darwin. Rebuild from source via .github/workflows/build-prebuilt.yml for other targets.");
+compile_error!(
+    "leyline-bssl-sys ships prebuilt bindings only for x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu, and aarch64-apple-darwin. Rebuild from source via .github/workflows/build-prebuilt.yml for other targets."
+);
 
 // explicitly require presence of some symbols to check if the bindings worked
-pub use generated::{ssl_compliance_policy_t, ERR_add_error_data, SSL_set1_groups}; // if these are missing, your include path is incorrect or has a wrong version of boringssl
 pub use generated::{BIO_new, OPENSSL_free, SSL_ERROR_NONE}; // if these are missing, your include path is incorrect
+pub use generated::{ERR_add_error_data, SSL_set1_groups, ssl_compliance_policy_t}; // if these are missing, your include path is incorrect or has a wrong version of boringssl
 #[cfg(feature = "fips")]
 pub use generated::{FIPS_mode, SSL_CTX_set_compliance_policy}; // your include path is incorrect or has a version of boringssl without FIPS support
 #[cfg(feature = "mlkem")]

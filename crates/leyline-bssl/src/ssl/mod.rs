@@ -62,8 +62,8 @@ use openssl_macros::corresponds;
 use std::any::TypeId;
 use std::collections::HashMap;
 use std::convert::TryInto;
-use std::ffi::{c_char, c_int, c_uchar, c_uint};
 use std::ffi::{CStr, CString};
+use std::ffi::{c_char, c_int, c_uchar, c_uint};
 use std::fmt;
 use std::io;
 use std::io::prelude::*;
@@ -96,7 +96,7 @@ use crate::try_int;
 use crate::x509::store::{X509Store, X509StoreBuilder, X509StoreBuilderRef, X509StoreRef};
 use crate::x509::verify::X509VerifyParamRef;
 use crate::x509::{
-    X509Name, X509Ref, X509StoreContextRef, X509VerifyError, X509VerifyResult, X509,
+    X509, X509Name, X509Ref, X509StoreContextRef, X509VerifyError, X509VerifyResult,
 };
 use crate::{cvt, cvt_0i, cvt_n, cvt_p, init};
 use crate::{ffi, free_data_box};
@@ -1601,11 +1601,7 @@ impl SslContextBuilder {
     pub fn min_proto_version(&mut self) -> Option<SslVersion> {
         unsafe {
             let r = ffi::SSL_CTX_get_min_proto_version(self.as_ptr());
-            if r == 0 {
-                None
-            } else {
-                Some(SslVersion(r))
-            }
+            if r == 0 { None } else { Some(SslVersion(r)) }
         }
     }
 
@@ -1614,11 +1610,7 @@ impl SslContextBuilder {
     pub fn max_proto_version(&mut self) -> Option<SslVersion> {
         unsafe {
             let r = ffi::SSL_CTX_get_max_proto_version(self.as_ptr());
-            if r == 0 {
-                None
-            } else {
-                Some(SslVersion(r))
-            }
+            if r == 0 { None } else { Some(SslVersion(r)) }
         }
     }
 
@@ -1715,7 +1707,10 @@ impl SslContextBuilder {
         C: CertificateCompressor,
     {
         const {
-            assert!(C::CAN_COMPRESS || C::CAN_DECOMPRESS, "Either compression or decompression must be supported for algorithm to be registered");
+            assert!(
+                C::CAN_COMPRESS || C::CAN_DECOMPRESS,
+                "Either compression or decompression must be supported for algorithm to be registered"
+            );
         };
         let success = unsafe {
             ffi::SSL_CTX_add_cert_compression_alg(
@@ -2659,11 +2654,7 @@ impl SslCipherRef {
     #[must_use]
     pub fn cipher_auth_nid(&self) -> Option<Nid> {
         let n = unsafe { ffi::SSL_CIPHER_get_auth_nid(self.as_ptr()) };
-        if n == 0 {
-            None
-        } else {
-            Some(Nid::from_raw(n))
-        }
+        if n == 0 { None } else { Some(Nid::from_raw(n)) }
     }
 
     /// Returns the NID corresponding to the cipher.
@@ -2671,11 +2662,7 @@ impl SslCipherRef {
     #[must_use]
     pub fn cipher_nid(&self) -> Option<Nid> {
         let n = unsafe { ffi::SSL_CIPHER_get_cipher_nid(self.as_ptr()) };
-        if n == 0 {
-            None
-        } else {
-            Some(Nid::from_raw(n))
-        }
+        if n == 0 { None } else { Some(Nid::from_raw(n)) }
     }
 }
 
@@ -3352,11 +3339,7 @@ impl SslRef {
     pub fn min_proto_version(&mut self) -> Option<SslVersion> {
         unsafe {
             let r = ffi::SSL_get_min_proto_version(self.as_ptr());
-            if r == 0 {
-                None
-            } else {
-                Some(SslVersion(r))
-            }
+            if r == 0 { None } else { Some(SslVersion(r)) }
         }
     }
 
@@ -3365,11 +3348,7 @@ impl SslRef {
     #[must_use]
     pub fn max_proto_version(&self) -> Option<SslVersion> {
         let r = unsafe { ffi::SSL_get_max_proto_version(self.as_ptr()) };
-        if r == 0 {
-            None
-        } else {
-            Some(SslVersion(r))
-        }
+        if r == 0 { None } else { Some(SslVersion(r)) }
     }
 
     /// Returns the protocol selected via Application Layer Protocol Negotiation (ALPN).
@@ -4557,7 +4536,7 @@ pub trait PrivateKeyMethod: Send + Sync + 'static {
     ///
     /// This method may be called arbitrarily many times before completion.
     fn complete(&self, ssl: &mut SslRef, output: &mut [u8])
-        -> Result<usize, PrivateKeyMethodError>;
+    -> Result<usize, PrivateKeyMethodError>;
 }
 
 /// An error returned from a private key method.

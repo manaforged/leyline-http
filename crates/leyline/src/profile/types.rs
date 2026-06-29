@@ -408,7 +408,7 @@ impl H2Profile {
                     return Err(crate::Error::Config(format!(
                         "unknown name in [h2.platforms.{}].omit_settings: {other:?}",
                         platform.identity_key()
-                    )))
+                    )));
                 }
             }
         }

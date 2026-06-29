@@ -43,12 +43,12 @@ use network_model::BBRv2NetworkModel;
 use self::mode::Mode;
 use self::mode::ModeImpl;
 
-use super::bandwidth::Bandwidth;
-use super::bbr::SendTimeState;
 use super::Acked;
 use super::CongestionControl;
 use super::Lost;
 use super::RttStats;
+use super::bandwidth::Bandwidth;
+use super::bbr::SendTimeState;
 
 const MAX_MODE_CHANGES_PER_CONGESTION_EVENT: usize = 4;
 

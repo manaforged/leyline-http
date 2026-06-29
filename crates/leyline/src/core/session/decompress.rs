@@ -289,15 +289,21 @@ mod tests {
             decompress_and_strip(gzip_body, headers, &CompressionConfig::default()).unwrap();
 
         assert_eq!(decoded, body);
-        assert!(!headers
-            .iter()
-            .any(|(k, _)| k.eq_ignore_ascii_case("content-encoding")));
-        assert!(!headers
-            .iter()
-            .any(|(k, _)| k.eq_ignore_ascii_case("content-length")));
-        assert!(headers
-            .iter()
-            .any(|(k, v)| k == "Content-Type" && v == "text/plain"));
+        assert!(
+            !headers
+                .iter()
+                .any(|(k, _)| k.eq_ignore_ascii_case("content-encoding"))
+        );
+        assert!(
+            !headers
+                .iter()
+                .any(|(k, _)| k.eq_ignore_ascii_case("content-length"))
+        );
+        assert!(
+            headers
+                .iter()
+                .any(|(k, v)| k == "Content-Type" && v == "text/plain")
+        );
     }
 
     // No content-encoding means nothing was decoded: every header, including

@@ -259,8 +259,8 @@ impl Drop for H2ConnectStream {
 mod connect_stream_tests {
     use std::io;
     use std::pin::Pin;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::task::{Context, Poll, Wake, Waker};
 
     use bytes::Bytes;

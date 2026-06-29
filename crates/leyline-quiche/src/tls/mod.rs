@@ -782,9 +782,7 @@ extern "C" fn add_handshake_data(
 
     trace!(
         "{} write message lvl={:?} len={}",
-        ex_data.trace_id,
-        level,
-        len
+        ex_data.trace_id, level, len
     );
 
     let buf = unsafe { slice::from_raw_parts(data, len) };
@@ -819,9 +817,7 @@ extern "C" fn send_alert(ssl: *mut SSL, level: crypto::Level, alert: u8) -> c_in
 
     trace!(
         "{} send alert lvl={:?} alert={:x}",
-        ex_data.trace_id,
-        level,
-        alert
+        ex_data.trace_id, level, alert
     );
 
     let error: u64 = TLS_ALERT_ERROR + u64::from(alert);
@@ -1002,7 +998,7 @@ fn log_ssl_error() {
     );
 }
 
-extern "C" {
+unsafe extern "C" {
     // Note: some vendor-specific methods are implemented by each vendor's
     // submodule (openssl-quictls / boringssl).
 

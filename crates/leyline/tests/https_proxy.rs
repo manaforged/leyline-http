@@ -20,16 +20,16 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use leyline::TcpProfile;
 use leyline::profile::BrowserProfile;
 use leyline::tls::{FingerprintConnector, TlsTrustConfig};
-use leyline::TcpProfile;
 use leyline_bssl::asn1::Asn1Time;
 use leyline_bssl::bn::{BigNum, MsbOption};
 use leyline_bssl::hash::MessageDigest;
 use leyline_bssl::pkey::PKey;
 use leyline_bssl::rsa::Rsa;
 use leyline_bssl::x509::extension::{BasicConstraints, SubjectAlternativeName};
-use leyline_bssl::x509::{X509NameBuilder, X509};
+use leyline_bssl::x509::{X509, X509NameBuilder};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
@@ -135,15 +135,15 @@ where
 
 /// Spawn a mock `https://` CONNECT proxy. Returns its address and a receiver
 /// that yields the CONNECT request the proxy decrypted off the TLS stream.
-async fn spawn_mock_https_proxy(gen: &Generated) -> (SocketAddr, oneshot::Receiver<String>) {
+async fn spawn_mock_https_proxy(r#gen: &Generated) -> (SocketAddr, oneshot::Receiver<String>) {
     use leyline_bssl::ssl::{Ssl, SslAcceptor, SslMethod};
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
 
-    let leaf_pem = gen.leaf_cert_pem.clone();
-    let key_pem = gen.leaf_key_pem.clone();
-    let ca_pem = gen.ca_cert_pem.clone();
+    let leaf_pem = r#gen.leaf_cert_pem.clone();
+    let key_pem = r#gen.leaf_key_pem.clone();
+    let ca_pem = r#gen.ca_cert_pem.clone();
     let (tx, rx) = oneshot::channel::<String>();
 
     tokio::spawn(async move {
@@ -186,13 +186,13 @@ async fn spawn_mock_https_proxy(gen: &Generated) -> (SocketAddr, oneshot::Receiv
     (addr, rx)
 }
 
-fn connector(gen: &Generated) -> FingerprintConnector {
+fn connector(r#gen: &Generated) -> FingerprintConnector {
     // Trust only the test CA — no env/system roots — so a successful origin
     // handshake through the tunnel proves real verification, not a bypass.
     let trust = TlsTrustConfig::new()
         .without_env_roots()
         .without_system_roots()
-        .add_ca_der(gen.ca_der.clone());
+        .add_ca_der(r#gen.ca_der.clone());
     FingerprintConnector::new_with_trust(&load_profile(), TcpProfile::LINUX, &trust)
         .expect("connector build")
 }
@@ -201,11 +201,11 @@ fn connector(gen: &Generated) -> FingerprintConnector {
 async fn https_proxy_tunnels_with_encrypted_connect() {
     // One cert covers both legs: `localhost` (the proxy, reached via the system
     // resolver) and `right.example` (the CONNECT target / nested SNI).
-    let gen = generate_chain(&["localhost", "right.example"]);
-    let (addr, connect_rx) = spawn_mock_https_proxy(&gen).await;
+    let r#gen = generate_chain(&["localhost", "right.example"]);
+    let (addr, connect_rx) = spawn_mock_https_proxy(&r#gen).await;
 
     let proxy_url = format!("https://user:secret@localhost:{}", addr.port());
-    let res = Arc::new(connector(&gen))
+    let res = Arc::new(connector(&r#gen))
         .connect("right.example", 443, Some(&proxy_url))
         .await;
     assert!(
@@ -234,11 +234,11 @@ async fn https_proxy_refused_when_connector_has_origin_identity() {
     // must REFUSE an https:// proxy rather than present the origin identity to
     // the proxy or check the proxy's cert against the origin's pins. The guard
     // fires before any socket is opened, so the unroutable :1 is never dialed.
-    let gen = generate_chain(&["right.example"]);
+    let r#gen = generate_chain(&["right.example"]);
     let trust = TlsTrustConfig::new()
         .without_env_roots()
         .without_system_roots()
-        .add_ca_der(gen.ca_der.clone())
+        .add_ca_der(r#gen.ca_der.clone())
         .add_pinned_leaf_sha256([0u8; 32]);
     let conn = FingerprintConnector::new_with_trust(&load_profile(), TcpProfile::LINUX, &trust)
         .expect("connector build");

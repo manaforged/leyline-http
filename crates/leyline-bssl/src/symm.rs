@@ -283,11 +283,7 @@ impl Cipher {
     pub fn iv_len(&self) -> Option<usize> {
         unsafe {
             let len = EVP_CIPHER_iv_length(self.0) as usize;
-            if len == 0 {
-                None
-            } else {
-                Some(len)
-            }
+            if len == 0 { None } else { Some(len) }
         }
     }
 

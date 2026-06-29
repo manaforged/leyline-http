@@ -140,16 +140,27 @@ where
         }
     }
 }
+#[doc = r" If Bindgen could only determine the size and alignment of a"]
+#[doc = r" type, it is represented like this."]
+#[derive(PartialEq, Copy, Clone, Debug, Hash)]
+#[repr(C)]
+pub struct __BindgenOpaqueArray<T: Copy, const N: usize>(pub [T; N]);
+impl<T: Copy + Default, const N: usize> Default for __BindgenOpaqueArray<T, N> {
+    fn default() -> Self {
+        Self([<T as Default>::default(); N])
+    }
+}
 pub const _STDINT_H: i32 = 1;
 pub const _FEATURES_H: i32 = 1;
 pub const _DEFAULT_SOURCE: i32 = 1;
-pub const __GLIBC_USE_ISOC2X: i32 = 0;
+pub const __GLIBC_USE_ISOC2Y: i32 = 0;
+pub const __GLIBC_USE_ISOC23: i32 = 0;
 pub const __USE_ISOC11: i32 = 1;
 pub const __USE_ISOC99: i32 = 1;
 pub const __USE_ISOC95: i32 = 1;
 pub const __USE_POSIX_IMPLICITLY: i32 = 1;
 pub const _POSIX_SOURCE: i32 = 1;
-pub const _POSIX_C_SOURCE: i32 = 200809;
+pub const _POSIX_C_SOURCE: i32 = 202405;
 pub const __USE_POSIX: i32 = 1;
 pub const __USE_POSIX2: i32 = 1;
 pub const __USE_POSIX199309: i32 = 1;
@@ -157,16 +168,17 @@ pub const __USE_POSIX199506: i32 = 1;
 pub const __USE_XOPEN2K: i32 = 1;
 pub const __USE_XOPEN2K8: i32 = 1;
 pub const _ATFILE_SOURCE: i32 = 1;
+pub const __USE_XOPEN2K24: i32 = 1;
 pub const __WORDSIZE: i32 = 64;
-pub const __WORDSIZE_TIME64_COMPAT32: i32 = 1;
-pub const __SYSCALL_WORDSIZE: i32 = 64;
+pub const __WORDSIZE_TIME64_COMPAT32: i32 = 0;
 pub const __TIMESIZE: i32 = 64;
+pub const __USE_TIME_BITS64: i32 = 1;
 pub const __USE_MISC: i32 = 1;
 pub const __USE_ATFILE: i32 = 1;
 pub const __USE_FORTIFY_LEVEL: i32 = 0;
 pub const __GLIBC_USE_DEPRECATED_GETS: i32 = 0;
 pub const __GLIBC_USE_DEPRECATED_SCANF: i32 = 0;
-pub const __GLIBC_USE_C2X_STRTOL: i32 = 0;
+pub const __GLIBC_USE_C23_STRTOL: i32 = 0;
 pub const _STDC_PREDEF_H: i32 = 1;
 pub const __STDC_IEC_559__: i32 = 1;
 pub const __STDC_IEC_60559_BFP__: i32 = 201404;
@@ -175,17 +187,17 @@ pub const __STDC_IEC_60559_COMPLEX__: i32 = 201404;
 pub const __STDC_ISO_10646__: i32 = 201706;
 pub const __GNU_LIBRARY__: i32 = 6;
 pub const __GLIBC__: i32 = 2;
-pub const __GLIBC_MINOR__: i32 = 39;
+pub const __GLIBC_MINOR__: i32 = 43;
 pub const _SYS_CDEFS_H: i32 = 1;
 pub const __glibc_c99_flexarr_available: i32 = 1;
 pub const __LDOUBLE_REDIRECTS_TO_FLOAT128_ABI: i32 = 0;
 pub const __HAVE_GENERIC_SELECTION: i32 = 1;
 pub const __GLIBC_USE_LIB_EXT2: i32 = 0;
 pub const __GLIBC_USE_IEC_60559_BFP_EXT: i32 = 0;
-pub const __GLIBC_USE_IEC_60559_BFP_EXT_C2X: i32 = 0;
+pub const __GLIBC_USE_IEC_60559_BFP_EXT_C23: i32 = 0;
 pub const __GLIBC_USE_IEC_60559_EXT: i32 = 0;
 pub const __GLIBC_USE_IEC_60559_FUNCS_EXT: i32 = 0;
-pub const __GLIBC_USE_IEC_60559_FUNCS_EXT_C2X: i32 = 0;
+pub const __GLIBC_USE_IEC_60559_FUNCS_EXT_C23: i32 = 0;
 pub const __GLIBC_USE_IEC_60559_TYPES_EXT: i32 = 0;
 pub const _BITS_TYPES_H: i32 = 1;
 pub const _BITS_TYPESIZES_H: i32 = 1;
@@ -193,7 +205,6 @@ pub const __OFF_T_MATCHES_OFF64_T: i32 = 1;
 pub const __INO_T_MATCHES_INO64_T: i32 = 1;
 pub const __RLIM_T_MATCHES_RLIM64_T: i32 = 1;
 pub const __STATFS_MATCHES_STATFS64: i32 = 1;
-pub const __KERNEL_OLD_TIMEVAL_MATCHES_TIMEVAL64: i32 = 1;
 pub const __FD_SETSIZE: i32 = 1024;
 pub const _BITS_TIME64_H: i32 = 1;
 pub const _BITS_WCHAR_H: i32 = 1;
@@ -249,7 +260,7 @@ pub const __WALL: i32 = 1073741824;
 pub const __WCLONE: i64 = 2147483648;
 pub const __W_CONTINUED: i32 = 65535;
 pub const __WCOREFLAG: i32 = 128;
-pub const __HAVE_FLOAT128: i32 = 0;
+pub const __HAVE_FLOAT128: i32 = 1;
 pub const __HAVE_DISTINCT_FLOAT128: i32 = 0;
 pub const __HAVE_FLOAT64X: i32 = 1;
 pub const __HAVE_FLOAT64X_LONG_DOUBLE: i32 = 1;
@@ -298,15 +309,15 @@ pub const FD_SETSIZE: i32 = 1024;
 pub const _BITS_PTHREADTYPES_COMMON_H: i32 = 1;
 pub const _THREAD_SHARED_TYPES_H: i32 = 1;
 pub const _BITS_PTHREADTYPES_ARCH_H: i32 = 1;
-pub const __SIZEOF_PTHREAD_MUTEX_T: i32 = 40;
-pub const __SIZEOF_PTHREAD_ATTR_T: i32 = 56;
+pub const __SIZEOF_PTHREAD_ATTR_T: i32 = 64;
+pub const __SIZEOF_PTHREAD_MUTEX_T: i32 = 48;
+pub const __SIZEOF_PTHREAD_MUTEXATTR_T: i32 = 8;
+pub const __SIZEOF_PTHREAD_CONDATTR_T: i32 = 8;
 pub const __SIZEOF_PTHREAD_RWLOCK_T: i32 = 56;
 pub const __SIZEOF_PTHREAD_BARRIER_T: i32 = 32;
-pub const __SIZEOF_PTHREAD_MUTEXATTR_T: i32 = 4;
+pub const __SIZEOF_PTHREAD_BARRIERATTR_T: i32 = 8;
 pub const __SIZEOF_PTHREAD_COND_T: i32 = 48;
-pub const __SIZEOF_PTHREAD_CONDATTR_T: i32 = 4;
 pub const __SIZEOF_PTHREAD_RWLOCKATTR_T: i32 = 8;
-pub const __SIZEOF_PTHREAD_BARRIERATTR_T: i32 = 4;
 pub const _THREAD_MUTEX_INTERNAL_H: i32 = 1;
 pub const __PTHREAD_MUTEX_HAVE_PREV: i32 = 1;
 pub const __have_pthread_attr_t: i32 = 1;
@@ -504,75 +515,75 @@ pub const _INTTYPES_H: i32 = 1;
 pub const ____gwchar_t_defined: i32 = 1;
 pub const __PRI64_PREFIX: &[u8; 2] = b"l\0";
 pub const __PRIPTR_PREFIX: &[u8; 2] = b"l\0";
-pub const PRId8: &[u8; 2] = b"d\0";
-pub const PRId16: &[u8; 2] = b"d\0";
+pub const PRId8: &[u8; 4] = b"hhd\0";
+pub const PRId16: &[u8; 3] = b"hd\0";
 pub const PRId32: &[u8; 2] = b"d\0";
 pub const PRId64: &[u8; 3] = b"ld\0";
-pub const PRIdLEAST8: &[u8; 2] = b"d\0";
-pub const PRIdLEAST16: &[u8; 2] = b"d\0";
+pub const PRIdLEAST8: &[u8; 4] = b"hhd\0";
+pub const PRIdLEAST16: &[u8; 3] = b"hd\0";
 pub const PRIdLEAST32: &[u8; 2] = b"d\0";
 pub const PRIdLEAST64: &[u8; 3] = b"ld\0";
-pub const PRIdFAST8: &[u8; 2] = b"d\0";
+pub const PRIdFAST8: &[u8; 4] = b"hhd\0";
 pub const PRIdFAST16: &[u8; 3] = b"ld\0";
 pub const PRIdFAST32: &[u8; 3] = b"ld\0";
 pub const PRIdFAST64: &[u8; 3] = b"ld\0";
-pub const PRIi8: &[u8; 2] = b"i\0";
-pub const PRIi16: &[u8; 2] = b"i\0";
+pub const PRIi8: &[u8; 4] = b"hhi\0";
+pub const PRIi16: &[u8; 3] = b"hi\0";
 pub const PRIi32: &[u8; 2] = b"i\0";
 pub const PRIi64: &[u8; 3] = b"li\0";
-pub const PRIiLEAST8: &[u8; 2] = b"i\0";
-pub const PRIiLEAST16: &[u8; 2] = b"i\0";
+pub const PRIiLEAST8: &[u8; 4] = b"hhi\0";
+pub const PRIiLEAST16: &[u8; 3] = b"hi\0";
 pub const PRIiLEAST32: &[u8; 2] = b"i\0";
 pub const PRIiLEAST64: &[u8; 3] = b"li\0";
-pub const PRIiFAST8: &[u8; 2] = b"i\0";
+pub const PRIiFAST8: &[u8; 4] = b"hhi\0";
 pub const PRIiFAST16: &[u8; 3] = b"li\0";
 pub const PRIiFAST32: &[u8; 3] = b"li\0";
 pub const PRIiFAST64: &[u8; 3] = b"li\0";
-pub const PRIo8: &[u8; 2] = b"o\0";
-pub const PRIo16: &[u8; 2] = b"o\0";
+pub const PRIo8: &[u8; 4] = b"hho\0";
+pub const PRIo16: &[u8; 3] = b"ho\0";
 pub const PRIo32: &[u8; 2] = b"o\0";
 pub const PRIo64: &[u8; 3] = b"lo\0";
-pub const PRIoLEAST8: &[u8; 2] = b"o\0";
-pub const PRIoLEAST16: &[u8; 2] = b"o\0";
+pub const PRIoLEAST8: &[u8; 4] = b"hho\0";
+pub const PRIoLEAST16: &[u8; 3] = b"ho\0";
 pub const PRIoLEAST32: &[u8; 2] = b"o\0";
 pub const PRIoLEAST64: &[u8; 3] = b"lo\0";
-pub const PRIoFAST8: &[u8; 2] = b"o\0";
+pub const PRIoFAST8: &[u8; 4] = b"hho\0";
 pub const PRIoFAST16: &[u8; 3] = b"lo\0";
 pub const PRIoFAST32: &[u8; 3] = b"lo\0";
 pub const PRIoFAST64: &[u8; 3] = b"lo\0";
-pub const PRIu8: &[u8; 2] = b"u\0";
-pub const PRIu16: &[u8; 2] = b"u\0";
+pub const PRIu8: &[u8; 4] = b"hhu\0";
+pub const PRIu16: &[u8; 3] = b"hu\0";
 pub const PRIu32: &[u8; 2] = b"u\0";
 pub const PRIu64: &[u8; 3] = b"lu\0";
-pub const PRIuLEAST8: &[u8; 2] = b"u\0";
-pub const PRIuLEAST16: &[u8; 2] = b"u\0";
+pub const PRIuLEAST8: &[u8; 4] = b"hhu\0";
+pub const PRIuLEAST16: &[u8; 3] = b"hu\0";
 pub const PRIuLEAST32: &[u8; 2] = b"u\0";
 pub const PRIuLEAST64: &[u8; 3] = b"lu\0";
-pub const PRIuFAST8: &[u8; 2] = b"u\0";
+pub const PRIuFAST8: &[u8; 4] = b"hhu\0";
 pub const PRIuFAST16: &[u8; 3] = b"lu\0";
 pub const PRIuFAST32: &[u8; 3] = b"lu\0";
 pub const PRIuFAST64: &[u8; 3] = b"lu\0";
-pub const PRIx8: &[u8; 2] = b"x\0";
-pub const PRIx16: &[u8; 2] = b"x\0";
+pub const PRIx8: &[u8; 4] = b"hhx\0";
+pub const PRIx16: &[u8; 3] = b"hx\0";
 pub const PRIx32: &[u8; 2] = b"x\0";
 pub const PRIx64: &[u8; 3] = b"lx\0";
-pub const PRIxLEAST8: &[u8; 2] = b"x\0";
-pub const PRIxLEAST16: &[u8; 2] = b"x\0";
+pub const PRIxLEAST8: &[u8; 4] = b"hhx\0";
+pub const PRIxLEAST16: &[u8; 3] = b"hx\0";
 pub const PRIxLEAST32: &[u8; 2] = b"x\0";
 pub const PRIxLEAST64: &[u8; 3] = b"lx\0";
-pub const PRIxFAST8: &[u8; 2] = b"x\0";
+pub const PRIxFAST8: &[u8; 4] = b"hhx\0";
 pub const PRIxFAST16: &[u8; 3] = b"lx\0";
 pub const PRIxFAST32: &[u8; 3] = b"lx\0";
 pub const PRIxFAST64: &[u8; 3] = b"lx\0";
-pub const PRIX8: &[u8; 2] = b"X\0";
-pub const PRIX16: &[u8; 2] = b"X\0";
+pub const PRIX8: &[u8; 4] = b"hhX\0";
+pub const PRIX16: &[u8; 3] = b"hX\0";
 pub const PRIX32: &[u8; 2] = b"X\0";
 pub const PRIX64: &[u8; 3] = b"lX\0";
-pub const PRIXLEAST8: &[u8; 2] = b"X\0";
-pub const PRIXLEAST16: &[u8; 2] = b"X\0";
+pub const PRIXLEAST8: &[u8; 4] = b"hhX\0";
+pub const PRIXLEAST16: &[u8; 3] = b"hX\0";
 pub const PRIXLEAST32: &[u8; 2] = b"X\0";
 pub const PRIXLEAST64: &[u8; 3] = b"lX\0";
-pub const PRIXFAST8: &[u8; 2] = b"X\0";
+pub const PRIXFAST8: &[u8; 4] = b"hhX\0";
 pub const PRIXFAST16: &[u8; 3] = b"lX\0";
 pub const PRIXFAST32: &[u8; 3] = b"lX\0";
 pub const PRIXFAST64: &[u8; 3] = b"lX\0";
@@ -4899,7 +4910,7 @@ pub const TRUST_TOKEN_R_BAD_VALIDITY_CHECK: i32 = 111;
 pub const TRUST_TOKEN_R_NO_SRR_KEY_CONFIGURED: i32 = 112;
 pub const TRUST_TOKEN_R_INVALID_METADATA_KEY: i32 = 113;
 pub const TRUST_TOKEN_R_INVALID_PROOF: i32 = 114;
-pub type wchar_t = ::std::os::raw::c_int;
+pub type wchar_t = ::std::os::raw::c_uint;
 pub type __u_char = ::std::os::raw::c_uchar;
 pub type __u_short = ::std::os::raw::c_ushort;
 pub type __u_int = ::std::os::raw::c_uint;
@@ -4930,7 +4941,7 @@ pub type __gid_t = ::std::os::raw::c_uint;
 pub type __ino_t = ::std::os::raw::c_ulong;
 pub type __ino64_t = ::std::os::raw::c_ulong;
 pub type __mode_t = ::std::os::raw::c_uint;
-pub type __nlink_t = ::std::os::raw::c_ulong;
+pub type __nlink_t = ::std::os::raw::c_uint;
 pub type __off_t = ::std::os::raw::c_long;
 pub type __off64_t = ::std::os::raw::c_long;
 pub type __pid_t = ::std::os::raw::c_int;
@@ -4957,7 +4968,7 @@ pub type __daddr_t = ::std::os::raw::c_int;
 pub type __key_t = ::std::os::raw::c_int;
 pub type __clockid_t = ::std::os::raw::c_int;
 pub type __timer_t = *mut ::std::os::raw::c_void;
-pub type __blksize_t = ::std::os::raw::c_long;
+pub type __blksize_t = ::std::os::raw::c_int;
 pub type __blkcnt_t = ::std::os::raw::c_long;
 pub type __blkcnt64_t = ::std::os::raw::c_long;
 pub type __fsblkcnt_t = ::std::os::raw::c_ulong;
@@ -4991,6 +5002,7 @@ pub type uint_fast32_t = ::std::os::raw::c_ulong;
 pub type uint_fast64_t = ::std::os::raw::c_ulong;
 pub type intmax_t = __intmax_t;
 pub type uintmax_t = __uintmax_t;
+pub type _Float128 = u128;
 pub type _Float32 = f32;
 pub type _Float64 = f64;
 pub type _Float32x = f64;
@@ -5222,8 +5234,7 @@ pub struct __pthread_mutex_s {
     pub __owner: ::std::os::raw::c_int,
     pub __nusers: ::std::os::raw::c_uint,
     pub __kind: ::std::os::raw::c_int,
-    pub __spins: ::std::os::raw::c_short,
-    pub __elision: ::std::os::raw::c_short,
+    pub __spins: ::std::os::raw::c_int,
     pub __list: __pthread_list_t,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
@@ -5242,8 +5253,6 @@ const _: () = {
         [::std::mem::offset_of!(__pthread_mutex_s, __kind) - 16usize];
     ["Offset of field: __pthread_mutex_s::__spins"]
         [::std::mem::offset_of!(__pthread_mutex_s, __spins) - 20usize];
-    ["Offset of field: __pthread_mutex_s::__elision"]
-        [::std::mem::offset_of!(__pthread_mutex_s, __elision) - 22usize];
     ["Offset of field: __pthread_mutex_s::__list"]
         [::std::mem::offset_of!(__pthread_mutex_s, __list) - 24usize];
 };
@@ -5267,8 +5276,7 @@ pub struct __pthread_rwlock_arch_t {
     pub __pad4: ::std::os::raw::c_uint,
     pub __cur_writer: ::std::os::raw::c_int,
     pub __shared: ::std::os::raw::c_int,
-    pub __rwelision: ::std::os::raw::c_schar,
-    pub __pad1: [::std::os::raw::c_uchar; 7usize],
+    pub __pad1: ::std::os::raw::c_ulong,
     pub __pad2: ::std::os::raw::c_ulong,
     pub __flags: ::std::os::raw::c_uint,
 }
@@ -5293,10 +5301,8 @@ const _: () = {
         [::std::mem::offset_of!(__pthread_rwlock_arch_t, __cur_writer) - 24usize];
     ["Offset of field: __pthread_rwlock_arch_t::__shared"]
         [::std::mem::offset_of!(__pthread_rwlock_arch_t, __shared) - 28usize];
-    ["Offset of field: __pthread_rwlock_arch_t::__rwelision"]
-        [::std::mem::offset_of!(__pthread_rwlock_arch_t, __rwelision) - 32usize];
     ["Offset of field: __pthread_rwlock_arch_t::__pad1"]
-        [::std::mem::offset_of!(__pthread_rwlock_arch_t, __pad1) - 33usize];
+        [::std::mem::offset_of!(__pthread_rwlock_arch_t, __pad1) - 32usize];
     ["Offset of field: __pthread_rwlock_arch_t::__pad2"]
         [::std::mem::offset_of!(__pthread_rwlock_arch_t, __pad2) - 40usize];
     ["Offset of field: __pthread_rwlock_arch_t::__flags"]
@@ -5307,11 +5313,12 @@ const _: () = {
 pub struct __pthread_cond_s {
     pub __wseq: __atomic_wide_counter,
     pub __g1_start: __atomic_wide_counter,
-    pub __g_refs: [::std::os::raw::c_uint; 2usize],
     pub __g_size: [::std::os::raw::c_uint; 2usize],
     pub __g1_orig_size: ::std::os::raw::c_uint,
     pub __wrefs: ::std::os::raw::c_uint,
     pub __g_signals: [::std::os::raw::c_uint; 2usize],
+    pub __unused_initialized_1: ::std::os::raw::c_uint,
+    pub __unused_initialized_2: ::std::os::raw::c_uint,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
@@ -5321,16 +5328,18 @@ const _: () = {
         [::std::mem::offset_of!(__pthread_cond_s, __wseq) - 0usize];
     ["Offset of field: __pthread_cond_s::__g1_start"]
         [::std::mem::offset_of!(__pthread_cond_s, __g1_start) - 8usize];
-    ["Offset of field: __pthread_cond_s::__g_refs"]
-        [::std::mem::offset_of!(__pthread_cond_s, __g_refs) - 16usize];
     ["Offset of field: __pthread_cond_s::__g_size"]
-        [::std::mem::offset_of!(__pthread_cond_s, __g_size) - 24usize];
+        [::std::mem::offset_of!(__pthread_cond_s, __g_size) - 16usize];
     ["Offset of field: __pthread_cond_s::__g1_orig_size"]
-        [::std::mem::offset_of!(__pthread_cond_s, __g1_orig_size) - 32usize];
+        [::std::mem::offset_of!(__pthread_cond_s, __g1_orig_size) - 24usize];
     ["Offset of field: __pthread_cond_s::__wrefs"]
-        [::std::mem::offset_of!(__pthread_cond_s, __wrefs) - 36usize];
+        [::std::mem::offset_of!(__pthread_cond_s, __wrefs) - 28usize];
     ["Offset of field: __pthread_cond_s::__g_signals"]
-        [::std::mem::offset_of!(__pthread_cond_s, __g_signals) - 40usize];
+        [::std::mem::offset_of!(__pthread_cond_s, __g_signals) - 32usize];
+    ["Offset of field: __pthread_cond_s::__unused_initialized_1"]
+        [::std::mem::offset_of!(__pthread_cond_s, __unused_initialized_1) - 40usize];
+    ["Offset of field: __pthread_cond_s::__unused_initialized_2"]
+        [::std::mem::offset_of!(__pthread_cond_s, __unused_initialized_2) - 44usize];
 };
 impl Default for __pthread_cond_s {
     fn default() -> Self {
@@ -5358,12 +5367,12 @@ pub type pthread_t = ::std::os::raw::c_ulong;
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub union pthread_mutexattr_t {
-    pub __size: [::std::os::raw::c_char; 4usize],
+    pub __size: [::std::os::raw::c_char; 8usize],
     pub __align: ::std::os::raw::c_int,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of pthread_mutexattr_t"][::std::mem::size_of::<pthread_mutexattr_t>() - 4usize];
+    ["Size of pthread_mutexattr_t"][::std::mem::size_of::<pthread_mutexattr_t>() - 8usize];
     ["Alignment of pthread_mutexattr_t"][::std::mem::align_of::<pthread_mutexattr_t>() - 4usize];
     ["Offset of field: pthread_mutexattr_t::__size"]
         [::std::mem::offset_of!(pthread_mutexattr_t, __size) - 0usize];
@@ -5382,12 +5391,12 @@ impl Default for pthread_mutexattr_t {
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub union pthread_condattr_t {
-    pub __size: [::std::os::raw::c_char; 4usize],
+    pub __size: [::std::os::raw::c_char; 8usize],
     pub __align: ::std::os::raw::c_int,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of pthread_condattr_t"][::std::mem::size_of::<pthread_condattr_t>() - 4usize];
+    ["Size of pthread_condattr_t"][::std::mem::size_of::<pthread_condattr_t>() - 8usize];
     ["Alignment of pthread_condattr_t"][::std::mem::align_of::<pthread_condattr_t>() - 4usize];
     ["Offset of field: pthread_condattr_t::__size"]
         [::std::mem::offset_of!(pthread_condattr_t, __size) - 0usize];
@@ -5408,12 +5417,12 @@ pub type pthread_once_t = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub union pthread_attr_t {
-    pub __size: [::std::os::raw::c_char; 56usize],
+    pub __size: [::std::os::raw::c_char; 64usize],
     pub __align: ::std::os::raw::c_long,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of pthread_attr_t"][::std::mem::size_of::<pthread_attr_t>() - 56usize];
+    ["Size of pthread_attr_t"][::std::mem::size_of::<pthread_attr_t>() - 64usize];
     ["Alignment of pthread_attr_t"][::std::mem::align_of::<pthread_attr_t>() - 8usize];
     ["Offset of field: pthread_attr_t::__size"]
         [::std::mem::offset_of!(pthread_attr_t, __size) - 0usize];
@@ -5433,12 +5442,12 @@ impl Default for pthread_attr_t {
 #[derive(Copy, Clone)]
 pub union pthread_mutex_t {
     pub __data: __pthread_mutex_s,
-    pub __size: [::std::os::raw::c_char; 40usize],
+    pub __size: [::std::os::raw::c_char; 48usize],
     pub __align: ::std::os::raw::c_long,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of pthread_mutex_t"][::std::mem::size_of::<pthread_mutex_t>() - 40usize];
+    ["Size of pthread_mutex_t"][::std::mem::size_of::<pthread_mutex_t>() - 48usize];
     ["Alignment of pthread_mutex_t"][::std::mem::align_of::<pthread_mutex_t>() - 8usize];
     ["Offset of field: pthread_mutex_t::__data"]
         [::std::mem::offset_of!(pthread_mutex_t, __data) - 0usize];
@@ -5562,12 +5571,12 @@ impl Default for pthread_barrier_t {
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub union pthread_barrierattr_t {
-    pub __size: [::std::os::raw::c_char; 4usize],
+    pub __size: [::std::os::raw::c_char; 8usize],
     pub __align: ::std::os::raw::c_int,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of pthread_barrierattr_t"][::std::mem::size_of::<pthread_barrierattr_t>() - 4usize];
+    ["Size of pthread_barrierattr_t"][::std::mem::size_of::<pthread_barrierattr_t>() - 8usize];
     ["Alignment of pthread_barrierattr_t"]
         [::std::mem::align_of::<pthread_barrierattr_t>() - 4usize];
     ["Offset of field: pthread_barrierattr_t::__size"]
@@ -6232,7 +6241,7 @@ impl Default for __locale_struct {
 }
 pub type __locale_t = *mut __locale_struct;
 pub type locale_t = __locale_t;
-pub type __gnuc_va_list = __builtin_va_list;
+pub type __gnuc_va_list = __BindgenOpaqueArray<u64, 4usize>;
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct __mbstate_t {
@@ -6366,7 +6375,9 @@ pub struct _IO_FILE {
     pub _markers: *mut _IO_marker,
     pub _chain: *mut _IO_FILE,
     pub _fileno: ::std::os::raw::c_int,
-    pub _flags2: ::std::os::raw::c_int,
+    pub _bitfield_align_1: [u32; 0],
+    pub _bitfield_1: __BindgenBitfieldUnit<[u8; 3usize]>,
+    pub _short_backupbuf: [::std::os::raw::c_char; 1usize],
     pub _old_offset: __off_t,
     pub _cur_column: ::std::os::raw::c_ushort,
     pub _vtable_offset: ::std::os::raw::c_schar,
@@ -6377,9 +6388,11 @@ pub struct _IO_FILE {
     pub _wide_data: *mut _IO_wide_data,
     pub _freeres_list: *mut _IO_FILE,
     pub _freeres_buf: *mut ::std::os::raw::c_void,
-    pub __pad5: usize,
+    pub _prevchain: *mut *mut _IO_FILE,
     pub _mode: ::std::os::raw::c_int,
-    pub _unused2: [::std::os::raw::c_char; 20usize],
+    pub _unused3: ::std::os::raw::c_int,
+    pub _total_written: __uint64_t,
+    pub _unused2: [::std::os::raw::c_char; 8usize],
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
@@ -6411,7 +6424,8 @@ const _: () = {
     ["Offset of field: _IO_FILE::_markers"][::std::mem::offset_of!(_IO_FILE, _markers) - 96usize];
     ["Offset of field: _IO_FILE::_chain"][::std::mem::offset_of!(_IO_FILE, _chain) - 104usize];
     ["Offset of field: _IO_FILE::_fileno"][::std::mem::offset_of!(_IO_FILE, _fileno) - 112usize];
-    ["Offset of field: _IO_FILE::_flags2"][::std::mem::offset_of!(_IO_FILE, _flags2) - 116usize];
+    ["Offset of field: _IO_FILE::_short_backupbuf"]
+        [::std::mem::offset_of!(_IO_FILE, _short_backupbuf) - 119usize];
     ["Offset of field: _IO_FILE::_old_offset"]
         [::std::mem::offset_of!(_IO_FILE, _old_offset) - 120usize];
     ["Offset of field: _IO_FILE::_cur_column"]
@@ -6429,9 +6443,13 @@ const _: () = {
         [::std::mem::offset_of!(_IO_FILE, _freeres_list) - 168usize];
     ["Offset of field: _IO_FILE::_freeres_buf"]
         [::std::mem::offset_of!(_IO_FILE, _freeres_buf) - 176usize];
-    ["Offset of field: _IO_FILE::__pad5"][::std::mem::offset_of!(_IO_FILE, __pad5) - 184usize];
+    ["Offset of field: _IO_FILE::_prevchain"]
+        [::std::mem::offset_of!(_IO_FILE, _prevchain) - 184usize];
     ["Offset of field: _IO_FILE::_mode"][::std::mem::offset_of!(_IO_FILE, _mode) - 192usize];
-    ["Offset of field: _IO_FILE::_unused2"][::std::mem::offset_of!(_IO_FILE, _unused2) - 196usize];
+    ["Offset of field: _IO_FILE::_unused3"][::std::mem::offset_of!(_IO_FILE, _unused3) - 196usize];
+    ["Offset of field: _IO_FILE::_total_written"]
+        [::std::mem::offset_of!(_IO_FILE, _total_written) - 200usize];
+    ["Offset of field: _IO_FILE::_unused2"][::std::mem::offset_of!(_IO_FILE, _unused2) - 208usize];
 };
 impl Default for _IO_FILE {
     fn default() -> Self {
@@ -6440,6 +6458,50 @@ impl Default for _IO_FILE {
             ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
             s.assume_init()
         }
+    }
+}
+impl _IO_FILE {
+    #[inline]
+    pub fn _flags2(&self) -> ::std::os::raw::c_int {
+        unsafe { ::std::mem::transmute(self._bitfield_1.get(0usize, 24u8) as u32) }
+    }
+    #[inline]
+    pub fn set__flags2(&mut self, val: ::std::os::raw::c_int) {
+        unsafe {
+            let val: u32 = ::std::mem::transmute(val);
+            self._bitfield_1.set(0usize, 24u8, val as u64)
+        }
+    }
+    #[inline]
+    pub unsafe fn _flags2_raw(this: *const Self) -> ::std::os::raw::c_int {
+        unsafe {
+            ::std::mem::transmute(<__BindgenBitfieldUnit<[u8; 3usize]>>::raw_get(
+                ::std::ptr::addr_of!((*this)._bitfield_1),
+                0usize,
+                24u8,
+            ) as u32)
+        }
+    }
+    #[inline]
+    pub unsafe fn set__flags2_raw(this: *mut Self, val: ::std::os::raw::c_int) {
+        unsafe {
+            let val: u32 = ::std::mem::transmute(val);
+            <__BindgenBitfieldUnit<[u8; 3usize]>>::raw_set(
+                ::std::ptr::addr_of_mut!((*this)._bitfield_1),
+                0usize,
+                24u8,
+                val as u64,
+            )
+        }
+    }
+    #[inline]
+    pub fn new_bitfield_1(_flags2: ::std::os::raw::c_int) -> __BindgenBitfieldUnit<[u8; 3usize]> {
+        let mut __bindgen_bitfield_unit: __BindgenBitfieldUnit<[u8; 3usize]> = Default::default();
+        __bindgen_bitfield_unit.set(0usize, 24u8, {
+            let _flags2: u32 = unsafe { ::std::mem::transmute(_flags2) };
+            _flags2 as u64
+        });
+        __bindgen_bitfield_unit
     }
 }
 pub type cookie_read_function_t = ::std::option::Option<
@@ -6705,7 +6767,7 @@ pub type BIO_info_cb = ::std::option::Option<
     ) -> ::std::os::raw::c_int,
 >;
 pub type bio_info_cb = BIO_info_cb;
-pub type __gwchar_t = ::std::os::raw::c_int;
+pub type __gwchar_t = ::std::os::raw::c_uint;
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
 pub struct imaxdiv_t {
@@ -10710,37 +10772,6 @@ pub type sk_TRUST_TOKEN_delete_if_func = ::std::option::Option<
 pub struct __locale_data {
     pub _address: u8,
 }
-pub type __builtin_va_list = [__va_list_tag; 1usize];
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct __va_list_tag {
-    pub gp_offset: ::std::os::raw::c_uint,
-    pub fp_offset: ::std::os::raw::c_uint,
-    pub overflow_arg_area: *mut ::std::os::raw::c_void,
-    pub reg_save_area: *mut ::std::os::raw::c_void,
-}
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of __va_list_tag"][::std::mem::size_of::<__va_list_tag>() - 24usize];
-    ["Alignment of __va_list_tag"][::std::mem::align_of::<__va_list_tag>() - 8usize];
-    ["Offset of field: __va_list_tag::gp_offset"]
-        [::std::mem::offset_of!(__va_list_tag, gp_offset) - 0usize];
-    ["Offset of field: __va_list_tag::fp_offset"]
-        [::std::mem::offset_of!(__va_list_tag, fp_offset) - 4usize];
-    ["Offset of field: __va_list_tag::overflow_arg_area"]
-        [::std::mem::offset_of!(__va_list_tag, overflow_arg_area) - 8usize];
-    ["Offset of field: __va_list_tag::reg_save_area"]
-        [::std::mem::offset_of!(__va_list_tag, reg_save_area) - 16usize];
-};
-impl Default for __va_list_tag {
-    fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
-        unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
-            s.assume_init()
-        }
-    }
-}
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
 pub struct CRYPTO_dynlock_value {
@@ -11281,16 +11312,16 @@ unsafe extern "C" {
     pub fn vfprintf(
         __s: *mut FILE,
         __format: *const ::std::os::raw::c_char,
-        __arg: *mut __va_list_tag,
+        __arg: __BindgenOpaqueArray<u64, 4usize>,
     ) -> ::std::os::raw::c_int;
     pub fn vprintf(
         __format: *const ::std::os::raw::c_char,
-        __arg: *mut __va_list_tag,
+        __arg: __BindgenOpaqueArray<u64, 4usize>,
     ) -> ::std::os::raw::c_int;
     pub fn vsprintf(
         __s: *mut ::std::os::raw::c_char,
         __format: *const ::std::os::raw::c_char,
-        __arg: *mut __va_list_tag,
+        __arg: __BindgenOpaqueArray<u64, 4usize>,
     ) -> ::std::os::raw::c_int;
     pub fn snprintf(
         __s: *mut ::std::os::raw::c_char,
@@ -11302,12 +11333,12 @@ unsafe extern "C" {
         __s: *mut ::std::os::raw::c_char,
         __maxlen: ::std::os::raw::c_ulong,
         __format: *const ::std::os::raw::c_char,
-        __arg: *mut __va_list_tag,
+        __arg: __BindgenOpaqueArray<u64, 4usize>,
     ) -> ::std::os::raw::c_int;
     pub fn vasprintf(
         __ptr: *mut *mut ::std::os::raw::c_char,
         __f: *const ::std::os::raw::c_char,
-        __arg: *mut __va_list_tag,
+        __arg: __gnuc_va_list,
     ) -> ::std::os::raw::c_int;
     pub fn __asprintf(
         __ptr: *mut *mut ::std::os::raw::c_char,
@@ -11322,7 +11353,7 @@ unsafe extern "C" {
     pub fn vdprintf(
         __fd: ::std::os::raw::c_int,
         __fmt: *const ::std::os::raw::c_char,
-        __arg: *mut __va_list_tag,
+        __arg: __gnuc_va_list,
     ) -> ::std::os::raw::c_int;
     pub fn dprintf(
         __fd: ::std::os::raw::c_int,
@@ -11357,33 +11388,33 @@ unsafe extern "C" {
     pub fn vfscanf(
         __s: *mut FILE,
         __format: *const ::std::os::raw::c_char,
-        __arg: *mut __va_list_tag,
+        __arg: __BindgenOpaqueArray<u64, 4usize>,
     ) -> ::std::os::raw::c_int;
     pub fn vscanf(
         __format: *const ::std::os::raw::c_char,
-        __arg: *mut __va_list_tag,
+        __arg: __BindgenOpaqueArray<u64, 4usize>,
     ) -> ::std::os::raw::c_int;
     pub fn vsscanf(
         __s: *const ::std::os::raw::c_char,
         __format: *const ::std::os::raw::c_char,
-        __arg: *mut __va_list_tag,
+        __arg: __BindgenOpaqueArray<u64, 4usize>,
     ) -> ::std::os::raw::c_int;
     #[link_name = "\u{1}__isoc99_vfscanf"]
     pub fn vfscanf1(
         __s: *mut FILE,
         __format: *const ::std::os::raw::c_char,
-        __arg: *mut __va_list_tag,
+        __arg: __BindgenOpaqueArray<u64, 4usize>,
     ) -> ::std::os::raw::c_int;
     #[link_name = "\u{1}__isoc99_vscanf"]
     pub fn vscanf1(
         __format: *const ::std::os::raw::c_char,
-        __arg: *mut __va_list_tag,
+        __arg: __BindgenOpaqueArray<u64, 4usize>,
     ) -> ::std::os::raw::c_int;
     #[link_name = "\u{1}__isoc99_vsscanf"]
     pub fn vsscanf1(
         __s: *const ::std::os::raw::c_char,
         __format: *const ::std::os::raw::c_char,
-        __arg: *mut __va_list_tag,
+        __arg: __BindgenOpaqueArray<u64, 4usize>,
     ) -> ::std::os::raw::c_int;
     pub fn fgetc(__stream: *mut FILE) -> ::std::os::raw::c_int;
     pub fn getc(__stream: *mut FILE) -> ::std::os::raw::c_int;
@@ -13170,12 +13201,12 @@ unsafe extern "C" {
         buf: *mut ::std::os::raw::c_char,
         n: usize,
         format: *const ::std::os::raw::c_char,
-        args: *mut __va_list_tag,
+        args: va_list,
     ) -> ::std::os::raw::c_int;
     pub fn OPENSSL_vasprintf(
         str_: *mut *mut ::std::os::raw::c_char,
         format: *const ::std::os::raw::c_char,
-        args: *mut __va_list_tag,
+        args: va_list,
     ) -> ::std::os::raw::c_int;
     pub fn OPENSSL_asprintf(
         str_: *mut *mut ::std::os::raw::c_char,
@@ -20450,6 +20481,5 @@ unsafe extern "C" {
         encrypted_bit: u8,
     ) -> ::std::os::raw::c_int;
 }
-
 /// Newtype for [`ERR_LIB_SSL`] constants
-pub use  _bindgen_ty_1  as ErrLib;
+pub use _bindgen_ty_1 as ErrLib;

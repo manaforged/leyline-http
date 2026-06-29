@@ -3,8 +3,8 @@
 use bytes::{BufMut, Bytes};
 
 use super::{FrameHeader, FrameType};
-use crate::h2::error::ErrorCode;
 use crate::h2::H2Error;
+use crate::h2::error::ErrorCode;
 
 /// Flags for DATA frames.
 pub mod flags {

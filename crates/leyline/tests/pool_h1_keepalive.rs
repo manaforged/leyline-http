@@ -12,11 +12,11 @@
 //!    (no panic) and the next request opens a fresh TCP — with the
 //!    `evictions_dead` counter bumped.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use leyline::pool::{send_request_h1_pooled, H1Body, H1ResponseBody, H1Target, Pool};
+use leyline::pool::{H1Body, H1ResponseBody, H1Target, Pool, send_request_h1_pooled};
 use leyline::profile::{Browser, Platform, ProfileRegistry};
 use leyline::tls::{ConnectorVariant, FingerprintConnector};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};

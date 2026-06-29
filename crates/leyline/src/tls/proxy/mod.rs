@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use tokio::net::TcpStream;
 
-use crate::tls::error::TlsError;
 use crate::tls::TlsStream;
+use crate::tls::error::TlsError;
 
 pub(crate) mod http;
 #[cfg(feature = "socks")]

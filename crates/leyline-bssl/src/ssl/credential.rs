@@ -1,8 +1,8 @@
 use crate::error::ErrorStack;
 use crate::ex_data::Index;
 use crate::pkey::{PKeyRef, Private};
-use crate::ssl::callbacks;
 use crate::ssl::PrivateKeyMethod;
+use crate::ssl::callbacks;
 use crate::{cvt_0i, cvt_n};
 use crate::{ffi, free_data_box};
 use foreign_types::{ForeignType, ForeignTypeRef};

@@ -14,7 +14,7 @@
 
 use socket2::Socket;
 
-use crate::tcp::{log_once, TcpProfile};
+use crate::tcp::{TcpProfile, log_once};
 
 #[cfg(unix)]
 /// # Safety
@@ -129,7 +129,7 @@ pub fn apply_platform_options(socket: &Socket, profile: &TcpProfile, is_v6: bool
     use std::os::windows::io::AsRawSocket;
 
     if profile.df {
-        extern "system" {
+        unsafe extern "system" {
             fn setsockopt(
                 s: usize,
                 level: i32,

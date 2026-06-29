@@ -14,28 +14,28 @@ use crate::recovery::QlogMetrics;
 
 use crate::frame;
 
-use crate::recovery::rtt::RttStats;
 use crate::recovery::CongestionControlAlgorithm;
+use crate::recovery::GRANULARITY;
 use crate::recovery::HandshakeStatus;
+use crate::recovery::INITIAL_PACKET_THRESHOLD;
+use crate::recovery::INITIAL_TIME_THRESHOLD;
 use crate::recovery::LossDetectionTimer;
+use crate::recovery::MAX_OUTSTANDING_NON_ACK_ELICITING;
+use crate::recovery::MAX_PACKET_THRESHOLD;
+use crate::recovery::MAX_PTO_PROBES_COUNT;
 use crate::recovery::RangeSet;
 use crate::recovery::RecoveryConfig;
 use crate::recovery::RecoveryOps;
 use crate::recovery::ReleaseDecision;
 use crate::recovery::Sent;
-use crate::recovery::GRANULARITY;
-use crate::recovery::INITIAL_PACKET_THRESHOLD;
-use crate::recovery::INITIAL_TIME_THRESHOLD;
-use crate::recovery::MAX_OUTSTANDING_NON_ACK_ELICITING;
-use crate::recovery::MAX_PACKET_THRESHOLD;
-use crate::recovery::MAX_PTO_PROBES_COUNT;
+use crate::recovery::rtt::RttStats;
 
-use super::bandwidth::Bandwidth;
-use super::pacer::Pacer;
 use super::Acked;
 use super::Congestion;
 use super::CongestionControl;
 use super::Lost;
+use super::bandwidth::Bandwidth;
+use super::pacer::Pacer;
 
 // Congestion Control
 const INITIAL_WINDOW_PACKETS: usize = 10;

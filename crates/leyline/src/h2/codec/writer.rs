@@ -3,12 +3,12 @@
 use bytes::{Bytes, BytesMut};
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
+use crate::h2::H2Error;
 use crate::h2::error::ErrorCode;
 use crate::h2::frame::{
-    DataFrame, GoAwayFrame, HeadersFrame, PingFrame, RstStreamFrame, SettingsFrame,
-    WindowUpdateFrame, FRAME_HEADER_LEN,
+    DataFrame, FRAME_HEADER_LEN, GoAwayFrame, HeadersFrame, PingFrame, RstStreamFrame,
+    SettingsFrame, WindowUpdateFrame,
 };
-use crate::h2::H2Error;
 
 use super::DEFAULT_MAX_FRAME_SIZE;
 

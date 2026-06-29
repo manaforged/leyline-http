@@ -20,18 +20,18 @@
 use std::time::Duration;
 
 use bytes::BytesMut;
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
 use futures_util::future::join_all;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt, DuplexStream};
 use tokio::runtime::Runtime;
 
+use leyline::h2::H2Client;
 use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
 use leyline::h2::connection::{ClientConnection, PseudoHeaders};
 use leyline::h2::frame::{
-    DataFrame, FrameHeader, FrameType, HeadersFrame, SettingsFrame, FRAME_HEADER_LEN,
+    DataFrame, FRAME_HEADER_LEN, FrameHeader, FrameType, HeadersFrame, SettingsFrame,
 };
 use leyline::h2::hpack;
-use leyline::h2::H2Client;
 
 const MOCK_PREFACE: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
 

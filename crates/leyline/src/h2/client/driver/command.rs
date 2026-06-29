@@ -7,7 +7,7 @@ use bytes::Bytes;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::mpsc;
 
-use crate::h2::connection::{encode_request_pseudos, PseudoHeaders};
+use crate::h2::connection::{PseudoHeaders, encode_request_pseudos};
 use crate::h2::error::{ErrorCode, H2Error};
 use crate::h2::stream_state::StreamEvent;
 

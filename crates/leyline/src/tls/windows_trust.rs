@@ -22,7 +22,7 @@
 use std::ptr;
 
 use windows_sys::Win32::Security::Cryptography::{
-    CertCloseStore, CertEnumCertificatesInStore, CertOpenSystemStoreW, CERT_CONTEXT, HCERTSTORE,
+    CERT_CONTEXT, CertCloseStore, CertEnumCertificatesInStore, CertOpenSystemStoreW, HCERTSTORE,
 };
 
 /// RAII wrapper that closes the Win32 cert store on drop.

@@ -209,12 +209,12 @@ struct RateSample {
 mod tests {
     use super::*;
 
+    use crate::Config;
     use crate::packet;
     use crate::ranges;
-    use crate::recovery::congestion::recovery::LegacyRecovery;
     use crate::recovery::HandshakeStatus;
     use crate::recovery::RecoveryOps;
-    use crate::Config;
+    use crate::recovery::congestion::recovery::LegacyRecovery;
 
     use smallvec::smallvec;
 

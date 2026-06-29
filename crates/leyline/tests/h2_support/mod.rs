@@ -13,7 +13,7 @@ use bytes::BytesMut;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use leyline::h2::frame::{
-    DataFrame, FrameHeader, HeadersFrame, SettingsFrame, WindowUpdateFrame, FRAME_HEADER_LEN,
+    DataFrame, FRAME_HEADER_LEN, FrameHeader, HeadersFrame, SettingsFrame, WindowUpdateFrame,
 };
 use leyline::h2::hpack;
 

@@ -365,7 +365,7 @@ mod tests {
         assert!(is_public_suffix("github.io"));
         assert!(is_public_suffix("com"));
         assert!(is_public_suffix("localhost")); // single-label
-                                                // Registrable domains are not public suffixes.
+        // Registrable domains are not public suffixes.
         assert!(!is_public_suffix("example.co.uk"));
         assert!(!is_public_suffix("example.com"));
         assert!(!is_public_suffix("foo.github.io"));

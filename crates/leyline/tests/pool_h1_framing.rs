@@ -16,7 +16,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use leyline::pool::{send_request_h1_pooled, H1Body, H1Target, Pool};
+use leyline::pool::{H1Body, H1Target, Pool, send_request_h1_pooled};
 use leyline::profile::{Browser, Platform, ProfileRegistry};
 use leyline::tls::{ConnectorVariant, FingerprintConnector};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};

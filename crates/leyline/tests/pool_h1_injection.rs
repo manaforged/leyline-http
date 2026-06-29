@@ -7,7 +7,7 @@
 //! (CWE-93). The validators reject every control-character byte
 //! before the wire write; these tests lock the gate in place.
 
-use leyline::pool::{send_request_h1_pooled, H1Body, H1PooledError, H1Target, Pool};
+use leyline::pool::{H1Body, H1PooledError, H1Target, Pool, send_request_h1_pooled};
 use leyline::profile::{Browser, Platform, ProfileRegistry};
 use leyline::tls::{ConnectorVariant, FingerprintConnector};
 use std::sync::Arc;

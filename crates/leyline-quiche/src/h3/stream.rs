@@ -290,7 +290,7 @@ impl Stream {
                     (frame::HEADERS_FRAME_TYPE_ID, true) => return Err(Error::FrameUnexpected),
 
                     (frame::PUSH_PROMISE_FRAME_TYPE_ID, true) => {
-                        return Err(Error::FrameUnexpected)
+                        return Err(Error::FrameUnexpected);
                     }
 
                     // All other frames are ignored after initialization.
@@ -332,7 +332,7 @@ impl Stream {
                         }
 
                         (frame::CANCEL_PUSH_FRAME_TYPE_ID, _) => {
-                            return Err(Error::FrameUnexpected)
+                            return Err(Error::FrameUnexpected);
                         }
 
                         (frame::SETTINGS_FRAME_TYPE_ID, _) => return Err(Error::FrameUnexpected),

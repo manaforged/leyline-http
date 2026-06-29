@@ -31,9 +31,9 @@
 use std::cmp;
 use std::time::Instant;
 
-use super::rtt::RttStats;
 use super::Acked;
 use super::Sent;
+use super::rtt::RttStats;
 
 use super::Congestion;
 use super::CongestionControlOps;
@@ -159,9 +159,9 @@ mod tests {
 
     use super::*;
 
+    use crate::recovery::RecoveryOps;
     use crate::recovery::congestion::recovery::LegacyRecovery;
     use crate::recovery::congestion::test_sender::TestSender;
-    use crate::recovery::RecoveryOps;
 
     use std::time::Duration;
 

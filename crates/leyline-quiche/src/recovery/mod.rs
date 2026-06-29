@@ -28,10 +28,10 @@ use std::str::FromStr;
 use std::time::Duration;
 use std::time::Instant;
 
+use crate::Config;
 use crate::frame;
 use crate::packet;
 use crate::ranges::RangeSet;
-use crate::Config;
 
 #[cfg(feature = "qlog")]
 use qlog::events::EventData;
@@ -567,10 +567,10 @@ impl ReleaseDecision {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::CongestionControlAlgorithm;
     use crate::packet;
     use crate::ranges;
     use crate::recovery::congestion::PACING_MULTIPLIER;
-    use crate::CongestionControlAlgorithm;
     use smallvec::smallvec;
     use std::str::FromStr;
 

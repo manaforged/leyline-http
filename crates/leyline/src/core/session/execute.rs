@@ -1,12 +1,12 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 
-use crate::profile::preset::HeaderPair;
 use crate::profile::Preset;
+use crate::profile::preset::HeaderPair;
 
+use super::Session;
 use super::decompress::{decompress_and_strip, drain_stream_into_vec};
 use super::header_merge::apply_extra_headers;
-use super::Session;
 use crate::core::body::Body;
 use crate::core::error::{Error, Result};
 use crate::core::headers::HeaderList;

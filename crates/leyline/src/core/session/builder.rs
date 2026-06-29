@@ -843,7 +843,7 @@ impl SessionBuilder {
                             ProtocolPolicy::Http3 | ProtocolPolicy::Race
                         ) =>
                     {
-                        return Err(e)
+                        return Err(e);
                     }
                     Err(_) => None,
                 },

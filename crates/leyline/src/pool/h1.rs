@@ -15,14 +15,14 @@ use bytes::Bytes;
 use futures_util::StreamExt;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::sync::{mpsc, OwnedSemaphorePermit};
+use tokio::sync::{OwnedSemaphorePermit, mpsc};
 
 use crate::core::BodyStream;
 use crate::tls::ConnectorVariant;
 
 use crate::pool::types::PoolKey;
 use crate::pool::types::Transport;
-use crate::pool::{make_key, H1Slot, Pool, TlsInfo};
+use crate::pool::{H1Slot, Pool, TlsInfo, make_key};
 
 /// Maximum request-line + headers size. Matches the core transport
 /// limit that pre-dated the pool refactor.
@@ -1195,7 +1195,7 @@ fn parse_h1_head(head: &str) -> Result<ParsedHead, H1PooledError> {
         _ => {
             return Err(H1PooledError::Http(format!(
                 "unknown HTTP/1.x minor version in status line: {status_line}"
-            )))
+            )));
         }
     };
     let status = parts

@@ -190,7 +190,7 @@ pub(crate) fn parse_challenge(header: &str) -> Result<Challenge> {
                     other => {
                         return Err(Error::Http(format!(
                             "digest: unsupported algorithm {other}"
-                        )))
+                        )));
                     }
                 };
             }

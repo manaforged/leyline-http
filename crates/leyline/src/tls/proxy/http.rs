@@ -19,8 +19,8 @@
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::tls::error::TlsError;
 use crate::tls::TlsStream;
+use crate::tls::error::TlsError;
 
 use crate::util::{base64_encode, percent_decode};
 

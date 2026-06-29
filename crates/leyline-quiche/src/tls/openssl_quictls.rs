@@ -310,7 +310,7 @@ pub(super) fn get_session_bytes(session: *mut SSL_SESSION) -> Result<Vec<u8>> {
 }
 pub(super) const TLS_ERROR: c_int = 2;
 
-extern "C" {
+unsafe extern "C" {
 
     fn SSL_CTX_ctrl(ctx: *mut SSL_CTX, cmd: c_int, larg: c_long, parg: *mut c_void) -> c_long;
 

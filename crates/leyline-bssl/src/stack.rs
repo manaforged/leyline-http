@@ -13,9 +13,9 @@ use crate::error::ErrorStack;
 use crate::{cvt_0, cvt_p};
 
 use crate::ffi::{
-    sk_free as OPENSSL_sk_free, sk_new_null as OPENSSL_sk_new_null, sk_num as OPENSSL_sk_num,
-    sk_pop as OPENSSL_sk_pop, sk_push as OPENSSL_sk_push, sk_value as OPENSSL_sk_value,
-    _STACK as OPENSSL_STACK,
+    _STACK as OPENSSL_STACK, sk_free as OPENSSL_sk_free, sk_new_null as OPENSSL_sk_new_null,
+    sk_num as OPENSSL_sk_num, sk_pop as OPENSSL_sk_pop, sk_push as OPENSSL_sk_push,
+    sk_value as OPENSSL_sk_value,
 };
 
 /// Trait implemented by types which can be placed in a stack.

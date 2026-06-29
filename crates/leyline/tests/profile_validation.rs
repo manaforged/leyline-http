@@ -8,7 +8,7 @@
 //! stricter validation does not reject any shipping profile.
 
 use leyline::h2::H2Config;
-use leyline::profile::{BrowserProfile, H2Profile, ProfileRegistry, ALL_BROWSERS};
+use leyline::profile::{ALL_BROWSERS, BrowserProfile, H2Profile, ProfileRegistry};
 use leyline::{Browser, Platform, TlsContext, TlsMinVersion};
 
 const ALL_PLATFORMS: [Platform; 5] = [

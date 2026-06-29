@@ -3,8 +3,8 @@
 //! driver task over an mpsc channel and run as independent streams.
 
 use std::io;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use bytes::Bytes;
 use tokio::sync::{mpsc, oneshot};
@@ -15,8 +15,8 @@ use crate::h2::error::{ErrorCode, H2Error};
 
 use super::connect_stream::{H2ConnectStream, ShutdownState};
 use super::driver::{
-    pump_request_body, DriverCommand, DriverRequestBody, PeerSettingsSnapshot,
-    STREAM_REQ_BODY_CAPACITY, STREAM_RESP_BODY_CAPACITY,
+    DriverCommand, DriverRequestBody, PeerSettingsSnapshot, STREAM_REQ_BODY_CAPACITY,
+    STREAM_RESP_BODY_CAPACITY, pump_request_body,
 };
 use super::types::{H2ResponseEx, RequestBody, ResponseBody};
 

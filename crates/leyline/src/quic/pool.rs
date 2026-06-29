@@ -21,21 +21,21 @@
 //! catches up.
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use bytes::Bytes;
 use leyline_quiche as quiche;
 use quiche::h3::NameValue;
-use tokio::sync::{mpsc, oneshot, Semaphore};
+use tokio::sync::{Semaphore, mpsc, oneshot};
 use tokio::task::AbortHandle;
 
 use crate::pool::TlsInfo;
 use crate::profile::BrowserProfile;
 use crate::quic::config::H3Config;
 use crate::quic::connection::{
-    check_body_budget, close_reason, connect_and_handshake, flush_egress, EstablishedH3, H3Response,
+    EstablishedH3, H3Response, check_body_budget, close_reason, connect_and_handshake, flush_egress,
 };
 
 /// Max number of outstanding request commands the driver buffers before the

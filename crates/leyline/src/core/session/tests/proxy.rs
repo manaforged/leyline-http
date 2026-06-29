@@ -1,4 +1,4 @@
-use super::super::proxy::{env_proxy_from, CGI_SIGNAL_ENV_VARS};
+use super::super::proxy::{CGI_SIGNAL_ENV_VARS, env_proxy_from};
 
 // NO_PROXY host-matching gates live next to `NoProxy` in
 // `core::config` (the dead duplicate matcher was removed).

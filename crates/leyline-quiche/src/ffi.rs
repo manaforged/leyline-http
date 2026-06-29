@@ -91,9 +91,9 @@ use libc::c_int as socklen_t;
 use libc::socklen_t;
 
 #[cfg(windows)]
-use windows_sys::Win32::Networking::WinSock::IN6_ADDR_0;
-#[cfg(windows)]
 use windows_sys::Win32::Networking::WinSock::IN_ADDR_0;
+#[cfg(windows)]
+use windows_sys::Win32::Networking::WinSock::IN6_ADDR_0;
 #[cfg(windows)]
 use windows_sys::Win32::Networking::WinSock::SOCKADDR_IN6_0;
 
@@ -2240,7 +2240,7 @@ mod tests {
     }
 
     #[cfg(not(windows))]
-    extern "C" {
+    unsafe extern "C" {
         fn inet_ntop(
             af: c_int,
             src: *const c_void,

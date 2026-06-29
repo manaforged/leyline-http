@@ -22,16 +22,16 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use leyline::TcpProfile;
 use leyline::profile::BrowserProfile;
 use leyline::tls::{FingerprintConnector, ResolveFuture, Resolver, TlsTrustConfig};
-use leyline::TcpProfile;
 use leyline_bssl::asn1::Asn1Time;
 use leyline_bssl::bn::{BigNum, MsbOption};
 use leyline_bssl::hash::MessageDigest;
 use leyline_bssl::pkey::PKey;
 use leyline_bssl::rsa::Rsa;
 use leyline_bssl::x509::extension::{BasicConstraints, SubjectAlternativeName};
-use leyline_bssl::x509::{X509NameBuilder, X509};
+use leyline_bssl::x509::{X509, X509NameBuilder};
 use sha2::{Digest, Sha256};
 use tokio::net::TcpListener;
 
@@ -132,15 +132,15 @@ fn load_profile() -> BrowserProfile {
 
 /// Spawn a one-shot BoringSSL acceptor presenting `leaf` + `ca`. Returns
 /// the bound address; the task serves a single handshake then exits.
-async fn spawn_tls_server(gen: &Generated) -> SocketAddr {
+async fn spawn_tls_server(r#gen: &Generated) -> SocketAddr {
     use leyline_bssl::ssl::{SslAcceptor, SslMethod};
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
 
-    let leaf_pem = gen.leaf_cert_pem.clone();
-    let key_pem = gen.leaf_key_pem.clone();
-    let ca_pem = gen.ca_cert_pem.clone();
+    let leaf_pem = r#gen.leaf_cert_pem.clone();
+    let key_pem = r#gen.leaf_key_pem.clone();
+    let ca_pem = r#gen.ca_cert_pem.clone();
 
     tokio::spawn(async move {
         let key = PKey::private_key_from_pem(&key_pem).unwrap();
@@ -171,12 +171,12 @@ async fn spawn_tls_server(gen: &Generated) -> SocketAddr {
     addr
 }
 
-fn connector(gen: &Generated, addr: SocketAddr) -> FingerprintConnector {
+fn connector(r#gen: &Generated, addr: SocketAddr) -> FingerprintConnector {
     let trust = TlsTrustConfig::new()
         .without_env_roots()
         .without_system_roots()
-        .add_ca_der(gen.ca_der.clone())
-        .add_pinned_leaf_sha256(gen.leaf_pin);
+        .add_ca_der(r#gen.ca_der.clone())
+        .add_pinned_leaf_sha256(r#gen.leaf_pin);
     FingerprintConnector::new_with_trust(&load_profile(), TcpProfile::LINUX, &trust)
         .expect("connector build")
         .with_resolver(Arc::new(LoopbackResolver(addr)))
@@ -184,12 +184,12 @@ fn connector(gen: &Generated, addr: SocketAddr) -> FingerprintConnector {
 
 #[tokio::test]
 async fn pinned_cert_still_accepts_matching_hostname() {
-    let gen = generate_chain("wrong.example");
-    let _ = gen.leaf_der;
-    let addr = spawn_tls_server(&gen).await;
+    let r#gen = generate_chain("wrong.example");
+    let _ = r#gen.leaf_der;
+    let addr = spawn_tls_server(&r#gen).await;
     // Control: connect to the cert's actual SAN — chain + pin + host
     // all match, so the handshake must succeed.
-    let res = connector(&gen, addr)
+    let res = connector(&r#gen, addr)
         .connect("wrong.example", 443, None)
         .await;
     assert!(
@@ -201,12 +201,12 @@ async fn pinned_cert_still_accepts_matching_hostname() {
 
 #[tokio::test]
 async fn pinned_cert_rejects_mismatched_hostname() {
-    let gen = generate_chain("wrong.example");
-    let addr = spawn_tls_server(&gen).await;
+    let r#gen = generate_chain("wrong.example");
+    let addr = spawn_tls_server(&r#gen).await;
     // Regression: the cert's SAN is wrong.example, but we connect to
     // right.example. Chain verifies and the pin matches, yet the
     // hostname does not — the handshake MUST fail.
-    let res = connector(&gen, addr)
+    let res = connector(&r#gen, addr)
         .connect("right.example", 443, None)
         .await;
     assert!(

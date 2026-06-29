@@ -3,8 +3,8 @@
 use bytes::BytesMut;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
-use crate::h2::frame::{Frame, FrameHeader, FRAME_HEADER_LEN};
 use crate::h2::H2Error;
+use crate::h2::frame::{FRAME_HEADER_LEN, Frame, FrameHeader};
 
 use super::DEFAULT_MAX_FRAME_SIZE;
 

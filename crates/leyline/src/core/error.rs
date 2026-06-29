@@ -113,8 +113,8 @@ impl Error {
     /// graceful GOAWAY, or a transport-level EOF/reset) and the request can
     /// be safely retried on a fresh connection.
     pub fn is_connection_closed(&self) -> bool {
-        use crate::h2::error::ErrorCode;
         use crate::h2::H2Error;
+        use crate::h2::error::ErrorCode;
         match self {
             Error::Io(e) => matches!(
                 e.kind(),

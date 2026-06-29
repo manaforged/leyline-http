@@ -17,19 +17,19 @@
 use std::time::Duration;
 
 use bytes::BytesMut;
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt, DuplexStream};
 use tokio::runtime::Runtime;
 
+use leyline::h2::H2Client;
 use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
 use leyline::h2::connection::{ClientConnection, PseudoHeaders};
 use leyline::h2::frame::{
-    DataFrame, FrameHeader, FrameType, HeadersFrame, SettingsFrame, FRAME_HEADER_LEN,
+    DataFrame, FRAME_HEADER_LEN, FrameHeader, FrameType, HeadersFrame, SettingsFrame,
 };
 use leyline::h2::hpack;
-use leyline::h2::H2Client;
 use leyline::pool::{
-    Pool, DEFAULT_IDLE_TIMEOUT, DEFAULT_MAX_CONNECTIONS, DEFAULT_MAX_H1_CONNS_PER_HOST,
+    DEFAULT_IDLE_TIMEOUT, DEFAULT_MAX_CONNECTIONS, DEFAULT_MAX_H1_CONNS_PER_HOST, Pool,
 };
 
 fn bench_pool_new(c: &mut Criterion) {

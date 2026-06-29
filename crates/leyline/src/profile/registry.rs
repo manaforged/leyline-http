@@ -2,8 +2,8 @@
 
 use std::collections::HashMap;
 
-use crate::profile::types::BrowserProfile;
 use crate::profile::Browser;
+use crate::profile::types::BrowserProfile;
 
 /// Registry of all loaded browser profiles, indexed by (browser, version).
 pub struct ProfileRegistry {

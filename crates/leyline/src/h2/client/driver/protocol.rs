@@ -127,7 +127,7 @@ mod flow_control_tests {
     //! `Ok` for a post-cap value, three RFC 9113 §6.9 invariants collapse
     //! simultaneously.
 
-    use super::{checked_window_add, MAX_FLOW_WINDOW};
+    use super::{MAX_FLOW_WINDOW, checked_window_add};
 
     #[test]
     fn exact_cap_is_ok() {

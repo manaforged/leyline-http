@@ -248,9 +248,9 @@ mod tests {
         assert_eq!(&a[..3], "t13"); // TLS 1.3
         assert_eq!(&a[3..4], "d"); // SNI present
         assert_eq!(&a[4..6], "15"); // 15 ciphers
-                                    // 17 extensions in the list (all non-GREASE). Real Chrome has 16
-                                    // because the list includes extended_master_secret, which Chrome 147
-                                    // may omit. The exact count depends on the BoringSSL configuration.
+        // 17 extensions in the list (all non-GREASE). Real Chrome has 16
+        // because the list includes extended_master_secret, which Chrome 147
+        // may omit. The exact count depends on the BoringSSL configuration.
         assert!(
             a[6..8].parse::<u32>().unwrap() >= 16,
             "ext count: {}",

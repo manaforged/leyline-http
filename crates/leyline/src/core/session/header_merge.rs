@@ -6,7 +6,7 @@
 use std::borrow::Cow;
 
 use crate::profile::preset::HeaderPair;
-use crate::profile::{infer_anchor, HeaderAnchor};
+use crate::profile::{HeaderAnchor, infer_anchor};
 
 use crate::core::headers::HeaderList;
 
@@ -128,11 +128,7 @@ fn anchor_target_index(headers: &[HeaderPair], anchor: Option<HeaderAnchor>) -> 
     else {
         return headers.len();
     };
-    if anchor.is_before() {
-        idx
-    } else {
-        idx + 1
-    }
+    if anchor.is_before() { idx } else { idx + 1 }
 }
 
 #[cfg(test)]

@@ -161,8 +161,8 @@ pub mod multipart {
 
 // Profile types
 pub use crate::profile::{
-    BrandOverlay, BrandOverlayError, Browser, BrowserProfile, ChromiumBrand, Platform, Preset,
-    ALL_BROWSERS, PROFILE_COUNT,
+    ALL_BROWSERS, BrandOverlay, BrandOverlayError, Browser, BrowserProfile, ChromiumBrand,
+    PROFILE_COUNT, Platform, Preset,
 };
 
 // TCP fingerprinting
@@ -170,7 +170,7 @@ pub use crate::tcp::TcpProfile;
 
 // Connection-pool statistics (via `Session::pool_stats`) and the tuning
 // defaults a caller would reference when overriding `pool_limits`.
-pub use crate::pool::{PoolStats, DEFAULT_IDLE_TIMEOUT, DEFAULT_MAX_CONNECTIONS};
+pub use crate::pool::{DEFAULT_IDLE_TIMEOUT, DEFAULT_MAX_CONNECTIONS, PoolStats};
 
 // HTTP/2 protocol error type returned by the HTTP/2 layer, with the error code
 // it carries (both render at the crate root — `ErrorCode` appears in the public

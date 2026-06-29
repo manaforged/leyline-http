@@ -4,10 +4,10 @@
 //! so we're measuring the fingerprint math (hashing + sorting + formatting)
 //! rather than profile lookup. Chrome 147 is the reference shape.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use leyline::audit::{
-    chrome_extension_ids, compute_ja3, compute_ja4, compute_ja4h, compute_ja4t, Ja3Input, Ja4Input,
-    Ja4hInput,
+    Ja3Input, Ja4Input, Ja4hInput, chrome_extension_ids, compute_ja3, compute_ja4, compute_ja4h,
+    compute_ja4t,
 };
 use leyline::profile::{Browser, ProfileRegistry};
 

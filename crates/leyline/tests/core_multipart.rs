@@ -2,8 +2,8 @@
 
 use std::io::Write;
 
-use leyline::core::multipart::{Form, Part};
 use leyline::core::Session;
+use leyline::core::multipart::{Form, Part};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 /// Read the full request (headers + body) off the socket. The tests

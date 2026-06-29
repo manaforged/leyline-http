@@ -291,6 +291,12 @@ use std::fmt;
 use std::fmt::Write;
 
 #[cfg(feature = "qlog")]
+use qlog::events::EventData;
+#[cfg(feature = "qlog")]
+use qlog::events::EventImportance;
+#[cfg(feature = "qlog")]
+use qlog::events::EventType;
+#[cfg(feature = "qlog")]
 use qlog::events::h3::H3FrameCreated;
 #[cfg(feature = "qlog")]
 use qlog::events::h3::H3FrameParsed;
@@ -306,12 +312,6 @@ use qlog::events::h3::H3StreamTypeSet;
 use qlog::events::h3::Http3EventType;
 #[cfg(feature = "qlog")]
 use qlog::events::h3::Http3Frame;
-#[cfg(feature = "qlog")]
-use qlog::events::EventData;
-#[cfg(feature = "qlog")]
-use qlog::events::EventImportance;
-#[cfg(feature = "qlog")]
-use qlog::events::EventType;
 
 /// List of ALPN tokens of supported HTTP/3 versions.
 ///
@@ -1047,7 +1047,10 @@ impl Connection {
     pub fn with_transport(conn: &mut super::Connection, config: &Config) -> Result<Connection> {
         let is_client = !conn.is_server;
         if is_client && !(conn.is_established() || conn.is_in_early_data()) {
-            trace!("{} QUIC connection must be established or in early data before creating an HTTP/3 connection", conn.trace_id());
+            trace!(
+                "{} QUIC connection must be established or in early data before creating an HTTP/3 connection",
+                conn.trace_id()
+            );
             return Err(Error::InternalError);
         }
 
@@ -1872,7 +1875,7 @@ impl Connection {
                 // Return early if the stream was reset, to avoid returning
                 // a Finished event later as well.
                 Err(Error::TransportError(crate::Error::StreamReset(e))) => {
-                    return Ok((s, Event::Reset(e)))
+                    return Ok((s, Event::Reset(e)));
                 }
 
                 Err(e) => return Err(e),

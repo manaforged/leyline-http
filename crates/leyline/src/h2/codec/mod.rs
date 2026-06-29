@@ -14,8 +14,8 @@ pub(crate) const DEFAULT_MAX_FRAME_SIZE: u32 = 16_384;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::h2::frame::{Frame, FrameHeader, SettingsFrame};
     use crate::h2::H2Error;
+    use crate::h2::frame::{Frame, FrameHeader, SettingsFrame};
     use bytes::BytesMut;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 

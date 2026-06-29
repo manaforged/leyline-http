@@ -18,9 +18,9 @@ use crate::core::SocketConfig;
 use crate::profile::BrowserProfile;
 use crate::tcp::TcpProfile;
 
-use crate::tls::builder::{apply_profile_with_trust, TlsMinVersion};
+use crate::tls::builder::{TlsMinVersion, apply_profile_with_trust};
 use crate::tls::error::TlsError;
-use crate::tls::happy_eyeballs::{happy_eyeballs_connect, HappyEyeballsConfig};
+use crate::tls::happy_eyeballs::{HappyEyeballsConfig, happy_eyeballs_connect};
 use crate::tls::nonblocking::connect_one;
 use crate::tls::resolver::{Resolver, SystemResolver};
 use crate::tls::trust::TlsTrustConfig;

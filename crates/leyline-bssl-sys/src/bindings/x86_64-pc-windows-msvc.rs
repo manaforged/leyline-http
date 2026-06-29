@@ -9752,7 +9752,7 @@ pub type __builtin_va_list = *mut ::std::os::raw::c_char;
 pub struct CRYPTO_dynlock_value {
     pub _address: u8,
 }
-extern "C" {
+unsafe extern "C" {
     pub fn __va_start(arg1: *mut *mut ::std::os::raw::c_char, ...);
     pub fn __security_init_cookie();
     pub fn __security_check_cookie(_StackCookie: usize);

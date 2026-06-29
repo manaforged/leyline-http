@@ -95,11 +95,11 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                     Ok(v) => v,
                     Err(new_win) => {
                         return Err(H2Error::Connection {
-                                code: ErrorCode::FlowControlError,
-                                reason: format!(
-                                    "WINDOW_UPDATE would push connection window to {new_win} (> 2^31-1)"
-                                ),
-                            });
+                            code: ErrorCode::FlowControlError,
+                            reason: format!(
+                                "WINDOW_UPDATE would push connection window to {new_win} (> 2^31-1)"
+                            ),
+                        });
                     }
                 };
             }

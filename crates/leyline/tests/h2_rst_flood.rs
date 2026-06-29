@@ -5,9 +5,9 @@
 
 use std::time::{Duration, Instant};
 
+use leyline::h2::H2Error;
 use leyline::h2::connection::RstFloodDetector;
 use leyline::h2::error::ErrorCode;
-use leyline::h2::H2Error;
 
 fn assert_calm(err: &H2Error) {
     match err {

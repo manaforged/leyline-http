@@ -285,7 +285,7 @@ pub(super) fn get_session_bytes(session: *mut SSL_SESSION) -> Result<Vec<u8>> {
 }
 pub(super) const TLS_ERROR: c_int = 3;
 
-extern "C" {
+unsafe extern "C" {
     // SSL_METHOD specific for boringssl.
     pub(super) fn SSL_CTX_set_tlsext_ticket_keys(
         ctx: *mut SSL_CTX,

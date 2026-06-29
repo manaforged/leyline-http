@@ -36,13 +36,13 @@ use std::cmp;
 use std::time::Duration;
 use std::time::Instant;
 
-use super::rtt::RttStats;
 use super::Acked;
 use super::Sent;
+use super::rtt::RttStats;
 
-use super::reno;
 use super::Congestion;
 use super::CongestionControlOps;
+use super::reno;
 use crate::recovery::MINIMUM_WINDOW_PACKETS;
 
 pub(crate) static CUBIC: CongestionControlOps = CongestionControlOps {
@@ -414,10 +414,10 @@ mod tests {
 
     use crate::CongestionControlAlgorithm;
 
+    use crate::recovery::RecoveryOps;
     use crate::recovery::congestion::hystart;
     use crate::recovery::congestion::recovery::LegacyRecovery;
     use crate::recovery::congestion::test_sender::TestSender;
-    use crate::recovery::RecoveryOps;
 
     fn test_sender() -> TestSender {
         TestSender::new(CongestionControlAlgorithm::CUBIC, false)

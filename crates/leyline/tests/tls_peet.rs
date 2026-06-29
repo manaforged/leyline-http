@@ -1448,7 +1448,8 @@ async fn live_h3_response_streaming_is_incremental() {
     // *decompressed* buffered length is meaningless (~9× apart for HTML).
     let decoded = decode_content_encoding(&compressed, encoding.as_deref());
     assert_eq!(
-        decoded, expected,
+        decoded,
+        expected,
         "streamed H3 body differs from buffered: {} decoded bytes (from {} compressed, encoding={encoding:?}) in {chunks} chunks vs {} buffered",
         decoded.len(),
         compressed.len(),
