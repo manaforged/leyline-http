@@ -31,7 +31,7 @@ pub use error::{Error, Result};
 pub(crate) use header_str::HeaderStr;
 pub use headers::HeaderList;
 pub use request::{ContentEncoding, IntoParamPair, RequestBuilder};
-pub use response::{HttpVersion, Response};
+pub use response::{HttpVersion, Response, ResponseTiming};
 pub use retry::{RetryPolicy, RetryTrigger};
 #[cfg(feature = "tower")]
 pub use service::LeylineService;

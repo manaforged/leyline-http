@@ -91,6 +91,9 @@ impl Session {
         let mut current_body = body;
         let mut redirect_chain = Vec::new();
         let mut all_cookies = HashMap::new();
+        // Accumulates timing across every redirect leg so the returned
+        // `Response::timing()` describes the whole call, not just the last hop.
+        let mut acc_timing = crate::core::ResponseTiming::accumulator();
 
         let redirect_cap = self.redirect_policy.max_redirects_hint();
         for _ in 0..=redirect_cap {
@@ -265,16 +268,28 @@ impl Session {
             // hop in this `execute_inner` call — once a caller picks a
             // proxy for a request, all redirects of that request go
             // through the same proxy.
-            let transport_resp = self
-                .send_with_policy(
-                    &current_method,
-                    &current_url,
-                    headers,
-                    hop_body,
-                    stream_response,
-                    request_proxy,
-                )
-                .await?;
+            //
+            // `send_with_policy` resolves when the transport response is ready:
+            // at headers for a streamed response (true TTFB), but only after the
+            // full body for the default buffered response (every protocol). So
+            // `response_header` caps first-byte for streamed callers and the
+            // whole response per hop for buffered callers — either way a proxy
+            // that connects then goes silent errors here instead of hanging out
+            // to `total`. See `TimeoutConfig::response_header`.
+            let send = self.send_with_policy(
+                &current_method,
+                &current_url,
+                headers,
+                hop_body,
+                stream_response,
+                request_proxy,
+            );
+            let transport_resp = match self.timeouts.response_header {
+                Some(ttfb) => tokio::time::timeout(ttfb, send)
+                    .await
+                    .map_err(|_| Error::Timeout)??,
+                None => send.await?,
+            };
             let status = transport_resp.status;
             let resp_headers = transport_resp.headers;
             let resp_body_shape = transport_resp.body;
@@ -284,6 +299,10 @@ impl Session {
             let peer_cert_der = transport_resp.peer_cert_der;
             let tls_version = transport_resp.tls_version;
             let tls_cipher = transport_resp.tls_cipher;
+            // Fold this leg's timing into the running total. On a redirect the
+            // loop continues and the next leg adds to it; the non-redirect
+            // return below ships the accumulated whole-request breakdown.
+            acc_timing.add_leg(&transport_resp.timing);
 
             // Store cookies from response and accumulate across redirect chain.
             let set_cookies: Vec<&str> = resp_headers
@@ -448,6 +467,7 @@ impl Session {
                     .audit_enabled
                     .then(|| std::sync::Arc::clone(&self.audit_tls)),
                 audit_cache: std::sync::OnceLock::new(),
+                timing: acc_timing,
             });
         }
 

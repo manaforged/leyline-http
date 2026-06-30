@@ -239,6 +239,7 @@ impl Pool {
             evictions_idle: self.counters.evictions_idle.load(Ordering::Relaxed),
             evictions_lru: self.counters.evictions_lru.load(Ordering::Relaxed),
             evictions_dead: self.counters.evictions_dead.load(Ordering::Relaxed),
+            stale_probed: self.counters.stale_probed.load(Ordering::Relaxed),
             installs: self.counters.installs.load(Ordering::Relaxed),
         }
     }
@@ -604,6 +605,14 @@ impl Pool {
     /// one dead connection.
     pub(crate) fn note_h1_dead(&self) {
         self.counters.evictions_dead.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record that the checkout liveness probe found a popped H1 connection
+    /// already dead and discarded it before committing a request (stats only).
+    /// Distinct from [`Self::note_h1_dead`]: this is the probe catching a stale
+    /// connection up front, not a request failing mid-exchange.
+    pub(crate) fn note_h1_stale_probed(&self) {
+        self.counters.stale_probed.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Current entry count.

@@ -72,6 +72,13 @@ const UPLOAD_CHUNK: usize = 16 * 1024;
 /// actually behind, so it isn't a steady-state poll.
 const STREAM_PUMP_INTERVAL: Duration = Duration::from_millis(2);
 
+/// Upper bound on how long a stream whose caller dropped its receiver lingers
+/// before the driver reaps it (see [`sweep_cancelled_streams`]). Caps the driver
+/// select wait while any stream is in flight, so an orphan on an otherwise-idle
+/// connection is reset within this window instead of holding QUIC stream credit
+/// until the idle timeout. Mirrors the H2 driver's sweep cadence.
+const CANCEL_SWEEP_INTERVAL: Duration = Duration::from_millis(100);
+
 /// A streaming request body: the same boxed `Stream` shape as
 /// [`crate::core::Body::Stream`]. When present, the driver pumps it into the
 /// request stream incrementally instead of buffering the whole body first.
@@ -479,6 +486,12 @@ impl H3Driver {
         let mut commands_closed = false;
 
         loop {
+            // Reap any stream whose caller dropped its receiver (an outer timeout
+            // fired, or the request was cancelled) before doing per-stream work,
+            // so a freed QUIC stream-credit slot is available to a request started
+            // in this same iteration.
+            sweep_cancelled_streams(&mut conn, &mut streams);
+
             // Start any queued requests now that the connection can take them,
             // (re)attempt flow-control-parked request bodies, then push any
             // ready streaming-response body into its consumer channel.
@@ -523,6 +536,13 @@ impl H3Driver {
             // the pump retries promptly instead of stalling to the idle timeout.
             if stream_backpressured {
                 timeout = timeout.min(STREAM_PUMP_INTERVAL);
+            }
+            // While any stream is in flight, cap the wait so a caller that drops
+            // its receiver on an otherwise-idle connection is reaped by the next
+            // `sweep_cancelled_streams` within a bounded window, rather than
+            // holding stream credit until the QUIC idle timeout.
+            if !streams.is_empty() {
+                timeout = timeout.min(CANCEL_SWEEP_INTERVAL);
             }
 
             tokio::select! {
@@ -814,6 +834,52 @@ fn reset_upload_half(conn: &mut quiche::Connection, stream_id: u64, stream: &mut
         let _ = conn.stream_shutdown(stream_id, quiche::Shutdown::Write, 0);
     }
     stream.cancel_upload();
+}
+
+/// True when the caller has abandoned this stream: it dropped the response
+/// oneshot before the head was delivered (a buffered request, or a streaming one
+/// pre-head), or — once the head has been streamed — dropped the body-channel
+/// receiver. Either is the signal that an outer timeout (`response_header` /
+/// `total`) or an explicit cancellation fired and the stream should be torn down.
+fn stream_is_cancelled(stream: &H3Stream) -> bool {
+    match stream.resp_tx.as_ref() {
+        Some(tx) => tx.is_closed(),
+        None => stream
+            .stream_tx
+            .as_ref()
+            .map(|tx| tx.is_closed())
+            .unwrap_or(false),
+    }
+}
+
+/// Ids of streams whose caller has dropped its receiver. Split out from
+/// [`sweep_cancelled_streams`] so the selection logic is unit-testable without a
+/// live `quiche::Connection`.
+fn cancelled_stream_ids(streams: &HashMap<u64, H3Stream>) -> Vec<u64> {
+    streams
+        .iter()
+        .filter(|(_, s)| stream_is_cancelled(s))
+        .map(|(&id, _)| id)
+        .collect()
+}
+
+/// Reap streams whose caller dropped its receiver, freeing the QUIC stream-credit
+/// slot instead of letting an orphan linger until the connection's idle timeout.
+///
+/// Without this, an outer timeout firing before the peer replies — the
+/// silent-proxy case `response_header` exists to catch — leaves the stream in the
+/// map with no peer event to remove it, holding `max_concurrent_bidi_streams`
+/// credit and flow-control window. STOP_SENDING (`Shutdown::Read`) abandons the
+/// response we will never read; [`reset_upload_half`] RESET_STREAMs the send half
+/// if the upload is still open and stops the body pump. The H2 driver's
+/// `sweep_cancelled_streams` is the counterpart this mirrors.
+fn sweep_cancelled_streams(conn: &mut quiche::Connection, streams: &mut HashMap<u64, H3Stream>) {
+    for id in cancelled_stream_ids(streams) {
+        if let Some(mut stream) = streams.remove(&id) {
+            let _ = conn.stream_shutdown(id, quiche::Shutdown::Read, 0);
+            reset_upload_half(conn, id, &mut stream);
+        }
+    }
 }
 
 /// Drain all ready HTTP/3 events, dispatching each to its request stream.
@@ -1252,6 +1318,59 @@ mod tests {
         let got = rx.await.expect("sender delivered").expect("ok response");
         assert_eq!(got.status, 200);
         assert_eq!(got.body, b"hello");
+    }
+
+    #[test]
+    fn cancelled_stream_ids_selects_only_dropped_receivers() {
+        // The sweep's selection logic: a stream whose caller still holds the
+        // response receiver is live; one whose receiver was dropped (outer
+        // timeout fired, request cancelled) is reaped.
+        let mut streams = HashMap::new();
+        let (tx_live, _rx_live) = oneshot::channel::<Result<H3Response, String>>();
+        streams.insert(1u64, H3Stream::new(tx_live, None, None, false));
+        let (tx_dead, rx_dead) = oneshot::channel::<Result<H3Response, String>>();
+        streams.insert(2u64, H3Stream::new(tx_dead, None, None, false));
+        drop(rx_dead);
+
+        let cancelled = cancelled_stream_ids(&streams);
+        assert_eq!(
+            cancelled,
+            vec![2u64],
+            "only the dropped-receiver stream is selected for reaping"
+        );
+    }
+
+    #[tokio::test]
+    async fn cancellation_tracks_resp_then_body_receiver_across_the_head() {
+        // Pre-head, cancellation is the response oneshot being dropped; once the
+        // head has streamed (resp_tx taken), it tracks the body-channel receiver.
+        let (tx, rx) = oneshot::channel::<Result<H3Response, String>>();
+        let (body_tx, body_rx) = mpsc::channel(4);
+        let mut s = H3Stream::new(tx, None, Some(body_tx), true);
+        assert!(
+            !stream_is_cancelled(&s),
+            "live resp receiver → not cancelled"
+        );
+        drop(rx);
+        assert!(
+            stream_is_cancelled(&s),
+            "dropped resp receiver pre-head → cancelled"
+        );
+
+        // Deliver the head (takes resp_tx); cancellation now follows the body
+        // channel. Re-seat a live receiver first so deliver_head has a sender.
+        let (tx2, _rx2) = oneshot::channel::<Result<H3Response, String>>();
+        s.resp_tx = Some(tx2);
+        s.deliver_head();
+        assert!(
+            !stream_is_cancelled(&s),
+            "live body receiver post-head → not cancelled"
+        );
+        drop(body_rx);
+        assert!(
+            stream_is_cancelled(&s),
+            "dropped body receiver post-head → cancelled"
+        );
     }
 
     #[test]

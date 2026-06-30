@@ -29,13 +29,18 @@ unsafe fn set_int_opt(
     val: libc::c_int,
     label: &'static str,
 ) {
-    let ret = libc::setsockopt(
-        fd,
-        level,
-        opt,
-        &val as *const _ as *const libc::c_void,
-        std::mem::size_of::<libc::c_int>() as libc::socklen_t,
-    );
+    // SAFETY: see the `# Safety` contract above — `fd` is a live socket and
+    // `&val` outlives the call. Edition 2024 requires the unsafe op to sit in an
+    // explicit `unsafe` block even inside an `unsafe fn`.
+    let ret = unsafe {
+        libc::setsockopt(
+            fd,
+            level,
+            opt,
+            &val as *const _ as *const libc::c_void,
+            std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+        )
+    };
     if ret != 0 {
         log_once(label, &std::io::Error::last_os_error());
     }

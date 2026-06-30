@@ -171,6 +171,17 @@ impl SessionBuilder {
         self
     }
 
+    /// Set the post-send response cap, per redirect hop. Bounds an upstream that
+    /// connects and then goes silent, which neither `connect_timeout` (already
+    /// elapsed) nor `read_timeout` (arms only on a streamed body) catches. For a
+    /// streamed response this is a true time-to-first-byte cap; for the default
+    /// buffered response it bounds the whole-body download. See
+    /// [`TimeoutConfig::response_header`] for the exact semantics.
+    pub fn response_header_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.timeouts.response_header = Some(timeout);
+        self
+    }
+
     /// Override the connection pool's idle-eviction timeout (default: 300s).
     ///
     /// Pool entries whose `last_use` is older than this duration are

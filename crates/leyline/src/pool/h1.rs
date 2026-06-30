@@ -138,6 +138,55 @@ pub enum H1PooledError {
 
 // thiserror brings the Display/Error impls; nothing else needed.
 
+/// Non-blocking liveness probe for a pooled keep-alive socket.
+///
+/// `checkout_h1` only sees application-level state (the idle deque) — it
+/// cannot tell that a peer closed its half of the connection while it sat
+/// idle. A keep-alive server with a shorter idle timeout than our pool (a
+/// Node default is 5s vs our 300s) reaps the socket from under us; the next
+/// write then fails mid-request. This poll catches that before we commit a
+/// request to the dead socket.
+///
+/// Returns `false` when the socket has hit EOF (read-ready, zero bytes), has
+/// errored, or already has bytes waiting before we sent anything (a framing
+/// desync we must not reuse). Returns `true` only for the normal idle
+/// keep-alive state: open, with no data pending.
+fn conn_is_live(io: &mut dyn H1Io) -> bool {
+    use std::task::{Context, Poll};
+    use tokio::io::ReadBuf;
+
+    let mut probe = [0u8; 1];
+    let mut buf = ReadBuf::new(&mut probe);
+    let mut cx = Context::from_waker(std::task::Waker::noop());
+    match Pin::new(io).poll_read(&mut cx, &mut buf) {
+        // No data pending and not closed — the expected idle-keep-alive state.
+        Poll::Pending => true,
+        // Ready with zero bytes is EOF; ready with bytes is a pre-request
+        // desync. Either way the connection is not safe to reuse.
+        Poll::Ready(Ok(())) => false,
+        Poll::Ready(Err(_)) => false,
+    }
+}
+
+/// Check out a pooled H1 connection that is still alive at the socket level.
+///
+/// Drains and discards any pooled entries that already hit EOF / error so a
+/// stale keep-alive connection becomes a clean cache miss (fresh connect)
+/// instead of a failed request, draining until a live connection is found or
+/// the destination's deque is empty.
+fn checkout_live_h1(pool: &Arc<Pool>, key: &PoolKey) -> Option<(H1Slot, TlsInfo)> {
+    while let Some((mut slot, tls)) = pool.checkout_h1(key) {
+        if conn_is_live(slot.io.as_mut()) {
+            return Some((slot, tls));
+        }
+        // Dead pooled socket caught before use — count it as a probe catch
+        // (distinct from a mid-exchange failure) and drop it (the checked-out
+        // slot is already removed from the deque); loop to the next warm entry.
+        pool.note_h1_stale_probed();
+    }
+    None
+}
+
 /// Send an HTTP/1.1 request over a pooled connection, opening a
 /// fresh TCP + TLS handshake on miss.
 ///
@@ -232,8 +281,10 @@ pub async fn send_request_h1_pooled(
     };
     let mut body = body;
 
-    // Try pooled connection first.
-    if let Some((slot, tls)) = pool.checkout_h1(&key) {
+    // Try pooled connection first. Probe each candidate for socket-level
+    // liveness so a keep-alive peer that closed under us becomes a clean miss
+    // rather than a failed write.
+    if let Some((slot, tls)) = checkout_live_h1(pool, &key) {
         let pooled_body = std::mem::replace(&mut body, H1Body::Empty);
         let mut io = slot.io;
         match exchange_on_stream(
@@ -934,8 +985,10 @@ async fn send_request_h1_streaming(
     };
     let mut body = body;
 
-    // Try a pooled connection first.
-    if let Some((slot, tls)) = pool.checkout_h1(&key) {
+    // Try a pooled connection first, probing for socket-level liveness so a
+    // stale keep-alive connection becomes a clean miss rather than a failed
+    // exchange.
+    if let Some((slot, tls)) = checkout_live_h1(pool, &key) {
         let pooled_body = std::mem::replace(&mut body, H1Body::Empty);
         let mut io = slot.io;
         match exchange_head_on_stream(
@@ -1491,4 +1544,101 @@ fn header_contains_token(headers: &[(String, String)], name: &str, token: &str) 
 
 fn find_header_end(buf: &[u8]) -> Option<usize> {
     buf.windows(4).position(|w| w == b"\r\n\r\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::AsyncWriteExt;
+    use tokio::net::{TcpListener, TcpStream};
+
+    /// Connect a real loopback TCP pair and return (client, accepted server).
+    async fn tcp_pair() -> (TcpStream, TcpStream) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let client = TcpStream::connect(addr).await.unwrap();
+        let (server, _) = listener.accept().await.unwrap();
+        (client, server)
+    }
+
+    #[tokio::test]
+    async fn live_idle_socket_probes_as_live() {
+        let (mut client, _server) = tcp_pair().await;
+        // Nothing sent by the peer: an idle keep-alive connection. The probe
+        // must report it live (poll_read is Pending), not evict it.
+        assert!(conn_is_live(&mut client as &mut dyn H1Io));
+    }
+
+    #[tokio::test]
+    async fn peer_closed_socket_probes_as_dead() {
+        let (mut client, server) = tcp_pair().await;
+        // The peer drops its half.
+        drop(server);
+        // Wait for the FIN to land so the probe sees EOF deterministically.
+        client.readable().await.unwrap();
+        assert!(!conn_is_live(&mut client as &mut dyn H1Io));
+    }
+
+    #[tokio::test]
+    async fn socket_with_pending_bytes_probes_as_dead() {
+        let (mut client, mut server) = tcp_pair().await;
+        // Unexpected bytes waiting before we sent a request = framing desync;
+        // the connection must not be reused.
+        server.write_all(b"x").await.unwrap();
+        server.flush().await.unwrap();
+        client.readable().await.unwrap();
+        assert!(!conn_is_live(&mut client as &mut dyn H1Io));
+    }
+
+    #[tokio::test]
+    async fn checkout_live_h1_drains_dead_and_counts_stale() {
+        let pool = Arc::new(Pool::new());
+        let key = make_key("127.0.0.1", 1, None, Transport::Tcp);
+
+        let (client, server) = tcp_pair().await;
+        // Peer closes, then wait for the FIN to land before pooling so the
+        // checkout probe deterministically sees a dead socket.
+        drop(server);
+        client.readable().await.unwrap();
+        pool.return_h1(
+            key.clone(),
+            H1Slot {
+                io: Box::new(client),
+            },
+            TlsInfo::default(),
+        );
+
+        // The only pooled entry is dead: checkout drains it and reports a miss,
+        // counting the catch as a probe catch (not a mid-exchange failure).
+        assert!(checkout_live_h1(&pool, &key).is_none());
+        let stats = pool.stats();
+        assert_eq!(stats.stale_probed, 1, "probe catch must count as stale");
+        assert_eq!(stats.evictions_dead, 0, "no mid-exchange failure occurred");
+    }
+
+    #[tokio::test]
+    async fn checkout_live_h1_returns_a_live_connection_uncounted() {
+        let pool = Arc::new(Pool::new());
+        let key = make_key("127.0.0.1", 2, None, Transport::Tcp);
+
+        // Keep the server end alive so the pooled connection stays open.
+        let (client, _server) = tcp_pair().await;
+        pool.return_h1(
+            key.clone(),
+            H1Slot {
+                io: Box::new(client),
+            },
+            TlsInfo::default(),
+        );
+
+        assert!(
+            checkout_live_h1(&pool, &key).is_some(),
+            "a live pooled connection must be handed out"
+        );
+        assert_eq!(
+            pool.stats().stale_probed,
+            0,
+            "a live connection is not a probe catch"
+        );
+    }
 }

@@ -5,6 +5,10 @@
     clippy::unreadable_literal,
     clippy::upper_case_acronyms,
     improper_ctypes,
+    // bindgen emits `transmute`s the rustc lint (warn-by-default since 1.88)
+    // flags as expressible via `{to,from}_*_bytes`/`cast_*`; these are generated
+    // FFI bindings, so silence it crate-wide like the other generated-code lints.
+    unnecessary_transmutes,
     non_camel_case_types,
     non_snake_case,
     non_upper_case_globals,
@@ -52,8 +56,8 @@ compile_error!(
 );
 
 // explicitly require presence of some symbols to check if the bindings worked
+pub use generated::{ssl_compliance_policy_t, ERR_add_error_data, SSL_set1_groups}; // if these are missing, your include path is incorrect or has a wrong version of boringssl
 pub use generated::{BIO_new, OPENSSL_free, SSL_ERROR_NONE}; // if these are missing, your include path is incorrect
-pub use generated::{ERR_add_error_data, SSL_set1_groups, ssl_compliance_policy_t}; // if these are missing, your include path is incorrect or has a wrong version of boringssl
 #[cfg(feature = "fips")]
 pub use generated::{FIPS_mode, SSL_CTX_set_compliance_policy}; // your include path is incorrect or has a version of boringssl without FIPS support
 #[cfg(feature = "mlkem")]

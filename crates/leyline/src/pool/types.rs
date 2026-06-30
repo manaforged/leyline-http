@@ -147,10 +147,12 @@ pub struct PoolStats {
     pub h2_hits: u64,
     /// Cumulative H2 checkout misses (no entry, or entry was dead).
     pub h2_misses: u64,
-    /// Cumulative H1 checkouts that popped a pooled connection. There is no
-    /// liveness probe at checkout, so a counted hit may still prove stale on
-    /// use (the exchange then fails and bumps `evictions_dead`); a hit means
-    /// "a warm connection was handed out", not "a request succeeded on it".
+    /// Cumulative H1 checkouts that popped a pooled connection. Checkout
+    /// probes each popped connection for socket-level liveness: ones already
+    /// closed by the peer are discarded (counted in `stale_probed`) and a
+    /// fresh one is opened, so a hit means "a warm, probe-live connection was
+    /// handed out", not "a request succeeded on it" — a connection can still
+    /// fail mid-exchange in the residual probe-to-write race (`evictions_dead`).
     pub h1_hits: u64,
     /// Cumulative H1 checkout misses (no entry, dead slot, or idle
     /// window exceeded).
@@ -163,9 +165,17 @@ pub struct PoolStats {
     pub evictions_idle: u64,
     /// Cumulative evictions triggered by the LRU cap.
     pub evictions_lru: u64,
-    /// Cumulative evictions caused by a send failing with a
-    /// connection-level error.
+    /// Cumulative evictions caused by a send failing with a connection-level
+    /// error mid-exchange — the residual probe-to-write race a checkout
+    /// liveness probe cannot close. Distinct from `stale_probed`, which counts
+    /// connections caught dead *before* a request was committed.
     pub evictions_dead: u64,
+    /// Cumulative H1 connections the checkout liveness probe found already
+    /// dead (peer-closed / EOF / pre-request desync) and discarded before use.
+    /// This is the probe working as intended: each one would otherwise have
+    /// become a failed exchange. A rising ratio against `h1_hits` means the
+    /// pool's idle timeout outlives the peer's keep-alive window.
+    pub stale_probed: u64,
     /// Cumulative fresh connections opened and installed (H1 or H2).
     pub installs: u64,
 }
@@ -182,5 +192,6 @@ pub(crate) struct PoolCounters {
     pub(crate) evictions_idle: AtomicU64,
     pub(crate) evictions_lru: AtomicU64,
     pub(crate) evictions_dead: AtomicU64,
+    pub(crate) stale_probed: AtomicU64,
     pub(crate) installs: AtomicU64,
 }

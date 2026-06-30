@@ -312,9 +312,14 @@ async fn h1_pool_recovers_when_server_drops_connection() {
     );
 
     let stats = pool.stats();
+    // The pooled stream is dead before request 2's checkout. The checkout
+    // liveness probe catches it up front (stale_probed) rather than letting the
+    // exchange fail mid-request (evictions_dead); a slow FIN could still land in
+    // the probe-to-write race and surface as evictions_dead. Either path means
+    // the dead stream was detected and the request recovered on a fresh TCP.
     assert!(
-        stats.evictions_dead >= 1,
-        "dead-stream eviction should have been counted (got {stats:?})"
+        stats.stale_probed + stats.evictions_dead >= 1,
+        "dead pooled stream should have been detected (got {stats:?})"
     );
 }
 

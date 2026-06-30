@@ -36,7 +36,9 @@
 //! ordering reflects actual request activity, not install time.
 
 use std::sync::Arc;
+use std::time::Instant;
 
+use crate::core::ResponseTiming;
 use crate::h2::client::{H2ResponseEx, RequestBody};
 use crate::h2::config::H2Config;
 use crate::h2::connection::{ClientConnection, PseudoHeaders};
@@ -465,7 +467,8 @@ pub async fn send_request(
     body: RequestBody,
     proxy: Option<&str>,
     stream_response: bool,
-) -> Result<(H2ResponseEx, TlsInfo), crate::Error> {
+) -> Result<(H2ResponseEx, TlsInfo, ResponseTiming), crate::Error> {
+    let started = Instant::now();
     let host = &pseudo.authority;
     let port = if pseudo.scheme == "https" { 443 } else { 80 };
 
@@ -484,6 +487,7 @@ pub async fn send_request(
 
     if let Some((handle, tls)) = pool.checkout_h2(&key) {
         let pooled_body = std::mem::replace(&mut body, RequestBody::None);
+        let send_started = Instant::now();
         match handle
             .send_request_ex(
                 pseudo.clone(),
@@ -495,7 +499,14 @@ pub async fn send_request(
         {
             Ok(resp) => {
                 tracing::Span::current().record("pool.hit", true);
-                return Ok((resp, tls));
+                let send_ms = ms_since(send_started);
+                let timing = ResponseTiming {
+                    reused: true,
+                    connect_ms: None,
+                    send_ms,
+                    total_ms: ms_since(started),
+                };
+                return Ok((resp, tls, timing));
             }
             Err(e) => {
                 // Pool returned an entry the checkout-side `is_dead`
@@ -545,6 +556,7 @@ pub async fn send_request(
     }
     tracing::Span::current().record("pool.hit", false);
 
+    let connect_started = Instant::now();
     let (handle, tls) = open_h2_coalesced(
         pool,
         connector,
@@ -555,7 +567,12 @@ pub async fn send_request(
         proxy,
     )
     .await?;
+    // DNS + TCP + TLS + H2 preface (or the wait for a coalesced peer's
+    // handshake). Stamped only on the cold path; a checkout-hit returns above
+    // with `connect_ms: None`.
+    let connect_ms = ms_since(connect_started);
 
+    let send_started = Instant::now();
     let resp = match handle
         .send_request_ex(pseudo, headers, body, stream_response)
         .await
@@ -567,7 +584,19 @@ pub async fn send_request(
         }
     };
 
-    Ok((resp, tls))
+    let timing = ResponseTiming {
+        reused: false,
+        connect_ms: Some(connect_ms),
+        send_ms: ms_since(send_started),
+        total_ms: ms_since(started),
+    };
+    Ok((resp, tls, timing))
+}
+
+/// Milliseconds elapsed since `start`, saturating into `u32` (a hop that
+/// somehow runs longer than ~49 days clamps rather than wraps).
+fn ms_since(start: Instant) -> u32 {
+    u32::try_from(start.elapsed().as_millis()).unwrap_or(u32::MAX)
 }
 
 /// Parse `host[:port]` authority into `(host, port)`.

@@ -22,6 +22,7 @@ fn builder_accepts_wreq_parity_transport_knobs() {
         total: Duration::from_secs(5),
         connect: Some(Duration::from_secs(1)),
         read: Some(Duration::from_secs(2)),
+        response_header: Some(Duration::from_secs(3)),
     };
     let pool = PoolConfig {
         idle_timeout: Duration::from_secs(30),

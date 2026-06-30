@@ -64,6 +64,84 @@ impl HttpVersion {
     }
 }
 
+/// Wall-clock timing breakdown for the transport hop that produced a
+/// [`Response`]. Purely observational — populated from `Instant` reads
+/// around the existing connect/send awaits, so it never changes a byte on
+/// the wire.
+///
+/// Currently populated for the **HTTP/2** path only (the default for
+/// HTTPS); H1/H3 responses carry [`ResponseTiming::default`] until those
+/// paths are instrumented. On a redirect chain the values are **summed
+/// across every leg** leyline followed, so this describes the whole call —
+/// `total_ms`/`send_ms` add up, `connect_ms` is the total handshake cost of
+/// whichever legs opened fresh connections, and `reused` is true only when
+/// no leg paid a connect.
+///
+/// `connect_ms` lumps DNS + TCP + TLS + the H2 preface into one number;
+/// splitting those (and a true TTFB/body split, which lives inside the H2
+/// driver) is a deliberate phase-2 follow-up.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ResponseTiming {
+    /// Every leg reused a pooled (warm) connection, so no connect/handshake
+    /// cost was paid (`connect_ms` is `None`). An uninstrumented H1/H3
+    /// response is distinguishable from a fast warm hop: it has `reused:
+    /// false`, `connect_ms: None`, and `total_ms: 0` together.
+    pub reused: bool,
+    /// DNS + TCP connect + TLS handshake + H2 preface for the leg(s) that
+    /// opened a fresh connection, in milliseconds. `None` when every leg
+    /// reused. NOTE: on a connection coalesced behind another in-flight
+    /// connect this includes the *wait* for that shared handshake, not this
+    /// request's own DNS/TCP/TLS — a `coalesced` discriminator is a phase-2
+    /// follow-up (TODO), so don't read aggregate `connect_ms` as pure
+    /// handshake cost.
+    pub connect_ms: Option<u32>,
+    /// Request-send → response, in milliseconds, summed across redirect legs.
+    /// For the buffered path (the default) this
+    /// spans send through the last body byte — `send_request_ex` resolves on
+    /// END_STREAM. For `stream_response: true` it is TTFB only (resolves at
+    /// the HEADERS frame; the body streams afterward). The internal
+    /// TTFB-vs-body split is not yet exposed.
+    pub send_ms: u32,
+    /// Whole transport exchange (connect, if any, plus send), summed across
+    /// redirect legs, in milliseconds. May slightly exceed
+    /// `connect_ms + send_ms` on the warm path (it also covers pool checkout)
+    /// or when a dead pooled connection was retried before the successful
+    /// attempt — that gap is real wall-clock the caller paid.
+    pub total_ms: u32,
+}
+
+impl ResponseTiming {
+    /// Seed for accumulating a redirect-following request across its legs.
+    /// `reused` starts `true` (the identity for "no leg paid a fresh
+    /// connect") and is flipped to `false` by the first leg that opened a
+    /// new connection. Distinct from [`ResponseTiming::default`], whose
+    /// `reused: false` is the right resting value for a leg that was never
+    /// instrumented (H1/H3).
+    pub(crate) fn accumulator() -> Self {
+        Self {
+            reused: true,
+            connect_ms: None,
+            send_ms: 0,
+            total_ms: 0,
+        }
+    }
+
+    /// Fold one transport leg into the running total. `total_ms`/`send_ms`
+    /// sum (saturating); `connect_ms` sums only the legs that actually
+    /// connected (stays `None` if every leg reused a pooled connection);
+    /// `reused` stays `true` only while every leg so far reused. This makes
+    /// [`Response::timing`] describe the WHOLE request — including any
+    /// redirects leyline followed — rather than just the final hop.
+    pub(crate) fn add_leg(&mut self, leg: &ResponseTiming) {
+        self.total_ms = self.total_ms.saturating_add(leg.total_ms);
+        self.send_ms = self.send_ms.saturating_add(leg.send_ms);
+        if let Some(c) = leg.connect_ms {
+            self.connect_ms = Some(self.connect_ms.unwrap_or(0).saturating_add(c));
+        }
+        self.reused &= leg.reused;
+    }
+}
+
 /// An HTTP response with buffered body.
 ///
 /// All fields are accessed through methods so the internal
@@ -86,6 +164,10 @@ pub struct Response {
     pub(crate) tls_cipher: Option<String>,
     /// Request method, kept for lazy JA4H computation in [`Response::audit`].
     pub(crate) request_method: String,
+    /// Wall-clock timing breakdown for the request, summed across any
+    /// redirect legs. See [`ResponseTiming`]. Default (all-zero) for H1/H3
+    /// and test-built responses.
+    pub(crate) timing: ResponseTiming,
     /// Shared connection-level fingerprints (JA4/JA3/H2/JA4T). `None` for
     /// responses built outside the TLS path (e.g. tests). Cloning this into
     /// the response is one atomic refcount bump — no string copies.
@@ -107,6 +189,14 @@ impl Response {
     /// HTTP protocol version used for this response.
     pub fn version(&self) -> HttpVersion {
         self.version
+    }
+
+    /// Wall-clock timing breakdown for the transport hop that produced this
+    /// response (warm-vs-cold connection, connect/handshake cost, send time).
+    /// Populated for HTTP/2; [`ResponseTiming::default`] for H1/H3. See
+    /// [`ResponseTiming`].
+    pub fn timing(&self) -> &ResponseTiming {
+        &self.timing
     }
 
     /// Final URL (after redirects).
@@ -516,6 +606,7 @@ mod tests {
             request_method: "GET".to_string(),
             audit_tls,
             audit_cache: OnceLock::new(),
+            timing: ResponseTiming::default(),
         }
     }
 
@@ -609,5 +700,69 @@ mod tests {
         resp.body = ResponseBody::Buffered("héllo".as_bytes().to_vec());
         // The declared utf-8 wins over the windows-1252 caller default.
         assert_eq!(resp.text_with_charset("windows-1252"), "héllo");
+    }
+
+    fn leg(reused: bool, connect_ms: Option<u32>, send_ms: u32, total_ms: u32) -> ResponseTiming {
+        ResponseTiming {
+            reused,
+            connect_ms,
+            send_ms,
+            total_ms,
+        }
+    }
+
+    #[test]
+    fn timing_single_leg_equals_that_leg() {
+        // One transport hop (no redirect): the accumulated timing is exactly
+        // that leg — the accumulator seed must be the identity.
+        let mut acc = ResponseTiming::accumulator();
+        let only = leg(true, None, 12, 15);
+        acc.add_leg(&only);
+        assert_eq!(acc, only);
+    }
+
+    #[test]
+    fn timing_cold_then_warm_redirect_sums_and_marks_not_reused() {
+        // 302 on a fresh connection (cold) → 200 reused on the pooled conn.
+        // total/send sum; connect_ms is the cold leg's handshake; one fresh
+        // connect anywhere means the whole request was NOT all-reused.
+        let mut acc = ResponseTiming::accumulator();
+        acc.add_leg(&leg(false, Some(40), 60, 105)); // cold 302
+        acc.add_leg(&leg(true, None, 800, 800)); // warm 200, big body
+        assert_eq!(acc.reused, false);
+        assert_eq!(acc.connect_ms, Some(40));
+        assert_eq!(acc.send_ms, 860);
+        assert_eq!(acc.total_ms, 905);
+    }
+
+    #[test]
+    fn timing_all_warm_stays_reused_with_no_connect() {
+        let mut acc = ResponseTiming::accumulator();
+        acc.add_leg(&leg(true, None, 5, 6));
+        acc.add_leg(&leg(true, None, 7, 8));
+        assert!(acc.reused);
+        assert_eq!(acc.connect_ms, None);
+        assert_eq!(acc.total_ms, 14);
+    }
+
+    #[test]
+    fn timing_two_cold_legs_sum_connect() {
+        // Both legs opened fresh connections (e.g. cross-origin redirect):
+        // connect_ms is the sum, not the last.
+        let mut acc = ResponseTiming::accumulator();
+        acc.add_leg(&leg(false, Some(30), 10, 45));
+        acc.add_leg(&leg(false, Some(25), 12, 40));
+        assert_eq!(acc.connect_ms, Some(55));
+        assert!(!acc.reused);
+    }
+
+    #[test]
+    fn timing_add_leg_saturates_not_wraps() {
+        let mut acc = ResponseTiming::accumulator();
+        acc.add_leg(&leg(false, Some(u32::MAX), u32::MAX, u32::MAX));
+        acc.add_leg(&leg(false, Some(10), 10, 10));
+        assert_eq!(acc.total_ms, u32::MAX);
+        assert_eq!(acc.send_ms, u32::MAX);
+        assert_eq!(acc.connect_ms, Some(u32::MAX));
     }
 }

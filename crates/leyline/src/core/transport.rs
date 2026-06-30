@@ -40,6 +40,9 @@ pub(crate) struct TransportResponse {
     pub(crate) peer_cert_der: Option<Vec<u8>>,
     pub(crate) tls_version: Option<String>,
     pub(crate) tls_cipher: Option<String>,
+    /// Wall-clock timing breakdown for this hop. Real on the H2 path;
+    /// [`crate::core::ResponseTiming::default`] on H1/H3 until instrumented.
+    pub(crate) timing: crate::core::ResponseTiming,
 }
 
 /// Send an HTTP request with browser-compatible defaults.
@@ -214,7 +217,7 @@ pub(crate) async fn send_request_h2(
     let h2_req_body = body_to_h2_request(body);
 
     // Send via pool (reuses connection or creates new one).
-    let (resp, tls) = crate::pool::send_request(
+    let (resp, tls, timing) = crate::pool::send_request(
         pool,
         connector,
         h2_config,
@@ -243,6 +246,7 @@ pub(crate) async fn send_request_h2(
         peer_cert_der: tls.peer_cert_der,
         tls_version: tls.version,
         tls_cipher: tls.cipher,
+        timing,
     })
 }
 
@@ -398,6 +402,8 @@ pub(crate) async fn send_request_h1(
         peer_cert_der,
         tls_version,
         tls_cipher,
+        // H1 path not yet instrumented — see ResponseTiming docs.
+        timing: crate::core::ResponseTiming::default(),
     })
 }
 
@@ -493,6 +499,8 @@ pub(crate) async fn send_request_h3(
         peer_cert_der: tls.peer_cert_der,
         tls_version: tls.version,
         tls_cipher: tls.cipher,
+        // H3 path not yet instrumented — see ResponseTiming docs.
+        timing: crate::core::ResponseTiming::default(),
     })
 }
 

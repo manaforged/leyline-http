@@ -443,6 +443,24 @@ pub struct TimeoutConfig {
     /// steady stream never trips it; a stalled connection errors with
     /// `TimedOut` well before the request-wide `total` timeout.
     pub read: Option<Duration>,
+    /// Cap on the wait from request-sent until the transport response resolves,
+    /// per redirect hop. Catches an upstream — typically a proxy — that
+    /// completes the handshake and then goes silent: `connect` has already
+    /// passed and the per-chunk `read` timeout only arms once a *streamed* body
+    /// is handed back, so without this the silent phase is bounded only by
+    /// `total`.
+    ///
+    /// What "resolves" means depends on the response mode:
+    /// - **Streamed** (`RequestBuilder::stream_response`): resolves at headers,
+    ///   so this is a true time-to-first-byte cap and the body is then governed
+    ///   by `read`.
+    /// - **Buffered** (the default `.send()`): resolves only after the full body
+    ///   is received — on every protocol, H1/H2/H3 alike — so this bounds
+    ///   connect + headers + whole-body download, i.e. it behaves as a per-hop
+    ///   whole-response cap, not just first-byte.
+    ///
+    /// `None` leaves the phase bounded by `total`.
+    pub response_header: Option<Duration>,
 }
 
 impl Default for TimeoutConfig {
@@ -451,6 +469,7 @@ impl Default for TimeoutConfig {
             total: Duration::from_secs(300),
             connect: None,
             read: None,
+            response_header: None,
         }
     }
 }

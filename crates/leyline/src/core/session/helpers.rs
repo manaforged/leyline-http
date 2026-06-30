@@ -196,6 +196,13 @@ impl Session {
         self.timeouts.total
     }
 
+    /// The configured post-send response timeout, if any
+    /// ([`SessionBuilder::response_header_timeout`]). `None` means the phase is
+    /// bounded only by [`default_timeout`](Self::default_timeout).
+    pub fn response_header_timeout(&self) -> Option<std::time::Duration> {
+        self.timeouts.response_header
+    }
+
     /// The session-wide default retry policy, inherited by every request that
     /// does not override it via [`crate::RequestBuilder::retry`].
     pub(crate) fn default_retry(&self) -> &crate::core::retry::RetryPolicy {

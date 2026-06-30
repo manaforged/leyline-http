@@ -9,7 +9,32 @@ until 1.0 — pin exact versions.
 
 ## Unreleased
 
+### Fixed
+
+- **HTTP/3 driver now reaps cancelled request streams (cancel-safety parity with
+  HTTP/2).** When a caller dropped its response receiver before the peer replied
+  — e.g. an outer `response_header` / `total` timeout firing on a silent upstream
+  — the H3 driver left the stream in its table with no peer event to remove it,
+  holding `max_concurrent_bidi_streams` credit and flow-control window until the
+  connection's idle timeout. The driver now sweeps such streams each loop
+  iteration (and caps its select wait to a bounded window while any stream is in
+  flight), STOP_SENDING + RESET_STREAM to free the slot at once — mirroring the
+  H2 driver's `sweep_cancelled_streams`. Off the default `Auto`→H2 path; affects
+  explicit `.http3()` / `.race()` callers.
+
 ### Added
+
+- **Post-send response timeout (`SessionBuilder::response_header_timeout`,
+  `TimeoutConfig::response_header`).** Caps the wait from request-sent until the
+  transport response resolves, per redirect hop. Bounds an upstream — typically
+  a proxy — that completes the handshake and then goes silent: `connect_timeout`
+  has already elapsed and `read_timeout` only arms on a streamed body, so before
+  this the silent phase was bounded only by the request-wide `total`. For a
+  **streamed** response (`stream_response`) it resolves at headers — a true
+  time-to-first-byte cap, with `read` then governing the body. For the
+  **buffered** default it resolves only after the full body (H1/H2/H3 alike), so
+  it bounds the whole response per hop. Opt-in — `None` leaves the phase bounded
+  by `total`, so existing sessions are unchanged.
 
 - **Chrome 148 profile (`Browser::Chrome148`).** Verified against
   tls.peet.ws on 2026-06-09 (Windows capture): wire-identical to Chrome
@@ -50,6 +75,22 @@ until 1.0 — pin exact versions.
   session.
 
 ### Fixed
+
+- **H1 pool probes a pooled connection for liveness before reuse.**
+  `checkout_h1` only saw the idle deque, so a keep-alive peer that closed
+  its half while the connection sat pooled (e.g. a Node server whose
+  default `keepAliveTimeout` is 5s vs the pool's 300s idle) was handed out
+  dead — the next write failed mid-request (Windows os error 10053 /
+  `WSAECONNABORTED`), spamming `pool stale hit` and hard-failing streaming
+  request bodies that cannot be replayed. Checkout now does a non-blocking
+  `poll_read` probe and drains any pooled entry already at EOF / error /
+  pre-request desync, turning a stale keep-alive socket into a clean cache
+  miss instead of a failed exchange. Buffered and one-shot streaming request
+  bodies both benefit; the irreducible probe-to-write race (a peer FIN landing
+  in the microseconds before the first write) can still surface for one-shot
+  streaming bodies, which cannot be replayed. Probe catches are counted in the
+  new `PoolStats::stale_probed`, distinct from `evictions_dead` (mid-exchange
+  failures), so the probe's effectiveness is observable.
 
 - **Env-inherited `NO_PROXY` no longer bypasses explicitly-set proxies.**
   `ProxyConfig::proxy_for` checked the no-proxy matcher before any proxy

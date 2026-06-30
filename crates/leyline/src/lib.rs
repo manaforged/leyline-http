@@ -146,8 +146,8 @@ pub use crate::core::{
     Body, BodyStream, CompressionConfig, ContentEncoding, DigestAuth, DnsConfig, Error, HeaderList,
     HttpVersion, IntoParamPair, NoProxy, PoolConfig, ProtocolPolicy, ProxyConfig, ProxyRule,
     ProxyUrl, RedirectAction, RedirectAttempt, RedirectPolicy, Request, RequestBuilder, Response,
-    Result, RetryPolicy, RetryTrigger, Session, SessionBuilder, SocketConfig, TimeoutConfig,
-    WebSocketConfig,
+    ResponseTiming, Result, RetryPolicy, RetryTrigger, Session, SessionBuilder, SocketConfig,
+    TimeoutConfig, WebSocketConfig,
 };
 
 /// Short alias for the primary Leyline session type.
