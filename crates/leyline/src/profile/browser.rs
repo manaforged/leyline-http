@@ -22,13 +22,18 @@ pub enum Browser {
     Chrome146,
     /// Google Chrome 147 (Windows/macOS/Linux/Android).
     Chrome147,
-    /// Google Chrome 148 (Windows/macOS/Linux/Android) — current default.
+    /// Google Chrome 148 (Windows/macOS/Linux/Android).
     ///
     /// Wire-identical to Chrome 147 (same JA4, ciphers, extension set, and
     /// Akamai-H2 fingerprint — verified against tls.peet.ws on 2026-06-09);
     /// the only divergence is the `Chrome/148` UA token and the `sec-ch-ua`
     /// brand list.
     Chrome148,
+    /// Google Chrome 149 (Windows/macOS/Linux/Android) — current default and
+    /// the current stable release. TLS/JA4 identical to 147 (verified
+    /// against real Chrome 149 via tls.peet.ws); identity is the 149 UA +
+    /// 3-brand sec-ch-ua.
+    Chrome149,
     /// Google Chrome 150 (Windows/macOS/Linux/Android).
     ///
     /// Prepends the ML-DSA post-quantum signature schemes (mldsa44/65/87 =
@@ -60,7 +65,7 @@ pub enum Browser {
 }
 
 /// Canonical profile count. Tests assert against this.
-pub const PROFILE_COUNT: usize = 16;
+pub const PROFILE_COUNT: usize = 17;
 
 /// All browser variants, for iteration.
 pub const ALL_BROWSERS: [Browser; PROFILE_COUNT] = [
@@ -68,6 +73,7 @@ pub const ALL_BROWSERS: [Browser; PROFILE_COUNT] = [
     Browser::Chrome146,
     Browser::Chrome147,
     Browser::Chrome148,
+    Browser::Chrome149,
     Browser::Chrome150,
     Browser::Aloha138,
     Browser::Brave146,
@@ -90,6 +96,7 @@ impl Browser {
             Self::Chrome146 => ("chrome", 146),
             Self::Chrome147 => ("chrome", 147),
             Self::Chrome148 => ("chrome", 148),
+            Self::Chrome149 => ("chrome", 149),
             Self::Chrome150 => ("chrome", 150),
             Self::Aloha138 => ("aloha", 138),
             Self::Brave146 => ("brave", 146),
@@ -111,8 +118,13 @@ impl Browser {
     }
 
     /// The default browser for new sessions.
+    ///
+    /// Pinned to Chrome 149, the current stable release.
+    /// Chrome 150 is not yet on the stable channel anywhere, so defaulting a
+    /// bare `Session::chrome()` to a `Chrome/150` UA no real user runs would
+    /// itself be a fingerprint tell.
     pub fn default_browser() -> Self {
-        Self::Chrome148
+        Self::Chrome149
     }
 
     /// Chromium major version for Chrome-family browsers.
@@ -130,6 +142,7 @@ impl Browser {
             Self::Chrome146 => Some(146),
             Self::Chrome147 => Some(147),
             Self::Chrome148 => Some(148),
+            Self::Chrome149 => Some(149),
             Self::Chrome150 => Some(150),
             Self::Aloha138 => Some(138),
             Self::Brave146 => Some(146),
@@ -151,6 +164,7 @@ impl std::fmt::Display for Browser {
             Self::Chrome146 => write!(f, "Chrome 146"),
             Self::Chrome147 => write!(f, "Chrome 147"),
             Self::Chrome148 => write!(f, "Chrome 148"),
+            Self::Chrome149 => write!(f, "Chrome 149"),
             Self::Chrome150 => write!(f, "Chrome 150"),
             Self::Aloha138 => write!(f, "Aloha 4.17 (Chromium 138)"),
             Self::Brave146 => write!(f, "Brave (Chromium 146)"),

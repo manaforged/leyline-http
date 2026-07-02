@@ -65,7 +65,7 @@ impl Session {
 
     /// Microsoft Edge on the latest Chromium profile we have a verified
     /// overlay for (currently Chrome 147). Pinned to the verified sibling
-    /// anchor rather than the global Chrome default (148).
+    /// anchor rather than the global Chrome default (149).
     pub fn edge() -> Self {
         Self::builder()
             .browser(Browser::Chrome147)

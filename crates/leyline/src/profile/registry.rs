@@ -26,6 +26,7 @@ impl ProfileRegistry {
         reg.load_toml(include_str!("../../profiles/chrome/146.toml"));
         reg.load_toml(include_str!("../../profiles/chrome/147.toml"));
         reg.load_toml(include_str!("../../profiles/chrome/148.toml"));
+        reg.load_toml(include_str!("../../profiles/chrome/149.toml"));
         reg.load_toml(include_str!("../../profiles/chrome/150.toml"));
         // Aloha (Chromium-based)
         reg.load_toml(include_str!("../../profiles/aloha/138.toml"));

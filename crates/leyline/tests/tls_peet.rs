@@ -253,7 +253,7 @@ async fn request_builder_timeout_overrides_session_default() {
 fn session_shortcuts_work() {
     assert_eq!(
         leyline::Session::chrome().browser(),
-        Some(Browser::Chrome148)
+        Some(Browser::Chrome149)
     );
     assert_eq!(
         leyline::Session::firefox().browser(),
@@ -600,9 +600,28 @@ async fn live_wire_audit_every_profile() {
 
 #[tokio::test]
 #[ignore = "live: needs network"]
-async fn live_ja4_exact_match_chrome148() {
-    // chrome_latest() resolves to Chrome 148 (the current default).
+async fn live_ja4_exact_match_chrome149() {
+    // Session::chrome() resolves to Chrome 149 (the current default and the
+    // current stable release).
     let session = leyline::Session::chrome();
+    let json = peet(&session).await;
+    let ja4 = json["tls"]["ja4"].as_str().expect("no tls.ja4");
+
+    let reg = leyline::profile::ProfileRegistry::builtin();
+    let profile = reg.get_browser(Browser::Chrome149).unwrap();
+    let expected = profile.expected_ja4().expect("Chrome 149 TOML missing JA4");
+
+    assert_eq!(ja4, expected, "Chrome 149 JA4 mismatch");
+    println!("✓ Chrome 149 JA4 exact match: {ja4}");
+}
+
+#[tokio::test]
+#[ignore = "live: needs network"]
+async fn live_ja4_exact_match_chrome148() {
+    let session = leyline::Session::builder()
+        .browser(Browser::Chrome148)
+        .build()
+        .unwrap();
     let json = peet(&session).await;
     let ja4 = json["tls"]["ja4"].as_str().expect("no tls.ja4");
 
