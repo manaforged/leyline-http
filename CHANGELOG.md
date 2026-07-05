@@ -22,6 +22,17 @@ until 1.0 — pin exact versions.
   H2 driver's `sweep_cancelled_streams`. Off the default `Auto`→H2 path; affects
   explicit `.http3()` / `.race()` callers.
 
+- **`tcp_keepalive_retries` no longer warns (or, under `strict`, hard-fails) on
+  platforms without per-socket `TCP_KEEPCNT`.** `SocketConfig` defaults the
+  retry count to `Some(3)`, but `socket2` only exposes `with_retries` on
+  Linux/Android/Apple/BSD. On other targets (Windows) every connection logged
+  `WARN socket option not supported option="tcp_keepalive_retries"`, and a
+  `strict: true` caller would have hard-failed every connect on a value it never
+  set. Keepalive idle time + interval still apply there, so the missing
+  retry-count is now a benign `debug!` no-op and the OS default probe count is
+  used. `tcp_user_timeout` / `interface` (explicit opt-ins) still error under
+  `strict`.
+
 ### Added
 
 - **Post-send response timeout (`SessionBuilder::response_header_timeout`,

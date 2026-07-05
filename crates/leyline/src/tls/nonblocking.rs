@@ -94,9 +94,16 @@ fn apply_socket_config(
         if let Some(retries) = config.tcp_keepalive_retries {
             keepalive = keepalive.with_retries(retries);
         }
+        // socket2 doesn't expose TCP_KEEPCNT on this platform; the OS manages
+        // the probe count itself. Idle time + interval above still apply, so a
+        // missing retry-count is a benign no-op — never fatal, even under strict
+        // (the value is set by SocketConfig default, not an explicit opt-in).
         #[cfg(not(any(target_os = "linux", target_os = "android", target_vendor = "apple")))]
         if config.tcp_keepalive_retries.is_some() {
-            unsupported_socket_option(config.strict, "tcp_keepalive_retries")?;
+            tracing::debug!(
+                target: "leyline::socket",
+                "tcp_keepalive_retries unsupported on this platform; using OS default"
+            );
         }
         socket.set_tcp_keepalive(&keepalive)?;
     }
@@ -150,7 +157,24 @@ fn windows_nonblocking_connect_started(_error: &std::io::Error) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::nonblocking_connect_started;
+    use super::{apply_socket_config, nonblocking_connect_started};
+    use crate::core::SocketConfig;
+
+    // The default SocketConfig sets `tcp_keepalive_retries: Some(3)`, but the
+    // retry count is only settable per-socket on Linux/Android/Apple. On other
+    // targets it must be a benign no-op even under `strict` — a defaulted value
+    // the caller never chose must never turn into a hard connect failure.
+    #[test]
+    fn default_keepalive_retries_never_fatal_under_strict() {
+        let socket =
+            socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::STREAM, None).unwrap();
+        let config = SocketConfig {
+            strict: true,
+            ..SocketConfig::default()
+        };
+        assert!(config.tcp_keepalive_retries.is_some());
+        assert!(apply_socket_config(&socket, &config).is_ok());
+    }
 
     #[test]
     fn accepts_would_block_kind() {
