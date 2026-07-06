@@ -47,6 +47,7 @@ impl Session {
             config: self.websocket_config,
             force_http1: false,
             proxy: None,
+            headers: Vec::new(),
         }
     }
 
@@ -56,6 +57,7 @@ impl Session {
         config: WebSocketConfig,
         force_http1: bool,
         request_proxy: Option<&str>,
+        extra_headers: &[(String, String)],
     ) -> Result<crate::core::websocket::WsConnection> {
         let origin = ws_origin(url)?;
         let parsed = url::Url::parse(url)?;
@@ -79,6 +81,7 @@ impl Session {
                 proxy,
                 &self.user_agent,
                 &origin,
+                extra_headers,
             )
             .await
             {
@@ -104,6 +107,7 @@ impl Session {
             proxy,
             &self.user_agent,
             &origin,
+            extra_headers,
         )
         .await
     }
@@ -113,7 +117,7 @@ impl Session {
     /// speak both protocols but whose H2 WebSocket implementation is
     /// known-broken, or for deterministic test setups.
     pub async fn websocket_http1(&self, url: &str) -> Result<crate::core::websocket::WsConnection> {
-        self.websocket_with_options(url, self.websocket_config, true, None)
+        self.websocket_with_options(url, self.websocket_config, true, None, &[])
             .await
     }
 }
@@ -125,6 +129,7 @@ pub struct WebSocketBuilder<'a> {
     config: WebSocketConfig,
     force_http1: bool,
     proxy: Option<String>,
+    headers: Vec<(String, String)>,
 }
 
 impl<'a> WebSocketBuilder<'a> {
@@ -146,6 +151,22 @@ impl<'a> WebSocketBuilder<'a> {
         self
     }
 
+    /// Forward these request headers on the WebSocket handshake — e.g. `Cookie`,
+    /// `Authorization`, `Sec-WebSocket-Protocol`, or a captured browser's
+    /// `User-Agent`/`Origin`. Handshake-control headers (`Host`, `Connection`,
+    /// `Upgrade`, `Sec-WebSocket-Key`/`-Version`/`-Extensions`) are ignored so a
+    /// forwarded copy can't break the upgrade. Replaces the current list.
+    pub fn headers(mut self, headers: impl IntoIterator<Item = (String, String)>) -> Self {
+        self.headers = headers.into_iter().collect();
+        self
+    }
+
+    /// Add a single header to forward on the handshake (see [`headers`](Self::headers)).
+    pub fn header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.headers.push((name.into(), value.into()));
+        self
+    }
+
     /// Connect.
     pub async fn connect(self) -> Result<crate::core::websocket::WsConnection> {
         self.session
@@ -154,6 +175,7 @@ impl<'a> WebSocketBuilder<'a> {
                 self.config,
                 self.force_http1,
                 self.proxy.as_deref(),
+                &self.headers,
             )
             .await
     }

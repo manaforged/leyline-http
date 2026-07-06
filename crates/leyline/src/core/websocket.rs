@@ -23,7 +23,7 @@ use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-use tokio_tungstenite::tungstenite::http::{HeaderValue, Uri};
+use tokio_tungstenite::tungstenite::http::{HeaderName, HeaderValue, Uri};
 use tokio_tungstenite::tungstenite::protocol::Role;
 
 use crate::h2::client::H2ConnectStream;
@@ -70,6 +70,7 @@ impl WsConnection {
         proxy: Option<&str>,
         user_agent: &str,
         origin: &str,
+        extra_headers: &[(String, String)],
     ) -> Result<Self> {
         let parsed = url::Url::parse(url)?;
         let host = parsed
@@ -111,6 +112,22 @@ impl WsConnection {
             HeaderValue::from_static("permessage-deflate; client_max_window_bits"),
         );
 
+        // Forward caller-supplied headers (Cookie, Authorization,
+        // Sec-WebSocket-Protocol, a real browser User-Agent/Origin, …) —
+        // overriding the defaults set above — but never the handshake-control
+        // headers tungstenite manages, or the upgrade breaks.
+        for (name, value) in extra_headers {
+            if is_reserved_ws_header(name) {
+                continue;
+            }
+            if let (Ok(hn), Ok(hv)) = (
+                HeaderName::from_bytes(name.as_bytes()),
+                HeaderValue::from_str(value),
+            ) {
+                headers.insert(hn, hv);
+            }
+        }
+
         let (ws_stream, _response) = tokio_tungstenite::client_async(request, tls_stream.stream)
             .await
             .map_err(|e| Error::Http(format!("ws handshake: {e}")))?;
@@ -127,6 +144,7 @@ impl WsConnection {
     /// handshaked. Returns an error shaped so that
     /// [`WsConnection::is_h2_fallback_trigger`] picks it up when the
     /// peer has not advertised `SETTINGS_ENABLE_CONNECT_PROTOCOL=1`.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn connect_h2(
         pool: &Arc<Pool>,
         connector: &ConnectorVariant,
@@ -135,6 +153,7 @@ impl WsConnection {
         proxy: Option<&str>,
         user_agent: &str,
         origin: &str,
+        extra_headers: &[(String, String)],
     ) -> Result<Self> {
         let parsed = url::Url::parse(url)?;
         let host = parsed
@@ -179,6 +198,19 @@ impl WsConnection {
         ));
         headers.push(("user-agent".into(), user_agent.into()));
         headers.push(("origin".into(), origin.into()));
+
+        // Forward caller headers (Cookie/Authorization/subprotocol/…), overriding
+        // the UA/Origin defaults, skipping handshake-control headers.
+        for (name, value) in extra_headers {
+            let lname = name.to_ascii_lowercase();
+            if is_reserved_ws_header(&lname) {
+                continue;
+            }
+            match headers.iter_mut().find(|(n, _)| n == &lname) {
+                Some(slot) => slot.1 = value.clone(),
+                None => headers.push((lname, value.clone())),
+            }
+        }
 
         let pseudo = PseudoHeaders {
             method: "CONNECT".into(),
@@ -307,6 +339,22 @@ impl WsConnection {
 /// [`WsConnection::is_h2_fallback_trigger`] to drive the H1 fallback.
 const H2_NO_CONNECT_PROTOCOL: &str = "h2-no-connect-protocol";
 
+/// Headers the WebSocket handshake owns. A caller forwarding a captured request's
+/// headers must not overwrite the values tungstenite/leyline generate for these,
+/// or the upgrade breaks.
+fn is_reserved_ws_header(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "host"
+            | "connection"
+            | "upgrade"
+            | "sec-websocket-key"
+            | "sec-websocket-version"
+            | "sec-websocket-extensions"
+            | "content-length"
+    )
+}
+
 /// Generate a cryptographically random 16-byte `Sec-WebSocket-Key`
 /// (RFC 6455 §4.1). The nonce must be unpredictable to prevent
 /// cached-response replay through an intermediary — a
@@ -316,4 +364,33 @@ fn random_sec_ws_key() -> String {
     let mut bytes = [0u8; 16];
     rand::thread_rng().fill_bytes(&mut bytes);
     BASE64_STANDARD.encode(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_reserved_ws_header;
+
+    #[test]
+    fn reserved_headers_gate_the_handshake_but_forwardable_pass() {
+        for h in [
+            "Host",
+            "connection",
+            "Upgrade",
+            "Sec-WebSocket-Key",
+            "SEC-WEBSOCKET-VERSION",
+            "sec-websocket-extensions",
+            "Content-Length",
+        ] {
+            assert!(is_reserved_ws_header(h), "{h} must be reserved");
+        }
+        for h in [
+            "cookie",
+            "Authorization",
+            "Origin",
+            "User-Agent",
+            "Sec-WebSocket-Protocol",
+        ] {
+            assert!(!is_reserved_ws_header(h), "{h} must be forwardable");
+        }
+    }
 }
