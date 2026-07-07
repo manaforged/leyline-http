@@ -158,6 +158,17 @@ async fn streaming_body_plus_retry_errors_clearly() {
     let chunks: Vec<std::io::Result<Bytes>> = vec![Ok(Bytes::from_static(b"abc"))];
     let body = Body::stream(stream::iter(chunks));
 
+    // A port nothing listens on: bind :0 for an OS-assigned port, then drop the
+    // listener so the connect is refused. Hardcoding a low port (e.g. :1) is
+    // fragile — a local process may already be squatting on it and answer, which
+    // turns the expected ConnectionError into an unexpected HTTP response.
+    let dead_port = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+
     // Hitting an unreachable port produces a ConnectionError; with
     // retry on, the builder should recognise the stream body and fail
     // with a replay-specific message BEFORE attempting a second call.
@@ -165,7 +176,7 @@ async fn streaming_body_plus_retry_errors_clearly() {
         .with_max_retries(3)
         .with_backoff(Duration::from_millis(1), Duration::from_millis(5));
     let err = session
-        .put("http://127.0.0.1:1/upload")
+        .put(&format!("http://127.0.0.1:{dead_port}/upload"))
         .body(body)
         .retry(policy)
         .timeout(Duration::from_secs(2))

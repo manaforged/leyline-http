@@ -191,7 +191,7 @@ pub use crate::audit::AuditData;
 
 // WebSocket
 #[cfg(feature = "websocket")]
-pub use crate::core::WsConnection;
+pub use crate::core::{WsConnection, WsSink, WsStream};
 
 // TLS context surface. `tls_context` / `quic_context` cover the common case;
 // for a profile you already hold, build a `TlsContext::from_profile` with the

@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
@@ -58,6 +59,9 @@ enum WsInner {
 /// ```
 pub struct WsConnection {
     inner: WsInner,
+    /// The subprotocol the origin selected in its handshake response
+    /// (`Sec-WebSocket-Protocol`), if any.
+    protocol: Option<String>,
 }
 
 impl WsConnection {
@@ -128,12 +132,19 @@ impl WsConnection {
             }
         }
 
-        let (ws_stream, _response) = tokio_tungstenite::client_async(request, tls_stream.stream)
+        let (ws_stream, response) = tokio_tungstenite::client_async(request, tls_stream.stream)
             .await
             .map_err(|e| Error::Http(format!("ws handshake: {e}")))?;
 
+        let protocol = response
+            .headers()
+            .get("sec-websocket-protocol")
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
+
         Ok(Self {
             inner: WsInner::H1(ws_stream),
+            protocol,
         })
     }
 
@@ -241,12 +252,21 @@ impl WsConnection {
             )));
         }
 
+        // Read the negotiated subprotocol off the CONNECT response before
+        // `from_raw_socket` consumes the stream.
+        let protocol = stream
+            .response_headers()
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case("sec-websocket-protocol"))
+            .map(|(_, v)| v.clone());
+
         // With the handshake already done on HEADERS, the bidirectional
         // stream carries only WebSocket frames — exactly what
         // `from_raw_socket` is for.
         let ws_stream = WebSocketStream::from_raw_socket(stream, Role::Client, None).await;
         Ok(Self {
             inner: WsInner::H2(ws_stream),
+            protocol,
         })
     }
 
@@ -330,6 +350,111 @@ impl WsConnection {
     /// `true` if the underlying transport is HTTP/2 extended CONNECT.
     pub fn is_http2(&self) -> bool {
         matches!(self.inner, WsInner::H2(_))
+    }
+
+    /// The subprotocol the origin selected in its handshake response
+    /// (`Sec-WebSocket-Protocol`), if any. A MITM bridge must echo this to its
+    /// own client or the client aborts the upgrade.
+    pub fn protocol(&self) -> Option<&str> {
+        self.protocol.as_deref()
+    }
+
+    /// Split into independent send and receive halves so each direction can be
+    /// driven by its own task. A single-task `select!` relay stalls one
+    /// direction while a `send` on the other is backpressured; splitting removes
+    /// that head-of-line coupling for a full-duplex proxy bridge.
+    pub fn split(self) -> (WsSink, WsStream) {
+        match self.inner {
+            WsInner::H1(s) => {
+                let (tx, rx) = s.split();
+                (
+                    WsSink {
+                        inner: WsSinkInner::H1(tx),
+                    },
+                    WsStream {
+                        inner: WsStreamInner::H1(rx),
+                    },
+                )
+            }
+            WsInner::H2(s) => {
+                let (tx, rx) = s.split();
+                (
+                    WsSink {
+                        inner: WsSinkInner::H2(tx),
+                    },
+                    WsStream {
+                        inner: WsStreamInner::H2(rx),
+                    },
+                )
+            }
+        }
+    }
+}
+
+/// Write half of a split [`WsConnection`].
+enum WsSinkInner {
+    H1(SplitSink<WebSocketStream<TlsIo>, Message>),
+    H2(SplitSink<WebSocketStream<H2ConnectStream>, Message>),
+}
+
+/// The send half returned by [`WsConnection::split`].
+pub struct WsSink {
+    inner: WsSinkInner,
+}
+
+impl WsSink {
+    /// Send a text message.
+    pub async fn send(&mut self, msg: &str) -> Result<()> {
+        self.send_raw(Message::Text(msg.into())).await
+    }
+
+    /// Send binary data.
+    pub async fn send_binary(&mut self, data: Vec<u8>) -> Result<()> {
+        self.send_raw(Message::Binary(data.into())).await
+    }
+
+    /// Send a raw tungstenite Message.
+    pub async fn send_raw(&mut self, msg: Message) -> Result<()> {
+        match &mut self.inner {
+            WsSinkInner::H1(s) => s.send(msg).await,
+            WsSinkInner::H2(s) => s.send(msg).await,
+        }
+        .map_err(|e| Error::Http(format!("ws send: {e}")))
+    }
+
+    /// Send a close frame and shut the write half down.
+    pub async fn close(&mut self) -> Result<()> {
+        match &mut self.inner {
+            WsSinkInner::H1(s) => s.close().await,
+            WsSinkInner::H2(s) => s.close().await,
+        }
+        .map_err(|e| Error::Http(format!("ws close: {e}")))
+    }
+}
+
+/// Read half of a split [`WsConnection`].
+enum WsStreamInner {
+    H1(SplitStream<WebSocketStream<TlsIo>>),
+    H2(SplitStream<WebSocketStream<H2ConnectStream>>),
+}
+
+/// The receive half returned by [`WsConnection::split`].
+pub struct WsStream {
+    inner: WsStreamInner,
+}
+
+impl WsStream {
+    /// Receive the next message. Returns `None` on close.
+    pub async fn recv(&mut self) -> Result<Option<Message>> {
+        let next = match &mut self.inner {
+            WsStreamInner::H1(s) => s.next().await,
+            WsStreamInner::H2(s) => s.next().await,
+        };
+        match next {
+            Some(Ok(msg)) => Ok(Some(msg)),
+            Some(Err(e)) => Err(Error::Http(format!("ws recv: {e}"))),
+            None => Ok(None),
+        }
     }
 }
 

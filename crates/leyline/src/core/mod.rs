@@ -40,4 +40,4 @@ pub use session::WebSocketBuilder;
 pub use session::{ProtocolPolicy, Session, SessionBuilder};
 pub use standalone::Request;
 #[cfg(feature = "websocket")]
-pub use websocket::WsConnection;
+pub use websocket::{WsConnection, WsSink, WsStream};
