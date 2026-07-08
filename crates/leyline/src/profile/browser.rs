@@ -119,12 +119,13 @@ impl Browser {
 
     /// The default browser for new sessions.
     ///
-    /// Pinned to Chrome 149, the current stable release.
-    /// Chrome 150 is not yet on the stable channel anywhere, so defaulting a
-    /// bare `Session::chrome()` to a `Chrome/150` UA no real user runs would
-    /// itself be a fingerprint tell.
+    /// Chrome 150 — now on the stable channel and the version
+    /// the client ships, so a bare `Session::chrome()` rides the latest
+    /// verified profile (JA4 `t13d1517…cb7bf5808d99`, live-checked against
+    /// tls.peet.ws). Pin an older major via the builder
+    /// (e.g. `.browser(Browser::Chrome149)`) when you need a fixed version.
     pub fn default_browser() -> Self {
-        Self::Chrome149
+        Self::Chrome150
     }
 
     /// Chromium major version for Chrome-family browsers.

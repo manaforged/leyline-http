@@ -39,7 +39,7 @@ env:
 jobs:
   core:
     name: shared core (lib tests + clippy)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -59,13 +59,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - runs-on: [self-hosted, Linux, X64]
             target: x86_64-unknown-linux-gnu
-          - os: windows-latest
+          - runs-on: [self-hosted, Windows, X64]
             target: x86_64-pc-windows-msvc
-          - os: macos-14 # Apple Silicon
+          - runs-on: [self-hosted, macOS, ARM64]
             target: aarch64-apple-darwin
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.runs-on }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -77,6 +77,15 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
+      # Self-hosted runners lack the hosted images' implicit build env: macOS
+      # cmake lives under Homebrew, and the Windows libclang for the btls-sys
+      # BoringSSL bindgen is at C:\tools\LLVM. (The Linux runner already has
+      # cmake + clang on PATH.) The runner uses Git-for-Windows bash here.
+      - name: self-hosted build env
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then echo "/opt/homebrew/bin" >> "$GITHUB_PATH"; fi
+          if [ "$RUNNER_OS" = "Windows" ]; then echo 'LIBCLANG_PATH=C:\tools\LLVM\bin' >> "$GITHUB_ENV"; fi
       - name: Configure MSVC (Windows)
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
@@ -97,13 +106,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - runs-on: [self-hosted, Linux, X64]
             target: x86_64-unknown-linux-gnu
-          - os: windows-latest
+          - runs-on: [self-hosted, Windows, X64]
             target: x86_64-pc-windows-msvc
-          - os: macos-14 # Apple Silicon
+          - runs-on: [self-hosted, macOS, ARM64]
             target: aarch64-apple-darwin
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.runs-on }}
     defaults:
       run:
         working-directory: wrappers/python
@@ -118,6 +127,15 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
+      # Self-hosted runners lack the hosted images' implicit build env: macOS
+      # cmake lives under Homebrew, and the Windows libclang for the btls-sys
+      # BoringSSL bindgen is at C:\tools\LLVM. (The Linux runner already has
+      # cmake + clang on PATH.) The runner uses Git-for-Windows bash here.
+      - name: self-hosted build env
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then echo "/opt/homebrew/bin" >> "$GITHUB_PATH"; fi
+          if [ "$RUNNER_OS" = "Windows" ]; then echo 'LIBCLANG_PATH=C:\tools\LLVM\bin' >> "$GITHUB_ENV"; fi
       - name: Configure MSVC (Windows)
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1

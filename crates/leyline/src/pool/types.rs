@@ -38,6 +38,12 @@ pub struct TlsInfo {
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub(crate) enum Transport {
     Tcp,
+    // Constructed only on the `http3` path (checkout_h3_handle /
+    // send_request_h3_pooled, both `#[cfg(feature = "http3")]`). Without that
+    // feature the variant is reserved but unbuilt, so allow the dead-code lint
+    // there rather than tripping `-D warnings` (e.g. the bindings clippy job,
+    // which compiles leyline without http3).
+    #[cfg_attr(not(feature = "http3"), allow(dead_code))]
     Quic,
 }
 

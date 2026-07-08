@@ -253,7 +253,7 @@ async fn request_builder_timeout_overrides_session_default() {
 fn session_shortcuts_work() {
     assert_eq!(
         leyline::Session::chrome().browser(),
-        Some(Browser::Chrome149)
+        Some(Browser::Chrome150)
     );
     assert_eq!(
         leyline::Session::firefox().browser(),
@@ -601,9 +601,13 @@ async fn live_wire_audit_every_profile() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_ja4_exact_match_chrome149() {
-    // Session::chrome() resolves to Chrome 149 (the current default and the
-    // current stable release).
-    let session = leyline::Session::chrome();
+    // Build Chrome 149 explicitly — the default is now Chrome 150, but this test
+    // anchors 149's own JA4 (the current stable major), so it must
+    // pin the version rather than ride Session::chrome().
+    let session = leyline::Session::builder()
+        .browser(Browser::Chrome149)
+        .build()
+        .unwrap();
     let json = peet(&session).await;
     let ja4 = json["tls"]["ja4"].as_str().expect("no tls.ja4");
 

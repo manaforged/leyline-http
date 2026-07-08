@@ -286,7 +286,7 @@ async fn chrome_default_has_no_brand_overlay() {
     assert!(!req.contains("OPR/"));
     assert!(!req.to_lowercase().contains("\r\ndnt: 1\r\n"));
     assert!(!req.to_lowercase().contains("\r\nsec-gpc: 1\r\n"));
-    // The default browser is Chrome 149 (the current stable release);
+    // The default browser is Chrome 150 (see Browser::default_browser);
     // its sec-ch-ua carries the "Google Chrome" brand somewhere in the value,
     // so match the brand anywhere rather than at the start. Intent: stock
     // Chrome identifies as Google Chrome and carries no sibling-brand token.
@@ -296,8 +296,8 @@ async fn chrome_default_has_no_brand_overlay() {
         .expect("sec-ch-ua header present")
         .to_lowercase();
     assert!(
-        sec_ch_ua_line.contains(r#""google chrome";v="149""#),
-        "Chrome sec-ch-ua should identify as Google Chrome 149:\n{req}"
+        sec_ch_ua_line.contains(r#""google chrome";v="150""#),
+        "Chrome sec-ch-ua should identify as Google Chrome 150:\n{req}"
     );
     assert!(
         !sec_ch_ua_line.contains("microsoft edge")

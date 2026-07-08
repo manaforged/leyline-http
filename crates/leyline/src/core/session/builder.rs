@@ -244,9 +244,10 @@ impl SessionBuilder {
         self
     }
 
-    /// Use the latest bundled Chrome profile.
+    /// Use the latest bundled Chrome profile (see [`Browser::default_browser`],
+    /// currently Chrome 150). Pin a specific major via [`Self::browser`].
     pub fn chrome(self) -> Self {
-        self.browser(Browser::Chrome147)
+        self.browser(Browser::default_browser())
     }
 
     /// Use the latest bundled Firefox profile.

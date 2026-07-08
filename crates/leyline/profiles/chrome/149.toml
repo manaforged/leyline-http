@@ -3,7 +3,7 @@ name = "Chrome 149"
 browser = "chrome"
 version = 149
 family = "chromium"
-verified_against = "tls.peet.ws real Chrome 149 capture"
+verified_against = "Chrome 148 TLS parity (tls.peet.ws 2026-06-17) + Trust Anchor Identifiers ext; pending live Chrome 149 re-capture"
 
 [tls]
 ciphers = [
@@ -42,9 +42,19 @@ cert_compression = ["brotli"]
 permute_extensions = true
 ech_grease = true
 pre_shared_key = true
+# Chrome 149 advertises Trust Anchor Identifiers (ext 0xCA34/51764) with an empty
+# list, same as Chrome 148 (the feature shipped after the original 147-clone
+# capture this profile was built from). Without it the cold ClientHello carries
+# only 16 extensions → t13d1516, which mislabels this profile as Chrome 145-147.
+request_trust_anchors = true
 
 [tls.fingerprint]
-ja4 = "t13d1516h2_8daaf6152771_d8a2da3f94cd"
+# Cold form. 149's TLS params (ciphers/curves/sigalgs/extensions) are byte-identical
+# to Chrome 148 — no ML-DSA sigalgs (that arrives in 150+) — so with Trust Anchor
+# Identifiers the cold ClientHello carries 17 extensions and yields the SAME JA4 as
+# 148. INFERRED from 148 parity (tls.peet.ws 2026-06-17); confirm against a live
+# Chrome 149 capture before relying on it — the pre-commit live test is the gate.
+ja4 = "t13d1517h2_8daaf6152771_dcad5a053991"
 
 [h2]
 header_table_size = 65536
