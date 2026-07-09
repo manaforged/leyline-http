@@ -113,6 +113,9 @@ fn session_builder_resolves_all_valid_combos() {
         (Browser::Firefox151, Platform::Windows),
         (Browser::Firefox151, Platform::Linux),
         (Browser::Firefox151, Platform::Android),
+        (Browser::Firefox152, Platform::Windows),
+        (Browser::Firefox152, Platform::Linux),
+        (Browser::Firefox152, Platform::Android),
         (Browser::Safari18, Platform::MacOS),
         (Browser::OkHttpAndroid10, Platform::Android),
         (Browser::OkHttpAndroid7, Platform::Android),
@@ -706,6 +709,46 @@ async fn live_ja4_exact_match_firefox150() {
 
     assert_eq!(ja4, expected, "Firefox 150 JA4 mismatch");
     println!("✓ Firefox 150 JA4 exact match: {ja4}");
+}
+
+#[tokio::test]
+#[ignore = "live: needs network"]
+async fn live_ja4_exact_match_firefox151() {
+    let session = leyline::Session::builder()
+        .browser(Browser::Firefox151)
+        .build()
+        .unwrap();
+    let json = peet(&session).await;
+    let ja4 = json["tls"]["ja4"].as_str().expect("no tls.ja4");
+
+    let reg = leyline::profile::ProfileRegistry::builtin();
+    let profile = reg.get_browser(Browser::Firefox151).unwrap();
+    let expected = profile
+        .expected_ja4()
+        .expect("Firefox 151 TOML missing JA4");
+
+    assert_eq!(ja4, expected, "Firefox 151 JA4 mismatch");
+    println!("✓ Firefox 151 JA4 exact match: {ja4}");
+}
+
+#[tokio::test]
+#[ignore = "live: needs network"]
+async fn live_ja4_exact_match_firefox152() {
+    let session = leyline::Session::builder()
+        .browser(Browser::Firefox152)
+        .build()
+        .unwrap();
+    let json = peet(&session).await;
+    let ja4 = json["tls"]["ja4"].as_str().expect("no tls.ja4");
+
+    let reg = leyline::profile::ProfileRegistry::builtin();
+    let profile = reg.get_browser(Browser::Firefox152).unwrap();
+    let expected = profile
+        .expected_ja4()
+        .expect("Firefox 152 TOML missing JA4");
+
+    assert_eq!(ja4, expected, "Firefox 152 JA4 mismatch");
+    println!("✓ Firefox 152 JA4 exact match: {ja4}");
 }
 
 #[tokio::test]

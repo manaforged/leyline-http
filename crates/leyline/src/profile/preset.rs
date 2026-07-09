@@ -42,6 +42,10 @@ pub struct HeaderContext<'a> {
     pub origin: &'a str,
     /// `Referer` header value, or empty if none.
     pub referer: &'a str,
+    /// Firefox (Gecko) identity. The presets are Chrome-shaped, so when this is set
+    /// [`Preset::build_headers`] strips the Chrome-only `Sec-CH-UA*` Client Hints (Firefox
+    /// emits none) and swaps the Chrome document `Accept` for the Gecko one.
+    pub firefox: bool,
 }
 
 /// A single header name-value pair, in insertion order.
@@ -64,10 +68,41 @@ fn o(s: &str) -> Cow<'static, str> {
     Cow::Owned(s.to_string())
 }
 
+/// Firefox's document `Accept` (Gecko) — captured live from tls.peet.ws (Firefox 153, Windows):
+/// `text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8`, with none of Chrome's
+/// `image/apng` / `application/signed-exchange` / image types. Swapped in for the Chrome document
+/// Accept on a Firefox identity so the request agrees with the Firefox JA4.
+const FIREFOX_DOC_ACCEPT: &str = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
+
+/// Real Firefox H2 request-header order, captured live from tls.peet.ws (Firefox 153, Windows). The
+/// navigate sequence (`user-agent … sec-fetch-user, priority, te`) is capture-exact; the subresource
+/// headers (`content-type`/`origin`/`referer`/`cookie`) are placed at Firefox-conventional positions
+/// pending a cookied-XHR capture. Applied by the session AFTER the full header set is assembled
+/// (including `cookie`) so every Firefox request matches this order.
+pub(crate) const FIREFOX_HEADER_ORDER: &[&str] = &[
+    "user-agent",
+    "accept",
+    "accept-language",
+    "accept-encoding",
+    "content-type",
+    "upgrade-insecure-requests",
+    "origin",
+    "referer",
+    "cookie",
+    "sec-fetch-dest",
+    "sec-fetch-mode",
+    "sec-fetch-site",
+    "sec-fetch-user",
+    "priority",
+    "te",
+];
+
 impl Preset {
-    /// Build the ordered header list for this preset.
+    /// Build the ordered header list for this preset. The presets are Chrome-shaped; a Firefox
+    /// identity ([`HeaderContext::firefox`]) is reshaped to drop the Chrome-only Client Hints and
+    /// use the Gecko document `Accept` so the request layer agrees with the Firefox TLS/JA4.
     pub fn build_headers(&self, ctx: &HeaderContext<'_>) -> Vec<HeaderPair> {
-        match self {
+        let mut headers = match self {
             Self::Navigate => Self::navigate_headers(ctx),
             Self::Script => Self::script_headers(ctx),
             Self::Xhr => Self::xhr_headers(ctx),
@@ -75,7 +110,35 @@ impl Preset {
             Self::CrossOrigin => Self::cross_origin_headers(ctx),
             Self::SameSite => Self::same_site_headers(ctx),
             Self::FormNavigate => Self::form_navigate_headers(ctx),
+        };
+        if ctx.firefox {
+            Self::reshape_for_firefox(*self, &mut headers);
         }
+        headers
+    }
+
+    /// Reshape a Chrome-shaped preset to Firefox's request SET (the session applies Firefox's header
+    /// ORDER afterward, via [`FIREFOX_HEADER_ORDER`]). Firefox emits NO `Sec-CH-UA*` Client Hints
+    /// (a Chromium feature), uses a Gecko document `Accept`, and carries an HTTP `priority` hint plus
+    /// `te: trailers` on every H2 request — all captured live from tls.peet.ws (Firefox 153).
+    fn reshape_for_firefox(preset: Preset, headers: &mut Vec<HeaderPair>) {
+        headers.retain(|(name, _)| !name.starts_with("sec-ch-ua"));
+        // Only the document (`text/html…`) Accept is browser-specific; the XHR/script Accepts
+        // (`*/*`, `application/json…`) are JS-set and browser-neutral, so leave them.
+        for (name, value) in headers.iter_mut() {
+            if name == "accept" && value.starts_with("text/html") {
+                *value = Cow::Borrowed(FIREFOX_DOC_ACCEPT);
+            }
+        }
+        // Document loads carry `priority: u=0, i` (capture-verified); subresource/API requests use
+        // `u=1, i` (Firefox-conventional). `te: trailers` rides every Firefox H2 request.
+        let priority = if matches!(preset, Preset::Navigate | Preset::FormNavigate) {
+            "u=0, i"
+        } else {
+            "u=1, i"
+        };
+        headers.push((b("priority"), b(priority)));
+        headers.push((b("te"), b("trailers")));
     }
 
     /// `sec-ch-ua-platform`, quoted per Chrome's wire format. Shared by
@@ -231,5 +294,65 @@ impl Preset {
             Self::accept_encoding(),
             (b("accept-language"), o(ctx.accept_language)),
         ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ctx(firefox: bool) -> HeaderContext<'static> {
+        HeaderContext {
+            user_agent: "UA",
+            sec_ch_ua: "\"Chromium\";v=\"148\"",
+            sec_ch_ua_mobile: "?0",
+            sec_ch_ua_platform: "Windows",
+            accept_language: "en-US,en;q=0.9",
+            origin: "https://x.com",
+            referer: "https://x.com/",
+            firefox,
+        }
+    }
+
+    fn names(h: &[HeaderPair]) -> Vec<String> {
+        h.iter().map(|(n, _)| n.to_string()).collect()
+    }
+
+    fn value<'a>(h: &'a [HeaderPair], name: &str) -> Option<&'a str> {
+        h.iter().find(|(n, _)| n == name).map(|(_, v)| v.as_ref())
+    }
+
+    /// A Firefox identity must ship NO `sec-ch-ua*` Client Hints (Firefox emits none), the Gecko
+    /// document `Accept`, and `te: trailers` + an HTTP `priority` hint; a Chrome identity keeps the
+    /// Client Hints and sends neither. Values are from a live Firefox 153 tls.peet.ws capture.
+    #[test]
+    fn firefox_reshapes_client_hints_accept_priority_and_te() {
+        // Chrome identity: CH headers present + Chrome document Accept, no priority/te.
+        let chrome = Preset::Navigate.build_headers(&ctx(false));
+        assert!(names(&chrome).iter().any(|n| n == "sec-ch-ua-mobile"));
+        assert!(value(&chrome, "accept").unwrap().contains("image/apng"));
+        assert_eq!(value(&chrome, "priority"), None);
+        assert_eq!(value(&chrome, "te"), None);
+
+        // Firefox navigate: zero Client Hints, Gecko document Accept, priority u=0, te trailers.
+        let ff = Preset::Navigate.build_headers(&ctx(true));
+        assert!(
+            names(&ff).iter().all(|n| !n.starts_with("sec-ch-ua")),
+            "firefox must send no Client Hints: {:?}",
+            names(&ff)
+        );
+        assert_eq!(value(&ff, "accept"), Some(FIREFOX_DOC_ACCEPT));
+        assert_eq!(value(&ff, "priority"), Some("u=0, i"));
+        assert_eq!(value(&ff, "te"), Some("trailers"));
+
+        // Firefox XHR/API: browser-neutral JS-set Accept untouched, priority u=1, te trailers.
+        let ff_xhr = Preset::SameSite.build_headers(&ctx(true));
+        assert!(names(&ff_xhr).iter().all(|n| !n.starts_with("sec-ch-ua")));
+        assert_eq!(
+            value(&ff_xhr, "accept"),
+            Some("application/json, text/plain, */*")
+        );
+        assert_eq!(value(&ff_xhr, "priority"), Some("u=1, i"));
+        assert_eq!(value(&ff_xhr, "te"), Some("trailers"));
     }
 }

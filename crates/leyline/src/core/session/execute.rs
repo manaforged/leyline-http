@@ -117,6 +117,7 @@ impl Session {
                     accept_language: &self.accept_language,
                     origin: &origin,
                     referer: &referer,
+                    firefox: self.browser.as_ref().is_some_and(|b| b.is_firefox()),
                 };
                 preset.build_headers(&ctx)
             } else {
@@ -239,6 +240,15 @@ impl Session {
             // list keep their relative position at the tail.
             if let Some(order) = self.identity_request_header_order.as_deref() {
                 reorder_headers(&mut headers, order);
+            } else if self.browser.as_ref().is_some_and(|b| b.is_firefox()) {
+                // Firefox ships no per-identity TOML order; apply the built-in Gecko header order so
+                // the full request sequence (including the just-assembled `cookie`) matches real
+                // Firefox rather than the Chrome-shaped preset.
+                let order: Vec<String> = crate::profile::preset::FIREFOX_HEADER_ORDER
+                    .iter()
+                    .map(|s| (*s).to_string())
+                    .collect();
+                reorder_headers(&mut headers, &order);
             }
 
             // Only retain a copy of the request headers when something will
@@ -518,6 +528,48 @@ mod reorder_tests {
 
     fn h(name: &str, value: &str) -> HeaderPair {
         (Cow::Owned(name.to_string()), Cow::Owned(value.to_string()))
+    }
+
+    /// The Firefox navigate header order, end to end (preset reshape → `FIREFOX_HEADER_ORDER`
+    /// reorder), must reproduce the live Firefox 153 tls.peet.ws capture exactly.
+    #[test]
+    fn firefox_navigate_order_matches_the_live_capture() {
+        use crate::profile::Preset;
+        use crate::profile::preset::{FIREFOX_HEADER_ORDER, HeaderContext};
+        let ctx = HeaderContext {
+            user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:153.0) Gecko/20100101 Firefox/153.0",
+            sec_ch_ua: "",
+            sec_ch_ua_mobile: "?0",
+            sec_ch_ua_platform: "Windows",
+            accept_language: "en-US,en;q=0.9",
+            origin: "https://tls.peet.ws",
+            referer: "",
+            firefox: true,
+        };
+        let mut headers = Preset::Navigate.build_headers(&ctx);
+        let order: Vec<String> = FIREFOX_HEADER_ORDER
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        reorder_headers(&mut headers, &order);
+        let names: Vec<&str> = headers.iter().map(|(n, _)| n.as_ref()).collect();
+        assert_eq!(
+            names,
+            vec![
+                "user-agent",
+                "accept",
+                "accept-language",
+                "accept-encoding",
+                "upgrade-insecure-requests",
+                "sec-fetch-dest",
+                "sec-fetch-mode",
+                "sec-fetch-site",
+                "sec-fetch-user",
+                "priority",
+                "te",
+            ],
+            "firefox navigate header order must match the live capture"
+        );
     }
 
     #[test]

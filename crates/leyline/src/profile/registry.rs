@@ -37,6 +37,7 @@ impl ProfileRegistry {
         reg.load_toml(include_str!("../../profiles/firefox/148.toml"));
         reg.load_toml(include_str!("../../profiles/firefox/150.toml"));
         reg.load_toml(include_str!("../../profiles/firefox/151.toml"));
+        reg.load_toml(include_str!("../../profiles/firefox/152.toml"));
         // Safari
         reg.load_toml(include_str!("../../profiles/safari/18.toml"));
         reg.load_toml(include_str!("../../profiles/safari/ios15.toml"));
@@ -174,14 +175,27 @@ mod tests {
         let reg = ProfileRegistry::builtin();
         let profile = reg.get("firefox", 151).expect("firefox 151 not found");
         assert_eq!(profile.meta.name, "Firefox 151");
-        assert_eq!(profile.tls.ciphers.len(), 15);
+        assert_eq!(profile.tls.ciphers.len(), 16);
         assert_eq!(
             profile.h2.pseudo_order,
             vec!["method", "path", "authority", "scheme"]
         );
         assert_eq!(
             profile.expected_ja4(),
-            Some("t13d1517h2_8daaf6152771_68c5a8c2958d")
+            Some("t13d1617h2_86a278354501_3cbfd9057e0d")
+        );
+    }
+
+    #[test]
+    fn firefox152_profile_parses() {
+        let reg = ProfileRegistry::builtin();
+        let profile = reg.get("firefox", 152).expect("firefox 152 not found");
+        assert_eq!(profile.meta.name, "Firefox 152");
+        assert_eq!(profile.tls.ciphers.len(), 16);
+        // Real FF152.0 == real FF151.0 at the TLS layer.
+        assert_eq!(
+            profile.expected_ja4(),
+            Some("t13d1617h2_86a278354501_3cbfd9057e0d")
         );
     }
 

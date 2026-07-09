@@ -48,8 +48,10 @@ pub enum Browser {
     Firefox148,
     /// Mozilla Firefox 150 (Windows/macOS/Linux/Android) - current release.
     Firefox150,
-    /// Mozilla Firefox 151 (Windows/macOS/Linux/Android) - available prerelease/canary capture.
+    /// Mozilla Firefox 151 (Windows/macOS/Linux/Android). TLS-identical to 152.
     Firefox151,
+    /// Mozilla Firefox 152 (Windows/macOS/Linux/Android) - current stable release.
+    Firefox152,
     /// Safari 18 on macOS.
     Safari18,
     /// OkHttp 4.x as shipped on Android 10+.
@@ -65,7 +67,7 @@ pub enum Browser {
 }
 
 /// Canonical profile count. Tests assert against this.
-pub const PROFILE_COUNT: usize = 17;
+pub const PROFILE_COUNT: usize = 18;
 
 /// All browser variants, for iteration.
 pub const ALL_BROWSERS: [Browser; PROFILE_COUNT] = [
@@ -80,6 +82,7 @@ pub const ALL_BROWSERS: [Browser; PROFILE_COUNT] = [
     Browser::Firefox148,
     Browser::Firefox150,
     Browser::Firefox151,
+    Browser::Firefox152,
     Browser::Safari18,
     Browser::OkHttpAndroid10,
     Browser::OkHttpAndroid7,
@@ -103,6 +106,7 @@ impl Browser {
             Self::Firefox148 => ("firefox", 148),
             Self::Firefox150 => ("firefox", 150),
             Self::Firefox151 => ("firefox", 151),
+            Self::Firefox152 => ("firefox", 152),
             Self::Safari18 => ("safari", 18),
             Self::OkHttpAndroid10 => ("okhttp", 10),
             Self::OkHttpAndroid7 => ("okhttp", 7),
@@ -115,6 +119,14 @@ impl Browser {
     /// Whether this browser caps at TLS 1.2 (no TLS 1.3).
     pub fn max_tls_12(&self) -> bool {
         matches!(self, Self::OkHttpAndroid7)
+    }
+
+    /// Whether this is a Firefox (Gecko) profile. Firefox emits no `Sec-CH-UA*`
+    /// Client Hints and a Gecko `Accept`, so the header presets gate those off
+    /// the wire for a Firefox identity (see `Preset::build_headers`).
+    #[must_use]
+    pub fn is_firefox(&self) -> bool {
+        self.profile_key().0 == "firefox"
     }
 
     /// The default browser for new sessions.
@@ -172,6 +184,7 @@ impl std::fmt::Display for Browser {
             Self::Firefox148 => write!(f, "Firefox 148"),
             Self::Firefox150 => write!(f, "Firefox 150"),
             Self::Firefox151 => write!(f, "Firefox 151"),
+            Self::Firefox152 => write!(f, "Firefox 152"),
             Self::Safari18 => write!(f, "Safari 18"),
             Self::OkHttpAndroid10 => write!(f, "OkHttp4 Android 10+"),
             Self::OkHttpAndroid7 => write!(f, "OkHttp4 Android 7-9"),

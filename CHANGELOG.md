@@ -11,6 +11,26 @@ until 1.0 — pin exact versions.
 
 ### Fixed
 
+- **Firefox identities now send a Firefox-shaped request, not a Chrome one.** The
+  header presets are Chrome-shaped, so a Firefox session (`Browser::Firefox15x`)
+  sent `Sec-CH-UA*` Client Hints (which no Firefox build emits), the Chrome
+  document `Accept`, no `priority` / `te` headers, and Chrome's header order — all
+  on the same connection as the Firefox JA4, a hard TLS-vs-header contradiction.
+  A Firefox identity now: strips every `sec-ch-ua*` header; uses the Gecko document
+  `Accept` (`text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8`); adds
+  `priority` (`u=0, i` on document loads, `u=1, i` on subresources) and
+  `te: trailers`; and reorders the full request (including `cookie`) to the real
+  Firefox sequence. Values captured live from Firefox 153 via tls.peet.ws; the
+  navigate order is capture-exact (subresource `content-type`/`origin`/`cookie`
+  positions are Firefox-conventional pending a cookied-XHR capture).
+
+- **Chrome 150 profile GREASE brand corrected to `"Not;A=Brand";v="8"`.** The
+  `chrome/150.toml` `sec_ch_ua` carried Chrome 149's GREASE
+  (`"Not)A;Brand";v="24"`) across all four platform identities — a stale copy —
+  so a Chrome-150 session advertised a brand token no real Chrome 150 emits,
+  splitting the wire `sec-ch-ua` from the browser's own `navigator.userAgentData`.
+  Corrected to the value a real Chromium 150.0.7871.47 build emits.
+
 - **HTTP/3 driver now reaps cancelled request streams (cancel-safety parity with
   HTTP/2).** When a caller dropped its response receiver before the peer replied
   — e.g. an outer `response_header` / `total` timeout firing on a silent upstream
