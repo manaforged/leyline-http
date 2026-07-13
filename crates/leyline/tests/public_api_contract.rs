@@ -6,8 +6,7 @@
 //! fails to COMPILE if any pinned signature changes, surfacing the break in the
 //! normal `cargo test` run rather than only when a downstream consumer rebuilds.
 //!
-//! `.github/workflows/public-api.yml` pins the whole public surface via
-//! cargo-public-api; this file is the toolchain-free guard for the accessors
+//! This file is the toolchain-free guard for the accessors
 //! that gate downstream code.
 
 #![allow(dead_code)]

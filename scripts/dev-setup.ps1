@@ -72,6 +72,6 @@ if (-not $SkipTests) {
 
 Write-Host ""
 Write-Host "Next useful commands:"
-Write-Host "  ./scripts/verify.sh --quick"
+Write-Host "  ./scripts/verify.sh"
 Write-Host "  cargo test --workspace --exclude leyline-quiche"
 Write-Host "  cargo test -p leyline --test tls_peet -- --ignored"

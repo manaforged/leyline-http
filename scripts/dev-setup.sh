@@ -103,7 +103,7 @@ ok "developer setup looks ready"
 cat <<'EOF'
 
 Next useful commands:
-  ./scripts/verify.sh --quick
+  ./scripts/verify.sh
   cargo test --workspace --exclude leyline-quiche
   cargo test -p leyline --test tls_peet -- --ignored
 EOF

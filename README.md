@@ -83,7 +83,7 @@ cd leyline
 ```
 
 The setup script checks Rust, native build prerequisites, then runs a small
-offline build/test pass. Once that is green, use `./scripts/verify.sh --quick`
+offline build/test pass. Once that is green, use `./scripts/verify.sh`
 or `.\scripts\verify.ps1 -Quick` for the normal local gate and reserve live
 tests for release validation.
 
@@ -338,7 +338,8 @@ Before tagging a release:
 ./scripts/dev-setup.sh           # first-clone prerequisite and fast offline check
 ./scripts/verify.sh              # fmt, clippy, docs, tests, deny, optional fuzz replay
 .\scripts\verify.ps1 -Quick      # PowerShell quick local gate
-./scripts/verify.sh --quick      # skip the live peet.ws + smoke suite
+./scripts/verify.sh              # fast compile sanity
+./scripts/verify.sh --full       # full tests, audits, and live checks
 ./scripts/verify.sh --fuzz 300   # run time-bounded fuzzing if fuzz/ is present
 ./scripts/package.sh             # package in publish order
 ```

@@ -206,16 +206,19 @@ fn edge_overlay(
 }
 
 /// Opera Stable major version per Chromium anchor. Opera Stable numbers its
-/// major a fixed 16 below the Chromium it rebases on (148→132, 147→131,
+/// major a fixed 16 below the Chromium it rebases on (149→133, 148→132, 147→131,
 /// 146→130, 145→129) and ships on a contemporaneous cadence; entries here pair
 /// each supported Chromium anchor with the Opera Stable major that shipped on
 /// it.
 ///
-/// The 148/132 pairing is sourced from Opera's official desktop release blog
-/// (Opera 132 Stable on Chromium 148.0.7778.97); its sec-ch-ua wire shape reuses
-/// the verified 129 template. Anchors marked EXTRAPOLATED are derived from
-/// vendor release notes, structurally identical to theÌ5/129 live capture.
+/// The 149/133 and 148/132 pairings are sourced from Opera's official desktop
+/// release blog (Opera 133 Stable on Chromium 149.0.7827.201; Opera 132 Stable
+/// on Chromium 148.0.7778.97); their sec-ch-ua wire shape reuses the verified
+/// 129 template. Anchors marked EXTRAPOLATED are derived from vendor release notes,
+/// structurally identical to theÌ5/129 live
+/// capture.
 const OPERA_PER_CHROMIUM: &[(u32, u32)] = &[
+    (149, 133), // Opera 133 Stable = Chromium 149.0.7827.201 — blogs.opera.com/desktop, 2026.
     (148, 132), // Opera 132 Stable = Chromium 148.0.7778.97 — blogs.opera.com/desktop, 2026.
     (147, 131), // EXTRAPOLATED from vendor release notes.
     (146, 130), // EXTRAPOLATED from vendor release notes.
@@ -498,10 +501,16 @@ mod tests {
 
     #[test]
     fn opera_overlay_only_accepts_verified_anchors() {
-        // OPERA_PER_CHROMIUM is the source of truth — 145/146/147/148 each
+        // OPERA_PER_CHROMIUM is the source of truth — 145/146/147/148/149 each
         // yield a distinct Opera version, anything outside the table
         // errors. Mobile platforms always error regardless of anchor.
-        for (chromium, expected_opera) in [(145u32, 129u32), (146, 130), (147, 131), (148, 132)] {
+        for (chromium, expected_opera) in [
+            (145u32, 129u32),
+            (146, 130),
+            (147, 131),
+            (148, 132),
+            (149, 133),
+        ] {
             let o = ChromiumBrand::Opera
                 .overlay(chromium, Platform::Windows, "ua", "")
                 .unwrap()
@@ -513,7 +522,7 @@ mod tests {
                 o.user_agent
             );
         }
-        for bad in [144u32, 149] {
+        for bad in [144u32, 150] {
             assert!(
                 ChromiumBrand::Opera
                     .overlay(bad, Platform::Windows, "ua", "")

@@ -52,7 +52,7 @@ mod generated {
     all(target_arch = "aarch64", target_os = "linux", target_env = "gnu"),
 )))]
 compile_error!(
-    "leyline-bssl-sys ships prebuilt bindings only for x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu, and aarch64-apple-darwin. Rebuild from source via .github/workflows/build-prebuilt.yml for other targets."
+    "leyline-bssl-sys ships prebuilt bindings only for x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu, and aarch64-apple-darwin. Rebuild from source via scripts/package-bssl.sh for other targets."
 );
 
 // explicitly require presence of some symbols to check if the bindings worked

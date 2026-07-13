@@ -9,10 +9,8 @@ Two paths, same as the old shim:
 - **Dev / release (default):** link the committed prebuilt static libs in
   `native/<target>/lib` + the pregenerated `src/bindings/<target>.rs`. No CMake,
   bindgen, Perl, or Go needed. `build.rs` only emits link directives.
-- **CI / source rebuild:** `.github/workflows/build-prebuilt.yml` checks out the
-  `deps/boringssl` submodule, applies `patches/*` (per `patches/SERIES`), builds
-  with `build/main.rs` (cmake + bindgen), and commits the regenerated libs +
-  bindings back here.
+- **Source rebuild:** the `deps/boringssl`
+  submodule and `patches/SERIES` to regenerate the target libraries and bindings.
 
 ## Revision + patches
 

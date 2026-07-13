@@ -33,7 +33,7 @@ toolchain prerequisites, runs `cargo check -p leyline --all-features`, and
 then runs two offline smoke tests. After it passes, the normal local gate is:
 
 ```bash
-./scripts/verify.sh --quick
+./scripts/verify.sh
 ```
 
 PowerShell:
@@ -57,9 +57,8 @@ BoringSSL update:
 
 1. Move the submodule to the new revision and rebase the patches
    (`git am --3way`); see `crates/leyline-bssl-sys/patches/SERIES`.
-2. Rebuild the prebuilt libs + bindings for each target — run
-   `scripts/package-bssl.sh` on a host of that target, or use
-   `.github/workflows/build-prebuilt.yml`.
+2. Run `scripts/package-bssl.sh` on a host of each target to rebuild the
+   prebuilt libraries and bindings.
 3. Run `cargo test --workspace --exclude leyline-quiche` and
    `cargo test -p leyline --test tls_peet -- --ignored`. Fingerprint
    tests will catch any regression in cipher order, extension order, or
@@ -72,7 +71,8 @@ includes the fix, then bump the submodule + rebuild.
 
 ```bash
 ./scripts/verify.sh            # everything below, in one shot
-./scripts/verify.sh --quick    # skip live network tests
+./scripts/verify.sh           # fast push sanity
+./scripts/verify.sh --full    # deliberate release validation
 ```
 
 The verify script runs:
@@ -86,13 +86,8 @@ The verify script runs:
 - `cargo deny --all-features check`
 - `cd benches && cargo bench --no-run` when `benches/` is present
 
-GitHub Actions runs CI: `test.yml` runs version/optionalDependencies parity,
-`cargo deny`, and the workspace test suite on every push and PR to `main`; the
-live tls.peet.ws fingerprint matrix runs only on `workflow_dispatch` / the
-weekly `fingerprint-cron.yml` (flaky network must not block PRs). The
-`release-{node,python,crates}.yml` workflows publish on `v*` tags. `scripts/verify.sh`
-is the local pre-PR/pre-tag gate that mirrors these checks — run it before
-opening a PR and before tagging.
+`scripts/verify.sh` is the canonical pre-PR and pre-tag gate. Scheduled live
+fingerprint verification runs directly on the approved self-hosted machine.
 
 The pre-commit hook runs the offline Leyline workspace suite automatically. If
 it fails, fix the cause - do not bypass the hook.
@@ -134,12 +129,12 @@ In brief:
 
 1. Bump `workspace.package.version` in the root `Cargo.toml` and mirror it into
    `package.json` (`version` + the three `optionalDependencies`),
-   `wrappers/python/pyproject.toml`, and the READMEs — CI's `version-parity` job
+   `wrappers/python/pyproject.toml`, and the READMEs — `scripts/verify.sh`
    enforces this. Add a `CHANGELOG.md` entry.
 2. Run `scripts/verify.sh` (the local preflight) and merge to `main`.
 3. `git tag -s vX.Y.Z -m "leyline vX.Y.Z" && git push origin vX.Y.Z`. The tag
-   fires `release-node.yml` and `release-python.yml`; `release-crates.yml` is
-   `workflow_dispatch`-only (public crates.io is a deliberate, manual go-live).
+   does not publish anything. Publish each artifact deliberately from its
+   supported target host.
 
 ## Commit shape
 

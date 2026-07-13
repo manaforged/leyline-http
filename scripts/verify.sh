@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Leyline local verify: runs the release quality gates locally before
-# tagging a release.
+# Leyline's direct self-hosted quality gate.
 #
-# Usage: ./scripts/verify.sh [--quick] [--fuzz [SECONDS]]
-# --quick        skips live tls_peet tests and the smoke suite
+# Usage: ./scripts/verify.sh [--full] [--fuzz [SECONDS]]
+# default        package parity and compile sanity
+# --full         tests, docs, audits, benches, and live checks
 # --fuzz [N]     run each cargo-fuzz target for N seconds (default 60)
 #                on top of the existing corpus replay. Requires
 #                `cargo install cargo-fuzz` and nightly rustc. Corpus
@@ -14,13 +14,15 @@
 #                requirement to a normal release gate.
 set -euo pipefail
 
-quick=0
+full=0
 fuzz=0
 fuzz_seconds=60
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --quick) quick=1; shift ;;
+        --quick) shift ;; # compatibility: quick is now the default
+        --full) full=1; shift ;;
         --fuzz)
+            full=1
             fuzz=1
             shift
             # Optional numeric seconds argument.
@@ -48,6 +50,23 @@ step() { printf '\n\033[1;34m== %s ==\033[0m\n' "$*"; }
 ok()   { printf '\033[1;32m✓ %s\033[0m\n'  "$*"; }
 fail() { printf '\033[1;31m✗ %s\033[0m\n'  "$*" >&2; exit 1; }
 
+# -- package versions -----------------------------------------------------
+step "package version parity"
+workspace_version="$(awk -F'"' '/^version *= *"/{print $2; exit}' Cargo.toml)"
+python_version="$(awk -F'"' '/^version *= *"/{print $2; exit}' wrappers/python/pyproject.toml)"
+python_expected="$(printf '%s\n' "$workspace_version" | sed -E 's/-alpha\./a/; s/-beta\./b/; s/-rc\./rc/')"
+node -e '
+const p = require("./package.json");
+const version = process.argv[1];
+if (p.version !== version) process.exit(1);
+for (const pin of Object.values(p.optionalDependencies || {})) {
+  if (pin !== version) process.exit(1);
+}
+' "$workspace_version" || fail "Node package versions differ from the workspace"
+[[ "$python_version" == "$python_expected" ]] \
+    || fail "Python package version differs from the workspace"
+ok "package versions match $workspace_version"
+
 # -- rustc toolchain sanity ----------------------------------------------
 step "rust toolchain"
 rustc --version
@@ -62,6 +81,15 @@ if [[ -n "$msrv" ]]; then
     else
         echo "  (cargo-msrv not installed; skipping active MSRV check)"
     fi
+fi
+
+step "cargo check"
+cargo check --workspace --exclude leyline-quiche || fail "cargo check failed"
+ok "compile sanity"
+
+if [[ $full -eq 0 ]]; then
+    printf '\n\033[1;32mSanity check passed.\033[0m\n'
+    exit 0
 fi
 
 # -- format --------------------------------------------------------------
@@ -96,9 +124,9 @@ step "cargo test --workspace --exclude leyline-quiche"
 cargo test --workspace --exclude leyline-quiche || fail "tests failed"
 ok "tests pass"
 
-if [[ $quick -eq 0 ]]; then
-    step "cargo test -p leyline --test tls_peet -- --ignored"
-    cargo test -p leyline --test tls_peet -- --ignored || fail "live tls_peet tests failed"
+if [[ $full -eq 1 ]]; then
+    step "cargo test -p leyline --test tls_peet --release -- --ignored"
+    cargo test -p leyline --test tls_peet --release -- --ignored || fail "live tls_peet tests failed"
     ok "live tls_peet pass"
 
     step "cargo test -p leyline --test smoke -- --ignored --nocapture"
@@ -137,7 +165,7 @@ fi
 # is a heavier prerequisite for a normal release.
 FUZZ_TARGETS=(hpack_integer hpack_header_block h2_frame cookie_set)
 
-if [[ $quick -eq 0 ]]; then
+if [[ $full -eq 1 ]]; then
     step "fuzz corpus replay (cargo fuzz, -runs=0)"
     if [[ ! -d fuzz ]]; then
         echo "  (fuzz/ not present; skipping corpus replay)"

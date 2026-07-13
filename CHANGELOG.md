@@ -9,6 +9,18 @@ until 1.0 — pin exact versions.
 
 ## Unreleased
 
+### Changed
+
+- Removed GitHub workflow orchestration; verification and releases now run directly on the supported self-hosted machines.
+- Reduced the push gate to package parity and compile sanity; formatting, deeper, and live checks require `--full`.
+
+### Added
+
+- **Opera brand overlay covers Chromium 149 (Opera 133 Stable).** `OPERA_PER_CHROMIUM`
+  gains the `149 → 133` anchor (Opera 133 Stable on Chromium 149.0.7827.201, per Opera's
+  official desktop release blog), so an Opera brand on a Chromium-149 profile emits a real
+  `OPR/133` overlay instead of erroring back to stock Chrome.
+
 ### Fixed
 
 - **Firefox identities now send a Firefox-shaped request, not a Chrome one.** The

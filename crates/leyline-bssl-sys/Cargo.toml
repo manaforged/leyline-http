@@ -22,7 +22,7 @@ autotests = false
 autobenches = false
 # Prebuilt artifacts are the dev/release path (no CMake/bindgen). The source
 # tree (deps/boringssl submodule + patches/ + build/ + cmake/) is the CI path:
-# .github/workflows/build-prebuilt.yml rebuilds the libs + bindings from it.
+# scripts/package-bssl.sh rebuilds the libraries and bindings from it.
 include = [
     "/Cargo.toml",
     "/README.md",

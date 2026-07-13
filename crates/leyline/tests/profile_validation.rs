@@ -164,8 +164,8 @@ fn real_cert_compression_codepoints_still_build() {
 // The convention used to be doc-only (CONTRIBUTING.md TODO). A profile whose
 // fingerprint was never anchored against live browser output is exactly how the
 // profile-drift soft-block incident shipped — so a missing `verified_against` is now a
-// test failure. (Date-staleness enforcement is the weekly fingerprint-cron's
-// job — it re-anchors against live truth; backfilling capture dates here would
+// test failure. Date staleness belongs to the approved self-hosted capture;
+// backfilling capture dates here would
 // mean inventing dates we don't have, which is the false-anchor this guards.)
 #[test]
 fn every_builtin_profile_declares_verified_against() {

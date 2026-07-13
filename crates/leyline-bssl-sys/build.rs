@@ -23,7 +23,7 @@ fn main() {
                1. Point BORING_BSSL_PATH at a BoringSSL build for this target, e.g.\n\
                     BORING_BSSL_PATH=/path/to/boringssl cargo build\n\
                2. Build the carried BoringSSL from source for this target via\n\
-                  .github/workflows/build-prebuilt.yml (needs CMake, Perl, libclang, Go),\n\
+                  scripts/package-bssl.sh (needs CMake, Perl, libclang, Go),\n\
                   then commit the resulting native/<target>/lib + src/bindings/<target>.rs.\n"
         );
     }

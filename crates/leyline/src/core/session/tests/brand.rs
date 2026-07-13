@@ -372,16 +372,16 @@ fn edge_overlay_on_mobile_platform_errors() {
 
 #[test]
 fn opera_overlay_on_unverified_anchor_errors() {
-    // OPERA_PER_CHROMIUM covers Chromium 145..=148 today. A profile
-    // anchored anywhere else (older 144 or some future 149+) still
+    // OPERA_PER_CHROMIUM covers Chromium 145..=149 today. A profile
+    // anchored anywhere else (older 144 or some future 150+) still
     // has no published Opera version we can mimic — the build must
     // error rather than guess. We rely on `Browser::chromium_major`
     // returning a value outside the table, simulated here by hand-
     // calling the overlay directly so we don't need an unsupported
     // `Browser` variant in the public enum.
     let err = ChromiumBrand::Opera
-        .overlay(149, Platform::Windows, "ua", "")
-        .expect_err("Opera on Chrome 149 must be rejected until captured");
+        .overlay(150, Platform::Windows, "ua", "")
+        .expect_err("Opera on Chrome 150 must be rejected until captured");
     assert!(format!("{err}").contains("not verified"));
 }
 
