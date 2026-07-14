@@ -279,7 +279,7 @@ impl Response {
     /// `:authority` / `:path` pseudo-headers and the HTTP/1 `Host` line. This is
     /// also exactly the set JA4H hashes (which excludes pseudo-headers).
     ///
-    /// Populated only when audit is enabled ([`SessionBuilder::audit`]) or a
+    /// Populated only when audit is enabled ([`crate::SessionBuilder::audit`]) or a
     /// response observer is registered; otherwise the iterator is empty, since
     /// the hot path keeps no copy.
     ///
@@ -729,7 +729,7 @@ mod tests {
         let mut acc = ResponseTiming::accumulator();
         acc.add_leg(&leg(false, Some(40), 60, 105)); // cold 302
         acc.add_leg(&leg(true, None, 800, 800)); // warm 200, big body
-        assert_eq!(acc.reused, false);
+        assert!(!acc.reused);
         assert_eq!(acc.connect_ms, Some(40));
         assert_eq!(acc.send_ms, 860);
         assert_eq!(acc.total_ms, 905);

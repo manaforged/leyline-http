@@ -53,6 +53,7 @@ fn test_config() -> H2Config {
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn get_req(
     path: &str,
 ) -> (

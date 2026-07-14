@@ -13,6 +13,7 @@ until 1.0 — pin exact versions.
 
 - Removed GitHub workflow orchestration; verification and releases now run directly on the supported self-hosted machines.
 - Reduced the push gate to package parity and compile sanity; formatting, deeper, and live checks require `--full`.
+- Restored the full verification gate on the current Rust toolchain by formatting the merged examples and resolving Clippy and rustdoc failures.
 
 ### Added
 

@@ -18,7 +18,7 @@
 //!   completion; requests beyond the cap wait on the semaphore for a
 //!   connection to free, rather than opening unbounded sockets.
 //! - **HTTP/3** — one QUIC connection per destination (feature `http3`); the
-//!   pooled handle is [`crate::quic::H3Client`], cloneable and multiplexing
+//!   pooled handle is `H3Client`, cloneable and multiplexing
 //!   like H2. Keyed under `Transport::Quic` so it never collides with a TCP
 //!   (H1/H2) entry to the same host.
 //!
@@ -324,7 +324,7 @@ async fn open_h3_coalesced(
     }
 }
 
-/// Obtain a cloneable [`crate::quic::H3Client`] for `(host, port)`, reusing a
+/// Obtain a cloneable `H3Client` for `(host, port)`, reusing a
 /// live pooled QUIC connection when one exists and otherwise driving a fresh
 /// QUIC + HTTP/3 handshake. H3 has no proxy support, so the key proxy is
 /// always `None`.

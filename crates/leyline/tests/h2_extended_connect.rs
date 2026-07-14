@@ -59,6 +59,7 @@ fn test_config() -> H2Config {
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn connect_pseudo() -> (
     PseudoHeaders,
     Vec<(

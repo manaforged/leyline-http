@@ -19,17 +19,15 @@ pub fn parse_set_cookie(header: &str, request_url: &url::Url) -> Option<Cookie> 
         None => (header, ""),
     };
 
-    let (name, value) = match name_value.find('=') {
-        Some(i) => {
-            let v = name_value[i + 1..].trim();
-            // Strip surrounding double-quotes (Chrome behavior).
-            let v = v
-                .strip_prefix('"')
-                .and_then(|v| v.strip_suffix('"'))
-                .unwrap_or(v);
-            (name_value[..i].trim(), v)
-        }
-        None => return None, // malformed
+    let (name, value) = {
+        let i = name_value.find('=')?;
+        let v = name_value[i + 1..].trim();
+        // Strip surrounding double-quotes (Chrome behavior).
+        let v = v
+            .strip_prefix('"')
+            .and_then(|v| v.strip_suffix('"'))
+            .unwrap_or(v);
+        (name_value[..i].trim(), v)
     };
 
     if name.is_empty() {

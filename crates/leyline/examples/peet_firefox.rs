@@ -3,12 +3,16 @@
 //! tls.peet.ws and prints the
 //! JA4/H2 next to the real-browser values captured on the Windows box.
 #![allow(missing_docs)]
-use leyline::profile::Browser;
 use leyline::Session;
+use leyline::profile::Browser;
 
 #[tokio::main]
 async fn main() {
-    for browser in [Browser::Firefox152, Browser::Firefox151, Browser::Firefox150] {
+    for browser in [
+        Browser::Firefox152,
+        Browser::Firefox151,
+        Browser::Firefox150,
+    ] {
         eprintln!("\n=== {browser:?} ===");
         let session = match Session::builder().browser(browser).build() {
             Ok(s) => s,
@@ -48,7 +52,9 @@ async fn main() {
             p("/http2/akamai_fingerprint_hash")
         );
     }
-    eprintln!("\n--- real FF151/FF152 ja4 = t13d1617h2_86a278354501_3cbfd9057e0d ---");
+    eprintln!(
+        "\n--- real FF151/FF152 ja4 = t13d1617h2_86a278354501_3cbfd9057e0d ---"
+    );
     eprintln!("--- real FF150 ja4       = t13d1717h2_5b57614c22b0_3cbfd9057e0d ---");
     eprintln!("--- real FF akamai_h2    = 1:65536;2:0;4:131072;5:16384|12517377|0|m,p,a,s ---");
 }
