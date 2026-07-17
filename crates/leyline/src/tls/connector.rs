@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use leyline_bssl::ssl::{NameType, SslConnector, SslSession, SslSessionCacheMode, SslVerifyMode};
+use leyline_bssl::x509::X509VerifyError;
 use lru::LruCache;
 use tokio::net::TcpStream;
 
@@ -23,17 +24,17 @@ use crate::tls::error::TlsError;
 use crate::tls::happy_eyeballs::{HappyEyeballsConfig, happy_eyeballs_connect};
 use crate::tls::nonblocking::connect_one;
 use crate::tls::resolver::{Resolver, SystemResolver};
-use crate::tls::trust::TlsTrustConfig;
+use crate::tls::trust::{
+    TlsTrustConfig, TrustFailure, VerificationFailure, install_pinning_verifier,
+    take_verification_failure,
+};
 use crate::tls::{TlsIo, TlsStream};
 
 /// Creates TLS connections matching a browser's fingerprint.
 ///
 /// Configures BoringSSL with exact cipher suites, curves, extensions,
 /// GREASE behavior, ALPS, cert compression (zlib/brotli/zstd), and ECH
-/// from TOML browser profiles. The fixed Firefox/Safari
-/// `extension_permutation` is the one knob whose profile data is not
-/// wired to the wire; its absence is logged loudly at construction rather
-/// than dropped silently (see the warn in `new_with_trust`).
+/// from TOML browser profiles.
 #[derive(Clone)]
 pub struct FingerprintConnector {
     ssl_connector: SslConnector,
@@ -63,11 +64,11 @@ pub struct FingerprintConnector {
     connect_timeout: Option<Duration>,
     /// Optional socket-level direct-connect overrides.
     socket_config: SocketConfig,
-    /// `true` when leaf pins are configured. Pinning replaces
+    /// Configured leaf pins. Pinning replaces
     /// BoringSSL's built-in verifier with a custom callback that does
     /// chain + pin but NOT the `X509_check_host` SAN match — so the
     /// hostname is re-verified explicitly after the handshake.
-    pins_active: bool,
+    pins: Vec<[u8; 32]>,
     /// `true` when a client certificate (mTLS identity) is configured. Like
     /// pins, it is origin-specific and must never be presented to an `https://`
     /// proxy — see [`Self::has_origin_tls_identity`].
@@ -86,10 +87,11 @@ impl FingerprintConnector {
         tcp: TcpProfile,
         trust: &TlsTrustConfig,
     ) -> Result<Self, TlsError> {
-        let mut builder = SslConnector::builder(leyline_bssl::ssl::SslMethod::tls())?;
+        let trust = trust.clone();
+        let mut builder = SslConnector::bare_builder(leyline_bssl::ssl::SslMethod::tls())?;
 
         // Drive every TLS-level knob from the profile via the shared factory.
-        apply_profile_with_trust(&mut builder, profile, TlsMinVersion::Tls12, trust)?;
+        apply_profile_with_trust(&mut builder, profile, TlsMinVersion::Tls12, &trust)?;
 
         let tls = &profile.tls;
 
@@ -115,28 +117,6 @@ impl FingerprintConnector {
             }
         });
 
-        // `extension_permutation` (the fixed Firefox/Safari extension order)
-        // is the one knob whose profile data is not applied to the wire: the
-        // TOML stores 0-based ordinals, but BoringSSL's
-        // `SSL_CTX_set_extension_order` consumes real TLS extension type IDs,
-        // so the arrays cannot be passed through directly — they require
-        // type-ID orders anchored by a JA4_r live test.
-        // Chrome-family permutation IS applied (`set_permute_extensions`);
-        // these families fall back to BoringSSL's default order. JA4 sorts
-        // extensions so it's unaffected — the gap is JA4_r only. Warn so the
-        // drop stays observable rather than silent (DR-leyline_bssl-gaps), but only
-        // once per profile per process — Firefox/Safari sessions are built
-        // routinely and a per-build warn would train operators to ignore it.
-        if tls.extension_permutation.is_some() && warn_permutation_once(&profile.meta.name) {
-            tracing::warn!(
-                target: "leyline::tls",
-                profile = %profile.meta.name,
-                "profile declares a fixed extension_permutation that is not yet \
-                 applied (needs type-ID re-capture); wire extension order falls \
-                 back to BoringSSL default — JA4_r will differ from the real browser"
-            );
-        }
-
         Ok(Self {
             ssl_connector: builder.build(),
             tcp_profile: tcp,
@@ -150,7 +130,7 @@ impl FingerprintConnector {
             happy_eyeballs: HappyEyeballsConfig::default(),
             connect_timeout: None,
             socket_config: SocketConfig::default(),
-            pins_active: !trust.pinned_leaf_sha256().is_empty(),
+            pins: trust.pinned_leaf_sha256().to_vec(),
             has_client_identity: trust.client_identity().is_some(),
         })
     }
@@ -161,7 +141,7 @@ impl FingerprintConnector {
     /// peer: leaking the origin client cert to it, or checking its cert against
     /// the origin's pins, would be wrong (and the pin check would fail).
     pub(crate) fn has_origin_tls_identity(&self) -> bool {
-        self.pins_active || self.has_client_identity
+        !self.pins.is_empty() || self.has_client_identity
     }
 
     /// Skip peer certificate verification. **Dangerous** — off by
@@ -261,6 +241,22 @@ impl FingerprintConnector {
         port: u16,
         alpn_override: Option<&[u8]>,
     ) -> Result<TlsStream, TlsError> {
+        let tcp_stream = self.dial_tcp(host, port).await?;
+        // TLS handshake with all per-connection fingerprint settings.
+        self.tls_handshake(tcp_stream, host, alpn_override.is_none())
+            .await
+    }
+
+    /// Open a fingerprinted TCP connection to `host:port` through the
+    /// connector's pluggable resolver and Happy-Eyeballs racer, applying the
+    /// browser [`TcpProfile`] SYN options via [`connect_one`].
+    ///
+    /// Shared by the direct path and the proxy leg (see
+    /// [`crate::tls::proxy::connect_to_proxy`]) so a proxy dial honours the same
+    /// resolver as a direct connect — a custom/DoH resolver is not bypassed for
+    /// the proxy hostname (no DNS leak vs. caller intent) — and the SYN to the
+    /// proxy carries the same browser TCP fingerprint.
+    pub(crate) async fn dial_tcp(&self, host: &str, port: u16) -> Result<TcpStream, TlsError> {
         // Resolve host. The resolver is pluggable — default
         // [`SystemResolver`] runs blocking `getaddrinfo(3)` off-thread;
         // tests and /etc/hosts-style overrides can substitute their own.
@@ -290,10 +286,7 @@ impl FingerprintConnector {
             })
             .await
             .map_err(TlsError::TcpConnect)?;
-
-        // TLS handshake with all per-connection fingerprint settings.
-        self.tls_handshake(tcp_stream, host, alpn_override.is_none())
-            .await
+        Ok(tcp_stream)
     }
 
     /// Perform TLS handshake with all per-connection fingerprint settings.
@@ -363,6 +356,8 @@ impl FingerprintConnector {
         if self.accept_invalid_certs {
             ssl.set_verify(SslVerifyMode::NONE);
         }
+        let verification_failure = (!self.accept_invalid_certs && !self.pins.is_empty())
+            .then(|| install_pinning_verifier(&mut ssl, &self.pins));
 
         // Session resumption — install cached session ticket before handshake.
         // Recover from a poisoned lock rather than silently skipping resumption
@@ -409,27 +404,41 @@ impl FingerprintConnector {
         // TLS handshake. leyline-bssl-tokio::SslStream::connect requires
         // Pin<&mut Self>; `S: Unpin` lets us pin on the stack.
         let mut stream = leyline_bssl_tokio::SslStream::new(ssl, io)
-            .map_err(|e| TlsError::SslConnect(e.to_string()))?;
-        std::pin::Pin::new(&mut stream)
-            .connect()
-            .await
-            .map_err(|e| TlsError::SslConnect(e.to_string()))?;
+            .map_err(|e| TlsError::SslConfig(e.to_string()))?;
+        if let Err(e) = std::pin::Pin::new(&mut stream).connect().await {
+            return Err(classify_handshake(
+                verification_failure.as_ref(),
+                stream.ssl().verify_result().err(),
+                e,
+            ));
+        }
 
         // Pinning replaced BoringSSL's built-in verifier, which skips
         // its hostname (SAN) check. Re-verify the leaf against the
         // requested host so a CA-trusted, correctly-pinned cert issued
         // for a different name can't be accepted here. Skipped only
         // when the caller explicitly opted out of verification.
-        if self.pins_active && !self.accept_invalid_certs {
+        if !self.pins.is_empty() && !self.accept_invalid_certs {
             let leaf = stream.ssl().peer_certificate().ok_or_else(|| {
-                TlsError::SslConnect("pinned connection presented no peer certificate".into())
+                TlsError::Certificate("pinned connection presented no peer certificate".into())
             })?;
-            let matches = leaf
-                .check_host(host)
-                .map_err(|e| TlsError::SslConnect(format!("hostname check failed: {e}")))?;
+            // Mirror `setup_verify_hostname` (leyline-bssl): an IP-literal host
+            // must be matched against IP SANs and any other host against DNS
+            // SANs. `X509_check_host` never matches IP SANs, so without this
+            // branch a valid IP-SAN certificate on a pinned IP connection is
+            // wrongly rejected. BoringSSL's `X509_check_host` also rejects
+            // partial wildcards unconditionally (`X509_CHECK_FLAG_NO_PARTIAL_
+            // WILDCARDS` is 0 in this build), so the hardcoded flags=0 in
+            // `check_host` already matches the default path's
+            // `NO_PARTIAL_WILDCARDS` strictness — the DNS branch needs no flag.
+            let matches = match host.parse::<std::net::IpAddr>() {
+                Ok(_) => leaf.check_ip_asc(host),
+                Err(_) => leaf.check_host(host),
+            }
+            .map_err(|e| TlsError::Hostname(format!("hostname check failed: {e}")))?;
             if !matches {
-                return Err(TlsError::SslConnect(format!(
-                    "certificate is valid and pinned but its SAN does not match {host}"
+                return Err(TlsError::Hostname(format!(
+                    "certificate is valid and pinned but does not match {host}"
                 )));
             }
         }
@@ -451,6 +460,33 @@ impl FingerprintConnector {
                 tls_cipher,
             },
         ))
+    }
+}
+
+fn classify_handshake(
+    failure: Option<&VerificationFailure>,
+    verify_error: Option<X509VerifyError>,
+    error: leyline_bssl::ssl::Error,
+) -> TlsError {
+    // BoringSSL reports INVALID_CALL when certificate verification never ran
+    // (for example, the peer reset or sent a non-TLS record). It is not a
+    // certificate failure and must not hide the typed transport/protocol cause.
+    let verify_error = verify_error.filter(|error| *error != X509VerifyError::INVALID_CALL);
+    match failure.and_then(take_verification_failure) {
+        Some(TrustFailure::Certificate) => TlsError::Certificate(error.to_string()),
+        Some(TrustFailure::Pinning) => TlsError::Pinning(error.to_string()),
+        None if matches!(
+            verify_error,
+            Some(X509VerifyError::HOSTNAME_MISMATCH | X509VerifyError::IP_ADDRESS_MISMATCH)
+        ) =>
+        {
+            TlsError::Hostname(error.to_string())
+        }
+        None if verify_error.is_some() => TlsError::Certificate(error.to_string()),
+        None => match error.into_io_error() {
+            Ok(error) => TlsError::HandshakeIo(error),
+            Err(error) => TlsError::Handshake(error.to_string()),
+        },
     }
 }
 
@@ -500,17 +536,6 @@ fn lock_unpoisoned<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
         );
         poisoned.into_inner()
     })
-}
-
-/// Returns `true` the first time it sees a given profile name this process,
-/// `false` thereafter — so the unapplied-`extension_permutation` warning
-/// fires once per profile instead of on every Firefox/Safari session build.
-fn warn_permutation_once(profile_name: &str) -> bool {
-    use std::collections::HashSet;
-    use std::sync::OnceLock;
-    static SEEN: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-    let seen = SEEN.get_or_init(|| Mutex::new(HashSet::new()));
-    lock_unpoisoned(seen).insert(profile_name.to_string())
 }
 
 #[cfg(test)]

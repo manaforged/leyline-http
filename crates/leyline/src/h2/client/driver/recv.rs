@@ -13,6 +13,15 @@ use crate::h2::stream_state::StreamEvent;
 
 use super::*;
 
+/// Slack permitted before an over-window inbound DATA frame is treated
+/// as a flow-control violation (RFC 9113 §6.9.1). A compliant peer never
+/// drives a receive window below zero — it tracks the credit we
+/// advertised and stops at it — so this is pure defensive margin against
+/// a benign accounting quirk. A slow-drip or window-overflow attacker
+/// overshoots by far more than one frame's worth and trips the check
+/// regardless.
+const RECV_WINDOW_VIOLATION_SLACK: i64 = 16 * 1024;
+
 impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     pub(super) async fn on_inbound_frame(&mut self, frame: Frame) -> Result<(), H2Error> {
         // RFC 9113 §5.1.1: client-initiated streams use odd identifiers;
@@ -75,8 +84,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 self.peer_snapshot
                     .set_enable_connect_protocol(self.peer_settings.enable_connect_protocol);
                 self.writer.write_settings_ack().await?;
-                self.reader
-                    .set_max_frame_size(self.peer_settings.max_frame_size);
+                // NB: the peer's SETTINGS_MAX_FRAME_SIZE bounds what *we send*
+                // (the writer reads it), not what we accept — so it deliberately
+                // does NOT touch the reader's inbound cap, which stays fixed at
+                // the value we advertised at connection setup (see bootstrap).
                 // Only the encoder tracks the peer's HEADER_TABLE_SIZE (it
                 // bounds how large a dynamic table *we* may push toward the
                 // peer's decoder). Our decoder's ceiling is whatever we
@@ -208,6 +219,13 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             h.fragment
         } else {
             let max_header_block = self.config.max_header_block_bytes;
+            // Bound the *entire* reassembly in wall-clock time, computed
+            // once so slow dribbling can't reset it. Without this a peer
+            // that sends HEADERS without END_HEADERS and then stalls
+            // parks the single driver task (and every multiplexed stream)
+            // forever — the `max_header_block` cap bounds size, never time.
+            let reassembly_timeout = self.config.header_block_reassembly_timeout;
+            let deadline = tokio::time::Instant::now() + reassembly_timeout;
             let mut assembled = h.fragment.to_vec();
             loop {
                 if assembled.len() > max_header_block {
@@ -218,14 +236,21 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                         ),
                     });
                 }
-                let cont = self
-                    .reader
-                    .next()
-                    .await?
-                    .ok_or_else(|| H2Error::Connection {
-                        code: ErrorCode::ProtocolError,
-                        reason: "connection closed during CONTINUATION".into(),
-                    })?;
+                let cont = match tokio::time::timeout_at(deadline, self.reader.next()).await {
+                    Ok(inner) => inner?,
+                    Err(_) => {
+                        return Err(H2Error::Connection {
+                            code: ErrorCode::ProtocolError,
+                            reason: format!(
+                                "CONTINUATION reassembly exceeded {reassembly_timeout:?}"
+                            ),
+                        });
+                    }
+                }
+                .ok_or_else(|| H2Error::Connection {
+                    code: ErrorCode::ProtocolError,
+                    reason: "connection closed during CONTINUATION".into(),
+                })?;
                 match cont {
                     Frame::Continuation {
                         stream_id,
@@ -267,19 +292,52 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 self.fail_stream(stream_id, err);
                 return Ok(());
             }
+            let mut status = None;
+            let mut saw_regular = false;
+            let mut bad_status = false;
             for header in decoded {
-                if header.name.as_ref() == b":status" {
-                    actor.status = std::str::from_utf8(&header.value)
-                        .ok()
-                        .and_then(|v| v.parse().ok())
-                        .ok_or_else(|| H2Error::Hpack("invalid :status".into()))?;
-                } else if !header.name.starts_with(b":") {
+                if header.name.starts_with(b":") {
+                    let value = header.value.as_ref();
+                    if saw_regular
+                        || header.name.as_ref() != b":status"
+                        || status.is_some()
+                        || value.len() != 3
+                        || !value.iter().all(u8::is_ascii_digit)
+                    {
+                        bad_status = true;
+                        break;
+                    }
+                    status = Some(
+                        value
+                            .iter()
+                            .fold(0_u16, |code, digit| code * 10 + u16::from(*digit - b'0')),
+                    );
+                } else {
+                    saw_regular = true;
                     actor.resp_headers.push((
                         HeaderStr::from_bytes_lossy(header.name),
                         HeaderStr::from_bytes_lossy(header.value),
                     ));
                 }
             }
+            // A response HEADERS block MUST carry exactly one valid numeric
+            // :status pseudo-header (RFC 9113 §8.3.1). A malformed or absent
+            // :status is a malformed *response*: fail this one stream with
+            // PROTOCOL_ERROR. Previously a malformed value propagated `?` out
+            // of the event loop and tore down every stream multiplexed on the
+            // connection, and an absent :status was silently delivered to the
+            // caller as a successful `status = 0` response.
+            let Some(status) = status.filter(|status| !bad_status && *status != 101) else {
+                self.fail_stream(
+                    stream_id,
+                    H2Error::Stream {
+                        stream_id,
+                        code: ErrorCode::ProtocolError,
+                    },
+                );
+                return Ok(());
+            };
+            actor.status = status;
             // 1xx informational (except 101) is provisional — discard and await
             // the real final HEADERS (mirrors H1 read_h1_response). Keep HPACK state.
             if matches!(actor.status, 100..=199) && actor.status != 101 && !h.end_stream {
@@ -299,7 +357,30 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 self.complete_stream(stream_id);
             }
         } else {
-            // Trailers.
+            // Trailers (a second HEADERS block). RFC 9113 §8.1: a trailer
+            // section MUST carry END_STREAM — it is the last thing on the
+            // stream. Without it the response framing is malformed; fail this
+            // stream rather than completing it as if the response ended cleanly.
+            if !h.end_stream {
+                self.fail_stream(
+                    stream_id,
+                    H2Error::Stream {
+                        stream_id,
+                        code: ErrorCode::ProtocolError,
+                    },
+                );
+                return Ok(());
+            }
+            if decoded.iter().any(|header| header.name.starts_with(b":")) {
+                self.fail_stream(
+                    stream_id,
+                    H2Error::Stream {
+                        stream_id,
+                        code: ErrorCode::ProtocolError,
+                    },
+                );
+                return Ok(());
+            }
             if let Err(e) = actor.state.transition(StreamEvent::RecvTrailers) {
                 let err = map_state_err(stream_id, e);
                 self.fail_stream(stream_id, err);
@@ -333,6 +414,20 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         // `conn_send_window` drains to zero and every stream on the
         // connection would stall.
         self.conn_recv_window -= len;
+        // RFC 9113 §6.9.1: the peer must not send more DATA than the
+        // connection receive window we advertised. A compliant peer
+        // tracks that credit and stops at it, so a window driven below
+        // zero (beyond a small slack) means the peer ignored flow
+        // control — a connection-level FLOW_CONTROL_ERROR.
+        if self.conn_recv_window < -RECV_WINDOW_VIOLATION_SLACK {
+            return Err(H2Error::Connection {
+                code: ErrorCode::FlowControlError,
+                reason: format!(
+                    "peer overran connection receive window by {} bytes",
+                    -self.conn_recv_window
+                ),
+            });
+        }
 
         let complete;
         let fail_outcome: Option<(H2Error, ErrorCode)> = {
@@ -427,6 +522,20 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 }
             }
             actor.recv_window -= len;
+            // RFC 9113 §6.9.1 at the stream level: an over-window DATA
+            // frame a compliant peer would never send is a stream-level
+            // FLOW_CONTROL_ERROR (RST_STREAM), leaving the rest of the
+            // connection intact. A stream failure already decided above
+            // (max-body, saturated consumer) takes precedence.
+            if outcome.is_none() && actor.recv_window < -RECV_WINDOW_VIOLATION_SLACK {
+                outcome = Some((
+                    H2Error::Stream {
+                        stream_id,
+                        code: ErrorCode::FlowControlError,
+                    },
+                    ErrorCode::FlowControlError,
+                ));
+            }
             complete = d.end_stream;
             outcome
         };

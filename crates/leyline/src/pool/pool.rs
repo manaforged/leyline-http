@@ -272,17 +272,23 @@ impl Pool {
         {
             let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
             map.retain(|_, entry| match entry {
-                PooledConn::H1 { idle, .. } => {
+                PooledConn::H1 { idle, last_use, .. } => {
                     let before = idle.len();
                     idle.retain(|(_, returned_at)| {
                         now.duration_since(*returned_at) < self.idle_timeout
                     });
                     idle_evicted += (before - idle.len()) as u64;
-                    // Keep unless idle expiry actually emptied the deque; an
-                    // entry emptied only by in-flight checkouts dropped nothing
-                    // (before == len) and must survive for the returning
-                    // requests to reuse.
-                    !idle.is_empty() || before == idle.len()
+                    // Keep while warm connections remain. An empty deque is
+                    // ambiguous: it may be empty only because every connection is
+                    // currently checked out (in-flight) — those requests will
+                    // return and reuse the entry, so it must survive — or it may
+                    // be abandoned, its connections all checked out and then died
+                    // mid-request, never returned via `return_h1`. `last_use` is
+                    // touched on every checkout and return, so an empty entry
+                    // untouched for the whole idle window has no live borrowers
+                    // and is dropped here rather than lingering until LRU
+                    // eviction (mirrors the H2/H3 `last_use` idle test below).
+                    !idle.is_empty() || now.duration_since(*last_use) < self.idle_timeout
                 }
                 PooledConn::H2 {
                     handle, last_use, ..
@@ -494,15 +500,33 @@ impl Pool {
         }
     }
 
-    /// Install a new H2 pooled connection.
+    /// Install a freshly-opened H2 connection, or — if a live one already
+    /// exists for `key` (a concurrent cold request beat us) — keep the existing
+    /// one and return its handle, dropping ours (its `DriverTask` drops here and
+    /// GOAWAY-closes the unused connection). Returns the canonical handle the
+    /// caller must use. Mirrors [`Self::install_or_get_h3`]: the coalesced connect
+    /// single-flights the common cold burst, but the shared-failure retry can
+    /// still let two connects reach here, and clobbering would drop a live pooled
+    /// connection out from under the requests already multiplexing on it.
     pub(crate) fn install_h2(
         &self,
         key: PoolKey,
         handle: H2Client,
         driver: DriverTask,
         tls: TlsInfo,
-    ) {
+    ) -> (H2Client, TlsInfo) {
         let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(PooledConn::H2 {
+            handle: existing,
+            tls: existing_tls,
+            ..
+        }) = map.get(&key)
+        {
+            if !existing.is_closed() {
+                self.counters.h2_hits.fetch_add(1, Ordering::Relaxed);
+                return (existing.clone(), existing_tls.clone());
+            }
+        }
         if !map.contains_key(&key) {
             let evicted = Self::evict_lru_if_needed(&mut map, self.max_connections);
             if evicted > 0 {
@@ -511,6 +535,7 @@ impl Pool {
                     .fetch_add(evicted, Ordering::Relaxed);
             }
         }
+        let out = (handle.clone(), tls.clone());
         map.insert(
             key,
             PooledConn::H2 {
@@ -521,6 +546,7 @@ impl Pool {
             },
         );
         self.counters.installs.fetch_add(1, Ordering::Relaxed);
+        out
     }
 
     /// Return a still-reusable H1 connection to the pool for `key`.
@@ -675,5 +701,75 @@ impl Pool {
 impl Default for Pool {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Pool;
+    use crate::pool::types::{PoolKey, PooledConn, TlsInfo, Transport};
+    use std::collections::VecDeque;
+    use std::time::{Duration, Instant};
+
+    fn h1_key(host: &str) -> PoolKey {
+        PoolKey {
+            host: host.to_string(),
+            port: 80,
+            proxy: None,
+            transport: Transport::Tcp,
+        }
+    }
+
+    fn insert_empty_h1(pool: &Pool, host: &str, last_use: Instant) {
+        pool.inner.lock().unwrap_or_else(|e| e.into_inner()).insert(
+            h1_key(host),
+            PooledConn::H1 {
+                idle: VecDeque::new(),
+                last_use,
+                tls: TlsInfo::default(),
+            },
+        );
+    }
+
+    // Regression for the lingering-empty-H1-entry leak. An entry whose deque
+    // emptied because its connections were all checked out and then died
+    // mid-request (never returned via `return_h1`) used to survive every idle
+    // sweep — `before == idle.len()` held forever for a `0 == 0` empty deque —
+    // and only left the pool on LRU eviction. Now the idle sweep drops it once
+    // its `last_use` ages past the idle timeout (no request has borrowed it).
+    #[test]
+    fn evict_idle_drops_abandoned_empty_h1_entry() {
+        let pool = Pool::with_limits(Duration::from_millis(20), 2048, 6);
+        // last_use well past the 20ms idle timeout → no live borrower.
+        let stale = Instant::now()
+            .checked_sub(Duration::from_millis(40))
+            .expect("monotonic clock is >40ms past its epoch");
+        insert_empty_h1(&pool, "abandoned", stale);
+
+        pool.evict_idle();
+
+        assert_eq!(
+            pool.len(),
+            0,
+            "an empty H1 entry idle past the timeout must be reaped, not linger until LRU"
+        );
+    }
+
+    // The counterpart the fix must NOT break: an entry that is empty only
+    // because every connection is currently checked out (in-flight) has a
+    // recent `last_use`, so the sweep keeps it for the returning requests to
+    // reuse rather than churning a drop + recreate on every sweep.
+    #[test]
+    fn evict_idle_keeps_empty_h1_entry_with_live_checkouts() {
+        let pool = Pool::with_limits(Duration::from_secs(300), 2048, 6);
+        insert_empty_h1(&pool, "in-flight", Instant::now());
+
+        pool.evict_idle();
+
+        assert_eq!(
+            pool.len(),
+            1,
+            "an empty H1 entry touched within the idle window (checkouts in flight) must survive"
+        );
     }
 }

@@ -71,8 +71,12 @@ pub(crate) enum PooledConn {
     /// An HTTP/2 entry. The `H2Client` is cloneable; each outbound
     /// request clones it, so the pool can hand out unlimited
     /// concurrent handles without ever checking the connection out /
-    /// in. The `DriverTask` stays here so dropping the pool entry
-    /// forces a graceful shutdown.
+    /// in. The entry also holds the `DriverTask`, but dropping that
+    /// alone does not stop the driver ([`DriverTask`] is inert on drop);
+    /// the driver shuts down gracefully (GOAWAY) only when the last
+    /// `H2Client` clone anywhere is dropped. Evicting this entry drops
+    /// one such clone — it *contributes* to that shutdown rather than
+    /// forcing it.
     H2 {
         handle: H2Client,
         /// Wrapped in `Option` so we can take it on eviction.

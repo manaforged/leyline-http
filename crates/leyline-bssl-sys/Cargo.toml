@@ -2,7 +2,7 @@
 name = "leyline-bssl-sys"
 version = "1.0.0-alpha.3"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.86"
 authors = [
     "Thomas Gardiner",
     "0x676e67 <gngppz@gmail.com>",
@@ -22,7 +22,8 @@ autotests = false
 autobenches = false
 # Prebuilt artifacts are the dev/release path (no CMake/bindgen). The source
 # tree (deps/boringssl submodule + patches/ + build/ + cmake/) is the CI path:
-# scripts/package-bssl.sh rebuilds the libraries and bindings from it.
+# scripts/package-bssl.sh rebuilds the libraries and bindings from it. Its
+# x86_64-pc-windows-msvc path uses cargo-xwin's Microsoft SDK/UCRT sysroot.
 include = [
     "/Cargo.toml",
     "/README.md",

@@ -17,12 +17,11 @@ pub(crate) async fn connect<C: crate::tls::TlsHandshake>(
     proxy: &url::Url,
     include_alps: bool,
 ) -> Result<TlsStream, TlsError> {
-    let mut tcp_stream = super::connect_to_proxy(proxy, 1080).await?;
-
-    let has_auth = !proxy.username().is_empty();
+    let auth = auth_request(proxy)?;
+    let mut tcp_stream = super::connect_to_proxy(connector, proxy, 1080).await?;
 
     // Greeting: version 5, auth methods.
-    if has_auth {
+    if auth.is_some() {
         // Offer NO_AUTH (0x00) and USERNAME/PASSWORD (0x02).
         tcp_stream
             .write_all(&[0x05, 0x02, 0x00, 0x02])
@@ -47,15 +46,21 @@ pub(crate) async fn connect<C: crate::tls::TlsHandshake>(
         ));
     }
 
-    match method_resp[1] {
-        0x00 => {}
-        0x02 => authenticate(&mut tcp_stream, proxy).await?,
-        0xFF => {
+    match (method_resp[1], auth.as_deref()) {
+        // NO_AUTH is always offered and always acceptable.
+        (0x00, _) => {}
+        // USERNAME/PASSWORD — only valid if *we* offered it. RFC 1928 requires
+        // the server to select from the methods the client sent; a server that
+        // picks 0x02 when we only offered NO_AUTH is attempting an unsolicited
+        // auth downgrade. Fall through to the rejection arm rather than sending
+        // credentials (or empty ones) we never advertised.
+        (0x02, Some(auth)) => authenticate(&mut tcp_stream, auth).await?,
+        (0xFF, _) => {
             return Err(TlsError::Profile(
                 "socks5: no acceptable auth method".into(),
             ));
         }
-        other => {
+        (other, _) => {
             return Err(TlsError::Profile(format!(
                 "socks5: unsupported auth method 0x{other:02x}"
             )));
@@ -69,9 +74,24 @@ pub(crate) async fn connect<C: crate::tls::TlsHandshake>(
         .await
 }
 
-async fn authenticate(tcp_stream: &mut TcpStream, proxy: &url::Url) -> Result<(), TlsError> {
+fn auth_request(proxy: &url::Url) -> Result<Option<Vec<u8>>, TlsError> {
     let username = percent_decode(proxy.username());
-    let password = proxy.password().map(percent_decode).unwrap_or_default();
+    let password = proxy.password().map(percent_decode);
+
+    if username.is_empty() && password.is_none() {
+        return Ok(None);
+    }
+
+    let Some(password) = password else {
+        return Err(TlsError::Profile(
+            "socks5: username and password must both be present".into(),
+        ));
+    };
+    if username.is_empty() || password.is_empty() {
+        return Err(TlsError::Profile(
+            "socks5: username and password must both be non-empty".into(),
+        ));
+    }
     if username.len() > 255 || password.len() > 255 {
         return Err(TlsError::Profile(
             "socks5: username or password exceeds 255 bytes".into(),
@@ -83,8 +103,12 @@ async fn authenticate(tcp_stream: &mut TcpStream, proxy: &url::Url) -> Result<()
     auth_req.extend_from_slice(username.as_bytes());
     auth_req.push(password.len() as u8);
     auth_req.extend_from_slice(password.as_bytes());
+    Ok(Some(auth_req))
+}
+
+async fn authenticate(tcp_stream: &mut TcpStream, auth: &[u8]) -> Result<(), TlsError> {
     tcp_stream
-        .write_all(&auth_req)
+        .write_all(auth)
         .await
         .map_err(TlsError::TcpConnect)?;
 
@@ -223,18 +247,66 @@ mod tests {
     async fn authenticate_rejects_wrong_subnegotiation_version() {
         let (mut client, mut server) = pair().await;
         let proxy: url::Url = "socks5://user:pass@127.0.0.1:1080".parse().unwrap();
+        let auth = auth_request(&proxy).unwrap().unwrap();
         let server_task = tokio::spawn(async move {
             let mut buf = vec![0u8; 64];
             let _ = server.read(&mut buf).await.unwrap();
             server.write_all(&[0x05, 0x00]).await.unwrap();
             server // keep the socket open until the client is done
         });
-        let res = authenticate(&mut client, &proxy).await;
+        let res = authenticate(&mut client, &auth).await;
         assert!(
             res.is_err(),
             "malformed auth VER byte must be rejected, got {res:?}"
         );
         let _ = server_task.await;
+    }
+
+    #[test]
+    fn auth_request_encodes_rfc_1929_credentials() {
+        let proxy: url::Url = "socks5://u%73er:p%40ss@127.0.0.1:1080".parse().unwrap();
+
+        assert_eq!(
+            auth_request(&proxy).unwrap(),
+            Some(vec![
+                0x01, 0x04, b'u', b's', b'e', b'r', 0x04, b'p', b'@', b's', b's'
+            ])
+        );
+    }
+
+    #[test]
+    fn auth_request_leaves_no_auth_proxies_unmodified() {
+        let proxy: url::Url = "socks5://127.0.0.1:1080".parse().unwrap();
+
+        assert_eq!(auth_request(&proxy).unwrap(), None);
+    }
+
+    #[test]
+    fn auth_request_accepts_255_byte_credentials() {
+        let user = "u".repeat(255);
+        let password = "p".repeat(255);
+        let proxy: url::Url = format!("socks5://{user}:{password}@127.0.0.1:1080")
+            .parse()
+            .unwrap();
+
+        let auth = auth_request(&proxy).unwrap().unwrap();
+        assert_eq!(auth.len(), 513);
+        assert_eq!(&auth[..2], &[0x01, 255]);
+        assert_eq!(auth[257], 255);
+    }
+
+    #[test]
+    fn auth_request_rejects_incomplete_empty_and_oversized_credentials() {
+        for proxy in [
+            "socks5://user@127.0.0.1:1080",
+            "socks5://:pass@127.0.0.1:1080",
+            "socks5://user:@127.0.0.1:1080",
+            &format!("socks5://{}:pass@127.0.0.1:1080", "u".repeat(256)),
+            &format!("socks5://user:{}@127.0.0.1:1080", "p".repeat(256)),
+        ] {
+            let proxy: url::Url = proxy.parse().unwrap();
+            assert!(auth_request(&proxy).is_err(), "{proxy}");
+        }
     }
 
     // RFC 1928 §5: the domain-name address type carries a one-byte

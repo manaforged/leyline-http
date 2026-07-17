@@ -7,10 +7,9 @@
 //! operations with exponential backoff.
 //!
 //! This module provides [`RetryPolicy`] — a small, explicit opt-in.
-//! Default behaviour is still zero retries (see
-//! [`RetryPolicy::none`]). Callers opt in per-request via
-//! [`crate::RequestBuilder::retry`] or set a session-wide default by
-//! stashing the policy on every builder they create.
+//! Default behaviour is zero retries (see [`RetryPolicy::none`]). Callers opt
+//! in per-request via [`crate::RequestBuilder::retry`] or for every request in
+//! a session via [`crate::SessionBuilder::retry`].
 //!
 //! # Idempotence
 //!
@@ -45,8 +44,8 @@ pub enum RetryTrigger {
     Timeout,
 }
 
-/// Retry policy. Wire on a [`crate::RequestBuilder`] with
-/// [`crate::RequestBuilder::retry`].
+/// Retry policy. Configure it with [`crate::RequestBuilder::retry`] or
+/// [`crate::SessionBuilder::retry`]. New sessions use [`RetryPolicy::none`].
 ///
 /// ```rust,ignore
 /// use std::time::Duration;

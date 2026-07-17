@@ -278,6 +278,24 @@ impl Jar {
     /// hazard where an auth cookie originally minted on `Path=/account`
     /// would never be matched and a second `Path=/` entry would shadow
     /// it in the jar.
+    ///
+    /// **Trusted-caller contract.** `domain` is the caller's own input and is
+    /// NOT re-validated against the Public Suffix List, because the inserted
+    /// cookie is always **host-only** (`host_only: true`): per
+    /// [`Cookie::matches`](crate::cookie::record::Cookie::matches) a host-only
+    /// cookie is sent only on an exact host match and can never broadcast to
+    /// sibling or child domains, so a public-suffix `domain` here yields a
+    /// cookie scoped to that exact host — not a supercookie. Applying the
+    /// parser's PSL guard would in fact be *stricter* than the parse path,
+    /// which does not run that guard on host-only cookies either
+    /// (`cookie/parse.rs`), and would wrongly reject legitimate host-only
+    /// cookies such as `localhost` used in local development. The network
+    /// trust boundary — where an attacker-supplied `Domain=` attribute could
+    /// broaden scope — is [`Jar::store_set_cookie`], which enforces PSL,
+    /// domain-match, and the eviction caps. This jar-shaped setter is the
+    /// local-state / persistence view (see the type-level docs) and does not
+    /// enforce the per-domain / global caps; a caller inserting unbounded
+    /// distinct names owns that discipline.
     pub fn set_named_on(&self, domain: &str, name: &str, value: &str) {
         let mut jar = lock(&self.inner);
         let key = domain.to_lowercase();
@@ -853,6 +871,36 @@ mod tests {
         jar.set_named_on("api.example.com", "session", "second");
         assert_eq!(jar.get_named("session").as_deref(), Some("second"));
         assert_eq!(jar.len(), 1);
+    }
+
+    #[test]
+    fn set_named_on_cookie_is_host_only_no_cross_host_leak() {
+        // The trusted-caller contract on `set_named_on` rests on the inserted
+        // cookie being host-only: even a public-suffix `domain` cannot become a
+        // supercookie because a host-only cookie is sent ONLY on an exact host
+        // match. Lock that invariant so a future change to the insert path
+        // (e.g. dropping `host_only: true`) can't silently turn these into
+        // domain-broadcasting cookies.
+        let jar = Jar::new();
+        jar.set_named_on("example.com", "sess", "v");
+        // Visible on the exact host.
+        assert_eq!(
+            jar.get_cookie("https://example.com/", "sess").as_deref(),
+            Some("v")
+        );
+        // NOT visible on a subdomain or a sibling host.
+        assert_eq!(jar.get_cookie("https://www.example.com/", "sess"), None);
+        assert_eq!(jar.get_cookie("https://api.example.com/", "sess"), None);
+
+        // Same guarantee even when `domain` is a public suffix: the cookie is
+        // pinned to that exact host and does not broadcast to registrable
+        // domains under it.
+        jar.set_named_on("co.uk", "psl", "v");
+        assert_eq!(
+            jar.get_cookie("https://co.uk/", "psl").as_deref(),
+            Some("v")
+        );
+        assert_eq!(jar.get_cookie("https://example.co.uk/", "psl"), None);
     }
 
     #[test]

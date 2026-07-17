@@ -436,7 +436,11 @@ impl Resolver for LayeredResolver {
 pub struct TimeoutConfig {
     /// Request-wide timeout.
     pub total: Duration,
-    /// DNS + TCP + TLS connect timeout.
+    /// DNS + TCP + TLS connect timeout. Defaults to 10s: a faulty provider
+    /// that completes the TCP connection but stalls the TLS handshake would
+    /// otherwise tie the request up for the full `total` timeout. A 10s cutoff
+    /// fails such a connect fast (as a retryable connection error) so a retry
+    /// policy can move on to a fresh connection. Set to `None` to disable.
     pub connect: Option<Duration>,
     /// Per-chunk idle timeout for streaming response bodies (and the drain of
     /// a streamed body that the caller buffers). Resets after each chunk, so a
@@ -467,7 +471,7 @@ impl Default for TimeoutConfig {
     fn default() -> Self {
         Self {
             total: Duration::from_secs(300),
-            connect: None,
+            connect: Some(Duration::from_secs(10)),
             read: None,
             response_header: None,
         }

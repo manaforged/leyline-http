@@ -8,13 +8,18 @@ publish anything.
 1. Update the workspace version in `Cargo.toml`, `package.json`, its optional
    dependency pins, and `wrappers/python/pyproject.toml`.
 2. Update `CHANGELOG.md`.
-3. Run `./scripts/verify.sh` from a clean exact-SHA checkout.
+3. Run `./scripts/verify.sh` from a clean exact-SHA checkout. It checks the
+   declared Rust 1.86 MSRV, packages every publishable Rust crate, and compiles
+   a separate consumer against the extracted `leyline` package.
 4. Tag only after the direct platform builds below pass.
 
 ## BoringSSL
 
-Run `scripts/package-bssl.sh` on every supported target and review the generated
-libraries and bindings. Do not copy an artifact between operating systems.
+Run `./scripts/verify.sh --bssl-source-build` on every supported target and
+review the generated libraries and bindings. This command exercises the carried
+BoringSSL source build before checking the resulting `leyline-bssl-sys` crate;
+it intentionally updates the host bundle for review. Do not copy an artifact
+between operating systems.
 
 ## Node
 
@@ -48,6 +53,29 @@ public release; confirm the project license and ownership first.
 
 ## Rust crates
 
-Run `cargo publish --dry-run` first, then publish dependencies before consumers.
-The binding crates are `publish = false`. Public `cargo publish` requires the
-authorized crates.io account and explicit operator intent.
+The binding crates are `publish = false`. The verification script stages the
+committed tree as one temporary workspace and uses Cargo's multi-package
+overlay, so unpublished internal dependencies can be normalized and checked
+before the first crates.io release exists.
+
+```bash
+./scripts/verify.sh
+```
+
+Publish only with the authorized crates.io account and explicit operator intent,
+in this dependency order: `leyline-bssl-sys`, `leyline-bssl`,
+`leyline-bssl-tokio`, `leyline-quiche`, then `leyline`. Use the same manifest
+boundaries for the excluded BoringSSL crates:
+
+```bash
+cargo publish --manifest-path crates/leyline-bssl-sys/Cargo.toml
+cargo publish --manifest-path crates/leyline-bssl/Cargo.toml
+cargo publish --manifest-path crates/leyline-bssl-tokio/Cargo.toml
+cargo publish --manifest-path crates/leyline-quiche/Cargo.toml
+cargo publish --manifest-path crates/leyline/Cargo.toml
+```
+
+Wait for each dependency version to appear in the crates.io index before moving
+to its consumer. On a first release, the package-boundary smoke check above is
+the rehearsal; a downstream `cargo publish --dry-run` cannot resolve internal
+dependencies until they have been published.

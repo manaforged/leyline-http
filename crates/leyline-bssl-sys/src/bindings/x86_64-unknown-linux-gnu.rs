@@ -20007,6 +20007,16 @@ unsafe extern "C" {
     );
     pub fn SSL_CTX_set_grease_enabled(ctx: *mut SSL_CTX, enabled: ::std::os::raw::c_int);
     pub fn SSL_CTX_set_permute_extensions(ctx: *mut SSL_CTX, enabled: ::std::os::raw::c_int);
+    pub fn SSL_CTX_set_extension_order(
+        ctx: *mut SSL_CTX,
+        order: *const u16,
+        order_len: usize,
+    ) -> ::std::os::raw::c_int;
+    pub fn SSL_CTX_set_tls13_cipher_order(
+        ctx: *mut SSL_CTX,
+        order: *const u16,
+        order_len: usize,
+    ) -> ::std::os::raw::c_int;
     pub fn SSL_set_permute_extensions(ssl: *mut SSL, enabled: ::std::os::raw::c_int);
     pub fn SSL_max_seal_overhead(ssl: *const SSL) -> usize;
     pub fn SSL_CTX_set_false_start_allowed_without_alpn(

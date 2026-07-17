@@ -14,6 +14,30 @@ until 1.0 — pin exact versions.
 - Removed GitHub workflow orchestration; verification and releases now run directly on the supported self-hosted machines.
 - Reduced the push gate to package parity and compile sanity; formatting, deeper, and live checks require `--full`.
 - Restored the full verification gate on the current Rust toolchain by formatting the merged examples and resolving Clippy and rustdoc failures.
+- **Application retries are opt-in.** A new `Session` uses
+  `RetryPolicy::none()`. Configure `SessionBuilder::retry(RetryPolicy::default())`
+  for a session-wide policy or `RequestBuilder::retry(...)` for one request.
+  Configured policies retry only safe, replayable requests; a streaming body that
+  would need replay fails with a clear error instead of a second attempt.
+
+- **Default connect timeout is now 10 seconds** (was: `None` / bounded only by
+  the request-wide `total` of 300s). A faulty provider that completes the TCP
+  connection but stalls the TLS handshake now fails the connect fast — as a
+  retryable connection error — instead of tying the request up for the full
+  `total`. Override with `connect_timeout(...)`, or `connect: None` on
+  `TimeoutConfig` to disable.
+
+### Security
+
+- **`TlsTrustConfig::without_system_roots()` now actually excludes the platform
+  trust store.** The connector is built from BoringSSL's `SslConnector::builder`,
+  which unconditionally calls `set_default_verify_paths()`; opting out of system
+  roots previously only skipped *adding* them, leaving the OS default CAs (the
+  public web PKI, on Linux) in the store. A caller who trusted only a private CA
+  therefore still trusted every public CA — an attacker holding any public-CA
+  cert for the target host could MITM them. The no-system-roots path now builds
+  from `bare_builder` (which never calls `set_default_verify_paths`), so only the
+  explicitly-configured roots are trusted.
 
 ### Added
 
@@ -43,6 +67,52 @@ until 1.0 — pin exact versions.
   so a Chrome-150 session advertised a brand token no real Chrome 150 emits,
   splitting the wire `sec-ch-ua` from the browser's own `navigator.userAgentData`.
   Corrected to the value a real Chromium 150.0.7871.47 build emits.
+
+- **TLS handshake failures are now retryable.** `TlsError::Handshake` — the way a
+  peer that resets mid-handshake (a common flaky-provider failure) surfaces — was
+  missing from the retry classifier, so such failures were never retried even
+  under a connection-error policy. It now joins `TcpConnect` / `Dns` /
+  `SslConnect` as a retryable connection error, and `Error::is_connection_closed`
+  reports it too.
+
+- **307/308 redirects no longer drop a buffered request body.** The hop body was
+  moved into the send and `current_body` left empty, so a method+body-preserving
+  redirect re-sent the request with **no body** — silently corrupting e.g. a
+  307-redirected login/checkout POST. The buffered body is now kept as a cheap
+  refcounted clone and replayed on the next hop. Streaming bodies still fail
+  loudly (they can't be replayed); an empty body stays empty.
+
+- **HTTP/2 inbound frame-size cap now uses our advertised `MAX_FRAME_SIZE`, not
+  the peer's.** The reader was capped by `peer_settings.max_frame_size` — the
+  peer's *receive* limit — so a hostile server advertising a 16 MB frame size
+  could make the client accept (and eagerly pre-allocate) frames far larger than
+  the 16384 it actually advertised. The reader now enforces our own value.
+
+- **Malformed or absent HTTP/2 and HTTP/3 `:status` no longer mis-behaves.** In
+  HTTP/2 a malformed `:status` propagated out of the event loop and tore down
+  every stream on the connection, and an absent one was delivered to the caller
+  as a successful `status = 0`. Both now fail just that stream (PROTOCOL_ERROR);
+  the HTTP/3 path, which coerced a bad `:status` to `0`, now resets the stream
+  with `H3_MESSAGE_ERROR`.
+
+- **HTTP/2 trailers now require END_STREAM.** A trailer HEADERS block without
+  END_STREAM (a malformed response per RFC 9113 §8.1) was completing the stream
+  as if the response ended cleanly; it now fails the stream.
+
+- **Redirects to a non-HTTP(S) scheme are refused.** A `Location:` of `file:`,
+  `data:`, `javascript:`, etc. was passed into the transport to fail with a
+  confusing downstream error; it is now rejected with a clear `Error::Redirect`.
+
+- **SOCKS5 no longer follows an auth method it never offered.** A server that
+  selected USERNAME/PASSWORD when the client offered only NO_AUTH would proceed
+  to authenticate (with empty credentials) — an unsolicited-auth downgrade. The
+  client now rejects a selected method it did not advertise, and offers auth when
+  the proxy URL carries a username **or** a password (a password-only URL was
+  previously not offering auth).
+
+- **`tcp::log_once` no longer panics on a poisoned lock.** It now recovers via
+  `PoisonError::into_inner`, matching the rest of the crate — a best-effort
+  diagnostic log must never abort a connection.
 
 - **HTTP/3 driver now reaps cancelled request streams (cancel-safety parity with
   HTTP/2).** When a caller dropped its response receiver before the peer replied

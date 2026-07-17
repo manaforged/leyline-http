@@ -3028,7 +3028,7 @@ pub mod testing {
     }
 
     impl Session {
-        pub fn new() -> Result<Session> {
+        pub fn new() -> Session {
             fn path_relative_to_manifest_dir(path: &str) -> String {
                 std::fs::canonicalize(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(path))
                     .unwrap()
@@ -3036,13 +3036,14 @@ pub mod testing {
                     .into_owned()
             }
 
-            let mut config = crate::Config::new(crate::PROTOCOL_VERSION)?;
-            config.load_cert_chain_from_pem_file(&path_relative_to_manifest_dir(
-                "examples/cert.crt",
-            ))?;
+            let mut config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
             config
-                .load_priv_key_from_pem_file(&path_relative_to_manifest_dir("examples/cert.key"))?;
-            config.set_application_protos(&[b"h3"])?;
+                .load_cert_chain_from_pem_file(&path_relative_to_manifest_dir("examples/cert.crt"))
+                .unwrap();
+            config
+                .load_priv_key_from_pem_file(&path_relative_to_manifest_dir("examples/cert.key"))
+                .unwrap();
+            config.set_application_protos(&[b"h3"]).unwrap();
             config.set_initial_max_data(1500);
             config.set_initial_max_stream_data_bidi_local(150);
             config.set_initial_max_stream_data_bidi_remote(150);
@@ -3053,8 +3054,8 @@ pub mod testing {
             config.enable_dgram(true, 3, 3);
             config.set_ack_delay_exponent(8);
 
-            let h3_config = Config::new()?;
-            Session::with_configs(&mut config, &h3_config)
+            let h3_config = Config::new().unwrap();
+            Session::with_configs(&mut config, &h3_config).unwrap()
         }
 
         pub fn with_configs(config: &mut crate::Config, h3_config: &Config) -> Result<Session> {

@@ -332,7 +332,7 @@ impl RequestBuilder {
         self
     }
 
-    /// Attach a [`RetryPolicy`] to this request.
+    /// Attach a [`RetryPolicy`] to this request, overriding the session policy.
     pub fn retry(mut self, policy: RetryPolicy) -> Self {
         self.retry_policy = policy;
         self

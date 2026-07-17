@@ -269,9 +269,17 @@ impl Session {
 
             // Take the body for this hop. Streams are one-shot; we replace
             // `current_body` with `Body::Empty` so a follow-up redirect
-            // sees there's nothing to replay (and fails loudly).
+            // sees there's nothing to replay (and fails loudly). A buffered
+            // body is kept as a cheap refcounted `Bytes` clone in
+            // `replay_body` so a 307/308 (method+body-preserving) redirect can
+            // re-send it — without this the hop body is moved into the send and
+            // the redirected request would go out with an empty body.
             let hop_body = std::mem::take(&mut current_body);
             let hop_body_was_stream = hop_body.is_stream();
+            let replay_body = match &hop_body {
+                Body::Bytes(b) => Some(b.clone()),
+                _ => None,
+            };
 
             // Send via the configured protocol policy. The per-request
             // proxy override (if any) carries through every redirect
@@ -323,12 +331,31 @@ impl Session {
             if !set_cookies.is_empty() {
                 self.cookie_jar
                     .store_response_cookies(&set_cookies, &current_url);
+                // Response-facing cookie map: read each value back from the jar,
+                // which parsed it with the one RFC 6265 parser (quote-stripping,
+                // domain/prefix validation). We take the name from the header
+                // (split on the first `;` then the first `=`, exactly as the
+                // parser does) but the *value* from the jar, so
+                // `Response::cookies()` cannot diverge from the jar on quoted
+                // values or attribute edge cases — the historical bug of a
+                // second, laxer hand-parser living here. A header the jar
+                // rejected (bad domain, public suffix, `__Host-`/`__Secure-`
+                // violation) or a deletion (`Max-Age=0`) is not a live cookie
+                // and is correctly absent. `get_cookie` scopes to this URL, so a
+                // cookie the server pinned to a non-matching path is reported by
+                // the jar rather than echoed raw here.
+                let url_str = current_url.as_str();
                 for sc in &set_cookies {
-                    if let Some(eq) = sc.find('=') {
-                        let name = sc[..eq].trim();
-                        let rest = &sc[eq + 1..];
-                        let value = rest.split(';').next().unwrap_or("").trim();
-                        all_cookies.insert(name.to_string(), value.to_string());
+                    let Some((name, _)) = sc.split(';').next().and_then(|nv| nv.split_once('='))
+                    else {
+                        continue;
+                    };
+                    let name = name.trim();
+                    if name.is_empty() {
+                        continue;
+                    }
+                    if let Some(value) = self.cookie_jar.get_cookie(url_str, name) {
+                        all_cookies.insert(name.to_string(), value);
                     }
                 }
             }
@@ -353,6 +380,17 @@ impl Session {
                         drop(resp_body_shape);
                         redirect_chain.push(current_url.to_string());
                         current_url = current_url.join(&location)?;
+                        // Refuse to follow a redirect to a non-HTTP(S) target
+                        // (`file:`, `data:`, `javascript:`, …). Browsers reject
+                        // these outright; without this guard the target would
+                        // flow into the transport and fail later with a
+                        // confusing "requires an https:// URL" error.
+                        if !matches!(current_url.scheme(), "http" | "https") {
+                            return Err(Error::Redirect(format!(
+                                "refusing to follow redirect to non-http(s) scheme `{}`",
+                                current_url.scheme()
+                            )));
+                        }
 
                         // 301/302/303: switch to GET, drop body.
                         // 307/308: preserve method and body. A streaming
@@ -366,6 +404,11 @@ impl Session {
                              not replayable. Either buffer the body before sending or set \
                              max_redirects(0)."
                             )));
+                        } else if let Some(bytes) = replay_body {
+                            // 307/308 preserve method and body; re-send the
+                            // buffered payload on the next hop (an empty body
+                            // stays empty — `replay_body` is None).
+                            current_body = Body::Bytes(bytes);
                         }
                         continue;
                     }

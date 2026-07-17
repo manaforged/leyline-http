@@ -50,9 +50,11 @@ pub struct TlsProfile {
     pub cert_compression: Vec<String>,
     #[serde(default)]
     pub permute_extensions: bool,
-    /// Fixed extension permutation indices (e.g. Firefox's deterministic order).
+    /// Fixed ClientHello extension order as IANA TLS extension type IDs.
     #[serde(default)]
-    pub extension_permutation: Option<Vec<u8>>,
+    pub extension_permutation: Option<Vec<u16>>,
+    #[serde(default = "default_grease")]
+    pub grease: bool,
     #[serde(default)]
     pub ech_grease: bool,
     #[serde(default)]
@@ -66,6 +68,10 @@ pub struct TlsProfile {
     pub request_trust_anchors: bool,
     #[serde(default)]
     pub fingerprint: Option<TlsFingerprint>,
+}
+
+const fn default_grease() -> bool {
+    true
 }
 
 #[allow(missing_docs)]
@@ -274,6 +280,7 @@ impl BrowserProfile {
                 cert_compression: Vec::new(),
                 permute_extensions: false,
                 extension_permutation: None,
+                grease: false,
                 ech_grease: false,
                 pre_shared_key: false,
                 request_trust_anchors: false,

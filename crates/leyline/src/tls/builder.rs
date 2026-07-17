@@ -73,6 +73,26 @@ pub(crate) fn apply_profile_with_trust(
     let cipher_str = tls.ciphers.join(":");
     builder.set_cipher_list(&cipher_str)?;
 
+    let tls13 = tls13_cipher_ids(&tls.ciphers)?;
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "windows",
+        all(target_arch = "aarch64", target_os = "macos")
+    ))]
+    if !tls13.is_empty() {
+        builder.set_tls13_cipher_order(&tls13)?;
+    }
+    #[cfg(not(any(
+        target_os = "linux",
+        target_os = "windows",
+        all(target_arch = "aarch64", target_os = "macos")
+    )))]
+    if !tls13.is_empty() && tls.extension_permutation.is_some() {
+        return Err(TlsError::Profile(
+            "exact TLS order requires a rebuilt BoringSSL bundle for this target".into(),
+        ));
+    }
+
     // Curves / supported_groups.
     let curves_str = tls
         .curves
@@ -138,8 +158,26 @@ pub(crate) fn apply_profile_with_trust(
         builder.set_permute_extensions(true);
     }
 
-    // GREASE — always enabled for Chromium/Firefox.
-    builder.set_grease_enabled(true);
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "windows",
+        all(target_arch = "aarch64", target_os = "macos")
+    ))]
+    if let Some(order) = &tls.extension_permutation {
+        builder.set_extension_order(order)?;
+    }
+    #[cfg(not(any(
+        target_os = "linux",
+        target_os = "windows",
+        all(target_arch = "aarch64", target_os = "macos")
+    )))]
+    if tls.extension_permutation.is_some() {
+        return Err(TlsError::Profile(
+            "exact TLS extension order requires a rebuilt BoringSSL bundle for this target".into(),
+        ));
+    }
+
+    builder.set_grease_enabled(tls.grease);
 
     // Minimum TLS version.
     let min = match min_version {
@@ -156,6 +194,23 @@ pub(crate) fn apply_profile_with_trust(
     builder.set_verify(SslVerifyMode::PEER);
 
     Ok(())
+}
+
+fn tls13_cipher_ids(ciphers: &[String]) -> Result<Vec<u16>, TlsError> {
+    ciphers
+        .iter()
+        .filter_map(|cipher| match cipher.as_str() {
+            "TLS_AES_128_GCM_SHA256" => Some(Ok(0x1301)),
+            "TLS_AES_256_GCM_SHA384" => Some(Ok(0x1302)),
+            "TLS_CHACHA20_POLY1305_SHA256" => Some(Ok(0x1303)),
+            _ if cipher.starts_with("TLS_AES_") || cipher.starts_with("TLS_CHACHA20_") => {
+                Some(Err(TlsError::Profile(format!(
+                    "unknown TLS 1.3 cipher: {cipher}"
+                ))))
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 /// Map profile curve names to BoringSSL curve names.

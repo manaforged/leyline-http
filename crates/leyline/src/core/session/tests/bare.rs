@@ -101,7 +101,7 @@ fn session_retry_default_is_inherited_by_requests() {
         .get("https://example.test/")
         .retry(RetryPolicy::none());
     assert_eq!(overridden.retry_policy.max_retries, 0);
-    // A session with no default leaves requests at no-retry.
+    // A session with no explicit policy performs no application retries.
     let bare = Session::new().get("https://example.test/");
     assert_eq!(bare.retry_policy.max_retries, 0);
 }

@@ -148,6 +148,17 @@ pub(crate) trait TlsHandshake {
     /// (client certificate / leaf pins) that must not be presented to, or
     /// applied against, an `https://` proxy.
     fn has_origin_tls_identity(&self) -> bool;
+
+    /// Open a fingerprinted TCP connection to `host:port` through the
+    /// connector's resolver + Happy-Eyeballs + `TcpProfile` path. The [`proxy`]
+    /// module dials the proxy leg through this so the proxy hostname is resolved
+    /// by the connector's resolver (no DNS leak) and the SYN carries the same
+    /// TCP fingerprint as a direct connect.
+    fn dial_tcp(
+        &self,
+        host: &str,
+        port: u16,
+    ) -> impl std::future::Future<Output = Result<tokio::net::TcpStream, TlsError>> + Send;
 }
 
 impl TlsHandshake for FingerprintConnector {
@@ -171,5 +182,9 @@ impl TlsHandshake for FingerprintConnector {
 
     fn has_origin_tls_identity(&self) -> bool {
         FingerprintConnector::has_origin_tls_identity(self)
+    }
+
+    async fn dial_tcp(&self, host: &str, port: u16) -> Result<tokio::net::TcpStream, TlsError> {
+        FingerprintConnector::dial_tcp(self, host, port).await
     }
 }

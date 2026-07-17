@@ -55,6 +55,7 @@ fn flood_config() -> H2Config {
         max_header_block_bytes: 256 * 1024,
         settings_flood_threshold: 100,
         settings_flood_window: Duration::from_secs(10),
+        header_block_reassembly_timeout: Duration::from_secs(10),
     }
 }
 

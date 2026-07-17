@@ -2,7 +2,7 @@
 name = "leyline-bssl"
 version = "1.0.0-alpha.3"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.86"
 authors = [
     "Thomas Gardiner",
     "0x676e67 <gngppz@gmail.com>",
@@ -30,7 +30,7 @@ bitflags = "2.11.1"
 foreign-types = "0.5"
 openssl-macros = "0.1.1"
 libc = "0.2.185"
-leyline-bssl-sys = { path = "../leyline-bssl-sys" }
+leyline-bssl-sys = { path = "../leyline-bssl-sys", version = "=1.0.0-alpha.3" }
 
 [dev-dependencies]
 hex = "0.4"

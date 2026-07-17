@@ -189,7 +189,22 @@ where
         }
     }
 
-    reader.set_max_frame_size(peer_settings.max_frame_size);
+    // Cap inbound frames at *our* advertised SETTINGS_MAX_FRAME_SIZE, never the
+    // peer's. RFC 9113 §4.2: a SETTINGS parameter bounds the frames its *sender*
+    // will receive — so `peer_settings.max_frame_size` limits what *we send*
+    // (the writer honours it), while what we *accept* is what we advertised. The
+    // reader is constructed at the 16384 default, which is exactly right when we
+    // advertise no MAX_FRAME_SIZE (Chrome/Safari/okhttp); only override it if a
+    // profile explicitly advertises a larger value. Using the peer's value here
+    // let a hostile server advertise a huge frame size and make us accept — and
+    // pre-allocate — frames far larger than we ever agreed to receive.
+    if let Some((_, ours)) = config
+        .settings
+        .iter()
+        .find(|(id, _)| matches!(id, crate::h2::config::SettingId::MaxFrameSize))
+    {
+        reader.set_max_frame_size(*ours);
+    }
 
     // HPACK codecs.
     //

@@ -69,7 +69,11 @@ pub enum Error {
         code: u16,
         /// Request URL.
         url: String,
-        /// Response body (for debugging 403s, rate limits, etc).
+        /// Response body prefix (for debugging 403s, rate limits, etc),
+        /// truncated to the first 16 KiB by
+        /// [`Response::error_for_status`](crate::Response::error_for_status)
+        /// so a large body is not retained in — and logged with — the error.
+        /// For the full body, read the `Response` before converting it.
         body: Vec<u8>,
     },
 
@@ -135,6 +139,7 @@ impl Error {
                 code: ErrorCode::RefusedStream,
                 ..
             }) => true,
+            Error::Tls(err) => err.is_retryable(),
             _ => false,
         }
     }

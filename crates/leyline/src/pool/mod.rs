@@ -109,37 +109,73 @@ async fn open_fresh_h2(
         .await
         .map_err(crate::Error::from)?;
 
-    pool.install_h2(key, handle.clone(), driver, tls.clone());
-    Ok((handle, tls))
+    // Returns the canonical handle: if a concurrent connect already installed a
+    // live entry for this key, `install_h2` keeps it and hands it back, dropping
+    // the one we just built rather than clobbering the live pooled connection.
+    Ok(pool.install_h2(key, handle, driver, tls))
 }
 
-/// Establish — or join an already in-progress — H2 connection to `(host, port, proxy)`,
-/// single-flighting concurrent first-requests so they share ONE TLS+H2 handshake instead of each
-/// opening their own. This eliminates the connection storm a one-conn-per-host pool otherwise
-/// triggers when N requests hit a cold destination at once, and (because the connect runs on its
-/// own spawned task) keeps the large handshake state machine off every caller's per-request
-/// future. H2-only: H1 keeps opening parallel connections via its own path.
-///
-/// The spawned connect always runs to completion and removes its own in-flight entry, so a
-/// cancelled leader cannot strand waiters (or leak the pool), and the next miss after a connection
-/// dies starts a fresh connect.
-async fn open_h2_coalesced(
+/// Reconstruct an owned [`crate::Error`] from an `Arc`-shared coalesced-connect
+/// failure. [`crate::Error`] is not `Clone` and the `Arc` is shared across every
+/// waiter, so the underlying error can't be moved out. Preserve the variants the
+/// caller and retry engine key on. In particular, TLS and I/O failures retain
+/// their variant and [`std::io::ErrorKind`], so sharing a failed connection does
+/// not change whether consumers consider it safe to retry.
+fn owned_connect_err(err: &crate::Error) -> crate::Error {
+    match err {
+        crate::Error::Tls(err) => crate::Error::Tls(match err {
+            crate::tls::TlsError::SslConfig(msg) => crate::tls::TlsError::SslConfig(msg.clone()),
+            crate::tls::TlsError::Handshake(msg) => crate::tls::TlsError::Handshake(msg.clone()),
+            crate::tls::TlsError::HandshakeIo(err) => {
+                crate::tls::TlsError::HandshakeIo(std::io::Error::new(err.kind(), err.to_string()))
+            }
+            crate::tls::TlsError::Certificate(msg) => {
+                crate::tls::TlsError::Certificate(msg.clone())
+            }
+            crate::tls::TlsError::Hostname(msg) => crate::tls::TlsError::Hostname(msg.clone()),
+            crate::tls::TlsError::Pinning(msg) => crate::tls::TlsError::Pinning(msg.clone()),
+            crate::tls::TlsError::TcpConnect(err) => {
+                crate::tls::TlsError::TcpConnect(std::io::Error::new(err.kind(), err.to_string()))
+            }
+            crate::tls::TlsError::Dns(err) => {
+                crate::tls::TlsError::Dns(std::io::Error::new(err.kind(), err.to_string()))
+            }
+            crate::tls::TlsError::SslConnect(msg) => crate::tls::TlsError::SslConnect(msg.clone()),
+            crate::tls::TlsError::Profile(msg) => crate::tls::TlsError::Profile(msg.clone()),
+            crate::tls::TlsError::TrustStore(msg) => crate::tls::TlsError::TrustStore(msg.clone()),
+        }),
+        crate::Error::Io(err) => crate::Error::Io(std::io::Error::new(err.kind(), err.to_string())),
+        crate::Error::AlpnMismatch { negotiated } => crate::Error::AlpnMismatch {
+            negotiated: negotiated.clone(),
+        },
+        crate::Error::Http3(msg) => crate::Error::Http3(msg.clone()),
+        other => crate::Error::Io(std::io::Error::new(
+            std::io::ErrorKind::ConnectionReset,
+            other.to_string(),
+        )),
+    }
+}
+
+/// Build (or join) the single-flight in-flight H2 connect for `key`: the shared
+/// future every concurrent first-request awaits. The connect is spawned so it is
+/// DRIVEN TO COMPLETION — and always runs its cleanup — even if every awaiter
+/// cancels. A `Shared` future is lazy: held only in the in-flight map and never
+/// polled, it would otherwise strand the half-open connect and leak the whole
+/// `Pool` through the `Arc<Pool>` it captures (a Pool→Shared→Pool cycle the
+/// cleanup never breaks). The task removes its own in-flight entry on completion,
+/// so a cancelled leader cannot strand waiters and the next miss starts fresh.
+fn h2_inflight_connect(
     pool: &Arc<Pool>,
     connector: &ConnectorVariant,
     h2_config: &H2Config,
-    key: PoolKey,
+    key: &PoolKey,
     host: &str,
     port: u16,
     proxy: Option<&str>,
-) -> Result<(crate::h2::client::H2Client, TlsInfo), crate::Error> {
+) -> self::pool::SharedConnect {
     use futures_util::FutureExt;
 
-    // A connect may have finished between the caller's pool miss and now.
-    if let Some(hit) = pool.checkout_h2(&key) {
-        return Ok(hit);
-    }
-
-    let shared = pool.inflight_h2_get_or_insert_with(key.clone(), || {
+    pool.inflight_h2_get_or_insert_with(key.clone(), || {
         let pool = Arc::clone(pool);
         let connector = connector.clone();
         let h2_config = h2_config.clone();
@@ -147,11 +183,6 @@ async fn open_h2_coalesced(
         let cleanup_key = key.clone();
         let host = host.to_string();
         let proxy = proxy.map(|s| s.to_string());
-        // Spawn so the connect is DRIVEN TO COMPLETION — and always runs its
-        // cleanup — even if every awaiter cancels. A `Shared` future is lazy:
-        // held only in the in-flight map and never polled, it would otherwise
-        // strand the half-open connect and leak the whole `Pool` through the
-        // `Arc<Pool>` it captures (a Pool→Shared→Pool cycle the cleanup never breaks).
         let handle = tokio::spawn(async move {
             let result = open_fresh_h2(
                 &pool,
@@ -182,24 +213,53 @@ async fn open_h2_coalesced(
         }
         .boxed()
         .shared()
-    });
+    })
+}
 
-    match shared.await {
-        Ok(pair) => Ok(pair),
-        Err(_shared_err) => {
-            // The shared connect failed; its error is `Arc`-shared (one failure
-            // fanned out to every waiter). Rather than surface that already-stale
-            // failure, each waiter makes its own fresh attempt. These run
-            // concurrently, but the pool keeps a single entry per key (a later
-            // `install_h2` overwrites, GOAWAY-closing the displaced driver), so a
-            // shared failure costs a burst of reconnects, not a permanent storm.
-            // Note: re-single-flight the retry if that burst is ever a problem.
-            Box::pin(open_fresh_h2(
-                pool, connector, h2_config, key, host, port, proxy,
-            ))
-            .await
+/// Establish — or join an already in-progress — H2 connection to `(host, port, proxy)`,
+/// single-flighting concurrent first-requests so they share ONE TLS+H2 handshake instead of each
+/// opening their own. This eliminates the connection storm a one-conn-per-host pool otherwise
+/// triggers when N requests hit a cold destination at once, and (because the connect runs on its
+/// own spawned task) keeps the large handshake state machine off every caller's per-request
+/// future. H2-only: H1 keeps opening parallel connections via its own path.
+///
+/// The failure path is single-flighted too: when the shared connect fails, the waiters re-coalesce
+/// onto ONE fresh retry rather than each dialing a down host concurrently (the reconnect storm).
+/// Bounded to two attempts, so a persistently-down host surfaces the error instead of looping.
+async fn open_h2_coalesced(
+    pool: &Arc<Pool>,
+    connector: &ConnectorVariant,
+    h2_config: &H2Config,
+    key: PoolKey,
+    host: &str,
+    port: u16,
+    proxy: Option<&str>,
+) -> Result<(crate::h2::client::H2Client, TlsInfo), crate::Error> {
+    // A connect may have finished between the caller's pool miss and now.
+    if let Some(hit) = pool.checkout_h2(&key) {
+        return Ok(hit);
+    }
+
+    // Single-flight the connect AND its retry: concurrent first-requests share
+    // ONE handshake, and if it fails they re-coalesce onto ONE fresh retry
+    // instead of each dialing a down host at once. Bounded to two attempts.
+    let mut last_err: Option<Arc<crate::Error>> = None;
+    for attempt in 0..2u8 {
+        if attempt > 0 {
+            // A peer's retry may have installed a live connection meanwhile.
+            if let Some(hit) = pool.checkout_h2(&key) {
+                return Ok(hit);
+            }
+        }
+        let shared = h2_inflight_connect(pool, connector, h2_config, &key, host, port, proxy);
+        match shared.await {
+            Ok(pair) => return Ok(pair),
+            Err(e) => last_err = Some(e),
         }
     }
+    Err(owned_connect_err(
+        &last_err.expect("the retry loop runs at least once"),
+    ))
 }
 
 /// Obtain a cloneable [`crate::h2::H2Client`] handle for `(host, port, proxy)`,
@@ -249,42 +309,30 @@ async fn open_fresh_h3_installed(
     Ok(pool.install_or_get_h3(key, handle, driver, tls))
 }
 
-/// Establish — or join an already in-progress — QUIC + HTTP/3 connection to
-/// `(host, port)`, single-flighting concurrent first-requests (and both `Race`
-/// legs) so they share ONE handshake instead of each opening their own QUIC
-/// connection and dropping all but the first at install. Mirrors
-/// [`open_h2_coalesced`]: the connect runs inside a boxed `Shared` future that
-/// removes its own in-flight entry on completion, so a cancelled leader cannot
-/// strand waiters and the next miss after a connection dies starts fresh.
+/// Build (or join) the single-flight in-flight H3 connect for `key`: the shared
+/// future every concurrent first-request (and both `Race` legs) awaits. Spawned
+/// so it is driven to completion and always runs its cleanup even if every
+/// awaiter cancels (e.g. the losing leg of a `Race`); the task removes its own
+/// in-flight entry on completion. See [`h2_inflight_connect`] for the lazy-
+/// `Shared`/`Pool`-leak rationale — identical here, plus a stranded UDP socket.
 #[cfg(feature = "http3")]
-async fn open_h3_coalesced(
+fn h3_inflight_connect(
     pool: &Arc<Pool>,
     h3_config: &crate::quic::H3Config,
     profile: &crate::profile::BrowserProfile,
-    key: PoolKey,
+    key: &PoolKey,
     host: &str,
     port: u16,
-) -> Result<(crate::quic::H3Client, TlsInfo), crate::Error> {
+) -> self::pool::SharedH3Connect {
     use futures_util::FutureExt;
 
-    // A connect may have finished between the caller's pool miss and now.
-    if let Some(hit) = pool.checkout_h3(&key) {
-        return Ok(hit);
-    }
-
-    let shared = pool.inflight_h3_get_or_insert_with(key.clone(), || {
+    pool.inflight_h3_get_or_insert_with(key.clone(), || {
         let pool = Arc::clone(pool);
         let h3_config = h3_config.clone();
         let profile = profile.clone();
         let connect_key = key.clone();
         let cleanup_key = key.clone();
         let host = host.to_string();
-        // Spawn so the connect is DRIVEN TO COMPLETION — and always runs its
-        // cleanup — even if every awaiter cancels (e.g. the losing leg of a
-        // `Race`). A `Shared` future is lazy: held only in the in-flight map
-        // and never polled, it would otherwise strand the half-open connect
-        // (and its UDP socket) and leak the whole `Pool` through the `Arc<Pool>`
-        // the connect captures (a Pool→Shared→Pool cycle the cleanup never breaks).
         let handle = tokio::spawn(async move {
             let result =
                 open_fresh_h3_installed(&pool, &h3_config, &profile, connect_key, &host, port)
@@ -305,23 +353,48 @@ async fn open_h3_coalesced(
         }
         .boxed()
         .shared()
-    });
+    })
+}
 
-    match shared.await {
-        Ok(pair) => Ok(pair),
-        Err(_shared_err) => {
-            // The shared connect failed (one failure fanned out to every
-            // waiter); each makes its own fresh attempt rather than surface a
-            // stale shared error. These run concurrently, but `install_or_get_h3`
-            // keeps the first live connection and drops the rest, so a shared
-            // failure costs a burst of reconnects, not a permanent storm.
-            // Note: re-single-flight the retry if that burst is ever a problem.
-            Box::pin(open_fresh_h3_installed(
-                pool, h3_config, profile, key, host, port,
-            ))
-            .await
+/// Establish — or join an already in-progress — QUIC + HTTP/3 connection to
+/// `(host, port)`, single-flighting concurrent first-requests (and both `Race`
+/// legs) so they share ONE handshake instead of each opening their own QUIC
+/// connection and dropping all but the first at install. Mirrors
+/// [`open_h2_coalesced`], including the single-flighted failure path: when the
+/// shared connect fails, the waiters re-coalesce onto ONE fresh retry rather
+/// than each dialing a down host concurrently. Bounded to two attempts.
+#[cfg(feature = "http3")]
+async fn open_h3_coalesced(
+    pool: &Arc<Pool>,
+    h3_config: &crate::quic::H3Config,
+    profile: &crate::profile::BrowserProfile,
+    key: PoolKey,
+    host: &str,
+    port: u16,
+) -> Result<(crate::quic::H3Client, TlsInfo), crate::Error> {
+    // A connect may have finished between the caller's pool miss and now.
+    if let Some(hit) = pool.checkout_h3(&key) {
+        return Ok(hit);
+    }
+
+    // Single-flight the connect AND its retry (see `open_h2_coalesced`).
+    let mut last_err: Option<Arc<crate::Error>> = None;
+    for attempt in 0..2u8 {
+        if attempt > 0 {
+            // A peer's retry may have installed a live connection meanwhile.
+            if let Some(hit) = pool.checkout_h3(&key) {
+                return Ok(hit);
+            }
+        }
+        let shared = h3_inflight_connect(pool, h3_config, profile, &key, host, port);
+        match shared.await {
+            Ok(pair) => return Ok(pair),
+            Err(e) => last_err = Some(e),
         }
     }
+    Err(owned_connect_err(
+        &last_err.expect("the retry loop runs at least once"),
+    ))
 }
 
 /// Obtain a cloneable `H3Client` for `(host, port)`, reusing a
@@ -632,5 +705,32 @@ mod tests {
             tcp,
             make_key("example.com", 443, Some("p:8080"), Transport::Tcp)
         );
+    }
+
+    #[test]
+    fn owned_connect_error_preserves_transport_variant_and_io_kind() {
+        let tcp = crate::Error::Tls(crate::tls::TlsError::TcpConnect(
+            std::io::ErrorKind::ConnectionRefused.into(),
+        ));
+        assert!(matches!(
+            owned_connect_err(&tcp),
+            crate::Error::Tls(crate::tls::TlsError::TcpConnect(err))
+                if err.kind() == std::io::ErrorKind::ConnectionRefused
+        ));
+
+        let handshake = crate::Error::Tls(crate::tls::TlsError::HandshakeIo(
+            std::io::ErrorKind::UnexpectedEof.into(),
+        ));
+        assert!(matches!(
+            owned_connect_err(&handshake),
+            crate::Error::Tls(crate::tls::TlsError::HandshakeIo(err))
+                if err.kind() == std::io::ErrorKind::UnexpectedEof
+        ));
+
+        let io = crate::Error::Io(std::io::ErrorKind::ConnectionAborted.into());
+        assert!(matches!(
+            owned_connect_err(&io),
+            crate::Error::Io(err) if err.kind() == std::io::ErrorKind::ConnectionAborted
+        ));
     }
 }

@@ -146,9 +146,29 @@ mod httpbin_lite {
                 };
                 redirect_302(&loc, vec![])
             }
-            ("GET", "/redirect-to") => {
-                let target = query.strip_prefix("url=").unwrap_or("/get");
-                redirect_302(target, vec![])
+            (_, "/redirect-to") => {
+                // httpbin-compatible: honours ?url= and optional ?status_code=
+                // for any method. A 307/308 preserves method + body, which the
+                // body-replay regression test exercises.
+                let params = parse_query(query);
+                let target = params.get("url").map(String::as_str).unwrap_or("/get");
+                let status: u16 = params
+                    .get("status_code")
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(302);
+                let reason = match status {
+                    301 => "Moved Permanently",
+                    303 => "See Other",
+                    307 => "Temporary Redirect",
+                    308 => "Permanent Redirect",
+                    _ => "Found",
+                };
+                build(
+                    status,
+                    reason,
+                    vec![("Location", target.to_string())],
+                    Vec::new(),
+                )
             }
             ("POST", "/post") => {
                 let ct = req
@@ -175,6 +195,18 @@ mod httpbin_lite {
                     "headers": header_val,
                 }))
             }
+            // A Set-Cookie whose value is double-quoted. RFC 6265 strips the
+            // surrounding quotes; a naive `split('=')` hand-parser leaves them
+            // in. Used to prove Response::cookies() goes through the real parser.
+            ("GET", "/set-cookie-quoted") => build(
+                200,
+                "OK",
+                vec![
+                    ("Content-Type", "text/plain".to_string()),
+                    ("Set-Cookie", "token=\"quoted value\"; Path=/".to_string()),
+                ],
+                b"ok".to_vec(),
+            ),
             _ => json_status(404, "Not Found", serde_json::json!({"error": "not found"})),
         };
 
@@ -287,6 +319,16 @@ mod httpbin_lite {
         m
     }
 
+    fn parse_query(query: &str) -> std::collections::HashMap<String, String> {
+        let mut m = std::collections::HashMap::new();
+        for pair in query.split('&') {
+            if let Some((k, v)) = pair.split_once('=') {
+                m.insert(k.to_string(), v.to_string());
+            }
+        }
+        m
+    }
+
     fn parse_form(body: &str) -> Map<String, Value> {
         let mut m = Map::new();
         for pair in body.split('&') {
@@ -361,6 +403,33 @@ async fn cookies_set_then_sent() {
     );
 }
 
+#[tokio::test]
+async fn response_cookies_use_the_rfc_parser_not_a_hand_parser() {
+    let base = httpbin_lite::spawn().await;
+    let session = Session::chrome();
+    let resp = session
+        .navigate(&format!("{base}/set-cookie-quoted"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    // The RFC 6265 parser strips the surrounding double-quotes; the retired
+    // hand-parser left them in. Response::cookies() must agree with the jar.
+    assert_eq!(
+        resp.cookie("token"),
+        Some("quoted value"),
+        "Response::cookies() must reflect the RFC parser (quotes stripped)"
+    );
+    // The jar (the single source of truth) holds the identical value.
+    assert_eq!(
+        session
+            .cookies()
+            .get_cookie(&format!("{base}/"), "token")
+            .as_deref(),
+        Some("quoted value"),
+        "Response::cookies() and the jar must not diverge"
+    );
+}
+
 // ─── Redirects ──────────────────────────────────────────────────────────────
 
 #[tokio::test]
@@ -401,6 +470,57 @@ async fn redirect_preserves_auth_same_host() {
         json["headers"]["Authorization"].as_str(),
         Some("Bearer secret-token-xyz"),
         "same-host redirect should preserve Authorization"
+    );
+}
+
+#[tokio::test]
+async fn redirect_307_308_replays_buffered_body() {
+    // Regression: 307/308 preserve method AND body. The hop body was moved
+    // into the send and `current_body` left `Empty`, so the redirected POST
+    // arrived at the target with no body — silent data loss. Assert the body
+    // survives the redirect for both status codes.
+    for status in [307u16, 308] {
+        let base = httpbin_lite::spawn().await;
+        let session = Session::chrome();
+        let payload = "replay-me-please-i-am-a-request-body";
+        let resp = session
+            .post(&format!(
+                "{base}/redirect-to?url=/post&status_code={status}"
+            ))
+            .body(payload.as_bytes().to_vec())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            200,
+            "{status}: should follow through to /post"
+        );
+        assert_eq!(resp.redirect_chain().len(), 1, "{status}: exactly one hop");
+        let json: Value = serde_json::from_str(&resp.text()).unwrap();
+        assert_eq!(
+            json["data"], payload,
+            "{status} redirect dropped the request body"
+        );
+    }
+}
+
+#[tokio::test]
+async fn redirect_to_non_http_scheme_is_refused() {
+    // A redirect whose target is a non-HTTP(S) scheme (file:, data:, …) must be
+    // refused cleanly, not passed into the transport to fail with a confusing
+    // downstream error.
+    let base = httpbin_lite::spawn().await;
+    let session = Session::chrome();
+    let result = session
+        .get(&format!("{base}/redirect-to?url=file:///etc/passwd"))
+        .send()
+        .await;
+    assert!(result.is_err(), "a file:// redirect target must be refused");
+    let msg = result.err().unwrap().to_string();
+    assert!(
+        msg.contains("non-http(s)") || msg.to_lowercase().contains("scheme"),
+        "expected a redirect-scheme refusal, got: {msg}"
     );
 }
 

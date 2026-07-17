@@ -157,6 +157,14 @@ pub struct H2Config {
     /// Sliding window over which `settings_flood_threshold` is
     /// measured. Default: 10 s.
     pub settings_flood_window: Duration,
+    /// Wall-clock ceiling on reassembling a single inbound header block
+    /// (HEADERS + all subsequent CONTINUATION frames). Reassembly blocks
+    /// the single driver task, so a peer that sends HEADERS without
+    /// END_HEADERS and then withholds (or dribbles) CONTINUATION bytes
+    /// would otherwise stall every multiplexed stream on the connection
+    /// indefinitely — `max_header_block_bytes` bounds size, never time.
+    /// Exceeding it is a `ProtocolError`. Default: 10 s.
+    pub header_block_reassembly_timeout: Duration,
 }
 
 impl H2Config {
@@ -280,6 +288,7 @@ impl H2Config {
             max_header_block_bytes: 256 * 1024,
             settings_flood_threshold: 20,
             settings_flood_window: Duration::from_secs(10),
+            header_block_reassembly_timeout: Duration::from_secs(10),
         })
     }
 

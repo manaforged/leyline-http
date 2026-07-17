@@ -18,7 +18,7 @@ use tokio::net::TcpStream;
 use tokio::sync::{OwnedSemaphorePermit, mpsc};
 
 use crate::core::BodyStream;
-use crate::tls::ConnectorVariant;
+use crate::tls::{ConnectorVariant, TlsError};
 
 use crate::pool::types::PoolKey;
 use crate::pool::types::Transport;
@@ -117,8 +117,8 @@ pub enum H1PooledError {
     #[error("{0}")]
     Config(String),
     /// TLS handshake failure.
-    #[error("tls: {0}")]
-    Tls(String),
+    #[error(transparent)]
+    Tls(#[from] TlsError),
     /// Plain I/O error during connect, send, or receive.
     #[error(transparent)]
     Io(#[from] std::io::Error),
@@ -384,10 +384,7 @@ async fn open_new(
 ) -> Result<(Box<dyn H1Io>, TlsInfo), H1PooledError> {
     match scheme {
         "https" => {
-            let tls_stream = connector
-                .connect_h1(host, port, proxy)
-                .await
-                .map_err(|e| H1PooledError::Tls(e.to_string()))?;
+            let tls_stream = connector.connect_h1(host, port, proxy).await?;
             let tls = TlsInfo {
                 peer_cert_der: tls_stream.peer_cert_der.clone(),
                 version: tls_stream.tls_version.clone(),
@@ -685,15 +682,13 @@ async fn read_h1_head<S>(stream: &mut S, method: &str) -> Result<H1Head, H1Poole
 where
     S: AsyncRead + Unpin + ?Sized,
 {
+    let mut buf = Vec::with_capacity(4096);
     loop {
-        let mut buf = read_h1_headers(stream).await?;
-        let header_end = find_header_end(&buf).ok_or_else(|| {
-            H1PooledError::Http("HTTP/1.1 response missing header terminator".into())
-        })?;
+        let header_end = read_h1_headers(stream, &mut buf).await?;
         let body_start = header_end + 4;
         let head = String::from_utf8_lossy(&buf[..header_end]);
         let (status, headers, minor) = parse_h1_head(&head)?;
-        let initial_body = buf.split_off(body_start);
+        buf.drain(..body_start);
 
         if (100..200).contains(&status) && status != 101 {
             continue;
@@ -718,7 +713,7 @@ where
             headers,
             minor,
             framing,
-            initial_body,
+            initial_body: buf,
         });
     }
 }
@@ -1090,15 +1085,13 @@ async fn read_h1_response<S>(stream: &mut S, method: &str) -> Result<ParsedRespo
 where
     S: AsyncRead + Unpin + ?Sized,
 {
+    let mut buf = Vec::with_capacity(4096);
     loop {
-        let mut buf = read_h1_headers(stream).await?;
-        let header_end = find_header_end(&buf).ok_or_else(|| {
-            H1PooledError::Http("HTTP/1.1 response missing header terminator".into())
-        })?;
+        let header_end = read_h1_headers(stream, &mut buf).await?;
         let body_start = header_end + 4;
         let head = String::from_utf8_lossy(&buf[..header_end]);
         let (status, headers, minor) = parse_h1_head(&head)?;
-        let initial_body = buf.split_off(body_start);
+        buf.drain(..body_start);
 
         // 1xx informational (except 101 Switching Protocols) — read again.
         if (100..200).contains(&status) && status != 101 {
@@ -1118,13 +1111,13 @@ where
         }
 
         let body = if header_contains_token(&headers, "transfer-encoding", "chunked") {
-            read_chunked_body(stream, initial_body).await?
+            read_chunked_body(stream, buf).await?
         } else if let Some(len) =
             header_first(&headers, "content-length").and_then(|v| v.trim().parse::<usize>().ok())
         {
-            read_fixed_body(stream, initial_body, len).await?
+            read_fixed_body(stream, buf, len).await?
         } else {
-            read_to_close(stream, initial_body).await?
+            read_to_close(stream, buf).await?
         };
 
         return Ok((status, headers, body, minor));
@@ -1205,13 +1198,25 @@ fn validate_framing_headers(headers: &[(String, String)]) -> Result<(), H1Pooled
     Ok(())
 }
 
-async fn read_h1_headers<S>(stream: &mut S) -> Result<Vec<u8>, H1PooledError>
+async fn read_h1_headers<S>(stream: &mut S, buf: &mut Vec<u8>) -> Result<usize, H1PooledError>
 where
     S: AsyncRead + Unpin + ?Sized,
 {
-    let mut buf = Vec::with_capacity(4096);
     let mut tmp = [0u8; 2048];
     loop {
+        if let Some(header_end) = find_header_end(buf) {
+            if header_end + 4 > MAX_H1_HEADER_BYTES {
+                return Err(H1PooledError::Http(format!(
+                    "HTTP/1.1 headers exceed {MAX_H1_HEADER_BYTES} bytes"
+                )));
+            }
+            return Ok(header_end);
+        }
+        if buf.len() > MAX_H1_HEADER_BYTES {
+            return Err(H1PooledError::Http(format!(
+                "HTTP/1.1 headers exceed {MAX_H1_HEADER_BYTES} bytes"
+            )));
+        }
         let n = stream.read(&mut tmp).await?;
         if n == 0 {
             return Err(H1PooledError::ConnectionClosed(
@@ -1219,14 +1224,6 @@ where
             ));
         }
         buf.extend_from_slice(&tmp[..n]);
-        if buf.len() > MAX_H1_HEADER_BYTES {
-            return Err(H1PooledError::Http(format!(
-                "HTTP/1.1 headers exceed {MAX_H1_HEADER_BYTES} bytes"
-            )));
-        }
-        if find_header_end(&buf).is_some() {
-            return Ok(buf);
-        }
     }
 }
 

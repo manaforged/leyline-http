@@ -105,7 +105,10 @@ impl TcpProfile {
 static LOGGED: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
 
 fn log_once(option: &'static str, err: &std::io::Error) {
-    let mut logged = LOGGED.lock().expect("tcp log lock poisoned");
+    // Recover from a poisoned lock rather than panicking — this is an
+    // advisory diagnostic log, and the rest of the crate handles lock
+    // poisoning the same way (`connector.rs`, `cookie/jar.rs`).
+    let mut logged = LOGGED.lock().unwrap_or_else(|e| e.into_inner());
     if !logged.contains(&option) {
         logged.push(option);
         tracing::warn!(option, error = %err, "setsockopt failed (non-fatal)");

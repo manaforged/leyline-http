@@ -267,11 +267,99 @@ impl H3Client {
 /// and skip the graceful close.
 pub struct H3DriverTask(#[allow(dead_code)] tokio::task::JoinHandle<()>);
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum H3ResponseState {
+    Initial,
+    Final,
+    Trailers,
+}
+
+type H3Headers = Vec<(String, String)>;
+
+enum H3HeaderBlock {
+    Informational(H3Headers),
+    Final { status: u16, headers: H3Headers },
+    Trailers(H3Headers),
+}
+
+impl H3ResponseState {
+    fn headers(&mut self, list: &[(String, String)]) -> Result<H3HeaderBlock, &'static str> {
+        match self {
+            Self::Initial => {
+                let (status, headers) = parse_response_head(list)?;
+                if (100..200).contains(&status) {
+                    Ok(H3HeaderBlock::Informational(headers))
+                } else {
+                    *self = Self::Final;
+                    Ok(H3HeaderBlock::Final { status, headers })
+                }
+            }
+            Self::Final => {
+                if list.iter().any(|(name, _)| name.starts_with(':')) {
+                    return Err("h3: trailers must not contain pseudo-headers");
+                }
+                *self = Self::Trailers;
+                Ok(H3HeaderBlock::Trailers(list.to_vec()))
+            }
+            Self::Trailers => Err("h3: response contains headers after trailers"),
+        }
+    }
+
+    fn data(self) -> Result<(), &'static str> {
+        match self {
+            Self::Final => Ok(()),
+            Self::Initial => Err("h3: response DATA arrived before a final response head"),
+            Self::Trailers => Err("h3: response DATA arrived after trailers"),
+        }
+    }
+
+    fn finish(self) -> Result<(), &'static str> {
+        match self {
+            Self::Initial => Err("h3: response ended before a final response head"),
+            Self::Final | Self::Trailers => Ok(()),
+        }
+    }
+}
+
+fn parse_response_head(list: &[(String, String)]) -> Result<(u16, H3Headers), &'static str> {
+    let mut status = None;
+    let mut headers = Vec::with_capacity(list.len());
+    let mut regular = false;
+
+    for (name, value) in list {
+        if name.starts_with(':') {
+            if regular || name != ":status" || status.is_some() {
+                return Err("h3: response contains malformed pseudo-headers");
+            }
+            if value.len() != 3 || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+                return Err("h3: response contains malformed :status pseudo-header");
+            }
+            let code = value
+                .bytes()
+                .fold(0, |status, byte| status * 10 + u16::from(byte - b'0'));
+            if code == 101 {
+                return Err("h3: status 101 is forbidden");
+            }
+            status = Some(code);
+        } else {
+            regular = true;
+            headers.push((name.clone(), value.clone()));
+        }
+    }
+
+    status
+        .map(|status| (status, headers))
+        .ok_or("h3: response missing :status pseudo-header")
+}
+
 /// Per-request-stream bookkeeping owned by the driver.
 struct H3Stream {
     resp_tx: Option<oneshot::Sender<Result<H3Response, String>>>,
+    response: H3ResponseState,
     status: u16,
     headers: Vec<(String, String)>,
+    informational: Vec<Vec<(String, String)>>,
+    trailers: Vec<(String, String)>,
     body: Vec<u8>,
     /// Streaming response sink; `Some` ⇒ deliver the head on HEADERS and stream
     /// body chunks through this channel instead of buffering into `body`.
@@ -348,8 +436,11 @@ impl H3Stream {
         };
         Self {
             resp_tx: Some(resp_tx),
+            response: H3ResponseState::Initial,
             status: 0,
             headers: Vec::new(),
+            informational: Vec::new(),
+            trailers: Vec::new(),
             body: Vec::new(),
             stream_tx,
             head_sent: false,
@@ -393,6 +484,26 @@ impl H3Stream {
         !self.fin_sent
     }
 
+    fn headers(&mut self, list: &[(String, String)]) -> Result<(), &'static str> {
+        match self.response.headers(list)? {
+            H3HeaderBlock::Informational(headers) => self.informational.push(headers),
+            H3HeaderBlock::Final { status, headers } => {
+                self.status = status;
+                self.headers = headers;
+            }
+            H3HeaderBlock::Trailers(headers) => self.trailers = headers,
+        }
+        Ok(())
+    }
+
+    fn data(&self) -> Result<(), &'static str> {
+        self.response.data()
+    }
+
+    fn finish(&self) -> Result<(), &'static str> {
+        self.response.finish()
+    }
+
     /// Deliver a head/error response on the oneshot (buffered mode, or a
     /// streaming error before the head was sent). Once-only.
     fn deliver(&mut self, result: Result<H3Response, String>) {
@@ -413,6 +524,16 @@ impl H3Stream {
             }));
         }
         self.head_sent = true;
+    }
+
+    fn deliver_error(&mut self, message: String) {
+        if self.head_sent {
+            if let Some(tx) = &self.stream_tx {
+                deliver_stream_error(tx, std::io::Error::other(message));
+            }
+        } else {
+            self.deliver(Err(message));
+        }
     }
 }
 
@@ -894,21 +1015,35 @@ fn drain_h3_events(
     loop {
         match h3.poll(conn) {
             Ok((stream_id, quiche::h3::Event::Headers { list, .. })) => {
+                let list = list
+                    .iter()
+                    .map(|header| {
+                        (
+                            String::from_utf8_lossy(header.name()).to_string(),
+                            String::from_utf8_lossy(header.value()).to_string(),
+                        )
+                    })
+                    .collect::<Vec<_>>();
                 let Some(stream) = streams.get_mut(&stream_id) else {
                     continue;
                 };
-                for h in &list {
-                    let name = String::from_utf8_lossy(h.name()).to_string();
-                    let value = String::from_utf8_lossy(h.value()).to_string();
-                    if name == ":status" {
-                        stream.status = value.parse().unwrap_or(0);
-                    } else {
-                        stream.headers.push((name, value));
-                    }
+                if let Err(message) = stream.headers(&list) {
+                    let _ = conn.stream_shutdown(
+                        stream_id,
+                        quiche::Shutdown::Read,
+                        quiche::h3::WireErrorCode::MessageError as u64,
+                    );
+                    let _ = conn.stream_shutdown(stream_id, quiche::Shutdown::Write, 0);
+                    stream.deliver_error(message.into());
+                    streams.remove(&stream_id);
+                    continue;
                 }
                 // Streaming: hand the caller the head as soon as it arrives;
                 // body chunks then flow through the channel via the pump.
-                if stream.is_streaming() && !stream.head_sent {
+                if stream.is_streaming()
+                    && stream.response == H3ResponseState::Final
+                    && !stream.head_sent
+                {
                     stream.deliver_head();
                 }
             }
@@ -923,6 +1058,17 @@ fn drain_h3_events(
                     }
                     continue;
                 };
+                if let Err(message) = stream.data() {
+                    let _ = conn.stream_shutdown(
+                        stream_id,
+                        quiche::Shutdown::Read,
+                        quiche::h3::WireErrorCode::MessageError as u64,
+                    );
+                    let _ = conn.stream_shutdown(stream_id, quiche::Shutdown::Write, 0);
+                    stream.deliver_error(message.into());
+                    streams.remove(&stream_id);
+                    continue;
+                }
                 // Streaming: drain inline, matching the buffered path's
                 // `recv_body` timing so flow-control credit is granted in
                 // immediate response to this packet. `forward_stream_body`
@@ -971,6 +1117,21 @@ fn drain_h3_events(
                 }
             }
             Ok((stream_id, quiche::h3::Event::Finished)) => {
+                let invalid = streams
+                    .get(&stream_id)
+                    .and_then(|stream| stream.finish().err());
+                if let Some(message) = invalid {
+                    let _ = conn.stream_shutdown(
+                        stream_id,
+                        quiche::Shutdown::Read,
+                        quiche::h3::WireErrorCode::MessageError as u64,
+                    );
+                    let _ = conn.stream_shutdown(stream_id, quiche::Shutdown::Write, 0);
+                    if let Some(mut stream) = streams.remove(&stream_id) {
+                        stream.deliver_error(message.into());
+                    }
+                    continue;
+                }
                 let streaming = streams.get(&stream_id).map(H3Stream::is_streaming);
                 match streaming {
                     // Streaming: mark finished; the pump drains the remaining
@@ -1229,6 +1390,91 @@ fn fail_all(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn headers(fields: &[(&str, &str)]) -> Vec<(String, String)> {
+        fields
+            .iter()
+            .map(|(name, value)| ((*name).into(), (*value).into()))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn streaming_head_waits_for_final_response_after_103() {
+        let (tx, rx) = oneshot::channel();
+        let (body_tx, _body_rx) = mpsc::channel(1);
+        let mut stream = H3Stream::new(tx, None, Some(body_tx), false);
+
+        stream
+            .headers(&headers(&[(":status", "103"), ("link", "</style.css>")]))
+            .expect("valid informational response");
+        assert_eq!(stream.response, H3ResponseState::Initial);
+        assert_eq!(stream.informational.len(), 1);
+        if stream.is_streaming() && stream.response == H3ResponseState::Final && !stream.head_sent {
+            stream.deliver_head();
+        }
+        assert!(!stream.head_sent, "103 must not deliver a streaming head");
+
+        stream
+            .headers(&headers(&[
+                (":status", "200"),
+                ("content-type", "text/plain"),
+            ]))
+            .expect("valid final response");
+        if stream.is_streaming() && stream.response == H3ResponseState::Final && !stream.head_sent {
+            stream.deliver_head();
+        }
+
+        let head = rx
+            .await
+            .expect("final response head delivered")
+            .expect("success");
+        assert_eq!(head.status, 200);
+        assert_eq!(head.headers, headers(&[("content-type", "text/plain")]));
+    }
+
+    #[test]
+    fn trailers_are_regular_fields_after_final_response() {
+        let mut state = H3ResponseState::Initial;
+        assert!(matches!(
+            state.headers(&headers(&[(":status", "200")])),
+            Ok(H3HeaderBlock::Final { .. })
+        ));
+        assert!(matches!(
+            state.headers(&headers(&[("x-checksum", "abc")])),
+            Ok(H3HeaderBlock::Trailers(fields)) if fields == headers(&[("x-checksum", "abc")])
+        ));
+        assert_eq!(state, H3ResponseState::Trailers);
+    }
+
+    #[test]
+    fn response_head_rejects_duplicate_and_malformed_status() {
+        let mut state = H3ResponseState::Initial;
+        assert!(
+            state
+                .headers(&headers(&[(":status", "200"), (":status", "201")]))
+                .is_err()
+        );
+
+        let mut state = H3ResponseState::Initial;
+        assert!(state.headers(&headers(&[(":status", "20")])).is_err());
+
+        let mut state = H3ResponseState::Initial;
+        assert!(state.headers(&headers(&[(":status", "101")])).is_err());
+    }
+
+    #[test]
+    fn trailers_reject_status_pseudo_header() {
+        let mut state = H3ResponseState::Initial;
+        state
+            .headers(&headers(&[(":status", "200")]))
+            .expect("final response");
+        assert!(state.headers(&headers(&[(":status", "204")])).is_err());
+    }
+
+    #[test]
+    fn data_requires_final_response_head() {
+        assert!(H3ResponseState::Initial.data().is_err());
+    }
 
     #[test]
     fn empty_and_absent_bodies_have_nothing_to_send() {

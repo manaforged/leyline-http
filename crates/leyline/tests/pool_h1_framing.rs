@@ -16,7 +16,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use leyline::pool::{H1Body, H1Target, Pool, send_request_h1_pooled};
+use futures_util::StreamExt;
+use leyline::pool::{H1Body, H1Response, H1ResponseBody, H1Target, Pool, send_request_h1_pooled};
 use leyline::profile::{Browser, Platform, ProfileRegistry};
 use leyline::tls::{ConnectorVariant, FingerprintConnector};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -109,6 +110,83 @@ async fn run_against_with_stats(
     .err()
     .expect("must reject framing conflict");
     (format!("{err}"), pool.stats())
+}
+
+async fn informational_response(chunks: &'static [&'static [u8]], stream: bool) -> H1Response {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    tokio::spawn(async move {
+        let (mut sock, _) = listener.accept().await.unwrap();
+        let mut req = Vec::new();
+        let mut buf = [0u8; 2048];
+        while !req.windows(4).any(|w| w == b"\r\n\r\n") {
+            let n = sock.read(&mut buf).await.unwrap();
+            req.extend_from_slice(&buf[..n]);
+        }
+        for (index, chunk) in chunks.iter().enumerate() {
+            sock.write_all(chunk).await.unwrap();
+            sock.flush().await.unwrap();
+            if index + 1 < chunks.len() {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        }
+    });
+
+    let pool = Arc::new(Pool::new());
+    let connector = connector();
+    let url = url::Url::parse(&format!("http://{addr}/")).unwrap();
+    send_request_h1_pooled(
+        &pool,
+        &connector,
+        "http",
+        "127.0.0.1",
+        addr.port(),
+        "GET",
+        &url,
+        vec![],
+        H1Body::Empty,
+        None,
+        H1Target::OriginForm,
+        stream,
+    )
+    .await
+    .expect("informational response succeeds")
+}
+
+#[tokio::test]
+async fn coalesced_informational_and_final_buffered_response_preserves_final_bytes() {
+    let response = informational_response(
+        &[b"HTTP/1.1 103 Early Hints\r\nLink: </app.css>; rel=preload\r\n\r\nHTTP/1.1 200 OK\r\nContent-Length: 5\r\nX-Final: yes\r\n\r\nhello"],
+        false,
+    )
+    .await;
+
+    assert_eq!(response.status, 200);
+    assert!(response.headers.contains(&("X-Final".into(), "yes".into())));
+    let H1ResponseBody::Buffered(body) = response.body else {
+        panic!("buffered request returns a buffered body");
+    };
+    assert_eq!(body, b"hello");
+}
+
+#[tokio::test]
+async fn split_informational_and_final_streaming_response_preserves_final_bytes() {
+    let response = informational_response(
+        &[
+            b"HTTP/1.1 103 Early Hints\r\nLink: </app.css>; rel=preload\r\n\r\n",
+            b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nX-Final: yes\r\n\r\nhello",
+        ],
+        true,
+    )
+    .await;
+
+    assert_eq!(response.status, 200);
+    assert!(response.headers.contains(&("X-Final".into(), "yes".into())));
+    let H1ResponseBody::Streaming(mut body) = response.body else {
+        panic!("streaming request returns a streaming body");
+    };
+    assert_eq!(body.next().await.unwrap().unwrap().as_ref(), b"hello");
 }
 
 #[tokio::test]

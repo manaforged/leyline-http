@@ -1,3 +1,6 @@
+// This generated-binding crate supports an MSRV older than some rustc lint
+// names used below. Older compilers must ignore those future lint names.
+#![allow(unknown_lints)]
 #![allow(
     clippy::missing_safety_doc,
     clippy::redundant_static_lifetimes,

@@ -20,6 +20,7 @@ pub fn parse_set_cookie(header: &str, request_url: &url::Url) -> Option<Cookie> 
     };
 
     let (name, value) = {
+        // No '=' → malformed, reject.
         let i = name_value.find('=')?;
         let v = name_value[i + 1..].trim();
         // Strip surrounding double-quotes (Chrome behavior).

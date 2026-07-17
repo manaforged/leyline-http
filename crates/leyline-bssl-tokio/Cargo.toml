@@ -2,7 +2,7 @@
 name = "leyline-bssl-tokio"
 version = "1.0.0-alpha.3"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.86"
 authors = [
     "Thomas Gardiner",
     "0x676e67 <gngppz@gmail.com>",
@@ -19,7 +19,7 @@ fips = ["leyline-bssl/fips"]
 prefix-symbols = ["leyline-bssl/prefix-symbols"]
 
 [dependencies]
-leyline-bssl = { path = "../leyline-bssl" }
+leyline-bssl = { path = "../leyline-bssl", version = "=1.0.0-alpha.3" }
 tokio = "1"
 
 [dev-dependencies]

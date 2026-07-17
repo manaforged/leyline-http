@@ -217,6 +217,12 @@ fn get_boringssl_cmake_config(config: &Config) -> cmake::Config {
         return boringssl_cmake;
     }
 
+    if config.target == "x86_64-pc-windows-msvc" && config.host != config.target {
+        panic!(
+            "x86_64-pc-windows-msvc source builds require cargo-xwin so CMake receives its Windows/MSVC toolchain; run `cargo xwin build --target x86_64-pc-windows-msvc`"
+        );
+    }
+
     if config.target_os == "windows" {
         // Explicitly use the non-debug CRT.
         // This is required now because newest BoringSSL requires CMake 3.22 which
@@ -788,6 +794,7 @@ fn generate_bindings(config: &Config) -> Result<PathBuf, Box<dyn std::error::Err
         .merge_extern_blocks(true)
         .prepend_enum_name(true)
         .blocklist_type("max_align_t") // Not supported by bindgen on all targets, not used by BoringSSL
+        .clang_arg(format!("--target={}", config.target))
         .clang_args(get_extra_clang_args_for_bindgen(config))
         .clang_arg("-I")
         .clang_arg(include_path.display().to_string());

@@ -24,7 +24,7 @@ use std::sync::Arc;
 
 use leyline::TcpProfile;
 use leyline::profile::BrowserProfile;
-use leyline::tls::{FingerprintConnector, ResolveFuture, Resolver, TlsTrustConfig};
+use leyline::tls::{FingerprintConnector, ResolveFuture, Resolver, TlsError, TlsTrustConfig};
 use leyline_bssl::asn1::Asn1Time;
 use leyline_bssl::bn::{BigNum, MsbOption};
 use leyline_bssl::hash::MessageDigest;
@@ -33,6 +33,7 @@ use leyline_bssl::rsa::Rsa;
 use leyline_bssl::x509::extension::{BasicConstraints, SubjectAlternativeName};
 use leyline_bssl::x509::{X509, X509NameBuilder};
 use sha2::{Digest, Sha256};
+use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 
 /// Resolver that maps every host to one fixed loopback address, so the
@@ -55,8 +56,16 @@ struct Generated {
     ca_cert_pem: Vec<u8>,
 }
 
-/// Generate a CA and a leaf cert whose only SAN is `leaf_dns`.
-fn generate_chain(leaf_dns: &str) -> Generated {
+/// The single SAN the generated leaf carries.
+#[derive(Clone, Copy)]
+enum San<'a> {
+    Dns(&'a str),
+    Ip(&'a str),
+}
+
+/// Generate a CA and a leaf cert (subject CN `leaf_cn`) whose only SAN is
+/// `leaf_san` — either a DNS name or an IP literal.
+fn generate_chain(leaf_cn: &str, leaf_san: San) -> Generated {
     // --- CA ---
     let ca_key = PKey::from_rsa(Rsa::generate(2048).unwrap()).unwrap();
     let mut name = X509NameBuilder::new().unwrap();
@@ -86,7 +95,7 @@ fn generate_chain(leaf_dns: &str) -> Generated {
     // --- leaf, signed by the CA ---
     let leaf_key = PKey::from_rsa(Rsa::generate(2048).unwrap()).unwrap();
     let mut leaf_name = X509NameBuilder::new().unwrap();
-    leaf_name.append_entry_by_text("CN", leaf_dns).unwrap();
+    leaf_name.append_entry_by_text("CN", leaf_cn).unwrap();
     let leaf_name = leaf_name.build();
 
     let mut leaf = X509::builder().unwrap();
@@ -104,8 +113,12 @@ fn generate_chain(leaf_dns: &str) -> Generated {
         .unwrap();
     leaf.set_not_after(&Asn1Time::days_from_now(1).unwrap())
         .unwrap();
-    let san = SubjectAlternativeName::new()
-        .dns(leaf_dns)
+    let mut san_builder = SubjectAlternativeName::new();
+    match leaf_san {
+        San::Dns(d) => san_builder.dns(d),
+        San::Ip(ip) => san_builder.ip(ip),
+    };
+    let san = san_builder
         .build(&leaf.x509v3_context(Some(&ca), None))
         .unwrap();
     leaf.append_extension(&san).unwrap();
@@ -182,9 +195,15 @@ fn connector(r#gen: &Generated, addr: SocketAddr) -> FingerprintConnector {
         .with_resolver(Arc::new(LoopbackResolver(addr)))
 }
 
+fn connector_with_trust(trust: TlsTrustConfig, addr: SocketAddr) -> FingerprintConnector {
+    FingerprintConnector::new_with_trust(&load_profile(), TcpProfile::LINUX, &trust)
+        .expect("connector build")
+        .with_resolver(Arc::new(LoopbackResolver(addr)))
+}
+
 #[tokio::test]
 async fn pinned_cert_still_accepts_matching_hostname() {
-    let r#gen = generate_chain("wrong.example");
+    let r#gen = generate_chain("wrong.example", San::Dns("wrong.example"));
     let _ = r#gen.leaf_der;
     let addr = spawn_tls_server(&r#gen).await;
     // Control: connect to the cert's actual SAN — chain + pin + host
@@ -201,7 +220,7 @@ async fn pinned_cert_still_accepts_matching_hostname() {
 
 #[tokio::test]
 async fn pinned_cert_rejects_mismatched_hostname() {
-    let r#gen = generate_chain("wrong.example");
+    let r#gen = generate_chain("wrong.example", San::Dns("wrong.example"));
     let addr = spawn_tls_server(&r#gen).await;
     // Regression: the cert's SAN is wrong.example, but we connect to
     // right.example. Chain verifies and the pin matches, yet the
@@ -209,8 +228,152 @@ async fn pinned_cert_rejects_mismatched_hostname() {
     let res = connector(&r#gen, addr)
         .connect("right.example", 443, None)
         .await;
+    let err = res.err().expect("hostname mismatch must fail");
+    assert!(matches!(err, TlsError::Hostname(_)), "got {err:?}");
+    assert!(!err.is_retryable());
+}
+
+#[tokio::test]
+async fn default_verifier_reports_hostname_mismatch() {
+    let r#gen = generate_chain("wrong.example", San::Dns("wrong.example"));
+    let addr = spawn_tls_server(&r#gen).await;
+    let trust = TlsTrustConfig::new()
+        .without_env_roots()
+        .without_system_roots()
+        .add_ca_der(r#gen.ca_der.clone());
+
+    let err = connector_with_trust(trust, addr)
+        .connect("right.example", 443, None)
+        .await
+        .err()
+        .expect("hostname mismatch must fail");
+    assert!(matches!(err, TlsError::Hostname(_)), "got {err:?}");
+    assert!(!err.is_retryable());
+}
+
+#[tokio::test]
+async fn pinned_cert_accepts_matching_ip_san() {
+    // A leaf whose only SAN is the IP literal 127.0.0.1. Connecting to that IP
+    // with the leaf pinned must succeed: the post-handshake recheck has to match
+    // the target IP against the cert's IP SAN. `X509_check_host` never matches
+    // IP SANs, so before the `check_ip_asc` branch a valid IP-pinned connection
+    // was wrongly rejected.
+    let r#gen = generate_chain("127.0.0.1", San::Ip("127.0.0.1"));
+    let addr = spawn_tls_server(&r#gen).await;
+    let res = connector(&r#gen, addr)
+        .connect("127.0.0.1", 443, None)
+        .await;
     assert!(
-        res.is_err(),
-        "pinned cert for wrong.example must be rejected when connecting to right.example"
+        res.is_ok(),
+        "matching-IP pinned handshake must succeed, got err: {:?}",
+        res.err().map(|e| e.to_string())
     );
+}
+
+#[tokio::test]
+async fn pinned_cert_rejects_mismatched_ip() {
+    // Guards against an over-broad fix: an IP cert for 127.0.0.1 must still be
+    // rejected when the connection target is a different IP literal, even though
+    // chain + pin pass. The LoopbackResolver points the socket at the real
+    // listener regardless of the requested host, so the handshake proceeds and
+    // only the IP recheck differs.
+    let r#gen = generate_chain("127.0.0.1", San::Ip("127.0.0.1"));
+    let addr = spawn_tls_server(&r#gen).await;
+    let res = connector(&r#gen, addr)
+        .connect("127.0.0.2", 443, None)
+        .await;
+    let err = res.err().expect("IP mismatch must fail");
+    assert!(matches!(err, TlsError::Hostname(_)), "got {err:?}");
+    assert!(!err.is_retryable());
+}
+
+#[tokio::test]
+async fn certificate_and_pinning_failures_are_permanent() {
+    let r#gen = generate_chain("right.example", San::Dns("right.example"));
+
+    let addr = spawn_tls_server(&r#gen).await;
+    let trust = TlsTrustConfig::new()
+        .without_env_roots()
+        .without_system_roots();
+    let err = connector_with_trust(trust, addr)
+        .connect("right.example", 443, None)
+        .await
+        .err()
+        .expect("untrusted chain must fail");
+    assert!(matches!(err, TlsError::Certificate(_)), "got {err:?}");
+    assert!(!err.is_retryable());
+
+    let addr = spawn_tls_server(&r#gen).await;
+    let trust = TlsTrustConfig::new()
+        .without_env_roots()
+        .without_system_roots()
+        .add_ca_der(r#gen.ca_der.clone())
+        .add_pinned_leaf_sha256([0; 32]);
+    let err = connector_with_trust(trust, addr)
+        .connect("right.example", 443, None)
+        .await
+        .err()
+        .expect("wrong pin must fail");
+    assert!(matches!(err, TlsError::Pinning(_)), "got {err:?}");
+    assert!(!err.is_retryable());
+}
+
+#[tokio::test]
+async fn tcp_connect_failure_is_retryable() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    drop(listener);
+
+    let trust = TlsTrustConfig::new()
+        .without_env_roots()
+        .without_system_roots();
+    let err = connector_with_trust(trust, addr)
+        .connect("offline.example", 443, None)
+        .await
+        .err()
+        .expect("closed listener must reject the TCP connection");
+    assert!(matches!(err, TlsError::TcpConnect(_)), "got {err:?}");
+    assert!(err.is_retryable());
+}
+
+#[tokio::test]
+async fn handshake_transport_failure_is_retryable() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.unwrap();
+        drop(tcp);
+    });
+
+    let trust = TlsTrustConfig::new()
+        .without_env_roots()
+        .without_system_roots();
+    let err = connector_with_trust(trust, addr)
+        .connect("closed.example", 443, None)
+        .await
+        .err()
+        .expect("peer closing during the handshake must fail");
+    assert!(matches!(err, TlsError::HandshakeIo(_)), "got {err:?}");
+    assert!(err.is_retryable());
+}
+
+#[tokio::test]
+async fn handshake_protocol_failure_is_permanent() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (mut tcp, _) = listener.accept().await.unwrap();
+        tcp.write_all(b"this is not TLS").await.unwrap();
+    });
+
+    let trust = TlsTrustConfig::new()
+        .without_env_roots()
+        .without_system_roots();
+    let err = connector_with_trust(trust, addr)
+        .connect("plaintext.example", 443, None)
+        .await
+        .err()
+        .expect("a non-TLS peer must fail the handshake");
+    assert!(matches!(err, TlsError::Handshake(_)), "got {err:?}");
+    assert!(!err.is_retryable());
 }

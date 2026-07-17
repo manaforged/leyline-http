@@ -33,7 +33,7 @@ pub(crate) async fn connect<C: crate::tls::TlsHandshake>(
     proxy: &url::Url,
     include_alps: bool,
 ) -> Result<TlsStream, TlsError> {
-    let mut tcp_stream = super::connect_to_proxy(proxy, 8080).await?;
+    let mut tcp_stream = super::connect_to_proxy(connector, proxy, 8080).await?;
     write_connect_and_validate(&mut tcp_stream, host, port, proxy).await?;
     connector
         .do_tls_handshake(tcp_stream, host, include_alps)
@@ -68,7 +68,7 @@ pub(crate) async fn connect_via_tls<C: crate::tls::TlsHandshake>(
     let proxy_host = proxy
         .host_str()
         .ok_or_else(|| TlsError::Profile("https proxy has no host".into()))?;
-    let tcp_stream = super::connect_to_proxy(proxy, 443).await?;
+    let tcp_stream = super::connect_to_proxy(connector, proxy, 443).await?;
 
     // Proxy leg: TLS to the proxy itself. The CONNECT exchange is HTTP/1.1, so
     // offer only http/1.1 on this leg (h2 over the proxy is a separate feature).

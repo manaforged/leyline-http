@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Leyline's direct self-hosted quality gate.
 #
-# Usage: ./scripts/verify.sh [--full] [--fuzz [SECONDS]]
+# Usage: ./scripts/verify.sh [--full] [--bssl-source-build] [--fuzz [SECONDS]]
 # default        package parity and compile sanity
 # --full         tests, docs, audits, benches, and live checks
 # --fuzz [N]     run each cargo-fuzz target for N seconds (default 60)
@@ -16,11 +16,13 @@ set -euo pipefail
 
 full=0
 fuzz=0
+bssl_source_build=0
 fuzz_seconds=60
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --quick) shift ;; # compatibility: quick is now the default
         --full) full=1; shift ;;
+        --bssl-source-build) bssl_source_build=1; shift ;;
         --fuzz)
             full=1
             fuzz=1
@@ -74,18 +76,88 @@ cargo --version
 msrv="$(awk -F'"' '/^rust-version *= *"/{print $2}' Cargo.toml)"
 if [[ -n "$msrv" ]]; then
     echo "workspace MSRV pinned to: $msrv"
-    # If cargo-msrv is available, verify; otherwise advise.
-    if command -v cargo-msrv >/dev/null; then
-        cargo msrv verify --manifest-path Cargo.toml || fail "MSRV verify failed"
-        ok "MSRV verified"
-    else
-        echo "  (cargo-msrv not installed; skipping active MSRV check)"
-    fi
+    cargo +"$msrv" --version || fail "Rust $msrv is required; install it with rustup toolchain install $msrv"
 fi
 
-step "cargo check"
-cargo check --workspace --exclude leyline-quiche || fail "cargo check failed"
-ok "compile sanity"
+step "cargo +$msrv check"
+cargo +"$msrv" check --workspace || fail "MSRV cargo check failed"
+ok "MSRV compile sanity"
+
+# -- package boundaries ---------------------------------------------------
+# Cargo 1.90+'s multi-package overlay can package unpublished workspace
+# dependencies together. The BoringSSL crates are standalone workspaces during
+# development, so stage the committed tree and temporarily join them to the
+# root workspace. This exercises the real normalized archives before a
+# first-cut release exists in the registry.
+step "cargo package (publishable Rust crates)"
+package_stage="$(mktemp -d)"
+package_root=""
+cleanup() {
+    [[ -z "${package_stage:-}" ]] || rm -rf "$package_stage"
+    [[ -z "${package_root:-}" ]] || rm -rf "$package_root"
+}
+trap cleanup EXIT
+git archive --format=tar HEAD | tar -xf - -C "$package_stage"
+node scripts/stage-package-workspace.mjs "$package_stage" \
+    || fail "failed to stage the package workspace"
+rm -rf "$CARGO_TARGET_DIR/package"
+cargo package \
+    --manifest-path "$package_stage/Cargo.toml" \
+    --workspace \
+    --exclude leyline-ffi \
+    --exclude leyline-node \
+    --exclude leyline-python \
+    --no-verify \
+    || fail "cargo package failed"
+ok "publishable crates packaged"
+
+# Compile an external consumer against the extracted archives. Patch all
+# internal packages to their just-packaged copies: this checks the archive
+# boundary without requiring a first-cut release to already be indexed.
+step "packaged leyline consumer smoke check"
+package_root="$(mktemp -d)"
+for archive in "$CARGO_TARGET_DIR"/package/*.crate; do
+    tar -xzf "$archive" -C "$package_root"
+done
+package_path() { find "$package_root" -maxdepth 1 -type d -name "$1-[0-9]*" -print -quit; }
+leyline_package="$(package_path leyline)"
+bssl_sys_package="$(package_path leyline-bssl-sys)"
+bssl_package="$(package_path leyline-bssl)"
+bssl_tokio_package="$(package_path leyline-bssl-tokio)"
+quiche_package="$(package_path leyline-quiche)"
+[[ -n "$leyline_package" && -n "$bssl_sys_package" && -n "$bssl_package" \
+    && -n "$bssl_tokio_package" && -n "$quiche_package" ]] \
+    || fail "packaged crate archive is missing"
+mkdir "$package_root/consumer"
+cat >"$package_root/consumer/Cargo.toml" <<EOF
+[package]
+name = "leyline-package-smoke"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+leyline = { path = "$leyline_package" }
+
+[patch.crates-io]
+leyline-bssl-sys = { path = "$bssl_sys_package" }
+leyline-bssl = { path = "$bssl_package" }
+leyline-bssl-tokio = { path = "$bssl_tokio_package" }
+leyline-quiche = { path = "$quiche_package" }
+EOF
+mkdir "$package_root/consumer/src"
+printf 'fn main() {}\n' >"$package_root/consumer/src/main.rs"
+cargo +"$msrv" check --manifest-path "$package_root/consumer/Cargo.toml" \
+    || fail "packaged leyline consumer smoke check failed"
+ok "packaged leyline consumer smoke check"
+
+if [[ $bssl_source_build -eq 1 ]]; then
+    step "BoringSSL source-build"
+    ./scripts/package-bssl.sh || fail "BoringSSL source-build failed"
+    cargo +"$msrv" check --manifest-path crates/leyline-bssl-sys/Cargo.toml \
+        || fail "source-built BoringSSL did not compile"
+    ok "BoringSSL source-build"
+fi
 
 if [[ $full -eq 0 ]]; then
     printf '\n\033[1;32mSanity check passed.\033[0m\n'

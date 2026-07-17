@@ -2061,6 +2061,42 @@ impl SslContextBuilder {
         unsafe { ffi::SSL_CTX_set_permute_extensions(self.as_ptr(), enabled as _) }
     }
 
+    /// Sets an exact ClientHello extension type-ID order.
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "windows",
+        all(target_arch = "aarch64", target_os = "macos")
+    ))]
+    #[corresponds(SSL_CTX_set_extension_order)]
+    pub fn set_extension_order(&mut self, order: &[u16]) -> Result<(), ErrorStack> {
+        unsafe {
+            cvt(ffi::SSL_CTX_set_extension_order(
+                self.as_ptr(),
+                order.as_ptr(),
+                order.len(),
+            ))
+            .map(|_| ())
+        }
+    }
+
+    /// Sets the TLS 1.3 ClientHello cipher-suite order.
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "windows",
+        all(target_arch = "aarch64", target_os = "macos")
+    ))]
+    #[corresponds(SSL_CTX_set_tls13_cipher_order)]
+    pub fn set_tls13_cipher_order(&mut self, order: &[u16]) -> Result<(), ErrorStack> {
+        unsafe {
+            cvt(ffi::SSL_CTX_set_tls13_cipher_order(
+                self.as_ptr(),
+                order.as_ptr(),
+                order.len(),
+            ))
+            .map(|_| ())
+        }
+    }
+
     /// Sets the context's supported signature verification algorithms.
     #[corresponds(SSL_CTX_set_verify_algorithm_prefs)]
     pub fn set_verify_algorithm_prefs(

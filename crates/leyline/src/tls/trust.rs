@@ -10,13 +10,16 @@
 //!   the operator sets them. BoringSSL — unlike OpenSSL — does not
 //!   consume these env vars automatically; wiring them here matches
 //!   the behaviour operators get from curl / reqwest / Python requests.
-//! - [`wire_system_trust`] is the fallback when no env override was
-//!   honoured. Dispatches to the platform-specific bridge (Windows
-//!   cert store) or to BoringSSL's `set_default_verify_paths` on Unix.
+//! - [`wire_system_trust`] loads only platform roots. It never consults
+//!   the process environment, so its policy remains independent from
+//!   [`wire_env_trust`].
 
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
-use leyline_bssl::ssl::{SslAlert, SslContextBuilder, SslFiletype, SslVerifyError, SslVerifyMode};
+use leyline_bssl::ssl::{
+    Ssl, SslAlert, SslContextBuilder, SslFiletype, SslVerifyError, SslVerifyMode,
+};
 use leyline_bssl::x509::{X509, X509StoreContext};
 use sha2::{Digest, Sha256};
 
@@ -25,7 +28,7 @@ use crate::tls::error::TlsError;
 /// TLS trust and client-certificate configuration.
 ///
 /// Defaults match Leyline's existing behavior: honour `SSL_CERT_FILE` /
-/// `SSL_CERT_DIR` when present, otherwise load the platform system roots.
+/// `SSL_CERT_DIR` and platform system roots when enabled.
 /// Explicit roots are additive, so callers can trust a private CA without
 /// losing the normal public web PKI.
 #[derive(Debug, Clone)]
@@ -36,6 +39,14 @@ pub struct TlsTrustConfig {
     ca_der: Vec<Vec<u8>>,
     client_identity: Option<ClientIdentity>,
     pinned_leaf_sha256: Vec<[u8; 32]>,
+}
+
+pub(crate) type VerificationFailure = Arc<Mutex<Option<TrustFailure>>>;
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum TrustFailure {
+    Certificate,
+    Pinning,
 }
 
 impl Default for TlsTrustConfig {
@@ -135,6 +146,14 @@ impl TlsTrustConfig {
     }
 }
 
+pub(crate) fn take_verification_failure(failure: &VerificationFailure) -> Option<TrustFailure> {
+    failure.lock().unwrap_or_else(|e| e.into_inner()).take()
+}
+
+fn record_verification_failure(failure: &VerificationFailure, reason: TrustFailure) {
+    *failure.lock().unwrap_or_else(|e| e.into_inner()) = Some(reason);
+}
+
 /// PEM client identity used for mutual TLS.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -145,23 +164,20 @@ pub struct ClientIdentity {
     pub private_key_file: PathBuf,
 }
 
-/// Honour `SSL_CERT_FILE` / `SSL_CERT_DIR` if set. Returns `true` when
-/// at least one trust root was loaded from the environment, in which
-/// case the caller should skip the system-store fallback.
+/// Honour `SSL_CERT_FILE` / `SSL_CERT_DIR` if set.
 ///
 /// On error (missing file, unreadable dir, malformed PEM) the function
-/// logs at `warn` and returns `false` so the caller falls back to the
-/// system trust store. A failed env override must not abort TLS setup
+/// logs at `warn`; a failed env root must not abort TLS setup
 /// silently — operators need to see the warning — but it also must not
 /// leave the process with zero CAs.
 pub(crate) fn wire_env_trust(builder: &mut SslContextBuilder) -> bool {
-    let mut env_trust_wired = false;
+    let mut loaded_any = false;
     if let Ok(file) = std::env::var("SSL_CERT_FILE") {
         let file = file.trim();
         if !file.is_empty() {
             match builder.set_ca_file(file) {
                 Ok(()) => {
-                    env_trust_wired = true;
+                    loaded_any = true;
                     // `warn` level: an env-var overriding the trust
                     // anchor is a security-relevant decision, and
                     // `debug` is off in most deployments. Operators
@@ -170,7 +186,7 @@ pub(crate) fn wire_env_trust(builder: &mut SslContextBuilder) -> bool {
                     tracing::warn!(
                         target: "leyline::tls::trust",
                         ca_file = %file,
-                        "SSL_CERT_FILE honoured — process trust store overridden by environment"
+                        "SSL_CERT_FILE honoured — environment trust root added"
                     );
                 }
                 Err(e) => {
@@ -178,7 +194,7 @@ pub(crate) fn wire_env_trust(builder: &mut SslContextBuilder) -> bool {
                         target: "leyline::tls::trust",
                         ca_file = %file,
                         err = %e,
-                        "SSL_CERT_FILE could not be loaded; falling back to system trust"
+                        "SSL_CERT_FILE could not be loaded"
                     );
                 }
             }
@@ -210,18 +226,18 @@ pub(crate) fn wire_env_trust(builder: &mut SslContextBuilder) -> bool {
                         }
                     }
                     if loaded > 0 {
-                        env_trust_wired = true;
+                        loaded_any = true;
                         tracing::warn!(
                             target: "leyline::tls::trust",
                             ca_dir = %dir,
                             files_loaded = loaded,
-                            "SSL_CERT_DIR honoured — process trust store overridden by environment"
+                            "SSL_CERT_DIR honoured — environment trust roots added"
                         );
                     } else {
                         tracing::warn!(
                             target: "leyline::tls::trust",
                             ca_dir = %dir,
-                            "SSL_CERT_DIR contained no loadable certificates; falling back to system trust"
+                            "SSL_CERT_DIR contained no loadable certificates"
                         );
                     }
                 }
@@ -229,12 +245,12 @@ pub(crate) fn wire_env_trust(builder: &mut SslContextBuilder) -> bool {
                 tracing::warn!(
                     target: "leyline::tls::trust",
                     ca_dir = %dir,
-                    "SSL_CERT_DIR does not exist; falling back to system trust"
+                    "SSL_CERT_DIR does not exist"
                 );
             }
         }
     }
-    env_trust_wired
+    loaded_any
 }
 
 /// Apply Leyline's configured trust behavior to an SSL context.
@@ -242,9 +258,9 @@ pub(crate) fn wire_configured_trust(
     builder: &mut SslContextBuilder,
     config: &TlsTrustConfig,
 ) -> Result<(), TlsError> {
-    let env_trust_wired = config.use_env_roots && wire_env_trust(builder);
-    if config.use_system_roots && !env_trust_wired {
-        wire_system_trust_cached(builder, config)?;
+    let env_roots_loaded = config.use_env_roots && wire_env_trust(builder);
+    if config.use_system_roots {
+        wire_system_trust_cached(builder, config, env_roots_loaded)?;
     }
 
     for path in &config.ca_files {
@@ -263,57 +279,64 @@ pub(crate) fn wire_configured_trust(
         builder.set_private_key_file(&identity.private_key_file, SslFiletype::PEM)?;
     }
 
-    if !config.pinned_leaf_sha256.is_empty() {
-        let pins = config.pinned_leaf_sha256.clone();
-        builder.set_custom_verify_callback(SslVerifyMode::PEER, move |ssl| {
-            let store = ssl.ssl_context().cert_store();
-            let cert = ssl
-                .peer_certificate()
-                .ok_or(SslVerifyError::Invalid(SslAlert::CERTIFICATE_UNKNOWN))?;
-            let chain = ssl
-                .peer_cert_chain()
-                .ok_or(SslVerifyError::Invalid(SslAlert::CERTIFICATE_UNKNOWN))?;
-
-            let chain_ok = X509StoreContext::new()
-                .map_err(|_| SslVerifyError::Invalid(SslAlert::INTERNAL_ERROR))?
-                .init(store, &cert, chain, |store_ctx| {
-                    let verified = store_ctx.verify_cert()?;
-                    Ok(verified && store_ctx.verify_result().is_ok())
-                })
-                .map_err(|_| SslVerifyError::Invalid(SslAlert::INTERNAL_ERROR))?;
-            if !chain_ok {
-                return Err(SslVerifyError::Invalid(SslAlert::UNKNOWN_CA));
-            }
-
-            let der = cert
-                .to_der()
-                .map_err(|_| SslVerifyError::Invalid(SslAlert::INTERNAL_ERROR))?;
-            let digest: [u8; 32] = Sha256::digest(&der).into();
-            if pins.iter().any(|pin| pin == &digest) {
-                Ok(())
-            } else {
-                Err(SslVerifyError::Invalid(SslAlert::CERTIFICATE_UNKNOWN))
-            }
-        });
-    }
-
     Ok(())
+}
+
+/// Install the pinning verifier on one handshake and return its private
+/// classification state. Keeping this state on the `Ssl` avoids cross-talk
+/// between concurrent handshakes made by the same connector.
+pub(crate) fn install_pinning_verifier(ssl: &mut Ssl, pins: &[[u8; 32]]) -> VerificationFailure {
+    let pins = pins.to_vec();
+    let failure = Arc::new(Mutex::new(None));
+    let callback_failure = failure.clone();
+    ssl.set_custom_verify_callback(SslVerifyMode::PEER, move |ssl| {
+        let store = ssl.ssl_context().cert_store();
+        let cert = ssl
+            .peer_certificate()
+            .ok_or(SslVerifyError::Invalid(SslAlert::CERTIFICATE_UNKNOWN))?;
+        let chain = ssl
+            .peer_cert_chain()
+            .ok_or(SslVerifyError::Invalid(SslAlert::CERTIFICATE_UNKNOWN))?;
+
+        let chain_ok = X509StoreContext::new()
+            .map_err(|_| SslVerifyError::Invalid(SslAlert::INTERNAL_ERROR))?
+            .init(store, &cert, chain, |store_ctx| {
+                let verified = store_ctx.verify_cert()?;
+                Ok(verified && store_ctx.verify_result().is_ok())
+            })
+            .map_err(|_| SslVerifyError::Invalid(SslAlert::INTERNAL_ERROR))?;
+        if !chain_ok {
+            record_verification_failure(&callback_failure, TrustFailure::Certificate);
+            return Err(SslVerifyError::Invalid(SslAlert::UNKNOWN_CA));
+        }
+
+        let der = cert
+            .to_der()
+            .map_err(|_| SslVerifyError::Invalid(SslAlert::INTERNAL_ERROR))?;
+        let digest: [u8; 32] = Sha256::digest(&der).into();
+        if pins.iter().any(|pin| pin == &digest) {
+            Ok(())
+        } else {
+            record_verification_failure(&callback_failure, TrustFailure::Pinning);
+            Err(SslVerifyError::Invalid(SslAlert::CERTIFICATE_UNKNOWN))
+        }
+    });
+    failure
 }
 
 /// Load the platform's system trust store into the builder's
 /// `X509_STORE`.
 ///
-/// Linux: BoringSSL's `set_default_verify_paths` points at the
-/// canonical `/etc/ssl/certs` / `/etc/pki/tls/certs` locations shipped
-/// with every mainstream distro.
+/// Linux: well-known distro CA bundles are loaded directly rather than through
+/// `set_default_verify_paths`, which also consults `SSL_CERT_FILE` and
+/// `SSL_CERT_DIR`.
 ///
 /// macOS: BoringSSL's compiled-in paths point at a Homebrew-style
 /// `/usr/local/etc/openssl/` that does not exist on a default macOS
 /// install, so `set_default_verify_paths` silently yields zero roots.
 /// We try the OpenSSL-compat bundle at `/etc/ssl/cert.pem` (shipped by
 /// Apple since 10.13, rebuilt from the System Keychain on every OS
-/// update), falling back to the default-paths call as a last resort
-/// so a non-standard macOS layout still loads *something*.
+/// update).
 ///
 /// Windows: BoringSSL's default paths point at Unix-style directories
 /// that do not exist, so without a bridge the process ends up with
@@ -336,8 +359,7 @@ pub(crate) fn wire_system_trust(builder: &mut SslContextBuilder) -> Result<(), T
     }
     #[cfg(all(not(windows), not(target_os = "macos")))]
     {
-        builder.set_default_verify_paths()?;
-        Ok(())
+        wire_linux_system_trust(builder)
     }
 }
 
@@ -354,8 +376,9 @@ pub(crate) fn wire_system_trust(builder: &mut SslContextBuilder) -> Result<(), T
 fn wire_system_trust_cached(
     builder: &mut SslContextBuilder,
     config: &TlsTrustConfig,
+    env_roots_loaded: bool,
 ) -> Result<(), TlsError> {
-    if config.ca_files.is_empty() && config.ca_der.is_empty() {
+    if !env_roots_loaded && config.ca_files.is_empty() && config.ca_der.is_empty() {
         builder.set_cert_store_ref(cached_windows_system_store()?);
         return Ok(());
     }
@@ -366,6 +389,7 @@ fn wire_system_trust_cached(
 fn wire_system_trust_cached(
     builder: &mut SslContextBuilder,
     _config: &TlsTrustConfig,
+    _env_roots_loaded: bool,
 ) -> Result<(), TlsError> {
     wire_system_trust(builder)
 }
@@ -410,11 +434,31 @@ fn cached_windows_system_store() -> Result<&'static leyline_bssl::x509::store::X
     Ok(STORE.get_or_init(|| store.build()))
 }
 
+/// Linux-only: load a distro CA bundle without allowing BoringSSL to inspect
+/// `SSL_CERT_FILE` or `SSL_CERT_DIR`.
+#[cfg(all(not(windows), not(target_os = "macos")))]
+fn wire_linux_system_trust(builder: &mut SslContextBuilder) -> Result<(), TlsError> {
+    const BUNDLES: &[&str] = &[
+        "/etc/ssl/certs/ca-certificates.crt",
+        "/etc/pki/tls/certs/ca-bundle.crt",
+        "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
+        "/etc/ssl/ca-bundle.pem",
+        "/etc/ssl/cert.pem",
+    ];
+    for &path in BUNDLES {
+        if std::path::Path::new(path).exists() {
+            return builder
+                .set_ca_file(path)
+                .map_err(|e| TlsError::TrustStore(format!("failed to load {path}: {e}")));
+        }
+    }
+    Err(TlsError::TrustStore(
+        "no supported Linux system CA bundle found".into(),
+    ))
+}
+
 /// macOS-only: load Apple's rebuilt-on-every-update OpenSSL bundle at
-/// `/etc/ssl/cert.pem`, which mirrors the System Keychain roots. Falls
-/// back to `set_default_verify_paths` if the file is missing so an
-/// unusual macOS layout still loads *something* instead of silently
-/// leaving the process with zero trust anchors.
+/// `/etc/ssl/cert.pem`, which mirrors the System Keychain roots.
 ///
 /// `security-framework` / the Keychain APIs are deliberately not bound
 /// directly: `/etc/ssl/cert.pem` already holds the same trust set
@@ -439,13 +483,14 @@ fn wire_macos_system_trust(builder: &mut SslContextBuilder) -> Result<(), TlsErr
                     target: "leyline::tls::trust",
                     path = APPLE_BUNDLE,
                     err = %e,
-                    "macOS system trust bundle parse failed; falling back to default paths"
+                    "macOS system trust bundle parse failed"
                 );
             }
         }
     }
-    builder.set_default_verify_paths()?;
-    Ok(())
+    Err(TlsError::TrustStore(
+        "macOS system trust bundle /etc/ssl/cert.pem is unavailable".into(),
+    ))
 }
 
 /// Windows-only: enumerate the `"ROOT"` system store via Win32 crypto

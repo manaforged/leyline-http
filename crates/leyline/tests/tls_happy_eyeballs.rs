@@ -16,7 +16,7 @@ use leyline::profile::BrowserProfile;
 use leyline::tls::{
     FingerprintConnector, HappyEyeballsConfig, ResolveFuture, Resolver, SystemResolver,
 };
-use leyline::{Browser, Session, TlsTrustConfig};
+use leyline::{Browser, Error, Session, TlsError, TlsTrustConfig};
 
 /// Mock resolver that returns a fixed list.
 struct StaticResolver(Vec<SocketAddr>);
@@ -111,5 +111,5 @@ fn invalid_der_root_is_rejected_at_build_time() {
         .add_root_certificate_der([1, 2, 3, 4])
         .build()
         .expect_err("invalid DER CA should fail TLS setup");
-    assert!(err.to_string().contains("ssl handshake"));
+    assert!(matches!(err, Error::Tls(TlsError::SslConfig(_))));
 }

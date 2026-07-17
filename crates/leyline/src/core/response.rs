@@ -500,10 +500,19 @@ impl Response {
     /// // If we get here, status is 2xx (or 1xx/3xx).
     /// ```
     pub fn error_for_status(self) -> crate::core::Result<Self> {
+        // Cap the body retained in `Error::Status`. That error is routinely
+        // logged and propagated, so stowing a body up to the 100 MB buffer cap
+        // would balloon logs and memory. 16 KiB is plenty to debug a 4xx/5xx
+        // (error page, JSON error envelope, rate-limit note); the full body is
+        // still available from the `Response` before you call this.
+        const MAX_ERROR_BODY: usize = 16 * 1024;
         if self.status >= 400 || self.status < 100 {
             let status = self.status;
             let url = self.url.clone();
-            let body = self.into_bytes();
+            // Copy only the retained prefix into a right-sized allocation and
+            // drop the (potentially huge) full body.
+            let full = self.into_bytes();
+            let body = full[..full.len().min(MAX_ERROR_BODY)].to_vec();
             Err(crate::Error::Status {
                 code: status,
                 url,
@@ -754,6 +763,39 @@ mod tests {
         acc.add_leg(&leg(false, Some(25), 12, 40));
         assert_eq!(acc.connect_ms, Some(55));
         assert!(!acc.reused);
+    }
+
+    #[test]
+    fn error_for_status_caps_retained_body() {
+        // A large body must not be stowed whole in Error::Status — it would
+        // balloon logs and memory. Cap is 16 KiB.
+        let mut resp = bare_response(None);
+        resp.status = 500;
+        resp.body = ResponseBody::Buffered(vec![b'x'; 2 * 1024 * 1024]);
+        match resp.error_for_status().unwrap_err() {
+            Error::Status { code, body, .. } => {
+                assert_eq!(code, 500);
+                assert_eq!(
+                    body.len(),
+                    16 * 1024,
+                    "Error::Status body must be capped at 16 KiB"
+                );
+                assert!(body.iter().all(|&b| b == b'x'), "prefix content preserved");
+            }
+            other => panic!("expected Error::Status, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn error_for_status_keeps_short_body_intact() {
+        // A body under the cap is retained verbatim.
+        let mut resp = bare_response(None);
+        resp.status = 404;
+        resp.body = ResponseBody::Buffered(b"not found".to_vec());
+        match resp.error_for_status().unwrap_err() {
+            Error::Status { body, .. } => assert_eq!(body, b"not found"),
+            other => panic!("expected Error::Status, got {other:?}"),
+        }
     }
 
     #[test]

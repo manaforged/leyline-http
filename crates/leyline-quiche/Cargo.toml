@@ -12,12 +12,16 @@ authors = [
     "Thomas Gardiner",
 ]
 build = "src/build.rs"
-rust-version = "1.85"
+rust-version = "1.86"
 include = [
     "/*.md",
     "/*.toml",
     "/COPYING",
     "/LICENSE",
+    "/examples/cert-big.crt",
+    "/examples/cert.crt",
+    "/examples/cert.key",
+    "/examples/rootca.crt",
     "/src",
 ]
 
@@ -62,7 +66,6 @@ url = { workspace = true }
 
 [lib]
 crate-type = ["lib", "staticlib", "cdylib"]
-test = false
 
 # Vendored quiche upstream — blanket-allow lint groups to keep upstream diffs
 # small and avoid chasing style lints in code we don't own.

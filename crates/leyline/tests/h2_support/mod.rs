@@ -93,6 +93,82 @@ pub async fn write_response<S: AsyncWrite + Unpin>(s: &mut S, stream_id: u32, bo
     s.write_all(&buf).await.expect("resp data write");
 }
 
+/// Write a HEADERS frame with an arbitrary header block — used to craft
+/// malformed responses (e.g. one with no `:status`, or a non-numeric one).
+pub async fn write_raw_headers<S: AsyncWrite + Unpin>(
+    s: &mut S,
+    stream_id: u32,
+    headers: &[(&str, &str)],
+    end_stream: bool,
+) {
+    let mut enc = hpack::Encoder::new();
+    let fragment = enc.encode_header_block(headers);
+    let h = HeadersFrame {
+        stream_id,
+        end_stream,
+        end_headers: true,
+        priority: None,
+        fragment: bytes::Bytes::from(fragment),
+    };
+    let mut buf = BytesMut::new();
+    h.encode(&mut buf);
+    s.write_all(&buf).await.expect("raw headers write");
+}
+
+/// Write a response HEADERS frame that deliberately omits END_HEADERS,
+/// so the receiver must wait for CONTINUATION frames to finish the block.
+/// Exercises the CONTINUATION-reassembly wall-clock timeout when the
+/// server then withholds the CONTINUATION.
+pub async fn write_headers_without_end<S: AsyncWrite + Unpin>(s: &mut S, stream_id: u32) {
+    let mut enc = hpack::Encoder::new();
+    let fragment = enc.encode_header_block(&[(":status", "200")]);
+    let h = HeadersFrame {
+        stream_id,
+        end_stream: false,
+        end_headers: false,
+        priority: None,
+        fragment: bytes::Bytes::from(fragment),
+    };
+    let mut buf = BytesMut::new();
+    h.encode(&mut buf);
+    s.write_all(&buf).await.expect("partial headers write");
+}
+
+/// Write just the response HEADERS (`:status`), END_HEADERS set but not
+/// END_STREAM — leaves the stream open for DATA frames to follow.
+pub async fn write_response_headers<S: AsyncWrite + Unpin>(s: &mut S, stream_id: u32) {
+    let mut enc = hpack::Encoder::new();
+    let fragment = enc.encode_header_block(&[(":status", "200")]);
+    let h = HeadersFrame {
+        stream_id,
+        end_stream: false,
+        end_headers: true,
+        priority: None,
+        fragment: bytes::Bytes::from(fragment),
+    };
+    let mut buf = BytesMut::new();
+    h.encode(&mut buf);
+    s.write_all(&buf).await.expect("resp headers write");
+}
+
+/// Write a single DATA frame of arbitrary length. Used to feed the
+/// driver an over-window body that violates inbound flow control.
+pub async fn write_data<S: AsyncWrite + Unpin>(
+    s: &mut S,
+    stream_id: u32,
+    data: &[u8],
+    end_stream: bool,
+) {
+    let d = DataFrame {
+        stream_id,
+        end_stream,
+        data: bytes::Bytes::copy_from_slice(data),
+    };
+    let mut buf = BytesMut::new();
+    d.encode(&mut buf);
+    s.write_all(&buf).await.expect("data write");
+}
+
 pub async fn write_window_update<S: AsyncWrite + Unpin>(s: &mut S, stream_id: u32, inc: u32) {
     let w = WindowUpdateFrame {
         stream_id,

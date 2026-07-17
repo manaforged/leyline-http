@@ -410,7 +410,7 @@ pub(crate) async fn send_request_h1(
 fn h1_error_to_core(e: H1PooledError) -> Error {
     match e {
         H1PooledError::Config(m) => Error::Config(m),
-        H1PooledError::Tls(m) => Error::Tls(crate::tls::TlsError::SslConnect(m)),
+        H1PooledError::Tls(error) => Error::Tls(error),
         H1PooledError::Io(io) => Error::Io(io),
         H1PooledError::Http(m) => Error::Http(m),
         // Transport-level EOF mid-exchange → typed Io(UnexpectedEof), so the
@@ -564,5 +564,14 @@ mod alpn_fallback_tests {
         ));
         assert!(matches!(framing, Error::Http(_)));
         assert!(!framing.is_connection_closed());
+
+        let pinning = h1_error_to_core(H1PooledError::Tls(crate::tls::TlsError::Pinning(
+            "mismatch".into(),
+        )));
+        assert!(
+            matches!(&pinning, Error::Tls(crate::tls::TlsError::Pinning(_))),
+            "H1 must preserve typed TLS failures, got {pinning:?}"
+        );
+        assert!(!pinning.is_connection_closed());
     }
 }

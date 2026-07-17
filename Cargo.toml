@@ -16,7 +16,7 @@ exclude = [
 [workspace.package]
 version = "1.0.0-rc.1"
 edition = "2024"
-rust-version = "1.85" # MSRV
+rust-version = "1.86" # MSRV
 authors = ["Thomas Gardiner"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/manaforged/leyline-http"
@@ -43,9 +43,9 @@ md-5 = "0.10"
 # Leyline's owned BoringSSL stack (vendored fork of 0x676e67/btls). Carries the
 # Firefox-specific C patches (record_size_limit, delegated_credentials, FFDHE,
 # 3DES) and pins the BoringSSL revision per Chrome era. Attribution in /NOTICE.
-leyline-bssl = { path = "crates/leyline-bssl" }
-leyline-bssl-sys = { path = "crates/leyline-bssl-sys" }
-leyline-bssl-tokio = { path = "crates/leyline-bssl-tokio" }
+leyline-bssl = { path = "crates/leyline-bssl", version = "=1.0.0-alpha.3" }
+leyline-bssl-sys = { path = "crates/leyline-bssl-sys", version = "=1.0.0-alpha.3" }
+leyline-bssl-tokio = { path = "crates/leyline-bssl-tokio", version = "=1.0.0-alpha.3" }
 socket2 = { version = "0.5", features = ["all"] }
 bytes = "1"
 tungstenite = "0.26"

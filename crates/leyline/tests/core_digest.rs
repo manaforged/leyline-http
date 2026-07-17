@@ -182,6 +182,96 @@ async fn stale_nonce_is_retried_transparently() {
     server.await.unwrap();
 }
 
+/// A same-origin redirect can sit between the caller's original URL and the
+/// server that issues the 401 Digest challenge. HA2 = H(method:uri) must use
+/// the request-target the server actually challenged (`/protected`), not the
+/// caller's original (`/start`); otherwise the authenticated retry signs the
+/// wrong URI and the server rejects it. Regression for the digest-uri fix.
+#[tokio::test]
+async fn digest_uri_tracks_the_redirected_challenge_url() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let server = tokio::spawn(async move {
+        // Round 1: GET /start (no auth) -> 302 to /protected (same origin).
+        let (mut sock, _) = listener.accept().await.unwrap();
+        let head = read_headers(&mut sock).await;
+        assert!(head.starts_with("GET /start "), "{head}");
+        sock.write_all(
+            b"HTTP/1.1 302 Found\r\n\
+              location: /protected\r\n\
+              content-length: 0\r\nconnection: close\r\n\r\n",
+        )
+        .await
+        .unwrap();
+        sock.flush().await.unwrap();
+        drop(sock);
+
+        // Round 2: GET /protected (no auth) -> 401 Digest challenge.
+        let (mut sock, _) = listener.accept().await.unwrap();
+        let head = read_headers(&mut sock).await;
+        assert!(head.starts_with("GET /protected "), "{head}");
+        sock.write_all(
+            b"HTTP/1.1 401 Unauthorized\r\n\
+              WWW-Authenticate: Digest realm=\"r\", nonce=\"n1\", qop=\"auth\", algorithm=MD5\r\n\
+              content-length: 0\r\nconnection: close\r\n\r\n",
+        )
+        .await
+        .unwrap();
+        sock.flush().await.unwrap();
+        drop(sock);
+
+        // Round 3: GET /start (WITH auth) -> 302 to /protected again. The
+        // digest uri must already be /protected, not /start.
+        let (mut sock, _) = listener.accept().await.unwrap();
+        let head = read_headers(&mut sock).await;
+        assert!(head.starts_with("GET /start "), "{head}");
+        let auth = extract_authorization(&head).expect("auth on retry first hop");
+        assert!(
+            auth.contains("uri=\"/protected\""),
+            "digest uri must track the redirected challenge URL, got: {auth}"
+        );
+        assert!(
+            !auth.contains("uri=\"/start\""),
+            "digest uri wrongly used the caller's original URL: {auth}"
+        );
+        sock.write_all(
+            b"HTTP/1.1 302 Found\r\n\
+              location: /protected\r\n\
+              content-length: 0\r\nconnection: close\r\n\r\n",
+        )
+        .await
+        .unwrap();
+        sock.flush().await.unwrap();
+        drop(sock);
+
+        // Round 4: GET /protected (WITH auth, uri=/protected) -> 200.
+        let (mut sock, _) = listener.accept().await.unwrap();
+        let head = read_headers(&mut sock).await;
+        assert!(head.starts_with("GET /protected "), "{head}");
+        let auth = extract_authorization(&head).expect("auth on retry final hop");
+        assert!(auth.contains("uri=\"/protected\""), "{auth}");
+        sock.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\nok")
+            .await
+            .unwrap();
+        sock.flush().await.unwrap();
+    });
+
+    let session = Session::builder().http1().build().unwrap();
+    let resp = session
+        .get(&format!("http://{addr}/start"))
+        .digest_auth(DigestAuth::new("u", "p"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        200,
+        "digest auth across a same-origin redirect must succeed"
+    );
+    server.await.unwrap();
+}
+
 #[tokio::test]
 async fn non_digest_401_is_passed_through() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

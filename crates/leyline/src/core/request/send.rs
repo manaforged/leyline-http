@@ -6,7 +6,6 @@ use crate::core::body::Body;
 use crate::core::error::Error;
 use crate::core::response::Response;
 use crate::core::retry::is_idempotent;
-use crate::tls::TlsError;
 
 impl RequestBuilder {
     /// Send the request and return a buffered response.
@@ -162,7 +161,24 @@ impl RequestBuilder {
                                 stale = challenge.stale,
                                 "digest 401 — computing response and retrying"
                             );
-                            let parsed = url::Url::parse(&url)?;
+                            // The 401 challenge may originate from a URL other
+                            // than the caller's original: `execute_with_timeout`
+                            // follows redirects internally. HA2 = H(method:uri)
+                            // must use the request-target the server actually
+                            // challenged — the response's final URL — not the
+                            // original. A same-origin redirect before the 401
+                            // then still yields a valid digest: the authenticated
+                            // retry re-follows that redirect carrying the
+                            // authorization header, and the server validates HA2
+                            // against the same `/protected` target we signed.
+                            //
+                            // Limitation: a cross-origin redirect strips the
+                            // authorization header on the follow (see
+                            // `execute_inner`'s sensitive-header stripping), so
+                            // digest across a cross-origin redirect cannot
+                            // complete — the retry lands unauthenticated and the
+                            // 401 passes through.
+                            let parsed = url::Url::parse(resp.url())?;
                             let uri_path = match parsed.query() {
                                 Some(q) => format!("{}?{}", parsed.path(), q),
                                 None => parsed.path().to_string(),
@@ -262,9 +278,9 @@ impl RequestBuilder {
                 // into a retry was a request-smuggling hazard.
                 Err(Error::Io(_)) => retry_policy.matches_connection_error(),
                 Err(Error::Timeout) => retry_policy.matches_timeout(),
-                Err(Error::Tls(
-                    TlsError::TcpConnect(_) | TlsError::Dns(_) | TlsError::SslConnect(_),
-                )) => retry_policy.matches_connection_error(),
+                Err(Error::Tls(err)) if err.is_retryable() => {
+                    retry_policy.matches_connection_error()
+                }
                 // Safely-retryable HTTP/2 transport failures: a transport-level
                 // IO error, a graceful GOAWAY (NoError), or a server-side
                 // REFUSED_STREAM (the request never began processing). Other
@@ -292,10 +308,11 @@ impl RequestBuilder {
             }
 
             if !body_retryable {
+                // The request hit a retryable error, but its streaming body
+                // can't be replayed, so the retry can't happen. Surface a clear
                 return Err(Error::Http(
-                    "retry requested on a streaming request body. Streaming bodies cannot \
-                     be replayed — buffer the body via `Body::Bytes` before calling \
-                     `retry()`, or drop the retry policy."
+                    "the request hit a retryable failure, but its streaming request body \
+                     cannot be replayed. Buffer the body via `Body::Bytes` before retrying."
                         .into(),
                 ));
             }

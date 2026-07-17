@@ -57,18 +57,49 @@ async fn retries_503_then_succeeds() {
         }
     });
 
-    let session = Session::builder().http1().build().unwrap();
     let policy =
         RetryPolicy::default().with_backoff(Duration::from_millis(1), Duration::from_millis(10));
+    let session = Session::builder().http1().retry(policy).build().unwrap();
     let resp = session
         .get(&format!("http://{addr}/flaky"))
-        .retry(policy)
         .send()
         .await
         .unwrap();
     assert_eq!(resp.status(), 200);
     assert_eq!(resp.text(), "ok");
     assert_eq!(counter.load(Ordering::Relaxed), 3);
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn new_sessions_do_not_retry_503() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let counter = Arc::new(AtomicU32::new(0));
+    let counter_clone = counter.clone();
+
+    let server = tokio::spawn(async move {
+        let (mut sock, _) = listener.accept().await.unwrap();
+        read_one_request(&mut sock).await;
+        counter_clone.fetch_add(1, Ordering::Relaxed);
+        sock.write_all(
+            b"HTTP/1.1 503 Service Unavailable\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+        )
+        .await
+        .unwrap();
+        sock.flush().await.unwrap();
+    });
+
+    let resp = Session::builder()
+        .http1()
+        .build()
+        .unwrap()
+        .get(&format!("http://{addr}/flaky"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 503);
+    assert_eq!(counter.load(Ordering::Relaxed), 1);
     server.await.unwrap();
 }
 
@@ -185,7 +216,7 @@ async fn streaming_body_plus_retry_errors_clearly() {
         .unwrap_err();
     let msg = format!("{err}");
     assert!(
-        msg.contains("Streaming bodies cannot") || msg.contains("cannot be replayed"),
+        msg.contains("streaming request body cannot be replayed"),
         "got: {msg}"
     );
 }
