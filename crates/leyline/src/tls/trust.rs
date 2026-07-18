@@ -331,12 +331,8 @@ pub(crate) fn install_pinning_verifier(ssl: &mut Ssl, pins: &[[u8; 32]]) -> Veri
 /// `set_default_verify_paths`, which also consults `SSL_CERT_FILE` and
 /// `SSL_CERT_DIR`.
 ///
-/// macOS: BoringSSL's compiled-in paths point at a Homebrew-style
-/// `/usr/local/etc/openssl/` that does not exist on a default macOS
-/// install, so `set_default_verify_paths` silently yields zero roots.
-/// We try the OpenSSL-compat bundle at `/etc/ssl/cert.pem` (shipped by
-/// Apple since 10.13, rebuilt from the System Keychain on every OS
-/// update).
+/// macOS: the Security.framework anchor list is copied into BoringSSL because
+/// Apple's OpenSSL-compat PEM bundle can lag behind the System Keychain.
 ///
 /// Windows: BoringSSL's default paths point at Unix-style directories
 /// that do not exist, so without a bridge the process ends up with
@@ -457,40 +453,41 @@ fn wire_linux_system_trust(builder: &mut SslContextBuilder) -> Result<(), TlsErr
     ))
 }
 
-/// macOS-only: load Apple's rebuilt-on-every-update OpenSSL bundle at
-/// `/etc/ssl/cert.pem`, which mirrors the System Keychain roots.
-///
-/// `security-framework` / the Keychain APIs are deliberately not bound
-/// directly: `/etc/ssl/cert.pem` already holds the same trust set
-/// and is rebuilt by the OS, so the binding would add a Foundation
-/// runtime dependency and a round-trip through CF for no material
-/// upside over reading a PEM file.
+/// macOS-only: enumerate the system trust anchors through Security.framework
+/// and push each DER certificate into BoringSSL's `X509_STORE`.
 #[cfg(target_os = "macos")]
 fn wire_macos_system_trust(builder: &mut SslContextBuilder) -> Result<(), TlsError> {
-    const APPLE_BUNDLE: &str = "/etc/ssl/cert.pem";
-    if std::path::Path::new(APPLE_BUNDLE).exists() {
-        match builder.set_ca_file(APPLE_BUNDLE) {
-            Ok(()) => {
-                tracing::info!(
+    let roots = crate::tls::macos_trust::load_system_roots().map_err(|error| {
+        TlsError::TrustStore(format!("failed to read macOS system roots: {error}"))
+    })?;
+    let store = builder.cert_store_mut();
+    let mut loaded = 0usize;
+    let mut skipped = 0usize;
+    for der in &roots {
+        match X509::from_der(der).and_then(|cert| store.add_cert(cert)) {
+            Ok(()) => loaded += 1,
+            Err(error) => {
+                skipped += 1;
+                tracing::debug!(
                     target: "leyline::tls::trust",
-                    path = APPLE_BUNDLE,
-                    "macOS system trust loaded from Apple OpenSSL-compat bundle"
-                );
-                return Ok(());
-            }
-            Err(e) => {
-                tracing::warn!(
-                    target: "leyline::tls::trust",
-                    path = APPLE_BUNDLE,
-                    err = %e,
-                    "macOS system trust bundle parse failed"
+                    %error,
+                    "macOS trust anchor rejected by BoringSSL"
                 );
             }
         }
     }
-    Err(TlsError::TrustStore(
-        "macOS system trust bundle /etc/ssl/cert.pem is unavailable".into(),
-    ))
+    if loaded == 0 {
+        return Err(TlsError::TrustStore(format!(
+            "macOS system trust store bridged zero certificates ({skipped} skipped)"
+        )));
+    }
+    tracing::info!(
+        target: "leyline::tls::trust",
+        loaded,
+        skipped,
+        "macOS system trust store bridged into BoringSSL"
+    );
+    Ok(())
 }
 
 /// Windows-only: enumerate the `"ROOT"` system store via Win32 crypto

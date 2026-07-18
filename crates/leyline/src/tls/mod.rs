@@ -8,6 +8,8 @@ mod builder;
 mod connector;
 mod error;
 mod happy_eyeballs;
+#[cfg(target_os = "macos")]
+mod macos_trust;
 mod nonblocking;
 mod proxy;
 mod resolver;

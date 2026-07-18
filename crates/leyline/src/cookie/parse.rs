@@ -198,6 +198,43 @@ fn is_public_suffix(domain: &str) -> bool {
         .is_some_and(|s| s.as_bytes().eq_ignore_ascii_case(domain.as_bytes()))
 }
 
+/// Extract the `(name, value)` of a Set-Cookie header the jar REFUSED to store
+/// (bad domain, public suffix, `__Host-`/`__Secure-` violation) for the
+/// response view. The jar's RFC 6265bis storage policy decides what may be
+/// persisted and broadcast on later requests; the response view instead
+/// reports what the server actually sent (reqwest parity), because storage
+/// policy is about the jar's trust boundary, not about this response's bytes.
+///
+/// Deletions (`Max-Age` ≤ 0) and malformed headers yield `None`: a deletion is
+/// not a live cookie, and a header with no name/value has nothing to report.
+pub(crate) fn rejected_cookie_name_value(header: &str) -> Option<(String, String)> {
+    let name_value = header.split(';').next()?;
+    let (name, value) = name_value.split_once('=')?;
+    let name = name.trim();
+    if name.is_empty() {
+        return None;
+    }
+    let value = value.trim();
+    let value = value
+        .strip_prefix('"')
+        .and_then(|v| v.strip_suffix('"'))
+        .unwrap_or(value);
+    // Reject deletions: any `Max-Age` attribute ≤ 0 means "delete now".
+    for attr in header.split(';').skip(1) {
+        let attr = attr.trim();
+        if let Some(v) = attr
+            .split_once('=')
+            .filter(|(k, _)| k.trim().eq_ignore_ascii_case("max-age"))
+            .map(|(_, v)| v.trim())
+        {
+            if v.parse::<i64>().is_ok_and(|secs| secs <= 0) {
+                return None;
+            }
+        }
+    }
+    Some((name.to_string(), value.to_string()))
+}
+
 /// The registrable domain (eTLD+1) of `host` per the Public Suffix List —
 /// e.g. `www.example.co.uk` → `example.co.uk`. `None` when `host` is itself a
 /// public suffix or has no registrable parent (an IP literal, `localhost`).
@@ -336,6 +373,30 @@ mod tests {
         assert_eq!(c.path, "/");
         assert_eq!(c.same_site, SameSite::Lax); // default
         assert!(c.host_only);
+    }
+
+    #[test]
+    fn rejected_cookie_name_value_reports_server_sent_but_unstorable() {
+        // Storage-invalid Domain (RFC 6265bis §5.3.6 mismatch): the jar must
+        // refuse it, yet the response view still reports what the server sent.
+        let rejected =
+            "late=abc|1|0|def; Path=/; Max-Age=1577847600; Domain=example.com; Secure";
+        let (name, value) = rejected_cookie_name_value(rejected).unwrap();
+        assert_eq!(name, "late");
+        assert_eq!(value, "abc|1|0|def");
+
+        // Quote-stripping matches the main parser (no divergence).
+        let (name, value) = rejected_cookie_name_value("n=\"quoted value\"").unwrap();
+        assert_eq!(name, "n");
+        assert_eq!(value, "quoted value");
+
+        // Deletions stay hidden (Max-Age=0 and negative both mean delete).
+        assert!(rejected_cookie_name_value("n=v; Max-Age=0").is_none());
+        assert!(rejected_cookie_name_value("n=v; Max-Age=-1").is_none());
+
+        // Malformed headers have nothing to report.
+        assert!(rejected_cookie_name_value("no-equals-sign").is_none());
+        assert!(rejected_cookie_name_value("=v").is_none());
     }
 
     #[test]

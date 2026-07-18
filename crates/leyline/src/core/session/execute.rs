@@ -356,6 +356,14 @@ impl Session {
                     }
                     if let Some(value) = self.cookie_jar.get_cookie(url_str, name) {
                         all_cookies.insert(name.to_string(), value);
+                    } else if let Some((_, value)) = crate::cookie::rejected_cookie_name_value(sc) {
+                        // The jar rejected this header for storage (bad domain,
+                        // public suffix, `__Host-`/`__Secure-` violation), so it
+                        // can never broadcast on later requests — but the server
+                        // did send it, and the response view reports what the
+                        // server sent (reqwest parity). Deletions and malformed
+                        // headers stay hidden.
+                        all_cookies.insert(name.to_string(), value);
                     }
                 }
             }

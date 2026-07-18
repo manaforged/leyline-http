@@ -24,6 +24,7 @@ mod parse;
 mod record;
 
 pub use jar::Jar;
+pub(crate) use parse::rejected_cookie_name_value;
 pub use record::{Cookie, SameSite};
 
 /// Whether a request is cross-site relative to the navigation that started it,
