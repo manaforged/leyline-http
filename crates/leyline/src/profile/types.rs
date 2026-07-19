@@ -60,10 +60,9 @@ pub struct TlsProfile {
     #[serde(default)]
     pub pre_shared_key: bool,
     /// Advertise the TLS Trust Anchor Identifiers extension (0xCA34/51764) with
-    /// an empty list, as Chrome 148+ does. Required for the ClientHello JA4 to
-    /// match real Chrome (t13d1517); omitting it yields t13d1516 and trips
-    /// a CDN edge's JA4+H2 join check (soft-block surfacing as `alpn: negotiated
-    /// none`).
+    /// an empty list when the selected browser profile does. This changes the
+    /// ClientHello JA4 extension count, so each Chrome major must follow its
+    /// captured wire profile.
     #[serde(default)]
     pub request_trust_anchors: bool,
     #[serde(default)]

@@ -3,8 +3,8 @@ name = "Chrome 150"
 browser = "chrome"
 version = 150
 family = "chromium"
-verified_against = "tls.peet.ws"
-verified_at = "2026-06-21"
+verified_against = "Chrome 150.0.7871.128 on macOS via tls.peet.ws"
+verified_at = "2026-07-18"
 
 [tls]
 ciphers = [
@@ -27,8 +27,8 @@ ciphers = [
 curves = ["X25519_MLKEM768", "X25519", "SECP256R1", "SECP384R1"]
 # Chrome 150 prepends the ML-DSA post-quantum signature schemes
 # (mldsa44/65/87 = 0x0904/0905/0906) ahead of the classical list. This is the
-# only TLS change vs Chrome 149, and it moves the JA4_3 hash dcad5a053991 ->
-# cb7bf5808d99. Requires a BoringSSL revision with SSL_SIGN_ML_DSA_* (>= 3a9254f).
+# only signature-algorithm change vs Chrome 149. Requires a BoringSSL revision
+# with SSL_SIGN_ML_DSA_* (>= 3a9254f).
 sigalgs = [
     "mldsa44",
     "mldsa65",
@@ -50,10 +50,10 @@ cert_compression = ["brotli"]
 permute_extensions = true
 ech_grease = true
 pre_shared_key = true
-request_trust_anchors = true
+request_trust_anchors = false
 
 [tls.fingerprint]
-ja4 = "t13d1517h2_8daaf6152771_cb7bf5808d99"
+ja4 = "t13d1516h2_8daaf6152771_806a8c22fdea"
 
 [h2]
 header_table_size = 65536
@@ -69,16 +69,16 @@ akamai = "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p"
 
 [identity.windows]
 user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
-sec_ch_ua = '"Google Chrome";v="150", "Chromium";v="150", "Not;A=Brand";v="8"'
+sec_ch_ua = '"Not;A=Brand";v="8", "Chromium";v="150", "Google Chrome";v="150"'
 
 [identity.macos]
 user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
-sec_ch_ua = '"Google Chrome";v="150", "Chromium";v="150", "Not;A=Brand";v="8"'
+sec_ch_ua = '"Not;A=Brand";v="8", "Chromium";v="150", "Google Chrome";v="150"'
 
 [identity.linux]
 user_agent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
-sec_ch_ua = '"Google Chrome";v="150", "Chromium";v="150", "Not;A=Brand";v="8"'
+sec_ch_ua = '"Not;A=Brand";v="8", "Chromium";v="150", "Google Chrome";v="150"'
 
 [identity.android]
 user_agent = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Mobile Safari/537.36"
-sec_ch_ua = '"Google Chrome";v="150", "Chromium";v="150", "Not;A=Brand";v="8"'
+sec_ch_ua = '"Not;A=Brand";v="8", "Chromium";v="150", "Google Chrome";v="150"'

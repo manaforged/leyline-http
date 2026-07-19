@@ -603,6 +603,30 @@ async fn live_wire_audit_every_profile() {
 
 #[tokio::test]
 #[ignore = "live: needs network"]
+async fn live_chrome150_macos_matches_capture() {
+    const SEC_CH_UA: &str = r#""Not;A=Brand";v="8", "Chromium";v="150", "Google Chrome";v="150""#;
+    const JA4: &str = "t13d1516h2_8daaf6152771_806a8c22fdea";
+    const H2: &str = "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p";
+
+    let session = leyline::Session::builder()
+        .browser(Browser::Chrome150)
+        .platform(Platform::MacOS)
+        .build()
+        .unwrap();
+    let json = peet(&session).await;
+    let headers = extract_sent_headers(&json);
+    let sec_ch_ua = header_value(&headers, "sec-ch-ua").expect("no sec-ch-ua");
+    let observed_h2 = json["http2"]["akamai_fingerprint"]
+        .as_str()
+        .expect("no http2.akamai_fingerprint");
+
+    assert_eq!(denormalize_peet_quotes(sec_ch_ua), SEC_CH_UA);
+    assert_eq!(json["tls"]["ja4"].as_str().expect("no tls.ja4"), JA4);
+    assert_eq!(normalize_akamai(observed_h2), H2);
+}
+
+#[tokio::test]
+#[ignore = "live: needs network"]
 async fn live_ja4_exact_match_chrome149() {
     // Build Chrome 149 explicitly — the default is now Chrome 150, but this test
     // anchors 149's own JA4 (the current stable major), so it must

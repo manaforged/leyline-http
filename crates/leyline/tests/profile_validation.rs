@@ -180,6 +180,37 @@ fn every_builtin_profile_declares_verified_against() {
     }
 }
 
+#[test]
+fn chrome150_identity_matches_capture_on_every_supported_platform() {
+    const SEC_CH_UA: &str = r#""Not;A=Brand";v="8", "Chromium";v="150", "Google Chrome";v="150""#;
+    let registry = ProfileRegistry::builtin();
+    let profile = registry
+        .get_browser(Browser::Chrome150)
+        .expect("chrome150 built-in profile");
+
+    for (platform, ua_marker) in [
+        (Platform::Windows, "Windows NT 10.0"),
+        (Platform::MacOS, "Macintosh; Intel Mac OS X 10_15_7"),
+        (Platform::Linux, "X11; Linux x86_64"),
+        (Platform::Android, "Linux; Android 14; Pixel 8"),
+    ] {
+        let identity = profile
+            .identity_for(platform)
+            .unwrap_or_else(|| panic!("Chrome 150 has no {platform:?} identity"));
+        assert_eq!(identity.sec_ch_ua, SEC_CH_UA, "{platform:?} sec-ch-ua");
+        assert!(
+            identity.user_agent.contains(ua_marker),
+            "{platform:?} UA has the wrong platform: {}",
+            identity.user_agent
+        );
+        assert!(
+            identity.user_agent.contains("Chrome/150.0.0.0"),
+            "{platform:?} UA has the wrong Chrome major: {}",
+            identity.user_agent
+        );
+    }
+}
+
 // ── Positive guard: every shipping profile must build an SSL context ─────────
 #[test]
 fn every_builtin_profile_builds_ssl_context() {

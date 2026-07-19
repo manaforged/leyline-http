@@ -45,7 +45,7 @@ pub struct FingerprintConnector {
     /// Use new ALPS codepoint (0x4469 for Chrome 131+).
     alps_new_codepoint: bool,
     /// Advertise Trust Anchor Identifiers (ext 0xCA34/51764) with an empty
-    /// list, as Chrome 148+ does — keeps the ClientHello JA4 at t13d1517.
+    /// list when the selected browser profile requires it.
     request_trust_anchors: bool,
     /// Per-host session ticket cache for TLS resumption (DER-encoded).
     session_cache: Arc<Mutex<LruCache<String, Vec<u8>>>>,
