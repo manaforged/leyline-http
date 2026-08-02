@@ -160,6 +160,114 @@ fn real_cert_compression_codepoints_still_build() {
     );
 }
 
+// ── A fixed extension order must be a complete, real permutation ──────
+// BoringSSL rejects an unknown or repeated extension ID outright, and appends
+// whatever the list omits in its own order. Either way the ClientHello stops
+// matching the browser the profile claims to be — JA4_r drift the sorted JA4
+// hides — so a broken order fails at load rather than at connect.
+const FIREFOX_152: &str = include_str!("../profiles/firefox/152.toml");
+const FIREFOX_152_PERMUTATION: &str =
+    "[0, 23, 65281, 10, 11, 35, 16, 5, 34, 18, 51, 43, 13, 45, 28, 27, 65037]";
+
+/// The real Firefox 152 profile with its captured extension order swapped out.
+fn firefox_152_ordered(list: &str) -> String {
+    let captured = format!("extension_permutation = {FIREFOX_152_PERMUTATION}");
+    assert!(
+        FIREFOX_152.contains(&captured),
+        "firefox/152.toml no longer declares the captured permutation verbatim; \
+         update FIREFOX_152_PERMUTATION"
+    );
+    FIREFOX_152.replace(&captured, &format!("extension_permutation = {list}"))
+}
+
+/// Load Firefox 152 under a broken order and return the rejection message.
+fn permutation_load_error(list: &str) -> String {
+    BrowserProfile::from_toml(&firefox_152_ordered(list))
+        .expect_err("a broken extension_permutation loaded successfully")
+        .to_string()
+}
+
+#[test]
+fn permutation_entry_outside_the_advertised_set_is_rejected() {
+    // 0x1234 is not an extension any profile advertises. BoringSSL would reject
+    // the list wholesale and silently ship its default order.
+    let err = permutation_load_error(
+        "[0, 23, 65281, 10, 11, 35, 16, 5, 34, 18, 51, 43, 13, 45, 28, 27, 4660]",
+    );
+    assert!(
+        err.contains("0x1234"),
+        "rejection did not name the offending entry: {err}"
+    );
+}
+
+#[test]
+fn permutation_omitting_an_advertised_extension_is_rejected() {
+    // compress_certificate (27) dropped while cert_compression stays populated:
+    // BoringSSL appends it after the listed extensions, off its captured spot.
+    let err = permutation_load_error(
+        "[0, 23, 65281, 10, 11, 35, 16, 5, 34, 18, 51, 43, 13, 45, 28, 65037]",
+    );
+    assert!(
+        err.contains("compress_certificate"),
+        "rejection did not name the omitted extension: {err}"
+    );
+}
+
+#[test]
+fn permutation_with_a_repeated_extension_id_is_rejected() {
+    let err = permutation_load_error(
+        "[0, 0, 65281, 10, 11, 35, 16, 5, 34, 18, 51, 43, 13, 45, 28, 27, 65037]",
+    );
+    assert!(
+        err.contains("repeats 0x0000"),
+        "rejection did not name the repeated entry: {err}"
+    );
+}
+
+#[test]
+fn empty_permutation_is_rejected() {
+    let err = permutation_load_error("[]");
+    assert!(
+        err.contains("empty"),
+        "an empty extension_permutation was treated as 'no order declared': {err}"
+    );
+}
+
+#[test]
+fn positioning_pre_shared_key_is_rejected() {
+    // 41 appears in a resumed-handshake capture, but TLS 1.3 fixes it last and
+    // BoringSSL ignores any position given for it — listing it would promise a
+    // wire order leyline cannot deliver.
+    let err = permutation_load_error(
+        "[0, 23, 65281, 10, 11, 35, 16, 5, 34, 18, 51, 43, 13, 45, 28, 27, 65037, 41]",
+    );
+    assert!(
+        err.contains("pre_shared_key"),
+        "rejection did not explain the pre_shared_key constraint: {err}"
+    );
+}
+
+// Positive guard: the shipped orders survive the gate, and at least one profile
+// actually exercises it (ProfileRegistry::builtin panics on a rejected profile).
+#[test]
+fn builtin_profiles_declaring_an_extension_order_still_load() {
+    let reg = ProfileRegistry::builtin();
+    let declaring = ALL_BROWSERS
+        .into_iter()
+        .filter(|browser| {
+            reg.get_browser(*browser)
+                .expect("built-in profile")
+                .tls
+                .extension_permutation
+                .is_some()
+        })
+        .count();
+    assert!(
+        declaring > 0,
+        "no built-in profile declares extension_permutation — the load-time gate is untested"
+    );
+}
+
 // ── verified_at: every shipping profile must name what it was anchored to ────
 // The convention used to be doc-only (CONTRIBUTING.md TODO). A profile whose
 // fingerprint was never anchored against live browser output is exactly how the

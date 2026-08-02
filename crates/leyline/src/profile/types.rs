@@ -1,6 +1,6 @@
 //! Profile types — deserialized from TOML profile files.
 
-use serde::Deserialize;
+use serde::{Deserialize, de::Error as _};
 use std::collections::HashMap;
 
 #[allow(missing_docs)]
@@ -206,8 +206,17 @@ pub struct PlatformIdentity {
 
 impl BrowserProfile {
     /// Parse a profile from a TOML string.
+    ///
+    /// Fields that only BoringSSL could reject — today the fixed
+    /// `extension_permutation` order — are checked here rather than at
+    /// connector build, so a bad ordinal names the profile and the entry
+    /// instead of surfacing as an opaque error stack, or as a silently
+    /// default-ordered ClientHello.
     pub fn from_toml(toml_str: &str) -> Result<Self, toml::de::Error> {
-        toml::from_str(toml_str)
+        let profile: Self = toml::from_str(toml_str)?;
+        crate::profile::permutation::validate(&profile.tls)
+            .map_err(|why| toml::de::Error::custom(format!("{}: {why}", profile.meta.name)))?;
+        Ok(profile)
     }
 
     /// The synthetic **bare** profile: a plain, non-impersonating HTTP

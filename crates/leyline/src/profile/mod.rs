@@ -7,6 +7,7 @@
 pub mod anchor;
 mod brand;
 mod browser;
+mod permutation;
 mod platform;
 /// Request preset types and header builder.
 pub mod preset;

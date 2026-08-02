@@ -16,6 +16,54 @@ const FIREFOX_152_EXTENSIONS: &[u16] = &[
 /// first flights were identical; this test compares order without sorting.
 #[tokio::test]
 async fn firefox_152_matches_captured_cipher_and_extension_order() {
+    let (ciphers, extensions) = capture_client_hello(Browser::Firefox152).await;
+    assert_eq!(ciphers, FIREFOX_152_CIPHERS);
+    assert_eq!(extensions, FIREFOX_152_EXTENSIONS);
+    // Anchor the TOML to the same capture: `extension_permutation` is what the
+    // connector hands BoringSSL, so if it drifts from the capture the wire
+    // follows it silently (JA4 sorts extensions and would not notice).
+    assert_eq!(
+        declared_extension_order(Browser::Firefox152),
+        FIREFOX_152_EXTENSIONS,
+        "firefox/152.toml drifted from the captured extension order"
+    );
+}
+
+/// The declared order is applied per profile, not baked into the TLS builder:
+/// Firefox 150 must put its own `extension_permutation` on the wire too.
+#[tokio::test]
+async fn firefox_150_client_hello_follows_its_declared_extension_order() {
+    let (_, extensions) = capture_client_hello(Browser::Firefox150).await;
+    assert_eq!(extensions, declared_extension_order(Browser::Firefox150));
+}
+
+/// Chrome 147+ advertises Trust Anchor Identifiers (0xCA34) with an empty list.
+/// Without it the ClientHello is t13d1516, so the connector now fails the handshake instead
+/// of warning when BoringSSL rejects the extension — which only holds up if
+/// BoringSSL accepts the empty list. This is the offline proof that it does.
+#[tokio::test]
+async fn chrome_147_client_hello_carries_trust_anchor_identifiers() {
+    let (_, extensions) = capture_client_hello(Browser::Chrome147).await;
+    assert!(
+        extensions.contains(&0xca34),
+        "trust_anchors extension absent; JA4 drops to t13d1516: {extensions:04x?}"
+    );
+}
+
+/// The fixed ClientHello extension order a built-in profile declares.
+fn declared_extension_order(browser: Browser) -> Vec<u16> {
+    leyline::profile::ProfileRegistry::builtin()
+        .get_browser(browser)
+        .expect("built-in profile")
+        .tls
+        .extension_permutation
+        .clone()
+        .expect("profile declares a fixed extension order")
+}
+
+/// Drive one real handshake attempt at a local listener that never answers,
+/// and return the `(cipher, extension)` IDs of the ClientHello it produced.
+async fn capture_client_hello(browser: Browser) -> (Vec<u16>, Vec<u16>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
@@ -24,7 +72,7 @@ async fn firefox_152_matches_captured_cipher_and_extension_order() {
     });
 
     let session = leyline::Session::builder()
-        .browser(Browser::Firefox152)
+        .browser(browser)
         .timeout(std::time::Duration::from_secs(3))
         .build()
         .unwrap();
@@ -33,9 +81,7 @@ async fn firefox_152_matches_captured_cipher_and_extension_order() {
         .await;
 
     let record = server.await.unwrap();
-    let (ciphers, extensions) = parse_client_hello(&record).expect("valid ClientHello");
-    assert_eq!(ciphers, FIREFOX_152_CIPHERS);
-    assert_eq!(extensions, FIREFOX_152_EXTENSIONS);
+    parse_client_hello(&record).expect("valid ClientHello")
 }
 
 async fn read_tls_record(stream: &mut tokio::net::TcpStream) -> Vec<u8> {

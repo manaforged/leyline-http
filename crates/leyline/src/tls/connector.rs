@@ -390,15 +390,16 @@ impl FingerprintConnector {
         // same so the ClientHello JA4 matches real Chrome (t13d1517). Without it
         // leyline sends t13d1516 and a CDN edge's JA4+H2 join check soft-blocks
         // the connection — TLS completes but ALPN is stripped, surfacing here as
-        // `alpn: negotiated none, expected h2`.
+        // `alpn: negotiated none, expected h2`. A profile that asks for the
+        // extension and does not get it fails the handshake early,
+        // so the handshake fails here instead of on the wire.
         if self.request_trust_anchors {
-            if let Err(e) = ssl.set_requested_trust_anchors(&[]) {
-                tracing::warn!(
-                    target: "leyline::tls",
-                    "set_requested_trust_anchors failed ({e}); trust_anchors \
-                     extension may be absent and JA4 will not match Chrome 148"
-                );
-            }
+            ssl.set_requested_trust_anchors(&[]).map_err(|e| {
+                TlsError::SslConfig(format!(
+                    "profile requires the trust_anchors extension (0xCA34), which BoringSSL \
+                     rejected ({e}); the ClientHello JA4 would not match the captured browser"
+                ))
+            })?;
         }
 
         // TLS handshake. leyline-bssl-tokio::SslStream::connect requires
