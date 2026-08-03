@@ -118,6 +118,7 @@ The `PROFILE_COUNT` constant and the profile-integrity tests enforce that
 every enum variant has a TOML file, every TOML file is loaded, and every
 profile carries a fingerprint expectation.
 
+
 ## Releasing
 
 A release ships from one `v*` tag: the Rust crate (crates.io), the Node addon

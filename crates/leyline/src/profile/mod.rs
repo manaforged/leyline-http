@@ -5,6 +5,7 @@
 
 /// Anchor slots for caller-controlled positional header injection.
 pub mod anchor;
+mod bare;
 mod brand;
 mod browser;
 mod permutation;

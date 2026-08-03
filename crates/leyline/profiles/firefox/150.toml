@@ -4,6 +4,8 @@ browser = "firefox"
 version = 150
 family = "gecko"
 verified_against = "tls.peet.ws capture 2026-04-28"
+# Cold + resumed capture of real Firefox 150.0 Windows; point build not recorded.
+captured_against = "firefox-150.0"
 
 [tls]
 ciphers = [

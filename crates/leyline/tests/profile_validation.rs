@@ -288,6 +288,100 @@ fn every_builtin_profile_declares_verified_against() {
     }
 }
 
+// ── captured_against: optional field, but its absence is a load-time warning ──
+// Unlike verified_against
+// it is *optional* (unrecorded on many older profiles), so a missing value
+// warns via `load_warnings` rather than failing the build — the warning is the
+// nudge to backfill it, not a gate that would block every unanchored profile.
+
+/// A minimal, permutation-free profile that parses through `from_toml`.
+/// `{extra}` splices an extra `[meta]` line (or nothing) for each case.
+fn minimal_profile_toml(extra: &str) -> String {
+    format!(
+        r#"
+[meta]
+name = "Test Profile"
+browser = "test"
+version = 1
+{extra}
+
+[tls]
+ciphers = ["TLS_AES_128_GCM_SHA256"]
+curves = ["X25519"]
+sigalgs = ["ecdsa_secp256r1_sha256"]
+
+[h2]
+pseudo_order = ["method", "scheme", "authority", "path"]
+settings_order = ["header_table_size"]
+"#
+    )
+}
+
+#[test]
+fn captured_against_parses_and_clears_the_warning() {
+    let toml = minimal_profile_toml(r#"captured_against = "chrome-150.0.7871.128""#);
+    let profile = BrowserProfile::from_toml(&toml).expect("minimal profile parses");
+    assert_eq!(
+        profile.meta.captured_against.as_deref(),
+        Some("chrome-150.0.7871.128"),
+        "captured_against did not round-trip from the TOML"
+    );
+    assert!(
+        profile.load_warnings().is_empty(),
+        "a profile that records captured_against still warned: {:?}",
+        profile.load_warnings()
+    );
+}
+
+#[test]
+fn missing_captured_against_warns_but_still_loads() {
+    // Absent field.
+    let profile = BrowserProfile::from_toml(&minimal_profile_toml(""))
+        .expect("a profile without captured_against must still load");
+    assert!(profile.meta.captured_against.is_none());
+    assert!(
+        profile
+            .load_warnings()
+            .iter()
+            .any(|w| w.contains("captured_against")),
+        "a missing captured_against produced no warning: {:?}",
+        profile.load_warnings()
+    );
+
+    // Present-but-empty is treated the same as missing.
+    let blank = BrowserProfile::from_toml(&minimal_profile_toml(r#"captured_against = "  ""#))
+        .expect("a blank captured_against must still load");
+    assert!(
+        blank
+            .load_warnings()
+            .iter()
+            .any(|w| w.contains("captured_against")),
+        "a blank captured_against produced no warning: {:?}",
+        blank.load_warnings()
+    );
+}
+
+#[test]
+fn backfilled_builtin_profiles_carry_captured_against() {
+    // Profiles whose capture build is known must keep the field.
+    let reg = ProfileRegistry::builtin();
+    for (browser, expected) in [
+        (Browser::Chrome148, "chrome-148"),
+        (Browser::Chrome150, "chrome-150.0.7871.128"),
+        (Browser::Firefox150, "firefox-150.0"),
+        (Browser::Firefox151, "firefox-151.0"),
+        (Browser::Firefox152, "firefox-152.0"),
+        (Browser::Brave146, "brave-146"),
+    ] {
+        let profile = reg.get_browser(browser).expect("built-in profile");
+        assert_eq!(
+            profile.meta.captured_against.as_deref(),
+            Some(expected),
+            "{browser}: backfilled captured_against changed or was dropped"
+        );
+    }
+}
+
 #[test]
 fn chrome150_identity_matches_capture_on_every_supported_platform() {
     const SEC_CH_UA: &str = r#""Not;A=Brand";v="8", "Chromium";v="150", "Google Chrome";v="150""#;

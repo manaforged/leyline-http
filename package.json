@@ -1,6 +1,6 @@
 {
   "name": "@manaforged/leyline",
-  "version": "1.0.0-rc.1",
+  "version": "1.0.0",
   "description": "Node.js bindings for Leyline — browser-fidelity TLS/HTTP fingerprint sessions",
   "license": "MIT OR Apache-2.0",
   "homepage": "https://github.com/manaforged/leyline-http",
@@ -51,9 +51,9 @@
     "NOTICE"
   ],
   "optionalDependencies": {
-    "@manaforged/leyline-darwin-arm64": "1.0.0-rc.1",
-    "@manaforged/leyline-linux-x64-gnu": "1.0.0-rc.1",
-    "@manaforged/leyline-win32-x64-msvc": "1.0.0-rc.1"
+    "@manaforged/leyline-darwin-arm64": "1.0.0",
+    "@manaforged/leyline-linux-x64-gnu": "1.0.0",
+    "@manaforged/leyline-win32-x64-msvc": "1.0.0"
   },
   "devDependencies": {
     "@napi-rs/cli": "^2.18.4"

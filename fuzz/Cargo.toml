@@ -1,0 +1,42 @@
+[package]
+name = "leyline-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+# Standalone package — deliberately its own workspace (the benches/ pattern)
+# so the fuzz harness and libfuzzer-sys never join the root workspace's
+# default builds. Run with:
+#
+#     cargo +nightly fuzz run <target>          # from the repo root or fuzz/
+#     ./scripts/verify.sh --fuzz [SECONDS]      # all targets, time-bounded
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+bytes = "1"
+leyline = { path = "../crates/leyline" }
+
+[[bin]]
+name = "h2_frame"
+path = "fuzz_targets/h2_frame.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "hpack"
+path = "fuzz_targets/hpack.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "h2_continuation"
+path = "fuzz_targets/h2_continuation.rs"
+test = false
+doc = false
+bench = false

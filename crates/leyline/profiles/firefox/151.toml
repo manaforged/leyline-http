@@ -8,6 +8,8 @@ family = "gecko"
 # no real Firefox and hash-collided with Chrome 149 (dropped both ECDSA CBC
 # ciphers + ecdsa_sha1) — corrected here. TLS is byte-identical to real FF152.0.
 verified_against = "tls.peet.ws capture 2026-07-07"
+# Real Firefox 151.0 Windows (selenium->tls.peet.ws 2026-07-07); point build not recorded.
+captured_against = "firefox-151.0"
 
 [tls]
 ciphers = [

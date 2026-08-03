@@ -5,6 +5,9 @@ version = 148
 family = "chromium"
 verified_against = "tls.peet.ws"
 verified_at = "2026-06-17"
+# Re-captured from real Chrome 148 via tls.peet.ws 2026-06-17; the
+# exact build quad was not recorded, so this pins the major only.
+captured_against = "chrome-148"
 
 # Chrome 148 was originally cloned from Chrome 147 (TLS/H2 byte-identical per the
 # 2026-06-09 capture). They have since DIVERGED: Chrome 148 now advertises the

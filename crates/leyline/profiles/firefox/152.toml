@@ -7,6 +7,8 @@ family = "gecko"
 # TLS is byte-identical to real Firefox 151.0 (same ja4/ja4_r/peetprint/H2);
 # the cipher list changed only at 150->151 (dropped TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA).
 verified_against = "tls.peet.ws capture 2026-07-07"
+# Real Firefox 152.0 Windows (selenium->tls.peet.ws 2026-07-07); point build not recorded.
+captured_against = "firefox-152.0"
 
 [tls]
 ciphers = [

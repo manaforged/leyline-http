@@ -5,6 +5,7 @@ version = 150
 family = "chromium"
 verified_against = "Chrome 150.0.7871.128 on macOS via tls.peet.ws"
 verified_at = "2026-07-18"
+captured_against = "chrome-150.0.7871.128"
 
 [tls]
 ciphers = [

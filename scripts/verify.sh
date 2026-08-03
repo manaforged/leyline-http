@@ -4,7 +4,7 @@
 # Usage: ./scripts/verify.sh [--full] [--bssl-source-build] [--fuzz [SECONDS]]
 # default        package parity and compile sanity
 # --full         tests, docs, audits, benches, and live checks
-# --fuzz [N]     run each cargo-fuzz target for N seconds (default 60)
+# --fuzz [N]     run each cargo-fuzz target for N seconds (default 300)
 #                on top of the existing corpus replay. Requires
 #                `cargo install cargo-fuzz` and nightly rustc. Corpus
 #                replay (fast, just runs the seeded inputs once) is
@@ -17,7 +17,7 @@ set -euo pipefail
 full=0
 fuzz=0
 bssl_source_build=0
-fuzz_seconds=60
+fuzz_seconds=300
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --quick) shift ;; # compatibility: quick is now the default
@@ -224,18 +224,18 @@ else
 fi
 
 # -- fuzz corpus replay --------------------------------------------------
-# The four `cargo fuzz` targets have seeded
-# corpora but no replay in the verify gate — the bugs they caught
-# (HPACK overflow panics, cookie overflow, frame parser panics) could
-# regress without any test breaking. Replay each corpus once to catch
-# regressions. This is fast (seconds per target) and doesn't need
-# nightly — libFuzzer's corpus replay is a deterministic byte-for-byte
-# run of every seeded input through the target harness.
+# `cargo fuzz` targets with seeded corpora but
+# no replay in the verify gate let the bugs they catch (HPACK decode
+# panics, frame parser panics) regress without any test breaking.
+# Replay each corpus once to catch regressions. This is fast (seconds
+# per target) and doesn't need nightly — libFuzzer's corpus replay is
+# a deterministic byte-for-byte run of every seeded input through the
+# target harness.
 #
 # The full time-bounded fuzzer (which DOES need nightly rustc for
 # sanitizer support) is opt-in via `--fuzz [SECONDS]` because nightly
 # is a heavier prerequisite for a normal release.
-FUZZ_TARGETS=(hpack_integer hpack_header_block h2_frame cookie_set)
+FUZZ_TARGETS=(h2_frame hpack h2_continuation)
 
 if [[ $full -eq 1 ]]; then
     step "fuzz corpus replay (cargo fuzz, -runs=0)"
