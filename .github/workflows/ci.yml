@@ -1,0 +1,128 @@
+name: ci
+
+# Change-scoped push gate: docs-only pushes cost one ~30s scope job; code
+# pushes check+test only the affected package closure
+# (scripts/affected-packages.mjs — kept in sync, plus a
+# workspace-excluded leyline-bssl* full trigger). FULL workspace verification
+# only runs when explicitly dispatched.
+#
+# The live-fingerprint suite (tests marked #[ignore], tls.peet.ws) stays OUT
+# of push CI by design — it is pre-commit/pre-push gate territory (see
+# CONTRIBUTING.md); plain `cargo test` never selects ignored tests.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      full:
+        description: 'Run FULL workspace check+test instead of the affected closure'
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: false  
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: '0'
+  CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+
+jobs:
+  changes:
+    name: Change scope
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      docs_only: ${{ steps.diff.outputs.docs_only }}
+      base: ${{ steps.diff.outputs.base }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0 # base resolution needs history
+
+      - name: Compute diff scope
+        id: diff
+        run: |
+          set -euo pipefail
+          # A push carries the exact previous tip in event.before; only the
+          # zero SHA (first push of a ref) or workflow_dispatch needs a
+          # resolved fallback.
+          base='${{ github.event.before }}'
+          if [[ ! "$base" =~ ^[0-9a-f]{40}$ || "$base" =~ ^0{40}$ ]]; then
+            base="$(git rev-parse HEAD~1 2>/dev/null || git merge-base origin/main HEAD)"
+          fi
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          docs_only=true
+          # Fail closed: a well-formed but unfetchable base (force push) must
+          # never classify as docs-only. docs/protocol is the live wire
+          # contract, never docs.
+          files="$(git diff --name-only "$base" HEAD --)" || { echo "::error::git diff failed for base $base (force-pushed or missing history)"; exit 1; }
+          while IFS= read -r file; do
+            case "$file" in
+              *.md|docs/*|book/*)
+                case "$file" in docs/protocol/*) docs_only=false; break ;; esac ;;
+              *) docs_only=false; break ;;
+            esac
+          done <<< "$files"
+          echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
+          echo "diff base: $base (docs_only=$docs_only)"
+
+  scoped:
+    name: Affected closure
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Resolve affected packages
+        id: affected
+        env:
+          GATE_BASE: ${{ needs.changes.outputs.base }}
+          GATE_FULL: ${{ github.event_name == 'workflow_dispatch' && inputs.full }}
+        run: |
+          set -euo pipefail
+          if [[ "$GATE_FULL" == 'true' ]]; then
+            echo '::notice::FULL workspace explicitly requested via workflow_dispatch'
+            node scripts/affected-packages.mjs --explain > "$RUNNER_TEMP/affected.txt"
+          else
+            node scripts/affected-packages.mjs --base "$GATE_BASE" --head HEAD --explain > "$RUNNER_TEMP/affected.txt"
+          fi
+          if [[ -s "$RUNNER_TEMP/affected.txt" ]]; then
+            echo 'empty=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'empty=true' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check affected closure
+        if: steps.affected.outputs.empty == 'false'
+        run: |
+          set -euo pipefail
+          set --
+          while IFS= read -r package; do
+            if [[ -n "$package" ]]; then set -- "$@" -p "$package"; fi
+          done < "$RUNNER_TEMP/affected.txt"
+          cargo check "$@" --all-targets
+
+      # --tests covers integration targets; doc tests and #[ignore]d live
+      # fingerprint tests are both excluded here.
+      - name: Test affected closure
+        if: steps.affected.outputs.empty == 'false'
+        run: |
+          set -euo pipefail
+          set --
+          while IFS= read -r package; do
+            if [[ -n "$package" ]]; then set -- "$@" -p "$package"; fi
+          done < "$RUNNER_TEMP/affected.txt"
+          cargo test "$@" --lib --bins --tests
+
+      - name: Notice for non-Rust changes
+        if: steps.affected.outputs.empty == 'true'
+        run: echo '::notice::no Rust packages affected by this change; check+test skipped'
