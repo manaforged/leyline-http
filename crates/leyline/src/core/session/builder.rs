@@ -1,6 +1,6 @@
 use std::sync::{Arc, LazyLock};
 
-use crate::cookie::Jar as CookieJar;
+use crate::cookie::Jar;
 use crate::core::{
     CompressionConfig, DnsConfig, NoProxy, PoolConfig, ProxyConfig, ProxyUrl, RedirectPolicy,
     SocketConfig, TimeoutConfig, WebSocketConfig,
@@ -56,7 +56,7 @@ pub struct SessionBuilder {
     websocket_config: WebSocketConfig,
     https_only: bool,
     audit: bool,
-    cookie_jar: Option<CookieJar>,
+    cookie_jar: Option<Jar>,
     tcp_profile: Option<TcpProfile>,
     protocol_policy: ProtocolPolicy,
     config_error: Option<String>,
@@ -340,7 +340,7 @@ impl SessionBuilder {
     }
 
     /// Provide a pre-populated cookie jar.
-    pub fn cookie_jar(mut self, jar: CookieJar) -> Self {
+    pub fn cookie_jar(mut self, jar: Jar) -> Self {
         self.cookie_jar = Some(jar);
         self
     }

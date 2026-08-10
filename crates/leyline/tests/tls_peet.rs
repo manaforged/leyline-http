@@ -478,6 +478,20 @@ async fn peet(session: &leyline::Session) -> Value {
     panic!("tls.peet.ws failed after retries: {last_err}");
 }
 
+
+/// The real platform for a browser's wire identity (the profile's own
+/// identity sections are the source of truth; Windows is the generic
+/// default for browser stacks that ship a Windows identity).
+fn live_platform_for(browser: Browser) -> Platform {
+    match browser {
+        Browser::SafariIOS15 | Browser::SafariIOS17 | Browser::SafariIOS18 => Platform::IOS,
+        Browser::CfnetworkIOS18 => Platform::IOS,
+        Browser::OkHttpAndroid10 => Platform::Android,
+        Browser::Safari18 | Browser::CfnetworkMacOS26 => Platform::MacOS,
+        _ => Platform::Windows,
+    }
+}
+
 /// Normalize an Akamai fingerprint for comparison: tls.peet.ws has a display
 /// bug for setting ID 8 (ENABLE_CONNECT_PROTOCOL) — it renders as `:1` not `8:1`.
 /// Our wire encoding is correct; the rewrite is purely display normalization.
@@ -557,12 +571,7 @@ async fn live_wire_audit_every_profile() {
             println!("- {browser:30} skipped (TLS 1.2 — tls.peet.ws requires 1.3)");
             continue;
         }
-        let platform = match browser {
-            Browser::SafariIOS15 | Browser::SafariIOS17 | Browser::SafariIOS18 => Platform::IOS,
-            Browser::OkHttpAndroid10 => Platform::Android,
-            Browser::Safari18 => Platform::MacOS,
-            _ => Platform::Windows,
-        };
+        let platform = live_platform_for(browser);
         let session = leyline::Session::builder()
             .browser(browser)
             .platform(platform)
@@ -815,12 +824,7 @@ async fn live_ja4_exact_match_every_profile_with_expectation() {
             }
         };
 
-        let platform = match browser {
-            Browser::SafariIOS15 | Browser::SafariIOS17 | Browser::SafariIOS18 => Platform::IOS,
-            Browser::OkHttpAndroid10 => Platform::Android,
-            Browser::Safari18 => Platform::MacOS,
-            _ => Platform::Windows,
-        };
+        let platform = live_platform_for(browser);
         let session = leyline::Session::builder()
             .browser(browser)
             .platform(platform)
@@ -858,12 +862,7 @@ async fn live_h2_akamai_every_profile() {
             continue;
         }
 
-        let platform = match browser {
-            Browser::SafariIOS15 | Browser::SafariIOS17 | Browser::SafariIOS18 => Platform::IOS,
-            Browser::OkHttpAndroid10 | Browser::OkHttpAndroid7 => Platform::Android,
-            Browser::Safari18 => Platform::MacOS,
-            _ => Platform::Windows,
-        };
+        let platform = live_platform_for(browser);
 
         let session = leyline::Session::builder()
             .browser(browser)

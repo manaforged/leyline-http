@@ -42,7 +42,7 @@ fn advertised_extensions(tls: &TlsProfile) -> Vec<(u16, &'static str)> {
         (0x0017, "extended_master_secret", true),
         (0xff01, "renegotiation_info", true),
         (0x000b, "ec_point_formats", true),
-        (0x0023, "session_ticket", true),
+        (0x0023, "session_ticket", tls.session_tickets),
         (0x0010, "alpn", true),
         (0x0033, "key_share", true),
         (0x002b, "supported_versions", true),

@@ -464,3 +464,181 @@ fn danger_accept_invalid_certs_session_builds() {
         .build()
         .expect("-k session must build even when system trust is unavailable");
 }
+
+// ── CFNetwork family: captured-only anchoring ───────────────────────────────
+// The cfnetwork family is anchored to OUR captures, not to any public browser
+// reference. `captured_against` is therefore REQUIRED (not just a nudge) for
+// this family — a cfnetwork profile without an exact capture build is a lie.
+
+#[test]
+fn cfnetwork_profiles_declare_captured_against() {
+    let reg = ProfileRegistry::builtin();
+    for browser in [
+        Browser::CfnetworkIOS18,
+        Browser::CfnetworkMacOS26,
+    ] {
+        let profile = reg.get_browser(browser).expect("built-in profile");
+        assert_eq!(profile.meta.family, "cfnetwork");
+        assert!(
+            !profile
+                .meta
+                .captured_against
+                .as_deref()
+                .unwrap_or("")
+                .trim()
+                .is_empty(),
+            "{browser}: cfnetwork profile must record captured_against \
+             (exact CFNetwork build) — shipped profiles derive only from captures"
+        );
+    }
+}
+
+#[test]
+fn cfnetwork_sigalgs_carry_the_wire_duplicate() {
+    // CFNetwork advertises rsa_pss_rsae_sha384 (0x0805) twice — a captured
+    // Apple quirk. A cfnetwork profile whose sigalg list has no duplicate no
+    // longer matches the wire.
+    let reg = ProfileRegistry::builtin();
+    for browser in [Browser::CfnetworkIOS18, Browser::CfnetworkMacOS26] {
+        let profile = reg.get_browser(browser).expect("built-in profile");
+        let dup = profile
+            .tls
+            .sigalgs
+            .iter()
+            .filter(|s| s.as_str() == "rsa_pss_rsae_sha384")
+            .count();
+        assert_eq!(
+            dup, 2,
+            "{browser}: CFNetwork sigalgs must duplicate rsa_pss_rsae_sha384 \
+             (0x0805) exactly once (captured on the wire)"
+        );
+    }
+}
+
+#[test]
+fn cfnetwork_ios18_lowers_version_floor_but_macos26_does_not() {
+    let reg = ProfileRegistry::builtin();
+    let ios = reg.get_browser(Browser::CfnetworkIOS18).expect("profile");
+    assert_eq!(
+        ios.tls.min_tls_version.as_deref(),
+        Some("1.0"),
+        "iOS 18.6 CFNetwork advertises TLS 1.0/1.1 in supported_versions"
+    );
+    let macos = reg.get_browser(Browser::CfnetworkMacOS26).expect("profile");
+    assert_eq!(
+        macos.tls.min_tls_version.as_deref(),
+        None,
+        "macOS 26 CFNetwork advertises only TLS 1.3/1.2"
+    );
+}
+
+#[test]
+fn cfnetwork_profiles_disable_session_tickets() {
+    let reg = ProfileRegistry::builtin();
+    for browser in [Browser::CfnetworkIOS18, Browser::CfnetworkMacOS26] {
+        let profile = reg.get_browser(browser).expect("built-in profile");
+        assert!(
+            !profile.tls.session_tickets,
+            "{browser}: CFNetwork sends no session_ticket extension on fresh \
+             connections (captured)"
+        );
+    }
+}
+
+// ── L6: profile-freshness metadata ─────────────────────────────────────────
+// Their Chrome-96-in-2026 corpus is the cautionary tale: a stale browser
+// identity against bleeding-edge wire identity is a cross-layer tell. The
+// metadata (meta.version + captured_against) already ships; these tests make
+// staleness fail loudly instead of riding along.
+
+fn newest_chrome_browser() -> Browser {
+    ALL_BROWSERS
+        .iter()
+        .copied()
+        .filter_map(|b| b.chromium_major().map(|m| (b, m)))
+        .max_by_key(|(_, m)| *m)
+        .map(|(b, _)| b)
+        .expect("at least one Chrome-family profile in ALL_BROWSERS")
+}
+
+/// Newest Chrome (derived from ALL_BROWSERS, not a hardcoded major): dir
+/// version, meta.version, and a **required** captured_against anchor agree.
+#[test]
+fn newest_chrome_profile_metadata_is_self_consistent() {
+    let reg = ProfileRegistry::builtin();
+    let browser = newest_chrome_browser();
+    let major = browser.chromium_major().expect("chrome major");
+    let newest = reg
+        .get_browser(browser)
+        .expect("newest chrome built-in profile");
+    assert_eq!(
+        newest.meta.version, major,
+        "meta.version must match the profile major"
+    );
+    let anchor = newest
+        .meta
+        .captured_against
+        .as_ref()
+        .expect("newest Chrome must pin captured_against (corpus rot gate)");
+    // Anchor shape: "chrome-150.0.7871.128".
+    let anchor_major = anchor
+        .split_once('-')
+        .and_then(|(_, rest)| rest.split('.').next())
+        .and_then(|m| m.parse::<u32>().ok());
+    assert_eq!(
+        anchor_major,
+        Some(major),
+        "captured_against must pin the same major as meta.version: {anchor}"
+    );
+}
+
+/// Hermetic staleness floor on the derived newest Chrome major. Deliberately
+/// low — trips only after long neglect. Live ignored test is the real gate.
+#[test]
+fn newest_chrome_profile_is_not_neglected() {
+    const FRESHNESS_FLOOR: u32 = 145;
+    let major = newest_chrome_browser()
+        .chromium_major()
+        .expect("chrome major");
+    assert!(
+        major >= FRESHNESS_FLOOR,
+        "newest Chrome profile is {major} (floor {FRESHNESS_FLOOR}) — the corpus is \
+         neglected; ship a current capture"
+    );
+}
+
+/// Live freshness gate: newest built-in Chrome within 2 majors of Stable.
+/// Schedule: `cargo test -p leyline --test profile_validation \
+///   newest_chrome_profile_within_two_majors_of_current_stable -- --ignored`
+/// or CI job `leyline-profile-freshness`. Requires curl + network.
+#[test]
+#[ignore = "network: fetches Chrome for Testing; run on schedule"]
+fn newest_chrome_profile_within_two_majors_of_current_stable() {
+    const URL: &str =
+        "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json";
+    let out = std::process::Command::new("curl")
+        .args(["-fsSL", "--max-time", "20", URL])
+        .output()
+        .expect("curl must be available for the live freshness gate");
+    assert!(out.status.success(), "Chrome for Testing fetch failed");
+    let json: serde_json::Value =
+        serde_json::from_slice(&out.stdout).expect("parse Chrome for Testing json");
+    let stable = json["channels"]["Stable"]["version"]
+        .as_str()
+        .expect("Stable version string");
+    let current: u32 = stable
+        .split('.')
+        .next()
+        .expect("major")
+        .parse()
+        .expect("numeric major");
+    let newest_major = newest_chrome_browser()
+        .chromium_major()
+        .expect("chrome major");
+    assert!(
+        current <= newest_major + 2,
+        "newest built-in Chrome profile is {newest_major}, current stable is \
+         {current} — >2 majors behind; ship a fresh capture (their Chrome-96 \
+         lesson)"
+    );
+}

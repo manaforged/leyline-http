@@ -1,4 +1,4 @@
-use crate::cookie::Jar as CookieJar;
+use crate::cookie::Jar;
 use crate::profile::{Browser, ChromiumBrand, Platform, Preset};
 
 use super::{Session, SessionBuilder};
@@ -111,7 +111,7 @@ impl Session {
     }
 
     /// Access the cookie jar.
-    pub fn cookies(&self) -> &CookieJar {
+    pub fn cookies(&self) -> &Jar {
         &self.cookie_jar
     }
 
@@ -120,7 +120,7 @@ impl Session {
     /// jar. The original session's jar is untouched. Use this when you want
     /// many short-lived cookie scopes while
     /// amortising TLS-handshake cost across them.
-    pub fn with_cookie_jar(&self, cookie_jar: CookieJar) -> Self {
+    pub fn with_cookie_jar(&self, cookie_jar: Jar) -> Self {
         let mut s = self.clone();
         // `make_mut` clones the inner state once (this Arc is shared), then
         // mutates the unique copy — the original session is untouched. This

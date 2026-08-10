@@ -5,14 +5,14 @@ index 6b3bb4506..8d55a8d3e 100644
 @@ -5511,6 +5511,12 @@ extern "C" {
  #define SN_X_Wing "X-Wing"
  #define NID_X_Wing 972
-
+ 
 +#define SN_ffdhe2048 "ffdhe2048"
 +#define NID_ffdhe2048 973
 +
 +#define SN_ffdhe3072 "ffdhe3072"
 +#define NID_ffdhe3072 974
 +
-
+ 
  #if defined(__cplusplus)
  } /* extern C */
 diff --git a/include/openssl/ssl.h b/include/openssl/ssl.h
@@ -37,12 +37,12 @@ index 0b91e5d38..324463012 100644
 +#define SSL_GROUP_FFDHE2048 256
 +#define SSL_GROUP_FFDHE3072 257
  #define SSL_GROUP_MLKEM1024 0x0202
-
+ 
  // SSL_CTX_set1_group_ids sets the preferred groups for `ctx` to `group_ids`.
 @@ -3107,6 +3111,22 @@ OPENSSL_EXPORT int SSL_set_verify_algorithm_prefs(SSL *ssl,
                                                    const uint16_t *prefs,
                                                    size_t num_prefs);
-
+ 
 +// SSL_CTX_set_record_size_limit configures the value `ctx` advertises in the
 +// record_size_limit extension (RFC 8449) on the ClientHello. A zero value (the
 +// default) disables the extension.
@@ -59,13 +59,13 @@ index 0b91e5d38..324463012 100644
 +OPENSSL_EXPORT int SSL_CTX_set_delegated_credentials(SSL_CTX *ctx,
 +                                                     const char *str);
 +
-
+ 
  // Certificate authorities.
  //
 @@ -5514,6 +5534,21 @@ OPENSSL_EXPORT void SSL_CTX_set_grease_enabled(SSL_CTX *ctx, int enabled);
  // permute extensions. For now, this is only implemented for the ClientHello.
  OPENSSL_EXPORT void SSL_CTX_set_permute_extensions(SSL_CTX *ctx, int enabled);
-
+ 
 +// SSL_CTX_set_extension_order configures a deterministic ClientHello extension
 +// order. |order| is a prefix of TLS extension type IDs; unspecified supported
 +// extensions follow in BoringSSL's internal order. Returns one on success and
@@ -91,7 +91,7 @@ index f4b348481..6d18435ee 100644
 @@ -113,6 +113,9 @@ extern "C" {
  // ExtensionType value from RFC 9345
  #define TLSEXT_TYPE_delegated_credential 34
-
+ 
 +// ExtensionType value from RFC 8449
 +#define TLSEXT_TYPE_record_size_limit 28
 +
@@ -147,11 +147,11 @@ index 3697e7abd..80db96562 100644
 +
    return true;
  }
-
+ 
 @@ -4063,6 +4084,35 @@ static bool ext_server_cert_type_add_serverhello(SSL_HANDSHAKE *hs, CBB *out) {
    return true;
  }
-
+ 
 +// Record Size Limit
 +//
 +// https://www.rfc-editor.org/rfc/rfc8449.html
@@ -196,17 +196,17 @@ index 3697e7abd..80db96562 100644
 +        dont_add_serverhello,
 +    },
  };
-
+ 
  #define kNumExtensions (sizeof(kExtensions) / sizeof(struct tls_extension))
 @@ -4304,24 +4361,55 @@ static_assert(kNumExtensions <=
                "too many extensions for received bitset");
-
+ 
  bool ssl_setup_extension_permutation(SSL_HANDSHAKE *hs) {
 -  if (!hs->config->permute_extensions) {
 +  if (!hs->config->permute_extensions && hs->config->extension_order.empty()) {
      return true;
    }
-
+ 
    static_assert(kNumExtensions <= UINT8_MAX,
                  "extensions_permutation type is too small");
 -  uint32_t seeds[kNumExtensions - 1];
@@ -267,7 +267,7 @@ index 3697e7abd..80db96562 100644
 @@ -4340,6 +4428,21 @@ static const struct tls_extension *tls_extension_find(uint32_t *out_index,
    return nullptr;
  }
-
+ 
 +bool ssl_extension_order_valid(Span<const uint16_t> order) {
 +  for (size_t i = 0; i < order.size(); i++) {
 +    uint32_t index;
@@ -308,19 +308,19 @@ index 85dde3e8b..f636baf6e 100644
 @@ -913,8 +913,10 @@ struct NamedGroup {
  // NamedGroups returns all supported groups.
  Span<const NamedGroup> NamedGroups();
-
+ 
 +bool ssl_extension_order_valid(Span<const uint16_t> order);
 +
  // kNumNamedGroups is the number of supported groups.
 -constexpr size_t kNumNamedGroups = 7u;
 +constexpr size_t kNumNamedGroups = 9u;
-
+ 
  // DefaultSupportedGroupIds returns the list of IDs for the default groups that
  // are supported when the caller hasn't explicitly configured supported groups.
 @@ -3453,6 +3455,18 @@ struct SSL_CONFIG {
    // accepted from the peer in decreasing order of preference.
    Array<uint16_t> verify_sigalgs;
-
+ 
 +  // record_size_limit, if non-zero, is advertised in the record_size_limit
 +  // extension (RFC 8449) in the ClientHello.
 +  uint16_t record_size_limit = 0;
@@ -339,7 +339,7 @@ index 85dde3e8b..f636baf6e 100644
 @@ -4143,6 +4157,17 @@ class SSLContext : public ssl_ctx_st, public RefCounted<SSLContext> {
    // accepted from the peer in decreasing order of preference.
    Array<uint16_t> verify_sigalgs;
-
+ 
 +  // record_size_limit, if non-zero, is advertised in the record_size_limit
 +  // extension (RFC 8449); copied to SSL_CONFIG at SSL_new.
 +  uint16_t record_size_limit = 0;
@@ -353,7 +353,7 @@ index 85dde3e8b..f636baf6e 100644
 +
    // accepted_peer_cert_types inherited by SSL struct.
    InplaceVector<uint8_t, kNumCertTypes> accepted_peer_cert_types;
-
+ 
 diff --git a/ssl/ssl_cipher.cc b/ssl/ssl_cipher.cc
 index 1ef231c39..480619378 100644
 --- a/ssl/ssl_cipher.cc
@@ -361,7 +361,7 @@ index 1ef231c39..480619378 100644
 @@ -165,6 +165,18 @@ static constexpr SSL_CIPHER kCiphers[] = {
          SSL_HANDSHAKE_MAC_SHA256,
      },
-
+ 
 +    // Cipher C008
 +    {
 +        TLS1_TXT_ECDHE_ECDSA_WITH_DES_192_CBC3_SHA,
@@ -380,7 +380,7 @@ index 1ef231c39..480619378 100644
 @@ -189,6 +201,18 @@ static constexpr SSL_CIPHER kCiphers[] = {
          SSL_HANDSHAKE_MAC_DEFAULT,
      },
-
+ 
 +    // Cipher C012
 +    {
 +        TLS1_TXT_ECDHE_RSA_WITH_DES_192_CBC3_SHA,
@@ -403,7 +403,7 @@ index 1ef231c39..480619378 100644
 +      SSL_CIPHER_ECDHE_ECDSA_WITH_3DES_EDE_CBC_SHA,
 +      SSL_CIPHER_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA,
    };
-
+ 
    // Set up a linked list of ciphers.
 diff --git a/ssl/ssl_key_share.cc b/ssl/ssl_key_share.cc
 index d155b5527..4c0563b9c 100644
@@ -416,7 +416,7 @@ index d155b5527..4c0563b9c 100644
 +    {NID_ffdhe2048, SSL_GROUP_FFDHE2048, "ffdhe2048", "dhe2048"},
 +    {NID_ffdhe3072, SSL_GROUP_FFDHE3072, "ffdhe3072", "dhe3072"},
  };
-
+ 
  static_assert(std::size(kNamedGroups) == kNumNamedGroups,
 diff --git a/ssl/ssl_lib.cc b/ssl/ssl_lib.cc
 index 491c717d4..733b3bd9f 100644
@@ -427,7 +427,7 @@ index 491c717d4..733b3bd9f 100644
    ssl->config->aes_hw_override_value = ctx_impl->aes_hw_override_value;
    ssl->config->compliance_policy = ctx_impl->compliance_policy;
 +  ssl->config->record_size_limit = ctx_impl->record_size_limit;
-
+ 
    if (!ssl->config->supported_group_list.CopyFrom(
            ctx_impl->supported_group_list) ||
 @@ -536,7 +537,11 @@ SSL *SSL_new(SSL_CTX *ctx) {
@@ -442,11 +442,11 @@ index 491c717d4..733b3bd9f 100644
 +          ctx_impl->delegated_credentials)) {
      return nullptr;
    }
-
+ 
 @@ -3193,6 +3198,48 @@ void SSL_set_permute_extensions(SSL *ssl, int enabled) {
    ssl->config->permute_extensions = !!enabled;
  }
-
+ 
 +int SSL_CTX_set_extension_order(SSL_CTX *ctx, const uint16_t *order,
 +                                size_t order_len) {
 +  if (!ssl_extension_order_valid(Span(order, order_len)) ||
@@ -493,11 +493,42 @@ index 491c717d4..733b3bd9f 100644
    return ssl->s3->ticket_age_skew;
  }
 diff --git a/ssl/ssl_privkey.cc b/ssl/ssl_privkey.cc
-index c489290b9..6ff0af26e 100644
+index c489290b9..f4742d38f 100644
 --- a/ssl/ssl_privkey.cc
 +++ b/ssl/ssl_privkey.cc
-@@ -960,3 +960,13 @@ int SSL_set_verify_algorithm_prefs(SSL *ssl, const uint16_t *prefs,
-
+@@ -572,23 +572,13 @@ int SSL_is_signature_algorithm_rsa_pss(uint16_t sigalg) {
+ }
+ 
+ static bool sigalgs_unique(Span<const uint16_t> in_sigalgs) {
+-  if (in_sigalgs.size() < 2) {
+-    return true;
+-  }
+-
+-  Array<uint16_t> sigalgs;
+-  if (!sigalgs.CopyFrom(in_sigalgs)) {
+-    return false;
+-  }
+-
+-  std::sort(sigalgs.begin(), sigalgs.end());
+-  for (size_t i = 1; i < sigalgs.size(); i++) {
+-    if (sigalgs[i - 1] == sigalgs[i]) {
+-      OPENSSL_PUT_ERROR(SSL, SSL_R_DUPLICATE_SIGNATURE_ALGORITHM);
+-      return false;
+-    }
+-  }
+-
++  // Leyline carry: allow duplicate signature algorithms. CFNetwork advertises
++  // rsa_pss_rsae_sha384 (0x0805) twice in its ClientHello; the duplicate is
++  // part of the wire fingerprint. The uniqueness check exists for BoringSSL's
++  // own preference handling (a set is unique by design); keeping a duplicate
++  // is harmless for signing/verification lookups (first match wins) and the
++  // ClientHello writer emits the configured list verbatim, duplicate and all.
++  (void)in_sigalgs;
+   return true;
+ }
+ 
+@@ -960,3 +950,13 @@ int SSL_set_verify_algorithm_prefs(SSL *ssl, const uint16_t *prefs,
+ 
    return set_sigalg_prefs(&ssl->config->verify_sigalgs, Span(prefs, num_prefs));
  }
 +

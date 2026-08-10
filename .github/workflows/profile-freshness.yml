@@ -1,0 +1,25 @@
+name: profile-freshness
+
+# L6: live gate that the newest built-in Chrome profile is within 2 majors of
+# Chrome for Testing Stable. Hermetic suite cannot do this; schedule only.
+on:
+  schedule:
+    - cron: '0 14 * * 1' # Mondays 14:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    name: Newest Chrome vs Stable
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Run ignored live freshness gate
+        run: |
+          set -euo pipefail
+          cargo test -p leyline --test profile_validation \
+            newest_chrome_profile_within_two_majors_of_current_stable \
+            -- --ignored --nocapture

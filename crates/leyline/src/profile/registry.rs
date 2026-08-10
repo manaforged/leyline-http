@@ -46,6 +46,9 @@ impl ProfileRegistry {
         // OkHttp
         reg.load_toml(include_str!("../../profiles/okhttp/android10.toml"));
         reg.load_toml(include_str!("../../profiles/okhttp/android7.toml"));
+        // CFNetwork (Apple URLSession app stack)
+        reg.load_toml(include_str!("../../profiles/cfnetwork/ios18.toml"));
+        reg.load_toml(include_str!("../../profiles/cfnetwork/macos26.toml"));
         reg
     }
 

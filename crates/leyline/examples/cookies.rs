@@ -1,4 +1,4 @@
-//! Persist cookies across requests with a `CookieJar`.
+//! Persist cookies across requests with a `Jar`.
 //!
 //! Run with: `cargo run -p leyline --example cookies`
 //!
@@ -6,14 +6,15 @@
 //! `Set-Cookie` header (e.g. a local test server). example.com will not
 //! echo cookies back.
 
-use leyline::{Browser, CookieJar, Platform, Session};
+use leyline::cookie::Jar;
+use leyline::{Browser, Platform, Session};
 
 const URL_SET: &str = "https://example.com/login";
 const URL_READ: &str = "https://example.com/me";
 
 #[tokio::main]
 async fn main() -> leyline::Result<()> {
-    let jar = CookieJar::new();
+    let jar = Jar::new();
 
     let session = Session::builder()
         .browser(Browser::Chrome147)

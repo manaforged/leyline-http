@@ -19,7 +19,7 @@ pub use websocket::WebSocketBuilder;
 
 use std::sync::Arc;
 
-use crate::cookie::Jar as CookieJar;
+use crate::cookie::Jar;
 #[cfg(feature = "websocket")]
 use crate::core::WebSocketConfig;
 use crate::core::retry::RetryPolicy;
@@ -119,7 +119,7 @@ pub struct SessionInner {
     #[cfg(feature = "websocket")]
     websocket_config: WebSocketConfig,
     https_only: bool,
-    cookie_jar: CookieJar,
+    cookie_jar: Jar,
     connector: ConnectorVariant,
     h2_config: H2Config,
     pool: Arc<Pool>,

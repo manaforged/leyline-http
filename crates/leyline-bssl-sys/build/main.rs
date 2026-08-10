@@ -772,7 +772,9 @@ fn get_include_path(config: &Config) -> Result<PathBuf, String> {
 fn generate_bindings(config: &Config) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let include_path = get_include_path(config)?;
 
-    let target_rust_version = bindgen::RustTarget::stable(77, 0)
+    // bindgen emits `unsafe extern` blocks only for rust_target >= 1.82
+    // (unsafe_extern_blocks feature); the crate is edition 2024.
+    let target_rust_version = bindgen::RustTarget::stable(82, 0)
         .map_err(|e| format!("bindgen does not recognize target rust version: {e}"))?;
 
     let mut builder = bindgen::Builder::default()

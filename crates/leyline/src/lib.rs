@@ -69,9 +69,9 @@
 //! ## Cookies
 //!
 //! ```rust,ignore
-//! use leyline::CookieJar;
+//! use leyline::cookie::Jar;
 //! let session = Session::builder()
-//!     .cookie_jar(CookieJar::new())
+//!     .cookie_jar(Jar::new())
 //!     .build()?;
 //! // Set-Cookie headers update the jar; later requests send them back.
 //! ```
@@ -181,10 +181,8 @@ pub use crate::h2::{ErrorCode, H2Error};
 #[cfg(feature = "http3")]
 pub use crate::quic::{H3Config, H3Response};
 
-// Cookie jar - re-export at crate root for the high-traffic case.
-// Prefer `leyline::cookie::Jar` in module signatures; `leyline::CookieJar`
-// is kept as a convenience alias.
-pub use crate::cookie::Jar as CookieJar;
+// Cookie system: one type — `leyline::cookie::Jar` (Chrome-accurate store).
+// Do not re-add a root CookieJar alias; dual names are how call sites diverge.
 
 // Audit data type (top-level re-export)
 pub use crate::audit::AuditData;

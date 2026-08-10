@@ -65,6 +65,11 @@ pub struct TlsProfile {
     pub ech_grease: bool,
     #[serde(default)]
     pub pre_shared_key: bool,
+    /// Advertise the TLS session_ticket extension (0x0023). BoringSSL sends
+    /// it by default; CFNetwork (Apple URLSession) does not on fresh
+    /// connections, so the cfnetwork family sets this false.
+    #[serde(default = "default_true")]
+    pub session_tickets: bool,
     /// Advertise the TLS Trust Anchor Identifiers extension (0xCA34/51764) with
     /// an empty list when the selected browser profile does. This changes the
     /// ClientHello JA4 extension count, so each Chrome major must follow its
@@ -73,9 +78,17 @@ pub struct TlsProfile {
     pub request_trust_anchors: bool,
     #[serde(default)]
     pub fingerprint: Option<TlsFingerprint>,
+    /// ClientHello supported_versions floor: "1.0" (CFNetwork iOS advertises
+    /// TLS 1.0/1.1), "1.2" (default), "1.3". Never loosens the QUIC floor.
+    #[serde(default)]
+    pub min_tls_version: Option<String>,
 }
 
 const fn default_grease() -> bool {
+    true
+}
+
+const fn default_true() -> bool {
     true
 }
 

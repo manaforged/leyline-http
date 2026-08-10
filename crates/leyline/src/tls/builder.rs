@@ -13,7 +13,7 @@
 
 use leyline_bssl::ssl::{
     CertificateCompressionAlgorithm, CertificateCompressor, SslContextBuilder, SslMethod,
-    SslVerifyMode,
+    SslOptions, SslVerifyMode,
 };
 
 use crate::profile::BrowserProfile;
@@ -23,10 +23,13 @@ use crate::tls::trust::TlsTrustConfig;
 
 /// Minimum TLS version pinned on the context. The TCP path allows 1.2+ to
 /// match real browser behaviour against legacy servers; the QUIC path must
-/// pin 1.3 per RFC 9001 §4.2.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// pin 1.3 per RFC 9001 §4.2. The cfnetwork-ios profile lowers the TCP floor
+/// to 1.0 (CFNetwork iOS advertises TLS 1.0/1.1 in supported_versions).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[non_exhaustive]
 pub enum TlsMinVersion {
+    /// Allow TLS 1.0+ (CFNetwork iOS advertises 1.0/1.1 in supported_versions).
+    Tls10,
     /// Allow TLS 1.2+. Used for the H1/H2 path.
     Tls12,
     /// Require TLS 1.3. Used for the H3/QUIC path.
@@ -179,8 +182,25 @@ pub(crate) fn apply_profile_with_trust(
 
     builder.set_grease_enabled(tls.grease);
 
-    // Minimum TLS version.
-    let min = match min_version {
+    // Session tickets: CFNetwork sends no session_ticket extension on fresh
+    // connections; BoringSSL advertises it by default.
+    if !tls.session_tickets {
+        builder.set_options(SslOptions::NO_TICKET);
+    }
+
+    // Minimum TLS version. A profile-declared `[tls] min_tls_version` may
+    // LOWER the TCP floor (CFNetwork iOS advertises TLS 1.0/1.1 in
+    // supported_versions) but never the QUIC floor (stays 1.3 per RFC 9001).
+    let min = if min_version == TlsMinVersion::Tls13 {
+        TlsMinVersion::Tls13
+    } else {
+        match profile_min_version(&tls.min_tls_version) {
+            Some(declared) => declared,
+            None => min_version,
+        }
+    };
+    let min = match min {
+        TlsMinVersion::Tls10 => leyline_bssl::ssl::SslVersion::TLS1,
         TlsMinVersion::Tls12 => leyline_bssl::ssl::SslVersion::TLS1_2,
         TlsMinVersion::Tls13 => leyline_bssl::ssl::SslVersion::TLS1_3,
     };
@@ -214,6 +234,24 @@ fn tls13_cipher_ids(ciphers: &[String]) -> Result<Vec<u16>, TlsError> {
 }
 
 /// Map profile curve names to BoringSSL curve names.
+/// Resolve a profile-declared `[tls] min_tls_version` string. Unknown values
+/// are profile typos — return `None` (transport floor applies) and let the
+/// validation tests flag the typo.
+fn profile_min_version(declared: &Option<String>) -> Option<TlsMinVersion> {
+    match declared.as_deref() {
+        None => None,
+        Some("1.0") => Some(TlsMinVersion::Tls10),
+        Some("1.2") => Some(TlsMinVersion::Tls12),
+        Some("1.3") => Some(TlsMinVersion::Tls13),
+        Some(other) => {
+            // Unknown values are profile typos; return None so the transport
+            // floor applies (validation tests flag the typo).
+            let _ = other;
+            None
+        }
+    }
+}
+
 fn boring_curve_name(name: &str) -> &str {
     match name {
         "X25519_MLKEM768" => "X25519MLKEM768",

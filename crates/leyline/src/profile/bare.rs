@@ -83,7 +83,9 @@ impl BrowserProfile {
                 grease: false,
                 ech_grease: false,
                 pre_shared_key: false,
+                session_tickets: true,
                 request_trust_anchors: false,
+                min_tls_version: None,
                 fingerprint: None,
             },
             h2: H2Profile {

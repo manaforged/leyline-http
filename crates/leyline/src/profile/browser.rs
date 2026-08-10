@@ -64,10 +64,14 @@ pub enum Browser {
     SafariIOS17,
     /// Safari on iOS 18.
     SafariIOS18,
+    /// CFNetwork/URLSession app stack on iOS 18 (captured first-party).
+    CfnetworkIOS18,
+    /// CFNetwork/URLSession app stack on macOS 26 (captured first-party).
+    CfnetworkMacOS26,
 }
 
 /// Canonical profile count. Tests assert against this.
-pub const PROFILE_COUNT: usize = 18;
+pub const PROFILE_COUNT: usize = 20;
 
 /// All browser variants, for iteration.
 pub const ALL_BROWSERS: [Browser; PROFILE_COUNT] = [
@@ -89,6 +93,8 @@ pub const ALL_BROWSERS: [Browser; PROFILE_COUNT] = [
     Browser::SafariIOS15,
     Browser::SafariIOS17,
     Browser::SafariIOS18,
+    Browser::CfnetworkIOS18,
+    Browser::CfnetworkMacOS26,
 ];
 
 impl Browser {
@@ -113,6 +119,8 @@ impl Browser {
             Self::SafariIOS15 => ("safari-ios", 15),
             Self::SafariIOS17 => ("safari-ios", 17),
             Self::SafariIOS18 => ("safari-ios", 18),
+            Self::CfnetworkIOS18 => ("cfnetwork-ios", 18),
+            Self::CfnetworkMacOS26 => ("cfnetwork-macos", 26),
         }
     }
 
@@ -191,6 +199,8 @@ impl std::fmt::Display for Browser {
             Self::SafariIOS15 => write!(f, "Safari iOS 15"),
             Self::SafariIOS17 => write!(f, "Safari iOS 17"),
             Self::SafariIOS18 => write!(f, "Safari iOS 18"),
+            Self::CfnetworkIOS18 => write!(f, "CFNetwork iOS 18"),
+            Self::CfnetworkMacOS26 => write!(f, "CFNetwork macOS 26"),
         }
     }
 }
