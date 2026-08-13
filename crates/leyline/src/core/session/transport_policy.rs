@@ -44,6 +44,7 @@ impl Session {
         body: Body,
         stream_response: bool,
         request_proxy: Option<&str>,
+        header_order: Option<&[String]>,
     ) -> Result<crate::core::transport::TransportResponse> {
         if self.https_only && url.scheme() != "https" {
             return Err(Error::Config(
@@ -63,6 +64,7 @@ impl Session {
                     body,
                     proxy,
                     stream_response,
+                    header_order,
                 )
                 .await
             }
@@ -97,6 +99,7 @@ impl Session {
                     body,
                     proxy,
                     stream_response,
+                    header_order,
                 )
                 .await
             }
@@ -145,7 +148,7 @@ impl Session {
                     && url.scheme() == "https";
                 match (raceable, self.h3_config.as_ref()) {
                     (true, Some(h3_config)) => {
-                        self.send_raced(h3_config, method, url, headers, body, proxy)
+                        self.send_raced(h3_config, method, url, headers, body, proxy, header_order)
                             .await
                     }
                     _ => {
@@ -159,6 +162,7 @@ impl Session {
                             body,
                             proxy,
                             stream_response,
+                            header_order,
                         )
                         .await
                     }
@@ -189,6 +193,7 @@ impl Session {
         headers: Vec<crate::h2::connection::HeaderPair>,
         body: Body,
         proxy: Option<&str>,
+        header_order: Option<&[String]>,
     ) -> Result<crate::core::transport::TransportResponse> {
         use crate::core::transport::{send_request_auto, send_request_h2, send_request_h3};
 
@@ -203,6 +208,7 @@ impl Session {
                 body,
                 proxy,
                 false,
+                header_order,
             )
             .await;
         };
@@ -281,6 +287,7 @@ impl Session {
                     body,
                     proxy,
                     false,
+                    header_order,
                 )
                 .await
             }
@@ -295,6 +302,7 @@ impl Session {
                     body,
                     proxy,
                     false,
+                    header_order,
                 )
                 .await
             }

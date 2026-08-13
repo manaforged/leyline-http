@@ -77,6 +77,7 @@ impl RequestBuilder {
                     self.timeout,
                     self.stream_response,
                     request_proxy.as_deref(),
+                    self.header_order.as_deref(),
                 )
                 .await;
         }
@@ -144,6 +145,7 @@ impl RequestBuilder {
                     attempt_timeout,
                     stream_response,
                     request_proxy.as_deref(),
+                    self.header_order.as_deref(),
                 )
                 .await;
 
@@ -232,6 +234,7 @@ impl RequestBuilder {
                                         Some(digest_remaining),
                                         stream_response,
                                         request_proxy.as_deref(),
+                                        self.header_order.as_deref(),
                                     )
                                     .await?;
                                 // RFC 7616 §3.3: stale=true means the

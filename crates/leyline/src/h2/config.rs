@@ -280,7 +280,11 @@ impl H2Config {
             settings_order,
             pseudo_order,
             initial_connection_window_size,
-            default_priority: None,
+            default_priority: h2.default_priority.map(|p| PriorityParams {
+                exclusive: p.exclusive,
+                stream_dependency: p.stream_dependency,
+                weight: p.weight,
+            }),
             rst_stream_flood_threshold: 100,
             rst_stream_flood_window: Duration::from_secs(10),
             settings_ack_timeout: Duration::from_secs(10),

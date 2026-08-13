@@ -132,6 +132,9 @@ impl Preset {
         }
         // Document loads carry `priority: u=0, i` (capture-verified); subresource/API requests use
         // `u=1, i` (Firefox-conventional). `te: trailers` rides every Firefox H2 request.
+        // The Chrome-shaped presets may already carry a `priority` (added
+        // for Chrome fidelity); replace rather than duplicate it.
+        headers.retain(|(name, _)| !name.eq_ignore_ascii_case("priority"));
         let priority = if matches!(preset, Preset::Navigate | Preset::FormNavigate) {
             "u=0, i"
         } else {
@@ -207,6 +210,10 @@ impl Preset {
             (b("referer"), o(ctx.referer)),
             Self::accept_encoding(),
             (b("accept-language"), o(ctx.accept_language)),
+            // Fetch-initiated requests carry Chromium's H2 `priority`
+            // header (`u=1, i` — capture-verified on Chrome 150). The H1
+            // transport strips it (Chrome sends it on H2 only).
+            (b("priority"), b("u=1, i")),
         ]
     }
 
@@ -354,5 +361,25 @@ mod tests {
         );
         assert_eq!(value(&ff_xhr, "priority"), Some("u=1, i"));
         assert_eq!(value(&ff_xhr, "te"), Some("trailers"));
+    }
+
+    /// Chrome 150 fetch/XHR (capture-verified against a real Chrome 150
+    /// binary): sends the H2 `priority` header (`u=1, i`) AND
+    /// `accept-language` (en-US,en;q=0.9). `priority` is stripped on the
+    /// H1 path in the transport — Chrome only emits it on H2.
+    #[test]
+    fn chrome_xhr_sends_priority_and_accept_language() {
+        let xhr = Preset::Xhr.build_headers(&ctx(false));
+        assert_eq!(value(&xhr, "priority"), Some("u=1, i"));
+        assert_eq!(value(&xhr, "accept-language"), Some("en-US,en;q=0.9"));
+        // Exactly one priority header — no duplicate from the Firefox
+        // reshape path (regression guard).
+        assert_eq!(xhr.iter().filter(|(n, _)| n == "priority").count(), 1);
+        let ff = Preset::Xhr.build_headers(&ctx(true));
+        assert_eq!(
+            ff.iter().filter(|(n, _)| n == "priority").count(),
+            1,
+            "firefox reshape must replace, not duplicate, priority"
+        );
     }
 }

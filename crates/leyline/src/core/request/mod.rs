@@ -83,6 +83,11 @@ pub struct RequestBuilder {
     /// keys connections by `(host, port, proxy)` so the session can
     /// multiplex traffic across multiple proxies.
     pub(super) proxy: Option<String>,
+    /// Per-request wire header order (H2/H3 only). When `Some`, the
+    /// assembled regular-header block is reordered to this exact
+    /// sequence before emission, matching Chrome's H2 header order.
+    /// Names not listed keep their relative order at the tail.
+    pub(super) header_order: Option<Vec<String>>,
 }
 
 impl RequestBuilder {
@@ -108,6 +113,7 @@ impl RequestBuilder {
             allow_non_idempotent_retry: false,
             digest_auth: None,
             proxy: None,
+            header_order: None,
         }
     }
 
@@ -120,6 +126,17 @@ impl RequestBuilder {
     /// Set a request preset (Navigate, Script, Xhr, Form, CrossOrigin, SameSite).
     pub fn preset(mut self, preset: Preset) -> Self {
         self.preset = Some(preset);
+        self
+    }
+
+    /// Pin the exact H2/H3 wire order of the regular headers for this
+    /// request. The final assembled block (preset headers, caller
+    /// headers, `content-length`, `cookie`) is reordered to this
+    /// sequence; names not listed keep their relative order at the
+    /// tail. Ignored on the H1 path. Use capture-verified Chrome
+    /// orders.
+    pub fn header_order(mut self, order: &[&str]) -> Self {
+        self.header_order = Some(order.iter().map(|s| (*s).to_string()).collect());
         self
     }
 

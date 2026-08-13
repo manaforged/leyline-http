@@ -133,6 +133,11 @@ pub struct H2Profile {
     pub unknown_setting9: Option<u32>,
     pub pseudo_order: Vec<String>,
     pub settings_order: Vec<String>,
+    /// PRIORITY fields emitted on each request's initial HEADERS frame.
+    /// Chrome carries exclusive + weight on every stream; Safari sends
+    /// none. `None` matches non-browser clients.
+    #[serde(default)]
+    pub default_priority: Option<H2PriorityProfile>,
     #[serde(default)]
     pub fingerprint: Option<H2Fingerprint>,
     /// Per-platform overrides. The resolver in
@@ -141,6 +146,18 @@ pub struct H2Profile {
     /// `unknown_setting8`.
     #[serde(default)]
     pub platforms: HashMap<String, H2PlatformOverride>,
+}
+
+/// PRIORITY fields for the initial HEADERS frame (RFC 9113 §5.3,
+/// fingerprint parity for Chrome-class browsers).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub struct H2PriorityProfile {
+    /// Exclusive dependency bit (E).
+    pub exclusive: bool,
+    /// Stream ID the new stream depends on (0 = root).
+    pub stream_dependency: u32,
+    /// Wire weight byte (`actual_weight - 1`), range `0..=255`.
+    pub weight: u8,
 }
 
 #[allow(missing_docs)]

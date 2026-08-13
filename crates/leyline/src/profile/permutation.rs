@@ -22,10 +22,13 @@ use crate::profile::TlsProfile;
 const PRE_SHARED_KEY: u16 = 0x0029;
 
 /// ALPS, new codepoint (Chrome 131+).
-const ALPS_NEW: u16 = 0x4469;
+/// ALPS, new (standardized) codepoint — matches the fork's
+/// `TLSEXT_TYPE_application_settings` (17613, 0x44cd).
+const ALPS_NEW: u16 = 0x44cd;
 
-/// ALPS, original codepoint.
-const ALPS_OLD: u16 = 0x4411;
+/// ALPS, old draft codepoint — the fork's
+/// `TLSEXT_TYPE_application_settings_old` (17513, 0x4469).
+const ALPS_OLD: u16 = 0x4469;
 
 /// The extension type IDs this profile's `[tls]` block causes BoringSSL to
 /// advertise, each paired with its name for error messages. The first nine are

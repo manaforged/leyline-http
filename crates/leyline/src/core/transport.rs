@@ -68,6 +68,7 @@ pub(crate) async fn send_request_auto(
     body: Body,
     proxy: Option<&str>,
     stream_response: bool,
+    header_order: Option<&[String]>,
 ) -> Result<TransportResponse> {
     if url.scheme() == "http" {
         // Boxed cold arm: for an `https://` request (the hot path) this branch
@@ -113,6 +114,7 @@ pub(crate) async fn send_request_auto(
         h2_body,
         proxy,
         stream_response,
+        header_order,
     )
     .await
     {
@@ -180,10 +182,11 @@ pub(crate) async fn send_request_h2(
     h2_config: &H2Config,
     method: &str,
     url: &url::Url,
-    headers: Vec<HeaderPair>,
+    mut headers: Vec<HeaderPair>,
     body: Body,
     proxy: Option<&str>,
     stream_response: bool,
+    header_order: Option<&[String]>,
 ) -> Result<TransportResponse> {
     if url.scheme() != "https" {
         return Err(Error::Config("HTTP/2 requires an https:// URL".into()));
@@ -215,6 +218,14 @@ pub(crate) async fn send_request_h2(
 
     // Translate Body → h2 request body representation.
     let h2_req_body = body_to_h2_request(body);
+
+    // Per-request wire header order (capture-driven H2 fidelity). The
+    // identity-level order (Brave/Firefox shapes) already ran at
+    // assemble time; this is the caller's exact-sequence pin for edges
+    // that fingerprint Chrome's H2 header order per request class.
+    if let Some(order) = header_order {
+        crate::core::session::execute::reorder_headers(&mut headers, order);
+    }
 
     // Send via pool (reuses connection or creates new one).
     let (resp, tls, timing) = crate::pool::send_request(
@@ -330,6 +341,9 @@ pub(crate) async fn send_request_h1(
                 ));
             }
             let mut headers = headers;
+            // Chrome sends the extensible `priority` header on H2 only;
+            // never emit it on the H1 wire (preset-level addition).
+            headers.retain(|(k, _)| !k.eq_ignore_ascii_case("priority"));
             if let Some(password) = parsed.password() {
                 let credentials = base64_encode(&format!(
                     "{}:{}",
@@ -343,7 +357,11 @@ pub(crate) async fn send_request_h1(
             }
             (H1Target::AbsoluteForm, headers)
         }
-        _ => (H1Target::OriginForm, headers),
+        _ => {
+            let mut headers = headers;
+            headers.retain(|(k, _)| !k.eq_ignore_ascii_case("priority"));
+            (H1Target::OriginForm, headers)
+        }
     };
 
     let h1_body = body_to_h1(body);

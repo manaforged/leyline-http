@@ -2,7 +2,7 @@
 
 mod builder;
 mod decompress;
-mod execute;
+pub(crate) mod execute;
 mod header_merge;
 mod helpers;
 mod proxy;

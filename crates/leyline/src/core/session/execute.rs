@@ -32,6 +32,7 @@ impl Session {
         override_timeout: Option<std::time::Duration>,
         stream_response: bool,
         request_proxy: Option<&str>,
+        header_order: Option<&[String]>,
     ) -> Result<Response> {
         let timeout = override_timeout.unwrap_or(self.timeouts.total);
         // Box the inner future to move its state to the heap. Without this,
@@ -48,6 +49,7 @@ impl Session {
             extra_headers,
             stream_response,
             request_proxy,
+            header_order,
         ));
         let result = match tokio::time::timeout(timeout, inner).await {
             Ok(result) => result,
@@ -79,6 +81,7 @@ impl Session {
         extra_headers: Option<HeaderList>,
         stream_response: bool,
         request_proxy: Option<&str>,
+        header_order: Option<&[String]>,
     ) -> Result<Response> {
         let mut current_url = url::Url::parse(raw_url)?;
         let original_origin = url_origin(&current_url);
@@ -214,7 +217,12 @@ impl Session {
                     // body. Drop any caller-supplied content-length so we never
                     // emit two (a request-smuggling shape) or a stale value.
                     headers.retain(|(k, _)| !k.eq_ignore_ascii_case("content-length"));
-                    headers.push(("content-length".into(), Cow::Owned(len.to_string())));
+                    // Chrome emits `content-length` as the FIRST regular
+                    // header (right after the pseudo headers on H2, right
+                    // after Host/Connection on H1) — not at the tail. The
+                    // position is part of the wire fingerprint Akamai-class
+                    // edges score on POSTs.
+                    headers.insert(0, ("content-length".into(), Cow::Owned(len.to_string())));
                 }
             }
 
@@ -301,6 +309,7 @@ impl Session {
                 hop_body,
                 stream_response,
                 request_proxy,
+                header_order,
             );
             let transport_resp = match self.timeouts.response_header {
                 Some(ttfb) => tokio::time::timeout(ttfb, send)
@@ -555,7 +564,7 @@ fn url_origin(url: &url::Url) -> String {
 /// Stable: multiple values for the same header keep their original
 /// relative order. Unknown / dynamic names (`content-length`, `cookie`,
 /// caller-anchored extras) end up at the tail untouched.
-fn reorder_headers(headers: &mut Vec<HeaderPair>, order: &[String]) {
+pub(crate) fn reorder_headers(headers: &mut Vec<HeaderPair>, order: &[String]) {
     let lc_order: Vec<String> = order.iter().map(|s| s.to_ascii_lowercase()).collect();
     let mut buckets: Vec<Vec<HeaderPair>> = vec![Vec::new(); lc_order.len()];
     let mut tail: Vec<HeaderPair> = Vec::new();

@@ -13,7 +13,7 @@ use tokio::sync::mpsc;
 use crate::h2::codec::{FrameReader, FrameWriter};
 use crate::h2::config::H2Config;
 use crate::h2::connection::{PeerSettings, RstFloodDetector, id_to_u16};
-use crate::h2::error::{ErrorCode, H2Error};
+use crate::h2::error::H2Error;
 use crate::h2::hpack;
 
 use super::super::handle::H2Client;
@@ -118,76 +118,15 @@ where
     }
     writer.flush().await?;
 
-    // 4. Read the server's SETTINGS. Some real servers delay or omit the
-    //    ACK for our initial SETTINGS until after request traffic starts;
-    //    browser clients do not block request dispatch on that ACK. The
-    //    driver still accepts a later ACK once it is running.
+    // 4. Do NOT wait for the server's SETTINGS before dispatching requests.
+    //    Chrome's first flight is preface, our SETTINGS, WINDOW_UPDATE, then
+    //    the first request HEADERS — the server's SETTINGS are read (and
+    //    acked) by the driver's recv loop only after they arrive, one round
+    //    trip later. Blocking here would insert a SETTINGS-ack frame ahead of
+    //    the request and diverge from the browser's wire ordering, which
+    //    Akamai-class edges fingerprint.
     let mut peer_settings = PeerSettings::default();
-    let mut got_settings = false;
-    let mut initial_send_window: i64 = 65535;
-    let deadline = tokio::time::Instant::now() + config.settings_ack_timeout;
-
-    while !got_settings {
-        let next = match tokio::time::timeout_at(deadline, reader.next()).await {
-            Ok(inner) => inner?,
-            Err(_) => {
-                tracing::warn!(
-                    target: "leyline::h2::handshake",
-                    timeout_ms = config.settings_ack_timeout.as_millis() as u64,
-                    got_peer_settings = got_settings,
-                    "SETTINGS_TIMEOUT — peer did not send SETTINGS; tearing down connection"
-                );
-                return Err(H2Error::Connection {
-                    code: ErrorCode::SettingsTimeout,
-                    reason: format!(
-                        "peer did not send SETTINGS within {:?}",
-                        config.settings_ack_timeout
-                    ),
-                });
-            }
-        };
-        let frame = next.ok_or_else(|| H2Error::Connection {
-            code: ErrorCode::ProtocolError,
-            reason: "connection closed before SETTINGS".into(),
-        })?;
-
-        match frame {
-            Frame::Settings(s) if !s.ack => {
-                let _result = peer_settings.apply(&s.params)?;
-                writer.write_settings_ack().await?;
-                writer.flush().await?;
-                got_settings = true;
-            }
-            Frame::Settings(_s) if _s.ack => {}
-            Frame::WindowUpdate(w) if w.stream_id == 0 => {
-                // §6.9.1 overflow check during handshake as well;
-                // a malicious peer sending WU(0, 2^31-1) twice must
-                // be rejected before we start writing DATA frames.
-                initial_send_window = match checked_window_add(
-                    initial_send_window,
-                    w.increment as i64,
-                ) {
-                    Ok(v) => v,
-                    Err(new_win) => {
-                        return Err(H2Error::Connection {
-                            code: ErrorCode::FlowControlError,
-                            reason: format!(
-                                "handshake WINDOW_UPDATE would push connection window to {new_win} (> 2^31-1)"
-                            ),
-                        });
-                    }
-                };
-            }
-            Frame::WindowUpdate(_) => {}
-            Frame::GoAway(g) => {
-                return Err(H2Error::Connection {
-                    code: g.error_code,
-                    reason: format!("server sent GOAWAY during handshake: {:?}", g.error_code),
-                });
-            }
-            _ => {}
-        }
-    }
+    let initial_send_window: i64 = 65535;
 
     // Cap inbound frames at *our* advertised SETTINGS_MAX_FRAME_SIZE, never the
     // peer's. RFC 9113 §4.2: a SETTINGS parameter bounds the frames its *sender*

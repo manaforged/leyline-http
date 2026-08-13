@@ -111,6 +111,7 @@ impl BrowserProfile {
                     "initial_window_size".into(),
                     "max_frame_size".into(),
                 ],
+                default_priority: None,
                 fingerprint: None,
                 platforms: HashMap::new(),
             },

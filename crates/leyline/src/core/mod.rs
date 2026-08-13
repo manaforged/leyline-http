@@ -14,7 +14,7 @@ mod response;
 pub(crate) mod retry;
 #[cfg(feature = "tower")]
 mod service;
-mod session;
+pub(crate) mod session;
 mod standalone;
 mod transport;
 #[cfg(feature = "websocket")]
