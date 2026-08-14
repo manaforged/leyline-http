@@ -255,6 +255,7 @@ fn profile_min_version(declared: &Option<String>) -> Option<TlsMinVersion> {
 fn boring_curve_name(name: &str) -> &str {
     match name {
         "X25519_MLKEM768" => "X25519MLKEM768",
+        "X25519_KYBER768" => "X25519Kyber768Draft00",
         "X25519" => "X25519",
         "SECP256R1" => "P-256",
         "SECP384R1" => "P-384",

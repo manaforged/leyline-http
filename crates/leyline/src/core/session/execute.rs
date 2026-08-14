@@ -120,7 +120,10 @@ impl Session {
                     accept_language: &self.accept_language,
                     origin: &origin,
                     referer: &referer,
-                    firefox: self.browser.as_ref().is_some_and(|b| b.is_firefox()),
+                    firefox: self
+                        .identity
+                        .map(|id| id.http().is_firefox())
+                        .unwrap_or_else(|| self.browser.as_ref().is_some_and(|b| b.is_firefox())),
                 };
                 preset.build_headers(&ctx)
             } else {

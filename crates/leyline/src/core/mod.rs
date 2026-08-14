@@ -37,7 +37,7 @@ pub use retry::{RetryPolicy, RetryTrigger};
 pub use service::LeylineService;
 #[cfg(feature = "websocket")]
 pub use session::WebSocketBuilder;
-pub use session::{ProtocolPolicy, Session, SessionBuilder};
+pub use session::{Identity, ProtocolPolicy, Session, SessionBuilder};
 pub use standalone::Request;
 #[cfg(feature = "websocket")]
 pub use websocket::{WsConnection, WsSink, WsStream};

@@ -21,9 +21,8 @@ use crate::profile::TlsProfile;
 /// any position given for it, so a profile must not try to order it.
 const PRE_SHARED_KEY: u16 = 0x0029;
 
-/// ALPS, new codepoint (Chrome 131+).
 /// ALPS, new (standardized) codepoint — matches the fork's
-/// `TLSEXT_TYPE_application_settings` (17613, 0x44cd).
+/// `TLSEXT_TYPE_application_settings` (17613, 0x44cd). Chrome 133+.
 const ALPS_NEW: u16 = 0x44cd;
 
 /// ALPS, old draft codepoint — the fork's

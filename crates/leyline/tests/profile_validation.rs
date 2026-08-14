@@ -473,10 +473,7 @@ fn danger_accept_invalid_certs_session_builds() {
 #[test]
 fn cfnetwork_profiles_declare_captured_against() {
     let reg = ProfileRegistry::builtin();
-    for browser in [
-        Browser::CfnetworkIOS18,
-        Browser::CfnetworkMacOS26,
-    ] {
+    for browser in [Browser::CfnetworkIOS18, Browser::CfnetworkMacOS26] {
         let profile = reg.get_browser(browser).expect("built-in profile");
         assert_eq!(profile.meta.family, "cfnetwork");
         assert!(
@@ -614,8 +611,7 @@ fn newest_chrome_profile_is_not_neglected() {
 #[test]
 #[ignore = "network: fetches Chrome for Testing; run on schedule"]
 fn newest_chrome_profile_within_two_majors_of_current_stable() {
-    const URL: &str =
-        "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json";
+    const URL: &str = "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json";
     let out = std::process::Command::new("curl")
         .args(["-fsSL", "--max-time", "20", URL])
         .output()

@@ -15,10 +15,7 @@ use serde_json::Value;
 const PEET_URL: &str = "https://tls.peet.ws/api/all";
 
 async fn peet(session: &Session) -> Value {
-    let resp = session
-        .navigate(PEET_URL)
-        .await
-        .expect("navigate failed");
+    let resp = session.navigate(PEET_URL).await.expect("navigate failed");
     assert_eq!(resp.status(), 200, "status {}", resp.status());
     serde_json::from_str(&resp.text()).expect("non-JSON body")
 }
@@ -73,13 +70,18 @@ fn assert_cfnetwork_common(json: &Value) {
     // zlib cert compression (Apple's choice; browsers advertise brotli).
     let cc = ext(json, "compress_certificate");
     assert!(
-        cc["algorithms"].as_array().is_some_and(|a| a[0].as_str() == Some("zlib (1)")),
+        cc["algorithms"]
+            .as_array()
+            .is_some_and(|a| a[0].as_str() == Some("zlib (1)")),
         "cert compression must be zlib"
     );
 
     // No session_ticket extension on fresh connections.
     assert!(
-        !exts.iter().any(|e| e["name"].as_str().unwrap_or_default().contains("session_ticket")),
+        !exts.iter().any(|e| e["name"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("session_ticket")),
         "CFNetwork sends no session_ticket extension"
     );
 
@@ -120,7 +122,10 @@ async fn live_cfnetwork_macos26_matches_capture() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|e| e["name"].as_str().unwrap_or_default().starts_with("padding")),
+            .any(|e| e["name"]
+                .as_str()
+                .unwrap_or_default()
+                .starts_with("padding")),
         "macOS CFNetwork sends no padding extension"
     );
     // macOS 26: MLKEM768 group + keyshare present.
@@ -166,7 +171,9 @@ async fn live_cfnetwork_ios18_matches_capture() {
         .as_array()
         .unwrap();
     assert!(
-        !groups.iter().any(|g| g.as_str().unwrap().contains("MLKEM768")),
+        !groups
+            .iter()
+            .any(|g| g.as_str().unwrap().contains("MLKEM768")),
         "iOS 18.6 CFNetwork has no MLKEM group"
     );
     // iOS 18.6 TLS 1.3 order: AES_128, AES_256, CHACHA (hardware order).

@@ -29,6 +29,10 @@ missing_docs = "deny"
 
 [workspace.lints.clippy]
 undocumented_unsafe_blocks = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+rc_mutex = "deny"
 
 [workspace.dependencies]
 tokio = { version = "1", features = ["net", "rt", "rt-multi-thread", "time", "io-util", "macros"] }

@@ -44,6 +44,44 @@ async fn capture_navigate_headers(session: Session) -> String {
 }
 
 #[tokio::test]
+async fn identity_keeps_ua_when_tls_rotates() {
+    let id = crate::Identity::locked(Browser::Chrome150, Platform::Windows)
+        .rotate_tls(Browser::Chrome146)
+        .expect("same family");
+    let mixed = Session::builder().identity(id).build().unwrap();
+    let headers = capture_navigate_headers(mixed).await;
+    assert!(
+        headers.contains("Chrome/150"),
+        "HTTP identity must stay Chrome 150:\n{headers}"
+    );
+    assert!(
+        !headers.contains("Chrome/146"),
+        "TLS roll must not rewrite UA to 146:\n{headers}"
+    );
+}
+
+#[tokio::test]
+async fn brand_overlay_follows_http_major_not_tls() {
+    let id = crate::Identity::locked(Browser::Chrome150, Platform::Windows)
+        .rotate_tls(Browser::Chrome116)
+        .expect("same family");
+    let session = Session::builder()
+        .identity(id)
+        .brand(ChromiumBrand::Edge)
+        .build()
+        .unwrap();
+    let headers = capture_navigate_headers(session).await;
+    assert!(
+        headers.contains("Chrome/150") && headers.contains("Edg/150"),
+        "Edge overlay must stamp the HTTP major:\n{headers}"
+    );
+    assert!(
+        !headers.contains("Edg/116") && !headers.contains("Chrome/116"),
+        "TLS hello must not drive brand or UA:\n{headers}"
+    );
+}
+
+#[tokio::test]
 async fn edge_brand_overlay_matches_capture() {
     let session = Session::edge();
     let req = capture_navigate_headers(session).await;

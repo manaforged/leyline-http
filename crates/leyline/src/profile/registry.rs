@@ -1,6 +1,7 @@
 //! Profile registry — loads and indexes browser profiles.
 
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
 use crate::profile::Browser;
 use crate::profile::types::BrowserProfile;
@@ -10,7 +11,15 @@ pub struct ProfileRegistry {
     profiles: HashMap<(String, u32), BrowserProfile>,
 }
 
+static BUILTIN: LazyLock<ProfileRegistry> = LazyLock::new(ProfileRegistry::builtin);
+
 impl ProfileRegistry {
+    /// The compiled-in profile set. Shared by session build and [`crate::Identity`].
+    #[must_use]
+    pub fn global() -> &'static Self {
+        &BUILTIN
+    }
+
     /// Create an empty registry.
     pub fn new() -> Self {
         Self {
@@ -22,6 +31,10 @@ impl ProfileRegistry {
     pub fn builtin() -> Self {
         let mut reg = Self::new();
         // Chrome
+        reg.load_toml(include_str!("../../profiles/chrome/116.toml"));
+        reg.load_toml(include_str!("../../profiles/chrome/120.toml"));
+        reg.load_toml(include_str!("../../profiles/chrome/124.toml"));
+        reg.load_toml(include_str!("../../profiles/chrome/131.toml"));
         reg.load_toml(include_str!("../../profiles/chrome/145.toml"));
         reg.load_toml(include_str!("../../profiles/chrome/146.toml"));
         reg.load_toml(include_str!("../../profiles/chrome/147.toml"));
@@ -34,6 +47,7 @@ impl ProfileRegistry {
         // sec-gpc + accept SXG-strip deltas)
         reg.load_toml(include_str!("../../profiles/brave/146.toml"));
         // Firefox
+        reg.load_toml(include_str!("../../profiles/firefox/133.toml"));
         reg.load_toml(include_str!("../../profiles/firefox/148.toml"));
         reg.load_toml(include_str!("../../profiles/firefox/150.toml"));
         reg.load_toml(include_str!("../../profiles/firefox/151.toml"));

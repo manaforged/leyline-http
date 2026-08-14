@@ -1,7 +1,7 @@
 use crate::cookie::Jar;
 use crate::profile::{Browser, ChromiumBrand, Platform, Preset};
 
-use super::{Session, SessionBuilder};
+use super::{Identity, Session, SessionBuilder};
 use crate::core::request::RequestBuilder;
 use crate::core::response::Response;
 use crate::core::{Body, IntoParamPair, Result};
@@ -173,8 +173,17 @@ impl Session {
 
     /// The impersonated browser, or `None` for a bare (non-impersonating)
     /// session — the default when no `.browser(...)` was set.
+    ///
+    /// After [`SessionBuilder::identity`] this is [`Identity::tls`]. Use
+    /// [`Session::identity`] for the locked HTTP + TLS + platform stack.
     pub fn browser(&self) -> Option<Browser> {
         self.browser
+    }
+
+    /// The locked presentation, or `None` for a bare session.
+    #[must_use]
+    pub fn identity(&self) -> Option<Identity> {
+        self.identity
     }
 
     /// The Chromium-family brand overlay applied, or

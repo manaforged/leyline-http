@@ -4,7 +4,7 @@
 ///
 /// Each variant maps 1:1 to a TOML profile in `crates/leyline/profiles/`.
 /// There are exactly
-/// 16 profiles. Most Chromium siblings (Edge, Opera, Vivaldi) are NOT
+/// 25 profiles. Most Chromium siblings (Edge, Opera, Vivaldi) are NOT
 /// separate variants — their TLS ClientHello is byte-identical to Chrome's.
 /// Pick a `ChromeNNN` anchor and apply `ChromiumBrand::{Edge, Opera, Vivaldi}`
 /// via `SessionBuilder::brand(..)` to swap HTTP identity headers without
@@ -16,6 +16,14 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Browser {
+    /// Google Chrome 116 — no ECH, no PQ (X25519 only).
+    Chrome116,
+    /// Google Chrome 120 — ECH grease, still no PQ.
+    Chrome120,
+    /// Google Chrome 124 — ECH + X25519Kyber768Draft00, old ALPS.
+    Chrome124,
+    /// Google Chrome 131 — ECH + MLKEM, old ALPS (17513).
+    Chrome131,
     /// Google Chrome 145 (Windows/macOS/Linux/Android).
     Chrome145,
     /// Google Chrome 146 (Windows/macOS/Linux/Android).
@@ -44,6 +52,8 @@ pub enum Browser {
     Aloha138,
     /// Brave 1.x — Chromium-146-based privacy browser (macOS only today).
     Brave146,
+    /// Mozilla Firefox 133 — MLKEM + ECH, no signed_certificate_timestamp.
+    Firefox133,
     /// Mozilla Firefox 148 (Windows/macOS/Linux/Android).
     Firefox148,
     /// Mozilla Firefox 150 (Windows/macOS/Linux/Android) - current release.
@@ -71,10 +81,14 @@ pub enum Browser {
 }
 
 /// Canonical profile count. Tests assert against this.
-pub const PROFILE_COUNT: usize = 20;
+pub const PROFILE_COUNT: usize = 25;
 
 /// All browser variants, for iteration.
 pub const ALL_BROWSERS: [Browser; PROFILE_COUNT] = [
+    Browser::Chrome116,
+    Browser::Chrome120,
+    Browser::Chrome124,
+    Browser::Chrome131,
     Browser::Chrome145,
     Browser::Chrome146,
     Browser::Chrome147,
@@ -83,6 +97,7 @@ pub const ALL_BROWSERS: [Browser; PROFILE_COUNT] = [
     Browser::Chrome150,
     Browser::Aloha138,
     Browser::Brave146,
+    Browser::Firefox133,
     Browser::Firefox148,
     Browser::Firefox150,
     Browser::Firefox151,
@@ -101,6 +116,10 @@ impl Browser {
     /// Profile lookup key: (browser_name, version).
     pub fn profile_key(&self) -> (&'static str, u32) {
         match self {
+            Self::Chrome116 => ("chrome", 116),
+            Self::Chrome120 => ("chrome", 120),
+            Self::Chrome124 => ("chrome", 124),
+            Self::Chrome131 => ("chrome", 131),
             Self::Chrome145 => ("chrome", 145),
             Self::Chrome146 => ("chrome", 146),
             Self::Chrome147 => ("chrome", 147),
@@ -109,6 +128,7 @@ impl Browser {
             Self::Chrome150 => ("chrome", 150),
             Self::Aloha138 => ("aloha", 138),
             Self::Brave146 => ("brave", 146),
+            Self::Firefox133 => ("firefox", 133),
             Self::Firefox148 => ("firefox", 148),
             Self::Firefox150 => ("firefox", 150),
             Self::Firefox151 => ("firefox", 151),
@@ -124,6 +144,61 @@ impl Browser {
         }
     }
 
+    /// Engine family (`chrome`, `firefox`, `safari-ios`, …).
+    ///
+    /// TLS rotate stays inside one family. Chrome 150 and Chrome 146 match;
+    /// Chrome and Firefox do not.
+    #[must_use]
+    pub fn family(&self) -> &'static str {
+        self.profile_key().0
+    }
+
+    /// Representative that owns this browser's ClientHello / JA4.
+    ///
+    /// Chrome 145 shares 146. Chrome 148 and 149 share 147. Firefox 148
+    /// shares 150. Firefox 151 shares 152. Chrome 124, 131, 116, and 120
+    /// each own a distinct hello. Rotate hellos via these, not every major.
+    #[must_use]
+    pub fn hello_rep(self) -> Self {
+        match self {
+            Self::Chrome116 => Self::Chrome116,
+            Self::Chrome120 => Self::Chrome120,
+            Self::Chrome124 => Self::Chrome124,
+            Self::Chrome131 => Self::Chrome131,
+            Self::Chrome145 | Self::Chrome146 => Self::Chrome146,
+            Self::Chrome147 | Self::Chrome148 | Self::Chrome149 => Self::Chrome147,
+            Self::Firefox133 => Self::Firefox133,
+            Self::Firefox148 | Self::Firefox150 => Self::Firefox150,
+            Self::Firefox151 | Self::Firefox152 => Self::Firefox152,
+            other => other,
+        }
+    }
+
+    /// Distinct ClientHello owners in this [`Browser::family`], newest first.
+    #[must_use]
+    pub fn family_hellos(self) -> &'static [Self] {
+        match self.family() {
+            "chrome" => &[
+                Self::Chrome150,
+                Self::Chrome147,
+                Self::Chrome146,
+                Self::Chrome131,
+                Self::Chrome124,
+                Self::Chrome120,
+                Self::Chrome116,
+            ],
+            "firefox" => &[Self::Firefox152, Self::Firefox150, Self::Firefox133],
+            "safari" => &[Self::Safari18],
+            "safari-ios" => &[Self::SafariIOS18, Self::SafariIOS17, Self::SafariIOS15],
+            "cfnetwork-ios" => &[Self::CfnetworkIOS18],
+            "cfnetwork-macos" => &[Self::CfnetworkMacOS26],
+            "brave" => &[Self::Brave146],
+            "aloha" => &[Self::Aloha138],
+            "okhttp" => &[Self::OkHttpAndroid10, Self::OkHttpAndroid7],
+            _ => &[],
+        }
+    }
+
     /// Whether this browser caps at TLS 1.2 (no TLS 1.3).
     pub fn max_tls_12(&self) -> bool {
         matches!(self, Self::OkHttpAndroid7)
@@ -134,7 +209,7 @@ impl Browser {
     /// the wire for a Firefox identity (see `Preset::build_headers`).
     #[must_use]
     pub fn is_firefox(&self) -> bool {
-        self.profile_key().0 == "firefox"
+        self.family() == "firefox"
     }
 
     /// The default browser for new sessions.
@@ -159,6 +234,10 @@ impl Browser {
     /// [`ChromiumBrand`]: crate::ChromiumBrand
     pub fn chromium_major(&self) -> Option<u32> {
         match self {
+            Self::Chrome116 => Some(116),
+            Self::Chrome120 => Some(120),
+            Self::Chrome124 => Some(124),
+            Self::Chrome131 => Some(131),
             Self::Chrome145 => Some(145),
             Self::Chrome146 => Some(146),
             Self::Chrome147 => Some(147),
@@ -181,6 +260,10 @@ impl Default for Browser {
 impl std::fmt::Display for Browser {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Chrome116 => write!(f, "Chrome 116"),
+            Self::Chrome120 => write!(f, "Chrome 120"),
+            Self::Chrome124 => write!(f, "Chrome 124"),
+            Self::Chrome131 => write!(f, "Chrome 131"),
             Self::Chrome145 => write!(f, "Chrome 145"),
             Self::Chrome146 => write!(f, "Chrome 146"),
             Self::Chrome147 => write!(f, "Chrome 147"),
@@ -189,6 +272,7 @@ impl std::fmt::Display for Browser {
             Self::Chrome150 => write!(f, "Chrome 150"),
             Self::Aloha138 => write!(f, "Aloha 4.17 (Chromium 138)"),
             Self::Brave146 => write!(f, "Brave (Chromium 146)"),
+            Self::Firefox133 => write!(f, "Firefox 133"),
             Self::Firefox148 => write!(f, "Firefox 148"),
             Self::Firefox150 => write!(f, "Firefox 150"),
             Self::Firefox151 => write!(f, "Firefox 151"),

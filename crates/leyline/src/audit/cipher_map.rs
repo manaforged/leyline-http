@@ -79,6 +79,7 @@ pub fn curve_id(name: &str) -> Option<u16> {
         "SECP384R1" | "P-384" => 0x0018,
         "SECP521R1" | "P-521" => 0x0019,
         "X25519" => 0x001d,
+        "X25519_KYBER768" | "X25519Kyber768Draft00" => 0x6399,
         "X25519_MLKEM768" | "X25519MLKEM768" => 0x11ec,
         "X448" => 0x001e,
         _ => return None,
@@ -102,6 +103,8 @@ mod tests {
             Some(0xc02f)
         );
         assert_eq!(cipher_id("UNKNOWN"), None);
+        assert_eq!(curve_id("X25519_KYBER768"), Some(0x6399));
+        assert_eq!(curve_id("X25519Kyber768Draft00"), Some(0x6399));
     }
 
     #[test]

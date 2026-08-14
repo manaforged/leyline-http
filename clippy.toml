@@ -1,0 +1,21 @@
+# Leyline already denies missing_docs + undocumented_unsafe_blocks.
+
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true
+allow-dbg-in-tests = true
+
+disallowed-types = [
+    { path = "once_cell::sync::Lazy", reason = "use std::sync::LazyLock" },
+    { path = "lazy_static::Lazy", reason = "use std::sync::LazyLock" },
+]
+
+disallowed-macros = [
+    { path = "lazy_static::lazy_static", reason = "use std::sync::LazyLock" },
+]
+
+disallowed-methods = [
+    { path = "std::env::set_current_dir", reason = "process-global; test-racy" },
+    { path = "std::thread::sleep", reason = "blocks the thread; async uses sleep_or_cancel" },
+]

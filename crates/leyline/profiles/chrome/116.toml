@@ -1,0 +1,80 @@
+[meta]
+name = "Chrome 116"
+browser = "chrome"
+version = 116
+family = "chromium"
+verified_against = "lexiforest/curl-impersonate tests/signatures/chrome_116.0.5845.180_win10.yaml"
+captured_against = "chrome-116.0.5845.180"
+
+[tls]
+ciphers = [
+    "TLS_AES_128_GCM_SHA256",
+    "TLS_AES_256_GCM_SHA384",
+    "TLS_CHACHA20_POLY1305_SHA256",
+    "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+    "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+    "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
+    "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+    "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256",
+    "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
+    "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA",
+    "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA",
+    "TLS_RSA_WITH_AES_128_GCM_SHA256",
+    "TLS_RSA_WITH_AES_256_GCM_SHA384",
+    "TLS_RSA_WITH_AES_128_CBC_SHA",
+    "TLS_RSA_WITH_AES_256_CBC_SHA",
+]
+curves = ["X25519", "SECP256R1", "SECP384R1"]
+sigalgs = [
+    "ecdsa_secp256r1_sha256", "rsa_pss_rsae_sha256", "rsa_pkcs1_sha256",
+    "ecdsa_secp384r1_sha384", "rsa_pss_rsae_sha384", "rsa_pkcs1_sha384",
+    "rsa_pss_rsae_sha512", "rsa_pkcs1_sha512",
+]
+alps = "h2"
+alps_new_codepoint = false
+ocsp_stapling = true
+signed_cert_timestamps = true
+cert_compression = ["brotli"]
+permute_extensions = true
+ech_grease = false
+pre_shared_key = true
+
+[h2]
+header_table_size = 65536
+enable_push = false
+initial_stream_window_size = 6291456
+initial_connection_window_size = 15728640
+max_header_list_size = 262144
+unknown_setting8 = 1
+pseudo_order = ["method", "authority", "scheme", "path"]
+settings_order = [
+    "header_table_size", "enable_push",
+    "initial_window_size", "max_frame_size",
+    "max_header_list_size", "unknown8", "unknown9",
+    "max_concurrent_streams",
+]
+
+[h2.fingerprint]
+akamai = "1:65536;2:0;4:6291456;6:262144;8:1|15663105|0|m,a,s,p"
+
+[h2.platforms.macos]
+omit_settings = ["unknown_setting8"]
+
+[h2.platforms.macos.fingerprint]
+akamai = "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p"
+
+[identity.windows]
+user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36"
+sec_ch_ua = '"Chromium";v="116", "Not)A;Brand";v="24", "Google Chrome";v="116"'
+
+[identity.macos]
+user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36"
+sec_ch_ua = '"Chromium";v="116", "Not)A;Brand";v="24", "Google Chrome";v="116"'
+
+[identity.linux]
+user_agent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36"
+sec_ch_ua = '"Chromium";v="116", "Not)A;Brand";v="24", "Google Chrome";v="116"'
+
+[identity.android]
+user_agent = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36"
+sec_ch_ua = '"Chromium";v="116", "Not)A;Brand";v="24", "Google Chrome";v="116"'

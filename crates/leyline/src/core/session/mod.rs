@@ -5,6 +5,7 @@ mod decompress;
 pub(crate) mod execute;
 mod header_merge;
 mod helpers;
+mod identity;
 mod proxy;
 mod transport_policy;
 #[cfg(feature = "websocket")]
@@ -14,6 +15,7 @@ mod websocket;
 mod tests;
 
 pub use builder::SessionBuilder;
+pub use identity::Identity;
 #[cfg(feature = "websocket")]
 pub use websocket::WebSocketBuilder;
 
@@ -81,8 +83,10 @@ impl std::ops::Deref for Session {
 #[derive(Clone)]
 pub struct SessionInner {
     /// The impersonated browser, or `None` for a bare (non-impersonating)
-    /// session.
+    /// session. After [`SessionBuilder::identity`] this is [`Identity::tls`].
     browser: Option<Browser>,
+    /// Locked presentation. `None` on a bare session.
+    identity: Option<Identity>,
     platform: Platform,
     brand: ChromiumBrand,
     user_agent: String,

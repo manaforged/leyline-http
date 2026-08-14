@@ -478,7 +478,6 @@ async fn peet(session: &leyline::Session) -> Value {
     panic!("tls.peet.ws failed after retries: {last_err}");
 }
 
-
 /// The real platform for a browser's wire identity (the profile's own
 /// identity sections are the source of truth; Windows is the generic
 /// default for browser stacks that ship a Windows identity).

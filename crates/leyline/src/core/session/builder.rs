@@ -14,11 +14,11 @@ use crate::tls::{
 };
 
 use super::proxy::env_proxy;
-use super::{ProtocolPolicy, Session, SessionInner};
+use super::{Identity, ProtocolPolicy, Session, SessionInner};
 use crate::audit::AuditTlsCache;
 use crate::core::error::{Error, Result};
 
-static PROFILES: LazyLock<ProfileRegistry> = LazyLock::new(ProfileRegistry::builtin);
+
 
 /// The synthetic bare profile, materialised once. Backs the default
 /// (no-impersonation) session so `&'static crate::profile::BrowserProfile`
@@ -62,6 +62,9 @@ pub struct SessionBuilder {
     config_error: Option<String>,
     accept_language_override: Option<String>,
     extra_identity_headers: Vec<(String, String)>,
+    /// When set, HTTP identity (UA / sec-ch-ua / identity extras) comes from
+    /// this browser while TLS + H2 still follow [`Self::browser`].
+    http_identity: Option<Browser>,
     accept_invalid_certs: bool,
     pool_idle_timeout: Option<std::time::Duration>,
     happy_eyeballs: Option<HappyEyeballsConfig>,
@@ -96,6 +99,7 @@ impl SessionBuilder {
             config_error: None,
             accept_language_override: None,
             extra_identity_headers: Vec::new(),
+            http_identity: None,
             accept_invalid_certs: false,
             pool_idle_timeout: None,
             happy_eyeballs: None,
@@ -558,6 +562,29 @@ impl SessionBuilder {
         self
     }
 
+    /// Apply a locked [`Identity`].
+    ///
+    /// TLS/H2 follow [`Identity::tls`]. HTTP headers follow [`Identity::http`].
+    /// Platform is [`Identity::platform`].
+    pub fn identity(self, id: Identity) -> Self {
+        let builder = self.browser(id.tls()).platform(id.platform());
+        if id.http() == id.tls() {
+            builder
+        } else {
+            builder.http_identity(id.http())
+        }
+    }
+
+    /// Keep TLS/H2 from [`Self::browser`], but take UA / `sec-ch-ua` /
+    /// identity extras from `browser`.
+    ///
+    /// Prefer [`Self::identity`] so family mismatch is unrepresentable.
+    /// This knob stays for tests that assert the split in isolation.
+    pub fn http_identity(mut self, browser: Browser) -> Self {
+        self.http_identity = Some(browser);
+        self
+    }
+
     /// Override the session's `accept-language` header for every request.
     /// When not called, the browser profile's TOML identity value is used.
     pub fn accept_language(mut self, lang: impl Into<String>) -> Self {
@@ -597,6 +624,13 @@ impl SessionBuilder {
     pub fn build(mut self) -> Result<Session> {
         if let Some(error) = self.config_error.take() {
             return Err(Error::Config(error));
+        }
+        if let (Some(tls), Some(http)) = (self.browser, self.http_identity) {
+            if tls.family() != http.family() {
+                return Err(Error::Config(format!(
+                    "http identity {http} is not the same family as TLS {tls}"
+                )));
+            }
         }
 
         // Resolve the effective platform:
@@ -663,7 +697,7 @@ impl SessionBuilder {
         // `None` browser = bare (the default): a synthetic, non-impersonating
         // profile. `Some(b)` = impersonate that browser from the registry.
         let profile: &'static crate::profile::BrowserProfile = match self.browser {
-            Some(b) => PROFILES
+            Some(b) => ProfileRegistry::global()
                 .get_browser(b)
                 .ok_or_else(|| Error::Config(format!("no profile for {b}")))?,
             None => &BARE_PROFILE,
@@ -674,12 +708,27 @@ impl SessionBuilder {
             .map(|b| b.to_string())
             .unwrap_or_else(|| "bare".to_string());
 
-        let mut identity = profile
-            .identity_for(self.platform)
-            .ok_or_else(|| {
-                Error::Config(format!("no {} identity for {browser_label}", self.platform))
-            })?
-            .clone();
+        let mut identity = if let Some(http_b) = self.http_identity {
+            let http_profile = ProfileRegistry::global()
+                .get_browser(http_b)
+                .ok_or_else(|| Error::Config(format!("no profile for http identity {http_b}")))?;
+            http_profile
+                .identity_for(self.platform)
+                .ok_or_else(|| {
+                    Error::Config(format!(
+                        "no {} identity for http identity {http_b}",
+                        self.platform
+                    ))
+                })?
+                .clone()
+        } else {
+            profile
+                .identity_for(self.platform)
+                .ok_or_else(|| {
+                    Error::Config(format!("no {} identity for {browser_label}", self.platform))
+                })?
+                .clone()
+        };
 
         // Apply the Chromium-sibling identity overlay if the caller
         // asked for one. Only meaningful on Chrome profiles;
@@ -693,7 +742,11 @@ impl SessionBuilder {
         if self.brand != ChromiumBrand::Chrome {
             // A brand overlay only applies to an explicit Chromium browser;
             // bare sessions have no browser and never carry brand headers.
-            if let Some(chromium_major) = self.browser.and_then(|b| b.chromium_major()) {
+            if let Some(chromium_major) = self
+                .http_identity
+                .or(self.browser)
+                .and_then(|b| b.chromium_major())
+            {
                 let overlay = self
                     .brand
                     .overlay(
@@ -784,9 +837,22 @@ impl SessionBuilder {
             is_windows,
         );
 
+        let presentation = match self.browser {
+            None => None,
+            Some(tls) => {
+                let http = self.http_identity.unwrap_or(tls);
+                Some(
+                    Identity::locked(http, self.platform)
+                        .rotate_tls(tls)
+                        .expect("build already rejected a family mismatch"),
+                )
+            }
+        };
+
         Ok(Session {
             inner: std::sync::Arc::new(SessionInner {
                 browser: self.browser,
+                identity: presentation,
                 platform: self.platform,
                 brand: self.brand,
                 user_agent: identity.user_agent,
