@@ -1,7 +1,7 @@
 # Releasing
 
-Leyline releases are deliberate direct operations. A Git tag does not build or
-publish anything.
+Leyline releases are deliberate direct operations. A Git tag runs the hosted
+qualification workflow. It does not publish a package.
 
 ## Preflight
 

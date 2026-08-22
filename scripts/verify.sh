@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Leyline's direct self-hosted quality gate.
+# Leyline release qualification.
 #
 # Usage: ./scripts/verify.sh [--full] [--bssl-source-build] [--fuzz [SECONDS]]
 # default        package parity and compile sanity
