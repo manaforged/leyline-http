@@ -1,5 +1,4 @@
 //! Guards public Leyline claims against absolute marketing language.
-
 use std::path::{Path, PathBuf};
 
 const FORBIDDEN_WORDS: &[&str] = &[
@@ -44,9 +43,9 @@ fn readme_keeps_public_evidence_commands() {
     let readme = std::fs::read_to_string(repo_root().join("README.md")).unwrap();
 
     for required in [
-        "cargo test -p leyline --test smoke -- --ignored --nocapture",
+        "cargo test -p leyline-tls --test smoke -- --ignored --nocapture",
         "cargo test --workspace --exclude leyline-quiche",
-        "cargo test -p leyline --test tls_peet -- --ignored",
+        "cargo test -p leyline-tls --test tls_peet -- --ignored",
     ] {
         assert!(
             readme.contains(required),
@@ -64,8 +63,12 @@ fn cited_test_names_exist() {
     let known = source_identifiers();
     let mut missing = Vec::new();
 
+    // TESTING.md is optional — the guard scans whichever claim docs exist,
+    // and README.md is required (checked above).
     for doc in ["TESTING.md", "README.md"] {
-        let raw = std::fs::read_to_string(repo_root().join(doc)).unwrap();
+        let Ok(raw) = std::fs::read_to_string(repo_root().join(doc)) else {
+            continue;
+        };
         // The `## Fuzzing` section names cargo-fuzz targets that live in an
         // optional `fuzz/` workspace, absent on most branches — not a
         // proof-promise about a test in this tree.

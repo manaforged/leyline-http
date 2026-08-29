@@ -12,27 +12,29 @@
 //! Tests spin up a `tokio::net::TcpListener` mock serving the bad
 //! response and assert the client surfaces a parse error rather than
 //! silently reusing a desynced connection.
-
+#![expect(
+    clippy::unwrap_used,
+    reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
+)]
 use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::StreamExt;
 use leyline::pool::{H1Body, H1Response, H1ResponseBody, H1Target, Pool, send_request_h1_pooled};
 use leyline::profile::{Browser, Platform, ProfileRegistry};
-use leyline::tls::{ConnectorVariant, FingerprintConnector};
+use leyline::tls::FingerprintConnector;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-fn connector() -> ConnectorVariant {
+fn connector() -> FingerprintConnector {
     let profiles = ProfileRegistry::builtin();
     let profile = profiles.get_browser(Browser::Chrome147).unwrap();
     let tcp_profile = Platform::default().tcp_profile();
-    ConnectorVariant::Fingerprint(FingerprintConnector::new(profile, tcp_profile).unwrap())
+    FingerprintConnector::new(profile, tcp_profile).unwrap()
 }
 
 async fn run_against(server_response: &'static [u8]) -> String {
     let (msg, stats) = run_against_with_stats(server_response).await;
-    // We assert
-    // TWO invariants about the pool after a framing error.
+    // Two invariants hold after a framing error:
     //
     // (a) `entries == 0` — the pool map does not hold a live slot.
     //     On its own this is weak: an empty pool is also the
@@ -56,6 +58,64 @@ async fn run_against(server_response: &'static [u8]) -> String {
         "framing-conflict socket was briefly installed in the pool before eviction (stats: {stats:?})"
     );
     msg
+}
+
+/// Absolute-form request targets to a plaintext proxy are
+/// scheme://authority + path + query; no userinfo, no fragment.
+#[tokio::test]
+async fn absolute_form_target_strips_userinfo_and_fragment() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let server = tokio::spawn(async move {
+        let (mut sock, _) = listener.accept().await.unwrap();
+        let mut acc: Vec<u8> = Vec::with_capacity(2048);
+        let mut buf = [0u8; 2048];
+        loop {
+            let n = sock.read(&mut buf).await.unwrap();
+            if n == 0 {
+                break;
+            }
+            acc.extend_from_slice(&buf[..n]);
+            if acc.windows(4).any(|w| w == b"\r\n\r\n") {
+                break;
+            }
+        }
+        sock.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+            .await
+            .unwrap();
+        sock.flush().await.unwrap();
+        String::from_utf8_lossy(&acc).to_string()
+    });
+
+    let pool = Arc::new(Pool::new());
+    let connector = connector();
+    let url = url::Url::parse("http://user:pw@example.com/a?b#frag").unwrap();
+    let proxy = format!("http://{addr}");
+    let resp = send_request_h1_pooled(
+        &pool,
+        &connector,
+        "http",
+        "example.com",
+        80,
+        "GET",
+        &url,
+        vec![],
+        H1Body::Empty,
+        Some(&proxy),
+        H1Target::AbsoluteForm,
+        false,
+    )
+    .await
+    .expect("proxied request succeeds");
+
+    assert_eq!(resp.status, 200);
+    let request_line = server.await.unwrap();
+    let request_line = request_line.lines().next().unwrap().to_string();
+    assert_eq!(
+        request_line, "GET http://example.com/a?b HTTP/1.1",
+        "userinfo and fragment must be stripped from the absolute-form target"
+    );
 }
 
 async fn run_against_with_stats(
@@ -229,11 +289,10 @@ async fn transfer_encoding_chunked_not_last_rejected() {
     );
 }
 
-// A Content-Length value that passes the single-header
-// and no-comma checks but fails `u64::parse` previously fell back to
-// `read_to_close`, letting a malicious origin desync the pool by
-// emitting more bytes than the stated length. Every non-decimal
-// variant below MUST now surface a framing error before body read.
+// A Content-Length value that passes the single-header and no-comma
+// checks but fails `u64::parse` must surface a framing error before the
+// body read — falling back to `read_to_close` lets a malicious origin
+// desync the pool by emitting more bytes than the stated length.
 
 #[tokio::test]
 async fn content_length_with_plus_sign_rejected() {

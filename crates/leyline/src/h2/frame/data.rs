@@ -23,6 +23,11 @@ pub struct DataFrame {
     pub end_stream: bool,
     /// Payload data (padding removed).
     pub data: Bytes,
+    /// Full frame payload length, including the pad-length octet and
+    /// padding when the `PADDED` flag is set. Flow control is accounted
+    /// on this, never on `data.len()` (RFC 9113 Section 6.9: the entire
+    /// DATA frame payload counts against the windows).
+    pub wire_len: u64,
 }
 
 impl DataFrame {
@@ -55,6 +60,7 @@ impl DataFrame {
             stream_id: header.stream_id,
             end_stream,
             data,
+            wire_len: header.length as u64,
         })
     }
 
@@ -74,3 +80,6 @@ impl DataFrame {
         buf.put_slice(&self.data);
     }
 }
+
+#[cfg(test)]
+mod tests;

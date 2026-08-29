@@ -3,6 +3,25 @@
 //! Single source of truth for these encodings, shared by every module that
 //! needs them.
 
+#![forbid(unsafe_code)]
+// This module must stay free of `unsafe`; memory-unsafe code is confined to
+// leyline-bssl* (FFI) and leyline's tcp/tls platform bridges.
+/// Redact a URL for logs and error values: the password, if any, becomes
+/// `REDACTED`. The username is kept (operators use it to tell accounts
+/// apart); the password never belongs in a trace or an error. Unparseable
+/// input is returned as-is.
+pub(crate) fn redacted_url(raw: &str) -> String {
+    match url::Url::parse(raw) {
+        Ok(mut url) if url.password().is_some() => {
+            // Plain token: the url crate percent-encodes brackets, which
+            // would make the marker noisy in logs.
+            let _ = url.set_password(Some("REDACTED"));
+            url.to_string()
+        }
+        _ => raw.to_string(),
+    }
+}
+
 /// Standard (padded) base64 encode. Used for HTTP Basic / proxy CONNECT auth.
 pub(crate) fn base64_encode(input: &str) -> String {
     use base64::Engine;
@@ -51,22 +70,4 @@ fn hex_val(b: u8) -> Option<u8> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn base64_encode_works() {
-        assert_eq!(base64_encode("user:pass"), "dXNlcjpwYXNz");
-        assert_eq!(base64_encode("a"), "YQ==");
-        assert_eq!(base64_encode("ab"), "YWI=");
-    }
-
-    #[test]
-    fn percent_decode_roundtrips_common_cases() {
-        assert_eq!(percent_decode("a%3Db"), "a=b");
-        assert_eq!(percent_decode("plain"), "plain");
-        assert_eq!(percent_decode("s3cr3t%21"), "s3cr3t!");
-        // A malformed trailing % is passed through, not dropped.
-        assert_eq!(percent_decode("bad%"), "bad%");
-    }
-}
+mod tests;

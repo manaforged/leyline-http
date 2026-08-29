@@ -1,5 +1,8 @@
 //! Wire-level ClientHello ordering regressions anchored to real browser captures.
-
+#![expect(
+    clippy::unwrap_used,
+    reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
+)]
 use leyline::Browser;
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpListener;

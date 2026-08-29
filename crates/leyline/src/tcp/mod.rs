@@ -3,6 +3,11 @@
 //! Sets per-connection TCP socket options (TTL, MSS, window size, DF bit,
 //! window scale, TCP_NODELAY) to match the claimed operating system's
 //! TCP/IP stack fingerprint.
+//!
+//! Honest limits: these are `setsockopt` *hints*, applied before `connect`.
+//! The kernel, NIC MTU, and middleboxes shape what the SYN actually carries,
+//! so a remote JA4T read will usually match but is not byte-guaranteed the
+//! way the TLS-layer fingerprints are.
 
 use std::sync::Mutex;
 
@@ -116,38 +121,4 @@ fn log_once(option: &'static str, err: &std::io::Error) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn profile_constants() {
-        assert_eq!(TcpProfile::WINDOWS.ttl, 128);
-        assert_eq!(TcpProfile::MACOS.ttl, 64);
-        assert_eq!(TcpProfile::LINUX.window_scale, 7);
-    }
-
-    #[test]
-    fn apply_does_not_panic() {
-        let socket = Socket::new(
-            socket2::Domain::IPV4,
-            socket2::Type::STREAM,
-            Some(socket2::Protocol::TCP),
-        )
-        .unwrap();
-        TcpProfile::WINDOWS.apply(&socket, false);
-        TcpProfile::LINUX.apply(&socket, false);
-        TcpProfile::MACOS.apply(&socket, false);
-        TcpProfile::IOS.apply(&socket, false);
-
-        let socket_v6 = Socket::new(
-            socket2::Domain::IPV6,
-            socket2::Type::STREAM,
-            Some(socket2::Protocol::TCP),
-        )
-        .unwrap();
-        TcpProfile::WINDOWS.apply(&socket_v6, true);
-        TcpProfile::LINUX.apply(&socket_v6, true);
-        TcpProfile::MACOS.apply(&socket_v6, true);
-        TcpProfile::IOS.apply(&socket_v6, true);
-    }
-}
+mod tests;

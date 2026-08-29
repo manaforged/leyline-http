@@ -1,7 +1,7 @@
 //! HTTP/2 SETTINGS frame and pseudo-header ordering.
 //!
 //! Defines the configuration types for HTTP/2 fingerprinting. These are
-//! resolved from TOML browser profiles and applied to hyper2 connections.
+//! resolved from TOML browser profiles and applied to the H2 client.
 
 use std::time::Duration;
 
@@ -327,91 +327,4 @@ impl H2Config {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn chrome147_h2_fingerprint() {
-        let reg = crate::profile::ProfileRegistry::builtin();
-        let profile = reg.get("chrome", 147).unwrap();
-        let h2 = H2Config::from_profile(&profile.h2).unwrap();
-        let fp = h2.akamai_fingerprint();
-        assert_eq!(fp, "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p");
-    }
-
-    #[test]
-    fn chrome148_h2_fingerprint() {
-        let reg = crate::profile::ProfileRegistry::builtin();
-        let profile = reg.get("chrome", 148).unwrap();
-        let h2 = H2Config::from_profile(&profile.h2).unwrap();
-        let fp = h2.akamai_fingerprint();
-        assert_eq!(fp, "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p");
-    }
-
-    #[test]
-    fn firefox150_h2_fingerprint() {
-        let reg = crate::profile::ProfileRegistry::builtin();
-        let profile = reg.get("firefox", 150).unwrap();
-        let h2 = H2Config::from_profile(&profile.h2).unwrap();
-        let fp = h2.akamai_fingerprint();
-        assert_eq!(fp, "1:65536;2:0;4:131072;5:16384|12517377|0|m,p,a,s");
-    }
-
-    #[test]
-    fn okhttp_h2_fingerprint() {
-        let reg = crate::profile::ProfileRegistry::builtin();
-        let profile = reg.get("okhttp", 10).unwrap();
-        let h2 = H2Config::from_profile(&profile.h2).unwrap();
-        let fp = h2.akamai_fingerprint();
-        assert_eq!(fp, "4:16777216|16711681|0|m,p,a,s");
-    }
-
-    #[test]
-    fn safari18_h2_fingerprint() {
-        let reg = crate::profile::ProfileRegistry::builtin();
-        let profile = reg.get("safari", 18).unwrap();
-        let h2 = H2Config::from_profile(&profile.h2).unwrap();
-        let fp = h2.akamai_fingerprint();
-        assert_eq!(fp, "2:0;3:100;4:2097152;8:1;9:1|10420225|0|m,s,a,p");
-    }
-
-    #[test]
-    fn safari_ios18_h2_fingerprint() {
-        let reg = crate::profile::ProfileRegistry::builtin();
-        let profile = reg.get("safari-ios", 18).unwrap();
-        let h2 = H2Config::from_profile(&profile.h2).unwrap();
-        let fp = h2.akamai_fingerprint();
-        assert_eq!(fp, "2:0;3:100;4:2097152;9:1|10420225|0|m,s,a,p");
-    }
-
-    #[test]
-    fn all_profiles_produce_expected_fingerprint() {
-        let reg = crate::profile::ProfileRegistry::builtin();
-        for browser in [
-            ("chrome", 145),
-            ("chrome", 146),
-            ("chrome", 147),
-            ("chrome", 148),
-            ("firefox", 148),
-            ("safari", 18),
-            ("safari-ios", 15),
-            ("safari-ios", 17),
-            ("safari-ios", 18),
-            ("okhttp", 10),
-            ("okhttp", 7),
-        ] {
-            let profile = reg
-                .get(browser.0, browser.1)
-                .unwrap_or_else(|| panic!("missing profile: {} {}", browser.0, browser.1));
-            if let Some(expected) = profile.expected_h2_fingerprint() {
-                let h2 = H2Config::from_profile(&profile.h2).unwrap();
-                let actual = h2.akamai_fingerprint();
-                assert_eq!(
-                    actual, expected,
-                    "H2 fingerprint mismatch for {} {}",
-                    browser.0, browser.1
-                );
-            }
-        }
-    }
-}
+mod tests;

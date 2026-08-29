@@ -10,40 +10,23 @@ const MAX_LIFETIME: Duration = Duration::from_secs(400 * 24 * 60 * 60);
 /// Parse a Set-Cookie header value into a Cookie.
 ///
 /// Returns None if the cookie is malformed or should be rejected.
-pub fn parse_set_cookie(header: &str, request_url: &url::Url) -> Option<Cookie> {
-    let now = SystemTime::now();
+/// Parsed `Secure`/`HttpOnly`/`SameSite`/`Domain`/`Path`/`Max-Age`/
+/// `Expires` attributes. Unknown attributes are ignored.
+#[derive(Default)]
+struct CookieAttributes {
+    domain: Option<String>,
+    path: Option<String>,
+    secure: bool,
+    http_only: bool,
+    same_site: Option<SameSite>,
+    max_age: Option<Duration>,
+    expires: Option<SystemTime>,
+}
 
-    // Split on first '=' to get name=value.
-    let (name_value, attrs_str) = match header.find(';') {
-        Some(i) => (&header[..i], &header[i + 1..]),
-        None => (header, ""),
-    };
-
-    let (name, value) = {
-        // No '=' → malformed, reject.
-        let i = name_value.find('=')?;
-        let v = name_value[i + 1..].trim();
-        // Strip surrounding double-quotes (Chrome behavior).
-        let v = v
-            .strip_prefix('"')
-            .and_then(|v| v.strip_suffix('"'))
-            .unwrap_or(v);
-        (name_value[..i].trim(), v)
-    };
-
-    if name.is_empty() {
-        return None;
-    }
-
-    // Parse attributes.
-    let mut domain = None;
-    let mut path = None;
-    let mut secure = false;
-    let mut http_only = false;
-    let mut same_site = None;
-    let mut max_age = None;
-    let mut expires = None;
-
+/// Parse the attribute section of a Set-Cookie header (everything after
+/// the first `;`).
+fn parse_attributes(attrs_str: &str) -> CookieAttributes {
+    let mut a = CookieAttributes::default();
     for attr in attrs_str.split(';') {
         let attr = attr.trim();
         if attr.is_empty() {
@@ -59,22 +42,22 @@ pub fn parse_set_cookie(header: &str, request_url: &url::Url) -> Option<Cookie> 
                 if let Some(v) = attr_value {
                     let d = v.strip_prefix('.').unwrap_or(v);
                     if !d.is_empty() {
-                        domain = Some(d.to_lowercase());
+                        a.domain = Some(d.to_lowercase());
                     }
                 }
             }
             "path" => {
                 if let Some(v) = attr_value {
                     if v.starts_with('/') {
-                        path = Some(v.to_string());
+                        a.path = Some(v.to_string());
                     }
                 }
             }
-            "secure" => secure = true,
-            "httponly" => http_only = true,
+            "secure" => a.secure = true,
+            "httponly" => a.http_only = true,
             "samesite" => {
                 if let Some(v) = attr_value {
-                    same_site = match v.to_lowercase().as_str() {
+                    a.same_site = match v.to_lowercase().as_str() {
                         "strict" => Some(SameSite::Strict),
                         "lax" => Some(SameSite::Lax),
                         "none" => Some(SameSite::None),
@@ -86,84 +69,148 @@ pub fn parse_set_cookie(header: &str, request_url: &url::Url) -> Option<Cookie> 
                 if let Some(v) = attr_value {
                     if let Ok(secs) = v.parse::<i64>() {
                         if secs <= 0 {
-                            max_age = Some(Duration::ZERO); // expire immediately
+                            a.max_age = Some(Duration::ZERO);
                         } else {
-                            max_age = Some(Duration::from_secs(secs as u64));
+                            a.max_age = Some(Duration::from_secs(secs as u64));
                         }
                     }
                 }
             }
             "expires" => {
                 if let Some(v) = attr_value {
-                    expires = parse_cookie_date(v);
+                    a.expires = parse_cookie_date(v);
                 }
             }
-            _ => {} // ignore unknown attributes
+            _ => {}
         }
     }
+    a
+}
 
-    // SameSite=None requires Secure (Chrome enforcement).
-    let same_site = match same_site {
-        Some(SameSite::None) if !secure => return None, // reject
-        Some(s) => s,
-        None => SameSite::Lax, // Chrome default
-    };
+/// Strict Secure Cookies (Chrome 52+): a Secure cookie may only be set
+/// by a secure origin. Localhost is trustworthy, matching browsers.
+fn secure_origin(request_url: &url::Url) -> bool {
+    let scheme = request_url.scheme();
+    let host = request_url.host_str().unwrap_or("");
+    scheme == "https"
+        || host == "localhost"
+        || host == "127.0.0.1"
+        || host == "[::1]"
+        || host.ends_with(".localhost")
+}
 
-    // Cookie prefix validation.
-    if name.starts_with("__Secure-") && !secure {
-        return None;
+/// RFC 6265bis §4.1.3 prefix rules, matched case-insensitively.
+fn prefix_rejected(name: &str, attrs: &CookieAttributes) -> bool {
+    let lower = name.to_ascii_lowercase();
+    if lower.starts_with("__secure-") {
+        return !attrs.secure;
     }
-    if name.starts_with("__Host-") {
-        if !secure || domain.is_some() {
-            return None;
-        }
-        // __Host- cookies must have path=/
-        if path.as_deref() != Some("/") {
-            return None;
-        }
+    if lower.starts_with("__host-") {
+        return !attrs.secure || attrs.domain.is_some() || attrs.path.as_deref() != Some("/");
     }
+    false
+}
 
-    // Compute expiry.
-    let computed_expires = if let Some(ma) = max_age {
-        // Max-Age takes precedence over Expires.
-        if ma == Duration::ZERO {
-            Some(now) // expire immediately
-        } else {
-            let capped = ma.min(MAX_LIFETIME);
-            Some(now + capped)
-        }
-    } else if let Some(exp) = expires {
-        // Cap at 400 days from now.
-        let max_time = now + MAX_LIFETIME;
-        Some(exp.min(max_time))
-    } else {
-        None // session cookie
-    };
+/// Expiry: Max-Age wins over Expires; both cap at [`MAX_LIFETIME`].
+fn compute_expiry(
+    now: SystemTime,
+    max_age: Option<Duration>,
+    expires: Option<SystemTime>,
+) -> Option<SystemTime> {
+    match max_age {
+        Some(Duration::ZERO) => Some(now),
+        Some(ma) => Some(now + ma.min(MAX_LIFETIME)),
+        None => expires.map(|exp| exp.min(now + MAX_LIFETIME)),
+    }
+}
 
-    // Default domain to request host (host-only cookie).
-    let request_host = request_url.host_str().unwrap_or("").to_lowercase();
+/// Domain scoping (RFC 6265bis §5.5/§5.7): on an IP-literal host the
+/// `Domain` attribute is ignored (host-only); otherwise the domain must
+/// equal or parent the request host, and must not be a public suffix.
+/// Returns `(host_only, cookie_domain)`.
+fn resolve_cookie_domain(request_url: &url::Url, domain: Option<String>) -> Option<(bool, String)> {
     let host_only = domain.is_none();
+    let request_host = request_url.host_str().unwrap_or("").to_lowercase();
     let cookie_domain = domain.unwrap_or_else(|| request_host.clone());
 
-    // Reject cookies set on public suffixes (basic check).
     if !host_only && is_public_suffix(&cookie_domain) {
         return None;
     }
-
-    // RFC 6265bis Section 5.3.6: Domain must match the request host.
-    // The cookie domain must be equal to or a parent domain of the request host.
     if !host_only {
-        let cd = cookie_domain.to_lowercase();
         let rh = request_host.to_lowercase();
-        if rh != cd && !rh.ends_with(&format!(".{cd}")) {
-            return None; // Cross-domain cookie injection blocked.
+        if rh != cookie_domain && !rh.ends_with(&format!(".{cookie_domain}")) {
+            return None;
         }
     }
+    Some((host_only, cookie_domain))
+}
 
-    // Default path from request URL.
-    let cookie_path = path.unwrap_or_else(|| default_path(request_url.path()));
+pub fn parse_set_cookie(header: &str, request_url: &url::Url) -> Option<Cookie> {
+    let now = SystemTime::now();
 
-    // Size limit: 4096 bytes.
+    let (name_value, attrs_str) = match header.find(';') {
+        Some(i) => (&header[..i], &header[i + 1..]),
+        None => (header, ""),
+    };
+
+    let (name, value) = {
+        let i = name_value.find('=')?;
+        let v = name_value[i + 1..].trim();
+        let v = v
+            .strip_prefix('"')
+            .and_then(|v| v.strip_suffix('"'))
+            .unwrap_or(v);
+        (name_value[..i].trim(), v)
+    };
+
+    if name.is_empty() {
+        return None;
+    }
+
+    // RFC 6265bis §5.6: names and values must be free of control
+    // characters; a CTL that enters the jar is echoed on later requests.
+    let has_ctl = |s: &str| s.bytes().any(|b| b < 0x20 || b == 0x7F);
+    if has_ctl(name) || has_ctl(value) {
+        return None;
+    }
+
+    let attrs = parse_attributes(attrs_str);
+
+    // Strict Secure Cookies (Chrome 52+): Secure requires a secure origin.
+    if attrs.secure && !secure_origin(request_url) {
+        return None;
+    }
+
+    // SameSite=None requires Secure (Chrome enforcement).
+    let same_site = match attrs.same_site {
+        Some(SameSite::None) if !attrs.secure => return None,
+        Some(s) => s,
+        None => SameSite::Lax,
+    };
+
+    if prefix_rejected(name, &attrs) {
+        return None;
+    }
+
+    let computed_expires = compute_expiry(now, attrs.max_age, attrs.expires);
+
+    // On an IP-literal host the Domain attribute is ignored (§5.5); see
+    // `resolve_cookie_domain` for why that matters.
+    let domain = if matches!(
+        request_url.host(),
+        Some(url::Host::Ipv4(_) | url::Host::Ipv6(_))
+    ) {
+        None
+    } else {
+        attrs.domain
+    };
+
+    let (host_only, cookie_domain) = resolve_cookie_domain(request_url, domain)?;
+
+    let cookie_path = attrs
+        .path
+        .unwrap_or_else(|| default_path(request_url.path()));
+
     if name.len() + value.len() > 4096 {
         return None;
     }
@@ -173,8 +220,8 @@ pub fn parse_set_cookie(header: &str, request_url: &url::Url) -> Option<Cookie> 
         value: value.to_string(),
         domain: cookie_domain,
         path: cookie_path,
-        secure,
-        http_only,
+        secure: attrs.secure,
+        http_only: attrs.http_only,
         same_site,
         expires: computed_expires,
         creation_time: now,
@@ -258,7 +305,8 @@ fn parse_cookie_date(s: &str) -> Option<SystemTime> {
     // Try RFC 1123: "Thu, 01 Dec 2025 00:00:00 GMT"
     // Try RFC 850: "Thursday, 01-Dec-25 00:00:00 GMT"
     // Try asctime: "Thu Dec  1 00:00:00 2025"
-    // For robustness, we try to extract year/month/day/time components.
+    // Extract year/month/day/time components independently; anything
+    // unparseable falls through to the rejection path.
     let s = s.trim();
 
     // Quick heuristic parse — extract numbers and month name.
@@ -356,173 +404,4 @@ fn days_since_epoch(year: u32, month: u32, day: u32) -> Option<i64> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn test_url(s: &str) -> url::Url {
-        url::Url::parse(s).unwrap()
-    }
-
-    #[test]
-    fn parse_basic_cookie() {
-        let url = test_url("https://example.com/path");
-        let c = parse_set_cookie("name=value", &url).unwrap();
-        assert_eq!(c.name, "name");
-        assert_eq!(c.value, "value");
-        assert_eq!(c.domain, "example.com");
-        assert_eq!(c.path, "/");
-        assert_eq!(c.same_site, SameSite::Lax); // default
-        assert!(c.host_only);
-    }
-
-    #[test]
-    fn rejected_cookie_name_value_reports_server_sent_but_unstorable() {
-        // Storage-invalid Domain (RFC 6265bis §5.3.6 mismatch): the jar must
-        // refuse it, yet the response view still reports what the server sent.
-        let rejected =
-            "late=abc|1|0|def; Path=/; Max-Age=1577847600; Domain=example.com; Secure";
-        let (name, value) = rejected_cookie_name_value(rejected).unwrap();
-        assert_eq!(name, "late");
-        assert_eq!(value, "abc|1|0|def");
-
-        // Quote-stripping matches the main parser (no divergence).
-        let (name, value) = rejected_cookie_name_value("n=\"quoted value\"").unwrap();
-        assert_eq!(name, "n");
-        assert_eq!(value, "quoted value");
-
-        // Deletions stay hidden (Max-Age=0 and negative both mean delete).
-        assert!(rejected_cookie_name_value("n=v; Max-Age=0").is_none());
-        assert!(rejected_cookie_name_value("n=v; Max-Age=-1").is_none());
-
-        // Malformed headers have nothing to report.
-        assert!(rejected_cookie_name_value("no-equals-sign").is_none());
-        assert!(rejected_cookie_name_value("=v").is_none());
-    }
-
-    #[test]
-    fn parse_full_attributes() {
-        let url = test_url("https://example.com/app/page");
-        let c = parse_set_cookie(
-            "tok=abc; Domain=example.com; Path=/app; Secure; HttpOnly; SameSite=None; Max-Age=3600",
-            &url,
-        )
-        .unwrap();
-        assert_eq!(c.name, "tok");
-        assert_eq!(c.value, "abc");
-        assert_eq!(c.domain, "example.com");
-        assert_eq!(c.path, "/app");
-        assert!(c.secure);
-        assert!(c.http_only);
-        assert_eq!(c.same_site, SameSite::None);
-        assert!(!c.host_only);
-        assert!(c.expires.is_some()); // from Max-Age
-    }
-
-    #[test]
-    fn psl_public_suffix_uses_real_list() {
-        // Multi-label suffixes the old gTLD allow-list missed.
-        assert!(is_public_suffix("co.uk"));
-        assert!(is_public_suffix("github.io"));
-        assert!(is_public_suffix("com"));
-        assert!(is_public_suffix("localhost")); // single-label
-        // Registrable domains are not public suffixes.
-        assert!(!is_public_suffix("example.co.uk"));
-        assert!(!is_public_suffix("example.com"));
-        assert!(!is_public_suffix("foo.github.io"));
-    }
-
-    #[test]
-    fn psl_registrable_domain() {
-        assert_eq!(
-            registrable_domain("www.example.co.uk").as_deref(),
-            Some("example.co.uk")
-        );
-        assert_eq!(
-            registrable_domain("a.b.example.com").as_deref(),
-            Some("example.com")
-        );
-        assert_eq!(
-            registrable_domain("example.com").as_deref(),
-            Some("example.com")
-        );
-        // A bare public suffix / single label has no registrable parent.
-        assert_eq!(registrable_domain("co.uk"), None);
-        assert_eq!(registrable_domain("localhost"), None);
-    }
-
-    #[test]
-    fn set_cookie_on_public_suffix_is_rejected() {
-        let url = test_url("https://example.co.uk/");
-        // A Domain attribute pointing at the public suffix is a supercookie.
-        assert!(parse_set_cookie("evil=1; Domain=co.uk", &url).is_none());
-        // The registrable domain is fine.
-        assert!(parse_set_cookie("ok=1; Domain=example.co.uk", &url).is_some());
-    }
-
-    #[test]
-    fn samesite_none_requires_secure() {
-        let url = test_url("https://example.com/");
-        let result = parse_set_cookie("bad=val; SameSite=None", &url);
-        assert!(result.is_none()); // rejected
-    }
-
-    #[test]
-    fn host_prefix_validation() {
-        let url = test_url("https://example.com/");
-        // Valid __Host- cookie.
-        let c = parse_set_cookie("__Host-id=1; Secure; Path=/", &url);
-        assert!(c.is_some());
-
-        // Invalid: __Host- with Domain.
-        let c = parse_set_cookie("__Host-id=1; Secure; Path=/; Domain=example.com", &url);
-        assert!(c.is_none());
-
-        // Invalid: __Host- without Secure.
-        let c = parse_set_cookie("__Host-id=1; Path=/", &url);
-        assert!(c.is_none());
-    }
-
-    #[test]
-    fn max_age_caps_at_400_days() {
-        let url = test_url("https://example.com/");
-        let c = parse_set_cookie("x=1; Max-Age=999999999", &url).unwrap();
-        let max_400_days = SystemTime::now() + Duration::from_secs(400 * 86400 + 1);
-        assert!(c.expires.unwrap() < max_400_days);
-    }
-
-    #[test]
-    fn value_with_equals() {
-        let url = test_url("https://example.com/");
-        let c = parse_set_cookie("token=abc=def=ghi; Path=/", &url).unwrap();
-        assert_eq!(c.name, "token");
-        assert_eq!(c.value, "abc=def=ghi");
-    }
-
-    #[test]
-    fn cookie_date_parsing() {
-        let t = parse_cookie_date("Thu, 01 Jan 2026 00:00:00 GMT");
-        assert!(t.is_some());
-    }
-
-    /// Regression gate for a cookie_set fuzzer finding:
-    /// pre-epoch `Expires` dates produced a negative `days_from_epoch`
-    /// that was cast to `u64`, then multiplied by 86400, panicking on
-    /// overflow under `debug_assertions`. Such cookies are already
-    /// expired and should resolve to `UNIX_EPOCH` (or be silently
-    /// discarded by the jar's normal expiry logic) — never panic.
-    #[test]
-    fn pre_epoch_expires_does_not_overflow() {
-        let url = test_url("https://example.com/");
-        // The fuzzer's minimised input:
-        let header = "session=deadbeef; Expires=Wed, 21 Oct 1013 07:28:00 GMT; Path=/";
-        // Must not panic. The cookie is already expired, so the jar
-        // may drop it; either way we want a Result not a crash.
-        let _ = parse_set_cookie(header, &url);
-
-        // A closer edge case — exactly 1 Jan 1970 boundary.
-        let t = parse_cookie_date("Thu, 01 Jan 1970 00:00:00 GMT");
-        assert!(t.is_some());
-        let t = parse_cookie_date("Wed, 31 Dec 1969 23:59:59 GMT");
-        assert_eq!(t, Some(SystemTime::UNIX_EPOCH));
-    }
-}
+mod tests;

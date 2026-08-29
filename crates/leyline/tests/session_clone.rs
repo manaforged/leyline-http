@@ -4,9 +4,7 @@
 //! `FingerprintConnector` by value and was non-cloneable — users had
 //! to wrap it in their own `Arc<Session>` to share across tasks,
 //! forcing an extra indirection that `reqwest::Client` callers
-//! don't need. That shape made `LeylineService` in `leyline-tower`
-//! the only cloneable wrapper and meant tower middleware had a
-//! shape gap vs direct `Session` users.
+//! don't need.
 //!
 //! Now `Session: Clone` via internally-shared `Arc`-wrapped fields
 //! (connection pool, cookie jar, session ticket cache). Cloning is

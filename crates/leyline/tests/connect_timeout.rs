@@ -8,7 +8,6 @@
 //! the boundary: a short `connect_timeout` with a slow-but-alive server still
 //! succeeds, while a dead endpoint bails on the connect phase instead of hanging
 //! to the request-wide `total`.
-
 use std::time::{Duration, Instant};
 
 use leyline::{RetryPolicy, Session};
@@ -46,7 +45,6 @@ async fn connect_timeout_does_not_bound_the_response_phase() {
     let start = Instant::now();
     let resp = session
         .get(&format!("http://{addr}/"))
-        .send()
         .await
         .expect("a 300ms connect timeout must not clip a response served at 600ms");
     let elapsed = start.elapsed();
@@ -87,7 +85,7 @@ async fn connect_timeout_bounds_an_unreachable_endpoint() {
 
     let start = Instant::now();
     let result = session
-        .get("https://192.0.2.1:443/")
+        .request("GET", "https://192.0.2.1:443/")
         .retry(RetryPolicy::none())
         .send()
         .await;

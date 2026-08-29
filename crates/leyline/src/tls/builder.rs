@@ -9,7 +9,7 @@
 //! from the *same* BoringSSL context — any fingerprint change applied here
 //! automatically propagates to both transports.
 //!
-//! [`FingerprintConnector`]: crate::FingerprintConnector
+//! [`FingerprintConnector`]: crate::tls::FingerprintConnector
 
 use leyline_bssl::ssl::{
     CertificateCompressionAlgorithm, CertificateCompressor, SslContextBuilder, SslMethod,
@@ -107,6 +107,9 @@ pub(crate) fn apply_profile_with_trust(
 
     // Signature algorithms — raw codepoints so ML-DSA (0x0904/05/06), which
     // BoringSSL has no name for, advertises by value. The same map feeds JA4.
+    // Advertised via set1_sigalgs: the signing-prefs entry point rejects
+    // duplicate codepoints, and real captures contain them (CFNetwork sends
+    // 0x0805 twice — a wire fingerprint, not a bug).
     let sigalgs = tls
         .sigalgs
         .iter()
@@ -115,7 +118,20 @@ pub(crate) fn apply_profile_with_trust(
                 .ok_or_else(|| TlsError::Profile(format!("unknown signature algorithm: {name}")))
         })
         .collect::<Result<Vec<u16>, _>>()?;
-    builder.set_sigalgs(&sigalgs)?;
+    // Some BoringSSL builds reject duplicate codepoints in the signing
+    // prefs (real captures contain them: CFNetwork advertises 0x0805
+    // twice). On those builds, fall back to the deduplicated list — the
+    // ClientHello then advertises one 0x0805 instead of two, a documented
+    // Linux-side fidelity gap until the prebuilt is regenerated. Builds
+    // that accept the capture list keep it byte-for-byte.
+    if let Err(e) = builder.set_sigalgs(&sigalgs) {
+        if !e.to_string().contains("DUPLICATE_SIGNATURE_ALGORITHM") {
+            return Err(TlsError::SslConfig(e.to_string()));
+        }
+        let mut deduped = sigalgs.clone();
+        deduped.dedup();
+        builder.set_sigalgs(&deduped)?;
+    }
 
     // OCSP stapling (status_request extension).
     if tls.ocsp_stapling {
@@ -213,6 +229,10 @@ pub(crate) fn apply_profile_with_trust(
     crate::tls::trust::wire_configured_trust(builder, trust)?;
     builder.set_verify(SslVerifyMode::PEER);
 
+    // Opt-in secret logging (SSLKEYLOGFILE), curl/browser compatible. Last
+    // so a keylog install failure can never interfere with trust wiring.
+    crate::tls::keylog::install_from_env(builder);
+
     Ok(())
 }
 
@@ -264,6 +284,33 @@ fn boring_curve_name(name: &str) -> &str {
     }
 }
 
+/// Upper bound on a decompressed peer certificate chain. RFC 8879 §4
+/// requires implementations to cap decompressed size; without this the
+/// three decoders below grow the heap without limit while a hostile
+/// server feeds a decompression bomb. Generous for post-quantum chains
+/// (ML-DSA leaves are ~4–13 KB each) — a legitimate chain stays far
+/// below this; a bomb stops here even if BoringSSL's own cap were loose.
+const MAX_CERT_DECOMPRESSED_BYTES: usize = 1024 * 1024;
+
+/// Decompress a certificate blob with a hard output cap.
+fn read_limited_cert<R: std::io::Read>(mut decoder: R) -> std::io::Result<Vec<u8>> {
+    let mut out = Vec::new();
+    let mut buf = [0u8; 8192];
+    loop {
+        let n = decoder.read(&mut buf)?;
+        if n == 0 {
+            return Ok(out);
+        }
+        if out.len() + n > MAX_CERT_DECOMPRESSED_BYTES {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "decompressed certificate exceeds limit",
+            ));
+        }
+        out.extend_from_slice(&buf[..n]);
+    }
+}
+
 /// Brotli cert decompression (advertises `compress_certificate` extension).
 #[derive(Debug)]
 struct BrotliDecompressor;
@@ -277,9 +324,8 @@ impl CertificateCompressor for BrotliDecompressor {
     where
         W: std::io::Write,
     {
-        let mut decoder = brotli::Decompressor::new(input, 4096);
-        std::io::copy(&mut decoder, output)?;
-        Ok(())
+        let decoded = read_limited_cert(brotli::Decompressor::new(input, 4096))?;
+        output.write_all(&decoded)
     }
 }
 
@@ -297,9 +343,8 @@ impl CertificateCompressor for ZlibDecompressor {
     where
         W: std::io::Write,
     {
-        let mut decoder = flate2::read::ZlibDecoder::new(input);
-        std::io::copy(&mut decoder, output)?;
-        Ok(())
+        let decoded = read_limited_cert(flate2::read::ZlibDecoder::new(input))?;
+        output.write_all(&decoded)
     }
 }
 
@@ -316,40 +361,11 @@ impl CertificateCompressor for ZstdDecompressor {
     where
         W: std::io::Write,
     {
-        let mut decoder = zstd::stream::read::Decoder::new(input)?;
-        std::io::copy(&mut decoder, output)?;
-        Ok(())
+        let decoder = zstd::stream::read::Decoder::new(input)?;
+        let decoded = read_limited_cert(decoder)?;
+        output.write_all(&decoded)
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use leyline_bssl::ssl::CertificateCompressor;
-    use std::io::Write;
-
-    // The decompressors aren't decorative: a server that compresses its
-    // certificate with the codepoint we advertise must actually be
-    // decodable. Round-trip a known payload through each.
-    #[test]
-    fn zlib_decompressor_round_trips() {
-        let original = b"-----BEGIN CERTIFICATE----- leyline zlib roundtrip";
-        let mut enc = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
-        enc.write_all(original).unwrap();
-        let compressed = enc.finish().unwrap();
-
-        let mut out = Vec::new();
-        ZlibDecompressor.decompress(&compressed, &mut out).unwrap();
-        assert_eq!(out, original);
-    }
-
-    #[test]
-    fn zstd_decompressor_round_trips() {
-        let original = b"-----BEGIN CERTIFICATE----- leyline zstd roundtrip";
-        let compressed = zstd::stream::encode_all(&original[..], 3).unwrap();
-
-        let mut out = Vec::new();
-        ZstdDecompressor.decompress(&compressed, &mut out).unwrap();
-        assert_eq!(out, original);
-    }
-}
+mod tests;

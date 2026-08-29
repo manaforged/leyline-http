@@ -5,7 +5,6 @@
 //! Construction-only sanity checks — the per-address race logic has
 //! thorough coverage in the crate's in-module tests, which exercise
 //! the real [`happy_eyeballs_connect`] race against tokio listeners.
-
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;

@@ -6,6 +6,10 @@ TLS engine links — the fingerprint is an emergent property of that revision.
 
 Two paths, same as the old shim:
 
+- **Provenance:** the source revision, carried patches, and per-file
+  checksums for the committed artifacts are recorded in
+  [PROVENANCE.md](PROVENANCE.md) and [native/CHECKSUMS](native/CHECKSUMS)
+  (verify: `scripts/package-bssl.sh --verify`).
 - **Dev / release (default):** link the committed prebuilt static libs in
   `native/<target>/lib` + the pregenerated `src/bindings/<target>.rs`. No CMake,
   bindgen, Perl, or Go needed. `build.rs` only emits link directives.

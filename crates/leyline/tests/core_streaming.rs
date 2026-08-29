@@ -1,5 +1,4 @@
 //! Integration tests for streaming request and response bodies.
-
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -193,7 +192,7 @@ async fn response_into_stream_on_buffered_returns_single_chunk() {
 
     let session = Session::builder().http1().build().unwrap();
     let resp = session
-        .get(&format!("http://{addr}/big"))
+        .request("GET", &format!("http://{addr}/big"))
         .stream()
         .send()
         .await
@@ -235,11 +234,7 @@ async fn download_to_writes_body_to_file() {
 
     let path = std::env::temp_dir().join(format!("leyline-dl-{}.bin", addr.port()));
     let session = Session::builder().http1().build().unwrap();
-    let resp = session
-        .get(&format!("http://{addr}/file"))
-        .send()
-        .await
-        .unwrap();
+    let resp = session.get(&format!("http://{addr}/file")).await.unwrap();
     let n = resp.download_to(&path).await.unwrap();
     assert_eq!(n, payload.len() as u64);
 
@@ -270,7 +265,7 @@ async fn into_stream_twice_returns_error() {
 
     let session = Session::builder().http1().build().unwrap();
     let resp = session
-        .get(&format!("http://{addr}/x"))
+        .request("GET", &format!("http://{addr}/x"))
         .stream()
         .send()
         .await
@@ -338,8 +333,8 @@ async fn redirect_with_streaming_body_errors() {
 // server, not here: a streaming REQUEST body is pumped into the request stream
 // incrementally (`live_h3_streaming_request_body_roundtrips` in tls_peet.rs),
 // and a `.stream()` RESPONSE is delivered incrementally too. Both need a real
-// QUIC peer (and `--release`, per the debug-build H3 handshake stack-overflow
-// note in CONTRIBUTING.md), so neither is unit-tested offline. The driver's
+// QUIC peer (H3 handshake in debug can overflow the default stack;
+// use `--release`), so neither is unit-tested offline. The driver's
 // request-body FIN-timing state machine has direct offline coverage in
 // `quic::pool::tests`.
 

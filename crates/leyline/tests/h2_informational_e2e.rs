@@ -126,6 +126,7 @@ async fn early_hints_103_is_skipped_final_status_wins() {
             stream_id,
             end_stream: true,
             data: bytes::Bytes::from_static(b"<html>ok</html>"),
+            wire_len: 15,
         };
         let mut buf = BytesMut::new();
         d.encode(&mut buf);

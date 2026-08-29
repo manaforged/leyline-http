@@ -1,0 +1,47 @@
+name: prebuilt-rebuild
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Rebuilds the x86_64-unknown-linux-gnu BoringSSL prebuilt from the pinned
+# revision + carried patch, and uploads the artifacts (libs + regenerated
+# bindings) for manual commit into crates/leyline-bssl-sys/. Purpose: after
+# a carried-patch change, regenerate the bundle so every target shares the
+# same BoringSSL behavior (e.g. duplicate sigalg tolerance).
+jobs:
+  rebuild-linux-gnu:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Install toolchain deps (cmake, perl, go, ninja, libclang)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build go clang libclang-dev
+
+      - name: Build + install the prebuilt bundle
+        run: scripts/package-bssl.sh --target x86_64-unknown-linux-gnu
+
+      - name: Verify the checksum manifest tooling runs
+        run: |
+          # The rebuilt blob intentionally differs (build nondeterminism);
+          # this step records the new hashes for the artifact.
+          sha256sum crates/leyline-bssl-sys/native/x86_64-unknown-linux-gnu/lib/* \
+            | tee native-hashes.txt
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: bssl-prebuilt-linux-gnu
+          path: |
+            crates/leyline-bssl-sys/native/x86_64-unknown-linux-gnu/lib/
+            crates/leyline-bssl-sys/src/bindings/x86_64-unknown-linux-gnu.rs
+            native-hashes.txt

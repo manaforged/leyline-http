@@ -1,11 +1,10 @@
 //! Wire-fidelity integration tests for session header merging.
-
 #[path = "core_support/raw_server.rs"]
 mod raw_server;
 
 use leyline::core::Session;
 use leyline::profile::{ChromiumBrand, HeaderAnchor, Preset};
-use leyline::{Browser, Client, Platform};
+use leyline::{Browser, Platform};
 use raw_server::{RawResponse, RawServer};
 
 #[tokio::test]
@@ -14,7 +13,7 @@ async fn caller_user_agent_replaces_no_preset_default() {
     let session = Session::builder().http1().build().unwrap();
 
     let resp = session
-        .get(&server.url("/ua"))
+        .request("GET", &server.url("/ua"))
         .header("user-agent", "X")
         .send()
         .await
@@ -34,7 +33,7 @@ async fn bulk_headers_replace_all_no_preset_defaults() {
     let session = Session::builder().http1().build().unwrap();
 
     let resp = session
-        .get(&server.url("/defaults"))
+        .request("GET", &server.url("/defaults"))
         .headers([
             ("user-agent", "ua-x"),
             ("accept", "accept-y"),
@@ -62,11 +61,14 @@ async fn bulk_headers_replace_all_no_preset_defaults() {
 async fn dx_helpers_accept_common_pair_shapes_and_header_shortcuts() {
     let mut server = RawServer::start(vec![RawResponse::ok(), RawResponse::ok()]).await;
 
-    let client = Client::builder().http1().build().unwrap();
-    let _explicit = Session::profile(Browser::Chrome147, Platform::Windows);
-    let _default = Client::new();
+    let client = Session::builder().http1().build().unwrap();
+    let _explicit = Session::builder()
+        .profile(Browser::Chrome147, Platform::Windows)
+        .build()
+        .unwrap();
+    let _default = Session::new();
     let _chrome = Session::chrome();
-    let _firefox = Client::builder().firefox().http1().build().unwrap();
+    let _firefox = Session::builder().firefox().http1().build().unwrap();
 
     let owned_headers = vec![
         ("x-owned".to_string(), "yes".to_string()),
@@ -74,7 +76,7 @@ async fn dx_helpers_accept_common_pair_shapes_and_header_shortcuts() {
     ];
 
     let resp = client
-        .get(&server.url("/dx"))
+        .request("GET", &server.url("/dx"))
         .query([("a", "1"), ("space", "hello world")])
         .headers(&owned_headers)
         .accept("application/json")
@@ -132,7 +134,7 @@ async fn append_header_preserves_duplicate_order() {
     let session = Session::builder().http1().build().unwrap();
 
     let resp = session
-        .get(&server.url("/dup"))
+        .request("GET", &server.url("/dup"))
         .append_header("x-dup", "a")
         .append_header("x-dup", "b")
         .send()
@@ -151,7 +153,7 @@ async fn set_then_append_user_agent_preserves_caller_order() {
     let session = Session::builder().http1().build().unwrap();
 
     let resp = session
-        .get(&server.url("/ua-append"))
+        .request("GET", &server.url("/ua-append"))
         .header("user-agent", "X")
         .append_header("user-agent", "Y")
         .send()
@@ -170,7 +172,7 @@ async fn caller_referer_wins_over_navigate_preset_referer() {
     let session = Session::builder().http1().build().unwrap();
 
     let resp = session
-        .get(&server.url("/nav"))
+        .request("GET", &server.url("/nav"))
         .preset(Preset::Navigate)
         .header("referer", "https://caller.example/from")
         .send()
@@ -195,7 +197,7 @@ async fn redirect_cross_origin_strips_authorization_after_first_hop() {
     let session = Session::builder().http1().build().unwrap();
 
     let resp = session
-        .get(&redirector.url("/start"))
+        .request("GET", &redirector.url("/start"))
         .header("authorization", "Bearer secret")
         .send()
         .await
@@ -221,7 +223,7 @@ async fn redirect_same_origin_preserves_authorization() {
     let session = Session::builder().http1().build().unwrap();
 
     let resp = session
-        .get(&server.url("/start"))
+        .request("GET", &server.url("/start"))
         .header("authorization", "Bearer secret")
         .send()
         .await
@@ -245,7 +247,7 @@ async fn caller_dnt_wins_over_edge_brand_overlay() {
         .unwrap();
 
     let resp = session
-        .get(&server.url("/edge"))
+        .request("GET", &server.url("/edge"))
         .header("dnt", "0")
         .send()
         .await
@@ -322,7 +324,7 @@ async fn plain_authorization_rides_after_user_agent() {
     let session = Session::builder().http1().build().unwrap();
 
     let resp = session
-        .get(&server.url("/auth"))
+        .request("GET", &server.url("/auth"))
         .preset(Preset::Xhr)
         .header("authorization", "Bearer tok")
         .send()

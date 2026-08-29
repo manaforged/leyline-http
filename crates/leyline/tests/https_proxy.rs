@@ -16,7 +16,10 @@
 //! returning `Ok` proves both handshakes completed and the origin cert
 //! verified against the trusted CA through the tunnel; the captured CONNECT
 //! proves the credentials were encrypted.
-
+#![expect(
+    clippy::unwrap_used,
+    reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
+)]
 use std::net::SocketAddr;
 use std::sync::Arc;
 

@@ -278,7 +278,7 @@ fn default_session() -> &'static Session {
 ///
 /// ```rust,ignore
 /// let client = leyline::client();
-/// let resp = client.get("https://api.example.com/v1").send().await?;
+/// let resp = client.get("https://api.example.com/v1").await?;
 /// ```
 pub fn client() -> Session {
     Session::new()
@@ -297,7 +297,7 @@ pub fn client() -> Session {
 /// println!("{}", resp.text());
 /// ```
 pub async fn get(url: &str) -> Result<Response> {
-    default_session().get(url).send().await
+    default_session().get(url).await
 }
 
 /// POST JSON with the shared bare default session. Sets `content-type:

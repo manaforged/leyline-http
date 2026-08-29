@@ -1,4 +1,8 @@
 //! Dumps on-the-wire UA / sec-ch-ua / dnt / sec-gpc for each ChromiumBrand.
+#![expect(
+    clippy::unwrap_used,
+    reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
+)]
 #![allow(missing_docs)]
 use leyline::Session;
 use leyline::profile::Preset;
@@ -27,7 +31,7 @@ async fn capture(session: Session) -> String {
         String::from_utf8_lossy(&req).to_string()
     });
     let _ = session
-        .get(&format!("http://{addr}/"))
+        .request("GET", &format!("http://{addr}/"))
         .preset(Preset::Navigate)
         .send()
         .await
@@ -46,7 +50,7 @@ fn extract(req: &str, header: &str) -> String {
 }
 
 // Spawns a local TCP server and dumps on-the-wire UA / sec-ch-ua headers per
-// ChromiumBrand. Opt-in: `cargo test -p leyline --test ua_dump -- --ignored
+// ChromiumBrand. Opt-in: `cargo test -p leyline-tls --test ua_dump -- --ignored
 // --nocapture`.
 #[tokio::test]
 #[ignore]

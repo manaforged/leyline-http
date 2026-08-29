@@ -10,7 +10,6 @@
 //! `ENHANCE_YOUR_CALM`. If a future refactor ever moves the
 //! `rst_flood.record(..)` call out of the `Frame::RstStream` arm,
 //! this test fails.
-
 #[path = "h2_support/mod.rs"]
 mod support;
 

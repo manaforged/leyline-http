@@ -2017,6 +2017,25 @@ impl SslContextBuilder {
     /// matching [`set_sigalgs_list`](Self::set_sigalgs_list). Unlike the
     /// name-string API, codepoints BoringSSL has no name for — e.g. ML-DSA
     /// `0x0904` / `0x0905` / `0x0906` — advertise correctly.
+    /// Sets the context's ClientHello signature-algorithm advertisement by
+    /// raw codepoint via `SSL_CTX_set1_sigalgs` — the entry point that does
+    /// not reject duplicate codepoints. Real ClientHellos contain them
+    /// (CFNetwork advertises 0x0805 twice), and the wire list must match
+    /// the capture exactly. Does not touch verify preferences.
+    #[corresponds(SSL_CTX_set1_sigalgs)]
+    pub fn set_sigalgs_advertise(&mut self, sigalgs: &[u16]) -> Result<(), ErrorStack> {
+        // `SSL_CTX_set1_sigalgs` takes `c_int` codepoints (the wire list is
+        // u16; every real codepoint fits).
+        let sigalgs: Vec<c_int> = sigalgs.iter().map(|&s| s as c_int).collect();
+        unsafe {
+            cvt(ffi::SSL_CTX_set1_sigalgs(
+                self.as_ptr(),
+                sigalgs.as_ptr(),
+                sigalgs.len(),
+            ))
+        }
+    }
+
     #[corresponds(SSL_CTX_set_signing_algorithm_prefs)]
     pub fn set_sigalgs(&mut self, sigalgs: &[u16]) -> Result<(), ErrorStack> {
         unsafe {

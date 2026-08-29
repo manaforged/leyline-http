@@ -31,7 +31,7 @@ use crate::h2::client::H2ConnectStream;
 use crate::h2::config::H2Config;
 use crate::h2::connection::PseudoHeaders;
 use crate::pool::Pool;
-use crate::tls::{ConnectorVariant, TlsIo};
+use crate::tls::{FingerprintConnector, TlsIo};
 
 use crate::core::error::{Error, Result};
 
@@ -41,7 +41,6 @@ use crate::core::error::{Error, Result};
 /// is a [`TlsIo`]; an H2 CONNECT stream is an `H2ConnectStream`).
 /// Keeping the enum behind an inner field also lets us evolve the list
 /// without breaking the public `WsConnection` API.
-#[allow(clippy::large_enum_variant)]
 enum WsInner {
     /// Classic HTTP/1.1 Upgrade (RFC 6455) over TLS.
     H1(WebSocketStream<TlsIo>),
@@ -69,7 +68,7 @@ impl WsConnection {
     /// connection is established with `http/1.1` ALPN and
     /// tokio-tungstenite performs the Upgrade handshake.
     pub(crate) async fn connect_h1(
-        connector: &ConnectorVariant,
+        connector: &FingerprintConnector,
         url: &str,
         proxy: Option<&str>,
         user_agent: &str,
@@ -155,10 +154,13 @@ impl WsConnection {
     /// handshaked. Returns an error shaped so that
     /// [`WsConnection::is_h2_fallback_trigger`] picks it up when the
     /// peer has not advertised `SETTINGS_ENABLE_CONNECT_PROTOCOL=1`.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "flat per-request wire fields across one internal call path"
+    )]
     pub(crate) async fn connect_h2(
         pool: &Arc<Pool>,
-        connector: &ConnectorVariant,
+        connector: &FingerprintConnector,
         h2_config: &H2Config,
         url: &str,
         proxy: Option<&str>,
@@ -492,30 +494,4 @@ fn random_sec_ws_key() -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::is_reserved_ws_header;
-
-    #[test]
-    fn reserved_headers_gate_the_handshake_but_forwardable_pass() {
-        for h in [
-            "Host",
-            "connection",
-            "Upgrade",
-            "Sec-WebSocket-Key",
-            "SEC-WEBSOCKET-VERSION",
-            "sec-websocket-extensions",
-            "Content-Length",
-        ] {
-            assert!(is_reserved_ws_header(h), "{h} must be reserved");
-        }
-        for h in [
-            "cookie",
-            "Authorization",
-            "Origin",
-            "User-Agent",
-            "Sec-WebSocket-Protocol",
-        ] {
-            assert!(!is_reserved_ws_header(h), "{h} must be forwardable");
-        }
-    }
-}
+mod tests;

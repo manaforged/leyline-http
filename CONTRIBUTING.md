@@ -97,9 +97,7 @@ it fails, fix the cause - do not bypass the hook.
 `crates/leyline/tests/claim_guard.rs` scans the README and every public
 `lib.rs` for marketing superlatives (`best`, `undetectable`,
 `indistinguishable`, `perfect`, etc.) and fails the build if it finds them.
-If a claim cannot be proved by a test in `TESTING.md`, it does not belong in
-this repo. When in doubt, phrase things as *what Leyline does* rather than
-*how it compares*.
+If a claim cannot be proved by a test, it does not belong in this repo.
 
 ## Adding a new browser profile
 
@@ -118,6 +116,7 @@ The `PROFILE_COUNT` constant and the profile-integrity tests enforce that
 every enum variant has a TOML file, every TOML file is loaded, and every
 profile carries a fingerprint expectation.
 
+Record the browser build in `captured_against` on the new TOML.
 
 ## Releasing
 

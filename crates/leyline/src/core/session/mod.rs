@@ -1,5 +1,6 @@
 //! Session - the primary Leyline client.
 
+#![forbid(unsafe_code)]
 mod builder;
 mod decompress;
 pub(crate) mod execute;
@@ -29,7 +30,8 @@ use crate::core::{CompressionConfig, ProxyConfig, RedirectPolicy, TimeoutConfig}
 use crate::h2::H2Config;
 use crate::pool::Pool;
 use crate::profile::{Browser, ChromiumBrand, Platform};
-use crate::tls::ConnectorVariant;
+use crate::tls::FingerprintConnector;
+use crate::tls::TlsTrustConfig;
 
 /// Protocol selection policy for requests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,12 +47,6 @@ pub enum ProtocolPolicy {
     /// Force HTTP/3 over QUIC.
     #[cfg(feature = "http3")]
     Http3,
-    /// Race the QUIC (H3) handshake against TCP+TLS (H2): a Chrome-style
-    /// happy-eyeballs race of the connections. Whichever establishes first
-    /// wins and carries the request (sent exactly once); on error of one, the
-    /// other wins; on error of both, falls back to Auto.
-    #[cfg(feature = "http3")]
-    Race,
 }
 
 /// A Leyline session - browser-fingerprinted HTTP client with cookies.
@@ -124,7 +120,7 @@ pub struct SessionInner {
     websocket_config: WebSocketConfig,
     https_only: bool,
     cookie_jar: Jar,
-    connector: ConnectorVariant,
+    connector: FingerprintConnector,
     h2_config: H2Config,
     pool: Arc<Pool>,
     /// Cached connection-level audit data computed from the profile, shared
@@ -144,8 +140,14 @@ pub struct SessionInner {
     /// HTTP/3 on such a profile errors rather than borrowing another's.
     #[cfg(feature = "http3")]
     h3_config: Option<crate::quic::H3Config>,
+    /// Trust configuration for the h3 path — the tcp connector bakes its
+    /// own copy at build time; h3 builds its context per connection.
+    tls_trust: TlsTrustConfig,
     /// Reference to the static browser profile — passed through to the H3
     /// path so QUIC ClientHello is built from the same factory as H2.
     #[cfg(feature = "http3")]
     profile: &'static crate::profile::BrowserProfile,
+    /// Last-parsed request URL cache: sequential calls with the same URL
+    /// string skip the parse.
+    url_cache: std::sync::Arc<std::sync::Mutex<Option<(String, url::Url)>>>,
 }

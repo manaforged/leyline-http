@@ -1,5 +1,6 @@
 //! Proxy-tunnel glue — dispatches to HTTP `CONNECT` or SOCKS5.
 
+#![forbid(unsafe_code)]
 use std::time::Duration;
 
 use tokio::net::TcpStream;
@@ -68,13 +69,11 @@ pub(crate) async fn connect_through_proxy<C: crate::tls::TlsHandshake>(
     let proxy = url::Url::parse(proxy_url)
         .map_err(|e| TlsError::Profile(format!("invalid proxy URL: {e}")))?;
 
-    // Scheme is an allowlist, not a fallthrough: `http::connect` writes the
-    // CONNECT request (and any `Proxy-Authorization` credentials) in cleartext,
-    // which is only correct for an `http://` CONNECT proxy. `RequestBuilder::
-    // proxy(&str)` and env-derived proxies are NOT validated through
-    // `ProxyUrl`, so any other scheme — `https`, `socks4`, a typo — would
-    // otherwise reach the cleartext path and leak credentials. Reject every
-    // scheme we cannot tunnel safely, before opening a socket.
+    // Scheme is an allowlist, not a fallthrough. `http::connect` writes CONNECT
+    // (and Proxy-Authorization) in cleartext — correct only for `http://`.
+    // `https://` uses `connect_via_tls`. `RequestBuilder::proxy(&str)` is not
+    // validated through `ProxyUrl`, so an unknown scheme must not fall through
+    // to the cleartext path.
     match proxy.scheme() {
         "socks5" | "socks5h" => {
             #[cfg(feature = "socks")]
@@ -90,7 +89,7 @@ pub(crate) async fn connect_through_proxy<C: crate::tls::TlsHandshake>(
         // encrypted inside that TLS, and the origin handshake nests within it.
         "https" => http::connect_via_tls(connector, host, port, &proxy, include_alps).await,
         other => Err(TlsError::Profile(format!(
-            "unsupported proxy scheme `{other}`: leyline tunnels only through http:// CONNECT or \
+            "unsupported proxy scheme `{other}`: leyline tunnels through http://, https://, or \
              socks5:// proxies. Sending CONNECT to a `{other}` proxy would transmit it — including \
              any Proxy-Authorization credentials — in cleartext."
         ))),
@@ -98,74 +97,4 @@ pub(crate) async fn connect_through_proxy<C: crate::tls::TlsHandshake>(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::net::SocketAddr;
-    use std::sync::{Arc, Mutex};
-
-    use crate::profile::{Browser, ProfileRegistry};
-    use crate::tcp::TcpProfile;
-    use crate::tls::{FingerprintConnector, ResolveFuture, Resolver};
-
-    /// Resolver that records every host it is asked to resolve and always
-    /// returns one fixed loopback address — so a test can prove the proxy dial
-    /// is routed through the connector's resolver (no DNS leak) and lands on a
-    /// known local listener.
-    struct RecordingResolver {
-        addr: SocketAddr,
-        seen: Arc<Mutex<Vec<String>>>,
-    }
-
-    impl Resolver for RecordingResolver {
-        fn resolve<'a>(&'a self, host: &'a str, _port: u16) -> ResolveFuture<'a> {
-            self.seen.lock().unwrap().push(host.to_string());
-            let addr = self.addr;
-            Box::pin(async move { Ok(vec![addr]) })
-        }
-    }
-
-    fn base_connector() -> FingerprintConnector {
-        let reg = ProfileRegistry::builtin();
-        let profile = reg
-            .get_browser(Browser::default_browser())
-            .expect("default profile present");
-        FingerprintConnector::new(profile, TcpProfile::LINUX).expect("connector build")
-    }
-
-    // The proxy TCP leg must be dialed through the connector's pluggable
-    // resolver, not a bare `TcpStream::connect`. Otherwise a custom/DoH
-    // resolver is bypassed for the proxy hostname (DNS leak vs. caller intent)
-    // and the SYN carries a non-browser TCP fingerprint. This asserts the
-    // connector's resolver is the one consulted for the proxy host.
-    #[tokio::test]
-    async fn connect_to_proxy_routes_through_connector_resolver() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let seen = Arc::new(Mutex::new(Vec::new()));
-        let connector = base_connector().with_resolver(Arc::new(RecordingResolver {
-            addr,
-            seen: seen.clone(),
-        }));
-        let url: url::Url = "http://proxy.test.invalid:8080".parse().unwrap();
-        let stream = connect_to_proxy(&connector, &url, 8080)
-            .await
-            .expect("dial reaches listener");
-        assert_eq!(stream.peer_addr().unwrap().port(), addr.port());
-        assert_eq!(
-            seen.lock().unwrap().as_slice(),
-            ["proxy.test.invalid"],
-            "proxy host must be resolved via the connector's resolver"
-        );
-    }
-
-    #[tokio::test]
-    async fn connect_to_proxy_requires_host() {
-        // Cannot-be-a-base URLs parse with no host component.
-        let url: url::Url = "mailto:a@b".parse().unwrap();
-        assert!(
-            connect_to_proxy(&base_connector(), &url, 8080)
-                .await
-                .is_err()
-        );
-    }
-}
+mod tests;

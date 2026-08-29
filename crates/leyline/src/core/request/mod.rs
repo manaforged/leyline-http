@@ -1,5 +1,6 @@
 //! Fluent request builder.
 
+#![forbid(unsafe_code)]
 mod compress;
 mod encode;
 mod send;
@@ -49,6 +50,7 @@ where
     }
 }
 
+#[must_use = "builders are lazy: nothing happens until `.send()` / `.build()`"]
 /// Fluent builder for constructing and sending HTTP requests.
 ///
 /// ```rust,ignore
@@ -90,6 +92,14 @@ pub struct RequestBuilder {
     pub(super) header_order: Option<Vec<String>>,
 }
 
+fn default_preset(session: &Session, method: &str) -> Option<Preset> {
+    session.browser()?;
+    match method {
+        "GET" | "HEAD" => Some(Preset::Navigate),
+        _ => None,
+    }
+}
+
 impl RequestBuilder {
     pub(crate) fn new(session: &Session, method: &str, url: &str) -> Self {
         Self {
@@ -99,7 +109,9 @@ impl RequestBuilder {
             session: session.clone(),
             method: method.to_string(),
             url: url.to_string(),
-            preset: None,
+            // Browser GET/HEAD looks like a document fetch unless the caller
+            // overrides with `.preset(...)`. Bare sessions stay generic.
+            preset: default_preset(session, method),
             body: Body::Empty,
             headers: HeaderList::new(),
             query_params: Vec::new(),
@@ -231,7 +243,7 @@ impl RequestBuilder {
     /// For headers with a well-known Chrome slot (`origin`,
     /// `authorization`, `x-csrf-token`, `x-requested-with`, etc.) the
     /// profile picks the anchor automatically. For site-specific
-    /// headers with no universal rule (for example
+    /// headers with no universal rule (e.g. a third-party SDK's
     /// `x-extra-*`), use [`anchored`](Self::anchored) and name
     /// the slot explicitly.
     pub fn header(mut self, name: &str, value: &str) -> Self {

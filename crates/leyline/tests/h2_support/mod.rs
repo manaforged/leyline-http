@@ -87,6 +87,7 @@ pub async fn write_response<S: AsyncWrite + Unpin>(s: &mut S, stream_id: u32, bo
         stream_id,
         end_stream: true,
         data: bytes::Bytes::copy_from_slice(body),
+        wire_len: body.len() as u64,
     };
     buf.clear();
     d.encode(&mut buf);
@@ -163,6 +164,7 @@ pub async fn write_data<S: AsyncWrite + Unpin>(
         stream_id,
         end_stream,
         data: bytes::Bytes::copy_from_slice(data),
+        wire_len: data.len() as u64,
     };
     let mut buf = BytesMut::new();
     d.encode(&mut buf);

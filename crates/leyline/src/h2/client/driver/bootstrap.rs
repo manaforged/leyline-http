@@ -125,7 +125,7 @@ where
     //    trip later. Blocking here would insert a SETTINGS-ack frame ahead of
     //    the request and diverge from the browser's wire ordering, which
     //    Akamai-class edges fingerprint.
-    let mut peer_settings = PeerSettings::default();
+    let peer_settings = PeerSettings::default();
     let initial_send_window: i64 = 65535;
 
     // Cap inbound frames at *our* advertised SETTINGS_MAX_FRAME_SIZE, never the
@@ -184,6 +184,7 @@ where
         encoder,
         decoder,
         peer_settings,
+        peer_greeted: false,
         peer_snapshot: snapshot.clone(),
         conn_send_window: initial_send_window,
         conn_recv_window: config.initial_connection_window_size as i64,
@@ -204,6 +205,7 @@ where
         command_rx: rx,
         closed: closed.clone(),
         peer_goaway_last_stream: None,
+        pending: VecDeque::new(),
         shutdown_started: false,
         body_chunk_tx,
         body_chunk_rx,

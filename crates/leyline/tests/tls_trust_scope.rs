@@ -21,7 +21,10 @@
 //! it is duplicated here (rather than shared) so this binary contains exactly
 //! one test and the process-global `SSL_CERT_FILE` write below cannot race a
 //! concurrent test reading the environment.
-
+#![expect(
+    clippy::unwrap_used,
+    reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
+)]
 use std::net::SocketAddr;
 use std::sync::Arc;
 

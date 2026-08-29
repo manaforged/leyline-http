@@ -18,7 +18,10 @@
 //!   proving the chain + pin would otherwise accept the cert.
 //! - regression: connecting to `right.example` fails — the hostname
 //!   mismatch is caught even though chain + pin pass.
-
+#![expect(
+    clippy::unwrap_used,
+    reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
+)]
 use std::net::SocketAddr;
 use std::sync::Arc;
 

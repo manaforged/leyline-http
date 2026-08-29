@@ -10,6 +10,14 @@
 //! and they exercise the real gzip/deflate/brotli decode path because the
 //! mock actually compresses its responses.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
+)]
+#![expect(
+    clippy::panic,
+    reason = "test harness helper: explicit panic on unexpected error shape is the assertion"
+)]
 use leyline::Session;
 use serde_json::Value;
 
@@ -458,7 +466,7 @@ async fn redirect_preserves_auth_same_host() {
     let base = httpbin_lite::spawn().await;
     let session = Session::chrome();
     let resp = session
-        .get(&format!("{base}/redirect-to?url={base}/headers"))
+        .request("GET", &format!("{base}/redirect-to?url={base}/headers"))
         .bearer_auth("secret-token-xyz")
         .send()
         .await
@@ -514,7 +522,6 @@ async fn redirect_to_non_http_scheme_is_refused() {
     let session = Session::chrome();
     let result = session
         .get(&format!("{base}/redirect-to?url=file:///etc/passwd"))
-        .send()
         .await;
     assert!(result.is_err(), "a file:// redirect target must be refused");
     let msg = result.err().unwrap().to_string();

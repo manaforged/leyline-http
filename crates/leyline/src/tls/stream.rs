@@ -23,7 +23,7 @@ use tokio::net::TcpStream;
 /// One arm today (`Boring`); future backends are added as additional
 /// arms without touching any caller. `Send`, `Unpin`, and `'static` are
 /// inherited from the inner stream, so this satisfies the pool's
-/// [`H1Io`](crate::pool::h1::H1Io) bound and `WebSocketStream<_>`'s
+/// `H1Io` trait bound and `WebSocketStream<_>`'s
 /// `S: AsyncRead + AsyncWrite + Unpin` requirement for free.
 pub(crate) enum TlsIo {
     /// BoringSSL over TCP, via `leyline-bssl-tokio`.

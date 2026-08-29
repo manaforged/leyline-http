@@ -1,15 +1,23 @@
 //! Integration tests against tls.peet.ws
 //!
 //! Offline tests (no network, always run):
-//!   cargo test -p leyline --test tls_peet
+//!   cargo test -p leyline-tls --test tls_peet
 //!
 //! Live tests (need network, ignored by default):
-//!   cargo test -p leyline --test tls_peet -- --ignored --nocapture
+//!   cargo test -p leyline-tls --test tls_peet -- --ignored --nocapture
 //!
 //! These verify — end-to-end against a real TLS inspector — that every
 //! profile in the registry produces exactly the fingerprint its TOML
 //! claims. If ANY of these assertions fail, we're shipping a lie.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
+)]
+#![expect(
+    clippy::panic,
+    reason = "test harness helper: explicit panic on unexpected error shape is the assertion"
+)]
 use leyline::profile::{ALL_BROWSERS, PROFILE_COUNT};
 use leyline::{Browser, Platform};
 use serde_json::Value;
@@ -97,12 +105,22 @@ fn session_builder_resolves_all_valid_combos() {
         (Browser::Chrome147, Platform::MacOS),
         (Browser::Chrome147, Platform::Linux),
         (Browser::Chrome147, Platform::Android),
+        (Browser::Chrome148, Platform::Windows),
+        (Browser::Chrome148, Platform::MacOS),
+        (Browser::Chrome148, Platform::Linux),
+        (Browser::Chrome148, Platform::Android),
+        (Browser::Chrome149, Platform::Windows),
+        (Browser::Chrome149, Platform::MacOS),
+        (Browser::Chrome149, Platform::Linux),
+        (Browser::Chrome149, Platform::Android),
+        (Browser::Chrome150, Platform::Windows),
+        (Browser::Chrome150, Platform::MacOS),
+        (Browser::Chrome150, Platform::Linux),
+        (Browser::Chrome150, Platform::Android),
         (Browser::Chrome146, Platform::Windows),
         (Browser::Chrome146, Platform::Android),
         (Browser::Chrome145, Platform::Windows),
         (Browser::Chrome145, Platform::Android),
-        (Browser::Aloha138, Platform::Windows),
-        (Browser::Aloha138, Platform::MacOS),
         (Browser::Brave146, Platform::MacOS),
         (Browser::Firefox148, Platform::Windows),
         (Browser::Firefox148, Platform::Linux),
@@ -118,10 +136,10 @@ fn session_builder_resolves_all_valid_combos() {
         (Browser::Firefox152, Platform::Android),
         (Browser::Safari18, Platform::MacOS),
         (Browser::OkHttpAndroid10, Platform::Android),
-        (Browser::OkHttpAndroid7, Platform::Android),
-        (Browser::SafariIOS15, Platform::IOS),
         (Browser::SafariIOS17, Platform::IOS),
         (Browser::SafariIOS18, Platform::IOS),
+        (Browser::CfnetworkIOS18, Platform::IOS),
+        (Browser::CfnetworkMacOS26, Platform::MacOS),
     ];
     for (browser, platform) in combos {
         let result = leyline::Session::builder()
@@ -139,8 +157,11 @@ fn crate_root_context_helpers_work() {
     let tls = leyline::tls_context(Browser::Chrome147);
     assert!(tls.is_ok(), "tls_context failed: {:?}", tls.err());
 
-    let quic = leyline::quic_context(Browser::Chrome147);
-    assert!(quic.is_ok(), "quic_context failed: {:?}", quic.err());
+    #[cfg(feature = "http3")]
+    {
+        let quic = leyline::quic_context(Browser::Chrome147);
+        assert!(quic.is_ok(), "quic_context failed: {:?}", quic.err());
+    }
 
     // Every browser variant should produce a working context.
     for browser in ALL_BROWSERS {
@@ -176,6 +197,7 @@ fn session_builder_rejects_http3_with_proxy_at_build_time() {
     );
 }
 
+#[cfg(feature = "http3")]
 #[tokio::test]
 async fn http3_session_rejects_per_request_proxy_at_send_time() {
     // The build-time guard above can't see per-request `.proxy(...)`
@@ -188,7 +210,7 @@ async fn http3_session_rejects_per_request_proxy_at_send_time() {
         .build()
         .expect("http3 session without proxy builds");
     let err = session
-        .get("https://example.com/")
+        .request("GET", "https://example.com/")
         .proxy("http://127.0.0.1:9")
         .send()
         .await
@@ -197,30 +219,6 @@ async fn http3_session_rejects_per_request_proxy_at_send_time() {
     assert!(
         msg.contains("http/3") || msg.contains("http3") || msg.contains("prox"),
         "error should mention http3/proxy, got: {msg}"
-    );
-}
-
-#[tokio::test]
-async fn race_policy_with_proxy_never_dials_h3_direct() {
-    // Race tries H3 first ONLY when no proxy was requested. With a
-    // (dead) per-request proxy the request must route through the proxy
-    // and fail — a successful response here would mean the H3 leg dialed
-    // the target directly, bypassing the proxy (real-IP leak).
-    let session = leyline::Session::builder()
-        .browser(Browser::Chrome147)
-        .race()
-        .timeout(std::time::Duration::from_secs(5))
-        .build()
-        .expect("race session builds");
-    let result = session
-        .get("https://example.com/")
-        .proxy("http://127.0.0.1:9")
-        .send()
-        .await;
-    assert!(
-        result.is_err(),
-        "request through a dead proxy must fail; success means the H3 race \
-         leg bypassed the proxy and dialed direct"
     );
 }
 
@@ -236,7 +234,7 @@ async fn request_builder_timeout_overrides_session_default() {
         .unwrap();
     let start = std::time::Instant::now();
     let err = session
-        .get("https://192.0.2.1/")
+        .request("GET", "https://192.0.2.1/")
         .timeout(std::time::Duration::from_millis(50))
         .send()
         .await
@@ -483,7 +481,7 @@ async fn peet(session: &leyline::Session) -> Value {
 /// default for browser stacks that ship a Windows identity).
 fn live_platform_for(browser: Browser) -> Platform {
     match browser {
-        Browser::SafariIOS15 | Browser::SafariIOS17 | Browser::SafariIOS18 => Platform::IOS,
+        Browser::SafariIOS17 | Browser::SafariIOS18 => Platform::IOS,
         Browser::CfnetworkIOS18 => Platform::IOS,
         Browser::OkHttpAndroid10 => Platform::Android,
         Browser::Safari18 | Browser::CfnetworkMacOS26 => Platform::MacOS,
@@ -565,11 +563,6 @@ async fn live_wire_audit_every_profile() {
     let mut checked = 0;
 
     for browser in ALL_BROWSERS {
-        // OkHttp Android 7-9 is TLS 1.2-only; tls.peet.ws requires TLS 1.3.
-        if matches!(browser, Browser::OkHttpAndroid7) {
-            println!("- {browser:30} skipped (TLS 1.2 — tls.peet.ws requires 1.3)");
-            continue;
-        }
         let platform = live_platform_for(browser);
         let session = leyline::Session::builder()
             .browser(browser)
@@ -809,11 +802,6 @@ async fn live_ja4_exact_match_every_profile_with_expectation() {
     let mut skipped: Vec<String> = Vec::new();
 
     for browser in ALL_BROWSERS {
-        if matches!(browser, Browser::OkHttpAndroid7) {
-            skipped.push(format!("{browser} (TLS 1.2 only — tls.peet.ws rejects)"));
-            continue;
-        }
-
         let profile = reg.get_browser(browser).unwrap();
         let expected = match profile.expected_ja4() {
             Some(e) => e,
@@ -854,13 +842,6 @@ async fn live_h2_akamai_every_profile() {
     let mut checked = 0;
 
     for browser in ALL_BROWSERS {
-        // OkHttp Android 7-9 is TLS 1.2-only; tls.peet.ws requires TLS 1.3
-        // (HANDSHAKE_FAILURE_ON_CLIENT_HELLO). Skip and log.
-        if matches!(browser, Browser::OkHttpAndroid7) {
-            println!("- {browser:30} skipped (TLS 1.2 — tls.peet.ws requires 1.3)");
-            continue;
-        }
-
         let platform = live_platform_for(browser);
 
         let session = leyline::Session::builder()
@@ -887,8 +868,8 @@ async fn live_h2_akamai_every_profile() {
 
     assert_eq!(
         checked,
-        PROFILE_COUNT - 1,
-        "expected to check all profiles except OkHttp 7"
+        PROFILE_COUNT,
+        "expected to check every first-class profile"
     );
 }
 
@@ -1056,12 +1037,10 @@ async fn live_chrome147_has_cert_compression() {
 /// Anchors the cert-compression *algorithm list*, not just the extension's
 /// presence. `live_chrome147_has_cert_compression` only proves extension 27
 /// exists — it would pass even if the advertised algorithm set were wrong.
-/// Firefox 150/151 are the only profiles that advertise more than brotli
-/// (zlib+brotli+zstd), and registering those decompressors is exactly what
-/// the cert-compression change touches on the wire, so it must be anchored
-/// against real peet output or the change is unverified (CONTRIBUTING.md tautology
-/// rule). We match on the stringified extension so we're robust to peet's
-/// exact field naming (`algorithms` vs parsed `data`).
+/// Firefox 150/151 advertise zlib+brotli+zstd. Registering those
+/// decompressors is a wire change; this test anchors the advertised list
+/// against peet output. Match the stringified extension so either peet field
+/// name (`algorithms` or parsed `data`) works.
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_firefox_cert_compression_advertises_zlib_brotli_zstd() {
@@ -1251,7 +1230,6 @@ async fn live_h3_cloudflare() {
         .expect("h3 session builds");
     let resp = session
         .get("https://cloudflare-quic.com/")
-        .send()
         .await
         .expect("H3 request failed");
     assert_eq!(resp.status(), 200, "H3 status: {}", resp.status());
@@ -1298,7 +1276,6 @@ async fn live_h3_cloudflare_firefox_profile() {
         .expect("h3 session builds");
     let resp = session
         .get("https://cloudflare-quic.com/")
-        .send()
         .await
         .expect("H3 request failed (firefox profile)");
     assert_eq!(
@@ -1319,7 +1296,7 @@ async fn live_h3_google() {
         .build()
         .expect("h3 session builds");
     let resp = session
-        .get("https://www.google.com/")
+        .request("GET", "https://www.google.com/")
         .header("accept", "text/html")
         .send()
         .await
@@ -1344,7 +1321,6 @@ async fn live_h3_pool_reuse() {
 
     let r1 = session
         .get("https://cloudflare-quic.com/")
-        .send()
         .await
         .expect("first H3 request failed");
     assert_eq!(r1.status(), 200);
@@ -1353,7 +1329,6 @@ async fn live_h3_pool_reuse() {
 
     let r2 = session
         .get("https://cloudflare-quic.com/")
-        .send()
         .await
         .expect("second H3 request failed");
     assert_eq!(r2.status(), 200);
@@ -1398,7 +1373,7 @@ async fn live_h3_concurrent_cold_requests_single_flight() {
 
     // Fire concurrently on a cold pool: each request misses the pool and joins
     // the single in-flight connect rather than starting its own.
-    let futs = (0..8).map(|_| session.get("https://cloudflare-quic.com/").send());
+    let futs = (0..8).map(|_| session.get("https://cloudflare-quic.com/"));
     for r in join_all(futs).await {
         assert_eq!(r.expect("concurrent H3 request failed").status(), 200);
     }
@@ -1414,71 +1389,6 @@ async fn live_h3_concurrent_cold_requests_single_flight() {
     println!(
         "✓ H3 single-flight: installs={}, entries={}, h3_hits={}",
         stats.installs, stats.entries, stats.h3_hits
-    );
-}
-
-/// True connection-level H2/H3 race: `.race()` to an origin that speaks both
-/// (cloudflare-quic.com) must succeed, send the request exactly once on the
-/// winning transport, and reuse a warm connection on the next request. Each
-/// connect runs to completion on its own task (so a cancelled leg can't strand
-/// the in-flight map or leak the pool), so the race warms the winner and may
-/// also warm the loser leg — 1 or 2 entries, both idle-evictable. The request
-/// still goes on the winner only; the reuse check is the observable guarantee.
-#[tokio::test]
-#[ignore = "live: needs network"]
-async fn live_race_sends_once_on_winner() {
-    let session = leyline::Session::builder()
-        .browser(Browser::Chrome147)
-        .race()
-        .build()
-        .expect("race session builds");
-
-    let r1 = session
-        .get("https://cloudflare-quic.com/")
-        .send()
-        .await
-        .expect("first raced request failed");
-    assert_eq!(r1.status(), 200, "race status: {}", r1.status());
-    let _ = r1.bytes();
-
-    let after_first = session.pool_stats();
-    // The race warms the winner and may also warm the loser leg (each connect
-    // completes on its own task and pools under its own transport key), so 1 or
-    // 2 entries — both idle-evictable. The request was sent once: only the
-    // winner's handle receives a `send`. The reuse check below is the
-    // observable guarantee that a warm connection is ready for the next request.
-    assert!(
-        (1..=2).contains(&after_first.entries),
-        "race must warm the winner (and optionally the loser leg), got {} entries \
-         (h2_misses={}, h3_misses={})",
-        after_first.entries,
-        after_first.h2_misses,
-        after_first.h3_misses
-    );
-
-    let r2 = session
-        .get("https://cloudflare-quic.com/")
-        .send()
-        .await
-        .expect("second raced request failed");
-    assert_eq!(r2.status(), 200);
-    let _ = r2.bytes();
-
-    let after_second = session.pool_stats();
-    assert!(
-        after_second.h2_hits + after_second.h3_hits >= 1,
-        "second raced request must reuse the winning connection \
-         (h2_hits={}, h3_hits={})",
-        after_second.h2_hits,
-        after_second.h3_hits
-    );
-    let won_h3 = after_second.h3_hits >= 1;
-    println!(
-        "✓ race: won={}, entries={}, h2_hits={}, h3_hits={}",
-        if won_h3 { "H3" } else { "H2" },
-        after_second.entries,
-        after_second.h2_hits,
-        after_second.h3_hits
     );
 }
 
@@ -1504,13 +1414,12 @@ async fn live_h3_response_streaming_is_incremental() {
     // the streamed body against after decompressing it.
     let expected = session
         .get("https://cloudflare-quic.com/")
-        .send()
         .await
         .expect("buffered H3 request failed")
         .into_bytes();
 
     let resp = session
-        .get("https://cloudflare-quic.com/")
+        .request("GET", "https://cloudflare-quic.com/")
         .stream()
         .send()
         .await
@@ -1731,9 +1640,8 @@ async fn live_h2_connection_reuse() {
 
 // ─── Live: peer certificate exposure ───────────────────────────────────
 
-/// Confirms `Response::tls_peer_certificate` is actually populated by
-/// the HTTPS transport — previously the field was hardcoded to `None`,
-/// so the accessor looked like a stable feature but returned nothing.
+/// Confirms `Response::tls_peer_certificate` is populated by the HTTPS
+/// transport on every response.
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_tls_peer_certificate_exposed() {

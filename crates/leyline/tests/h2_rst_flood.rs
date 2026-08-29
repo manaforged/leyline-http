@@ -2,7 +2,10 @@
 //!
 //! Pure state tests — no tokio, no network — we drive the sliding window
 //! directly with synthetic timestamps via `RstFloodDetector::record`.
-
+#![expect(
+    clippy::panic,
+    reason = "test harness helper: explicit panic on unexpected error shape is the assertion"
+)]
 use std::time::{Duration, Instant};
 
 use leyline::h2::H2Error;

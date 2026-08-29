@@ -1,5 +1,5 @@
 use super::super::Session;
-use crate::profile::{Browser, ChromiumBrand, Platform, Preset};
+use crate::profile::{Browser, ChromiumBrand, Platform};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 // ---- ChromiumBrand overlay regression gates ----
@@ -8,8 +8,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 // for that variant. If any overlay rule drifts, these fail.
 //
 // Verification provenance:
-//   - Edge 147, Brave 147, Opera 129  → live captures from tls.peet.ws.
-//   - Opera 130/131, Vivaldi 7.9      → vendor release notes,
+//   - Edge 150, Brave 146, Opera 129  → live captures / arithmetic overlay.
+//   - Opera 130–134, Vivaldi 7.9      → vendor release notes,
 //     structurally identical to the verified shape.
 
 async fn capture_navigate_headers(session: Session) -> String {
@@ -34,12 +34,7 @@ async fn capture_navigate_headers(session: Session) -> String {
             .unwrap();
         String::from_utf8_lossy(&req).to_string()
     });
-    let _ = session
-        .get(&format!("http://{addr}/"))
-        .preset(Preset::Navigate)
-        .send()
-        .await
-        .unwrap();
+    let _ = session.get(&format!("http://{addr}/")).await.unwrap();
     server.await.unwrap()
 }
 
@@ -63,7 +58,7 @@ async fn identity_keeps_ua_when_tls_rotates() {
 #[tokio::test]
 async fn brand_overlay_follows_http_major_not_tls() {
     let id = crate::Identity::locked(Browser::Chrome150, Platform::Windows)
-        .rotate_tls(Browser::Chrome116)
+        .rotate_tls(Browser::Chrome145)
         .expect("same family");
     let session = Session::builder()
         .identity(id)
@@ -89,13 +84,13 @@ async fn edge_brand_overlay_matches_capture() {
     // current versions. Verified against tls.peet.ws on 2026-04-25
     // with Edge 147 on macOS.
     assert!(
-        req.contains("Chrome/147.0.0.0 Safari/537.36 Edg/147.0.0.0"),
-        "Edge UA must carry reduced Edg/147.0.0.0 suffix:\n{req}"
+        req.contains("Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0"),
+        "Edge UA must carry reduced Edg/150.0.0.0 suffix:\n{req}"
     );
-    // sec-ch-ua brand list reorders to put "Microsoft Edge" first.
+    // Chrome 150 GREASE keeps Chromium in the middle slot; Edge replaces
+    // "Google Chrome" rather than moving to the front.
     assert!(
-        req.contains(r#"Sec-Ch-Ua: "Microsoft Edge";v="147""#)
-            || req.contains(r#"sec-ch-ua: "Microsoft Edge";v="147""#),
+        req.contains(r#""Microsoft Edge";v="150""#),
         "Edge sec-ch-ua brand missing:\n{req}"
     );
     // Edge ships `dnt: 1` by default; Chrome does not.
@@ -154,14 +149,12 @@ async fn brave_first_class_profile_matches_capture() {
 
 #[tokio::test]
 async fn opera_brand_overlay_matches_capture() {
-    // Session::opera() resolves to the latest verified Opera anchor —
-    // currently Chrome 147 / Opera 131 (vendor-doc EXTRAPOLATED; see
-    // OPERA_PER_CHROMIUM in profile::brand). Bump these assertions when the
-    // anchor table moves.
+    // Session::opera() resolves to Chrome 150 / Opera 134 (Chromium-minus-16
+    // EXTRAPOLATED; see OPERA_PER_CHROMIUM). Bump these when the table moves.
     let session = Session::opera();
     let req = capture_navigate_headers(session).await;
     assert!(
-        req.contains("Chrome/147.0.0.0 Safari/537.36 OPR/131.0.0.0"),
+        req.contains("Chrome/150.0.0.0 Safari/537.36 OPR/134.0.0.0"),
         "Opera UA suffix missing:\n{req}"
     );
     // Opera uses "Not:A-Brand";v="99" (dash/colon/99) — not the
@@ -169,12 +162,12 @@ async fn opera_brand_overlay_matches_capture() {
     // Opera captures from Chrome captures.
     assert!(
         req.to_lowercase()
-            .contains(r#"sec-ch-ua: "not:a-brand";v="99", "opera";v="131""#),
+            .contains(r#"sec-ch-ua: "not:a-brand";v="99", "opera";v="134""#),
         "Opera sec-ch-ua placeholder form missing:\n{req}"
     );
     assert!(
-        req.to_lowercase().contains(r#""chromium";v="147""#),
-        "Opera Chromium anchor 147 missing:\n{req}"
+        req.to_lowercase().contains(r#""chromium";v="150""#),
+        "Opera Chromium anchor 150 missing:\n{req}"
     );
 }
 
@@ -202,10 +195,9 @@ async fn opera_146_overlay_emits_130() {
 
 #[tokio::test]
 async fn opera_148_overlay_emits_132() {
-    // Opera 132 / Chromium 148 — the anchor a recorded Opera build pins
-    // to. Sourced from Opera's official desktop release blog (Opera 132 Stable
-    // on Chromium 148.0.7778.97); sec-ch-ua shape reuses the verified 129
-    // template. Pin the explicit pairing so a table edit can't collapse it.
+    // Opera 132 / Chromium 148. From Opera's desktop release blog
+    // (Opera 132 Stable on Chromium 148.0.7778.97). sec-ch-ua reuses the
+    // verified 129 template. Pin the pairing so a table edit cannot collapse it.
     let session = Session::builder()
         .browser(Browser::Chrome148)
         .brand(ChromiumBrand::Opera)
@@ -220,6 +212,25 @@ async fn opera_148_overlay_emits_132() {
         req.to_lowercase()
             .contains(r#"sec-ch-ua: "not:a-brand";v="99", "opera";v="132", "chromium";v="148""#),
         "Opera 148 sec-ch-ua missing:\n{req}"
+    );
+}
+
+#[tokio::test]
+async fn opera_150_overlay_emits_134() {
+    let session = Session::builder()
+        .browser(Browser::Chrome150)
+        .brand(ChromiumBrand::Opera)
+        .build()
+        .unwrap();
+    let req = capture_navigate_headers(session).await;
+    assert!(
+        req.contains("Chrome/150.0.0.0 Safari/537.36 OPR/134.0.0.0"),
+        "Opera 150 UA suffix missing:\n{req}"
+    );
+    assert!(
+        req.to_lowercase()
+            .contains(r#"sec-ch-ua: "not:a-brand";v="99", "opera";v="134", "chromium";v="150""#),
+        "Opera 150 sec-ch-ua missing:\n{req}"
     );
 }
 
@@ -292,7 +303,7 @@ async fn vivaldi_brand_overlay_matches_capture() {
 fn vivaldi_overlay_on_unverified_anchor_errors() {
     // VIVALDI_BUILDS_PER_MAJOR currently only knows about Chromium 147.
     // 145/146 anchors must error rather than guess a build version.
-    for bad in [144u32, 145, 146, 148] {
+    for bad in [144u32, 145, 146, 148, 150] {
         let err = ChromiumBrand::Vivaldi
             .overlay(bad, Platform::Windows, "ua", r#""Google Chrome";v="147""#)
             .expect_err(&format!(
@@ -410,17 +421,27 @@ fn edge_overlay_on_mobile_platform_errors() {
 
 #[test]
 fn opera_overlay_on_unverified_anchor_errors() {
-    // OPERA_PER_CHROMIUM covers Chromium 145..=149 today. A profile
-    // anchored anywhere else (older 144 or some future 150+) still
-    // has no published Opera version we can mimic — the build must
-    // error rather than guess. We rely on `Browser::chromium_major`
-    // returning a value outside the table, simulated here by hand-
-    // calling the overlay directly so we don't need an unsupported
-    // `Browser` variant in the public enum.
+    // OPERA_PER_CHROMIUM covers Chromium 145..=150. Older majors still
+    // have no published Opera version we can mimic — the build must
+    // error rather than guess.
     let err = ChromiumBrand::Opera
-        .overlay(150, Platform::Windows, "ua", "")
-        .expect_err("Opera on Chrome 150 must be rejected until captured");
+        .overlay(144, Platform::Windows, "ua", "")
+        .expect_err("Opera on Chromium 144 must be rejected until captured");
     assert!(format!("{err}").contains("not verified"));
+}
+
+#[test]
+fn builder_edge_impersonates() {
+    let s = Session::builder().edge().build().unwrap();
+    assert_eq!(s.browser(), Some(Browser::default_browser()));
+    assert_eq!(s.brand(), ChromiumBrand::Edge);
+}
+
+#[test]
+fn builder_opera_impersonates() {
+    let s = Session::builder().opera().build().unwrap();
+    assert_eq!(s.browser(), Some(Browser::default_browser()));
+    assert_eq!(s.brand(), ChromiumBrand::Opera);
 }
 
 #[tokio::test]
@@ -452,8 +473,7 @@ async fn user_dnt_override_wins_over_edge_default() {
         String::from_utf8_lossy(&req).to_string()
     });
     let _ = session
-        .get(&format!("http://{addr}/"))
-        .preset(Preset::Navigate)
+        .request("GET", &format!("http://{addr}/"))
         .append_header("dnt", "0")
         .send()
         .await

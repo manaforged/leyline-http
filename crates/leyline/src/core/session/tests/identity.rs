@@ -146,46 +146,32 @@ fn identity_apply_locked_builds() {
 
 #[test]
 fn older_public_hellos_build() {
-    for browser in [
-        Browser::Chrome116,
-        Browser::Chrome120,
-        Browser::Chrome124,
-        Browser::Chrome131,
-    ] {
-        let id = Identity::locked(Browser::Chrome150, Platform::Windows)
-            .rotate_tls(browser)
-            .expect("same family");
+    for browser in [Browser::Chrome145, Browser::Firefox148] {
+        let id = match browser {
+            Browser::Chrome145 => Identity::locked(Browser::Chrome150, Platform::Windows)
+                .rotate_tls(browser)
+                .expect("same family"),
+            Browser::Firefox148 => Identity::locked(Browser::Firefox152, Platform::Windows)
+                .rotate_tls(browser)
+                .expect("same family"),
+            other => panic!("unexpected {other:?}"),
+        };
         Session::builder()
             .identity(id)
             .build()
             .unwrap_or_else(|e| panic!("{browser} hello builds: {e}"));
     }
-    let firefox = Identity::locked(Browser::Firefox152, Platform::Windows)
-        .rotate_tls(Browser::Firefox133)
-        .expect("same family");
-    Session::builder()
-        .identity(firefox)
-        .build()
-        .expect("firefox 133 hello builds");
 }
 
 #[test]
-fn hello_library_is_seven_chrome_hellos() {
+fn hello_library_is_three_chrome_hellos() {
     let lib = Identity::locked(Browser::Chrome150, Platform::Windows)
         .hello_library()
         .expect("chrome hello library");
     let tls: Vec<Browser> = lib.iter().map(|id| id.tls()).collect();
     assert_eq!(
         tls,
-        vec![
-            Browser::Chrome150,
-            Browser::Chrome147,
-            Browser::Chrome146,
-            Browser::Chrome131,
-            Browser::Chrome124,
-            Browser::Chrome120,
-            Browser::Chrome116,
-        ]
+        vec![Browser::Chrome150, Browser::Chrome147, Browser::Chrome146,]
     );
     assert!(lib.iter().all(|id| id.http() == Browser::Chrome150));
     assert!(lib.iter().all(|id| id.platform() == Platform::Windows));
@@ -196,19 +182,11 @@ fn rotate_hello_walks_distinct_chrome_ja4s() {
     let a = Identity::locked(Browser::Chrome150, Platform::Windows);
     let b = a.rotate_hello().expect("150 → 147");
     let c = b.rotate_hello().expect("147 → 146");
-    let d = c.rotate_hello().expect("146 → 131");
-    let e = d.rotate_hello().expect("131 → 124");
-    let f = e.rotate_hello().expect("124 → 120");
-    let g = f.rotate_hello().expect("120 → 116");
-    let h = g.rotate_hello().expect("116 → 150");
+    let d = c.rotate_hello().expect("146 → 150");
     assert_eq!(b.tls(), Browser::Chrome147);
     assert_eq!(c.tls(), Browser::Chrome146);
-    assert_eq!(d.tls(), Browser::Chrome131);
-    assert_eq!(e.tls(), Browser::Chrome124);
-    assert_eq!(f.tls(), Browser::Chrome120);
-    assert_eq!(g.tls(), Browser::Chrome116);
-    assert_eq!(h.tls(), Browser::Chrome150);
-    assert_eq!(h.http(), Browser::Chrome150);
+    assert_eq!(d.tls(), Browser::Chrome150);
+    assert_eq!(d.http(), Browser::Chrome150);
 }
 
 #[test]
@@ -234,16 +212,17 @@ fn identity_apply_rotated_tls_builds() {
 fn hello_library_stays_consistent() {
     let mint = Identity::locked(Browser::Chrome150, Platform::Windows);
     let lib = mint.hello_library().expect("chrome hello library");
-    assert_eq!(mint.user_agent().expect("ua"), lib[0].user_agent().expect("ua"));
+    assert_eq!(
+        mint.user_agent().expect("ua"),
+        lib[0].user_agent().expect("ua")
+    );
     for id in &lib {
         assert_eq!(id.http(), Browser::Chrome150);
         assert_eq!(id.platform(), Platform::Windows);
         assert_eq!(id.tls(), id.tls().hello_rep());
         assert_eq!(id.http().family(), id.tls().family());
         assert!(
-            id.user_agent()
-                .expect("ua")
-                .contains("Chrome/150.0.0.0"),
+            id.user_agent().expect("ua").contains("Chrome/150.0.0.0"),
             "HTTP UA must stay 150 for {:?}: {}",
             id.tls(),
             id.user_agent().expect("ua")
@@ -264,18 +243,12 @@ fn firefox_hello_library_stays_consistent() {
         .expect("firefox hello library");
     assert_eq!(
         lib.iter().map(|id| id.tls()).collect::<Vec<_>>(),
-        vec![
-            Browser::Firefox152,
-            Browser::Firefox150,
-            Browser::Firefox133,
-        ]
+        vec![Browser::Firefox152, Browser::Firefox150]
     );
     for id in lib {
         assert_eq!(id.http(), Browser::Firefox152);
         assert!(
-            id.user_agent()
-                .expect("ua")
-                .contains("Firefox/152.0"),
+            id.user_agent().expect("ua").contains("Firefox/152.0"),
             "HTTP UA must stay 152 for {:?}: {}",
             id.tls(),
             id.user_agent().expect("ua")

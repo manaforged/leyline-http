@@ -41,7 +41,7 @@ async fn plaintext_http_uses_h1_and_preserves_duplicate_headers() {
 
     let session = Session::chrome();
     let resp = session
-        .get(&format!("http://{addr}/wire?q=1"))
+        .request("GET", &format!("http://{addr}/wire?q=1"))
         .append_header("x-dup", "one")
         .append_header("x-dup", "two")
         .send()
@@ -78,11 +78,7 @@ async fn one_shot_get(builder: super::super::SessionBuilder, path: &str) -> crat
             .unwrap();
     });
     let session = builder.build().unwrap();
-    let resp = session
-        .get(&format!("http://{addr}{path}"))
-        .send()
-        .await
-        .unwrap();
+    let resp = session.get(&format!("http://{addr}{path}")).await.unwrap();
     server.await.unwrap();
     resp
 }
@@ -212,7 +208,7 @@ async fn unsupported_scheme_proxy_is_refused_not_sent_in_cleartext() {
     // `ProxyUrl`, so an unhandled scheme must not fall through to the cleartext
     // CONNECT path and leak Proxy-Authorization.
     let err = Session::chrome()
-        .get("https://example.test/")
+        .request("GET", "https://example.test/")
         .proxy("ftp://user:secret@127.0.0.1:1")
         .send()
         .await
@@ -298,11 +294,11 @@ async fn https_scheme_proxy_is_accepted_and_dialed_over_tls() {
     // CONNECT (and any Proxy-Authorization) is encrypted. The request is no
     // longer refused at scheme inspection — it proceeds to dial the proxy. With
     // an unroutable proxy port the attempt fails with a connection-level error,
-    // NOT the old "https proxies unsupported / cleartext" refusal. (The
+    // https proxies are supported; (the
     // encrypted-credential guarantee is verified end-to-end by the live
     // mock-proxy test in tests/https_proxy.rs.)
     let err = Session::chrome()
-        .get("https://example.test/")
+        .request("GET", "https://example.test/")
         .proxy("https://user:secret@127.0.0.1:1")
         .send()
         .await
@@ -310,7 +306,7 @@ async fn https_scheme_proxy_is_accepted_and_dialed_over_tls() {
     let msg = format!("{err}").to_lowercase();
     assert!(
         !msg.contains("cleartext") && !msg.contains("unsupported proxy scheme"),
-        "https proxy must no longer be refused as unsupported, got: {msg}"
+        "https proxy must be supported, got: {msg}"
     );
 }
 
@@ -374,7 +370,7 @@ async fn streamed_chunked_response_reassembles() {
     });
 
     let resp = Session::chrome()
-        .get(&format!("http://{addr}/x"))
+        .request("GET", &format!("http://{addr}/x"))
         .stream()
         .send()
         .await
@@ -409,7 +405,7 @@ async fn streamed_fixed_length_response_reassembles() {
     });
 
     let resp = Session::chrome()
-        .get(&format!("http://{addr}/x"))
+        .request("GET", &format!("http://{addr}/x"))
         .stream()
         .send()
         .await
@@ -447,7 +443,7 @@ async fn streamed_connection_is_reused_after_full_drain() {
 
     let session = Session::chrome();
     let r1 = session
-        .get(&format!("http://{addr}/a"))
+        .request("GET", &format!("http://{addr}/a"))
         .stream()
         .send()
         .await
@@ -460,11 +456,7 @@ async fn streamed_connection_is_reused_after_full_drain() {
     assert_eq!(b1, b"first");
 
     // Reuses the reinstated connection (the server only accepted once).
-    let r2 = session
-        .get(&format!("http://{addr}/b"))
-        .send()
-        .await
-        .unwrap();
+    let r2 = session.get(&format!("http://{addr}/b")).await.unwrap();
     assert_eq!(r2.text(), "second");
     server.await.unwrap();
 }
@@ -492,7 +484,7 @@ async fn streamed_read_timeout_fires_on_stall() {
         .build()
         .unwrap();
     let resp = session
-        .get(&format!("http://{addr}/x"))
+        .request("GET", &format!("http://{addr}/x"))
         .stream()
         .send()
         .await
@@ -547,7 +539,7 @@ async fn streamed_connection_dropped_when_consumer_drops_early() {
 
     let session = Session::chrome();
     let r1 = session
-        .get(&format!("http://{addr}/a"))
+        .request("GET", &format!("http://{addr}/a"))
         .stream()
         .send()
         .await
@@ -557,11 +549,7 @@ async fn streamed_connection_dropped_when_consumer_drops_early() {
     drop(s1); // early drop — the pump must NOT reinstate this connection
 
     // A correctly-dropped connection forces a second accept for request 2.
-    let r2 = session
-        .get(&format!("http://{addr}/b"))
-        .send()
-        .await
-        .unwrap();
+    let r2 = session.get(&format!("http://{addr}/b")).await.unwrap();
     assert_eq!(r2.status(), 200);
     // Poll briefly: the second accept is registered as r2 completes.
     assert_eq!(

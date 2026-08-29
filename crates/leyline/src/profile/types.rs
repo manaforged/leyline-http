@@ -3,7 +3,10 @@
 use serde::{Deserialize, de::Error as _};
 use std::collections::HashMap;
 
-#[allow(missing_docs)]
+#[expect(
+    missing_docs,
+    reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
+)]
 /// A complete browser fingerprint profile, loaded from TOML.
 #[derive(Debug, Clone, Deserialize)]
 pub struct BrowserProfile {
@@ -14,7 +17,10 @@ pub struct BrowserProfile {
     pub identity: HashMap<String, PlatformIdentity>,
 }
 
-#[allow(missing_docs)]
+#[expect(
+    missing_docs,
+    reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
+)]
 /// Profile metadata.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ProfileMeta {
@@ -27,13 +33,16 @@ pub struct ProfileMeta {
     pub verified_against: String,
     /// The exact browser build this profile's fingerprint was captured
     /// against, e.g. `"chrome-150.0.7871.128"`. Optional: absent means the
-    /// capture anchor is unrecorded, which [`BrowserProfile::load_warnings`]
+    /// capture build is unrecorded, which [`BrowserProfile::load_warnings`]
     /// flags (a warning, not a hard error, so unanchored profiles still load).
     #[serde(default)]
     pub captured_against: Option<String>,
 }
 
-#[allow(missing_docs)]
+#[expect(
+    missing_docs,
+    reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
+)]
 /// TLS ClientHello configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct TlsProfile {
@@ -92,7 +101,10 @@ const fn default_true() -> bool {
     true
 }
 
-#[allow(missing_docs)]
+#[expect(
+    missing_docs,
+    reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
+)]
 /// Expected TLS fingerprint for verification.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct TlsFingerprint {
@@ -109,7 +121,10 @@ pub struct TlsFingerprint {
     pub platforms: HashMap<String, TlsFingerprint>,
 }
 
-#[allow(missing_docs)]
+#[expect(
+    missing_docs,
+    reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
+)]
 /// HTTP/2 SETTINGS frame configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct H2Profile {
@@ -160,7 +175,10 @@ pub struct H2PriorityProfile {
     pub weight: u8,
 }
 
-#[allow(missing_docs)]
+#[expect(
+    missing_docs,
+    reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
+)]
 /// Per-platform overrides for an [`H2Profile`].
 ///
 /// Each `Some` field overrides the base profile's matching field. Names
@@ -203,7 +221,10 @@ pub struct H2PlatformOverride {
     pub fingerprint: Option<H2Fingerprint>,
 }
 
-#[allow(missing_docs)]
+#[expect(
+    missing_docs,
+    reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
+)]
 /// Expected H2 fingerprint for verification.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct H2Fingerprint {
@@ -211,7 +232,10 @@ pub struct H2Fingerprint {
     pub akamai: Option<String>,
 }
 
-#[allow(missing_docs)]
+#[expect(
+    missing_docs,
+    reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
+)]
 /// Platform-specific identity (user-agent, sec-ch-ua).
 #[derive(Debug, Clone, Deserialize)]
 pub struct PlatformIdentity {
@@ -258,13 +282,11 @@ impl BrowserProfile {
         Ok(profile)
     }
 
-    /// Non-fatal load-time warnings for a parsed profile — gaps a maintainer
-    /// should close but that do not stop the profile from loading.
+    /// Non-fatal load-time warnings for a parsed profile.
     ///
-    /// Currently reports a missing or empty `[meta] captured_against`, which
-    /// keeps a profile's capture build machine-checkable. [`Self::from_toml`] logs each via `tracing::warn!`;
-    /// returning them as data lets tests and tooling assert without a tracing
-    /// subscriber.
+    /// Currently reports a missing or empty `[meta] captured_against`.
+    /// [`Self::from_toml`] logs each via `tracing::warn!`. Returning them
+    /// as data lets tests assert without a tracing subscriber.
     pub fn load_warnings(&self) -> Vec<String> {
         let mut warnings = Vec::new();
         let capture_unrecorded = self
@@ -275,7 +297,7 @@ impl BrowserProfile {
         if capture_unrecorded {
             warnings.push(format!(
                 "{}: [meta] captured_against is missing — the exact browser build this \
-                 profile was captured against is unrecorded (lockstep versioning rule)",
+                 profile was captured against is unrecorded",
                 self.meta.name
             ));
         }
@@ -391,37 +413,4 @@ impl H2Profile {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::profile::{Browser, Platform, ProfileRegistry};
-
-    fn chrome_h2(version: Browser) -> H2Profile {
-        ProfileRegistry::builtin()
-            .get_browser(version)
-            .expect("built-in profile")
-            .h2
-            .clone()
-    }
-
-    #[test]
-    fn unknown_omit_settings_name_is_rejected() {
-        let mut h2 = chrome_h2(Browser::Chrome147);
-        let over = H2PlatformOverride {
-            omit_settings: vec!["not_a_setting".into()],
-            ..Default::default()
-        };
-        h2.platforms
-            .insert(Platform::Windows.identity_key().to_string(), over);
-        assert!(
-            h2.resolve_for_platform(Platform::Windows).is_err(),
-            "a bogus omit_settings name was silently ignored instead of rejected"
-        );
-    }
-
-    #[test]
-    fn builtin_platform_overrides_resolve_ok() {
-        // Chrome 145 macOS override drops max_concurrent_streams + unknown_setting8.
-        let h2 = chrome_h2(Browser::Chrome145);
-        assert!(h2.resolve_for_platform(Platform::MacOS).is_ok());
-    }
-}
+mod tests;

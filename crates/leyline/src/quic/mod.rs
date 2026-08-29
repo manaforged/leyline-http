@@ -5,6 +5,9 @@
 //! connection survives between requests via a driver task and multiplexes
 //! request streams ([`pool`]).
 
+#![forbid(unsafe_code)]
+// This module must stay free of `unsafe`; memory-unsafe code is confined to
+// leyline-bssl* (FFI) and leyline's tcp/tls platform bridges (reviewed there).
 mod config;
 mod connection;
 mod pool;

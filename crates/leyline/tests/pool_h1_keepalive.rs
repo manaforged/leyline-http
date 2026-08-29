@@ -11,29 +11,30 @@
 //! 3. A mid-exchange drop by the server surfaces as a clean error
 //!    (no panic) and the next request opens a fresh TCP — with the
 //!    `evictions_dead` counter bumped.
-
+#![expect(
+    clippy::unwrap_used,
+    reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
+)]
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use leyline::pool::{H1Body, H1ResponseBody, H1Target, Pool, send_request_h1_pooled};
 use leyline::profile::{Browser, Platform, ProfileRegistry};
-use leyline::tls::{ConnectorVariant, FingerprintConnector};
+use leyline::tls::FingerprintConnector;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 /// Spin up a bare `FingerprintConnector` so we can exercise the
 /// plaintext-HTTP path without standing up a full `Session`. The TLS
 /// fields never fire for `http://` destinations.
-fn bare_connector() -> ConnectorVariant {
+fn bare_connector() -> FingerprintConnector {
     let registry = ProfileRegistry::builtin();
     let profile = registry
         .get_browser(Browser::Chrome147)
         .expect("chrome147 profile is bundled");
-    ConnectorVariant::Fingerprint(
-        FingerprintConnector::new(profile, Platform::Windows.tcp_profile())
-            .expect("build fingerprint connector"),
-    )
+    FingerprintConnector::new(profile, Platform::Windows.tcp_profile())
+        .expect("build fingerprint connector")
 }
 
 /// A tiny mock server that accepts TCP connections, reads one
@@ -111,7 +112,7 @@ where
 }
 
 /// Shared setup: pool, connector, URL.
-fn setup() -> (Arc<Pool>, ConnectorVariant) {
+fn setup() -> (Arc<Pool>, FingerprintConnector) {
     (Arc::new(Pool::new()), bare_connector())
 }
 
@@ -527,4 +528,88 @@ async fn h1_cancelled_request_releases_permit() {
         .expect("request B must not deadlock — the cancelled request must release its permit")
         .expect("request B succeeds");
     assert_eq!(resp.status, 200);
+}
+
+/// A POST on a warm pooled socket whose server answers with a truncated
+/// body and closes must surface the error — never replay on a second
+/// connection.
+#[tokio::test]
+async fn post_is_not_replayed_after_mid_response_close() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let conns = Arc::new(AtomicUsize::new(0));
+    let conns_srv = conns.clone();
+
+    let server = tokio::spawn(async move {
+        let (mut sock, _) = listener.accept().await.unwrap();
+        conns_srv.fetch_add(1, Ordering::SeqCst);
+
+        // Exchange 1: warm the pool (keep-alive 200). The socket stays open —
+        // the client will reuse it.
+        let mut buf = [0u8; 1024];
+        let _ = sock.read(&mut buf).await;
+        let _ = sock
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+            .await;
+        let _ = sock.flush().await;
+
+        // Exchange 2: the POST arrives on the SAME socket. The server
+        // answers with a declared body longer than what it sends, then
+        // closes — the response started, so the request may already have
+        // been processed.
+        let _ = sock.read(&mut buf).await;
+        let _ = sock
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nabc")
+            .await;
+        let _ = sock.flush().await;
+        drop(sock);
+    });
+
+    let pool = Arc::new(Pool::new());
+    let connector = bare_connector();
+
+    // Warm the pool with a GET.
+    let url = url::Url::parse(&format!("http://{addr}/warm")).unwrap();
+    let warm = send_request_h1_pooled(
+        &pool,
+        &connector,
+        "http",
+        &addr.ip().to_string(),
+        addr.port(),
+        "GET",
+        &url,
+        vec![],
+        H1Body::Empty,
+        None,
+        H1Target::OriginForm,
+        false,
+    )
+    .await
+    .expect("warm-up request succeeds");
+    assert_eq!(warm.status, 200);
+
+    // POST on the warm socket; the server truncates and closes.
+    let url = url::Url::parse(&format!("http://{addr}/charge")).unwrap();
+    let post = send_request_h1_pooled(
+        &pool,
+        &connector,
+        "http",
+        &addr.ip().to_string(),
+        addr.port(),
+        "POST",
+        &url,
+        vec![],
+        H1Body::Buffered(bytes::Bytes::from_static(b"payload")),
+        None,
+        H1Target::OriginForm,
+        false,
+    )
+    .await;
+
+    assert!(post.is_err(), "mid-response close must surface as an error");
+
+    // Exactly one connection total. A second accept would mean the POST
+    // body was replayed on a fresh connection.
+    assert_eq!(conns.load(Ordering::SeqCst), 1, "POST must not be replayed");
+    server.await.unwrap();
 }

@@ -16,7 +16,7 @@ const SMOKE_TIMEOUT: Duration = Duration::from_secs(25);
 type SmokeFuture<'a> = Pin<Box<dyn Future<Output = Result<String>> + 'a>>;
 
 // Live competitive smoke suite. Hits external services (tls.peet.ws, httpbin,
-// cloudflare-quic). Opt-in: `cargo test -p leyline --test smoke -- --ignored
+// cloudflare-quic). Opt-in: `cargo test -p leyline-tls --test smoke -- --ignored
 // --nocapture`.
 #[tokio::test]
 #[ignore]
@@ -150,7 +150,7 @@ async fn smoke_suite() {
         smoke(async {
             let s = Session::chrome();
             let r = s
-                .get("https://httpbin.org/get")
+                .request("GET", "https://httpbin.org/get")
                 .query([("foo", "bar"), ("n", "42")])
                 .send()
                 .await?;
@@ -169,7 +169,7 @@ async fn smoke_suite() {
         smoke(async {
             let s = Session::chrome();
             let r = s
-                .get("https://httpbin.org/get")
+                .request("GET", "https://httpbin.org/get")
                 .bearer_auth("test-token-123")
                 .send()
                 .await?;
@@ -360,7 +360,7 @@ async fn h1_wire_shape() -> Result<String> {
 
     let session = Session::chrome();
     let resp = session
-        .get(&format!("http://{addr}/wire?q=1"))
+        .request("GET", &format!("http://{addr}/wire?q=1"))
         .append_header("x-proof", "smoke")
         .send()
         .await?;
@@ -394,7 +394,7 @@ async fn h3_get(browser: Browser) -> Result<String> {
     let session = Session::builder().browser(browser).http3().build()?;
     let url = format!("https://{H3_GET_HOST}/");
     let resp = session
-        .get(&url)
+        .request("GET", &url)
         .header("accept", "text/html,application/xhtml+xml")
         .send()
         .await?;

@@ -72,7 +72,12 @@ impl HeadersFrame {
             }
             let pad_len = payload[0] as usize;
             offset = 1;
-            if pad_len >= end - offset {
+            // Same arithmetic as DATA: the pad-length octet plus the
+            // padding must fit inside the payload. A padding length that
+            // consumes everything after the octet leaves an empty (but
+            // well-formed) header block fragment and is allowed; RFC 9113
+            // Section 6.2 has no stricter rule.
+            if offset + pad_len > payload.len() {
                 return Err(H2Error::Connection {
                     code: ErrorCode::ProtocolError,
                     reason: "HEADERS padding exceeds payload".into(),
@@ -150,3 +155,6 @@ impl HeadersFrame {
         buf.put_slice(&self.fragment);
     }
 }
+
+#[cfg(test)]
+mod tests;

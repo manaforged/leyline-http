@@ -8,7 +8,6 @@
 //! `WINDOW_UPDATE(stream=0, inc=0x7FFFFFFF)` twice would climb past
 //! 2^31 − 1 without any error surfaced to the caller — an interop
 //! + compliance failure (h2spec 6.9.1).
-
 #[path = "h2_support/mod.rs"]
 mod support;
 

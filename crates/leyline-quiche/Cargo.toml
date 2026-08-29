@@ -26,9 +26,7 @@ include = [
 ]
 
 # Vendored third-party code (cloudflare/quiche). Hygiene gates (line caps,
-# clippy strictness) do not apply here — we track upstream.
-[package.metadata.leyline]
-vendored = true
+# clippy strictness) do not apply here. We track upstream.
 
 [features]
 default = ["boringssl-bssl-crate"]

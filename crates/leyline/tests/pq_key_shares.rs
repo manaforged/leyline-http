@@ -9,7 +9,6 @@
 //! Leyline drives BoringSSL directly, so the two key shares should always
 //! come from independent ephemeral generations. This test captures the real
 //! ClientHello on the wire and locks that property in.
-
 use leyline::Browser;
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpListener;

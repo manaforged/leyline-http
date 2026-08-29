@@ -37,7 +37,8 @@
     "build": "napi build --platform --release --cargo-cwd crates/leyline-node wrappers/node",
     "build:debug": "napi build --platform --cargo-cwd crates/leyline-node wrappers/node",
     "artifacts": "napi artifacts --dir artifacts --dist npm",
-    "test": "node wrappers/node/test/offline.js && node wrappers/node/test/smoke.js"
+    "test": "node wrappers/node/test/offline.js && node wrappers/node/test/smoke.js",
+    "lint": "oxlint wrappers/node tools"
   },
   "files": [
     "wrappers/node/leyline.js",
@@ -56,6 +57,8 @@
     "@manaforged/leyline-win32-x64-msvc": "1.0.0"
   },
   "devDependencies": {
-    "@napi-rs/cli": "^2.18.4"
+    "@napi-rs/cli": "^2.18.4",
+    "@oxlint/plugins": "^1.80.0",
+    "oxlint": "^1.80.0"
   }
 }

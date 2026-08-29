@@ -163,5 +163,9 @@ flate2 = "1"
 brotli = "8"
 zstd = "0.13"
 
+[package.metadata.cargo-machete]
+# imported as `md5` (crate `md-5`); used by the digest-auth MD5 algorithm
+ignore = ["md-5"]
+
 [lints]
 workspace = true

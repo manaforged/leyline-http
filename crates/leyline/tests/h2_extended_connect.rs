@@ -11,7 +11,6 @@
 //!   treats as "try H1";
 //! - stream teardown: dropping the stream closes the write half with
 //!   END_STREAM and leaves sibling streams alive on the connection.
-
 #[path = "h2_support/mod.rs"]
 mod support;
 
@@ -175,6 +174,7 @@ async fn write_data<S: tokio::io::AsyncWrite + Unpin>(
         stream_id,
         end_stream,
         data: Bytes::copy_from_slice(data),
+        wire_len: data.len() as u64,
     };
     let mut buf = BytesMut::new();
     d.encode(&mut buf);

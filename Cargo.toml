@@ -58,7 +58,7 @@ sha1 = "0.10"
 base64 = "0.22"
 
 [profile.release]
-lto = "thin"
+lto = "fat"
 codegen-units = 1
 strip = "symbols"
 opt-level = 3

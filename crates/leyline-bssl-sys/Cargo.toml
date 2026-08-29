@@ -35,6 +35,8 @@ include = [
     "/src/bindings/x86_64-unknown-linux-gnu.rs",
     "/src/bindings/aarch64-apple-darwin.rs",
     "/src/bindings/aarch64-unknown-linux-gnu.rs",
+    "/native/CHECKSUMS",
+    "/PROVENANCE.md",
     "/native/x86_64-pc-windows-msvc/lib/crypto.lib",
     "/native/x86_64-pc-windows-msvc/lib/ssl.lib",
     "/native/x86_64-unknown-linux-gnu/lib/libcrypto.a",

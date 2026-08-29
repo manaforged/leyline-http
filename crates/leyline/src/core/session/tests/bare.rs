@@ -31,11 +31,7 @@ async fn capture_get_headers(session: Session) -> String {
             .unwrap();
         String::from_utf8_lossy(&req).to_string()
     });
-    let _ = session
-        .get(&format!("http://{addr}/"))
-        .send()
-        .await
-        .unwrap();
+    let _ = session.get(&format!("http://{addr}/")).await.unwrap();
     server.await.unwrap()
 }
 
@@ -88,21 +84,35 @@ async fn bare_session_sends_generic_ua_and_no_client_hints() {
     );
 }
 
+#[tokio::test]
+async fn chrome_get_emits_navigate_headers() {
+    let req = capture_get_headers(Session::chrome()).await;
+    let lower = req.to_lowercase();
+    assert!(
+        lower.contains("sec-fetch-mode: navigate"),
+        "Chrome GET must look like a document fetch:\n{req}"
+    );
+    assert!(
+        lower.contains("sec-ch-ua"),
+        "Chrome GET must emit client hints:\n{req}"
+    );
+}
+
 #[test]
 fn session_retry_default_is_inherited_by_requests() {
     use crate::RetryPolicy;
     let policy = RetryPolicy::default().with_max_retries(7);
     let session = Session::builder().retry(policy).build().unwrap();
     // A request that does not call .retry(..) inherits the session default.
-    let req = session.get("https://example.test/");
+    let req = session.request("GET", "https://example.test/");
     assert_eq!(req.retry_policy.max_retries, 7);
     // A per-request override still wins over the session default.
     let overridden = session
-        .get("https://example.test/")
+        .request("GET", "https://example.test/")
         .retry(RetryPolicy::none());
     assert_eq!(overridden.retry_policy.max_retries, 0);
     // A session with no explicit policy performs no application retries.
-    let bare = Session::new().get("https://example.test/");
+    let bare = Session::new().request("GET", "https://example.test/");
     assert_eq!(bare.retry_policy.max_retries, 0);
 }
 
@@ -113,8 +123,29 @@ fn platform_host_resolves_and_never_leaks() {
     // Explicit platform still wins and is honoured verbatim.
     let s = Session::builder()
         .browser(Browser::Chrome148)
-        .platform(Platform::MacOS)
+        .macos()
         .build()
         .unwrap();
     assert_eq!(s.platform(), Platform::MacOS);
+}
+
+#[test]
+fn chrome_linux_is_one_chain() {
+    let s = Session::builder().chrome().linux().build().unwrap();
+    assert_eq!(s.browser(), Some(Browser::default_browser()));
+    assert_eq!(s.platform(), Platform::Linux);
+}
+
+#[test]
+fn safari_ios_picks_iphone_profile() {
+    let s = Session::builder().safari().ios().build().unwrap();
+    assert_eq!(s.browser(), Some(Browser::SafariIOS18));
+    assert_eq!(s.platform(), Platform::IOS);
+}
+
+#[test]
+fn ios_then_safari_still_iphone() {
+    let s = Session::builder().ios().safari().build().unwrap();
+    assert_eq!(s.browser(), Some(Browser::SafariIOS18));
+    assert_eq!(s.platform(), Platform::IOS);
 }

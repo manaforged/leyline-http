@@ -135,6 +135,20 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         for (_, mut actor) in self.streams.drain() {
             actor.deliver_err(clone_err(&final_err));
         }
+        // Deferred-at-capacity requests fail with the same final status.
+        while let Some(cmd) = self.pending.pop_front() {
+            match cmd {
+                DriverCommand::SendRequest { response_tx, .. } => {
+                    let _ = response_tx.send(Err(clone_err(&final_err)));
+                }
+                DriverCommand::SendRequestEx { response_tx, .. } => {
+                    let _ = response_tx.send(Err(clone_err(&final_err)));
+                }
+                DriverCommand::OpenConnect { headers_tx, .. } => {
+                    let _ = headers_tx.send(Err(clone_err(&final_err)));
+                }
+            }
+        }
         // Drain remaining commands in the channel and fail them.
         while let Ok(cmd) = self.command_rx.try_recv() {
             match cmd {
@@ -168,11 +182,17 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             // slot is reclaimed within one tick (100 ms), which is the bounded
             // cadence the sweep was designed for.
             let mut tick_fired = false;
+            if !self.pending.is_empty() {
+                self.drain_pending().await?;
+            }
             tokio::select! {
                 biased;
                 frame = self.reader.next() => {
                     match frame? {
-                        Some(f) => self.on_inbound_frame(f).await?,
+                        Some(f) => {
+                            self.on_inbound_frame(f).await?;
+                            self.drain_pending().await?;
+                        }
                         None => {
                             // Reader EOF. If we've initiated shutdown, this is ok.
                             return if self.shutdown_started {
@@ -188,7 +208,15 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 }
                 maybe_cmd = self.command_rx.recv() => {
                     match maybe_cmd {
-                        Some(cmd) => self.on_command(cmd).await?,
+                        Some(cmd) => {
+                            // Batch: one wakeup serves every command already
+                            // queued behind this one — each saved recv()
+                            // transition is a saved task park under load.
+                            self.on_command(cmd).await?;
+                            while let Ok(next) = self.command_rx.try_recv() {
+                                self.on_command(next).await?;
+                            }
+                        }
                         None => {
                             // Last handle dropped — graceful shutdown.
                             return self.graceful_shutdown().await;
@@ -305,6 +333,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             });
         }
         Ok(())
+    }
+
+    /// Peer SETTINGS received — the concurrent-stream limit is known and
+    /// admission decisions are meaningful.
+    pub(super) fn peer_ready(&self) -> bool {
+        self.peer_greeted
     }
 
     /// Reject a new stream if the peer's MAX_CONCURRENT_STREAMS is reached

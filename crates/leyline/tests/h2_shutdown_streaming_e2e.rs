@@ -10,7 +10,6 @@
 //! The mock server reads the full upload (with a per-read starvation
 //! timeout) and only then completes the response, so the test passes
 //! only if the shutdown drain keeps pumping body chunks.
-
 #[path = "h2_support/mod.rs"]
 mod support;
 
@@ -123,6 +122,7 @@ async fn streaming_upload_completes_after_last_handle_drops() {
             stream_id,
             end_stream: true,
             data: Bytes::from_static(b"done"),
+            wire_len: 4,
         };
         buf.clear();
         done.encode(&mut buf);

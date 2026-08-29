@@ -10,7 +10,6 @@
 //! This drives `checkout_handle` against a server that accepts every connection
 //! and then drops it (so the TLS handshake fails on EOF) and asserts the number
 //! of accepted connections — i.e. the number of dials — stays small.
-
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -18,18 +17,16 @@ use std::time::Duration;
 use leyline::h2::H2Config;
 use leyline::pool::Pool;
 use leyline::profile::{Browser, Platform, ProfileRegistry};
-use leyline::tls::{ConnectorVariant, FingerprintConnector};
+use leyline::tls::FingerprintConnector;
 use tokio::net::TcpListener;
 
-fn bare_connector() -> ConnectorVariant {
+fn bare_connector() -> FingerprintConnector {
     let registry = ProfileRegistry::builtin();
     let profile = registry
         .get_browser(Browser::Chrome147)
         .expect("chrome147 profile is bundled");
-    ConnectorVariant::Fingerprint(
-        FingerprintConnector::new(profile, Platform::Windows.tcp_profile())
-            .expect("build fingerprint connector"),
-    )
+    FingerprintConnector::new(profile, Platform::Windows.tcp_profile())
+        .expect("build fingerprint connector")
 }
 
 fn chrome_h2_config() -> H2Config {

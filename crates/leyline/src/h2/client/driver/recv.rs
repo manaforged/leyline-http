@@ -81,6 +81,8 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 }
                 self.peer_snapshot
                     .set_max_concurrent_streams(self.peer_settings.max_concurrent_streams);
+                self.peer_greeted = true;
+                self.drain_pending().await?;
                 self.peer_snapshot
                     .set_enable_connect_protocol(self.peer_settings.enable_connect_protocol);
                 self.writer.write_settings_ack().await?;
@@ -93,8 +95,14 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 // peer's decoder). Our decoder's ceiling is whatever we
                 // advertised at connection setup and does not change when
                 // the peer updates its own SETTINGS.
-                self.encoder
-                    .set_max_table_size(self.peer_settings.header_table_size as usize);
+                // Clamp the encoder table: a hostile peer advertising
+                // HEADER_TABLE_SIZE: 0xffffffff would otherwise remove our
+                // eviction bound and make every encode an O(table) scan
+                // (nghttp2 and Go clamp at 4096 the same way). We advertise
+                // 4096 ourselves, so this never changes bytes against
+                // compliant peers.
+                let encoder_cap = (self.peer_settings.header_table_size as usize).min(4096);
+                self.encoder.set_max_table_size(encoder_cap);
             }
             Frame::WindowUpdate(w) if w.stream_id == 0 => {
                 // RFC 9113 §6.9.1: a sender MUST NOT allow a
@@ -196,9 +204,16 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 self.fail_stream(r.stream_id, err);
             }
             Frame::PushPromise(pp) => {
+                // RFC 9113 §4.3: every field block must be decoded even when
+                // the stream is reset — the block mutates the shared dynamic
+                // table. Skipping it desyncs HPACK and fails the whole
+                // connection on the next dynamic-index reference. Decode,
+                // discard the promised headers, reset the stream.
+                let decoded = self.decoder.decode_header_block(&pp.fragment);
                 self.writer
                     .write_rst_stream(pp.promised_stream_id, ErrorCode::Cancel)
                     .await?;
+                decoded.map_err(H2Error::Hpack)?;
             }
             Frame::Continuation { .. } => {
                 // A bare CONTINUATION without a preceding HEADERS we
@@ -401,7 +416,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
 
     pub(super) async fn on_data(&mut self, d: DataFrame) -> Result<(), H2Error> {
         let stream_id = d.stream_id;
-        let len = d.data.len() as i64;
+        // Flow control counts the entire frame payload, including the
+        // pad-length octet and padding (RFC 9113 Section 6.9). `d.data`
+        // is the unpadded body, so `wire_len` is the honest number here.
+        let len = d.wire_len as i64;
 
         // Connection-level flow control: the peer burned `len` bytes of
         // its `conn_send_window` to put these bytes on the wire, so we

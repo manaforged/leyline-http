@@ -35,6 +35,9 @@
 //! The last-use timestamp is updated on every checkout, so LRU
 //! ordering reflects actual request activity, not install time.
 
+#![forbid(unsafe_code)]
+// This module must stay free of `unsafe`; memory-unsafe code is confined to
+// leyline-bssl* (FFI) and leyline's tcp/tls platform bridges (reviewed there).
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -42,10 +45,13 @@ use crate::core::ResponseTiming;
 use crate::h2::client::{H2ResponseEx, RequestBody};
 use crate::h2::config::H2Config;
 use crate::h2::connection::{ClientConnection, PseudoHeaders};
-use crate::tls::ConnectorVariant;
+use crate::tls::FingerprintConnector;
 
 mod h1;
-#[allow(clippy::module_inception)]
+#[expect(
+    clippy::module_inception,
+    reason = "pool::pool is the pool engine; the parent module is the public facade"
+)]
 mod pool;
 mod types;
 
@@ -62,12 +68,14 @@ use types::{H2Io, PoolKey, Transport};
 
 /// Construct a pool key for a transport family. Visible to the `h1` submodule.
 pub(crate) fn make_key(
+    scheme: &str,
     host: &str,
     port: u16,
     proxy: Option<&str>,
     transport: Transport,
 ) -> PoolKey {
     PoolKey {
+        scheme: scheme.to_string(),
         host: host.to_string(),
         port,
         proxy: proxy.map(|s| s.to_string()),
@@ -80,7 +88,7 @@ pub(crate) fn make_key(
 /// and return the cloneable client handle plus its TLS metadata.
 async fn open_fresh_h2(
     pool: &Arc<Pool>,
-    connector: &ConnectorVariant,
+    connector: &FingerprintConnector,
     h2_config: &H2Config,
     key: PoolKey,
     host: &str,
@@ -166,7 +174,7 @@ fn owned_connect_err(err: &crate::Error) -> crate::Error {
 /// so a cancelled leader cannot strand waiters and the next miss starts fresh.
 fn h2_inflight_connect(
     pool: &Arc<Pool>,
-    connector: &ConnectorVariant,
+    connector: &FingerprintConnector,
     h2_config: &H2Config,
     key: &PoolKey,
     host: &str,
@@ -228,7 +236,7 @@ fn h2_inflight_connect(
 /// Bounded to two attempts, so a persistently-down host surfaces the error instead of looping.
 async fn open_h2_coalesced(
     pool: &Arc<Pool>,
-    connector: &ConnectorVariant,
+    connector: &FingerprintConnector,
     h2_config: &H2Config,
     key: PoolKey,
     host: &str,
@@ -273,13 +281,16 @@ async fn open_h2_coalesced(
 )]
 pub async fn checkout_handle(
     pool: &Arc<Pool>,
-    connector: &ConnectorVariant,
+    connector: &FingerprintConnector,
     h2_config: &H2Config,
     host: &str,
     port: u16,
     proxy: Option<&str>,
 ) -> Result<(crate::h2::client::H2Client, TlsInfo), crate::Error> {
-    let key = make_key(host, port, proxy, Transport::Tcp);
+    // The h2 checkout path is https-only (see send_request_h2's scheme
+    // guard); the key carries the scheme so a same-host:port plaintext
+    // socket can never satisfy an https request.
+    let key = make_key("https", host, port, proxy, Transport::Tcp);
 
     pool.evict_idle();
 
@@ -299,27 +310,27 @@ async fn open_fresh_h3_installed(
     pool: &Arc<Pool>,
     h3_config: &crate::quic::H3Config,
     profile: &crate::profile::BrowserProfile,
+    trust: &crate::tls::TlsTrustConfig,
     key: PoolKey,
     host: &str,
     port: u16,
 ) -> Result<(crate::quic::H3Client, TlsInfo), crate::Error> {
-    let (handle, driver, tls) = crate::quic::open_fresh_h3(h3_config, profile, host, port)
+    let (handle, driver, tls) = crate::quic::open_fresh_h3(h3_config, profile, trust, host, port)
         .await
         .map_err(crate::Error::Http3)?;
     Ok(pool.install_or_get_h3(key, handle, driver, tls))
 }
 
-/// Build (or join) the single-flight in-flight H3 connect for `key`: the shared
-/// future every concurrent first-request (and both `Race` legs) awaits. Spawned
-/// so it is driven to completion and always runs its cleanup even if every
-/// awaiter cancels (e.g. the losing leg of a `Race`); the task removes its own
-/// in-flight entry on completion. See [`h2_inflight_connect`] for the lazy-
-/// `Shared`/`Pool`-leak rationale — identical here, plus a stranded UDP socket.
+/// Shared in-flight H3 connect for `key`. Concurrent first-requests await
+/// this one handshake. The connect task removes its map entry when it
+/// finishes, including when every waiter cancels. See [`h2_inflight_connect`]
+/// for the `Shared`/`Pool` leak rationale. Same here, plus a UDP socket.
 #[cfg(feature = "http3")]
 fn h3_inflight_connect(
     pool: &Arc<Pool>,
     h3_config: &crate::quic::H3Config,
     profile: &crate::profile::BrowserProfile,
+    trust: &crate::tls::TlsTrustConfig,
     key: &PoolKey,
     host: &str,
     port: u16,
@@ -330,14 +341,22 @@ fn h3_inflight_connect(
         let pool = Arc::clone(pool);
         let h3_config = h3_config.clone();
         let profile = profile.clone();
+        let trust = trust.clone();
         let connect_key = key.clone();
         let cleanup_key = key.clone();
         let host = host.to_string();
         let handle = tokio::spawn(async move {
-            let result =
-                open_fresh_h3_installed(&pool, &h3_config, &profile, connect_key, &host, port)
-                    .await
-                    .map_err(Arc::new);
+            let result = open_fresh_h3_installed(
+                &pool,
+                &h3_config,
+                &profile,
+                &trust,
+                connect_key,
+                &host,
+                port,
+            )
+            .await
+            .map_err(Arc::new);
             // On completion (success or failure) drop our in-flight entry. On
             // success the connection is already installed, so later callers
             // checkout-hit rather than re-connect.
@@ -356,18 +375,16 @@ fn h3_inflight_connect(
     })
 }
 
-/// Establish — or join an already in-progress — QUIC + HTTP/3 connection to
-/// `(host, port)`, single-flighting concurrent first-requests (and both `Race`
-/// legs) so they share ONE handshake instead of each opening their own QUIC
-/// connection and dropping all but the first at install. Mirrors
-/// [`open_h2_coalesced`], including the single-flighted failure path: when the
-/// shared connect fails, the waiters re-coalesce onto ONE fresh retry rather
-/// than each dialing a down host concurrently. Bounded to two attempts.
+/// Open or join a QUIC + HTTP/3 connection to `(host, port)`. Concurrent
+/// first-requests share one handshake. On shared failure, waiters join one
+/// retry instead of each dialing a down host. Two attempts. Mirrors
+/// [`open_h2_coalesced`].
 #[cfg(feature = "http3")]
 async fn open_h3_coalesced(
     pool: &Arc<Pool>,
     h3_config: &crate::quic::H3Config,
     profile: &crate::profile::BrowserProfile,
+    trust: &crate::tls::TlsTrustConfig,
     key: PoolKey,
     host: &str,
     port: u16,
@@ -386,7 +403,7 @@ async fn open_h3_coalesced(
                 return Ok(hit);
             }
         }
-        let shared = h3_inflight_connect(pool, h3_config, profile, &key, host, port);
+        let shared = h3_inflight_connect(pool, h3_config, profile, trust, &key, host, port);
         match shared.await {
             Ok(pair) => return Ok(pair),
             Err(e) => last_err = Some(e),
@@ -395,34 +412,6 @@ async fn open_h3_coalesced(
     Err(owned_connect_err(
         &last_err.expect("the retry loop runs at least once"),
     ))
-}
-
-/// Obtain a cloneable `H3Client` for `(host, port)`, reusing a
-/// live pooled QUIC connection when one exists and otherwise driving a fresh
-/// QUIC + HTTP/3 handshake. H3 has no proxy support, so the key proxy is
-/// always `None`.
-///
-/// Connection-only: returns once the connection is usable, before any request
-/// stream is opened. The transport sends the request on the returned handle;
-/// the [`ProtocolPolicy::Race`](crate::ProtocolPolicy) path races this against
-/// [`checkout_handle`] (H2) and sends on whichever connection comes up first.
-#[cfg(feature = "http3")]
-pub async fn checkout_h3_handle(
-    pool: &Arc<Pool>,
-    h3_config: &crate::quic::H3Config,
-    profile: &crate::profile::BrowserProfile,
-    host: &str,
-    port: u16,
-) -> Result<(crate::quic::H3Client, TlsInfo), crate::Error> {
-    let key = make_key(host, port, None, Transport::Quic);
-
-    pool.evict_idle();
-
-    if let Some(hit) = pool.checkout_h3(&key) {
-        return Ok(hit);
-    }
-
-    open_h3_coalesced(pool, h3_config, profile, key, host, port).await
 }
 
 /// Send an HTTP/3 request, reusing a pooled QUIC connection when alive.
@@ -435,11 +424,15 @@ pub async fn checkout_h3_handle(
 /// surfaced as-is, never replayed, so a non-idempotent request is never sent
 /// to the origin twice. A fresh connection's failure is likewise never retried.
 #[cfg(feature = "http3")]
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "flat per-request wire fields across one internal call path"
+)]
 pub async fn send_request_h3_pooled(
     pool: &Arc<Pool>,
     h3_config: &crate::quic::H3Config,
     profile: &crate::profile::BrowserProfile,
+    trust: &crate::tls::TlsTrustConfig,
     host: &str,
     port: u16,
     method: &str,
@@ -450,7 +443,7 @@ pub async fn send_request_h3_pooled(
     body_stream: Option<crate::quic::H3RequestBodyStream>,
     stream_response: bool,
 ) -> Result<(crate::quic::H3ResponseParts, TlsInfo), crate::Error> {
-    let key = make_key(host, port, None, Transport::Quic);
+    let key = make_key("https", host, port, None, Transport::Quic);
 
     pool.evict_idle();
 
@@ -497,7 +490,7 @@ pub async fn send_request_h3_pooled(
         }
     }
 
-    let (handle, tls) = open_h3_coalesced(pool, h3_config, profile, key, host, port).await?;
+    let (handle, tls) = open_h3_coalesced(pool, h3_config, profile, trust, key, host, port).await?;
     let resp = handle
         .send_request(
             method,
@@ -530,10 +523,13 @@ pub async fn send_request_h3_pooled(
         pool.hit = tracing::field::Empty,
     )
 )]
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "flat per-request wire fields across one internal call path"
+)]
 pub async fn send_request(
     pool: &Arc<Pool>,
-    connector: &ConnectorVariant,
+    connector: &FingerprintConnector,
     h2_config: &H2Config,
     pseudo: PseudoHeaders,
     headers: Vec<crate::h2::connection::HeaderPair>,
@@ -547,7 +543,13 @@ pub async fn send_request(
 
     let (connect_host, connect_port) = parse_authority(host, port);
 
-    let key = make_key(connect_host, connect_port, proxy, Transport::Tcp);
+    let key = make_key(
+        &pseudo.scheme,
+        connect_host,
+        connect_port,
+        proxy,
+        Transport::Tcp,
+    );
 
     pool.evict_idle();
 
@@ -684,53 +686,4 @@ fn parse_authority(authority: &str, default_port: u16) -> (&str, u16) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    // The keystone of H2/H3 coexistence: the same destination under different
-    // transports must be DISTINCT pool keys, or an H3 install clobbers a live
-    // H2 entry (and vice versa). If this ever asserts equal, the pool collapsed
-    // back to one-entry-per-host and the collision is back.
-    #[test]
-    fn transport_separates_the_keyspace() {
-        let tcp = make_key("example.com", 443, None, Transport::Tcp);
-        let quic = make_key("example.com", 443, None, Transport::Quic);
-        assert_ne!(tcp, quic, "H2 (Tcp) and H3 (Quic) must not share a key");
-
-        // Same transport + destination → same key (so reuse still works).
-        assert_eq!(tcp, make_key("example.com", 443, None, Transport::Tcp));
-
-        // The proxy leg still participates in identity.
-        assert_ne!(
-            tcp,
-            make_key("example.com", 443, Some("p:8080"), Transport::Tcp)
-        );
-    }
-
-    #[test]
-    fn owned_connect_error_preserves_transport_variant_and_io_kind() {
-        let tcp = crate::Error::Tls(crate::tls::TlsError::TcpConnect(
-            std::io::ErrorKind::ConnectionRefused.into(),
-        ));
-        assert!(matches!(
-            owned_connect_err(&tcp),
-            crate::Error::Tls(crate::tls::TlsError::TcpConnect(err))
-                if err.kind() == std::io::ErrorKind::ConnectionRefused
-        ));
-
-        let handshake = crate::Error::Tls(crate::tls::TlsError::HandshakeIo(
-            std::io::ErrorKind::UnexpectedEof.into(),
-        ));
-        assert!(matches!(
-            owned_connect_err(&handshake),
-            crate::Error::Tls(crate::tls::TlsError::HandshakeIo(err))
-                if err.kind() == std::io::ErrorKind::UnexpectedEof
-        ));
-
-        let io = crate::Error::Io(std::io::ErrorKind::ConnectionAborted.into());
-        assert!(matches!(
-            owned_connect_err(&io),
-            crate::Error::Io(err) if err.kind() == std::io::ErrorKind::ConnectionAborted
-        ));
-    }
-}
+mod tests;

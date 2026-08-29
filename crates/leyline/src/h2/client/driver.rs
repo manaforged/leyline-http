@@ -143,7 +143,10 @@ enum SendBodyInput {
         /// Trailers to emit after the last chunk. Not surfaced yet
         /// through the `send_request_ex` API — reserved for a future
         /// `send_request_ex_with_trailers` entry point.
-        #[allow(dead_code)]
+        #[expect(
+            dead_code,
+            reason = "reserved for a future send_request_ex_with_trailers entry point; not surfaced yet"
+        )]
         trailers: Vec<(String, String)>,
     },
 }
@@ -279,6 +282,10 @@ struct Driver<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> {
     encoder: hpack::Encoder,
     decoder: hpack::Decoder,
     peer_settings: PeerSettings,
+    /// True once the peer's first SETTINGS frame has been processed. h2
+    /// requires it before its MAX_CONCURRENT_STREAMS (if any) is known;
+    /// absence of the setting means unlimited, not unknown.
+    peer_greeted: bool,
     peer_snapshot: Arc<PeerSettingsSnapshot>,
     conn_send_window: i64,
     conn_recv_window: i64,
@@ -298,6 +305,10 @@ struct Driver<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> {
     /// Set when the peer sends GOAWAY. New SendRequest commands are
     /// rejected; already-open streams ≤ last_stream_id may finish.
     peer_goaway_last_stream: Option<u32>,
+    /// Requests deferred at the peer's MAX_CONCURRENT_STREAMS limit.
+    /// Drained (in order) every time a stream closes and a slot frees.
+    /// Buffered bodies only — streaming bodies cannot be parked.
+    pending: VecDeque<DriverCommand>,
     shutdown_started: bool,
     /// Sink given to per-stream request-body relay tasks so they can
     /// hand chunks back to the driver without needing per-stream

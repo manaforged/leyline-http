@@ -10,7 +10,7 @@ use crate::h2::config::H2Config;
 use crate::h2::connection::PseudoHeaders;
 use crate::pool::{H1Body, H1PooledError, H1ResponseBody, H1Target, Pool};
 use crate::profile::preset::HeaderPair;
-use crate::tls::ConnectorVariant;
+use crate::tls::FingerprintConnector;
 use crate::util::{base64_encode, percent_decode};
 use bytes::Bytes;
 use futures_util::StreamExt;
@@ -57,10 +57,13 @@ pub(crate) struct TransportResponse {
         proxied = proxy.is_some(),
     )
 )]
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "flat per-request wire fields across one internal call path"
+)]
 pub(crate) async fn send_request_auto(
     pool: &Arc<Pool>,
-    connector: &ConnectorVariant,
+    connector: &FingerprintConnector,
     h2_config: &H2Config,
     method: &str,
     url: &url::Url,
@@ -175,10 +178,13 @@ async fn materialise_stream_body(body: Body) -> Result<Bytes> {
     skip_all,
     fields(http.method = method, http.host = url.host_str().unwrap_or(""))
 )]
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "flat per-request wire fields across one internal call path"
+)]
 pub(crate) async fn send_request_h2(
     pool: &Arc<Pool>,
-    connector: &ConnectorVariant,
+    connector: &FingerprintConnector,
     h2_config: &H2Config,
     method: &str,
     url: &url::Url,
@@ -218,6 +224,9 @@ pub(crate) async fn send_request_h2(
 
     // Translate Body → h2 request body representation.
     let h2_req_body = body_to_h2_request(body);
+
+    // RFC 9113 §8.2.2 + §8.2.1 header hygiene for the h2 wire.
+    strip_connection_specific_headers(&mut headers)?;
 
     // Per-request wire header order (capture-driven H2 fidelity). The
     // identity-level order (Brave/Firefox shapes) already ran at
@@ -276,6 +285,56 @@ fn body_to_h2_request(body: Body) -> crate::h2::client::RequestBody {
     }
 }
 
+/// RFC 9113 §8.2.2: connection-specific headers must never be emitted on
+/// an H2 connection — a compliant peer rejects the stream. §8.2.1 requires
+/// lowercase field names; a mixed-case caller header ("X-Thing") is treated
+/// as malformed by servers. Strip the former, lowercase the latter.
+/// `te` is legal only for "trailers".
+pub(crate) fn strip_connection_specific_headers(headers: &mut Vec<HeaderPair>) -> Result<()> {
+    // One pass: count framing headers, drop connection-specific ones,
+    // and lowercase names in place. Framing ambiguity (duplicate
+    // Transfer-Encoding, or Transfer-Encoding together with
+    // Content-Length) is the request-smuggling shape; it errors after
+    // the sweep — the caller drops the headers either way.
+    let mut te = 0usize;
+    let mut cl = 0usize;
+    headers.retain_mut(|(name, value)| {
+        let lower = name.to_ascii_lowercase();
+        match lower.as_str() {
+            "transfer-encoding" => {
+                te += 1;
+                false
+            }
+            "content-length" => {
+                cl += 1;
+                true
+            }
+            "connection" | "keep-alive" | "proxy-connection" | "upgrade" | "http2-settings" => {
+                false
+            }
+            "te" => value.eq_ignore_ascii_case("trailers"),
+            _ => true,
+        }
+    });
+    if te > 1 {
+        return Err(Error::Config(format!(
+            "{te} Transfer-Encoding headers on one request: framing would be ambiguous"
+        )));
+    }
+    if te > 0 && cl > 0 {
+        return Err(Error::Config(
+            "Transfer-Encoding together with Content-Length on one request: framing would be ambiguous"
+                .into(),
+        ));
+    }
+    for (name, _) in headers.iter_mut() {
+        if name.chars().any(|c| c.is_ascii_uppercase()) {
+            *name = name.to_lowercase().into();
+        }
+    }
+    Ok(())
+}
+
 /// Translate a [`Body`] into the H1 pool's request body shape.
 fn body_to_h1(body: Body) -> H1Body {
     match body {
@@ -308,10 +367,13 @@ fn body_to_h1(body: Body) -> H1Body {
         http.host = url.host_str().unwrap_or(""),
     )
 )]
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "flat per-request wire fields across one internal call path"
+)]
 pub(crate) async fn send_request_h1(
     pool: &Arc<Pool>,
-    connector: &ConnectorVariant,
+    connector: &FingerprintConnector,
     method: &str,
     url: &url::Url,
     headers: Vec<HeaderPair>,
@@ -449,14 +511,18 @@ fn h1_error_to_core(e: H1PooledError) -> Error {
     skip_all,
     fields(http.method = method, http.host = url.host_str().unwrap_or(""))
 )]
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "flat per-request wire fields across one internal call path"
+)]
 pub(crate) async fn send_request_h3(
     pool: &Arc<Pool>,
     h3_config: &crate::quic::H3Config,
     profile: &crate::profile::BrowserProfile,
+    trust: &crate::tls::TlsTrustConfig,
     method: &str,
     url: &url::Url,
-    headers: Vec<HeaderPair>,
+    mut headers: Vec<HeaderPair>,
     body: Body,
     stream_response: bool,
 ) -> Result<TransportResponse> {
@@ -464,9 +530,21 @@ pub(crate) async fn send_request_h3(
         .host_str()
         .ok_or_else(|| Error::Config("no host in URL".into()))?;
     let port = url.port_or_known_default().unwrap_or(443);
+    // :authority carries a non-default port (rfc 9114 §4.1.1.1) and must
+    // match the h2 path's authority byte-for-byte, or the two transports
+    // fingerprint differently on the same session.
+    let authority = if url.scheme() == "https" && port == 443 {
+        host.to_string()
+    } else {
+        format!("{host}:{port}")
+    };
     let path = url.path();
     let query = url.query().map(|q| format!("?{q}")).unwrap_or_default();
     let full_path = format!("{path}{query}");
+
+    // RFC 9114 §4.2 — the same h2 hygiene rule applies to h3: no
+    // connection-specific headers, lowercase field names only.
+    strip_connection_specific_headers(&mut headers)?;
 
     // A streaming request body is pumped into the request stream incrementally;
     // a buffered body is sent whole. `content-length` (for a length-known
@@ -481,10 +559,11 @@ pub(crate) async fn send_request_h3(
         pool,
         h3_config,
         profile,
+        trust,
         host,
         port,
         method,
-        host,
+        &authority,
         &full_path,
         &headers
             .iter()
@@ -535,61 +614,6 @@ fn is_h2_alpn_mismatch(err: &Error) -> bool {
 }
 
 #[cfg(test)]
-mod alpn_fallback_tests {
-    use super::*;
-
-    #[test]
-    fn alpn_mismatch_detected() {
-        // The pool surfaces the ALPN decline as the typed Error::AlpnMismatch,
-        // which must trip the HTTP/1.1 fallback regardless of which protocol
-        // (or none) the peer negotiated. Without it, proxyless navigations to
-        // hosts that decline h2 ALPN on a cookieless interstitial hard-error
-        // instead of falling back.
-        assert!(is_h2_alpn_mismatch(&Error::AlpnMismatch {
-            negotiated: "none".into()
-        }));
-        assert!(is_h2_alpn_mismatch(&Error::AlpnMismatch {
-            negotiated: "http/1.1".into()
-        }));
-        // Unrelated errors must NOT trigger a fallback — neither a generic
-        // HTTP error nor a non-ALPN HTTP/2 transport error.
-        assert!(!is_h2_alpn_mismatch(&Error::Http("404 not found".into())));
-        assert!(!is_h2_alpn_mismatch(&Error::Http2(
-            crate::h2::H2Error::Stream {
-                stream_id: 1,
-                code: crate::h2::error::ErrorCode::RefusedStream,
-            }
-        )));
-    }
-
-    #[test]
-    fn h1_connection_closed_is_typed_retryable_but_framing_is_not() {
-        use crate::pool::H1PooledError;
-        // Mid-exchange EOF → typed Io(UnexpectedEof), classified as a
-        // connection-closed (so the retry engine's typed Io arm retries it).
-        let closed = h1_error_to_core(H1PooledError::ConnectionClosed("before headers".into()));
-        assert!(
-            matches!(&closed, Error::Io(e) if e.kind() == std::io::ErrorKind::UnexpectedEof),
-            "ConnectionClosed must map to Io(UnexpectedEof), got {closed:?}"
-        );
-        assert!(closed.is_connection_closed());
-        // A framing error whose message interpolates attacker-controlled header
-        // bytes containing "connection" must NOT be classified as
-        // connection-closed — the old substring match would have retried it
-        // (a request-smuggling hazard); the typed path does not.
-        let framing = h1_error_to_core(H1PooledError::Http(
-            "invalid Transfer-Encoding: connection-close".into(),
-        ));
-        assert!(matches!(framing, Error::Http(_)));
-        assert!(!framing.is_connection_closed());
-
-        let pinning = h1_error_to_core(H1PooledError::Tls(crate::tls::TlsError::Pinning(
-            "mismatch".into(),
-        )));
-        assert!(
-            matches!(&pinning, Error::Tls(crate::tls::TlsError::Pinning(_))),
-            "H1 must preserve typed TLS failures, got {pinning:?}"
-        );
-        assert!(!pinning.is_connection_closed());
-    }
-}
+mod alpn_fallback_tests;
+#[cfg(test)]
+mod h2_header_hygiene_tests;

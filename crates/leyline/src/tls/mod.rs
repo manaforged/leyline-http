@@ -8,6 +8,7 @@ mod builder;
 mod connector;
 mod error;
 mod happy_eyeballs;
+mod keylog;
 #[cfg(target_os = "macos")]
 mod macos_trust;
 mod nonblocking;
@@ -29,8 +30,10 @@ pub use trust::{ClientIdentity, TlsTrustConfig};
 #[doc(hidden)]
 pub use connector::FingerprintConnector;
 
+pub(crate) use builder::apply_profile_with_trust;
 pub(crate) use builder::build_ssl_context;
 pub(crate) use stream::TlsIo;
+pub(crate) use trust::install_pinning_verifier_ctx;
 
 /// A BoringSSL TLS context preconfigured to a browser profile's fingerprint.
 ///
@@ -69,7 +72,7 @@ impl TlsContext {
 /// A connected TLS stream with ALPN result.
 #[doc(hidden)]
 pub struct TlsStream {
-    /// The async TLS stream, behind the backend-agnostic [`TlsIo`] seam.
+    /// The async TLS stream.
     /// `pub(crate)` because the concrete backend is an internal detail —
     /// consumers read the neutral metadata fields below, not the raw IO.
     pub(crate) stream: TlsIo,
@@ -83,43 +86,6 @@ pub struct TlsStream {
     pub tls_version: Option<String>,
     /// Negotiated TLS cipher suite name (e.g. `"TLS_AES_128_GCM_SHA256"`).
     pub tls_cipher: Option<String>,
-}
-
-/// The active connector backend, selected once by the session builder.
-/// Every session — bare `Session::new()` (via the synthetic `BARE_PROFILE`)
-/// and browser/profile sessions alike — uses the BoringSSL
-/// [`FingerprintConnector`]. The rest of the stack dispatches
-/// `connect`/`connect_h1` through here. One variant today; the enum is the
-/// seam where a future TLS backend slots in.
-#[doc(hidden)]
-#[derive(Clone, Debug)]
-pub enum ConnectorVariant {
-    /// BoringSSL fingerprinting connector.
-    Fingerprint(FingerprintConnector),
-}
-
-impl ConnectorVariant {
-    pub(crate) async fn connect(
-        &self,
-        host: &str,
-        port: u16,
-        proxy: Option<&str>,
-    ) -> Result<TlsStream, TlsError> {
-        match self {
-            ConnectorVariant::Fingerprint(c) => c.connect(host, port, proxy).await,
-        }
-    }
-
-    pub(crate) async fn connect_h1(
-        &self,
-        host: &str,
-        port: u16,
-        proxy: Option<&str>,
-    ) -> Result<TlsStream, TlsError> {
-        match self {
-            ConnectorVariant::Fingerprint(c) => c.connect_h1(host, port, proxy).await,
-        }
-    }
 }
 
 /// Drives a TLS handshake over an already-connected TCP stream.

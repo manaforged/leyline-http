@@ -12,8 +12,7 @@
 //! bits: `stats()` on an empty pool, `with_limits` reflects in the
 //! cap, and `len()` / `is_empty()` agree with `stats().entries`.
 //!
-//! A full integration-level test (hits on a real driver) is already
-//! covered by `crates/h2/tests/multiplex.rs` + the e2e tower test.
+//! Hits on a live H2 driver are covered by `tests/h2_multiplex.rs`.
 
 use leyline::pool::{DEFAULT_IDLE_TIMEOUT, DEFAULT_MAX_CONNECTIONS, Pool, PoolStats};
 use std::time::Duration;

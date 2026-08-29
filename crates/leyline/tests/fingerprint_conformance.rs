@@ -23,7 +23,7 @@
 //!   UNANCHORED    computed but has no golden, or isn't offline-wire-verifiable
 //!                 (JA3, JA4T, cert-compression advertise-vs-apply, H3 transport).
 //!
-//! Run: `cargo nextest run -p leyline fingerprint_conformance --nocapture`
+//! Run: `cargo nextest run -p leyline-tls fingerprint_conformance --nocapture`
 //! (also written to `$CARGO_TARGET_TMPDIR/fingerprint-conformance.md`).
 
 use leyline::Platform;

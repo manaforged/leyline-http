@@ -12,6 +12,7 @@ use crate::core::error::{Error, Result};
 use crate::core::headers::HeaderList;
 use crate::core::response::Response;
 use crate::core::{RedirectAction, RedirectAttempt};
+use crate::util::redacted_url;
 
 impl Session {
     // Core execution.
@@ -21,7 +22,10 @@ impl Session {
     /// `request_proxy`, when `Some`, overrides the session's default proxy
     /// for this single request (and any redirects it follows).
     /// Handles redirects, decompression, cookies.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "flat per-request wire fields across one internal call path"
+    )]
     pub(crate) async fn execute_with_timeout(
         &self,
         method: &str,
@@ -69,9 +73,12 @@ impl Session {
         name = "session.execute",
         level = "debug",
         skip_all,
-        fields(http.method = method, http.url = raw_url)
+        fields(http.method = method, http.url = redacted_url(raw_url))
     )]
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "flat per-request wire fields across one internal call path"
+    )]
     async fn execute_inner(
         &self,
         method: &str,
@@ -83,7 +90,19 @@ impl Session {
         request_proxy: Option<&str>,
         header_order: Option<&[String]>,
     ) -> Result<Response> {
-        let mut current_url = url::Url::parse(raw_url)?;
+        let mut current_url = {
+            // Sequential calls with the same URL string are the dominant
+            // shape; the cache trades a parse for a string compare.
+            let mut cache = lock(&self.url_cache);
+            match cache.as_mut() {
+                Some((raw, parsed)) if raw == raw_url => parsed.clone(),
+                _ => {
+                    let parsed = url::Url::parse(raw_url)?;
+                    *cache = Some((raw_url.to_string(), parsed.clone()));
+                    parsed
+                }
+            }
+        };
         let original_origin = url_origin(&current_url);
         let mut current_method = method.to_string();
         // Carry the body through the redirect loop. A streaming body is
@@ -101,174 +120,23 @@ impl Session {
         let redirect_cap = self.redirect_policy.max_redirects_hint();
         for _ in 0..=redirect_cap {
             let origin = url_origin(&current_url);
-            let referer = if redirect_chain.is_empty() {
-                format!("{}/", origin)
-            } else {
-                redirect_chain
-                    .last()
-                    .cloned()
-                    .unwrap_or_else(|| format!("{}/", origin))
-            };
+            let referer = referer_for(redirect_chain.last().map(|s: &String| s.as_str()), &origin);
 
-            // Build headers.
-            let mut headers: Vec<HeaderPair> = if let Some(preset) = preset {
-                let ctx = crate::profile::preset::HeaderContext {
-                    user_agent: &self.user_agent,
-                    sec_ch_ua: &self.sec_ch_ua,
-                    sec_ch_ua_mobile: self.platform.mobile_flag(),
-                    sec_ch_ua_platform: self.platform.sec_ch_platform(),
-                    accept_language: &self.accept_language,
-                    origin: &origin,
-                    referer: &referer,
-                    firefox: self
-                        .identity
-                        .map(|id| id.http().is_firefox())
-                        .unwrap_or_else(|| self.browser.as_ref().is_some_and(|b| b.is_firefox())),
-                };
-                preset.build_headers(&ctx)
-            } else {
-                vec![
-                    ("user-agent".into(), Cow::Owned(self.user_agent.clone())),
-                    ("accept".into(), Cow::Borrowed("*/*")),
-                    (
-                        "accept-encoding".into(),
-                        Cow::Borrowed("gzip, deflate, br, zstd"),
-                    ),
-                    (
-                        "accept-language".into(),
-                        Cow::Owned(self.accept_language.clone()),
-                    ),
-                ]
-            };
+            let strip_sensitive = !redirect_chain.is_empty() && origin != original_origin;
+            let headers = self.build_hop_headers(
+                preset,
+                &origin,
+                &referer,
+                &current_url,
+                &current_method,
+                &redirect_chain,
+                &current_body,
+                extra_headers.as_ref(),
+                strip_sensitive,
+            );
 
-            // Apply Chromium-sibling brand overlays AND identity-level
-            // overrides for first-class profiles. Both apply the same
-            // shape of edits (Navigate `accept` swap, extra headers);
-            // only one of the two paths fires for any given session
-            // because brand overlays are off when Brave is first-class.
-            let navigate_accept_override = self
-                .identity_navigate_accept
-                .as_deref()
-                .or(self.brand_navigate_accept.as_deref());
-            if let (Some(accept_override), Some(Preset::Navigate)) =
-                (navigate_accept_override, preset)
-            {
-                for (name, value) in headers.iter_mut() {
-                    if name == "accept" {
-                        *value = Cow::Owned(accept_override.to_string());
-                        break;
-                    }
-                }
-            }
-            // User's `.header(..)` / `.append_header(..)` always
-            // wins over a brand or identity default — e.g. a caller on an
-            // Edge session setting `.header("dnt", "0")` must not
-            // see both `dnt: 1` (brand) and `dnt: 0` (user) on the
-            // wire. We also skip any name that the active preset
-            // already emitted, so a future preset shipping `dnt` or
-            // `sec-gpc` by default doesn't collide with the overlay.
-            for (k, v) in self
-                .brand_extra_headers
-                .iter()
-                .chain(self.identity_extra_headers.iter())
-            {
-                let user_has_it = extra_headers
-                    .as_ref()
-                    .map(|h| h.iter().any(|(uk, _)| uk.eq_ignore_ascii_case(k)))
-                    .unwrap_or(false);
-                let preset_has_it = headers.iter().any(|(hk, _)| hk.eq_ignore_ascii_case(k));
-                if !user_has_it && !preset_has_it {
-                    headers.push((Cow::Owned(k.clone()), Cow::Owned(v.clone())));
-                }
-            }
-
-            // Extra headers: include on first request, and on same-origin redirects.
-            // Strip sensitive headers on cross-origin redirects.
-            //
-            // Caller headers are merged into the preset-built list via
-            // three rules:
-            //   (1) A name the preset already emits is replaced in
-            //       place — preserves the preset position and prevents
-            //       wire-coalesced `ua1,ua2` duplicates (HTTP/1.1
-            //       §3.2.2).
-            //   (2) A caller-anchored header (`.anchored(anchor, ...)`)
-            //       is spliced immediately after (or before, for
-            //       `BeforeAcceptEncoding`) its anchor header in the
-            //       current list.
-            //   (3) A plain caller header (`.header(...)`) whose name
-            //       has a universal Chrome slot per `infer_anchor`
-            //       rides at the inferred anchor; otherwise it
-            //       appends at the end of the preset list.
-            if let Some(ref extra) = extra_headers {
-                let same_origin = origin == original_origin;
-                let strip_sensitive = !redirect_chain.is_empty() && !same_origin;
-                let sensitive = |name: &str| {
-                    let lower = name.to_ascii_lowercase();
-                    lower == "authorization" || lower == "proxy-authorization" || lower == "cookie"
-                };
-
-                apply_extra_headers(&mut headers, extra, strip_sensitive, &sensitive);
-            }
-
-            // Content-Length for requests with a known-length body.
-            // For length-unknown streams we leave it out and let the
-            // transport pick `Transfer-Encoding: chunked` (H1) or native
-            // framing (H2/H3).
-            if let Some(len) = current_body.len_hint() {
-                if !matches!(current_body, Body::Empty) || len > 0 {
-                    // The computed length is authoritative for a known-length
-                    // body. Drop any caller-supplied content-length so we never
-                    // emit two (a request-smuggling shape) or a stale value.
-                    headers.retain(|(k, _)| !k.eq_ignore_ascii_case("content-length"));
-                    // Chrome emits `content-length` as the FIRST regular
-                    // header (right after the pseudo headers on H2, right
-                    // after Host/Connection on H1) — not at the tail. The
-                    // position is part of the wire fingerprint Akamai-class
-                    // edges score on POSTs.
-                    headers.insert(0, ("content-length".into(), Cow::Owned(len.to_string())));
-                }
-            }
-
-            // Cookies. SameSite is enforced against the request's cross-site
-            // context: a cross-site redirect withholds `Strict` cookies (and
-            // `Lax` on non-safe methods), matching a real browser navigation.
-            let cross_site = crate::cookie::is_cross_site(&current_url, &redirect_chain);
-            let safe_method = ["GET", "HEAD"]
-                .iter()
-                .any(|m| current_method.eq_ignore_ascii_case(m));
-            if let Some(cookie_val) =
-                self.cookie_jar
-                    .cookie_header_for(&current_url, cross_site, safe_method)
-            {
-                headers.push(("cookie".into(), Cow::Owned(cookie_val)));
-            }
-
-            // Identity-level header reordering. Browsers like Brave ship
-            // a non-Chrome request-header sequence (e.g. accept-language
-            // repositioned after sec-gpc, between accept and sec-fetch-*).
-            // When the active identity declares a `request_header_order`,
-            // sort the assembled headers to that order; names not in the
-            // list keep their relative position at the tail.
-            if let Some(order) = self.identity_request_header_order.as_deref() {
-                reorder_headers(&mut headers, order);
-            } else if self.browser.as_ref().is_some_and(|b| b.is_firefox()) {
-                // Firefox ships no per-identity TOML order; apply the built-in Gecko header order so
-                // the full request sequence (including the just-assembled `cookie`) matches real
-                // Firefox rather than the Chrome-shaped preset.
-                let order: Vec<String> = crate::profile::preset::FIREFOX_HEADER_ORDER
-                    .iter()
-                    .map(|s| (*s).to_string())
-                    .collect();
-                reorder_headers(&mut headers, &order);
-            }
-
-            // Only retain a copy of the request headers when something will
-            // read them: audit introspection is enabled, or a response
-            // observer is registered (its snapshot borrows them). The default
-            // hot path skips this clone entirely.
-            let want_introspect = self.audit_enabled || crate::observe::has_observer();
-            // Owned snapshot only for the opt-in audit/observe boundary; the
-            // hot path skips it. The request header list itself stays `Cow`.
+            // Clone request headers only when audit is on.
+            let want_introspect = self.audit_enabled;
             let audit_headers: Vec<(String, String)> = if want_introspect {
                 headers
                     .iter()
@@ -334,51 +202,7 @@ impl Session {
             // return below ships the accumulated whole-request breakdown.
             acc_timing.add_leg(&transport_resp.timing);
 
-            // Store cookies from response and accumulate across redirect chain.
-            let set_cookies: Vec<&str> = resp_headers
-                .iter()
-                .filter(|(k, _)| k.eq_ignore_ascii_case("set-cookie"))
-                .map(|(_, v)| v.as_str())
-                .collect();
-            if !set_cookies.is_empty() {
-                self.cookie_jar
-                    .store_response_cookies(&set_cookies, &current_url);
-                // Response-facing cookie map: read each value back from the jar,
-                // which parsed it with the one RFC 6265 parser (quote-stripping,
-                // domain/prefix validation). We take the name from the header
-                // (split on the first `;` then the first `=`, exactly as the
-                // parser does) but the *value* from the jar, so
-                // `Response::cookies()` cannot diverge from the jar on quoted
-                // values or attribute edge cases — the historical bug of a
-                // second, laxer hand-parser living here. A header the jar
-                // rejected (bad domain, public suffix, `__Host-`/`__Secure-`
-                // violation) or a deletion (`Max-Age=0`) is not a live cookie
-                // and is correctly absent. `get_cookie` scopes to this URL, so a
-                // cookie the server pinned to a non-matching path is reported by
-                // the jar rather than echoed raw here.
-                let url_str = current_url.as_str();
-                for sc in &set_cookies {
-                    let Some((name, _)) = sc.split(';').next().and_then(|nv| nv.split_once('='))
-                    else {
-                        continue;
-                    };
-                    let name = name.trim();
-                    if name.is_empty() {
-                        continue;
-                    }
-                    if let Some(value) = self.cookie_jar.get_cookie(url_str, name) {
-                        all_cookies.insert(name.to_string(), value);
-                    } else if let Some((_, value)) = crate::cookie::rejected_cookie_name_value(sc) {
-                        // The jar rejected this header for storage (bad domain,
-                        // public suffix, `__Host-`/`__Secure-` violation), so it
-                        // can never broadcast on later requests — but the server
-                        // did send it, and the response view reports what the
-                        // server sent (reqwest parity). Deletions and malformed
-                        // headers stay hidden.
-                        all_cookies.insert(name.to_string(), value);
-                    }
-                }
-            }
+            self.collect_cookies(&resp_headers, &current_url, &mut all_cookies);
 
             // Check for redirect.
             if matches!(status, 301 | 302 | 303 | 307 | 308) {
@@ -435,66 +259,10 @@ impl Session {
                 }
             }
 
-            // If the caller opted into streaming, deliver as-is WITHOUT
-            // decompression. Otherwise materialise and decompress as today.
-            let (final_body, final_headers) = match resp_body_shape {
-                crate::core::transport::TransportBody::Streaming(mut bs) if stream_response => {
-                    // The session read_timeout becomes a per-chunk idle timeout
-                    // on the delivered stream.
-                    bs.set_read_timeout(self.timeouts.read);
-                    (
-                        crate::core::response::ResponseBody::Streaming(bs),
-                        resp_headers,
-                    )
-                }
-                crate::core::transport::TransportBody::Streaming(bs) => {
-                    // Transport returned a stream but caller wanted
-                    // buffering. Drain it fully here, then run normal
-                    // decompression.
-                    let drain = drain_stream_into_vec(bs);
-                    let buf = if let Some(read_timeout) = self.timeouts.read {
-                        tokio::time::timeout(read_timeout, drain)
-                            .await
-                            .map_err(|_| Error::Timeout)??
-                    } else {
-                        drain.await?
-                    };
-                    let (buf, resp_headers) =
-                        decompress_and_strip(buf, resp_headers, &self.compression)?;
-                    (
-                        crate::core::response::ResponseBody::Buffered(buf),
-                        resp_headers,
-                    )
-                }
-                crate::core::transport::TransportBody::Buffered(buf) => {
-                    if stream_response {
-                        // Transport buffered (H1 / H3 path). Preserve
-                        // content-encoding and hand the buffer over as a
-                        // single-chunk stream so the API is uniform.
-                        (
-                            crate::core::response::ResponseBody::Streaming(
-                                crate::core::body_stream::BodyStream::from_bytes(
-                                    bytes::Bytes::from(buf),
-                                ),
-                            ),
-                            resp_headers,
-                        )
-                    } else {
-                        let (buf, resp_headers) =
-                            decompress_and_strip(buf, resp_headers, &self.compression)?;
-                        (
-                            crate::core::response::ResponseBody::Buffered(buf),
-                            resp_headers,
-                        )
-                    }
-                }
-            };
+            let (final_body, final_headers) = self
+                .finalize_response_body(resp_body_shape, resp_headers, stream_response)
+                .await?;
 
-            // Fire the global response observer (if registered) before
-            // handing the assembled response back to the caller. Streamed
-            // responses pass an empty body slice — the observer cannot
-            // drain a stream without changing semantics, and a dump-style
-            // observer wouldn't get useful bytes anyway.
             {
                 let body_slice: &[u8] = match &final_body {
                     crate::core::response::ResponseBody::Buffered(buf) => buf.as_slice(),
@@ -549,6 +317,299 @@ impl Session {
             redirect_cap
         )))
     }
+
+    /// Headers for one redirect-loop hop: preset or default set, brand and
+    /// identity overlays, caller extras, framing length, cookies, and the
+    /// identity or Gecko header order.
+    #[allow(clippy::too_many_arguments)]
+    fn build_hop_headers(
+        &self,
+        preset: Option<Preset>,
+        origin: &str,
+        referer: &str,
+        current_url: &url::Url,
+        current_method: &str,
+        redirect_chain: &[String],
+        current_body: &Body,
+        extra_headers: Option<&HeaderList>,
+        strip_sensitive: bool,
+    ) -> Vec<HeaderPair> {
+        // Build headers.
+        let mut headers: Vec<HeaderPair> = if let Some(preset) = preset {
+            let ctx = crate::profile::preset::HeaderContext {
+                user_agent: &self.user_agent,
+                sec_ch_ua: &self.sec_ch_ua,
+                sec_ch_ua_mobile: self.platform.mobile_flag(),
+                sec_ch_ua_platform: self.platform.sec_ch_platform(),
+                accept_language: &self.accept_language,
+                origin,
+                referer,
+                firefox: self
+                    .identity
+                    .map(|id| id.http().is_firefox())
+                    .unwrap_or_else(|| self.browser.as_ref().is_some_and(|b| b.is_firefox())),
+            };
+            preset.build_headers(&ctx)
+        } else {
+            vec![
+                ("user-agent".into(), Cow::Owned(self.user_agent.clone())),
+                ("accept".into(), Cow::Borrowed("*/*")),
+                (
+                    "accept-encoding".into(),
+                    Cow::Borrowed("gzip, deflate, br, zstd"),
+                ),
+                (
+                    "accept-language".into(),
+                    Cow::Owned(self.accept_language.clone()),
+                ),
+            ]
+        };
+
+        // Apply Chromium-sibling brand overlays AND identity-level
+        // overrides for first-class profiles. Both apply the same
+        // shape of edits (Navigate `accept` swap, extra headers);
+        // only one of the two paths fires for any given session
+        // because brand overlays are off when Brave is first-class.
+        let navigate_accept_override = self
+            .identity_navigate_accept
+            .as_deref()
+            .or(self.brand_navigate_accept.as_deref());
+        if let (Some(accept_override), Some(Preset::Navigate)) = (navigate_accept_override, preset)
+        {
+            for (name, value) in headers.iter_mut() {
+                if name == "accept" {
+                    *value = Cow::Owned(accept_override.to_string());
+                    break;
+                }
+            }
+        }
+        // User's `.header(..)` / `.append_header(..)` always
+        // wins over a brand or identity default — e.g. a caller on an
+        // Edge session setting `.header("dnt", "0")` must not
+        // see both `dnt: 1` (brand) and `dnt: 0` (user) on the
+        // wire. We also skip any name that the active preset
+        // already emitted, so a future preset shipping `dnt` or
+        // `sec-gpc` by default doesn't collide with the overlay.
+        // Cross-origin redirect hops drop credential-bearing headers —
+        // the rule covers session-level extras (brand overlays,
+        // identity extras) exactly like per-request ones.
+        let sensitive = |name: &str| {
+            let lower = name.to_ascii_lowercase();
+            lower == "authorization" || lower == "proxy-authorization" || lower == "cookie"
+        };
+
+        for (k, v) in self
+            .brand_extra_headers
+            .iter()
+            .chain(self.identity_extra_headers.iter())
+        {
+            let user_has_it = extra_headers
+                .as_ref()
+                .map(|h| h.iter().any(|(uk, _)| uk.eq_ignore_ascii_case(k)))
+                .unwrap_or(false);
+            let preset_has_it = headers.iter().any(|(hk, _)| hk.eq_ignore_ascii_case(k));
+            if !user_has_it && !preset_has_it && !(strip_sensitive && sensitive(k)) {
+                headers.push((Cow::Owned(k.clone()), Cow::Owned(v.clone())));
+            }
+        }
+
+        // Extra headers: include on first request, and on same-origin redirects.
+        // Strip sensitive headers on cross-origin redirects.
+        //
+        // Caller headers are merged into the preset-built list via
+        // three rules:
+        //   (1) A name the preset already emits is replaced in
+        //       place — preserves the preset position and prevents
+        //       wire-coalesced `ua1,ua2` duplicates (HTTP/1.1
+        //       §3.2.2).
+        //   (2) A caller-anchored header (`.anchored(anchor, ...)`)
+        //       is spliced immediately after (or before, for
+        //       `BeforeAcceptEncoding`) its anchor header in the
+        //       current list.
+        //   (3) A plain caller header (`.header(...)`) whose name
+        //       has a universal Chrome slot per `infer_anchor`
+        //       rides at the inferred anchor; otherwise it
+        //       appends at the end of the preset list.
+        if let Some(extra) = extra_headers {
+            apply_extra_headers(&mut headers, extra, strip_sensitive, &sensitive);
+        }
+
+        // Content-Length for requests with a known-length body.
+        // For length-unknown streams we leave it out and let the
+        // transport pick `Transfer-Encoding: chunked` (H1) or native
+        // framing (H2/H3).
+        if let Some(len) = current_body.len_hint() {
+            if !matches!(current_body, Body::Empty) || len > 0 {
+                // The computed length is authoritative for a known-length
+                // body. Drop any caller-supplied content-length so we never
+                // emit two (a request-smuggling shape) or a stale value.
+                headers.retain(|(k, _)| !k.eq_ignore_ascii_case("content-length"));
+                // Chrome emits `content-length` as the FIRST regular
+                // header (right after the pseudo headers on H2, right
+                // after Host/Connection on H1) — not at the tail. The
+                // position is part of the wire fingerprint Akamai-class
+                // edges score on POSTs.
+                headers.insert(0, ("content-length".into(), Cow::Owned(len.to_string())));
+            }
+        }
+
+        // Cookies. SameSite is enforced against the request's cross-site
+        // context: a cross-site redirect withholds `Strict` cookies (and
+        // `Lax` on non-safe methods), matching a real browser navigation.
+        let cross_site = crate::cookie::is_cross_site(current_url, redirect_chain);
+        let safe_method = ["GET", "HEAD"]
+            .iter()
+            .any(|m| current_method.eq_ignore_ascii_case(m));
+        if let Some(cookie_val) =
+            self.cookie_jar
+                .cookie_header_for(current_url, cross_site, safe_method)
+        {
+            headers.push(("cookie".into(), Cow::Owned(cookie_val)));
+        }
+
+        // Identity-level header reordering. Browsers like Brave ship
+        // a non-Chrome request-header sequence (e.g. accept-language
+        // repositioned after sec-gpc, between accept and sec-fetch-*).
+        // When the active identity declares a `request_header_order`,
+        // sort the assembled headers to that order; names not in the
+        // list keep their relative position at the tail.
+        if let Some(order) = self.identity_request_header_order.as_deref() {
+            reorder_headers(&mut headers, order);
+        } else if self.browser.as_ref().is_some_and(|b| b.is_firefox()) {
+            // Firefox ships no per-identity TOML order; apply the built-in Gecko header order so
+            // the full request sequence (including the just-assembled `cookie`) matches real
+            // Firefox rather than the Chrome-shaped preset.
+            let order: Vec<String> = crate::profile::preset::FIREFOX_HEADER_ORDER
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect();
+            reorder_headers(&mut headers, &order);
+        }
+
+        headers
+    }
+    /// Store this hop's Set-Cookie values in the jar and accumulate the
+    /// response-facing cookie view: live values read back from the jar,
+    /// rejected-but-sent names reported as the server sent them.
+    fn collect_cookies(
+        &self,
+        resp_headers: &[(crate::core::HeaderStr, crate::core::HeaderStr)],
+        current_url: &url::Url,
+        all_cookies: &mut HashMap<String, String>,
+    ) {
+        // Store cookies from response and accumulate across redirect chain.
+        let set_cookies: Vec<&str> = resp_headers
+            .iter()
+            .filter(|(k, _)| k.eq_ignore_ascii_case("set-cookie"))
+            .map(|(_, v)| v.as_str())
+            .collect();
+        if !set_cookies.is_empty() {
+            self.cookie_jar
+                .store_response_cookies(set_cookies.as_slice(), current_url);
+            // Response-facing cookie map: read each value back from the jar,
+            // which parsed it with the one RFC 6265 parser (quote-stripping,
+            // domain/prefix validation). We take the name from the header
+            // (split on the first `;` then the first `=`, exactly as the
+            // parser does) but the *value* from the jar, so
+            // `Response::cookies()` cannot diverge from the jar on quoted
+            // values or attribute edge cases. A header the jar
+            // rejected (bad domain, public suffix, `__Host-`/`__Secure-`
+            // violation) or a deletion (`Max-Age=0`) is not a live cookie
+            // and is correctly absent. `get_cookie` scopes to this URL, so a
+            // cookie the server pinned to a non-matching path is reported by
+            // the jar rather than echoed raw here.
+            let url_str = current_url.as_str();
+            for sc in &set_cookies {
+                let Some((name, _)) = sc.split(';').next().and_then(|nv| nv.split_once('=')) else {
+                    continue;
+                };
+                let name = name.trim();
+                if name.is_empty() {
+                    continue;
+                }
+                if let Some(value) = self.cookie_jar.get_cookie(url_str, name) {
+                    all_cookies.insert(name.to_string(), value);
+                } else if let Some((_, value)) = crate::cookie::rejected_cookie_name_value(sc) {
+                    // The jar rejected this header for storage (bad domain,
+                    // public suffix, `__Host-`/`__Secure-` violation), so it
+                    // can never broadcast on later requests — but the server
+                    // did send it, and the response view reports what the
+                    // server sent (reqwest parity). Deletions and malformed
+                    // headers stay hidden.
+                    all_cookies.insert(name.to_string(), value);
+                }
+            }
+        }
+    }
+
+    /// Shape the transport body for the caller: streamed as-is when
+    /// streaming is on, drained then decompressed when buffering is
+    /// wanted, and re-streamed as a single-chunk body when the transport
+    /// buffered but the caller asked for streaming.
+    async fn finalize_response_body(
+        &self,
+        resp_body_shape: crate::core::transport::TransportBody,
+        resp_headers: Vec<(crate::core::HeaderStr, crate::core::HeaderStr)>,
+        stream_response: bool,
+    ) -> Result<(
+        crate::core::response::ResponseBody,
+        Vec<(crate::core::HeaderStr, crate::core::HeaderStr)>,
+    )> {
+        // If the caller opted into streaming, deliver as-is WITHOUT
+        // decompression. Otherwise materialise and decompress as today.
+        Ok(match resp_body_shape {
+            crate::core::transport::TransportBody::Streaming(mut bs) if stream_response => {
+                // The session read_timeout becomes a per-chunk idle timeout
+                // on the delivered stream.
+                bs.set_read_timeout(self.timeouts.read);
+                (
+                    crate::core::response::ResponseBody::Streaming(bs),
+                    resp_headers,
+                )
+            }
+            crate::core::transport::TransportBody::Streaming(bs) => {
+                // Transport returned a stream but caller wanted
+                // buffering. Drain it fully here, then run normal
+                // decompression.
+                let drain = drain_stream_into_vec(bs);
+                let buf = if let Some(read_timeout) = self.timeouts.read {
+                    tokio::time::timeout(read_timeout, drain)
+                        .await
+                        .map_err(|_| Error::Timeout)??
+                } else {
+                    drain.await?
+                };
+                let (buf, resp_headers) =
+                    decompress_and_strip(buf, resp_headers, &self.compression)?;
+                (
+                    crate::core::response::ResponseBody::Buffered(buf),
+                    resp_headers,
+                )
+            }
+            crate::core::transport::TransportBody::Buffered(buf) => {
+                if stream_response {
+                    // Transport buffered (H1 / H3 path). Preserve
+                    // content-encoding and hand the buffer over as a
+                    // single-chunk stream so the API is uniform.
+                    (
+                        crate::core::response::ResponseBody::Streaming(
+                            crate::core::body_stream::BodyStream::from_bytes(bytes::Bytes::from(
+                                buf,
+                            )),
+                        ),
+                        resp_headers,
+                    )
+                } else {
+                    let (buf, resp_headers) =
+                        decompress_and_strip(buf, resp_headers, &self.compression)?;
+                    (
+                        crate::core::response::ResponseBody::Buffered(buf),
+                        resp_headers,
+                    )
+                }
+            }
+        })
+    }
 }
 
 fn url_origin(url: &url::Url) -> String {
@@ -557,6 +618,28 @@ fn url_origin(url: &url::Url) -> String {
         Some(port) => format!("{}://{}:{}", url.scheme(), host, port),
         None => format!("{}://{}", url.scheme(), host),
     }
+}
+
+/// Referer per the browser-default `strict-origin-when-cross-origin`
+/// policy: the full previous URL on a same-origin hop, origin-only on a
+/// cross-origin hop — with credentials and fragment stripped in both cases.
+fn referer_for(prev: Option<&str>, current_origin: &str) -> String {
+    let Some(prev) = prev else {
+        return format!("{current_origin}/");
+    };
+    let Ok(mut parsed) = url::Url::parse(prev) else {
+        return format!("{current_origin}/");
+    };
+    // Cross-origin hop: the referrer is the SOURCE origin (where the
+    // redirect came from), never the destination.
+    if url_origin(&parsed) != current_origin {
+        let origin = url_origin(&parsed);
+        return format!("{origin}/");
+    }
+    let _ = parsed.set_username("");
+    let _ = parsed.set_password(None);
+    parsed.set_fragment(None);
+    parsed.to_string()
 }
 
 /// Reorder `headers` in place so that, for each name in `order`, all
@@ -585,100 +668,14 @@ pub(crate) fn reorder_headers(headers: &mut Vec<HeaderPair>, order: &[String]) {
 }
 
 #[cfg(test)]
-mod reorder_tests {
-    use super::reorder_headers;
-    use super::{Cow, HeaderPair};
+mod redact_tests;
+#[cfg(test)]
+mod referer_tests;
+#[cfg(test)]
+mod reorder_tests;
 
-    fn h(name: &str, value: &str) -> HeaderPair {
-        (Cow::Owned(name.to_string()), Cow::Owned(value.to_string()))
-    }
-
-    /// The Firefox navigate header order, end to end (preset reshape → `FIREFOX_HEADER_ORDER`
-    /// reorder), must reproduce the live Firefox 153 tls.peet.ws capture exactly.
-    #[test]
-    fn firefox_navigate_order_matches_the_live_capture() {
-        use crate::profile::Preset;
-        use crate::profile::preset::{FIREFOX_HEADER_ORDER, HeaderContext};
-        let ctx = HeaderContext {
-            user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:153.0) Gecko/20100101 Firefox/153.0",
-            sec_ch_ua: "",
-            sec_ch_ua_mobile: "?0",
-            sec_ch_ua_platform: "Windows",
-            accept_language: "en-US,en;q=0.9",
-            origin: "https://tls.peet.ws",
-            referer: "",
-            firefox: true,
-        };
-        let mut headers = Preset::Navigate.build_headers(&ctx);
-        let order: Vec<String> = FIREFOX_HEADER_ORDER
-            .iter()
-            .map(|s| (*s).to_string())
-            .collect();
-        reorder_headers(&mut headers, &order);
-        let names: Vec<&str> = headers.iter().map(|(n, _)| n.as_ref()).collect();
-        assert_eq!(
-            names,
-            vec![
-                "user-agent",
-                "accept",
-                "accept-language",
-                "accept-encoding",
-                "upgrade-insecure-requests",
-                "sec-fetch-dest",
-                "sec-fetch-mode",
-                "sec-fetch-site",
-                "sec-fetch-user",
-                "priority",
-                "te",
-            ],
-            "firefox navigate header order must match the live capture"
-        );
-    }
-
-    #[test]
-    fn moves_named_headers_to_declared_order() {
-        let mut headers = vec![
-            h("user-agent", "u"),
-            h("accept", "a"),
-            h("sec-fetch-site", "s"),
-            h("accept-language", "al"),
-            h("sec-gpc", "1"),
-        ];
-        let order = vec![
-            "accept".into(),
-            "sec-gpc".into(),
-            "accept-language".into(),
-            "sec-fetch-site".into(),
-        ];
-        reorder_headers(&mut headers, &order);
-        let names: Vec<&str> = headers.iter().map(|(n, _)| n.as_ref()).collect();
-        assert_eq!(
-            names,
-            vec![
-                "accept",
-                "sec-gpc",
-                "accept-language",
-                "sec-fetch-site",
-                "user-agent",
-            ]
-        );
-    }
-
-    #[test]
-    fn missing_names_in_order_are_skipped() {
-        let mut headers = vec![h("accept", "a"), h("user-agent", "u")];
-        let order = vec!["accept".into(), "sec-gpc".into(), "user-agent".into()];
-        reorder_headers(&mut headers, &order);
-        let names: Vec<&str> = headers.iter().map(|(n, _)| n.as_ref()).collect();
-        assert_eq!(names, vec!["accept", "user-agent"]);
-    }
-
-    #[test]
-    fn case_insensitive_matching() {
-        let mut headers = vec![h("User-Agent", "u"), h("Accept", "a")];
-        let order = vec!["accept".into(), "user-agent".into()];
-        reorder_headers(&mut headers, &order);
-        let names: Vec<&str> = headers.iter().map(|(n, _)| n.as_ref()).collect();
-        assert_eq!(names, vec!["Accept", "User-Agent"]);
-    }
+/// Mutex lock that survives poisoning: a panic in another request thread must
+/// not turn every later request on this session into an error.
+fn lock<T>(m: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }

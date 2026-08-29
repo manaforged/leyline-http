@@ -1,5 +1,13 @@
 //! Integration tests for `multipart/form-data` bodies.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
+)]
+#![expect(
+    clippy::panic,
+    reason = "test harness helper: explicit panic on unexpected error shape is the assertion"
+)]
 use std::io::Write;
 
 use leyline::core::Session;

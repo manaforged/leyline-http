@@ -1,6 +1,9 @@
 //! Integration tests for the `RetryPolicy` — exercises the retry
 //! loop against a mock H1 server that can return flaky responses.
-
+#![expect(
+    clippy::unwrap_used,
+    reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
+)]
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
@@ -60,11 +63,7 @@ async fn retries_503_then_succeeds() {
     let policy =
         RetryPolicy::default().with_backoff(Duration::from_millis(1), Duration::from_millis(10));
     let session = Session::builder().http1().retry(policy).build().unwrap();
-    let resp = session
-        .get(&format!("http://{addr}/flaky"))
-        .send()
-        .await
-        .unwrap();
+    let resp = session.get(&format!("http://{addr}/flaky")).await.unwrap();
     assert_eq!(resp.status(), 200);
     assert_eq!(resp.text(), "ok");
     assert_eq!(counter.load(Ordering::Relaxed), 3);
@@ -95,7 +94,6 @@ async fn new_sessions_do_not_retry_503() {
         .build()
         .unwrap()
         .get(&format!("http://{addr}/flaky"))
-        .send()
         .await
         .unwrap();
     assert_eq!(resp.status(), 503);
@@ -126,7 +124,7 @@ async fn does_not_retry_on_400() {
     let policy =
         RetryPolicy::default().with_backoff(Duration::from_millis(1), Duration::from_millis(5));
     let resp = session
-        .get(&format!("http://{addr}/bad"))
+        .request("GET", &format!("http://{addr}/bad"))
         .retry(policy)
         .send()
         .await
@@ -247,7 +245,7 @@ async fn retries_exhausted_returns_last_response() {
         .with_max_retries(3)
         .with_backoff(Duration::from_millis(1), Duration::from_millis(5));
     let resp = session
-        .get(&format!("http://{addr}/bad"))
+        .request("GET", &format!("http://{addr}/bad"))
         .retry(policy)
         .send()
         .await

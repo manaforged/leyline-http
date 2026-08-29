@@ -3,6 +3,7 @@
 //! Designed for profile-driven encoding, where the bytes we produce are
 //! compared against the selected browser profile's expected behavior.
 
+#![forbid(unsafe_code)]
 mod decoder;
 mod encoder;
 mod huffman;

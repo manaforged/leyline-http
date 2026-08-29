@@ -254,7 +254,6 @@ impl H2Client {
             }
         };
 
-        #[allow(clippy::needless_update)]
         Ok(H2ConnectStream {
             shutdown_state: ShutdownState::Open,
             status: resp.status,

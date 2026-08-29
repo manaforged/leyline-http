@@ -9,6 +9,14 @@
 //!   iOS 18.6 (CFNetwork/3826.600.41): ja4 t13d2014h2_a09f3c656075_7f0f34a4126d
 //!
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
+)]
+#![expect(
+    clippy::panic,
+    reason = "test harness helper: explicit panic on unexpected error shape is the assertion"
+)]
 use leyline::{Browser, Platform, Session};
 use serde_json::Value;
 

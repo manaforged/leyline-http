@@ -12,64 +12,58 @@ impl Session {
         SessionBuilder::new()
     }
 
-    // ── Infallible constructors ─────────────────────────────────
-    //
-    // The common entry points return `Session`, not `Result<Session>` —
-    // built-in profiles are statically valid (enforced by the
-    // `profile_validation` tests), so the only way these fail is an
-    // unrecoverable environment fault (e.g. a corrupt OS trust store), which
-    // they surface as a panic exactly like `reqwest::Client::new()`. For a
-    // configuration that can genuinely fail (custom trust roots, etc.) use
-    // the fallible [`Session::builder`]`.build()`.
+    // Infallible constructors return Session. Built-in profiles are
+    // statically valid. They panic only on an unrecoverable environment
+    // fault (corrupt OS trust store). Fallible setup uses SessionBuilder::build.
 
-    /// A default **bare** session — no browser impersonation, a plain
-    /// `leyline/<version>` client on the host OS. Mirrors the
-    /// `Client::new()` shape. Opt into a browser with [`Session::chrome`]
-    /// or `Session::builder().browser(...)`.
+    /// Bare session. No browser profile. ClientHello is `leyline/<version>`
+    /// on the host OS. Opt into a browser with [`Session::chrome`] or
+    /// `Session::builder().browser(...)`.
     pub fn new() -> Self {
         Self::builder()
             .build()
             .expect("bare session profile is always valid")
     }
 
-    /// The latest bundled Chrome profile (currently Chrome 148 on Windows).
-    /// Bumps silently when a new Chrome profile is added — pin
-    /// [`Browser::Chrome147`] via the builder for a fixed version.
+    /// Latest Chrome on Windows. Infallible.
+    ///
+    /// Other OS: `Session::builder().chrome().macos().build()`. Pin a major
+    /// with `.browser(Browser::Chrome147)` when you need a fixed version.
     ///
     /// This does not enable fingerprint auditing — `resp.audit()` returns
     /// `None`. For JA4/H2 introspection, build via
     /// `Session::builder().chrome().audit(true).build()` instead.
     pub fn chrome() -> Self {
         Self::builder()
-            .browser(Browser::default_browser())
+            .chrome()
             .build()
             .expect("built-in Chrome profile is always valid")
     }
 
-    /// The latest bundled Firefox profile (currently Firefox 150 on Windows).
+    /// Firefox [`Browser::default_firefox`] (currently Firefox 150 on Windows).
+    /// Newest bundled Firefox is [`Browser::Firefox152`] — pin it via the
+    /// builder; this constructor does not follow that major yet.
     pub fn firefox() -> Self {
         Self::builder()
-            .browser(Browser::Firefox150)
+            .firefox()
             .build()
             .expect("built-in Firefox profile is always valid")
     }
 
     /// The latest bundled Safari profile (currently Safari 18 on macOS).
+    /// Safari on iPhone: `Session::builder().safari().ios().build()`.
     pub fn safari() -> Self {
         Self::builder()
-            .browser(Browser::Safari18)
-            .platform(Platform::MacOS)
+            .safari()
             .build()
             .expect("built-in Safari profile is always valid")
     }
 
-    /// Microsoft Edge on the latest Chromium profile we have a verified
-    /// overlay for (currently Chrome 147). Pinned to the verified sibling
-    /// anchor rather than the global Chrome default (149).
+    /// Microsoft Edge overlay on [`Browser::default_browser`] (Chrome 150).
+    /// TLS/H2 stay Chrome; HTTP identity is Edge (`Edg/150`, `sec-ch-ua`).
     pub fn edge() -> Self {
         Self::builder()
-            .browser(Browser::Chrome147)
-            .brand(ChromiumBrand::Edge)
+            .edge()
             .build()
             .expect("built-in Edge overlay is always valid")
     }
@@ -77,26 +71,27 @@ impl Session {
     /// Brave on the latest verified Chromium profile (currently Brave 146).
     pub fn brave() -> Self {
         Self::builder()
-            .browser(Browser::Brave146)
-            .platform(Platform::MacOS)
+            .brave()
             .build()
             .expect("built-in Brave profile is always valid")
     }
 
-    /// Opera on the latest verified Chromium overlay (Chrome 147 / Opera 131).
+    /// Opera overlay on [`Browser::default_browser`] (Chrome 150 / Opera 134).
+    /// Opera's `sec-ch-ua` shape is captured; the 150/134 pair follows Opera's
+    /// Chromium-minus-16 numbering until a peet recapture lands.
     pub fn opera() -> Self {
         Self::builder()
-            .browser(Browser::Chrome147)
-            .brand(ChromiumBrand::Opera)
+            .opera()
             .build()
             .expect("built-in Opera overlay is always valid")
     }
 
-    /// Vivaldi on the latest verified Chromium overlay (Chrome 147 / Vivaldi 7.9).
+    /// Vivaldi overlay on Chrome 147 — last major with a recorded Vivaldi
+    /// build string. Pin [`Browser::Chrome150`] via the builder when a 150
+    /// capture exists.
     pub fn vivaldi() -> Self {
         Self::builder()
-            .browser(Browser::Chrome147)
-            .brand(ChromiumBrand::Vivaldi)
+            .vivaldi()
             .build()
             .expect("built-in Vivaldi overlay is always valid")
     }
@@ -104,8 +99,7 @@ impl Session {
     /// A session for an explicit browser and platform in one call.
     pub fn profile(browser: Browser, platform: Platform) -> Self {
         Self::builder()
-            .browser(browser)
-            .platform(platform)
+            .profile(browser, platform)
             .build()
             .expect("built-in profile is always valid")
     }
@@ -118,8 +112,8 @@ impl Session {
     /// Derive a new session from this one that shares the TLS connector,
     /// H2/H3 config, and connection pool, but uses an independent cookie
     /// jar. The original session's jar is untouched. Use this when you want
-    /// many short-lived cookie scopes while
-    /// amortising TLS-handshake cost across them.
+    /// many short-lived cookie scopes while amortising TLS-handshake cost
+    /// across them.
     pub fn with_cookie_jar(&self, cookie_jar: Jar) -> Self {
         let mut s = self.clone();
         // `make_mut` clones the inner state once (this Arc is shared), then
@@ -133,8 +127,7 @@ impl Session {
     /// state — cookie jar, TLS connector, BoringSSL session cache, H2/H3
     /// config, browser/platform identity, header overlays — and only swaps
     /// the bound proxy. Use this when one identity needs to rotate egress
-    /// IPs across many short-lived clones (e.g. per-chunk monitor probes
-    /// or sticky-session refresh) without
+    /// IPs across many short-lived clones without
     /// re-handshaking or losing cookie state.
     ///
     /// The pool keys connections by `(host, port, proxy)`, so the first
@@ -238,28 +231,30 @@ impl Session {
         std::sync::Arc::ptr_eq(&self.pool, &other.pool)
     }
 
-    // Fluent request builders.
-    //
-    // Every verb returns a `RequestBuilder` that you chain on and end with
-    // `.send().await`. This is the one and only way to issue a request —
-    // no parallel `get_request` / `fetch` / bare-async-verb API.
+    // GET and HEAD fire. POST/PUT/PATCH/DELETE return a builder because they
+    // need a body. Extra headers, retry, proxy, or a non-Navigate preset go
+    // through [`Self::request`].
 
-    /// Start a request with any HTTP method.
+    /// Start a request with any HTTP method. Chain headers / retry / preset,
+    /// then `.send().await`.
     ///
     /// ```rust,ignore
+    /// session.request("GET", url).header("x-request-id", "abc").send().await?;
     /// session.request("PATCH", url).json(&body).send().await?;
     /// ```
     pub fn request(&self, method: &str, url: &str) -> RequestBuilder {
         RequestBuilder::new(self, method, url)
     }
 
-    /// Start a GET request.
+    /// GET and send. A browser session uses the Navigate preset (document
+    /// fetch). A bare session sends a generic client. For extra headers,
+    /// retry, or a different preset, use [`Self::request`].
     ///
     /// ```rust,ignore
-    /// let resp = session.get(url).send().await?;
+    /// let resp = session.get(url).await?;
     /// ```
-    pub fn get(&self, url: &str) -> RequestBuilder {
-        RequestBuilder::new(self, "GET", url)
+    pub async fn get(&self, url: &str) -> Result<Response> {
+        self.request("GET", url).send().await
     }
 
     /// Start a POST request.
@@ -282,40 +277,41 @@ impl Session {
         RequestBuilder::new(self, "DELETE", url)
     }
 
-    /// Start a HEAD request.
-    pub fn head(&self, url: &str) -> RequestBuilder {
-        RequestBuilder::new(self, "HEAD", url)
+    /// HEAD and send. Same preset rules as [`Self::get`].
+    pub async fn head(&self, url: &str) -> Result<Response> {
+        self.request("HEAD", url).send().await
     }
 
     // Convenience shortcuts.
 
-    /// GET with the Navigate preset applied — the request looks like a
-    /// browser document-fetch (Sec-Fetch-Mode: navigate, etc.). Returns a
-    /// fully-executed `Response`; use [`get`](Self::get) if you want a
-    /// builder you can chain on.
+    /// GET with the Navigate preset. Same as [`Self::get`] on a browser
+    /// session; on a bare session this still emits `Sec-Fetch-*`.
     pub async fn navigate(&self, url: &str) -> Result<Response> {
-        self.get(url).preset(Preset::Navigate).send().await
+        self.request("GET", url)
+            .preset(Preset::Navigate)
+            .send()
+            .await
     }
 
     /// GET a sub-resource with the Script preset applied — the request
     /// looks like a browser `<script src=…>` / stylesheet load
     /// (Sec-Fetch-Dest: script, no-cors). Returns a fully-executed
-    /// `Response`; use [`get`](Self::get) + `.preset(Preset::Script)` if
+    /// `Response`; use [`Self::request`] + `.preset(Preset::Script)` if
     /// you need to chain extra headers first.
     ///
     /// ```rust,ignore
     /// let js = session.get_script(url).await?.text();
     /// ```
     pub async fn get_script(&self, url: &str) -> Result<Response> {
-        self.get(url).preset(Preset::Script).send().await
+        self.request("GET", url).preset(Preset::Script).send().await
     }
 
     /// GET with the XHR preset applied — the request looks like a
     /// browser `fetch()` / `XMLHttpRequest` (Sec-Fetch-Mode: cors,
     /// Sec-Fetch-Dest: empty). Returns a fully-executed `Response`; use
-    /// [`get`](Self::get) + `.preset(Preset::Xhr)` to chain headers first.
+    /// [`Self::request`] + `.preset(Preset::Xhr)` to chain headers first.
     pub async fn get_xhr(&self, url: &str) -> Result<Response> {
-        self.get(url).preset(Preset::Xhr).send().await
+        self.request("GET", url).preset(Preset::Xhr).send().await
     }
 
     /// POST a JSON body with the XHR preset applied.
@@ -352,45 +348,6 @@ impl Session {
             .form_str(data)
             .send()
             .await
-    }
-
-    /// Dispatch a standalone [`crate::Request`] value. Used by
-    /// adapters that can't borrow the session (e.g. the `tower::Service`
-    /// implementation in `leyline-tower`).
-    ///
-    /// For most code, prefer the fluent [`Self::get`] / [`Self::post`]
-    /// / [`Self::request`] builders — they're borrow-cheap and avoid
-    /// an extra allocation of the `Request` value.
-    pub async fn execute_request(&self, req: crate::Request) -> Result<Response> {
-        // Route through the fluent builder so retry / digest / stream /
-        // timeout options on `Request` carry the same semantics as
-        // `session.get(...).retry(...).send()`. Without this, a tower
-        // middleware holding a `Request` would silently lose every
-        // feature added after the raw `execute_with_timeout` path.
-        let mut rb = self.request(&req.method, &req.url);
-        for (name, value) in req.headers.iter() {
-            rb = rb.header(name, value);
-        }
-        match req.body {
-            crate::Body::Empty => {}
-            other => rb = rb.body(other),
-        }
-        if let Some(t) = req.timeout {
-            rb = rb.timeout(t);
-        }
-        if let Some(policy) = req.retry_policy {
-            rb = rb.retry(policy);
-        }
-        if req.allow_non_idempotent_retry {
-            rb = rb.allow_non_idempotent_retry(true);
-        }
-        if let Some(auth) = req.digest_auth {
-            rb = rb.digest_auth(auth);
-        }
-        if req.stream_response {
-            rb = rb.stream();
-        }
-        rb.send().await
     }
 }
 

@@ -27,7 +27,7 @@ impl Session {
 
     /// `true` iff *any* proxy was requested for this call (session
     /// default OR per-request override) — regardless of `NO_PROXY`
-    /// filtering. Used by the H3 / Race guards: an explicit caller
+    /// filtering. Used by the H3 guard: an explicit caller
     /// `.proxy(...)` must suppress H3 even when `NO_PROXY` would have
     /// bypassed the proxy, because the caller's intent is "route
     /// through this specific egress, not H3."
@@ -36,6 +36,12 @@ impl Session {
         request_proxy.is_some() || self.proxy.is_some() || self.proxy_config.first_proxy().is_some()
     }
 
+    // One call site passes the full per-request policy; the arguments are
+    // flat wire-request fields, not a configuration object boundary.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "flat wire-request fields for one internal call site"
+    )]
     pub(super) async fn send_with_policy(
         &self,
         method: &str,
@@ -113,21 +119,15 @@ impl Session {
                 let h3_config = self.h3_config.as_ref().ok_or_else(|| {
                     Error::Config("this browser profile has no HTTP/3 fingerprint".into())
                 })?;
-                // Boxed cold arm (defense-in-depth). The companion change in
-                // this same commit (`quic::connection`) already moves the H3
-                // future's 64 KB datagram buffer + quiche Connection to the
-                // heap, so the H3 future is now ~2.5 KB — not the ~82 KB it was
-                // when, inlined, it became >97% of every request's allocation.
-                // We still box the arm on principle: heavyweight cold protocol
-                // machinery must never size the hot per-request future, so
-                // future growth in the H3 path cannot silently re-inflate the
-                // H2/Auto hot path (this mirrors wreq's boxed-protocol
-                // dispatch). The ~10 KB H1 arm above is the larger remaining
-                // payoff of arm-boxing today.
+                // Boxed cold arm: the h3 future carries a 64 KB datagram
+                // buffer plus the quiche connection, so inlining it sizes
+                // every hot-path future by the cold arm. Heavyweight protocol
+                // machinery must never size the per-request future.
                 Box::pin(crate::core::transport::send_request_h3(
                     &self.pool,
                     h3_config,
                     self.profile,
+                    &self.tls_trust,
                     method,
                     url,
                     headers,
@@ -136,199 +136,9 @@ impl Session {
                 ))
                 .await
             }
-            #[cfg(feature = "http3")]
-            ProtocolPolicy::Race => {
-                // A buffered HTTPS request with an H3 fingerprint and no proxy
-                // can be raced. Anything else (streaming body/response, an
-                // explicit proxy, plaintext, or a profile without H3) runs
-                // straight through Auto.
-                let raceable = !body.is_stream()
-                    && !stream_response
-                    && !self.proxy_requested(request_proxy)
-                    && url.scheme() == "https";
-                match (raceable, self.h3_config.as_ref()) {
-                    (true, Some(h3_config)) => {
-                        self.send_raced(h3_config, method, url, headers, body, proxy, header_order)
-                            .await
-                    }
-                    _ => {
-                        crate::core::transport::send_request_auto(
-                            &self.pool,
-                            &self.connector,
-                            &self.h2_config,
-                            method,
-                            url,
-                            headers,
-                            body,
-                            proxy,
-                            stream_response,
-                            header_order,
-                        )
-                        .await
-                    }
-                }
-            }
-        }
-    }
-
-    /// True connection-level H2/H3 race (Chrome-style happy-eyeballs).
-    ///
-    /// Races the QUIC handshake against TCP+TLS+H2 — the **connections**, not
-    /// the requests. Whichever establishes first wins, and the request is sent
-    /// exactly once on the winner via the normal pooled send path (which
-    /// reuses the just-warmed connection). A naive parallel race of the two
-    /// `send_request_*` futures would connect *and* send on both, double-
-    /// sending the request to the origin — a load anomaly; racing
-    /// the connect-only checkouts is what avoids it.
-    ///
-    /// If one connection errors, the other still wins (fall-forward); if both
-    /// error, Auto runs and surfaces a proper error. The loser's in-flight
-    /// connect is cancelled when its future drops at the end of the race.
-    #[cfg(feature = "http3")]
-    async fn send_raced(
-        &self,
-        h3_config: &crate::quic::H3Config,
-        method: &str,
-        url: &url::Url,
-        headers: Vec<crate::h2::connection::HeaderPair>,
-        body: Body,
-        proxy: Option<&str>,
-        header_order: Option<&[String]>,
-    ) -> Result<crate::core::transport::TransportResponse> {
-        use crate::core::transport::{send_request_auto, send_request_h2, send_request_h3};
-
-        let Some(host) = url.host_str() else {
-            return send_request_auto(
-                &self.pool,
-                &self.connector,
-                &self.h2_config,
-                method,
-                url,
-                headers,
-                body,
-                proxy,
-                false,
-                header_order,
-            )
-            .await;
-        };
-        let port = url.port_or_known_default().unwrap_or(443);
-
-        enum Winner {
-            H3,
-            H2,
-        }
-
-        // Connect-only: each future returns once its connection is established
-        // (or reuses a pooled one) without opening a request stream.
-        let h3_connect =
-            crate::pool::checkout_h3_handle(&self.pool, h3_config, self.profile, host, port);
-        let h2_connect = crate::pool::checkout_handle(
-            &self.pool,
-            &self.connector,
-            &self.h2_config,
-            host,
-            port,
-            proxy,
-        );
-        tokio::pin!(h3_connect, h2_connect);
-
-        let mut h3_done = false;
-        let mut h2_done = false;
-        let winner = loop {
-            tokio::select! {
-                r = &mut h3_connect, if !h3_done => match r {
-                    Ok(_) => break Some(Winner::H3),
-                    Err(_) => {
-                        h3_done = true;
-                        if h2_done {
-                            break None;
-                        }
-                    }
-                },
-                r = &mut h2_connect, if !h2_done => match r {
-                    Ok(_) => break Some(Winner::H2),
-                    Err(_) => {
-                        h2_done = true;
-                        if h3_done {
-                            break None;
-                        }
-                    }
-                },
-            }
-        };
-
-        // The winning connection is now warm in the pool; dispatch through the
-        // normal per-protocol send path, which checks it back out and sends
-        // the request exactly once. Dropping the pinned futures here cancels
-        // the loser's connect.
-        match winner {
-            Some(Winner::H3) => {
-                Box::pin(send_request_h3(
-                    &self.pool,
-                    h3_config,
-                    self.profile,
-                    method,
-                    url,
-                    headers,
-                    body,
-                    false,
-                ))
-                .await
-            }
-            Some(Winner::H2) => {
-                send_request_h2(
-                    &self.pool,
-                    &self.connector,
-                    &self.h2_config,
-                    method,
-                    url,
-                    headers,
-                    body,
-                    proxy,
-                    false,
-                    header_order,
-                )
-                .await
-            }
-            None => {
-                send_request_auto(
-                    &self.pool,
-                    &self.connector,
-                    &self.h2_config,
-                    method,
-                    url,
-                    headers,
-                    body,
-                    proxy,
-                    false,
-                    header_order,
-                )
-                .await
-            }
         }
     }
 }
 
 #[cfg(test)]
-mod tests {
-    /// `with_proxy` must actually override a proxy set at build time.
-    /// `proxy_for` returns the FIRST matching rule, so appending an
-    /// all-scheme rule would let the original build-time proxy keep
-    /// winning and silently no-op the rotation.
-    #[test]
-    fn with_proxy_overrides_build_time_proxy() {
-        let session = crate::Session::builder()
-            .proxy("http://first:1")
-            .build()
-            .expect("bare session builds");
-        let rotated = session.with_proxy("http://second:2");
-
-        let url = url::Url::parse("https://example.test/").unwrap();
-        assert_eq!(
-            rotated.effective_proxy_for(&url, None),
-            Some("http://second:2"),
-            "with_proxy must win over the build-time proxy"
-        );
-    }
-}
+mod tests;

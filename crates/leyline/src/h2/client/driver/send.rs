@@ -134,6 +134,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                                     stream_id,
                                     end_stream: true,
                                     data: Bytes::new(),
+                                    wire_len: 0,
                                 })
                                 .await?;
                             let _ = self.writer.flush().await;
@@ -195,11 +196,13 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 }
             }
 
+            let wire_len = piece.len() as u64;
             self.writer
                 .write_data(&DataFrame {
                     stream_id,
                     end_stream: is_last,
                     data: piece,
+                    wire_len,
                 })
                 .await?;
 
@@ -331,11 +334,13 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 }
             }
 
+            let wire_len = chunk.len() as u64;
             self.writer
                 .write_data(&DataFrame {
                     stream_id,
                     end_stream: data_end_stream,
                     data: chunk,
+                    wire_len,
                 })
                 .await?;
 

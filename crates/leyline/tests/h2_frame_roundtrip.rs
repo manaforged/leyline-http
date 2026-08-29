@@ -1,5 +1,4 @@
 //! Frame roundtrip tests — encode then parse, verify fields survive.
-
 use bytes::BytesMut;
 use leyline::h2::frame::*;
 
@@ -79,6 +78,7 @@ fn data_roundtrip() {
         stream_id: 1,
         end_stream: true,
         data: bytes::Bytes::from_static(b"hello world"),
+        wire_len: 11,
     };
     let mut buf = roundtrip_buf();
     frame.encode(&mut buf);

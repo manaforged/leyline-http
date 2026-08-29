@@ -1,7 +1,6 @@
 # cfnetwork-capture
 
-Permanent recapture rig for the **CFNetwork / app-identity wire fingerprint**
-
+Permanent recapture rig for the CFNetwork / URLSession ClientHello.
 
 A CFNetwork ClientHello is a property of the **OS framework version**, not of
 the app — any URLSession client on a given iOS/macOS build produces the same

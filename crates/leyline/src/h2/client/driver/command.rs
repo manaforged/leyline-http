@@ -15,6 +15,13 @@ use super::*;
 
 impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     pub(super) async fn on_command(&mut self, cmd: DriverCommand) -> Result<(), H2Error> {
+        // h2 requires the server's initial SETTINGS before its
+        // MAX_CONCURRENT_STREAMS is known. Until they arrive, park commands
+        // instead of racing the limit and eating REFUSED_STREAM resets.
+        if !self.peer_ready() {
+            self.pending.push_back(cmd);
+            return Ok(());
+        }
         match cmd {
             DriverCommand::SendRequest {
                 pseudo,
@@ -24,6 +31,19 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 response_tx,
             } => {
                 if let Err(e) = self.admit_new_stream() {
+                    // A buffered body parks fine: it is a refcounted
+                    // handle, not a live stream. The legacy API carries no
+                    // streaming uploads, so every capacity failure parks.
+                    if Self::deferrable_capacity_error(&e) {
+                        self.pending.push_back(DriverCommand::SendRequest {
+                            pseudo,
+                            headers,
+                            body,
+                            trailers,
+                            response_tx,
+                        });
+                        return Ok(());
+                    }
                     let _ = response_tx.send(Err(e));
                     return Ok(());
                 }
@@ -73,7 +93,25 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 response_tx,
                 stream_body_tx,
             } => {
+                // Streaming request bodies cannot be parked (the pump would
+                // buffer unboundedly); buffered bodies defer until a slot
+                // frees.
+                let deferrable = !matches!(
+                    body,
+                    crate::h2::client::driver::protocol::DriverRequestBody::Streaming { .. }
+                );
                 if let Err(e) = self.admit_new_stream() {
+                    if Self::deferrable_capacity_error(&e) && deferrable {
+                        self.pending.push_back(DriverCommand::SendRequestEx {
+                            pseudo,
+                            headers,
+                            body,
+                            stream_response,
+                            response_tx,
+                            stream_body_tx,
+                        });
+                        return Ok(());
+                    }
                     let _ = response_tx.send(Err(e));
                     return Ok(());
                 }
@@ -88,6 +126,34 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 self.start_request_ex(pseudo, headers, body, sink).await
             }
         }
+    }
+
+    /// A capacity rejection (`RefusedStream` from OUR OWN admission check,
+    /// not a server reset) is deferrable: the request parks in `pending`
+    /// and starts when a stream slot frees. GOAWAY and stream-ID
+    /// exhaustion are permanent and error immediately.
+    fn deferrable_capacity_error(e: &H2Error) -> bool {
+        matches!(
+            e,
+            H2Error::Connection {
+                code: ErrorCode::RefusedStream,
+                ..
+            }
+        )
+    }
+
+    /// Start deferred requests, in order, while the peer's stream budget
+    /// allows. Called after frames that may have closed streams.
+    pub(super) async fn drain_pending(&mut self) -> Result<(), H2Error> {
+        // Peer settings must be in (or the gate in `on_command` re-parks
+        // everything and this loop never terminates), admission must pass,
+        // and work must exist — else nothing changes and we return.
+        while !self.pending.is_empty() && self.peer_ready() && self.admit_new_stream().is_ok() {
+            if let Some(cmd) = self.pending.pop_front() {
+                self.on_command(cmd).await?;
+            }
+        }
+        Ok(())
     }
 
     pub(super) async fn start_request(

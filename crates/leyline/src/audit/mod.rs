@@ -3,6 +3,9 @@
 //! Computes fingerprints from profile data (not wire capture). Since Leyline
 //! configures TLS and TCP from TOML profiles, we know exactly what we send.
 
+#![forbid(unsafe_code)]
+// This module must stay free of `unsafe`; memory-unsafe code is confined to
+// leyline-bssl* (FFI) and leyline's tcp/tls platform bridges.
 mod cipher_map;
 mod ja3;
 mod ja4;

@@ -10,7 +10,6 @@
 //! imposes a wall-clock deadline (`header_block_reassembly_timeout`) on
 //! the whole reassembly and tears the connection down with a ProtocolError
 //! on expiry.
-
 #[path = "h2_support/mod.rs"]
 mod support;
 

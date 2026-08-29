@@ -20,8 +20,8 @@ pub struct Ja3Input<'a> {
 /// Compute JA3 fingerprint. Returns (raw_string, md5_hash).
 pub fn compute_ja3(input: &Ja3Input<'_>) -> String {
     let raw = compute_ja3_raw(input);
-    let digest = md5_legacy::compute(raw.as_bytes());
-    format!("{:x}", digest)
+    use md5::Digest as _;
+    format!("{:x}", md5::Md5::digest(raw.as_bytes()))
 }
 
 /// Compute the raw JA3 string (before hashing).
@@ -60,21 +60,4 @@ pub fn compute_ja3_raw(input: &Ja3Input<'_>) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ja3_format() {
-        let input = Ja3Input {
-            ciphers: &[
-                "TLS_AES_128_GCM_SHA256".into(),
-                "TLS_RSA_WITH_AES_128_CBC_SHA".into(),
-            ],
-            curves: &["X25519".into(), "SECP256R1".into()],
-            extension_ids: &[0x0000, 0x000a, 0x000b],
-            tls_record_version: 771, // TLS 1.2
-        };
-        let hash = compute_ja3(&input);
-        assert_eq!(hash.len(), 32); // MD5 hex length
-    }
-}
+mod tests;

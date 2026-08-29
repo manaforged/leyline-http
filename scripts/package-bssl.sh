@@ -17,6 +17,8 @@
 # Usage:
 #   ./scripts/package-bssl.sh            # build + install bundle for the host target
 #   ./scripts/package-bssl.sh --check    # only report what's missing, build nothing
+#   ./scripts/package-bssl.sh --verify   # only verify committed artifacts against
+#                                        #   native/CHECKSUMS (no build)
 #   ./scripts/package-bssl.sh --target x86_64-pc-windows-msvc
 set -euo pipefail
 
@@ -30,7 +32,7 @@ warn() { printf '\033[1;33mWARN %s\033[0m\n' "$*"; }
 die()  { printf '\033[1;31mERROR %s\033[0m\n' "$*" >&2; exit 1; }
 usage() {
     cat <<'EOF'
-Usage: ./scripts/package-bssl.sh [--check] [--target <triple>]
+Usage: ./scripts/package-bssl.sh [--check] [--verify] [--target <triple>]
 
 Without --target, package the host target. The only supported cross target is
 x86_64-pc-windows-msvc; it uses cargo-xwin, clang-cl, lld-link, llvm-lib, and
@@ -39,10 +41,12 @@ EOF
 }
 
 check_only=0
+verify_only=0
 target=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --check) check_only=1 ;;
+        --verify) verify_only=1 ;;
         --target)
             [[ $# -ge 2 ]] || die "--target requires a Rust target triple"
             target="$2"
@@ -52,12 +56,19 @@ while [[ $# -gt 0 ]]; do
             usage
             exit 0
             ;;
-        *) die "unknown argument: $1 (expected --check or --target <triple>)" ;;
+        *) die "unknown argument: $1 (expected --check, --verify, or --target <triple>)" ;;
     esac
     shift
 done
 
 sys_dir="crates/leyline-bssl-sys"
+
+if [[ $verify_only -eq 1 ]]; then
+    step "verify committed artifacts against native/CHECKSUMS"
+    (cd "$sys_dir" && sha256sum -c native/CHECKSUMS) || die "checksum drift: committed artifacts differ from native/CHECKSUMS"
+    ok "all artifacts match native/CHECKSUMS"
+    exit 0
+fi
 
 # --- target triple ---------------------------------------------------------
 if [[ -z "$target" ]]; then

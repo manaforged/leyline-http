@@ -161,6 +161,7 @@ async fn large_body_completes_against_flow_control_honouring_server() {
                 stream_id,
                 end_stream,
                 data: bytes::Bytes::from(vec![0xAB; budget]),
+                wire_len: budget as u64,
             };
             let mut buf = BytesMut::new();
             d.encode(&mut buf);

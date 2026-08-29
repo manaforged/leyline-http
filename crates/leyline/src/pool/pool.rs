@@ -22,10 +22,8 @@ use crate::pool::types::{H1Slot, PoolCounters, PoolKey, PoolStats, PooledConn, T
 pub(crate) type SharedConnect =
     Shared<BoxFuture<'static, Result<(H2Client, TlsInfo), Arc<crate::Error>>>>;
 
-/// The H3 analogue of [`SharedConnect`]: a shared, awaitable in-progress QUIC +
-/// HTTP/3 connect. Concurrent first-requests (and `Race` legs) to one
-/// destination join ONE handshake instead of each opening their own QUIC
-/// connection and dropping all but the first at install.
+/// Shared in-flight QUIC + HTTP/3 connect. Concurrent first-requests to
+/// one destination await one handshake.
 #[cfg(feature = "http3")]
 pub(crate) type SharedH3Connect =
     Shared<BoxFuture<'static, Result<(H3Client, TlsInfo), Arc<crate::Error>>>>;
@@ -97,10 +95,8 @@ pub struct Pool {
     /// In-progress H2 connects, keyed like `inner`. Single-flights connection establishment so
     /// concurrent first-requests to one destination share a single TLS+H2 handshake.
     pub(crate) inflight_h2: Mutex<HashMap<PoolKey, SharedConnect>>,
-    /// In-progress H3 connects, keyed like `inner` (with `Transport::Quic`).
-    /// Single-flights the QUIC + HTTP/3 handshake so a cold burst (or both
-    /// `Race` legs) shares one connection instead of opening N and dropping
-    /// all but the first at install.
+    /// In-progress H3 connects, keyed like `inner` with `Transport::Quic`.
+    /// Concurrent first-requests share one QUIC + HTTP/3 handshake.
     #[cfg(feature = "http3")]
     pub(crate) inflight_h3: Mutex<HashMap<PoolKey, SharedH3Connect>>,
     pub(crate) idle_timeout: Duration,
@@ -422,9 +418,8 @@ impl Pool {
     /// so no in-flight request ever races a teardown of the connection it is
     /// about to use.
     ///
-    /// H2 and H3 keep separate `PoolKey`s (`Transport::Tcp` vs `Quic`), so a
-    /// `Race` that brings up both protocols to one host pools each rather than
-    /// clobbering — this never overwrites a live entry of the other transport.
+    /// H2 and H3 keep separate `PoolKey`s (`Transport::Tcp` vs `Quic`), so
+    /// both can be live to one host. This never overwrites the other transport.
     #[cfg(feature = "http3")]
     pub(crate) fn install_or_get_h3(
         &self,
@@ -669,6 +664,7 @@ impl Pool {
             map.insert(
                 PoolKey {
                     host: format!("h{i}.bench"),
+                    scheme: "https".to_string(),
                     port: 443,
                     proxy: None,
                     transport: crate::pool::types::Transport::Tcp,
@@ -705,71 +701,4 @@ impl Default for Pool {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::Pool;
-    use crate::pool::types::{PoolKey, PooledConn, TlsInfo, Transport};
-    use std::collections::VecDeque;
-    use std::time::{Duration, Instant};
-
-    fn h1_key(host: &str) -> PoolKey {
-        PoolKey {
-            host: host.to_string(),
-            port: 80,
-            proxy: None,
-            transport: Transport::Tcp,
-        }
-    }
-
-    fn insert_empty_h1(pool: &Pool, host: &str, last_use: Instant) {
-        pool.inner.lock().unwrap_or_else(|e| e.into_inner()).insert(
-            h1_key(host),
-            PooledConn::H1 {
-                idle: VecDeque::new(),
-                last_use,
-                tls: TlsInfo::default(),
-            },
-        );
-    }
-
-    // Regression for the lingering-empty-H1-entry leak. An entry whose deque
-    // emptied because its connections were all checked out and then died
-    // mid-request (never returned via `return_h1`) used to survive every idle
-    // sweep — `before == idle.len()` held forever for a `0 == 0` empty deque —
-    // and only left the pool on LRU eviction. Now the idle sweep drops it once
-    // its `last_use` ages past the idle timeout (no request has borrowed it).
-    #[test]
-    fn evict_idle_drops_abandoned_empty_h1_entry() {
-        let pool = Pool::with_limits(Duration::from_millis(20), 2048, 6);
-        // last_use well past the 20ms idle timeout → no live borrower.
-        let stale = Instant::now()
-            .checked_sub(Duration::from_millis(40))
-            .expect("monotonic clock is >40ms past its epoch");
-        insert_empty_h1(&pool, "abandoned", stale);
-
-        pool.evict_idle();
-
-        assert_eq!(
-            pool.len(),
-            0,
-            "an empty H1 entry idle past the timeout must be reaped, not linger until LRU"
-        );
-    }
-
-    // The counterpart the fix must NOT break: an entry that is empty only
-    // because every connection is currently checked out (in-flight) has a
-    // recent `last_use`, so the sweep keeps it for the returning requests to
-    // reuse rather than churning a drop + recreate on every sweep.
-    #[test]
-    fn evict_idle_keeps_empty_h1_entry_with_live_checkouts() {
-        let pool = Pool::with_limits(Duration::from_secs(300), 2048, 6);
-        insert_empty_h1(&pool, "in-flight", Instant::now());
-
-        pool.evict_idle();
-
-        assert_eq!(
-            pool.len(),
-            1,
-            "an empty H1 entry touched within the idle window (checkouts in flight) must survive"
-        );
-    }
-}
+mod tests;

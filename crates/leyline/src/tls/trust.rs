@@ -41,6 +41,10 @@ pub struct TlsTrustConfig {
     pinned_leaf_sha256: Vec<[u8; 32]>,
 }
 
+/// Why shared mutability: the BoringSSL custom-verify callback runs inside
+/// the handshake (possibly on a different runtime worker than the caller's
+/// future); the connector reads the classification after the handshake. A
+/// one-shot slot, not shared state in any meaningful sense.
 pub(crate) type VerificationFailure = Arc<Mutex<Option<TrustFailure>>>;
 
 #[derive(Clone, Copy, Debug)]
@@ -144,6 +148,43 @@ impl TlsTrustConfig {
     pub fn pinned_leaf_sha256(&self) -> &[[u8; 32]] {
         &self.pinned_leaf_sha256
     }
+}
+
+/// Context-level variant of [`install_pinning_verifier`] for QUIC: the
+/// callback lives on the shared `SslContext` because quiche owns the
+/// per-connection `Ssl` handles. Pin failure surfaces as a handshake
+/// alert; the classification handle is unnecessary here.
+pub(crate) fn install_pinning_verifier_ctx(builder: &mut SslContextBuilder, pins: &[[u8; 32]]) {
+    let pins = pins.to_vec();
+    builder.set_custom_verify_callback(SslVerifyMode::PEER, move |ssl| {
+        let store = ssl.ssl_context().cert_store();
+        let cert = ssl
+            .peer_certificate()
+            .ok_or(SslVerifyError::Invalid(SslAlert::CERTIFICATE_UNKNOWN))?;
+        let chain = ssl
+            .peer_cert_chain()
+            .ok_or(SslVerifyError::Invalid(SslAlert::CERTIFICATE_UNKNOWN))?;
+
+        let chain_ok = X509StoreContext::new()
+            .map_err(|_| SslVerifyError::Invalid(SslAlert::INTERNAL_ERROR))?
+            .init(store, &cert, chain, |store_ctx| {
+                Ok(store_ctx.verify_cert()? && store_ctx.verify_result().is_ok())
+            })
+            .map_err(|_| SslVerifyError::Invalid(SslAlert::INTERNAL_ERROR))?;
+        if !chain_ok {
+            return Err(SslVerifyError::Invalid(SslAlert::UNKNOWN_CA));
+        }
+
+        let der = cert
+            .to_der()
+            .map_err(|_| SslVerifyError::Invalid(SslAlert::INTERNAL_ERROR))?;
+        let digest: [u8; 32] = Sha256::digest(&der).into();
+        if pins.iter().any(|pin| pin == &digest) {
+            Ok(())
+        } else {
+            Err(SslVerifyError::Invalid(SslAlert::CERTIFICATE_UNKNOWN))
+        }
+    });
 }
 
 pub(crate) fn take_verification_failure(failure: &VerificationFailure) -> Option<TrustFailure> {
@@ -453,8 +494,11 @@ fn wire_linux_system_trust(builder: &mut SslContextBuilder) -> Result<(), TlsErr
     ))
 }
 
-/// macOS-only: enumerate the system trust anchors through Security.framework
-/// and push each DER certificate into BoringSSL's `X509_STORE`.
+/// macOS-only: build the effective system trust set — built-in anchors
+/// merged with user/admin/system trust settings (`SecTrustSettings*`),
+/// so user-installed roots work and explicit distrust is honored, the
+/// same merge a real browser evaluates against — and push each
+/// DER-encoded root into BoringSSL's `X509_STORE`.
 #[cfg(target_os = "macos")]
 fn wire_macos_system_trust(builder: &mut SslContextBuilder) -> Result<(), TlsError> {
     let roots = crate::tls::macos_trust::load_system_roots().map_err(|error| {
@@ -601,136 +645,4 @@ pub(crate) fn collect_ca_dir_candidates(dir: &std::path::Path) -> Vec<std::path:
 }
 
 #[cfg(test)]
-mod ca_dir_tests {
-    //! Guards against SSL_CERT_DIR silently disabling trust on
-    //! Debian/Ubuntu/RHEL, where all entries in `/etc/ssl/certs` are
-    //! symlinks. These gates cover the symlink-following, extension-filter,
-    //! and file-type-after-resolve semantics directly. If a future
-    //! refactor re-introduces `DirEntry::metadata()` or drops the
-    //! symlink-follow, these tests fail.
-
-    use super::collect_ca_dir_candidates;
-    use std::fs;
-    use std::io::Write;
-    use std::path::{Path, PathBuf};
-    use std::sync::atomic::{AtomicU64, Ordering};
-
-    static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-    /// Disposable per-test directory under the OS temp dir. Named
-    /// with a process-unique counter so parallel tests never clash.
-    struct TempDir(PathBuf);
-
-    impl TempDir {
-        fn new(label: &str) -> Self {
-            let id = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
-            let p = std::env::temp_dir().join(format!(
-                "leyline-ca-{}-{}-{}",
-                label,
-                std::process::id(),
-                id
-            ));
-            let _ = fs::remove_dir_all(&p);
-            fs::create_dir_all(&p).unwrap();
-            TempDir(p)
-        }
-        fn path(&self) -> &Path {
-            &self.0
-        }
-    }
-    impl Drop for TempDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
-
-    fn write_pem(path: &Path, label: &str) {
-        let mut f = fs::File::create(path).unwrap();
-        // Content is arbitrary — the helper only walks the dir;
-        // it does NOT call `set_ca_file`.
-        writeln!(
-            f,
-            "-----BEGIN CERTIFICATE-----\n{label}\n-----END CERTIFICATE-----"
-        )
-        .unwrap();
-    }
-
-    #[test]
-    fn missing_dir_yields_empty_candidates() {
-        let tmp = TempDir::new("missing");
-        let nowhere = tmp.path().join("does-not-exist");
-        assert!(collect_ca_dir_candidates(&nowhere).is_empty());
-    }
-
-    #[test]
-    fn accepts_regular_pem_crt_cer_files() {
-        let tmp = TempDir::new("regular");
-        write_pem(&tmp.path().join("a.pem"), "a");
-        write_pem(&tmp.path().join("b.crt"), "b");
-        write_pem(&tmp.path().join("c.cer"), "c");
-        let mut v = collect_ca_dir_candidates(tmp.path());
-        v.sort();
-        assert_eq!(v.len(), 3, "expected 3 candidates, got {v:?}");
-    }
-
-    #[test]
-    fn extension_match_is_case_insensitive() {
-        let tmp = TempDir::new("case");
-        write_pem(&tmp.path().join("a.PEM"), "a");
-        write_pem(&tmp.path().join("b.Crt"), "b");
-        let v = collect_ca_dir_candidates(tmp.path());
-        assert_eq!(v.len(), 2);
-    }
-
-    #[test]
-    fn wrong_extensions_skipped() {
-        let tmp = TempDir::new("ext");
-        write_pem(&tmp.path().join("a.pem"), "a");
-        write_pem(&tmp.path().join("b.hash"), "b");
-        write_pem(&tmp.path().join("README"), "c");
-        write_pem(&tmp.path().join("d.txt"), "d");
-        write_pem(&tmp.path().join("e.pem.bak"), "e");
-        let v = collect_ca_dir_candidates(tmp.path());
-        assert_eq!(v.len(), 1, "only a.pem should pass: {v:?}");
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn symlink_to_regular_file_is_accepted() {
-        // This is the bug: the Debian/Ubuntu `/etc/ssl/certs`
-        // layout is ENTIRELY symlinks. If this test ever regresses,
-        // every mainstream Linux distro loses TLS trust.
-        use std::os::unix::fs::symlink;
-        let tmp = TempDir::new("sym");
-        let real = tmp.path().join("real.pem");
-        write_pem(&real, "real");
-        let link = tmp.path().join("link.pem");
-        symlink(&real, &link).unwrap();
-        let v = collect_ca_dir_candidates(tmp.path());
-        // Both the real file and the symlink pointing at it are
-        // loadable candidates — BoringSSL deduplicates by subject
-        // so double-loading is harmless.
-        assert_eq!(v.len(), 2, "got {v:?}");
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn broken_symlink_skipped() {
-        use std::os::unix::fs::symlink;
-        let tmp = TempDir::new("broken");
-        let link = tmp.path().join("dangling.pem");
-        symlink("/nonexistent/target.pem", &link).unwrap();
-        let v = collect_ca_dir_candidates(tmp.path());
-        assert!(v.is_empty(), "broken symlink must be skipped: {v:?}");
-    }
-
-    #[test]
-    fn directory_entry_with_cert_extension_skipped() {
-        let tmp = TempDir::new("subdir");
-        // `foo.pem/` as a directory must not be treated as a cert.
-        fs::create_dir(tmp.path().join("bogus.pem")).unwrap();
-        write_pem(&tmp.path().join("real.pem"), "real");
-        let v = collect_ca_dir_candidates(tmp.path());
-        assert_eq!(v.len(), 1, "only real.pem expected: {v:?}");
-    }
-}
+mod ca_dir_tests;

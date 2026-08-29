@@ -38,8 +38,8 @@ pub struct TlsInfo {
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub(crate) enum Transport {
     Tcp,
-    // Constructed only on the `http3` path (checkout_h3_handle /
-    // send_request_h3_pooled, both `#[cfg(feature = "http3")]`). Without that
+    // Constructed only on the `http3` path (`send_request_h3_pooled`,
+    // `#[cfg(feature = "http3")]`). Without that
     // feature the variant is reserved but unbuilt, so allow the dead-code lint
     // there rather than tripping `-D warnings` (e.g. the bindings clippy job,
     // which compiles leyline without http3).
@@ -52,6 +52,11 @@ pub(crate) enum Transport {
 pub(crate) struct PoolKey {
     pub(crate) host: String,
     pub(crate) port: u16,
+    /// Request scheme — part of the key because a plaintext socket must
+    /// never satisfy a later `https://` request to the same host:port
+    /// (an attacker serving plaintext on 443 would otherwise have his
+    /// socket pooled for the TLS request, credentials included).
+    pub(crate) scheme: String,
     pub(crate) proxy: Option<String>,
     pub(crate) transport: Transport,
 }
@@ -61,7 +66,7 @@ pub(crate) struct PoolKey {
 /// I/O types behind one key.
 pub struct H1Slot {
     /// TLS over TCP for `https://`; plaintext TCP for `http://`.
-    /// Boxed rather than parameterising [`Pool`] by I/O type so a
+    /// Boxed rather than parameterising [`Pool`](super::Pool) by I/O type so a
     /// single pool can service both schemes.
     pub(crate) io: Box<dyn H1Io>,
 }

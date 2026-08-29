@@ -3,7 +3,6 @@
 //! Each test spins up a tiny mock H2 server inline over `tokio::io::duplex`
 //! and exercises one property of the driver: independent stream progress,
 //! flow-control parking, graceful shutdown, and reader-EOF fan-out.
-
 #[path = "h2_support/mod.rs"]
 mod support;
 

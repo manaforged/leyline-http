@@ -1,0 +1,76 @@
+use super::*;
+
+fn ctx(firefox: bool) -> HeaderContext<'static> {
+    HeaderContext {
+        user_agent: "UA",
+        sec_ch_ua: "\"Chromium\";v=\"148\"",
+        sec_ch_ua_mobile: "?0",
+        sec_ch_ua_platform: "Windows",
+        accept_language: "en-US,en;q=0.9",
+        origin: "https://x.com",
+        referer: "https://x.com/",
+        firefox,
+    }
+}
+
+fn names(h: &[HeaderPair]) -> Vec<String> {
+    h.iter().map(|(n, _)| n.to_string()).collect()
+}
+
+fn value<'a>(h: &'a [HeaderPair], name: &str) -> Option<&'a str> {
+    h.iter().find(|(n, _)| n == name).map(|(_, v)| v.as_ref())
+}
+
+/// A Firefox identity must ship NO `sec-ch-ua*` Client Hints (Firefox emits none), the Gecko
+/// document `Accept`, and `te: trailers` + an HTTP `priority` hint; a Chrome identity keeps the
+/// Client Hints and sends neither. Values are from a live Firefox 153 tls.peet.ws capture.
+#[test]
+fn firefox_reshapes_client_hints_accept_priority_and_te() {
+    // Chrome identity: CH headers present + Chrome document Accept, no priority/te.
+    let chrome = Preset::Navigate.build_headers(&ctx(false));
+    assert!(names(&chrome).iter().any(|n| n == "sec-ch-ua-mobile"));
+    assert!(value(&chrome, "accept").unwrap().contains("image/apng"));
+    assert_eq!(value(&chrome, "priority"), None);
+    assert_eq!(value(&chrome, "te"), None);
+
+    // Firefox navigate: zero Client Hints, Gecko document Accept, priority u=0, te trailers.
+    let ff = Preset::Navigate.build_headers(&ctx(true));
+    assert!(
+        names(&ff).iter().all(|n| !n.starts_with("sec-ch-ua")),
+        "firefox must send no Client Hints: {:?}",
+        names(&ff)
+    );
+    assert_eq!(value(&ff, "accept"), Some(FIREFOX_DOC_ACCEPT));
+    assert_eq!(value(&ff, "priority"), Some("u=0, i"));
+    assert_eq!(value(&ff, "te"), Some("trailers"));
+
+    // Firefox XHR/API: browser-neutral JS-set Accept untouched, priority u=1, te trailers.
+    let ff_xhr = Preset::SameSite.build_headers(&ctx(true));
+    assert!(names(&ff_xhr).iter().all(|n| !n.starts_with("sec-ch-ua")));
+    assert_eq!(
+        value(&ff_xhr, "accept"),
+        Some("application/json, text/plain, */*")
+    );
+    assert_eq!(value(&ff_xhr, "priority"), Some("u=1, i"));
+    assert_eq!(value(&ff_xhr, "te"), Some("trailers"));
+}
+
+/// Chrome 150 fetch/XHR (capture-verified against a real Chrome 150
+/// binary): sends the H2 `priority` header (`u=1, i`) AND
+/// `accept-language` (en-US,en;q=0.9). `priority` is stripped on the
+/// H1 path in the transport — Chrome only emits it on H2.
+#[test]
+fn chrome_xhr_sends_priority_and_accept_language() {
+    let xhr = Preset::Xhr.build_headers(&ctx(false));
+    assert_eq!(value(&xhr, "priority"), Some("u=1, i"));
+    assert_eq!(value(&xhr, "accept-language"), Some("en-US,en;q=0.9"));
+    // Exactly one priority header — no duplicate from the Firefox
+    // reshape path (regression guard).
+    assert_eq!(xhr.iter().filter(|(n, _)| n == "priority").count(), 1);
+    let ff = Preset::Xhr.build_headers(&ctx(true));
+    assert_eq!(
+        ff.iter().filter(|(n, _)| n == "priority").count(),
+        1,
+        "firefox reshape must replace, not duplicate, priority"
+    );
+}

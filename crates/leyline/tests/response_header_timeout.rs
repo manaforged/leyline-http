@@ -6,7 +6,6 @@
 //! only by the request-wide `total`. The test stands up a plaintext H1 server
 //! that accepts the request and never replies, and asserts the client errors
 //! with `Timeout` on the TTFB budget — well before `total`.
-
 use std::time::{Duration, Instant};
 
 use leyline::{Error, Session};
@@ -40,7 +39,7 @@ async fn response_header_timeout_fires_when_upstream_goes_silent() {
         .expect("session builds");
 
     let start = Instant::now();
-    let result = session.get(&format!("http://{addr}/")).send().await;
+    let result = session.get(&format!("http://{addr}/")).await;
     let elapsed = start.elapsed();
 
     assert!(
@@ -84,7 +83,6 @@ async fn no_response_header_timeout_means_request_survives_past_the_ttfb_window(
 
     let resp = session
         .get(&format!("http://{addr}/"))
-        .send()
         .await
         .expect("request without a TTFB cap survives the 600ms stall");
     assert_eq!(resp.status(), 200);
@@ -136,7 +134,7 @@ async fn session_recovers_after_ttfb_timeout_no_pool_wedge() {
         .build()
         .expect("session builds");
 
-    let first = session.get(&format!("http://{addr}/")).send().await;
+    let first = session.get(&format!("http://{addr}/")).await;
     assert!(
         matches!(first, Err(Error::Timeout)),
         "first request should TTFB-timeout, got {first:?}"
@@ -145,7 +143,6 @@ async fn session_recovers_after_ttfb_timeout_no_pool_wedge() {
     // Second request on the same session must recover and succeed.
     let second = session
         .get(&format!("http://{addr}/"))
-        .send()
         .await
         .expect("session must recover and succeed after a TTFB timeout");
     assert_eq!(second.status(), 200);
@@ -178,7 +175,7 @@ async fn total_backstop_bounds_silence_when_ttfb_unset() {
         .expect("session builds");
 
     let start = Instant::now();
-    let result = session.get(&format!("http://{addr}/")).send().await;
+    let result = session.get(&format!("http://{addr}/")).await;
     let elapsed = start.elapsed();
 
     assert!(

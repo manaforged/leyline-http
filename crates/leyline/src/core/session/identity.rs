@@ -50,8 +50,7 @@ impl Identity {
 
     /// Next distinct ClientHello in this family. HTTP + platform stay.
     ///
-    /// Chrome walks 150 → 147 → 146 → 131 → 124 → 120 → 116 → 150.
-    /// Firefox walks 152 → 150 → 133 → 152.
+    /// Chrome walks 150 → 147 → 146 → 150. Firefox walks 152 → 150 → 152.
     ///
     /// # Errors
     ///
@@ -84,7 +83,8 @@ impl Identity {
 
     /// Families a jar can pass to on this platform (HTTP + TLS both switch).
     ///
-    /// Same jar, new locked presentation.
+    /// Same jar, new locked presentation. A session that already ran as
+    /// Chrome can keep that jar and continue as Firefox (or Safari).
     /// Not [`Self::rotate_tls`].
     const PASS_REPS: &[Browser] = &[
         Browser::Chrome150,
@@ -165,10 +165,7 @@ impl Identity {
             .get_browser(self.http)
             .ok_or_else(|| Error::Config(format!("no profile for {}", self.http)))?;
         profile.identity_for(self.platform).ok_or_else(|| {
-            Error::Config(format!(
-                "no {} identity for {}",
-                self.platform, self.http
-            ))
+            Error::Config(format!("no {} identity for {}", self.platform, self.http))
         })
     }
 }

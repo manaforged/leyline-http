@@ -2,7 +2,6 @@
 //!
 //! Verify the pseudo-header list sent on the wire for classic CONNECT
 //! (RFC 9113 §8.5) and extended CONNECT (RFC 8441 §4).
-
 use leyline::h2::config::PseudoOrder;
 use leyline::h2::connection::PseudoHeaders;
 use leyline::h2::error::{ErrorCode, H2Error};

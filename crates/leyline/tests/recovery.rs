@@ -2,7 +2,6 @@
 //! providers recover when retries are explicitly enabled, the default performs
 //! no application retry, and a stalled handshake fails fast on the connect
 //! timeout rather than hanging the whole request budget.
-
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
@@ -50,7 +49,6 @@ async fn explicit_retry_policy_recovers_from_transient_connection_drop() {
 
     let resp = session
         .get(&format!("http://{addr}/"))
-        .send()
         .await
         .expect("explicit retries should recover from the first-connection drop");
     assert_eq!(resp.status(), 200);
@@ -91,7 +89,7 @@ async fn default_session_does_not_retry_a_transient_connection_drop() {
         .build()
         .unwrap();
 
-    let result = session.get(&format!("http://{addr}/")).send().await;
+    let result = session.get(&format!("http://{addr}/")).await;
     assert!(
         result.is_err(),
         "the no-retry default must surface the connection drop"
@@ -134,7 +132,6 @@ async fn connect_timeout_bounds_a_stalled_tls_handshake() {
     let start = Instant::now();
     let result = session
         .get(&format!("https://127.0.0.1:{}/", addr.port()))
-        .send()
         .await;
     let elapsed = start.elapsed();
 

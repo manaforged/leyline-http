@@ -48,12 +48,16 @@ pub struct FingerprintConnector {
     /// list when the selected browser profile requires it.
     request_trust_anchors: bool,
     /// Per-host session ticket cache for TLS resumption (DER-encoded).
+    /// Why shared mutability: cloned connectors across tasks must share one
+    /// ticket cache, and ticket insertion happens inside the BoringSSL
+    /// session callback. LRU + mutex keeps memory bounded and the poison
+    /// policy explicit (see `lock_unpoisoned`).
     session_cache: Arc<Mutex<LruCache<String, Vec<u8>>>>,
     /// When `true`, skip peer certificate verification entirely.
     /// **Dangerous** — off by default; only the `leyline` CLI's
     /// `-k/--insecure` flag and explicit test fixtures should turn
     /// this on.
-    accept_invalid_certs: bool,
+    accept_invalid_certs: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// DNS resolver for direct connections. Defaults to
     /// [`SystemResolver`] which wraps blocking `getaddrinfo(3)` in
     /// [`tokio::task::spawn_blocking`].
@@ -101,12 +105,23 @@ impl FingerprintConnector {
 
         // Session resumption — enable external client-side caching.
         let session_cache = Arc::new(Mutex::new(LruCache::new(
-            std::num::NonZeroUsize::new(256).unwrap(),
+            // Invariant: the literal is non-zero, so `new` cannot fail.
+            std::num::NonZeroUsize::new(256).expect("cache capacity literal is non-zero"),
         )));
         builder
             .set_session_cache_mode(SslSessionCacheMode::CLIENT | SslSessionCacheMode::NO_INTERNAL);
         let cache_clone = session_cache.clone();
+        // Shared with the struct so `set_accept_invalid_certs` after build
+        // is observed by already-registered handshakes.
+        let accept_invalid_certs = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let insecure_flag = accept_invalid_certs.clone();
         builder.set_new_session_callback(move |ssl, session| {
+            // Tickets minted while verification was disabled are never
+            // cached: resumption would skip certificate verification, so a
+            // MITM ticket could ride into later verified connections.
+            if insecure_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                return;
+            }
             if let Some(hostname) = ssl.servername(NameType::HOST_NAME) {
                 if let Ok(der) = session.to_der() {
                     // Recover from poison like the read side does — a
@@ -125,7 +140,7 @@ impl FingerprintConnector {
             alps_new_codepoint: tls.alps_new_codepoint,
             request_trust_anchors: tls.request_trust_anchors,
             session_cache,
-            accept_invalid_certs: false,
+            accept_invalid_certs,
             resolver: Arc::new(SystemResolver),
             happy_eyeballs: HappyEyeballsConfig::default(),
             connect_timeout: None,
@@ -148,7 +163,15 @@ impl FingerprintConnector {
     /// default; only the `leyline` CLI's `-k/--insecure` flag and
     /// explicit test fixtures should turn this on.
     pub fn set_accept_invalid_certs(&mut self, accept: bool) {
-        self.accept_invalid_certs = accept;
+        use std::sync::atomic::Ordering;
+        self.accept_invalid_certs.store(accept, Ordering::Relaxed);
+    }
+
+    /// Live insecure-mode flag, shared with the session-ticket callback so
+    /// tickets minted while verification was off are never cached or reused.
+    fn insecure_mode(&self) -> bool {
+        use std::sync::atomic::Ordering;
+        self.accept_invalid_certs.load(Ordering::Relaxed)
     }
 
     /// Override the DNS resolver (for `/etc/hosts`-style tests or
@@ -353,10 +376,11 @@ impl FingerprintConnector {
 
         // Danger mode: skip peer verification entirely. Only wired
         // through the CLI's -k/--insecure flag; off by default.
-        if self.accept_invalid_certs {
+        let insecure = self.insecure_mode();
+        if insecure {
             ssl.set_verify(SslVerifyMode::NONE);
         }
-        let verification_failure = (!self.accept_invalid_certs && !self.pins.is_empty())
+        let verification_failure = (!insecure && !self.pins.is_empty())
             .then(|| install_pinning_verifier(&mut ssl, &self.pins));
 
         // Session resumption — install cached session ticket before handshake.
@@ -364,7 +388,7 @@ impl FingerprintConnector {
         // (a skip downgrades a resumed JA4 to the cold form, changing the fp).
         {
             let mut cache = lock_unpoisoned(&self.session_cache);
-            if let Some(der) = cache.get(host).cloned() {
+            if let Some(der) = (!insecure).then(|| cache.get(host).cloned()).flatten() {
                 if let Ok(session) = SslSession::from_der(&der) {
                     // SAFETY: BoringSSL requires `set_session` to be
                     // called on an Ssl not yet handed to `connect()`.
@@ -388,9 +412,10 @@ impl FingerprintConnector {
         // Trust Anchor Identifiers (extension 0xCA34 / 51764). Chrome 148+ sends
         // an empty `TrustAnchorIdentifierList` to advertise support; emit the
         // same so the ClientHello JA4 matches real Chrome (t13d1517). Without it
-        // leyline sends t13d1516 and a CDN edge's JA4+H2 join check soft-blocks
-        // the connection — TLS completes but ALPN is stripped, surfacing here as
-        // `alpn: negotiated none, expected h2`. A profile that asks for the
+        // leyline sends t13d1516 and some CDN edges' JA4+H2 join-check
+        // soft-blocks the connection — TLS completes but ALPN is stripped,
+        // surfacing here as `alpn: negotiated none, expected h2`. A profile
+        // that asks for the
         // extension and does not get it fails the handshake early,
         // so the handshake fails here instead of on the wire.
         if self.request_trust_anchors {
@@ -419,7 +444,7 @@ impl FingerprintConnector {
         // requested host so a CA-trusted, correctly-pinned cert issued
         // for a different name can't be accepted here. Skipped only
         // when the caller explicitly opted out of verification.
-        if !self.pins.is_empty() && !self.accept_invalid_certs {
+        if !self.pins.is_empty() && !insecure {
             let leaf = stream.ssl().peer_certificate().ok_or_else(|| {
                 TlsError::Certificate("pinned connection presented no peer certificate".into())
             })?;
@@ -540,23 +565,4 @@ fn lock_unpoisoned<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::lock_unpoisoned;
-    use std::sync::{Arc, Mutex};
-
-    #[test]
-    fn lock_unpoisoned_recovers_after_panic() {
-        let cache = Arc::new(Mutex::new(vec![1u8]));
-        let poisoner = cache.clone();
-        let _ = std::thread::spawn(move || {
-            let _guard = poisoner.lock().unwrap();
-            panic!("poison the mutex");
-        })
-        .join();
-        assert!(cache.is_poisoned(), "test setup failed to poison the mutex");
-
-        // Both the read and write paths must keep working.
-        lock_unpoisoned(&cache).push(2);
-        assert_eq!(*lock_unpoisoned(&cache), vec![1, 2]);
-    }
-}
+mod tests;

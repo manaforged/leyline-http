@@ -2,7 +2,9 @@
 //! to make the client mis-behave. These drive the real `ClientConnection`
 //! driver against hand-crafted server frames (the driver's own frame handling
 //! is under test, so the server side emits raw RFC 9113 bytes).
-
+//!
+//! Every test drives the client against attacker-controlled bytes and
+//! reproduces a specific way a hostile server could mis-behave it.
 #[path = "h2_support/mod.rs"]
 mod support;
 
@@ -290,4 +292,75 @@ async fn pseudo_header_in_trailers_fails_the_stream() {
     );
 
     server.abort();
+}
+
+/// A PUSH_PROMISE field block mutates the shared HPACK table even when
+/// the promised stream is reset — it must be decoded regardless (RFC 9113
+/// §4.3), or the next dynamic-index reference kills the connection.
+#[tokio::test]
+async fn push_promise_field_block_is_hpack_decoded_before_reset() {
+    let (client_io, mut server_io) = tokio::io::duplex(65_536);
+
+    let server = tokio::spawn(async move {
+        read_preface(&mut server_io).await;
+        let (h, _) = read_frame(&mut server_io).await;
+        assert_eq!(h.frame_type, FrameType::Settings as u8);
+        write_server_settings(&mut server_io).await;
+        write_settings_ack(&mut server_io).await;
+        let (h, _) = read_frame(&mut server_io).await;
+        assert_eq!(h.frame_type, FrameType::Settings as u8);
+        assert!(h.flags & 0x1 != 0, "expected client SETTINGS ack");
+
+        // Request A on stream 1. Push promised stream 2 with a field block
+        // that inserts (x, y) via literal-with-incremental-indexing, then
+        // answer stream 1 referencing that fresh dynamic entry (62) with
+        // END_STREAM.
+        let (h, _) = read_frame(&mut server_io).await;
+        assert_eq!(h.frame_type, FrameType::Headers as u8);
+        assert_eq!(h.stream_id, 1);
+
+        server_io
+            .write_all(&[
+                0x00, 0x00, 0x09, 0x05, 0x04, 0x00, 0x00, 0x00, 0x02, // hdr
+                0x00, 0x00, 0x00, 0x02, // promised stream 2
+                0x40, 0x01, b'x', 0x01, b'y', // insert "x: y"
+            ])
+            .await
+            .unwrap();
+        server_io
+            .write_all(&[
+                0x00, 0x00, 0x02, 0x01, 0x05, 0x00, 0x00, 0x00, 0x01, // hdr
+                0x88, 0xbe, // :status 200 + indexed 62 = (x, y)
+            ])
+            .await
+            .unwrap();
+
+        // The client must still RST the promised stream.
+        loop {
+            let (fh, _) = read_frame(&mut server_io).await;
+            if fh.frame_type == FrameType::RstStream as u8 && fh.stream_id == 2 {
+                break;
+            }
+        }
+    });
+
+    let (handle, _driver) = ClientConnection::start(client_io, test_config())
+        .await
+        .expect("handshake");
+
+    let (p, h) = get_req("/a");
+    let resp = handle
+        .send_request(p, h, None)
+        .await
+        .expect("push + dynamic reference must decode cleanly");
+
+    assert_eq!(resp.status, 200);
+    let x = resp
+        .headers
+        .iter()
+        .find(|(n, _)| n.as_str() == "x")
+        .map(|(_, v)| v.as_str());
+    assert_eq!(x, Some("y"), "pushed-entry reference must decode");
+
+    server.await.unwrap();
 }

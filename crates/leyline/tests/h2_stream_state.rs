@@ -3,6 +3,14 @@
 //! No tokio, no network — just exercising the RFC 9113 §5.1 transitions
 //! from the client perspective.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
+)]
+#![expect(
+    clippy::panic,
+    reason = "test harness helper: explicit panic on unexpected error shape is the assertion"
+)]
 use leyline::h2::error::ErrorCode;
 use leyline::h2::stream_state::{ClosedReason, StreamEvent, StreamState, StreamStateError};
 

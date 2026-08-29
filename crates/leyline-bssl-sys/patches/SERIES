@@ -11,5 +11,7 @@ boringssl @ 3a9254f16eda7a4c5d2260039ff23456a0a34de4
 # ML-DSA TLS signature algorithms (Chrome 150) are native at this revision.
 #
 # Prebuilt artifacts (native/<target>/lib + src/bindings/<target>.rs) are built
-# at `target` for all three supported targets:
-#   x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu, aarch64-apple-darwin
+# at `target` for all four supported targets:
+#   x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu,
+#   aarch64-unknown-linux-gnu, aarch64-apple-darwin
+# Provenance + checksums: PROVENANCE.md and native/CHECKSUMS.

@@ -111,6 +111,11 @@ cargo package \
     || fail "cargo package failed"
 ok "publishable crates packaged"
 
+step "prebuilt BoringSSL artifact checksums"
+"$(cd "$(dirname "$0")" && pwd)/package-bssl.sh" --verify \
+    || fail "committed BoringSSL artifacts differ from native/CHECKSUMS"
+ok "prebuilt BoringSSL artifacts match native/CHECKSUMS"
+
 # Compile an external consumer against the extracted archives. Patch all
 # internal packages to their just-packaged copies: this checks the archive
 # boundary without requiring a first-cut release to already be indexed.

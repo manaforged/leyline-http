@@ -77,7 +77,7 @@ min_tls_version = "1.0"
 extension_permutation = [0, 23, 65281, 10, 11, 16, 5, 13, 18, 51, 45, 43, 27]
 
 [tls.fingerprint]
-ja4 = "t13d2014h2_a09f3c656075_7f0f34a4126d"
+ja4 = "t13d2014h2_a09f3c656075_e42f34c56612"
 
 [h2]
 enable_push = false

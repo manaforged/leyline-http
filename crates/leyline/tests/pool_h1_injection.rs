@@ -6,17 +6,20 @@
 //! the request and smuggle a second one through the pool connection
 //! (CWE-93). The validators reject every control-character byte
 //! before the wire write; these tests lock the gate in place.
-
+#![expect(
+    clippy::unwrap_used,
+    reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
+)]
 use leyline::pool::{H1Body, H1PooledError, H1Target, Pool, send_request_h1_pooled};
 use leyline::profile::{Browser, Platform, ProfileRegistry};
-use leyline::tls::{ConnectorVariant, FingerprintConnector};
+use leyline::tls::FingerprintConnector;
 use std::sync::Arc;
 
-fn connector() -> ConnectorVariant {
+fn connector() -> FingerprintConnector {
     let profiles = ProfileRegistry::builtin();
     let profile = profiles.get_browser(Browser::Chrome147).unwrap();
     let tcp_profile = Platform::default().tcp_profile();
-    ConnectorVariant::Fingerprint(FingerprintConnector::new(profile, tcp_profile).unwrap())
+    FingerprintConnector::new(profile, tcp_profile).unwrap()
 }
 
 /// The mock server we never reach — every injection attempt must be

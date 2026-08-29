@@ -1,5 +1,4 @@
 //! Non-network smoke coverage for the wreq-parity builder surface.
-
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
@@ -102,13 +101,6 @@ fn default_session_timeout_is_five_minutes() {
         .expect("default session builds");
 
     assert_eq!(session.default_timeout(), Duration::from_secs(300));
-}
-
-#[cfg(feature = "tower")]
-#[test]
-fn tower_service_adapter_compiles() {
-    let session = Session::builder().build().unwrap();
-    let _svc = leyline::LeylineService::new(session);
 }
 
 /// The request builder must be owned + `Send` so it can be built up front

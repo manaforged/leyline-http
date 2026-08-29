@@ -1,12 +1,7 @@
 //! Negative-path validation for browser profiles.
 //!
-//! A fingerprinting library must fail loudly when profile data is malformed:
-//! a silently-substituted default ships a wrong wire fingerprint, which CDN/WAF
-//! edges soft-block (a profile-drift soft-block incident). Each test mutates
-//! one field of a real built-in profile and asserts `H2Config::from_profile`
-//! rejects it instead of degrading silently. The positive guard proves the
-//! stricter validation does not reject any shipping profile.
-
+//! A malformed profile must fail to load. Substituting a default would emit
+//! the wrong ClientHello.
 use leyline::h2::H2Config;
 use leyline::profile::{ALL_BROWSERS, BrowserProfile, H2Profile, ProfileRegistry};
 use leyline::{Browser, Platform, TlsContext, TlsMinVersion};
@@ -120,8 +115,8 @@ fn unknown_profile_family_has_no_h3_config() {
 #[test]
 fn gecko_family_maps_to_firefox_h3_not_chrome() {
     use leyline::H3Config;
-    // Firefox profiles declare family="gecko" (not "firefox"); the old match
-    // arm tested "firefox" and never fired, silently shipping Chrome's H3.
+    // Firefox profiles declare family="gecko" (not "firefox"); the h3
+    // config lookup must key on the declared value.
     let gecko = H3Config::for_family("gecko").expect("gecko maps to an H3 config");
     assert_eq!(
         gecko.initial_max_streams_bidi,
@@ -268,13 +263,9 @@ fn builtin_profiles_declaring_an_extension_order_still_load() {
     );
 }
 
-// ── verified_at: every shipping profile must name what it was anchored to ────
-// The convention used to be doc-only (CONTRIBUTING.md TODO). A profile whose
-// fingerprint was never anchored against live browser output is exactly how the
-// profile-drift soft-block incident shipped — so a missing `verified_against` is now a
-// test failure. Date staleness belongs to the approved self-hosted capture;
-// backfilling capture dates here would
-// mean inventing dates we don't have, which is the false-anchor this guards.)
+// ── verified_against: every shipping profile must name what it was anchored to
+// A profile with an empty verified_against has never been checked against a
+// live capture. Missing it is a test failure.
 #[test]
 fn every_builtin_profile_declares_verified_against() {
     let reg = ProfileRegistry::builtin();
@@ -283,16 +274,13 @@ fn every_builtin_profile_declares_verified_against() {
         assert!(
             !profile.meta.verified_against.trim().is_empty(),
             "{browser}: [meta] verified_against is empty — the profile fingerprint \
-             was never anchored against a live capture (see CONTRIBUTING.md)"
+             was never anchored against a live capture"
         );
     }
 }
 
-// ── captured_against: optional field, but its absence is a load-time warning ──
-// Unlike verified_against
-// it is *optional* (unrecorded on many older profiles), so a missing value
-// warns via `load_warnings` rather than failing the build — the warning is the
-// nudge to backfill it, not a gate that would block every unanchored profile.
+// captured_against is optional. Missing it warns via `load_warnings` instead
+// of failing the build.
 
 /// A minimal, permutation-free profile that parses through `from_toml`.
 /// `{extra}` splices an extra `[meta]` line (or nothing) for each case.
@@ -363,7 +351,7 @@ fn missing_captured_against_warns_but_still_loads() {
 
 #[test]
 fn backfilled_builtin_profiles_carry_captured_against() {
-    // Profiles whose capture build is known must keep the field.
+    // Profiles that record a capture build must keep the field.
     let reg = ProfileRegistry::builtin();
     for (browser, expected) in [
         (Browser::Chrome148, "chrome-148"),
@@ -605,7 +593,7 @@ fn newest_chrome_profile_is_not_neglected() {
 }
 
 /// Live freshness gate: newest built-in Chrome within 2 majors of Stable.
-/// Schedule: `cargo test -p leyline --test profile_validation \
+/// Schedule: `cargo test -p leyline-tls --test profile_validation \
 ///   newest_chrome_profile_within_two_majors_of_current_stable -- --ignored`
 /// or CI job `leyline-profile-freshness`. Requires curl + network.
 #[test]
@@ -637,4 +625,22 @@ fn newest_chrome_profile_within_two_majors_of_current_stable() {
          {current} — >2 majors behind; ship a fresh capture (their Chrome-96 \
          lesson)"
     );
+}
+
+// Invariant: every variant's hello_rep must be a member of its family's
+// family_hellos. hello_rep collapses UA-only majors onto the hello owner;
+// family_hellos lists the owners. If a new variant lands without its
+// hello_rep arm, this catches it instead of the identity lock silently
+// treating a shared hello as a distinct owner.
+#[test]
+fn hello_rep_maps_every_variant_to_a_family_hello() {
+    for browser in ALL_BROWSERS {
+        let owner = browser.hello_rep();
+        let hellos = browser.family_hellos();
+        assert!(
+            hellos.contains(&owner),
+            "{browser} resolves to hello owner {owner}, which is not in the {family} family hellos {hellos:?}",
+            family = browser.family(),
+        );
+    }
 }

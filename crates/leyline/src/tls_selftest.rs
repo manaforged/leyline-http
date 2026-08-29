@@ -70,7 +70,7 @@ pub fn spawn_canary_to(service: &'static str, url: &'static str) {
             }
         };
 
-        match session.get(url).send().await {
+        match session.get(url).await {
             Ok(resp) => {
                 tracing::info!(
                     target: "leyline::tls_selftest",

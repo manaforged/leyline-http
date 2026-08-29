@@ -14,7 +14,7 @@ use std::net::ToSocketAddrs;
 use leyline_quiche as quiche;
 
 use crate::profile::BrowserProfile;
-use crate::tls::{TlsMinVersion, build_ssl_context};
+use crate::tls::{TlsMinVersion, TlsTrustConfig, apply_profile_with_trust};
 
 use crate::quic::config::H3Config;
 
@@ -56,9 +56,22 @@ pub(crate) struct EstablishedH3 {
 fn build_quic_config(
     h3_cfg: &H3Config,
     profile: &BrowserProfile,
+    trust: &TlsTrustConfig,
 ) -> Result<quiche::Config, String> {
-    let ssl_builder = build_ssl_context(profile, TlsMinVersion::Tls13)
+    let mut ssl_builder =
+        leyline_bssl::ssl::SslContextBuilder::new(leyline_bssl::ssl::SslMethod::tls())
+            .map_err(|e| format!("quic ssl ctx: {e}"))?;
+    apply_profile_with_trust(&mut ssl_builder, profile, TlsMinVersion::Tls13, trust)
         .map_err(|e| format!("quic ssl ctx: {e}"))?;
+
+    // Pinning at the context level: quiche owns the per-connection Ssl
+    // handles, so the pin verifier lives on the shared ctx (same closure
+    // shape as the tcp path). Wire trust (ca files, client identity) was
+    // already applied from `trust` by apply_profile_with_trust.
+    let pins = trust.pinned_leaf_sha256();
+    if !pins.is_empty() {
+        crate::tls::install_pinning_verifier_ctx(&mut ssl_builder, pins);
+    }
 
     let mut config =
         quiche::Config::with_boring_ssl_ctx_builder(quiche::PROTOCOL_VERSION, ssl_builder)
@@ -94,18 +107,18 @@ fn build_h3_config(h3_cfg: &H3Config) -> Result<quiche::h3::Config, String> {
 /// control streams are exchanged, returning the live transport parts.
 ///
 /// This is the connect-without-send primitive: it returns once the
-/// connection is usable but before any request stream is opened. Racing two
-/// of these (QUIC vs TCP+TLS) and sending the request only on the winner is
-/// how a true Chrome-style H2/H3 race sends the request exactly once.
+/// connection is usable but before any request stream is opened. The pool
+/// uses it so a later send rides a live QUIC session.
 pub(crate) async fn connect_and_handshake(
     h3_cfg: &H3Config,
     profile: &BrowserProfile,
+    trust: &TlsTrustConfig,
     host: &str,
     port: u16,
 ) -> Result<EstablishedH3, String> {
     validate_connection_id_len(h3_cfg.dcid_length)?;
 
-    let mut config = build_quic_config(h3_cfg, profile)?;
+    let mut config = build_quic_config(h3_cfg, profile, trust)?;
     let peer_addr = resolve_peer(host, port).await?;
 
     let bind = match peer_addr {
@@ -327,71 +340,4 @@ pub(crate) fn check_body_budget(already: usize, n: usize, max: u64) -> Result<()
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{check_body_budget, resolve_peer, validate_connection_id_len};
-
-    #[tokio::test]
-    async fn resolve_peer_prefers_ipv4_for_localhost() {
-        let addr = resolve_peer("localhost", 443)
-            .await
-            .expect("resolve localhost");
-        // When both families are published, IPv4 must win because the
-        // UDP socket binds 0.0.0.0 by default.
-        assert!(addr.is_ipv4(), "got {addr}");
-    }
-
-    #[tokio::test]
-    async fn resolve_peer_falls_back_on_ipv6_only_hosts() {
-        // A bare IPv6 literal resolves to exactly one V6 addr — the
-        // old inline code errored with "no IPv4 address resolved".
-        let addr = resolve_peer("::1", 443).await.expect("resolve ::1");
-        assert!(addr.is_ipv6(), "got {addr}");
-    }
-
-    #[test]
-    fn validates_profile_connection_id_lengths() {
-        assert!(validate_connection_id_len(8).is_ok());
-        assert!(validate_connection_id_len(0).is_err());
-        assert!(validate_connection_id_len(leyline_quiche::MAX_CONN_ID_LEN + 1).is_err());
-    }
-
-    // ---- H3 response-body cap: these unit tests cover the
-    // body-budget arithmetic directly. If the H3 recv loop stops
-    // calling check_body_budget, or if the helper ever returns Ok
-    // for an overflow case, the OOM DoS protection is silently
-    // disabled. ----
-
-    #[test]
-    fn body_budget_allows_zero_chunks() {
-        assert!(check_body_budget(0, 0, 1024).is_ok());
-        assert!(check_body_budget(1024, 0, 1024).is_ok());
-    }
-
-    #[test]
-    fn body_budget_allows_exactly_max() {
-        assert!(check_body_budget(0, 1024, 1024).is_ok());
-        assert!(check_body_budget(512, 512, 1024).is_ok());
-    }
-
-    #[test]
-    fn body_budget_rejects_past_max_by_one_byte() {
-        let err = check_body_budget(1024, 1, 1024).unwrap_err();
-        assert_eq!(err, 1025);
-    }
-
-    #[test]
-    fn body_budget_rejects_large_chunk_past_cap() {
-        let err = check_body_budget(0, 100 * 1024 * 1024 + 1, 100 * 1024 * 1024).unwrap_err();
-        assert_eq!(err, (100 * 1024 * 1024 + 1) as u64);
-    }
-
-    #[test]
-    fn body_budget_saturates_on_usize_add_overflow() {
-        // A malicious peer feeding chunk sizes that would wrap usize
-        // must not sneak past the cap. saturating_add pins to
-        // usize::MAX which converts to u64::MAX on 64-bit targets,
-        // guaranteeing the comparison still rejects.
-        let err = check_body_budget(usize::MAX, 1, 100 * 1024 * 1024).unwrap_err();
-        assert_eq!(err, usize::MAX as u64);
-    }
-}
+mod tests;

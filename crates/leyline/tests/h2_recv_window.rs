@@ -9,7 +9,6 @@
 //! over-window burst is a connection-level violation (whole connection
 //! torn down) or, when only a single stream overruns, a stream-level one
 //! (RST_STREAM, connection survives).
-
 #[path = "h2_support/mod.rs"]
 mod support;
 
