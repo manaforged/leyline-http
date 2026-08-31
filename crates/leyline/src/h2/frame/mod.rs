@@ -1,6 +1,4 @@
 //! HTTP/2 frame types and codec.
-//!
-//! All 10 frame types from RFC 9113 Section 6, plus the 9-byte frame header.
 
 #![forbid(unsafe_code)]
 mod data;
@@ -85,16 +83,6 @@ impl FrameType {
 }
 
 /// 9-byte frame header (RFC 9113 Section 4.1).
-///
-/// ```text
-/// +-----------------------------------------------+
-/// |                Length (24)                      |
-/// +---------------+---------------+---------------+
-/// |  Type (8)     |  Flags (8)    |
-/// +-+-------------+---------------+---------------+
-/// |R|             Stream Identifier (31)           |
-/// +-+---------------------------------------------+
-/// ```
 #[derive(Debug, Clone, Copy)]
 pub struct FrameHeader {
     /// Payload length (24-bit, max 16384 default, up to 16777215).
@@ -117,7 +105,6 @@ impl FrameHeader {
         let frame_type = buf[3];
         let flags = buf[4];
         let stream_id = be_u32(&buf[5..9]);
-        // Clear the R bit (MSB of stream_id).
         let stream_id = stream_id & 0x7FFF_FFFF;
 
         Self {

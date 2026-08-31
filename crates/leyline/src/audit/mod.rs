@@ -1,11 +1,6 @@
 //! JA3/JA4/JA4H/JA4T fingerprint computation and export.
-//!
-//! Computes fingerprints from profile data (not wire capture). Since Leyline
-//! configures TLS and TCP from TOML profiles, we know exactly what we send.
 
 #![forbid(unsafe_code)]
-// This module must stay free of `unsafe`; memory-unsafe code is confined to
-// leyline-bssl* (FFI) and leyline's tcp/tls platform bridges.
 mod cipher_map;
 mod ja3;
 mod ja4;
@@ -22,8 +17,7 @@ use sha2::{Digest, Sha256};
 pub(crate) use cipher_map::sigalg_id;
 use cipher_map::{cipher_id, curve_id, is_grease};
 
-/// Map cipher-suite names to their IANA IDs, dropping unrecognized names and
-/// GREASE values. Preserves input order. Shared by JA3 and JA4.
+/// Map cipher-suite names to their IANA IDs, dropping unrecognized names and GREASE values.
 fn non_grease_cipher_ids(ciphers: &[String]) -> Vec<u16> {
     ciphers
         .iter()
@@ -33,7 +27,6 @@ fn non_grease_cipher_ids(ciphers: &[String]) -> Vec<u16> {
 }
 
 /// Filter a list of extension IDs to the non-GREASE ones, preserving order.
-/// Shared by JA3 and JA4.
 fn non_grease_ext_ids(extension_ids: &[u16]) -> Vec<u16> {
     extension_ids
         .iter()
@@ -42,8 +35,7 @@ fn non_grease_ext_ids(extension_ids: &[u16]) -> Vec<u16> {
         .collect()
 }
 
-/// Map named-curve / supported-group names to their IANA IDs, dropping
-/// unrecognized names and GREASE values. Preserves input order. Used by JA3.
+/// Map named-curve / supported-group names to their IANA IDs, dropping unrecognized names and GREASE values.
 fn non_grease_curve_ids(curves: &[String]) -> Vec<u16> {
     curves
         .iter()
@@ -52,7 +44,7 @@ fn non_grease_curve_ids(curves: &[String]) -> Vec<u16> {
         .collect()
 }
 
-/// SHA-256, take first 12 hex chars. Used by all JA4+ fingerprints.
+/// SHA-256, take first 12 hex chars.
 fn hash12(s: &str) -> String {
     if s.is_empty() {
         "000000000000".to_owned()
@@ -62,7 +54,7 @@ fn hash12(s: &str) -> String {
     }
 }
 
-/// Per-response fingerprint data. Returned by `resp.audit()`.
+/// Per-response fingerprint data.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct AuditData {
@@ -72,19 +64,13 @@ pub struct AuditData {
     pub ja3: String,
     /// Akamai-style H2 fingerprint.
     pub h2_fingerprint: String,
-    /// JA4T TCP fingerprint.
+    /// JA4T computed from the TCP profile applied via `setsockopt`, not captured from the SYN.
     pub ja4t: String,
     /// JA4H HTTP request fingerprint.
     pub ja4h: String,
 }
 
-/// Connection-level fingerprints, precomputed once per [`Session`] from the
-/// profile. JA4/JA3/Akamai-H2/JA4T are all determined by the TLS+H2+TCP
-/// profile, not the individual request, so they're computed at session build
-/// and shared by every response via an `Arc`. The request-dependent JA4H is
-/// computed lazily in `Response::audit()` — see that method.
-///
-/// [`Session`]: crate::Session
+/// Connection-level fingerprints, precomputed once per [`Session`] from the profile.
 #[derive(Debug, Clone)]
 pub(crate) struct AuditTlsCache {
     pub(crate) ja4: String,

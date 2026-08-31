@@ -1,14 +1,12 @@
 //! Set custom headers and an `Authorization: Bearer` token on a request.
-//!
-//! Run with: `cargo run -p leyline --example headers`
 
-use leyline::Client;
+use leyline::Session;
 
 const URL: &str = "https://example.com/protected";
 
 #[tokio::main]
 async fn main() -> leyline::Result<()> {
-    let session = Client::chrome();
+    let session = Session::chrome();
 
     let resp = session
         .get(URL)

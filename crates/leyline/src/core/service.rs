@@ -33,6 +33,6 @@ impl tower_service::Service<Request> for LeylineService {
 
     fn call(&mut self, req: Request) -> Self::Future {
         let session = self.session.clone();
-        Box::pin(async move { session.execute_request(req).await })
+        Box::pin(async move { session.execute(req).await })
     }
 }

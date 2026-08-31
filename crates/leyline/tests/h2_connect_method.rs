@@ -1,7 +1,4 @@
 //! CONNECT / extended-CONNECT pseudo-header shape tests.
-//!
-//! Verify the pseudo-header list sent on the wire for classic CONNECT
-//! (RFC 9113 §8.5) and extended CONNECT (RFC 8441 §4).
 use leyline::h2::config::PseudoOrder;
 use leyline::h2::connection::PseudoHeaders;
 use leyline::h2::error::{ErrorCode, H2Error};
@@ -21,14 +18,12 @@ fn names<'a>(list: &[(&'a str, &'a str)]) -> Vec<&'a str> {
 fn classic_connect_omits_scheme_and_path() {
     let p = PseudoHeaders {
         method: "CONNECT".into(),
-        scheme: "https".into(), // should be ignored
+        scheme: "https".into(),
         authority: "example.com:443".into(),
-        path: "/unused".into(), // should be ignored
+        path: "/unused".into(),
         protocol: None,
     };
     let list = p.build_pseudo_list(&CHROME_ORDER).unwrap();
-    // Chrome order is m,a,s,p — with :scheme and :path dropped, only
-    // :method and :authority remain, in that order.
     assert_eq!(names(&list), vec![":method", ":authority"]);
     assert_eq!(list[0].1, "CONNECT");
     assert_eq!(list[1].1, "example.com:443");
@@ -44,7 +39,6 @@ fn extended_connect_emits_protocol() {
         protocol: Some("websocket".into()),
     };
     let list = p.build_pseudo_list(&CHROME_ORDER).unwrap();
-    // Extended CONNECT: classic pseudos (minus :scheme/:path) + :protocol.
     assert_eq!(names(&list), vec![":method", ":authority", ":protocol"]);
     assert_eq!(list[2].1, "websocket");
 }
@@ -67,8 +61,6 @@ fn non_connect_emits_all_four_pseudos() {
 
 #[test]
 fn non_connect_with_protocol_still_appends_it() {
-    // Degenerate — the spec reserves :protocol for CONNECT — but we
-    // trust the caller; fingerprint parity wins over policing.
     let p = PseudoHeaders {
         method: "GET".into(),
         scheme: "https".into(),
@@ -98,7 +90,6 @@ fn connect_without_authority_rejected() {
 
 #[test]
 fn pseudo_order_honoured_for_non_connect() {
-    // Firefox-ish order: m,p,a,s.
     let order = [
         PseudoOrder::Method,
         PseudoOrder::Path,

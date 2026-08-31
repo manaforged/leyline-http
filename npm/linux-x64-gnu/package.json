@@ -1,6 +1,6 @@
 {
   "name": "@manaforged/leyline-linux-x64-gnu",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "os": [
     "linux"
   ],
@@ -9,11 +9,14 @@
   ],
   "main": "leyline.linux-x64-gnu.node",
   "files": [
-    "leyline.linux-x64-gnu.node"
+    "leyline.linux-x64-gnu.node",
+    "NOTICE",
+    "LICENSE-MIT",
+    "LICENSE-BORINGSSL"
   ],
-  "description": "Node.js bindings for Leyline — browser-fidelity TLS/HTTP fingerprint sessions",
+  "description": "linux-x64-gnu native addon for leyline-http",
   "homepage": "https://github.com/manaforged/leyline-http",
-  "license": "MIT OR Apache-2.0",
+  "license": "MIT",
   "engines": {
     "node": ">=18"
   },

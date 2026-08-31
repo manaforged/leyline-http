@@ -1,9 +1,4 @@
 //! Stream a large upload and download without buffering the whole body.
-//!
-//! Reads a local file, streams it as a request body over HTTP/2, then
-//! streams the response back chunk-by-chunk to stdout.
-//!
-//! Run: `cargo run --example streaming -- https://httpbin.org/post ./input.bin`
 
 use bytes::Bytes;
 use futures_util::StreamExt;
@@ -19,20 +14,17 @@ async fn main() -> leyline::Result<()> {
 
     let session = Session::builder().browser(Browser::Chrome147).build()?;
 
-    // ── Streaming upload ────────────────────────────────────────────
     let body = if let Some(path) = file_path {
         let meta = tokio::fs::metadata(&path).await.expect("stat input file");
         let file = tokio::fs::File::open(&path).await.expect("open input file");
         let reader = tokio_util::io::ReaderStream::new(file).map(|r| r);
         Body::stream_with_length(reader, meta.len())
     } else {
-        // Synthetic 1 MiB stream of A's for demo.
         let chunks = (0..16).map(|_| Ok::<Bytes, std::io::Error>(Bytes::from(vec![b'A'; 65536])));
         let stream = futures_util::stream::iter(chunks);
         Body::stream_with_length(stream, 16 * 65536)
     };
 
-    // ── Streaming download ──────────────────────────────────────────
     let resp = session
         .post(&url)
         .body(body)

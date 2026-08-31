@@ -1,7 +1,4 @@
 //! PUSH_PROMISE frame (RFC 9113 Section 6.6).
-//!
-//! Clients receive these from servers. We parse them so we can RST_STREAM
-//! the promised stream (Chrome's behavior).
 
 use bytes::Bytes;
 

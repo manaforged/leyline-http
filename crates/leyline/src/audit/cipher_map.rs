@@ -1,19 +1,14 @@
 //! Cipher suite and extension name → numeric ID mappings.
-//!
-//! These map the human-readable names used in TOML profiles to the
-//! IANA-assigned numeric identifiers used in JA3/JA4 computation.
 
 /// Map a cipher suite name to its IANA 2-byte identifier.
 pub fn cipher_id(name: &str) -> Option<u16> {
     Some(match name {
-        // TLS 1.3 cipher suites
         "TLS_AES_128_GCM_SHA256" => 0x1301,
         "TLS_AES_256_GCM_SHA384" => 0x1302,
         "TLS_CHACHA20_POLY1305_SHA256" => 0x1303,
         "TLS_AES_128_CCM_SHA256" => 0x1304,
         "TLS_AES_128_CCM_8_SHA256" => 0x1305,
 
-        // ECDHE + ECDSA
         "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256" => 0xc02b,
         "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384" => 0xc02c,
         "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256" => 0xcca9,
@@ -22,7 +17,6 @@ pub fn cipher_id(name: &str) -> Option<u16> {
         "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256" => 0xc023,
         "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384" => 0xc024,
 
-        // ECDHE + RSA
         "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256" => 0xc02f,
         "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384" => 0xc030,
         "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256" => 0xcca8,
@@ -31,7 +25,6 @@ pub fn cipher_id(name: &str) -> Option<u16> {
         "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256" => 0xc027,
         "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384" => 0xc028,
 
-        // RSA
         "TLS_RSA_WITH_AES_128_GCM_SHA256" => 0x009c,
         "TLS_RSA_WITH_AES_256_GCM_SHA384" => 0x009d,
         "TLS_RSA_WITH_AES_128_CBC_SHA" => 0x002f,
@@ -63,8 +56,6 @@ pub fn sigalg_id(name: &str) -> Option<u16> {
         "rsa_pkcs1_sha512" => 0x0601,
         "rsa_pkcs1_sha1" => 0x0201,
         "ecdsa_sha1" => 0x0203,
-        // ML-DSA (draft-ietf-tls-mldsa) — Chrome 150+. BoringSSL has no name
-        // for these, so they reach the wire only via the raw-codepoint path.
         "mldsa44" => 0x0904,
         "mldsa65" => 0x0905,
         "mldsa87" => 0x0906,

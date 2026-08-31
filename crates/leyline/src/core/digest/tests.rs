@@ -12,7 +12,6 @@ fn parses_md5_challenge() {
 
 #[test]
 fn rfc7616_md5_vector() {
-    // RFC 7616 §3.9.1 — the canonical MD5 test vector.
     let challenge = Challenge {
         realm: "http-auth@example.org".into(),
         nonce: "7ypf/xlj9XXwfDPEoM4URrv/xwf94BcCAzFZH4GiTo0v".into(),
@@ -57,9 +56,6 @@ fn refuses_auth_int_only_challenge() {
 
 #[test]
 fn quoted_values_escape_backslash_and_quote() {
-    // RFC 7616 §3.4: `"` and `\` inside a quoted-string carry a
-    // backslash prefix. Unescaped, a `"` in the username truncates
-    // the Authorization value and can corrupt the header's framing.
     let challenge = Challenge {
         realm: "r".into(),
         nonce: "n".into(),
@@ -88,14 +84,11 @@ fn nonce_count_increments_per_nonce() {
 #[test]
 fn nonce_cache_lru_evicts_beyond_cap() {
     reset_nonce_cache_for_test();
-    // Fill the cache past capacity.
     for i in 0..DIGEST_NONCE_CACHE_CAP + 16 {
         let nonce = format!("lru-test-{i}");
         let n = next_nc_for_nonce(&nonce);
         assert_eq!(n, 1);
     }
-    // The earliest nonces should have been evicted; re-inserting
-    // yields nc=1, not the previous counter.
     let restart = next_nc_for_nonce("lru-test-0");
     assert_eq!(
         restart, 1,
@@ -121,9 +114,6 @@ fn reports_missing_nonce() {
 
 #[test]
 fn sha256_response_matches_manual_computation() {
-    // Build the same challenge/response and sanity-check that we
-    // can reproduce the response hash by hand using the SAME code
-    // path — this guards against accidental HA1/HA2 typos.
     let challenge = Challenge {
         realm: "r".into(),
         nonce: "n".into(),

@@ -1,10 +1,4 @@
 //! Read the per-connection wire-fingerprint audit block off a response.
-//!
-//! Run with: `cargo run -p leyline --example audit`
-//!
-//! `AuditData` carries the JA3, JA4, JA4T, JA4H, and HTTP/2 Akamai
-//! fingerprint that leyline actually negotiated with the server. Use it
-//! to verify the wire shape matches the browser profile you picked.
 
 use leyline::{Browser, Platform, Session};
 
@@ -15,12 +9,10 @@ async fn main() -> leyline::Result<()> {
     let session = Session::builder()
         .browser(Browser::Chrome147)
         .platform(Platform::Linux)
-        // Audit is opt-in — without this, `resp.audit()` returns None and the
-        // hot path skips retaining request headers.
         .audit(true)
         .build()?;
 
-    let resp = session.get(URL).send().await?;
+    let resp = session.get(URL).await?;
 
     if let Some(audit) = resp.audit() {
         println!("JA3:            {}", audit.ja3);

@@ -8,13 +8,6 @@ use std::time::Duration;
 use crate::tls::{Resolver, SystemResolver};
 
 /// A validated proxy URL.
-///
-/// Leyline accepts `http://`, `https://`, `socks5://`, and `socks5h://`
-/// proxy URLs. SOCKS URLs require the `socks` feature at connection time.
-/// An `https://` proxy TLS-handshakes to the proxy before CONNECT, so
-/// credentials are not sent in cleartext. This type lets callers validate
-/// and carry proxy strings without accidentally feeding an empty host or
-/// unsupported scheme into the connection layer.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ProxyUrl(String);
 
@@ -109,10 +102,7 @@ impl From<ProxyUrl> for String {
 pub struct ProxyConfig {
     rules: Vec<ProxyRule>,
     no_proxy: NoProxy,
-    /// `true` when the matcher was set via [`Self::no_proxy`] (deliberate
-    /// caller config) rather than inherited from the `NO_PROXY` env var.
-    /// Env-derived patterns only gate env-derived proxies — they must
-    /// never silently turn an explicitly-proxied request DIRECT.
+    /// `true` when the matcher was set via [`Self::no_proxy`] (deliberate caller config) rather than inherited from the `NO_PROXY` env var.
     no_proxy_explicit: bool,
     use_env: bool,
 }
@@ -151,13 +141,7 @@ impl ProxyConfig {
         self
     }
 
-    /// Replace the session-default all-scheme proxy. Any existing
-    /// all-scheme rule is removed before the new one is appended;
-    /// scheme-specific rules are preserved and keep outranking the
-    /// catch-all (`proxy_for` is first-match). Session-level setters
-    /// (`SessionBuilder::proxy`, `Session::with_proxy`) must use this
-    /// instead of `with_rule`: appending leaves the older all-scheme
-    /// rule winning first-match and the new proxy silently ignored.
+    /// Replace the session-default all-scheme proxy.
     pub(crate) fn set_default_proxy(mut self, proxy_url: impl Into<String>) -> Self {
         self.rules.retain(|r| r.scheme != ProxyRuleScheme::All);
         self.rules.push(ProxyRule::all(proxy_url));
@@ -170,10 +154,7 @@ impl ProxyConfig {
         self
     }
 
-    /// Replace the no-proxy matcher. A matcher set here is *explicit*:
-    /// it bypasses any configured proxy, including per-request overrides.
-    /// (The env-inherited `NO_PROXY` default only gates env-derived
-    /// proxies — see `Self::proxy_for`.)
+    /// Replace the no-proxy matcher.
     pub fn no_proxy(mut self, no_proxy: NoProxy) -> Self {
         self.no_proxy = no_proxy;
         self.no_proxy_explicit = true;
@@ -197,24 +178,6 @@ impl ProxyConfig {
     }
 
     /// Select a proxy URL for a request.
-    ///
-    /// Resolution order:
-    ///   1. `request_override` - caller passed `.proxy(...)` on the
-    ///      RequestBuilder; that's an explicit per-request choice and
-    ///      wins over any rule or session default. This is what enables
-    ///      per-request rotation: each call can pick its own egress
-    ///      regardless of the session's bound proxy.
-    ///   2. Configured `rules` matching the URL scheme.
-    ///   3. `session_default` - the session's `.proxy(...)` value, used
-    ///      only when no rule matched.
-    ///
-    /// No-proxy gating is scoped by provenance: a matcher set via
-    /// [`Self::no_proxy`] bypasses any of the three; the env-inherited
-    /// `NO_PROXY` default only bypasses proxies that were themselves
-    /// discovered from the environment (`session_proxy_from_env`). A
-    /// stray `NO_PROXY` on the box must never silently turn an
-    /// explicitly-proxied request DIRECT — that is a
-    /// real-IP leak, not a convenience.
     pub(crate) fn proxy_for<'a>(
         &'a self,
         url: &url::Url,
@@ -235,9 +198,6 @@ impl ProxyConfig {
             .find(|rule| rule.matches(url.scheme()))
             .map(|rule| rule.url.as_str())
             .or(session_default)?;
-        // When the env proxy was injected at session build, it is the
-        // only rule and the session default (injection is skipped as
-        // soon as any explicit proxy exists) — so one flag covers both.
         if (self.no_proxy_explicit || session_proxy_from_env) && self.no_proxy.matches(host) {
             return None;
         }
@@ -433,34 +393,11 @@ impl Resolver for LayeredResolver {
 pub struct TimeoutConfig {
     /// Request-wide timeout.
     pub total: Duration,
-    /// DNS + TCP + TLS connect timeout. Defaults to 10s: a faulty provider
-    /// that completes the TCP connection but stalls the TLS handshake would
-    /// otherwise tie the request up for the full `total` timeout. A 10s cutoff
-    /// fails such a connect fast (as a retryable connection error) so a retry
-    /// policy can move on to a fresh connection. Set to `None` to disable.
+    /// DNS + TCP + TLS connect timeout.
     pub connect: Option<Duration>,
-    /// Per-chunk idle timeout for streaming response bodies (and the drain of
-    /// a streamed body that the caller buffers). Resets after each chunk, so a
-    /// steady stream never trips it; a stalled connection errors with
-    /// `TimedOut` well before the request-wide `total` timeout.
+    /// Per-chunk idle timeout for streaming response bodies (and the drain of a streamed body that the caller buffers).
     pub read: Option<Duration>,
-    /// Cap on the wait from request-sent until the transport response resolves,
-    /// per redirect hop. Catches an upstream — typically a proxy — that
-    /// completes the handshake and then goes silent: `connect` has already
-    /// passed and the per-chunk `read` timeout only arms once a *streamed* body
-    /// is handed back, so without this the silent phase is bounded only by
-    /// `total`.
-    ///
-    /// What "resolves" means depends on the response mode:
-    /// - **Streamed** (`RequestBuilder::stream_response`): resolves at headers,
-    ///   so this is a true time-to-first-byte cap and the body is then governed
-    ///   by `read`.
-    /// - **Buffered** (the default `.send()`): resolves only after the full body
-    ///   is received — on every protocol, H1/H2/H3 alike — so this bounds
-    ///   connect + headers + whole-body download, i.e. it behaves as a per-hop
-    ///   whole-response cap, not just first-byte.
-    ///
-    /// `None` leaves the phase bounded by `total`.
+    /// Cap on the wait from request-sent until the transport response resolves, per redirect hop.
     pub response_header: Option<Duration>,
 }
 
@@ -489,10 +426,7 @@ pub struct PoolConfig {
     pub idle_timeout: Duration,
     /// Maximum pooled entries.
     pub max_connections: usize,
-    /// Maximum simultaneous HTTP/1.1 connections per destination
-    /// `(host, port, proxy)`. Defaults to 256 (throughput-favouring; H1 is the
-    /// rare ALPN fallback) — set to 6 to mirror a browser's per-host socket
-    /// limit. The HTTP/2 path (one multiplexed connection) is unaffected.
+    /// Maximum simultaneous HTTP/1.1 connections per destination `(host, port, proxy)`.
     pub max_h1_conns_per_host: usize,
     /// Whether keepalive pooling is enabled.
     pub keepalive: bool,
@@ -527,19 +461,11 @@ pub struct SocketConfig {
     pub local_ipv6: Option<Ipv6Addr>,
     /// Override TCP_NODELAY after the browser TCP profile is applied.
     pub tcp_nodelay: Option<bool>,
-    /// TCP keepalive idle time. Default 60s — kernel sends a
-    /// keepalive probe after the socket has been idle this long.
-    /// Cheap (one packet, no syscall on our side) and keeps NAT /
-    /// load-balancer flow tables from pruning the connection
-    /// during idle gaps that happen between long-lived requests
-    /// (long-lived / session-persistent pooled workloads).
-    /// Set to `None` to disable kernel keepalive entirely.
+    /// TCP keepalive idle time.
     pub tcp_keepalive: Option<Duration>,
     /// TCP keepalive interval between probes once idle expires.
-    /// Default 30s.
     pub tcp_keepalive_interval: Option<Duration>,
-    /// TCP keepalive probe count before the kernel drops the
-    /// connection. Default 3 probes (matches Linux default).
+    /// TCP keepalive probe count before the kernel drops the connection.
     pub tcp_keepalive_retries: Option<u32>,
     /// TCP user timeout.
     pub tcp_user_timeout: Option<Duration>,
@@ -560,10 +486,6 @@ impl Default for SocketConfig {
             local_ipv4: None,
             local_ipv6: None,
             tcp_nodelay: None,
-            // Kernel-level keepalive on by default — long-lived
-            // sessions (session-persistent pooled workloads) need their
-            // sockets to survive idle gaps without app-level pings,
-            // and one keepalive probe every 60s is invisibly cheap.
             tcp_keepalive: Some(Duration::from_secs(60)),
             tcp_keepalive_interval: Some(Duration::from_secs(30)),
             tcp_keepalive_retries: Some(3),
@@ -772,17 +694,11 @@ impl WebSocketConfig {
 
 fn normalize_host(host: &str) -> String {
     let stripped = host.trim().trim_end_matches('.');
-    // Strip a matching `[` `]` pair around IPv6 literals — `url::Host`
-    // rejects bracketed input, and NO_PROXY accepts both `[::1]` and
-    // `::1` forms. Only strip when both brackets are present.
     let stripped = stripped
         .strip_prefix('[')
         .and_then(|s| s.strip_suffix(']'))
         .unwrap_or(stripped);
     let lowered = stripped.to_ascii_lowercase();
-    // `url::Host` canonicalises IP literals (collapsing `::` runs) and
-    // IDN domains, so `::1`/`fe80::1` survive instead of being mangled
-    // by a naive `split(':')`.
     match url::Host::parse(&lowered) {
         Ok(url::Host::Domain(d)) => d,
         Ok(url::Host::Ipv4(a)) => a.to_string(),
@@ -799,14 +715,11 @@ fn pattern_matches(host: &str, raw: &str) -> bool {
     if pat == "*" {
         return true;
     }
-    // Strip a `:port` suffix while leaving bare IPv6 literals (two or
-    // more colons, unbracketed) untouched — `[::1]:8080` and
-    // `example.com:443` lose the port; `::1` does not.
     if pat.starts_with('[') {
         if let Some(end) = pat.find("]:") {
             let suffix = &pat[end + 2..];
             if !suffix.is_empty() && suffix.bytes().all(|b| b.is_ascii_digit()) {
-                pat.truncate(end + 1); // keep the trailing `]`
+                pat.truncate(end + 1);
             }
         }
     } else if pat.matches(':').count() == 1 {

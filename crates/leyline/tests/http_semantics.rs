@@ -1,14 +1,4 @@
-//! General HTTP-semantics tests: decompression, redirects, cookies, body
-//! round-trips. These verify leyline behaviour that has nothing to do with
-//! wire fingerprinting, so they live here rather than in `tls_peet.rs`.
-//!
-//! They used to hit `httpbin.org` as `#[ignore]` "live" tests, which made
-//! them (a) flaky — httpbin.org regularly 503s — and (b) part of the
-//! fingerprint pre-commit gate's live matrix, where an httpbin outage would
-//! block an unrelated commit. They now run against an in-process
-//! `httpbin_lite` server (below): no network, no third party, deterministic,
-//! and they exercise the real gzip/deflate/brotli decode path because the
-//! mock actually compresses its responses.
+//! General HTTP-semantics tests: decompression, redirects, cookies, body round-trips.
 
 #![expect(
     clippy::unwrap_used,
@@ -21,12 +11,7 @@
 use leyline::Session;
 use serde_json::Value;
 
-/// A minimal, in-process httpbin-compatible server. Implements exactly the
-/// endpoints these tests need (`/gzip`, `/brotli`, `/deflate`, `/get`,
-/// `/headers`, `/cookies[/set]`, `/redirect/N`, `/redirect-to`, `/post`),
-/// matching httpbin's JSON shape and header capitalisation. One request per
-/// connection (`Connection: close`); the accept loop handles many
-/// connections so redirect chains and multi-request flows work.
+/// A minimal, in-process httpbin-compatible server.
 mod httpbin_lite {
     use std::io::Write as _;
 
@@ -34,9 +19,7 @@ mod httpbin_lite {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::{TcpListener, TcpStream};
 
-    /// Spawn the server on an ephemeral localhost port and return its base
-    /// URL (e.g. `http://127.0.0.1:54123`). The server task runs until the
-    /// test's runtime is dropped.
+    /// Spawn the server on an ephemeral localhost port and return its base URL (e.g. `http://127.0.0.1:54123`).
     pub async fn spawn() -> String {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -61,7 +44,7 @@ mod httpbin_lite {
         let header_end = loop {
             let n = sock.read(&mut tmp).await.ok()?;
             if n == 0 {
-                return None; // client closed (e.g. a pool probe) — nothing to do
+                return None;
             }
             buf.extend_from_slice(&tmp[..n]);
             if let Some(i) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
@@ -142,7 +125,6 @@ mod httpbin_lite {
                 json_200(serde_json::json!({"cookies": Value::Object(cookies)}))
             }
             ("GET", "/cookies/set") => {
-                // query is `name=value`; httpbin sets it then 302s to /cookies.
                 redirect_302("/cookies", vec![("Set-Cookie", format!("{query}; Path=/"))])
             }
             ("GET", p) if p.starts_with("/redirect/") => {
@@ -155,9 +137,6 @@ mod httpbin_lite {
                 redirect_302(&loc, vec![])
             }
             (_, "/redirect-to") => {
-                // httpbin-compatible: honours ?url= and optional ?status_code=
-                // for any method. A 307/308 preserves method + body, which the
-                // body-replay regression test exercises.
                 let params = parse_query(query);
                 let target = params.get("url").map(String::as_str).unwrap_or("/get");
                 let status: u16 = params
@@ -203,9 +182,6 @@ mod httpbin_lite {
                     "headers": header_val,
                 }))
             }
-            // A Set-Cookie whose value is double-quoted. RFC 6265 strips the
-            // surrounding quotes; a naive `split('=')` hand-parser leaves them
-            // in. Used to prove Response::cookies() goes through the real parser.
             ("GET", "/set-cookie-quoted") => build(
                 200,
                 "OK",
@@ -258,8 +234,6 @@ mod httpbin_lite {
                 e.finish().unwrap()
             }
             "deflate" => {
-                // httpbin's `deflate` is zlib-wrapped (RFC 1950), which is
-                // what real browsers accept under `Content-Encoding: deflate`.
                 let mut e =
                     flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
                 e.write_all(&raw).unwrap();
@@ -291,9 +265,7 @@ mod httpbin_lite {
         build(302, "Found", extra, Vec::new())
     }
 
-    /// Capitalise header names the way httpbin echoes them (`Content-Type`,
-    /// `Authorization`, …) so assertions on `json["headers"]["Authorization"]`
-    /// match regardless of the case leyline put on the wire.
+    /// Capitalise header names the way httpbin echoes them (`Content-Type`, `Authorization`, …) so assertions on `json["headers"]["Authorization"]` match regardless of the case leyline put on the wire.
     fn title_cased_headers(headers: &[(String, String)]) -> Map<String, Value> {
         let mut m = Map::new();
         for (k, v) in headers {
@@ -356,15 +328,14 @@ mod httpbin_lite {
     }
 }
 
-// ─── Decompression ────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn decompression_gzip() {
     let base = httpbin_lite::spawn().await;
     let session = Session::chrome();
-    let resp = session.navigate(&format!("{base}/gzip")).await.unwrap();
+    let resp = session.get(&format!("{base}/gzip")).await.unwrap();
     assert_eq!(resp.status(), 200);
-    let json: Value = serde_json::from_str(&resp.text()).expect("gzip-decoded body not JSON");
+    let json: Value =
+        serde_json::from_str(&resp.text().unwrap()).expect("gzip-decoded body not JSON");
     assert_eq!(json["gzipped"], true);
 }
 
@@ -372,9 +343,10 @@ async fn decompression_gzip() {
 async fn decompression_brotli() {
     let base = httpbin_lite::spawn().await;
     let session = Session::chrome();
-    let resp = session.navigate(&format!("{base}/brotli")).await.unwrap();
+    let resp = session.get(&format!("{base}/brotli")).await.unwrap();
     assert_eq!(resp.status(), 200);
-    let json: Value = serde_json::from_str(&resp.text()).expect("brotli-decoded body not JSON");
+    let json: Value =
+        serde_json::from_str(&resp.text().unwrap()).expect("brotli-decoded body not JSON");
     assert_eq!(json["brotli"], true);
 }
 
@@ -382,28 +354,26 @@ async fn decompression_brotli() {
 async fn decompression_deflate() {
     let base = httpbin_lite::spawn().await;
     let session = Session::chrome();
-    let resp = session.navigate(&format!("{base}/deflate")).await.unwrap();
+    let resp = session.get(&format!("{base}/deflate")).await.unwrap();
     assert_eq!(resp.status(), 200);
-    let json: Value = serde_json::from_str(&resp.text()).expect("deflate-decoded body not JSON");
+    let json: Value =
+        serde_json::from_str(&resp.text().unwrap()).expect("deflate-decoded body not JSON");
     assert_eq!(json["deflated"], true);
 }
-
-// ─── Cookies ────────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn cookies_set_then_sent() {
     let base = httpbin_lite::spawn().await;
     let session = Session::chrome();
-    // Set a cookie via a Set-Cookie + redirect, then confirm it is sent back.
     let resp1 = session
-        .navigate(&format!("{base}/cookies/set?token=abc123"))
+        .get(&format!("{base}/cookies/set?token=abc123"))
         .await
         .unwrap();
     assert_eq!(resp1.status(), 200);
 
-    let resp2 = session.navigate(&format!("{base}/cookies")).await.unwrap();
+    let resp2 = session.get(&format!("{base}/cookies")).await.unwrap();
     assert_eq!(resp2.status(), 200);
-    let json: Value = serde_json::from_str(&resp2.text()).unwrap();
+    let json: Value = serde_json::from_str(&resp2.text().unwrap()).unwrap();
     assert_eq!(
         json["cookies"]["token"].as_str(),
         Some("abc123"),
@@ -416,18 +386,15 @@ async fn response_cookies_use_the_rfc_parser_not_a_hand_parser() {
     let base = httpbin_lite::spawn().await;
     let session = Session::chrome();
     let resp = session
-        .navigate(&format!("{base}/set-cookie-quoted"))
+        .get(&format!("{base}/set-cookie-quoted"))
         .await
         .unwrap();
     assert_eq!(resp.status(), 200);
-    // The RFC 6265 parser strips the surrounding double-quotes; the retired
-    // hand-parser left them in. Response::cookies() must agree with the jar.
     assert_eq!(
         resp.cookie("token"),
         Some("quoted value"),
         "Response::cookies() must reflect the RFC parser (quotes stripped)"
     );
-    // The jar (the single source of truth) holds the identical value.
     assert_eq!(
         session
             .cookies()
@@ -438,16 +405,11 @@ async fn response_cookies_use_the_rfc_parser_not_a_hand_parser() {
     );
 }
 
-// ─── Redirects ──────────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn redirect_follows_and_rewrites_url() {
     let base = httpbin_lite::spawn().await;
     let session = Session::chrome();
-    let resp = session
-        .navigate(&format!("{base}/redirect/3"))
-        .await
-        .unwrap();
+    let resp = session.get(&format!("{base}/redirect/3")).await.unwrap();
     assert_eq!(resp.status(), 200);
     assert_eq!(
         resp.redirect_chain().len(),
@@ -472,8 +434,7 @@ async fn redirect_preserves_auth_same_host() {
         .await
         .unwrap();
     assert_eq!(resp.status(), 200);
-    let json: Value = serde_json::from_str(&resp.text()).unwrap();
-    // Same-host redirect preserves Authorization.
+    let json: Value = serde_json::from_str(&resp.text().unwrap()).unwrap();
     assert_eq!(
         json["headers"]["Authorization"].as_str(),
         Some("Bearer secret-token-xyz"),
@@ -483,10 +444,6 @@ async fn redirect_preserves_auth_same_host() {
 
 #[tokio::test]
 async fn redirect_307_308_replays_buffered_body() {
-    // Regression: 307/308 preserve method AND body. The hop body was moved
-    // into the send and `current_body` left `Empty`, so the redirected POST
-    // arrived at the target with no body — silent data loss. Assert the body
-    // survives the redirect for both status codes.
     for status in [307u16, 308] {
         let base = httpbin_lite::spawn().await;
         let session = Session::chrome();
@@ -505,7 +462,7 @@ async fn redirect_307_308_replays_buffered_body() {
             "{status}: should follow through to /post"
         );
         assert_eq!(resp.redirect_chain().len(), 1, "{status}: exactly one hop");
-        let json: Value = serde_json::from_str(&resp.text()).unwrap();
+        let json: Value = serde_json::from_str(&resp.text().unwrap()).unwrap();
         assert_eq!(
             json["data"], payload,
             "{status} redirect dropped the request body"
@@ -515,9 +472,6 @@ async fn redirect_307_308_replays_buffered_body() {
 
 #[tokio::test]
 async fn redirect_to_non_http_scheme_is_refused() {
-    // A redirect whose target is a non-HTTP(S) scheme (file:, data:, …) must be
-    // refused cleanly, not passed into the transport to fail with a confusing
-    // downstream error.
     let base = httpbin_lite::spawn().await;
     let session = Session::chrome();
     let result = session
@@ -531,19 +485,18 @@ async fn redirect_to_non_http_scheme_is_refused() {
     );
 }
 
-// ─── Body round-trips ─────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn post_json_body_roundtrip() {
     let base = httpbin_lite::spawn().await;
     let session = Session::chrome();
     let body = serde_json::json!({"test": "leyline", "n": 42});
     let resp = session
-        .post_json(&format!("{base}/post"), &body)
+        .post(&format!("{base}/post"))
+        .json(&body)
         .await
         .unwrap();
     assert_eq!(resp.status(), 200);
-    let json: Value = serde_json::from_str(&resp.text()).unwrap();
+    let json: Value = serde_json::from_str(&resp.text().unwrap()).unwrap();
     assert_eq!(json["json"]["test"], "leyline");
     assert_eq!(json["json"]["n"], 42);
 }
@@ -553,11 +506,12 @@ async fn post_form_body_roundtrip() {
     let base = httpbin_lite::spawn().await;
     let session = Session::chrome();
     let resp = session
-        .post_form(&format!("{base}/post"), &[("u", "alice"), ("p", "s3cret")])
+        .post(&format!("{base}/post"))
+        .form(&[("u", "alice"), ("p", "s3cret")])
         .await
         .unwrap();
     assert_eq!(resp.status(), 200);
-    let json: Value = serde_json::from_str(&resp.text()).unwrap();
+    let json: Value = serde_json::from_str(&resp.text().unwrap()).unwrap();
     assert_eq!(json["form"]["u"], "alice");
     assert_eq!(json["form"]["p"], "s3cret");
 }

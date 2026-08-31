@@ -1,7 +1,4 @@
 //! JA4H HTTP request fingerprint (FoxIO specification).
-//!
-//! Format: `{section_a}_{section_b}_{section_c}_{section_d}`
-//! Computed from the HTTP request headers.
 
 use crate::audit::hash12;
 
@@ -12,7 +9,6 @@ pub struct Ja4hInput<'a> {
     /// HTTP version: "1.0", "1.1", "2", "3".
     pub http_version: &'a str,
     /// Request headers as (name, value) pairs in order.
-    /// Names should be lowercase.
     pub headers: &'a [(String, String)],
 }
 
@@ -26,9 +22,7 @@ pub fn compute_ja4h(input: &Ja4hInput<'_>) -> String {
 }
 
 /// Section A: request metadata.
-/// Format: {method:2}{version:2}{cookie}{referer}{header_count:02}{lang:4}
 fn section_a(input: &Ja4hInput<'_>) -> String {
-    // Method: first 2 chars, lowercase.
     let method = &input.method.to_lowercase();
     let method2 = if method.len() >= 2 {
         &method[..2]
@@ -36,7 +30,6 @@ fn section_a(input: &Ja4hInput<'_>) -> String {
         method.as_str()
     };
 
-    // Version.
     let version = match input.http_version {
         "1.0" => "10",
         "1.1" => "11",
@@ -45,13 +38,11 @@ fn section_a(input: &Ja4hInput<'_>) -> String {
         _ => "00",
     };
 
-    // Cookie/Referer presence.
     let has_cookie = input.headers.iter().any(|(n, _)| n == "cookie");
     let has_referer = input.headers.iter().any(|(n, _)| n == "referer");
     let cookie_flag = if has_cookie { "c" } else { "n" };
     let referer_flag = if has_referer { "r" } else { "n" };
 
-    // Header count excluding cookie, referer, and pseudo-headers.
     let count = input
         .headers
         .iter()
@@ -59,7 +50,6 @@ fn section_a(input: &Ja4hInput<'_>) -> String {
         .count()
         .min(99);
 
-    // Accept-Language: first tag, remove dashes, pad/truncate to 4 chars.
     let lang = input
         .headers
         .iter()

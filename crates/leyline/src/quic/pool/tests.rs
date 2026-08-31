@@ -108,9 +108,6 @@ fn empty_and_absent_bodies_have_nothing_to_send() {
 
 #[test]
 fn streaming_body_pends_on_chunk_and_eof() {
-    // A streaming request body parks nothing until a chunk arrives, keeps
-    // its send side open until EOF, and — once EOF lands with an empty
-    // queue — still pends so the empty terminating FIN is written.
     let (tx, _rx) = oneshot::channel();
     let mut s = H3Stream::new(tx, None, None, true);
     assert!(!s.body_write_pending(), "no chunks yet → nothing to write");
@@ -134,10 +131,6 @@ fn streaming_body_pends_on_chunk_and_eof() {
 
 #[test]
 fn cancel_upload_drops_queue_and_finishes_send_side() {
-    // Early teardown (peer responded first, or the response receiver was
-    // dropped) must drop queued upload bytes and mark the send side done so
-    // the writer never re-touches it or re-emits a FIN. (No pump here, so
-    // the abort is a no-op; the state effects are what this pins.)
     let (tx, _rx) = oneshot::channel();
     let mut s = H3Stream::new(tx, None, None, true);
     s.out_chunks
@@ -166,8 +159,6 @@ async fn deliver_is_once_only() {
         body: std::mem::take(&mut stream.body),
     };
     stream.deliver(Ok(resp));
-    // A second delivery is a no-op (the sender was already taken), so a
-    // late Reset/teardown after a clean Finished can't double-fire or panic.
     stream.deliver(Err("late teardown".into()));
 
     let got = rx.await.expect("sender delivered").expect("ok response");
@@ -177,9 +168,6 @@ async fn deliver_is_once_only() {
 
 #[test]
 fn cancelled_stream_ids_selects_only_dropped_receivers() {
-    // The sweep's selection logic: a stream whose caller still holds the
-    // response receiver is live; one whose receiver was dropped (outer
-    // timeout fired, request cancelled) is reaped.
     let mut streams = HashMap::new();
     let (tx_live, _rx_live) = oneshot::channel::<Result<H3Response, String>>();
     streams.insert(1u64, H3Stream::new(tx_live, None, None, false));
@@ -197,8 +185,6 @@ fn cancelled_stream_ids_selects_only_dropped_receivers() {
 
 #[tokio::test]
 async fn cancellation_tracks_resp_then_body_receiver_across_the_head() {
-    // Pre-head, cancellation is the response oneshot being dropped; once the
-    // head has streamed (resp_tx taken), it tracks the body-channel receiver.
     let (tx, rx) = oneshot::channel::<Result<H3Response, String>>();
     let (body_tx, body_rx) = mpsc::channel(4);
     let mut s = H3Stream::new(tx, None, Some(body_tx), true);
@@ -212,8 +198,6 @@ async fn cancellation_tracks_resp_then_body_receiver_across_the_head() {
         "dropped resp receiver pre-head → cancelled"
     );
 
-    // Deliver the head (takes resp_tx); cancellation now follows the body
-    // channel. Re-seat a live receiver first so deliver_head has a sender.
     let (tx2, _rx2) = oneshot::channel::<Result<H3Response, String>>();
     s.resp_tx = Some(tx2);
     s.deliver_head();
@@ -230,9 +214,6 @@ async fn cancellation_tracks_resp_then_body_receiver_across_the_head() {
 
 #[test]
 fn only_provably_unsent_requests_are_retryable() {
-    // The keystone of the never-double-send guarantee: a request that may
-    // have reached the origin must NOT be classified as retryable, or
-    // send_request_h3_pooled would replay a non-idempotent request.
     assert!(H3SendError::NotSent("connection closed".into()).is_retryable());
     assert!(!H3SendError::Failed("stream reset".into()).is_retryable());
     assert_eq!(

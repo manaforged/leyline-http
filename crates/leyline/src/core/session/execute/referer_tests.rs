@@ -2,8 +2,6 @@ use super::referer_for;
 
 #[test]
 fn cross_origin_redirect_sends_origin_only() {
-    // The redirect chain URL (userinfo + token query included) must
-    // never cross to another origin.
     let referer = referer_for(
         Some("https://user:pw@a.example/reset?token=SECRET"),
         "https://b.example",

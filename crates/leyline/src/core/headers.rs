@@ -2,10 +2,7 @@
 
 use crate::profile::HeaderAnchor;
 
-/// A single header entry. The optional `anchor` records where the
-/// caller wants this header spliced into a preset-built list; plain
-/// entries (no anchor) keep the previous "append at the end" semantics
-/// unless `infer_anchor` finds a well-known Chrome slot for the name.
+/// A single header entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct HeaderEntry {
     pub name: String,
@@ -14,10 +11,6 @@ pub(crate) struct HeaderEntry {
 }
 
 /// Ordered HTTP headers with duplicate-name support.
-///
-/// This is intentionally not a map: browsers and fingerprinting endpoints can
-/// observe header order, and response headers such as `Set-Cookie` are valid
-/// multiple times.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HeaderList {
     inner: Vec<HeaderEntry>,
@@ -68,9 +61,7 @@ impl HeaderList {
         });
     }
 
-    /// Append an anchored header. The anchor tells the session where
-    /// this header should be spliced into the preset-built header
-    /// list — see [`crate::profile::HeaderAnchor`].
+    /// Append an anchored header.
     pub fn append_anchored(
         &mut self,
         anchor: HeaderAnchor,

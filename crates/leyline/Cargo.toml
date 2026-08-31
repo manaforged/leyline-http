@@ -1,6 +1,6 @@
 [package]
-name = "leyline"
-description = "Browser-accurate TLS fingerprinting for Rust"
+name = "leyline-http"
+description = "HTTP client that mimics browsers on the wire"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,8 +10,11 @@ authors.workspace = true
 homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
-documentation = "https://docs.rs/leyline"
-readme = "README.md"
+documentation = "https://docs.rs/leyline-http"
+readme = "../../README.md"
+
+[lib]
+name = "leyline"
 
 [package.metadata.docs.rs]
 # leyline-bssl-sys ships prebuilt BoringSSL for x86_64-unknown-linux-gnu, so
@@ -76,7 +79,7 @@ full = [
 [dependencies]
 # External deps absorbed from sub-crates
 # -- from leyline-quiche (external BSD-2 fork, stays as path dep)
-leyline-quiche = { path = "../leyline-quiche", version = "=1.0.0", default-features = false, optional = true, features = [
+leyline-quiche = { path = "../leyline-quiche", version = "=0.1.0", default-features = false, optional = true, features = [
     "boringssl-bssl-crate",
 ] }
 

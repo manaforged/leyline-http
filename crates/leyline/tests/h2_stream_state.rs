@@ -1,7 +1,4 @@
 //! Pure state-machine tests for `StreamState`.
-//!
-//! No tokio, no network — just exercising the RFC 9113 §5.1 transitions
-//! from the client perspective.
 
 #![expect(
     clippy::unwrap_used,
@@ -38,10 +35,6 @@ fn half_closed_remote() -> StreamState {
         .unwrap();
     s
 }
-
-// ---------------------------------------------------------------------------
-// Legal transitions from every state.
-// ---------------------------------------------------------------------------
 
 #[test]
 fn idle_to_open_via_send_headers() {
@@ -208,10 +201,6 @@ fn half_closed_remote_send_trailers_to_closed() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// RST_STREAM — from every non-idle state, into Closed with correct reason.
-// ---------------------------------------------------------------------------
-
 #[test]
 fn rst_local_from_open_closes_with_rst_local() {
     let mut s = open();
@@ -254,10 +243,6 @@ fn rst_remote_from_half_closed_remote_closes() {
     assert!(s.is_closed());
 }
 
-// ---------------------------------------------------------------------------
-// Illegal transitions.
-// ---------------------------------------------------------------------------
-
 fn assert_invalid(res: Result<(), StreamStateError>) {
     match res {
         Err(StreamStateError::InvalidTransition { .. }) => {}
@@ -274,8 +259,6 @@ fn idle_rejects_send_data() {
 
 #[test]
 fn idle_rejects_recv_headers() {
-    // A client never "receives" a HEADERS that opens an idle stream id
-    // it didn't allocate — that would be PUSH territory and we refuse it.
     let mut s = idle();
     assert_invalid(s.transition(StreamEvent::RecvHeaders { end_stream: false }));
 }
@@ -306,7 +289,6 @@ fn idle_rejects_send_trailers() {
 
 #[test]
 fn open_rejects_send_headers_again() {
-    // Duplicate SendHeaders without going through SendTrailers is invalid.
     let mut s = open();
     assert_invalid(s.transition(StreamEvent::SendHeaders { end_stream: false }));
 }
@@ -330,15 +312,12 @@ fn closed_rejects_recv_data() {
 
 #[test]
 fn recv_trailers_before_recv_headers_is_invalid_from_idle() {
-    // Trailers before the initial response HEADERS is meaningless.
     let mut s = idle();
     assert_invalid(s.transition(StreamEvent::RecvTrailers));
 }
 
 #[test]
 fn double_end_stream_recv_is_invalid() {
-    // End-stream twice on the recv side: once transitions to closed,
-    // the second time is a protocol error.
     let mut s = half_closed_local();
     s.transition(StreamEvent::RecvData { end_stream: true })
         .unwrap();
@@ -347,8 +326,6 @@ fn double_end_stream_recv_is_invalid() {
 
 #[test]
 fn double_end_stream_send_is_invalid() {
-    // We already HalfClosedLocal after end-stream headers; sending data
-    // again (even with end_stream) is a protocol error.
     let mut s = half_closed_local();
     assert_invalid(s.transition(StreamEvent::SendData { end_stream: true }));
 }
@@ -384,10 +361,6 @@ fn invalid_transition_name_populated() {
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// is_closed / can_send_data / can_recv_data coverage.
-// ---------------------------------------------------------------------------
 
 #[test]
 fn is_closed_flags() {

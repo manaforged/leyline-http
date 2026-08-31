@@ -4,8 +4,8 @@ use super::*;
 fn frame_header_roundtrip() {
     let header = FrameHeader {
         length: 16384,
-        frame_type: 0x0, // DATA
-        flags: 0x1,      // END_STREAM
+        frame_type: 0x0,
+        flags: 0x1,
         stream_id: 1,
     };
     let mut buf = BytesMut::with_capacity(9);
@@ -22,18 +22,17 @@ fn frame_header_roundtrip() {
 #[test]
 fn frame_header_clears_reserved_bit() {
     let mut raw = [0u8; 9];
-    // Set R bit (MSB of stream ID bytes)
     raw[5] = 0x80;
     raw[8] = 0x01;
     let header = FrameHeader::parse(&raw);
-    assert_eq!(header.stream_id, 1); // R bit cleared
+    assert_eq!(header.stream_id, 1);
 }
 
 #[test]
 fn unknown_frame_types_parse() {
     let header = FrameHeader {
         length: 4,
-        frame_type: 0xFF, // unknown
+        frame_type: 0xFF,
         flags: 0x0,
         stream_id: 0,
     };

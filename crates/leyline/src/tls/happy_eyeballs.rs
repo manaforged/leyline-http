@@ -1,19 +1,4 @@
 //! Happy Eyeballs v2 (RFC 8305 §5) TCP connect racing.
-//!
-//! Once a [`Resolver`](crate::Resolver) has produced a list of
-//! candidate addresses, [`happy_eyeballs_connect`] interleaves them
-//! by address family (AAAA, A, AAAA, A, …), then launches TCP connect
-//! attempts staggered by [`HappyEyeballsConfig::resolve_delay`]. The
-//! first socket that completes its three-way handshake wins; any
-//! in-flight attempts are aborted when their [`FuturesUnordered`]
-//! task is dropped.
-//!
-//! This module only orchestrates the race. The caller (the
-//! [`FingerprintConnector`](crate::tls::FingerprintConnector)) owns the
-//! TCP profile, so the actual socket construction runs through a
-//! closure it supplies — that keeps socket option tuning
-//! (`IP_BIND_ADDRESS_NO_PORT`, initcwnd, `TCP_NODELAY`, …) in one
-//! place.
 
 use std::future::Future;
 use std::io;
@@ -28,12 +13,9 @@ use tokio::time::sleep;
 /// Tunables for the Happy Eyeballs race.
 #[derive(Debug, Clone, Copy)]
 pub struct HappyEyeballsConfig {
-    /// Gap between successive connect attempts. RFC 8305 §8
-    /// recommends 250 ms and forbids anything below 10 ms.
+    /// Gap between successive connect attempts.
     pub resolve_delay: Duration,
-    /// Maximum number of parallel connect attempts. Caps worst-case
-    /// fan-out on pathological resolvers that return dozens of
-    /// addresses. Defaults to 8.
+    /// Maximum number of parallel connect attempts.
     pub attempt_limit: usize,
 }
 
@@ -47,11 +29,6 @@ impl Default for HappyEyeballsConfig {
 }
 
 /// Reorder `addrs` so that v6 and v4 addresses alternate, v6 first.
-///
-/// Approximates RFC 6724 destination address selection by simply
-/// interleaving — good enough for the "prefer IPv6, fall back to
-/// IPv4" intent without depending on a DNS library that does full
-/// prefix-match ranking.
 pub(crate) fn interleave_by_family(addrs: Vec<SocketAddr>) -> Vec<SocketAddr> {
     let mut v6: Vec<SocketAddr> = Vec::new();
     let mut v4: Vec<SocketAddr> = Vec::new();
@@ -79,13 +56,7 @@ pub(crate) fn interleave_by_family(addrs: Vec<SocketAddr>) -> Vec<SocketAddr> {
     out
 }
 
-/// Race TCP connect attempts across `addrs`, staggered by
-/// `config.resolve_delay`. Returns the first successful `(stream,
-/// addr)` pair. If every attempt fails, returns the last error.
-///
-/// `connect_fn` builds a [`TcpStream`] for a single address — that
-/// is where the caller applies its TCP fingerprint (socket2 options,
-/// non-blocking mode, TFO, …) before awaiting completion.
+/// Race TCP connect attempts across `addrs`, staggered by `config.resolve_delay`.
 pub(crate) async fn happy_eyeballs_connect<F, Fut>(
     addrs: Vec<SocketAddr>,
     config: HappyEyeballsConfig,
@@ -106,14 +77,10 @@ where
     let attempt_limit = config.attempt_limit.max(1);
     let mut iter = interleaved.into_iter().take(attempt_limit);
 
-    // One boxed future per in-flight attempt. `FuturesUnordered`
-    // drops the remaining futures when we `return` out of the race,
-    // aborting any stragglers.
     type Attempt = Pin<Box<dyn Future<Output = Result<(TcpStream, SocketAddr), io::Error>> + Send>>;
     let mut in_flight: FuturesUnordered<Attempt> = FuturesUnordered::new();
     let mut last_err: Option<io::Error> = None;
 
-    // Kick off the first attempt immediately (RFC 8305 §5 step 2).
     if let Some(first) = iter.next() {
         let fut = connect_fn(first);
         in_flight.push(Box::pin(async move { fut.await.map(|s| (s, first)) }));
@@ -122,11 +89,6 @@ where
     'outer: loop {
         match iter.next() {
             Some(addr) => {
-                // Stagger: race the in-flight set against a
-                // `resolve_delay` timer. If an attempt wins during the
-                // stagger, return it. If they all fail during the
-                // stagger, launch immediately. If the timer fires
-                // first, launch the next attempt and loop.
                 let sleep_fut = sleep(config.resolve_delay);
                 tokio::pin!(sleep_fut);
                 loop {
@@ -137,9 +99,6 @@ where
                                 Some(Ok(winner)) => return Ok(winner),
                                 Some(Err(e)) => {
                                     last_err = Some(e);
-                                    // Keep waiting on the timer unless we've
-                                    // drained in-flight entirely — in which
-                                    // case, start the next attempt right away.
                                     if in_flight.is_empty() {
                                         let fut = connect_fn(addr);
                                         in_flight.push(Box::pin(async move {
@@ -162,7 +121,6 @@ where
                 }
             }
             None => {
-                // All candidates launched — drain the in-flight set.
                 if in_flight.is_empty() {
                     return Err(last_err.unwrap_or_else(|| {
                         io::Error::new(io::ErrorKind::NotFound, "no addresses resolved")

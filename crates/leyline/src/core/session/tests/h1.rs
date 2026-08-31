@@ -1,6 +1,7 @@
-use super::super::Session;
+use super::super::{Session, SessionBuilder};
 use crate::core::error::Error;
-use crate::core::response::HttpVersion;
+use crate::core::response::{HttpVersion, Response};
+use crate::{Body, ContentEncoding, Request};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[tokio::test]
@@ -49,13 +50,44 @@ async fn plaintext_http_uses_h1_and_preserves_duplicate_headers() {
         .unwrap();
 
     assert_eq!(resp.version(), HttpVersion::Http1_1);
-    assert_eq!(resp.text(), "ok");
-    assert_eq!(resp.header_all("set-cookie"), vec!["a=1", "b=2"]);
+    assert_eq!(resp.text().unwrap(), "ok");
+    assert_eq!(
+        resp.header_all("set-cookie").collect::<Vec<_>>(),
+        vec!["a=1", "b=2"]
+    );
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn owned() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut req = Vec::new();
+        let mut tmp = [0u8; 1024];
+        loop {
+            let n = socket.read(&mut tmp).await.unwrap();
+            assert!(n > 0, "client closed before request headers");
+            req.extend_from_slice(&tmp[..n]);
+            if req.windows(4).any(|w| w == b"\r\n\r\n") {
+                break;
+            }
+        }
+        socket
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok")
+            .await
+            .unwrap();
+    });
+    let req = Request::new("GET", format!("http://{addr}/owned"));
+    let resp = Session::chrome().execute(req).await.unwrap();
+    assert_eq!(resp.status(), 200);
+    assert_eq!(resp.text().unwrap(), "ok");
     server.await.unwrap();
 }
 
 /// Spin up a one-shot H1 mock and return the `Response` for inspection.
-async fn one_shot_get(builder: super::super::SessionBuilder, path: &str) -> crate::core::Response {
+async fn one_shot_get(builder: SessionBuilder, path: &str) -> Response {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
@@ -86,7 +118,6 @@ async fn one_shot_get(builder: super::super::SessionBuilder, path: &str) -> crat
 #[tokio::test]
 async fn audit_is_off_by_default() {
     let resp = one_shot_get(Session::builder(), "/x").await;
-    // Default: no fingerprint introspection, no retained request headers.
     assert!(
         resp.audit().is_none(),
         "audit() should be None unless opted in"
@@ -128,7 +159,6 @@ async fn compress_sets_header_and_puts_compressed_bytes_on_the_wire() {
         let (mut socket, _) = listener.accept().await.unwrap();
         let mut buf = Vec::new();
         let mut tmp = [0u8; 1024];
-        // Read until the full header block plus the declared body are in.
         let (buf, body_start, content_len) = loop {
             let n = socket.read(&mut tmp).await.unwrap();
             assert!(n > 0, "client closed before full request");
@@ -165,13 +195,11 @@ async fn compress_sets_header_and_puts_compressed_bytes_on_the_wire() {
         decoded
     });
 
-    // Compressible payload large enough that the gzip output is strictly
-    // smaller than the input — proves the wire body really is compressed.
     let payload = b"the quick brown fox jumps over the lazy dog. ".repeat(64);
     let resp = Session::chrome()
         .post(&format!("http://{addr}/upload"))
         .body(payload.clone())
-        .compress(crate::ContentEncoding::Gzip)
+        .compress(ContentEncoding::Gzip)
         .send()
         .await
         .unwrap();
@@ -186,15 +214,13 @@ async fn compress_sets_header_and_puts_compressed_bytes_on_the_wire() {
 
 #[tokio::test]
 async fn compress_rejects_streaming_body() {
-    // Compression is applied before dispatch, so this errors without a live
-    // server: a streaming body cannot be compressed in place.
-    let body = crate::Body::stream(futures_util::stream::iter(vec![Ok::<_, std::io::Error>(
+    let body = Body::stream(futures_util::stream::iter(vec![Ok::<_, std::io::Error>(
         bytes::Bytes::from_static(b"chunk"),
     )]));
     let err = Session::chrome()
         .post("http://127.0.0.1:9/x")
         .body(body)
-        .compress(crate::ContentEncoding::Gzip)
+        .compress(ContentEncoding::Gzip)
         .send()
         .await
         .unwrap_err();
@@ -203,10 +229,6 @@ async fn compress_rejects_streaming_body() {
 
 #[tokio::test]
 async fn unsupported_scheme_proxy_is_refused_not_sent_in_cleartext() {
-    // Schemes leyline cannot tunnel safely (here `ftp`) must error before any
-    // socket opens — `RequestBuilder::proxy(&str)` is not validated through
-    // `ProxyUrl`, so an unhandled scheme must not fall through to the cleartext
-    // CONNECT path and leak Proxy-Authorization.
     let err = Session::chrome()
         .request("GET", "https://example.test/")
         .proxy("ftp://user:secret@127.0.0.1:1")
@@ -238,8 +260,6 @@ async fn compress_strips_stale_caller_content_length() {
             buf.extend_from_slice(&tmp[..n]);
             if let Some(hdr_end) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
                 let head = String::from_utf8_lossy(&buf[..hdr_end]).to_lowercase();
-                // Exactly one content-length, and it must be the compressed
-                // length — never the caller's stale 999999.
                 assert_eq!(
                     head.matches("content-length:").count(),
                     1,
@@ -275,10 +295,9 @@ async fn compress_strips_stale_caller_content_length() {
     let payload = b"the quick brown fox jumps over the lazy dog. ".repeat(64);
     let resp = Session::chrome()
         .post(&format!("http://{addr}/upload"))
-        // A bogus caller-supplied content-length must not survive compression.
         .header("content-length", "999999")
         .body(payload.clone())
-        .compress(crate::ContentEncoding::Gzip)
+        .compress(ContentEncoding::Gzip)
         .send()
         .await
         .unwrap();
@@ -290,13 +309,6 @@ async fn compress_strips_stale_caller_content_length() {
 
 #[tokio::test]
 async fn https_scheme_proxy_is_accepted_and_dialed_over_tls() {
-    // An https:// proxy is supported: the client→proxy leg is TLS, so the
-    // CONNECT (and any Proxy-Authorization) is encrypted. The request is no
-    // longer refused at scheme inspection — it proceeds to dial the proxy. With
-    // an unroutable proxy port the attempt fails with a connection-level error,
-    // https proxies are supported; (the
-    // encrypted-credential guarantee is verified end-to-end by the live
-    // mock-proxy test in tests/https_proxy.rs.)
     let err = Session::chrome()
         .request("GET", "https://example.test/")
         .proxy("https://user:secret@127.0.0.1:1")
@@ -333,10 +345,7 @@ async fn json_builder_returns_error_instead_of_panicking() {
     assert!(matches!(err, Error::Json(_)));
 }
 
-// ---- H1 streaming download ----
-
-/// Read a request head (up to the `\r\n\r\n` terminator). Returns `false`
-/// on a clean EOF before any bytes — the keep-alive connection was closed.
+/// Read a request head (up to the `\r\n\r\n` terminator).
 async fn read_request_head(sock: &mut tokio::net::TcpStream) -> bool {
     let mut buf = Vec::new();
     let mut tmp = [0u8; 1024];
@@ -360,7 +369,6 @@ async fn streamed_chunked_response_reassembles() {
     let server = tokio::spawn(async move {
         let (mut sock, _) = listener.accept().await.unwrap();
         read_request_head(&mut sock).await;
-        // "Hello, " (7) + "streaming " (A=10) + "world!" (6), then terminator.
         sock.write_all(
             b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n\
               7\r\nHello, \r\nA\r\nstreaming \r\n6\r\nworld!\r\n0\r\n\r\n",
@@ -390,7 +398,6 @@ async fn streamed_fixed_length_response_reassembles() {
     use futures_util::StreamExt;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    // 10 KB — larger than the 8 KB pump read buffer, so it spans multiple chunks.
     let payload = b"the quick brown fox ".repeat(500);
     let payload_srv = payload.clone();
     let server = tokio::spawn(async move {
@@ -424,10 +431,6 @@ async fn streamed_connection_is_reused_after_full_drain() {
     use futures_util::StreamExt;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    // The server accepts exactly ONE connection and serves two sequential
-    // requests on it. If the streamed connection is reinstated after a clean
-    // drain, request 2 reuses it; otherwise request 2 would need a second
-    // accept that never comes and the test would hang.
     let server = tokio::spawn(async move {
         let (mut sock, _) = listener.accept().await.unwrap();
         for body in [b"first".as_slice(), b"second".as_slice()] {
@@ -455,9 +458,8 @@ async fn streamed_connection_is_reused_after_full_drain() {
     }
     assert_eq!(b1, b"first");
 
-    // Reuses the reinstated connection (the server only accepted once).
     let r2 = session.get(&format!("http://{addr}/b")).await.unwrap();
-    assert_eq!(r2.text(), "second");
+    assert_eq!(r2.text().unwrap(), "second");
     server.await.unwrap();
 }
 
@@ -471,8 +473,6 @@ async fn streamed_read_timeout_fires_on_stall() {
     let server = tokio::spawn(async move {
         let (mut sock, _) = listener.accept().await.unwrap();
         read_request_head(&mut sock).await;
-        // One chunk, then stall: no further bytes, connection held open, so the
-        // per-chunk read-idle timeout must fire on the consumer side.
         sock.write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n")
             .await
             .unwrap();
@@ -491,8 +491,6 @@ async fn streamed_read_timeout_fires_on_stall() {
         .unwrap();
     let mut stream = resp.into_stream().unwrap();
     assert_eq!(&stream.next().await.unwrap().unwrap()[..], b"hello");
-    // The next chunk never arrives → read_timeout fires (well before the
-    // 300 s request-wide timeout would).
     let err = stream.next().await.unwrap().unwrap_err();
     assert_eq!(err.kind(), std::io::ErrorKind::TimedOut, "{err}");
     server.abort();
@@ -508,9 +506,6 @@ async fn streamed_connection_dropped_when_consumer_drops_early() {
     let addr = listener.local_addr().unwrap();
     let accepts = Arc::new(AtomicUsize::new(0));
     let accepts_srv = accepts.clone();
-    // Real keep-alive server: each accepted connection serves requests in a
-    // loop until the peer closes it. A correctly-dropped early stream closes
-    // its connection, forcing request 2 onto a second accept.
     tokio::spawn(async move {
         loop {
             let Ok((mut sock, _)) = listener.accept().await else {
@@ -519,9 +514,6 @@ async fn streamed_connection_dropped_when_consumer_drops_early() {
             accepts_srv.fetch_add(1, Ordering::SeqCst);
             tokio::spawn(async move {
                 while read_request_head(&mut sock).await {
-                    // 50 chunks of 10 bytes — far more than the pump's 16-deep
-                    // channel can buffer, so a consumer that reads one chunk and
-                    // drops leaves unread body on the wire.
                     let mut resp =
                         b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: keep-alive\r\n\r\n"
                             .to_vec();
@@ -546,12 +538,9 @@ async fn streamed_connection_dropped_when_consumer_drops_early() {
         .unwrap();
     let mut s1 = r1.into_stream().unwrap();
     let _first = s1.next().await.unwrap().unwrap();
-    drop(s1); // early drop — the pump must NOT reinstate this connection
-
-    // A correctly-dropped connection forces a second accept for request 2.
+    drop(s1);
     let r2 = session.get(&format!("http://{addr}/b")).await.unwrap();
     assert_eq!(r2.status(), 200);
-    // Poll briefly: the second accept is registered as r2 completes.
     assert_eq!(
         accepts.load(Ordering::SeqCst),
         2,

@@ -31,13 +31,9 @@ fn section_a_chrome147() {
         alpn: "h2",
     };
     let a = compute_section_a(&input);
-    // 15 ciphers, 16 extensions (ALPS included), h2
-    assert_eq!(&a[..3], "t13"); // TLS 1.3
-    assert_eq!(&a[3..4], "d"); // SNI present
-    assert_eq!(&a[4..6], "15"); // 15 ciphers
-    // 17 extensions in the list (all non-GREASE). Real Chrome has 16
-    // because the list includes extended_master_secret, which Chrome 147
-    // may omit. The exact count depends on the BoringSSL configuration.
+    assert_eq!(&a[..3], "t13");
+    assert_eq!(&a[3..4], "d");
+    assert_eq!(&a[4..6], "15");
     assert!(
         a[6..8].parse::<u32>().unwrap() >= 16,
         "ext count: {}",
@@ -79,6 +75,5 @@ fn section_b_chrome147() {
         alpn: "h2",
     };
     let b = compute_section_b(&input);
-    // Expected from Chrome 147 JA4: 8daaf6152771
     assert_eq!(b, "8daaf6152771");
 }

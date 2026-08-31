@@ -4,9 +4,9 @@ use crate::{Error, Identity};
 
 #[test]
 fn locked_keeps_http_and_tls_on_one_browser() {
-    let id = Identity::locked(Browser::Chrome150, Platform::Windows);
-    assert_eq!(id.http(), Browser::Chrome150);
-    assert_eq!(id.tls(), Browser::Chrome150);
+    let id = Identity::locked(Browser::Chrome152, Platform::Windows);
+    assert_eq!(id.http(), Browser::Chrome152);
+    assert_eq!(id.tls(), Browser::Chrome152);
     assert_eq!(id.platform(), Platform::Windows);
 }
 
@@ -15,6 +15,9 @@ fn locked_collapses_tls_to_hello_owner() {
     let id = Identity::locked(Browser::Chrome148, Platform::Windows);
     assert_eq!(id.http(), Browser::Chrome148);
     assert_eq!(id.tls(), Browser::Chrome147);
+    let id = Identity::locked(Browser::Chrome151, Platform::Windows);
+    assert_eq!(id.http(), Browser::Chrome151);
+    assert_eq!(id.tls(), Browser::Chrome152);
 }
 
 #[test]
@@ -90,14 +93,14 @@ fn switch_family_rejects_safari_on_windows() {
 fn pass_library_windows_is_firefox() {
     let lib = Identity::locked(Browser::Chrome150, Platform::Windows).pass_library();
     let https: Vec<Browser> = lib.iter().map(|id| id.http()).collect();
-    assert_eq!(https, vec![Browser::Firefox152]);
+    assert_eq!(https, vec![Browser::Firefox154]);
 }
 
 #[test]
 fn pass_library_macos_is_firefox_and_safari() {
     let from_chrome = Identity::locked(Browser::Chrome150, Platform::MacOS).pass_library();
     let https: Vec<Browser> = from_chrome.iter().map(|id| id.http()).collect();
-    assert_eq!(https, vec![Browser::Firefox152, Browser::Safari18]);
+    assert_eq!(https, vec![Browser::Firefox154, Browser::Safari26]);
 }
 
 #[test]
@@ -171,7 +174,7 @@ fn hello_library_is_three_chrome_hellos() {
     let tls: Vec<Browser> = lib.iter().map(|id| id.tls()).collect();
     assert_eq!(
         tls,
-        vec![Browser::Chrome150, Browser::Chrome147, Browser::Chrome146,]
+        vec![Browser::Chrome152, Browser::Chrome147, Browser::Chrome146,]
     );
     assert!(lib.iter().all(|id| id.http() == Browser::Chrome150));
     assert!(lib.iter().all(|id| id.platform() == Platform::Windows));
@@ -180,12 +183,12 @@ fn hello_library_is_three_chrome_hellos() {
 #[test]
 fn rotate_hello_walks_distinct_chrome_ja4s() {
     let a = Identity::locked(Browser::Chrome150, Platform::Windows);
-    let b = a.rotate_hello().expect("150 → 147");
+    let b = a.rotate_hello().expect("152-rep → 147");
     let c = b.rotate_hello().expect("147 → 146");
-    let d = c.rotate_hello().expect("146 → 150");
+    let d = c.rotate_hello().expect("146 → 152");
     assert_eq!(b.tls(), Browser::Chrome147);
     assert_eq!(c.tls(), Browser::Chrome146);
-    assert_eq!(d.tls(), Browser::Chrome150);
+    assert_eq!(d.tls(), Browser::Chrome152);
     assert_eq!(d.http(), Browser::Chrome150);
 }
 
@@ -243,7 +246,11 @@ fn firefox_hello_library_stays_consistent() {
         .expect("firefox hello library");
     assert_eq!(
         lib.iter().map(|id| id.tls()).collect::<Vec<_>>(),
-        vec![Browser::Firefox152, Browser::Firefox150]
+        vec![
+            Browser::Firefox154,
+            Browser::Firefox152,
+            Browser::Firefox150
+        ]
     );
     for id in lib {
         assert_eq!(id.http(), Browser::Firefox152);

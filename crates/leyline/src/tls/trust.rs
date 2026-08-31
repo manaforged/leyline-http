@@ -1,18 +1,4 @@
 //! Trust-root wiring for BoringSSL `SslContextBuilder`.
-//!
-//! Separate from `builder.rs` so the PEM-env and system-store logic
-//! (including the Windows certificate-store bridge) stays isolated from
-//! profile application.
-//!
-//! Two entry points:
-//!
-//! - [`wire_env_trust`] honours `SSL_CERT_FILE` and `SSL_CERT_DIR` if
-//!   the operator sets them. BoringSSL — unlike OpenSSL — does not
-//!   consume these env vars automatically; wiring them here matches
-//!   the behaviour operators get from curl / reqwest / Python requests.
-//! - [`wire_system_trust`] loads only platform roots. It never consults
-//!   the process environment, so its policy remains independent from
-//!   [`wire_env_trust`].
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -26,11 +12,6 @@ use sha2::{Digest, Sha256};
 use crate::tls::error::TlsError;
 
 /// TLS trust and client-certificate configuration.
-///
-/// Defaults match Leyline's existing behavior: honour `SSL_CERT_FILE` /
-/// `SSL_CERT_DIR` and platform system roots when enabled.
-/// Explicit roots are additive, so callers can trust a private CA without
-/// losing the normal public web PKI.
 #[derive(Debug, Clone)]
 pub struct TlsTrustConfig {
     use_env_roots: bool,
@@ -41,10 +22,7 @@ pub struct TlsTrustConfig {
     pinned_leaf_sha256: Vec<[u8; 32]>,
 }
 
-/// Why shared mutability: the BoringSSL custom-verify callback runs inside
-/// the handshake (possibly on a different runtime worker than the caller's
-/// future); the connector reads the classification after the handshake. A
-/// one-shot slot, not shared state in any meaningful sense.
+/// Why shared mutability: the BoringSSL custom-verify callback runs inside the handshake (possibly on a different runtime worker than the caller's future); the connector reads the classification after the handshake.
 pub(crate) type VerificationFailure = Arc<Mutex<Option<TrustFailure>>>;
 
 #[derive(Clone, Copy, Debug)]
@@ -97,10 +75,6 @@ impl TlsTrustConfig {
     }
 
     /// Add a SHA-256 pin for the DER-encoded leaf certificate.
-    ///
-    /// Pinning is additive to normal certificate validation: the chain
-    /// must still verify against the configured roots, and the leaf
-    /// certificate must match one of the configured hashes.
     pub fn add_pinned_leaf_sha256(mut self, sha256: [u8; 32]) -> Self {
         self.pinned_leaf_sha256.push(sha256);
         self
@@ -150,10 +124,7 @@ impl TlsTrustConfig {
     }
 }
 
-/// Context-level variant of [`install_pinning_verifier`] for QUIC: the
-/// callback lives on the shared `SslContext` because quiche owns the
-/// per-connection `Ssl` handles. Pin failure surfaces as a handshake
-/// alert; the classification handle is unnecessary here.
+/// Context-level variant of [`install_pinning_verifier`] for QUIC: the callback lives on the shared `SslContext` because quiche owns the per-connection `Ssl` handles.
 pub(crate) fn install_pinning_verifier_ctx(builder: &mut SslContextBuilder, pins: &[[u8; 32]]) {
     let pins = pins.to_vec();
     builder.set_custom_verify_callback(SslVerifyMode::PEER, move |ssl| {
@@ -206,11 +177,6 @@ pub struct ClientIdentity {
 }
 
 /// Honour `SSL_CERT_FILE` / `SSL_CERT_DIR` if set.
-///
-/// On error (missing file, unreadable dir, malformed PEM) the function
-/// logs at `warn`; a failed env root must not abort TLS setup
-/// silently — operators need to see the warning — but it also must not
-/// leave the process with zero CAs.
 pub(crate) fn wire_env_trust(builder: &mut SslContextBuilder) -> bool {
     let mut loaded_any = false;
     if let Ok(file) = std::env::var("SSL_CERT_FILE") {
@@ -219,11 +185,6 @@ pub(crate) fn wire_env_trust(builder: &mut SslContextBuilder) -> bool {
             match builder.set_ca_file(file) {
                 Ok(()) => {
                     loaded_any = true;
-                    // `warn` level: an env-var overriding the trust
-                    // anchor is a security-relevant decision, and
-                    // `debug` is off in most deployments. Operators
-                    // need to see this unconditionally so a leaked
-                    // env-var attack doesn't fly under the radar.
                     tracing::warn!(
                         target: "leyline::tls::trust",
                         ca_file = %file,
@@ -246,10 +207,6 @@ pub(crate) fn wire_env_trust(builder: &mut SslContextBuilder) -> bool {
         if !dir.is_empty() {
             let dir_path = std::path::PathBuf::from(dir);
             if dir_path.is_dir() {
-                // `collect_ca_dir_candidates` filters by extension and
-                // follows symlinks (see its docs). Per-file parse
-                // errors degrade to debug-log; an all-bad dir falls
-                // back to system trust so we never run with zero CAs.
                 let candidates = collect_ca_dir_candidates(&dir_path);
                 if !candidates.is_empty() || dir_path.exists() {
                     let mut loaded = 0usize;
@@ -323,9 +280,7 @@ pub(crate) fn wire_configured_trust(
     Ok(())
 }
 
-/// Install the pinning verifier on one handshake and return its private
-/// classification state. Keeping this state on the `Ssl` avoids cross-talk
-/// between concurrent handshakes made by the same connector.
+/// Install the pinning verifier on one handshake and return its private classification state.
 pub(crate) fn install_pinning_verifier(ssl: &mut Ssl, pins: &[[u8; 32]]) -> VerificationFailure {
     let pins = pins.to_vec();
     let failure = Arc::new(Mutex::new(None));
@@ -365,26 +320,7 @@ pub(crate) fn install_pinning_verifier(ssl: &mut Ssl, pins: &[[u8; 32]]) -> Veri
     failure
 }
 
-/// Load the platform's system trust store into the builder's
-/// `X509_STORE`.
-///
-/// Linux: well-known distro CA bundles are loaded directly rather than through
-/// `set_default_verify_paths`, which also consults `SSL_CERT_FILE` and
-/// `SSL_CERT_DIR`.
-///
-/// macOS: the Security.framework anchor list is copied into BoringSSL because
-/// Apple's OpenSSL-compat PEM bundle can lag behind the System Keychain.
-///
-/// Windows: BoringSSL's default paths point at Unix-style directories
-/// that do not exist, so without a bridge the process ends up with
-/// zero trust roots and every HTTPS handshake fails with
-/// `unable to get local issuer certificate`. We pull every cert from
-/// the logical `"ROOT"` Windows store via the Win32 crypto API (see
-/// `windows_trust` module) and push each one into the BoringSSL store.
-///
-/// Returns `TlsError` only when the platform bridge itself fails
-/// catastrophically. Individual malformed roots are skipped with a
-/// `debug` log — a single bad cert must not void the whole trust store.
+/// Load the platform's system trust store into the builder's `X509_STORE`.
 pub(crate) fn wire_system_trust(builder: &mut SslContextBuilder) -> Result<(), TlsError> {
     #[cfg(windows)]
     {
@@ -401,14 +337,6 @@ pub(crate) fn wire_system_trust(builder: &mut SslContextBuilder) -> Result<(), T
 }
 
 /// System trust with a process-wide cache for the common pure-system case.
-///
-/// On Windows the bridge enumerates and DER-parses the entire OS ROOT store —
-/// expensive, and identical for every connector. With no additive roots
-/// (`ca_files` / `ca_der` empty), share one pre-parsed, refcounted root store
-/// across builders instead of rebuilding it each time. The store holds only
-/// public CA roots, so sharing carries no per-session identity. Configs with
-/// extra roots keep a mutable per-builder store (a shared store cannot be
-/// mutated).
 #[cfg(windows)]
 fn wire_system_trust_cached(
     builder: &mut SslContextBuilder,
@@ -431,9 +359,7 @@ fn wire_system_trust_cached(
     wire_system_trust(builder)
 }
 
-/// Build once and share the parsed Windows system ROOT store. The first
-/// connector pays the OS enumeration + DER parse; every later one shares the
-/// same refcounted `X509_STORE`.
+/// Build once and share the parsed Windows system ROOT store.
 #[cfg(windows)]
 fn cached_windows_system_store() -> Result<&'static leyline_bssl::x509::store::X509Store, TlsError>
 {
@@ -471,8 +397,7 @@ fn cached_windows_system_store() -> Result<&'static leyline_bssl::x509::store::X
     Ok(STORE.get_or_init(|| store.build()))
 }
 
-/// Linux-only: load a distro CA bundle without allowing BoringSSL to inspect
-/// `SSL_CERT_FILE` or `SSL_CERT_DIR`.
+/// Linux-only: load a distro CA bundle without allowing BoringSSL to inspect `SSL_CERT_FILE` or `SSL_CERT_DIR`.
 #[cfg(all(not(windows), not(target_os = "macos")))]
 fn wire_linux_system_trust(builder: &mut SslContextBuilder) -> Result<(), TlsError> {
     const BUNDLES: &[&str] = &[
@@ -494,11 +419,7 @@ fn wire_linux_system_trust(builder: &mut SslContextBuilder) -> Result<(), TlsErr
     ))
 }
 
-/// macOS-only: build the effective system trust set — built-in anchors
-/// merged with user/admin/system trust settings (`SecTrustSettings*`),
-/// so user-installed roots work and explicit distrust is honored, the
-/// same merge a real browser evaluates against — and push each
-/// DER-encoded root into BoringSSL's `X509_STORE`.
+/// macOS-only: build the effective system trust set — built-in anchors merged with user/admin/system trust settings (`SecTrustSettings*`), so user-installed roots work and explicit distrust is honored, the same merge a real browser evaluates against — and push each DER-encoded root into BoringSSL's `X509_STORE`.
 #[cfg(target_os = "macos")]
 fn wire_macos_system_trust(builder: &mut SslContextBuilder) -> Result<(), TlsError> {
     let roots = crate::tls::macos_trust::load_system_roots().map_err(|error| {
@@ -534,12 +455,7 @@ fn wire_macos_system_trust(builder: &mut SslContextBuilder) -> Result<(), TlsErr
     Ok(())
 }
 
-/// Windows-only: enumerate the `"ROOT"` system store via Win32 crypto
-/// API and push each DER-encoded cert into the BoringSSL `X509_STORE`.
-///
-/// Mirrors what `rustls-native-certs` does, minus the `schannel` crate
-/// dependency that `deny.toml` bans alongside other alternative TLS
-/// backends.
+/// Windows-only: enumerate the `"ROOT"` system store via Win32 crypto API and push each DER-encoded cert into the BoringSSL `X509_STORE`.
 #[cfg(windows)]
 fn wire_windows_system_trust(builder: &mut SslContextBuilder) -> Result<(), TlsError> {
     use leyline_bssl::x509::X509;
@@ -547,8 +463,6 @@ fn wire_windows_system_trust(builder: &mut SslContextBuilder) -> Result<(), TlsE
     let roots = match crate::tls::windows_trust::load_system_roots() {
         Ok(r) => r,
         Err(e) => {
-            // A connector with no roots fails every handshake later with an
-            // opaque cert error; fail at build time instead of swallowing.
             return Err(TlsError::TrustStore(format!(
                 "failed to open Windows system ROOT store: {e}"
             )));
@@ -583,7 +497,6 @@ fn wire_windows_system_trust(builder: &mut SslContextBuilder) -> Result<(), TlsE
     }
 
     if loaded == 0 {
-        // Empty store + PEER verify mode = every handshake fails opaquely.
         return Err(TlsError::TrustStore(format!(
             "Windows system ROOT store bridged zero certificates ({skipped} skipped)"
         )));
@@ -597,21 +510,7 @@ fn wire_windows_system_trust(builder: &mut SslContextBuilder) -> Result<(), TlsE
     Ok(())
 }
 
-/// Walk `dir` and return every entry that passes the CA-dir
-/// acceptance rules:
-///
-/// - filename extension matches `.pem` / `.crt` / `.cer` (ASCII
-///   case-insensitive),
-/// - resolving the path through [`std::fs::metadata`] (which DOES
-///   follow symlinks) yields a regular file.
-///
-/// Broken symlinks, symlink loops, directories, and targets with
-/// unrecognised extensions are skipped silently. Returns entries
-/// in whatever order `read_dir` yields — callers that require
-/// determinism must sort.
-///
-/// Extracted so the dir-walk semantics can be covered by regression
-/// tests without needing a live `SslContextBuilder`.
+/// Walk `dir` and return every entry that passes the CA-dir acceptance rules: - filename extension matches `.pem` / `.crt` / `.cer` (ASCII case-insensitive), - resolving the path through [`std::fs::metadata`] (which DOES follow symlinks) yields a regular file.
 pub(crate) fn collect_ca_dir_candidates(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
@@ -627,12 +526,6 @@ pub(crate) fn collect_ca_dir_candidates(dir: &std::path::Path) -> Vec<std::path:
         if !ext_ok {
             continue;
         }
-        // `fs::metadata` follows symlinks — crucial for the
-        // Debian/Ubuntu/RHEL `/etc/ssl/certs` layout which is
-        // entirely symlinks pointing into
-        // `/usr/share/ca-certificates/`. `DirEntry::metadata()`
-        // (non-following) would reject every symlink and leave the
-        // process with zero CAs.
         let Ok(resolved) = std::fs::metadata(&p) else {
             continue;
         };

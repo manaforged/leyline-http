@@ -1,13 +1,4 @@
 //! JA4T TCP fingerprinting via socket2.
-//!
-//! Sets per-connection TCP socket options (TTL, MSS, window size, DF bit,
-//! window scale, TCP_NODELAY) to match the claimed operating system's
-//! TCP/IP stack fingerprint.
-//!
-//! Honest limits: these are `setsockopt` *hints*, applied before `connect`.
-//! The kernel, NIC MTU, and middleboxes shape what the SYN actually carries,
-//! so a remote JA4T read will usually match but is not byte-guaranteed the
-//! way the TLS-layer fingerprints are.
 
 use std::sync::Mutex;
 
@@ -26,7 +17,7 @@ pub struct TcpProfile {
     pub window_size: u32,
     /// Don't Fragment bit.
     pub df: bool,
-    /// TCP window scale factor: 8 (Windows), 6 (macOS), 7 (Linux). 0 = skip.
+    /// TCP window scale factor: 8 (Windows), 6 (macOS), 7 (Linux).
     pub window_scale: u32,
     /// TCP_NODELAY (disables Nagle's algorithm).
     pub no_delay: bool,
@@ -74,11 +65,6 @@ impl TcpProfile {
     };
 
     /// Apply this TCP profile to a socket before connect().
-    ///
-    /// `is_v6` must match the socket's address family — on Windows and Linux,
-    /// IP-level options (`IP_TTL`, `IP_DONTFRAGMENT`, `IP_MTU_DISCOVER`) return
-    /// `EINVAL` on IPv6 sockets; the IPv6 equivalents at `IPPROTO_IPV6` must be
-    /// used instead.
     pub fn apply(&self, socket: &Socket, is_v6: bool) {
         if self.ttl > 0 {
             let result = if is_v6 {
@@ -110,9 +96,6 @@ impl TcpProfile {
 static LOGGED: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
 
 fn log_once(option: &'static str, err: &std::io::Error) {
-    // Recover from a poisoned lock rather than panicking — this is an
-    // advisory diagnostic log, and the rest of the crate handles lock
-    // poisoning the same way (`connector.rs`, `cookie/jar.rs`).
     let mut logged = LOGGED.lock().unwrap_or_else(|e| e.into_inner());
     if !logged.contains(&option) {
         logged.push(option);

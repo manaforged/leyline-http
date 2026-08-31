@@ -4,8 +4,6 @@ browser = "brave"
 version = 146
 family = "chromium"
 verified_against = "tls.peet.ws"
-# Real Brave macOS capture 2026-04-25 (see [h2.platforms.macos] note below);
-# Brave's own release string was not recorded, so this pins the Chromium major.
 captured_against = "brave-146"
 
 [tls]

@@ -1,12 +1,8 @@
 //! Bare (non-impersonating) default session behaviour.
-//!
-//! The default `Session` does NOT impersonate a browser: a plain
-//! `leyline/<version>` User-Agent, no `sec-ch-ua` / client-hint headers,
-//! and the host OS rather than a hardcoded Windows fingerprint. Opting into
-//! a browser is the explicit, named action.
 
 use crate::Session;
-use crate::profile::{Browser, Platform};
+use crate::profile::{Browser, Platform, Preset};
+use crate::{Error, RequestBuilder};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 async fn capture_get_headers(session: Session) -> String {
@@ -37,15 +33,12 @@ async fn capture_get_headers(session: Session) -> String {
 
 #[test]
 fn default_session_is_bare() {
-    // No `.browser(...)` → bare. `Session::new()` and a plain builder
-    // both land here.
     assert_eq!(Session::new().browser(), None);
     assert_eq!(Session::builder().build().unwrap().browser(), None);
 }
 
 #[test]
 fn chrome_helper_is_explicit_browser() {
-    // Impersonation is the named opt-in, and still selects a real browser.
     assert_eq!(
         Session::chrome().browser(),
         Some(Browser::default_browser())
@@ -54,11 +47,8 @@ fn chrome_helper_is_explicit_browser() {
 
 #[test]
 fn bare_default_platform_follows_host() {
-    // A bare session with no explicit `.platform()` resolves to the host
-    // OS, not a hardcoded Windows.
     let s = Session::new();
     assert_eq!(s.platform(), Platform::detect_host());
-    // An impersonation profile, by contrast, defaults to Windows.
     let chrome = Session::builder()
         .browser(Browser::Chrome148)
         .build()
@@ -101,17 +91,14 @@ async fn chrome_get_emits_navigate_headers() {
 #[test]
 fn session_retry_default_is_inherited_by_requests() {
     use crate::RetryPolicy;
-    let policy = RetryPolicy::default().with_max_retries(7);
+    let policy = RetryPolicy::transient().with_max_retries(7);
     let session = Session::builder().retry(policy).build().unwrap();
-    // A request that does not call .retry(..) inherits the session default.
     let req = session.request("GET", "https://example.test/");
     assert_eq!(req.retry_policy.max_retries, 7);
-    // A per-request override still wins over the session default.
     let overridden = session
         .request("GET", "https://example.test/")
         .retry(RetryPolicy::none());
     assert_eq!(overridden.retry_policy.max_retries, 0);
-    // A session with no explicit policy performs no application retries.
     let bare = Session::new().request("GET", "https://example.test/");
     assert_eq!(bare.retry_policy.max_retries, 0);
 }
@@ -120,7 +107,6 @@ fn session_retry_default_is_inherited_by_requests() {
 fn platform_host_resolves_and_never_leaks() {
     assert_eq!(Platform::Host.resolve(), Platform::detect_host());
     assert_ne!(Platform::detect_host(), Platform::Host);
-    // Explicit platform still wins and is honoured verbatim.
     let s = Session::builder()
         .browser(Browser::Chrome148)
         .macos()
@@ -148,4 +134,105 @@ fn ios_then_safari_still_iphone() {
     let s = Session::builder().ios().safari().build().unwrap();
     assert_eq!(s.browser(), Some(Browser::SafariIOS18));
     assert_eq!(s.platform(), Platform::IOS);
+}
+
+#[test]
+fn safari_windows_profile_is_err() {
+    match Session::profile(Browser::Safari26, Platform::Windows) {
+        Err(Error::Config(message)) => {
+            assert!(message.contains("Windows"), "unexpected config: {message}");
+        }
+        other => panic!("expected Config, got {other:?}"),
+    }
+}
+
+#[test]
+fn windows_then_brave_keeps_windows() {
+    let s = Session::builder().windows().brave().build().unwrap();
+    assert_eq!(s.browser(), Some(Browser::Brave146));
+    assert_eq!(s.platform(), Platform::Windows);
+}
+
+async fn capture_post_headers(
+    session: Session,
+    finish: impl FnOnce(RequestBuilder) -> RequestBuilder,
+) -> String {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut sock, _) = listener.accept().await.unwrap();
+        let mut req = Vec::new();
+        let mut tmp = [0u8; 2048];
+        loop {
+            let n = sock.read(&mut tmp).await.unwrap();
+            if n == 0 {
+                break;
+            }
+            req.extend_from_slice(&tmp[..n]);
+            if req.windows(4).any(|w| w == b"\r\n\r\n") {
+                break;
+            }
+        }
+        sock.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n")
+            .await
+            .unwrap();
+        String::from_utf8_lossy(&req).to_string()
+    });
+    let _ = finish(session.post(&format!("http://{addr}/")))
+        .await
+        .unwrap();
+    server.await.unwrap()
+}
+
+#[tokio::test]
+async fn json_body_infers_xhr_preset() {
+    let req =
+        capture_post_headers(Session::chrome(), |b| b.json(&serde_json::json!({"a": 1}))).await;
+    let lower = req.to_lowercase();
+    assert!(
+        lower.contains("sec-fetch-mode: cors"),
+        "JSON POST should look like XHR:\n{req}"
+    );
+    assert!(
+        lower.contains("content-type: application/json"),
+        "JSON POST must set content-type:\n{req}"
+    );
+}
+
+#[tokio::test]
+async fn form_body_infers_form_preset() {
+    let req = capture_post_headers(Session::chrome(), |b| b.form(&[("u", "alice")])).await;
+    let lower = req.to_lowercase();
+    assert!(
+        lower.contains("sec-fetch-mode: cors"),
+        "form POST should look like Form:\n{req}"
+    );
+    assert!(
+        lower.contains("content-type: application/x-www-form-urlencoded"),
+        "form POST must set content-type:\n{req}"
+    );
+}
+
+#[tokio::test]
+async fn user_preset_wins_over_json_inference() {
+    let req = capture_post_headers(Session::chrome(), |b| {
+        b.preset(Preset::Navigate)
+            .json(&serde_json::json!({"a": 1}))
+    })
+    .await;
+    let lower = req.to_lowercase();
+    assert!(
+        lower.contains("sec-fetch-mode: navigate"),
+        "explicit preset must not be overwritten by json():\n{req}"
+    );
+}
+
+#[tokio::test]
+async fn bare_json_has_no_sec_fetch() {
+    let req = capture_post_headers(Session::new(), |b| b.json(&serde_json::json!({"a": 1}))).await;
+    let lower = req.to_lowercase();
+    assert!(
+        !lower.contains("sec-fetch-"),
+        "bare JSON POST must not impersonate:\n{req}"
+    );
 }

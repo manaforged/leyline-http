@@ -1,10 +1,5 @@
 use super::*;
 
-// ---- swap_brand format snapshots across Chromium versions ----
-// These assertions live in the same file as the source, so they
-// catch template-edit typos, not wire-level truth. The
-// wire-level truth is in session.rs integration tests.
-
 #[test]
 fn swap_brand_preserves_chrome147_grease_form() {
     let chrome = r#""Google Chrome";v="147", "Not.A/Brand";v="8", "Chromium";v="147""#;
@@ -34,8 +29,6 @@ fn drop_brand_removes_chrome_entry_only() {
 
 #[test]
 fn drop_brand_preserves_remaining_slot_order() {
-    // Different chrome major shuffles slot order; dropping must
-    // not re-sort the survivors.
     let chrome = r#""Not_A Brand";v="24", "Chromium";v="146", "Google Chrome";v="146""#;
     assert_eq!(
         drop_brand(chrome, "Google Chrome"),
@@ -51,8 +44,6 @@ fn swap_brand_preserves_chrome146_slot_order() {
         r#""Brave";v="146", "Chromium";v="146", "Not_A Brand";v="24""#
     );
 }
-
-// ---- Overlay gating ----
 
 #[test]
 fn chrome_brand_has_no_overlay() {
@@ -74,9 +65,6 @@ fn edge_overlay_populates_ua_and_headers() {
         .overlay(147, Platform::Windows, ua, sch)
         .unwrap()
         .unwrap();
-    // Real Edge ships the UA-reduced `Edg/{major}.0.0.0` form on
-    // current versions. Verified against tls.peet.ws on 2026-04-25
-    // with Edge 147 on macOS.
     assert!(
         o.user_agent.ends_with(" Edg/147.0.0.0"),
         "Edge UA must end with reduced Edg/{{major}}.0.0.0: {}",
@@ -120,9 +108,6 @@ fn edge_overlay_on_mobile_errors() {
 
 #[test]
 fn opera_overlay_only_accepts_verified_anchors() {
-    // OPERA_PER_CHROMIUM is the source of truth — 145..=150 each
-    // yield a distinct Opera version, anything outside the table
-    // errors. Mobile platforms always error regardless of anchor.
     for (chromium, expected_opera) in [
         (145u32, 129u32),
         (146, 130),
@@ -130,6 +115,8 @@ fn opera_overlay_only_accepts_verified_anchors() {
         (148, 132),
         (149, 133),
         (150, 134),
+        (151, 135),
+        (152, 136),
     ] {
         let o = ChromiumBrand::Opera
             .overlay(chromium, Platform::Windows, "ua", "")
@@ -142,7 +129,7 @@ fn opera_overlay_only_accepts_verified_anchors() {
             o.user_agent
         );
     }
-    for bad in [144u32, 151] {
+    for bad in [144u32, 153] {
         assert!(
             ChromiumBrand::Opera
                 .overlay(bad, Platform::Windows, "ua", "")
@@ -162,8 +149,6 @@ fn error_display_uses_platform_display_not_debug() {
         platform: Platform::MacOS,
     };
     let msg = format!("{err}");
-    // `Platform::Display` is `"macOS"` (the sec-ch-ua form);
-    // `Debug` would be `"MacOS"`. We want the former.
     assert!(
         msg.contains("/ macOS /") || msg.contains("/ macOS"),
         "{msg}"

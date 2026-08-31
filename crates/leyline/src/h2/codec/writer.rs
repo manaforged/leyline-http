@@ -13,11 +13,6 @@ use crate::h2::frame::{
 use super::DEFAULT_MAX_FRAME_SIZE;
 
 /// Frames that can be serialized into a `BytesMut` buffer.
-///
-/// Every concrete frame type already has an inherent `encode(&self, buf: &mut
-/// impl BufMut)`; this trait just lets [`FrameWriter::write_frame`] be generic
-/// over them while delegating to that existing inherent method (so the emitted
-/// bytes are unchanged).
 pub(crate) trait FrameEncode {
     /// Serialize this frame (header + payload) into `buf`.
     fn encode(&self, buf: &mut BytesMut);
@@ -62,7 +57,6 @@ impl<W: AsyncWrite + Unpin> FrameWriter<W> {
 
     /// Write the HTTP/2 client connection preface.
     pub async fn write_preface(&mut self) -> Result<(), H2Error> {
-        // RFC 9113 Section 3.4: client connection preface.
         self.inner
             .write_all(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
             .await?;
@@ -70,10 +64,6 @@ impl<W: AsyncWrite + Unpin> FrameWriter<W> {
     }
 
     /// Encode `frame` into the reusable buffer and write it out.
-    ///
-    /// Does **not** flush — callers that need a flush (only `write_settings`)
-    /// must call [`FrameWriter::flush`] themselves afterwards. This preserves
-    /// the original per-method flush behavior exactly.
     async fn write_frame<F: FrameEncode>(&mut self, frame: &F) -> Result<(), H2Error> {
         self.buf.clear();
         frame.encode(&mut self.buf);

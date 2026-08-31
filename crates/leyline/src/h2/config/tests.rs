@@ -1,8 +1,9 @@
 use super::*;
+use crate::profile::ProfileRegistry;
 
 #[test]
 fn chrome147_h2_fingerprint() {
-    let reg = crate::profile::ProfileRegistry::builtin();
+    let reg = ProfileRegistry::builtin();
     let profile = reg.get("chrome", 147).unwrap();
     let h2 = H2Config::from_profile(&profile.h2).unwrap();
     let fp = h2.akamai_fingerprint();
@@ -11,7 +12,7 @@ fn chrome147_h2_fingerprint() {
 
 #[test]
 fn chrome148_h2_fingerprint() {
-    let reg = crate::profile::ProfileRegistry::builtin();
+    let reg = ProfileRegistry::builtin();
     let profile = reg.get("chrome", 148).unwrap();
     let h2 = H2Config::from_profile(&profile.h2).unwrap();
     let fp = h2.akamai_fingerprint();
@@ -19,8 +20,19 @@ fn chrome148_h2_fingerprint() {
 }
 
 #[test]
+fn chrome150_priority() {
+    let reg = ProfileRegistry::builtin();
+    let profile = reg.get("chrome", 150).unwrap();
+    assert!(profile.h2.default_priority.is_some());
+    let h2 = H2Config::from_profile(&profile.h2).unwrap();
+    assert!(h2.default_priority.is_some());
+    let fp = h2.akamai_fingerprint();
+    assert_eq!(fp, "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p");
+}
+
+#[test]
 fn firefox150_h2_fingerprint() {
-    let reg = crate::profile::ProfileRegistry::builtin();
+    let reg = ProfileRegistry::builtin();
     let profile = reg.get("firefox", 150).unwrap();
     let h2 = H2Config::from_profile(&profile.h2).unwrap();
     let fp = h2.akamai_fingerprint();
@@ -29,7 +41,7 @@ fn firefox150_h2_fingerprint() {
 
 #[test]
 fn okhttp_h2_fingerprint() {
-    let reg = crate::profile::ProfileRegistry::builtin();
+    let reg = ProfileRegistry::builtin();
     let profile = reg.get("okhttp", 10).unwrap();
     let h2 = H2Config::from_profile(&profile.h2).unwrap();
     let fp = h2.akamai_fingerprint();
@@ -38,7 +50,7 @@ fn okhttp_h2_fingerprint() {
 
 #[test]
 fn safari18_h2_fingerprint() {
-    let reg = crate::profile::ProfileRegistry::builtin();
+    let reg = ProfileRegistry::builtin();
     let profile = reg.get("safari", 18).unwrap();
     let h2 = H2Config::from_profile(&profile.h2).unwrap();
     let fp = h2.akamai_fingerprint();
@@ -47,7 +59,7 @@ fn safari18_h2_fingerprint() {
 
 #[test]
 fn safari_ios18_h2_fingerprint() {
-    let reg = crate::profile::ProfileRegistry::builtin();
+    let reg = ProfileRegistry::builtin();
     let profile = reg.get("safari-ios", 18).unwrap();
     let h2 = H2Config::from_profile(&profile.h2).unwrap();
     let fp = h2.akamai_fingerprint();
@@ -56,7 +68,7 @@ fn safari_ios18_h2_fingerprint() {
 
 #[test]
 fn all_profiles_produce_expected_fingerprint() {
-    let reg = crate::profile::ProfileRegistry::builtin();
+    let reg = ProfileRegistry::builtin();
     for browser in [
         ("chrome", 145),
         ("chrome", 146),

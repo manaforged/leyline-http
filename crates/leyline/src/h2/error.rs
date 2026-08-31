@@ -1,10 +1,6 @@
 //! HTTP/2 error types.
 
 /// HTTP/2 error codes (RFC 9113 §7).
-///
-/// `#[non_exhaustive]` so future RFC additions (e.g. new CVE-response
-/// codes) can land in a minor release without breaking downstream
-/// `match` arms.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
 #[non_exhaustive]
@@ -57,7 +53,7 @@ impl ErrorCode {
             0xb => Self::EnhanceYourCalm,
             0xc => Self::InadequateSecurity,
             0xd => Self::Http11Required,
-            _ => Self::InternalError, // unknown error codes treated as internal
+            _ => Self::InternalError,
         }
     }
 }

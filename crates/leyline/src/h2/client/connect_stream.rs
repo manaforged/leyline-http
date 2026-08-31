@@ -1,9 +1,4 @@
-//! [`H2ConnectStream`] — a bidirectional byte stream layered over an
-//! HTTP/2 connection opened via RFC 8441 extended CONNECT.
-//!
-//! Self-contained: it talks to the driver only through channels. The
-//! struct fields are `pub(super)` so the driver and handle modules can
-//! construct it, but they do not leak past the `client` module.
+//! [`H2ConnectStream`] — a bidirectional byte stream layered over an HTTP/2 connection opened via RFC 8441 extended CONNECT.
 
 use std::io;
 use std::pin::Pin;
@@ -12,35 +7,16 @@ use bytes::Bytes;
 use tokio::sync::mpsc;
 use tokio_util::sync::PollSender;
 
-/// Bidirectional stream over an HTTP/2 connection opened via
-/// RFC 8441 extended CONNECT.
-///
-/// Implements `tokio::io::AsyncRead` and `tokio::io::AsyncWrite` so higher layers
-/// (tokio-tungstenite, an arbitrary framed protocol) can run on top.
-/// Writes are chunked through the H2 driver's flow-control machinery;
-/// reads drain DATA frames the driver pushes into the inbound channel.
-/// Dropping the stream closes the write half gracefully with an
-/// END_STREAM DATA frame.
+/// Bidirectional stream over an HTTP/2 connection opened via RFC 8441 extended CONNECT.
 pub struct H2ConnectStream {
     pub(super) status: u16,
     pub(super) response_headers: Vec<(String, String)>,
-    /// Wrapped in `Option` so `poll_shutdown` and `Drop` can take it
-    /// to signal EOF to the driver-side relay task. `PollSender` rather
-    /// than a raw `mpsc::Sender` because `poll_write` must keep its
-    /// channel reservation — and with it the registered waker — alive
-    /// across `Pending` polls; a per-poll `reserve()` future dropped on
-    /// `Pending` deregisters the waker and the writer hangs forever.
+    /// Wrapped in `Option` so `poll_shutdown` and `Drop` can take it to signal EOF to the driver-side relay task.
     pub(super) write_tx: Option<PollSender<io::Result<Bytes>>>,
     pub(super) read_rx: mpsc::Receiver<io::Result<Bytes>>,
     pub(super) read_leftover: Bytes,
     pub(super) read_eof: bool,
-    /// Tracks `poll_shutdown` state so a caller awaiting
-    /// `AsyncWriteExt::shutdown` blocks until the driver has actually
-    /// written the END_STREAM DATA frame to the wire. Without this,
-    /// `shutdown()` would resolve before any bytes — much less the
-    /// END_STREAM — landed on the wire and the caller racing with a
-    /// server that expects clean close could observe the close from
-    /// the wrong side.
+    /// Tracks `poll_shutdown` state so a caller awaiting `AsyncWriteExt::shutdown` blocks until the driver has actually written the END_STREAM DATA frame to the wire.
     pub(super) shutdown_state: ShutdownState,
 }
 
@@ -48,10 +24,7 @@ pub struct H2ConnectStream {
 pub(super) enum ShutdownState {
     /// Initial state — the caller hasn't started shutdown yet.
     Open,
-    /// Caller dropped the sender; now waiting for the driver-side
-    /// relay to observe EOF and emit END_STREAM. `read_eof` on the
-    /// response half is the observable signal, since the driver
-    /// closes the read side's mpsc as part of stream completion.
+    /// Caller dropped the sender; now waiting for the driver-side relay to observe EOF and emit END_STREAM.
     Draining,
 }
 
@@ -67,8 +40,7 @@ impl std::fmt::Debug for H2ConnectStream {
 }
 
 impl H2ConnectStream {
-    /// The server's `:status` from the response HEADERS — `200` for a
-    /// successful extended CONNECT per RFC 8441 §5.
+    /// The server's `:status` from the response HEADERS — `200` for a successful extended CONNECT per RFC 8441 §5.
     pub fn status(&self) -> u16 {
         self.status
     }
@@ -136,11 +108,6 @@ impl tokio::io::AsyncWrite for H2ConnectStream {
                 )));
             }
         };
-        // `PollSender` holds the channel reservation inside itself, so
-        // the registered waker survives a `Pending` return. A per-poll
-        // `pin!(tx.reserve())` future is wrong here: dropping it on
-        // `Pending` deregisters the waker from the channel's waitlist
-        // and the writer is never repolled when capacity frees.
         match tx.poll_reserve(cx) {
             Poll::Ready(Ok(())) => {
                 let n = buf.len();
@@ -172,8 +139,6 @@ impl tokio::io::AsyncWrite for H2ConnectStream {
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<io::Result<()>> {
         use std::task::Poll;
-        // First call: close the write half. Dropping the sender drives
-        // the driver-side relay to EOF, which emits END_STREAM.
         if matches!(self.shutdown_state, ShutdownState::Open) {
             self.write_tx = None;
             self.shutdown_state = ShutdownState::Draining;
@@ -183,25 +148,12 @@ impl tokio::io::AsyncWrite for H2ConnectStream {
             return Poll::Ready(Ok(()));
         }
 
-        // Drain whatever chunks the driver has queued in a bounded
-        // inner loop. The prior implementation pulled one chunk per
-        // poll and self-wake'd, which spun CPU at wire rate whenever
-        // the peer kept streaming DATA during shutdown. Bounded draw
-        // + waker-based repoll keeps the task cooperative.
         for _ in 0..H2_CONNECT_SHUTDOWN_DRAIN_BUDGET {
             match self.read_rx.poll_recv(cx) {
                 Poll::Ready(Some(Ok(bytes))) => {
                     if bytes.is_empty() {
                         continue;
                     }
-                    // Cap on the leftover buffer. Shutdown is not a
-                    // licence for the peer to stream unbounded bytes
-                    // into our memory. When the cap is hit, surface
-                    // an IO error so callers see the truncation
-                    // instead of a silent clean-EOF — returning
-                    // Ready(Ok(())) here would, for WebSocket or
-                    // binary-download workloads, look like a successful
-                    // close and silently drop tail bytes.
                     if self.read_leftover.len() >= H2_CONNECT_LEFTOVER_CAP {
                         self.read_eof = true;
                         return Poll::Ready(Err(io::Error::other(
@@ -225,28 +177,17 @@ impl tokio::io::AsyncWrite for H2ConnectStream {
                     self.read_eof = true;
                     return Poll::Ready(Ok(()));
                 }
-                // The waker is registered with the mpsc; the runtime
-                // will repoll us when the next chunk (or close)
-                // arrives. No self-wake needed.
                 Poll::Pending => return Poll::Pending,
             }
         }
-        // We drained our budget without seeing close. Yield back to
-        // the runtime and ask to be repolled, so other tasks get a
-        // turn instead of us hogging the worker with leftover copies.
         cx.waker().wake_by_ref();
         Poll::Pending
     }
 }
 
-/// Max bytes we accumulate into `H2ConnectStream::read_leftover` during
-/// `poll_shutdown`. When the peer keeps streaming DATA after the caller
-/// starts shutdown, tail bytes beyond the cap are dropped — shutdown is
-/// not a licence to burn unbounded memory.
-const H2_CONNECT_LEFTOVER_CAP: usize = 1 << 20; // 1 MiB
-
-/// Max chunks drained per `poll_shutdown` iteration. Keeps the task
-/// cooperative under a peer that bursts many small DATA frames.
+/// Max bytes we accumulate into `H2ConnectStream::read_leftover` during `poll_shutdown`.
+const H2_CONNECT_LEFTOVER_CAP: usize = 1 << 20;
+/// Max chunks drained per `poll_shutdown` iteration.
 const H2_CONNECT_SHUTDOWN_DRAIN_BUDGET: usize = 64;
 
 impl Drop for H2ConnectStream {

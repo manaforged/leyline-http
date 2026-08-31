@@ -1,10 +1,4 @@
 //! Demonstrate concurrent multiplexing over a single H2 connection.
-//!
-//! Fires 50 requests in parallel against the same host. The pool reuses
-//! one `H2Client` handle across all of them, so every request goes over
-//! the same TLS + TCP connection as an independent H2 stream.
-//!
-//! Run: `cargo run --example concurrent -- https://tls.peet.ws/api/all`
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -32,7 +26,7 @@ async fn main() -> leyline::Result<()> {
         let session = Arc::clone(&session);
         let url = url.clone();
         handles.push(tokio::spawn(async move {
-            let resp = session.get(&url).send().await?;
+            let resp = session.get(&url).await?;
             Ok::<(usize, u16), leyline::Error>((i, resp.status()))
         }));
     }

@@ -31,10 +31,7 @@ pub struct ProfileMeta {
     pub family: String,
     #[serde(default)]
     pub verified_against: String,
-    /// The exact browser build this profile's fingerprint was captured
-    /// against, e.g. `"chrome-150.0.7871.128"`. Optional: absent means the
-    /// capture build is unrecorded, which [`BrowserProfile::load_warnings`]
-    /// flags (a warning, not a hard error, so unanchored profiles still load).
+    /// The exact browser build this profile's fingerprint was captured against, e.g. `"chrome-150.0.7871.128"`.
     #[serde(default)]
     pub captured_against: Option<String>,
 }
@@ -74,21 +71,15 @@ pub struct TlsProfile {
     pub ech_grease: bool,
     #[serde(default)]
     pub pre_shared_key: bool,
-    /// Advertise the TLS session_ticket extension (0x0023). BoringSSL sends
-    /// it by default; CFNetwork (Apple URLSession) does not on fresh
-    /// connections, so the cfnetwork family sets this false.
+    /// Advertise the TLS session_ticket extension (0x0023).
     #[serde(default = "default_true")]
     pub session_tickets: bool,
-    /// Advertise the TLS Trust Anchor Identifiers extension (0xCA34/51764) with
-    /// an empty list when the selected browser profile does. This changes the
-    /// ClientHello JA4 extension count, so each Chrome major must follow its
-    /// captured wire profile.
+    /// Advertise the TLS Trust Anchor Identifiers extension (0xCA34/51764) with an empty list when the selected browser profile does.
     #[serde(default)]
     pub request_trust_anchors: bool,
     #[serde(default)]
     pub fingerprint: Option<TlsFingerprint>,
-    /// ClientHello supported_versions floor: "1.0" (CFNetwork iOS advertises
-    /// TLS 1.0/1.1), "1.2" (default), "1.3". Never loosens the QUIC floor.
+    /// ClientHello supported_versions floor: "1.0" (CFNetwork iOS advertises TLS 1.0/1.1), "1.2" (default), "1.3".
     #[serde(default)]
     pub min_tls_version: Option<String>,
 }
@@ -110,13 +101,10 @@ const fn default_true() -> bool {
 pub struct TlsFingerprint {
     #[serde(default)]
     pub ja4: Option<String>,
-    /// JA4 observed on a resumed TLS 1.3 handshake that carries
-    /// `pre_shared_key` (41). Cold first-flight JA4 remains in [`Self::ja4`].
+    /// JA4 observed on a resumed TLS 1.3 handshake that carries `pre_shared_key` (41).
     #[serde(default)]
     pub resumed_ja4: Option<String>,
-    /// Per-platform JA4 overrides. Resolves Windows / macOS variation when
-    /// the same browser ships different ClientHello configurations per
-    /// host OS.
+    /// Per-platform JA4 overrides.
     #[serde(default)]
     pub platforms: HashMap<String, TlsFingerprint>,
 }
@@ -149,22 +137,16 @@ pub struct H2Profile {
     pub pseudo_order: Vec<String>,
     pub settings_order: Vec<String>,
     /// PRIORITY fields emitted on each request's initial HEADERS frame.
-    /// Chrome carries exclusive + weight on every stream; Safari sends
-    /// none. `None` matches non-browser clients.
     #[serde(default)]
     pub default_priority: Option<H2PriorityProfile>,
     #[serde(default)]
     pub fingerprint: Option<H2Fingerprint>,
-    /// Per-platform overrides. The resolver in
-    /// [`H2Profile::resolve_for_platform`] applies the override on top of
-    /// this base profile to handle cases like Chromium-on-macOS dropping
-    /// `unknown_setting8`.
+    /// Per-platform overrides.
     #[serde(default)]
     pub platforms: HashMap<String, H2PlatformOverride>,
 }
 
-/// PRIORITY fields for the initial HEADERS frame (RFC 9113 §5.3,
-/// fingerprint parity for Chrome-class browsers).
+/// PRIORITY fields for the initial HEADERS frame (RFC 9113 §5.3, fingerprint parity for Chrome-class browsers).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub struct H2PriorityProfile {
     /// Exclusive dependency bit (E).
@@ -180,11 +162,6 @@ pub struct H2PriorityProfile {
     reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
 )]
 /// Per-platform overrides for an [`H2Profile`].
-///
-/// Each `Some` field overrides the base profile's matching field. Names
-/// listed in `omit_settings` cause the corresponding base field to be set
-/// to `None` (so that SETTINGS parameter is dropped from the wire frame).
-/// `fingerprint` overrides the expected Akamai string for this platform.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct H2PlatformOverride {
     #[serde(default)]
@@ -206,8 +183,6 @@ pub struct H2PlatformOverride {
     #[serde(default)]
     pub unknown_setting9: Option<u32>,
     /// Names of base settings to omit from this platform's SETTINGS frame.
-    /// Valid names: `unknown_setting8`, `unknown_setting9`, plus any of the
-    /// regular setting names (`header_table_size`, etc.).
     #[serde(default)]
     pub omit_settings: Vec<String>,
     /// Optional pseudo_order override (rarely needed).
@@ -243,35 +218,19 @@ pub struct PlatformIdentity {
     pub sec_ch_ua: String,
     #[serde(default)]
     pub accept_language: Option<String>,
-    /// Optional explicit request-header order. When set, the assembled
-    /// request headers (after preset, brand overlay, identity extras,
-    /// caller extras, content-length, cookie, referer, priority) are
-    /// reordered to match this list. Names not in the list keep their
-    /// relative order at the end. Used for browsers like Brave that ship
-    /// a non-Chrome header sequence (e.g. `accept-language` repositioned
-    /// between `accept` and `sec-fetch-*`).
+    /// Optional explicit request-header order.
     #[serde(default)]
     pub request_header_order: Option<Vec<String>>,
-    /// Extra headers appended for every request from this identity (for
-    /// example Brave's `sec-gpc: 1`). Caller-supplied and preset-supplied
-    /// headers of the same name take precedence.
+    /// Extra headers appended for every request from this identity (for example Brave's `sec-gpc: 1`).
     #[serde(default)]
     pub extra_headers: Vec<(String, String)>,
-    /// Optional override for the `accept` value emitted by the
-    /// `Preset::Navigate` preset. Used by Brave to drop the
-    /// `application/signed-exchange;v=b3;q=0.7` token.
+    /// Optional override for the `accept` value emitted by the `Preset::Navigate` preset.
     #[serde(default)]
     pub navigate_accept_override: Option<String>,
 }
 
 impl BrowserProfile {
     /// Parse a profile from a TOML string.
-    ///
-    /// Fields that only BoringSSL could reject — today the fixed
-    /// `extension_permutation` order — are checked here rather than at
-    /// connector build, so a bad ordinal names the profile and the entry
-    /// instead of surfacing as an opaque error stack, or as a silently
-    /// default-ordered ClientHello.
     pub fn from_toml(toml_str: &str) -> Result<Self, toml::de::Error> {
         let profile: Self = toml::from_str(toml_str)?;
         crate::profile::permutation::validate(&profile.tls)
@@ -283,10 +242,6 @@ impl BrowserProfile {
     }
 
     /// Non-fatal load-time warnings for a parsed profile.
-    ///
-    /// Currently reports a missing or empty `[meta] captured_against`.
-    /// [`Self::from_toml`] logs each via `tracing::warn!`. Returning them
-    /// as data lets tests assert without a tracing subscriber.
     pub fn load_warnings(&self) -> Vec<String> {
         let mut warnings = Vec::new();
         let capture_unrecorded = self
@@ -309,8 +264,7 @@ impl BrowserProfile {
         self.identity.get(platform.identity_key())
     }
 
-    /// Expected JA4 hash, if specified. Returns the base profile's JA4
-    /// (typically the Windows form).
+    /// Expected JA4 hash, if specified.
     pub fn expected_ja4(&self) -> Option<&str> {
         self.tls.fingerprint.as_ref()?.ja4.as_deref()
     }
@@ -320,15 +274,12 @@ impl BrowserProfile {
         self.tls.fingerprint.as_ref()?.resumed_ja4.as_deref()
     }
 
-    /// Expected Akamai H2 fingerprint, if specified. Returns the base
-    /// profile's expectation (typically the Windows form). For
-    /// platform-specific expectations, use [`Self::expected_h2_fingerprint_for`].
+    /// Expected Akamai H2 fingerprint, if specified.
     pub fn expected_h2_fingerprint(&self) -> Option<&str> {
         self.h2.fingerprint.as_ref()?.akamai.as_deref()
     }
 
     /// Expected Akamai H2 fingerprint for a specific platform key.
-    /// Falls back to the base expectation when no override is declared.
     pub fn expected_h2_fingerprint_for(&self, platform: crate::profile::Platform) -> Option<&str> {
         if let Some(p) = self.h2.platforms.get(platform.identity_key()) {
             if let Some(ref fp) = p.fingerprint {
@@ -342,10 +293,7 @@ impl BrowserProfile {
 }
 
 impl H2Profile {
-    /// Resolve this profile for a given platform. When a `[h2.platforms.X]`
-    /// override exists, return a new H2Profile with the override applied
-    /// (per-field `Some` wins; names in `omit_settings` clear the matching
-    /// base field). Returns `self.clone()` when no override is declared.
+    /// Resolve this profile for a given platform.
     pub fn resolve_for_platform(
         &self,
         platform: crate::profile::Platform,

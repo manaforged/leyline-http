@@ -3,14 +3,13 @@ name = "CFNetwork iOS 18"
 browser = "cfnetwork-ios"
 version = 18
 family = "cfnetwork"
-verified_against = "CFNetwork/3826.600.41 (iOS 18.6 sim) via tls.peet.ws"
-verified_at = "2026-08-09"
+verified_against = "CFNetwork/3826.600.41 iOS 18.6 sim first-party loopback pcap"
+verified_at = "2026-08-29"
 captured_against = "CFNetwork-3826.600.41-iOS-18.6-22G86-sim"
 
-# First-party capture, 2026-08-09, three runs stable:
-#   tools/cfnetwork-capture probe (iOS 18.6 simulator) → tls.peet.ws/api/all
+# First-party URLSession probe pcap (iOS 18.6 sim / 22G86).
 #
-# iOS 18.6 vs macOS 26 deltas, all independently captured:
+# iOS 18.6 vs macOS 26 deltas in this hello:
 #   - NO X25519MLKEM768: groups = GREASE, X25519, P-256, P-384, P-521;
 #     key_share = GREASE + X25519 only
 #   - NO unknown_setting9 in H2 SETTINGS; initial window 2 MiB (vs 4 MiB)

@@ -36,8 +36,6 @@ fn fold_without_previous_header_is_dropped() {
 
 #[test]
 fn whitespace_before_colon_drops_the_line() {
-    // RFC 9112 §5.1: never interpret "Name : value". Interpreting it
-    // while strict intermediaries reject it is the client-side desync.
     let head = "HTTP/1.1 200 OK\r\n\
                     Transfer-Encoding : chunked\r\n\
                     X-Ok: 1\r\n\
@@ -72,17 +70,13 @@ async fn tcp_pair() -> (TcpStream, TcpStream) {
 #[tokio::test]
 async fn live_idle_socket_probes_as_live() {
     let (mut client, _server) = tcp_pair().await;
-    // Nothing sent by the peer: an idle keep-alive connection. The probe
-    // must report it live (poll_read is Pending), not evict it.
     assert!(conn_is_live(&mut client as &mut dyn H1Io));
 }
 
 #[tokio::test]
 async fn peer_closed_socket_probes_as_dead() {
     let (mut client, server) = tcp_pair().await;
-    // The peer drops its half.
     drop(server);
-    // Wait for the FIN to land so the probe sees EOF deterministically.
     client.readable().await.unwrap();
     assert!(!conn_is_live(&mut client as &mut dyn H1Io));
 }
@@ -90,8 +84,6 @@ async fn peer_closed_socket_probes_as_dead() {
 #[tokio::test]
 async fn socket_with_pending_bytes_probes_as_dead() {
     let (mut client, mut server) = tcp_pair().await;
-    // Unexpected bytes waiting before we sent a request = framing desync;
-    // the connection must not be reused.
     server.write_all(b"x").await.unwrap();
     server.flush().await.unwrap();
     client.readable().await.unwrap();
@@ -104,8 +96,6 @@ async fn checkout_live_h1_drains_dead_and_counts_stale() {
     let key = make_key("http", "127.0.0.1", 1, None, Transport::Tcp);
 
     let (client, server) = tcp_pair().await;
-    // Peer closes, then wait for the FIN to land before pooling so the
-    // checkout probe deterministically sees a dead socket.
     drop(server);
     client.readable().await.unwrap();
     pool.return_h1(
@@ -116,8 +106,6 @@ async fn checkout_live_h1_drains_dead_and_counts_stale() {
         TlsInfo::default(),
     );
 
-    // The only pooled entry is dead: checkout drains it and reports a miss,
-    // counting the catch as a probe catch (not a mid-exchange failure).
     assert!(checkout_live_h1(&pool, &key).is_none());
     let stats = pool.stats();
     assert_eq!(stats.stale_probed, 1, "probe catch must count as stale");
@@ -129,7 +117,6 @@ async fn checkout_live_h1_returns_a_live_connection_uncounted() {
     let pool = Arc::new(Pool::new());
     let key = make_key("http", "127.0.0.1", 2, None, Transport::Tcp);
 
-    // Keep the server end alive so the pooled connection stays open.
     let (client, _server) = tcp_pair().await;
     pool.return_h1(
         key.clone(),

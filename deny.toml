@@ -37,9 +37,9 @@ version = 2
 # Keep forward-looking allow-list entries (MPL-2.0/CC0-1.0/BSL-1.0/Unicode-*)
 # without "license not encountered" noise drowning a real new warning.
 unused-allowed-license = "allow"
-# SPDX identifiers we accept for dependencies. Leyline itself is
-# dual-licensed MIT OR Apache-2.0 and we only pull in OSS-compatible
-# crates. Modern BoringSSL (shipped prebuilt by leyline-bssl-sys) was relicensed
+# SPDX identifiers we accept for dependencies. Leyline is MIT; vendored
+# forks keep their upstream licenses (see NOTICE). We only pull in
+# OSS-compatible crates. Modern BoringSSL (shipped prebuilt by leyline-bssl-sys) was relicensed
 # by Google to Apache-2.0, already in this list; `OpenSSL` is intentionally
 # omitted — nothing in the graph requires it, so a future `openssl` pull
 # fails the gate.
@@ -89,24 +89,15 @@ allow-wildcard-paths = true
 highlight = "all"
 workspace-default-features = "allow"
 external-default-features = "allow"
-# Crates we never want to pull in transitively — these would indicate a
-# TLS backend being dragged in that would defeat the BoringSSL pin.
 deny = [
     { name = "openssl" },
     { name = "openssl-sys" },
     { name = "native-tls" },
-    # rustls + its trust-store helpers. BoringSSL (leyline-bssl) is the only TLS
-    # backend; a transitive rustls pull means an alternative stack slipped
-    # in. schannel / security-framework are the OS trust crates that path
-    # used — Leyline reads the platform store directly (windows-sys), so
-    # they stay out too.
     { name = "rustls" },
     { name = "rustls-native-certs" },
     { name = "rustls-pemfile" },
     { name = "schannel" },
     { name = "security-framework" },
-    # Leftover hyper/h2 — we ship our own HTTP/2 implementation; any
-    # transitive pull means something is silently routing around it.
     { name = "h2" },
     { name = "hyper" },
 ]

@@ -1,32 +1,18 @@
 //! Request-body compression.
-//!
-//! The symmetric counterpart to response decompression in
-//! [`crate::core::session`]'s `decompress` module: a caller opts a buffered
-//! request body into a codec via [`crate::RequestBuilder::compress`], and
-//! Leyline compresses the bytes and declares `Content-Encoding` before
-//! dispatch. Servers that accept the codec (or that advertised it) decode it.
-//!
-//! Codecs are gated on the same `compression-*` cargo features as the
-//! decode path: a codec the build excluded is a hard error, never a silent
-//! pass-through of uncompressed bytes under a compressed header.
 
 use crate::core::error::{Error, Result};
 
-/// Content codec for an outgoing request body, selected via
-/// [`crate::RequestBuilder::compress`]. The matching wire token is sent as
-/// the request's `Content-Encoding`.
+/// Content codec for an outgoing request body, selected via [`crate::RequestBuilder::compress`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ContentEncoding {
-    /// gzip (RFC 1952). Wire token `gzip`.
+    /// gzip (RFC 1952).
     Gzip,
-    /// Brotli (RFC 7932). Wire token `br`.
+    /// Brotli (RFC 7932).
     Brotli,
-    /// Zstandard (RFC 8878). Wire token `zstd`.
+    /// Zstandard (RFC 8878).
     Zstd,
-    /// zlib-wrapped DEFLATE (RFC 1950), per RFC 9110 §8.4.1.2. Wire token
-    /// `deflate`. Some older servers expect raw (unwrapped) DEFLATE and reject
-    /// the zlib wrapper; prefer [`Gzip`](Self::Gzip) for widest interop.
+    /// zlib-wrapped DEFLATE (RFC 1950), per RFC 9110 §8.4.1.2.
     Deflate,
 }
 
@@ -41,8 +27,7 @@ impl ContentEncoding {
         }
     }
 
-    /// Compress `data` with this codec. Errors when the matching cargo
-    /// feature is compiled out.
+    /// Compress `data` with this codec.
     pub(crate) fn encode(self, data: &[u8]) -> Result<Vec<u8>> {
         match self {
             ContentEncoding::Gzip => {

@@ -1,25 +1,4 @@
 //! macOS system trust store bridge for BoringSSL.
-//!
-//! Two sources are merged, mirroring what a real browser (Safari/Chrome on
-//! macOS) trusts:
-//!
-//! 1. **Built-in anchors** — `SecTrustCopyAnchorCertificates`.
-//! 2. **Trust settings** — `SecTrustSettingsCopyCertificates` across the
-//!    user, admin, and system domains. This is what makes user-installed
-//!    roots (mkcert, corporate MITM proxies) work in real browsers, and it
-//!    is also where explicit *distrust* (deny) decisions live. Ignoring
-//!    these would fail closed for user-added CAs and fail open for
-//!    user-denied ones.
-//!
-//! Merge rule: a built-in anchor is dropped when any domain denies it; a
-//! trust-settings certificate is added when any domain grants
-//! `TrustRoot`/`TrustAsRoot` (an entry without a result key defaults to
-//! `TrustRoot` per Apple's docs). A deny anywhere wins over trust anywhere.
-//!
-//! Usage-constraint policies (per-certificate, per-domain restrictions such
-//! as "trust only for SSL in this app") are not evaluated; an entry that
-//! grants trust in ANY policy is treated as a root. This matches the
-//! common all-policies entries and is documented in the README's Limits.
 
 use std::collections::HashSet;
 use std::ffi::c_void;
@@ -35,32 +14,23 @@ type OsStatus = i32;
 type SecCertificateRef = CfTypeRef;
 type SecTrustSettingsDomain = i32;
 
-// SecTrustSettingsDomain (Security.framework).
 const DOMAIN_USER: SecTrustSettingsDomain = 0;
 const DOMAIN_ADMIN: SecTrustSettingsDomain = 1;
 const DOMAIN_SYSTEM: SecTrustSettingsDomain = 2;
 
-// SecTrustSettingsResult.
 const RESULT_DENY: i64 = 1;
 const RESULT_TRUST_ROOT: i64 = 2;
 const RESULT_TRUST_AS_ROOT: i64 = 3;
 
-// errSecItemNotFound — "no trust settings / no certificates in this domain".
 const ERR_SEC_ITEM_NOT_FOUND: OsStatus = -25300;
 
-// kCFNumberSInt64Type.
 const CF_NUMBER_SINT64: isize = 4;
 
-// kCFStringEncodingUTF8.
 const CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
 
-/// The `kSecTrustSettingsResult` dictionary key. Newer SDKs no longer export
-/// the `_kSecTrustSettingsResult` data symbol, so the key is built at runtime
-/// as an equivalent CFString — CFDictionary key lookup compares by value.
-/// Owned by the caller (released via `OwnedCf`).
+/// The `kSecTrustSettingsResult` dictionary key.
 fn trust_settings_result_key() -> Option<OwnedCf> {
-    // SAFETY: null allocator = kCFAllocatorDefault; input is a valid
-    // NUL-terminated UTF-8 literal; the returned string is owned.
+    // SAFETY: null allocator = kCFAllocatorDefault; input is a valid NUL-terminated UTF-8 literal; the returned string is owned.
     let key = unsafe {
         CFStringCreateWithCString(
             std::ptr::null(),
@@ -124,8 +94,6 @@ impl Drop for OwnedCf {
 }
 
 /// DER bytes of a `SecCertificateRef`.
-// SAFETY (callers): `cert` must be a valid certificate reference, and the
-// returned `Vec` owns its copy of the bytes.
 unsafe fn certificate_der(cert: SecCertificateRef) -> Option<Vec<u8>> {
     // SAFETY: Copy API — the returned CFData is owned and released below.
     let data = OwnedCf::new(unsafe { SecCertificateCopyData(cert) })?;
@@ -141,9 +109,6 @@ unsafe fn certificate_der(cert: SecCertificateRef) -> Option<Vec<u8>> {
 }
 
 /// Collect `(denied, trusted)` DER sets from one trust-settings domain.
-/// `denied` holds certificates explicitly distrusted; `trusted` holds
-/// certificates the domain grants root status (explicitly, or implicitly
-/// when a settings entry omits the result key).
 fn domain_trust_sets(domain: SecTrustSettingsDomain) -> (HashSet<Vec<u8>>, HashSet<Vec<u8>>) {
     let mut denied = HashSet::new();
     let mut trusted = HashSet::new();
@@ -153,11 +118,9 @@ fn domain_trust_sets(domain: SecTrustSettingsDomain) -> (HashSet<Vec<u8>>, HashS
     };
 
     let mut certs = std::ptr::null();
-    // SAFETY: out-pointer is valid; the returned array is owned (released
-    // via `OwnedCf`) and valid for this function's duration.
+    // SAFETY: out-pointer is valid; the returned array is owned (released via `OwnedCf`) and valid for this function's duration.
     let status = unsafe { SecTrustSettingsCopyCertificates(domain, &mut certs) };
     if status != 0 {
-        // errSecItemNotFound simply means the domain holds no settings.
         if status != ERR_SEC_ITEM_NOT_FOUND {
             tracing::debug!(
                 target: "leyline::tls::trust",
@@ -179,15 +142,13 @@ fn domain_trust_sets(domain: SecTrustSettingsDomain) -> (HashSet<Vec<u8>>, HashS
         if cert.is_null() {
             continue;
         }
-        // SAFETY: `cert` is a live certificate reference from the array;
-        // the returned Vec owns its byte copy.
+        // SAFETY: `cert` is a live certificate reference from the array; the returned Vec owns its byte copy.
         let Some(der) = (unsafe { certificate_der(cert) }) else {
             continue;
         };
 
         let mut settings = std::ptr::null();
-        // SAFETY: `cert` is valid; the returned settings array is owned
-        // (released via `OwnedCf`) and valid for this function's duration.
+        // SAFETY: `cert` is valid; the returned settings array is owned (released via `OwnedCf`) and valid for this function's duration.
         let status = unsafe { SecTrustSettingsCopyTrustSettings(cert, domain, &mut settings) };
         if status != 0 {
             if status != ERR_SEC_ITEM_NOT_FOUND {
@@ -213,11 +174,9 @@ fn domain_trust_sets(domain: SecTrustSettingsDomain) -> (HashSet<Vec<u8>>, HashS
             if dict.is_null() {
                 continue;
             }
-            // SAFETY: `dict` is a live CFDictionary; the key is a value-
-            // equal CFString for kSecTrustSettingsResult.
+            // SAFETY: `dict` is a live CFDictionary; the key is a value- equal CFString for kSecTrustSettingsResult.
             let raw = unsafe { CFDictionaryGetValue(dict, result_key.get()) };
             if raw.is_null() {
-                // Apple: an entry without a result key defaults to TrustRoot.
                 grant = true;
                 continue;
             }
@@ -250,9 +209,7 @@ fn domain_trust_sets(domain: SecTrustSettingsDomain) -> (HashSet<Vec<u8>>, HashS
     (denied, trusted)
 }
 
-/// Return the effective system trust set as DER: built-in anchors minus
-/// every domain's explicit deny, plus every trust-settings root. This is
-/// the set Safari/Chrome on this Mac would evaluate against.
+/// Return the effective system trust set as DER: built-in anchors minus every domain's explicit deny, plus every trust-settings root.
 pub(crate) fn load_system_roots() -> std::io::Result<Vec<Vec<u8>>> {
     let mut denied_all: HashSet<Vec<u8>> = HashSet::new();
     let mut trusted_all: HashSet<Vec<u8>> = HashSet::new();
@@ -283,8 +240,6 @@ pub(crate) fn load_system_roots() -> std::io::Result<Vec<Vec<u8>>> {
         ));
     }
 
-    // Roots = (anchors not denied) ∪ (trusted not denied). A HashSet keeps
-    // the merge idempotent when a cert is both an anchor and a settings root.
     let mut roots: HashSet<Vec<u8>> = HashSet::new();
     for index in 0..count {
         // SAFETY: index is within the CFArray bounds established above.
@@ -292,8 +247,7 @@ pub(crate) fn load_system_roots() -> std::io::Result<Vec<Vec<u8>>> {
         if certificate.is_null() {
             continue;
         }
-        // SAFETY: `certificate` is a live certificate reference from the
-        // anchor array; the returned Vec owns its byte copy.
+        // SAFETY: `certificate` is a live certificate reference from the anchor array; the returned Vec owns its byte copy.
         let Some(der) = (unsafe { certificate_der(certificate) }) else {
             continue;
         };

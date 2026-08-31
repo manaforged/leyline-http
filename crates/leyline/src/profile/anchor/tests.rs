@@ -47,8 +47,6 @@ fn infer_anchor_none_for_custom_headers() {
 
 #[test]
 fn infer_anchor_none_for_preset_owned_headers() {
-    // Preset already emits these; setting them via .header()
-    // replaces the preset value rather than re-anchoring.
     assert_eq!(infer_anchor("accept"), None);
     assert_eq!(infer_anchor("user-agent"), None);
     assert_eq!(infer_anchor("accept-language"), None);

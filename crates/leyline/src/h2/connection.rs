@@ -1,11 +1,4 @@
 //! HTTP/2 client connection — handshake, settings exchange, stream dispatch.
-//!
-//! This module retains the legacy `ClientConnection` API as a thin shell
-//! around the concurrent driver living in the `h2::client` module. New
-//! code should prefer [`crate::h2::H2Client`] directly — it is cloneable
-//! and multiplexes concurrent requests over one TCP connection without
-//! head-of-line blocking. `ClientConnection` remains for backward
-//! compatibility with tests and callers that want a single-owner handle.
 
 use std::collections::VecDeque;
 use std::time::Instant;
@@ -33,11 +26,7 @@ pub struct PeerSettings {
     pub max_frame_size: u32,
     /// SETTINGS_MAX_HEADER_LIST_SIZE — peer's header list size limit, if any.
     pub max_header_list_size: Option<u32>,
-    /// RFC 8441 §3 — `SETTINGS_ENABLE_CONNECT_PROTOCOL`. When `true` the
-    /// peer accepts an extended CONNECT request carrying a `:protocol`
-    /// pseudo-header (e.g. WebSocket over HTTP/2). Default `false`;
-    /// the setting is sticky per RFC 8441 §3 — once `1` it cannot be
-    /// reverted to `0`.
+    /// RFC 8441 §3 — `SETTINGS_ENABLE_CONNECT_PROTOCOL`.
     pub enable_connect_protocol: bool,
 }
 
@@ -68,7 +57,6 @@ impl PeerSettings {
             match id {
                 0x1 => self.header_table_size = val,
                 0x2 => {
-                    // RFC 9113 Section 6.5.2: must be 0 or 1.
                     if val > 1 {
                         return Err(H2Error::Connection {
                             code: ErrorCode::ProtocolError,
@@ -98,9 +86,6 @@ impl PeerSettings {
                 }
                 0x6 => self.max_header_list_size = Some(val),
                 0x8 => {
-                    // RFC 8441 §3 — SETTINGS_ENABLE_CONNECT_PROTOCOL.
-                    // Value must be 0 or 1; once advertised as 1 the
-                    // peer MUST NOT revert to 0 on the same connection.
                     if val > 1 {
                         return Err(H2Error::Connection {
                             code: ErrorCode::ProtocolError,
@@ -115,7 +100,7 @@ impl PeerSettings {
                     }
                     self.enable_connect_protocol = val == 1;
                 }
-                _ => {} // Unknown settings MUST be ignored (RFC 9113 6.5.2)
+                _ => {}
             }
         }
         let delta = if self.initial_window_size != old_window {
@@ -142,28 +127,21 @@ pub struct H2Response {
     pub trailers: Option<Vec<(crate::core::HeaderStr, crate::core::HeaderStr)>>,
 }
 
-/// Sliding-window flood detector shared by the RST_STREAM and
-/// SETTINGS defences.
-///
-/// Pulled out of `ClientConnection` so the state can be exercised by
-/// pure integration tests without standing up a real IO stream.
+/// Sliding-window flood detector shared by the RST_STREAM and SETTINGS defences.
 #[doc(hidden)]
 #[derive(Debug, Clone)]
 pub struct RstFloodDetector {
     events: VecDeque<Instant>,
     threshold: u32,
     window: std::time::Duration,
-    /// Tracing `target` so RST vs SETTINGS trips are distinguishable
-    /// in operator logs without separate detector types.
+    /// Tracing `target` so RST vs SETTINGS trips are distinguishable in operator logs without separate detector types.
     label: &'static str,
-    /// Human-readable reason attached to the `EnhanceYourCalm`
-    /// connection error on trip.
+    /// Human-readable reason attached to the `EnhanceYourCalm` connection error on trip.
     reason: &'static str,
 }
 
 impl RstFloodDetector {
-    /// Build a detector with the given sliding window + threshold
-    /// and a generic "RST_STREAM" label.
+    /// Build a detector with the given sliding window + threshold and a generic "RST_STREAM" label.
     pub fn new(threshold: u32, window: std::time::Duration) -> Self {
         Self::with_label(
             threshold,
@@ -173,9 +151,7 @@ impl RstFloodDetector {
         )
     }
 
-    /// Build a detector with a custom label + reason. Used by the
-    /// SETTINGS flood guard so it can surface as a distinct
-    /// `leyline::h2::settings_flood` tracing target.
+    /// Build a detector with a custom label + reason.
     pub fn with_label(
         threshold: u32,
         window: std::time::Duration,
@@ -191,8 +167,7 @@ impl RstFloodDetector {
         }
     }
 
-    /// Record one event at `at`; return `Err(EnhanceYourCalm)` if the
-    /// window now holds strictly more than `threshold` events.
+    /// Record one event at `at`; return `Err(EnhanceYourCalm)` if the window now holds strictly more than `threshold` events.
     pub fn record(&mut self, at: Instant) -> Result<(), H2Error> {
         while let Some(front) = self.events.front().copied() {
             if at.saturating_duration_since(front) > self.window {
@@ -222,16 +197,9 @@ impl RstFloodDetector {
 }
 
 /// Legacy HTTP/2 client connection shell.
-///
-/// Wraps a running [`H2Client`] + [`DriverTask`] behind the pre-driver
-/// API (`handshake`, `send_request`, `send_request_with_trailers`). The
-/// driver task runs until either this shell is dropped (which in turn
-/// drops the single handle it holds — graceful shutdown) or the peer
-/// tears the connection down.
 pub struct ClientConnection<T> {
     handle: H2Client,
-    /// Kept so the driver task is aborted when the shell is dropped;
-    /// prevents orphaned tasks when callers don't explicitly shut down.
+    /// Kept so the driver task is aborted when the shell is dropped; prevents orphaned tasks when callers don't explicitly shut down.
     _driver: Option<DriverTask>,
     _io_marker: std::marker::PhantomData<T>,
 }
@@ -248,15 +216,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> ClientConnection<T> {
         })
     }
 
-    /// Start a concurrent multiplexing client over `io`, returning the
-    /// cloneable handle and the driver task. Prefer this for new code.
+    /// Start a concurrent multiplexing client over `io`, returning the cloneable handle and the driver task.
     pub async fn start(io: T, config: H2Config) -> Result<(H2Client, DriverTask), H2Error> {
         client::start(io, config).await
     }
 
-    /// Borrow the underlying cloneable handle. Useful for callers that
-    /// want to issue concurrent requests without going through the
-    /// single-owner `send_request` API.
+    /// Borrow the underlying cloneable handle.
     pub fn handle(&self) -> &H2Client {
         &self.handle
     }
@@ -272,11 +237,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> ClientConnection<T> {
     }
 
     /// Send a request with optional trailers, receive the full response.
-    ///
-    /// When `trailers` is empty this behaves identically to
-    /// [`Self::send_request`]. When non-empty, the HEADERS / DATA frames
-    /// carry `end_stream = false` and a second HEADERS frame encoding the
-    /// trailer block closes the stream (RFC 9113 §8.1).
     pub async fn send_request_with_trailers(
         &mut self,
         pseudo: PseudoHeaders,
@@ -290,10 +250,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> ClientConnection<T> {
     }
 }
 
-/// A single request header name/value pair. Both parts are
-/// `Cow<'static, str>`: a Chrome-constant header borrows its literal
-/// (zero allocation) while a session/request value owns its string. The
-/// `'static` bound lets the assembled list cross the driver's command channel.
+/// A single request header name/value pair.
 pub(crate) type HeaderPair = (
     std::borrow::Cow<'static, str>,
     std::borrow::Cow<'static, str>,
@@ -310,18 +267,12 @@ pub struct PseudoHeaders {
     pub authority: String,
     /// `:path` pseudo-header value, including the query string.
     pub path: String,
-    /// RFC 8441 `:protocol` pseudo-header value for extended CONNECT
-    /// (e.g. `Some("websocket")` for WebSocket-over-HTTP/2). `None` for
-    /// all other request shapes, including classic CONNECT tunnels.
+    /// RFC 8441 `:protocol` pseudo-header value for extended CONNECT (e.g. `Some("websocket")` for WebSocket-over-HTTP/2).
     pub protocol: Option<String>,
 }
 
 impl PseudoHeaders {
     /// Build the ordered pseudo-header list for a request.
-    ///
-    /// CONNECT (RFC 9113 §8.5) omits `:scheme` and `:path`. Extended
-    /// CONNECT (RFC 8441) appends `:protocol` after the classic pseudos.
-    /// Returns `Err` if `:method == CONNECT` but `:authority` is empty.
     pub fn build_pseudo_list<'a>(
         &'a self,
         pseudo_order: &[PseudoOrder; 4],
@@ -366,20 +317,13 @@ pub(crate) fn id_to_u16(id: &SettingId) -> u16 {
     }
 }
 
-/// Encode the pseudo-header list followed by regular request headers
-/// into an HPACK header block. Shared between the driver and any
-/// backward-compat path that needs a ready-to-ship fragment.
-///
-/// Takes ownership of nothing — both `pseudo_list` and `headers` must
-/// outlive the call. Internally copies into a scratch `Vec` so the
-/// input lifetimes don't have to be unified by the caller.
+/// Encode the pseudo-header list followed by regular request headers into an HPACK header block.
 pub(crate) fn encode_request_pseudos<'a>(
     encoder: &mut hpack::Encoder,
     pseudo_list: Vec<(&'a str, &'a str)>,
     headers: &'a [HeaderPair],
 ) -> Vec<u8> {
     let count = pseudo_list.len() + headers.len();
-    // Lazily chain pseudos + headers — no intermediate `combined` Vec.
     let pairs = pseudo_list
         .iter()
         .map(|&(n, v)| (n, v))

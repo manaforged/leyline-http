@@ -1,30 +1,4 @@
-//! Fingerprint trust map — where each self-reported fingerprint dimension sits
-//! relative to truth, offline and deterministic.
-//!
-//! IMPORTANT: wire truth lives in the live `tls_peet` suite (peet.ws observes
-//! the actual ClientHello / SETTINGS frame). This offline map cannot prove wire
-//! correctness — it classifies the *trust status* of leyline's self-reports:
-//!
-//!   GATED         leyline emits this value itself, it equals the captured
-//!                 golden, AND the live suite confirms golden == wire. Trustworthy.
-//!                 A mismatch here is a real regression → hard fail.
-//!                 (Akamai-H2: the H2 SETTINGS frame is emitted by leyline's own
-//!                  h2 code, so offline == wire — confirmed by
-//!                  `tls_peet::live_h2_akamai_every_profile`.)
-//!
-//!   RECONSTRUCTION the offline value is an INDEPENDENT reconstruction, not the
-//!                 bytes on the wire. JA4's extension component comes from
-//!                 `audit::chrome_extension_ids` (a hand-coded model of BoringSSL's
-//!                 emission), so it can differ from the real ClientHello. Compared
-//!                 here against the wire golden only to show whether the
-//!                 reconstruction happens to be accurate. NOT gated, NOT a bug —
-//!                 the real JA4 check is `tls_peet::live_ja4_exact_match_*`.
-//!
-//!   UNANCHORED    computed but has no golden, or isn't offline-wire-verifiable
-//!                 (JA3, JA4T, cert-compression advertise-vs-apply, H3 transport).
-//!
-//! Run: `cargo nextest run -p leyline-tls fingerprint_conformance --nocapture`
-//! (also written to `$CARGO_TARGET_TMPDIR/fingerprint-conformance.md`).
+//! Fingerprint trust map — where each self-reported fingerprint dimension sits relative to truth, offline and deterministic.
 
 use leyline::Platform;
 use leyline::audit::{
@@ -35,7 +9,7 @@ use leyline::profile::{ALL_BROWSERS, ProfileRegistry};
 
 #[derive(PartialEq, Clone, Copy)]
 enum Status {
-    /// Wire-faithful + golden match. Gated.
+    /// Wire-faithful + golden match.
     Gated,
     /// Wire-faithful golden MISMATCH → regression, hard fail.
     GatedFail,
@@ -86,7 +60,6 @@ fn fingerprint_conformance() {
         let p = reg.get_browser(browser).expect("built-in profile");
         let name = browser.to_string();
 
-        // ── Akamai-H2: GATED (leyline emits the SETTINGS frame itself) ──
         let h2 = H2Config::from_profile(&p.h2).expect("valid built-in h2");
         rows.push(gated(
             &name,
@@ -109,7 +82,6 @@ fn fingerprint_conformance() {
             }
         }
 
-        // ── JA4: RECONSTRUCTION (extension hash modelled, not measured) ──
         let ext = chrome_extension_ids(&p.tls);
         let ja4 = compute_ja4(&Ja4Input {
             ciphers: &p.tls.ciphers,
@@ -122,7 +94,6 @@ fn fingerprint_conformance() {
         });
         rows.push(recon(&name, "JA4 (audit)", &ja4, p.expected_ja4()));
 
-        // ── JA3: reconstruction, and no golden anywhere ──
         let ja3 = compute_ja3(&Ja3Input {
             ciphers: &p.tls.ciphers,
             curves: &p.tls.curves,
@@ -136,7 +107,6 @@ fn fingerprint_conformance() {
             format!("reconstruction {ja3}; no JA3 golden in any TOML"),
         ));
 
-        // ── JA4T: TCP-layer, no golden ──
         let tcp = Platform::Windows.tcp_profile();
         let ja4t = compute_ja4t(
             tcp.window_size,
@@ -151,7 +121,6 @@ fn fingerprint_conformance() {
             format!("computed {ja4t}; no JA4T golden, not offline-wire-verifiable"),
         ));
 
-        // ── cert-compression: code fact — apply_profile only applies brotli ──
         let cc = &p.tls.cert_compression;
         let applied = cc.iter().filter(|a| a.as_str() == "brotli").count();
         rows.push(Row::new(
@@ -164,7 +133,6 @@ fn fingerprint_conformance() {
             ),
         ));
 
-        // ── H3 transport: family → config selection, no QUIC capture golden ──
         #[cfg(feature = "http3")]
         {
             let fam = &p.meta.family;

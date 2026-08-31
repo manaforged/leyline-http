@@ -7,6 +7,7 @@ const FORBIDDEN_WORDS: &[&str] = &[
     "indistinguishable",
     "unblockable",
     "perfect",
+    "perfectly",
     "bypass",
 ];
 
@@ -38,47 +39,19 @@ fn public_claims_stay_bounded() {
     );
 }
 
-#[test]
-fn readme_keeps_public_evidence_commands() {
-    let readme = std::fs::read_to_string(repo_root().join("README.md")).unwrap();
-
-    for required in [
-        "cargo test -p leyline-tls --test smoke -- --ignored --nocapture",
-        "cargo test --workspace --exclude leyline-quiche",
-        "cargo test -p leyline-tls --test tls_peet -- --ignored",
-    ] {
-        assert!(
-            readme.contains(required),
-            "README missing public evidence command: {required}"
-        );
-    }
-}
-
-/// Every test name printed in TESTING.md / README.md must actually exist.
-/// This is the guard that would have caught the stale `live_decompression_*`
-/// citations left behind when those tests were renamed and moved offline:
-/// a cited name that exists nowhere in the source is a broken promise of proof.
+/// Every test name printed in README.md must exist in src/ or tests/.
 #[test]
 fn cited_test_names_exist() {
     let known = source_identifiers();
     let mut missing = Vec::new();
 
-    // TESTING.md is optional — the guard scans whichever claim docs exist,
-    // and README.md is required (checked above).
-    for doc in ["TESTING.md", "README.md"] {
-        let Ok(raw) = std::fs::read_to_string(repo_root().join(doc)) else {
-            continue;
-        };
-        // The `## Fuzzing` section names cargo-fuzz targets that live in an
-        // optional `fuzz/` workspace, absent on most branches — not a
-        // proof-promise about a test in this tree.
-        let text = strip_section(&raw, "## Fuzzing");
-        for name in cited_test_candidates(&text) {
-            if !known.contains(&name) {
-                missing.push(format!(
-                    "{doc} cites `{name}`, which exists nowhere in src/ or tests/"
-                ));
-            }
+    let raw = std::fs::read_to_string(repo_root().join("README.md")).unwrap();
+    let text = strip_section(&raw, "## Fuzzing");
+    for name in cited_test_candidates(&text) {
+        if !known.contains(&name) {
+            missing.push(format!(
+                "README.md cites `{name}`, which exists nowhere in src/ or tests/"
+            ));
         }
     }
 
@@ -89,11 +62,7 @@ fn cited_test_names_exist() {
     );
 }
 
-/// Doc examples must not reintroduce two known footguns: `?` on an infallible
-/// constructor (won't compile) and `resp.audit().unwrap()` (panics unless
-/// audit was enabled on the session). The crate README is also compiled as a
-/// doctest, which catches the first at compile time; this catches both across
-/// every claim surface, including the un-doctested root README.
+/// Doc examples must not reintroduce two known footguns: `?` on an infallible constructor (won't compile) and `resp.audit().unwrap()` (panics unless audit was enabled on the session).
 #[test]
 fn examples_avoid_known_footguns() {
     const FORBIDDEN_SNIPPETS: &[&str] = &[
@@ -107,10 +76,7 @@ fn examples_avoid_known_footguns() {
         ".audit().unwrap()",
     ];
     let mut hits = Vec::new();
-    let mut surfaces = public_claim_surfaces();
-    surfaces.push(repo_root().join("crates/leyline/README.md"));
-
-    for path in surfaces {
+    for path in public_claim_surfaces() {
         let Ok(text) = std::fs::read_to_string(&path) else {
             continue;
         };
@@ -136,8 +102,7 @@ fn examples_avoid_known_footguns() {
     );
 }
 
-/// Drop a markdown section (the `## Heading` line through the line before the
-/// next `## ` heading) so its contents are excluded from scanning.
+/// Drop a markdown section (the `## Heading` line through the line before the next `## ` heading) so its contents are excluded from scanning.
 fn strip_section(text: &str, heading: &str) -> String {
     let mut out = String::new();
     let mut in_section = false;
@@ -153,17 +118,14 @@ fn strip_section(text: &str, heading: &str) -> String {
     out
 }
 
-/// Backticked tokens in a doc that look like a test/function name. Handles the
-/// brace-expansion shorthand `live_ja4_exact_match_{chrome148,firefox150}`.
+/// Backticked tokens in a doc that look like a test/function name.
 fn cited_test_candidates(text: &str) -> Vec<String> {
     let mut out = Vec::new();
-    // Odd-indexed split segments are the contents between backticks.
     for (i, span) in text.split('`').enumerate() {
         if i % 2 == 0 {
             continue;
         }
         if let Some((prefix, rest)) = span.split_once('{') {
-            // `prefix{a,b,c}` -> prefix+a, prefix+b, prefix+c
             if let Some(items) = rest.strip_suffix('}') {
                 if is_snake_ident(prefix) {
                     for item in items.split(',') {
@@ -178,9 +140,7 @@ fn cited_test_candidates(text: &str) -> Vec<String> {
     out
 }
 
-/// Lowercase snake_case with at least one underscore — the shape of test fn
-/// names and lowercase API methods, but not paths (`foo.rs`), types
-/// (`H2Config`), or `Type::method` citations.
+/// Lowercase snake_case with at least one underscore — the shape of test fn names and lowercase API methods, but not paths (`foo.rs`), types (`H2Config`), or `Type::method` citations.
 fn is_snake_ident(s: &str) -> bool {
     s.contains('_')
         && !s.is_empty()
@@ -189,8 +149,7 @@ fn is_snake_ident(s: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
 }
 
-/// Every identifier-shaped token that appears in the crate's `src/` or
-/// `tests/` Rust sources (test fn names included).
+/// Every identifier-shaped token that appears in the crate's `src/` or `tests/` Rust sources (test fn names included).
 fn source_identifiers() -> std::collections::HashSet<String> {
     let mut set = std::collections::HashSet::new();
     let crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));

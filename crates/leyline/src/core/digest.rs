@@ -1,42 +1,11 @@
 //! HTTP Digest authentication (RFC 7616).
-//!
-//! Digest is alive and well in enterprise / on-prem stacks (routers,
-//! NASes, many embedded server SDKs, and some SOAP endpoints). Browsers
-//! still support it, and `curl` + `reqwest` both wire it in. This module
-//! computes the `Authorization: Digest` header from the server challenge
-//! so callers do not have to.
-//!
-//! The flow is a challenge/response:
-//!
-//! 1. Client sends the request with no `Authorization`.
-//! 2. Server responds `401` with `WWW-Authenticate: Digest realm=...,
-//!    nonce=..., qop="auth", algorithm=MD5`.
-//! 3. Client computes `response = H(HA1 ":" nonce ":" nc ":" cnonce
-//!    ":" qop ":" HA2)` and retries with an `Authorization: Digest`
-//!    header.
-//!
-//! Leyline supports `MD5`, `SHA-256`, and `SHA-512-256` (plus their
-//! `-sess` variants) with `qop=auth`. Username-hashing (`userhash=true`)
-//! is not supported; callers that need it must compute the Authorization
-//! header themselves.
 
 use md5::{Digest as Md5Digest, Md5};
 use sha2::{Sha256, Sha512_256};
 
 use crate::core::error::{Error, Result};
 
-/// Digest credentials. Attach to a request with
-/// [`crate::RequestBuilder::digest_auth`].
-///
-/// ```rust,ignore
-/// use leyline::DigestAuth;
-///
-/// let resp = session
-///     .request("GET", "https://router.local/status")
-///     .digest_auth(DigestAuth::new("admin", "hunter2"))
-///     .send()
-///     .await?;
-/// ```
+/// Digest credentials.
 #[derive(Debug, Clone)]
 pub struct DigestAuth {
     pub(crate) username: String,
@@ -120,11 +89,6 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 /// Parse a `WWW-Authenticate: Digest ...` challenge into its fields.
-///
-/// Scans the header value after the `Digest` prefix for `key=value`
-/// pairs, where values may be quoted. Unknown / unsupported algorithms
-/// are surfaced as an error so the caller doesn't silently fall back
-/// to a weaker hash.
 pub(crate) fn parse_challenge(header: &str) -> Result<Challenge> {
     let trimmed = header.trim();
     let body = trimmed
@@ -136,14 +100,12 @@ pub(crate) fn parse_challenge(header: &str) -> Result<Challenge> {
     let mut i = 0;
     let bytes = body.as_bytes();
     while i < bytes.len() {
-        // Skip whitespace / commas.
         while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b',' || bytes[i] == b'\t') {
             i += 1;
         }
         if i >= bytes.len() {
             break;
         }
-        // Read key up to '='.
         let key_start = i;
         while i < bytes.len() && bytes[i] != b'=' {
             i += 1;
@@ -153,7 +115,6 @@ pub(crate) fn parse_challenge(header: &str) -> Result<Challenge> {
         }
         let key = &body[key_start..i];
         i += 1;
-        // Read value: quoted or bare up to comma.
         let (val, ni) = if i < bytes.len() && bytes[i] == b'"' {
             let start = i + 1;
             let mut j = start;
@@ -194,7 +155,7 @@ pub(crate) fn parse_challenge(header: &str) -> Result<Challenge> {
                     }
                 };
             }
-            _ => { /* ignore unknown attributes */ }
+            _ => {}
         }
     }
 
@@ -208,10 +169,6 @@ pub(crate) fn parse_challenge(header: &str) -> Result<Challenge> {
 }
 
 /// Compute the `Authorization: Digest ...` header for one request.
-///
-/// `nc` is the 8-hex-digit nonce counter, which callers track per
-/// (nonce) to prevent server-side replay. `cnonce` is a fresh random
-/// value the client generates per request.
 pub(crate) fn build_auth_header(
     challenge: &Challenge,
     auth: &DigestAuth,
@@ -220,13 +177,8 @@ pub(crate) fn build_auth_header(
     nc: u32,
     cnonce: &str,
 ) -> Option<String> {
-    // Reject challenges we cannot honestly answer. `qop=auth-int` would
-    // require the entity-body hash in HA2 per RFC 7616 §3.4.3; emitting
-    // a response without it would be rejected by the server as invalid.
-    // Better to refuse cleanly so the caller surfaces a clear error.
     let qop = match challenge.qop.as_deref() {
         Some(offered) => pick_supported_qop(offered)?,
-        // RFC 2069 fallback — no qop offered; allowed.
         None => "",
     };
 
@@ -251,13 +203,9 @@ pub(crate) fn build_auth_header(
             .as_bytes(),
         )
     } else {
-        // RFC 2069 fallback — no qop.
         alg.hash_hex(format!("{}:{}:{}", ha1, challenge.nonce, ha2).as_bytes())
     };
 
-    // Quoted-string values are escaped per RFC 9110 §5.6.4 / RFC 7616
-    // §3.4: `"` and `\` carry a backslash prefix. The hash inputs above
-    // keep the RAW values — escaping is wire-format only.
     let quoted = |s: &str| {
         let mut esc = String::with_capacity(s.len() + 2);
         esc.push('"');
@@ -293,14 +241,6 @@ pub(crate) fn build_auth_header(
 }
 
 /// Pick a supported `qop` token from the server's advertised list.
-///
-/// Returns `Some("auth")` when the server offers `auth` (alone or in a
-/// list). Returns `None` when the server offers only `auth-int` — which
-/// we deliberately do not support, since our `HA2` would be wrong
-/// without the entity-body hash required by RFC 7616 §3.4.3. Callers
-/// should treat `None` as "challenge acceptable but we can't answer"
-/// and skip the digest retry with a clear error rather than emitting
-/// an invalid response.
 pub(crate) fn pick_supported_qop(qop: &str) -> Option<&'static str> {
     for token in qop.split(',') {
         if token.trim().eq_ignore_ascii_case("auth") {
@@ -311,32 +251,11 @@ pub(crate) fn pick_supported_qop(qop: &str) -> Option<&'static str> {
 }
 
 /// Generate a fresh 16-hex-char client nonce.
-///
-/// RFC 7616 §3.4 says the cnonce must be unique per request for a
-/// given server nonce. We sample 8 random bytes so an observer cannot
-/// predict the cnonce from a timing-correlated counter.
 pub(crate) fn generate_cnonce() -> String {
-    // 8 random bytes → 16 hex chars.
     crate::util::random_hex_token(8)
 }
 
 /// Monotonic nonce-count per server-nonce string, per process.
-///
-/// RFC 7616 §3.4 requires the `nc` field to increment each time the
-/// client sends a request using a given server-nonce; reuse is a
-/// replay-protection violation. We cache the current count per nonce
-/// in a global LRU map and hand out the next value. When an entry
-/// would be evicted (memory cap) or the counter is about to wrap past
-/// `u32::MAX`, the mapping is dropped — the next request with that
-/// nonce starts at `nc = 1`. A server tracking strict monotonicity
-/// across an evicted nonce would then reject our response with `401
-/// stale=true`, at which point the caller's retry policy re-runs the
-/// challenge exchange with a fresh nonce. This is the standard
-/// RFC-correct recovery path.
-///
-/// Cap is intentionally generous (4 096 entries) — digest is rare
-/// enough in modern traffic that this is many sessions' worth. Raise
-/// via `DIGEST_NONCE_CACHE_CAP` at compile time if needed.
 pub(crate) const DIGEST_NONCE_CACHE_CAP: usize = 4096;
 
 fn nonce_cache() -> &'static std::sync::Mutex<lru::LruCache<String, u32>> {
@@ -353,11 +272,6 @@ fn nonce_cache() -> &'static std::sync::Mutex<lru::LruCache<String, u32>> {
 
 pub(crate) fn next_nc_for_nonce(nonce: &str) -> u32 {
     let mut guard = nonce_cache().lock().unwrap_or_else(|e| e.into_inner());
-    // If existing counter would wrap, drop and restart. u32::MAX is
-    // `ffffffff`, which is a valid `nc` on the wire but the next
-    // increment would collide. Safer to force a re-challenge by
-    // evicting the entry and starting fresh; the server will send
-    // `401 stale=true` and the caller's retry flow re-challenges.
     if let Some(existing) = guard.get(nonce) {
         if *existing >= u32::MAX - 1 {
             guard.pop(nonce);
@@ -375,8 +289,7 @@ pub(crate) fn next_nc_for_nonce(nonce: &str) -> u32 {
     }
 }
 
-/// Test-only: reset the global nonce cache so unit tests don't leak
-/// counter state between runs.
+/// Test-only: reset the global nonce cache so unit tests don't leak counter state between runs.
 #[cfg(test)]
 pub(crate) fn reset_nonce_cache_for_test() {
     let mut guard = nonce_cache().lock().unwrap_or_else(|e| e.into_inner());

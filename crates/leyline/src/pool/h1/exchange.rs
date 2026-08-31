@@ -9,13 +9,6 @@ pub(super) async fn send_h1_request(
     body: H1Body,
     target: H1Target,
 ) -> Result<bool, H1PooledError> {
-    // ─── Wire-shape validation (CWE-93, request smuggling) ──────────
-    //
-    // Every caller-supplied byte that lands on the keep-alive socket
-    // must be rejected for CR/LF/NUL before we serialise it. A
-    // single `\r\n` in a header value or method splits the request
-    // and lets an attacker smuggle a second request into the reused
-    // pool connection.
     if !is_valid_token(method) {
         return Err(H1PooledError::Config(format!(
             "invalid HTTP method `{method}`: non-token bytes not allowed"
@@ -44,18 +37,9 @@ pub(super) async fn send_h1_request(
     let request_target = match target {
         H1Target::OriginForm => path,
         H1Target::AbsoluteForm => {
-            // RFC 9112 §3.2.2: absolute-form is an absolute-URI — scheme,
-            // authority, path, query. Never userinfo (RFC 9110 §4.2.4:
-            // clients must not generate it) and never a fragment; both
-            // would be forwarded to the proxy and its logs.
             format!("{}://{}{}", url.scheme(), authority, path)
         }
     };
-    // URL parsing rejects CR/LF in host, but the path / query can
-    // contain percent-encoded bytes. Validate the final target
-    // string as a defence-in-depth: no raw CR/LF/SP/NUL/HTAB. The
-    // `request_target` is what goes on the request-line, so any
-    // control char here is a smuggling vector.
     if !is_valid_request_target(&request_target) {
         return Err(H1PooledError::Config(format!(
             "invalid request target `{request_target}`: control characters not allowed"
@@ -114,7 +98,6 @@ pub(super) async fn send_h1_request(
         headers.push(("Connection".into(), "keep-alive".into()));
     }
 
-    // Serialise + send the request head.
     let mut req = Vec::new();
     req.extend_from_slice(format!("{method} {request_target} HTTP/1.1\r\n").as_bytes());
     for (name, value) in &headers {
@@ -172,8 +155,6 @@ pub(super) async fn send_h1_request(
 
     stream.flush().await?;
 
-    // Whether the caller explicitly asked us to close the connection via
-    // `Connection: close` — feeds the post-response reuse decision.
     Ok(header_contains_token(&headers, "connection", "close"))
 }
 pub(super) fn compute_reusable(
@@ -247,20 +228,12 @@ pub(super) fn validate_framing_headers(headers: &[(String, String)]) -> Result<(
             "response has multiple Content-Length headers (RFC 9112 §6.1)".into(),
         ));
     }
-    // A single CL header may still carry a comma-separated value —
-    // that's the other flavour of the same attack.
     if let Some(v) = header_first(headers, "content-length") {
         if v.contains(',') {
             return Err(H1PooledError::Http(
                 "response Content-Length contains multiple values".into(),
             ));
         }
-        // RFC 9112 §8.6: Content-Length MUST be a non-negative decimal
-        // integer. A present-but-unparseable value (`+10`, `10 foo`,
-        // tab-prefixed, hex, anything but `[0-9]+`) must be rejected:
-        // falling through to read-to-close is a smuggling vector when an
-        // upstream parses leniently and disagrees on body length. Require
-        // clean ASCII digits.
         let trimmed = v.trim();
         if trimmed.is_empty()
             || !trimmed.bytes().all(|b| b.is_ascii_digit())
@@ -279,8 +252,6 @@ pub(super) fn validate_framing_headers(headers: &[(String, String)]) -> Result<(
         ));
     }
     if let Some(te) = te {
-        // Last coding must be `chunked`. Split on commas, ignore
-        // whitespace, compare last token.
         let last = te
             .split(',')
             .map(|t| t.trim())

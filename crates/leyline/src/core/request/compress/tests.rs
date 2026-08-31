@@ -8,9 +8,6 @@ fn header_tokens() {
     assert_eq!(ContentEncoding::Deflate.header_value(), "deflate");
 }
 
-// Each roundtrip decodes with the same crate used by the response path,
-// proving the encoded bytes are wire-valid for that codec (not merely
-// self-consistent). Compressible input so we also assert it shrank.
 fn sample() -> Vec<u8> {
     b"the quick brown fox jumps over the lazy dog. ".repeat(16)
 }
@@ -60,7 +57,6 @@ fn deflate_roundtrips_zlib_wrapped() {
     let data = sample();
     let enc = ContentEncoding::Deflate.encode(&data).unwrap();
     assert!(enc.len() < data.len());
-    // zlib-wrapped DEFLATE: CMF first byte is 0x78 (deflate method, 32K window).
     assert_eq!(enc.first(), Some(&0x78));
     let mut out = Vec::new();
     flate2::read::ZlibDecoder::new(&enc[..])

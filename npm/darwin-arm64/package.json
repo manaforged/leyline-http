@@ -1,6 +1,6 @@
 {
   "name": "@manaforged/leyline-darwin-arm64",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "os": [
     "darwin"
   ],
@@ -9,11 +9,14 @@
   ],
   "main": "leyline.darwin-arm64.node",
   "files": [
-    "leyline.darwin-arm64.node"
+    "leyline.darwin-arm64.node",
+    "NOTICE",
+    "LICENSE-MIT",
+    "LICENSE-BORINGSSL"
   ],
-  "description": "Node.js bindings for Leyline — browser-fidelity TLS/HTTP fingerprint sessions",
+  "description": "darwin-arm64 native addon for leyline-http",
   "homepage": "https://github.com/manaforged/leyline-http",
-  "license": "MIT OR Apache-2.0",
+  "license": "MIT",
   "engines": {
     "node": ">=18"
   },

@@ -15,14 +15,11 @@ fn cookie_ordering_chrome_style() {
     let jar = Jar::new();
     let url = Url::parse("https://example.com/app/page").unwrap();
 
-    // Set cookies with different paths and creation times.
-    // Use store_set_cookie directly for control.
     jar.store_set_cookie("a=1; Path=/", &url);
     jar.store_set_cookie("b=2; Path=/app", &url);
     jar.store_set_cookie("c=3; Path=/app/page", &url);
 
     let header = jar.cookie_header(&url).unwrap();
-    // Order: /app/page (longest path) first, then /app, then /
     assert!(
         header.starts_with("c=3"),
         "expected c=3 first, got: {header}"
@@ -32,8 +29,6 @@ fn cookie_ordering_chrome_style() {
 }
 
 #[test]
-// Sync test: needs wall-clock separation for SystemTime creation-time
-// ordering; the clippy.toml disallow-list targets async blocking.
 #[expect(
     clippy::disallowed_methods,
     reason = "sync test needs wall-clock separation for SystemTime ordering; disallow-rule targets async blocking"
@@ -42,13 +37,11 @@ fn creation_time_ordering() {
     let jar = Jar::new();
     let url = Url::parse("https://example.com/").unwrap();
 
-    // Same path, different creation times. Oldest should come first.
     jar.store_set_cookie("first=1; Path=/", &url);
     std::thread::sleep(std::time::Duration::from_millis(10));
     jar.store_set_cookie("second=2; Path=/", &url);
 
     let header = jar.cookie_header(&url).unwrap();
-    // Same path length → creation time ascending → first before second.
     assert!(
         header.find("first=1").unwrap() < header.find("second=2").unwrap(),
         "older cookie should come first: {header}"
@@ -98,8 +91,6 @@ fn same_path_cookies_keep_creation_order() {
 }
 
 #[test]
-// Sync test: needs wall-clock separation for SystemTime creation-time
-// ordering; the clippy.toml disallow-list targets async blocking.
 #[expect(
     clippy::disallowed_methods,
     reason = "sync test needs wall-clock separation for SystemTime ordering; disallow-rule targets async blocking"
@@ -135,7 +126,6 @@ fn expired_cookies_not_returned() {
     let jar = Jar::new();
     let url = Url::parse("https://example.com/").unwrap();
 
-    // Max-Age=0 means delete/expire immediately.
     jar.store_set_cookie("gone=bye; Max-Age=0", &url);
     assert_eq!(jar.get_cookie("https://example.com", "gone"), None);
 }
@@ -145,7 +135,6 @@ fn per_domain_eviction() {
     let jar = Jar::new();
     let url = Url::parse("https://example.com/").unwrap();
 
-    // Insert 181 cookies — should trigger eviction.
     for i in 0..=MAX_COOKIES_PER_DOMAIN {
         jar.store_set_cookie(&format!("c{}=v{}; Path=/", i, i), &url);
     }
@@ -187,23 +176,19 @@ fn samesite_enforced_on_cross_site_requests() {
 
     let req = Url::parse("https://example.com/page").unwrap();
 
-    // Same-site: all three are eligible.
     let same = jar.cookie_header_for(&req, false, true).unwrap();
     assert!(same.contains("strict=1") && same.contains("lax=1") && same.contains("none=1"));
 
-    // Cross-site safe navigation (GET): Strict withheld; Lax + None sent.
     let cross_get = jar.cookie_header_for(&req, true, true).unwrap();
     assert!(!cross_get.contains("strict=1"), "{cross_get}");
     assert!(cross_get.contains("lax=1") && cross_get.contains("none=1"));
 
-    // Cross-site unsafe navigation (POST): only None sent.
     let cross_post = jar.cookie_header_for(&req, true, false).unwrap();
     assert!(!cross_post.contains("strict=1") && !cross_post.contains("lax=1"));
     assert!(cross_post.contains("none=1"));
 }
 
-/// RFC 6265bis §5.7 "Leave Secure Cookies Alone": a plaintext response
-/// cannot overwrite (or delete) a Secure cookie the HTTPS origin set.
+/// RFC 6265bis §5.7 "Leave Secure Cookies Alone": a plaintext response cannot overwrite (or delete) a Secure cookie the HTTPS origin set.
 #[test]
 fn insecure_origin_cannot_overwrite_secure_cookie() {
     let jar = Jar::new();
@@ -218,7 +203,6 @@ fn insecure_origin_cannot_overwrite_secure_cookie() {
         "plaintext overwrite of a Secure cookie must be refused"
     );
 
-    // Same for a plaintext deletion attempt.
     jar.store_set_cookie("session=; Path=/; Max-Age=0", &http);
     assert_eq!(
         jar.get_cookie("https://example.com/", "session"),
@@ -226,8 +210,6 @@ fn insecure_origin_cannot_overwrite_secure_cookie() {
         "plaintext deletion of a Secure cookie must be refused"
     );
 
-    // The HTTPS origin can still refresh its own Secure cookie and
-    // delete it with Max-Age=0.
     jar.store_set_cookie("session=rotated; Secure; Path=/", &https);
     assert_eq!(
         jar.get_cookie("https://example.com/", "session"),
@@ -243,9 +225,7 @@ fn secure_cookie_not_sent_over_http() {
     let https = Url::parse("https://example.com/").unwrap();
     jar.store_set_cookie("tok=secret; Secure; SameSite=None", &https);
 
-    // Available over HTTPS.
     assert!(jar.get_cookie("https://example.com", "tok").is_some());
-    // NOT available over HTTP.
     assert!(jar.get_cookie("http://example.com", "tok").is_none());
 }
 
@@ -283,26 +263,15 @@ fn set_named_on_upserts() {
 
 #[test]
 fn set_named_on_cookie_is_host_only_no_cross_host_leak() {
-    // The trusted-caller contract on `set_named_on` rests on the inserted
-    // cookie being host-only: even a public-suffix `domain` cannot become a
-    // supercookie because a host-only cookie is sent ONLY on an exact host
-    // match. Lock that invariant so a future change to the insert path
-    // (e.g. dropping `host_only: true`) can't silently turn these into
-    // domain-broadcasting cookies.
     let jar = Jar::new();
     jar.set_named_on("example.com", "sess", "v");
-    // Visible on the exact host.
     assert_eq!(
         jar.get_cookie("https://example.com/", "sess").as_deref(),
         Some("v")
     );
-    // NOT visible on a subdomain or a sibling host.
     assert_eq!(jar.get_cookie("https://www.example.com/", "sess"), None);
     assert_eq!(jar.get_cookie("https://api.example.com/", "sess"), None);
 
-    // Same guarantee even when `domain` is a public suffix: the cookie is
-    // pinned to that exact host and does not broadcast to registrable
-    // domains under it.
     jar.set_named_on("co.uk", "psl", "v");
     assert_eq!(
         jar.get_cookie("https://co.uk/", "psl").as_deref(),
@@ -342,8 +311,6 @@ fn remove_named_for_host_spares_siblings() {
     jar.set_cookie("https://example.com", "session", "apex");
     jar.set_cookie("https://store.example.com", "other", "keep");
 
-    // Clears the store host + the parent-domain (apex) mis-host, but leaves
-    // the sibling www zone and unrelated cookies untouched.
     assert_eq!(
         jar.remove_named_for_host("store.example.com", "session"),
         2
@@ -380,13 +347,8 @@ fn merge_combines_jars_last_write_wins() {
     assert_eq!(a.get_named("shared").as_deref(), Some("b_value"));
 }
 
-// ─── Persistence ─────────────────────────────────
-
 #[test]
 fn serde_round_trip_preserves_cross_subdomain_attribution() {
-    // A host-only cookie on `api.example.com` must round-trip
-    // losslessly through serde. A `String`-shaped export that filtered
-    // against `https://www.example.com` would silently drop it.
     let jar = Jar::new();
     jar.store_set_cookie(
         "auth=secret; Path=/; Secure",
@@ -406,7 +368,6 @@ fn serde_round_trip_preserves_cross_subdomain_attribution() {
     let restored: Jar = serde_json::from_str(&json).expect("deserialize");
     assert_eq!(restored.len(), 3);
 
-    // The host-only gsp cookie is back pinned to gsp, not www.
     assert_eq!(
         restored.get_cookie("https://api.example.com", "auth"),
         Some("secret".into()),
@@ -451,19 +412,13 @@ fn deep_clone_is_independent() {
     assert_eq!(b.get_named("k").as_deref(), Some("1"));
 }
 
-// ─── set_named / merge invariants ───────────────────────────────────────────
-
 #[test]
 fn set_named_updates_every_match_across_domains() {
-    // `set_named` must update every match and return true if any. Stopping
-    // at the first match returned by HashMap iteration is non-deterministic
-    // when the same cookie name lives on multiple domains.
     let jar = Jar::new();
     jar.set_cookie("https://example.com", "token", "old1");
     jar.set_cookie("https://api.example.com", "token", "old2");
     assert_eq!(jar.len(), 2);
     assert!(jar.set_named("token", "rotated"));
-    // Both sites see the new token regardless of HashMap iteration order.
     assert_eq!(
         jar.get_cookie("https://example.com", "token")
             .as_deref(),
@@ -478,11 +433,6 @@ fn set_named_updates_every_match_across_domains() {
 
 #[test]
 fn set_named_on_updates_existing_path_not_just_root() {
-    // `set_named_on` must match cookies on any path, not just `Path=/`. A
-    // cookie minted by the server on `Path=/auth` would otherwise go
-    // unmatched, and a duplicate would be inserted on `Path=/`, producing
-    // two entries with the same name and silently emitting both in the
-    // Cookie header.
     let jar = Jar::new();
     let url = Url::parse("https://example.com/auth/redirect").unwrap();
     jar.store_set_cookie("accessToken=initial; Path=/auth", &url);
@@ -494,8 +444,6 @@ fn set_named_on_updates_existing_path_not_just_root() {
         1,
         "must update existing entry, not insert duplicate"
     );
-    // Original path attribute preserved — the cookie still applies on
-    // /auth, not just /.
     assert_eq!(
         jar.get_cookie("https://example.com/auth/foo", "token")
             .as_deref(),
@@ -504,16 +452,11 @@ fn set_named_on_updates_existing_path_not_just_root() {
 }
 
 #[test]
-// Sync test: needs wall-clock separation for SystemTime last_access
-// ordering; the clippy.toml disallow-list targets async blocking.
 #[expect(
     clippy::disallowed_methods,
     reason = "sync test needs wall-clock separation for SystemTime ordering; disallow-rule targets async blocking"
 )]
 fn set_named_bumps_last_access() {
-    // `set_named` must bump `last_access`; leaving it stale would let a
-    // recently-rotated auth token be evicted before truly-cold cookies
-    // under LRU pressure.
     let jar = Jar::new();
     jar.set_cookie("https://example.com", "tok", "old");
     let before = {
@@ -531,16 +474,10 @@ fn set_named_bumps_last_access() {
 
 #[test]
 fn merge_drops_expired_cookies() {
-    // `merge` must drop expired cookies, matching `store_set_cookie`'s
-    // filtering. Accepting them lets a deserialized jar whose session has
-    // aged past `expires` silently keep dead cookies in the live HTTP jar.
     let live = Jar::new();
     let stale = Jar::new();
     let url = Url::parse("https://example.com/").unwrap();
-    // Past-expiry cookie via Max-Age=-1 — the parser stamps this as
-    // already-expired so `merge` must skip it.
     stale.store_set_cookie("dead=yes; Path=/; Max-Age=1", &url);
-    // Manually rewind the cookie's `expires` to the past.
     {
         let mut inner = lock(&stale.inner);
         if let Some(entries) = inner.cookies.get_mut("example.com") {
@@ -566,12 +503,9 @@ fn merge_drops_expired_cookies() {
 
 #[test]
 fn merge_enforces_per_domain_eviction_cap() {
-    // `merge` must enforce eviction; skipping it lets long-lived
-    // sessions blow past Chrome's 180-cookie per-domain ceiling.
     let live = Jar::new();
     let bulk = Jar::new();
     let url = Url::parse("https://example.com/").unwrap();
-    // Stuff the source jar to MAX-1 so eviction triggers on merge.
     for i in 0..(MAX_COOKIES_PER_DOMAIN + 5) {
         bulk.store_set_cookie(&format!("c{i}=v{i}; Path=/"), &url);
     }
@@ -589,13 +523,7 @@ fn merge_enforces_per_domain_eviction_cap() {
 
 #[test]
 fn serialize_order_is_stable_across_runs() {
-    // `Serialize` must emit a stable order. Emitting
-    // `HashMap.values().flatten()` gives a fresh ordering every run,
-    // breaking diff-based session change detection and on-disk equality
-    // checks.
     let jar = Jar::new();
-    // Populate across multiple domains/paths so a HashMap shuffle
-    // would actually change the serialization.
     let u1 = Url::parse("https://www.example.com/").unwrap();
     let u2 = Url::parse("https://api.example.com/").unwrap();
     let u3 = Url::parse("https://api.example.com/").unwrap();

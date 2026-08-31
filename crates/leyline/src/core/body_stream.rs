@@ -1,9 +1,4 @@
 //! Streaming response body.
-//!
-//! Wraps an mpsc receiver the transport layer pumps response chunks into.
-//! Drivers deliver headers as soon as they arrive and push body frames
-//! through the channel. The consumer drives [`BodyStream`] as a
-//! `futures_util::Stream`.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -15,28 +10,12 @@ use futures_util::Stream;
 use tokio::sync::mpsc;
 use tokio::time::Sleep;
 
-/// A streaming response body. Yields `io::Result<Bytes>` chunks as they
-/// arrive from the transport.
-///
-/// Obtained from [`Response::into_stream`](crate::Response::into_stream)
-/// after opting in with
-/// [`RequestBuilder::stream`](crate::RequestBuilder::stream).
-///
-/// When a session `read_timeout` is configured, it applies here as a
-/// per-chunk idle timeout: if the next body chunk does not arrive within the
-/// timeout the stream yields an [`io::ErrorKind::TimedOut`] error. The clock
-/// resets after every chunk, so a steady (if slow) stream never trips it —
-/// this catches a stalled connection that a request-wide timeout would only
-/// notice much later. The same chokepoint covers every transport (H1/H2/H3),
-/// since they all deliver through this channel.
-///
-/// [`io::ErrorKind::TimedOut`]: std::io::ErrorKind::TimedOut
+/// A streaming response body.
 pub struct BodyStream {
     rx: mpsc::Receiver<std::io::Result<Bytes>>,
     /// Per-chunk idle timeout, from the session `read_timeout`.
     read_timeout: Option<Duration>,
-    /// Armed while waiting for the next chunk; reset to `None` after each
-    /// chunk so the timeout measures the gap between chunks, not total time.
+    /// Armed while waiting for the next chunk; reset to `None` after each chunk so the timeout measures the gap between chunks, not total time.
     idle: Option<Pin<Box<Sleep>>>,
 }
 
@@ -50,10 +29,6 @@ impl BodyStream {
     }
 
     /// Build a streaming body from a fully-buffered `Bytes` buffer.
-    ///
-    /// Yields a single chunk then ends. Used by paths that opted into
-    /// streaming but ran on a transport (H1 default, H3) that buffered
-    /// the body anyway, so the caller API stays uniform.
     pub(crate) fn from_bytes(buf: Bytes) -> Self {
         let (tx, rx) = mpsc::channel(1);
         if !buf.is_empty() {
@@ -76,8 +51,6 @@ impl Stream for BodyStream {
         let this = self.get_mut();
         match this.rx.poll_recv(cx) {
             Poll::Ready(item) => {
-                // Progress (chunk, error, or end) — disarm so the next gap
-                // gets a fresh timeout.
                 this.idle = None;
                 Poll::Ready(item)
             }

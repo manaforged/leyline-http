@@ -8,8 +8,7 @@ use crate::tls::error::TlsError;
 
 use crate::util::percent_decode;
 
-/// Open a TLS-over-SOCKS5 tunnel through `proxy` and return the
-/// wrapped TLS stream.
+/// Open a TLS-over-SOCKS5 tunnel through `proxy` and return the wrapped TLS stream.
 pub(crate) async fn connect<C: crate::tls::TlsHandshake>(
     connector: &C,
     host: &str,
@@ -20,9 +19,7 @@ pub(crate) async fn connect<C: crate::tls::TlsHandshake>(
     let auth = auth_request(proxy)?;
     let mut tcp_stream = super::connect_to_proxy(connector, proxy, 1080).await?;
 
-    // Greeting: version 5, auth methods.
     if auth.is_some() {
-        // Offer NO_AUTH (0x00) and USERNAME/PASSWORD (0x02).
         tcp_stream
             .write_all(&[0x05, 0x02, 0x00, 0x02])
             .await
@@ -47,13 +44,7 @@ pub(crate) async fn connect<C: crate::tls::TlsHandshake>(
     }
 
     match (method_resp[1], auth.as_deref()) {
-        // NO_AUTH is always offered and always acceptable.
         (0x00, _) => {}
-        // USERNAME/PASSWORD — only valid if *we* offered it. RFC 1928 requires
-        // the server to select from the methods the client sent; a server that
-        // picks 0x02 when we only offered NO_AUTH is attempting an unsolicited
-        // auth downgrade. Fall through to the rejection arm rather than sending
-        // credentials (or empty ones) we never advertised.
         (0x02, Some(auth)) => authenticate(&mut tcp_stream, auth).await?,
         (0xFF, _) => {
             return Err(TlsError::Profile(
@@ -98,7 +89,7 @@ fn auth_request(proxy: &url::Url) -> Result<Option<Vec<u8>>, TlsError> {
         ));
     }
     let mut auth_req = Vec::with_capacity(3 + username.len() + password.len());
-    auth_req.push(0x01); // Sub-negotiation version.
+    auth_req.push(0x01);
     auth_req.push(username.len() as u8);
     auth_req.extend_from_slice(username.as_bytes());
     auth_req.push(password.len() as u8);
@@ -117,9 +108,6 @@ async fn authenticate(tcp_stream: &mut TcpStream, auth: &[u8]) -> Result<(), Tls
         .read_exact(&mut auth_resp)
         .await
         .map_err(TlsError::TcpConnect)?;
-    // RFC 1929 §2: VER must be 0x01. A wrong version byte means the
-    // peer is not speaking the sub-negotiation protocol — treat any
-    // status it carries as garbage rather than trusting byte 1 alone.
     if auth_resp[0] != 0x01 {
         return Err(TlsError::Profile(format!(
             "socks5: invalid auth sub-negotiation version 0x{:02x}",
@@ -134,9 +122,6 @@ async fn authenticate(tcp_stream: &mut TcpStream, auth: &[u8]) -> Result<(), Tls
 
 async fn send_connect(tcp_stream: &mut TcpStream, host: &str, port: u16) -> Result<(), TlsError> {
     let host_bytes = host.as_bytes();
-    // RFC 1928 §5: domain-name address type carries a one-byte length.
-    // Without this guard the `as u8` below silently truncates and the
-    // proxy misparses the request.
     if host_bytes.len() > 255 {
         return Err(TlsError::Profile(format!(
             "socks5: hostname too long ({} bytes, max 255)",
@@ -144,10 +129,10 @@ async fn send_connect(tcp_stream: &mut TcpStream, host: &str, port: u16) -> Resu
         )));
     }
     let mut connect_req = Vec::with_capacity(7 + host_bytes.len());
-    connect_req.push(0x05); // Version.
-    connect_req.push(0x01); // CONNECT command.
-    connect_req.push(0x00); // Reserved.
-    connect_req.push(0x03); // Domain name address type.
+    connect_req.push(0x05);
+    connect_req.push(0x01);
+    connect_req.push(0x00);
+    connect_req.push(0x03);
     connect_req.push(host_bytes.len() as u8);
     connect_req.extend_from_slice(host_bytes);
     connect_req.push((port >> 8) as u8);
@@ -185,10 +170,8 @@ async fn send_connect(tcp_stream: &mut TcpStream, host: &str, port: u16) -> Resu
         )));
     }
 
-    // Skip the bind address. Address type is at resp_buf[3].
     match resp_buf[3] {
         0x01 => {
-            // IPv4: 4 bytes + 2 port bytes.
             let mut skip = [0u8; 6];
             tcp_stream
                 .read_exact(&mut skip)
@@ -196,7 +179,6 @@ async fn send_connect(tcp_stream: &mut TcpStream, host: &str, port: u16) -> Resu
                 .map_err(TlsError::TcpConnect)?;
         }
         0x03 => {
-            // Domain: 1 byte length + N bytes + 2 port bytes.
             let mut len_buf = [0u8; 1];
             tcp_stream
                 .read_exact(&mut len_buf)
@@ -210,7 +192,6 @@ async fn send_connect(tcp_stream: &mut TcpStream, host: &str, port: u16) -> Resu
                 .map_err(TlsError::TcpConnect)?;
         }
         0x04 => {
-            // IPv6: 16 bytes + 2 port bytes.
             let mut skip = [0u8; 18];
             tcp_stream
                 .read_exact(&mut skip)

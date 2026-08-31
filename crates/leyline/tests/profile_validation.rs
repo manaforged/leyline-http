@@ -1,7 +1,4 @@
 //! Negative-path validation for browser profiles.
-//!
-//! A malformed profile must fail to load. Substituting a default would emit
-//! the wrong ClientHello.
 use leyline::h2::H2Config;
 use leyline::profile::{ALL_BROWSERS, BrowserProfile, H2Profile, ProfileRegistry};
 use leyline::{Browser, Platform, TlsContext, TlsMinVersion};
@@ -27,24 +24,22 @@ fn chrome_profile() -> BrowserProfile {
         .clone()
 }
 
-// ── C-1: an unknown settings_order key is a typo, not a no-op ────────────────
 #[test]
 fn unknown_settings_order_key_is_rejected() {
     let mut h2 = chrome_h2();
-    h2.settings_order.push("initial_windowsize".into()); // typo of initial_window_size
+    h2.settings_order.push("initial_windowsize".into());
     assert!(
         H2Config::from_profile(&h2).is_err(),
         "a typo'd settings_order key was silently dropped, shipping the wrong SETTINGS frame"
     );
 }
 
-// ── C-2: pseudo_order must be exactly four known tokens ──────────────────────
 #[test]
 fn unknown_pseudo_order_token_is_rejected() {
     let mut h2 = chrome_h2();
     h2.pseudo_order = vec![
         "method".into(),
-        "xyz".into(), // unknown
+        "xyz".into(),
         "authority".into(),
         "scheme".into(),
     ];
@@ -57,7 +52,7 @@ fn unknown_pseudo_order_token_is_rejected() {
 #[test]
 fn short_pseudo_order_is_rejected() {
     let mut h2 = chrome_h2();
-    h2.pseudo_order = vec!["method".into(), "authority".into(), "scheme".into()]; // 3, not 4
+    h2.pseudo_order = vec!["method".into(), "authority".into(), "scheme".into()];
     assert!(
         H2Config::from_profile(&h2).is_err(),
         "a 3-element pseudo_order silently padded the 4th slot with a Chrome default"
@@ -67,9 +62,6 @@ fn short_pseudo_order_is_rejected() {
 #[test]
 fn duplicate_pseudo_order_token_is_rejected() {
     let mut h2 = chrome_h2();
-    // 4 entries, all individually valid — but `:method` twice means
-    // `:authority` is missing; build_pseudo_list would emit a malformed
-    // request (duplicate pseudo-header, one dropped entirely).
     h2.pseudo_order = vec![
         "method".into(),
         "method".into(),
@@ -82,7 +74,6 @@ fn duplicate_pseudo_order_token_is_rejected() {
     );
 }
 
-// ── C-3: a missing connection window is a data bug, not RFC-default ──────────
 #[test]
 fn missing_connection_window_is_rejected() {
     let mut h2 = chrome_h2();
@@ -94,17 +85,14 @@ fn missing_connection_window_is_rejected() {
     );
 }
 
-// ── C-4: profile family must map to a real H3 config, never default ─────────
 #[cfg(feature = "http3")]
 #[test]
 fn unknown_profile_family_has_no_h3_config() {
     use leyline::H3Config;
-    // okhttp ships no HTTP/3 fingerprint; it must error, not borrow Chrome's.
     assert!(
         H3Config::for_family("okhttp").is_err(),
         "okhttp silently received an H3 config it has no fingerprint for"
     );
-    // Empty family is the #[serde(default)] value — must not default to Chrome.
     assert!(
         H3Config::for_family("").is_err(),
         "empty meta.family silently defaulted to Chrome's QUIC transport params"
@@ -115,8 +103,6 @@ fn unknown_profile_family_has_no_h3_config() {
 #[test]
 fn gecko_family_maps_to_firefox_h3_not_chrome() {
     use leyline::H3Config;
-    // Firefox profiles declare family="gecko" (not "firefox"); the h3
-    // config lookup must key on the declared value.
     let gecko = H3Config::for_family("gecko").expect("gecko maps to an H3 config");
     assert_eq!(
         gecko.initial_max_streams_bidi,
@@ -130,11 +116,21 @@ fn gecko_family_maps_to_firefox_h3_not_chrome() {
     );
 }
 
-// ── C-7: a garbage cert-compression name is a profile typo → reject ─────────
+#[cfg(feature = "http3")]
+#[test]
+fn qpack() {
+    use leyline::H3Config;
+    assert_eq!(H3Config::chrome().qpack_max_table_capacity, 0);
+    assert_eq!(H3Config::firefox().qpack_max_table_capacity, 0);
+    assert_eq!(H3Config::safari().qpack_max_table_capacity, 0);
+    assert_eq!(H3Config::chrome().qpack_blocked_streams, 0);
+    assert_eq!(H3Config::firefox().qpack_blocked_streams, 0);
+    assert_eq!(H3Config::safari().qpack_blocked_streams, 0);
+}
+
 #[test]
 fn unknown_cert_compression_algorithm_is_rejected() {
     let mut profile = chrome_profile();
-    // Not an RFC 8879 codepoint — a typo, not a real algorithm.
     profile.tls.cert_compression = vec!["frobnicate".into()];
     assert!(
         TlsContext::from_profile(&profile, TlsMinVersion::Tls13).is_err(),
@@ -142,9 +138,6 @@ fn unknown_cert_compression_algorithm_is_rejected() {
     );
 }
 
-// Real RFC 8879 codepoints (Firefox advertises zlib + brotli + zstd) must all
-// build — each is now registered with a working decompressor, so the advertised
-// `compress_certificate` extension is honest.
 #[test]
 fn real_cert_compression_codepoints_still_build() {
     let mut profile = chrome_profile();
@@ -155,11 +148,6 @@ fn real_cert_compression_codepoints_still_build() {
     );
 }
 
-// ── A fixed extension order must be a complete, real permutation ──────
-// BoringSSL rejects an unknown or repeated extension ID outright, and appends
-// whatever the list omits in its own order. Either way the ClientHello stops
-// matching the browser the profile claims to be — JA4_r drift the sorted JA4
-// hides — so a broken order fails at load rather than at connect.
 const FIREFOX_152: &str = include_str!("../profiles/firefox/152.toml");
 const FIREFOX_152_PERMUTATION: &str =
     "[0, 23, 65281, 10, 11, 35, 16, 5, 34, 18, 51, 43, 13, 45, 28, 27, 65037]";
@@ -184,8 +172,6 @@ fn permutation_load_error(list: &str) -> String {
 
 #[test]
 fn permutation_entry_outside_the_advertised_set_is_rejected() {
-    // 0x1234 is not an extension any profile advertises. BoringSSL would reject
-    // the list wholesale and silently ship its default order.
     let err = permutation_load_error(
         "[0, 23, 65281, 10, 11, 35, 16, 5, 34, 18, 51, 43, 13, 45, 28, 27, 4660]",
     );
@@ -197,8 +183,6 @@ fn permutation_entry_outside_the_advertised_set_is_rejected() {
 
 #[test]
 fn permutation_omitting_an_advertised_extension_is_rejected() {
-    // compress_certificate (27) dropped while cert_compression stays populated:
-    // BoringSSL appends it after the listed extensions, off its captured spot.
     let err = permutation_load_error(
         "[0, 23, 65281, 10, 11, 35, 16, 5, 34, 18, 51, 43, 13, 45, 28, 65037]",
     );
@@ -230,9 +214,6 @@ fn empty_permutation_is_rejected() {
 
 #[test]
 fn positioning_pre_shared_key_is_rejected() {
-    // 41 appears in a resumed-handshake capture, but TLS 1.3 fixes it last and
-    // BoringSSL ignores any position given for it — listing it would promise a
-    // wire order leyline cannot deliver.
     let err = permutation_load_error(
         "[0, 23, 65281, 10, 11, 35, 16, 5, 34, 18, 51, 43, 13, 45, 28, 27, 65037, 41]",
     );
@@ -242,8 +223,6 @@ fn positioning_pre_shared_key_is_rejected() {
     );
 }
 
-// Positive guard: the shipped orders survive the gate, and at least one profile
-// actually exercises it (ProfileRegistry::builtin panics on a rejected profile).
 #[test]
 fn builtin_profiles_declaring_an_extension_order_still_load() {
     let reg = ProfileRegistry::builtin();
@@ -263,9 +242,6 @@ fn builtin_profiles_declaring_an_extension_order_still_load() {
     );
 }
 
-// ── verified_against: every shipping profile must name what it was anchored to
-// A profile with an empty verified_against has never been checked against a
-// live capture. Missing it is a test failure.
 #[test]
 fn every_builtin_profile_declares_verified_against() {
     let reg = ProfileRegistry::builtin();
@@ -279,11 +255,7 @@ fn every_builtin_profile_declares_verified_against() {
     }
 }
 
-// captured_against is optional. Missing it warns via `load_warnings` instead
-// of failing the build.
-
 /// A minimal, permutation-free profile that parses through `from_toml`.
-/// `{extra}` splices an extra `[meta]` line (or nothing) for each case.
 fn minimal_profile_toml(extra: &str) -> String {
     format!(
         r#"
@@ -323,7 +295,6 @@ fn captured_against_parses_and_clears_the_warning() {
 
 #[test]
 fn missing_captured_against_warns_but_still_loads() {
-    // Absent field.
     let profile = BrowserProfile::from_toml(&minimal_profile_toml(""))
         .expect("a profile without captured_against must still load");
     assert!(profile.meta.captured_against.is_none());
@@ -336,7 +307,6 @@ fn missing_captured_against_warns_but_still_loads() {
         profile.load_warnings()
     );
 
-    // Present-but-empty is treated the same as missing.
     let blank = BrowserProfile::from_toml(&minimal_profile_toml(r#"captured_against = "  ""#))
         .expect("a blank captured_against must still load");
     assert!(
@@ -351,14 +321,18 @@ fn missing_captured_against_warns_but_still_loads() {
 
 #[test]
 fn backfilled_builtin_profiles_carry_captured_against() {
-    // Profiles that record a capture build must keep the field.
     let reg = ProfileRegistry::builtin();
     for (browser, expected) in [
         (Browser::Chrome148, "chrome-148"),
         (Browser::Chrome150, "chrome-150.0.7871.128"),
+        (Browser::Chrome151, "chrome-headless-shell-151.0.7922.138"),
+        (Browser::Chrome152, "chrome-headless-shell-152.0.7977.64"),
         (Browser::Firefox150, "firefox-150.0"),
         (Browser::Firefox151, "firefox-151.0"),
         (Browser::Firefox152, "firefox-152.0"),
+        (Browser::Firefox153, "firefox-153.0.1"),
+        (Browser::Firefox154, "firefox-154.0.1"),
+        (Browser::Safari26, "webkit-26.5"),
         (Browser::Brave146, "brave-146"),
     ] {
         let profile = reg.get_browser(browser).expect("built-in profile");
@@ -401,7 +375,6 @@ fn chrome150_identity_matches_capture_on_every_supported_platform() {
     }
 }
 
-// ── Positive guard: every shipping profile must build an SSL context ─────────
 #[test]
 fn every_builtin_profile_builds_ssl_context() {
     let reg = ProfileRegistry::builtin();
@@ -417,7 +390,6 @@ fn every_builtin_profile_builds_ssl_context() {
     }
 }
 
-// ── Positive guard: stricter validation must not reject any shipping profile ─
 #[test]
 fn every_builtin_h2config_resolves_on_all_platforms() {
     let reg = ProfileRegistry::builtin();
@@ -439,11 +411,6 @@ fn every_builtin_h2config_resolves_on_all_platforms() {
     }
 }
 
-// ── -k escape hatch: building with verification disabled must not depend ─────
-// on a loadable system trust store. On this CI host the
-// store loads fine either way, so this only anchors the happy path; the real
-// guarantee is that `danger_accept_invalid_certs` builds with
-// `without_system_roots`, which never touches the store.
 #[test]
 fn danger_accept_invalid_certs_session_builds() {
     leyline::Session::builder()
@@ -452,11 +419,6 @@ fn danger_accept_invalid_certs_session_builds() {
         .build()
         .expect("-k session must build even when system trust is unavailable");
 }
-
-// ── CFNetwork family: captured-only anchoring ───────────────────────────────
-// The cfnetwork family is anchored to OUR captures, not to any public browser
-// reference. `captured_against` is therefore REQUIRED (not just a nudge) for
-// this family — a cfnetwork profile without an exact capture build is a lie.
 
 #[test]
 fn cfnetwork_profiles_declare_captured_against() {
@@ -480,9 +442,6 @@ fn cfnetwork_profiles_declare_captured_against() {
 
 #[test]
 fn cfnetwork_sigalgs_carry_the_wire_duplicate() {
-    // CFNetwork advertises rsa_pss_rsae_sha384 (0x0805) twice — a captured
-    // Apple quirk. A cfnetwork profile whose sigalg list has no duplicate no
-    // longer matches the wire.
     let reg = ProfileRegistry::builtin();
     for browser in [Browser::CfnetworkIOS18, Browser::CfnetworkMacOS26] {
         let profile = reg.get_browser(browser).expect("built-in profile");
@@ -530,12 +489,6 @@ fn cfnetwork_profiles_disable_session_tickets() {
     }
 }
 
-// ── L6: profile-freshness metadata ─────────────────────────────────────────
-// Their Chrome-96-in-2026 corpus is the cautionary tale: a stale browser
-// identity against bleeding-edge wire identity is a cross-layer tell. The
-// metadata (meta.version + captured_against) already ships; these tests make
-// staleness fail loudly instead of riding along.
-
 fn newest_chrome_browser() -> Browser {
     ALL_BROWSERS
         .iter()
@@ -546,8 +499,7 @@ fn newest_chrome_browser() -> Browser {
         .expect("at least one Chrome-family profile in ALL_BROWSERS")
 }
 
-/// Newest Chrome (derived from ALL_BROWSERS, not a hardcoded major): dir
-/// version, meta.version, and a **required** captured_against anchor agree.
+/// Newest Chrome (derived from ALL_BROWSERS, not a hardcoded major): dir version, meta.version, and a **required** captured_against anchor agree.
 #[test]
 fn newest_chrome_profile_metadata_is_self_consistent() {
     let reg = ProfileRegistry::builtin();
@@ -565,10 +517,10 @@ fn newest_chrome_profile_metadata_is_self_consistent() {
         .captured_against
         .as_ref()
         .expect("newest Chrome must pin captured_against (corpus rot gate)");
-    // Anchor shape: "chrome-150.0.7871.128".
     let anchor_major = anchor
-        .split_once('-')
-        .and_then(|(_, rest)| rest.split('.').next())
+        .split('-')
+        .find(|part| part.as_bytes().first().is_some_and(u8::is_ascii_digit))
+        .and_then(|part| part.split('.').next())
         .and_then(|m| m.parse::<u32>().ok());
     assert_eq!(
         anchor_major,
@@ -577,8 +529,7 @@ fn newest_chrome_profile_metadata_is_self_consistent() {
     );
 }
 
-/// Hermetic staleness floor on the derived newest Chrome major. Deliberately
-/// low — trips only after long neglect. Live ignored test is the real gate.
+/// Hermetic staleness floor on the derived newest Chrome major.
 #[test]
 fn newest_chrome_profile_is_not_neglected() {
     const FRESHNESS_FLOOR: u32 = 145;
@@ -592,10 +543,7 @@ fn newest_chrome_profile_is_not_neglected() {
     );
 }
 
-/// Live freshness gate: newest built-in Chrome within 2 majors of Stable.
-/// Schedule: `cargo test -p leyline-tls --test profile_validation \
-///   newest_chrome_profile_within_two_majors_of_current_stable -- --ignored`
-/// or CI job `leyline-profile-freshness`. Requires curl + network.
+/// Live freshness gate: newest built-in Chrome within 1 major of Stable.
 #[test]
 #[ignore = "network: fetches Chrome for Testing; run on schedule"]
 fn newest_chrome_profile_within_two_majors_of_current_stable() {
@@ -620,18 +568,12 @@ fn newest_chrome_profile_within_two_majors_of_current_stable() {
         .chromium_major()
         .expect("chrome major");
     assert!(
-        current <= newest_major + 2,
+        current <= newest_major + 1,
         "newest built-in Chrome profile is {newest_major}, current stable is \
-         {current} — >2 majors behind; ship a fresh capture (their Chrome-96 \
-         lesson)"
+         {current} — more than one major behind; ship a fresh capture"
     );
 }
 
-// Invariant: every variant's hello_rep must be a member of its family's
-// family_hellos. hello_rep collapses UA-only majors onto the hello owner;
-// family_hellos lists the owners. If a new variant lands without its
-// hello_rep arm, this catches it instead of the identity lock silently
-// treating a shared hello as a distinct owner.
 #[test]
 fn hello_rep_maps_every_variant_to_a_family_hello() {
     for browser in ALL_BROWSERS {

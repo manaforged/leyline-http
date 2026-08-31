@@ -1,10 +1,4 @@
 //! Persist cookies across requests with a `Jar`.
-//!
-//! Run with: `cargo run -p leyline --example cookies`
-//!
-//! Swap `URL_SET` and `URL_READ` for endpoints that actually round-trip a
-//! `Set-Cookie` header (e.g. a local test server). example.com will not
-//! echo cookies back.
 
 use leyline::cookie::Jar;
 use leyline::{Browser, Platform, Session};
@@ -22,11 +16,9 @@ async fn main() -> leyline::Result<()> {
         .cookie_jar(jar)
         .build()?;
 
-    // First request: server may set cookies on the jar.
-    let _ = session.get(URL_SET).send().await?;
+    drop(session.get(URL_SET).await?);
 
-    // Second request: any cookies the jar captured are sent automatically.
-    let resp = session.get(URL_READ).send().await?;
+    let resp = session.get(URL_READ).await?;
     println!("status: {}", resp.status());
 
     Ok(())

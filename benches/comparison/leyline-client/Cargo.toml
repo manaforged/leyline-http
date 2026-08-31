@@ -1,0 +1,25 @@
+[package]
+name = "leyline-cmp-client"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Detached from leyline's workspace so its prebuilt-BoringSSL leyline dep does
+# not enter (or conflict with) the main build graph.
+[workspace]
+
+[dependencies]
+leyline = { package = "leyline-http", path = "../../../crates/leyline" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
+[features]
+default = []
+mimalloc = ["dep:mimalloc"]
+
+[dependencies.mimalloc]
+version = "0.1"
+optional = true
+
+[profile.release]
+lto = "fat"
+codegen-units = 1

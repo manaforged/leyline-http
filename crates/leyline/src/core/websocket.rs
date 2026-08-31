@@ -1,19 +1,4 @@
 //! WebSocket client with TLS fingerprinting.
-//!
-//! Two transports share one caller-facing type:
-//!
-//! - **HTTP/1.1 Upgrade** (RFC 6455) — the long-standing path. A fresh
-//!   TLS connection is negotiated with `http/1.1` ALPN and
-//!   tokio-tungstenite drives the Upgrade handshake over it.
-//! - **HTTP/2 extended CONNECT** (RFC 8441) — when the session's pooled
-//!   H2 connection to the destination advertises
-//!   `SETTINGS_ENABLE_CONNECT_PROTOCOL = 1`, the WebSocket opens as a
-//!   bidirectional stream inside that H2 connection: the handshake
-//!   happens in HEADERS, DATA frames carry WebSocket frames.
-//!
-//! Both return the same [`WsConnection`] so callers don't see the
-//! difference. The HTTP/1.1 variant remains the fallback whenever ALPN
-//! doesn't negotiate `h2` or the peer hasn't enabled extended CONNECT.
 
 use std::sync::Arc;
 
@@ -23,6 +8,7 @@ use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
+pub use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::{HeaderName, HeaderValue, Uri};
 use tokio_tungstenite::tungstenite::protocol::Role;
@@ -36,11 +22,6 @@ use crate::tls::{FingerprintConnector, TlsIo};
 use crate::core::error::{Error, Result};
 
 /// Transport variant carried inside a connected [`WsConnection`].
-///
-/// Boxed because the two sides have different sizes (an H1 TLS stream
-/// is a [`TlsIo`]; an H2 CONNECT stream is an `H2ConnectStream`).
-/// Keeping the enum behind an inner field also lets us evolve the list
-/// without breaking the public `WsConnection` API.
 enum WsInner {
     /// Classic HTTP/1.1 Upgrade (RFC 6455) over TLS.
     H1(WebSocketStream<TlsIo>),
@@ -49,24 +30,14 @@ enum WsInner {
 }
 
 /// A connected WebSocket.
-///
-/// ```rust,ignore
-/// let mut ws = session.websocket("wss://echo.example.com/ws").await?;
-/// ws.send("hello").await?;
-/// let msg = ws.recv().await?;
-/// ws.close().await?;
-/// ```
 pub struct WsConnection {
     inner: WsInner,
-    /// The subprotocol the origin selected in its handshake response
-    /// (`Sec-WebSocket-Protocol`), if any.
+    /// The subprotocol the origin selected in its handshake response (`Sec-WebSocket-Protocol`), if any.
     protocol: Option<String>,
 }
 
 impl WsConnection {
-    /// Connect over HTTP/1.1. This is the legacy path — a fresh TLS
-    /// connection is established with `http/1.1` ALPN and
-    /// tokio-tungstenite performs the Upgrade handshake.
+    /// Connect over HTTP/1.1.
     pub(crate) async fn connect_h1(
         connector: &FingerprintConnector,
         url: &str,
@@ -86,11 +57,6 @@ impl WsConnection {
             .await
             .map_err(Error::Tls)?;
 
-        // Rewrite scheme from `wss` to `ws` once at the URL head —
-        // the earlier `url.replace(..)` was a naive substring
-        // substitution that would corrupt query strings or path
-        // segments containing the literal `wss://` (e.g. a
-        // redirect-target query parameter).
         let ws_url = if let Some(rest) = url.strip_prefix("wss://") {
             format!("ws://{rest}")
         } else {
@@ -115,20 +81,12 @@ impl WsConnection {
             HeaderValue::from_static("permessage-deflate; client_max_window_bits"),
         );
 
-        // Forward caller-supplied headers (Cookie, Authorization,
-        // Sec-WebSocket-Protocol, a real browser User-Agent/Origin, …) —
-        // overriding the defaults set above — but never the handshake-control
-        // headers tungstenite manages, or the upgrade breaks.
         for (name, value) in extra_headers {
             if is_reserved_ws_header(name) {
                 continue;
             }
-            if let (Ok(hn), Ok(hv)) = (
-                HeaderName::from_bytes(name.as_bytes()),
-                HeaderValue::from_str(value),
-            ) {
-                headers.insert(hn, hv);
-            }
+            let (hn, hv) = ws_header_pair(name, value)?;
+            headers.insert(hn, hv);
         }
 
         let (ws_stream, response) = tokio_tungstenite::client_async(request, tls_stream.stream)
@@ -148,12 +106,6 @@ impl WsConnection {
     }
 
     /// Connect over HTTP/2 extended CONNECT (RFC 8441).
-    ///
-    /// Uses the session pool: if a pooled H2 connection for the
-    /// destination exists it is reused, otherwise a fresh one is
-    /// handshaked. Returns an error shaped so that
-    /// [`WsConnection::is_h2_fallback_trigger`] picks it up when the
-    /// peer has not advertised `SETTINGS_ENABLE_CONNECT_PROTOCOL=1`.
     #[expect(
         clippy::too_many_arguments,
         reason = "flat per-request wire fields across one internal call path"
@@ -191,7 +143,6 @@ impl WsConnection {
             format!("{host}:{port}")
         };
 
-        // Grab (or open) a pooled H2 handle for this destination.
         let (h2_client, _tls) =
             crate::pool::checkout_handle(pool, connector, h2_config, &host, port, proxy).await?;
 
@@ -199,8 +150,6 @@ impl WsConnection {
             return Err(Error::Http(H2_NO_CONNECT_PROTOCOL.into()));
         }
 
-        // Build the WebSocket handshake headers. RFC 8441 §4 reuses
-        // the RFC 6455 Sec-WebSocket-* headers on the HEADERS frame.
         let sec_key = random_sec_ws_key();
         let mut headers: Vec<(String, String)> = Vec::with_capacity(8);
         headers.push(("sec-websocket-version".into(), "13".into()));
@@ -212,13 +161,12 @@ impl WsConnection {
         headers.push(("user-agent".into(), user_agent.into()));
         headers.push(("origin".into(), origin.into()));
 
-        // Forward caller headers (Cookie/Authorization/subprotocol/…), overriding
-        // the UA/Origin defaults, skipping handshake-control headers.
         for (name, value) in extra_headers {
             let lname = name.to_ascii_lowercase();
             if is_reserved_ws_header(&lname) {
                 continue;
             }
+            drop(ws_header_pair(name, value)?);
             match headers.iter_mut().find(|(n, _)| n == &lname) {
                 Some(slot) => slot.1 = value.clone(),
                 None => headers.push((lname, value.clone())),
@@ -244,9 +192,6 @@ impl WsConnection {
             .await
             .map_err(|e| Error::Http(format!("h2 ws: {e}")))?;
 
-        // RFC 8441 §5: :status 200 is success; anything else is a
-        // handshake failure. Surface 4xx/5xx before any WebSocket
-        // framing code touches the stream.
         if stream.status() != 200 {
             return Err(Error::Http(format!(
                 "ws handshake: h2 extended CONNECT returned :status {}",
@@ -254,17 +199,12 @@ impl WsConnection {
             )));
         }
 
-        // Read the negotiated subprotocol off the CONNECT response before
-        // `from_raw_socket` consumes the stream.
         let protocol = stream
             .response_headers()
             .iter()
             .find(|(n, _)| n.eq_ignore_ascii_case("sec-websocket-protocol"))
             .map(|(_, v)| v.clone());
 
-        // With the handshake already done on HEADERS, the bidirectional
-        // stream carries only WebSocket frames — exactly what
-        // `from_raw_socket` is for.
         let ws_stream = WebSocketStream::from_raw_socket(stream, Role::Client, None).await;
         Ok(Self {
             inner: WsInner::H2(ws_stream),
@@ -272,10 +212,7 @@ impl WsConnection {
         })
     }
 
-    /// True if `err` is the sentinel "peer doesn't enable CONNECT
-    /// protocol" failure from [`connect_h2`](Self::connect_h2). The
-    /// session uses this to decide whether an H2 attempt should fall
-    /// back to a fresh H1 upgrade.
+    /// True if `err` is the sentinel "peer doesn't enable CONNECT protocol" failure from [`connect_h2`](Self::connect_h2).
     pub(crate) fn is_h2_fallback_trigger(err: &Error) -> bool {
         matches!(err, Error::Http(s) if s.contains(H2_NO_CONNECT_PROTOCOL))
     }
@@ -308,8 +245,8 @@ impl WsConnection {
         }
     }
 
-    /// Send a raw tungstenite Message.
-    pub async fn send_raw(&mut self, msg: Message) -> Result<()> {
+    /// Send a raw [`WsMessage`].
+    pub async fn send_raw(&mut self, msg: WsMessage) -> Result<()> {
         match &mut self.inner {
             WsInner::H1(s) => s
                 .send(msg)
@@ -322,8 +259,8 @@ impl WsConnection {
         }
     }
 
-    /// Receive the next message. Returns None on close.
-    pub async fn recv(&mut self) -> Result<Option<Message>> {
+    /// Receive the next message.
+    pub async fn recv(&mut self) -> Result<Option<WsMessage>> {
         let next = match &mut self.inner {
             WsInner::H1(s) => s.next().await,
             WsInner::H2(s) => s.next().await,
@@ -354,17 +291,12 @@ impl WsConnection {
         matches!(self.inner, WsInner::H2(_))
     }
 
-    /// The subprotocol the origin selected in its handshake response
-    /// (`Sec-WebSocket-Protocol`), if any. A MITM bridge must echo this to its
-    /// own client or the client aborts the upgrade.
+    /// The subprotocol the origin selected in its handshake response (`Sec-WebSocket-Protocol`), if any.
     pub fn protocol(&self) -> Option<&str> {
         self.protocol.as_deref()
     }
 
-    /// Split into independent send and receive halves so each direction can be
-    /// driven by its own task. A single-task `select!` relay stalls one
-    /// direction while a `send` on the other is backpressured; splitting removes
-    /// that head-of-line coupling for a full-duplex proxy bridge.
+    /// Split into independent send and receive halves so each direction can be driven by its own task.
     pub fn split(self) -> (WsSink, WsStream) {
         match self.inner {
             WsInner::H1(s) => {
@@ -415,8 +347,8 @@ impl WsSink {
         self.send_raw(Message::Binary(data.into())).await
     }
 
-    /// Send a raw tungstenite Message.
-    pub async fn send_raw(&mut self, msg: Message) -> Result<()> {
+    /// Send a raw [`WsMessage`].
+    pub async fn send_raw(&mut self, msg: WsMessage) -> Result<()> {
         match &mut self.inner {
             WsSinkInner::H1(s) => s.send(msg).await,
             WsSinkInner::H2(s) => s.send(msg).await,
@@ -446,8 +378,8 @@ pub struct WsStream {
 }
 
 impl WsStream {
-    /// Receive the next message. Returns `None` on close.
-    pub async fn recv(&mut self) -> Result<Option<Message>> {
+    /// Receive the next message.
+    pub async fn recv(&mut self) -> Result<Option<WsMessage>> {
         let next = match &mut self.inner {
             WsStreamInner::H1(s) => s.next().await,
             WsStreamInner::H2(s) => s.next().await,
@@ -460,15 +392,18 @@ impl WsStream {
     }
 }
 
-/// Sentinel message embedded in the `Error::Http` string when the
-/// peer's pooled H2 connection doesn't advertise
-/// `SETTINGS_ENABLE_CONNECT_PROTOCOL`. Matched by
-/// [`WsConnection::is_h2_fallback_trigger`] to drive the H1 fallback.
+/// Sentinel message embedded in the `Error::Http` string when the peer's pooled H2 connection doesn't advertise `SETTINGS_ENABLE_CONNECT_PROTOCOL`.
 const H2_NO_CONNECT_PROTOCOL: &str = "h2-no-connect-protocol";
 
-/// Headers the WebSocket handshake owns. A caller forwarding a captured request's
-/// headers must not overwrite the values tungstenite/leyline generate for these,
-/// or the upgrade breaks.
+fn ws_header_pair(name: &str, value: &str) -> Result<(HeaderName, HeaderValue)> {
+    let hn = HeaderName::from_bytes(name.as_bytes())
+        .map_err(|_| Error::Http(format!("invalid websocket header name: {name}")))?;
+    let hv = HeaderValue::from_str(value)
+        .map_err(|_| Error::Http(format!("invalid websocket header value for {name}")))?;
+    Ok((hn, hv))
+}
+
+/// Headers the WebSocket handshake owns.
 fn is_reserved_ws_header(name: &str) -> bool {
     matches!(
         name.to_ascii_lowercase().as_str(),
@@ -482,10 +417,7 @@ fn is_reserved_ws_header(name: &str) -> bool {
     )
 }
 
-/// Generate a cryptographically random 16-byte `Sec-WebSocket-Key`
-/// (RFC 6455 §4.1). The nonce must be unpredictable to prevent
-/// cached-response replay through an intermediary — a
-/// `RandomState`-hashed timestamp is not.
+/// Generate a cryptographically random 16-byte `Sec-WebSocket-Key` (RFC 6455 §4.1).
 fn random_sec_ws_key() -> String {
     use rand::RngCore;
     let mut bytes = [0u8; 16];

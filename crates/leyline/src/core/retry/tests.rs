@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn default_policy_retries_5xx_subset() {
-    let p = RetryPolicy::default();
+    let p = RetryPolicy::transient();
     assert!(p.matches_status(502));
     assert!(p.matches_status(503));
     assert!(p.matches_status(504));
@@ -14,7 +14,7 @@ fn default_policy_retries_5xx_subset() {
 fn server_error_trigger_matches_all_5xx() {
     let p = RetryPolicy {
         retry_on: vec![RetryTrigger::ServerError],
-        ..RetryPolicy::default()
+        ..RetryPolicy::transient()
     };
     assert!(p.matches_status(500));
     assert!(p.matches_status(599));
@@ -48,9 +48,23 @@ fn retry_after_parses_delta_seconds_only() {
     assert_eq!(parse_retry_after("120"), Some(Duration::from_secs(120)));
     assert_eq!(parse_retry_after("  5 "), Some(Duration::from_secs(5)));
     assert_eq!(parse_retry_after("0"), Some(Duration::ZERO));
-    // HTTP-date form is not parsed here — falls through to backoff.
-    assert_eq!(parse_retry_after("Wed, 21 Oct 2025 07:28:00 GMT"), None);
     assert_eq!(parse_retry_after("soon"), None);
+}
+
+#[test]
+fn retry_after_parses_past_imf_fixdate_as_zero() {
+    assert_eq!(
+        parse_retry_after("Wed, 21 Oct 2025 07:28:00 GMT"),
+        Some(Duration::ZERO)
+    );
+}
+
+#[test]
+fn imf_fixdate_epoch() {
+    assert_eq!(
+        unix_from_ymd_hms(1970, 1, 1, 0, 0, 0),
+        Some(std::time::UNIX_EPOCH)
+    );
 }
 
 #[test]

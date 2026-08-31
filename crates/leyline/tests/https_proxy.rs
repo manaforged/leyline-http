@@ -1,21 +1,4 @@
 //! Integration test: `https://` CONNECT proxy (TLS to the proxy itself).
-//!
-//! For an `https://` proxy the client→proxy leg is itself TLS, so the CONNECT
-//! request — including `Proxy-Authorization` credentials — travels *encrypted*,
-//! and the real origin handshake nests inside that proxy TLS.
-//!
-//! This stands up an in-process mock proxy that:
-//!   1. accepts a TLS handshake (the proxy leg),
-//!   2. reads the CONNECT request off the decrypted stream (proving it arrived
-//!      inside TLS, not in cleartext) and reports it back,
-//!   3. answers `200 Connection established`,
-//!   4. accepts a SECOND, nested TLS handshake (the origin leg) over the same
-//!      stream.
-//!
-//! The production `FingerprintConnector` drives the whole chain. `connect`
-//! returning `Ok` proves both handshakes completed and the origin cert
-//! verified against the trusted CA through the tunnel; the captured CONNECT
-//! proves the credentials were encrypted.
 #![expect(
     clippy::unwrap_used,
     reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
@@ -44,9 +27,7 @@ struct Generated {
     ca_cert_pem: Vec<u8>,
 }
 
-/// Generate a CA and a leaf cert carrying every name in `dns_names` as a SAN,
-/// so the one cert serves both the proxy leg (`localhost`) and the origin leg
-/// (`right.example`).
+/// Generate a CA and a leaf cert carrying every name in `dns_names` as a SAN, so the one cert serves both the proxy leg (`localhost`) and the origin leg (`right.example`).
 fn generate_chain(dns_names: &[&str]) -> Generated {
     let ca_key = PKey::from_rsa(Rsa::generate(2048).unwrap()).unwrap();
     let mut name = X509NameBuilder::new().unwrap();
@@ -115,8 +96,7 @@ fn load_profile() -> BrowserProfile {
         .expect("chrome 147 profile parses")
 }
 
-/// Read from `s` until the `\r\n\r\n` header terminator; return the bytes as a
-/// String.
+/// Read from `s` until the `\r\n\r\n` header terminator; return the bytes as a String.
 async fn read_head<S>(s: &mut S) -> String
 where
     S: AsyncReadExt + Unpin,
@@ -136,8 +116,7 @@ where
     String::from_utf8_lossy(&buf).into_owned()
 }
 
-/// Spawn a mock `https://` CONNECT proxy. Returns its address and a receiver
-/// that yields the CONNECT request the proxy decrypted off the TLS stream.
+/// Spawn a mock `https://` CONNECT proxy.
 async fn spawn_mock_https_proxy(r#gen: &Generated) -> (SocketAddr, oneshot::Receiver<String>) {
     use leyline_bssl::ssl::{Ssl, SslAcceptor, SslMethod};
 
@@ -161,13 +140,10 @@ async fn spawn_mock_https_proxy(r#gen: &Generated) -> (SocketAddr, oneshot::Rece
 
         let (tcp, _) = listener.accept().await.unwrap();
 
-        // Proxy leg: TLS to the proxy itself.
         let ssl = Ssl::new(acceptor.context()).unwrap();
         let mut proxy_tls = leyline_bssl_tokio::SslStream::new(ssl, tcp).unwrap();
         std::pin::Pin::new(&mut proxy_tls).accept().await.unwrap();
 
-        // The CONNECT request arrives decrypted here — i.e. it was encrypted on
-        // the wire. Report it so the test can assert the credentials.
         let connect_req = read_head(&mut proxy_tls).await;
         let _ = tx.send(connect_req);
 
@@ -177,21 +153,15 @@ async fn spawn_mock_https_proxy(r#gen: &Generated) -> (SocketAddr, oneshot::Rece
             .unwrap();
         proxy_tls.flush().await.unwrap();
 
-        // Origin leg: a SECOND, nested TLS handshake over the proxy TLS — the
-        // real fingerprinted handshake the client performs to the target.
         let ssl2 = Ssl::new(acceptor.context()).unwrap();
         let mut origin_tls = leyline_bssl_tokio::SslStream::new(ssl2, proxy_tls).unwrap();
         let _ = std::pin::Pin::new(&mut origin_tls).accept().await;
-        // Client returns its handshaked stream without sending an app request,
-        // so nothing more to read; the task ends.
     });
 
     (addr, rx)
 }
 
 fn connector(r#gen: &Generated) -> FingerprintConnector {
-    // Trust only the test CA — no env/system roots — so a successful origin
-    // handshake through the tunnel proves real verification, not a bypass.
     let trust = TlsTrustConfig::new()
         .without_env_roots()
         .without_system_roots()
@@ -202,8 +172,6 @@ fn connector(r#gen: &Generated) -> FingerprintConnector {
 
 #[tokio::test]
 async fn https_proxy_tunnels_with_encrypted_connect() {
-    // One cert covers both legs: `localhost` (the proxy, reached via the system
-    // resolver) and `right.example` (the CONNECT target / nested SNI).
     let r#gen = generate_chain(&["localhost", "right.example"]);
     let (addr, connect_rx) = spawn_mock_https_proxy(&r#gen).await;
 
@@ -218,8 +186,6 @@ async fn https_proxy_tunnels_with_encrypted_connect() {
         res.err().map(|e| e.to_string())
     );
 
-    // The proxy decrypted the CONNECT off its TLS stream — so it was encrypted
-    // on the wire — and it carried the Basic credentials (`user:secret`).
     let connect_req = connect_rx.await.expect("proxy reported its CONNECT");
     assert!(
         connect_req.starts_with("CONNECT right.example:443 "),
@@ -233,10 +199,6 @@ async fn https_proxy_tunnels_with_encrypted_connect() {
 
 #[tokio::test]
 async fn https_proxy_refused_when_connector_has_origin_identity() {
-    // A connector carrying an origin-specific TLS identity (here, leaf pins)
-    // must REFUSE an https:// proxy rather than present the origin identity to
-    // the proxy or check the proxy's cert against the origin's pins. The guard
-    // fires before any socket is opened, so the unroutable :1 is never dialed.
     let r#gen = generate_chain(&["right.example"]);
     let trust = TlsTrustConfig::new()
         .without_env_roots()

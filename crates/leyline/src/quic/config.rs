@@ -1,21 +1,11 @@
 //! HTTP/3 + QUIC fingerprint configuration.
-//!
-//! Defines the transport parameters and H3 SETTINGS that match
-//! real browser behavior (Chrome, Firefox, Safari).
 
 use std::time::Duration;
 
 /// HTTP/3 configuration for browser fingerprinting.
-///
-/// `#[non_exhaustive]` so a new RFC parameter can be added without
-/// breaking consumers that constructed with `..Default::default()` or
-/// one of the browser presets. Construct via [`H3Config::chrome`] /
-/// [`firefox`](H3Config::firefox) / [`safari`](H3Config::safari) and
-/// then mutate individual fields.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct H3Config {
-    // ─── QUIC transport parameters ─────────────────────────────
     /// Max data the peer can send (connection-level flow control).
     pub initial_max_data: u64,
     /// Max data on a locally-initiated bidirectional stream.
@@ -37,7 +27,6 @@ pub struct H3Config {
     /// Initial DCID length (Chrome uses 8 bytes).
     pub dcid_length: usize,
 
-    // ─── HTTP/3 SETTINGS ───────────────────────────────────────
     /// QPACK max table capacity.
     pub qpack_max_table_capacity: u64,
     /// QPACK blocked streams.
@@ -45,20 +34,12 @@ pub struct H3Config {
     /// Max field section size (like H2 MAX_HEADER_LIST_SIZE).
     pub max_field_section_size: u64,
 
-    // ─── Safety limits (not wire-visible) ──────────────────────
-    /// Hard cap on the response body the H3 client will buffer
-    /// before aborting the stream. Mirrors the H2 path's
-    /// `max_response_body_bytes` — without it, a malicious origin
-    /// can stream gigabytes over an unbounded flow-control window
-    /// and OOM the client.
+    /// Hard cap on the response body the H3 client will buffer before aborting the stream.
     pub max_response_body_bytes: u64,
 }
 
 impl H3Config {
-    /// Select the H3 transport config for a profile family (`meta.family` in
-    /// the TOML). Unknown or empty families are rejected, not defaulted — a
-    /// wrong QUIC transport fingerprint is a soft-block risk. Keys are the
-    /// family strings the profiles use (`gecko`, `webkit`), not browser names.
+    /// Select the H3 transport config for a profile family (`meta.family` in the TOML).
     pub fn for_family(family: &str) -> Result<Self, crate::Error> {
         match family {
             "chromium" => Ok(Self::chrome()),
@@ -70,7 +51,7 @@ impl H3Config {
         }
     }
 
-    /// Chrome 147 QUIC/H3 configuration.
+    /// Chrome QUIC transport parameters.
     pub fn chrome() -> Self {
         Self {
             initial_max_data: 15_728_640,
@@ -83,22 +64,9 @@ impl H3Config {
             max_udp_payload_size: 1472,
             active_connection_id_limit: 4,
             dcid_length: 8,
-            // Advertised as 0 because leyline-quiche's QPACK decoder
-            // (h3/qpack/decoder.rs) is stubbed for the dynamic-table
-            // path — its dynamic-table branches return InvalidHeaderValue
-            // → QpackDecompressionFailed. Real Chrome advertises 65536/100,
-            // but advertising a non-zero capacity requires the fork's
-            // decoder to support the dynamic table. RFC 9204 §3.1 says an
-            // encoder MUST NOT emit dynamic-table references when the peer's
-            // advertised capacity is zero, so advertising 0 forces Google's
-            // H3 server to use only static-table refs (which the decoder
-            // handles). Cloudflare's server happens to do that anyway —
-            // that's why live_h3_cloudflare passes either way and only
-            // live_h3_google exposed the gap.
             qpack_max_table_capacity: 0,
             qpack_blocked_streams: 0,
             max_field_section_size: 262_144,
-            // 100 MiB default, same as the H1 path's cap.
             max_response_body_bytes: 100 * 1024 * 1024,
         }
     }
@@ -116,15 +84,14 @@ impl H3Config {
             max_udp_payload_size: 1472,
             active_connection_id_limit: 8,
             dcid_length: 8,
-            qpack_max_table_capacity: 65_536,
-            qpack_blocked_streams: 20,
+            qpack_max_table_capacity: 0,
+            qpack_blocked_streams: 0,
             max_field_section_size: 262_144,
-            // 100 MiB default, same as the H1 path's cap.
             max_response_body_bytes: 100 * 1024 * 1024,
         }
     }
 
-    /// Safari 18 QUIC/H3 configuration.
+    /// Safari QUIC/H3 configuration.
     pub fn safari() -> Self {
         Self {
             initial_max_data: 8_388_608,
@@ -137,10 +104,9 @@ impl H3Config {
             max_udp_payload_size: 1452,
             active_connection_id_limit: 4,
             dcid_length: 8,
-            qpack_max_table_capacity: 4096,
-            qpack_blocked_streams: 10,
+            qpack_max_table_capacity: 0,
+            qpack_blocked_streams: 0,
             max_field_section_size: 262_144,
-            // 100 MiB default, same as the H1 path's cap.
             max_response_body_bytes: 100 * 1024 * 1024,
         }
     }

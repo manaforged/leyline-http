@@ -60,13 +60,13 @@ if (Test-Path "crates/leyline-bssl-sys/native/x86_64-pc-windows-msvc/lib/ssl.lib
 Ok "prerequisite scan complete"
 
 Step "fast offline build"
-Run "cargo" @("check", "-p", "leyline", "--all-features")
-Ok "leyline all-features check passed"
+Run "cargo" @("check", "-p", "leyline-http", "--all-features")
+Ok "leyline-http all-features check passed"
 
 if (-not $SkipTests) {
     Step "offline smoke tests"
-    Run "cargo" @("test", "-p", "leyline", "--test", "parity_builder")
-    Run "cargo" @("test", "-p", "leyline", "--test", "tls_happy_eyeballs")
+    Run "cargo" @("test", "-p", "leyline-http", "--test", "parity_builder")
+    Run "cargo" @("test", "-p", "leyline-http", "--test", "tls_happy_eyeballs")
     Ok "developer setup looks ready"
 }
 
@@ -74,4 +74,4 @@ Write-Host ""
 Write-Host "Next useful commands:"
 Write-Host "  ./scripts/verify.sh"
 Write-Host "  cargo test --workspace --exclude leyline-quiche"
-Write-Host "  cargo test -p leyline --test tls_peet -- --ignored"
+Write-Host "  cargo test -p leyline-http --test tls_peet -- --ignored"

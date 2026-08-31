@@ -1,14 +1,8 @@
 //! HTTP/2 SETTINGS frame and pseudo-header ordering.
-//!
-//! Defines the configuration types for HTTP/2 fingerprinting. These are
-//! resolved from TOML browser profiles and applied to the H2 client.
 
 use std::time::Duration;
 
 /// HTTP/2 SETTINGS parameter ID.
-///
-/// `#[non_exhaustive]` so a new RFC parameter can be added without
-/// breaking downstream `match` arms.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u16)]
 #[non_exhaustive]
@@ -32,13 +26,6 @@ pub enum SettingId {
 }
 
 /// RFC 8441 §3 — `SETTINGS_ENABLE_CONNECT_PROTOCOL` identifier (0x8).
-///
-/// Value `1` on the server side means "I accept extended CONNECT with a
-/// `:protocol` pseudo-header" (e.g. WebSocket over HTTP/2); value `0`
-/// (or the setting missing entirely) means the server only speaks the
-/// classic CONNECT tunnel shape from RFC 9113 §8.5. Per RFC 8441 §3
-/// the setting is sticky — once the server advertises `1` it cannot
-/// revert to `0` on the same connection.
 pub const SETTINGS_ENABLE_CONNECT_PROTOCOL: u16 = 0x8;
 
 impl SettingId {
@@ -96,15 +83,9 @@ impl PseudoOrder {
 }
 
 /// Priority fields emitted alongside a client-initiated HEADERS frame.
-///
-/// RFC 9113 deprecated the PRIORITY flag, but Chrome and Firefox still emit
-/// stream-dependency data on initial HEADERS for fingerprint parity. Weight
-/// is carried on the wire as `weight - 1`, so the range `0..=255` maps to
-/// priorities `1..=256`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PriorityParams {
-    /// Exclusive dependency bit (E) — when set, the new stream becomes the
-    /// sole dependency of `stream_dependency`.
+    /// Exclusive dependency bit (E) — when set, the new stream becomes the sole dependency of `stream_dependency`.
     pub exclusive: bool,
     /// Stream ID this new stream depends on (0 = root of the tree).
     pub stream_dependency: u32,
@@ -123,58 +104,28 @@ pub struct H2Config {
     pub pseudo_order: [PseudoOrder; 4],
     /// Initial connection-level window size (for WINDOW_UPDATE after preface).
     pub initial_connection_window_size: u32,
-    /// Optional PRIORITY fields to emit on the initial HEADERS frame of
-    /// each request. `None` (the default) sends no priority data — matches
-    /// non-browser HTTP/2 clients. Set to `Some(..)` to match Chrome /
-    /// Firefox fingerprints.
+    /// Optional PRIORITY fields to emit on the initial HEADERS frame of each request.
     pub default_priority: Option<PriorityParams>,
-    /// Threshold for the inbound RST_STREAM flood guard — more than this
-    /// many RST_STREAM frames inside `rst_stream_flood_window` causes the
-    /// connection to tear down with `ENHANCE_YOUR_CALM` (CVE-2023-44487
-    /// defense-in-depth).
+    /// Threshold for the inbound RST_STREAM flood guard — more than this many RST_STREAM frames inside `rst_stream_flood_window` causes the connection to tear down with `ENHANCE_YOUR_CALM` (CVE-2023-44487 defense-in-depth).
     pub rst_stream_flood_threshold: u32,
     /// Sliding window over which `rst_stream_flood_threshold` is measured.
     pub rst_stream_flood_window: Duration,
-    /// Max time to wait for the peer to ACK our SETTINGS frame during
-    /// handshake (RFC 9113 §6.5.3). On timeout, the handshake fails
-    /// with a `SettingsTimeout` connection error. Default: 10 s.
+    /// Max time to wait for the peer to ACK our SETTINGS frame during handshake (RFC 9113 §6.5.3).
     pub settings_ack_timeout: Duration,
-    /// Hard cap on the size of a response body. Requests that exceed
-    /// this value fail with a stream-level error; existing streams on
-    /// the same connection continue. Default: 100 MiB.
+    /// Hard cap on the size of a response body.
     pub max_response_body_bytes: usize,
-    /// Hard cap on the total size of a single inbound header block
-    /// (HEADERS + all subsequent CONTINUATION fragments). Exceeding it
-    /// is a `CompressionError`. Default: 256 KiB (Chrome's ceiling).
+    /// Hard cap on the total size of a single inbound header block (HEADERS + all subsequent CONTINUATION fragments).
     pub max_header_block_bytes: usize,
-    /// Threshold for the inbound non-ACK SETTINGS flood guard — more
-    /// than this many mid-connection SETTINGS updates inside
-    /// `settings_flood_window` causes the connection to tear down
-    /// with `ENHANCE_YOUR_CALM`. Defence against a peer that burns
-    /// client CPU by bursting SETTINGS frames (each triggers an ACK
-    /// write plus a stream-window rescan). Default: 20.
+    /// Threshold for the inbound non-ACK SETTINGS flood guard — more than this many mid-connection SETTINGS updates inside `settings_flood_window` causes the connection to tear down with `ENHANCE_YOUR_CALM`.
     pub settings_flood_threshold: u32,
-    /// Sliding window over which `settings_flood_threshold` is
-    /// measured. Default: 10 s.
+    /// Sliding window over which `settings_flood_threshold` is measured.
     pub settings_flood_window: Duration,
-    /// Wall-clock ceiling on reassembling a single inbound header block
-    /// (HEADERS + all subsequent CONTINUATION frames). Reassembly blocks
-    /// the single driver task, so a peer that sends HEADERS without
-    /// END_HEADERS and then withholds (or dribbles) CONTINUATION bytes
-    /// would otherwise stall every multiplexed stream on the connection
-    /// indefinitely — `max_header_block_bytes` bounds size, never time.
-    /// Exceeding it is a `ProtocolError`. Default: 10 s.
+    /// Wall-clock ceiling on reassembling a single inbound header block (HEADERS + all subsequent CONTINUATION frames).
     pub header_block_reassembly_timeout: Duration,
 }
 
 impl H2Config {
-    /// The per-stream receive window we advertise to the peer via
-    /// `SETTINGS_INITIAL_WINDOW_SIZE`, falling back to the RFC 9113
-    /// §6.5.2 default when the profile omits the setting. This is the
-    /// only correct basis for seeding and replenishing a stream's
-    /// receive window — `initial_connection_window_size` is the
-    /// connection-level value and `peer_settings.initial_window_size`
-    /// governs the send direction.
+    /// The per-stream receive window we advertise to the peer via `SETTINGS_INITIAL_WINDOW_SIZE`, falling back to the RFC 9113 §6.5.2 default when the profile omits the setting.
     pub(crate) fn advertised_initial_window_size(&self) -> u32 {
         self.settings
             .iter()
@@ -184,13 +135,9 @@ impl H2Config {
     }
 
     /// Build from a TOML H2Profile.
-    ///
-    /// Settings are stored in the order specified by `settings_order` so the
-    /// wire format matches the profile's declared ordering.
     pub fn from_profile(h2: &crate::profile::H2Profile) -> Result<Self, crate::Error> {
         use std::collections::HashMap;
 
-        // Collect all available settings into a lookup map.
         let mut available: HashMap<SettingId, u32> = HashMap::new();
         if let Some(v) = h2.header_table_size {
             available.insert(SettingId::HeaderTableSize, v);
@@ -217,7 +164,6 @@ impl H2Config {
             available.insert(SettingId::Unknown9, v);
         }
 
-        // Reject typo'd keys; a silently dropped key ships the wrong SETTINGS frame.
         let settings_order: Vec<SettingId> = h2
             .settings_order
             .iter()
@@ -228,15 +174,11 @@ impl H2Config {
             })
             .collect::<Result<_, _>>()?;
 
-        // A valueless key is an ordering-only entry (e.g. Chrome 147 lists
-        // max_frame_size / max_concurrent_streams with no value); it is omitted.
         let settings: Vec<(SettingId, u32)> = settings_order
             .iter()
             .filter_map(|id| available.get(id).map(|v| (*id, *v)))
             .collect();
 
-        // pseudo_order must be exactly 4 known tokens; a short/typo'd list would
-        // silently keep a Chrome default slot, mis-fingerprinting Firefox/Safari.
         if h2.pseudo_order.len() != 4 {
             return Err(crate::Error::Config(format!(
                 "H2 pseudo_order must have exactly 4 entries, got {}",
@@ -254,10 +196,6 @@ impl H2Config {
                 crate::Error::Config(format!("unknown H2 pseudo_order token: {s:?}"))
             })?;
         }
-        // Four *known* tokens is not enough — a duplicate means another
-        // pseudo-header is missing, and `build_pseudo_list` would emit
-        // one twice and drop the other (a malformed request, not just a
-        // wrong fingerprint).
         for i in 1..pseudo_order.len() {
             if pseudo_order[..i].contains(&pseudo_order[i]) {
                 return Err(crate::Error::Config(format!(
@@ -267,7 +205,6 @@ impl H2Config {
             }
         }
 
-        // Missing window → no WINDOW_UPDATE (increment 0) → Akamai shows |0|.
         let initial_connection_window_size =
             h2.initial_connection_window_size.ok_or_else(|| {
                 crate::Error::Config(
@@ -298,7 +235,6 @@ impl H2Config {
 
     /// Compute the Akamai-style H2 fingerprint string.
     pub fn akamai_fingerprint(&self) -> String {
-        // SETTINGS part: ordered by settings_order
         let settings_str: String = self
             .settings_order
             .iter()
@@ -311,10 +247,8 @@ impl H2Config {
             .collect::<Vec<_>>()
             .join(";");
 
-        // WINDOW_UPDATE: connection window - default 65535
         let window_update = self.initial_connection_window_size.saturating_sub(65535);
 
-        // Pseudo-header order
         let pseudo_str: String = self
             .pseudo_order
             .iter()

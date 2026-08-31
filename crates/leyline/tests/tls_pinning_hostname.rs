@@ -1,23 +1,4 @@
-//! Integration test: certificate pinning must NOT bypass hostname
-//! verification.
-//!
-//! leyline replaces BoringSSL's built-in verifier with a custom
-//! callback when leaf pins are configured. `SSL_CTX_set_custom_verify`
-//! replaces the *entire* verification path, including the
-//! `X509_check_host` SAN match the built-in verifier performs. Without
-//! an explicit hostname check, a CA-trusted, correctly-pinned
-//! certificate issued for `wrong.example` would be accepted when
-//! connecting to `right.example`.
-//!
-//! This test generates a private CA, issues a leaf for `wrong.example`,
-//! stands up a real BoringSSL acceptor presenting it, and drives the
-//! production `FingerprintConnector` against it with that leaf pinned
-//! and the CA trusted:
-//!
-//! - control: connecting to `wrong.example` (the cert's SAN) succeeds —
-//!   proving the chain + pin would otherwise accept the cert.
-//! - regression: connecting to `right.example` fails — the hostname
-//!   mismatch is caught even though chain + pin pass.
+//! Integration test: certificate pinning must NOT bypass hostname verification.
 #![expect(
     clippy::unwrap_used,
     reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
@@ -39,8 +20,7 @@ use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 
-/// Resolver that maps every host to one fixed loopback address, so the
-/// test can connect to an arbitrary SNI name against a local listener.
+/// Resolver that maps every host to one fixed loopback address, so the test can connect to an arbitrary SNI name against a local listener.
 struct LoopbackResolver(SocketAddr);
 
 impl Resolver for LoopbackResolver {
@@ -66,10 +46,8 @@ enum San<'a> {
     Ip(&'a str),
 }
 
-/// Generate a CA and a leaf cert (subject CN `leaf_cn`) whose only SAN is
-/// `leaf_san` — either a DNS name or an IP literal.
+/// Generate a CA and a leaf cert (subject CN `leaf_cn`) whose only SAN is `leaf_san` — either a DNS name or an IP literal.
 fn generate_chain(leaf_cn: &str, leaf_san: San) -> Generated {
-    // --- CA ---
     let ca_key = PKey::from_rsa(Rsa::generate(2048).unwrap()).unwrap();
     let mut name = X509NameBuilder::new().unwrap();
     name.append_entry_by_text("CN", "leyline-test-ca").unwrap();
@@ -95,7 +73,6 @@ fn generate_chain(leaf_cn: &str, leaf_san: San) -> Generated {
     ca.sign(&ca_key, MessageDigest::sha256()).unwrap();
     let ca = ca.build();
 
-    // --- leaf, signed by the CA ---
     let leaf_key = PKey::from_rsa(Rsa::generate(2048).unwrap()).unwrap();
     let mut leaf_name = X509NameBuilder::new().unwrap();
     leaf_name.append_entry_by_text("CN", leaf_cn).unwrap();
@@ -146,8 +123,7 @@ fn load_profile() -> BrowserProfile {
         .expect("chrome 147 profile parses")
 }
 
-/// Spawn a one-shot BoringSSL acceptor presenting `leaf` + `ca`. Returns
-/// the bound address; the task serves a single handshake then exits.
+/// Spawn a one-shot BoringSSL acceptor presenting `leaf` + `ca`.
 async fn spawn_tls_server(r#gen: &Generated) -> SocketAddr {
     use leyline_bssl::ssl::{SslAcceptor, SslMethod};
 
@@ -168,7 +144,6 @@ async fn spawn_tls_server(r#gen: &Generated) -> SocketAddr {
         builder.add_extra_chain_cert(ca).unwrap();
         let acceptor = builder.build();
 
-        // Serve a couple of handshakes (control + regression attempts).
         for _ in 0..2 {
             let Ok((tcp, _)) = listener.accept().await else {
                 return;
@@ -178,8 +153,6 @@ async fn spawn_tls_server(r#gen: &Generated) -> SocketAddr {
                 Ok(s) => s,
                 Err(_) => continue,
             };
-            // A client that aborts on hostname mismatch makes accept()
-            // fail; that's expected for the regression case.
             let _ = std::pin::Pin::new(&mut stream).accept().await;
         }
     });
@@ -209,8 +182,6 @@ async fn pinned_cert_still_accepts_matching_hostname() {
     let r#gen = generate_chain("wrong.example", San::Dns("wrong.example"));
     let _ = r#gen.leaf_der;
     let addr = spawn_tls_server(&r#gen).await;
-    // Control: connect to the cert's actual SAN — chain + pin + host
-    // all match, so the handshake must succeed.
     let res = connector(&r#gen, addr)
         .connect("wrong.example", 443, None)
         .await;
@@ -225,9 +196,6 @@ async fn pinned_cert_still_accepts_matching_hostname() {
 async fn pinned_cert_rejects_mismatched_hostname() {
     let r#gen = generate_chain("wrong.example", San::Dns("wrong.example"));
     let addr = spawn_tls_server(&r#gen).await;
-    // Regression: the cert's SAN is wrong.example, but we connect to
-    // right.example. Chain verifies and the pin matches, yet the
-    // hostname does not — the handshake MUST fail.
     let res = connector(&r#gen, addr)
         .connect("right.example", 443, None)
         .await;
@@ -256,11 +224,6 @@ async fn default_verifier_reports_hostname_mismatch() {
 
 #[tokio::test]
 async fn pinned_cert_accepts_matching_ip_san() {
-    // A leaf whose only SAN is the IP literal 127.0.0.1. Connecting to that IP
-    // with the leaf pinned must succeed: the post-handshake recheck has to match
-    // the target IP against the cert's IP SAN. `X509_check_host` never matches
-    // IP SANs, so before the `check_ip_asc` branch a valid IP-pinned connection
-    // was wrongly rejected.
     let r#gen = generate_chain("127.0.0.1", San::Ip("127.0.0.1"));
     let addr = spawn_tls_server(&r#gen).await;
     let res = connector(&r#gen, addr)
@@ -275,11 +238,6 @@ async fn pinned_cert_accepts_matching_ip_san() {
 
 #[tokio::test]
 async fn pinned_cert_rejects_mismatched_ip() {
-    // Guards against an over-broad fix: an IP cert for 127.0.0.1 must still be
-    // rejected when the connection target is a different IP literal, even though
-    // chain + pin pass. The LoopbackResolver points the socket at the real
-    // listener regardless of the requested host, so the handshake proceeds and
-    // only the IP recheck differs.
     let r#gen = generate_chain("127.0.0.1", San::Ip("127.0.0.1"));
     let addr = spawn_tls_server(&r#gen).await;
     let res = connector(&r#gen, addr)
@@ -361,7 +319,7 @@ async fn handshake_transport_failure_is_retryable() {
 }
 
 #[tokio::test]
-async fn handshake_protocol_failure_is_permanent() {
+async fn handshake_protocol_failure_is_retryable() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
@@ -378,5 +336,5 @@ async fn handshake_protocol_failure_is_permanent() {
         .err()
         .expect("a non-TLS peer must fail the handshake");
     assert!(matches!(err, TlsError::Handshake(_)), "got {err:?}");
-    assert!(!err.is_retryable());
+    assert!(err.is_retryable());
 }

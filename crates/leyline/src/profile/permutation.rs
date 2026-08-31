@@ -1,38 +1,17 @@
 //! Validation for a profile's fixed ClientHello extension order.
-//!
-//! `extension_permutation` is the exact wire order BoringSSL emits for a
-//! profile, expressed as IANA TLS extension type IDs and handed to
-//! `SSL_CTX_set_extension_order`. Two failure modes surface far away from the
-//! TOML that caused them: BoringSSL rejects the whole list on an unknown or
-//! repeated ID (an opaque error stack at connector build), and it appends any
-//! extension the list omits in its own order (a ClientHello whose tail no
-//! longer matches the captured browser — the JA4_r drift a CDN edge joins
-//! against). Both are checked at load, while the profile name is still in hand.
-//!
-//! The table below answers "does this profile advertise extension N", which is
-//! the membership half of what `audit::ja4::chrome_extension_ids` computes;
-//! that one owns Chrome's *order* and documents itself as an approximation for
-//! the Firefox/Safari families, so it is not the right authority for a gate
-//! that only those families hit.
 
 use crate::profile::TlsProfile;
 
-/// `pre_shared_key`. TLS 1.3 fixes this extension last and BoringSSL ignores
-/// any position given for it, so a profile must not try to order it.
+/// `pre_shared_key`.
 const PRE_SHARED_KEY: u16 = 0x0029;
 
-/// ALPS, new (standardized) codepoint — matches the fork's
-/// `TLSEXT_TYPE_application_settings` (17613, 0x44cd). Chrome 133+.
+/// ALPS, new (standardized) codepoint — matches the fork's `TLSEXT_TYPE_application_settings` (17613, 0x44cd).
 const ALPS_NEW: u16 = 0x44cd;
 
-/// ALPS, old draft codepoint — the fork's
-/// `TLSEXT_TYPE_application_settings_old` (17513, 0x4469).
+/// ALPS, old draft codepoint — the fork's `TLSEXT_TYPE_application_settings_old` (17513, 0x4469).
 const ALPS_OLD: u16 = 0x4469;
 
-/// The extension type IDs this profile's `[tls]` block causes BoringSSL to
-/// advertise, each paired with its name for error messages. The first nine are
-/// in every ClientHello leyline builds; the rest are switched on by the profile
-/// field named beside them.
+/// The extension type IDs this profile's `[tls]` block causes BoringSSL to advertise, each paired with its name for error messages.
 fn advertised_extensions(tls: &TlsProfile) -> Vec<(u16, &'static str)> {
     let alps = if tls.alps_new_codepoint {
         ALPS_NEW
@@ -76,13 +55,7 @@ fn advertised_extensions(tls: &TlsProfile) -> Vec<(u16, &'static str)> {
     .collect()
 }
 
-/// Check a profile's declared extension order against the extensions it
-/// actually advertises. The list must be a complete permutation of that set:
-/// every entry advertised, every advertised extension present, no repeats.
-///
-/// `Ok(())` when the profile declares no order — BoringSSL's default ordering
-/// is then the deliberate choice, as it is for the Chrome family, which
-/// shuffles per session via `permute_extensions` instead.
+/// Check a profile's declared extension order against the extensions it actually advertises.
 pub(super) fn validate(tls: &TlsProfile) -> Result<(), String> {
     let Some(order) = tls.extension_permutation.as_deref() else {
         return Ok(());

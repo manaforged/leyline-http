@@ -2,7 +2,6 @@ use super::*;
 
 #[test]
 fn encode_small_value() {
-    // RFC 7541 C.1.1: encode 10 with 5-bit prefix
     let mut buf = Vec::new();
     encode(10, 5, 0x00, &mut buf);
     assert_eq!(buf, vec![0x0A]);
@@ -10,7 +9,6 @@ fn encode_small_value() {
 
 #[test]
 fn encode_prefix_boundary() {
-    // RFC 7541 C.1.2: encode 1337 with 5-bit prefix
     let mut buf = Vec::new();
     encode(1337, 5, 0x00, &mut buf);
     assert_eq!(buf, vec![0x1F, 0x9A, 0x0A]);
@@ -18,7 +16,6 @@ fn encode_prefix_boundary() {
 
 #[test]
 fn encode_at_max_prefix() {
-    // RFC 7541 C.1.3: encode 42 starting on byte boundary (8-bit prefix)
     let mut buf = Vec::new();
     encode(42, 8, 0x00, &mut buf);
     assert_eq!(buf, vec![42]);
@@ -33,7 +30,6 @@ fn decode_small_value() {
 
 #[test]
 fn decode_multi_byte() {
-    // 1337 with 5-bit prefix: first byte = 0x1F (31), then 0x9A, 0x0A
     let src = [0x9A, 0x0A];
     let (val, consumed) = decode(0x1F, 5, &src, 0).unwrap();
     assert_eq!(val, 1337);
@@ -69,7 +65,6 @@ fn roundtrip_various_values() {
 
 #[test]
 fn decode_overflow_rejected() {
-    // A very long continuation sequence that would overflow.
     let src = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x0F];
     let result = decode(0x1F, 5, &src, 0);
     assert!(result.is_err());
@@ -77,13 +72,8 @@ fn decode_overflow_rejected() {
 
 #[test]
 fn decode_rejects_values_past_u31_max() {
-    // Five continuation bytes all clear the shift<=28 guard yet can
-    // assemble a value past 2^31-1 on a 64-bit usize. HPACK integers
-    // index tables and size strings; nothing legitimate exceeds the
-    // HTTP/2 2^31-1 ceiling, and letting 2^32+ through hands
-    // downstream code an attacker-chosen allocation size.
     let mut src = Vec::new();
-    let mut rem: u64 = (1u64 << 32) - 31; // encodes 2^32 with a 5-bit prefix
+    let mut rem: u64 = (1u64 << 32) - 31;
     while rem >= 128 {
         src.push((rem & 0x7F) as u8 | 0x80);
         rem >>= 7;

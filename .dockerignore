@@ -1,6 +1,0 @@
-target/
-**/target/
-.git/
-.idea/
-.vscode/
-*.log

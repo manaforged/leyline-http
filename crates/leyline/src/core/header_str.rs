@@ -8,20 +8,11 @@ use std::ops::Deref;
 use bytes::Bytes;
 
 /// A response header name or value: a `Bytes`-backed string slice.
-///
-/// HTTP/2 and HTTP/3 responses decode header fields straight out of the
-/// HPACK/QPACK tables. An indexed (table-hit) field materializes here by a
-/// refcount bump or a `'static` borrow — no heap copy — and a literal field
-/// allocates once. Construction validates UTF-8, so [`Deref`] to `str` is
-/// infallible and callers keep `&str` ergonomics.
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct HeaderStr(Bytes);
 
 impl Hash for HeaderStr {
-    /// Hash as `str`, not as `[u8]`: `<str>::hash` and `<[u8]>::hash` differ
-    /// (length prefix vs `0xff` terminator), so hashing the inner `Bytes`
-    /// directly would break the [`Borrow`]`<str>` contract — a `HeaderStr`
-    /// map key and a `&str` lookup must hash identically.
+    /// Hash as `str`, not as `[u8]`: `<str>::hash` and `<[u8]>::hash` differ (length prefix vs `0xff` terminator), so hashing the inner `Bytes` directly would break the [`Borrow`]`<str>` contract — a `HeaderStr` map key and a `&str` lookup must hash identically.
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.as_str().hash(state);
     }
@@ -33,11 +24,7 @@ impl HeaderStr {
         Self(Bytes::from_static(s.as_bytes()))
     }
 
-    /// Wrap raw header bytes, coercing to UTF-8 at this boundary: valid input
-    /// is wrapped zero-copy; non-UTF-8 obs-text is replaced with U+FFFD
-    /// (matching the H1/QPACK read paths). The HPACK decoder keeps the original
-    /// wire bytes in its dynamic table so table-size accounting stays in lockstep
-    /// with the peer; the lossy `&str` view is materialized only here.
+    /// Wrap raw header bytes, coercing to UTF-8 at this boundary: valid input is wrapped zero-copy; non-UTF-8 obs-text is replaced with U+FFFD (matching the H1/QPACK read paths).
     pub(crate) fn from_bytes_lossy(bytes: Bytes) -> Self {
         match std::str::from_utf8(&bytes) {
             Ok(_) => Self(bytes),
@@ -51,10 +38,9 @@ impl HeaderStr {
         Ok(Self(bytes))
     }
 
-    /// Borrow as `&str`. Infallible: every constructor upholds UTF-8.
+    /// Borrow as `&str`.
     pub fn as_str(&self) -> &str {
-        // SAFETY: every constructor validates (or is given pre-validated)
-        // UTF-8, so the bytes are always a valid `str`.
+        // SAFETY: every constructor validates (or is given pre-validated) UTF-8, so the bytes are always a valid `str`.
         unsafe { std::str::from_utf8_unchecked(&self.0) }
     }
 

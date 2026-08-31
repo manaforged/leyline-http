@@ -11,15 +11,10 @@ use crate::quic::{H3Client, H3DriverTask};
 use crate::pool::h1::H1Io;
 use crate::tls::TlsIo;
 
-/// I/O type used during the H2 handshake — the backend-agnostic TLS
-/// stream ([`TlsIo`]). Today that resolves to BoringSSL over TCP; a
-/// future TLS backend slots in as a new `TlsIo` arm without changing
-/// this alias or the H2 driver above it.
+/// I/O type used during the H2 handshake — the backend-agnostic TLS stream ([`TlsIo`]).
 pub(crate) type H2Io = TlsIo;
 
 /// TLS handshake result carried alongside pooled connections.
-/// Every field is per-connection (it's the same for every request
-/// that reuses the connection).
 #[derive(Clone, Default)]
 pub struct TlsInfo {
     /// Peer certificate in DER encoding, if the peer presented one.
@@ -30,19 +25,10 @@ pub struct TlsInfo {
     pub cipher: Option<String>,
 }
 
-/// Transport family a pool entry rides on. Separates the keyspace so an H2
-/// (TCP) and an H3 (QUIC) connection to the same destination coexist rather
-/// than clobbering each other. H1 and H2 share `Tcp`: they negotiate over the
-/// same TCP+TLS handshake (ALPN picks one), so a destination pools one or the
-/// other under that key, never both at once.
+/// Transport family a pool entry rides on.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub(crate) enum Transport {
     Tcp,
-    // Constructed only on the `http3` path (`send_request_h3_pooled`,
-    // `#[cfg(feature = "http3")]`). Without that
-    // feature the variant is reserved but unbuilt, so allow the dead-code lint
-    // there rather than tripping `-D warnings` (e.g. the bindings clippy job,
-    // which compiles leyline without http3).
     #[cfg_attr(not(feature = "http3"), allow(dead_code))]
     Quic,
 }
@@ -52,36 +38,21 @@ pub(crate) enum Transport {
 pub(crate) struct PoolKey {
     pub(crate) host: String,
     pub(crate) port: u16,
-    /// Request scheme — part of the key because a plaintext socket must
-    /// never satisfy a later `https://` request to the same host:port
-    /// (an attacker serving plaintext on 443 would otherwise have his
-    /// socket pooled for the TLS request, credentials included).
+    /// Request scheme — part of the key because a plaintext socket must never satisfy a later `https://` request to the same host:port (an attacker serving plaintext on 443 would otherwise have his socket pooled for the TLS request, credentials included).
     pub(crate) scheme: String,
     pub(crate) proxy: Option<String>,
     pub(crate) transport: Transport,
 }
 
-/// An owned HTTP/1.1 keep-alive slot. Carries the TLS-over-TCP or
-/// plaintext-TCP stream, boxed so the pool can hold many different
-/// I/O types behind one key.
+/// An owned HTTP/1.1 keep-alive slot.
 pub struct H1Slot {
     /// TLS over TCP for `https://`; plaintext TCP for `http://`.
-    /// Boxed rather than parameterising [`Pool`](super::Pool) by I/O type so a
-    /// single pool can service both schemes.
     pub(crate) io: Box<dyn H1Io>,
 }
 
 /// A pooled connection entry.
 pub(crate) enum PooledConn {
-    /// An HTTP/2 entry. The `H2Client` is cloneable; each outbound
-    /// request clones it, so the pool can hand out unlimited
-    /// concurrent handles without ever checking the connection out /
-    /// in. The entry also holds the `DriverTask`, but dropping that
-    /// alone does not stop the driver ([`DriverTask`] is inert on drop);
-    /// the driver shuts down gracefully (GOAWAY) only when the last
-    /// `H2Client` clone anywhere is dropped. Evicting this entry drops
-    /// one such clone — it *contributes* to that shutdown rather than
-    /// forcing it.
+    /// An HTTP/2 entry.
     H2 {
         handle: H2Client,
         /// Wrapped in `Option` so we can take it on eviction.
@@ -89,24 +60,13 @@ pub(crate) enum PooledConn {
         last_use: Instant,
         tls: TlsInfo,
     },
-    /// An HTTP/1.1 keep-alive entry. Holds a deque of warm idle
-    /// connections to this destination. H1 cannot multiplex, so per-host
-    /// concurrency comes from several parallel connections (browsers open
-    /// up to ~6 per host); a checkout pops one warm connection and a
-    /// reusable completion returns it via [`super::Pool::return_h1`]. The
-    /// live connection count per host is bounded by the pool's per-host
-    /// semaphore (`max_h1_conns_per_host`), so this deque never exceeds
-    /// that cap. Each connection carries the `Instant` it was last
-    /// returned, for per-connection idle eviction.
+    /// An HTTP/1.1 keep-alive entry.
     H1 {
         idle: VecDeque<(H1Slot, Instant)>,
         last_use: Instant,
         tls: TlsInfo,
     },
-    /// An HTTP/3 entry. Like H2, the [`H3Client`] handle is cloneable and
-    /// multiplexes concurrent requests over the one QUIC connection; checkout
-    /// is a clone, never a check-out/in. The `H3DriverTask` stays here so
-    /// dropping the pool entry tears the connection down.
+    /// An HTTP/3 entry.
     #[cfg(feature = "http3")]
     H3 {
         handle: H3Client,
@@ -146,11 +106,6 @@ impl PooledConn {
 }
 
 /// Observability snapshot of a [`super::Pool`].
-///
-/// Returned by [`super::Pool::stats`]. All counters are monotonically
-/// increasing over the lifetime of the pool; divide by a wall-clock
-/// interval to get rates. `entries` is the instantaneous live-entry
-/// count at the moment stats were read.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct PoolStats {
@@ -162,15 +117,9 @@ pub struct PoolStats {
     pub h2_hits: u64,
     /// Cumulative H2 checkout misses (no entry, or entry was dead).
     pub h2_misses: u64,
-    /// Cumulative H1 checkouts that popped a pooled connection. Checkout
-    /// probes each popped connection for socket-level liveness: ones already
-    /// closed by the peer are discarded (counted in `stale_probed`) and a
-    /// fresh one is opened, so a hit means "a warm, probe-live connection was
-    /// handed out", not "a request succeeded on it" — a connection can still
-    /// fail mid-exchange in the residual probe-to-write race (`evictions_dead`).
+    /// Cumulative H1 checkouts that popped a pooled connection.
     pub h1_hits: u64,
-    /// Cumulative H1 checkout misses (no entry, dead slot, or idle
-    /// window exceeded).
+    /// Cumulative H1 checkout misses (no entry, dead slot, or idle window exceeded).
     pub h1_misses: u64,
     /// Cumulative successful H3 checkouts (QUIC connection alive + reused).
     pub h3_hits: u64,
@@ -180,16 +129,9 @@ pub struct PoolStats {
     pub evictions_idle: u64,
     /// Cumulative evictions triggered by the LRU cap.
     pub evictions_lru: u64,
-    /// Cumulative evictions caused by a send failing with a connection-level
-    /// error mid-exchange — the residual probe-to-write race a checkout
-    /// liveness probe cannot close. Distinct from `stale_probed`, which counts
-    /// connections caught dead *before* a request was committed.
+    /// Cumulative evictions caused by a send failing with a connection-level error mid-exchange — the residual probe-to-write race a checkout liveness probe cannot close.
     pub evictions_dead: u64,
-    /// Cumulative H1 connections the checkout liveness probe found already
-    /// dead (peer-closed / EOF / pre-request desync) and discarded before use.
-    /// This is the probe working as intended: each one would otherwise have
-    /// become a failed exchange. A rising ratio against `h1_hits` means the
-    /// pool's idle timeout outlives the peer's keep-alive window.
+    /// Cumulative H1 connections the checkout liveness probe found already dead (peer-closed / EOF / pre-request desync) and discarded before use.
     pub stale_probed: u64,
     /// Cumulative fresh connections opened and installed (H1 or H2).
     pub installs: u64,

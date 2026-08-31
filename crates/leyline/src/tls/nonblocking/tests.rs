@@ -1,10 +1,6 @@
 use super::{apply_socket_config, nonblocking_connect_started};
 use crate::core::SocketConfig;
 
-// The default SocketConfig sets `tcp_keepalive_retries: Some(3)`, but the
-// retry count is only settable per-socket on Linux/Android/Apple. On other
-// targets it must be a benign no-op even under `strict` — a defaulted value
-// the caller never chose must never turn into a hard connect failure.
 #[test]
 fn default_keepalive_retries_never_fatal_under_strict() {
     let socket = socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::STREAM, None).unwrap();

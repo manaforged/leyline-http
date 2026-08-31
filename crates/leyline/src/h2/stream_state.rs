@@ -1,18 +1,8 @@
 //! Per-stream state machine for an HTTP/2 client (RFC 9113 §5.1).
-//!
-//! This module models stream lifecycle from the client's perspective only.
-//! The `ReservedLocal` / `ReservedRemote` states are never reached: the
-//! client disables `SETTINGS_ENABLE_PUSH` (or RST_STREAMs any PUSH_PROMISE
-//! it sees), so server-initiated reserved states cannot arise during a
-//! client session.
 
 use crate::h2::error::ErrorCode;
 
 /// Why a stream ended up in the `Closed` state.
-///
-/// Kept around for the lifetime of whatever stream-info record the
-/// connection still holds, so callers can reason about *why* a stream is
-/// gone (clean end-of-stream vs. cancellation vs. error).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClosedReason {
     /// Stream closed cleanly because both sides sent END_STREAM.
@@ -34,7 +24,7 @@ pub enum StreamState {
     Open,
     /// The client sent END_STREAM; the server is still sending.
     HalfClosedLocal,
-    /// The server sent END_STREAM; the client is still sending. Rare for a client.
+    /// The server sent END_STREAM; the client is still sending.
     HalfClosedRemote,
     /// Stream is finished; no further frames are valid.
     Closed {
@@ -44,11 +34,6 @@ pub enum StreamState {
 }
 
 /// Events that drive stream state transitions.
-///
-/// These are the *logical* events the connection loop fires when it either
-/// writes a frame to the peer or hands an inbound frame off to the state
-/// machine. Flow control accounting is orthogonal and lives on
-/// `ClientConnection` directly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StreamEvent {
     /// The client sent a HEADERS frame (request headers, not trailers).
@@ -82,9 +67,6 @@ pub enum StreamEvent {
 }
 
 /// An illegal state transition was attempted.
-///
-/// Call sites map this into `H2Error::Stream { code: ProtocolError, .. }`
-/// before surfacing it to the user.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum StreamStateError {
     /// The state machine refused the event.
@@ -99,11 +81,6 @@ pub enum StreamStateError {
 
 impl StreamState {
     /// Apply an event to this stream, mutating in place on success.
-    ///
-    /// On success, `self` reflects the new state. On failure, `self` is
-    /// left untouched and an `InvalidTransition` error is returned —
-    /// callers are expected to promote this to a connection/stream
-    /// protocol error.
     pub fn transition(&mut self, event: StreamEvent) -> Result<(), StreamStateError> {
         let next = next_state(*self, event)?;
         *self = next;
@@ -115,14 +92,12 @@ impl StreamState {
         matches!(self, StreamState::Closed { .. })
     }
 
-    /// Return true iff we (the client) are still allowed to send DATA
-    /// on this stream.
+    /// Return true iff we (the client) are still allowed to send DATA on this stream.
     pub fn can_send_data(&self) -> bool {
         matches!(self, StreamState::Open | StreamState::HalfClosedRemote)
     }
 
-    /// Return true iff we (the client) are still allowed to receive
-    /// DATA from the peer.
+    /// Return true iff we (the client) are still allowed to receive DATA from the peer.
     pub fn can_recv_data(&self) -> bool {
         matches!(self, StreamState::Open | StreamState::HalfClosedLocal)
     }
@@ -162,8 +137,6 @@ fn next_state(from: StreamState, event: StreamEvent) -> Result<StreamState, Stre
     use StreamEvent as E;
     use StreamState as S;
 
-    // RST_STREAM either way terminates the stream from any non-idle state.
-    // Idle + RST is a protocol violation per RFC 9113 §5.1.
     match (from, event) {
         (S::Idle, E::SendRstStream(_)) | (S::Idle, E::RecvRstStream(_)) => {
             return Err(invalid(from, event));
@@ -183,10 +156,8 @@ fn next_state(from: StreamState, event: StreamEvent) -> Result<StreamState, Stre
 
     match from {
         S::Idle => match event {
-            // Opening HEADERS — with or without END_STREAM.
             E::SendHeaders { end_stream: false } => Ok(S::Open),
             E::SendHeaders { end_stream: true } => Ok(S::HalfClosedLocal),
-            // Everything else on an idle stream is a protocol error.
             _ => Err(invalid(from, event)),
         },
         S::Open => match event {
@@ -198,11 +169,9 @@ fn next_state(from: StreamState, event: StreamEvent) -> Result<StreamState, Stre
             E::RecvData { end_stream: false } => Ok(S::Open),
             E::RecvData { end_stream: true } => Ok(S::HalfClosedRemote),
             E::RecvTrailers => Ok(S::HalfClosedRemote),
-            // SendHeaders again in Open would be trailers; require SendTrailers.
             _ => Err(invalid(from, event)),
         },
         S::HalfClosedLocal => match event {
-            // We already sent END_STREAM — no more outbound DATA/HEADERS.
             E::RecvHeaders { end_stream: false } => Ok(S::HalfClosedLocal),
             E::RecvHeaders { end_stream: true } => Ok(S::Closed {
                 reason: ClosedReason::EndStream,
@@ -217,7 +186,6 @@ fn next_state(from: StreamState, event: StreamEvent) -> Result<StreamState, Stre
             _ => Err(invalid(from, event)),
         },
         S::HalfClosedRemote => match event {
-            // Server already end-streamed; we can still finish sending.
             E::SendData { end_stream: false } => Ok(S::HalfClosedRemote),
             E::SendData { end_stream: true } => Ok(S::Closed {
                 reason: ClosedReason::EndStream,
@@ -227,12 +195,6 @@ fn next_state(from: StreamState, event: StreamEvent) -> Result<StreamState, Stre
             }),
             _ => Err(invalid(from, event)),
         },
-        S::Closed { .. } => {
-            // RST_STREAM was handled above; everything else is a violation.
-            // RFC 9113 §5.1 permits *tolerating* some frames on recently
-            // closed streams — that tolerance is implemented at the call
-            // site (see `ClientConnection::transition_stream`), not here.
-            Err(invalid(from, event))
-        }
+        S::Closed { .. } => Err(invalid(from, event)),
     }
 }

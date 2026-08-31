@@ -1,8 +1,4 @@
 //! Retry with exponential backoff on transient server errors.
-//!
-//! Run: `cargo run --example retry -- https://httpbin.org/status/503,200`
-//! (httpbin's multi-status endpoint answers the requested codes in sequence;
-//! exact flakiness depends on what the server echoes.)
 
 use std::time::Duration;
 
@@ -16,11 +12,11 @@ async fn main() -> leyline::Result<()> {
 
     let session = Session::builder().browser(Browser::Chrome147).build()?;
 
-    let policy = RetryPolicy::default()
+    let policy = RetryPolicy::transient()
         .with_max_retries(4)
         .with_backoff(Duration::from_millis(100), Duration::from_secs(2));
 
-    let resp = session.get(&url).retry(policy).send().await?;
+    let resp = session.request("GET", &url).retry(policy).send().await?;
 
     println!("final status: {}", resp.status());
     Ok(())

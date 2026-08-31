@@ -1,6 +1,6 @@
 {
   "name": "@manaforged/leyline-win32-x64-msvc",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "os": [
     "win32"
   ],
@@ -9,11 +9,14 @@
   ],
   "main": "leyline.win32-x64-msvc.node",
   "files": [
-    "leyline.win32-x64-msvc.node"
+    "leyline.win32-x64-msvc.node",
+    "NOTICE",
+    "LICENSE-MIT",
+    "LICENSE-BORINGSSL"
   ],
-  "description": "Node.js bindings for Leyline — browser-fidelity TLS/HTTP fingerprint sessions",
+  "description": "win32-x64-msvc native addon for leyline-http",
   "homepage": "https://github.com/manaforged/leyline-http",
-  "license": "MIT OR Apache-2.0",
+  "license": "MIT",
   "engines": {
     "node": ">=18"
   },

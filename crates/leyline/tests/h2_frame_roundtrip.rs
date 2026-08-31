@@ -10,12 +10,7 @@ fn roundtrip_buf() -> BytesMut {
 fn settings_roundtrip() {
     let frame = SettingsFrame {
         ack: false,
-        params: vec![
-            (0x1, 65536),   // HEADER_TABLE_SIZE
-            (0x2, 0),       // ENABLE_PUSH
-            (0x4, 6291456), // INITIAL_WINDOW_SIZE
-            (0x6, 262144),  // MAX_HEADER_LIST_SIZE
-        ],
+        params: vec![(0x1, 65536), (0x2, 0), (0x4, 6291456), (0x6, 262144)],
     };
     let mut buf = roundtrip_buf();
     frame.encode(&mut buf);
@@ -34,14 +29,7 @@ fn settings_roundtrip() {
 
 #[test]
 fn settings_ordering_preserved() {
-    // Chrome 147 sends settings in a specific order that differs from ID order.
-    // The fingerprint depends on this ordering being preserved.
-    let chrome_params = vec![
-        (0x1, 65536),   // HEADER_TABLE_SIZE
-        (0x2, 0),       // ENABLE_PUSH
-        (0x4, 6291456), // INITIAL_WINDOW_SIZE (ID 4, before ID 3!)
-        (0x6, 262144),  // MAX_HEADER_LIST_SIZE (ID 6, no ID 5)
-    ];
+    let chrome_params = vec![(0x1, 65536), (0x2, 0), (0x4, 6291456), (0x6, 262144)];
 
     let frame = SettingsFrame {
         ack: false,
@@ -54,7 +42,6 @@ fn settings_ordering_preserved() {
     let payload = bytes::Bytes::copy_from_slice(&buf[9..]);
     let parsed = SettingsFrame::parse(header, payload).unwrap();
 
-    // Order must be preserved exactly — this is the fingerprint.
     assert_eq!(parsed.params, chrome_params);
 }
 
@@ -145,8 +132,6 @@ fn headers_with_priority_roundtrip() {
 
 #[test]
 fn headers_with_chrome_priority_roundtrip() {
-    // Chrome's legacy RFC 7540 priority: exclusive=true, dep=0, weight=255
-    // (carrying weight 256). Firefox uses exclusive=false, dep varies.
     let params = leyline::h2::PriorityParams {
         exclusive: true,
         stream_dependency: 0,
@@ -166,13 +151,10 @@ fn headers_with_chrome_priority_roundtrip() {
     let mut buf = roundtrip_buf();
     frame.encode(&mut buf);
 
-    // Expect PRIORITY flag in the wire flags byte (bit 0x20).
     let header_bytes: [u8; 9] = buf[..9].try_into().unwrap();
     let flags = header_bytes[4];
     assert_eq!(flags & 0x20, 0x20, "PRIORITY flag not set in HEADERS");
-    // Payload should include 5-byte priority block before the fragment.
-    assert_eq!(header_bytes[2] as usize, 5 + 3); // length = 5 + fragment
-
+    assert_eq!(header_bytes[2] as usize, 5 + 3);
     let header = FrameHeader::parse(&header_bytes);
     let payload = bytes::Bytes::copy_from_slice(&buf[9..]);
     let parsed = HeadersFrame::parse(header, payload).unwrap();
@@ -187,7 +169,7 @@ fn headers_with_chrome_priority_roundtrip() {
 fn window_update_roundtrip() {
     let frame = WindowUpdateFrame {
         stream_id: 0,
-        increment: 15663105, // Chrome's connection WINDOW_UPDATE
+        increment: 15663105,
     };
     let mut buf = roundtrip_buf();
     frame.encode(&mut buf);
@@ -259,7 +241,7 @@ fn settings_rejects_nonzero_stream() {
         length: 0,
         frame_type: 0x4,
         flags: 0,
-        stream_id: 1, // invalid
+        stream_id: 1,
     };
     let result = SettingsFrame::parse(header, bytes::Bytes::new());
     assert!(result.is_err());
@@ -271,7 +253,7 @@ fn data_rejects_stream_zero() {
         length: 0,
         frame_type: 0x0,
         flags: 0,
-        stream_id: 0, // invalid
+        stream_id: 0,
     };
     let result = DataFrame::parse(header, bytes::Bytes::new());
     assert!(result.is_err());

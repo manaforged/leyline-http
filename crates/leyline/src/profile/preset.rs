@@ -18,11 +18,7 @@ pub enum Preset {
     CrossOrigin,
     /// Same-site subdomain API call.
     SameSite,
-    /// Form-submit POST whose response is a top-level *document* navigation
-    /// (e.g. classic `<form action="..." method="post">` with no `fetch()`
-    /// wrapper — clicking the form button replaces the page). Distinct
-    /// from `Form` (XHR-shaped CORS POST) and `Navigate` (top-level GET).
-    /// Captured against Chrome 147 form-POST navigations.
+    /// Form-submit POST whose response is a top-level *document* navigation (e.g. classic `<form action="..." method="post">` with no `fetch()` wrapper — clicking the form button replaces the page).
     FormNavigate,
 }
 
@@ -42,18 +38,11 @@ pub struct HeaderContext<'a> {
     pub origin: &'a str,
     /// `Referer` header value, or empty if none.
     pub referer: &'a str,
-    /// Firefox (Gecko) identity. The presets are Chrome-shaped, so when this is set
-    /// [`Preset::build_headers`] strips the Chrome-only `Sec-CH-UA*` Client Hints (Firefox
-    /// emits none) and swaps the Chrome document `Accept` for the Gecko one.
+    /// Firefox (Gecko) identity.
     pub firefox: bool,
 }
 
 /// A single header name-value pair, in insertion order.
-///
-/// Both parts are `Cow<'static, str>`: header names and Chrome-constant values
-/// are `Borrowed` static literals (zero allocation), while session- or
-/// request-derived values (UA, origin, referer) are `Owned`. The `'static`
-/// bound lets the assembled list move into the H2 driver's command channel.
 pub type HeaderPair = (Cow<'static, str>, Cow<'static, str>);
 
 /// Borrowed (zero-alloc) header part from a static literal.
@@ -68,17 +57,10 @@ fn o(s: &str) -> Cow<'static, str> {
     Cow::Owned(s.to_string())
 }
 
-/// Firefox's document `Accept` (Gecko) — captured live from tls.peet.ws (Firefox 153, Windows):
-/// `text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8`, with none of Chrome's
-/// `image/apng` / `application/signed-exchange` / image types. Swapped in for the Chrome document
-/// Accept on a Firefox identity so the request agrees with the Firefox JA4.
+/// Firefox's document `Accept` (Gecko) — captured live from tls.peet.ws (Firefox 153, Windows): `text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8`, with none of Chrome's `image/apng` / `application/signed-exchange` / image types.
 const FIREFOX_DOC_ACCEPT: &str = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
 
-/// Real Firefox H2 request-header order, captured live from tls.peet.ws (Firefox 153, Windows). The
-/// navigate sequence (`user-agent … sec-fetch-user, priority, te`) is capture-exact; the subresource
-/// headers (`content-type`/`origin`/`referer`/`cookie`) are placed at Firefox-conventional positions
-/// pending a cookied-XHR capture. Applied by the session AFTER the full header set is assembled
-/// (including `cookie`) so every Firefox request matches this order.
+/// Real Firefox H2 request-header order, captured live from tls.peet.ws (Firefox 153, Windows).
 pub(crate) const FIREFOX_HEADER_ORDER: &[&str] = &[
     "user-agent",
     "accept",
@@ -98,9 +80,7 @@ pub(crate) const FIREFOX_HEADER_ORDER: &[&str] = &[
 ];
 
 impl Preset {
-    /// Build the ordered header list for this preset. The presets are Chrome-shaped; a Firefox
-    /// identity ([`HeaderContext::firefox`]) is reshaped to drop the Chrome-only Client Hints and
-    /// use the Gecko document `Accept` so the request layer agrees with the Firefox TLS/JA4.
+    /// Build the ordered header list for this preset.
     pub fn build_headers(&self, ctx: &HeaderContext<'_>) -> Vec<HeaderPair> {
         let mut headers = match self {
             Self::Navigate => Self::navigate_headers(ctx),
@@ -117,23 +97,14 @@ impl Preset {
         headers
     }
 
-    /// Reshape a Chrome-shaped preset to Firefox's request SET (the session applies Firefox's header
-    /// ORDER afterward, via [`FIREFOX_HEADER_ORDER`]). Firefox emits NO `Sec-CH-UA*` Client Hints
-    /// (a Chromium feature), uses a Gecko document `Accept`, and carries an HTTP `priority` hint plus
-    /// `te: trailers` on every H2 request — all captured live from tls.peet.ws (Firefox 153).
+    /// Reshape a Chrome-shaped preset to Firefox's request SET (the session applies Firefox's header ORDER afterward, via [`FIREFOX_HEADER_ORDER`]).
     fn reshape_for_firefox(preset: Preset, headers: &mut Vec<HeaderPair>) {
         headers.retain(|(name, _)| !name.starts_with("sec-ch-ua"));
-        // Only the document (`text/html…`) Accept is browser-specific; the XHR/script Accepts
-        // (`*/*`, `application/json…`) are JS-set and browser-neutral, so leave them.
         for (name, value) in headers.iter_mut() {
             if name == "accept" && value.starts_with("text/html") {
                 *value = Cow::Borrowed(FIREFOX_DOC_ACCEPT);
             }
         }
-        // Document loads carry `priority: u=0, i` (capture-verified); subresource/API requests use
-        // `u=1, i` (Firefox-conventional). `te: trailers` rides every Firefox H2 request.
-        // The Chrome-shaped presets may already carry a `priority` (added
-        // for Chrome fidelity); replace rather than duplicate it.
         headers.retain(|(name, _)| !name.eq_ignore_ascii_case("priority"));
         let priority = if matches!(preset, Preset::Navigate | Preset::FormNavigate) {
             "u=0, i"
@@ -144,8 +115,7 @@ impl Preset {
         headers.push((b("te"), b("trailers")));
     }
 
-    /// `sec-ch-ua-platform`, quoted per Chrome's wire format. Shared by
-    /// every preset so the quoting lives in exactly one place.
+    /// `sec-ch-ua-platform`, quoted per Chrome's wire format.
     fn sec_ch_ua_platform(ctx: &HeaderContext<'_>) -> HeaderPair {
         (
             b("sec-ch-ua-platform"),
@@ -210,9 +180,6 @@ impl Preset {
             (b("referer"), o(ctx.referer)),
             Self::accept_encoding(),
             (b("accept-language"), o(ctx.accept_language)),
-            // Fetch-initiated requests carry Chromium's H2 `priority`
-            // header (`u=1, i` — capture-verified on Chrome 150). The H1
-            // transport strips it (Chrome sends it on H2 only).
             (b("priority"), b("u=1, i")),
         ]
     }
@@ -253,14 +220,6 @@ impl Preset {
     }
 
     fn form_navigate_headers(ctx: &HeaderContext<'_>) -> Vec<HeaderPair> {
-        // Form-submit-as-top-level-navigation: classic `<form method=post>`
-        // where the response replaces the document. Chrome's wire shape
-        // mirrors `Navigate` (full text/html accept block, sec-fetch-mode
-        // navigate, sec-fetch-dest document, sec-fetch-user ?1, upgrade-
-        // insecure-requests) plus the POST-specific cache-control,
-        // content-type, and origin headers. sec-fetch-site is `same-origin`
-        // because a form button click is always referred from a page on
-        // the form's own origin.
         vec![
             (b("cache-control"), b("max-age=0")),
             (b("sec-ch-ua"), o(ctx.sec_ch_ua)),

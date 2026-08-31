@@ -1,11 +1,6 @@
 //! Browser/platform/preset profile definitions and TOML loader.
-//!
-//! Profiles are declarative TOML files embedded at compile time. Adding a new
-//! browser version means creating a TOML file — no core code changes needed.
 
 #![forbid(unsafe_code)]
-// This module must stay free of `unsafe`; memory-unsafe code is confined to
-// leyline-bssl* (FFI) and leyline's tcp/tls platform bridges.
 /// Anchor slots for caller-controlled positional header injection.
 pub mod anchor;
 mod bare;

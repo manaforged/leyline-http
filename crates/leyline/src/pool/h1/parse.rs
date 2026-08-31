@@ -1,9 +1,7 @@
-//! Split from the parent pool module. Types live in the parent.
+//! Split from the parent pool module.
 use super::*;
 
-/// Read and parse the response head only, deciding the body framing but
-/// leaving the body on the wire. Skips 1xx informational responses, the
-/// same as [`read_h1_response`].
+/// Read and parse the response head only, deciding the body framing but leaving the body on the wire.
 pub(super) async fn read_h1_head<S>(stream: &mut S, method: &str) -> Result<H1Head, H1PooledError>
 where
     S: AsyncRead + Unpin + ?Sized,
@@ -43,8 +41,7 @@ where
         });
     }
 }
-/// Returns `(status, headers, body, http_minor_version)`. The minor
-/// version is `1` for HTTP/1.1 and `0` for HTTP/1.0.
+/// Returns `(status, headers, body, http_minor_version)`.
 pub(super) async fn read_h1_response<S>(
     stream: &mut S,
     method: &str,
@@ -60,17 +57,10 @@ where
         let (status, headers, minor) = parse_h1_head(&head)?;
         buf.drain(..body_start);
 
-        // 1xx informational (except 101 Switching Protocols) — read again.
         if (100..200).contains(&status) && status != 101 {
             continue;
         }
 
-        // RFC 9112 §6.1: reject multiple or conflicting framing
-        // headers up-front. With a keep-alive pool an ambiguous
-        // framing decision is a request-smuggling vector — the
-        // parser and the server might disagree on where the body
-        // ends, and the next pooled request lands in the wrong
-        // place on the wire.
         validate_framing_headers(&headers)?;
 
         if method.eq_ignore_ascii_case("HEAD") || matches!(status, 101 | 204 | 304) {
@@ -154,13 +144,6 @@ pub(super) fn parse_h1_head(head: &str) -> Result<ParsedHead, H1PooledError> {
             continue;
         }
         if line.starts_with(' ') || line.starts_with('\t') {
-            // RFC 9112 §5.2 (user-agent case): obs-fold is replaced with a
-            // single SP and appended to the previous field's value — never
-            // parsed as a new header. Parsing folded lines as independent
-            // headers would let a hostile peer inject arbitrary response
-            // headers (jar poisoning, framing confusion with lenient
-            // intermediaries). A fold with no previous header is malformed:
-            // dropped, like browsers do.
             if let Some((_, value)) = headers.last_mut() {
                 value.push(' ');
                 value.push_str(line.trim());
@@ -170,10 +153,6 @@ pub(super) fn parse_h1_head(head: &str) -> Result<ParsedHead, H1PooledError> {
         let Some((name, value)) = line.split_once(':') else {
             continue;
         };
-        // Whitespace between field name and colon is illegal (RFC 9112
-        // §5.1). Interpreting "Transfer-Encoding : chunked" as a framing
-        // header while a strict intermediary rejects it is the textbook
-        // client-side desync — drop the line, like browsers do.
         if name.is_empty() || name.ends_with(' ') || name.ends_with('\t') {
             continue;
         }
@@ -241,9 +220,6 @@ where
         let line_end = read_until_crlf(stream, &mut buf).await?;
         let size_line = String::from_utf8_lossy(&buf[..line_end]);
         let size_token = size_line.split(';').next().unwrap_or("").trim();
-        // Reject oversized chunk declarations up front: this guard
-        // prevents a malicious peer from overflowing `size + 2` or
-        // forcing an uncontrolled read.
         let size_u64 = u64::from_str_radix(size_token, 16)
             .map_err(|e| H1PooledError::Http(format!("invalid chunk size: {e}")))?;
         if size_u64 > MAX_H1_BODY_BYTES as u64 {

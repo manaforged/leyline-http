@@ -1,15 +1,4 @@
-//! Regression gate: CONTINUATION reassembly must be bounded in wall-clock
-//! time, not just in total bytes.
-//!
-//! `on_headers` reassembles a header block spread across HEADERS +
-//! CONTINUATION frames in a loop that blocks the single driver task. A
-//! peer that sends HEADERS *without* END_HEADERS and then withholds (or
-//! dribbles) the CONTINUATION never trips the `max_header_block_bytes`
-//! size cap — so before the fix the driver, and every other multiplexed
-//! stream on the connection, stalled indefinitely (a slow-loris). The fix
-//! imposes a wall-clock deadline (`header_block_reassembly_timeout`) on
-//! the whole reassembly and tears the connection down with a ProtocolError
-//! on expiry.
+//! Regression gate: CONTINUATION reassembly must be bounded in wall-clock time, not just in total bytes.
 #[path = "h2_support/mod.rs"]
 mod support;
 
@@ -21,9 +10,7 @@ use leyline::h2::error::ErrorCode;
 use leyline::h2::frame::FrameType;
 use support::*;
 
-/// Short reassembly deadline so the test measures the timeout in
-/// milliseconds rather than the production 10 s. Everything else mirrors
-/// the other h2 integration configs.
+/// Short reassembly deadline so the test measures the timeout in milliseconds rather than the production 10 s.
 const REASSEMBLY_TIMEOUT: Duration = Duration::from_millis(250);
 
 fn test_config() -> H2Config {
@@ -73,10 +60,6 @@ async fn continuation_reassembly_times_out_on_stall() {
         assert_eq!(h.frame_type, FrameType::Settings as u8);
         assert!(h.flags & 0x1 != 0);
 
-        // Adversarial: a HEADERS frame on stream 1 with END_HEADERS unset,
-        // then silence. The promised CONTINUATION never arrives, and the
-        // socket stays open so the driver blocks in reassembly rather than
-        // observing EOF.
         write_headers_without_end(&mut server_io, 1).await;
         std::future::pending::<()>().await;
     });
@@ -84,13 +67,8 @@ async fn continuation_reassembly_times_out_on_stall() {
     let (handle, driver) = ClientConnection::start(client_io, test_config())
         .await
         .expect("handshake");
-    // Hold a handle so the driver stays in its event loop — dropping the
-    // last handle would trigger a graceful shutdown instead.
     let _handle = handle;
 
-    // The reassembly deadline (250 ms) must fire well inside this wrapper.
-    // A regression — a driver that never times out — trips the wrapper and
-    // fails the assertion below instead of hanging the suite.
     let driver_result = tokio::time::timeout(Duration::from_secs(10), driver.join()).await;
 
     let err = driver_result

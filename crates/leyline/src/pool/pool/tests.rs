@@ -24,15 +24,9 @@ fn insert_empty_h1(pool: &Pool, host: &str, last_use: Instant) {
     );
 }
 
-// Regression for the lingering-empty-H1-entry leak. An entry whose deque
-// emptied because its connections were all checked out and then died
-// mid-request (never returned via `return_h1`) is not idle-swept — `before == idle.len()` held forever for a `0 == 0` empty deque —
-// and only left the pool on LRU eviction. Now the idle sweep drops it once
-// its `last_use` ages past the idle timeout (no request has borrowed it).
 #[test]
 fn evict_idle_drops_abandoned_empty_h1_entry() {
     let pool = Pool::with_limits(Duration::from_millis(20), 2048, 6);
-    // last_use well past the 20ms idle timeout → no live borrower.
     let stale = Instant::now()
         .checked_sub(Duration::from_millis(40))
         .expect("monotonic clock is >40ms past its epoch");
@@ -47,10 +41,6 @@ fn evict_idle_drops_abandoned_empty_h1_entry() {
     );
 }
 
-// The counterpart the fix must NOT break: an entry that is empty only
-// because every connection is currently checked out (in-flight) has a
-// recent `last_use`, so the sweep keeps it for the returning requests to
-// reuse rather than churning a drop + recreate on every sweep.
 #[test]
 fn evict_idle_keeps_empty_h1_entry_with_live_checkouts() {
     let pool = Pool::with_limits(Duration::from_secs(300), 2048, 6);

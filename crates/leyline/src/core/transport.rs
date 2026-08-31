@@ -1,8 +1,4 @@
 //! Transport layer — connects TLS/plain TCP and sends requests.
-//!
-//! HTTPS defaults to our own leyline-h2 implementation with connection pooling.
-//! Plain `http://` and explicit H1 policy go through the HTTP/1.1
-//! keep-alive pool in [`crate::pool`].
 
 use std::sync::Arc;
 
@@ -22,8 +18,7 @@ use crate::core::response::HttpVersion;
 
 const MAX_H1_BODY_BYTES: usize = 100 * 1024 * 1024;
 
-/// Body shape returned by a transport. Either fully buffered, or a
-/// receiver the caller drains via `BodyStream`.
+/// Body shape returned by a transport.
 pub(crate) enum TransportBody {
     Buffered(Vec<u8>),
     Streaming(BodyStream),
@@ -40,8 +35,7 @@ pub(crate) struct TransportResponse {
     pub(crate) peer_cert_der: Option<Vec<u8>>,
     pub(crate) tls_version: Option<String>,
     pub(crate) tls_cipher: Option<String>,
-    /// Wall-clock timing breakdown for this hop. Real on the H2 path;
-    /// [`crate::core::ResponseTiming::default`] on H1/H3 until instrumented.
+    /// Wall-clock timing breakdown for this hop.
     pub(crate) timing: crate::core::ResponseTiming,
 }
 
@@ -74,10 +68,6 @@ pub(crate) async fn send_request_auto(
     header_order: Option<&[String]>,
 ) -> Result<TransportResponse> {
     if url.scheme() == "http" {
-        // Boxed cold arm: for an `https://` request (the hot path) this branch
-        // is never taken, yet inline it would size `send_request_auto`'s future
-        // to the ~10 KB H1 transport. Box it so plaintext HTTP heap-allocates
-        // its H1 state only when actually used.
         return Box::pin(send_request_h1(
             pool,
             connector,
@@ -91,12 +81,7 @@ pub(crate) async fn send_request_auto(
         .await;
     }
 
-    // To support the H1 fallback on ALPN mismatch we need to retain the
-    // body. Streaming bodies are one-shot, so eagerly materialise them.
-    // Callers who want hard streaming over H2 should pin `.http2()`.
     let (h2_body, fallback_buf): (Body, Option<Bytes>) = if body.is_stream() {
-        // Boxed cold arm: stream materialisation only runs for `.stream()`
-        // request bodies; keep its drain buffer off the buffered-body hot path.
         let buf = Box::pin(materialise_stream_body(body)).await?;
         (Body::from(buf.clone()), Some(buf))
     } else {
@@ -128,10 +113,6 @@ pub(crate) async fn send_request_auto(
                 Some(buf) => Body::from(buf),
                 None => Body::Empty,
             };
-            // Boxed cold arm: the HTTP/1.1 fallback runs only after an H2 ALPN
-            // mismatch (rare CDN/interstitial behaviour). Inline it would size
-            // the H2 success path — the hot path — to the ~10 KB H1 future. Box
-            // it so the H1 state is heap-allocated only when the fallback fires.
             Box::pin(send_request_h1(
                 pool,
                 connector,
@@ -148,9 +129,7 @@ pub(crate) async fn send_request_auto(
     }
 }
 
-/// Drain a streaming body into a single `Bytes` buffer. Used when the
-/// transport can't accept streams (H3) or needs to retain the body for
-/// a fallback retry.
+/// Drain a streaming body into a single `Bytes` buffer.
 async fn materialise_stream_body(body: Body) -> Result<Bytes> {
     match body {
         Body::Empty => Ok(Bytes::new()),
@@ -203,7 +182,6 @@ pub(crate) async fn send_request_h2(
         .ok_or_else(|| Error::Config("no host in URL".into()))?;
     let port = url.port_or_known_default().unwrap_or(443);
 
-    // Build pseudo-headers.
     let path = url.path();
     let query = url.query().map(|q| format!("?{q}")).unwrap_or_default();
     let pseudo = PseudoHeaders {
@@ -222,21 +200,14 @@ pub(crate) async fn send_request_h2(
         protocol: None,
     };
 
-    // Translate Body → h2 request body representation.
     let h2_req_body = body_to_h2_request(body);
 
-    // RFC 9113 §8.2.2 + §8.2.1 header hygiene for the h2 wire.
     strip_connection_specific_headers(&mut headers)?;
 
-    // Per-request wire header order (capture-driven H2 fidelity). The
-    // identity-level order (Brave/Firefox shapes) already ran at
-    // assemble time; this is the caller's exact-sequence pin for edges
-    // that fingerprint Chrome's H2 header order per request class.
     if let Some(order) = header_order {
         crate::core::session::execute::reorder_headers(&mut headers, order);
     }
 
-    // Send via pool (reuses connection or creates new one).
     let (resp, tls, timing) = crate::pool::send_request(
         pool,
         connector,
@@ -285,17 +256,8 @@ fn body_to_h2_request(body: Body) -> crate::h2::client::RequestBody {
     }
 }
 
-/// RFC 9113 §8.2.2: connection-specific headers must never be emitted on
-/// an H2 connection — a compliant peer rejects the stream. §8.2.1 requires
-/// lowercase field names; a mixed-case caller header ("X-Thing") is treated
-/// as malformed by servers. Strip the former, lowercase the latter.
-/// `te` is legal only for "trailers".
+/// RFC 9113 §8.2.2: connection-specific headers must never be emitted on an H2 connection — a compliant peer rejects the stream.
 pub(crate) fn strip_connection_specific_headers(headers: &mut Vec<HeaderPair>) -> Result<()> {
-    // One pass: count framing headers, drop connection-specific ones,
-    // and lowercase names in place. Framing ambiguity (duplicate
-    // Transfer-Encoding, or Transfer-Encoding together with
-    // Content-Length) is the request-smuggling shape; it errors after
-    // the sweep — the caller drops the headers either way.
     let mut te = 0usize;
     let mut cl = 0usize;
     headers.retain_mut(|(name, value)| {
@@ -352,11 +314,6 @@ fn body_to_h1(body: Body) -> H1Body {
 }
 
 /// Send an HTTP/1.1 request through the HTTP/1.1 keep-alive pool.
-///
-/// HTTPS uses `connector.connect_h1` (BoringSSL with `http/1.1` ALPN);
-/// plaintext HTTP uses a bare `TcpStream`. Connections are reused for
-/// subsequent requests to the same `(host, port, proxy)` destination
-/// when the response allows keep-alive.
 #[tracing::instrument(
     name = "transport.h1",
     level = "debug",
@@ -389,10 +346,6 @@ pub(crate) async fn send_request_h1(
         .ok_or_else(|| Error::Config(format!("no default port for scheme {}", url.scheme())))?;
     let scheme = url.scheme();
 
-    // Plaintext HTTP via an http proxy uses absolute-form request
-    // targets (`GET http://host/path HTTP/1.1`) and may carry
-    // `Proxy-Authorization`. HTTPS through a proxy is already handled
-    // inside `connector.connect_h1` via the CONNECT tunnel.
     let (target, headers) = match (scheme, proxy) {
         ("http", Some(proxy_url)) => {
             let parsed = url::Url::parse(proxy_url)
@@ -403,8 +356,6 @@ pub(crate) async fn send_request_h1(
                 ));
             }
             let mut headers = headers;
-            // Chrome sends the extensible `priority` header on H2 only;
-            // never emit it on the H1 wire (preset-level addition).
             headers.retain(|(k, _)| !k.eq_ignore_ascii_case("priority"));
             if let Some(password) = parsed.password() {
                 let credentials = base64_encode(&format!(
@@ -455,9 +406,6 @@ pub(crate) async fn send_request_h1(
 
     let (tls_alpn, peer_cert_der, tls_version, tls_cipher) = match resp.tls {
         Some(info) => (
-            // The H1 path always negotiates http/1.1 when TLS is
-            // involved; surface it for audit. For plaintext HTTP
-            // everything below is `None`.
             Some("http/1.1".to_string()),
             info.peer_cert_der,
             info.version,
@@ -468,8 +416,6 @@ pub(crate) async fn send_request_h1(
 
     Ok(TransportResponse {
         status: resp.status,
-        // H1 parses headers into owned `String`s; `Bytes::from(String)`
-        // takes the buffer, so this is a move per header, not a copy.
         headers: resp
             .headers
             .into_iter()
@@ -482,7 +428,6 @@ pub(crate) async fn send_request_h1(
         peer_cert_der,
         tls_version,
         tls_cipher,
-        // H1 path not yet instrumented — see ResponseTiming docs.
         timing: crate::core::ResponseTiming::default(),
     })
 }
@@ -493,9 +438,6 @@ fn h1_error_to_core(e: H1PooledError) -> Error {
         H1PooledError::Tls(error) => Error::Tls(error),
         H1PooledError::Io(io) => Error::Io(io),
         H1PooledError::Http(m) => Error::Http(m),
-        // Transport-level EOF mid-exchange → typed Io(UnexpectedEof), so the
-        // retry engine treats it as a connection error via the typed `Io` arm
-        // (no substring sniffing of an attacker-influenceable message).
         H1PooledError::ConnectionClosed(ctx) => Error::Io(std::io::Error::new(
             std::io::ErrorKind::UnexpectedEof,
             format!("connection closed {ctx}"),
@@ -530,9 +472,6 @@ pub(crate) async fn send_request_h3(
         .host_str()
         .ok_or_else(|| Error::Config("no host in URL".into()))?;
     let port = url.port_or_known_default().unwrap_or(443);
-    // :authority carries a non-default port (rfc 9114 §4.1.1.1) and must
-    // match the h2 path's authority byte-for-byte, or the two transports
-    // fingerprint differently on the same session.
     let authority = if url.scheme() == "https" && port == 443 {
         host.to_string()
     } else {
@@ -542,13 +481,8 @@ pub(crate) async fn send_request_h3(
     let query = url.query().map(|q| format!("?{q}")).unwrap_or_default();
     let full_path = format!("{path}{query}");
 
-    // RFC 9114 §4.2 — the same h2 hygiene rule applies to h3: no
-    // connection-specific headers, lowercase field names only.
     strip_connection_specific_headers(&mut headers)?;
 
-    // A streaming request body is pumped into the request stream incrementally;
-    // a buffered body is sent whole. `content-length` (for a length-known
-    // stream) is already on `headers` from the execute layer.
     let (body_bytes, body_stream) = match body {
         Body::Empty => (None, None),
         Body::Bytes(b) => (Some(b), None),
@@ -582,7 +516,6 @@ pub(crate) async fn send_request_h3(
 
     Ok(TransportResponse {
         status: resp.status,
-        // H3/QPACK yields owned `String`s; move them into `HeaderStr`.
         headers: resp
             .headers
             .into_iter()
@@ -592,23 +525,14 @@ pub(crate) async fn send_request_h3(
         final_url: url.to_string(),
         version: HttpVersion::Http3,
         tls_alpn: Some("h3".to_string()),
-        // Captured from the QUIC handshake (TLS 1.3 per RFC 9001 §4.2).
         peer_cert_der: tls.peer_cert_der,
         tls_version: tls.version,
         tls_cipher: tls.cipher,
-        // H3 path not yet instrumented — see ResponseTiming docs.
         timing: crate::core::ResponseTiming::default(),
     })
 }
 
-/// True when the H2 attempt failed because the server declined the `h2` ALPN
-/// (e.g. some CDN/WAF edges serve a cookieless interstitial over HTTP/1.1,
-/// replying with no ALPN). Real Chrome falls back to HTTP/1.1 in this case, so
-/// the transport retries on h1 instead of erroring out.
-///
-/// The pool path surfaces this as `Error::AlpnMismatch` (see
-/// `pool::open_fresh_h2`); the transport keys the HTTP/1.1 fallback off that
-/// typed variant so an unrelated H2 or HTTP error never trips it.
+/// True when the H2 attempt failed because the server declined the `h2` ALPN (e.g. some CDN/WAF edges serve a cookieless interstitial over HTTP/1.1, replying with no ALPN).
 fn is_h2_alpn_mismatch(err: &Error) -> bool {
     matches!(err, Error::AlpnMismatch { .. })
 }

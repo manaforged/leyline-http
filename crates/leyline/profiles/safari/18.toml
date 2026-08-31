@@ -36,7 +36,8 @@ cert_compression = ["brotli"]
 pre_shared_key = true
 
 [tls.fingerprint]
-# Pinned to leyline's current emission; not externally verified.
+# JA4 is leyline's current emission. Recapture from Safari.app before
+# treating this as a browser match.
 ja4 = "t13d2015h2_a09f3c656075_52cf856b4c42"
 
 [h2]

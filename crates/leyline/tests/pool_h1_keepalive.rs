@@ -1,16 +1,4 @@
 //! Integration tests for the HTTP/1.1 keep-alive pool.
-//!
-//! These tests stand up a minimal `TcpListener`-based mock server,
-//! drive the pool via [`send_request_h1_pooled`] directly (bypassing
-//! the full `Session` plumbing to keep the contract tight), and
-//! assert:
-//!
-//! 1. Back-to-back requests to the same host ride one TCP accept().
-//! 2. `Connection: close` on the response forces a fresh TCP on the
-//!    next request.
-//! 3. A mid-exchange drop by the server surfaces as a clean error
-//!    (no panic) and the next request opens a fresh TCP — with the
-//!    `evictions_dead` counter bumped.
 #![expect(
     clippy::unwrap_used,
     reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
@@ -25,9 +13,7 @@ use leyline::tls::FingerprintConnector;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
-/// Spin up a bare `FingerprintConnector` so we can exercise the
-/// plaintext-HTTP path without standing up a full `Session`. The TLS
-/// fields never fire for `http://` destinations.
+/// Spin up a bare `FingerprintConnector` so we can exercise the plaintext-HTTP path without standing up a full `Session`.
 fn bare_connector() -> FingerprintConnector {
     let registry = ProfileRegistry::builtin();
     let profile = registry
@@ -37,12 +23,7 @@ fn bare_connector() -> FingerprintConnector {
         .expect("build fingerprint connector")
 }
 
-/// A tiny mock server that accepts TCP connections, reads one
-/// request per connection, and sends a canned response. The script
-/// closure receives the request index (0-based per accept()) and
-/// returns `(response_bytes, keep_alive)` — when `keep_alive` is
-/// false, the server closes the connection after writing the
-/// response.
+/// A tiny mock server that accepts TCP connections, reads one request per connection, and sends a canned response.
 async fn spawn_mock_server<F>(
     script: F,
 ) -> (
@@ -66,11 +47,6 @@ where
             let conn_index = accepts_clone.fetch_add(1, Ordering::SeqCst);
             let script = script.clone();
             tokio::spawn(async move {
-                // Per-connection request loop. Each iteration reads
-                // one request (HEAD-only — no bodies in tests), runs
-                // the script, writes the response, then decides
-                // whether to keep looping based on the script's
-                // response bytes.
                 let mut req_index = 0usize;
                 loop {
                     let mut req = Vec::new();
@@ -87,18 +63,11 @@ where
                             Err(_) => return,
                         }
                     }
-                    // Use (conn_index * 16) + req_index as the script
-                    // argument — tests can tell apart "2nd request on
-                    // conn 1" vs "1st request on conn 2" via index
-                    // arithmetic.
                     let bytes = script(conn_index * 16 + req_index);
                     if socket.write_all(&bytes).await.is_err() {
                         return;
                     }
                     req_index += 1;
-                    // Detect `Connection: close` in what we wrote;
-                    // if present, drop the connection so the client
-                    // sees a closed socket on the next request.
                     let resp_str = String::from_utf8_lossy(&bytes).to_lowercase();
                     if resp_str.contains("connection: close") {
                         return;
@@ -153,8 +122,6 @@ async fn h1_pool_reuses_connection_for_sequential_requests() {
         assert_eq!(body, b"ok");
     }
 
-    // Give any in-flight accept() a moment to resolve before we
-    // probe the counter.
     tokio::time::sleep(Duration::from_millis(20)).await;
     assert_eq!(
         accepts.load(Ordering::SeqCst),
@@ -169,7 +136,6 @@ async fn h1_pool_reuses_connection_for_sequential_requests() {
 
 #[tokio::test]
 async fn h1_pool_honours_connection_close() {
-    // Script: first response carries `Connection: close`, second does not.
     let (addr, accepts, _server) = spawn_mock_server(|i| {
         if i == 0 {
             b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".to_vec()
@@ -214,11 +180,6 @@ async fn h1_pool_honours_connection_close() {
 
 #[tokio::test]
 async fn h1_pool_recovers_when_server_drops_connection() {
-    // Script: first request responds normally and then the server
-    // drops the socket before the client's next request — simulated
-    // by accepting, reading one request, writing a clean response
-    // (no `Connection: close`), and then letting the connection
-    // close naturally when the task ends.
     let (listener_addr, accepts, _server) = {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -245,9 +206,6 @@ async fn h1_pool_recovers_when_server_drops_connection() {
                             Err(_) => return,
                         }
                     }
-                    // Write a clean response WITHOUT `Connection:
-                    // close` — the client will happily pool the
-                    // connection. Then drop the socket.
                     let _ = socket.write_all(&ok_response()).await;
                     let _ = socket.shutdown().await;
                 });
@@ -261,7 +219,6 @@ async fn h1_pool_recovers_when_server_drops_connection() {
     let port = listener_addr.port();
     let url = url::Url::parse(&format!("http://{listener_addr}/")).unwrap();
 
-    // Request 1 — handshake + clean response. Pool parks the stream.
     let resp1 = send_request_h1_pooled(
         &pool,
         &connector,
@@ -280,13 +237,8 @@ async fn h1_pool_recovers_when_server_drops_connection() {
     .expect("first request succeeds");
     assert_eq!(resp1.status, 200);
 
-    // Give the server side of the socket a moment to finish closing
-    // so the client's pooled read hits an EOF rather than a live
-    // connection.
     tokio::time::sleep(Duration::from_millis(50)).await;
 
-    // Request 2 — the pooled stream is dead; send_request_h1_pooled
-    // should retry on a fresh TCP and succeed.
     let resp2 = send_request_h1_pooled(
         &pool,
         &connector,
@@ -313,20 +265,13 @@ async fn h1_pool_recovers_when_server_drops_connection() {
     );
 
     let stats = pool.stats();
-    // The pooled stream is dead before request 2's checkout. The checkout
-    // liveness probe catches it up front (stale_probed) rather than letting the
-    // exchange fail mid-request (evictions_dead); a slow FIN could still land in
-    // the probe-to-write race and surface as evictions_dead. Either path means
-    // the dead stream was detected and the request recovered on a fresh TCP.
     assert!(
         stats.stale_probed + stats.evictions_dead >= 1,
         "dead pooled stream should have been detected (got {stats:?})"
     );
 }
 
-/// A mock server that delays each response and tracks the PEAK number of
-/// connections open at once — so a test can assert the per-host connection
-/// cap actually bounds concurrency. Returns `(addr, accepts, peak, handle)`.
+/// A mock server that delays each response and tracks the PEAK number of connections open at once — so a test can assert the per-host connection cap actually bounds concurrency.
 async fn spawn_peak_tracking_server(
     delay: Duration,
 ) -> (
@@ -350,7 +295,6 @@ async fn spawn_peak_tracking_server(
                 break;
             };
             accepts_c.fetch_add(1, Ordering::SeqCst);
-            // Bump the live gauge and record the high-water mark.
             let now_live = live_c.fetch_add(1, Ordering::SeqCst) + 1;
             peak_c.fetch_max(now_live, Ordering::SeqCst);
             let live_task = live_c.clone();
@@ -373,7 +317,6 @@ async fn spawn_peak_tracking_server(
                     if done {
                         break;
                     }
-                    // Hold the connection busy so concurrent requests overlap.
                     tokio::time::sleep(delay).await;
                     if socket
                         .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
@@ -383,7 +326,6 @@ async fn spawn_peak_tracking_server(
                         break;
                     }
                 }
-                // Connection closed — decrement the live gauge.
                 live_task.fetch_sub(1, Ordering::SeqCst);
             });
         }
@@ -392,16 +334,13 @@ async fn spawn_peak_tracking_server(
     (addr, accepts, peak, handle)
 }
 
-/// The per-host H1 cap must bound the number of connections open at once,
-/// and the warm connections must be reused for the queued overflow rather
-/// than each request opening (and discarding) a fresh socket.
+/// The per-host H1 cap must bound the number of connections open at once, and the warm connections must be reused for the queued overflow rather than each request opening (and discarding) a fresh socket.
 #[tokio::test]
 async fn h1_cap_bounds_concurrency_and_reuses_warm_connections() {
     const CAP: usize = 3;
     const REQUESTS: usize = 12;
     let (addr, accepts, peak, _server) =
         spawn_peak_tracking_server(Duration::from_millis(40)).await;
-    // Generous idle timeout + LRU so warm connections survive for reuse.
     let pool = Arc::new(Pool::with_limits(Duration::from_secs(30), 2048, CAP));
     let connector = bare_connector();
     let host = "127.0.0.1".to_string();
@@ -438,13 +377,11 @@ async fn h1_cap_bounds_concurrency_and_reuses_warm_connections() {
         assert_eq!(status, 200);
     }
 
-    // THE cap test: a broken/missing semaphore would let all 12 run at once.
     assert!(
         peak.load(Ordering::SeqCst) <= CAP,
         "concurrent connections ({}) must never exceed the cap ({CAP})",
         peak.load(Ordering::SeqCst)
     );
-    // Reuse: at most CAP sockets were opened for all REQUESTS requests.
     assert!(
         accepts.load(Ordering::SeqCst) <= CAP,
         "at most {CAP} sockets should be opened (got {})",
@@ -459,13 +396,9 @@ async fn h1_cap_bounds_concurrency_and_reuses_warm_connections() {
     );
 }
 
-/// A request cancelled mid-exchange (its future dropped) must release its
-/// per-host permit, or a later request to the same host deadlocks. With a
-/// cap of 1 this is unambiguous: if the permit leaked, request B never
-/// acquires it and times out.
+/// A request cancelled mid-exchange (its future dropped) must release its per-host permit, or a later request to the same host deadlocks.
 #[tokio::test]
 async fn h1_cancelled_request_releases_permit() {
-    // 500ms server delay so we can cancel request A while it holds the permit.
     let (addr, _accepts, _peak, _server) =
         spawn_peak_tracking_server(Duration::from_millis(500)).await;
     let pool = Arc::new(Pool::with_limits(Duration::from_secs(30), 2048, 1));
@@ -474,8 +407,6 @@ async fn h1_cancelled_request_releases_permit() {
     let port = addr.port();
     let url = url::Url::parse(&format!("http://{addr}/")).unwrap();
 
-    // Request A acquires the only permit, then we cancel it mid-exchange by
-    // letting the timeout drop its future.
     let a = {
         let pool = Arc::clone(&pool);
         let connector = connector.clone();
@@ -499,7 +430,6 @@ async fn h1_cancelled_request_releases_permit() {
             .await
         }
     };
-    // Drop A's future after 50ms (it is still blocked in the 500ms exchange).
     assert!(
         tokio::time::timeout(Duration::from_millis(50), a)
             .await
@@ -507,8 +437,6 @@ async fn h1_cancelled_request_releases_permit() {
         "request A should still be in-flight (cancelled by timeout)"
     );
 
-    // Request B must acquire the now-released permit and complete. If the
-    // permit leaked, this hangs and the 3s timeout fires.
     let b = send_request_h1_pooled(
         &pool,
         &connector,
@@ -530,9 +458,7 @@ async fn h1_cancelled_request_releases_permit() {
     assert_eq!(resp.status, 200);
 }
 
-/// A POST on a warm pooled socket whose server answers with a truncated
-/// body and closes must surface the error — never replay on a second
-/// connection.
+/// A POST on a warm pooled socket whose server answers with a truncated body and closes must surface the error — never replay on a second connection.
 #[tokio::test]
 async fn post_is_not_replayed_after_mid_response_close() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -544,8 +470,6 @@ async fn post_is_not_replayed_after_mid_response_close() {
         let (mut sock, _) = listener.accept().await.unwrap();
         conns_srv.fetch_add(1, Ordering::SeqCst);
 
-        // Exchange 1: warm the pool (keep-alive 200). The socket stays open —
-        // the client will reuse it.
         let mut buf = [0u8; 1024];
         let _ = sock.read(&mut buf).await;
         let _ = sock
@@ -553,10 +477,6 @@ async fn post_is_not_replayed_after_mid_response_close() {
             .await;
         let _ = sock.flush().await;
 
-        // Exchange 2: the POST arrives on the SAME socket. The server
-        // answers with a declared body longer than what it sends, then
-        // closes — the response started, so the request may already have
-        // been processed.
         let _ = sock.read(&mut buf).await;
         let _ = sock
             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nabc")
@@ -568,7 +488,6 @@ async fn post_is_not_replayed_after_mid_response_close() {
     let pool = Arc::new(Pool::new());
     let connector = bare_connector();
 
-    // Warm the pool with a GET.
     let url = url::Url::parse(&format!("http://{addr}/warm")).unwrap();
     let warm = send_request_h1_pooled(
         &pool,
@@ -588,7 +507,6 @@ async fn post_is_not_replayed_after_mid_response_close() {
     .expect("warm-up request succeeds");
     assert_eq!(warm.status, 200);
 
-    // POST on the warm socket; the server truncates and closes.
     let url = url::Url::parse(&format!("http://{addr}/charge")).unwrap();
     let post = send_request_h1_pooled(
         &pool,
@@ -608,8 +526,6 @@ async fn post_is_not_replayed_after_mid_response_close() {
 
     assert!(post.is_err(), "mid-response close must surface as an error");
 
-    // Exactly one connection total. A second accept would mean the POST
-    // body was replayed on a fresh connection.
     assert_eq!(conns.load(Ordering::SeqCst), 1, "POST must not be replayed");
     server.await.unwrap();
 }

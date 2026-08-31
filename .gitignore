@@ -23,8 +23,10 @@ wrappers/python/.venv/
 wrappers/python/**/*.so
 wrappers/python/**/*.pyd
 wrappers/python/**/__pycache__/
+scripts/__pycache__/
 wrappers/python/.pytest_cache/
 # cargo-fuzz build output (corpus is tracked, target/artifacts aren't)
+tools/webkit-capture/.build/
 fuzz/target/
 fuzz/artifacts/
 # benches sub-workspace build output

@@ -18,18 +18,12 @@ pub enum Platform {
     Android,
     /// Apple iOS / iPadOS (mobile flag `?1`).
     IOS,
-    /// Detect the host OS at build time (`cfg!(target_os)`), falling back
-    /// to [`Platform::Windows`] for an unrecognised target. This is the
-    /// default for a **bare** (non-impersonating) session — an internal
-    /// call from a Linux box honestly looks like Linux. Resolved to a
-    /// concrete variant by [`Platform::resolve`] before any use, so it
-    /// never reaches the wire as-is.
+    /// Detect the host OS at build time (`cfg!(target_os)`), falling back to [`Platform::Windows`] for an unrecognised target.
     Host,
 }
 
 impl Platform {
-    /// Concrete host OS from the compile target. Never returns
-    /// [`Platform::Host`]; unknown targets fall back to Windows.
+    /// Concrete host OS from the compile target.
     pub fn detect_host() -> Self {
         #[cfg(target_os = "windows")]
         {
@@ -63,9 +57,7 @@ impl Platform {
         }
     }
 
-    /// Resolve [`Platform::Host`] to the concrete host OS; a no-op for every
-    /// explicit variant. Call before reading any platform-derived value so
-    /// `Host` never leaks into a fingerprint.
+    /// Resolve [`Platform::Host`] to the concrete host OS; a no-op for every explicit variant.
     #[must_use]
     pub fn resolve(self) -> Self {
         match self {

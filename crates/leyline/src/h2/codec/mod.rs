@@ -1,6 +1,4 @@
 //! Frame codec — reads and writes HTTP/2 frames over async IO.
-//!
-//! No tokio_util dependency. Just a buffer + AsyncRead/AsyncWrite.
 
 #![forbid(unsafe_code)]
 mod reader;

@@ -2,9 +2,6 @@ use super::*;
 use leyline_bssl::ssl::CertificateCompressor;
 use std::io::Write;
 
-// The decompressors aren't decorative: a server that compresses its
-// certificate with the codepoint we advertise must actually be
-// decodable. Round-trip a known payload through each.
 #[test]
 fn zlib_decompressor_round_trips() {
     let original = b"-----BEGIN CERTIFICATE----- leyline zlib roundtrip";
@@ -29,8 +26,6 @@ fn zstd_decompressor_round_trips() {
 
 #[test]
 fn decompression_bomb_is_capped() {
-    // 8 MiB of zeros compresses to a few KB: a tiny hostile
-    // certificate-compression body must not grow the heap unbounded.
     let original = vec![0u8; 8 * 1024 * 1024];
     let mut enc = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
     enc.write_all(&original).unwrap();

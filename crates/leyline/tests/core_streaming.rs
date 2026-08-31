@@ -9,8 +9,6 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[tokio::test]
 async fn streaming_request_body_chunked_over_h1() {
-    // A mock H1 server that reads chunked request, computes total
-    // length, and echoes it.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
 
@@ -18,7 +16,6 @@ async fn streaming_request_body_chunked_over_h1() {
         let (mut sock, _) = listener.accept().await.unwrap();
         let mut req = Vec::new();
         let mut tmp = [0u8; 4096];
-        // Read headers
         let header_end;
         loop {
             let n = sock.read(&mut tmp).await.unwrap();
@@ -35,11 +32,9 @@ async fn streaming_request_body_chunked_over_h1() {
             "chunked expected, got headers: {head}"
         );
 
-        // Read chunked body
         let mut body_buf: Vec<u8> = req[header_end..].to_vec();
         let mut total: usize = 0;
         loop {
-            // Need a chunk-size line.
             let crlf = loop {
                 if let Some(i) = body_buf.windows(2).position(|w| w == b"\r\n") {
                     break i;
@@ -54,7 +49,6 @@ async fn streaming_request_body_chunked_over_h1() {
             let size = usize::from_str_radix(size_line.trim(), 16).unwrap();
             body_buf.drain(..crlf + 2);
             if size == 0 {
-                // Trailing CRLF.
                 while body_buf.len() < 2 {
                     let n = sock.read(&mut tmp).await.unwrap();
                     if n == 0 {
@@ -85,7 +79,6 @@ async fn streaming_request_body_chunked_over_h1() {
     });
 
     let session = Session::builder().http1().build().unwrap();
-    // Build a 3 MB body as many 8 KB chunks.
     let chunks: Vec<std::io::Result<Bytes>> = (0..384)
         .map(|_| Ok(Bytes::from(vec![b'a'; 8 * 1024])))
         .collect();
@@ -99,7 +92,7 @@ async fn streaming_request_body_chunked_over_h1() {
         .await
         .unwrap();
     assert_eq!(resp.status(), 200);
-    assert_eq!(resp.text().trim(), expected_total.to_string());
+    assert_eq!(resp.text().unwrap().trim(), expected_total.to_string());
 
     server.await.unwrap();
 }
@@ -163,8 +156,6 @@ async fn streaming_request_body_fixed_length_content_length() {
 
 #[tokio::test]
 async fn response_into_stream_on_buffered_returns_single_chunk() {
-    // `stream()` is opted-in, but H1 buffers internally — still we
-    // expose the body as a BodyStream so the API is uniform.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
 
@@ -180,7 +171,6 @@ async fn response_into_stream_on_buffered_returns_single_chunk() {
                 break;
             }
         }
-        // 10 × 64 KB body.
         let total = 10 * 64 * 1024;
         let body_bytes = vec![b'A'; total];
         let resp_head =
@@ -270,12 +260,10 @@ async fn into_stream_twice_returns_error() {
         .send()
         .await
         .unwrap();
-    // First take succeeds:
     let mut s1 = match resp.into_stream() {
         Ok(s) => s,
         Err(e) => panic!("unexpected error: {e}"),
     };
-    // Drain once so we don't hang.
     while let Some(c) = s1.next().await {
         let _ = c.unwrap();
     }
@@ -292,7 +280,6 @@ async fn redirect_with_streaming_body_errors() {
         let (mut sock, _) = listener.accept().await.unwrap();
         let mut req = Vec::new();
         let mut tmp = [0u8; 4096];
-        // Drain headers + any initial chunks — we just need to 307 the caller.
         loop {
             let n = sock.read(&mut tmp).await.unwrap();
             if n == 0 {
@@ -329,24 +316,13 @@ async fn redirect_with_streaming_body_errors() {
     server.await.unwrap();
 }
 
-// Streaming over H3 — both directions — is exercised against a live QUIC
-// server, not here: a streaming REQUEST body is pumped into the request stream
-// incrementally (`live_h3_streaming_request_body_roundtrips` in tls_peet.rs),
-// and a `.stream()` RESPONSE is delivered incrementally too. Both need a real
-// QUIC peer (H3 handshake in debug can overflow the default stack;
-// use `--release`), so neither is unit-tested offline. The driver's
-// request-body FIN-timing state machine has direct offline coverage in
-// `quic::pool::tests`.
-
 #[tokio::test]
 async fn body_ergonomics_from_impls_unchanged() {
-    // Tests that existing `.body(Vec<u8>)` call sites still compile.
     let session = Session::builder()
         .http1()
         .protocol_policy(ProtocolPolicy::Http1)
         .build()
         .unwrap();
-    // Can't hit the network here — just verify builder chaining types.
     let _ = session
         .post("http://127.0.0.1:1")
         .body(vec![1u8, 2, 3])

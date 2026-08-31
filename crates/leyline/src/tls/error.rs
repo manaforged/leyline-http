@@ -50,25 +50,44 @@ pub enum TlsError {
 }
 
 impl TlsError {
-    /// Whether retrying on a fresh connection can resolve this failure.
+    /// Connect-phase failures a new TCP+TLS attempt can recover.
     pub fn is_retryable(&self) -> bool {
         matches!(
             self,
-            Self::TcpConnect(_) | Self::Dns(_) | Self::HandshakeIo(_)
+            Self::TcpConnect(_)
+                | Self::Dns(_)
+                | Self::HandshakeIo(_)
+                | Self::Handshake(_)
+                | Self::SslConnect(_)
         )
     }
 }
 
-// leyline_bssl errors are stringified at the boundary so no `leyline_bssl` type is nameable in
-// the public `TlsError` enum (a leyline_bssl major bump can change these impls without
-// breaking the variants consumers match on). These conversions keep `?`
-// ergonomic across the BoringSSL build/handshake paths.
+fn transport_eof(msg: &str) -> bool {
+    let lower = msg.to_ascii_lowercase();
+    lower.contains("unexpected eof")
+        || lower.contains("connection reset")
+        || lower.contains("broken pipe")
+        || lower.contains("connection aborted")
+}
+
+pub(crate) fn from_handshake_ssl(e: leyline_bssl::ssl::Error) -> TlsError {
+    match e.into_io_error() {
+        Ok(e) => TlsError::HandshakeIo(e),
+        Err(e) => {
+            let msg = e.to_string();
+            if transport_eof(&msg) {
+                TlsError::HandshakeIo(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, msg))
+            } else {
+                TlsError::Handshake(msg)
+            }
+        }
+    }
+}
+
 impl From<leyline_bssl::ssl::Error> for TlsError {
     fn from(e: leyline_bssl::ssl::Error) -> Self {
-        match e.into_io_error() {
-            Ok(e) => TlsError::HandshakeIo(e),
-            Err(e) => TlsError::Handshake(e.to_string()),
-        }
+        from_handshake_ssl(e)
     }
 }
 
@@ -77,3 +96,6 @@ impl From<leyline_bssl::error::ErrorStack> for TlsError {
         TlsError::SslConfig(e.to_string())
     }
 }
+
+#[cfg(test)]
+mod tests;

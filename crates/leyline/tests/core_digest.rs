@@ -23,14 +23,12 @@ async fn read_headers(sock: &mut tokio::net::TcpStream) -> String {
     String::from_utf8_lossy(&acc).to_string()
 }
 
-/// Extract the `Authorization:` header value (if any) from a block of
-/// HTTP/1 request headers.
+/// Extract the `Authorization:` header value (if any) from a block of HTTP/1 request headers.
 fn extract_authorization(headers: &str) -> Option<String> {
     for line in headers.split("\r\n") {
         let lower = line.to_ascii_lowercase();
         if let Some(rest) = lower.strip_prefix("authorization: ") {
             let _ = rest;
-            // Preserve the original value (with casing).
             let v = line.split_once(": ").unwrap().1.to_string();
             return Some(v);
         }
@@ -38,17 +36,13 @@ fn extract_authorization(headers: &str) -> Option<String> {
     None
 }
 
-/// Mock a two-step Digest challenge/response:
-/// 1. Return 401 with `WWW-Authenticate: Digest ...`.
-/// 2. On the retried request, verify the `Authorization` header parses
-///    as a Digest response, then return 200.
+/// Mock a two-step Digest challenge/response: 1.
 async fn run_digest_server(
     listener: tokio::net::TcpListener,
     algo_wire: &'static str,
     expected_user: &'static str,
     expected_realm: &'static str,
 ) {
-    // Round 1.
     let (mut sock, _) = listener.accept().await.unwrap();
     let _headers = read_headers(&mut sock).await;
     let challenge = format!(
@@ -64,7 +58,6 @@ async fn run_digest_server(
     sock.flush().await.unwrap();
     drop(sock);
 
-    // Round 2.
     let (mut sock, _) = listener.accept().await.unwrap();
     let headers = read_headers(&mut sock).await;
     let auth = extract_authorization(&headers).expect("Authorization header on retry");
@@ -100,7 +93,7 @@ async fn md5_challenge_round_trip() {
         .await
         .unwrap();
     assert_eq!(resp.status(), 200);
-    assert_eq!(resp.text(), "ok");
+    assert_eq!(resp.text().unwrap(), "ok");
     server.await.unwrap();
 }
 
@@ -129,7 +122,6 @@ async fn stale_nonce_is_retried_transparently() {
     let addr = listener.local_addr().unwrap();
 
     let server = tokio::spawn(async move {
-        // Round 1: initial challenge.
         let (mut sock, _) = listener.accept().await.unwrap();
         let _ = read_headers(&mut sock).await;
         sock.write_all(
@@ -142,8 +134,6 @@ async fn stale_nonce_is_retried_transparently() {
         sock.flush().await.unwrap();
         drop(sock);
 
-        // Round 2: credentials were fine but the nonce expired in
-        // flight — answer 401 stale=true with a fresh nonce.
         let (mut sock, _) = listener.accept().await.unwrap();
         let headers = read_headers(&mut sock).await;
         let auth = extract_authorization(&headers).expect("auth on first retry");
@@ -158,8 +148,6 @@ async fn stale_nonce_is_retried_transparently() {
         sock.flush().await.unwrap();
         drop(sock);
 
-        // Round 3: RFC 7616 §3.3 — the client must retry with the
-        // fresh nonce without surfacing the 401 to the caller.
         let (mut sock, _) = listener.accept().await.unwrap();
         let headers = read_headers(&mut sock).await;
         let auth = extract_authorization(&headers).expect("auth on stale retry");
@@ -185,18 +173,13 @@ async fn stale_nonce_is_retried_transparently() {
     server.await.unwrap();
 }
 
-/// A same-origin redirect can sit between the caller's original URL and the
-/// server that issues the 401 Digest challenge. HA2 = H(method:uri) must use
-/// the request-target the server actually challenged (`/protected`), not the
-/// caller's original (`/start`); otherwise the authenticated retry signs the
-/// wrong URI and the server rejects it. Regression for the digest-uri fix.
+/// A same-origin redirect can sit between the caller's original URL and the server that issues the 401 Digest challenge.
 #[tokio::test]
 async fn digest_uri_tracks_the_redirected_challenge_url() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
 
     let server = tokio::spawn(async move {
-        // Round 1: GET /start (no auth) -> 302 to /protected (same origin).
         let (mut sock, _) = listener.accept().await.unwrap();
         let head = read_headers(&mut sock).await;
         assert!(head.starts_with("GET /start "), "{head}");
@@ -210,7 +193,6 @@ async fn digest_uri_tracks_the_redirected_challenge_url() {
         sock.flush().await.unwrap();
         drop(sock);
 
-        // Round 2: GET /protected (no auth) -> 401 Digest challenge.
         let (mut sock, _) = listener.accept().await.unwrap();
         let head = read_headers(&mut sock).await;
         assert!(head.starts_with("GET /protected "), "{head}");
@@ -224,8 +206,6 @@ async fn digest_uri_tracks_the_redirected_challenge_url() {
         sock.flush().await.unwrap();
         drop(sock);
 
-        // Round 3: GET /start (WITH auth) -> 302 to /protected again. The
-        // digest uri must already be /protected, not /start.
         let (mut sock, _) = listener.accept().await.unwrap();
         let head = read_headers(&mut sock).await;
         assert!(head.starts_with("GET /start "), "{head}");
@@ -248,7 +228,6 @@ async fn digest_uri_tracks_the_redirected_challenge_url() {
         sock.flush().await.unwrap();
         drop(sock);
 
-        // Round 4: GET /protected (WITH auth, uri=/protected) -> 200.
         let (mut sock, _) = listener.accept().await.unwrap();
         let head = read_headers(&mut sock).await;
         assert!(head.starts_with("GET /protected "), "{head}");
@@ -283,7 +262,6 @@ async fn non_digest_401_is_passed_through() {
     let server = tokio::spawn(async move {
         let (mut sock, _) = listener.accept().await.unwrap();
         let _ = read_headers(&mut sock).await;
-        // 401 with a Basic challenge — not Digest, so we should NOT retry.
         sock.write_all(
             b"HTTP/1.1 401 Unauthorized\r\n\
               WWW-Authenticate: Basic realm=\"x\"\r\n\

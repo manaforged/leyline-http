@@ -2,12 +2,12 @@ use std::sync::{Arc, LazyLock};
 
 use crate::cookie::Jar;
 use crate::core::{
-    CompressionConfig, DnsConfig, NoProxy, PoolConfig, ProxyConfig, ProxyUrl, RedirectPolicy,
-    SocketConfig, TimeoutConfig, WebSocketConfig,
+    CompressionConfig, DnsConfig, IntoParamPair, NoProxy, PoolConfig, ProxyConfig, ProxyUrl,
+    RedirectPolicy, SocketConfig, TimeoutConfig, WebSocketConfig,
 };
 use crate::h2::H2Config;
 use crate::pool::Pool;
-use crate::profile::{Browser, ChromiumBrand, Platform, ProfileRegistry};
+use crate::profile::{Browser, BrowserProfile, ChromiumBrand, Platform, ProfileRegistry};
 use crate::tcp::TcpProfile;
 use crate::tls::{FingerprintConnector, HappyEyeballsConfig, Resolver, TlsTrustConfig};
 
@@ -16,31 +16,20 @@ use super::{Identity, ProtocolPolicy, Session, SessionInner};
 use crate::audit::AuditTlsCache;
 use crate::core::error::{Error, Result};
 
-/// The synthetic bare profile, materialised once. Backs the default
-/// (no-impersonation) session so `&'static crate::profile::BrowserProfile`
-/// is available to the connector and the H3 path, exactly like the
-/// registry-backed browser profiles.
-static BARE_PROFILE: LazyLock<crate::profile::BrowserProfile> =
-    LazyLock::new(crate::profile::BrowserProfile::bare);
+/// The synthetic bare profile, materialised once.
+static BARE_PROFILE: LazyLock<BrowserProfile> = LazyLock::new(BrowserProfile::bare);
 
 #[must_use = "builders are lazy: nothing happens until `.send()` / `.build()`"]
 /// Session builder - configure browser, platform, proxy, timeout, cookies.
 pub struct SessionBuilder {
-    /// The browser to impersonate. `None` (the default) means **bare** —
-    /// no impersonation, a plain `leyline/<version>` client. `.browser(b)`
-    /// opts into a browser fingerprint.
+    /// The browser to impersonate.
     browser: Option<Browser>,
     platform: Platform,
-    /// `true` once `.platform(...)` (or a platform-pinning convenience like
-    /// `.safari()`) was called. When still `false` at build time the
-    /// platform is chosen by default: an impersonation profile defaults to
-    /// Windows (the dominant real-user OS; a one-time notice fires), while a
-    /// bare session follows the host OS.
+    /// `true` once `.platform(...)` (or a platform-pinning convenience like `.safari()`) was called.
     platform_explicit: bool,
     brand: ChromiumBrand,
     proxy: Option<String>,
-    /// Set when `proxy` was discovered from the environment at build
-    /// time (vs an explicit `.proxy(...)` call).
+    /// Set when `proxy` was discovered from the environment at build time (vs an explicit `.proxy(...)` call).
     proxy_from_env: bool,
     max_redirects: usize,
     proxy_config: ProxyConfig,
@@ -56,11 +45,11 @@ pub struct SessionBuilder {
     cookie_jar: Option<Jar>,
     tcp_profile: Option<TcpProfile>,
     protocol_policy: ProtocolPolicy,
+    protocol_explicit: bool,
     config_error: Option<String>,
     accept_language_override: Option<String>,
     extra_identity_headers: Vec<(String, String)>,
-    /// When set, HTTP identity (UA / sec-ch-ua / identity extras) comes from
-    /// this browser while TLS + H2 still follow [`Self::browser`].
+    /// When set, HTTP identity (UA / sec-ch-ua / identity extras) comes from this browser while TLS + H2 still follow [`Self::browser`].
     http_identity: Option<Browser>,
     accept_invalid_certs: bool,
     pool_idle_timeout: Option<std::time::Duration>,
@@ -96,6 +85,7 @@ impl SessionBuilder {
             cookie_jar: None,
             tcp_profile: None,
             protocol_policy: ProtocolPolicy::Auto,
+            protocol_explicit: false,
             config_error: None,
             accept_language_override: None,
             extra_identity_headers: Vec::new(),
@@ -109,7 +99,6 @@ impl SessionBuilder {
     }
 
     /// Set a proxy URL (`http://`, `https://`, `socks5://`, `socks5h://`).
-    /// `https://` TLS-handshakes to the proxy before CONNECT.
     pub fn proxy(mut self, proxy: impl Into<String>) -> Self {
         let proxy = proxy.into();
         self.proxy_config = self.proxy_config.set_default_proxy(proxy.clone());
@@ -150,9 +139,7 @@ impl SessionBuilder {
         self
     }
 
-    /// Set a session-wide default retry policy, inherited by every request that
-    /// does not override it via [`crate::RequestBuilder::retry`]. Default: no
-    /// retries.
+    /// Set a session-wide default retry policy, inherited by every request that does not override it via [`crate::RequestBuilder::retry`].
     pub fn retry(mut self, policy: crate::core::retry::RetryPolicy) -> Self {
         self.default_retry = policy;
         self
@@ -176,24 +163,13 @@ impl SessionBuilder {
         self
     }
 
-    /// Set the post-send response cap, per redirect hop. Bounds an upstream that
-    /// connects and then goes silent, which neither `connect_timeout` (already
-    /// elapsed) nor `read_timeout` (arms only on a streamed body) catches. For a
-    /// streamed response this is a true time-to-first-byte cap; for the default
-    /// buffered response it bounds the whole-body download. See
-    /// [`TimeoutConfig::response_header`] for the exact semantics.
+    /// Set the post-send response cap, per redirect hop.
     pub fn response_header_timeout(mut self, timeout: std::time::Duration) -> Self {
         self.timeouts.response_header = Some(timeout);
         self
     }
 
     /// Override the connection pool's idle-eviction timeout (default: 300s).
-    ///
-    /// Pool entries whose `last_use` is older than this duration are
-    /// evicted on the next `evict_idle` pass. Raise this when a caller has
-    /// its own keep-warm cadence (e.g. a 30-minute heartbeat) and wants
-    /// the pooled TLS connection to survive between ticks instead of
-    /// being torn down at the default 300 seconds.
     pub fn pool_idle_timeout(mut self, timeout: std::time::Duration) -> Self {
         self.pool_idle_timeout = Some(timeout);
         self.pool_config.idle_timeout = timeout;
@@ -219,56 +195,58 @@ impl SessionBuilder {
         self
     }
 
-    /// Set the maximum simultaneous HTTP/1.1 connections per destination
-    /// `(host, port, proxy)`.
-    ///
-    /// HTTP/1.1 cannot multiplex, so per-host concurrency comes from opening
-    /// several connections. The default is 256 (throughput-favouring — H1 is
-    /// the rare ALPN fallback, so the per-host socket *count* is a fingerprint
-    /// signal that is already moot once you are off HTTP/2). Set it to **6** to
-    /// strictly mirror a real Chrome's per-host socket limit
-    /// (`kMaxSocketsPerGroup`). Has no effect on HTTP/2 (one multiplexed
-    /// connection per host).
-    pub fn h1_max_conns_per_host(mut self, max: usize) -> Self {
-        self.pool_config.max_h1_conns_per_host = max.max(1);
-        self
-    }
-
     /// Disable connection reuse for this session.
     pub fn disable_keepalive(mut self) -> Self {
         self.pool_config.keepalive = false;
         self
     }
 
-    /// Impersonate a specific browser. Without this call the session is
-    /// **bare** — a plain `leyline/<version>` client with no browser
-    /// fingerprint. Call this (or a convenience like [`Self::chrome`]) to
-    /// opt into browser parity.
+    /// Impersonate a specific browser.
     pub fn browser(mut self, browser: Browser) -> Self {
         self.browser = Some(browser);
         self
     }
 
-    /// Use the latest bundled Chrome profile (see [`Browser::default_browser`],
-    /// currently Chrome 150). Pin a specific major via [`Self::browser`].
+    /// Use the latest bundled Chrome profile (see [`Browser::default_browser`], currently Chrome 152).
     pub fn chrome(self) -> Self {
-        self.browser(Browser::default_browser())
+        self.browser(Browser::default_browser()).with_h3_race()
     }
 
-    /// Firefox [`Browser::default_firefox`] (currently Firefox 150).
-    /// Pin [`Browser::Firefox152`] via [`Self::browser`] for the newest
-    /// bundled Firefox.
+    fn with_h3_race(self) -> Self {
+        #[cfg(feature = "http3")]
+        {
+            if self.protocol_explicit {
+                self
+            } else {
+                self.race()
+            }
+        }
+        #[cfg(not(feature = "http3"))]
+        {
+            self
+        }
+    }
+
+    fn chromium_or_default(self, default: Browser) -> Self {
+        if self.browser.is_none() {
+            self.browser(default)
+        } else {
+            self
+        }
+    }
+
+    /// Firefox [`Browser::default_firefox`] (currently Firefox 154).
     pub fn firefox(self) -> Self {
         self.browser(Browser::default_firefox())
     }
 
-    /// Latest bundled Safari. macOS unless [`.ios()`](Self::ios) already ran.
+    /// Latest bundled Safari.
     pub fn safari(self) -> Self {
         if self.platform_explicit {
             let platform = self.platform;
-            self.browser(Browser::Safari18.for_platform(platform))
+            self.browser(Browser::Safari26.for_platform(platform))
         } else {
-            self.browser(Browser::Safari18).macos()
+            self.browser(Browser::Safari26).macos()
         }
     }
 
@@ -277,74 +255,45 @@ impl SessionBuilder {
         self.browser(browser).platform(platform)
     }
 
-    /// Apply a Chromium-family identity overlay (Edge, Brave, Opera).
-    ///
-    /// Leaves TLS ClientHello and HTTP/2 SETTINGS untouched - those
-    /// are byte-identical across Chromium siblings at a given
-    /// Chromium version. What changes is a small set of HTTP
-    /// identity headers:
-    ///
-    /// - `user-agent` suffix - `Edg/NNN` for Edge, `OPR/NNN` for
-    ///   Opera, unchanged for Brave (Brave matches Chrome's UA by
-    ///   design).
-    /// - `sec-ch-ua` brand list - `"Microsoft Edge"`, `"Brave"`, or
-    ///   `"Opera"` in place of `"Google Chrome"`. Opera additionally
-    ///   uses the `"Not:A-Brand"` placeholder form.
-    /// - Extra privacy headers - `dnt: 1` for Edge, `sec-gpc: 1`
-    ///   for Brave.
-    /// - Navigation `accept` - Brave drops `signed-exchange;v=b3`
-    ///   because it disables signed exchanges by default.
-    ///
-    /// The brand setter is a no-op when applied to non-Chromium
-    /// profiles (Firefox, Safari, OkHttp) - the overlay only
-    /// affects Chrome profiles. Opera is typically based on
-    /// `Chromium N-2`; pair with `Browser::Chrome145` for Opera 129.
+    /// Apply a Chromium-family identity overlay ([`ChromiumBrand`]: Edge, Opera, Vivaldi).
     pub fn brand(mut self, brand: ChromiumBrand) -> Self {
         self.brand = brand;
         self
     }
 
-    /// Microsoft Edge overlay on [`Browser::default_browser`] (Chrome 150).
-    /// Same pin as [`crate::Session::edge`]. If `.browser(...)` already ran,
-    /// only the brand overlay is applied.
-    pub fn edge(mut self) -> Self {
-        if self.browser.is_none() {
-            self.browser = Some(Browser::default_browser());
-        }
-        self.brand(ChromiumBrand::Edge)
+    /// Microsoft Edge overlay on [`Browser::default_browser`] (Chrome 152).
+    pub fn edge(self) -> Self {
+        self.chromium_or_default(Browser::default_browser())
+            .with_h3_race()
+            .brand(ChromiumBrand::Edge)
     }
 
     /// Use the latest bundled Brave identity.
     pub fn brave(self) -> Self {
-        self.browser(Browser::Brave146).platform(Platform::MacOS)
+        let this = if self.platform_explicit {
+            let platform = self.platform;
+            self.browser(Browser::Brave146.for_platform(platform))
+        } else {
+            self.browser(Browser::Brave146).macos()
+        };
+        this.with_h3_race()
     }
 
-    /// Opera overlay on [`Browser::default_browser`] (Chrome 150 / Opera 134).
-    /// Same pin as [`crate::Session::opera`]. If `.browser(...)` already ran,
-    /// only the brand overlay is applied.
-    pub fn opera(mut self) -> Self {
-        if self.browser.is_none() {
-            self.browser = Some(Browser::default_browser());
-        }
-        self.brand(ChromiumBrand::Opera)
+    /// Opera overlay on [`Browser::default_browser`] (Chrome 152 / Opera 136).
+    pub fn opera(self) -> Self {
+        self.chromium_or_default(Browser::default_browser())
+            .with_h3_race()
+            .brand(ChromiumBrand::Opera)
     }
 
-    /// Vivaldi overlay on Chrome 147 — last major with a recorded Vivaldi
-    /// build string. Same pin as [`crate::Session::vivaldi`]. If `.browser(...)`
-    /// already ran, only the brand overlay is applied.
-    pub fn vivaldi(mut self) -> Self {
-        if self.browser.is_none() {
-            self.browser = Some(Browser::Chrome147);
-        }
-        self.brand(ChromiumBrand::Vivaldi)
+    /// Vivaldi overlay on Chrome 147 — last major with a recorded Vivaldi build string.
+    pub fn vivaldi(self) -> Self {
+        self.chromium_or_default(Browser::Chrome147)
+            .with_h3_race()
+            .brand(ChromiumBrand::Vivaldi)
     }
 
-    /// Set the target OS. Prefer [`.windows()`](Self::windows) /
-    /// [`.macos()`](Self::macos) / [`.linux()`](Self::linux) /
-    /// [`.android()`](Self::android) / [`.ios()`](Self::ios).
-    ///
-    /// When never called, an impersonating session defaults to
-    /// [`Platform::Windows`]. A bare session follows the host OS.
+    /// Set the target OS.
     pub fn platform(mut self, platform: Platform) -> Self {
         self.platform = platform;
         self.platform_explicit = true;
@@ -354,7 +303,7 @@ impl SessionBuilder {
         self
     }
 
-    /// Windows. Default for `Session::chrome()` / `.chrome()`.
+    /// Windows.
     pub fn windows(self) -> Self {
         self.platform(Platform::Windows)
     }
@@ -369,12 +318,12 @@ impl SessionBuilder {
         self.platform(Platform::Linux)
     }
 
-    /// Android. Chrome-on-Android is `.chrome().android()`.
+    /// Android.
     pub fn android(self) -> Self {
         self.platform(Platform::Android)
     }
 
-    /// iOS / iPadOS. [`.safari().ios()`](Self::safari) is Safari on iPhone.
+    /// iOS / iPadOS.
     pub fn ios(self) -> Self {
         self.platform(Platform::IOS)
     }
@@ -406,9 +355,6 @@ impl SessionBuilder {
     }
 
     /// Use a custom DNS resolver for direct connections.
-    ///
-    /// Proxy connections still resolve at the proxy unless the proxy
-    /// protocol itself requires local resolution.
     pub fn resolver(mut self, resolver: Arc<dyn Resolver>) -> Self {
         self.dns_config = self.dns_config.resolver(resolver);
         self
@@ -490,15 +436,6 @@ impl SessionBuilder {
     }
 
     /// Enable per-response fingerprint introspection.
-    ///
-    /// Off by default. When off, the execute path skips cloning the request
-    /// headers, responses don't retain them, and [`Response::audit`] returns
-    /// `None` — so high-throughput callers that never introspect pay nothing.
-    /// Turn this on to populate [`Response::audit`] (JA3/JA4/JA4H/JA4T/H2) and
-    /// [`Response::request_headers`].
-    ///
-    /// [`Response::audit`]: crate::Response::audit
-    /// [`Response::request_headers`]: crate::Response::request_headers
     pub fn audit(mut self, enabled: bool) -> Self {
         self.audit = enabled;
         self
@@ -517,9 +454,6 @@ impl SessionBuilder {
     }
 
     /// Add a SHA-256 pin for the DER-encoded leaf certificate.
-    ///
-    /// The certificate chain must still validate against configured
-    /// roots; this adds a leaf hash requirement on top.
     pub fn add_pinned_leaf_sha256(mut self, sha256: [u8; 32]) -> Self {
         self.tls_trust = self.tls_trust.add_pinned_leaf_sha256(sha256);
         self
@@ -550,14 +484,8 @@ impl SessionBuilder {
     }
 
     /// Force HTTP/3 over QUIC.
-    ///
-    /// ```rust,ignore
-    /// let session = Session::builder()
-    ///     .chrome()
-    ///     .http3()
-    ///     .build()?;
-    /// ```
     pub fn http3(mut self) -> Self {
+        self.protocol_explicit = true;
         #[cfg(feature = "http3")]
         {
             self.protocol_policy = ProtocolPolicy::Http3;
@@ -574,26 +502,43 @@ impl SessionBuilder {
 
     /// Force HTTP/1.1.
     pub fn http1(mut self) -> Self {
+        self.protocol_explicit = true;
         self.protocol_policy = ProtocolPolicy::Http1;
         self
     }
 
     /// Force HTTP/2.
     pub fn http2(mut self) -> Self {
+        self.protocol_explicit = true;
         self.protocol_policy = ProtocolPolicy::Http2;
+        self
+    }
+
+    /// Race the HTTP/3 (QUIC) and HTTP/2 (TCP+TLS) handshakes, Chrome-style: whichever connection establishes first carries the request (sent once), with HTTP/1.1 fallback via the Auto path when neither comes up.
+    pub fn race(mut self) -> Self {
+        self.protocol_explicit = true;
+        #[cfg(feature = "http3")]
+        {
+            self.protocol_policy = ProtocolPolicy::Race;
+        }
+        #[cfg(not(feature = "http3"))]
+        {
+            self.config_error = Some(
+                "HTTP/3 race support requires the `http3` feature; rebuild leyline with feature `http3`"
+                    .into(),
+            );
+        }
         self
     }
 
     /// Set the protocol selection policy.
     pub fn protocol_policy(mut self, policy: ProtocolPolicy) -> Self {
+        self.protocol_explicit = true;
         self.protocol_policy = policy;
         self
     }
 
     /// Apply a locked [`Identity`].
-    ///
-    /// TLS/H2 follow [`Identity::tls`]. HTTP headers follow [`Identity::http`].
-    /// Platform is [`Identity::platform`].
     pub fn identity(self, id: Identity) -> Self {
         let builder = self.browser(id.tls()).platform(id.platform());
         if id.http() == id.tls() {
@@ -603,45 +548,31 @@ impl SessionBuilder {
         }
     }
 
-    /// Keep TLS/H2 from [`Self::browser`], but take UA / `sec-ch-ua` /
-    /// identity extras from `browser`.
-    ///
-    /// Prefer [`Self::identity`] so family mismatch is unrepresentable.
-    /// This knob stays for tests that assert the split in isolation.
+    /// Keep TLS/H2 from [`Self::browser`], but take UA / `sec-ch-ua` / identity extras from `browser`.
     pub fn http_identity(mut self, browser: Browser) -> Self {
         self.http_identity = Some(browser);
         self
     }
 
     /// Override the session's `accept-language` header for every request.
-    /// When not called, the browser profile's TOML identity value is used.
     pub fn accept_language(mut self, lang: impl Into<String>) -> Self {
         self.accept_language_override = Some(lang.into());
         self
     }
 
-    /// Append session-level default headers injected on every request after
-    /// the preset identity block. Use this to carry per-account client hints
-    /// (`device-memory`, `viewport-width`, `dpr`, etc.) without touching
-    /// every request site in the module. Per-request `.header()` calls and
-    /// preset-emitted names take precedence over these defaults.
-    pub fn extra_headers(mut self, headers: impl IntoIterator<Item = (String, String)>) -> Self {
-        self.extra_identity_headers.extend(headers);
+    /// Append session default headers after the preset identity block on every request.
+    pub fn extra_headers<I, P>(mut self, headers: I) -> Self
+    where
+        I: IntoIterator<Item = P>,
+        P: IntoParamPair,
+    {
+        for pair in headers {
+            self.extra_identity_headers.push(pair.into_param_pair());
+        }
         self
     }
 
-    /// Disable peer certificate verification. **Dangerous** - any
-    /// man-in-the-middle between the client and the target can serve
-    /// arbitrary content without detection. Intended only for the
-    /// `leyline` CLI's `-k/--insecure` flag and controlled test
-    /// fixtures against self-signed local servers.
-    ///
-    /// The `danger_` prefix is grep-able on purpose: a call site in
-    /// production code is a bug.
-    ///
-    /// Also skips system trust-store wiring at build time (the roots
-    /// would never be consulted), so a machine with an unloadable
-    /// system store can still build a session with this flag set.
+    /// Disable peer certificate verification.
     pub fn danger_accept_invalid_certs(mut self, accept: bool) -> Self {
         self.accept_invalid_certs = accept;
         self
@@ -660,11 +591,6 @@ impl SessionBuilder {
             }
         }
 
-        // Resolve the effective platform:
-        //  - explicit `.platform(...)` always wins (resolving `Host` if set);
-        //  - an impersonation profile with no explicit platform defaults to
-        //    Windows (dominant real-user OS) and warns once;
-        //  - a bare session follows the host OS (honest for internal calls).
         self.platform = if self.platform_explicit {
             self.platform.resolve()
         } else if self.browser.is_some() {
@@ -681,32 +607,13 @@ impl SessionBuilder {
             Platform::detect_host()
         };
 
-        // Honour standard proxy environment variables when no explicit
-        // `proxy(..)` has been set. A CLI user exporting `HTTPS_PROXY`
-        // gets it picked up without re-plumbing the session. The
-        // precedence order is:
-        //   1. Explicit `SessionBuilder::proxy(..)` (highest).
-        //   2. `HTTPS_PROXY` (upper or lower case).
-        //   3. `HTTP_PROXY` (upper or lower case).
-        // `NO_PROXY` is honoured per-request in the transport layer
-        // Building the session with a proxy plus `NO_PROXY`
-        // patterns means some hosts bypass it.
         if self.proxy.is_none() && self.proxy_config.uses_env() {
             if let Some(p) = env_proxy() {
                 self.proxy_config = self.proxy_config.set_default_proxy(p.clone());
                 self.proxy = Some(p);
-                // Provenance matters: env-inherited NO_PROXY patterns may
-                // bypass this proxy, but never an explicitly-set one.
                 self.proxy_from_env = true;
             }
         }
-        // HTTP/3 and proxies are mutually exclusive by design. Tunnelling QUIC
-        // (UDP) through a forward proxy requires MASQUE (RFC 9298 — UDP over
-        // HTTP), a large separate protocol effort no mainstream proxy speaks; an
-        // HTTP CONNECT / SOCKS proxy carries only TCP. So when a proxy is set,
-        // the correct path is HTTP/2 over the proxy's TCP tunnel — request that
-        // explicitly rather than silently dialing UDP direct (which would leak
-        // the real egress IP past the proxy). Fail fast at build time.
         #[cfg(feature = "http3")]
         {
             if (self.proxy.is_some() || self.proxy_config.first_proxy().is_some())
@@ -721,9 +628,7 @@ impl SessionBuilder {
             }
         }
 
-        // `None` browser = bare (the default): a synthetic, non-impersonating
-        // profile. `Some(b)` = impersonate that browser from the registry.
-        let profile: &'static crate::profile::BrowserProfile = match self.browser {
+        let profile: &'static BrowserProfile = match self.browser {
             Some(b) => ProfileRegistry::global()
                 .get_browser(b)
                 .ok_or_else(|| Error::Config(format!("no profile for {b}")))?,
@@ -766,8 +671,6 @@ impl SessionBuilder {
 
         let connector = self.build_connector(profile, tcp_profile)?;
 
-        // Build H2 config from profile, applying any per-platform
-        // override (e.g. Chromium-on-macOS drops `unknown_setting8`).
         let resolved_h2 = profile.h2.resolve_for_platform(self.platform)?;
         let h2_config = H2Config::from_profile(&resolved_h2)?;
 
@@ -830,11 +733,6 @@ impl SessionBuilder {
                         self.pool_config.max_h1_conns_per_host.max(1),
                     )
                 } else {
-                    // Keepalive disabled: zero idle timeout means connections are
-                    // never reused. The per-host H1 cap still applies (it governs
-                    // concurrency, not reuse), so honour the configured value
-                    // rather than forcing it to 1 — disabling reuse must not
-                    // silently serialise concurrent H1 requests to a host.
                     Pool::with_limits(
                         std::time::Duration::ZERO,
                         1,
@@ -849,8 +747,12 @@ impl SessionBuilder {
                 #[cfg(feature = "http3")]
                 h3_config: match crate::quic::H3Config::for_family(&profile.meta.family) {
                     Ok(cfg) => Some(cfg),
-                    // No H3 fingerprint for this family — only fatal if HTTP/3 was requested.
-                    Err(e) if matches!(self.protocol_policy, ProtocolPolicy::Http3) => {
+                    Err(e)
+                        if matches!(
+                            self.protocol_policy,
+                            ProtocolPolicy::Http3 | ProtocolPolicy::Race
+                        ) =>
+                    {
                         return Err(e);
                     }
                     Err(_) => None,
@@ -860,15 +762,13 @@ impl SessionBuilder {
             }),
         })
     }
-    /// Pre-compute the audit fingerprints (JA4, JA3, Akamai-H2, JA4T) from
-    /// the resolved profile so `audit()` never recomputes per response.
+    /// Pre-compute the audit fingerprints (JA4, JA3, Akamai-H2, JA4T) from the resolved profile so `audit()` never recomputes per response.
     fn compute_audit_cache(
         &self,
-        profile: &'static crate::profile::BrowserProfile,
+        profile: &'static BrowserProfile,
         h2_config: &H2Config,
         tcp_profile: TcpProfile,
     ) -> AuditTlsCache {
-        // Pre-compute audit data from profile.
         let extension_ids = crate::audit::chrome_extension_ids(&profile.tls);
         let ja4 = {
             let input = crate::audit::Ja4Input {
@@ -887,7 +787,7 @@ impl SessionBuilder {
                 ciphers: &profile.tls.ciphers,
                 curves: &profile.tls.curves,
                 extension_ids: &extension_ids,
-                tls_record_version: 771, // TLS 1.2 record layer
+                tls_record_version: 771,
             };
             crate::audit::compute_ja3(&input)
         };
@@ -907,28 +807,17 @@ impl SessionBuilder {
         }
     }
 
-    /// Build the BoringSSL fingerprint connector for the resolved profile:
-    /// trust wiring, cert-verification policy, resolver, socket config,
-    /// connect timeout, and Happy Eyeballs.
+    /// Build the BoringSSL fingerprint connector for the resolved profile: trust wiring, cert-verification policy, resolver, socket config, connect timeout, and Happy Eyeballs.
     fn build_connector(
         &self,
-        profile: &'static crate::profile::BrowserProfile,
+        profile: &'static BrowserProfile,
         tcp_profile: TcpProfile,
     ) -> Result<FingerprintConnector> {
-        // Build TLS connector from profile. When peer verification is
-        // disabled, skip system trust-store wiring entirely: loading roots
-        // we will never verify against is pointless, and an unloadable
-        // store (e.g. a broken Windows ROOT hive) would otherwise fail the
-        // build before `set_accept_invalid_certs` ever runs — killing the
-        // `-k` escape hatch on exactly the machines that need it.
         let tls_trust = if self.accept_invalid_certs {
             self.tls_trust.clone().without_system_roots()
         } else {
             self.tls_trust.clone()
         };
-        // Every session uses the BoringSSL fingerprint connector: browser/
-        // profile sessions impersonate that browser, and a bare
-        // `Session::new()` uses the synthetic `BARE_PROFILE` resolved above.
         let mut fp = FingerprintConnector::new_with_trust(profile, tcp_profile, &tls_trust)
             .map_err(Error::Tls)?;
         if self.accept_invalid_certs {
@@ -945,48 +834,38 @@ impl SessionBuilder {
         Ok(fp)
     }
 
-    /// Apply the Chromium-sibling identity overlay if the caller asked for
-    /// one. Only meaningful on Chrome profiles; `chromium_major()` returns
-    /// None for Firefox / Safari / OkHttp, which short-circuits the overlay
-    /// to a no-op. An unverified (brand, Chromium, platform) combination
-    /// errors rather than silently emitting headers we haven't captured
-    /// against a real browser.
+    /// Apply the Chromium-sibling identity overlay if the caller asked for one.
     fn apply_brand_overlay(
         &self,
         identity: &mut crate::profile::PlatformIdentity,
     ) -> Result<BrandOverlayEdits> {
         let mut brand_extra_headers: Vec<(String, String)> = Vec::new();
         let mut brand_navigate_accept: Option<String> = None;
-        // Apply the Chromium-sibling identity overlay if the caller
-        // asked for one. Only meaningful on Chrome profiles;
-        // `chromium_major()` returns None for Firefox / Safari /
-        // OkHttp, which short-circuits the overlay to a no-op. An
-        // unverified (brand, Chromium, platform) combination
-        // returns an error rather than silently emitting headers
-        // we haven't captured against a real browser.
         if self.brand != ChromiumBrand::Chrome {
-            // A brand overlay only applies to an explicit Chromium browser;
-            // bare sessions have no browser and never carry brand headers.
-            if let Some(chromium_major) = self
+            let Some(chromium_major) = self
                 .http_identity
                 .or(self.browser)
                 .and_then(|b| b.chromium_major())
-            {
-                let overlay = self
-                    .brand
-                    .overlay(
-                        chromium_major,
-                        self.platform,
-                        &identity.user_agent,
-                        &identity.sec_ch_ua,
-                    )
-                    .map_err(|e| Error::Config(format!("{e}")))?;
-                if let Some(overlay) = overlay {
-                    identity.user_agent = overlay.user_agent;
-                    identity.sec_ch_ua = overlay.sec_ch_ua;
-                    brand_extra_headers = overlay.extra_headers;
-                    brand_navigate_accept = overlay.navigate_accept;
-                }
+            else {
+                return Err(Error::Config(format!(
+                    "{} overlay requires a Chromium HTTP identity",
+                    self.brand.label()
+                )));
+            };
+            let overlay = self
+                .brand
+                .overlay(
+                    chromium_major,
+                    self.platform,
+                    &identity.user_agent,
+                    &identity.sec_ch_ua,
+                )
+                .map_err(|e| Error::Config(format!("{e}")))?;
+            if let Some(overlay) = overlay {
+                identity.user_agent = overlay.user_agent;
+                identity.sec_ch_ua = overlay.sec_ch_ua;
+                brand_extra_headers = overlay.extra_headers;
+                brand_navigate_accept = overlay.navigate_accept;
             }
         }
         Ok((brand_extra_headers, brand_navigate_accept))

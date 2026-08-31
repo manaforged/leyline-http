@@ -50,7 +50,6 @@ fn audit_surfaces_cached_connection_fingerprints() {
     assert_eq!(audit.ja3, cache.ja3);
     assert_eq!(audit.h2_fingerprint, cache.h2_fingerprint);
     assert_eq!(audit.ja4t, cache.ja4t);
-    // JA4H is request-derived, so it must be non-empty and shaped a_b_c_d.
     assert_eq!(
         audit.ja4h.split('_').count(),
         4,
@@ -64,7 +63,6 @@ fn audit_memoises_across_calls() {
     let resp = bare_response(Some(sample_cache()));
     let first = resp.audit().unwrap() as *const _;
     let second = resp.audit().unwrap() as *const _;
-    // Same allocation on the second call — JA4H is hashed once, not per call.
     assert_eq!(first, second, "audit() must memoise, not recompute");
 }
 
@@ -76,11 +74,9 @@ fn text_decodes_declared_charset() {
         crate::core::HeaderStr::from_static("content-type"),
         crate::core::HeaderStr::from_static("text/html; charset=windows-1252"),
     )];
-    // windows-1252: 0xE9 -> 'é', 0xA9 -> '©'. As raw UTF-8 these bytes are
-    // invalid and would become U+FFFD without charset handling.
     resp.body = ResponseBody::Buffered(vec![0xE9, 0xA9]);
-    assert_eq!(resp.text(), "é©");
-    assert_eq!(resp.into_text(), "é©");
+    assert_eq!(resp.text().unwrap(), "é©");
+    assert_eq!(resp.into_text().unwrap(), "é©");
 }
 
 #[cfg(feature = "charset")]
@@ -91,9 +87,8 @@ fn text_charset_param_is_case_insensitive_and_unquoted() {
         crate::core::HeaderStr::from_static("content-type"),
         crate::core::HeaderStr::from_static("text/plain; Charset=\"Shift_JIS\""),
     )];
-    // Shift_JIS 0x82 0xA0 -> 'あ' (U+3042).
     resp.body = ResponseBody::Buffered(vec![0x82, 0xA0]);
-    assert_eq!(resp.text(), "あ");
+    assert_eq!(resp.text().unwrap(), "あ");
 }
 
 #[cfg(feature = "charset")]
@@ -101,8 +96,7 @@ fn text_charset_param_is_case_insensitive_and_unquoted() {
 fn text_defaults_to_utf8_without_charset() {
     let mut resp = bare_response(None);
     resp.body = ResponseBody::Buffered("héllo".as_bytes().to_vec());
-    // No declared charset -> text() uses UTF-8.
-    assert_eq!(resp.text(), "héllo");
+    assert_eq!(resp.text().unwrap(), "héllo");
 }
 
 #[cfg(feature = "charset")]
@@ -114,8 +108,7 @@ fn declared_charset_overrides_text_with_charset_default() {
         crate::core::HeaderStr::from_static("text/plain; charset=utf-8"),
     )];
     resp.body = ResponseBody::Buffered("héllo".as_bytes().to_vec());
-    // The declared utf-8 wins over the windows-1252 caller default.
-    assert_eq!(resp.text_with_charset("windows-1252"), "héllo");
+    assert_eq!(resp.text_with_charset("windows-1252").unwrap(), "héllo");
 }
 
 fn leg(reused: bool, connect_ms: Option<u32>, send_ms: u32, total_ms: u32) -> ResponseTiming {
@@ -129,8 +122,6 @@ fn leg(reused: bool, connect_ms: Option<u32>, send_ms: u32, total_ms: u32) -> Re
 
 #[test]
 fn timing_single_leg_equals_that_leg() {
-    // One transport hop (no redirect): the accumulated timing is exactly
-    // that leg — the accumulator seed must be the identity.
     let mut acc = ResponseTiming::accumulator();
     let only = leg(true, None, 12, 15);
     acc.add_leg(&only);
@@ -139,12 +130,9 @@ fn timing_single_leg_equals_that_leg() {
 
 #[test]
 fn timing_cold_then_warm_redirect_sums_and_marks_not_reused() {
-    // 302 on a fresh connection (cold) → 200 reused on the pooled conn.
-    // total/send sum; connect_ms is the cold leg's handshake; one fresh
-    // connect anywhere means the whole request was NOT all-reused.
     let mut acc = ResponseTiming::accumulator();
-    acc.add_leg(&leg(false, Some(40), 60, 105)); // cold 302
-    acc.add_leg(&leg(true, None, 800, 800)); // warm 200, big body
+    acc.add_leg(&leg(false, Some(40), 60, 105));
+    acc.add_leg(&leg(true, None, 800, 800));
     assert!(!acc.reused);
     assert_eq!(acc.connect_ms, Some(40));
     assert_eq!(acc.send_ms, 860);
@@ -163,8 +151,6 @@ fn timing_all_warm_stays_reused_with_no_connect() {
 
 #[test]
 fn timing_two_cold_legs_sum_connect() {
-    // Both legs opened fresh connections (e.g. cross-origin redirect):
-    // connect_ms is the sum, not the last.
     let mut acc = ResponseTiming::accumulator();
     acc.add_leg(&leg(false, Some(30), 10, 45));
     acc.add_leg(&leg(false, Some(25), 12, 40));
@@ -174,8 +160,6 @@ fn timing_two_cold_legs_sum_connect() {
 
 #[test]
 fn error_for_status_caps_retained_body() {
-    // A large body must not be stowed whole in Error::Status — it would
-    // balloon logs and memory. Cap is 16 KiB.
     let mut resp = bare_response(None);
     resp.status = 500;
     resp.body = ResponseBody::Buffered(vec![b'x'; 2 * 1024 * 1024]);
@@ -195,7 +179,6 @@ fn error_for_status_caps_retained_body() {
 
 #[test]
 fn error_for_status_keeps_short_body_intact() {
-    // A body under the cap is retained verbatim.
     let mut resp = bare_response(None);
     resp.status = 404;
     resp.body = ResponseBody::Buffered(b"not found".to_vec());

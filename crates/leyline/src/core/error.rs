@@ -69,11 +69,7 @@ pub enum Error {
         code: u16,
         /// Request URL.
         url: String,
-        /// Response body prefix (for debugging 403s, rate limits, etc),
-        /// truncated to the first 16 KiB by
-        /// [`Response::error_for_status`](crate::Response::error_for_status)
-        /// so a large body is not retained in — and logged with — the error.
-        /// For the full body, read the `Response` before converting it.
+        /// Response body prefix (for debugging 403s, rate limits, etc), truncated to the first 16 KiB by [`Response::error_for_status`](crate::Response::error_for_status) so a large body is not retained in — and logged with — the error.
         body: Vec<u8>,
     },
 
@@ -83,29 +79,45 @@ pub enum Error {
 }
 
 impl Error {
-    /// True if this error is a request timeout. Mirrors
-    /// `reqwest::Error::is_timeout` so retry/backoff code ports across.
+    /// True if this error is a request timeout.
     pub fn is_timeout(&self) -> bool {
-        matches!(self, Error::Timeout)
+        match self {
+            Error::Timeout => true,
+            Error::Io(e) if e.kind() == std::io::ErrorKind::TimedOut => true,
+            Error::Tls(e) => io_kind(e).is_some_and(|k| k == std::io::ErrorKind::TimedOut),
+            _ => false,
+        }
     }
 
-    /// True if this is a connection-establishment failure (TCP, TLS
-    /// handshake, proxy tunnel, or low-level IO) rather than a protocol
-    /// or status error. Mirrors `reqwest::Error::is_connect`.
+    /// True if this is a connection-establishment failure (TCP, DNS, TLS handshake, or proxy tunnel), not body or file I/O.
     pub fn is_connect(&self) -> bool {
-        matches!(self, Error::Io(_) | Error::Tls(_) | Error::Proxy(_))
+        use crate::tls::TlsError;
+        match self {
+            Error::Proxy(_) => true,
+            Error::Tls(
+                TlsError::TcpConnect(_)
+                | TlsError::Dns(_)
+                | TlsError::Handshake(_)
+                | TlsError::HandshakeIo(_)
+                | TlsError::SslConnect(_),
+            ) => true,
+            Error::Io(e) => matches!(
+                e.kind(),
+                std::io::ErrorKind::ConnectionRefused
+                    | std::io::ErrorKind::AddrNotAvailable
+                    | std::io::ErrorKind::NotConnected
+                    | std::io::ErrorKind::NetworkUnreachable
+            ),
+            _ => false,
+        }
     }
 
-    /// True if this error carries an HTTP status (from
-    /// [`Response::error_for_status`](crate::Response::error_for_status)).
-    /// Mirrors `reqwest::Error::is_status`.
+    /// True if this error carries an HTTP status (from [`Response::error_for_status`](crate::Response::error_for_status)).
     pub fn is_status(&self) -> bool {
         matches!(self, Error::Status { .. })
     }
 
-    /// The HTTP status code, when this error carries one. Returns `u16`
-    /// to match [`Response::status`](crate::Response::status) (reqwest
-    /// returns `Option<StatusCode>`); `None` for non-status errors.
+    /// The HTTP status code, when this error carries one.
     pub fn status(&self) -> Option<u16> {
         match self {
             Error::Status { code, .. } => Some(*code),
@@ -113,9 +125,7 @@ impl Error {
         }
     }
 
-    /// True if the error indicates the connection went away (peer closed,
-    /// graceful GOAWAY, or a transport-level EOF/reset) and the request can
-    /// be safely retried on a fresh connection.
+    /// True if the error indicates the connection went away (peer closed, graceful GOAWAY, or a transport-level EOF/reset) and the request can be safely retried on a fresh connection.
     pub fn is_connection_closed(&self) -> bool {
         use crate::h2::H2Error;
         use crate::h2::error::ErrorCode;
@@ -132,9 +142,6 @@ impl Error {
                 code: ErrorCode::NoError,
                 ..
             }) => true,
-            // Server refused the stream before processing it — the request
-            // never began, so it is safe to retry. Mirrors the retry engine
-            // in core/request/send.rs.
             Error::Http2(H2Error::Stream {
                 code: ErrorCode::RefusedStream,
                 ..
@@ -144,3 +151,15 @@ impl Error {
         }
     }
 }
+
+fn io_kind(err: &crate::tls::TlsError) -> Option<std::io::ErrorKind> {
+    use crate::tls::TlsError;
+    match err {
+        TlsError::TcpConnect(e) | TlsError::Dns(e) | TlsError::HandshakeIo(e) => Some(e.kind()),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+#[path = "error/tests.rs"]
+mod tests;

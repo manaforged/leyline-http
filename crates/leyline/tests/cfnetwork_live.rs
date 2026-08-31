@@ -1,13 +1,4 @@
 //! Live fingerprint gate for the CFNetwork (Apple URLSession) profile family.
-//!
-//! The truth anchor for these profiles is our own first-party capture (the
-//! probe in tools/cfnetwork-capture against tls.peet.ws / the capture server)
-//! — tls.peet.ws is a browser reference, not an app-stack reference, so these
-//! tests assert leyline reproduces the CAPTURED CFNetwork wire shape:
-//!
-//!   macOS 26 (CFNetwork/3860.600.21): ja4 t13d2013h2_a09f3c656075_7f0f34a4126d
-//!   iOS 18.6 (CFNetwork/3826.600.41): ja4 t13d2014h2_a09f3c656075_7f0f34a4126d
-//!
 
 #![expect(
     clippy::unwrap_used,
@@ -23,9 +14,9 @@ use serde_json::Value;
 const PEET_URL: &str = "https://tls.peet.ws/api/all";
 
 async fn peet(session: &Session) -> Value {
-    let resp = session.navigate(PEET_URL).await.expect("navigate failed");
+    let resp = session.get(PEET_URL).await.expect("navigate failed");
     assert_eq!(resp.status(), 200, "status {}", resp.status());
-    serde_json::from_str(&resp.text()).expect("non-JSON body")
+    serde_json::from_str(&resp.text().unwrap()).expect("non-JSON body")
 }
 
 fn ext<'a>(json: &'a Value, prefix: &str) -> &'a Value {
@@ -49,14 +40,12 @@ fn ciphers_without_grease(json: &Value) -> Vec<&str> {
 
 /// Shared CFNetwork shape, asserted for every cfnetwork profile.
 fn assert_cfnetwork_common(json: &Value) {
-    // GREASE cipher at the FRONT of the cipher list.
     let ciphers = json["tls"]["ciphers"].as_array().expect("ciphers");
     assert!(
         ciphers[0].as_str().unwrap().starts_with("TLS_GREASE"),
         "GREASE cipher must be first, got {}",
         ciphers[0]
     );
-    // GREASE extension first AND last (or second-to-last before padding).
     let exts = json["tls"]["extensions"].as_array().expect("exts");
     assert!(exts[0]["name"].as_str().unwrap().starts_with("TLS_GREASE"));
     let last = exts.iter().rev().find(|e| {
@@ -65,7 +54,6 @@ fn assert_cfnetwork_common(json: &Value) {
     });
     assert!(last.is_some(), "trailing GREASE extension missing");
 
-    // The CFNetwork dup: rsa_pss_rsae_sha384 (0x0805) advertised twice.
     let sigalgs = ext(json, "signature_algorithms")["signature_algorithms"]
         .as_array()
         .expect("sigalgs");
@@ -75,7 +63,6 @@ fn assert_cfnetwork_common(json: &Value) {
         .count();
     assert_eq!(dup_count, 2, "CFNetwork duplicates 0x0805 in sigalgs");
 
-    // zlib cert compression (Apple's choice; browsers advertise brotli).
     let cc = ext(json, "compress_certificate");
     assert!(
         cc["algorithms"]
@@ -84,7 +71,6 @@ fn assert_cfnetwork_common(json: &Value) {
         "cert compression must be zlib"
     );
 
-    // No session_ticket extension on fresh connections.
     assert!(
         !exts.iter().any(|e| e["name"]
             .as_str()
@@ -93,7 +79,6 @@ fn assert_cfnetwork_common(json: &Value) {
         "CFNetwork sends no session_ticket extension"
     );
 
-    // Pseudo-header order m,s,p,a.
     assert_eq!(
         json["http2"]["akamai_fingerprint"]
             .as_str()
@@ -124,7 +109,6 @@ async fn live_cfnetwork_macos26_matches_capture() {
         json["http2"]["akamai_fingerprint"].as_str().unwrap(),
         "2:0;4:4194304;3:100;9:1|10485760|0|m,s,p,a"
     );
-    // macOS 26: no padding extension.
     assert!(
         !json["tls"]["extensions"]
             .as_array()
@@ -136,7 +120,6 @@ async fn live_cfnetwork_macos26_matches_capture() {
                 .starts_with("padding")),
         "macOS CFNetwork sends no padding extension"
     );
-    // macOS 26: MLKEM768 group + keyshare present.
     assert!(
         ext(&json, "supported_groups")["supported_groups"]
             .as_array()
@@ -144,7 +127,6 @@ async fn live_cfnetwork_macos26_matches_capture() {
             .iter()
             .any(|g| g.as_str().unwrap().contains("MLKEM768"))
     );
-    // macOS 26 TLS 1.3 order: AES_256, CHACHA, AES_128.
     assert_eq!(
         &ciphers_without_grease(&json)[..3],
         &[
@@ -174,7 +156,6 @@ async fn live_cfnetwork_ios18_matches_capture() {
         json["http2"]["akamai_fingerprint"].as_str().unwrap(),
         "2:0;4:2097152;3:100|10485760|0|m,s,p,a"
     );
-    // iOS 18.6: NO MLKEM (groups start X25519 after GREASE).
     let groups = ext(&json, "supported_groups")["supported_groups"]
         .as_array()
         .unwrap();
@@ -184,7 +165,6 @@ async fn live_cfnetwork_ios18_matches_capture() {
             .any(|g| g.as_str().unwrap().contains("MLKEM768")),
         "iOS 18.6 CFNetwork has no MLKEM group"
     );
-    // iOS 18.6 TLS 1.3 order: AES_128, AES_256, CHACHA (hardware order).
     assert_eq!(
         &ciphers_without_grease(&json)[..3],
         &[
@@ -193,7 +173,6 @@ async fn live_cfnetwork_ios18_matches_capture() {
             "TLS_CHACHA20_POLY1305_SHA256",
         ]
     );
-    // iOS advertises TLS 1.0/1.1 in supported_versions.
     let versions = ext(&json, "supported_versions")["versions"]
         .as_array()
         .unwrap();
@@ -201,8 +180,6 @@ async fn live_cfnetwork_ios18_matches_capture() {
         versions.iter().any(|v| v.as_str() == Some("TLS 1.0"))
             && versions.iter().any(|v| v.as_str() == Some("TLS 1.1"))
     );
-    // Padding extension present, LAST, byte-identical to the capture
-    // (394 bytes at SNI tls.peet.ws).
     let exts = json["tls"]["extensions"].as_array().unwrap();
     let padding = exts.last().expect("last ext");
     assert!(

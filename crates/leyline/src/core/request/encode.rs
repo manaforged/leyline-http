@@ -10,10 +10,6 @@ pub(crate) fn url_encode_pairs(params: &[(String, String)]) -> String {
 }
 
 /// Percent-encode a string for `application/x-www-form-urlencoded`.
-///
-/// Follows the WHATWG form-urlencoded rules: unreserved set per RFC 3986
-/// stays as-is, space becomes `+`, everything else is `%HH`. Matches
-/// `percent_encoding::NON_ALPHANUMERIC` with a `' '` → `'+'` pass.
 fn url_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {

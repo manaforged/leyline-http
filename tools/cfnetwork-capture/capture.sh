@@ -39,11 +39,10 @@ case "$PLATFORM" in
     *) echo "usage: capture.sh --platform ios18|ios26|macos [--runs N] [--out NAME] [--device UDID]" >&2; exit 2 ;;
 esac
 
-# ── non-interactive sudo check (tcpdump needs root on loopback) ─────────────
+# tcpdump on loopback needs root. Prefer a cached ticket; otherwise sudo prompts.
 if ! sudo -n true 2>/dev/null; then
-    echo "[capture] tcpdump needs root. Run from a terminal where sudo can prompt," >&2
-    echo "[capture] or pre-authorize: sudo -v" >&2
-    exit 1
+    echo "[capture] tcpdump needs root; sudo will prompt." >&2
+    sudo -v
 fi
 
 STAMP="$(date +%Y%m%d-%H%M%S)"
@@ -129,15 +128,19 @@ trap - EXIT
 
 # ── parse ────────────────────────────────────────────────────────────────────
 echo "[capture] parsing pcap ($(stat -f%z "$PCAP") bytes)"
+# Wireshark 4.6 field names (underscores, not dots, on extension lists).
 tshark -r "$PCAP" -Y "tls.handshake.type==1" -T fields \
     -e frame.number \
     -e tls.handshake.ciphersuite \
-    -e tls.handshake.extensions.supported_group \
+    -e tls.handshake.extensions_supported_group \
     -e tls.handshake.sig_hash_alg \
-    -e tls.handshake.extensions.alpn \
-    -e tls.handshake.extensions.type \
-    -E header=y -E separator='|' > "$OUT_DIR/clienthello.txt" 2>/dev/null \
+    -e tls.handshake.extensions_alpn_str \
+    -e tls.handshake.extension.type \
+    -E header=y -E separator='|' -E occurrence=a > "$OUT_DIR/clienthello.txt" \
     || echo "[capture] no ClientHello frames found in pcap" >&2
+if ! grep -q '^[0-9]' "$OUT_DIR/clienthello.txt" 2>/dev/null; then
+    echo "[capture] clienthello.txt has no hello rows" >&2
+fi
 
 echo "[capture] writing meta + candidate fragment"
 {

@@ -11,10 +11,6 @@ fn no_proxy_matches_domains_and_literals() {
 
 #[test]
 fn no_proxy_ipv6_literal_matches_bare_host() {
-    // Naive `split(':')` truncation collapsed `::1` to an empty
-    // string, silently breaking loopback bypass for IPv6. The
-    // bracketed and bare pattern forms must match a bracketless
-    // IPv6 URL host.
     assert!(NoProxy::from_string("::1").unwrap().matches("::1"));
     assert!(NoProxy::from_string("[::1]").unwrap().matches("::1"));
     assert!(NoProxy::from_string("[::1]:8080").unwrap().matches("::1"));
@@ -28,8 +24,6 @@ fn no_proxy_ipv6_literal_matches_bare_host() {
 
 #[test]
 fn no_proxy_ipv6_bracketed_host_matches_pattern() {
-    // `url::Host::parse` rejects brackets; the normaliser strips
-    // them so `[::1]` on either side compares equal to `::1`.
     assert!(NoProxy::from_string("::1").unwrap().matches("[::1]"));
     assert!(NoProxy::from_string("[::1]").unwrap().matches("[::1]"));
 }
@@ -55,9 +49,6 @@ fn no_proxy_ipv4_port_stripping_still_works() {
 
 #[test]
 fn no_proxy_does_not_match_unrelated_ipv6() {
-    // Critical negative: `::1` must NOT match `::2`. Guard against
-    // bare IPv6 patterns collapsing to a value that matches every
-    // IPv6 host.
     assert!(!NoProxy::from_string("::1").unwrap().matches("::2"));
     assert!(
         !NoProxy::from_string("2001:db8::1")
@@ -66,14 +57,7 @@ fn no_proxy_does_not_match_unrelated_ipv6() {
     );
 }
 
-// ── no-proxy provenance gates ──────────────
-//
-// Env-inherited NO_PROXY may only bypass env-discovered proxies. A
-// stray NO_PROXY on the box silently turning explicitly-proxied
-// traffic DIRECT is a real-IP leak, not a convenience.
-
-/// A config whose `no_proxy` came from the environment (not the
-/// `.no_proxy()` builder).
+/// A config whose `no_proxy` came from the environment (not the `.no_proxy()` builder).
 fn cfg_with_env_no_proxy(patterns: &str) -> ProxyConfig {
     ProxyConfig {
         rules: Vec::new(),
@@ -110,7 +94,6 @@ fn env_no_proxy_bypasses_env_derived_proxy() {
     let cfg = cfg_with_env_no_proxy("target.test");
     let url = url::Url::parse("https://target.test/x").unwrap();
     assert_eq!(cfg.proxy_for(&url, None, Some("http://env:1"), true), None);
-    // Non-matching hosts still go through the env proxy.
     let other = url::Url::parse("https://other.test/x").unwrap();
     assert_eq!(
         cfg.proxy_for(&other, None, Some("http://env:1"), true),
@@ -120,9 +103,6 @@ fn env_no_proxy_bypasses_env_derived_proxy() {
 
 #[test]
 fn explicit_no_proxy_bypasses_all_proxies() {
-    // Set via the builder method → deliberate config → gates
-    // everything, per-request overrides included (curl --noproxy
-    // semantics, and the pre-fix behaviour for explicit users).
     let cfg = ProxyConfig::new().no_proxy(NoProxy::from_string("target.test").unwrap());
     let url = url::Url::parse("https://target.test/x").unwrap();
     assert_eq!(cfg.proxy_for(&url, Some("http://req:1"), None, false), None);

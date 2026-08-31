@@ -1,5 +1,5 @@
 Leyline
-Copyright 2026 Manaforge Technologies, LLC.
+Copyright 2026 Thomas Gardiner.
 
 This product includes software developed by third parties. Each upstream
 component retains its own license; the grants below are informative.
@@ -51,7 +51,8 @@ BoringSSL binary provenance (prebuilt static libraries)
 
 `leyline-bssl-sys` ships prebuilt BoringSSL static libraries under
 `crates/leyline-bssl-sys/native/<target>/lib/` ({libcrypto,libssl}.a / {crypto,ssl}.lib)
-for x86_64-unknown-linux-gnu, x86_64-pc-windows-msvc, and aarch64-apple-darwin.
+for x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, x86_64-pc-windows-msvc,
+and aarch64-apple-darwin.
 These are statically linked into every distributed binary artifact — the Node
 N-API addon (`.node`) and the Python wheel. Their full license text (Apache-2.0
 plus the BSD-3-Clause Go notice) is preserved at

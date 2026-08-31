@@ -1,12 +1,4 @@
 //! Regression gate for oversized trailer blocks.
-//!
-//! RFC 9113 §6.10: a header block too large for one frame continues in
-//! CONTINUATION frames. The request-headers path always did this;
-//! `write_trailers` instead returned a connection-level InternalError,
-//! so any trailer block past the peer's SETTINGS_MAX_FRAME_SIZE killed
-//! the whole connection. The mock server here asserts the trailer
-//! block arrives as HEADERS(END_STREAM, !END_HEADERS) followed by
-//! CONTINUATION frames with END_HEADERS on the last.
 
 #[path = "h2_support/mod.rs"]
 mod support;
@@ -66,8 +58,6 @@ async fn oversized_trailer_block_splits_into_continuations() {
         write_server_settings(&mut server_io).await;
         write_settings_ack(&mut server_io).await;
 
-        // Drain frames until the request HEADERS (no END_STREAM —
-        // trailers follow).
         let stream_id = loop {
             let (h, _) = read_frame(&mut server_io).await;
             if h.frame_type == FrameType::Headers as u8 {
@@ -77,8 +67,6 @@ async fn oversized_trailer_block_splits_into_continuations() {
             }
         };
 
-        // Trailer block: HEADERS with END_STREAM but NOT END_HEADERS,
-        // then CONTINUATION frames, END_HEADERS on the last.
         let (h, first) = read_frame(&mut server_io).await;
         assert_eq!(h.frame_type, FrameType::Headers as u8, "trailer HEADERS");
         assert_ne!(
@@ -121,8 +109,6 @@ async fn oversized_trailer_block_splits_into_continuations() {
         .await
         .expect("handshake");
 
-    // ~60 KB of 'a' HPACK-huffman-encodes to ~37 KB — three frames at
-    // the default 16 384 max_frame_size.
     let big = "a".repeat(60_000);
     let resp = tokio::time::timeout(
         Duration::from_secs(5),

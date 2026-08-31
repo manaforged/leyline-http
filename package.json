@@ -1,8 +1,8 @@
 {
   "name": "@manaforged/leyline",
-  "version": "1.0.0",
-  "description": "Node.js bindings for Leyline — browser-fidelity TLS/HTTP fingerprint sessions",
-  "license": "MIT OR Apache-2.0",
+  "version": "0.1.0",
+  "description": "Node.js bindings for leyline-http",
+  "license": "MIT",
   "homepage": "https://github.com/manaforged/leyline-http",
   "repository": {
     "type": "git",
@@ -37,8 +37,7 @@
     "build": "napi build --platform --release --cargo-cwd crates/leyline-node wrappers/node",
     "build:debug": "napi build --platform --cargo-cwd crates/leyline-node wrappers/node",
     "artifacts": "napi artifacts --dir artifacts --dist npm",
-    "test": "node wrappers/node/test/offline.js && node wrappers/node/test/smoke.js",
-    "lint": "oxlint wrappers/node tools"
+    "test": "node wrappers/node/test/offline.js && node wrappers/node/test/smoke.js"
   },
   "files": [
     "wrappers/node/leyline.js",
@@ -47,18 +46,14 @@
     "wrappers/node/index.d.ts",
     "wrappers/node/README.md",
     "LICENSE",
-    "LICENSE-MIT",
-    "LICENSE-APACHE",
     "NOTICE"
   ],
   "optionalDependencies": {
-    "@manaforged/leyline-darwin-arm64": "1.0.0",
-    "@manaforged/leyline-linux-x64-gnu": "1.0.0",
-    "@manaforged/leyline-win32-x64-msvc": "1.0.0"
+    "@manaforged/leyline-darwin-arm64": "0.1.0",
+    "@manaforged/leyline-linux-x64-gnu": "0.1.0",
+    "@manaforged/leyline-win32-x64-msvc": "0.1.0"
   },
   "devDependencies": {
-    "@napi-rs/cli": "^2.18.4",
-    "@oxlint/plugins": "^1.80.0",
-    "oxlint": "^1.80.0"
+    "@napi-rs/cli": "^2.18.4"
   }
 }

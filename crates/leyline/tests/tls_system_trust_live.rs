@@ -5,7 +5,7 @@
 #[ignore = "live: needs network and current public PKI"]
 async fn macos_system_trust_accepts_example_chain() {
     let result = leyline::Session::chrome()
-        .navigate(
+        .get(
             "https://store.example.com/",
         )
         .await;

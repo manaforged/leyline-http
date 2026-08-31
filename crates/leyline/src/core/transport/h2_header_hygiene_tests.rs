@@ -7,8 +7,7 @@ fn pairs<'a>(rows: impl IntoIterator<Item = (&'a str, &'a str)>) -> Vec<HeaderPa
         .collect()
 }
 
-/// RFC 9113 §8.2.2: connection-specific headers must not reach the h2
-/// wire. A compliant server rejects the stream with a protocol error.
+/// RFC 9113 §8.2.2: connection-specific headers must not reach the h2 wire.
 #[test]
 fn connection_specific_headers_are_stripped() {
     let mut headers = pairs([
@@ -25,8 +24,7 @@ fn connection_specific_headers_are_stripped() {
     assert_eq!(names, ["user-agent", "x-keep"]);
 }
 
-/// RFC 9113 §8.2.1: field names are lowercase on the h2 wire; a
-/// mixed-case caller header would make the request malformed.
+/// RFC 9113 §8.2.1: field names are lowercase on the h2 wire; a mixed-case caller header would make the request malformed.
 #[test]
 fn field_names_are_lowercased() {
     let mut headers = pairs([("User-Agent", "x"), ("X-Thing", "1")]);
@@ -35,8 +33,7 @@ fn field_names_are_lowercased() {
     assert_eq!(names, ["user-agent", "x-thing"]);
 }
 
-/// `te` is the one connection-header allowed on h2, and only for
-/// "trailers" (RFC 9113 §8.2.2).
+/// `te` is the one connection-header allowed on h2, and only for "trailers" (RFC 9113 §8.2.2).
 #[test]
 fn te_is_allowed_only_for_trailers() {
     let mut headers = pairs([("te", "trailers"), ("te", "trailers, deflate")]);
@@ -45,8 +42,7 @@ fn te_is_allowed_only_for_trailers() {
     assert_eq!(headers[0].1, "trailers");
 }
 
-/// A duplicated Transfer-Encoding is the request-smuggling shape:
-/// reject instead of silently re-framing.
+/// A duplicated Transfer-Encoding is the request-smuggling shape: reject instead of silently re-framing.
 #[test]
 fn duplicate_transfer_encoding_is_rejected() {
     let mut headers = pairs([
@@ -57,8 +53,7 @@ fn duplicate_transfer_encoding_is_rejected() {
     assert!(err.to_string().contains("2 Transfer-Encoding"));
 }
 
-/// Transfer-Encoding plus Content-Length is the other framing
-/// ambiguity; also rejected before any stripping happens.
+/// Transfer-Encoding plus Content-Length is the other framing ambiguity; also rejected before any stripping happens.
 #[test]
 fn transfer_encoding_with_content_length_is_rejected() {
     let mut headers = pairs([("Content-Length", "5"), ("Transfer-Encoding", "chunked")]);

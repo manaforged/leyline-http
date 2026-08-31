@@ -1,29 +1,12 @@
 //! The synthetic **bare** profile — a hand-built, non-impersonating default.
-//!
-//! Split out of [`super::types`] because it is the one profile constructed in
-//! code rather than deserialized from TOML: keeping it here holds `types.rs`
-//! to the deserialized schema and its accessors.
 
 use std::collections::HashMap;
 
 use super::types::{BrowserProfile, H2Profile, PlatformIdentity, ProfileMeta, TlsProfile};
 
 impl BrowserProfile {
-    /// The synthetic **bare** profile: a plain, non-impersonating HTTP
-    /// client. This is what a [`Session`](crate::Session) is by default when
-    /// no `.browser(...)` is chosen — a generic `leyline/<version>`
-    /// User-Agent, no `sec-ch-ua`/brand headers, a minimal modern TLS
-    /// cipher/curve/sigalg set with none of the browser-specific quirks
-    /// (no ALPS, no cert-compression advert, no extension permutation,
-    /// no delegated credentials, no record-size-limit), and stock HTTP/2
-    /// SETTINGS. It carries no expected fingerprint — there is nothing to
-    /// verify against an external browser.
-    ///
-    /// Built in code rather than from TOML so the default path needs no
-    /// profile file and no parse step.
+    /// The synthetic **bare** profile: a plain, non-impersonating HTTP client.
     pub fn bare() -> Self {
-        // Generic, OS-agnostic identity. The UA is the same on every
-        // platform; only the TCP fingerprint follows the resolved host.
         let identity = PlatformIdentity {
             user_agent: concat!("leyline/", env!("CARGO_PKG_VERSION")).to_string(),
             sec_ch_ua: String::new(),
@@ -43,14 +26,10 @@ impl BrowserProfile {
                 browser: "bare".to_string(),
                 version: 0,
                 family: "bare".to_string(),
-                // Not anchored to any browser — exempt from verification.
                 verified_against: "n/a (synthetic non-impersonating profile)".to_string(),
-                // Nothing was captured; the bare client impersonates no build.
                 captured_against: None,
             },
             tls: TlsProfile {
-                // Minimal modern set; names match the IANA-style spelling the
-                // other profiles use (accepted by BoringSSL's cipher parser).
                 ciphers: vec![
                     "TLS_AES_128_GCM_SHA256".into(),
                     "TLS_AES_256_GCM_SHA384".into(),

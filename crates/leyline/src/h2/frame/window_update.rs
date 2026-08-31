@@ -11,7 +11,7 @@ use crate::h2::error::ErrorCode;
 pub struct WindowUpdateFrame {
     /// Stream to credit (0 means connection-level window).
     pub stream_id: u32,
-    /// Window size increment (1 to 2^31-1). Zero is a protocol error.
+    /// Window size increment (1 to 2^31-1).
     pub increment: u32,
 }
 
@@ -29,17 +29,14 @@ impl WindowUpdateFrame {
         }
 
         let increment = be_u32(&payload[..4]);
-        let increment = increment & 0x7FFF_FFFF; // clear R bit
-
+        let increment = increment & 0x7FFF_FFFF;
         if increment == 0 {
             if header.stream_id == 0 {
-                // Connection-level zero increment → connection error.
                 return Err(H2Error::Connection {
                     code: ErrorCode::ProtocolError,
                     reason: "WINDOW_UPDATE increment of 0 on connection".into(),
                 });
             } else {
-                // Stream-level zero increment → stream error.
                 return Err(H2Error::Stream {
                     stream_id: header.stream_id,
                     code: ErrorCode::ProtocolError,

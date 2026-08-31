@@ -26,7 +26,6 @@ fn unknown_omit_settings_name_is_rejected() {
 
 #[test]
 fn builtin_platform_overrides_resolve_ok() {
-    // Chrome 145 macOS override drops max_concurrent_streams + unknown_setting8.
     let h2 = chrome_h2(Browser::Chrome145);
     assert!(h2.resolve_for_platform(Platform::MacOS).is_ok());
 }

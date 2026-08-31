@@ -1,9 +1,5 @@
 use super::*;
 
-// Built-ins are include_str! compile-time constants — a parse
-// failure is a programmer error (bad merge, hand-edit) and must
-// fail at load with the parse error, not surface 30 calls later
-// as a misleading "built-in profile missing" panic.
 #[test]
 #[should_panic(expected = "built-in profile is statically valid")]
 fn malformed_builtin_toml_panics_at_load() {
@@ -96,7 +92,6 @@ fn firefox152_profile_parses() {
     let profile = reg.get("firefox", 152).expect("firefox 152 not found");
     assert_eq!(profile.meta.name, "Firefox 152");
     assert_eq!(profile.tls.ciphers.len(), 16);
-    // Real FF152.0 == real FF151.0 at the TLS layer.
     assert_eq!(
         profile.expected_ja4(),
         Some("t13d1617h2_86a278354501_3cbfd9057e0d")

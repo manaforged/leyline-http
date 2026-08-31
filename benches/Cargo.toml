@@ -1,0 +1,71 @@
+[package]
+name = "leyline-benches"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Standalone package — deliberately its own workspace (see `[workspace]` below)
+# so `cargo build` at the repo root stays fast and criterion's transitive deps
+# (plotters, tinytemplate, rayon) don't get pulled into every library build.
+# Run with:
+#
+#     cargo bench --manifest-path benches/Cargo.toml
+#
+# or from this directory: `cargo bench`.
+[workspace]
+
+[dependencies]
+leyline = { package = "leyline-http", path = "../crates/leyline", features = ["bench-internals"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+bytes = "1"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+tokio = { version = "1", features = ["rt-multi-thread", "rt", "macros", "io-util", "net", "sync", "time"] }
+# Peer for HPACK head-to-head. h2 keeps its HPACK primitives private, so the
+# comparison bench gracefully degrades to a note (see hpack_vs_h2.rs).
+h2 = "0.4"
+# Peer for the bare HTTP/1.1 head-to-head (http_vs_reqwest.rs). default-features
+# off strips reqwest's TLS backends / h2 / gzip — we only need the bare hyper
+# H1 client over plaintext loopback.
+reqwest = { version = "0.12", default-features = false }
+
+[[bench]]
+name = "hpack"
+harness = false
+
+[[bench]]
+name = "audit"
+harness = false
+
+[[bench]]
+name = "frames"
+harness = false
+
+[[bench]]
+name = "profile"
+harness = false
+
+[[bench]]
+name = "session"
+harness = false
+
+[[bench]]
+name = "multiplex"
+harness = false
+
+[[bench]]
+name = "hpack_vs_h2"
+harness = false
+
+[[bench]]
+name = "http_vs_reqwest"
+harness = false
+
+[[bench]]
+name = "allocs"
+harness = false
+
+[[bench]]
+name = "pool"
+harness = false

@@ -1,16 +1,10 @@
-//! Non-blocking TCP connect primitive shared by the Happy-Eyeballs
-//! racer and any future direct-connect path.
+//! Non-blocking TCP connect primitive shared by the Happy-Eyeballs racer and any future direct-connect path.
 
 use crate::core::SocketConfig;
 use crate::tcp::TcpProfile;
 use tokio::net::TcpStream;
 
 /// Build a fingerprinted TCP connection to a single resolved address.
-///
-/// Extracted so Happy-Eyeballs can invoke it per candidate without
-/// cloning the whole connector. The TCP profile is applied *before*
-/// `connect` so SYN options (MSS, window scale, TFO, …) match the
-/// browser fingerprint.
 pub(crate) async fn connect_one(
     sock_addr: std::net::SocketAddr,
     tcp_profile: &TcpProfile,
@@ -36,7 +30,6 @@ pub(crate) async fn connect_one(
     let std_stream: std::net::TcpStream = socket.into();
     let tcp_stream = TcpStream::from_std(std_stream)?;
 
-    // Wait for the non-blocking connect to complete (or error out).
     tcp_stream.writable().await?;
     if let Some(e) = tcp_stream.take_error()? {
         return Err(e);
@@ -94,10 +87,6 @@ fn apply_socket_config(
         if let Some(retries) = config.tcp_keepalive_retries {
             keepalive = keepalive.with_retries(retries);
         }
-        // socket2 doesn't expose TCP_KEEPCNT on this platform; the OS manages
-        // the probe count itself. Idle time + interval above still apply, so a
-        // missing retry-count is a benign no-op — never fatal, even under strict
-        // (the value is set by SocketConfig default, not an explicit opt-in).
         #[cfg(not(any(target_os = "linux", target_os = "android", target_vendor = "apple")))]
         if config.tcp_keepalive_retries.is_some() {
             tracing::debug!(
@@ -128,12 +117,7 @@ fn unsupported_socket_option(strict: bool, name: &str) -> Result<(), std::io::Er
     }
 }
 
-/// `Socket::connect` on a non-blocking socket returns an OS-specific
-/// "would block / in progress" error that means "the async connect
-/// has started; wait for writable". Unix: `EINPROGRESS` or the
-/// generic `WouldBlock` kind. Windows WSA: `WSAEWOULDBLOCK` (10035)
-/// or `WSAEINPROGRESS` (10036). Without this, non-blocking connects
-/// on Windows fail instantly instead of completing asynchronously.
+/// `Socket::connect` on a non-blocking socket returns an OS-specific "would block / in progress" error that means "the async connect has started; wait for writable".
 fn nonblocking_connect_started(error: &std::io::Error) -> bool {
     error.kind() == std::io::ErrorKind::WouldBlock
         || error.raw_os_error() == Some(libc::EINPROGRESS)

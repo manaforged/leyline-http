@@ -1,9 +1,10 @@
 # BoringSSL prebuilt provenance
 
-Every byte shipped in `native/` and `src/bindings/` is reproducible from
-the inputs below. `native/CHECKSUMS` pins the exact artifacts; verify a
-checkout with `sha256sum -c native/CHECKSUMS` from this directory, or
-rebuild from source and compare with `scripts/package-bssl.sh --verify`.
+`native/CHECKSUMS` pins the committed `native/` libraries and
+`src/bindings/` files. Verify a checkout with `sha256sum -c native/CHECKSUMS`
+from this directory. A rebuild from source can differ across hosts and
+toolchains; run `scripts/package-bssl.sh --verify` and commit the new
+checksums when the artifacts change.
 
 ## Source revision
 

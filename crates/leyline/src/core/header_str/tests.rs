@@ -28,9 +28,6 @@ fn deref_enables_str_methods() {
 
 #[test]
 fn borrow_str_hash_contract_holds() {
-    // A `HeaderStr` map key must be findable by `&str` lookup — only true
-    // if `HeaderStr` and its borrowed `str` hash identically (they would
-    // not if `Hash` were derived over the inner `[u8]`).
     let mut m = std::collections::HashMap::new();
     m.insert(HeaderStr::from("content-type".to_string()), 1);
     assert_eq!(m.get("content-type"), Some(&1));

@@ -1,15 +1,4 @@
 //! Regression test for the H2 coalesced-connect FAILURE path.
-//!
-//! `open_h2_coalesced` single-flights concurrent first-requests so a cold burst
-//! shares ONE handshake. The failure path used to break that guarantee: when the
-//! shared connect failed, every waiter fell through to its own fresh
-//! `open_fresh_h2`, so N coalesced requests to a *down* host became N simultaneous
-//! reconnects — the reconnect storm. The fix keeps the single-flight on failure
-//! too: the waiters re-coalesce onto ONE shared retry, bounded to two attempts.
-//!
-//! This drives `checkout_handle` against a server that accepts every connection
-//! and then drops it (so the TLS handshake fails on EOF) and asserts the number
-//! of accepted connections — i.e. the number of dials — stays small.
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -41,9 +30,6 @@ fn chrome_h2_config() -> H2Config {
 async fn coalesced_h2_connect_failure_shares_one_retry() {
     const WAITERS: usize = 20;
 
-    // Server: accept every connection, hold it briefly (so the whole burst has
-    // time to coalesce onto the same in-flight connect), then drop it — the
-    // client's TLS handshake fails on EOF. Each accepted connection is one dial.
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let accepts = Arc::new(AtomicUsize::new(0));
@@ -55,7 +41,6 @@ async fn coalesced_h2_connect_failure_shares_one_retry() {
             };
             accepts_c.fetch_add(1, Ordering::SeqCst);
             tokio::spawn(async move {
-                // Hold long enough for the burst to coalesce, then close.
                 tokio::time::sleep(Duration::from_millis(150)).await;
                 drop(socket);
             });
@@ -80,7 +65,6 @@ async fn coalesced_h2_connect_failure_shares_one_retry() {
     }
 
     for h in handles {
-        // Every request must fail — the host never completes a handshake.
         let r = tokio::time::timeout(Duration::from_secs(10), h)
             .await
             .expect("checkout task did not hang")
@@ -98,13 +82,9 @@ async fn coalesced_h2_connect_failure_shares_one_retry() {
         );
     }
 
-    // Let any in-flight accept land before reading the counter.
     tokio::time::sleep(Duration::from_millis(50)).await;
     let dials = accepts.load(Ordering::SeqCst);
 
-    // Single-flight bounds the burst to the coalesced connect plus one shared
-    // retry (~2 dials). Without it, all WAITERS fall through to their own fresh
-    // dial (~WAITERS + 1). The generous ceiling still cleanly separates them.
     assert!(
         dials <= 5,
         "coalesced connect failure fanned out to {dials} dials \

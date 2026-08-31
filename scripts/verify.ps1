@@ -22,6 +22,13 @@ function Run($Command, [string[]]$Arguments) {
     }
 }
 
+Step "rust comments (one line)"
+$py = Get-Command python3 -ErrorAction SilentlyContinue
+if (-not $py) { $py = Get-Command python -ErrorAction SilentlyContinue }
+if (-not $py) { throw "python3 not installed" }
+Run $py.Source @("scripts/check-comments.py")
+Ok "comment lint"
+
 Step "rust toolchain"
 Run "rustc" @("--version")
 Run "cargo" @("--version")
@@ -56,11 +63,11 @@ Ok "tests pass"
 
 if (-not $Quick) {
     Step "live tls_peet"
-    Run "cargo" @("test", "-p", "leyline", "--test", "tls_peet", "--", "--ignored")
+    Run "cargo" @("test", "-p", "leyline-http", "--test", "tls_peet", "--", "--ignored")
     Ok "live tls_peet pass"
 
     Step "live smoke"
-    Run "cargo" @("test", "-p", "leyline", "--test", "smoke", "--", "--ignored", "--nocapture")
+    Run "cargo" @("test", "-p", "leyline-http", "--test", "smoke", "--", "--ignored", "--nocapture")
     Ok "smoke pass"
 }
 

@@ -30,7 +30,6 @@ fn plain_unknown_header_appends_at_end() {
 
 #[test]
 fn plain_known_header_rides_inferred_anchor() {
-    // `authorization` has an inferred AfterUserAgent anchor.
     let mut headers = preset_xhr();
     let mut extra = HeaderList::new();
     extra.set("authorization", "Bearer t");
@@ -75,8 +74,6 @@ fn preset_owned_name_replaced_in_place() {
 
 #[test]
 fn anchored_headers_interleave_at_each_anchor() {
-    // Regression test for a third-party SDK header pattern
-    // — seven headers at five anchors.
     let mut headers = vec![
         ("sec-ch-ua".into(), "chrome".into()),
         ("sec-ch-ua-mobile".into(), "?0".into()),
@@ -146,8 +143,6 @@ fn sensitive_stripped_on_cross_origin_redirect() {
 
 #[test]
 fn anchor_absent_falls_back_to_end() {
-    // Navigate preset has no content-type; AfterContentType
-    // anchor falls back to appending at the end.
     let mut headers = vec![
         ("sec-ch-ua".into(), "chrome".into()),
         ("user-agent".into(), "Mozilla/5.0".into()),

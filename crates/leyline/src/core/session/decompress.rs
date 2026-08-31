@@ -19,8 +19,6 @@ pub(super) fn decompress_body(
         None => return Ok((body, false)),
     };
 
-    // Split on comma for multi-encoding, apply in reverse order.
-    // "gzip, br" means gzip was applied first and br second; decode br then gzip.
     let encodings: Vec<&str> = encoding.split(',').map(|s| s.trim()).collect();
     if !encodings.iter().all(|enc| config.allows(enc)) {
         return Ok((body, false));
@@ -37,9 +35,7 @@ pub(super) fn decompress_body(
 /// Response headers as `(name, value)` pairs in wire order.
 type HeaderPairs = Vec<(HeaderStr, HeaderStr)>;
 
-/// Decompress `body` per its `content-encoding` header and, when bytes were
-/// actually decoded, drop the now-stale `content-encoding`/`content-length`
-/// headers. Headers are returned unchanged when nothing was decoded.
+/// Decompress `body` per its `content-encoding` header and, when bytes were actually decoded, drop the now-stale `content-encoding`/`content-length` headers.
 pub(super) fn decompress_and_strip(
     body: Vec<u8>,
     headers: HeaderPairs,
@@ -130,19 +126,12 @@ fn decompress_single(body: Vec<u8>, encoding: &str) -> Result<Vec<u8>> {
         "deflate" => {
             #[cfg(feature = "compression-deflate")]
             {
-                // HTTP `Content-Encoding: deflate` is notoriously ambiguous: some
-                // servers send raw DEFLATE, most (IIS, nginx, httpbin) send zlib-
-                // wrapped DEFLATE. Real Chrome tries zlib first and falls back to
-                // raw. Detect zlib by its magic byte (CMF): high nibble is the
-                // compression method (8 = deflate), so 0x78 is the common CMF.
                 let looks_like_zlib = body.first() == Some(&0x78);
                 if looks_like_zlib {
                     let mut decoder = flate2::read::ZlibDecoder::new(&body[..]);
                     match read_limited(&mut decoder, "deflate") {
                         Ok(v) => return Ok(v),
-                        Err(_) => {
-                            // Fall through to raw DEFLATE.
-                        }
+                        Err(_) => {}
                     }
                 }
                 let mut decoder = flate2::read::DeflateDecoder::new(&body[..]);

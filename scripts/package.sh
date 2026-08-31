@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Package Leyline crates in crates.io publish order.
 #
-# `leyline` depends on `leyline-quiche` by version, so crates.io packaging
-# cannot verify `leyline` until the matching `leyline-quiche` version is
+# `leyline-http` depends on `leyline-quiche` by version, so crates.io packaging
+# cannot verify `leyline-http` until the matching `leyline-quiche` version is
 # visible in the crates.io index. This script makes that dependency boundary
 # explicit instead of hiding it behind a confusing cargo error.
 #
@@ -35,10 +35,10 @@ step "cargo package -p leyline-quiche"
 cargo package -p leyline-quiche "$@"
 ok "leyline-quiche packages"
 
-step "cargo package -p leyline"
+step "cargo package -p leyline-http"
 log="$(mktemp)"
-if cargo package -p leyline "$@" 2>&1 | tee "$log"; then
-    ok "leyline packages"
+if cargo package -p leyline-http "$@" 2>&1 | tee "$log"; then
+    ok "leyline-http packages"
     rm -f "$log"
     exit 0
 fi
@@ -47,14 +47,14 @@ if grep -q "no matching package named.*leyline-quiche" "$log"; then
     rm -f "$log"
     cat >&2 <<EOF
 
-leyline-quiche packaged successfully, but leyline cannot be packaged yet
+leyline-quiche packaged successfully, but leyline-http cannot be packaged yet
 because crates.io does not have leyline-quiche $version in its index.
 
 Release order:
   1. cargo publish -p leyline-quiche
   2. wait for crates.io index propagation
   3. ./scripts/package.sh
-  4. cargo publish -p leyline
+  4. cargo publish -p leyline-http
 
 EOF
     exit 3

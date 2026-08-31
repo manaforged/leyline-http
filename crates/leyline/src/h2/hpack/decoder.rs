@@ -1,6 +1,4 @@
 //! HPACK decoder (RFC 7541 Section 6).
-//!
-//! Decodes header blocks from the wire format back into name-value pairs.
 
 use bytes::Bytes;
 
@@ -18,12 +16,7 @@ pub struct Decoder {
     max_header_list_size: usize,
 }
 
-/// A decoded header. Both parts are the **original wire `Bytes`**: an indexed
-/// header (static or dynamic table hit) materializes by refcount/`from_static`
-/// with no heap copy; only a literal value allocates. Bytes are kept verbatim —
-/// no UTF-8 coercion here — so the dynamic table sizes entries by their true
-/// octet length and stays in lockstep with the peer's table. The lossy `&str`
-/// view is materialized later at the `HeaderStr` boundary.
+/// A decoded header.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Header {
     pub name: Bytes,
@@ -61,12 +54,10 @@ impl Decoder {
             let byte = src[pos];
 
             if byte & 0x80 != 0 {
-                // Indexed header field (Section 6.1): 1xxxxxxx
                 let (index, consumed) =
                     integer::decode(byte, 7, &src[pos + 1..], 0).map_err(|e| e.to_string())?;
                 pos += 1 + consumed;
 
-                // RFC 7541 Section 6.1: index 0 is not used.
                 if index == 0 {
                     return Err("HPACK index 0 is invalid".into());
                 }
@@ -75,22 +66,18 @@ impl Decoder {
                     .ok_or_else(|| format!("invalid index {index}"))?;
                 headers.push(Header { name, value });
             } else if byte & 0xC0 == 0x40 {
-                // Literal with incremental indexing (Section 6.2.1): 01xxxxxx
                 let (header, consumed) = self.decode_literal(src, pos, 6, 0x3F, true)?;
                 pos += consumed;
                 headers.push(header);
             } else if byte & 0xF0 == 0x00 {
-                // Literal without indexing (Section 6.2.2): 0000xxxx
                 let (header, consumed) = self.decode_literal(src, pos, 4, 0x0F, false)?;
                 pos += consumed;
                 headers.push(header);
             } else if byte & 0xF0 == 0x10 {
-                // Literal never indexed (Section 6.2.3): 0001xxxx
                 let (header, consumed) = self.decode_literal(src, pos, 4, 0x0F, false)?;
                 pos += consumed;
                 headers.push(header);
             } else if byte & 0xE0 == 0x20 {
-                // Dynamic table size update (Section 6.3): 001xxxxx
                 let (new_size, consumed) =
                     integer::decode(byte, 5, &src[pos + 1..], 0).map_err(|e| e.to_string())?;
                 pos += 1 + consumed;
@@ -106,7 +93,6 @@ impl Decoder {
                 return Err(format!("unexpected byte {byte:#04x} at position {pos}"));
             }
 
-            // Check decoded size limit (HPACK bomb protection).
             if let Some(last) = headers.last() {
                 total_size += last.name.len() + last.value.len() + 32;
                 if total_size > self.max_header_list_size {
@@ -133,24 +119,20 @@ impl Decoder {
         let byte = src[pos];
         let mut offset = pos + 1;
 
-        // Decode name index or literal name.
         let (name_index, consumed) = integer::decode(byte & mask, prefix_bits, &src[offset..], 0)
             .map_err(|e| e.to_string())?;
         offset += consumed;
 
         let name = if name_index == 0 {
-            // Literal name.
             let (s, consumed) = decode_string(&src[offset..])?;
             offset += consumed;
             s
         } else {
-            // Indexed name (static or dynamic table) — refcount/from_static.
             let (n, _) = table::lookup(name_index, &self.dynamic)
                 .ok_or_else(|| format!("invalid name index {name_index}"))?;
             n
         };
 
-        // Decode value (always literal).
         let (value, consumed) = decode_string(&src[offset..])?;
         offset += consumed;
 
@@ -168,12 +150,7 @@ impl Default for Decoder {
     }
 }
 
-/// Decode a string literal (RFC 7541 Section 5.2) into the **original wire
-/// `Bytes`**. A raw literal is copied verbatim; a Huffman literal decodes into a
-/// `Vec`. No UTF-8 coercion happens here: the bytes feed the dynamic table at
-/// their true octet length so eviction stays in lockstep with the peer. Any
-/// non-UTF-8 obs-text is coerced lossily (U+FFFD) only later, at the `HeaderStr`
-/// boundary ([`crate::core::HeaderStr::from_bytes_lossy`]).
+/// Decode a string literal (RFC 7541 Section 5.2) into the **original wire `Bytes`**.
 fn decode_string(src: &[u8]) -> Result<(Bytes, usize), String> {
     if src.is_empty() {
         return Err("unexpected end of string".into());

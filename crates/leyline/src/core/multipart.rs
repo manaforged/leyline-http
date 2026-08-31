@@ -1,24 +1,4 @@
 //! `multipart/form-data` bodies (RFC 7578).
-//!
-//! A `Form` carries an ordered list of `Part`s plus a random boundary
-//! string. When the builder wires the form into a request, the body is
-//! materialised as a streaming `Body::Stream` so very large file
-//! uploads never land in memory all at once — each part's body is
-//! pumped to the wire as the transport pulls it.
-//!
-//! Each part has a name, an optional filename and mime type, optional
-//! extra headers, and a body. The body can be a text string, a raw
-//! byte buffer, or another stream (for file-backed uploads).
-//!
-//! ```rust,ignore
-//! use leyline::multipart::{Form, Part};
-//!
-//! let form = Form::new()
-//!     .text("username", "alice")
-//!     .part("avatar", Part::bytes(jpeg_bytes).filename("cat.jpg").mime("image/jpeg"));
-//!
-//! session.post(url).multipart(form).send().await?;
-//! ```
 
 use std::io;
 use std::path::Path;
@@ -52,9 +32,7 @@ impl Part {
         }
     }
 
-    /// Build a part from a raw byte buffer. Defaults to no MIME type —
-    /// set one with [`Part::mime`] to control how the server classifies
-    /// the upload.
+    /// Build a part from a raw byte buffer.
     pub fn bytes(bytes: impl Into<Bytes>) -> Self {
         Self {
             name: String::new(),
@@ -65,10 +43,7 @@ impl Part {
         }
     }
 
-    /// Build a part from an arbitrary `Stream` yielding
-    /// `io::Result<Bytes>`. The underlying stream is consumed once and
-    /// is not replayable — streaming parts cannot participate in
-    /// retries.
+    /// Build a part from an arbitrary `Stream` yielding `io::Result<Bytes>`.
     pub fn stream<S>(stream: S) -> Self
     where
         S: Stream<Item = io::Result<Bytes>> + Send + 'static,
@@ -82,8 +57,7 @@ impl Part {
         }
     }
 
-    /// Set the `filename` attribute on this part's
-    /// `Content-Disposition` header.
+    /// Set the `filename` attribute on this part's `Content-Disposition` header.
     pub fn filename(mut self, name: impl Into<String>) -> Self {
         self.filename = Some(name.into());
         self
@@ -102,10 +76,7 @@ impl Part {
     }
 }
 
-/// A `multipart/form-data` form. Build with [`Form::new`], add parts
-/// via [`Form::text`], [`Form::part`], or [`Form::file`], and wire it
-/// into a request with
-/// [`crate::RequestBuilder::multipart`].
+/// A `multipart/form-data` form.
 pub struct Form {
     pub(crate) parts: Vec<Part>,
     pub(crate) boundary: String,
@@ -126,9 +97,7 @@ impl Form {
         }
     }
 
-    /// The generated boundary string. Callers don't usually need this —
-    /// the request builder wires the boundary into the `Content-Type`
-    /// header for them.
+    /// The generated boundary string.
     pub fn boundary(&self) -> &str {
         &self.boundary
     }
@@ -148,20 +117,9 @@ impl Form {
         self
     }
 
-    /// Append a file part by streaming the file chunk-by-chunk from
-    /// disk — the file is never fully materialised in memory. Uses
-    /// `tokio::fs::File` so the read stays cooperative on both
-    /// multi- and current-thread runtimes.
-    ///
-    /// Synchronous by signature (returns `Self` not a future) because
-    /// the file is opened lazily when the multipart stream polls its
-    /// first chunk; the open itself happens inside the runtime.
+    /// Append a file part by streaming the file chunk-by-chunk from disk — the file is never fully materialised in memory.
     pub fn file(mut self, name: impl Into<String>, path: impl AsRef<Path>) -> io::Result<Self> {
         let path = path.as_ref().to_path_buf();
-        // Open synchronously (std) just to fail fast if the path is
-        // invalid or permissions are wrong — the caller wants this
-        // error eagerly, before firing a request. The actual read is
-        // driven async-ly via `tokio::fs` inside the stream.
         let metadata = std::fs::metadata(&path)?;
         let filename = path
             .file_name()
@@ -181,9 +139,6 @@ impl Form {
 
         let mut part = Part::stream(stream).filename(filename);
         part.name = name.into();
-        // Record the length hint so the multipart size-hint summation
-        // can still report Some(total) rather than degrading the
-        // whole form to Content-Length: unknown.
         if let Body::Stream {
             ref mut length_hint,
             ..
@@ -195,26 +150,21 @@ impl Form {
         Ok(self)
     }
 
-    /// Total length of the serialised body in bytes, when every part
-    /// has a known length. Returns `None` if any part is a
-    /// length-unknown stream.
+    /// Total length of the serialised body in bytes, when every part has a known length.
     pub(crate) fn len_hint(&self) -> Option<u64> {
         let mut total: u64 = 0;
         for part in &self.parts {
-            // Per-part boundary line: `--BOUNDARY\r\n`
             total += 2 + self.boundary.len() as u64 + 2;
-            // Headers: Content-Disposition + optional mime + extras + blank line.
             total += part_header_len(part) as u64;
             let body_len = part.body.len_hint()?;
             total += body_len;
-            total += 2; // trailing CRLF after part body
+            total += 2;
         }
-        total += 2 + self.boundary.len() as u64 + 4; // final --BOUNDARY--\r\n
+        total += 2 + self.boundary.len() as u64 + 4;
         Some(total)
     }
 
-    /// Consume this form and produce a [`Body::Stream`] that yields the
-    /// serialised multipart payload.
+    /// Consume this form and produce a [`Body::Stream`] that yields the serialised multipart payload.
     pub(crate) fn into_stream_body(self) -> Body {
         let length_hint = self.len_hint();
         let stream = FormStream::new(self);
@@ -225,15 +175,12 @@ impl Form {
         }
     }
 
-    /// The wire-format `Content-Type` header for this form, including
-    /// the boundary parameter.
+    /// The wire-format `Content-Type` header for this form, including the boundary parameter.
     pub fn content_type(&self) -> String {
         format!("multipart/form-data; boundary={}", self.boundary)
     }
 
-    /// Test-only: consume the form into its streaming-body
-    /// representation. Integration tests use this to inspect the
-    /// serialised bytes without standing up an HTTP server.
+    /// Test-only: consume the form into its streaming-body representation.
     #[doc(hidden)]
     pub fn into_stream_body_for_test(self) -> Body {
         self.into_stream_body()
@@ -241,7 +188,6 @@ impl Form {
 }
 
 fn part_header_len(part: &Part) -> usize {
-    // `Content-Disposition: form-data; name="NAME"[; filename="FN"]\r\n`
     let mut n = "Content-Disposition: form-data; name=\"\"\r\n".len() + part.name.len();
     if let Some(fname) = &part.filename {
         n += "; filename=\"\"".len() + fname.len();
@@ -250,14 +196,13 @@ fn part_header_len(part: &Part) -> usize {
         n += "Content-Type: \r\n".len() + mime.len();
     }
     for (k, v) in &part.extra_headers {
-        n += k.len() + 2 + v.len() + 2; // "k: v\r\n"
+        n += k.len() + 2 + v.len() + 2;
     }
-    n += 2; // blank line between headers and body
+    n += 2;
     n
 }
 
-/// Stream adapter that walks through each part, emitting headers,
-/// then pulling the part body, then the separator.
+/// Stream adapter that walks through each part, emitting headers, then pulling the part body, then the separator.
 struct FormStream {
     boundary: String,
     parts: std::collections::VecDeque<Part>,
@@ -285,28 +230,11 @@ impl FormStream {
     }
 }
 
-/// Escape a header-value token for quoted use inside a
-/// `Content-Disposition` parameter.
-///
-/// RFC 7578 §4.2 + RFC 2183 + RFC 5987: names and filenames are
-/// quoted-strings over HTTP-header syntax. CR / LF / NUL must be
-/// rejected because they terminate or concatenate headers (CWE-93
-/// response-splitting / header injection). DQUOTE and BACKSLASH must
-/// be backslash-escaped per RFC 7230 §3.2.6's `quoted-pair` rule.
-/// Emitting these fields verbatim is a user-reachable injection hole via
-/// `Form::file(..., path)` where `path.file_name()` could be
-/// attacker-controlled.
-///
-/// Returns `None` if the input contains bytes that cannot be safely
-/// encoded (control chars other than HTAB, which we also reject to
-/// stay strictly inside `qdtext`). Callers surface this as an error
-/// rather than silently truncating.
+/// Escape a header-value token for quoted use inside a `Content-Disposition` parameter.
 fn escape_quoted(input: &str) -> Option<Vec<u8>> {
     let mut out = Vec::with_capacity(input.len() + 2);
     for b in input.bytes() {
         match b {
-            // Reject every control char: CR, LF, NUL, HTAB, plus
-            // anything under 0x20 and the DEL (0x7F).
             0x00..=0x1F | 0x7F => return None,
             b'"' | b'\\' => {
                 out.push(b'\\');
@@ -347,8 +275,6 @@ fn render_part_headers(boundary: &str, part: &Part) -> io::Result<Bytes> {
     out.extend_from_slice(b"\r\n");
 
     if let Some(mime) = &part.mime {
-        // MIME per RFC 2045 is a token, not a quoted string — disallow
-        // CR/LF/NUL here too so a user-supplied mime can't break out.
         if mime.bytes().any(|b| matches!(b, 0x00..=0x1F | 0x7F)) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -361,8 +287,6 @@ fn render_part_headers(boundary: &str, part: &Part) -> io::Result<Bytes> {
     }
 
     for (k, v) in &part.extra_headers {
-        // Extra header names + values: reject CR/LF/NUL so an
-        // attacker-supplied pair can't inject structure.
         let bad = k.bytes().any(|b| matches!(b, 0x00..=0x1F | 0x7F))
             || v.bytes().any(|b| matches!(b, 0x00..=0x0A | 0x0D | 0x7F));
         if bad {
@@ -386,14 +310,11 @@ impl Stream for FormStream {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         loop {
-            // SAFETY: we never move `self.state` variants that hold a
-            // `Pin<Box<...>>` out of the structure — we only poll them
-            // in place via `.as_mut()`.
+            // SAFETY: we never move `self.state` variants that hold a `Pin<Box<...>>` out of the structure — we only poll them in place via `.as_mut()`.
             let this = &mut *self;
             match &mut this.state {
                 FormState::NextPart => {
                     let Some(part) = this.parts.pop_front() else {
-                        // No more parts — emit closing boundary.
                         let mut out = Vec::with_capacity(this.boundary.len() + 6);
                         out.extend_from_slice(b"--");
                         out.extend_from_slice(this.boundary.as_bytes());
@@ -401,9 +322,6 @@ impl Stream for FormStream {
                         this.state = FormState::Done;
                         return Poll::Ready(Some(Ok(Bytes::from(out))));
                     };
-                    // Surface header-injection rejections as stream
-                    // errors so the caller sees the failure instead of
-                    // the transport silently skipping the part.
                     let headers = match render_part_headers(&this.boundary, &part) {
                         Ok(h) => h,
                         Err(e) => {
@@ -411,9 +329,7 @@ impl Stream for FormStream {
                             return Poll::Ready(Some(Err(e)));
                         }
                     };
-                    // Move the part body out so we can take ownership.
                     let body = part.body;
-                    // Transition into InBody with a stream-view of the body.
                     let body_stream: Pin<
                         Box<dyn Stream<Item = io::Result<Bytes>> + Send + 'static>,
                     > = match body {
@@ -449,14 +365,7 @@ impl Stream for FormStream {
 }
 
 /// Produce a 48-hex-char random boundary via `rand::thread_rng`.
-///
-/// RFC 7578 requires the boundary be absent from every part body. 128
-/// bits of real randomness make a collision astronomically unlikely for
-/// any realistic upload; the earlier DIY mix of `nanos + pid + counter +
-/// heap_addr` was correlated enough for two fast concurrent calls to
-/// produce related outputs.
 fn random_boundary() -> String {
-    // 16 random bytes → 32 hex chars, behind the Leyline boundary prefix.
     format!(
         "----LeylineFormBoundary{}",
         crate::util::random_hex_token(16)

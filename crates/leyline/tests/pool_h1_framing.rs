@@ -1,17 +1,4 @@
-//! Regression gates for H1 response-framing conflict
-//! rejection. `validate_framing_headers` must refuse:
-//!
-//! - multiple `Content-Length` header lines
-//! - a single `Content-Length` value with commas (`10, 10`)
-//! - both `Content-Length` and `Transfer-Encoding` present
-//! - `Transfer-Encoding` where `chunked` is not the final coding
-//!
-//! All four are RFC 9112 §6.1 request-smuggling vectors against a
-//! keep-alive pool.
-//!
-//! Tests spin up a `tokio::net::TcpListener` mock serving the bad
-//! response and assert the client surfaces a parse error rather than
-//! silently reusing a desynced connection.
+//! `validate_framing_headers` must refuse: - multiple `Content-Length` header lines - a single `Content-Length` value with commas (`10, 10`) - both `Content-Length` and `Transfer-Encoding` present - `Transfer-Encoding` where `chunked` is not the final coding All four are RFC 9112 §6.1 request-smuggling vectors against a keep-alive pool.
 #![expect(
     clippy::unwrap_used,
     reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
@@ -34,21 +21,6 @@ fn connector() -> FingerprintConnector {
 
 async fn run_against(server_response: &'static [u8]) -> String {
     let (msg, stats) = run_against_with_stats(server_response).await;
-    // Two invariants hold after a framing error:
-    //
-    // (a) `entries == 0` — the pool map does not hold a live slot.
-    //     On its own this is weak: an empty pool is also the
-    //     default before any request runs, and in the test we
-    //     start from a fresh pool, so an error path that never
-    //     installed anything trivially satisfies it.
-    //
-    // (b) `installs == 0` — the monotonic install counter proves
-    //     no install EVER ran. This is the real invariant the
-    //     request-smuggling defence relies on: a desynced socket
-    //     must never be stashed in the pool, not even
-    //     transiently. A hypothetical regression that installed
-    //     the bad slot and immediately evicted it would pass (a)
-    //     but fail (b) — which is what we want.
     assert_eq!(
         stats.entries, 0,
         "framing-conflict socket stayed in the pool (stats: {stats:?})"
@@ -60,8 +32,7 @@ async fn run_against(server_response: &'static [u8]) -> String {
     msg
 }
 
-/// Absolute-form request targets to a plaintext proxy are
-/// scheme://authority + path + query; no userinfo, no fragment.
+/// Absolute-form request targets to a plaintext proxy are scheme://authority + path + query; no userinfo, no fragment.
 #[tokio::test]
 async fn absolute_form_target_strips_userinfo_and_fragment() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -126,10 +97,6 @@ async fn run_against_with_stats(
 
     tokio::spawn(async move {
         let (mut sock, _) = listener.accept().await.unwrap();
-        // Accumulate across reads — a single-read sniff for
-        // `\r\n\r\n` was flaky whenever the kernel delivered the
-        // request header in multiple segments (CI schedulers,
-        // Nagle, etc.). Scan the running buffer for end-of-headers.
         let mut acc: Vec<u8> = Vec::with_capacity(2048);
         let mut buf = [0u8; 2048];
         loop {
@@ -144,8 +111,6 @@ async fn run_against_with_stats(
         }
         sock.write_all(server_response).await.unwrap();
         sock.flush().await.unwrap();
-        // Keep the socket open briefly so the client has time to
-        // read the response fully before we send FIN.
         tokio::time::sleep(Duration::from_millis(50)).await;
     });
 
@@ -288,11 +253,6 @@ async fn transfer_encoding_chunked_not_last_rejected() {
         "unexpected error: {msg}"
     );
 }
-
-// A Content-Length value that passes the single-header and no-comma
-// checks but fails `u64::parse` must surface a framing error before the
-// body read — falling back to `read_to_close` lets a malicious origin
-// desync the pool by emitting more bytes than the stated length.
 
 #[tokio::test]
 async fn content_length_with_plus_sign_rejected() {

@@ -13,22 +13,11 @@ use crate::h2::stream_state::StreamEvent;
 
 use super::*;
 
-/// Slack permitted before an over-window inbound DATA frame is treated
-/// as a flow-control violation (RFC 9113 §6.9.1). A compliant peer never
-/// drives a receive window below zero — it tracks the credit we
-/// advertised and stops at it — so this is pure defensive margin against
-/// a benign accounting quirk. A slow-drip or window-overflow attacker
-/// overshoots by far more than one frame's worth and trips the check
-/// regardless.
+/// Slack permitted before an over-window inbound DATA frame is treated as a flow-control violation (RFC 9113 §6.9.1).
 const RECV_WINDOW_VIOLATION_SLACK: i64 = 16 * 1024;
 
 impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     pub(super) async fn on_inbound_frame(&mut self, frame: Frame) -> Result<(), H2Error> {
-        // RFC 9113 §5.1.1: client-initiated streams use odd identifiers;
-        // server-initiated (PUSH_PROMISE) use even. Any HEADERS / DATA
-        // frame from the peer on an even stream id — or on any stream
-        // id the client didn't originate — is a connection error. We
-        // catch this at the entry point rather than in every handler.
         let enforce_odd = |sid: u32| -> Result<(), H2Error> {
             if sid == 0 || sid % 2 == 0 {
                 return Err(H2Error::Connection {
@@ -50,21 +39,11 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 enforce_odd(d.stream_id)?;
                 self.on_data(d).await?
             }
-            Frame::Settings(s) if s.ack => {
-                // ACK of our settings — ignored.
-            }
+            Frame::Settings(s) if s.ack => {}
             Frame::Settings(s) => {
-                // Rate-limit inbound non-ACK SETTINGS: each one forces
-                // an ACK write + a stream-window rescan, so a burst is
-                // CPU-expensive. Trip `ENHANCE_YOUR_CALM` past the
-                // configured threshold.
                 self.settings_flood.record(Instant::now())?;
                 let result = self.peer_settings.apply(&s.params)?;
                 if let Some(delta) = result.window_size_delta {
-                    // RFC 9113 §6.9.2: a SETTINGS_INITIAL_WINDOW_SIZE
-                    // change that causes any stream flow-control
-                    // window to exceed 2^31 − 1 MUST be treated as a
-                    // connection error of type FLOW_CONTROL_ERROR.
                     for (sid, actor) in self.streams.iter_mut() {
                         match checked_window_add(actor.send_window, delta) {
                             Ok(v) => actor.send_window = v,
@@ -86,27 +65,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 self.peer_snapshot
                     .set_enable_connect_protocol(self.peer_settings.enable_connect_protocol);
                 self.writer.write_settings_ack().await?;
-                // NB: the peer's SETTINGS_MAX_FRAME_SIZE bounds what *we send*
-                // (the writer reads it), not what we accept — so it deliberately
-                // does NOT touch the reader's inbound cap, which stays fixed at
-                // the value we advertised at connection setup (see bootstrap).
-                // Only the encoder tracks the peer's HEADER_TABLE_SIZE (it
-                // bounds how large a dynamic table *we* may push toward the
-                // peer's decoder). Our decoder's ceiling is whatever we
-                // advertised at connection setup and does not change when
-                // the peer updates its own SETTINGS.
-                // Clamp the encoder table: a hostile peer advertising
-                // HEADER_TABLE_SIZE: 0xffffffff would otherwise remove our
-                // eviction bound and make every encode an O(table) scan
-                // (nghttp2 and Go clamp at 4096 the same way). We advertise
-                // 4096 ourselves, so this never changes bytes against
-                // compliant peers.
                 let encoder_cap = (self.peer_settings.header_table_size as usize).min(4096);
                 self.encoder.set_max_table_size(encoder_cap);
             }
             Frame::WindowUpdate(w) if w.stream_id == 0 => {
-                // RFC 9113 §6.9.1: a sender MUST NOT allow a
-                // flow-control window to exceed 2^31 − 1.
                 self.conn_send_window = match checked_window_add(
                     self.conn_send_window,
                     w.increment as i64,
@@ -124,9 +86,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             }
             Frame::WindowUpdate(w) => {
                 if let Some(actor) = self.streams.get_mut(&w.stream_id) {
-                    // §6.9.1 stream-level overflow — RST_STREAM
-                    // with FLOW_CONTROL_ERROR rather than tearing
-                    // the whole connection down.
                     match checked_window_add(actor.send_window, w.increment as i64) {
                         Ok(v) => actor.send_window = v,
                         Err(_) => {
@@ -147,12 +106,8 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             }
             Frame::Ping(_) => {}
             Frame::GoAway(g) => {
-                // Mark connection as no-new-streams; existing streams
-                // ≤ last_stream_id may finish. If error is non-zero,
-                // tear the connection down as a connection error.
                 self.peer_goaway_last_stream = Some(g.last_stream_id);
                 if !matches!(g.error_code, ErrorCode::NoError) {
-                    // Fail all streams above last_stream_id immediately.
                     let to_fail: Vec<u32> = self
                         .streams
                         .keys()
@@ -175,15 +130,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 }
             }
             Frame::RstStream(r) => {
-                // RFC 9113 §5.4.2 / §5.1: RST_STREAM on an "idle"
-                // stream (one the client never opened) is a connection
-                // error with PROTOCOL_ERROR. `stream_id == 0` is
-                // reserved for the connection and must never appear
-                // on RST_STREAM. An odd stream id at or above
-                // `next_stream_id` is the client's own ID space but
-                // has not yet been allocated — idle by definition.
-                // Even stream ids are server-push reservations, which
-                // we reject at PUSH_PROMISE anyway.
                 if r.stream_id == 0 || (r.stream_id % 2 == 1 && r.stream_id >= self.next_stream_id)
                 {
                     return Err(H2Error::Connection {
@@ -204,11 +150,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 self.fail_stream(r.stream_id, err);
             }
             Frame::PushPromise(pp) => {
-                // RFC 9113 §4.3: every field block must be decoded even when
-                // the stream is reset — the block mutates the shared dynamic
-                // table. Skipping it desyncs HPACK and fails the whole
-                // connection on the next dynamic-index reference. Decode,
-                // discard the promised headers, reset the stream.
                 let decoded = self.decoder.decode_header_block(&pp.fragment);
                 self.writer
                     .write_rst_stream(pp.promised_stream_id, ErrorCode::Cancel)
@@ -216,8 +157,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 decoded.map_err(H2Error::Hpack)?;
             }
             Frame::Continuation { .. } => {
-                // A bare CONTINUATION without a preceding HEADERS we
-                // already consumed is a protocol error.
                 return Err(H2Error::Connection {
                     code: ErrorCode::ProtocolError,
                     reason: "unexpected CONTINUATION".into(),
@@ -229,16 +168,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     }
 
     pub(super) async fn on_headers(&mut self, h: HeadersFrame) -> Result<(), H2Error> {
-        // Reassemble CONTINUATION.
         let full_fragment = if h.end_headers {
             h.fragment
         } else {
             let max_header_block = self.config.max_header_block_bytes;
-            // Bound the *entire* reassembly in wall-clock time, computed
-            // once so slow dribbling can't reset it. Without this a peer
-            // that sends HEADERS without END_HEADERS and then stalls
-            // parks the single driver task (and every multiplexed stream)
-            // forever — the `max_header_block` cap bounds size, never time.
             let reassembly_timeout = self.config.header_block_reassembly_timeout;
             let deadline = tokio::time::Instant::now() + reassembly_timeout;
             let mut assembled = h.fragment.to_vec();
@@ -296,7 +229,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         let stream_id = h.stream_id;
         let actor = match self.streams.get_mut(&stream_id) {
             Some(a) => a,
-            None => return Ok(()), // Unknown stream, ignore.
+            None => return Ok(()),
         };
 
         if !actor.got_headers {
@@ -335,13 +268,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                     ));
                 }
             }
-            // A response HEADERS block MUST carry exactly one valid numeric
-            // :status pseudo-header (RFC 9113 §8.3.1). A malformed or absent
-            // :status is a malformed *response*: fail this one stream with
-            // PROTOCOL_ERROR. Previously a malformed value propagated `?` out
-            // of the event loop and tore down every stream multiplexed on the
-            // connection, and an absent :status was silently delivered to the
-            // caller as a successful `status = 0` response.
             let Some(status) = status.filter(|status| !bad_status && *status != 101) else {
                 self.fail_stream(
                     stream_id,
@@ -353,8 +279,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 return Ok(());
             };
             actor.status = status;
-            // 1xx informational (except 101) is provisional — discard and await
-            // the real final HEADERS (mirrors H1 read_h1_response). Keep HPACK state.
             if matches!(actor.status, 100..=199) && actor.status != 101 && !h.end_stream {
                 actor.status = 0;
                 actor.resp_headers.clear();
@@ -364,7 +288,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             if matches!(actor.status, 204 | 304) {
                 actor.drop_body = true;
             }
-            // Streaming-response sinks deliver headers immediately.
             if matches!(actor.response_tx, Some(ResponseSink::StreamingEx { .. })) {
                 actor.deliver_headers_streaming();
             }
@@ -372,10 +295,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 self.complete_stream(stream_id);
             }
         } else {
-            // Trailers (a second HEADERS block). RFC 9113 §8.1: a trailer
-            // section MUST carry END_STREAM — it is the last thing on the
-            // stream. Without it the response framing is malformed; fail this
-            // stream rather than completing it as if the response ended cleanly.
             if !h.end_stream {
                 self.fail_stream(
                     stream_id,
@@ -416,27 +335,9 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
 
     pub(super) async fn on_data(&mut self, d: DataFrame) -> Result<(), H2Error> {
         let stream_id = d.stream_id;
-        // Flow control counts the entire frame payload, including the
-        // pad-length octet and padding (RFC 9113 Section 6.9). `d.data`
-        // is the unpadded body, so `wire_len` is the honest number here.
         let len = d.wire_len as i64;
 
-        // Connection-level flow control: the peer burned `len` bytes of
-        // its `conn_send_window` to put these bytes on the wire, so we
-        // must always account for them against our `conn_recv_window`
-        // and eventually send a WINDOW_UPDATE, *regardless* of what
-        // happens to the payload below. Early-returning on stream-local
-        // errors (unknown id, bad state, max-body exceeded, consumer
-        // overflow) without crediting back the conn window means that,
-        // over a session with repeated slow-consumer RSTs, the peer's
-        // `conn_send_window` drains to zero and every stream on the
-        // connection would stall.
         self.conn_recv_window -= len;
-        // RFC 9113 §6.9.1: the peer must not send more DATA than the
-        // connection receive window we advertised. A compliant peer
-        // tracks that credit and stops at it, so a window driven below
-        // zero (beyond a small slack) means the peer ignored flow
-        // control — a connection-level FLOW_CONTROL_ERROR.
         if self.conn_recv_window < -RECV_WINDOW_VIOLATION_SLACK {
             return Err(H2Error::Connection {
                 code: ErrorCode::FlowControlError,
@@ -470,21 +371,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 let is_streaming =
                     matches!(actor.response_tx, Some(ResponseSink::StreamingEx { .. }));
                 if is_streaming {
-                    // Forward the chunk to the consumer via the body
-                    // channel. `try_send` ONLY — the driver is the
-                    // single task owning reader + writer + every
-                    // stream, so we must never `.await` on a consumer
-                    // channel here: a slow consumer on stream A would
-                    // otherwise stall every other concurrent stream
-                    // on the same TCP connection, silently voiding
-                    // the multiplexing guarantee the whole driver
-                    // architecture exists to provide.
-                    //
-                    // When the consumer's bounded channel is full, we
-                    // surface that as an `ErrorKind::WouldBlock` item
-                    // to the consumer, and signal a stream-level RST
-                    // to the main body below (which still runs the
-                    // conn-window accounting).
                     if !d.data.is_empty() {
                         if let Some(ResponseSink::StreamingEx { body_tx, .. }) =
                             actor.response_tx.as_ref()
@@ -540,11 +426,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 }
             }
             actor.recv_window -= len;
-            // RFC 9113 §6.9.1 at the stream level: an over-window DATA
-            // frame a compliant peer would never send is a stream-level
-            // FLOW_CONTROL_ERROR (RST_STREAM), leaving the rest of the
-            // connection intact. A stream failure already decided above
-            // (max-body, saturated consumer) takes precedence.
             if outcome.is_none() && actor.recv_window < -RECV_WINDOW_VIOLATION_SLACK {
                 outcome = Some((
                     H2Error::Stream {
@@ -561,8 +442,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         if let Some((err, code)) = fail_outcome {
             let _ = self.writer.write_rst_stream(stream_id, code).await;
             self.fail_stream(stream_id, err);
-            // Still need to credit back the conn window even on
-            // stream-level failure.
             self.maybe_top_up_conn_window().await?;
             return Ok(());
         }

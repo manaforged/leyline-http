@@ -12,7 +12,6 @@ fn lock_unpoisoned_recovers_after_panic() {
     .join();
     assert!(cache.is_poisoned(), "test setup failed to poison the mutex");
 
-    // Both the read and write paths must keep working.
     lock_unpoisoned(&cache).push(2);
     assert_eq!(*lock_unpoisoned(&cache), vec![1, 2]);
 }

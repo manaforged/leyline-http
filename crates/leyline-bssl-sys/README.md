@@ -25,4 +25,4 @@ the revision = move the submodule, rebase the patches (`git am --3way`), rebuild
 re-verify the full profile matrix.
 
 Supported targets: `x86_64-pc-windows-msvc`, `x86_64-unknown-linux-gnu`,
-`aarch64-apple-darwin`.
+`aarch64-unknown-linux-gnu`, `aarch64-apple-darwin`.

@@ -5,8 +5,7 @@ fn h(name: &str, value: &str) -> HeaderPair {
     (Cow::Owned(name.to_string()), Cow::Owned(value.to_string()))
 }
 
-/// The Firefox navigate header order, end to end (preset reshape → `FIREFOX_HEADER_ORDER`
-/// reorder), must reproduce the live Firefox 153 tls.peet.ws capture exactly.
+/// The Firefox navigate header order, end to end (preset reshape → `FIREFOX_HEADER_ORDER` reorder), must reproduce the live Firefox 153 tls.peet.ws capture exactly.
 #[test]
 fn firefox_navigate_order_matches_the_live_capture() {
     use crate::profile::Preset;

@@ -21,10 +21,6 @@ fn decompress_multi_encoding_in_reverse_order() {
     assert_eq!(decoded, body);
 }
 
-// A codec whose cargo feature is compiled out must hard-error rather
-// than pass the body through: the caller would otherwise receive
-// compressed bytes flagged `decoded` with content-encoding and
-// content-length already stripped — silent corruption.
 #[cfg(not(feature = "compression-gzip"))]
 #[test]
 fn gzip_without_feature_is_an_error() {
@@ -68,8 +64,6 @@ fn zstd_without_feature_is_an_error() {
     assert!(matches!(err, Error::Decode(_)), "got: {err:?}");
 }
 
-// When bytes are actually decoded, the now-stale content-encoding and
-// content-length must be stripped while every other header survives.
 #[cfg(feature = "compression-gzip")]
 #[test]
 fn decompress_and_strip_drops_stale_framing_headers() {
@@ -113,8 +107,6 @@ fn decompress_and_strip_drops_stale_framing_headers() {
     );
 }
 
-// No content-encoding means nothing was decoded: every header, including
-// any content-length, must pass through untouched.
 #[test]
 fn decompress_and_strip_preserves_headers_when_not_decoded() {
     let headers = vec![

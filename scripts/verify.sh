@@ -52,6 +52,10 @@ step() { printf '\n\033[1;34m== %s ==\033[0m\n' "$*"; }
 ok()   { printf '\033[1;32m✓ %s\033[0m\n'  "$*"; }
 fail() { printf '\033[1;31m✗ %s\033[0m\n'  "$*" >&2; exit 1; }
 
+step "rust comments (one line)"
+python3 scripts/check-comments.py || fail "comments must be one-line rustdoc or // SAFETY:"
+ok "comment lint"
+
 # -- package versions -----------------------------------------------------
 step "package version parity"
 workspace_version="$(awk -F'"' '/^version *= *"/{print $2; exit}' Cargo.toml)"
@@ -125,7 +129,7 @@ for archive in "$CARGO_TARGET_DIR"/package/*.crate; do
     tar -xzf "$archive" -C "$package_root"
 done
 package_path() { find "$package_root" -maxdepth 1 -type d -name "$1-[0-9]*" -print -quit; }
-leyline_package="$(package_path leyline)"
+leyline_package="$(package_path leyline-http)"
 bssl_sys_package="$(package_path leyline-bssl-sys)"
 bssl_package="$(package_path leyline-bssl)"
 bssl_tokio_package="$(package_path leyline-bssl-tokio)"
@@ -142,7 +146,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
-leyline = { path = "$leyline_package" }
+leyline-http = { path = "$leyline_package" }
 
 [patch.crates-io]
 leyline-bssl-sys = { path = "$bssl_sys_package" }
@@ -202,12 +206,12 @@ cargo test --workspace --exclude leyline-quiche || fail "tests failed"
 ok "tests pass"
 
 if [[ $full -eq 1 ]]; then
-    step "cargo test -p leyline --test tls_peet --release -- --ignored"
-    cargo test -p leyline --test tls_peet --release -- --ignored || fail "live tls_peet tests failed"
+    step "cargo test -p leyline-http --test tls_peet --release -- --ignored"
+    cargo test -p leyline-http --test tls_peet --release -- --ignored || fail "live tls_peet tests failed"
     ok "live tls_peet pass"
 
-    step "cargo test -p leyline --test smoke -- --ignored --nocapture"
-    cargo test -p leyline --test smoke -- --ignored --nocapture || fail "smoke suite failed"
+    step "cargo test -p leyline-http --test smoke -- --ignored --nocapture"
+    cargo test -p leyline-http --test smoke -- --ignored --nocapture || fail "smoke suite failed"
     ok "smoke pass"
 fi
 
@@ -229,13 +233,8 @@ else
 fi
 
 # -- fuzz corpus replay --------------------------------------------------
-# `cargo fuzz` targets with seeded corpora but
-# no replay in the verify gate let the bugs they catch (HPACK decode
-# panics, frame parser panics) regress without any test breaking.
-# Replay each corpus once to catch regressions. This is fast (seconds
-# per target) and doesn't need nightly — libFuzzer's corpus replay is
-# a deterministic byte-for-byte run of every seeded input through the
-# target harness.
+# Replay each corpus once. Fast. Does not need nightly. Time-bounded
+# fuzzing needs nightly and is `--fuzz [SECONDS]`.
 #
 # The full time-bounded fuzzer (which DOES need nightly rustc for
 # sanitizer support) is opt-in via `--fuzz [SECONDS]` because nightly

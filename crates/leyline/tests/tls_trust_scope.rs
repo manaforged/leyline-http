@@ -1,26 +1,4 @@
-//! Regression: `without_system_roots()` must keep the *default* trust roots
-//! out of the store, not merely skip adding Leyline's own configured roots.
-//!
-//! `SslConnector::builder` calls BoringSSL's `set_default_verify_paths()`
-//! unconditionally; that consults the OS default CA locations and the
-//! `SSL_CERT_FILE` / `SSL_CERT_DIR` environment variables. Before the fix,
-//! `without_system_roots()` only skipped *adding* system roots in
-//! `wire_configured_trust`, so those defaults stayed in the store — a caller
-//! who trusted only a private CA still trusted the entire public web PKI. The
-//! fix builds that path from `bare_builder`, which never calls
-//! `set_default_verify_paths`.
-//!
-//! `SSL_CERT_FILE`, pointed at a private CA, is a controllable stand-in for
-//! "a root the default paths would load":
-//!   * control — system roots ON: a leaf signed by that CA is ACCEPTED, which
-//!     proves the default-paths mechanism really does pick up `SSL_CERT_FILE`
-//!     (so the regression assertion below is meaningful, not vacuous).
-//!   * regression — system roots OFF: the same leaf is REJECTED.
-//!
-//! The cert-generation + acceptor harness mirrors `tls_pinning_hostname.rs`;
-//! it is duplicated here (rather than shared) so this binary contains exactly
-//! one test and the process-global `SSL_CERT_FILE` write below cannot race a
-//! concurrent test reading the environment.
+//! Regression: `without_system_roots()` must keep the *default* trust roots out of the store, not merely skip adding Leyline's own configured roots.
 #![expect(
     clippy::unwrap_used,
     reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
@@ -124,8 +102,7 @@ fn load_profile() -> BrowserProfile {
         .expect("chrome 147 profile parses")
 }
 
-/// Spawn a BoringSSL acceptor presenting `leaf` + `ca`, serving the trust
-/// controls below then exiting.
+/// Spawn a BoringSSL acceptor presenting `leaf` + `ca`, serving the trust controls below then exiting.
 async fn spawn_tls_server(chain: &Chain) -> SocketAddr {
     use leyline_bssl::ssl::{SslAcceptor, SslMethod};
 
@@ -155,8 +132,6 @@ async fn spawn_tls_server(chain: &Chain) -> SocketAddr {
                 Ok(s) => s,
                 Err(_) => continue,
             };
-            // The regression client rejects the cert, which fails accept();
-            // that's expected.
             let _ = std::pin::Pin::new(&mut stream).accept().await;
         }
     });
@@ -174,15 +149,13 @@ async fn without_env_roots_excludes_environment_roots() {
         std::env::temp_dir().join(format!("leyline-trust-scope-ca-{}.pem", std::process::id()));
     std::fs::write(&ca_path, &chain.ca_cert_pem).unwrap();
     let old_ca = std::env::var_os("SSL_CERT_FILE");
-    // SAFETY: `ENV_LOCK` serializes this test's process-global environment
-    // mutation, and this binary has no other tests that read `SSL_CERT_FILE`.
+    // SAFETY: `ENV_LOCK` serializes this test's process-global environment mutation, and this binary has no other tests that read `SSL_CERT_FILE`.
     unsafe {
         std::env::set_var("SSL_CERT_FILE", &ca_path);
     }
 
     let addr = spawn_tls_server(&chain).await;
 
-    // Default configuration explicitly loads environment roots.
     let control = TlsTrustConfig::new();
     let res = FingerprintConnector::new_with_trust(&load_profile(), TcpProfile::LINUX, &control)
         .expect("connector build")
@@ -195,7 +168,6 @@ async fn without_env_roots_excludes_environment_roots() {
         res.err().map(|e| e.to_string())
     );
 
-    // System roots remain enabled, but the explicit environment source is off.
     let restricted = TlsTrustConfig::new().without_env_roots();
     let res = FingerprintConnector::new_with_trust(&load_profile(), TcpProfile::LINUX, &restricted)
         .expect("connector build")
@@ -207,7 +179,6 @@ async fn without_env_roots_excludes_environment_roots() {
         "without_env_roots() must not trust a CA that only SSL_CERT_FILE provides"
     );
 
-    // Private roots stay additive even when ambient environment roots are off.
     let explicit = TlsTrustConfig::new()
         .without_env_roots()
         .add_ca_file(&ca_path);
@@ -222,8 +193,7 @@ async fn without_env_roots_excludes_environment_roots() {
         res.err().map(|e| e.to_string())
     );
 
-    // SAFETY: the same lock still excludes concurrent environment readers;
-    // restore the process state before releasing it.
+    // SAFETY: the same lock still excludes concurrent environment readers; restore the process state before releasing it.
     unsafe {
         match old_ca {
             Some(value) => std::env::set_var("SSL_CERT_FILE", value),

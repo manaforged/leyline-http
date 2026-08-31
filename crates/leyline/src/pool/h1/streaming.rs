@@ -1,8 +1,7 @@
-//! Split from the parent pool module. Types live in the parent.
+//! Split from the parent pool module.
 use super::*;
 
-/// Stream the response body to the consumer, then reinstate the connection on
-/// a clean full drain (or drop it). The permit releases when this task ends.
+/// Stream the response body to the consumer, then reinstate the connection on a clean full drain (or drop it).
 pub(super) async fn run_h1_stream_pump(mut pump: H1StreamPump) {
     let initial = std::mem::take(&mut pump.initial_body);
     let drained_clean = stream_body_into(pump.io.as_mut(), pump.framing, initial, &pump.tx).await;
@@ -13,18 +12,9 @@ pub(super) async fn run_h1_stream_pump(mut pump: H1StreamPump) {
             pump.pool.note_h1_install();
         }
     }
-    // Otherwise the socket is dropped: an early consumer drop or a mid-body
-    // error leaves unread/partial bytes on the wire, so the connection cannot
-    // be safely reused.
-    //
-    // Release the per-host permit now that streaming has finished, freeing the
-    // slot for a queued request. The permit is held purely for its `Drop`;
-    // this makes the release point explicit.
     drop(pump.permit);
 }
-/// Drive the body into `tx` per `framing`. Returns `true` only on a clean
-/// full drain; `false` if the consumer dropped the stream or an error
-/// occurred (the error is forwarded to the consumer first).
+/// Drive the body into `tx` per `framing`.
 pub(super) async fn stream_body_into(
     stream: &mut dyn H1Io,
     framing: BodyFraming,
@@ -205,13 +195,8 @@ pub(super) async fn send_request_h1_streaming(
     permit: OwnedSemaphorePermit,
     key: PoolKey,
 ) -> Result<H1Response, H1PooledError> {
-    // Streaming bodies are one-shot: a failed pooled attempt surfaces the
-    // error and never replays on a fresh connection.
     let mut body = body;
 
-    // Try a pooled connection first, probing for socket-level liveness so a
-    // stale keep-alive connection becomes a clean miss rather than a failed
-    // exchange.
     if let Some((slot, tls)) = checkout_live_h1(pool, &key) {
         let pooled_body = std::mem::replace(&mut body, H1Body::Empty);
         let mut io = slot.io;
@@ -256,14 +241,12 @@ pub(super) async fn send_request_h1_streaming(
                     "pool stale hit -- pooled h1 stream failed before response, opening fresh"
                 );
                 pool.note_h1_dead();
-                // Streaming bodies are one-shot: never replayed.
                 return Err(e);
             }
         }
     }
     tracing::Span::current().record("pool.hit", false);
 
-    // Miss — fresh connection under the same permit.
     let (io, tls): (Box<dyn H1Io>, TlsInfo) =
         open_new(connector, scheme, host, port, proxy).await?;
     let mut slot = H1Slot { io };

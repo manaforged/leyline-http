@@ -1,27 +1,11 @@
 //! Platform-specific TCP socket options (MSS, DF bit, window scale).
-//!
-//! Each platform has a thin wrapper around `setsockopt`. The `unsafe`
-//! blocks below all share the same safety story:
-//!
-//! - The fd/raw-socket comes from a live [`socket2::Socket`] held by
-//!   `apply_platform_options`, so it is a valid open descriptor for the
-//!   duration of the call.
-//! - The `optval` pointer refers to a stack-local that outlives the
-//!   FFI call, and the passed `optlen` is `size_of::<T>()` of that
-//!   stack-local.
-//! - A non-zero return is logged (once per option) and treated as
-//!   best-effort — profile application never poisons the socket.
 
 use socket2::Socket;
 
 use crate::tcp::{TcpProfile, log_once};
 
 #[cfg(unix)]
-/// # Safety
-/// See module-level SAFETY. `fd` must be a valid open socket descriptor
-/// owned by the caller; `val` is read by the kernel for `size_of::<i32>()`
-/// bytes and must therefore point at an `i32`-sized value that lives for
-/// the duration of the call.
+/// See module-level SAFETY.
 unsafe fn set_int_opt(
     fd: libc::c_int,
     level: libc::c_int,
@@ -29,9 +13,7 @@ unsafe fn set_int_opt(
     val: libc::c_int,
     label: &'static str,
 ) {
-    // SAFETY: see the `# Safety` contract above — `fd` is a live socket and
-    // `&val` outlives the call. Edition 2024 requires the unsafe op to sit in an
-    // explicit `unsafe` block even inside an `unsafe fn`.
+    // SAFETY: see the `# Safety` contract above — `fd` is a live socket and `&val` outlives the call. Edition 2024 requires the unsafe op to sit in an explicit `unsafe` block even inside an `unsafe fn`.
     let ret = unsafe {
         libc::setsockopt(
             fd,
@@ -75,9 +57,7 @@ pub fn apply_platform_options(socket: &Socket, profile: &TcpProfile, is_v6: bool
             (libc::IPPROTO_IP, libc::IP_MTU_DISCOVER, "IP_MTU_DISCOVER")
         };
         // SAFETY: see module-level SAFETY.
-        unsafe {
-            set_int_opt(fd, level, opt, 2 /* PMTUDISC_DO */, label)
-        };
+        unsafe { set_int_opt(fd, level, opt, 2, label) };
     }
 
     if profile.window_scale > 0 {
@@ -117,7 +97,6 @@ pub fn apply_platform_options(socket: &Socket, profile: &TcpProfile, is_v6: bool
         };
     }
 
-    // macOS: IP_DONTFRAG = 28 (IPPROTO_IP), IPV6_DONTFRAG = 62 (IPPROTO_IPV6).
     if profile.df {
         let (level, opt, label) = if is_v6 {
             (libc::IPPROTO_IPV6, 62, "IPV6_DONTFRAG")
@@ -143,19 +122,13 @@ pub fn apply_platform_options(socket: &Socket, profile: &TcpProfile, is_v6: bool
                 optlen: i32,
             ) -> i32;
         }
-        // Winsock: IP_DONTFRAGMENT = 14 at IPPROTO_IP (0); IPV6_DONTFRAG = 14
-        // at IPPROTO_IPV6 (41). Using IPPROTO_IP on a v6 socket returns
-        // WSAEINVAL (10022).
         let (level, optname, label) = if is_v6 {
             (41, 14, "IPV6_DONTFRAG")
         } else {
             (0, 14, "IP_DONTFRAGMENT")
         };
         let val: u32 = 1;
-        // SAFETY: `socket` is a live `Socket`, so `as_raw_socket()` is a
-        // valid open SOCKET handle for the duration of this call. `val`
-        // is a stack-local u32 that outlives the call, and the passed
-        // length is exactly sizeof(u32).
+        // SAFETY: `socket` is a live `Socket`, so `as_raw_socket()` is a valid open SOCKET handle for the duration of this call. `val` is a stack-local u32 that outlives the call, and the passed length is exactly sizeof(u32).
         let ret = unsafe {
             setsockopt(
                 socket.as_raw_socket() as usize,

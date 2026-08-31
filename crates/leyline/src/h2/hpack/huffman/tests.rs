@@ -2,7 +2,6 @@ use super::*;
 
 #[test]
 fn encode_www_example_com() {
-    // RFC 7541 C.4.1: "www.example.com"
     let mut dst = Vec::new();
     encode(b"www.example.com", &mut dst);
     assert_eq!(
@@ -47,9 +46,6 @@ fn roundtrip_ascii() {
 
 #[test]
 fn roundtrip_all_bytes() {
-    // Every byte value 0-255 must roundtrip correctly.
-    // This exercises 30-bit codes (bytes 10, 13, 22) that overflow a
-    // u32 accumulator — decoding must use wider arithmetic.
     for byte in 0u8..=255 {
         let input = [byte];
         let mut encoded = Vec::new();
@@ -61,8 +57,6 @@ fn roundtrip_all_bytes() {
 
 #[test]
 fn roundtrip_all_byte_pairs() {
-    // Every two-byte sequence exercises symbol-to-symbol transitions and
-    // the 8-bit fast-path / long-code fallback boundary across all codes.
     let mut encoded = Vec::new();
     for a in 0u8..=255 {
         for b in 0u8..=255 {
@@ -92,9 +86,6 @@ fn roundtrip_realistic_headers() {
 
 #[test]
 fn roundtrip_control_chars() {
-    // CR (13) and LF (10) have 30-bit codes — the longest in the table.
-    // These overflow a u32 accumulator, so the decoder must use wider
-    // arithmetic.
     let input = b"\r\n\r\n";
     let mut encoded = Vec::new();
     encode(input, &mut encoded);

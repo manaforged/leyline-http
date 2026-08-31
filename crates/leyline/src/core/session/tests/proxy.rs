@@ -1,14 +1,5 @@
 use super::super::proxy::{CGI_SIGNAL_ENV_VARS, env_proxy_from};
 
-// NO_PROXY host-matching gates live next to `NoProxy` in
-// `core::config` (the dead duplicate matcher was removed).
-
-// ---- httpoxy mitigation regression gates ----
-//
-// The env_proxy logic takes its environment getters as parameters so it
-// can be tested without mutating `std::env`. If a refactor ever re-couples
-// this to the process environment, these tests should scream first.
-
 use std::collections::HashMap;
 
 fn mock_env<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
@@ -71,10 +62,7 @@ fn env_proxy_prefers_scheme_specific_proxy_over_all_proxy() {
     assert_eq!(v, Some("http://https.example:3128".to_string()));
 }
 
-/// httpoxy: when any CGI-style variable is set AND `HTTP_PROXY`
-/// is also set, `HTTP_PROXY` MUST be ignored. `HTTPS_PROXY` is
-/// not spoofable via HTTP request headers (no `Https-Proxy:`
-/// header mapping exists) and is still honoured.
+/// httpoxy: when any CGI-style variable is set AND `HTTP_PROXY` is also set, `HTTP_PROXY` MUST be ignored.
 #[test]
 fn env_proxy_ignores_http_proxy_under_cgi() {
     for signal in CGI_SIGNAL_ENV_VARS {
@@ -101,19 +89,9 @@ fn env_proxy_under_cgi_still_honours_https_proxy() {
     assert_eq!(v, Some("http://legit.example:3128".to_string()));
 }
 
-/// Exercise the asymmetry between `get_var` and
-/// `has_var` that the dependency-injected helper explicitly
-/// permits. A non-UTF-8 value in the real env has
-/// `env::var(k) == Err` (`get_var` returns None) but
-/// `env::var_os(k) == Some` (`has_var` returns true). The
-/// candidate MUST be treated as unreadable - skipped by the
-/// candidate loop but still honoured for the CGI sniff.
+/// Exercise the asymmetry between `get_var` and `has_var` that the dependency-injected helper explicitly permits.
 #[test]
 fn env_proxy_skips_present_but_unreadable_vars() {
-    // Simulate: both HTTPS_PROXY and HTTP_PROXY *present* but
-    // unreadable as UTF-8. Non-CGI; neither candidate should
-    // yield a proxy URL - NOT an empty-string fallback that
-    // quietly disables proxying without telling the caller.
     let get_var = |k: &str| -> Option<String> {
         let _ = k;
         None
@@ -124,10 +102,6 @@ fn env_proxy_skips_present_but_unreadable_vars() {
 
 #[test]
 fn env_proxy_under_cgi_with_unreadable_http_proxy() {
-    // httpoxy mitigation must still trigger when HTTP_PROXY is
-    // present-but-unreadable under CGI. The candidate list
-    // excludes uppercase HTTP_PROXY; `get_var` returning None
-    // for the remaining candidates, so the overall result is None.
     let get_var = |k: &str| -> Option<String> {
         let _ = k;
         None
@@ -138,9 +112,6 @@ fn env_proxy_under_cgi_with_unreadable_http_proxy() {
 
 #[test]
 fn env_proxy_under_cgi_with_unreadable_http_proxy_but_readable_https() {
-    // Even under CGI with a suspicious unreadable HTTP_PROXY,
-    // a legitimately readable HTTPS_PROXY must still win -
-    // HTTPS_PROXY is not spoofable via HTTP request headers.
     let legit = "http://legit.example:3128";
     let get_var = move |k: &str| -> Option<String> {
         if k == "HTTPS_PROXY" {
@@ -155,9 +126,6 @@ fn env_proxy_under_cgi_with_unreadable_http_proxy_but_readable_https() {
 
 #[test]
 fn env_proxy_under_cgi_still_honours_lowercase_http_proxy() {
-    // CGI does not populate lowercase `http_proxy` (CGI writes
-    // HTTP_PROXY from a `Proxy:` header); so a shell-set
-    // lowercase value remains a legit user config.
     let pairs = &[
         ("REQUEST_METHOD", "GET"),
         ("http_proxy", "http://user.example:3128"),

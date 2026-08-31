@@ -1,7 +1,4 @@
 //! Public request/response body types exchanged with the HTTP/2 client.
-//!
-//! These are pure data types with no private coupling to the driver, so
-//! they live in their own module and are re-exported from the client root.
 
 use std::io;
 use std::pin::Pin;
@@ -13,17 +10,13 @@ use tokio::sync::mpsc;
 pub enum RequestBody {
     /// No body — headers carry END_STREAM.
     None,
-    /// Fully-materialised bytes. Sent as one or more DATA frames.
+    /// Fully-materialised bytes.
     Buffered(Bytes),
-    /// Streaming body: chunks are pulled as they arrive from the
-    /// caller-provided stream. Honours flow control and the peer's
-    /// MAX_FRAME_SIZE by breaking into multiple DATA frames.
+    /// Streaming body: chunks are pulled as they arrive from the caller-provided stream.
     Streaming {
         /// The stream yielding chunks.
         stream: Pin<Box<dyn futures_util::Stream<Item = io::Result<Bytes>> + Send + 'static>>,
-        /// Known exact length in bytes, if any. Informational only at
-        /// the H2 level — the client crate sets `content-length` before
-        /// calling into h2.
+        /// Known exact length in bytes, if any.
         length_hint: Option<u64>,
     },
 }
@@ -55,8 +48,6 @@ impl From<Option<Bytes>> for RequestBody {
 }
 
 /// Extended response returned by [`super::H2Client::send_request_ex`].
-/// Carries a [`ResponseBody`] that may be either buffered (the default) or
-/// a streaming receiver.
 #[derive(Debug)]
 pub struct H2ResponseEx {
     /// HTTP status code.
@@ -65,11 +56,7 @@ pub struct H2ResponseEx {
     pub headers: Vec<(crate::core::HeaderStr, crate::core::HeaderStr)>,
     /// Response body — buffered or streaming.
     pub body: ResponseBody,
-    /// Trailers, if any. Only populated for buffered responses; in the
-    /// streaming path trailers are delivered as a final zero-length
-    /// chunk followed by close of the channel. (Trailer delivery over
-    /// the streaming API is not exposed yet — callers that need
-    /// trailers should use the buffered path.)
+    /// Trailers, if any.
     pub trailers: Option<Vec<(crate::core::HeaderStr, crate::core::HeaderStr)>>,
 }
 

@@ -9,9 +9,6 @@ async fn pair() -> (TcpStream, TcpStream) {
     (client.unwrap(), server.unwrap().0)
 }
 
-// RFC 1929 §2: the auth sub-negotiation response is VER STATUS and
-// VER MUST be 0x01. A proxy (or in-path injector) replying with a
-// garbage version byte and a success status must not be accepted.
 #[tokio::test]
 async fn authenticate_rejects_wrong_subnegotiation_version() {
     let (mut client, mut server) = pair().await;
@@ -21,7 +18,7 @@ async fn authenticate_rejects_wrong_subnegotiation_version() {
         let mut buf = vec![0u8; 64];
         let _ = server.read(&mut buf).await.unwrap();
         server.write_all(&[0x05, 0x00]).await.unwrap();
-        server // keep the socket open until the client is done
+        server
     });
     let res = authenticate(&mut client, &auth).await;
     assert!(
@@ -78,10 +75,6 @@ fn auth_request_rejects_incomplete_empty_and_oversized_credentials() {
     }
 }
 
-// RFC 1928 §5: the domain-name address type carries a one-byte
-// length, so hostnames past 255 bytes cannot be encoded. The old
-// code truncated the length with `as u8` and sent a malformed
-// CONNECT that the proxy misparses.
 #[tokio::test]
 async fn send_connect_rejects_hostname_longer_than_255_bytes() {
     let (mut client, _server) = pair().await;

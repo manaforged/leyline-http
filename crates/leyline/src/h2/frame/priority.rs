@@ -1,6 +1,4 @@
 //! PRIORITY frame (RFC 9113 Section 6.3).
-//!
-//! Deprecated in RFC 9113 but must be accepted without error.
 
 use bytes::Bytes;
 

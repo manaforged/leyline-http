@@ -1,7 +1,4 @@
-//! Recovery / resilience tests: transient connection failures from flaky
-//! providers recover when retries are explicitly enabled, the default performs
-//! no application retry, and a stalled handshake fails fast on the connect
-//! timeout rather than hanging the whole request budget.
+//! Recovery / resilience tests: transient connection failures from flaky providers recover when retries are explicitly enabled, the default performs no application retry, and a stalled handshake fails fast on the connect timeout rather than hanging the whole request budget.
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
@@ -10,9 +7,7 @@ use leyline::{RetryPolicy, Session};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
-/// A GET against an upstream that drops the first connection before responding
-/// must recover when retries are enabled because a mid-exchange EOF is a
-/// retryable connection error.
+/// A GET against an upstream that drops the first connection before responding must recover when retries are enabled because a mid-exchange EOF is a retryable connection error.
 #[tokio::test]
 async fn explicit_retry_policy_recovers_from_transient_connection_drop() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -22,13 +17,10 @@ async fn explicit_retry_policy_recovers_from_transient_connection_drop() {
 
     let server = tokio::spawn(async move {
         let mut buf = [0u8; 1024];
-        // Connection 1: read the request, then drop the socket (flaky upstream
-        // closes before it replies).
         let (mut s1, _) = listener.accept().await.unwrap();
         conns_srv.fetch_add(1, Ordering::SeqCst);
         let _ = s1.read(&mut buf).await;
         drop(s1);
-        // Connection 2: serve a normal 200.
         let (mut s2, _) = listener.accept().await.unwrap();
         conns_srv.fetch_add(1, Ordering::SeqCst);
         let _ = s2.read(&mut buf).await;
@@ -42,7 +34,8 @@ async fn explicit_retry_policy_recovers_from_transient_connection_drop() {
         .http1()
         .disable_env_proxies()
         .retry(
-            RetryPolicy::default().with_backoff(Duration::from_millis(1), Duration::from_millis(5)),
+            RetryPolicy::transient()
+                .with_backoff(Duration::from_millis(1), Duration::from_millis(5)),
         )
         .build()
         .unwrap();
@@ -61,8 +54,7 @@ async fn explicit_retry_policy_recovers_from_transient_connection_drop() {
     server.abort();
 }
 
-/// Without an explicit retry policy, the same transient drop surfaces as an
-/// error with no second connection attempt.
+/// Without an explicit retry policy, the same transient drop surfaces as an error with no second connection attempt.
 #[tokio::test]
 async fn default_session_does_not_retry_a_transient_connection_drop() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -76,7 +68,6 @@ async fn default_session_does_not_retry_a_transient_connection_drop() {
         conns_srv.fetch_add(1, Ordering::SeqCst);
         let _ = s1.read(&mut buf).await;
         drop(s1);
-        // A second accept is available but should never be hit.
         if let Ok((mut s2, _)) = listener.accept().await {
             conns_srv.fetch_add(1, Ordering::SeqCst);
             let _ = s2.read(&mut buf).await;
@@ -94,7 +85,6 @@ async fn default_session_does_not_retry_a_transient_connection_drop() {
         result.is_err(),
         "the no-retry default must surface the connection drop"
     );
-    // Give any (erroneous) retry a moment to land before asserting the count.
     tokio::time::sleep(Duration::from_millis(150)).await;
     assert_eq!(
         conns.load(Ordering::SeqCst),
@@ -105,20 +95,13 @@ async fn default_session_does_not_retry_a_transient_connection_drop() {
     server.abort();
 }
 
-/// A default connect timeout (10s) must bound a stalled TLS handshake: an
-/// endpoint that completes TCP but never progresses the handshake must fail
-/// well before the 300s `total`, without the caller configuring anything.
-/// Here we shorten `connect_timeout` so the test is fast, but the point is the
-/// default is *some* finite value rather than `None`.
+/// A default connect timeout (10s) must bound a stalled TLS handshake: an endpoint that completes TCP but never progresses the handshake must fail well before the 300s `total`, without the caller configuring anything.
 #[tokio::test]
 async fn connect_timeout_bounds_a_stalled_tls_handshake() {
-    // Accept the TCP connection but send nothing — the TLS ClientHello gets no
-    // ServerHello, so the handshake stalls.
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
         let (_sock, _) = listener.accept().await.unwrap();
-        // Hold the connection open, never speak TLS.
         tokio::time::sleep(Duration::from_secs(30)).await;
     });
 

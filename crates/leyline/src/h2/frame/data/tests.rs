@@ -12,7 +12,6 @@ fn header(len: u32, flags: u8) -> FrameHeader {
 
 #[test]
 fn padded_frame_wire_len_covers_pad_octet_and_padding() {
-    // wire: [pad_len=4][5 data bytes][4 padding] = 10 payload bytes
     let mut payload = vec![4u8];
     payload.extend_from_slice(b"hello");
     payload.extend_from_slice(&[0u8; 4]);
@@ -31,9 +30,6 @@ fn unpadded_frame_wire_len_equals_data_len() {
 
 #[test]
 fn padding_equal_to_payload_is_protocol_error() {
-    // RFC 9113 6.1: a padding length equal to the frame payload
-    // length is a connection error. pad_len = payload_len - 1 is the
-    // legal empty-body edge.
     let payload = vec![10u8, 0, 0, 0, 0, 0, 0, 0, 0, 0];
     assert!(DataFrame::parse(header(10, flags::PADDED), Bytes::from(payload)).is_err());
 }

@@ -205,7 +205,7 @@ The bundle is in place, but $triple still needs to be taught to the crate:
      a template; pick the right (target_arch, target_os, target_env).
 
 Then verify: cargo build --target $triple
-And add a live test pass per CONTRIBUTING.md before committing fingerprint-path changes.
+And run the live peet tests before committing fingerprint-path changes.
 EOF
 else
     ok "target already registered in build.rs + lib.rs — run: cargo build --target $triple"

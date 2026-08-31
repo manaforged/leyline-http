@@ -11,20 +11,10 @@ use crate::h2::error::{ErrorCode, H2Error};
 
 use super::super::types::H2ResponseEx;
 
-/// Maximum permitted HTTP/2 flow-control window value (RFC 9113
-/// §6.9.1). A peer that pushes any window past this via WINDOW_UPDATE
-/// or SETTINGS_INITIAL_WINDOW_SIZE is committing a FLOW_CONTROL_ERROR
-/// and must be rejected to stay spec-conformant.
+/// Maximum permitted HTTP/2 flow-control window value (RFC 9113 §6.9.1).
 pub(crate) const MAX_FLOW_WINDOW: i64 = 0x7FFF_FFFF;
 
-/// Compute `current + delta` with the RFC 9113 §6.9.1 ceiling
-/// (2^31 − 1) applied. `delta` may be negative when a SETTINGS
-/// frame *lowers* SETTINGS_INITIAL_WINDOW_SIZE — the spec allows
-/// the resulting window to go negative but never above the cap.
-///
-/// Returns `Ok(new_window)` on success or `Err(new_window)` where
-/// the error variant carries the post-add value so the caller can
-/// include it in a diagnostic.
+/// Compute `current + delta` with the RFC 9113 §6.9.1 ceiling (2^31 − 1) applied.
 pub(crate) fn checked_window_add(current: i64, delta: i64) -> Result<i64, i64> {
     let new_win = current.saturating_add(delta);
     if new_win > MAX_FLOW_WINDOW {
@@ -34,9 +24,7 @@ pub(crate) fn checked_window_add(current: i64, delta: i64) -> Result<i64, i64> {
     }
 }
 
-/// Driver task handle. Dropping it does **not** stop the driver — drop
-/// all [`crate::h2::H2Client`] handles for graceful shutdown. This handle
-/// exists so callers can `await` the driver's final status or force-abort it.
+/// Driver task handle.
 pub struct DriverTask {
     pub(super) join: JoinHandle<Result<(), H2Error>>,
 }
@@ -54,22 +42,19 @@ impl DriverTask {
         }
     }
 
-    /// Abort the driver task forcibly. Prefer dropping all handles.
+    /// Abort the driver task forcibly.
     pub fn abort(self) {
         self.join.abort();
     }
 }
 
-/// Request body shape as seen by the driver. The user-provided `Stream`
-/// is converted into an mpsc receiver before the command is enqueued.
+/// Request body shape as seen by the driver.
 pub(crate) enum DriverRequestBody {
     None,
     Buffered(Bytes),
     Streaming {
         rx: mpsc::Receiver<io::Result<Bytes>>,
-        /// Retained for future use — H2 doesn't need content-length at
-        /// the frame layer, but downstream consumers may want to know
-        /// the declared size.
+        /// Retained for future use — H2 doesn't need content-length at the frame layer, but downstream consumers may want to know the declared size.
         #[expect(
             dead_code,
             reason = "retained for downstream consumers of the declared frame size; not read at the frame layer"
@@ -94,30 +79,18 @@ pub(crate) enum DriverCommand {
         body: DriverRequestBody,
         stream_response: bool,
         response_tx: oneshot::Sender<Result<H2ResponseEx, H2Error>>,
-        /// For streaming-response mode, the sender side of the body
-        /// chunk channel. Ignored in buffered-response mode. The
-        /// caller keeps the receiver and stitches it into the returned
-        /// `H2ResponseEx` after receiving headers.
+        /// For streaming-response mode, the sender side of the body chunk channel.
         stream_body_tx: mpsc::Sender<io::Result<Bytes>>,
     },
-    /// Open an RFC 8441 extended CONNECT stream that stays
-    /// bidirectional until the caller drops the
-    /// [`H2ConnectStream`](crate::h2::client::connect_stream::H2ConnectStream) handle or the peer tears it down. The
-    /// request HEADERS carries no END_STREAM flag, so DATA frames
-    /// flow in both directions for the lifetime of the stream.
+    /// Open an RFC 8441 extended CONNECT stream that stays bidirectional until the caller drops the [`H2ConnectStream`](crate::h2::client::connect_stream::H2ConnectStream) handle or the peer tears it down.
     OpenConnect {
         pseudo: PseudoHeaders,
         headers: Vec<crate::h2::connection::HeaderPair>,
-        /// Outbound (user-side) data: a relay task forwards chunks
-        /// read from here into the driver's internal body-chunk
-        /// channel, which drives DATA-frame emission.
+        /// Outbound (user-side) data: a relay task forwards chunks read from here into the driver's internal body-chunk channel, which drives DATA-frame emission.
         write_rx: mpsc::Receiver<io::Result<Bytes>>,
-        /// Delivered once :status HEADERS arrive — callers observe
-        /// the WebSocket handshake outcome synchronously before
-        /// receiving the stream handle.
+        /// Delivered once :status HEADERS arrive — callers observe the WebSocket handshake outcome synchronously before receiving the stream handle.
         headers_tx: oneshot::Sender<Result<H2ResponseEx, H2Error>>,
-        /// Inbound DATA chunks — driver forwards here, caller reads
-        /// them through the [`H2ConnectStream`](crate::h2::client::connect_stream::H2ConnectStream) `AsyncRead` impl.
+        /// Inbound DATA chunks — driver forwards here, caller reads them through the [`H2ConnectStream`](crate::h2::client::connect_stream::H2ConnectStream) `AsyncRead` impl.
         body_tx: mpsc::Sender<io::Result<Bytes>>,
     },
 }

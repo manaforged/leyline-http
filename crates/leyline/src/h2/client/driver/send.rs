@@ -52,12 +52,9 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         Ok(())
     }
 
-    /// Drain as much of the per-stream streaming body buffer as the flow
-    /// control window permits; emit DATA frames accordingly. Marks
-    /// END_STREAM on the final frame when the producer has EOF'd.
+    /// Drain as much of the per-stream streaming body buffer as the flow control window permits; emit DATA frames accordingly.
     pub(super) async fn try_pump_streaming_body(&mut self, stream_id: u32) -> Result<(), H2Error> {
         loop {
-            // Take the next chunk out of the actor's buffer (if any).
             let next_chunk: Option<Bytes> =
                 self.streams
                     .get_mut(&stream_id)
@@ -87,7 +84,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             }
 
             if stream_err.is_some() && next_chunk.is_none() {
-                // Cancel the stream — producer errored.
                 let _ = self
                     .writer
                     .write_rst_stream(stream_id, ErrorCode::InternalError)
@@ -102,10 +98,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
 
             match next_chunk {
                 Some(chunk) if !chunk.is_empty() => {
-                    // Write as much as possible, park on flow control.
                     self.write_streaming_chunk(stream_id, chunk, closed).await?;
-                    // If we parked (pending_send set), stop pumping —
-                    // resumption happens via try_drain_pending.
                     let parked = self
                         .streams
                         .get(&stream_id)
@@ -117,8 +110,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 }
                 _ => {
                     if closed {
-                        // No more chunks and producer closed: emit an
-                        // empty END_STREAM DATA frame if we haven't yet.
                         if !already_closed {
                             if let Some(actor) = self.streams.get_mut(&stream_id) {
                                 if let Err(e) = actor
@@ -155,8 +146,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         while !chunk.is_empty() {
             let window = self.effective_send_window(stream_id);
             if window == 0 {
-                // Park — stash the remainder in `pending_send`. The
-                // next WINDOW_UPDATE will resume via try_drain_pending.
                 if let Some(actor) = self.streams.get_mut(&stream_id) {
                     actor.pending_send = Some(PendingSend {
                         remaining: chunk.clone(),
@@ -173,8 +162,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             let piece = chunk.slice(0..chunk_size);
             chunk = chunk.slice(chunk_size..);
 
-            // Is this the last DATA frame? Only if producer has EOF'd
-            // AND no more buffered chunks follow.
             let no_more_buffered = self
                 .streams
                 .get(&stream_id)
@@ -265,9 +252,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         Ok(())
     }
 
-    /// Write the remainder of a header block (from `offset`) as
-    /// CONTINUATION frames, END_HEADERS on the last (RFC 9113 §6.10).
-    /// Shared by the request-headers and trailers paths.
+    /// Write the remainder of a header block (from `offset`) as CONTINUATION frames, END_HEADERS on the last (RFC 9113 §6.10).
     pub(super) async fn write_continuations(
         &mut self,
         stream_id: u32,
@@ -294,8 +279,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         Ok(())
     }
 
-    /// Try to write `body` for `stream_id`; on flow-control exhaustion,
-    /// stash the remainder in the actor's pending_send and return.
+    /// Try to write `body` for `stream_id`; on flow-control exhaustion, stash the remainder in the actor's pending_send and return.
     pub(super) async fn write_body_or_park(
         &mut self,
         stream_id: u32,
@@ -303,12 +287,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         has_trailers: bool,
         trailers: Vec<(String, String)>,
     ) -> Result<(), H2Error> {
-        // Attempt to write as much as flow control allows.
         let mut remaining = body;
         while !remaining.is_empty() {
             let window = self.effective_send_window(stream_id);
             if window == 0 {
-                // Park.
                 self.park_stream(
                     stream_id,
                     PendingSend {
@@ -325,7 +307,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             let is_last = remaining.is_empty();
             let data_end_stream = is_last && !has_trailers;
 
-            // Drive state machine.
             if let Some(actor) = self.streams.get_mut(&stream_id) {
                 if let Err(e) = actor.state.transition(StreamEvent::SendData {
                     end_stream: data_end_stream,
@@ -350,7 +331,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             }
         }
 
-        // Body fully written. Send trailers if present.
         if has_trailers {
             self.write_trailers(stream_id, trailers).await?;
         }
@@ -373,11 +353,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         }
         let fragment = self.encoder.encode_header_block(&list);
         let max_frame = self.peer_settings.max_frame_size as usize;
-        // RFC 9113 §6.10: a block past max_frame_size continues in
-        // CONTINUATION frames — END_STREAM rides the first HEADERS
-        // frame, END_HEADERS the last frame of the block. Mirrors
-        // write_headers_block; erroring here would kill the whole
-        // connection on any large trailer set.
         let first_len = max_frame.min(fragment.len());
         let end_headers = first_len == fragment.len();
         self.writer
@@ -401,7 +376,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         if self.buffered_pending.is_empty() {
             return Ok(());
         }
-        // Drain by repeatedly popping the front; re-park if still blocked.
         let mut progress_count = self.buffered_pending.len();
         while progress_count > 0 && !self.buffered_pending.is_empty() {
             progress_count -= 1;
@@ -409,7 +383,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 Some(s) => s,
                 None => break,
             };
-            // Extract pending.
             let pending = match self
                 .streams
                 .get_mut(&sid)
@@ -419,10 +392,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 None => continue,
             };
 
-            // Streaming input? Push the pending.remaining back into the
-            // front of the streaming buffer and let the streaming pump
-            // handle it (it understands END_STREAM timing relative to
-            // the producer's EOF signal).
             let is_streaming = self
                 .streams
                 .get(&sid)
@@ -451,8 +420,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 .await;
             match result {
                 Ok(()) => {
-                    // If the stream is still parked, we already pushed it
-                    // back via park_stream. Otherwise it's done sending.
                     let _ = self.writer.flush().await;
                 }
                 Err(e) => {

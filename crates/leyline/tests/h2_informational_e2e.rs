@@ -1,16 +1,4 @@
-//! Regression: HTTP/2 1xx informational responses (Cloudflare's 103 Early
-//! Hints) must be skipped, not returned as the final status.
-//!
-//! The bug: the H2 client set `got_headers` on the FIRST HEADERS frame
-//! unconditionally, so a 103 Early Hints became the response status and the
-//! real 200 was mis-filed as trailers — surfacing in a consuming application
-//! as an opaque "unexpected 103" error on every Cloudflare-fronted HTML fetch.
-//! H1 already skipped 1xx (pool/h1.rs:571); the H2 client did not.
-//!
-//! The request is a no-body GET (END_STREAM on the request HEADERS → the stream
-//! is HalfClosedLocal — the production path), and the two response header blocks
-//! share ONE encoder so HPACK dynamic-table state stays continuous: a fix that
-//! wrongly reset the decoder between the 103 and 200 would corrupt the 200 decode.
+//! Regression: HTTP/2 1xx informational responses (Cloudflare's 103 Early Hints) must be skipped, not returned as the final status.
 
 #[path = "h2_support/mod.rs"]
 mod support;
@@ -92,8 +80,6 @@ async fn early_hints_103_is_skipped_final_status_wins() {
         write_server_settings(&mut server_io).await;
         write_settings_ack(&mut server_io).await;
 
-        // Drain until the request HEADERS. A no-body GET carries END_STREAM,
-        // so the request stream is HalfClosedLocal — the production path.
         let stream_id = loop {
             let (h, _) = read_frame(&mut server_io).await;
             if h.frame_type == FrameType::Headers as u8 {
@@ -102,9 +88,7 @@ async fn early_hints_103_is_skipped_final_status_wins() {
             }
         };
 
-        // One shared encoder → HPACK dynamic-table continuity across both blocks.
         let mut enc = hpack::Encoder::new();
-        // 103 Early Hints with a preload Link hint — must be discarded entirely.
         write_headers_block(
             &mut server_io,
             &mut enc,
@@ -113,7 +97,6 @@ async fn early_hints_103_is_skipped_final_status_wins() {
             false,
         )
         .await;
-        // Final 200, no END_STREAM (DATA terminates the stream).
         write_headers_block(
             &mut server_io,
             &mut enc,
@@ -156,13 +139,11 @@ async fn early_hints_103_is_skipped_final_status_wins() {
     .expect("request timed out")
     .expect("a 103 before the 200 must not error the request");
 
-    // The 103 is provisional: the FINAL status wins.
     assert_eq!(
         resp.status, 200,
         "1xx Early Hints must be skipped, not returned as the final status"
     );
     assert_eq!(resp.body, b"<html>ok</html>");
-    // The 200's real headers are present...
     assert!(
         resp.headers
             .iter()
@@ -170,7 +151,6 @@ async fn early_hints_103_is_skipped_final_status_wins() {
         "final headers must come from the 200, got {:?}",
         resp.headers
     );
-    // ...and the 103's provisional preload hint must NOT poison them.
     assert!(
         !resp.headers.iter().any(|(k, _)| k == "link"),
         "103 Early Hints headers must be discarded, got {:?}",

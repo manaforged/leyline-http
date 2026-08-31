@@ -15,8 +15,8 @@ fn ja4h_no_cookies() {
     let fp = compute_ja4h(&input);
     let parts: Vec<&str> = fp.split('_').collect();
     assert_eq!(parts.len(), 4);
-    assert!(parts[0].starts_with("ge20nn")); // GET, HTTP/2, no cookie, no referer
-    assert_eq!(parts[2], "000000000000"); // no cookies
+    assert!(parts[0].starts_with("ge20nn"));
+    assert_eq!(parts[2], "000000000000");
     assert_eq!(parts[3], "000000000000");
 }
 
@@ -35,6 +35,6 @@ fn section_a_format() {
         headers: &headers,
     };
     let a = section_a(&input);
-    assert!(a.starts_with("po20cr")); // POST, HTTP/2, cookie, referer
+    assert!(a.starts_with("po20cr"));
     assert!(a.ends_with("enUS"));
 }

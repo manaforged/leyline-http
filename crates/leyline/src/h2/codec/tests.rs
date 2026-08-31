@@ -58,10 +58,6 @@ async fn write_and_read_preface_then_settings() {
 
 #[tokio::test]
 async fn next_resumes_after_cancellation() {
-    // Simulates the actor-model driver's `tokio::select!`: a sibling
-    // branch wins mid-read, the reader future is dropped with only
-    // part of a frame on the wire, and the next `next()` call must
-    // resume instead of re-reading from the socket and desyncing.
     let (client, mut server) = tokio::io::duplex(1024);
 
     let frame = SettingsFrame {
@@ -72,9 +68,6 @@ async fn next_resumes_after_cancellation() {
     frame.encode(&mut encoded);
     let encoded = encoded.freeze();
 
-    // Server writes one byte at a time so the reader's `read` call
-    // will often return Pending in-between, giving the select! race
-    // real opportunity to drop the reader future mid-header.
     let server_task = tokio::spawn(async move {
         for byte in encoded.iter() {
             server.write_all(&[*byte]).await.unwrap();

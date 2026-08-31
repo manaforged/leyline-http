@@ -12,6 +12,5 @@ fn percent_decode_roundtrips_common_cases() {
     assert_eq!(percent_decode("a%3Db"), "a=b");
     assert_eq!(percent_decode("plain"), "plain");
     assert_eq!(percent_decode("s3cr3t%21"), "s3cr3t!");
-    // A malformed trailing % is passed through, not dropped.
     assert_eq!(percent_decode("bad%"), "bad%");
 }

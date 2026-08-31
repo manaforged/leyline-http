@@ -2,11 +2,13 @@
 
 #[tokio::main]
 async fn main() {
-    match leyline::get("https://tls.peet.ws/api/all").await {
+    match leyline::Session::chrome()
+        .get("https://tls.peet.ws/api/all")
+        .await
+    {
         Ok(resp) => {
             println!("Status: {}", resp.status());
-            // Parse the fingerprint from the response
-            let text = resp.text();
+            let text = resp.text().unwrap();
             if text.len() > 100 {
                 println!("Body: {}... ({} bytes)", &text[..100], text.len());
             }

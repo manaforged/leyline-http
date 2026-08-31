@@ -14,12 +14,10 @@ use leyline::core::Session;
 use leyline::core::multipart::{Form, Part};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-/// Read the full request (headers + body) off the socket. The tests
-/// here set `Content-Length` so we can read exactly.
+/// Read the full request (headers + body) off the socket.
 async fn read_full_request(sock: &mut tokio::net::TcpStream) -> (String, Vec<u8>) {
     let mut buf = [0u8; 8192];
     let mut acc = Vec::new();
-    // Read headers first.
     let header_end;
     loop {
         let n = sock.read(&mut buf).await.unwrap();
@@ -31,7 +29,6 @@ async fn read_full_request(sock: &mut tokio::net::TcpStream) -> (String, Vec<u8>
         }
     }
     let head_text = String::from_utf8_lossy(&acc[..header_end]).to_string();
-    // Parse Content-Length.
     let mut cl: Option<usize> = None;
     for line in head_text.split("\r\n") {
         if let Some(v) = line.strip_prefix("Content-Length: ") {
@@ -61,7 +58,6 @@ async fn text_plus_text_form_roundtrips() {
     let server = tokio::spawn(async move {
         let (mut sock, _) = listener.accept().await.unwrap();
         let (head, body) = read_full_request(&mut sock).await;
-        // Extract boundary from content-type.
         let ct = head
             .split("\r\n")
             .find(|l| l.to_lowercase().starts_with("content-type:"))
@@ -70,7 +66,6 @@ async fn text_plus_text_form_roundtrips() {
         let boundary = ct.split("boundary=").nth(1).unwrap().trim().to_string();
 
         let body_text = String::from_utf8_lossy(&body).to_string();
-        // Three distinct occurrences: 2 part openers + 1 closer.
         let opener = format!("--{boundary}\r\n");
         let closer = format!("--{boundary}--\r\n");
         assert_eq!(body_text.matches(&opener).count(), 2, "body: {body_text}");
@@ -140,7 +135,6 @@ async fn text_plus_file() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
 
-    // Write a temp file with known contents.
     let mut tf = tempfile_like("leyline-mp-test.bin");
     tf.write_all(b"file-bytes-under-test-0123456789").unwrap();
     tf.flush().unwrap();
@@ -205,8 +199,7 @@ impl Drop for TempFile {
     }
 }
 
-/// Create a deterministic temp file path under the system temp dir
-/// (avoids pulling in the `tempfile` crate for a single call site).
+/// Create a deterministic temp file path under the system temp dir (avoids pulling in the `tempfile` crate for a single call site).
 fn tempfile_like(name: &str) -> TempFile {
     let dir = std::env::temp_dir();
     let unique = format!(
@@ -223,17 +216,9 @@ fn tempfile_like(name: &str) -> TempFile {
     TempFile { path, file }
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// Regression gates: header-injection defence. Prior to the fix
-// a `name` or `filename` containing CR/LF would escape the
-// Content-Disposition header and let an attacker forge headers or
-// break out of the multipart body entirely (CWE-93).
-// ─────────────────────────────────────────────────────────────────────
-
 use futures_util::StreamExt;
 
-/// Directly pull the first chunk out of a Form to inspect its
-/// `Content-Disposition` serialization without going over the wire.
+/// Directly pull the first chunk out of a Form to inspect its `Content-Disposition` serialization without going over the wire.
 async fn first_part_header(form: Form) -> std::io::Result<bytes::Bytes> {
     let body = form.into_stream_body_for_test();
     let mut stream = match body {

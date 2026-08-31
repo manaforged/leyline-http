@@ -1,21 +1,4 @@
 //! Opt-in TLS secret logging for wire debugging (curl/browser compatible).
-//!
-//! When `SSLKEYLOGFILE` is set, per-connection TLS secrets are appended to
-//! the named file in the NSS key-log format Wireshark consumes — the same
-//! mechanism curl, Firefox, and Chrome honour. This is how every capture in
-//! `tests/` documentation was debuggable without a patched client.
-//!
-//! Secrets written here decrypt the traffic they belong to. The mechanism is
-//! env opt-in only, the activation is logged at `warn` (matching how
-//! `SSL_CERT_FILE` trust overrides are surfaced), and the file is opened in
-//! append mode so parallel sessions and processes interleave safely.
-//! Unset (the default) costs one `env::var` lookup per context build.
-//!
-//! Threading note: the callback writes synchronously inside the handshake,
-//! on whatever thread drives it (including tokio workers on the async
-//! path). Writes are a few lines, once per secret, and flushed — the same
-//! trade curl and the browsers make. Heavy capture pipelines should point
-//! `SSLKEYLOGFILE` at a tmpfs file.
 
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -52,9 +35,7 @@ pub(crate) fn install_from_env(builder: &mut SslContextBuilder) {
     }
 }
 
-/// Open `path` for appending and return the line-writer closure installed as
-/// the BoringSSL keylog callback. Each line is flushed immediately so a
-/// capture being decrypted live sees secrets as handshakes complete.
+/// Open `path` for appending and return the line-writer closure installed as the BoringSSL keylog callback.
 fn keylog_writer(path: &str) -> std::io::Result<impl Fn(&str) + Send + Sync + 'static> {
     let file = OpenOptions::new().create(true).append(true).open(path)?;
     let file = Arc::new(Mutex::new(file));

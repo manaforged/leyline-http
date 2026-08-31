@@ -1,10 +1,4 @@
 //! POST a JSON body.
-//!
-//! Run with: `cargo run -p leyline --example post_json`
-//!
-//! example.com accepts the request and returns 200 with no body. Swap
-//! `URL` for an endpoint that echoes JSON back if you want to see the
-//! response payload.
 
 use leyline::{Browser, Platform, Session};
 use serde::Serialize;
@@ -32,6 +26,6 @@ async fn main() -> leyline::Result<()> {
     let resp = session.post(URL).json(&payload).send().await?;
 
     println!("status: {}", resp.status());
-    println!("body:   {}", resp.text());
+    println!("body:   {}", resp.text().unwrap());
     Ok(())
 }

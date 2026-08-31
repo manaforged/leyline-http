@@ -14,7 +14,7 @@ pub struct ProfileRegistry {
 static BUILTIN: LazyLock<ProfileRegistry> = LazyLock::new(ProfileRegistry::builtin);
 
 impl ProfileRegistry {
-    /// The compiled-in profile set. Shared by session build and [`crate::Identity`].
+    /// The compiled-in profile set.
     #[must_use]
     pub fn global() -> &'static Self {
         &BUILTIN
@@ -30,47 +30,34 @@ impl ProfileRegistry {
     /// Load all built-in profiles (compiled in via include_str!).
     pub fn builtin() -> Self {
         let mut reg = Self::new();
-        // Chrome
         reg.load_toml(include_str!("../../profiles/chrome/145.toml"));
         reg.load_toml(include_str!("../../profiles/chrome/146.toml"));
         reg.load_toml(include_str!("../../profiles/chrome/147.toml"));
         reg.load_toml(include_str!("../../profiles/chrome/148.toml"));
         reg.load_toml(include_str!("../../profiles/chrome/149.toml"));
         reg.load_toml(include_str!("../../profiles/chrome/150.toml"));
-        // Brave (Chromium-based, first-class because of header-order +
-        // sec-gpc + accept SXG-strip deltas)
+        reg.load_toml(include_str!("../../profiles/chrome/151.toml"));
+        reg.load_toml(include_str!("../../profiles/chrome/152.toml"));
         reg.load_toml(include_str!("../../profiles/brave/146.toml"));
-        // Firefox
         reg.load_toml(include_str!("../../profiles/firefox/148.toml"));
         reg.load_toml(include_str!("../../profiles/firefox/149.toml"));
         reg.load_toml(include_str!("../../profiles/firefox/150.toml"));
         reg.load_toml(include_str!("../../profiles/firefox/151.toml"));
         reg.load_toml(include_str!("../../profiles/firefox/152.toml"));
-        // Safari
+        reg.load_toml(include_str!("../../profiles/firefox/153.toml"));
+        reg.load_toml(include_str!("../../profiles/firefox/154.toml"));
         reg.load_toml(include_str!("../../profiles/safari/18.toml"));
+        reg.load_toml(include_str!("../../profiles/safari/26.toml"));
         reg.load_toml(include_str!("../../profiles/safari/ios17.toml"));
         reg.load_toml(include_str!("../../profiles/safari/ios18.toml"));
-        // OkHttp
         reg.load_toml(include_str!("../../profiles/okhttp/android10.toml"));
-        // CFNetwork (Apple URLSession app stack)
         reg.load_toml(include_str!("../../profiles/cfnetwork/ios18.toml"));
         reg.load_toml(include_str!("../../profiles/cfnetwork/macos26.toml"));
         reg
     }
 
     /// Parse and insert a TOML profile string.
-    ///
-    /// Panics on parse failure: every caller feeds `include_str!`
-    /// compile-time constants, so a bad profile is a programmer error
-    /// (merge conflict, hand-edit). Logging the error and skipping would
-    /// defer the failure to a misleading "built-in profile missing"
-    /// panic at the `profile()` call site, with the parse error buried
-    /// in trace output.
     fn load_toml(&mut self, toml_str: &str) {
-        // Invariant: every input is an `include_str!` compile-time constant
-        // gated by the `profile_validation` test suite. A failure is a
-        // programmer error (merge conflict, hand-edit) and must be loud;
-        // `.expect` carries the parse error in the message.
         let profile = BrowserProfile::from_toml(toml_str)
             .expect("built-in profile is statically valid (profile_validation)");
         let key = (profile.meta.browser.clone(), profile.meta.version);

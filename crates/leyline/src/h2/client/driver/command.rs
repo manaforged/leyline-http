@@ -15,9 +15,6 @@ use super::*;
 
 impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     pub(super) async fn on_command(&mut self, cmd: DriverCommand) -> Result<(), H2Error> {
-        // h2 requires the server's initial SETTINGS before its
-        // MAX_CONCURRENT_STREAMS is known. Until they arrive, park commands
-        // instead of racing the limit and eating REFUSED_STREAM resets.
         if !self.peer_ready() {
             self.pending.push_back(cmd);
             return Ok(());
@@ -31,9 +28,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 response_tx,
             } => {
                 if let Err(e) = self.admit_new_stream() {
-                    // A buffered body parks fine: it is a refcounted
-                    // handle, not a live stream. The legacy API carries no
-                    // streaming uploads, so every capacity failure parks.
                     if Self::deferrable_capacity_error(&e) {
                         self.pending.push_back(DriverCommand::SendRequest {
                             pseudo,
@@ -93,9 +87,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 response_tx,
                 stream_body_tx,
             } => {
-                // Streaming request bodies cannot be parked (the pump would
-                // buffer unboundedly); buffered bodies defer until a slot
-                // frees.
                 let deferrable = !matches!(
                     body,
                     crate::h2::client::driver::protocol::DriverRequestBody::Streaming { .. }
@@ -128,10 +119,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         }
     }
 
-    /// A capacity rejection (`RefusedStream` from OUR OWN admission check,
-    /// not a server reset) is deferrable: the request parks in `pending`
-    /// and starts when a stream slot frees. GOAWAY and stream-ID
-    /// exhaustion are permanent and error immediately.
+    /// A capacity rejection (`RefusedStream` from OUR OWN admission check, not a server reset) is deferrable: the request parks in `pending` and starts when a stream slot frees.
     fn deferrable_capacity_error(e: &H2Error) -> bool {
         matches!(
             e,
@@ -142,12 +130,8 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         )
     }
 
-    /// Start deferred requests, in order, while the peer's stream budget
-    /// allows. Called after frames that may have closed streams.
+    /// Start deferred requests, in order, while the peer's stream budget allows.
     pub(super) async fn drain_pending(&mut self) -> Result<(), H2Error> {
-        // Peer settings must be in (or the gate in `on_command` re-parks
-        // everything and this loop never terminates), admission must pass,
-        // and work must exist — else nothing changes and we return.
         while !self.pending.is_empty() && self.peer_ready() && self.admit_new_stream().is_ok() {
             if let Some(cmd) = self.pending.pop_front() {
                 self.on_command(cmd).await?;
@@ -167,7 +151,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         let stream_id = self.alloc_stream_id();
         let is_head = pseudo.method.eq_ignore_ascii_case("HEAD");
 
-        // Build pseudo-header list (CONNECT aware).
         let header_list = match pseudo.build_pseudo_list(&self.config.pseudo_order) {
             Ok(list) => list,
             Err(e) => {
@@ -175,7 +158,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 return Ok(());
             }
         };
-        // Encode header block.
         let fragment = encode_request_pseudos(&mut self.encoder, header_list, &headers);
 
         let has_trailers = !trailers.is_empty();
@@ -185,7 +167,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         let initial_recv = self.config.advertised_initial_window_size() as i64;
         let mut actor = StreamActor::new(initial_send, initial_recv, sink, is_head);
 
-        // Drive state machine: SendHeaders.
         if let Err(e) = actor.state.transition(StreamEvent::SendHeaders {
             end_stream: end_stream_on_headers,
         }) {
@@ -194,10 +175,8 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             return Ok(());
         }
 
-        // Insert actor now so inbound frames can find it.
         self.streams.insert(stream_id, actor);
 
-        // Write HEADERS (+ CONTINUATION if needed).
         if let Err(e) = self
             .write_headers_block(stream_id, end_stream_on_headers, fragment, true)
             .await
@@ -206,8 +185,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             return Ok(());
         }
 
-        // Handle body (if any). `write_body_or_park` emits trailing HEADERS
-        // on completion, so when a body is present we're done after the call.
         let had_body = body.is_some();
         if let Some(body) = body {
             if let Err(e) = self
@@ -219,8 +196,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             }
         }
 
-        // Body-less request with trailers: HEADERS didn't carry END_STREAM,
-        // so we emit the trailer block directly.
         if !had_body && has_trailers {
             if let Err(e) = self.write_trailers(stream_id, trailers).await {
                 self.fail_stream(stream_id, e);
@@ -228,7 +203,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             }
         }
 
-        // Flush best-effort.
         let _ = self.writer.flush().await;
 
         Ok(())
@@ -241,8 +215,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         body: DriverRequestBody,
         sink: ResponseSink,
     ) -> Result<(), H2Error> {
-        // Buffered / None bodies delegate to the legacy start_request
-        // by wrapping into `Option<Bytes>` — same framing, same logic.
         match body {
             DriverRequestBody::None => {
                 self.start_request(pseudo, headers, None, Vec::new(), sink)
@@ -254,12 +226,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                     .await
             }
             DriverRequestBody::Streaming { rx, length_hint: _ } => {
-                // Streaming body. Allocate a stream id, send HEADERS
-                // without END_STREAM, install the actor with a
-                // `SendBodyInput::Streaming`, then spawn a relay task
-                // that forwards chunks from `rx` into the driver's
-                // shared `body_chunk_tx`. The event loop pulls chunks
-                // and feeds them into `write_body_or_park`.
                 let stream_id = self.alloc_stream_id();
                 let is_head = pseudo.method.eq_ignore_ascii_case("HEAD");
 
@@ -301,34 +267,18 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                     return Ok(());
                 }
 
-                // Spawn relay: reads chunks from caller rx, forwards
-                // them through the driver-shared mpsc tagged by stream
-                // id. Driver's event_loop handles them in a select
-                // branch.
                 let chunk_tx = self.body_chunk_tx.clone();
                 tokio::spawn(super::bootstrap::relay_request_body(
                     stream_id, rx, chunk_tx,
                 ));
 
-                // We stop here; inbound chunk events will arrive via
-                // `BodyChunkIn` and trigger further writes.
                 let _ = self.writer.flush().await;
                 Ok(())
             }
         }
     }
 
-    /// Open an RFC 8441 extended CONNECT stream. Shape mirrors the
-    /// streaming-body path from [`start_request_ex`](Self::start_request_ex),
-    /// but:
-    ///
-    /// - the HEADERS frame never carries END_STREAM — the stream is
-    ///   bidirectional until the peer/caller tears it down,
-    /// - the response sink is always streaming so the caller can start
-    ///   draining inbound DATA frames as soon as HEADERS arrive.
-    ///
-    /// Pseudo-header validation (`:method=CONNECT`, `:protocol` present)
-    /// already happened on the handle before the command reached here.
+    /// Open an RFC 8441 extended CONNECT stream.
     pub(super) async fn start_extended_connect(
         &mut self,
         pseudo: PseudoHeaders,

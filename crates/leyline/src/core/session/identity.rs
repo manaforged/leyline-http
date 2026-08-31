@@ -4,11 +4,6 @@ use crate::core::error::{Error, Result};
 use crate::profile::{Browser, Platform, ProfileRegistry};
 
 /// HTTP identity plus the TLS profile that carries it.
-///
-/// [`Identity::http`] and [`Identity::platform`] stay fixed. [`Identity::tls`]
-/// is always that family's [`Browser::hello_rep`] — a distinct ClientHello,
-/// not a UA-only major. [`Identity::rotate_tls`] may change `tls` only inside
-/// the same [`Browser::family`] as `http`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Identity {
     http: Browser,
@@ -18,9 +13,6 @@ pub struct Identity {
 
 impl Identity {
     /// HTTP headers from `browser`; TLS/H2 from that browser's hello owner.
-    ///
-    /// Chrome 148 locks as Chrome 148 HTTP + Chrome 147 TLS. Chrome 150
-    /// locks as 150 on both.
     #[must_use]
     pub fn locked(browser: Browser, platform: Platform) -> Self {
         Self {
@@ -30,11 +22,7 @@ impl Identity {
         }
     }
 
-    /// Roll TLS/H2 to `tls`. HTTP headers and platform stay.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::Config`] when `tls` is a different family than [`Self::http`].
+    /// Roll TLS/H2 to `tls`.
     pub fn rotate_tls(self, tls: Browser) -> Result<Self> {
         if self.http.family() != tls.family() {
             return Err(Error::Config(format!(
@@ -48,13 +36,7 @@ impl Identity {
         })
     }
 
-    /// Next distinct ClientHello in this family. HTTP + platform stay.
-    ///
-    /// Chrome walks 150 → 147 → 146 → 150. Firefox walks 152 → 150 → 152.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::Config`] when the family has only one hello.
+    /// Next distinct ClientHello in this family.
     pub fn rotate_hello(self) -> Result<Self> {
         let hellos = self.http.family_hellos();
         if hellos.len() < 2 {
@@ -69,10 +51,6 @@ impl Identity {
     }
 
     /// Every distinct-hello stack with this HTTP identity and platform.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::Config`] if a hello in the family table is a different family.
     pub fn hello_library(self) -> Result<Vec<Self>> {
         self.http
             .family_hellos()
@@ -82,24 +60,14 @@ impl Identity {
     }
 
     /// Families a jar can pass to on this platform (HTTP + TLS both switch).
-    ///
-    /// Same jar, new locked presentation. A session that already ran as
-    /// Chrome can keep that jar and continue as Firefox (or Safari).
-    /// Not [`Self::rotate_tls`].
     const PASS_REPS: &[Browser] = &[
-        Browser::Chrome150,
-        Browser::Firefox152,
-        Browser::Safari18,
+        Browser::Chrome152,
+        Browser::Firefox154,
+        Browser::Safari26,
         Browser::SafariIOS18,
     ];
 
-    /// Locked identity in `dest`'s family, same platform. Caller keeps the jar.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::Config`] when `dest` is the same family (use [`Self::rotate_tls`])
-    /// or the dest profile has no HTTP identity for this platform (Safari is
-    /// macOS-only; Safari iOS is iOS-only).
+    /// Locked identity in `dest`'s family, same platform.
     pub fn pass(self, dest: Browser) -> Result<Self> {
         if dest.family() == self.http.family() {
             return Err(Error::Config(format!(
@@ -113,9 +81,6 @@ impl Identity {
     }
 
     /// Every other family that can carry this platform's HTTP identity.
-    ///
-    /// Windows/Linux/Android: Firefox. macOS: Firefox + Safari 18. iOS:
-    /// Safari iOS. Chrome is listed when this identity is not already Chrome.
     #[must_use]
     pub fn pass_library(self) -> Vec<Self> {
         Self::PASS_REPS
@@ -143,19 +108,11 @@ impl Identity {
     }
 
     /// `User-Agent` from the HTTP profile for this platform.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::Config`] when the HTTP profile has no identity for the platform.
     pub fn user_agent(self) -> Result<String> {
         Ok(self.http_platform()?.user_agent.clone())
     }
 
     /// `sec-ch-ua` from the HTTP profile for this platform.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::Config`] when the HTTP profile has no identity for the platform.
     pub fn sec_ch_ua(self) -> Result<String> {
         Ok(self.http_platform()?.sec_ch_ua.clone())
     }

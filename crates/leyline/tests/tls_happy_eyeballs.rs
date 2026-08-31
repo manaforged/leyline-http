@@ -1,10 +1,4 @@
-//! Integration test: exercise the public [`FingerprintConnector`]
-//! builder surface around the new [`Resolver`] and
-//! [`HappyEyeballsConfig`] knobs.
-//!
-//! Construction-only sanity checks — the per-address race logic has
-//! thorough coverage in the crate's in-module tests, which exercise
-//! the real [`happy_eyeballs_connect`] race against tokio listeners.
+//! Integration test: exercise the public [`FingerprintConnector`] builder surface around the new [`Resolver`] and [`HappyEyeballsConfig`] knobs.
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -71,7 +65,6 @@ async fn default_happy_eyeballs_is_250ms() {
 
 #[tokio::test]
 async fn failing_resolver_is_pluggable() {
-    // Compile-time check: FailingResolver satisfies Resolver.
     let _: Arc<dyn Resolver> = Arc::new(FailingResolver);
 }
 

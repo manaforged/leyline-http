@@ -27,7 +27,6 @@ fn interleave_imbalanced() {
     assert_eq!(out, vec![v6a, v4a, v4b, v4c]);
 }
 
-// Spawn a localhost listener and return its bound `SocketAddr`.
 async fn spawn_listener() -> SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -57,9 +56,6 @@ async fn single_address_succeeds() {
 #[tokio::test]
 async fn v6_failure_falls_through_to_v4() {
     let v4_addr = spawn_listener().await;
-    // RFC 3849 documentation prefix — not routable, so connect
-    // attempts fail fast with "network unreachable" rather than
-    // hanging for the full syn-retry timeout.
     let v6_unreachable: SocketAddr = SocketAddr::from((
         Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0xdead, 0xbeef),
         v4_addr.port(),
@@ -87,11 +83,7 @@ async fn v6_failure_falls_through_to_v4() {
     let elapsed = start.elapsed();
 
     assert_eq!(winner, v4_addr);
-    // We must have launched at least the v6 attempt; the v4
-    // attempt fires either after the 50ms stagger or earlier if
-    // v6 errors synchronously.
     assert!(attempts.load(Ordering::SeqCst) >= 1);
-    // Should not have waited for any OS-level SYN retry (seconds).
     assert!(
         elapsed < Duration::from_secs(5),
         "fallback too slow: {elapsed:?}"
@@ -100,8 +92,6 @@ async fn v6_failure_falls_through_to_v4() {
 
 #[tokio::test]
 async fn all_failures_surface_last_error() {
-    // Two loopback addresses with ports nothing is listening on
-    // so `connect` returns ConnectionRefused immediately.
     let port1 = {
         let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let p = l.local_addr().unwrap().port();
@@ -127,7 +117,6 @@ async fn all_failures_surface_last_error() {
     )
     .await
     .expect_err("both should fail");
-    // ConnectionRefused on Linux, similar on other unices.
     assert!(
         matches!(
             err.kind(),

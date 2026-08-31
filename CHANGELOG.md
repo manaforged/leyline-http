@@ -4,16 +4,27 @@ All notable changes to Leyline. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [SemVer](https://semver.org/spec/v2.0.0.html).
 
-Leyline is pre-1.0. Breaking changes will happen between minor releases
-until 1.0 — pin exact versions.
+Crate on crates.io is `leyline-http` (the `leyline` name is taken). First
+publish is 0.1.0; the BoringSSL crate is still `1.0.0-alpha.3`.
 
 ## Unreleased
 
+## 0.1.0
+
 ### Changed
 
-- Removed GitHub workflow orchestration; verification and releases now run directly on the supported self-hosted machines.
-- Reduced the push gate to package parity and compile sanity; formatting, deeper, and live checks require `--full`.
-- Restored the full verification gate on the current Rust toolchain by formatting the merged examples and resolving Clippy and rustdoc failures.
+- Workspace version is 0.1.0. Bundled BoringSSL is still `1.0.0-alpha.3`.
+- Crate package name is `leyline-http` (lib still `leyline`).
+- Bundled Chrome 152, Firefox 154, Safari 26 (WKWebView TLS/H2). Edge is a Chrome TLS overlay.
+- `Session::chrome()` uses `ProtocolPolicy::Race` when `http3` is on.
+- HTTP/3 QPACK capacity is advertised as 0 until the decoder has a
+  dynamic table.
+- Node/Python Chrome clients race H3 against H2 like `Session::chrome()`.
+- `Session::get` awaits a response. Chain headers or retry with
+  `session.request("GET", url)`.
+- A `v*` tag runs hosted `scripts/verify.sh --full`. Publishing is
+  manual. Local default `verify.sh` is package sanity; `--full` is the
+  release gate.
 - **Application retries are opt-in.** A new `Session` uses
   `RetryPolicy::none()`. Configure `SessionBuilder::retry(RetryPolicy::default())`
   for a session-wide policy or `RequestBuilder::retry(...)` for one request.
@@ -49,7 +60,7 @@ until 1.0 — pin exact versions.
 ### Fixed
 
 - **Firefox identities now send a Firefox-shaped request, not a Chrome one.** The
-  header presets are Chrome-shaped, so a Firefox session (`Browser::Firefox15x`)
+  header presets are Chrome-shaped, so a Firefox session (`Browser::Firefox148` through `Firefox154`)
   sent `Sec-CH-UA*` Client Hints (which no Firefox build emits), the Chrome
   document `Accept`, no `priority` / `te` headers, and Chrome's header order — all
   on the same connection as the Firefox JA4, a hard TLS-vs-header contradiction.
@@ -68,12 +79,12 @@ until 1.0 — pin exact versions.
   splitting the wire `sec-ch-ua` from the browser's own `navigator.userAgentData`.
   Corrected to the value a real Chromium 150.0.7871.47 build emits.
 
-- **TLS handshake failures are now retryable.** `TlsError::Handshake` — the way a
-  peer that resets mid-handshake (a common flaky-provider failure) surfaces — was
-  missing from the retry classifier, so such failures were never retried even
-  under a connection-error policy. It now joins `TcpConnect` / `Dns` /
-  `SslConnect` as a retryable connection error, and `Error::is_connection_closed`
-  reports it too.
+- **TLS handshake failures are retryable.** Connect-phase TLS errors
+  (`Handshake`, `HandshakeIo`, `SslConnect`) join `TcpConnect` / `Dns`.
+  A peer that resets, alerts, or speaks garbage during the handshake is
+  retried on a fresh connection. Certificate, hostname, and pin failures
+  stay permanent. `Error::is_connection_closed` follows
+  `TlsError::is_retryable`.
 
 - **307/308 redirects no longer drop a buffered request body.** The hop body was
   moved into the send and `current_body` left empty, so a method+body-preserving
@@ -158,7 +169,7 @@ until 1.0 — pin exact versions.
   HTTP identity differs: the `Chrome/148` UA token and the rotated
   `sec-ch-ua` brand list (`"Chromium";v="148", "Google Chrome";v="148",
   "Not/A)Brand";v="99"`). `Browser::default_browser()` /
-  `Session::chrome_latest()` / `Session::new()` now resolve to Chrome 148;
+  `Session::chrome()` now resolves to Chrome 148;
   pin `Browser::Chrome147` via the builder for the prior version.
 
 ### Changed
@@ -216,11 +227,9 @@ until 1.0 — pin exact versions.
   old bypass-everything semantics.
 
 - **`danger_accept_invalid_certs` builds even when the system trust
-  store is unloadable.** The Windows trust-store hard-fail introduced in
-  the hardening wave ran during context build, before
-  `set_accept_invalid_certs` was applied — so a machine with a broken
-  ROOT hive could not build a `-k` session at all. Verification-disabled
-  sessions now skip system trust wiring entirely.
+  store is unloadable.** Verification-disabled sessions skip system
+  trust wiring. A machine with a broken ROOT hive can still build a
+  `-k` session.
 
 - **TLS session-ticket cache recovers from mutex poison on the write
   side too.** The read side recovered but the `new_session_callback`
@@ -269,7 +278,7 @@ until 1.0 — pin exact versions.
   locations (`/etc/ssl/certs`) that do not exist on Windows, so a
   default `Session` on Windows had zero trust roots and every HTTPS
   request failed at handshake with `unable to get local issuer
-  certificate`. `leyline-tls` now enumerates the logical `"ROOT"`
+  certificate`. `leyline-http` now enumerates the logical `"ROOT"`
   Windows store via the Win32 crypto API (`CertOpenSystemStoreW`,
   `CertEnumCertificatesInStore`) and loads every cert into the
   BoringSSL `X509_STORE` when neither `SSL_CERT_FILE` nor
@@ -280,7 +289,7 @@ until 1.0 — pin exact versions.
 
 ## 1.0.0-alpha.1 — 2026-04-17
 
-First public release.
+Historical version line. First crates.io publish is 0.1.0.
 
 ### What's here
 
@@ -305,12 +314,9 @@ Browser profiles: Chrome 145/146/147, Firefox 148, Safari macOS 18,
 Safari iOS 15/17/18, OkHttp Android 7/10. Adding a version is a TOML
 copy-and-edit.
 
-C FFI plus Python, Node.js, and Go wrappers — each builds the dynamic
-library locally.
+Python and Node.js wrappers. Each builds the native library locally.
 
 ### Security hardening
-
-The headline security items:
 
 - **CWE-93** — H1 request smuggling. `send_request_h1_pooled` validates
   method, request-target, header names (RFC 9110 §5.6.2 `tchar`), and
@@ -355,9 +361,9 @@ The headline security items:
 ### Testing and verification
 
 - 780 tests across the workspace.
-- Four `cargo fuzz` targets with 1,150 seeded corpus inputs.
-  `scripts/verify.sh` replays the corpus on every non-quick run and
-  supports time-bounded fuzzing via `--fuzz [SECONDS]`.
+- Three `cargo fuzz` targets (`h2_frame`, `hpack`, `h2_continuation`).
+  `scripts/verify.sh --full` replays the corpus when cargo-fuzz and
+  nightly are installed. Time-bounded fuzzing is `--fuzz [SECONDS]`.
 - Live tests against `tls.peet.ws`, Cloudflare, and Google QUIC
   document JA3 / JA4 / H2 fingerprints per profile.
 - `scripts/verify.sh` runs fmt, clippy (`-D warnings`), docs
@@ -366,9 +372,8 @@ The headline security items:
 
 ### Known limitations
 
-- `leyline-h2` is browser-shaped, not a full RFC 9113 server-capable
-  stack. See [TESTING.md](TESTING.md) for the covered surface.
+- The HTTP/2 stack is browser-shaped, not a full RFC 9113 server.
 - Fingerprints drift. Profiles track the browser versions we captured;
   re-verify against a fresh capture before production use.
-- Pre-compiled FFI artifacts are not published; wrappers build the
-  dynamic library locally.
+- `leyline-bssl-sys` ships prebuilt BoringSSL libraries for four
+  targets. Node and Python still need a native addon or wheel.

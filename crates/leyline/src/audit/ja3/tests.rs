@@ -9,8 +9,8 @@ fn ja3_format() {
         ],
         curves: &["X25519".into(), "SECP256R1".into()],
         extension_ids: &[0x0000, 0x000a, 0x000b],
-        tls_record_version: 771, // TLS 1.2
+        tls_record_version: 771,
     };
     let hash = compute_ja3(&input);
-    assert_eq!(hash.len(), 32); // MD5 hex length
+    assert_eq!(hash.len(), 32);
 }

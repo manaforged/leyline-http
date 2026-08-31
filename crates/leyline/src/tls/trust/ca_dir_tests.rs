@@ -1,9 +1,4 @@
-//! Guards against SSL_CERT_DIR silently disabling trust on
-//! Debian/Ubuntu/RHEL, where all entries in `/etc/ssl/certs` are
-//! symlinks. These gates cover the symlink-following, extension-filter,
-//! and file-type-after-resolve semantics directly. If a future
-//! refactor re-introduces `DirEntry::metadata()` or drops the
-//! symlink-follow, these tests fail.
+//! Guards against SSL_CERT_DIR silently disabling trust on Debian/Ubuntu/RHEL, where all entries in `/etc/ssl/certs` are symlinks.
 
 use super::collect_ca_dir_candidates;
 use std::fs;
@@ -13,8 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-/// Disposable per-test directory under the OS temp dir. Named
-/// with a process-unique counter so parallel tests never clash.
+/// Disposable per-test directory under the OS temp dir.
 struct TempDir(PathBuf);
 
 impl TempDir {
@@ -42,8 +36,6 @@ impl Drop for TempDir {
 
 fn write_pem(path: &Path, label: &str) {
     let mut f = fs::File::create(path).unwrap();
-    // Content is arbitrary — the helper only walks the dir;
-    // it does NOT call `set_ca_file`.
     writeln!(
         f,
         "-----BEGIN CERTIFICATE-----\n{label}\n-----END CERTIFICATE-----"
@@ -93,9 +85,6 @@ fn wrong_extensions_skipped() {
 #[test]
 #[cfg(unix)]
 fn symlink_to_regular_file_is_accepted() {
-    // This is the bug: the Debian/Ubuntu `/etc/ssl/certs`
-    // layout is ENTIRELY symlinks. If this test ever regresses,
-    // every mainstream Linux distro loses TLS trust.
     use std::os::unix::fs::symlink;
     let tmp = TempDir::new("sym");
     let real = tmp.path().join("real.pem");
@@ -103,9 +92,6 @@ fn symlink_to_regular_file_is_accepted() {
     let link = tmp.path().join("link.pem");
     symlink(&real, &link).unwrap();
     let v = collect_ca_dir_candidates(tmp.path());
-    // Both the real file and the symlink pointing at it are
-    // loadable candidates — BoringSSL deduplicates by subject
-    // so double-loading is harmless.
     assert_eq!(v.len(), 2, "got {v:?}");
 }
 
@@ -123,7 +109,6 @@ fn broken_symlink_skipped() {
 #[test]
 fn directory_entry_with_cert_extension_skipped() {
     let tmp = TempDir::new("subdir");
-    // `foo.pem/` as a directory must not be treated as a cert.
     fs::create_dir(tmp.path().join("bogus.pem")).unwrap();
     write_pem(&tmp.path().join("real.pem"), "real");
     let v = collect_ca_dir_candidates(tmp.path());

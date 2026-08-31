@@ -11,7 +11,7 @@ authors = [
     "Ivan Nikulin <ifaaan@gmail.com>",
 ]
 description = "Leyline's owned BoringSSL FFI: a pinned BoringSSL revision + carried patches, shipped prebuilt"
-license = "MIT"
+license = "MIT AND Apache-2.0 AND BSD-3-Clause"
 repository = "https://github.com/manaforged/leyline-http"
 build = "build.rs"
 links = "boringssl"
@@ -54,8 +54,8 @@ prefix-symbols = []
 underscore-wildcards = []
 # Rebuild BoringSSL from the deps/boringssl submodule (cmake + bindgen) instead
 # of linking the committed prebuilt libs. CI-only — pulls the heavy build
-# toolchain. Used with `build = "build/main.rs"`; see build-prebuilt.yml. Off by
-# default so normal dev/release builds stay on the prebuilt path (no CMake/Go).
+# toolchain. Off by default so normal dev/release builds stay on the prebuilt
+# path (no CMake/Go).
 source-build = ["dep:bindgen", "dep:cmake", "dep:fs_extra", "dep:fslock"]
 
 # Source-build toolchain — optional, pulled only by the `source-build` feature,

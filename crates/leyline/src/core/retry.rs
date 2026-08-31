@@ -1,32 +1,4 @@
 //! Idempotent retry with exponential backoff.
-//!
-//! `reqwest` doesn't retry, and neither does Leyline by default. Under
-//! load, networks fault — a dropped TCP connection mid-response, a 502 from
-//! a reloading upstream, a transient 503. The happy path for an HTTP
-//! client that wants to survive real-world traffic is to retry *safe*
-//! operations with exponential backoff.
-//!
-//! This module provides [`RetryPolicy`] — a small, explicit opt-in.
-//! Default behaviour is zero retries (see [`RetryPolicy::none`]). Callers opt
-//! in per-request via [`crate::RequestBuilder::retry`] or for every request in
-//! a session via [`crate::SessionBuilder::retry`].
-//!
-//! # Idempotence
-//!
-//! Retrying a non-idempotent request (`POST` / `PATCH`) is dangerous:
-//! the server may have committed the first attempt even though the
-//! client saw a connection error, so the retry would double-apply the
-//! side effect. We guard against that by default — `POST`/`PATCH`
-//! requests only retry when the caller explicitly calls
-//! [`crate::RequestBuilder::allow_non_idempotent_retry`].
-//!
-//! # Streaming bodies
-//!
-//! [`crate::Body::Stream`] cannot be replayed — the `Stream` may have
-//! been polled to completion on the first attempt. When a retry would
-//! fire against a streaming body, the retry engine returns a clear
-//! error pointing the caller at [`crate::Body::Bytes`] instead. It
-//! never silently drops the retry.
 
 use std::time::Duration;
 
@@ -38,26 +10,13 @@ pub enum RetryTrigger {
     ConnectionError,
     /// A specific HTTP status code (e.g. 429, 502, 503, 504).
     Status(u16),
-    /// Any 5xx status. Implies [`RetryTrigger::Status`] for 500..=599.
+    /// Any 5xx status.
     ServerError,
     /// The request hit the per-request or session timeout.
     Timeout,
 }
 
-/// Retry policy. Configure it with [`crate::RequestBuilder::retry`] or
-/// [`crate::SessionBuilder::retry`]. New sessions use [`RetryPolicy::none`].
-///
-/// ```rust,ignore
-/// use std::time::Duration;
-/// use leyline::{RetryPolicy, RetryTrigger};
-///
-/// let policy = RetryPolicy::default()
-///     .with_max_retries(5)
-///     .with_backoff(Duration::from_millis(200), Duration::from_secs(10))
-///     .on_status(429);
-///
-/// session.request("GET", url).retry(policy).send().await?;
-/// ```
+/// Retry policy.
 #[derive(Debug, Clone)]
 pub struct RetryPolicy {
     /// Maximum number of retry attempts (0 = no retry).
@@ -68,18 +27,33 @@ pub struct RetryPolicy {
     pub max_backoff: Duration,
     /// Exponential factor applied between attempts.
     pub backoff_factor: f64,
-    /// Whether to apply AWS-style full jitter (`backoff * uniform(0,1)`)
-    /// to avoid thundering-herd alignment. Off forces strict exponential.
+    /// Whether to apply AWS-style full jitter (`backoff * uniform(0,1)`) to avoid thundering-herd alignment.
     pub jitter: bool,
     /// Set of triggers that should cause a retry.
     pub retry_on: Vec<RetryTrigger>,
 }
 
 impl Default for RetryPolicy {
-    /// Conservative defaults: 3 retries, 100ms → 1s exponential, 2.0
-    /// factor, jitter on, retry on connection errors + 502/503/504 +
-    /// timeout.
     fn default() -> Self {
+        Self::none()
+    }
+}
+
+impl RetryPolicy {
+    /// A policy that performs no retries.
+    pub fn none() -> Self {
+        Self {
+            max_retries: 0,
+            initial_backoff: Duration::from_millis(0),
+            max_backoff: Duration::from_millis(0),
+            backoff_factor: 1.0,
+            jitter: false,
+            retry_on: Vec::new(),
+        }
+    }
+
+    /// Retry connection errors, 502/503/504, and timeouts. `max_retries` is 3, so 4 attempts in total (100ms → 1s).
+    pub fn transient() -> Self {
         Self {
             max_retries: 3,
             initial_backoff: Duration::from_millis(100),
@@ -93,22 +67,6 @@ impl Default for RetryPolicy {
                 RetryTrigger::Status(504),
                 RetryTrigger::Timeout,
             ],
-        }
-    }
-}
-
-impl RetryPolicy {
-    /// A policy that performs no retries. This is the default for
-    /// fresh [`crate::RequestBuilder`]s — users opt into retries
-    /// explicitly.
-    pub fn none() -> Self {
-        Self {
-            max_retries: 0,
-            initial_backoff: Duration::from_millis(0),
-            max_backoff: Duration::from_millis(0),
-            backoff_factor: 1.0,
-            jitter: false,
-            retry_on: Vec::new(),
         }
     }
 
@@ -162,10 +120,7 @@ impl RetryPolicy {
             .any(|t| matches!(t, RetryTrigger::Timeout))
     }
 
-    /// Compute the backoff duration for attempt `n` (0-indexed). The
-    /// first retry uses `initial_backoff`, the second uses
-    /// `initial_backoff * backoff_factor`, and so on, capped at
-    /// `max_backoff`.
+    /// Compute the backoff duration for attempt `n` (0-indexed).
     pub(crate) fn backoff(&self, attempt: u32) -> Duration {
         let base = self.initial_backoff.as_secs_f64();
         let raw = base * self.backoff_factor.powi(attempt as i32);
@@ -180,26 +135,91 @@ impl RetryPolicy {
 }
 
 /// Return a uniform jitter factor in the range `[0.0, 1.0]`.
-///
-/// AWS's "full jitter" pattern: the actual sleep is
-/// `uniform(0, cap) * backoff(attempt)`, so synchronised callers
-/// decorrelate maximally instead of re-aligning on the backoff midpoint.
-/// The earlier `[0.5, 1.5]` window still clustered callers within a 3×
-/// spread of `initial_backoff`.
 fn cheap_jitter() -> f64 {
     use rand::Rng;
     rand::thread_rng().gen_range(0.0..=1.0)
 }
 
-/// Parse a `Retry-After` header value into a delay. Honors the
-/// delta-seconds form (`Retry-After: 120`). The HTTP-date form is not parsed
-/// here; callers fall back to the policy's own exponential backoff for it.
+/// Parse a `Retry-After` header value into a delay (delta-seconds or IMF-fixdate).
 pub(crate) fn parse_retry_after(value: &str) -> Option<Duration> {
-    value.trim().parse::<u64>().ok().map(Duration::from_secs)
+    let value = value.trim();
+    if let Ok(secs) = value.parse::<u64>() {
+        return Some(Duration::from_secs(secs));
+    }
+    let when = parse_imf_fixdate(value)?;
+    Some(
+        when.duration_since(std::time::SystemTime::now())
+            .unwrap_or(Duration::ZERO),
+    )
 }
 
-/// Whether a method is idempotent per RFC 9110 §9.2.2 — safe to retry
-/// automatically without caller opt-in.
+fn parse_imf_fixdate(s: &str) -> Option<std::time::SystemTime> {
+    let rest = s.split_once(", ")?.1;
+    let mut parts = rest.split_whitespace();
+    let day: u32 = parts.next()?.parse().ok()?;
+    let month = month_num(parts.next()?)?;
+    let year: i32 = parts.next()?.parse().ok()?;
+    let hms = parts.next()?;
+    let tz = parts.next()?;
+    if !tz.eq_ignore_ascii_case("GMT") && !tz.eq_ignore_ascii_case("UTC") {
+        return None;
+    }
+    let mut t = hms.split(':');
+    let hour: u32 = t.next()?.parse().ok()?;
+    let min: u32 = t.next()?.parse().ok()?;
+    let sec: u32 = t.next()?.parse().ok()?;
+    unix_from_ymd_hms(year, month, day, hour, min, sec)
+}
+
+fn month_num(month: &str) -> Option<u32> {
+    Some(match month {
+        "Jan" => 1,
+        "Feb" => 2,
+        "Mar" => 3,
+        "Apr" => 4,
+        "May" => 5,
+        "Jun" => 6,
+        "Jul" => 7,
+        "Aug" => 8,
+        "Sep" => 9,
+        "Oct" => 10,
+        "Nov" => 11,
+        "Dec" => 12,
+        _ => return None,
+    })
+}
+
+fn unix_from_ymd_hms(
+    year: i32,
+    month: u32,
+    day: u32,
+    hour: u32,
+    min: u32,
+    sec: u32,
+) -> Option<std::time::SystemTime> {
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) || hour > 23 || min > 59 || sec > 59 {
+        return None;
+    }
+    let mut y = year;
+    if month <= 2 {
+        y -= 1;
+    }
+    let era = y.div_euclid(400);
+    let yoe = (y - era * 400) as u32;
+    let shifted = if month > 2 { month - 3 } else { month + 9 };
+    let doy = (153 * shifted + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = i64::from(era) * 146097 + i64::from(doe) - 719468;
+    let secs = days
+        .checked_mul(86400)?
+        .checked_add(i64::from(hour) * 3600 + i64::from(min) * 60 + i64::from(sec))?;
+    if secs < 0 {
+        return None;
+    }
+    Some(std::time::UNIX_EPOCH + Duration::from_secs(secs as u64))
+}
+
+/// Whether a method is idempotent per RFC 9110 §9.2.2 — safe to retry automatically without caller opt-in.
 pub(crate) fn is_idempotent(method: &str) -> bool {
     ["GET", "HEAD", "OPTIONS", "PUT", "DELETE", "TRACE"]
         .iter()

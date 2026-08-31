@@ -1,5 +1,4 @@
-/// Environment variable names whose presence indicates a CGI-like
-/// request-handler context where uppercase `HTTP_PROXY` is untrusted.
+/// Environment variable names whose presence indicates a CGI-like request-handler context where uppercase `HTTP_PROXY` is untrusted.
 pub(crate) const CGI_SIGNAL_ENV_VARS: &[&str] = &[
     "GATEWAY_INTERFACE",
     "REQUEST_METHOD",
@@ -17,11 +16,7 @@ pub(super) fn env_proxy() -> Option<String> {
     env_proxy_from(|k| std::env::var(k).ok(), |k| std::env::var_os(k).is_some())
 }
 
-/// Pure-function core of [`env_proxy`]: given a value getter and a
-/// presence getter, return the first non-empty proxy URL while
-/// applying the httpoxy CGI sniff. Exposed to the test module so
-/// we can unit-test the httpoxy mitigation without mutating the
-/// process environment (which would race with other tests).
+/// Pure-function core of [`env_proxy`]: given a value getter and a presence getter, return the first non-empty proxy URL while applying the httpoxy CGI sniff.
 pub(crate) fn env_proxy_from<F, G>(get_var: F, has_var: G) -> Option<String>
 where
     F: Fn(&str) -> Option<String>,
@@ -37,9 +32,6 @@ where
     }
 
     let candidates: &[&str] = if in_cgi {
-        // Skip the uppercase `HTTP_PROXY` variant that CGI collides
-        // with. `HTTPS_PROXY` isn't an HTTP request header so it's
-        // safe; `http_proxy` (lowercase) isn't populated by CGI.
         &[
             "HTTPS_PROXY",
             "https_proxy",

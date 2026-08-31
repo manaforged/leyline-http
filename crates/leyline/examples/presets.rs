@@ -1,6 +1,4 @@
 //! Browser-shaped request presets — one helper per fetch context.
-//!
-//! Run with: `cargo run -p leyline --example presets`
 
 use leyline::{Browser, Platform, Session};
 
@@ -11,34 +9,34 @@ async fn main() -> leyline::Result<()> {
         .platform(Platform::Windows)
         .build()?;
 
-    // Top-level document fetch (Sec-Fetch-Mode: navigate).
-    let page = session.navigate("https://example.com/").await?;
+    let page = session.get("https://example.com/").await?;
     println!("navigate: {}", page.status());
 
-    // Sub-resource load, as a `<script src=…>` tag (no-cors, dest script).
-    let js = session.get_script("https://example.com/app.js").await?;
-    println!("script:   {} ({} bytes)", js.status(), js.bytes().len());
+    let js = session
+        .get("https://example.com/app.js")
+        .preset(leyline::Preset::Script)
+        .await?;
+    println!("script:   {} ({} bytes)", js.status(), js.bytes()?.len());
 
-    // fetch()/XHR GET (cors, empty dest).
-    let api = session.get_xhr("https://example.com/api/state").await?;
+    let api = session
+        .get("https://example.com/api/state")
+        .preset(leyline::Preset::Xhr)
+        .await?;
     println!("xhr get:  {}", api.status());
 
-    // fetch()/XHR POST with a raw, non-JSON body (e.g. a telemetry beacon).
-    let beacon = session
-        .post_xhr("https://example.com/collect", "payload=p%3D1")
+    let posted = session
+        .post("https://example.com/api/items")
+        .preset(leyline::Preset::Xhr)
+        .body("payload=p%3D1")
         .await?;
     println!("xhr post: {}", posted.status());
 
-    // fetch()/XHR POST with a JSON body.
     let created = session
-        .post_json(
-            "https://example.com/users",
-            &serde_json::json!({ "name": "ada" }),
-        )
+        .post("https://example.com/users")
+        .json(&serde_json::json!({ "name": "ada" }))
         .await?;
     println!("json:     {}", created.status());
 
-    // Error classification, reqwest-style.
     match api.error_for_status() {
         Ok(resp) => println!("ok:       {}", resp.status()),
         Err(e) if e.is_status() => println!("status:   {:?}", e.status()),

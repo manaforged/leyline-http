@@ -30,12 +30,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         &mut self,
         stream_id: u32,
     ) -> Result<(), H2Error> {
-        // Must match the seed in `StreamActor::new` call sites: the
-        // stream's receive window is OUR advertised
-        // SETTINGS_INITIAL_WINDOW_SIZE. `peer_settings.initial_window_size`
-        // governs the send direction and made this threshold
-        // unreachable against small-window peers (stall after the
-        // advertised window on any larger body).
         let initial = self.config.advertised_initial_window_size() as i64;
         let needs_update = self
             .streams
@@ -64,7 +58,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
 
     pub(super) async fn graceful_shutdown(&mut self) -> Result<(), H2Error> {
         self.shutdown_started = true;
-        // Send GOAWAY(NO_ERROR, last_stream_id = next_stream_id - 2).
         let last = self.next_stream_id.saturating_sub(2);
         let _ = self.writer.write_goaway(last, ErrorCode::NoError).await;
         let _ = self.writer.flush().await;
@@ -73,11 +66,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             return Ok(());
         }
 
-        // Drain — wait for in-flight responses up to a small timeout.
-        // In-flight streaming UPLOADS must keep pumping here too:
-        // omitting the body_chunk_rx arm starved them, the server
-        // never saw END_STREAM, and the timeout surfaced a spurious
-        // error on a healthy transfer.
         let mut body_rx_open = true;
         let deadline = Instant::now() + Duration::from_millis(500);
         loop {
@@ -105,9 +93,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                             self.on_body_chunk(c).await?;
                             self.try_drain_pending().await?;
                         }
-                        // All senders dropped — disarm the arm or a
-                        // closed channel busy-loops the select until
-                        // the deadline.
                         None => body_rx_open = false,
                     }
                 }
@@ -122,9 +107,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
 impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     pub(super) async fn run(mut self) -> Result<(), H2Error> {
         let result = self.event_loop().await;
-        // Mark closed so handles stop enqueuing new commands.
         self.closed.store(true, Ordering::Release);
-        // Fail any remaining pending requests with the final status.
         let final_err = match &result {
             Ok(()) => H2Error::Connection {
                 code: ErrorCode::NoError,
@@ -135,7 +118,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         for (_, mut actor) in self.streams.drain() {
             actor.deliver_err(clone_err(&final_err));
         }
-        // Deferred-at-capacity requests fail with the same final status.
         while let Some(cmd) = self.pending.pop_front() {
             match cmd {
                 DriverCommand::SendRequest { response_tx, .. } => {
@@ -149,7 +131,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 }
             }
         }
-        // Drain remaining commands in the channel and fail them.
         while let Ok(cmd) = self.command_rx.try_recv() {
             match cmd {
                 DriverCommand::SendRequest { response_tx, .. } => {
@@ -167,20 +148,9 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     }
 
     pub(super) async fn event_loop(&mut self) -> Result<(), H2Error> {
-        // Periodic tick so the cancel-safety sweep fires even when the
-        // connection is otherwise idle. 100 ms is fine-grained enough
-        // that a cancelled `send_request` can't peg a connection on
-        // `MAX_CONCURRENT_STREAMS` for noticeable human time, and
-        // coarse enough that it costs ~10 wakeups/second of idle CPU
-        // — negligible compared to a real request flow.
         let mut sweep_tick = tokio::time::interval(std::time::Duration::from_millis(100));
         sweep_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
-            // Only the periodic tick triggers the O(streams) cancel sweep —
-            // running it after every frame/command/chunk made cleanup
-            // O(event-rate × streams) on the single driver. A dropped caller's
-            // slot is reclaimed within one tick (100 ms), which is the bounded
-            // cadence the sweep was designed for.
             let mut tick_fired = false;
             if !self.pending.is_empty() {
                 self.drain_pending().await?;
@@ -194,7 +164,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                             self.drain_pending().await?;
                         }
                         None => {
-                            // Reader EOF. If we've initiated shutdown, this is ok.
                             return if self.shutdown_started {
                                 Ok(())
                             } else {
@@ -209,16 +178,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 maybe_cmd = self.command_rx.recv() => {
                     match maybe_cmd {
                         Some(cmd) => {
-                            // Batch: one wakeup serves every command already
-                            // queued behind this one — each saved recv()
-                            // transition is a saved task park under load.
                             self.on_command(cmd).await?;
                             while let Ok(next) = self.command_rx.try_recv() {
                                 self.on_command(next).await?;
                             }
                         }
                         None => {
-                            // Last handle dropped — graceful shutdown.
                             return self.graceful_shutdown().await;
                         }
                     }
@@ -233,37 +198,16 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 }
             }
 
-            // After any event we try to drain pending sends because the
-            // write window may have grown (WINDOW_UPDATE / SETTINGS).
             self.try_drain_pending().await?;
 
-            // Cancel-safety sweep: if the caller dropped the response
-            // oneshot (e.g. `tokio::select!` lost this branch, or an
-            // outer timeout fired), we must proactively RST_STREAM
-            // the orphaned stream — otherwise its `StreamActor`
-            // lingers, consuming a MAX_CONCURRENT_STREAMS slot and
-            // flow-control window until the server closes from its
-            // side. Under aggressive cancellation this pegs the
-            // connection at the concurrent-stream limit. Gated to the tick so
-            // it costs O(streams) at ~10 Hz, not O(streams) per event.
             if tick_fired {
                 self.sweep_cancelled_streams().await?;
             }
         }
     }
 
-    /// Walk the streams table; for any entry whose caller has dropped
-    /// the response oneshot (or whose streaming body channel is
-    /// closed on the reader side), send RST_STREAM(CANCEL) and clean
-    /// up the actor.
+    /// Walk the streams table; for any entry whose caller has dropped the response oneshot (or whose streaming body channel is closed on the reader side), send RST_STREAM(CANCEL) and clean up the actor.
     pub(super) async fn sweep_cancelled_streams(&mut self) -> Result<(), H2Error> {
-        // Collect first to avoid mutating `self.streams` under the
-        // borrow of the iteration. Streams in Closed state are
-        // already cleaned up elsewhere. Streams with an active
-        // streaming-body relay (extended CONNECT, streaming upload)
-        // are skipped: those use the write relay's EOF signal to
-        // emit a graceful END_STREAM, so an eager RST would race the
-        // natural close.
         let to_cancel: Vec<u32> = self
             .streams
             .iter()
@@ -271,8 +215,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 if actor.state.is_closed() {
                     return false;
                 }
-                // Active streaming-body upload or CONNECT stream —
-                // graceful close flows through the relay, not RST.
                 if matches!(
                     actor.send_body_input,
                     SendBodyInput::Streaming { closed: false, .. }
@@ -289,11 +231,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                         let headers_dead =
                             headers_tx.as_ref().map(|t| t.is_closed()).unwrap_or(true);
                         let body_dead = body_tx.is_closed();
-                        // The caller cancelled if BOTH the headers
-                        // oneshot AND the body channel are gone.
-                        // Either alone might be dropped legitimately
-                        // by the driver mid-flight (e.g. after headers
-                        // have already been delivered).
                         headers_dead && body_dead
                     }
                     None => false,
@@ -318,13 +255,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         Ok(())
     }
 
-    // -------------------------------------------------------------------
-    // Command handling
-    // -------------------------------------------------------------------
-
-    /// Reject a new stream if the peer has sent GOAWAY. Checked first at
-    /// every stream-open site so a going-away connection always reports the
-    /// same error before any capacity check.
+    /// Reject a new stream if the peer has sent GOAWAY.
     pub(super) fn reject_after_goaway(&self) -> Result<(), H2Error> {
         if self.peer_goaway_last_stream.is_some() {
             return Err(H2Error::Connection {
@@ -335,14 +266,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         Ok(())
     }
 
-    /// Peer SETTINGS received — the concurrent-stream limit is known and
-    /// admission decisions are meaningful.
+    /// Peer SETTINGS received — the concurrent-stream limit is known and admission decisions are meaningful.
     pub(super) fn peer_ready(&self) -> bool {
         self.peer_greeted
     }
 
-    /// Reject a new stream if the peer's MAX_CONCURRENT_STREAMS is reached
-    /// or our client stream-ID space is exhausted.
+    /// Reject a new stream if the peer's MAX_CONCURRENT_STREAMS is reached or our client stream-ID space is exhausted.
     pub(super) fn check_stream_capacity(&self) -> Result<(), H2Error> {
         if let Some(limit) = self.peer_settings.max_concurrent_streams {
             if self.active_stream_count() >= limit {
@@ -361,10 +290,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         Ok(())
     }
 
-    /// Full admission check for a plain new stream: GOAWAY refusal then
-    /// capacity. Extended CONNECT composes the two halves itself so its
-    /// ENABLE_CONNECT_PROTOCOL check keeps its original position between
-    /// the GOAWAY and capacity checks.
+    /// Full admission check for a plain new stream: GOAWAY refusal then capacity.
     pub(super) fn admit_new_stream(&self) -> Result<(), H2Error> {
         self.reject_after_goaway()?;
         self.check_stream_capacity()
@@ -377,9 +303,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         stream_id
     }
 
-    /// Bytes we may send on `stream_id` right now: the smaller of the
-    /// connection- and stream-level send windows, each clamped to >= 0. A
-    /// missing stream yields 0.
+    /// Bytes we may send on `stream_id` right now: the smaller of the connection- and stream-level send windows, each clamped to >= 0.
     pub(super) fn effective_send_window(&self, stream_id: u32) -> usize {
         let conn = self.conn_send_window.max(0) as usize;
         let stream = self
@@ -403,7 +327,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         if let Some(mut actor) = self.streams.remove(&stream_id) {
             actor.deliver_ok();
         }
-        // Clean up pending queue.
         self.buffered_pending.retain(|&s| s != stream_id);
     }
 

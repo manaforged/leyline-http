@@ -1,16 +1,4 @@
 //! Integration tests for RFC 8441 extended CONNECT (WebSocket-over-H2).
-//!
-//! Each test stands up a bespoke mock H2 server inline over
-//! `tokio::io::duplex`. We exercise:
-//!
-//! - the happy path: peer advertises `ENABLE_CONNECT_PROTOCOL=1`,
-//!   server echoes DATA frames, client observes them;
-//! - the fallback trigger: peer omits the setting, client's
-//!   [`H2Client::open_extended_connect`] errors with a shape that
-//!   [`leyline::core::websocket::WsConnection::is_h2_fallback_trigger`]
-//!   treats as "try H1";
-//! - stream teardown: dropping the stream closes the write half with
-//!   END_STREAM and leaves sibling streams alive on the connection.
 #[path = "h2_support/mod.rs"]
 mod support;
 
@@ -95,7 +83,6 @@ where
     assert_eq!(h.frame_type, FrameType::Settings as u8);
 
     let params = if advertise_connect {
-        // RFC 8441: SETTINGS_ENABLE_CONNECT_PROTOCOL = 0x8, value 1.
         vec![(0x8u16, 1u32)]
     } else {
         vec![]
@@ -108,8 +95,7 @@ where
     assert!(h.flags & 0x1 != 0, "expected client SETTINGS ACK");
 }
 
-/// Decode a HEADERS / CONTINUATION sequence from the stream, returning
-/// the assembled header list for assertions.
+/// Decode a HEADERS / CONTINUATION sequence from the stream, returning the assembled header list for assertions.
 async fn read_header_block<S>(server_io: &mut S) -> (u32, bool, Vec<(String, String)>)
 where
     S: tokio::io::AsyncRead + Unpin,
@@ -120,7 +106,6 @@ where
     let end_stream = h.flags & 0x1 != 0;
     let end_headers = h.flags & 0x4 != 0;
     let priority = h.flags & 0x20 != 0;
-    // Skip optional PAD_LENGTH (we don't emit padding in the client).
     let start = if priority { 5 } else { 0 };
     let mut fragment = payload[start..].to_vec();
     if !end_headers {
@@ -147,8 +132,7 @@ where
     (stream_id, end_stream, list)
 }
 
-/// Encode and write a 200 OK response HEADERS frame (non-end-stream)
-/// for an extended CONNECT stream.
+/// Encode and write a 200 OK response HEADERS frame (non-end-stream) for an extended CONNECT stream.
 async fn write_connect_200<S: tokio::io::AsyncWrite + Unpin>(s: &mut S, stream_id: u32) {
     let mut enc = hpack::Encoder::new();
     let fragment = enc.encode_header_block(&[(":status", "200")]);
@@ -181,10 +165,6 @@ async fn write_data<S: tokio::io::AsyncWrite + Unpin>(
     s.write_all(&buf).await.expect("data write");
 }
 
-// ---------------------------------------------------------------------------
-// Test 1: happy path — server advertises setting, echoes a payload.
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn h2_extended_connect_happy_path_echoes_payload() {
     let (client_io, mut server_io) = tokio::io::duplex(65_536);
@@ -192,7 +172,6 @@ async fn h2_extended_connect_happy_path_echoes_payload() {
     let server = tokio::spawn(async move {
         perform_handshake(&mut server_io, true).await;
 
-        // Expect an extended-CONNECT HEADERS frame (no END_STREAM).
         let (sid, end_stream, hdrs) = read_header_block(&mut server_io).await;
         assert_eq!(sid, 1);
         assert!(!end_stream, "extended CONNECT must not send END_STREAM");
@@ -213,10 +192,8 @@ async fn h2_extended_connect_happy_path_echoes_payload() {
             "Sec-WebSocket-Version header missing: {hdrs:?}"
         );
 
-        // Accept with :status 200.
         write_connect_200(&mut server_io, sid).await;
 
-        // Read one DATA frame from the client, echo it back.
         let mut reader = FrameReader::new(tokio::io::BufReader::new(&mut server_io));
         let frame = reader
             .next()
@@ -231,14 +208,11 @@ async fn h2_extended_connect_happy_path_echoes_payload() {
             }
             other => panic!("expected DATA frame, got {other:?}"),
         };
-        // End the reader's borrow so we can take the server_io write path.
         #[allow(dropping_references, clippy::drop_non_drop)]
         drop(reader);
 
         write_data(&mut server_io, sid, &data_bytes, false).await;
 
-        // Give the client time to surface the chunk and drop the
-        // stream; then drain whatever it sends.
         let mut sink = [0u8; 4096];
         let _ = tokio::time::timeout(Duration::from_millis(100), server_io.read(&mut sink)).await;
     });
@@ -247,9 +221,6 @@ async fn h2_extended_connect_happy_path_echoes_payload() {
         .await
         .expect("handshake");
 
-    // Wait for the server's SETTINGS (with ENABLE_CONNECT_PROTOCOL=1) to
-    // have been applied by the driver. The handle's cached snapshot is
-    // updated as soon as the driver processes the server's SETTINGS.
     let deadline = tokio::time::Instant::now() + Duration::from_millis(500);
     while !handle.peer_enables_connect_protocol() {
         if tokio::time::Instant::now() >= deadline {
@@ -277,27 +248,16 @@ async fn h2_extended_connect_happy_path_echoes_payload() {
     server.await.expect("server task");
 }
 
-// ---------------------------------------------------------------------------
-// Test 2: server omits ENABLE_CONNECT_PROTOCOL — client call errors,
-// and the error is tagged for H1 fallback by core's WsConnection.
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn h2_without_connect_protocol_falls_back() {
     let (client_io, mut server_io) = tokio::io::duplex(65_536);
 
     let server = tokio::spawn(async move {
         perform_handshake(&mut server_io, false).await;
-        // Nothing further expected — client must not send a CONNECT
-        // HEADERS frame on this connection. Read anything that arrives
-        // and assert it isn't a CONNECT.
         let mut sink = [0u8; 4096];
         let res = tokio::time::timeout(Duration::from_millis(150), server_io.read(&mut sink)).await;
         if let Ok(Ok(n)) = res {
             if n > 0 {
-                // The only legitimate traffic is a GOAWAY from graceful
-                // shutdown when the handle drops. Decode & verify.
-                // Frame type 0x7 == GOAWAY.
                 assert_eq!(
                     sink[3], 0x7,
                     "expected GOAWAY (0x7), got frame type 0x{:02x}",
@@ -311,7 +271,6 @@ async fn h2_without_connect_protocol_falls_back() {
         .await
         .expect("handshake");
 
-    // Flush: ensure SETTINGS exchange has completed before we probe.
     tokio::time::sleep(Duration::from_millis(20)).await;
     assert!(
         !handle.peer_enables_connect_protocol(),
@@ -324,8 +283,6 @@ async fn h2_without_connect_protocol_falls_back() {
         .await
         .expect_err("extended CONNECT must fail without peer setting");
 
-    // The H2Error message must mention the setting so upstream layers
-    // (leyline-core::websocket) can detect and fall back.
     let msg = format!("{err}");
     assert!(
         msg.contains("SETTINGS_ENABLE_CONNECT_PROTOCOL") || msg.contains("ENABLE_CONNECT_PROTOCOL"),
@@ -336,11 +293,6 @@ async fn h2_without_connect_protocol_falls_back() {
     let _ = tokio::time::timeout(Duration::from_millis(200), server).await;
 }
 
-// ---------------------------------------------------------------------------
-// Test 3: dropping the stream signals END_STREAM to the peer while a
-// sibling stream on the same H2 connection continues to work.
-// ---------------------------------------------------------------------------
-
 #[tokio::test]
 async fn dropping_connect_stream_signals_end_stream() {
     let (client_io, mut server_io) = tokio::io::duplex(65_536);
@@ -348,17 +300,11 @@ async fn dropping_connect_stream_signals_end_stream() {
     let server = tokio::spawn(async move {
         perform_handshake(&mut server_io, true).await;
 
-        // Extended CONNECT on stream 1.
         let (sid1, end, _hdrs) = read_header_block(&mut server_io).await;
         assert_eq!(sid1, 1);
         assert!(!end, "extended CONNECT must not carry END_STREAM");
         write_connect_200(&mut server_io, sid1).await;
 
-        // The client-side driver emits an END_STREAM DATA frame when
-        // the `H2ConnectStream` handle is dropped (via the relay task
-        // seeing its mpsc sender closed). We read frames until we
-        // observe that, with a budget for noise (WINDOW_UPDATE,
-        // sibling streams).
         let mut reader = FrameReader::new(&mut server_io);
         let mut saw_end_stream = false;
         let mut saw_sibling = None::<u32>;
@@ -391,7 +337,6 @@ async fn dropping_connect_stream_signals_end_stream() {
         .await
         .expect("handshake");
 
-    // Wait for ENABLE_CONNECT_PROTOCOL=1.
     let deadline = tokio::time::Instant::now() + Duration::from_millis(500);
     while !handle.peer_enables_connect_protocol() {
         if tokio::time::Instant::now() >= deadline {
@@ -400,8 +345,6 @@ async fn dropping_connect_stream_signals_end_stream() {
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
 
-    // Open the CONNECT stream, then immediately drop it to trigger
-    // the graceful END_STREAM path.
     let (pseudo, headers) = connect_pseudo();
     let stream = handle
         .open_extended_connect(pseudo, headers)
@@ -409,8 +352,6 @@ async fn dropping_connect_stream_signals_end_stream() {
         .expect("CONNECT open");
     drop(stream);
 
-    // Issue a sibling GET to prove the H2 connection is still healthy
-    // after the CONNECT stream teardown.
     let pseudo = PseudoHeaders {
         method: "GET".into(),
         scheme: "https".into(),

@@ -1,5 +1,4 @@
-//! Integration tests for the `RetryPolicy` — exercises the retry
-//! loop against a mock H1 server that can return flaky responses.
+//! Integration tests for the `RetryPolicy` — exercises the retry loop against a mock H1 server that can return flaky responses.
 #![expect(
     clippy::unwrap_used,
     reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
@@ -13,9 +12,7 @@ use futures_util::stream;
 use leyline::core::{Body, RetryPolicy, Session};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-/// Read one complete HTTP/1.1 request off the socket and return when
-/// headers are done. For the tests below, request bodies are either
-/// absent (GET) or tiny enough to arrive with headers.
+/// Read one complete HTTP/1.1 request off the socket and return when headers are done.
 async fn read_one_request(sock: &mut tokio::net::TcpStream) {
     let mut buf = [0u8; 4096];
     let mut acc = Vec::new();
@@ -61,11 +58,11 @@ async fn retries_503_then_succeeds() {
     });
 
     let policy =
-        RetryPolicy::default().with_backoff(Duration::from_millis(1), Duration::from_millis(10));
+        RetryPolicy::transient().with_backoff(Duration::from_millis(1), Duration::from_millis(10));
     let session = Session::builder().http1().retry(policy).build().unwrap();
     let resp = session.get(&format!("http://{addr}/flaky")).await.unwrap();
     assert_eq!(resp.status(), 200);
-    assert_eq!(resp.text(), "ok");
+    assert_eq!(resp.text().unwrap(), "ok");
     assert_eq!(counter.load(Ordering::Relaxed), 3);
     server.await.unwrap();
 }
@@ -122,7 +119,7 @@ async fn does_not_retry_on_400() {
 
     let session = Session::builder().http1().build().unwrap();
     let policy =
-        RetryPolicy::default().with_backoff(Duration::from_millis(1), Duration::from_millis(5));
+        RetryPolicy::transient().with_backoff(Duration::from_millis(1), Duration::from_millis(5));
     let resp = session
         .request("GET", &format!("http://{addr}/bad"))
         .retry(policy)
@@ -143,7 +140,6 @@ async fn post_without_opt_in_does_not_retry() {
 
     let server = tokio::spawn(async move {
         let (mut sock, _) = listener.accept().await.unwrap();
-        // Drain headers + body.
         let mut buf = [0u8; 4096];
         let mut acc = Vec::new();
         loop {
@@ -167,7 +163,7 @@ async fn post_without_opt_in_does_not_retry() {
 
     let session = Session::builder().http1().build().unwrap();
     let policy =
-        RetryPolicy::default().with_backoff(Duration::from_millis(1), Duration::from_millis(5));
+        RetryPolicy::transient().with_backoff(Duration::from_millis(1), Duration::from_millis(5));
     let resp = session
         .post(&format!("http://{addr}/payment"))
         .body(vec![1u8, 2, 3])
@@ -183,14 +179,9 @@ async fn post_without_opt_in_does_not_retry() {
 #[tokio::test]
 async fn streaming_body_plus_retry_errors_clearly() {
     let session = Session::builder().http1().build().unwrap();
-    // A streaming body that would have been replayable-hostile.
     let chunks: Vec<std::io::Result<Bytes>> = vec![Ok(Bytes::from_static(b"abc"))];
     let body = Body::stream(stream::iter(chunks));
 
-    // A port nothing listens on: bind :0 for an OS-assigned port, then drop the
-    // listener so the connect is refused. Hardcoding a low port (e.g. :1) is
-    // fragile — a local process may already be squatting on it and answer, which
-    // turns the expected ConnectionError into an unexpected HTTP response.
     let dead_port = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .unwrap()
@@ -198,10 +189,7 @@ async fn streaming_body_plus_retry_errors_clearly() {
         .unwrap()
         .port();
 
-    // Hitting an unreachable port produces a ConnectionError; with
-    // retry on, the builder should recognise the stream body and fail
-    // with a replay-specific message BEFORE attempting a second call.
-    let policy = RetryPolicy::default()
+    let policy = RetryPolicy::transient()
         .with_max_retries(3)
         .with_backoff(Duration::from_millis(1), Duration::from_millis(5));
     let err = session
@@ -241,7 +229,7 @@ async fn retries_exhausted_returns_last_response() {
     });
 
     let session = Session::builder().http1().build().unwrap();
-    let policy = RetryPolicy::default()
+    let policy = RetryPolicy::transient()
         .with_max_retries(3)
         .with_backoff(Duration::from_millis(1), Duration::from_millis(5));
     let resp = session
@@ -251,7 +239,6 @@ async fn retries_exhausted_returns_last_response() {
         .await
         .unwrap();
     assert_eq!(resp.status(), 502);
-    // Original + 3 retries = 4 attempts.
     assert_eq!(counter.load(Ordering::Relaxed), 4);
     server.await.unwrap();
 }

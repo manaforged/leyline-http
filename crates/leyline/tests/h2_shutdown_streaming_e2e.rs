@@ -1,15 +1,4 @@
 //! Regression gate for streaming uploads during graceful shutdown.
-//!
-//! When the last `H2Client` handle drops, the driver enters
-//! `graceful_shutdown` to drain in-flight streams. That drain loop
-//! used to select only on inbound frames — never on `body_chunk_rx` —
-//! so an in-flight streaming UPLOAD starved: its chunks sat in the
-//! channel, the server never saw END_STREAM, and the 500 ms drain
-//! timeout fired with a spurious error on a healthy transfer.
-//!
-//! The mock server reads the full upload (with a per-read starvation
-//! timeout) and only then completes the response, so the test passes
-//! only if the shutdown drain keeps pumping body chunks.
 #[path = "h2_support/mod.rs"]
 mod support;
 
@@ -72,8 +61,6 @@ async fn streaming_upload_completes_after_last_handle_drops() {
         write_server_settings(&mut server_io).await;
         write_settings_ack(&mut server_io).await;
 
-        // Drain frames until the request HEADERS (no END_STREAM — a
-        // streaming body follows).
         let stream_id = loop {
             let (h, _) = read_frame(&mut server_io).await;
             if h.frame_type == FrameType::Headers as u8 {
@@ -82,9 +69,6 @@ async fn streaming_upload_completes_after_last_handle_drops() {
             }
         };
 
-        // Respond with HEADERS immediately so the client's
-        // `send_request_ex(stream_response=true)` resolves and the
-        // caller can drop its handle while the upload continues.
         let mut enc = leyline::h2::hpack::Encoder::new();
         let fragment = enc.encode_header_block(&[(":status", "200")]);
         let hf = leyline::h2::frame::HeadersFrame {
@@ -98,9 +82,6 @@ async fn streaming_upload_completes_after_last_handle_drops() {
         hf.encode(&mut buf);
         server_io.write_all(&buf).await.expect("resp headers");
 
-        // Read the upload. Each read carries a starvation timeout: if
-        // the shutdown drain stops pumping body chunks, the next DATA
-        // frame never arrives.
         let mut received = 0usize;
         loop {
             let (h, payload) =
@@ -108,7 +89,7 @@ async fn streaming_upload_completes_after_last_handle_drops() {
                     .await
                     .expect("upload starved: no DATA during graceful shutdown");
             if h.frame_type != FrameType::Data as u8 {
-                continue; // GOAWAY, WINDOW_UPDATE, SETTINGS ack…
+                continue;
             }
             received += payload.len();
             if h.flags & END_STREAM != 0 {
@@ -117,7 +98,6 @@ async fn streaming_upload_completes_after_last_handle_drops() {
         }
         assert_eq!(received, CHUNKS * CHUNK_LEN, "full upload must arrive");
 
-        // Complete the response.
         let done = leyline::h2::frame::DataFrame {
             stream_id,
             end_stream: true,
@@ -134,8 +114,6 @@ async fn streaming_upload_completes_after_last_handle_drops() {
         .await
         .expect("handshake");
 
-    // Four 8 KB chunks, 50 ms apart — the upload is mid-flight when
-    // the handle drops below.
     let chunks: Vec<std::io::Result<Bytes>> = (0..CHUNKS)
         .map(|i| Ok(Bytes::from(vec![i as u8 + 1; CHUNK_LEN])))
         .collect();
@@ -164,12 +142,8 @@ async fn streaming_upload_completes_after_last_handle_drops() {
         .expect("response headers");
     assert_eq!(resp.status, 200);
 
-    // Last handle gone — the driver enters graceful_shutdown while the
-    // upload is still streaming.
     drop(handle);
 
-    // Drain the streaming response; it completes only after the server
-    // has received the entire upload.
     let mut body = match resp.body {
         ResponseBody::Streaming(rx) => rx,
         other => panic!("expected streaming body, got {other:?}"),

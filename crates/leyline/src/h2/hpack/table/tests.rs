@@ -16,7 +16,7 @@ fn b(s: &str) -> Bytes {
 
 #[test]
 fn static_table_size() {
-    assert_eq!(STATIC_TABLE.len(), 62); // 0-61
+    assert_eq!(STATIC_TABLE.len(), 62);
 }
 
 #[test]
@@ -38,20 +38,19 @@ fn dynamic_table_insert_and_get() {
 
 #[test]
 fn dynamic_table_eviction() {
-    // "aa" + "bb" + 32 = 36 bytes per entry. Max 70 = room for 1, not 2.
     let mut dt = DynamicTable::with_max_size(70);
-    dt.insert(b("aa"), b("bb")); // 36 bytes
+    dt.insert(b("aa"), b("bb"));
     assert_eq!(dt.len(), 1);
 
-    dt.insert(b("cc"), b("dd")); // 36 bytes, total would be 72 > 70, evicts first
+    dt.insert(b("cc"), b("dd"));
     assert_eq!(dt.len(), 1);
     assert_eq!(entry(&dt, 0), Some(("cc", "dd")));
 }
 
 #[test]
 fn dynamic_table_oversized_entry_clears() {
-    let mut dt = DynamicTable::with_max_size(32); // too small for any entry
-    dt.insert(b("x"), b("y")); // 1+1+32 = 34, exceeds 32
+    let mut dt = DynamicTable::with_max_size(32);
+    dt.insert(b("x"), b("y"));
     assert_eq!(dt.len(), 0);
 }
 
@@ -60,19 +59,16 @@ fn lookup_static_and_dynamic() {
     let mut dt = DynamicTable::new();
     dt.insert(b("x-custom"), b("val"));
 
-    // Static lookup.
     let (n, v) = lookup(2, &dt).unwrap();
     assert_eq!(
         (n.as_ref(), v.as_ref()),
         (b"\x3amethod".as_ref(), b"GET".as_ref())
     );
-    // Dynamic lookup (index 62 = first dynamic entry).
     let (n, v) = lookup(62, &dt).unwrap();
     assert_eq!(
         (n.as_ref(), v.as_ref()),
         (b"x-custom".as_ref(), b"val".as_ref())
     );
-    // Out of range.
     assert!(lookup(63, &dt).is_none());
 }
 

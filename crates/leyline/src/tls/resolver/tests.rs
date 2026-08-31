@@ -1,9 +1,6 @@
 use super::*;
 
-/// A mock resolver that always returns the same static address
-/// list. Used by integration tests to drive a deterministic
-/// [`happy_eyeballs_connect`](crate::tls::happy_eyeballs::happy_eyeballs_connect)
-/// race against a known-good loopback listener.
+/// A mock resolver that always returns the same static address list.
 struct StaticResolver(pub Vec<SocketAddr>);
 
 impl Resolver for StaticResolver {
@@ -44,7 +41,6 @@ async fn failing_resolver_errs() {
 
 #[tokio::test]
 async fn system_resolver_resolves_localhost() {
-    // `localhost` is in /etc/hosts on every CI runner we care about.
     let r = SystemResolver;
     let addrs = r.resolve("localhost", 443).await.unwrap();
     assert!(!addrs.is_empty());
