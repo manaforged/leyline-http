@@ -42,8 +42,8 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                     return Ok(());
                 }
                 self.start_request(
-                    pseudo,
-                    headers,
+                    &pseudo,
+                    &headers,
                     body,
                     trailers,
                     ResponseSink::Buffered(response_tx),
@@ -76,12 +76,11 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                     headers_tx: Some(headers_tx),
                     body_tx,
                 };
-                self.start_extended_connect(pseudo, headers, write_rx, sink)
+                self.start_extended_connect(&pseudo, &headers, write_rx, sink)
                     .await
             }
             DriverCommand::SendRequestEx {
-                pseudo,
-                headers,
+                head,
                 body,
                 stream_response,
                 response_tx,
@@ -94,8 +93,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 if let Err(e) = self.admit_new_stream() {
                     if Self::deferrable_capacity_error(&e) && deferrable {
                         self.pending.push_back(DriverCommand::SendRequestEx {
-                            pseudo,
-                            headers,
+                            head,
                             body,
                             stream_response,
                             response_tx,
@@ -114,7 +112,8 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 } else {
                     ResponseSink::BufferedEx(response_tx)
                 };
-                self.start_request_ex(pseudo, headers, body, sink).await
+                self.start_request_ex(&head.pseudo, &head.headers, body, sink)
+                    .await
             }
         }
     }
@@ -142,8 +141,8 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
 
     pub(super) async fn start_request(
         &mut self,
-        pseudo: PseudoHeaders,
-        headers: Vec<crate::h2::connection::HeaderPair>,
+        pseudo: &PseudoHeaders,
+        headers: &[crate::h2::connection::HeaderPair],
         body: Option<Bytes>,
         trailers: Vec<(String, String)>,
         sink: ResponseSink,
@@ -158,7 +157,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 return Ok(());
             }
         };
-        let fragment = encode_request_pseudos(&mut self.encoder, header_list, &headers);
+        let fragment = encode_request_pseudos(&mut self.encoder, header_list, headers);
 
         let has_trailers = !trailers.is_empty();
         let end_stream_on_headers = body.is_none() && !has_trailers;
@@ -186,32 +185,30 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         }
 
         let had_body = body.is_some();
-        if let Some(body) = body {
-            if let Err(e) = self
+        if let Some(body) = body
+            && let Err(e) = self
                 .write_body_or_park(stream_id, body, has_trailers, trailers.clone())
                 .await
-            {
-                self.fail_stream(stream_id, e);
-                return Ok(());
-            }
+        {
+            self.fail_stream(stream_id, e);
+            return Ok(());
         }
 
-        if !had_body && has_trailers {
-            if let Err(e) = self.write_trailers(stream_id, trailers).await {
-                self.fail_stream(stream_id, e);
-                return Ok(());
-            }
+        if !had_body
+            && has_trailers
+            && let Err(e) = self.write_trailers(stream_id, trailers).await
+        {
+            self.fail_stream(stream_id, e);
+            return Ok(());
         }
-
-        let _ = self.writer.flush().await;
 
         Ok(())
     }
 
     pub(super) async fn start_request_ex(
         &mut self,
-        pseudo: PseudoHeaders,
-        headers: Vec<crate::h2::connection::HeaderPair>,
+        pseudo: &PseudoHeaders,
+        headers: &[crate::h2::connection::HeaderPair],
         body: DriverRequestBody,
         sink: ResponseSink,
     ) -> Result<(), H2Error> {
@@ -236,7 +233,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                         return Ok(());
                     }
                 };
-                let fragment = encode_request_pseudos(&mut self.encoder, header_list, &headers);
+                let fragment = encode_request_pseudos(&mut self.encoder, header_list, headers);
 
                 let initial_send = self.peer_settings.initial_window_size as i64;
                 let initial_recv = self.config.advertised_initial_window_size() as i64;
@@ -272,7 +269,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                     stream_id, rx, chunk_tx,
                 ));
 
-                let _ = self.writer.flush().await;
                 Ok(())
             }
         }
@@ -281,8 +277,8 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     /// Open an RFC 8441 extended CONNECT stream.
     pub(super) async fn start_extended_connect(
         &mut self,
-        pseudo: PseudoHeaders,
-        headers: Vec<crate::h2::connection::HeaderPair>,
+        pseudo: &PseudoHeaders,
+        headers: &[crate::h2::connection::HeaderPair],
         write_rx: mpsc::Receiver<io::Result<Bytes>>,
         sink: ResponseSink,
     ) -> Result<(), H2Error> {
@@ -295,7 +291,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 return Ok(());
             }
         };
-        let fragment = encode_request_pseudos(&mut self.encoder, header_list, &headers);
+        let fragment = encode_request_pseudos(&mut self.encoder, header_list, headers);
 
         let initial_send = self.peer_settings.initial_window_size as i64;
         let initial_recv = self.config.advertised_initial_window_size() as i64;
@@ -331,7 +327,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             stream_id, write_rx, chunk_tx,
         ));
 
-        let _ = self.writer.flush().await;
         Ok(())
     }
 }

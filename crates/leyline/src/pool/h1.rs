@@ -11,8 +11,10 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::{OwnedSemaphorePermit, mpsc};
 
-use crate::core::BodyStream;
+use crate::BodyStream;
 use crate::tls::{FingerprintConnector, TlsError};
+use crate::trace;
+use crate::util::is_idempotent;
 
 use crate::pool::types::PoolKey;
 use crate::pool::types::Transport;
@@ -196,7 +198,7 @@ pub async fn send_request_h1_pooled(
     }
 
     let body_is_stream = body.is_stream();
-    let replayable = crate::core::retry::is_idempotent(method);
+    let replayable = is_idempotent(method);
     let retry_buf: Option<Bytes> = match &body {
         H1Body::Buffered(b) => Some(b.clone()),
         _ => None,
@@ -204,6 +206,7 @@ pub async fn send_request_h1_pooled(
     let mut body = body;
 
     if let Some((slot, tls)) = checkout_live_h1(pool, &key) {
+        trace::connect(host, port, true, std::time::Duration::ZERO);
         let pooled_body = std::mem::replace(&mut body, H1Body::Empty);
         let mut io = slot.io;
         match exchange_on_stream(
@@ -315,9 +318,15 @@ async fn open_new(
                     .host_str()
                     .ok_or_else(|| H1PooledError::Config("proxy has no host".into()))?;
                 let proxy_port = parsed.port_or_known_default().unwrap_or(8080);
-                TcpStream::connect((proxy_host, proxy_port)).await?
+                let started = std::time::Instant::now();
+                let stream = TcpStream::connect((proxy_host, proxy_port)).await?;
+                trace::connect(proxy_host, proxy_port, false, started.elapsed());
+                stream
             } else {
-                TcpStream::connect((host, port)).await?
+                let started = std::time::Instant::now();
+                let stream = TcpStream::connect((host, port)).await?;
+                trace::connect(host, port, false, started.elapsed());
+                stream
             };
             let io: Box<dyn H1Io> = Box::new(stream);
             Ok((io, TlsInfo::default()))
@@ -558,7 +567,7 @@ fn find_header_end(buf: &[u8]) -> Option<usize> {
     buf.windows(4).position(|w| w == b"\r\n\r\n")
 }
 
-mod parse;
+pub(crate) mod parse;
 mod streaming;
 mod wire;
 use parse::*;

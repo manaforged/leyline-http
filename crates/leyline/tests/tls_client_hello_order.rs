@@ -121,8 +121,10 @@ fn parse_client_hello(record: &[u8]) -> Option<(Vec<u16>, Vec<u16>)> {
     offset += 2;
     let cipher_bytes = hello.get(offset..offset + cipher_len)?;
     let ciphers = cipher_bytes
-        .chunks_exact(2)
-        .map(|bytes| u16::from_be_bytes([bytes[0], bytes[1]]))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|bytes| u16::from_be_bytes(*bytes))
         .collect();
     offset += cipher_len;
 

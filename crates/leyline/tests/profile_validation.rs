@@ -139,12 +139,33 @@ fn unknown_cert_compression_algorithm_is_rejected() {
 }
 
 #[test]
+#[cfg(all(
+    feature = "compression-brotli",
+    feature = "compression-zstd",
+    any(feature = "compression-gzip", feature = "compression-deflate")
+))]
 fn real_cert_compression_codepoints_still_build() {
     let mut profile = chrome_profile();
     profile.tls.cert_compression = vec!["zlib".into(), "brotli".into(), "zstd".into()];
     assert!(
         TlsContext::from_profile(&profile, TlsMinVersion::Tls13).is_ok(),
         "a real RFC 8879 cert-compression list (as Firefox ships) failed to build"
+    );
+}
+
+/// A cert-compression codepoint whose codec feature is compiled out must name the feature, not vanish from the ClientHello.
+#[test]
+#[cfg(not(feature = "compression-zstd"))]
+fn cert_compression_without_its_feature_names_the_feature() {
+    let mut profile = chrome_profile();
+    profile.tls.cert_compression = vec!["zstd".into()];
+    let err = match TlsContext::from_profile(&profile, TlsMinVersion::Tls13) {
+        Err(err) => err,
+        Ok(_) => panic!("zstd cert decompression built with `compression-zstd` off"),
+    };
+    assert!(
+        err.to_string().contains("compression-zstd"),
+        "the error must name the feature to enable: {err}"
     );
 }
 
@@ -376,6 +397,11 @@ fn chrome150_identity_matches_capture_on_every_supported_platform() {
 }
 
 #[test]
+#[cfg(all(
+    feature = "compression-brotli",
+    feature = "compression-zstd",
+    any(feature = "compression-gzip", feature = "compression-deflate")
+))]
 fn every_builtin_profile_builds_ssl_context() {
     let reg = ProfileRegistry::builtin();
     for browser in ALL_BROWSERS {
@@ -412,6 +438,11 @@ fn every_builtin_h2config_resolves_on_all_platforms() {
 }
 
 #[test]
+#[cfg(all(
+    feature = "compression-brotli",
+    feature = "compression-zstd",
+    any(feature = "compression-gzip", feature = "compression-deflate")
+))]
 fn danger_accept_invalid_certs_session_builds() {
     leyline::Session::builder()
         .browser(Browser::Chrome147)

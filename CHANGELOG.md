@@ -4,32 +4,248 @@ All notable changes to Leyline. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [SemVer](https://semver.org/spec/v2.0.0.html).
 
-Crate on crates.io is `leyline-http` (the `leyline` name is taken). First
-publish is 0.1.0; the BoringSSL crate is still `1.0.0-alpha.3`.
-
 ## Unreleased
+
+### Changed
+
+- The HTTP/2 request path does less work per request: a pooled send and its
+  retry share one request head instead of cloning the pseudo-headers and the
+  header list, the HPACK encoder indexes the static table by name length
+  instead of scanning all 61 entries (encoding a Chrome header set is 18%
+  faster), and a buffered response body is sized once from `content-length`.
+- `Response::bytes`, `text`, `text_utf8`, `text_with_charset`, `into_bytes`,
+  `into_text`, and `json` are async and work on a streamed body: they drain it,
+  decompress it, and keep the bytes for later calls. Draining honors the
+  session `read_timeout` per chunk and the same 100 MiB cap buffered mode
+  applies. The `&mut self` calls need `let mut resp`. The "response body is
+  streaming or already taken" error is gone.
+- `BindingResponse::from_leyline` is async, because it drains the body.
+- `BrowserProfile::from_toml` returns `ProfileError` instead of
+  `toml::de::Error`, and `ProfileError::Parse` now carries
+  `path: Option<PathBuf>` with a boxed source. The parser message stays
+  reachable through `Display` and `Error::source`, and `toml` is off the
+  public API.
+- `From<leyline_bssl::ssl::Error>` and `From<leyline_bssl::error::ErrorStack>`
+  for `TlsError` are gone; the conversions are crate-private, so BoringSSL
+  types are off the public API.
+- The external-type allowlist admits `url::*` and `tokio::io::AsyncWrite`.
+  `url` is the shared URL type of the Rust HTTP ecosystem, so `Jar` takes
+  `url::Url` rather than a wrapper, and `AsyncWrite` is the sink type of
+  `Response::copy_to` in a tokio-only crate.
+  `cargo check-external-types` reports no unapproved type.
+
+### Added
+
+- `Response::as_bytes` and `Response::as_text` read an already-buffered body
+  with no await; both return `None` while the body is still a stream.
+- `Response::error_for_status` does not await, so it attaches a body prefix
+  only when the body is already buffered.
+- `SessionBuilder::trace` installs a per-request lifecycle listener. The
+  `leyline::trace::Trace` trait reports `dns`, `connect`, `tls`, `sent`,
+  `head`, and `done`, each event carrying an attempt id, the phase duration,
+  and the phase's own fields. `TracingTrace` writes the events to `tracing`;
+  `Timing` collects the same numbers as `ResponseTiming`. See
+  `examples/trace.rs`.
+- `SessionBuilder::layer`, behind the `tower` feature, wraps every request
+  attempt in a Tower stack. The session hands the layer a `leyline::layer::Call`
+  after it resolved headers, body, and proxy and before it picks a transport,
+  and takes back a `leyline::layer::Reply`; each redirect leg is one call, and
+  redirects, retries, cookies, and tracing stay in the session. A layer can edit
+  request headers or answer without calling the inner service. `layer::Log`
+  writes one `tracing` line per call. See `examples/layer.rs`.
+- A user guide under `docs/guide/`, twelve chapters whose code blocks run as
+  doctests of `leyline-http`.
+- Builder setters on every config struct, one method per field:
+  `TimeoutConfig::default().total(d).connect(d)`, and the same shape on
+  `PoolConfig`, `SocketConfig`, `CompressionConfig`, `WebSocketConfig`,
+  `HappyEyeballsConfig`, and `RetryPolicy`. The fields stay `pub` for reading.
+- `unstable-bssl`, off by default, exposes `TlsContext::builder_mut` and
+  `TlsContext::into_inner`. The BoringSSL types they return carry no semver
+  promise.
+- `package.metadata.cargo_check_external_types.allowed_external_types` in
+  `crates/leyline/Cargo.toml` records which foreign crates the public API may
+  speak.
+
+### Changed
+
+- Config structs and public data records are `#[non_exhaustive]`, so a new
+  field is no longer a breaking change: `TimeoutConfig`, `PoolConfig`,
+  `SocketConfig`, `CompressionConfig`, `WebSocketConfig`, `RetryPolicy`,
+  `ResponseTiming`, `Request`, `HappyEyeballsConfig`, `TcpProfile`, and
+  `ProxyRule`. Build them from `default()` (or `new()`) plus setters.
+- `WsMessage` is a Leyline enum (`Text`, `Binary`, `Ping`, `Pong`,
+  `Close(Option<CloseFrame>)`), not a re-export of tungstenite's `Message`.
+  `CloseFrame` carries a `u16` code and a `String` reason.
+- `RedirectAttempt::url` is an `&http::Uri`, not an `&url::Url`.
+- `TcpProfile::apply` is crate-internal; it took a `socket2::Socket`.
+- `leyline::fuzz::parse_set_cookie` takes the request URL as a `&str`.
+
+### Changed
+
+- MSRV is 1.88: the crate uses let chains, `is_multiple_of`, and
+  `as_chunks`, which 1.86 does not have. Verified with `rustup run 1.88.0`.
+
+### Added
+
+- `RequestBuilder::timeouts` overrides the session `total`, `read`, and
+  `response_header` caps for one request. `connect` stays session-wide,
+  because connections are pooled and coalesced across requests.
+- `docs/MSRV.md` states the MSRV policy: the MSRV is `rust-version` in
+  `Cargo.toml`, a bump needs a feature that requires it, and a bump ships as
+  its own minor release.
+- `SECURITY.md` names the pinned BoringSSL revision and the 14-day window for
+  picking up an upstream BoringSSL or quiche security fix.
+- `benches/benches/clients.rs` compares Leyline against `reqwest` 0.13 over an
+  in-process TLS origin for HTTP/1.1 keep-alive, HTTP/2 multiplexing, and a
+  4 MiB streamed download; `BENCHMARKS.md` records the machine, the command,
+  and the numbers.
+
+### Changed
+
+- `leyline::Error` is a struct, not an enum. `err.kind()` returns a
+  `leyline::Kind` (`Builder`, `Request`, `Redirect`, `Status`, `Body`,
+  `Decode`, `Timeout`, `Connect`, `Tls`, `Http2`, `Http3`, `Proxy`, `Io`,
+  `Config`, `Url`, `Json`); the wrapped `TlsError`, `H2Error`,
+  `std::io::Error`, `url::ParseError`, or `serde_json::Error` is reachable
+  through `std::error::Error::source()`. `status()` returns a `StatusCode`,
+  `url()` returns the request URI, `body_prefix()` returns the retained
+  response body, and `without_url()` drops the URL. `Debug` replaces
+  userinfo in the URL with `***`. `is_timeout`, `is_connect`,
+  `is_connection_closed`, and `is_status` keep their meaning, and
+  `is_redirect`, `is_body`, and `is_decode` join them. Code that matched on
+  `Error::Config(..)` or the other variants now reads `err.kind()`.
+
+- Every `TimeoutConfig` field documents what it caps and when it fires.
+- The public surface uses the `http` crate's types, as reqwest and hyper do.
+  `Response::status` and `Error::status` return `http::StatusCode`.
+  `Response::headers` and
+  `Response::trailers` yield `(&http::HeaderName, &http::HeaderValue)` in wire
+  order, and `Response::header_map` copies them into an `http::HeaderMap`.
+  `Request::method` is an `http::Method` and `Request::url` an `http::Uri`;
+  `Session::request` takes a `Method` and anything that converts to a `Uri`.
+  `RequestBuilder::header` and the other header setters take
+  `impl TryInto<HeaderName>` and `impl TryInto<HeaderValue>`, so strings keep
+  working and an invalid name or value surfaces from `send`. `HeaderList`
+  stores `(HeaderName, HeaderValue)` and keeps insertion order and duplicates.
+  The crate re-exports `http`, so callers share one version of these types.
+- `LeylineService` also implements `tower::Service<http::Request<Body>>` with
+  `Response = http::Response<Body>`; `From<http::Request<Body>> for Request`
+  carries method, URI, headers, and body across so both paths share one
+  dispatch.
+- `ProfileRegistry::load(dir)` reads a `<family>/<version>.toml` profile
+  directory and runs the same parse and extension-order validation as the
+  compiled-in set, so you can author and validate a profile for a browser
+  release the installed crate does not bundle. Failures come back as
+  `ProfileError::Io`, `Parse`, or `Empty`.
+- `Browser::latest(Family)` returns the highest bundled version of a product
+  line, so a caller pins the family instead of a version.
+- `docs/PROFILES.md` lists every bundled profile with its `captured_against`
+  build and whether its JA4 is gated or reconnaissance, and states the
+  capture cadence.
+
+### Changed
+
+- The OkHttp Android 10 profile declares `padding = true`. BoringSSL appends
+  RFC 7685 padding to this ClientHello, so the reconstructed JA4 now matches
+  the profile's wire golden.
+
+- `flate2`, `brotli`, and `zstd` are optional and follow the
+  `compression-*` features, which now also gate the matching RFC 8879
+  certificate decompressor. A profile that lists a cert-compression
+  algorithm whose feature is off fails at session build and names the
+  feature. Default build: 162 crates, was 168; a build with no compression
+  features pulls 126.
+- The crate builds on one `rand` (0.9) and one `md5` (`md-5`), and the
+  library no longer enables the `tokio` `rt-multi-thread` feature.
+- HTTP/2 writes one buffer per event-loop turn instead of one per frame.
+  Eight concurrent requests now leave the client in a single transport write
+  rather than eight, so each turn costs one TLS record and one syscall. The
+  frame reader also reads into one persistent buffer and hands out slices of
+  it, instead of allocating and zeroing a buffer per frame.
+- `Session::chrome()` and the other Chromium constructors race HTTP/3 against
+  HTTP/2 only for origins that advertised `h3` in `Alt-Svc` or already
+  completed a QUIC handshake. A cold origin gets one TCP handshake, as in
+  Chrome. The race prefers a pooled HTTP/3 connection instead of picking at
+  random.
+- `Response::trailers()` returns the trailers of buffered HTTP/2 and HTTP/3
+  responses. It was always empty.
+- `Response::audit().ja4` is derived from the profile's fixed extension order
+  when it has one, with the correct ALPS codepoints. The offline conformance
+  test gates JA4 for every profile with a fixed order. Profiles without one
+  are reported, not gated.
+- `Debug` output of `Session`, `ProxyRule`, and `ProxyUrl` replaces the proxy
+  password with `***`.
+- HTTP/1.1 requests reject `Transfer-Encoding` beside `Content-Length` and
+  duplicate `Transfer-Encoding`, the same check HTTP/2 and HTTP/3 already ran.
+- An HTTP/3 request rejected with `H3_REQUEST_REJECTED` is replayed once;
+  a second rejection returns the error.
+- A profile with an unknown `min_tls_version` fails at session build instead
+  of silently using the default floor.
+- `leyline::core` is private; every type it held is at the crate root.
+  `leyline::h2` and `leyline::pool` stay hidden and carry no semver promise.
+- `From<multipart::Form> for Body`.
+- One owner per decision: a request's preset is inferred from `content-type`
+  in one place for both `RequestBuilder` and `Session::execute`; retry
+  classification uses `Error::is_connect`, `is_connection_closed`, and
+  `is_timeout`, so a `PermissionDenied` from a body stream is not retried;
+  a per-request `header_order` applies on every protocol and wins over the
+  identity order; proxy state lives in `ProxyConfig` only, and every proxy
+  URL is validated at `SessionBuilder::build`.
+- HTTP/2: a streaming response consumer that reads late no longer gets
+  `RST_STREAM(CANCEL)`; the driver queues the chunks and stops crediting the
+  stream window until the consumer drains. A peer that ends its side while
+  the request body is still open gets `RST_STREAM(NO_ERROR)`. A peer that
+  sends on a closed stream gets `RST_STREAM(STREAM_CLOSED)`. `GOAWAY` with
+  `NO_ERROR` fails the streams above `last_stream_id` with `REFUSED_STREAM`,
+  which `RetryPolicy::transient` retries.
+- `ProtocolPolicy::Auto` sends a streaming request body straight to HTTP/2
+  instead of buffering it for a fallback. When an origin negotiates
+  `http/1.1`, the pool remembers it per host, port, and proxy, and later
+  requests dial HTTP/1.1 directly; an ALPN mismatch is not retried.
+- `SessionBuilder` has one method per config struct plus a few shortcuts.
+  Removed: `read_timeout`, `response_header_timeout`, `pool_idle_timeout`,
+  `disable_keepalive`, `local_address`, `tcp_nodelay`, `tcp_keepalive`.
+  Use `timeouts(TimeoutConfig { .. })`, `pool_config(PoolConfig { .. })`,
+  and `socket_config(SocketConfig { .. })`. `timeouts` replaces every
+  timeout, including values set earlier by `timeout` and `connect_timeout`.
+
+### Removed
+
+- Process-global response and error observers (`leyline::observe`).
+  `SessionBuilder::audit` covers the same need per session.
+- `Error::Proxy`, which nothing constructed.
+- `H2Config::settings_ack_timeout`, which nothing read.
 
 ## 0.1.0
 
 ### Changed
 
-- Workspace version is 0.1.0. Bundled BoringSSL is still `1.0.0-alpha.3`.
 - Crate package name is `leyline-http` (lib still `leyline`).
 - Bundled Chrome 152, Firefox 154, Safari 26 (WKWebView TLS/H2). Edge is a Chrome TLS overlay.
 - `Session::chrome()` uses `ProtocolPolicy::Race` when `http3` is on.
 - HTTP/3 QPACK capacity is advertised as 0 until the decoder has a
   dynamic table.
 - Node/Python Chrome clients race H3 against H2 like `Session::chrome()`.
-- `Session::get` awaits a response. Chain headers or retry with
-  `session.request("GET", url)`.
+- `Session::get` / `head` / `post` return a `RequestBuilder`. Await the
+  builder (`session.get(url).await`) or chain (`.header(...).json(...).await`).
+  `Session::chrome().get(url).await` is the oneshot. There is no crate-root
+  `leyline::get`.
+- `Session::profile(browser, platform)` returns `Result`. `Response::text`
+  and `bytes` return `Result`. JSON/form bodies infer Xhr/Form on POST/PUT/PATCH
+  when the session impersonates a browser. `Session::execute` infers from
+  `content-type` unless `Request.preset` is set.
+- WebSocket is one door: `session.websocket(url).await`. `wss://` only.
+  The handshake does not advertise `permessage-deflate`.
+- Header names, values, and methods are RFC 9110 tokens. CR/LF is rejected
+  before the request is sent.
 - A `v*` tag runs hosted `scripts/verify.sh --full`. Publishing is
   manual. Local default `verify.sh` is package sanity; `--full` is the
   release gate.
 - **Application retries are opt-in.** A new `Session` uses
-  `RetryPolicy::none()`. Configure `SessionBuilder::retry(RetryPolicy::default())`
-  for a session-wide policy or `RequestBuilder::retry(...)` for one request.
-  Configured policies retry only safe, replayable requests; a streaming body that
-  would need replay fails with a clear error instead of a second attempt.
+  `RetryPolicy::none()` (`Default` is none). Use `RetryPolicy::transient()`
+  for 429/502/503/504, connect errors, and timeouts (3 retries, 4 attempts).
+  Set it on the session or one request. A streaming body that cannot replay
+  returns the attempt's error instead of a synthetic message.
 
 - **Default connect timeout is now 10 seconds** (was: `None` / bounded only by
   the request-wide `total` of 300s). A faulty provider that completes the TCP
@@ -83,8 +299,9 @@ publish is 0.1.0; the BoringSSL crate is still `1.0.0-alpha.3`.
   (`Handshake`, `HandshakeIo`, `SslConnect`) join `TcpConnect` / `Dns`.
   A peer that resets, alerts, or speaks garbage during the handshake is
   retried on a fresh connection. Certificate, hostname, and pin failures
-  stay permanent. `Error::is_connection_closed` follows
-  `TlsError::is_retryable`.
+  stay permanent. `Error::is_connect` is handshake/DNS/proxy only.
+  `Error::is_connection_closed` is a drop after a connection existed
+  (not DNS or TCP-connect failure).
 
 - **307/308 redirects no longer drop a buffered request body.** The hop body was
   moved into the send and `current_body` left empty, so a method+body-preserving
@@ -194,8 +411,8 @@ publish is 0.1.0; the BoringSSL crate is still `1.0.0-alpha.3`.
   pooled workloads keep one pool entry per
   `(host, proxy)` pair and previously had to run app-level keep-alive
   pings just to outrun the 90s reaper and the 256-entry LRU. Override
-  via `Session::builder().pool_limits(idle, max)` /
-  `.tcp_keepalive(..)`, or set `SocketConfig.tcp_keepalive = None` to
+  via `Session::builder().pool_idle_timeout(...)` / `.pool_config(...)` /
+  `.tcp_keepalive(...)`, or set `SocketConfig.tcp_keepalive = None` to
   disable kernel keepalive. ~2048 × ~50 KB ≈ 100 MB pool ceiling per
   session.
 

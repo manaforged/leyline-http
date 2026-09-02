@@ -223,6 +223,41 @@ fi
 cargo deny --all-features check || fail "cargo-deny found issues"
 ok "cargo-deny clean"
 
+# -- public API surface ---------------------------------------------------
+# Mirrors the "semver" and "external types" jobs of the Pre-tag matrix
+# workflow (.github/workflows/matrix.yml). Both tools are optional locally:
+# skip with a note rather than failing a release gate on a missing binary.
+semver_status="skipped (cargo install --locked cargo-semver-checks)"
+step "cargo semver-checks check-release -p leyline-http"
+if ! command -v cargo-semver-checks >/dev/null; then
+    echo "  (cargo-semver-checks not installed; skipping — install with"
+    echo "   'cargo install --locked cargo-semver-checks')"
+elif [[ -z "$(git tag --list 'v*')" ]]; then
+    semver_status="skipped (no v* tag to compare against)"
+    echo "  (no v* tag exists yet; nothing to compare a release against)"
+else
+    cargo semver-checks check-release -p leyline-http \
+        || fail "cargo-semver-checks found a breaking change"
+    semver_status="ran"
+    ok "semver-checks clean"
+fi
+
+external_types_status="skipped (cargo install --locked cargo-check-external-types)"
+step "cargo check-external-types -p leyline-http (nightly)"
+if ! command -v cargo-check-external-types >/dev/null; then
+    echo "  (cargo-check-external-types not installed; skipping — install with"
+    echo "   'cargo install --locked cargo-check-external-types')"
+elif ! rustup toolchain list 2>/dev/null | grep -q nightly; then
+    external_types_status="skipped (nightly toolchain not installed)"
+    echo "  (nightly toolchain not installed; skipping — the tool reads"
+    echo "   nightly rustdoc JSON. Install with 'rustup toolchain install nightly')"
+else
+    cargo +nightly check-external-types -p leyline-http \
+        || fail "public API leaks unapproved external types"
+    external_types_status="ran"
+    ok "external types clean"
+fi
+
 # -- benches compile -----------------------------------------------------
 step "benches compile (sub-workspace)"
 if [[ -d benches ]]; then
@@ -239,7 +274,7 @@ fi
 # The full time-bounded fuzzer (which DOES need nightly rustc for
 # sanitizer support) is opt-in via `--fuzz [SECONDS]` because nightly
 # is a heavier prerequisite for a normal release.
-FUZZ_TARGETS=(h2_frame hpack h2_continuation)
+FUZZ_TARGETS=(h2_frame hpack h2_continuation h1_head h1_chunked cookie connect_response qpack)
 
 if [[ $full -eq 1 ]]; then
     step "fuzz corpus replay (cargo fuzz, -runs=0)"
@@ -283,5 +318,25 @@ if [[ $fuzz -eq 1 ]]; then
     done
     ok "fuzz time-bounded runs clean"
 fi
+
+# -- pre-tag matrix parity ------------------------------------------------
+# The same list of checks as .github/workflows/matrix.yml ("Pre-tag matrix",
+# workflow_dispatch only). Read this before you cut a tag: anything marked
+# "matrix only" was not proven by this local run.
+step "pre-tag matrix parity (.github/workflows/matrix.yml)"
+printf '  %-22s %s\n' \
+    'check (MSRV)'        "ran (cargo +$msrv check --workspace)" \
+    'check (stable)'      'ran (this toolchain)' \
+    'check (beta)'        'matrix only' \
+    'feature powerset'    'matrix only (cargo hack --feature-powerset --depth 2)' \
+    'minimal versions'    'matrix only (cargo minimal-versions check)' \
+    'semver'              "$semver_status" \
+    'external types'      "$external_types_status" \
+    'supply chain'        'ran (cargo deny --all-features check)' \
+    'cross aarch64-macos' 'matrix only' \
+    'cross x86_64-linux'  'matrix only' \
+    'cross aarch64-linux' 'matrix only' \
+    'cross x86_64-windows' 'matrix only'
+echo "  Run the rest with: gh workflow run matrix.yml"
 
 printf '\n\033[1;32mAll verify gates passed.\033[0m\n'

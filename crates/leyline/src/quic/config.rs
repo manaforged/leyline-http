@@ -2,6 +2,8 @@
 
 use std::time::Duration;
 
+use crate::{Error, Kind};
+
 /// HTTP/3 configuration for browser fingerprinting.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -40,14 +42,13 @@ pub struct H3Config {
 
 impl H3Config {
     /// Select the H3 transport config for a profile family (`meta.family` in the TOML).
-    pub fn for_family(family: &str) -> Result<Self, crate::Error> {
+    pub fn for_family(family: &str) -> Result<Self, Error> {
         match family {
             "chromium" => Ok(Self::chrome()),
             "gecko" => Ok(Self::firefox()),
             "webkit" => Ok(Self::safari()),
-            other => Err(crate::Error::Config(format!(
-                "no HTTP/3 config for profile family {other:?}"
-            ))),
+            other => Err(Error::new(Kind::Config)
+                .with_message(format!("no HTTP/3 config for profile family {other:?}"))),
         }
     }
 

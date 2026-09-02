@@ -50,6 +50,19 @@ impl HeaderStr {
     }
 }
 
+impl AsRef<[u8]> for HeaderStr {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl From<HeaderStr> for Bytes {
+    /// Zero-copy: hands back the wrapped buffer.
+    fn from(s: HeaderStr) -> Self {
+        s.0
+    }
+}
+
 impl Deref for HeaderStr {
     type Target = str;
     fn deref(&self) -> &str {

@@ -38,8 +38,8 @@ impl ContentEncoding {
                         Vec::with_capacity(data.len() / 2),
                         flate2::Compression::default(),
                     );
-                    enc.write_all(data).map_err(Error::Io)?;
-                    enc.finish().map_err(Error::Io)
+                    enc.write_all(data).map_err(Error::from)?;
+                    enc.finish().map_err(Error::from)
                 }
                 #[cfg(not(feature = "compression-gzip"))]
                 {
@@ -53,7 +53,7 @@ impl ContentEncoding {
                     let mut out = Vec::with_capacity(data.len() / 2);
                     brotli::CompressorReader::new(data, 4096, 5, 22)
                         .read_to_end(&mut out)
-                        .map_err(Error::Io)?;
+                        .map_err(Error::from)?;
                     Ok(out)
                 }
                 #[cfg(not(feature = "compression-brotli"))]
@@ -64,7 +64,7 @@ impl ContentEncoding {
             ContentEncoding::Zstd => {
                 #[cfg(feature = "compression-zstd")]
                 {
-                    zstd::encode_all(data, 3).map_err(Error::Io)
+                    zstd::encode_all(data, 3).map_err(Error::from)
                 }
                 #[cfg(not(feature = "compression-zstd"))]
                 {
@@ -79,8 +79,8 @@ impl ContentEncoding {
                         Vec::with_capacity(data.len() / 2),
                         flate2::Compression::default(),
                     );
-                    enc.write_all(data).map_err(Error::Io)?;
-                    enc.finish().map_err(Error::Io)
+                    enc.write_all(data).map_err(Error::from)?;
+                    enc.finish().map_err(Error::from)
                 }
                 #[cfg(not(feature = "compression-deflate"))]
                 {
@@ -99,7 +99,7 @@ impl ContentEncoding {
     feature = "compression-deflate"
 )))]
 fn feature_off(codec: &str, feature: &str) -> Error {
-    Error::Body(format!(
+    Error::new(Kind::Body).with_message(format!(
         "{codec} request compression requested but the `{feature}` feature is not compiled in"
     ))
 }

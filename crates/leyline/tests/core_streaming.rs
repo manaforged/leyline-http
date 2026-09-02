@@ -4,7 +4,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use futures_util::StreamExt;
 use futures_util::stream;
-use leyline::core::{Body, ProtocolPolicy, Session};
+use leyline::{Body, ProtocolPolicy, Session};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[tokio::test]
@@ -85,14 +85,17 @@ async fn streaming_request_body_chunked_over_h1() {
     let expected_total: usize = 384 * 8 * 1024;
     let body = Body::stream(stream::iter(chunks));
 
-    let resp = session
+    let mut resp = session
         .post(&format!("http://{addr}/upload"))
         .body(body)
         .send()
         .await
         .unwrap();
     assert_eq!(resp.status(), 200);
-    assert_eq!(resp.text().unwrap().trim(), expected_total.to_string());
+    assert_eq!(
+        resp.text().await.unwrap().trim(),
+        expected_total.to_string()
+    );
 
     server.await.unwrap();
 }
@@ -182,7 +185,7 @@ async fn response_into_stream_on_buffered_returns_single_chunk() {
 
     let session = Session::builder().http1().build().unwrap();
     let resp = session
-        .request("GET", &format!("http://{addr}/big"))
+        .request(http::Method::GET, format!("http://{addr}/big"))
         .stream()
         .send()
         .await
@@ -196,6 +199,54 @@ async fn response_into_stream_on_buffered_returns_single_chunk() {
     }
     assert_eq!(total, 10 * 64 * 1024);
     server.await.unwrap();
+}
+
+/// Serve one fixed HTTP/1.1 response, then return the listener address.
+async fn one_shot(body: &'static str) -> std::net::SocketAddr {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (mut sock, _) = listener.accept().await.unwrap();
+        let mut buf = [0u8; 1024];
+        loop {
+            let n = sock.read(&mut buf).await.unwrap();
+            if n == 0 || buf[..n].windows(4).any(|w| w == b"\r\n\r\n") {
+                break;
+            }
+        }
+        let head = format!(
+            "HTTP/1.1 200 OK\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+            body.len()
+        );
+        sock.write_all(head.as_bytes()).await.unwrap();
+        sock.write_all(body.as_bytes()).await.unwrap();
+        sock.flush().await.unwrap();
+    });
+    addr
+}
+
+#[tokio::test]
+async fn text_drains_a_streamed_body() {
+    let addr = one_shot("hello stream").await;
+    let session = Session::builder().http1().build().unwrap();
+    let mut resp = session
+        .request(http::Method::GET, format!("http://{addr}/x"))
+        .stream()
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.as_bytes().is_none(), "body is still a stream");
+    assert_eq!(resp.text().await.unwrap(), "hello stream");
+    assert_eq!(resp.as_bytes(), Some(&b"hello stream"[..]));
+}
+
+#[tokio::test]
+async fn buffered_body_is_visible_to_as_bytes() {
+    let addr = one_shot("buffered").await;
+    let session = Session::builder().http1().build().unwrap();
+    let resp = session.get(&format!("http://{addr}/x")).await.unwrap();
+    assert_eq!(resp.as_bytes(), Some(&b"buffered"[..]));
+    assert_eq!(resp.as_text().unwrap().unwrap(), "buffered");
 }
 
 #[tokio::test]
@@ -255,7 +306,7 @@ async fn into_stream_twice_returns_error() {
 
     let session = Session::builder().http1().build().unwrap();
     let resp = session
-        .request("GET", &format!("http://{addr}/x"))
+        .request(http::Method::GET, format!("http://{addr}/x"))
         .stream()
         .send()
         .await

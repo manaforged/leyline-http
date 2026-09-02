@@ -69,11 +69,7 @@ impl Decoder {
                 let (header, consumed) = self.decode_literal(src, pos, 6, 0x3F, true)?;
                 pos += consumed;
                 headers.push(header);
-            } else if byte & 0xF0 == 0x00 {
-                let (header, consumed) = self.decode_literal(src, pos, 4, 0x0F, false)?;
-                pos += consumed;
-                headers.push(header);
-            } else if byte & 0xF0 == 0x10 {
+            } else if byte & 0xE0 == 0x00 {
                 let (header, consumed) = self.decode_literal(src, pos, 4, 0x0F, false)?;
                 pos += consumed;
                 headers.push(header);

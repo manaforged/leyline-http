@@ -1,9 +1,7 @@
 //! Fingerprint trust map — where each self-reported fingerprint dimension sits relative to truth, offline and deterministic.
 
 use leyline::Platform;
-use leyline::audit::{
-    Ja3Input, Ja4Input, chrome_extension_ids, compute_ja3, compute_ja4, compute_ja4t,
-};
+use leyline::audit::{Ja3Input, Ja4Input, compute_ja3, compute_ja4, compute_ja4t, extension_ids};
 use leyline::h2::H2Config;
 use leyline::profile::{ALL_BROWSERS, ProfileRegistry};
 
@@ -82,7 +80,7 @@ fn fingerprint_conformance() {
             }
         }
 
-        let ext = chrome_extension_ids(&p.tls);
+        let ext = extension_ids(&p.tls);
         let ja4 = compute_ja4(&Ja4Input {
             ciphers: &p.tls.ciphers,
             sigalgs: &p.tls.sigalgs,
@@ -92,7 +90,11 @@ fn fingerprint_conformance() {
             has_sni: true,
             alpn: "h2",
         });
-        rows.push(recon(&name, "JA4 (audit)", &ja4, p.expected_ja4()));
+        rows.push(if p.tls.extension_permutation.is_some() {
+            gated(&name, "JA4 (audit)", &ja4, p.expected_ja4())
+        } else {
+            recon(&name, "JA4 (audit)", &ja4, p.expected_ja4())
+        });
 
         let ja3 = compute_ja3(&Ja3Input {
             ciphers: &p.tls.ciphers,

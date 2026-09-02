@@ -10,9 +10,12 @@
 #
 # Prereqs on the host: a Rust toolchain plus the source-build deps
 #   (cmake, perl, go, and libclang — `LIBCLANG_PATH` may need setting on macOS).
-# The Windows/MSVC path additionally requires cargo-xwin, clang-cl, lld-link,
-# llvm-lib, ninja, and nasm. cargo-xwin acquires the Microsoft SDK/UCRT sysroot; it
-# deliberately does not use MinGW.
+# Cross-packaging x86_64-pc-windows-msvc from a non-Windows host additionally
+# requires cargo-xwin, clang-cl, lld-link, llvm-lib, ninja, and nasm. cargo-xwin
+# acquires the Microsoft SDK/UCRT sysroot; it deliberately does not use MinGW.
+# On a Windows host the same target builds natively: run this script under Git
+# Bash inside a Visual Studio developer environment, with cmake, ninja, nasm,
+# perl, go, and LLVM (libclang) on PATH.
 #
 # Usage:
 #   ./scripts/package-bssl.sh            # build + install bundle for the host target
@@ -25,6 +28,16 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_root"
 export PATH="$HOME/.cargo/bin:$PATH"
+
+# Cargo and CMake on Windows are native executables; hand them a Windows path
+# even when this script runs under Git Bash/MSYS. Elsewhere this is identity.
+winpath() {
+    if command -v cygpath >/dev/null 2>&1; then
+        cygpath -w "$1"
+    else
+        printf '%s\n' "$1"
+    fi
+}
 
 step() { printf '\n\033[1;34m== %s ==\033[0m\n' "$*"; }
 ok()   { printf '\033[1;32mOK %s\033[0m\n'  "$*"; }
@@ -150,11 +163,11 @@ if [[ $cross_windows == 1 ]]; then
     (
         cd "$sys_dir"
         XWIN_CROSS_COMPILER=clang-cl \
-        CARGO_TARGET_DIR="$target_root" \
+        CARGO_TARGET_DIR="$(winpath "$target_root")" \
         cargo xwin build --release --target "$triple" --features source-build
     ) || die "Windows/MSVC source build failed — cargo-xwin must be able to acquire its Microsoft SDK/UCRT sysroot and use clang-cl/lld-link/llvm-lib"
 else
-    ( cd "$sys_dir" && CARGO_TARGET_DIR="$target_root" cargo build --release --features source-build ) \
+    ( cd "$sys_dir" && CARGO_TARGET_DIR="$(winpath "$target_root")" cargo build --release --features source-build ) \
         || die "leyline-bssl-sys source build failed — install cmake/perl/go/libclang and retry"
 fi
 restore_build
@@ -192,6 +205,42 @@ ok "native libs -> $native_dir/"
 
 cp "$src_out/bindings.rs" "$bindings_file"
 ok "bindings -> $bindings_file"
+
+# --- prove the exports carry the LEYLINE_ prefix ---------------------------
+# BoringSSL is built with -DBORINGSSL_PREFIX=LEYLINE so a downstream crate can
+# link openssl-sys or boring-sys in the same binary. Fail the package if an
+# unprefixed OpenSSL-style export survived.
+step "verifying LEYLINE_ symbol prefixing"
+# llvm-nm reads both ELF/Mach-O archives and MSVC .lib; dumpbin is the fallback
+# on a Windows host that has the MSVC tools but no LLVM.
+nm_tool=""
+for candidate in llvm-nm nm; do
+    command -v "$candidate" >/dev/null 2>&1 && { nm_tool="$candidate"; break; }
+done
+dumpbin_tool=""
+command -v dumpbin >/dev/null 2>&1 && dumpbin_tool="dumpbin"
+if [[ $is_msvc == 1 && "$nm_tool" == "nm" ]]; then
+    nm_tool=""
+fi
+if [[ -z "$nm_tool" && -z "$dumpbin_tool" ]]; then
+    warn "no llvm-nm, nm, or dumpbin on PATH — cannot verify symbol prefixing for $triple"
+else
+    if [[ -n "$nm_tool" ]]; then
+        exports="$("$nm_tool" --defined-only --extern-only "$native_dir/$crypto_lib" "$native_dir/$ssl_lib" 2>/dev/null \
+            | awk '{print $NF}' | sed 's/^_//')"
+    else
+        # `//symbols` survives MSYS argument mangling as `/symbols`.
+        exports="$(dumpbin //symbols "$(winpath "$native_dir/$crypto_lib")" "$(winpath "$native_dir/$ssl_lib")" 2>/dev/null \
+            | awk '/External/ && !/UNDEF/ {print $NF}' | sed 's/^_//')"
+    fi
+    prefixed="$(printf '%s\n' "$exports" | grep -c '^LEYLINE_' || true)"
+    leaked="$(printf '%s\n' "$exports" \
+        | grep -E '^(SSL|TLS|CRYPTO|EVP|X509|BIO|ASN1|RSA|EC|BN|ERR|OPENSSL)_' || true)"
+    [[ "$prefixed" -gt 0 ]] || die "no LEYLINE_-prefixed exports in $native_dir — the prefixed build did not run"
+    [[ -z "$leaked" ]] || die "unprefixed BoringSSL exports remain in $native_dir:
+$leaked"
+    ok "$prefixed prefixed exports, no unprefixed BoringSSL exports"
+fi
 
 # --- tell the maintainer what code still needs touching ---------------------
 if [[ $registered_build == 0 || $registered_lib == 0 ]]; then

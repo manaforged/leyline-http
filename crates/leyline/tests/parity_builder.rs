@@ -17,24 +17,20 @@ fn builder_accepts_wreq_parity_transport_knobs() {
         .with_rule(ProxyRule::https("http://127.0.0.1:8080"))
         .no_proxy(NoProxy::new(["localhost", ".internal"]))
         .without_env();
-    let timeouts = TimeoutConfig {
-        total: Duration::from_secs(5),
-        connect: Some(Duration::from_secs(1)),
-        read: Some(Duration::from_secs(2)),
-        response_header: Some(Duration::from_secs(3)),
-    };
-    let pool = PoolConfig {
-        idle_timeout: Duration::from_secs(30),
-        max_connections: 8,
-        max_h1_conns_per_host: 6,
-        keepalive: true,
-    };
-    let socket = SocketConfig {
-        local_address: Some(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
-        tcp_nodelay: Some(true),
-        tcp_keepalive: Some(Duration::from_secs(20)),
-        ..SocketConfig::default()
-    };
+    let timeouts = TimeoutConfig::default()
+        .total(Duration::from_secs(5))
+        .connect(Duration::from_secs(1))
+        .read(Duration::from_secs(2))
+        .response_header(Duration::from_secs(3));
+    let pool = PoolConfig::default()
+        .idle_timeout(Duration::from_secs(30))
+        .max_connections(8)
+        .max_h1_conns_per_host(6)
+        .keepalive(true);
+    let socket = SocketConfig::default()
+        .local_address(IpAddr::V4(Ipv4Addr::UNSPECIFIED))
+        .tcp_nodelay(true)
+        .tcp_keepalive(Duration::from_secs(20));
     let redirects = RedirectPolicy::custom(|attempt| {
         if attempt.status == 307 {
             RedirectAction::Stop
@@ -42,17 +38,14 @@ fn builder_accepts_wreq_parity_transport_knobs() {
             RedirectAction::Follow
         }
     });
-    let compression = CompressionConfig {
-        gzip: true,
-        brotli: false,
-        deflate: true,
-        zstd: false,
-    };
-    let websocket = WebSocketConfig {
-        prefer_http2: false,
-        max_message_size: Some(1024 * 1024),
-        ..WebSocketConfig::default()
-    };
+    let compression = CompressionConfig::default()
+        .gzip(true)
+        .brotli(false)
+        .deflate(true)
+        .zstd(false);
+    let websocket = WebSocketConfig::default()
+        .prefer_http2(false)
+        .max_message_size(1024 * 1024);
 
     let session = Session::builder()
         .browser(Browser::Chrome147)
@@ -74,20 +67,29 @@ fn builder_accepts_wreq_parity_transport_knobs() {
 }
 
 #[test]
-fn legacy_builder_methods_feed_new_configs() {
+fn config_structs_feed_the_session() {
     let session = Session::builder()
         .proxy("http://127.0.0.1:8080")
         .disable_env_proxies()
-        .timeout(Duration::from_secs(7))
-        .connect_timeout(Duration::from_millis(500))
-        .read_timeout(Duration::from_millis(750))
-        .pool_idle_timeout(Duration::from_secs(11))
-        .pool_limits(Duration::from_secs(12), 3)
+        .timeouts(
+            leyline::TimeoutConfig::default()
+                .total(Duration::from_secs(7))
+                .connect(Duration::from_millis(500))
+                .read(Duration::from_millis(750)),
+        )
+        .pool_config(
+            leyline::PoolConfig::default()
+                .idle_timeout(Duration::from_secs(12))
+                .max_connections(3),
+        )
         .max_redirects(0)
-        .tcp_nodelay(true)
-        .tcp_keepalive(Duration::from_secs(9))
+        .socket_config(
+            leyline::SocketConfig::default()
+                .tcp_nodelay(true)
+                .tcp_keepalive(Duration::from_secs(9)),
+        )
         .build()
-        .expect("legacy shorthands remain valid");
+        .expect("config structs build a session");
 
     assert_eq!(session.default_timeout(), Duration::from_secs(7));
     assert_eq!(session.pool_stats().max_connections, 3);

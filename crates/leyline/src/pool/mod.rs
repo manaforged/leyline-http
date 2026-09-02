@@ -2,12 +2,10 @@
 
 #![forbid(unsafe_code)]
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use crate::Error;
-use crate::core::ResponseTiming;
-use crate::core::retry::is_idempotent;
-use crate::h2::client::{H2Client, H2ResponseEx, RequestBody};
+use crate::HttpVersion;
+use crate::h2::client::{H2Client, H2ResponseEx, Head, RequestBody};
 use crate::h2::config::H2Config;
 use crate::h2::connection::{ClientConnection, HeaderPair, PseudoHeaders};
 use crate::h2::{ErrorCode, H2Error};
@@ -18,8 +16,11 @@ use crate::quic::{H3Client, H3Config, H3RequestBodyStream, H3ResponseParts, open
 #[cfg(feature = "http3")]
 use crate::tls::TlsTrustConfig;
 use crate::tls::{FingerprintConnector, TlsError};
+use crate::trace;
+use crate::util::is_idempotent;
+use crate::{Error, Kind, ResponseTiming};
 
-mod h1;
+pub(crate) mod h1;
 #[expect(
     clippy::module_inception,
     reason = "pool::pool is the pool engine; the parent module is the public facade"
@@ -75,7 +76,9 @@ async fn open_fresh_h2(
             .as_ref()
             .map(|p| String::from_utf8_lossy(p).to_string())
             .unwrap_or_else(|| "none".to_string());
-        return Err(Error::AlpnMismatch { negotiated });
+        return Err(Error::new(Kind::Http2)
+            .with_message(format!("alpn: negotiated {negotiated}, expected h2"))
+            .with_alpn(negotiated));
     }
 
     let tls = TlsInfo {
@@ -92,33 +95,50 @@ async fn open_fresh_h2(
 
 /// Reconstruct an owned [`crate::Error`] from an `Arc`-shared coalesced-connect failure.
 fn connect_err(err: &Error) -> Error {
+    let mut out = Error::new(err.kind());
+    let mut sourced = true;
+    if let Some(tls) = err.tls() {
+        out = out.with_source(clone_tls(tls));
+    } else if let Some(io) = err.io() {
+        out = out.with_source(std::io::Error::new(io.kind(), io.to_string()));
+    } else {
+        sourced = false;
+    }
+    if let Some(msg) = err.message() {
+        out = out.with_message(msg.to_owned());
+    } else if !sourced {
+        out = out.with_message(err.to_string());
+    }
+    if let Some(alpn) = err.alpn() {
+        out = out.with_alpn(alpn);
+    }
+    if let Some(url) = err.url() {
+        out = out.with_url(url.clone());
+    }
+    if let Some(status) = err.status() {
+        out = out.with_status(status);
+    }
+    out
+}
+
+/// Rebuild a [`TlsError`] that is shared behind an `Arc`.
+fn clone_tls(err: &TlsError) -> TlsError {
     match err {
-        Error::Tls(err) => Error::Tls(match err {
-            TlsError::SslConfig(msg) => TlsError::SslConfig(msg.clone()),
-            TlsError::Handshake(msg) => TlsError::Handshake(msg.clone()),
-            TlsError::HandshakeIo(err) => {
-                TlsError::HandshakeIo(std::io::Error::new(err.kind(), err.to_string()))
-            }
-            TlsError::Certificate(msg) => TlsError::Certificate(msg.clone()),
-            TlsError::Hostname(msg) => TlsError::Hostname(msg.clone()),
-            TlsError::Pinning(msg) => TlsError::Pinning(msg.clone()),
-            TlsError::TcpConnect(err) => {
-                TlsError::TcpConnect(std::io::Error::new(err.kind(), err.to_string()))
-            }
-            TlsError::Dns(err) => TlsError::Dns(std::io::Error::new(err.kind(), err.to_string())),
-            TlsError::SslConnect(msg) => TlsError::SslConnect(msg.clone()),
-            TlsError::Profile(msg) => TlsError::Profile(msg.clone()),
-            TlsError::TrustStore(msg) => TlsError::TrustStore(msg.clone()),
-        }),
-        Error::Io(err) => Error::Io(std::io::Error::new(err.kind(), err.to_string())),
-        Error::AlpnMismatch { negotiated } => Error::AlpnMismatch {
-            negotiated: negotiated.clone(),
-        },
-        Error::Http3(msg) => Error::Http3(msg.clone()),
-        other => Error::Io(std::io::Error::new(
-            std::io::ErrorKind::ConnectionReset,
-            other.to_string(),
-        )),
+        TlsError::SslConfig(msg) => TlsError::SslConfig(msg.clone()),
+        TlsError::Handshake(msg) => TlsError::Handshake(msg.clone()),
+        TlsError::HandshakeIo(err) => {
+            TlsError::HandshakeIo(std::io::Error::new(err.kind(), err.to_string()))
+        }
+        TlsError::Certificate(msg) => TlsError::Certificate(msg.clone()),
+        TlsError::Hostname(msg) => TlsError::Hostname(msg.clone()),
+        TlsError::Pinning(msg) => TlsError::Pinning(msg.clone()),
+        TlsError::TcpConnect(err) => {
+            TlsError::TcpConnect(std::io::Error::new(err.kind(), err.to_string()))
+        }
+        TlsError::Dns(err) => TlsError::Dns(std::io::Error::new(err.kind(), err.to_string())),
+        TlsError::SslConnect(msg) => TlsError::SslConnect(msg.clone()),
+        TlsError::Profile(msg) => TlsError::Profile(msg.clone()),
+        TlsError::TrustStore(msg) => TlsError::TrustStore(msg.clone()),
     }
 }
 
@@ -141,7 +161,7 @@ fn h2_inflight_connect(
         let cleanup_key = key.clone();
         let host = host.to_string();
         let proxy = proxy.map(|s| s.to_string());
-        let handle = tokio::spawn(async move {
+        let handle = tokio::spawn(trace::carry(async move {
             let result = open_fresh_h2(
                 &pool,
                 &connector,
@@ -155,13 +175,15 @@ fn h2_inflight_connect(
             .map_err(Arc::new);
             pool.inflight_h2_remove(&cleanup_key);
             result
-        });
+        }));
         async move {
             handle.await.unwrap_or_else(|e| {
-                Err(Arc::new(Error::Http2(H2Error::Connection {
-                    code: ErrorCode::InternalError,
-                    reason: format!("h2 connect task failed: {e}"),
-                })))
+                Err(Arc::new(Error::new(Kind::Http2).with_source(
+                    H2Error::Connection {
+                        code: ErrorCode::InternalError,
+                        reason: format!("h2 connect task failed: {e}"),
+                    },
+                )))
             })
         }
         .boxed()
@@ -184,14 +206,15 @@ async fn open_h2_coalesced(
 
     let mut last_err: Option<Arc<Error>> = None;
     for attempt in 0..2u8 {
-        if attempt > 0 {
-            if let Some(hit) = pool.checkout_h2(&key) {
-                return Ok(hit);
-            }
+        if attempt > 0
+            && let Some(hit) = pool.checkout_h2(&key)
+        {
+            return Ok(hit);
         }
         let shared = h2_inflight_connect(pool, connector, h2_config, &key, host, port, proxy);
         match shared.await {
             Ok(pair) => return Ok(pair),
+            Err(e) if e.alpn().is_some() => return Err(connect_err(&e)),
             Err(e) => last_err = Some(e),
         }
     }
@@ -266,7 +289,7 @@ async fn open_fresh_h3_installed(
 ) -> Result<(H3Client, TlsInfo), Error> {
     let (handle, driver, tls) = open_fresh_h3(h3_config, profile, trust, host, port)
         .await
-        .map_err(Error::Http3)?;
+        .map_err(|e| Error::new(Kind::Http3).with_message(e.to_string()))?;
     Ok(pool.install_or_get_h3(key, handle, driver, tls))
 }
 
@@ -290,7 +313,7 @@ fn h3_inflight_connect(
         let connect_key = key.clone();
         let cleanup_key = key.clone();
         let host = host.to_string();
-        let handle = tokio::spawn(async move {
+        let handle = tokio::spawn(trace::carry(async move {
             let result = open_fresh_h3_installed(
                 &pool,
                 &h3_config,
@@ -304,12 +327,12 @@ fn h3_inflight_connect(
             .map_err(Arc::new);
             pool.inflight_h3_remove(&cleanup_key);
             result
-        });
+        }));
         async move {
             handle.await.unwrap_or_else(|e| {
-                Err(Arc::new(Error::Http3(format!(
-                    "h3 connect task failed: {e}"
-                ))))
+                Err(Arc::new(
+                    Error::new(Kind::Http3).with_message(format!("h3 connect task failed: {e}")),
+                ))
             })
         }
         .boxed()
@@ -333,10 +356,10 @@ async fn open_h3_coalesced(
 
     let mut last_err: Option<Arc<Error>> = None;
     for attempt in 0..2u8 {
-        if attempt > 0 {
-            if let Some(hit) = pool.checkout_h3(&key) {
-                return Ok(hit);
-            }
+        if attempt > 0
+            && let Some(hit) = pool.checkout_h3(&key)
+        {
+            return Ok(hit);
         }
         let shared = h3_inflight_connect(pool, h3_config, profile, trust, &key, host, port);
         match shared.await {
@@ -378,6 +401,9 @@ pub async fn send_request_h3_pooled(
     let mut body_stream = body_stream;
 
     if let Some((handle, tls)) = pool.checkout_h3(&key) {
+        trace::connect(host, port, true, Duration::ZERO);
+        let started = Instant::now();
+        trace::sent(host, HttpVersion::Http3, Duration::ZERO);
         match handle
             .send_request(
                 method,
@@ -390,9 +416,12 @@ pub async fn send_request_h3_pooled(
             )
             .await
         {
-            Ok(resp) => return Ok((resp, tls)),
+            Ok(resp) => {
+                trace::head(host, resp.status, HttpVersion::Http3, started.elapsed());
+                return Ok((resp, tls));
+            }
             Err(e) if !e.is_retryable() => {
-                return Err(Error::Http3(e.message().to_string()));
+                return Err(Error::new(Kind::Http3).with_message(e.message().to_string()));
             }
             Err(e) => {
                 tracing::info!(
@@ -404,7 +433,7 @@ pub async fn send_request_h3_pooled(
                 );
                 pool.invalidate(&key);
                 if body_is_stream {
-                    return Err(Error::Body(format!(
+                    return Err(Error::new(Kind::Body).with_message(format!(
                         "pooled h3 connection died and a streaming request body cannot be retried: {}",
                         e.message()
                     )));
@@ -413,7 +442,20 @@ pub async fn send_request_h3_pooled(
         }
     }
 
+    let connect_started = Instant::now();
     let (handle, tls) = open_h3_coalesced(pool, h3_config, profile, trust, key, host, port).await?;
+    trace::connect(host, port, false, connect_started.elapsed());
+    if trace::on() {
+        trace::tls(
+            host,
+            tls.version.as_deref(),
+            tls.cipher.as_deref(),
+            Some("h3"),
+            Duration::ZERO,
+        );
+    }
+    let started = Instant::now();
+    trace::sent(host, HttpVersion::Http3, Duration::ZERO);
     let resp = handle
         .send_request(
             method,
@@ -425,7 +467,8 @@ pub async fn send_request_h3_pooled(
             stream_response,
         )
         .await
-        .map_err(|e| Error::Http3(e.message().to_string()))?;
+        .map_err(|e| Error::new(Kind::Http3).with_message(e.message().to_string()))?;
+    trace::head(host, resp.status, HttpVersion::Http3, started.elapsed());
     Ok((resp, tls))
 }
 
@@ -455,6 +498,8 @@ pub async fn send_request(
     stream_response: bool,
 ) -> Result<(H2ResponseEx, TlsInfo, ResponseTiming), Error> {
     let started = Instant::now();
+    let head = Arc::new(Head { pseudo, headers });
+    let pseudo = &head.pseudo;
     let host = &pseudo.authority;
     let port = if pseudo.scheme == "https" { 443 } else { 80 };
 
@@ -478,20 +523,23 @@ pub async fn send_request(
     let mut body = body;
 
     if let Some((handle, tls)) = pool.checkout_h2(&key) {
+        trace::connect(connect_host, connect_port, true, Duration::ZERO);
         let pooled_body = std::mem::replace(&mut body, RequestBody::None);
         let send_started = Instant::now();
+        trace::sent(connect_host, HttpVersion::Http2, Duration::ZERO);
         match handle
-            .send_request_ex(
-                pseudo.clone(),
-                headers.clone(),
-                pooled_body,
-                stream_response,
-            )
+            .send_shared(Arc::clone(&head), pooled_body, stream_response)
             .await
         {
             Ok(resp) => {
                 tracing::Span::current().record("pool.hit", true);
                 let send_ms = ms_since(send_started);
+                trace::head(
+                    connect_host,
+                    resp.status,
+                    HttpVersion::Http2,
+                    send_started.elapsed(),
+                );
                 let timing = ResponseTiming {
                     reused: true,
                     connect_ms: None,
@@ -511,7 +559,7 @@ pub async fn send_request(
                 );
                 pool.invalidate(&key);
                 if body_is_stream {
-                    return Err(Error::Body(format!(
+                    return Err(Error::new(Kind::Body).with_message(format!(
                         "pooled connection died and streaming body cannot be retried: {e}"
                     )));
                 }
@@ -523,7 +571,7 @@ pub async fn send_request(
                     }
                 );
                 if !refused && !is_idempotent(&pseudo.method) {
-                    return Err(Error::Http2(e));
+                    return Err(Error::new(Kind::Http2).with_source(e));
                 }
                 if let Some(buf) = &retry_buf {
                     body = RequestBody::Buffered(buf.clone());
@@ -547,14 +595,24 @@ pub async fn send_request(
     let connect_ms = ms_since(connect_started);
 
     let send_started = Instant::now();
+    let traced_host = trace::on().then(|| connect_host.to_string());
+    trace::sent(connect_host, HttpVersion::Http2, Duration::ZERO);
     let resp = match handle
-        .send_request_ex(pseudo, headers, body, stream_response)
+        .send_shared(Arc::clone(&head), body, stream_response)
         .await
     {
-        Ok(r) => r,
+        Ok(r) => {
+            trace::head(
+                traced_host.as_deref().unwrap_or_default(),
+                r.status,
+                HttpVersion::Http2,
+                send_started.elapsed(),
+            );
+            r
+        }
         Err(e) => {
             pool.invalidate(&key);
-            return Err(Error::Http2(e));
+            return Err(Error::new(Kind::Http2).with_source(e));
         }
     };
 

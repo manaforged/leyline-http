@@ -1,6 +1,8 @@
 use std::sync::{Arc, LazyLock};
 
 use crate::cookie::Jar;
+#[cfg(feature = "tower")]
+use crate::core::layer::{Call, Hold, Reply, Stack, Transport};
 use crate::core::{
     CompressionConfig, DnsConfig, IntoParamPair, NoProxy, PoolConfig, ProxyConfig, ProxyUrl,
     RedirectPolicy, SocketConfig, TimeoutConfig, WebSocketConfig,
@@ -10,11 +12,12 @@ use crate::pool::Pool;
 use crate::profile::{Browser, BrowserProfile, ChromiumBrand, Platform, ProfileRegistry};
 use crate::tcp::TcpProfile;
 use crate::tls::{FingerprintConnector, HappyEyeballsConfig, Resolver, TlsTrustConfig};
+use crate::trace::Trace;
 
 use super::proxy::env_proxy;
 use super::{Identity, ProtocolPolicy, Session, SessionInner};
 use crate::audit::AuditTlsCache;
-use crate::core::error::{Error, Result};
+use crate::core::error::{Error, Kind, Result};
 
 /// The synthetic bare profile, materialised once.
 static BARE_PROFILE: LazyLock<BrowserProfile> = LazyLock::new(BrowserProfile::bare);
@@ -28,10 +31,7 @@ pub struct SessionBuilder {
     /// `true` once `.platform(...)` (or a platform-pinning convenience like `.safari()`) was called.
     platform_explicit: bool,
     brand: ChromiumBrand,
-    proxy: Option<String>,
     /// Set when `proxy` was discovered from the environment at build time (vs an explicit `.proxy(...)` call).
-    proxy_from_env: bool,
-    max_redirects: usize,
     proxy_config: ProxyConfig,
     dns_config: DnsConfig,
     timeouts: TimeoutConfig,
@@ -52,11 +52,15 @@ pub struct SessionBuilder {
     /// When set, HTTP identity (UA / sec-ch-ua / identity extras) comes from this browser while TLS + H2 still follow [`Self::browser`].
     http_identity: Option<Browser>,
     accept_invalid_certs: bool,
-    pool_idle_timeout: Option<std::time::Duration>,
     happy_eyeballs: Option<HappyEyeballsConfig>,
     tls_trust: TlsTrustConfig,
     /// Session-wide default retry policy (none unless set via `retry`).
     default_retry: crate::core::retry::RetryPolicy,
+    /// Lifecycle listener installed by `trace`.
+    trace: Option<Arc<dyn Trace>>,
+    /// Composed middleware stack installed by `layer`.
+    #[cfg(feature = "tower")]
+    layer: Option<Arc<dyn Stack>>,
 }
 
 /// Header edits plus a Navigate `accept` replacement from a brand overlay.
@@ -69,9 +73,6 @@ impl SessionBuilder {
             platform: Platform::default(),
             platform_explicit: false,
             brand: ChromiumBrand::default(),
-            proxy: None,
-            proxy_from_env: false,
-            max_redirects: 10,
             proxy_config: ProxyConfig::default(),
             dns_config: DnsConfig::default(),
             timeouts: TimeoutConfig::default(),
@@ -91,32 +92,23 @@ impl SessionBuilder {
             extra_identity_headers: Vec::new(),
             http_identity: None,
             accept_invalid_certs: false,
-            pool_idle_timeout: None,
             happy_eyeballs: None,
             tls_trust: TlsTrustConfig::default(),
             default_retry: crate::core::retry::RetryPolicy::none(),
+            trace: None,
+            #[cfg(feature = "tower")]
+            layer: None,
         }
     }
 
     /// Set a proxy URL (`http://`, `https://`, `socks5://`, `socks5h://`).
     pub fn proxy(mut self, proxy: impl Into<String>) -> Self {
-        let proxy = proxy.into();
-        self.proxy_config = self.proxy_config.set_default_proxy(proxy.clone());
-        self.proxy = Some(proxy);
-        self
-    }
-
-    /// Set a validated proxy URL.
-    pub fn proxy_url(mut self, proxy: ProxyUrl) -> Self {
-        let proxy = proxy.into_string();
-        self.proxy_config = self.proxy_config.set_default_proxy(proxy.clone());
-        self.proxy = Some(proxy);
+        self.proxy_config = self.proxy_config.set_default_proxy(proxy);
         self
     }
 
     /// Replace the full proxy configuration.
     pub fn proxies(mut self, config: ProxyConfig) -> Self {
-        self.proxy = config.first_proxy().map(ToOwned::to_owned);
         self.proxy_config = config;
         self
     }
@@ -145,7 +137,7 @@ impl SessionBuilder {
         self
     }
 
-    /// Replace timeout configuration.
+    /// Replace every timeout, including values set earlier by `timeout` and `connect_timeout`.
     pub fn timeouts(mut self, config: TimeoutConfig) -> Self {
         self.timeouts = config;
         self
@@ -157,47 +149,9 @@ impl SessionBuilder {
         self
     }
 
-    /// Set buffered response-body read timeout.
-    pub fn read_timeout(mut self, timeout: std::time::Duration) -> Self {
-        self.timeouts.read = Some(timeout);
-        self
-    }
-
-    /// Set the post-send response cap, per redirect hop.
-    pub fn response_header_timeout(mut self, timeout: std::time::Duration) -> Self {
-        self.timeouts.response_header = Some(timeout);
-        self
-    }
-
-    /// Override the connection pool's idle-eviction timeout (default: 300s).
-    pub fn pool_idle_timeout(mut self, timeout: std::time::Duration) -> Self {
-        self.pool_idle_timeout = Some(timeout);
-        self.pool_config.idle_timeout = timeout;
-        self
-    }
-
-    /// Replace connection-pool configuration.
+    /// Replace the connection-pool configuration.
     pub fn pool_config(mut self, config: PoolConfig) -> Self {
-        self.pool_idle_timeout = Some(config.idle_timeout);
         self.pool_config = config;
-        self
-    }
-
-    /// Set pool idle timeout and maximum pooled destinations.
-    pub fn pool_limits(
-        mut self,
-        idle_timeout: std::time::Duration,
-        max_connections: usize,
-    ) -> Self {
-        self.pool_idle_timeout = Some(idle_timeout);
-        self.pool_config.idle_timeout = idle_timeout;
-        self.pool_config.max_connections = max_connections.max(1);
-        self
-    }
-
-    /// Disable connection reuse for this session.
-    pub fn disable_keepalive(mut self) -> Self {
-        self.pool_config.keepalive = false;
         self
     }
 
@@ -286,7 +240,7 @@ impl SessionBuilder {
             .brand(ChromiumBrand::Opera)
     }
 
-    /// Vivaldi overlay on Chrome 147 — last major with a recorded Vivaldi build string.
+    /// Vivaldi overlay on Chrome 147: last major with a recorded Vivaldi build string.
     pub fn vivaldi(self) -> Self {
         self.chromium_or_default(Browser::Chrome147)
             .with_h3_race()
@@ -330,14 +284,12 @@ impl SessionBuilder {
 
     /// Set maximum number of redirects to follow.
     pub fn max_redirects(mut self, n: usize) -> Self {
-        self.max_redirects = n;
         self.redirect_policy = RedirectPolicy::limited(n);
         self
     }
 
     /// Replace redirect follow policy.
     pub fn redirect_policy(mut self, policy: RedirectPolicy) -> Self {
-        self.max_redirects = policy.max_redirects_hint();
         self.redirect_policy = policy;
         self
     }
@@ -393,27 +345,9 @@ impl SessionBuilder {
         self
     }
 
-    /// Replace low-level socket options for direct connects.
+    /// Replace the socket configuration: bind address, TCP_NODELAY, keepalive, buffers, and interface.
     pub fn socket_config(mut self, config: SocketConfig) -> Self {
         self.socket_config = config;
-        self
-    }
-
-    /// Bind direct sockets to a local IP address.
-    pub fn local_address(mut self, address: std::net::IpAddr) -> Self {
-        self.socket_config.local_address = Some(address);
-        self
-    }
-
-    /// Override TCP_NODELAY.
-    pub fn tcp_nodelay(mut self, enabled: bool) -> Self {
-        self.socket_config.tcp_nodelay = Some(enabled);
-        self
-    }
-
-    /// Set TCP keepalive idle time.
-    pub fn tcp_keepalive(mut self, idle: std::time::Duration) -> Self {
-        self.socket_config.tcp_keepalive = Some(idle);
         self
     }
 
@@ -432,6 +366,28 @@ impl SessionBuilder {
     /// Reject non-HTTPS request URLs at execution time.
     pub fn https_only(mut self, enabled: bool) -> Self {
         self.https_only = enabled;
+        self
+    }
+
+    /// Observe every request's lifecycle through `hook`: DNS, connect, TLS, send, response head, and completion. The hook runs inline on the request task, so a slow listener slows the request.
+    pub fn trace(mut self, hook: impl Trace) -> Self {
+        self.trace = Some(Arc::new(hook));
+        self
+    }
+
+    /// Wrap every request attempt in a Tower middleware stack. The layer runs after the session resolved headers, body, and proxy, and before the transport is chosen; each redirect leg is one [`crate::layer::Call`]. Retries, redirects, cookies, and tracing stay in the session, outside the layer. A layer can edit headers or answer without calling the inner service; it cannot change the protocol policy. A later call replaces an earlier stack, so compose with `tower::ServiceBuilder` or `tower_layer::Stack`.
+    #[cfg(feature = "tower")]
+    pub fn layer<L>(mut self, layer: L) -> Self
+    where
+        L: tower_layer::Layer<Transport>,
+        L::Service: tower_service::Service<Call, Response = Reply, Error = Error>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+        <L::Service as tower_service::Service<Call>>::Future: Send + 'static,
+    {
+        self.layer = Some(Arc::new(Hold(layer.layer(Transport))));
         self
     }
 
@@ -581,14 +537,14 @@ impl SessionBuilder {
     /// Build the session.
     pub fn build(mut self) -> Result<Session> {
         if let Some(error) = self.config_error.take() {
-            return Err(Error::Config(error));
+            return Err(Error::new(Kind::Config).with_message(error));
         }
-        if let (Some(tls), Some(http)) = (self.browser, self.http_identity) {
-            if tls.family() != http.family() {
-                return Err(Error::Config(format!(
-                    "http identity {http} is not the same family as TLS {tls}"
-                )));
-            }
+        if let (Some(tls), Some(http)) = (self.browser, self.http_identity)
+            && tls.family() != http.family()
+        {
+            return Err(Error::new(Kind::Config).with_message(format!(
+                "http identity {http} is not the same family as TLS {tls}"
+            )));
         }
 
         self.platform = if self.platform_explicit {
@@ -598,7 +554,7 @@ impl SessionBuilder {
             NOTICE.call_once(|| {
                 tracing::info!(
                     target: "leyline::session",
-                    "no .platform() set on an impersonation profile — defaulting to \
+                    "no .platform() set on an impersonation profile: defaulting to \
                      Windows; call .platform(...) to pin the OS identity"
                 );
             });
@@ -607,31 +563,32 @@ impl SessionBuilder {
             Platform::detect_host()
         };
 
-        if self.proxy.is_none() && self.proxy_config.uses_env() {
-            if let Some(p) = env_proxy() {
-                self.proxy_config = self.proxy_config.set_default_proxy(p.clone());
-                self.proxy = Some(p);
-                self.proxy_from_env = true;
-            }
+        for rule in self.proxy_config.rules() {
+            ProxyUrl::parse(rule.url())?;
+        }
+        if self.proxy_config.primary().is_none()
+            && self.proxy_config.uses_env()
+            && let Some(p) = env_proxy()
+        {
+            self.proxy_config = self.proxy_config.set_default_proxy(p).set_from_env();
         }
         #[cfg(feature = "http3")]
         {
-            if (self.proxy.is_some() || self.proxy_config.first_proxy().is_some())
+            if self.proxy_config.primary().is_some()
                 && matches!(self.protocol_policy, ProtocolPolicy::Http3)
             {
-                return Err(Error::Config(
+                return Err(Error::new(Kind::Config).with_message(
                     "HTTP/3 cannot run over a proxy (QUIC/UDP needs MASQUE, which proxies don't \
                      speak): drop `.http3()` to use HTTP/2 over the proxy's CONNECT tunnel, or \
-                     drop `.proxy(...)` to dial HTTP/3 direct"
-                        .into(),
+                     drop `.proxy(...)` to dial HTTP/3 direct",
                 ));
             }
         }
 
         let profile: &'static BrowserProfile = match self.browser {
-            Some(b) => ProfileRegistry::global()
-                .get_browser(b)
-                .ok_or_else(|| Error::Config(format!("no profile for {b}")))?,
+            Some(b) => ProfileRegistry::global().get_browser(b).ok_or_else(|| {
+                Error::new(Kind::Config).with_message(format!("no profile for {b}"))
+            })?,
             None => &BARE_PROFILE,
         };
 
@@ -643,11 +600,14 @@ impl SessionBuilder {
         let mut identity = if let Some(http_b) = self.http_identity {
             let http_profile = ProfileRegistry::global()
                 .get_browser(http_b)
-                .ok_or_else(|| Error::Config(format!("no profile for http identity {http_b}")))?;
+                .ok_or_else(|| {
+                    Error::new(Kind::Config)
+                        .with_message(format!("no profile for http identity {http_b}"))
+                })?;
             http_profile
                 .identity_for(self.platform)
                 .ok_or_else(|| {
-                    Error::Config(format!(
+                    Error::new(Kind::Config).with_message(format!(
                         "no {} identity for http identity {http_b}",
                         self.platform
                     ))
@@ -657,7 +617,8 @@ impl SessionBuilder {
             profile
                 .identity_for(self.platform)
                 .ok_or_else(|| {
-                    Error::Config(format!("no {} identity for {browser_label}", self.platform))
+                    Error::new(Kind::Config)
+                        .with_message(format!("no {} identity for {browser_label}", self.platform))
                 })?
                 .clone()
         };
@@ -712,9 +673,6 @@ impl SessionBuilder {
                 },
                 identity_navigate_accept: identity.navigate_accept_override.clone(),
                 identity_request_header_order: identity.request_header_order.clone(),
-                proxy: self.proxy,
-                proxy_from_env: self.proxy_from_env,
-                max_redirects: self.max_redirects,
                 proxy_config: self.proxy_config,
                 timeouts: self.timeouts,
                 redirect_policy: self.redirect_policy,
@@ -743,6 +701,9 @@ impl SessionBuilder {
                 audit_enabled: self.audit,
                 protocol_policy: self.protocol_policy,
                 default_retry: self.default_retry,
+                trace: self.trace,
+                #[cfg(feature = "tower")]
+                layer: self.layer,
                 tls_trust: self.tls_trust.clone(),
                 #[cfg(feature = "http3")]
                 h3_config: match crate::quic::H3Config::for_family(&profile.meta.family) {
@@ -769,7 +730,7 @@ impl SessionBuilder {
         h2_config: &H2Config,
         tcp_profile: TcpProfile,
     ) -> AuditTlsCache {
-        let extension_ids = crate::audit::chrome_extension_ids(&profile.tls);
+        let extension_ids = crate::audit::extension_ids(&profile.tls);
         let ja4 = {
             let input = crate::audit::Ja4Input {
                 ciphers: &profile.tls.ciphers,
@@ -819,7 +780,7 @@ impl SessionBuilder {
             self.tls_trust.clone()
         };
         let mut fp = FingerprintConnector::new_with_trust(profile, tcp_profile, &tls_trust)
-            .map_err(Error::Tls)?;
+            .map_err(Error::from)?;
         if self.accept_invalid_certs {
             fp.set_accept_invalid_certs(true);
         }
@@ -847,7 +808,7 @@ impl SessionBuilder {
                 .or(self.browser)
                 .and_then(|b| b.chromium_major())
             else {
-                return Err(Error::Config(format!(
+                return Err(Error::new(Kind::Config).with_message(format!(
                     "{} overlay requires a Chromium HTTP identity",
                     self.brand.label()
                 )));
@@ -860,7 +821,7 @@ impl SessionBuilder {
                     &identity.user_agent,
                     &identity.sec_ch_ua,
                 )
-                .map_err(|e| Error::Config(format!("{e}")))?;
+                .map_err(|e| Error::new(Kind::Config).with_message(format!("{e}")))?;
             if let Some(overlay) = overlay {
                 identity.user_agent = overlay.user_agent;
                 identity.sec_ch_ua = overlay.sec_ch_ua;

@@ -16,6 +16,23 @@ readme = "../../README.md"
 [lib]
 name = "leyline"
 
+[package.metadata.cargo_check_external_types]
+# Types on the public API that callers are expected to name themselves.
+# `url` is the shared URL type of the Rust HTTP ecosystem (reqwest exposes it
+# too), so `Jar` takes `url::Url` instead of a wrapper. `tokio::io::AsyncWrite`
+# is the sink type of `Response::copy_to`; the crate is tokio-only, so a
+# private sink trait would only add a conversion.
+allowed_external_types = [
+    "http",
+    "http::*",
+    "bytes::*",
+    "serde_core::*",
+    "serde_json::*",
+    "futures_core::*",
+    "url::*",
+    "tokio::io::async_write::AsyncWrite",
+]
+
 [package.metadata.docs.rs]
 # leyline-bssl-sys ships prebuilt BoringSSL for x86_64-unknown-linux-gnu, so
 # docs.rs links the committed libs (no cmake/source build). Document the default
@@ -40,14 +57,14 @@ cookies = []
 # Charset-aware response-body text decoding (Content-Type charset + BOM, via
 # encoding_rs). Off → Response::text falls back to UTF-8 lossy.
 charset = ["dep:encoding_rs"]
-# Body decompression markers. flate2/zstd are non-optional because the TLS
-# layer needs them unconditionally for RFC 8879 certificate decompression
-# (zlib/zstd codepoints are fingerprint-bearing); these flags only gate the
-# HTTP response-body decompression code paths.
-compression-gzip = []
-compression-brotli = []
-compression-deflate = []
-compression-zstd = []
+# Body compression codecs. Each flag also gates the matching RFC 8879
+# certificate decompressor in the TLS layer, so a profile that lists a
+# cert-compression algorithm whose feature is off fails when the session
+# builds instead of silently dropping the codepoint.
+compression-gzip = ["dep:flate2"]
+compression-brotli = ["dep:brotli"]
+compression-deflate = ["dep:flate2"]
+compression-zstd = ["dep:zstd"]
 multipart = ["stream", "dep:async-stream"]
 stream = []
 websocket = ["dep:tungstenite", "dep:tokio-tungstenite"]
@@ -58,7 +75,10 @@ native-interface-bind = []
 # Exposes pub bench-only probes into otherwise pub(crate) pool internals
 # (checkout + evict path). Off by default; only leyline-benches enables it.
 bench-internals = []
-tower = ["dep:tower-service"]
+# Exposes the BoringSSL `SslContextBuilder` behind `TlsContext`. Off by default;
+# the BoringSSL types are not covered by this crate's semver promise.
+unstable-bssl = []
+tower = ["dep:tower-service", "dep:tower-layer"]
 full = [
     "cookies",
     "compression-gzip",
@@ -89,7 +109,7 @@ leyline-bssl = { workspace = true }
 leyline-bssl-tokio = { workspace = true }
 
 # -- async runtime
-tokio = { workspace = true, features = ["net", "rt", "rt-multi-thread", "time", "io-util", "macros", "fs", "sync"] }
+tokio = { workspace = true, features = ["net", "rt", "time", "io-util", "macros", "fs", "sync"] }
 
 # -- serialization
 serde = { workspace = true }
@@ -111,7 +131,6 @@ sha2 = { workspace = true }
 md-5 = { workspace = true }
 sha1 = { workspace = true }
 hex = "0.4"
-md5_legacy = { package = "md5", version = "0.7" }
 base64 = { workspace = true }
 
 # -- HTTP / WebSocket
@@ -132,19 +151,24 @@ async-stream = { version = "0.3", optional = true }
 # cancel-safe AsyncWrite backpressure (waker survives across polls).
 tokio-util = { version = "0.7", features = ["io"] }
 lru = "0.18"
-rand = "0.8"
+rand = "0.9"
 libc = "0.2"
 tower-service = { version = "0.3", optional = true }
+tower-layer = { version = "0.3", optional = true }
 
-# -- compression (all non-optional: the TLS layer needs flate2/zstd for
-#    RFC 8879 certificate decompression regardless of body-compression flags)
-flate2 = "1"
-brotli = "8"
-zstd = "0.13"
+# -- compression (optional: each codec is pulled in by its own feature, for
+#    both HTTP body compression and RFC 8879 certificate decompression)
+flate2 = { version = "1", optional = true }
+brotli = { version = "8", optional = true }
+zstd = { version = "0.13", optional = true }
 
 # Windows: read the platform trust store via Win32 crypto API.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Security_Cryptography", "Win32_Foundation"] }
+
+[[example]]
+name = "layer"
+required-features = ["tower"]
 
 [dev-dependencies]
 bytes = { workspace = true }

@@ -40,7 +40,7 @@ const STREAM_PUMP_INTERVAL: Duration = Duration::from_millis(2);
 /// Upper bound on how long a stream whose caller dropped its receiver lingers before the driver reaps it (see [`sweep_cancelled_streams`]).
 const CANCEL_SWEEP_INTERVAL: Duration = Duration::from_millis(100);
 
-/// A streaming request body: the same boxed `Stream` shape as [`crate::core::Body::Stream`].
+/// A streaming request body: the same boxed `Stream` shape as [`crate::Body::Stream`].
 pub type H3RequestBodyStream =
     std::pin::Pin<Box<dyn futures_util::Stream<Item = std::io::Result<Bytes>> + Send + 'static>>;
 
@@ -65,6 +65,8 @@ enum H3Command {
         body_stream: Option<H3RequestBodyStream>,
         /// `Some` when the caller wants the response body delivered incrementally: the head (status + headers) resolves `resp_tx` as soon as HEADERS arrive and body chunks flow through this channel.
         stream_body_tx: Option<mpsc::Sender<std::io::Result<Bytes>>>,
+        /// `true` once the driver has already replayed this request after an H3_REQUEST_REJECTED; a second rejection is returned to the caller.
+        retried: bool,
         resp_tx: oneshot::Sender<Result<H3Response, String>>,
     },
 }
@@ -81,6 +83,8 @@ pub enum H3RespBody {
 pub struct H3ResponseParts {
     pub status: u16,
     pub headers: Vec<(String, String)>,
+    /// Trailer headers of a buffered response; empty for streaming responses.
+    pub trailers: Vec<(String, String)>,
     pub body: H3RespBody,
 }
 
@@ -157,6 +161,7 @@ impl H3Client {
                 body_stream,
                 stream_body_tx,
                 resp_tx,
+                retried: false,
             })
             .await
             .map_err(|_| H3SendError::NotSent("h3 driver task has exited".into()))?;
@@ -165,6 +170,7 @@ impl H3Client {
             Ok(Ok(head)) => Ok(H3ResponseParts {
                 status: head.status,
                 headers: head.headers,
+                trailers: head.trailers,
                 body: match stream_body_rx {
                     Some(rx) => H3RespBody::Streaming(rx),
                     None => H3RespBody::Buffered(head.body),
@@ -308,7 +314,7 @@ struct H3Stream {
     /// Handle to this stream's request-body pump task (`None` unless streaming).
     pump: Option<AbortHandle>,
     /// Request retained for one transparent retry when the server answers H3_REQUEST_REJECTED (its MAX_CONCURRENT_STREAMS budget was full at open).
-    retry: Option<(Vec<quiche::h3::Header>, Option<Bytes>, u8)>,
+    retry: Option<(Vec<quiche::h3::Header>, Option<Bytes>)>,
 }
 
 impl Drop for H3Stream {
@@ -409,18 +415,19 @@ impl H3Stream {
     /// Deliver a head/error response on the oneshot (buffered mode, or a streaming error before the head was sent).
     fn deliver(&mut self, result: Result<H3Response, String>) {
         if let Some(tx) = self.resp_tx.take() {
-            let _ = tx.send(result);
+            drop(tx.send(result));
         }
     }
 
     /// Streaming: deliver the head (status + headers, empty placeholder body) the first time HEADERS arrive.
     fn deliver_head(&mut self) {
         if let Some(tx) = self.resp_tx.take() {
-            let _ = tx.send(Ok(H3Response {
+            drop(tx.send(Ok(H3Response {
                 status: self.status,
                 headers: std::mem::take(&mut self.headers),
                 body: Vec::new(),
-            }));
+                trailers: Vec::new(),
+            })));
         }
         self.head_sent = true;
     }

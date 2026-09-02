@@ -332,10 +332,10 @@ mod httpbin_lite {
 async fn decompression_gzip() {
     let base = httpbin_lite::spawn().await;
     let session = Session::chrome();
-    let resp = session.get(&format!("{base}/gzip")).await.unwrap();
+    let mut resp = session.get(&format!("{base}/gzip")).await.unwrap();
     assert_eq!(resp.status(), 200);
     let json: Value =
-        serde_json::from_str(&resp.text().unwrap()).expect("gzip-decoded body not JSON");
+        serde_json::from_str(&resp.text().await.unwrap()).expect("gzip-decoded body not JSON");
     assert_eq!(json["gzipped"], true);
 }
 
@@ -343,10 +343,10 @@ async fn decompression_gzip() {
 async fn decompression_brotli() {
     let base = httpbin_lite::spawn().await;
     let session = Session::chrome();
-    let resp = session.get(&format!("{base}/brotli")).await.unwrap();
+    let mut resp = session.get(&format!("{base}/brotli")).await.unwrap();
     assert_eq!(resp.status(), 200);
     let json: Value =
-        serde_json::from_str(&resp.text().unwrap()).expect("brotli-decoded body not JSON");
+        serde_json::from_str(&resp.text().await.unwrap()).expect("brotli-decoded body not JSON");
     assert_eq!(json["brotli"], true);
 }
 
@@ -354,10 +354,10 @@ async fn decompression_brotli() {
 async fn decompression_deflate() {
     let base = httpbin_lite::spawn().await;
     let session = Session::chrome();
-    let resp = session.get(&format!("{base}/deflate")).await.unwrap();
+    let mut resp = session.get(&format!("{base}/deflate")).await.unwrap();
     assert_eq!(resp.status(), 200);
     let json: Value =
-        serde_json::from_str(&resp.text().unwrap()).expect("deflate-decoded body not JSON");
+        serde_json::from_str(&resp.text().await.unwrap()).expect("deflate-decoded body not JSON");
     assert_eq!(json["deflated"], true);
 }
 
@@ -371,9 +371,9 @@ async fn cookies_set_then_sent() {
         .unwrap();
     assert_eq!(resp1.status(), 200);
 
-    let resp2 = session.get(&format!("{base}/cookies")).await.unwrap();
+    let mut resp2 = session.get(&format!("{base}/cookies")).await.unwrap();
     assert_eq!(resp2.status(), 200);
-    let json: Value = serde_json::from_str(&resp2.text().unwrap()).unwrap();
+    let json: Value = serde_json::from_str(&resp2.text().await.unwrap()).unwrap();
     assert_eq!(
         json["cookies"]["token"].as_str(),
         Some("abc123"),
@@ -427,14 +427,17 @@ async fn redirect_follows_and_rewrites_url() {
 async fn redirect_preserves_auth_same_host() {
     let base = httpbin_lite::spawn().await;
     let session = Session::chrome();
-    let resp = session
-        .request("GET", &format!("{base}/redirect-to?url={base}/headers"))
+    let mut resp = session
+        .request(
+            http::Method::GET,
+            format!("{base}/redirect-to?url={base}/headers"),
+        )
         .bearer_auth("secret-token-xyz")
         .send()
         .await
         .unwrap();
     assert_eq!(resp.status(), 200);
-    let json: Value = serde_json::from_str(&resp.text().unwrap()).unwrap();
+    let json: Value = serde_json::from_str(&resp.text().await.unwrap()).unwrap();
     assert_eq!(
         json["headers"]["Authorization"].as_str(),
         Some("Bearer secret-token-xyz"),
@@ -448,7 +451,7 @@ async fn redirect_307_308_replays_buffered_body() {
         let base = httpbin_lite::spawn().await;
         let session = Session::chrome();
         let payload = "replay-me-please-i-am-a-request-body";
-        let resp = session
+        let mut resp = session
             .post(&format!(
                 "{base}/redirect-to?url=/post&status_code={status}"
             ))
@@ -462,7 +465,7 @@ async fn redirect_307_308_replays_buffered_body() {
             "{status}: should follow through to /post"
         );
         assert_eq!(resp.redirect_chain().len(), 1, "{status}: exactly one hop");
-        let json: Value = serde_json::from_str(&resp.text().unwrap()).unwrap();
+        let json: Value = serde_json::from_str(&resp.text().await.unwrap()).unwrap();
         assert_eq!(
             json["data"], payload,
             "{status} redirect dropped the request body"
@@ -490,13 +493,13 @@ async fn post_json_body_roundtrip() {
     let base = httpbin_lite::spawn().await;
     let session = Session::chrome();
     let body = serde_json::json!({"test": "leyline", "n": 42});
-    let resp = session
+    let mut resp = session
         .post(&format!("{base}/post"))
         .json(&body)
         .await
         .unwrap();
     assert_eq!(resp.status(), 200);
-    let json: Value = serde_json::from_str(&resp.text().unwrap()).unwrap();
+    let json: Value = serde_json::from_str(&resp.text().await.unwrap()).unwrap();
     assert_eq!(json["json"]["test"], "leyline");
     assert_eq!(json["json"]["n"], 42);
 }
@@ -505,13 +508,13 @@ async fn post_json_body_roundtrip() {
 async fn post_form_body_roundtrip() {
     let base = httpbin_lite::spawn().await;
     let session = Session::chrome();
-    let resp = session
+    let mut resp = session
         .post(&format!("{base}/post"))
-        .form(&[("u", "alice"), ("p", "s3cret")])
+        .form([("u", "alice"), ("p", "s3cret")])
         .await
         .unwrap();
     assert_eq!(resp.status(), 200);
-    let json: Value = serde_json::from_str(&resp.text().unwrap()).unwrap();
+    let json: Value = serde_json::from_str(&resp.text().await.unwrap()).unwrap();
     assert_eq!(json["form"]["u"], "alice");
     assert_eq!(json["form"]["p"], "s3cret");
 }

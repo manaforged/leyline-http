@@ -6,9 +6,9 @@ async fn main() {
         .get("https://tls.peet.ws/api/all")
         .await
     {
-        Ok(resp) => {
+        Ok(mut resp) => {
             println!("Status: {}", resp.status());
-            let text = resp.text().unwrap();
+            let text = resp.text().await.unwrap();
             if text.len() > 100 {
                 println!("Body: {}... ({} bytes)", &text[..100], text.len());
             }

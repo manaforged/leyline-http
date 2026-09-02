@@ -8,6 +8,7 @@ mod platform;
 
 /// TCP/IP stack fingerprint parameters for JA4T matching.
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub struct TcpProfile {
     /// IP TTL: 128 for Windows, 64 for macOS/Linux.
     pub ttl: u32,
@@ -65,7 +66,7 @@ impl TcpProfile {
     };
 
     /// Apply this TCP profile to a socket before connect().
-    pub fn apply(&self, socket: &Socket, is_v6: bool) {
+    pub(crate) fn apply(&self, socket: &Socket, is_v6: bool) {
         if self.ttl > 0 {
             let result = if is_v6 {
                 socket.set_unicast_hops_v6(self.ttl)
@@ -77,16 +78,16 @@ impl TcpProfile {
             }
         }
 
-        if self.window_size > 0 {
-            if let Err(e) = socket.set_recv_buffer_size(self.window_size as usize) {
-                log_once("SO_RCVBUF", &e);
-            }
+        if self.window_size > 0
+            && let Err(e) = socket.set_recv_buffer_size(self.window_size as usize)
+        {
+            log_once("SO_RCVBUF", &e);
         }
 
-        if self.no_delay {
-            if let Err(e) = socket.set_nodelay(true) {
-                log_once("TCP_NODELAY", &e);
-            }
+        if self.no_delay
+            && let Err(e) = socket.set_nodelay(true)
+        {
+            log_once("TCP_NODELAY", &e);
         }
 
         platform::apply_platform_options(socket, self, is_v6);

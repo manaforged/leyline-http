@@ -40,7 +40,10 @@ impl_frame_encode!(
     GoAwayFrame,
 );
 
-/// Writes HTTP/2 frames to an async writer.
+/// Bytes that may accumulate in the outbound buffer before `write_frame` drains it eagerly.
+const CAP: usize = 64 * 1024;
+
+/// Writes HTTP/2 frames to an async writer; frames accumulate so one event-loop turn costs one `write_all`, and [`FrameWriter::flush`] must run before awaiting the peer.
 pub struct FrameWriter<W> {
     inner: W,
     buf: BytesMut,
@@ -55,19 +58,33 @@ impl<W: AsyncWrite + Unpin> FrameWriter<W> {
         }
     }
 
+    /// Buffered bytes not yet handed to the socket.
+    pub fn pending(&self) -> usize {
+        self.buf.len()
+    }
+
     /// Write the HTTP/2 client connection preface.
     pub async fn write_preface(&mut self) -> Result<(), H2Error> {
-        self.inner
-            .write_all(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
-            .await?;
+        self.buf
+            .extend_from_slice(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
         Ok(())
     }
 
-    /// Encode `frame` into the reusable buffer and write it out.
+    /// Append `frame` to the outbound buffer, draining it once it passes `CAP`.
     async fn write_frame<F: FrameEncode>(&mut self, frame: &F) -> Result<(), H2Error> {
-        self.buf.clear();
         frame.encode(&mut self.buf);
-        self.inner.write_all(&self.buf).await?;
+        if self.buf.len() >= CAP {
+            self.drain().await?;
+        }
+        Ok(())
+    }
+
+    /// Hand the accumulated bytes to the socket without flushing it.
+    async fn drain(&mut self) -> Result<(), H2Error> {
+        if !self.buf.is_empty() {
+            self.inner.write_all(&self.buf).await?;
+            self.buf.clear();
+        }
         Ok(())
     }
 
@@ -77,8 +94,7 @@ impl<W: AsyncWrite + Unpin> FrameWriter<W> {
         frame: &crate::h2::frame::SettingsFrame,
     ) -> Result<(), H2Error> {
         self.write_frame(frame).await?;
-        self.inner.flush().await?;
-        Ok(())
+        self.flush().await
     }
 
     /// Write a WINDOW_UPDATE frame.
@@ -143,17 +159,21 @@ impl<W: AsyncWrite + Unpin> FrameWriter<W> {
 
     /// Write raw bytes (for CONTINUATION frames).
     pub async fn write_raw(&mut self, data: &[u8]) -> Result<(), H2Error> {
-        self.inner.write_all(data).await?;
+        self.buf.extend_from_slice(data);
+        if self.buf.len() >= CAP {
+            self.drain().await?;
+        }
         Ok(())
     }
 
-    /// Flush the writer.
+    /// Write the accumulated bytes, then flush the socket.
     pub async fn flush(&mut self) -> Result<(), H2Error> {
+        self.drain().await?;
         self.inner.flush().await?;
         Ok(())
     }
 
-    /// Get a mutable reference to the inner writer.
+    /// Get a mutable reference to the inner writer; flush first or buffered frames are reordered.
     pub fn inner_mut(&mut self) -> &mut W {
         &mut self.inner
     }

@@ -10,8 +10,8 @@
 )]
 use std::io::Write;
 
-use leyline::core::Session;
-use leyline::core::multipart::{Form, Part};
+use leyline::Session;
+use leyline::multipart::{Form, Part};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 /// Read the full request (headers + body) off the socket.
@@ -220,9 +220,9 @@ use futures_util::StreamExt;
 
 /// Directly pull the first chunk out of a Form to inspect its `Content-Disposition` serialization without going over the wire.
 async fn first_part_header(form: Form) -> std::io::Result<bytes::Bytes> {
-    let body = form.into_stream_body_for_test();
+    let body: leyline::Body = form.into();
     let mut stream = match body {
-        leyline::core::Body::Stream { stream, .. } => stream,
+        leyline::Body::Stream { stream, .. } => stream,
         _ => panic!("multipart body must be Stream"),
     };
     match stream.next().await {

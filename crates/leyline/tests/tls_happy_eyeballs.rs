@@ -9,7 +9,7 @@ use leyline::profile::BrowserProfile;
 use leyline::tls::{
     FingerprintConnector, HappyEyeballsConfig, ResolveFuture, Resolver, SystemResolver,
 };
-use leyline::{Browser, Error, Session, TlsError, TlsTrustConfig};
+use leyline::{Browser, Session, TlsError, TlsTrustConfig};
 
 /// Mock resolver that returns a fixed list.
 struct StaticResolver(Vec<SocketAddr>);
@@ -42,10 +42,11 @@ async fn builder_accepts_custom_resolver() {
     let _connector = FingerprintConnector::new(&profile, TcpProfile::LINUX)
         .expect("connector build")
         .with_resolver(resolver)
-        .with_happy_eyeballs_config(HappyEyeballsConfig {
-            resolve_delay: Duration::from_millis(50),
-            attempt_limit: 4,
-        });
+        .with_happy_eyeballs_config(
+            HappyEyeballsConfig::default()
+                .resolve_delay(Duration::from_millis(50))
+                .attempt_limit(4),
+        );
 }
 
 #[tokio::test]
@@ -74,10 +75,11 @@ fn session_builder_exposes_dns_controls() {
     let _session = Session::builder()
         .browser(Browser::Chrome146)
         .resolver(resolver)
-        .happy_eyeballs(HappyEyeballsConfig {
-            resolve_delay: Duration::from_millis(25),
-            attempt_limit: 2,
-        })
+        .happy_eyeballs(
+            HappyEyeballsConfig::default()
+                .resolve_delay(Duration::from_millis(25))
+                .attempt_limit(2),
+        )
         .build()
         .expect("session build");
 }
@@ -103,5 +105,5 @@ fn invalid_der_root_is_rejected_at_build_time() {
         .add_root_certificate_der([1, 2, 3, 4])
         .build()
         .expect_err("invalid DER CA should fail TLS setup");
-    assert!(matches!(err, Error::Tls(TlsError::SslConfig(_))));
+    assert!(matches!(err.tls(), Some(TlsError::SslConfig(_))));
 }

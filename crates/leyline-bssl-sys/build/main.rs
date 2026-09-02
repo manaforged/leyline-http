@@ -10,7 +10,7 @@ use std::process::{Command, Output};
 use std::sync::OnceLock;
 
 use crate::config::Config;
-use crate::prefix::{prefix_symbols, PrefixCallback};
+use crate::prefix::{PREFIX, PrefixCallback};
 
 mod cache;
 mod config;
@@ -591,9 +591,8 @@ fn build_boringssl_or_get_prebuilt(config: &Config) -> &Path {
                 .define("FIPS", "1");
         }
 
-        if config.features.prefix_symbols {
-            cfg.define("CMAKE_POSITION_INDEPENDENT_CODE", "ON");
-        }
+        cfg.define("CMAKE_POSITION_INDEPENDENT_CODE", "ON");
+        cfg.define("BORINGSSL_PREFIX", PREFIX);
 
         cache::apply(config, &mut cfg);
 
@@ -682,23 +681,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         emit_link_directives(&config);
     }
 
-    if config.features.prefix_symbols {
-        match config.target_os.as_str() {
-            "macos" | "ios" | "windows" => {
-                println!(
-                    "cargo:warning=The `prefix_symbols` feature is not supported on macOS/iOS or Windows targets. Skipping symbol prefixing."
-                );
-            }
-            _ => {
-                // Symbol prefixing requires the 'nm' tool which is not available in the docs.rs
-                // build environment. When building documentation, symbol prefixing is skipped.
-                // For regular builds, this operation is costly and only performed when necessary.
-                if !config.env.docs_rs {
-                    prefix_symbols(&config)
-                }
-            }
-        }
-    }
     generate_bindings(&config).map_err(|e| format!("could not generate bindings: {e}"))?;
     if let Some(install_dir) = &config.env.export_to_install_dir {
         install_artifacts(&config, install_dir)
@@ -818,9 +800,10 @@ fn generate_bindings(config: &Config) -> Result<PathBuf, Box<dyn std::error::Err
         }
     }
 
-    if config.features.prefix_symbols {
-        builder = builder.parse_callbacks(Box::new(PrefixCallback));
-    }
+    builder = builder.parse_callbacks(Box::new(PrefixCallback::read(
+        &include_path,
+        &config.target_os,
+    )?));
 
     let must_have_headers = [
         "aes.h",

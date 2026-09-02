@@ -39,7 +39,7 @@ fn public_claims_stay_bounded() {
     );
 }
 
-/// Every test name printed in README.md must exist in src/ or tests/.
+/// Every test or example name printed in README.md must exist in src/, tests/, or examples/.
 #[test]
 fn cited_test_names_exist() {
     let known = source_identifiers();
@@ -50,7 +50,7 @@ fn cited_test_names_exist() {
     for name in cited_test_candidates(&text) {
         if !known.contains(&name) {
             missing.push(format!(
-                "README.md cites `{name}`, which exists nowhere in src/ or tests/"
+                "README.md cites `{name}`, which exists nowhere in src/, tests/, or examples/"
             ));
         }
     }
@@ -126,11 +126,11 @@ fn cited_test_candidates(text: &str) -> Vec<String> {
             continue;
         }
         if let Some((prefix, rest)) = span.split_once('{') {
-            if let Some(items) = rest.strip_suffix('}') {
-                if is_snake_ident(prefix) {
-                    for item in items.split(',') {
-                        out.push(format!("{prefix}{}", item.trim()));
-                    }
+            if let Some(items) = rest.strip_suffix('}')
+                && is_snake_ident(prefix)
+            {
+                for item in items.split(',') {
+                    out.push(format!("{prefix}{}", item.trim()));
                 }
             }
         } else if is_snake_ident(span) {
@@ -153,7 +153,7 @@ fn is_snake_ident(s: &str) -> bool {
 fn source_identifiers() -> std::collections::HashSet<String> {
     let mut set = std::collections::HashSet::new();
     let crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    for sub in ["src", "tests"] {
+    for sub in ["src", "tests", "examples"] {
         collect_identifiers(&crate_dir.join(sub), &mut set);
     }
     set
@@ -168,6 +168,9 @@ fn collect_identifiers(dir: &Path, set: &mut std::collections::HashSet<String>) 
         if path.is_dir() {
             collect_identifiers(&path, set);
         } else if path.extension().is_some_and(|e| e == "rs") {
+            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                set.insert(stem.to_string());
+            }
             if let Ok(text) = std::fs::read_to_string(&path) {
                 for token in text.split(|c: char| !c.is_ascii_alphanumeric() && c != '_') {
                     if is_snake_ident(token) {

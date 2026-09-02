@@ -3,7 +3,7 @@
     clippy::unwrap_used,
     reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
 )]
-use leyline::core::{DigestAuth, Session};
+use leyline::{DigestAuth, Session};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 /// Drain HTTP/1 headers off a socket, returning the header block text.
@@ -86,14 +86,14 @@ async fn md5_challenge_round_trip() {
     });
 
     let session = Session::builder().http1().build().unwrap();
-    let resp = session
-        .request("GET", &format!("http://{addr}/protected"))
+    let mut resp = session
+        .request(http::Method::GET, format!("http://{addr}/protected"))
         .digest_auth(DigestAuth::new("mufasa", "circle-of-life"))
         .send()
         .await
         .unwrap();
     assert_eq!(resp.status(), 200);
-    assert_eq!(resp.text().unwrap(), "ok");
+    assert_eq!(resp.text().await.unwrap(), "ok");
     server.await.unwrap();
 }
 
@@ -107,7 +107,7 @@ async fn sha256_challenge_round_trip() {
 
     let session = Session::builder().http1().build().unwrap();
     let resp = session
-        .request("GET", &format!("http://{addr}/"))
+        .request(http::Method::GET, format!("http://{addr}/"))
         .digest_auth(DigestAuth::new("admin", "hunter2"))
         .send()
         .await
@@ -160,7 +160,7 @@ async fn stale_nonce_is_retried_transparently() {
 
     let session = Session::builder().http1().build().unwrap();
     let resp = session
-        .request("GET", &format!("http://{addr}/protected"))
+        .request(http::Method::GET, format!("http://{addr}/protected"))
         .digest_auth(DigestAuth::new("u", "p"))
         .send()
         .await
@@ -241,7 +241,7 @@ async fn digest_uri_tracks_the_redirected_challenge_url() {
 
     let session = Session::builder().http1().build().unwrap();
     let resp = session
-        .request("GET", &format!("http://{addr}/start"))
+        .request(http::Method::GET, format!("http://{addr}/start"))
         .digest_auth(DigestAuth::new("u", "p"))
         .send()
         .await
@@ -274,7 +274,7 @@ async fn non_digest_401_is_passed_through() {
 
     let session = Session::builder().http1().build().unwrap();
     let resp = session
-        .request("GET", &format!("http://{addr}/"))
+        .request(http::Method::GET, format!("http://{addr}/"))
         .digest_auth(DigestAuth::new("u", "p"))
         .send()
         .await

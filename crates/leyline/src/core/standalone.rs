@@ -2,17 +2,21 @@
 
 use std::time::Duration;
 
+use http::{HeaderName, HeaderValue, Method, Uri};
+
 use crate::core::body::Body;
 use crate::core::digest::DigestAuth;
 use crate::core::headers::HeaderList;
 use crate::core::retry::RetryPolicy;
+use crate::profile::Preset;
 
-/// A standalone, owned HTTP request.
+/// Owned HTTP request. `Session::execute` infers Xhr/Form from `content-type` unless `preset` is set.
+#[non_exhaustive]
 pub struct Request {
     /// Method (`GET`, `POST`, ...).
-    pub method: String,
+    pub method: Method,
     /// Absolute request URL.
-    pub url: String,
+    pub url: Uri,
     /// Extra headers to merge with the session's preset headers.
     pub headers: HeaderList,
     /// Request body.
@@ -27,6 +31,8 @@ pub struct Request {
     pub allow_non_idempotent_retry: bool,
     /// When `true`, the response body is delivered as a stream rather than buffered into `Vec<u8>`.
     pub stream_response: bool,
+    /// Request preset. `None` lets `Session::execute` infer from `content-type`.
+    pub preset: Option<Preset>,
 }
 
 impl std::fmt::Debug for Request {
@@ -42,11 +48,11 @@ impl std::fmt::Debug for Request {
 }
 
 impl Request {
-    /// Build a new request with the given method and URL.
-    pub fn new(method: impl Into<String>, url: impl Into<String>) -> Self {
+    /// Build a new request with the given method and URL. An unparsable URL surfaces when the session executes the request.
+    pub fn new(method: Method, url: impl TryInto<Uri>) -> Self {
         Self {
-            method: method.into(),
-            url: url.into(),
+            method,
+            url: url.try_into().unwrap_or_default(),
             headers: HeaderList::new(),
             body: Body::Empty,
             timeout: None,
@@ -54,6 +60,7 @@ impl Request {
             digest_auth: None,
             allow_non_idempotent_retry: false,
             stream_response: false,
+            preset: None,
         }
     }
 
@@ -81,25 +88,25 @@ impl Request {
         self
     }
 
-    /// Convenience: build a `GET` request.
-    pub fn get(url: impl Into<String>) -> Self {
-        Self::new("GET", url)
-    }
-
-    /// Convenience: build a `POST` request.
-    pub fn post(url: impl Into<String>) -> Self {
-        Self::new("POST", url)
-    }
-
-    /// Set a request header, replacing any prior value with the same name.
-    pub fn header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
-        self.headers.set(name, value);
+    /// Set a request header, replacing any prior value with the same name. An invalid name or value is dropped.
+    pub fn header(
+        mut self,
+        name: impl TryInto<HeaderName>,
+        value: impl TryInto<HeaderValue>,
+    ) -> Self {
+        drop(self.headers.set(name, value));
         self
     }
 
     /// Set the request body.
     pub fn body(mut self, body: impl Into<Body>) -> Self {
         self.body = body.into();
+        self
+    }
+
+    /// Pin the request preset instead of inferring it from `content-type`.
+    pub fn preset(mut self, preset: Preset) -> Self {
+        self.preset = Some(preset);
         self
     }
 

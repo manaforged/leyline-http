@@ -35,7 +35,6 @@ fn test_config() -> H2Config {
         default_priority: None,
         rst_stream_flood_threshold: 100,
         rst_stream_flood_window: Duration::from_secs(10),
-        settings_ack_timeout: Duration::from_secs(10),
         max_response_body_bytes: 100 * 1024 * 1024,
         max_header_block_bytes: 256 * 1024,
         settings_flood_threshold: 100,
@@ -312,4 +311,204 @@ async fn push_promise_field_block_is_hpack_decoded_before_reset() {
     assert_eq!(x, Some("y"), "pushed-entry reference must decode");
 
     server.await.unwrap();
+}
+
+/// Trailers that correctly end the stream are delivered on the response.
+#[tokio::test]
+async fn trailers_with_end_stream_reach_the_response() {
+    let (client_io, mut server_io) = tokio::io::duplex(65_536);
+
+    let server = tokio::spawn(async move {
+        read_preface(&mut server_io).await;
+        let (h, _) = read_frame(&mut server_io).await;
+        assert_eq!(h.frame_type, FrameType::Settings as u8);
+        write_server_settings(&mut server_io).await;
+        write_settings_ack(&mut server_io).await;
+        let (h, _) = read_frame(&mut server_io).await;
+        assert_eq!(h.frame_type, FrameType::Settings as u8);
+        assert!(h.flags & 0x1 != 0, "expected client SETTINGS ack");
+
+        let (h, _) = read_frame(&mut server_io).await;
+        assert_eq!(h.frame_type, FrameType::Headers as u8);
+        assert_eq!(h.stream_id, 1);
+        write_raw_headers(&mut server_io, 1, &[(":status", "200")], false).await;
+        write_data(&mut server_io, 1, b"body", false).await;
+        write_raw_headers(&mut server_io, 1, &[("grpc-status", "0")], true).await;
+
+        let mut sink = [0u8; 256];
+        let _ = server_io.read(&mut sink).await;
+    });
+
+    let (handle, _driver) = ClientConnection::start(client_io, test_config())
+        .await
+        .expect("handshake");
+
+    let (p, h) = get_req("/");
+    let resp = handle.send_request(p, h, None).await.expect("response");
+    assert_eq!(resp.status, 200);
+    assert_eq!(resp.body, b"body");
+    let trailers: Vec<(&str, &str)> = resp
+        .trailers
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+    assert_eq!(trailers, vec![("grpc-status", "0")]);
+
+    server.abort();
+}
+
+async fn handshake<S: AsyncReadExt + AsyncWriteExt + Unpin>(server_io: &mut S) {
+    read_preface(server_io).await;
+    let (h, _) = read_frame(server_io).await;
+    assert_eq!(h.frame_type, FrameType::Settings as u8);
+    write_server_settings(server_io).await;
+    write_settings_ack(server_io).await;
+    let (h, _) = read_frame(server_io).await;
+    assert_eq!(h.frame_type, FrameType::Settings as u8);
+    assert!(h.flags & 0x1 != 0, "expected client SETTINGS ack");
+}
+
+async fn write_goaway<S: AsyncWriteExt + Unpin>(server_io: &mut S, last_stream_id: u32, code: u32) {
+    let mut frame = vec![0, 0, 8, FrameType::GoAway as u8, 0, 0, 0, 0, 0];
+    frame.extend_from_slice(&last_stream_id.to_be_bytes());
+    frame.extend_from_slice(&code.to_be_bytes());
+    server_io.write_all(&frame).await.expect("goaway write");
+}
+
+/// GOAWAY(NO_ERROR) with a lower last_stream_id refuses the streams above it so the caller can retry them elsewhere.
+#[tokio::test]
+async fn goaway_no_error_refuses_streams_above_last_id() {
+    let (client_io, mut server_io) = tokio::io::duplex(65_536);
+
+    let server = tokio::spawn(async move {
+        handshake(&mut server_io).await;
+        let (h, _) = read_frame(&mut server_io).await;
+        assert_eq!(h.frame_type, FrameType::Headers as u8);
+        assert_eq!(h.stream_id, 1);
+        write_goaway(&mut server_io, 0, 0).await;
+        let mut sink = [0u8; 256];
+        let _ = server_io.read(&mut sink).await;
+    });
+
+    let (handle, _driver) = ClientConnection::start(client_io, test_config())
+        .await
+        .expect("handshake");
+    let (p, h) = get_req("/");
+    let err = handle.send_request(p, h, None).await.expect_err("refused");
+    assert!(
+        matches!(
+            err,
+            leyline::h2::H2Error::Stream {
+                stream_id: 1,
+                code: leyline::h2::ErrorCode::RefusedStream
+            }
+        ),
+        "expected RefusedStream, got {err:?}"
+    );
+    server.abort();
+}
+
+/// A streaming consumer that reads late must get every byte; the driver queues instead of cancelling.
+#[tokio::test]
+async fn slow_streaming_consumer_is_not_cancelled() {
+    let (client_io, mut server_io) = tokio::io::duplex(1 << 20);
+    const CHUNKS: usize = 200;
+    const CHUNK: usize = 100;
+
+    let server = tokio::spawn(async move {
+        handshake(&mut server_io).await;
+        let (h, _) = read_frame(&mut server_io).await;
+        assert_eq!(h.frame_type, FrameType::Headers as u8);
+        write_raw_headers(&mut server_io, 1, &[(":status", "200")], false).await;
+        for i in 0..CHUNKS {
+            write_data(&mut server_io, 1, &[b'a'; CHUNK], i + 1 == CHUNKS).await;
+        }
+        loop {
+            let mut sink = [0u8; 256];
+            match server_io.read(&mut sink).await {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {}
+            }
+        }
+    });
+
+    let (handle, _driver) = ClientConnection::start(client_io, test_config())
+        .await
+        .expect("handshake");
+    let (p, h) = get_req("/");
+    let resp = handle
+        .send_request_ex(p, h, leyline::h2::RequestBody::None, true)
+        .await
+        .expect("head");
+    let leyline::h2::ResponseBody::Streaming(mut rx) = resp.body else {
+        panic!("expected a streaming body");
+    };
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let mut total = 0usize;
+    while let Some(chunk) = rx.recv().await {
+        total += chunk.expect("chunk").len();
+    }
+    assert_eq!(total, CHUNKS * CHUNK);
+    server.abort();
+}
+
+/// When the peer ends its side while our request body is still open, the client resets the stream with NO_ERROR instead of streaming into the void.
+#[tokio::test]
+async fn early_end_stream_resets_open_request_body() {
+    let (client_io, mut server_io) = tokio::io::duplex(65_536);
+
+    let (seen_tx, seen_rx) = tokio::sync::oneshot::channel::<u32>();
+    let server = tokio::spawn(async move {
+        handshake(&mut server_io).await;
+        let (h, _) = read_frame(&mut server_io).await;
+        assert_eq!(h.frame_type, FrameType::Headers as u8);
+        write_raw_headers(&mut server_io, 1, &[(":status", "200")], true).await;
+        let mut seen_tx = Some(seen_tx);
+        loop {
+            let (h, payload) = read_frame(&mut server_io).await;
+            if h.frame_type == FrameType::RstStream as u8 && h.stream_id == 1 {
+                let code = u32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]]);
+                if let Some(tx) = seen_tx.take() {
+                    let _ = tx.send(code);
+                }
+                break;
+            }
+        }
+    });
+
+    let (handle, _driver) = ClientConnection::start(client_io, test_config())
+        .await
+        .expect("handshake");
+    let (mut p, h) = get_req("/");
+    p.method = "POST".into();
+    let (body_tx, body_rx) = tokio::sync::mpsc::channel::<std::io::Result<bytes::Bytes>>(4);
+    body_tx
+        .send(Ok(bytes::Bytes::from_static(b"first")))
+        .await
+        .expect("queue");
+    let stream = futures_util::stream::unfold(body_rx, |mut rx| async move {
+        rx.recv().await.map(|item| (item, rx))
+    });
+    let resp = handle
+        .send_request_ex(
+            p,
+            h,
+            leyline::h2::RequestBody::Streaming {
+                stream: Box::pin(stream),
+                length_hint: None,
+            },
+            false,
+        )
+        .await
+        .expect("response");
+    assert_eq!(resp.status, 200);
+    let code = tokio::time::timeout(Duration::from_secs(2), seen_rx)
+        .await
+        .expect("client sent RST_STREAM")
+        .expect("server task alive");
+    assert_eq!(code, 0, "expected NO_ERROR");
+    drop(body_tx);
+    server.abort();
 }

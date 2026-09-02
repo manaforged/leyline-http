@@ -54,3 +54,25 @@ fn evict_idle_keeps_empty_h1_entry_with_live_checkouts() {
         "an empty H1 entry touched within the idle window (checkouts in flight) must survive"
     );
 }
+
+#[cfg(feature = "http3")]
+#[test]
+fn alt_svc_marks_h3_origin() {
+    let pool = Pool::new();
+    assert!(!pool.knows_h3("example.com", 443));
+    pool.note_alt_svc("example.com", 443, "h2=\":443\"; ma=86400");
+    assert!(!pool.knows_h3("example.com", 443));
+    pool.note_alt_svc("example.com", 443, "h3=\":443\"; ma=86400, h3-29=\":443\"");
+    assert!(pool.knows_h3("example.com", 443));
+    assert!(!pool.knows_h3("example.com", 8443));
+}
+
+#[test]
+fn alpn_h1_memory_is_per_origin_and_proxy() {
+    let pool = Pool::new();
+    assert!(!pool.is_h1_only("example.com", 443, None));
+    pool.note_h1_only("example.com", 443, None);
+    assert!(pool.is_h1_only("example.com", 443, None));
+    assert!(!pool.is_h1_only("example.com", 443, Some("http://proxy:1")));
+    assert!(!pool.is_h1_only("example.com", 8443, None));
+}

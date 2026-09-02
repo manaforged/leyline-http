@@ -16,7 +16,11 @@ async fn main() -> leyline::Result<()> {
         .with_max_retries(4)
         .with_backoff(Duration::from_millis(100), Duration::from_secs(2));
 
-    let resp = session.request("GET", &url).retry(policy).send().await?;
+    let resp = session
+        .request(http::Method::GET, url)
+        .retry(policy)
+        .send()
+        .await?;
 
     println!("final status: {}", resp.status());
     Ok(())

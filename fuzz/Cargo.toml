@@ -19,6 +19,9 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4"
 bytes = "1"
 leyline = { package = "leyline-http", path = "../crates/leyline" }
+leyline-quiche = { path = "../crates/leyline-quiche" }
+tokio = { version = "1", features = ["rt", "io-util"] }
+url = "2"
 
 [[bin]]
 name = "h2_frame"
@@ -37,6 +40,41 @@ bench = false
 [[bin]]
 name = "h2_continuation"
 path = "fuzz_targets/h2_continuation.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "h1_head"
+path = "fuzz_targets/h1_head.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "h1_chunked"
+path = "fuzz_targets/h1_chunked.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "cookie"
+path = "fuzz_targets/cookie.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "connect_response"
+path = "fuzz_targets/connect_response.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "qpack"
+path = "fuzz_targets/qpack.rs"
 test = false
 doc = false
 bench = false

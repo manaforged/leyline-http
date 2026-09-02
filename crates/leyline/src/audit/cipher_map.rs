@@ -32,6 +32,8 @@ pub fn cipher_id(name: &str) -> Option<u16> {
         "TLS_RSA_WITH_AES_128_CBC_SHA256" => 0x003c,
         "TLS_RSA_WITH_AES_256_CBC_SHA256" => 0x003d,
         "TLS_RSA_WITH_3DES_EDE_CBC_SHA" => 0x000a,
+        "TLS_ECDHE_ECDSA_WITH_3DES_EDE_CBC_SHA" => 0xc008,
+        "TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA" => 0xc012,
 
         _ => return None,
     })

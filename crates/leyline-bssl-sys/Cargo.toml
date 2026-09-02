@@ -2,7 +2,7 @@
 name = "leyline-bssl-sys"
 version = "1.0.0-alpha.3"
 edition = "2024"
-rust-version = "1.86"
+rust-version = "1.88"
 authors = [
     "Thomas Gardiner",
     "0x676e67 <gngppz@gmail.com>",
@@ -14,7 +14,7 @@ description = "Leyline's owned BoringSSL FFI: a pinned BoringSSL revision + carr
 license = "MIT AND Apache-2.0 AND BSD-3-Clause"
 repository = "https://github.com/manaforged/leyline-http"
 build = "build.rs"
-links = "boringssl"
+links = "leyline_bssl"
 autolib = false
 autobins = false
 autoexamples = false
@@ -50,7 +50,6 @@ include = [
 [features]
 fips = []
 mlkem = []
-prefix-symbols = []
 underscore-wildcards = []
 # Rebuild BoringSSL from the deps/boringssl submodule (cmake + bindgen) instead
 # of linking the committed prebuilt libs. CI-only — pulls the heavy build

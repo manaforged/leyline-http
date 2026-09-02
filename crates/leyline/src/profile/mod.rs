@@ -6,7 +6,7 @@ pub mod anchor;
 mod bare;
 mod brand;
 mod browser;
-mod permutation;
+pub(crate) mod permutation;
 mod platform;
 /// Request preset types and header builder.
 pub mod preset;
@@ -15,8 +15,8 @@ mod types;
 
 pub use anchor::{HeaderAnchor, infer_anchor};
 pub use brand::{BrandOverlay, BrandOverlayError, ChromiumBrand};
-pub use browser::{ALL_BROWSERS, Browser, PROFILE_COUNT};
+pub use browser::{ALL_BROWSERS, Browser, Family, PROFILE_COUNT};
 pub use platform::Platform;
 pub use preset::Preset;
-pub use registry::ProfileRegistry;
+pub use registry::{ProfileError, ProfileRegistry};
 pub use types::*;

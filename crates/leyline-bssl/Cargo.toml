@@ -2,7 +2,7 @@
 name = "leyline-bssl"
 version = "1.0.0-alpha.3"
 edition = "2024"
-rust-version = "1.86"
+rust-version = "1.88"
 authors = [
     "Thomas Gardiner",
     "0x676e67 <gngppz@gmail.com>",
@@ -23,7 +23,6 @@ credential = []
 # blocks reference it, so it must remain a declared feature.
 legacy-compat-deprecated = []
 underscore-wildcards = ["leyline-bssl-sys/underscore-wildcards"]
-prefix-symbols = ["leyline-bssl-sys/prefix-symbols"]
 
 [dependencies]
 bitflags = "2.11.1"

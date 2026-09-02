@@ -1,6 +1,6 @@
 use super::super::Session;
 use crate::profile::{Browser, Platform};
-use crate::{Error, Identity};
+use crate::{Identity, Kind};
 
 #[test]
 fn locked_keeps_http_and_tls_on_one_browser() {
@@ -67,15 +67,12 @@ fn switch_family_rejects_same_family() {
     let err = Identity::locked(Browser::Chrome150, Platform::Windows)
         .pass(Browser::Chrome146)
         .expect_err("a switch needs another family");
-    match err {
-        Error::Config(message) => {
-            assert!(
-                message.contains("rotate_tls"),
-                "unexpected config: {message}"
-            );
-        }
-        other => panic!("expected Config, got {other}"),
-    }
+    assert_eq!(err.kind(), Kind::Config, "expected Config, got {err}");
+    let message = err.message().expect("config errors carry a message");
+    assert!(
+        message.contains("rotate_tls"),
+        "unexpected config: {message}"
+    );
 }
 
 #[test]
@@ -83,10 +80,7 @@ fn switch_family_rejects_safari_on_windows() {
     let err = Identity::locked(Browser::Chrome150, Platform::Windows)
         .pass(Browser::Safari18)
         .expect_err("safari has no windows identity");
-    match err {
-        Error::Config(_) => {}
-        other => panic!("expected Config, got {other}"),
-    }
+    assert_eq!(err.kind(), Kind::Config, "expected Config, got {err}");
 }
 
 #[test]
@@ -108,15 +102,12 @@ fn rotate_tls_rejects_other_family() {
     let err = Identity::locked(Browser::Chrome150, Platform::Windows)
         .rotate_tls(Browser::Firefox152)
         .expect_err("chrome → firefox is not a legal rotate");
-    match err {
-        Error::Config(message) => {
-            assert!(
-                message.contains("not the same family"),
-                "unexpected config: {message}"
-            );
-        }
-        other => panic!("expected Config, got {other}"),
-    }
+    assert_eq!(err.kind(), Kind::Config, "expected Config, got {err}");
+    let message = err.message().expect("config errors carry a message");
+    assert!(
+        message.contains("not the same family"),
+        "unexpected config: {message}"
+    );
 }
 
 #[test]
@@ -127,15 +118,12 @@ fn build_rejects_http_family_mismatch() {
         .platform(Platform::Windows)
         .build()
         .expect_err("chrome HTTP on firefox TLS must fail");
-    match err {
-        Error::Config(message) => {
-            assert!(
-                message.contains("not the same family"),
-                "unexpected config: {message}"
-            );
-        }
-        other => panic!("expected Config, got {other}"),
-    }
+    assert_eq!(err.kind(), Kind::Config, "expected Config, got {err}");
+    let message = err.message().expect("config errors carry a message");
+    assert!(
+        message.contains("not the same family"),
+        "unexpected config: {message}"
+    );
 }
 
 #[test]

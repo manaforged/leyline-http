@@ -5,7 +5,7 @@ use std::pin::Pin;
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
-use leyline::{Browser, Error, Result, Session};
+use leyline::{Browser, Error, Kind, Result, Session};
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -74,8 +74,8 @@ async fn smoke_suite() {
         &mut failed,
         smoke(async {
             let s = Session::chrome();
-            let r = s.get(PEET_URL).await?;
-            let body = r.text().unwrap();
+            let mut r = s.get(PEET_URL).await?;
+            let body = r.text().await.unwrap();
             let _: Value = serde_json::from_str(&body)?;
             ensure(
                 body.contains("http2") && body.contains("tls"),
@@ -92,13 +92,17 @@ async fn smoke_suite() {
         &mut failed,
         smoke(async {
             let s = Session::chrome();
-            let r = s.get("https://httpbin.org/get").await?;
+            let mut r = s.get("https://httpbin.org/get").await?;
             ensure(r.status() == 200, format!("status={}", r.status()))?;
             ensure(
-                r.text().unwrap().contains("headers"),
+                r.text().await.unwrap().contains("headers"),
                 "httpbin body missing headers",
             )?;
-            Ok(format!("status={} body={}B", r.status(), r.bytes()?.len()))
+            Ok(format!(
+                "status={} body={}B",
+                r.status(),
+                r.bytes().await?.len()
+            ))
         }),
     )
     .await;
@@ -110,8 +114,8 @@ async fn smoke_suite() {
         smoke(async {
             let s = Session::chrome();
             let payload = serde_json::json!({"test": "leyline", "v": 2});
-            let r = s.post("https://httpbin.org/post").json(&payload).await?;
-            let v: Value = r.json()?;
+            let mut r = s.post("https://httpbin.org/post").json(&payload).await?;
+            let v: Value = r.json().await?;
             let echoed = json_str(&v["json"]["test"], "json.test")?;
             ensure(echoed == "leyline", format!("echoed={echoed}"))?;
             Ok(format!("echoed={echoed}"))
@@ -125,11 +129,11 @@ async fn smoke_suite() {
         &mut failed,
         smoke(async {
             let s = Session::chrome();
-            let r = s
+            let mut r = s
                 .post("https://httpbin.org/post")
-                .form(&[("user", "alice"), ("pass", "s3cret!")])
+                .form([("user", "alice"), ("pass", "s3cret!")])
                 .await?;
-            let v: Value = r.json()?;
+            let v: Value = r.json().await?;
             let user = json_str(&v["form"]["user"], "form.user")?;
             let pass = json_str(&v["form"]["pass"], "form.pass")?;
             ensure(
@@ -147,12 +151,12 @@ async fn smoke_suite() {
         &mut failed,
         smoke(async {
             let s = Session::chrome();
-            let r = s
-                .request("GET", "https://httpbin.org/get")
+            let mut r = s
+                .request(http::Method::GET, "https://httpbin.org/get")
                 .query([("foo", "bar"), ("n", "42")])
                 .send()
                 .await?;
-            let v: Value = r.json()?;
+            let v: Value = r.json().await?;
             let arg_foo = json_str(&v["args"]["foo"], "args.foo")?;
             ensure(arg_foo == "bar", format!("foo={arg_foo}"))?;
             Ok(format!("foo={arg_foo}"))
@@ -166,12 +170,12 @@ async fn smoke_suite() {
         &mut failed,
         smoke(async {
             let s = Session::chrome();
-            let r = s
-                .request("GET", "https://httpbin.org/get")
+            let mut r = s
+                .request(http::Method::GET, "https://httpbin.org/get")
                 .bearer_auth("test-token-123")
                 .send()
                 .await?;
-            let v: Value = r.json()?;
+            let v: Value = r.json().await?;
             let auth = json_str(&v["headers"]["Authorization"], "headers.Authorization")?;
             ensure(auth.contains("test-token-123"), format!("auth={auth}"))?;
             Ok(format!("auth={auth}"))
@@ -212,12 +216,12 @@ async fn smoke_suite() {
         &mut passed,
         &mut failed,
         smoke(async {
-            let c = Session::chrome().get(PEET_URL).await?;
-            let f = Session::firefox().get(PEET_URL).await?;
-            let s = Session::safari().get(PEET_URL).await?;
-            let ch: Value = c.json()?;
-            let fh: Value = f.json()?;
-            let sh: Value = s.json()?;
+            let mut c = Session::chrome().get(PEET_URL).await?;
+            let mut f = Session::firefox().get(PEET_URL).await?;
+            let mut s = Session::safari().get(PEET_URL).await?;
+            let ch: Value = c.json().await?;
+            let fh: Value = f.json().await?;
+            let sh: Value = s.json().await?;
             let c_fp = normalize_akamai(json_str(
                 &ch["http2"]["akamai_fingerprint"],
                 "chrome http2.akamai_fingerprint",
@@ -277,9 +281,9 @@ async fn smoke_suite() {
         &mut failed,
         smoke(async {
             let s = Session::chrome();
-            let r = s.get("https://httpbin.org/bytes/50000").await?;
+            let mut r = s.get("https://httpbin.org/bytes/50000").await?;
             ensure(r.status() == 200, format!("status={}", r.status()))?;
-            let n = r.bytes()?.len();
+            let n = r.bytes().await?.len();
             ensure(n == 50_000, format!("got {n} bytes"))?;
             Ok(format!("{n}B"))
         }),
@@ -295,9 +299,9 @@ async fn smoke_suite() {
 }
 
 async fn exact_fingerprint(session: Session, browser: Browser) -> Result<String> {
-    let r = session.get(PEET_URL).await?;
+    let mut r = session.get(PEET_URL).await?;
     ensure(r.status() == 200, format!("status={}", r.status()))?;
-    let v: Value = r.json()?;
+    let v: Value = r.json().await?;
 
     let ja4 = json_str(&v["tls"]["ja4"], "tls.ja4")?;
     let h2 = normalize_akamai(json_str(
@@ -306,14 +310,12 @@ async fn exact_fingerprint(session: Session, browser: Browser) -> Result<String>
     )?);
 
     let profile = browser.profile();
-    let expected_ja4 = profile
-        .expected_ja4()
-        .ok_or_else(|| Error::Http(format!("{browser} profile missing expected JA4")))?;
-    let expected_h2 = normalize_akamai(
-        profile
-            .expected_h2_fingerprint()
-            .ok_or_else(|| Error::Http(format!("{browser} profile missing expected H2")))?,
-    );
+    let expected_ja4 = profile.expected_ja4().ok_or_else(|| {
+        Error::new(Kind::Request).with_message(format!("{browser} profile missing expected JA4"))
+    })?;
+    let expected_h2 = normalize_akamai(profile.expected_h2_fingerprint().ok_or_else(|| {
+        Error::new(Kind::Request).with_message(format!("{browser} profile missing expected H2"))
+    })?);
 
     ensure(
         ja4 == expected_ja4,
@@ -356,7 +358,7 @@ async fn h1_wire_shape() -> Result<String> {
 
     let session = Session::chrome();
     let resp = session
-        .request("GET", &format!("http://{addr}/wire?q=1"))
+        .request(http::Method::GET, format!("http://{addr}/wire?q=1"))
         .append_header("x-proof", "smoke")
         .send()
         .await?;
@@ -364,8 +366,8 @@ async fn h1_wire_shape() -> Result<String> {
 
     let text = server
         .await
-        .map_err(|e| Error::Http(format!("h1 server task failed: {e}")))?
-        .map_err(Error::Http)?;
+        .map_err(|e| Error::new(Kind::Request).with_message(format!("h1 server task failed: {e}")))?
+        .map_err(|e| Error::new(Kind::Request).with_message(e))?;
 
     ensure(
         text.starts_with("GET /wire?q=1 HTTP/1.1\r\n"),
@@ -389,14 +391,14 @@ async fn h1_wire_shape() -> Result<String> {
 async fn h3_get(browser: Browser) -> Result<String> {
     let session = Session::builder().browser(browser).http3().build()?;
     let url = format!("https://{H3_GET_HOST}/");
-    let resp = session
-        .request("GET", &url)
+    let mut resp = session
+        .request(http::Method::GET, url)
         .header("accept", "text/html,application/xhtml+xml")
         .send()
         .await?;
 
     let status = resp.status();
-    let body = resp.bytes()?;
+    let body = resp.bytes().await?;
     ensure(status == 200, format!("status={status}"))?;
     ensure(!body.is_empty(), "empty H3 body")?;
     Ok(format!("status={status} body={}B", body.len()))
@@ -409,7 +411,7 @@ async fn h3_post_body() -> Result<String> {
         .http3()
         .build()?;
     let url = format!("https://{H3_ECHO_HOST}/post");
-    let resp = session
+    let mut resp = session
         .post(&url)
         .header("accept", "application/json")
         .header("content-type", "application/json")
@@ -418,7 +420,7 @@ async fn h3_post_body() -> Result<String> {
         .await?;
 
     let status = resp.status();
-    let body = String::from_utf8_lossy(resp.bytes()?).into_owned();
+    let body = String::from_utf8_lossy(resp.bytes().await?).into_owned();
     ensure(status == 200, format!("status={status}"))?;
     ensure(
         body.contains("leyline-h3-body"),
@@ -452,14 +454,14 @@ async fn run(name: &str, passed: &mut u32, failed: &mut u32, fut: SmokeFuture<'_
 fn json_str<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
     value
         .as_str()
-        .ok_or_else(|| Error::Http(format!("missing {name}")))
+        .ok_or_else(|| Error::new(Kind::Request).with_message(format!("missing {name}")))
 }
 
 fn ensure(condition: bool, message: impl Into<String>) -> Result<()> {
     if condition {
         Ok(())
     } else {
-        Err(Error::Http(message.into()))
+        Err(Error::new(Kind::Request).with_message(message.into()))
     }
 }
 

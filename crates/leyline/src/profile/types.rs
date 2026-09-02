@@ -1,7 +1,11 @@
 //! Profile types — deserialized from TOML profile files.
 
-use serde::{Deserialize, de::Error as _};
 use std::collections::HashMap;
+
+use serde::Deserialize;
+
+use crate::profile::registry::ProfileError;
+use crate::{Error, Kind};
 
 #[expect(
     missing_docs,
@@ -79,6 +83,9 @@ pub struct TlsProfile {
     pub request_trust_anchors: bool,
     #[serde(default)]
     pub fingerprint: Option<TlsFingerprint>,
+    /// BoringSSL appends RFC 7685 padding (0x0015) to this hello shape; it is never part of `extension_permutation` but counts toward the wire JA4.
+    #[serde(default)]
+    pub padding: bool,
     /// ClientHello supported_versions floor: "1.0" (CFNetwork iOS advertises TLS 1.0/1.1), "1.2" (default), "1.3".
     #[serde(default)]
     pub min_tls_version: Option<String>,
@@ -230,11 +237,11 @@ pub struct PlatformIdentity {
 }
 
 impl BrowserProfile {
-    /// Parse a profile from a TOML string.
-    pub fn from_toml(toml_str: &str) -> Result<Self, toml::de::Error> {
-        let profile: Self = toml::from_str(toml_str)?;
+    /// Parse a profile from a TOML string; fails with [`ProfileError::Parse`] on invalid TOML or a rejected permutation.
+    pub fn from_toml(toml_str: &str) -> Result<Self, ProfileError> {
+        let profile: Self = toml::from_str(toml_str).map_err(ProfileError::parse)?;
         crate::profile::permutation::validate(&profile.tls)
-            .map_err(|why| toml::de::Error::custom(format!("{}: {why}", profile.meta.name)))?;
+            .map_err(|why| ProfileError::parse(format!("{}: {why}", profile.meta.name)))?;
         for warning in profile.load_warnings() {
             tracing::warn!(target: "leyline::profile", "{warning}");
         }
@@ -281,12 +288,11 @@ impl BrowserProfile {
 
     /// Expected Akamai H2 fingerprint for a specific platform key.
     pub fn expected_h2_fingerprint_for(&self, platform: crate::profile::Platform) -> Option<&str> {
-        if let Some(p) = self.h2.platforms.get(platform.identity_key()) {
-            if let Some(ref fp) = p.fingerprint {
-                if let Some(ref s) = fp.akamai {
-                    return Some(s.as_str());
-                }
-            }
+        if let Some(p) = self.h2.platforms.get(platform.identity_key())
+            && let Some(ref fp) = p.fingerprint
+            && let Some(ref s) = fp.akamai
+        {
+            return Some(s.as_str());
         }
         self.h2.fingerprint.as_ref()?.akamai.as_deref()
     }
@@ -297,7 +303,7 @@ impl H2Profile {
     pub fn resolve_for_platform(
         &self,
         platform: crate::profile::Platform,
-    ) -> Result<H2Profile, crate::Error> {
+    ) -> Result<H2Profile, Error> {
         let Some(over) = self.platforms.get(platform.identity_key()) else {
             return Ok(self.clone());
         };
@@ -348,7 +354,7 @@ impl H2Profile {
                 "unknown_setting8" => out.unknown_setting8 = None,
                 "unknown_setting9" => out.unknown_setting9 = None,
                 other => {
-                    return Err(crate::Error::Config(format!(
+                    return Err(Error::new(Kind::Config).with_message(format!(
                         "unknown name in [h2.platforms.{}].omit_settings: {other:?}",
                         platform.identity_key()
                     )));

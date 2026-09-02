@@ -91,3 +91,35 @@ fn find_static_name_only() {
 fn find_static_not_found() {
     assert_eq!(find_static("x-custom-header", ""), None);
 }
+
+#[test]
+fn find_static_matches_linear_scan() {
+    let scan = |name: &str, value: &str| {
+        let mut first = None;
+        for (i, &(n, v)) in STATIC_TABLE.iter().enumerate().skip(1) {
+            if n == name {
+                if v == value {
+                    return Some((i, true));
+                }
+                if first.is_none() {
+                    first = Some(i);
+                }
+            }
+        }
+        first.map(|i| (i, false))
+    };
+    for &(name, value) in STATIC_TABLE.iter().skip(1) {
+        assert_eq!(
+            find_static(name, value),
+            scan(name, value),
+            "{name}: {value}"
+        );
+        assert_eq!(
+            find_static(name, "zzz-no-such-value"),
+            scan(name, "zzz-no-such-value"),
+            "{name} name-only"
+        );
+    }
+    assert_eq!(find_static("x-not-in-table", "v"), None);
+    assert_eq!(find_static("", ""), None);
+}

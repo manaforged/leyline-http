@@ -262,19 +262,25 @@ pub(crate) fn wire_configured_trust(
     }
 
     for path in &config.ca_files {
-        builder.set_ca_file(path)?;
+        builder.set_ca_file(path).map_err(TlsError::from_stack)?;
     }
 
     if !config.ca_der.is_empty() {
         let store = builder.cert_store_mut();
         for der in &config.ca_der {
-            store.add_cert(X509::from_der(der)?)?;
+            store
+                .add_cert(X509::from_der(der).map_err(TlsError::from_stack)?)
+                .map_err(TlsError::from_stack)?;
         }
     }
 
     if let Some(identity) = &config.client_identity {
-        builder.set_certificate_chain_file(&identity.certificate_chain_file)?;
-        builder.set_private_key_file(&identity.private_key_file, SslFiletype::PEM)?;
+        builder
+            .set_certificate_chain_file(&identity.certificate_chain_file)
+            .map_err(TlsError::from_stack)?;
+        builder
+            .set_private_key_file(&identity.private_key_file, SslFiletype::PEM)
+            .map_err(TlsError::from_stack)?;
     }
 
     Ok(())

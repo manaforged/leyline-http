@@ -2,7 +2,7 @@
 
 #![forbid(unsafe_code)]
 mod builder;
-mod decompress;
+pub(crate) mod decompress;
 pub(crate) mod execute;
 mod header_merge;
 mod helpers;
@@ -25,6 +25,8 @@ use std::sync::Arc;
 use crate::cookie::Jar;
 #[cfg(feature = "websocket")]
 use crate::core::WebSocketConfig;
+#[cfg(feature = "tower")]
+use crate::core::layer::Stack;
 use crate::core::retry::RetryPolicy;
 use crate::core::{CompressionConfig, ProxyConfig, RedirectPolicy, TimeoutConfig};
 use crate::h2::H2Config;
@@ -46,7 +48,7 @@ pub enum ProtocolPolicy {
     /// Force HTTP/3 over QUIC.
     #[cfg(feature = "http3")]
     Http3,
-    /// Race QUIC (H3) against TCP+TLS (H2).
+    /// Race QUIC (H3) against TCP+TLS (H2) for origins that advertised `h3` in `Alt-Svc` or already completed a QUIC handshake; every other origin behaves like `Auto`.
     #[cfg(feature = "http3")]
     Race,
 }
@@ -79,10 +81,6 @@ pub(crate) struct SessionInner {
     identity_navigate_accept: Option<String>,
     /// Identity-level explicit request-header order.
     identity_request_header_order: Option<Vec<String>>,
-    proxy: Option<String>,
-    /// `true` when `proxy` was discovered from `HTTPS_PROXY`/`HTTP_PROXY` at build time rather than set explicitly.
-    proxy_from_env: bool,
-    max_redirects: usize,
     proxy_config: ProxyConfig,
     /// Single source of truth for all timeouts; the total request timeout is `timeouts.total`.
     timeouts: TimeoutConfig,
@@ -111,6 +109,11 @@ pub(crate) struct SessionInner {
     /// Reference to the static browser profile — passed through to the H3 path so QUIC ClientHello is built from the same factory as H2.
     #[cfg(feature = "http3")]
     profile: &'static crate::profile::BrowserProfile,
+    /// Composed middleware stack, or `None` when the session was built without `SessionBuilder::layer`.
+    #[cfg(feature = "tower")]
+    layer: Option<Arc<dyn Stack>>,
+    /// Lifecycle listener, or `None` when the session was built without `SessionBuilder::trace`.
+    trace: Option<Arc<dyn crate::trace::Trace>>,
     /// Last-parsed request URL cache: sequential calls with the same URL string skip the parse.
     url_cache: std::sync::Arc<std::sync::Mutex<Option<(String, url::Url)>>>,
 }

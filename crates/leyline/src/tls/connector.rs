@@ -1,7 +1,7 @@
 //! TLS connector that creates fingerprinted connections from browser profiles.
 
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use leyline_bssl::ssl::{NameType, SslConnector, SslSession, SslSessionCacheMode, SslVerifyMode};
 use leyline_bssl::x509::X509VerifyError;
@@ -22,6 +22,7 @@ use crate::tls::trust::{
     take_verification_failure,
 };
 use crate::tls::{TlsIo, TlsStream};
+use crate::trace;
 
 /// Creates TLS connections matching a browser's fingerprint.
 #[derive(Clone)]
@@ -66,13 +67,16 @@ impl FingerprintConnector {
         trust: &TlsTrustConfig,
     ) -> Result<Self, TlsError> {
         let trust = trust.clone();
-        let mut builder = SslConnector::bare_builder(leyline_bssl::ssl::SslMethod::tls())?;
+        let mut builder = SslConnector::bare_builder(leyline_bssl::ssl::SslMethod::tls())
+            .map_err(TlsError::from_stack)?;
 
         apply_profile_with_trust(&mut builder, profile, TlsMinVersion::Tls12, &trust)?;
 
         let tls = &profile.tls;
 
-        builder.set_alpn_protos(b"\x02h2\x08http/1.1")?;
+        builder
+            .set_alpn_protos(b"\x02h2\x08http/1.1")
+            .map_err(TlsError::from_stack)?;
 
         let session_cache = Arc::new(Mutex::new(LruCache::new(
             std::num::NonZeroUsize::new(256).expect("cache capacity literal is non-zero"),
@@ -86,10 +90,10 @@ impl FingerprintConnector {
             if insecure_flag.load(std::sync::atomic::Ordering::Relaxed) {
                 return;
             }
-            if let Some(hostname) = ssl.servername(NameType::HOST_NAME) {
-                if let Ok(der) = session.to_der() {
-                    lock_unpoisoned(&cache_clone).put(hostname.to_string(), der);
-                }
+            if let Some(hostname) = ssl.servername(NameType::HOST_NAME)
+                && let Ok(der) = session.to_der()
+            {
+                lock_unpoisoned(&cache_clone).put(hostname.to_string(), der);
             }
         });
 
@@ -222,11 +226,13 @@ impl FingerprintConnector {
 
     /// Open a fingerprinted TCP connection to `host:port` through the connector's pluggable resolver and Happy-Eyeballs racer, applying the browser [`TcpProfile`] SYN options via [`connect_one`].
     pub(crate) async fn dial_tcp(&self, host: &str, port: u16) -> Result<TcpStream, TlsError> {
+        let started = Instant::now();
         let addrs = self
             .resolver
             .resolve(host, port)
             .await
             .map_err(TlsError::Dns)?;
+        trace::dns(host, port, addrs.len(), started.elapsed());
 
         if addrs.is_empty() {
             return Err(TlsError::Dns(std::io::Error::new(
@@ -237,6 +243,7 @@ impl FingerprintConnector {
 
         let tcp_profile = self.tcp_profile;
         let socket_config = self.socket_config.clone();
+        let started = Instant::now();
         let (tcp_stream, _addr) =
             happy_eyeballs_connect(addrs, self.happy_eyeballs, move |sock_addr| {
                 let socket_config = socket_config.clone();
@@ -244,6 +251,7 @@ impl FingerprintConnector {
             })
             .await
             .map_err(TlsError::TcpConnect)?;
+        trace::connect(host, port, false, started.elapsed());
         Ok(tcp_stream)
     }
 
@@ -279,20 +287,28 @@ impl FingerprintConnector {
     where
         S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
     {
-        let mut config = self.ssl_connector.configure()?;
+        let started = Instant::now();
+        let mut config = self
+            .ssl_connector
+            .configure()
+            .map_err(TlsError::from_stack)?;
 
         if include_alps {
             if let Some(ref alps) = self.alps_proto {
-                config.add_application_settings(alps)?;
+                config
+                    .add_application_settings(alps)
+                    .map_err(TlsError::from_stack)?;
                 if self.alps_new_codepoint {
                     config.set_alps_use_new_codepoint(true);
                 }
             }
         } else {
-            config.set_alpn_protos(b"\x08http/1.1")?;
+            config
+                .set_alpn_protos(b"\x08http/1.1")
+                .map_err(TlsError::from_stack)?;
         }
 
-        let mut ssl = config.into_ssl(host)?;
+        let mut ssl = config.into_ssl(host).map_err(TlsError::from_stack)?;
 
         let insecure = self.insecure_mode();
         if insecure {
@@ -303,12 +319,12 @@ impl FingerprintConnector {
 
         {
             let mut cache = lock_unpoisoned(&self.session_cache);
-            if let Some(der) = (!insecure).then(|| cache.get(host).cloned()).flatten() {
-                if let Ok(session) = SslSession::from_der(&der) {
-                    // SAFETY: BoringSSL requires `set_session` to be called on an Ssl not yet handed to `connect()`. `ssl` was just constructed via `config.into_ssl` and has not started its handshake; it will be driven via `leyline_bssl_tokio::connect` below. The `SslSession` is owned for the duration of this block. No concurrent access.
-                    unsafe {
-                        let _ = ssl.set_session(&session);
-                    }
+            if let Some(der) = (!insecure).then(|| cache.get(host).cloned()).flatten()
+                && let Ok(session) = SslSession::from_der(&der)
+            {
+                // SAFETY: BoringSSL requires `set_session` to be called on an Ssl not yet handed to `connect()`. `ssl` was just constructed via `config.into_ssl` and has not started its handshake; it will be driven via `leyline_bssl_tokio::connect` below. The `SslSession` is owned for the duration of this block. No concurrent access.
+                unsafe {
+                    let _ = ssl.set_session(&session);
                 }
             }
         }
@@ -360,6 +376,19 @@ impl FingerprintConnector {
         let tls_version = Some(stream.ssl().version_str().to_string());
         let tls_cipher = stream.ssl().current_cipher().map(|c| c.name().to_string());
 
+        if trace::on() {
+            let proto = alpn
+                .as_deref()
+                .map(|p| String::from_utf8_lossy(p).into_owned());
+            trace::tls(
+                host,
+                tls_version.as_deref(),
+                tls_cipher.as_deref(),
+                proto.as_deref(),
+                started.elapsed(),
+            );
+        }
+
         Ok((
             stream,
             TlsMeta {
@@ -389,7 +418,7 @@ fn classify_handshake(
             TlsError::Hostname(error.to_string())
         }
         None if verify_error.is_some() => TlsError::Certificate(error.to_string()),
-        None => super::error::from_handshake_ssl(error),
+        None => TlsError::from_ssl(error),
     }
 }
 

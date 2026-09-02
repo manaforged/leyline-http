@@ -16,8 +16,9 @@ pub enum RetryTrigger {
     Timeout,
 }
 
-/// Retry policy.
+/// Retry policy. Start from [`RetryPolicy::none`] or [`RetryPolicy::transient`] and set one field per call.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct RetryPolicy {
     /// Maximum number of retry attempts (0 = no retry).
     pub max_retries: u32,
@@ -52,7 +53,7 @@ impl RetryPolicy {
         }
     }
 
-    /// Retry connection errors, 502/503/504, and timeouts. `max_retries` is 3, so 4 attempts in total (100ms → 1s).
+    /// Retry connection errors, 429/502/503/504, and timeouts. `max_retries` is 3, so 4 attempts in total (100ms → 1s).
     pub fn transient() -> Self {
         Self {
             max_retries: 3,
@@ -62,6 +63,7 @@ impl RetryPolicy {
             jitter: true,
             retry_on: vec![
                 RetryTrigger::ConnectionError,
+                RetryTrigger::Status(429),
                 RetryTrigger::Status(502),
                 RetryTrigger::Status(503),
                 RetryTrigger::Status(504),
@@ -86,6 +88,30 @@ impl RetryPolicy {
     /// Add an HTTP status code to the retry trigger set.
     pub fn on_status(mut self, code: u16) -> Self {
         self.retry_on.push(RetryTrigger::Status(code));
+        self
+    }
+
+    /// Add a trigger to the retry set.
+    pub fn on(mut self, trigger: RetryTrigger) -> Self {
+        self.retry_on.push(trigger);
+        self
+    }
+
+    /// Replace the whole trigger set.
+    pub fn retry_on(mut self, triggers: impl IntoIterator<Item = RetryTrigger>) -> Self {
+        self.retry_on = triggers.into_iter().collect();
+        self
+    }
+
+    /// Set the exponential factor applied between attempts.
+    pub fn backoff_factor(mut self, factor: f64) -> Self {
+        self.backoff_factor = factor;
+        self
+    }
+
+    /// Enable or disable full jitter on the backoff.
+    pub fn jitter(mut self, on: bool) -> Self {
+        self.jitter = on;
         self
     }
 
@@ -137,7 +163,7 @@ impl RetryPolicy {
 /// Return a uniform jitter factor in the range `[0.0, 1.0]`.
 fn cheap_jitter() -> f64 {
     use rand::Rng;
-    rand::thread_rng().gen_range(0.0..=1.0)
+    rand::rng().random_range(0.0..=1.0)
 }
 
 /// Parse a `Retry-After` header value into a delay (delta-seconds or IMF-fixdate).
@@ -217,13 +243,6 @@ fn unix_from_ymd_hms(
         return None;
     }
     Some(std::time::UNIX_EPOCH + Duration::from_secs(secs as u64))
-}
-
-/// Whether a method is idempotent per RFC 9110 §9.2.2 — safe to retry automatically without caller opt-in.
-pub(crate) fn is_idempotent(method: &str) -> bool {
-    ["GET", "HEAD", "OPTIONS", "PUT", "DELETE", "TRACE"]
-        .iter()
-        .any(|m| method.eq_ignore_ascii_case(m))
 }
 
 #[cfg(test)]

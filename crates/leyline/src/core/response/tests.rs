@@ -2,7 +2,7 @@ use super::*;
 
 fn bare_response(audit_tls: Option<Arc<crate::audit::AuditTlsCache>>) -> Response {
     Response {
-        status: 200,
+        status: http::StatusCode::OK,
         version: HttpVersion::Http2,
         headers: Vec::new(),
         trailers: Vec::new(),
@@ -23,6 +23,7 @@ fn bare_response(audit_tls: Option<Arc<crate::audit::AuditTlsCache>>) -> Respons
         audit_tls,
         audit_cache: OnceLock::new(),
         timing: ResponseTiming::default(),
+        compression: crate::core::CompressionConfig::default(),
     }
 }
 
@@ -67,48 +68,51 @@ fn audit_memoises_across_calls() {
 }
 
 #[cfg(feature = "charset")]
-#[test]
-fn text_decodes_declared_charset() {
+#[tokio::test]
+async fn text_decodes_declared_charset() {
     let mut resp = bare_response(None);
     resp.headers = vec![(
-        crate::core::HeaderStr::from_static("content-type"),
-        crate::core::HeaderStr::from_static("text/html; charset=windows-1252"),
+        http::HeaderName::from_static("content-type"),
+        http::HeaderValue::from_static("text/html; charset=windows-1252"),
     )];
     resp.body = ResponseBody::Buffered(vec![0xE9, 0xA9]);
-    assert_eq!(resp.text().unwrap(), "é©");
-    assert_eq!(resp.into_text().unwrap(), "é©");
+    assert_eq!(resp.text().await.unwrap(), "é©");
+    assert_eq!(resp.into_text().await.unwrap(), "é©");
 }
 
 #[cfg(feature = "charset")]
-#[test]
-fn text_charset_param_is_case_insensitive_and_unquoted() {
+#[tokio::test]
+async fn text_charset_param_is_case_insensitive_and_unquoted() {
     let mut resp = bare_response(None);
     resp.headers = vec![(
-        crate::core::HeaderStr::from_static("content-type"),
-        crate::core::HeaderStr::from_static("text/plain; Charset=\"Shift_JIS\""),
+        http::HeaderName::from_static("content-type"),
+        http::HeaderValue::from_static("text/plain; Charset=\"Shift_JIS\""),
     )];
     resp.body = ResponseBody::Buffered(vec![0x82, 0xA0]);
-    assert_eq!(resp.text().unwrap(), "あ");
+    assert_eq!(resp.text().await.unwrap(), "あ");
 }
 
 #[cfg(feature = "charset")]
-#[test]
-fn text_defaults_to_utf8_without_charset() {
+#[tokio::test]
+async fn text_defaults_to_utf8_without_charset() {
     let mut resp = bare_response(None);
     resp.body = ResponseBody::Buffered("héllo".as_bytes().to_vec());
-    assert_eq!(resp.text().unwrap(), "héllo");
+    assert_eq!(resp.text().await.unwrap(), "héllo");
 }
 
 #[cfg(feature = "charset")]
-#[test]
-fn declared_charset_overrides_text_with_charset_default() {
+#[tokio::test]
+async fn declared_charset_overrides_text_with_charset_default() {
     let mut resp = bare_response(None);
     resp.headers = vec![(
-        crate::core::HeaderStr::from_static("content-type"),
-        crate::core::HeaderStr::from_static("text/plain; charset=utf-8"),
+        http::HeaderName::from_static("content-type"),
+        http::HeaderValue::from_static("text/plain; charset=utf-8"),
     )];
     resp.body = ResponseBody::Buffered("héllo".as_bytes().to_vec());
-    assert_eq!(resp.text_with_charset("windows-1252").unwrap(), "héllo");
+    assert_eq!(
+        resp.text_with_charset("windows-1252").await.unwrap(),
+        "héllo"
+    );
 }
 
 fn leg(reused: bool, connect_ms: Option<u32>, send_ms: u32, total_ms: u32) -> ResponseTiming {
@@ -158,34 +162,60 @@ fn timing_two_cold_legs_sum_connect() {
     assert!(!acc.reused);
 }
 
+#[tokio::test]
+async fn bytes_on_a_taken_stream_reports_a_body_error() {
+    let mut resp = bare_response(None);
+    resp.body = ResponseBody::Taken;
+    let err = resp.bytes().await.unwrap_err();
+    assert_eq!(err.kind(), Kind::Body, "expected a body error, got {err:?}");
+    assert!(err.to_string().contains("into_stream"), "{err}");
+}
+
+#[tokio::test]
+async fn as_bytes_sees_a_buffered_body_and_skips_a_stream() {
+    let mut resp = bare_response(None);
+    resp.body = ResponseBody::Buffered(b"hi".to_vec());
+    assert_eq!(resp.as_bytes(), Some(&b"hi"[..]));
+    assert_eq!(resp.as_text().expect("buffered").unwrap(), "hi");
+
+    resp.body = ResponseBody::Streaming(BodyStream::from_bytes(bytes::Bytes::from_static(b"hi")));
+    assert!(resp.as_bytes().is_none());
+    assert_eq!(resp.text().await.unwrap(), "hi");
+}
+
 #[test]
 fn error_for_status_caps_retained_body() {
     let mut resp = bare_response(None);
-    resp.status = 500;
+    resp.status = http::StatusCode::INTERNAL_SERVER_ERROR;
     resp.body = ResponseBody::Buffered(vec![b'x'; 2 * 1024 * 1024]);
-    match resp.error_for_status().unwrap_err() {
-        Error::Status { code, body, .. } => {
-            assert_eq!(code, 500);
-            assert_eq!(
-                body.len(),
-                16 * 1024,
-                "Error::Status body must be capped at 16 KiB"
-            );
-            assert!(body.iter().all(|&b| b == b'x'), "prefix content preserved");
-        }
-        other => panic!("expected Error::Status, got {other:?}"),
-    }
+    let err = resp.error_for_status().unwrap_err();
+    assert_eq!(
+        err.kind(),
+        Kind::Status,
+        "expected a status error, got {err:?}"
+    );
+    assert_eq!(err.status().map(|s| s.as_u16()), Some(500));
+    let body = err.body_prefix().expect("status errors keep a body prefix");
+    assert_eq!(
+        body.len(),
+        16 * 1024,
+        "status body must be capped at 16 KiB"
+    );
+    assert!(body.iter().all(|&b| b == b'x'), "prefix content preserved");
 }
 
 #[test]
 fn error_for_status_keeps_short_body_intact() {
     let mut resp = bare_response(None);
-    resp.status = 404;
+    resp.status = http::StatusCode::NOT_FOUND;
     resp.body = ResponseBody::Buffered(b"not found".to_vec());
-    match resp.error_for_status().unwrap_err() {
-        Error::Status { body, .. } => assert_eq!(body, b"not found"),
-        other => panic!("expected Error::Status, got {other:?}"),
-    }
+    let err = resp.error_for_status().unwrap_err();
+    assert_eq!(
+        err.kind(),
+        Kind::Status,
+        "expected a status error, got {err:?}"
+    );
+    assert_eq!(err.body_prefix(), Some(&b"not found"[..]));
 }
 
 #[test]

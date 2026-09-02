@@ -99,60 +99,9 @@ fn compute_section_c(input: &Ja4Input<'_>) -> String {
     hash12(&combined)
 }
 
-/// Build the list of extension IDs that **Chrome** sends in its ClientHello, derived from the TLS profile configuration.
-pub fn chrome_extension_ids(tls: &crate::profile::TlsProfile) -> Vec<u16> {
-    let mut exts = Vec::new();
-
-    exts.push(0x0000);
-    exts.push(0x0017);
-    exts.push(0xff01);
-    if !tls.curves.is_empty() {
-        exts.push(0x000a);
-    }
-
-    exts.push(0x000b);
-    exts.push(0x0023);
-    exts.push(0x0010);
-    if tls.ocsp_stapling {
-        exts.push(0x0005);
-    }
-
-    if tls.delegated_credentials.is_some() {
-        exts.push(0x0022);
-    }
-
-    exts.push(0x0033);
-    exts.push(0x002b);
-    if !tls.sigalgs.is_empty() {
-        exts.push(0x000d);
-    }
-
-    exts.push(0x002d);
-    if tls.record_size_limit.is_some() {
-        exts.push(0x001c);
-    }
-
-    if !tls.cert_compression.is_empty() {
-        exts.push(0x001b);
-    }
-
-    if tls.signed_cert_timestamps {
-        exts.push(0x0012);
-    }
-
-    if tls.alps.is_some() {
-        if tls.alps_new_codepoint {
-            exts.push(0x4469);
-        } else {
-            exts.push(0x4411);
-        }
-    }
-
-    if tls.ech_grease {
-        exts.push(0xfe0d);
-    }
-
-    exts
+/// Extension type IDs this profile's TLS block puts in a fresh ClientHello.
+pub fn extension_ids(tls: &crate::profile::TlsProfile) -> Vec<u16> {
+    crate::profile::permutation::extension_ids(tls)
 }
 
 #[cfg(test)]

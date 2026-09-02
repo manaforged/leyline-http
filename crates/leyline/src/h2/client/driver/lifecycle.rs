@@ -34,7 +34,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         let needs_update = self
             .streams
             .get(&stream_id)
-            .map(|a| a.recv_window < initial / 2)
+            .map(|a| a.stalled.is_empty() && a.recv_window < initial / 2)
             .unwrap_or(false);
         if needs_update {
             let current = self
@@ -77,6 +77,9 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 return Ok(());
             }
             let timeout = deadline - now;
+            if self.writer.pending() > 0 {
+                self.writer.flush().await?;
+            }
             tokio::select! {
                 biased;
                 frame = self.reader.next() => {
@@ -150,10 +153,15 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     pub(super) async fn event_loop(&mut self) -> Result<(), H2Error> {
         let mut sweep_tick = tokio::time::interval(std::time::Duration::from_millis(100));
         sweep_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut flush_tick = tokio::time::interval(std::time::Duration::from_millis(1));
+        flush_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             let mut tick_fired = false;
             if !self.pending.is_empty() {
                 self.drain_pending().await?;
+            }
+            if self.writer.pending() > 0 {
+                self.writer.flush().await?;
             }
             tokio::select! {
                 biased;
@@ -195,6 +203,9 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 }
                 _ = sweep_tick.tick() => {
                     tick_fired = true;
+                }
+                _ = flush_tick.tick(), if self.has_stalled() => {
+                    self.flush_stalled().await?;
                 }
             }
 
@@ -273,13 +284,13 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
 
     /// Reject a new stream if the peer's MAX_CONCURRENT_STREAMS is reached or our client stream-ID space is exhausted.
     pub(super) fn check_stream_capacity(&self) -> Result<(), H2Error> {
-        if let Some(limit) = self.peer_settings.max_concurrent_streams {
-            if self.active_stream_count() >= limit {
-                return Err(H2Error::Connection {
-                    code: ErrorCode::RefusedStream,
-                    reason: "MAX_CONCURRENT_STREAMS exceeded".into(),
-                });
-            }
+        if let Some(limit) = self.peer_settings.max_concurrent_streams
+            && self.active_stream_count() >= limit
+        {
+            return Err(H2Error::Connection {
+                code: ErrorCode::RefusedStream,
+                reason: "MAX_CONCURRENT_STREAMS exceeded".into(),
+            });
         }
         if self.next_stream_id > 0x7FFF_FFFF {
             return Err(H2Error::Connection {
@@ -323,8 +334,69 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         }
     }
 
+    /// The peer finished its side. If ours is still open, tell it we will not send the rest, then complete.
+    pub(super) async fn finish_remote(&mut self, stream_id: u32) -> Result<(), H2Error> {
+        let local_open = self
+            .streams
+            .get(&stream_id)
+            .is_some_and(|a| !a.state.is_closed());
+        if local_open {
+            let _ = self
+                .writer
+                .write_rst_stream(stream_id, ErrorCode::NoError)
+                .await;
+        }
+        if let Some(actor) = self.streams.get_mut(&stream_id)
+            && !actor.stalled.is_empty()
+        {
+            actor.remote_done = true;
+            return Ok(());
+        }
+        self.complete_stream(stream_id);
+        Ok(())
+    }
+
+    /// `true` while any streaming response has chunks its consumer has not taken.
+    pub(super) fn has_stalled(&self) -> bool {
+        self.stalled > 0
+    }
+
+    /// Hand queued response chunks to consumers that made room, then re-credit the windows of streams that drained.
+    pub(super) async fn flush_stalled(&mut self) -> Result<(), H2Error> {
+        let mut drained = Vec::new();
+        for (sid, actor) in self.streams.iter_mut() {
+            let Some(ResponseSink::StreamingEx { body_tx, .. }) = actor.response_tx.as_ref() else {
+                continue;
+            };
+            while let Some(chunk) = actor.stalled.pop_front() {
+                self.stalled -= 1;
+                match body_tx.try_send(Ok(chunk)) {
+                    Ok(()) => {}
+                    Err(mpsc::error::TrySendError::Full(Ok(chunk))) => {
+                        actor.stalled.push_front(chunk);
+                        self.stalled += 1;
+                        break;
+                    }
+                    Err(_) => break,
+                }
+            }
+            if actor.stalled.is_empty() {
+                drained.push((*sid, actor.remote_done));
+            }
+        }
+        for (sid, done) in drained {
+            if done {
+                self.complete_stream(sid);
+            } else {
+                self.maybe_top_up_stream_window(sid).await?;
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn complete_stream(&mut self, stream_id: u32) {
         if let Some(mut actor) = self.streams.remove(&stream_id) {
+            self.stalled = self.stalled.saturating_sub(actor.stalled.len());
             actor.deliver_ok();
         }
         self.buffered_pending.retain(|&s| s != stream_id);
@@ -332,6 +404,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
 
     pub(super) fn fail_stream(&mut self, stream_id: u32, err: H2Error) {
         if let Some(mut actor) = self.streams.remove(&stream_id) {
+            self.stalled = self.stalled.saturating_sub(actor.stalled.len());
             actor.deliver_err(err);
         }
         self.buffered_pending.retain(|&s| s != stream_id);

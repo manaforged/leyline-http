@@ -1,5 +1,5 @@
-use super::reorder_headers;
 use super::{Cow, HeaderPair};
+use crate::core::headers::reorder as reorder_headers;
 
 fn h(name: &str, value: &str) -> HeaderPair {
     (Cow::Owned(name.to_string()), Cow::Owned(value.to_string()))

@@ -94,15 +94,15 @@ impl Encoder {
         let mut dyn_exact = None;
         let mut dyn_name = None;
         for i in 0..self.dynamic.len() {
-            if let Some((n, v)) = self.dynamic.get(i) {
-                if n.as_ref() == name.as_bytes() {
-                    if v.as_ref() == value.as_bytes() {
-                        dyn_exact = Some(dyn_offset + i);
-                        break;
-                    }
-                    if dyn_name.is_none() {
-                        dyn_name = Some(dyn_offset + i);
-                    }
+            if let Some((n, v)) = self.dynamic.get(i)
+                && n.as_ref() == name.as_bytes()
+            {
+                if v.as_ref() == value.as_bytes() {
+                    dyn_exact = Some(dyn_offset + i);
+                    break;
+                }
+                if dyn_name.is_none() {
+                    dyn_name = Some(dyn_offset + i);
                 }
             }
         }

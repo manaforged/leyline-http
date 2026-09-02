@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use futures_util::stream;
-use leyline::core::{Body, RetryPolicy, Session};
+use leyline::{Body, RetryPolicy, Session};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 /// Read one complete HTTP/1.1 request off the socket and return when headers are done.
@@ -60,9 +60,9 @@ async fn retries_503_then_succeeds() {
     let policy =
         RetryPolicy::transient().with_backoff(Duration::from_millis(1), Duration::from_millis(10));
     let session = Session::builder().http1().retry(policy).build().unwrap();
-    let resp = session.get(&format!("http://{addr}/flaky")).await.unwrap();
+    let mut resp = session.get(&format!("http://{addr}/flaky")).await.unwrap();
     assert_eq!(resp.status(), 200);
-    assert_eq!(resp.text().unwrap(), "ok");
+    assert_eq!(resp.text().await.unwrap(), "ok");
     assert_eq!(counter.load(Ordering::Relaxed), 3);
     server.await.unwrap();
 }
@@ -121,7 +121,7 @@ async fn does_not_retry_on_400() {
     let policy =
         RetryPolicy::transient().with_backoff(Duration::from_millis(1), Duration::from_millis(5));
     let resp = session
-        .request("GET", &format!("http://{addr}/bad"))
+        .request(http::Method::GET, format!("http://{addr}/bad"))
         .retry(policy)
         .send()
         .await
@@ -202,8 +202,12 @@ async fn streaming_body_plus_retry_errors_clearly() {
         .unwrap_err();
     let msg = format!("{err}");
     assert!(
-        msg.contains("streaming request body cannot be replayed"),
-        "got: {msg}"
+        !msg.contains("cannot be replayed"),
+        "unreplayable body must surface the real attempt error, got: {msg}"
+    );
+    assert!(
+        err.is_connect() || err.is_timeout(),
+        "expected connect/timeout, got: {msg}"
     );
 }
 
@@ -233,7 +237,7 @@ async fn retries_exhausted_returns_last_response() {
         .with_max_retries(3)
         .with_backoff(Duration::from_millis(1), Duration::from_millis(5));
     let resp = session
-        .request("GET", &format!("http://{addr}/bad"))
+        .request(http::Method::GET, format!("http://{addr}/bad"))
         .retry(policy)
         .send()
         .await

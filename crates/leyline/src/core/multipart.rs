@@ -179,11 +179,11 @@ impl Form {
     pub fn content_type(&self) -> String {
         format!("multipart/form-data; boundary={}", self.boundary)
     }
+}
 
-    /// Test-only: consume the form into its streaming-body representation.
-    #[doc(hidden)]
-    pub fn into_stream_body_for_test(self) -> Body {
-        self.into_stream_body()
+impl From<Form> for Body {
+    fn from(form: Form) -> Body {
+        form.into_stream_body()
     }
 }
 
@@ -364,7 +364,7 @@ impl Stream for FormStream {
     }
 }
 
-/// Produce a 48-hex-char random boundary via `rand::thread_rng`.
+/// Produce a 48-hex-char random boundary via `rand::rng`.
 fn random_boundary() -> String {
     format!(
         "----LeylineFormBoundary{}",

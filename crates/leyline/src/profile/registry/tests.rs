@@ -1,5 +1,82 @@
 use super::*;
 
+/// Smallest profile TOML the loader accepts, for the directory-load tests.
+const MINIMAL: &str = r#"
+[meta]
+name = "Test 1"
+browser = "test"
+version = 1
+family = "chromium"
+captured_against = "test-1.0"
+
+[tls]
+ciphers = ["TLS_AES_128_GCM_SHA256"]
+curves = ["X25519"]
+sigalgs = ["ecdsa_secp256r1_sha256"]
+
+[h2]
+pseudo_order = ["method", "authority", "scheme", "path"]
+settings_order = ["header_table_size"]
+"#;
+
+/// A fresh empty directory under the system temp dir.
+fn scratch(name: &str) -> std::path::PathBuf {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock after epoch")
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("leyline-{name}-{stamp}"));
+    std::fs::create_dir_all(&dir).expect("create scratch dir");
+    dir
+}
+
+#[test]
+fn load_reads_a_family_directory() {
+    let dir = scratch("load");
+    let family = dir.join("test");
+    std::fs::create_dir_all(&family).expect("create family dir");
+    std::fs::write(family.join("1.toml"), MINIMAL).expect("write profile");
+
+    let reg = ProfileRegistry::load(&dir).expect("load scratch registry");
+    assert_eq!(reg.len(), 1);
+    let profile = reg.get("test", 1).expect("test 1 not found");
+    assert_eq!(profile.meta.name, "Test 1");
+    assert_eq!(profile.tls.ciphers, vec!["TLS_AES_128_GCM_SHA256"]);
+
+    std::fs::remove_dir_all(&dir).expect("clean scratch dir");
+}
+
+#[test]
+fn load_rejects_an_invalid_permutation() {
+    let dir = scratch("invalid");
+    let family = dir.join("test");
+    std::fs::create_dir_all(&family).expect("create family dir");
+    let bad = MINIMAL.replace(
+        "sigalgs = [\"ecdsa_secp256r1_sha256\"]",
+        "sigalgs = [\"ecdsa_secp256r1_sha256\"]\nextension_permutation = [0]",
+    );
+    std::fs::write(family.join("1.toml"), bad).expect("write profile");
+
+    match ProfileRegistry::load(&dir) {
+        Err(ProfileError::Parse { .. }) => {}
+        Err(other) => panic!("expected a Parse error, got {other}"),
+        Ok(_) => panic!("permutation must be validated"),
+    }
+
+    std::fs::remove_dir_all(&dir).expect("clean scratch dir");
+}
+
+#[test]
+fn load_rejects_an_empty_directory() {
+    let dir = scratch("empty");
+    match ProfileRegistry::load(&dir) {
+        Err(ProfileError::Empty { .. }) => {}
+        Err(other) => panic!("expected an Empty error, got {other}"),
+        Ok(_) => panic!("empty directory must not load"),
+    }
+    std::fs::remove_dir_all(&dir).expect("clean scratch dir");
+}
+
 #[test]
 #[should_panic(expected = "built-in profile is statically valid")]
 fn malformed_builtin_toml_panics_at_load() {

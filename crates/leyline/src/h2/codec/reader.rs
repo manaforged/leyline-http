@@ -1,6 +1,6 @@
 //! Cancel-safe frame reader.
 
-use bytes::BytesMut;
+use bytes::{Buf, BytesMut};
 use tokio::io::{AsyncRead, AsyncReadExt};
 
 use crate::h2::H2Error;
@@ -8,19 +8,15 @@ use crate::h2::frame::{FRAME_HEADER_LEN, Frame, FrameHeader};
 
 use super::DEFAULT_MAX_FRAME_SIZE;
 
+/// Bytes the reader keeps available for the next `read_buf` call.
+const SLACK: usize = 16 * 1024;
+
 /// Reads HTTP/2 frames from an async reader.
 pub struct FrameReader<R> {
     inner: R,
     max_frame_size: u32,
-    header_buf: [u8; FRAME_HEADER_LEN],
-    header_filled: usize,
-    payload_state: Option<PayloadState>,
-}
-
-struct PayloadState {
-    header: FrameHeader,
     buf: BytesMut,
-    filled: usize,
+    header: Option<FrameHeader>,
 }
 
 impl<R: AsyncRead + Unpin> FrameReader<R> {
@@ -29,9 +25,8 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
         Self {
             inner: reader,
             max_frame_size: DEFAULT_MAX_FRAME_SIZE,
-            header_buf: [0u8; FRAME_HEADER_LEN],
-            header_filled: 0,
-            payload_state: None,
+            buf: BytesMut::with_capacity(DEFAULT_MAX_FRAME_SIZE as usize + SLACK),
+            header: None,
         }
     }
 
@@ -40,16 +35,27 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
         self.max_frame_size = size;
     }
 
-    /// Read the next frame.
-    pub async fn next(&mut self) -> Result<Option<Frame>, H2Error> {
-        while self.payload_state.is_none() && self.header_filled < FRAME_HEADER_LEN {
+    /// Read `want` bytes into the buffer, reporting whether the peer closed first.
+    async fn fill(&mut self, want: usize) -> Result<bool, H2Error> {
+        while self.buf.len() < want {
+            self.buf.reserve(want - self.buf.len() + SLACK);
             let n = self
                 .inner
-                .read(&mut self.header_buf[self.header_filled..])
+                .read_buf(&mut self.buf)
                 .await
                 .map_err(H2Error::Io)?;
             if n == 0 {
-                if self.header_filled == 0 {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    /// Read the next frame.
+    pub async fn next(&mut self) -> Result<Option<Frame>, H2Error> {
+        if self.header.is_none() {
+            if !self.fill(FRAME_HEADER_LEN).await? {
+                if self.buf.is_empty() {
                     return Ok(None);
                 }
                 return Err(H2Error::Io(std::io::Error::new(
@@ -57,51 +63,33 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
                     "peer closed mid-frame-header",
                 )));
             }
-            self.header_filled += n;
-        }
-
-        if self.payload_state.is_none() {
-            let header = FrameHeader::parse(&self.header_buf);
+            let mut raw = [0u8; FRAME_HEADER_LEN];
+            raw.copy_from_slice(&self.buf[..FRAME_HEADER_LEN]);
+            let header = FrameHeader::parse(&raw);
+            self.buf.advance(FRAME_HEADER_LEN);
             if header.length > self.max_frame_size {
-                self.header_filled = 0;
                 return Err(H2Error::FrameTooLarge {
                     size: header.length,
                     max: self.max_frame_size,
                 });
             }
-            let buf = BytesMut::zeroed(header.length as usize);
-            self.payload_state = Some(PayloadState {
-                header,
-                buf,
-                filled: 0,
-            });
+            self.header = Some(header);
         }
 
-        let state = self
-            .payload_state
-            .as_mut()
-            .expect("payload state set above");
-        while state.filled < state.buf.len() {
-            let n = self
-                .inner
-                .read(&mut state.buf[state.filled..])
-                .await
-                .map_err(H2Error::Io)?;
-            if n == 0 {
-                return Err(H2Error::Io(std::io::Error::new(
-                    std::io::ErrorKind::UnexpectedEof,
-                    "peer closed mid-frame-payload",
-                )));
-            }
-            state.filled += n;
+        let len = self.header.as_ref().map_or(0, |h| h.length) as usize;
+        if !self.fill(len).await? {
+            return Err(H2Error::Io(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "peer closed mid-frame-payload",
+            )));
         }
 
-        let state = self.payload_state.take().expect("payload state set above");
-        self.header_filled = 0;
-        Frame::parse(state.header, state.buf.freeze()).map(Some)
+        let header = self.header.take().expect("header set above");
+        let payload = self.buf.split_to(len).freeze();
+        Frame::parse(header, payload).map(Some)
     }
 
-    /// Get a mutable reference to the inner reader.
+    /// Get a mutable reference to the inner reader; bytes already read ahead stay in this reader.
     pub fn inner_mut(&mut self) -> &mut R {
         &mut self.inner
     }

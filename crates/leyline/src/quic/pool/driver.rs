@@ -1,6 +1,19 @@
 //! The h3 connection driver task: sole owner of the QUIC connection.
 use super::*;
 
+mod drain;
+
+/// Borrowed connection state for one pass of the HTTP/3 event loop.
+struct Drain<'a> {
+    h3: &'a mut quiche::h3::Connection,
+    conn: &'a mut quiche::Connection,
+    streams: &'a mut HashMap<u64, H3Stream>,
+    pending: &'a mut VecDeque<H3Command>,
+    scratch: &'a mut [u8],
+    max_body: u64,
+    admit: &'a mut Option<usize>,
+}
+
 impl H3Driver {
     pub(super) async fn run(self) {
         let EstablishedH3 {
@@ -58,8 +71,21 @@ impl H3Driver {
             }
 
             if commands_closed && streams.is_empty() && pending.is_empty() {
-                let _ = conn.close(true, 0x100, b"done");
-                let _ = flush_egress(&socket, &mut conn, &mut out).await;
+                match conn.close(true, 0x100, b"done") {
+                    Ok(()) | Err(quiche::Error::Done) => {}
+                    Err(e) => tracing::warn!(
+                        target: "leyline::quic",
+                        error = %e,
+                        "h3 connection close failed"
+                    ),
+                }
+                if let Err(e) = flush_egress(&socket, &mut conn, &mut out).await {
+                    tracing::warn!(
+                        target: "leyline::quic",
+                        error = %e,
+                        "h3 final egress flush failed"
+                    );
+                }
                 closed.store(true, Ordering::Release);
                 return;
             }
@@ -77,8 +103,8 @@ impl H3Driver {
                     Some(cmd) => {
                         if draining {
                             let H3Command::Request { resp_tx, .. } = cmd;
-                            let _ = resp_tx
-                                .send(Err("server sent GOAWAY: request not sent".into()));
+                            drop(resp_tx
+                                .send(Err("server sent GOAWAY: request not sent".into())));
                         } else {
                             pending.push_back(cmd);
                         }
@@ -115,9 +141,9 @@ impl H3Driver {
                                 closed.store(true, Ordering::Release);
                                 for cmd in pending.drain(..) {
                                     let H3Command::Request { resp_tx, .. } = cmd;
-                                    let _ = resp_tx.send(Err(
+                                    drop(resp_tx.send(Err(
                                         "server sent GOAWAY: request not sent".into()
-                                    ));
+                                    )));
                                 }
                                 tracing::debug!(
                                     target: "leyline::quic",
@@ -151,6 +177,7 @@ pub(super) fn start_pending(
         headers,
         body,
         body_stream,
+        retried,
         ..
     }) = pending.front()
     {
@@ -159,7 +186,7 @@ pub(super) fn start_pending(
         }
         let streaming = body_stream.is_some();
         let fin = !streaming && body.as_ref().is_none_or(Bytes::is_empty);
-        let retry = (!streaming).then(|| (headers.clone(), body.clone(), 0u8));
+        let retry = (!streaming && !*retried).then(|| (headers.clone(), body.clone()));
         match h3.send_request(conn, headers, fin) {
             Ok(stream_id) => {
                 let Some(H3Command::Request {
@@ -191,7 +218,7 @@ pub(super) fn start_pending(
             Err(quiche::h3::Error::StreamBlocked) | Err(quiche::h3::Error::Done) => break,
             Err(e) => {
                 if let Some(H3Command::Request { resp_tx, .. }) = pending.pop_front() {
-                    let _ = resp_tx.send(Err(format!("h3 send_request: {e}")));
+                    drop(resp_tx.send(Err(format!("h3 send_request: {e}"))));
                 }
             }
         }
@@ -290,22 +317,24 @@ async fn pump_request_body(
                 }
             }
             Err(error) => {
-                let _ = tx
-                    .send(H3BodyChunk::Eof {
+                drop(
+                    tx.send(H3BodyChunk::Eof {
                         stream_id,
                         error: Some(error),
                     })
-                    .await;
+                    .await,
+                );
                 return;
             }
         }
     }
-    let _ = tx
-        .send(H3BodyChunk::Eof {
+    drop(
+        tx.send(H3BodyChunk::Eof {
             stream_id,
             error: None,
         })
-        .await;
+        .await,
+    );
 }
 
 /// Apply a relayed request-body chunk to its stream.
@@ -327,8 +356,8 @@ pub(super) fn on_request_body_chunk(
             match error {
                 None => stream.body_eof = true,
                 Some(e) => {
-                    let _ = conn.stream_shutdown(stream_id, quiche::Shutdown::Write, 0);
-                    let _ = conn.stream_shutdown(stream_id, quiche::Shutdown::Read, 0);
+                    shutdown(conn, stream_id, quiche::Shutdown::Write, 0);
+                    shutdown(conn, stream_id, quiche::Shutdown::Read, 0);
                     let msg = format!("h3 request body stream error: {e}");
                     if stream.head_sent {
                         if let Some(tx) = &stream.stream_tx {
@@ -344,10 +373,23 @@ pub(super) fn on_request_body_chunk(
     }
 }
 
+/// Shut down one half of a QUIC stream; `Done` means it was already shut down.
+fn shutdown(conn: &mut quiche::Connection, id: u64, dir: quiche::Shutdown, err: u64) {
+    match conn.stream_shutdown(id, dir, err) {
+        Ok(()) | Err(quiche::Error::Done) => {}
+        Err(e) => tracing::warn!(
+            target: "leyline::quic",
+            stream_id = id,
+            error = %e,
+            "h3 stream shutdown failed"
+        ),
+    }
+}
+
 /// Reset the request-upload (write) half of a stream and cancel its pump.
 fn reset_upload_half(conn: &mut quiche::Connection, stream_id: u64, stream: &mut H3Stream) {
     if stream.send_side_open() {
-        let _ = conn.stream_shutdown(stream_id, quiche::Shutdown::Write, 0);
+        shutdown(conn, stream_id, quiche::Shutdown::Write, 0);
     }
     stream.cancel_upload();
 }
@@ -380,7 +422,7 @@ pub(super) fn sweep_cancelled_streams(
 ) {
     for id in cancelled_stream_ids(streams) {
         if let Some(mut stream) = streams.remove(&id) {
-            let _ = conn.stream_shutdown(id, quiche::Shutdown::Read, 0);
+            shutdown(conn, id, quiche::Shutdown::Read, 0);
             reset_upload_half(conn, id, &mut stream);
         }
     }
@@ -396,177 +438,18 @@ pub(super) fn drain_h3_events(
     max_response_body_bytes: u64,
     admit_cap: &mut Option<usize>,
 ) -> Result<bool, String> {
-    loop {
-        match h3.poll(conn) {
-            Ok((stream_id, quiche::h3::Event::Headers { list, .. })) => {
-                let list = list
-                    .iter()
-                    .map(|header| {
-                        (
-                            String::from_utf8_lossy(header.name()).to_string(),
-                            String::from_utf8_lossy(header.value()).to_string(),
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                let Some(stream) = streams.get_mut(&stream_id) else {
-                    continue;
-                };
-                if let Err(message) = stream.headers(&list) {
-                    let _ = conn.stream_shutdown(
-                        stream_id,
-                        quiche::Shutdown::Read,
-                        quiche::h3::WireErrorCode::MessageError as u64,
-                    );
-                    let _ = conn.stream_shutdown(stream_id, quiche::Shutdown::Write, 0);
-                    stream.deliver_error(message.into());
-                    streams.remove(&stream_id);
-                    continue;
-                }
-                if stream.is_streaming()
-                    && stream.response == H3ResponseState::Final
-                    && !stream.head_sent
-                {
-                    stream.deliver_head();
-                }
-            }
-            Ok((stream_id, quiche::h3::Event::Data)) => {
-                let Some(stream) = streams.get_mut(&stream_id) else {
-                    while let Ok(n) = h3.recv_body(conn, stream_id, scratch) {
-                        if n == 0 {
-                            break;
-                        }
-                    }
-                    continue;
-                };
-                if let Err(message) = stream.data() {
-                    let _ = conn.stream_shutdown(
-                        stream_id,
-                        quiche::Shutdown::Read,
-                        quiche::h3::WireErrorCode::MessageError as u64,
-                    );
-                    let _ = conn.stream_shutdown(stream_id, quiche::Shutdown::Write, 0);
-                    stream.deliver_error(message.into());
-                    streams.remove(&stream_id);
-                    continue;
-                }
-                if stream.is_streaming() {
-                    if forward_stream_body(
-                        h3,
-                        conn,
-                        stream_id,
-                        stream,
-                        scratch,
-                        max_response_body_bytes,
-                    ) {
-                        streams.remove(&stream_id);
-                    }
-                    continue;
-                }
-                while let Ok(n) = h3.recv_body(conn, stream_id, scratch) {
-                    if n == 0 {
-                        break;
-                    }
-                    if let Err(new_len) =
-                        check_body_budget(stream.body_bytes_seen, n, max_response_body_bytes)
-                    {
-                        let _ = conn.stream_shutdown(
-                            stream_id,
-                            quiche::Shutdown::Read,
-                            quiche::h3::WireErrorCode::ExcessiveLoad as u64,
-                        );
-                        stream.deliver(Err(format!(
-                            "h3: response body exceeded max_response_body_bytes ({new_len} > {max_response_body_bytes})"
-                        )));
-                        streams.remove(&stream_id);
-                        break;
-                    }
-                    stream.body_bytes_seen += n;
-                    stream.body.extend_from_slice(&scratch[..n]);
-                }
-            }
-            Ok((stream_id, quiche::h3::Event::Finished)) => {
-                let invalid = streams
-                    .get(&stream_id)
-                    .and_then(|stream| stream.finish().err());
-                if let Some(message) = invalid {
-                    let _ = conn.stream_shutdown(
-                        stream_id,
-                        quiche::Shutdown::Read,
-                        quiche::h3::WireErrorCode::MessageError as u64,
-                    );
-                    let _ = conn.stream_shutdown(stream_id, quiche::Shutdown::Write, 0);
-                    if let Some(mut stream) = streams.remove(&stream_id) {
-                        stream.deliver_error(message.into());
-                    }
-                    continue;
-                }
-                let streaming = streams.get(&stream_id).map(H3Stream::is_streaming);
-                match streaming {
-                    Some(true) => {
-                        if let Some(stream) = streams.get_mut(&stream_id) {
-                            reset_upload_half(conn, stream_id, stream);
-                            stream.peer_finished = true;
-                        }
-                    }
-                    Some(false) => {
-                        if let Some(mut stream) = streams.remove(&stream_id) {
-                            if stream.send_side_open() {
-                                let _ = conn.stream_shutdown(stream_id, quiche::Shutdown::Write, 0);
-                            }
-                            let resp = H3Response {
-                                status: stream.status,
-                                headers: std::mem::take(&mut stream.headers),
-                                body: std::mem::take(&mut stream.body),
-                            };
-                            stream.deliver(Ok(resp));
-                        }
-                    }
-                    None => {}
-                }
-            }
-            Ok((stream_id, quiche::h3::Event::Reset(e))) => {
-                if e == 0x10b {
-                    let cur = streams.len().max(1);
-                    let next = match *admit_cap {
-                        Some(c) => c.min(cur / 2).max(1),
-                        None => (cur / 2).max(1),
-                    };
-                    *admit_cap = Some(next);
-                }
-                if let Some(mut stream) = streams.remove(&stream_id) {
-                    if e == 0x10b && !stream.head_sent {
-                        if let Some((headers, body, _)) = stream.retry.take() {
-                            pending.push_back(H3Command::Request {
-                                headers,
-                                body,
-                                body_stream: None,
-                                stream_body_tx: None,
-                                resp_tx: stream.resp_tx.take().expect("buffered keeps resp_tx"),
-                            });
-                            continue;
-                        }
-                    }
-                }
-                if let Some(mut stream) = streams.remove(&stream_id) {
-                    let msg = format!("h3 stream reset: {e}");
-                    if stream.head_sent {
-                        if let Some(tx) = &stream.stream_tx {
-                            deliver_stream_error(tx, std::io::Error::other(msg));
-                        }
-                    } else {
-                        stream.deliver(Err(msg));
-                    }
-                }
-            }
-            Ok((_, quiche::h3::Event::PriorityUpdate)) => {}
-            Ok((_, quiche::h3::Event::GoAway)) => return Ok(true),
-            Err(quiche::h3::Error::Done) => return Ok(false),
-            Err(e) => return Err(format!("h3 poll: {e}")),
-        }
+    Drain {
+        h3,
+        conn,
+        streams,
+        pending,
+        scratch,
+        max_body: max_response_body_bytes,
+        admit: admit_cap,
     }
+    .run()
 }
 
-/// Drain ready body bytes for one streaming response into its bounded channel, applying back-pressure: a chunk the channel can't accept yet is stashed (`stalled`) and reading stops immediately, leaving the rest in quiche so QUIC flow control throttles the origin.
 pub(super) fn forward_stream_body(
     h3: &mut quiche::h3::Connection,
     conn: &mut quiche::Connection,
@@ -591,7 +474,7 @@ pub(super) fn forward_stream_body(
                 return false;
             }
             Err(TrySendError::Closed(_)) => {
-                let _ = conn.stream_shutdown(stream_id, quiche::Shutdown::Read, 0);
+                shutdown(conn, stream_id, quiche::Shutdown::Read, 0);
                 reset_upload_half(conn, stream_id, stream);
                 return true;
             }
@@ -609,7 +492,8 @@ pub(super) fn forward_stream_body(
                 if let Err(new_len) =
                     check_body_budget(stream.body_bytes_seen, n, max_response_body_bytes)
                 {
-                    let _ = conn.stream_shutdown(
+                    shutdown(
+                        conn,
                         stream_id,
                         quiche::Shutdown::Read,
                         quiche::h3::WireErrorCode::ExcessiveLoad as u64,
@@ -633,7 +517,7 @@ pub(super) fn forward_stream_body(
                         break;
                     }
                     Err(TrySendError::Closed(_)) => {
-                        let _ = conn.stream_shutdown(stream_id, quiche::Shutdown::Read, 0);
+                        shutdown(conn, stream_id, quiche::Shutdown::Read, 0);
                         reset_upload_half(conn, stream_id, stream);
                         return true;
                     }
@@ -696,7 +580,7 @@ pub(super) fn pump_streaming_bodies(
 pub(super) fn deliver_stream_error(tx: &mpsc::Sender<std::io::Result<Bytes>>, err: std::io::Error) {
     let tx = tx.clone();
     tokio::spawn(async move {
-        let _ = tx.send(Err(err)).await;
+        drop(tx.send(Err(err)).await);
     });
 }
 
@@ -719,6 +603,6 @@ pub(super) fn fail_all(
     }
     for cmd in pending.drain(..) {
         let H3Command::Request { resp_tx, .. } = cmd;
-        let _ = resp_tx.send(Err(reason.clone()));
+        drop(resp_tx.send(Err(reason.clone())));
     }
 }

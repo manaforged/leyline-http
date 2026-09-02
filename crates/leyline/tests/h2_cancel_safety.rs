@@ -36,7 +36,6 @@ fn test_config() -> H2Config {
         default_priority: None,
         rst_stream_flood_threshold: 100,
         rst_stream_flood_window: Duration::from_secs(10),
-        settings_ack_timeout: Duration::from_secs(10),
         max_response_body_bytes: 100 * 1024 * 1024,
         max_header_block_bytes: 256 * 1024,
         settings_flood_threshold: 100,

@@ -10,8 +10,9 @@ use futures_util::stream::{FuturesUnordered, StreamExt};
 use tokio::net::TcpStream;
 use tokio::time::sleep;
 
-/// Tunables for the Happy Eyeballs race.
+/// Tunables for the Happy Eyeballs race. Start from [`HappyEyeballsConfig::default`] and set one field per call.
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub struct HappyEyeballsConfig {
     /// Gap between successive connect attempts.
     pub resolve_delay: Duration,
@@ -25,6 +26,25 @@ impl Default for HappyEyeballsConfig {
             resolve_delay: Duration::from_millis(250),
             attempt_limit: 8,
         }
+    }
+}
+
+impl HappyEyeballsConfig {
+    /// Create default Happy Eyeballs tunables.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the gap between successive connect attempts.
+    pub fn resolve_delay(mut self, d: Duration) -> Self {
+        self.resolve_delay = d;
+        self
+    }
+
+    /// Set the maximum number of parallel connect attempts.
+    pub fn attempt_limit(mut self, n: usize) -> Self {
+        self.attempt_limit = n;
+        self
     }
 }
 

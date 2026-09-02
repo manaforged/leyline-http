@@ -56,7 +56,7 @@ async fn connect_timeout_bounds_an_unreachable_endpoint() {
 
     let start = Instant::now();
     let result = session
-        .request("GET", "https://192.0.2.1:443/")
+        .request(http::Method::GET, "https://192.0.2.1:443/")
         .retry(RetryPolicy::none())
         .send()
         .await;

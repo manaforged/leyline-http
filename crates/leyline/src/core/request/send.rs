@@ -3,165 +3,111 @@
 use super::RequestBuilder;
 use crate::core::Result;
 use crate::core::body::Body;
-use crate::core::error::Error;
+use crate::core::error::{Error, Kind};
 use crate::core::response::Response;
-use crate::core::retry::is_idempotent;
+use crate::core::session::execute::Attempt;
+use crate::util::is_idempotent;
 
 impl RequestBuilder {
     /// Send the request and return a buffered response.
     pub async fn send(mut self) -> Result<Response> {
         self.prepare()?;
-        if self.retry_policy.is_none() && self.digest_auth.is_none() {
-            let body = std::mem::take(&mut self.body);
-            let request_proxy = self.proxy.take();
-            let headers = if self.headers.is_empty() {
-                None
-            } else {
-                Some(std::mem::take(&mut self.headers))
-            };
-            return self
-                .session
-                .execute_with_timeout(
-                    &self.method,
-                    &self.url,
-                    self.preset,
-                    body,
-                    headers,
-                    self.timeout,
-                    self.stream_response,
-                    request_proxy.as_deref(),
-                    self.header_order.as_deref(),
-                )
-                .await;
+        let retry_policy = self.retry_policy.clone();
+        let digest_auth = self.digest_auth.take();
+        let allow_non_idempotent_retry = self.allow_non_idempotent_retry;
+        let timeout = self.timeout;
+        let session = self.session.clone();
+        let mut attempt = self.into_attempt();
+
+        if retry_policy.is_none() && digest_auth.is_none() {
+            return session.run(attempt).await;
         }
 
-        let method = self.method.clone();
-        let url = self.url.clone();
-        let preset = self.preset;
-        let base_headers = self.headers.clone();
-        let timeout = self.timeout;
-        let stream_response = self.stream_response;
-        let retry_policy = self.retry_policy.clone();
-        let allow_non_idempotent_retry = self.allow_non_idempotent_retry;
-        let digest_auth = self.digest_auth.clone();
-        let request_proxy = self.proxy.take();
-        let mut body = std::mem::take(&mut self.body);
-
-        let retryable_method = allow_non_idempotent_retry || is_idempotent(&method);
-        let body_retryable = !body.is_stream();
-
-        let retry_body_template: Option<Body> = match &body {
-            Body::Empty => Some(Body::Empty),
-            Body::Bytes(b) => Some(Body::Bytes(b.clone())),
-            Body::Stream { .. } => None,
+        let retryable_method = allow_non_idempotent_retry || is_idempotent(attempt.method.as_str());
+        let body_retryable = !attempt.body.is_stream();
+        let replay: Option<bytes::Bytes> = match &attempt.body {
+            Body::Bytes(b) => Some(b.clone()),
+            _ => None,
         };
+        let base_headers = attempt.headers.clone();
 
-        let session_timeout = timeout.unwrap_or_else(|| self.session.default_timeout());
+        let session_timeout = timeout.unwrap_or_else(|| session.default_timeout());
         let deadline = tokio::time::Instant::now() + session_timeout;
 
-        let mut attempt: u32 = 0;
+        let mut n: u32 = 0;
         loop {
             let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
             if remaining.is_zero() {
-                return Err(Error::Timeout);
+                return Err(Error::new(Kind::Timeout));
             }
-            let attempt_timeout = Some(remaining);
-            let this_headers = if base_headers.is_empty() {
-                None
-            } else {
-                Some(base_headers.clone())
-            };
-            let hop_body = std::mem::take(&mut body);
-            let is_stream_body = hop_body.is_stream();
+            let is_stream_body = attempt.body.is_stream();
+            let hop_body = std::mem::take(&mut attempt.body);
+            let this = attempt.again(hop_body, base_headers.clone(), Some(remaining));
+            let result = session.run(this).await;
 
-            let result = self
-                .session
-                .execute_with_timeout(
-                    &method,
-                    &url,
-                    preset,
-                    hop_body,
-                    this_headers,
-                    attempt_timeout,
-                    stream_response,
-                    request_proxy.as_deref(),
-                    self.header_order.as_deref(),
+            if let (Some(auth), Ok(resp)) = (&digest_auth, result.as_ref())
+                && resp.status() == 401
+                && n == 0
+                && let Some(header) = resp.header("www-authenticate")
+                && let Ok(challenge) = crate::core::digest::parse_challenge(header)
+            {
+                let parsed = url::Url::parse(resp.url())?;
+                let uri_path = match parsed.query() {
+                    Some(q) => format!("{}?{}", parsed.path(), q),
+                    None => parsed.path().to_string(),
+                };
+                if is_stream_body {
+                    return Err(Error::new(Kind::Request).with_message(
+                        "digest auth: cannot replay streaming request body. \
+                         Buffer the body via `Body::Bytes` before sending.",
+                    ));
+                }
+                return Self::digest_followup(
+                    &session, attempt, auth, challenge, &uri_path, replay, deadline,
                 )
                 .await;
-
-            if let (Some(auth), Ok(resp)) = (&digest_auth, result.as_ref()) {
-                if resp.status() == 401 && attempt == 0 {
-                    if let Some(header) = resp.header("www-authenticate") {
-                        if let Ok(challenge) = crate::core::digest::parse_challenge(header) {
-                            let parsed = url::Url::parse(resp.url())?;
-                            let uri_path = match parsed.query() {
-                                Some(q) => format!("{}?{}", parsed.path(), q),
-                                None => parsed.path().to_string(),
-                            };
-                            return Self::digest_followup(
-                                &self.session,
-                                self.header_order.as_deref(),
-                                auth,
-                                challenge,
-                                &url,
-                                &method,
-                                &uri_path,
-                                preset,
-                                &base_headers,
-                                match retry_body_template.as_ref() {
-                                    Some(Body::Bytes(b)) => Body::Bytes(b.clone()),
-                                    _ => Body::Empty,
-                                },
-                                deadline,
-                                stream_response,
-                                request_proxy.as_deref(),
-                                is_stream_body,
-                            )
-                            .await;
-                        }
-                    }
-                }
             }
 
-            let sleep = match plan_retry(
-                &result,
-                &retry_policy,
-                attempt,
-                retryable_method,
-                body_retryable,
-            ) {
-                RetryPlan::Stop => return result,
-                RetryPlan::Abort(e) => return Err(e),
-                RetryPlan::Backoff(sleep) => sleep,
-            };
-            if !retryable_method {
-                return result;
-            }
-
-            if !body_retryable {
-                return Err(Error::Http(
-                    "the request hit a retryable failure, but its streaming request body \
-                     cannot be replayed. Buffer the body via `Body::Bytes` before retrying."
-                        .into(),
-                ));
-            }
+            let sleep =
+                match plan_retry(&result, &retry_policy, n, retryable_method, body_retryable) {
+                    RetryPlan::Stop => return result,
+                    RetryPlan::Backoff(sleep) => sleep,
+                };
 
             let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
             tokio::time::sleep(sleep.min(remaining)).await;
-            attempt += 1;
-            body = match &retry_body_template {
-                Some(Body::Empty) => Body::Empty,
-                Some(Body::Bytes(b)) => Body::Bytes(b.clone()),
-                _ => Body::Empty,
-            };
+            n += 1;
+            attempt.body = replay.clone().map(Body::Bytes).unwrap_or(Body::Empty);
+        }
+    }
+
+    /// Hand the builder's fields to the session as one owned attempt.
+    fn into_attempt(mut self) -> Attempt {
+        let headers = if self.headers.is_empty() {
+            None
+        } else {
+            Some(std::mem::take(&mut self.headers))
+        };
+        Attempt {
+            method: std::mem::take(&mut self.method),
+            url: std::mem::take(&mut self.url),
+            preset: self.preset,
+            body: std::mem::take(&mut self.body),
+            headers,
+            timeout: self.timeout,
+            timeouts: self.timeouts,
+            stream_response: self.stream_response,
+            proxy: self.proxy.take(),
+            header_order: self.header_order.take(),
         }
     }
 
     /// Builder-error replay, query-param append, and opt-in request-body compression.
-    fn prepare(&mut self) -> Result<()> {
+    pub(crate) fn prepare(&mut self) -> Result<()> {
         if let Some(err) = self.builder_error.take() {
             return Err(err);
         }
+        self.infer_from_content_type();
 
         if !self.query_params.is_empty() {
             let mut url = url::Url::parse(&self.url)?;
@@ -179,15 +125,14 @@ impl RequestBuilder {
                 Body::Bytes(b) => {
                     let compressed = encoding.encode(b)?;
                     self.headers
-                        .set("content-encoding", encoding.header_value());
+                        .set("content-encoding", encoding.header_value())?;
                     self.body = Body::from(compressed);
                 }
                 Body::Empty => {}
                 Body::Stream { .. } => {
-                    return Err(Error::Body(
+                    return Err(Error::new(Kind::Body).with_message(
                         "request-body compression is not supported for streaming bodies; \
-                         buffer the body via `Body::Bytes` before calling `.compress(..)`"
-                            .into(),
+                         buffer the body via `Body::Bytes` before calling `.compress(..)`",
                     ));
                 }
             }
@@ -196,88 +141,63 @@ impl RequestBuilder {
     }
 
     /// Handle a 401 Digest challenge: compute the Authorization response and retry once, honoring stale=true with a single fresh-nonce retry (RFC 7616 §3.3).
-    #[allow(clippy::too_many_arguments)]
     async fn digest_followup(
         session: &crate::core::Session,
-        header_order: Option<&[String]>,
+        attempt: Attempt,
         auth: &crate::core::digest::DigestAuth,
         challenge: crate::core::digest::Challenge,
-        url: &str,
-        method: &str,
         uri_path: &str,
-        preset: Option<crate::profile::Preset>,
-        base_headers: &crate::core::headers::HeaderList,
-        replay_template: Body,
+        replay: Option<bytes::Bytes>,
         deadline: tokio::time::Instant,
-        stream_response: bool,
-        request_proxy: Option<&str>,
-        is_stream_body: bool,
     ) -> Result<Response> {
-        if is_stream_body {
-            return Err(Error::Http(
-                "digest auth: cannot replay streaming request body. \
-                 Buffer the body via `Body::Bytes` before sending."
-                    .into(),
-            ));
-        }
         let mut challenge = challenge;
         let mut stale_retried = false;
         loop {
             let cnonce = crate::core::digest::generate_cnonce();
             let nc = crate::core::digest::next_nc_for_nonce(&challenge.nonce);
             let auth_header = match crate::core::digest::build_auth_header(
-                &challenge, auth, method, uri_path, nc, &cnonce,
+                &challenge,
+                auth,
+                attempt.method.as_str(),
+                uri_path,
+                nc,
+                &cnonce,
             ) {
                 Some(h) => h,
                 None => {
-                    return Err(Error::Http(
+                    return Err(Error::new(Kind::Request).with_message(
                         "digest auth: server offered only qop=auth-int, \
                          which Leyline does not implement (RFC 7616 §3.4.3 \
                          requires the entity-body hash in HA2). Pass through \
-                         the 401 or remove digest_auth()."
-                            .into(),
+                         the 401 or remove digest_auth().",
                     ));
                 }
             };
-            let mut digest_headers = base_headers.clone();
-            digest_headers.set("authorization", auth_header);
-            let replay_body = match &replay_template {
-                Body::Bytes(b) => Body::Bytes(b.clone()),
-                _ => Body::Empty,
-            };
+            let mut digest_headers = attempt.headers.clone().unwrap_or_default();
+            digest_headers.set("authorization", auth_header)?;
+            let replay_body = replay.clone().map(Body::Bytes).unwrap_or(Body::Empty);
             let digest_remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
             if digest_remaining.is_zero() {
-                return Err(Error::Timeout);
+                return Err(Error::new(Kind::Timeout));
             }
             let resp = session
-                .execute_with_timeout(
-                    method,
-                    url,
-                    preset,
-                    replay_body,
-                    Some(digest_headers),
-                    Some(digest_remaining),
-                    stream_response,
-                    request_proxy,
-                    header_order,
-                )
+                .run(attempt.again(replay_body, Some(digest_headers), Some(digest_remaining)))
                 .await?;
-            if resp.status() == 401 && !stale_retried {
-                let next = resp
+            if resp.status() == 401
+                && !stale_retried
+                && let Some(next) = resp
                     .header("www-authenticate")
-                    .and_then(|v| crate::core::digest::parse_challenge(v).ok());
-                if let Some(next) = next {
-                    if next.stale {
-                        tracing::debug!(
-                            target: "leyline::digest",
-                            nonce = %next.nonce,
-                            "stale nonce — retrying with fresh challenge"
-                        );
-                        challenge = next;
-                        stale_retried = true;
-                        continue;
-                    }
-                }
+                    .and_then(|v| crate::core::digest::parse_challenge(v).ok())
+                && next.stale
+            {
+                tracing::debug!(
+                    target: "leyline::digest",
+                    nonce = %next.nonce,
+                    "stale nonce — retrying with fresh challenge"
+                );
+                challenge = next;
+                stale_retried = true;
+                continue;
             }
             return Ok(resp);
         }
@@ -288,8 +208,6 @@ impl RequestBuilder {
 enum RetryPlan {
     /// Give up and surface the attempt's result.
     Stop,
-    /// Give up with a synthesized error (unreplayable streaming body).
-    Abort(Error),
     /// Sleep this long, then try again.
     Backoff(std::time::Duration),
 }
@@ -306,32 +224,15 @@ fn plan_retry(
         return RetryPlan::Stop;
     }
     let should_retry = match result {
-        Ok(resp) => retry_policy.matches_status(resp.status()),
-        Err(Error::Io(_)) => retry_policy.matches_connection_error(),
-        Err(Error::Timeout) => retry_policy.matches_timeout(),
-        Err(Error::Tls(err)) if err.is_retryable() => retry_policy.matches_connection_error(),
-        Err(Error::Http2(
-            crate::h2::H2Error::Io(_)
-            | crate::h2::H2Error::Connection {
-                code: crate::h2::error::ErrorCode::NoError,
-                ..
-            }
-            | crate::h2::H2Error::Stream {
-                code: crate::h2::error::ErrorCode::RefusedStream,
-                ..
-            },
-        )) => retry_policy.matches_connection_error(),
-        _ => false,
+        Ok(resp) => retry_policy.matches_status(resp.status().as_u16()),
+        Err(err) if err.is_timeout() => retry_policy.matches_timeout(),
+        Err(err) if err.is_connect() || err.is_connection_closed() => {
+            retry_policy.matches_connection_error()
+        }
+        Err(_) => false,
     };
-    if !should_retry || !retryable_method {
+    if !should_retry || !retryable_method || !body_retryable {
         return RetryPlan::Stop;
-    }
-    if !body_retryable {
-        return RetryPlan::Abort(Error::Http(
-            "the request hit a retryable failure, but its streaming request body \
-             cannot be replayed. Buffer the body via `Body::Bytes` before retrying."
-                .into(),
-        ));
     }
     let sleep = match result {
         Ok(resp) => resp
@@ -351,3 +252,7 @@ impl std::future::IntoFuture for RequestBuilder {
         Box::pin(async move { self.send().await })
     }
 }
+
+#[cfg(test)]
+#[path = "send_tests.rs"]
+mod tests;

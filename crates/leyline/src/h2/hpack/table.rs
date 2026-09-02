@@ -177,20 +177,131 @@ pub fn lookup(index: usize, dynamic: &DynamicTable) -> Option<(Bytes, Bytes)> {
     }
 }
 
+/// First index and entry count of a static-table name, whose entries are always contiguous (RFC 7541 Appendix A).
+fn span(name: &str) -> Option<(usize, usize)> {
+    let found = match name.len() {
+        3 => match name {
+            "age" => (21, 1),
+            "via" => (60, 1),
+            _ => return None,
+        },
+        4 => match name {
+            "date" => (33, 1),
+            "etag" => (34, 1),
+            "from" => (37, 1),
+            "host" => (38, 1),
+            "link" => (45, 1),
+            "vary" => (59, 1),
+            _ => return None,
+        },
+        5 => match name {
+            ":path" => (4, 2),
+            "allow" => (22, 1),
+            "range" => (50, 1),
+            _ => return None,
+        },
+        6 => match name {
+            "accept" => (19, 1),
+            "cookie" => (32, 1),
+            "expect" => (35, 1),
+            "server" => (54, 1),
+            _ => return None,
+        },
+        7 => match name {
+            ":method" => (2, 2),
+            ":scheme" => (6, 2),
+            ":status" => (8, 7),
+            "expires" => (36, 1),
+            "referer" => (51, 1),
+            "refresh" => (52, 1),
+            _ => return None,
+        },
+        8 => match name {
+            "if-match" => (39, 1),
+            "if-range" => (42, 1),
+            "location" => (46, 1),
+            _ => return None,
+        },
+        10 => match name {
+            ":authority" => (1, 1),
+            "set-cookie" => (55, 1),
+            "user-agent" => (58, 1),
+            _ => return None,
+        },
+        11 => match name {
+            "retry-after" => (53, 1),
+            _ => return None,
+        },
+        12 => match name {
+            "content-type" => (31, 1),
+            "max-forwards" => (47, 1),
+            _ => return None,
+        },
+        13 => match name {
+            "accept-ranges" => (18, 1),
+            "authorization" => (23, 1),
+            "cache-control" => (24, 1),
+            "content-range" => (30, 1),
+            "if-none-match" => (41, 1),
+            "last-modified" => (44, 1),
+            _ => return None,
+        },
+        14 => match name {
+            "accept-charset" => (15, 1),
+            "content-length" => (28, 1),
+            _ => return None,
+        },
+        15 => match name {
+            "accept-encoding" => (16, 1),
+            "accept-language" => (17, 1),
+            _ => return None,
+        },
+        16 => match name {
+            "content-encoding" => (26, 1),
+            "content-language" => (27, 1),
+            "content-location" => (29, 1),
+            "www-authenticate" => (61, 1),
+            _ => return None,
+        },
+        17 => match name {
+            "if-modified-since" => (40, 1),
+            "transfer-encoding" => (57, 1),
+            _ => return None,
+        },
+        18 => match name {
+            "proxy-authenticate" => (48, 1),
+            _ => return None,
+        },
+        19 => match name {
+            "content-disposition" => (25, 1),
+            "if-unmodified-since" => (43, 1),
+            "proxy-authorization" => (49, 1),
+            _ => return None,
+        },
+        25 => match name {
+            "strict-transport-security" => (56, 1),
+            _ => return None,
+        },
+        27 => match name {
+            "access-control-allow-origin" => (20, 1),
+            _ => return None,
+        },
+        _ => return None,
+    };
+    Some(found)
+}
+
 /// Find the index for a header name+value in static table.
 pub fn find_static(name: &str, value: &str) -> Option<(usize, bool)> {
-    let mut name_match = None;
-    for (i, &(n, v)) in STATIC_TABLE.iter().enumerate().skip(1) {
-        if n == name {
-            if v == value {
-                return Some((i, true));
-            }
-            if name_match.is_none() {
-                name_match = Some(i);
-            }
+    let (first, count) = span(name)?;
+    for i in first..first + count {
+        if let Some(&(_, v)) = STATIC_TABLE.get(i)
+            && v == value
+        {
+            return Some((i, true));
         }
     }
-    name_match.map(|i| (i, false))
+    Some((first, false))
 }
 
 #[cfg(test)]

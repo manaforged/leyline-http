@@ -1,7 +1,14 @@
 use super::*;
+#[cfg(any(
+    feature = "compression-gzip",
+    feature = "compression-deflate",
+    feature = "compression-zstd"
+))]
 use leyline_bssl::ssl::CertificateCompressor;
+#[cfg(any(feature = "compression-gzip", feature = "compression-deflate"))]
 use std::io::Write;
 
+#[cfg(any(feature = "compression-gzip", feature = "compression-deflate"))]
 #[test]
 fn zlib_decompressor_round_trips() {
     let original = b"-----BEGIN CERTIFICATE----- leyline zlib roundtrip";
@@ -14,6 +21,7 @@ fn zlib_decompressor_round_trips() {
     assert_eq!(out, original);
 }
 
+#[cfg(feature = "compression-zstd")]
 #[test]
 fn zstd_decompressor_round_trips() {
     let original = b"-----BEGIN CERTIFICATE----- leyline zstd roundtrip";
@@ -24,6 +32,7 @@ fn zstd_decompressor_round_trips() {
     assert_eq!(out, original);
 }
 
+#[cfg(any(feature = "compression-gzip", feature = "compression-deflate"))]
 #[test]
 fn decompression_bomb_is_capped() {
     let original = vec![0u8; 8 * 1024 * 1024];
@@ -37,4 +46,14 @@ fn decompression_bomb_is_capped() {
         .unwrap_err();
     assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
     assert!(out.len() <= MAX_CERT_DECOMPRESSED_BYTES + 8192);
+}
+
+#[test]
+fn unknown_min_tls_version_is_a_profile_error() {
+    assert!(profile_min_version(&Some("1.1".into())).is_err());
+    assert_eq!(
+        profile_min_version(&Some("1.2".into())).unwrap(),
+        Some(TlsMinVersion::Tls12)
+    );
+    assert_eq!(profile_min_version(&None).unwrap(), None);
 }

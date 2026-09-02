@@ -6,8 +6,8 @@
 ))]
 use std::io::Read;
 
-use crate::core::error::{Error, Result};
-use crate::core::{CompressionConfig, HeaderStr};
+use crate::core::CompressionConfig;
+use crate::core::error::{Error, Kind, Result};
 
 pub(super) fn decompress_body(
     body: Vec<u8>,
@@ -33,26 +33,23 @@ pub(super) fn decompress_body(
 }
 
 /// Response headers as `(name, value)` pairs in wire order.
-type HeaderPairs = Vec<(HeaderStr, HeaderStr)>;
+type HeaderPairs = Vec<(http::HeaderName, http::HeaderValue)>;
 
 /// Decompress `body` per its `content-encoding` header and, when bytes were actually decoded, drop the now-stale `content-encoding`/`content-length` headers.
-pub(super) fn decompress_and_strip(
+pub(crate) fn decompress_and_strip(
     body: Vec<u8>,
     headers: HeaderPairs,
     config: &CompressionConfig,
 ) -> Result<(Vec<u8>, HeaderPairs)> {
     let content_encoding = headers
         .iter()
-        .find(|(k, _)| k.eq_ignore_ascii_case("content-encoding"))
-        .map(|(_, v)| v.to_lowercase());
+        .find(|(k, _)| *k == "content-encoding")
+        .map(|(_, v)| String::from_utf8_lossy(v.as_bytes()).to_lowercase());
     let (body, decoded) = decompress_body(body, content_encoding.as_deref(), config)?;
     let headers = if decoded {
         headers
             .into_iter()
-            .filter(|(k, _)| {
-                !k.eq_ignore_ascii_case("content-encoding")
-                    && !k.eq_ignore_ascii_case("content-length")
-            })
+            .filter(|(k, _)| *k != "content-encoding" && *k != "content-length")
             .collect()
     } else {
         headers
@@ -63,17 +60,16 @@ pub(super) fn decompress_and_strip(
 /// Max decompressed body size (100 MB, same as wire limit).
 const MAX_DECOMPRESSED: usize = 100 * 1024 * 1024;
 
-pub(super) async fn drain_stream_into_vec(
+pub(crate) async fn drain_stream_into_vec(
     mut bs: crate::core::body_stream::BodyStream,
 ) -> Result<Vec<u8>> {
     use futures_util::StreamExt;
     let mut out = Vec::new();
     while let Some(chunk) = bs.next().await {
-        let chunk = chunk.map_err(Error::Io)?;
+        let chunk = chunk.map_err(Error::from)?;
         if out.len() + chunk.len() > MAX_DECOMPRESSED {
-            return Err(Error::Body(format!(
-                "response body exceeds {MAX_DECOMPRESSED} bytes"
-            )));
+            return Err(Error::new(Kind::Body)
+                .with_message(format!("response body exceeds {MAX_DECOMPRESSED} bytes")));
         }
         out.extend_from_slice(&chunk);
     }
@@ -90,8 +86,8 @@ fn decompress_single(body: Vec<u8>, encoding: &str) -> Result<Vec<u8>> {
             }
             #[cfg(not(feature = "compression-gzip"))]
             {
-                Err(Error::Decode(
-                    "gzip body received but the compression-gzip feature is not compiled in".into(),
+                Err(Error::new(Kind::Decode).with_message(
+                    "gzip body received but the compression-gzip feature is not compiled in",
                 ))
             }
         }
@@ -103,9 +99,8 @@ fn decompress_single(body: Vec<u8>, encoding: &str) -> Result<Vec<u8>> {
             }
             #[cfg(not(feature = "compression-brotli"))]
             {
-                Err(Error::Decode(
-                    "brotli body received but the compression-brotli feature is not compiled in"
-                        .into(),
+                Err(Error::new(Kind::Decode).with_message(
+                    "brotli body received but the compression-brotli feature is not compiled in",
                 ))
             }
         }
@@ -113,13 +108,13 @@ fn decompress_single(body: Vec<u8>, encoding: &str) -> Result<Vec<u8>> {
             #[cfg(feature = "compression-zstd")]
             {
                 let mut decoder = zstd::Decoder::new(&body[..])
-                    .map_err(|e| Error::Decode(format!("zstd: {e}")))?;
+                    .map_err(|e| Error::new(Kind::Decode).with_message(format!("zstd: {e}")))?;
                 read_limited(&mut decoder, "zstd")
             }
             #[cfg(not(feature = "compression-zstd"))]
             {
-                Err(Error::Decode(
-                    "zstd body received but the compression-zstd feature is not compiled in".into(),
+                Err(Error::new(Kind::Decode).with_message(
+                    "zstd body received but the compression-zstd feature is not compiled in",
                 ))
             }
         }
@@ -129,9 +124,8 @@ fn decompress_single(body: Vec<u8>, encoding: &str) -> Result<Vec<u8>> {
                 let looks_like_zlib = body.first() == Some(&0x78);
                 if looks_like_zlib {
                     let mut decoder = flate2::read::ZlibDecoder::new(&body[..]);
-                    match read_limited(&mut decoder, "deflate") {
-                        Ok(v) => return Ok(v),
-                        Err(_) => {}
+                    if let Ok(v) = read_limited(&mut decoder, "deflate") {
+                        return Ok(v);
                     }
                 }
                 let mut decoder = flate2::read::DeflateDecoder::new(&body[..]);
@@ -139,9 +133,8 @@ fn decompress_single(body: Vec<u8>, encoding: &str) -> Result<Vec<u8>> {
             }
             #[cfg(not(feature = "compression-deflate"))]
             {
-                Err(Error::Decode(
-                    "deflate body received but the compression-deflate feature is not compiled in"
-                        .into(),
+                Err(Error::new(Kind::Decode).with_message(
+                    "deflate body received but the compression-deflate feature is not compiled in",
                 ))
             }
         }
@@ -163,13 +156,13 @@ fn read_limited(reader: &mut impl Read, name: &str) -> Result<Vec<u8>> {
     loop {
         let n = reader
             .read(&mut buf)
-            .map_err(|e| Error::Decode(format!("{name}: {e}")))?;
+            .map_err(|e| Error::new(Kind::Decode).with_message(format!("{name}: {e}")))?;
         if n == 0 {
             break;
         }
         out.extend_from_slice(&buf[..n]);
         if out.len() > MAX_DECOMPRESSED {
-            return Err(Error::Decode(format!(
+            return Err(Error::new(Kind::Decode).with_message(format!(
                 "{name}: decompressed size exceeds {MAX_DECOMPRESSED} bytes"
             )));
         }

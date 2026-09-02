@@ -1,5 +1,4 @@
 /target
-Cargo.lock
 *.swp
 *.swo
 .DS_Store
@@ -31,3 +30,6 @@ fuzz/target/
 fuzz/artifacts/
 # benches sub-workspace build output
 benches/target/
+
+
+

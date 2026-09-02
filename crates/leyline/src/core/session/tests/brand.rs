@@ -415,7 +415,7 @@ async fn user_dnt_override_wins_over_edge_default() {
         String::from_utf8_lossy(&req).to_string()
     });
     let _ = session
-        .request("GET", &format!("http://{addr}/"))
+        .request(http::Method::GET, format!("http://{addr}/"))
         .append_header("dnt", "0")
         .send()
         .await

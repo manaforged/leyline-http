@@ -1,5 +1,40 @@
 //! Browser enum — maps to a profile in the registry.
 
+/// A product line in the bundled profile set, for callers that want its newest version without naming one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Family {
+    /// Google Chrome.
+    Chrome,
+    /// Brave, on a Chromium anchor.
+    Brave,
+    /// Mozilla Firefox.
+    Firefox,
+    /// Safari on macOS.
+    Safari,
+    /// Safari on iOS.
+    SafariIos,
+    /// The CFNetwork/URLSession app stack.
+    CfNetwork,
+    /// OkHttp on Android.
+    OkHttp,
+}
+
+impl std::fmt::Display for Family {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match self {
+            Self::Chrome => "Chrome",
+            Self::Brave => "Brave",
+            Self::Firefox => "Firefox",
+            Self::Safari => "Safari",
+            Self::SafariIos => "Safari iOS",
+            Self::CfNetwork => "CFNetwork",
+            Self::OkHttp => "OkHttp",
+        };
+        f.write_str(name)
+    }
+}
+
 /// Identifies a browser for TLS profile selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
@@ -109,6 +144,20 @@ impl Browser {
             Self::SafariIOS18 => ("safari-ios", 18),
             Self::CfnetworkIOS18 => ("cfnetwork-ios", 18),
             Self::CfnetworkMacOS26 => ("cfnetwork-macos", 26),
+        }
+    }
+
+    /// Highest bundled version in `family`, so a caller pins the product line and takes whatever this crate release carries.
+    #[must_use]
+    pub fn latest(family: Family) -> Self {
+        match family {
+            Family::Chrome => Self::Chrome152,
+            Family::Brave => Self::Brave146,
+            Family::Firefox => Self::Firefox154,
+            Family::Safari => Self::Safari26,
+            Family::SafariIos => Self::SafariIOS18,
+            Family::CfNetwork => Self::CfnetworkMacOS26,
+            Family::OkHttp => Self::OkHttpAndroid10,
         }
     }
 
@@ -237,3 +286,6 @@ impl std::fmt::Display for Browser {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

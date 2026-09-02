@@ -4,6 +4,12 @@ use std::time::{Duration, SystemTime};
 
 use crate::cookie::record::{Cookie, SameSite};
 
+mod attr;
+mod date;
+
+use attr::set;
+use date::{Date, stamp, token};
+
 /// Max cookie lifetime: 400 days (Chrome enforcement).
 const MAX_LIFETIME: Duration = Duration::from_secs(400 * 24 * 60 * 60);
 
@@ -27,57 +33,11 @@ fn parse_attributes(attrs_str: &str) -> CookieAttributes {
         if attr.is_empty() {
             continue;
         }
-        let (attr_name, attr_value) = match attr.find('=') {
+        let (name, value) = match attr.find('=') {
             Some(i) => (attr[..i].trim(), Some(attr[i + 1..].trim())),
             None => (attr, None),
         };
-
-        match attr_name.to_lowercase().as_str() {
-            "domain" => {
-                if let Some(v) = attr_value {
-                    let d = v.strip_prefix('.').unwrap_or(v);
-                    if !d.is_empty() {
-                        a.domain = Some(d.to_lowercase());
-                    }
-                }
-            }
-            "path" => {
-                if let Some(v) = attr_value {
-                    if v.starts_with('/') {
-                        a.path = Some(v.to_string());
-                    }
-                }
-            }
-            "secure" => a.secure = true,
-            "httponly" => a.http_only = true,
-            "samesite" => {
-                if let Some(v) = attr_value {
-                    a.same_site = match v.to_lowercase().as_str() {
-                        "strict" => Some(SameSite::Strict),
-                        "lax" => Some(SameSite::Lax),
-                        "none" => Some(SameSite::None),
-                        _ => None,
-                    };
-                }
-            }
-            "max-age" => {
-                if let Some(v) = attr_value {
-                    if let Ok(secs) = v.parse::<i64>() {
-                        if secs <= 0 {
-                            a.max_age = Some(Duration::ZERO);
-                        } else {
-                            a.max_age = Some(Duration::from_secs(secs as u64));
-                        }
-                    }
-                }
-            }
-            "expires" => {
-                if let Some(v) = attr_value {
-                    a.expires = parse_cookie_date(v);
-                }
-            }
-            _ => {}
-        }
+        set(&mut a, name, value);
     }
     a
 }
@@ -136,6 +96,7 @@ fn resolve_cookie_domain(request_url: &url::Url, domain: Option<String>) -> Opti
     Some((host_only, cookie_domain))
 }
 
+/// Parse one `Set-Cookie` header line against `request_url`, returning `None` when the cookie is rejected.
 pub fn parse_set_cookie(header: &str, request_url: &url::Url) -> Option<Cookie> {
     let now = SystemTime::now();
 
@@ -243,10 +204,9 @@ pub(crate) fn rejected_cookie_name_value(header: &str) -> Option<(String, String
             .split_once('=')
             .filter(|(k, _)| k.trim().eq_ignore_ascii_case("max-age"))
             .map(|(_, v)| v.trim())
+            && v.parse::<i64>().is_ok_and(|secs| secs <= 0)
         {
-            if v.parse::<i64>().is_ok_and(|secs| secs <= 0) {
-                return None;
-            }
+            return None;
         }
     }
     Some((name.to_string(), value.to_string()))
@@ -269,79 +229,16 @@ fn default_path(request_path: &str) -> String {
 }
 
 /// Basic cookie date parser (handles common formats).
-fn parse_cookie_date(s: &str) -> Option<SystemTime> {
-    let s = s.trim();
-
-    let mut day = 0u32;
-    let mut month = 0u32;
-    let mut year = 0u32;
-    let mut hour = 0u32;
-    let mut minute = 0u32;
-    let mut second = 0u32;
-    let mut found_time = false;
-
-    for token in s.split([' ', '-', ',']) {
-        let token = token.trim();
-        if token.is_empty() {
+pub fn parse_cookie_date(s: &str) -> Option<SystemTime> {
+    let mut d = Date::default();
+    for tok in s.trim().split([' ', '-', ',']) {
+        let tok = tok.trim();
+        if tok.is_empty() {
             continue;
         }
-
-        if !found_time && token.contains(':') {
-            let parts: Vec<&str> = token.split(':').collect();
-            if parts.len() >= 2 {
-                hour = parts[0].parse().unwrap_or(0);
-                minute = parts[1].parse().unwrap_or(0);
-                second = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
-                found_time = true;
-            }
-            continue;
-        }
-
-        if let Ok(n) = token.parse::<u32>() {
-            if n > 99 {
-                year = n;
-            } else if day == 0 {
-                day = n;
-            } else if year == 0 {
-                year = if n > 68 { 1900 + n } else { 2000 + n };
-            }
-            continue;
-        }
-
-        let m = match token.get(..3).map(|s| s.to_lowercase()).as_deref() {
-            Some("jan") => 1,
-            Some("feb") => 2,
-            Some("mar") => 3,
-            Some("apr") => 4,
-            Some("may") => 5,
-            Some("jun") => 6,
-            Some("jul") => 7,
-            Some("aug") => 8,
-            Some("sep") => 9,
-            Some("oct") => 10,
-            Some("nov") => 11,
-            Some("dec") => 12,
-            _ => 0,
-        };
-        if m > 0 {
-            month = m;
-        }
+        token(&mut d, tok);
     }
-
-    if day == 0 || month == 0 || year == 0 {
-        return None;
-    }
-
-    let days_from_epoch = days_since_epoch(year, month, day)?;
-    if days_from_epoch < 0 {
-        return Some(SystemTime::UNIX_EPOCH);
-    }
-    let secs = (days_from_epoch as u64)
-        .checked_mul(86400)?
-        .checked_add(hour as u64 * 3600)?
-        .checked_add(minute as u64 * 60)?
-        .checked_add(second as u64)?;
-    Some(SystemTime::UNIX_EPOCH + Duration::from_secs(secs))
+    stamp(&d)
 }
 
 /// Days since Unix epoch for a given date.

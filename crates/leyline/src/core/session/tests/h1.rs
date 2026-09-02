@@ -1,5 +1,5 @@
 use super::super::{Session, SessionBuilder};
-use crate::core::error::Error;
+use crate::core::error::Kind;
 use crate::core::response::{HttpVersion, Response};
 use crate::{Body, ContentEncoding, Request};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -41,8 +41,8 @@ async fn plaintext_http_uses_h1_and_preserves_duplicate_headers() {
     });
 
     let session = Session::chrome();
-    let resp = session
-        .request("GET", &format!("http://{addr}/wire?q=1"))
+    let mut resp = session
+        .request(http::Method::GET, format!("http://{addr}/wire?q=1"))
         .append_header("x-dup", "one")
         .append_header("x-dup", "two")
         .send()
@@ -50,7 +50,7 @@ async fn plaintext_http_uses_h1_and_preserves_duplicate_headers() {
         .unwrap();
 
     assert_eq!(resp.version(), HttpVersion::Http1_1);
-    assert_eq!(resp.text().unwrap(), "ok");
+    assert_eq!(resp.text().await.unwrap(), "ok");
     assert_eq!(
         resp.header_all("set-cookie").collect::<Vec<_>>(),
         vec!["a=1", "b=2"]
@@ -79,10 +79,10 @@ async fn owned() {
             .await
             .unwrap();
     });
-    let req = Request::new("GET", format!("http://{addr}/owned"));
-    let resp = Session::chrome().execute(req).await.unwrap();
+    let req = Request::new(http::Method::GET, format!("http://{addr}/owned"));
+    let mut resp = Session::chrome().execute(req).await.unwrap();
     assert_eq!(resp.status(), 200);
-    assert_eq!(resp.text().unwrap(), "ok");
+    assert_eq!(resp.text().await.unwrap(), "ok");
     server.await.unwrap();
 }
 
@@ -224,13 +224,13 @@ async fn compress_rejects_streaming_body() {
         .send()
         .await
         .unwrap_err();
-    assert!(matches!(err, Error::Body(_)), "got: {err:?}");
+    assert_eq!(err.kind(), Kind::Body, "got: {err:?}");
 }
 
 #[tokio::test]
 async fn unsupported_scheme_proxy_is_refused_not_sent_in_cleartext() {
     let err = Session::chrome()
-        .request("GET", "https://example.test/")
+        .request(http::Method::GET, "https://example.test/")
         .proxy("ftp://user:secret@127.0.0.1:1")
         .send()
         .await
@@ -310,7 +310,7 @@ async fn compress_strips_stale_caller_content_length() {
 #[tokio::test]
 async fn https_scheme_proxy_is_accepted_and_dialed_over_tls() {
     let err = Session::chrome()
-        .request("GET", "https://example.test/")
+        .request(http::Method::GET, "https://example.test/")
         .proxy("https://user:secret@127.0.0.1:1")
         .send()
         .await
@@ -342,7 +342,7 @@ async fn json_builder_returns_error_instead_of_panicking() {
         .send()
         .await
         .unwrap_err();
-    assert!(matches!(err, Error::Json(_)));
+    assert_eq!(err.kind(), Kind::Json);
 }
 
 /// Read a request head (up to the `\r\n\r\n` terminator).
@@ -378,7 +378,7 @@ async fn streamed_chunked_response_reassembles() {
     });
 
     let resp = Session::chrome()
-        .request("GET", &format!("http://{addr}/x"))
+        .request(http::Method::GET, format!("http://{addr}/x"))
         .stream()
         .send()
         .await
@@ -412,7 +412,7 @@ async fn streamed_fixed_length_response_reassembles() {
     });
 
     let resp = Session::chrome()
-        .request("GET", &format!("http://{addr}/x"))
+        .request(http::Method::GET, format!("http://{addr}/x"))
         .stream()
         .send()
         .await
@@ -446,7 +446,7 @@ async fn streamed_connection_is_reused_after_full_drain() {
 
     let session = Session::chrome();
     let r1 = session
-        .request("GET", &format!("http://{addr}/a"))
+        .request(http::Method::GET, format!("http://{addr}/a"))
         .stream()
         .send()
         .await
@@ -458,8 +458,8 @@ async fn streamed_connection_is_reused_after_full_drain() {
     }
     assert_eq!(b1, b"first");
 
-    let r2 = session.get(&format!("http://{addr}/b")).await.unwrap();
-    assert_eq!(r2.text().unwrap(), "second");
+    let mut r2 = session.get(&format!("http://{addr}/b")).await.unwrap();
+    assert_eq!(r2.text().await.unwrap(), "second");
     server.await.unwrap();
 }
 
@@ -480,11 +480,14 @@ async fn streamed_read_timeout_fires_on_stall() {
     });
 
     let session = Session::builder()
-        .read_timeout(Duration::from_millis(200))
+        .timeouts(crate::TimeoutConfig {
+            read: Some(Duration::from_millis(200)),
+            ..crate::TimeoutConfig::default()
+        })
         .build()
         .unwrap();
     let resp = session
-        .request("GET", &format!("http://{addr}/x"))
+        .request(http::Method::GET, format!("http://{addr}/x"))
         .stream()
         .send()
         .await
@@ -531,7 +534,7 @@ async fn streamed_connection_dropped_when_consumer_drops_early() {
 
     let session = Session::chrome();
     let r1 = session
-        .request("GET", &format!("http://{addr}/a"))
+        .request(http::Method::GET, format!("http://{addr}/a"))
         .stream()
         .send()
         .await

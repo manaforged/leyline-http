@@ -1,7 +1,7 @@
 use super::Session;
 use crate::core::IntoParamPair;
 use crate::core::WebSocketConfig;
-use crate::core::error::{Error, Result};
+use crate::core::error::{Error, Kind, Result};
 
 impl Session {
     /// Start a WebSocket connect.
@@ -9,7 +9,7 @@ impl Session {
         WebSocketBuilder {
             session: self.clone(),
             url: url.to_string(),
-            config: self.inner.websocket_config.clone(),
+            config: self.inner.websocket_config,
             force_http1: false,
             proxy: None,
             headers: Vec::new(),
@@ -26,12 +26,7 @@ impl Session {
     ) -> Result<crate::core::websocket::WsConnection> {
         let origin = ws_origin(url)?;
         let parsed = url::Url::parse(url)?;
-        let proxy = self.inner.proxy_config.proxy_for(
-            &parsed,
-            request_proxy,
-            self.inner.proxy.as_deref(),
-            self.inner.proxy_from_env,
-        );
+        let proxy = self.inner.proxy_config.proxy_for(&parsed, request_proxy);
 
         if config.prefer_http2 && !force_http1 {
             match crate::core::websocket::WsConnection::connect_h2(
@@ -43,6 +38,7 @@ impl Session {
                 &self.inner.user_agent,
                 &origin,
                 extra_headers,
+                &config,
             )
             .await
             {
@@ -53,12 +49,7 @@ impl Session {
                         "H2 extended CONNECT not available, falling back to H1 Upgrade"
                     );
                 }
-                Err(e) => {
-                    tracing::debug!(
-                        error = %e,
-                        "H2 WebSocket path failed, falling back to H1 Upgrade"
-                    );
-                }
+                Err(e) => return Err(e),
             }
         }
 
@@ -69,6 +60,7 @@ impl Session {
             &self.inner.user_agent,
             &origin,
             extra_headers,
+            &config,
         )
         .await
     }
@@ -152,14 +144,12 @@ fn ws_origin(url: &str) -> Result<String> {
     let scheme = match parsed.scheme() {
         "wss" => "https",
         "ws" => {
-            return Err(Error::Http(
-                "plaintext ws:// is not supported; use wss://".into(),
-            ));
+            return Err(Error::new(Kind::Request)
+                .with_message("plaintext ws:// is not supported; use wss://"));
         }
         other => {
-            return Err(Error::Http(format!(
-                "websocket URL must use wss://, not {other}"
-            )));
+            return Err(Error::new(Kind::Request)
+                .with_message(format!("websocket URL must use wss://, not {other}")));
         }
     };
     let host = parsed.host_str().unwrap_or("");

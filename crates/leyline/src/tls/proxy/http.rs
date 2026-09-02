@@ -103,7 +103,7 @@ where
 }
 
 /// Validate a proxy CONNECT response header block.
-pub(crate) fn validate_connect_response(buf: &[u8], end_idx: usize) -> Result<(), TlsError> {
+pub fn validate_connect_response(buf: &[u8], end_idx: usize) -> Result<(), TlsError> {
     if end_idx < 4 || end_idx > buf.len() {
         return Err(TlsError::Profile(format!(
             "proxy CONNECT response validator called with out-of-contract end_idx={end_idx} buf.len={}",

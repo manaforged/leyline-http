@@ -2,7 +2,7 @@
 
 #![forbid(unsafe_code)]
 mod jar;
-mod parse;
+pub(crate) mod parse;
 mod record;
 
 pub use jar::Jar;

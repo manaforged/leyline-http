@@ -6,7 +6,7 @@
 
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use leyline::audit::{
-    Ja3Input, Ja4Input, Ja4hInput, chrome_extension_ids, compute_ja3, compute_ja4, compute_ja4h,
+    Ja3Input, Ja4Input, Ja4hInput, extension_ids, compute_ja3, compute_ja4, compute_ja4h,
     compute_ja4t,
 };
 use leyline::profile::{Browser, ProfileRegistry};
@@ -19,7 +19,7 @@ fn chrome_147_inputs() -> (Vec<String>, Vec<String>, Vec<String>, Vec<u16>) {
     let ciphers = profile.tls.ciphers.clone();
     let sigalgs = profile.tls.sigalgs.clone();
     let curves = profile.tls.curves.clone();
-    let ext_ids = chrome_extension_ids(&profile.tls);
+    let ext_ids = extension_ids(&profile.tls);
     (ciphers, sigalgs, curves, ext_ids)
 }
 
@@ -72,9 +72,9 @@ fn bench_ja4t(c: &mut Criterion) {
 fn bench_extension_ids(c: &mut Criterion) {
     let profiles = ProfileRegistry::builtin();
     let profile = profiles.get_browser(Browser::Chrome147).unwrap();
-    c.bench_function("audit::chrome_extension_ids", |b| {
+    c.bench_function("audit::extension_ids", |b| {
         b.iter(|| {
-            black_box(chrome_extension_ids(black_box(&profile.tls)));
+            black_box(extension_ids(black_box(&profile.tls)));
         });
     });
 }

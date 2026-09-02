@@ -1003,16 +1003,22 @@ unsafe extern "C" {
     // submodule (openssl-quictls / boringssl).
 
     // SSL_METHOD
+    #[link_name = "LEYLINE_TLS_method"]
     fn TLS_method() -> *const SSL_METHOD;
 
     // SSL_CTX
+    #[link_name = "LEYLINE_SSL_CTX_new"]
     fn SSL_CTX_new(method: *const SSL_METHOD) -> *mut SSL_CTX;
+    #[link_name = "LEYLINE_SSL_CTX_free"]
     fn SSL_CTX_free(ctx: *mut SSL_CTX);
 
+    #[link_name = "LEYLINE_SSL_CTX_use_certificate_chain_file"]
     fn SSL_CTX_use_certificate_chain_file(ctx: *mut SSL_CTX, file: *const c_char) -> c_int;
 
+    #[link_name = "LEYLINE_SSL_CTX_use_PrivateKey_file"]
     fn SSL_CTX_use_PrivateKey_file(ctx: *mut SSL_CTX, file: *const c_char, ty: c_int) -> c_int;
 
+    #[link_name = "LEYLINE_SSL_CTX_load_verify_locations"]
     fn SSL_CTX_load_verify_locations(
         ctx: *mut SSL_CTX,
         file: *const c_char,
@@ -1020,24 +1026,30 @@ unsafe extern "C" {
     ) -> c_int;
 
     #[cfg(not(windows))]
+    #[link_name = "LEYLINE_SSL_CTX_set_default_verify_paths"]
     fn SSL_CTX_set_default_verify_paths(ctx: *mut SSL_CTX) -> c_int;
 
     #[cfg(windows)]
+    #[link_name = "LEYLINE_SSL_CTX_get_cert_store"]
     fn SSL_CTX_get_cert_store(ctx: *mut SSL_CTX) -> *mut X509_STORE;
 
+    #[link_name = "LEYLINE_SSL_CTX_set_verify"]
     fn SSL_CTX_set_verify(
         ctx: *mut SSL_CTX,
         mode: c_int,
         cb: Option<unsafe extern "C" fn(ok: c_int, store_ctx: *mut X509_STORE_CTX) -> c_int>,
     );
 
+    #[link_name = "LEYLINE_SSL_CTX_set_keylog_callback"]
     fn SSL_CTX_set_keylog_callback(
         ctx: *mut SSL_CTX,
         cb: Option<unsafe extern "C" fn(ssl: *const SSL, line: *const c_char)>,
     );
 
+    #[link_name = "LEYLINE_SSL_CTX_set_alpn_protos"]
     fn SSL_CTX_set_alpn_protos(ctx: *mut SSL_CTX, protos: *const u8, protos_len: usize) -> c_int;
 
+    #[link_name = "LEYLINE_SSL_CTX_set_alpn_select_cb"]
     fn SSL_CTX_set_alpn_select_cb(
         ctx: *mut SSL_CTX,
         cb: Option<
@@ -1053,50 +1065,70 @@ unsafe extern "C" {
         arg: *mut c_void,
     );
 
+    #[link_name = "LEYLINE_SSL_CTX_sess_set_new_cb"]
     fn SSL_CTX_sess_set_new_cb(
         ctx: *mut SSL_CTX,
         cb: Option<unsafe extern "C" fn(ssl: *mut SSL, session: *mut SSL_SESSION) -> c_int>,
     );
 
+    #[link_name = "LEYLINE_SSL_new"]
     fn SSL_new(ctx: *mut SSL_CTX) -> *mut SSL;
 
+    #[link_name = "LEYLINE_SSL_get_error"]
     fn SSL_get_error(ssl: *const SSL, ret_code: c_int) -> c_int;
 
+    #[link_name = "LEYLINE_SSL_set_accept_state"]
     fn SSL_set_accept_state(ssl: *mut SSL);
+    #[link_name = "LEYLINE_SSL_set_connect_state"]
     fn SSL_set_connect_state(ssl: *mut SSL);
 
+    #[link_name = "LEYLINE_SSL_get0_param"]
     fn SSL_get0_param(ssl: *mut SSL) -> *mut X509_VERIFY_PARAM;
 
+    #[link_name = "LEYLINE_SSL_set_ex_data"]
     fn SSL_set_ex_data(ssl: *mut SSL, idx: c_int, ptr: *mut c_void) -> c_int;
+    #[link_name = "LEYLINE_SSL_get_ex_data"]
     fn SSL_get_ex_data(ssl: *const SSL, idx: c_int) -> *mut c_void;
 
+    #[link_name = "LEYLINE_SSL_get_current_cipher"]
     fn SSL_get_current_cipher(ssl: *const SSL) -> *const SSL_CIPHER;
 
+    #[link_name = "LEYLINE_SSL_set_session"]
     fn SSL_set_session(ssl: *mut SSL, session: *mut SSL_SESSION) -> c_int;
 
+    #[link_name = "LEYLINE_SSL_get_SSL_CTX"]
     fn SSL_get_SSL_CTX(ssl: *const SSL) -> *mut SSL_CTX;
 
+    #[link_name = "LEYLINE_SSL_set_quiet_shutdown"]
     fn SSL_set_quiet_shutdown(ssl: *mut SSL, mode: c_int);
 
+    #[link_name = "LEYLINE_SSL_set_quic_transport_params"]
     fn SSL_set_quic_transport_params(ssl: *mut SSL, params: *const u8, params_len: usize) -> c_int;
 
+    #[link_name = "LEYLINE_SSL_set_quic_method"]
     fn SSL_set_quic_method(ssl: *mut SSL, quic_method: *const SSL_QUIC_METHOD) -> c_int;
 
+    #[link_name = "LEYLINE_SSL_set_quic_use_legacy_codepoint"]
     fn SSL_set_quic_use_legacy_codepoint(ssl: *mut SSL, use_legacy: c_int);
 
     #[cfg(test)]
+    #[link_name = "LEYLINE_SSL_set_options"]
     fn SSL_set_options(ssl: *mut SSL, opts: u32) -> u32;
 
+    #[link_name = "LEYLINE_SSL_get_peer_quic_transport_params"]
     fn SSL_get_peer_quic_transport_params(
         ssl: *const SSL,
         out_params: *mut *const u8,
         out_params_len: *mut usize,
     );
 
+    #[link_name = "LEYLINE_SSL_get0_alpn_selected"]
     fn SSL_get0_alpn_selected(ssl: *const SSL, out: *mut *const u8, out_len: *mut u32);
 
+    #[link_name = "LEYLINE_SSL_get_servername"]
     fn SSL_get_servername(ssl: *const SSL, ty: c_int) -> *const c_char;
 
+    #[link_name = "LEYLINE_SSL_provide_quic_data"]
     fn SSL_provide_quic_data(
         ssl: *mut SSL,
         level: crypto::Level,
@@ -1104,28 +1136,38 @@ unsafe extern "C" {
         len: usize,
     ) -> c_int;
 
+    #[link_name = "LEYLINE_SSL_process_quic_post_handshake"]
     fn SSL_process_quic_post_handshake(ssl: *mut SSL) -> c_int;
 
+    #[link_name = "LEYLINE_SSL_do_handshake"]
     fn SSL_do_handshake(ssl: *mut SSL) -> c_int;
 
+    #[link_name = "LEYLINE_SSL_quic_write_level"]
     fn SSL_quic_write_level(ssl: *const SSL) -> crypto::Level;
 
+    #[link_name = "LEYLINE_SSL_session_reused"]
     fn SSL_session_reused(ssl: *const SSL) -> c_int;
 
+    #[link_name = "LEYLINE_SSL_in_init"]
     fn SSL_in_init(ssl: *const SSL) -> c_int;
 
+    #[link_name = "LEYLINE_SSL_clear"]
     fn SSL_clear(ssl: *mut SSL) -> c_int;
 
+    #[link_name = "LEYLINE_SSL_free"]
     fn SSL_free(ssl: *mut SSL);
 
     // SSL_CIPHER
+    #[link_name = "LEYLINE_SSL_CIPHER_get_id"]
     fn SSL_CIPHER_get_id(cipher: *const SSL_CIPHER) -> c_uint;
 
     // SSL_SESSION
 
+    #[link_name = "LEYLINE_SSL_SESSION_free"]
     fn SSL_SESSION_free(session: *mut SSL_SESSION);
 
     // X509_VERIFY_PARAM
+    #[link_name = "LEYLINE_X509_VERIFY_PARAM_set1_host"]
     fn X509_VERIFY_PARAM_set1_host(
         param: *mut X509_VERIFY_PARAM,
         name: *const c_char,
@@ -1134,21 +1176,27 @@ unsafe extern "C" {
 
     // X509_STORE
     #[cfg(windows)]
+    #[link_name = "LEYLINE_X509_STORE_add_cert"]
     fn X509_STORE_add_cert(ctx: *mut X509_STORE, x: *mut X509) -> c_int;
 
     // X509
     #[cfg(windows)]
+    #[link_name = "LEYLINE_X509_free"]
     fn X509_free(x: *mut X509);
     #[cfg(windows)]
+    #[link_name = "LEYLINE_d2i_X509"]
     fn d2i_X509(px: *mut X509, input: *const *const u8, len: c_int) -> *mut X509;
 
     // ERR
+    #[link_name = "LEYLINE_ERR_peek_error"]
     fn ERR_peek_error() -> c_uint;
 
+    #[link_name = "LEYLINE_ERR_error_string_n"]
     fn ERR_error_string_n(err: c_uint, buf: *mut c_char, len: usize);
 
     // OPENSSL
     #[allow(dead_code)]
+    #[link_name = "LEYLINE_OPENSSL_free"]
     fn OPENSSL_free(ptr: *mut c_void);
 
 }

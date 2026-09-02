@@ -2,6 +2,8 @@
 
 use std::time::Duration;
 
+use crate::{Error, Kind};
+
 /// HTTP/2 SETTINGS parameter ID.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u16)]
@@ -110,8 +112,6 @@ pub struct H2Config {
     pub rst_stream_flood_threshold: u32,
     /// Sliding window over which `rst_stream_flood_threshold` is measured.
     pub rst_stream_flood_window: Duration,
-    /// Max time to wait for the peer to ACK our SETTINGS frame during handshake (RFC 9113 §6.5.3).
-    pub settings_ack_timeout: Duration,
     /// Hard cap on the size of a response body.
     pub max_response_body_bytes: usize,
     /// Hard cap on the total size of a single inbound header block (HEADERS + all subsequent CONTINUATION fragments).
@@ -135,7 +135,7 @@ impl H2Config {
     }
 
     /// Build from a TOML H2Profile.
-    pub fn from_profile(h2: &crate::profile::H2Profile) -> Result<Self, crate::Error> {
+    pub fn from_profile(h2: &crate::profile::H2Profile) -> Result<Self, Error> {
         use std::collections::HashMap;
 
         let mut available: HashMap<SettingId, u32> = HashMap::new();
@@ -169,7 +169,8 @@ impl H2Config {
             .iter()
             .map(|s| {
                 SettingId::parse_key(s).ok_or_else(|| {
-                    crate::Error::Config(format!("unknown H2 settings_order key: {s:?}"))
+                    Error::new(Kind::Config)
+                        .with_message(format!("unknown H2 settings_order key: {s:?}"))
                 })
             })
             .collect::<Result<_, _>>()?;
@@ -180,7 +181,7 @@ impl H2Config {
             .collect();
 
         if h2.pseudo_order.len() != 4 {
-            return Err(crate::Error::Config(format!(
+            return Err(Error::new(Kind::Config).with_message(format!(
                 "H2 pseudo_order must have exactly 4 entries, got {}",
                 h2.pseudo_order.len()
             )));
@@ -193,12 +194,13 @@ impl H2Config {
         ];
         for (slot, s) in pseudo_order.iter_mut().zip(h2.pseudo_order.iter()) {
             *slot = PseudoOrder::parse_key(s).ok_or_else(|| {
-                crate::Error::Config(format!("unknown H2 pseudo_order token: {s:?}"))
+                Error::new(Kind::Config)
+                    .with_message(format!("unknown H2 pseudo_order token: {s:?}"))
             })?;
         }
         for i in 1..pseudo_order.len() {
             if pseudo_order[..i].contains(&pseudo_order[i]) {
-                return Err(crate::Error::Config(format!(
+                return Err(Error::new(Kind::Config).with_message(format!(
                     "duplicate H2 pseudo_order token: {:?}",
                     h2.pseudo_order[i]
                 )));
@@ -207,9 +209,8 @@ impl H2Config {
 
         let initial_connection_window_size =
             h2.initial_connection_window_size.ok_or_else(|| {
-                crate::Error::Config(
-                    "H2 profile missing initial_connection_window_size".to_string(),
-                )
+                Error::new(Kind::Config)
+                    .with_message("H2 profile missing initial_connection_window_size".to_string())
             })?;
 
         Ok(Self {
@@ -224,7 +225,6 @@ impl H2Config {
             }),
             rst_stream_flood_threshold: 100,
             rst_stream_flood_window: Duration::from_secs(10),
-            settings_ack_timeout: Duration::from_secs(10),
             max_response_body_bytes: 100 * 1024 * 1024,
             max_header_block_bytes: 256 * 1024,
             settings_flood_threshold: 20,

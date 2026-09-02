@@ -5,8 +5,9 @@ mod body_stream;
 mod config;
 mod digest;
 mod error;
-mod header_str;
 mod headers;
+#[cfg(feature = "tower")]
+pub(crate) mod layer;
 #[cfg(feature = "multipart")]
 pub mod multipart;
 mod request;
@@ -27,8 +28,7 @@ pub use config::{
     RedirectAction, RedirectAttempt, RedirectPolicy, SocketConfig, TimeoutConfig, WebSocketConfig,
 };
 pub use digest::DigestAuth;
-pub use error::{Error, Result};
-pub(crate) use header_str::HeaderStr;
+pub use error::{Error, Kind, Result};
 pub use headers::HeaderList;
 pub use request::{ContentEncoding, IntoParamPair, RequestBuilder};
 pub use response::{HttpVersion, Response, ResponseTiming};
@@ -40,4 +40,4 @@ pub use session::WebSocketBuilder;
 pub use session::{Identity, ProtocolPolicy, Session, SessionBuilder};
 pub use standalone::Request;
 #[cfg(feature = "websocket")]
-pub use websocket::{WsConnection, WsMessage, WsSink, WsStream};
+pub use websocket::{CloseFrame, WsConnection, WsMessage, WsSink, WsStream};

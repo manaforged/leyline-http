@@ -29,8 +29,7 @@ async fn macos_system_trust_accepts_example_chain_through_proxy() {
         .build()
         .expect("build production-shaped session");
     let result = session
-        .request(
-            "GET",
+        .request(http::Method::GET,
             "https://store.example.com/",
         )
         .send()

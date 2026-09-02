@@ -2,8 +2,8 @@
 #[path = "core_support/raw_server.rs"]
 mod raw_server;
 
-use leyline::core::Session;
-use leyline::profile::{ChromiumBrand, HeaderAnchor, Preset};
+use leyline::Session;
+use leyline::profile::{HeaderAnchor, Preset};
 use leyline::{Browser, Platform};
 use raw_server::{RawResponse, RawServer};
 
@@ -13,7 +13,7 @@ async fn caller_user_agent_replaces_no_preset_default() {
     let session = Session::builder().http1().build().unwrap();
 
     let resp = session
-        .request("GET", &server.url("/ua"))
+        .request(http::Method::GET, server.url("/ua"))
         .header("user-agent", "X")
         .send()
         .await
@@ -33,7 +33,7 @@ async fn bulk_headers_replace_all_no_preset_defaults() {
     let session = Session::builder().http1().build().unwrap();
 
     let resp = session
-        .request("GET", &server.url("/defaults"))
+        .request(http::Method::GET, server.url("/defaults"))
         .headers([
             ("user-agent", "ua-x"),
             ("accept", "accept-y"),
@@ -76,7 +76,7 @@ async fn dx_helpers_accept_common_pair_shapes_and_header_shortcuts() {
     ];
 
     let resp = client
-        .request("GET", &server.url("/dx"))
+        .request(http::Method::GET, server.url("/dx"))
         .query([("a", "1"), ("space", "hello world")])
         .headers(&owned_headers)
         .accept("application/json")
@@ -134,7 +134,7 @@ async fn append_header_preserves_duplicate_order() {
     let session = Session::builder().http1().build().unwrap();
 
     let resp = session
-        .request("GET", &server.url("/dup"))
+        .request(http::Method::GET, server.url("/dup"))
         .append_header("x-dup", "a")
         .append_header("x-dup", "b")
         .send()
@@ -153,7 +153,7 @@ async fn set_then_append_user_agent_preserves_caller_order() {
     let session = Session::builder().http1().build().unwrap();
 
     let resp = session
-        .request("GET", &server.url("/ua-append"))
+        .request(http::Method::GET, server.url("/ua-append"))
         .header("user-agent", "X")
         .append_header("user-agent", "Y")
         .send()
@@ -172,7 +172,7 @@ async fn caller_referer_wins_over_navigate_preset_referer() {
     let session = Session::builder().http1().build().unwrap();
 
     let resp = session
-        .request("GET", &server.url("/nav"))
+        .request(http::Method::GET, server.url("/nav"))
         .preset(Preset::Navigate)
         .header("referer", "https://caller.example/from")
         .send()
@@ -197,7 +197,7 @@ async fn redirect_cross_origin_strips_authorization_after_first_hop() {
     let session = Session::builder().http1().build().unwrap();
 
     let resp = session
-        .request("GET", &redirector.url("/start"))
+        .request(http::Method::GET, redirector.url("/start"))
         .header("authorization", "Bearer secret")
         .send()
         .await
@@ -223,7 +223,7 @@ async fn redirect_same_origin_preserves_authorization() {
     let session = Session::builder().http1().build().unwrap();
 
     let resp = session
-        .request("GET", &server.url("/start"))
+        .request(http::Method::GET, server.url("/start"))
         .header("authorization", "Bearer secret")
         .send()
         .await
@@ -240,14 +240,10 @@ async fn redirect_same_origin_preserves_authorization() {
 #[tokio::test]
 async fn caller_dnt_wins_over_edge_brand_overlay() {
     let mut server = RawServer::start(vec![RawResponse::ok()]).await;
-    let session = Session::builder()
-        .brand(ChromiumBrand::Edge)
-        .http1()
-        .build()
-        .unwrap();
+    let session = Session::builder().http1().edge().build().unwrap();
 
     let resp = session
-        .request("GET", &server.url("/edge"))
+        .request(http::Method::GET, server.url("/edge"))
         .header("dnt", "0")
         .send()
         .await
@@ -319,7 +315,7 @@ async fn plain_authorization_rides_after_user_agent() {
     let session = Session::builder().http1().build().unwrap();
 
     let resp = session
-        .request("GET", &server.url("/auth"))
+        .request(http::Method::GET, server.url("/auth"))
         .preset(Preset::Xhr)
         .header("authorization", "Bearer tok")
         .send()

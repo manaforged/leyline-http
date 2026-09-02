@@ -16,23 +16,22 @@ pub(crate) fn apply_extra_headers(
 ) {
     let kept: Vec<&crate::core::headers::HeaderEntry> = extra
         .entries()
-        .filter(|e| !(strip_sensitive && sensitive(&e.name)))
+        .filter(|e| !(strip_sensitive && sensitive(e.name.as_str())))
         .collect();
 
     let mut consumed_names: Vec<String> = Vec::new();
-    for (i, entry) in kept.iter().enumerate() {
+    for entry in &kept {
         if entry.anchor.is_some() {
             continue;
         }
-        let lower = entry.name.to_ascii_lowercase();
+        let lower = entry.name.as_str().to_string();
         if consumed_names.contains(&lower) {
             continue;
         }
-        let _ = i;
         let values_in_order: Vec<HeaderPair> = kept
             .iter()
-            .filter(|e| e.anchor.is_none() && e.name.eq_ignore_ascii_case(&lower))
-            .map(|e| (Cow::Owned(e.name.clone()), Cow::Owned(e.value.clone())))
+            .filter(|e| e.anchor.is_none() && e.name.as_str() == lower)
+            .map(|e| (Cow::Owned(e.name.as_str().to_string()), text(&e.value)))
             .collect();
         if let Some(pos) = headers
             .iter()
@@ -49,14 +48,14 @@ pub(crate) fn apply_extra_headers(
 
     let mut insertions: Vec<(usize, Vec<HeaderPair>)> = Vec::new();
     for entry in &kept {
-        if entry.anchor.is_none() && consumed_names.contains(&entry.name.to_ascii_lowercase()) {
+        if entry.anchor.is_none() && consumed_names.contains(&entry.name.as_str().to_string()) {
             continue;
         }
-        let anchor = entry.anchor.or_else(|| infer_anchor(&entry.name));
+        let anchor = entry.anchor.or_else(|| infer_anchor(entry.name.as_str()));
         let target_idx = anchor_target_index(headers, anchor);
         let item = (
-            Cow::Owned(entry.name.clone()),
-            Cow::Owned(entry.value.clone()),
+            Cow::Owned(entry.name.as_str().to_string()),
+            text(&entry.value),
         );
         if let Some((_, bucket)) = insertions.iter_mut().find(|(i, _)| *i == target_idx) {
             bucket.push(item);
@@ -72,6 +71,11 @@ pub(crate) fn apply_extra_headers(
             headers.insert(insert_at, item);
         }
     }
+}
+
+/// Header value as text; obs-text bytes become U+FFFD.
+fn text(v: &http::HeaderValue) -> Cow<'static, str> {
+    Cow::Owned(String::from_utf8_lossy(v.as_bytes()).into_owned())
 }
 
 /// Compute the target insertion index for a header at the given anchor.

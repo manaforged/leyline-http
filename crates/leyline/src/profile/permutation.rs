@@ -48,11 +48,27 @@ fn advertised_extensions(tls: &TlsProfile) -> Vec<(u16, &'static str)> {
             !tls.cert_compression.is_empty(),
         ),
         (alps, "application_settings", tls.alps.is_some()),
+        (0xca34, "trust_anchors", tls.request_trust_anchors),
         (0xfe0d, "encrypted_client_hello", tls.ech_grease),
     ]
     .into_iter()
     .filter_map(|(id, name, advertised)| advertised.then_some((id, name)))
     .collect()
+}
+
+/// Extension type IDs this profile puts in a fresh ClientHello, in the declared order when the profile fixes one.
+pub(crate) fn extension_ids(tls: &TlsProfile) -> Vec<u16> {
+    let mut ids = match tls.extension_permutation.as_deref() {
+        Some(order) => order.to_vec(),
+        None => advertised_extensions(tls)
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect(),
+    };
+    if tls.padding {
+        ids.push(0x0015);
+    }
+    ids
 }
 
 /// Check a profile's declared extension order against the extensions it actually advertises.

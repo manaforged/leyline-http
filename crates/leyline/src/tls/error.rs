@@ -71,29 +71,25 @@ fn transport_eof(msg: &str) -> bool {
         || lower.contains("connection aborted")
 }
 
-pub(crate) fn from_handshake_ssl(e: leyline_bssl::ssl::Error) -> TlsError {
-    match e.into_io_error() {
-        Ok(e) => TlsError::HandshakeIo(e),
-        Err(e) => {
-            let msg = e.to_string();
-            if transport_eof(&msg) {
-                TlsError::HandshakeIo(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, msg))
-            } else {
-                TlsError::Handshake(msg)
+impl TlsError {
+    /// Map a BoringSSL handshake error; crate-private so `leyline_bssl` stays off the public API.
+    pub(crate) fn from_ssl(e: leyline_bssl::ssl::Error) -> Self {
+        match e.into_io_error() {
+            Ok(e) => Self::HandshakeIo(e),
+            Err(e) => {
+                let msg = e.to_string();
+                if transport_eof(&msg) {
+                    Self::HandshakeIo(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, msg))
+                } else {
+                    Self::Handshake(msg)
+                }
             }
         }
     }
-}
 
-impl From<leyline_bssl::ssl::Error> for TlsError {
-    fn from(e: leyline_bssl::ssl::Error) -> Self {
-        from_handshake_ssl(e)
-    }
-}
-
-impl From<leyline_bssl::error::ErrorStack> for TlsError {
-    fn from(e: leyline_bssl::error::ErrorStack) -> Self {
-        TlsError::SslConfig(e.to_string())
+    /// Map a BoringSSL configuration error stack; crate-private so `leyline_bssl` stays off the public API.
+    pub(crate) fn from_stack(e: leyline_bssl::error::ErrorStack) -> Self {
+        Self::SslConfig(e.to_string())
     }
 }
 

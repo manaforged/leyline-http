@@ -13,7 +13,7 @@ use crate::h2::error::{ErrorCode, H2Error};
 
 use super::connect_stream::{H2ConnectStream, ShutdownState};
 use super::driver::{
-    DriverCommand, DriverRequestBody, PeerSettingsSnapshot, STREAM_REQ_BODY_CAPACITY,
+    DriverCommand, DriverRequestBody, Head, PeerSettingsSnapshot, STREAM_REQ_BODY_CAPACITY,
     STREAM_RESP_BODY_CAPACITY, pump_request_body,
 };
 use super::types::{H2ResponseEx, RequestBody, ResponseBody};
@@ -83,6 +83,17 @@ impl H2Client {
         body: RequestBody,
         stream_response: bool,
     ) -> Result<H2ResponseEx, H2Error> {
+        self.send_shared(Arc::new(Head { pseudo, headers }), body, stream_response)
+            .await
+    }
+
+    /// Extended send over a request head the caller already owns behind an `Arc`, so a retry costs no header clone.
+    pub(crate) async fn send_shared(
+        &self,
+        head: Arc<Head>,
+        body: RequestBody,
+        stream_response: bool,
+    ) -> Result<H2ResponseEx, H2Error> {
         if self.closed.load(Ordering::Acquire) {
             return Err(H2Error::Connection {
                 code: ErrorCode::NoError,
@@ -111,8 +122,7 @@ impl H2Client {
             mpsc::channel::<io::Result<Bytes>>(STREAM_RESP_BODY_CAPACITY);
 
         let cmd = DriverCommand::SendRequestEx {
-            pseudo,
-            headers,
+            head,
             body: body_in,
             stream_response,
             response_tx,

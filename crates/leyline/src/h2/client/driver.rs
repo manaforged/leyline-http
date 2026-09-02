@@ -16,6 +16,7 @@ use crate::h2::error::{ErrorCode, H2Error};
 use crate::h2::frame::*;
 use crate::h2::hpack;
 use crate::h2::stream_state::{StreamState, StreamStateError};
+use crate::header_str::HeaderStr;
 
 use super::types::{H2ResponseEx, ResponseBody};
 
@@ -29,7 +30,7 @@ mod send;
 pub(super) use self::bootstrap::pump_request_body;
 pub(crate) use self::bootstrap::start;
 pub use protocol::DriverTask;
-pub(crate) use protocol::{DriverCommand, DriverRequestBody, checked_window_add};
+pub(crate) use protocol::{DriverCommand, DriverRequestBody, Head, checked_window_add};
 
 /// Max number of outstanding SendRequest commands the driver will buffer before applying back-pressure on callers.
 const COMMAND_CHANNEL_CAPACITY: usize = 1024;
@@ -128,9 +129,9 @@ struct StreamActor {
     response_tx: Option<ResponseSink>,
     status: u16,
     got_headers: bool,
-    resp_headers: Vec<(crate::core::HeaderStr, crate::core::HeaderStr)>,
+    resp_headers: Vec<(HeaderStr, HeaderStr)>,
     body: Vec<u8>,
-    trailers: Option<Vec<(crate::core::HeaderStr, crate::core::HeaderStr)>>,
+    trailers: Option<Vec<(HeaderStr, HeaderStr)>>,
     /// HEAD/1xx/204/304: drain DATA without buffering.
     drop_body: bool,
     /// Remaining outbound body (set when flow-control parks us mid-body).
@@ -139,6 +140,10 @@ struct StreamActor {
     send_body_input: SendBodyInput,
     /// `true` once we've written a DATA frame with END_STREAM (or the trailing HEADERS frame).
     send_closed: bool,
+    /// Streaming response chunks the consumer has not taken yet; the stream window is not re-credited while this is non-empty.
+    stalled: std::collections::VecDeque<Bytes>,
+    /// The peer already ended its side; the stream completes once `stalled` drains.
+    remote_done: bool,
 }
 
 impl StreamActor {
@@ -157,20 +162,22 @@ impl StreamActor {
             pending_send: None,
             send_body_input: SendBodyInput::None,
             send_closed: false,
+            stalled: std::collections::VecDeque::new(),
+            remote_done: false,
         }
     }
 
     /// Deliver the HEADERS portion of a streaming response.
     fn deliver_headers_streaming(&mut self) {
-        if let Some(ResponseSink::StreamingEx { headers_tx, .. }) = self.response_tx.as_mut() {
-            if let Some(tx) = headers_tx.take() {
-                let _ = tx.send(Ok(H2ResponseEx {
-                    status: self.status,
-                    headers: std::mem::take(&mut self.resp_headers),
-                    body: ResponseBody::Buffered(Vec::new()),
-                    trailers: None,
-                }));
-            }
+        if let Some(ResponseSink::StreamingEx { headers_tx, .. }) = self.response_tx.as_mut()
+            && let Some(tx) = headers_tx.take()
+        {
+            let _ = tx.send(Ok(H2ResponseEx {
+                status: self.status,
+                headers: std::mem::take(&mut self.resp_headers),
+                body: ResponseBody::Buffered(Vec::new()),
+                trailers: None,
+            }));
         }
     }
 
@@ -265,6 +272,8 @@ struct Driver<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> {
     body_chunk_tx: mpsc::Sender<BodyChunkIn>,
     /// The receive side the driver awaits in `event_loop`.
     body_chunk_rx: mpsc::Receiver<BodyChunkIn>,
+    /// Response chunks queued across every stream whose consumer has not taken them yet.
+    stalled: usize,
 }
 
 fn send_err_to_sink(sink: ResponseSink, err: H2Error) {

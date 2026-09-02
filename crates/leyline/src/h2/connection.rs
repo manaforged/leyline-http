@@ -10,6 +10,7 @@ use crate::h2::client::{self, DriverTask, H2Client};
 use crate::h2::config::{H2Config, PseudoOrder, SettingId};
 use crate::h2::error::{ErrorCode, H2Error};
 use crate::h2::hpack;
+use crate::header_str::HeaderStr;
 
 /// Peer SETTINGS (received from server).
 #[derive(Debug, Clone)]
@@ -120,11 +121,11 @@ pub struct H2Response {
     /// HTTP status code.
     pub status: u16,
     /// Response headers (name, value pairs in order).
-    pub headers: Vec<(crate::core::HeaderStr, crate::core::HeaderStr)>,
+    pub headers: Vec<(HeaderStr, HeaderStr)>,
     /// Response body.
     pub body: Vec<u8>,
     /// Trailer headers, if any.
-    pub trailers: Option<Vec<(crate::core::HeaderStr, crate::core::HeaderStr)>>,
+    pub trailers: Option<Vec<(HeaderStr, HeaderStr)>>,
 }
 
 /// Sliding-window flood detector shared by the RST_STREAM and SETTINGS defences.

@@ -18,6 +18,8 @@ pub struct H3Response {
     pub headers: Vec<(String, String)>,
     /// Response body.
     pub body: Vec<u8>,
+    /// Trailer headers, empty when the peer sent none.
+    pub trailers: Vec<(String, String)>,
 }
 
 /// The live transport parts of an established QUIC + HTTP/3 connection.
@@ -112,8 +114,10 @@ pub(crate) async fn connect_and_handshake(
         .map_err(|e| format!("local addr: {e}"))?;
 
     let mut scid_bytes = vec![0u8; h3_cfg.dcid_length];
-    use rand::RngCore;
-    rand::rngs::OsRng.fill_bytes(scid_bytes.as_mut_slice());
+    use rand::TryRngCore;
+    rand::rngs::OsRng
+        .try_fill_bytes(scid_bytes.as_mut_slice())
+        .map_err(|e| format!("scid entropy: {e}"))?;
     let scid = quiche::ConnectionId::from_ref(&scid_bytes);
 
     let mut conn = Box::new(

@@ -309,13 +309,17 @@ pub(crate) fn hkdf_expand(
 }
 
 unsafe extern "C" {
+    #[link_name = "LEYLINE_EVP_aead_aes_128_gcm_tls13"]
     fn EVP_aead_aes_128_gcm_tls13() -> *const EVP_AEAD;
 
+    #[link_name = "LEYLINE_EVP_aead_aes_256_gcm_tls13"]
     fn EVP_aead_aes_256_gcm_tls13() -> *const EVP_AEAD;
 
+    #[link_name = "LEYLINE_EVP_aead_chacha20_poly1305"]
     fn EVP_aead_chacha20_poly1305() -> *const EVP_AEAD;
 
     // HKDF
+    #[link_name = "LEYLINE_HKDF_extract"]
     fn HKDF_extract(
         out_key: *mut u8,
         out_len: *mut usize,
@@ -326,6 +330,7 @@ unsafe extern "C" {
         salt_len: usize,
     ) -> c_int;
 
+    #[link_name = "LEYLINE_HKDF_expand"]
     fn HKDF_expand(
         out_key: *mut u8,
         out_len: usize,
@@ -337,6 +342,7 @@ unsafe extern "C" {
     ) -> c_int;
 
     // EVP_AEAD_CTX
+    #[link_name = "LEYLINE_EVP_AEAD_CTX_init"]
     fn EVP_AEAD_CTX_init(
         ctx: *mut EVP_AEAD_CTX,
         aead: *const EVP_AEAD,
@@ -346,6 +352,7 @@ unsafe extern "C" {
         engine: *mut c_void,
     ) -> c_int;
 
+    #[link_name = "LEYLINE_EVP_AEAD_CTX_open"]
     fn EVP_AEAD_CTX_open(
         ctx: *const EVP_AEAD_CTX,
         out: *mut u8,
@@ -359,6 +366,7 @@ unsafe extern "C" {
         ad_len: usize,
     ) -> c_int;
 
+    #[link_name = "LEYLINE_EVP_AEAD_CTX_seal_scatter"]
     fn EVP_AEAD_CTX_seal_scatter(
         ctx: *const EVP_AEAD_CTX,
         out: *mut u8,
@@ -376,11 +384,14 @@ unsafe extern "C" {
     ) -> c_int;
 
     // AES
+    #[link_name = "LEYLINE_AES_set_encrypt_key"]
     fn AES_set_encrypt_key(key: *const u8, bits: c_uint, aeskey: *mut AES_KEY) -> c_int;
 
+    #[link_name = "LEYLINE_AES_ecb_encrypt"]
     fn AES_ecb_encrypt(inp: *const u8, out: *mut u8, key: *const AES_KEY, enc: c_int) -> c_void;
 
     // ChaCha20
+    #[link_name = "LEYLINE_CRYPTO_chacha_20"]
     fn CRYPTO_chacha_20(
         out: *mut u8,
         inp: *const u8,

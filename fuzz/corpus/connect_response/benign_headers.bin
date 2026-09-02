@@ -1,0 +1,4 @@
+HTTP/1.1 200 OK
+Via: 1.1 proxy
+X-Foo: bar
+

@@ -14,3 +14,14 @@ fn percent_decode_roundtrips_common_cases() {
     assert_eq!(percent_decode("s3cr3t%21"), "s3cr3t!");
     assert_eq!(percent_decode("bad%"), "bad%");
 }
+
+#[test]
+fn idempotent_matches_rfc_set() {
+    for m in ["GET", "HEAD", "OPTIONS", "PUT", "DELETE", "TRACE"] {
+        assert!(is_idempotent(m), "{m}");
+        assert!(is_idempotent(&m.to_lowercase()), "{m}");
+    }
+    for m in ["POST", "PATCH"] {
+        assert!(!is_idempotent(m), "{m}");
+    }
+}

@@ -194,7 +194,7 @@ async fn http3_session_rejects_per_request_proxy_at_send_time() {
         .build()
         .expect("http3 session without proxy builds");
     let err = session
-        .request("GET", "https://example.com/")
+        .request(http::Method::GET, "https://example.com/")
         .proxy("http://127.0.0.1:9")
         .send()
         .await
@@ -216,7 +216,7 @@ async fn race_proxy() {
         .build()
         .expect("race session builds");
     let result = session
-        .request("GET", "https://example.com/")
+        .request(http::Method::GET, "https://example.com/")
         .proxy("http://127.0.0.1:9")
         .send()
         .await;
@@ -236,15 +236,15 @@ async fn request_builder_timeout_overrides_session_default() {
         .unwrap();
     let start = std::time::Instant::now();
     let err = session
-        .request("GET", "https://192.0.2.1/")
+        .request(http::Method::GET, "https://192.0.2.1/")
         .timeout(std::time::Duration::from_millis(50))
         .send()
         .await
         .expect_err("should time out on unroutable address");
     let elapsed = start.elapsed();
     assert!(
-        matches!(err, leyline::Error::Timeout),
-        "expected Error::Timeout, got {err:?}"
+        err.is_timeout(),
+        "expected Error::new(Kind::Timeout), got {err:?}"
     );
     assert!(
         elapsed < std::time::Duration::from_secs(5),
@@ -422,7 +422,7 @@ async fn peet(session: &leyline::Session) -> Value {
         if attempt > 0 {
             tokio::time::sleep(std::time::Duration::from_millis(500 * attempt as u64)).await;
         }
-        let resp = match session.get(PEET_URL).await {
+        let mut resp = match session.get(PEET_URL).await {
             Ok(r) => r,
             Err(e) => {
                 last_err = format!("request error: {e}");
@@ -433,7 +433,7 @@ async fn peet(session: &leyline::Session) -> Value {
             last_err = format!("status {}", resp.status());
             continue;
         }
-        match serde_json::from_str(&resp.text().unwrap()) {
+        match serde_json::from_str(&resp.text().await.unwrap()) {
             Ok(v) => return v,
             Err(e) => last_err = format!("non-JSON: {e}"),
         }
@@ -1140,7 +1140,7 @@ async fn live_h3_cloudflare() {
         .http3()
         .build()
         .expect("h3 session builds");
-    let resp = session
+    let mut resp = session
         .get("https://cloudflare-quic.com/")
         .await
         .expect("H3 request failed");
@@ -1161,7 +1161,7 @@ async fn live_h3_cloudflare() {
         resp.tls_peer_certificate().is_some_and(|c| !c.is_empty()),
         "H3 peer certificate should be exposed"
     );
-    let body = resp.bytes().expect("buffered H3 body");
+    let body = resp.bytes().await.expect("buffered H3 body");
     assert!(!body.is_empty(), "H3 body is empty");
     println!(
         "✓ HTTP/3 to cloudflare-quic.com: status 200, {} bytes, cipher {:?}",
@@ -1201,7 +1201,7 @@ async fn live_h3_google() {
         .build()
         .expect("h3 session builds");
     let resp = session
-        .request("GET", "https://www.google.com/")
+        .request(http::Method::GET, "https://www.google.com/")
         .header("accept", "text/html")
         .send()
         .await
@@ -1220,20 +1220,20 @@ async fn live_h3_pool_reuse() {
         .build()
         .expect("h3 session builds");
 
-    let r1 = session
+    let mut r1 = session
         .get("https://cloudflare-quic.com/")
         .await
         .expect("first H3 request failed");
     assert_eq!(r1.status(), 200);
-    let _ = r1.bytes();
+    drop(r1.bytes().await);
     let after_first = session.pool_stats();
 
-    let r2 = session
+    let mut r2 = session
         .get("https://cloudflare-quic.com/")
         .await
         .expect("second H3 request failed");
     assert_eq!(r2.status(), 200);
-    let _ = r2.bytes();
+    drop(r2.bytes().await);
     let after_second = session.pool_stats();
 
     assert_eq!(
@@ -1267,12 +1267,12 @@ async fn live_race() {
         .build()
         .expect("race session builds");
 
-    let r1 = session
+    let mut r1 = session
         .get("https://cloudflare-quic.com/")
         .await
         .expect("first raced request failed");
     assert_eq!(r1.status(), 200, "race status: {}", r1.status());
-    let _ = r1.bytes();
+    drop(r1.bytes().await);
 
     let after_first = session.pool_stats();
     assert!(
@@ -1284,12 +1284,12 @@ async fn live_race() {
         after_first.h3_misses
     );
 
-    let r2 = session
+    let mut r2 = session
         .get("https://cloudflare-quic.com/")
         .await
         .expect("second raced request failed");
     assert_eq!(r2.status(), 200);
-    let _ = r2.bytes();
+    drop(r2.bytes().await);
 
     let after_second = session.pool_stats();
     assert!(
@@ -1349,10 +1349,11 @@ async fn live_h3_response_streaming_is_incremental() {
         .await
         .expect("buffered H3 request failed")
         .into_bytes()
+        .await
         .expect("buffered H3 body");
 
     let resp = session
-        .request("GET", "https://cloudflare-quic.com/")
+        .request(http::Method::GET, "https://cloudflare-quic.com/")
         .stream()
         .send()
         .await
@@ -1396,7 +1397,7 @@ async fn live_h3_response_streaming_is_incremental() {
 async fn live_h3_streaming_request_body_roundtrips() {
     use bytes::Bytes;
     use futures_util::stream;
-    use leyline::core::Body;
+    use leyline::Body;
 
     let session = leyline::Session::builder()
         .browser(Browser::Chrome147)
@@ -1413,7 +1414,7 @@ async fn live_h3_streaming_request_body_roundtrips() {
     let chunk_count = chunks.len();
     let body = Body::stream_with_length(stream::iter(chunks), total as u64);
 
-    let resp = session
+    let mut resp = session
         .post("https://httpbin.agrd.workers.dev/post")
         .header("content-type", "text/plain")
         .body(body)
@@ -1422,7 +1423,7 @@ async fn live_h3_streaming_request_body_roundtrips() {
         .expect("streamed H3 POST failed");
     assert_eq!(resp.status(), 200, "echo origin returned non-200");
 
-    let raw = resp.bytes().expect("buffered body");
+    let raw = resp.bytes().await.expect("buffered body");
     let v: Value = serde_json::from_slice(raw).expect("echo response is JSON");
     let expected_str = std::str::from_utf8(&expected).unwrap();
     let echoed = match v["body"].as_str() {
@@ -1565,12 +1566,12 @@ async fn live_http_connect_proxy() {
         .build()
         .expect("build session with proxy");
 
-    let resp = session
+    let mut resp = session
         .get(PEET_URL)
         .await
         .expect("proxy-tunnelled fetch failed");
     assert_eq!(resp.status(), 200);
-    let json: Value = serde_json::from_str(&resp.text().unwrap()).unwrap();
+    let json: Value = serde_json::from_str(&resp.text().await.unwrap()).unwrap();
     let h2 = json["http2"]["akamai_fingerprint"].as_str().unwrap();
     assert_eq!(
         normalize_akamai(h2),
@@ -1599,12 +1600,12 @@ async fn live_socks5_proxy() {
         .build()
         .expect("build session with proxy");
 
-    let resp = session
+    let mut resp = session
         .get(PEET_URL)
         .await
         .expect("socks5-tunnelled fetch failed");
     assert_eq!(resp.status(), 200);
-    let json: Value = serde_json::from_str(&resp.text().unwrap()).unwrap();
+    let json: Value = serde_json::from_str(&resp.text().await.unwrap()).unwrap();
     let h2 = json["http2"]["akamai_fingerprint"].as_str().unwrap();
     assert_eq!(
         normalize_akamai(h2),

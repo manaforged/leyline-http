@@ -1,0 +1,191 @@
+//! The driver must batch one event-loop turn into one transport write.
+#[path = "h2_support/mod.rs"]
+mod support;
+
+use std::pin::Pin;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::task::{Context, Poll};
+use std::time::Duration;
+
+use support::*;
+use tokio::io::{AsyncRead, AsyncWrite, DuplexStream, ReadBuf};
+use tokio::sync::oneshot;
+
+use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
+use leyline::h2::connection::{ClientConnection, PseudoHeaders};
+use leyline::h2::frame::FrameType;
+
+/// Duplex half that counts every `poll_write` the client makes.
+struct Counted {
+    inner: DuplexStream,
+    writes: Arc<AtomicUsize>,
+}
+
+impl AsyncRead for Counted {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.inner).poll_read(cx, buf)
+    }
+}
+
+impl AsyncWrite for Counted {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        let out = Pin::new(&mut self.inner).poll_write(cx, buf);
+        if matches!(out, Poll::Ready(Ok(_))) {
+            self.writes.fetch_add(1, Ordering::Relaxed);
+        }
+        out
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.inner).poll_shutdown(cx)
+    }
+}
+
+fn test_config() -> H2Config {
+    H2Config {
+        settings: vec![
+            (SettingId::HeaderTableSize, 4096),
+            (SettingId::EnablePush, 0),
+            (SettingId::InitialWindowSize, 65535),
+            (SettingId::MaxFrameSize, 16384),
+        ],
+        settings_order: vec![
+            SettingId::HeaderTableSize,
+            SettingId::EnablePush,
+            SettingId::InitialWindowSize,
+            SettingId::MaxFrameSize,
+        ],
+        pseudo_order: [
+            PseudoOrder::Method,
+            PseudoOrder::Authority,
+            PseudoOrder::Scheme,
+            PseudoOrder::Path,
+        ],
+        initial_connection_window_size: 65535,
+        default_priority: None,
+        rst_stream_flood_threshold: 100,
+        rst_stream_flood_window: Duration::from_secs(10),
+        max_response_body_bytes: 100 * 1024 * 1024,
+        max_header_block_bytes: 256 * 1024,
+        settings_flood_threshold: 100,
+        settings_flood_window: Duration::from_secs(10),
+        header_block_reassembly_timeout: Duration::from_secs(10),
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn get_req(
+    path: &str,
+) -> (
+    PseudoHeaders,
+    Vec<(
+        std::borrow::Cow<'static, str>,
+        std::borrow::Cow<'static, str>,
+    )>,
+) {
+    (
+        PseudoHeaders {
+            method: "GET".into(),
+            scheme: "https".into(),
+            authority: "example.com".into(),
+            path: path.into(),
+            protocol: None,
+        },
+        vec![("user-agent".into(), "test".into())],
+    )
+}
+
+#[tokio::test]
+async fn eight_concurrent_requests_share_one_write() {
+    let (client_io, mut server_io) = tokio::io::duplex(256 * 1024);
+    let writes = Arc::new(AtomicUsize::new(0));
+    let counted = Counted {
+        inner: client_io,
+        writes: writes.clone(),
+    };
+
+    let (greeted_tx, greeted_rx) = oneshot::channel::<()>();
+    let (headers_tx, headers_rx) = oneshot::channel::<()>();
+    let (go_tx, go_rx) = oneshot::channel::<()>();
+
+    let server = tokio::spawn(async move {
+        read_preface(&mut server_io).await;
+        let (h, _) = read_frame(&mut server_io).await;
+        assert_eq!(h.frame_type, FrameType::Settings as u8);
+        write_server_settings(&mut server_io).await;
+        write_settings_ack(&mut server_io).await;
+        let (h, _) = read_frame(&mut server_io).await;
+        assert_eq!(h.frame_type, FrameType::Settings as u8);
+        assert!(h.flags & 0x1 != 0, "expected SETTINGS ACK");
+        greeted_tx.send(()).expect("greeted");
+
+        let mut ids = Vec::new();
+        while ids.len() < 8 {
+            let (h, _) = read_frame(&mut server_io).await;
+            if h.frame_type == FrameType::Headers as u8 {
+                ids.push(h.stream_id);
+            }
+        }
+        headers_tx.send(()).expect("headers seen");
+        go_rx.await.expect("go");
+        for id in ids {
+            write_response(&mut server_io, id, b"ok").await;
+        }
+        server_io
+    });
+
+    let (handle, _driver) = ClientConnection::start(counted, test_config())
+        .await
+        .expect("handshake");
+    greeted_rx.await.expect("greeted");
+    let before = writes.load(Ordering::Relaxed);
+
+    let reqs: Vec<_> = (0..8)
+        .map(|i| {
+            let (p, h) = get_req(&format!("/{i}"));
+            handle.send_request(p, h, None)
+        })
+        .collect();
+    let mut all = Box::pin(futures_util::future::join_all(reqs));
+    let mut headers_rx = headers_rx;
+    let mut during = None;
+    let mut go = Some(go_tx);
+    let responses = loop {
+        tokio::select! {
+            r = &mut all => break r,
+            _ = &mut headers_rx, if during.is_none() => {
+                during = Some(writes.load(Ordering::Relaxed) - before);
+                if let Some(tx) = go.take() {
+                    tx.send(()).expect("go");
+                }
+            }
+        }
+    };
+    drop(all);
+    let during = during.expect("server saw all eight header blocks");
+
+    for r in responses {
+        assert_eq!(r.expect("response").status, 200);
+    }
+
+    assert!(
+        during <= 3,
+        "request phase took {during} transport writes for 8 concurrent requests"
+    );
+
+    drop(handle);
+    let _ = server.await;
+}

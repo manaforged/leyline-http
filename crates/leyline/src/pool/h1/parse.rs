@@ -111,7 +111,8 @@ where
         buf.extend_from_slice(&tmp[..n]);
     }
 }
-pub(super) fn parse_h1_head(head: &str) -> Result<ParsedHead, H1PooledError> {
+/// Parse an HTTP/1.1 response head into `(status, headers, minor version)`.
+pub fn parse_h1_head(head: &str) -> Result<ParsedHead, H1PooledError> {
     let mut lines = head.split("\r\n");
     let status_line = lines
         .next()
@@ -208,7 +209,8 @@ where
         }
     }
 }
-pub(super) async fn read_chunked_body<S>(
+/// Decode a `Transfer-Encoding: chunked` body from `stream`, starting with the bytes already in `buf`.
+pub async fn read_chunked_body<S>(
     stream: &mut S,
     mut buf: Vec<u8>,
 ) -> Result<Vec<u8>, H1PooledError>

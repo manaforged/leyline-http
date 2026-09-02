@@ -3,7 +3,11 @@
 use md5::{Digest as Md5Digest, Md5};
 use sha2::{Sha256, Sha512_256};
 
-use crate::core::error::{Error, Result};
+use crate::core::error::{Error, Kind, Result};
+
+mod scan;
+
+use scan::{Pair, pairs};
 
 /// Digest credentials.
 #[derive(Debug, Clone)]
@@ -94,78 +98,49 @@ pub(crate) fn parse_challenge(header: &str) -> Result<Challenge> {
     let body = trimmed
         .strip_prefix("Digest ")
         .or_else(|| trimmed.strip_prefix("digest "))
-        .ok_or_else(|| Error::Http("digest: not a Digest challenge".into()))?;
+        .ok_or_else(|| Error::new(Kind::Request).with_message("digest: not a Digest challenge"))?;
 
     let mut ch = Challenge::default();
-    let mut i = 0;
-    let bytes = body.as_bytes();
-    while i < bytes.len() {
-        while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b',' || bytes[i] == b'\t') {
-            i += 1;
-        }
-        if i >= bytes.len() {
-            break;
-        }
-        let key_start = i;
-        while i < bytes.len() && bytes[i] != b'=' {
-            i += 1;
-        }
-        if i >= bytes.len() {
-            break;
-        }
-        let key = &body[key_start..i];
-        i += 1;
-        let (val, ni) = if i < bytes.len() && bytes[i] == b'"' {
-            let start = i + 1;
-            let mut j = start;
-            while j < bytes.len() && bytes[j] != b'"' {
-                j += 1;
-            }
-            let v = &body[start..j];
-            let end = if j < bytes.len() { j + 1 } else { j };
-            (v.to_string(), end)
-        } else {
-            let start = i;
-            let mut j = start;
-            while j < bytes.len() && bytes[j] != b',' {
-                j += 1;
-            }
-            (body[start..j].trim().to_string(), j)
-        };
-        i = ni;
-
-        match key.trim().to_ascii_lowercase().as_str() {
-            "realm" => ch.realm = val,
-            "nonce" => ch.nonce = val,
-            "qop" => ch.qop = Some(val),
-            "opaque" => ch.opaque = Some(val),
-            "stale" => ch.stale = val.eq_ignore_ascii_case("true"),
-            "algorithm" => {
-                ch.algorithm = match val.trim() {
-                    "MD5" | "md5" => Algorithm::Md5,
-                    "MD5-sess" | "md5-sess" => Algorithm::Md5Sess,
-                    "SHA-256" | "sha-256" => Algorithm::Sha256,
-                    "SHA-256-sess" | "sha-256-sess" => Algorithm::Sha256Sess,
-                    "SHA-512-256" | "sha-512-256" => Algorithm::Sha512_256,
-                    "SHA-512-256-sess" | "sha-512-256-sess" => Algorithm::Sha512_256Sess,
-                    other => {
-                        return Err(Error::Http(format!(
-                            "digest: unsupported algorithm {other}"
-                        )));
-                    }
-                };
-            }
-            _ => {}
-        }
+    for pair in pairs(body) {
+        fill(&mut ch, pair)?;
     }
 
     if ch.nonce.is_empty() {
-        return Err(Error::Http(
-            "digest: challenge missing required `nonce`".into(),
-        ));
+        return Err(
+            Error::new(Kind::Request).with_message("digest: challenge missing required `nonce`")
+        );
     }
 
     Ok(ch)
+}
+
+/// Store one scanned pair on the challenge, ignoring unknown keys.
+fn fill(ch: &mut Challenge, pair: Pair<'_>) -> Result<()> {
+    let Pair { key, val } = pair;
+    match key.trim().to_ascii_lowercase().as_str() {
+        "realm" => ch.realm = val,
+        "nonce" => ch.nonce = val,
+        "qop" => ch.qop = Some(val),
+        "opaque" => ch.opaque = Some(val),
+        "stale" => ch.stale = val.eq_ignore_ascii_case("true"),
+        "algorithm" => ch.algorithm = algorithm(val.trim())?,
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Map a challenge `algorithm` value to its enum.
+fn algorithm(val: &str) -> Result<Algorithm> {
+    match val {
+        "MD5" | "md5" => Ok(Algorithm::Md5),
+        "MD5-sess" | "md5-sess" => Ok(Algorithm::Md5Sess),
+        "SHA-256" | "sha-256" => Ok(Algorithm::Sha256),
+        "SHA-256-sess" | "sha-256-sess" => Ok(Algorithm::Sha256Sess),
+        "SHA-512-256" | "sha-512-256" => Ok(Algorithm::Sha512_256),
+        "SHA-512-256-sess" | "sha-512-256-sess" => Ok(Algorithm::Sha512_256Sess),
+        other => Err(Error::new(Kind::Request)
+            .with_message(format!("digest: unsupported algorithm {other}"))),
+    }
 }
 
 /// Compute the `Authorization: Digest ...` header for one request.
@@ -272,10 +247,10 @@ fn nonce_cache() -> &'static std::sync::Mutex<lru::LruCache<String, u32>> {
 
 pub(crate) fn next_nc_for_nonce(nonce: &str) -> u32 {
     let mut guard = nonce_cache().lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(existing) = guard.get(nonce) {
-        if *existing >= u32::MAX - 1 {
-            guard.pop(nonce);
-        }
+    if let Some(existing) = guard.get(nonce)
+        && *existing >= u32::MAX - 1
+    {
+        guard.pop(nonce);
     }
     match guard.get_mut(nonce) {
         Some(counter) => {

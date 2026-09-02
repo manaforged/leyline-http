@@ -1,6 +1,6 @@
 use super::*;
-use crate::Error;
 use crate::tls::TlsError;
+use crate::{Error, Kind};
 
 #[test]
 fn transport_separates_the_keyspace() {
@@ -21,27 +21,29 @@ fn transport_separates_the_keyspace() {
 
 #[test]
 fn kinds() {
-    let tcp = Error::Tls(TlsError::TcpConnect(
+    let tcp = Error::new(Kind::Tls).with_source(TlsError::TcpConnect(
         std::io::ErrorKind::ConnectionRefused.into(),
     ));
+    let tcp = connect_err(&tcp);
     assert!(matches!(
-        connect_err(&tcp),
-        Error::Tls(TlsError::TcpConnect(err))
-            if err.kind() == std::io::ErrorKind::ConnectionRefused
+        tcp.tls(),
+        Some(TlsError::TcpConnect(err)) if err.kind() == std::io::ErrorKind::ConnectionRefused
     ));
 
-    let handshake = Error::Tls(TlsError::HandshakeIo(
+    let handshake = Error::new(Kind::Tls).with_source(TlsError::HandshakeIo(
         std::io::ErrorKind::UnexpectedEof.into(),
     ));
+    let handshake = connect_err(&handshake);
     assert!(matches!(
-        connect_err(&handshake),
-        Error::Tls(TlsError::HandshakeIo(err))
-            if err.kind() == std::io::ErrorKind::UnexpectedEof
+        handshake.tls(),
+        Some(TlsError::HandshakeIo(err)) if err.kind() == std::io::ErrorKind::UnexpectedEof
     ));
 
-    let io = Error::Io(std::io::ErrorKind::ConnectionAborted.into());
-    assert!(matches!(
-        connect_err(&io),
-        Error::Io(err) if err.kind() == std::io::ErrorKind::ConnectionAborted
-    ));
+    let io = Error::new(Kind::Io)
+        .with_source(std::io::Error::from(std::io::ErrorKind::ConnectionAborted));
+    let io = connect_err(&io);
+    assert!(
+        io.io()
+            .is_some_and(|e| e.kind() == std::io::ErrorKind::ConnectionAborted)
+    );
 }

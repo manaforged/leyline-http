@@ -1,12 +1,13 @@
 //! Flow-control constants, the command protocol, and the driver task handle.
 
 use std::io;
+use std::sync::Arc;
 
 use bytes::Bytes;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
-use crate::h2::connection::{H2Response, PseudoHeaders};
+use crate::h2::connection::{H2Response, HeaderPair, PseudoHeaders};
 use crate::h2::error::{ErrorCode, H2Error};
 
 use super::super::types::H2ResponseEx;
@@ -63,6 +64,14 @@ pub(crate) enum DriverRequestBody {
     },
 }
 
+/// The head of a request, shared with the driver behind an `Arc` so a pooled attempt and its retry never clone the pseudo-headers or the header list.
+pub(crate) struct Head {
+    /// Pseudo-headers, in caller order.
+    pub(crate) pseudo: PseudoHeaders,
+    /// Regular request headers, in wire order.
+    pub(crate) headers: Vec<HeaderPair>,
+}
+
 /// Commands the driver accepts from handles.
 pub(crate) enum DriverCommand {
     SendRequest {
@@ -74,8 +83,7 @@ pub(crate) enum DriverCommand {
         response_tx: oneshot::Sender<Result<H2Response, H2Error>>,
     },
     SendRequestEx {
-        pseudo: PseudoHeaders,
-        headers: Vec<crate::h2::connection::HeaderPair>,
+        head: Arc<Head>,
         body: DriverRequestBody,
         stream_response: bool,
         response_tx: oneshot::Sender<Result<H2ResponseEx, H2Error>>,

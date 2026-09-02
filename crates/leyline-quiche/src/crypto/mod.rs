@@ -503,11 +503,14 @@ pub fn verify_slices_are_equal(a: &[u8], b: &[u8]) -> Result<()> {
 }
 
 unsafe extern "C" {
+    #[link_name = "LEYLINE_EVP_sha256"]
     fn EVP_sha256() -> *const EVP_MD;
 
+    #[link_name = "LEYLINE_EVP_sha384"]
     fn EVP_sha384() -> *const EVP_MD;
 
     // CRYPTO
+    #[link_name = "LEYLINE_CRYPTO_memcmp"]
     fn CRYPTO_memcmp(a: *const u8, b: *const u8, len: usize) -> c_int;
 }
 

@@ -69,17 +69,16 @@ impl Jar {
         if cookie.is_expired() {
             let mut jar = lock(&self.inner);
             let domain = cookie.domain.to_lowercase();
-            if let Some(entries) = jar.cookies.get_mut(&domain) {
-                if let Some(pos) = entries
+            if let Some(entries) = jar.cookies.get_mut(&domain)
+                && let Some(pos) = entries
                     .iter()
                     .position(|c| c.name == cookie.name && c.path == cookie.path)
-                {
-                    if entries[pos].secure && url.scheme() != "https" {
-                        return;
-                    }
-                    entries.remove(pos);
-                    jar.total -= 1;
+            {
+                if entries[pos].secure && url.scheme() != "https" {
+                    return;
                 }
+                entries.remove(pos);
+                jar.total -= 1;
             }
             return;
         }

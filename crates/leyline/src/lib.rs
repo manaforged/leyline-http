@@ -1,30 +1,80 @@
-//! An HTTP client that mimics browsers on the wire.
-
-use std::sync::LazyLock;
+//! An HTTP client that mimics browsers on the wire. User guide: `docs/guide/`.
 
 #[cfg(doctest)]
 #[doc = include_str!("../../../README.md")]
 pub struct ReadmeDoctests;
 
+/// User guide chapters, compiled as doctests.
+#[cfg(doctest)]
+pub mod guide {
+    #[doc = include_str!("../../../docs/guide/README.md")]
+    pub struct Index;
+    #[doc = include_str!("../../../docs/guide/quick-start.md")]
+    pub struct QuickStart;
+    #[doc = include_str!("../../../docs/guide/sessions.md")]
+    pub struct Sessions;
+    #[doc = include_str!("../../../docs/guide/requests.md")]
+    pub struct Requests;
+    #[doc = include_str!("../../../docs/guide/responses.md")]
+    pub struct Responses;
+    #[doc = include_str!("../../../docs/guide/streaming.md")]
+    pub struct Streaming;
+    #[doc = include_str!("../../../docs/guide/retries-and-timeouts.md")]
+    pub struct Retries;
+    #[doc = include_str!("../../../docs/guide/proxies.md")]
+    pub struct Proxies;
+    #[doc = include_str!("../../../docs/guide/cookies.md")]
+    pub struct Cookies;
+    #[doc = include_str!("../../../docs/guide/websocket.md")]
+    pub struct WebSocket;
+    #[doc = include_str!("../../../docs/guide/http3.md")]
+    pub struct Http3;
+    #[doc = include_str!("../../../docs/guide/fingerprints.md")]
+    pub struct Fingerprints;
+    #[doc = include_str!("../../../docs/guide/features-and-targets.md")]
+    pub struct Features;
+}
+
 pub mod audit;
 pub mod cookie;
 pub mod profile;
 pub mod tls;
-pub(crate) mod tls_selftest;
+pub mod trace;
 
-#[doc(hidden)]
-pub mod observe;
-
-#[doc(hidden)]
-pub mod core;
+pub(crate) mod core;
+/// HTTP/2 internals used by this crate's tests and benches. Unstable: no semver promise.
 #[doc(hidden)]
 pub mod h2;
+pub(crate) mod header_str;
+/// Connection-pool internals used by this crate's tests and benches. Unstable: no semver promise.
 #[doc(hidden)]
 pub mod pool;
+/// Parser entry points the `fuzz/` targets drive. Unstable: no semver promise.
+#[doc(hidden)]
+pub mod fuzz {
+    pub use crate::cookie::parse::parse_cookie_date;
+    pub use crate::pool::h1::parse::{parse_h1_head, read_chunked_body};
+    pub use crate::tls::proxy::http::validate_connect_response;
+
+    /// Parse one `Set-Cookie` line against an absolute request URL. Unstable: no semver promise.
+    pub fn parse_set_cookie(header: &str, request_url: &str) -> Option<crate::cookie::Cookie> {
+        let parsed = url::Url::parse(request_url).ok()?;
+        crate::cookie::parse::parse_set_cookie(header, &parsed)
+    }
+}
 #[cfg(feature = "http3")]
 pub(crate) mod quic;
 pub(crate) mod tcp;
 mod util;
+
+/// The `http` crate, re-exported so callers share one version of `Method`, `Uri`, `StatusCode`, and the header types.
+pub use http;
+
+/// Tower middleware around one request attempt.
+#[cfg(feature = "tower")]
+pub mod layer {
+    pub use crate::core::layer::{Call, Log, Logged, Pending, Reply, Transport};
+}
 
 #[cfg(feature = "tower")]
 pub use crate::core::LeylineService;
@@ -32,7 +82,7 @@ pub use crate::core::LeylineService;
 pub use crate::core::WebSocketBuilder;
 pub use crate::core::{
     Body, BodyStream, CompressionConfig, ContentEncoding, DigestAuth, DnsConfig, Error, HeaderList,
-    HttpVersion, Identity, IntoParamPair, NoProxy, PoolConfig, ProtocolPolicy, ProxyConfig,
+    HttpVersion, Identity, IntoParamPair, Kind, NoProxy, PoolConfig, ProtocolPolicy, ProxyConfig,
     ProxyRule, ProxyUrl, RedirectAction, RedirectAttempt, RedirectPolicy, Request, RequestBuilder,
     Response, ResponseTiming, Result, RetryPolicy, RetryTrigger, Session, SessionBuilder,
     SocketConfig, TimeoutConfig, WebSocketConfig,
@@ -45,6 +95,7 @@ pub mod multipart {
     pub use crate::core::multipart::{Form, Part};
 }
 
+use crate::profile::ProfileRegistry;
 pub use crate::profile::{Browser, BrowserProfile, ChromiumBrand, Platform, Preset};
 
 pub use crate::tcp::TcpProfile;
@@ -55,17 +106,14 @@ pub use crate::h2::{ErrorCode, H2Error};
 pub use crate::quic::H3Config;
 
 #[cfg(feature = "websocket")]
-pub use crate::core::{WsConnection, WsMessage, WsSink, WsStream};
+pub use crate::core::{CloseFrame, WsConnection, WsMessage, WsSink, WsStream};
 
 pub use crate::tls::{TlsContext, TlsError, TlsMinVersion, TlsTrustConfig};
-
-static PROFILES: LazyLock<crate::profile::ProfileRegistry> =
-    LazyLock::new(crate::profile::ProfileRegistry::builtin);
 
 impl Browser {
     /// Built-in static profile for this variant.
     pub fn profile(self) -> &'static BrowserProfile {
-        PROFILES.get_browser(self).expect(
+        ProfileRegistry::global().get_browser(self).expect(
             "built-in profile missing - registry integrity check in tests would have caught this",
         )
     }

@@ -3,6 +3,7 @@ use super::*;
 #[test]
 fn default_policy_retries_5xx_subset() {
     let p = RetryPolicy::transient();
+    assert!(p.matches_status(429));
     assert!(p.matches_status(502));
     assert!(p.matches_status(503));
     assert!(p.matches_status(504));
@@ -65,15 +66,4 @@ fn imf_fixdate_epoch() {
         unix_from_ymd_hms(1970, 1, 1, 0, 0, 0),
         Some(std::time::UNIX_EPOCH)
     );
-}
-
-#[test]
-fn idempotent_matches_rfc_set() {
-    for m in ["GET", "HEAD", "OPTIONS", "PUT", "DELETE", "TRACE"] {
-        assert!(is_idempotent(m), "{m}");
-        assert!(is_idempotent(&m.to_lowercase()), "{m}");
-    }
-    for m in ["POST", "PATCH"] {
-        assert!(!is_idempotent(m), "{m}");
-    }
 }

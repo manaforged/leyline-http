@@ -177,6 +177,7 @@ where
         shutdown_started: false,
         body_chunk_tx,
         body_chunk_rx,
+        stalled: 0,
     };
 
     let join = tokio::spawn(driver.run());

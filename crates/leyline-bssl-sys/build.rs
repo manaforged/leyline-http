@@ -36,12 +36,6 @@ fn main() {
         panic!("leyline-bssl-sys does not package ML-KEM-specific BoringSSL artifacts.");
     }
 
-    if env::var_os("CARGO_FEATURE_PREFIX_SYMBOLS").is_some() {
-        println!(
-            "cargo:warning=leyline-bssl-sys prefix-symbols is ignored by Leyline's prebuilt shim."
-        );
-    }
-
     let lib_dir = match env::var_os("BORING_BSSL_PATH") {
         Some(path) => find_lib_dir(PathBuf::from(path), &target),
         None => {

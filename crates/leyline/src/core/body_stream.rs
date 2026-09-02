@@ -32,7 +32,8 @@ impl BodyStream {
     pub(crate) fn from_bytes(buf: Bytes) -> Self {
         let (tx, rx) = mpsc::channel(1);
         if !buf.is_empty() {
-            let _ = tx.try_send(Ok(buf));
+            tx.try_send(Ok(buf))
+                .expect("fresh channel with capacity 1 has room");
         }
         drop(tx);
         Self::new(rx)

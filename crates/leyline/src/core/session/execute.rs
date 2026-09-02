@@ -1,3 +1,7 @@
+use http::Uri;
+
+use crate::core::headers::reorder;
+use crate::core::transport::Prepared;
 use std::borrow::Cow;
 use std::collections::HashMap;
 
@@ -8,79 +12,94 @@ use super::Session;
 use super::decompress::{decompress_and_strip, drain_stream_into_vec};
 use super::header_merge::apply_extra_headers;
 use crate::core::body::Body;
-use crate::core::error::{Error, Result};
+use crate::core::error::{Error, Kind, Result};
 use crate::core::headers::HeaderList;
 use crate::core::response::Response;
 use crate::core::{RedirectAction, RedirectAttempt};
-use crate::observe::has_observer;
+use crate::trace;
 use crate::util::redacted_url;
 
-impl Session {
-    /// Execute a request with an optional per-request timeout override.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "flat per-request wire fields across one internal call path"
-    )]
-    pub(crate) async fn execute_with_timeout(
+/// One attempt of a request as the builder hands it to the session: everything the redirect loop needs, owned so retries can rebuild it.
+pub(crate) struct Attempt {
+    pub(crate) method: http::Method,
+    pub(crate) url: String,
+    pub(crate) preset: Option<Preset>,
+    pub(crate) body: Body,
+    pub(crate) headers: Option<HeaderList>,
+    pub(crate) timeout: Option<std::time::Duration>,
+    pub(crate) timeouts: Option<crate::core::config::TimeoutConfig>,
+    pub(crate) stream_response: bool,
+    pub(crate) proxy: Option<String>,
+    pub(crate) header_order: Option<Vec<String>>,
+}
+
+impl Attempt {
+    /// The same attempt with a fresh body, headers, and timeout; the cheap fields are cloned.
+    pub(crate) fn again(
         &self,
-        method: &str,
-        raw_url: &str,
-        preset: Option<Preset>,
         body: Body,
-        extra_headers: Option<HeaderList>,
-        override_timeout: Option<std::time::Duration>,
-        stream_response: bool,
-        request_proxy: Option<&str>,
-        header_order: Option<&[String]>,
-    ) -> Result<Response> {
-        let timeout = override_timeout.unwrap_or(self.inner.timeouts.total);
+        headers: Option<HeaderList>,
+        timeout: Option<std::time::Duration>,
+    ) -> Attempt {
+        Attempt {
+            method: self.method.clone(),
+            url: self.url.clone(),
+            preset: self.preset,
+            body,
+            headers,
+            timeout,
+            timeouts: self.timeouts,
+            stream_response: self.stream_response,
+            proxy: self.proxy.clone(),
+            header_order: self.header_order.clone(),
+        }
+    }
+}
+
+impl Session {
+    /// Execute one attempt of a request under its total timeout.
+    pub(crate) async fn run(&self, attempt: Attempt) -> Result<Response> {
+        let timeout = attempt.timeout.unwrap_or(self.inner.timeouts.total);
         let inner: std::pin::Pin<
             Box<dyn std::future::Future<Output = Result<Response>> + Send + '_>,
-        > = Box::pin(self.execute_inner(
-            method,
-            raw_url,
-            preset,
-            body,
-            extra_headers,
-            stream_response,
-            request_proxy,
-            header_order,
-        ));
-        let result = match tokio::time::timeout(timeout, inner).await {
-            Ok(result) => result,
-            Err(_) => Err(Error::Timeout),
-        };
-        if let Err(ref e) = result {
-            crate::observe::notify_request_error(&crate::observe::RequestErrorSnapshot {
-                method,
-                url: raw_url,
-                error: &e.to_string(),
+        > = Box::pin(self.execute_inner(attempt));
+        trace::scope(self.inner.trace.as_ref(), async move {
+            let out = match tokio::time::timeout(timeout, inner).await {
+                Ok(result) => result,
+                Err(_) => Err(Error::new(Kind::Timeout)),
+            };
+            trace::done(match &out {
+                Ok(_) => Ok(()),
+                Err(e) => Err(e),
             });
-        }
-        result
+            out
+        })
+        .await
     }
 
     #[tracing::instrument(
         name = "session.execute",
         level = "debug",
         skip_all,
-        fields(http.method = method, http.url = redacted_url(raw_url))
+        fields(http.method = attempt.method.as_str(), http.url = redacted_url(&attempt.url))
     )]
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "flat per-request wire fields across one internal call path"
-    )]
-    async fn execute_inner(
-        &self,
-        method: &str,
-        raw_url: &str,
-        preset: Option<Preset>,
-        body: Body,
-        extra_headers: Option<HeaderList>,
-        stream_response: bool,
-        request_proxy: Option<&str>,
-        header_order: Option<&[String]>,
-    ) -> Result<Response> {
+    async fn execute_inner(&self, attempt: Attempt) -> Result<Response> {
+        let Attempt {
+            method,
+            url: raw_url,
+            preset,
+            body,
+            headers: extra_headers,
+            timeouts: over,
+            stream_response,
+            proxy: request_proxy,
+            header_order,
+            ..
+        } = attempt;
+        let read = over.and_then(|t| t.read).or(self.inner.timeouts.read);
+        let raw_url = raw_url.as_str();
+        let request_proxy = request_proxy.as_deref();
+        let header_order = header_order.as_deref();
         let mut current_url = {
             let mut cache = lock(&self.inner.url_cache);
             match cache.as_mut() {
@@ -115,9 +134,10 @@ impl Session {
                 &current_body,
                 extra_headers.as_ref(),
                 strip_sensitive,
+                header_order,
             );
 
-            let want_introspect = self.inner.audit_enabled || has_observer();
+            let want_introspect = self.inner.audit_enabled;
             let audit_headers: Vec<(String, String)> = if want_introspect {
                 headers
                     .iter()
@@ -134,23 +154,26 @@ impl Session {
                 _ => None,
             };
 
-            let send = self.send_with_policy(
-                &current_method,
-                &current_url,
+            let send = self.dispatch(Prepared {
+                method: &current_method,
+                url: &current_url,
                 headers,
-                hop_body,
+                body: hop_body,
+                proxy: request_proxy,
                 stream_response,
-                request_proxy,
-                header_order,
-            );
-            let transport_resp = match self.inner.timeouts.response_header {
+            });
+            let ttfb = over
+                .and_then(|t| t.response_header)
+                .or(self.inner.timeouts.response_header);
+            let transport_resp = match ttfb {
                 Some(ttfb) => tokio::time::timeout(ttfb, send)
                     .await
-                    .map_err(|_| Error::Timeout)??,
+                    .map_err(|_| Error::new(Kind::Timeout))??,
                 None => send.await?,
             };
             let status = transport_resp.status;
             let resp_headers = transport_resp.headers;
+            let resp_trailers = transport_resp.trailers;
             let resp_body_shape = transport_resp.body;
             let final_url = transport_resp.final_url;
             let response_version = transport_resp.version;
@@ -161,67 +184,64 @@ impl Session {
             acc_timing.add_leg(&transport_resp.timing);
 
             self.collect_cookies(&resp_headers, &current_url, &mut all_cookies);
+            #[cfg(feature = "http3")]
+            if let Some(host) = current_url.host_str()
+                && let Some(port) = current_url.port_or_known_default()
+            {
+                for (_, v) in resp_headers.iter().filter(|(k, _)| *k == "alt-svc") {
+                    self.inner.pool.note_alt_svc(
+                        host,
+                        port,
+                        &String::from_utf8_lossy(v.as_bytes()),
+                    );
+                }
+            }
 
-            if matches!(status, 301 | 302 | 303 | 307 | 308) {
-                if let Some(location) = resp_headers
+            let code = status.as_u16();
+            if matches!(code, 301 | 302 | 303 | 307 | 308)
+                && let Some(location) = resp_headers
                     .iter()
-                    .find(|(k, _)| k.eq_ignore_ascii_case("location"))
-                    .map(|(_, v)| v.clone())
-                {
-                    let action = self.inner.redirect_policy.action(RedirectAttempt {
-                        status,
-                        url: &current_url,
-                        location: Some(location.as_str()),
-                        previous: &redirect_chain,
-                    });
-                    if action == RedirectAction::Stop {
-                    } else {
-                        drop(resp_body_shape);
-                        redirect_chain.push(current_url.to_string());
-                        current_url = current_url.join(&location)?;
-                        if !matches!(current_url.scheme(), "http" | "https") {
-                            return Err(Error::Redirect(format!(
-                                "refusing to follow redirect to non-http(s) scheme `{}`",
-                                current_url.scheme()
-                            )));
-                        }
+                    .find(|(k, _)| *k == "location")
+                    .map(|(_, v)| String::from_utf8_lossy(v.as_bytes()).into_owned())
+            {
+                let attempt_url: Uri = current_url.as_str().parse().unwrap_or_default();
+                let action = self.inner.redirect_policy.action(RedirectAttempt {
+                    status: code,
+                    url: &attempt_url,
+                    location: Some(location.as_str()),
+                    previous: &redirect_chain,
+                });
+                if action == RedirectAction::Stop {
+                } else {
+                    drop(resp_body_shape);
+                    redirect_chain.push(current_url.to_string());
+                    current_url = current_url.join(&location)?;
+                    if !matches!(current_url.scheme(), "http" | "https") {
+                        return Err(Error::new(Kind::Redirect).with_message(format!(
+                            "refusing to follow redirect to non-http(s) scheme `{}`",
+                            current_url.scheme()
+                        )));
+                    }
 
-                        if matches!(status, 301..=303) {
-                            current_method = "GET".to_string();
-                            current_body = Body::Empty;
-                        } else if hop_body_was_stream {
-                            return Err(Error::Redirect(format!(
-                                "cannot follow {status} redirect: streaming request bodies are \
+                    if matches!(code, 301..=303) {
+                        current_method = "GET".to_string();
+                        current_body = Body::Empty;
+                    } else if hop_body_was_stream {
+                        return Err(Error::new(Kind::Redirect).with_message(format!(
+                            "cannot follow {code} redirect: streaming request bodies are \
                              not replayable. Either buffer the body before sending or set \
                              max_redirects(0)."
-                            )));
-                        } else if let Some(bytes) = replay_body {
-                            current_body = Body::Bytes(bytes);
-                        }
-                        continue;
+                        )));
+                    } else if let Some(bytes) = replay_body {
+                        current_body = Body::Bytes(bytes);
                     }
+                    continue;
                 }
             }
 
             let (final_body, final_headers) = self
-                .finalize_response_body(resp_body_shape, resp_headers, stream_response)
+                .finalize_response_body(resp_body_shape, resp_headers, stream_response, read)
                 .await?;
-
-            {
-                let body_slice: &[u8] = match &final_body {
-                    crate::core::response::ResponseBody::Buffered(buf) => buf.as_slice(),
-                    _ => &[],
-                };
-                crate::observe::notify_response(&crate::observe::ResponseSnapshot {
-                    method: &current_method,
-                    url: raw_url,
-                    final_url: &final_url,
-                    status,
-                    request_headers: &audit_headers,
-                    response_headers_raw: &final_headers,
-                    body: body_slice,
-                });
-            }
 
             return Ok(Response {
                 status,
@@ -231,7 +251,7 @@ impl Session {
                 url: final_url,
                 redirect_chain,
                 version: response_version,
-                trailers: Vec::new(),
+                trailers: resp_trailers,
                 request_headers: audit_headers,
                 tls_alpn,
                 tls_peer_certificate: peer_cert_der,
@@ -247,14 +267,13 @@ impl Session {
                     .audit_enabled
                     .then(|| std::sync::Arc::clone(&self.inner.audit_tls)),
                 audit_cache: std::sync::OnceLock::new(),
+                compression: self.inner.compression,
                 timing: acc_timing,
             });
         }
 
-        Err(Error::Redirect(format!(
-            "too many redirects (max {})",
-            redirect_cap
-        )))
+        Err(Error::new(Kind::Redirect)
+            .with_message(format!("too many redirects (max {})", redirect_cap)))
     }
 
     /// Headers for one redirect-loop hop: preset or default set, brand and identity overlays, caller extras, framing length, cookies, and the identity or Gecko header order.
@@ -270,6 +289,7 @@ impl Session {
         current_body: &Body,
         extra_headers: Option<&HeaderList>,
         strip_sensitive: bool,
+        header_order: Option<&[String]>,
     ) -> Vec<HeaderPair> {
         let mut headers: Vec<HeaderPair> = if let Some(preset) = preset {
             let ctx = crate::profile::preset::HeaderContext {
@@ -332,7 +352,7 @@ impl Session {
         {
             let user_has_it = extra_headers
                 .as_ref()
-                .map(|h| h.iter().any(|(uk, _)| uk.eq_ignore_ascii_case(k)))
+                .map(|h| h.iter().any(|(uk, _)| uk.as_str().eq_ignore_ascii_case(k)))
                 .unwrap_or(false);
             let preset_has_it = headers.iter().any(|(hk, _)| hk.eq_ignore_ascii_case(k));
             if !user_has_it && !preset_has_it && !(strip_sensitive && sensitive(k)) {
@@ -344,11 +364,11 @@ impl Session {
             apply_extra_headers(&mut headers, extra, strip_sensitive, &sensitive);
         }
 
-        if let Some(len) = current_body.len_hint() {
-            if !matches!(current_body, Body::Empty) || len > 0 {
-                headers.retain(|(k, _)| !k.eq_ignore_ascii_case("content-length"));
-                headers.insert(0, ("content-length".into(), Cow::Owned(len.to_string())));
-            }
+        if let Some(len) = current_body.len_hint()
+            && (!matches!(current_body, Body::Empty) || len > 0)
+        {
+            headers.retain(|(k, _)| !k.eq_ignore_ascii_case("content-length"));
+            headers.insert(0, ("content-length".into(), Cow::Owned(len.to_string())));
         }
 
         let cross_site = crate::cookie::is_cross_site(current_url, redirect_chain);
@@ -363,14 +383,16 @@ impl Session {
             headers.push(("cookie".into(), Cow::Owned(cookie_val)));
         }
 
-        if let Some(order) = self.inner.identity_request_header_order.as_deref() {
-            reorder_headers(&mut headers, order);
+        if let Some(order) = header_order {
+            reorder(&mut headers, order);
+        } else if let Some(order) = self.inner.identity_request_header_order.as_deref() {
+            reorder(&mut headers, order);
         } else if self.inner.browser.as_ref().is_some_and(|b| b.is_firefox()) {
             let order: Vec<String> = crate::profile::preset::FIREFOX_HEADER_ORDER
                 .iter()
                 .map(|s| (*s).to_string())
                 .collect();
-            reorder_headers(&mut headers, &order);
+            reorder(&mut headers, &order);
         }
 
         headers
@@ -378,14 +400,14 @@ impl Session {
     /// Store this hop's Set-Cookie values in the jar and accumulate the response-facing cookie view: live values read back from the jar, rejected-but-sent names reported as the server sent them.
     fn collect_cookies(
         &self,
-        resp_headers: &[(crate::core::HeaderStr, crate::core::HeaderStr)],
+        resp_headers: &[(http::HeaderName, http::HeaderValue)],
         current_url: &url::Url,
         all_cookies: &mut HashMap<String, String>,
     ) {
         let set_cookies: Vec<&str> = resp_headers
             .iter()
-            .filter(|(k, _)| k.eq_ignore_ascii_case("set-cookie"))
-            .map(|(_, v)| v.as_str())
+            .filter(|(k, _)| *k == "set-cookie")
+            .filter_map(|(_, v)| v.to_str().ok())
             .collect();
         if !set_cookies.is_empty() {
             self.inner
@@ -413,15 +435,16 @@ impl Session {
     async fn finalize_response_body(
         &self,
         resp_body_shape: crate::core::transport::TransportBody,
-        resp_headers: Vec<(crate::core::HeaderStr, crate::core::HeaderStr)>,
+        resp_headers: Vec<(http::HeaderName, http::HeaderValue)>,
         stream_response: bool,
+        read: Option<std::time::Duration>,
     ) -> Result<(
         crate::core::response::ResponseBody,
-        Vec<(crate::core::HeaderStr, crate::core::HeaderStr)>,
+        Vec<(http::HeaderName, http::HeaderValue)>,
     )> {
         Ok(match resp_body_shape {
             crate::core::transport::TransportBody::Streaming(mut bs) if stream_response => {
-                bs.set_read_timeout(self.inner.timeouts.read);
+                bs.set_read_timeout(read);
                 (
                     crate::core::response::ResponseBody::Streaming(bs),
                     resp_headers,
@@ -429,10 +452,10 @@ impl Session {
             }
             crate::core::transport::TransportBody::Streaming(bs) => {
                 let drain = drain_stream_into_vec(bs);
-                let buf = if let Some(read_timeout) = self.inner.timeouts.read {
+                let buf = if let Some(read_timeout) = read {
                     tokio::time::timeout(read_timeout, drain)
                         .await
-                        .map_err(|_| Error::Timeout)??
+                        .map_err(|_| Error::new(Kind::Timeout))??
                 } else {
                     drain.await?
                 };
@@ -490,24 +513,6 @@ fn referer_for(prev: Option<&str>, current_origin: &str) -> String {
     let _ = parsed.set_password(None);
     parsed.set_fragment(None);
     parsed.to_string()
-}
-
-/// Reorder `headers` in place so that, for each name in `order`, all matching headers (case-insensitive) appear in `order`'s position.
-pub(crate) fn reorder_headers(headers: &mut Vec<HeaderPair>, order: &[String]) {
-    let lc_order: Vec<String> = order.iter().map(|s| s.to_ascii_lowercase()).collect();
-    let mut buckets: Vec<Vec<HeaderPair>> = vec![Vec::new(); lc_order.len()];
-    let mut tail: Vec<HeaderPair> = Vec::new();
-    for h in std::mem::take(headers) {
-        let lc = h.0.to_ascii_lowercase();
-        match lc_order.iter().position(|n| *n == lc) {
-            Some(idx) => buckets[idx].push(h),
-            None => tail.push(h),
-        }
-    }
-    for b in buckets {
-        headers.extend(b);
-    }
-    headers.extend(tail);
 }
 
 #[cfg(test)]

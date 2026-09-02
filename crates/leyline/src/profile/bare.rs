@@ -64,6 +64,7 @@ impl BrowserProfile {
                 pre_shared_key: false,
                 session_tickets: true,
                 request_trust_anchors: false,
+                padding: false,
                 min_tls_version: None,
                 fingerprint: None,
             },

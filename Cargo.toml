@@ -16,7 +16,7 @@ exclude = [
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.86" # MSRV
+rust-version = "1.88" # MSRV
 authors = ["Thomas Gardiner"]
 license = "MIT"
 repository = "https://github.com/manaforged/leyline-http"
@@ -35,7 +35,7 @@ dbg_macro = "deny"
 rc_mutex = "deny"
 
 [workspace.dependencies]
-tokio = { version = "1", features = ["net", "rt", "rt-multi-thread", "time", "io-util", "macros"] }
+tokio = { version = "1", features = ["net", "rt", "time", "io-util"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"

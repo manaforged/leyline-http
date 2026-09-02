@@ -9,11 +9,14 @@ pub use compress::ContentEncoding;
 
 use std::time::Duration;
 
+use http::{HeaderName, HeaderValue, Method};
+
 use crate::profile::{HeaderAnchor, Preset};
 
 use crate::core::body::Body;
+use crate::core::config::TimeoutConfig;
 use crate::core::digest::DigestAuth;
-use crate::core::error::Error;
+use crate::core::error::{Error, Kind};
 use crate::core::headers::HeaderList;
 #[cfg(feature = "multipart")]
 use crate::core::multipart::Form;
@@ -50,13 +53,15 @@ where
 /// Fluent builder for constructing and sending HTTP requests.
 pub struct RequestBuilder {
     pub(super) session: Session,
-    pub(super) method: String,
+    pub(super) method: Method,
     pub(super) url: String,
     pub(super) preset: Option<Preset>,
     pub(super) body: Body,
     pub(super) headers: HeaderList,
     pub(super) query_params: Vec<(String, String)>,
     pub(super) timeout: Option<Duration>,
+    /// Per-request override of the session timeouts; `total` is carried by `timeout`.
+    pub(super) timeouts: Option<TimeoutConfig>,
     pub(super) builder_error: Option<Error>,
     pub(super) stream_response: bool,
     /// When `Some`, the buffered body is compressed with this codec and a matching `Content-Encoding` header is set at send time.
@@ -71,25 +76,27 @@ pub struct RequestBuilder {
     pub(super) preset_user: bool,
 }
 
-fn default_preset(session: &Session, method: &str) -> Option<Preset> {
+fn default_preset(session: &Session, method: &Method) -> Option<Preset> {
     session.browser()?;
-    match method {
-        "GET" | "HEAD" => Some(Preset::Navigate),
+    match *method {
+        Method::GET | Method::HEAD => Some(Preset::Navigate),
         _ => None,
     }
 }
 
 impl RequestBuilder {
-    pub(crate) fn new(session: &Session, method: &str, url: &str) -> Self {
+    pub(crate) fn new(session: &Session, method: Method, url: &str) -> Self {
+        let preset = default_preset(session, &method);
         Self {
             session: session.clone(),
-            method: method.to_string(),
+            method,
             url: url.to_string(),
-            preset: default_preset(session, method),
+            preset,
             body: Body::Empty,
             headers: HeaderList::new(),
             query_params: Vec::new(),
             timeout: None,
+            timeouts: None,
             builder_error: None,
             stream_response: false,
             compress: None,
@@ -102,18 +109,48 @@ impl RequestBuilder {
         }
     }
 
-    fn infer_body_preset(&mut self, preset: Preset) {
+    /// A builder whose URL failed to parse; the error surfaces from `send`.
+    pub(crate) fn invalid(session: &Session, method: Method) -> Self {
+        let mut builder = Self::new(session, method, "");
+        builder.builder_error = Some(Error::new(Kind::Request).with_message("invalid request URL"));
+        builder
+    }
+
+    fn fail(&mut self, err: Error) {
+        if self.builder_error.is_none() {
+            self.builder_error = Some(err);
+        }
+    }
+
+    /// Infer `Preset::Xhr` or `Preset::Form` from the `content-type` header on a POST, PUT, or PATCH when the session impersonates a browser and the caller set no preset.
+    fn infer_from_content_type(&mut self) {
         if self.preset_user || self.session.browser().is_none() {
             return;
         }
-        if matches!(self.method.as_str(), "POST" | "PUT" | "PATCH") {
-            self.preset = Some(preset);
+        if !matches!(self.method, Method::POST | Method::PUT | Method::PATCH) {
+            return;
+        }
+        let Some(ct) = self.headers.get("content-type") else {
+            return;
+        };
+        let ct = String::from_utf8_lossy(ct.as_bytes()).to_ascii_lowercase();
+        if ct.starts_with("application/json") {
+            self.preset = Some(Preset::Xhr);
+        } else if ct.starts_with("application/x-www-form-urlencoded") {
+            self.preset = Some(Preset::Form);
         }
     }
 
     /// Override the session's default timeout for this one request.
     pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
+        self
+    }
+
+    /// Override `total`, `read`, and `response_header` for this one request; `connect` stays session-wide because connections are pooled and coalesced across requests.
+    pub fn timeouts(mut self, timeouts: TimeoutConfig) -> Self {
+        self.timeout = Some(timeouts.total);
+        self.timeouts = Some(timeouts);
         self
     }
 
@@ -124,7 +161,7 @@ impl RequestBuilder {
         self
     }
 
-    /// Pin the exact H2/H3 wire order of the regular headers for this request.
+    /// Pin the wire order of the regular headers for this request on every protocol; it wins over the identity's own order.
     pub fn header_order(mut self, order: &[&str]) -> Self {
         self.header_order = Some(order.iter().map(|s| (*s).to_string()).collect());
         self
@@ -138,14 +175,13 @@ impl RequestBuilder {
 
     /// Set the request body as JSON.
     pub fn json(mut self, value: &impl serde::Serialize) -> Self {
-        self.infer_body_preset(Preset::Xhr);
         match serde_json::to_vec(value) {
             Ok(bytes) => {
-                self.headers.set("content-type", "application/json");
+                self.put("content-type", "application/json");
                 self.body = Body::from(bytes);
             }
             Err(e) => {
-                self.builder_error = Some(Error::Json(e));
+                self.builder_error = Some(Error::new(Kind::Json).with_source(e));
             }
         }
         self
@@ -157,20 +193,16 @@ impl RequestBuilder {
         I: IntoIterator<Item = P>,
         P: IntoParamPair,
     {
-        self.infer_body_preset(Preset::Form);
         let pairs = collect_pairs(params);
         let encoded = encode::url_encode_pairs(&pairs);
-        self.headers
-            .set("content-type", "application/x-www-form-urlencoded");
+        self.put("content-type", "application/x-www-form-urlencoded");
         self.body = Body::from(encoded.into_bytes());
         self
     }
 
     /// Set the request body as a pre-encoded form string.
     pub fn form_str(mut self, encoded: &str) -> Self {
-        self.infer_body_preset(Preset::Form);
-        self.headers
-            .set("content-type", "application/x-www-form-urlencoded");
+        self.put("content-type", "application/x-www-form-urlencoded");
         self.body = Body::from(encoded.as_bytes().to_vec());
         self
     }
@@ -199,16 +231,33 @@ impl RequestBuilder {
         self
     }
 
-    /// Set a request header.
-    pub fn header(mut self, name: &str, value: &str) -> Self {
-        self.headers.set(name, value);
+    /// Set a request header. An invalid name or value surfaces as an error from `send`.
+    pub fn header(
+        mut self,
+        name: impl TryInto<HeaderName>,
+        value: impl TryInto<HeaderValue>,
+    ) -> Self {
+        self.put(name, value);
         self
     }
 
     /// Append a request header without replacing existing values with the same name.
-    pub fn append_header(mut self, name: &str, value: &str) -> Self {
-        self.headers.append(name, value);
+    pub fn append_header(
+        mut self,
+        name: impl TryInto<HeaderName>,
+        value: impl TryInto<HeaderValue>,
+    ) -> Self {
+        if let Err(err) = self.headers.append(name, value) {
+            self.fail(err);
+        }
         self
+    }
+
+    /// Set one header, recording an invalid name or value as the builder error.
+    fn put(&mut self, name: impl TryInto<HeaderName>, value: impl TryInto<HeaderValue>) {
+        if let Err(err) = self.headers.set(name, value) {
+            self.fail(err);
+        }
     }
 
     /// Set multiple headers at once.
@@ -219,7 +268,7 @@ impl RequestBuilder {
     {
         for pair in headers {
             let (k, v) = pair.into_param_pair();
-            self.headers.set(k, v);
+            self.put(k, v);
         }
         self
     }
@@ -232,7 +281,10 @@ impl RequestBuilder {
     {
         for pair in headers {
             let (k, v) = pair.into_param_pair();
-            self.headers.append(k, v);
+            if let Err(err) = self.headers.append(k, v) {
+                self.fail(err);
+                return self;
+            }
         }
         self
     }
@@ -268,22 +320,28 @@ impl RequestBuilder {
     }
 
     /// Append a header at a caller-specified anchor slot.
-    pub fn anchored(mut self, anchor: HeaderAnchor, name: &str, value: &str) -> Self {
-        self.headers.append_anchored(anchor, name, value);
+    pub fn anchored(
+        mut self,
+        anchor: HeaderAnchor,
+        name: impl TryInto<HeaderName>,
+        value: impl TryInto<HeaderValue>,
+    ) -> Self {
+        if let Err(err) = self.headers.append_anchored(anchor, name, value) {
+            self.fail(err);
+        }
         self
     }
 
     /// Set a Bearer token for the Authorization header.
     pub fn bearer_auth(mut self, token: &str) -> Self {
-        self.headers.set("authorization", format!("Bearer {token}"));
+        self.put("authorization", format!("Bearer {token}"));
         self
     }
 
     /// Set Basic auth for the Authorization header.
     pub fn basic_auth(mut self, username: &str, password: &str) -> Self {
         let encoded = crate::util::base64_encode(&format!("{username}:{password}"));
-        self.headers
-            .set("authorization", format!("Basic {encoded}"));
+        self.put("authorization", format!("Basic {encoded}"));
         self
     }
 
@@ -308,7 +366,7 @@ impl RequestBuilder {
     /// Send the request as `multipart/form-data`.
     #[cfg(feature = "multipart")]
     pub fn multipart(mut self, form: Form) -> Self {
-        self.headers.set("content-type", form.content_type());
+        self.put("content-type", form.content_type());
         self.body = form.into_stream_body();
         self
     }
@@ -318,13 +376,11 @@ impl RequestBuilder {
         self.proxy = Some(proxy_url.to_string());
         self
     }
-
-    /// Override the session proxy with a validated [`ProxyUrl`](crate::ProxyUrl).
-    pub fn proxy_url(mut self, proxy_url: crate::ProxyUrl) -> Self {
-        self.proxy = Some(proxy_url.into_string());
-        self
-    }
 }
+
+#[cfg(test)]
+#[path = "mod_tests.rs"]
+mod tests;
 
 fn collect_pairs<I, P>(params: I) -> Vec<(String, String)>
 where

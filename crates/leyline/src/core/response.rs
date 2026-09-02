@@ -3,8 +3,11 @@
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
+use http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
+
 use crate::core::body_stream::BodyStream;
-use crate::core::error::{Error, Result};
+use crate::core::error::{Error, Kind, Result};
+use crate::core::session::decompress::{decompress_and_strip as strip, drain_stream_into_vec};
 
 /// Internal body representation.
 pub(crate) enum ResponseBody {
@@ -65,6 +68,7 @@ impl HttpVersion {
 
 /// Wall-clock timing for a request, summed across redirect legs.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ResponseTiming {
     /// Every leg reused a pooled (warm) connection, so no connect/handshake cost was paid (`connect_ms` is `None`).
     pub reused: bool,
@@ -101,10 +105,10 @@ impl ResponseTiming {
 /// An HTTP response. The body is buffered unless the request used `.stream()`.
 #[derive(Debug)]
 pub struct Response {
-    pub(crate) status: u16,
+    pub(crate) status: StatusCode,
     pub(crate) version: HttpVersion,
-    pub(crate) headers: Vec<(crate::core::HeaderStr, crate::core::HeaderStr)>,
-    pub(crate) trailers: Vec<(crate::core::HeaderStr, crate::core::HeaderStr)>,
+    pub(crate) headers: Vec<(HeaderName, HeaderValue)>,
+    pub(crate) trailers: Vec<(HeaderName, HeaderValue)>,
     pub(crate) body: ResponseBody,
     pub(crate) cookies: HashMap<String, String>,
     pub(crate) url: String,
@@ -122,11 +126,13 @@ pub struct Response {
     pub(crate) audit_tls: Option<Arc<crate::audit::AuditTlsCache>>,
     /// Memoised full audit block.
     pub(crate) audit_cache: OnceLock<crate::audit::AuditData>,
+    /// Decompression settings applied when a streamed body is drained.
+    pub(crate) compression: crate::core::CompressionConfig,
 }
 
 impl Response {
     /// HTTP status code.
-    pub fn status(&self) -> u16 {
+    pub fn status(&self) -> StatusCode {
         self.status
     }
 
@@ -135,7 +141,7 @@ impl Response {
         self.version
     }
 
-    /// Wall-clock timing breakdown for the transport hop that produced this response (warm-vs-cold connection, connect/handshake cost, send time).
+    /// Timing summed across redirect legs. A hop that did not record connect/send is zero.
     pub fn timing(&self) -> &ResponseTiming {
         &self.timing
     }
@@ -151,16 +157,25 @@ impl Response {
     }
 
     /// Response headers in wire order, as `(name, value)` pairs.
-    pub fn headers(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.headers.iter().map(|(k, v)| (k.as_str(), v.as_str()))
+    pub fn headers(&self) -> impl Iterator<Item = (&HeaderName, &HeaderValue)> {
+        self.headers.iter().map(|(k, v)| (k, v))
     }
 
-    /// Response trailers in wire order, as `(name, value)` pairs, if the transport exposed them.
-    pub fn trailers(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.trailers.iter().map(|(k, v)| (k.as_str(), v.as_str()))
+    /// Response headers copied into a [`HeaderMap`]; wire order and duplicates are preserved by [`headers`](Self::headers), not by the map.
+    pub fn header_map(&self) -> HeaderMap {
+        let mut map = HeaderMap::with_capacity(self.headers.len());
+        for (k, v) in &self.headers {
+            map.append(k.clone(), v.clone());
+        }
+        map
     }
 
-    /// Iterate cookies collected from `Set-Cookie` headers.
+    /// Response trailers in wire order. Buffered HTTP/2 and HTTP/3 responses carry them; streaming responses and HTTP/1.1 yield none.
+    pub fn trailers(&self) -> impl Iterator<Item = (&HeaderName, &HeaderValue)> {
+        self.trailers.iter().map(|(k, v)| (k, v))
+    }
+
+    /// Cookies from `Set-Cookie`. Last value wins per name; order is unspecified. Use [`header_all`](Self::header_all) for the raw headers.
     pub fn cookies(&self) -> impl Iterator<Item = (&str, &str)> {
         self.cookies.iter().map(|(k, v)| (k.as_str(), v.as_str()))
     }
@@ -197,15 +212,19 @@ impl Response {
             .map(|(k, v)| (k.as_str(), v.as_str()))
     }
 
-    /// Response body decoded to a `String`, honoring the `charset` of the `Content-Type` header (default UTF-8); invalid sequences are replaced with U+FFFD and a leading BOM overrides the declared charset (WHATWG behavior).
-    pub fn text(&self) -> crate::core::Result<String> {
-        self.text_with_charset("utf-8")
+    /// Response body decoded to a `String`, honoring the `charset` of the `Content-Type` header (default UTF-8); invalid sequences are replaced with U+FFFD and a leading BOM overrides the declared charset (WHATWG behavior). A streamed body is drained first.
+    pub async fn text(&mut self) -> crate::core::Result<String> {
+        self.text_with_charset("utf-8").await
     }
 
     /// Like [`text`](Self::text) but uses `default_encoding` (a WHATWG/IANA label, e.g. `"utf-8"`, `"windows-1252"`, `"shift_jis"`) when the response declares no charset.
     #[cfg(feature = "charset")]
-    pub fn text_with_charset(&self, default_encoding: &str) -> crate::core::Result<String> {
-        let bytes = self.bytes()?;
+    pub async fn text_with_charset(
+        &mut self,
+        default_encoding: &str,
+    ) -> crate::core::Result<String> {
+        self.drain().await?;
+        let bytes = self.as_bytes().unwrap_or_default();
         let label = self.charset_label();
         let encoding =
             encoding_rs::Encoding::for_label(label.unwrap_or(default_encoding).as_bytes())
@@ -215,8 +234,11 @@ impl Response {
 
     /// UTF-8-lossy fallback when the `charset` feature is disabled.
     #[cfg(not(feature = "charset"))]
-    pub fn text_with_charset(&self, _default_encoding: &str) -> crate::core::Result<String> {
-        Ok(String::from_utf8_lossy(self.bytes()?).to_string())
+    pub async fn text_with_charset(
+        &mut self,
+        _default_encoding: &str,
+    ) -> crate::core::Result<String> {
+        Ok(String::from_utf8_lossy(self.bytes().await?).to_string())
     }
 
     /// The `charset` parameter of the `Content-Type` header, if present.
@@ -231,33 +253,67 @@ impl Response {
         })
     }
 
-    /// Response body as a borrowed UTF-8 string slice.
-    pub fn text_utf8(&self) -> crate::core::Result<&str> {
-        std::str::from_utf8(self.bytes()?).map_err(|e| Error::Decode(e.to_string()))
+    /// Response body as a borrowed UTF-8 string slice. A streamed body is drained first.
+    pub async fn text_utf8(&mut self) -> crate::core::Result<&str> {
+        self.drain().await?;
+        std::str::from_utf8(self.as_bytes().unwrap_or_default())
+            .map_err(|e| Error::new(Kind::Decode).with_message(e.to_string()))
     }
 
-    /// Response body as raw bytes.
-    pub fn bytes(&self) -> crate::core::Result<&[u8]> {
+    /// Response body as raw bytes. A streamed body is drained, decompressed, and kept for later calls.
+    pub async fn bytes(&mut self) -> crate::core::Result<&[u8]> {
+        self.drain().await?;
+        Ok(self.as_bytes().unwrap_or_default())
+    }
+
+    /// Already-buffered body bytes, without draining or awaiting; `None` while the body is still a stream or was taken by [`into_stream`](Self::into_stream).
+    pub fn as_bytes(&self) -> Option<&[u8]> {
         match &self.body {
-            ResponseBody::Buffered(b) => Ok(b),
-            ResponseBody::Streaming(_) | ResponseBody::Taken => Err(Error::Body(
-                "response body is streaming or already taken".into(),
-            )),
+            ResponseBody::Buffered(b) => Some(b),
+            ResponseBody::Streaming(_) | ResponseBody::Taken => None,
         }
     }
 
-    /// Take ownership of the response body as raw bytes.
-    pub fn into_bytes(self) -> crate::core::Result<Vec<u8>> {
-        match self.body {
+    /// Already-buffered body as UTF-8, without draining or awaiting; `None` while the body is still a stream or was taken by [`into_stream`](Self::into_stream).
+    pub fn as_text(&self) -> Option<crate::core::Result<&str>> {
+        self.as_bytes().map(|b| {
+            std::str::from_utf8(b).map_err(|e| Error::new(Kind::Decode).with_message(e.to_string()))
+        })
+    }
+
+    /// Buffer a streamed body, decompressing it the way a non-streamed body is decompressed.
+    async fn drain(&mut self) -> Result<()> {
+        let stream = match std::mem::replace(&mut self.body, ResponseBody::Taken) {
+            ResponseBody::Buffered(b) => {
+                self.body = ResponseBody::Buffered(b);
+                return Ok(());
+            }
+            ResponseBody::Taken => {
+                return Err(Error::new(Kind::Body).with_message(
+                    "response body stream was taken by `into_stream`; read the bytes from that stream",
+                ));
+            }
+            ResponseBody::Streaming(s) => s,
+        };
+        let buf = drain_stream_into_vec(stream).await?;
+        let (buf, headers) = strip(buf, std::mem::take(&mut self.headers), &self.compression)?;
+        self.headers = headers;
+        self.body = ResponseBody::Buffered(buf);
+        Ok(())
+    }
+
+    /// Take ownership of the response body as raw bytes. A streamed body is drained first.
+    pub async fn into_bytes(self) -> crate::core::Result<Vec<u8>> {
+        let mut this = self;
+        this.drain().await?;
+        match this.body {
             ResponseBody::Buffered(b) => Ok(b),
-            ResponseBody::Streaming(_) | ResponseBody::Taken => Err(Error::Body(
-                "response body is streaming or already taken".into(),
-            )),
+            ResponseBody::Streaming(_) | ResponseBody::Taken => Ok(Vec::new()),
         }
     }
 
-    /// Take ownership of the response body as a `String`, honoring the `Content-Type` charset (default UTF-8).
-    pub fn into_text(self) -> crate::core::Result<String> {
+    /// Take ownership of the response body as a `String`, honoring the `Content-Type` charset (default UTF-8). A streamed body is drained first.
+    pub async fn into_text(self) -> crate::core::Result<String> {
         #[cfg(feature = "charset")]
         let encoding = {
             let label = self.charset_label();
@@ -265,7 +321,7 @@ impl Response {
                 .and_then(|l| encoding_rs::Encoding::for_label(l.as_bytes()))
                 .unwrap_or(encoding_rs::UTF_8)
         };
-        let bytes = self.into_bytes()?;
+        let bytes = self.into_bytes().await?;
         #[cfg(feature = "charset")]
         if encoding != encoding_rs::UTF_8 {
             return Ok(encoding.decode(&bytes).0.into_owned());
@@ -276,15 +332,9 @@ impl Response {
         })
     }
 
-    /// Deserialize the response body as JSON.
-    pub fn json<T: serde::de::DeserializeOwned>(&self) -> crate::core::Result<T> {
-        if matches!(self.body, ResponseBody::Streaming(_) | ResponseBody::Taken) {
-            return Err(crate::Error::Body(
-                "response body was delivered as a stream (opt in with `.stream()`) — consume it via `into_stream()` and deserialize the bytes yourself"
-                    .into(),
-            ));
-        }
-        Ok(serde_json::from_slice(self.bytes()?)?)
+    /// Deserialize the response body as JSON. A streamed body is drained first.
+    pub async fn json<T: serde::de::DeserializeOwned>(&mut self) -> crate::core::Result<T> {
+        Ok(serde_json::from_slice(self.bytes().await?)?)
     }
 
     /// Take ownership of the streaming response body.
@@ -292,9 +342,8 @@ impl Response {
         match std::mem::replace(&mut self.body, ResponseBody::Taken) {
             ResponseBody::Streaming(s) => Ok(s),
             ResponseBody::Buffered(b) => Ok(BodyStream::from_bytes(bytes::Bytes::from(b))),
-            ResponseBody::Taken => Err(Error::Body(
-                "response body has already been taken as a stream".into(),
-            )),
+            ResponseBody::Taken => Err(Error::new(Kind::Body)
+                .with_message("response body has already been taken as a stream")),
         }
     }
 
@@ -309,17 +358,17 @@ impl Response {
         let mut stream = self.into_stream()?;
         let mut total: u64 = 0;
         while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(Error::Io)?;
-            writer.write_all(&chunk).await.map_err(Error::Io)?;
+            let chunk = chunk.map_err(Error::from)?;
+            writer.write_all(&chunk).await.map_err(Error::from)?;
             total += chunk.len() as u64;
         }
-        writer.flush().await.map_err(Error::Io)?;
+        writer.flush().await.map_err(Error::from)?;
         Ok(total)
     }
 
     /// Stream the response body to a file at `path`, returning the number of bytes written.
     pub async fn download_to(self, path: impl AsRef<std::path::Path>) -> Result<u64> {
-        let mut file = tokio::fs::File::create(path).await.map_err(Error::Io)?;
+        let mut file = tokio::fs::File::create(path).await.map_err(Error::from)?;
         self.copy_to(&mut file).await
     }
 
@@ -335,37 +384,39 @@ impl Response {
 
     /// Whether the status code indicates success (2xx).
     pub fn is_success(&self) -> bool {
-        (200..300).contains(&self.status)
+        self.status.is_success()
     }
 
     /// Whether the response was a redirect (3xx).
     pub fn is_redirect(&self) -> bool {
-        (300..400).contains(&self.status)
+        self.status.is_redirection()
     }
 
     /// Whether the status is a client error (4xx).
     pub fn is_client_error(&self) -> bool {
-        (400..500).contains(&self.status)
+        self.status.is_client_error()
     }
 
     /// Whether the status is a server error (5xx).
     pub fn is_server_error(&self) -> bool {
-        (500..600).contains(&self.status)
+        self.status.is_server_error()
     }
 
-    /// Turn a 4xx/5xx response into an error.
+    /// Turn a 4xx/5xx response into an error. This call does not await, so it attaches body bytes only when the body is already buffered ([`as_bytes`](Self::as_bytes)); a streamed body gives an error with no body.
     pub fn error_for_status(self) -> crate::core::Result<Self> {
         const MAX_ERROR_BODY: usize = 16 * 1024;
-        if self.status >= 400 || self.status < 100 {
+        if self.status.as_u16() >= 400 {
             let status = self.status;
-            let url = crate::util::redacted_url(&self.url);
-            let full = self.into_bytes().unwrap_or_default();
+            let url = self.url.clone();
+            let full = self.as_bytes().unwrap_or_default();
             let body = full[..full.len().min(MAX_ERROR_BODY)].to_vec();
-            Err(crate::Error::Status {
-                code: status,
-                url,
-                body,
-            })
+            let mut err = crate::Error::new(Kind::Status)
+                .with_status(status)
+                .with_body(body);
+            if let Ok(uri) = url.parse::<http::Uri>() {
+                err = err.with_url(uri);
+            }
+            Err(err)
         } else {
             Ok(self)
         }
@@ -394,16 +445,16 @@ impl Response {
     pub fn header(&self, name: &str) -> Option<&str> {
         self.headers
             .iter()
-            .find(|(k, _)| k.eq_ignore_ascii_case(name))
-            .map(|(_, v)| v.as_str())
+            .find(|(k, _)| k.as_str().eq_ignore_ascii_case(name))
+            .and_then(|(_, v)| v.to_str().ok())
     }
 
     /// All values for a response header (case-insensitive), in wire order.
     pub fn header_all<'a>(&'a self, name: &'a str) -> impl Iterator<Item = &'a str> + 'a {
         self.headers
             .iter()
-            .filter(move |(k, _)| k.eq_ignore_ascii_case(name))
-            .map(|(_, v)| v.as_str())
+            .filter(move |(k, _)| k.as_str().eq_ignore_ascii_case(name))
+            .filter_map(|(_, v)| v.to_str().ok())
     }
 }
 

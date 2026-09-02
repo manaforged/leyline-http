@@ -23,6 +23,10 @@ sigalgs = [
 ]
 ocsp_stapling = true
 signed_cert_timestamps = true
+# BoringSSL appends RFC 7685 padding (21) to this hello: the wire golden below
+# counts 14 extensions where the 13 the [tls] block turns on account for only
+# 13, and padding is the one extension BoringSSL adds without a profile flag.
+padding = true
 
 [h2]
 initial_stream_window_size = 16777216

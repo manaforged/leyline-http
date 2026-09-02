@@ -3,6 +3,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use http::StatusCode;
 use leyline::{Browser, Platform, Session};
 
 #[tokio::main]
@@ -27,16 +28,17 @@ async fn main() -> leyline::Result<()> {
         let url = url.clone();
         handles.push(tokio::spawn(async move {
             let resp = session.get(&url).await?;
-            Ok::<(usize, u16), leyline::Error>((i, resp.status()))
+            Ok::<(usize, StatusCode), leyline::Error>((i, resp.status()))
         }));
     }
 
     let mut ok = 0usize;
     for h in handles {
-        if let Ok(Ok((_, status))) = h.await {
-            if status < 400 {
-                ok += 1;
-            }
+        if let Ok(Ok((_, status))) = h.await
+            && !status.is_client_error()
+            && !status.is_server_error()
+        {
+            ok += 1;
         }
     }
 

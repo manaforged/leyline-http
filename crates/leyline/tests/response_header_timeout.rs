@@ -21,8 +21,11 @@ async fn response_header_timeout_fires_when_upstream_goes_silent() {
     let session = Session::builder()
         .http1()
         .disable_env_proxies()
-        .response_header_timeout(Duration::from_millis(300))
-        .timeout(Duration::from_secs(10))
+        .timeouts(
+            leyline::TimeoutConfig::default()
+                .total(Duration::from_secs(10))
+                .response_header(Duration::from_millis(300)),
+        )
         .build()
         .expect("session builds");
 
@@ -31,8 +34,8 @@ async fn response_header_timeout_fires_when_upstream_goes_silent() {
     let elapsed = start.elapsed();
 
     assert!(
-        matches!(result, Err(Error::Timeout)),
-        "expected Error::Timeout, got {result:?}"
+        result.as_ref().is_err_and(Error::is_timeout),
+        "expected Error::new(Kind::Timeout), got {result:?}"
     );
     assert!(
         elapsed < Duration::from_secs(2),
@@ -105,14 +108,17 @@ async fn session_recovers_after_ttfb_timeout_no_pool_wedge() {
     let session = Session::builder()
         .http1()
         .disable_env_proxies()
-        .response_header_timeout(Duration::from_millis(250))
-        .timeout(Duration::from_secs(10))
+        .timeouts(
+            leyline::TimeoutConfig::default()
+                .total(Duration::from_secs(10))
+                .response_header(Duration::from_millis(250)),
+        )
         .build()
         .expect("session builds");
 
     let first = session.get(&format!("http://{addr}/")).await;
     assert!(
-        matches!(first, Err(Error::Timeout)),
+        first.as_ref().is_err_and(Error::is_timeout),
         "first request should TTFB-timeout, got {first:?}"
     );
 
@@ -150,7 +156,7 @@ async fn total_backstop_bounds_silence_when_ttfb_unset() {
     let elapsed = start.elapsed();
 
     assert!(
-        matches!(result, Err(Error::Timeout)),
+        result.as_ref().is_err_and(Error::is_timeout),
         "expected total Timeout, got {result:?}"
     );
     assert!(

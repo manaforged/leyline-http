@@ -2,7 +2,7 @@
 
 use crate::Session;
 use crate::profile::{Browser, Platform, Preset};
-use crate::{Error, RequestBuilder};
+use crate::{Kind, Request, RequestBuilder};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 async fn capture_get_headers(session: Session) -> String {
@@ -93,13 +93,13 @@ fn session_retry_default_is_inherited_by_requests() {
     use crate::RetryPolicy;
     let policy = RetryPolicy::transient().with_max_retries(7);
     let session = Session::builder().retry(policy).build().unwrap();
-    let req = session.request("GET", "https://example.test/");
+    let req = session.request(http::Method::GET, "https://example.test/");
     assert_eq!(req.retry_policy.max_retries, 7);
     let overridden = session
-        .request("GET", "https://example.test/")
+        .request(http::Method::GET, "https://example.test/")
         .retry(RetryPolicy::none());
     assert_eq!(overridden.retry_policy.max_retries, 0);
-    let bare = Session::new().request("GET", "https://example.test/");
+    let bare = Session::new().request(http::Method::GET, "https://example.test/");
     assert_eq!(bare.retry_policy.max_retries, 0);
 }
 
@@ -138,12 +138,11 @@ fn ios_then_safari_still_iphone() {
 
 #[test]
 fn safari_windows_profile_is_err() {
-    match Session::profile(Browser::Safari26, Platform::Windows) {
-        Err(Error::Config(message)) => {
-            assert!(message.contains("Windows"), "unexpected config: {message}");
-        }
-        other => panic!("expected Config, got {other:?}"),
-    }
+    let err = Session::profile(Browser::Safari26, Platform::Windows)
+        .expect_err("safari on windows is not a profile");
+    assert_eq!(err.kind(), Kind::Config, "expected Config, got {err:?}");
+    let message = err.message().expect("config errors carry a message");
+    assert!(message.contains("Windows"), "unexpected config: {message}");
 }
 
 #[test]
@@ -185,6 +184,41 @@ async fn capture_post_headers(
 }
 
 #[tokio::test]
+async fn execute_json_content_type_infers_xhr() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut sock, _) = listener.accept().await.unwrap();
+        let mut req = Vec::new();
+        let mut tmp = [0u8; 2048];
+        loop {
+            let n = sock.read(&mut tmp).await.unwrap();
+            if n == 0 {
+                break;
+            }
+            req.extend_from_slice(&tmp[..n]);
+            if req.windows(4).any(|w| w == b"\r\n\r\n") {
+                break;
+            }
+        }
+        sock.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n")
+            .await
+            .unwrap();
+        String::from_utf8_lossy(&req).to_string()
+    });
+    let req = Request::new(http::Method::POST, format!("http://{addr}/"))
+        .header("content-type", "application/json")
+        .body("{}");
+    Session::chrome().execute(req).await.unwrap();
+    let wire = server.await.unwrap();
+    let lower = wire.to_lowercase();
+    assert!(
+        lower.contains("sec-fetch-mode: cors"),
+        "owned Request JSON POST should look like XHR:\n{wire}"
+    );
+}
+
+#[tokio::test]
 async fn json_body_infers_xhr_preset() {
     let req =
         capture_post_headers(Session::chrome(), |b| b.json(&serde_json::json!({"a": 1}))).await;
@@ -201,7 +235,7 @@ async fn json_body_infers_xhr_preset() {
 
 #[tokio::test]
 async fn form_body_infers_form_preset() {
-    let req = capture_post_headers(Session::chrome(), |b| b.form(&[("u", "alice")])).await;
+    let req = capture_post_headers(Session::chrome(), |b| b.form([("u", "alice")])).await;
     let lower = req.to_lowercase();
     assert!(
         lower.contains("sec-fetch-mode: cors"),

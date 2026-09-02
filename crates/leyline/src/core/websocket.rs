@@ -8,10 +8,9 @@ use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
-pub use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::{HeaderName, HeaderValue, Uri};
-use tokio_tungstenite::tungstenite::protocol::Role;
+use tokio_tungstenite::tungstenite::protocol::{CloseFrame as WireClose, Role};
 
 use crate::h2::client::H2ConnectStream;
 use crate::h2::config::H2Config;
@@ -19,7 +18,75 @@ use crate::h2::connection::PseudoHeaders;
 use crate::pool::Pool;
 use crate::tls::{FingerprintConnector, TlsIo};
 
-use crate::core::error::{Error, Result};
+use crate::core::WebSocketConfig;
+use crate::core::error::{Error, Kind, Result};
+
+/// A WebSocket message, owned by Leyline so the wire library stays out of the public API.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum WsMessage {
+    /// UTF-8 text frame.
+    Text(String),
+    /// Binary frame.
+    Binary(Vec<u8>),
+    /// Ping frame. The library answers it; the payload is not surfaced.
+    Ping,
+    /// Pong frame. The payload is not surfaced.
+    Pong,
+    /// Close frame, with the peer's status and reason when it sent one.
+    Close(Option<CloseFrame>),
+}
+
+/// Status and reason carried by a WebSocket close frame (RFC 6455 §5.5.1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct CloseFrame {
+    /// Close status code.
+    pub code: u16,
+    /// Close reason.
+    pub reason: String,
+}
+
+impl CloseFrame {
+    /// Build a close frame from a status code and reason.
+    pub fn new(code: u16, reason: impl Into<String>) -> Self {
+        Self {
+            code,
+            reason: reason.into(),
+        }
+    }
+}
+
+impl WsMessage {
+    /// Convert a wire message into the public enum.
+    fn wire(msg: Message) -> Self {
+        match msg {
+            Message::Text(s) => Self::Text(s.as_str().to_owned()),
+            Message::Binary(b) => Self::Binary(b.to_vec()),
+            Message::Ping(_) => Self::Ping,
+            Message::Pong(_) => Self::Pong,
+            Message::Close(frame) => Self::Close(frame.map(|f| CloseFrame {
+                code: f.code.into(),
+                reason: f.reason.as_str().to_owned(),
+            })),
+            Message::Frame(f) => Self::Binary(f.into_payload().to_vec()),
+        }
+    }
+
+    /// Convert the public enum into a wire message.
+    fn into_wire(self) -> Message {
+        match self {
+            Self::Text(s) => Message::Text(s.into()),
+            Self::Binary(b) => Message::Binary(b.into()),
+            Self::Ping => Message::Ping(Vec::new().into()),
+            Self::Pong => Message::Pong(Vec::new().into()),
+            Self::Close(frame) => Message::Close(frame.map(|f| WireClose {
+                code: f.code.into(),
+                reason: f.reason.into(),
+            })),
+        }
+    }
+}
 
 /// Transport variant carried inside a connected [`WsConnection`].
 enum WsInner {
@@ -45,29 +112,30 @@ impl WsConnection {
         user_agent: &str,
         origin: &str,
         extra_headers: &[(String, String)],
+        ws_config: &WebSocketConfig,
     ) -> Result<Self> {
         let parsed = url::Url::parse(url)?;
         let host = parsed
             .host_str()
-            .ok_or_else(|| Error::Config("no host in WebSocket URL".into()))?;
+            .ok_or_else(|| Error::new(Kind::Config).with_message("no host in WebSocket URL"))?;
         let port = parsed.port_or_known_default().unwrap_or(443);
 
         let tls_stream = connector
             .connect_h1(host, port, proxy)
             .await
-            .map_err(Error::Tls)?;
+            .map_err(Error::from)?;
 
         let ws_url = if let Some(rest) = url.strip_prefix("wss://") {
             format!("ws://{rest}")
         } else {
             url.to_string()
         };
-        let uri: Uri = ws_url
-            .parse()
-            .map_err(|e: http::uri::InvalidUri| Error::Config(e.to_string()))?;
+        let uri: Uri = ws_url.parse().map_err(|e: http::uri::InvalidUri| {
+            Error::new(Kind::Config).with_message(e.to_string())
+        })?;
         let mut request = uri
             .into_client_request()
-            .map_err(|e| Error::Http(format!("ws request: {e}")))?;
+            .map_err(|e| Error::new(Kind::Request).with_message(format!("ws request: {e}")))?;
 
         let headers = request.headers_mut();
         if let Ok(val) = HeaderValue::from_str(user_agent) {
@@ -76,10 +144,6 @@ impl WsConnection {
         if let Ok(val) = HeaderValue::from_str(origin) {
             headers.insert("Origin", val);
         }
-        headers.insert(
-            "Sec-WebSocket-Extensions",
-            HeaderValue::from_static("permessage-deflate; client_max_window_bits"),
-        );
 
         for (name, value) in extra_headers {
             if is_reserved_ws_header(name) {
@@ -89,9 +153,13 @@ impl WsConnection {
             headers.insert(hn, hv);
         }
 
-        let (ws_stream, response) = tokio_tungstenite::client_async(request, tls_stream.stream)
-            .await
-            .map_err(|e| Error::Http(format!("ws handshake: {e}")))?;
+        let (ws_stream, response) = tokio_tungstenite::client_async_with_config(
+            request,
+            tls_stream.stream,
+            Some(tungstenite_config(ws_config)),
+        )
+        .await
+        .map_err(|e| Error::new(Kind::Request).with_message(format!("ws handshake: {e}")))?;
 
         let protocol = response
             .headers()
@@ -119,11 +187,12 @@ impl WsConnection {
         user_agent: &str,
         origin: &str,
         extra_headers: &[(String, String)],
+        ws_config: &WebSocketConfig,
     ) -> Result<Self> {
         let parsed = url::Url::parse(url)?;
         let host = parsed
             .host_str()
-            .ok_or_else(|| Error::Config("no host in WebSocket URL".into()))?
+            .ok_or_else(|| Error::new(Kind::Config).with_message("no host in WebSocket URL"))?
             .to_string();
         let port = parsed.port_or_known_default().unwrap_or(443);
         let path = {
@@ -147,17 +216,13 @@ impl WsConnection {
             crate::pool::checkout_handle(pool, connector, h2_config, &host, port, proxy).await?;
 
         if !h2_client.peer_enables_connect_protocol() {
-            return Err(Error::Http(H2_NO_CONNECT_PROTOCOL.into()));
+            return Err(Error::new(Kind::Request).with_message(H2_NO_CONNECT_PROTOCOL));
         }
 
         let sec_key = random_sec_ws_key();
         let mut headers: Vec<(String, String)> = Vec::with_capacity(8);
         headers.push(("sec-websocket-version".into(), "13".into()));
         headers.push(("sec-websocket-key".into(), sec_key));
-        headers.push((
-            "sec-websocket-extensions".into(),
-            "permessage-deflate; client_max_window_bits".into(),
-        ));
         headers.push(("user-agent".into(), user_agent.into()));
         headers.push(("origin".into(), origin.into()));
 
@@ -190,10 +255,10 @@ impl WsConnection {
                     .collect(),
             )
             .await
-            .map_err(|e| Error::Http(format!("h2 ws: {e}")))?;
+            .map_err(|e| Error::new(Kind::Request).with_message(format!("h2 ws: {e}")))?;
 
         if stream.status() != 200 {
-            return Err(Error::Http(format!(
+            return Err(Error::new(Kind::Request).with_message(format!(
                 "ws handshake: h2 extended CONNECT returned :status {}",
                 stream.status()
             )));
@@ -205,7 +270,12 @@ impl WsConnection {
             .find(|(n, _)| n.eq_ignore_ascii_case("sec-websocket-protocol"))
             .map(|(_, v)| v.clone());
 
-        let ws_stream = WebSocketStream::from_raw_socket(stream, Role::Client, None).await;
+        let ws_stream = WebSocketStream::from_raw_socket(
+            stream,
+            Role::Client,
+            Some(tungstenite_config(ws_config)),
+        )
+        .await;
         Ok(Self {
             inner: WsInner::H2(ws_stream),
             protocol,
@@ -214,7 +284,10 @@ impl WsConnection {
 
     /// True if `err` is the sentinel "peer doesn't enable CONNECT protocol" failure from [`connect_h2`](Self::connect_h2).
     pub(crate) fn is_h2_fallback_trigger(err: &Error) -> bool {
-        matches!(err, Error::Http(s) if s.contains(H2_NO_CONNECT_PROTOCOL))
+        err.kind() == Kind::Request
+            && err
+                .message()
+                .is_some_and(|s| s.contains(H2_NO_CONNECT_PROTOCOL))
     }
 
     /// Send a text message.
@@ -223,11 +296,11 @@ impl WsConnection {
             WsInner::H1(s) => s
                 .send(Message::Text(msg.into()))
                 .await
-                .map_err(|e| Error::Http(format!("ws send: {e}"))),
+                .map_err(|e| Error::new(Kind::Request).with_message(format!("ws send: {e}"))),
             WsInner::H2(s) => s
                 .send(Message::Text(msg.into()))
                 .await
-                .map_err(|e| Error::Http(format!("ws send: {e}"))),
+                .map_err(|e| Error::new(Kind::Request).with_message(format!("ws send: {e}"))),
         }
     }
 
@@ -237,25 +310,26 @@ impl WsConnection {
             WsInner::H1(s) => s
                 .send(Message::Binary(data.into()))
                 .await
-                .map_err(|e| Error::Http(format!("ws send: {e}"))),
+                .map_err(|e| Error::new(Kind::Request).with_message(format!("ws send: {e}"))),
             WsInner::H2(s) => s
                 .send(Message::Binary(data.into()))
                 .await
-                .map_err(|e| Error::Http(format!("ws send: {e}"))),
+                .map_err(|e| Error::new(Kind::Request).with_message(format!("ws send: {e}"))),
         }
     }
 
     /// Send a raw [`WsMessage`].
     pub async fn send_raw(&mut self, msg: WsMessage) -> Result<()> {
+        let msg = msg.into_wire();
         match &mut self.inner {
             WsInner::H1(s) => s
                 .send(msg)
                 .await
-                .map_err(|e| Error::Http(format!("ws send: {e}"))),
+                .map_err(|e| Error::new(Kind::Request).with_message(format!("ws send: {e}"))),
             WsInner::H2(s) => s
                 .send(msg)
                 .await
-                .map_err(|e| Error::Http(format!("ws send: {e}"))),
+                .map_err(|e| Error::new(Kind::Request).with_message(format!("ws send: {e}"))),
         }
     }
 
@@ -266,8 +340,8 @@ impl WsConnection {
             WsInner::H2(s) => s.next().await,
         };
         match next {
-            Some(Ok(msg)) => Ok(Some(msg)),
-            Some(Err(e)) => Err(Error::Http(format!("ws recv: {e}"))),
+            Some(Ok(msg)) => Ok(Some(WsMessage::wire(msg))),
+            Some(Err(e)) => Err(Error::new(Kind::Request).with_message(format!("ws recv: {e}"))),
             None => Ok(None),
         }
     }
@@ -278,11 +352,11 @@ impl WsConnection {
             WsInner::H1(s) => s
                 .close(None)
                 .await
-                .map_err(|e| Error::Http(format!("ws close: {e}"))),
+                .map_err(|e| Error::new(Kind::Request).with_message(format!("ws close: {e}"))),
             WsInner::H2(s) => s
                 .close(None)
                 .await
-                .map_err(|e| Error::Http(format!("ws close: {e}"))),
+                .map_err(|e| Error::new(Kind::Request).with_message(format!("ws close: {e}"))),
         }
     }
 
@@ -339,21 +413,22 @@ pub struct WsSink {
 impl WsSink {
     /// Send a text message.
     pub async fn send(&mut self, msg: &str) -> Result<()> {
-        self.send_raw(Message::Text(msg.into())).await
+        self.send_raw(WsMessage::Text(msg.to_owned())).await
     }
 
     /// Send binary data.
     pub async fn send_binary(&mut self, data: Vec<u8>) -> Result<()> {
-        self.send_raw(Message::Binary(data.into())).await
+        self.send_raw(WsMessage::Binary(data)).await
     }
 
     /// Send a raw [`WsMessage`].
     pub async fn send_raw(&mut self, msg: WsMessage) -> Result<()> {
+        let msg = msg.into_wire();
         match &mut self.inner {
             WsSinkInner::H1(s) => s.send(msg).await,
             WsSinkInner::H2(s) => s.send(msg).await,
         }
-        .map_err(|e| Error::Http(format!("ws send: {e}")))
+        .map_err(|e| Error::new(Kind::Request).with_message(format!("ws send: {e}")))
     }
 
     /// Send a close frame and shut the write half down.
@@ -362,7 +437,7 @@ impl WsSink {
             WsSinkInner::H1(s) => s.close().await,
             WsSinkInner::H2(s) => s.close().await,
         }
-        .map_err(|e| Error::Http(format!("ws close: {e}")))
+        .map_err(|e| Error::new(Kind::Request).with_message(format!("ws close: {e}")))
     }
 }
 
@@ -385,21 +460,46 @@ impl WsStream {
             WsStreamInner::H2(s) => s.next().await,
         };
         match next {
-            Some(Ok(msg)) => Ok(Some(msg)),
-            Some(Err(e)) => Err(Error::Http(format!("ws recv: {e}"))),
+            Some(Ok(msg)) => Ok(Some(WsMessage::wire(msg))),
+            Some(Err(e)) => Err(Error::new(Kind::Request).with_message(format!("ws recv: {e}"))),
             None => Ok(None),
         }
     }
 }
 
-/// Sentinel message embedded in the `Error::Http` string when the peer's pooled H2 connection doesn't advertise `SETTINGS_ENABLE_CONNECT_PROTOCOL`.
+/// Sentinel message embedded in the `Error` string when the peer's pooled H2 connection doesn't advertise `SETTINGS_ENABLE_CONNECT_PROTOCOL`.
 const H2_NO_CONNECT_PROTOCOL: &str = "h2-no-connect-protocol";
 
+fn tungstenite_config(
+    cfg: &WebSocketConfig,
+) -> tokio_tungstenite::tungstenite::protocol::WebSocketConfig {
+    let mut out = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default();
+    if let Some(n) = cfg.read_buffer_size {
+        out.read_buffer_size = n;
+    }
+    if let Some(n) = cfg.write_buffer_size {
+        out.write_buffer_size = n;
+    }
+    if let Some(n) = cfg.max_write_buffer_size {
+        out.max_write_buffer_size = n;
+    }
+    if let Some(n) = cfg.max_message_size {
+        out.max_message_size = Some(n);
+    }
+    if let Some(n) = cfg.max_frame_size {
+        out.max_frame_size = Some(n);
+    }
+    out.accept_unmasked_frames = cfg.accept_unmasked_frames;
+    out
+}
+
 fn ws_header_pair(name: &str, value: &str) -> Result<(HeaderName, HeaderValue)> {
-    let hn = HeaderName::from_bytes(name.as_bytes())
-        .map_err(|_| Error::Http(format!("invalid websocket header name: {name}")))?;
-    let hv = HeaderValue::from_str(value)
-        .map_err(|_| Error::Http(format!("invalid websocket header value for {name}")))?;
+    let hn = HeaderName::from_bytes(name.as_bytes()).map_err(|_| {
+        Error::new(Kind::Request).with_message(format!("invalid websocket header name: {name}"))
+    })?;
+    let hv = HeaderValue::from_str(value).map_err(|_| {
+        Error::new(Kind::Request).with_message(format!("invalid websocket header value for {name}"))
+    })?;
     Ok((hn, hv))
 }
 
@@ -421,7 +521,7 @@ fn is_reserved_ws_header(name: &str) -> bool {
 fn random_sec_ws_key() -> String {
     use rand::RngCore;
     let mut bytes = [0u8; 16];
-    rand::thread_rng().fill_bytes(&mut bytes);
+    rand::rng().fill_bytes(&mut bytes);
     BASE64_STANDARD.encode(bytes)
 }
 

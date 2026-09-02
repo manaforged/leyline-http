@@ -15,6 +15,36 @@ index 6b3bb4506..8d55a8d3e 100644
  
  #if defined(__cplusplus)
  } /* extern C */
+diff --git a/include/openssl/prefix_symbols.h b/include/openssl/prefix_symbols.h
+index 5b4bace1d..096f9bc09 100644
+--- a/include/openssl/prefix_symbols.h
++++ b/include/openssl/prefix_symbols.h
+@@ -3149,6 +3149,12 @@
+ #pragma redefine_extname sk_push BORINGSSL_ADD_USER_LABEL_AND_PREFIX(sk_push)
+ #pragma redefine_extname sk_value BORINGSSL_ADD_USER_LABEL_AND_PREFIX(sk_value)
+ 
++#pragma redefine_extname SSL_CTX_set_delegated_credentials BORINGSSL_ADD_USER_LABEL_AND_PREFIX(SSL_CTX_set_delegated_credentials)
++#pragma redefine_extname SSL_CTX_set_extension_order BORINGSSL_ADD_USER_LABEL_AND_PREFIX(SSL_CTX_set_extension_order)
++#pragma redefine_extname SSL_CTX_set_record_size_limit BORINGSSL_ADD_USER_LABEL_AND_PREFIX(SSL_CTX_set_record_size_limit)
++#pragma redefine_extname SSL_CTX_set_tls13_cipher_order BORINGSSL_ADD_USER_LABEL_AND_PREFIX(SSL_CTX_set_tls13_cipher_order)
++#pragma redefine_extname SSL_set_record_size_limit BORINGSSL_ADD_USER_LABEL_AND_PREFIX(SSL_set_record_size_limit)
++
+ #else  // __PRAGMA_REDEFINE_EXTNAME && !__ASSEMBLER__
+ 
+ #define ACCESS_DESCRIPTION_free BORINGSSL_ADD_PREFIX(ACCESS_DESCRIPTION_free)
+@@ -6263,6 +6269,12 @@
+ #define sk_push BORINGSSL_ADD_PREFIX(sk_push)
+ #define sk_value BORINGSSL_ADD_PREFIX(sk_value)
+ 
++#define SSL_CTX_set_delegated_credentials BORINGSSL_ADD_PREFIX(SSL_CTX_set_delegated_credentials)
++#define SSL_CTX_set_extension_order BORINGSSL_ADD_PREFIX(SSL_CTX_set_extension_order)
++#define SSL_CTX_set_record_size_limit BORINGSSL_ADD_PREFIX(SSL_CTX_set_record_size_limit)
++#define SSL_CTX_set_tls13_cipher_order BORINGSSL_ADD_PREFIX(SSL_CTX_set_tls13_cipher_order)
++#define SSL_set_record_size_limit BORINGSSL_ADD_PREFIX(SSL_set_record_size_limit)
++
+ #endif  // __PRAGMA_REDEFINE_EXTNAME && !__ASSEMBLER__
+ 
+ #if !defined(BORINGSSL_ALWAYS_USE_STATIC_INLINE) && !defined(__ASSEMBLER__)
 diff --git a/include/openssl/ssl.h b/include/openssl/ssl.h
 index 0b91e5d38..324463012 100644
 --- a/include/openssl/ssl.h

@@ -38,7 +38,6 @@ fn test_config() -> H2Config {
         default_priority: None,
         rst_stream_flood_threshold: 100,
         rst_stream_flood_window: Duration::from_secs(10),
-        settings_ack_timeout: Duration::from_secs(10),
         max_response_body_bytes: 100 * 1024 * 1024,
         max_header_block_bytes: 256 * 1024,
         settings_flood_threshold: 100,
@@ -256,14 +255,14 @@ async fn h2_without_connect_protocol_falls_back() {
         perform_handshake(&mut server_io, false).await;
         let mut sink = [0u8; 4096];
         let res = tokio::time::timeout(Duration::from_millis(150), server_io.read(&mut sink)).await;
-        if let Ok(Ok(n)) = res {
-            if n > 0 {
-                assert_eq!(
-                    sink[3], 0x7,
-                    "expected GOAWAY (0x7), got frame type 0x{:02x}",
-                    sink[3]
-                );
-            }
+        if let Ok(Ok(n)) = res
+            && n > 0
+        {
+            assert_eq!(
+                sink[3], 0x7,
+                "expected GOAWAY (0x7), got frame type 0x{:02x}",
+                sink[3]
+            );
         }
     });
 
@@ -322,10 +321,7 @@ async fn dropping_connect_stream_signals_end_stream() {
                 }
                 Frame::Headers(h) => {
                     saw_sibling = Some(h.stream_id);
-                    #[allow(dropping_references, clippy::drop_non_drop)]
-                    drop(reader);
-                    write_response(&mut server_io, saw_sibling.unwrap(), b"sibling-ok").await;
-                    reader = FrameReader::new(&mut server_io);
+                    write_response(reader.inner_mut(), h.stream_id, b"sibling-ok").await;
                 }
                 _ => {}
             }

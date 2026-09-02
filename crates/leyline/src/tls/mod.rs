@@ -8,7 +8,7 @@ mod keylog;
 #[cfg(target_os = "macos")]
 mod macos_trust;
 mod nonblocking;
-mod proxy;
+pub(crate) mod proxy;
 mod resolver;
 mod stream;
 mod trust;
@@ -30,7 +30,13 @@ pub(crate) use stream::TlsIo;
 pub(crate) use trust::install_pinning_verifier_ctx;
 
 /// A BoringSSL TLS context preconfigured to a browser profile's fingerprint.
-pub struct TlsContext(leyline_bssl::ssl::SslContextBuilder);
+pub struct TlsContext(
+    #[cfg_attr(
+        not(feature = "unstable-bssl"),
+        expect(dead_code, reason = "read only through the unstable-bssl accessors")
+    )]
+    leyline_bssl::ssl::SslContextBuilder,
+);
 
 impl TlsContext {
     /// Build a context matching `profile`, pinned to `min_version`.
@@ -41,12 +47,14 @@ impl TlsContext {
         build_ssl_context(profile, min_version).map(Self)
     }
 
-    /// Mutable access to the underlying BoringSSL `SslContextBuilder`.
+    /// Mutable access to the underlying BoringSSL `SslContextBuilder`. Unstable: no semver promise, and the BoringSSL type may change with any release.
+    #[cfg(feature = "unstable-bssl")]
     pub fn builder_mut(&mut self) -> &mut leyline_bssl::ssl::SslContextBuilder {
         &mut self.0
     }
 
-    /// Consume the wrapper and return the underlying BoringSSL builder.
+    /// Consume the wrapper and return the underlying BoringSSL builder. Unstable: no semver promise, and the BoringSSL type may change with any release.
+    #[cfg(feature = "unstable-bssl")]
     pub fn into_inner(self) -> leyline_bssl::ssl::SslContextBuilder {
         self.0
     }

@@ -157,6 +157,7 @@ async fn deliver_is_once_only() {
         status: stream.status,
         headers: std::mem::take(&mut stream.headers),
         body: std::mem::take(&mut stream.body),
+        trailers: Vec::new(),
     };
     stream.deliver(Ok(resp));
     stream.deliver(Err("late teardown".into()));
@@ -237,6 +238,7 @@ fn fail_all_drains_streams_and_pending_and_marks_closed() {
         body_stream: None,
         stream_body_tx: None,
         resp_tx: tx2,
+        retried: false,
     });
 
     fail_all(&mut streams, &mut pending, &closed, "boom".into());

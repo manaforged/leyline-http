@@ -2,21 +2,43 @@
 
 use std::sync::Arc;
 
+use bytes::Bytes;
+use http::{HeaderName, HeaderValue, StatusCode};
+
 use crate::h2::config::H2Config;
 use crate::h2::connection::PseudoHeaders;
 use crate::pool::{H1Body, H1PooledError, H1ResponseBody, H1Target, Pool};
 use crate::profile::preset::HeaderPair;
 use crate::tls::FingerprintConnector;
 use crate::util::{base64_encode, percent_decode};
-use bytes::Bytes;
-use futures_util::StreamExt;
 
 use crate::core::body::Body;
 use crate::core::body_stream::BodyStream;
-use crate::core::error::{Error, Result};
+use crate::core::error::{Error, Kind, Result};
 use crate::core::response::HttpVersion;
 
-const MAX_H1_BODY_BYTES: usize = 100 * 1024 * 1024;
+/// Response status as `http` sees it; an out-of-range code is reported as a protocol error.
+fn status(code: u16) -> Result<StatusCode> {
+    StatusCode::from_u16(code)
+        .map_err(|_| Error::new(Kind::Request).with_message(format!("invalid status code {code}")))
+}
+
+/// Response headers as `http` sees them; a header the wire types cannot represent is dropped.
+fn adopt<I, N, V>(headers: I) -> Vec<(HeaderName, HeaderValue)>
+where
+    I: IntoIterator<Item = (N, V)>,
+    N: AsRef<[u8]>,
+    V: Into<Bytes>,
+{
+    headers
+        .into_iter()
+        .filter_map(|(k, v)| {
+            let name = HeaderName::from_bytes(k.as_ref()).ok()?;
+            let value = HeaderValue::from_maybe_shared(v.into()).ok()?;
+            Some((name, value))
+        })
+        .collect()
+}
 
 /// Body shape returned by a transport.
 pub(crate) enum TransportBody {
@@ -26,8 +48,10 @@ pub(crate) enum TransportBody {
 
 /// Response returned by a transport.
 pub(crate) struct TransportResponse {
-    pub(crate) status: u16,
-    pub(crate) headers: Vec<(crate::core::HeaderStr, crate::core::HeaderStr)>,
+    pub(crate) status: StatusCode,
+    pub(crate) headers: Vec<(HeaderName, HeaderValue)>,
+    /// Trailer headers of a buffered response; empty for streaming responses and for HTTP/1.1.
+    pub(crate) trailers: Vec<(HeaderName, HeaderValue)>,
     pub(crate) body: TransportBody,
     pub(crate) final_url: String,
     pub(crate) version: HttpVersion,
@@ -39,114 +63,99 @@ pub(crate) struct TransportResponse {
     pub(crate) timing: crate::core::ResponseTiming,
 }
 
+/// One request ready for a transport: the session has resolved headers, body, and proxy; the transport only frames it.
+pub(crate) struct Prepared<'a> {
+    pub(crate) method: &'a str,
+    pub(crate) url: &'a url::Url,
+    pub(crate) headers: Vec<HeaderPair>,
+    pub(crate) body: Body,
+    pub(crate) proxy: Option<&'a str>,
+    pub(crate) stream_response: bool,
+}
+
 /// Send an HTTP request with browser-compatible defaults.
 #[tracing::instrument(
     name = "transport.auto",
     level = "debug",
     skip_all,
     fields(
-        http.method = method,
-        http.scheme = url.scheme(),
-        http.host = url.host_str().unwrap_or(""),
-        proxied = proxy.is_some(),
+        http.method = req.method,
+        http.scheme = req.url.scheme(),
+        http.host = req.url.host_str().unwrap_or(""),
+        proxied = req.proxy.is_some(),
     )
-)]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "flat per-request wire fields across one internal call path"
 )]
 pub(crate) async fn send_request_auto(
     pool: &Arc<Pool>,
     connector: &FingerprintConnector,
     h2_config: &H2Config,
-    method: &str,
-    url: &url::Url,
-    headers: Vec<HeaderPair>,
-    body: Body,
-    proxy: Option<&str>,
-    stream_response: bool,
-    header_order: Option<&[String]>,
+    req: Prepared<'_>,
 ) -> Result<TransportResponse> {
-    if url.scheme() == "http" {
-        return Box::pin(send_request_h1(
-            pool,
-            connector,
-            method,
-            url,
-            headers,
-            body,
-            proxy,
-            stream_response,
-        ))
-        .await;
+    if req.url.scheme() == "http" {
+        return Box::pin(send_request_h1(pool, connector, req)).await;
     }
+    let host = req.url.host_str().unwrap_or("").to_string();
+    let port = req.url.port_or_known_default().unwrap_or(443);
+    let proxy_key = req.proxy.map(str::to_string);
+    if pool.is_h1_only(&host, port, proxy_key.as_deref()) {
+        return Box::pin(send_request_h1(pool, connector, req)).await;
+    }
+    let Prepared {
+        method,
+        url,
+        headers,
+        body,
+        proxy,
+        stream_response,
+    } = req;
 
-    let (h2_body, fallback_buf): (Body, Option<Bytes>) = if body.is_stream() {
-        let buf = Box::pin(materialise_stream_body(body)).await?;
-        (Body::from(buf.clone()), Some(buf))
-    } else {
-        match body {
-            Body::Empty => (Body::Empty, None),
-            Body::Bytes(b) => (Body::Bytes(b.clone()), Some(b)),
-            Body::Stream { .. } => unreachable!("stream branch handled above"),
-        }
+    let (h2_body, replay): (Body, Option<Body>) = match body {
+        Body::Empty => (Body::Empty, Some(Body::Empty)),
+        Body::Bytes(b) => (Body::Bytes(b.clone()), Some(Body::Bytes(b))),
+        stream @ Body::Stream { .. } => (stream, None),
     };
 
     match send_request_h2(
         pool,
         connector,
         h2_config,
-        method,
-        url,
-        headers.clone(),
-        h2_body,
-        proxy,
-        stream_response,
-        header_order,
+        Prepared {
+            method,
+            url,
+            headers: headers.clone(),
+            body: h2_body,
+            proxy,
+            stream_response,
+        },
     )
     .await
     {
         Ok(resp) => Ok(resp),
         Err(e) if is_h2_alpn_mismatch(&e) => {
             tracing::debug!(error = %e, "H2 ALPN mismatch, falling back to HTTP/1.1");
-            let fallback_body = match fallback_buf {
-                Some(buf) => Body::from(buf),
-                None => Body::Empty,
+            pool.note_h1_only(&host, port, proxy_key.as_deref());
+            let Some(body) = replay else {
+                return Err(Error::new(Kind::Request).with_message(
+                    "the origin negotiated HTTP/1.1 and a streaming request body cannot be \
+                     replayed; send the request again, buffer the body, or use \
+                     ProtocolPolicy::Http1",
+                ));
             };
             Box::pin(send_request_h1(
                 pool,
                 connector,
-                method,
-                url,
-                headers,
-                fallback_body,
-                proxy,
-                stream_response,
+                Prepared {
+                    method,
+                    url,
+                    headers,
+                    body,
+                    proxy,
+                    stream_response,
+                },
             ))
             .await
         }
         Err(e) => Err(e),
-    }
-}
-
-/// Drain a streaming body into a single `Bytes` buffer.
-async fn materialise_stream_body(body: Body) -> Result<Bytes> {
-    match body {
-        Body::Empty => Ok(Bytes::new()),
-        Body::Bytes(b) => Ok(b),
-        Body::Stream { mut stream, .. } => {
-            let mut buf: Vec<u8> = Vec::new();
-            while let Some(chunk) = stream.next().await {
-                let chunk = chunk.map_err(Error::Io)?;
-                buf.extend_from_slice(&chunk);
-                if buf.len() > MAX_H1_BODY_BYTES {
-                    return Err(Error::Body(format!(
-                        "streaming request body exceeded {MAX_H1_BODY_BYTES} bytes"
-                    )));
-                }
-            }
-            Ok(Bytes::from(buf))
-        }
     }
 }
 
@@ -155,35 +164,33 @@ async fn materialise_stream_body(body: Body) -> Result<Bytes> {
     name = "transport.h2",
     level = "debug",
     skip_all,
-    fields(http.method = method, http.host = url.host_str().unwrap_or(""))
-)]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "flat per-request wire fields across one internal call path"
+    fields(http.method = req.method, http.host = req.url.host_str().unwrap_or(""))
 )]
 pub(crate) async fn send_request_h2(
     pool: &Arc<Pool>,
     connector: &FingerprintConnector,
     h2_config: &H2Config,
-    method: &str,
-    url: &url::Url,
-    mut headers: Vec<HeaderPair>,
-    body: Body,
-    proxy: Option<&str>,
-    stream_response: bool,
-    header_order: Option<&[String]>,
+    req: Prepared<'_>,
 ) -> Result<TransportResponse> {
+    let Prepared {
+        method,
+        url,
+        mut headers,
+        body,
+        proxy,
+        stream_response,
+    } = req;
     if url.scheme() != "https" {
-        return Err(Error::Config("HTTP/2 requires an https:// URL".into()));
+        return Err(Error::new(Kind::Config).with_message("HTTP/2 requires an https:// URL"));
     }
 
     let host = url
         .host_str()
-        .ok_or_else(|| Error::Config("no host in URL".into()))?;
+        .ok_or_else(|| Error::new(Kind::Config).with_message("no host in URL"))?;
     let port = url.port_or_known_default().unwrap_or(443);
 
     let path = url.path();
-    let query = url.query().map(|q| format!("?{q}")).unwrap_or_default();
+    let query = url.query();
     let pseudo = PseudoHeaders {
         method: method.to_string(),
         scheme: url.scheme().to_string(),
@@ -196,17 +203,22 @@ pub(crate) async fn send_request_h2(
                 format!("{host}:{port}")
             }
         },
-        path: format!("{path}{query}"),
+        path: match query {
+            Some(q) => {
+                let mut target = String::with_capacity(path.len() + q.len() + 1);
+                target.push_str(path);
+                target.push('?');
+                target.push_str(q);
+                target
+            }
+            None => path.to_string(),
+        },
         protocol: None,
     };
 
     let h2_req_body = body_to_h2_request(body);
 
     strip_connection_specific_headers(&mut headers)?;
-
-    if let Some(order) = header_order {
-        crate::core::session::execute::reorder_headers(&mut headers, order);
-    }
 
     let (resp, tls, timing) = crate::pool::send_request(
         pool,
@@ -228,8 +240,9 @@ pub(crate) async fn send_request_h2(
     };
 
     Ok(TransportResponse {
-        status: resp.status,
-        headers: resp.headers,
+        status: status(resp.status)?,
+        headers: adopt(resp.headers),
+        trailers: adopt(resp.trailers.unwrap_or_default()),
         body: transport_body,
         final_url: url.to_string(),
         version: HttpVersion::Http2,
@@ -256,39 +269,41 @@ fn body_to_h2_request(body: Body) -> crate::h2::client::RequestBody {
     }
 }
 
-/// RFC 9113 §8.2.2: connection-specific headers must never be emitted on an H2 connection — a compliant peer rejects the stream.
-pub(crate) fn strip_connection_specific_headers(headers: &mut Vec<HeaderPair>) -> Result<()> {
-    let mut te = 0usize;
-    let mut cl = 0usize;
-    headers.retain_mut(|(name, value)| {
-        let lower = name.to_ascii_lowercase();
-        match lower.as_str() {
-            "transfer-encoding" => {
-                te += 1;
-                false
-            }
-            "content-length" => {
-                cl += 1;
-                true
-            }
-            "connection" | "keep-alive" | "proxy-connection" | "upgrade" | "http2-settings" => {
-                false
-            }
-            "te" => value.eq_ignore_ascii_case("trailers"),
-            _ => true,
-        }
-    });
+/// Reject a header list whose message framing is ambiguous: more than one `Transfer-Encoding`, or `Transfer-Encoding` beside `Content-Length` (RFC 9112 §6.1).
+pub(crate) fn check_framing(headers: &[HeaderPair]) -> Result<()> {
+    let te = headers
+        .iter()
+        .filter(|(k, _)| k.eq_ignore_ascii_case("transfer-encoding"))
+        .count();
+    let cl = headers
+        .iter()
+        .filter(|(k, _)| k.eq_ignore_ascii_case("content-length"))
+        .count();
     if te > 1 {
-        return Err(Error::Config(format!(
+        return Err(Error::new(Kind::Config).with_message(format!(
             "{te} Transfer-Encoding headers on one request: framing would be ambiguous"
         )));
     }
     if te > 0 && cl > 0 {
-        return Err(Error::Config(
+        return Err(Error::new(Kind::Config).with_message(
             "Transfer-Encoding together with Content-Length on one request: framing would be ambiguous"
-                .into(),
         ));
     }
+    Ok(())
+}
+
+/// RFC 9113 §8.2.2: connection-specific headers must never be emitted on an H2 connection — a compliant peer rejects the stream.
+pub(crate) fn strip_connection_specific_headers(headers: &mut Vec<HeaderPair>) -> Result<()> {
+    check_framing(headers)?;
+    headers.retain_mut(|(name, value)| {
+        let lower = name.to_ascii_lowercase();
+        match lower.as_str() {
+            "transfer-encoding" | "connection" | "keep-alive" | "proxy-connection" | "upgrade"
+            | "http2-settings" => false,
+            "te" => value.eq_ignore_ascii_case("trailers"),
+            _ => true,
+        }
+    });
     for (name, _) in headers.iter_mut() {
         if name.chars().any(|c| c.is_ascii_uppercase()) {
             *name = name.to_lowercase().into();
@@ -319,41 +334,42 @@ fn body_to_h1(body: Body) -> H1Body {
     level = "debug",
     skip_all,
     fields(
-        http.method = method,
-        http.scheme = url.scheme(),
-        http.host = url.host_str().unwrap_or(""),
+        http.method = req.method,
+        http.scheme = req.url.scheme(),
+        http.host = req.url.host_str().unwrap_or(""),
     )
-)]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "flat per-request wire fields across one internal call path"
 )]
 pub(crate) async fn send_request_h1(
     pool: &Arc<Pool>,
     connector: &FingerprintConnector,
-    method: &str,
-    url: &url::Url,
-    headers: Vec<HeaderPair>,
-    body: Body,
-    proxy: Option<&str>,
-    stream_response: bool,
+    req: Prepared<'_>,
 ) -> Result<TransportResponse> {
+    let Prepared {
+        method,
+        url,
+        headers,
+        body,
+        proxy,
+        stream_response,
+    } = req;
+    check_framing(&headers)?;
     let host = url
         .host_str()
-        .ok_or_else(|| Error::Config("no host in URL".into()))?;
-    let port = url
-        .port_or_known_default()
-        .ok_or_else(|| Error::Config(format!("no default port for scheme {}", url.scheme())))?;
+        .ok_or_else(|| Error::new(Kind::Config).with_message("no host in URL"))?;
+    let port = url.port_or_known_default().ok_or_else(|| {
+        Error::new(Kind::Config)
+            .with_message(format!("no default port for scheme {}", url.scheme()))
+    })?;
     let scheme = url.scheme();
 
     let (target, headers) = match (scheme, proxy) {
         ("http", Some(proxy_url)) => {
-            let parsed = url::Url::parse(proxy_url)
-                .map_err(|e| Error::Config(format!("invalid proxy URL: {e}")))?;
+            let parsed = url::Url::parse(proxy_url).map_err(|e| {
+                Error::new(Kind::Config).with_message(format!("invalid proxy URL: {e}"))
+            })?;
             if parsed.scheme() != "http" {
-                return Err(Error::Config(
-                    "plaintext HTTP currently supports http:// proxies only".into(),
-                ));
+                return Err(Error::new(Kind::Config)
+                    .with_message("plaintext HTTP currently supports http:// proxies only"));
             }
             let mut headers = headers;
             headers.retain(|(k, _)| !k.eq_ignore_ascii_case("priority"));
@@ -415,12 +431,9 @@ pub(crate) async fn send_request_h1(
     };
 
     Ok(TransportResponse {
-        status: resp.status,
-        headers: resp
-            .headers
-            .into_iter()
-            .map(|(k, v)| (k.into(), v.into()))
-            .collect(),
+        status: status(resp.status)?,
+        headers: adopt(resp.headers),
+        trailers: Vec::new(),
         body: transport_body,
         final_url: url.to_string(),
         version: HttpVersion::Http1_1,
@@ -434,14 +447,16 @@ pub(crate) async fn send_request_h1(
 
 fn h1_error_to_core(e: H1PooledError) -> Error {
     match e {
-        H1PooledError::Config(m) => Error::Config(m),
-        H1PooledError::Tls(error) => Error::Tls(error),
-        H1PooledError::Io(io) => Error::Io(io),
-        H1PooledError::Http(m) => Error::Http(m),
-        H1PooledError::ConnectionClosed(ctx) => Error::Io(std::io::Error::new(
-            std::io::ErrorKind::UnexpectedEof,
-            format!("connection closed {ctx}"),
-        )),
+        H1PooledError::Config(m) => Error::new(Kind::Config).with_message(m),
+        H1PooledError::Tls(error) => Error::new(Kind::Tls).with_source(error),
+        H1PooledError::Io(io) => Error::new(Kind::Io).with_source(io),
+        H1PooledError::Http(m) => Error::new(Kind::Request).with_message(m),
+        H1PooledError::ConnectionClosed(ctx) => {
+            Error::new(Kind::Io).with_source(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                format!("connection closed {ctx}"),
+            ))
+        }
     }
 }
 
@@ -451,26 +466,26 @@ fn h1_error_to_core(e: H1PooledError) -> Error {
     name = "transport.h3",
     level = "debug",
     skip_all,
-    fields(http.method = method, http.host = url.host_str().unwrap_or(""))
-)]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "flat per-request wire fields across one internal call path"
+    fields(http.method = req.method, http.host = req.url.host_str().unwrap_or(""))
 )]
 pub(crate) async fn send_request_h3(
     pool: &Arc<Pool>,
     h3_config: &crate::quic::H3Config,
     profile: &crate::profile::BrowserProfile,
     trust: &crate::tls::TlsTrustConfig,
-    method: &str,
-    url: &url::Url,
-    mut headers: Vec<HeaderPair>,
-    body: Body,
-    stream_response: bool,
+    req: Prepared<'_>,
 ) -> Result<TransportResponse> {
+    let Prepared {
+        method,
+        url,
+        mut headers,
+        body,
+        stream_response,
+        ..
+    } = req;
     let host = url
         .host_str()
-        .ok_or_else(|| Error::Config("no host in URL".into()))?;
+        .ok_or_else(|| Error::new(Kind::Config).with_message("no host in URL"))?;
     let port = url.port_or_known_default().unwrap_or(443);
     let authority = if url.scheme() == "https" && port == 443 {
         host.to_string()
@@ -515,12 +530,9 @@ pub(crate) async fn send_request_h3(
     };
 
     Ok(TransportResponse {
-        status: resp.status,
-        headers: resp
-            .headers
-            .into_iter()
-            .map(|(k, v)| (k.into(), v.into()))
-            .collect(),
+        status: status(resp.status)?,
+        headers: adopt(resp.headers),
+        trailers: adopt(resp.trailers),
         body: transport_body,
         final_url: url.to_string(),
         version: HttpVersion::Http3,
@@ -534,7 +546,7 @@ pub(crate) async fn send_request_h3(
 
 /// True when the H2 attempt failed because the server declined the `h2` ALPN (e.g. some CDN/WAF edges serve a cookieless interstitial over HTTP/1.1, replying with no ALPN).
 fn is_h2_alpn_mismatch(err: &Error) -> bool {
-    matches!(err, Error::AlpnMismatch { .. })
+    err.alpn().is_some()
 }
 
 #[cfg(test)]

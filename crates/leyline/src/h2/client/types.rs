@@ -6,6 +6,8 @@ use std::pin::Pin;
 use bytes::Bytes;
 use tokio::sync::mpsc;
 
+use crate::header_str::HeaderStr;
+
 /// Request body supplied to [`super::H2Client::send_request_ex`].
 pub enum RequestBody {
     /// No body — headers carry END_STREAM.
@@ -53,11 +55,11 @@ pub struct H2ResponseEx {
     /// HTTP status code.
     pub status: u16,
     /// Response headers in wire order.
-    pub headers: Vec<(crate::core::HeaderStr, crate::core::HeaderStr)>,
+    pub headers: Vec<(HeaderStr, HeaderStr)>,
     /// Response body — buffered or streaming.
     pub body: ResponseBody,
     /// Trailers, if any.
-    pub trailers: Option<Vec<(crate::core::HeaderStr, crate::core::HeaderStr)>>,
+    pub trailers: Option<Vec<(HeaderStr, HeaderStr)>>,
 }
 
 /// Response body shape delivered alongside an [`H2ResponseEx`].

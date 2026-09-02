@@ -1,4 +1,4 @@
-//! Small shared encoding helpers used across the TLS proxy and HTTP layers.
+//! Small shared helpers used across the TLS proxy and HTTP layers.
 
 #![forbid(unsafe_code)]
 /// Redact a URL for logs and error values: the password, if any, becomes `REDACTED`.
@@ -22,7 +22,7 @@ pub(crate) fn base64_encode(input: &str) -> String {
 pub(crate) fn random_hex_token(bytes: usize) -> String {
     use rand::RngCore;
     let mut buf = vec![0u8; bytes];
-    rand::thread_rng().fill_bytes(&mut buf);
+    rand::rng().fill_bytes(&mut buf);
     hex::encode(buf)
 }
 
@@ -32,17 +32,25 @@ pub(crate) fn percent_decode(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let (Some(hi), Some(lo)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2])) {
-                out.push((hi << 4) | lo);
-                i += 3;
-                continue;
-            }
+        if bytes[i] == b'%'
+            && i + 2 < bytes.len()
+            && let (Some(hi), Some(lo)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2]))
+        {
+            out.push((hi << 4) | lo);
+            i += 3;
+            continue;
         }
         out.push(bytes[i]);
         i += 1;
     }
     String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Whether a method is idempotent per RFC 9110 §9.2.2 — safe to retry automatically without caller opt-in.
+pub(crate) fn is_idempotent(method: &str) -> bool {
+    ["GET", "HEAD", "OPTIONS", "PUT", "DELETE", "TRACE"]
+        .iter()
+        .any(|m| method.eq_ignore_ascii_case(m))
 }
 
 fn hex_val(b: u8) -> Option<u8> {

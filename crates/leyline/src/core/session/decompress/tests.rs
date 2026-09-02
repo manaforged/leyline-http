@@ -1,4 +1,5 @@
 use super::*;
+use http::{HeaderName, HeaderValue};
 #[cfg(all(feature = "compression-gzip", feature = "compression-brotli"))]
 use std::io::Write;
 
@@ -30,14 +31,20 @@ fn gzip_without_feature_is_an_error() {
         &CompressionConfig::default(),
     )
     .unwrap_err();
-    assert!(matches!(err, Error::Decode(_)), "got: {err:?}");
+    assert!(
+        matches!(err, Error::new(Kind::Decode).with_message(_)),
+        "got: {err:?}"
+    );
 }
 
 #[cfg(not(feature = "compression-brotli"))]
 #[test]
 fn brotli_without_feature_is_an_error() {
     let err = decompress_body(vec![0x0b], Some("br"), &CompressionConfig::default()).unwrap_err();
-    assert!(matches!(err, Error::Decode(_)), "got: {err:?}");
+    assert!(
+        matches!(err, Error::new(Kind::Decode).with_message(_)),
+        "got: {err:?}"
+    );
 }
 
 #[cfg(not(feature = "compression-deflate"))]
@@ -49,7 +56,10 @@ fn deflate_without_feature_is_an_error() {
         &CompressionConfig::default(),
     )
     .unwrap_err();
-    assert!(matches!(err, Error::Decode(_)), "got: {err:?}");
+    assert!(
+        matches!(err, Error::new(Kind::Decode).with_message(_)),
+        "got: {err:?}"
+    );
 }
 
 #[cfg(not(feature = "compression-zstd"))]
@@ -61,7 +71,10 @@ fn zstd_without_feature_is_an_error() {
         &CompressionConfig::default(),
     )
     .unwrap_err();
-    assert!(matches!(err, Error::Decode(_)), "got: {err:?}");
+    assert!(
+        matches!(err, Error::new(Kind::Decode).with_message(_)),
+        "got: {err:?}"
+    );
 }
 
 #[cfg(feature = "compression-gzip")]
@@ -74,36 +87,28 @@ fn decompress_and_strip_drops_stale_framing_headers() {
 
     let headers = vec![
         (
-            HeaderStr::from_static("Content-Encoding"),
-            HeaderStr::from_static("gzip"),
+            HeaderName::from_static("content-encoding"),
+            HeaderValue::from_static("gzip"),
         ),
         (
-            HeaderStr::from_static("Content-Length"),
-            HeaderStr::from(gzip_body.len().to_string()),
+            HeaderName::from_static("content-length"),
+            HeaderValue::from(gzip_body.len()),
         ),
         (
-            HeaderStr::from_static("Content-Type"),
-            HeaderStr::from_static("text/plain"),
+            HeaderName::from_static("content-type"),
+            HeaderValue::from_static("text/plain"),
         ),
     ];
     let (decoded, headers) =
         decompress_and_strip(gzip_body, headers, &CompressionConfig::default()).unwrap();
 
     assert_eq!(decoded, body);
-    assert!(
-        !headers
-            .iter()
-            .any(|(k, _)| k.eq_ignore_ascii_case("content-encoding"))
-    );
-    assert!(
-        !headers
-            .iter()
-            .any(|(k, _)| k.eq_ignore_ascii_case("content-length"))
-    );
+    assert!(!headers.iter().any(|(k, _)| *k == "content-encoding"));
+    assert!(!headers.iter().any(|(k, _)| *k == "content-length"));
     assert!(
         headers
             .iter()
-            .any(|(k, v)| k == "Content-Type" && v == "text/plain")
+            .any(|(k, v)| *k == "content-type" && v == "text/plain")
     );
 }
 
@@ -111,12 +116,12 @@ fn decompress_and_strip_drops_stale_framing_headers() {
 fn decompress_and_strip_preserves_headers_when_not_decoded() {
     let headers = vec![
         (
-            HeaderStr::from_static("Content-Length"),
-            HeaderStr::from_static("5"),
+            HeaderName::from_static("content-length"),
+            HeaderValue::from_static("5"),
         ),
         (
-            HeaderStr::from_static("Content-Type"),
-            HeaderStr::from_static("text/plain"),
+            HeaderName::from_static("content-type"),
+            HeaderValue::from_static("text/plain"),
         ),
     ];
     let (body, out) = decompress_and_strip(

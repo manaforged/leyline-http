@@ -287,14 +287,18 @@ pub(super) const TLS_ERROR: c_int = 3;
 
 unsafe extern "C" {
     // SSL_METHOD specific for boringssl.
+    #[link_name = "LEYLINE_SSL_CTX_set_tlsext_ticket_keys"]
     pub(super) fn SSL_CTX_set_tlsext_ticket_keys(
         ctx: *mut SSL_CTX,
         key: *const u8,
         key_len: usize,
     ) -> c_int;
+    #[link_name = "LEYLINE_SSL_CTX_set_early_data_enabled"]
     fn SSL_CTX_set_early_data_enabled(ctx: *mut SSL_CTX, enabled: i32);
 
+    #[link_name = "LEYLINE_SSL_CTX_set_session_cache_mode"]
     pub(super) fn SSL_CTX_set_session_cache_mode(ctx: *mut SSL_CTX, mode: c_int) -> c_int;
+    #[link_name = "LEYLINE_SSL_get_ex_new_index"]
     pub(super) fn SSL_get_ex_new_index(
         argl: c_long,
         argp: *const c_void,
@@ -303,20 +307,29 @@ unsafe extern "C" {
         free_func: *const c_void,
     ) -> c_int;
 
+    #[link_name = "LEYLINE_SSL_get_curve_id"]
     fn SSL_get_curve_id(ssl: *const SSL) -> u16;
+    #[link_name = "LEYLINE_SSL_get_curve_name"]
     fn SSL_get_curve_name(curve: u16) -> *const c_char;
 
+    #[link_name = "LEYLINE_SSL_get_peer_signature_algorithm"]
     fn SSL_get_peer_signature_algorithm(ssl: *const SSL) -> u16;
+    #[link_name = "LEYLINE_SSL_get_signature_algorithm_name"]
     fn SSL_get_signature_algorithm_name(sigalg: u16, include_curve: i32) -> *const c_char;
 
+    #[link_name = "LEYLINE_SSL_get0_peer_certificates"]
     fn SSL_get0_peer_certificates(ssl: *const SSL) -> *const STACK_OF;
 
+    #[link_name = "LEYLINE_SSL_set_min_proto_version"]
     pub(super) fn SSL_set_min_proto_version(ssl: *mut SSL, version: u16) -> c_int;
 
+    #[link_name = "LEYLINE_SSL_set_max_proto_version"]
     pub(super) fn SSL_set_max_proto_version(ssl: *mut SSL, version: u16) -> c_int;
 
+    #[link_name = "LEYLINE_SSL_set_tlsext_host_name"]
     pub(super) fn SSL_set_tlsext_host_name(ssl: *mut SSL, name: *const c_char) -> c_int;
 
+    #[link_name = "LEYLINE_SSL_set_quic_early_data_context"]
     fn SSL_set_quic_early_data_context(
         ssl: *mut SSL,
         context: *const u8,
@@ -324,18 +337,23 @@ unsafe extern "C" {
     ) -> c_int;
 
     #[cfg(test)]
+    #[link_name = "LEYLINE_SSL_set_private_key_method"]
     fn SSL_set_private_key_method(ssl: *mut SSL, key_method: *const SSL_PRIVATE_KEY_METHOD);
 
+    #[link_name = "LEYLINE_SSL_reset_early_data_reject"]
     fn SSL_reset_early_data_reject(ssl: *mut SSL);
 
+    #[link_name = "LEYLINE_SSL_in_early_data"]
     fn SSL_in_early_data(ssl: *const SSL) -> c_int;
 
+    #[link_name = "LEYLINE_SSL_SESSION_to_bytes"]
     fn SSL_SESSION_to_bytes(
         session: *const SSL_SESSION,
         out: *mut *mut u8,
         out_len: *mut usize,
     ) -> c_int;
 
+    #[link_name = "LEYLINE_SSL_SESSION_from_bytes"]
     fn SSL_SESSION_from_bytes(
         input: *const u8,
         input_len: usize,
@@ -344,13 +362,17 @@ unsafe extern "C" {
 
     // STACK_OF
 
+    #[link_name = "LEYLINE_sk_num"]
     fn sk_num(stack: *const STACK_OF) -> usize;
 
+    #[link_name = "LEYLINE_sk_value"]
     fn sk_value(stack: *const STACK_OF, idx: usize) -> *mut c_void;
 
     // CRYPTO_BUFFER
 
+    #[link_name = "LEYLINE_CRYPTO_BUFFER_len"]
     fn CRYPTO_BUFFER_len(buffer: *const CRYPTO_BUFFER) -> usize;
 
+    #[link_name = "LEYLINE_CRYPTO_BUFFER_data"]
     fn CRYPTO_BUFFER_data(buffer: *const CRYPTO_BUFFER) -> *const u8;
 }

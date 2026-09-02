@@ -23,9 +23,9 @@ async fn main() -> leyline::Result<()> {
         age: 36,
     };
 
-    let resp = session.post(URL).json(&payload).send().await?;
+    let mut resp = session.post(URL).json(&payload).send().await?;
 
     println!("status: {}", resp.status());
-    println!("body:   {}", resp.text().unwrap());
+    println!("body:   {}", resp.text().await.unwrap());
     Ok(())
 }

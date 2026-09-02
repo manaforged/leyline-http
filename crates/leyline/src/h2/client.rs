@@ -10,4 +10,4 @@ pub use handle::H2Client;
 pub use types::{H2ResponseEx, RequestBody, ResponseBody};
 
 pub use driver::DriverTask;
-pub(crate) use driver::start;
+pub(crate) use driver::{Head, start};

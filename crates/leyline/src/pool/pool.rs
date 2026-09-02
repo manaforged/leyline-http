@@ -1,6 +1,6 @@
 //! [`Pool`] struct — thread-safe connection map with LRU eviction.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -45,6 +45,11 @@ pub struct Pool {
     /// In-progress H3 connects, keyed like `inner` with `Transport::Quic`.
     #[cfg(feature = "http3")]
     pub(crate) inflight_h3: Mutex<HashMap<PoolKey, SharedH3Connect>>,
+    /// `(host, port)` pairs that advertised `h3` in `Alt-Svc` or already completed a QUIC handshake; only these are raced.
+    #[cfg(feature = "http3")]
+    pub(crate) h3_known: Mutex<HashSet<(String, u16)>>,
+    /// `(host, port, proxy)` triples whose TLS ALPN negotiated `http/1.1`; `Auto` skips the HTTP/2 attempt for them.
+    pub(crate) h1_only: Mutex<HashSet<(String, u16, Option<String>)>>,
     pub(crate) idle_timeout: Duration,
     /// LRU cap.
     pub(crate) max_connections: usize,
@@ -60,6 +65,51 @@ pub struct Pool {
 }
 
 impl Pool {
+    /// Remember that `host:port` via `proxy` negotiated `http/1.1`, so later `Auto` requests dial HTTP/1.1 directly.
+    pub(crate) fn note_h1_only(&self, host: &str, port: u16, proxy: Option<&str>) {
+        self.h1_only
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert((host.to_string(), port, proxy.map(str::to_string)));
+    }
+
+    /// `true` once `host:port` via `proxy` is known to speak HTTP/1.1 only.
+    pub(crate) fn is_h1_only(&self, host: &str, port: u16, proxy: Option<&str>) -> bool {
+        self.h1_only
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(&(host.to_string(), port, proxy.map(str::to_string)))
+    }
+
+    /// Record that `host:port` speaks HTTP/3, from a completed QUIC handshake or an `Alt-Svc` header.
+    #[cfg(feature = "http3")]
+    pub(crate) fn note_h3(&self, host: &str, port: u16) {
+        self.h3_known
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert((host.to_string(), port));
+    }
+
+    /// Record `host:port` as an HTTP/3 origin when an `Alt-Svc` header value advertises `h3`.
+    #[cfg(feature = "http3")]
+    pub(crate) fn note_alt_svc(&self, host: &str, port: u16, alt_svc: &str) {
+        if alt_svc
+            .split(',')
+            .any(|alt| alt.trim_start().starts_with("h3="))
+        {
+            self.note_h3(host, port);
+        }
+    }
+
+    /// `true` once `host:port` is known to speak HTTP/3.
+    #[cfg(feature = "http3")]
+    pub(crate) fn knows_h3(&self, host: &str, port: u16) -> bool {
+        self.h3_known
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(&(host.to_string(), port))
+    }
+
     /// Create a pool with default 300 s idle timeout, a 2048-entry LRU cap, and the default per-host H1 connection cap.
     pub fn new() -> Self {
         Self {
@@ -67,6 +117,9 @@ impl Pool {
             inflight_h2: Mutex::new(HashMap::new()),
             #[cfg(feature = "http3")]
             inflight_h3: Mutex::new(HashMap::new()),
+            #[cfg(feature = "http3")]
+            h3_known: Mutex::new(HashSet::new()),
+            h1_only: Mutex::new(HashSet::new()),
             idle_timeout: DEFAULT_IDLE_TIMEOUT,
             max_connections: DEFAULT_MAX_CONNECTIONS,
             max_h1_conns_per_host: DEFAULT_MAX_H1_CONNS_PER_HOST,
@@ -93,6 +146,9 @@ impl Pool {
             inflight_h2: Mutex::new(HashMap::new()),
             #[cfg(feature = "http3")]
             inflight_h3: Mutex::new(HashMap::new()),
+            #[cfg(feature = "http3")]
+            h3_known: Mutex::new(HashSet::new()),
+            h1_only: Mutex::new(HashSet::new()),
             idle_timeout,
             max_connections,
             max_h1_conns_per_host,
@@ -319,11 +375,10 @@ impl Pool {
             tls: existing_tls,
             ..
         }) = map.get(&key)
+            && !existing.is_closed()
         {
-            if !existing.is_closed() {
-                self.counters.h3_hits.fetch_add(1, Ordering::Relaxed);
-                return (existing.clone(), existing_tls.clone());
-            }
+            self.counters.h3_hits.fetch_add(1, Ordering::Relaxed);
+            return (existing.clone(), existing_tls.clone());
         }
         if !map.contains_key(&key) {
             let evicted = Self::evict_lru_if_needed(&mut map, self.max_connections);
@@ -388,11 +443,10 @@ impl Pool {
             tls: existing_tls,
             ..
         }) = map.get(&key)
+            && !existing.is_closed()
         {
-            if !existing.is_closed() {
-                self.counters.h2_hits.fetch_add(1, Ordering::Relaxed);
-                return (existing.clone(), existing_tls.clone());
-            }
+            self.counters.h2_hits.fetch_add(1, Ordering::Relaxed);
+            return (existing.clone(), existing_tls.clone());
         }
         if !map.contains_key(&key) {
             let evicted = Self::evict_lru_if_needed(&mut map, self.max_connections);
