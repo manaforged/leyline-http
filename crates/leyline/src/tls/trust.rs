@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use leyline_bssl::ssl::{
-    Ssl, SslAlert, SslContextBuilder, SslFiletype, SslVerifyError, SslVerifyMode,
+    NameType, Ssl, SslAlert, SslContextBuilder, SslFiletype, SslRef, SslVerifyError, SslVerifyMode,
 };
 use leyline_bssl::x509::{X509, X509StoreContext};
 use sha2::{Digest, Sha256};
@@ -24,6 +24,7 @@ pub(crate) type VerificationFailure = Arc<Mutex<Option<TrustFailure>>>;
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum TrustFailure {
     Certificate,
+    Hostname,
     Pinning,
 }
 
@@ -107,37 +108,72 @@ impl TlsTrustConfig {
     }
 }
 
-pub(crate) fn install_pinning_verifier_ctx(builder: &mut SslContextBuilder, pins: &[[u8; 32]]) {
+pub(crate) fn install_verifier_ctx(
+    builder: &mut SslContextBuilder,
+    pins: &[[u8; 32]],
+    host: Option<&str>,
+    system_roots: bool,
+) {
     let pins = pins.to_vec();
+    let host = host.map(str::to_owned);
     builder.set_custom_verify_callback(SslVerifyMode::PEER, move |ssl| {
-        let store = ssl.ssl_context().cert_store();
-        let cert = ssl
-            .peer_certificate()
+        let hostname = host
+            .as_deref()
+            .or_else(|| ssl.servername(NameType::HOST_NAME))
             .ok_or(SslVerifyError::Invalid(SslAlert::CERTIFICATE_UNKNOWN))?;
-        let chain = ssl
-            .peer_cert_chain()
-            .ok_or(SslVerifyError::Invalid(SslAlert::CERTIFICATE_UNKNOWN))?;
-
-        let chain_ok = X509StoreContext::new()
-            .map_err(|_| SslVerifyError::Invalid(SslAlert::INTERNAL_ERROR))?
-            .init(store, &cert, chain, |store_ctx| {
-                Ok(store_ctx.verify_cert()? && store_ctx.verify_result().is_ok())
-            })
-            .map_err(|_| SslVerifyError::Invalid(SslAlert::INTERNAL_ERROR))?;
-        if !chain_ok {
-            return Err(SslVerifyError::Invalid(SslAlert::UNKNOWN_CA));
-        }
-
-        let der = cert
-            .to_der()
-            .map_err(|_| SslVerifyError::Invalid(SslAlert::INTERNAL_ERROR))?;
-        let digest: [u8; 32] = Sha256::digest(&der).into();
-        if pins.iter().any(|pin| pin == &digest) {
-            Ok(())
-        } else {
-            Err(SslVerifyError::Invalid(SslAlert::CERTIFICATE_UNKNOWN))
-        }
+        verify(ssl, hostname, &pins, system_roots)
+            .map_err(|_| SslVerifyError::Invalid(SslAlert::CERTIFICATE_UNKNOWN))
     });
+}
+
+fn trusted(ssl: &SslRef, _host: &str, _system_roots: bool) -> Result<bool, TrustFailure> {
+    let cert = ssl.peer_certificate().ok_or(TrustFailure::Certificate)?;
+    let chain = ssl.peer_cert_chain().ok_or(TrustFailure::Certificate)?;
+    let configured = X509StoreContext::new()
+        .map_err(|_| TrustFailure::Certificate)?
+        .init(ssl.ssl_context().cert_store(), &cert, chain, |context| {
+            Ok(context.verify_cert()? && context.verify_result().is_ok())
+        })
+        .map_err(|_| TrustFailure::Certificate)?;
+    if configured {
+        return Ok(true);
+    }
+    #[cfg(target_os = "macos")]
+    if _system_roots {
+        return super::macos_trust::verify(ssl, _host).map_err(|error| {
+            tracing::debug!(target: "leyline::tls::trust", %error, "macOS certificate evaluation failed");
+            TrustFailure::Certificate
+        });
+    }
+    Ok(false)
+}
+
+fn verify(
+    ssl: &SslRef,
+    host: &str,
+    pins: &[[u8; 32]],
+    system_roots: bool,
+) -> Result<(), TrustFailure> {
+    let cert = ssl.peer_certificate().ok_or(TrustFailure::Certificate)?;
+    let hostname_matches = match host.parse::<std::net::IpAddr>() {
+        Ok(_) => cert.check_ip_asc(host),
+        Err(_) => cert.check_host(host),
+    }
+    .map_err(|_| TrustFailure::Hostname)?;
+    if !hostname_matches {
+        return Err(TrustFailure::Hostname);
+    }
+    if !trusted(ssl, host, system_roots)? {
+        return Err(TrustFailure::Certificate);
+    }
+    if !pins.is_empty() {
+        let der = cert.to_der().map_err(|_| TrustFailure::Certificate)?;
+        let digest: [u8; 32] = Sha256::digest(&der).into();
+        if !pins.contains(&digest) {
+            return Err(TrustFailure::Pinning);
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn take_verification_failure(failure: &VerificationFailure) -> Option<TrustFailure> {
@@ -233,9 +269,16 @@ pub(crate) fn wire_configured_trust(
     builder: &mut SslContextBuilder,
     config: &TlsTrustConfig,
 ) -> Result<(), TlsError> {
-    let env_roots_loaded = config.use_env_roots && wire_env_trust(builder);
-    if config.use_system_roots {
-        wire_system_trust_cached(builder, config, env_roots_loaded)?;
+    #[cfg(target_os = "macos")]
+    if config.use_env_roots {
+        wire_env_trust(builder);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let env_roots_loaded = config.use_env_roots && wire_env_trust(builder);
+        if config.use_system_roots {
+            wire_system_trust_cached(builder, config, env_roots_loaded)?;
+        }
     }
 
     for path in &config.ca_files {
@@ -251,6 +294,11 @@ pub(crate) fn wire_configured_trust(
         }
     }
 
+    #[cfg(target_os = "macos")]
+    if config.use_system_roots {
+        install_verifier_ctx(builder, &config.pinned_leaf_sha256, None, true);
+    }
+
     if let Some(identity) = &config.client_identity {
         builder
             .set_certificate_chain_file(&identity.certificate_chain_file)
@@ -263,53 +311,30 @@ pub(crate) fn wire_configured_trust(
     Ok(())
 }
 
-pub(crate) fn install_pinning_verifier(ssl: &mut Ssl, pins: &[[u8; 32]]) -> VerificationFailure {
+pub(crate) fn install_verifier(
+    ssl: &mut Ssl,
+    pins: &[[u8; 32]],
+    host: &str,
+    system_roots: bool,
+) -> VerificationFailure {
     let pins = pins.to_vec();
+    let host = host.to_owned();
     let failure = Arc::new(Mutex::new(None));
     let callback_failure = failure.clone();
     ssl.set_custom_verify_callback(SslVerifyMode::PEER, move |ssl| {
-        let store = ssl.ssl_context().cert_store();
-        let cert = ssl
-            .peer_certificate()
-            .ok_or(SslVerifyError::Invalid(SslAlert::CERTIFICATE_UNKNOWN))?;
-        let chain = ssl
-            .peer_cert_chain()
-            .ok_or(SslVerifyError::Invalid(SslAlert::CERTIFICATE_UNKNOWN))?;
-
-        let chain_ok = X509StoreContext::new()
-            .map_err(|_| SslVerifyError::Invalid(SslAlert::INTERNAL_ERROR))?
-            .init(store, &cert, chain, |store_ctx| {
-                let verified = store_ctx.verify_cert()?;
-                Ok(verified && store_ctx.verify_result().is_ok())
-            })
-            .map_err(|_| SslVerifyError::Invalid(SslAlert::INTERNAL_ERROR))?;
-        if !chain_ok {
-            record_verification_failure(&callback_failure, TrustFailure::Certificate);
-            return Err(SslVerifyError::Invalid(SslAlert::UNKNOWN_CA));
-        }
-
-        let der = cert
-            .to_der()
-            .map_err(|_| SslVerifyError::Invalid(SslAlert::INTERNAL_ERROR))?;
-        let digest: [u8; 32] = Sha256::digest(&der).into();
-        if pins.iter().any(|pin| pin == &digest) {
-            Ok(())
-        } else {
-            record_verification_failure(&callback_failure, TrustFailure::Pinning);
-            Err(SslVerifyError::Invalid(SslAlert::CERTIFICATE_UNKNOWN))
-        }
+        verify(ssl, &host, &pins, system_roots).map_err(|reason| {
+            record_verification_failure(&callback_failure, reason);
+            SslVerifyError::Invalid(SslAlert::CERTIFICATE_UNKNOWN)
+        })
     });
     failure
 }
 
+#[cfg(not(target_os = "macos"))]
 pub(crate) fn wire_system_trust(builder: &mut SslContextBuilder) -> Result<(), TlsError> {
     #[cfg(windows)]
     {
         wire_windows_system_trust(builder)
-    }
-    #[cfg(target_os = "macos")]
-    {
-        wire_macos_system_trust(builder)
     }
     #[cfg(all(not(windows), not(target_os = "macos")))]
     {
@@ -330,7 +355,7 @@ fn wire_system_trust_cached(
     wire_system_trust(builder)
 }
 
-#[cfg(not(windows))]
+#[cfg(all(not(windows), not(target_os = "macos")))]
 fn wire_system_trust_cached(
     builder: &mut SslContextBuilder,
     _config: &TlsTrustConfig,
@@ -395,41 +420,6 @@ fn wire_linux_system_trust(builder: &mut SslContextBuilder) -> Result<(), TlsErr
     Err(TlsError::TrustStore(
         "no supported Linux system CA bundle found".into(),
     ))
-}
-
-#[cfg(target_os = "macos")]
-fn wire_macos_system_trust(builder: &mut SslContextBuilder) -> Result<(), TlsError> {
-    let roots = crate::tls::macos_trust::load_system_roots().map_err(|error| {
-        TlsError::TrustStore(format!("failed to read macOS system roots: {error}"))
-    })?;
-    let store = builder.cert_store_mut();
-    let mut loaded = 0usize;
-    let mut skipped = 0usize;
-    for der in &roots {
-        match X509::from_der(der).and_then(|cert| store.add_cert(cert)) {
-            Ok(()) => loaded += 1,
-            Err(error) => {
-                skipped += 1;
-                tracing::debug!(
-                    target: "leyline::tls::trust",
-                    %error,
-                    "macOS trust anchor rejected by BoringSSL"
-                );
-            }
-        }
-    }
-    if loaded == 0 {
-        return Err(TlsError::TrustStore(format!(
-            "macOS system trust store bridged zero certificates ({skipped} skipped)"
-        )));
-    }
-    tracing::info!(
-        target: "leyline::tls::trust",
-        loaded,
-        skipped,
-        "macOS system trust store bridged into BoringSSL"
-    );
-    Ok(())
 }
 
 #[cfg(windows)]

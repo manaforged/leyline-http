@@ -25,7 +25,7 @@ pub use connector::FingerprintConnector;
 pub(crate) use builder::apply_profile_with_trust;
 pub(crate) use builder::build_ssl_context;
 pub(crate) use stream::TlsIo;
-pub(crate) use trust::install_pinning_verifier_ctx;
+pub(crate) use trust::install_verifier_ctx;
 
 pub struct TlsContext(
     #[cfg_attr(

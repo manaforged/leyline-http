@@ -16,7 +16,6 @@ repository = "https://github.com/manaforged/leyline-http"
 [features]
 default = ["leyline-bssl/default"]
 fips = ["leyline-bssl/fips"]
-prefix-symbols = ["leyline-bssl/prefix-symbols"]
 
 [dependencies]
 leyline-bssl = { path = "../leyline-bssl", version = "=1.0.0-alpha.3" }

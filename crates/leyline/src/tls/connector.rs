@@ -16,8 +16,7 @@ use crate::tls::happy_eyeballs::{HappyEyeballsConfig, happy_eyeballs_connect};
 use crate::tls::nonblocking::connect_one;
 use crate::tls::resolver::{Resolver, SystemResolver};
 use crate::tls::trust::{
-    TlsTrustConfig, TrustFailure, VerificationFailure, install_pinning_verifier,
-    take_verification_failure,
+    TlsTrustConfig, TrustFailure, VerificationFailure, install_verifier, take_verification_failure,
 };
 use crate::tls::{TlsIo, TlsStream};
 use crate::trace;
@@ -37,6 +36,7 @@ pub struct FingerprintConnector {
     connect_timeout: Option<Duration>,
     socket_config: SocketConfig,
     pins: Vec<[u8; 32]>,
+    system_roots: bool,
     has_client_identity: bool,
 }
 
@@ -95,6 +95,7 @@ impl FingerprintConnector {
             connect_timeout: None,
             socket_config: SocketConfig::default(),
             pins: trust.pinned_leaf_sha256().to_vec(),
+            system_roots: trust.uses_system_roots(),
             has_client_identity: trust.client_identity().is_some(),
         })
     }
@@ -284,8 +285,9 @@ impl FingerprintConnector {
         if insecure {
             ssl.set_verify(SslVerifyMode::NONE);
         }
-        let verification_failure = (!insecure && !self.pins.is_empty())
-            .then(|| install_pinning_verifier(&mut ssl, &self.pins));
+        let verification_failure = (!insecure
+            && (!self.pins.is_empty() || cfg!(target_os = "macos") && self.system_roots))
+            .then(|| install_verifier(&mut ssl, &self.pins, host, self.system_roots));
 
         {
             let mut cache = lock_unpoisoned(&self.session_cache);
@@ -320,22 +322,6 @@ impl FingerprintConnector {
                 stream.ssl().verify_result().err(),
                 e,
             ));
-        }
-
-        if !self.pins.is_empty() && !insecure {
-            let leaf = stream.ssl().peer_certificate().ok_or_else(|| {
-                TlsError::Certificate("pinned connection presented no peer certificate".into())
-            })?;
-            let matches = match host.parse::<std::net::IpAddr>() {
-                Ok(_) => leaf.check_ip_asc(host),
-                Err(_) => leaf.check_host(host),
-            }
-            .map_err(|e| TlsError::Hostname(format!("hostname check failed: {e}")))?;
-            if !matches {
-                return Err(TlsError::Hostname(format!(
-                    "certificate is valid and pinned but does not match {host}"
-                )));
-            }
         }
 
         let alpn = stream.ssl().selected_alpn_protocol().map(|p| p.to_vec());
@@ -379,6 +365,7 @@ fn classify_handshake(
     let verify_error = verify_error.filter(|error| *error != X509VerifyError::INVALID_CALL);
     match failure.and_then(take_verification_failure) {
         Some(TrustFailure::Certificate) => TlsError::Certificate(error.to_string()),
+        Some(TrustFailure::Hostname) => TlsError::Hostname(error.to_string()),
         Some(TrustFailure::Pinning) => TlsError::Pinning(error.to_string()),
         None if matches!(
             verify_error,

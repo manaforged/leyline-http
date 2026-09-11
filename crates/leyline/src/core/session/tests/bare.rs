@@ -268,3 +268,26 @@ async fn bare_json_has_no_sec_fetch() {
         "bare JSON POST must not impersonate:\n{req}"
     );
 }
+
+#[tokio::test]
+async fn native_json_omits_browser_headers_and_preserves_app_headers() {
+    let session = Session::chrome();
+    let wire = capture_post_headers(session, |request| {
+        request
+            .preset(Preset::Native)
+            .header("user-agent", "ExampleApp/1.0")
+            .header("authorization", "Bearer test-token")
+            .json(&serde_json::json!({"id": 1}))
+    })
+    .await;
+    let lower = wire.to_lowercase();
+    for name in ["origin:", "referer:", "sec-fetch-", "sec-ch-ua"] {
+        assert!(
+            !lower.contains(name),
+            "native request contains {name}: {wire}"
+        );
+    }
+    assert!(lower.contains("user-agent: exampleapp/1.0"));
+    assert!(lower.contains("authorization: bearer test-token"));
+    assert!(lower.contains("content-type: application/json"));
+}

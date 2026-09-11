@@ -3,6 +3,7 @@ use std::borrow::Cow;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Preset {
+    Native,
     Navigate,
     Script,
     Xhr,
@@ -58,6 +59,12 @@ pub(crate) const FIREFOX_HEADER_ORDER: &[&str] = &[
 impl Preset {
     pub fn build_headers(&self, ctx: &HeaderContext<'_>) -> Vec<HeaderPair> {
         let mut headers = match self {
+            Self::Native => vec![
+                (b("user-agent"), o(ctx.user_agent)),
+                (b("accept"), b("*/*")),
+                (b("accept-encoding"), b("gzip, deflate, br, zstd")),
+                (b("accept-language"), o(ctx.accept_language)),
+            ],
             Self::Navigate => Self::navigate_headers(ctx),
             Self::Script => Self::script_headers(ctx),
             Self::Xhr => Self::xhr_headers(ctx),

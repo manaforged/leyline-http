@@ -6,6 +6,14 @@ All notable changes to Leyline. Format loosely follows
 
 ## Unreleased
 
+### Fixed
+
+- `Session::with_proxy` opens a new connection for the rebound proxy. It
+  evicts the pool entries, in-flight HTTP/2 connects, HTTP/1 permits, and
+  ALPN memory for that proxy key before it rebinds, so the next request opens a new connection
+  through the proxy instead of reusing the pooled
+  socket.
+
 ### Changed
 
 - The HTTP/2 request path does less work per request: a pooled send and its
@@ -35,6 +43,9 @@ All notable changes to Leyline. Format loosely follows
   `cargo check-external-types` reports no unapproved type.
 
 ### Added
+
+- `Preset::Native` keeps the session transport profile and sends native app
+  requests without browser Origin, Referer, fetch metadata, or client hints.
 
 - `Response::as_bytes` and `Response::as_text` read an already-buffered body
   with no await; both return `None` while the body is still a stream.

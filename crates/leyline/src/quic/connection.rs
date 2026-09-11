@@ -30,6 +30,7 @@ fn build_quic_config(
     h3_cfg: &H3Config,
     profile: &BrowserProfile,
     trust: &TlsTrustConfig,
+    host: &str,
 ) -> Result<quiche::Config, String> {
     let mut ssl_builder =
         leyline_bssl::ssl::SslContextBuilder::new(leyline_bssl::ssl::SslMethod::tls())
@@ -38,8 +39,13 @@ fn build_quic_config(
         .map_err(|e| format!("quic ssl ctx: {e}"))?;
 
     let pins = trust.pinned_leaf_sha256();
-    if !pins.is_empty() {
-        crate::tls::install_pinning_verifier_ctx(&mut ssl_builder, pins);
+    if !pins.is_empty() || cfg!(target_os = "macos") && trust.uses_system_roots() {
+        crate::tls::install_verifier_ctx(
+            &mut ssl_builder,
+            pins,
+            Some(host),
+            trust.uses_system_roots(),
+        );
     }
 
     let mut config =
@@ -80,7 +86,7 @@ pub(crate) async fn connect_and_handshake(
 ) -> Result<EstablishedH3, String> {
     validate_connection_id_len(h3_cfg.dcid_length)?;
 
-    let mut config = build_quic_config(h3_cfg, profile, trust)?;
+    let mut config = build_quic_config(h3_cfg, profile, trust, host)?;
     let peer_addr = resolve_peer(host, port).await?;
 
     let bind = match peer_addr {

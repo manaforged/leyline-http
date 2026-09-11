@@ -371,10 +371,14 @@ impl Session {
         let safe_method = ["GET", "HEAD"]
             .iter()
             .any(|m| current_method.eq_ignore_ascii_case(m));
-        if let Some(cookie_val) =
-            self.inner
-                .cookie_jar
-                .cookie_header_for(current_url, cross_site, safe_method)
+        let caller_cookie = headers
+            .iter()
+            .any(|(k, _)| k.eq_ignore_ascii_case("cookie"));
+        if !caller_cookie
+            && let Some(cookie_val) =
+                self.inner
+                    .cookie_jar
+                    .cookie_header_for(current_url, cross_site, safe_method)
         {
             headers.push(("cookie".into(), Cow::Owned(cookie_val)));
         }

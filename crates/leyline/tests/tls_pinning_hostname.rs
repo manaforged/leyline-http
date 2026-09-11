@@ -172,6 +172,38 @@ fn connector_with_trust(trust: TlsTrustConfig, addr: SocketAddr) -> FingerprintC
         .with_resolver(Arc::new(LoopbackResolver(addr)))
 }
 
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn native_system_trust_preserves_custom_ca_hostname_and_pins() {
+    let generated = generate_chain("native.example", San::Dns("native.example"));
+    for (host, ca, pin, expected) in [
+        ("native.example", true, Some(generated.leaf_pin), "ok"),
+        ("native.example", true, None, "ok"),
+        ("other.example", true, Some(generated.leaf_pin), "hostname"),
+        ("native.example", true, Some([0; 32]), "pin"),
+        ("native.example", false, None, "certificate"),
+    ] {
+        let mut trust = TlsTrustConfig::new().without_env_roots();
+        if ca {
+            trust = trust.add_ca_der(generated.ca_der.clone());
+        }
+        if let Some(pin) = pin {
+            trust = trust.add_pinned_leaf_sha256(pin);
+        }
+        let addr = spawn_tls_server(&generated).await;
+        let result = connector_with_trust(trust, addr)
+            .connect(host, 443, None)
+            .await;
+        match expected {
+            "ok" => assert!(result.is_ok(), "{host}: {:?}", result.err()),
+            "hostname" => assert!(matches!(result, Err(TlsError::Hostname(_)))),
+            "pin" => assert!(matches!(result, Err(TlsError::Pinning(_)))),
+            "certificate" => assert!(matches!(result, Err(TlsError::Certificate(_)))),
+            _ => unreachable!(),
+        }
+    }
+}
+
 #[tokio::test]
 async fn pinned_cert_still_accepts_matching_hostname() {
     let r#gen = generate_chain("wrong.example", San::Dns("wrong.example"));

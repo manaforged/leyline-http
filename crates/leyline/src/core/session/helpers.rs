@@ -1,11 +1,12 @@
 use http::{Method, Uri};
+use std::sync::Arc;
 
 use crate::cookie::Jar;
 use crate::profile::{Browser, ChromiumBrand, Platform};
 
 use super::{Identity, Session, SessionBuilder};
 use crate::core::request::RequestBuilder;
-use crate::core::{Request, Response, Result};
+use crate::core::{RedirectPolicy, Request, Response, Result};
 
 impl Session {
     pub fn builder() -> SessionBuilder {
@@ -84,8 +85,15 @@ impl Session {
     pub fn with_proxy(&self, proxy_url: &str) -> Self {
         let mut s = self.clone();
         let inner = std::sync::Arc::make_mut(&mut s.inner);
+        inner.pool.evict_proxy(Some(proxy_url));
         inner.proxy_config = inner.proxy_config.clone().set_default_proxy(proxy_url);
         s
+    }
+
+    pub fn with_redirect_policy(&self, policy: RedirectPolicy) -> Self {
+        let mut session = self.clone();
+        Arc::make_mut(&mut session.inner).redirect_policy = policy;
+        session
     }
 
     pub fn browser(&self) -> Option<Browser> {
