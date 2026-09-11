@@ -1,7 +1,4 @@
-//! Small shared helpers used across the TLS proxy and HTTP layers.
-
 #![forbid(unsafe_code)]
-/// Redact a URL for logs and error values: the password, if any, becomes `REDACTED`.
 pub(crate) fn redacted_url(raw: &str) -> String {
     match url::Url::parse(raw) {
         Ok(mut url) if url.password().is_some() => {
@@ -12,13 +9,11 @@ pub(crate) fn redacted_url(raw: &str) -> String {
     }
 }
 
-/// Standard (padded) base64 encode.
 pub(crate) fn base64_encode(input: &str) -> String {
     use base64::Engine;
     base64::engine::general_purpose::STANDARD.encode(input.as_bytes())
 }
 
-/// Generate a random lowercase-hex token from `bytes` cryptographically random bytes (so the output is `2 * bytes` hex chars).
 pub(crate) fn random_hex_token(bytes: usize) -> String {
     use rand::RngCore;
     let mut buf = vec![0u8; bytes];
@@ -26,7 +21,6 @@ pub(crate) fn random_hex_token(bytes: usize) -> String {
     hex::encode(buf)
 }
 
-/// Decode a percent-encoded URL component (e.g. proxy username/password).
 pub(crate) fn percent_decode(s: &str) -> String {
     let mut out = Vec::with_capacity(s.len());
     let bytes = s.as_bytes();
@@ -46,7 +40,6 @@ pub(crate) fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// Whether a method is idempotent per RFC 9110 §9.2.2 — safe to retry automatically without caller opt-in.
 pub(crate) fn is_idempotent(method: &str) -> bool {
     ["GET", "HEAD", "OPTIONS", "PUT", "DELETE", "TRACE"]
         .iter()

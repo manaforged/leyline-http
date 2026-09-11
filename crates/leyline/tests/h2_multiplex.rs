@@ -1,4 +1,3 @@
-//! Concurrent multiplexing tests for the driver/handle model.
 #[path = "h2_support/mod.rs"]
 mod support;
 

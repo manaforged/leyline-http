@@ -1,14 +1,4 @@
 #!/usr/bin/env bash
-# Package Leyline crates in crates.io publish order.
-#
-# `leyline-http` depends on `leyline-quiche` by version, so crates.io packaging
-# cannot verify `leyline-http` until the matching `leyline-quiche` version is
-# visible in the crates.io index. This script makes that dependency boundary
-# explicit instead of hiding it behind a confusing cargo error.
-#
-# Usage:
-#   ./scripts/package.sh [cargo-package-flags...]
-#   ./scripts/package.sh --allow-dirty
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"

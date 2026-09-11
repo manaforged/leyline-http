@@ -515,7 +515,6 @@ def wire_family(family: str, prefix: str) -> None:
         rep = max(group)
         arms.append(f"            {names} => Self::{prefix}{rep},")
         reps.append(f"Self::{prefix}{rep}")
-    # Replace existing arms for this prefix inside hello_rep.
     def swap_hello(match: re.Match[str]) -> str:
         body = match.group(1)
         kept = [
@@ -523,7 +522,6 @@ def wire_family(family: str, prefix: str) -> None:
             for line in body.splitlines()
             if f"Self::{prefix}" not in line or "other =>" in line
         ]
-        # insert our arms before `other => other`
         out = []
         inserted = False
         for line in kept:
@@ -593,7 +591,6 @@ def wire_family(family: str, prefix: str) -> None:
         registry.write_text(reg)
 
     bind = bindings.read_text()
-    # Update latest aliases to newest; add pinned alias for the new major.
     if family == "chrome":
         bind = re.sub(
             r'"chrome" \| "chrome-latest" \| "chrome\d+" \| "chrome-\d+" => \{\n            \(Chrome\d+, Windows, Brand::Chrome\)',
@@ -914,7 +911,6 @@ def fill_edge(dry: bool, no_wire: bool) -> int:
     print(f"edge: overlay on Chrome {newest} (TLS/H2 Chrome, HTTP Edg/{newest})")
     if dry or no_wire:
         return 0
-    # Aliases track default Chrome. wire_family(chrome) already points edge-latest there.
     return 0
 
 

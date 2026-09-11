@@ -1,13 +1,4 @@
 #!/usr/bin/env bash
-# Chrome profile freshness: bundled major vs Chrome for Testing Stable.
-#
-# Does not capture a ClientHello. It fails when the corpus is behind so a
-# human recapture can land. Cron/launchd: `chrome-freshness.sh --install-launchd`.
-#
-# Usage:
-#   scripts/chrome-freshness.sh
-#   scripts/chrome-freshness.sh --install-launchd
-#   scripts/chrome-freshness.sh --uninstall-launchd
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"

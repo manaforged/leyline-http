@@ -1,5 +1,3 @@
-//! Open a WebSocket on a browser session, send one message, print the reply.
-
 use leyline::Session;
 
 #[tokio::main]

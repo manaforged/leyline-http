@@ -1,5 +1,3 @@
-//! Integration tests against tls.peet.ws Offline tests (no network, always run): cargo test -p leyline-http --test tls_peet Live tests (need network, ignored by default): cargo test -p leyline-http --test tls_peet -- --ignored --nocapture These verify — end-to-end against a real TLS inspector — that every profile in the registry produces exactly the fingerprint its TOML claims.
-
 #![expect(
     clippy::unwrap_used,
     reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
@@ -64,7 +62,6 @@ fn h2_fingerprints_match_toml_expectations() {
     );
 }
 
-/// Per-platform H2 overrides resolve to the right Akamai fingerprint.
 #[test]
 fn h2_per_platform_overrides_resolve() {
     let reg = leyline::profile::ProfileRegistry::builtin();
@@ -268,7 +265,6 @@ fn session_shortcuts_work() {
     );
 }
 
-/// Stand up an HTTP CONNECT mock proxy on localhost that accepts one connection, asserts the client sent a well-formed CONNECT request, responds 200 then intentionally closes.
 #[tokio::test]
 async fn offline_http_connect_proxy_wire_bytes() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -335,7 +331,6 @@ async fn offline_http_connect_proxy_wire_bytes() {
     }
 }
 
-/// Stand up a SOCKS5 mock proxy on localhost, walk the client through the auth negotiation + CONNECT command, and verify the bytes match RFC 1928.
 #[cfg(feature = "socks")]
 #[tokio::test]
 async fn offline_socks5_proxy_wire_bytes() {
@@ -415,7 +410,6 @@ async fn offline_socks5_proxy_wire_bytes() {
     println!("✓ offline SOCKS5 wire bytes OK (RFC 1928 greet + auth + CONNECT)");
 }
 
-/// Fetch tls.peet.ws/api/all with the given session and parse JSON.
 async fn peet(session: &leyline::Session) -> Value {
     let mut last_err = String::new();
     for attempt in 0..4 {
@@ -441,7 +435,6 @@ async fn peet(session: &leyline::Session) -> Value {
     panic!("tls.peet.ws failed after retries: {last_err}");
 }
 
-/// The real platform for a browser's wire identity (the profile's own identity sections are the source of truth; Windows is the generic default for browser stacks that ship a Windows identity).
 fn live_platform_for(browser: Browser) -> Platform {
     match browser {
         Browser::SafariIOS17 | Browser::SafariIOS18 => Platform::IOS,
@@ -452,12 +445,10 @@ fn live_platform_for(browser: Browser) -> Platform {
     }
 }
 
-/// Normalize an Akamai fingerprint for comparison: tls.peet.ws has a display bug for setting ID 8 (ENABLE_CONNECT_PROTOCOL) — it renders as `:1` not `8:1`.
 fn normalize_akamai(fp: &str) -> String {
     fp.replace(";:1", ";8:1")
 }
 
-/// Extract the HEADERS frame from the `http2.sent_frames` array and return its header list as a `Vec<(String, String)>` preserving order.
 fn extract_sent_headers(peet_json: &Value) -> Vec<(String, String)> {
     let frames = peet_json["http2"]["sent_frames"]
         .as_array()
@@ -482,7 +473,6 @@ fn extract_sent_headers(peet_json: &Value) -> Vec<(String, String)> {
     panic!("no HEADERS frame in sent_frames");
 }
 
-/// Find a header value by name (case-insensitive).
 fn header_value<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
     headers
         .iter()
@@ -490,7 +480,6 @@ fn header_value<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a s
         .map(|(_, v)| v.as_str())
 }
 
-/// tls.peet.ws echoes quoted header values with an odd escape quirk (adding a backslash before each `"` and dropping the final `"`).
 fn denormalize_peet_quotes(raw: &str) -> String {
     if !raw.contains('\\') {
         return raw.to_string();
@@ -739,7 +728,6 @@ async fn live_ja4_exact_match_safari18() {
     println!("✓ Safari 18 JA4 exact match: {ja4}");
 }
 
-/// Assert every profile with an expected_ja4() in its TOML matches exactly.
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_ja4_exact_match_every_profile_with_expectation() {
@@ -816,7 +804,6 @@ async fn live_h2_akamai_every_profile() {
     );
 }
 
-/// Run a TCP handshake and return the TTL tls.peet.ws observed for the SYN.
 async fn observe_ttl(browser: Browser, platform: Platform) -> i64 {
     let session = leyline::Session::builder()
         .browser(browser)
@@ -829,7 +816,6 @@ async fn observe_ttl(browser: Browser, platform: Platform) -> i64 {
         .expect("no tcpip.ip.ttl")
 }
 
-/// Recover the initial TTL from an observed (per-hop-decremented) value by rounding up to the nearest standard initial TTL.
 fn initial_ttl(observed: i64) -> i64 {
     [64, 128, 255]
         .into_iter()
@@ -963,7 +949,6 @@ async fn live_chrome147_has_cert_compression() {
     println!("✓ Chrome 147 compress_certificate extension present");
 }
 
-/// Anchors the cert-compression *algorithm list*, not just the extension's presence.
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_firefox_cert_compression_advertises_zlib_brotli_zstd() {
@@ -1131,7 +1116,6 @@ async fn live_firefox150_pseudo_header_order() {
     println!("✓ Firefox 150 pseudo-header order: method,path,authority,scheme");
 }
 
-/// Sanity: HTTP/3 works end-to-end against a known H3 server through the pooled Session path.
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_h3_cloudflare() {
@@ -1170,7 +1154,6 @@ async fn live_h3_cloudflare() {
     );
 }
 
-/// Same H3 endpoint, but driven from the Firefox 150 profile.
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_h3_cloudflare_firefox_profile() {
@@ -1210,7 +1193,6 @@ async fn live_h3_google() {
     println!("✓ HTTP/3 to www.google.com: status 200");
 }
 
-/// HTTP/3 connection pooling: two sequential requests on one Session must reuse the same QUIC connection.
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_h3_pool_reuse() {
@@ -1257,7 +1239,6 @@ async fn live_h3_pool_reuse() {
     );
 }
 
-/// True connection-level H2/H3 race: `.race()` to an origin that speaks both (cloudflare-quic.com) must succeed, send the request exactly once on the winning transport, and reuse a warm connection on the next request.
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_race() {
@@ -1301,7 +1282,6 @@ async fn live_race() {
     );
 }
 
-/// Single-flight: N concurrent first-requests to a cold H3 destination share ONE QUIC handshake (one `install`), instead of each opening its own connection and dropping all but the first at install.
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_h3_concurrent_cold_requests_single_flight() {
@@ -1332,7 +1312,6 @@ async fn live_h3_concurrent_cold_requests_single_flight() {
     );
 }
 
-/// Incremental H3 response streaming: a `.stream()` request over HTTP/3 must deliver the body in multiple chunks as they arrive, not as one buffered blob.
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_h3_response_streaming_is_incremental() {
@@ -1391,7 +1370,6 @@ async fn live_h3_response_streaming_is_incremental() {
     );
 }
 
-/// A streaming REQUEST body over H3 is pumped into the request stream chunk by chunk and the terminating FIN rides the last chunk — never an interior one.
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_h3_streaming_request_body_roundtrips() {
@@ -1454,7 +1432,6 @@ async fn live_h3_streaming_request_body_roundtrips() {
     );
 }
 
-/// Decompress a response body per its `content-encoding`.
 fn decode_content_encoding(body: &[u8], encoding: Option<&str>) -> Vec<u8> {
     use std::io::Read;
     match encoding {
@@ -1529,7 +1506,6 @@ async fn live_h2_connection_reuse() {
     println!("✓ Three sequential requests succeeded (pool reuse)");
 }
 
-/// Confirms `Response::tls_peer_certificate` is populated by the HTTPS transport on every response.
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_tls_peer_certificate_exposed() {
@@ -1548,7 +1524,6 @@ async fn live_tls_peer_certificate_exposed() {
     println!("✓ peer certificate exposed: {} DER bytes", cert.len());
 }
 
-/// HTTP CONNECT proxy: set $LEYLINE_TEST_HTTP_PROXY=http://user:pass@host:port to exercise this path end-to-end.
 #[tokio::test]
 #[ignore = "live: needs network + $LEYLINE_TEST_HTTP_PROXY"]
 async fn live_http_connect_proxy() {
@@ -1581,7 +1556,6 @@ async fn live_http_connect_proxy() {
     println!("✓ HTTP CONNECT proxy: tunneled request preserved Chrome 147 H2 fingerprint");
 }
 
-/// SOCKS5 proxy: set $LEYLINE_TEST_SOCKS5_PROXY=socks5://user:pass@host:port to exercise this path.
 #[cfg(feature = "socks")]
 #[tokio::test]
 #[ignore = "live: needs network + $LEYLINE_TEST_SOCKS5_PROXY"]

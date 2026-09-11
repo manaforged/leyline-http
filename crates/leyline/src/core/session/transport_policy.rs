@@ -14,7 +14,6 @@ use crate::pool::checkout_handle;
 use crate::quic::H3Config;
 
 impl Session {
-    /// Resolve the proxy URL to use for this request, honoring (in order of preference): a per-request override, then the session's default proxy.
     fn effective_proxy_for<'a>(
         &'a self,
         url: &url::Url,
@@ -23,13 +22,11 @@ impl Session {
         self.inner.proxy_config.proxy_for(url, request_proxy)
     }
 
-    /// `true` iff *any* proxy was requested for this call (session default OR per-request override) — regardless of `NO_PROXY` filtering.
     #[cfg(feature = "http3")]
     fn proxy_requested(&self, request_proxy: Option<&str>) -> bool {
         request_proxy.is_some() || self.inner.proxy_config.primary().is_some()
     }
 
-    /// Run one prepared attempt: through the middleware stack when the session has one, straight to the transport otherwise.
     pub(crate) async fn dispatch<'a>(&'a self, req: Prepared<'a>) -> Result<TransportResponse> {
         #[cfg(feature = "tower")]
         if let Some(stack) = self.inner.layer.clone() {
@@ -108,7 +105,6 @@ impl Session {
         }
     }
 
-    /// Race QUIC against TCP+TLS; the first transport to hand back a connection carries the request.
     #[cfg(feature = "http3")]
     async fn send_raced(
         &self,

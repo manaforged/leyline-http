@@ -62,7 +62,6 @@ fn env_proxy_prefers_scheme_specific_proxy_over_all_proxy() {
     assert_eq!(v, Some("http://https.example:3128".to_string()));
 }
 
-/// httpoxy: when any CGI-style variable is set AND `HTTP_PROXY` is also set, `HTTP_PROXY` MUST be ignored.
 #[test]
 fn env_proxy_ignores_http_proxy_under_cgi() {
     for signal in CGI_SIGNAL_ENV_VARS {
@@ -89,7 +88,6 @@ fn env_proxy_under_cgi_still_honours_https_proxy() {
     assert_eq!(v, Some("http://legit.example:3128".to_string()));
 }
 
-/// Exercise the asymmetry between `get_var` and `has_var` that the dependency-injected helper explicitly permits.
 #[test]
 fn env_proxy_skips_present_but_unreadable_vars() {
     let get_var = |k: &str| -> Option<String> {

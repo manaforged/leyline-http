@@ -1,5 +1,3 @@
-//! Chrome-profiled cookie jar.
-
 #![forbid(unsafe_code)]
 mod jar;
 pub(crate) mod parse;
@@ -9,7 +7,6 @@ pub use jar::Jar;
 pub(crate) use parse::rejected_cookie_name_value;
 pub use record::{Cookie, SameSite};
 
-/// Whether a request is cross-site relative to the navigation that started it, for SameSite cookie enforcement.
 pub(crate) fn is_cross_site(current: &url::Url, redirect_chain: &[String]) -> bool {
     let site_of =
         |host: &str| parse::registrable_domain(host).unwrap_or_else(|| host.to_ascii_lowercase());

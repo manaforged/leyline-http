@@ -1,6 +1,3 @@
-//! HPACK integer encoding/decoding (RFC 7541 Section 5.1).
-
-/// Encode an integer with the given prefix size (1-8 bits).
 pub fn encode(value: usize, prefix_bits: u8, prefix_pattern: u8, dst: &mut Vec<u8>) {
     let max_prefix = (1 << prefix_bits) - 1;
 
@@ -17,7 +14,6 @@ pub fn encode(value: usize, prefix_bits: u8, prefix_pattern: u8, dst: &mut Vec<u
     }
 }
 
-/// Decode an integer from `src` starting at `pos`, with the given prefix size.
 pub fn decode(
     first_byte: u8,
     prefix_bits: u8,

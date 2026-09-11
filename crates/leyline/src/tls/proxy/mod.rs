@@ -1,5 +1,3 @@
-//! Proxy-tunnel glue — dispatches to HTTP `CONNECT` or SOCKS5.
-
 #![forbid(unsafe_code)]
 use std::time::Duration;
 
@@ -12,10 +10,8 @@ pub(crate) mod http;
 #[cfg(feature = "socks")]
 pub(crate) mod socks5;
 
-/// Ceiling on the client→proxy TCP connect.
 const PROXY_CONNECT_CEILING: Duration = Duration::from_secs(30);
 
-/// Open the TCP leg to the proxy itself — shared by the HTTP CONNECT and SOCKS5 tunnels.
 pub(crate) async fn connect_to_proxy<C: crate::tls::TlsHandshake>(
     connector: &C,
     proxy: &url::Url,
@@ -34,7 +30,6 @@ pub(crate) async fn connect_to_proxy<C: crate::tls::TlsHandshake>(
     }
 }
 
-/// Dispatch a proxied TLS connection based on the scheme of `proxy_url`.
 pub(crate) async fn connect_through_proxy<C: crate::tls::TlsHandshake>(
     connector: &C,
     host: &str,

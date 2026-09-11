@@ -1,5 +1,3 @@
-//! Wrap every request attempt in a Tower middleware stack. `Log` writes through `tracing`, so install a subscriber to see its line.
-
 use std::task::{Context, Poll};
 
 use leyline::layer::{Call, Log, Pending, Reply};
@@ -9,7 +7,6 @@ use tower_service::Service;
 
 const URL: &str = "https://example.com";
 
-/// Layer that stamps one header on every attempt.
 #[derive(Clone, Copy)]
 struct Tag;
 
@@ -21,7 +18,6 @@ impl<S> Layer<S> for Tag {
     }
 }
 
-/// The service [`Tag`] installs.
 #[derive(Clone, Copy)]
 struct Tagged<S> {
     inner: S,

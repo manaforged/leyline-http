@@ -1,5 +1,3 @@
-//! Set custom headers and an `Authorization: Bearer` token on a request.
-
 use leyline::Session;
 
 const URL: &str = "https://example.com/protected";

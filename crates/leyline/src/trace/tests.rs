@@ -6,7 +6,6 @@ use tokio::net::TcpListener;
 use super::{Connect, Done, Head, Sent, Trace};
 use crate::Session;
 
-/// Records one line per event, plus the attempt id each event carried.
 #[derive(Default)]
 struct Recorder {
     lines: Mutex<Vec<String>>,
@@ -50,7 +49,6 @@ impl Trace for Recorder {
     }
 }
 
-/// A plain HTTP/1.1 server that answers `count` keep-alive requests on one accepted connection.
 async fn serve(count: usize) -> std::net::SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

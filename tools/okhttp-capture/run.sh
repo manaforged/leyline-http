@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Hit tls.peet.ws with Maven OkHttp 4.12.0 and 5.5.0. Needs a JDK.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 out="${LEYLINE_ONESHOT_OUT:-${TMPDIR:-/tmp}/leyline-oneshot}"

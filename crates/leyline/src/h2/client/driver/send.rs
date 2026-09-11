@@ -1,5 +1,3 @@
-//! Outbound DATA / HEADERS frame emission and flow-control drain.
-
 use bytes::{Bytes, BytesMut};
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -52,7 +50,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         Ok(())
     }
 
-    /// Drain as much of the per-stream streaming body buffer as the flow control window permits; emit DATA frames accordingly.
     pub(super) async fn try_pump_streaming_body(&mut self, stream_id: u32) -> Result<(), H2Error> {
         loop {
             let next_chunk: Option<Bytes> =
@@ -250,7 +247,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         Ok(())
     }
 
-    /// Write the remainder of a header block (from `offset`) as CONTINUATION frames, END_HEADERS on the last (RFC 9113 §6.10).
     pub(super) async fn write_continuations(
         &mut self,
         stream_id: u32,
@@ -277,7 +273,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         Ok(())
     }
 
-    /// Try to write `body` for `stream_id`; on flow-control exhaustion, stash the remainder in the actor's pending_send and return.
     pub(super) async fn write_body_or_park(
         &mut self,
         stream_id: u32,
@@ -369,7 +364,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         Ok(())
     }
 
-    /// Try to resume each parked stream that now has flow-control credit.
     pub(super) async fn try_drain_pending(&mut self) -> Result<(), H2Error> {
         if self.buffered_pending.is_empty() {
             return Ok(());

@@ -1,16 +1,7 @@
-//! HPACK encode / decode throughput on a realistic Chrome-147 request
-//! header set (~15 headers, ~500 bytes before encoding).
-//!
-//! Measures Leyline's encoder + decoder in isolation. No peer comparison:
-//! adding the `h2` crate as a dev-dep would pull a full tokio/hyper stack
-//! into the bench suite for one micro-benchmark, so that is left as a
-//! future exercise (noted in the bench module doc).
 
 use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
 use leyline::h2::hpack::{Decoder, Encoder};
 
-/// ~15 headers, ~500 bytes raw — matches what `session.get(url)` produces
-/// for a typical navigation request on Chrome 147.
 fn chrome_147_request_headers() -> Vec<(&'static str, &'static str)> {
     vec![
         (":method", "GET"),

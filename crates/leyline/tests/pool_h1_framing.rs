@@ -1,4 +1,3 @@
-//! `validate_framing_headers` must refuse: - multiple `Content-Length` header lines - a single `Content-Length` value with commas (`10, 10`) - both `Content-Length` and `Transfer-Encoding` present - `Transfer-Encoding` where `chunked` is not the final coding All four are RFC 9112 §6.1 request-smuggling vectors against a keep-alive pool.
 #![expect(
     clippy::unwrap_used,
     reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
@@ -32,7 +31,6 @@ async fn run_against(server_response: &'static [u8]) -> String {
     msg
 }
 
-/// Absolute-form request targets to a plaintext proxy are scheme://authority + path + query; no userinfo, no fragment.
 #[tokio::test]
 async fn absolute_form_target_strips_userinfo_and_fragment() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

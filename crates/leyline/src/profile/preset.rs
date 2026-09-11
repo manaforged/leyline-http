@@ -1,66 +1,42 @@
-//! Request presets — Chrome-accurate header templates for each request type.
-
 use std::borrow::Cow;
 
-/// Request type preset that determines sec-fetch-* headers and ordering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Preset {
-    /// Page navigation (GET document).
     Navigate,
-    /// Script/CSS resource fetch.
     Script,
-    /// XHR/fetch JSON API call.
     Xhr,
-    /// Form POST.
     Form,
-    /// Cross-origin API call.
     CrossOrigin,
-    /// Same-site subdomain API call.
     SameSite,
-    /// Form-submit POST whose response is a top-level *document* navigation (e.g. classic `<form action="..." method="post">` with no `fetch()` wrapper — clicking the form button replaces the page).
     FormNavigate,
 }
 
-/// Context needed to build preset headers.
 pub struct HeaderContext<'a> {
-    /// Full `User-Agent` string.
     pub user_agent: &'a str,
-    /// `Sec-CH-UA` brand list, already quoted per Chrome's format.
     pub sec_ch_ua: &'a str,
-    /// `Sec-CH-UA-Mobile` flag (`?0` for desktop, `?1` for mobile).
     pub sec_ch_ua_mobile: &'a str,
-    /// Platform label used in `Sec-CH-UA-Platform` (quoted downstream).
     pub sec_ch_ua_platform: &'a str,
-    /// `Accept-Language` header value.
     pub accept_language: &'a str,
-    /// Origin of the current request (`scheme://host[:port]`).
     pub origin: &'a str,
-    /// `Referer` header value, or empty if none.
     pub referer: &'a str,
-    /// Firefox (Gecko) identity.
     pub firefox: bool,
 }
 
-/// A single header name-value pair, in insertion order.
 pub type HeaderPair = (Cow<'static, str>, Cow<'static, str>);
 
-/// Borrowed (zero-alloc) header part from a static literal.
 #[inline]
 fn b(s: &'static str) -> Cow<'static, str> {
     Cow::Borrowed(s)
 }
 
-/// Owned header part from a runtime string (the session UA, an origin, …).
 #[inline]
 fn o(s: &str) -> Cow<'static, str> {
     Cow::Owned(s.to_string())
 }
 
-/// Firefox's document `Accept` (Gecko) — captured live from tls.peet.ws (Firefox 153, Windows): `text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8`, with none of Chrome's `image/apng` / `application/signed-exchange` / image types.
 const FIREFOX_DOC_ACCEPT: &str = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
 
-/// Real Firefox H2 request-header order, captured live from tls.peet.ws (Firefox 153, Windows).
 pub(crate) const FIREFOX_HEADER_ORDER: &[&str] = &[
     "user-agent",
     "accept",
@@ -80,7 +56,6 @@ pub(crate) const FIREFOX_HEADER_ORDER: &[&str] = &[
 ];
 
 impl Preset {
-    /// Build the ordered header list for this preset.
     pub fn build_headers(&self, ctx: &HeaderContext<'_>) -> Vec<HeaderPair> {
         let mut headers = match self {
             Self::Navigate => Self::navigate_headers(ctx),
@@ -97,7 +72,6 @@ impl Preset {
         headers
     }
 
-    /// Reshape a Chrome-shaped preset to Firefox's request SET (the session applies Firefox's header ORDER afterward, via [`FIREFOX_HEADER_ORDER`]).
     fn reshape_for_firefox(preset: Preset, headers: &mut Vec<HeaderPair>) {
         headers.retain(|(name, _)| !name.starts_with("sec-ch-ua"));
         for (name, value) in headers.iter_mut() {
@@ -115,7 +89,6 @@ impl Preset {
         headers.push((b("te"), b("trailers")));
     }
 
-    /// `sec-ch-ua-platform`, quoted per Chrome's wire format.
     fn sec_ch_ua_platform(ctx: &HeaderContext<'_>) -> HeaderPair {
         (
             b("sec-ch-ua-platform"),
@@ -123,7 +96,6 @@ impl Preset {
         )
     }
 
-    /// `accept-encoding` value shared by every Chrome-shaped preset.
     fn accept_encoding() -> HeaderPair {
         (b("accept-encoding"), b("gzip, deflate, br, zstd"))
     }

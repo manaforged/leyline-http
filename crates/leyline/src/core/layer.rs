@@ -1,5 +1,3 @@
-//! Tower middleware around one prepared request attempt.
-
 use std::borrow::Cow;
 use std::future::{Future, poll_fn};
 use std::pin::Pin;
@@ -18,10 +16,8 @@ use crate::core::transport::{Prepared, TransportBody, TransportResponse};
 use crate::core::{ResponseTiming, Session};
 use crate::profile::preset::HeaderPair;
 
-/// The future every layer service in this seam returns.
 pub type Pending = Pin<Box<dyn Future<Output = Result<Reply>> + Send>>;
 
-/// One prepared attempt as a layer sees it: the session has already resolved headers, body, and proxy, and no transport is chosen yet.
 pub struct Call {
     method: Method,
     uri: Uri,
@@ -34,42 +30,34 @@ pub struct Call {
 }
 
 impl Call {
-    /// Request method.
     pub fn method(&self) -> &Method {
         &self.method
     }
 
-    /// Request URL of this attempt; a redirect leg carries the URL of that leg.
     pub fn uri(&self) -> &Uri {
         &self.uri
     }
 
-    /// Request headers in wire order.
     pub fn headers(&self) -> &HeaderList {
         &self.headers
     }
 
-    /// Request headers in wire order, mutable: an edit here reaches the wire.
     pub fn headers_mut(&mut self) -> &mut HeaderList {
         &mut self.headers
     }
 
-    /// Request body.
     pub fn body(&self) -> &Body {
         &self.body
     }
 
-    /// Proxy URL this attempt uses, after session and per-request resolution.
     pub fn proxy(&self) -> Option<&str> {
         self.proxy.as_deref()
     }
 
-    /// `true` when the caller asked for a streamed response body.
     pub fn stream(&self) -> bool {
         self.stream
     }
 
-    /// Build one call from a prepared attempt plus the session that runs it.
     pub(crate) fn new(session: Session, req: Prepared<'_>) -> Result<Self> {
         let Prepared {
             method,
@@ -101,7 +89,6 @@ impl Call {
         })
     }
 
-    /// Run this call on the session transport.
     async fn run(self) -> Result<Reply> {
         let Self {
             method,
@@ -136,13 +123,11 @@ impl Call {
     }
 }
 
-/// The response of one call: the transport head plus its body.
 pub struct Reply {
     inner: TransportResponse,
 }
 
 impl Reply {
-    /// A canned reply with this status, no headers, and an empty body.
     pub fn new(status: StatusCode) -> Self {
         Self {
             inner: TransportResponse {
@@ -161,7 +146,6 @@ impl Reply {
         }
     }
 
-    /// The same reply with one more header appended.
     pub fn header(
         mut self,
         name: impl TryInto<http::HeaderName>,
@@ -173,18 +157,15 @@ impl Reply {
         Ok(self)
     }
 
-    /// The same reply with this buffered body.
     pub fn body(mut self, body: impl Into<Vec<u8>>) -> Self {
         self.inner.body = TransportBody::Buffered(body.into());
         self
     }
 
-    /// Response status.
     pub fn status(&self) -> StatusCode {
         self.inner.status
     }
 
-    /// First value for this response header name, when it is valid UTF-8.
     pub fn get(&self, name: &str) -> Option<&str> {
         self.inner
             .headers
@@ -193,7 +174,6 @@ impl Reply {
             .and_then(|(_, v)| v.to_str().ok())
     }
 
-    /// Name the URL this reply came from when a short-circuiting layer left it empty.
     pub(crate) fn seal(mut self, url: &url::Url) -> TransportResponse {
         if self.inner.final_url.is_empty() {
             self.inner.final_url = url.to_string();
@@ -202,7 +182,6 @@ impl Reply {
     }
 }
 
-/// The innermost service: it runs the call on the session transport.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Transport;
 
@@ -220,13 +199,10 @@ impl Service<Call> for Transport {
     }
 }
 
-/// Type-erased composed stack held by the session.
 pub(crate) trait Stack: Send + Sync {
-    /// Run one call through the stack.
     fn call(&self, call: Call) -> Pending;
 }
 
-/// Holds one composed service and clones it per call.
 pub(crate) struct Hold<S>(pub(crate) S);
 
 impl<S> Stack for Hold<S>
@@ -243,7 +219,6 @@ where
     }
 }
 
-/// Layer that emits one `tracing` line per call: method, host, status, and elapsed time.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Log;
 
@@ -255,7 +230,6 @@ impl<S> Layer<S> for Log {
     }
 }
 
-/// The service [`Log`] wraps around the next service.
 #[derive(Clone, Copy, Debug)]
 pub struct Logged<S> {
     inner: S,

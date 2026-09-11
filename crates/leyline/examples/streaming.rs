@@ -1,5 +1,3 @@
-//! Stream a large upload and download without buffering the whole body.
-
 use bytes::Bytes;
 use futures_util::StreamExt;
 use leyline::{Body, Browser, Session};

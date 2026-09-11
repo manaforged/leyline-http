@@ -1,36 +1,22 @@
-//! Idempotent retry with exponential backoff.
-
 use std::time::Duration;
 
-/// Trigger condition for a retry attempt.
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub enum RetryTrigger {
-    /// Connection-level IO errors (reset, EOF mid-response, refused, etc.).
     ConnectionError,
-    /// A specific HTTP status code (e.g. 429, 502, 503, 504).
     Status(u16),
-    /// Any 5xx status.
     ServerError,
-    /// The request hit the per-request or session timeout.
     Timeout,
 }
 
-/// Retry policy. Start from [`RetryPolicy::none`] or [`RetryPolicy::transient`] and set one field per call.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct RetryPolicy {
-    /// Maximum number of retry attempts (0 = no retry).
     pub max_retries: u32,
-    /// Initial backoff before the first retry.
     pub initial_backoff: Duration,
-    /// Upper bound on the exponential backoff.
     pub max_backoff: Duration,
-    /// Exponential factor applied between attempts.
     pub backoff_factor: f64,
-    /// Whether to apply AWS-style full jitter (`backoff * uniform(0,1)`) to avoid thundering-herd alignment.
     pub jitter: bool,
-    /// Set of triggers that should cause a retry.
     pub retry_on: Vec<RetryTrigger>,
 }
 
@@ -41,7 +27,6 @@ impl Default for RetryPolicy {
 }
 
 impl RetryPolicy {
-    /// A policy that performs no retries.
     pub fn none() -> Self {
         Self {
             max_retries: 0,
@@ -53,7 +38,6 @@ impl RetryPolicy {
         }
     }
 
-    /// Retry connection errors, 429/502/503/504, and timeouts. `max_retries` is 3, so 4 attempts in total (100ms → 1s).
     pub fn transient() -> Self {
         Self {
             max_retries: 3,
@@ -72,55 +56,46 @@ impl RetryPolicy {
         }
     }
 
-    /// Override the maximum number of retries.
     pub fn with_max_retries(mut self, n: u32) -> Self {
         self.max_retries = n;
         self
     }
 
-    /// Override the initial and maximum backoff durations.
     pub fn with_backoff(mut self, initial: Duration, max: Duration) -> Self {
         self.initial_backoff = initial;
         self.max_backoff = max;
         self
     }
 
-    /// Add an HTTP status code to the retry trigger set.
     pub fn on_status(mut self, code: u16) -> Self {
         self.retry_on.push(RetryTrigger::Status(code));
         self
     }
 
-    /// Add a trigger to the retry set.
     pub fn on(mut self, trigger: RetryTrigger) -> Self {
         self.retry_on.push(trigger);
         self
     }
 
-    /// Replace the whole trigger set.
     pub fn retry_on(mut self, triggers: impl IntoIterator<Item = RetryTrigger>) -> Self {
         self.retry_on = triggers.into_iter().collect();
         self
     }
 
-    /// Set the exponential factor applied between attempts.
     pub fn backoff_factor(mut self, factor: f64) -> Self {
         self.backoff_factor = factor;
         self
     }
 
-    /// Enable or disable full jitter on the backoff.
     pub fn jitter(mut self, on: bool) -> Self {
         self.jitter = on;
         self
     }
 
-    /// Returns true if the policy never retries.
     pub(crate) fn is_none(&self) -> bool {
         self.max_retries == 0
     }
 
-    /// Should we retry on this status code?
     pub(crate) fn matches_status(&self, status: u16) -> bool {
         for t in &self.retry_on {
             match *t {
@@ -132,21 +107,18 @@ impl RetryPolicy {
         false
     }
 
-    /// Should we retry on a connection-level error?
     pub(crate) fn matches_connection_error(&self) -> bool {
         self.retry_on
             .iter()
             .any(|t| matches!(t, RetryTrigger::ConnectionError))
     }
 
-    /// Should we retry on a timeout?
     pub(crate) fn matches_timeout(&self) -> bool {
         self.retry_on
             .iter()
             .any(|t| matches!(t, RetryTrigger::Timeout))
     }
 
-    /// Compute the backoff duration for attempt `n` (0-indexed).
     pub(crate) fn backoff(&self, attempt: u32) -> Duration {
         let base = self.initial_backoff.as_secs_f64();
         let raw = base * self.backoff_factor.powi(attempt as i32);
@@ -160,13 +132,11 @@ impl RetryPolicy {
     }
 }
 
-/// Return a uniform jitter factor in the range `[0.0, 1.0]`.
 fn cheap_jitter() -> f64 {
     use rand::Rng;
     rand::rng().random_range(0.0..=1.0)
 }
 
-/// Parse a `Retry-After` header value into a delay (delta-seconds or IMF-fixdate).
 pub(crate) fn parse_retry_after(value: &str) -> Option<Duration> {
     let value = value.trim();
     if let Ok(secs) = value.parse::<u64>() {

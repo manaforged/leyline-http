@@ -1,5 +1,3 @@
-//! HTTP/2 frame types and codec.
-
 #![forbid(unsafe_code)]
 mod data;
 mod goaway;
@@ -25,46 +23,32 @@ pub use window_update::WindowUpdateFrame;
 use bytes::BytesMut;
 use bytes::{BufMut, Bytes};
 
-/// Decode a big-endian `u16` from the first two bytes of `b`.
 #[inline]
 pub(crate) fn be_u16(b: &[u8]) -> u16 {
     u16::from_be_bytes([b[0], b[1]])
 }
 
-/// Decode a big-endian `u32` from the first four bytes of `b`.
 #[inline]
 pub(crate) fn be_u32(b: &[u8]) -> u32 {
     u32::from_be_bytes([b[0], b[1], b[2], b[3]])
 }
 
-/// Frame type IDs (RFC 9113 Section 6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum FrameType {
-    /// DATA frame — carries HTTP request/response body bytes.
     Data = 0x0,
-    /// HEADERS frame — carries a HPACK-encoded header block fragment.
     Headers = 0x1,
-    /// PRIORITY frame — conveys sender-advised stream priority.
     Priority = 0x2,
-    /// RST_STREAM frame — abruptly terminates a stream.
     RstStream = 0x3,
-    /// SETTINGS frame — conveys connection-level configuration.
     Settings = 0x4,
-    /// PUSH_PROMISE frame — reserves a stream for server push.
     PushPromise = 0x5,
-    /// PING frame — liveness check and round-trip time measurement.
     Ping = 0x6,
-    /// GOAWAY frame — initiates graceful shutdown of a connection.
     GoAway = 0x7,
-    /// WINDOW_UPDATE frame — extends flow-control credit.
     WindowUpdate = 0x8,
-    /// CONTINUATION frame — continues a header block split across frames.
     Continuation = 0x9,
 }
 
 impl FrameType {
-    /// Parse from wire byte.
     pub fn from_u8(val: u8) -> Option<Self> {
         match val {
             0x0 => Some(Self::Data),
@@ -82,24 +66,17 @@ impl FrameType {
     }
 }
 
-/// 9-byte frame header (RFC 9113 Section 4.1).
 #[derive(Debug, Clone, Copy)]
 pub struct FrameHeader {
-    /// Payload length (24-bit, max 16384 default, up to 16777215).
     pub length: u32,
-    /// Frame type.
     pub frame_type: u8,
-    /// Type-specific flags.
     pub flags: u8,
-    /// Stream identifier (31-bit, R bit must be 0).
     pub stream_id: u32,
 }
 
-/// Frame header size in bytes.
 pub const FRAME_HEADER_LEN: usize = 9;
 
 impl FrameHeader {
-    /// Parse a 9-byte frame header.
     pub fn parse(buf: &[u8; FRAME_HEADER_LEN]) -> Self {
         let length = ((buf[0] as u32) << 16) | ((buf[1] as u32) << 8) | (buf[2] as u32);
         let frame_type = buf[3];
@@ -115,7 +92,6 @@ impl FrameHeader {
         }
     }
 
-    /// Serialize to 9 bytes.
     pub fn encode(&self, buf: &mut impl BufMut) {
         buf.put_u8((self.length >> 16) as u8);
         buf.put_u8((self.length >> 8) as u8);
@@ -126,51 +102,31 @@ impl FrameHeader {
     }
 }
 
-/// A parsed HTTP/2 frame.
 #[derive(Debug)]
 pub enum Frame {
-    /// DATA frame (type 0x0).
     Data(DataFrame),
-    /// HEADERS frame (type 0x1).
     Headers(HeadersFrame),
-    /// PRIORITY frame (type 0x2).
     Priority(PriorityFrame),
-    /// RST_STREAM frame (type 0x3).
     RstStream(RstStreamFrame),
-    /// SETTINGS frame (type 0x4).
     Settings(SettingsFrame),
-    /// PUSH_PROMISE frame (type 0x5).
     PushPromise(PushPromiseFrame),
-    /// PING frame (type 0x6).
     Ping(PingFrame),
-    /// GOAWAY frame (type 0x7).
     GoAway(GoAwayFrame),
-    /// WINDOW_UPDATE frame (type 0x8).
     WindowUpdate(WindowUpdateFrame),
-    /// CONTINUATION frame (type 0x9) — raw header block fragment.
     Continuation {
-        /// Stream identifier.
         stream_id: u32,
-        /// Whether this is the last CONTINUATION (END_HEADERS set).
         end_headers: bool,
-        /// Header block fragment.
         fragment: Bytes,
     },
-    /// Unknown frame type — must be ignored per RFC 9113 Section 4.1.
     Unknown {
-        /// Frame type byte.
         frame_type: u8,
-        /// Flags.
         flags: u8,
-        /// Stream ID.
         stream_id: u32,
-        /// Payload.
         payload: Bytes,
     },
 }
 
 impl Frame {
-    /// Parse a frame from header + payload.
     pub fn parse(header: FrameHeader, payload: Bytes) -> Result<Self, crate::h2::H2Error> {
         match FrameType::from_u8(header.frame_type) {
             Some(FrameType::Data) => Ok(Frame::Data(DataFrame::parse(header, payload)?)),

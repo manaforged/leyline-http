@@ -1,4 +1,3 @@
-//! Regression gate: the inbound receive window must be *enforced*, not merely advertised.
 #[path = "h2_support/mod.rs"]
 mod support;
 
@@ -12,7 +11,6 @@ use leyline::h2::frame::FrameType;
 use support::*;
 use tokio::io::AsyncReadExt;
 
-/// Connection window and stream window both default (65535).
 fn test_config() -> H2Config {
     H2Config {
         settings: vec![
@@ -45,7 +43,6 @@ fn test_config() -> H2Config {
     }
 }
 
-/// Like `test_config` but with a *small* per-stream window (1024) while the connection window stays at 65535.
 fn small_stream_window_config() -> H2Config {
     let mut cfg = test_config();
     cfg.settings = vec![
@@ -75,7 +72,6 @@ fn get_req(path: &str) -> (PseudoHeaders, CowHeaders) {
     )
 }
 
-/// A single DATA frame larger than the advertised *connection* window (65535) — plus the small slack — must tear the whole connection down with FLOW_CONTROL_ERROR rather than letting the window silently go negative.
 #[tokio::test]
 async fn connection_recv_window_overrun_kills_connection() {
     let (client_io, mut server_io) = tokio::io::duplex(256 * 1024);
@@ -134,7 +130,6 @@ async fn connection_recv_window_overrun_kills_connection() {
     let _ = server.await;
 }
 
-/// A DATA frame that overruns only the *stream* window (1024) while the connection window (65535) has headroom must RST_STREAM the offending stream with FLOW_CONTROL_ERROR and leave the connection intact.
 #[tokio::test]
 async fn stream_recv_window_overrun_rsts_stream_and_survives() {
     let (client_io, mut server_io) = tokio::io::duplex(256 * 1024);

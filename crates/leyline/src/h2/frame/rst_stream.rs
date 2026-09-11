@@ -1,22 +1,16 @@
-//! RST_STREAM frame (RFC 9113 Section 6.4).
-
 use bytes::{BufMut, Bytes};
 
 use super::{FrameHeader, FrameType, be_u32};
 use crate::h2::H2Error;
 use crate::h2::error::ErrorCode;
 
-/// RST_STREAM frame — abruptly terminates a stream.
 #[derive(Debug)]
 pub struct RstStreamFrame {
-    /// Stream being terminated.
     pub stream_id: u32,
-    /// Reason the stream is being reset.
     pub error_code: ErrorCode,
 }
 
 impl RstStreamFrame {
-    /// Parse from header + payload.
     pub fn parse(header: FrameHeader, payload: Bytes) -> Result<Self, H2Error> {
         if header.stream_id == 0 {
             return Err(H2Error::Connection {
@@ -39,7 +33,6 @@ impl RstStreamFrame {
         })
     }
 
-    /// Encode to bytes.
     pub fn encode(&self, buf: &mut impl BufMut) {
         let header = FrameHeader {
             length: 4,

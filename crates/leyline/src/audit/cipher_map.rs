@@ -1,6 +1,3 @@
-//! Cipher suite and extension name → numeric ID mappings.
-
-/// Map a cipher suite name to its IANA 2-byte identifier.
 pub fn cipher_id(name: &str) -> Option<u16> {
     Some(match name {
         "TLS_AES_128_GCM_SHA256" => 0x1301,
@@ -39,7 +36,6 @@ pub fn cipher_id(name: &str) -> Option<u16> {
     })
 }
 
-/// Map a signature algorithm name to its IANA 2-byte identifier.
 pub fn sigalg_id(name: &str) -> Option<u16> {
     Some(match name {
         "ecdsa_secp256r1_sha256" => 0x0403,
@@ -65,7 +61,6 @@ pub fn sigalg_id(name: &str) -> Option<u16> {
     })
 }
 
-/// Map a named curve to its IANA Supported Group identifier.
 pub fn curve_id(name: &str) -> Option<u16> {
     Some(match name {
         "SECP256R1" | "P-256" => 0x0017,
@@ -79,7 +74,6 @@ pub fn curve_id(name: &str) -> Option<u16> {
     })
 }
 
-/// Check if a value is a GREASE value (0x?a?a pattern).
 pub fn is_grease(val: u16) -> bool {
     val & 0x0f0f == 0x0a0a
 }

@@ -1,4 +1,3 @@
-//! Guards public Leyline claims against absolute marketing language.
 use std::path::{Path, PathBuf};
 
 const FORBIDDEN_WORDS: &[&str] = &[
@@ -39,7 +38,6 @@ fn public_claims_stay_bounded() {
     );
 }
 
-/// Every test or example name printed in README.md must exist in src/, tests/, or examples/.
 #[test]
 fn cited_test_names_exist() {
     let known = source_identifiers();
@@ -62,7 +60,6 @@ fn cited_test_names_exist() {
     );
 }
 
-/// Doc examples must not reintroduce two known footguns: `?` on an infallible constructor (won't compile) and `resp.audit().unwrap()` (panics unless audit was enabled on the session).
 #[test]
 fn examples_avoid_known_footguns() {
     const FORBIDDEN_SNIPPETS: &[&str] = &[
@@ -102,7 +99,6 @@ fn examples_avoid_known_footguns() {
     );
 }
 
-/// Drop a markdown section (the `## Heading` line through the line before the next `## ` heading) so its contents are excluded from scanning.
 fn strip_section(text: &str, heading: &str) -> String {
     let mut out = String::new();
     let mut in_section = false;
@@ -118,7 +114,6 @@ fn strip_section(text: &str, heading: &str) -> String {
     out
 }
 
-/// Backticked tokens in a doc that look like a test/function name.
 fn cited_test_candidates(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     for (i, span) in text.split('`').enumerate() {
@@ -140,7 +135,6 @@ fn cited_test_candidates(text: &str) -> Vec<String> {
     out
 }
 
-/// Lowercase snake_case with at least one underscore — the shape of test fn names and lowercase API methods, but not paths (`foo.rs`), types (`H2Config`), or `Type::method` citations.
 fn is_snake_ident(s: &str) -> bool {
     s.contains('_')
         && !s.is_empty()
@@ -149,7 +143,6 @@ fn is_snake_ident(s: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
 }
 
-/// Every identifier-shaped token that appears in the crate's `src/` or `tests/` Rust sources (test fn names included).
 fn source_identifiers() -> std::collections::HashSet<String> {
     let mut set = std::collections::HashSet::new();
     let crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));

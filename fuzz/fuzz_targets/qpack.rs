@@ -1,4 +1,3 @@
-//! QPACK decoder fuzz: arbitrary header blocks → `Decoder::decode` must never panic.
 #![no_main]
 
 use leyline_quiche::h3::qpack::Decoder;

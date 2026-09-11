@@ -1,4 +1,3 @@
-//! Frame codec fuzz: arbitrary bytes → `FrameHeader::parse` + `Frame::parse` must never panic.
 #![no_main]
 
 use bytes::Bytes;

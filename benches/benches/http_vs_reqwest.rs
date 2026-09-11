@@ -1,25 +1,3 @@
-//! Bare HTTP/1.1 head-to-head: Leyline vs `reqwest`.
-//!
-//! Unlike the rest of the suite (in-process `tokio::io::duplex` mock peers),
-//! reqwest can only attach to a real socket — so this bench stands up a tiny
-//! loopback HTTP/1.1 keep-alive server and races both clients against it over
-//! `http://127.0.0.1:<port>/`. Both clients hit the same server, so the delta
-//! is pure client-stack cost (request build + H1 codec + pool checkout +
-//! response parse), not network.
-//!
-//! Leyline's `http://` scheme routes through its plaintext HTTP/1.1 transport
-//! (`send_request_h1`, no TLS); reqwest is built `default-features = false`
-//! (no TLS backend, no h2, no gzip) so it is the bare hyper H1 client. To keep
-//! the comparison fair, both fully consume the 10-byte response body —
-//! leyline buffers it into `Response` eagerly, and reqwest's `.bytes()` forces
-//! the read that `.send()` alone defers.
-//!
-//! Scenarios (mirroring `multiplex.rs`):
-//!   * `http_vs_reqwest::{leyline,reqwest}_serial_1k` — 1000 back-to-back GETs
-//!     on one reused, pooled client. The steady-state per-request cost.
-//!   * `http_vs_reqwest::{leyline,reqwest}_concurrent_100` — 100 concurrent
-//!     GETs. Over H1 this fans out across the client's connection pool, so it
-//!     measures pooled-concurrency behaviour, not multiplexing.
 
 use std::time::{Duration, Instant};
 
@@ -31,14 +9,9 @@ use tokio::runtime::Runtime;
 
 use leyline::Session;
 
-/// Minimal fixed keep-alive 200 response with a 10-byte body.
 const RESP: &[u8] =
     b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: keep-alive\r\n\r\nok-10byte!";
 
-/// Drain complete GET requests off one keep-alive connection and answer each
-/// with `RESP`. GETs carry no body, so `\r\n\r\n` terminates a request; the
-/// scan tolerates partial reads and pipelining. (No request-body parsing —
-/// the bench only sends GETs.)
 async fn handle_conn(mut sock: TcpStream) {
     let mut buf: Vec<u8> = Vec::with_capacity(8192);
     let mut tmp = [0u8; 8192];
@@ -68,8 +41,6 @@ async fn run_server(listener: TcpListener) {
     }
 }
 
-/// Bind a loopback listener, spawn the server on the current runtime, and
-/// return the base URL clients should hit.
 async fn spawn_server() -> String {
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let addr = listener.local_addr().expect("local_addr");
@@ -84,7 +55,6 @@ fn bench_leyline_serial(c: &mut Criterion) {
     let rt = Runtime::new().expect("tokio runtime");
     let url = rt.block_on(spawn_server());
     let session = Session::new();
-    // Warm the pool so we time steady-state, not the first connect.
     rt.block_on(async {
         session.get(&url).await.expect("warm");
     });

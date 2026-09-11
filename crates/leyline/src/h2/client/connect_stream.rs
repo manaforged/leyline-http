@@ -1,5 +1,3 @@
-//! [`H2ConnectStream`] — a bidirectional byte stream layered over an HTTP/2 connection opened via RFC 8441 extended CONNECT.
-
 use std::io;
 use std::pin::Pin;
 
@@ -7,24 +5,18 @@ use bytes::Bytes;
 use tokio::sync::mpsc;
 use tokio_util::sync::PollSender;
 
-/// Bidirectional stream over an HTTP/2 connection opened via RFC 8441 extended CONNECT.
 pub struct H2ConnectStream {
     pub(super) status: u16,
     pub(super) response_headers: Vec<(String, String)>,
-    /// Wrapped in `Option` so `poll_shutdown` and `Drop` can take it to signal EOF to the driver-side relay task.
     pub(super) write_tx: Option<PollSender<io::Result<Bytes>>>,
     pub(super) read_rx: mpsc::Receiver<io::Result<Bytes>>,
     pub(super) read_leftover: Bytes,
     pub(super) read_eof: bool,
-    /// Tracks `poll_shutdown` state so a caller awaiting `AsyncWriteExt::shutdown` blocks until the driver has actually written the END_STREAM DATA frame to the wire.
     pub(super) shutdown_state: ShutdownState,
 }
 
-/// State machine for `H2ConnectStream::poll_shutdown`.
 pub(super) enum ShutdownState {
-    /// Initial state — the caller hasn't started shutdown yet.
     Open,
-    /// Caller dropped the sender; now waiting for the driver-side relay to observe EOF and emit END_STREAM.
     Draining,
 }
 
@@ -40,12 +32,10 @@ impl std::fmt::Debug for H2ConnectStream {
 }
 
 impl H2ConnectStream {
-    /// The server's `:status` from the response HEADERS — `200` for a successful extended CONNECT per RFC 8441 §5.
     pub fn status(&self) -> u16 {
         self.status
     }
 
-    /// Non-pseudo response headers.
     pub fn response_headers(&self) -> &[(String, String)] {
         &self.response_headers
     }
@@ -185,9 +175,7 @@ impl tokio::io::AsyncWrite for H2ConnectStream {
     }
 }
 
-/// Max bytes we accumulate into `H2ConnectStream::read_leftover` during `poll_shutdown`.
 const H2_CONNECT_LEFTOVER_CAP: usize = 1 << 20;
-/// Max chunks drained per `poll_shutdown` iteration.
 const H2_CONNECT_SHUTDOWN_DRAIN_BUDGET: usize = 64;
 
 impl Drop for H2ConnectStream {

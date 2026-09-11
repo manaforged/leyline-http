@@ -1,6 +1,5 @@
 use super::*;
 
-/// `(&str, &str)` view of a dynamic-table entry for assertions.
 fn entry(dt: &DynamicTable, i: usize) -> Option<(&str, &str)> {
     dt.get(i).map(|(n, v)| {
         (

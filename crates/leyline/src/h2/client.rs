@@ -1,5 +1,3 @@
-//! Concurrent multiplexing HTTP/2 client (driver + handle).
-
 mod connect_stream;
 mod driver;
 mod handle;

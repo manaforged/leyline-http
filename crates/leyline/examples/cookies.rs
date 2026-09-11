@@ -1,5 +1,3 @@
-//! Persist cookies across requests with a `Jar`.
-
 use leyline::cookie::Jar;
 use leyline::{Browser, Platform, Session};
 

@@ -1,4 +1,3 @@
-//! Recovery / resilience tests: transient connection failures from flaky providers recover when retries are explicitly enabled, the default performs no application retry, and a stalled handshake fails fast on the connect timeout rather than hanging the whole request budget.
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
@@ -7,7 +6,6 @@ use leyline::{RetryPolicy, Session};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
-/// A GET against an upstream that drops the first connection before responding must recover when retries are enabled because a mid-exchange EOF is a retryable connection error.
 #[tokio::test]
 async fn explicit_retry_policy_recovers_from_transient_connection_drop() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -54,7 +52,6 @@ async fn explicit_retry_policy_recovers_from_transient_connection_drop() {
     server.abort();
 }
 
-/// Without an explicit retry policy, the same transient drop surfaces as an error with no second connection attempt.
 #[tokio::test]
 async fn default_session_does_not_retry_a_transient_connection_drop() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -95,7 +92,6 @@ async fn default_session_does_not_retry_a_transient_connection_drop() {
     server.abort();
 }
 
-/// A default connect timeout (10s) must bound a stalled TLS handshake: an endpoint that completes TCP but never progresses the handshake must fail well before the 300s `total`, without the caller configuring anything.
 #[tokio::test]
 async fn connect_timeout_bounds_a_stalled_tls_handshake() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

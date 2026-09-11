@@ -1,12 +1,9 @@
-//! Windows system trust store bridge for BoringSSL.
-
 use std::ptr;
 
 use windows_sys::Win32::Security::Cryptography::{
     CERT_CONTEXT, CertCloseStore, CertEnumCertificatesInStore, CertOpenSystemStoreW, HCERTSTORE,
 };
 
-/// RAII wrapper that closes the Win32 cert store on drop.
 struct RootStore(HCERTSTORE);
 
 impl Drop for RootStore {
@@ -20,7 +17,6 @@ impl Drop for RootStore {
     }
 }
 
-/// Read every certificate in the Windows `"ROOT"` logical store and return each as DER-encoded bytes.
 pub(crate) fn load_system_roots() -> std::io::Result<Vec<Vec<u8>>> {
     let store_name: Vec<u16> = "ROOT\0".encode_utf16().collect();
 

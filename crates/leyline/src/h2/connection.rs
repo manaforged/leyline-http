@@ -1,5 +1,3 @@
-//! HTTP/2 client connection — handshake, settings exchange, stream dispatch.
-
 use std::collections::VecDeque;
 use std::time::Instant;
 
@@ -12,22 +10,14 @@ use crate::h2::error::{ErrorCode, H2Error};
 use crate::h2::hpack;
 use crate::header_str::HeaderStr;
 
-/// Peer SETTINGS (received from server).
 #[derive(Debug, Clone)]
 pub struct PeerSettings {
-    /// SETTINGS_HEADER_TABLE_SIZE advertised by the peer (in octets).
     pub header_table_size: u32,
-    /// SETTINGS_ENABLE_PUSH — whether the peer accepts server push.
     pub enable_push: bool,
-    /// SETTINGS_MAX_CONCURRENT_STREAMS — peer's concurrency limit, if any.
     pub max_concurrent_streams: Option<u32>,
-    /// SETTINGS_INITIAL_WINDOW_SIZE — per-stream flow-control window.
     pub initial_window_size: u32,
-    /// SETTINGS_MAX_FRAME_SIZE — the largest frame the peer will accept.
     pub max_frame_size: u32,
-    /// SETTINGS_MAX_HEADER_LIST_SIZE — peer's header list size limit, if any.
     pub max_header_list_size: Option<u32>,
-    /// RFC 8441 §3 — `SETTINGS_ENABLE_CONNECT_PROTOCOL`.
     pub enable_connect_protocol: bool,
 }
 
@@ -45,9 +35,7 @@ impl Default for PeerSettings {
     }
 }
 
-/// Result of applying SETTINGS — carries deltas for flow control adjustment.
 pub(crate) struct SettingsApplyResult {
-    /// Change in INITIAL_WINDOW_SIZE (new - old), if it changed.
     pub window_size_delta: Option<i64>,
 }
 
@@ -115,34 +103,25 @@ impl PeerSettings {
     }
 }
 
-/// A response received from the server.
 #[derive(Debug)]
 pub struct H2Response {
-    /// HTTP status code.
     pub status: u16,
-    /// Response headers (name, value pairs in order).
     pub headers: Vec<(HeaderStr, HeaderStr)>,
-    /// Response body.
     pub body: Vec<u8>,
-    /// Trailer headers, if any.
     pub trailers: Option<Vec<(HeaderStr, HeaderStr)>>,
 }
 
-/// Sliding-window flood detector shared by the RST_STREAM and SETTINGS defences.
 #[doc(hidden)]
 #[derive(Debug, Clone)]
 pub struct RstFloodDetector {
     events: VecDeque<Instant>,
     threshold: u32,
     window: std::time::Duration,
-    /// Tracing `target` so RST vs SETTINGS trips are distinguishable in operator logs without separate detector types.
     label: &'static str,
-    /// Human-readable reason attached to the `EnhanceYourCalm` connection error on trip.
     reason: &'static str,
 }
 
 impl RstFloodDetector {
-    /// Build a detector with the given sliding window + threshold and a generic "RST_STREAM" label.
     pub fn new(threshold: u32, window: std::time::Duration) -> Self {
         Self::with_label(
             threshold,
@@ -152,7 +131,6 @@ impl RstFloodDetector {
         )
     }
 
-    /// Build a detector with a custom label + reason.
     pub fn with_label(
         threshold: u32,
         window: std::time::Duration,
@@ -168,7 +146,6 @@ impl RstFloodDetector {
         }
     }
 
-    /// Record one event at `at`; return `Err(EnhanceYourCalm)` if the window now holds strictly more than `threshold` events.
     pub fn record(&mut self, at: Instant) -> Result<(), H2Error> {
         while let Some(front) = self.events.front().copied() {
             if at.saturating_duration_since(front) > self.window {
@@ -197,16 +174,13 @@ impl RstFloodDetector {
     }
 }
 
-/// Legacy HTTP/2 client connection shell.
 pub struct ClientConnection<T> {
     handle: H2Client,
-    /// Kept so the driver task is aborted when the shell is dropped; prevents orphaned tasks when callers don't explicitly shut down.
     _driver: Option<DriverTask>,
     _io_marker: std::marker::PhantomData<T>,
 }
 
 impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> ClientConnection<T> {
-    /// Perform the HTTP/2 handshake with fingerprint-accurate SETTINGS.
     #[tracing::instrument(name = "h2.handshake", level = "debug", skip_all)]
     pub async fn handshake(io: T, config: H2Config) -> Result<Self, H2Error> {
         let (handle, driver) = client::start(io, config).await?;
@@ -217,17 +191,14 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> ClientConnection<T> {
         })
     }
 
-    /// Start a concurrent multiplexing client over `io`, returning the cloneable handle and the driver task.
     pub async fn start(io: T, config: H2Config) -> Result<(H2Client, DriverTask), H2Error> {
         client::start(io, config).await
     }
 
-    /// Borrow the underlying cloneable handle.
     pub fn handle(&self) -> &H2Client {
         &self.handle
     }
 
-    /// Send a request and receive the full response.
     pub async fn send_request(
         &mut self,
         pseudo: PseudoHeaders,
@@ -237,7 +208,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> ClientConnection<T> {
         self.handle.send_request(pseudo, headers, body).await
     }
 
-    /// Send a request with optional trailers, receive the full response.
     pub async fn send_request_with_trailers(
         &mut self,
         pseudo: PseudoHeaders,
@@ -251,29 +221,21 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> ClientConnection<T> {
     }
 }
 
-/// A single request header name/value pair.
 pub(crate) type HeaderPair = (
     std::borrow::Cow<'static, str>,
     std::borrow::Cow<'static, str>,
 );
 
-/// Pseudo-headers for a request.
 #[derive(Debug, Clone, Default)]
 pub struct PseudoHeaders {
-    /// `:method` pseudo-header value (HTTP method in upper-case).
     pub method: String,
-    /// `:scheme` pseudo-header value (typically `https`).
     pub scheme: String,
-    /// `:authority` pseudo-header value (`host` with optional port).
     pub authority: String,
-    /// `:path` pseudo-header value, including the query string.
     pub path: String,
-    /// RFC 8441 `:protocol` pseudo-header value for extended CONNECT (e.g. `Some("websocket")` for WebSocket-over-HTTP/2).
     pub protocol: Option<String>,
 }
 
 impl PseudoHeaders {
-    /// Build the ordered pseudo-header list for a request.
     pub fn build_pseudo_list<'a>(
         &'a self,
         pseudo_order: &[PseudoOrder; 4],
@@ -304,7 +266,6 @@ impl PseudoHeaders {
     }
 }
 
-/// Map a [`SettingId`] to its wire-format u16 identifier.
 pub(crate) fn id_to_u16(id: &SettingId) -> u16 {
     match id {
         SettingId::HeaderTableSize => 0x1,
@@ -318,7 +279,6 @@ pub(crate) fn id_to_u16(id: &SettingId) -> u16 {
     }
 }
 
-/// Encode the pseudo-header list followed by regular request headers into an HPACK header block.
 pub(crate) fn encode_request_pseudos<'a>(
     encoder: &mut hpack::Encoder,
     pseudo_list: Vec<(&'a str, &'a str)>,

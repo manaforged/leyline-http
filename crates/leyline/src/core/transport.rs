@@ -1,5 +1,3 @@
-//! Transport layer — connects TLS/plain TCP and sends requests.
-
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -17,13 +15,11 @@ use crate::core::body_stream::BodyStream;
 use crate::core::error::{Error, Kind, Result};
 use crate::core::response::HttpVersion;
 
-/// Response status as `http` sees it; an out-of-range code is reported as a protocol error.
 fn status(code: u16) -> Result<StatusCode> {
     StatusCode::from_u16(code)
         .map_err(|_| Error::new(Kind::Request).with_message(format!("invalid status code {code}")))
 }
 
-/// Response headers as `http` sees them; a header the wire types cannot represent is dropped.
 fn adopt<I, N, V>(headers: I) -> Vec<(HeaderName, HeaderValue)>
 where
     I: IntoIterator<Item = (N, V)>,
@@ -40,17 +36,14 @@ where
         .collect()
 }
 
-/// Body shape returned by a transport.
 pub(crate) enum TransportBody {
     Buffered(Vec<u8>),
     Streaming(BodyStream),
 }
 
-/// Response returned by a transport.
 pub(crate) struct TransportResponse {
     pub(crate) status: StatusCode,
     pub(crate) headers: Vec<(HeaderName, HeaderValue)>,
-    /// Trailer headers of a buffered response; empty for streaming responses and for HTTP/1.1.
     pub(crate) trailers: Vec<(HeaderName, HeaderValue)>,
     pub(crate) body: TransportBody,
     pub(crate) final_url: String,
@@ -59,11 +52,9 @@ pub(crate) struct TransportResponse {
     pub(crate) peer_cert_der: Option<Vec<u8>>,
     pub(crate) tls_version: Option<String>,
     pub(crate) tls_cipher: Option<String>,
-    /// Wall-clock timing breakdown for this hop.
     pub(crate) timing: crate::core::ResponseTiming,
 }
 
-/// One request ready for a transport: the session has resolved headers, body, and proxy; the transport only frames it.
 pub(crate) struct Prepared<'a> {
     pub(crate) method: &'a str,
     pub(crate) url: &'a url::Url,
@@ -73,7 +64,6 @@ pub(crate) struct Prepared<'a> {
     pub(crate) stream_response: bool,
 }
 
-/// Send an HTTP request with browser-compatible defaults.
 #[tracing::instrument(
     name = "transport.auto",
     level = "debug",
@@ -159,7 +149,6 @@ pub(crate) async fn send_request_auto(
     }
 }
 
-/// Send an HTTP request, reusing pooled H2 connections when available.
 #[tracing::instrument(
     name = "transport.h2",
     level = "debug",
@@ -254,7 +243,6 @@ pub(crate) async fn send_request_h2(
     })
 }
 
-/// Translate a [`Body`] into the h2-crate request body shape.
 fn body_to_h2_request(body: Body) -> crate::h2::client::RequestBody {
     match body {
         Body::Empty => crate::h2::client::RequestBody::None,
@@ -269,7 +257,6 @@ fn body_to_h2_request(body: Body) -> crate::h2::client::RequestBody {
     }
 }
 
-/// Reject a header list whose message framing is ambiguous: more than one `Transfer-Encoding`, or `Transfer-Encoding` beside `Content-Length` (RFC 9112 §6.1).
 pub(crate) fn check_framing(headers: &[HeaderPair]) -> Result<()> {
     let te = headers
         .iter()
@@ -292,7 +279,6 @@ pub(crate) fn check_framing(headers: &[HeaderPair]) -> Result<()> {
     Ok(())
 }
 
-/// RFC 9113 §8.2.2: connection-specific headers must never be emitted on an H2 connection — a compliant peer rejects the stream.
 pub(crate) fn strip_connection_specific_headers(headers: &mut Vec<HeaderPair>) -> Result<()> {
     check_framing(headers)?;
     headers.retain_mut(|(name, value)| {
@@ -312,7 +298,6 @@ pub(crate) fn strip_connection_specific_headers(headers: &mut Vec<HeaderPair>) -
     Ok(())
 }
 
-/// Translate a [`Body`] into the H1 pool's request body shape.
 fn body_to_h1(body: Body) -> H1Body {
     match body {
         Body::Empty => H1Body::Empty,
@@ -328,7 +313,6 @@ fn body_to_h1(body: Body) -> H1Body {
     }
 }
 
-/// Send an HTTP/1.1 request through the HTTP/1.1 keep-alive pool.
 #[tracing::instrument(
     name = "transport.h1",
     level = "debug",
@@ -460,7 +444,6 @@ fn h1_error_to_core(e: H1PooledError) -> Error {
     }
 }
 
-/// Send an HTTP/3 request over QUIC.
 #[cfg(feature = "http3")]
 #[tracing::instrument(
     name = "transport.h3",
@@ -544,7 +527,6 @@ pub(crate) async fn send_request_h3(
     })
 }
 
-/// True when the H2 attempt failed because the server declined the `h2` ALPN (e.g. some CDN/WAF edges serve a cookieless interstitial over HTTP/1.1, replying with no ALPN).
 fn is_h2_alpn_mismatch(err: &Error) -> bool {
     err.alpn().is_some()
 }

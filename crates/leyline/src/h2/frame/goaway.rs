@@ -1,24 +1,17 @@
-//! GOAWAY frame (RFC 9113 Section 6.8).
-
 use bytes::{BufMut, Bytes};
 
 use super::{FrameHeader, FrameType, be_u32};
 use crate::h2::H2Error;
 use crate::h2::error::ErrorCode;
 
-/// GOAWAY frame — signals connection shutdown.
 #[derive(Debug)]
 pub struct GoAwayFrame {
-    /// Highest stream ID that was processed.
     pub last_stream_id: u32,
-    /// Error code.
     pub error_code: ErrorCode,
-    /// Optional debug data.
     pub debug_data: Bytes,
 }
 
 impl GoAwayFrame {
-    /// Parse from header + payload.
     pub fn parse(header: FrameHeader, payload: Bytes) -> Result<Self, H2Error> {
         if header.stream_id != 0 {
             return Err(H2Error::Connection {
@@ -51,7 +44,6 @@ impl GoAwayFrame {
         })
     }
 
-    /// Encode to bytes.
     pub fn encode(&self, buf: &mut impl BufMut) {
         let length = 8 + self.debug_data.len() as u32;
         let header = FrameHeader {

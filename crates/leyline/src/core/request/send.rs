@@ -1,5 +1,3 @@
-//! Request dispatch — quick-path, digest auth, and retry loop.
-
 use super::RequestBuilder;
 use crate::core::Result;
 use crate::core::body::Body;
@@ -9,7 +7,6 @@ use crate::core::session::execute::Attempt;
 use crate::util::is_idempotent;
 
 impl RequestBuilder {
-    /// Send the request and return a buffered response.
     pub async fn send(mut self) -> Result<Response> {
         self.prepare()?;
         let retry_policy = self.retry_policy.clone();
@@ -81,7 +78,6 @@ impl RequestBuilder {
         }
     }
 
-    /// Hand the builder's fields to the session as one owned attempt.
     fn into_attempt(mut self) -> Attempt {
         let headers = if self.headers.is_empty() {
             None
@@ -102,7 +98,6 @@ impl RequestBuilder {
         }
     }
 
-    /// Builder-error replay, query-param append, and opt-in request-body compression.
     pub(crate) fn prepare(&mut self) -> Result<()> {
         if let Some(err) = self.builder_error.take() {
             return Err(err);
@@ -140,7 +135,6 @@ impl RequestBuilder {
         Ok(())
     }
 
-    /// Handle a 401 Digest challenge: compute the Authorization response and retry once, honoring stale=true with a single fresh-nonce retry (RFC 7616 §3.3).
     async fn digest_followup(
         session: &crate::core::Session,
         attempt: Attempt,
@@ -204,15 +198,11 @@ impl RequestBuilder {
     }
 }
 
-/// What the retry loop does after one attempt.
 enum RetryPlan {
-    /// Give up and surface the attempt's result.
     Stop,
-    /// Sleep this long, then try again.
     Backoff(std::time::Duration),
 }
 
-/// Applies the retry policy to one attempt's outcome.
 fn plan_retry(
     result: &Result<Response>,
     retry_policy: &crate::core::retry::RetryPolicy,

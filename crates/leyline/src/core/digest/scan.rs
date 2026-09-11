@@ -1,14 +1,8 @@
-//! Quoted-string aware `key=value` scanner for a Digest challenge.
-
-/// One `key=value` pair from a challenge body.
 pub(super) struct Pair<'a> {
-    /// Raw key text, not yet trimmed or lowercased.
     pub key: &'a str,
-    /// Value text with the surrounding quotes removed.
     pub val: String,
 }
 
-/// Split a challenge body into its `key=value` pairs.
 pub(super) fn pairs(body: &str) -> Vec<Pair<'_>> {
     let bytes = body.as_bytes();
     let mut out = Vec::new();
@@ -36,7 +30,6 @@ pub(super) fn pairs(body: &str) -> Vec<Pair<'_>> {
     out
 }
 
-/// Read one value at `i`, quoted or bare, and return it with the next offset.
 fn value(body: &str, i: usize) -> (String, usize) {
     let bytes = body.as_bytes();
     if i < bytes.len() && bytes[i] == b'"' {

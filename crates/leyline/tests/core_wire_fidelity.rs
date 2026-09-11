@@ -1,4 +1,3 @@
-//! Wire-fidelity integration tests for session header merging.
 #[path = "core_support/raw_server.rs"]
 mod raw_server;
 
@@ -256,7 +255,6 @@ async fn caller_dnt_wins_over_edge_brand_overlay() {
     server.finish().await;
 }
 
-/// A site can emit 7 headers at 5 different anchor points.
 #[tokio::test]
 async fn anchored_headers_interleave_at_preset_slots() {
     let mut server = RawServer::start(vec![RawResponse::ok()]).await;
@@ -308,7 +306,6 @@ async fn anchored_headers_interleave_at_preset_slots() {
     server.finish().await;
 }
 
-/// A plain `.header("authorization", ...)` rides at the inferred `AfterUserAgent` slot without the caller naming it, because `leyline::profile::infer_anchor` recognises the well-known name.
 #[tokio::test]
 async fn plain_authorization_rides_after_user_agent() {
     let mut server = RawServer::start(vec![RawResponse::ok()]).await;

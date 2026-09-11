@@ -1,4 +1,3 @@
-//! CONTINUATION reassembly fuzz: header-block fragments split across HEADERS + CONTINUATION frame boundaries, joined and HPACK-decoded.
 #![no_main]
 
 use bytes::Bytes;

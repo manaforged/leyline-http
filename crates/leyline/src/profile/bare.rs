@@ -1,11 +1,8 @@
-//! The synthetic **bare** profile — a hand-built, non-impersonating default.
-
 use std::collections::HashMap;
 
 use super::types::{BrowserProfile, H2Profile, PlatformIdentity, ProfileMeta, TlsProfile};
 
 impl BrowserProfile {
-    /// The synthetic **bare** profile: a plain, non-impersonating HTTP client.
     pub fn bare() -> Self {
         let identity = PlatformIdentity {
             user_agent: concat!("leyline/", env!("CARGO_PKG_VERSION")).to_string(),

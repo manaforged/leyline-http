@@ -1,37 +1,24 @@
-//! HTTP/2 SETTINGS frame and pseudo-header ordering.
-
 use std::time::Duration;
 
 use crate::{Error, Kind};
 
-/// HTTP/2 SETTINGS parameter ID.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u16)]
 #[non_exhaustive]
 pub enum SettingId {
-    /// SETTINGS_HEADER_TABLE_SIZE (0x1)
     HeaderTableSize = 1,
-    /// SETTINGS_ENABLE_PUSH (0x2)
     EnablePush = 2,
-    /// SETTINGS_MAX_CONCURRENT_STREAMS (0x3)
     MaxConcurrentStreams = 3,
-    /// SETTINGS_INITIAL_WINDOW_SIZE (0x4)
     InitialWindowSize = 4,
-    /// SETTINGS_MAX_FRAME_SIZE (0x5)
     MaxFrameSize = 5,
-    /// SETTINGS_MAX_HEADER_LIST_SIZE (0x6)
     MaxHeaderListSize = 6,
-    /// Unknown setting 8 (EnableConnectProtocol in some implementations).
     Unknown8 = 8,
-    /// Unknown setting 9.
     Unknown9 = 9,
 }
 
-/// RFC 8441 §3 — `SETTINGS_ENABLE_CONNECT_PROTOCOL` identifier (0x8).
 pub const SETTINGS_ENABLE_CONNECT_PROTOCOL: u16 = 0x8;
 
 impl SettingId {
-    /// Parse from the key string used in TOML profiles.
     pub fn parse_key(s: &str) -> Option<Self> {
         match s {
             "header_table_size" => Some(Self::HeaderTableSize),
@@ -47,22 +34,16 @@ impl SettingId {
     }
 }
 
-/// HTTP/2 pseudo-header ordering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PseudoOrder {
-    /// `:method`
     Method,
-    /// `:authority`
     Authority,
-    /// `:scheme`
     Scheme,
-    /// `:path`
     Path,
 }
 
 impl PseudoOrder {
-    /// Parse from the key string used in TOML profiles.
     pub fn parse_key(s: &str) -> Option<Self> {
         match s {
             "method" => Some(Self::Method),
@@ -73,7 +54,6 @@ impl PseudoOrder {
         }
     }
 
-    /// Short label for fingerprint display.
     pub fn label(&self) -> &'static str {
         match self {
             Self::Method => "m",
@@ -84,48 +64,30 @@ impl PseudoOrder {
     }
 }
 
-/// Priority fields emitted alongside a client-initiated HEADERS frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PriorityParams {
-    /// Exclusive dependency bit (E) — when set, the new stream becomes the sole dependency of `stream_dependency`.
     pub exclusive: bool,
-    /// Stream ID this new stream depends on (0 = root of the tree).
     pub stream_dependency: u32,
-    /// Weight on the wire (`actual_weight - 1`); range `0..=255`.
     pub weight: u8,
 }
 
-/// Resolved HTTP/2 fingerprint configuration.
 #[derive(Debug, Clone)]
 pub struct H2Config {
-    /// Ordered SETTINGS parameters with their values.
     pub settings: Vec<(SettingId, u32)>,
-    /// SETTINGS frame parameter ordering.
     pub settings_order: Vec<SettingId>,
-    /// Pseudo-header ordering for HEADERS frames.
     pub pseudo_order: [PseudoOrder; 4],
-    /// Initial connection-level window size (for WINDOW_UPDATE after preface).
     pub initial_connection_window_size: u32,
-    /// Optional PRIORITY fields to emit on the initial HEADERS frame of each request.
     pub default_priority: Option<PriorityParams>,
-    /// Threshold for the inbound RST_STREAM flood guard — more than this many RST_STREAM frames inside `rst_stream_flood_window` causes the connection to tear down with `ENHANCE_YOUR_CALM` (CVE-2023-44487 defense-in-depth).
     pub rst_stream_flood_threshold: u32,
-    /// Sliding window over which `rst_stream_flood_threshold` is measured.
     pub rst_stream_flood_window: Duration,
-    /// Hard cap on the size of a response body.
     pub max_response_body_bytes: usize,
-    /// Hard cap on the total size of a single inbound header block (HEADERS + all subsequent CONTINUATION fragments).
     pub max_header_block_bytes: usize,
-    /// Threshold for the inbound non-ACK SETTINGS flood guard — more than this many mid-connection SETTINGS updates inside `settings_flood_window` causes the connection to tear down with `ENHANCE_YOUR_CALM`.
     pub settings_flood_threshold: u32,
-    /// Sliding window over which `settings_flood_threshold` is measured.
     pub settings_flood_window: Duration,
-    /// Wall-clock ceiling on reassembling a single inbound header block (HEADERS + all subsequent CONTINUATION frames).
     pub header_block_reassembly_timeout: Duration,
 }
 
 impl H2Config {
-    /// The per-stream receive window we advertise to the peer via `SETTINGS_INITIAL_WINDOW_SIZE`, falling back to the RFC 9113 §6.5.2 default when the profile omits the setting.
     pub(crate) fn advertised_initial_window_size(&self) -> u32 {
         self.settings
             .iter()
@@ -134,7 +96,6 @@ impl H2Config {
             .unwrap_or(65_535)
     }
 
-    /// Build from a TOML H2Profile.
     pub fn from_profile(h2: &crate::profile::H2Profile) -> Result<Self, Error> {
         use std::collections::HashMap;
 
@@ -233,7 +194,6 @@ impl H2Config {
         })
     }
 
-    /// Compute the Akamai-style H2 fingerprint string.
     pub fn akamai_fingerprint(&self) -> String {
         let settings_str: String = self
             .settings_order

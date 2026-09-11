@@ -1,17 +1,4 @@
 #!/usr/bin/env bash
-# Leyline release qualification.
-#
-# Usage: ./scripts/verify.sh [--full] [--bssl-source-build] [--fuzz [SECONDS]]
-# default        package parity and compile sanity
-# --full         tests, docs, audits, benches, and live checks
-# --fuzz [N]     run each cargo-fuzz target for N seconds (default 300)
-#                on top of the existing corpus replay. Requires
-#                `cargo install cargo-fuzz` and nightly rustc. Corpus
-#                replay (fast, just runs the seeded inputs once) is
-#                always performed in non-quick mode if cargo-fuzz is
-#                available — it catches regressions on bugs already
-#                caught-and-fixed without adding the nightly-rustc
-#                requirement to a normal release gate.
 set -euo pipefail
 
 full=0
@@ -27,7 +14,6 @@ while [[ $# -gt 0 ]]; do
             full=1
             fuzz=1
             shift
-            # Optional numeric seconds argument.
             if [[ "${1:-}" =~ ^[0-9]+$ ]]; then
                 fuzz_seconds="$1"
                 shift
@@ -56,7 +42,6 @@ step "rust comments (one line)"
 python3 scripts/check-comments.py || fail "comments must be one-line rustdoc or // SAFETY:"
 ok "comment lint"
 
-# -- package versions -----------------------------------------------------
 step "package version parity"
 workspace_version="$(awk -F'"' '/^version *= *"/{print $2; exit}' Cargo.toml)"
 python_version="$(awk -F'"' '/^version *= *"/{print $2; exit}' wrappers/python/pyproject.toml)"
@@ -73,7 +58,6 @@ for (const pin of Object.values(p.optionalDependencies || {})) {
     || fail "Python package version differs from the workspace"
 ok "package versions match $workspace_version"
 
-# -- rustc toolchain sanity ----------------------------------------------
 step "rust toolchain"
 rustc --version
 cargo --version
@@ -87,12 +71,6 @@ step "cargo +$msrv check"
 cargo +"$msrv" check --workspace || fail "MSRV cargo check failed"
 ok "MSRV compile sanity"
 
-# -- package boundaries ---------------------------------------------------
-# Cargo 1.90+'s multi-package overlay can package unpublished workspace
-# dependencies together. The BoringSSL crates are standalone workspaces during
-# development, so stage the committed tree and temporarily join them to the
-# root workspace. This exercises the real normalized archives before a
-# first-cut release exists in the registry.
 step "cargo package (publishable Rust crates)"
 package_stage="$(mktemp -d)"
 package_root=""
@@ -120,9 +98,6 @@ step "prebuilt BoringSSL artifact checksums"
     || fail "committed BoringSSL artifacts differ from native/CHECKSUMS"
 ok "prebuilt BoringSSL artifacts match native/CHECKSUMS"
 
-# Compile an external consumer against the extracted archives. Patch all
-# internal packages to their just-packaged copies: this checks the archive
-# boundary without requiring a first-cut release to already be indexed.
 step "packaged leyline consumer smoke check"
 package_root="$(mktemp -d)"
 for archive in "$CARGO_TARGET_DIR"/package/*.crate; do
@@ -173,15 +148,10 @@ if [[ $full -eq 0 ]]; then
     exit 0
 fi
 
-# -- format --------------------------------------------------------------
 step "cargo fmt --all --check"
 cargo fmt --all -- --check || fail "rustfmt found formatting issues"
 ok "format clean"
 
-# -- clippy --------------------------------------------------------------
-# `leyline-quiche` is a vendored upstream fork. Gate clippy strictly on
-# Leyline's own crates, with `--no-deps` so generated or vendored code
-# does not pollute our release signal.
 step "cargo clippy (workspace, excluding vendored leyline-quiche, --no-deps)"
 cargo clippy \
     --workspace \
@@ -191,7 +161,6 @@ cargo clippy \
     || fail "clippy produced warnings"
 ok "clippy clean"
 
-# -- docs ----------------------------------------------------------------
 step "cargo doc (workspace, excluding vendored leyline-quiche)"
 RUSTDOCFLAGS="-D warnings" cargo doc \
     --workspace \
@@ -200,7 +169,6 @@ RUSTDOCFLAGS="-D warnings" cargo doc \
     || fail "rustdoc warnings"
 ok "docs clean"
 
-# -- tests ---------------------------------------------------------------
 step "cargo test --workspace --exclude leyline-quiche"
 cargo test --workspace --exclude leyline-quiche || fail "tests failed"
 ok "tests pass"
@@ -215,7 +183,6 @@ if [[ $full -eq 1 ]]; then
     ok "smoke pass"
 fi
 
-# -- supply chain --------------------------------------------------------
 step "cargo deny --all-features check"
 if ! command -v cargo-deny >/dev/null; then
     fail "cargo-deny not installed: cargo install --locked cargo-deny"
@@ -223,10 +190,6 @@ fi
 cargo deny --all-features check || fail "cargo-deny found issues"
 ok "cargo-deny clean"
 
-# -- public API surface ---------------------------------------------------
-# Mirrors the "semver" and "external types" jobs of the Pre-tag matrix
-# workflow (.github/workflows/matrix.yml). Both tools are optional locally:
-# skip with a note rather than failing a release gate on a missing binary.
 semver_status="skipped (cargo install --locked cargo-semver-checks)"
 step "cargo semver-checks check-release -p leyline-http"
 if ! command -v cargo-semver-checks >/dev/null; then
@@ -258,7 +221,6 @@ else
     ok "external types clean"
 fi
 
-# -- benches compile -----------------------------------------------------
 step "benches compile (sub-workspace)"
 if [[ -d benches ]]; then
     ( cd benches && cargo bench --no-run ) || fail "benches fail to compile"
@@ -267,13 +229,6 @@ else
     echo "  (benches/ not present; skipping bench compile gate)"
 fi
 
-# -- fuzz corpus replay --------------------------------------------------
-# Replay each corpus once. Fast. Does not need nightly. Time-bounded
-# fuzzing needs nightly and is `--fuzz [SECONDS]`.
-#
-# The full time-bounded fuzzer (which DOES need nightly rustc for
-# sanitizer support) is opt-in via `--fuzz [SECONDS]` because nightly
-# is a heavier prerequisite for a normal release.
 FUZZ_TARGETS=(h2_frame hpack h2_continuation h1_head h1_chunked cookie connect_response qpack)
 
 if [[ $full -eq 1 ]]; then
@@ -284,8 +239,6 @@ if [[ $full -eq 1 ]]; then
         echo "  (cargo-fuzz not installed; skipping corpus replay — install with"
         echo "   'cargo install --locked cargo-fuzz' to enable this gate)"
     elif ! command -v rustc >/dev/null || ! rustup toolchain list 2>/dev/null | grep -q nightly; then
-        # cargo-fuzz insists on nightly even for `-runs=0` corpus replay
-        # because the instrumentation layer is only stable on nightly.
         echo "  (nightly toolchain not installed; skipping corpus replay —"
         echo "   install with 'rustup toolchain install nightly')"
     else
@@ -319,10 +272,6 @@ if [[ $fuzz -eq 1 ]]; then
     ok "fuzz time-bounded runs clean"
 fi
 
-# -- pre-tag matrix parity ------------------------------------------------
-# The same list of checks as .github/workflows/matrix.yml ("Pre-tag matrix",
-# workflow_dispatch only). Read this before you cut a tag: anything marked
-# "matrix only" was not proven by this local run.
 step "pre-tag matrix parity (.github/workflows/matrix.yml)"
 printf '  %-22s %s\n' \
     'check (MSRV)'        "ran (cargo +$msrv check --workspace)" \

@@ -1,23 +1,15 @@
-//! Request-body compression.
-
 use crate::core::error::{Error, Result};
 
-/// Content codec for an outgoing request body, selected via [`crate::RequestBuilder::compress`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ContentEncoding {
-    /// gzip (RFC 1952).
     Gzip,
-    /// Brotli (RFC 7932).
     Brotli,
-    /// Zstandard (RFC 8878).
     Zstd,
-    /// zlib-wrapped DEFLATE (RFC 1950), per RFC 9110 §8.4.1.2.
     Deflate,
 }
 
 impl ContentEncoding {
-    /// The `Content-Encoding` header token for this codec.
     pub(crate) fn header_value(self) -> &'static str {
         match self {
             ContentEncoding::Gzip => "gzip",
@@ -27,7 +19,6 @@ impl ContentEncoding {
         }
     }
 
-    /// Compress `data` with this codec.
     pub(crate) fn encode(self, data: &[u8]) -> Result<Vec<u8>> {
         match self {
             ContentEncoding::Gzip => {
@@ -91,7 +82,6 @@ impl ContentEncoding {
     }
 }
 
-/// Error for a codec whose cargo feature was compiled out.
 #[cfg(not(all(
     feature = "compression-gzip",
     feature = "compression-brotli",

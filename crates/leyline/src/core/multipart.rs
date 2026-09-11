@@ -1,5 +1,3 @@
-//! `multipart/form-data` bodies (RFC 7578).
-
 use std::io;
 use std::path::Path;
 use std::pin::Pin;
@@ -10,7 +8,6 @@ use futures_util::Stream;
 
 use crate::core::body::Body;
 
-/// A single part of a multipart form.
 pub struct Part {
     pub(crate) name: String,
     pub(crate) body: Body,
@@ -20,7 +17,6 @@ pub struct Part {
 }
 
 impl Part {
-    /// Build a text part with `Content-Type: text/plain; charset=utf-8`.
     pub fn text(value: impl Into<String>) -> Self {
         let s = value.into();
         Self {
@@ -32,7 +28,6 @@ impl Part {
         }
     }
 
-    /// Build a part from a raw byte buffer.
     pub fn bytes(bytes: impl Into<Bytes>) -> Self {
         Self {
             name: String::new(),
@@ -43,7 +38,6 @@ impl Part {
         }
     }
 
-    /// Build a part from an arbitrary `Stream` yielding `io::Result<Bytes>`.
     pub fn stream<S>(stream: S) -> Self
     where
         S: Stream<Item = io::Result<Bytes>> + Send + 'static,
@@ -57,26 +51,22 @@ impl Part {
         }
     }
 
-    /// Set the `filename` attribute on this part's `Content-Disposition` header.
     pub fn filename(mut self, name: impl Into<String>) -> Self {
         self.filename = Some(name.into());
         self
     }
 
-    /// Set the `Content-Type` header for this part.
     pub fn mime(mut self, mime: impl Into<String>) -> Self {
         self.mime = Some(mime.into());
         self
     }
 
-    /// Append an extra header to this part (e.g. `Content-Transfer-Encoding`).
     pub fn header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.extra_headers.push((name.into(), value.into()));
         self
     }
 }
 
-/// A `multipart/form-data` form.
 pub struct Form {
     pub(crate) parts: Vec<Part>,
     pub(crate) boundary: String,
@@ -89,7 +79,6 @@ impl Default for Form {
 }
 
 impl Form {
-    /// Create an empty form with a fresh random boundary.
     pub fn new() -> Self {
         Self {
             parts: Vec::new(),
@@ -97,12 +86,10 @@ impl Form {
         }
     }
 
-    /// The generated boundary string.
     pub fn boundary(&self) -> &str {
         &self.boundary
     }
 
-    /// Append a plain-text part with the given name and value.
     pub fn text(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         let mut part = Part::text(value);
         part.name = name.into();
@@ -110,14 +97,12 @@ impl Form {
         self
     }
 
-    /// Append an arbitrary part with the given name.
     pub fn part(mut self, name: impl Into<String>, mut part: Part) -> Self {
         part.name = name.into();
         self.parts.push(part);
         self
     }
 
-    /// Append a file part by streaming the file chunk-by-chunk from disk — the file is never fully materialised in memory.
     pub fn file(mut self, name: impl Into<String>, path: impl AsRef<Path>) -> io::Result<Self> {
         let path = path.as_ref().to_path_buf();
         let metadata = std::fs::metadata(&path)?;
@@ -150,7 +135,6 @@ impl Form {
         Ok(self)
     }
 
-    /// Total length of the serialised body in bytes, when every part has a known length.
     pub(crate) fn len_hint(&self) -> Option<u64> {
         let mut total: u64 = 0;
         for part in &self.parts {
@@ -164,7 +148,6 @@ impl Form {
         Some(total)
     }
 
-    /// Consume this form and produce a [`Body::Stream`] that yields the serialised multipart payload.
     pub(crate) fn into_stream_body(self) -> Body {
         let length_hint = self.len_hint();
         let stream = FormStream::new(self);
@@ -175,7 +158,6 @@ impl Form {
         }
     }
 
-    /// The wire-format `Content-Type` header for this form, including the boundary parameter.
     pub fn content_type(&self) -> String {
         format!("multipart/form-data; boundary={}", self.boundary)
     }
@@ -202,7 +184,6 @@ fn part_header_len(part: &Part) -> usize {
     n
 }
 
-/// Stream adapter that walks through each part, emitting headers, then pulling the part body, then the separator.
 struct FormStream {
     boundary: String,
     parts: std::collections::VecDeque<Part>,
@@ -210,13 +191,9 @@ struct FormStream {
 }
 
 enum FormState {
-    /// Emit the leading `--boundary\r\n` + part headers for the next part.
     NextPart,
-    /// Drain the current part's body.
     InBody(Pin<Box<dyn Stream<Item = io::Result<Bytes>> + Send + 'static>>),
-    /// Emit the trailing `\r\n` separator before the next part.
     PartEnd,
-    /// Stream is complete.
     Done,
 }
 
@@ -230,7 +207,6 @@ impl FormStream {
     }
 }
 
-/// Escape a header-value token for quoted use inside a `Content-Disposition` parameter.
 fn escape_quoted(input: &str) -> Option<Vec<u8>> {
     let mut out = Vec::with_capacity(input.len() + 2);
     for b in input.bytes() {
@@ -364,7 +340,6 @@ impl Stream for FormStream {
     }
 }
 
-/// Produce a 48-hex-char random boundary via `rand::rng`.
 fn random_boundary() -> String {
     format!(
         "----LeylineFormBoundary{}",

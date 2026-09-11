@@ -1,6 +1,3 @@
-//! URL-encoding helpers used by the request builder.
-
-/// URL-encode key-value pairs.
 pub(crate) fn url_encode_pairs(params: &[(String, String)]) -> String {
     params
         .iter()
@@ -9,7 +6,6 @@ pub(crate) fn url_encode_pairs(params: &[(String, String)]) -> String {
         .join("&")
 }
 
-/// Percent-encode a string for `application/x-www-form-urlencoded`.
 fn url_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {

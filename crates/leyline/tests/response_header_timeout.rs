@@ -1,4 +1,3 @@
-//! Regression gate for the time-to-first-byte (`response_header`) timeout.
 use std::time::{Duration, Instant};
 
 use leyline::{Error, Session};

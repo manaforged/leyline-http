@@ -52,7 +52,6 @@ fn rejects_non_200_status() {
     assert!(format!("{err}").contains("proxy CONNECT failed"));
 }
 
-/// Some proxies return `407` with a `Content-Length` body that arrives in the same TCP read as the headers.
 #[test]
 fn non_200_with_trailing_body_reports_status_not_injection() {
     let full = b"HTTP/1.1 407 Proxy Authentication Required\r\n\

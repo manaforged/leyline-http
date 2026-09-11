@@ -1,14 +1,10 @@
-//! Browser/platform/preset profile definitions and TOML loader.
-
 #![forbid(unsafe_code)]
-/// Anchor slots for caller-controlled positional header injection.
 pub mod anchor;
 mod bare;
 mod brand;
 mod browser;
 pub(crate) mod permutation;
 mod platform;
-/// Request preset types and header builder.
 pub mod preset;
 mod registry;
 mod types;

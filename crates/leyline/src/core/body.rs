@@ -1,5 +1,3 @@
-//! Request body — buffered bytes or a streaming source.
-
 use std::fmt;
 use std::io;
 use std::pin::Pin;
@@ -7,20 +5,14 @@ use std::pin::Pin;
 use bytes::Bytes;
 use futures_util::Stream;
 
-/// An HTTP request body.
 #[derive(Default)]
 #[non_exhaustive]
 pub enum Body {
-    /// No body (e.g. a GET request).
     #[default]
     Empty,
-    /// A fully-materialised byte buffer.
     Bytes(Bytes),
-    /// A streaming body.
     Stream {
-        /// The underlying `Stream` that yields body chunks on poll.
         stream: Pin<Box<dyn Stream<Item = io::Result<Bytes>> + Send + 'static>>,
-        /// Known exact content-length, if any.
         length_hint: Option<u64>,
     },
 }
@@ -42,7 +34,6 @@ impl fmt::Debug for Body {
 }
 
 impl Body {
-    /// Wrap a `Stream` yielding `io::Result<Bytes>` as a streaming body with no known length.
     pub fn stream<S>(stream: S) -> Self
     where
         S: Stream<Item = io::Result<Bytes>> + Send + 'static,
@@ -53,7 +44,6 @@ impl Body {
         }
     }
 
-    /// Wrap a `Stream` with a known exact content length in bytes.
     pub fn stream_with_length<S>(stream: S, length: u64) -> Self
     where
         S: Stream<Item = io::Result<Bytes>> + Send + 'static,
@@ -64,7 +54,6 @@ impl Body {
         }
     }
 
-    /// Length hint in bytes, if the body is buffered or a length-known stream.
     pub fn len_hint(&self) -> Option<u64> {
         match self {
             Body::Empty => Some(0),
@@ -73,7 +62,6 @@ impl Body {
         }
     }
 
-    /// True if this body is empty (either the `Empty` variant or a zero-length buffered `Bytes`).
     pub fn is_empty(&self) -> bool {
         match self {
             Body::Empty => true,
@@ -82,7 +70,6 @@ impl Body {
         }
     }
 
-    /// True if this body is a streaming source.
     pub fn is_stream(&self) -> bool {
         matches!(self, Body::Stream { .. })
     }

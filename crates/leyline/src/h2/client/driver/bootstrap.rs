@@ -1,5 +1,3 @@
-//! Connection bootstrap: handshake and driver task spawn.
-
 use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::pin::Pin;
@@ -20,7 +18,6 @@ use super::super::handle::H2Client;
 
 use super::*;
 
-/// Pump a user `Stream<Item = io::Result<Bytes>>` into an mpsc the driver can `recv` from.
 pub(crate) async fn pump_request_body(
     mut stream: Pin<Box<dyn futures_util::Stream<Item = io::Result<Bytes>> + Send + 'static>>,
     tx: mpsc::Sender<io::Result<Bytes>>,
@@ -37,7 +34,6 @@ pub(crate) async fn pump_request_body(
     }
 }
 
-/// Per-stream relay: forwards chunks from the caller-owned `rx` into the driver-wide `chunk_tx`, tagging each message with `stream_id`.
 pub(super) async fn relay_request_body(
     stream_id: u32,
     mut rx: mpsc::Receiver<io::Result<Bytes>>,
@@ -76,7 +72,6 @@ pub(super) async fn relay_request_body(
         .await;
 }
 
-/// Spawn a driver task over the given IO, after performing the HTTP/2 handshake (preface + SETTINGS exchange).
 pub(crate) async fn start<T>(io: T, config: H2Config) -> Result<(H2Client, DriverTask), H2Error>
 where
     T: AsyncRead + AsyncWrite + Unpin + Send + 'static,

@@ -1,10 +1,7 @@
-//! HPACK header table — static (RFC 7541 Appendix A) + dynamic.
-
 use std::collections::VecDeque;
 
 use bytes::Bytes;
 
-/// Static table: 61 pre-defined header entries (RFC 7541 Appendix A).
 pub static STATIC_TABLE: &[(&str, &str)] = &[
     ("", ""),
     (":authority", ""),
@@ -70,17 +67,13 @@ pub static STATIC_TABLE: &[(&str, &str)] = &[
     ("www-authenticate", ""),
 ];
 
-/// Dynamic table — FIFO with bounded size (RFC 7541 Section 2.3.2).
 pub struct DynamicTable {
     entries: VecDeque<(Bytes, Bytes)>,
-    /// Current size in bytes (name.len() + value.len() + 32 per entry).
     size: usize,
-    /// Maximum size (set by SETTINGS_HEADER_TABLE_SIZE).
     max_size: usize,
 }
 
 impl DynamicTable {
-    /// Create with default max size (4096 bytes).
     pub fn new() -> Self {
         Self {
             entries: VecDeque::new(),
@@ -89,7 +82,6 @@ impl DynamicTable {
         }
     }
 
-    /// Create with a specific max size.
     pub fn with_max_size(max_size: usize) -> Self {
         Self {
             entries: VecDeque::new(),
@@ -98,13 +90,11 @@ impl DynamicTable {
         }
     }
 
-    /// Update the max size (from SETTINGS).
     pub fn set_max_size(&mut self, max_size: usize) {
         self.max_size = max_size;
         self.evict();
     }
 
-    /// Insert a new entry at the front.
     pub fn insert(&mut self, name: Bytes, value: Bytes) {
         let entry_size = name.len() + value.len() + 32;
 
@@ -126,22 +116,18 @@ impl DynamicTable {
         self.size += entry_size;
     }
 
-    /// Get an entry by dynamic index (0 = newest).
     pub fn get(&self, index: usize) -> Option<(&Bytes, &Bytes)> {
         self.entries.get(index).map(|(n, v)| (n, v))
     }
 
-    /// Number of entries.
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
-    /// Whether the table is empty.
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
-    /// Current size in bytes.
     pub fn size(&self) -> usize {
         self.size
     }
@@ -163,7 +149,6 @@ impl Default for DynamicTable {
     }
 }
 
-/// Look up a header by index across static + dynamic tables.
 pub fn lookup(index: usize, dynamic: &DynamicTable) -> Option<(Bytes, Bytes)> {
     if index < STATIC_TABLE.len() {
         let (name, value) = STATIC_TABLE[index];
@@ -177,7 +162,6 @@ pub fn lookup(index: usize, dynamic: &DynamicTable) -> Option<(Bytes, Bytes)> {
     }
 }
 
-/// First index and entry count of a static-table name, whose entries are always contiguous (RFC 7541 Appendix A).
 fn span(name: &str) -> Option<(usize, usize)> {
     let found = match name.len() {
         3 => match name {
@@ -291,7 +275,6 @@ fn span(name: &str) -> Option<(usize, usize)> {
     Some(found)
 }
 
-/// Find the index for a header name+value in static table.
 pub fn find_static(name: &str, value: &str) -> Option<(usize, bool)> {
     let (first, count) = span(name)?;
     for i in first..first + count {

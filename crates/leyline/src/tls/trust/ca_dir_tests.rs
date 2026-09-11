@@ -1,5 +1,3 @@
-//! Guards against SSL_CERT_DIR silently disabling trust on Debian/Ubuntu/RHEL, where all entries in `/etc/ssl/certs` are symlinks.
-
 use super::collect_ca_dir_candidates;
 use std::fs;
 use std::io::Write;
@@ -8,7 +6,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-/// Disposable per-test directory under the OS temp dir.
 struct TempDir(PathBuf);
 
 impl TempDir {

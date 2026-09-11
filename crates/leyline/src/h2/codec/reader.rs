@@ -1,5 +1,3 @@
-//! Cancel-safe frame reader.
-
 use bytes::{Buf, BytesMut};
 use tokio::io::{AsyncRead, AsyncReadExt};
 
@@ -8,10 +6,8 @@ use crate::h2::frame::{FRAME_HEADER_LEN, Frame, FrameHeader};
 
 use super::DEFAULT_MAX_FRAME_SIZE;
 
-/// Bytes the reader keeps available for the next `read_buf` call.
 const SLACK: usize = 16 * 1024;
 
-/// Reads HTTP/2 frames from an async reader.
 pub struct FrameReader<R> {
     inner: R,
     max_frame_size: u32,
@@ -20,7 +16,6 @@ pub struct FrameReader<R> {
 }
 
 impl<R: AsyncRead + Unpin> FrameReader<R> {
-    /// Create a new frame reader.
     pub fn new(reader: R) -> Self {
         Self {
             inner: reader,
@@ -30,12 +25,10 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
         }
     }
 
-    /// Update max frame size (after receiving SETTINGS).
     pub fn set_max_frame_size(&mut self, size: u32) {
         self.max_frame_size = size;
     }
 
-    /// Read `want` bytes into the buffer, reporting whether the peer closed first.
     async fn fill(&mut self, want: usize) -> Result<bool, H2Error> {
         while self.buf.len() < want {
             self.buf.reserve(want - self.buf.len() + SLACK);
@@ -51,7 +44,6 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
         Ok(true)
     }
 
-    /// Read the next frame.
     pub async fn next(&mut self) -> Result<Option<Frame>, H2Error> {
         if self.header.is_none() {
             if !self.fill(FRAME_HEADER_LEN).await? {
@@ -89,7 +81,6 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
         Frame::parse(header, payload).map(Some)
     }
 
-    /// Get a mutable reference to the inner reader; bytes already read ahead stay in this reader.
     pub fn inner_mut(&mut self) -> &mut R {
         &mut self.inner
     }

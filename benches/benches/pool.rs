@@ -1,18 +1,3 @@
-//! Connection-pool micro-benchmarks.
-//!
-//! The pool's hot path is:
-//!   * `Pool::new()` at session construction.
-//!   * `Pool::checkout(key)` on every outbound request — an `Arc<Mutex<...>>`
-//!     hash-map lookup followed by an `H2Client::clone` on hit.
-//!   * `Pool::install(...)` on cold requests — one LRU evict check + insert.
-//!
-//! `checkout`/`install` are private, so we approximate them:
-//!   * Construction cost → `Pool::new()` and `Pool::with_limits(...)`.
-//!   * Warm checkout cost → `H2Client::clone()` (the operation `checkout`
-//!     performs under the mutex; the hash lookup is O(1) over a string key,
-//!     and the critical section is a few dozen ns — Arc clone dominates).
-//!
-//! This isolates the pool cost that a user pays on every request.
 
 use std::time::Duration;
 
@@ -54,9 +39,6 @@ fn bench_pool_with_limits(c: &mut Criterion) {
     });
 }
 
-// Warm checkout cost is measured as H2Client clone over a live driver —
-// this is precisely what `Pool::checkout` does once it finds the entry.
-// Mock server setup mirrors multiplex.rs.
 
 fn test_config() -> H2Config {
     H2Config {
@@ -174,7 +156,6 @@ fn bench_handle_clone_warm(c: &mut Criterion) {
         let (h, d) = ClientConnection::start(cio, test_config())
             .await
             .expect("handshake");
-        // One warmup request so the driver is fully rolling.
         let (p, hh) = (
             PseudoHeaders {
                 method: "GET".into(),
@@ -203,13 +184,6 @@ fn bench_handle_clone_warm(c: &mut Criterion) {
     });
 }
 
-// The real per-request hot path is `checkout_handle`: make_key -> evict_idle
-// -> checkout_h2. `evict_idle` scans every pooled entry, so its cost grows
-// with pool occupancy. This bench drives that exact body (`Pool::bench_probe`)
-// against pools pre-filled with N live entries, isolating how checkout cost
-// scales with occupancy. One live mock connection backs all N entries (the
-// handle is cloned), so every entry reports `is_closed() == false` and
-// `evict_idle` keeps them all — the worst-case scan.
 fn bench_checkout_scale(c: &mut Criterion) {
     let rt = Runtime::new().expect("tokio runtime");
     let (handle, server, _driver): (H2Client, _, _) = rt.block_on(async {

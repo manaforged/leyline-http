@@ -1,5 +1,3 @@
-//! General HTTP-semantics tests: decompression, redirects, cookies, body round-trips.
-
 #![expect(
     clippy::unwrap_used,
     reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
@@ -11,7 +9,6 @@
 use leyline::Session;
 use serde_json::Value;
 
-/// A minimal, in-process httpbin-compatible server.
 mod httpbin_lite {
     use std::io::Write as _;
 
@@ -19,7 +16,6 @@ mod httpbin_lite {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::{TcpListener, TcpStream};
 
-    /// Spawn the server on an ephemeral localhost port and return its base URL (e.g. `http://127.0.0.1:54123`).
     pub async fn spawn() -> String {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -265,7 +261,6 @@ mod httpbin_lite {
         build(302, "Found", extra, Vec::new())
     }
 
-    /// Capitalise header names the way httpbin echoes them (`Content-Type`, `Authorization`, …) so assertions on `json["headers"]["Authorization"]` match regardless of the case leyline put on the wire.
     fn title_cased_headers(headers: &[(String, String)]) -> Map<String, Value> {
         let mut m = Map::new();
         for (k, v) in headers {

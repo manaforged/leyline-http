@@ -1,10 +1,7 @@
-//! Non-blocking TCP connect primitive shared by the Happy-Eyeballs racer and any future direct-connect path.
-
 use crate::core::SocketConfig;
 use crate::tcp::TcpProfile;
 use tokio::net::TcpStream;
 
-/// Build a fingerprinted TCP connection to a single resolved address.
 pub(crate) async fn connect_one(
     sock_addr: std::net::SocketAddr,
     tcp_profile: &TcpProfile,
@@ -117,7 +114,6 @@ fn unsupported_socket_option(strict: bool, name: &str) -> Result<(), std::io::Er
     }
 }
 
-/// `Socket::connect` on a non-blocking socket returns an OS-specific "would block / in progress" error that means "the async connect has started; wait for writable".
 fn nonblocking_connect_started(error: &std::io::Error) -> bool {
     error.kind() == std::io::ErrorKind::WouldBlock
         || error.raw_os_error() == Some(libc::EINPROGRESS)

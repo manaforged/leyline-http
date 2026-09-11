@@ -1,5 +1,3 @@
-//! Live fingerprint gate for the CFNetwork (Apple URLSession) profile family.
-
 #![expect(
     clippy::unwrap_used,
     reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
@@ -38,7 +36,6 @@ fn ciphers_without_grease(json: &Value) -> Vec<&str> {
         .collect()
 }
 
-/// Shared CFNetwork shape, asserted for every cfnetwork profile.
 fn assert_cfnetwork_common(json: &Value) {
     let ciphers = json["tls"]["ciphers"].as_array().expect("ciphers");
     assert!(

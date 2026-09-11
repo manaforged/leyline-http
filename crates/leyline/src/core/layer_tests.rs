@@ -15,7 +15,6 @@ use crate::{Browser, Session};
 
 type Log = Arc<Mutex<Vec<String>>>;
 
-/// Serve `/one` as a redirect to `/two` and every other path as `200 ok`, recording each request head.
 async fn serve(log: Log) -> SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -56,7 +55,6 @@ async fn serve(log: Log) -> SocketAddr {
     addr
 }
 
-/// Layer that counts every call it sees.
 #[derive(Clone)]
 struct Count(Arc<AtomicUsize>);
 
@@ -71,7 +69,6 @@ impl<S> Layer<S> for Count {
     }
 }
 
-/// The service [`Count`] installs.
 #[derive(Clone)]
 struct Counter<S> {
     inner: S,
@@ -97,7 +94,6 @@ where
     }
 }
 
-/// Layer that answers without touching the transport.
 #[derive(Clone)]
 struct Canned;
 
@@ -109,7 +105,6 @@ impl<S> Layer<S> for Canned {
     }
 }
 
-/// The service [`Canned`] installs.
 #[derive(Clone)]
 struct Short<S> {
     #[expect(
@@ -140,7 +135,6 @@ where
     }
 }
 
-/// Layer that adds one request header.
 #[derive(Clone)]
 struct Tag;
 
@@ -152,7 +146,6 @@ impl<S> Layer<S> for Tag {
     }
 }
 
-/// The service [`Tag`] installs.
 #[derive(Clone)]
 struct Tagged<S> {
     inner: S,

@@ -1,4 +1,3 @@
-//! Regression: `without_system_roots()` must keep the *default* trust roots out of the store, not merely skip adding Leyline's own configured roots.
 #![expect(
     clippy::unwrap_used,
     reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
@@ -34,7 +33,6 @@ struct Chain {
     leaf_key_pem: Vec<u8>,
 }
 
-/// Generate a private CA and a leaf cert whose only SAN is `leaf_dns`.
 fn generate_chain(leaf_dns: &str) -> Chain {
     let ca_key = PKey::from_rsa(Rsa::generate(2048).unwrap()).unwrap();
     let mut name = X509NameBuilder::new().unwrap();
@@ -102,7 +100,6 @@ fn load_profile() -> BrowserProfile {
         .expect("chrome 147 profile parses")
 }
 
-/// Spawn a BoringSSL acceptor presenting `leaf` + `ca`, serving the trust controls below then exiting.
 async fn spawn_tls_server(chain: &Chain) -> SocketAddr {
     use leyline_bssl::ssl::{SslAcceptor, SslMethod};
 

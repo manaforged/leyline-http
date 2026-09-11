@@ -1,34 +1,23 @@
-//! DATA frame (RFC 9113 Section 6.1).
-
 use bytes::{BufMut, Bytes};
 
 use super::{FrameHeader, FrameType};
 use crate::h2::H2Error;
 use crate::h2::error::ErrorCode;
 
-/// Flags for DATA frames.
 pub mod flags {
-    /// END_STREAM (0x1) — last frame for this stream.
     pub const END_STREAM: u8 = 0x1;
-    /// PADDED (0x8) — frame is padded.
     pub const PADDED: u8 = 0x8;
 }
 
-/// DATA frame — carries request/response body data.
 #[derive(Debug)]
 pub struct DataFrame {
-    /// Stream identifier (must be non-zero).
     pub stream_id: u32,
-    /// Whether this is the last frame for the stream.
     pub end_stream: bool,
-    /// Payload data (padding removed).
     pub data: Bytes,
-    /// Full frame payload length, including the pad-length octet and padding when the `PADDED` flag is set.
     pub wire_len: u64,
 }
 
 impl DataFrame {
-    /// Parse from header + payload.
     pub fn parse(header: FrameHeader, payload: Bytes) -> Result<Self, H2Error> {
         if header.stream_id == 0 {
             return Err(H2Error::Connection {
@@ -61,7 +50,6 @@ impl DataFrame {
         })
     }
 
-    /// Encode to bytes (header + payload).
     pub fn encode(&self, buf: &mut impl BufMut) {
         let mut flag = 0u8;
         if self.end_stream {

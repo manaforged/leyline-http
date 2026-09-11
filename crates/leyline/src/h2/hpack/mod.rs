@@ -1,5 +1,3 @@
-//! HPACK header compression (RFC 7541).
-
 #![forbid(unsafe_code)]
 mod decoder;
 mod encoder;

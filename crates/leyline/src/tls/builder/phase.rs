@@ -1,5 +1,3 @@
-//! Profile-driven phases of the `SslContextBuilder` setup.
-
 use leyline_bssl::ssl::{SslContextBuilder, SslOptions, SslVersion};
 
 use crate::audit::sigalg_id;
@@ -20,7 +18,6 @@ use super::ZstdDecompressor;
 use super::missing;
 use super::{TlsMinVersion, boring_curve_name, profile_min_version, tls13_cipher_ids};
 
-/// Set the cipher list and the TLS 1.3 cipher order.
 pub(super) fn ciphers(builder: &mut SslContextBuilder, tls: &TlsProfile) -> Result<(), TlsError> {
     let list = tls.ciphers.join(":");
     builder
@@ -51,7 +48,6 @@ pub(super) fn ciphers(builder: &mut SslContextBuilder, tls: &TlsProfile) -> Resu
     Ok(())
 }
 
-/// Set the supported curves and key shares.
 pub(super) fn curves(builder: &mut SslContextBuilder, tls: &TlsProfile) -> Result<(), TlsError> {
     let list = tls
         .curves
@@ -65,7 +61,6 @@ pub(super) fn curves(builder: &mut SslContextBuilder, tls: &TlsProfile) -> Resul
     Ok(())
 }
 
-/// Set the signature algorithms, retrying once without duplicates.
 pub(super) fn sigalgs(builder: &mut SslContextBuilder, tls: &TlsProfile) -> Result<(), TlsError> {
     let ids = tls
         .sigalgs
@@ -88,7 +83,6 @@ pub(super) fn sigalgs(builder: &mut SslContextBuilder, tls: &TlsProfile) -> Resu
     Ok(())
 }
 
-/// Register the certificate compression algorithms the profile advertises.
 pub(super) fn compression(
     builder: &mut SslContextBuilder,
     tls: &TlsProfile,
@@ -129,7 +123,6 @@ pub(super) fn compression(
     Ok(())
 }
 
-/// Wire the ClientHello extensions the profile declares.
 pub(super) fn extensions(
     builder: &mut SslContextBuilder,
     tls: &TlsProfile,
@@ -168,7 +161,6 @@ pub(super) fn extensions(
     Ok(())
 }
 
-/// Apply the exact extension order when the linked BoringSSL supports it.
 fn order(builder: &mut SslContextBuilder, tls: &TlsProfile) -> Result<(), TlsError> {
     #[cfg(any(
         target_os = "linux",
@@ -193,7 +185,6 @@ fn order(builder: &mut SslContextBuilder, tls: &TlsProfile) -> Result<(), TlsErr
     Ok(())
 }
 
-/// Pin the minimum protocol version from the profile and the caller floor.
 pub(super) fn versions(
     builder: &mut SslContextBuilder,
     tls: &TlsProfile,

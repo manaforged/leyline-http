@@ -1,4 +1,3 @@
-//! Integration tests for streaming request and response bodies.
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -201,7 +200,6 @@ async fn response_into_stream_on_buffered_returns_single_chunk() {
     server.await.unwrap();
 }
 
-/// Serve one fixed HTTP/1.1 response, then return the listener address.
 async fn one_shot(body: &'static str) -> std::net::SocketAddr {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

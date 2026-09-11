@@ -1,5 +1,3 @@
-//! Dropping send_request RST_STREAMs the H2 stream.
-
 #[path = "h2_support/mod.rs"]
 mod support;
 

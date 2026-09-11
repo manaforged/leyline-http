@@ -1,5 +1,3 @@
-//! HTTP/3 client connection over QUIC.
-
 use std::net::ToSocketAddrs;
 
 use leyline_quiche as quiche;
@@ -9,35 +7,25 @@ use crate::tls::{TlsMinVersion, TlsTrustConfig, apply_profile_with_trust};
 
 use crate::quic::config::H3Config;
 
-/// An HTTP/3 response.
 #[derive(Debug)]
 pub struct H3Response {
-    /// HTTP status code.
     pub status: u16,
-    /// Response headers.
     pub headers: Vec<(String, String)>,
-    /// Response body.
     pub body: Vec<u8>,
-    /// Trailer headers, empty when the peer sent none.
     pub trailers: Vec<(String, String)>,
 }
 
-/// The live transport parts of an established QUIC + HTTP/3 connection.
 pub(crate) struct EstablishedH3 {
     pub(crate) socket: tokio::net::UdpSocket,
     pub(crate) conn: Box<quiche::Connection>,
     pub(crate) h3: quiche::h3::Connection,
     pub(crate) peer_addr: std::net::SocketAddr,
     pub(crate) local_addr: std::net::SocketAddr,
-    /// Max UDP payload — sizes the egress buffer in the driver loop.
     pub(crate) max_udp_payload: usize,
-    /// Per-response body cap, enforced by the driver.
     pub(crate) max_response_body_bytes: u64,
-    /// Peer certificate + negotiated TLS detail, captured at handshake so the pool can surface it on every response over this connection.
     pub(crate) tls: crate::pool::TlsInfo,
 }
 
-/// Build the QUIC `quiche::Config` for a profile via the shared fingerprint factory, so the QUIC ClientHello carries exactly the same cipher list, curve list, sig-alg list, cert compression, delegated credentials, etc. as the H2 TCP path would.
 fn build_quic_config(
     h3_cfg: &H3Config,
     profile: &BrowserProfile,
@@ -75,7 +63,6 @@ fn build_quic_config(
     Ok(config)
 }
 
-/// Build the HTTP/3 `quiche::h3::Config` (QPACK + field-section limits).
 fn build_h3_config(h3_cfg: &H3Config) -> Result<quiche::h3::Config, String> {
     let mut h3_config = quiche::h3::Config::new().map_err(|e| format!("h3 config: {e}"))?;
     h3_config.set_qpack_max_table_capacity(h3_cfg.qpack_max_table_capacity);
@@ -84,7 +71,6 @@ fn build_h3_config(h3_cfg: &H3Config) -> Result<quiche::h3::Config, String> {
     Ok(h3_config)
 }
 
-/// Connect to `host:port` over QUIC and drive the handshake until the HTTP/3 control streams are exchanged, returning the live transport parts.
 pub(crate) async fn connect_and_handshake(
     h3_cfg: &H3Config,
     profile: &BrowserProfile,
@@ -200,7 +186,6 @@ pub(crate) async fn connect_and_handshake(
     }
 }
 
-/// Drain every queued QUIC packet to the socket.
 pub(crate) async fn flush_egress(
     socket: &tokio::net::UdpSocket,
     conn: &mut quiche::Connection,
@@ -220,7 +205,6 @@ pub(crate) async fn flush_egress(
     }
 }
 
-/// Format a closed-connection diagnostic carrying peer/local error detail.
 pub(crate) fn close_reason(ctx: &str, iter: u32, conn: &quiche::Connection) -> String {
     let peer_err = conn.peer_error().map(|e| {
         format!(
@@ -242,7 +226,6 @@ pub(crate) fn close_reason(ctx: &str, iter: u32, conn: &quiche::Connection) -> S
     )
 }
 
-/// Resolve the QUIC peer off the async runtime.
 async fn resolve_peer(host: &str, port: u16) -> Result<std::net::SocketAddr, String> {
     let addr_str = if host.contains(':') {
         format!("[{host}]:{port}")
@@ -274,7 +257,6 @@ fn validate_connection_id_len(len: usize) -> Result<(), String> {
     Ok(())
 }
 
-/// Check whether adding `n` more bytes to an `already`-sized response body would exceed `max`.
 pub(crate) fn check_body_budget(already: usize, n: usize, max: u64) -> Result<(), u64> {
     let new_total = already.saturating_add(n) as u64;
     if new_total > max {

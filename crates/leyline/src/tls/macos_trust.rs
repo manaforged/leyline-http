@@ -1,5 +1,3 @@
-//! macOS system trust store bridge for BoringSSL.
-
 use std::collections::HashSet;
 use std::ffi::c_void;
 
@@ -28,7 +26,6 @@ const CF_NUMBER_SINT64: isize = 4;
 
 const CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
 
-/// The `kSecTrustSettingsResult` dictionary key.
 fn trust_settings_result_key() -> Option<OwnedCf> {
     // SAFETY: null allocator = kCFAllocatorDefault; input is a valid NUL-terminated UTF-8 literal; the returned string is owned.
     let key = unsafe {
@@ -93,7 +90,6 @@ impl Drop for OwnedCf {
     }
 }
 
-/// DER bytes of a `SecCertificateRef`.
 unsafe fn certificate_der(cert: SecCertificateRef) -> Option<Vec<u8>> {
     // SAFETY: Copy API — the returned CFData is owned and released below.
     let data = OwnedCf::new(unsafe { SecCertificateCopyData(cert) })?;
@@ -108,7 +104,6 @@ unsafe fn certificate_der(cert: SecCertificateRef) -> Option<Vec<u8>> {
     Some(unsafe { std::slice::from_raw_parts(bytes, length as usize) }.to_vec())
 }
 
-/// Collect `(denied, trusted)` DER sets from one trust-settings domain.
 fn domain_trust_sets(domain: SecTrustSettingsDomain) -> (HashSet<Vec<u8>>, HashSet<Vec<u8>>) {
     let mut denied = HashSet::new();
     let mut trusted = HashSet::new();
@@ -209,7 +204,6 @@ fn domain_trust_sets(domain: SecTrustSettingsDomain) -> (HashSet<Vec<u8>>, HashS
     (denied, trusted)
 }
 
-/// Return the effective system trust set as DER: built-in anchors minus every domain's explicit deny, plus every trust-settings root.
 pub(crate) fn load_system_roots() -> std::io::Result<Vec<Vec<u8>>> {
     let mut denied_all: HashSet<Vec<u8>> = HashSet::new();
     let mut trusted_all: HashSet<Vec<u8>> = HashSet::new();

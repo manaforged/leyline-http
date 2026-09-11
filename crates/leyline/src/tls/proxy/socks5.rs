@@ -1,5 +1,3 @@
-//! SOCKS5 (RFC 1928 + 1929) tunnel establishment.
-
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
@@ -8,7 +6,6 @@ use crate::tls::error::TlsError;
 
 use crate::util::percent_decode;
 
-/// Open a TLS-over-SOCKS5 tunnel through `proxy` and return the wrapped TLS stream.
 pub(crate) async fn connect<C: crate::tls::TlsHandshake>(
     connector: &C,
     host: &str,

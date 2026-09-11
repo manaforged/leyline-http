@@ -1,21 +1,4 @@
 #!/usr/bin/env bash
-# Interleaved paired (ABAB) throughput comparison: leyline vs wreq, one round
-# of each per iteration, with a paired t-test + 95% CI on the per-round
-# concurrent-rps delta and a sign test. Interleaving cancels thermal/scheduler
-# drift that block sampling (all-leyline-then-all-wreq) leaves in the numbers.
-#
-# Two correctness guards make the rps comparison meaningful, not marketing:
-#   * an EQUIVALENCE gate — both clients fetch the URL once and must agree on
-#     status + body hash, proving they did identical work;
-#   * pinning the clients to a core set disjoint from the server's (Linux
-#     taskset), removing server/client core contention.
-#
-# Target: a local self-signed HTTPS/2 server by default; set TARGET_URL (and
-# optionally PROXY=http://user:pass@host:port) to drive a real remote endpoint
-# through a proxy.
-#
-#   ROUNDS=20 CONC=20000 CONCURRENCY=64 ./paired.sh
-#   TARGET_URL=https://example.com/ PROXY=http://u:p@host:port ./paired.sh
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -23,8 +6,6 @@ ROUNDS="${ROUNDS:-20}"
 CONC="${CONC:-20000}"
 CONCURRENCY="${CONCURRENCY:-64}"
 WREQ_TARGET="${WREQ_TARGET:-target}"
-# Core pinning (Linux). SERVER_CPUS for the local server; CLIENT_CPUS for both
-# clients. Empty => no pinning (e.g. macOS, or a remote target with no server).
 SERVER_CPUS="${SERVER_CPUS:-0-1}"
 CLIENT_CPUS="${CLIENT_CPUS:-2-15}"
 
@@ -63,7 +44,6 @@ else
   echo "== local server $URL ==" >&2
 fi
 
-# ---- equivalence gate -------------------------------------------------------
 echo "== equivalence gate ==" >&2
 L_EQ=$(pin_client ./bin/leyline "$URL" equiv)
 W_EQ=$(pin_client ./bin/wreq "$URL" equiv)
@@ -76,18 +56,15 @@ if [ "$l_fp" != "$w_fp" ]; then
 fi
 echo "equivalence OK ($l_fp)" >&2
 
-# ---- paired ABAB rounds -----------------------------------------------------
 pairs="$(mktemp)"
 echo "== $ROUNDS paired rounds (conc=$CONC x$CONCURRENCY) ==" >&2
 for r in $(seq 1 "$ROUNDS"); do
-  # warm=1 cold=1 keep the per-invocation overhead minimal; we read conc only.
   l=$(pin_client ./bin/leyline "$URL" 1 1 "$CONC" "$CONCURRENCY" | grep -oE 'conc_rps=[0-9]+' | cut -d= -f2)
   w=$(pin_client ./bin/wreq    "$URL" 1 1 "$CONC" "$CONCURRENCY" | grep -oE 'conc_rps=[0-9]+' | cut -d= -f2)
   echo "$l $w" >> "$pairs"
   echo "round $r: leyline=$l wreq=$w" >&2
 done
 
-# ---- paired statistics ------------------------------------------------------
 awk '
 { l=$1; w=$2; d=l-w; n++; sl+=l; sw+=w; sd+=d; sdd+=d*d; if (l>w) wins++ }
 END {
@@ -95,8 +72,6 @@ END {
   ml=sl/n; mw=sw/n; md=sd/n;
   var=(sdd - n*md*md)/(n-1); se=sqrt(var/n);
   t = (se>0)? md/se : 0;
-  # t_.025 critical value, approximated (df>=19 ~ 2.09; large-n ~ 1.98). Use a
-  # conservative 2.09; report t so the reader can judge significance directly.
   crit=2.09; lo=md-crit*se; hi=md+crit*se;
   printf("\n=== PAIRED RESULT (n=%d) ===\n", n);
   printf("leyline mean conc_rps : %.0f\n", ml);

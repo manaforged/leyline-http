@@ -1,4 +1,3 @@
-//! Wire-level ClientHello ordering regressions anchored to real browser captures.
 #![expect(
     clippy::unwrap_used,
     reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
@@ -15,7 +14,6 @@ const FIREFOX_152_EXTENSIONS: &[u16] = &[
     0, 23, 65281, 10, 11, 35, 16, 5, 34, 18, 51, 43, 13, 45, 28, 27, 65037,
 ];
 
-/// Captured from official Firefox 152.0.6 on macOS on 2026-07-16.
 #[tokio::test]
 async fn firefox_152_matches_captured_cipher_and_extension_order() {
     let (ciphers, extensions) = capture_client_hello(Browser::Firefox152).await;
@@ -28,14 +26,12 @@ async fn firefox_152_matches_captured_cipher_and_extension_order() {
     );
 }
 
-/// The declared order is applied per profile, not baked into the TLS builder: Firefox 150 must put its own `extension_permutation` on the wire too.
 #[tokio::test]
 async fn firefox_150_client_hello_follows_its_declared_extension_order() {
     let (_, extensions) = capture_client_hello(Browser::Firefox150).await;
     assert_eq!(extensions, declared_extension_order(Browser::Firefox150));
 }
 
-/// Chrome 147+ advertises Trust Anchor Identifiers (0xCA34) with an empty list.
 #[tokio::test]
 async fn chrome_147_client_hello_carries_trust_anchor_identifiers() {
     let (_, extensions) = capture_client_hello(Browser::Chrome147).await;
@@ -45,7 +41,6 @@ async fn chrome_147_client_hello_carries_trust_anchor_identifiers() {
     );
 }
 
-/// The fixed ClientHello extension order a built-in profile declares.
 fn declared_extension_order(browser: Browser) -> Vec<u16> {
     leyline::profile::ProfileRegistry::builtin()
         .get_browser(browser)
@@ -56,7 +51,6 @@ fn declared_extension_order(browser: Browser) -> Vec<u16> {
         .expect("profile declares a fixed extension order")
 }
 
-/// Drive one real handshake attempt at a local listener that never answers, and return the `(cipher, extension)` IDs of the ClientHello it produced.
 async fn capture_client_hello(browser: Browser) -> (Vec<u16>, Vec<u16>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

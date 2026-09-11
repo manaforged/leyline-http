@@ -1,5 +1,3 @@
-//! Set-Cookie header parser (RFC 6265bis).
-
 use std::time::{Duration, SystemTime};
 
 use crate::cookie::record::{Cookie, SameSite};
@@ -10,10 +8,8 @@ mod date;
 use attr::set;
 use date::{Date, stamp, token};
 
-/// Max cookie lifetime: 400 days (Chrome enforcement).
 const MAX_LIFETIME: Duration = Duration::from_secs(400 * 24 * 60 * 60);
 
-/// Parse a Set-Cookie header value into a Cookie.
 #[derive(Default)]
 struct CookieAttributes {
     domain: Option<String>,
@@ -25,7 +21,6 @@ struct CookieAttributes {
     expires: Option<SystemTime>,
 }
 
-/// Parse the attribute section of a Set-Cookie header (everything after the first `;`).
 fn parse_attributes(attrs_str: &str) -> CookieAttributes {
     let mut a = CookieAttributes::default();
     for attr in attrs_str.split(';') {
@@ -42,7 +37,6 @@ fn parse_attributes(attrs_str: &str) -> CookieAttributes {
     a
 }
 
-/// Strict Secure Cookies (Chrome 52+): a Secure cookie may only be set by a secure origin.
 fn secure_origin(request_url: &url::Url) -> bool {
     let scheme = request_url.scheme();
     let host = request_url.host_str().unwrap_or("");
@@ -53,7 +47,6 @@ fn secure_origin(request_url: &url::Url) -> bool {
         || host.ends_with(".localhost")
 }
 
-/// RFC 6265bis §4.1.3 prefix rules, matched case-insensitively.
 fn prefix_rejected(name: &str, attrs: &CookieAttributes) -> bool {
     let lower = name.to_ascii_lowercase();
     if lower.starts_with("__secure-") {
@@ -65,7 +58,6 @@ fn prefix_rejected(name: &str, attrs: &CookieAttributes) -> bool {
     false
 }
 
-/// Expiry: Max-Age wins over Expires; both cap at [`MAX_LIFETIME`].
 fn compute_expiry(
     now: SystemTime,
     max_age: Option<Duration>,
@@ -78,7 +70,6 @@ fn compute_expiry(
     }
 }
 
-/// Domain scoping (RFC 6265bis §5.5/§5.7): on an IP-literal host the `Domain` attribute is ignored (host-only); otherwise the domain must equal or parent the request host, and must not be a public suffix.
 fn resolve_cookie_domain(request_url: &url::Url, domain: Option<String>) -> Option<(bool, String)> {
     let host_only = domain.is_none();
     let request_host = request_url.host_str().unwrap_or("").to_lowercase();
@@ -96,7 +87,6 @@ fn resolve_cookie_domain(request_url: &url::Url, domain: Option<String>) -> Opti
     Some((host_only, cookie_domain))
 }
 
-/// Parse one `Set-Cookie` header line against `request_url`, returning `None` when the cookie is rejected.
 pub fn parse_set_cookie(header: &str, request_url: &url::Url) -> Option<Cookie> {
     let now = SystemTime::now();
 
@@ -176,7 +166,6 @@ pub fn parse_set_cookie(header: &str, request_url: &url::Url) -> Option<Cookie> 
     })
 }
 
-/// Is `domain` a public suffix (per RFC 6265bis §5.2, which forbids setting a cookie on one)?
 fn is_public_suffix(domain: &str) -> bool {
     if !domain.contains('.') {
         return true;
@@ -185,7 +174,6 @@ fn is_public_suffix(domain: &str) -> bool {
         .is_some_and(|s| s.as_bytes().eq_ignore_ascii_case(domain.as_bytes()))
 }
 
-/// Extract the `(name, value)` of a Set-Cookie header the jar REFUSED to store (bad domain, public suffix, `__Host-`/`__Secure-` violation) for the response view.
 pub(crate) fn rejected_cookie_name_value(header: &str) -> Option<(String, String)> {
     let name_value = header.split(';').next()?;
     let (name, value) = name_value.split_once('=')?;
@@ -212,12 +200,10 @@ pub(crate) fn rejected_cookie_name_value(header: &str) -> Option<(String, String
     Some((name.to_string(), value.to_string()))
 }
 
-/// The registrable domain (eTLD+1) of `host` per the Public Suffix List — e.g. `www.example.co.uk` → `example.co.uk`.
 pub(crate) fn registrable_domain(host: &str) -> Option<String> {
     psl::domain(host.as_bytes()).map(|d| String::from_utf8_lossy(d.as_bytes()).into_owned())
 }
 
-/// Default cookie path from request URI (RFC 6265bis Section 5.1.4).
 fn default_path(request_path: &str) -> String {
     if !request_path.starts_with('/') {
         return "/".to_string();
@@ -228,7 +214,6 @@ fn default_path(request_path: &str) -> String {
     }
 }
 
-/// Basic cookie date parser (handles common formats).
 pub fn parse_cookie_date(s: &str) -> Option<SystemTime> {
     let mut d = Date::default();
     for tok in s.trim().split([' ', '-', ',']) {
@@ -241,7 +226,6 @@ pub fn parse_cookie_date(s: &str) -> Option<SystemTime> {
     stamp(&d)
 }
 
-/// Days since Unix epoch for a given date.
 fn days_since_epoch(year: u32, month: u32, day: u32) -> Option<i64> {
     if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
         return None;

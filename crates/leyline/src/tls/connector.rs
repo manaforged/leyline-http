@@ -1,5 +1,3 @@
-//! TLS connector that creates fingerprinted connections from browser profiles.
-
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -24,43 +22,29 @@ use crate::tls::trust::{
 use crate::tls::{TlsIo, TlsStream};
 use crate::trace;
 
-/// Creates TLS connections matching a browser's fingerprint.
 #[derive(Clone)]
 pub struct FingerprintConnector {
     ssl_connector: SslConnector,
     tcp_profile: TcpProfile,
     ech_grease: bool,
-    /// ALPS protocol (e.g. "h2") — applied per-connection.
     alps_proto: Option<Vec<u8>>,
-    /// Use new ALPS codepoint (0x4469 for Chrome 131+).
     alps_new_codepoint: bool,
-    /// Advertise Trust Anchor Identifiers (ext 0xCA34/51764) with an empty list when the selected browser profile requires it.
     request_trust_anchors: bool,
-    /// Per-host session ticket cache for TLS resumption (DER-encoded).
     session_cache: Arc<Mutex<LruCache<String, Vec<u8>>>>,
-    /// When `true`, skip peer certificate verification entirely.
     accept_invalid_certs: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    /// DNS resolver for direct connections.
     resolver: Arc<dyn Resolver>,
-    /// Happy Eyeballs (RFC 8305) tunables for the dual-stack race.
     happy_eyeballs: HappyEyeballsConfig,
-    /// Optional timeout around DNS + TCP + TLS connect.
     connect_timeout: Option<Duration>,
-    /// Optional socket-level direct-connect overrides.
     socket_config: SocketConfig,
-    /// Configured leaf pins.
     pins: Vec<[u8; 32]>,
-    /// `true` when a client certificate (mTLS identity) is configured.
     has_client_identity: bool,
 }
 
 impl FingerprintConnector {
-    /// Build a connector from a browser profile and TCP profile.
     pub fn new(profile: &BrowserProfile, tcp: TcpProfile) -> Result<Self, TlsError> {
         Self::new_with_trust(profile, tcp, &TlsTrustConfig::default())
     }
 
-    /// Build a connector with explicit trust-root and mTLS settings.
     pub fn new_with_trust(
         profile: &BrowserProfile,
         tcp: TcpProfile,
@@ -115,48 +99,40 @@ impl FingerprintConnector {
         })
     }
 
-    /// `true` when this connector carries an origin-specific TLS identity — a client certificate (mTLS) or leaf pins — that must NOT be presented to, or applied against, an `https://` CONNECT proxy.
     pub(crate) fn has_origin_tls_identity(&self) -> bool {
         !self.pins.is_empty() || self.has_client_identity
     }
 
-    /// Skip peer certificate verification.
     pub fn set_accept_invalid_certs(&mut self, accept: bool) {
         use std::sync::atomic::Ordering;
         self.accept_invalid_certs.store(accept, Ordering::Relaxed);
     }
 
-    /// Live insecure-mode flag, shared with the session-ticket callback so tickets minted while verification was off are never cached or reused.
     fn insecure_mode(&self) -> bool {
         use std::sync::atomic::Ordering;
         self.accept_invalid_certs.load(Ordering::Relaxed)
     }
 
-    /// Override the DNS resolver (for `/etc/hosts`-style tests or deterministic offline rigs).
     pub fn with_resolver(mut self, resolver: Arc<dyn Resolver>) -> Self {
         self.resolver = resolver;
         self
     }
 
-    /// Override the Happy-Eyeballs tunables.
     pub fn with_happy_eyeballs_config(mut self, config: HappyEyeballsConfig) -> Self {
         self.happy_eyeballs = config;
         self
     }
 
-    /// Apply a timeout around DNS + TCP + TLS connection setup.
     pub fn with_connect_timeout(mut self, timeout: Duration) -> Self {
         self.connect_timeout = Some(timeout);
         self
     }
 
-    /// Apply low-level socket options for direct TCP connects.
     pub fn with_socket_config(mut self, config: SocketConfig) -> Self {
         self.socket_config = config;
         self
     }
 
-    /// Connect to `host:port`, optionally through `proxy_url`.
     pub async fn connect(
         &self,
         host: &str,
@@ -175,7 +151,6 @@ impl FingerprintConnector {
         self.with_timeout(fut).await
     }
 
-    /// Connect with HTTP/1.1 ALPN only (for WebSocket upgrade).
     pub async fn connect_h1(
         &self,
         host: &str,
@@ -212,7 +187,6 @@ impl FingerprintConnector {
         }
     }
 
-    /// Direct connection with optional ALPN override.
     async fn connect_direct_with_alpn(
         &self,
         host: &str,
@@ -224,7 +198,6 @@ impl FingerprintConnector {
             .await
     }
 
-    /// Open a fingerprinted TCP connection to `host:port` through the connector's pluggable resolver and Happy-Eyeballs racer, applying the browser [`TcpProfile`] SYN options via [`connect_one`].
     pub(crate) async fn dial_tcp(&self, host: &str, port: u16) -> Result<TcpStream, TlsError> {
         let started = Instant::now();
         let addrs = self
@@ -255,7 +228,6 @@ impl FingerprintConnector {
         Ok(tcp_stream)
     }
 
-    /// Perform TLS handshake with all per-connection fingerprint settings.
     pub(crate) async fn tls_handshake(
         &self,
         tcp_stream: TcpStream,
@@ -266,7 +238,6 @@ impl FingerprintConnector {
         Ok(meta.into_tls_stream(TlsIo::Boring(stream)))
     }
 
-    /// Drive the same fingerprinted TLS handshake over an already-established TLS stream — the inner (origin-facing) leg of an `https://` CONNECT proxy, so the origin TLS nests inside the proxy TLS.
     pub(crate) async fn tls_handshake_nested(
         &self,
         inner: TlsIo,
@@ -277,7 +248,6 @@ impl FingerprintConnector {
         Ok(meta.into_tls_stream(TlsIo::Nested(Box::new(stream))))
     }
 
-    /// The fingerprint-bearing TLS handshake, generic over the byte stream so the direct path (`TcpStream`) and the `https://`-proxy inner leg (`TlsIo`) share ONE ClientHello — the single source of truth for the JA4.
     async fn handshake_over<S>(
         &self,
         io: S,
@@ -422,7 +392,6 @@ fn classify_handshake(
     }
 }
 
-/// Negotiated TLS metadata captured at handshake, paired with the handshaked stream so [`FingerprintConnector::handshake_over`] can stay generic over the byte stream while each caller wraps the stream in its own [`TlsIo`] arm.
 struct TlsMeta {
     alpn: Option<Vec<u8>>,
     peer_cert_der: Option<Vec<u8>>,
@@ -451,7 +420,6 @@ impl std::fmt::Debug for FingerprintConnector {
     }
 }
 
-/// Lock the session-ticket cache, recovering from a poisoned mutex.
 fn lock_unpoisoned<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|poisoned| {
         tracing::warn!(

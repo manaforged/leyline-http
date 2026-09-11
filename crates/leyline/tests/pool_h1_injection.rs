@@ -1,5 +1,3 @@
-//! H1 request method, URL, and headers reject control bytes.
-
 #![expect(
     clippy::unwrap_used,
     reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
@@ -16,7 +14,6 @@ fn connector() -> FingerprintConnector {
     FingerprintConnector::new(profile, tcp_profile).unwrap()
 }
 
-/// The mock server we never reach — every injection attempt must be rejected by the validator before the TCP connect fires.
 const UNROUTABLE_URL: &str = "http://127.0.0.1:1/";
 
 async fn short_exchange(

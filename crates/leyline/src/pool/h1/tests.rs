@@ -58,7 +58,6 @@ fn empty_header_name_dropped() {
     assert_eq!(headers[0].0, "X-Real");
 }
 
-/// Connect a real loopback TCP pair and return (client, accepted server).
 async fn tcp_pair() -> (TcpStream, TcpStream) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

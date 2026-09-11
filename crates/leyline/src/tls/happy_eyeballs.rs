@@ -1,5 +1,3 @@
-//! Happy Eyeballs v2 (RFC 8305 §5) TCP connect racing.
-
 use std::future::Future;
 use std::io;
 use std::net::SocketAddr;
@@ -10,13 +8,10 @@ use futures_util::stream::{FuturesUnordered, StreamExt};
 use tokio::net::TcpStream;
 use tokio::time::sleep;
 
-/// Tunables for the Happy Eyeballs race. Start from [`HappyEyeballsConfig::default`] and set one field per call.
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub struct HappyEyeballsConfig {
-    /// Gap between successive connect attempts.
     pub resolve_delay: Duration,
-    /// Maximum number of parallel connect attempts.
     pub attempt_limit: usize,
 }
 
@@ -30,25 +25,21 @@ impl Default for HappyEyeballsConfig {
 }
 
 impl HappyEyeballsConfig {
-    /// Create default Happy Eyeballs tunables.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Set the gap between successive connect attempts.
     pub fn resolve_delay(mut self, d: Duration) -> Self {
         self.resolve_delay = d;
         self
     }
 
-    /// Set the maximum number of parallel connect attempts.
     pub fn attempt_limit(mut self, n: usize) -> Self {
         self.attempt_limit = n;
         self
     }
 }
 
-/// Reorder `addrs` so that v6 and v4 addresses alternate, v6 first.
 pub(crate) fn interleave_by_family(addrs: Vec<SocketAddr>) -> Vec<SocketAddr> {
     let mut v6: Vec<SocketAddr> = Vec::new();
     let mut v4: Vec<SocketAddr> = Vec::new();
@@ -76,7 +67,6 @@ pub(crate) fn interleave_by_family(addrs: Vec<SocketAddr>) -> Vec<SocketAddr> {
     out
 }
 
-/// Race TCP connect attempts across `addrs`, staggered by `config.resolve_delay`.
 pub(crate) async fn happy_eyeballs_connect<F, Fut>(
     addrs: Vec<SocketAddr>,
     config: HappyEyeballsConfig,

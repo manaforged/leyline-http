@@ -1,52 +1,33 @@
-//! Individual cookie — stores all attributes Chrome tracks.
-
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-/// SameSite attribute values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SameSite {
-    /// Cookie sent only on same-site requests, never on cross-site.
     Strict,
-    /// Cookie sent on same-site requests and top-level cross-site GET navigations.
     Lax,
-    /// Cookie sent on every request, including cross-site.
     None,
 }
 
-/// A single cookie with all RFC 6265bis attributes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Cookie {
-    /// Cookie name (left side of `name=value`).
     pub name: String,
-    /// Cookie value (right side of `name=value`).
     pub value: String,
-    /// Registrable domain the cookie is scoped to.
     pub domain: String,
-    /// URL path the cookie applies to (RFC 6265bis Section 5.1.4).
     pub path: String,
-    /// `Secure` attribute — cookie only sent over HTTPS.
     pub secure: bool,
-    /// `HttpOnly` attribute — cookie inaccessible to JavaScript.
     pub http_only: bool,
-    /// `SameSite` attribute controlling cross-site request behavior.
     pub same_site: SameSite,
-    /// Absolute expiry time, or `None` for session cookies.
     #[serde(with = "systime_opt_ms")]
     pub expires: Option<SystemTime>,
-    /// When the cookie was first created.
     #[serde(with = "systime_ms")]
     pub creation_time: SystemTime,
-    /// LRU bookkeeping.
     #[serde(skip, default = "SystemTime::now")]
     pub last_access: SystemTime,
-    /// Whether the domain was explicitly set (vs defaulting to request host).
     pub host_only: bool,
 }
 
 impl Cookie {
-    /// Whether this cookie has expired.
     pub fn is_expired(&self) -> bool {
         if let Some(expires) = self.expires {
             SystemTime::now() > expires
@@ -55,7 +36,6 @@ impl Cookie {
         }
     }
 
-    /// Whether this cookie matches a request URL.
     pub fn matches(&self, url_domain: &str, url_path: &str, is_secure: bool) -> bool {
         if self.secure && !is_secure {
             return false;
@@ -90,7 +70,6 @@ impl Cookie {
     }
 }
 
-/// Serde helper: `SystemTime` ↔ unix-millis i64.
 mod systime_ms {
     use super::*;
 
@@ -109,7 +88,6 @@ mod systime_ms {
     }
 }
 
-/// Serde helper: `Option<SystemTime>` ↔ optional unix-millis i64.
 mod systime_opt_ms {
     use super::*;
 

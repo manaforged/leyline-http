@@ -1,5 +1,3 @@
-//! HTTP/2 with native fingerprint control.
-
 #![forbid(unsafe_code)]
 pub(crate) mod client;
 pub mod codec;

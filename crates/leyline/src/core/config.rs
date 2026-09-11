@@ -1,5 +1,3 @@
-//! Public configuration structs for Leyline sessions.
-
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
@@ -8,7 +6,6 @@ use std::time::Duration;
 use crate::core::Kind;
 use crate::tls::{Resolver, SystemResolver};
 
-/// A validated proxy URL.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct ProxyUrl(String);
 
@@ -18,7 +15,6 @@ impl std::fmt::Debug for ProxyUrl {
     }
 }
 
-/// Replace the password in a proxy URL's userinfo with `***` for logs and `Debug` output.
 pub(crate) fn redact(raw: &str) -> String {
     let Ok(mut parsed) = url::Url::parse(raw) else {
         return raw.to_string();
@@ -33,7 +29,6 @@ pub(crate) fn redact(raw: &str) -> String {
 }
 
 impl ProxyUrl {
-    /// Validate a proxy URL.
     pub fn parse(raw: impl AsRef<str>) -> crate::core::Result<Self> {
         let raw = raw.as_ref().trim();
         let parsed = Self::parse_inner(raw)?;
@@ -76,32 +71,26 @@ impl ProxyUrl {
         Ok(Self(raw.to_string()))
     }
 
-    /// Build an HTTP proxy URL.
     pub fn http(raw: impl AsRef<str>) -> crate::core::Result<Self> {
         Self::parse_scheme(raw, "http")
     }
 
-    /// Build an HTTPS proxy URL (TLS to the proxy, then CONNECT).
     pub fn https(raw: impl AsRef<str>) -> crate::core::Result<Self> {
         Self::parse_scheme(raw, "https")
     }
 
-    /// Build a SOCKS5 proxy URL. Hostnames are sent to the proxy for resolution, the same as `socks5h`.
     pub fn socks5(raw: impl AsRef<str>) -> crate::core::Result<Self> {
         Self::parse_scheme(raw, "socks5")
     }
 
-    /// Build a SOCKS5H proxy URL. Behaves the same as `socks5`: the proxy resolves hostnames.
     pub fn socks5h(raw: impl AsRef<str>) -> crate::core::Result<Self> {
         Self::parse_scheme(raw, "socks5h")
     }
 
-    /// Borrow as a string.
     pub fn as_str(&self) -> &str {
         &self.0
     }
 
-    /// Consume into the validated string.
     pub fn into_string(self) -> String {
         self.0
     }
@@ -119,15 +108,12 @@ impl From<ProxyUrl> for String {
     }
 }
 
-/// Proxy configuration for a session.
 #[derive(Clone)]
 pub struct ProxyConfig {
     rules: Vec<ProxyRule>,
     no_proxy: NoProxy,
-    /// `true` when the matcher was set via [`Self::no_proxy`] (deliberate caller config) rather than inherited from the `NO_PROXY` env var.
     no_proxy_explicit: bool,
     use_env: bool,
-    /// `true` when the default proxy came from `HTTPS_PROXY`/`HTTP_PROXY` at session build, so `NO_PROXY` applies to it.
     from_env: bool,
 }
 
@@ -156,18 +142,15 @@ impl Default for ProxyConfig {
 }
 
 impl ProxyConfig {
-    /// Create proxy config that honours environment proxies.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Add a proxy rule.
     pub fn with_rule(mut self, rule: ProxyRule) -> Self {
         self.rules.push(rule);
         self
     }
 
-    /// Replace the session-default all-scheme proxy.
     pub(crate) fn set_default_proxy(mut self, proxy_url: impl Into<String>) -> Self {
         self.rules.retain(|r| r.scheme != ProxyRuleScheme::All);
         self.rules.push(ProxyRule::all(proxy_url));
@@ -175,18 +158,15 @@ impl ProxyConfig {
         self
     }
 
-    /// Mark the default proxy as discovered from the environment.
     pub(crate) fn set_from_env(mut self) -> Self {
         self.from_env = true;
         self
     }
 
-    /// Every configured rule, for validation at session build.
     pub(crate) fn rules(&self) -> &[ProxyRule] {
         &self.rules
     }
 
-    /// The all-scheme proxy when one is set, else the first rule's URL.
     pub(crate) fn primary(&self) -> Option<&str> {
         self.rules
             .iter()
@@ -195,31 +175,26 @@ impl ProxyConfig {
             .map(|r| r.url.as_str())
     }
 
-    /// Add a proxy URL that applies to all supported schemes.
     pub fn all(mut self, proxy_url: impl Into<String>) -> Self {
         self.rules.push(ProxyRule::all(proxy_url));
         self
     }
 
-    /// Replace the no-proxy matcher.
     pub fn no_proxy(mut self, no_proxy: NoProxy) -> Self {
         self.no_proxy = no_proxy;
         self.no_proxy_explicit = true;
         self
     }
 
-    /// Disable environment proxy discovery.
     pub fn without_env(mut self) -> Self {
         self.use_env = false;
         self
     }
 
-    /// Whether environment proxy discovery is enabled.
     pub fn uses_env(&self) -> bool {
         self.use_env
     }
 
-    /// Select a proxy URL for a request.
     pub(crate) fn proxy_for<'a>(
         &'a self,
         url: &url::Url,
@@ -244,7 +219,6 @@ impl ProxyConfig {
     }
 }
 
-/// A single proxy routing rule.
 #[derive(Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ProxyRule {
@@ -262,7 +236,6 @@ impl std::fmt::Debug for ProxyRule {
 }
 
 impl ProxyRule {
-    /// Route all supported request schemes through `proxy_url`.
     pub fn all(proxy_url: impl Into<String>) -> Self {
         Self {
             scheme: ProxyRuleScheme::All,
@@ -270,7 +243,6 @@ impl ProxyRule {
         }
     }
 
-    /// Route HTTP requests through `proxy_url`.
     pub fn http(proxy_url: impl Into<String>) -> Self {
         Self {
             scheme: ProxyRuleScheme::Http,
@@ -278,7 +250,6 @@ impl ProxyRule {
         }
     }
 
-    /// Route HTTPS requests through `proxy_url`.
     pub fn https(proxy_url: impl Into<String>) -> Self {
         Self {
             scheme: ProxyRuleScheme::Https,
@@ -295,7 +266,6 @@ impl ProxyRule {
         )
     }
 
-    /// Proxy URL carried by this rule.
     pub fn url(&self) -> &str {
         &self.url
     }
@@ -308,14 +278,12 @@ enum ProxyRuleScheme {
     Https,
 }
 
-/// Host matcher for proxy bypass rules.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct NoProxy {
     patterns: Vec<String>,
 }
 
 impl NoProxy {
-    /// Build from a comma-separated no-proxy list.
     pub fn from_string(raw: &str) -> Option<Self> {
         let patterns: Vec<String> = raw
             .split(',')
@@ -326,7 +294,6 @@ impl NoProxy {
         (!patterns.is_empty()).then_some(Self { patterns })
     }
 
-    /// Build from `NO_PROXY` / `no_proxy`.
     pub fn from_env() -> Option<Self> {
         std::env::var("NO_PROXY")
             .ok()
@@ -334,7 +301,6 @@ impl NoProxy {
             .and_then(|raw| Self::from_string(&raw))
     }
 
-    /// Create a matcher from exact/domain patterns.
     pub fn new<I, S>(patterns: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -345,14 +311,12 @@ impl NoProxy {
         }
     }
 
-    /// Return true when `host` should bypass proxies.
     pub fn matches(&self, host: &str) -> bool {
         let host = normalize_host(host);
         self.patterns.iter().any(|raw| pattern_matches(&host, raw))
     }
 }
 
-/// DNS configuration for direct connections.
 #[derive(Clone)]
 pub struct DnsConfig {
     resolver: Arc<dyn Resolver>,
@@ -377,25 +341,21 @@ impl Default for DnsConfig {
 }
 
 impl DnsConfig {
-    /// Create DNS config with the system resolver.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Use a custom resolver.
     pub fn resolver(mut self, resolver: Arc<dyn Resolver>) -> Self {
         self.resolver = resolver;
         self
     }
 
-    /// Resolve a host to a single socket address.
     pub fn resolve_host(mut self, host: impl AsRef<str>, addr: SocketAddr) -> Self {
         self.overrides
             .insert(normalize_host(host.as_ref()), vec![addr]);
         self
     }
 
-    /// Resolve a host to multiple socket addresses.
     pub fn resolve_host_to_addrs<I>(mut self, host: impl AsRef<str>, addrs: I) -> Self
     where
         I: IntoIterator<Item = SocketAddr>,
@@ -405,7 +365,6 @@ impl DnsConfig {
         self
     }
 
-    /// Convert to a resolver object.
     pub(crate) fn into_resolver(self) -> Arc<dyn Resolver> {
         if self.overrides.is_empty() {
             self.resolver
@@ -437,17 +396,12 @@ impl Resolver for LayeredResolver {
     }
 }
 
-/// Request timeout configuration. Start from [`TimeoutConfig::default`] and set one field per call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct TimeoutConfig {
-    /// Wall-clock cap on one `send`, covering every redirect hop, retry, backoff sleep, and buffered body read; on expiry the call returns a `Kind::Timeout` error.
     pub total: Duration,
-    /// Cap on DNS + TCP + TLS setup for one new `https` connection, fired before the request is written; pooled reuse and plaintext `http` connects are not covered.
     pub connect: Option<Duration>,
-    /// Idle cap between chunks of a streamed response body, fired only on a request that called `stream`; a buffered body is read inside the `response_header` and `total` windows instead.
     pub read: Option<Duration>,
-    /// Cap on the wait from request-sent until the transport response resolves, per redirect hop; a buffered response resolves only after its body is read.
     pub response_header: Option<Duration>,
 }
 
@@ -463,47 +417,37 @@ impl Default for TimeoutConfig {
 }
 
 impl TimeoutConfig {
-    /// Create default timeout config.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Set the wall-clock cap on one `send`.
     pub fn total(mut self, d: Duration) -> Self {
         self.total = d;
         self
     }
 
-    /// Set the connect-setup cap. `None` disables it.
     pub fn connect(mut self, d: impl Into<Option<Duration>>) -> Self {
         self.connect = d.into();
         self
     }
 
-    /// Set the idle cap between streamed body chunks. `None` disables it.
     pub fn read(mut self, d: impl Into<Option<Duration>>) -> Self {
         self.read = d.into();
         self
     }
 
-    /// Set the request-sent to response cap, per redirect hop. `None` disables it.
     pub fn response_header(mut self, d: impl Into<Option<Duration>>) -> Self {
         self.response_header = d.into();
         self
     }
 }
 
-/// Connection pool configuration. Start from [`PoolConfig::default`] and set one field per call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct PoolConfig {
-    /// Idle eviction timeout.
     pub idle_timeout: Duration,
-    /// Maximum pooled entries.
     pub max_connections: usize,
-    /// Maximum simultaneous HTTP/1.1 connections per destination `(host, port, proxy)`.
     pub max_h1_conns_per_host: usize,
-    /// Whether keepalive pooling is enabled.
     pub keepalive: bool,
 }
 
@@ -519,63 +463,45 @@ impl Default for PoolConfig {
 }
 
 impl PoolConfig {
-    /// Create default pool config.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Set the idle eviction timeout.
     pub fn idle_timeout(mut self, d: Duration) -> Self {
         self.idle_timeout = d;
         self
     }
 
-    /// Set the maximum number of pooled entries.
     pub fn max_connections(mut self, n: usize) -> Self {
         self.max_connections = n;
         self
     }
 
-    /// Set the maximum simultaneous HTTP/1.1 connections per destination.
     pub fn max_h1_conns_per_host(mut self, n: usize) -> Self {
         self.max_h1_conns_per_host = n;
         self
     }
 
-    /// Enable or disable keepalive pooling.
     pub fn keepalive(mut self, on: bool) -> Self {
         self.keepalive = on;
         self
     }
 }
 
-/// Socket-level direct-connect options. Start from [`SocketConfig::default`] and set one field per call.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct SocketConfig {
-    /// Bind every direct socket to this local address.
     pub local_address: Option<IpAddr>,
-    /// IPv4-specific local bind address.
     pub local_ipv4: Option<Ipv4Addr>,
-    /// IPv6-specific local bind address.
     pub local_ipv6: Option<Ipv6Addr>,
-    /// Override TCP_NODELAY after the browser TCP profile is applied.
     pub tcp_nodelay: Option<bool>,
-    /// TCP keepalive idle time.
     pub tcp_keepalive: Option<Duration>,
-    /// TCP keepalive interval between probes once idle expires.
     pub tcp_keepalive_interval: Option<Duration>,
-    /// TCP keepalive probe count before the kernel drops the connection.
     pub tcp_keepalive_retries: Option<u32>,
-    /// TCP user timeout.
     pub tcp_user_timeout: Option<Duration>,
-    /// Socket send buffer size.
     pub send_buffer_size: Option<usize>,
-    /// Socket receive buffer size.
     pub recv_buffer_size: Option<usize>,
-    /// Platform network interface name.
     pub interface: Option<String>,
-    /// Treat socket-option failures as hard errors.
     pub strict: bool,
 }
 
@@ -599,85 +525,71 @@ impl Default for SocketConfig {
 }
 
 impl SocketConfig {
-    /// Create default socket config.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Bind every direct socket to this local address.
     pub fn local_address(mut self, addr: impl Into<Option<IpAddr>>) -> Self {
         self.local_address = addr.into();
         self
     }
 
-    /// Bind IPv4 sockets to this local address.
     pub fn local_ipv4(mut self, addr: impl Into<Option<Ipv4Addr>>) -> Self {
         self.local_ipv4 = addr.into();
         self
     }
 
-    /// Bind IPv6 sockets to this local address.
     pub fn local_ipv6(mut self, addr: impl Into<Option<Ipv6Addr>>) -> Self {
         self.local_ipv6 = addr.into();
         self
     }
 
-    /// Override `TCP_NODELAY` after the browser TCP profile is applied.
     pub fn tcp_nodelay(mut self, on: impl Into<Option<bool>>) -> Self {
         self.tcp_nodelay = on.into();
         self
     }
 
-    /// Set the TCP keepalive idle time.
     pub fn tcp_keepalive(mut self, d: impl Into<Option<Duration>>) -> Self {
         self.tcp_keepalive = d.into();
         self
     }
 
-    /// Set the TCP keepalive probe interval.
     pub fn tcp_keepalive_interval(mut self, d: impl Into<Option<Duration>>) -> Self {
         self.tcp_keepalive_interval = d.into();
         self
     }
 
-    /// Set the TCP keepalive probe count.
     pub fn tcp_keepalive_retries(mut self, n: impl Into<Option<u32>>) -> Self {
         self.tcp_keepalive_retries = n.into();
         self
     }
 
-    /// Set the TCP user timeout.
     pub fn tcp_user_timeout(mut self, d: impl Into<Option<Duration>>) -> Self {
         self.tcp_user_timeout = d.into();
         self
     }
 
-    /// Set the socket send buffer size.
     pub fn send_buffer_size(mut self, n: impl Into<Option<usize>>) -> Self {
         self.send_buffer_size = n.into();
         self
     }
 
-    /// Set the socket receive buffer size.
     pub fn recv_buffer_size(mut self, n: impl Into<Option<usize>>) -> Self {
         self.recv_buffer_size = n.into();
         self
     }
 
-    /// Bind to a platform network interface by name.
     pub fn interface(mut self, name: impl Into<String>) -> Self {
         self.interface = Some(name.into());
         self
     }
 
-    /// Treat socket-option failures as hard errors.
     pub fn strict(mut self, on: bool) -> Self {
         self.strict = on;
         self
     }
 }
 
-/// Redirect follow policy.
 #[derive(Clone)]
 pub struct RedirectPolicy {
     kind: RedirectKind,
@@ -707,21 +619,18 @@ impl Default for RedirectPolicy {
 }
 
 impl RedirectPolicy {
-    /// Follow up to `max` redirects.
     pub fn limited(max: usize) -> Self {
         Self {
             kind: RedirectKind::Limited(max),
         }
     }
 
-    /// Do not follow redirects.
     pub fn none() -> Self {
         Self {
             kind: RedirectKind::None,
         }
     }
 
-    /// Use a custom redirect callback.
     pub fn custom<F>(f: F) -> Self
     where
         F: Fn(RedirectAttempt<'_>) -> RedirectAction + Send + Sync + 'static,
@@ -754,41 +663,28 @@ impl RedirectPolicy {
     }
 }
 
-/// Information passed to a custom redirect policy.
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub struct RedirectAttempt<'a> {
-    /// Response status code.
     pub status: u16,
-    /// Current request URL.
     pub url: &'a http::Uri,
-    /// Location header value, if present.
     pub location: Option<&'a str>,
-    /// Previously visited URLs.
     pub previous: &'a [String],
 }
 
-/// Decision returned by a redirect policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum RedirectAction {
-    /// Follow the redirect.
     Follow,
-    /// Return the redirect response to the caller.
     Stop,
 }
 
-/// Response decompression configuration. Start from [`CompressionConfig::default`] and set one field per call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct CompressionConfig {
-    /// Decode gzip.
     pub gzip: bool,
-    /// Decode Brotli.
     pub brotli: bool,
-    /// Decode deflate.
     pub deflate: bool,
-    /// Decode zstd.
     pub zstd: bool,
 }
 
@@ -804,12 +700,10 @@ impl Default for CompressionConfig {
 }
 
 impl CompressionConfig {
-    /// Create default compression config.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Disable all response decompression.
     pub fn none() -> Self {
         Self {
             gzip: false,
@@ -819,31 +713,26 @@ impl CompressionConfig {
         }
     }
 
-    /// Enable or disable gzip decoding.
     pub fn gzip(mut self, on: bool) -> Self {
         self.gzip = on;
         self
     }
 
-    /// Enable or disable Brotli decoding.
     pub fn brotli(mut self, on: bool) -> Self {
         self.brotli = on;
         self
     }
 
-    /// Enable or disable deflate decoding.
     pub fn deflate(mut self, on: bool) -> Self {
         self.deflate = on;
         self
     }
 
-    /// Enable or disable zstd decoding.
     pub fn zstd(mut self, on: bool) -> Self {
         self.zstd = on;
         self
     }
 
-    /// Return true if this encoding may be decoded.
     pub(crate) fn allows(&self, encoding: &str) -> bool {
         match encoding {
             "gzip" | "x-gzip" => self.gzip,
@@ -856,23 +745,15 @@ impl CompressionConfig {
     }
 }
 
-/// WebSocket connection preferences. Start from [`WebSocketConfig::default`] and set one field per call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct WebSocketConfig {
-    /// Prefer HTTP/2 extended CONNECT before H1 upgrade.
     pub prefer_http2: bool,
-    /// Maximum frame size.
     pub max_frame_size: Option<usize>,
-    /// Maximum message size.
     pub max_message_size: Option<usize>,
-    /// Read buffer size.
     pub read_buffer_size: Option<usize>,
-    /// Write buffer size.
     pub write_buffer_size: Option<usize>,
-    /// Maximum queued write buffer size.
     pub max_write_buffer_size: Option<usize>,
-    /// Accept unmasked frames.
     pub accept_unmasked_frames: bool,
 }
 
@@ -891,48 +772,40 @@ impl Default for WebSocketConfig {
 }
 
 impl WebSocketConfig {
-    /// Create default WebSocket config.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Prefer HTTP/2 extended CONNECT before the HTTP/1.1 upgrade.
     pub fn prefer_http2(mut self, on: bool) -> Self {
         self.prefer_http2 = on;
         self
     }
 
-    /// Set the maximum frame size.
     pub fn max_frame_size(mut self, n: impl Into<Option<usize>>) -> Self {
         self.max_frame_size = n.into();
         self
     }
 
-    /// Set the maximum message size.
     pub fn max_message_size(mut self, n: impl Into<Option<usize>>) -> Self {
         self.max_message_size = n.into();
         self
     }
 
-    /// Set the read buffer size.
     pub fn read_buffer_size(mut self, n: impl Into<Option<usize>>) -> Self {
         self.read_buffer_size = n.into();
         self
     }
 
-    /// Set the write buffer size.
     pub fn write_buffer_size(mut self, n: impl Into<Option<usize>>) -> Self {
         self.write_buffer_size = n.into();
         self
     }
 
-    /// Set the maximum queued write buffer size.
     pub fn max_write_buffer_size(mut self, n: impl Into<Option<usize>>) -> Self {
         self.max_write_buffer_size = n.into();
         self
     }
 
-    /// Accept unmasked frames from the peer.
     pub fn accept_unmasked_frames(mut self, on: bool) -> Self {
         self.accept_unmasked_frames = on;
         self

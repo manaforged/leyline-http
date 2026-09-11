@@ -7,26 +7,22 @@ use http::{HeaderName, Request as HttpRequest, Response as HttpResponse};
 use crate::core::body::Body;
 use crate::core::{Kind, Request, Response, Result, Session};
 
-/// Tower-compatible adapter for dispatching owned Leyline requests.
 #[derive(Clone)]
 pub struct LeylineService {
     session: Session,
 }
 
 impl LeylineService {
-    /// Wrap a session as a Tower service.
     pub fn new(session: Session) -> Self {
         Self { session }
     }
 
-    /// Borrow the underlying session.
     pub fn session(&self) -> &Session {
         &self.session
     }
 }
 
 impl From<HttpRequest<Body>> for Request {
-    /// Carry method, URI, headers, and body across; extensions and version are dropped because the identity picks the protocol.
     fn from(req: HttpRequest<Body>) -> Self {
         let (parts, body) = req.into_parts();
         let mut out = Request::new(parts.method, parts.uri);
@@ -44,7 +40,6 @@ impl From<HttpRequest<Body>> for Request {
     }
 }
 
-/// Rebuild the response as `http` sees it: status, wire-ordered headers, and the body.
 fn adapt(resp: Response) -> Result<HttpResponse<Body>> {
     let mut builder = HttpResponse::builder().status(resp.status());
     for (name, value) in resp.headers() {

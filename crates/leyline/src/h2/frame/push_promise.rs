@@ -1,26 +1,18 @@
-//! PUSH_PROMISE frame (RFC 9113 Section 6.6).
-
 use bytes::Bytes;
 
 use super::{FrameHeader, be_u32};
 use crate::h2::H2Error;
 use crate::h2::error::ErrorCode;
 
-/// PUSH_PROMISE frame — server push.
 #[derive(Debug)]
 pub struct PushPromiseFrame {
-    /// Stream the promise is associated with.
     pub stream_id: u32,
-    /// `END_HEADERS` flag — no CONTINUATION frames follow.
     pub end_headers: bool,
-    /// The promised stream ID.
     pub promised_stream_id: u32,
-    /// HPACK-encoded header block fragment.
     pub fragment: Bytes,
 }
 
 impl PushPromiseFrame {
-    /// Parse from header + payload.
     pub fn parse(header: FrameHeader, payload: Bytes) -> Result<Self, H2Error> {
         if header.stream_id == 0 {
             return Err(H2Error::Connection {

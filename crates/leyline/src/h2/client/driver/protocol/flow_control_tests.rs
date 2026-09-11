@@ -1,5 +1,3 @@
-//! `WINDOW_UPDATE`, SETTINGS, and the handshake path all reuse the same flow-window math via `checked_window_add`, giving all three call sites a single unit-test gate.
-
 use super::{MAX_FLOW_WINDOW, checked_window_add};
 
 #[test]

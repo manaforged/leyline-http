@@ -1,4 +1,3 @@
-//! Split from the parent pool module.
 use super::*;
 
 use std::time::Instant;
@@ -9,11 +8,9 @@ use crate::trace;
 mod body;
 mod head;
 
-/// A request body that arrives chunk by chunk.
 type BodyStream =
     Pin<Box<dyn futures_util::Stream<Item = std::io::Result<Bytes>> + Send + 'static>>;
 
-/// How the request body is delimited on the wire.
 enum Framing {
     None,
     Buffered(Bytes),
@@ -21,7 +18,6 @@ enum Framing {
     Chunked { stream: BodyStream },
 }
 
-/// Serialise and send an HTTP/1.1 request head + body on `stream`.
 pub(super) async fn send_h1_request(
     stream: &mut dyn H1Io,
     method: &str,
@@ -63,7 +59,6 @@ pub(super) async fn send_h1_request(
 
     Ok(header_contains_token(&headers, "connection", "close"))
 }
-/// Decide whether a keep-alive connection may be reinstated after a response.
 pub(super) fn compute_reusable(
     client_asked_close: bool,
     resp_headers: &[(String, String)],
@@ -79,7 +74,6 @@ pub(super) fn compute_reusable(
         server_says_keepalive
     }
 }
-/// Run a single buffered HTTP/1.1 request/response exchange on `stream`.
 pub(super) async fn exchange_on_stream(
     stream: &mut dyn H1Io,
     method: &str,
@@ -105,7 +99,6 @@ pub(super) async fn exchange_on_stream(
         reusable,
     ))
 }
-/// Send the request and read only the response head, leaving the body on the wire for a streaming pump.
 pub(super) async fn exchange_head_on_stream(
     stream: &mut dyn H1Io,
     method: &str,
@@ -125,7 +118,6 @@ pub(super) async fn exchange_head_on_stream(
         && !matches!(head.framing, BodyFraming::ToClose);
     Ok((head, reusable))
 }
-/// Map a pool error to the `io::Error` the streaming consumer receives.
 pub(super) fn h1err_to_io(e: H1PooledError) -> io::Error {
     match e {
         H1PooledError::Io(io) => io,
@@ -138,7 +130,6 @@ pub(super) fn method_typically_has_body(method: &str) -> bool {
         .iter()
         .any(|m| method.eq_ignore_ascii_case(m))
 }
-/// RFC 9112 §6.1 framing validation.
 pub(super) fn validate_framing_headers(headers: &[(String, String)]) -> Result<(), H1PooledError> {
     let cl_count = headers
         .iter()

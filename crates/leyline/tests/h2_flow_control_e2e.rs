@@ -1,5 +1,3 @@
-//! Regression gate for the stream-level receive window.
-
 #[path = "h2_support/mod.rs"]
 mod support;
 
@@ -13,11 +11,8 @@ use leyline::h2::hpack;
 use support::*;
 use tokio::io::AsyncWriteExt;
 
-/// Our advertised per-stream receive window.
 const STREAM_WINDOW: u32 = 65_535;
-/// Connection-level window — deliberately much larger than the stream window so only the stream credit gates the transfer (and so the buggy connection-seeded recv window visibly diverges).
 const CONN_WINDOW: u32 = 1_048_576;
-/// Response body size — far past the stream window so the server must pause for a stream WINDOW_UPDATE at least once.
 const BODY_LEN: usize = 200_000;
 const MAX_FRAME: usize = 16_384;
 

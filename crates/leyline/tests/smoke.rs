@@ -1,5 +1,3 @@
-//! Live smoke suite for Leyline's proof gates.
-
 use std::future::Future;
 use std::pin::Pin;
 use std::time::{Duration, Instant};

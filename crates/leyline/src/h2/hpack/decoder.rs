@@ -1,22 +1,17 @@
-//! HPACK decoder (RFC 7541 Section 6).
-
 use bytes::Bytes;
 
 use super::huffman;
 use super::integer;
 use super::table::{self, DynamicTable};
 
-/// Max total decoded header size (64KB default, matches Chrome).
 const MAX_HEADER_LIST_SIZE: usize = 64 * 1024;
 
-/// HPACK decoder with dynamic table state.
 pub struct Decoder {
     dynamic: DynamicTable,
     max_table_size: usize,
     max_header_list_size: usize,
 }
 
-/// A decoded header.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Header {
     pub name: Bytes,
@@ -24,7 +19,6 @@ pub struct Header {
 }
 
 impl Decoder {
-    /// Create a new decoder with default table size (4096).
     pub fn new() -> Self {
         Self {
             dynamic: DynamicTable::new(),
@@ -33,18 +27,15 @@ impl Decoder {
         }
     }
 
-    /// Set max table size (from SETTINGS).
     pub fn set_max_table_size(&mut self, size: usize) {
         self.max_table_size = size;
         self.dynamic.set_max_size(size);
     }
 
-    /// Set max decoded header list size.
     pub fn set_max_header_list_size(&mut self, size: usize) {
         self.max_header_list_size = size;
     }
 
-    /// Decode a header block into a list of headers.
     pub fn decode_header_block(&mut self, src: &[u8]) -> Result<Vec<Header>, String> {
         let mut headers = Vec::new();
         let mut total_size = 0usize;
@@ -103,7 +94,6 @@ impl Decoder {
         Ok(headers)
     }
 
-    /// Decode a literal header field.
     fn decode_literal(
         &mut self,
         src: &[u8],
@@ -146,7 +136,6 @@ impl Default for Decoder {
     }
 }
 
-/// Decode a string literal (RFC 7541 Section 5.2) into the **original wire `Bytes`**.
 fn decode_string(src: &[u8]) -> Result<(Bytes, usize), String> {
     if src.is_empty() {
         return Err("unexpected end of string".into());

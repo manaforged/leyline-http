@@ -1,4 +1,3 @@
-//! Integration tests for RFC 8441 extended CONNECT (WebSocket-over-H2).
 #[path = "h2_support/mod.rs"]
 mod support;
 
@@ -94,7 +93,6 @@ where
     assert!(h.flags & 0x1 != 0, "expected client SETTINGS ACK");
 }
 
-/// Decode a HEADERS / CONTINUATION sequence from the stream, returning the assembled header list for assertions.
 async fn read_header_block<S>(server_io: &mut S) -> (u32, bool, Vec<(String, String)>)
 where
     S: tokio::io::AsyncRead + Unpin,
@@ -131,7 +129,6 @@ where
     (stream_id, end_stream, list)
 }
 
-/// Encode and write a 200 OK response HEADERS frame (non-end-stream) for an extended CONNECT stream.
 async fn write_connect_200<S: tokio::io::AsyncWrite + Unpin>(s: &mut S, stream_id: u32) {
     let mut enc = hpack::Encoder::new();
     let fragment = enc.encode_header_block(&[(":status", "200")]);

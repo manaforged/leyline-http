@@ -1,6 +1,3 @@
-//! Huffman encoding/decoding for HPACK (RFC 7541 Section 5.2).
-
-/// (code, bit_length) for each byte value 0-255, plus EOS at index 256.
 static HUFFMAN_TABLE: [(u32, u8); 257] = [
     (0x1ff8, 13),
     (0x7fffd8, 23),
@@ -261,7 +258,6 @@ static HUFFMAN_TABLE: [(u32, u8); 257] = [
     (0x3fffffff, 30),
 ];
 
-/// Huffman-encode a byte slice.
 pub fn encode(src: &[u8], dst: &mut Vec<u8>) {
     let mut bits: u64 = 0;
     let mut bits_left: u8 = 0;
@@ -284,7 +280,6 @@ pub fn encode(src: &[u8], dst: &mut Vec<u8>) {
     }
 }
 
-/// Huffman-decode a byte slice.
 pub fn decode(src: &[u8]) -> Result<Vec<u8>, &'static str> {
     let table = decode_table();
     let mut dst = Vec::new();
@@ -323,14 +318,12 @@ pub fn decode(src: &[u8]) -> Result<Vec<u8>, &'static str> {
     Ok(dst)
 }
 
-/// One entry of the 8-bit fast table: the short code (length 5..=8) that begins at this 8-bit prefix.
 #[derive(Clone, Copy)]
 struct Fast8 {
     sym: u16,
     len: u8,
 }
 
-/// Decode lookup table, built once.
 struct DecodeTable {
     by_length: [Vec<(u32, u16)>; 26],
     fast8: [Fast8; 256],
@@ -379,14 +372,12 @@ impl DecodeTable {
     }
 }
 
-/// The decode table, built once on first use.
 fn decode_table() -> &'static DecodeTable {
     use std::sync::LazyLock;
     static TABLE: LazyLock<DecodeTable> = LazyLock::new(DecodeTable::new);
     &TABLE
 }
 
-/// Decode one symbol from the accumulator.
 fn decode_symbol(table: &DecodeTable, acc: u64, acc_bits: u8) -> Option<(u16, u8)> {
     let start = if acc_bits >= 8 {
         let top8 = ((acc >> (acc_bits - 8)) & 0xff) as usize;
@@ -409,7 +400,6 @@ fn decode_symbol(table: &DecodeTable, acc: u64, acc_bits: u8) -> Option<(u16, u8
     None
 }
 
-/// Returns the encoded length of `src` in bytes (for deciding raw vs Huffman).
 pub fn encoded_len(src: &[u8]) -> usize {
     let total_bits: usize = src
         .iter()

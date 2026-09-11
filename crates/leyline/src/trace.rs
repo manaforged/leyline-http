@@ -1,5 +1,3 @@
-//! Per-request lifecycle hooks: DNS, connect, TLS, send, response head, and completion.
-
 use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
@@ -7,113 +5,71 @@ use std::time::{Duration, Instant};
 
 use crate::{Error, HttpVersion, ResponseTiming};
 
-/// Name resolution finished for one request.
 #[non_exhaustive]
 pub struct Dns<'a> {
-    /// Attempt this event belongs to.
     pub id: u64,
-    /// Host name that was resolved.
     pub host: &'a str,
-    /// Port the addresses were resolved for.
     pub port: u16,
-    /// Number of addresses the resolver returned.
     pub addrs: usize,
-    /// Time the resolver took.
     pub elapsed: Duration,
 }
 
-/// A connection became available for one request.
 #[non_exhaustive]
 pub struct Connect<'a> {
-    /// Attempt this event belongs to.
     pub id: u64,
-    /// Host the connection points at.
     pub host: &'a str,
-    /// Port the connection points at.
     pub port: u16,
-    /// `true` when the connection came from the pool; then `elapsed` is zero.
     pub reused: bool,
-    /// Time the TCP or QUIC connect took.
     pub elapsed: Duration,
 }
 
-/// A TLS handshake completed for one request.
 #[non_exhaustive]
 pub struct Tls<'a> {
-    /// Attempt this event belongs to.
     pub id: u64,
-    /// Host the handshake authenticated.
     pub host: &'a str,
-    /// Negotiated TLS version, as the library reports it.
     pub version: Option<&'a str>,
-    /// Negotiated cipher suite.
     pub cipher: Option<&'a str>,
-    /// Protocol ALPN selected.
     pub alpn: Option<&'a str>,
-    /// Time the handshake took.
     pub elapsed: Duration,
 }
 
-/// The request was handed to the wire.
 #[non_exhaustive]
 pub struct Sent<'a> {
-    /// Attempt this event belongs to.
     pub id: u64,
-    /// Host the request went to.
     pub host: &'a str,
-    /// Protocol that framed the request.
     pub protocol: HttpVersion,
-    /// Time spent framing and writing the request.
     pub elapsed: Duration,
 }
 
-/// The response head (first byte) arrived.
 #[non_exhaustive]
 pub struct Head<'a> {
-    /// Attempt this event belongs to.
     pub id: u64,
-    /// Host the response came from.
     pub host: &'a str,
-    /// Response status code.
     pub status: u16,
-    /// Protocol that carried the response.
     pub protocol: HttpVersion,
-    /// Time from the end of the request send to the response head.
     pub elapsed: Duration,
 }
 
-/// The attempt finished: the body is complete, or the request failed.
 #[non_exhaustive]
 pub struct Done<'a> {
-    /// Attempt this event belongs to.
     pub id: u64,
-    /// Time from the start of the attempt.
     pub elapsed: Duration,
-    /// `Ok` when the response reached the caller, `Err` with the failure otherwise.
     pub outcome: Result<(), &'a Error>,
 }
 
-/// Observes one request's lifecycle; every method has a no-op default. Hooks run inline on the request task, so a slow listener slows the request. Do not block, lock, or await inside one.
 #[expect(
     unused_variables,
     reason = "no-op defaults keep the event name visible in the rendered signature"
 )]
 pub trait Trace: Send + Sync + 'static {
-    /// Name resolution finished.
     fn dns(&self, ev: &Dns<'_>) {}
-    /// A connection became available; `ev.reused` tells a pool hit from a fresh dial.
     fn connect(&self, ev: &Connect<'_>) {}
-    /// A TLS handshake completed.
     fn tls(&self, ev: &Tls<'_>) {}
-    /// The request reached the wire.
     fn sent(&self, ev: &Sent<'_>) {}
-    /// The response head arrived.
     fn head(&self, ev: &Head<'_>) {}
-    /// The attempt finished.
     fn done(&self, ev: &Done<'_>) {}
 }
 
-/// The listener and identity of the attempt running on this task.
 #[derive(Clone)]
 pub(crate) struct Ctx {
     hook: Arc<dyn Trace>,
@@ -125,10 +81,8 @@ tokio::task_local! {
     static CURRENT: Ctx;
 }
 
-/// Monotonic attempt counter; every scope takes the next value.
 static NEXT: AtomicU64 = AtomicU64::new(1);
 
-/// Run `fut` as one traced attempt. Without a listener the future runs unchanged.
 pub(crate) async fn scope<F>(hook: Option<&Arc<dyn Trace>>, fut: F) -> F::Output
 where
     F: Future,
@@ -146,7 +100,6 @@ where
     }
 }
 
-/// Carry the calling task's trace context into a spawned task. Call this in the parent task.
 pub(crate) fn carry<F>(fut: F) -> impl Future<Output = F::Output> + Send
 where
     F: Future + Send,
@@ -160,17 +113,14 @@ where
     }
 }
 
-/// `true` when the current task carries a listener.
 pub(crate) fn on() -> bool {
     CURRENT.try_with(|_| ()).is_ok()
 }
 
-/// Hand the current context to `emit`, or do nothing when the task carries no listener.
 fn with(emit: impl FnOnce(&Ctx)) {
     CURRENT.try_with(emit).unwrap_or(())
 }
 
-/// Report finished name resolution.
 pub(crate) fn dns(host: &str, port: u16, addrs: usize, elapsed: Duration) {
     with(|ctx| {
         ctx.hook.dns(&Dns {
@@ -183,7 +133,6 @@ pub(crate) fn dns(host: &str, port: u16, addrs: usize, elapsed: Duration) {
     });
 }
 
-/// Report an available connection.
 pub(crate) fn connect(host: &str, port: u16, reused: bool, elapsed: Duration) {
     with(|ctx| {
         ctx.hook.connect(&Connect {
@@ -196,7 +145,6 @@ pub(crate) fn connect(host: &str, port: u16, reused: bool, elapsed: Duration) {
     });
 }
 
-/// Report a completed TLS handshake.
 pub(crate) fn tls(
     host: &str,
     version: Option<&str>,
@@ -216,7 +164,6 @@ pub(crate) fn tls(
     });
 }
 
-/// Report a request that reached the wire.
 pub(crate) fn sent(host: &str, protocol: HttpVersion, elapsed: Duration) {
     with(|ctx| {
         ctx.hook.sent(&Sent {
@@ -228,7 +175,6 @@ pub(crate) fn sent(host: &str, protocol: HttpVersion, elapsed: Duration) {
     });
 }
 
-/// Report an arrived response head.
 pub(crate) fn head(host: &str, status: u16, protocol: HttpVersion, elapsed: Duration) {
     with(|ctx| {
         ctx.hook.head(&Head {
@@ -241,7 +187,6 @@ pub(crate) fn head(host: &str, status: u16, protocol: HttpVersion, elapsed: Dura
     });
 }
 
-/// Report the end of the attempt.
 pub(crate) fn done(outcome: Result<(), &Error>) {
     with(|ctx| {
         ctx.hook.done(&Done {
@@ -252,7 +197,6 @@ pub(crate) fn done(outcome: Result<(), &Error>) {
     });
 }
 
-/// A [`Trace`] that writes every event as a `tracing` debug event under the `leyline::trace` target.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct TracingTrace;
 
@@ -289,12 +233,10 @@ impl Trace for TracingTrace {
     }
 }
 
-/// Milliseconds elapsed, saturating into `u32`.
 fn ms(d: Duration) -> u32 {
     u32::try_from(d.as_millis()).unwrap_or(u32::MAX)
 }
 
-/// A [`Trace`] that fills the same numbers as [`crate::ResponseTiming`], readable after the request through [`Timing::snapshot`]. Share one instance across requests by cloning the `Arc` you hand to [`crate::SessionBuilder::trace`]; the snapshot then reports the most recent attempt.
 #[derive(Debug, Default)]
 pub struct Timing {
     reused: AtomicBool,
@@ -305,12 +247,10 @@ pub struct Timing {
 }
 
 impl Timing {
-    /// A recorder with every number at zero.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// The numbers recorded by the most recent attempt.
     pub fn snapshot(&self) -> ResponseTiming {
         ResponseTiming {
             reused: self.reused.load(Ordering::Relaxed),

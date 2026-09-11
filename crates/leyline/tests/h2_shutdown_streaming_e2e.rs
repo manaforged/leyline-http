@@ -1,4 +1,3 @@
-//! Regression gate for streaming uploads during graceful shutdown.
 #[path = "h2_support/mod.rs"]
 mod support;
 

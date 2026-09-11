@@ -1,4 +1,3 @@
-//! The driver must batch one event-loop turn into one transport write.
 #[path = "h2_support/mod.rs"]
 mod support;
 
@@ -16,7 +15,6 @@ use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
 use leyline::h2::connection::{ClientConnection, PseudoHeaders};
 use leyline::h2::frame::FrameType;
 
-/// Duplex half that counts every `poll_write` the client makes.
 struct Counted {
     inner: DuplexStream,
     writes: Arc<AtomicUsize>,

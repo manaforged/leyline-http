@@ -1,5 +1,3 @@
-//! [`H2Client`] — the cloneable public handle to a running HTTP/2 connection.
-
 use std::io;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -18,7 +16,6 @@ use super::driver::{
 };
 use super::types::{H2ResponseEx, RequestBody, ResponseBody};
 
-/// Cloneable handle to a running HTTP/2 connection.
 #[derive(Clone)]
 pub struct H2Client {
     pub(super) tx: mpsc::Sender<DriverCommand>,
@@ -27,7 +24,6 @@ pub struct H2Client {
 }
 
 impl H2Client {
-    /// Send a request over a multiplexed stream and await the response.
     pub async fn send_request(
         &self,
         pseudo: PseudoHeaders,
@@ -38,7 +34,6 @@ impl H2Client {
             .await
     }
 
-    /// Send a request with optional trailers and await the response.
     pub async fn send_request_with_trailers(
         &self,
         pseudo: PseudoHeaders,
@@ -75,7 +70,6 @@ impl H2Client {
         }
     }
 
-    /// Extended send — supports streaming request bodies and optional streaming response delivery.
     pub async fn send_request_ex(
         &self,
         pseudo: PseudoHeaders,
@@ -87,7 +81,6 @@ impl H2Client {
             .await
     }
 
-    /// Extended send over a request head the caller already owns behind an `Arc`, so a retry costs no header clone.
     pub(crate) async fn send_shared(
         &self,
         head: Arc<Head>,
@@ -148,17 +141,14 @@ impl H2Client {
         }
     }
 
-    /// Return `true` if the driver task has shut down (GOAWAY, IO error, or last handle dropped).
     pub fn is_closed(&self) -> bool {
         self.closed.load(Ordering::Acquire)
     }
 
-    /// Return `true` if the peer has advertised `SETTINGS_ENABLE_CONNECT_PROTOCOL = 1` (RFC 8441 §3).
     pub fn peer_enables_connect_protocol(&self) -> bool {
         self.peer_settings.enable_connect_protocol()
     }
 
-    /// Open an HTTP/2 extended CONNECT (RFC 8441) bidirectional stream.
     pub async fn open_extended_connect(
         &self,
         pseudo: PseudoHeaders,

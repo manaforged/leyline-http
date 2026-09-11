@@ -1,5 +1,3 @@
-//! Regression gate for oversized trailer blocks.
-
 #[path = "h2_support/mod.rs"]
 mod support;
 

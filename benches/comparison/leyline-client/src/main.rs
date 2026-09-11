@@ -1,11 +1,3 @@
-//! leyline Chrome-150 comparison client: HTTP/2 over TLS, cert verification off.
-//!
-//! Args: <url> [warm_n|print] [cold_n] [conc_n] [conc_c]. Phases:
-//!   warm — warm_n sequential GETs on one reused, pooled session (latency).
-//!   conc — conc_n GETs with conc_c in flight over the one multiplexed H2
-//!          connection (throughput — the metric that matters for H2).
-//!   cold — cold_n GETs each on a fresh session (handshake cost).
-//! `print` mode does one GET and prints the body (JA4 capture off the clock).
 #[cfg(feature = "mimalloc")]
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -19,9 +11,6 @@ fn build() -> Session {
         .chrome()
         .http2()
         .danger_accept_invalid_certs(true);
-    // Optional egress proxy (`PROXY=http://user:pass@host:port` or socks5://…)
-    // so the paired comparison can run through a real proxy against a remote
-    // target, not just the loopback server.
     if let Ok(p) = std::env::var("PROXY") {
         if !p.is_empty() {
             b = b.proxy(p);
@@ -30,9 +19,6 @@ fn build() -> Session {
     b.build().expect("leyline session builds")
 }
 
-/// 64-bit FNV-1a — a dependency-free body fingerprint for the equivalence
-/// gate. The paired harness asserts leyline and wreq see the same status +
-/// body hash for the same URL, so the rps numbers compare equal work.
 fn fnv1a(bytes: &[u8]) -> u64 {
     let mut h = 0xcbf2_9ce4_8422_2325u64;
     for &b in bytes {
@@ -56,8 +42,6 @@ async fn main() {
         return;
     }
 
-    // Equivalence gate: one GET, emit status + body fingerprint so the
-    // orchestrator can assert leyline and wreq fetched identical bytes.
     if args.get(2).map(|s| s.as_str()) == Some("equiv") {
         let resp = build().get(url.as_str()).await.expect("equiv req");
         let status = resp.status();
@@ -78,7 +62,6 @@ async fn main() {
     let session = build();
     session.get(url.as_str()).await.expect("warmup");
 
-    // warm: sequential on the reused session.
     let mut warm_us: Vec<u32> = Vec::with_capacity(warm_n);
     let start = Instant::now();
     for _ in 0..warm_n {
@@ -97,7 +80,6 @@ async fn main() {
         pct(0.99)
     );
 
-    // conc: conc_c workers share the one multiplexed connection.
     let per = conc_n / conc_c;
     let start = Instant::now();
     let mut handles = Vec::with_capacity(conc_c);
@@ -116,7 +98,6 @@ async fn main() {
     }
     let conc_rps = (per * conc_c) as f64 / start.elapsed().as_secs_f64();
 
-    // cold: fresh session (new TLS handshake) per request.
     let start = Instant::now();
     for _ in 0..cold_n {
         let resp = build().get(url.as_str()).await.expect("cold req");

@@ -1,5 +1,3 @@
-//! Driver lifecycle: run loop, stream admission, stream completion.
-
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
@@ -217,7 +215,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         }
     }
 
-    /// Walk the streams table; for any entry whose caller has dropped the response oneshot (or whose streaming body channel is closed on the reader side), send RST_STREAM(CANCEL) and clean up the actor.
     pub(super) async fn sweep_cancelled_streams(&mut self) -> Result<(), H2Error> {
         let to_cancel: Vec<u32> = self
             .streams
@@ -266,7 +263,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         Ok(())
     }
 
-    /// Reject a new stream if the peer has sent GOAWAY.
     pub(super) fn reject_after_goaway(&self) -> Result<(), H2Error> {
         if self.peer_goaway_last_stream.is_some() {
             return Err(H2Error::Connection {
@@ -277,12 +273,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         Ok(())
     }
 
-    /// Peer SETTINGS received — the concurrent-stream limit is known and admission decisions are meaningful.
     pub(super) fn peer_ready(&self) -> bool {
         self.peer_greeted
     }
 
-    /// Reject a new stream if the peer's MAX_CONCURRENT_STREAMS is reached or our client stream-ID space is exhausted.
     pub(super) fn check_stream_capacity(&self) -> Result<(), H2Error> {
         if let Some(limit) = self.peer_settings.max_concurrent_streams
             && self.active_stream_count() >= limit
@@ -301,20 +295,17 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         Ok(())
     }
 
-    /// Full admission check for a plain new stream: GOAWAY refusal then capacity.
     pub(super) fn admit_new_stream(&self) -> Result<(), H2Error> {
         self.reject_after_goaway()?;
         self.check_stream_capacity()
     }
 
-    /// Allocate the next client stream ID (odd, +2) and advance the counter.
     pub(super) fn alloc_stream_id(&mut self) -> u32 {
         let stream_id = self.next_stream_id;
         self.next_stream_id = stream_id + 2;
         stream_id
     }
 
-    /// Bytes we may send on `stream_id` right now: the smaller of the connection- and stream-level send windows, each clamped to >= 0.
     pub(super) fn effective_send_window(&self, stream_id: u32) -> usize {
         let conn = self.conn_send_window.max(0) as usize;
         let stream = self
@@ -334,7 +325,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         }
     }
 
-    /// The peer finished its side. If ours is still open, tell it we will not send the rest, then complete.
     pub(super) async fn finish_remote(&mut self, stream_id: u32) -> Result<(), H2Error> {
         let local_open = self
             .streams
@@ -356,12 +346,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         Ok(())
     }
 
-    /// `true` while any streaming response has chunks its consumer has not taken.
     pub(super) fn has_stalled(&self) -> bool {
         self.stalled > 0
     }
 
-    /// Hand queued response chunks to consumers that made room, then re-credit the windows of streams that drained.
     pub(super) async fn flush_stalled(&mut self) -> Result<(), H2Error> {
         let mut drained = Vec::new();
         for (sid, actor) in self.streams.iter_mut() {

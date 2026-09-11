@@ -1,5 +1,3 @@
-//! [`Pool`] struct — thread-safe connection map with LRU eviction.
-
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -16,56 +14,39 @@ use crate::quic::{H3Client, H3DriverTask};
 use crate::pool::types::Transport;
 use crate::pool::types::{H1Slot, PoolCounters, PoolKey, PoolStats, PooledConn, TlsInfo};
 
-/// A shared, awaitable in-progress H2 connect.
 pub(crate) type SharedConnect =
     Shared<BoxFuture<'static, Result<(H2Client, TlsInfo), Arc<crate::Error>>>>;
 
-/// Shared in-flight QUIC + HTTP/3 connect.
 #[cfg(feature = "http3")]
 pub(crate) type SharedH3Connect =
     Shared<BoxFuture<'static, Result<(H3Client, TlsInfo), Arc<crate::Error>>>>;
 
-/// Default idle-timeout for pooled connections.
 pub const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
 
-/// Default LRU cap: 2048 entries.
 pub const DEFAULT_MAX_CONNECTIONS: usize = 2048;
 
-/// Default cap on simultaneous HTTP/1.1 connections **per destination** `(host, port, proxy)`.
 pub const DEFAULT_MAX_H1_CONNS_PER_HOST: usize = 256;
 
-/// Minimum spacing between full idle/permit sweeps.
 const POOL_REAP_INTERVAL: Duration = Duration::from_millis(250);
 
-/// HTTP connection pool.
 pub struct Pool {
     pub(crate) inner: Mutex<HashMap<PoolKey, PooledConn>>,
-    /// In-progress H2 connects, keyed like `inner`.
     pub(crate) inflight_h2: Mutex<HashMap<PoolKey, SharedConnect>>,
-    /// In-progress H3 connects, keyed like `inner` with `Transport::Quic`.
     #[cfg(feature = "http3")]
     pub(crate) inflight_h3: Mutex<HashMap<PoolKey, SharedH3Connect>>,
-    /// `(host, port)` pairs that advertised `h3` in `Alt-Svc` or already completed a QUIC handshake; only these are raced.
     #[cfg(feature = "http3")]
     pub(crate) h3_known: Mutex<HashSet<(String, u16)>>,
-    /// `(host, port, proxy)` triples whose TLS ALPN negotiated `http/1.1`; `Auto` skips the HTTP/2 attempt for them.
     pub(crate) h1_only: Mutex<HashSet<(String, u16, Option<String>)>>,
     pub(crate) idle_timeout: Duration,
-    /// LRU cap.
     pub(crate) max_connections: usize,
-    /// Max simultaneous HTTP/1.1 connections per `(host, port, proxy)`.
     pub(crate) max_h1_conns_per_host: usize,
-    /// Per-host H1 connection permits.
     pub(crate) h1_permits: Mutex<HashMap<PoolKey, Arc<Semaphore>>>,
     pub(crate) counters: PoolCounters,
-    /// Monotonic base for the idle-sweep throttle.
     created: Instant,
-    /// Earliest `created.elapsed()` millis at which the next full idle/permit sweep may run.
     next_reap_ms: AtomicU64,
 }
 
 impl Pool {
-    /// Remember that `host:port` via `proxy` negotiated `http/1.1`, so later `Auto` requests dial HTTP/1.1 directly.
     pub(crate) fn note_h1_only(&self, host: &str, port: u16, proxy: Option<&str>) {
         self.h1_only
             .lock()
@@ -73,7 +54,6 @@ impl Pool {
             .insert((host.to_string(), port, proxy.map(str::to_string)));
     }
 
-    /// `true` once `host:port` via `proxy` is known to speak HTTP/1.1 only.
     pub(crate) fn is_h1_only(&self, host: &str, port: u16, proxy: Option<&str>) -> bool {
         self.h1_only
             .lock()
@@ -81,7 +61,6 @@ impl Pool {
             .contains(&(host.to_string(), port, proxy.map(str::to_string)))
     }
 
-    /// Record that `host:port` speaks HTTP/3, from a completed QUIC handshake or an `Alt-Svc` header.
     #[cfg(feature = "http3")]
     pub(crate) fn note_h3(&self, host: &str, port: u16) {
         self.h3_known
@@ -90,7 +69,6 @@ impl Pool {
             .insert((host.to_string(), port));
     }
 
-    /// Record `host:port` as an HTTP/3 origin when an `Alt-Svc` header value advertises `h3`.
     #[cfg(feature = "http3")]
     pub(crate) fn note_alt_svc(&self, host: &str, port: u16, alt_svc: &str) {
         if alt_svc
@@ -101,7 +79,6 @@ impl Pool {
         }
     }
 
-    /// `true` once `host:port` is known to speak HTTP/3.
     #[cfg(feature = "http3")]
     pub(crate) fn knows_h3(&self, host: &str, port: u16) -> bool {
         self.h3_known
@@ -110,7 +87,6 @@ impl Pool {
             .contains(&(host.to_string(), port))
     }
 
-    /// Create a pool with default 300 s idle timeout, a 2048-entry LRU cap, and the default per-host H1 connection cap.
     pub fn new() -> Self {
         Self {
             inner: Mutex::new(HashMap::new()),
@@ -130,7 +106,6 @@ impl Pool {
         }
     }
 
-    /// Create a pool with explicit idle timeout, LRU cap, and per-host H1 connection cap.
     pub fn with_limits(
         idle_timeout: Duration,
         max_connections: usize,
@@ -159,7 +134,6 @@ impl Pool {
         }
     }
 
-    /// Return the in-progress H2 connect for `key`, or insert one built by `make` if none is running.
     pub(crate) fn inflight_h2_get_or_insert_with(
         &self,
         key: PoolKey,
@@ -174,7 +148,6 @@ impl Pool {
         shared
     }
 
-    /// Remove the in-progress connect entry for `key` (idempotent).
     pub(crate) fn inflight_h2_remove(&self, key: &PoolKey) {
         self.inflight_h2
             .lock()
@@ -182,7 +155,6 @@ impl Pool {
             .remove(key);
     }
 
-    /// H3 analogue of [`Self::inflight_h2_get_or_insert_with`].
     #[cfg(feature = "http3")]
     pub(crate) fn inflight_h3_get_or_insert_with(
         &self,
@@ -198,7 +170,6 @@ impl Pool {
         shared
     }
 
-    /// Remove the in-progress H3 connect entry for `key` (idempotent).
     #[cfg(feature = "http3")]
     pub(crate) fn inflight_h3_remove(&self, key: &PoolKey) {
         self.inflight_h3
@@ -207,7 +178,6 @@ impl Pool {
             .remove(key);
     }
 
-    /// Observability snapshot.
     pub fn stats(&self) -> PoolStats {
         let entries = self.inner.lock().unwrap_or_else(|e| e.into_inner()).len();
         PoolStats {
@@ -227,7 +197,6 @@ impl Pool {
         }
     }
 
-    /// Evict idle connections AND any entry whose underlying handle is already dead.
     pub(crate) fn evict_idle(&self) {
         let now = Instant::now();
         let now_ms = now.duration_since(self.created).as_millis() as u64;
@@ -284,7 +253,6 @@ impl Pool {
         }
     }
 
-    /// Drop the LRU entry when at or over cap.
     pub(crate) fn evict_lru_if_needed(map: &mut HashMap<PoolKey, PooledConn>, cap: usize) -> u64 {
         let mut evicted = 0u64;
         while map.len() >= cap {
@@ -303,7 +271,6 @@ impl Pool {
         evicted
     }
 
-    /// Look up a live H2 handle for `key`, touching its last-use timestamp.
     pub(crate) fn checkout_h2(&self, key: &PoolKey) -> Option<(H2Client, TlsInfo)> {
         let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let dead = map.get(key).is_some_and(PooledConn::is_dead);
@@ -331,7 +298,6 @@ impl Pool {
         }
     }
 
-    /// Look up a live H3 handle for `key`, touching its last-use timestamp.
     #[cfg(feature = "http3")]
     pub(crate) fn checkout_h3(&self, key: &PoolKey) -> Option<(H3Client, TlsInfo)> {
         let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
@@ -360,7 +326,6 @@ impl Pool {
         }
     }
 
-    /// Install a freshly-opened H3 connection, or — if a live one already exists for `key` (a concurrent cold request beat us) — keep the existing one and return its handle, dropping ours.
     #[cfg(feature = "http3")]
     pub(crate) fn install_or_get_h3(
         &self,
@@ -402,7 +367,6 @@ impl Pool {
         out
     }
 
-    /// Pop a warm idle H1 connection for `key`, if one is pooled.
     pub(crate) fn checkout_h1(&self, key: &PoolKey) -> Option<(H1Slot, TlsInfo)> {
         let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         match map.get_mut(key) {
@@ -429,7 +393,6 @@ impl Pool {
         }
     }
 
-    /// Install a freshly-opened H2 connection, or — if a live one already exists for `key` (a concurrent cold request beat us) — keep the existing one and return its handle, dropping ours (its `DriverTask` drops here and GOAWAY-closes the unused connection).
     pub(crate) fn install_h2(
         &self,
         key: PoolKey,
@@ -470,7 +433,6 @@ impl Pool {
         out
     }
 
-    /// Return a still-reusable H1 connection to the pool for `key`.
     pub(crate) fn return_h1(&self, key: PoolKey, slot: H1Slot, tls: TlsInfo) {
         let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         match map.get_mut(&key) {
@@ -502,7 +464,6 @@ impl Pool {
         );
     }
 
-    /// Acquire a per-host H1 connection permit, waiting if all `max_h1_conns_per_host` are in use.
     pub(crate) async fn acquire_h1_permit(&self, key: &PoolKey) -> OwnedSemaphorePermit {
         let sem = {
             let mut permits = self.h1_permits.lock().unwrap_or_else(|e| e.into_inner());
@@ -516,32 +477,26 @@ impl Pool {
             .expect("h1 per-host semaphore is never closed")
     }
 
-    /// Record that a freshly-opened H1 connection was installed into the pool (stats only).
     pub(crate) fn note_h1_install(&self) {
         self.counters.installs.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// Record that a checked-out H1 connection died mid-request and was discarded (stats only).
     pub(crate) fn note_h1_dead(&self) {
         self.counters.evictions_dead.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// Record that the checkout liveness probe found a popped H1 connection already dead and discarded it before committing a request (stats only).
     pub(crate) fn note_h1_stale_probed(&self) {
         self.counters.stale_probed.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// Current entry count.
     pub fn len(&self) -> usize {
         self.inner.lock().unwrap_or_else(|e| e.into_inner()).len()
     }
 
-    /// True when the pool has no entries.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
-    /// Invalidate the entry for `key` after a connection-level error.
     pub(crate) fn invalidate(&self, key: &PoolKey) {
         let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         if map.remove(key).is_some() {
@@ -549,7 +504,6 @@ impl Pool {
         }
     }
 
-    /// Fill with `n` synthetic live H2 entries sharing `handle` (driver: None; liveness via the shared driver).
     #[cfg(feature = "bench-internals")]
     pub fn bench_populate_h2(&self, n: usize, handle: &H2Client) {
         let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
@@ -573,7 +527,6 @@ impl Pool {
         }
     }
 
-    /// `checkout_handle`'s hot-path body: make_key + evict_idle + checkout_h2.
     #[cfg(feature = "bench-internals")]
     pub fn bench_probe(&self) -> bool {
         let key = PoolKey {

@@ -1,16 +1,3 @@
-//! Head-to-head HPACK peer comparison (Leyline vs the `h2` crate).
-//!
-//! # Status: h2 crate does not expose HPACK primitives publicly
-//!
-//! The `h2` crate (hyperium/h2, v0.4) keeps its HPACK encoder/decoder inside
-//! a private `h2::hpack` module. The only public entry points to its header
-//! compression machinery are `h2::client::handshake` and the `SendRequest`
-//! it returns — a full handshake that pulls in tokio IO, the frame codec,
-//! and the SETTINGS/ACK round-trip. Measuring HPACK cost through that is
-//! apples-to-oranges and would muddy the numbers.
-//!
-//! So this bench reports Leyline-only figures here. A proper peer would
-//! need `h2` to expose its HPACK module.
 
 use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
 use leyline::h2::hpack::{Decoder, Encoder};
@@ -85,12 +72,8 @@ fn bench_leyline_decode(c: &mut Criterion) {
     g.finish();
 }
 
-/// Peer-comparison placeholder that records the deferred status. Not timed
-/// against anything — exists so the benchmark set keeps the named slot.
 fn bench_h2_peer_note(c: &mut Criterion) {
     c.bench_function("hpack_vs_h2::h2_peer_status", |b| {
-        // A no-op of the note — this is intentionally trivial; see
-        // the module doc for the real explanation.
         b.iter(|| {
             black_box("h2 crate does not expose hpack publicly");
         });

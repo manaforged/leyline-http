@@ -1,6 +1,5 @@
 use super::*;
 
-/// Smallest profile TOML the loader accepts, for the directory-load tests.
 const MINIMAL: &str = r#"
 [meta]
 name = "Test 1"
@@ -19,7 +18,6 @@ pseudo_order = ["method", "authority", "scheme", "path"]
 settings_order = ["header_table_size"]
 "#;
 
-/// A fresh empty directory under the system temp dir.
 fn scratch(name: &str) -> std::path::PathBuf {
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

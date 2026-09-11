@@ -1,4 +1,3 @@
-/// Environment variable names whose presence indicates a CGI-like request-handler context where uppercase `HTTP_PROXY` is untrusted.
 pub(crate) const CGI_SIGNAL_ENV_VARS: &[&str] = &[
     "GATEWAY_INTERFACE",
     "REQUEST_METHOD",
@@ -16,7 +15,6 @@ pub(super) fn env_proxy() -> Option<String> {
     env_proxy_from(|k| std::env::var(k).ok(), |k| std::env::var_os(k).is_some())
 }
 
-/// Pure-function core of [`env_proxy`]: given a value getter and a presence getter, return the first non-empty proxy URL while applying the httpoxy CGI sniff.
 pub(crate) fn env_proxy_from<F, G>(get_var: F, has_var: G) -> Option<String>
 where
     F: Fn(&str) -> Option<String>,

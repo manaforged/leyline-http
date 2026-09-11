@@ -1,5 +1,3 @@
-//! The simplest possible Leyline usage.
-
 #[tokio::main]
 async fn main() {
     match leyline::Session::chrome()

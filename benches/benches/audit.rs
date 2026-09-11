@@ -1,8 +1,3 @@
-//! JA3 / JA4 / JA4T computation cost.
-//!
-//! We feed each function the same profile-derived input on every iteration
-//! so we're measuring the fingerprint math (hashing + sorting + formatting)
-//! rather than profile lookup. Chrome 147 is the reference shape.
 
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use leyline::audit::{
@@ -79,10 +74,6 @@ fn bench_extension_ids(c: &mut Criterion) {
     });
 }
 
-/// JA4H is the only request-dependent fingerprint, so it's the work
-/// `Response::audit()` now defers to first access instead of computing on
-/// every response. This bench quantifies that per-request cost using a
-/// realistic Chrome-147 navigation header set (16 headers).
 fn bench_ja4h(c: &mut Criterion) {
     let headers: Vec<(String, String)> = [
         (":method", "GET"),

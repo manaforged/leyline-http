@@ -1,9 +1,6 @@
-//! Locked browser presentation for a session.
-
 use crate::core::error::{Error, Kind, Result};
 use crate::profile::{Browser, Platform, ProfileRegistry};
 
-/// HTTP identity plus the TLS profile that carries it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Identity {
     http: Browser,
@@ -12,7 +9,6 @@ pub struct Identity {
 }
 
 impl Identity {
-    /// HTTP headers from `browser`; TLS/H2 from that browser's hello owner.
     #[must_use]
     pub fn locked(browser: Browser, platform: Platform) -> Self {
         Self {
@@ -22,7 +18,6 @@ impl Identity {
         }
     }
 
-    /// Roll TLS/H2 to `tls`.
     pub fn rotate_tls(self, tls: Browser) -> Result<Self> {
         if self.http.family() != tls.family() {
             return Err(Error::new(Kind::Config).with_message(format!(
@@ -36,7 +31,6 @@ impl Identity {
         })
     }
 
-    /// Next distinct ClientHello in this family.
     pub fn rotate_hello(self) -> Result<Self> {
         let hellos = self.http.family_hellos();
         if hellos.len() < 2 {
@@ -48,7 +42,6 @@ impl Identity {
         self.rotate_tls(hellos[(i + 1) % hellos.len()])
     }
 
-    /// Every distinct-hello stack with this HTTP identity and platform.
     pub fn hello_library(self) -> Result<Vec<Self>> {
         self.http
             .family_hellos()
@@ -57,7 +50,6 @@ impl Identity {
             .collect()
     }
 
-    /// Families a jar can pass to on this platform (HTTP + TLS both switch).
     const PASS_REPS: &[Browser] = &[
         Browser::Chrome152,
         Browser::Firefox154,
@@ -65,7 +57,6 @@ impl Identity {
         Browser::SafariIOS18,
     ];
 
-    /// Locked identity in `dest`'s family, same platform.
     pub fn pass(self, dest: Browser) -> Result<Self> {
         if dest.family() == self.http.family() {
             return Err(Error::new(Kind::Config).with_message(format!(
@@ -78,7 +69,6 @@ impl Identity {
         Ok(id)
     }
 
-    /// Every other family that can carry this platform's HTTP identity.
     #[must_use]
     pub fn pass_library(self) -> Vec<Self> {
         Self::PASS_REPS
@@ -87,30 +77,25 @@ impl Identity {
             .collect()
     }
 
-    /// Browser that supplies UA, Client Hints, and identity extras.
     #[must_use]
     pub fn http(self) -> Browser {
         self.http
     }
 
-    /// Browser that supplies the TLS ClientHello and H2 settings.
     #[must_use]
     pub fn tls(self) -> Browser {
         self.tls
     }
 
-    /// OS identity for this session.
     #[must_use]
     pub fn platform(self) -> Platform {
         self.platform
     }
 
-    /// `User-Agent` from the HTTP profile for this platform.
     pub fn user_agent(self) -> Result<String> {
         Ok(self.http_platform()?.user_agent.clone())
     }
 
-    /// `sec-ch-ua` from the HTTP profile for this platform.
     pub fn sec_ch_ua(self) -> Result<String> {
         Ok(self.http_platform()?.sec_ch_ua.clone())
     }

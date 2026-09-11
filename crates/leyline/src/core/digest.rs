@@ -1,5 +1,3 @@
-//! HTTP Digest authentication (RFC 7616).
-
 use md5::{Digest as Md5Digest, Md5};
 use sha2::{Sha256, Sha512_256};
 
@@ -9,7 +7,6 @@ mod scan;
 
 use scan::{Pair, pairs};
 
-/// Digest credentials.
 #[derive(Debug, Clone)]
 pub struct DigestAuth {
     pub(crate) username: String,
@@ -17,7 +14,6 @@ pub struct DigestAuth {
 }
 
 impl DigestAuth {
-    /// Build a new set of digest credentials.
     pub fn new(username: impl Into<String>, password: impl Into<String>) -> Self {
         Self {
             username: username.into(),
@@ -26,7 +22,6 @@ impl DigestAuth {
     }
 }
 
-/// Parsed `WWW-Authenticate: Digest ...` challenge.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct Challenge {
     pub realm: String,
@@ -92,7 +87,6 @@ fn hex(bytes: &[u8]) -> String {
     hex::encode(bytes)
 }
 
-/// Parse a `WWW-Authenticate: Digest ...` challenge into its fields.
 pub(crate) fn parse_challenge(header: &str) -> Result<Challenge> {
     let trimmed = header.trim();
     let body = trimmed
@@ -114,7 +108,6 @@ pub(crate) fn parse_challenge(header: &str) -> Result<Challenge> {
     Ok(ch)
 }
 
-/// Store one scanned pair on the challenge, ignoring unknown keys.
 fn fill(ch: &mut Challenge, pair: Pair<'_>) -> Result<()> {
     let Pair { key, val } = pair;
     match key.trim().to_ascii_lowercase().as_str() {
@@ -129,7 +122,6 @@ fn fill(ch: &mut Challenge, pair: Pair<'_>) -> Result<()> {
     Ok(())
 }
 
-/// Map a challenge `algorithm` value to its enum.
 fn algorithm(val: &str) -> Result<Algorithm> {
     match val {
         "MD5" | "md5" => Ok(Algorithm::Md5),
@@ -143,7 +135,6 @@ fn algorithm(val: &str) -> Result<Algorithm> {
     }
 }
 
-/// Compute the `Authorization: Digest ...` header for one request.
 pub(crate) fn build_auth_header(
     challenge: &Challenge,
     auth: &DigestAuth,
@@ -215,7 +206,6 @@ pub(crate) fn build_auth_header(
     Some(out)
 }
 
-/// Pick a supported `qop` token from the server's advertised list.
 pub(crate) fn pick_supported_qop(qop: &str) -> Option<&'static str> {
     for token in qop.split(',') {
         if token.trim().eq_ignore_ascii_case("auth") {
@@ -225,12 +215,10 @@ pub(crate) fn pick_supported_qop(qop: &str) -> Option<&'static str> {
     None
 }
 
-/// Generate a fresh 16-hex-char client nonce.
 pub(crate) fn generate_cnonce() -> String {
     crate::util::random_hex_token(8)
 }
 
-/// Monotonic nonce-count per server-nonce string, per process.
 pub(crate) const DIGEST_NONCE_CACHE_CAP: usize = 4096;
 
 fn nonce_cache() -> &'static std::sync::Mutex<lru::LruCache<String, u32>> {
@@ -264,7 +252,6 @@ pub(crate) fn next_nc_for_nonce(nonce: &str) -> u32 {
     }
 }
 
-/// Test-only: reset the global nonce cache so unit tests don't leak counter state between runs.
 #[cfg(test)]
 pub(crate) fn reset_nonce_cache_for_test() {
     let mut guard = nonce_cache().lock().unwrap_or_else(|e| e.into_inner());

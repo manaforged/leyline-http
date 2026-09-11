@@ -1,4 +1,3 @@
-//! CONNECT / extended-CONNECT pseudo-header shape tests.
 use leyline::h2::config::PseudoOrder;
 use leyline::h2::connection::PseudoHeaders;
 use leyline::h2::error::{ErrorCode, H2Error};

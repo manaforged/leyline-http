@@ -1,5 +1,3 @@
-//! Integration tests for `multipart/form-data` bodies.
-
 #![expect(
     clippy::unwrap_used,
     reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
@@ -14,7 +12,6 @@ use leyline::Session;
 use leyline::multipart::{Form, Part};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-/// Read the full request (headers + body) off the socket.
 async fn read_full_request(sock: &mut tokio::net::TcpStream) -> (String, Vec<u8>) {
     let mut buf = [0u8; 8192];
     let mut acc = Vec::new();
@@ -199,7 +196,6 @@ impl Drop for TempFile {
     }
 }
 
-/// Create a deterministic temp file path under the system temp dir (avoids pulling in the `tempfile` crate for a single call site).
 fn tempfile_like(name: &str) -> TempFile {
     let dir = std::env::temp_dir();
     let unique = format!(
@@ -218,7 +214,6 @@ fn tempfile_like(name: &str) -> TempFile {
 
 use futures_util::StreamExt;
 
-/// Directly pull the first chunk out of a Form to inspect its `Content-Disposition` serialization without going over the wire.
 async fn first_part_header(form: Form) -> std::io::Result<bytes::Bytes> {
     let body: leyline::Body = form.into();
     let mut stream = match body {

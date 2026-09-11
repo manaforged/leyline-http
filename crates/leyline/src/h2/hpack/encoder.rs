@@ -1,20 +1,15 @@
-//! HPACK encoder (RFC 7541 Section 6).
-
 use bytes::Bytes;
 
 use super::huffman;
 use super::integer;
 use super::table::{self, DynamicTable};
 
-/// HPACK encoder with dynamic table state.
 pub struct Encoder {
     dynamic: DynamicTable,
-    /// Pending table size update to signal at start of next header block.
     pending_size_update: Option<usize>,
 }
 
 impl Encoder {
-    /// Create a new encoder with default table size (4096).
     pub fn new() -> Self {
         Self {
             dynamic: DynamicTable::new(),
@@ -22,18 +17,15 @@ impl Encoder {
         }
     }
 
-    /// Set the max dynamic table size (from SETTINGS_HEADER_TABLE_SIZE).
     pub fn set_max_table_size(&mut self, size: usize) {
         self.dynamic.set_max_size(size);
         self.pending_size_update = Some(size);
     }
 
-    /// Encode a header block (list of name-value pairs).
     pub fn encode_header_block(&mut self, headers: &[(&str, &str)]) -> Vec<u8> {
         self.encode_header_block_iter(headers.iter().copied(), headers.len())
     }
 
-    /// Encode an ordered sequence of header pairs in one pass, without the caller first collecting them into a single slice.
     pub fn encode_header_block_iter<'a>(
         &mut self,
         headers: impl Iterator<Item = (&'a str, &'a str)>,
@@ -52,7 +44,6 @@ impl Encoder {
         dst
     }
 
-    /// Headers that must use "never indexed" representation (RFC 7541 Section 7.1.3).
     fn is_sensitive(name: &str) -> bool {
         matches!(
             name,
@@ -119,7 +110,6 @@ impl Encoder {
         self.encode_literal_new_name(name, value, dst);
     }
 
-    /// Literal header with incremental indexing, name referenced by index.
     fn encode_literal_indexed_name(&mut self, name_index: usize, value: &str, dst: &mut Vec<u8>) {
         integer::encode(name_index, 6, 0x40, dst);
         encode_string(value, dst);
@@ -128,7 +118,6 @@ impl Encoder {
             .insert(name, Bytes::copy_from_slice(value.as_bytes()));
     }
 
-    /// Literal header with incremental indexing, new name.
     fn encode_literal_new_name(&mut self, name: &str, value: &str, dst: &mut Vec<u8>) {
         dst.push(0x40);
         encode_string(name, dst);
@@ -158,7 +147,6 @@ impl Default for Encoder {
     }
 }
 
-/// Encode a string value, choosing Huffman if shorter.
 fn encode_string(s: &str, dst: &mut Vec<u8>) {
     let huff_len = huffman::encoded_len(s.as_bytes());
 

@@ -1,5 +1,3 @@
-//! Backend-agnostic TLS byte stream — the plug point for a second TLS backend.
-
 use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -7,11 +5,8 @@ use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
 
-/// The active TLS backend's byte stream.
 pub(crate) enum TlsIo {
-    /// BoringSSL over TCP, via `leyline-bssl-tokio`.
     Boring(leyline_bssl_tokio::SslStream<TcpStream>),
-    /// Nested TLS: the inner handshake (to the origin) runs over an outer TLS stream (to an `https://` CONNECT proxy).
     Nested(Box<leyline_bssl_tokio::SslStream<TlsIo>>),
 }
 

@@ -1,5 +1,3 @@
-//! Profile registry — loads and indexes browser profiles.
-
 use std::collections::HashMap;
 use std::fs::{read_dir, read_to_string};
 use std::path::{Path, PathBuf};
@@ -8,27 +6,18 @@ use std::sync::LazyLock;
 use crate::profile::Browser;
 use crate::profile::types::BrowserProfile;
 
-/// Why [`ProfileRegistry::load`] could not build a registry from a directory.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ProfileError {
-    /// A directory or file under the profile directory could not be read.
     Io {
-        /// Path that failed.
         path: PathBuf,
-        /// Underlying filesystem error.
         source: std::io::Error,
     },
-    /// A `<family>/<version>.toml` file did not parse, or failed the same validation the built-in set runs.
     Parse {
-        /// Path of the rejected file, absent when the profile came from a string.
         path: Option<PathBuf>,
-        /// Parser or validator message.
         source: Box<dyn std::error::Error + Send + Sync>,
     },
-    /// The directory held no `<family>/<version>.toml` file.
     Empty {
-        /// Directory that was scanned.
         path: PathBuf,
     },
 }
@@ -80,7 +69,6 @@ impl std::error::Error for ProfileError {
     }
 }
 
-/// Registry of all loaded browser profiles, indexed by (browser, version).
 pub struct ProfileRegistry {
     profiles: HashMap<(String, u32), BrowserProfile>,
 }
@@ -88,20 +76,17 @@ pub struct ProfileRegistry {
 static BUILTIN: LazyLock<ProfileRegistry> = LazyLock::new(ProfileRegistry::builtin);
 
 impl ProfileRegistry {
-    /// The compiled-in profile set.
     #[must_use]
     pub fn global() -> &'static Self {
         &BUILTIN
     }
 
-    /// Create an empty registry.
     pub fn new() -> Self {
         Self {
             profiles: HashMap::new(),
         }
     }
 
-    /// Load all built-in profiles (compiled in via include_str!).
     pub fn builtin() -> Self {
         let mut reg = Self::new();
         reg.load_toml(include_str!("../../profiles/chrome/145.toml"));
@@ -130,7 +115,6 @@ impl ProfileRegistry {
         reg
     }
 
-    /// Load a profile directory laid out as `<family>/<version>.toml` with the same parse and permutation validation as [`ProfileRegistry::builtin`]; fails with [`ProfileError`] on an unreadable directory, an invalid TOML, or no profiles.
     pub fn load(dir: &Path) -> Result<Self, ProfileError> {
         let mut reg = Self::new();
         for family in sorted(dir)? {
@@ -158,7 +142,6 @@ impl ProfileRegistry {
         Ok(reg)
     }
 
-    /// Parse and insert a TOML profile string.
     fn load_toml(&mut self, toml_str: &str) {
         let profile = BrowserProfile::from_toml(toml_str)
             .expect("built-in profile is statically valid (profile_validation)");
@@ -166,29 +149,24 @@ impl ProfileRegistry {
         self.profiles.insert(key, profile);
     }
 
-    /// Look up a profile by browser name and version.
     pub fn get(&self, browser: &str, version: u32) -> Option<&BrowserProfile> {
         self.profiles.get(&(browser.to_string(), version))
     }
 
-    /// Look up a profile by Browser enum.
     pub fn get_browser(&self, browser: Browser) -> Option<&BrowserProfile> {
         let (name, version) = browser.profile_key();
         self.get(name, version)
     }
 
-    /// Number of loaded profiles.
     pub fn len(&self) -> usize {
         self.profiles.len()
     }
 
-    /// Whether the registry is empty.
     pub fn is_empty(&self) -> bool {
         self.profiles.is_empty()
     }
 }
 
-/// Directory entries in a stable order, so two runs over the same directory load the same profiles.
 fn sorted(dir: &Path) -> Result<Vec<PathBuf>, ProfileError> {
     let entries = read_dir(dir).map_err(|source| ProfileError::Io {
         path: dir.to_path_buf(),

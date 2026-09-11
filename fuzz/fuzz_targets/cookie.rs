@@ -1,4 +1,3 @@
-//! Cookie fuzz: arbitrary `Set-Cookie` lines and cookie-date strings must never panic the parser.
 #![no_main]
 
 use std::hint::black_box;

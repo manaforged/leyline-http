@@ -1,5 +1,3 @@
-//! Streaming response body.
-
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -10,12 +8,9 @@ use futures_util::Stream;
 use tokio::sync::mpsc;
 use tokio::time::Sleep;
 
-/// A streaming response body.
 pub struct BodyStream {
     rx: mpsc::Receiver<std::io::Result<Bytes>>,
-    /// Per-chunk idle timeout, from the session `read_timeout`.
     read_timeout: Option<Duration>,
-    /// Armed while waiting for the next chunk; reset to `None` after each chunk so the timeout measures the gap between chunks, not total time.
     idle: Option<Pin<Box<Sleep>>>,
 }
 
@@ -28,7 +23,6 @@ impl BodyStream {
         }
     }
 
-    /// Build a streaming body from a fully-buffered `Bytes` buffer.
     pub(crate) fn from_bytes(buf: Bytes) -> Self {
         let (tx, rx) = mpsc::channel(1);
         if !buf.is_empty() {
@@ -39,7 +33,6 @@ impl BodyStream {
         Self::new(rx)
     }
 
-    /// Apply a per-chunk idle read timeout (from the session `read_timeout`).
     pub(crate) fn set_read_timeout(&mut self, timeout: Option<Duration>) {
         self.read_timeout = timeout;
     }

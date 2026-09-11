@@ -1,4 +1,3 @@
-//! Integration tests for HTTP Digest authentication.
 #![expect(
     clippy::unwrap_used,
     reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
@@ -6,7 +5,6 @@
 use leyline::{DigestAuth, Session};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-/// Drain HTTP/1 headers off a socket, returning the header block text.
 async fn read_headers(sock: &mut tokio::net::TcpStream) -> String {
     let mut buf = [0u8; 4096];
     let mut acc = Vec::new();
@@ -23,7 +21,6 @@ async fn read_headers(sock: &mut tokio::net::TcpStream) -> String {
     String::from_utf8_lossy(&acc).to_string()
 }
 
-/// Extract the `Authorization:` header value (if any) from a block of HTTP/1 request headers.
 fn extract_authorization(headers: &str) -> Option<String> {
     for line in headers.split("\r\n") {
         let lower = line.to_ascii_lowercase();
@@ -36,7 +33,6 @@ fn extract_authorization(headers: &str) -> Option<String> {
     None
 }
 
-/// Mock a two-step Digest challenge/response: 1.
 async fn run_digest_server(
     listener: tokio::net::TcpListener,
     algo_wire: &'static str,
@@ -173,7 +169,6 @@ async fn stale_nonce_is_retried_transparently() {
     server.await.unwrap();
 }
 
-/// A same-origin redirect can sit between the caller's original URL and the server that issues the 401 Digest challenge.
 #[tokio::test]
 async fn digest_uri_tracks_the_redirected_challenge_url() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

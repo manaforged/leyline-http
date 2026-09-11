@@ -1,4 +1,3 @@
-//! Integration test: certificate pinning must NOT bypass hostname verification.
 #![expect(
     clippy::unwrap_used,
     reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
@@ -20,7 +19,6 @@ use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 
-/// Resolver that maps every host to one fixed loopback address, so the test can connect to an arbitrary SNI name against a local listener.
 struct LoopbackResolver(SocketAddr);
 
 impl Resolver for LoopbackResolver {
@@ -39,14 +37,12 @@ struct Generated {
     ca_cert_pem: Vec<u8>,
 }
 
-/// The single SAN the generated leaf carries.
 #[derive(Clone, Copy)]
 enum San<'a> {
     Dns(&'a str),
     Ip(&'a str),
 }
 
-/// Generate a CA and a leaf cert (subject CN `leaf_cn`) whose only SAN is `leaf_san` — either a DNS name or an IP literal.
 fn generate_chain(leaf_cn: &str, leaf_san: San) -> Generated {
     let ca_key = PKey::from_rsa(Rsa::generate(2048).unwrap()).unwrap();
     let mut name = X509NameBuilder::new().unwrap();
@@ -123,7 +119,6 @@ fn load_profile() -> BrowserProfile {
         .expect("chrome 147 profile parses")
 }
 
-/// Spawn a one-shot BoringSSL acceptor presenting `leaf` + `ca`.
 async fn spawn_tls_server(r#gen: &Generated) -> SocketAddr {
     use leyline_bssl::ssl::{SslAcceptor, SslMethod};
 

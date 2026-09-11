@@ -1,13 +1,4 @@
 #!/usr/bin/env bash
-# Build all four clients + the shared server, run each against one local
-# HTTPS/2 server, and print a RESULT line per client (warm / conc / cold req/s).
-#
-#   warm = N sequential GETs on one reused client (round-trip latency; this is
-#          server-influenced).
-#   conc = N GETs with C in flight over the one multiplexed H2 connection
-#          (throughput — the metric that actually compares H2 clients).
-#   cold = M GETs each on a fresh client (full TLS handshake + fingerprint
-#          generation per request).
 set -euo pipefail
 cd "$(dirname "$0")"
 ADDR="${ADDR:-127.0.0.1:0}"

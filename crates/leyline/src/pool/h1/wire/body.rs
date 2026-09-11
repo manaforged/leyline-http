@@ -1,8 +1,5 @@
-//! Body write phases for a streamed HTTP/1.1 request.
-
 use super::*;
 
-/// Write a streamed body that must match the declared content-length exactly.
 pub(super) async fn fixed(
     stream: &mut dyn H1Io,
     mut body: BodyStream,
@@ -27,7 +24,6 @@ pub(super) async fn fixed(
     Ok(())
 }
 
-/// Write a streamed body as chunked transfer-coding, then the terminating chunk.
 pub(super) async fn chunked(
     stream: &mut dyn H1Io,
     mut body: BodyStream,

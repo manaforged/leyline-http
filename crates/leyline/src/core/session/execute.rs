@@ -19,7 +19,6 @@ use crate::core::{RedirectAction, RedirectAttempt};
 use crate::trace;
 use crate::util::redacted_url;
 
-/// One attempt of a request as the builder hands it to the session: everything the redirect loop needs, owned so retries can rebuild it.
 pub(crate) struct Attempt {
     pub(crate) method: http::Method,
     pub(crate) url: String,
@@ -34,7 +33,6 @@ pub(crate) struct Attempt {
 }
 
 impl Attempt {
-    /// The same attempt with a fresh body, headers, and timeout; the cheap fields are cloned.
     pub(crate) fn again(
         &self,
         body: Body,
@@ -57,7 +55,6 @@ impl Attempt {
 }
 
 impl Session {
-    /// Execute one attempt of a request under its total timeout.
     pub(crate) async fn run(&self, attempt: Attempt) -> Result<Response> {
         let timeout = attempt.timeout.unwrap_or(self.inner.timeouts.total);
         let inner: std::pin::Pin<
@@ -276,7 +273,6 @@ impl Session {
             .with_message(format!("too many redirects (max {})", redirect_cap)))
     }
 
-    /// Headers for one redirect-loop hop: preset or default set, brand and identity overlays, caller extras, framing length, cookies, and the identity or Gecko header order.
     #[allow(clippy::too_many_arguments)]
     fn build_hop_headers(
         &self,
@@ -397,7 +393,6 @@ impl Session {
 
         headers
     }
-    /// Store this hop's Set-Cookie values in the jar and accumulate the response-facing cookie view: live values read back from the jar, rejected-but-sent names reported as the server sent them.
     fn collect_cookies(
         &self,
         resp_headers: &[(http::HeaderName, http::HeaderValue)],
@@ -431,7 +426,6 @@ impl Session {
         }
     }
 
-    /// Shape the transport body for the caller: streamed as-is when streaming is on, drained then decompressed when buffering is wanted, and re-streamed as a single-chunk body when the transport buffered but the caller asked for streaming.
     async fn finalize_response_body(
         &self,
         resp_body_shape: crate::core::transport::TransportBody,
@@ -497,7 +491,6 @@ fn url_origin(url: &url::Url) -> String {
     }
 }
 
-/// Referer per the browser-default `strict-origin-when-cross-origin` policy: the full previous URL on a same-origin hop, origin-only on a cross-origin hop — with credentials and fragment stripped in both cases.
 fn referer_for(prev: Option<&str>, current_origin: &str) -> String {
     let Some(prev) = prev else {
         return format!("{current_origin}/");
@@ -522,7 +515,6 @@ mod referer_tests;
 #[cfg(test)]
 mod reorder_tests;
 
-/// Mutex lock that survives poisoning: a panic in another request thread must not turn every later request on this session into an error.
 fn lock<T>(m: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }

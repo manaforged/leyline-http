@@ -1,4 +1,3 @@
-//! Regression test for the H2 coalesced-connect FAILURE path.
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;

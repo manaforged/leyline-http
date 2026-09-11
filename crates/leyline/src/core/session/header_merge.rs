@@ -1,5 +1,3 @@
-//! Caller → preset header interleave logic.
-
 use std::borrow::Cow;
 
 use crate::profile::preset::HeaderPair;
@@ -7,7 +5,6 @@ use crate::profile::{HeaderAnchor, infer_anchor};
 
 use crate::core::headers::HeaderList;
 
-/// Merge caller-supplied headers into the preset-built list.
 pub(crate) fn apply_extra_headers(
     headers: &mut Vec<HeaderPair>,
     extra: &HeaderList,
@@ -73,12 +70,10 @@ pub(crate) fn apply_extra_headers(
     }
 }
 
-/// Header value as text; obs-text bytes become U+FFFD.
 fn text(v: &http::HeaderValue) -> Cow<'static, str> {
     Cow::Owned(String::from_utf8_lossy(v.as_bytes()).into_owned())
 }
 
-/// Compute the target insertion index for a header at the given anchor.
 fn anchor_target_index(headers: &[HeaderPair], anchor: Option<HeaderAnchor>) -> usize {
     let Some(anchor) = anchor else {
         return headers.len();

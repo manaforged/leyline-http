@@ -86,7 +86,6 @@ async fn owned() {
     server.await.unwrap();
 }
 
-/// Spin up a one-shot H1 mock and return the `Response` for inspection.
 async fn one_shot_get(builder: SessionBuilder, path: &str) -> Response {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -345,7 +344,6 @@ async fn json_builder_returns_error_instead_of_panicking() {
     assert_eq!(err.kind(), Kind::Json);
 }
 
-/// Read a request head (up to the `\r\n\r\n` terminator).
 async fn read_request_head(sock: &mut tokio::net::TcpStream) -> bool {
     let mut buf = Vec::new();
     let mut tmp = [0u8; 1024];

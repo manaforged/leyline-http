@@ -1,11 +1,8 @@
-//! One handler per inbound control frame type.
-
 use std::time::Instant;
 
 use super::*;
 
 impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
-    /// Apply peer SETTINGS, re-scale stream windows, and acknowledge.
     pub(super) async fn on_settings(&mut self, s: SettingsFrame) -> Result<(), H2Error> {
         if s.ack {
             return Ok(());
@@ -39,7 +36,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         Ok(())
     }
 
-    /// Credit the connection or one stream with the WINDOW_UPDATE increment.
     pub(super) async fn on_window(&mut self, w: WindowUpdateFrame) -> Result<(), H2Error> {
         if w.stream_id == 0 {
             self.conn_send_window =
@@ -74,7 +70,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         Ok(())
     }
 
-    /// Answer a peer PING; ignore an acknowledgement of our own.
     pub(super) async fn on_ping(&mut self, p: PingFrame) -> Result<(), H2Error> {
         if !p.ack {
             self.writer.write_ping_ack(p.payload).await?;
@@ -82,7 +77,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         Ok(())
     }
 
-    /// Fail every stream above the GOAWAY last-stream id, then close on a real error code.
     pub(super) fn on_goaway(&mut self, g: GoAwayFrame) -> Result<(), H2Error> {
         self.peer_goaway_last_stream = Some(g.last_stream_id);
         let to_fail: Vec<u32> = self
@@ -118,7 +112,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         })
     }
 
-    /// Tear down the stream a peer RST_STREAM names, rejecting idle stream ids.
     pub(super) fn on_rst(&mut self, r: RstStreamFrame) -> Result<(), H2Error> {
         if r.stream_id == 0 || (r.stream_id % 2 == 1 && r.stream_id >= self.next_stream_id) {
             return Err(H2Error::Connection {
@@ -140,7 +133,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         Ok(())
     }
 
-    /// Refuse server push: cancel the promised stream but keep the HPACK table in sync.
     pub(super) async fn on_push(&mut self, pp: PushPromiseFrame) -> Result<(), H2Error> {
         let decoded = self.decoder.decode_header_block(&pp.fragment);
         self.writer

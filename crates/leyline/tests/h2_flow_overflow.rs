@@ -1,5 +1,3 @@
-//! WINDOW_UPDATE past 2^31-1 is FLOW_CONTROL_ERROR.
-
 #[path = "h2_support/mod.rs"]
 mod support;
 

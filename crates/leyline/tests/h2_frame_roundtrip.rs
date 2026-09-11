@@ -1,4 +1,3 @@
-//! Frame roundtrip tests — encode then parse, verify fields survive.
 use bytes::BytesMut;
 use leyline::h2::frame::*;
 

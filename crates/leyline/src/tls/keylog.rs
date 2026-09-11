@@ -1,12 +1,9 @@
-//! Opt-in TLS secret logging for wire debugging (curl/browser compatible).
-
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 
 use leyline_bssl::ssl::SslContextBuilder;
 
-/// Install the NSS key-log writer on `builder` when `SSLKEYLOGFILE` is set.
 pub(crate) fn install_from_env(builder: &mut SslContextBuilder) {
     let Ok(path) = std::env::var("SSLKEYLOGFILE") else {
         return;
@@ -35,7 +32,6 @@ pub(crate) fn install_from_env(builder: &mut SslContextBuilder) {
     }
 }
 
-/// Open `path` for appending and return the line-writer closure installed as the BoringSSL keylog callback.
 fn keylog_writer(path: &str) -> std::io::Result<impl Fn(&str) + Send + Sync + 'static> {
     let file = OpenOptions::new().create(true).append(true).open(path)?;
     let file = Arc::new(Mutex::new(file));

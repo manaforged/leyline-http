@@ -1,4 +1,3 @@
-//! Integration test: `https://` CONNECT proxy (TLS to the proxy itself).
 #![expect(
     clippy::unwrap_used,
     reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
@@ -27,7 +26,6 @@ struct Generated {
     ca_cert_pem: Vec<u8>,
 }
 
-/// Generate a CA and a leaf cert carrying every name in `dns_names` as a SAN, so the one cert serves both the proxy leg (`localhost`) and the origin leg (`right.example`).
 fn generate_chain(dns_names: &[&str]) -> Generated {
     let ca_key = PKey::from_rsa(Rsa::generate(2048).unwrap()).unwrap();
     let mut name = X509NameBuilder::new().unwrap();
@@ -96,7 +94,6 @@ fn load_profile() -> BrowserProfile {
         .expect("chrome 147 profile parses")
 }
 
-/// Read from `s` until the `\r\n\r\n` header terminator; return the bytes as a String.
 async fn read_head<S>(s: &mut S) -> String
 where
     S: AsyncReadExt + Unpin,
@@ -116,7 +113,6 @@ where
     String::from_utf8_lossy(&buf).into_owned()
 }
 
-/// Spawn a mock `https://` CONNECT proxy.
 async fn spawn_mock_https_proxy(r#gen: &Generated) -> (SocketAddr, oneshot::Receiver<String>) {
     use leyline_bssl::ssl::{Ssl, SslAcceptor, SslMethod};
 

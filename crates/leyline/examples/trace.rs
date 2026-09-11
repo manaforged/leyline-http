@@ -1,11 +1,8 @@
-//! Print one line per request lifecycle event.
-
 use leyline::trace::{Connect, Dns, Done, Head, Sent, Tls, Trace};
 use leyline::{Browser, Session};
 
 const URL: &str = "https://example.com";
 
-/// Prints every event the client reports.
 struct Printer;
 
 impl Trace for Printer {

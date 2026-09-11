@@ -1,5 +1,3 @@
-//! Cheaply-cloneable, UTF-8 response header string.
-
 use std::borrow::Borrow;
 use std::fmt;
 use std::hash::{Hash, Hasher};
@@ -7,24 +5,20 @@ use std::ops::Deref;
 
 use bytes::Bytes;
 
-/// A response header name or value: a `Bytes`-backed string slice.
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct HeaderStr(Bytes);
 
 impl Hash for HeaderStr {
-    /// Hash as `str`, not as `[u8]`: `<str>::hash` and `<[u8]>::hash` differ (length prefix vs `0xff` terminator), so hashing the inner `Bytes` directly would break the [`Borrow`]`<str>` contract — a `HeaderStr` map key and a `&str` lookup must hash identically.
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.as_str().hash(state);
     }
 }
 
 impl HeaderStr {
-    /// Borrow a `'static` string with no allocation.
     pub fn from_static(s: &'static str) -> Self {
         Self(Bytes::from_static(s.as_bytes()))
     }
 
-    /// Wrap raw header bytes, coercing to UTF-8 at this boundary: valid input is wrapped zero-copy; non-UTF-8 obs-text is replaced with U+FFFD (matching the H1/QPACK read paths).
     pub(crate) fn from_bytes_lossy(bytes: Bytes) -> Self {
         match std::str::from_utf8(&bytes) {
             Ok(_) => Self(bytes),
@@ -32,19 +26,16 @@ impl HeaderStr {
         }
     }
 
-    /// Wrap bytes, validating UTF-8.
     pub fn from_utf8(bytes: Bytes) -> Result<Self, std::str::Utf8Error> {
         std::str::from_utf8(&bytes)?;
         Ok(Self(bytes))
     }
 
-    /// Borrow as `&str`.
     pub fn as_str(&self) -> &str {
         // SAFETY: every constructor validates (or is given pre-validated) UTF-8, so the bytes are always a valid `str`.
         unsafe { std::str::from_utf8_unchecked(&self.0) }
     }
 
-    /// The underlying bytes.
     pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }
@@ -57,7 +48,6 @@ impl AsRef<[u8]> for HeaderStr {
 }
 
 impl From<HeaderStr> for Bytes {
-    /// Zero-copy: hands back the wrapped buffer.
     fn from(s: HeaderStr) -> Self {
         s.0
     }
@@ -83,7 +73,6 @@ impl AsRef<str> for HeaderStr {
 }
 
 impl From<String> for HeaderStr {
-    /// Zero-copy: takes ownership of the `String`'s buffer.
     fn from(s: String) -> Self {
         Self(Bytes::from(s))
     }

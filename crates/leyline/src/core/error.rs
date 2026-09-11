@@ -1,5 +1,3 @@
-//! Error types for Leyline.
-
 use std::borrow::Cow;
 use std::error::Error as StdError;
 use std::fmt;
@@ -12,52 +10,32 @@ use crate::h2::H2Error;
 use crate::h2::error::ErrorCode;
 use crate::tls::TlsError;
 
-/// Leyline result alias.
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Boxed source error carried by [`Error`].
 type Source = Box<dyn StdError + Send + Sync>;
 
-/// The layer that failed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Kind {
-    /// A client or request could not be built from the given inputs.
     Builder,
-    /// The request could not be sent or the exchange failed at the HTTP layer.
     Request,
-    /// Redirect handling failed.
     Redirect,
-    /// The response carried a 4xx or 5xx status.
     Status,
-    /// Request or response body streaming or buffering failed.
     Body,
-    /// Response decompression or decoding failed.
     Decode,
-    /// The operation timed out.
     Timeout,
-    /// The connection could not be established.
     Connect,
-    /// TLS configuration, handshake, or verification failed.
     Tls,
-    /// HTTP/2 protocol or transport error.
     Http2,
-    /// HTTP/3 or QUIC protocol or transport error.
     Http3,
-    /// Proxy configuration or tunnel failure.
     Proxy,
-    /// Low-level IO error.
     Io,
-    /// Invalid configuration.
     Config,
-    /// URL parsing failed.
     Url,
-    /// JSON serialization or deserialization failed.
     Json,
 }
 
 impl Kind {
-    /// A stable lowercase token for this kind.
     pub fn as_str(self) -> &'static str {
         match self {
             Kind::Builder => "builder",
@@ -86,7 +64,6 @@ impl fmt::Display for Kind {
     }
 }
 
-/// Everything an [`Error`] carries, kept behind one allocation.
 struct Inner {
     kind: Kind,
     source: Option<Source>,
@@ -97,13 +74,11 @@ struct Inner {
     alpn: Option<String>,
 }
 
-/// The error returned by every fallible Leyline operation.
 pub struct Error {
     inner: Box<Inner>,
 }
 
 impl Error {
-    /// A new error of `kind` with no context attached.
     pub fn new(kind: Kind) -> Self {
         Self {
             inner: Box::new(Inner {
@@ -118,74 +93,61 @@ impl Error {
         }
     }
 
-    /// Attach the underlying error.
     pub fn with_source(mut self, source: impl Into<Source>) -> Self {
         self.inner.source = Some(source.into());
         self
     }
 
-    /// Attach the request URL.
     pub fn with_url(mut self, url: Uri) -> Self {
         self.inner.url = Some(url);
         self
     }
 
-    /// Attach the response status.
     pub fn with_status(mut self, status: StatusCode) -> Self {
         self.inner.status = Some(status);
         self
     }
 
-    /// Attach a human-readable message.
     pub fn with_message(mut self, message: impl Into<Cow<'static, str>>) -> Self {
         self.inner.message = Some(message.into());
         self
     }
 
-    /// Attach a response body prefix, as captured by [`Response::error_for_status`](crate::Response::error_for_status).
     pub fn with_body(mut self, body: Vec<u8>) -> Self {
         self.inner.body = Some(body);
         self
     }
 
-    /// Attach the ALPN protocol the peer negotiated when it was not the required one.
     pub fn with_alpn(mut self, negotiated: impl Into<String>) -> Self {
         self.inner.alpn = Some(negotiated.into());
         self
     }
 
-    /// The layer that failed.
     pub fn kind(&self) -> Kind {
         self.inner.kind
     }
 
-    /// The attached message, when the error carries one.
     pub fn message(&self) -> Option<&str> {
         self.inner.message.as_deref()
     }
 
-    /// The captured response body prefix, when the error carries one.
     pub fn body_prefix(&self) -> Option<&[u8]> {
         self.inner.body.as_deref()
     }
 
-    /// The HTTP status code, when this error carries one.
     pub fn status(&self) -> Option<StatusCode> {
         self.inner.status
     }
 
-    /// The request URL, when this error carries one.
     pub fn url(&self) -> Option<&Uri> {
         self.inner.url.as_ref()
     }
 
-    /// The same error without its URL, for callers that must not leak it.
     pub fn without_url(mut self) -> Self {
         self.inner.url = None;
         self
     }
 
-    /// True if this error is a timeout.
     pub fn is_timeout(&self) -> bool {
         if self.inner.kind == Kind::Timeout {
             return true;
@@ -201,7 +163,6 @@ impl Error {
             .is_some_and(|k| k == io::ErrorKind::TimedOut)
     }
 
-    /// True if this is a connection-establishment failure (TCP, DNS, TLS handshake, or proxy tunnel), not body or file I/O.
     pub fn is_connect(&self) -> bool {
         if self.inner.kind == Kind::Connect {
             return true;
@@ -229,27 +190,22 @@ impl Error {
         })
     }
 
-    /// True if this error carries an HTTP status (from [`Response::error_for_status`](crate::Response::error_for_status)).
     pub fn is_status(&self) -> bool {
         self.inner.kind == Kind::Status
     }
 
-    /// True if redirect handling failed.
     pub fn is_redirect(&self) -> bool {
         self.inner.kind == Kind::Redirect
     }
 
-    /// True if a request or response body failed.
     pub fn is_body(&self) -> bool {
         self.inner.kind == Kind::Body
     }
 
-    /// True if response decoding or decompression failed.
     pub fn is_decode(&self) -> bool {
         self.inner.kind == Kind::Decode
     }
 
-    /// True if the connection went away (peer closed, graceful GOAWAY, or a transport-level EOF or reset) and the request can be retried on a fresh connection.
     pub fn is_connection_closed(&self) -> bool {
         if self.io().is_some_and(|e| {
             matches!(
@@ -284,22 +240,18 @@ impl Error {
         )
     }
 
-    /// The wrapped IO error, when the source is one.
     pub fn io(&self) -> Option<&io::Error> {
         self.source_as()
     }
 
-    /// The wrapped TLS error, when the source is one.
     pub fn tls(&self) -> Option<&TlsError> {
         self.source_as()
     }
 
-    /// The wrapped HTTP/2 error, when the source is one.
     pub fn h2(&self) -> Option<&H2Error> {
         self.source_as()
     }
 
-    /// The ALPN protocol the peer negotiated, when this error is an ALPN mismatch.
     pub(crate) fn alpn(&self) -> Option<&str> {
         self.inner.alpn.as_deref()
     }
@@ -358,7 +310,6 @@ impl StdError for Error {
     }
 }
 
-/// A URL with any userinfo replaced, so credentials never reach a log.
 fn redact(url: &Uri) -> String {
     let Some(authority) = url.authority() else {
         return url.to_string();

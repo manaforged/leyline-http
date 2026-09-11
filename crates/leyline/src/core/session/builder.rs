@@ -19,19 +19,14 @@ use super::{Identity, ProtocolPolicy, Session, SessionInner};
 use crate::audit::AuditTlsCache;
 use crate::core::error::{Error, Kind, Result};
 
-/// The synthetic bare profile, materialised once.
 static BARE_PROFILE: LazyLock<BrowserProfile> = LazyLock::new(BrowserProfile::bare);
 
 #[must_use = "builders are lazy: nothing happens until `.send()` / `.build()`"]
-/// Session builder - configure browser, platform, proxy, timeout, cookies.
 pub struct SessionBuilder {
-    /// The browser to impersonate.
     browser: Option<Browser>,
     platform: Platform,
-    /// `true` once `.platform(...)` (or a platform-pinning convenience like `.safari()`) was called.
     platform_explicit: bool,
     brand: ChromiumBrand,
-    /// Set when `proxy` was discovered from the environment at build time (vs an explicit `.proxy(...)` call).
     proxy_config: ProxyConfig,
     dns_config: DnsConfig,
     timeouts: TimeoutConfig,
@@ -49,21 +44,16 @@ pub struct SessionBuilder {
     config_error: Option<String>,
     accept_language_override: Option<String>,
     extra_identity_headers: Vec<(String, String)>,
-    /// When set, HTTP identity (UA / sec-ch-ua / identity extras) comes from this browser while TLS + H2 still follow [`Self::browser`].
     http_identity: Option<Browser>,
     accept_invalid_certs: bool,
     happy_eyeballs: Option<HappyEyeballsConfig>,
     tls_trust: TlsTrustConfig,
-    /// Session-wide default retry policy (none unless set via `retry`).
     default_retry: crate::core::retry::RetryPolicy,
-    /// Lifecycle listener installed by `trace`.
     trace: Option<Arc<dyn Trace>>,
-    /// Composed middleware stack installed by `layer`.
     #[cfg(feature = "tower")]
     layer: Option<Arc<dyn Stack>>,
 }
 
-/// Header edits plus a Navigate `accept` replacement from a brand overlay.
 type BrandOverlayEdits = (Vec<(String, String)>, Option<String>);
 
 impl SessionBuilder {
@@ -101,67 +91,56 @@ impl SessionBuilder {
         }
     }
 
-    /// Set a proxy URL (`http://`, `https://`, `socks5://`, `socks5h://`).
     pub fn proxy(mut self, proxy: impl Into<String>) -> Self {
         self.proxy_config = self.proxy_config.set_default_proxy(proxy);
         self
     }
 
-    /// Replace the full proxy configuration.
     pub fn proxies(mut self, config: ProxyConfig) -> Self {
         self.proxy_config = config;
         self
     }
 
-    /// Replace the proxy bypass matcher.
     pub fn no_proxy(mut self, no_proxy: NoProxy) -> Self {
         self.proxy_config = self.proxy_config.no_proxy(no_proxy);
         self
     }
 
-    /// Do not honour `HTTP_PROXY` / `HTTPS_PROXY` for this session.
     pub fn disable_env_proxies(mut self) -> Self {
         self.proxy_config = self.proxy_config.without_env();
         self
     }
 
-    /// Set request timeout (default: 5 minutes).
     pub fn timeout(mut self, timeout: std::time::Duration) -> Self {
         self.timeouts.total = timeout;
         self
     }
 
-    /// Set a session-wide default retry policy, inherited by every request that does not override it via [`crate::RequestBuilder::retry`].
     pub fn retry(mut self, policy: crate::core::retry::RetryPolicy) -> Self {
         self.default_retry = policy;
         self
     }
 
-    /// Replace every timeout, including values set earlier by `timeout` and `connect_timeout`.
     pub fn timeouts(mut self, config: TimeoutConfig) -> Self {
         self.timeouts = config;
         self
     }
 
-    /// Set DNS + TCP + TLS connect timeout.
     pub fn connect_timeout(mut self, timeout: std::time::Duration) -> Self {
         self.timeouts.connect = Some(timeout);
         self
     }
 
-    /// Replace the connection-pool configuration.
     pub fn pool_config(mut self, config: PoolConfig) -> Self {
         self.pool_config = config;
         self
     }
 
-    /// Impersonate a specific browser.
     pub fn browser(mut self, browser: Browser) -> Self {
         self.browser = Some(browser);
         self
     }
 
-    /// Use the latest bundled Chrome profile (see [`Browser::default_browser`], currently Chrome 152).
     pub fn chrome(self) -> Self {
         self.browser(Browser::default_browser()).with_h3_race()
     }
@@ -189,12 +168,10 @@ impl SessionBuilder {
         }
     }
 
-    /// Firefox [`Browser::default_firefox`] (currently Firefox 154).
     pub fn firefox(self) -> Self {
         self.browser(Browser::default_firefox())
     }
 
-    /// Latest bundled Safari.
     pub fn safari(self) -> Self {
         if self.platform_explicit {
             let platform = self.platform;
@@ -204,25 +181,21 @@ impl SessionBuilder {
         }
     }
 
-    /// Use a browser/platform pair in one call.
     pub fn profile(self, browser: Browser, platform: Platform) -> Self {
         self.browser(browser).platform(platform)
     }
 
-    /// Apply a Chromium-family identity overlay ([`ChromiumBrand`]: Edge, Opera, Vivaldi).
     pub fn brand(mut self, brand: ChromiumBrand) -> Self {
         self.brand = brand;
         self
     }
 
-    /// Microsoft Edge overlay on [`Browser::default_browser`] (Chrome 152).
     pub fn edge(self) -> Self {
         self.chromium_or_default(Browser::default_browser())
             .with_h3_race()
             .brand(ChromiumBrand::Edge)
     }
 
-    /// Use the latest bundled Brave identity.
     pub fn brave(self) -> Self {
         let this = if self.platform_explicit {
             let platform = self.platform;
@@ -233,21 +206,18 @@ impl SessionBuilder {
         this.with_h3_race()
     }
 
-    /// Opera overlay on [`Browser::default_browser`] (Chrome 152 / Opera 136).
     pub fn opera(self) -> Self {
         self.chromium_or_default(Browser::default_browser())
             .with_h3_race()
             .brand(ChromiumBrand::Opera)
     }
 
-    /// Vivaldi overlay on Chrome 147: last major with a recorded Vivaldi build string.
     pub fn vivaldi(self) -> Self {
         self.chromium_or_default(Browser::Chrome147)
             .with_h3_race()
             .brand(ChromiumBrand::Vivaldi)
     }
 
-    /// Set the target OS.
     pub fn platform(mut self, platform: Platform) -> Self {
         self.platform = platform;
         self.platform_explicit = true;
@@ -257,74 +227,61 @@ impl SessionBuilder {
         self
     }
 
-    /// Windows.
     pub fn windows(self) -> Self {
         self.platform(Platform::Windows)
     }
 
-    /// macOS.
     pub fn macos(self) -> Self {
         self.platform(Platform::MacOS)
     }
 
-    /// Linux desktop.
     pub fn linux(self) -> Self {
         self.platform(Platform::Linux)
     }
 
-    /// Android.
     pub fn android(self) -> Self {
         self.platform(Platform::Android)
     }
 
-    /// iOS / iPadOS.
     pub fn ios(self) -> Self {
         self.platform(Platform::IOS)
     }
 
-    /// Set maximum number of redirects to follow.
     pub fn max_redirects(mut self, n: usize) -> Self {
         self.redirect_policy = RedirectPolicy::limited(n);
         self
     }
 
-    /// Replace redirect follow policy.
     pub fn redirect_policy(mut self, policy: RedirectPolicy) -> Self {
         self.redirect_policy = policy;
         self
     }
 
-    /// Provide a pre-populated cookie jar.
     pub fn cookie_jar(mut self, jar: Jar) -> Self {
         self.cookie_jar = Some(jar);
         self
     }
 
-    /// Set a custom TCP fingerprint profile.
     pub fn tcp_profile(mut self, profile: TcpProfile) -> Self {
         self.tcp_profile = Some(profile);
         self
     }
 
-    /// Use a custom DNS resolver for direct connections.
     pub fn resolver(mut self, resolver: Arc<dyn Resolver>) -> Self {
         self.dns_config = self.dns_config.resolver(resolver);
         self
     }
 
-    /// Replace direct-connect DNS configuration.
     pub fn dns(mut self, config: DnsConfig) -> Self {
         self.dns_config = config;
         self
     }
 
-    /// Override one host to one socket address for direct connects.
     pub fn resolve_host(mut self, host: impl AsRef<str>, addr: std::net::SocketAddr) -> Self {
         self.dns_config = self.dns_config.resolve_host(host, addr);
         self
     }
 
-    /// Override one host to multiple socket addresses for direct connects.
     pub fn resolve_host_to_addrs<I>(mut self, host: impl AsRef<str>, addrs: I) -> Self
     where
         I: IntoIterator<Item = std::net::SocketAddr>,
@@ -333,49 +290,41 @@ impl SessionBuilder {
         self
     }
 
-    /// Override Happy Eyeballs dual-stack connect tunables.
     pub fn happy_eyeballs(mut self, config: HappyEyeballsConfig) -> Self {
         self.happy_eyeballs = Some(config);
         self
     }
 
-    /// Replace TLS trust-root and client-certificate configuration.
     pub fn tls_trust(mut self, trust: TlsTrustConfig) -> Self {
         self.tls_trust = trust;
         self
     }
 
-    /// Replace the socket configuration: bind address, TCP_NODELAY, keepalive, buffers, and interface.
     pub fn socket_config(mut self, config: SocketConfig) -> Self {
         self.socket_config = config;
         self
     }
 
-    /// Replace response decompression policy.
     pub fn compression(mut self, config: CompressionConfig) -> Self {
         self.compression = config;
         self
     }
 
-    /// Replace WebSocket defaults.
     pub fn websocket_config(mut self, config: WebSocketConfig) -> Self {
         self.websocket_config = config;
         self
     }
 
-    /// Reject non-HTTPS request URLs at execution time.
     pub fn https_only(mut self, enabled: bool) -> Self {
         self.https_only = enabled;
         self
     }
 
-    /// Observe every request's lifecycle through `hook`: DNS, connect, TLS, send, response head, and completion. The hook runs inline on the request task, so a slow listener slows the request.
     pub fn trace(mut self, hook: impl Trace) -> Self {
         self.trace = Some(Arc::new(hook));
         self
     }
 
-    /// Wrap every request attempt in a Tower middleware stack. The layer runs after the session resolved headers, body, and proxy, and before the transport is chosen; each redirect leg is one [`crate::layer::Call`]. Retries, redirects, cookies, and tracing stay in the session, outside the layer. A layer can edit headers or answer without calling the inner service; it cannot change the protocol policy. A later call replaces an earlier stack, so compose with `tower::ServiceBuilder` or `tower_layer::Stack`.
     #[cfg(feature = "tower")]
     pub fn layer<L>(mut self, layer: L) -> Self
     where
@@ -391,43 +340,36 @@ impl SessionBuilder {
         self
     }
 
-    /// Enable per-response fingerprint introspection.
     pub fn audit(mut self, enabled: bool) -> Self {
         self.audit = enabled;
         self
     }
 
-    /// Add a PEM CA file or bundle to the TLS trust store.
     pub fn add_root_certificate_file(mut self, path: impl Into<std::path::PathBuf>) -> Self {
         self.tls_trust = self.tls_trust.add_ca_file(path);
         self
     }
 
-    /// Add a DER-encoded CA certificate to the TLS trust store.
     pub fn add_root_certificate_der(mut self, der: impl Into<Vec<u8>>) -> Self {
         self.tls_trust = self.tls_trust.add_ca_der(der);
         self
     }
 
-    /// Add a SHA-256 pin for the DER-encoded leaf certificate.
     pub fn add_pinned_leaf_sha256(mut self, sha256: [u8; 32]) -> Self {
         self.tls_trust = self.tls_trust.add_pinned_leaf_sha256(sha256);
         self
     }
 
-    /// Do not honour `SSL_CERT_FILE` / `SSL_CERT_DIR` for this session.
     pub fn without_env_roots(mut self) -> Self {
         self.tls_trust = self.tls_trust.without_env_roots();
         self
     }
 
-    /// Do not load platform system roots for this session.
     pub fn without_system_roots(mut self) -> Self {
         self.tls_trust = self.tls_trust.without_system_roots();
         self
     }
 
-    /// Use a PEM client certificate chain and private key for mTLS.
     pub fn client_identity_files(
         mut self,
         certificate_chain_file: impl Into<std::path::PathBuf>,
@@ -439,7 +381,6 @@ impl SessionBuilder {
         self
     }
 
-    /// Force HTTP/3 over QUIC.
     pub fn http3(mut self) -> Self {
         self.protocol_explicit = true;
         #[cfg(feature = "http3")]
@@ -456,21 +397,18 @@ impl SessionBuilder {
         self
     }
 
-    /// Force HTTP/1.1.
     pub fn http1(mut self) -> Self {
         self.protocol_explicit = true;
         self.protocol_policy = ProtocolPolicy::Http1;
         self
     }
 
-    /// Force HTTP/2.
     pub fn http2(mut self) -> Self {
         self.protocol_explicit = true;
         self.protocol_policy = ProtocolPolicy::Http2;
         self
     }
 
-    /// Race the HTTP/3 (QUIC) and HTTP/2 (TCP+TLS) handshakes, Chrome-style: whichever connection establishes first carries the request (sent once), with HTTP/1.1 fallback via the Auto path when neither comes up.
     pub fn race(mut self) -> Self {
         self.protocol_explicit = true;
         #[cfg(feature = "http3")]
@@ -487,14 +425,12 @@ impl SessionBuilder {
         self
     }
 
-    /// Set the protocol selection policy.
     pub fn protocol_policy(mut self, policy: ProtocolPolicy) -> Self {
         self.protocol_explicit = true;
         self.protocol_policy = policy;
         self
     }
 
-    /// Apply a locked [`Identity`].
     pub fn identity(self, id: Identity) -> Self {
         let builder = self.browser(id.tls()).platform(id.platform());
         if id.http() == id.tls() {
@@ -504,19 +440,16 @@ impl SessionBuilder {
         }
     }
 
-    /// Keep TLS/H2 from [`Self::browser`], but take UA / `sec-ch-ua` / identity extras from `browser`.
     pub fn http_identity(mut self, browser: Browser) -> Self {
         self.http_identity = Some(browser);
         self
     }
 
-    /// Override the session's `accept-language` header for every request.
     pub fn accept_language(mut self, lang: impl Into<String>) -> Self {
         self.accept_language_override = Some(lang.into());
         self
     }
 
-    /// Append session default headers after the preset identity block on every request.
     pub fn extra_headers<I, P>(mut self, headers: I) -> Self
     where
         I: IntoIterator<Item = P>,
@@ -528,13 +461,11 @@ impl SessionBuilder {
         self
     }
 
-    /// Disable peer certificate verification.
     pub fn danger_accept_invalid_certs(mut self, accept: bool) -> Self {
         self.accept_invalid_certs = accept;
         self
     }
 
-    /// Build the session.
     pub fn build(mut self) -> Result<Session> {
         if let Some(error) = self.config_error.take() {
             return Err(Error::new(Kind::Config).with_message(error));
@@ -723,7 +654,6 @@ impl SessionBuilder {
             }),
         })
     }
-    /// Pre-compute the audit fingerprints (JA4, JA3, Akamai-H2, JA4T) from the resolved profile so `audit()` never recomputes per response.
     fn compute_audit_cache(
         &self,
         profile: &'static BrowserProfile,
@@ -768,7 +698,6 @@ impl SessionBuilder {
         }
     }
 
-    /// Build the BoringSSL fingerprint connector for the resolved profile: trust wiring, cert-verification policy, resolver, socket config, connect timeout, and Happy Eyeballs.
     fn build_connector(
         &self,
         profile: &'static BrowserProfile,
@@ -795,7 +724,6 @@ impl SessionBuilder {
         Ok(fp)
     }
 
-    /// Apply the Chromium-sibling identity overlay if the caller asked for one.
     fn apply_brand_overlay(
         &self,
         identity: &mut crate::profile::PlatformIdentity,

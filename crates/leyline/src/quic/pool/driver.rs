@@ -1,9 +1,7 @@
-//! The h3 connection driver task: sole owner of the QUIC connection.
 use super::*;
 
 mod drain;
 
-/// Borrowed connection state for one pass of the HTTP/3 event loop.
 struct Drain<'a> {
     h3: &'a mut quiche::h3::Connection,
     conn: &'a mut quiche::Connection,
@@ -164,7 +162,6 @@ impl H3Driver {
     }
 }
 
-/// Open request streams for queued commands.
 pub(super) fn start_pending(
     h3: &mut quiche::h3::Connection,
     conn: &mut quiche::Connection,
@@ -225,7 +222,6 @@ pub(super) fn start_pending(
     }
 }
 
-/// Write any queued request-body bytes — chunks that flow control parked mid-write, plus chunks freshly relayed from a streaming body's pump.
 pub(super) fn write_pending_request_bodies(
     h3: &mut quiche::h3::Connection,
     conn: &mut quiche::Connection,
@@ -238,7 +234,6 @@ pub(super) fn write_pending_request_bodies(
     }
 }
 
-/// Write as much of a stream's queued request body as flow control allows.
 pub(super) fn write_request_body(
     h3: &mut quiche::h3::Connection,
     conn: &mut quiche::Connection,
@@ -286,7 +281,6 @@ pub(super) fn write_request_body(
     }
 }
 
-/// Read a streaming request body and relay each chunk to the driver tagged with `stream_id`.
 async fn pump_request_body(
     stream_id: u64,
     mut body: H3RequestBodyStream,
@@ -337,7 +331,6 @@ async fn pump_request_body(
     );
 }
 
-/// Apply a relayed request-body chunk to its stream.
 pub(super) fn on_request_body_chunk(
     conn: &mut quiche::Connection,
     streams: &mut HashMap<u64, H3Stream>,
@@ -373,7 +366,6 @@ pub(super) fn on_request_body_chunk(
     }
 }
 
-/// Shut down one half of a QUIC stream; `Done` means it was already shut down.
 fn shutdown(conn: &mut quiche::Connection, id: u64, dir: quiche::Shutdown, err: u64) {
     match conn.stream_shutdown(id, dir, err) {
         Ok(()) | Err(quiche::Error::Done) => {}
@@ -386,7 +378,6 @@ fn shutdown(conn: &mut quiche::Connection, id: u64, dir: quiche::Shutdown, err: 
     }
 }
 
-/// Reset the request-upload (write) half of a stream and cancel its pump.
 fn reset_upload_half(conn: &mut quiche::Connection, stream_id: u64, stream: &mut H3Stream) {
     if stream.send_side_open() {
         shutdown(conn, stream_id, quiche::Shutdown::Write, 0);
@@ -394,7 +385,6 @@ fn reset_upload_half(conn: &mut quiche::Connection, stream_id: u64, stream: &mut
     stream.cancel_upload();
 }
 
-/// True when the caller has abandoned this stream: it dropped the response oneshot before the head was delivered (a buffered request, or a streaming one pre-head), or — once the head has been streamed — dropped the body-channel receiver.
 pub(super) fn stream_is_cancelled(stream: &H3Stream) -> bool {
     match stream.resp_tx.as_ref() {
         Some(tx) => tx.is_closed(),
@@ -406,7 +396,6 @@ pub(super) fn stream_is_cancelled(stream: &H3Stream) -> bool {
     }
 }
 
-/// Ids of streams whose caller has dropped its receiver.
 pub(super) fn cancelled_stream_ids(streams: &HashMap<u64, H3Stream>) -> Vec<u64> {
     streams
         .iter()
@@ -415,7 +404,6 @@ pub(super) fn cancelled_stream_ids(streams: &HashMap<u64, H3Stream>) -> Vec<u64>
         .collect()
 }
 
-/// Reap streams whose caller dropped its receiver, freeing the QUIC stream-credit slot instead of letting an orphan linger until the connection's idle timeout.
 pub(super) fn sweep_cancelled_streams(
     conn: &mut quiche::Connection,
     streams: &mut HashMap<u64, H3Stream>,
@@ -428,7 +416,6 @@ pub(super) fn sweep_cancelled_streams(
     }
 }
 
-/// Drain all ready HTTP/3 events, dispatching each to its request stream.
 pub(super) fn drain_h3_events(
     h3: &mut quiche::h3::Connection,
     conn: &mut quiche::Connection,
@@ -544,7 +531,6 @@ pub(super) fn forward_stream_body(
     false
 }
 
-/// Retry a stalled chunk and emit EOF for every streaming response once its peer has finished.
 pub(super) fn pump_streaming_bodies(
     h3: &mut quiche::h3::Connection,
     conn: &mut quiche::Connection,
@@ -576,7 +562,6 @@ pub(super) fn pump_streaming_bodies(
     streams.values().any(|s| s.stalled.is_some())
 }
 
-/// Deliver a terminal error to a streaming consumer reliably.
 pub(super) fn deliver_stream_error(tx: &mpsc::Sender<std::io::Result<Bytes>>, err: std::io::Error) {
     let tx = tx.clone();
     tokio::spawn(async move {
@@ -584,7 +569,6 @@ pub(super) fn deliver_stream_error(tx: &mpsc::Sender<std::io::Result<Bytes>>, er
     });
 }
 
-/// Fail every in-flight and queued request with `reason` and mark the connection closed.
 pub(super) fn fail_all(
     streams: &mut HashMap<u64, H3Stream>,
     pending: &mut VecDeque<H3Command>,

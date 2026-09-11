@@ -32,10 +32,8 @@ pub(super) fn decompress_body(
     Ok((data, true))
 }
 
-/// Response headers as `(name, value)` pairs in wire order.
 type HeaderPairs = Vec<(http::HeaderName, http::HeaderValue)>;
 
-/// Decompress `body` per its `content-encoding` header and, when bytes were actually decoded, drop the now-stale `content-encoding`/`content-length` headers.
 pub(crate) fn decompress_and_strip(
     body: Vec<u8>,
     headers: HeaderPairs,
@@ -57,7 +55,6 @@ pub(crate) fn decompress_and_strip(
     Ok((body, headers))
 }
 
-/// Max decompressed body size (100 MB, same as wire limit).
 const MAX_DECOMPRESSED: usize = 100 * 1024 * 1024;
 
 pub(crate) async fn drain_stream_into_vec(
@@ -143,7 +140,6 @@ fn decompress_single(body: Vec<u8>, encoding: &str) -> Result<Vec<u8>> {
     }
 }
 
-/// Read from a decoder with a size limit (decompression bomb protection).
 #[cfg(any(
     feature = "compression-gzip",
     feature = "compression-brotli",

@@ -1,5 +1,3 @@
-//! Send a request over HTTP/3 (QUIC).
-
 use leyline::Session;
 
 const URL: &str = "https://cloudflare.com";

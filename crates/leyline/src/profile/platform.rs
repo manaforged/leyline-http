@@ -1,29 +1,19 @@
-//! Platform enum — OS identity for fingerprint consistency.
-
 use crate::tcp::TcpProfile;
 
-/// Target operating system platform.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 #[derive(Default)]
 pub enum Platform {
-    /// Microsoft Windows (`Sec-CH-UA-Platform: "Windows"`).
     #[default]
     Windows,
-    /// Apple macOS (`Sec-CH-UA-Platform: "macOS"`).
     MacOS,
-    /// Linux desktop (`Sec-CH-UA-Platform: "Linux"`).
     Linux,
-    /// Google Android (mobile flag `?1`).
     Android,
-    /// Apple iOS / iPadOS (mobile flag `?1`).
     IOS,
-    /// Detect the host OS at build time (`cfg!(target_os)`), falling back to [`Platform::Windows`] for an unrecognised target.
     Host,
 }
 
 impl Platform {
-    /// Concrete host OS from the compile target.
     pub fn detect_host() -> Self {
         #[cfg(target_os = "windows")]
         {
@@ -57,7 +47,6 @@ impl Platform {
         }
     }
 
-    /// Resolve [`Platform::Host`] to the concrete host OS; a no-op for every explicit variant.
     #[must_use]
     pub fn resolve(self) -> Self {
         match self {
@@ -66,7 +55,6 @@ impl Platform {
         }
     }
 
-    /// The `Sec-CH-UA-Platform` header value.
     pub fn sec_ch_platform(&self) -> &'static str {
         match self {
             Self::Windows => "Windows",
@@ -78,7 +66,6 @@ impl Platform {
         }
     }
 
-    /// The `Sec-CH-UA-Mobile` header value.
     pub fn mobile_flag(&self) -> &'static str {
         match self {
             Self::Android | Self::IOS => "?1",
@@ -87,7 +74,6 @@ impl Platform {
         }
     }
 
-    /// Map to the TCP fingerprint profile for this OS.
     pub fn tcp_profile(&self) -> TcpProfile {
         match self {
             Self::Windows => TcpProfile::WINDOWS,
@@ -98,7 +84,6 @@ impl Platform {
         }
     }
 
-    /// Profile identity lookup key (lowercase).
     pub fn identity_key(&self) -> &'static str {
         match self {
             Self::Windows => "windows",

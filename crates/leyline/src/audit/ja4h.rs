@@ -1,18 +1,11 @@
-//! JA4H HTTP request fingerprint (FoxIO specification).
-
 use crate::audit::hash12;
 
-/// Input data for JA4H computation.
 pub struct Ja4hInput<'a> {
-    /// HTTP method (e.g. "GET", "POST").
     pub method: &'a str,
-    /// HTTP version: "1.0", "1.1", "2", "3".
     pub http_version: &'a str,
-    /// Request headers as (name, value) pairs in order.
     pub headers: &'a [(String, String)],
 }
 
-/// Compute JA4H fingerprint.
 pub fn compute_ja4h(input: &Ja4hInput<'_>) -> String {
     let a = section_a(input);
     let b = section_b(input);
@@ -21,7 +14,6 @@ pub fn compute_ja4h(input: &Ja4hInput<'_>) -> String {
     format!("{a}_{b}_{c}_{d}")
 }
 
-/// Section A: request metadata.
 fn section_a(input: &Ja4hInput<'_>) -> String {
     let method = &input.method.to_lowercase();
     let method2 = if method.len() >= 2 {
@@ -69,7 +61,6 @@ fn section_a(input: &Ja4hInput<'_>) -> String {
     format!("{method2}{version}{cookie_flag}{referer_flag}{count:02}{lang}")
 }
 
-/// Section B: sorted header names hash.
 fn section_b(input: &Ja4hInput<'_>) -> String {
     let mut names: Vec<&str> = input
         .headers
@@ -82,7 +73,6 @@ fn section_b(input: &Ja4hInput<'_>) -> String {
     hash12(&s)
 }
 
-/// Section C: sorted cookie names hash.
 fn section_c(input: &Ja4hInput<'_>) -> String {
     let cookie_val = input
         .headers
@@ -107,7 +97,6 @@ fn section_c(input: &Ja4hInput<'_>) -> String {
     }
 }
 
-/// Section D: sorted cookie name=value pairs hash.
 fn section_d(input: &Ja4hInput<'_>) -> String {
     let cookie_val = input
         .headers

@@ -1,5 +1,3 @@
-//! HTTP/1.1 `CONNECT` tunnel establishment and response validation.
-
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::tls::TlsStream;
@@ -7,7 +5,6 @@ use crate::tls::error::TlsError;
 
 use crate::util::{base64_encode, percent_decode};
 
-/// Open a TLS-over-HTTP-CONNECT tunnel through a cleartext `http://` proxy and return the wrapped TLS stream.
 pub(crate) async fn connect<C: crate::tls::TlsHandshake>(
     connector: &C,
     host: &str,
@@ -22,7 +19,6 @@ pub(crate) async fn connect<C: crate::tls::TlsHandshake>(
         .await
 }
 
-/// Open a CONNECT tunnel through an `https://` proxy: the client→proxy leg is itself TLS, so the CONNECT request and any `Proxy-Authorization` credentials travel encrypted (never in cleartext).
 pub(crate) async fn connect_via_tls<C: crate::tls::TlsHandshake>(
     connector: &C,
     host: &str,
@@ -55,7 +51,6 @@ pub(crate) async fn connect_via_tls<C: crate::tls::TlsHandshake>(
         .await
 }
 
-/// Write the `CONNECT host:port` request (with `Proxy-Authorization` when the proxy URL carries credentials) over `stream`, then read and validate the proxy's response.
 async fn write_connect_and_validate<S>(
     stream: &mut S,
     host: &str,
@@ -102,7 +97,6 @@ where
     validate_connect_response(&response_buf, end_idx)
 }
 
-/// Validate a proxy CONNECT response header block.
 pub fn validate_connect_response(buf: &[u8], end_idx: usize) -> Result<(), TlsError> {
     if end_idx < 4 || end_idx > buf.len() {
         return Err(TlsError::Profile(format!(

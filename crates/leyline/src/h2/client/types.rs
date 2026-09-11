@@ -1,5 +1,3 @@
-//! Public request/response body types exchanged with the HTTP/2 client.
-
 use std::io;
 use std::pin::Pin;
 
@@ -8,17 +6,11 @@ use tokio::sync::mpsc;
 
 use crate::header_str::HeaderStr;
 
-/// Request body supplied to [`super::H2Client::send_request_ex`].
 pub enum RequestBody {
-    /// No body — headers carry END_STREAM.
     None,
-    /// Fully-materialised bytes.
     Buffered(Bytes),
-    /// Streaming body: chunks are pulled as they arrive from the caller-provided stream.
     Streaming {
-        /// The stream yielding chunks.
         stream: Pin<Box<dyn futures_util::Stream<Item = io::Result<Bytes>> + Send + 'static>>,
-        /// Known exact length in bytes, if any.
         length_hint: Option<u64>,
     },
 }
@@ -49,24 +41,16 @@ impl From<Option<Bytes>> for RequestBody {
     }
 }
 
-/// Extended response returned by [`super::H2Client::send_request_ex`].
 #[derive(Debug)]
 pub struct H2ResponseEx {
-    /// HTTP status code.
     pub status: u16,
-    /// Response headers in wire order.
     pub headers: Vec<(HeaderStr, HeaderStr)>,
-    /// Response body — buffered or streaming.
     pub body: ResponseBody,
-    /// Trailers, if any.
     pub trailers: Option<Vec<(HeaderStr, HeaderStr)>>,
 }
 
-/// Response body shape delivered alongside an [`H2ResponseEx`].
 pub enum ResponseBody {
-    /// Fully buffered body (the default).
     Buffered(Vec<u8>),
-    /// Streaming body: the caller drains chunks via the receiver.
     Streaming(mpsc::Receiver<io::Result<Bytes>>),
 }
 

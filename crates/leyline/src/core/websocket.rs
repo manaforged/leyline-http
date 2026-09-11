@@ -1,5 +1,3 @@
-//! WebSocket client with TLS fingerprinting.
-
 use std::sync::Arc;
 
 use base64::Engine as _;
@@ -21,34 +19,24 @@ use crate::tls::{FingerprintConnector, TlsIo};
 use crate::core::WebSocketConfig;
 use crate::core::error::{Error, Kind, Result};
 
-/// A WebSocket message, owned by Leyline so the wire library stays out of the public API.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum WsMessage {
-    /// UTF-8 text frame.
     Text(String),
-    /// Binary frame.
     Binary(Vec<u8>),
-    /// Ping frame. The library answers it; the payload is not surfaced.
     Ping,
-    /// Pong frame. The payload is not surfaced.
     Pong,
-    /// Close frame, with the peer's status and reason when it sent one.
     Close(Option<CloseFrame>),
 }
 
-/// Status and reason carried by a WebSocket close frame (RFC 6455 §5.5.1).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct CloseFrame {
-    /// Close status code.
     pub code: u16,
-    /// Close reason.
     pub reason: String,
 }
 
 impl CloseFrame {
-    /// Build a close frame from a status code and reason.
     pub fn new(code: u16, reason: impl Into<String>) -> Self {
         Self {
             code,
@@ -58,7 +46,6 @@ impl CloseFrame {
 }
 
 impl WsMessage {
-    /// Convert a wire message into the public enum.
     fn wire(msg: Message) -> Self {
         match msg {
             Message::Text(s) => Self::Text(s.as_str().to_owned()),
@@ -73,7 +60,6 @@ impl WsMessage {
         }
     }
 
-    /// Convert the public enum into a wire message.
     fn into_wire(self) -> Message {
         match self {
             Self::Text(s) => Message::Text(s.into()),
@@ -88,23 +74,17 @@ impl WsMessage {
     }
 }
 
-/// Transport variant carried inside a connected [`WsConnection`].
 enum WsInner {
-    /// Classic HTTP/1.1 Upgrade (RFC 6455) over TLS.
     H1(WebSocketStream<TlsIo>),
-    /// RFC 8441 extended CONNECT over HTTP/2.
     H2(WebSocketStream<H2ConnectStream>),
 }
 
-/// A connected WebSocket.
 pub struct WsConnection {
     inner: WsInner,
-    /// The subprotocol the origin selected in its handshake response (`Sec-WebSocket-Protocol`), if any.
     protocol: Option<String>,
 }
 
 impl WsConnection {
-    /// Connect over HTTP/1.1.
     pub(crate) async fn connect_h1(
         connector: &FingerprintConnector,
         url: &str,
@@ -173,7 +153,6 @@ impl WsConnection {
         })
     }
 
-    /// Connect over HTTP/2 extended CONNECT (RFC 8441).
     #[expect(
         clippy::too_many_arguments,
         reason = "flat per-request wire fields across one internal call path"
@@ -282,7 +261,6 @@ impl WsConnection {
         })
     }
 
-    /// True if `err` is the sentinel "peer doesn't enable CONNECT protocol" failure from [`connect_h2`](Self::connect_h2).
     pub(crate) fn is_h2_fallback_trigger(err: &Error) -> bool {
         err.kind() == Kind::Request
             && err
@@ -290,7 +268,6 @@ impl WsConnection {
                 .is_some_and(|s| s.contains(H2_NO_CONNECT_PROTOCOL))
     }
 
-    /// Send a text message.
     pub async fn send(&mut self, msg: &str) -> Result<()> {
         match &mut self.inner {
             WsInner::H1(s) => s
@@ -304,7 +281,6 @@ impl WsConnection {
         }
     }
 
-    /// Send binary data.
     pub async fn send_binary(&mut self, data: Vec<u8>) -> Result<()> {
         match &mut self.inner {
             WsInner::H1(s) => s
@@ -318,7 +294,6 @@ impl WsConnection {
         }
     }
 
-    /// Send a raw [`WsMessage`].
     pub async fn send_raw(&mut self, msg: WsMessage) -> Result<()> {
         let msg = msg.into_wire();
         match &mut self.inner {
@@ -333,7 +308,6 @@ impl WsConnection {
         }
     }
 
-    /// Receive the next message.
     pub async fn recv(&mut self) -> Result<Option<WsMessage>> {
         let next = match &mut self.inner {
             WsInner::H1(s) => s.next().await,
@@ -346,7 +320,6 @@ impl WsConnection {
         }
     }
 
-    /// Send a close frame and shut down.
     pub async fn close(&mut self) -> Result<()> {
         match &mut self.inner {
             WsInner::H1(s) => s
@@ -360,17 +333,14 @@ impl WsConnection {
         }
     }
 
-    /// `true` if the underlying transport is HTTP/2 extended CONNECT.
     pub fn is_http2(&self) -> bool {
         matches!(self.inner, WsInner::H2(_))
     }
 
-    /// The subprotocol the origin selected in its handshake response (`Sec-WebSocket-Protocol`), if any.
     pub fn protocol(&self) -> Option<&str> {
         self.protocol.as_deref()
     }
 
-    /// Split into independent send and receive halves so each direction can be driven by its own task.
     pub fn split(self) -> (WsSink, WsStream) {
         match self.inner {
             WsInner::H1(s) => {
@@ -399,29 +369,24 @@ impl WsConnection {
     }
 }
 
-/// Write half of a split [`WsConnection`].
 enum WsSinkInner {
     H1(SplitSink<WebSocketStream<TlsIo>, Message>),
     H2(SplitSink<WebSocketStream<H2ConnectStream>, Message>),
 }
 
-/// The send half returned by [`WsConnection::split`].
 pub struct WsSink {
     inner: WsSinkInner,
 }
 
 impl WsSink {
-    /// Send a text message.
     pub async fn send(&mut self, msg: &str) -> Result<()> {
         self.send_raw(WsMessage::Text(msg.to_owned())).await
     }
 
-    /// Send binary data.
     pub async fn send_binary(&mut self, data: Vec<u8>) -> Result<()> {
         self.send_raw(WsMessage::Binary(data)).await
     }
 
-    /// Send a raw [`WsMessage`].
     pub async fn send_raw(&mut self, msg: WsMessage) -> Result<()> {
         let msg = msg.into_wire();
         match &mut self.inner {
@@ -431,7 +396,6 @@ impl WsSink {
         .map_err(|e| Error::new(Kind::Request).with_message(format!("ws send: {e}")))
     }
 
-    /// Send a close frame and shut the write half down.
     pub async fn close(&mut self) -> Result<()> {
         match &mut self.inner {
             WsSinkInner::H1(s) => s.close().await,
@@ -441,19 +405,16 @@ impl WsSink {
     }
 }
 
-/// Read half of a split [`WsConnection`].
 enum WsStreamInner {
     H1(SplitStream<WebSocketStream<TlsIo>>),
     H2(SplitStream<WebSocketStream<H2ConnectStream>>),
 }
 
-/// The receive half returned by [`WsConnection::split`].
 pub struct WsStream {
     inner: WsStreamInner,
 }
 
 impl WsStream {
-    /// Receive the next message.
     pub async fn recv(&mut self) -> Result<Option<WsMessage>> {
         let next = match &mut self.inner {
             WsStreamInner::H1(s) => s.next().await,
@@ -467,7 +428,6 @@ impl WsStream {
     }
 }
 
-/// Sentinel message embedded in the `Error` string when the peer's pooled H2 connection doesn't advertise `SETTINGS_ENABLE_CONNECT_PROTOCOL`.
 const H2_NO_CONNECT_PROTOCOL: &str = "h2-no-connect-protocol";
 
 fn tungstenite_config(
@@ -503,7 +463,6 @@ fn ws_header_pair(name: &str, value: &str) -> Result<(HeaderName, HeaderValue)> 
     Ok((hn, hv))
 }
 
-/// Headers the WebSocket handshake owns.
 fn is_reserved_ws_header(name: &str) -> bool {
     matches!(
         name.to_ascii_lowercase().as_str(),
@@ -517,7 +476,6 @@ fn is_reserved_ws_header(name: &str) -> bool {
     )
 }
 
-/// Generate a cryptographically random 16-byte `Sec-WebSocket-Key` (RFC 6455 §4.1).
 fn random_sec_ws_key() -> String {
     use rand::RngCore;
     let mut bytes = [0u8; 16];

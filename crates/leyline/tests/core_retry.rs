@@ -1,4 +1,3 @@
-//! Integration tests for the `RetryPolicy` — exercises the retry loop against a mock H1 server that can return flaky responses.
 #![expect(
     clippy::unwrap_used,
     reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
@@ -12,7 +11,6 @@ use futures_util::stream;
 use leyline::{Body, RetryPolicy, Session};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-/// Read one complete HTTP/1.1 request off the socket and return when headers are done.
 async fn read_one_request(sock: &mut tokio::net::TcpStream) {
     let mut buf = [0u8; 4096];
     let mut acc = Vec::new();

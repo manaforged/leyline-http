@@ -1,20 +1,4 @@
 #!/usr/bin/env bash
-# cfnetwork-capture: capture the CFNetwork/URLSession wire fingerprint
-# (TLS ClientHello + H2 frame order) from iOS Simulator or macOS host.
-#
-# Outputs an evidence pack under out/<name>/:
-#   raw.pcap            tcpdump loopback capture (handshake + h2 frames)
-#   server.log          H2 frame order log (SETTINGS/WINDOW_UPDATE/HEADERS...)
-#   clienthello.txt     tshark ClientHello field dump (order-preserving)
-#   candidate.toml      skeleton profile fragment derived from the capture
-#   meta.txt            platform/build/run metadata
-#
-# Requires: xcodebuild + simulator runtime (iOS), swift, go, tshark; sudo for
-# tcpdump (loopback capture needs root on macOS).
-#
-# Usage:
-#   capture.sh --platform ios18 [--runs 3] [--out NAME] [--device UDID]
-#   capture.sh --platform macos [--runs 3] [--out NAME]
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -39,7 +23,6 @@ case "$PLATFORM" in
     *) echo "usage: capture.sh --platform ios18|ios26|macos [--runs N] [--out NAME] [--device UDID]" >&2; exit 2 ;;
 esac
 
-# tcpdump on loopback needs root. Prefer a cached ticket; otherwise sudo prompts.
 if ! sudo -n true 2>/dev/null; then
     echo "[capture] tcpdump needs root; sudo will prompt." >&2
     sudo -v
@@ -52,7 +35,6 @@ mkdir -p "$OUT_DIR"
 echo "[capture] platform=$PLATFORM runs=$RUNS"
 echo "[capture] out=$OUT_DIR"
 
-# ── build the probe ──────────────────────────────────────────────────────────
 PROBE_BIN="$HERE/probe/.build/debug/cfnetwork-probe"
 if [ "$PLATFORM" = "macos" ]; then
     (cd "$HERE/probe" && swift build -q)
@@ -63,7 +45,6 @@ else
 fi
 [ -x "$PROBE_BIN" ] || { echo "[capture] probe build failed" >&2; exit 1; }
 
-# ── boot the simulator (ios only) ───────────────────────────────────────────
 SIM_DEVICE="$DEVICE"
 if [ "$PLATFORM" != "macos" ]; then
     if [ -z "$SIM_DEVICE" ]; then
@@ -81,7 +62,6 @@ if [ "$PLATFORM" != "macos" ]; then
     echo "[capture] device=$SIM_DEVICE"
 fi
 
-# ── start the server ─────────────────────────────────────────────────────────
 (
     cd "$HERE/server"
     [ -x ./capture-server ] || go build -o capture-server .
@@ -102,7 +82,6 @@ PORT="${URL##*:}"
 TARGET="https://127.0.0.1:${PORT}/"
 echo "[capture] target=$TARGET"
 
-# ── capture ──────────────────────────────────────────────────────────────────
 PCAP="$OUT_DIR/raw.pcap"
 sudo tcpdump -i lo0 -w "$PCAP" "tcp port $PORT" >/dev/null 2>&1 &
 TCPDUMP_PID=$!
@@ -126,9 +105,7 @@ kill $SERVER_PID 2>/dev/null || true
 wait $SERVER_PID 2>/dev/null || true
 trap - EXIT
 
-# ── parse ────────────────────────────────────────────────────────────────────
 echo "[capture] parsing pcap ($(stat -f%z "$PCAP") bytes)"
-# Wireshark 4.6 field names (underscores, not dots, on extension lists).
 tshark -r "$PCAP" -Y "tls.handshake.type==1" -T fields \
     -e frame.number \
     -e tls.handshake.ciphersuite \

@@ -1,22 +1,12 @@
-//! Browser enum — maps to a profile in the registry.
-
-/// A product line in the bundled profile set, for callers that want its newest version without naming one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Family {
-    /// Google Chrome.
     Chrome,
-    /// Brave, on a Chromium anchor.
     Brave,
-    /// Mozilla Firefox.
     Firefox,
-    /// Safari on macOS.
     Safari,
-    /// Safari on iOS.
     SafariIos,
-    /// The CFNetwork/URLSession app stack.
     CfNetwork,
-    /// OkHttp on Android.
     OkHttp,
 }
 
@@ -35,62 +25,36 @@ impl std::fmt::Display for Family {
     }
 }
 
-/// Identifies a browser for TLS profile selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Browser {
-    /// Google Chrome 145 (Windows/macOS/Linux/Android).
     Chrome145,
-    /// Google Chrome 146 (Windows/macOS/Linux/Android).
     Chrome146,
-    /// Google Chrome 147 (Windows/macOS/Linux/Android).
     Chrome147,
-    /// Google Chrome 148 (Windows/macOS/Linux/Android).
     Chrome148,
-    /// Google Chrome 149 (Windows/macOS/Linux/Android).
     Chrome149,
-    /// Google Chrome 150 (Windows/macOS/Linux/Android).
     Chrome150,
-    /// Google Chrome 151.
     Chrome151,
-    /// Google Chrome 152.
     Chrome152,
-    /// Brave 1.x — Chromium-146-based.
     Brave146,
-    /// Mozilla Firefox 148 (Windows/macOS/Linux/Android).
     Firefox148,
-    /// Mozilla Firefox 149 (Windows/macOS/Linux/Android).
     Firefox149,
-    /// Mozilla Firefox 150 (Windows/macOS/Linux/Android).
     Firefox150,
-    /// Mozilla Firefox 151 (Windows/macOS/Linux/Android).
     Firefox151,
-    /// Mozilla Firefox 152 (Windows/macOS/Linux/Android).
     Firefox152,
-    /// Mozilla Firefox 153.
     Firefox153,
-    /// Mozilla Firefox 154.
     Firefox154,
-    /// Safari 18 on macOS.
     Safari18,
-    /// Safari 26.
     Safari26,
-    /// OkHttp 4.x as shipped on Android 10+.
     OkHttpAndroid10,
-    /// Safari on iOS 17.
     SafariIOS17,
-    /// Safari on iOS 18.
     SafariIOS18,
-    /// CFNetwork/URLSession app stack on iOS 18 (captured first-party).
     CfnetworkIOS18,
-    /// CFNetwork/URLSession app stack on macOS 26 (captured first-party).
     CfnetworkMacOS26,
 }
 
-/// Canonical profile count.
 pub const PROFILE_COUNT: usize = 23;
 
-/// All browser variants, for iteration.
 pub const ALL_BROWSERS: [Browser; PROFILE_COUNT] = [
     Browser::Chrome145,
     Browser::Chrome146,
@@ -118,7 +82,6 @@ pub const ALL_BROWSERS: [Browser; PROFILE_COUNT] = [
 ];
 
 impl Browser {
-    /// Profile lookup key: (browser_name, version).
     pub fn profile_key(&self) -> (&'static str, u32) {
         match self {
             Self::Chrome145 => ("chrome", 145),
@@ -147,7 +110,6 @@ impl Browser {
         }
     }
 
-    /// Highest bundled version in `family`, so a caller pins the product line and takes whatever this crate release carries.
     #[must_use]
     pub fn latest(family: Family) -> Self {
         match family {
@@ -161,13 +123,11 @@ impl Browser {
         }
     }
 
-    /// Engine family (`chrome`, `firefox`, `safari-ios`, …).
     #[must_use]
     pub fn family(&self) -> &'static str {
         self.profile_key().0
     }
 
-    /// Representative that owns this browser's ClientHello / JA4.
     #[must_use]
     pub fn hello_rep(self) -> Self {
         match self {
@@ -183,7 +143,6 @@ impl Browser {
         }
     }
 
-    /// Profile in this product line that exists on `platform`.
     #[must_use]
     pub fn for_platform(self, platform: crate::profile::Platform) -> Self {
         use crate::profile::Platform;
@@ -196,7 +155,6 @@ impl Browser {
         }
     }
 
-    /// Distinct ClientHello owners in this [`Browser::family`], newest first.
     #[must_use]
     pub fn family_hellos(self) -> &'static [Self] {
         match self.family() {
@@ -212,29 +170,24 @@ impl Browser {
         }
     }
 
-    /// Whether this browser caps at TLS 1.2 (no TLS 1.3).
     #[allow(clippy::unused_self)]
     pub fn max_tls_12(&self) -> bool {
         false
     }
 
-    /// Whether this is a Firefox (Gecko) profile.
     #[must_use]
     pub fn is_firefox(&self) -> bool {
         self.family() == "firefox"
     }
 
-    /// The default browser for new sessions.
     pub fn default_browser() -> Self {
         Self::Chrome152
     }
 
-    /// The Firefox profile [`crate::Session::firefox`] and [`crate::SessionBuilder::firefox`] select.
     pub fn default_firefox() -> Self {
         Self::Firefox154
     }
 
-    /// Chromium major version for Chrome-family browsers.
     pub fn chromium_major(&self) -> Option<u32> {
         match self {
             Self::Chrome145 => Some(145),

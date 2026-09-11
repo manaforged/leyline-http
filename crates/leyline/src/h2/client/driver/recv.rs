@@ -1,5 +1,3 @@
-//! Inbound frame handling, flow-control top-ups, and graceful shutdown.
-
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::mpsc;
 
@@ -11,10 +9,8 @@ use super::*;
 mod frames;
 mod headers;
 
-/// Slack permitted before an over-window inbound DATA frame is treated as a flow-control violation (RFC 9113 §6.9.1).
 const RECV_WINDOW_VIOLATION_SLACK: i64 = 16 * 1024;
 
-/// Reject a client-expected frame that arrives on stream 0 or on a server-initiated stream id.
 fn enforce_odd(sid: u32) -> Result<(), H2Error> {
     if sid == 0 || sid.is_multiple_of(2) {
         return Err(H2Error::Connection {

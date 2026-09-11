@@ -1,7 +1,6 @@
 use super::ProtocolPolicy;
 use crate::Session;
 
-/// `with_proxy` must actually override a proxy set at build time.
 #[test]
 fn rotate() {
     let session = Session::builder()

@@ -1,4 +1,3 @@
-//! HPACK decoder fuzz: arbitrary bytes → `Decoder::decode_header_block` must never panic.
 #![no_main]
 
 use leyline::h2::hpack::Decoder;

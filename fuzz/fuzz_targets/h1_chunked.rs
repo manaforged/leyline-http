@@ -1,4 +1,3 @@
-//! Chunked transfer-decoder fuzz: arbitrary bytes on the wire → `read_chunked_body` must never panic.
 #![no_main]
 
 use leyline::fuzz::read_chunked_body;

@@ -1,5 +1,3 @@
-//! RST_STREAM flood trips ENHANCE_YOUR_CALM on a live driver.
-
 #[path = "h2_support/mod.rs"]
 mod support;
 
@@ -13,7 +11,6 @@ use leyline::h2::frame::FrameType;
 use support::*;
 use tokio::io::AsyncWriteExt;
 
-/// Config with a deliberately low `rst_stream_flood_threshold` so a handful of `RST_STREAM` frames is enough to trip the guard.
 fn flood_config() -> H2Config {
     H2Config {
         settings: vec![
@@ -64,7 +61,6 @@ fn get_req(path: &str) -> (PseudoHeaders, CowHeaders) {
     )
 }
 
-/// Build a raw RST_STREAM frame (9-byte header + 4-byte error code payload).
 fn encode_rst_stream(stream_id: u32, code: u32) -> Vec<u8> {
     let mut v = Vec::with_capacity(13);
     v.extend_from_slice(&[0x00, 0x00, 0x04, 0x03, 0x00]);

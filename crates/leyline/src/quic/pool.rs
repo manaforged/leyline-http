@@ -1,5 +1,3 @@
-//! Persistent, poolable HTTP/3 connection (driver task + cloneable handle).
-
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -19,80 +17,59 @@ use crate::quic::connection::{
 };
 use crate::tls::TlsTrustConfig;
 
-/// Max number of outstanding request commands the driver buffers before the handle's `send` applies back-pressure.
 const COMMAND_CHANNEL_CAPACITY: usize = 1024;
 
-/// Channel depth for streamed response-body chunks.
 const STREAM_RESP_CAPACITY: usize = 32;
 
-/// Channel depth for the driver-wide inbound request-body relay (chunks pumped from streaming request bodies, tagged by stream).
 const STREAM_REQ_CAPACITY: usize = 64;
 
-/// Per-stream in-flight request-body budget: the cap on streamed upload bytes handed to the driver but not yet written to the wire (queued in the relay channel plus `out_chunks`).
 const UPLOAD_WINDOW: usize = 256 * 1024;
 
-/// Max bytes the pump relays per chunk.
 const UPLOAD_CHUNK: usize = 16 * 1024;
 
-/// Re-poll interval while a streaming response is back-pressured.
 const STREAM_PUMP_INTERVAL: Duration = Duration::from_millis(2);
 
-/// Upper bound on how long a stream whose caller dropped its receiver lingers before the driver reaps it (see [`sweep_cancelled_streams`]).
 const CANCEL_SWEEP_INTERVAL: Duration = Duration::from_millis(100);
 
-/// A streaming request body: the same boxed `Stream` shape as [`crate::Body::Stream`].
 pub type H3RequestBodyStream =
     std::pin::Pin<Box<dyn futures_util::Stream<Item = std::io::Result<Bytes>> + Send + 'static>>;
 
-/// A chunk of an outbound streaming request body, relayed from a per-request pump task to the driver and tagged with the stream it belongs to.
 enum H3BodyChunk {
-    /// More body bytes to write to `stream_id`.
-    Chunk { stream_id: u64, data: Bytes },
-    /// The body source ended.
+    Chunk {
+        stream_id: u64,
+        data: Bytes,
+    },
     Eof {
         stream_id: u64,
         error: Option<std::io::Error>,
     },
 }
 
-/// A request fanned from an [`H3Client`] handle to the driver.
 enum H3Command {
     Request {
-        /// Pre-built HTTP/3 header list (pseudo-headers first), owned so it crosses the channel without borrowing the caller.
         headers: Vec<quiche::h3::Header>,
         body: Option<Bytes>,
-        /// `Some` for a streaming request body: the driver spawns a pump that feeds chunks in as they arrive and finishes the stream on EOF.
         body_stream: Option<H3RequestBodyStream>,
-        /// `Some` when the caller wants the response body delivered incrementally: the head (status + headers) resolves `resp_tx` as soon as HEADERS arrive and body chunks flow through this channel.
         stream_body_tx: Option<mpsc::Sender<std::io::Result<Bytes>>>,
-        /// `true` once the driver has already replayed this request after an H3_REQUEST_REJECTED; a second rejection is returned to the caller.
         retried: bool,
         resp_tx: oneshot::Sender<Result<H3Response, String>>,
     },
 }
 
-/// Response body shape returned by [`H3Client::send_request`].
 pub enum H3RespBody {
-    /// Fully buffered body (delivered on stream completion).
     Buffered(Vec<u8>),
-    /// Incremental body: the caller drains chunks from the receiver.
     Streaming(mpsc::Receiver<std::io::Result<Bytes>>),
 }
 
-/// Response head + body returned by [`H3Client::send_request`].
 pub struct H3ResponseParts {
     pub status: u16,
     pub headers: Vec<(String, String)>,
-    /// Trailer headers of a buffered response; empty for streaming responses.
     pub trailers: Vec<(String, String)>,
     pub body: H3RespBody,
 }
 
-/// Outcome of a failed [`H3Client::send_request`], distinguishing a request that provably never left the client from one that may already have reached the origin.
 pub enum H3SendError {
-    /// The request was never transmitted: the connection was already known dead, or the driver had exited before the request was even queued.
     NotSent(String),
-    /// The request may have reached the origin before the failure (a stream reset, mid-response connection loss, or driver teardown).
     Failed(String),
 }
 
@@ -103,13 +80,11 @@ impl H3SendError {
         }
     }
 
-    /// Only a provably-unsent request may be replayed.
     pub(crate) fn is_retryable(&self) -> bool {
         matches!(self, H3SendError::NotSent(_))
     }
 }
 
-/// Cloneable handle to a running HTTP/3 connection.
 #[derive(Clone)]
 pub struct H3Client {
     tx: mpsc::Sender<H3Command>,
@@ -117,7 +92,6 @@ pub struct H3Client {
 }
 
 impl H3Client {
-    /// Send a request over a multiplexed stream and await the response head.
     #[expect(
         clippy::too_many_arguments,
         reason = "flat per-request wire fields across one internal call path"
@@ -183,13 +157,11 @@ impl H3Client {
         }
     }
 
-    /// `true` once the driver has shut down (connection closed, IO error, or the last handle dropped).
     pub fn is_closed(&self) -> bool {
         self.closed.load(Ordering::Acquire)
     }
 }
 
-/// Rides along in the pool entry to keep the driver task discoverable.
 pub struct H3DriverTask(
     #[expect(
         dead_code,
@@ -283,7 +255,6 @@ fn parse_response_head(list: &[(String, String)]) -> Result<(u16, H3Headers), &'
         .ok_or("h3: response missing :status pseudo-header")
 }
 
-/// Per-request-stream bookkeeping owned by the driver.
 struct H3Stream {
     resp_tx: Option<oneshot::Sender<Result<H3Response, String>>>,
     response: H3ResponseState,
@@ -292,28 +263,17 @@ struct H3Stream {
     informational: Vec<Vec<(String, String)>>,
     trailers: Vec<(String, String)>,
     body: Vec<u8>,
-    /// Streaming response sink; `Some` ⇒ deliver the head on HEADERS and stream body chunks through this channel instead of buffering into `body`.
     stream_tx: Option<mpsc::Sender<std::io::Result<Bytes>>>,
-    /// Streaming: the head (status + headers) has been delivered on `resp_tx`.
     head_sent: bool,
-    /// Streaming: a chunk read from quiche that the bounded channel could not accept yet (back-pressure).
     stalled: Option<Bytes>,
-    /// Streaming: the peer's `Finished` arrived; close the body channel once the remaining buffered body has drained into it.
     peer_finished: bool,
-    /// Total response-body bytes seen, for the per-response cap — the buffered `body` Vec can't measure it in streaming mode, where chunks leave.
     body_bytes_seen: usize,
-    /// Outbound request-body chunks awaiting write (one for a buffered body; many, appended as they arrive, for a streaming body).
     out_chunks: VecDeque<Bytes>,
     out_offset: usize,
-    /// No more request-body chunks will be appended: a buffered body is complete at construction; a streaming body becomes complete when its source signals EOF.
     body_eof: bool,
-    /// The stream's send side has been finished (FIN delivered to quiche) — set when the empty/absent body finished on HEADERS, when the final body chunk flushed with FIN, or after an explicit empty-FIN write.
     fin_sent: bool,
-    /// Per-stream upload byte-credit for a streaming request body (`None` for a buffered body).
     upload_credit: Option<Arc<Semaphore>>,
-    /// Handle to this stream's request-body pump task (`None` unless streaming).
     pump: Option<AbortHandle>,
-    /// Request retained for one transparent retry when the server answers H3_REQUEST_REJECTED (its MAX_CONCURRENT_STREAMS budget was full at open).
     retry: Option<(Vec<quiche::h3::Header>, Option<Bytes>)>,
 }
 
@@ -326,7 +286,6 @@ impl Drop for H3Stream {
 }
 
 impl H3Stream {
-    /// Construct a per-request stream.
     fn new(
         resp_tx: oneshot::Sender<Result<H3Response, String>>,
         body: Option<Bytes>,
@@ -368,7 +327,6 @@ impl H3Stream {
         }
     }
 
-    /// Abort the request-body pump and discard any queued upload, marking the send side finished.
     fn cancel_upload(&mut self) {
         if let Some(pump) = self.pump.take() {
             pump.abort();
@@ -382,12 +340,10 @@ impl H3Stream {
         self.stream_tx.is_some()
     }
 
-    /// Request-body work remains: queued chunks to write, or a known-complete body whose terminating FIN hasn't been sent yet (the empty-FIN case).
     fn body_write_pending(&self) -> bool {
         !self.out_chunks.is_empty() || (self.body_eof && !self.fin_sent)
     }
 
-    /// The stream's send side is still open — we haven't finished uploading the request body.
     fn send_side_open(&self) -> bool {
         !self.fin_sent
     }
@@ -412,14 +368,12 @@ impl H3Stream {
         self.response.finish()
     }
 
-    /// Deliver a head/error response on the oneshot (buffered mode, or a streaming error before the head was sent).
     fn deliver(&mut self, result: Result<H3Response, String>) {
         if let Some(tx) = self.resp_tx.take() {
             drop(tx.send(result));
         }
     }
 
-    /// Streaming: deliver the head (status + headers, empty placeholder body) the first time HEADERS arrive.
     fn deliver_head(&mut self) {
         if let Some(tx) = self.resp_tx.take() {
             drop(tx.send(Ok(H3Response {
@@ -443,7 +397,6 @@ impl H3Stream {
     }
 }
 
-/// Establish a fresh pooled HTTP/3 connection to `(host, port)` and spawn its driver.
 pub(crate) async fn open_fresh_h3(
     h3_cfg: &H3Config,
     profile: &BrowserProfile,
@@ -471,11 +424,9 @@ pub(crate) async fn open_fresh_h3(
     Ok((H3Client { tx, closed }, H3DriverTask(task), tls))
 }
 
-/// The driver task: sole owner of the QUIC connection, cooperative multiplexing of request streams.
 struct H3Driver {
     established: EstablishedH3,
     command_rx: mpsc::Receiver<H3Command>,
-    /// Driver-wide relay for streaming request-body chunks.
     body_chunk_tx: mpsc::Sender<H3BodyChunk>,
     body_chunk_rx: mpsc::Receiver<H3BodyChunk>,
     closed: Arc<AtomicBool>,

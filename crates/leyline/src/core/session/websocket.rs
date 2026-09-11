@@ -4,7 +4,6 @@ use crate::core::WebSocketConfig;
 use crate::core::error::{Error, Kind, Result};
 
 impl Session {
-    /// Start a WebSocket connect.
     pub fn websocket(&self, url: &str) -> WebSocketBuilder {
         WebSocketBuilder {
             session: self.clone(),
@@ -66,7 +65,6 @@ impl Session {
     }
 }
 
-/// Builder returned by [`Session::websocket`].
 #[must_use = "builders are lazy: nothing happens until `.connect()` / await"]
 pub struct WebSocketBuilder {
     session: Session,
@@ -78,25 +76,21 @@ pub struct WebSocketBuilder {
 }
 
 impl WebSocketBuilder {
-    /// Replace WebSocket limits/preferences for this connection.
     pub fn config(mut self, config: WebSocketConfig) -> Self {
         self.config = config;
         self
     }
 
-    /// Force the HTTP/1.1 Upgrade path.
     pub fn http1(mut self) -> Self {
         self.force_http1 = true;
         self
     }
 
-    /// Override the session proxy for this WebSocket connection.
     pub fn proxy(mut self, proxy_url: impl Into<String>) -> Self {
         self.proxy = Some(proxy_url.into());
         self
     }
 
-    /// Set handshake headers. Same-name values replace, like [`crate::RequestBuilder::headers`].
     pub fn headers<I, P>(mut self, headers: I) -> Self
     where
         I: IntoIterator<Item = P>,
@@ -109,13 +103,11 @@ impl WebSocketBuilder {
         self
     }
 
-    /// Set one handshake header (see [`headers`](Self::headers)).
     pub fn header(mut self, name: &str, value: &str) -> Self {
         set_header(&mut self.headers, name.to_string(), value.to_string());
         self
     }
 
-    /// Connect.
     pub async fn connect(self) -> Result<crate::core::websocket::WsConnection> {
         self.session
             .websocket_with_options(
@@ -138,7 +130,6 @@ impl std::future::IntoFuture for WebSocketBuilder {
     }
 }
 
-/// Build a WebSocket `Origin` header value from a `wss://` URL by mapping the scheme to `https`.
 fn ws_origin(url: &str) -> Result<String> {
     let parsed = url::Url::parse(url)?;
     let scheme = match parsed.scheme() {

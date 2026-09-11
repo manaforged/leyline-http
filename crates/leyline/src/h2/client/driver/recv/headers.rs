@@ -1,12 +1,9 @@
-//! HEADERS reassembly, pseudo-header validation, and the response and trailer paths.
-
 use bytes::Bytes;
 
 use crate::header_str::HeaderStr;
 
 use super::*;
 
-/// Validate the pseudo-header block, collect the regular headers, and return the status.
 fn pseudo(actor: &mut StreamActor, decoded: Vec<(Bytes, Bytes)>) -> Option<u16> {
     let mut status = None;
     let mut saw_regular = false;
@@ -39,7 +36,6 @@ fn pseudo(actor: &mut StreamActor, decoded: Vec<(Bytes, Bytes)>) -> Option<u16> 
     status.filter(|status| !bad_status && *status != 101)
 }
 
-/// Size the buffered body once from the declared `content-length`, so a multi-frame response never regrows its buffer.
 fn reserve_body(actor: &mut StreamActor, cap: usize) {
     if actor.drop_body || matches!(actor.response_tx, Some(ResponseSink::StreamingEx { .. })) {
         return;
@@ -77,7 +73,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         }
     }
 
-    /// Join the HEADERS fragment with its CONTINUATION frames under the configured size and time bounds.
     async fn reassemble(&mut self, h: &HeadersFrame) -> Result<Bytes, H2Error> {
         if h.end_headers {
             return Ok(h.fragment.clone());
@@ -130,7 +125,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         Ok(Bytes::from(assembled))
     }
 
-    /// Accept the response head: validate it, drop an informational one, otherwise publish it.
     async fn respond(
         &mut self,
         h: &HeadersFrame,
@@ -181,7 +175,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         Ok(())
     }
 
-    /// Accept a trailer block: it must end the stream and carry no pseudo-headers.
     fn on_trailers(
         &mut self,
         h: &HeadersFrame,

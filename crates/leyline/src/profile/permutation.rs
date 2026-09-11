@@ -1,17 +1,11 @@
-//! Validation for a profile's fixed ClientHello extension order.
-
 use crate::profile::TlsProfile;
 
-/// `pre_shared_key`.
 const PRE_SHARED_KEY: u16 = 0x0029;
 
-/// ALPS, new (standardized) codepoint — matches the fork's `TLSEXT_TYPE_application_settings` (17613, 0x44cd).
 const ALPS_NEW: u16 = 0x44cd;
 
-/// ALPS, old draft codepoint — the fork's `TLSEXT_TYPE_application_settings_old` (17513, 0x4469).
 const ALPS_OLD: u16 = 0x4469;
 
-/// The extension type IDs this profile's `[tls]` block causes BoringSSL to advertise, each paired with its name for error messages.
 fn advertised_extensions(tls: &TlsProfile) -> Vec<(u16, &'static str)> {
     let alps = if tls.alps_new_codepoint {
         ALPS_NEW
@@ -56,7 +50,6 @@ fn advertised_extensions(tls: &TlsProfile) -> Vec<(u16, &'static str)> {
     .collect()
 }
 
-/// Extension type IDs this profile puts in a fresh ClientHello, in the declared order when the profile fixes one.
 pub(crate) fn extension_ids(tls: &TlsProfile) -> Vec<u16> {
     let mut ids = match tls.extension_permutation.as_deref() {
         Some(order) => order.to_vec(),
@@ -71,7 +64,6 @@ pub(crate) fn extension_ids(tls: &TlsProfile) -> Vec<u16> {
     ids
 }
 
-/// Check a profile's declared extension order against the extensions it actually advertises.
 pub(super) fn validate(tls: &TlsProfile) -> Result<(), String> {
     let Some(order) = tls.extension_permutation.as_deref() else {
         return Ok(());

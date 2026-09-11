@@ -1,7 +1,5 @@
-//! Split from the parent pool module.
 use super::*;
 
-/// Read and parse the response head only, deciding the body framing but leaving the body on the wire.
 pub(super) async fn read_h1_head<S>(stream: &mut S, method: &str) -> Result<H1Head, H1PooledError>
 where
     S: AsyncRead + Unpin + ?Sized,
@@ -41,7 +39,6 @@ where
         });
     }
 }
-/// Returns `(status, headers, body, http_minor_version)`.
 pub(super) async fn read_h1_response<S>(
     stream: &mut S,
     method: &str,
@@ -111,7 +108,6 @@ where
         buf.extend_from_slice(&tmp[..n]);
     }
 }
-/// Parse an HTTP/1.1 response head into `(status, headers, minor version)`.
 pub fn parse_h1_head(head: &str) -> Result<ParsedHead, H1PooledError> {
     let mut lines = head.split("\r\n");
     let status_line = lines
@@ -209,7 +205,6 @@ where
         }
     }
 }
-/// Decode a `Transfer-Encoding: chunked` body from `stream`, starting with the bytes already in `buf`.
 pub async fn read_chunked_body<S>(
     stream: &mut S,
     mut buf: Vec<u8>,

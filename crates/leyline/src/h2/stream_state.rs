@@ -1,103 +1,58 @@
-//! Per-stream state machine for an HTTP/2 client (RFC 9113 §5.1).
-
 use crate::h2::error::ErrorCode;
 
-/// Why a stream ended up in the `Closed` state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClosedReason {
-    /// Stream closed cleanly because both sides sent END_STREAM.
     EndStream,
-    /// The client sent RST_STREAM to cancel the stream.
     RstLocal(ErrorCode),
-    /// Peer sent RST_STREAM to cancel the stream.
     RstRemote(ErrorCode),
-    /// Stream ended because of a protocol/state-machine violation.
     Error,
 }
 
-/// RFC 9113 §5.1 stream state, from the client perspective.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StreamState {
-    /// Stream id has not been used yet — no frames sent or received.
     Idle,
-    /// Both endpoints may send frames freely.
     Open,
-    /// The client sent END_STREAM; the server is still sending.
     HalfClosedLocal,
-    /// The server sent END_STREAM; the client is still sending.
     HalfClosedRemote,
-    /// Stream is finished; no further frames are valid.
-    Closed {
-        /// The reason this stream terminated.
-        reason: ClosedReason,
-    },
+    Closed { reason: ClosedReason },
 }
 
-/// Events that drive stream state transitions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StreamEvent {
-    /// The client sent a HEADERS frame (request headers, not trailers).
-    SendHeaders {
-        /// Whether the HEADERS frame carried END_STREAM.
-        end_stream: bool,
-    },
-    /// The client sent a DATA frame.
-    SendData {
-        /// Whether the DATA frame carried END_STREAM.
-        end_stream: bool,
-    },
-    /// The client sent request trailers (a HEADERS frame after DATA, with END_STREAM).
+    SendHeaders { end_stream: bool },
+    SendData { end_stream: bool },
     SendTrailers,
-    /// The client sent a RST_STREAM frame with the given error code.
     SendRstStream(ErrorCode),
-    /// Received a HEADERS frame (response headers).
-    RecvHeaders {
-        /// Whether the HEADERS frame carried END_STREAM.
-        end_stream: bool,
-    },
-    /// Received a DATA frame.
-    RecvData {
-        /// Whether the DATA frame carried END_STREAM.
-        end_stream: bool,
-    },
-    /// Received response trailers (a HEADERS frame after DATA, implicitly ending the stream).
+    RecvHeaders { end_stream: bool },
+    RecvData { end_stream: bool },
     RecvTrailers,
-    /// Received a RST_STREAM frame with the given error code.
     RecvRstStream(ErrorCode),
 }
 
-/// An illegal state transition was attempted.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum StreamStateError {
-    /// The state machine refused the event.
     #[error("invalid transition: cannot apply {event} in state {from}")]
     InvalidTransition {
-        /// Human-readable name of the source state.
         from: &'static str,
-        /// Human-readable name of the event.
         event: &'static str,
     },
 }
 
 impl StreamState {
-    /// Apply an event to this stream, mutating in place on success.
     pub fn transition(&mut self, event: StreamEvent) -> Result<(), StreamStateError> {
         let next = next_state(*self, event)?;
         *self = next;
         Ok(())
     }
 
-    /// Return true iff the stream is in `Closed` state.
     pub fn is_closed(&self) -> bool {
         matches!(self, StreamState::Closed { .. })
     }
 
-    /// Return true iff we (the client) are still allowed to send DATA on this stream.
     pub fn can_send_data(&self) -> bool {
         matches!(self, StreamState::Open | StreamState::HalfClosedRemote)
     }
 
-    /// Return true iff we (the client) are still allowed to receive DATA from the peer.
     pub fn can_recv_data(&self) -> bool {
         matches!(self, StreamState::Open | StreamState::HalfClosedLocal)
     }

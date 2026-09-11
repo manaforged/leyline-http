@@ -1,8 +1,3 @@
-//! Static profile lookup cost — `Browser::Chrome147.profile()`.
-//!
-//! The registry is built once behind a `LazyLock`, so all iterations after
-//! the first are pure HashMap dispatch. The first iteration pays the
-//! registry-build cost — criterion's warm-up handles that automatically.
 
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use leyline::Browser;
@@ -18,8 +13,6 @@ fn bench_profile_lookup_chrome147(c: &mut Criterion) {
 }
 
 fn bench_profile_lookup_all(c: &mut Criterion) {
-    // Walk every browser variant — amortises HashMap dispatch across the
-    // full registry to catch pathological lookups.
     c.bench_function("profile::lookup_all_browsers", |b| {
         b.iter(|| {
             for br in ALL_BROWSERS {

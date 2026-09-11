@@ -1,5 +1,3 @@
-//! Shared BoringSSL `SslContextBuilder` factory for fingerprint-correct TLS handshakes.
-
 #[cfg(any(
     feature = "compression-gzip",
     feature = "compression-brotli",
@@ -17,19 +15,14 @@ use crate::tls::trust::{TlsTrustConfig, wire_configured_trust};
 
 mod phase;
 
-/// Minimum TLS version pinned on the context.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[non_exhaustive]
 pub enum TlsMinVersion {
-    /// Allow TLS 1.0+ (CFNetwork iOS advertises 1.0/1.1 in supported_versions).
     Tls10,
-    /// Allow TLS 1.2+.
     Tls12,
-    /// Require TLS 1.3.
     Tls13,
 }
 
-/// Build an `SslContextBuilder` preloaded with every TLS-level knob from the given profile.
 pub fn build_ssl_context(
     profile: &BrowserProfile,
     min_version: TlsMinVersion,
@@ -39,7 +32,6 @@ pub fn build_ssl_context(
     Ok(builder)
 }
 
-/// Apply every profile-driven TLS knob to an already-constructed `SslContextBuilder`.
 pub(crate) fn apply_profile(
     builder: &mut SslContextBuilder,
     profile: &BrowserProfile,
@@ -48,7 +40,6 @@ pub(crate) fn apply_profile(
     apply_profile_with_trust(builder, profile, min_version, &TlsTrustConfig::default())
 }
 
-/// Apply every profile-driven TLS knob with explicit trust settings.
 pub(crate) fn apply_profile_with_trust(
     builder: &mut SslContextBuilder,
     profile: &BrowserProfile,
@@ -88,7 +79,6 @@ fn tls13_cipher_ids(ciphers: &[String]) -> Result<Vec<u16>, TlsError> {
         .collect()
 }
 
-/// Parse a profile's `min_tls_version`; an unknown value is a profile error, not a silent default.
 fn profile_min_version(declared: &Option<String>) -> Result<Option<TlsMinVersion>, TlsError> {
     match declared.as_deref() {
         None => Ok(None),
@@ -101,7 +91,6 @@ fn profile_min_version(declared: &Option<String>) -> Result<Option<TlsMinVersion
     }
 }
 
-/// Map profile curve names to BoringSSL curve names.
 fn boring_curve_name(name: &str) -> &str {
     match name {
         "X25519_MLKEM768" => "X25519MLKEM768",
@@ -114,7 +103,6 @@ fn boring_curve_name(name: &str) -> &str {
     }
 }
 
-/// Error for a certificate-compression codepoint whose cargo feature is off.
 #[cfg(not(all(
     feature = "compression-brotli",
     feature = "compression-zstd",
@@ -126,7 +114,6 @@ fn missing(algo: &str, feature: &str) -> TlsError {
     ))
 }
 
-/// Upper bound on a decompressed peer certificate chain.
 #[cfg(any(
     feature = "compression-gzip",
     feature = "compression-brotli",
@@ -135,7 +122,6 @@ fn missing(algo: &str, feature: &str) -> TlsError {
 ))]
 const MAX_CERT_DECOMPRESSED_BYTES: usize = 1024 * 1024;
 
-/// Decompress a certificate blob with a hard output cap.
 #[cfg(any(
     feature = "compression-gzip",
     feature = "compression-brotli",
@@ -160,7 +146,6 @@ fn read_limited_cert<R: std::io::Read>(mut decoder: R) -> std::io::Result<Vec<u8
     }
 }
 
-/// Brotli cert decompression (advertises `compress_certificate` extension).
 #[cfg(feature = "compression-brotli")]
 #[derive(Debug)]
 struct BrotliDecompressor;
@@ -180,7 +165,6 @@ impl CertificateCompressor for BrotliDecompressor {
     }
 }
 
-/// zlib (RFC 1950) cert decompression — advertises codepoint 1, which Firefox sends first in its `compress_certificate` extension.
 #[cfg(any(feature = "compression-gzip", feature = "compression-deflate"))]
 #[derive(Debug)]
 struct ZlibDecompressor;
@@ -200,7 +184,6 @@ impl CertificateCompressor for ZlibDecompressor {
     }
 }
 
-/// zstd (RFC 8878) cert decompression — advertises codepoint 3.
 #[cfg(feature = "compression-zstd")]
 #[derive(Debug)]
 struct ZstdDecompressor;

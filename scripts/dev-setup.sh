@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-# Fresh-developer setup check for Leyline.
-#
-# This intentionally runs a small, offline build instead of the full release
-# gate. Use scripts/verify.sh once the local toolchain is warm.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -51,9 +47,6 @@ if command -v cmd.exe >/dev/null 2>&1 || command -v powershell.exe >/dev/null 2>
     uname_s="Windows"
 fi
 
-# Map host OS/arch to the Rust target triple the prebuilt shim is keyed on,
-# then check whether crates/leyline-bssl-sys ships a prebuilt for it. If it
-# does, the in-workspace build links it directly — no CMake/Perl/libclang/Go.
 uname_m="$(uname -m 2>/dev/null || echo unknown)"
 case "$uname_m" in
     arm64|aarch64) arch="aarch64" ;;

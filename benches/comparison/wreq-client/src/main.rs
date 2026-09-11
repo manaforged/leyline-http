@@ -1,7 +1,3 @@
-//! wreq Chrome-149 comparison client: HTTP/2 over TLS, cert verification off.
-//!
-//! Args: <url> [warm_n|print] [cold_n] [conc_n] [conc_c]. See leyline-client for
-//! the phase definitions. `print` mode does one GET and prints the body.
 use std::time::Instant;
 
 use wreq::Client;
@@ -11,7 +7,6 @@ fn build() -> Client {
     let mut b = Client::builder()
         .emulation(Emulation::Chrome149)
         .tls_cert_verification(false);
-    // Optional egress proxy, mirroring leyline-client (`PROXY=http://…`).
     if let Ok(p) = std::env::var("PROXY") {
         if !p.is_empty() {
             b = b.proxy(wreq::Proxy::all(p).expect("proxy url"));
@@ -20,8 +15,6 @@ fn build() -> Client {
     b.build().expect("wreq client builds")
 }
 
-/// 64-bit FNV-1a body fingerprint — identical to leyline-client so the
-/// equivalence gate compares like for like.
 fn fnv1a(bytes: &[u8]) -> u64 {
     let mut h = 0xcbf2_9ce4_8422_2325u64;
     for &b in bytes {

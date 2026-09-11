@@ -1,21 +1,3 @@
-//! End-to-end multiplexing throughput against an in-process mock HTTP/2 peer.
-//!
-//! The mock peer is a tiny task that:
-//!   * reads the HTTP/2 preface,
-//!   * exchanges SETTINGS and ACKs them,
-//!   * for every HEADERS frame received, writes back a minimal 200 response
-//!     (HEADERS + DATA with END_STREAM, ~10 bytes body).
-//!
-//! No flow-control stalls, no head-of-line contention — the mock answers in
-//! the order HEADERS arrive, so we're measuring pure driver/codec cost.
-//!
-//! Three scenarios:
-//!   * `multiplex::serial_1k_requests` — 1000 back-to-back requests on one
-//!     `H2Client`. Total wall-time → req/s.
-//!   * `multiplex::concurrent_100_inflight` — 100 concurrent `send_request`
-//!     futures. Should be ≥ 2× the serial throughput if multiplexing works.
-//!   * `multiplex::handle_clone` — cost of cloning an `H2Client` handle
-//!     (the pooled-checkout hot path).
 
 use std::time::Duration;
 
@@ -71,17 +53,13 @@ async fn read_exact<S: AsyncRead + Unpin>(s: &mut S, buf: &mut [u8]) -> std::io:
     s.read_exact(buf).await.map(|_| ())
 }
 
-/// Minimal mock H2 server. Reads preface + SETTINGS, handshakes, then
-/// answers every HEADERS frame with an empty-body 200 response.
 async fn run_mock_server(mut io: DuplexStream) {
-    // Preface.
     let mut preface = [0u8; 24];
     if read_exact(&mut io, &mut preface).await.is_err() {
         return;
     }
     assert_eq!(&preface[..], MOCK_PREFACE);
 
-    // Client SETTINGS.
     let mut hdr_buf = [0u8; FRAME_HEADER_LEN];
     if read_exact(&mut io, &mut hdr_buf).await.is_err() {
         return;
@@ -93,7 +71,6 @@ async fn run_mock_server(mut io: DuplexStream) {
         let _ = read_exact(&mut io, &mut body).await;
     }
 
-    // Server SETTINGS (empty, default).
     let mut out = BytesMut::new();
     SettingsFrame {
         ack: false,
@@ -103,19 +80,16 @@ async fn run_mock_server(mut io: DuplexStream) {
     if io.write_all(&out).await.is_err() {
         return;
     }
-    // Server ACK of client SETTINGS.
     out.clear();
     SettingsFrame::ack().encode(&mut out);
     if io.write_all(&out).await.is_err() {
         return;
     }
 
-    // Client SETTINGS ACK.
     if read_exact(&mut io, &mut hdr_buf).await.is_err() {
         return;
     }
 
-    // Main loop: read frames, for every HEADERS emit a response.
     loop {
         let mut hb = [0u8; FRAME_HEADER_LEN];
         if read_exact(&mut io, &mut hb).await.is_err() {
@@ -154,8 +128,6 @@ async fn run_mock_server(mut io: DuplexStream) {
                 return;
             }
         }
-        // Drop other frames silently; the client's flow-control & SETTINGS
-        // are adequately handled just by our static window.
     }
 }
 
@@ -178,8 +150,6 @@ fn req() -> (
     )
 }
 
-/// Build a connected (H2Client, server task, _driver) triple. Must be
-/// called inside a tokio runtime context.
 async fn build_client() -> (
     H2Client,
     tokio::task::JoinHandle<()>,
@@ -266,8 +236,6 @@ fn bench_concurrent_100(c: &mut Criterion) {
 
 fn bench_handle_clone(c: &mut Criterion) {
     let rt = Runtime::new().expect("tokio runtime");
-    // Build one live handle and clone it in a tight loop. This models
-    // the pool's checkout-on-hit cost (Arc<...> + Sender clone).
     let (handle, server, _driver) = rt.block_on(build_client());
     c.bench_function("multiplex::handle_clone", |b| {
         b.iter(|| {

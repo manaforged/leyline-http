@@ -1,4 +1,3 @@
-//! Integration test: exercise the public [`FingerprintConnector`] builder surface around the new [`Resolver`] and [`HappyEyeballsConfig`] knobs.
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -11,7 +10,6 @@ use leyline::tls::{
 };
 use leyline::{Browser, Session, TlsError, TlsTrustConfig};
 
-/// Mock resolver that returns a fixed list.
 struct StaticResolver(Vec<SocketAddr>);
 
 impl Resolver for StaticResolver {
@@ -21,7 +19,6 @@ impl Resolver for StaticResolver {
     }
 }
 
-/// Resolver that always errors.
 struct FailingResolver;
 
 impl Resolver for FailingResolver {

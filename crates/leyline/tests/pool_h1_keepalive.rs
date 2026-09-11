@@ -1,4 +1,3 @@
-//! Integration tests for the HTTP/1.1 keep-alive pool.
 #![expect(
     clippy::unwrap_used,
     reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
@@ -13,7 +12,6 @@ use leyline::tls::FingerprintConnector;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
-/// Spin up a bare `FingerprintConnector` so we can exercise the plaintext-HTTP path without standing up a full `Session`.
 fn bare_connector() -> FingerprintConnector {
     let registry = ProfileRegistry::builtin();
     let profile = registry
@@ -23,7 +21,6 @@ fn bare_connector() -> FingerprintConnector {
         .expect("build fingerprint connector")
 }
 
-/// A tiny mock server that accepts TCP connections, reads one request per connection, and sends a canned response.
 async fn spawn_mock_server<F>(
     script: F,
 ) -> (
@@ -80,7 +77,6 @@ where
     (addr, accepts, handle)
 }
 
-/// Shared setup: pool, connector, URL.
 fn setup() -> (Arc<Pool>, FingerprintConnector) {
     (Arc::new(Pool::new()), bare_connector())
 }
@@ -271,7 +267,6 @@ async fn h1_pool_recovers_when_server_drops_connection() {
     );
 }
 
-/// A mock server that delays each response and tracks the PEAK number of connections open at once — so a test can assert the per-host connection cap actually bounds concurrency.
 async fn spawn_peak_tracking_server(
     delay: Duration,
 ) -> (
@@ -334,7 +329,6 @@ async fn spawn_peak_tracking_server(
     (addr, accepts, peak, handle)
 }
 
-/// The per-host H1 cap must bound the number of connections open at once, and the warm connections must be reused for the queued overflow rather than each request opening (and discarding) a fresh socket.
 #[tokio::test]
 async fn h1_cap_bounds_concurrency_and_reuses_warm_connections() {
     const CAP: usize = 3;
@@ -396,7 +390,6 @@ async fn h1_cap_bounds_concurrency_and_reuses_warm_connections() {
     );
 }
 
-/// A request cancelled mid-exchange (its future dropped) must release its per-host permit, or a later request to the same host deadlocks.
 #[tokio::test]
 async fn h1_cancelled_request_releases_permit() {
     let (addr, _accepts, _peak, _server) =
@@ -458,7 +451,6 @@ async fn h1_cancelled_request_releases_permit() {
     assert_eq!(resp.status, 200);
 }
 
-/// A POST on a warm pooled socket whose server answers with a truncated body and closes must surface the error — never replay on a second connection.
 #[tokio::test]
 async fn post_is_not_replayed_after_mid_response_close() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

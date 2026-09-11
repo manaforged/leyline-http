@@ -1,5 +1,3 @@
-//! Cookie jar — Chrome-accurate storage, retrieval, ordering, and persistence.
-
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::SystemTime;
@@ -10,25 +8,18 @@ use url::Url;
 use crate::cookie::parse;
 use crate::cookie::record::Cookie;
 
-/// Chrome's per-domain cookie limit.
 const MAX_COOKIES_PER_DOMAIN: usize = 180;
-/// How many to evict when the per-domain limit is hit.
 const EVICT_PER_DOMAIN: usize = 30;
-/// Chrome's global cookie limit.
 const MAX_COOKIES_GLOBAL: usize = 3300;
-/// How many to evict when the global limit is hit.
 const EVICT_GLOBAL: usize = 300;
 
-/// Thread-safe cookie jar with Chrome-accurate behavior.
 #[derive(Clone)]
 pub struct Jar {
     inner: Arc<Mutex<JarInner>>,
 }
 
 struct JarInner {
-    /// All cookies, keyed by registrable domain.
     cookies: HashMap<String, Vec<Cookie>>,
-    /// Total cookie count across all domains.
     total: usize,
 }
 
@@ -37,7 +28,6 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 impl Jar {
-    /// Create an empty cookie jar.
     pub fn new() -> Self {
         Self {
             inner: Arc::new(Mutex::new(JarInner {
@@ -47,7 +37,6 @@ impl Jar {
         }
     }
 
-    /// Fork an independent jar holding a deep copy of every cookie.
     pub fn deep_clone(&self) -> Self {
         let cookies = {
             let jar = lock(&self.inner);
@@ -59,7 +48,6 @@ impl Jar {
         }
     }
 
-    /// Store a Set-Cookie header from a response.
     pub fn store_set_cookie(&self, header: &str, url: &Url) {
         let mut cookie = match parse::parse_set_cookie(header, url) {
             Some(c) => c,
@@ -120,19 +108,16 @@ impl Jar {
         }
     }
 
-    /// Store multiple Set-Cookie headers from a response.
     pub fn store_response_cookies(&self, headers: &[&str], url: &Url) {
         for header in headers {
             self.store_set_cookie(header, url);
         }
     }
 
-    /// Build the Cookie header value for a request.
     pub fn cookie_header(&self, url: &Url) -> Option<String> {
         self.cookie_header_for(url, false, true)
     }
 
-    /// Build the Cookie header, enforcing SameSite for the request's cross-site context.
     pub(crate) fn cookie_header_for(
         &self,
         url: &Url,
@@ -188,7 +173,6 @@ impl Jar {
         Some(header)
     }
 
-    /// Look up a cookie value by name without a URL filter.
     pub fn get_named(&self, name: &str) -> Option<String> {
         let jar = lock(&self.inner);
         for entries in jar.cookies.values() {
@@ -201,12 +185,10 @@ impl Jar {
         None
     }
 
-    /// True if any non-expired cookie with `name` exists in the jar.
     pub fn contains_named(&self, name: &str) -> bool {
         self.get_named(name).is_some()
     }
 
-    /// Update the value of every cookie matching `name`, across every domain and path the jar holds.
     pub fn set_named(&self, name: &str, value: &str) -> bool {
         let mut jar = lock(&self.inner);
         let now = SystemTime::now();
@@ -223,7 +205,6 @@ impl Jar {
         updated
     }
 
-    /// Upsert a cookie on a specific domain.
     pub fn set_named_on(&self, domain: &str, name: &str, value: &str) {
         let mut jar = lock(&self.inner);
         let key = domain.to_lowercase();
@@ -256,7 +237,6 @@ impl Jar {
         jar.total += 1;
     }
 
-    /// Remove the first cookie matching `name` (any domain).
     pub fn remove_named(&self, name: &str) -> bool {
         let mut jar = lock(&self.inner);
         for entries in jar.cookies.values_mut() {
@@ -269,7 +249,6 @@ impl Jar {
         false
     }
 
-    /// Remove every cookie matching `name` across every domain.
     pub fn remove_all_named(&self, name: &str) -> usize {
         let mut jar = lock(&self.inner);
         let mut removed = 0;
@@ -282,7 +261,6 @@ impl Jar {
         removed
     }
 
-    /// Remove cookies named `name` whose domain is `host` itself or a parent suffix of it (e.g. removing for `store.example.com` also clears a stale entry mis-hosted on `example.com`), while preserving same-named cookies on sibling hosts like `www.example.com`.
     pub fn remove_named_for_host(&self, host: &str, name: &str) -> usize {
         let mut jar = lock(&self.inner);
         let host = host.to_lowercase();
@@ -298,7 +276,6 @@ impl Jar {
         removed
     }
 
-    /// Snapshot every cookie in the jar, sorted by domain then name.
     pub fn all_cookies(&self) -> Vec<Cookie> {
         let jar = lock(&self.inner);
         let mut out: Vec<Cookie> = jar.cookies.values().flatten().cloned().collect();
@@ -306,7 +283,6 @@ impl Jar {
         out
     }
 
-    /// Merge cookies from another jar into this one.
     pub fn merge(&self, other: &Jar) {
         let snapshots: Vec<Cookie> = {
             let other_inner = lock(&other.inner);
@@ -343,7 +319,6 @@ impl Jar {
         }
     }
 
-    /// Get a single cookie value by name for a URL.
     pub fn get_cookie(&self, url: &str, name: &str) -> Option<String> {
         let url = Url::parse(url).ok()?;
         let domain = url.host_str().unwrap_or("");
@@ -364,7 +339,6 @@ impl Jar {
         None
     }
 
-    /// Set a cookie manually (convenience for testing/setup).
     pub fn set_cookie(&self, url: &str, name: &str, value: &str) {
         let parsed_url = match Url::parse(url) {
             Ok(u) => u,
@@ -374,7 +348,6 @@ impl Jar {
         self.store_set_cookie(&header, &parsed_url);
     }
 
-    /// Load cookies from a Cookie header string (e.g., "a=1; b=2").
     pub fn load_cookies(&self, cookie_str: &str, raw_url: &str) {
         let url = match Url::parse(raw_url) {
             Ok(u) => u,
@@ -391,7 +364,6 @@ impl Jar {
         }
     }
 
-    /// Export cookies for a URL as a Cookie header string.
     pub fn export_cookies(&self, raw_url: &str) -> String {
         let url = match Url::parse(raw_url) {
             Ok(u) => u,
@@ -400,19 +372,16 @@ impl Jar {
         self.cookie_header(&url).unwrap_or_default()
     }
 
-    /// Remove every cookie from the jar.
     pub fn clear(&self) {
         let mut jar = lock(&self.inner);
         jar.cookies.clear();
         jar.total = 0;
     }
 
-    /// True if the jar holds no cookies.
     pub fn is_empty(&self) -> bool {
         lock(&self.inner).total == 0
     }
 
-    /// Number of cookies currently in the jar.
     pub fn len(&self) -> usize {
         lock(&self.inner).total
     }
@@ -468,13 +437,11 @@ impl<'de> Deserialize<'de> for Jar {
     }
 }
 
-/// Evict the N least-recently-accessed cookies from a domain's list.
 fn evict_lru(cookies: &mut Vec<Cookie>, count: usize) {
     cookies.sort_by_key(|a| a.last_access);
     cookies.drain(..count.min(cookies.len()));
 }
 
-/// Evict N cookies globally, targeting least-recently-accessed.
 fn evict_global(all: &mut HashMap<String, Vec<Cookie>>, count: usize) {
     let mut all_cookies: Vec<(String, usize, SystemTime)> = Vec::new();
     for (domain, entries) in all.iter() {

@@ -1,11 +1,8 @@
-//! Platform-specific TCP socket options (MSS, DF bit, window scale).
-
 use socket2::Socket;
 
 use crate::tcp::{TcpProfile, log_once};
 
 #[cfg(unix)]
-/// See module-level SAFETY.
 unsafe fn set_int_opt(
     fd: libc::c_int,
     level: libc::c_int,

@@ -1,5 +1,3 @@
-//! Pure state-machine tests for `StreamState`.
-
 #![expect(
     clippy::unwrap_used,
     reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"

@@ -1,5 +1,3 @@
-//! Live anchors for platform TLS trust against public certificate chains.
-
 #[cfg(target_os = "macos")]
 #[tokio::test]
 #[ignore = "live: needs network and current public PKI"]

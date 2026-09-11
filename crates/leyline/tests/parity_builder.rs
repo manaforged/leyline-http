@@ -1,4 +1,3 @@
-//! Non-network smoke coverage for the wreq-parity builder surface.
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
@@ -105,7 +104,6 @@ fn default_session_timeout_is_five_minutes() {
     assert_eq!(session.default_timeout(), Duration::from_secs(300));
 }
 
-/// The request builder must be owned + `Send` so it can be built up front and moved into a `tokio::spawn` / stored in a struct — the common fan-out/worker pattern.
 #[test]
 fn request_builder_is_send_and_movable_into_spawn() {
     fn assert_send<T: Send>(_: &T) {}

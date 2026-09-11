@@ -1,4 +1,3 @@
-//! Proxy CONNECT response fuzz: arbitrary proxy replies → `validate_connect_response` must never panic.
 #![no_main]
 
 use leyline::fuzz::validate_connect_response;

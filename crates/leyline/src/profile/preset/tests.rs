@@ -21,7 +21,6 @@ fn value<'a>(h: &'a [HeaderPair], name: &str) -> Option<&'a str> {
     h.iter().find(|(n, _)| n == name).map(|(_, v)| v.as_ref())
 }
 
-/// A Firefox identity must ship NO `sec-ch-ua*` Client Hints (Firefox emits none), the Gecko document `Accept`, and `te: trailers` + an HTTP `priority` hint; a Chrome identity keeps the Client Hints and sends neither.
 #[test]
 fn firefox_reshapes_client_hints_accept_priority_and_te() {
     let chrome = Preset::Navigate.build_headers(&ctx(false));
@@ -50,7 +49,6 @@ fn firefox_reshapes_client_hints_accept_priority_and_te() {
     assert_eq!(value(&ff_xhr, "te"), Some("trailers"));
 }
 
-/// Chrome 150 fetch/XHR (capture-verified against a real Chrome 150 binary): sends the H2 `priority` header (`u=1, i`) AND `accept-language` (en-US,en;q=0.9).
 #[test]
 fn chrome_xhr_sends_priority_and_accept_language() {
     let xhr = Preset::Xhr.build_headers(&ctx(false));

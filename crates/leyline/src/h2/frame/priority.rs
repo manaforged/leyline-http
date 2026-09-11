@@ -1,5 +1,3 @@
-//! PRIORITY frame (RFC 9113 Section 6.3).
-
 use bytes::Bytes;
 
 use super::headers::StreamDependency;
@@ -7,17 +5,13 @@ use super::{FrameHeader, be_u32};
 use crate::h2::H2Error;
 use crate::h2::error::ErrorCode;
 
-/// PRIORITY frame — stream dependency (deprecated, parse only).
 #[derive(Debug)]
 pub struct PriorityFrame {
-    /// Stream whose priority is being advised.
     pub stream_id: u32,
-    /// Dependency declaration carried by the frame.
     pub dependency: StreamDependency,
 }
 
 impl PriorityFrame {
-    /// Parse from header + payload.
     pub fn parse(header: FrameHeader, payload: Bytes) -> Result<Self, H2Error> {
         if header.stream_id == 0 {
             return Err(H2Error::Connection {

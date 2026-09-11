@@ -1,5 +1,3 @@
-//! Tiny mock HTTP/2 server helpers for driver-focused integration tests.
-
 #![allow(dead_code)]
 
 use bytes::BytesMut;
@@ -18,7 +16,6 @@ pub async fn read_preface<S: AsyncRead + Unpin>(s: &mut S) {
     assert_eq!(&buf[..], PREFACE, "bad preface bytes");
 }
 
-/// Read a single frame header + payload from the wire.
 pub async fn read_frame<S: AsyncRead + Unpin>(s: &mut S) -> (FrameHeader, Vec<u8>) {
     let mut hdr_buf = [0u8; FRAME_HEADER_LEN];
     s.read_exact(&mut hdr_buf).await.expect("frame header read");
@@ -32,7 +29,6 @@ pub async fn read_frame<S: AsyncRead + Unpin>(s: &mut S) -> (FrameHeader, Vec<u8
     (hdr, payload)
 }
 
-/// Write an empty SETTINGS frame (used by the mock server to advertise defaults) and its ACK to the given settings.
 pub async fn write_server_settings<S: AsyncWrite + Unpin>(s: &mut S) {
     let frame = SettingsFrame {
         ack: false,
@@ -43,7 +39,6 @@ pub async fn write_server_settings<S: AsyncWrite + Unpin>(s: &mut S) {
     s.write_all(&buf).await.expect("server settings write");
 }
 
-/// Write a SETTINGS frame with arbitrary params.
 pub async fn write_server_settings_with<S: AsyncWrite + Unpin>(s: &mut S, params: Vec<(u16, u32)>) {
     let frame = SettingsFrame { ack: false, params };
     let mut buf = BytesMut::new();
@@ -58,7 +53,6 @@ pub async fn write_settings_ack<S: AsyncWrite + Unpin>(s: &mut S) {
     s.write_all(&buf).await.expect("settings ack write");
 }
 
-/// Write a full response: HEADERS(:status) + DATA(body, END_STREAM).
 pub async fn write_response<S: AsyncWrite + Unpin>(s: &mut S, stream_id: u32, body: &[u8]) {
     let mut enc = hpack::Encoder::new();
     let fragment = enc.encode_header_block(&[(":status", "200")]);
@@ -84,7 +78,6 @@ pub async fn write_response<S: AsyncWrite + Unpin>(s: &mut S, stream_id: u32, bo
     s.write_all(&buf).await.expect("resp data write");
 }
 
-/// Write a HEADERS frame with an arbitrary header block — used to craft malformed responses (e.g. one with no `:status`, or a non-numeric one).
 pub async fn write_raw_headers<S: AsyncWrite + Unpin>(
     s: &mut S,
     stream_id: u32,
@@ -105,7 +98,6 @@ pub async fn write_raw_headers<S: AsyncWrite + Unpin>(
     s.write_all(&buf).await.expect("raw headers write");
 }
 
-/// Write a response HEADERS frame that deliberately omits END_HEADERS, so the receiver must wait for CONTINUATION frames to finish the block.
 pub async fn write_headers_without_end<S: AsyncWrite + Unpin>(s: &mut S, stream_id: u32) {
     let mut enc = hpack::Encoder::new();
     let fragment = enc.encode_header_block(&[(":status", "200")]);
@@ -121,7 +113,6 @@ pub async fn write_headers_without_end<S: AsyncWrite + Unpin>(s: &mut S, stream_
     s.write_all(&buf).await.expect("partial headers write");
 }
 
-/// Write just the response HEADERS (`:status`), END_HEADERS set but not END_STREAM — leaves the stream open for DATA frames to follow.
 pub async fn write_response_headers<S: AsyncWrite + Unpin>(s: &mut S, stream_id: u32) {
     let mut enc = hpack::Encoder::new();
     let fragment = enc.encode_header_block(&[(":status", "200")]);
@@ -137,7 +128,6 @@ pub async fn write_response_headers<S: AsyncWrite + Unpin>(s: &mut S, stream_id:
     s.write_all(&buf).await.expect("resp headers write");
 }
 
-/// Write a single DATA frame of arbitrary length.
 pub async fn write_data<S: AsyncWrite + Unpin>(
     s: &mut S,
     stream_id: u32,

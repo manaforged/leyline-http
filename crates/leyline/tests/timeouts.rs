@@ -1,4 +1,3 @@
-//! One gate per timeout class, driven by in-process plain-HTTP servers.
 use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
@@ -7,7 +6,6 @@ use leyline::{RetryPolicy, Session, TimeoutConfig};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
-/// Accept one connection, read the request, run `after` on the socket.
 async fn serve<F, Fut>(after: F) -> std::net::SocketAddr
 where
     F: FnOnce(tokio::net::TcpStream) -> Fut + Send + 'static,
@@ -83,7 +81,6 @@ async fn response_header_timeout_fires_when_the_server_never_writes() {
     );
 }
 
-/// Write a complete header block plus one chunk of a chunked body, then stall.
 async fn half_chunked(mut sock: tokio::net::TcpStream) {
     drop(
         sock.write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nhalf\r\n")

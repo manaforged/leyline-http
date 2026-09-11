@@ -1,5 +1,3 @@
-//! Retry with exponential backoff on transient server errors.
-
 use std::time::Duration;
 
 use leyline::{Browser, RetryPolicy, Session};

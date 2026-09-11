@@ -57,7 +57,6 @@ fn no_proxy_does_not_match_unrelated_ipv6() {
     );
 }
 
-/// A config whose `no_proxy` came from the environment (not the `.no_proxy()` builder).
 fn cfg_with_env_no_proxy(patterns: &str) -> ProxyConfig {
     ProxyConfig {
         rules: Vec::new(),

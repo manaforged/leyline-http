@@ -1,5 +1,3 @@
-//! Profile types — deserialized from TOML profile files.
-
 use std::collections::HashMap;
 
 use serde::Deserialize;
@@ -11,7 +9,6 @@ use crate::{Error, Kind};
     missing_docs,
     reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
 )]
-/// A complete browser fingerprint profile, loaded from TOML.
 #[derive(Debug, Clone, Deserialize)]
 pub struct BrowserProfile {
     pub meta: ProfileMeta,
@@ -25,7 +22,6 @@ pub struct BrowserProfile {
     missing_docs,
     reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
 )]
-/// Profile metadata.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ProfileMeta {
     pub name: String,
@@ -35,7 +31,6 @@ pub struct ProfileMeta {
     pub family: String,
     #[serde(default)]
     pub verified_against: String,
-    /// The exact browser build this profile's fingerprint was captured against, e.g. `"chrome-150.0.7871.128"`.
     #[serde(default)]
     pub captured_against: Option<String>,
 }
@@ -44,7 +39,6 @@ pub struct ProfileMeta {
     missing_docs,
     reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
 )]
-/// TLS ClientHello configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct TlsProfile {
     pub ciphers: Vec<String>,
@@ -66,7 +60,6 @@ pub struct TlsProfile {
     pub cert_compression: Vec<String>,
     #[serde(default)]
     pub permute_extensions: bool,
-    /// Fixed ClientHello extension order as IANA TLS extension type IDs.
     #[serde(default)]
     pub extension_permutation: Option<Vec<u16>>,
     #[serde(default = "default_grease")]
@@ -75,18 +68,14 @@ pub struct TlsProfile {
     pub ech_grease: bool,
     #[serde(default)]
     pub pre_shared_key: bool,
-    /// Advertise the TLS session_ticket extension (0x0023).
     #[serde(default = "default_true")]
     pub session_tickets: bool,
-    /// Advertise the TLS Trust Anchor Identifiers extension (0xCA34/51764) with an empty list when the selected browser profile does.
     #[serde(default)]
     pub request_trust_anchors: bool,
     #[serde(default)]
     pub fingerprint: Option<TlsFingerprint>,
-    /// BoringSSL appends RFC 7685 padding (0x0015) to this hello shape; it is never part of `extension_permutation` but counts toward the wire JA4.
     #[serde(default)]
     pub padding: bool,
-    /// ClientHello supported_versions floor: "1.0" (CFNetwork iOS advertises TLS 1.0/1.1), "1.2" (default), "1.3".
     #[serde(default)]
     pub min_tls_version: Option<String>,
 }
@@ -103,15 +92,12 @@ const fn default_true() -> bool {
     missing_docs,
     reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
 )]
-/// Expected TLS fingerprint for verification.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct TlsFingerprint {
     #[serde(default)]
     pub ja4: Option<String>,
-    /// JA4 observed on a resumed TLS 1.3 handshake that carries `pre_shared_key` (41).
     #[serde(default)]
     pub resumed_ja4: Option<String>,
-    /// Per-platform JA4 overrides.
     #[serde(default)]
     pub platforms: HashMap<String, TlsFingerprint>,
 }
@@ -120,7 +106,6 @@ pub struct TlsFingerprint {
     missing_docs,
     reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
 )]
-/// HTTP/2 SETTINGS frame configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct H2Profile {
     #[serde(default)]
@@ -143,24 +128,18 @@ pub struct H2Profile {
     pub unknown_setting9: Option<u32>,
     pub pseudo_order: Vec<String>,
     pub settings_order: Vec<String>,
-    /// PRIORITY fields emitted on each request's initial HEADERS frame.
     #[serde(default)]
     pub default_priority: Option<H2PriorityProfile>,
     #[serde(default)]
     pub fingerprint: Option<H2Fingerprint>,
-    /// Per-platform overrides.
     #[serde(default)]
     pub platforms: HashMap<String, H2PlatformOverride>,
 }
 
-/// PRIORITY fields for the initial HEADERS frame (RFC 9113 §5.3, fingerprint parity for Chrome-class browsers).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub struct H2PriorityProfile {
-    /// Exclusive dependency bit (E).
     pub exclusive: bool,
-    /// Stream ID the new stream depends on (0 = root).
     pub stream_dependency: u32,
-    /// Wire weight byte (`actual_weight - 1`), range `0..=255`.
     pub weight: u8,
 }
 
@@ -168,7 +147,6 @@ pub struct H2PriorityProfile {
     missing_docs,
     reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
 )]
-/// Per-platform overrides for an [`H2Profile`].
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct H2PlatformOverride {
     #[serde(default)]
@@ -189,16 +167,12 @@ pub struct H2PlatformOverride {
     pub unknown_setting8: Option<u32>,
     #[serde(default)]
     pub unknown_setting9: Option<u32>,
-    /// Names of base settings to omit from this platform's SETTINGS frame.
     #[serde(default)]
     pub omit_settings: Vec<String>,
-    /// Optional pseudo_order override (rarely needed).
     #[serde(default)]
     pub pseudo_order: Option<Vec<String>>,
-    /// Optional settings_order override.
     #[serde(default)]
     pub settings_order: Option<Vec<String>>,
-    /// Per-platform Akamai fingerprint expectation.
     #[serde(default)]
     pub fingerprint: Option<H2Fingerprint>,
 }
@@ -207,7 +181,6 @@ pub struct H2PlatformOverride {
     missing_docs,
     reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
 )]
-/// Expected H2 fingerprint for verification.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct H2Fingerprint {
     #[serde(default)]
@@ -218,26 +191,21 @@ pub struct H2Fingerprint {
     missing_docs,
     reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
 )]
-/// Platform-specific identity (user-agent, sec-ch-ua).
 #[derive(Debug, Clone, Deserialize)]
 pub struct PlatformIdentity {
     pub user_agent: String,
     pub sec_ch_ua: String,
     #[serde(default)]
     pub accept_language: Option<String>,
-    /// Optional explicit request-header order.
     #[serde(default)]
     pub request_header_order: Option<Vec<String>>,
-    /// Extra headers appended for every request from this identity (for example Brave's `sec-gpc: 1`).
     #[serde(default)]
     pub extra_headers: Vec<(String, String)>,
-    /// Optional override for the `accept` value emitted by the `Preset::Navigate` preset.
     #[serde(default)]
     pub navigate_accept_override: Option<String>,
 }
 
 impl BrowserProfile {
-    /// Parse a profile from a TOML string; fails with [`ProfileError::Parse`] on invalid TOML or a rejected permutation.
     pub fn from_toml(toml_str: &str) -> Result<Self, ProfileError> {
         let profile: Self = toml::from_str(toml_str).map_err(ProfileError::parse)?;
         crate::profile::permutation::validate(&profile.tls)
@@ -248,7 +216,6 @@ impl BrowserProfile {
         Ok(profile)
     }
 
-    /// Non-fatal load-time warnings for a parsed profile.
     pub fn load_warnings(&self) -> Vec<String> {
         let mut warnings = Vec::new();
         let capture_unrecorded = self
@@ -266,27 +233,22 @@ impl BrowserProfile {
         warnings
     }
 
-    /// Get the identity for a given platform.
     pub fn identity_for(&self, platform: crate::profile::Platform) -> Option<&PlatformIdentity> {
         self.identity.get(platform.identity_key())
     }
 
-    /// Expected JA4 hash, if specified.
     pub fn expected_ja4(&self) -> Option<&str> {
         self.tls.fingerprint.as_ref()?.ja4.as_deref()
     }
 
-    /// Expected JA4 for a resumed TLS 1.3 handshake, if captured.
     pub fn expected_resumed_ja4(&self) -> Option<&str> {
         self.tls.fingerprint.as_ref()?.resumed_ja4.as_deref()
     }
 
-    /// Expected Akamai H2 fingerprint, if specified.
     pub fn expected_h2_fingerprint(&self) -> Option<&str> {
         self.h2.fingerprint.as_ref()?.akamai.as_deref()
     }
 
-    /// Expected Akamai H2 fingerprint for a specific platform key.
     pub fn expected_h2_fingerprint_for(&self, platform: crate::profile::Platform) -> Option<&str> {
         if let Some(p) = self.h2.platforms.get(platform.identity_key())
             && let Some(ref fp) = p.fingerprint
@@ -299,7 +261,6 @@ impl BrowserProfile {
 }
 
 impl H2Profile {
-    /// Resolve this profile for a given platform.
     pub fn resolve_for_platform(
         &self,
         platform: crate::profile::Platform,

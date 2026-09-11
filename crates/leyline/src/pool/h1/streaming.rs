@@ -1,7 +1,5 @@
-//! Split from the parent pool module.
 use super::*;
 
-/// Stream the response body to the consumer, then reinstate the connection on a clean full drain (or drop it).
 pub(super) async fn run_h1_stream_pump(mut pump: H1StreamPump) {
     let initial = std::mem::take(&mut pump.initial_body);
     let drained_clean = stream_body_into(pump.io.as_mut(), pump.framing, initial, &pump.tx).await;
@@ -14,7 +12,6 @@ pub(super) async fn run_h1_stream_pump(mut pump: H1StreamPump) {
     }
     drop(pump.permit);
 }
-/// Drive the body into `tx` per `framing`.
 pub(super) async fn stream_body_into(
     stream: &mut dyn H1Io,
     framing: BodyFraming,

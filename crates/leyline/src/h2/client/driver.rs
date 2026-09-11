@@ -1,5 +1,3 @@
-//! HTTP/2 driver task — the concurrent core of the client.
-
 use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::sync::Arc;
@@ -32,23 +30,17 @@ pub(crate) use self::bootstrap::start;
 pub use protocol::DriverTask;
 pub(crate) use protocol::{DriverCommand, DriverRequestBody, Head, checked_window_add};
 
-/// Max number of outstanding SendRequest commands the driver will buffer before applying back-pressure on callers.
 const COMMAND_CHANNEL_CAPACITY: usize = 1024;
 
-/// Channel capacity for streaming request body chunks.
 pub(super) const STREAM_REQ_BODY_CAPACITY: usize = 32;
 
-/// Channel capacity for streaming response body chunks.
 pub(super) const STREAM_RESP_BODY_CAPACITY: usize = 32;
 
-/// Shared snapshot of peer settings visible to every cloneable handle.
 #[doc(hidden)]
 #[derive(Debug)]
 pub struct PeerSettingsSnapshot {
-    /// Peer's latest SETTINGS_MAX_CONCURRENT_STREAMS, if advertised.
     max_concurrent_streams: std::sync::atomic::AtomicU32,
     has_max_streams: std::sync::atomic::AtomicBool,
-    /// RFC 8441 §3 — `SETTINGS_ENABLE_CONNECT_PROTOCOL`.
     enable_connect_protocol: std::sync::atomic::AtomicBool,
 }
 
@@ -75,43 +67,31 @@ impl PeerSettingsSnapshot {
         self.enable_connect_protocol.store(value, Ordering::Relaxed);
     }
 
-    /// Public read: has the peer advertised RFC 8441 extended CONNECT support yet?
     pub fn enable_connect_protocol(&self) -> bool {
         self.enable_connect_protocol.load(Ordering::Relaxed)
     }
 }
 
-/// A send that has partially written and is waiting for WINDOW_UPDATE to resume.
 struct PendingSend {
-    /// Remaining body bytes not yet written.
     remaining: Bytes,
-    /// Trailers to send after END_STREAM on the final DATA frame — or, if non-empty, a trailing HEADERS frame follows the DATA.
     trailers: Vec<(String, String)>,
 }
 
-/// Where the final response should be delivered.
 enum ResponseSink {
-    /// Legacy API: buffered body in a oneshot.
     Buffered(oneshot::Sender<Result<H2Response, H2Error>>),
-    /// Extended API, buffered response: body collected in-driver, one final message on completion.
     BufferedEx(oneshot::Sender<Result<H2ResponseEx, H2Error>>),
-    /// Extended API, streaming response: headers go out on the oneshot as soon as they arrive; body chunks flow through the mpsc.
     StreamingEx {
         headers_tx: Option<oneshot::Sender<Result<H2ResponseEx, H2Error>>>,
         body_tx: mpsc::Sender<io::Result<Bytes>>,
     },
 }
 
-/// Streaming-body input state attached to a stream actor.
 enum SendBodyInput {
-    /// No streaming source — entire body was provided up-front in `pending_send.remaining` or there is no body.
     None,
-    /// Streaming from a producer task.
     Streaming {
         pending_buf: VecDeque<Bytes>,
         closed: bool,
         error: Option<io::Error>,
-        /// Trailers to emit after the last chunk.
         #[expect(
             dead_code,
             reason = "reserved for a future send_request_ex_with_trailers entry point; not surfaced yet"
@@ -120,29 +100,21 @@ enum SendBodyInput {
     },
 }
 
-/// Per-stream bookkeeping owned by the driver.
 struct StreamActor {
     state: StreamState,
     send_window: i64,
     recv_window: i64,
-    /// Where the driver delivers the final response.
     response_tx: Option<ResponseSink>,
     status: u16,
     got_headers: bool,
     resp_headers: Vec<(HeaderStr, HeaderStr)>,
     body: Vec<u8>,
     trailers: Option<Vec<(HeaderStr, HeaderStr)>>,
-    /// HEAD/1xx/204/304: drain DATA without buffering.
     drop_body: bool,
-    /// Remaining outbound body (set when flow-control parks us mid-body).
     pending_send: Option<PendingSend>,
-    /// Streaming request body state, if the caller passed a stream.
     send_body_input: SendBodyInput,
-    /// `true` once we've written a DATA frame with END_STREAM (or the trailing HEADERS frame).
     send_closed: bool,
-    /// Streaming response chunks the consumer has not taken yet; the stream window is not re-credited while this is non-empty.
     stalled: std::collections::VecDeque<Bytes>,
-    /// The peer already ended its side; the stream completes once `stalled` drains.
     remote_done: bool,
 }
 
@@ -167,7 +139,6 @@ impl StreamActor {
         }
     }
 
-    /// Deliver the HEADERS portion of a streaming response.
     fn deliver_headers_streaming(&mut self) {
         if let Some(ResponseSink::StreamingEx { headers_tx, .. }) = self.response_tx.as_mut()
             && let Some(tx) = headers_tx.take()
@@ -230,49 +201,40 @@ impl StreamActor {
     }
 }
 
-/// A streaming request body chunk routed back to the driver from a per-stream producer task.
 enum BodyChunkIn {
-    /// A chunk of body bytes.
-    Chunk { stream_id: u32, data: Bytes },
-    /// Stream ended (EOF).
+    Chunk {
+        stream_id: u32,
+        data: Bytes,
+    },
     Eof {
         stream_id: u32,
         error: Option<io::Error>,
     },
 }
 
-/// The actor task: single writer/reader owner, cooperative multiplexing.
 struct Driver<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> {
     reader: FrameReader<tokio::io::ReadHalf<T>>,
     writer: FrameWriter<tokio::io::WriteHalf<T>>,
     encoder: hpack::Encoder,
     decoder: hpack::Decoder,
     peer_settings: PeerSettings,
-    /// True once the peer's first SETTINGS frame has been processed.
     peer_greeted: bool,
     peer_snapshot: Arc<PeerSettingsSnapshot>,
     conn_send_window: i64,
     conn_recv_window: i64,
     streams: HashMap<u32, StreamActor>,
     next_stream_id: u32,
-    /// Stream IDs with a pending_send, in insertion order, so we can fairly resume them when flow-control credit returns.
     buffered_pending: VecDeque<u32>,
     rst_flood: RstFloodDetector,
-    /// Sliding-window guard against SETTINGS floods — mid-connection non-ACK SETTINGS frames beyond the configured rate force an `ENHANCE_YOUR_CALM` close.
     settings_flood: RstFloodDetector,
     config: H2Config,
     command_rx: mpsc::Receiver<DriverCommand>,
     closed: Arc<AtomicBool>,
-    /// Set when the peer sends GOAWAY.
     peer_goaway_last_stream: Option<u32>,
-    /// Requests deferred at the peer's MAX_CONCURRENT_STREAMS limit.
     pending: VecDeque<DriverCommand>,
     shutdown_started: bool,
-    /// Sink given to per-stream request-body relay tasks so they can hand chunks back to the driver without needing per-stream channels in `select!`.
     body_chunk_tx: mpsc::Sender<BodyChunkIn>,
-    /// The receive side the driver awaits in `event_loop`.
     body_chunk_rx: mpsc::Receiver<BodyChunkIn>,
-    /// Response chunks queued across every stream whose consumer has not taken them yet.
     stalled: usize,
 }
 

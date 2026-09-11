@@ -1,16 +1,11 @@
-//! Guards against utls #342–style post-quantum ephemeral key reuse.
 use leyline::Browser;
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpListener;
 
-/// TLS extension type `key_share`.
 const EXT_KEY_SHARE: u16 = 0x0033;
-/// `supported_groups` entries we care about.
 const GROUP_X25519: u16 = 0x001d;
 const GROUP_X25519_MLKEM768: u16 = 0x11ec;
-/// ML-KEM-768 encapsulation key length (FIPS 203).
 const MLKEM768_EK_LEN: usize = 1184;
-/// X25519 public key length.
 const X25519_PUB_LEN: usize = 32;
 
 #[tokio::test]
@@ -110,7 +105,6 @@ fn hex_prefix(b: &[u8]) -> String {
     b.iter().take(6).map(|x| format!("{x:02x}")).collect()
 }
 
-/// Parse a captured TLS record containing a ClientHello and return every `(group, key_exchange)` entry from its `key_share` extension.
 fn parse_key_shares(rec: &[u8]) -> Option<Vec<(u16, Vec<u8>)>> {
     if rec.len() < 5 || rec[0] != 0x16 {
         return None;

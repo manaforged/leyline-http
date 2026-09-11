@@ -188,7 +188,6 @@ fn samesite_enforced_on_cross_site_requests() {
     assert!(cross_post.contains("none=1"));
 }
 
-/// RFC 6265bis §5.7 "Leave Secure Cookies Alone": a plaintext response cannot overwrite (or delete) a Secure cookie the HTTPS origin set.
 #[test]
 fn insecure_origin_cannot_overwrite_secure_cookie() {
     let jar = Jar::new();

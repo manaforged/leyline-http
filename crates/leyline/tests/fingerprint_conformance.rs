@@ -1,5 +1,3 @@
-//! Fingerprint trust map — where each self-reported fingerprint dimension sits relative to truth, offline and deterministic.
-
 use leyline::Platform;
 use leyline::audit::{Ja3Input, Ja4Input, compute_ja3, compute_ja4, compute_ja4t, extension_ids};
 use leyline::h2::H2Config;
@@ -7,15 +5,10 @@ use leyline::profile::{ALL_BROWSERS, ProfileRegistry};
 
 #[derive(PartialEq, Clone, Copy)]
 enum Status {
-    /// Wire-faithful + golden match.
     Gated,
-    /// Wire-faithful golden MISMATCH → regression, hard fail.
     GatedFail,
-    /// Reconstruction happens to match the wire golden.
     ReconAccurate,
-    /// Reconstruction diverges from the wire golden (audit() not wire-exact here).
     ReconDiverges,
-    /// No golden / not offline-wire-verifiable.
     Unanchored,
 }
 
@@ -170,7 +163,6 @@ const ALL_PLATFORMS: [Platform; 5] = [
     Platform::IOS,
 ];
 
-/// A wire-faithful dimension compared to its golden (gated).
 fn gated(profile: &str, dim: &str, got: &str, golden: Option<&str>) -> Row {
     match golden {
         Some(g) if g == got => Row::new(profile, dim, Status::Gated, g.to_string()),
@@ -189,7 +181,6 @@ fn gated(profile: &str, dim: &str, got: &str, golden: Option<&str>) -> Row {
     }
 }
 
-/// A reconstruction compared to the wire golden (reported, never gated).
 fn recon(profile: &str, dim: &str, got: &str, golden: Option<&str>) -> Row {
     match golden {
         Some(g) if g == got => Row::new(profile, dim, Status::ReconAccurate, g.to_string()),
@@ -208,7 +199,6 @@ fn recon(profile: &str, dim: &str, got: &str, golden: Option<&str>) -> Row {
     }
 }
 
-/// Render the map as markdown.
 fn render(rows: &[Row]) -> String {
     use std::fmt::Write;
     let mut s = String::new();

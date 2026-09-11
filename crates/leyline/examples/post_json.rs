@@ -1,5 +1,3 @@
-//! POST a JSON body.
-
 use leyline::{Browser, Platform, Session};
 use serde::Serialize;
 

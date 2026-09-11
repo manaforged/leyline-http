@@ -1,31 +1,21 @@
-//! JA4T TCP fingerprinting via socket2.
-
 use std::sync::Mutex;
 
 use socket2::Socket;
 
 mod platform;
 
-/// TCP/IP stack fingerprint parameters for JA4T matching.
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub struct TcpProfile {
-    /// IP TTL: 128 for Windows, 64 for macOS/Linux.
     pub ttl: u32,
-    /// TCP Max Segment Size: 1460 for standard Ethernet.
     pub mss: u32,
-    /// TCP receive window size: 64240 (Windows), 65535 (macOS/Linux).
     pub window_size: u32,
-    /// Don't Fragment bit.
     pub df: bool,
-    /// TCP window scale factor: 8 (Windows), 6 (macOS), 7 (Linux).
     pub window_scale: u32,
-    /// TCP_NODELAY (disables Nagle's algorithm).
     pub no_delay: bool,
 }
 
 impl TcpProfile {
-    /// TCP profile matching Windows defaults (TTL 128, window scale 8).
     pub const WINDOWS: Self = Self {
         ttl: 128,
         mss: 1460,
@@ -35,7 +25,6 @@ impl TcpProfile {
         no_delay: true,
     };
 
-    /// TCP profile matching macOS defaults (TTL 64, window scale 6).
     pub const MACOS: Self = Self {
         ttl: 64,
         mss: 1460,
@@ -45,7 +34,6 @@ impl TcpProfile {
         no_delay: true,
     };
 
-    /// TCP profile matching Linux defaults (TTL 64, window scale 7).
     pub const LINUX: Self = Self {
         ttl: 64,
         mss: 1460,
@@ -55,7 +43,6 @@ impl TcpProfile {
         no_delay: true,
     };
 
-    /// TCP profile matching iOS defaults (TTL 64, Nagle enabled).
     pub const IOS: Self = Self {
         ttl: 64,
         mss: 1460,
@@ -65,7 +52,6 @@ impl TcpProfile {
         no_delay: false,
     };
 
-    /// Apply this TCP profile to a socket before connect().
     pub(crate) fn apply(&self, socket: &Socket, is_v6: bool) {
         if self.ttl > 0 {
             let result = if is_v6 {

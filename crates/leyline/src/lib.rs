@@ -1,10 +1,7 @@
-//! An HTTP client that mimics browsers on the wire. User guide: `docs/guide/`.
-
 #[cfg(doctest)]
 #[doc = include_str!("../../../README.md")]
 pub struct ReadmeDoctests;
 
-/// User guide chapters, compiled as doctests.
 #[cfg(doctest)]
 pub mod guide {
     #[doc = include_str!("../../../docs/guide/README.md")]
@@ -42,21 +39,17 @@ pub mod tls;
 pub mod trace;
 
 pub(crate) mod core;
-/// HTTP/2 internals used by this crate's tests and benches. Unstable: no semver promise.
 #[doc(hidden)]
 pub mod h2;
 pub(crate) mod header_str;
-/// Connection-pool internals used by this crate's tests and benches. Unstable: no semver promise.
 #[doc(hidden)]
 pub mod pool;
-/// Parser entry points the `fuzz/` targets drive. Unstable: no semver promise.
 #[doc(hidden)]
 pub mod fuzz {
     pub use crate::cookie::parse::parse_cookie_date;
     pub use crate::pool::h1::parse::{parse_h1_head, read_chunked_body};
     pub use crate::tls::proxy::http::validate_connect_response;
 
-    /// Parse one `Set-Cookie` line against an absolute request URL. Unstable: no semver promise.
     pub fn parse_set_cookie(header: &str, request_url: &str) -> Option<crate::cookie::Cookie> {
         let parsed = url::Url::parse(request_url).ok()?;
         crate::cookie::parse::parse_set_cookie(header, &parsed)
@@ -67,10 +60,8 @@ pub(crate) mod quic;
 pub(crate) mod tcp;
 mod util;
 
-/// The `http` crate, re-exported so callers share one version of `Method`, `Uri`, `StatusCode`, and the header types.
 pub use http;
 
-/// Tower middleware around one request attempt.
 #[cfg(feature = "tower")]
 pub mod layer {
     pub use crate::core::layer::{Call, Log, Logged, Pending, Reply, Transport};
@@ -89,7 +80,6 @@ pub use crate::core::{
 };
 pub use crate::pool::PoolStats;
 
-/// `multipart/form-data` bodies.
 #[cfg(feature = "multipart")]
 pub mod multipart {
     pub use crate::core::multipart::{Form, Part};
@@ -111,7 +101,6 @@ pub use crate::core::{CloseFrame, WsConnection, WsMessage, WsSink, WsStream};
 pub use crate::tls::{TlsContext, TlsError, TlsMinVersion, TlsTrustConfig};
 
 impl Browser {
-    /// Built-in static profile for this variant.
     pub fn profile(self) -> &'static BrowserProfile {
         ProfileRegistry::global().get_browser(self).expect(
             "built-in profile missing - registry integrity check in tests would have caught this",

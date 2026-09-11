@@ -1,5 +1,3 @@
-//! HTTP connection pool.
-
 #![forbid(unsafe_code)]
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -39,7 +37,6 @@ pub use types::{H1Slot, PoolStats, TlsInfo};
 
 use types::{H2Io, PoolKey, Transport};
 
-/// Construct a pool key for a transport family.
 pub(crate) fn make_key(
     scheme: &str,
     host: &str,
@@ -56,7 +53,6 @@ pub(crate) fn make_key(
     }
 }
 
-/// Establish a fresh TLS + H2 connection to `(host, port, proxy)`, require that ALPN negotiated `h2`, install the driver into `pool` under `key`, and return the cloneable client handle plus its TLS metadata.
 async fn open_fresh_h2(
     pool: &Arc<Pool>,
     connector: &FingerprintConnector,
@@ -93,7 +89,6 @@ async fn open_fresh_h2(
     Ok(pool.install_h2(key, handle, driver, tls))
 }
 
-/// Reconstruct an owned [`crate::Error`] from an `Arc`-shared coalesced-connect failure.
 fn connect_err(err: &Error) -> Error {
     let mut out = Error::new(err.kind());
     let mut sourced = true;
@@ -121,7 +116,6 @@ fn connect_err(err: &Error) -> Error {
     out
 }
 
-/// Rebuild a [`TlsError`] that is shared behind an `Arc`.
 fn clone_tls(err: &TlsError) -> TlsError {
     match err {
         TlsError::SslConfig(msg) => TlsError::SslConfig(msg.clone()),
@@ -223,7 +217,6 @@ async fn open_h2_coalesced(
     ))
 }
 
-/// Obtain a cloneable [`crate::h2::H2Client`] handle for `(host, port, proxy)`, reusing an existing pooled connection when available and otherwise establishing a fresh TLS + H2 handshake.
 #[tracing::instrument(
     name = "pool.checkout_handle",
     level = "debug",
@@ -249,7 +242,6 @@ pub async fn checkout_handle(
     open_h2_coalesced(pool, connector, h2_config, key, host, port, proxy).await
 }
 
-/// Obtain a cloneable `H3Client` for `(host, port)`, reusing a live pooled QUIC connection when one exists and otherwise driving a fresh handshake.
 #[cfg(feature = "http3")]
 #[tracing::instrument(
     name = "pool.checkout_h3_handle",
@@ -276,7 +268,6 @@ pub async fn checkout_h3_handle(
     open_h3_coalesced(pool, h3_config, profile, trust, key, host, port).await
 }
 
-/// Open a fresh QUIC + HTTP/3 connection and install it into `pool` under `key`, returning the cloneable handle plus TLS metadata.
 #[cfg(feature = "http3")]
 async fn open_fresh_h3_installed(
     pool: &Arc<Pool>,
@@ -372,7 +363,6 @@ async fn open_h3_coalesced(
     ))
 }
 
-/// Send an HTTP/3 request, reusing a pooled QUIC connection when alive.
 #[cfg(feature = "http3")]
 #[expect(
     clippy::too_many_arguments,
@@ -472,7 +462,6 @@ pub async fn send_request_h3_pooled(
     Ok((resp, tls))
 }
 
-/// Send a request, reusing a pooled H2 connection when available.
 #[tracing::instrument(
     name = "pool.send_request",
     level = "debug",
@@ -625,12 +614,10 @@ pub async fn send_request(
     Ok((resp, tls, timing))
 }
 
-/// Milliseconds elapsed since `start`, saturating into `u32` (a hop that somehow runs longer than ~49 days clamps rather than wraps).
 fn ms_since(start: Instant) -> u32 {
     u32::try_from(start.elapsed().as_millis()).unwrap_or(u32::MAX)
 }
 
-/// Parse `host[:port]` authority into `(host, port)`.
 fn parse_authority(authority: &str, default_port: u16) -> (&str, u16) {
     if let Some(colon) = authority.rfind(':') {
         let port_str = &authority[colon + 1..];

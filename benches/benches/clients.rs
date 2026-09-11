@@ -1,36 +1,3 @@
-//! TLS head-to-head: Leyline vs `reqwest` 0.13 (rustls) against one in-process
-//! origin.
-//!
-//! The bench owns the server. It generates an `rcgen` self-signed leaf
-//! (SAN `localhost` + `127.0.0.1`), then stands up two loopback TLS listeners
-//! backed by hyper 1.x over `tokio-rustls`:
-//!
-//!   * an ALPN `http/1.1` listener (`http1::Builder`, keep-alive on), and
-//!   * an ALPN `h2` listener (`http2::Builder`).
-//!
-//! ALPN on the server side is what pins each scenario to one protocol, so no
-//! client-side version override is needed. Both clients trust the leaf through
-//! their own API: `danger_accept_invalid_certs(true)`. That is a deliberate
-//! bench shortcut — it removes trust-store work from both stacks equally and
-//! keeps the delta on the client HTTP path.
-//!
-//! Before any timing, `verify` fetches every scenario once per client and
-//! asserts the response body is byte-equal to the server's fixture (and that
-//! the negotiated version is the one the listener advertised). A mismatch
-//! panics and the bench fails.
-//!
-//! Scenarios:
-//!   * `clients::{leyline,reqwest}_h1_16k` — 200 sequential keep-alive GETs of
-//!     a 16 KiB body on one reused client.
-//!   * `clients::{leyline,reqwest}_h2_32x16k` — 32 concurrent GETs of the same
-//!     16 KiB body, multiplexed over one H2 connection.
-//!   * `clients::{leyline,reqwest}_stream_4mib` — one 4 MiB body consumed
-//!     chunk by chunk through each client's streaming API.
-//!
-//! `wreq` is not here: `btls-sys` (wreq's BoringSSL) and `leyline-bssl-sys`
-//! both declare `links = "boringssl"`, and Cargo refuses to put two such
-//! packages in one dependency graph. The out-of-process wreq comparison lives
-//! in `benches/comparison/`.
 
 use std::convert::Infallible;
 use std::sync::{Arc, LazyLock};
@@ -53,19 +20,14 @@ use tokio_rustls::TlsAcceptor;
 
 use leyline::{HttpVersion, Session};
 
-/// Body served on `/small`.
 const SMALL: usize = 16 * 1024;
 
-/// Body served on `/big`.
 const BIG: usize = 4 * 1024 * 1024;
 
-/// Sequential GETs per H1 sample.
 const SERIAL: usize = 200;
 
-/// In-flight GETs per H2 sample.
 const CONC: usize = 32;
 
-/// Deterministic fixture bytes; the equivalence assertions compare against these.
 fn fixture(len: usize) -> Bytes {
     Bytes::from((0..len).map(|i| (i % 251) as u8).collect::<Vec<u8>>())
 }
@@ -73,7 +35,6 @@ fn fixture(len: usize) -> Bytes {
 static SMALL_BODY: LazyLock<Bytes> = LazyLock::new(|| fixture(SMALL));
 static BIG_BODY: LazyLock<Bytes> = LazyLock::new(|| fixture(BIG));
 
-/// Serve the 4 MiB fixture on `/big`, the 16 KiB fixture everywhere else.
 async fn respond(req: Inbound<hyper::body::Incoming>) -> Result<Outbound<Full<Bytes>>, Infallible> {
     let body = if req.uri().path() == "/big" {
         BIG_BODY.clone()
@@ -83,7 +44,6 @@ async fn respond(req: Inbound<hyper::body::Incoming>) -> Result<Outbound<Full<By
     Ok(Outbound::new(Full::new(body)))
 }
 
-/// Self-signed acceptor advertising exactly one ALPN protocol.
 fn tls(alpn: &[u8]) -> TlsAcceptor {
     let leaf =
         rcgen::generate_simple_self_signed(vec!["localhost".to_string(), "127.0.0.1".to_string()])
@@ -97,7 +57,6 @@ fn tls(alpn: &[u8]) -> TlsAcceptor {
     TlsAcceptor::from(Arc::new(config))
 }
 
-/// Bind a loopback TLS origin, spawn it, and return its base URL.
 async fn origin(h2: bool) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let addr = listener.local_addr().expect("local addr");
@@ -134,7 +93,6 @@ async fn origin(h2: bool) -> String {
     format!("https://127.0.0.1:{}/", addr.port())
 }
 
-/// One buffered GET through Leyline, body returned for comparison.
 async fn ley(session: &Session, url: &str) -> (Bytes, HttpVersion) {
     let mut resp = session.get(url).await.expect("leyline request");
     let version = resp.version();
@@ -142,7 +100,6 @@ async fn ley(session: &Session, url: &str) -> (Bytes, HttpVersion) {
     (body, version)
 }
 
-/// One streamed GET through Leyline, chunks concatenated.
 async fn ley_stream(session: &Session, url: &str) -> Bytes {
     let resp = session.get(url).stream().await.expect("leyline request");
     let mut stream = resp.into_stream().expect("leyline stream");
@@ -153,7 +110,6 @@ async fn ley_stream(session: &Session, url: &str) -> Bytes {
     Bytes::from(out)
 }
 
-/// One buffered GET through reqwest, body returned for comparison.
 async fn req(client: &reqwest13::Client, url: &str) -> (Bytes, reqwest13::Version) {
     let resp = client.get(url).send().await.expect("reqwest request");
     let version = resp.version();
@@ -161,7 +117,6 @@ async fn req(client: &reqwest13::Client, url: &str) -> (Bytes, reqwest13::Versio
     (body, version)
 }
 
-/// One streamed GET through reqwest, chunks concatenated.
 async fn req_stream(client: &reqwest13::Client, url: &str) -> Bytes {
     let resp = client.get(url).send().await.expect("reqwest request");
     let mut stream = resp.bytes_stream();
@@ -172,8 +127,6 @@ async fn req_stream(client: &reqwest13::Client, url: &str) -> Bytes {
     Bytes::from(out)
 }
 
-/// Assert every client returns the server fixture byte for byte, on the
-/// protocol the listener advertised. Runs before any measurement.
 async fn verify(session: &Session, client: &reqwest13::Client, h1: &str, h2: &str, big: &str) {
     let (body, version) = ley(session, h1).await;
     assert_eq!(body, *SMALL_BODY, "leyline h1 16k body mismatch");

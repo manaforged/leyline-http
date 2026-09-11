@@ -1,5 +1,3 @@
-//! Demonstrate concurrent multiplexing over a single H2 connection.
-
 use std::sync::Arc;
 use std::time::Instant;
 

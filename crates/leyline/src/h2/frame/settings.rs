@@ -1,28 +1,20 @@
-//! SETTINGS frame (RFC 9113 Section 6.5).
-
 use bytes::{BufMut, Bytes};
 
 use super::{FrameHeader, FrameType, be_u16, be_u32};
 use crate::h2::H2Error;
 use crate::h2::error::ErrorCode;
 
-/// Flags for SETTINGS frames.
 pub mod flags {
-    /// ACK (0x1) — acknowledges receipt of SETTINGS.
     pub const ACK: u8 = 0x1;
 }
 
-/// SETTINGS frame — connection configuration parameters.
 #[derive(Debug)]
 pub struct SettingsFrame {
-    /// Whether this is an ACK frame.
     pub ack: bool,
-    /// Settings parameters in wire order (order matters for fingerprinting).
     pub params: Vec<(u16, u32)>,
 }
 
 impl SettingsFrame {
-    /// Parse from header + payload.
     pub fn parse(header: FrameHeader, payload: Bytes) -> Result<Self, H2Error> {
         if header.stream_id != 0 {
             return Err(H2Error::Connection {
@@ -59,7 +51,6 @@ impl SettingsFrame {
         Ok(Self { ack, params })
     }
 
-    /// Create a SETTINGS ACK frame.
     pub fn ack() -> Self {
         Self {
             ack: true,
@@ -67,7 +58,6 @@ impl SettingsFrame {
         }
     }
 
-    /// Encode to bytes (header + payload).
     pub fn encode(&self, buf: &mut impl BufMut) {
         let payload_len = if self.ack { 0 } else { self.params.len() * 6 };
         let header = FrameHeader {

@@ -6,7 +6,6 @@ use crate::profile::{Browser, ProfileRegistry};
 use crate::tcp::TcpProfile;
 use crate::tls::{FingerprintConnector, ResolveFuture, Resolver};
 
-/// Resolver that records every host it is asked to resolve and always returns one fixed loopback address — so a test can prove the proxy dial is routed through the connector's resolver (no DNS leak) and lands on a known local listener.
 struct RecordingResolver {
     addr: SocketAddr,
     seen: Arc<Mutex<Vec<String>>>,

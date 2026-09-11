@@ -1,5 +1,3 @@
-//! Regression: HTTP/2 1xx informational responses (Cloudflare's 103 Early Hints) must be skipped, not returned as the final status.
-
 #[path = "h2_support/mod.rs"]
 mod support;
 
@@ -47,7 +45,6 @@ fn config() -> H2Config {
     }
 }
 
-/// Write one HEADERS frame through a shared encoder (continuous HPACK).
 async fn write_headers_block<S: AsyncWrite + Unpin>(
     s: &mut S,
     enc: &mut hpack::Encoder,

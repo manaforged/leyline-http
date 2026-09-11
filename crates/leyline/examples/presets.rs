@@ -1,5 +1,3 @@
-//! Browser-shaped request presets — one helper per fetch context.
-
 use leyline::{Browser, Platform, Session};
 
 #[tokio::main]

@@ -1,4 +1,3 @@
-//! Regression gate for the `connect_timeout` phase boundary.
 use std::time::{Duration, Instant};
 
 use leyline::{RetryPolicy, Session};

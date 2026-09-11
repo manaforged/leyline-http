@@ -1,5 +1,3 @@
-//! Session clones share the pool and cookie jar.
-
 use leyline::{Browser, Session};
 
 #[test]

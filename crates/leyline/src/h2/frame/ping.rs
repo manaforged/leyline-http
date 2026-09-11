@@ -1,27 +1,20 @@
-//! PING frame (RFC 9113 Section 6.7).
-
 use bytes::{BufMut, Bytes};
 
 use super::{FrameHeader, FrameType};
 use crate::h2::H2Error;
 use crate::h2::error::ErrorCode;
 
-/// Flags for PING frames.
 pub mod flags {
     pub const ACK: u8 = 0x1;
 }
 
-/// PING frame — connection liveness check.
 #[derive(Debug)]
 pub struct PingFrame {
-    /// Whether this is an ACK (response to a PING).
     pub ack: bool,
-    /// 8 bytes of opaque data.
     pub payload: [u8; 8],
 }
 
 impl PingFrame {
-    /// Parse from header + payload.
     pub fn parse(header: FrameHeader, payload: Bytes) -> Result<Self, H2Error> {
         if header.stream_id != 0 {
             return Err(H2Error::Connection {
@@ -43,7 +36,6 @@ impl PingFrame {
         Ok(Self { ack, payload: data })
     }
 
-    /// Encode to bytes.
     pub fn encode(&self, buf: &mut impl BufMut) {
         let header = FrameHeader {
             length: 8,

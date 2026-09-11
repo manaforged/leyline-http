@@ -1,4 +1,3 @@
-//! Adversarial HTTP/2 server tests: a hostile or buggy peer must not be able to make the client mis-behave.
 #[path = "h2_support/mod.rs"]
 mod support;
 
@@ -58,7 +57,6 @@ fn get_req(path: &str) -> (PseudoHeaders, CowHeaders) {
     )
 }
 
-/// Regression: the inbound frame-size cap must be *our* advertised SETTINGS_MAX_FRAME_SIZE (16384), never the peer's.
 #[tokio::test]
 async fn peer_max_frame_size_does_not_raise_our_inbound_cap() {
     let (client_io, mut server_io) = tokio::io::duplex(1 << 20);
@@ -109,7 +107,6 @@ async fn peer_max_frame_size_does_not_raise_our_inbound_cap() {
     server.abort();
 }
 
-/// Regression: a response HEADERS block with a missing or malformed `:status` must fail only *that* stream (RFC 9113 §8.3.1 malformed response) — the multiplexed connection must survive, and a later request on it must still succeed.
 #[tokio::test]
 async fn bad_status_fails_stream_but_not_connection() {
     for bad_headers in [
@@ -172,7 +169,6 @@ async fn bad_status_fails_stream_but_not_connection() {
     }
 }
 
-/// Regression: a trailer HEADERS block (a second header block after the response headers) that arrives WITHOUT END_STREAM is malformed per RFC 9113 §8.1 — trailers are the last thing on the stream.
 #[tokio::test]
 async fn trailers_without_end_stream_fail_the_stream() {
     let (client_io, mut server_io) = tokio::io::duplex(65_536);
@@ -212,7 +208,6 @@ async fn trailers_without_end_stream_fail_the_stream() {
     server.abort();
 }
 
-/// A trailer section must not contain pseudo-headers, even when it correctly terminates the stream.
 #[tokio::test]
 async fn pseudo_header_in_trailers_fails_the_stream() {
     let (client_io, mut server_io) = tokio::io::duplex(65_536);
@@ -251,7 +246,6 @@ async fn pseudo_header_in_trailers_fails_the_stream() {
     server.abort();
 }
 
-/// A PUSH_PROMISE field block mutates the shared HPACK table even when the promised stream is reset — it must be decoded regardless (RFC 9113 §4.3), or the next dynamic-index reference kills the connection.
 #[tokio::test]
 async fn push_promise_field_block_is_hpack_decoded_before_reset() {
     let (client_io, mut server_io) = tokio::io::duplex(65_536);
@@ -313,7 +307,6 @@ async fn push_promise_field_block_is_hpack_decoded_before_reset() {
     server.await.unwrap();
 }
 
-/// Trailers that correctly end the stream are delivered on the response.
 #[tokio::test]
 async fn trailers_with_end_stream_reach_the_response() {
     let (client_io, mut server_io) = tokio::io::duplex(65_536);
@@ -377,7 +370,6 @@ async fn write_goaway<S: AsyncWriteExt + Unpin>(server_io: &mut S, last_stream_i
     server_io.write_all(&frame).await.expect("goaway write");
 }
 
-/// GOAWAY(NO_ERROR) with a lower last_stream_id refuses the streams above it so the caller can retry them elsewhere.
 #[tokio::test]
 async fn goaway_no_error_refuses_streams_above_last_id() {
     let (client_io, mut server_io) = tokio::io::duplex(65_536);
@@ -410,7 +402,6 @@ async fn goaway_no_error_refuses_streams_above_last_id() {
     server.abort();
 }
 
-/// A streaming consumer that reads late must get every byte; the driver queues instead of cancelling.
 #[tokio::test]
 async fn slow_streaming_consumer_is_not_cancelled() {
     let (client_io, mut server_io) = tokio::io::duplex(1 << 20);
@@ -454,7 +445,6 @@ async fn slow_streaming_consumer_is_not_cancelled() {
     server.abort();
 }
 
-/// When the peer ends its side while our request body is still open, the client resets the stream with NO_ERROR instead of streaming into the void.
 #[tokio::test]
 async fn early_end_stream_resets_open_request_body() {
     let (client_io, mut server_io) = tokio::io::duplex(65_536);

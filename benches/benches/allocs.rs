@@ -1,17 +1,3 @@
-//! Allocation profile for the request hot path.
-//!
-//! This bench binary installs a wrapper around `std::alloc::System` that
-//! tallies allocation count and live-byte watermark on every alloc/dealloc.
-//! Criterion is then used only as a harness to print the numbers once per
-//! benchmark — throughput / ns-per-op measurements are a side effect.
-//!
-//! We report three numbers:
-//!   * Allocations per `send_request` on an already-warm connection
-//!     (serial path).
-//!   * Peak resident bytes while 100 concurrent streams are in flight.
-//!   * Allocations per `Session::builder().build()?`.
-//!
-//! Everything runs against the in-process mock HTTP/2 peer defined inline.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -31,9 +17,6 @@ use leyline::h2::frame::{
 use leyline::h2::hpack;
 use leyline::{Browser, Session};
 
-// ---------------------------------------------------------------------------
-// Counting allocator.
-// ---------------------------------------------------------------------------
 
 struct Counting;
 
@@ -48,7 +31,6 @@ unsafe impl GlobalAlloc for Counting {
             ALLOCS.fetch_add(1, Ordering::Relaxed);
             let new_live = LIVE_BYTES.fetch_add(layout.size() as u64, Ordering::Relaxed)
                 + layout.size() as u64;
-            // Relaxed peak update — good enough for reporting.
             let mut peak = PEAK_BYTES.load(Ordering::Relaxed);
             while new_live > peak {
                 match PEAK_BYTES.compare_exchange_weak(
@@ -106,9 +88,6 @@ fn reset_peak() {
     PEAK_BYTES.store(LIVE_BYTES.load(Ordering::Relaxed), Ordering::Relaxed);
 }
 
-// ---------------------------------------------------------------------------
-// Mock H2 server (copy of multiplex.rs to keep this bench self-contained).
-// ---------------------------------------------------------------------------
 
 fn test_config() -> H2Config {
     H2Config {
@@ -146,17 +125,12 @@ async fn read_exact<S: AsyncRead + Unpin>(s: &mut S, buf: &mut [u8]) -> std::io:
     s.read_exact(buf).await.map(|_| ())
 }
 
-/// Response shape the mock peer replies with. `Tiny` is a near-empty
-/// response (`:status` + 10-byte body); `Realistic` is a Chrome-typical
-/// response (12 headers + 2 KiB body) so the per-request numbers isolate
-/// response materialization on real traffic from the empty case.
 #[derive(Clone, Copy)]
 enum RespProfile {
     Tiny,
     Realistic,
 }
 
-/// Chrome-typical response header set (names lowercase, HTTP/2 form).
 const REALISTIC_HEADERS: &[(&str, &str)] = &[
     (":status", "200"),
     ("content-type", "text/html; charset=utf-8"),
@@ -223,8 +197,6 @@ async fn run_mock_server(mut io: DuplexStream, profile: RespProfile) {
     if read_exact(&mut io, &mut hdr_buf).await.is_err() {
         return;
     }
-    // Persistent encoder + static body keep per-request server-side allocs
-    // near-constant so the tiny-vs-realistic delta is client-dominated.
     let mut enc = hpack::Encoder::new();
     let headers = resp_headers(profile);
     let body = resp_body(profile);
@@ -288,9 +260,6 @@ fn req() -> (
     )
 }
 
-// ---------------------------------------------------------------------------
-// Bench: allocations per send_request on a warm connection.
-// ---------------------------------------------------------------------------
 
 fn bench_per_request(c: &mut Criterion) {
     let mut g = c.benchmark_group("allocs");
@@ -308,14 +277,12 @@ fn per_request_profile(
 ) {
     let rt = Runtime::new().expect("tokio runtime");
 
-    // Build the warm connection outside the measurement window.
     let (handle, server_task, _driver) = rt.block_on(async {
         let (cio, sio) = tokio::io::duplex(1024 * 1024);
         let server = tokio::spawn(run_mock_server(sio, profile));
         let (h, d) = ClientConnection::start(cio, test_config())
             .await
             .expect("handshake");
-        // Warm the driver by doing 1 request first.
         let (p, hh) = req();
         let _ = h.send_request(p, hh, None).await.unwrap();
         (h, server, d)
@@ -325,9 +292,6 @@ fn per_request_profile(
     g.bench_function(label, |b| {
         b.iter_custom(|iters| {
             rt.block_on(async {
-                // Snapshot total alloc count over `iters * N` requests and
-                // divide out. Reports time in ns-per-request; the allocation
-                // count is emitted to stderr once per call.
                 let start_allocs = ALLOCS.load(Ordering::Relaxed);
                 let t0 = std::time::Instant::now();
                 for _ in 0..iters {
@@ -356,9 +320,6 @@ fn per_request_profile(
     });
 }
 
-// ---------------------------------------------------------------------------
-// Bench: peak live bytes while 100 concurrent streams are in flight.
-// ---------------------------------------------------------------------------
 
 fn bench_concurrent_footprint(c: &mut Criterion) {
     let rt = Runtime::new().expect("tokio runtime");
@@ -413,9 +374,6 @@ fn bench_concurrent_footprint(c: &mut Criterion) {
     g.finish();
 }
 
-// ---------------------------------------------------------------------------
-// Bench: allocations per Session::builder().build()?.
-// ---------------------------------------------------------------------------
 
 fn bench_session_build_allocs(c: &mut Criterion) {
     let mut g = c.benchmark_group("allocs");
@@ -441,15 +399,7 @@ fn bench_session_build_allocs(c: &mut Criterion) {
     g.finish();
 }
 
-// ---------------------------------------------------------------------------
-// Bench: allocations to decode + materialize a response header block.
-// ---------------------------------------------------------------------------
 
-// Decode a realistic response header block, then materialize the non-pseudo
-// headers into a `Vec<(String, String)>` — what the H2 driver does per response
-// (recv.rs `on_headers`). `clone` mirrors copying each decoded String into the
-// destination; `move` consumes the decoded headers so their Strings move in.
-// The gap is the per-header allocation the move path eliminates.
 fn bench_response_header_materialize(c: &mut Criterion) {
     let mut enc = hpack::Encoder::new();
     let block = enc.encode_header_block(&[

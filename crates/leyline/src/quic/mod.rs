@@ -1,5 +1,3 @@
-//! HTTP/3 over QUIC with browser-profiled fingerprinting.
-
 #![forbid(unsafe_code)]
 mod config;
 mod connection;

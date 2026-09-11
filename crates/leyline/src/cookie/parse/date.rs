@@ -1,10 +1,7 @@
-//! RFC 6265 cookie-date token classifier and validator.
-
 use std::time::{Duration, SystemTime};
 
 use super::days_since_epoch;
 
-/// Fields collected from the date tokens.
 #[derive(Default)]
 pub(super) struct Date {
     day: u32,
@@ -16,7 +13,6 @@ pub(super) struct Date {
     time: bool,
 }
 
-/// Classify one date token and store it.
 pub(super) fn token(d: &mut Date, tok: &str) {
     if !d.time && tok.contains(':') {
         let parts: Vec<&str> = tok.split(':').collect();
@@ -46,7 +42,6 @@ pub(super) fn token(d: &mut Date, tok: &str) {
     }
 }
 
-/// Map a three-letter month name to its number, or 0.
 fn month(tok: &str) -> u32 {
     match tok.get(..3).map(|s| s.to_lowercase()).as_deref() {
         Some("jan") => 1,
@@ -65,7 +60,6 @@ fn month(tok: &str) -> u32 {
     }
 }
 
-/// Turn collected fields into a timestamp, rejecting an incomplete date.
 pub(super) fn stamp(d: &Date) -> Option<SystemTime> {
     if d.day == 0 || d.month == 0 || d.year == 0 {
         return None;

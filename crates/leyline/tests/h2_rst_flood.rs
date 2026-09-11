@@ -1,4 +1,3 @@
-//! RST_STREAM flood detector tests (CVE-2023-44487 defense-in-depth).
 #![expect(
     clippy::panic,
     reason = "test harness helper: explicit panic on unexpected error shape is the assertion"

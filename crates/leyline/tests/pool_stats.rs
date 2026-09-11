@@ -1,5 +1,3 @@
-//! PoolStats counters follow checkout, install, and evict.
-
 use leyline::pool::{DEFAULT_IDLE_TIMEOUT, DEFAULT_MAX_CONNECTIONS, Pool, PoolStats};
 use std::time::Duration;
 

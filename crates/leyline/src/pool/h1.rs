@@ -1,5 +1,3 @@
-//! HTTP/1.1 keep-alive pool entry point.
-
 use std::borrow::Cow;
 use std::io;
 use std::pin::Pin;
@@ -20,41 +18,27 @@ use crate::pool::types::PoolKey;
 use crate::pool::types::Transport;
 use crate::pool::{H1Slot, Pool, TlsInfo, make_key};
 
-/// Maximum request-line + headers size.
 pub const MAX_H1_HEADER_BYTES: usize = 64 * 1024;
 
-/// Maximum body size the H1 pool will accept or send.
 pub const MAX_H1_BODY_BYTES: usize = 100 * 1024 * 1024;
 
-/// Marker trait for the two concrete I/O types we hold in the pool: `TlsStream` over TCP for `https://` and bare `TcpStream` for `http://`.
 pub trait H1Io: AsyncRead + AsyncWrite + Send + Unpin + 'static {}
 impl<T> H1Io for T where T: AsyncRead + AsyncWrite + Send + Unpin + 'static {}
 
-/// Request-target style: origin-form `/path?q=1` for direct connections, absolute-form `http://host/path?q=1` for plaintext HTTP proxies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum H1Target {
-    /// `GET /path?q=1 HTTP/1.1`
     OriginForm,
-    /// `GET http://host/path?q=1 HTTP/1.1`
     AbsoluteForm,
 }
 
-/// Request body shape accepted by [`send_request_h1_pooled`].
 pub enum H1Body {
-    /// No body.
     Empty,
-    /// A fully-materialised byte buffer.
     Buffered(Bytes),
-    /// A streaming body with a known exact content length.
     FixedStream {
-        /// The stream of body chunks.
         stream: Pin<Box<dyn futures_util::Stream<Item = std::io::Result<Bytes>> + Send + 'static>>,
-        /// Exact body length in bytes.
         length: u64,
     },
-    /// A streaming body with unknown length.
     ChunkedStream {
-        /// The stream of body chunks.
         stream: Pin<Box<dyn futures_util::Stream<Item = std::io::Result<Bytes>> + Send + 'static>>,
     },
 }
@@ -68,47 +52,32 @@ impl H1Body {
     }
 }
 
-/// Response body produced by the H1 pool.
 pub enum H1ResponseBody {
-    /// The fully-drained response body.
     Buffered(Vec<u8>),
-    /// An incrementally-streamed body.
     Streaming(BodyStream),
 }
 
-/// Response returned by [`send_request_h1_pooled`].
 pub struct H1Response {
-    /// HTTP status code.
     pub status: u16,
-    /// Response headers in wire order.
     pub headers: Vec<(String, String)>,
-    /// Response body.
     pub body: H1ResponseBody,
-    /// TLS handshake snapshot for the connection that served the request, or `None` for plaintext HTTP.
     pub tls: Option<TlsInfo>,
 }
 
-/// Errors surfaced by [`send_request_h1_pooled`].
 #[derive(Debug, thiserror::Error)]
 pub enum H1PooledError {
-    /// Caller misconfiguration (bad URL, unsupported scheme, …).
     #[error("{0}")]
     Config(String),
-    /// TLS handshake failure.
     #[error(transparent)]
     Tls(#[from] TlsError),
-    /// Plain I/O error during connect, send, or receive.
     #[error(transparent)]
     Io(#[from] std::io::Error),
-    /// Protocol-level error parsing a response (bad status line, oversize headers, malformed chunked body, …).
     #[error("http: {0}")]
     Http(String),
-    /// The connection closed before the response was fully received — a transport-level EOF mid-exchange, distinct from a framing error.
     #[error("connection closed: {0}")]
     ConnectionClosed(String),
 }
 
-/// Non-blocking liveness probe for a pooled keep-alive socket.
 fn conn_is_live(io: &mut dyn H1Io) -> bool {
     use std::task::{Context, Poll};
     use tokio::io::ReadBuf;
@@ -123,7 +92,6 @@ fn conn_is_live(io: &mut dyn H1Io) -> bool {
     }
 }
 
-/// Check out a pooled H1 connection that is still alive at the socket level.
 fn checkout_live_h1(pool: &Arc<Pool>, key: &PoolKey) -> Option<(H1Slot, TlsInfo)> {
     while let Some((mut slot, tls)) = pool.checkout_h1(key) {
         if conn_is_live(slot.io.as_mut()) {
@@ -134,7 +102,6 @@ fn checkout_live_h1(pool: &Arc<Pool>, key: &PoolKey) -> Option<(H1Slot, TlsInfo)
     None
 }
 
-/// Send an HTTP/1.1 request over a pooled connection, opening a fresh TCP + TLS handshake on miss.
 #[tracing::instrument(
     name = "pool.send_request_h1",
     level = "debug",
@@ -286,7 +253,6 @@ fn tls_for_scheme(scheme: &str, tls: &TlsInfo) -> Option<TlsInfo> {
     }
 }
 
-/// Open a fresh TCP (+ optional TLS) stream for the given destination and return it as a boxed `H1Io` alongside the TLS snapshot.
 async fn open_new(
     connector: &FingerprintConnector,
     scheme: &str,
@@ -337,30 +303,22 @@ async fn open_new(
     }
 }
 
-/// Wire-level response carried back by the exchange helper.
 struct WireResponse {
     status: u16,
     headers: Vec<(String, String)>,
     body: Vec<u8>,
 }
 
-/// Bounded backpressure for the streaming pump: the pump blocks on `send` when the consumer is behind, so a slow reader naturally rate-limits the socket reads instead of buffering an unbounded body in memory.
 const STREAM_CHANNEL_DEPTH: usize = 16;
 
-/// How a response body is delimited on the wire.
 #[derive(Debug, Clone, Copy)]
 enum BodyFraming {
-    /// No body (HEAD, 101, 204, 304).
     None,
-    /// Exact length from `Content-Length`.
     Fixed(u64),
-    /// `Transfer-Encoding: chunked`.
     Chunked,
-    /// No framing — the body ends when the server closes the connection.
     ToClose,
 }
 
-/// Parsed response head plus the framing of the not-yet-read body and the body bytes already buffered while reading the header block.
 struct H1Head {
     status: u16,
     headers: Vec<(String, String)>,
@@ -369,7 +327,6 @@ struct H1Head {
     initial_body: Vec<u8>,
 }
 
-/// Owns the H1 connection for the lifetime of a streamed response body and reinstates it to the pool after a clean full drain.
 struct H1StreamPump {
     io: Box<dyn H1Io>,
     permit: OwnedSemaphorePermit,
@@ -379,15 +336,12 @@ struct H1StreamPump {
     framing: BodyFraming,
     initial_body: Vec<u8>,
     reusable: bool,
-    /// Count a pool install only for a fresh connection — a reused one was already counted when first installed.
     count_install: bool,
     tx: mpsc::Sender<io::Result<Bytes>>,
 }
 
-/// Streaming variant of [`send_request_h1_pooled`]: reads the response head, then hands the connection to a background pump that forwards body chunks and reinstates the connection on a clean full drain.
 type ParsedHead = (u16, Vec<(String, String)>, u8);
 
-/// Parsed HTTP/1.x response: status + headers + body + http/1.x minor version.
 type ParsedResponse = (u16, Vec<(String, String)>, Vec<u8>, u8);
 
 async fn read_chunk_trailers<S>(stream: &mut S, buf: &mut Vec<u8>) -> Result<(), H1PooledError>
@@ -404,7 +358,6 @@ where
     }
 }
 
-/// Upper bound on a single CRLF-delimited line inside a chunked body (size lines and trailers).
 const MAX_H1_CHUNK_LINE_BYTES: usize = 16 * 1024;
 
 async fn read_until_crlf<S>(stream: &mut S, buf: &mut Vec<u8>) -> Result<usize, H1PooledError>
@@ -484,7 +437,6 @@ fn contains_header(headers: &[(String, String)], name: &str) -> bool {
     headers.iter().any(|(k, _)| k.eq_ignore_ascii_case(name))
 }
 
-/// Predicate: `s` is a non-empty sequence of RFC 9110 `tchar`s — the byte set permitted for HTTP method names and header names.
 fn is_valid_token(s: &str) -> bool {
     if s.is_empty() {
         return false;
@@ -513,13 +465,11 @@ fn is_valid_token(s: &str) -> bool {
     })
 }
 
-/// Predicate: `s` is a valid HTTP header field-value.
 fn is_valid_header_value(s: &str) -> bool {
     s.bytes()
         .all(|b| matches!(b, b'\t' | b' '..=b'~' | 0x80..=0xFF))
 }
 
-/// Predicate: `s` is a valid HTTP request-target.
 fn is_valid_request_target(s: &str) -> bool {
     if s.is_empty() {
         return false;

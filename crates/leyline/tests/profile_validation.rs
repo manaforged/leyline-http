@@ -1,4 +1,3 @@
-//! Negative-path validation for browser profiles.
 use leyline::h2::H2Config;
 use leyline::profile::{ALL_BROWSERS, BrowserProfile, H2Profile, ProfileRegistry};
 use leyline::{Browser, Platform, TlsContext, TlsMinVersion};
@@ -11,12 +10,10 @@ const ALL_PLATFORMS: [Platform; 5] = [
     Platform::IOS,
 ];
 
-/// A real, valid base profile to mutate one field at a time.
 fn chrome_h2() -> H2Profile {
     chrome_profile().h2
 }
 
-/// An owned clone of a real built-in profile, for one-field mutation tests.
 fn chrome_profile() -> BrowserProfile {
     ProfileRegistry::builtin()
         .get_browser(Browser::Chrome147)
@@ -153,7 +150,6 @@ fn real_cert_compression_codepoints_still_build() {
     );
 }
 
-/// A cert-compression codepoint whose codec feature is compiled out must name the feature, not vanish from the ClientHello.
 #[test]
 #[cfg(not(feature = "compression-zstd"))]
 fn cert_compression_without_its_feature_names_the_feature() {
@@ -173,7 +169,6 @@ const FIREFOX_152: &str = include_str!("../profiles/firefox/152.toml");
 const FIREFOX_152_PERMUTATION: &str =
     "[0, 23, 65281, 10, 11, 35, 16, 5, 34, 18, 51, 43, 13, 45, 28, 27, 65037]";
 
-/// The real Firefox 152 profile with its captured extension order swapped out.
 fn firefox_152_ordered(list: &str) -> String {
     let captured = format!("extension_permutation = {FIREFOX_152_PERMUTATION}");
     assert!(
@@ -184,7 +179,6 @@ fn firefox_152_ordered(list: &str) -> String {
     FIREFOX_152.replace(&captured, &format!("extension_permutation = {list}"))
 }
 
-/// Load Firefox 152 under a broken order and return the rejection message.
 fn permutation_load_error(list: &str) -> String {
     BrowserProfile::from_toml(&firefox_152_ordered(list))
         .expect_err("a broken extension_permutation loaded successfully")
@@ -276,7 +270,6 @@ fn every_builtin_profile_declares_verified_against() {
     }
 }
 
-/// A minimal, permutation-free profile that parses through `from_toml`.
 fn minimal_profile_toml(extra: &str) -> String {
     format!(
         r#"
@@ -530,7 +523,6 @@ fn newest_chrome_browser() -> Browser {
         .expect("at least one Chrome-family profile in ALL_BROWSERS")
 }
 
-/// Newest Chrome (derived from ALL_BROWSERS, not a hardcoded major): dir version, meta.version, and a **required** captured_against anchor agree.
 #[test]
 fn newest_chrome_profile_metadata_is_self_consistent() {
     let reg = ProfileRegistry::builtin();
@@ -560,7 +552,6 @@ fn newest_chrome_profile_metadata_is_self_consistent() {
     );
 }
 
-/// Hermetic staleness floor on the derived newest Chrome major.
 #[test]
 fn newest_chrome_profile_is_not_neglected() {
     const FRESHNESS_FLOOR: u32 = 145;
@@ -574,7 +565,6 @@ fn newest_chrome_profile_is_not_neglected() {
     );
 }
 
-/// Live freshness gate: newest built-in Chrome within 1 major of Stable.
 #[test]
 #[ignore = "network: fetches Chrome for Testing; run on schedule"]
 fn newest_chrome_profile_within_two_majors_of_current_stable() {

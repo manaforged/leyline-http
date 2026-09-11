@@ -1,5 +1,3 @@
-//! Driver command handling: on_command, start_request, start_request_ex, start_extended_connect.
-
 use std::collections::VecDeque;
 use std::io;
 
@@ -118,7 +116,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         }
     }
 
-    /// A capacity rejection (`RefusedStream` from OUR OWN admission check, not a server reset) is deferrable: the request parks in `pending` and starts when a stream slot frees.
     fn deferrable_capacity_error(e: &H2Error) -> bool {
         matches!(
             e,
@@ -129,7 +126,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         )
     }
 
-    /// Start deferred requests, in order, while the peer's stream budget allows.
     pub(super) async fn drain_pending(&mut self) -> Result<(), H2Error> {
         while !self.pending.is_empty() && self.peer_ready() && self.admit_new_stream().is_ok() {
             if let Some(cmd) = self.pending.pop_front() {
@@ -274,7 +270,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         }
     }
 
-    /// Open an RFC 8441 extended CONNECT stream.
     pub(super) async fn start_extended_connect(
         &mut self,
         pseudo: &PseudoHeaders,

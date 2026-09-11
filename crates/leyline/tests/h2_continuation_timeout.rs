@@ -1,4 +1,3 @@
-//! Regression gate: CONTINUATION reassembly must be bounded in wall-clock time, not just in total bytes.
 #[path = "h2_support/mod.rs"]
 mod support;
 
@@ -10,7 +9,6 @@ use leyline::h2::error::ErrorCode;
 use leyline::h2::frame::FrameType;
 use support::*;
 
-/// Short reassembly deadline so the test measures the timeout in milliseconds rather than the production 10 s.
 const REASSEMBLY_TIMEOUT: Duration = Duration::from_millis(250);
 
 fn test_config() -> H2Config {

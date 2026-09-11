@@ -1,5 +1,3 @@
-//! Bare (non-impersonating) default session behaviour.
-
 use crate::Session;
 use crate::profile::{Browser, Platform, Preset};
 use crate::{Kind, Request, RequestBuilder};

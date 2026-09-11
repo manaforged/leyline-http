@@ -1,6 +1,5 @@
 use super::*;
 
-/// Every family this enum names, so the test walks the whole set.
 const ALL_FAMILIES: [Family; 7] = [
     Family::Chrome,
     Family::Brave,

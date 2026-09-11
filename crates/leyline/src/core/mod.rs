@@ -1,5 +1,3 @@
-//! Session, transport, request builder, and response types.
-
 mod body;
 mod body_stream;
 mod config;

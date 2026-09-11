@@ -1,5 +1,3 @@
-//! Read the per-connection wire-fingerprint audit block off a response.
-
 use leyline::{Browser, Platform, Session};
 
 const URL: &str = "https://example.com";

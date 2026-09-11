@@ -1,22 +1,16 @@
-//! WINDOW_UPDATE frame (RFC 9113 Section 6.9).
-
 use bytes::{BufMut, Bytes};
 
 use super::{FrameHeader, FrameType, be_u32};
 use crate::h2::H2Error;
 use crate::h2::error::ErrorCode;
 
-/// WINDOW_UPDATE frame — flow control increment.
 #[derive(Debug)]
 pub struct WindowUpdateFrame {
-    /// Stream to credit (0 means connection-level window).
     pub stream_id: u32,
-    /// Window size increment (1 to 2^31-1).
     pub increment: u32,
 }
 
 impl WindowUpdateFrame {
-    /// Parse from header + payload.
     pub fn parse(header: FrameHeader, payload: Bytes) -> Result<Self, H2Error> {
         if payload.len() != 4 {
             return Err(H2Error::Connection {
@@ -50,7 +44,6 @@ impl WindowUpdateFrame {
         })
     }
 
-    /// Encode to bytes.
     pub fn encode(&self, buf: &mut impl BufMut) {
         let header = FrameHeader {
             length: 4,

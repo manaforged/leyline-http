@@ -131,7 +131,6 @@ fn cookie_date_parsing() {
     assert!(t.is_some());
 }
 
-/// Pre-epoch `Expires` dates must not panic: a negative `days_from_epoch` cast to `u64` and multiplied by 86400 overflows under `debug_assertions`.
 #[test]
 fn pre_epoch_expires_does_not_overflow() {
     let url = test_url("https://example.com/");
@@ -144,7 +143,6 @@ fn pre_epoch_expires_does_not_overflow() {
     assert_eq!(t, Some(SystemTime::UNIX_EPOCH));
 }
 
-/// Strict Secure Cookies (Chrome 52+): a Secure cookie set from a plaintext origin is ignored.
 #[test]
 fn secure_cookie_requires_secure_origin() {
     assert!(parse_set_cookie("a=1; Secure; Path=/", &test_url("http://example.com/")).is_none());
@@ -153,7 +151,6 @@ fn secure_cookie_requires_secure_origin() {
     assert!(parse_set_cookie("a=1; Path=/", &test_url("http://example.com/")).is_some());
 }
 
-/// RFC 6265bis §5.5: on an IP-literal host, a `Domain` attribute is ignored and the cookie is host-only.
 #[test]
 fn ip_host_ignores_domain_attribute() {
     let url = test_url("https://1.2.3.4/");
@@ -166,7 +163,6 @@ fn ip_host_ignores_domain_attribute() {
     assert!(c6.host_only);
 }
 
-/// The jar-level consequence of `ip_host_ignores_domain_attribute`: a cookie set on one raw-IP host (even with a crafted `Domain=`) is never visible on a sibling IP host.
 #[test]
 fn ip_domain_cookie_does_not_reach_sibling_ip() {
     use crate::cookie::Jar;
@@ -177,7 +173,6 @@ fn ip_domain_cookie_does_not_reach_sibling_ip() {
     assert_eq!(jar.get_cookie("https://1.2.3.4/", "k"), Some("v".into()));
 }
 
-/// RFC 6265bis §4.1.3: `__Secure-`/`__Host-` prefix matching is case-insensitive.
 #[test]
 fn cookie_prefixes_are_case_insensitive() {
     let url = test_url("https://example.com/");
@@ -194,7 +189,6 @@ fn cookie_prefixes_are_case_insensitive() {
     }
 }
 
-/// RFC 6265bis §5.6: control characters in a cookie name or value must be rejected at parse.
 #[test]
 fn ctl_bytes_in_name_or_value_are_rejected() {
     let url = test_url("https://example.com/");

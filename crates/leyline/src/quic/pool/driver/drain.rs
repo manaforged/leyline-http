@@ -1,9 +1,6 @@
-//! One handler per HTTP/3 event, driven by the poll loop in `Drain::run`.
-
 use super::*;
 
 impl Drain<'_> {
-    /// Poll until quiche has no further event, dispatching each to its handler.
     pub(super) fn run(&mut self) -> Result<bool, String> {
         loop {
             match self.h3.poll(self.conn) {
@@ -19,7 +16,6 @@ impl Drain<'_> {
         }
     }
 
-    /// Record a response or trailer header block, releasing the head when the stream is streaming.
     fn headers(&mut self, id: u64, list: &[quiche::h3::Header]) {
         let list = list
             .iter()
@@ -48,7 +44,6 @@ impl Drain<'_> {
         }
     }
 
-    /// Read the body bytes quiche has buffered, either forwarding or accumulating them.
     fn data(&mut self, id: u64) {
         let Some(stream) = self.streams.get_mut(&id) else {
             self.discard(id);
@@ -73,7 +68,6 @@ impl Drain<'_> {
         self.buffer(id);
     }
 
-    /// Drop the body of a stream that is no longer tracked.
     fn discard(&mut self, id: u64) {
         while let Ok(n) = self.h3.recv_body(self.conn, id, self.scratch) {
             if n == 0 {
@@ -82,7 +76,6 @@ impl Drain<'_> {
         }
     }
 
-    /// Accumulate the body of a buffered stream under the response-size budget.
     fn buffer(&mut self, id: u64) {
         let max = self.max_body;
         let Some(stream) = self.streams.get_mut(&id) else {
@@ -110,7 +103,6 @@ impl Drain<'_> {
         }
     }
 
-    /// Complete a stream the peer finished, delivering the buffered response when there is one.
     fn finish(&mut self, id: u64) {
         let invalid = self
             .streams
@@ -153,7 +145,6 @@ impl Drain<'_> {
         }
     }
 
-    /// Handle a peer stream reset: lower the admission cap, retry once, else report the failure.
     fn reset(&mut self, id: u64, e: u64) {
         if e == 0x10b {
             let cur = self.streams.len().max(1);
@@ -191,7 +182,6 @@ impl Drain<'_> {
     }
 }
 
-/// Close both halves of a stream after a message error.
 fn close(conn: &mut quiche::Connection, id: u64, code: u64) {
     shutdown(conn, id, quiche::Shutdown::Read, code);
     shutdown(conn, id, quiche::Shutdown::Write, 0);

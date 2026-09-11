@@ -1,6 +1,5 @@
 use super::*;
 
-/// A mock resolver that always returns the same static address list.
 struct StaticResolver(pub Vec<SocketAddr>);
 
 impl Resolver for StaticResolver {
@@ -10,7 +9,6 @@ impl Resolver for StaticResolver {
     }
 }
 
-/// A resolver that always errors out.
 struct FailingResolver;
 
 impl Resolver for FailingResolver {

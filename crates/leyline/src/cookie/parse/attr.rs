@@ -1,12 +1,9 @@
-//! Per-attribute handling for the Set-Cookie attribute section.
-
 use std::time::Duration;
 
 use crate::cookie::record::SameSite;
 
 use super::{CookieAttributes, parse_cookie_date};
 
-/// Store one `name[=value]` attribute, ignoring unknown names.
 pub(super) fn set(a: &mut CookieAttributes, name: &str, value: Option<&str>) {
     match name.to_lowercase().as_str() {
         "domain" => {
@@ -47,7 +44,6 @@ pub(super) fn set(a: &mut CookieAttributes, name: &str, value: Option<&str>) {
     }
 }
 
-/// Map a `SameSite` value, or `None` when it is unknown.
 fn same_site(v: &str) -> Option<SameSite> {
     match v.to_lowercase().as_str() {
         "strict" => Some(SameSite::Strict),
@@ -57,7 +53,6 @@ fn same_site(v: &str) -> Option<SameSite> {
     }
 }
 
-/// Map a `Max-Age` value; a non-positive age is zero.
 fn max_age(v: &str) -> Option<Duration> {
     let secs = v.parse::<i64>().ok()?;
     if secs <= 0 {

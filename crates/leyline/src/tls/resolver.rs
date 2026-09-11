@@ -1,21 +1,15 @@
-//! Pluggable DNS resolution for the TLS connector.
-
 use std::future::Future;
 use std::io;
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::pin::Pin;
 
-/// A boxed future returned by [`Resolver::resolve`].
 pub type ResolveFuture<'a> =
     Pin<Box<dyn Future<Output = Result<Vec<SocketAddr>, io::Error>> + Send + 'a>>;
 
-/// Asynchronous host-to-`SocketAddr` resolver.
 pub trait Resolver: Send + Sync + 'static {
-    /// Resolve `host` and `port` to a list of socket addresses.
     fn resolve<'a>(&'a self, host: &'a str, port: u16) -> ResolveFuture<'a>;
 }
 
-/// Default resolver: blocking `getaddrinfo(3)` off-thread via [`tokio::task::spawn_blocking`].
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SystemResolver;
 

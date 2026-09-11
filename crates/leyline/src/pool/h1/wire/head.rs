@@ -1,8 +1,5 @@
-//! Request-line construction, header validation, and the framing decision.
-
 use super::*;
 
-/// Reject a method, header name, or header value that carries bytes the wire format forbids.
 pub(super) fn validate(method: &str, headers: &[(String, String)]) -> Result<(), H1PooledError> {
     if !is_valid_token(method) {
         return Err(H1PooledError::Config(format!(
@@ -24,7 +21,6 @@ pub(super) fn validate(method: &str, headers: &[(String, String)]) -> Result<(),
     Ok(())
 }
 
-/// Build the request target and the authority the Host header uses.
 pub(super) fn target(url: &url::Url, target: H1Target) -> Result<(String, String), H1PooledError> {
     let host = url
         .host_str()
@@ -48,7 +44,6 @@ pub(super) fn target(url: &url::Url, target: H1Target) -> Result<(String, String
     Ok((request_target, authority))
 }
 
-/// Choose the body framing and append the Content-Length or Transfer-Encoding header it needs.
 pub(super) fn frame(method: &str, headers: &mut Vec<(String, String)>, body: H1Body) -> Framing {
     let has_cl = contains_header(headers, "content-length");
     let has_te = contains_header(headers, "transfer-encoding");
@@ -80,7 +75,6 @@ pub(super) fn frame(method: &str, headers: &mut Vec<(String, String)>, body: H1B
     }
 }
 
-/// Serialise the request line and the header block.
 pub(super) fn head(method: &str, request_target: &str, headers: &[(String, String)]) -> Vec<u8> {
     let mut req = Vec::new();
     req.extend_from_slice(format!("{method} {request_target} HTTP/1.1\r\n").as_bytes());

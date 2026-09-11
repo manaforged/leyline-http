@@ -1,51 +1,33 @@
-//! HEADERS frame (RFC 9113 Section 6.2).
-
 use bytes::{BufMut, Bytes};
 
 use super::{FrameHeader, FrameType, be_u32};
 use crate::h2::H2Error;
 use crate::h2::error::ErrorCode;
 
-/// Flags for HEADERS frames.
 pub mod flags {
-    /// Marks the stream as half-closed after this frame.
     pub const END_STREAM: u8 = 0x1;
-    /// Indicates that the header block ends with this frame.
     pub const END_HEADERS: u8 = 0x4;
-    /// The payload starts with an octet count and trailing padding.
     pub const PADDED: u8 = 0x8;
-    /// Priority fields are present before the header block.
     pub const PRIORITY: u8 = 0x20;
 }
 
-/// Stream dependency for PRIORITY-flagged HEADERS.
 #[derive(Debug, Clone, Copy)]
 pub struct StreamDependency {
-    /// Whether this is an exclusive dependency.
     pub exclusive: bool,
-    /// The stream this depends on.
     pub dependency_id: u32,
-    /// Weight (1-256, wire value is 0-255).
     pub weight: u8,
 }
 
-/// HEADERS frame — carries header block fragment + optional priority.
 #[derive(Debug)]
 pub struct HeadersFrame {
-    /// Stream this header block belongs to.
     pub stream_id: u32,
-    /// `END_STREAM` flag — the sender won't send any more DATA on this stream.
     pub end_stream: bool,
-    /// `END_HEADERS` flag — no CONTINUATION frames follow.
     pub end_headers: bool,
-    /// Optional priority/dependency hint when the `PRIORITY` flag is set.
     pub priority: Option<StreamDependency>,
-    /// Raw HPACK-encoded header block fragment.
     pub fragment: Bytes,
 }
 
 impl HeadersFrame {
-    /// Parse from header + payload.
     pub fn parse(header: FrameHeader, payload: Bytes) -> Result<Self, H2Error> {
         if header.stream_id == 0 {
             return Err(H2Error::Connection {
@@ -112,7 +94,6 @@ impl HeadersFrame {
         })
     }
 
-    /// Encode to bytes.
     pub fn encode(&self, buf: &mut impl BufMut) {
         let mut flags = 0u8;
         if self.end_stream {
