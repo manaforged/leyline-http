@@ -13,7 +13,7 @@ Thanks for your interest in Leyline.
    It runs formatting, workspace Clippy with warnings denied, rustdoc with
    warnings denied, the workspace test suite, `cargo-deny`, package and
    consumer checks, and with `--full` the live fingerprint and smoke
-   suites. The gate needs Python 3, Node, the 1.88 toolchain through
+   suites. The gate needs Python 3, Node, the 1.98 toolchain through
    rustup, and `cargo-deny` installed; the live suites need network access.
 
    Tests that need the network are marked `#[ignore]`. Run them with

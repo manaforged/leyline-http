@@ -144,9 +144,9 @@ encoding_rs = { version = "0.8", optional = true }
 # Mozilla Public Suffix List (compile-time embedded) for cookie
 # registrable-domain + public-suffix checks. Non-optional: the cookie module
 # compiles unconditionally and the list cannot be hand-rolled.
-psl = "2"
+psl = "2.1"
 futures-util = "0.3"
-async-stream = { version = "0.3", optional = true }
+async-stream = { version = "0.3.5", optional = true }
 # Non-optional: h2::client::H2ConnectStream needs PollSender for
 # cancel-safe AsyncWrite backpressure (waker survives across polls).
 tokio-util = { version = "0.7", features = ["io"] }
@@ -158,7 +158,7 @@ tower-layer = { version = "0.3", optional = true }
 
 # -- compression (optional: each codec is pulled in by its own feature, for
 #    both HTTP body compression and RFC 8879 certificate decompression)
-flate2 = { version = "1", optional = true }
+flate2 = { version = "1.0.14", optional = true }
 brotli = { version = "8", optional = true }
 zstd = { version = "0.13", optional = true }
 
@@ -186,7 +186,7 @@ base64 = { workspace = true }
 # live H3 streaming test, which decodes the raw streamed body per its
 # content-encoding. zstd is a normal dep of leyline but integration tests only
 # see dev-deps, so it is restated here.
-flate2 = "1"
+flate2 = "1.0.14"
 brotli = "8"
 zstd = "0.13"
 

@@ -4,7 +4,7 @@ HTTP client that mimics browsers on the wire.
 
 ## Requirements
 
-Rust 1.88 or later and Tokio. Prebuilt BoringSSL libraries and Rust bindings
+Rust 1.98 or later and Tokio. Prebuilt BoringSSL libraries and Rust bindings
 are included for:
 
 - `aarch64-apple-darwin`

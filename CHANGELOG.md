@@ -25,3 +25,8 @@ changes or a higher minimum Rust version require a new minor release, such as
   and arm64 with glibc, and Windows x86_64 with MSVC.
 - A [user guide](crates/leyline/docs/guide/README.md) covering requests,
   responses, sessions, and supported targets.
+
+### Changed
+
+- The minimum supported Rust version is 1.98, the current stable at
+  release time.

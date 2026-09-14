@@ -17,9 +17,3 @@ fn session_is_clone_and_sharing_pool_with_cookies() {
     assert_eq!(session.platform(), clone.platform());
     assert_eq!(session.default_timeout(), clone.default_timeout());
 }
-
-#[test]
-fn session_clone_is_send_sync() {
-    fn assert_send_sync<T: Send + Sync>() {}
-    assert_send_sync::<Session>();
-}

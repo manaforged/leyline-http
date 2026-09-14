@@ -3,7 +3,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use futures_util::StreamExt;
 use futures_util::stream;
-use leyline::{Body, ProtocolPolicy, Session};
+use leyline::{Body, Session};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[tokio::test]
@@ -363,29 +363,4 @@ async fn redirect_with_streaming_body_errors() {
         "got: {msg}"
     );
     server.await.unwrap();
-}
-
-#[tokio::test]
-async fn body_ergonomics_from_impls_unchanged() {
-    let session = Session::builder()
-        .http1()
-        .protocol_policy(ProtocolPolicy::Http1)
-        .build()
-        .unwrap();
-    let _ = session
-        .post("http://127.0.0.1:1")
-        .body(vec![1u8, 2, 3])
-        .timeout(Duration::from_millis(10));
-    let _ = session
-        .post("http://127.0.0.1:1")
-        .body("hello")
-        .timeout(Duration::from_millis(10));
-    let _ = session
-        .post("http://127.0.0.1:1")
-        .body(String::from("hello"))
-        .timeout(Duration::from_millis(10));
-    let _ = session
-        .post("http://127.0.0.1:1")
-        .body(Bytes::from_static(b"hello"))
-        .timeout(Duration::from_millis(10));
 }

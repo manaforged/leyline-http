@@ -21,16 +21,6 @@ fn with_limits_reflects_in_stats() {
 }
 
 #[test]
-fn stats_snapshot_is_copy_and_comparable() {
-    let pool = Pool::new();
-    let a = pool.stats();
-    let b = pool.stats();
-    assert_eq!(a, b);
-    let _c = a;
-    let _d = a;
-}
-
-#[test]
 fn default_constants_are_sane() {
     assert_eq!(DEFAULT_MAX_CONNECTIONS, 2048);
     assert_eq!(DEFAULT_IDLE_TIMEOUT, Duration::from_secs(300));

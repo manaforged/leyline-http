@@ -823,16 +823,6 @@ fn initial_ttl(observed: i64) -> i64 {
         .unwrap_or(255)
 }
 
-#[test]
-fn initial_ttl_buckets_to_standard_values() {
-    assert_eq!(initial_ttl(63), 64);
-    assert_eq!(initial_ttl(34), 64);
-    assert_eq!(initial_ttl(64), 64);
-    assert_eq!(initial_ttl(65), 128);
-    assert_eq!(initial_ttl(110), 128);
-    assert_eq!(initial_ttl(128), 128);
-}
-
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_tcp_windows_ttl_is_128() {

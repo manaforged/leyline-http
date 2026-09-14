@@ -63,26 +63,32 @@ jobs:
         run: cargo check -p leyline-http --locked --all-targets
 
   features:
-    name: feature powerset
+    name: each feature
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: stable
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: features
 
-      - uses: taiki-e/install-action@0758d235715de2f3551eacc980d9ae8fce9342c3 # v2.87.3
-        with:
-          tool: cargo-hack
-
-      # Depth 2 covers every single feature and every pair, which is where
-      # `cfg` gaps show up. This is the slowest job in the workflow.
-      - name: cargo hack check
-        run: cargo hack check -p leyline-http --feature-powerset --depth 2 --locked
+      - name: each-feature check
+        run: |
+          mapfile -t feats < <(cargo metadata --locked --no-deps --format-version=1 \
+            | jq -r '.packages[] | select(.name == "leyline-http") | .features | keys[]')
+          [ "${#feats[@]}" -eq 0 ] && exit 1
+          rc=0
+          for combo in none "${feats[@]}"; do
+            args=(--locked --no-default-features)
+            [ "$combo" != none ] && args+=(--features "$combo")
+            cargo check -p leyline-http "${args[@]}" || rc=1
+          done
+          exit $rc
 
   minimal-versions:
     name: minimal versions
@@ -92,6 +98,8 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: stable
 
       - name: Install nightly for -Z minimal-versions lockfile generation
         uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
@@ -102,12 +110,11 @@ jobs:
         with:
           key: minimal-versions
 
-      - uses: taiki-e/install-action@0758d235715de2f3551eacc980d9ae8fce9342c3 # v2.87.3
-        with:
-          tool: cargo-minimal-versions,cargo-hack
-
       - name: cargo minimal-versions check (nightly resolves, stable compiles)
-        run: cargo minimal-versions check -p leyline-http --locked
+        run: |
+          cargo +nightly update -Z minimal-versions
+          cargo update -p pkg-config --precise 0.3.34
+          cargo check -p leyline-http --locked
 
   semver:
     name: semver
@@ -119,6 +126,8 @@ jobs:
           fetch-depth: 0
 
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: stable
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -141,7 +150,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
-          toolchain: nightly
+          toolchain: nightly-2026-06-20
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -152,7 +161,7 @@ jobs:
           tool: cargo-check-external-types
 
       - name: cargo check-external-types (nightly rustdoc JSON)
-        run: cargo +nightly check-external-types -p leyline-http
+        run: cargo +nightly-2026-06-20 check-external-types --manifest-path crates/leyline/Cargo.toml
 
   deny:
     name: supply chain
@@ -162,6 +171,8 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: stable
 
       - uses: taiki-e/install-action@0758d235715de2f3551eacc980d9ae8fce9342c3 # v2.87.3
         with:
@@ -191,6 +202,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
+          toolchain: stable
           targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2

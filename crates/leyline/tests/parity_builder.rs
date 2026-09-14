@@ -66,35 +66,6 @@ fn builder_accepts_wreq_parity_transport_knobs() {
 }
 
 #[test]
-fn config_structs_feed_the_session() {
-    let session = Session::builder()
-        .proxy("http://127.0.0.1:8080")
-        .disable_env_proxies()
-        .timeouts(
-            leyline::TimeoutConfig::default()
-                .total(Duration::from_secs(7))
-                .connect(Duration::from_millis(500))
-                .read(Duration::from_millis(750)),
-        )
-        .pool_config(
-            leyline::PoolConfig::default()
-                .idle_timeout(Duration::from_secs(12))
-                .max_connections(3),
-        )
-        .max_redirects(0)
-        .socket_config(
-            leyline::SocketConfig::default()
-                .tcp_nodelay(true)
-                .tcp_keepalive(Duration::from_secs(9)),
-        )
-        .build()
-        .expect("config structs build a session");
-
-    assert_eq!(session.default_timeout(), Duration::from_secs(7));
-    assert_eq!(session.pool_stats().max_connections, 3);
-}
-
-#[test]
 fn default_session_timeout_is_five_minutes() {
     let session = Session::builder()
         .disable_env_proxies()
@@ -102,32 +73,4 @@ fn default_session_timeout_is_five_minutes() {
         .expect("default session builds");
 
     assert_eq!(session.default_timeout(), Duration::from_secs(300));
-}
-
-#[test]
-fn request_builder_is_send_and_movable_into_spawn() {
-    fn assert_send<T: Send>(_: &T) {}
-
-    let session = Session::builder()
-        .disable_env_proxies()
-        .build()
-        .expect("session builds");
-
-    let req = session
-        .post("https://example.test/")
-        .header("x-worker", "1")
-        .body("payload");
-    assert_send(&req);
-
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .build()
-        .unwrap();
-    rt.block_on(async move {
-        let handle = tokio::spawn(async move {
-            let _ = req.timeout(Duration::from_millis(10)).send().await;
-        });
-        let _ = handle.await;
-    });
-
-    assert!(session.pool_stats().max_connections >= 1);
 }

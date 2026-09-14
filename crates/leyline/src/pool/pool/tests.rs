@@ -65,6 +65,12 @@ fn alt_svc_marks_h3_origin() {
     pool.note_alt_svc("example.com", 443, "h3=\":443\"; ma=86400, h3-29=\":443\"");
     assert!(pool.knows_h3("example.com", 443));
     assert!(!pool.knows_h3("example.com", 8443));
+    pool.note_alt_svc("other.example", 443, "h3=\":8443\"");
+    assert!(!pool.knows_h3("other.example", 443));
+    pool.note_alt_svc("cross.example", 443, "h3=\"elsewhere.example:443\"");
+    assert!(!pool.knows_h3("cross.example", 443));
+    pool.note_alt_svc("same.example", 443, "h3=\"same.example:443\"");
+    assert!(pool.knows_h3("same.example", 443));
 }
 
 #[test]

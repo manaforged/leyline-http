@@ -73,7 +73,7 @@ impl Pool {
     pub(crate) fn note_alt_svc(&self, host: &str, port: u16, alt_svc: &str) {
         if alt_svc
             .split(',')
-            .any(|alt| alt.trim_start().starts_with("h3="))
+            .any(|alt| alt_svc_same_authority(alt.trim_start(), host, port))
         {
             self.note_h3(host, port);
         }
@@ -574,6 +574,25 @@ impl Pool {
 impl Default for Pool {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(feature = "http3")]
+fn alt_svc_same_authority(entry: &str, host: &str, port: u16) -> bool {
+    let Some(value) = entry.strip_prefix("h3=") else {
+        return false;
+    };
+    let authority = value.split(';').next().unwrap_or_default().trim();
+    let authority = authority
+        .strip_prefix('"')
+        .and_then(|a| a.strip_suffix('"'))
+        .unwrap_or(authority);
+    match authority.rsplit_once(':') {
+        Some((alt_host, alt_port)) => {
+            alt_port.parse::<u16>() == Ok(port)
+                && (alt_host.is_empty() || alt_host.eq_ignore_ascii_case(host))
+        }
+        None => false,
     }
 }
 

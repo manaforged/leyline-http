@@ -1,7 +1,7 @@
 # Minimum supported Rust version
 
 The minimum supported Rust version (MSRV) is the `rust-version` field in the
-workspace `Cargo.toml`. It is **1.88**. Read that field rather than this
+workspace `Cargo.toml`. It is **1.98**. Read that field rather than this
 number if the two disagree.
 
 ## When the MSRV moves
@@ -15,8 +15,8 @@ patch release.
 
 ## What you can build with
 
-Leyline compiles on the MSRV, 1.88, and is tested on current stable. The
-release gate compile-checks 1.88 and runs the test suite on stable. A
+Leyline compiles on the MSRV, 1.98, and is tested on current stable. The
+release gate compile-checks 1.98 and runs the test suite on stable. A
 toolchain between them is expected to work but is not part of the gate.
 
 To check your toolchain, run:

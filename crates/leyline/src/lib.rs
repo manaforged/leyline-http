@@ -1,4 +1,6 @@
-#![doc = include_str!(concat!("../", env!("CARGO_PKG_README")))]
+#[cfg(doctest)]
+#[doc = include_str!("../../../README.md")]
+pub struct ReadmeDoctests;
 
 #[cfg(doctest)]
 pub mod guide {
