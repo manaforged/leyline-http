@@ -1,34 +1,32 @@
-#[cfg(doctest)]
-#[doc = include_str!("../../../README.md")]
-pub struct ReadmeDoctests;
+#![doc = include_str!(concat!("../", env!("CARGO_PKG_README")))]
 
 #[cfg(doctest)]
 pub mod guide {
-    #[doc = include_str!("../../../docs/guide/README.md")]
+    #[doc = include_str!("../docs/guide/README.md")]
     pub struct Index;
-    #[doc = include_str!("../../../docs/guide/quick-start.md")]
+    #[doc = include_str!("../docs/guide/quick-start.md")]
     pub struct QuickStart;
-    #[doc = include_str!("../../../docs/guide/sessions.md")]
+    #[doc = include_str!("../docs/guide/sessions.md")]
     pub struct Sessions;
-    #[doc = include_str!("../../../docs/guide/requests.md")]
+    #[doc = include_str!("../docs/guide/requests.md")]
     pub struct Requests;
-    #[doc = include_str!("../../../docs/guide/responses.md")]
+    #[doc = include_str!("../docs/guide/responses.md")]
     pub struct Responses;
-    #[doc = include_str!("../../../docs/guide/streaming.md")]
+    #[doc = include_str!("../docs/guide/streaming.md")]
     pub struct Streaming;
-    #[doc = include_str!("../../../docs/guide/retries-and-timeouts.md")]
+    #[doc = include_str!("../docs/guide/retries-and-timeouts.md")]
     pub struct Retries;
-    #[doc = include_str!("../../../docs/guide/proxies.md")]
+    #[doc = include_str!("../docs/guide/proxies.md")]
     pub struct Proxies;
-    #[doc = include_str!("../../../docs/guide/cookies.md")]
+    #[doc = include_str!("../docs/guide/cookies.md")]
     pub struct Cookies;
-    #[doc = include_str!("../../../docs/guide/websocket.md")]
+    #[doc = include_str!("../docs/guide/websocket.md")]
     pub struct WebSocket;
-    #[doc = include_str!("../../../docs/guide/http3.md")]
+    #[doc = include_str!("../docs/guide/http3.md")]
     pub struct Http3;
-    #[doc = include_str!("../../../docs/guide/fingerprints.md")]
+    #[doc = include_str!("../docs/guide/fingerprints.md")]
     pub struct Fingerprints;
-    #[doc = include_str!("../../../docs/guide/features-and-targets.md")]
+    #[doc = include_str!("../docs/guide/features-and-targets.md")]
     pub struct Features;
 }
 

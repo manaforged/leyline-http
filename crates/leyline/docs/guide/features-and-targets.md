@@ -23,8 +23,9 @@ on by default: `cookies`, `charset`, `compression-gzip`, `compression-brotli`,
 | `socks` | no | SOCKS5 proxy tunnels. Without it, a `socks5://` proxy URL fails at connect time. |
 | `native-interface-bind` | no | Marks binding a socket to a named network interface. `SocketConfig::interface` compiles either way. |
 | `tower` | no | Adds `LeylineService`, a `tower_service::Service` over a session. |
+| `unstable-bssl` | no | Exposes the BoringSSL `SslContextBuilder` behind `TlsContext`. The BoringSSL types are outside this crate's semver promise. |
 | `bench-internals` | no | Exposes pool probes for the benchmark crate. Not for application use. |
-| `full` | no | Every feature above except `bench-internals`. |
+| `full` | no | Every feature above except `bench-internals` and `unstable-bssl`. |
 
 Each compression flag pulls in its own codec crate and gates two things: the
 HTTP body path and the matching RFC 8879 certificate decompressor in the TLS
@@ -38,7 +39,7 @@ Turn everything off and add back what you need:
 
 ```toml
 [dependencies]
-leyline-http = { version = "0.1", default-features = false, features = ["stream", "socks"] }
+leyline-http = { git = "https://github.com/manaforged/leyline-http", branch = "main", default-features = false, features = ["stream", "socks"] }
 ```
 
 ## Prebuilt BoringSSL targets
@@ -56,16 +57,12 @@ CMake, bindgen, Perl, or Go.
 
 ## Other targets
 
-For any other target, the build fails with a message that names your two
-options. Either point `BORING_BSSL_PATH` at a BoringSSL build for that target:
+Other targets are not supported by the packaged crate. Adding one requires
+native BoringSSL libraries, generated Rust bindings, and a matching target
+configuration in `leyline-bssl-sys`.
 
-```sh
-BORING_BSSL_PATH=/path/to/boringssl cargo build
-```
-
-Or rebuild the carried BoringSSL from source with
-`scripts/package-bssl.sh`, which needs CMake, Perl, libclang, and Go, and then
-commit the resulting `native/<target>/lib` and `src/bindings/<target>.rs`.
+`BORING_BSSL_PATH` overrides the native library location for an existing
+target. It does not generate bindings or enable another target.
 
 `BORING_BSSL_RUST_CPPLIB` names an extra C++ standard library to link when
 your toolchain needs one.
@@ -89,9 +86,9 @@ artifacts do not carry those builds.
 ## MSRV
 
 The workspace sets `rust-version = "1.88"`, and every crate inherits it. The
-edition is 2024. Leyline supports every stable release from the last six
-months. [docs/MSRV.md](../MSRV.md) states the policy: a bump gets its own
-minor release and its own changelog line, and never lands in a patch
+edition is 2024. The release gate compile-checks 1.88 and runs the test
+suite on current stable. [docs/MSRV.md](../MSRV.md) states the policy: a bump gets
+its own minor release and its own changelog line, and never lands in a patch
 release.
 
 ## Documentation build

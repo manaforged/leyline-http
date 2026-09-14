@@ -4,13 +4,17 @@ Thanks for your interest in Leyline.
 
 ## Before you open a pull request
 
-1. Run the checks the release gate runs:
+1. Run the release gate:
 
    ```sh
-   cargo fmt --all --check
-   cargo clippy -p leyline-http --all-targets
-   cargo nextest run -p leyline-http
+   ./scripts/verify.sh --full
    ```
+
+   It runs formatting, workspace Clippy with warnings denied, rustdoc with
+   warnings denied, the workspace test suite, `cargo-deny`, package and
+   consumer checks, and with `--full` the live fingerprint and smoke
+   suites. The gate needs Python 3, Node, the 1.88 toolchain through
+   rustup, and `cargo-deny` installed; the live suites need network access.
 
    Tests that need the network are marked `#[ignore]`. Run them with
    `cargo nextest run -p leyline-http --run-ignored all` when your change
@@ -42,6 +46,5 @@ conformance test gates every profile that fixes its extension order.
 
 ## Style
 
-Rust code is formatted by `rustfmt` with the repository defaults. Public
-items carry one-line rustdoc. Tests live in `*_tests.rs` files or under
-`tests/`, not inside production modules.
+Rust code is formatted by `rustfmt` with the repository defaults. Tests live
+in `*_tests.rs` files or under `tests/`, not inside production modules.

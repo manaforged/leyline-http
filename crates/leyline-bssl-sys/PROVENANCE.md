@@ -74,4 +74,5 @@ The `prebuilt-rebuild` workflow builds the Linux and Windows targets. It is
 ## crates.io packaging
 
 The publish include list ships these artifacts to every user; the
-resulting `.crate` must stay under crates.io's 10 MB cap.
+resulting `.crate` must stay under crates.io's 10 MB cap. Re-measure after
+any rebuild.

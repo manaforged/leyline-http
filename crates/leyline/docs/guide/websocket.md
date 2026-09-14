@@ -1,8 +1,10 @@
 # WebSocket
 
-The `websocket` feature is on by default. A WebSocket uses the same session,
-so it carries the same TLS fingerprint, the same connection pool, and the same
-cookies as your HTTP requests.
+The `websocket` feature is on by default. A WebSocket uses the same session
+for its TLS fingerprint and proxy. It does not read or write the session
+cookie jar, and the HTTP/1.1 upgrade opens a fresh connection instead of
+using the HTTP pool. Send cookies as explicit handshake headers when the
+origin needs them, and use `wss://`: plaintext `ws://` is not accepted.
 
 ## Connect
 

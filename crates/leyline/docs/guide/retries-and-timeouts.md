@@ -99,10 +99,10 @@ session's total request timeout is `timeouts.total`.
 
 | Field | Default | Covers |
 | --- | --- | --- |
-| `total` | 300 s | Wall clock for one `send`, covering every redirect hop, retry, backoff sleep, and buffered body read. On expiry the call returns `Error::Timeout`. |
+| `total` | 300 s | Wall clock for one `send`, covering every redirect hop, retry, backoff sleep, and buffered body read. On expiry the call returns `Kind::Timeout`. |
 | `connect` | `Some(10 s)` | DNS, TCP connect, and TLS setup for one new `https` connection, fired before the request is written. Pooled reuse and plaintext `http` connects are not covered. |
 | `read` | `None` | Idle gap between chunks of a streamed response body. It fires only on a request that called `stream`; a buffered body is read inside the `response_header` and `total` windows instead. |
-| `response_header` | `None` | Wait from request sent until the transport response resolves, per redirect hop. A buffered response resolves only after its body is read. |
+| `response_header` | `None` | Wait from dispatch start until the transport response resolves, per redirect hop: connection acquisition, DNS and TLS setup, and request transmission are inside this window. A buffered response resolves only after its body is read. |
 
 ```rust,no_run
 use leyline::{Session, TimeoutConfig};
@@ -133,9 +133,9 @@ sets `connect` alone.
 ## Per-request timeouts
 
 `RequestBuilder::timeout` overrides `total` for one request.
-`RequestBuilder::timeouts` overrides `total`, `read`, and `response_header`
-together. `connect` stays session-wide either way, because connections are
-pooled and coalesced across requests.
+`RequestBuilder::timeouts` overrides `total`, `read`, and `response_header`.
+A `None` keeps the session value for that field. `connect` stays session-wide
+either way, because connections are pooled and coalesced across requests.
 
 ```rust,no_run
 use leyline::TimeoutConfig;
@@ -165,7 +165,7 @@ let streamed = session
 # }
 ```
 
-A timeout surfaces as `Error::Timeout`, and `Error::is_timeout()` returns true
+A timeout surfaces as `Kind::Timeout`, and `Error::is_timeout()` returns true
 for it and for an underlying `TimedOut` I/O error.
 
 ## Next

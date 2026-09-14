@@ -14,7 +14,9 @@ otherwise.
 
 - The `leyline-http` crate and the crates it bundles: `leyline-bssl`,
   `leyline-bssl-sys`, `leyline-bssl-tokio`, and `leyline-quiche`.
-- The Node and Python wrappers under `wrappers/`.
+- The Node and Python wrappers under `wrappers/`. They are developed
+  in-tree but are not part of the 0.1.0 Rust release and are not published
+  to public registries.
 
 ## Out of scope
 
@@ -32,6 +34,7 @@ pinned at tag `150.0.7871.26`. See
 for the carried patches and the rebuild steps.
 
 A security fix released upstream in BoringSSL or quiche is picked up and
-released in Leyline within 14 days of the upstream fix. Each pickup gets a
+released in Leyline as soon as practicable. Each pickup gets a
 `### Security` line in [CHANGELOG.md](CHANGELOG.md) that names the upstream
-advisory and the new pinned revision.
+advisory and the new pinned revision, and the pinned revision is recorded in
+`PROVENANCE.md`.

@@ -21,11 +21,15 @@ overrides sit beside it.
 `sec-fetch-*` set and the header order for the fetch context. See
 [Requests](requests.md).
 
-**TCP.** `TcpProfile` sets the socket options that shape the SYN: TTL, MSS,
-window size, window scale, the don't-fragment bit, and `TCP_NODELAY`. Windows
-uses TTL 128 and window scale 8; macOS and Linux use TTL 64 with scale 6 and 7.
-`Platform::tcp_profile()` picks the one for an OS, and
-`SessionBuilder::tcp_profile` overrides it.
+**TCP.** `TcpProfile` carries the socket options that shape the SYN: TTL,
+MSS, window size, window scale, the don't-fragment bit, and `TCP_NODELAY`.
+`Platform::tcp_profile()` picks the profile for an OS, and
+`SessionBuilder::tcp_profile` overrides it. Each platform applies what it
+can: Linux applies TTL, MSS, don't-fragment, and derives a
+`TCP_WINDOW_CLAMP` from the window fields; macOS applies TTL, MSS, and
+don't-fragment; Windows applies TTL and don't-fragment. The audit's JA4T is
+computed from the configured values, including fields the running platform
+does not apply.
 
 ## Audit a session
 
@@ -77,16 +81,17 @@ requested, and the kernel decides what the SYN carries.
 `crates/leyline/tests/fingerprint_conformance.rs` puts each profile and
 dimension into one of five states, without touching the network:
 
-- Gated: wire-faithful and matching its recorded golden value.
-- Gated fail: wire-faithful but diverging from the golden. That is a
-  regression and a hard failure.
-- Recon accurate: reconstructed from the profile and matching the wire golden.
+- Gated: a fixed-order profile's reconstruction matches its configured golden.
+- Gated fail: that reconstruction differs from the golden, so the test fails.
+- Recon accurate: a reconstruction matches the golden without a fixed order.
 - Recon diverges: reconstructed and not matching, so `audit()` is not
   wire-exact there.
 - Unanchored: no golden value, so nothing is claimed.
 
 Run it with `cargo test -p leyline-http --test fingerprint_conformance`. The
-report tells you which dimensions are proven and which are only reconstructed.
+report checks agreement between the profile data and its configured goldens.
+Establishing browser fidelity also requires a browser capture and a comparison
+with Leyline's emitted handshake.
 
 ## Read a profile
 

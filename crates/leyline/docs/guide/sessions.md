@@ -22,8 +22,9 @@ let session = Session::builder()
 # }
 ```
 
-The convenience constructors skip the builder and panic only if the built-in
-profile is missing: `Session::chrome()`, `Session::firefox()`,
+The convenience constructors skip the builder and panic if construction
+fails, for example when a built-in profile is missing or a required
+compression feature is disabled: `Session::chrome()`, `Session::firefox()`,
 `Session::safari()`, `Session::edge()`, `Session::brave()`, `Session::opera()`,
 and `Session::vivaldi()`.
 
@@ -88,7 +89,7 @@ extra headers change.
 use leyline::{ChromiumBrand, Session};
 
 # fn run() -> leyline::Result<()> {
-let session = Session::builder().brand(ChromiumBrand::Edge).build()?;
+let session = Session::builder().chrome().brand(ChromiumBrand::Edge).build()?;
 assert_eq!(session.brand(), Some(ChromiumBrand::Edge));
 # Ok(())
 # }

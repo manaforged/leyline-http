@@ -4,12 +4,17 @@ mod support;
 use std::time::Duration;
 
 use bytes::BytesMut;
+use futures_util::stream::empty;
 use support::*;
 use tokio::io::AsyncReadExt;
+use tokio::sync::oneshot;
+use tokio::time::timeout;
 
 use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
 use leyline::h2::connection::{ClientConnection, PseudoHeaders};
+use leyline::h2::error::{ErrorCode, H2Error};
 use leyline::h2::frame::{FrameType, GoAwayFrame};
+use leyline::h2::{RequestBody, ResponseBody};
 
 fn test_config() -> H2Config {
     H2Config {
@@ -315,4 +320,207 @@ async fn reader_eof_fails_pending_requests() {
 
     let _ = tokio::time::timeout(Duration::from_secs(1), server).await;
     let _ = BytesMut::new();
+}
+
+#[tokio::test]
+async fn zero_stream_limit_waits_for_peer_update() {
+    timeout(Duration::from_secs(5), async {
+        let (client_io, mut server_io) = tokio::io::duplex(65_536);
+        let (release, ready) = oneshot::channel();
+        let (greeted, greeting) = oneshot::channel();
+        let (done, finished) = oneshot::channel();
+        let server = tokio::spawn(async move {
+            read_preface(&mut server_io).await;
+            read_frame(&mut server_io).await;
+            write_server_settings_with(&mut server_io, vec![(0x3, 0)]).await;
+            write_settings_ack(&mut server_io).await;
+            let (ack, _) = read_frame(&mut server_io).await;
+            assert_eq!(ack.frame_type, FrameType::Settings as u8);
+            assert_eq!(ack.flags, 1);
+            greeted.send(()).expect("peer settings acknowledged");
+            ready.await.expect("response release");
+            write_server_settings_with(&mut server_io, vec![(0x3, 1)]).await;
+            let request = loop {
+                let (frame, _) = read_frame(&mut server_io).await;
+                if frame.frame_type == FrameType::Headers as u8 {
+                    break frame;
+                }
+            };
+            assert_eq!(request.stream_id, 1);
+            write_response(&mut server_io, request.stream_id, b"resumed").await;
+            finished.await.expect("client assertions complete");
+        });
+        let (handle, _driver) = ClientConnection::start(client_io, test_config())
+            .await
+            .expect("response or connection");
+        greeting.await.expect("peer settings applied");
+        let (pseudo, headers) = get_req("/blocked");
+        let error = handle
+            .send_request_ex(
+                pseudo,
+                headers,
+                RequestBody::Streaming {
+                    stream: Box::pin(empty()),
+                    length_hint: None,
+                },
+                false,
+            )
+            .await
+            .expect_err("peer capacity exhausted");
+        assert!(matches!(
+            error,
+            H2Error::Connection {
+                code: ErrorCode::RefusedStream,
+                ..
+            }
+        ));
+        release.send(()).expect("release server");
+        let (pseudo, headers) = get_req("/resumed");
+        let response = handle
+            .send_request(pseudo, headers, None)
+            .await
+            .expect("response");
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, b"resumed");
+        done.send(()).expect("complete server");
+        server.await.expect("server task");
+    })
+    .await
+    .expect("stream limit update stalled");
+}
+
+#[tokio::test]
+async fn closed_stream_with_unread_chunks_releases_peer_capacity() {
+    timeout(Duration::from_secs(5), async {
+        let (client_io, mut server_io) = tokio::io::duplex(65_536);
+        let (release, ready) = oneshot::channel();
+        let (done, finished) = oneshot::channel();
+        let server = tokio::spawn(async move {
+            read_preface(&mut server_io).await;
+            read_frame(&mut server_io).await;
+            write_server_settings_with(&mut server_io, vec![(0x3, 1)]).await;
+            write_settings_ack(&mut server_io).await;
+            loop {
+                let (frame, _) = read_frame(&mut server_io).await;
+                if frame.frame_type == FrameType::Headers as u8 {
+                    assert_eq!(frame.stream_id, 1);
+                    break;
+                }
+            }
+            write_response_headers(&mut server_io, 1).await;
+            ready.await.expect("response release");
+            for byte in 0..40u8 {
+                write_data(&mut server_io, 1, &[byte], byte == 39).await;
+            }
+            loop {
+                let (frame, _) = read_frame(&mut server_io).await;
+                if frame.frame_type == FrameType::Headers as u8 {
+                    assert_eq!(frame.stream_id, 3);
+                    write_response(&mut server_io, 3, b"next").await;
+                    break;
+                }
+            }
+            finished.await.expect("client assertions complete");
+        });
+        let (handle, _driver) = ClientConnection::start(client_io, test_config())
+            .await
+            .expect("response or connection");
+        let (pseudo, headers) = get_req("/stream");
+        let response = handle
+            .send_request_ex(pseudo, headers, RequestBody::None, true)
+            .await
+            .expect("response or connection");
+        assert_eq!(response.status, 200);
+        let ResponseBody::Streaming(mut body) = response.body else {
+            panic!("expected streaming body");
+        };
+        let (pseudo, headers) = get_req("/blocked");
+        let error = handle
+            .send_request_ex(
+                pseudo,
+                headers,
+                RequestBody::Streaming {
+                    stream: Box::pin(empty()),
+                    length_hint: None,
+                },
+                false,
+            )
+            .await
+            .expect_err("peer capacity exhausted");
+        assert!(matches!(
+            error,
+            H2Error::Connection {
+                code: ErrorCode::RefusedStream,
+                ..
+            }
+        ));
+        release.send(()).expect("release server");
+        let (pseudo, headers) = get_req("/next");
+        let response = handle
+            .send_request(pseudo, headers, None)
+            .await
+            .expect("response");
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, b"next");
+        let mut received = Vec::new();
+        while let Some(chunk) = body.recv().await {
+            received.extend_from_slice(&chunk.expect("response chunk"));
+        }
+        assert_eq!(received, (0..40u8).collect::<Vec<_>>());
+        done.send(()).expect("complete server");
+        server.await.expect("server task");
+    })
+    .await
+    .expect("closed response retained peer capacity");
+}
+
+#[tokio::test]
+async fn queued_request_uses_acknowledged_settings() {
+    let (client, mut peer) = tokio::io::duplex(65_536);
+    let (ready, proceed) = oneshot::channel();
+    let server = tokio::spawn(async move {
+        read_preface(&mut peer).await;
+        let (initial, _) = read_frame(&mut peer).await;
+        assert_eq!(initial.frame_type, FrameType::Settings as u8);
+        proceed.await.expect("release peer settings");
+        write_server_settings_with(&mut peer, vec![(0x1, 0)]).await;
+        write_settings_ack(&mut peer).await;
+        let (ack, payload) = read_frame(&mut peer).await;
+        assert_eq!(ack.frame_type, FrameType::Settings as u8);
+        assert_eq!(ack.flags & 0x1, 0x1);
+        assert!(payload.is_empty());
+        let (request, payload) = read_frame(&mut peer).await;
+        assert_eq!(request.frame_type, FrameType::Headers as u8);
+        assert_eq!(payload.first(), Some(&0x20));
+        write_response(&mut peer, request.stream_id, b"configured").await;
+        let mut closed = [0; 9];
+        let _ = peer.read(&mut closed).await;
+    });
+    let (handle, driver) = ClientConnection::start(client, test_config())
+        .await
+        .expect("start client");
+    let (pseudo, headers) = get_req("/");
+    let mut request = Box::pin(handle.send_request(pseudo, headers, None));
+    assert!(
+        timeout(Duration::from_millis(10), request.as_mut())
+            .await
+            .is_err()
+    );
+    ready.send(()).expect("release settings");
+    let response = timeout(Duration::from_secs(2), request.as_mut())
+        .await
+        .expect("response deadline")
+        .expect("response");
+    assert_eq!(response.status, 200);
+    assert_eq!(response.body, b"configured");
+    drop(request);
+    drop(handle);
+    timeout(Duration::from_secs(2), server)
+        .await
+        .expect("server deadline")
+        .expect("server");
+    timeout(Duration::from_secs(2), driver.join())
+        .await
+        .expect("driver deadline")
+        .expect("driver");
 }

@@ -10,14 +10,14 @@ Leyline bumps the MSRV only when a feature it needs requires a newer
 compiler. There is no scheduled bump, and no bump for style or convenience.
 
 A bump is a breaking-enough change to get its own minor release and its own
-line in [CHANGELOG.md](../CHANGELOG.md). You will never find an MSRV bump in a
+line in [CHANGELOG.md](https://github.com/manaforged/leyline-http/blob/main/CHANGELOG.md). You will never find an MSRV bump in a
 patch release.
 
 ## What you can build with
 
-Leyline supports every stable Rust release from the last six months. If your
-toolchain is newer than the MSRV and less than six months old, Leyline builds.
-If it is older, upgrade Rust or pin an older Leyline.
+Leyline compiles on the MSRV, 1.88, and is tested on current stable. The
+release gate compile-checks 1.88 and runs the test suite on stable. A
+toolchain between them is expected to work but is not part of the gate.
 
 To check your toolchain, run:
 

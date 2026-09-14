@@ -282,19 +282,16 @@ pub(crate) fn check_framing(headers: &[HeaderPair]) -> Result<()> {
 pub(crate) fn strip_connection_specific_headers(headers: &mut Vec<HeaderPair>) -> Result<()> {
     check_framing(headers)?;
     headers.retain_mut(|(name, value)| {
-        let lower = name.to_ascii_lowercase();
-        match lower.as_str() {
+        if name.bytes().any(|b| b.is_ascii_uppercase()) {
+            *name = name.to_lowercase().into();
+        }
+        match name.as_ref() {
             "transfer-encoding" | "connection" | "keep-alive" | "proxy-connection" | "upgrade"
             | "http2-settings" => false,
             "te" => value.eq_ignore_ascii_case("trailers"),
             _ => true,
         }
     });
-    for (name, _) in headers.iter_mut() {
-        if name.chars().any(|c| c.is_ascii_uppercase()) {
-            *name = name.to_lowercase().into();
-        }
-    }
     Ok(())
 }
 

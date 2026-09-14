@@ -25,16 +25,21 @@ Set it with `protocol_policy(...)`, or with the shorthand `http1()`,
 use leyline::{ProtocolPolicy, Session};
 
 # fn run() -> leyline::Result<()> {
-let session = Session::builder().protocol_policy(ProtocolPolicy::Http3).build()?;
+let session = Session::builder()
+    .chrome()
+    .protocol_policy(ProtocolPolicy::Http3)
+    .build()?;
 assert_eq!(session.protocol_policy(), ProtocolPolicy::Http3);
 # Ok(())
 # }
 ```
 
+Select a browser before forcing HTTP/3: the bare profile has no HTTP/3
+configuration, so a forced `Http3` request from a bare session fails.
 `Session::chrome()` and the other Chromium constructors select `Race`.
 
 A profile without an HTTP/3 fingerprint fails a forced `Http3` request with
-`Error::Config`.
+`Kind::Config`.
 
 ## The Alt-Svc gate
 
@@ -62,10 +67,10 @@ sent once. If both fail, the `Auto` path runs.
 profile presents: the flow-control limits, `max_idle_timeout`,
 `max_udp_payload_size`, `active_connection_id_limit`, the initial destination
 connection ID length, the QPACK settings, `max_field_section_size`, and a cap
-on the response body the HTTP/3 client buffers.
+on the response body the HTTP/3 client accepts, streaming included.
 
 `H3Config::for_family` selects the set for a profile family: `chromium`,
-`gecko`, or `webkit`. Any other family is an `Error::Config`.
+`gecko`, or `webkit`. Any other family is an `Kind::Config`.
 
 ```rust
 use leyline::H3Config;
@@ -80,13 +85,15 @@ assert!(H3Config::for_family("nonesuch").is_err());
 Every bundled profile advertises `qpack_max_table_capacity: 0` and
 `qpack_blocked_streams: 0`. The dynamic table is not used in either
 direction, so header fields are encoded against the static table and
-literals only. That matches what the browsers send and keeps the encoder
-deterministic.
+literals only. This is a deliberate implementation limit: it keeps the
+encoder deterministic, and it is a fingerprint difference from stacks whose
+QPACK encoder uses a dynamic table. Version-specific captures would be
+needed to establish full QPACK equivalence.
 
 ## No proxy support
 
 HTTP/3 does not go through a proxy. A forced `Http3` request with a session
-proxy or a per-request proxy fails with `Error::Config`, telling you to use
+proxy or a per-request proxy fails with `Kind::Config`, telling you to use
 `Auto` or `Http2`. Under `Race`, a proxied request is not raced and takes the
 `Auto` path.
 

@@ -29,6 +29,20 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
         self.max_frame_size = size;
     }
 
+    pub(crate) fn buffered(&self) -> bool {
+        if let Some(header) = &self.header {
+            return self.buf.len() >= header.length as usize;
+        }
+        if self.buf.len() < FRAME_HEADER_LEN {
+            return false;
+        }
+        let mut raw = [0; FRAME_HEADER_LEN];
+        raw.copy_from_slice(&self.buf[..FRAME_HEADER_LEN]);
+        let header = FrameHeader::parse(&raw);
+        header.length > self.max_frame_size
+            || self.buf.len() >= FRAME_HEADER_LEN + header.length as usize
+    }
+
     async fn fill(&mut self, want: usize) -> Result<bool, H2Error> {
         while self.buf.len() < want {
             self.buf.reserve(want - self.buf.len() + SLACK);

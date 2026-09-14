@@ -7,13 +7,15 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
+use bytes::{Bytes, BytesMut};
 use support::*;
-use tokio::io::{AsyncRead, AsyncWrite, DuplexStream, ReadBuf};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, DuplexStream, ReadBuf};
 use tokio::sync::oneshot;
+use tokio::time::timeout;
 
 use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
 use leyline::h2::connection::{ClientConnection, PseudoHeaders};
-use leyline::h2::frame::FrameType;
+use leyline::h2::frame::{FrameHeader, FrameType, HeadersFrame, PingFrame};
 
 struct Counted {
     inner: DuplexStream,
@@ -186,4 +188,119 @@ async fn eight_concurrent_requests_share_one_write() {
 
     drop(handle);
     let _ = server.await;
+}
+
+#[tokio::test]
+async fn buffered_pings_share_one_write() {
+    let (client, mut peer) = tokio::io::duplex(65_536);
+    let writes = Arc::new(AtomicUsize::new(0));
+    let counted = Counted {
+        inner: client,
+        writes: Arc::clone(&writes),
+    };
+    let (handle, driver) = ClientConnection::start(counted, test_config())
+        .await
+        .expect("start client");
+    timeout(Duration::from_secs(2), async {
+        read_preface(&mut peer).await;
+        let (initial, _) = read_frame(&mut peer).await;
+        assert_eq!(initial.frame_type, FrameType::Settings as u8);
+        write_server_settings(&mut peer).await;
+        write_settings_ack(&mut peer).await;
+        let (ack, _) = read_frame(&mut peer).await;
+        assert_eq!(ack.frame_type, FrameType::Settings as u8);
+        assert_eq!(ack.flags & 1, 1);
+        let before = writes.load(Ordering::Relaxed);
+        let mut frames = BytesMut::new();
+        for value in 0..8_u64 {
+            PingFrame {
+                ack: false,
+                payload: value.to_be_bytes(),
+            }
+            .encode(&mut frames);
+        }
+        peer.write_all(&frames).await.expect("write pings");
+        for value in 0..8_u64 {
+            let (ack, payload) = read_frame(&mut peer).await;
+            assert_eq!(ack.frame_type, FrameType::Ping as u8);
+            assert_eq!(ack.flags & 1, 1);
+            assert_eq!(ack.stream_id, 0);
+            assert_eq!(payload, value.to_be_bytes());
+        }
+        assert_eq!(writes.load(Ordering::Relaxed) - before, 1);
+        drop(handle);
+        driver.join().await.expect("driver");
+    })
+    .await
+    .expect("acknowledgement deadline");
+}
+
+#[tokio::test]
+async fn ping_ack_precedes_continuation_wait() {
+    let (client, mut peer) = tokio::io::duplex(65_536);
+    let (handle, driver) = ClientConnection::start(client, test_config())
+        .await
+        .expect("start client");
+    let server = async move {
+        read_preface(&mut peer).await;
+        let (initial, _) = read_frame(&mut peer).await;
+        assert_eq!(initial.frame_type, FrameType::Settings as u8);
+        write_server_settings(&mut peer).await;
+        write_settings_ack(&mut peer).await;
+        let (ack, _) = read_frame(&mut peer).await;
+        assert_eq!(ack.frame_type, FrameType::Settings as u8);
+        assert_eq!(ack.flags & 1, 1);
+        let (request, _) = read_frame(&mut peer).await;
+        assert_eq!(request.frame_type, FrameType::Headers as u8);
+        let payload = 73_u64.to_be_bytes();
+        let mut frames = BytesMut::new();
+        PingFrame {
+            ack: false,
+            payload,
+        }
+        .encode(&mut frames);
+        HeadersFrame {
+            stream_id: request.stream_id,
+            end_stream: true,
+            end_headers: false,
+            priority: None,
+            fragment: Bytes::from_static(&[0x88]),
+        }
+        .encode(&mut frames);
+        peer.write_all(&frames)
+            .await
+            .expect("write ping and headers");
+        let (ack, received) = timeout(Duration::from_millis(200), read_frame(&mut peer))
+            .await
+            .expect("ping acknowledgement before continuation");
+        assert_eq!(ack.frame_type, FrameType::Ping as u8);
+        assert_eq!(ack.flags & 1, 1);
+        assert_eq!(ack.stream_id, 0);
+        assert_eq!(received, payload);
+        frames.clear();
+        FrameHeader {
+            length: 0,
+            frame_type: FrameType::Continuation as u8,
+            flags: 4,
+            stream_id: request.stream_id,
+        }
+        .encode(&mut frames);
+        peer.write_all(&frames).await.expect("write continuation");
+        peer
+    };
+    let (pseudo, headers) = get_req("/continued");
+    let (peer, response) = timeout(Duration::from_secs(2), async {
+        tokio::join!(server, handle.send_request(pseudo, headers, None))
+    })
+    .await
+    .expect("request deadline");
+    let response = response.expect("response");
+    assert_eq!(response.status, 200);
+    assert!(response.body.is_empty());
+    drop(handle);
+    timeout(Duration::from_secs(2), driver.join())
+        .await
+        .expect("driver deadline")
+        .expect("driver");
+    drop(peer);
 }

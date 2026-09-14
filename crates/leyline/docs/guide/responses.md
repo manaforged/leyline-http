@@ -57,18 +57,19 @@ let links: Vec<&str> = resp.header_all("link").collect();
 ```
 
 `content_length()` and `content_type()` are shorthands for the two headers you
-read most. `request_headers()` reports the headers the session actually sent,
-in send order, after the preset block, the cookie jar, and your own headers
-were merged.
+read most. `request_headers()` reports the headers the session prepared to
+send, in send order, after the preset block, the cookie jar, and your own
+headers were merged. It requires `.audit(true)` on the session; without audit
+it returns an empty list. The values are prepared before dispatch, not
+captured from the transport.
 
 ## Cookies
 
-The session jar stores `Set-Cookie` automatically. The response also exposes a
-per-response view: `cookies()` iterates the names and values from this
-response's `Set-Cookie` headers, and `cookie(name)` looks one up. Last value
-wins per name, and the iteration order is unspecified. Read
-`header_all("set-cookie")` when you need the raw headers with their
-attributes. See [Cookies](cookies.md).
+The session jar stores `Set-Cookie` automatically. `cookies()` iterates the
+names and values collected across the whole redirect chain, with the last
+value winning per name, and `cookie(name)` looks one up. The iteration order
+is unspecified. Read `header_all("set-cookie")` for the raw headers of the
+final response with their attributes. See [Cookies](cookies.md).
 
 ## Redirect chain
 
@@ -139,10 +140,10 @@ println!("{written} bytes");
 
 ## Turn a status into an error
 
-`error_for_status()` consumes the response and returns `Err(Error::Status)`
-for any status at or above 400. The error carries the code as a `StatusCode`,
-the URL with its password redacted, and the first 16 KiB of the body, so a 403
-explains itself without a second request. The call does not await, so it
+`error_for_status()` consumes the response and returns an error whose kind is
+`Kind::Status` for any status at or above 400. The error carries the code as a
+`StatusCode`, the URL with its password redacted, and the first 16 KiB of the
+body, so a 403 explains itself without a second request. The call does not await, so it
 attaches the body only when the body is already buffered (`as_bytes()`); a
 streamed body gives an error with no body.
 

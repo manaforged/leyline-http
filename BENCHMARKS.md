@@ -1,165 +1,312 @@
 # Benchmarks
 
-`benches/benches/clients.rs` races Leyline against `reqwest` 0.13 (rustls) over
-one TLS origin that the benchmark starts inside its own process.
+This repository measures the current revision with open tooling: Criterion
+for in-process work, the separate comparison clients for end-to-end rates,
+nghttp2's h2load as an independent reference, and a netem link for
+wide-area behavior. Every timed response in the Leyline and wreq Rust
+comparison clients is checked against the expected bytes. The Go reference
+clients (`go/tlsclient`, `go/azuretls`) do not check response bodies.
 
-## Machine
+## Quick start
 
-| Field | Value |
-| --- | --- |
-| CPU | Apple M2 Max, 12 cores |
-| OS | macOS 26.5.1 (build 25F80) |
-| Toolchain | rustc 1.98.0 (88d9e12ae 2026-08-18) |
-| Commit | `e47d399` |
-| 1-minute load average during the run | 23.7 to 30.3 |
-
-The machine was not idle: other builds ran on it throughout, sampled once every
-5 seconds with `uptime`. Treat the numbers as one contended run, not a quiet-box
-figure.
-
-Collected with:
-
-```
-sysctl -n machdep.cpu.brand_string
-sw_vers
-git rev-parse --short HEAD
+```sh
+cd benches/comparison
+CMP_CA=ca.der CMP_CERT=server.der CMP_KEY=server-key.der \
+  LEYLINE_CHROME=149 CLIENT_CPUS=2-7,18-23 ROUNDS=20 ./paired.sh
+CMP_CA=ca.der CMP_CA_KEY=ca-key.pem RTT_MS=30 LEYLINE_CHROME=149 ./netem.sh
+../../scripts/perf_accounting.py --client leyline --preset small
 ```
 
-## Command
+`paired.sh` reads `CMP_CA`, `CMP_CERT`, `CMP_KEY`, `LEYLINE_CHROME`,
+`ROUNDS`, `CONC`, `CONCURRENCY`, `TARGET_URL`, and `CONTROL`. `netem.sh`
+reads `RTT_MS`, `ORIGIN`, and the `paired.sh` variables. `control.sh` alone
+prints the reference rows for a running origin. `CMP_CONNECTIONS` spreads
+client tasks over several connections.
 
-```
+## Reference results
+
+Measured on a 16-core x86_64 Linux host (Rust 1.98.1, fat LTO,
+one codegen unit). Origin on CPUs 0-1; clients on CPUs 2-7 and 18-23.
+`LEYLINE_CHROME=149` request headers, verified TLS with the test CA,
+HTTP/2, ten-byte `byte[i] = i % 251` bodies, one connection with 64 streams
+unless stated. Client rows are twenty balanced pairs at one connection and
+eight balanced pairs at eight connections. The h2load rows use the same
+headers and topology and 524,288 requests; h2load does not verify
+certificates or check response bodies. Paired 95% intervals use the t
+value for the pair count and all exclude zero.
+
+| Cell (concurrent) | h2load | Leyline | wreq 0.16.1 | Leyline vs wreq |
+| --- | ---: | ---: | ---: | --- |
+| Go 10 B, 1 connection x 64 streams | 93,751 | 90,886 | 93,358 | -2.7% [-3,219, -1,725] |
+| Go 10 B, 8 connections x 8 streams | 118,018 | 118,486 | 116,215 | +1.9% [+1,051, +3,491] |
+| Hyper 10 B, 1 connection x 64 streams | 225,655 | 211,193 | 192,050 | +10.0% [+17,635, +20,650] |
+| Hyper 10 B, 8 connections x 8 streams | 346,472 | 331,748 | 330,177 | +0.5% [-1,541, +4,682], includes zero |
+
+Warm sequential and cold deltas, both origins, one connection, twenty pairs:
+
+| Metric | Go | Hyper |
+| --- | ---: | ---: |
+| Warm sequential | +4.7% [+1,226, +1,511] | +17.3% [+7,688, +8,242] |
+| Cold (full setup and teardown) | +3.6% [+23, +151] | +4.7% [+92, +183] |
+
+The delayed-link cells use the fixed client against wreq. Positive favors
+Leyline; intervals that include zero are parity:
+
+| Origin | Body | RTT | Change | 95% interval | Pairs |
+| --- | ---: | ---: | ---: | --- | ---: |
+| Go | 16 KiB | 30 ms | -0.4% | [-26, +8] | 8 |
+| Hyper | 16 KiB | 30 ms | +0.3% | [-8, +21] | 8 |
+| Go | 16 KiB | 80 ms | -0.6% | [-9, 0] | 8 |
+| Hyper | 16 KiB | 80 ms | +0.6% | [+3, +4] | 4 |
+| Go | 4 MiB | 30 ms | +0.6% | [0, +1] | 4 |
+| Hyper | 4 MiB | 30 ms | -1.3% | [-1, 0] | 8 |
+| Go | 4 MiB | 80 ms | +0.1% | [0, 0] | 8 |
+| Hyper | 4 MiB | 80 ms | +0.0% | [0, 0] | 4 |
+
+These are loopback and emulated-link measurements on one host. They do not
+establish network behavior, other payloads, or a universal ranking.
+Browser-major labels do not prove identical requests or fingerprints;
+capture the wire before claiming equivalence. Results are host-specific;
+reproduce with the commands above and report the matching control row. The
+per-round observations behind every interval are in
+[`benches/comparison/results/2026-09-13-reference.json`](benches/comparison/results/2026-09-13-reference.json);
+the summaries above are recomputed from those rounds.
+
+
+## Compare with reqwest
+
+`benches/benches/clients.rs` compares Leyline's default session, without
+browser impersonation, against reqwest 0.13 with rustls.
+
+```sh
 cargo bench --manifest-path benches/Cargo.toml --bench clients
 ```
 
-## Methodology
+The benchmark starts a loopback TLS origin using hyper and tokio-rustls.
+Separate listeners advertise HTTP/1.1 and HTTP/2. Both clients disable
+certificate verification for the generated self-signed certificate.
 
-The benchmark owns the server. It generates a self-signed leaf with `rcgen`
-(SAN `localhost` and `127.0.0.1`) and binds two loopback TLS listeners, each
-built from hyper 1.x on `tokio-rustls`:
+| Scenario | Work per iteration |
+| --- | --- |
+| HTTP/1.1 keep-alive | 200 sequential requests for a 16 KiB body |
+| HTTP/2 multiplexing | 32 concurrent requests for a 16 KiB body |
+| Streamed download | One 4 MiB response, consumed through the streaming API |
 
-- one advertising ALPN `http/1.1`, served by `hyper::server::conn::http1` with
-  keep-alive on;
-- one advertising ALPN `h2`, served by `hyper::server::conn::http2`.
+Before timing, `verify` compares each client's response bytes with the
+server fixture. It also checks the negotiated protocol for the HTTP/1.1 and
+HTTP/2 requests. The fixture is `(0..len).map(|i| (i % 251) as u8)`.
+A mismatch fails the benchmark before it produces timings.
 
-Server-side ALPN is what pins each scenario to one protocol. Both clients trust
-the leaf through their own API: `danger_accept_invalid_certs(true)` on the
-Leyline `SessionBuilder` and on the `reqwest::ClientBuilder`. That is a
-benchmark shortcut. It removes trust-store and chain-verification work from
-both stacks equally and keeps the measured delta on the client HTTP path.
+Criterion records per-scenario timings under `benches/target/criterion/`.
+A concurrent batch duration is not an individual request's latency.
 
-**Byte-equivalence.** Before any timing, `verify` runs every scenario once per
-client and asserts that the response body is byte-equal to the server's fixture
-(`(0..len).map(|i| (i % 251) as u8)`, 16 KiB and 4 MiB), and that the
-negotiated protocol version is the one the listener advertised. A mismatch
-panics and the benchmark fails; no numbers are produced.
+## Separate Rust clients
 
-**Numbers.** Criterion times each scenario with `iter_custom`. Median and p95
-are computed from the per-sample times in
-`benches/target/criterion/clients/<name>/new/sample.json`, as
-`times[i] / iters[i]` — the wall time of one scenario execution. The p95 is the
-95th percentile of those per-sample values with linear interpolation. The three
-scenarios are:
+The programs in `benches/comparison/` include these Rust clients:
 
-- `h1_16k` — 200 sequential keep-alive GETs of the 16 KiB body on one reused
-  client;
-- `h2_32x16k` — 32 concurrent GETs of the 16 KiB body, multiplexed over one
-  HTTP/2 connection;
-- `stream_4mib` — one 4 MiB body consumed chunk by chunk through each client's
-  streaming API (`Response::into_stream` for Leyline, `bytes_stream` for
-  reqwest).
+| Client | Dependencies | Profile |
+| --- | --- | --- |
+| `leyline-client` | This checkout | Chrome 152 by default |
+| `wreq-client` | wreq 0.16.1, wreq-util 0.2.0 | Chrome 149 |
+| `reqwest-client` | reqwest 0.13.5 with rustls and HTTP/2 | No browser impersonation |
 
-**wreq is absent.** `wreq` depends on `btls-sys`, which declares
-`links = "boringssl"`, and so does `leyline-bssl-sys`. Cargo refuses to resolve
-two `links = "boringssl"` packages into one dependency graph, so wreq cannot be
-linked into this benchmark binary at all. The out-of-process wreq comparison
-lives in `benches/comparison/`.
+Build each client with its own locked manifest and the same Rust toolchain.
+Rust 1.98.1 builds all three. Their release profiles use fat LTO and one
+codegen unit. Their lockfiles resolve Tokio 1.53.1.
 
-## Results
+Each program accepts `URL WARM_COUNT COLD_COUNT CONCURRENT_COUNT CONCURRENCY`.
+Every timed response must have status 200 and the expected body:
+`ok-10byte!` by default, or the `CMP_BODY` fixture when set. The cold loop
+creates a client for every request, so it includes client
+construction, connection setup, TLS, response consumption, and teardown.
+The concurrent phase also prints p50, p90, p99, and p99.9 microseconds over
+every request. The `print` and `equiv` commands provide separate response
+checks.
 
-Run of 2026-09-01. `median` and `p95` are per-scenario-execution wall times
-from `sample.json`; `criterion` is criterion's own point estimate for the same
-benchmark.
+Set `LEYLINE_CHROME=149` to select Chrome 149 or `LEYLINE_CHROME=bare`
+to disable browser impersonation in the Leyline client. Equal browser version
+labels do not establish equal fingerprints: the libraries can select different
+platform headers, header order, and TLS settings. Capture those settings when
+reporting a browser comparison.
 
-| Scenario | Client | Median | p95 | Criterion estimate | Samples |
-| --- | --- | ---: | ---: | ---: | ---: |
-| 200 sequential H1 GETs, 16 KiB | leyline | 12.105 ms | 18.544 ms | 12.978 ms | 20 |
-| 200 sequential H1 GETs, 16 KiB | reqwest 0.13 | 35.525 ms | 44.195 ms | 38.133 ms | 20 |
-| 32 concurrent H2 GETs, 16 KiB | leyline | 3.855 ms | 5.151 ms | 3.584 ms | 30 |
-| 32 concurrent H2 GETs, 16 KiB | reqwest 0.13 | 1.523 ms | 2.049 ms | 1.535 ms | 30 |
-| 4 MiB streamed download | leyline | 10.953 ms | 16.966 ms | 7.933 ms | 20 |
-| 4 MiB streamed download | reqwest 0.13 | 17.226 ms | 30.582 ms | 22.546 ms | 20 |
+### Certificate verification
 
-Derived from the medians:
+Without `CMP_CA`, these clients disable certificate verification for the
+self-signed fixture. The disabled modes do different work. Reqwest 0.13.5's
+rustls verifier skips handshake-signature checks; Leyline's BoringSSL path
+still checks those signatures. Do not use this mode to compare normal,
+verified TLS performance.
 
-| Scenario | leyline | reqwest 0.13 |
-| --- | ---: | ---: |
-| H1 keep-alive, per request | 60.5 us | 177.6 us |
-| H2 multiplexed, per request | 120.5 us | 47.6 us |
-| 4 MiB stream, throughput | 365 MiB/s | 232 MiB/s |
+Set `CMP_CA` to a DER-encoded root CA certificate to enable certificate
+and hostname verification. Each client trusts only that root. It reads the
+file once before timing; client construction still configures the trust store.
 
-Criterion summary lines from the run:
+The Go origin in `benches/comparison/go/server` and the Hyper origin in
+`benches/examples/origin.rs` accept `CMP_CERT` and `CMP_KEY`.
+Use a DER-encoded server certificate and an unencrypted PKCS#8 DER private key.
+The certificate must be signed by the test CA and include the request host in
+its subject alternative names. Both origins can use the same certificate and
+key. With neither variable set, each generates a self-signed certificate.
 
-```
-clients/leyline_h1_16k      time:   [11.966 ms 12.978 ms 14.599 ms]
-                            thrpt:  [13.699 Kelem/s 15.411 Kelem/s 16.714 Kelem/s]
-clients/reqwest_h1_16k      time:   [36.515 ms 38.133 ms 39.834 ms]
-                            thrpt:  [5.0208 Kelem/s 5.2448 Kelem/s 5.4772 Kelem/s]
-clients/leyline_h2_32x16k   time:   [3.1353 ms 3.5838 ms 4.0747 ms]
-                            thrpt:  [7.8533 Kelem/s 8.9290 Kelem/s 10.206 Kelem/s]
-clients/reqwest_h2_32x16k   time:   [1.4483 ms 1.5351 ms 1.6338 ms]
-                            thrpt:  [19.586 Kelem/s 20.846 Kelem/s 22.095 Kelem/s]
-clients/leyline_stream_4mib time:   [5.9239 ms 7.9326 ms 10.972 ms]
-                            thrpt:  [364.55 MiB/s 504.25 MiB/s 675.23 MiB/s]
-clients/reqwest_stream_4mib time:   [16.127 ms 22.546 ms 30.457 ms]
-                            thrpt:  [131.33 MiB/s 177.42 MiB/s 248.04 MiB/s]
-```
+Before timing, confirm that each client accepts the test CA and rejects an
+unrelated CA and a hostname absent from the certificate. Keep the private test
+keys out of Git.
 
-The spread between the median and criterion's estimate for
-`leyline_stream_4mib` is wide (10.953 ms against 7.933 ms), and the H2 and
-stream intervals are wide as well. Both follow from the machine load recorded
-above. Rerun on an idle machine before drawing a conclusion from those two
-rows.
 
-## Rerun after HTTP/2 write batching
+Set `CMP_LOG_PROTO=1` on either origin to record the HTTP version, TLS
+version, cipher, key-exchange group, and full or resumed handshake state.
+Go also records whether a HelloRetryRequest occurred. Keep this logging off
+while timing requests.
 
-Commit `d7d095b` (accumulating frame writer, one flush per event-loop turn, persistent read buffer). Same command, same machine, 1-minute load average 17.7 to 23.4 during the run, so treat these as directional.
+Set `CMP_TLS=matched` on both origins to restrict key exchange to X25519.
+The Hyper origin also restricts the cipher to TLS 1.3 AES-128-GCM. Go selects
+its TLS 1.3 cipher internally; confirm AES-128-GCM in the capture before
+comparing clients. Report these controlled settings separately from defaults.
 
-| Scenario | Client | Criterion estimate | Before |
-| --- | --- | ---: | ---: |
-| 32 concurrent H2 GETs, 16 KiB | leyline | 2.329 ms | 3.584 ms |
-| 32 concurrent H2 GETs, 16 KiB | reqwest 0.13 | 1.290 ms | 1.535 ms |
+The Leyline client also accepts `URL trace COUNT`. It checks every response
+and prints mean nanoseconds for session construction, DNS, TCP, TLS, and the
+HTTP response. TLS includes time waiting for the server. The reported stages
+do not cover all request preparation, scheduling, or teardown work. Tracing
+adds overhead, so use it to diagnose costs rather than rank clients.
 
-The write probe in `crates/leyline/tests/h2_write_batching.rs` counts one transport write for the request phase of 8 concurrent requests, where the previous driver made 8.
+### Response sizes
 
-## Rerun after the per-request allocation pass
+Set `CMP_BODY` to a nonnegative byte count on the origin and Rust clients.
+The fixture uses `byte[i] = i % 251`, matching the in-process benchmark.
+Each process creates the fixture before timing. Clients compare every
+response with the complete expected byte sequence, and `equiv` hashes raw
+bytes. With `CMP_BODY` unset, the body remains `ok-10byte!`.
 
-Branch `map/p1b-h2-overhead` (shared request head, HPACK static-table index,
-`content-length`-sized response buffer). Same command and machine as the write
-batching rerun. The 1-minute load average ranged from 11 to 39 across the runs,
-so the wall-clock rows below are directional, not a measurement of the change.
+Use `equiv` for binary fixtures; `print` decodes the response as text.
+Choose request counts and concurrency for the body size, and record both.
+These programs measure buffered response consumption. They do not establish
+streaming, upload, compression, or network-latency performance.
 
-| Scenario | Client | Before | After |
-| --- | --- | ---: | ---: |
-| 32 concurrent H2 GETs, 16 KiB | leyline | 1.139 ms | 1.126 ms |
-| 32 concurrent H2 GETs, 16 KiB | reqwest 0.13 | 771 us | 803 us |
+### Offered-load latency
 
-Those two runs are 10 minutes apart on a loaded machine and both clients moved
-by more than the difference between them: read the pair as "the ratio to
-reqwest did not change", not as a speedup. The wall-clock gap on this scenario
-is still about 1.4x reqwest.
+Both comparison clients accept a `paced` mode that sends requests at a
+fixed rate and reports service and coordinated-omission-corrected latency
+percentiles:
 
-Two numbers from the run are load-independent:
-
-```
-hpack/encode_chrome_headers   before: [2.0318 us 2.0370 us 2.0424 us]
-hpack/encode_chrome_headers   after:  [1.6472 us 1.6555 us 1.6669 us]
-                                      change: -18.3% (p = 0.00 < 0.05)
-allocs/per_request_tiny       before: 17.0 allocs/request   after: 17.0
-allocs/per_request_realistic  before: 57.8 allocs/request   after: 57.8
+```sh
+./bin/leyline URL paced RATE_PER_SECOND SECONDS CONCURRENCY
 ```
 
-The `allocs` bench drives `H2Client::send_request` directly, so it does not
-cover the pooled `pool::send_request` path where the pseudo-header and header
-clones were removed; those requests now share one `Arc<Head>` between the
-pooled attempt and its retry instead of cloning one `String` per pseudo-header
-and two per header.
+The corrected percentile measures from the intended start time, so it
+includes queueing when the offered rate exceeds capacity. Report the
+achieved rate beside the corrected percentiles; above capacity the achieved
+rate is the capacity estimate.
+
+Set `CMP_CONNECTIONS` on both comparison clients to spread the worker tasks
+over several connections. Match the control's `-c` and `-m` at the same
+product: eight connections with eight streams is eight connections times
+eight concurrent streams.
+
+## Reference control (h2load)
+
+`benches/comparison/control.sh` measures the origin with nghttp2's h2load,
+an independent HTTP/2 client. A peer delta alone cannot show whether both
+clients are near the transport's ceiling. The control supplies that ceiling
+for the same origin, request headers, and connection/stream topology.
+
+Install h2load from the `nghttp2-client` package (Linux) or `nghttp2`
+(macOS). h2load does not verify peer certificates (OpenSSL's default is
+`SSL_VERIFY_NONE`), so no CA is needed and the control measures an
+unverified TLS path. The comparison clients verify; do not read the control
+as verified-client evidence.
+
+```sh
+TARGET_URL=https://127.0.0.1:8443/ ./control.sh
+```
+
+The script sends the same thirteen non-pseudo Chrome 149 headers as the
+comparison clients and runs four configurations: the light header set and
+the browser header set on one connection with 64 streams, then browser
+headers on two and eight connections. The light row shows the transport
+ceiling without browser overhead. Do not compare a light-header number with
+a browser-profile client number; the origin does less work for the light
+request.
+
+Limits: h2load uses OpenSSL, not BoringSSL, does not verify certificates,
+and does not compare response bodies. It bounds the origin and the topology,
+not the clients. Report the control row beside every published client
+result. Treat a client number above the control as parity with the ceiling
+unless repeated rounds show a difference outside the paired interval.
+
+## Wide-area behavior (netem)
+
+`benches/comparison/netem.sh` runs a paired comparison over a virtual link
+with a real round-trip delay. The origin runs in its own network namespace
+and only the veth pair is delayed, so no other service on the host is
+affected. Loopback has almost no latency and hides window-management
+defects; this cell found a large-response collapse that no loopback test
+could see: at 30 ms RTT one four-MiB response measured 0.52 requests/s
+against wreq's 28.95, fixed by commit `f49f4e1`.
+
+Requirements: iproute2, openssl, passwordless sudo, and the DER test CA in
+`CMP_CA`. The origin certificate must include the virtual link address in
+its SAN; set `CMP_CA_KEY` to mint one from the test CA, or set
+`NETEM_CERT` and `NETEM_KEY` to a prepared leaf.
+
+```sh
+CMP_CA=ca.der CMP_CA_KEY=ca-key.pem RTT_MS=30 ./netem.sh
+```
+
+`RTT_MS` defaults to 30. `ORIGIN`, `SERVER_CPUS`, and the `paired.sh`
+variables (ROUNDS, CONC, ...) apply. Run the same cells at more than one
+RTT; a result at a single delay is a screen, not a ranking.
+
+## Performance accounting
+
+`scripts/perf_accounting.py` runs one comparison client against a local
+origin under `perf stat` counters for both processes and prints cycles,
+instructions, task-clock, context switches, and page faults per completed
+operation. The counters explain where a throughput difference lives; they
+do not rank clients by themselves.
+
+```sh
+scripts/perf_accounting.py --client leyline --preset small
+scripts/perf_accounting.py --client wreq --preset large --syscalls
+scripts/perf_accounting.py --client leyline --preset small --record
+```
+
+Presets mirror the comparison workloads: small (ten-byte), medium (16 KiB),
+large (4 MiB). Override the counts with `--warm`, `--cold`, `--requests`,
+`--concurrency`, and `--body`. `--syscalls` adds BPF per-syscall counts
+with bpftrace. `--record` captures 199 Hz DWARF call graphs and writes a
+text report per round. Raw counters land in a JSON file next to the
+captures (`PERF_OUT`, default `/tmp/leyline-perf-accounting`).
+
+Requirements: Linux, perf with passwordless sudo, bpftrace for `--syscalls`.
+Pair a profiling run with `paired.sh` for throughput and `netem.sh` for
+wide-area behavior. An instrumented rate is diagnostic, not a benchmark.
+
+## Browser-profile comparisons
+
+The separate client programs under `benches/comparison/` compare Leyline,
+wreq, tls-client, and azuretls. `run.sh` builds and runs all four against
+the local Go origin. They run in separate processes. Their browser profiles
+and versions can differ, and the Go clients do not verify response bodies.
+
+`paired.sh` runs the Leyline and wreq clients in alternating order each
+round and reports the paired difference with a 95% interval, the winning
+rounds, and the mean concurrent p50/p99 latencies. The equivalence gate
+compares the two clients' complete responses before any timing. When
+h2load is installed it also prints the reference control row from
+`control.sh`.
+
+## Recording a result
+
+Publish results from a committed harness with:
+
+- The full source revision, dependency lockfiles, browser profiles, and build
+  options.
+- Hardware, OS, toolchain versions, CPU affinity, and background load.
+- Request counts, concurrency, payload sizes, connection reuse, and TLS
+  verification settings.
+- The h2load control row for every origin and body size.
+- The response-equivalence output and raw measurements from each round.
+- The run order and statistical method, with uncertainty beside the estimate.
+
+Keep non-impersonating HTTP comparisons separate from browser-profile
+comparisons. Report each scenario's result, including regressions.

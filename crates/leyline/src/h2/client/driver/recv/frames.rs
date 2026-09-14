@@ -27,7 +27,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         self.peer_snapshot
             .set_max_concurrent_streams(self.peer_settings.max_concurrent_streams);
         self.peer_greeted = true;
-        self.drain_pending().await?;
         self.peer_snapshot
             .set_enable_connect_protocol(self.peer_settings.enable_connect_protocol);
         self.writer.write_settings_ack().await?;

@@ -6,11 +6,14 @@ use std::time::Duration;
 use bytes::{Bytes, BytesMut};
 use support::*;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::oneshot;
+use tokio::time::{sleep, timeout};
 
+use leyline::h2::ErrorCode;
 use leyline::h2::codec::FrameReader;
 use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
 use leyline::h2::connection::{ClientConnection, PseudoHeaders};
-use leyline::h2::frame::{DataFrame, Frame, FrameType, HeadersFrame};
+use leyline::h2::frame::{DataFrame, Frame, FrameType, HeadersFrame, PingFrame, RstStreamFrame};
 use leyline::h2::hpack;
 
 fn test_config() -> H2Config {
@@ -231,6 +234,8 @@ async fn h2_extended_connect_happy_path_echoes_payload() {
         .await
         .expect("extended CONNECT should succeed");
     assert_eq!(stream.status(), 200);
+    drop(handle);
+    sleep(Duration::from_millis(750)).await;
 
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
     stream.write_all(b"hello h2 ws").await.expect("write");
@@ -369,4 +374,81 @@ async fn dropping_connect_stream_signals_end_stream() {
         "client never emitted END_STREAM on the CONNECT stream"
     );
     assert_eq!(saw_sib, Some(3), "sibling GET must use stream id 3");
+}
+
+#[tokio::test]
+async fn connect_reset_survives_a_full_receive_queue() {
+    let (client_io, mut server_io) = tokio::io::duplex(65_536);
+    let (settings_tx, settings_rx) = oneshot::channel();
+    let (ready_tx, ready_rx) = oneshot::channel();
+    let (done_tx, done_rx) = oneshot::channel();
+    let server = tokio::spawn(async move {
+        perform_handshake(&mut server_io, true).await;
+        settings_tx.send(()).expect("settings receiver");
+        let (sid, _, _) = read_header_block(&mut server_io).await;
+        write_connect_200(&mut server_io, sid).await;
+        for _ in 0..96 {
+            write_data(&mut server_io, sid, b"0123456789abcdef", false).await;
+        }
+        let mut encoded = BytesMut::new();
+        RstStreamFrame {
+            stream_id: sid,
+            error_code: ErrorCode::Cancel,
+        }
+        .encode(&mut encoded);
+        PingFrame {
+            ack: false,
+            payload: *b"connect!",
+        }
+        .encode(&mut encoded);
+        server_io.write_all(&encoded).await.expect("reset and PING");
+        loop {
+            let (header, payload) = read_frame(&mut server_io).await;
+            if header.frame_type == FrameType::Ping as u8 {
+                assert_eq!(header.flags & 1, 1);
+                assert_eq!(payload, b"connect!");
+                break;
+            }
+        }
+        ready_tx.send(()).expect("parked consumer");
+        done_rx.await.expect("consumer finished");
+    });
+    let (handle, driver) = ClientConnection::start(client_io, test_config())
+        .await
+        .expect("H2 connection");
+    timeout(Duration::from_secs(3), settings_rx)
+        .await
+        .expect("settings processed")
+        .expect("settings barrier");
+    let (pseudo, headers) = connect_pseudo();
+    let mut stream = handle
+        .open_extended_connect(pseudo, headers)
+        .await
+        .expect("CONNECT headers");
+    assert_eq!(stream.status(), 200);
+    timeout(Duration::from_secs(3), ready_rx)
+        .await
+        .expect("reset processed")
+        .expect("reset barrier");
+    let mut received = Vec::new();
+    let error = timeout(Duration::from_secs(3), stream.read_to_end(&mut received))
+        .await
+        .expect("CONNECT completion")
+        .expect_err("CONNECT reset must not return EOF");
+    assert!(error.to_string().contains("Cancel"), "{error}");
+    assert!(received.len() <= 96 * 16);
+    assert!(
+        received
+            .iter()
+            .enumerate()
+            .all(|(i, &byte)| byte == b"0123456789abcdef"[i % 16])
+    );
+    done_tx.send(()).expect("server waiting");
+    server.await.expect("server task");
+    assert!(
+        timeout(Duration::from_secs(3), driver.join())
+            .await
+            .expect("driver exits")
+            .is_err()
+    );
 }

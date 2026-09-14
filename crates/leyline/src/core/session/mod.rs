@@ -18,7 +18,9 @@ pub use identity::Identity;
 #[cfg(feature = "websocket")]
 pub use websocket::WebSocketBuilder;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+
+use url::Url;
 
 use crate::cookie::Jar;
 #[cfg(feature = "websocket")]
@@ -75,8 +77,7 @@ pub(crate) struct SessionInner {
     connector: FingerprintConnector,
     h2_config: H2Config,
     pool: Arc<Pool>,
-    audit_tls: Arc<crate::audit::AuditTlsCache>,
-    audit_enabled: bool,
+    audit_tls: Option<Arc<crate::audit::AuditTlsCache>>,
     protocol_policy: ProtocolPolicy,
     default_retry: RetryPolicy,
     #[cfg(feature = "http3")]
@@ -87,5 +88,9 @@ pub(crate) struct SessionInner {
     #[cfg(feature = "tower")]
     layer: Option<Arc<dyn Stack>>,
     trace: Option<Arc<dyn crate::trace::Trace>>,
-    url_cache: std::sync::Arc<std::sync::Mutex<Option<(String, url::Url)>>>,
+    #[expect(
+        clippy::type_complexity,
+        reason = "The shared cache retains raw input and a parsed URL shared by active requests"
+    )]
+    url_cache: Arc<Mutex<Option<(String, Arc<Url>)>>>,
 }

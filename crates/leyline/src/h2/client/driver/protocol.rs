@@ -8,7 +8,7 @@ use tokio::task::JoinHandle;
 use crate::h2::connection::{H2Response, HeaderPair, PseudoHeaders};
 use crate::h2::error::{ErrorCode, H2Error};
 
-use super::super::types::H2ResponseEx;
+use super::ResponseSink;
 
 pub(crate) const MAX_FLOW_WINDOW: i64 = 0x7FFF_FFFF;
 
@@ -71,16 +71,13 @@ pub(crate) enum DriverCommand {
     SendRequestEx {
         head: Arc<Head>,
         body: DriverRequestBody,
-        stream_response: bool,
-        response_tx: oneshot::Sender<Result<H2ResponseEx, H2Error>>,
-        stream_body_tx: mpsc::Sender<io::Result<Bytes>>,
+        sink: ResponseSink,
     },
     OpenConnect {
         pseudo: PseudoHeaders,
         headers: Vec<crate::h2::connection::HeaderPair>,
         write_rx: mpsc::Receiver<io::Result<Bytes>>,
-        headers_tx: oneshot::Sender<Result<H2ResponseEx, H2Error>>,
-        body_tx: mpsc::Sender<io::Result<Bytes>>,
+        sink: ResponseSink,
     },
 }
 

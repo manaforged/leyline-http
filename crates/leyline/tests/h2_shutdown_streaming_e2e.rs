@@ -11,6 +11,7 @@ use leyline::h2::frame::FrameType;
 use leyline::h2::{RequestBody, ResponseBody};
 use support::*;
 use tokio::io::AsyncWriteExt;
+use tokio::time::{sleep, timeout};
 
 const END_STREAM: u8 = 0x1;
 const CHUNKS: usize = 4;
@@ -116,7 +117,7 @@ async fn streaming_upload_completes_after_last_handle_drops() {
         .map(|i| Ok(Bytes::from(vec![i as u8 + 1; CHUNK_LEN])))
         .collect();
     let stream = futures_util::stream::iter(chunks).then(|c| async move {
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        sleep(Duration::from_millis(200)).await;
         c
     });
 
@@ -160,4 +161,74 @@ async fn streaming_upload_completes_after_last_handle_drops() {
         .expect("driver hung")
         .expect("driver errored");
     server.await.expect("mock server panicked");
+}
+
+#[tokio::test]
+async fn abandoned_response_is_reset_before_shutdown() {
+    let (client, mut peer) = tokio::io::duplex(65_536);
+    let server = tokio::spawn(async move {
+        read_preface(&mut peer).await;
+        let (header, _) = read_frame(&mut peer).await;
+        assert_eq!(header.frame_type, FrameType::Settings as u8);
+        write_server_settings(&mut peer).await;
+        write_settings_ack(&mut peer).await;
+        let sid = loop {
+            let (header, _) = read_frame(&mut peer).await;
+            if header.frame_type == FrameType::Headers as u8 {
+                break header.stream_id;
+            }
+        };
+        write_response_headers(&mut peer, sid).await;
+        let mut reset = false;
+        loop {
+            let (header, payload) = timeout(Duration::from_secs(3), read_frame(&mut peer))
+                .await
+                .expect("connection shutdown");
+            if header.frame_type == FrameType::RstStream as u8 {
+                assert_eq!(header.stream_id, sid);
+                assert_eq!(
+                    u32::from_be_bytes(payload.try_into().expect("reset code")),
+                    8
+                );
+                reset = true;
+            } else if header.frame_type == FrameType::GoAway as u8 {
+                assert!(reset, "abandoned response was not cancelled before GOAWAY");
+                assert_eq!(
+                    u32::from_be_bytes(payload[..4].try_into().expect("last peer stream")),
+                    0
+                );
+                assert_eq!(
+                    u32::from_be_bytes(payload[4..8].try_into().expect("GOAWAY code")),
+                    0
+                );
+                break;
+            }
+        }
+    });
+    let (handle, driver) = ClientConnection::start(client, config())
+        .await
+        .expect("connection");
+    let response = handle
+        .send_request_ex(
+            PseudoHeaders {
+                method: "GET".into(),
+                scheme: "https".into(),
+                authority: "example.test".into(),
+                path: "/".into(),
+                protocol: None,
+            },
+            Vec::new(),
+            RequestBody::None,
+            true,
+        )
+        .await
+        .expect("headers");
+    assert_eq!(response.status, 200);
+    drop(handle);
+    drop(response);
+    timeout(Duration::from_secs(3), driver.join())
+        .await
+        .expect("driver exits after cancellation")
+        .expect("driver shutdown");
+    server.await.expect("peer task");
 }

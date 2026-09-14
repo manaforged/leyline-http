@@ -64,3 +64,43 @@ fn deflate_roundtrips_zlib_wrapped() {
         .unwrap();
     assert_eq!(out, data);
 }
+
+#[cfg(not(all(
+    feature = "compression-gzip",
+    feature = "compression-brotli",
+    feature = "compression-zstd",
+    feature = "compression-deflate"
+)))]
+#[test]
+fn disabled_codecs_return_body_errors() {
+    for (encoding, enabled, feature) in [
+        (
+            ContentEncoding::Gzip,
+            cfg!(feature = "compression-gzip"),
+            "compression-gzip",
+        ),
+        (
+            ContentEncoding::Brotli,
+            cfg!(feature = "compression-brotli"),
+            "compression-brotli",
+        ),
+        (
+            ContentEncoding::Zstd,
+            cfg!(feature = "compression-zstd"),
+            "compression-zstd",
+        ),
+        (
+            ContentEncoding::Deflate,
+            cfg!(feature = "compression-deflate"),
+            "compression-deflate",
+        ),
+    ] {
+        if !enabled {
+            let error = encoding
+                .encode(b"request body")
+                .expect_err("disabled codec must fail");
+            assert!(error.is_body());
+            assert!(error.message().expect("feature guidance").contains(feature));
+        }
+    }
+}

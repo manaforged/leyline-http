@@ -175,7 +175,8 @@ let resp = session.post("https://example.com/upload").multipart(form).await?;
 `Body::stream` wraps any `Stream` of `io::Result<Bytes>`.
 `Body::stream_with_length` does the same and declares an exact
 `Content-Length`. Give the length whenever you know it: a body with no length
-hint is sent chunked. See [Streaming](streaming.md).
+hint is sent chunked. See [Streaming](streaming.md). The example needs `bytes`
+and `futures-util` in your manifest.
 
 ```rust,no_run
 use bytes::Bytes;
@@ -243,9 +244,10 @@ let resp = session
 ```
 
 `timeout` replaces the total request timeout alone. `timeouts` replaces
-`total`, `read`, and `response_header` together for this one request.
-`connect` stays session-wide, because connections are pooled and coalesced
-across requests.
+`total`, `read`, and `response_header` for this one request. A `None` keeps
+the session value for that field, so a session `read` or `response_header`
+timeout cannot be disabled per request. `connect` stays session-wide,
+because connections are pooled and coalesced across requests.
 
 ```rust,no_run
 use leyline::TimeoutConfig;
@@ -329,7 +331,8 @@ println!("{}", resp.status());
 # }
 ```
 
-Enable it with `features = ["tower"]`.
+Enable it with `features = ["tower"]`. The example also needs
+`tower-service = "0.3"` in your manifest; the feature does not re-export it.
 
 ## Middleware layers
 

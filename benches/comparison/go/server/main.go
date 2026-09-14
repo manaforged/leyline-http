@@ -1,8 +1,3 @@
-// Shared HTTPS/2 server for the client comparison. Ephemeral self-signed cert,
-// real HTTP/2 over TLS (ALPN h2), keep-alive, fixed 10-byte 200 body. Binds the
-// address given (default 127.0.0.1:0 — an ephemeral port, so it never collides
-// with anything already running) and prints the actual URL it chose. Every
-// client hits this same server, so the only thing that differs is client code.
 package main
 
 import (
@@ -17,10 +12,26 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 )
 
-func selfSigned() tls.Certificate {
+func certificate() tls.Certificate {
+	if path, ok := os.LookupEnv("CMP_CERT"); ok {
+		der, err := os.ReadFile(path)
+		if err != nil {
+			panic(err)
+		}
+		keyDer, err := os.ReadFile(os.Getenv("CMP_KEY"))
+		if err != nil {
+			panic(err)
+		}
+		key, err := x509.ParsePKCS8PrivateKey(keyDer)
+		if err != nil {
+			panic(err)
+		}
+		return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
+	}
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	tmpl := &x509.Certificate{
 		SerialNumber:          big.NewInt(1),
@@ -48,11 +59,23 @@ func main() {
 		os.Exit(1)
 	}
 	body := []byte("ok-10byte!")
+	if size, ok := os.LookupEnv("CMP_BODY"); ok {
+		n, err := strconv.Atoi(size)
+		if err != nil || n < 0 {
+			panic("CMP_BODY is a nonnegative byte count")
+		}
+		body = make([]byte, n)
+		for i := range body {
+			body[i] = byte(i % 251)
+		}
+	}
 	mux := http.NewServeMux()
 	logProto := os.Getenv("CMP_LOG_PROTO") == "1"
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if logProto {
 			fmt.Fprintf(os.Stderr, "PROTO %s\n", r.Proto)
+			fmt.Fprintf(os.Stderr, "TLS version=%x cipher=%s group=%s resumed=%t retry=%t\n",
+				r.TLS.Version, tls.CipherSuiteName(r.TLS.CipherSuite), r.TLS.CurveID, r.TLS.DidResume, r.TLS.HelloRetryRequest)
 		}
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(200)
@@ -61,10 +84,13 @@ func main() {
 	srv := &http.Server{
 		Handler: mux,
 		TLSConfig: &tls.Config{
-			Certificates: []tls.Certificate{selfSigned()},
+			Certificates: []tls.Certificate{certificate()},
 			NextProtos:   []string{"h2", "http/1.1"},
 			MinVersion:   tls.VersionTLS12,
 		},
+	}
+	if os.Getenv("CMP_TLS") == "matched" {
+		srv.TLSConfig.CurvePreferences = []tls.CurveID{tls.X25519}
 	}
 	fmt.Printf("LISTENING https://%s/\n", ln.Addr().String())
 	if err := srv.ServeTLS(ln, "", ""); err != nil {

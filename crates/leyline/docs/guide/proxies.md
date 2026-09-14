@@ -113,7 +113,9 @@ way: the proxy resolves the hostname.
 
 ```toml
 [dependencies]
-leyline-http = { version = "0.1", features = ["socks"] }
+# Git until the 0.1.0 packages are published; then:
+# leyline-http = { version = "0.1", features = ["socks"] }
+leyline-http = { git = "https://github.com/manaforged/leyline-http", branch = "main", features = ["socks"] }
 ```
 
 ## Per-request override
@@ -140,7 +142,7 @@ connection.
 ## HTTP/3 is not proxied
 
 QUIC has no proxy path here. A request with `ProtocolPolicy::Http3` and any
-proxy set fails with `Error::Config`, telling you to use `Auto` or `Http2`.
+proxy set fails with `Kind::Config`, telling you to use `Auto` or `Http2`.
 Under `ProtocolPolicy::Race`, a proxied request is not raced: it goes down the
 `Auto` path instead. See [HTTP/3](http3.md).
 

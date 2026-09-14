@@ -10,8 +10,8 @@ publish = false
 [workspace]
 
 [dependencies]
-wreq = "=6.0.0-rc.31"
-wreq-util = "=3.0.0-rc.14"
+wreq = "=0.16.1"
+wreq-util = "=0.2.0"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 [profile.release]

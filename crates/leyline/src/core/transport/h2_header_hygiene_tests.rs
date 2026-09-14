@@ -16,6 +16,7 @@ fn connection_specific_headers_are_stripped() {
         ("Upgrade", "websocket"),
         ("Transfer-Encoding", "chunked"),
         ("Proxy-Connection", "keep-alive"),
+        ("HTTP2-Settings", "value"),
         ("x-keep", "1"),
     ]);
     strip_connection_specific_headers(&mut headers).unwrap();
@@ -25,10 +26,22 @@ fn connection_specific_headers_are_stripped() {
 
 #[test]
 fn field_names_are_lowercased() {
-    let mut headers = pairs([("User-Agent", "x"), ("X-Thing", "1")]);
+    let mut headers = vec![
+        ("User-Agent".into(), "Agent/1.0".into()),
+        ("x-thing".to_owned().into(), "MiXeD".to_owned().into()),
+        ("X-Thing".into(), "second".into()),
+        ("TE".into(), "Trailers".into()),
+    ];
     strip_connection_specific_headers(&mut headers).unwrap();
-    let names: Vec<&str> = headers.iter().map(|(n, _)| n.as_ref()).collect();
-    assert_eq!(names, ["user-agent", "x-thing"]);
+    assert_eq!(
+        headers,
+        pairs([
+            ("user-agent", "Agent/1.0"),
+            ("x-thing", "MiXeD"),
+            ("x-thing", "second"),
+            ("te", "Trailers"),
+        ])
+    );
 }
 
 #[test]

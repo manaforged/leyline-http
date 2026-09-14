@@ -3,7 +3,7 @@ use std::io;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{mpsc, oneshot};
 
@@ -77,13 +77,34 @@ struct PendingSend {
     trailers: Vec<(String, String)>,
 }
 
-enum ResponseSink {
+pub(crate) enum ResponseSink {
     Buffered(oneshot::Sender<Result<H2Response, H2Error>>),
     BufferedEx(oneshot::Sender<Result<H2ResponseEx, H2Error>>),
     StreamingEx {
         headers_tx: Option<oneshot::Sender<Result<H2ResponseEx, H2Error>>>,
         body_tx: mpsc::Sender<io::Result<Bytes>>,
+        terminal: mpsc::OwnedPermit<io::Result<Bytes>>,
     },
+}
+
+impl ResponseSink {
+    pub(super) fn streaming(
+        headers_tx: oneshot::Sender<Result<H2ResponseEx, H2Error>>,
+    ) -> (Self, mpsc::Receiver<io::Result<Bytes>>) {
+        let (body_tx, body_rx) = mpsc::channel(STREAM_RESP_BODY_CAPACITY + 1);
+        let terminal = body_tx
+            .clone()
+            .try_reserve_owned()
+            .expect("new body channel has an available slot");
+        (
+            Self::StreamingEx {
+                headers_tx: Some(headers_tx),
+                body_tx,
+                terminal,
+            },
+            body_rx,
+        )
+    }
 }
 
 enum SendBodyInput {
@@ -170,10 +191,16 @@ impl StreamActor {
                     trailers: self.trailers.take(),
                 }));
             }
-            Some(ResponseSink::StreamingEx { body_tx, .. }) => {
-                drop(body_tx);
+            Some(ResponseSink::StreamingEx {
+                body_tx, terminal, ..
+            }) if !self.stalled.is_empty() && !body_tx.is_closed() => {
+                let mut tail = BytesMut::with_capacity(self.stalled.iter().map(Bytes::len).sum());
+                for chunk in self.stalled.drain(..) {
+                    tail.extend_from_slice(&chunk);
+                }
+                drop(terminal.send(Ok(tail.freeze())));
             }
-            None => {}
+            None | Some(ResponseSink::StreamingEx { .. }) => {}
         }
     }
 
@@ -187,16 +214,27 @@ impl StreamActor {
             }
             Some(ResponseSink::StreamingEx {
                 headers_tx,
-                body_tx,
+                terminal,
+                ..
             }) => {
                 if let Some(tx) = headers_tx {
                     let _ = tx.send(Err(err));
                 } else {
-                    let _ =
-                        body_tx.try_send(Err(io::Error::other(format!("h2 stream failed: {err}"))));
+                    drop(terminal.send(Err(io::Error::other(format!("h2 stream failed: {err}")))));
                 }
             }
             None => {}
+        }
+    }
+}
+
+impl Drop for StreamActor {
+    fn drop(&mut self) {
+        if self.response_tx.is_some() {
+            self.deliver_err(H2Error::Connection {
+                code: ErrorCode::InternalError,
+                reason: "connection driver stopped before response completion".into(),
+            });
         }
     }
 }

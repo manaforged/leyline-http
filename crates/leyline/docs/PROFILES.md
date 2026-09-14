@@ -15,12 +15,16 @@ Each profile can pin a JA4 golden under `[tls.fingerprint]`. The offline
 leyline reconstructs from the profile's own `[tls]` block, and reports one of
 two trust levels:
 
-- **Gated.** The profile declares `extension_permutation`, so the ClientHello
-  extension order is fixed and the reconstruction is wire-faithful. A mismatch
-  fails the test as a regression.
+- **Gated.** The profile declares `extension_permutation`. The test compares
+  the reconstructed fingerprint with the configured golden and fails on a
+  mismatch. This check does not establish the golden's browser provenance.
 - **Reconnaissance.** The profile leaves the order to BoringSSL, so the
-  reconstruction is an estimate. A mismatch is reported, not failed. Wire truth
-  for these comes from the live `tls_peet` suite.
+  reconstruction is an estimate. A mismatch is reported, not failed. The live
+  `tls_peet` suite checks Leyline's emission against the configured golden.
+
+A browser capture provides the reference for either category. Neither the
+offline test nor a live Leyline request captures the browser itself. Matching
+JA4 does not establish equality of every ClientHello field.
 
 `captured_against` records the exact browser build a profile was captured from.
 A missing value logs a load-time warning and means the capture build is

@@ -349,9 +349,12 @@ async fn handshake_transport_failure_is_retryable() {
 async fn handshake_protocol_failure_is_retryable() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
+    let peer = tokio::spawn(async move {
         let (mut tcp, _) = listener.accept().await.unwrap();
-        tcp.write_all(b"this is not TLS").await.unwrap();
+        tcp.write_all(b"this is not TLS")
+            .await
+            .expect("send non-TLS bytes");
+        tcp
     });
 
     let trust = TlsTrustConfig::new()
@@ -362,6 +365,7 @@ async fn handshake_protocol_failure_is_retryable() {
         .await
         .err()
         .expect("a non-TLS peer must fail the handshake");
+    drop(peer.await.expect("peer task completes"));
     assert!(matches!(err, TlsError::Handshake(_)), "got {err:?}");
     assert!(err.is_retryable());
 }

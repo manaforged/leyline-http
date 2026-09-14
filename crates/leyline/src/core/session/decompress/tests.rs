@@ -30,21 +30,16 @@ fn gzip_without_feature_is_an_error() {
         Some("gzip"),
         &CompressionConfig::default(),
     )
-    .unwrap_err();
-    assert!(
-        matches!(err, Error::new(Kind::Decode).with_message(_)),
-        "got: {err:?}"
-    );
+    .expect_err("disabled response codec must fail");
+    assert!(err.is_decode(), "got: {err:?}");
 }
 
 #[cfg(not(feature = "compression-brotli"))]
 #[test]
 fn brotli_without_feature_is_an_error() {
-    let err = decompress_body(vec![0x0b], Some("br"), &CompressionConfig::default()).unwrap_err();
-    assert!(
-        matches!(err, Error::new(Kind::Decode).with_message(_)),
-        "got: {err:?}"
-    );
+    let err = decompress_body(vec![0x0b], Some("br"), &CompressionConfig::default())
+        .expect_err("disabled response codec must fail");
+    assert!(err.is_decode(), "got: {err:?}");
 }
 
 #[cfg(not(feature = "compression-deflate"))]
@@ -55,11 +50,8 @@ fn deflate_without_feature_is_an_error() {
         Some("deflate"),
         &CompressionConfig::default(),
     )
-    .unwrap_err();
-    assert!(
-        matches!(err, Error::new(Kind::Decode).with_message(_)),
-        "got: {err:?}"
-    );
+    .expect_err("disabled response codec must fail");
+    assert!(err.is_decode(), "got: {err:?}");
 }
 
 #[cfg(not(feature = "compression-zstd"))]
@@ -70,11 +62,8 @@ fn zstd_without_feature_is_an_error() {
         Some("zstd"),
         &CompressionConfig::default(),
     )
-    .unwrap_err();
-    assert!(
-        matches!(err, Error::new(Kind::Decode).with_message(_)),
-        "got: {err:?}"
-    );
+    .expect_err("disabled response codec must fail");
+    assert!(err.is_decode(), "got: {err:?}");
 }
 
 #[cfg(feature = "compression-gzip")]

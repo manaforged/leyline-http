@@ -16,11 +16,12 @@ how to use it, in reading order.
 11. [Fingerprints](fingerprints.md): what a profile pins and how to audit it.
 12. [Features and targets](features-and-targets.md): cargo features, targets, MSRV.
 
-Errors: see the rustdoc for `leyline::Error` until the chapter lands.
+See [Responses](responses.md) for status handling and body errors.
 
 Reference pages beside this guide: [profiles](../PROFILES.md) and
 [MSRV](../MSRV.md).
 
-Every code block in this guide is compiled as a doctest of the `leyline-http`
-crate. Blocks that would open a socket are marked `no_run`, so they compile but
-do not send traffic.
+Every Rust block in this guide is compiled as a doctest of the
+`leyline-http` crate; the Tower blocks compile only under
+`--features tower`, and the `toml` blocks are not compiled. Blocks that would
+open a socket are marked `no_run`, so they compile but do not send traffic.

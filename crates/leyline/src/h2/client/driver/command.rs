@@ -52,64 +52,43 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 pseudo,
                 headers,
                 write_rx,
-                headers_tx,
-                body_tx,
+                sink,
             } => {
                 if let Err(e) = self.reject_after_goaway() {
-                    let _ = headers_tx.send(Err(e));
+                    send_err_to_sink(sink, e);
                     return Ok(());
                 }
                 if !self.peer_settings.enable_connect_protocol {
-                    let _ = headers_tx.send(Err(H2Error::Connection {
-                        code: ErrorCode::ProtocolError,
-                        reason: "peer does not advertise ENABLE_CONNECT_PROTOCOL".into(),
-                    }));
+                    send_err_to_sink(
+                        sink,
+                        H2Error::Connection {
+                            code: ErrorCode::ProtocolError,
+                            reason: "peer does not advertise ENABLE_CONNECT_PROTOCOL".into(),
+                        },
+                    );
                     return Ok(());
                 }
                 if let Err(e) = self.check_stream_capacity() {
-                    let _ = headers_tx.send(Err(e));
+                    send_err_to_sink(sink, e);
                     return Ok(());
                 }
-                let sink = ResponseSink::StreamingEx {
-                    headers_tx: Some(headers_tx),
-                    body_tx,
-                };
                 self.start_extended_connect(&pseudo, &headers, write_rx, sink)
                     .await
             }
-            DriverCommand::SendRequestEx {
-                head,
-                body,
-                stream_response,
-                response_tx,
-                stream_body_tx,
-            } => {
+            DriverCommand::SendRequestEx { head, body, sink } => {
                 let deferrable = !matches!(
                     body,
                     crate::h2::client::driver::protocol::DriverRequestBody::Streaming { .. }
                 );
                 if let Err(e) = self.admit_new_stream() {
                     if Self::deferrable_capacity_error(&e) && deferrable {
-                        self.pending.push_back(DriverCommand::SendRequestEx {
-                            head,
-                            body,
-                            stream_response,
-                            response_tx,
-                            stream_body_tx,
-                        });
+                        self.pending
+                            .push_back(DriverCommand::SendRequestEx { head, body, sink });
                         return Ok(());
                     }
-                    let _ = response_tx.send(Err(e));
+                    send_err_to_sink(sink, e);
                     return Ok(());
                 }
-                let sink = if stream_response {
-                    ResponseSink::StreamingEx {
-                        headers_tx: Some(response_tx),
-                        body_tx: stream_body_tx,
-                    }
-                } else {
-                    ResponseSink::BufferedEx(response_tx)
-                };
                 self.start_request_ex(&head.pseudo, &head.headers, body, sink)
                     .await
             }

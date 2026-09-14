@@ -557,16 +557,24 @@ impl SessionBuilder {
         let (brand_extra_headers, brand_navigate_accept) =
             self.apply_brand_overlay(&mut identity)?;
 
-        let tcp_profile = self
-            .tcp_profile
-            .unwrap_or_else(|| self.platform.tcp_profile());
+        let tcp_profile = self.tcp_profile.unwrap_or_else(|| {
+            let mut tcp = self.platform.tcp_profile();
+            if self.browser.is_none() {
+                tcp.mss = 0;
+                tcp.window_size = 0;
+                tcp.window_scale = 0;
+            }
+            tcp
+        });
 
         let connector = self.build_connector(profile, tcp_profile)?;
 
         let resolved_h2 = profile.h2.resolve_for_platform(self.platform)?;
         let h2_config = H2Config::from_profile(&resolved_h2)?;
 
-        let audit_cache = self.compute_audit_cache(profile, &h2_config, tcp_profile);
+        let audit_cache = self
+            .audit
+            .then(|| Arc::new(self.compute_audit_cache(profile, &h2_config, tcp_profile)));
 
         let cookie_jar = self.cookie_jar.unwrap_or_default();
 
@@ -628,8 +636,7 @@ impl SessionBuilder {
                         self.pool_config.max_h1_conns_per_host.max(1),
                     )
                 }),
-                audit_tls: Arc::new(audit_cache),
-                audit_enabled: self.audit,
+                audit_tls: audit_cache,
                 protocol_policy: self.protocol_policy,
                 default_retry: self.default_retry,
                 trace: self.trace,

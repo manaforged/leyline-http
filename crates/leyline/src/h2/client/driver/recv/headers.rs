@@ -77,6 +77,9 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         if h.end_headers {
             return Ok(h.fragment.clone());
         }
+        if self.writer.pending() > 0 {
+            self.writer.flush().await?;
+        }
         let max_header_block = self.config.max_header_block_bytes;
         let reassembly_timeout = self.config.header_block_reassembly_timeout;
         let deadline = tokio::time::Instant::now() + reassembly_timeout;

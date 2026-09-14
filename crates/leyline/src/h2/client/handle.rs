@@ -11,8 +11,8 @@ use crate::h2::error::{ErrorCode, H2Error};
 
 use super::connect_stream::{H2ConnectStream, ShutdownState};
 use super::driver::{
-    DriverCommand, DriverRequestBody, Head, PeerSettingsSnapshot, STREAM_REQ_BODY_CAPACITY,
-    STREAM_RESP_BODY_CAPACITY, pump_request_body,
+    DriverCommand, DriverRequestBody, Head, PeerSettingsSnapshot, ResponseSink,
+    STREAM_REQ_BODY_CAPACITY, pump_request_body,
 };
 use super::types::{H2ResponseEx, RequestBody, ResponseBody};
 
@@ -111,15 +111,17 @@ impl H2Client {
         };
 
         let (response_tx, response_rx) = oneshot::channel::<Result<H2ResponseEx, H2Error>>();
-        let (body_body_tx, body_body_rx) =
-            mpsc::channel::<io::Result<Bytes>>(STREAM_RESP_BODY_CAPACITY);
+        let (sink, stream_body_rx) = if stream_response {
+            let (sink, receiver) = ResponseSink::streaming(response_tx);
+            (sink, Some(receiver))
+        } else {
+            (ResponseSink::BufferedEx(response_tx), None)
+        };
 
         let cmd = DriverCommand::SendRequestEx {
             head,
             body: body_in,
-            stream_response,
-            response_tx,
-            stream_body_tx: body_body_tx,
+            sink,
         };
         self.tx.send(cmd).await.map_err(|_| H2Error::Connection {
             code: ErrorCode::NoError,
@@ -128,8 +130,8 @@ impl H2Client {
 
         match response_rx.await {
             Ok(Ok(mut resp)) => {
-                if stream_response {
-                    resp.body = ResponseBody::Streaming(body_body_rx);
+                if let Some(rx) = stream_body_rx {
+                    resp.body = ResponseBody::Streaming(rx);
                 }
                 Ok(resp)
             }
@@ -176,15 +178,14 @@ impl H2Client {
         }
 
         let (write_tx, write_rx) = mpsc::channel::<io::Result<Bytes>>(STREAM_REQ_BODY_CAPACITY);
-        let (body_tx, body_rx) = mpsc::channel::<io::Result<Bytes>>(STREAM_RESP_BODY_CAPACITY);
         let (headers_tx, headers_rx) = oneshot::channel::<Result<H2ResponseEx, H2Error>>();
+        let (sink, body_rx) = ResponseSink::streaming(headers_tx);
 
         let cmd = DriverCommand::OpenConnect {
             pseudo,
             headers,
             write_rx,
-            headers_tx,
-            body_tx,
+            sink,
         };
         self.tx.send(cmd).await.map_err(|_| H2Error::Connection {
             code: ErrorCode::NoError,

@@ -1,9 +1,11 @@
 use http::Uri;
+use url::Url;
 
 use crate::core::headers::reorder;
 use crate::core::transport::Prepared;
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::profile::Preset;
 use crate::profile::preset::HeaderPair;
@@ -100,10 +102,10 @@ impl Session {
         let mut current_url = {
             let mut cache = lock(&self.inner.url_cache);
             match cache.as_mut() {
-                Some((raw, parsed)) if raw == raw_url => parsed.clone(),
+                Some((raw, parsed)) if raw == raw_url => Arc::clone(parsed),
                 _ => {
-                    let parsed = url::Url::parse(raw_url)?;
-                    *cache = Some((raw_url.to_string(), parsed.clone()));
+                    let parsed = Arc::new(Url::parse(raw_url)?);
+                    *cache = Some((raw_url.to_string(), Arc::clone(&parsed)));
                     parsed
                 }
             }
@@ -117,10 +119,14 @@ impl Session {
 
         let redirect_cap = self.inner.redirect_policy.max_redirects_hint();
         for _ in 0..=redirect_cap {
-            let origin = url_origin(&current_url);
+            let origin = if redirect_chain.is_empty() {
+                Cow::Borrowed(original_origin.as_str())
+            } else {
+                Cow::Owned(url_origin(&current_url))
+            };
             let referer = referer_for(redirect_chain.last().map(|s: &String| s.as_str()), &origin);
 
-            let strip_sensitive = !redirect_chain.is_empty() && origin != original_origin;
+            let strip_sensitive = !redirect_chain.is_empty() && origin.as_ref() != original_origin;
             let headers = self.build_hop_headers(
                 preset,
                 &origin,
@@ -134,7 +140,7 @@ impl Session {
                 header_order,
             );
 
-            let want_introspect = self.inner.audit_enabled;
+            let want_introspect = self.inner.audit_tls.is_some();
             let audit_headers: Vec<(String, String)> = if want_introspect {
                 headers
                     .iter()
@@ -212,7 +218,7 @@ impl Session {
                 } else {
                     drop(resp_body_shape);
                     redirect_chain.push(current_url.to_string());
-                    current_url = current_url.join(&location)?;
+                    current_url = Arc::new(current_url.join(&location)?);
                     if !matches!(current_url.scheme(), "http" | "https") {
                         return Err(Error::new(Kind::Redirect).with_message(format!(
                             "refusing to follow redirect to non-http(s) scheme `{}`",
@@ -254,15 +260,12 @@ impl Session {
                 tls_peer_certificate: peer_cert_der,
                 tls_version,
                 tls_cipher,
-                request_method: if self.inner.audit_enabled {
+                request_method: if self.inner.audit_tls.is_some() {
                     current_method.clone()
                 } else {
                     String::new()
                 },
-                audit_tls: self
-                    .inner
-                    .audit_enabled
-                    .then(|| std::sync::Arc::clone(&self.inner.audit_tls)),
+                audit_tls: self.inner.audit_tls.clone(),
                 audit_cache: std::sync::OnceLock::new(),
                 compression: self.inner.compression,
                 timing: acc_timing,
@@ -279,7 +282,7 @@ impl Session {
         preset: Option<Preset>,
         origin: &str,
         referer: &str,
-        current_url: &url::Url,
+        current_url: &Url,
         current_method: &str,
         redirect_chain: &[String],
         current_body: &Body,
@@ -400,7 +403,7 @@ impl Session {
     fn collect_cookies(
         &self,
         resp_headers: &[(http::HeaderName, http::HeaderValue)],
-        current_url: &url::Url,
+        current_url: &Url,
         all_cookies: &mut HashMap<String, String>,
     ) {
         let set_cookies: Vec<&str> = resp_headers
@@ -487,7 +490,7 @@ impl Session {
     }
 }
 
-fn url_origin(url: &url::Url) -> String {
+fn url_origin(url: &Url) -> String {
     let host = url.host_str().unwrap_or("");
     match url.port() {
         Some(port) => format!("{}://{}:{}", url.scheme(), host, port),
@@ -499,7 +502,7 @@ fn referer_for(prev: Option<&str>, current_origin: &str) -> String {
     let Some(prev) = prev else {
         return format!("{current_origin}/");
     };
-    let Ok(mut parsed) = url::Url::parse(prev) else {
+    let Ok(mut parsed) = Url::parse(prev) else {
         return format!("{current_origin}/");
     };
     if url_origin(&parsed) != current_origin {

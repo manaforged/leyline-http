@@ -1,5 +1,4 @@
 use std::sync::atomic::Ordering;
-use std::time::{Duration, Instant};
 
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -53,56 +52,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         }
         Ok(())
     }
-
-    pub(super) async fn graceful_shutdown(&mut self) -> Result<(), H2Error> {
-        self.shutdown_started = true;
-        let last = self.next_stream_id.saturating_sub(2);
-        let _ = self.writer.write_goaway(last, ErrorCode::NoError).await;
-        let _ = self.writer.flush().await;
-
-        if self.streams.is_empty() {
-            return Ok(());
-        }
-
-        let mut body_rx_open = true;
-        let deadline = Instant::now() + Duration::from_millis(500);
-        loop {
-            if self.streams.is_empty() {
-                return Ok(());
-            }
-            let now = Instant::now();
-            if now >= deadline {
-                return Ok(());
-            }
-            let timeout = deadline - now;
-            if self.writer.pending() > 0 {
-                self.writer.flush().await?;
-            }
-            tokio::select! {
-                biased;
-                frame = self.reader.next() => {
-                    match frame {
-                        Ok(Some(f)) => self.on_inbound_frame(f).await?,
-                        Ok(None) => return Ok(()),
-                        Err(e) => return Err(e),
-                    }
-                    self.try_drain_pending().await?;
-                }
-                maybe_chunk = self.body_chunk_rx.recv(), if body_rx_open => {
-                    match maybe_chunk {
-                        Some(c) => {
-                            self.on_body_chunk(c).await?;
-                            self.try_drain_pending().await?;
-                        }
-                        None => body_rx_open = false,
-                    }
-                }
-                _ = tokio::time::sleep(timeout) => {
-                    return Ok(());
-                }
-            }
-        }
-    }
 }
 
 impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
@@ -117,18 +66,20 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             Err(e) => clone_err(e),
         };
         for (_, mut actor) in self.streams.drain() {
-            actor.deliver_err(clone_err(&final_err));
+            if actor.remote_done {
+                actor.deliver_ok();
+            } else {
+                actor.deliver_err(clone_err(&final_err));
+            }
         }
         while let Some(cmd) = self.pending.pop_front() {
             match cmd {
                 DriverCommand::SendRequest { response_tx, .. } => {
                     let _ = response_tx.send(Err(clone_err(&final_err)));
                 }
-                DriverCommand::SendRequestEx { response_tx, .. } => {
-                    let _ = response_tx.send(Err(clone_err(&final_err)));
-                }
-                DriverCommand::OpenConnect { headers_tx, .. } => {
-                    let _ = headers_tx.send(Err(clone_err(&final_err)));
+                DriverCommand::SendRequestEx { sink, .. }
+                | DriverCommand::OpenConnect { sink, .. } => {
+                    send_err_to_sink(sink, clone_err(&final_err));
                 }
             }
         }
@@ -137,11 +88,9 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 DriverCommand::SendRequest { response_tx, .. } => {
                     let _ = response_tx.send(Err(clone_err(&final_err)));
                 }
-                DriverCommand::SendRequestEx { response_tx, .. } => {
-                    let _ = response_tx.send(Err(clone_err(&final_err)));
-                }
-                DriverCommand::OpenConnect { headers_tx, .. } => {
-                    let _ = headers_tx.send(Err(clone_err(&final_err)));
+                DriverCommand::SendRequestEx { sink, .. }
+                | DriverCommand::OpenConnect { sink, .. } => {
+                    send_err_to_sink(sink, clone_err(&final_err));
                 }
             }
         }
@@ -154,11 +103,16 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         let mut flush_tick = tokio::time::interval(std::time::Duration::from_millis(1));
         flush_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
+            if self.shutdown_started && self.streams.is_empty() {
+                let _ = self.writer.write_goaway(0, ErrorCode::NoError).await;
+                let _ = self.writer.flush().await;
+                return Ok(());
+            }
             let mut tick_fired = false;
             if !self.pending.is_empty() {
                 self.drain_pending().await?;
             }
-            if self.writer.pending() > 0 {
+            if self.writer.pending() > 0 && !self.reader.buffered() {
                 self.writer.flush().await?;
             }
             tokio::select! {
@@ -181,17 +135,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                         }
                     }
                 }
-                maybe_cmd = self.command_rx.recv() => {
+                maybe_cmd = self.command_rx.recv(), if !self.shutdown_started => {
                     match maybe_cmd {
                         Some(cmd) => {
                             self.on_command(cmd).await?;
-                            while let Ok(next) = self.command_rx.try_recv() {
-                                self.on_command(next).await?;
-                            }
                         }
-                        None => {
-                            return self.graceful_shutdown().await;
-                        }
+                        None => self.shutdown_started = true,
                     }
                 }
                 maybe_chunk = self.body_chunk_rx.recv() => {
@@ -207,6 +156,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 }
             }
 
+            for _ in 0..self.command_rx.len() {
+                let Ok(next) = self.command_rx.try_recv() else {
+                    break;
+                };
+                self.on_command(next).await?;
+            }
             self.try_drain_pending().await?;
 
             if tick_fired {
@@ -235,6 +190,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                     Some(ResponseSink::StreamingEx {
                         headers_tx,
                         body_tx,
+                        ..
                     }) => {
                         let headers_dead =
                             headers_tx.as_ref().map(|t| t.is_closed()).unwrap_or(true);
@@ -279,6 +235,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
 
     pub(super) fn check_stream_capacity(&self) -> Result<(), H2Error> {
         if let Some(limit) = self.peer_settings.max_concurrent_streams
+            && self.streams.len() >= limit as usize
             && self.active_stream_count() >= limit
         {
             return Err(H2Error::Connection {

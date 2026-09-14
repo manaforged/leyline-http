@@ -72,18 +72,15 @@ impl Encoder {
             return;
         }
 
-        if let Some((index, exact)) = table::find_static(name, value) {
-            if exact {
-                integer::encode(index, 7, 0x80, dst);
-                return;
-            }
-            self.encode_literal_indexed_name(index, value, dst);
+        let matched = table::find_static(name, value);
+        if let Some((index, true)) = matched {
+            integer::encode(index, 7, 0x80, dst);
             return;
         }
 
         let dyn_offset = table::STATIC_TABLE.len();
         let mut dyn_exact = None;
-        let mut dyn_name = None;
+        let mut name_index = matched.map(|(index, _)| index);
         for i in 0..self.dynamic.len() {
             if let Some((n, v)) = self.dynamic.get(i)
                 && n.as_ref() == name.as_bytes()
@@ -92,8 +89,8 @@ impl Encoder {
                     dyn_exact = Some(dyn_offset + i);
                     break;
                 }
-                if dyn_name.is_none() {
-                    dyn_name = Some(dyn_offset + i);
+                if name_index.is_none() {
+                    name_index = Some(dyn_offset + i);
                 }
             }
         }
@@ -102,7 +99,7 @@ impl Encoder {
             integer::encode(index, 7, 0x80, dst);
             return;
         }
-        if let Some(index) = dyn_name {
+        if let Some(index) = name_index {
             self.encode_literal_indexed_name(index, value, dst);
             return;
         }

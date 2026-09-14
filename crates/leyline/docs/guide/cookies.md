@@ -92,7 +92,9 @@ A `Cookie` carries the full RFC 6265bis attribute set: `name`, `value`,
 
 The jar follows Chrome's behavior:
 
-- Cookies are keyed by registrable domain.
+- Cookies are stored under the exact domain the `Set-Cookie` names: its
+  `Domain=` value when present, the request host otherwise. The 180-cookie
+  limit applies per exact domain.
 - `Secure` cookies go only over HTTPS.
 - `SameSite` is enforced against the navigation that started the request, so a
   redirect chain that crosses sites makes the request cross-site.
@@ -108,8 +110,9 @@ how you persist a login between runs.
 ## The public suffix rule
 
 Domain scoping uses the Mozilla Public Suffix List, compiled into the crate.
-The registrable domain of `www.example.co.uk` is `example.co.uk`, so a cookie
-set there is shared with `shop.example.co.uk`.
+A cookie with `Domain=example.co.uk` is shared with `shop.example.co.uk`,
+because the list accepts `example.co.uk` as a registrable domain. A host-only
+cookie set by `www.example.co.uk` reaches that host only.
 
 The same list blocks a cookie set on a public suffix itself. A `Set-Cookie`
 with `Domain=co.uk` is refused, as is one with a domain that has no dot. Such

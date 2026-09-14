@@ -6,15 +6,16 @@ response.
 ## Add the dependency
 
 The crate is `leyline-http`. The library it builds is `leyline`, so that is the
-name you import.
+name you import. Until the first crates.io release is published, use Git:
 
 ```toml
 [dependencies]
-leyline-http = "0.1"
+leyline-http = { git = "https://github.com/manaforged/leyline-http", branch = "main" }
 tokio = { version = "1", features = ["full"] }
 ```
 
-Leyline is async and runs on Tokio. Every send is an `async fn`.
+Leyline is async and runs on Tokio. Every send is an `async fn`. The JSON
+example below also needs `serde_json = "1"` in the same manifest.
 
 ## Send a GET request
 

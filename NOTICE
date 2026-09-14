@@ -36,7 +36,8 @@ Leyline requires:
 
 - `SSL_CTX_set_record_size_limit` (RFC 8449) — Firefox profiles.
 - `SSL_CTX_set_delegated_credentials` (RFC 9345) — Firefox profiles.
-- MLKEM768 / post-quantum key agreement codepoints.
+- MLKEM768 / post-quantum key agreement codepoints, native to the pinned
+  BoringSSL revision. The separate `mlkem` feature build is refused.
 - Deterministic GREASE ordering and ClientHello extension permutation hooks.
 
 Upstream: https://github.com/0x676e67/btls
@@ -53,13 +54,14 @@ BoringSSL binary provenance (prebuilt static libraries)
 `crates/leyline-bssl-sys/native/<target>/lib/` ({libcrypto,libssl}.a / {crypto,ssl}.lib)
 for x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, x86_64-pc-windows-msvc,
 and aarch64-apple-darwin.
-These are statically linked into every distributed binary artifact — the Node
-N-API addon (`.node`) and the Python wheel. Their full license text (Apache-2.0
+These are statically linked into bundled binary artifacts when those are
+built, such as the Node N-API addon (`.node`) and the Python wheel. The Node
+and Python wrappers are not part of the 0.1.0 Rust release. Their full
+license text (Apache-2.0
 plus the BSD-3-Clause Go notice) is preserved at
 `crates/leyline-bssl-sys/LICENSE-BORINGSSL`, and the MIT binding-glue grant at
 `crates/leyline-bssl-sys/LICENSE-MIT`. The npm packages and Python wheels carry a
-`LICENSE` conveying these obligations; the source distribution (sdist) builds
-BoringSSL from source instead and does not redistribute these binaries.
+`LICENSE` conveying these obligations.
 
 ================================================================================
 Runtime dependencies pulled from crates.io

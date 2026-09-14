@@ -21,6 +21,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tarfile
 import tempfile
 import urllib.request
 import zipfile
@@ -208,7 +209,10 @@ def chrome_shell_for_major(major: int) -> tuple[str, Path]:
             shutil.rmtree(dest_dir)
         dest_dir.mkdir(parents=True)
         with zipfile.ZipFile(zpath) as zf:
-            zf.extractall(dest_dir)
+            for member in zf.infolist():
+                extracted = Path(zf.extract(member, dest_dir))
+                if member.external_attr >> 16 & 0o111:
+                    extracted.chmod(extracted.stat().st_mode | 0o111)
         binary = next(dest_dir.rglob("chrome-headless-shell"), None)
     if binary is None or not os.access(binary, os.X_OK):
         raise SystemExit(f"chrome-headless-shell missing under {dest_dir}")
@@ -228,6 +232,25 @@ def live_firefox_version() -> str:
 
 
 def firefox_bin_for(ver: str) -> Path:
+    if plat.system() == "Linux":
+        if plat.machine().lower() not in {"x86_64", "amd64"}:
+            raise SystemExit("Firefox collection on Linux requires x86_64")
+        directory = CACHE / f"firefox-{ver}-linux-x86_64"
+        binary = directory / "firefox" / "firefox"
+        if binary.is_file() and os.access(binary, os.X_OK):
+            return binary
+        archive = CACHE / f"firefox-{ver}-linux-x86_64.tar.xz"
+        url = (
+            "https://download-installer.cdn.mozilla.net/pub/firefox/releases/"
+            f"{ver}/linux-x86_64/en-US/firefox-{ver}.tar.xz"
+        )
+        print(f"downloading Firefox {ver}")
+        http_bytes(url, archive)
+        with tarfile.open(archive) as bundle:
+            bundle.extractall(directory, filter="data")
+        if not binary.is_file() or not os.access(binary, os.X_OK):
+            raise SystemExit(f"Firefox executable missing under {directory}")
+        return binary
     app = CACHE / f"Firefox-{ver}.app"
     binary = app / "Contents/MacOS/firefox"
     if binary.is_file() and os.access(binary, os.X_OK):
@@ -731,17 +754,18 @@ def catalog() -> list[tuple[str, str, str, str, str]]:
         "fill" if firefox_miss else "ok",
         f"missing {firefox_miss}" if firefox_miss else "current",
     ))
-    safari_host = safari_host_version()
-    safari_maj = int(safari_host.split(".", 1)[0]) if safari_host[:1].isdigit() else 0
-    safari_have = bundled_majors("safari")
-    safari_gap = [] if safari_maj in safari_have else [safari_maj]
-    rows.append((
-        "safari",
-        ",".join(str(m) for m in safari_have) or "none",
-        safari_host,
-        "fill" if safari_gap else "ok",
-        f"WKWebView dump {safari_gap}" if safari_gap else "current",
-    ))
+    if plat.system() == "Darwin":
+        safari_host = safari_host_version()
+        safari_maj = int(safari_host.split(".", 1)[0]) if safari_host[:1].isdigit() else 0
+        safari_have = bundled_majors("safari")
+        safari_gap = [] if safari_maj in safari_have else [safari_maj]
+        rows.append((
+            "safari",
+            ",".join(str(m) for m in safari_have) or "none",
+            safari_host,
+            "fill" if safari_gap else "ok",
+            f"WKWebView dump {safari_gap}" if safari_gap else "current",
+        ))
     chrome_newest = chrome_have[-1] if chrome_have else 0
     edge_maj, edge_ver = live_edge_major()
     edge_gap = edge_maj > chrome_newest
@@ -789,7 +813,7 @@ def print_catalog(rows: list[tuple[str, str, str, str, str]]) -> None:
     print("-" * 110)
     for fam, bundled, live, action, note in rows:
         print(f"{fam:<12} {bundled:<28} {live:<22} {action:<10} {note}")
-    print("suite is chrome, firefox, safari, edge. no brave.")
+    print("suite: " + ", ".join(row[0] for row in rows))
 
 
 def fill_chrome(dry: bool, no_wire: bool) -> int:
@@ -925,6 +949,8 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--no-wire", action="store_true", help="write TOML only")
     args = parser.parse_args(argv)
+    if args.target == "safari" and plat.system() != "Darwin":
+        parser.error("Safari collection requires macOS")
     CACHE.mkdir(parents=True, exist_ok=True)
     OUT.mkdir(parents=True, exist_ok=True)
 
@@ -938,7 +964,7 @@ def main(argv: list[str]) -> int:
         rc |= fill_chrome(args.dry_run, args.no_wire)
     if args.target in {"all", "firefox"}:
         rc |= fill_firefox(args.dry_run, args.no_wire)
-    if args.target in {"all", "safari"}:
+    if args.target in {"all", "safari"} and plat.system() == "Darwin":
         rc |= fill_safari(args.dry_run, args.no_wire)
     if args.target in {"all", "edge"}:
         rc |= fill_edge(args.dry_run, args.no_wire)

@@ -1,3 +1,10 @@
+#[cfg(not(all(
+    feature = "compression-gzip",
+    feature = "compression-brotli",
+    feature = "compression-zstd",
+    feature = "compression-deflate"
+)))]
+use crate::core::error::Kind;
 use crate::core::error::{Error, Result};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

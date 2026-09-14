@@ -64,12 +64,6 @@ impl TcpProfile {
             }
         }
 
-        if self.window_size > 0
-            && let Err(e) = socket.set_recv_buffer_size(self.window_size as usize)
-        {
-            log_once("SO_RCVBUF", &e);
-        }
-
         if self.no_delay
             && let Err(e) = socket.set_nodelay(true)
         {

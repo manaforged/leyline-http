@@ -204,7 +204,8 @@ impl Default for Session {
 
 impl std::fmt::Debug for Session {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Session")
+        let mut debug = f.debug_struct("Session");
+        debug
             .field("browser", &self.inner.browser)
             .field("platform", &self.inner.platform)
             .field(
@@ -216,9 +217,11 @@ impl std::fmt::Debug for Session {
                     .map(crate::core::config::redact),
             )
             .field("timeout", &self.inner.timeouts.total)
-            .field("protocol_policy", &self.inner.protocol_policy)
-            .field("ja4", &self.inner.audit_tls.ja4)
-            .finish()
+            .field("protocol_policy", &self.inner.protocol_policy);
+        if let Some(audit) = &self.inner.audit_tls {
+            debug.field("ja4", &audit.ja4);
+        }
+        debug.finish()
     }
 }
 
