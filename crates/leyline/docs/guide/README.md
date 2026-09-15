@@ -16,8 +16,6 @@ how to use it, in reading order.
 11. [Fingerprints](fingerprints.md): what a profile pins and how to audit it.
 12. [Features and targets](features-and-targets.md): cargo features, targets, MSRV.
 
-See [Responses](responses.md) for status handling and body errors.
-
 Reference pages beside this guide: [profiles](../PROFILES.md) and
 [MSRV](../MSRV.md).
 

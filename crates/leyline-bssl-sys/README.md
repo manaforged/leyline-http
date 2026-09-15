@@ -4,7 +4,7 @@ Leyline's owned BoringSSL FFI. Replaces the upstream `btls-sys` shim so leyline
 controls the **exact BoringSSL revision** (and the patches on top of it) that the
 TLS engine links — the fingerprint is an emergent property of that revision.
 
-Two paths, same as the old shim:
+Two link paths:
 
 - **Provenance:** the source revision, carried patches, and per-file
   checksums for the committed artifacts are recorded in
