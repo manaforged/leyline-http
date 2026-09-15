@@ -108,12 +108,15 @@ impl Preset {
     }
 
     fn navigate_headers(ctx: &HeaderContext<'_>) -> Vec<HeaderPair> {
+        // Order captured live from Chrome 152 (tls.peet.ws H2 HEADERS frame):
+        // accept-language precedes accept, priority closes the block.
         vec![
             (b("sec-ch-ua"), o(ctx.sec_ch_ua)),
             (b("sec-ch-ua-mobile"), o(ctx.sec_ch_ua_mobile)),
             Self::sec_ch_ua_platform(ctx),
             (b("upgrade-insecure-requests"), b("1")),
             (b("user-agent"), o(ctx.user_agent)),
+            (b("accept-language"), o(ctx.accept_language)),
             (
                 b("accept"),
                 b(
@@ -125,7 +128,7 @@ impl Preset {
             (b("sec-fetch-user"), b("?1")),
             (b("sec-fetch-dest"), b("document")),
             Self::accept_encoding(),
-            (b("accept-language"), o(ctx.accept_language)),
+            (b("priority"), b("u=0, i")),
         ]
     }
 
@@ -146,19 +149,21 @@ impl Preset {
     }
 
     fn xhr_headers(ctx: &HeaderContext<'_>) -> Vec<HeaderPair> {
+        // Chrome fetch order (captured): platform, UA, accept, sec-ch-ua,
+        // accept-language, mobile, sec-fetch-*, referer, encoding, priority.
         vec![
-            (b("sec-ch-ua"), o(ctx.sec_ch_ua)),
-            (b("sec-ch-ua-mobile"), o(ctx.sec_ch_ua_mobile)),
             Self::sec_ch_ua_platform(ctx),
             (b("user-agent"), o(ctx.user_agent)),
             (b("accept"), b("application/json, text/plain, */*")),
+            (b("sec-ch-ua"), o(ctx.sec_ch_ua)),
+            (b("accept-language"), o(ctx.accept_language)),
+            (b("sec-ch-ua-mobile"), o(ctx.sec_ch_ua_mobile)),
             (b("origin"), o(ctx.origin)),
             (b("sec-fetch-site"), b("same-origin")),
             (b("sec-fetch-mode"), b("cors")),
             (b("sec-fetch-dest"), b("empty")),
             (b("referer"), o(ctx.referer)),
             Self::accept_encoding(),
-            (b("accept-language"), o(ctx.accept_language)),
             (b("priority"), b("u=1, i")),
         ]
     }
@@ -183,18 +188,19 @@ impl Preset {
 
     fn cross_origin_headers(ctx: &HeaderContext<'_>) -> Vec<HeaderPair> {
         vec![
-            (b("sec-ch-ua"), o(ctx.sec_ch_ua)),
-            (b("sec-ch-ua-mobile"), o(ctx.sec_ch_ua_mobile)),
             Self::sec_ch_ua_platform(ctx),
             (b("user-agent"), o(ctx.user_agent)),
             (b("accept"), b("application/json, text/plain, */*")),
+            (b("sec-ch-ua"), o(ctx.sec_ch_ua)),
+            (b("accept-language"), o(ctx.accept_language)),
+            (b("sec-ch-ua-mobile"), o(ctx.sec_ch_ua_mobile)),
             (b("origin"), o(ctx.origin)),
             (b("sec-fetch-site"), b("cross-site")),
             (b("sec-fetch-mode"), b("cors")),
             (b("sec-fetch-dest"), b("empty")),
             (b("referer"), o(ctx.referer)),
             Self::accept_encoding(),
-            (b("accept-language"), o(ctx.accept_language)),
+            (b("priority"), b("u=1, i")),
         ]
     }
 
@@ -225,19 +231,22 @@ impl Preset {
     }
 
     fn same_site_headers(ctx: &HeaderContext<'_>) -> Vec<HeaderPair> {
+        // Order captured live from a Chrome in-page fetch (H2 HEADERS frame):
+        // platform leads the client-hint cluster, priority closes it.
         vec![
-            (b("sec-ch-ua"), o(ctx.sec_ch_ua)),
-            (b("sec-ch-ua-mobile"), o(ctx.sec_ch_ua_mobile)),
             Self::sec_ch_ua_platform(ctx),
             (b("user-agent"), o(ctx.user_agent)),
             (b("accept"), b("application/json, text/plain, */*")),
+            (b("sec-ch-ua"), o(ctx.sec_ch_ua)),
+            (b("accept-language"), o(ctx.accept_language)),
+            (b("sec-ch-ua-mobile"), o(ctx.sec_ch_ua_mobile)),
             (b("origin"), o(ctx.origin)),
             (b("sec-fetch-site"), b("same-site")),
             (b("sec-fetch-mode"), b("cors")),
             (b("sec-fetch-dest"), b("empty")),
             (b("referer"), o(ctx.referer)),
             Self::accept_encoding(),
-            (b("accept-language"), o(ctx.accept_language)),
+            (b("priority"), b("u=1, i")),
         ]
     }
 }
