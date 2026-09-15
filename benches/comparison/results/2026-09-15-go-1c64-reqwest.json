@@ -1,0 +1,121 @@
+{
+ "name": "go-10b-1c",
+ "origin": "go",
+ "body_bytes": 10,
+ "connections": 1,
+ "streams": 64,
+ "profile": "149",
+ "left": "leyline",
+ "right": "reqwest",
+ "left_sha256": "sha256:be4b97373a1b21796c6aa10974c6a6e5d12c66f4591cc8f8858afa9de41021aa",
+ "right_sha256": "sha256:6defaa0583ae73a815fc775beeb773c66ccc4bbef06da8ca0fd46e6e0e290a67",
+ "warm_count": 2000,
+ "cold_count": 200,
+ "conc_count": 20000,
+ "rounds": [
+  {
+   "round": 1,
+   "left": {
+    "conc_rps": 88875.032,
+    "warm_rps": 29709.632,
+    "cold_rps": 1043.852
+   },
+   "right": {
+    "conc_rps": 92906.861,
+    "warm_rps": 30180.495,
+    "cold_rps": 1130.026
+   }
+  },
+  {
+   "round": 2,
+   "left": {
+    "conc_rps": 88560.133,
+    "warm_rps": 28897.52,
+    "cold_rps": 1035.984
+   },
+   "right": {
+    "conc_rps": 95165.326,
+    "warm_rps": 31199.642,
+    "cold_rps": 1115.397
+   }
+  },
+  {
+   "round": 3,
+   "left": {
+    "conc_rps": 88893.181,
+    "warm_rps": 29835.446,
+    "cold_rps": 1037.783
+   },
+   "right": {
+    "conc_rps": 95093.408,
+    "warm_rps": 31927.715,
+    "cold_rps": 1129.447
+   }
+  },
+  {
+   "round": 4,
+   "left": {
+    "conc_rps": 88212.293,
+    "warm_rps": 29215.613,
+    "cold_rps": 1035.55
+   },
+   "right": {
+    "conc_rps": 99294.992,
+    "warm_rps": 29909.378,
+    "cold_rps": 1121.397
+   }
+  },
+  {
+   "round": 5,
+   "left": {
+    "conc_rps": 91952.187,
+    "warm_rps": 29467.535,
+    "cold_rps": 1017.4
+   },
+   "right": {
+    "conc_rps": 92339.433,
+    "warm_rps": 31785.871,
+    "cold_rps": 1116.768
+   }
+  },
+  {
+   "round": 6,
+   "left": {
+    "conc_rps": 92772.951,
+    "warm_rps": 30998.761,
+    "cold_rps": 1010.646
+   },
+   "right": {
+    "conc_rps": 96086.689,
+    "warm_rps": 30618.217,
+    "cold_rps": 1124.191
+   }
+  },
+  {
+   "round": 7,
+   "left": {
+    "conc_rps": 90876.631,
+    "warm_rps": 29652.44,
+    "cold_rps": 1040.436
+   },
+   "right": {
+    "conc_rps": 102100.608,
+    "warm_rps": 29338.225,
+    "cold_rps": 1118.914
+   }
+  },
+  {
+   "round": 8,
+   "left": {
+    "conc_rps": 87760.007,
+    "warm_rps": 29458.786,
+    "cold_rps": 1020.845
+   },
+   "right": {
+    "conc_rps": 93683.819,
+    "warm_rps": 30517.37,
+    "cold_rps": 1124.434
+   }
+  }
+ ]
+}
