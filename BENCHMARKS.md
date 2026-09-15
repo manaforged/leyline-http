@@ -155,17 +155,33 @@ in-flight depth, not worker threads.
 
 Leyline is the cheapest client measured; the Go server spends about 7%
 more CPU serving it than wreq and 15% more than reqwest. On a server-bound
-cell that difference is the throughput gap. Two contributors were
-isolated:
+cell that difference is the throughput gap. Server-side profiles (perf on
+the origin while each client ran) show the extra work concentrated in
+request-header processing:
 
-- The Chrome profile adds a five-byte priority section to every HEADERS
-  frame, as Chrome does. `LEYLINE_CHROME=bare` drops the server cost to
-  79.1k cycles per request. wreq and reqwest send no priority field, so
-  the Go server's stream-dependency scheduler does less work for them.
+- `http2.(*Framer).readMetaFrame` (HPACK decoding): 2.50% of server CPU
+  for Leyline against 1.71% for wreq and 1.16% for reqwest.
+- `textproto.CanonicalMIMEHeaderKey` (request header normalization):
+  1.98% for Leyline, 2.28% for wreq, 1.12% for reqwest.
 - Loopback captures show Leyline emitting more, smaller TCP segments per
   request than wreq (0.43 vs 0.29 segments per request; modal payload 47 B
   vs 82 B) for fewer total bytes per request (185 B vs 203 B). More
   records mean more server reads and TLS decryptions for the same work.
+
+`LEYLINE_CHROME=bare` drops the server cost to 79.1k cycles per request,
+so roughly half of the gap versus wreq is the Chrome header block itself —
+the profile's header set and HPACK encoding choices — and the remainder is
+wire shape. The RFC 9218 write scheduler (`priorityWriteScheduler.Pop`)
+runs at ~1% of server CPU for all three clients, so per-request priority
+handling is not the differentiator.
+
+Usage was audited for each client: all three hold exactly the configured
+socket count on the wire, build with fat LTO and one codegen unit on the
+same toolchain and Tokio version, run identical warm/concurrent/cold
+phases with identical per-request verification, and Leyline's optional
+mimalloc feature was off. reqwest's 942k req/s at eight connections is
+itself proof of multiplexed HTTP/2 (eight HTTP/1.1 connections cap near
+240k).
 
 Client-side profiles at the same cell: wreq spends ~10% of samples on one
 contended pool mutex plus ~5% in the kernel spinlock path and makes 560k
