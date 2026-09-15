@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -71,11 +72,23 @@ func main() {
 	}
 	mux := http.NewServeMux()
 	logProto := os.Getenv("CMP_LOG_PROTO") == "1"
+	logHeaders := os.Getenv("CMP_LOG_HEADERS") == "1"
+	var logOnce sync.Once
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if logProto {
 			fmt.Fprintf(os.Stderr, "PROTO %s\n", r.Proto)
 			fmt.Fprintf(os.Stderr, "TLS version=%x cipher=%s group=%s resumed=%t retry=%t\n",
 				r.TLS.Version, tls.CipherSuiteName(r.TLS.CipherSuite), r.TLS.CurveID, r.TLS.DidResume, r.TLS.HelloRetryRequest)
+		}
+		if logHeaders {
+			logOnce.Do(func() {
+				fmt.Fprintf(os.Stderr, "HEADERS host=%s\n", r.Host)
+				for name, values := range r.Header {
+					for _, v := range values {
+						fmt.Fprintf(os.Stderr, "HDR %s: %s\n", name, v)
+					}
+				}
+			})
 		}
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(200)
