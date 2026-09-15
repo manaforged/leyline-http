@@ -9,7 +9,7 @@ license = "BSD-2-Clause"
 repository.workspace = true
 authors = [
     "Alessandro Ghedini <alessandro@ghedini.me>",
-    "Thomas Gardiner",
+    "Thomas Gardiner <thomas@manaforge.tech>",
 ]
 build = "src/build.rs"
 rust-version = "1.98"

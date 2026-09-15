@@ -12,5 +12,5 @@ import `leyline`. It pulls `leyline-quiche` in when the `http3` feature is on.
 ## License
 
 BSD-2-Clause, inherited from upstream `cloudflare/quiche`. Local changes
-by Thomas Gardiner are released under the same license. Full attribution
+by Manaforge Technologies, LLC are released under the same license. Full attribution
 in the workspace [`NOTICE`](https://github.com/manaforged/leyline-http/blob/main/NOTICE).
