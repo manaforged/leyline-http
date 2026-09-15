@@ -353,9 +353,15 @@ impl Session {
                 .as_ref()
                 .map(|h| h.iter().any(|(uk, _)| uk.as_str().eq_ignore_ascii_case(k)))
                 .unwrap_or(false);
-            let preset_has_it = headers.iter().any(|(hk, _)| hk.eq_ignore_ascii_case(k));
-            if !user_has_it && !preset_has_it && !(strip_sensitive && sensitive(k)) {
-                headers.push((Cow::Owned(k.clone()), Cow::Owned(v.clone())));
+            if user_has_it || (strip_sensitive && sensitive(k)) {
+                continue;
+            }
+            match headers
+                .iter()
+                .position(|(hk, _)| hk.eq_ignore_ascii_case(k))
+            {
+                Some(pos) => headers[pos].1 = Cow::Owned(v.clone()),
+                None => headers.push((Cow::Owned(k.clone()), Cow::Owned(v.clone()))),
             }
         }
 
