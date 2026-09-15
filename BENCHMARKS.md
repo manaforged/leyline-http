@@ -18,10 +18,13 @@ CMP_CA=ca.der CMP_CA_KEY=ca-key.pem RTT_MS=30 LEYLINE_CHROME=149 ./netem.sh
 ```
 
 `paired.sh` reads `CMP_CA`, `CMP_CERT`, `CMP_KEY`, `LEYLINE_CHROME`,
-`ROUNDS`, `CONC`, `CONCURRENCY`, `TARGET_URL`, and `CONTROL`. `netem.sh`
-reads `RTT_MS`, `ORIGIN`, and the `paired.sh` variables. `control.sh` alone
-prints the reference rows for a running origin. `CMP_CONNECTIONS` spreads
-client tasks over several connections.
+`ROUNDS`, `CONC`, `CONCURRENCY`, `TARGET_URL`, and `CONTROL`. `LEFT` and
+`RIGHT` select the two binaries in `bin/`; `WARM` and `COLD` set the
+per-round sequential counts (default `1`, so the loop measures only the
+concurrent phase) and `PAIRED_JSON` writes the per-round observations as a
+JSON cell. `netem.sh` reads `RTT_MS`, `ORIGIN`, and the `paired.sh`
+variables. `control.sh` alone prints the reference rows for a running
+origin. `CMP_CONNECTIONS` spreads client tasks over several connections.
 
 ## Reference results
 
@@ -184,7 +187,7 @@ streaming, upload, compression, or network-latency performance.
 
 ### Offered-load latency
 
-Both comparison clients accept a `paced` mode that sends requests at a
+The Rust comparison clients accept a `paced` mode that sends requests at a
 fixed rate and reports service and coordinated-omission-corrected latency
 percentiles:
 
@@ -284,16 +287,34 @@ wide-area behavior. An instrumented rate is diagnostic, not a benchmark.
 ## Browser-profile comparisons
 
 The separate client programs under `benches/comparison/` compare Leyline,
-wreq, tls-client, and azuretls. `run.sh` builds and runs all four against
-the local Go origin. They run in separate processes. Their browser profiles
-and versions can differ, and the Go clients do not verify response bodies.
+wreq, reqwest, tls-client, and azuretls. `run.sh` builds and runs all five
+against the local Go origin. They run in separate processes. Their browser
+profiles and versions can differ, and the Go clients do not verify response
+bodies.
 
-`paired.sh` runs the Leyline and wreq clients in alternating order each
-round and reports the paired difference with a 95% interval, the winning
-rounds, and the mean concurrent p50/p99 latencies. The equivalence gate
-compares the two clients' complete responses before any timing. When
-h2load is installed it also prints the reference control row from
-`control.sh`.
+`paired.sh` runs the `LEFT` and `RIGHT` clients in alternating order each
+round (default `leyline` and `wreq`) and reports the paired difference with
+a 95% interval, the winning rounds, and the mean concurrent p50/p99
+latencies. The equivalence gate compares the two clients' complete
+responses before any timing. When h2load is installed it also prints the
+reference control row from `control.sh`.
+
+### The reqwest baseline
+
+reqwest applies no browser profile, so it anchors the fingerprint tax.
+Three pairings decompose it:
+
+- `RIGHT=reqwest ./paired.sh` pairs Leyline's Chrome profile against
+  reqwest's natural request.
+- `LEYLINE_CHROME=bare RIGHT=reqwest ./paired.sh` pairs Leyline without
+  impersonation against reqwest. The distance between this cell and the
+  Chrome cell is what the fingerprint itself costs.
+- Set `CMP_HEADERS` to a tab-separated name/value file to send the same
+  request header block from all three clients; leave it unset so each
+  client sends its natural request.
+
+Publish reqwest rows with `CMP_CA` set so both clients run the verified
+TLS path.
 
 ## Recording a result
 

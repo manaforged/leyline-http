@@ -19,6 +19,9 @@ echo "== build leyline client =="
 echo "== build wreq client (BoringSSL from source unless WREQ_TARGET reuses one) =="
 ( cd wreq-client && CARGO_TARGET_DIR="$WREQ_TARGET" cargo build --release -q && cp "$WREQ_TARGET/release/wreq-cmp-client" ../bin/wreq )
 
+echo "== build reqwest client =="
+( cd reqwest-client && CARGO_TARGET_DIR="$WREQ_TARGET" cargo build --release -q && cp "$WREQ_TARGET/release/reqwest-cmp-client" ../bin/reqwest )
+
 echo "== start server =="
 : > /tmp/cmp-server.log
 ./bin/server "$ADDR" >/tmp/cmp-server.log 2>&1 &
@@ -37,5 +40,6 @@ echo "server at $URL"
 echo "== run (warm=$WARM conc=$CONC x$CONCURRENCY cold=$COLD) =="
 ./bin/leyline   "$URL" "$WARM" "$COLD" "$CONC" "$CONCURRENCY"
 ./bin/wreq      "$URL" "$WARM" "$COLD" "$CONC" "$CONCURRENCY"
+./bin/reqwest   "$URL" "$WARM" "$COLD" "$CONC" "$CONCURRENCY"
 ./bin/tlsclient "$URL" "$WARM" "$COLD" "$CONC" "$CONCURRENCY"
 ./bin/azuretls  "$URL" "$WARM" "$COLD" "$CONC" "$CONCURRENCY"
