@@ -109,9 +109,45 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 return Ok(());
             }
             let mut tick_fired = false;
+            for _ in 0..128 {
+                if !self.reader.buffered() {
+                    break;
+                }
+                match self.reader.next().await? {
+                    Some(f) => {
+                        self.on_inbound_frame(f).await?;
+                        if !self.pending.is_empty() {
+                            self.drain_pending().await?;
+                        }
+                    }
+                    None => {
+                        return if self.shutdown_started {
+                            Ok(())
+                        } else {
+                            Err(H2Error::Connection {
+                                code: ErrorCode::NoError,
+                                reason: "peer closed connection".into(),
+                            })
+                        };
+                    }
+                }
+            }
+            for _ in 0..self.command_rx.len() {
+                let Ok(next) = self.command_rx.try_recv() else {
+                    break;
+                };
+                self.on_command(next).await?;
+            }
+            for _ in 0..self.body_chunk_rx.len() {
+                let Ok(chunk) = self.body_chunk_rx.try_recv() else {
+                    break;
+                };
+                self.on_body_chunk(chunk).await?;
+            }
             if !self.pending.is_empty() {
                 self.drain_pending().await?;
             }
+            self.try_drain_pending().await?;
             if self.writer.pending() > 0 && !self.reader.buffered() {
                 self.writer.flush().await?;
             }
