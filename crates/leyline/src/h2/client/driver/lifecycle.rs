@@ -30,13 +30,13 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         let initial = self.config.advertised_initial_window_size() as i64;
         let needs_update = self
             .streams
-            .get(&stream_id)
+            .get(stream_id)
             .map(|a| a.stalled.is_empty() && a.recv_window < initial / 2)
             .unwrap_or(false);
         if needs_update {
             let current = self
                 .streams
-                .get(&stream_id)
+                .get(stream_id)
                 .map(|a| a.recv_window)
                 .unwrap_or(0);
             let increment = (initial - current).clamp(1, 0x7FFF_FFFF) as u32;
@@ -46,7 +46,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                     increment,
                 })
                 .await?;
-            if let Some(actor) = self.streams.get_mut(&stream_id) {
+            if let Some(actor) = self.streams.get_mut(stream_id) {
                 actor.recv_window += increment as i64;
             }
         }
@@ -200,7 +200,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                     None => false,
                 }
             })
-            .map(|(&id, _)| id)
+            .map(|(id, _)| id)
             .collect();
 
         for sid in to_cancel {
@@ -267,14 +267,14 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         let conn = self.conn_send_window.max(0) as usize;
         let stream = self
             .streams
-            .get(&stream_id)
+            .get(stream_id)
             .map(|i| i.send_window.max(0) as usize)
             .unwrap_or(0);
         conn.min(stream)
     }
 
     pub(super) fn park_stream(&mut self, stream_id: u32, pending: PendingSend) {
-        if let Some(actor) = self.streams.get_mut(&stream_id) {
+        if let Some(actor) = self.streams.get_mut(stream_id) {
             actor.pending_send = Some(pending);
             if !self.buffered_pending.contains(&stream_id) {
                 self.buffered_pending.push_back(stream_id);
@@ -285,7 +285,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     pub(super) async fn finish_remote(&mut self, stream_id: u32) -> Result<(), H2Error> {
         let local_open = self
             .streams
-            .get(&stream_id)
+            .get(stream_id)
             .is_some_and(|a| !a.state.is_closed());
         if local_open {
             let _ = self
@@ -293,7 +293,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 .write_rst_stream(stream_id, ErrorCode::NoError)
                 .await;
         }
-        if let Some(actor) = self.streams.get_mut(&stream_id)
+        if let Some(actor) = self.streams.get_mut(stream_id)
             && !actor.stalled.is_empty()
         {
             actor.remote_done = true;
@@ -326,7 +326,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 }
             }
             if actor.stalled.is_empty() {
-                drained.push((*sid, actor.remote_done));
+                drained.push((sid, actor.remote_done));
             }
         }
         for (sid, done) in drained {
@@ -340,7 +340,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     }
 
     pub(super) fn complete_stream(&mut self, stream_id: u32) {
-        if let Some(mut actor) = self.streams.remove(&stream_id) {
+        if let Some(mut actor) = self.streams.remove(stream_id) {
             self.stalled = self.stalled.saturating_sub(actor.stalled.len());
             actor.deliver_ok();
         }
@@ -348,7 +348,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     }
 
     pub(super) fn fail_stream(&mut self, stream_id: u32, err: H2Error) {
-        if let Some(mut actor) = self.streams.remove(&stream_id) {
+        if let Some(mut actor) = self.streams.remove(stream_id) {
             self.stalled = self.stalled.saturating_sub(actor.stalled.len());
             actor.deliver_err(err);
         }

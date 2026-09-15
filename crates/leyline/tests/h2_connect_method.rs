@@ -22,7 +22,8 @@ fn classic_connect_omits_scheme_and_path() {
         path: "/unused".into(),
         protocol: None,
     };
-    let list = p.build_pseudo_list(&CHROME_ORDER).unwrap();
+    let (list, len) = p.build_pseudo_list(&CHROME_ORDER).unwrap();
+    let list = &list[..len];
     assert_eq!(names(&list), vec![":method", ":authority"]);
     assert_eq!(list[0].1, "CONNECT");
     assert_eq!(list[1].1, "example.com:443");
@@ -37,7 +38,8 @@ fn extended_connect_emits_protocol() {
         path: "/chat".into(),
         protocol: Some("websocket".into()),
     };
-    let list = p.build_pseudo_list(&CHROME_ORDER).unwrap();
+    let (list, len) = p.build_pseudo_list(&CHROME_ORDER).unwrap();
+    let list = &list[..len];
     assert_eq!(names(&list), vec![":method", ":authority", ":protocol"]);
     assert_eq!(list[2].1, "websocket");
 }
@@ -51,7 +53,8 @@ fn non_connect_emits_all_four_pseudos() {
         path: "/".into(),
         protocol: None,
     };
-    let list = p.build_pseudo_list(&CHROME_ORDER).unwrap();
+    let (list, len) = p.build_pseudo_list(&CHROME_ORDER).unwrap();
+    let list = &list[..len];
     assert_eq!(
         names(&list),
         vec![":method", ":authority", ":scheme", ":path"]
@@ -67,7 +70,8 @@ fn non_connect_with_protocol_still_appends_it() {
         path: "/".into(),
         protocol: Some("websocket".into()),
     };
-    let list = p.build_pseudo_list(&CHROME_ORDER).unwrap();
+    let (list, len) = p.build_pseudo_list(&CHROME_ORDER).unwrap();
+    let list = &list[..len];
     assert_eq!(list.last().map(|(n, _)| *n), Some(":protocol"));
 }
 
@@ -102,7 +106,8 @@ fn pseudo_order_honoured_for_non_connect() {
         path: "/api".into(),
         protocol: None,
     };
-    let list = p.build_pseudo_list(&order).unwrap();
+    let (list, len) = p.build_pseudo_list(&order).unwrap();
+    let list = &list[..len];
     assert_eq!(
         names(&list),
         vec![":method", ":path", ":authority", ":scheme"]

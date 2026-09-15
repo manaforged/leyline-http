@@ -6,6 +6,7 @@ use http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 use crate::core::body_stream::BodyStream;
 use crate::core::error::{Error, Kind, Result};
 use crate::core::session::decompress::{decompress_and_strip as strip, drain_stream_into_vec};
+use crate::header_str::HeaderStr;
 
 pub(crate) enum ResponseBody {
     Buffered(Vec<u8>),
@@ -94,7 +95,7 @@ pub struct Response {
     pub(crate) url: String,
     pub(crate) redirect_chain: Vec<String>,
     pub(crate) request_headers: Vec<(String, String)>,
-    pub(crate) tls_alpn: Option<String>,
+    pub(crate) tls_alpn: Option<HeaderStr>,
     pub(crate) tls_peer_certificate: Option<Vec<u8>>,
     pub(crate) tls_version: Option<String>,
     pub(crate) tls_cipher: Option<String>,
@@ -151,7 +152,7 @@ impl Response {
     }
 
     pub fn tls_alpn(&self) -> Option<&str> {
-        self.tls_alpn.as_deref()
+        self.tls_alpn.as_ref().map(|s| s.as_str())
     }
 
     pub fn tls_peer_certificate(&self) -> Option<&[u8]> {

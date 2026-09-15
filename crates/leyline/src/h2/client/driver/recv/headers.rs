@@ -62,7 +62,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             .map(|header| (header.name, header.value))
             .collect();
 
-        let first = match self.streams.get(&h.stream_id) {
+        let first = match self.streams.get(h.stream_id) {
             Some(actor) => !actor.got_headers,
             None => return Ok(()),
         };
@@ -134,7 +134,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         decoded: Vec<(Bytes, Bytes)>,
     ) -> Result<(), H2Error> {
         let stream_id = h.stream_id;
-        let Some(actor) = self.streams.get_mut(&stream_id) else {
+        let Some(actor) = self.streams.get_mut(stream_id) else {
             return Ok(());
         };
         if let Err(e) = actor.state.transition(StreamEvent::RecvHeaders {
@@ -194,7 +194,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             );
             return Ok(());
         }
-        let Some(actor) = self.streams.get_mut(&stream_id) else {
+        let Some(actor) = self.streams.get_mut(stream_id) else {
             return Ok(());
         };
         if let Err(e) = actor.state.transition(StreamEvent::RecvTrailers) {

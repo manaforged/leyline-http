@@ -10,7 +10,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     pub(super) async fn on_body_chunk(&mut self, chunk: BodyChunkIn) -> Result<(), H2Error> {
         match chunk {
             BodyChunkIn::Chunk { stream_id, data } => {
-                let should_try_write = if let Some(actor) = self.streams.get_mut(&stream_id) {
+                let should_try_write = if let Some(actor) = self.streams.get_mut(stream_id) {
                     if let SendBodyInput::Streaming { pending_buf, .. } = &mut actor.send_body_input
                     {
                         pending_buf.push_back(data);
@@ -26,7 +26,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 }
             }
             BodyChunkIn::Eof { stream_id, error } => {
-                let should_try_write = if let Some(actor) = self.streams.get_mut(&stream_id) {
+                let should_try_write = if let Some(actor) = self.streams.get_mut(stream_id) {
                     if let SendBodyInput::Streaming {
                         closed, error: e, ..
                     } = &mut actor.send_body_input
@@ -54,7 +54,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         loop {
             let next_chunk: Option<Bytes> =
                 self.streams
-                    .get_mut(&stream_id)
+                    .get_mut(stream_id)
                     .and_then(|a| match &mut a.send_body_input {
                         SendBodyInput::Streaming { pending_buf, .. } => pending_buf.pop_front(),
                         _ => None,
@@ -62,7 +62,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
 
             let (closed, stream_err) = self
                 .streams
-                .get(&stream_id)
+                .get(stream_id)
                 .and_then(|a| match &a.send_body_input {
                     SendBodyInput::Streaming { closed, error, .. } => {
                         Some((*closed, error.as_ref().map(|e| e.to_string())))
@@ -73,7 +73,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
 
             let already_closed = self
                 .streams
-                .get(&stream_id)
+                .get(stream_id)
                 .map(|a| a.send_closed)
                 .unwrap_or(true);
             if already_closed {
@@ -98,7 +98,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                     self.write_streaming_chunk(stream_id, chunk, closed).await?;
                     let parked = self
                         .streams
-                        .get(&stream_id)
+                        .get(stream_id)
                         .map(|a| a.pending_send.is_some())
                         .unwrap_or(false);
                     if parked {
@@ -107,7 +107,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 }
                 _ => {
                     if closed && !already_closed {
-                        if let Some(actor) = self.streams.get_mut(&stream_id) {
+                        if let Some(actor) = self.streams.get_mut(stream_id) {
                             if let Err(e) = actor
                                 .state
                                 .transition(StreamEvent::SendData { end_stream: true })
@@ -141,7 +141,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         while !chunk.is_empty() {
             let window = self.effective_send_window(stream_id);
             if window == 0 {
-                if let Some(actor) = self.streams.get_mut(&stream_id) {
+                if let Some(actor) = self.streams.get_mut(stream_id) {
                     actor.pending_send = Some(PendingSend {
                         remaining: chunk.clone(),
                         trailers: Vec::new(),
@@ -159,7 +159,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
 
             let no_more_buffered = self
                 .streams
-                .get(&stream_id)
+                .get(stream_id)
                 .map(|a| match &a.send_body_input {
                     SendBodyInput::Streaming { pending_buf, .. } => pending_buf.is_empty(),
                     _ => true,
@@ -167,7 +167,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 .unwrap_or(true);
             let is_last = chunk.is_empty() && producer_closed && no_more_buffered;
 
-            if let Some(actor) = self.streams.get_mut(&stream_id) {
+            if let Some(actor) = self.streams.get_mut(stream_id) {
                 if let Err(e) = actor.state.transition(StreamEvent::SendData {
                     end_stream: is_last,
                 }) {
@@ -189,7 +189,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 .await?;
 
             self.conn_send_window -= chunk_size as i64;
-            if let Some(actor) = self.streams.get_mut(&stream_id) {
+            if let Some(actor) = self.streams.get_mut(stream_id) {
                 actor.send_window -= chunk_size as i64;
             }
             if is_last {
@@ -300,7 +300,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             let is_last = remaining.is_empty();
             let data_end_stream = is_last && !has_trailers;
 
-            if let Some(actor) = self.streams.get_mut(&stream_id)
+            if let Some(actor) = self.streams.get_mut(stream_id)
                 && let Err(e) = actor.state.transition(StreamEvent::SendData {
                     end_stream: data_end_stream,
                 })
@@ -319,7 +319,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 .await?;
 
             self.conn_send_window -= chunk_size as i64;
-            if let Some(actor) = self.streams.get_mut(&stream_id) {
+            if let Some(actor) = self.streams.get_mut(stream_id) {
                 actor.send_window -= chunk_size as i64;
             }
         }
@@ -335,7 +335,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         stream_id: u32,
         trailers: Vec<(String, String)>,
     ) -> Result<(), H2Error> {
-        if let Some(actor) = self.streams.get_mut(&stream_id)
+        if let Some(actor) = self.streams.get_mut(stream_id)
             && let Err(e) = actor.state.transition(StreamEvent::SendTrailers)
         {
             return Err(map_state_err(stream_id, e));
@@ -377,7 +377,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             };
             let pending = match self
                 .streams
-                .get_mut(&sid)
+                .get_mut(sid)
                 .and_then(|a| a.pending_send.take())
             {
                 Some(p) => p,
@@ -386,11 +386,11 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
 
             let is_streaming = self
                 .streams
-                .get(&sid)
+                .get(sid)
                 .map(|a| matches!(a.send_body_input, SendBodyInput::Streaming { .. }))
                 .unwrap_or(false);
             if is_streaming {
-                if let Some(actor) = self.streams.get_mut(&sid)
+                if let Some(actor) = self.streams.get_mut(sid)
                     && let SendBodyInput::Streaming { pending_buf, .. } = &mut actor.send_body_input
                     && !pending.remaining.is_empty()
                 {

@@ -51,7 +51,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 };
             return Ok(());
         }
-        if let Some(actor) = self.streams.get_mut(&w.stream_id) {
+        if let Some(actor) = self.streams.get_mut(w.stream_id) {
             match checked_window_add(actor.send_window, w.increment as i64) {
                 Ok(v) => actor.send_window = v,
                 Err(_) => {
@@ -119,7 +119,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             });
         }
         self.rst_flood.record(Instant::now())?;
-        if let Some(actor) = self.streams.get_mut(&r.stream_id) {
+        if let Some(actor) = self.streams.get_mut(r.stream_id) {
             let _ = actor
                 .state
                 .transition(StreamEvent::RecvRstStream(r.error_code));

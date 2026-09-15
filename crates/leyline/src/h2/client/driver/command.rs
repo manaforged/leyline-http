@@ -125,14 +125,15 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         let stream_id = self.alloc_stream_id();
         let is_head = pseudo.method.eq_ignore_ascii_case("HEAD");
 
-        let header_list = match pseudo.build_pseudo_list(&self.config.pseudo_order) {
-            Ok(list) => list,
+        let (pseudo_list, pseudo_len) = match pseudo.build_pseudo_list(&self.config.pseudo_order) {
+            Ok(l) => l,
             Err(e) => {
                 send_err_to_sink(sink, e);
                 return Ok(());
             }
         };
-        let fragment = encode_request_pseudos(&mut self.encoder, header_list, headers);
+        let fragment =
+            encode_request_pseudos(&mut self.encoder, &pseudo_list[..pseudo_len], headers);
 
         let has_trailers = !trailers.is_empty();
         let end_stream_on_headers = body.is_none() && !has_trailers;
@@ -201,14 +202,16 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 let stream_id = self.alloc_stream_id();
                 let is_head = pseudo.method.eq_ignore_ascii_case("HEAD");
 
-                let header_list = match pseudo.build_pseudo_list(&self.config.pseudo_order) {
-                    Ok(list) => list,
-                    Err(e) => {
-                        send_err_to_sink(sink, e);
-                        return Ok(());
-                    }
-                };
-                let fragment = encode_request_pseudos(&mut self.encoder, header_list, headers);
+                let (pseudo_list, pseudo_len) =
+                    match pseudo.build_pseudo_list(&self.config.pseudo_order) {
+                        Ok(l) => l,
+                        Err(e) => {
+                            send_err_to_sink(sink, e);
+                            return Ok(());
+                        }
+                    };
+                let fragment =
+                    encode_request_pseudos(&mut self.encoder, &pseudo_list[..pseudo_len], headers);
 
                 let initial_send = self.peer_settings.initial_window_size as i64;
                 let initial_recv = self.config.advertised_initial_window_size() as i64;
@@ -258,14 +261,15 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     ) -> Result<(), H2Error> {
         let stream_id = self.alloc_stream_id();
 
-        let header_list = match pseudo.build_pseudo_list(&self.config.pseudo_order) {
-            Ok(list) => list,
+        let (pseudo_list, pseudo_len) = match pseudo.build_pseudo_list(&self.config.pseudo_order) {
+            Ok(l) => l,
             Err(e) => {
                 send_err_to_sink(sink, e);
                 return Ok(());
             }
         };
-        let fragment = encode_request_pseudos(&mut self.encoder, header_list, headers);
+        let fragment =
+            encode_request_pseudos(&mut self.encoder, &pseudo_list[..pseudo_len], headers);
 
         let initial_send = self.peer_settings.initial_window_size as i64;
         let initial_recv = self.config.advertised_initial_window_size() as i64;

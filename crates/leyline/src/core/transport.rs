@@ -5,6 +5,7 @@ use http::{HeaderName, HeaderValue, StatusCode};
 
 use crate::h2::config::H2Config;
 use crate::h2::connection::PseudoHeaders;
+use crate::header_str::HeaderStr;
 use crate::pool::{H1Body, H1PooledError, H1ResponseBody, H1Target, Pool};
 use crate::profile::preset::HeaderPair;
 use crate::tls::FingerprintConnector;
@@ -48,7 +49,7 @@ pub(crate) struct TransportResponse {
     pub(crate) body: TransportBody,
     pub(crate) final_url: String,
     pub(crate) version: HttpVersion,
-    pub(crate) tls_alpn: Option<String>,
+    pub(crate) tls_alpn: Option<HeaderStr>,
     pub(crate) peer_cert_der: Option<Vec<u8>>,
     pub(crate) tls_version: Option<String>,
     pub(crate) tls_cipher: Option<String>,
@@ -181,18 +182,25 @@ pub(crate) async fn send_request_h2(
     let path = url.path();
     let query = url.query();
     let pseudo = PseudoHeaders {
-        method: method.to_string(),
-        scheme: url.scheme().to_string(),
-        authority: {
-            let is_default_port =
-                (url.scheme() == "https" && port == 443) || (url.scheme() == "http" && port == 80);
-            if is_default_port {
-                host.to_string()
-            } else {
-                format!("{host}:{port}")
-            }
+        method: match method {
+            "GET" => HeaderStr::from_static("GET"),
+            "HEAD" => HeaderStr::from_static("HEAD"),
+            "POST" => HeaderStr::from_static("POST"),
+            "PUT" => HeaderStr::from_static("PUT"),
+            "DELETE" => HeaderStr::from_static("DELETE"),
+            "OPTIONS" => HeaderStr::from_static("OPTIONS"),
+            "PATCH" => HeaderStr::from_static("PATCH"),
+            "TRACE" => HeaderStr::from_static("TRACE"),
+            "CONNECT" => HeaderStr::from_static("CONNECT"),
+            m => HeaderStr::from(m),
         },
-        path: match query {
+        scheme: HeaderStr::from_static("https"),
+        authority: if port == 443 {
+            HeaderStr::from(host)
+        } else {
+            HeaderStr::from(format!("{host}:{port}"))
+        },
+        path: HeaderStr::from(match query {
             Some(q) => {
                 let mut target = String::with_capacity(path.len() + q.len() + 1);
                 target.push_str(path);
@@ -200,8 +208,8 @@ pub(crate) async fn send_request_h2(
                 target.push_str(q);
                 target
             }
-            None => path.to_string(),
-        },
+            None => path.to_owned(),
+        }),
         protocol: None,
     };
 
@@ -233,9 +241,9 @@ pub(crate) async fn send_request_h2(
         headers: adopt(resp.headers),
         trailers: adopt(resp.trailers.unwrap_or_default()),
         body: transport_body,
-        final_url: url.to_string(),
+        final_url: url.as_str().to_owned(),
         version: HttpVersion::Http2,
-        tls_alpn: Some("h2".to_string()),
+        tls_alpn: Some(HeaderStr::from_static("h2")),
         peer_cert_der: tls.peer_cert_der,
         tls_version: tls.version,
         tls_cipher: tls.cipher,
@@ -403,7 +411,7 @@ pub(crate) async fn send_request_h1(
 
     let (tls_alpn, peer_cert_der, tls_version, tls_cipher) = match resp.tls {
         Some(info) => (
-            Some("http/1.1".to_string()),
+            Some(HeaderStr::from_static("http/1.1")),
             info.peer_cert_der,
             info.version,
             info.cipher,
@@ -416,7 +424,7 @@ pub(crate) async fn send_request_h1(
         headers: adopt(resp.headers),
         trailers: Vec::new(),
         body: transport_body,
-        final_url: url.to_string(),
+        final_url: url.as_str().to_owned(),
         version: HttpVersion::Http1_1,
         tls_alpn,
         peer_cert_der,
@@ -514,9 +522,9 @@ pub(crate) async fn send_request_h3(
         headers: adopt(resp.headers),
         trailers: adopt(resp.trailers),
         body: transport_body,
-        final_url: url.to_string(),
+        final_url: url.as_str().to_owned(),
         version: HttpVersion::Http3,
-        tls_alpn: Some("h3".to_string()),
+        tls_alpn: Some(HeaderStr::from_static("h3")),
         peer_cert_der: tls.peer_cert_der,
         tls_version: tls.version,
         tls_cipher: tls.cipher,

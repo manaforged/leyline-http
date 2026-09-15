@@ -228,18 +228,18 @@ pub(crate) type HeaderPair = (
 
 #[derive(Debug, Clone, Default)]
 pub struct PseudoHeaders {
-    pub method: String,
-    pub scheme: String,
-    pub authority: String,
-    pub path: String,
-    pub protocol: Option<String>,
+    pub method: HeaderStr,
+    pub scheme: HeaderStr,
+    pub authority: HeaderStr,
+    pub path: HeaderStr,
+    pub protocol: Option<HeaderStr>,
 }
 
 impl PseudoHeaders {
     pub fn build_pseudo_list<'a>(
         &'a self,
         pseudo_order: &[PseudoOrder; 4],
-    ) -> Result<Vec<(&'a str, &'a str)>, H2Error> {
+    ) -> Result<([(&'a str, &'a str); 5], usize), H2Error> {
         let is_connect = self.method.eq_ignore_ascii_case("CONNECT");
         if is_connect && self.authority.is_empty() {
             return Err(H2Error::Connection {
@@ -248,21 +248,26 @@ impl PseudoHeaders {
             });
         }
 
-        let mut list: Vec<(&str, &str)> = Vec::with_capacity(5);
+        let mut list = [("", ""); 5];
+        let mut len = 0;
+        let mut push = |n: &'a str, v: &'a str| {
+            list[len] = (n, v);
+            len += 1;
+        };
         for order in pseudo_order {
             match order {
-                PseudoOrder::Method => list.push((":method", &self.method)),
-                PseudoOrder::Scheme if !is_connect => list.push((":scheme", &self.scheme)),
+                PseudoOrder::Method => push(":method", self.method.as_str()),
+                PseudoOrder::Scheme if !is_connect => push(":scheme", self.scheme.as_str()),
                 PseudoOrder::Scheme => {}
-                PseudoOrder::Authority => list.push((":authority", &self.authority)),
-                PseudoOrder::Path if !is_connect => list.push((":path", &self.path)),
+                PseudoOrder::Authority => push(":authority", self.authority.as_str()),
+                PseudoOrder::Path if !is_connect => push(":path", self.path.as_str()),
                 PseudoOrder::Path => {}
             }
         }
-        if let Some(proto) = self.protocol.as_deref() {
-            list.push((":protocol", proto));
+        if let Some(proto) = self.protocol.as_ref().map(|p| p.as_str()) {
+            push(":protocol", proto);
         }
-        Ok(list)
+        Ok((list, len))
     }
 }
 
@@ -281,13 +286,13 @@ pub(crate) fn id_to_u16(id: &SettingId) -> u16 {
 
 pub(crate) fn encode_request_pseudos<'a>(
     encoder: &mut hpack::Encoder,
-    pseudo_list: Vec<(&'a str, &'a str)>,
+    pseudo_list: &[(&'a str, &'a str)],
     headers: &'a [HeaderPair],
 ) -> Vec<u8> {
     let count = pseudo_list.len() + headers.len();
     let pairs = pseudo_list
         .iter()
-        .map(|&(n, v)| (n, v))
+        .copied()
         .chain(headers.iter().map(|(n, v)| (n.as_ref(), v.as_ref())));
     encoder.encode_header_block_iter(pairs, count)
 }

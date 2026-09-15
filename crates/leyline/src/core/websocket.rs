@@ -13,6 +13,7 @@ use tokio_tungstenite::tungstenite::protocol::{CloseFrame as WireClose, Role};
 use crate::h2::client::H2ConnectStream;
 use crate::h2::config::H2Config;
 use crate::h2::connection::PseudoHeaders;
+use crate::header_str::HeaderStr;
 use crate::pool::Pool;
 use crate::tls::{FingerprintConnector, TlsIo};
 
@@ -218,11 +219,11 @@ impl WsConnection {
         }
 
         let pseudo = PseudoHeaders {
-            method: "CONNECT".into(),
-            scheme: "https".into(),
-            authority,
-            path,
-            protocol: Some("websocket".into()),
+            method: HeaderStr::from_static("CONNECT"),
+            scheme: HeaderStr::from_static("https"),
+            authority: HeaderStr::from(authority),
+            path: HeaderStr::from(path),
+            protocol: Some(HeaderStr::from_static("websocket")),
         };
 
         let stream = h2_client

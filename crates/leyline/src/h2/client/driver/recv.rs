@@ -66,7 +66,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         let complete;
         let mut queued = 0usize;
         let fail_outcome: Option<(H2Error, ErrorCode)> = {
-            let actor = match self.streams.get_mut(&stream_id) {
+            let actor = match self.streams.get_mut(stream_id) {
                 Some(a) => a,
                 None => {
                     self.maybe_top_up_conn_window().await?;

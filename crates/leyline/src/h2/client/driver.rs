@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::io;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -24,6 +24,7 @@ mod lifecycle;
 mod protocol;
 mod recv;
 mod send;
+mod stream_map;
 
 pub(super) use self::bootstrap::pump_request_body;
 pub(crate) use self::bootstrap::start;
@@ -260,7 +261,7 @@ struct Driver<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> {
     peer_snapshot: Arc<PeerSettingsSnapshot>,
     conn_send_window: i64,
     conn_recv_window: i64,
-    streams: HashMap<u32, StreamActor>,
+    streams: stream_map::StreamMap,
     next_stream_id: u32,
     buffered_pending: VecDeque<u32>,
     rst_flood: RstFloodDetector,

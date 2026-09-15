@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::io;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -151,7 +151,7 @@ where
         peer_snapshot: snapshot.clone(),
         conn_send_window: initial_send_window,
         conn_recv_window: config.initial_connection_window_size as i64,
-        streams: HashMap::new(),
+        streams: super::stream_map::StreamMap::new(),
         next_stream_id: 1,
         buffered_pending: VecDeque::new(),
         rst_flood: RstFloodDetector::new(
