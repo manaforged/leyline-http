@@ -141,6 +141,45 @@ One connection of either client is a serial pipeline (one driver task each
 side, ~2 cores at ~170k rps); capacity scales with connections and
 in-flight depth, not worker threads.
 
+### Per-request cost accounting (2026-09-15)
+
+`perf_accounting.py` on the Go-origin 1x64 cell, mean of two rounds over
+624,788 verified requests:
+
+| Counter per request | Leyline | wreq | reqwest |
+| --- | ---: | ---: | ---: |
+| Client cycles | 61k | 106k | 99k |
+| Client instructions | 102k | 131k | 131k |
+| Client context switches | 2.0 | 3.6 | 3.1 |
+| Server cycles | 82.6k | 77.4k | 71.6k |
+
+Leyline is the cheapest client measured; the Go server spends about 7%
+more CPU serving it than wreq and 15% more than reqwest. On a server-bound
+cell that difference is the throughput gap. Two contributors were
+isolated:
+
+- The Chrome profile adds a five-byte priority section to every HEADERS
+  frame, as Chrome does. `LEYLINE_CHROME=bare` drops the server cost to
+  79.1k cycles per request. wreq and reqwest send no priority field, so
+  the Go server's stream-dependency scheduler does less work for them.
+- Loopback captures show Leyline emitting more, smaller TCP segments per
+  request than wreq (0.43 vs 0.29 segments per request; modal payload 47 B
+  vs 82 B) for fewer total bytes per request (185 B vs 203 B). More
+  records mean more server reads and TLS decryptions for the same work.
+
+Client-side profiles at the same cell: wreq spends ~10% of samples on one
+contended pool mutex plus ~5% in the kernel spinlock path and makes 560k
+futex calls per five seconds, where Leyline makes 121k. Leyline's profile
+has no single hotspot; cost spreads across HPACK encoding (~2.8%),
+request orchestration, response-header adoption, and stream-map hashing
+(~1.4% SipHash on a `HashMap<u32>`).
+
+Sequential keepalive on one connection: Leyline 31-33 us p50, wreq
+34-35 us. The 8-connections/8-in-flight cell that shows -4.2% on the Go
+origin measures +3.2% for Leyline on the Hyper origin (264,924 vs
+256,668 req/s): the multi-connection collapse on the Go cells is the
+server's per-connection serialization, not the client's.
+
 
 ## Compare with reqwest
 

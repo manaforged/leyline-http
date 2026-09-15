@@ -52,6 +52,23 @@ Reuse a session to share connections and cookies. `Session::chrome()` selects
 the latest bundled Chrome profile with a Windows identity. Use the builder to
 select another browser or platform.
 
+## Benchmarks
+
+Paired loopback runs on a Ryzen 9 9950X3D host; every client verifies TLS
+and byte-checks every response. Deltas are Leyline's concurrent
+throughput; negative is a loss.
+
+| Cell | Result |
+| --- | ---: |
+| Peak concurrent vs wreq, identical request headers | +33.5% |
+| Peak concurrent vs reqwest | +20.4% |
+| Sequential keepalive vs wreq | +3.5% |
+| Go origin, 1 connection x 64 streams vs wreq | -1.4% (parity) |
+| Go origin, 8 connections x 8 streams vs reqwest | -14.8% |
+
+Full methodology, all cells, and per-request CPU accounting are in
+[BENCHMARKS.md](https://github.com/manaforged/leyline-http/blob/main/BENCHMARKS.md).
+
 ## Limits
 
 Profiles cover selected TLS, HTTP/2, and HTTP header properties. Capture
