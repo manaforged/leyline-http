@@ -134,8 +134,8 @@ END {
   printf("mean round p50/p99 us : %s %.0f/%.0f  %s %.0f/%.0f\n", L, lp50/n, lp99/n, R, rp50/n, rp99/n);
   mdw=sdw/n; varw=(sddw - n*mdw*mdw)/(n-1); sew=sqrt(varw/n);
   printf("warm_rps delta        : %+.3f  (%+.1f%%)  95%% CI [%.3f, %.3f]\n", mdw, 100*mdw/(srw/n), mdw-crit*sew, mdw+crit*sew);
-  mdc=sdc/n; varc=(sddc - n*mdc*mdc)/(n-1); sec=sqrt(varc/n);
-  printf("cold_rps delta        : %+.3f  (%+.1f%%)  95%% CI [%.3f, %.3f]\n", mdc, 100*mdc/(src/n), mdc-crit*sec, mdc+crit*sec);
+  if (src>0) { mdc=sdc/n; varc=(sddc - n*mdc*mdc)/(n-1); sec=sqrt(varc/n);
+  printf("cold_rps delta        : %+.3f  (%+.1f%%)  95%% CI [%.3f, %.3f]\n", mdc, 100*mdc/(src/n), mdc-crit*sec, mdc+crit*sec); }
 }' "$pairs"
 
 if [ -n "${PAIRED_JSON:-}" ]; then
