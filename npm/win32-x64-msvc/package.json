@@ -1,5 +1,5 @@
 {
-  "name": "@manaforged/leyline-win32-x64-msvc",
+  "name": "@manaforged/leyline-http-win32-x64-msvc",
   "version": "0.1.0",
   "os": [
     "win32"

@@ -1,5 +1,5 @@
 {
-  "name": "@manaforged/leyline-darwin-arm64",
+  "name": "@manaforged/leyline-http-darwin-arm64",
   "version": "0.1.0",
   "os": [
     "darwin"

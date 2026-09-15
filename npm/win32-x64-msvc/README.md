@@ -1,3 +1,3 @@
-# `@manaforged/leyline-win32-x64-msvc`
+# `@manaforged/leyline-http-win32-x64-msvc`
 
-This is the **x86_64-pc-windows-msvc** binary for `@manaforged/leyline`
+This is the **x86_64-pc-windows-msvc** binary for `@manaforged/leyline-http`
