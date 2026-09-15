@@ -197,6 +197,88 @@ origin measures +3.2% for Leyline on the Hyper origin (264,924 vs
 server's per-connection serialization, not the client's.
 
 
+## Real-network matrix (2026-09-16, LAN)
+
+Same clients and harness, origins moved to a second host at
+`192.0.2.10` serving Go on `:8443` and Hyper on
+`:8444`, ~3.6 ms mean RTT (min 2.7, mdev 1.3) from the client
+host over the wired LAN. The origin
+certificate carries SANs for the LAN address and `127.0.0.1`. Eight
+balanced pairs per cell, verified responses; in-flight counts are
+total workers spread over `CMP_CONNECTIONS` connections.
+
+Cells that reached significance in a first pass were re-run; the
+table lists every pass because the LAN's run-to-run spread is the
+result. `lan-*.json` in `benches/comparison/results/` holds the
+per-round data for passes two and three.
+
+| Cell | Peer | Pass 1 | Pass 2 | Pass 3 |
+| --- | --- | ---: | ---: | ---: |
+| Go 10 B, 1 conn x 64 | wreq | +0.6% ns | +4.8% ns | — |
+| Go 10 B, 1 conn x 64 | reqwest | +8.2% sig | +0.4% ns | +12.3% sig |
+| Go 10 B, 8 conns x 64 | wreq | -2.8% ns | +3.5% ns | — |
+| Go 10 B, 8 conns x 64 | reqwest | -0.4% ns | +0.6% ns | — |
+| Go 10 B, 8 conns x 512 | wreq | +3.1% borderline | +3.6% ns | — |
+| Hyper 10 B, 8 conns x 256 | wreq | +1.3% ns | +5.6% ns | — |
+| Hyper 10 B, 8 conns x 256 | reqwest | -1.6% ns | -8.1% ns | — |
+| Hyper 16 KiB, 8 conns x 64 | wreq | +7.9% sig | -0.5% ns | -0.8% ns |
+
+The RTT path compresses the loopback differences: at 64 in-flight
+requests against the Go origin every client converges near 11k req/s
+because the path's round-trip floor, not the client, sets the rate.
+Within that bound the Go 1x64 cell favors Leyline over reqwest —
+three passes at +8.2%, +0.4%, +12.3%, significant twice — while the
+16 KiB cell's first-pass +7.9% did not replicate and reads as parity
+with noise. No LAN cell produced a stable wreq separation. These
+numbers bound what the loopback results can mean on a real link: at
+typical concurrency the transport dominates; the honest LAN claim is
+parity-to-modest-gains with real variance, not the loopback deltas.
+
+h2load controls at matched total in-flight, same origins and path:
+
+| Cell | h2load | Leyline |
+| --- | ---: | ---: |
+| LAN Go, 8 conns x 64 | 11,170 | ~11,100 |
+| LAN Go, 8 conns x 512 | 60,358 | ~77,000 |
+| LAN Hyper, 8 conns x 256 | 44,048 | ~45,200 |
+| Loopback Hyper, 8 conns x 256 | 644,114 | ~1.06M |
+
+h2load's `-m` counts streams per connection; the clients' `CONCURRENCY`
+counts total in-flight requests. Matching depth — not any client
+difference — explains why a `-m 64` control row can read several times
+higher than an `8 conns x 64` client cell.
+
+## Offered-load latency (open-loop)
+
+The `paced` mode offers a constant request rate and reports
+coordinated-omission-corrected percentiles — intended-start to
+completion — beside raw service time, so a client that cannot hold
+the rate shows queueing rather than a flattering service mean.
+Loopback Hyper origin, 8 connections, 10-second runs, verified
+responses:
+
+| Offered rate | Leyline corrected p50/p99 | wreq | reqwest |
+| ---: | --- | --- | --- |
+| 100k req/s | 1.65 / 2.6 ms | 1.6 / 4.2 ms | 1.5 / 3.9 ms |
+| 140k req/s | 2.1 / 3.7 ms | 2.0 / 26 ms | 1.7 / 5.6 ms |
+| 600k req/s | achieved 173k | achieved 141k | achieved 171k |
+
+All three hold 100k cleanly. At 140k — inside wreq's measured ~141k
+ceiling — wreq's corrected p99 blows out to ~26 ms while Leyline
+holds ~3.7 ms; reqwest stays between them. At 600k the offered rate
+exceeds every client's capacity, so the achieved rate is the capacity
+estimate: Leyline 173k, reqwest 171k, wreq 141k. reqwest's raw
+service p50 runs lower than Leyline's at sustainable rates (173 µs
+versus 526 µs at 100k) — the bare engine does less work per request —
+but the corrected percentiles converge because pacing delay, not
+service, dominates.
+
+LAN paced, Go origin, 8k req/s offered, 8 connections: all three
+clients sustain the rate with corrected p50 ~6.0 ms and p99
+~12-15 ms; occasional ~30-60 ms spikes hit all three equally and
+track with the path's jitter, not the client.
+
+
 ## Compare with reqwest
 
 `benches/benches/clients.rs` compares Leyline's default session, without

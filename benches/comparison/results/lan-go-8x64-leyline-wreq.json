@@ -1,0 +1,121 @@
+{
+ "name": "go-10b-8c-lan",
+ "origin": "go",
+ "body_bytes": 10,
+ "connections": 8,
+ "streams": 64,
+ "profile": "",
+ "left": "leyline",
+ "right": "wreq",
+ "left_sha256": "sha256:b37e8f1287cac75aabc707239f17f8139befed42085515f1b2aea351e34ff195",
+ "right_sha256": "sha256:7e2f172b70c20084ec8172fa0827ffcd3bad11a9c928bbe7b7ff05540b96cbef",
+ "warm_count": 1,
+ "cold_count": 1,
+ "conc_count": 40000,
+ "rounds": [
+  {
+   "round": 1,
+   "left": {
+    "conc_rps": 11641.147,
+    "warm_rps": 266.769,
+    "cold_rps": 44.078
+   },
+   "right": {
+    "conc_rps": 10588.204,
+    "warm_rps": 234.676,
+    "cold_rps": 54.69
+   }
+  },
+  {
+   "round": 2,
+   "left": {
+    "conc_rps": 10135.532,
+    "warm_rps": 224.933,
+    "cold_rps": 41.872
+   },
+   "right": {
+    "conc_rps": 11725.735,
+    "warm_rps": 296.084,
+    "cold_rps": 53.271
+   }
+  },
+  {
+   "round": 3,
+   "left": {
+    "conc_rps": 11416.214,
+    "warm_rps": 258.688,
+    "cold_rps": 40.745
+   },
+   "right": {
+    "conc_rps": 9350.177,
+    "warm_rps": 271.971,
+    "cold_rps": 47.286
+   }
+  },
+  {
+   "round": 4,
+   "left": {
+    "conc_rps": 11179.749,
+    "warm_rps": 244.488,
+    "cold_rps": 45.715
+   },
+   "right": {
+    "conc_rps": 10956.154,
+    "warm_rps": 294.748,
+    "cold_rps": 36.331
+   }
+  },
+  {
+   "round": 5,
+   "left": {
+    "conc_rps": 10662.824,
+    "warm_rps": 268.422,
+    "cold_rps": 36.117
+   },
+   "right": {
+    "conc_rps": 11074.078,
+    "warm_rps": 250.014,
+    "cold_rps": 50.206
+   }
+  },
+  {
+   "round": 6,
+   "left": {
+    "conc_rps": 11494.506,
+    "warm_rps": 240.536,
+    "cold_rps": 40.718
+   },
+   "right": {
+    "conc_rps": 11477.212,
+    "warm_rps": 268.162,
+    "cold_rps": 47.775
+   }
+  },
+  {
+   "round": 7,
+   "left": {
+    "conc_rps": 11274.482,
+    "warm_rps": 267.942,
+    "cold_rps": 41.165
+   },
+   "right": {
+    "conc_rps": 11221.97,
+    "warm_rps": 253.929,
+    "cold_rps": 54.099
+   }
+  },
+  {
+   "round": 8,
+   "left": {
+    "conc_rps": 11469.055,
+    "warm_rps": 187.029,
+    "cold_rps": 45.032
+   },
+   "right": {
+    "conc_rps": 9822.279,
+    "warm_rps": 220.937,
+    "cold_rps": 49.705
+   }
+  }
+ ]
+}
