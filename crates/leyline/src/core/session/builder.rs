@@ -629,11 +629,19 @@ impl SessionBuilder {
                         self.pool_config.max_connections.max(1),
                         self.pool_config.max_h1_conns_per_host.max(1),
                     )
+                    .with_h2_ping(
+                        self.pool_config.h2_ping_after_idle,
+                        self.pool_config.h2_ping_timeout,
+                    )
                 } else {
                     Pool::with_limits(
                         std::time::Duration::ZERO,
                         1,
                         self.pool_config.max_h1_conns_per_host.max(1),
+                    )
+                    .with_h2_ping(
+                        self.pool_config.h2_ping_after_idle,
+                        self.pool_config.h2_ping_timeout,
                     )
                 }),
                 audit_tls: audit_cache,

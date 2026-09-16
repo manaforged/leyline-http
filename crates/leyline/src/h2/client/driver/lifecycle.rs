@@ -81,6 +81,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 | DriverCommand::OpenConnect { sink, .. } => {
                     send_err_to_sink(sink, clone_err(&final_err));
                 }
+                DriverCommand::Ping { .. } => {}
             }
         }
         while let Ok(cmd) = self.command_rx.try_recv() {
@@ -92,6 +93,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 | DriverCommand::OpenConnect { sink, .. } => {
                     send_err_to_sink(sink, clone_err(&final_err));
                 }
+                DriverCommand::Ping { .. } => {}
             }
         }
         result

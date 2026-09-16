@@ -79,6 +79,9 @@ pub(crate) enum DriverCommand {
         write_rx: mpsc::Receiver<io::Result<Bytes>>,
         sink: ResponseSink,
     },
+    Ping {
+        ack_tx: oneshot::Sender<()>,
+    },
 }
 
 #[cfg(test)]

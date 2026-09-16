@@ -19,6 +19,7 @@ use crate::util::is_idempotent;
 use crate::{Error, Kind, ResponseTiming};
 
 pub(crate) mod h1;
+mod liveness;
 #[expect(
     clippy::module_inception,
     reason = "pool::pool is the pool engine; the parent module is the public facade"
@@ -30,6 +31,8 @@ pub use h1::{
     H1Body, H1Io, H1PooledError, H1Response, H1ResponseBody, H1Target, MAX_H1_BODY_BYTES,
     MAX_H1_HEADER_BYTES, send_request_h1_pooled,
 };
+pub(crate) use liveness::checkout_live_h2;
+pub use liveness::{DEFAULT_H2_PING_AFTER_IDLE, DEFAULT_H2_PING_TIMEOUT};
 pub use pool::{
     DEFAULT_IDLE_TIMEOUT, DEFAULT_MAX_CONNECTIONS, DEFAULT_MAX_H1_CONNS_PER_HOST, Pool,
 };
@@ -235,7 +238,7 @@ pub async fn checkout_handle(
 
     pool.evict_idle();
 
-    if let Some((handle, tls)) = pool.checkout_h2(&key) {
+    if let Some((handle, tls)) = checkout_live_h2(pool, &key).await {
         return Ok((handle, tls));
     }
 
@@ -511,7 +514,7 @@ pub async fn send_request(
     };
     let mut body = body;
 
-    if let Some((handle, tls)) = pool.checkout_h2(&key) {
+    if let Some((handle, tls)) = checkout_live_h2(pool, &key).await {
         trace::connect(connect_host, connect_port, true, Duration::ZERO);
         let pooled_body = std::mem::replace(&mut body, RequestBody::None);
         let send_started = Instant::now();

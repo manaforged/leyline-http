@@ -139,6 +139,40 @@ impl Session {
         self.inner.pool.stats()
     }
 
+    pub async fn preconnect(&self, url: &str) -> Result<()> {
+        let url = url::Url::parse(url)?;
+        if url.scheme() != "https" || self.inner.protocol_policy == super::ProtocolPolicy::Http1 {
+            return Ok(());
+        }
+        let host = url.host_str().unwrap_or("");
+        let port = url.port_or_known_default().unwrap_or(443);
+        let proxy = self.inner.proxy_config.proxy_for(&url, None);
+        let connect = crate::pool::checkout_handle(
+            &self.inner.pool,
+            &self.inner.connector,
+            &self.inner.h2_config,
+            host,
+            port,
+            proxy,
+        );
+        let opened = match self.inner.timeouts.connect {
+            Some(limit) => tokio::time::timeout(limit, connect).await.map_err(|_| {
+                crate::Error::new(crate::Kind::Timeout).with_message(format!(
+                    "preconnect to {host}:{port} timed out after {limit:?}"
+                ))
+            })?,
+            None => connect.await,
+        };
+        match opened {
+            Ok(_) => Ok(()),
+            Err(error) if error.alpn().is_some() => {
+                self.inner.pool.note_h1_only(host, port, proxy);
+                Ok(())
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     pub fn request(&self, method: Method, url: impl TryInto<Uri>) -> RequestBuilder {
         match url.try_into() {
             Ok(url) => RequestBuilder::new(self, method, &url.to_string()),

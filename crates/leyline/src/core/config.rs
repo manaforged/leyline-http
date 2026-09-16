@@ -449,6 +449,8 @@ pub struct PoolConfig {
     pub max_connections: usize,
     pub max_h1_conns_per_host: usize,
     pub keepalive: bool,
+    pub h2_ping_after_idle: Option<Duration>,
+    pub h2_ping_timeout: Duration,
 }
 
 impl Default for PoolConfig {
@@ -458,6 +460,8 @@ impl Default for PoolConfig {
             max_connections: crate::pool::DEFAULT_MAX_CONNECTIONS,
             max_h1_conns_per_host: crate::pool::DEFAULT_MAX_H1_CONNS_PER_HOST,
             keepalive: true,
+            h2_ping_after_idle: crate::pool::DEFAULT_H2_PING_AFTER_IDLE,
+            h2_ping_timeout: crate::pool::DEFAULT_H2_PING_TIMEOUT,
         }
     }
 }
@@ -484,6 +488,16 @@ impl PoolConfig {
 
     pub fn keepalive(mut self, on: bool) -> Self {
         self.keepalive = on;
+        self
+    }
+
+    pub fn h2_ping_after_idle(mut self, d: impl Into<Option<Duration>>) -> Self {
+        self.h2_ping_after_idle = d.into();
+        self
+    }
+
+    pub fn h2_ping_timeout(mut self, d: Duration) -> Self {
+        self.h2_ping_timeout = d;
         self
     }
 }

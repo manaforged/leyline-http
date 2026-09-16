@@ -18,6 +18,13 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             return Ok(());
         }
         match cmd {
+            DriverCommand::Ping { ack_tx } => {
+                self.ping_seq = self.ping_seq.wrapping_add(1);
+                let payload = self.ping_seq.to_be_bytes();
+                self.writer.write_ping(payload).await?;
+                self.pings.push_back((payload, ack_tx));
+                Ok(())
+            }
             DriverCommand::SendRequest {
                 pseudo,
                 headers,

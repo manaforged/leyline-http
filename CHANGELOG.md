@@ -22,6 +22,12 @@ changes or a higher minimum Rust version require a new minor release, such as
   request.
 - Prebuilt BoringSSL libraries and Rust bindings for macOS arm64, Linux x86_64
   and arm64 with glibc, and Windows x86_64 with MSVC.
+- `Session::preconnect` opens and pools an HTTP/2 connection before the first
+  request.
+- The pool sends an HTTP/2 PING before reusing a connection idle for 10 seconds
+  and replaces the connection if the PING is not acknowledged within 2 seconds.
+  `PoolConfig::h2_ping_after_idle` and `PoolConfig::h2_ping_timeout` change
+  the thresholds.
 - A [user guide](crates/leyline/docs/guide/README.md) covering requests,
   responses, sessions, and supported targets.
 

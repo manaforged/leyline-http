@@ -275,6 +275,8 @@ struct Driver<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> {
     body_chunk_tx: mpsc::Sender<BodyChunkIn>,
     body_chunk_rx: mpsc::Receiver<BodyChunkIn>,
     stalled: usize,
+    ping_seq: u64,
+    pings: VecDeque<([u8; 8], oneshot::Sender<()>)>,
 }
 
 fn send_err_to_sink(sink: ResponseSink, err: H2Error) {

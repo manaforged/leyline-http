@@ -153,6 +153,37 @@ let via_proxy = session.with_proxy("http://user:pass@proxy.example:8080");
 # }
 ```
 
+## Keep connections warm
+
+`preconnect(url)` opens the TCP, proxy, TLS, and HTTP/2 connection for an
+`https` origin and stores it in the pool. The first request to that origin
+then reuses it and skips the handshake. For an `http` URL, or when the session
+uses `ProtocolPolicy::Http1`, `preconnect` does nothing. If the origin only
+speaks HTTP/1.1, the session records that and returns `Ok`.
+
+Before the pool reuses an HTTP/2 connection that has been idle for 10 seconds,
+it sends a PING. Chrome does the same. If no acknowledgement arrives within 2
+seconds, the pool drops the connection and opens a new one, so the request does
+not wait on a dead socket. `pool_stats().h2_ping_failures` counts the dropped
+connections. Change the thresholds with `PoolConfig::h2_ping_after_idle` and
+`PoolConfig::h2_ping_timeout`. Pass `None` to `h2_ping_after_idle` to turn the
+check off.
+
+```rust,no_run
+use std::time::Duration;
+
+use leyline::PoolConfig;
+
+# async fn run() -> leyline::Result<()> {
+let session = leyline::Session::builder()
+    .chrome()
+    .pool_config(PoolConfig::new().h2_ping_after_idle(Duration::from_secs(10)))
+    .build()?;
+session.preconnect("https://example.com/").await?;
+# Ok(())
+# }
+```
+
 ## Read back what you built
 
 `browser()`, `platform()`, `brand()`, `identity()`, `protocol_policy()`,

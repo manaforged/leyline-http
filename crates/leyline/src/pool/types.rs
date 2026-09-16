@@ -101,6 +101,7 @@ pub struct PoolStats {
     pub evictions_lru: u64,
     pub evictions_dead: u64,
     pub stale_probed: u64,
+    pub h2_ping_failures: u64,
     pub installs: u64,
 }
 
@@ -116,5 +117,6 @@ pub(crate) struct PoolCounters {
     pub(crate) evictions_lru: AtomicU64,
     pub(crate) evictions_dead: AtomicU64,
     pub(crate) stale_probed: AtomicU64,
+    pub(crate) h2_ping_failures: AtomicU64,
     pub(crate) installs: AtomicU64,
 }

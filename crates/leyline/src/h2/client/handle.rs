@@ -143,6 +143,27 @@ impl H2Client {
         }
     }
 
+    pub async fn ping(&self) -> Result<(), H2Error> {
+        if self.closed.load(Ordering::Acquire) {
+            return Err(H2Error::Connection {
+                code: ErrorCode::NoError,
+                reason: "connection closed".into(),
+            });
+        }
+        let (ack_tx, ack_rx) = oneshot::channel();
+        self.tx
+            .send(DriverCommand::Ping { ack_tx })
+            .await
+            .map_err(|_| H2Error::Connection {
+                code: ErrorCode::NoError,
+                reason: "driver task has exited".into(),
+            })?;
+        ack_rx.await.map_err(|_| H2Error::Connection {
+            code: ErrorCode::NoError,
+            reason: "connection closed before the ping was acknowledged".into(),
+        })
+    }
+
     pub fn is_closed(&self) -> bool {
         self.closed.load(Ordering::Acquire)
     }

@@ -103,6 +103,14 @@ impl<W: AsyncWrite + Unpin> FrameWriter<W> {
         self.write_frame(frame).await
     }
 
+    pub async fn write_ping(&mut self, payload: [u8; 8]) -> Result<(), H2Error> {
+        let frame = crate::h2::frame::PingFrame {
+            ack: false,
+            payload,
+        };
+        self.write_frame(&frame).await
+    }
+
     pub async fn write_ping_ack(&mut self, payload: [u8; 8]) -> Result<(), H2Error> {
         let frame = crate::h2::frame::PingFrame { ack: true, payload };
         self.write_frame(&frame).await

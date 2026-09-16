@@ -40,6 +40,8 @@ pub struct Pool {
     pub(crate) idle_timeout: Duration,
     pub(crate) max_connections: usize,
     pub(crate) max_h1_conns_per_host: usize,
+    pub(crate) h2_ping_after_idle: Option<Duration>,
+    pub(crate) h2_ping_timeout: Duration,
     pub(crate) h1_permits: Mutex<HashMap<PoolKey, Arc<Semaphore>>>,
     pub(crate) counters: PoolCounters,
     created: Instant,
@@ -99,6 +101,8 @@ impl Pool {
             idle_timeout: DEFAULT_IDLE_TIMEOUT,
             max_connections: DEFAULT_MAX_CONNECTIONS,
             max_h1_conns_per_host: DEFAULT_MAX_H1_CONNS_PER_HOST,
+            h2_ping_after_idle: super::liveness::DEFAULT_H2_PING_AFTER_IDLE,
+            h2_ping_timeout: super::liveness::DEFAULT_H2_PING_TIMEOUT,
             h1_permits: Mutex::new(HashMap::new()),
             counters: PoolCounters::default(),
             created: Instant::now(),
@@ -127,6 +131,8 @@ impl Pool {
             idle_timeout,
             max_connections,
             max_h1_conns_per_host,
+            h2_ping_after_idle: super::liveness::DEFAULT_H2_PING_AFTER_IDLE,
+            h2_ping_timeout: super::liveness::DEFAULT_H2_PING_TIMEOUT,
             h1_permits: Mutex::new(HashMap::new()),
             counters: PoolCounters::default(),
             created: Instant::now(),
@@ -193,6 +199,7 @@ impl Pool {
             evictions_lru: self.counters.evictions_lru.load(Ordering::Relaxed),
             evictions_dead: self.counters.evictions_dead.load(Ordering::Relaxed),
             stale_probed: self.counters.stale_probed.load(Ordering::Relaxed),
+            h2_ping_failures: self.counters.h2_ping_failures.load(Ordering::Relaxed),
             installs: self.counters.installs.load(Ordering::Relaxed),
         }
     }
@@ -503,6 +510,7 @@ impl Pool {
             self.max_connections,
             self.max_h1_conns_per_host,
         )
+        .with_h2_ping(self.h2_ping_after_idle, self.h2_ping_timeout)
     }
 
     pub(crate) fn invalidate(&self, key: &PoolKey) {

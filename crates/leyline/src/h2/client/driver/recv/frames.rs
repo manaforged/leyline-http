@@ -72,6 +72,15 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     pub(super) async fn on_ping(&mut self, p: PingFrame) -> Result<(), H2Error> {
         if !p.ack {
             self.writer.write_ping_ack(p.payload).await?;
+            return Ok(());
+        }
+        if let Some(index) = self
+            .pings
+            .iter()
+            .position(|(payload, _)| *payload == p.payload)
+            && let Some((_, ack_tx)) = self.pings.remove(index)
+        {
+            let _ = ack_tx.send(());
         }
         Ok(())
     }

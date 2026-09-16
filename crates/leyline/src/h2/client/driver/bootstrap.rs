@@ -172,6 +172,8 @@ where
         shutdown_started: false,
         body_chunk_tx,
         body_chunk_rx,
+        ping_seq: 0,
+        pings: VecDeque::new(),
         stalled: 0,
     };
 
