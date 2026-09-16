@@ -166,16 +166,13 @@ pub const __USE_ATFILE: i32 = 1;
 pub const __USE_FORTIFY_LEVEL: i32 = 0;
 pub const __GLIBC_USE_DEPRECATED_GETS: i32 = 0;
 pub const __GLIBC_USE_DEPRECATED_SCANF: i32 = 0;
-pub const __GLIBC_USE_C2X_STRTOL: i32 = 0;
 pub const _STDC_PREDEF_H: i32 = 1;
 pub const __STDC_IEC_559__: i32 = 1;
-pub const __STDC_IEC_60559_BFP__: i32 = 201404;
 pub const __STDC_IEC_559_COMPLEX__: i32 = 1;
-pub const __STDC_IEC_60559_COMPLEX__: i32 = 201404;
 pub const __STDC_ISO_10646__: i32 = 201706;
 pub const __GNU_LIBRARY__: i32 = 6;
 pub const __GLIBC__: i32 = 2;
-pub const __GLIBC_MINOR__: i32 = 39;
+pub const __GLIBC_MINOR__: i32 = 34;
 pub const _SYS_CDEFS_H: i32 = 1;
 pub const __glibc_c99_flexarr_available: i32 = 1;
 pub const __LDOUBLE_REDIRECTS_TO_FLOAT128_ABI: i32 = 0;
@@ -199,7 +196,6 @@ pub const _BITS_TIME64_H: i32 = 1;
 pub const _BITS_WCHAR_H: i32 = 1;
 pub const _BITS_STDINT_INTN_H: i32 = 1;
 pub const _BITS_STDINT_UINTN_H: i32 = 1;
-pub const _BITS_STDINT_LEAST_H: i32 = 1;
 pub const INT8_MIN: i32 = -128;
 pub const INT16_MIN: i32 = -32768;
 pub const INT32_MIN: i32 = -2147483648;
@@ -347,7 +343,6 @@ pub const __struct_FILE_defined: i32 = 1;
 pub const _IO_EOF_SEEN: i32 = 16;
 pub const _IO_ERR_SEEN: i32 = 32;
 pub const _IO_USER_LOCK: i32 = 32768;
-pub const __cookie_io_functions_t_defined: i32 = 1;
 pub const _IOFBF: i32 = 0;
 pub const _IOLBF: i32 = 1;
 pub const _IONBF: i32 = 2;
@@ -357,9 +352,9 @@ pub const SEEK_SET: i32 = 0;
 pub const SEEK_CUR: i32 = 1;
 pub const SEEK_END: i32 = 2;
 pub const P_tmpdir: &[u8; 5] = b"/tmp\0";
+pub const _BITS_STDIO_LIM_H: i32 = 1;
 pub const L_tmpnam: i32 = 20;
 pub const TMP_MAX: i32 = 238328;
-pub const _BITS_STDIO_LIM_H: i32 = 1;
 pub const FILENAME_MAX: i32 = 4096;
 pub const L_ctermid: i32 = 9;
 pub const FOPEN_MAX: i32 = 16;
@@ -5307,7 +5302,7 @@ const _: () = {
 pub struct __pthread_cond_s {
     pub __wseq: __atomic_wide_counter,
     pub __g1_start: __atomic_wide_counter,
-    pub __g_refs: [::std::os::raw::c_uint; 2usize],
+    pub __glibc_unused___g_refs: [::std::os::raw::c_uint; 2usize],
     pub __g_size: [::std::os::raw::c_uint; 2usize],
     pub __g1_orig_size: ::std::os::raw::c_uint,
     pub __wrefs: ::std::os::raw::c_uint,
@@ -5321,8 +5316,8 @@ const _: () = {
         [::std::mem::offset_of!(__pthread_cond_s, __wseq) - 0usize];
     ["Offset of field: __pthread_cond_s::__g1_start"]
         [::std::mem::offset_of!(__pthread_cond_s, __g1_start) - 8usize];
-    ["Offset of field: __pthread_cond_s::__g_refs"]
-        [::std::mem::offset_of!(__pthread_cond_s, __g_refs) - 16usize];
+    ["Offset of field: __pthread_cond_s::__glibc_unused___g_refs"]
+        [::std::mem::offset_of!(__pthread_cond_s, __glibc_unused___g_refs) - 16usize];
     ["Offset of field: __pthread_cond_s::__g_size"]
         [::std::mem::offset_of!(__pthread_cond_s, __g_size) - 24usize];
     ["Offset of field: __pthread_cond_s::__g1_orig_size"]
@@ -6442,54 +6437,6 @@ impl Default for _IO_FILE {
         }
     }
 }
-pub type cookie_read_function_t = ::std::option::Option<
-    unsafe extern "C" fn(
-        __cookie: *mut ::std::os::raw::c_void,
-        __buf: *mut ::std::os::raw::c_char,
-        __nbytes: usize,
-    ) -> __ssize_t,
->;
-pub type cookie_write_function_t = ::std::option::Option<
-    unsafe extern "C" fn(
-        __cookie: *mut ::std::os::raw::c_void,
-        __buf: *const ::std::os::raw::c_char,
-        __nbytes: usize,
-    ) -> __ssize_t,
->;
-pub type cookie_seek_function_t = ::std::option::Option<
-    unsafe extern "C" fn(
-        __cookie: *mut ::std::os::raw::c_void,
-        __pos: *mut __off64_t,
-        __w: ::std::os::raw::c_int,
-    ) -> ::std::os::raw::c_int,
->;
-pub type cookie_close_function_t = ::std::option::Option<
-    unsafe extern "C" fn(__cookie: *mut ::std::os::raw::c_void) -> ::std::os::raw::c_int,
->;
-#[repr(C)]
-#[derive(Debug, Default, Copy, Clone)]
-pub struct _IO_cookie_io_functions_t {
-    pub read: cookie_read_function_t,
-    pub write: cookie_write_function_t,
-    pub seek: cookie_seek_function_t,
-    pub close: cookie_close_function_t,
-}
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of _IO_cookie_io_functions_t"]
-        [::std::mem::size_of::<_IO_cookie_io_functions_t>() - 32usize];
-    ["Alignment of _IO_cookie_io_functions_t"]
-        [::std::mem::align_of::<_IO_cookie_io_functions_t>() - 8usize];
-    ["Offset of field: _IO_cookie_io_functions_t::read"]
-        [::std::mem::offset_of!(_IO_cookie_io_functions_t, read) - 0usize];
-    ["Offset of field: _IO_cookie_io_functions_t::write"]
-        [::std::mem::offset_of!(_IO_cookie_io_functions_t, write) - 8usize];
-    ["Offset of field: _IO_cookie_io_functions_t::seek"]
-        [::std::mem::offset_of!(_IO_cookie_io_functions_t, seek) - 16usize];
-    ["Offset of field: _IO_cookie_io_functions_t::close"]
-        [::std::mem::offset_of!(_IO_cookie_io_functions_t, close) - 24usize];
-};
-pub type cookie_io_functions_t = _IO_cookie_io_functions_t;
 pub type va_list = __gnuc_va_list;
 pub type fpos_t = __fpos_t;
 #[repr(C)]
@@ -10882,9 +10829,6 @@ unsafe extern "C" {
         __param: *mut ::std::os::raw::c_ushort,
         __buffer: *mut drand48_data,
     ) -> ::std::os::raw::c_int;
-    pub fn arc4random() -> __uint32_t;
-    pub fn arc4random_buf(__buf: *mut ::std::os::raw::c_void, __size: usize);
-    pub fn arc4random_uniform(__upper_bound: __uint32_t) -> __uint32_t;
     pub fn malloc(__size: ::std::os::raw::c_ulong) -> *mut ::std::os::raw::c_void;
     pub fn calloc(
         __nmemb: ::std::os::raw::c_ulong,
@@ -11257,11 +11201,6 @@ unsafe extern "C" {
     ) -> *mut FILE;
     pub fn fdopen(__fd: ::std::os::raw::c_int, __modes: *const ::std::os::raw::c_char)
         -> *mut FILE;
-    pub fn fopencookie(
-        __magic_cookie: *mut ::std::os::raw::c_void,
-        __modes: *const ::std::os::raw::c_char,
-        __io_funcs: cookie_io_functions_t,
-    ) -> *mut FILE;
     pub fn fmemopen(
         __s: *mut ::std::os::raw::c_void,
         __len: usize,
@@ -11316,21 +11255,6 @@ unsafe extern "C" {
         __maxlen: ::std::os::raw::c_ulong,
         __format: *const ::std::os::raw::c_char,
         __arg: *mut __va_list_tag,
-    ) -> ::std::os::raw::c_int;
-    pub fn vasprintf(
-        __ptr: *mut *mut ::std::os::raw::c_char,
-        __f: *const ::std::os::raw::c_char,
-        __arg: *mut __va_list_tag,
-    ) -> ::std::os::raw::c_int;
-    pub fn __asprintf(
-        __ptr: *mut *mut ::std::os::raw::c_char,
-        __fmt: *const ::std::os::raw::c_char,
-        ...
-    ) -> ::std::os::raw::c_int;
-    pub fn asprintf(
-        __ptr: *mut *mut ::std::os::raw::c_char,
-        __fmt: *const ::std::os::raw::c_char,
-        ...
     ) -> ::std::os::raw::c_int;
     pub fn vdprintf(
         __fd: ::std::os::raw::c_int,
@@ -23459,6 +23383,5 @@ unsafe extern "C" {
         encrypted_bit: u8,
     ) -> ::std::os::raw::c_int;
 }
-
 /// Newtype for [`ERR_LIB_SSL`] constants
-pub use  _bindgen_ty_1  as ErrLib;
+pub use _bindgen_ty_1 as ErrLib;

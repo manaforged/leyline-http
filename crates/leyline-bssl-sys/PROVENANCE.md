@@ -30,7 +30,7 @@ Targets regenerated with the prefix:
 | Target | Prefixed | Date |
 | --- | --- | --- |
 | aarch64-apple-darwin | yes | 2026-09-01 (Apple clang, cmake 4, macOS 15 arm64) |
-| x86_64-unknown-linux-gnu | yes | ubuntu-24.04 |
+| x86_64-unknown-linux-gnu | yes | quay.io/centos/centos:stream9, glibc 2.34, gcc 11.5.0, clang 22.1.8, cmake 3.31.8, go 1.26.7, ninja 1.10.2, rustc 1.98.1 |
 | aarch64-unknown-linux-gnu | yes | ubuntu-24.04-arm |
 | x86_64-pc-windows-msvc | yes | windows-2025, MSVC |
 
