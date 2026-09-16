@@ -8,6 +8,7 @@ mod headers;
 pub(crate) mod layer;
 #[cfg(feature = "multipart")]
 pub mod multipart;
+mod read_until;
 mod request;
 mod response;
 pub(crate) mod retry;

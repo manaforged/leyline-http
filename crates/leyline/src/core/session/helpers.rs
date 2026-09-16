@@ -140,13 +140,17 @@ impl Session {
     }
 
     pub async fn preconnect(&self, url: &str) -> Result<()> {
+        self.preconnect_via(url, None).await
+    }
+
+    pub async fn preconnect_via(&self, url: &str, proxy: Option<&str>) -> Result<()> {
         let url = url::Url::parse(url)?;
         if url.scheme() != "https" || self.inner.protocol_policy == super::ProtocolPolicy::Http1 {
             return Ok(());
         }
         let host = url.host_str().unwrap_or("");
         let port = url.port_or_known_default().unwrap_or(443);
-        let proxy = self.inner.proxy_config.proxy_for(&url, None);
+        let proxy = self.inner.proxy_config.proxy_for(&url, proxy);
         let connect = crate::pool::checkout_handle(
             &self.inner.pool,
             &self.inner.connector,

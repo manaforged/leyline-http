@@ -226,6 +226,8 @@ pub(crate) type HeaderPair = (
     std::borrow::Cow<'static, str>,
 );
 
+pub type PseudoList<'a> = ([(&'a str, &'a str); 5], usize);
+
 #[derive(Debug, Clone, Default)]
 pub struct PseudoHeaders {
     pub method: HeaderStr,
@@ -239,7 +241,7 @@ impl PseudoHeaders {
     pub fn build_pseudo_list<'a>(
         &'a self,
         pseudo_order: &[PseudoOrder; 4],
-    ) -> Result<([(&'a str, &'a str); 5], usize), H2Error> {
+    ) -> Result<PseudoList<'a>, H2Error> {
         let is_connect = self.method.eq_ignore_ascii_case("CONNECT");
         if is_connect && self.authority.is_empty() {
             return Err(H2Error::Connection {
