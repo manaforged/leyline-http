@@ -1,13 +1,12 @@
 # Changelog
 
-The first public release of `leyline-http` will be **0.1.0**. No public
-release has shipped yet.
+The first public release of `leyline-http` is **0.1.0**.
 
 Within the `0.1.x` series, updates preserve API compatibility. Breaking API
 changes or a higher minimum Rust version require a new minor release, such as
 `0.2.0`. The BoringSSL implementation crates are versioned separately.
 
-## Unreleased
+## 0.1.0 - 2026-09-16
 
 ### Added
 
