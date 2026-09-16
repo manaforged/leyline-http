@@ -82,30 +82,3 @@ fn alpn_h1_memory_is_per_origin_and_proxy() {
     assert!(!pool.is_h1_only("example.com", 443, Some("http://proxy:1")));
     assert!(!pool.is_h1_only("example.com", 8443, None));
 }
-
-#[test]
-fn evict_proxy_drops_only_that_proxy_key() {
-    let pool = Pool::with_limits(Duration::from_secs(60), 16, 16);
-    let mut via_a = h1_key("origin.example");
-    via_a.proxy = Some("http://proxy-a.example:8080".to_string());
-    let mut via_b = h1_key("origin.example");
-    via_b.proxy = Some("http://other.example:1".to_string());
-    for key in [&via_a, &via_b] {
-        pool.inner.lock().unwrap_or_else(|e| e.into_inner()).insert(
-            key.clone(),
-            PooledConn::H1 {
-                idle: VecDeque::new(),
-                last_use: Instant::now(),
-                tls: TlsInfo::default(),
-            },
-        );
-    }
-    pool.note_h1_only("origin.example", 80, Some("http://proxy-a.example:8080"));
-
-    assert_eq!(pool.evict_proxy(Some("http://proxy-a.example:8080")), 1);
-    let map = pool.inner.lock().unwrap_or_else(|e| e.into_inner());
-    assert!(!map.contains_key(&via_a));
-    assert!(map.contains_key(&via_b));
-    drop(map);
-    assert!(!pool.is_h1_only("origin.example", 80, Some("http://proxy-a.example:8080")));
-}

@@ -85,7 +85,7 @@ impl Session {
     pub fn with_proxy(&self, proxy_url: &str) -> Self {
         let mut s = self.clone();
         let inner = std::sync::Arc::make_mut(&mut s.inner);
-        inner.pool.evict_proxy(Some(proxy_url));
+        inner.pool = std::sync::Arc::new(inner.pool.fresh());
         inner.proxy_config = inner.proxy_config.clone().set_default_proxy(proxy_url);
         s
     }

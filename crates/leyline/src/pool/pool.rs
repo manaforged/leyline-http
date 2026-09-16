@@ -497,34 +497,12 @@ impl Pool {
         self.len() == 0
     }
 
-    pub(crate) fn evict_proxy(&self, proxy: Option<&str>) -> usize {
-        let mut evicted = 0usize;
-        {
-            let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-            map.retain(|key, _| {
-                let hit = key.proxy.as_deref() == proxy;
-                if hit {
-                    evicted += 1;
-                }
-                !hit
-            });
-        }
-        self.inflight_h2
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .retain(|key, _| key.proxy.as_deref() != proxy);
-        self.h1_permits
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .retain(|key, _| key.proxy.as_deref() != proxy);
-        self.h1_only
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .retain(|(_, _, p)| p.as_deref() != proxy);
-        self.counters
-            .evictions_dead
-            .fetch_add(evicted as u64, Ordering::Relaxed);
-        evicted
+    pub(crate) fn fresh(&self) -> Self {
+        Self::with_limits(
+            self.idle_timeout,
+            self.max_connections,
+            self.max_h1_conns_per_host,
+        )
     }
 
     pub(crate) fn invalidate(&self, key: &PoolKey) {
