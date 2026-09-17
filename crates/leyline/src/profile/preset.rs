@@ -108,8 +108,6 @@ impl Preset {
     }
 
     fn navigate_headers(ctx: &HeaderContext<'_>) -> Vec<HeaderPair> {
-        // Order captured live from Chrome 152 (tls.peet.ws H2 HEADERS frame):
-        // accept-language precedes accept, priority closes the block.
         vec![
             (b("sec-ch-ua"), o(ctx.sec_ch_ua)),
             (b("sec-ch-ua-mobile"), o(ctx.sec_ch_ua_mobile)),
@@ -149,8 +147,6 @@ impl Preset {
     }
 
     fn xhr_headers(ctx: &HeaderContext<'_>) -> Vec<HeaderPair> {
-        // Chrome fetch order (captured): platform, UA, accept, sec-ch-ua,
-        // accept-language, mobile, sec-fetch-*, referer, encoding, priority.
         vec![
             Self::sec_ch_ua_platform(ctx),
             (b("user-agent"), o(ctx.user_agent)),
@@ -231,8 +227,6 @@ impl Preset {
     }
 
     fn same_site_headers(ctx: &HeaderContext<'_>) -> Vec<HeaderPair> {
-        // Order captured live from a Chrome in-page fetch (H2 HEADERS frame):
-        // platform leads the client-hint cluster, priority closes it.
         vec![
             Self::sec_ch_ua_platform(ctx),
             (b("user-agent"), o(ctx.user_agent)),

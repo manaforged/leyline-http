@@ -26,8 +26,6 @@ fn firefox_reshapes_client_hints_accept_priority_and_te() {
     let chrome = Preset::Navigate.build_headers(&ctx(false));
     assert!(names(&chrome).iter().any(|n| n == "sec-ch-ua-mobile"));
     assert!(value(&chrome, "accept").unwrap().contains("image/apng"));
-    // Chrome 152 navigations carry the priority header (captured live via
-    // tls.peet.ws H2 HEADERS frame) and close the header block with it.
     assert_eq!(value(&chrome, "priority"), Some("u=0, i"));
     let names_ref = names(&chrome);
     assert_eq!(names_ref.last().map(String::as_str), Some("priority"));

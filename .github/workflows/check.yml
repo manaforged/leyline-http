@@ -13,25 +13,37 @@ permissions:
   contents: read
 
 env:
+  CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: '0'
+  CARGO_PROFILE_DEV_DEBUG: '0'
 
 jobs:
   check:
-    name: fmt + check
+    name: lint
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
-      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
-          toolchain: stable
-          components: rustfmt
+          persist-credentials: false
+
+      - name: workflow lint
+        run: |
+          docker build --tag ci-actionlint .github/actionlint
+          docker run --rm --volume "$PWD:/repo:ro" --workdir /repo ci-actionlint
+
+      - name: Rust toolchain
+        run: rustup show active-toolchain
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+
+      - name: comment lint
+        run: python3 scripts/check-comments.py
 
       - name: cargo fmt
         run: cargo fmt --all -- --check
 
-      - name: cargo check
-        run: cargo check -p leyline-http --locked --all-targets
+      - name: cargo clippy
+        run: cargo clippy --workspace --exclude leyline-quiche --all-targets --locked --no-deps -- -D warnings
