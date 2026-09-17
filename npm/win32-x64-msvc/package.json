@@ -1,6 +1,6 @@
 {
   "name": "@manaforged/leyline-http-win32-x64-msvc",
-  "version": "0.1.0",
+  "version": "0.1.0-alpha.1",
   "os": [
     "win32"
   ],

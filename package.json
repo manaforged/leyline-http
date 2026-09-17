@@ -1,6 +1,6 @@
 {
   "name": "@manaforged/leyline-http",
-  "version": "0.1.0",
+  "version": "0.1.0-alpha.1",
   "description": "Node.js bindings for leyline-http",
   "license": "MIT",
   "homepage": "https://github.com/manaforged/leyline-http",
@@ -49,9 +49,9 @@
     "NOTICE"
   ],
   "optionalDependencies": {
-    "@manaforged/leyline-http-darwin-arm64": "0.1.0",
-    "@manaforged/leyline-http-linux-x64-gnu": "0.1.0",
-    "@manaforged/leyline-http-win32-x64-msvc": "0.1.0"
+    "@manaforged/leyline-http-darwin-arm64": "0.1.0-alpha.1",
+    "@manaforged/leyline-http-linux-x64-gnu": "0.1.0-alpha.1",
+    "@manaforged/leyline-http-win32-x64-msvc": "0.1.0-alpha.1"
   },
   "devDependencies": {
     "@napi-rs/cli": "^2.18.4"
