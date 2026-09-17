@@ -2,9 +2,13 @@
 
 HTTP client that sends the same TLS ClientHello, HTTP/2 settings, and
 header order as Chrome, Firefox, or Safari. Profiles ship for Chrome 145 to
-152, Firefox 148 to 151, and Safari 26. It is also the cheapest client we
-have measured: about 61k CPU cycles per request against 99k for reqwest and
-106k for wreq, with TLS verified on every connection.
+152, Brave 146, Firefox 148 to 154, Safari 18 and 26, Safari on iOS 17 and
+18, OkHttp on Android, and CFNetwork on iOS and macOS. It is also the
+cheapest client we have measured: about 61k CPU cycles per request against
+99k for reqwest and 106k for wreq, with TLS verified on every connection.
+
+Pre-release. `0.1.0-alpha.N` versions are previews while 0.1 settles. The API
+can change between alphas.
 
 ## Requirements
 
@@ -21,8 +25,7 @@ Setting `BORING_BSSL_PATH` alone does not add target support.
 
 ## Install
 
-The first crates.io release, `0.1.0`, is in preparation. Until it is published,
-use the repository:
+Until the alpha is on crates.io, use the repository:
 
 ```toml
 [dependencies]

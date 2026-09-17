@@ -14,7 +14,7 @@ exclude = [
     "crates/leyline-bssl-tokio",
 ]
 [workspace.package]
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 edition = "2024"
 rust-version = "1.98" # MSRV
 authors = ["Thomas Gardiner <thomas@manaforge.tech>"]

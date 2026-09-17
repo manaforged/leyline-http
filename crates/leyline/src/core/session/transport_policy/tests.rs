@@ -7,7 +7,9 @@ fn rotate() {
         .proxy("http://first:1")
         .build()
         .expect("bare session builds");
-    let rotated = session.with_proxy("http://second:2");
+    let rotated = session
+        .with_proxy("http://second:2")
+        .expect("valid proxy url");
 
     let url = url::Url::parse("https://example.test/").unwrap();
     assert_eq!(

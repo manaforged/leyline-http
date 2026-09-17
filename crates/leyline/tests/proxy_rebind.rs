@@ -62,7 +62,7 @@ async fn with_proxy_on_the_same_url_opens_a_new_connection() {
         "same session reuses the socket"
     );
 
-    let rebound = session.with_proxy(&proxy);
+    let rebound = session.with_proxy(&proxy).unwrap();
     rebound.get(url).send().await.unwrap().text().await.unwrap();
     assert_eq!(
         accepted.load(Ordering::SeqCst),

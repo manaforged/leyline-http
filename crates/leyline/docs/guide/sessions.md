@@ -138,8 +138,8 @@ parts:
 - `with_cookie_jar(jar)` keeps the TLS connector, the protocol configuration,
   and the pool, and swaps in an independent jar.
 - `with_proxy(url)` keeps cookies, TLS, and the identity, opens a new pool, and swaps
-  only the proxy. An empty or invalid URL is accepted here and fails on the
-  request that uses it.
+  only the proxy. It returns `Result<Session>`: an invalid URL or an
+  unsupported scheme fails here, the same way `build()` does.
 
 ```rust,no_run
 use leyline::cookie::Jar;
@@ -147,7 +147,7 @@ use leyline::cookie::Jar;
 # fn run() -> leyline::Result<()> {
 let session = leyline::Session::chrome();
 let other_user = session.with_cookie_jar(Jar::new());
-let via_proxy = session.with_proxy("http://user:pass@proxy.example:8080");
+let via_proxy = session.with_proxy("http://user:pass@proxy.example:8080")?;
 # let _ = (other_user, via_proxy);
 # Ok(())
 # }
