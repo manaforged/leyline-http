@@ -1,6 +1,10 @@
 # Leyline
 
-HTTP client that mimics browsers on the wire.
+HTTP client that sends the same TLS ClientHello, HTTP/2 settings, and
+header order as Chrome, Firefox, or Safari. Profiles ship for Chrome 145 to
+152, Firefox 148 to 151, and Safari 26. It is also the cheapest client we
+have measured: about 61k CPU cycles per request against 99k for reqwest and
+106k for wreq, with TLS verified on every connection.
 
 ## Requirements
 
@@ -26,13 +30,9 @@ leyline-http = { git = "https://github.com/manaforged/leyline-http", branch = "m
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
-The package name is `leyline-http`; the Rust import is `leyline`. The crate
-family has five packages. A registry install becomes possible once they are
-published in this order: `leyline-bssl-sys`, `leyline-bssl`, then
-`leyline-bssl-tokio` and `leyline-quiche`, then `leyline-http`. A Git
-dependency also checks out the vendored BoringSSL source submodule (about
-500 MB); the published packages use the included prebuilt libraries and do
-not need it.
+The package is `leyline-http`; the import is `leyline`. A Git dependency also
+checks out the vendored BoringSSL submodule, about 500 MB. The published
+packages ship prebuilt libraries and skip it.
 
 ## Usage
 
@@ -54,19 +54,22 @@ select another browser or platform.
 
 ## Benchmarks
 
-Paired loopback runs on a Ryzen 9 9950X3D host; every client verifies TLS
-and byte-checks every response. Deltas are Leyline's concurrent
-throughput; negative is a loss.
+Paired loopback runs on one Ryzen 9 9950X3D host against a Hyper origin
+with headroom, so the client sets the rate. Every client verifies TLS and
+byte-checks every response. Deltas are Leyline's throughput relative to the
+peer.
 
-| Cell | Result |
+| Scenario | Result |
 | --- | ---: |
-| Peak concurrent vs wreq, identical request headers | +33.5% |
-| Peak concurrent vs reqwest | +20.4% |
+| 8 connections x 256 in flight vs wreq, identical request headers | +33.5% |
+| 8 connections x 256 in flight vs reqwest | +20.4% |
+| 1 connection x 64 streams vs wreq | +12.7% |
 | Sequential keepalive vs wreq | +3.5% |
-| Go origin, 1 connection x 64 streams vs wreq | -1.4% (parity) |
-| Go origin, 8 connections x 8 streams vs reqwest | -14.8% |
+| Concurrent p50 / p99 latency | 219 / 441 µs; wreq 307 / 638, reqwest 258 / 549 |
 
-Full methodology, all cells, and per-request CPU accounting are in
+On a 30 ms link every client converges on the round-trip floor. Expect
+parity there, not these deltas. Cells where the origin was the bottleneck,
+the full method, and the per-round data are in
 [BENCHMARKS.md](https://github.com/manaforged/leyline-http/blob/main/BENCHMARKS.md).
 
 ## Limits
@@ -80,6 +83,8 @@ HTTP/3 proxy support is not implemented. The HTTP/3 QPACK decoder uses no
 dynamic table; that differs from Chromium's QPACK parameters and is a known
 protocol fingerprint difference. Opt-in `response.audit()` values describe
 the configured profile and request; they are not packet captures.
+Detection by a remote site is out of scope; see
+[SECURITY.md](https://github.com/manaforged/leyline-http/blob/main/SECURITY.md).
 
 ## Docs
 
