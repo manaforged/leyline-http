@@ -15,6 +15,7 @@ Thanks for your interest in Leyline.
    consumer checks, and with `--full` the live fingerprint and smoke
    suites. The gate needs Python 3, Node, the 1.98 toolchain through
    rustup, and `cargo-deny` installed; the live suites need network access.
+   Set `LEYLINE_SKIP_LIVE_TESTS=1` to skip the live matrix in the pre-commit hook.
 
    Tests that need the network are marked `#[ignore]`. Run them with
    `cargo nextest run -p leyline-http --run-ignored all` when your change

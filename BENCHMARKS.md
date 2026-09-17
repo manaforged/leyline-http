@@ -199,10 +199,9 @@ server's per-connection serialization, not the client's.
 
 ## Real-network matrix (2026-09-16, LAN)
 
-Same clients and harness, origins moved to a second host at
-`192.0.2.10` serving Go on `:8443` and Hyper on
-`:8444`, ~3.6 ms mean RTT (min 2.7, mdev 1.3) from the client
-host over the wired LAN. The origin
+Same clients and harness, origins moved to a second host: a second machine
+on the wired LAN serving Go on `:8443` and Hyper on `:8444`, ~3.6 ms
+mean RTT (min 2.7, mdev 1.3) from the client host. The origin
 certificate carries SANs for the LAN address and `127.0.0.1`. Eight
 balanced pairs per cell, verified responses; in-flight counts are
 total workers spread over `CMP_CONNECTIONS` connections.

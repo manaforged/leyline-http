@@ -3,9 +3,9 @@ use super::*;
 #[test]
 fn basic_set_and_get() {
     let jar = Jar::new();
-    jar.set_cookie("https://example.com", "_ab", "abc123");
+    jar.set_cookie("https://example.com", "sid", "abc123");
     assert_eq!(
-        jar.get_cookie("https://example.com", "_ab"),
+        jar.get_cookie("https://example.com", "sid"),
         Some("abc123".into())
     );
 }
@@ -305,18 +305,18 @@ fn remove_all_named_clears_every_domain() {
 #[test]
 fn remove_named_for_host_spares_siblings() {
     let jar = Jar::new();
-    jar.set_cookie("https://store.example.com", "session", "store");
-    jar.set_cookie("https://www.example.com", "session", "www");
-    jar.set_cookie("https://example.com", "session", "apex");
+    jar.set_cookie("https://store.example.com", "clearance", "store");
+    jar.set_cookie("https://www.example.com", "clearance", "www");
+    jar.set_cookie("https://example.com", "clearance", "apex");
     jar.set_cookie("https://store.example.com", "other", "keep");
 
     assert_eq!(
-        jar.remove_named_for_host("store.example.com", "session"),
+        jar.remove_named_for_host("store.example.com", "clearance"),
         2
     );
     let store_view = jar.export_cookies("https://store.example.com");
     assert!(
-        !store_view.contains("session"),
+        !store_view.contains("clearance"),
         "store clearance removed, got {store_view:?}"
     );
     assert!(
@@ -325,7 +325,7 @@ fn remove_named_for_host_spares_siblings() {
     );
     assert!(
         jar.export_cookies("https://www.example.com")
-            .contains("session=www"),
+            .contains("clearance=www"),
         "sibling www zone must survive"
     );
 }
