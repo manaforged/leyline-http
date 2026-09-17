@@ -1,4 +1,5 @@
 use std::env;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 const SUPPORTED_TARGETS: &[&str] = &[
@@ -48,13 +49,22 @@ fn main() {
 
     assert_static_libs_exist(&lib_dir, &target);
 
-    println!("cargo:rustc-link-search=native={}", lib_dir.display());
+    let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo should set OUT_DIR"));
+    for name in ["crypto", "ssl"] {
+        let source = lib_dir.join(static_lib_file(name, &target));
+        let linked_name = format!("leyline_{name}");
+        let destination = out_dir.join(static_lib_file(&linked_name, &target));
+        fs::copy(&source, &destination).unwrap_or_else(|error| {
+            panic!("Failed to stage {}: {error}", source.display());
+        });
+        println!("cargo:rerun-if-changed={}", source.display());
+        println!("cargo:rustc-link-lib=static={linked_name}");
+    }
+    println!("cargo:rustc-link-search=native={}", out_dir.display());
     if let Some(cpp_lib) = env::var_os("BORING_BSSL_RUST_CPPLIB").and_then(|v| v.into_string().ok())
     {
         println!("cargo:rustc-link-lib={cpp_lib}");
     }
-    println!("cargo:rustc-link-lib=static=crypto");
-    println!("cargo:rustc-link-lib=static=ssl");
     if target.ends_with("msvc") {
         println!("cargo:rustc-link-lib=advapi32");
     } else if target.contains("apple") {
