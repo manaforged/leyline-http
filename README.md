@@ -7,9 +7,6 @@ header order as Chrome, Firefox, or Safari. Profiles ship for Chrome 145 to
 cheapest client we have measured: about 61k CPU cycles per request against
 99k for reqwest and 106k for wreq, with TLS verified on every connection.
 
-Pre-release. `0.1.0-alpha.N` versions are previews while 0.1 settles. The API
-can change between alphas.
-
 ## Requirements
 
 Rust 1.98 or later and Tokio. Prebuilt BoringSSL libraries and Rust bindings
@@ -25,7 +22,7 @@ Setting `BORING_BSSL_PATH` alone does not add target support.
 
 ## Install
 
-Until the alpha is on crates.io, use the repository:
+Until 0.1.0 is on crates.io, use the repository:
 
 ```toml
 [dependencies]

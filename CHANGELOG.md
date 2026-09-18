@@ -1,20 +1,12 @@
 # Changelog
 
-The first public release line of `leyline-http` is **0.1.0**. Versions named
-`0.1.0-alpha.N` are previews of it and may change the API between alphas.
+The first public release of `leyline-http` is **0.1.0**.
 
-Once `0.1.0` ships, updates within the `0.1.x` series preserve API
-compatibility. Breaking API changes or a higher minimum Rust version require
-a new minor release, such as `0.2.0`. The BoringSSL implementation crates are
-versioned separately.
+Within the `0.1.x` series, updates preserve API compatibility. Breaking API
+changes or a higher minimum Rust version require a new minor release, such as
+`0.2.0`. The BoringSSL implementation crates are versioned separately.
 
-## 0.1.0-alpha.1 - 2026-09-17
-
-### Changed
-
-- `Session::with_proxy` returns `Result<Session>` and rejects an invalid proxy
-  URL or an unsupported scheme when it is called, matching `SessionBuilder::build`.
-- The README and benchmark summary describe the client-bound cells only.
+## 0.1.0 - 2026-09-17
 
 ### Added
 

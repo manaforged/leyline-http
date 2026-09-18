@@ -601,7 +601,7 @@ dependencies = [
 
 [[package]]
 name = "leyline-ffi"
-version = "0.1.0-alpha.1"
+version = "0.1.0"
 dependencies = [
  "leyline-http",
  "serde_json",
@@ -633,7 +633,7 @@ dependencies = [
 
 [[package]]
 name = "leyline-http"
-version = "0.1.0-alpha.1"
+version = "0.1.0"
 dependencies = [
  "async-stream",
  "base64",
@@ -673,7 +673,7 @@ dependencies = [
 
 [[package]]
 name = "leyline-node"
-version = "0.1.0-alpha.1"
+version = "0.1.0"
 dependencies = [
  "leyline-ffi",
  "napi",
@@ -683,7 +683,7 @@ dependencies = [
 
 [[package]]
 name = "leyline-python"
-version = "0.1.0-alpha.1"
+version = "0.1.0"
 dependencies = [
  "leyline-ffi",
  "pyo3",
@@ -693,7 +693,7 @@ dependencies = [
 
 [[package]]
 name = "leyline-quiche"
-version = "0.1.0-alpha.1"
+version = "0.1.0"
 dependencies = [
  "debug_panic",
  "either",
