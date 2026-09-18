@@ -1,8 +1,8 @@
 [package]
 name = "leyline-bssl-tokio"
-version = "1.0.0-alpha.3"
+version = "0.1.0"
 edition = "2024"
-rust-version = "1.98"
+rust-version = "1.96"
 authors = [
     "Thomas Gardiner <thomas@manaforge.tech>",
     "0x676e67 <gngppz@gmail.com>",
@@ -18,7 +18,7 @@ default = ["leyline-bssl/default"]
 fips = ["leyline-bssl/fips"]
 
 [dependencies]
-leyline-bssl = { path = "../leyline-bssl", version = "=1.0.0-alpha.3" }
+leyline-bssl = { path = "../leyline-bssl", version = "=0.1.0" }
 tokio = "1"
 
 [dev-dependencies]

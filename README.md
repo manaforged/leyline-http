@@ -9,7 +9,7 @@ cheapest client we have measured: about 61k CPU cycles per request against
 
 ## Requirements
 
-Rust 1.98 or later and Tokio. Prebuilt BoringSSL libraries and Rust bindings
+Rust 1.96 or later and Tokio. Prebuilt BoringSSL libraries and Rust bindings
 are included for:
 
 - `aarch64-apple-darwin`

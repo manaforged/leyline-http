@@ -12,7 +12,7 @@ authors = [
     "Thomas Gardiner <thomas@manaforge.tech>",
 ]
 build = "src/build.rs"
-rust-version = "1.98"
+rust-version = "1.96"
 include = [
     "/*.md",
     "/*.toml",

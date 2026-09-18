@@ -4,7 +4,9 @@ The first public release of `leyline-http` is **0.1.0**.
 
 Within the `0.1.x` series, updates preserve API compatibility. Breaking API
 changes or a higher minimum Rust version require a new minor release, such as
-`0.2.0`. The BoringSSL implementation crates are versioned separately.
+`0.2.0`. The minimum supported Rust version is 1.96, two releases behind
+stable. The BoringSSL implementation crates share this version and publish as
+separate crates.
 
 ## 0.1.0 - 2026-09-17
 
@@ -33,5 +35,5 @@ changes or a higher minimum Rust version require a new minor release, such as
 
 ### Changed
 
-- The minimum supported Rust version is 1.98, the current stable at
-  release time.
+- The minimum supported Rust version is 1.96, two releases behind the
+  current stable at release time.
