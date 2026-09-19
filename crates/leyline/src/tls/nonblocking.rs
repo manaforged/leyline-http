@@ -104,14 +104,25 @@ fn apply_socket_config(
 
 fn unsupported_socket_option(strict: bool, name: &str) -> Result<(), std::io::Error> {
     if strict {
-        Err(std::io::Error::new(
+        return Err(std::io::Error::new(
             std::io::ErrorKind::Unsupported,
             format!("{name} is not supported on this platform/build"),
-        ))
-    } else {
-        tracing::warn!(target: "leyline::socket", option = name, "socket option not supported");
-        Ok(())
+        ));
     }
+    if warned_once(name) {
+        tracing::warn!(target: "leyline::socket", option = name, "socket option not supported");
+    }
+    Ok(())
+}
+
+fn warned_once(name: &str) -> bool {
+    static WARNED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+        std::sync::OnceLock::new();
+    WARNED
+        .get_or_init(std::sync::Mutex::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(name.to_owned())
 }
 
 fn nonblocking_connect_started(error: &std::io::Error) -> bool {
