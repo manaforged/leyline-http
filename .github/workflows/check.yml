@@ -57,3 +57,7 @@ jobs:
       - name: cargo clippy
         if: steps.scope.outputs.args != ''
         run: cargo clippy ${{ steps.scope.outputs.args }} --all-targets --locked --no-deps -- -D warnings
+
+      - name: cargo test
+        if: steps.scope.outputs.args != ''
+        run: cargo test ${{ steps.scope.outputs.args }} --locked
