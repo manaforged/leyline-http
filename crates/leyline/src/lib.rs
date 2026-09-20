@@ -3,6 +3,10 @@
 pub struct ReadmeDoctests;
 
 #[cfg(doctest)]
+#[doc = include_str!("../docs/api.md")]
+pub struct ApiMap;
+
+#[cfg(doctest)]
 pub mod guide {
     #[doc = include_str!("../docs/guide/README.md")]
     pub struct Index;

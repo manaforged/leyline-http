@@ -1,0 +1,11 @@
+[book]
+title = "Leyline"
+description = "HTTP client that sends the same TLS ClientHello, HTTP/2 settings, and header order as a real browser"
+src = "."
+authors = ["Thomas Gardiner"]
+language = "en"
+
+[output.html]
+git-repository-url = "https://github.com/manaforged/leyline-http"
+edit-url-template = "https://github.com/manaforged/leyline-http/edit/main/crates/leyline/docs/{path}"
+default-theme = "light"

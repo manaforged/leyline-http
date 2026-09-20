@@ -93,6 +93,11 @@ for sessions, requests, streaming, retries, proxies, and fingerprints.
 The [changelog](https://github.com/manaforged/leyline-http/blob/main/CHANGELOG.md)
 states the version policy.
 
+[docs/api.md](https://github.com/manaforged/leyline-http/blob/main/crates/leyline/docs/api.md)
+is the API contract: a job-to-symbol map of the supported
+surface, the error model, and the `#[doc(hidden)]` internals that are
+off-limits.
+
 ## License
 
 Leyline is [MIT licensed](https://github.com/manaforged/leyline-http/blob/main/LICENSE).
