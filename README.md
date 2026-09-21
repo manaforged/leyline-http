@@ -7,6 +7,11 @@ header order as Chrome, Firefox, or Safari. Profiles ship for Chrome 145 to
 cheapest client we have measured: about 61k CPU cycles per request against
 99k for reqwest and 106k for wreq, with TLS verified on every connection.
 
+The API map is
+[docs/api.md](https://raw.githubusercontent.com/manaforged/leyline-http/main/docs/api.md).
+
+Unreleased. Until 0.1.0 is on crates.io, pin a Git `rev`.
+
 ## Requirements
 
 Rust 1.96 or later and Tokio. Prebuilt BoringSSL libraries and Rust bindings
@@ -22,11 +27,11 @@ Setting `BORING_BSSL_PATH` alone does not add target support.
 
 ## Install
 
-Until 0.1.0 is on crates.io, use the repository:
+Add the Git dependency. Replace `<sha>` with a commit from this repository.
 
 ```toml
 [dependencies]
-leyline-http = { git = "https://github.com/manaforged/leyline-http", branch = "main" }
+leyline-http = { git = "https://github.com/manaforged/leyline-http", rev = "<sha>" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -52,38 +57,6 @@ Reuse a session to share connections and cookies. `Session::chrome()` selects
 the latest bundled Chrome profile with a Windows identity. Use the builder to
 select another browser or platform.
 
-## Features
-
-- **Self-audit.** `SessionBuilder::audit(true)` returns the JA3, JA4,
-  JA4H, JA4T, and HTTP/2 fingerprints of what the session emits. No
-  external capture service needed.
-- **Four fingerprint layers.** TLS, HTTP/2, header order, and TCP socket
-  options (JA4T).
-- **HTTP/3.** On by default, with `Race` and `Http3` protocol policies.
-- **Early-stop streaming.** `Response::read_until(limit, predicate)`
-  decodes gzip, Brotli, zstd, and deflate while streaming and returns the
-  decoded prefix, so you can stop at a marker without downloading the rest.
-  A streaming request body returns an error on a 307 or 308 redirect.
-- **Wire introspection.** Per-response `tls_peer_certificate`,
-  `tls_cipher`, `tls_version`, `tls_alpn`, and `request_headers` show
-  what was negotiated and sent.
-- **Certificate pinning.** `add_pinned_leaf_sha256` in one call, no
-  custom verifier.
-- **Socket options.** `TCP_USER_TIMEOUT` on Linux and Android, keepalive
-  tuning, source-IP binding, and Happy Eyeballs parameters.
-- **Connection warming.** `preconnect` and `preconnect_via` pool a
-  connection, through a chosen proxy if needed, before the request that
-  matters. Idle HTTP/2 connections are PING-checked before reuse.
-- **DNS pinning.** `resolve_host` and `resolve_host_to_addrs` map a host
-  to chosen addresses without touching the resolver.
-- **Profiles as data.** TOML profiles that you load, validate, and
-  version with `ProfileRegistry`.
-- **Conformance-tested.** An offline test gates each profile against
-  recorded fingerprint goldens.
-- **Coexists with OpenSSL.** Shipped BoringSSL is symbol-prefixed, so
-  `openssl-sys` and `boring-sys` link in the same binary.
-- **Structured timing.** Per-phase trace events and `Response::timing`.
-
 ## Benchmarks
 
 Paired loopback runs on one Ryzen 9 9950X3D host against a Hyper origin
@@ -108,7 +81,7 @@ the full method, and the per-round data are in
 
 Profiles cover selected TLS, HTTP/2, and HTTP header properties. Capture
 status and known gaps are listed in the
-[profile reference](https://github.com/manaforged/leyline-http/blob/main/crates/leyline/docs/PROFILES.md).
+[profile reference](https://github.com/manaforged/leyline-http/blob/main/docs/guide/profiles.md).
 Safari 26 uses a WKWebView capture with a synthesized Safari HTTP identity.
 
 HTTP/3 proxy support is not implemented. The HTTP/3 QPACK decoder uses no
@@ -120,16 +93,21 @@ Detection by a remote site is out of scope; see
 
 ## Docs
 
-Read the [user guide](https://github.com/manaforged/leyline-http/blob/main/crates/leyline/docs/guide/README.md)
-for sessions, requests, streaming, retries, proxies, TLS trust, socket
-options, and fingerprints.
-The [changelog](https://github.com/manaforged/leyline-http/blob/main/CHANGELOG.md)
-states the version policy.
+| Read | For |
+| --- | --- |
+| [User guide](https://github.com/manaforged/leyline-http/blob/main/docs/guide/README.md) | Task pages in reading order. Build the book with `mdbook serve docs`. |
+| Reference | Run `cargo doc -p leyline-http --open`. The [profile reference](https://github.com/manaforged/leyline-http/blob/main/docs/guide/profiles.md) lists the bundled profiles and their capture status. |
+| [API map](https://github.com/manaforged/leyline-http/blob/main/docs/api.md) | Each job mapped to its symbol or command, the error model, and what is off-limits. |
 
-[docs/api.md](https://github.com/manaforged/leyline-http/blob/main/crates/leyline/docs/api.md)
-is the API contract: a job-to-symbol map of the supported
-surface, the error model, and the `#[doc(hidden)]` internals that are
-off-limits.
+The [changelog](https://github.com/manaforged/leyline-http/blob/main/CHANGELOG.md) states the version policy.
+
+## Security
+
+Report a vulnerability as [SECURITY.md](https://github.com/manaforged/leyline-http/blob/main/SECURITY.md) describes.
+
+## Contributing
+
+See [CONTRIBUTING.md](https://github.com/manaforged/leyline-http/blob/main/CONTRIBUTING.md) for the build and the checks.
 
 ## License
 

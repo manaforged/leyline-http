@@ -7,5 +7,5 @@ language = "en"
 
 [output.html]
 git-repository-url = "https://github.com/manaforged/leyline-http"
-edit-url-template = "https://github.com/manaforged/leyline-http/edit/main/crates/leyline/docs/{path}"
+edit-url-template = "https://github.com/manaforged/leyline-http/edit/main/docs/{path}"
 default-theme = "light"

@@ -18,8 +18,8 @@ how to use it, in reading order.
 13. [Fingerprints](fingerprints.md): what a profile pins and how to audit it.
 14. [Features and targets](features-and-targets.md): cargo features, targets, MSRV.
 
-Reference pages beside this guide: [profiles](../PROFILES.md) and
-[MSRV](../MSRV.md).
+Reference pages beside this guide: [profiles](profiles.md) and
+[MSRV](msrv.md).
 
 Every Rust block in this guide is compiled as a doctest of the
 `leyline-http` crate; the Tower blocks compile only under

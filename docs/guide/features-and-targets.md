@@ -87,7 +87,7 @@ artifacts do not carry those builds.
 
 The workspace sets `rust-version = "1.96"`, and every crate inherits it. The
 edition is 2024. The release gate compile-checks 1.96 and runs the test
-suite on current stable. [docs/MSRV.md](../MSRV.md) states the policy: a bump gets
+suite on current stable. [MSRV](msrv.md) states the policy: a bump gets
 its own minor release and its own changelog line, and never lands in a patch
 release.
 

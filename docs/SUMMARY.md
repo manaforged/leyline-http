@@ -21,6 +21,6 @@
 
 - [Fingerprints](guide/fingerprints.md)
 - [Features and targets](guide/features-and-targets.md)
-- [Profile reference](PROFILES.md)
-- [MSRV](MSRV.md)
+- [Profile reference](guide/profiles.md)
+- [MSRV](guide/msrv.md)
 - [API map](api.md)

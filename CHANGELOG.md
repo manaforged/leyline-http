@@ -14,7 +14,7 @@ separate crates.
 
 - An asynchronous `Session` API for HTTP/1.1, HTTP/2, and HTTP/3 on Tokio.
 - Browser profiles for TLS, HTTP/2 settings, and request headers. See the
-  [profile reference](crates/leyline/docs/PROFILES.md) for bundled versions and
+  [profile reference](docs/guide/profiles.md) for bundled versions and
   capture status.
 - Cookies, proxy configuration, redirect policies, opt-in retries, streaming
   request and response bodies, and response decompression.
@@ -30,7 +30,7 @@ separate crates.
   and replaces the connection if the PING is not acknowledged within 2 seconds.
   `PoolConfig::h2_ping_after_idle` and `PoolConfig::h2_ping_timeout` change
   the thresholds.
-- A [user guide](crates/leyline/docs/guide/README.md) covering requests,
+- A [user guide](docs/guide/README.md) covering requests,
   responses, sessions, and supported targets.
 
 ### Changed

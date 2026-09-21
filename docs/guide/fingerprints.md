@@ -97,7 +97,7 @@ with Leyline's emitted handshake.
 
 Profiles are TOML files under `crates/leyline/profiles/<family>/<version>.toml`,
 and every bundled one is compiled into the binary.
-[docs/PROFILES.md](../PROFILES.md) lists what ships, which JA4 goldens are
+The [profile reference](profiles.md) lists what ships, which JA4 goldens are
 gated, and the update cadence.
 
 `ProfileRegistry::global()` borrows the built-in set, `get_browser` looks one
