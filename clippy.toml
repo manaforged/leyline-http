@@ -1,5 +1,3 @@
-# Leyline already denies missing_docs + undocumented_unsafe_blocks.
-
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 allow-panic-in-tests = true
