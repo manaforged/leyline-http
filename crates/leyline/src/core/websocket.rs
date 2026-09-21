@@ -83,6 +83,7 @@ enum WsInner {
 pub struct WsConnection {
     inner: WsInner,
     protocol: Option<String>,
+    headers: Vec<(String, String)>,
 }
 
 impl WsConnection {
@@ -147,10 +148,16 @@ impl WsConnection {
             .get("sec-websocket-protocol")
             .and_then(|v| v.to_str().ok())
             .map(str::to_owned);
+        let headers = response
+            .headers()
+            .iter()
+            .filter_map(|(n, v)| Some((n.as_str().to_owned(), v.to_str().ok()?.to_owned())))
+            .collect();
 
         Ok(Self {
             inner: WsInner::H1(ws_stream),
             protocol,
+            headers,
         })
     }
 
@@ -249,6 +256,7 @@ impl WsConnection {
             .iter()
             .find(|(n, _)| n.eq_ignore_ascii_case("sec-websocket-protocol"))
             .map(|(_, v)| v.clone());
+        let headers = stream.response_headers().to_vec();
 
         let ws_stream = WebSocketStream::from_raw_socket(
             stream,
@@ -259,6 +267,7 @@ impl WsConnection {
         Ok(Self {
             inner: WsInner::H2(ws_stream),
             protocol,
+            headers,
         })
     }
 
@@ -340,6 +349,13 @@ impl WsConnection {
 
     pub fn protocol(&self) -> Option<&str> {
         self.protocol.as_deref()
+    }
+
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.as_str())
     }
 
     pub fn split(self) -> (WsSink, WsStream) {

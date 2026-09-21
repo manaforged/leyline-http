@@ -5,6 +5,9 @@ use std::sync::{Arc, Mutex};
 use leyline_bssl::ssl::SslContextBuilder;
 
 pub(crate) fn install_from_env(builder: &mut SslContextBuilder) {
+    if !cfg!(debug_assertions) {
+        return;
+    }
     let Ok(path) = std::env::var("SSLKEYLOGFILE") else {
         return;
     };
