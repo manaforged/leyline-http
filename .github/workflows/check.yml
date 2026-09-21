@@ -45,10 +45,11 @@ jobs:
       - name: Select affected packages
         id: scope
         run: |
-          pkgs=$(node scripts/affected-packages.mjs \
+          all=$(node scripts/affected-packages.mjs \
             --base "${{ github.event.pull_request.base.sha }}" \
             --head "${{ github.event.pull_request.head.sha }}" \
-            --explain | grep -v '^leyline-quiche$' || true)
+            --explain)
+          pkgs=$(printf '%s\n' "$all" | grep -v '^leyline-quiche$' || true)
           args=""
           for p in $pkgs; do args="$args -p $p"; done
           echo "args=$args" >> "$GITHUB_OUTPUT"
