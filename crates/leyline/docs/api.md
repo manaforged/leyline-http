@@ -58,30 +58,32 @@ not at the root.
 | Job | Symbols |
 |---|---|
 | Pick a browser | `Session::chrome`/`firefox`/`safari`/`edge`/`brave`/`opera`/`vivaldi`, `Session::profile(Browser, Platform)`, `SessionBuilder::browser`, `Browser`, `Browser::latest(Family)`, `Preset`, `profile::ALL_BROWSERS`, `profile::Family` |
-| Pick a platform | `SessionBuilder::windows`/`macos`/`linux`/`android`/`ios`, `Platform::Host` |
+| Pick a platform | `SessionBuilder::platform`/`windows`/`macos`/`linux`/`android`/`ios`, `Platform::Host` |
 | Brand overlay | `SessionBuilder::brand`, `ChromiumBrand`, `profile::BrandOverlayError` |
 | Composed identity | `Identity::locked`, `Identity::rotate_tls`, `Identity::rotate_hello`, `Identity::pass`, `SessionBuilder::identity`, `SessionBuilder::http_identity` |
 | HTTP methods | `Session::get`/`post`/`put`/`patch`/`delete`/`head`, `Session::request(Method, url)`, `Session::execute(Request)` |
 | Headers | `RequestBuilder::header`/`append_header`/`headers`/`append_headers`, `accept`/`accept_language`/`user_agent`/`referer`/`origin`/`content_type`, `anchored(profile::HeaderAnchor, ..)`, `header_order`, `HeaderList` |
 | Body out | `RequestBuilder::body`/`json`/`form`/`form_str`/`multipart`, `Body::stream`, `multipart::Form`, `multipart::Part` |
-| Query | `RequestBuilder::query` |
+| Query | `RequestBuilder::query`, `IntoParamPair` |
+| Session defaults | `SessionBuilder::accept_language`/`extra_headers`/`https_only`, `Session::default_timeout`/`response_header_timeout` |
 | Auth | `RequestBuilder::basic_auth`/`bearer_auth`/`digest_auth`, `DigestAuth` |
-| Read the response | `Response::status`/`headers`/`header`/`header_all`/`cookies`/`cookie`, `text`/`bytes`/`json`/`into_text`/`into_bytes`, `error_for_status` |
+| Read the response | `Response::status`/`headers`/`header`/`header_all`/`cookies`/`cookie`, `text`/`text_utf8`/`text_with_charset`/`bytes`/`json`/`into_text`/`into_bytes`, `as_bytes`/`as_text`, `content_length`, `header_map`, `is_success`/`is_client_error`/`is_server_error`, `error_for_status` |
+| Inspect the wire | `Response::request_headers`, `tls_peer_certificate`, `tls_cipher`, `tls_version`, `tls_alpn`, `trailers`, `redirect_chain`, `url`, `timing` |
 | Streaming | `RequestBuilder::stream`, `Response::into_stream` produces `BodyStream` (a `futures_util::Stream`), `copy_to`, `download_to`, `read_until` |
 | Retries and timeouts | `RetryPolicy::none`/`transient`, `RetryTrigger`, `TimeoutConfig`, `SessionBuilder::retry`/`timeout`/`timeouts`/`connect_timeout`, per-request `RequestBuilder::retry`/`timeout`/`timeouts`, `allow_non_idempotent_retry` |
-| Redirects | `SessionBuilder::max_redirects`/`redirect_policy`, `RedirectPolicy::limited`/`none`/`custom`, `RedirectAttempt`, `RedirectAction`, `Response::redirect_chain` |
+| Redirects | `SessionBuilder::max_redirects`/`redirect_policy`, `RedirectPolicy::limited`/`none`/`custom`, `RedirectAttempt`, `RedirectAction`, `Session::with_redirect_policy`, `Response::redirect_chain` |
 | Proxies | `SessionBuilder::proxy`/`proxies`/`no_proxy`/`disable_env_proxies`, `ProxyConfig`, `ProxyRule`, `ProxyUrl`, `NoProxy`, `Session::with_proxy`, per-request `RequestBuilder::proxy` |
 | DNS | `SessionBuilder::resolver`/`dns`/`resolve_host`/`resolve_host_to_addrs`, `DnsConfig`, `tls::Resolver`, `tls::SystemResolver` |
 | TLS trust | `SessionBuilder::tls_trust`/`add_root_certificate_file`/`add_root_certificate_der`/`add_pinned_leaf_sha256`/`without_env_roots`/`without_system_roots`/`client_identity_files`/`danger_accept_invalid_certs`, `TlsTrustConfig`, `tls::ClientIdentity`, `TlsMinVersion`, `TlsContext`, `TlsError` |
-| HTTP/3 | `SessionBuilder::http3`/`race`/`protocol_policy`, `ProtocolPolicy`, `H3Config` (feature `http3`, on by default) |
-| WebSocket | `Session::websocket` gives `WebSocketBuilder`; `connect()` gives `WsConnection`; `split()` gives `WsSink` and `WsStream`; `WsMessage`, `CloseFrame`, `WebSocketConfig` (feature `websocket`, on by default) |
+| Protocol | `SessionBuilder::http1`/`http2`/`http3`/`race`/`protocol_policy`, `ProtocolPolicy`, `H3Config` (feature `http3`, on by default) |
+| WebSocket | `Session::websocket` gives `WebSocketBuilder`; `connect()` gives `WsConnection`; `split()` gives `WsSink` and `WsStream`; `WsMessage`, `CloseFrame`, `WebSocketConfig` through `SessionBuilder::websocket_config` (feature `websocket`, on by default) |
 | Cookies | `Session::cookies`, `Session::with_cookie_jar`, `SessionBuilder::cookie_jar`, `cookie::Jar`, `cookie::Cookie`, `cookie::SameSite` |
 | Fingerprints | `SessionBuilder::audit(true)` then `Response::audit` gives `audit::AuditData`; `audit::compute_ja3`/`compute_ja4`/`compute_ja4h`/`compute_ja4t` with `Ja3Input`/`Ja4Input`/`Ja4hInput` for standalone computation; `Browser::profile` gives `BrowserProfile` |
 | Tracing and timing | `SessionBuilder::trace(impl trace::Trace)`, events `trace::Dns`/`Connect`/`Tls`/`Sent`/`Head`/`Done`, `trace::TracingTrace`, `trace::Timing`, `Response::timing` gives `ResponseTiming` |
 | Pool observability | `Session::pool_stats` gives `PoolStats`, `Session::preconnect`/`preconnect_via`, `SessionBuilder::pool_config` gives `PoolConfig` |
-| Transport knobs | `SessionBuilder::tcp_profile` takes `TcpProfile`, `socket_config` takes `SocketConfig`, `happy_eyeballs` takes `tls::HappyEyeballsConfig`, `compression` takes `CompressionConfig` |
+| Transport knobs | `SessionBuilder::tcp_profile` takes `TcpProfile`, `socket_config` takes `SocketConfig` (`tcp_user_timeout` applies on Linux and Android; `interface` is accepted but not applied), `happy_eyeballs` takes `tls::HappyEyeballsConfig`, `compression` takes `CompressionConfig` |
 | Request compression | `CompressionConfig`, `RequestBuilder::compress(ContentEncoding)` |
-| Tower | `LeylineService`, `layer::Call`/`Log`/`Logged`/`Pending`/`Reply`/`Transport` (feature `tower`, off by default) |
+| Tower | `SessionBuilder::layer`, `LeylineService`, `layer::Call`/`Log`/`Logged`/`Pending`/`Reply`/`Transport` (feature `tower`, off by default) |
 | HTTP/2 errors | `H2Error`, `ErrorCode` (root re-exports; the rest of `leyline::h2` is internal) |
 | http types | `leyline::http` re-exports the `http` crate: `Method`, `Uri`, `HeaderName`, `HeaderValue`, `StatusCode` |
 
@@ -125,6 +127,14 @@ predicates `is_timeout`/`is_connect`/`is_status`/`is_redirect`/`is_body`/
   already taken.
 - Public enums and config structs are `#[non_exhaustive]`: match with a `_`
   arm and construct through builders or `Default`, not literals.
+- `SessionBuilder::socket_config`, `tls_trust`, `dns`, and `pool_config`
+  replace the whole value. Start from `::new()`, which carries the defaults.
+- `Response::read_until(limit, done)` calls `done(body, from)` after each
+  decoded chunk: `body` is every decoded byte so far, `from` is where the
+  newest chunk starts. It stops on `true`, at `limit` decoded bytes, or at
+  end of stream, and returns the decoded prefix.
+- `Response::audit` is `None` unless the session was built with
+  `audit(true)`.
 - Default features: `cookies`, `charset`, `compression-gzip`,
   `compression-brotli`, `compression-deflate`, `compression-zstd`,
   `multipart`, `stream`, `websocket`, `http3`, `system-trust`. Opt-in
@@ -132,6 +142,40 @@ predicates `is_timeout`/`is_connect`/`is_status`/`is_redirect`/`is_body`/
   (exposes BoringSSL types on `TlsContext`), `bench-internals` (bench-only
   pool probes). `full` enables every opt-in except `bench-internals` and
   `unstable-bssl`.
+- The supported public surface is `leyline-http` plus the three binding
+  crates.
+
+## Bindings
+
+`leyline-node` (napi) and `leyline-python` (pyo3) wrap
+`leyline-ffi::BindingClient` with a flat config surface.
+
+Client options (`ClientOptions` / `Client(**kwargs)`): `profile`,
+`browser`, `platform`, `proxy`, `timeout`, `audit`, `max_redirects`,
+`disable_redirects`, `accept_language`, `extra_headers`,
+`pinned_leaf_sha256` (hex strings), `ca_files`, `client_cert` +
+`client_key`, `danger_accept_invalid_certs`, `disable_env_roots`,
+`disable_system_roots`, `disable_env_proxies`, `dns` (host to address
+list), `interface`, `local_address`, `tcp_keepalive*`,
+`tcp_user_timeout`, `send_buffer_size`, `recv_buffer_size`,
+`retry_max_retries`, `retry_initial_backoff`, `retry_max_backoff`,
+`retry_on_status`, `https_only`, `protocol` (`http1`/`http2`/`http3`/
+`race`/`default`).
+
+Request options: `headers`, `query`/`params`, `body`/`content`/`data`/
+`json`, `form`, `timeout`, `proxy`, `bearer_auth`, `auth` (basic),
+`digest_auth`, `header_order`, `anchored` (anchor, name, value),
+`preset`.
+
+Client methods beyond the verbs: `read_until(url, marker, limit)`,
+`preconnect(url, proxy)`, `cookies()`, `export_cookies(url)`,
+`load_cookies(str, url)`, `get_cookie`/`set_cookie`, `clear_cookies`,
+`pool_stats()`.
+
+Response fields: `status`, `ok`, `url`, `http_version`, `headers`,
+`cookies`, `request_headers`, `trailers`, `redirect_chain`, `body`/
+`bytes`/`text`, `content_type`, `tls` (`version`, `cipher`, `alpn`,
+`peer_certificate`), `timing`, `audit`.
 
 ## Profile schema
 

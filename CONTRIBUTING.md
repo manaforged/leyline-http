@@ -13,7 +13,9 @@ Thanks for your interest in Leyline.
    It runs formatting, workspace Clippy with warnings denied, rustdoc with
    warnings denied, the workspace test suite, `cargo-deny`, package and
    consumer checks, and with `--full` the live fingerprint and smoke
-   suites. The gate needs Python 3, Node, the 1.96 toolchain through
+   suites. The vendored `leyline-quiche` crate is excluded from the
+   clippy, rustdoc, and test gates; the vendored `leyline-bssl*` crates
+   still gate. The gate needs Python 3, Node, the 1.96 toolchain through
    rustup, and `cargo-deny` installed; the live suites need network access.
    Set `LEYLINE_SKIP_LIVE_TESTS=1` to skip the live matrix in the pre-commit hook.
 

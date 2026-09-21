@@ -63,8 +63,9 @@ println!("{total} bytes");
 `copy_to(writer)` and `download_to(path)` do the same loop for you and return
 the byte count. All three stream helpers hand back the content-encoded bytes
 as they arrive; `bytes()`, `text()`, and `json()` decode compression when they
-drain a body. Request identity encoding, or decode the stream yourself, when
-you need decoded bytes from a stream.
+drain a body. Request identity encoding, or use `read_until` (see
+[Stop at a marker](#stop-at-a-marker)), when you need decoded bytes from a
+stream.
 
 HTTP/1.1 streaming rejects bodies above 100 MiB, fixed-length, chunked, or
 close-delimited, and HTTP/3 streaming rejects them per chunk. Only HTTP/2
@@ -89,6 +90,42 @@ println!("{} bytes", body.len());
 # Ok(())
 # }
 ```
+
+## Stop at a marker
+
+`read_until(limit, done)` reads a streamed body, decodes gzip, Brotli, zstd,
+and deflate as the chunks arrive, and stops when you tell it to. Use it when
+the value you need sits near the top of a large page.
+
+After each chunk, Leyline calls `done(body, from)`. `body` is every decoded
+byte so far. `from` is the offset where the newest chunk starts. Return `true`
+to stop. The read also stops when `body` reaches `limit` decoded bytes or the
+stream ends. The call returns the decoded prefix and drops the connection's
+remaining body.
+
+```rust,no_run
+# async fn run() -> leyline::Result<()> {
+let session = leyline::Session::chrome();
+let marker = b"</head>";
+let resp = session.get("https://example.com/big").stream().await?;
+let head = resp
+    .read_until(256 * 1024, |body, from| {
+        let start = from.saturating_sub(marker.len());
+        body[start..].windows(marker.len()).any(|w| w == marker)
+    })
+    .await?;
+println!("{} decoded bytes", head.len());
+# Ok(())
+# }
+```
+
+Scan from `from` minus the marker length, as the example does. A marker can
+straddle two chunks, and a scan of the whole body on every chunk costs
+quadratic time on a large page.
+
+`read_until` consumes the response. Read the status, headers, `timing()`, and
+`audit()` before you call it. An unknown `Content-Encoding` returns a
+`Kind::Decode` error.
 
 ## Back-pressure
 

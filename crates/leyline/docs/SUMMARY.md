@@ -14,6 +14,8 @@
 - [Cookies](guide/cookies.md)
 - [WebSocket](guide/websocket.md)
 - [HTTP/3](guide/http3.md)
+- [TLS trust](guide/tls-trust.md)
+- [Network](guide/network.md)
 
 # Reference
 

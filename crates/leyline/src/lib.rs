@@ -30,6 +30,10 @@ pub mod guide {
     pub struct WebSocket;
     #[doc = include_str!("../docs/guide/http3.md")]
     pub struct Http3;
+    #[doc = include_str!("../docs/guide/tls-trust.md")]
+    pub struct TlsTrust;
+    #[doc = include_str!("../docs/guide/network.md")]
+    pub struct Network;
     #[doc = include_str!("../docs/guide/fingerprints.md")]
     pub struct Fingerprints;
     #[doc = include_str!("../docs/guide/features-and-targets.md")]

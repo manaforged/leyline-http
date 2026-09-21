@@ -52,6 +52,38 @@ Reuse a session to share connections and cookies. `Session::chrome()` selects
 the latest bundled Chrome profile with a Windows identity. Use the builder to
 select another browser or platform.
 
+## Features
+
+- **Self-audit.** `SessionBuilder::audit(true)` returns the JA3, JA4,
+  JA4H, JA4T, and HTTP/2 fingerprints of what the session emits. No
+  external capture service needed.
+- **Four fingerprint layers.** TLS, HTTP/2, header order, and TCP socket
+  options (JA4T).
+- **HTTP/3.** On by default, with `Race` and `Http3` protocol policies.
+- **Early-stop streaming.** `Response::read_until(limit, predicate)`
+  decodes gzip, Brotli, zstd, and deflate while streaming and returns the
+  decoded prefix, so you can stop at a marker without downloading the rest.
+  A streaming request body returns an error on a 307 or 308 redirect.
+- **Wire introspection.** Per-response `tls_peer_certificate`,
+  `tls_cipher`, `tls_version`, `tls_alpn`, and `request_headers` show
+  what was negotiated and sent.
+- **Certificate pinning.** `add_pinned_leaf_sha256` in one call, no
+  custom verifier.
+- **Socket options.** `TCP_USER_TIMEOUT` on Linux and Android, keepalive
+  tuning, source-IP binding, and Happy Eyeballs parameters.
+- **Connection warming.** `preconnect` and `preconnect_via` pool a
+  connection, through a chosen proxy if needed, before the request that
+  matters. Idle HTTP/2 connections are PING-checked before reuse.
+- **DNS pinning.** `resolve_host` and `resolve_host_to_addrs` map a host
+  to chosen addresses without touching the resolver.
+- **Profiles as data.** TOML profiles that you load, validate, and
+  version with `ProfileRegistry`.
+- **Conformance-tested.** An offline test gates each profile against
+  recorded fingerprint goldens.
+- **Coexists with OpenSSL.** Shipped BoringSSL is symbol-prefixed, so
+  `openssl-sys` and `boring-sys` link in the same binary.
+- **Structured timing.** Per-phase trace events and `Response::timing`.
+
 ## Benchmarks
 
 Paired loopback runs on one Ryzen 9 9950X3D host against a Hyper origin
@@ -89,7 +121,8 @@ Detection by a remote site is out of scope; see
 ## Docs
 
 Read the [user guide](https://github.com/manaforged/leyline-http/blob/main/crates/leyline/docs/guide/README.md)
-for sessions, requests, streaming, retries, proxies, and fingerprints.
+for sessions, requests, streaming, retries, proxies, TLS trust, socket
+options, and fingerprints.
 The [changelog](https://github.com/manaforged/leyline-http/blob/main/CHANGELOG.md)
 states the version policy.
 

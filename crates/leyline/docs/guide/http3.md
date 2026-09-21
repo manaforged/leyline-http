@@ -99,4 +99,4 @@ proxy or a per-request proxy fails with `Kind::Config`, telling you to use
 
 ## Next
 
-Read [Fingerprints](fingerprints.md).
+Read [TLS trust](tls-trust.md).
