@@ -93,6 +93,11 @@ fn apply_socket_config(
         }
         socket.set_tcp_keepalive(&keepalive)?;
     }
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    if let Some(timeout) = config.tcp_user_timeout {
+        socket.set_tcp_user_timeout(Some(timeout))?;
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
     if config.tcp_user_timeout.is_some() {
         unsupported_socket_option(config.strict, "tcp_user_timeout")?;
     }
