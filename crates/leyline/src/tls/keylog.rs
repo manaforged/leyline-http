@@ -1,9 +1,16 @@
+#[cfg(debug_assertions)]
 use std::fs::OpenOptions;
+#[cfg(debug_assertions)]
 use std::io::Write;
+#[cfg(debug_assertions)]
 use std::sync::{Arc, Mutex};
 
 use leyline_bssl::ssl::SslContextBuilder;
 
+#[cfg(not(debug_assertions))]
+pub(crate) fn install_from_env(_builder: &mut SslContextBuilder) {}
+
+#[cfg(debug_assertions)]
 pub(crate) fn install_from_env(builder: &mut SslContextBuilder) {
     if !cfg!(debug_assertions) {
         return;
@@ -35,6 +42,7 @@ pub(crate) fn install_from_env(builder: &mut SslContextBuilder) {
     }
 }
 
+#[cfg(debug_assertions)]
 fn keylog_writer(path: &str) -> std::io::Result<impl Fn(&str) + Send + Sync + 'static> {
     let file = OpenOptions::new().create(true).append(true).open(path)?;
     let file = Arc::new(Mutex::new(file));
