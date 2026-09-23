@@ -6,7 +6,6 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures_util::StreamExt;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::net::TcpStream;
 use tokio::sync::{OwnedSemaphorePermit, mpsc};
 
 use crate::BodyStream;
@@ -272,28 +271,27 @@ async fn open_new(
             Ok((io, tls))
         }
         "http" => {
-            let stream = if let Some(proxy_url) = proxy {
-                let parsed = url::Url::parse(proxy_url)
-                    .map_err(|e| H1PooledError::Config(format!("invalid proxy URL: {e}")))?;
-                if parsed.scheme() != "http" {
+            let parsed = proxy
+                .map(url::Url::parse)
+                .transpose()
+                .map_err(|e| H1PooledError::Config(format!("invalid proxy URL: {e}")))?;
+            let (dial_host, dial_port) = match &parsed {
+                Some(parsed) if parsed.scheme() != "http" => {
                     return Err(H1PooledError::Config(
                         "plaintext HTTP currently supports http:// proxies only".into(),
                     ));
                 }
-                let proxy_host = parsed
-                    .host_str()
-                    .ok_or_else(|| H1PooledError::Config("proxy has no host".into()))?;
-                let proxy_port = parsed.port_or_known_default().unwrap_or(8080);
-                let started = std::time::Instant::now();
-                let stream = TcpStream::connect((proxy_host, proxy_port)).await?;
-                trace::connect(proxy_host, proxy_port, false, started.elapsed());
-                stream
-            } else {
-                let started = std::time::Instant::now();
-                let stream = TcpStream::connect((host, port)).await?;
-                trace::connect(host, port, false, started.elapsed());
-                stream
+                Some(parsed) => (
+                    parsed
+                        .host_str()
+                        .ok_or_else(|| H1PooledError::Config("proxy has no host".into()))?,
+                    parsed.port_or_known_default().unwrap_or(8080),
+                ),
+                None => (host, port),
             };
+            let stream = connector
+                .with_timeout(connector.dial_tcp(dial_host, dial_port))
+                .await?;
             let io: Box<dyn H1Io> = Box::new(stream);
             Ok((io, TlsInfo::default()))
         }

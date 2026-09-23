@@ -173,9 +173,9 @@ impl FingerprintConnector {
         self.with_timeout(fut).await
     }
 
-    async fn with_timeout<F>(&self, fut: F) -> Result<TlsStream, TlsError>
+    pub(crate) async fn with_timeout<T, F>(&self, fut: F) -> Result<T, TlsError>
     where
-        F: std::future::Future<Output = Result<TlsStream, TlsError>>,
+        F: std::future::Future<Output = Result<T, TlsError>>,
     {
         match self.connect_timeout {
             Some(timeout) => tokio::time::timeout(timeout, fut).await.map_err(|_| {

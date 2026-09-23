@@ -70,3 +70,28 @@ async fn connect_timeout_bounds_an_unreachable_endpoint() {
         "connect bail took {elapsed:?} — connect_timeout did not bound it (fell through toward the 10s total)"
     );
 }
+
+#[tokio::test]
+async fn connect_timeout_is_one_window_per_request_on_http_and_https() {
+    let session = Session::builder()
+        .disable_env_proxies()
+        .connect_timeout(Duration::from_millis(300))
+        .build()
+        .expect("session builds");
+
+    for url in ["http://192.0.2.1:80/", "https://192.0.2.1:443/"] {
+        let start = Instant::now();
+        let result = session
+            .request(http::Method::GET, url)
+            .retry(RetryPolicy::none())
+            .send()
+            .await;
+        let elapsed = start.elapsed();
+
+        assert!(result.is_err(), "{url} must error, got {result:?}");
+        assert!(
+            elapsed < Duration::from_millis(550),
+            "{url} took {elapsed:?}; the 300ms connect timeout must bound the whole request"
+        );
+    }
+}

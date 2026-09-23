@@ -224,14 +224,17 @@ fn plan_retry(
     if !should_retry || !retryable_method || !body_retryable {
         return RetryPlan::Stop;
     }
-    let sleep = match result {
+    let retry_after = match result {
         Ok(resp) => resp
             .header("retry-after")
             .and_then(crate::core::retry::parse_retry_after),
         _ => None,
+    };
+    match retry_after {
+        Some(wait) if wait > retry_policy.max_retry_after => RetryPlan::Stop,
+        Some(wait) => RetryPlan::Backoff(wait),
+        None => RetryPlan::Backoff(retry_policy.backoff(attempt)),
     }
-    .unwrap_or_else(|| retry_policy.backoff(attempt));
-    RetryPlan::Backoff(sleep)
 }
 
 impl std::future::IntoFuture for RequestBuilder {

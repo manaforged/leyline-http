@@ -28,6 +28,7 @@ fn backoff_grows_and_caps() {
         max_retries: 10,
         initial_backoff: Duration::from_millis(100),
         max_backoff: Duration::from_millis(800),
+        max_retry_after: Duration::ZERO,
         backoff_factor: 2.0,
         jitter: false,
         retry_on: vec![RetryTrigger::ConnectionError],

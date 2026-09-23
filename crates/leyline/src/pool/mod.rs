@@ -211,7 +211,7 @@ async fn open_h2_coalesced(
         let shared = h2_inflight_connect(pool, connector, h2_config, &key, host, port, proxy);
         match shared.await {
             Ok(pair) => return Ok(pair),
-            Err(e) if e.alpn().is_some() => return Err(connect_err(&e)),
+            Err(e) if e.alpn().is_some() || e.is_timeout() => return Err(connect_err(&e)),
             Err(e) => last_err = Some(e),
         }
     }

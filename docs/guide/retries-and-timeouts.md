@@ -65,6 +65,11 @@ the computed backoff. Leyline parses both forms: delta-seconds, and an
 IMF-fixdate with a `GMT` or `UTC` zone. An unparsable value falls back to the
 computed backoff.
 
+By default Leyline waits as long as `Retry-After` asks. To cap the wait, call
+`with_max_retry_after`. If `Retry-After` then asks for longer than the cap,
+Leyline stops retrying and returns the response, as it does when retries run
+out. The caller can then fall back.
+
 ## The idempotency rule
 
 Leyline retries only idempotent methods by default: GET, HEAD, OPTIONS, PUT,

@@ -70,7 +70,7 @@ not at the root.
 | Read the response | `Response::status`/`headers`/`header`/`header_all`/`cookies`/`cookie`, `text`/`text_utf8`/`text_with_charset`/`bytes`/`json`/`into_text`/`into_bytes`, `as_bytes`/`as_text`, `content_length`, `header_map`, `is_success`/`is_client_error`/`is_server_error`, `error_for_status` |
 | Inspect the wire | `Response::request_headers`, `tls_peer_certificate`, `tls_cipher`, `tls_version`, `tls_alpn`, `trailers`, `redirect_chain`, `url`, `timing` |
 | Streaming | `RequestBuilder::stream`, `Response::into_stream` produces `BodyStream` (a `futures_util::Stream`), `copy_to`, `download_to`, `read_until` |
-| Retries and timeouts | `RetryPolicy::none`/`transient`, `RetryTrigger`, `TimeoutConfig`, `SessionBuilder::retry`/`timeout`/`timeouts`/`connect_timeout`, per-request `RequestBuilder::retry`/`timeout`/`timeouts`, `allow_non_idempotent_retry` |
+| Retries and timeouts | `RetryPolicy::none`/`transient`/`with_max_retry_after`, `RetryTrigger`, `TimeoutConfig`, `SessionBuilder::retry`/`timeout`/`timeouts`/`connect_timeout`, per-request `RequestBuilder::retry`/`timeout`/`timeouts`, `allow_non_idempotent_retry` |
 | Redirects | `SessionBuilder::max_redirects`/`redirect_policy`, `RedirectPolicy::limited`/`none`/`custom`, `RedirectAttempt`, `RedirectAction`, `Session::with_redirect_policy`, `Response::redirect_chain` |
 | Proxies | `SessionBuilder::proxy`/`proxies`/`no_proxy`/`disable_env_proxies`, `ProxyConfig`, `ProxyRule`, `ProxyUrl`, `NoProxy`, `Session::with_proxy`, per-request `RequestBuilder::proxy` |
 | DNS | `SessionBuilder::resolver`/`dns`/`resolve_host`/`resolve_host_to_addrs`, `DnsConfig`, `tls::Resolver`, `tls::SystemResolver` |

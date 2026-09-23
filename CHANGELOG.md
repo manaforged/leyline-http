@@ -8,6 +8,13 @@ changes or a higher minimum Rust version require a new minor release, such as
 stable. The BoringSSL implementation crates share this version and publish as
 separate crates.
 
+## Unreleased
+
+### Fixed
+
+- `connect_timeout` now bounds plain `http://` connects, and one HTTPS
+  request spends at most one connect timeout on an unreachable host.
+
 ## 0.1.0 - 2026-09-17
 
 ### Added

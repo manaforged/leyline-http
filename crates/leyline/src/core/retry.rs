@@ -15,6 +15,7 @@ pub struct RetryPolicy {
     pub max_retries: u32,
     pub initial_backoff: Duration,
     pub max_backoff: Duration,
+    pub max_retry_after: Duration,
     pub backoff_factor: f64,
     pub jitter: bool,
     pub retry_on: Vec<RetryTrigger>,
@@ -32,6 +33,7 @@ impl RetryPolicy {
             max_retries: 0,
             initial_backoff: Duration::from_millis(0),
             max_backoff: Duration::from_millis(0),
+            max_retry_after: Duration::MAX,
             backoff_factor: 1.0,
             jitter: false,
             retry_on: Vec::new(),
@@ -43,6 +45,7 @@ impl RetryPolicy {
             max_retries: 3,
             initial_backoff: Duration::from_millis(100),
             max_backoff: Duration::from_secs(1),
+            max_retry_after: Duration::MAX,
             backoff_factor: 2.0,
             jitter: true,
             retry_on: vec![
@@ -64,6 +67,11 @@ impl RetryPolicy {
     pub fn with_backoff(mut self, initial: Duration, max: Duration) -> Self {
         self.initial_backoff = initial;
         self.max_backoff = max;
+        self
+    }
+
+    pub fn with_max_retry_after(mut self, max: Duration) -> Self {
+        self.max_retry_after = max;
         self
     }
 
