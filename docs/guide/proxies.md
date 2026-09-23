@@ -122,9 +122,12 @@ leyline-http = { git = "https://github.com/manaforged/leyline-http", branch = "m
 
 `RequestBuilder::proxy` replaces the session proxy for one request.
 `Session::with_proxy` derives a whole session that differs only in its proxy,
-and keeps the cookies and the TLS context. The derived session gets its own
-connection pool, so it opens new sockets and does not close connections that
-other sessions still use.
+and keeps the cookie jar, the TLS context, the identity, and the pool. Pool
+entries are keyed by proxy, so the derived session never reuses a connection
+opened through another proxy. A rotation back to a proxy with warm connections
+reuses them, and the rotation closes no connection that another session uses.
+A rebind to the session's current proxy URL takes a fresh pool instead, so the
+next request opens a new socket and a next request opens new connections.
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {

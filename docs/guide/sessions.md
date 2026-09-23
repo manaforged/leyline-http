@@ -137,8 +137,10 @@ parts:
 
 - `with_cookie_jar(jar)` keeps the TLS connector, the protocol configuration,
   and the pool, and swaps in an independent jar.
-- `with_proxy(url)` keeps cookies, TLS, and the identity, opens a new pool, and swaps
-  only the proxy. It returns `Result<Session>`: an invalid URL or an
+- `with_proxy(url)` keeps the cookie jar, TLS, the identity, and the pool,
+  and swaps only the proxy. Pool entries are keyed by proxy, so connections
+  never cross proxies. A rebind to the current proxy URL takes a fresh pool,
+  so a next request opens new connections. It returns `Result<Session>`: an invalid URL or an
   unsupported scheme fails here, the same way `build()` does.
 
 ```rust,no_run

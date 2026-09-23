@@ -86,7 +86,9 @@ impl Session {
         let proxy = crate::core::ProxyUrl::parse(proxy_url)?;
         let mut s = self.clone();
         let inner = std::sync::Arc::make_mut(&mut s.inner);
-        inner.pool = std::sync::Arc::new(inner.pool.fresh());
+        if inner.proxy_config.primary() == Some(proxy.as_str()) {
+            inner.pool = std::sync::Arc::new(inner.pool.fresh());
+        }
         inner.proxy_config = inner.proxy_config.clone().set_default_proxy(proxy.as_str());
         Ok(s)
     }

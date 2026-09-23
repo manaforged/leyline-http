@@ -119,8 +119,10 @@ predicates `is_timeout`/`is_connect`/`is_status`/`is_redirect`/`is_body`/
 - `Session::new()` and `Session::default()` build a bare session with no
   impersonation. Every named constructor (`chrome()`, `firefox()`, and the
   rest) impersonates.
-- `Session::with_*` derives a clone that shares the pool, except
-  `with_proxy`, which takes a fresh pool.
+- `Session::with_*` derives a clone that shares the pool. Pool entries are
+  keyed by proxy, so sessions on different proxies never share a connection.
+  `with_proxy` with the session's current proxy URL takes a fresh pool, so a
+  next request opens new connections.
 - `Response` body readers (`text`, `bytes`, `json`) buffer on first call.
   `into_stream`, `copy_to`, `download_to`, and `read_until` consume the
   response. `into_stream` returns `Err` with `Kind::Body` if the body was
