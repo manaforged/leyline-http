@@ -121,6 +121,25 @@ pub(crate) fn curve_id(name: &str) -> Option<u16> {
     curve(name).map(|c| c.id)
 }
 
+fn name_of(table: &[(&'static str, u16)], id: u16) -> Option<&'static str> {
+    table
+        .iter()
+        .find(|&&(_, known)| known == id)
+        .map(|&(n, _)| n)
+}
+
+pub(crate) fn cipher_name(id: u16) -> Option<&'static str> {
+    name_of(CIPHERS, id)
+}
+
+pub(crate) fn sigalg_name(id: u16) -> Option<&'static str> {
+    name_of(SIGALGS, id)
+}
+
+pub(crate) fn curve_name(id: u16) -> Option<&'static str> {
+    CURVES.iter().find(|c| c.id == id).map(|c| c.name)
+}
+
 pub(crate) fn boring_curve_name(name: &str) -> &str {
     curve(name).map_or(name, |c| c.boring)
 }

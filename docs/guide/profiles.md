@@ -185,3 +185,108 @@ from those tables. `build` returns `Kind::Config` when the profile has no
 table for that platform. Without `.platform()`, the platform is Windows. A
 brand overlay (`SessionBuilder::brand`) needs `chromium_major` in `[meta]`.
 The request header order follows `header_style` in `[meta]`.
+
+## Build a profile from a JA3 or Akamai string
+
+`BrowserProfile::from_fingerprint` builds a profile from fingerprint strings
+instead of a TOML file. It returns the same `BrowserProfile` type, and
+`SessionBuilder::profile` sends it the same way.
+
+`FingerprintSpec` takes these inputs:
+
+- `ja3(raw)`: a raw JA3 string, `version,ciphers,extensions,curves,point
+  formats`. It sets the cipher list, the curve list, and the exact extension
+  order.
+- `ja4_r(raw)`: a raw JA4_r or JA4_ro string. It sets the cipher list, the
+  extension set, and the signature algorithms. The hashed JA4 form
+  (`t13d1516h2_8daaf6152771_806a8c22fdea`) cannot be inverted, so
+  `from_fingerprint` rejects it.
+- `akamai(raw)`: an Akamai HTTP/2 string,
+  `SETTINGS|WINDOW_UPDATE|PRIORITY|pseudo-header order`. It sets the SETTINGS
+  order and values, the connection window, and the pseudo-header order.
+- `base(profile)`: the profile to start from. The result keeps every value
+  the strings do not carry: the identity tables, the headers, HTTP/3, the
+  signature algorithms for a JA3 string, and the curves for a JA4_r string.
+  Without a base, the bare profile is the start.
+- `user_agent(ua)` and `header_order(names)`: replace the user agent and the
+  request header order in every identity table.
+- `name(name)`: the profile name in logs and errors.
+
+This example takes the JA3 and Akamai values of the bundled Chrome 152
+profile and applies them to the Chrome 148 profile:
+
+```rust
+use leyline::profile::FingerprintSpec;
+use leyline::{Browser, BrowserProfile, Session};
+
+# fn main() -> leyline::Result<()> {
+let ja3 = "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,\
+           0-23-65281-11-35-16-51-43-45-10-13-5-18-27-17613-65037,4588-29-23-24,0";
+let akamai = "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p";
+let spec = FingerprintSpec::new()
+    .base(Browser::Chrome148.profile().clone())
+    .ja3(ja3)
+    .akamai(akamai)
+    .name("Chrome 152 from strings");
+let profile = BrowserProfile::from_fingerprint(spec)?;
+
+let chrome152 = Browser::Chrome152.profile();
+assert_eq!(profile.tls.ciphers, chrome152.tls.ciphers);
+assert_eq!(profile.tls.curves, chrome152.tls.curves);
+assert_eq!(chrome152.expected_h2_fingerprint(), Some(akamai));
+
+let session = Session::builder().profile(profile).audit(true).build()?;
+# drop(session);
+# Ok(())
+# }
+```
+
+`Response::audit` confirms the result. A session built from these strings
+reports the same JA3 and Akamai values as the Chrome 152 session:
+
+```rust,no_run
+# use leyline::profile::FingerprintSpec;
+# use leyline::{Browser, BrowserProfile, Session};
+# async fn run(ja3: &str, akamai: &str) -> leyline::Result<()> {
+let spec = FingerprintSpec::new()
+    .base(Browser::Chrome148.profile().clone())
+    .ja3(ja3)
+    .akamai(akamai);
+let custom = Session::builder()
+    .profile(BrowserProfile::from_fingerprint(spec)?)
+    .audit(true)
+    .build()?;
+let reference = Session::builder()
+    .browser(Browser::Chrome152)
+    .audit(true)
+    .build()?;
+
+let url = "https://tls.peet.ws/api/all";
+let custom = custom.get(url).await?;
+let reference = reference.get(url).await?;
+let (Some(custom), Some(reference)) = (custom.audit(), reference.audit()) else {
+    return Ok(());
+};
+assert_eq!(custom.ja3, reference.ja3);
+assert_eq!(custom.h2_fingerprint, reference.h2_fingerprint);
+# Ok(())
+# }
+```
+
+These rules apply to the strings:
+
+- A GREASE value in any list sets `grease = true` and is not stored. A string
+  without GREASE keeps the base value.
+- Each extension ID turns on the `[tls]` setting that sends it. An extension
+  that carries data (`application_settings`, `compress_certificate`,
+  `delegated_credentials`, `record_size_limit`) takes its value from the base
+  profile. `from_fingerprint` fails when the base has no value.
+- `pre_shared_key` (41) sets `pre_shared_key = true`. `padding` (21) sets
+  `padding = true` and must be the last extension.
+- The JA3 version must be 771 and the point formats must be `0`. The Akamai
+  PRIORITY field must be `0`.
+- An ID that is not in the leyline IANA registry fails. An extension or
+  SETTINGS ID that leyline cannot send also fails.
+
+Every failure returns `Kind::Config` with a message that names the format and
+the field.

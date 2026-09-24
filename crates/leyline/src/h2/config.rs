@@ -16,19 +16,37 @@ pub enum SettingId {
     Unknown9 = 9,
 }
 
+const SETTING_KEYS: [(SettingId, &str); 8] = [
+    (SettingId::HeaderTableSize, "header_table_size"),
+    (SettingId::EnablePush, "enable_push"),
+    (SettingId::MaxConcurrentStreams, "max_concurrent_streams"),
+    (SettingId::InitialWindowSize, "initial_window_size"),
+    (SettingId::MaxFrameSize, "max_frame_size"),
+    (SettingId::MaxHeaderListSize, "max_header_list_size"),
+    (SettingId::Unknown8, "unknown8"),
+    (SettingId::Unknown9, "unknown9"),
+];
+
 impl SettingId {
     pub fn parse_key(s: &str) -> Option<Self> {
-        match s {
-            "header_table_size" => Some(Self::HeaderTableSize),
-            "enable_push" => Some(Self::EnablePush),
-            "max_concurrent_streams" => Some(Self::MaxConcurrentStreams),
-            "initial_window_size" => Some(Self::InitialWindowSize),
-            "max_frame_size" => Some(Self::MaxFrameSize),
-            "max_header_list_size" => Some(Self::MaxHeaderListSize),
-            "unknown8" => Some(Self::Unknown8),
-            "unknown9" => Some(Self::Unknown9),
-            _ => None,
-        }
+        SETTING_KEYS
+            .iter()
+            .find(|(_, key)| *key == s)
+            .map(|&(id, _)| id)
+    }
+
+    pub(crate) fn from_code(code: u16) -> Option<Self> {
+        SETTING_KEYS
+            .iter()
+            .find(|&&(id, _)| id as u16 == code)
+            .map(|&(id, _)| id)
+    }
+
+    pub(crate) fn key(self) -> &'static str {
+        SETTING_KEYS
+            .iter()
+            .find(|&&(id, _)| id == self)
+            .map_or("", |&(_, key)| key)
     }
 }
 
@@ -41,24 +59,33 @@ pub enum PseudoOrder {
     Path,
 }
 
+const PSEUDO_KEYS: [(PseudoOrder, &str, &str); 4] = [
+    (PseudoOrder::Method, "method", "m"),
+    (PseudoOrder::Authority, "authority", "a"),
+    (PseudoOrder::Scheme, "scheme", "s"),
+    (PseudoOrder::Path, "path", "p"),
+];
+
 impl PseudoOrder {
     pub fn parse_key(s: &str) -> Option<Self> {
-        match s {
-            "method" => Some(Self::Method),
-            "authority" => Some(Self::Authority),
-            "scheme" => Some(Self::Scheme),
-            "path" => Some(Self::Path),
-            _ => None,
-        }
+        PSEUDO_KEYS
+            .iter()
+            .find(|(_, key, _)| *key == s)
+            .map(|&(order, _, _)| order)
+    }
+
+    pub(crate) fn key_for_label(label: &str) -> Option<&'static str> {
+        PSEUDO_KEYS
+            .iter()
+            .find(|(_, _, known)| *known == label)
+            .map(|&(_, key, _)| key)
     }
 
     pub fn label(&self) -> &'static str {
-        match self {
-            Self::Method => "m",
-            Self::Authority => "a",
-            Self::Scheme => "s",
-            Self::Path => "p",
-        }
+        PSEUDO_KEYS
+            .iter()
+            .find(|(order, _, _)| order == self)
+            .map_or("", |&(_, _, label)| label)
     }
 }
 

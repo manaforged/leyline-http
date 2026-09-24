@@ -1,54 +1,5 @@
 use crate::profile::TlsProfile;
-
-const PRE_SHARED_KEY: u16 = 0x0029;
-
-const ALPS_NEW: u16 = 0x44cd;
-
-const ALPS_OLD: u16 = 0x4469;
-
-fn advertised_extensions(tls: &TlsProfile) -> Vec<(u16, &'static str)> {
-    let alps = if tls.alps_new_codepoint {
-        ALPS_NEW
-    } else {
-        ALPS_OLD
-    };
-    [
-        (0x0000, "server_name", true),
-        (0x0017, "extended_master_secret", true),
-        (0xff01, "renegotiation_info", true),
-        (0x000b, "ec_point_formats", true),
-        (0x0023, "session_ticket", tls.session_tickets),
-        (0x0010, "alpn", true),
-        (0x0033, "key_share", true),
-        (0x002b, "supported_versions", true),
-        (0x002d, "psk_key_exchange_modes", true),
-        (0x000a, "supported_groups", !tls.curves.is_empty()),
-        (0x000d, "signature_algorithms", !tls.sigalgs.is_empty()),
-        (0x0005, "status_request", tls.ocsp_stapling),
-        (
-            0x0012,
-            "signed_certificate_timestamp",
-            tls.signed_cert_timestamps,
-        ),
-        (
-            0x0022,
-            "delegated_credentials",
-            tls.delegated_credentials.is_some(),
-        ),
-        (0x001c, "record_size_limit", tls.record_size_limit.is_some()),
-        (
-            0x001b,
-            "compress_certificate",
-            !tls.cert_compression.is_empty(),
-        ),
-        (alps, "application_settings", tls.alps.is_some()),
-        (0xca34, "trust_anchors", tls.request_trust_anchors),
-        (0xfe0d, "encrypted_client_hello", tls.ech_grease),
-    ]
-    .into_iter()
-    .filter_map(|(id, name, advertised)| advertised.then_some((id, name)))
-    .collect()
-}
+use crate::profile::extension::{PADDING, PRE_SHARED_KEY, advertised_extensions};
 
 pub(crate) fn extension_ids(tls: &TlsProfile) -> Vec<u16> {
     let mut ids = match tls.extension_permutation.as_deref() {
@@ -59,7 +10,7 @@ pub(crate) fn extension_ids(tls: &TlsProfile) -> Vec<u16> {
             .collect(),
     };
     if tls.padding {
-        ids.push(0x0015);
+        ids.push(PADDING);
     }
     ids
 }

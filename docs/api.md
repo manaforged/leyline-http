@@ -160,7 +160,8 @@ counted.
 | `Family`, `Platform`, `ChromiumBrand`, `Preset` | enums; `Platform::detect_host`, `Platform::tcp_profile` | 2 |
 | `Identity` | `locked`, `rotate_tls`, `switch_family`, `http`, `tls`, `platform` | 6 |
 | `SessionIdentity` | `identity`, `browser`, `platform`, `brand`, `user_agent` | 5 |
-| `BrowserProfile` | `from_toml`, `expected_ja4`, `expected_h2_fingerprint` | 3 |
+| `BrowserProfile` | `from_toml`, `from_fingerprint(FingerprintSpec)`, `expected_ja4`, `expected_h2_fingerprint` | 4 |
+| `profile::FingerprintSpec` | `new`, `ja3`, `ja4_r`, `akamai`, `user_agent`, `header_order`, `base(BrowserProfile)`, `name` | 8 |
 | `profile::ProfileRegistry` | `global`, `load(dir)`, `get` | 3 |
 | `profile::{ProfileMeta, TlsProfile, TlsFingerprint, H2Profile, H2PriorityProfile, H2PlatformOverride, H2Fingerprint, H3Profile, PlatformIdentity, HeaderAnchor, HeaderStyle}` | schema types, public fields | 0 |
 | `profile::ProfileError` | error of `load` and `from_toml` | 0 |
@@ -181,7 +182,7 @@ counted.
 | `http` | re-export of the `http` crate | 0 |
 | `H2Error`, `ErrorCode` | sources reachable from `Error::h2` | 0 |
 
-Total: 255 public functions.
+Total: 264 public functions.
 
 ## Semantics
 
@@ -208,6 +209,15 @@ Total: 255 public functions.
   `build` returns `Kind::Config` when the profile has no identity table for
   the platform. Without `.platform()`, the platform is Windows.
   `Session::identity().browser()` is `None` for a loaded profile.
+- `BrowserProfile::from_fingerprint` builds a profile from a raw JA3 string,
+  a raw JA4_r string, and an Akamai HTTP/2 string, on top of the
+  `FingerprintSpec::base` profile or the bare profile. It returns the same
+  `BrowserProfile` that `from_toml` returns, and `SessionBuilder::profile`
+  sends it. The IANA registry that `audit` uses maps the IDs to names, so
+  `Response::audit` reports the JA3 and Akamai values of the input strings.
+  A hashed JA4, an unknown ID, an extension or SETTINGS ID that leyline
+  cannot send, and PRIORITY frames fail with `Kind::Config`. The guide
+  section "Build a profile from a JA3 or Akamai string" lists the rules.
 - A brand overlay needs `chromium_major` in the profile `[meta]` table.
 - Config types (`TimeoutConfig`, `RetryPolicy`, `RedirectPolicy`,
   `ProxyConfig`, `DnsConfig`, `TlsTrustConfig`, `PoolConfig`, `SocketConfig`,
