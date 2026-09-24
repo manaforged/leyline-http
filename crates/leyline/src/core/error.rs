@@ -279,7 +279,7 @@ impl fmt::Display for Error {
             write!(f, ": {detail}")?;
         }
         if let Some(url) = &self.inner.url {
-            write!(f, " for {}", redact(url))?;
+            write!(f, " for {}", crate::util::redact(&url.to_string()))?;
         }
         Ok(())
     }
@@ -293,7 +293,7 @@ impl fmt::Debug for Error {
             out.field("status", &status.as_u16());
         }
         if let Some(url) = &self.inner.url {
-            out.field("url", &redact(url));
+            out.field("url", &crate::util::redact(&url.to_string()));
         }
         if let Some(message) = &self.inner.message {
             out.field("message", message);
@@ -309,26 +309,6 @@ impl StdError for Error {
     fn source(&self) -> Option<&(dyn StdError + 'static)> {
         self.inner.source.as_ref().map(|e| &**e as &dyn StdError)
     }
-}
-
-fn redact(url: &Uri) -> String {
-    let Some(authority) = url.authority() else {
-        return url.to_string();
-    };
-    let text = authority.as_str();
-    let Some(at) = text.rfind('@') else {
-        return url.to_string();
-    };
-    let scheme = url
-        .scheme_str()
-        .map(|s| format!("{s}://"))
-        .unwrap_or_default();
-    let path = url
-        .path_and_query()
-        .map(ToString::to_string)
-        .unwrap_or_default();
-    let host = text.get(at + 1..).unwrap_or_default();
-    format!("{scheme}***@{host}{path}")
 }
 
 fn io_kind(err: &TlsError) -> Option<io::ErrorKind> {

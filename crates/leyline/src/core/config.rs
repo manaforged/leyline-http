@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use crate::core::Kind;
 use crate::tls::{HappyEyeballsConfig, Resolver, SystemResolver};
+use crate::util::redact;
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct ProxyUrl(String);
@@ -12,23 +13,6 @@ pub struct ProxyUrl(String);
 impl std::fmt::Debug for ProxyUrl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("ProxyUrl").field(&redact(&self.0)).finish()
-    }
-}
-
-pub(crate) fn redact(raw: &str) -> String {
-    let Ok(mut parsed) = url::Url::parse(raw) else {
-        return raw.to_string();
-    };
-    let masked = if parsed.password().is_some() {
-        parsed.set_password(Some("***"))
-    } else if !parsed.username().is_empty() {
-        parsed.set_username("***")
-    } else {
-        return raw.to_string();
-    };
-    match masked {
-        Ok(()) => parsed.to_string(),
-        Err(()) => raw.to_string(),
     }
 }
 

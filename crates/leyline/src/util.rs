@@ -1,11 +1,18 @@
 #![forbid(unsafe_code)]
-pub(crate) fn redacted_url(raw: &str) -> String {
-    match url::Url::parse(raw) {
-        Ok(mut url) if url.password().is_some() => {
-            let _ = url.set_password(Some("REDACTED"));
-            url.to_string()
-        }
-        _ => raw.to_string(),
+pub(crate) fn redact(raw: &str) -> String {
+    let Ok(mut parsed) = url::Url::parse(raw) else {
+        return raw.to_string();
+    };
+    let masked = if parsed.password().is_some() {
+        parsed.set_password(Some("***"))
+    } else if !parsed.username().is_empty() {
+        parsed.set_username("***")
+    } else {
+        return raw.to_string();
+    };
+    match masked {
+        Ok(()) => parsed.to_string(),
+        Err(()) => raw.to_string(),
     }
 }
 

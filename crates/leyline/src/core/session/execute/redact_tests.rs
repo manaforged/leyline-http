@@ -1,17 +1,14 @@
-use super::redacted_url;
+use super::redact;
 
 #[test]
-fn password_is_redacted_username_is_kept() {
+fn userinfo_is_redacted() {
     assert_eq!(
-        redacted_url("https://user:secretpw@example.com/x?a=1"),
-        "https://user:REDACTED@example.com/x?a=1"
+        redact("https://user:secretpw@example.com/x?a=1"),
+        "https://user:***@example.com/x?a=1"
     );
+    assert_eq!(redact("https://example.com/x"), "https://example.com/x");
     assert_eq!(
-        redacted_url("https://example.com/x"),
-        "https://example.com/x"
-    );
-    assert_eq!(
-        redacted_url("https://onlyuser@example.com/"),
-        "https://onlyuser@example.com/"
+        redact("https://onlyuser@example.com/"),
+        "https://***@example.com/"
     );
 }
