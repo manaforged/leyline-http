@@ -159,7 +159,7 @@ tower-layer = { version = "0.3", optional = true }
 
 # -- compression (optional: each codec is pulled in by its own feature, for
 #    both HTTP body compression and RFC 8879 certificate decompression)
-flate2 = { version = "1.0.14", optional = true }
+flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"], optional = true }
 brotli = { version = "8", optional = true }
 zstd = { version = "0.13", optional = true }
 
@@ -295,7 +295,7 @@ base64 = { workspace = true }
 # live H3 streaming test, which decodes the raw streamed body per its
 # content-encoding. zstd is a normal dep of leyline but integration tests only
 # see dev-deps, so it is restated here.
-flate2 = "1.0.14"
+flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"] }
 brotli = "8"
 zstd = "0.13"
 
