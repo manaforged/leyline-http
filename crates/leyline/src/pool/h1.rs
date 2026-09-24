@@ -9,9 +9,11 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{OwnedSemaphorePermit, mpsc};
 
 use crate::BodyStream;
+use crate::ResponseTiming;
 use crate::tls::{FingerprintConnector, TlsError};
 use crate::trace;
 use crate::util::is_idempotent;
+use std::time::Instant;
 
 use crate::pool::types::PoolKey;
 use crate::pool::types::Transport;
@@ -50,6 +52,7 @@ pub struct H1Response {
     pub headers: Vec<(String, String)>,
     pub body: H1ResponseBody,
     pub tls: Option<TlsInfo>,
+    pub timing: ResponseTiming,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -152,6 +155,7 @@ pub async fn send_request_h1_pooled(
         .await;
     }
 
+    let started = Instant::now();
     let replay = replay_body(method, &body);
     let mut body = body;
 
@@ -180,6 +184,7 @@ pub async fn send_request_h1_pooled(
                     headers: resp.headers,
                     body: H1ResponseBody::Buffered(resp.body),
                     tls: tls_for_scheme(scheme, &tls),
+                    timing: ResponseTiming::leg(started, None),
                 });
             }
             Err(e) => {
@@ -201,8 +206,10 @@ pub async fn send_request_h1_pooled(
     }
     tracing::Span::current().record("pool.hit", false);
 
+    let connect_started = Instant::now();
     let (io, tls): (Box<dyn H1Io>, TlsInfo) =
         open_new(connector, scheme, host, port, proxy).await?;
+    let connect_ms = ResponseTiming::millis(connect_started);
 
     let mut slot = H1Slot { io };
     let result = exchange_on_stream(
@@ -227,6 +234,7 @@ pub async fn send_request_h1_pooled(
                 headers: resp.headers,
                 body: H1ResponseBody::Buffered(resp.body),
                 tls: tls_for_scheme(scheme, &tls),
+                timing: ResponseTiming::leg(started, Some(connect_ms)),
             })
         }
         Err(e) => Err(e),

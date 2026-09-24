@@ -116,7 +116,7 @@ pub(crate) async fn send_request_h1(
         final_url: url.as_str().to_owned(),
         version: HttpVersion::Http1_1,
         tls: resp.tls,
-        timing: crate::core::ResponseTiming::default(),
+        timing: resp.timing,
     })
 }
 

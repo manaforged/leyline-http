@@ -183,6 +183,7 @@ pub(super) async fn send_request_h1_streaming(
     permit: OwnedSemaphorePermit,
     key: PoolKey,
 ) -> Result<H1Response, H1PooledError> {
+    let started = Instant::now();
     let replay = replay_body(method, &body);
     let mut body = body;
 
@@ -219,6 +220,7 @@ pub(super) async fn send_request_h1_streaming(
                     headers: head.headers,
                     body: H1ResponseBody::Streaming(BodyStream::new(rx)),
                     tls: tls_for_scheme(scheme, &tls),
+                    timing: ResponseTiming::leg(started, None),
                 });
             }
             Err(e) => {
@@ -239,8 +241,10 @@ pub(super) async fn send_request_h1_streaming(
     }
     tracing::Span::current().record("pool.hit", false);
 
+    let connect_started = Instant::now();
     let (io, tls): (Box<dyn H1Io>, TlsInfo) =
         open_new(connector, scheme, host, port, proxy).await?;
+    let connect_ms = ResponseTiming::millis(connect_started);
     let mut slot = H1Slot { io };
     let (head, reusable) =
         exchange_head_on_stream(slot.io.as_mut(), method, url, headers, body, target).await?;
@@ -262,6 +266,7 @@ pub(super) async fn send_request_h1_streaming(
         headers: head.headers,
         body: H1ResponseBody::Streaming(BodyStream::new(rx)),
         tls: tls_for_scheme(scheme, &tls),
+        timing: ResponseTiming::leg(started, Some(connect_ms)),
     })
 }
 

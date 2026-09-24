@@ -207,7 +207,7 @@ pub(crate) async fn send_request(
         {
             Ok(resp) => {
                 tracing::Span::current().record("pool.hit", true);
-                let send_ms = ms_since(send_started);
+                let send_ms = ResponseTiming::millis(send_started);
                 trace::head(
                     connect_host,
                     resp.status,
@@ -219,7 +219,7 @@ pub(crate) async fn send_request(
                     reused: true,
                     connect_ms: None,
                     send_ms,
-                    total_ms: ms_since(started),
+                    total_ms: ResponseTiming::millis(started),
                 };
                 return Ok((resp, tls, timing));
             }
@@ -256,7 +256,7 @@ pub(crate) async fn send_request(
 
     let connect_started = Instant::now();
     let (handle, tls) = open_h2(pool, connector, h2_config, key.clone()).await?;
-    let connect_ms = ms_since(connect_started);
+    let connect_ms = ResponseTiming::millis(connect_started);
 
     let send_started = Instant::now();
     let traced_host = trace::on().then(|| connect_host.to_string());
@@ -291,14 +291,10 @@ pub(crate) async fn send_request(
     let timing = ResponseTiming {
         reused: false,
         connect_ms: Some(connect_ms),
-        send_ms: ms_since(send_started),
-        total_ms: ms_since(started),
+        send_ms: ResponseTiming::millis(send_started),
+        total_ms: ResponseTiming::millis(started),
     };
     Ok((resp, tls, timing))
-}
-
-fn ms_since(start: Instant) -> u32 {
-    u32::try_from(start.elapsed().as_millis()).unwrap_or(u32::MAX)
 }
 
 fn parse_authority(authority: &str, default_port: u16) -> (&str, u16) {

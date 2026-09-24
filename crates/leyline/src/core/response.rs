@@ -73,6 +73,20 @@ impl ResponseTiming {
         }
     }
 
+    pub(crate) fn leg(started: std::time::Instant, connect_ms: Option<u32>) -> Self {
+        let total_ms = Self::millis(started);
+        Self {
+            reused: connect_ms.is_none(),
+            connect_ms,
+            send_ms: total_ms.saturating_sub(connect_ms.unwrap_or(0)),
+            total_ms,
+        }
+    }
+
+    pub(crate) fn millis(start: std::time::Instant) -> u32 {
+        u32::try_from(start.elapsed().as_millis()).unwrap_or(u32::MAX)
+    }
+
     pub(crate) fn add_leg(&mut self, leg: &ResponseTiming) {
         self.total_ms = self.total_ms.saturating_add(leg.total_ms);
         self.send_ms = self.send_ms.saturating_add(leg.send_ms);
