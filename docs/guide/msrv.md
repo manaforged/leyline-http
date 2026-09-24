@@ -12,9 +12,9 @@ few months old still builds Leyline.
 Leyline bumps the MSRV only when a feature it needs requires a newer
 compiler. There is no scheduled bump, and no bump for style or convenience.
 
-A bump is a breaking-enough change to get its own minor release and its own
-line in [CHANGELOG.md](https://github.com/manaforged/leyline-http/blob/main/CHANGELOG.md). You will never find an MSRV bump in a
-patch release.
+An MSRV bump ships in a minor release with its own line in
+[CHANGELOG.md](https://github.com/manaforged/leyline-http/blob/main/CHANGELOG.md).
+A patch release never raises the MSRV.
 
 ## What you can build with
 

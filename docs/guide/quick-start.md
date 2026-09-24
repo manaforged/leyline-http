@@ -6,11 +6,11 @@ response.
 ## Add the dependency
 
 The crate is `leyline-http`. The library it builds is `leyline`, so that is the
-name you import. Until the first crates.io release is published, use Git:
+name you import.
 
 ```toml
 [dependencies]
-leyline-http = { git = "https://github.com/manaforged/leyline-http", branch = "main" }
+leyline-http = "0.1"
 tokio = { version = "1", features = ["full"] }
 ```
 

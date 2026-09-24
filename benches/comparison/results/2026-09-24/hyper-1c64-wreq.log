@@ -1,0 +1,41 @@
+== build clients ==
+== local server https://127.0.0.1:38233/ ==
+== equivalence gate ==
+EQUIV leyline status=200 fnv=5df04559e15e1bf4 len=10
+EQUIV wreq status=200 fnv=5df04559e15e1bf4 len=10
+equivalence OK (200 fnv=5df04559e15e1bf4 len=10)
+== 20 paired rounds: leyline vs wreq (warm=2000 cold=200 conc=400000 x64, alternating order) ==
+round 1 (leyline,wreq): leyline=176676.773 wreq=158355.006
+round 2 (wreq,leyline): leyline=173153.609 wreq=155890.952
+round 3 (leyline,wreq): leyline=172275.511 wreq=155271.015
+round 4 (wreq,leyline): leyline=172742.827 wreq=154823.336
+round 5 (leyline,wreq): leyline=171578.968 wreq=153917.154
+round 6 (wreq,leyline): leyline=169679.138 wreq=154485.710
+round 7 (leyline,wreq): leyline=171079.189 wreq=155015.280
+round 8 (wreq,leyline): leyline=171536.687 wreq=155670.701
+round 9 (leyline,wreq): leyline=173103.684 wreq=155323.224
+round 10 (wreq,leyline): leyline=173140.317 wreq=155348.607
+round 11 (leyline,wreq): leyline=171465.632 wreq=155117.163
+round 12 (wreq,leyline): leyline=167951.511 wreq=154328.974
+round 13 (leyline,wreq): leyline=173455.616 wreq=154055.533
+round 14 (wreq,leyline): leyline=173078.015 wreq=155644.812
+round 15 (leyline,wreq): leyline=173053.731 wreq=155372.970
+round 16 (wreq,leyline): leyline=172247.192 wreq=154330.017
+round 17 (leyline,wreq): leyline=172091.463 wreq=157328.998
+round 18 (wreq,leyline): leyline=172202.356 wreq=155010.943
+round 19 (leyline,wreq): leyline=171797.916 wreq=156984.336
+round 20 (wreq,leyline): leyline=170325.693 wreq=156892.547
+
+=== PAIRED RESULT (n=20): leyline vs wreq ===
+leyline mean conc_rps : 172131.791
+wreq mean conc_rps : 155458.364
+delta (leyline-wreq)  : 16673.428  (+10.7%)
+95% CI of delta       : [15919.864, 17426.991]  (t=2.093)
+paired t              : 46.31  (|t|>2.09 ~ significant at 95%)
+sign test             : leyline faster in 20/20 rounds
+mean round p50/p99 us : leyline 349/589  wreq 404/582
+warm_rps delta        : +5204.415  (+15.3%)  95% CI [4613.841, 5794.989]
+cold_rps delta        : +187.381  (+10.6%)  95% CI [143.232, 231.531]
+wrote results/2026-09-24/hyper-1c64-wreq.json
+
+== h2load reference skipped: install nghttp2-client, or set CONTROL=0 to silence ==

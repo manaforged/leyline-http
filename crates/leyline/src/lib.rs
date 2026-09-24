@@ -1,6 +1,4 @@
-#[cfg(doctest)]
-#[doc = include_str!("../../../README.md")]
-pub struct ReadmeDoctests;
+#![doc = include_str!("../README.md")]
 
 #[cfg(doctest)]
 #[doc = include_str!("../../../docs/api.md")]

@@ -39,7 +39,7 @@ Turn everything off and add back what you need:
 
 ```toml
 [dependencies]
-leyline-http = { git = "https://github.com/manaforged/leyline-http", branch = "main", default-features = false, features = ["stream", "socks"] }
+leyline-http = { version = "0.1", default-features = false, features = ["stream", "socks"] }
 ```
 
 ## Prebuilt BoringSSL targets
@@ -85,7 +85,7 @@ artifacts do not carry those builds.
 
 ## MSRV
 
-The workspace sets `rust-version = "1.96"`, and every crate inherits it. The
+The workspace sets `rust-version = "1.96"`, and every crate sets it. The
 edition is 2024. The release gate compile-checks 1.96 and runs the test
 suite on current stable. [MSRV](msrv.md) states the policy: a bump gets
 its own minor release and its own changelog line, and never lands in a patch

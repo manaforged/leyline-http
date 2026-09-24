@@ -1,0 +1,41 @@
+== build clients ==
+== local server https://127.0.0.1:42371/ ==
+== equivalence gate ==
+EQUIV leyline status=200 fnv=5df04559e15e1bf4 len=10
+EQUIV reqwest status=200 fnv=5df04559e15e1bf4 len=10
+equivalence OK (200 fnv=5df04559e15e1bf4 len=10)
+== 20 paired rounds: leyline vs reqwest (warm=1 cold=1 conc=3000000 x256, alternating order) ==
+round 1 (leyline,reqwest): leyline=1101644.228 reqwest=1041337.873
+round 2 (reqwest,leyline): leyline=1098050.997 reqwest=1045162.064
+round 3 (leyline,reqwest): leyline=1081086.428 reqwest=1040922.206
+round 4 (reqwest,leyline): leyline=1089921.071 reqwest=1050035.671
+round 5 (leyline,reqwest): leyline=1089038.663 reqwest=1039922.516
+round 6 (reqwest,leyline): leyline=1094022.991 reqwest=1037628.990
+round 7 (leyline,reqwest): leyline=1104761.636 reqwest=1028776.781
+round 8 (reqwest,leyline): leyline=1085388.179 reqwest=1024205.191
+round 9 (leyline,reqwest): leyline=1050716.552 reqwest=997571.578
+round 10 (reqwest,leyline): leyline=1087107.013 reqwest=1034586.118
+round 11 (leyline,reqwest): leyline=1086508.444 reqwest=1031483.444
+round 12 (reqwest,leyline): leyline=1083633.504 reqwest=1034374.710
+round 13 (leyline,reqwest): leyline=1095157.752 reqwest=1014916.807
+round 14 (reqwest,leyline): leyline=1102400.745 reqwest=1033052.199
+round 15 (leyline,reqwest): leyline=1087210.143 reqwest=1030896.440
+round 16 (reqwest,leyline): leyline=1083249.924 reqwest=1026132.280
+round 17 (leyline,reqwest): leyline=1101211.530 reqwest=1034541.594
+round 18 (reqwest,leyline): leyline=1096487.973 reqwest=1036450.378
+round 19 (leyline,reqwest): leyline=1096419.844 reqwest=1022344.502
+round 20 (reqwest,leyline): leyline=1094971.775 reqwest=1025768.453
+
+=== PAIRED RESULT (n=20): leyline vs reqwest ===
+leyline mean conc_rps : 1090449.470
+reqwest mean conc_rps : 1031505.490
+delta (leyline-reqwest)  : 58943.980  (+5.7%)
+95% CI of delta       : [53790.134, 64097.826]  (t=2.093)
+paired t              : 23.94  (|t|>2.09 ~ significant at 95%)
+sign test             : leyline faster in 20/20 rounds
+mean round p50/p99 us : leyline 217/578  reqwest 236/479
+warm_rps delta        : -1041.917  (-4.4%)  95% CI [-3849.472, 1765.638]
+cold_rps delta        : -290.454  (-20.4%)  95% CI [-352.578, -228.331]
+wrote results/2026-09-24/hyper-8c256-reqwest.json
+
+== h2load reference skipped: install nghttp2-client, or set CONTROL=0 to silence ==

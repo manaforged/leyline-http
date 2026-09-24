@@ -6,7 +6,7 @@ The modules `leyline::h2`, `leyline::pool`, `leyline::fuzz`, and
 leyline's own tests, benches, and fuzz targets. They are public but not part
 of the contract; they change without notice. Do not call them.
 
-Crate: `leyline-http` on crates.io / Git. Import name: `leyline`.
+Crate: `leyline-http` on crates.io. Import name: `leyline`.
 
 ## Core types
 
@@ -144,8 +144,8 @@ predicates `is_timeout`/`is_connect`/`is_status`/`is_redirect`/`is_body`/
   (exposes BoringSSL types on `TlsContext`), `bench-internals` (bench-only
   pool probes). `full` enables every opt-in except `bench-internals` and
   `unstable-bssl`.
-- The supported public surface is `leyline-http` plus the three binding
-  crates.
+- The supported public surface is `leyline-http`. The BoringSSL crates it
+  depends on are outside the semver promise.
 
 ## Bindings
 

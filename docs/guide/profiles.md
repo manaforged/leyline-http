@@ -81,16 +81,14 @@ profile advertises ALPS at the old draft codepoint (`0x4469`), which is what
 
 Do not reconcile these by flipping the flag. Each file records that its golden
 was re-pinned to leyline's own emission rather than to a browser capture, so
-the golden is not evidence about Safari. Safari 26 — the one WebKit profile with
-a first-party capture (`webkit-26.5`) — sends no ALPS extension at all, which
-suggests the flag and the golden are both wrong and that the fix is a fresh
-capture from Safari.app and Mobile Safari, not a hash edit.
+the golden is not evidence about Safari. Safari 26 is the one WebKit profile
+with a first-party capture (`webkit-26.5`), and it sends no ALPS extension.
+The fix is a fresh capture from Safari.app and Mobile Safari, not a hash edit.
 
 ## Update cadence
 
-- **Chrome and Firefox:** add a profile within one week of a stable release.
-  Both ship on a four-week train, so a profile that trails by more than one
-  release is visibly stale on the wire.
+- **Chrome and Firefox:** Leyline adds profiles for new stable releases. Both
+  browsers ship every four weeks.
 - **Safari:** add a profile when Apple ships an OS release. Safari's TLS stack
   moves with macOS and iOS, not with the browser version alone.
 - **Brave, OkHttp, and CFNetwork:** recapture when the upstream engine version
@@ -122,5 +120,5 @@ on, and `ProfileError::Empty` when the directory holds no profile.
 Use this to author and validate a profile for a browser release that the
 installed crate version does not bundle yet. In 0.1 the session builder still
 selects a profile by `Browser` variant, so a loaded profile is available for
-inspection and validation but is not yet dialable; sending one requires a crate
+inspection and validation but is not usable in a session; sending one requires a crate
 release that adds the variant.

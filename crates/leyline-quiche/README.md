@@ -1,13 +1,12 @@
 # leyline-quiche
 
 A vendored fork of [`cloudflare/quiche`](https://github.com/cloudflare/quiche)
-v0.23.7 that links against [`leyline-bssl`](../leyline-bssl) instead
+v0.23.7 that links against [`leyline-bssl`](https://crates.io/crates/leyline-bssl) instead
 of `boring`, so [`leyline-http`](https://crates.io/crates/leyline-http)'s HTTP/2 and
 HTTP/3 ClientHellos share the same patched BoringSSL build.
 
 **Most users do not want this crate directly.** Depend on `leyline-http`;
 import `leyline`. It pulls `leyline-quiche` in when the `http3` feature is on.
-
 
 ## License
 

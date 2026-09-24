@@ -1,7 +1,5 @@
 # Contributing
 
-Thanks for your interest in Leyline.
-
 ## Before you open a pull request
 
 1. Run the release gate:

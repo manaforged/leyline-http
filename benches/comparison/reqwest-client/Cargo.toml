@@ -9,7 +9,3 @@ publish = false
 [dependencies]
 reqwest = { version = "=0.13.5", default-features = false, features = ["rustls", "http2"] }
 tokio = { version = "=1.53.1", features = ["rt-multi-thread", "macros"] }
-
-[profile.release]
-lto = "fat"
-codegen-units = 1

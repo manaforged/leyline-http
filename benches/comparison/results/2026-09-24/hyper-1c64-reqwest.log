@@ -1,0 +1,41 @@
+== build clients ==
+== local server https://127.0.0.1:38881/ ==
+== equivalence gate ==
+EQUIV leyline status=200 fnv=5df04559e15e1bf4 len=10
+EQUIV reqwest status=200 fnv=5df04559e15e1bf4 len=10
+equivalence OK (200 fnv=5df04559e15e1bf4 len=10)
+== 20 paired rounds: leyline vs reqwest (warm=2000 cold=200 conc=400000 x64, alternating order) ==
+round 1 (leyline,reqwest): leyline=175596.295 reqwest=184010.416
+round 2 (reqwest,leyline): leyline=172948.828 reqwest=180070.724
+round 3 (leyline,reqwest): leyline=174511.702 reqwest=182879.559
+round 4 (reqwest,leyline): leyline=169482.187 reqwest=180043.544
+round 5 (leyline,reqwest): leyline=173037.645 reqwest=180093.952
+round 6 (reqwest,leyline): leyline=175328.026 reqwest=184060.921
+round 7 (leyline,reqwest): leyline=176248.242 reqwest=182175.094
+round 8 (reqwest,leyline): leyline=174024.051 reqwest=182302.080
+round 9 (leyline,reqwest): leyline=174833.553 reqwest=181524.850
+round 10 (reqwest,leyline): leyline=174407.802 reqwest=178664.169
+round 11 (leyline,reqwest): leyline=173736.242 reqwest=181216.197
+round 12 (reqwest,leyline): leyline=173385.591 reqwest=183427.447
+round 13 (leyline,reqwest): leyline=173083.365 reqwest=181820.429
+round 14 (reqwest,leyline): leyline=175312.135 reqwest=180010.152
+round 15 (leyline,reqwest): leyline=172902.077 reqwest=179647.607
+round 16 (reqwest,leyline): leyline=170759.606 reqwest=180129.759
+round 17 (leyline,reqwest): leyline=173226.347 reqwest=181345.813
+round 18 (reqwest,leyline): leyline=174214.115 reqwest=181965.108
+round 19 (leyline,reqwest): leyline=173219.515 reqwest=179068.115
+round 20 (reqwest,leyline): leyline=173420.172 reqwest=179421.294
+
+=== PAIRED RESULT (n=20): leyline vs reqwest ===
+leyline mean conc_rps : 173683.875
+reqwest mean conc_rps : 181193.861
+delta (leyline-reqwest)  : -7509.987  (-4.1%)
+95% CI of delta       : [-8287.234, -6732.739]  (t=2.093)
+paired t              : -20.22  (|t|>2.09 ~ significant at 95%)
+sign test             : leyline faster in 0/20 rounds
+mean round p50/p99 us : leyline 347/579  reqwest 341/536
+warm_rps delta        : +3546.915  (+10.0%)  95% CI [2916.032, 4177.799]
+cold_rps delta        : -413.965  (-17.7%)  95% CI [-473.113, -354.818]
+wrote results/2026-09-24/hyper-1c64-reqwest.json
+
+== h2load reference skipped: install nghttp2-client, or set CONTROL=0 to silence ==

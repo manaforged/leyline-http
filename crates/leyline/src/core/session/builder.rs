@@ -446,7 +446,9 @@ impl SessionBuilder {
     }
 
     pub fn accept_language(mut self, lang: impl Into<String>) -> Self {
-        self.accept_language_override = Some(lang.into());
+        let lang = lang.into();
+        self.check_header("accept-language", &lang);
+        self.accept_language_override = Some(lang);
         self
     }
 
@@ -456,9 +458,20 @@ impl SessionBuilder {
         P: IntoParamPair,
     {
         for pair in headers {
-            self.extra_identity_headers.push(pair.into_param_pair());
+            let (name, value) = pair.into_param_pair();
+            self.check_header(&name, &value);
+            self.extra_identity_headers.push((name, value));
         }
         self
+    }
+
+    fn check_header(&mut self, name: &str, value: &str) {
+        if self.config_error.is_none()
+            && (crate::core::headers::name(name).is_err()
+                || crate::core::headers::value(value).is_err())
+        {
+            self.config_error = Some(format!("invalid header `{}`", name.escape_debug()));
+        }
     }
 
     pub fn danger_accept_invalid_certs(mut self, accept: bool) -> Self {

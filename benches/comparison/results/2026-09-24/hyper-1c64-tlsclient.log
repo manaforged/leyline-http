@@ -1,0 +1,41 @@
+== build clients ==
+== local server https://127.0.0.1:37017/ ==
+== equivalence gate ==
+EQUIV leyline status=200 fnv=5df04559e15e1bf4 len=10
+EQUIV tls-client status=200 fnv=5df04559e15e1bf4 len=10
+equivalence OK (200 fnv=5df04559e15e1bf4 len=10)
+== 20 paired rounds: leyline vs tlsclient (warm=2000 cold=200 conc=400000 x64, alternating order) ==
+round 1 (leyline,tlsclient): leyline=174288.078 tlsclient=83526
+round 2 (tlsclient,leyline): leyline=170948.468 tlsclient=83416
+round 3 (leyline,tlsclient): leyline=171743.728 tlsclient=83309
+round 4 (tlsclient,leyline): leyline=173669.665 tlsclient=82763
+round 5 (leyline,tlsclient): leyline=171315.523 tlsclient=84074
+round 6 (tlsclient,leyline): leyline=170431.889 tlsclient=83056
+round 7 (leyline,tlsclient): leyline=169619.906 tlsclient=83417
+round 8 (tlsclient,leyline): leyline=171360.079 tlsclient=83531
+round 9 (leyline,tlsclient): leyline=168991.575 tlsclient=83324
+round 10 (tlsclient,leyline): leyline=170601.680 tlsclient=81587
+round 11 (leyline,tlsclient): leyline=167916.913 tlsclient=83787
+round 12 (tlsclient,leyline): leyline=168837.162 tlsclient=82236
+round 13 (leyline,tlsclient): leyline=163531.462 tlsclient=79890
+round 14 (tlsclient,leyline): leyline=166160.093 tlsclient=81034
+round 15 (leyline,tlsclient): leyline=168237.160 tlsclient=75460
+round 16 (tlsclient,leyline): leyline=166942.705 tlsclient=81829
+round 17 (leyline,tlsclient): leyline=169636.628 tlsclient=79975
+round 18 (tlsclient,leyline): leyline=164222.251 tlsclient=79114
+round 19 (leyline,tlsclient): leyline=164997.122 tlsclient=84983
+round 20 (tlsclient,leyline): leyline=168331.421 tlsclient=86472
+
+=== PAIRED RESULT (n=20): leyline vs tlsclient ===
+leyline mean conc_rps : 169089.175
+tlsclient mean conc_rps : 82339.150
+delta (leyline-tlsclient)  : 86750.025  (+105.4%)
+95% CI of delta       : [85294.095, 88205.956]  (t=2.093)
+paired t              : 124.71  (|t|>2.09 ~ significant at 95%)
+sign test             : leyline faster in 20/20 rounds
+mean round p50/p99 us : leyline 356/598  tlsclient 912/2015
+warm_rps delta        : -3262.342  (-7.7%)  95% CI [-3838.817, -2685.866]
+cold_rps delta        : +543.608  (+39.5%)  95% CI [513.741, 573.476]
+wrote results/2026-09-24/hyper-1c64-tlsclient.json
+
+== h2load reference skipped: install nghttp2-client, or set CONTROL=0 to silence ==

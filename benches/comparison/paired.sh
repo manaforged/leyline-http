@@ -28,6 +28,9 @@ CLIENT_CPUS="${CLIENT_CPUS:-2-15}"
 CONTROL="${CONTROL:-1}"
 LEFT="${LEFT:-leyline}"
 RIGHT="${RIGHT:-wreq}"
+ORIGIN="${ORIGIN:-go}"
+if [ -n "${TARGET_URL:-}" ]; then ORIGIN="external"; fi
+LOAD_AVG_START="$(cat /proc/loadavg 2>/dev/null || true)"
 
 pin_client() { if [ -n "$CLIENT_CPUS" ] && command -v taskset >/dev/null 2>&1; then taskset -c "$CLIENT_CPUS" "$@"; else "$@"; fi; }
 
@@ -38,6 +41,7 @@ build_client() {
     leyline) ( cd leyline-client && cargo build --release -q && cp target/release/leyline-cmp-client ../bin/leyline ) ;;
     wreq) ( cd wreq-client && CARGO_TARGET_DIR="$WREQ_TARGET" cargo build --release -q && cp "$WREQ_TARGET/release/wreq-cmp-client" ../bin/wreq ) ;;
     reqwest) ( cd reqwest-client && CARGO_TARGET_DIR="$WREQ_TARGET" cargo build --release -q && cp "$WREQ_TARGET/release/reqwest-cmp-client" ../bin/reqwest ) ;;
+    tlsclient) ( cd go && go build -o ../bin/tlsclient ./tlsclient ) ;;
     *) [ -x "bin/$1" ] || { echo "ERROR: no build rule for client '$1' and bin/$1 is missing" >&2; exit 1; } ;;
   esac
 }
@@ -54,7 +58,11 @@ if [ -n "${TARGET_URL:-}" ]; then
   URL="$TARGET_URL"
   echo "== remote target $URL  proxy=${PROXY:-none} ==" >&2
 else
-  ( cd go && go build -o ../bin/server ./server )
+  case "$ORIGIN" in
+    go) ( cd go && go build -o ../bin/server ./server ) ;;
+    hyper) ( cd .. && cargo build --release -q --example origin && cp target/release/examples/origin comparison/bin/server ) ;;
+    *) echo "ERROR: ORIGIN must be go or hyper" >&2; exit 1 ;;
+  esac
   : > /tmp/cmp-paired-server.log
   if [ -n "$SERVER_CPUS" ] && command -v taskset >/dev/null 2>&1; then
     taskset -c "$SERVER_CPUS" ./bin/server "127.0.0.1:0" >/tmp/cmp-paired-server.log 2>&1 &
@@ -140,20 +148,59 @@ END {
 
 if [ -n "${PAIRED_JSON:-}" ]; then
   LEFT="$LEFT" RIGHT="$RIGHT" WARM="$WARM" COLD="$COLD" CONC="$CONC" CONCURRENCY="$CONCURRENCY" \
-    CELL_NAME="${CELL_NAME:-}" ORIGIN="${ORIGIN:-go}" CMP_BODY="${CMP_BODY:-}" \
+    CELL_NAME="${CELL_NAME:-}" ORIGIN="$ORIGIN" CMP_BODY="${CMP_BODY:-}" \
     CMP_CONNECTIONS="${CMP_CONNECTIONS:-1}" LEYLINE_CHROME="${LEYLINE_CHROME:-}" \
+    SERVER_CPUS="$SERVER_CPUS" CLIENT_CPUS="$CLIENT_CPUS" LOAD_AVG_START="$LOAD_AVG_START" \
     python3 - "$pairs" "$PAIRED_JSON" <<'PYEOF'
-import hashlib, json, os, sys
+import hashlib, json, os, platform, re, subprocess, sys
 
 pairs_path, out_path = sys.argv[1], sys.argv[2]
 rounds = []
 for i, line in enumerate(open(pairs_path), 1):
     f = line.split()
-    rounds.append({
-        "round": i,
-        "left":  {"conc_rps": float(f[0]), "warm_rps": float(f[3]), "cold_rps": float(f[4])},
-        "right": {"conc_rps": float(f[5]), "warm_rps": float(f[8]), "cold_rps": float(f[9])},
-    })
+    side = lambda o: {"conc_rps": float(f[o]), "conc_p50_us": float(f[o + 1]), "conc_p99_us": float(f[o + 2]),
+                      "warm_rps": float(f[o + 3]), "cold_rps": float(f[o + 4])}
+    rounds.append({"round": i, "left": side(0), "right": side(5)})
+
+def run(*cmd):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, check=True).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+def read(path):
+    try:
+        return open(path).read().strip()
+    except OSError:
+        return None
+
+def locked(client, crate):
+    lock = read(f"{client}-client/Cargo.lock") or ""
+    m = re.search(rf'name = "{re.escape(crate)}"\nversion = "([^"]+)"', lock)
+    return m.group(1) if m else None
+
+def go_module(module):
+    m = re.search(rf"^\s*{re.escape(module)} (v\S+)", read("go/go.mod") or "", re.M)
+    return m.group(1) if m else None
+
+cpu = next((l.split(":", 1)[1].strip() for l in (read("/proc/cpuinfo") or "").splitlines() if l.startswith("model name")), None)
+host = {
+    "leyline_rev": os.environ.get("LEYLINE_REV") or run("git", "rev-parse", "HEAD"),
+    "kernel": platform.release(),
+    "cpu": cpu,
+    "governor": read("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor"),
+    "boost": read("/sys/devices/system/cpu/cpufreq/boost"),
+    "rustc": run("rustc", "--version"),
+    "server_cpus": os.environ.get("SERVER_CPUS"),
+    "client_cpus": os.environ.get("CLIENT_CPUS"),
+    "load_avg_start": os.environ.get("LOAD_AVG_START"),
+    "load_avg_end": read("/proc/loadavg"),
+    "wreq": locked("wreq", "wreq"),
+    "reqwest": locked("reqwest", "reqwest"),
+    "tls_client": go_module("github.com/bogdanfinn/tls-client"),
+    "go": run("go", "env", "GOVERSION"),
+    "build_profile": "cargo default release",
+}
 
 def sha(b):
     try:
@@ -176,6 +223,7 @@ cell = {
     "warm_count": int(os.environ.get("WARM", "1")),
     "cold_count": int(os.environ.get("COLD", "1")),
     "conc_count": int(os.environ.get("CONC", "20000")),
+    "host": host,
     "rounds": rounds,
 }
 with open(out_path, "w") as fh:

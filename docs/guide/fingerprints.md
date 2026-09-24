@@ -148,8 +148,8 @@ returns a `ProfileError`:
 - `Empty` when the directory holds no `<family>/<version>.toml` file.
 
 In 0.1 the session builder still selects a profile by `Browser` variant, so a
-loaded profile is available for inspection and validation but is not yet
-dialable. Sending one needs a crate release that adds the variant.
+loaded profile is available for inspection and validation but is not usable in a
+session. Sending one needs a crate release that adds the variant.
 
 To parse a single file rather than a directory, call
 `BrowserProfile::from_toml`. It runs the same validation.

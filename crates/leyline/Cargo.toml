@@ -11,7 +11,7 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 documentation = "https://docs.rs/leyline-http"
-readme = "../../README.md"
+readme = "README.md"
 
 [lib]
 name = "leyline"

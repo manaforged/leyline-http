@@ -34,7 +34,7 @@ pinned at tag `150.0.7871.26`. See
 for the carried patches and the rebuild steps.
 
 A security fix released upstream in BoringSSL or quiche is picked up and
-released in Leyline as soon as practicable. Each pickup gets a
+released in the next Leyline patch release. Each pickup gets a
 `### Security` line in [CHANGELOG.md](CHANGELOG.md) that names the upstream
 advisory and the new pinned revision, and the pinned revision is recorded in
 `PROVENANCE.md`.

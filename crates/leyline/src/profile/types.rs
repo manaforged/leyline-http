@@ -10,6 +10,7 @@ use crate::{Error, Kind};
     reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
 )]
 #[derive(Debug, Clone, Deserialize)]
+#[non_exhaustive]
 pub struct BrowserProfile {
     pub meta: ProfileMeta,
     pub tls: TlsProfile,
@@ -23,6 +24,7 @@ pub struct BrowserProfile {
     reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
 )]
 #[derive(Debug, Clone, Deserialize)]
+#[non_exhaustive]
 pub struct ProfileMeta {
     pub name: String,
     pub browser: String,
@@ -40,6 +42,7 @@ pub struct ProfileMeta {
     reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
 )]
 #[derive(Debug, Clone, Deserialize)]
+#[non_exhaustive]
 pub struct TlsProfile {
     pub ciphers: Vec<String>,
     pub curves: Vec<String>,
@@ -93,6 +96,7 @@ const fn default_true() -> bool {
     reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
 )]
 #[derive(Debug, Clone, Default, Deserialize)]
+#[non_exhaustive]
 pub struct TlsFingerprint {
     #[serde(default)]
     pub ja4: Option<String>,
@@ -107,6 +111,7 @@ pub struct TlsFingerprint {
     reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
 )]
 #[derive(Debug, Clone, Deserialize)]
+#[non_exhaustive]
 pub struct H2Profile {
     #[serde(default)]
     pub header_table_size: Option<u32>,
@@ -137,6 +142,7 @@ pub struct H2Profile {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[non_exhaustive]
 pub struct H2PriorityProfile {
     pub exclusive: bool,
     pub stream_dependency: u32,
@@ -148,6 +154,7 @@ pub struct H2PriorityProfile {
     reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
 )]
 #[derive(Debug, Clone, Default, Deserialize)]
+#[non_exhaustive]
 pub struct H2PlatformOverride {
     #[serde(default)]
     pub header_table_size: Option<u32>,
@@ -182,6 +189,7 @@ pub struct H2PlatformOverride {
     reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
 )]
 #[derive(Debug, Clone, Default, Deserialize)]
+#[non_exhaustive]
 pub struct H2Fingerprint {
     #[serde(default)]
     pub akamai: Option<String>,
@@ -192,6 +200,7 @@ pub struct H2Fingerprint {
     reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
 )]
 #[derive(Debug, Clone, Deserialize)]
+#[non_exhaustive]
 pub struct PlatformIdentity {
     pub user_agent: String,
     pub sec_ch_ua: String,

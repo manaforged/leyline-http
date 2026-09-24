@@ -1,0 +1,41 @@
+== build clients ==
+== local server https://127.0.0.1:33361/ ==
+== equivalence gate ==
+EQUIV leyline status=200 fnv=5df04559e15e1bf4 len=10
+EQUIV wreq status=200 fnv=5df04559e15e1bf4 len=10
+equivalence OK (200 fnv=5df04559e15e1bf4 len=10)
+== 20 paired rounds: leyline vs wreq (warm=1 cold=1 conc=200000 x8, alternating order) ==
+round 1 (leyline,wreq): leyline=261096.225 wreq=246091.391
+round 2 (wreq,leyline): leyline=262361.356 wreq=244233.135
+round 3 (leyline,wreq): leyline=263227.276 wreq=244957.744
+round 4 (wreq,leyline): leyline=251712.690 wreq=228452.921
+round 5 (leyline,wreq): leyline=245332.064 wreq=246450.460
+round 6 (wreq,leyline): leyline=264239.498 wreq=249031.226
+round 7 (leyline,wreq): leyline=263651.415 wreq=243215.724
+round 8 (wreq,leyline): leyline=263651.245 wreq=247191.160
+round 9 (leyline,wreq): leyline=260093.575 wreq=247519.612
+round 10 (wreq,leyline): leyline=260815.924 wreq=249528.541
+round 11 (leyline,wreq): leyline=261743.282 wreq=236027.554
+round 12 (wreq,leyline): leyline=256748.253 wreq=245841.694
+round 13 (leyline,wreq): leyline=229725.462 wreq=102779.426
+round 14 (wreq,leyline): leyline=257394.117 wreq=178902.704
+round 15 (leyline,wreq): leyline=260474.430 wreq=246274.842
+round 16 (wreq,leyline): leyline=259163.210 wreq=246324.741
+round 17 (leyline,wreq): leyline=256867.836 wreq=251045.983
+round 18 (wreq,leyline): leyline=256038.341 wreq=247354.294
+round 19 (leyline,wreq): leyline=257403.906 wreq=235567.077
+round 20 (wreq,leyline): leyline=250932.664 wreq=244974.445
+
+=== PAIRED RESULT (n=20): leyline vs wreq ===
+leyline mean conc_rps : 257133.638
+wreq mean conc_rps : 234088.234
+delta (leyline-wreq)  : 23045.405  (+9.8%)
+95% CI of delta       : [9439.668, 36651.141]  (t=2.093)
+paired t              : 3.55  (|t|>2.09 ~ significant at 95%)
+sign test             : leyline faster in 19/20 rounds
+mean round p50/p99 us : leyline 28/68  wreq 31/81
+warm_rps delta        : +2919.654  (+13.9%)  95% CI [96.691, 5742.616]
+cold_rps delta        : +115.615  (+10.0%)  95% CI [65.019, 166.211]
+wrote results/2026-09-24/hyper-8c8-wreq.json
+
+== h2load reference skipped: install nghttp2-client, or set CONTROL=0 to silence ==

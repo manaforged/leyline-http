@@ -113,9 +113,7 @@ way: the proxy resolves the hostname.
 
 ```toml
 [dependencies]
-# Git until the 0.1.0 packages are published; then:
-# leyline-http = { version = "0.1", features = ["socks"] }
-leyline-http = { git = "https://github.com/manaforged/leyline-http", branch = "main", features = ["socks"] }
+leyline-http = { version = "0.1", features = ["socks"] }
 ```
 
 ## Per-request override

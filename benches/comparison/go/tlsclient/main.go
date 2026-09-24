@@ -21,7 +21,7 @@ var expected []byte
 
 func newClient() tls_client.HttpClient {
 	opts := []tls_client.HttpClientOption{
-		tls_client.WithClientProfile(profiles.Chrome_146),
+		tls_client.WithClientProfile(profiles.Chrome_152),
 		tls_client.WithTimeoutSeconds(30),
 	}
 	if caPath := os.Getenv("CMP_CA"); caPath != "" {

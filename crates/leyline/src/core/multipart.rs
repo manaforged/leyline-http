@@ -170,9 +170,9 @@ impl From<Form> for Body {
 }
 
 fn part_header_len(part: &Part) -> usize {
-    let mut n = "Content-Disposition: form-data; name=\"\"\r\n".len() + part.name.len();
+    let mut n = "Content-Disposition: form-data; name=\"\"\r\n".len() + quoted_len(&part.name);
     if let Some(fname) = &part.filename {
-        n += "; filename=\"\"".len() + fname.len();
+        n += "; filename=\"\"".len() + quoted_len(fname);
     }
     if let Some(mime) = &part.mime {
         n += "Content-Type: \r\n".len() + mime.len();
@@ -205,6 +205,10 @@ impl FormStream {
             state: FormState::NextPart,
         }
     }
+}
+
+fn quoted_len(input: &str) -> usize {
+    input.len() + input.bytes().filter(|b| matches!(b, b'"' | b'\\')).count()
 }
 
 fn escape_quoted(input: &str) -> Option<Vec<u8>> {

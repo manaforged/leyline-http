@@ -1,28 +1,28 @@
 # leyline-bssl-sys
 
-Leyline's owned BoringSSL FFI. Replaces the upstream `btls-sys` shim so leyline
-controls the **exact BoringSSL revision** (and the patches on top of it) that the
-TLS engine links — the fingerprint is an emergent property of that revision.
+Raw FFI bindings to the BoringSSL build that
+[`leyline-http`](https://crates.io/crates/leyline-http) uses. The crate ships
+prebuilt static libraries and pregenerated bindings for four targets, so a
+build needs no CMake, bindgen, Perl, or Go:
 
-Two link paths:
+- `aarch64-apple-darwin`
+- `x86_64-unknown-linux-gnu`
+- `aarch64-unknown-linux-gnu`
+- `x86_64-pc-windows-msvc`
 
-- **Provenance:** the source revision, carried patches, and per-file
-  checksums for the committed artifacts are recorded in
-  [PROVENANCE.md](PROVENANCE.md) and [native/CHECKSUMS](native/CHECKSUMS)
-  (verify: `scripts/package-bssl.sh --verify`).
-- **Dev / release (default):** link the committed prebuilt static libs in
-  `native/<target>/lib` + the pregenerated `src/bindings/<target>.rs`. No CMake,
-  bindgen, Perl, or Go needed. `build.rs` only emits link directives.
-- **Source rebuild:** the `deps/boringssl`
-  submodule and `patches/SERIES` to regenerate the target libraries and bindings.
+`patches/SERIES` pins the BoringSSL revision and lists the carried patches.
+The patches add the TLS extensions that the Firefox profiles need
+(`record_size_limit`, `delegated_credentials`) and a configurable extension
+order.
+[PROVENANCE.md](https://github.com/manaforged/leyline-http/blob/main/crates/leyline-bssl-sys/PROVENANCE.md)
+records the source revision, the patches, and a checksum for each library.
 
-## Revision + patches
+Depend on `leyline-http` instead of this crate. Its API is outside the
+`leyline-http` semver promise.
 
-The pinned BoringSSL commit and patch apply-order live in `patches/SERIES`. The
-patches (carried from upstream btls) add the Firefox extensions leyline needs
-(`set_record_size_limit`, `set_delegated_credentials`) plus PQ support. Bumping
-the revision = move the submodule, rebase the patches (`git am --3way`), rebuild,
-re-verify the full profile matrix.
+## License
 
-Supported targets: `x86_64-pc-windows-msvc`, `x86_64-unknown-linux-gnu`,
-`aarch64-unknown-linux-gnu`, `aarch64-apple-darwin`.
+`MIT AND Apache-2.0 AND BSD-3-Clause`. See
+[LICENSE-BORINGSSL](https://github.com/manaforged/leyline-http/blob/main/crates/leyline-bssl-sys/LICENSE-BORINGSSL)
+and the repository
+[NOTICE](https://github.com/manaforged/leyline-http/blob/main/NOTICE).
