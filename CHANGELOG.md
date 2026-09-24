@@ -36,16 +36,16 @@ First public release.
   response. By default there is no cap.
 - `Response::read_until` decodes a compressed body and stops when a predicate
   holds or a byte limit is reached.
-- `Session::preconnect` and `Session::preconnect_via` open and pool an
-  HTTP/2 connection before the first request, directly or through a given
-  proxy.
+- `Session::preconnect` opens and pools an HTTP/2 connection before the
+  first request, directly or through a given proxy.
 - The pool sends an HTTP/2 PING before it reuses a connection idle for 10
   seconds. It replaces the connection if the PING is not acknowledged within
   2 seconds. `PoolConfig::h2_ping_after_idle` and
   `PoolConfig::h2_ping_timeout` change the thresholds.
 - WebSocket connections through the session. `WsConnection::header` reads the
   handshake response headers.
-- Lifecycle tracing and optional Tower integration (feature `tower`).
+- Lifecycle tracing and a Tower `Service`, `LeylineService`, that wraps a
+  session (feature `tower`).
 - Opt-in fingerprint diagnostics derived from the configured profile and
   request (`SessionBuilder::audit`).
 - `SocketConfig::tcp_user_timeout` applies on Linux and Android. On other
@@ -53,7 +53,7 @@ First public release.
 - Prebuilt BoringSSL libraries and Rust bindings for macOS arm64, Linux x86_64
   and arm64 with glibc, and Windows x86_64 with MSVC.
 - A [user guide](docs/README.md) and an [API map](docs/api.md).
-- `connect_timeout` bounds plain `http://` connects. One request spends at
+- `TimeoutConfig::connect` bounds plain `http://` connects. One request spends at
   most one connect timeout on an unreachable host.
 - `Session::with_proxy` keeps the shared connection pool, which is keyed by
   proxy. A rebind to the session's current proxy URL takes a new pool, so a

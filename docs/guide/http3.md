@@ -1,8 +1,7 @@
 # HTTP/3
 
 The `http3` feature is on by default. It pulls in `leyline-quiche` and adds
-`H3Config`, the `Http3` and `Race` protocol policies, and the `http3()` and
-`race()` builder methods. Build with `default-features = false` to drop the
+`H3Config` and the `Http3` and `Race` protocol policies. Build with `default-features = false` to drop the
 QUIC stack entirely.
 
 ## Protocol policy
@@ -17,30 +16,26 @@ QUIC stack entirely.
 | `Http3` | Force HTTP/3 over QUIC. Needs the `http3` feature. |
 | `Race` | Race QUIC against TCP and TLS for origins already known to speak HTTP/3. Needs the `http3` feature. |
 
-Set it with `protocol_policy(...)`, or with the shorthand `http1()`,
-`http2()`, `http3()`, and `race()` builder methods.
-`Session::protocol_policy()` reads it back.
+Set it with `SessionBuilder::protocol`.
 
 ```rust,no_run
-use leyline::{ProtocolPolicy, Session};
+use leyline::{Browser, ProtocolPolicy, Session};
 
 # fn run() -> leyline::Result<()> {
 let session = Session::builder()
-    .chrome()
-    .protocol_policy(ProtocolPolicy::Http3)
+    .browser(Browser::default_browser())
+    .protocol(ProtocolPolicy::Http3)
     .build()?;
-assert_eq!(session.protocol_policy(), ProtocolPolicy::Http3);
+# let _ = session;
 # Ok(())
 # }
 ```
 
 Select a browser before forcing HTTP/3: the bare profile has no HTTP/3
 configuration, so a forced `Http3` request from a bare session fails.
-`.chrome()`, `.edge()`, `.opera()`, `.vivaldi()`, and `.brave()` select
-`Race`, on the builder and as `Session` constructors. `.browser(Browser::...)`
-keeps `Auto`, so a session built that way does not try HTTP/3. Call `.race()`
-after `.browser(...)` to get the same policy. An explicit protocol policy set
-before these shortcuts is kept.
+`Session::new()` selects `Race`. `Session::builder()` keeps `Auto`, so a
+session built that way does not try HTTP/3. Add
+`.protocol(ProtocolPolicy::Race)` to get the same policy.
 
 A profile without an HTTP/3 fingerprint fails a forced `Http3` request with
 `Kind::Config`.

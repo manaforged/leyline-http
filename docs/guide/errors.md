@@ -12,7 +12,7 @@ lists what each `Kind` means.
 use leyline::{Kind, Session};
 
 # async fn run() {
-let session = Session::chrome();
+let session = Session::new();
 match session.get("https://example.com/").await {
     Ok(resp) => println!("{}", resp.status()),
     Err(err) => match err.kind() {
@@ -39,7 +39,7 @@ error of kind `Kind::Status`. `err.status()` then returns the code.
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
-let session = leyline::Session::chrome();
+let session = leyline::Session::new();
 let resp = session.get("https://example.com/").await?.error_for_status()?;
 # let _ = resp;
 # Ok(())

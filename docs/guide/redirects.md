@@ -20,25 +20,30 @@ A session follows redirects by default, up to 10 per request. It follows a
 
 ## Set the limit
 
-`max_redirects(n)` sets the limit. `max_redirects(0)` turns redirects off.
+`.redirect(RedirectPolicy::limited(n))` sets the limit.
+`RedirectPolicy::none()` turns redirects off.
 When the limit is reached, the session returns the last `3xx` response. It
 does not return an error.
 
 ```rust,no_run
-use leyline::{RedirectPolicy, Session};
+use leyline::{Browser, RedirectPolicy, Session};
 
 # fn run() -> leyline::Result<()> {
-let session = Session::builder().chrome().max_redirects(3).build()?;
-let no_redirects = session.with_redirect_policy(RedirectPolicy::none());
-# let _ = no_redirects;
+let session = Session::builder()
+    .browser(Browser::default_browser())
+    .redirect(RedirectPolicy::limited(3))
+    .build()?;
+let no_redirects = Session::builder()
+    .browser(Browser::default_browser())
+    .redirect(RedirectPolicy::none())
+    .build()?;
+# let _ = (session, no_redirects);
 # Ok(())
 # }
 ```
 
-`RedirectPolicy::limited(n)` is the same as `max_redirects(n)`.
-`RedirectPolicy::none()` follows no redirect. `Session::with_redirect_policy`
-returns a copy of the session with another policy. The copy shares the pool
-and the cookie jar.
+`RedirectPolicy::limited(10)` is the default. `RedirectPolicy::none()` follows
+no redirect. The policy is set once per session, at build time.
 
 ## Decide each redirect
 
@@ -48,7 +53,7 @@ value, and the URLs followed so far. It returns `RedirectAction::Follow` or
 `RedirectAction::Stop`. On `Stop`, the session returns the `3xx` response.
 
 ```rust,no_run
-use leyline::{RedirectAction, RedirectPolicy, Session};
+use leyline::{Browser, RedirectAction, RedirectPolicy, Session};
 
 # fn run() -> leyline::Result<()> {
 let policy = RedirectPolicy::custom(|attempt| {
@@ -61,7 +66,10 @@ let policy = RedirectPolicy::custom(|attempt| {
         RedirectAction::Stop
     }
 });
-let session = Session::builder().chrome().redirect_policy(policy).build()?;
+let session = Session::builder()
+    .browser(Browser::default_browser())
+    .redirect(policy)
+    .build()?;
 # let _ = session;
 # Ok(())
 # }

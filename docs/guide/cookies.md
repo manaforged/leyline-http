@@ -9,7 +9,7 @@ stores what the response sets.
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
-let session = leyline::Session::chrome();
+let session = leyline::Session::new();
 session.get("https://example.com/login").await?;
 
 let jar = session.cookies();
@@ -65,9 +65,8 @@ assert!(!forked.contains_named("extra"));
 ## Give a session its own jar
 
 `SessionBuilder::cookie_jar(jar)` starts a session from a jar you built,
-which is how you restore a saved login. `Session::with_cookie_jar(jar)` derives
-a session that keeps the TLS context and the pool but swaps the jar, which is
-how you run several identities over one connection pool.
+which is how you restore a saved login. To run a second identity, build a
+second session with its own jar.
 
 ```rust,no_run
 use leyline::cookie::Jar;
@@ -77,8 +76,8 @@ let jar = Jar::new();
 jar.load_cookies("session_id=abc; theme=dark", "https://example.com/");
 
 let session = leyline::Session::builder().cookie_jar(jar).build()?;
-let second_identity = session.with_cookie_jar(Jar::new());
-# let _ = second_identity;
+let second_identity = leyline::Session::builder().cookie_jar(Jar::new()).build()?;
+# let _ = (session, second_identity);
 # Ok(())
 # }
 ```
@@ -116,8 +115,7 @@ cookie set by `www.example.co.uk` reaches that host only.
 
 The same list blocks a cookie set on a public suffix itself. A `Set-Cookie`
 with `Domain=co.uk` is refused, as is one with a domain that has no dot. Such
-a cookie is not stored, though `Response::cookies()` still reports the name
-and value it carried.
+a cookie is not stored, and `Response::cookies()` does not list it.
 
 ## Next
 

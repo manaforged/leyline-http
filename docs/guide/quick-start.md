@@ -19,7 +19,7 @@ example below also needs `serde_json = "1"` in the same manifest.
 
 ## Send a GET request
 
-`Session::chrome()` builds a session that impersonates the latest bundled
+`Session::new()` builds a session that impersonates the latest bundled
 Chrome on Windows.
 
 ```rust,no_run
@@ -27,7 +27,7 @@ use leyline::Session;
 
 #[tokio::main]
 async fn main() -> leyline::Result<()> {
-    let session = Session::chrome();
+    let session = Session::new();
     let resp = session.get("https://example.com/").await?;
     println!("{}", resp.status());
     Ok(())
@@ -41,7 +41,7 @@ header, and falls back to UTF-8.
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
-let session = leyline::Session::chrome();
+let session = leyline::Session::new();
 let body = session.get("https://example.com/").await?.text().await?;
 println!("{} bytes", body.len());
 # Ok(())
@@ -55,7 +55,7 @@ println!("{} bytes", body.len());
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
-let session = leyline::Session::chrome();
+let session = leyline::Session::new();
 let value: serde_json::Value = session
     .get("https://example.com/api/state")
     .await?
@@ -75,7 +75,7 @@ variable first.
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
-let session = leyline::Session::chrome();
+let session = leyline::Session::new();
 
 // Await the builder.
 let a = session.get("https://example.com/one").await?;

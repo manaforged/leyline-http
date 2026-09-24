@@ -27,7 +27,7 @@ Reference pages beside this guide: [profiles](guide/profiles.md) and
 [MSRV](guide/msrv.md).
 
 The Rust blocks in these pages are doctests of the `leyline-http` crate. The
-Tower blocks in [Requests](guide/requests.md) compile only under `--features tower`,
+Tower block in [Requests](guide/requests.md) compiles only under `--features tower`,
 and the default test run does not enable it. The `toml`, `sh`, and `js` blocks
 are not compiled. Blocks that open a socket are marked `no_run`, so they
 compile but do not send traffic.

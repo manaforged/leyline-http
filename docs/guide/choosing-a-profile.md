@@ -6,16 +6,19 @@ session claims. Pick both.
 
 ## Start with the default
 
-`Session::chrome()` is the default choice. It selects
-`Browser::default_browser()`, which is Chrome 152, on Windows, and it races
-HTTP/3 against HTTP/2.
+`Session::new()` is the default choice. It selects
+`Browser::default_browser()`, which is Chrome 152, on Windows. With the
+`http3` feature, it races HTTP/3 against HTTP/2.
 
 ```rust,no_run
-use leyline::{Platform, Session};
+use leyline::{Browser, Platform, Session};
 
 # fn run() -> leyline::Result<()> {
-let windows = Session::chrome();
-let mac = Session::builder().chrome().platform(Platform::MacOS).build()?;
+let windows = Session::new();
+let mac = Session::builder()
+    .browser(Browser::default_browser())
+    .platform(Platform::MacOS)
+    .build()?;
 # let _ = (windows, mac);
 # Ok(())
 # }
@@ -25,12 +28,12 @@ let mac = Session::builder().chrome().platform(Platform::MacOS).build()?;
 
 | You need | Use |
 | --- | --- |
-| The most common desktop browser | `.chrome()` |
-| Firefox | `.firefox()`, which selects `Browser::default_firefox()` |
-| Safari on macOS | `.safari()` |
-| Edge, Opera, or Vivaldi | `.edge()`, `.opera()`, or `.vivaldi()`: a brand on a Chrome profile |
-| Brave | `.brave()` |
-| A phone | `.android()` or `.ios()` with a browser that has that platform, or an app profile such as `Browser::OkHttpAndroid10` or `Browser::CfnetworkIOS18` |
+| The most common desktop browser | `.browser(Browser::default_browser())` |
+| Firefox | `.browser(Browser::default_firefox())` |
+| Safari on macOS | `.browser(Browser::Safari26).platform(Platform::MacOS)` |
+| Edge, Opera, or Vivaldi | `.brand(ChromiumBrand::Edge)`, `Opera`, or `Vivaldi`: a brand on a Chrome profile |
+| Brave | `.browser(Browser::Brave146).platform(Platform::MacOS)` |
+| A phone | `.platform(Platform::Android)` or `.platform(Platform::IOS)` with a browser that has that platform, or an app profile such as `Browser::OkHttpAndroid10` or `Browser::CfnetworkIOS18` |
 | One fixed version | `.browser(Browser::Chrome150)`, then `.platform(...)` |
 
 `Browser::latest(family)` returns the newest bundled version of a family. See

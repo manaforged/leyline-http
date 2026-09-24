@@ -13,7 +13,7 @@ await the builder.
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
-let session = leyline::Session::chrome();
+let session = leyline::Session::new();
 let mut ws = session.websocket("wss://example.com/live").connect().await?;
 ws.send("hello").await?;
 # Ok(())
@@ -44,7 +44,7 @@ and `protocol()` returns the subprotocol the origin selected, if any.
 use leyline::WebSocketConfig;
 
 # async fn run() -> leyline::Result<()> {
-let session = leyline::Session::chrome();
+let session = leyline::Session::new();
 let ws = session
     .websocket("wss://example.com/live")
     .config(WebSocketConfig::default().max_message_size(1 << 20))
@@ -66,7 +66,7 @@ connection down.
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
-let session = leyline::Session::chrome();
+let session = leyline::Session::new();
 let mut ws = session.websocket("wss://example.com/live").connect().await?;
 
 ws.send("ping").await?;
@@ -88,7 +88,7 @@ can write while another reads. The sink keeps `send`, `send_binary`,
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
-let session = leyline::Session::chrome();
+let session = leyline::Session::new();
 let ws = session.websocket("wss://example.com/live").connect().await?;
 let (mut sink, mut stream) = ws.split();
 

@@ -16,7 +16,7 @@ to 1 s, factor 2, and full jitter.
 use leyline::RetryPolicy;
 
 # async fn run() -> leyline::Result<()> {
-let session = leyline::Session::chrome();
+let session = leyline::Session::new();
 let resp = session
     .get("https://example.com/flaky")
     .retry(RetryPolicy::transient().with_max_retries(4))
@@ -76,18 +76,18 @@ Leyline retries only idempotent methods by default: GET, HEAD, OPTIONS, PUT,
 DELETE, and TRACE, per RFC 9110 section 9.2.2. A POST or PATCH is sent once,
 whatever the policy says.
 
-Opt in per request when you know the endpoint is safe to repeat.
+Opt in on the policy with `allow_non_idempotent(true)` when you know the
+endpoint is safe to repeat.
 
 ```rust,no_run
 use leyline::RetryPolicy;
 
 # async fn run() -> leyline::Result<()> {
-let session = leyline::Session::chrome();
+let session = leyline::Session::new();
 let resp = session
     .post("https://example.com/idempotent-write")
     .json(&serde_json::json!({ "id": "fixed-key" }))
-    .retry(RetryPolicy::transient())
-    .allow_non_idempotent_retry(true)
+    .retry(RetryPolicy::transient().allow_non_idempotent(true))
     .await?;
 # let _ = resp;
 # Ok(())
@@ -115,7 +115,7 @@ use std::time::Duration;
 
 # fn run() -> leyline::Result<()> {
 let session = Session::builder()
-    .timeouts(
+    .timeout(
         TimeoutConfig::default()
             .total(Duration::from_secs(60))
             .connect(Duration::from_secs(5))
@@ -128,17 +128,15 @@ let session = Session::builder()
 # }
 ```
 
-`timeouts()` replaces every value, including anything set earlier by `timeout`
-or `connect_timeout`. Set it first, then adjust with the narrow methods if you
-want to.
-
-`SessionBuilder::timeout` sets `total` alone. `SessionBuilder::connect_timeout`
-sets `connect` alone.
+`SessionBuilder::timeout` takes a `Duration` or a `TimeoutConfig`. A
+`Duration` becomes `TimeoutConfig::new().total(duration)`, so the other fields
+keep their defaults. A later `timeout` call replaces the whole configuration.
+To change `connect` alone, pass `TimeoutConfig::new().connect(duration)`.
 
 ## Per-request timeouts
 
-`RequestBuilder::timeout` overrides `total` for one request.
-`RequestBuilder::timeouts` overrides `total`, `read`, and `response_header`.
+`RequestBuilder::timeout` with a `Duration` overrides `total` for one request.
+With a `TimeoutConfig`, it overrides `total`, `read`, and `response_header`.
 A `None` keeps the session value for that field. `connect` stays session-wide
 either way, because connections are pooled and coalesced across requests.
 
@@ -147,7 +145,7 @@ use leyline::TimeoutConfig;
 use std::time::Duration;
 
 # async fn run() -> leyline::Result<()> {
-let session = leyline::Session::chrome();
+let session = leyline::Session::new();
 
 let quick = session
     .get("https://example.com/slow")
@@ -157,7 +155,7 @@ let quick = session
 let streamed = session
     .get("https://example.com/feed")
     .stream()
-    .timeouts(
+    .timeout(
         TimeoutConfig::default()
             .total(Duration::from_secs(120))
             .read(Duration::from_secs(10))

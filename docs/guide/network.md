@@ -5,22 +5,25 @@ Leyline picks between IPv4 and IPv6, and which socket options it sets.
 
 ## Map a host to an address
 
-`resolve_host` sends one host to one address without a DNS lookup. The host
+`DnsConfig::resolve_host` sends one host to one address without a DNS lookup. The host
 name still goes into SNI and the `Host` header, so the server sees a normal
 request.
 
 ```rust,no_run
 # fn run() -> leyline::Result<()> {
 let session = leyline::Session::builder()
-    .chrome()
-    .resolve_host("example.com", "203.0.113.10:443".parse().unwrap())
+    .browser(leyline::Browser::default_browser())
+    .dns(leyline::DnsConfig::new().resolve_host(
+        "example.com",
+        "203.0.113.10:443".parse().unwrap(),
+    ))
     .build()?;
 # let _ = session;
 # Ok(())
 # }
 ```
 
-`resolve_host_to_addrs` takes several addresses for one host. Leyline tries
+`DnsConfig::resolve_host_to_addrs` takes several addresses for one host. Leyline tries
 them in the Happy Eyeballs order described below.
 
 Hosts without an override go to the resolver.
@@ -28,10 +31,12 @@ Hosts without an override go to the resolver.
 ## Replace the resolver
 
 The default is `tls::SystemResolver`. To use your own, implement
-`tls::Resolver` and pass it to `SessionBuilder::resolver`.
+`tls::Resolver` and pass it to `SessionBuilder::dns` as an
+`Arc<dyn Resolver>`.
 
 `DnsConfig` holds a resolver and the overrides as one value, so several
-builders can share it.
+builders can share it. Put every override in one `DnsConfig`: a second `dns`
+call replaces the first.
 
 ```rust,no_run
 # fn run() -> leyline::Result<()> {
@@ -39,7 +44,10 @@ use leyline::DnsConfig;
 
 let dns = DnsConfig::new()
     .resolve_host("api.example.com", "203.0.113.10:443".parse().unwrap());
-let session = leyline::Session::builder().chrome().dns(dns).build()?;
+let session = leyline::Session::builder()
+    .browser(leyline::Browser::default_browser())
+    .dns(dns)
+    .build()?;
 # let _ = session;
 # Ok(())
 # }
@@ -51,7 +59,8 @@ When a host has IPv6 and IPv4 addresses, Leyline interleaves the two families
 and starts the next attempt if the current one has not connected in time. The
 first connection to complete wins.
 
-`tls::HappyEyeballsConfig` sets two values:
+`tls::HappyEyeballsConfig` sets two values. Pass it to
+`SocketConfig::happy_eyeballs`:
 
 | Setting | Default | Meaning |
 |---|---|---|
@@ -61,15 +70,16 @@ first connection to complete wins.
 ```rust,no_run
 # fn run() -> leyline::Result<()> {
 use std::time::Duration;
+use leyline::SocketConfig;
 use leyline::tls::HappyEyeballsConfig;
 
 let session = leyline::Session::builder()
-    .chrome()
-    .happy_eyeballs(
+    .browser(leyline::Browser::default_browser())
+    .socket(SocketConfig::new().happy_eyeballs(
         HappyEyeballsConfig::new()
             .resolve_delay(Duration::from_millis(100))
             .attempt_limit(4),
-    )
+    ))
     .build()?;
 # let _ = session;
 # Ok(())
@@ -91,6 +101,7 @@ let session = leyline::Session::builder()
 | `local_address`, `local_ipv4`, `local_ipv6` | unset | Source IP to bind |
 | `interface` | unset | Network interface to bind (accepted, not applied yet) |
 | `strict` | `false` | Fail when an option is unsupported |
+| `happy_eyeballs` | enabled | Happy Eyeballs settings, or `None` to turn it off |
 
 The timing and size setters take a value or `None`. Pass `None` to clear a
 default, for example `tcp_keepalive(None)` to turn keepalive off.
@@ -101,8 +112,8 @@ use std::time::Duration;
 use leyline::SocketConfig;
 
 let session = leyline::Session::builder()
-    .chrome()
-    .socket_config(
+    .browser(leyline::Browser::default_browser())
+    .socket(
         SocketConfig::new()
             .tcp_nodelay(true)
             .tcp_user_timeout(Duration::from_secs(20))
@@ -115,7 +126,7 @@ let session = leyline::Session::builder()
 # }
 ```
 
-`socket_config` replaces the whole value. Start from `SocketConfig::new()`,
+`socket` replaces the whole value. Start from `SocketConfig::new()`,
 which carries the defaults, and change only what you need.
 
 ### Why set `tcp_user_timeout`

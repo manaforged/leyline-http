@@ -19,7 +19,7 @@ and anything that parses as an `http::Uri`.
 use leyline::http::Method;
 
 # async fn run() -> leyline::Result<()> {
-let session = leyline::Session::chrome();
+let session = leyline::Session::new();
 let resp = session.request(Method::OPTIONS, "https://example.com/api").await?;
 println!("{}", resp.status());
 # Ok(())
@@ -36,30 +36,29 @@ Header setters take anything that converts to an `http::HeaderName` and an
 constant costs no parse. An invalid name or value surfaces as an error from
 `send`, not at the call site.
 
-`header` replaces every earlier value with the same name. `append_header`
-keeps them.
+`header` appends. A second call with the same name adds a second value and
+keeps the first.
 
 ```rust,no_run
 use leyline::http::header::ACCEPT_LANGUAGE;
 
 # async fn run() -> leyline::Result<()> {
-let session = leyline::Session::chrome();
+let session = leyline::Session::new();
 let resp = session
     .get("https://example.com/")
     .header("x-request-id", "1")
     .header(ACCEPT_LANGUAGE, "en-GB,en;q=0.9")
-    .append_header("x-tag", "a")
-    .append_header("x-tag", "b")
+    .header("x-tag", "a")
+    .header("x-tag", "b")
     .await?;
 # let _ = resp;
 # Ok(())
 # }
 ```
 
-`headers` and `append_headers` take an iterator of pairs and follow the same
-replace-or-keep rule. There are named shorthands for the headers you set most:
-`accept`, `accept_language`, `user_agent`, `referer`, `origin`,
-`content_type`, `bearer_auth`, and `basic_auth`.
+`headers` takes an iterator of pairs and appends each one the same way. Set
+`accept`, `user-agent`, `referer`, and other named headers with `header`.
+`bearer_auth` and `basic_auth` build the `Authorization` header for you.
 
 ### Order
 
@@ -78,7 +77,7 @@ Two methods override the header order:
 use leyline::profile::HeaderAnchor;
 
 # async fn run() -> leyline::Result<()> {
-let session = leyline::Session::chrome();
+let session = leyline::Session::new();
 let resp = session
     .get("https://example.com/")
     .anchored(HeaderAnchor::AfterUserAgent, "x-client", "leyline")
@@ -103,7 +102,7 @@ more.
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
-let session = leyline::Session::chrome();
+let session = leyline::Session::new();
 let resp = session
     .get("https://example.com/search")
     .query([("q", "leyline"), ("page", "2")])
@@ -121,7 +120,7 @@ so `body` takes any of them directly.
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
-let session = leyline::Session::chrome();
+let session = leyline::Session::new();
 
 // Raw bytes.
 let a = session
@@ -147,7 +146,9 @@ let c = session
 # }
 ```
 
-`form_str` sends a form body you encoded yourself. `compress(encoding)`
+To send a form body you encoded yourself, set the
+`content-type: application/x-www-form-urlencoded` header and pass the string
+to `body`. `compress(encoding)`
 compresses a buffered body and sets the matching `Content-Encoding` header.
 
 ### Multipart
@@ -160,7 +161,7 @@ chunk by chunk, so a large upload is never fully materialized in memory.
 use leyline::multipart::{Form, Part};
 
 # async fn run() -> leyline::Result<()> {
-let session = leyline::Session::chrome();
+let session = leyline::Session::new();
 let form = Form::new()
     .text("name", "ada")
     .part("note", Part::text("hello").mime("text/plain"));
@@ -183,7 +184,7 @@ use bytes::Bytes;
 use leyline::Body;
 
 # async fn run() -> leyline::Result<()> {
-let session = leyline::Session::chrome();
+let session = leyline::Session::new();
 let chunks = (0..4).map(|_| Ok::<Bytes, std::io::Error>(Bytes::from_static(b"data")));
 let body = Body::stream_with_length(futures_util::stream::iter(chunks), 16);
 let resp = session
@@ -214,7 +215,7 @@ Set one explicitly when the default guess is wrong.
 use leyline::Preset;
 
 # async fn run() -> leyline::Result<()> {
-let session = leyline::Session::chrome();
+let session = leyline::Session::new();
 let js = session
     .get("https://example.com/app.js")
     .preset(Preset::Script)
@@ -232,7 +233,7 @@ let js = session
 use std::time::Duration;
 
 # async fn run() -> leyline::Result<()> {
-let session = leyline::Session::chrome();
+let session = leyline::Session::new();
 let resp = session
     .get("https://example.com/ip")
     .proxy("http://user:pass@proxy.example:8080")
@@ -243,8 +244,9 @@ let resp = session
 # }
 ```
 
-`timeout` replaces the total request timeout alone. `timeouts` replaces
-`total`, `read`, and `response_header` for this one request. A `None` keeps
+`timeout` takes a `Duration` or a `TimeoutConfig`. A `Duration` sets the total
+request timeout alone. A `TimeoutConfig` sets `total`, `read`, and
+`response_header` for this one request. A `None` keeps
 the session value for that field, so a session `read` or `response_header`
 timeout cannot be disabled per request. `connect` stays session-wide,
 because connections are pooled and coalesced across requests.
@@ -254,10 +256,10 @@ use leyline::TimeoutConfig;
 use std::time::Duration;
 
 # async fn run() -> leyline::Result<()> {
-let session = leyline::Session::chrome();
+let session = leyline::Session::new();
 let resp = session
     .get("https://example.com/slow")
-    .timeouts(
+    .timeout(
         TimeoutConfig::default()
             .total(Duration::from_secs(30))
             .read(Duration::from_secs(5)),
@@ -270,23 +272,24 @@ let resp = session
 
 See [Retries and timeouts](retries-and-timeouts.md).
 
-## The Request value type
+## Send an http::Request
 
-`Request` is an owned request you can build, store, and send later. `new`
-takes an `http::Method` and anything that parses as an `http::Uri`. Its
-settings mirror the builder's: `header`, `body`, `timeout`, `retry`,
-`allow_non_idempotent_retry`, `digest_auth`, and `stream`. `Session::execute`
-sends it.
+`Session::execute` sends an `http::Request<Body>`. It carries the method, the
+URI, the headers, and the body across. It reads three optional values from the
+request extensions: a `Preset`, a `TimeoutConfig`, and a `RetryPolicy`.
 
 ```rust,no_run
-use leyline::Request;
-use leyline::http::Method;
+use leyline::Body;
+use leyline::http::{Method, Request};
 
 # async fn run() -> leyline::Result<()> {
-let session = leyline::Session::chrome();
-let req = Request::new(Method::POST, "https://example.com/items")
+let session = leyline::Session::new();
+let req = Request::builder()
+    .method(Method::POST)
+    .uri("https://example.com/items")
     .header("content-type", "application/json")
-    .body(r#"{"ok":true}"#);
+    .body(Body::from(r#"{"ok":true}"#))
+    .expect("valid request");
 let resp = session.execute(req).await?;
 # let _ = resp;
 # Ok(())
@@ -294,23 +297,22 @@ let resp = session.execute(req).await?;
 ```
 
 `execute` infers the preset from `content-type` the same way the builder does,
-unless the `Request` already carries one. A `Request` is forgiving where the
-builder is strict: an unparsable URL becomes the default `Uri` and surfaces
-when the session executes it, and an invalid header is dropped.
+unless the extensions already carry one. Digest authentication and response
+streaming are not available through `execute`. Use the `RequestBuilder` for
+them.
 
 ## Tower service
 
 The `tower` feature, off by default, adds `LeylineService`. It wraps a session
-and implements `tower_service::Service` twice:
+and implements `tower_service::Service<http::Request<Body>>`, answering with an
+`http::Response<Body>`, so a stack built on `http` types drops in unchanged.
+The error type is `leyline::Error`.
 
-- `Service<leyline::Request>`, answering with a `leyline::Response`.
-- `Service<http::Request<Body>>`, answering with an `http::Response<Body>`, so
-  a stack built on `http` types drops in unchanged.
-
-Both use `leyline::Error` as the error type. The `http` adapter carries the
-method, the URI, the headers, and the body across; the version and the
-extensions are dropped, because the profile picks the protocol. The response
-body comes back as a stream.
+The service sends each request through `Session::execute`. The version is
+dropped, because the profile picks the protocol. The response body comes back
+as a stream. To add middleware, wrap the service with any Tower layer.
+Redirects, retries, cookies, and tracing stay in the session, inside the
+service.
 
 ```rust,no_run
 # #[cfg(feature = "tower")]
@@ -319,7 +321,7 @@ use leyline::http::{Method, Request as HttpRequest};
 use leyline::{Body, LeylineService, Session};
 use tower_service::Service;
 
-let mut svc = LeylineService::new(Session::chrome());
+let mut svc = LeylineService::new(Session::new());
 let req = HttpRequest::builder()
     .method(Method::GET)
     .uri("https://example.com/")
@@ -333,41 +335,6 @@ println!("{}", resp.status());
 
 Enable it with `features = ["tower"]`. The example also needs
 `tower-service = "0.3"` in your manifest; the feature does not re-export it.
-
-## Middleware layers
-
-`SessionBuilder::layer`, also behind the `tower` feature, wraps every request
-attempt in a Tower stack. The session hands the layer a `layer::Call` after it
-resolved the headers, the body, and the proxy, and before it picks a transport.
-The layer answers with a `layer::Reply`.
-
-Each redirect leg and each retry attempt is its own `Call`. Redirects, retries,
-cookies, and tracing stay in the session, outside the layer, so a layer sees one
-attempt and nothing else. A layer can read the method, the URI, the proxy, and
-the stream flag, can edit the request headers, and can return a `Reply` without
-calling the inner service. It cannot change the protocol policy: the session
-picks HTTP/1.1, HTTP/2, or HTTP/3 after the stack returns to the transport.
-
-`layer::Log` is the built-in example. It writes one `tracing` line per call with
-the method, the host, the status, and the elapsed time.
-
-```rust,no_run
-# #[cfg(feature = "tower")]
-# fn build() -> leyline::Result<leyline::Session> {
-use leyline::layer::Log;
-use leyline::{Browser, Session};
-
-let session = Session::builder()
-    .browser(Browser::Chrome147)
-    .layer(Log)
-    .build()?;
-# Ok(session)
-# }
-```
-
-Compose several layers with `tower::ServiceBuilder` or `tower_layer::Stack` and
-pass the composed layer; a second `layer` call replaces the first stack.
-`examples/layer.rs` stacks a header-stamping layer under `Log`.
 
 ## Next
 

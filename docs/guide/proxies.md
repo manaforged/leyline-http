@@ -6,7 +6,8 @@ request, and any `Proxy-Authorization` credentials, in cleartext.
 
 ## Set one proxy
 
-`SessionBuilder::proxy` takes a URL string and applies it to every scheme.
+`SessionBuilder::proxy` takes a URL string, a `ProxyUrl`, or a `ProxyConfig`.
+A URL applies to every scheme.
 
 ```rust,no_run
 # fn run() -> leyline::Result<()> {
@@ -46,7 +47,7 @@ use leyline::{ProxyConfig, ProxyRule, Session};
 let proxies = ProxyConfig::new()
     .with_rule(ProxyRule::https("http://secure-proxy.example:8080"))
     .with_rule(ProxyRule::http("http://plain-proxy.example:3128"));
-let session = Session::builder().proxies(proxies).build()?;
+let session = Session::builder().proxy(proxies).build()?;
 # let _ = session;
 # Ok(())
 # }
@@ -72,7 +73,7 @@ optional. A trailing `:port` is stripped. `*` matches every host. Matching is
 case-insensitive, and a trailing dot on the host is ignored.
 
 The bypass list applies in two cases: when you set it yourself with
-`ProxyConfig::no_proxy` or `SessionBuilder::no_proxy`, and when the session's
+`ProxyConfig::no_proxy`, and when the session's
 proxy was discovered from the environment. An explicit `NoProxy` also
 suppresses a per-request `proxy()` override for a matching host.
 
@@ -90,13 +91,14 @@ of `GATEWAY_INTERFACE`, `REQUEST_METHOD`, `SERVER_SOFTWARE`, `SCRIPT_NAME`,
 `SERVER_NAME`, or `SERVER_PORT`, and logs a warning on the
 `leyline::env_proxy::cgi` target.
 
-Turn discovery off with `SessionBuilder::disable_env_proxies`, or with
-`ProxyConfig::without_env`. `ProxyConfig::uses_env` reports the current
+Turn discovery off with `ProxyConfig::without_env`. `ProxyConfig::uses_env` reports the current
 setting.
 
 ```rust,no_run
 # fn run() -> leyline::Result<()> {
-let session = leyline::Session::builder().disable_env_proxies().build()?;
+let session = leyline::Session::builder()
+    .proxy(leyline::ProxyConfig::new().without_env())
+    .build()?;
 # let _ = session;
 # Ok(())
 # }
@@ -131,7 +133,7 @@ next request opens a new socket.
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
-let session = leyline::Session::chrome();
+let session = leyline::Session::new();
 let resp = session
     .get("https://example.com/ip")
     .proxy("http://other-proxy.example:8080")

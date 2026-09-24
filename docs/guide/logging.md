@@ -20,7 +20,6 @@ Every target starts with `leyline`.
 | `leyline::quic` | HTTP/3 and QUIC events |
 | `leyline::profile` | Profile load warnings, for example a missing `captured_against` |
 | `leyline::digest` | Digest authentication |
-| `leyline::layer` | Request layers |
 | `leyline::trace` | Request phases from `TracingTrace` |
 
 With a subscriber that reads `RUST_LOG`, this filter shows the request phases
@@ -37,11 +36,14 @@ RUST_LOG=leyline=warn,leyline::trace=debug cargo run
 response head, and completion.
 
 ```rust,no_run
-use leyline::Session;
 use leyline::trace::TracingTrace;
+use leyline::{Browser, Session};
 
 # fn run() -> leyline::Result<()> {
-let session = Session::builder().chrome().trace(TracingTrace).build()?;
+let session = Session::builder()
+    .browser(Browser::default_browser())
+    .trace(TracingTrace)
+    .build()?;
 # let _ = session;
 # Ok(())
 # }

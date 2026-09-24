@@ -18,7 +18,7 @@ some origins reject.
 use leyline::Body;
 
 # async fn run() -> leyline::Result<()> {
-let session = leyline::Session::chrome();
+let session = leyline::Session::new();
 let file = tokio::fs::File::open("upload.bin").await?;
 let len = tokio::fs::metadata("upload.bin").await?.len();
 let body = Body::stream_with_length(tokio_util::io::ReaderStream::new(file), len);
@@ -47,7 +47,7 @@ implements `futures_util::Stream<Item = io::Result<Bytes>>`.
 use futures_util::StreamExt;
 
 # async fn run() -> leyline::Result<()> {
-let session = leyline::Session::chrome();
+let session = leyline::Session::new();
 let resp = session.get("https://example.com/big").stream().await?;
 
 let mut body = resp.into_stream()?;
@@ -60,8 +60,8 @@ println!("{total} bytes");
 # }
 ```
 
-`copy_to(writer)` and `download_to(path)` do the same loop for you and return
-the byte count. On a response from `.stream()`, all three helpers hand back
+`copy_to(writer)` does the same loop for you and returns the byte count. On a
+response from `.stream()`, `into_stream` and `copy_to` hand back
 the content-encoded bytes as they arrive; `bytes()`, `text()`, and `json()` decode compression when they
 drain a body. Request identity encoding, or use `read_until` (see
 [Stop at a marker](#stop-at-a-marker)), when you need decoded bytes from a
@@ -69,22 +69,19 @@ stream.
 
 HTTP/1.1 streaming rejects bodies above 100 MiB, fixed-length, chunked, or
 close-delimited, and HTTP/3 streaming rejects them per chunk. Only HTTP/2
-streaming does not apply that cap; `download_to` does not change this.
+streaming does not apply that cap; `copy_to` does not change this.
 
 You do not have to stream it yourself. `bytes().await`, `text().await`, and
 `json().await` drain a streaming body for you, decompress it, and keep the
 bytes for later calls, so they work in both modes. Draining honors the session
 `read_timeout` per chunk and the same 100 MiB cap that buffered mode applies.
 Take the stream or drain it, not both: `into_stream()` consumes the response,
-so nothing is left to read after it. The sync accessors
-`as_bytes()` and `as_text()` return `None` until the body is buffered. A
-streaming response also carries no trailers.
+so nothing is left to read after it. A streaming response also carries no trailers.
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
-let session = leyline::Session::chrome();
+let session = leyline::Session::new();
 let mut resp = session.get("https://example.com/big").stream().await?;
-assert!(resp.as_bytes().is_none());
 let body = resp.text().await?;
 println!("{} bytes", body.len());
 # Ok(())
@@ -105,7 +102,7 @@ remaining body.
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
-let session = leyline::Session::chrome();
+let session = leyline::Session::new();
 let marker = b"</head>";
 let resp = session.get("https://example.com/big").stream().await?;
 let head = resp
@@ -151,7 +148,7 @@ already been consumed by the first attempt. That has two consequences.
 **Redirects.** A 301, 302, or 303 turns the request into a GET with an empty
 body, so it follows normally. A 307 or 308 must replay the original body. With
 a streaming body Leyline stops and returns `Kind::Redirect`, telling you to
-buffer the body before sending or to set `max_redirects(0)`.
+buffer the body before sending or to set `RedirectPolicy::none()`.
 
 **Retries.** The retry loop checks the body before it sleeps. A streaming body
 is not retryable, so the policy is skipped and the first outcome is returned,
