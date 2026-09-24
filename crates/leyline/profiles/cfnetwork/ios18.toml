@@ -2,6 +2,8 @@
 name = "CFNetwork iOS 18"
 browser = "cfnetwork-ios"
 version = 18
+variant = "CfnetworkIOS18"
+platform_browser = { macos = "cfnetwork-macos" }
 family = "cfnetwork"
 verified_against = "CFNetwork/3826.600.41 iOS 18.6 sim first-party loopback pcap"
 verified_at = "2026-08-29"

@@ -84,32 +84,27 @@ fn missing_connection_window_is_rejected() {
 
 #[cfg(feature = "http3")]
 #[test]
-fn unknown_profile_family_has_no_h3_config() {
+fn profile_without_h3_table_has_no_h3_config() {
     use leyline::H3Config;
     assert!(
-        H3Config::for_family("okhttp").is_err(),
+        H3Config::from_profile(Browser::OkHttpAndroid10.profile()).is_err(),
         "okhttp silently received an H3 config it has no fingerprint for"
     );
     assert!(
-        H3Config::for_family("").is_err(),
-        "empty meta.family silently defaulted to Chrome's QUIC transport params"
+        H3Config::from_profile(&BrowserProfile::bare()).is_err(),
+        "a profile with no [h3] table silently defaulted to Chrome's QUIC transport params"
     );
 }
 
 #[cfg(feature = "http3")]
 #[test]
-fn gecko_family_maps_to_firefox_h3_not_chrome() {
+fn firefox_profile_carries_firefox_h3_not_chrome() {
     use leyline::H3Config;
-    let gecko = H3Config::for_family("gecko").expect("gecko maps to an H3 config");
-    assert_eq!(
-        gecko.initial_max_streams_bidi,
-        H3Config::firefox().initial_max_streams_bidi,
-        "gecko must resolve to Firefox H3 params, not Chrome's"
-    );
+    let firefox = H3Config::from_profile(Browser::Firefox154.profile()).expect("firefox h3");
+    let chrome = H3Config::from_profile(Browser::Chrome152.profile()).expect("chrome h3");
     assert_ne!(
-        gecko.initial_max_streams_bidi,
-        H3Config::chrome().initial_max_streams_bidi,
-        "gecko is still resolving to Chrome's H3 params"
+        firefox.initial_max_streams_bidi, chrome.initial_max_streams_bidi,
+        "firefox is still resolving to Chrome's H3 params"
     );
 }
 
@@ -117,12 +112,13 @@ fn gecko_family_maps_to_firefox_h3_not_chrome() {
 #[test]
 fn qpack() {
     use leyline::H3Config;
-    assert_eq!(H3Config::chrome().qpack_max_table_capacity, 0);
-    assert_eq!(H3Config::firefox().qpack_max_table_capacity, 0);
-    assert_eq!(H3Config::safari().qpack_max_table_capacity, 0);
-    assert_eq!(H3Config::chrome().qpack_blocked_streams, 0);
-    assert_eq!(H3Config::firefox().qpack_blocked_streams, 0);
-    assert_eq!(H3Config::safari().qpack_blocked_streams, 0);
+    for browser in Browser::all().iter().copied() {
+        let Ok(config) = H3Config::from_profile(browser.profile()) else {
+            continue;
+        };
+        assert_eq!(config.qpack_max_table_capacity, 0, "{browser}");
+        assert_eq!(config.qpack_blocked_streams, 0, "{browser}");
+    }
 }
 
 #[test]

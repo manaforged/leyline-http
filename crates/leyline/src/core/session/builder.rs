@@ -672,7 +672,7 @@ impl SessionBuilder {
                 layer: self.layer,
                 tls_trust: self.tls_trust.clone(),
                 #[cfg(feature = "http3")]
-                h3_config: match crate::quic::H3Config::for_family(&profile.meta.family) {
+                h3_config: match crate::quic::H3Config::from_profile(profile) {
                     Ok(cfg) => Some(cfg),
                     Err(e)
                         if matches!(

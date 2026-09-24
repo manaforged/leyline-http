@@ -2,6 +2,9 @@
 name = "Chrome 149"
 browser = "chrome"
 version = 149
+variant = "Chrome149"
+hello = 147
+chromium_major = 149
 family = "chromium"
 ch_ua_brand = "Google Chrome"
 verified_against = "Chrome 148 TLS parity (tls.peet.ws 2026-06-17) + Trust Anchor Identifiers ext; pending live Chrome 149 re-capture"
@@ -93,3 +96,18 @@ user_agent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Ge
 
 [identity.android]
 user_agent = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Mobile Safari/537.36"
+
+[h3]
+initial_max_data = 15728640
+initial_max_stream_data_bidi_local = 6291456
+initial_max_stream_data_bidi_remote = 6291456
+initial_max_stream_data_uni = 6291456
+initial_max_streams_bidi = 100
+initial_max_streams_uni = 100
+max_idle_timeout_secs = 30
+max_udp_payload_size = 1472
+active_connection_id_limit = 4
+dcid_length = 8
+qpack_max_table_capacity = 0
+qpack_blocked_streams = 0
+max_field_section_size = 262144

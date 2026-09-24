@@ -1,5 +1,16 @@
 use std::borrow::Cow;
 
+use serde::Deserialize;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[non_exhaustive]
+pub enum HeaderStyle {
+    #[default]
+    Chromium,
+    Gecko,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Preset {
@@ -37,24 +48,6 @@ fn o(s: &str) -> Cow<'static, str> {
 }
 
 const FIREFOX_DOC_ACCEPT: &str = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
-
-pub(crate) const FIREFOX_HEADER_ORDER: &[&str] = &[
-    "user-agent",
-    "accept",
-    "accept-language",
-    "accept-encoding",
-    "content-type",
-    "upgrade-insecure-requests",
-    "origin",
-    "referer",
-    "cookie",
-    "sec-fetch-dest",
-    "sec-fetch-mode",
-    "sec-fetch-site",
-    "sec-fetch-user",
-    "priority",
-    "te",
-];
 
 impl Preset {
     pub fn build_headers(&self, ctx: &HeaderContext<'_>) -> Vec<HeaderPair> {

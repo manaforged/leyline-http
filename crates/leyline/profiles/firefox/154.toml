@@ -2,6 +2,8 @@
 name = "Firefox 154"
 browser = "firefox"
 version = 154
+variant = "Firefox154"
+header_style = "gecko"
 family = "gecko"
 verified_against = "Firefox 154.0.1 macOS via tls.peet.ws 2026-08-29"
 captured_against = "firefox-154.0.1"
@@ -55,15 +57,34 @@ akamai = "1:65536;2:0;4:131072;5:16384|12517377|0|m,p,a,s"
 [identity.windows]
 user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:154.0) Gecko/20100101 Firefox/154.0"
 sec_ch_ua = ""
+request_header_order = ["user-agent", "accept", "accept-language", "accept-encoding", "content-type", "upgrade-insecure-requests", "origin", "referer", "cookie", "sec-fetch-dest", "sec-fetch-mode", "sec-fetch-site", "sec-fetch-user", "priority", "te"]
 
 [identity.macos]
 user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:154.0) Gecko/20100101 Firefox/154.0"
 sec_ch_ua = ""
+request_header_order = ["user-agent", "accept", "accept-language", "accept-encoding", "content-type", "upgrade-insecure-requests", "origin", "referer", "cookie", "sec-fetch-dest", "sec-fetch-mode", "sec-fetch-site", "sec-fetch-user", "priority", "te"]
 
 [identity.linux]
 user_agent = "Mozilla/5.0 (X11; Linux x86_64; rv:154.0) Gecko/20100101 Firefox/154.0"
 sec_ch_ua = ""
+request_header_order = ["user-agent", "accept", "accept-language", "accept-encoding", "content-type", "upgrade-insecure-requests", "origin", "referer", "cookie", "sec-fetch-dest", "sec-fetch-mode", "sec-fetch-site", "sec-fetch-user", "priority", "te"]
 
 [identity.android]
 user_agent = "Mozilla/5.0 (Android 14; Mobile; rv:154.0) Gecko/154.0 Firefox/154.0"
 sec_ch_ua = ""
+request_header_order = ["user-agent", "accept", "accept-language", "accept-encoding", "content-type", "upgrade-insecure-requests", "origin", "referer", "cookie", "sec-fetch-dest", "sec-fetch-mode", "sec-fetch-site", "sec-fetch-user", "priority", "te"]
+
+[h3]
+initial_max_data = 25165824
+initial_max_stream_data_bidi_local = 12582912
+initial_max_stream_data_bidi_remote = 12582912
+initial_max_stream_data_uni = 12582912
+initial_max_streams_bidi = 16
+initial_max_streams_uni = 16
+max_idle_timeout_secs = 30
+max_udp_payload_size = 1472
+active_connection_id_limit = 8
+dcid_length = 8
+qpack_max_table_capacity = 0
+qpack_blocked_streams = 0
+max_field_section_size = 262144

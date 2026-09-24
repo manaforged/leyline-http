@@ -1,208 +1,96 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub enum Family {
-    Chrome,
-    Brave,
-    Firefox,
-    Safari,
-    SafariIos,
-    CfNetwork,
-    OkHttp,
+use crate::profile::preset::HeaderStyle;
+use crate::profile::{Platform, ProfileRegistry};
+
+include!(concat!(env!("OUT_DIR"), "/browser.rs"));
+
+struct Entry {
+    key: &'static str,
+    version: u32,
+    name: &'static str,
+    hello: Browser,
+    hellos: &'static [Browser],
+    chromium_major: Option<u32>,
+    platforms: &'static [(&'static str, Browser)],
+    source: &'static str,
 }
 
 impl std::fmt::Display for Family {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let name = match self {
-            Self::Chrome => "Chrome",
-            Self::Brave => "Brave",
-            Self::Firefox => "Firefox",
-            Self::Safari => "Safari",
-            Self::SafariIos => "Safari iOS",
-            Self::CfNetwork => "CFNetwork",
-            Self::OkHttp => "OkHttp",
-        };
-        f.write_str(name)
+        f.write_str(FAMILY_LABELS[*self as usize])
     }
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub enum Browser {
-    Chrome145,
-    Chrome146,
-    Chrome147,
-    Chrome148,
-    Chrome149,
-    Chrome150,
-    Chrome151,
-    Chrome152,
-    Brave146,
-    Firefox148,
-    Firefox149,
-    Firefox150,
-    Firefox151,
-    Firefox152,
-    Firefox153,
-    Firefox154,
-    Safari18,
-    Safari26,
-    OkHttpAndroid10,
-    SafariIOS17,
-    SafariIOS18,
-    CfnetworkIOS18,
-    CfnetworkMacOS26,
-}
-
-const ALL: &[Browser] = &[
-    Browser::Chrome145,
-    Browser::Chrome146,
-    Browser::Chrome147,
-    Browser::Chrome148,
-    Browser::Chrome149,
-    Browser::Chrome150,
-    Browser::Chrome151,
-    Browser::Chrome152,
-    Browser::Brave146,
-    Browser::Firefox148,
-    Browser::Firefox149,
-    Browser::Firefox150,
-    Browser::Firefox151,
-    Browser::Firefox152,
-    Browser::Firefox153,
-    Browser::Firefox154,
-    Browser::Safari18,
-    Browser::Safari26,
-    Browser::OkHttpAndroid10,
-    Browser::SafariIOS17,
-    Browser::SafariIOS18,
-    Browser::CfnetworkIOS18,
-    Browser::CfnetworkMacOS26,
-];
 
 impl Browser {
     pub fn all() -> &'static [Browser] {
         ALL
     }
 
+    fn entry(self) -> &'static Entry {
+        &ENTRIES[self as usize]
+    }
+
     pub fn profile_key(&self) -> (&'static str, u32) {
-        match self {
-            Self::Chrome145 => ("chrome", 145),
-            Self::Chrome146 => ("chrome", 146),
-            Self::Chrome147 => ("chrome", 147),
-            Self::Chrome148 => ("chrome", 148),
-            Self::Chrome149 => ("chrome", 149),
-            Self::Chrome150 => ("chrome", 150),
-            Self::Chrome151 => ("chrome", 151),
-            Self::Chrome152 => ("chrome", 152),
-            Self::Brave146 => ("brave", 146),
-            Self::Firefox148 => ("firefox", 148),
-            Self::Firefox149 => ("firefox", 149),
-            Self::Firefox150 => ("firefox", 150),
-            Self::Firefox151 => ("firefox", 151),
-            Self::Firefox152 => ("firefox", 152),
-            Self::Firefox153 => ("firefox", 153),
-            Self::Firefox154 => ("firefox", 154),
-            Self::Safari18 => ("safari", 18),
-            Self::Safari26 => ("safari", 26),
-            Self::OkHttpAndroid10 => ("okhttp", 10),
-            Self::SafariIOS17 => ("safari-ios", 17),
-            Self::SafariIOS18 => ("safari-ios", 18),
-            Self::CfnetworkIOS18 => ("cfnetwork-ios", 18),
-            Self::CfnetworkMacOS26 => ("cfnetwork-macos", 26),
-        }
+        let entry = self.entry();
+        (entry.key, entry.version)
     }
 
     #[must_use]
     pub fn latest(family: Family) -> Self {
-        match family {
-            Family::Chrome => Self::Chrome152,
-            Family::Brave => Self::Brave146,
-            Family::Firefox => Self::Firefox154,
-            Family::Safari => Self::Safari26,
-            Family::SafariIos => Self::SafariIOS18,
-            Family::CfNetwork => Self::CfnetworkMacOS26,
-            Family::OkHttp => Self::OkHttpAndroid10,
-        }
+        FAMILY_LATEST[family as usize]
     }
 
     #[must_use]
     pub fn family(&self) -> &'static str {
-        self.profile_key().0
+        self.entry().key
     }
 
     #[must_use]
     pub fn hello_rep(self) -> Self {
-        match self {
-            Self::Chrome145 | Self::Chrome146 => Self::Chrome146,
-            Self::Chrome147 | Self::Chrome148 | Self::Chrome149 => Self::Chrome147,
-            Self::Chrome150 | Self::Chrome151 | Self::Chrome152 => Self::Chrome152,
-            Self::Firefox148 | Self::Firefox149 | Self::Firefox150 => Self::Firefox150,
-            Self::Firefox151 | Self::Firefox152 | Self::Firefox153 => Self::Firefox152,
-            Self::Firefox154 => Self::Firefox154,
-            Self::Safari26 => Self::Safari26,
-            Self::Safari18 => Self::Safari18,
-            other => other,
-        }
+        self.entry().hello
     }
 
     #[must_use]
-    pub fn for_platform(self, platform: crate::profile::Platform) -> Self {
-        use crate::profile::Platform;
-        match (self, platform) {
-            (Self::Safari18 | Self::Safari26, Platform::IOS) => Self::SafariIOS18,
-            (Self::SafariIOS17 | Self::SafariIOS18, Platform::MacOS) => Self::Safari26,
-            (Self::CfnetworkMacOS26, Platform::IOS) => Self::CfnetworkIOS18,
-            (Self::CfnetworkIOS18, Platform::MacOS) => Self::CfnetworkMacOS26,
-            (other, _) => other,
+    pub fn for_platform(self, platform: Platform) -> Self {
+        if platform == Platform::Host {
+            return self;
         }
+        let key = platform.identity_key();
+        self.entry()
+            .platforms
+            .iter()
+            .find(|(name, _)| *name == key)
+            .map_or(self, |&(_, browser)| browser)
     }
 
     #[must_use]
     pub fn family_hellos(self) -> &'static [Self] {
-        match self.family() {
-            "chrome" => &[Self::Chrome152, Self::Chrome147, Self::Chrome146],
-            "firefox" => &[Self::Firefox154, Self::Firefox152, Self::Firefox150],
-            "safari" => &[Self::Safari26, Self::Safari18],
-            "safari-ios" => &[Self::SafariIOS18, Self::SafariIOS17],
-            "cfnetwork-ios" => &[Self::CfnetworkIOS18],
-            "cfnetwork-macos" => &[Self::CfnetworkMacOS26],
-            "brave" => &[Self::Brave146],
-            "okhttp" => &[Self::OkHttpAndroid10],
-            _ => &[],
-        }
+        self.entry().hellos
     }
 
-    #[allow(clippy::unused_self)]
-    pub fn max_tls_12(&self) -> bool {
-        false
+    pub(crate) fn cookie_pass_targets() -> &'static [Self] {
+        COOKIE_PASS
     }
 
-    #[must_use]
-    pub fn is_firefox(&self) -> bool {
-        self.family() == "firefox"
+    pub(crate) fn header_style(self) -> HeaderStyle {
+        ProfileRegistry::global()
+            .get_browser(self)
+            .map_or_else(HeaderStyle::default, |profile| profile.meta.header_style)
+    }
+
+    pub(crate) fn profile_source(self) -> &'static str {
+        self.entry().source
     }
 
     pub fn default_browser() -> Self {
-        Self::Chrome152
+        Self::latest(DEFAULT_FAMILY)
     }
 
     pub fn default_firefox() -> Self {
-        Self::Firefox154
+        Self::latest(Family::Firefox)
     }
 
     pub fn chromium_major(&self) -> Option<u32> {
-        match self {
-            Self::Chrome145 => Some(145),
-            Self::Chrome146 => Some(146),
-            Self::Chrome147 => Some(147),
-            Self::Chrome148 => Some(148),
-            Self::Chrome149 => Some(149),
-            Self::Chrome150 => Some(150),
-            Self::Chrome151 => Some(151),
-            Self::Chrome152 => Some(152),
-            Self::Brave146 => Some(146),
-            _ => None,
-        }
+        self.entry().chromium_major
     }
 }
 
@@ -214,31 +102,7 @@ impl Default for Browser {
 
 impl std::fmt::Display for Browser {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Chrome145 => write!(f, "Chrome 145"),
-            Self::Chrome146 => write!(f, "Chrome 146"),
-            Self::Chrome147 => write!(f, "Chrome 147"),
-            Self::Chrome148 => write!(f, "Chrome 148"),
-            Self::Chrome149 => write!(f, "Chrome 149"),
-            Self::Chrome150 => write!(f, "Chrome 150"),
-            Self::Chrome151 => write!(f, "Chrome 151"),
-            Self::Chrome152 => write!(f, "Chrome 152"),
-            Self::Brave146 => write!(f, "Brave (Chromium 146)"),
-            Self::Firefox148 => write!(f, "Firefox 148"),
-            Self::Firefox149 => write!(f, "Firefox 149"),
-            Self::Firefox150 => write!(f, "Firefox 150"),
-            Self::Firefox151 => write!(f, "Firefox 151"),
-            Self::Firefox152 => write!(f, "Firefox 152"),
-            Self::Firefox153 => write!(f, "Firefox 153"),
-            Self::Firefox154 => write!(f, "Firefox 154"),
-            Self::Safari18 => write!(f, "Safari 18"),
-            Self::Safari26 => write!(f, "Safari 26"),
-            Self::OkHttpAndroid10 => write!(f, "OkHttp4 Android 10+"),
-            Self::SafariIOS17 => write!(f, "Safari iOS 17"),
-            Self::SafariIOS18 => write!(f, "Safari iOS 18"),
-            Self::CfnetworkIOS18 => write!(f, "CFNetwork iOS 18"),
-            Self::CfnetworkMacOS26 => write!(f, "CFNetwork macOS 26"),
-        }
+        f.write_str(self.entry().name)
     }
 }
 

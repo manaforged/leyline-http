@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use crate::profile::BrowserProfile;
 use crate::{Error, Kind};
 
 #[derive(Debug, Clone)]
@@ -23,71 +24,31 @@ pub struct H3Config {
     pub max_response_body_bytes: u64,
 }
 
+const MAX_RESPONSE_BODY_BYTES: u64 = 100 * 1024 * 1024;
+
 impl H3Config {
-    pub fn for_family(family: &str) -> Result<Self, Error> {
-        match family {
-            "chromium" => Ok(Self::chrome()),
-            "gecko" => Ok(Self::firefox()),
-            "webkit" => Ok(Self::safari()),
-            other => Err(Error::new(Kind::Config)
-                .with_message(format!("no HTTP/3 config for profile family {other:?}"))),
-        }
-    }
-
-    pub fn chrome() -> Self {
-        Self {
-            initial_max_data: 15_728_640,
-            initial_max_stream_data_bidi_local: 6_291_456,
-            initial_max_stream_data_bidi_remote: 6_291_456,
-            initial_max_stream_data_uni: 6_291_456,
-            initial_max_streams_bidi: 100,
-            initial_max_streams_uni: 100,
-            max_idle_timeout: Duration::from_secs(30),
-            max_udp_payload_size: 1472,
-            active_connection_id_limit: 4,
-            dcid_length: 8,
-            qpack_max_table_capacity: 0,
-            qpack_blocked_streams: 0,
-            max_field_section_size: 262_144,
-            max_response_body_bytes: 100 * 1024 * 1024,
-        }
-    }
-
-    pub fn firefox() -> Self {
-        Self {
-            initial_max_data: 25_165_824,
-            initial_max_stream_data_bidi_local: 12_582_912,
-            initial_max_stream_data_bidi_remote: 12_582_912,
-            initial_max_stream_data_uni: 12_582_912,
-            initial_max_streams_bidi: 16,
-            initial_max_streams_uni: 16,
-            max_idle_timeout: Duration::from_secs(30),
-            max_udp_payload_size: 1472,
-            active_connection_id_limit: 8,
-            dcid_length: 8,
-            qpack_max_table_capacity: 0,
-            qpack_blocked_streams: 0,
-            max_field_section_size: 262_144,
-            max_response_body_bytes: 100 * 1024 * 1024,
-        }
-    }
-
-    pub fn safari() -> Self {
-        Self {
-            initial_max_data: 8_388_608,
-            initial_max_stream_data_bidi_local: 1_048_576,
-            initial_max_stream_data_bidi_remote: 1_048_576,
-            initial_max_stream_data_uni: 1_048_576,
-            initial_max_streams_bidi: 100,
-            initial_max_streams_uni: 100,
-            max_idle_timeout: Duration::from_secs(600),
-            max_udp_payload_size: 1452,
-            active_connection_id_limit: 4,
-            dcid_length: 8,
-            qpack_max_table_capacity: 0,
-            qpack_blocked_streams: 0,
-            max_field_section_size: 262_144,
-            max_response_body_bytes: 100 * 1024 * 1024,
-        }
+    pub fn from_profile(profile: &BrowserProfile) -> Result<Self, Error> {
+        let h3 = profile.h3.as_ref().ok_or_else(|| {
+            Error::new(Kind::Config).with_message(format!(
+                "profile {} has no [h3] table, so it has no HTTP/3 transport",
+                profile.meta.name
+            ))
+        })?;
+        Ok(Self {
+            initial_max_data: h3.initial_max_data,
+            initial_max_stream_data_bidi_local: h3.initial_max_stream_data_bidi_local,
+            initial_max_stream_data_bidi_remote: h3.initial_max_stream_data_bidi_remote,
+            initial_max_stream_data_uni: h3.initial_max_stream_data_uni,
+            initial_max_streams_bidi: h3.initial_max_streams_bidi,
+            initial_max_streams_uni: h3.initial_max_streams_uni,
+            max_idle_timeout: Duration::from_secs(h3.max_idle_timeout_secs),
+            max_udp_payload_size: h3.max_udp_payload_size,
+            active_connection_id_limit: h3.active_connection_id_limit,
+            dcid_length: h3.dcid_length,
+            qpack_max_table_capacity: h3.qpack_max_table_capacity,
+            qpack_blocked_streams: h3.qpack_blocked_streams,
+            max_field_section_size: h3.max_field_section_size,
+            max_response_body_bytes: MAX_RESPONSE_BODY_BYTES,
+        })
     }
 }

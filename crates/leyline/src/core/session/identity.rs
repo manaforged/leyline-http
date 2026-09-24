@@ -50,13 +50,6 @@ impl Identity {
             .collect()
     }
 
-    const PASS_REPS: &[Browser] = &[
-        Browser::Chrome152,
-        Browser::Firefox154,
-        Browser::Safari26,
-        Browser::SafariIOS18,
-    ];
-
     pub fn pass(self, dest: Browser) -> Result<Self> {
         if dest.family() == self.http.family() {
             return Err(Error::new(Kind::Config).with_message(format!(
@@ -71,7 +64,7 @@ impl Identity {
 
     #[must_use]
     pub fn pass_library(self) -> Vec<Self> {
-        Self::PASS_REPS
+        Browser::cookie_pass_targets()
             .iter()
             .filter_map(|&dest| self.pass(dest).ok())
             .collect()

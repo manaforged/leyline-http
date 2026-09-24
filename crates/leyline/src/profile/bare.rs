@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use super::preset::HeaderStyle;
 use super::types::{BrowserProfile, H2Profile, PlatformIdentity, ProfileMeta, TlsProfile};
 
 impl BrowserProfile {
@@ -26,6 +27,7 @@ impl BrowserProfile {
                 verified_against: "n/a (synthetic non-impersonating profile)".to_string(),
                 captured_against: None,
                 ch_ua_brand: None,
+                header_style: HeaderStyle::default(),
             },
             tls: TlsProfile {
                 ciphers: vec![
@@ -94,6 +96,7 @@ impl BrowserProfile {
                 platforms: HashMap::new(),
             },
             identity: identity_map,
+            h3: None,
         }
     }
 }

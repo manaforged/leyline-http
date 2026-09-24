@@ -319,6 +319,9 @@ def clone_profile(src: Path, dest: Path, *, name: str, browser: str, version: in
     text = re.sub(r'(?m)^name = ".*"$', f'name = "{name}"', text, count=1)
     text = re.sub(r'(?m)^browser = ".*"$', f'browser = "{browser}"', text, count=1)
     text = re.sub(r'(?m)^version = \d+$', f"version = {version}", text, count=1)
+    text = re.sub(r'(?m)^variant = ".*"$', f'variant = "{name.replace(" ", "")}"', text, count=1)
+    text = re.sub(r'(?m)^chromium_major = \d+$', f"chromium_major = {version}", text, count=1)
+    text = re.sub(r'(?m)^hello = \d+\n', "", text, count=1)
     if re.search(r'(?m)^verified_against = ', text):
         text = re.sub(r'(?m)^verified_against = ".*"$', f'verified_against = "{verified}"', text, count=1)
     else:
@@ -467,173 +470,46 @@ def ja4_groups(family: str) -> list[list[int]]:
     return list(grouped.values())
 
 
-def insert_once(text: str, needle: str, extra: str) -> str:
-    if extra.strip() in text:
+def set_meta(text: str, key: str, value: str | None) -> str:
+    text = re.sub(rf"(?m)^{re.escape(key)} = .*\n", "", text, count=1)
+    if value is None:
         return text
-    if needle not in text:
-        raise SystemExit(f"wire: missing marker {needle!r}")
-    return text.replace(needle, needle + extra, 1)
+    updated, n = re.subn(r"(?m)^(version = \d+\n)", rf"\g<1>{key} = {value}\n", text, count=1)
+    if n != 1:
+        raise SystemExit(f"wire: no [meta] version line to anchor {key}")
+    return updated
 
 
 def wire_family(family: str, prefix: str) -> None:
     majors = bundled_majors(family)
     if not majors:
         return
-    newest = majors[-1]
-    browser_rs = ROOT / "crates/leyline/src/profile/browser.rs"
-    registry = ROOT / "crates/leyline/src/profile/registry.rs"
-    identity = ROOT / "crates/leyline/src/core/session/identity.rs"
-    brand = ROOT / "crates/leyline/src/profile/brand.rs"
-    text = browser_rs.read_text()
+    reps: dict[int, int] = {}
+    for group in ja4_groups(family):
+        for major in group:
+            reps[major] = max(group)
     for major in majors:
-        variant = f"{prefix}{major}"
-        if f"{variant}," not in text and f"{variant} =>" not in text:
-            prev = [m for m in majors if m < major]
-            if not prev:
-                raise SystemExit(f"cannot insert {variant} with no previous major")
-            prev_v = f"{prefix}{prev[-1]}"
-            text = insert_once(text, f"    {prev_v},\n", f"    /// {prefix} {major}.\n    {variant},\n")
-            text = insert_once(
-                text,
-                f"    Browser::{prev_v},\n",
-                f"    Browser::{variant},\n",
-            )
-            text = insert_once(
-                text,
-                f'            Self::{prev_v} => ("{family}", {prev[-1]}),\n',
-                f'            Self::{variant} => ("{family}", {major}),\n',
-            )
-            text = insert_once(
-                text,
-                f'            Self::{prev_v} => write!(f, "{prefix} {prev[-1]}"),\n',
-                f'            Self::{variant} => write!(f, "{prefix} {major}"),\n',
-            )
-            if family == "chrome":
-                text = insert_once(
-                    text,
-                    f"            Self::{prev_v} => Some({prev[-1]}),\n",
-                    f"            Self::{variant} => Some({major}),\n",
-                )
-    groups = ja4_groups(family)
-    arms = []
-    reps = []
-    for group in sorted(groups, key=lambda g: max(g), reverse=True):
-        names = " | ".join(f"Self::{prefix}{m}" for m in group)
-        rep = max(group)
-        arms.append(f"            {names} => Self::{prefix}{rep},")
-        reps.append(f"Self::{prefix}{rep}")
-    def swap_hello(match: re.Match[str]) -> str:
-        body = match.group(1)
-        kept = [
-            line
-            for line in body.splitlines()
-            if f"Self::{prefix}" not in line or "other =>" in line
-        ]
-        out = []
-        inserted = False
-        for line in kept:
-            if "other => other" in line:
-                out.extend(arms)
-                inserted = True
-            out.append(line)
-        if not inserted:
-            out.extend(arms)
-        return "    pub fn hello_rep(self) -> Self {\n        match self {\n" + "\n".join(out) + "\n        }\n    }"
-
-    text, n = re.subn(
-        r"    pub fn hello_rep\(self\) -> Self \{\n        match self \{\n(.*?)\n        \}\n    \}",
-        swap_hello,
-        text,
-        count=1,
-        flags=re.S,
-    )
-    if n != 1:
-        raise SystemExit("wire: could not rewrite hello_rep")
-    hellos = ", ".join(reps)
-    text = re.sub(
-        rf'            "{family}" => &\[.*?\],',
-        f'            "{family}" => &[{hellos}],',
-        text,
-        count=1,
-    )
-    if family == "chrome":
-        text = re.sub(
-            r"(pub fn default_browser\(\) -> Self \{\n        Self::)Chrome\d+",
-            rf"\1Chrome{newest}",
-            text,
-            count=1,
-        )
-    if family == "firefox":
-        text = re.sub(
-            r"(pub fn default_firefox\(\) -> Self \{\n        Self::)Firefox\d+",
-            rf"\1Firefox{newest}",
-            text,
-            count=1,
-        )
-    if family == "safari":
-        text = re.sub(
-            r"\(Self::Safari\d+, Platform::IOS\) => Self::SafariIOS18,",
-            f"(Self::Safari18 | Self::Safari{newest}, Platform::IOS) => Self::SafariIOS18,"
-            if newest != 18
-            else "(Self::Safari18, Platform::IOS) => Self::SafariIOS18,",
-            text,
-            count=1,
-        )
-        text = re.sub(
-            r"\(Self::SafariIOS17 \| Self::SafariIOS18, Platform::MacOS\) => Self::Safari\d+,",
-            f"(Self::SafariIOS17 | Self::SafariIOS18, Platform::MacOS) => Self::Safari{newest},",
-            text,
-            count=1,
-        )
-    browser_rs.write_text(text)
-
-    reg = registry.read_text()
-    load_line = f'        reg.load_toml(include_str!("../../profiles/{family}/{newest}.toml"));\n'
-    if load_line not in reg:
-        prev = majors[-2] if len(majors) > 1 else None
-        if prev is None:
-            raise SystemExit("wire: registry has no previous include")
-        prev_line = f'        reg.load_toml(include_str!("../../profiles/{family}/{prev}.toml"));\n'
-        reg = insert_once(reg, prev_line, load_line)
-        registry.write_text(reg)
-
-    ident = identity.read_text()
-    if family == "chrome":
-        ident = re.sub(
-            r"        Browser::Chrome\d+,",
-            f"        Browser::Chrome{newest},",
-            ident,
-            count=1,
-        )
-    if family == "firefox":
-        ident = re.sub(
-            r"        Browser::Firefox\d+,",
-            f"        Browser::Firefox{newest},",
-            ident,
-            count=1,
-        )
-    identity.write_text(ident)
+        path = ROOT / "crates/leyline/profiles" / family / f"{major}.toml"
+        text = path.read_text()
+        text = set_meta(text, "variant", f'"{prefix}{major}"')
+        if re.search(r"(?m)^chromium_major = ", text):
+            text = set_meta(text, "chromium_major", str(major))
+        rep = reps.get(major, major)
+        text = set_meta(text, "hello", str(rep) if rep != major else None)
+        path.write_text(text)
 
     if family == "chrome":
+        newest = majors[-1]
+        brand = ROOT / "crates/leyline/src/profile/brand.rs"
         btxt = brand.read_text()
         opera = newest - 16
         row = f"    ({newest}, {opera}),\n"
+        needle = "const OPERA_PER_CHROMIUM: &[(u32, u32)] = &[\n"
         if f"({newest}," not in btxt:
-            btxt = insert_once(btxt, "const OPERA_PER_CHROMIUM: &[(u32, u32)] = &[\n", row)
-            brand.write_text(btxt)
-    if family == "safari":
-        builder = ROOT / "crates/leyline/src/core/session/builder.rs"
-        bld = builder.read_text()
-        bld = bld.replace(
-            "Browser::Safari18.for_platform",
-            f"Browser::Safari{newest}.for_platform",
-        )
-        bld = bld.replace(
-            "self.browser(Browser::Safari18).macos()",
-            f"self.browser(Browser::Safari{newest}).macos()",
-        )
-        builder.write_text(bld)
-    print(f"wired {prefix}{newest}  from toml majors + siblings")
+            if needle not in btxt:
+                raise SystemExit(f"wire: missing marker {needle!r}")
+            brand.write_text(btxt.replace(needle, needle + row, 1))
+    print(f"wired {prefix}{majors[-1]}  meta written from toml majors + ja4 groups")
 
 
 def missing_majors(family: str, live_major: int) -> list[int]:

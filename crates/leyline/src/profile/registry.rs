@@ -89,29 +89,9 @@ impl ProfileRegistry {
 
     pub fn builtin() -> Self {
         let mut reg = Self::new();
-        reg.load_toml(include_str!("../../profiles/chrome/145.toml"));
-        reg.load_toml(include_str!("../../profiles/chrome/146.toml"));
-        reg.load_toml(include_str!("../../profiles/chrome/147.toml"));
-        reg.load_toml(include_str!("../../profiles/chrome/148.toml"));
-        reg.load_toml(include_str!("../../profiles/chrome/149.toml"));
-        reg.load_toml(include_str!("../../profiles/chrome/150.toml"));
-        reg.load_toml(include_str!("../../profiles/chrome/151.toml"));
-        reg.load_toml(include_str!("../../profiles/chrome/152.toml"));
-        reg.load_toml(include_str!("../../profiles/brave/146.toml"));
-        reg.load_toml(include_str!("../../profiles/firefox/148.toml"));
-        reg.load_toml(include_str!("../../profiles/firefox/149.toml"));
-        reg.load_toml(include_str!("../../profiles/firefox/150.toml"));
-        reg.load_toml(include_str!("../../profiles/firefox/151.toml"));
-        reg.load_toml(include_str!("../../profiles/firefox/152.toml"));
-        reg.load_toml(include_str!("../../profiles/firefox/153.toml"));
-        reg.load_toml(include_str!("../../profiles/firefox/154.toml"));
-        reg.load_toml(include_str!("../../profiles/safari/18.toml"));
-        reg.load_toml(include_str!("../../profiles/safari/26.toml"));
-        reg.load_toml(include_str!("../../profiles/safari/ios17.toml"));
-        reg.load_toml(include_str!("../../profiles/safari/ios18.toml"));
-        reg.load_toml(include_str!("../../profiles/okhttp/android10.toml"));
-        reg.load_toml(include_str!("../../profiles/cfnetwork/ios18.toml"));
-        reg.load_toml(include_str!("../../profiles/cfnetwork/macos26.toml"));
+        for browser in Browser::all() {
+            reg.load_toml(browser.profile_source());
+        }
         reg
     }
 

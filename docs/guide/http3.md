@@ -73,15 +73,16 @@ profile presents: the flow-control limits, `max_idle_timeout`,
 connection ID length, the QPACK settings, `max_field_section_size`, and a cap
 on the response body the HTTP/3 client accepts, streaming included.
 
-`H3Config::for_family` selects the set for a profile family: `chromium`,
-`gecko`, or `webkit`. Any other family is an `Kind::Config`.
+`H3Config::from_profile` reads the `[h3]` table of a profile. A profile with
+no `[h3]` table has no HTTP/3 transport, and `from_profile` returns a
+`Kind::Config` error.
 
 ```rust
-use leyline::H3Config;
+use leyline::{Browser, H3Config};
 
-let chrome = H3Config::for_family("chromium").expect("chromium config");
+let chrome = H3Config::from_profile(Browser::Chrome152.profile()).expect("chrome config");
 assert_eq!(chrome.dcid_length, 8);
-assert!(H3Config::for_family("nonesuch").is_err());
+assert!(H3Config::from_profile(Browser::OkHttpAndroid10.profile()).is_err());
 ```
 
 ## QPACK

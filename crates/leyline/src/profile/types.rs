@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use serde::Deserialize;
 
+use crate::profile::preset::HeaderStyle;
 use crate::profile::registry::ProfileError;
 use crate::{Error, Kind};
 
@@ -17,6 +18,8 @@ pub struct BrowserProfile {
     pub h2: H2Profile,
     #[serde(default)]
     pub identity: HashMap<String, PlatformIdentity>,
+    #[serde(default)]
+    pub h3: Option<H3Profile>,
 }
 
 #[expect(
@@ -37,6 +40,30 @@ pub struct ProfileMeta {
     pub captured_against: Option<String>,
     #[serde(default)]
     pub ch_ua_brand: Option<String>,
+    #[serde(default)]
+    pub header_style: HeaderStyle,
+}
+
+#[expect(
+    missing_docs,
+    reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
+)]
+#[derive(Debug, Clone, Deserialize)]
+#[non_exhaustive]
+pub struct H3Profile {
+    pub initial_max_data: u64,
+    pub initial_max_stream_data_bidi_local: u64,
+    pub initial_max_stream_data_bidi_remote: u64,
+    pub initial_max_stream_data_uni: u64,
+    pub initial_max_streams_bidi: u64,
+    pub initial_max_streams_uni: u64,
+    pub max_idle_timeout_secs: u64,
+    pub max_udp_payload_size: u16,
+    pub active_connection_id_limit: u64,
+    pub dcid_length: usize,
+    pub qpack_max_table_capacity: u64,
+    pub qpack_blocked_streams: u64,
+    pub max_field_section_size: u64,
 }
 
 #[expect(

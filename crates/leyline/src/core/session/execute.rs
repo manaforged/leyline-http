@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::profile::Preset;
-use crate::profile::preset::HeaderPair;
+use crate::profile::preset::{HeaderPair, HeaderStyle};
 
 use super::Session;
 use super::decompress::{decompress_and_strip, drain_stream_into_vec};
@@ -304,8 +304,9 @@ impl Session {
                 firefox: self
                     .inner
                     .identity
-                    .map(|id| id.http().is_firefox())
-                    .unwrap_or_else(|| self.inner.browser.as_ref().is_some_and(|b| b.is_firefox())),
+                    .map(|id| id.http())
+                    .or(self.inner.browser)
+                    .is_some_and(|b| b.header_style() == HeaderStyle::Gecko),
             };
             preset.build_headers(&ctx)
         } else {
@@ -404,21 +405,10 @@ impl Session {
         headers
     }
     pub(super) fn session_header_order(&self) -> Option<Cow<'_, [String]>> {
-        if let Some(order) = self.inner.identity_request_header_order.as_deref() {
-            return Some(Cow::Borrowed(order));
-        }
         self.inner
-            .browser
-            .as_ref()
-            .is_some_and(|b| b.is_firefox())
-            .then(|| {
-                Cow::Owned(
-                    crate::profile::preset::FIREFOX_HEADER_ORDER
-                        .iter()
-                        .map(|s| (*s).to_string())
-                        .collect(),
-                )
-            })
+            .identity_request_header_order
+            .as_deref()
+            .map(Cow::Borrowed)
     }
     fn collect_cookies(
         &self,

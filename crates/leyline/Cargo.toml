@@ -274,6 +274,10 @@ required-features = ["bench-internals"]
 name = "tls_peet"
 required-features = ["bench-internals"]
 
+[build-dependencies]
+serde = { workspace = true }
+toml = { workspace = true }
+
 [dev-dependencies]
 bytes = { workspace = true }
 # In-test cert generation + a localhost TLS acceptor for the

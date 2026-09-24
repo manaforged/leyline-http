@@ -2,6 +2,8 @@
 name = "CFNetwork macOS 26"
 browser = "cfnetwork-macos"
 version = 26
+variant = "CfnetworkMacOS26"
+platform_browser = { ios = "cfnetwork-ios" }
 family = "cfnetwork"
 verified_against = "CFNetwork/3860.600.21 macOS 26.5.1 first-party loopback pcap"
 verified_at = "2026-08-29"

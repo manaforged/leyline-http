@@ -130,10 +130,9 @@ fn fingerprint_conformance() {
 
         #[cfg(feature = "http3")]
         {
-            let fam = &p.meta.family;
-            let detail = match leyline::H3Config::for_family(fam) {
-                Ok(_) => format!("family {fam:?} → H3Config; no QUIC-capture golden"),
-                Err(_) => format!("family {fam:?} → no H3 config (HTTP/3 unsupported)"),
+            let detail = match leyline::H3Config::from_profile(p) {
+                Ok(_) => "[h3] table → H3Config; no QUIC-capture golden".to_string(),
+                Err(_) => "no [h3] table (HTTP/3 unsupported)".to_string(),
             };
             rows.push(Row::new(&name, "H3 transport", Status::Unanchored, detail));
         }
