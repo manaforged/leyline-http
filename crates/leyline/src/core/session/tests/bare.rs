@@ -25,7 +25,7 @@ async fn capture_get_headers(session: Session) -> String {
             .unwrap();
         String::from_utf8_lossy(&req).to_string()
     });
-    let _ = session.get(&format!("http://{addr}/")).await.unwrap();
+    let _ = session.get(format!("http://{addr}/")).await.unwrap();
     server.await.unwrap()
 }
 
@@ -193,7 +193,7 @@ async fn capture_post_headers(
             .unwrap();
         String::from_utf8_lossy(&req).to_string()
     });
-    let _ = finish(session.post(&format!("http://{addr}/")))
+    let _ = finish(session.post(format!("http://{addr}/")))
         .await
         .unwrap();
     server.await.unwrap()

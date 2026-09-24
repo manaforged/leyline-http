@@ -4,13 +4,13 @@ use super::*;
 fn basic_set_and_get() {
     let jar = Jar::new();
     jar.set_cookie(
-        &url::Url::parse("https://example.com").unwrap(),
+        url::Url::parse("https://example.com").unwrap(),
         "sid",
         "abc123",
     )
     .unwrap();
     assert_eq!(
-        jar.get_cookie(&url::Url::parse("https://example.com").unwrap(), "sid")
+        jar.get_cookie(url::Url::parse("https://example.com").unwrap(), "sid")
             .unwrap(),
         Some("abc123".into())
     );
@@ -77,11 +77,11 @@ fn load_and_export() {
     let jar = Jar::new();
     jar.load_cookies(
         "a=1; b=2",
-        &url::Url::parse("https://example.com/page").unwrap(),
+        url::Url::parse("https://example.com/page").unwrap(),
     )
     .unwrap();
     let export = jar
-        .export_cookies(&url::Url::parse("https://example.com/other").unwrap())
+        .export_cookies(url::Url::parse("https://example.com/other").unwrap())
         .unwrap();
     assert_eq!(export, "a=1; b=2");
 }
@@ -91,18 +91,18 @@ fn same_path_cookies_keep_creation_order() {
     let jar = Jar::new();
     jar.load_cookies(
         "zeta=r; alpha=i; mid=v",
-        &url::Url::parse("https://www.example.com/page").unwrap(),
+        url::Url::parse("https://www.example.com/page").unwrap(),
     )
     .unwrap();
     jar.set_cookie(
-        &url::Url::parse("https://www.example.com/").unwrap(),
+        url::Url::parse("https://www.example.com/").unwrap(),
         "late",
         "abc123",
     )
     .unwrap();
 
     let export = jar
-        .export_cookies(&url::Url::parse("https://www.example.com/v1/items").unwrap())
+        .export_cookies(url::Url::parse("https://www.example.com/v1/items").unwrap())
         .unwrap();
     assert_eq!(
         export,
@@ -138,7 +138,7 @@ fn longer_path_cookies_precede_same_path_creation_order() {
     );
 
     let export = jar
-        .export_cookies(&url::Url::parse("https://example.com/cart/items").unwrap())
+        .export_cookies(url::Url::parse("https://example.com/cart/items").unwrap())
         .unwrap();
     assert_eq!(export, "deep=1; root=1; tail=1");
 }
@@ -150,7 +150,7 @@ fn expired_cookies_not_returned() {
 
     jar.store_set_cookie("gone=bye; Max-Age=0", &url).unwrap();
     assert_eq!(
-        jar.get_cookie(&url::Url::parse("https://example.com").unwrap(), "gone")
+        jar.get_cookie(url::Url::parse("https://example.com").unwrap(), "gone")
             .unwrap(),
         None
     );
@@ -186,7 +186,7 @@ fn samesite_none_requires_secure() {
     jar.store_set_cookie("bad=val; SameSite=None", &url)
         .unwrap();
     assert_eq!(
-        jar.get_cookie(&url::Url::parse("https://example.com").unwrap(), "bad")
+        jar.get_cookie(url::Url::parse("https://example.com").unwrap(), "bad")
             .unwrap(),
         None
     );
@@ -194,7 +194,7 @@ fn samesite_none_requires_secure() {
     jar.store_set_cookie("good=val; SameSite=None; Secure", &url)
         .unwrap();
     assert_eq!(
-        jar.get_cookie(&url::Url::parse("https://example.com").unwrap(), "good")
+        jar.get_cookie(url::Url::parse("https://example.com").unwrap(), "good")
             .unwrap(),
         Some("val".into())
     );
@@ -234,7 +234,7 @@ fn insecure_origin_cannot_overwrite_secure_cookie() {
         .unwrap();
     jar.store_set_cookie("session=evil; Path=/", &http).unwrap();
     assert_eq!(
-        jar.get_cookie(&url::Url::parse("https://example.com/").unwrap(), "session")
+        jar.get_cookie(url::Url::parse("https://example.com/").unwrap(), "session")
             .unwrap(),
         Some("good".into()),
         "plaintext overwrite of a Secure cookie must be refused"
@@ -243,7 +243,7 @@ fn insecure_origin_cannot_overwrite_secure_cookie() {
     jar.store_set_cookie("session=; Path=/; Max-Age=0", &http)
         .unwrap();
     assert_eq!(
-        jar.get_cookie(&url::Url::parse("https://example.com/").unwrap(), "session")
+        jar.get_cookie(url::Url::parse("https://example.com/").unwrap(), "session")
             .unwrap(),
         Some("good".into()),
         "plaintext deletion of a Secure cookie must be refused"
@@ -252,14 +252,14 @@ fn insecure_origin_cannot_overwrite_secure_cookie() {
     jar.store_set_cookie("session=rotated; Secure; Path=/", &https)
         .unwrap();
     assert_eq!(
-        jar.get_cookie(&url::Url::parse("https://example.com/").unwrap(), "session")
+        jar.get_cookie(url::Url::parse("https://example.com/").unwrap(), "session")
             .unwrap(),
         Some("rotated".into())
     );
     jar.store_set_cookie("session=; Path=/; Max-Age=0", &https)
         .unwrap();
     assert_eq!(
-        jar.get_cookie(&url::Url::parse("https://example.com/").unwrap(), "session")
+        jar.get_cookie(url::Url::parse("https://example.com/").unwrap(), "session")
             .unwrap(),
         None
     );
@@ -273,12 +273,12 @@ fn secure_cookie_not_sent_over_http() {
         .unwrap();
 
     assert!(
-        jar.get_cookie(&url::Url::parse("https://example.com").unwrap(), "tok")
+        jar.get_cookie(url::Url::parse("https://example.com").unwrap(), "tok")
             .unwrap()
             .is_some()
     );
     assert!(
-        jar.get_cookie(&url::Url::parse("http://example.com").unwrap(), "tok")
+        jar.get_cookie(url::Url::parse("http://example.com").unwrap(), "tok")
             .unwrap()
             .is_none()
     );
@@ -287,9 +287,9 @@ fn secure_cookie_not_sent_over_http() {
 #[test]
 fn remove_named_removes_every_match() {
     let jar = Jar::new();
-    jar.set_cookie(&url::Url::parse("https://a.example.com").unwrap(), "k", "1")
+    jar.set_cookie(url::Url::parse("https://a.example.com").unwrap(), "k", "1")
         .unwrap();
-    jar.set_cookie(&url::Url::parse("https://b.example.com").unwrap(), "k", "2")
+    jar.set_cookie(url::Url::parse("https://b.example.com").unwrap(), "k", "2")
         .unwrap();
     assert_eq!(jar.all_cookies().len(), 2);
     assert_eq!(jar.remove_named("k"), 2);
@@ -302,17 +302,17 @@ fn serde_round_trip_preserves_cross_subdomain_attribution() {
     let jar = Jar::new();
     jar.store_set_cookie(
         "auth=secret; Path=/; Secure",
-        &Url::parse("https://api.example.com").unwrap(),
+        Url::parse("https://api.example.com").unwrap(),
     )
     .unwrap();
     jar.store_set_cookie(
         "shared=value; Domain=example.com; Path=/; Secure",
-        &Url::parse("https://www.example.com").unwrap(),
+        Url::parse("https://www.example.com").unwrap(),
     )
     .unwrap();
     jar.store_set_cookie(
         "wwwonly=val; Path=/",
-        &Url::parse("https://www.example.com").unwrap(),
+        Url::parse("https://www.example.com").unwrap(),
     )
     .unwrap();
     assert_eq!(jar.all_cookies().len(), 3);
@@ -323,14 +323,14 @@ fn serde_round_trip_preserves_cross_subdomain_attribution() {
 
     assert_eq!(
         restored
-            .get_cookie(&url::Url::parse("https://api.example.com").unwrap(), "auth")
+            .get_cookie(url::Url::parse("https://api.example.com").unwrap(), "auth")
             .unwrap(),
         Some("secret".into()),
         "auth must be visible on api.example.com"
     );
     assert_eq!(
         restored
-            .get_cookie(&url::Url::parse("https://www.example.com").unwrap(), "auth")
+            .get_cookie(url::Url::parse("https://www.example.com").unwrap(), "auth")
             .unwrap(),
         None,
         "auth must NOT leak to www.example.com (host-only)"
@@ -338,7 +338,7 @@ fn serde_round_trip_preserves_cross_subdomain_attribution() {
     assert_eq!(
         restored
             .get_cookie(
-                &url::Url::parse("https://www.example.com").unwrap(),
+                url::Url::parse("https://www.example.com").unwrap(),
                 "shared"
             )
             .unwrap(),
@@ -347,7 +347,7 @@ fn serde_round_trip_preserves_cross_subdomain_attribution() {
     assert_eq!(
         restored
             .get_cookie(
-                &url::Url::parse("https://api.example.com").unwrap(),
+                url::Url::parse("https://api.example.com").unwrap(),
                 "shared"
             )
             .unwrap(),
@@ -357,7 +357,7 @@ fn serde_round_trip_preserves_cross_subdomain_attribution() {
     assert_eq!(
         restored
             .get_cookie(
-                &url::Url::parse("https://www.example.com").unwrap(),
+                url::Url::parse("https://www.example.com").unwrap(),
                 "wwwonly"
             )
             .unwrap(),

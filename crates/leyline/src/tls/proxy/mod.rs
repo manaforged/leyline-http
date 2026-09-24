@@ -39,7 +39,7 @@ pub(crate) async fn connect_through_proxy<C: crate::tls::TlsHandshake>(
             return socks5::connect(connector, host, port, &proxy, include_alps).await;
             #[cfg(not(feature = "socks"))]
             return Err(TlsError::proxy(
-                "SOCKS proxy support requires the `socks` feature".into(),
+                "SOCKS proxy support requires the `socks` feature",
             ));
         }
         "http" => http::connect(connector, host, port, &proxy, include_alps).await,

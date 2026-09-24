@@ -55,6 +55,7 @@ impl Session {
         s
     }
 
+    #[cfg(test)]
     pub(crate) fn browser(&self) -> Option<Browser> {
         self.inner.browser
     }

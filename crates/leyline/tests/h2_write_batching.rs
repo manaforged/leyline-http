@@ -299,14 +299,7 @@ async fn ping_ack_precedes_continuation_wait() {
     let (peer, response) = timeout(Duration::from_secs(2), async {
         tokio::join!(
             server,
-            handle.send_shared(
-                Arc::new(Head {
-                    pseudo: pseudo,
-                    headers: headers
-                }),
-                RequestBody::None,
-                false
-            )
+            handle.send_shared(Arc::new(Head { pseudo, headers }), RequestBody::None, false)
         )
     })
     .await

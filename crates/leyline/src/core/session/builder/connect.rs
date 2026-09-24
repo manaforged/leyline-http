@@ -17,7 +17,7 @@ impl SessionBuilder {
         h2_config: &H2Config,
         tcp_profile: &TcpProfile,
     ) -> AuditTlsCache {
-        let extension_ids = crate::audit::extension_ids(&profile.tls);
+        let extension_ids = crate::profile::permutation::extension_ids(&profile.tls);
         let ja4 = {
             let input = crate::audit::Ja4Input {
                 ciphers: &profile.tls.ciphers,

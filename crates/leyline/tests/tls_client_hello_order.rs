@@ -64,7 +64,7 @@ async fn capture_client_hello(browser: Browser) -> (Vec<u16>, Vec<u16>) {
         .build()
         .unwrap();
     let _ = session
-        .get(&format!("https://localhost:{}/", addr.port()))
+        .get(format!("https://localhost:{}/", addr.port()))
         .await;
 
     let record = server.await.unwrap();

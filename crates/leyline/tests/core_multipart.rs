@@ -80,7 +80,7 @@ async fn text_plus_text_form_roundtrips() {
         .unwrap();
     let form = Form::new().text("user", "alice").text("role", "admin");
     let resp = session
-        .post(&format!("http://{addr}/submit"))
+        .post(format!("http://{addr}/submit"))
         .multipart(form)
         .send()
         .await
@@ -120,7 +120,7 @@ async fn text_plus_bytes_part() {
             .mime("image/png"),
     );
     let resp = session
-        .post(&format!("http://{addr}/upload"))
+        .post(format!("http://{addr}/upload"))
         .multipart(form)
         .send()
         .await
@@ -164,7 +164,7 @@ async fn text_plus_file() {
         .file("payload", &path)
         .unwrap();
     let resp = session
-        .post(&format!("http://{addr}/upload"))
+        .post(format!("http://{addr}/upload"))
         .multipart(form)
         .send()
         .await

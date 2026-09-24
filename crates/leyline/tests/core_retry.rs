@@ -63,7 +63,7 @@ async fn retries_503_then_succeeds() {
         .retry(policy)
         .build()
         .unwrap();
-    let resp = session.get(&format!("http://{addr}/flaky")).await.unwrap();
+    let resp = session.get(format!("http://{addr}/flaky")).await.unwrap();
     assert_eq!(resp.status(), 200);
     assert_eq!(resp.text().await.unwrap(), "ok");
     assert_eq!(counter.load(Ordering::Relaxed), 3);
@@ -93,7 +93,7 @@ async fn new_sessions_do_not_retry_503() {
         .protocol(ProtocolPolicy::Http1)
         .build()
         .unwrap()
-        .get(&format!("http://{addr}/flaky"))
+        .get(format!("http://{addr}/flaky"))
         .await
         .unwrap();
     assert_eq!(resp.status(), 503);
@@ -176,7 +176,7 @@ async fn post_without_opt_in_does_not_retry() {
         .initial_backoff(Duration::from_millis(1))
         .max_backoff(Duration::from_millis(5));
     let resp = session
-        .post(&format!("http://{addr}/payment"))
+        .post(format!("http://{addr}/payment"))
         .body(vec![1u8, 2, 3])
         .retry(policy)
         .send()
@@ -208,7 +208,7 @@ async fn streaming_body_plus_retry_errors_clearly() {
         .initial_backoff(Duration::from_millis(1))
         .max_backoff(Duration::from_millis(5));
     let err = session
-        .put(&format!("http://127.0.0.1:{dead_port}/upload"))
+        .put(format!("http://127.0.0.1:{dead_port}/upload"))
         .body(body)
         .retry(policy)
         .timeout(Duration::from_secs(2))

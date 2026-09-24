@@ -6,6 +6,17 @@ use tokio::spawn;
 use tokio::sync::oneshot;
 use tokio::time::timeout;
 
+async fn head(socket: &mut TcpStream) -> String {
+    let mut request = Vec::new();
+    let mut bytes = [0; 1024];
+    while !request.windows(4).any(|part| part == b"\r\n\r\n") {
+        let n = socket.read(&mut bytes).await.unwrap();
+        assert!(n > 0);
+        request.extend_from_slice(&bytes[..n]);
+    }
+    String::from_utf8(request).unwrap()
+}
+
 #[tokio::test]
 async fn redirect_retains_url_when_another_request_replaces_cache() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -59,7 +70,7 @@ async fn redirect_retains_url_when_another_request_replaces_cache() {
         .unwrap()
         .unwrap();
     let other = session
-        .get(&format!("{origin}/other?second=2"))
+        .get(format!("{origin}/other?second=2"))
         .send()
         .await
         .unwrap();

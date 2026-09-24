@@ -29,7 +29,7 @@ async fn response_header_timeout_fires_when_upstream_goes_silent() {
         .expect("session builds");
 
     let start = Instant::now();
-    let result = session.get(&format!("http://{addr}/")).await;
+    let result = session.get(format!("http://{addr}/")).await;
     let elapsed = start.elapsed();
 
     assert!(
@@ -69,7 +69,7 @@ async fn no_response_header_timeout_means_request_survives_past_the_ttfb_window(
         .expect("session builds");
 
     let resp = session
-        .get(&format!("http://{addr}/"))
+        .get(format!("http://{addr}/"))
         .await
         .expect("request without a TTFB cap survives the 600ms stall");
     assert_eq!(resp.status(), 200);
@@ -115,14 +115,14 @@ async fn session_recovers_after_ttfb_timeout_no_pool_wedge() {
         .build()
         .expect("session builds");
 
-    let first = session.get(&format!("http://{addr}/")).await;
+    let first = session.get(format!("http://{addr}/")).await;
     assert!(
         first.as_ref().is_err_and(Error::is_timeout),
         "first request should TTFB-timeout, got {first:?}"
     );
 
     let second = session
-        .get(&format!("http://{addr}/"))
+        .get(format!("http://{addr}/"))
         .await
         .expect("session must recover and succeed after a TTFB timeout");
     assert_eq!(second.status(), 200);
@@ -151,7 +151,7 @@ async fn total_backstop_bounds_silence_when_ttfb_unset() {
         .expect("session builds");
 
     let start = Instant::now();
-    let result = session.get(&format!("http://{addr}/")).await;
+    let result = session.get(format!("http://{addr}/")).await;
     let elapsed = start.elapsed();
 
     assert!(

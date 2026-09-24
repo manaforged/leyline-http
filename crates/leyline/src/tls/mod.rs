@@ -31,6 +31,11 @@ pub(crate) use builder::apply_profile_with_trust;
 pub(crate) use builder::build_ssl_context;
 pub(crate) use session_cache::SessionCache;
 pub(crate) use stream::TlsIo;
+#[cfg(feature = "bench-internals")]
+#[doc(hidden)]
+pub use stream::TlsStream;
+#[cfg(not(feature = "bench-internals"))]
+pub(crate) use stream::TlsStream;
 pub(crate) use trust::install_verifier_ctx;
 
 #[cfg(any(feature = "unstable-bssl", feature = "bench-internals"))]
@@ -60,14 +65,6 @@ impl TlsContext {
     pub fn into_inner(self) -> leyline_bssl::ssl::SslContextBuilder {
         self.0
     }
-}
-
-pub(crate) struct TlsStream {
-    pub(crate) stream: TlsIo,
-    pub alpn: Option<Vec<u8>>,
-    pub peer_cert_der: Option<Vec<u8>>,
-    pub tls_version: Option<String>,
-    pub tls_cipher: Option<String>,
 }
 
 pub(crate) trait TlsHandshake {

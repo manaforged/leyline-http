@@ -1418,7 +1418,7 @@ async fn live_h3_streaming_request_body_roundtrips() {
     assert_eq!(resp.status(), 200, "echo origin returned non-200");
 
     let raw = resp.bytes().await.expect("buffered body");
-    let v: Value = serde_json::from_slice(raw).expect("echo response is JSON");
+    let v: Value = serde_json::from_slice(&raw).expect("echo response is JSON");
     let expected_str = std::str::from_utf8(&expected).unwrap();
     let echoed = match v["body"].as_str() {
         Some(s) => s,
@@ -1427,7 +1427,7 @@ async fn live_h3_streaming_request_body_roundtrips() {
                 .as_object()
                 .map(|o| o.keys().collect())
                 .unwrap_or_default();
-            let head: String = String::from_utf8_lossy(raw).chars().take(400).collect();
+            let head: String = String::from_utf8_lossy(&raw).chars().take(400).collect();
             panic!("echo `body` is not a string; response keys={keys:?}; head={head}");
         }
     };

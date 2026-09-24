@@ -152,12 +152,12 @@ fn ip_domain_cookie_does_not_reach_sibling_ip() {
     let a = url::Url::parse("https://1.2.3.4/").unwrap();
     jar.store_set_cookie("k=v; Domain=3.4; Path=/", &a).unwrap();
     assert_eq!(
-        jar.get_cookie(&url::Url::parse("https://5.6.3.4/").unwrap(), "k")
+        jar.get_cookie(url::Url::parse("https://5.6.3.4/").unwrap(), "k")
             .unwrap(),
         None
     );
     assert_eq!(
-        jar.get_cookie(&url::Url::parse("https://1.2.3.4/").unwrap(), "k")
+        jar.get_cookie(url::Url::parse("https://1.2.3.4/").unwrap(), "k")
             .unwrap(),
         Some("v".into())
     );

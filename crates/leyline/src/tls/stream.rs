@@ -53,3 +53,11 @@ impl AsyncWrite for TlsIo {
         }
     }
 }
+
+pub struct TlsStream {
+    pub(crate) stream: TlsIo,
+    pub alpn: Option<Vec<u8>>,
+    pub peer_cert_der: Option<Vec<u8>>,
+    pub tls_version: Option<String>,
+    pub tls_cipher: Option<String>,
+}

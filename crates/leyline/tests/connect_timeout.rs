@@ -33,7 +33,7 @@ async fn connect_timeout_does_not_bound_the_response_phase() {
 
     let start = Instant::now();
     let resp = session
-        .get(&format!("http://{addr}/"))
+        .get(format!("http://{addr}/"))
         .await
         .expect("a 300ms connect timeout must not clip a response served at 600ms");
     let elapsed = start.elapsed();

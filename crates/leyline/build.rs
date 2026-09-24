@@ -169,13 +169,13 @@ fn check_unique(rows: &[Row], families: &Families) -> BuildResult<()> {
     Ok(())
 }
 
-fn find(rows: &[Row], browser: &str, version: u32) -> BuildResult<&Row> {
+fn find<'a>(rows: &'a [Row], browser: &str, version: u32) -> BuildResult<&'a Row> {
     rows.iter()
         .find(|r| r.meta.browser == browser && r.meta.version == version)
         .ok_or_else(|| format!("no profile for {browser} {version}").into())
 }
 
-fn latest<'a>(rows: &'a [Row], keep: impl Fn(&Row) -> bool) -> Option<&'a Row> {
+fn latest(rows: &[Row], keep: impl Fn(&Row) -> bool) -> Option<&Row> {
     rows.iter()
         .filter(|r| r.meta.deprecated.is_none() && keep(r))
         .max_by_key(|r| r.meta.version)

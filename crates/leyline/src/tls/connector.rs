@@ -41,6 +41,7 @@ pub struct FingerprintConnector {
 }
 
 impl FingerprintConnector {
+    #[cfg(any(test, feature = "bench-internals"))]
     pub fn new(profile: &BrowserProfile, tcp: TcpProfile) -> Result<Self, TlsError> {
         Self::new_with_trust(profile, tcp, &TlsTrustConfig::default())
     }

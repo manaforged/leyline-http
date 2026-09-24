@@ -88,7 +88,7 @@ async fn streaming_request_body_chunked_over_h1() {
     let body = Body::stream(stream::iter(chunks), None);
 
     let resp = session
-        .post(&format!("http://{addr}/upload"))
+        .post(format!("http://{addr}/upload"))
         .body(body)
         .send()
         .await
@@ -153,7 +153,7 @@ async fn streaming_request_body_fixed_length_content_length() {
     let body = Body::stream(stream::iter(chunks), Some(payload_len as u64));
 
     let resp = session
-        .post(&format!("http://{addr}/upload"))
+        .post(format!("http://{addr}/upload"))
         .body(body)
         .send()
         .await
@@ -255,7 +255,7 @@ async fn buffered_body_is_visible_to_as_bytes() {
         .protocol(ProtocolPolicy::Http1)
         .build()
         .unwrap();
-    let resp = session.get(&format!("http://{addr}/x")).await.unwrap();
+    let resp = session.get(format!("http://{addr}/x")).await.unwrap();
     assert_eq!(resp.bytes().await.unwrap(), &b"buffered"[..]);
 }
 
@@ -288,7 +288,7 @@ async fn download_to_writes_body_to_file() {
         .protocol(ProtocolPolicy::Http1)
         .build()
         .unwrap();
-    let resp = session.get(&format!("http://{addr}/file")).await.unwrap();
+    let resp = session.get(format!("http://{addr}/file")).await.unwrap();
     let mut file = tokio::fs::File::create(&path).await.unwrap();
     let n = resp.copy_to(&mut file).await.unwrap();
     assert_eq!(n, payload.len() as u64);
@@ -373,7 +373,7 @@ async fn redirect_with_streaming_body_errors() {
     let body = Body::stream(stream::iter(chunks), None);
 
     let err = session
-        .post(&format!("http://{addr}/before"))
+        .post(format!("http://{addr}/before"))
         .body(body)
         .timeout(Duration::from_secs(5))
         .send()

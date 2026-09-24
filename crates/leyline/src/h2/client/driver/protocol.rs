@@ -5,7 +5,6 @@ use bytes::Bytes;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::h2::connection::{HeaderPair, PseudoHeaders};
-use crate::h2::error::H2Error;
 
 use super::ResponseSink;
 

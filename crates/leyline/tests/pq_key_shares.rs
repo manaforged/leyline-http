@@ -43,7 +43,7 @@ async fn chrome_pq_key_shares_use_distinct_x25519_ephemerals() {
         .build()
         .unwrap();
     let _ = session
-        .get(&format!("https://{}:{}/", addr.ip(), addr.port()))
+        .get(format!("https://{}:{}/", addr.ip(), addr.port()))
         .await;
 
     let bytes = server.await.unwrap();

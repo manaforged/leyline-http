@@ -79,7 +79,7 @@ async fn order_is_connect_sent_head_done() {
     let session = session(&hook);
 
     let resp = session
-        .get(&format!("http://{addr}/one"))
+        .get(format!("http://{addr}/one"))
         .send()
         .await
         .unwrap();
@@ -111,7 +111,7 @@ async fn a_pooled_second_request_reports_reuse() {
 
     drop(
         session
-            .get(&format!("http://{addr}/one"))
+            .get(format!("http://{addr}/one"))
             .send()
             .await
             .unwrap(),
@@ -119,7 +119,7 @@ async fn a_pooled_second_request_reports_reuse() {
     let first = hook.lines().len();
     drop(
         session
-            .get(&format!("http://{addr}/two"))
+            .get(format!("http://{addr}/two"))
             .send()
             .await
             .unwrap(),
@@ -163,7 +163,7 @@ async fn response_timing_reports_a_fresh_dial() {
     let addr = serve(1).await;
     let session = Session::builder().build().unwrap();
     let resp = session
-        .get(&format!("http://{addr}/one"))
+        .get(format!("http://{addr}/one"))
         .send()
         .await
         .unwrap();
@@ -178,7 +178,7 @@ async fn no_listener_fires_nothing() {
     let addr = serve(1).await;
     let session = Session::builder().build().unwrap();
     let resp = session
-        .get(&format!("http://{addr}/one"))
+        .get(format!("http://{addr}/one"))
         .send()
         .await
         .unwrap();

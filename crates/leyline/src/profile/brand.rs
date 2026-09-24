@@ -88,13 +88,15 @@ impl ChromiumBrand {
     }
 }
 
+type BrandExtras = (Vec<(String, String)>, Option<String>);
+
 impl ChromiumBrand {
     pub(crate) fn apply(
         self,
         chromium_major: u32,
         platform: Platform,
         identity: &mut PlatformIdentity,
-    ) -> Result<(Vec<(String, String)>, Option<String>), BrandOverlayError> {
+    ) -> Result<BrandExtras, BrandOverlayError> {
         let Some(overlay) = self.overlay(chromium_major, platform, &identity.user_agent)? else {
             return Ok((Vec::new(), None));
         };

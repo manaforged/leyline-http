@@ -113,7 +113,7 @@ async fn streamed_connection_is_reused_after_full_drain() {
     }
     assert_eq!(b1, b"first");
 
-    let r2 = session.get(&format!("http://{addr}/b")).await.unwrap();
+    let r2 = session.get(format!("http://{addr}/b")).await.unwrap();
     assert_eq!(r2.text().await.unwrap(), "second");
     server.await.unwrap();
 }
@@ -194,7 +194,7 @@ async fn streamed_connection_dropped_when_consumer_drops_early() {
     let mut s1 = r1.into_stream().unwrap();
     let _first = s1.next().await.unwrap().unwrap();
     drop(s1);
-    let r2 = session.get(&format!("http://{addr}/b")).await.unwrap();
+    let r2 = session.get(format!("http://{addr}/b")).await.unwrap();
     assert_eq!(r2.status(), 200);
     assert_eq!(
         accepts.load(Ordering::SeqCst),

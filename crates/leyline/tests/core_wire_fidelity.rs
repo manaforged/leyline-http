@@ -123,7 +123,7 @@ async fn dx_helpers_accept_common_pair_shapes_and_header_shortcuts() {
     ];
 
     let resp = client
-        .post(&server.url("/login"))
+        .post(server.url("/login"))
         .form(&form_pairs)
         .send()
         .await
@@ -296,7 +296,7 @@ async fn anchored_headers_interleave_at_preset_slots() {
         .unwrap();
 
     let resp = session
-        .post(&server.url("/collect"))
+        .post(server.url("/submit"))
         .preset(Preset::Form)
         .anchored(HeaderAnchor::AfterCchUa, "x-extra-1", "f")
         .anchored(HeaderAnchor::AfterCchUaMobile, "x-extra-2", "a0")

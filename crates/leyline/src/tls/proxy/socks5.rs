@@ -35,16 +35,14 @@ pub(crate) async fn connect<C: crate::tls::TlsHandshake>(
         .map_err(TlsError::proxy_io)?;
 
     if method_resp[0] != 0x05 {
-        return Err(TlsError::proxy(
-            "socks5: invalid version in response".into(),
-        ));
+        return Err(TlsError::proxy("socks5: invalid version in response"));
     }
 
     match (method_resp[1], auth.as_deref()) {
         (0x00, _) => {}
         (0x02, Some(auth)) => authenticate(&mut tcp_stream, auth).await?,
         (0xFF, _) => {
-            return Err(TlsError::proxy("socks5: no acceptable auth method".into()));
+            return Err(TlsError::proxy("socks5: no acceptable auth method"));
         }
         (other, _) => {
             return Err(TlsError::proxy(format!(
@@ -71,17 +69,17 @@ fn auth_request(proxy: &url::Url) -> Result<Option<Vec<u8>>, TlsError> {
 
     let Some(password) = password else {
         return Err(TlsError::proxy(
-            "socks5: username and password must both be present".into(),
+            "socks5: username and password must both be present",
         ));
     };
     if username.is_empty() || password.is_empty() {
         return Err(TlsError::proxy(
-            "socks5: username and password must both be non-empty".into(),
+            "socks5: username and password must both be non-empty",
         ));
     }
     if username.len() > 255 || password.len() > 255 {
         return Err(TlsError::proxy(
-            "socks5: username or password exceeds 255 bytes".into(),
+            "socks5: username or password exceeds 255 bytes",
         ));
     }
     let mut auth_req = Vec::with_capacity(3 + username.len() + password.len());
@@ -111,7 +109,7 @@ async fn authenticate(tcp_stream: &mut TcpStream, auth: &[u8]) -> Result<(), Tls
         )));
     }
     if auth_resp[1] != 0x00 {
-        return Err(TlsError::proxy("socks5: authentication failed".into()));
+        return Err(TlsError::proxy("socks5: authentication failed"));
     }
     Ok(())
 }
@@ -153,9 +151,7 @@ async fn send_connect(tcp_stream: &mut TcpStream, host: &str, port: u16) -> Resu
         .map_err(TlsError::proxy_io)?;
 
     if resp_buf[0] != 0x05 {
-        return Err(TlsError::proxy(
-            "socks5: invalid CONNECT response version".into(),
-        ));
+        return Err(TlsError::proxy("socks5: invalid CONNECT response version"));
     }
     if resp_buf[1] != 0x00 {
         let reason = match resp_buf[1] {

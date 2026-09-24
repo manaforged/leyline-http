@@ -281,7 +281,7 @@ impl std::fmt::Debug for Jar {
 }
 
 impl Serialize for Jar {
-    fn serialize<S: Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
+    fn serialize<S: Serializer>(&self, ser: S) -> std::result::Result<S::Ok, S::Error> {
         let jar = lock(&self.inner);
         let mut flat: Vec<&Cookie> = jar.cookies.values().flatten().collect();
         flat.sort_by(|a, b| {
@@ -296,7 +296,7 @@ impl Serialize for Jar {
 }
 
 impl<'de> Deserialize<'de> for Jar {
-    fn deserialize<D: Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
+    fn deserialize<D: Deserializer<'de>>(de: D) -> std::result::Result<Self, D::Error> {
         let cookies: Vec<Cookie> = Vec::deserialize(de)?;
         let mut buckets: HashMap<String, Vec<Cookie>> = HashMap::new();
         let mut total = 0;

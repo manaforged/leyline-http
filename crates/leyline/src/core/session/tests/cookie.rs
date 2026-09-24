@@ -53,10 +53,10 @@ async fn explicit_cookie_replaces_jar_cookie_and_jar_still_emits_alone() {
         .timeout(Duration::from_secs(3))
         .build()
         .unwrap();
-    session.get(&format!("{origin}/seed")).send().await.unwrap();
-    session.get(&format!("{origin}/jar")).send().await.unwrap();
+    session.get(format!("{origin}/seed")).send().await.unwrap();
+    session.get(format!("{origin}/jar")).send().await.unwrap();
     session
-        .get(&format!("{origin}/explicit"))
+        .get(format!("{origin}/explicit"))
         .header("cookie", "mine=2; jar=1")
         .send()
         .await
@@ -96,10 +96,10 @@ async fn cross_origin_redirect_strips_explicit_cookie_and_uses_target_jar() {
         .unwrap();
     session
         .cookies()
-        .set_cookie(&url::Url::parse(&second_origin).unwrap(), "other", "3")
+        .set_cookie(url::Url::parse(&second_origin).unwrap(), "other", "3")
         .unwrap();
     let body = session
-        .get(&format!("{first_origin}/start"))
+        .get(format!("{first_origin}/start"))
         .header("cookie", "mine=2")
         .send()
         .await

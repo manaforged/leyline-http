@@ -40,7 +40,7 @@ async fn explicit_retry_policy_recovers_from_transient_connection_drop() {
         .unwrap();
 
     let resp = session
-        .get(&format!("http://{addr}/"))
+        .get(format!("http://{addr}/"))
         .await
         .expect("explicit retries should recover from the first-connection drop");
     assert_eq!(resp.status(), 200);
@@ -78,7 +78,7 @@ async fn default_session_does_not_retry_a_transient_connection_drop() {
         .build()
         .unwrap();
 
-    let result = session.get(&format!("http://{addr}/")).await;
+    let result = session.get(format!("http://{addr}/")).await;
     assert!(
         result.is_err(),
         "the no-retry default must surface the connection drop"
@@ -114,7 +114,7 @@ async fn connect_timeout_bounds_a_stalled_tls_handshake() {
 
     let start = Instant::now();
     let result = session
-        .get(&format!("https://127.0.0.1:{}/", addr.port()))
+        .get(format!("https://127.0.0.1:{}/", addr.port()))
         .await;
     let elapsed = start.elapsed();
 

@@ -31,14 +31,13 @@ pub(crate) async fn connect_via_tls<C: crate::tls::TlsHandshake>(
         return Err(TlsError::proxy(
             "https:// proxy is not supported together with a client certificate or certificate \
              pins: the origin TLS identity must not be presented to the proxy. Use an http:// \
-             CONNECT or socks5:// proxy, or drop the client cert / pins."
-                .into(),
+             CONNECT or socks5:// proxy, or drop the client cert / pins.",
         ));
     }
 
     let proxy_host = proxy
         .host_str()
-        .ok_or_else(|| TlsError::proxy("https proxy has no host".into()))?;
+        .ok_or_else(|| TlsError::proxy("https proxy has no host"))?;
     let tcp_stream = super::connect_to_proxy(connector, proxy, 443).await?;
 
     let proxy_key = SessionCache::key(
@@ -87,12 +86,12 @@ where
         let n = stream.read(&mut tmp).await.map_err(TlsError::proxy_io)?;
         if n == 0 {
             return Err(TlsError::proxy(
-                "proxy closed connection before CONNECT response".into(),
+                "proxy closed connection before CONNECT response",
             ));
         }
         response_buf.extend_from_slice(&tmp[..n]);
         if response_buf.len() > 8192 {
-            return Err(TlsError::proxy("proxy CONNECT response too large".into()));
+            return Err(TlsError::proxy("proxy CONNECT response too large"));
         }
         if let Some(i) = response_buf.windows(4).position(|w| w == b"\r\n\r\n") {
             break i + 4;
@@ -111,7 +110,7 @@ pub fn validate_connect_response(buf: &[u8], end_idx: usize) -> Result<(), TlsEr
     }
 
     let response = std::str::from_utf8(&buf[..end_idx])
-        .map_err(|_| TlsError::proxy("proxy CONNECT response is not UTF-8".into()))?;
+        .map_err(|_| TlsError::proxy("proxy CONNECT response is not UTF-8"))?;
     let mut lines = response.split("\r\n");
     let status_line = lines.next().unwrap_or("");
 
@@ -146,8 +145,7 @@ pub fn validate_connect_response(buf: &[u8], end_idx: usize) -> Result<(), TlsEr
     if end_idx < buf.len() {
         return Err(TlsError::proxy(
             "proxy CONNECT response carries trailing bytes after headers \
-             (possible TLS-stream injection)"
-                .into(),
+             (possible TLS-stream injection)",
         ));
     }
 
