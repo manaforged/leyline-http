@@ -96,10 +96,34 @@ impl Body {
         matches!(self.0, BodyKind::Stream { .. })
     }
 
-    pub(crate) fn as_bytes(&self) -> Option<&Bytes> {
+    pub(crate) fn into_parts(self) -> (Option<Bytes>, Option<BoxedStream>) {
+        match self.0 {
+            BodyKind::Empty => (None, None),
+            BodyKind::Bytes(b) => (Some(b), None),
+            BodyKind::Stream { stream, .. } => (None, Some(stream)),
+        }
+    }
+
+    pub(crate) fn into_h2(self) -> crate::h2::client::RequestBody {
+        use crate::h2::client::RequestBody;
+        match self.0 {
+            BodyKind::Empty => RequestBody::None,
+            BodyKind::Bytes(b) => RequestBody::Buffered(b),
+            BodyKind::Stream {
+                stream,
+                length_hint,
+            } => RequestBody::Streaming {
+                stream,
+                length_hint,
+            },
+        }
+    }
+
+    pub(crate) fn replay(&self) -> Option<Body> {
         match &self.0 {
-            BodyKind::Bytes(b) => Some(b),
-            _ => None,
+            BodyKind::Empty => Some(Body::default()),
+            BodyKind::Bytes(b) => Some(Body::bytes(b.clone())),
+            BodyKind::Stream { .. } => None,
         }
     }
 }

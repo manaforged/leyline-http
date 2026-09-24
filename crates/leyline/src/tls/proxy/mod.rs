@@ -1,6 +1,4 @@
 #![forbid(unsafe_code)]
-use std::time::Duration;
-
 use tokio::net::TcpStream;
 
 use crate::tls::TlsStream;
@@ -9,8 +7,6 @@ use crate::tls::error::TlsError;
 pub(crate) mod http;
 #[cfg(feature = "socks")]
 pub(crate) mod socks5;
-
-const PROXY_CONNECT_CEILING: Duration = Duration::from_secs(30);
 
 pub(crate) async fn connect_to_proxy<C: crate::tls::TlsHandshake>(
     connector: &C,
@@ -21,13 +17,7 @@ pub(crate) async fn connect_to_proxy<C: crate::tls::TlsHandshake>(
         .host_str()
         .ok_or_else(|| TlsError::Profile(format!("{} proxy has no host", proxy.scheme())))?;
     let port = proxy.port_or_known_default().unwrap_or(fallback_port);
-    match tokio::time::timeout(PROXY_CONNECT_CEILING, connector.dial_tcp(host, port)).await {
-        Ok(res) => res,
-        Err(_) => Err(TlsError::TcpConnect(std::io::Error::new(
-            std::io::ErrorKind::TimedOut,
-            format!("proxy connect to {host}:{port} timed out after {PROXY_CONNECT_CEILING:?}"),
-        ))),
-    }
+    connector.dial_tcp(host, port).await
 }
 
 pub(crate) async fn connect_through_proxy<C: crate::tls::TlsHandshake>(

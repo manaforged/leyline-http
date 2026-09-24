@@ -9,13 +9,14 @@ use quiche::h3::NameValue;
 use tokio::sync::{Semaphore, mpsc, oneshot};
 use tokio::task::AbortHandle;
 
+use crate::core::deadline::{Elapsed, within};
 use crate::pool::TlsInfo;
 use crate::profile::BrowserProfile;
 use crate::quic::config::H3Config;
 use crate::quic::connection::{
     EstablishedH3, H3Response, check_body_budget, close_reason, connect_and_handshake, flush_egress,
 };
-use crate::tls::{Resolver, TlsTrustConfig};
+use crate::tls::{FingerprintConnector, TlsTrustConfig};
 
 const COMMAND_CHANNEL_CAPACITY: usize = 1024;
 
@@ -164,14 +165,6 @@ impl H3Client {
         self.closed.load(Ordering::Acquire)
     }
 }
-
-pub struct H3DriverTask(
-    #[expect(
-        dead_code,
-        reason = "field held so the JoinHandle drops (and thus never aborts) with the struct; never read"
-    )]
-    tokio::task::JoinHandle<()>,
-);
 
 struct H3Stream {
     resp_tx: Option<oneshot::Sender<Result<H3Response, H3SendError>>>,
@@ -343,11 +336,21 @@ pub(crate) async fn open_fresh_h3(
     h3_cfg: &H3Config,
     profile: &BrowserProfile,
     trust: &TlsTrustConfig,
-    resolver: &dyn Resolver,
+    connector: &FingerprintConnector,
     host: &str,
     port: u16,
-) -> Result<(H3Client, H3DriverTask, TlsInfo), String> {
-    let established = connect_and_handshake(h3_cfg, profile, trust, resolver, host, port).await?;
+) -> Result<(H3Client, TlsInfo), String> {
+    let handshake = connect_and_handshake(
+        h3_cfg,
+        profile,
+        trust,
+        connector.resolver().as_ref(),
+        host,
+        port,
+    );
+    let established = within(connector.connect_timeout(), handshake)
+        .await
+        .map_err(|Elapsed| format!("h3 handshake to {host}:{port}: connect timeout"))??;
     let tls = established.tls.clone();
 
     let (tx, command_rx) = mpsc::channel(COMMAND_CHANNEL_CAPACITY);
@@ -362,9 +365,9 @@ pub(crate) async fn open_fresh_h3(
         closed: Arc::clone(&closed),
         streams: HashMap::new(),
     };
-    let task = tokio::spawn(driver.run());
+    drop(tokio::spawn(driver.run()));
 
-    Ok((H3Client { tx, closed }, H3DriverTask(task), tls))
+    Ok((H3Client { tx, closed }, tls))
 }
 
 struct H3Driver {

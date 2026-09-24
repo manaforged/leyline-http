@@ -122,20 +122,10 @@ pub(crate) async fn connect_and_handshake(
     let mut out = vec![0u8; h3_cfg.max_udp_payload_size as usize];
     let mut buf = vec![0u8; 65_535];
     let mut h3: Option<quiche::h3::Connection> = None;
-    let deadline = std::time::Instant::now() + h3_cfg.max_idle_timeout;
     let mut iter = 0u32;
 
     loop {
         iter += 1;
-        if std::time::Instant::now() >= deadline {
-            return Err(format!(
-                "h3 handshake: deadline exceeded ({:?}, iter={iter}): closed={} established={} h3={}",
-                h3_cfg.max_idle_timeout,
-                conn.is_closed(),
-                conn.is_established(),
-                h3.is_some()
-            ));
-        }
         if iter > 10_000 {
             return Err(format!(
                 "h3 handshake: CPU-spin guard tripped at {iter} iters: closed={} established={} h3={}",

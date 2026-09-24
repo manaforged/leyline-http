@@ -1,6 +1,7 @@
 use super::RequestBuilder;
 use crate::core::Result;
 use crate::core::body::{Body, BodyKind};
+use crate::core::deadline::Deadline;
 use crate::core::error::{Error, Kind};
 use crate::core::response::Response;
 use crate::core::session::execute::Attempt;
@@ -11,33 +12,26 @@ impl RequestBuilder {
         self.prepare()?;
         let retry_policy = self.retry_policy.clone();
         let digest_auth = self.digest_auth.take();
-        let timeout = self.timeouts.map(|t| t.total);
         let session = self.session.clone();
-        let mut attempt = self.into_attempt();
+        let deadline = session.deadline(self.timeouts.as_ref(), self.timeouts.map(|t| t.total));
+        let mut attempt = self.into_attempt(deadline);
 
         if retry_policy.is_none() && digest_auth.is_none() {
-            return session.run(attempt).await;
+            return session.attempt(attempt).await;
         }
 
         let retryable_method =
             retry_policy.allow_non_idempotent || is_idempotent(attempt.method.as_str());
-        let body_retryable = !attempt.body.is_stream();
-        let replay: Option<bytes::Bytes> = attempt.body.as_bytes().cloned();
+        let replay = attempt.body.replay();
+        let body_retryable = replay.is_some();
         let base_headers = attempt.headers.clone();
-
-        let session_timeout = timeout.unwrap_or_else(|| session.default_timeout());
-        let deadline = tokio::time::Instant::now() + session_timeout;
 
         let mut n: u32 = 0;
         loop {
-            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-            if remaining.is_zero() {
-                return Err(Error::new(Kind::Timeout));
-            }
-            let is_stream_body = attempt.body.is_stream();
-            let hop_body = std::mem::take(&mut attempt.body);
-            let this = attempt.again(hop_body, base_headers.clone(), Some(remaining));
-            let result = session.run(this).await;
+            deadline.check()?;
+            let attempt_body = std::mem::take(&mut attempt.body);
+            let this = attempt.again(attempt_body, base_headers.clone());
+            let result = session.attempt(this).await;
 
             if let (Some(auth), Ok(resp)) = (&digest_auth, result.as_ref())
                 && resp.status() == 401
@@ -51,14 +45,14 @@ impl RequestBuilder {
                     Some(q) => format!("{}?{}", parsed.path(), q),
                     None => parsed.path().to_string(),
                 };
-                if is_stream_body {
+                let Some(replay) = replay else {
                     return Err(Error::new(Kind::Request).with_message(
                         "digest auth: cannot replay streaming request body. \
                          Buffer the body into bytes before sending.",
                     ));
-                }
+                };
                 return Self::digest_followup(
-                    &session, attempt, auth, challenge, &uri_path, replay, deadline,
+                    &session, attempt, auth, challenge, &uri_path, replay,
                 )
                 .await;
             }
@@ -69,14 +63,13 @@ impl RequestBuilder {
                     RetryPlan::Backoff(sleep) => sleep,
                 };
 
-            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-            tokio::time::sleep(sleep.min(remaining)).await;
+            deadline.sleep(sleep).await;
             n += 1;
-            attempt.body = replay.clone().map(Body::bytes).unwrap_or_default();
+            attempt.body = replay.as_ref().and_then(Body::replay).unwrap_or_default();
         }
     }
 
-    fn into_attempt(mut self) -> Attempt {
+    fn into_attempt(mut self, deadline: Deadline) -> Attempt {
         let headers = if self.headers.is_empty() {
             None
         } else {
@@ -88,8 +81,7 @@ impl RequestBuilder {
             preset: self.preset,
             body: std::mem::take(&mut self.body),
             headers,
-            timeout: self.timeouts.map(|t| t.total),
-            timeouts: self.timeouts,
+            deadline,
             stream_response: self.stream_response,
             proxy: self.proxy.take(),
             header_order: self.header_order.take(),
@@ -139,8 +131,7 @@ impl RequestBuilder {
         auth: &crate::core::digest::DigestAuth,
         challenge: crate::core::digest::Challenge,
         uri_path: &str,
-        replay: Option<bytes::Bytes>,
-        deadline: tokio::time::Instant,
+        replay: Body,
     ) -> Result<Response> {
         let mut challenge = challenge;
         let mut stale_retried = false;
@@ -167,13 +158,10 @@ impl RequestBuilder {
             };
             let mut digest_headers = attempt.headers.clone().unwrap_or_default();
             digest_headers.set("authorization", auth_header)?;
-            let replay_body = replay.clone().map(Body::bytes).unwrap_or_default();
-            let digest_remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-            if digest_remaining.is_zero() {
-                return Err(Error::new(Kind::Timeout));
-            }
+            let replay_body = replay.replay().unwrap_or_default();
+            attempt.deadline.check()?;
             let resp = session
-                .run(attempt.again(replay_body, Some(digest_headers), Some(digest_remaining)))
+                .attempt(attempt.again(replay_body, Some(digest_headers)))
                 .await?;
             if resp.status() == 401
                 && !stale_retried

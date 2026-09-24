@@ -1,6 +1,7 @@
 mod body;
 mod body_stream;
 mod config;
+pub(crate) mod deadline;
 mod digest;
 mod error;
 mod headers;

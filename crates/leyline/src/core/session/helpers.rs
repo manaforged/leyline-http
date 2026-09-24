@@ -72,10 +72,6 @@ impl Session {
         self.inner.protocol_policy
     }
 
-    pub(crate) fn default_timeout(&self) -> std::time::Duration {
-        self.inner.timeouts.total
-    }
-
     pub(crate) fn default_retry(&self) -> &crate::core::retry::RetryPolicy {
         &self.inner.default_retry
     }
@@ -92,22 +88,15 @@ impl Session {
         let host = url.host_str().unwrap_or("");
         let port = url.port_or_known_default().unwrap_or(443);
         let proxy = self.inner.proxy_config.proxy_for(&url, proxy);
-        let connect = crate::pool::checkout_handle(
+        let opened = crate::pool::checkout_handle(
             &self.inner.pool,
             &self.inner.connector,
             &self.inner.h2_config,
             host,
             port,
             proxy,
-        );
-        let opened = match self.inner.timeouts.connect {
-            Some(limit) => tokio::time::timeout(limit, connect).await.map_err(|_| {
-                crate::Error::new(crate::Kind::Timeout).with_message(format!(
-                    "preconnect to {host}:{port} timed out after {limit:?}"
-                ))
-            })?,
-            None => connect.await,
-        };
+        )
+        .await;
         match opened {
             Ok(_) => Ok(()),
             Err(error) if error.alpn().is_some() => {
@@ -183,11 +172,7 @@ impl std::fmt::Debug for Session {
             .field("platform", &self.inner.platform)
             .field(
                 "proxy",
-                &self
-                    .inner
-                    .proxy_config
-                    .primary()
-                    .map(crate::core::config::redact),
+                &self.inner.proxy_config.primary().map(crate::util::redact),
             )
             .field("timeout", &self.inner.timeouts.total)
             .field("protocol_policy", &self.inner.protocol_policy);
@@ -209,7 +194,7 @@ impl std::fmt::Display for Session {
                 self.inner
                     .proxy_config
                     .primary()
-                    .map(crate::core::config::redact)
+                    .map(crate::util::redact)
                     .unwrap_or_else(|| "none".into())
             ),
             None => write!(
@@ -219,7 +204,7 @@ impl std::fmt::Display for Session {
                 self.inner
                     .proxy_config
                     .primary()
-                    .map(crate::core::config::redact)
+                    .map(crate::util::redact)
                     .unwrap_or_else(|| "none".into())
             ),
         }

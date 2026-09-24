@@ -1,0 +1,145 @@
+use std::borrow::Cow;
+
+use url::Url;
+
+use super::super::header_merge::apply_extra_headers;
+use crate::core::Session;
+use crate::core::body::{Body, BodyKind};
+use crate::core::headers::{HeaderList, reorder};
+use crate::profile::Preset;
+use crate::profile::preset::{HeaderPair, HeaderStyle};
+
+impl Session {
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn attempt_headers(
+        &self,
+        preset: Option<Preset>,
+        origin: &str,
+        referer: &str,
+        current_url: &Url,
+        current_method: &str,
+        redirect_chain: &[String],
+        current_body: &Body,
+        extra_headers: Option<&HeaderList>,
+        strip_sensitive: bool,
+        header_order: Option<&[String]>,
+    ) -> Vec<HeaderPair> {
+        let mut headers: Vec<HeaderPair> = if let Some(preset) = preset {
+            let ctx = crate::profile::preset::HeaderContext {
+                user_agent: &self.inner.user_agent,
+                sec_ch_ua: &self.inner.sec_ch_ua,
+                sec_ch_ua_mobile: self.inner.platform.mobile_flag(),
+                sec_ch_ua_platform: self.inner.platform.sec_ch_platform(),
+                accept_language: &self.inner.accept_language,
+                origin,
+                referer,
+                firefox: self
+                    .inner
+                    .identity
+                    .map(|id| id.http())
+                    .or(self.inner.browser)
+                    .is_some_and(|b| b.header_style() == HeaderStyle::Gecko),
+            };
+            preset.build_headers(&ctx)
+        } else {
+            vec![
+                (
+                    "user-agent".into(),
+                    Cow::Owned(self.inner.user_agent.clone()),
+                ),
+                ("accept".into(), Cow::Borrowed("*/*")),
+                (
+                    "accept-encoding".into(),
+                    Cow::Borrowed("gzip, deflate, br, zstd"),
+                ),
+                (
+                    "accept-language".into(),
+                    Cow::Owned(self.inner.accept_language.clone()),
+                ),
+            ]
+        };
+
+        let navigate_accept_override = self
+            .inner
+            .identity_navigate_accept
+            .as_deref()
+            .or(self.inner.brand_navigate_accept.as_deref());
+        if let (Some(accept_override), Some(Preset::Navigate)) = (navigate_accept_override, preset)
+        {
+            for (name, value) in headers.iter_mut() {
+                if name == "accept" {
+                    *value = Cow::Owned(accept_override.to_string());
+                    break;
+                }
+            }
+        }
+        let sensitive = |name: &str| {
+            let lower = name.to_ascii_lowercase();
+            lower == "authorization" || lower == "proxy-authorization" || lower == "cookie"
+        };
+
+        for (k, v) in self
+            .inner
+            .brand_extra_headers
+            .iter()
+            .chain(self.inner.identity_extra_headers.iter())
+        {
+            let user_has_it = extra_headers
+                .as_ref()
+                .map(|h| h.iter().any(|(uk, _)| uk.as_str().eq_ignore_ascii_case(k)))
+                .unwrap_or(false);
+            if user_has_it || (strip_sensitive && sensitive(k)) {
+                continue;
+            }
+            match headers
+                .iter()
+                .position(|(hk, _)| hk.eq_ignore_ascii_case(k))
+            {
+                Some(pos) => headers[pos].1 = Cow::Owned(v.clone()),
+                None => headers.push((Cow::Owned(k.clone()), Cow::Owned(v.clone()))),
+            }
+        }
+
+        if let Some(extra) = extra_headers {
+            apply_extra_headers(&mut headers, extra, strip_sensitive, &sensitive);
+        }
+
+        if let Some(len) = current_body.len_hint()
+            && (!matches!(current_body.0, BodyKind::Empty) || len > 0)
+        {
+            headers.retain(|(k, _)| !k.eq_ignore_ascii_case("content-length"));
+            headers.insert(0, ("content-length".into(), Cow::Owned(len.to_string())));
+        }
+
+        let cross_site = crate::cookie::is_cross_site(current_url, redirect_chain);
+        let safe_method = ["GET", "HEAD"]
+            .iter()
+            .any(|m| current_method.eq_ignore_ascii_case(m));
+        let caller_cookie = headers
+            .iter()
+            .any(|(k, _)| k.eq_ignore_ascii_case("cookie"));
+        if !caller_cookie
+            && let Some(cookie_val) =
+                self.inner
+                    .cookie_jar
+                    .cookie_header_for(current_url, cross_site, safe_method)
+        {
+            headers.push(("cookie".into(), Cow::Owned(cookie_val)));
+        }
+
+        if let Some(order) = header_order
+            .map(Cow::Borrowed)
+            .or_else(|| self.session_header_order())
+        {
+            reorder(&mut headers, &order);
+        }
+
+        headers
+    }
+    pub(in crate::core::session) fn session_header_order(&self) -> Option<Cow<'_, [String]>> {
+        self.inner
+            .identity_request_header_order
+            .as_deref()
+            .map(Cow::Borrowed)
+    }
+}

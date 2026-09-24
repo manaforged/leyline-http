@@ -129,9 +129,7 @@ impl WebSocketBuilder {
             self.proxy.as_deref(),
             &self.headers,
         );
-        tokio::time::timeout(self.session.inner.timeouts.total, handshake)
-            .await
-            .map_err(|_| Error::new(Kind::Timeout))?
+        self.session.deadline(None, None).total(handshake).await
     }
 }
 
