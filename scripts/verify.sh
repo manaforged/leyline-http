@@ -183,6 +183,18 @@ g_doc() {
     ok "docs clean"
 }
 
+g_api() {
+    step "generated API reference"
+    python3 scripts/generate-api.py --check || fail "run python3 scripts/generate-api.py"
+    ok "API reference current"
+}
+
+g_book() {
+    step "mdbook"
+    mdbook build docs >/dev/null || fail "mdbook build docs"
+    ok "book builds"
+}
+
 g_test() {
     step "cargo test --workspace --exclude leyline-quiche"
     cargo test --workspace --exclude leyline-quiche || fail "tests failed"
@@ -304,11 +316,11 @@ g_fuzz_timed() {
 
 gate_order=(
     comments parity msrv package bssl-source
-    fmt clippy doc test live deny semver external-types benches
+    fmt clippy doc api book test live deny semver external-types benches
     fuzz-replay fuzz-timed
 )
 quick_gates=(comments parity msrv package)
-full_gates=(comments parity msrv package fmt clippy doc test live
+full_gates=(comments parity msrv package fmt clippy doc api book test live
     deny semver external-types benches fuzz-replay)
 
 if [[ -n "$only" ]]; then

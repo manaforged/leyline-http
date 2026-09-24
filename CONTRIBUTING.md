@@ -24,7 +24,12 @@
 2. Keep the change to one topic. A bug fix, its regression test, and its
    changelog line are one pull request.
 
-3. Add a line under `Unreleased` in `CHANGELOG.md` when the change is
+3. If the change adds, removes, or changes a public item, run
+   `python3 scripts/generate-api.py` and commit `docs/reference/`. It needs
+   `cargo-public-api` 0.52.0 and the `nightly-2026-09-16` toolchain. The
+   release gate runs it with `--check`.
+
+4. Add a line under `Unreleased` in `CHANGELOG.md` when the change is
    visible to a user of the crate.
 
 ## Pull request description

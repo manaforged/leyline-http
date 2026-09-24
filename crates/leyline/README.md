@@ -98,10 +98,10 @@ lists the capture status of every profile.
 
 | Page | Contents |
 | --- | --- |
-| [API reference](https://docs.rs/leyline-http) | Generated reference for the public API. |
-| [User guide](https://github.com/manaforged/leyline-http/blob/main/docs/guide/README.md) | Task pages: sessions, requests, streaming, proxies, cookies, HTTP/3, and TLS trust. |
-| [Profile reference](https://github.com/manaforged/leyline-http/blob/main/docs/guide/profiles.md) | Bundled profiles and their capture status. |
-| [API map](https://github.com/manaforged/leyline-http/blob/main/docs/api.md) | Each task mapped to its type or function, and the error model. |
+| [User guide](https://manaforged.github.io/leyline-http/) | Task pages: sessions, requests, streaming, proxies, cookies, HTTP/3, and TLS trust. |
+| [API reference](https://manaforged.github.io/leyline-http/reference/leyline-http.html) | Every public item, generated from the compiler. The release check fails when it is stale. |
+| [Profile reference](https://manaforged.github.io/leyline-http/guide/profiles.html) | Bundled profiles and their capture status. |
+| [API map](https://manaforged.github.io/leyline-http/api.html) | Each task mapped to its type or function, and the error model. |
 | [Changelog](https://github.com/manaforged/leyline-http/blob/main/CHANGELOG.md) | Release notes and the version policy. |
 
 ## Security

@@ -24,3 +24,7 @@
 - [Profile reference](guide/profiles.md)
 - [MSRV](guide/msrv.md)
 - [API map](api.md)
+
+# API reference
+
+- [leyline-http](reference/leyline-http.md)
