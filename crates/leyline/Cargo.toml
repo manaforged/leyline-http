@@ -67,7 +67,7 @@ compression-gzip = ["dep:flate2"]
 compression-brotli = ["dep:brotli"]
 compression-deflate = ["dep:flate2"]
 compression-zstd = ["dep:zstd"]
-multipart = ["stream", "dep:async-stream"]
+multipart = ["stream"]
 stream = []
 websocket = ["dep:tungstenite", "dep:tokio-tungstenite"]
 http3 = ["dep:leyline-quiche"]
@@ -148,7 +148,6 @@ encoding_rs = { version = "0.8", optional = true }
 # compiles unconditionally and the list cannot be hand-rolled.
 psl = "2.1"
 futures-util = "0.3"
-async-stream = { version = "0.3.5", optional = true }
 # Non-optional: h2::client::H2ConnectStream needs PollSender for
 # cancel-safe AsyncWrite backpressure (waker survives across polls).
 tokio-util = { version = "0.7", features = ["io"] }

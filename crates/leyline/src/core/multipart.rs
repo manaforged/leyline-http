@@ -4,7 +4,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use bytes::Bytes;
-use futures_util::Stream;
+use futures_util::{Stream, TryFutureExt};
 
 use crate::core::body::{Body, BodyKind};
 
@@ -112,15 +112,9 @@ impl Form {
             .unwrap_or("file")
             .to_string();
 
-        let async_path = path.clone();
-        let stream = async_stream::try_stream! {
-            let file = tokio::fs::File::open(&async_path).await?;
-            let mut reader = tokio_util::io::ReaderStream::new(file);
-            use futures_util::StreamExt as _;
-            while let Some(chunk) = reader.next().await {
-                yield chunk?;
-            }
-        };
+        let stream = tokio::fs::File::open(path)
+            .map_ok(tokio_util::io::ReaderStream::new)
+            .try_flatten_stream();
 
         let mut part = Part::stream(stream).filename(filename);
         part.name = name.into();
