@@ -500,15 +500,14 @@ def wire_family(family: str, prefix: str) -> None:
 
     if family == "chrome":
         newest = majors[-1]
-        brand = ROOT / "crates/leyline/src/profile/brand.rs"
-        btxt = brand.read_text()
-        opera = newest - 16
-        row = f"    ({newest}, {opera}),\n"
-        needle = "const OPERA_PER_CHROMIUM: &[(u32, u32)] = &[\n"
-        if f"({newest}," not in btxt:
+        brands = ROOT / "crates/leyline/profiles/brands.toml"
+        btxt = brands.read_text()
+        row = f'"{newest}" = ["{newest - 16}.0.0.0"]\n'
+        needle = "[Opera.versions]\n"
+        if f'"{newest}" = ' not in btxt.split(needle, 1)[-1].split("\n[", 1)[0]:
             if needle not in btxt:
                 raise SystemExit(f"wire: missing marker {needle!r}")
-            brand.write_text(btxt.replace(needle, needle + row, 1))
+            brands.write_text(btxt.replace(needle, needle + row, 1))
     print(f"wired {prefix}{majors[-1]}  meta written from toml majors + ja4 groups")
 
 
