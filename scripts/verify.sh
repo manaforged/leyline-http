@@ -3,7 +3,6 @@ set -euo pipefail
 
 full=0
 fuzz=0
-bssl_source_build=0
 fuzz_seconds=300
 only=""
 while [[ $# -gt 0 ]]; do
@@ -11,7 +10,6 @@ while [[ $# -gt 0 ]]; do
         --quick) shift ;; # compatibility: quick is now the default
         --full) full=1; shift ;;
         --only) only="${2:?--only needs a comma-separated gate list}"; shift 2 ;;
-        --bssl-source-build) bssl_source_build=1; shift ;;
         --fuzz)
             full=1
             fuzz=1
@@ -84,11 +82,6 @@ g_package() {
         || fail "cargo package failed"
     ok "publishable crates packaged"
 
-    step "prebuilt BoringSSL artifact checksums"
-    "$(cd "$(dirname "$0")" && pwd)/package-bssl.sh" --verify \
-        || fail "committed BoringSSL artifacts differ from native/CHECKSUMS"
-    ok "prebuilt BoringSSL artifacts match native/CHECKSUMS"
-
     step "packaged leyline consumer smoke check"
     package_root="$(mktemp -d)"
     for archive in "$CARGO_TARGET_DIR"/package/*.crate; do
@@ -125,14 +118,6 @@ EOF
     cargo +"$msrv" check --manifest-path "$package_root/consumer/Cargo.toml" \
         || fail "packaged leyline consumer smoke check failed"
     ok "packaged leyline consumer smoke check"
-}
-
-g_bssl_source() {
-    step "BoringSSL source-build"
-    ./scripts/package-bssl.sh || fail "BoringSSL source-build failed"
-    cargo +"$msrv" check --manifest-path crates/leyline-bssl-sys/Cargo.toml \
-        || fail "source-built BoringSSL did not compile"
-    ok "BoringSSL source-build"
 }
 
 g_fmt() {
@@ -295,7 +280,7 @@ g_fuzz_timed() {
 }
 
 gate_order=(
-    comments msrv package bssl-source
+    comments msrv package
     fmt clippy doc api book test live deny semver external-types benches
     fuzz-replay fuzz-timed
 )
@@ -314,7 +299,6 @@ elif [[ $full -eq 1 ]]; then
 else
     want=("${quick_gates[@]}")
 fi
-[[ $bssl_source_build -eq 1 ]] && want+=(bssl-source)
 [[ $fuzz -eq 1 ]] && want+=(fuzz-timed)
 
 semver_status="skipped (cargo install --locked cargo-semver-checks)"

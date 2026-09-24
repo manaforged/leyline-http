@@ -24,7 +24,7 @@ otherwise.
 
 ## Bundled BoringSSL and quiche
 
-`leyline-bssl-sys` ships a prebuilt BoringSSL pinned to commit
+`leyline-bssl-sys` builds BoringSSL from source, pinned to commit
 `3a9254f16eda7a4c5d2260039ff23456a0a34de4`, the revision Chromium's DEPS
 pinned at tag `150.0.7871.26`. See
 [`crates/leyline-bssl-sys/PROVENANCE.md`](crates/leyline-bssl-sys/PROVENANCE.md)

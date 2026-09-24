@@ -1,45 +1,3 @@
-//! Public/private key processing.
-//!
-//! Asymmetric public key algorithms solve the problem of establishing and sharing
-//! secret keys to securely send and receive messages.
-//! This system uses a pair of keys: a public key, which can be freely
-//! distributed, and a private key, which is kept to oneself. An entity may
-//! encrypt information using a user's public key. The encrypted information can
-//! only be deciphered using that user's private key.
-//!
-//! This module offers support for five popular algorithms:
-//!
-//! * RSA
-//!
-//! * DSA
-//!
-//! * Diffie-Hellman
-//!
-//! * Elliptic Curves
-//!
-//! * HMAC
-//!
-//! These algorithms rely on hard mathematical problems - namely integer factorization,
-//! discrete logarithms, and elliptic curve relationships - that currently do not
-//! yield efficient solutions. This property ensures the security of these
-//! cryptographic algorithms.
-//!
-//! # Example
-//!
-//! Generate a 2048-bit RSA public/private key pair and print the public key.
-//!
-//! ```rust
-//! use leyline_bssl::rsa::Rsa;
-//! use leyline_bssl::pkey::PKey;
-//! use std::str;
-//!
-//! let rsa = Rsa::generate(2048).unwrap();
-//! let pkey = PKey::from_rsa(rsa).unwrap();
-//!
-//! let pub_key: Vec<u8> = pkey.public_key_to_pem().unwrap();
-//! println!("{:?}", str::from_utf8(pub_key.as_slice()).unwrap());
-//! ```
-
 use foreign_types::{ForeignType, ForeignTypeRef};
 use libc::{c_int, c_long};
 use openssl_macros::corresponds;
@@ -56,19 +14,15 @@ use crate::error::ErrorStack;
 use crate::ffi;
 use crate::rsa::Rsa;
 use crate::try_int;
-use crate::util::{CallbackState, invoke_passwd_cb};
+use crate::util::{invoke_passwd_cb, CallbackState};
 use crate::{cvt, cvt_0i, cvt_p};
 
-/// A tag type indicating that a key only has parameters.
 pub enum Params {}
 
-/// A tag type indicating that a key only has public components.
 pub enum Public {}
 
-/// A tag type indicating that a key has private components.
 pub enum Private {}
 
-/// An identifier of a kind of key.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Id(c_int);
 
@@ -83,13 +37,11 @@ impl Id {
     pub const X25519: Id = Id(ffi::EVP_PKEY_X25519);
     pub const X448: Id = Id(ffi::EVP_PKEY_X448);
 
-    /// Creates a `Id` from an integer representation.
     #[must_use]
     pub fn from_raw(value: c_int) -> Id {
         Id(value)
     }
 
-    /// Returns the integer representation of the `Id`.
     #[allow(clippy::trivially_copy_pass_by_ref)]
     #[must_use]
     pub fn as_raw(&self) -> c_int {
@@ -97,7 +49,6 @@ impl Id {
     }
 }
 
-/// A trait indicating that a key has parameters.
 #[allow(clippy::missing_safety_doc)]
 pub unsafe trait HasParams {}
 
@@ -105,7 +56,6 @@ unsafe impl HasParams for Params {}
 
 unsafe impl<T> HasParams for T where T: HasPublic {}
 
-/// A trait indicating that a key has public components.
 #[allow(clippy::missing_safety_doc)]
 pub unsafe trait HasPublic {}
 
@@ -113,7 +63,6 @@ unsafe impl HasPublic for Public {}
 
 unsafe impl<T> HasPublic for T where T: HasPrivate {}
 
-/// A trait indicating that a key has private components.
 #[allow(clippy::missing_safety_doc)]
 pub unsafe trait HasPrivate {}
 
@@ -123,9 +72,7 @@ generic_foreign_type_and_impl_send_sync! {
     type CType = ffi::EVP_PKEY;
     fn drop = ffi::EVP_PKEY_free;
 
-    /// A public or private key.
     pub struct PKey<T>;
-    /// Reference to [`PKey`].
     pub struct PKeyRef<T>;
 }
 
@@ -141,7 +88,6 @@ impl<T> ToOwned for PKeyRef<T> {
 }
 
 impl<T> PKeyRef<T> {
-    /// Returns a copy of the internal RSA key.
     #[corresponds(EVP_PKEY_get1_RSA)]
     pub fn rsa(&self) -> Result<Rsa<T>, ErrorStack> {
         unsafe {
@@ -150,7 +96,6 @@ impl<T> PKeyRef<T> {
         }
     }
 
-    /// Returns a copy of the internal DSA key.
     #[corresponds(EVP_PKEY_get1_DSA)]
     pub fn dsa(&self) -> Result<Dsa<T>, ErrorStack> {
         unsafe {
@@ -159,7 +104,6 @@ impl<T> PKeyRef<T> {
         }
     }
 
-    /// Returns a copy of the internal DH key.
     #[corresponds(EVP_PKEY_get1_DH)]
     pub fn dh(&self) -> Result<Dh<T>, ErrorStack> {
         unsafe {
@@ -168,7 +112,6 @@ impl<T> PKeyRef<T> {
         }
     }
 
-    /// Returns a copy of the internal elliptic curve key.
     #[corresponds(EVP_PKEY_get1_EC_KEY)]
     pub fn ec_key(&self) -> Result<EcKey<T>, ErrorStack> {
         unsafe {
@@ -177,14 +120,12 @@ impl<T> PKeyRef<T> {
         }
     }
 
-    /// Returns the `Id` that represents the type of this key.
     #[corresponds(EVP_PKEY_id)]
     #[must_use]
     pub fn id(&self) -> Id {
         unsafe { Id::from_raw(ffi::EVP_PKEY_id(self.as_ptr())) }
     }
 
-    /// Returns the maximum size of a signature in bytes.
     #[corresponds(EVP_PKEY_size)]
     #[must_use]
     pub fn size(&self) -> usize {
@@ -197,31 +138,22 @@ where
     T: HasPublic,
 {
     to_pem! {
-        /// Serializes the public key into a PEM-encoded SubjectPublicKeyInfo structure.
-        ///
-        /// The output will have a header of `-----BEGIN PUBLIC KEY-----`.
         #[corresponds(PEM_write_bio_PUBKEY)]
         public_key_to_pem,
         ffi::PEM_write_bio_PUBKEY
     }
 
     to_der! {
-        /// Serializes the public key into a DER-encoded SubjectPublicKeyInfo structure.
         #[corresponds(i2d_PUBKEY)]
         public_key_to_der,
         ffi::i2d_PUBKEY
     }
 
-    /// Returns the size of the key.
-    ///
-    /// This corresponds to the bit length of the modulus of an RSA key, and the bit length of the
-    /// group order for an elliptic curve key, for example.
     #[must_use]
     pub fn bits(&self) -> u32 {
         unsafe { ffi::EVP_PKEY_bits(self.as_ptr()) as u32 }
     }
 
-    /// Compares the public component of this key with another.
     #[must_use]
     pub fn public_eq<U>(&self, other: &PKeyRef<U>) -> bool
     where
@@ -230,7 +162,6 @@ where
         unsafe { ffi::EVP_PKEY_cmp(self.as_ptr(), other.as_ptr()) == 1 }
     }
 
-    /// Returns the length of the "raw" form of the public key. Only supported for certain key types.
     #[corresponds(EVP_PKEY_get_raw_public_key)]
     pub fn raw_public_key_len(&self) -> Result<usize, ErrorStack> {
         unsafe {
@@ -244,9 +175,6 @@ where
         }
     }
 
-    /// Outputs a copy of the "raw" form of the public key. Only supported for certain key types.
-    ///
-    /// Returns the used portion of `out`.
     #[corresponds(EVP_PKEY_get_raw_public_key)]
     pub fn raw_public_key<'a>(&self, out: &'a mut [u8]) -> Result<&'a [u8], ErrorStack> {
         unsafe {
@@ -266,39 +194,27 @@ where
     T: HasPrivate,
 {
     private_key_to_pem! {
-        /// Serializes the private key to a PEM-encoded PKCS#8 PrivateKeyInfo structure.
-        ///
-        /// The output will have a header of `-----BEGIN PRIVATE KEY-----`.
         #[corresponds(PEM_write_bio_PKCS8PrivateKey)]
         private_key_to_pem_pkcs8,
-        /// Serializes the private key to a PEM-encoded PKCS#8 EncryptedPrivateKeyInfo structure.
-        ///
-        /// The output will have a header of `-----BEGIN ENCRYPTED PRIVATE KEY-----`.
         #[corresponds(PEM_write_bio_PKCS8PrivateKey)]
         private_key_to_pem_pkcs8_passphrase,
         ffi::PEM_write_bio_PKCS8PrivateKey
     }
 
     to_der! {
-        /// Serializes the private key to a DER-encoded key type specific format.
         #[corresponds(i2d_PrivateKey)]
         private_key_to_der,
         ffi::i2d_PrivateKey
     }
 
-    // This isn't actually PEM output, but `i2d_PKCS8PrivateKey_bio` is documented to be
-    // "identical to the corresponding PEM function", and it's declared in pem.h.
     private_key_to_pem! {
-        /// Serializes the private key to a DER-encoded PKCS#8 PrivateKeyInfo structure.
         #[corresponds(i2d_PKCS8PrivateKey_bio)]
         private_key_to_der_pkcs8,
-        /// Serializes the private key to a DER-encoded PKCS#8 EncryptedPrivateKeyInfo structure.
         #[corresponds(i2d_PKCS8PrivateKey_bio)]
         private_key_to_der_pkcs8_passphrase,
         ffi::i2d_PKCS8PrivateKey_bio
     }
 
-    /// Returns the length of the "raw" form of the private key. Only supported for certain key types.
     #[corresponds(EVP_PKEY_get_raw_private_key)]
     pub fn raw_private_key_len(&self) -> Result<usize, ErrorStack> {
         unsafe {
@@ -312,9 +228,6 @@ where
         }
     }
 
-    /// Outputs a copy of the "raw" form of the private key. Only supported for certain key types.
-    ///
-    /// Returns the used portion of `out`.
     #[corresponds(EVP_PKEY_get_raw_private_key)]
     pub fn raw_private_key<'a>(&self, out: &'a mut [u8]) -> Result<&'a [u8], ErrorStack> {
         unsafe {
@@ -342,7 +255,6 @@ impl<T> fmt::Debug for PKey<T> {
             _ => "unknown",
         };
         fmt.debug_struct("PKey").field("algorithm", &alg).finish()
-        // TODO: Print details for each specific type of key
     }
 }
 
@@ -353,7 +265,6 @@ impl<T> Clone for PKey<T> {
 }
 
 impl<T> PKey<T> {
-    /// Creates a new `PKey` containing an RSA key.
     #[corresponds(EVP_PKEY_assign_RSA)]
     pub fn from_rsa(rsa: Rsa<T>) -> Result<PKey<T>, ErrorStack> {
         unsafe {
@@ -369,7 +280,6 @@ impl<T> PKey<T> {
         }
     }
 
-    /// Creates a new `PKey` containing an elliptic curve key.
     #[corresponds(EVP_PKEY_assign_EC_KEY)]
     pub fn from_ec_key(ec_key: EcKey<T>) -> Result<PKey<T>, ErrorStack> {
         unsafe {
@@ -387,15 +297,6 @@ impl<T> PKey<T> {
 }
 
 impl PKey<Private> {
-    /// Generates a private key for key types that support parameterless
-    /// `EVP_PKEY_keygen`.
-    ///
-    /// This is primarily useful for modern "raw" key types such as X25519,
-    /// Ed25519, Ed448, and X448.
-    ///
-    /// Algorithms that require explicit generation parameters (for example RSA
-    /// key size or an EC group) should use their dedicated APIs instead, such
-    /// as [`Rsa::generate`] and [`EcKey::generate`].
     #[corresponds(EVP_PKEY_keygen)]
     pub fn generate(id: Id) -> Result<PKey<Private>, ErrorStack> {
         unsafe {
@@ -418,17 +319,12 @@ impl PKey<Private> {
     }
 
     private_key_from_pem! {
-        /// Deserializes a private key from a PEM-encoded key type specific format.
         #[corresponds(PEM_read_bio_PrivateKey)]
         private_key_from_pem,
 
-        /// Deserializes a private key from a PEM-encoded encrypted key type specific format.
         #[corresponds(PEM_read_bio_PrivateKey)]
         private_key_from_pem_passphrase,
 
-        /// Deserializes a private key from a PEM-encoded encrypted key type specific format.
-        ///
-        /// The callback should fill the password into the provided buffer and return its length.
         #[corresponds(PEM_read_bio_PrivateKey)]
         private_key_from_pem_callback,
         PKey<Private>,
@@ -436,11 +332,6 @@ impl PKey<Private> {
     }
 
     from_der! {
-        /// Decodes a DER-encoded private key.
-        ///
-        /// This function will automatically attempt to detect the underlying key format, and
-        /// supports the unencrypted PKCS#8 PrivateKeyInfo structures as well as key type specific
-        /// formats.
         #[corresponds(d2i_AutoPrivateKey)]
         private_key_from_der,
         PKey<Private>,
@@ -448,9 +339,6 @@ impl PKey<Private> {
         ::libc::c_long
     }
 
-    /// Deserializes a DER-formatted PKCS#8 unencrypted private key.
-    ///
-    /// This method is mainly for interoperability reasons. Encrypted keyfiles should be preferred.
     pub fn private_key_from_pkcs8(der: &[u8]) -> Result<PKey<Private>, ErrorStack> {
         unsafe {
             ffi::init();
@@ -466,11 +354,6 @@ impl PKey<Private> {
         }
     }
 
-    /// Deserializes a DER-formatted PKCS#8 private key, using a callback to retrieve the password
-    /// if the key is encrypted.
-    ///
-    /// The callback should copy the password into the provided buffer and return the number of
-    /// bytes written.
     pub fn private_key_from_pkcs8_callback<F>(
         der: &[u8],
         callback: F,
@@ -492,12 +375,6 @@ impl PKey<Private> {
         }
     }
 
-    /// Deserializes a DER-formatted PKCS#8 private key, using the supplied password if the key is
-    /// encrypted.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `passphrase` contains an embedded null.
     pub fn private_key_from_pkcs8_passphrase(
         der: &[u8],
         passphrase: &[u8],
@@ -519,9 +396,6 @@ impl PKey<Private> {
 
 impl PKey<Public> {
     from_pem! {
-        /// Decodes a PEM-encoded SubjectPublicKeyInfo structure.
-        ///
-        /// The input should have a header of `-----BEGIN PUBLIC KEY-----`.
         #[corresponds(PEM_read_bio_PUBKEY)]
         public_key_from_pem,
         PKey<Public>,
@@ -529,7 +403,6 @@ impl PKey<Public> {
     }
 
     from_der! {
-        /// Decodes a DER-encoded SubjectPublicKeyInfo structure.
         #[corresponds(d2i_PUBKEY)]
         public_key_from_der,
         PKey<Public>,
@@ -620,8 +493,6 @@ mod tests {
         let priv_key = key.private_key_to_pem_pkcs8().unwrap();
         let pub_key = key.public_key_to_pem().unwrap();
 
-        // As a super-simple verification, just check that the buffers contain
-        // the `PRIVATE KEY` or `PUBLIC KEY` strings.
         assert!(priv_key.windows(11).any(|s| s == b"PRIVATE KEY"));
         assert!(pub_key.windows(10).any(|s| s == b"PUBLIC KEY"));
     }
@@ -633,9 +504,8 @@ mod tests {
 
         let priv_key = key.private_key_to_der_pkcs8().unwrap();
 
-        // Check that this has the correct PKCS#8 version number and algorithm.
-        assert_eq!(hex::encode(&priv_key[4..=6]), "020100"); // Version 0
-        assert_eq!(hex::encode(&priv_key[9..=19]), "06092a864886f70d010101"); // Algorithm RSA/PKCS#1
+        assert_eq!(hex::encode(&priv_key[4..=6]), "020100");
+        assert_eq!(hex::encode(&priv_key[9..=19]), "06092a864886f70d010101");
     }
 
     #[test]

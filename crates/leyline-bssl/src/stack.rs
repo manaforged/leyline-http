@@ -13,23 +13,15 @@ use crate::error::ErrorStack;
 use crate::{cvt_0, cvt_p};
 
 use crate::ffi::{
-    _STACK as OPENSSL_STACK, sk_free as OPENSSL_sk_free, sk_new_null as OPENSSL_sk_new_null,
-    sk_num as OPENSSL_sk_num, sk_pop as OPENSSL_sk_pop, sk_push as OPENSSL_sk_push,
-    sk_value as OPENSSL_sk_value,
+    sk_free as OPENSSL_sk_free, sk_new_null as OPENSSL_sk_new_null, sk_num as OPENSSL_sk_num,
+    sk_pop as OPENSSL_sk_pop, sk_push as OPENSSL_sk_push, sk_value as OPENSSL_sk_value,
+    _STACK as OPENSSL_STACK,
 };
 
-/// Trait implemented by types which can be placed in a stack.
-///
-/// It should not be implemented for any type outside of this crate.
 pub trait Stackable: ForeignType {
-    /// The C stack type for this element.
-    ///
-    /// Generally called `stack_st_{ELEMENT_TYPE}`, normally hidden by the
-    /// `STACK_OF(ELEMENT_TYPE)` macro in the OpenSSL API.
     type StackType;
 }
 
-/// An owned stack of `T`.
 pub struct Stack<T: Stackable>(*mut T::StackType);
 
 unsafe impl<T: Stackable + Send> Send for Stack<T> {}
@@ -179,13 +171,11 @@ impl<T: Stackable> StackRef<T> {
         self.as_ptr().cast()
     }
 
-    /// Returns the number of items in the stack.
     #[must_use]
     pub fn len(&self) -> usize {
         unsafe { OPENSSL_sk_num(self.as_stack()) }
     }
 
-    /// Determines if the stack is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
@@ -206,8 +196,6 @@ impl<T: Stackable> StackRef<T> {
         }
     }
 
-    /// Returns a reference to the element at the given index in the
-    /// stack or `None` if the index is out of bounds
     #[must_use]
     pub fn get(&self, idx: usize) -> Option<&T::Ref> {
         unsafe {
@@ -219,8 +207,6 @@ impl<T: Stackable> StackRef<T> {
         }
     }
 
-    /// Returns a mutable reference to the element at the given index in the
-    /// stack or `None` if the index is out of bounds
     pub fn get_mut(&mut self, idx: usize) -> Option<&mut T::Ref> {
         unsafe {
             if idx >= self.len() {
@@ -231,7 +217,6 @@ impl<T: Stackable> StackRef<T> {
         }
     }
 
-    /// Pushes a value onto the top of the stack.
     pub fn push(&mut self, data: T) -> Result<(), ErrorStack> {
         unsafe {
             cvt_0(OPENSSL_sk_push(self.as_stack(), data.as_ptr().cast()))?;
@@ -240,7 +225,6 @@ impl<T: Stackable> StackRef<T> {
         }
     }
 
-    /// Removes the last element from the stack and returns it.
     pub fn pop(&mut self) -> Option<T> {
         unsafe {
             let ptr = OPENSSL_sk_pop(self.as_stack());
@@ -307,7 +291,6 @@ impl<'a, T: Stackable> iter::IntoIterator for &'a mut Stack<T> {
     }
 }
 
-/// An iterator over the stack's contents.
 pub struct Iter<'a, T: Stackable>
 where
     T: 'a,
@@ -344,7 +327,6 @@ impl<'a, T: Stackable> DoubleEndedIterator for Iter<'a, T> {
 
 impl<T: Stackable> ExactSizeIterator for Iter<'_, T> {}
 
-/// A mutable iterator over the stack's contents.
 pub struct IterMut<'a, T: Stackable + 'a> {
     stack: &'a mut StackRef<T>,
     idxs: Range<size_t>,

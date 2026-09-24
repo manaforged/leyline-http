@@ -137,8 +137,10 @@ async fn spawn_mock_https_proxy(r#gen: &Generated) -> (SocketAddr, oneshot::Rece
         let (tcp, _) = listener.accept().await.unwrap();
 
         let ssl = Ssl::new(acceptor.context()).unwrap();
-        let mut proxy_tls = leyline_bssl_tokio::SslStream::new(ssl, tcp).unwrap();
-        std::pin::Pin::new(&mut proxy_tls).accept().await.unwrap();
+        let mut proxy_tls = leyline_bssl_tokio::SslStreamBuilder::new(ssl, tcp)
+            .accept()
+            .await
+            .unwrap();
 
         let connect_req = read_head(&mut proxy_tls).await;
         let _ = tx.send(connect_req);
@@ -150,8 +152,9 @@ async fn spawn_mock_https_proxy(r#gen: &Generated) -> (SocketAddr, oneshot::Rece
         proxy_tls.flush().await.unwrap();
 
         let ssl2 = Ssl::new(acceptor.context()).unwrap();
-        let mut origin_tls = leyline_bssl_tokio::SslStream::new(ssl2, proxy_tls).unwrap();
-        let _ = std::pin::Pin::new(&mut origin_tls).accept().await;
+        let _ = leyline_bssl_tokio::SslStreamBuilder::new(ssl2, proxy_tls)
+            .accept()
+            .await;
     });
 
     (addr, rx)

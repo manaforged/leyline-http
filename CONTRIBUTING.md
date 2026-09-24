@@ -14,8 +14,14 @@
    suites. The vendored `leyline-quiche` crate is excluded from the
    clippy, rustdoc, and test gates; the vendored `leyline-bssl*` crates
    still gate. The gate needs Python 3, Node, rustup (the toolchain comes from
-   `rust-toolchain.toml`), and `cargo-deny`. The live suites need network
-   access.
+   `rust-toolchain.toml`), and `cargo-deny`. Every build compiles BoringSSL
+   from source, so it also needs CMake 3.22 or later, a C and C++ compiler,
+   and libclang; on Windows, the MSVC build tools and NASM. The live suites
+   need network access.
+
+   The BoringSSL patches live in `crates/leyline-bssl-sys/patches/` as a
+   numbered series. The build applies them in order. List a new patch in
+   `crates/leyline-bssl-sys/PROVENANCE.md`.
 
    Tests that need the network are marked `#[ignore]`. Run them with
    `cargo nextest run -p leyline-http --run-ignored all` when your change

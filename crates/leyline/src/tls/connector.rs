@@ -310,15 +310,20 @@ impl FingerprintConnector {
             })?;
         }
 
-        let mut stream = leyline_bssl_tokio::SslStream::new(ssl, io)
-            .map_err(|e| TlsError::SslConfig(e.to_string()))?;
-        if let Err(e) = std::pin::Pin::new(&mut stream).connect().await {
-            return Err(classify_handshake(
-                verification_failure.as_ref(),
-                stream.ssl().verify_result().err(),
-                e,
-            ));
-        }
+        let stream = match leyline_bssl_tokio::SslStreamBuilder::new(ssl, io)
+            .connect()
+            .await
+        {
+            Ok(stream) => stream,
+            Err(e) => {
+                let verify_error = e.ssl().and_then(|ssl| ssl.verify_result().err());
+                return Err(classify_handshake(
+                    verification_failure.as_ref(),
+                    verify_error,
+                    e,
+                ));
+            }
+        };
 
         let alpn = stream.ssl().selected_alpn_protocol().map(|p| p.to_vec());
         let peer_cert_der = stream
@@ -353,10 +358,10 @@ impl FingerprintConnector {
     }
 }
 
-fn classify_handshake(
+fn classify_handshake<S>(
     failure: Option<&VerificationFailure>,
     verify_error: Option<X509VerifyError>,
-    error: leyline_bssl::ssl::Error,
+    error: leyline_bssl_tokio::HandshakeError<S>,
 ) -> TlsError {
     let verify_error = verify_error.filter(|error| *error != X509VerifyError::INVALID_CALL);
     match failure.and_then(take_verification_failure) {
@@ -371,7 +376,7 @@ fn classify_handshake(
             TlsError::Hostname(error.to_string())
         }
         None if verify_error.is_some() => TlsError::Certificate(error.to_string()),
-        None => TlsError::from_ssl(error),
+        None => TlsError::from_handshake(&error),
     }
 }
 

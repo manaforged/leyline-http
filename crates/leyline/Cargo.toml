@@ -36,9 +36,6 @@ allowed_external_types = [
 ]
 
 [package.metadata.docs.rs]
-# leyline-bssl-sys ships prebuilt BoringSSL for x86_64-unknown-linux-gnu, so
-# docs.rs links the committed libs (no cmake/source build). Document the default
-# feature set on one target to stay within docs.rs build limits.
 targets = ["x86_64-unknown-linux-gnu"]
 
 [features]

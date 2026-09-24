@@ -37,9 +37,6 @@ reqwest13 = { package = "reqwest", version = "0.13", default-features = false, f
     "http2",
     "stream",
 ] }
-# wreq is absent on purpose: `btls-sys` and `leyline-bssl-sys` both declare
-# `links = "boringssl"`, so Cargo refuses to resolve them into one graph. The
-# out-of-process wreq comparison lives in `comparison/wreq-client`.
 # In-process TLS origin for clients.rs: hyper 1.x over tokio-rustls, with an
 # rcgen self-signed leaf.
 hyper = { version = "1", features = ["server", "http1", "http2"] }

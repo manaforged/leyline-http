@@ -1,32 +1,20 @@
 [package]
 name = "leyline-bssl"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 rust-version = "1.96"
 authors = [
     "Thomas Gardiner <thomas@manaforge.tech>",
-    "0x676e67 <gngppz@gmail.com>",
     "Steven Fackler <sfackler@gmail.com>",
     "Ivan Nikulin <ifaaan@gmail.com>",
 ]
-description = "Safe BoringSSL bindings used by leyline-http"
+description = "Safe BoringSSL bindings for leyline-http, forked from Cloudflare boring"
 homepage = "https://github.com/manaforged/leyline-http"
 documentation = "https://docs.rs/leyline-bssl"
 keywords = ["boringssl", "tls", "ssl"]
 categories = ["cryptography", "api-bindings"]
 license = "Apache-2.0"
 repository = "https://github.com/manaforged/leyline-http"
-
-[features]
-default = []
-fips = ["leyline-bssl-sys/fips"]
-mlkem = []
-prf = []
-credential = []
-# Deprecated no-op compat gate carried from upstream; some `cfg(not(...))`
-# blocks reference it, so it must remain a declared feature.
-legacy-compat-deprecated = []
-underscore-wildcards = ["leyline-bssl-sys/underscore-wildcards"]
 
 [dependencies]
 bitflags = "2.11.1"

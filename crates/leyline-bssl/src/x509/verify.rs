@@ -8,7 +8,6 @@ use crate::error::ErrorStack;
 use crate::{cvt, cvt_p};
 
 bitflags! {
-    /// Flags used to check an `X509` certificate.
     #[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord, Hash)]
     #[repr(transparent)]
     pub struct X509CheckFlags: c_uint {
@@ -18,13 +17,10 @@ bitflags! {
         const MULTI_LABEL_WILDCARDS = ffi::X509_CHECK_FLAG_MULTI_LABEL_WILDCARDS as _;
         const SINGLE_LABEL_SUBDOMAINS = ffi::X509_CHECK_FLAG_SINGLE_LABEL_SUBDOMAINS as _;
         const NEVER_CHECK_SUBJECT = ffi::X509_CHECK_FLAG_NEVER_CHECK_SUBJECT as _;
-        #[cfg(feature = "underscore-wildcards")]
-        const UNDERSCORE_WILDCARDS = ffi::X509_CHECK_FLAG_UNDERSCORE_WILDCARDS as _;
     }
 }
 
 bitflags! {
-    /// Flags used to check an `X509` certificate.
     #[derive(Debug, PartialEq, Eq, Clone, Copy, PartialOrd, Ord, Hash)]
     #[repr(transparent)]
     #[doc(alias = "X509Flags")]
@@ -54,12 +50,10 @@ foreign_type_and_impl_send_sync! {
     type CType = ffi::X509_VERIFY_PARAM;
     fn drop = ffi::X509_VERIFY_PARAM_free;
 
-    /// Adjust parameters associated with certificate verification.
     pub struct X509VerifyParam;
 }
 
 impl X509VerifyParam {
-    /// Create an X509VerifyParam
     #[corresponds(X509_VERIFY_PARAM_new)]
     pub fn new() -> Result<Self, ErrorStack> {
         unsafe {
@@ -71,32 +65,36 @@ impl X509VerifyParam {
 }
 
 impl X509VerifyParamRef {
-    /// Set verification flags.
     #[corresponds(X509_VERIFY_PARAM_set_flags)]
     pub fn set_flags(&mut self, flags: X509VerifyFlags) {
+        self.try_set_flags(flags).expect("use try_set_flags");
+    }
+
+    #[corresponds(X509_VERIFY_PARAM_set_flags)]
+    pub fn try_set_flags(&mut self, flags: X509VerifyFlags) -> Result<(), ErrorStack> {
         unsafe {
             cvt(ffi::X509_VERIFY_PARAM_set_flags(
                 self.as_ptr(),
                 flags.bits(),
             ))
-            .unwrap();
         }
     }
 
-    /// Clear verification flags.
     #[corresponds(X509_VERIFY_PARAM_clear_flags)]
     pub fn clear_flags(&mut self, flags: X509VerifyFlags) {
+        self.try_clear_flags(flags).expect("use try_clear_flags");
+    }
+
+    #[corresponds(X509_VERIFY_PARAM_clear_flags)]
+    pub fn try_clear_flags(&mut self, flags: X509VerifyFlags) -> Result<(), ErrorStack> {
         unsafe {
             cvt(ffi::X509_VERIFY_PARAM_clear_flags(
                 self.as_ptr(),
                 flags.bits(),
             ))
-            .unwrap();
         }
     }
 
-    ///
-    /// Set the host flags.
     #[corresponds(X509_VERIFY_PARAM_set_hostflags)]
     pub fn set_hostflags(&mut self, hostflags: X509CheckFlags) {
         unsafe {
@@ -104,7 +102,6 @@ impl X509VerifyParamRef {
         }
     }
 
-    /// Gets verification flags.
     #[corresponds(X509_VERIFY_PARAM_get_flags)]
     #[must_use]
     pub fn flags(&self) -> X509VerifyFlags {
@@ -112,11 +109,9 @@ impl X509VerifyParamRef {
         X509VerifyFlags::from_bits_retain(bits)
     }
 
-    /// Set the expected DNS hostname.
     #[corresponds(X509_VERIFY_PARAM_set1_host)]
     pub fn set_host(&mut self, host: &str) -> Result<(), ErrorStack> {
         unsafe {
-            // len == 0 means "run strlen" :(
             let raw_host = if host.is_empty() { "\0" } else { host };
             cvt(ffi::X509_VERIFY_PARAM_set1_host(
                 self.as_ptr(),
@@ -126,11 +121,9 @@ impl X509VerifyParamRef {
         }
     }
 
-    /// Set the expected email address.
     #[corresponds(X509_VERIFY_PARAM_set1_email)]
     pub fn set_email(&mut self, email: &str) -> Result<(), ErrorStack> {
         unsafe {
-            // len == 0 means "run strlen" :(
             let raw_email = if email.is_empty() { "\0" } else { email };
             cvt(ffi::X509_VERIFY_PARAM_set1_email(
                 self.as_ptr(),
@@ -140,7 +133,6 @@ impl X509VerifyParamRef {
         }
     }
 
-    /// Set the expected IPv4 or IPv6 address.
     #[corresponds(X509_VERIFY_PARAM_set1_ip)]
     pub fn set_ip(&mut self, ip: IpAddr) -> Result<(), ErrorStack> {
         unsafe {
@@ -163,21 +155,16 @@ impl X509VerifyParamRef {
         }
     }
 
-    /// Set the verification time, where time is of type time_t, traditionaly defined as seconds since the epoch
     #[corresponds(X509_VERIFY_PARAM_set_time)]
     pub fn set_time(&mut self, time: time_t) {
         unsafe { ffi::X509_VERIFY_PARAM_set_time(self.as_ptr(), time) }
     }
 
-    /// Set the verification depth
     #[corresponds(X509_VERIFY_PARAM_set_depth)]
     pub fn set_depth(&mut self, depth: c_int) {
         unsafe { ffi::X509_VERIFY_PARAM_set_depth(self.as_ptr(), depth) }
     }
 
-    /// Copies parameters from `src`.
-    ///
-    /// If a parameter is unset in `src`, the existing value in `self`` is preserved.
     #[corresponds(X509_VERIFY_PARAM_set1)]
     pub fn copy_from(&mut self, src: &Self) -> Result<(), ErrorStack> {
         unsafe { cvt(ffi::X509_VERIFY_PARAM_set1(self.as_ptr(), src.as_ptr())) }

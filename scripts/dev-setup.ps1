@@ -51,12 +51,9 @@ if ($Msrv) {
 }
 
 Step "native build prerequisites"
-if (Test-Path "crates/leyline-bssl-sys/native/x86_64-pc-windows-msvc/lib/ssl.lib") {
-    Write-Host "Windows prebuilt BoringSSL shim found; CMake/Perl only needed to refresh it."
-} else {
-    Need "cmake" "Install Visual Studio Build Tools with C++ CMake tools, or install CMake separately." | Out-Null
-    Need "perl" "Install Strawberry Perl: choco install strawberryperl" | Out-Null
-}
+Need "cmake" "Install Visual Studio Build Tools with C++ CMake tools, or install CMake separately." | Out-Null
+Need "nasm" "Install NASM: choco install nasm" | Out-Null
+Need "clang" "Install LLVM for libclang: choco install llvm" | Out-Null
 Ok "prerequisite scan complete"
 
 Step "fast offline build"

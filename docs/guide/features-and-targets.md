@@ -42,52 +42,54 @@ Turn everything off and add back what you need:
 leyline-http = { version = "0.1", default-features = false, features = ["stream", "socks"] }
 ```
 
-## Prebuilt BoringSSL targets
+## BoringSSL build
 
-Leyline links its own BoringSSL through `leyline-bssl-sys`, which ships
-prebuilt static libraries and pregenerated bindings for four targets:
+`leyline-bssl-sys` builds BoringSSL from source with CMake and generates the
+Rust bindings with `bindgen`. It supports four targets:
 
 - `aarch64-apple-darwin`
 - `x86_64-unknown-linux-gnu`
 - `aarch64-unknown-linux-gnu`
 - `x86_64-pc-windows-msvc`
 
-On those targets the build script only emits link directives. You need no
-CMake, bindgen, Perl, or Go.
+The build needs CMake 3.22 or later, a C and C++ compiler, and libclang. On
+Windows it also needs the MSVC build tools and NASM. See
+[Supported platforms](platforms.md).
+
+The build uses the macOS deployment target that Rust uses
+(`MACOSX_DEPLOYMENT_TARGET`, 11.0 by default) and honours `+crt-static` on
+MSVC. It maps the source and output directories to `/build`, so the
+libraries embed no local paths.
 
 ## Other targets
 
-Other targets are not supported by the packaged crate. See
-[Supported platforms](platforms.md) for the build error and the minimum glibc. Adding one requires
-native BoringSSL libraries, generated Rust bindings, and a matching target
-configuration in `leyline-bssl-sys`.
+Other targets are not supported. The build stops with an error that names the
+four targets.
 
-`BORING_BSSL_PATH` overrides the native library location for an existing
-target. It does not generate bindings or enable another target.
-
+`BORING_BSSL_PATH` links a BoringSSL that you built yourself for a supported
+target. `BORING_BSSL_SOURCE_PATH` builds another BoringSSL source tree, and
+`BORING_BSSL_ASSUME_PATCHED` skips the carried patches for it.
 `BORING_BSSL_RUST_CPPLIB` names an extra C++ standard library to link when
 your toolchain needs one.
 
 ## Symbol prefixing and openssl-sys
 
-Shipped BoringSSL libraries are built with `-DBORINGSSL_PREFIX=LEYLINE`, so
-every export is `LEYLINE_<name>`. The generated bindings keep the plain Rust
-identifier and carry a `#[link_name]` for the prefixed export. Prefixing is
-not optional, and there is no `prefix-symbols` feature. That is what lets a
-binary link `openssl-sys` or `boring-sys` beside Leyline.
+BoringSSL is built with `-DBORINGSSL_PREFIX=LEYLINE`, so every C export is
+`LEYLINE_<name>`. The C++ structs behind `SSL` and `SSL_SESSION` are renamed
+to `LEYLINE_ssl_st` and `LEYLINE_ssl_session_st`, and BoringSSL's internal
+C++ code is in the `bssl::LEYLINE` namespace. The generated bindings keep the
+plain Rust identifier and carry a `#[link_name]` for the prefixed export. That
+lets a binary link `openssl-sys` or `boring-sys` beside Leyline.
 
 `leyline-bssl-sys` declares `links = "leyline_bssl"`, its own key, so it does
-not collide with another crate claiming `boringssl`. The packaging script
-fails if an unprefixed OpenSSL-style export survives. All four shipped targets
-are prefixed, and `PROVENANCE.md` records when each was built.
+not collide with another crate claiming `boringssl`.
 
-The `fips` and `mlkem` features are refused outright, because the packaged
-artifacts do not carry those builds.
+The crates have no `fips`, `mlkem`, or `rpk` feature.
 
 ## MSRV
 
 The workspace sets `rust-version = "1.96"`, and every crate sets it. The
-edition is 2024. The release gate compile-checks 1.96 and runs the test
+edition is 2024; the forked `leyline-bssl*` crates keep upstream's 2021. The release gate compile-checks 1.96 and runs the test
 suite on current stable. [MSRV](msrv.md) states the policy: a bump gets
 its own minor release and its own changelog line, and never lands in a patch
 release.
@@ -95,5 +97,4 @@ release.
 ## Documentation build
 
 `docs.rs` builds `leyline-http` for `x86_64-unknown-linux-gnu` only, with the
-default feature set, because that target has committed prebuilt libraries and
-one target stays within the docs.rs build limits.
+default feature set, because one target stays within the docs.rs build limits.

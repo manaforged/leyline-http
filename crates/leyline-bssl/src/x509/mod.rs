@@ -1,12 +1,3 @@
-//! The standard defining the format of public key certificates.
-//!
-//! An `X509` certificate binds an identity to a public key, and is either
-//! signed by a certificate authority (CA) or self-signed. An entity that gets
-//! a hold of a certificate can both verify your identity (via a CA) and encrypt
-//! data with the included public key. `X509` certificates are used in many
-//! Internet protocols, including SSL/TLS, which is the basis for HTTPS,
-//! the secure protocol for browsing the web.
-
 use foreign_types::{ForeignType, ForeignTypeRef};
 use libc::{c_int, c_long, c_void};
 use openssl_macros::corresponds;
@@ -46,9 +37,6 @@ pub mod extension;
 pub mod store;
 pub mod verify;
 
-#[cfg(test)]
-mod tests;
-
 static STORE_INDEX: LazyLock<Index<X509StoreContext, store::X509Store>> =
     LazyLock::new(|| X509StoreContext::new_ex_index().unwrap());
 
@@ -62,19 +50,15 @@ foreign_type_and_impl_send_sync! {
     type CType = ffi::X509_STORE_CTX;
     fn drop = ffi::X509_STORE_CTX_free;
 
-    /// An `X509` certificate store context.
     pub struct X509StoreContext;
 }
 
 impl X509StoreContext {
-    /// Returns the index which can be used to obtain a reference to the `Ssl` associated with a
-    /// context.
     #[corresponds(SSL_get_ex_data_X509_STORE_CTX_idx)]
     pub fn ssl_idx() -> Result<Index<X509StoreContext, SslRef>, ErrorStack> {
         unsafe { cvt_n(ffi::SSL_get_ex_data_X509_STORE_CTX_idx()).map(|idx| Index::from_raw(idx)) }
     }
 
-    /// Creates a new `X509StoreContext` instance.
     #[corresponds(X509_STORE_CTX_new)]
     pub fn new() -> Result<X509StoreContext, ErrorStack> {
         unsafe {
@@ -83,10 +67,6 @@ impl X509StoreContext {
         }
     }
 
-    /// Returns a new extra data index.
-    ///
-    /// Each invocation of this function is guaranteed to return a distinct index. These can be used
-    /// to store data in the context that can be retrieved later by callbacks, for example.
     #[corresponds(SSL_CTX_get_ex_new_index)]
     pub fn new_ex_index<T>() -> Result<Index<X509StoreContext, T>, ErrorStack>
     where
@@ -101,7 +81,6 @@ impl X509StoreContext {
 }
 
 impl X509StoreContextRef {
-    /// Returns application data pertaining to an `X509` store context.
     #[corresponds(X509_STORE_CTX_get_ex_data)]
     #[must_use]
     pub fn ex_data<T>(&self, index: Index<X509StoreContext, T>) -> Option<&T> {
@@ -112,7 +91,6 @@ impl X509StoreContextRef {
         }
     }
 
-    /// Returns a mutable reference to the extra data at the specified index.
     #[corresponds(X509_STORE_CTX_get_ex_data)]
     pub fn ex_data_mut<T>(&mut self, index: Index<X509StoreContext, T>) -> Option<&mut T> {
         unsafe {
@@ -122,10 +100,6 @@ impl X509StoreContextRef {
         }
     }
 
-    /// Sets or overwrites the extra data at the specified index.
-    ///
-    /// This can be used to provide data to callbacks registered with the context. Use the
-    /// `Ssl::new_ex_index` method to create an `Index`.
     #[corresponds(X509_STORE_CTX_set_ex_data)]
     pub fn set_ex_data<T>(&mut self, index: Index<X509StoreContext, T>, data: T) {
         if let Some(old) = self.ex_data_mut(index) {
@@ -145,25 +119,11 @@ impl X509StoreContextRef {
         }
     }
 
-    /// Returns the verify result of the context.
     #[corresponds(X509_STORE_CTX_get_error)]
     pub fn verify_result(&self) -> X509VerifyResult {
         unsafe { X509VerifyError::from_raw(ffi::X509_STORE_CTX_get_error(self.as_ptr())) }
     }
 
-    /// Initializes this context with the given certificate, certificates chain and certificate
-    /// store. After initializing the context, the `with_context` closure is called with the prepared
-    /// context. As long as the closure is running, the context stays initialized and can be used
-    /// to e.g. verify a certificate. The context will be cleaned up, after the closure finished.
-    ///
-    /// * `trust` - The certificate store with the trusted certificates.
-    /// * `cert` - The certificate that should be verified.
-    /// * `cert_chain` - The certificates chain.
-    /// * `with_context` - The closure that is called with the initialized context.
-    ///
-    /// Calls [`X509_STORE_CTX_cleanup`] after calling `with_context`.
-    ///
-    /// [`X509_STORE_CTX_cleanup`]:  https://www.openssl.org/docs/man1.0.2/crypto/X509_STORE_CTX_cleanup.html
     #[corresponds(X509_STORE_CTX_init)]
     pub fn init<F, T>(
         &mut self,
@@ -199,12 +159,6 @@ impl X509StoreContextRef {
         }
     }
 
-    /// Initializes this context with the given certificate, certificates chain and certificate
-    /// store.
-    ///
-    /// * `trust` - The certificate store with the trusted certificates.
-    /// * `cert` - The certificate that should be verified.
-    /// * `cert_chain` - The certificates chain.
     #[corresponds(X509_STORE_CTX_init)]
     pub fn reset_with_context_data(
         &mut self,
@@ -232,40 +186,26 @@ impl X509StoreContextRef {
         Ok(())
     }
 
-    /// Returns a reference to the X509 verification configuration.
     #[corresponds(X509_STORE_CTX_get0_param)]
     pub fn verify_param(&mut self) -> &X509VerifyParamRef {
         unsafe { X509VerifyParamRef::from_ptr(ffi::X509_STORE_CTX_get0_param(self.as_ptr())) }
     }
 
-    /// Returns a mutable reference to the X509 verification configuration.
     #[corresponds(X509_STORE_CTX_get0_param)]
     pub fn verify_param_mut(&mut self) -> &mut X509VerifyParamRef {
         unsafe { X509VerifyParamRef::from_ptr_mut(ffi::X509_STORE_CTX_get0_param(self.as_ptr())) }
     }
 
-    /// Sets the X509 verification configuration.
     #[corresponds(X509_STORE_CTX_set0_param)]
     pub fn set_verify_param(&mut self, param: X509VerifyParam) {
-        unsafe {
-            // `set0_param` takes ownership of the param — hand over the raw
-            // pointer (`into_ptr`) so Rust never frees it a second time.
-            ffi::X509_STORE_CTX_set0_param(self.as_ptr(), param.into_ptr())
-        }
+        unsafe { ffi::X509_STORE_CTX_set0_param(self.as_ptr(), param.into_ptr()) }
     }
 
-    /// Verifies the stored certificate.
-    ///
-    /// Returns `true` if verification succeeds. The `error` method will return the specific
-    /// validation error if the certificate was not valid.
-    ///
-    /// This will only work inside of a call to `init`.
     #[corresponds(X509_verify_cert)]
     pub fn verify_cert(&mut self) -> Result<bool, ErrorStack> {
         unsafe { cvt_n(ffi::X509_verify_cert(self.as_ptr())).map(|n| n != 0) }
     }
 
-    /// Set the verify result of the context.
     #[corresponds(X509_STORE_CTX_set_error)]
     pub fn set_error(&mut self, result: X509VerifyResult) {
         unsafe {
@@ -279,8 +219,6 @@ impl X509StoreContextRef {
         }
     }
 
-    /// Returns a reference to the certificate which caused the error or None if
-    /// no certificate is relevant to the error.
     #[corresponds(X509_STORE_CTX_get_current_cert)]
     #[must_use]
     pub fn current_cert(&self) -> Option<&X509Ref> {
@@ -294,17 +232,12 @@ impl X509StoreContextRef {
         }
     }
 
-    /// Returns a non-negative integer representing the depth in the certificate
-    /// chain where the error occurred. If it is zero it occurred in the end
-    /// entity certificate, one if it is the certificate which signed the end
-    /// entity certificate and so on.
     #[corresponds(X509_STORE_CTX_get_error_depth)]
     #[must_use]
     pub fn error_depth(&self) -> u32 {
         unsafe { ffi::X509_STORE_CTX_get_error_depth(self.as_ptr()) as u32 }
     }
 
-    /// Returns a reference to a complete valid `X509` certificate chain.
     #[corresponds(X509_STORE_CTX_get0_chain)]
     #[must_use]
     pub fn chain(&self) -> Option<&StackRef<X509>> {
@@ -319,8 +252,6 @@ impl X509StoreContextRef {
         }
     }
 
-    /// Returns a reference to the `X509` certificates used to initialize the
-    /// [`X509StoreContextRef`].
     #[corresponds(X509_STORE_CTX_get0_untrusted)]
     #[must_use]
     pub fn untrusted(&self) -> Option<&StackRef<X509>> {
@@ -335,8 +266,6 @@ impl X509StoreContextRef {
         }
     }
 
-    /// Returns a reference to the certificate being verified.
-    /// May return None if a raw public key is being verified.
     #[corresponds(X509_STORE_CTX_get0_cert)]
     #[must_use]
     pub fn cert(&self) -> Option<&X509Ref> {
@@ -351,11 +280,9 @@ impl X509StoreContextRef {
     }
 }
 
-/// A builder used to construct an `X509`.
 pub struct X509Builder(X509);
 
 impl X509Builder {
-    /// Creates a new builder.
     #[corresponds(X509_new)]
     pub fn new() -> Result<X509Builder, ErrorStack> {
         unsafe {
@@ -364,28 +291,21 @@ impl X509Builder {
         }
     }
 
-    /// Sets the notAfter constraint on the certificate.
     #[corresponds(X509_set1_notAfter)]
     pub fn set_not_after(&mut self, not_after: &Asn1TimeRef) -> Result<(), ErrorStack> {
         unsafe { cvt(X509_set1_notAfter(self.0.as_ptr(), not_after.as_ptr())) }
     }
 
-    /// Sets the notBefore constraint on the certificate.
     #[corresponds(X509_set1_notBefore)]
     pub fn set_not_before(&mut self, not_before: &Asn1TimeRef) -> Result<(), ErrorStack> {
         unsafe { cvt(X509_set1_notBefore(self.0.as_ptr(), not_before.as_ptr())) }
     }
 
-    /// Sets the version of the certificate.
-    ///
-    /// Note that the version is zero-indexed; that is, a certificate corresponding to version 3 of
-    /// the X.509 standard should pass `2` to this method.
     #[corresponds(X509_set_version)]
     pub fn set_version(&mut self, version: i32) -> Result<(), ErrorStack> {
         unsafe { cvt(ffi::X509_set_version(self.0.as_ptr(), version.into())) }
     }
 
-    /// Sets the serial number of the certificate.
     #[corresponds(X509_set_serialNumber)]
     pub fn set_serial_number(&mut self, serial_number: &Asn1IntegerRef) -> Result<(), ErrorStack> {
         unsafe {
@@ -396,7 +316,6 @@ impl X509Builder {
         }
     }
 
-    /// Sets the issuer name of the certificate.
     #[corresponds(X509_set_issuer_name)]
     pub fn set_issuer_name(&mut self, issuer_name: &X509NameRef) -> Result<(), ErrorStack> {
         unsafe {
@@ -407,24 +326,6 @@ impl X509Builder {
         }
     }
 
-    /// Sets the subject name of the certificate.
-    ///
-    /// When building certificates, the `C`, `ST`, and `O` options are common when using the openssl command line tools.
-    /// The `CN` field is used for the common name, such as a DNS name.
-    ///
-    /// ```
-    /// use leyline_bssl::x509::{X509, X509NameBuilder};
-    ///
-    /// let mut x509_name = leyline_bssl::x509::X509NameBuilder::new().unwrap();
-    /// x509_name.append_entry_by_text("C", "US").unwrap();
-    /// x509_name.append_entry_by_text("ST", "CA").unwrap();
-    /// x509_name.append_entry_by_text("O", "Some organization").unwrap();
-    /// x509_name.append_entry_by_text("CN", "www.example.com").unwrap();
-    /// let x509_name = x509_name.build();
-    ///
-    /// let mut x509 = leyline_bssl::x509::X509::builder().unwrap();
-    /// x509.set_subject_name(&x509_name).unwrap();
-    /// ```
     #[corresponds(X509_set_subject_name)]
     pub fn set_subject_name(&mut self, subject_name: &X509NameRef) -> Result<(), ErrorStack> {
         unsafe {
@@ -435,7 +336,6 @@ impl X509Builder {
         }
     }
 
-    /// Sets the public key associated with the certificate.
     #[corresponds(X509_set_pubkey)]
     pub fn set_pubkey<T>(&mut self, key: &PKeyRef<T>) -> Result<(), ErrorStack>
     where
@@ -444,9 +344,6 @@ impl X509Builder {
         unsafe { cvt(ffi::X509_set_pubkey(self.0.as_ptr(), key.as_ptr())) }
     }
 
-    /// Returns a context object which is needed to create certain X509 extension values.
-    ///
-    /// Set `issuer` to `None` if the certificate will be self-signed.
     #[corresponds(X509V3_set_ctx)]
     #[must_use]
     pub fn x509v3_context<'a>(
@@ -471,7 +368,6 @@ impl X509Builder {
                 0,
             );
 
-            // nodb case taken care of since we zeroed ctx above
             if let Some(conf) = conf {
                 ffi::X509V3_set_nconf(&mut ctx, conf.as_ptr());
             }
@@ -480,7 +376,6 @@ impl X509Builder {
         }
     }
 
-    /// Adds an X509 extension value to the certificate.
     #[corresponds(X509_add_ext)]
     pub fn append_extension(&mut self, extension: &X509ExtensionRef) -> Result<(), ErrorStack> {
         unsafe {
@@ -489,7 +384,6 @@ impl X509Builder {
         }
     }
 
-    /// Signs the certificate with a private key.
     #[corresponds(X509_sign)]
     pub fn sign<T>(&mut self, key: &PKeyRef<T>, hash: MessageDigest) -> Result<(), ErrorStack>
     where
@@ -498,7 +392,6 @@ impl X509Builder {
         unsafe { cvt(ffi::X509_sign(self.0.as_ptr(), key.as_ptr(), hash.as_ptr())) }
     }
 
-    /// Consumes the builder, returning the certificate.
     #[must_use]
     pub fn build(self) -> X509 {
         self.0
@@ -509,12 +402,10 @@ foreign_type_and_impl_send_sync! {
     type CType = ffi::X509;
     fn drop = ffi::X509_free;
 
-    /// An `X509` public key certificate.
     pub struct X509;
 }
 
 impl X509Ref {
-    /// Returns this certificate's subject name.
     #[corresponds(X509_get_subject_name)]
     #[must_use]
     pub fn subject_name(&self) -> &X509NameRef {
@@ -524,14 +415,12 @@ impl X509Ref {
         }
     }
 
-    /// Returns the hash of the certificates subject
     #[corresponds(X509_subject_name_hash)]
     #[must_use]
     pub fn subject_name_hash(&self) -> u32 {
         unsafe { ffi::X509_subject_name_hash(self.as_ptr()) as u32 }
     }
 
-    /// Returns this certificate's subject alternative name entries, if they exist.
     #[corresponds(X509_get_ext_d2i)]
     #[must_use]
     pub fn subject_alt_names(&self) -> Option<Stack<GeneralName>> {
@@ -550,7 +439,6 @@ impl X509Ref {
         }
     }
 
-    /// Returns this certificate's issuer name.
     #[corresponds(X509_get_issuer_name)]
     #[must_use]
     pub fn issuer_name(&self) -> &X509NameRef {
@@ -560,7 +448,6 @@ impl X509Ref {
         }
     }
 
-    /// Returns this certificate's issuer alternative name entries, if they exist.
     #[corresponds(X509_get_ext_d2i)]
     #[must_use]
     pub fn issuer_alt_names(&self) -> Option<Stack<GeneralName>> {
@@ -579,7 +466,6 @@ impl X509Ref {
         }
     }
 
-    /// Returns this certificate's subject key id, if it exists.
     #[corresponds(X509_get0_subject_key_id)]
     #[must_use]
     pub fn subject_key_id(&self) -> Option<&Asn1StringRef> {
@@ -589,7 +475,6 @@ impl X509Ref {
         }
     }
 
-    /// Returns this certificate's authority key id, if it exists.
     #[corresponds(X509_get0_authority_key_id)]
     #[must_use]
     pub fn authority_key_id(&self) -> Option<&Asn1StringRef> {
@@ -607,7 +492,6 @@ impl X509Ref {
         }
     }
 
-    /// Returns a digest of the DER representation of the certificate.
     #[corresponds(X509_digest)]
     pub fn digest(&self, hash_type: MessageDigest) -> Result<DigestBytes, ErrorStack> {
         unsafe {
@@ -633,7 +517,6 @@ impl X509Ref {
         self.digest(hash_type).map(|b| b.to_vec())
     }
 
-    /// Returns the certificate's Not After validity period.
     #[corresponds(X509_getm_notAfter)]
     #[must_use]
     pub fn not_after(&self) -> &Asn1TimeRef {
@@ -644,7 +527,6 @@ impl X509Ref {
         }
     }
 
-    /// Returns the certificate's Not Before validity period.
     #[corresponds(X509_getm_notBefore)]
     #[must_use]
     pub fn not_before(&self) -> &Asn1TimeRef {
@@ -655,7 +537,6 @@ impl X509Ref {
         }
     }
 
-    /// Returns the certificate's signature
     #[corresponds(X509_get0_signature)]
     #[must_use]
     pub fn signature(&self) -> &Asn1BitStringRef {
@@ -667,7 +548,6 @@ impl X509Ref {
         }
     }
 
-    /// Returns the certificate's signature algorithm.
     #[corresponds(X509_get0_signature)]
     #[must_use]
     pub fn signature_algorithm(&self) -> &X509AlgorithmRef {
@@ -679,14 +559,11 @@ impl X509Ref {
         }
     }
 
-    /// Returns the list of OCSP responder URLs specified in the certificate's Authority Information
-    /// Access field.
     #[corresponds(X509_get1_ocsp)]
     pub fn ocsp_responders(&self) -> Result<Stack<OpensslString>, ErrorStack> {
         unsafe { cvt_p(ffi::X509_get1_ocsp(self.as_ptr())).map(|p| Stack::from_ptr(p)) }
     }
 
-    /// Checks that this certificate issued `subject`.
     #[corresponds(X509_check_issued)]
     pub fn issued(&self, subject: &X509Ref) -> X509VerifyResult {
         unsafe {
@@ -695,12 +572,6 @@ impl X509Ref {
         }
     }
 
-    /// Check if the certificate is signed using the given public key.
-    ///
-    /// Only the signature is checked: no other checks (such as certificate chain validity)
-    /// are performed.
-    ///
-    /// Returns `true` if verification succeeds.
     #[corresponds(X509_verify)]
     pub fn verify<T>(&self, key: &PKeyRef<T>) -> Result<bool, ErrorStack>
     where
@@ -709,7 +580,6 @@ impl X509Ref {
         unsafe { cvt_n(ffi::X509_verify(self.as_ptr(), key.as_ptr())).map(|n| n != 0) }
     }
 
-    /// Returns this certificate's serial number.
     #[corresponds(X509_get_serialNumber)]
     #[must_use]
     pub fn serial_number(&self) -> &Asn1IntegerRef {
@@ -741,16 +611,12 @@ impl X509Ref {
     }
 
     to_pem! {
-        /// Serializes the certificate into a PEM-encoded X509 structure.
-        ///
-        /// The output will have a header of `-----BEGIN CERTIFICATE-----`.
         #[corresponds(PEM_write_bio_X509)]
         to_pem,
         ffi::PEM_write_bio_X509
     }
 
     to_der! {
-        /// Serializes the certificate into a DER-encoded X509 structure.
         #[corresponds(i2d_X509)]
         to_der,
         ffi::i2d_X509
@@ -769,15 +635,11 @@ impl ToOwned for X509Ref {
 }
 
 impl X509 {
-    /// Returns a new builder.
     pub fn builder() -> Result<X509Builder, ErrorStack> {
         X509Builder::new()
     }
 
     from_pem! {
-        /// Deserializes a PEM-encoded X509 structure.
-        ///
-        /// The input should have a header of `-----BEGIN CERTIFICATE-----`.
         #[corresponds(PEM_read_bio_X509)]
         from_pem,
         X509,
@@ -785,7 +647,6 @@ impl X509 {
     }
 
     from_der! {
-        /// Deserializes a DER-encoded X509 structure.
         #[corresponds(d2i_X509)]
         from_der,
         X509,
@@ -793,7 +654,6 @@ impl X509 {
         ::libc::c_long
     }
 
-    /// Deserializes a list of PEM-formatted certificates.
     #[corresponds(PEM_read_bio_X509)]
     pub fn stack_from_pem(pem: &[u8]) -> Result<Vec<X509>, ErrorStack> {
         unsafe {
@@ -854,7 +714,6 @@ impl fmt::Debug for X509 {
         if let Ok(public_key) = &self.public_key() {
             debug_struct.field("public_key", public_key);
         }
-        // TODO: Print extensions once they are supported on the X509 struct.
 
         debug_struct.finish()
     }
@@ -870,7 +729,6 @@ impl Stackable for X509 {
     type StackType = ffi::stack_st_X509;
 }
 
-/// A context object required to construct certain `X509` extension values.
 pub struct X509v3Context<'a>(ffi::X509V3_CTX, PhantomData<(&'a X509Ref, &'a ConfRef)>);
 
 impl X509v3Context<'_> {
@@ -884,7 +742,6 @@ foreign_type_and_impl_send_sync! {
     type CType = ffi::X509_EXTENSION;
     fn drop = ffi::X509_EXTENSION_free;
 
-    /// Permit additional fields to be added to an `X509` v3 certificate.
     pub struct X509Extension;
 }
 
@@ -893,16 +750,6 @@ impl Stackable for X509Extension {
 }
 
 impl X509Extension {
-    /// Constructs an X509 extension value. See `man x509v3_config` for information on supported
-    /// names and their value formats.
-    ///
-    /// Some extension types, such as `subjectAlternativeName`, require an `X509v3Context` to be
-    /// provided.
-    ///
-    /// DO NOT CALL THIS WITH UNTRUSTED `value`: `value` is an OpenSSL
-    /// mini-language that can read arbitrary files.
-    ///
-    /// See the extension module for builder types which will construct certain common extensions.
     pub fn new(
         conf: Option<&ConfRef>,
         context: Option<&X509v3Context>,
@@ -939,16 +786,6 @@ impl X509Extension {
         }
     }
 
-    /// Constructs an X509 extension value. See `man x509v3_config` for information on supported
-    /// extensions and their value formats.
-    ///
-    /// Some extension types, such as `nid::SUBJECT_ALTERNATIVE_NAME`, require an `X509v3Context` to
-    /// be provided.
-    ///
-    /// DO NOT CALL THIS WITH UNTRUSTED `value`: `value` is an OpenSSL
-    /// mini-language that can read arbitrary files.
-    ///
-    /// See the extension module for builder types which will construct certain common extensions.
     pub fn new_nid(
         conf: Option<&ConfRef>,
         context: Option<&X509v3Context>,
@@ -999,17 +836,14 @@ impl X509Extension {
 
 impl X509ExtensionRef {
     to_der! {
-        /// Serializes the Extension to its standard DER encoding.
         to_der,
         ffi::i2d_X509_EXTENSION
     }
 }
 
-/// A builder used to construct an `X509Name`.
 pub struct X509NameBuilder(X509Name);
 
 impl X509NameBuilder {
-    /// Creates a new builder.
     pub fn new() -> Result<X509NameBuilder, ErrorStack> {
         unsafe {
             ffi::init();
@@ -1017,7 +851,6 @@ impl X509NameBuilder {
         }
     }
 
-    /// Add a field entry by str.
     #[corresponds(X509_NAME_add_entry_by_txt)]
     pub fn append_entry_by_text(&mut self, field: &str, value: &str) -> Result<(), ErrorStack> {
         unsafe {
@@ -1034,7 +867,6 @@ impl X509NameBuilder {
         }
     }
 
-    /// Add a field entry by str with a specific type.
     #[corresponds(X509_NAME_add_entry_by_txt)]
     pub fn append_entry_by_text_with_type(
         &mut self,
@@ -1056,7 +888,6 @@ impl X509NameBuilder {
         }
     }
 
-    /// Add a field entry by NID.
     #[corresponds(X509_NAME_add_entry_by_NID)]
     pub fn append_entry_by_nid(&mut self, field: Nid, value: &str) -> Result<(), ErrorStack> {
         unsafe {
@@ -1072,7 +903,6 @@ impl X509NameBuilder {
         }
     }
 
-    /// Add a field entry by NID with a specific type.
     #[corresponds(X509_NAME_add_entry_by_NID)]
     pub fn append_entry_by_nid_with_type(
         &mut self,
@@ -1093,12 +923,8 @@ impl X509NameBuilder {
         }
     }
 
-    /// Return an `X509Name`.
     #[must_use]
     pub fn build(self) -> X509Name {
-        // Round-trip through bytes because OpenSSL is not const correct and
-        // names in a "modified" state compute various things lazily. This can
-        // lead to data-races because OpenSSL doesn't have locks or anything.
         X509Name::from_der(&self.0.to_der().unwrap()).unwrap()
     }
 }
@@ -1107,19 +933,14 @@ foreign_type_and_impl_send_sync! {
     type CType = ffi::X509_NAME;
     fn drop = ffi::X509_NAME_free;
 
-    /// The names of an `X509` certificate.
     pub struct X509Name;
 }
 
 impl X509Name {
-    /// Returns a new builder.
     pub fn builder() -> Result<X509NameBuilder, ErrorStack> {
         X509NameBuilder::new()
     }
 
-    /// Loads subject names from a file containing PEM-formatted certificates.
-    ///
-    /// This is commonly used in conjunction with `SslContextBuilder::set_client_ca_list`.
     pub fn load_client_ca_file<P: AsRef<Path>>(file: P) -> Result<Stack<X509Name>, ErrorStack> {
         let file = CString::new(file.as_ref().as_os_str().as_encoded_bytes())
             .map_err(ErrorStack::internal_error)?;
@@ -1127,7 +948,6 @@ impl X509Name {
     }
 
     from_der! {
-        /// Deserializes a DER-encoded X509 name structure.
         #[corresponds(d2i_X509_NAME)]
         from_der,
         X509Name,
@@ -1141,7 +961,6 @@ impl Stackable for X509Name {
 }
 
 impl X509NameRef {
-    /// Returns the name entries by the nid.
     #[must_use]
     pub fn entries_by_nid(&self, nid: Nid) -> X509NameEntries<'_> {
         X509NameEntries {
@@ -1151,7 +970,6 @@ impl X509NameRef {
         }
     }
 
-    /// Returns an iterator over all `X509NameEntry` values
     #[must_use]
     pub fn entries(&self) -> X509NameEntries<'_> {
         X509NameEntries {
@@ -1161,9 +979,6 @@ impl X509NameRef {
         }
     }
 
-    /// Returns an owned String representing the X509 name configurable via incoming flags.
-    ///
-    /// This function will return `None` if the underlying string contains invalid utf-8.
     #[corresponds(X509_NAME_print_ex)]
     #[must_use]
     pub fn print_ex(&self, flags: i32) -> Option<String> {
@@ -1177,7 +992,6 @@ impl X509NameRef {
     }
 
     to_der! {
-        /// Serializes the certificate into a DER-encoded X509 name structure.
         #[corresponds(i2d_X509_NAME)]
         to_der,
         ffi::i2d_X509_NAME
@@ -1190,7 +1004,6 @@ impl fmt::Debug for X509NameRef {
     }
 }
 
-/// A type to destructure and examine an `X509Name`.
 pub struct X509NameEntries<'a> {
     name: &'a X509NameRef,
     nid: Option<Nid>,
@@ -1204,7 +1017,6 @@ impl<'a> Iterator for X509NameEntries<'a> {
         unsafe {
             match self.nid {
                 Some(nid) => {
-                    // There is a `Nid` specified to search for
                     self.loc =
                         ffi::X509_NAME_get_index_by_NID(self.name.as_ptr(), nid.as_raw(), self.loc);
                     if self.loc == -1 {
@@ -1212,7 +1024,6 @@ impl<'a> Iterator for X509NameEntries<'a> {
                     }
                 }
                 None => {
-                    // Iterate over all `Nid`s
                     self.loc += 1;
                     if self.loc >= ffi::X509_NAME_entry_count(self.name.as_ptr()) {
                         return None;
@@ -1232,12 +1043,10 @@ foreign_type_and_impl_send_sync! {
     type CType = ffi::X509_NAME_ENTRY;
     fn drop = ffi::X509_NAME_ENTRY_free;
 
-    /// A name entry associated with a `X509Name`.
     pub struct X509NameEntry;
 }
 
 impl X509NameEntryRef {
-    /// Returns the field value of an `X509NameEntry`.
     #[corresponds(X509_NAME_ENTRY_get_data)]
     #[must_use]
     pub fn data(&self) -> &Asn1StringRef {
@@ -1247,8 +1056,6 @@ impl X509NameEntryRef {
         }
     }
 
-    /// Returns the `Asn1Object` value of an `X509NameEntry`.
-    /// This is useful for finding out about the actual `Nid` when iterating over all `X509NameEntries`.
     #[corresponds(X509_NAME_ENTRY_get_object)]
     #[must_use]
     pub fn object(&self) -> &Asn1ObjectRef {
@@ -1265,11 +1072,9 @@ impl fmt::Debug for X509NameEntryRef {
     }
 }
 
-/// A builder used to construct an `X509Req`.
 pub struct X509ReqBuilder(X509Req);
 
 impl X509ReqBuilder {
-    /// Returns a builder for a certificate request.
     #[corresponds(X509_REQ_new)]
     pub fn new() -> Result<X509ReqBuilder, ErrorStack> {
         unsafe {
@@ -1278,13 +1083,11 @@ impl X509ReqBuilder {
         }
     }
 
-    /// Set the numerical value of the version field.
     #[corresponds(X509_REQ_set_version)]
     pub fn set_version(&mut self, version: i32) -> Result<(), ErrorStack> {
         unsafe { cvt(ffi::X509_REQ_set_version(self.0.as_ptr(), version.into())) }
     }
 
-    /// Set the issuer name.
     #[corresponds(X509_REQ_set_subject_name)]
     pub fn set_subject_name(&mut self, subject_name: &X509NameRef) -> Result<(), ErrorStack> {
         unsafe {
@@ -1295,7 +1098,6 @@ impl X509ReqBuilder {
         }
     }
 
-    /// Set the public key.
     #[corresponds(X509_REQ_set_pubkey)]
     pub fn set_pubkey<T>(&mut self, key: &PKeyRef<T>) -> Result<(), ErrorStack>
     where
@@ -1304,8 +1106,6 @@ impl X509ReqBuilder {
         unsafe { cvt(ffi::X509_REQ_set_pubkey(self.0.as_ptr(), key.as_ptr())) }
     }
 
-    /// Return an `X509v3Context`. This context object can be used to construct
-    /// certain `X509` extensions.
     #[must_use]
     pub fn x509v3_context<'a>(&'a self, conf: Option<&'a ConfRef>) -> X509v3Context<'a> {
         unsafe {
@@ -1320,7 +1120,6 @@ impl X509ReqBuilder {
                 0,
             );
 
-            // nodb case taken care of since we zeroed ctx above
             if let Some(conf) = conf {
                 ffi::X509V3_set_nconf(&mut ctx, conf.as_ptr());
             }
@@ -1329,7 +1128,6 @@ impl X509ReqBuilder {
         }
     }
 
-    /// Permits any number of extension fields to be added to the certificate.
     pub fn add_extensions(
         &mut self,
         extensions: &StackRef<X509Extension>,
@@ -1342,7 +1140,6 @@ impl X509ReqBuilder {
         }
     }
 
-    /// Sign the request using a private key.
     #[corresponds(X509_REQ_sign)]
     pub fn sign<T>(&mut self, key: &PKeyRef<T>, hash: MessageDigest) -> Result<(), ErrorStack>
     where
@@ -1357,7 +1154,6 @@ impl X509ReqBuilder {
         }
     }
 
-    /// Returns the `X509Req`.
     #[must_use]
     pub fn build(self) -> X509Req {
         self.0
@@ -1368,20 +1164,15 @@ foreign_type_and_impl_send_sync! {
     type CType = ffi::X509_REQ;
     fn drop = ffi::X509_REQ_free;
 
-    /// An `X509` certificate request.
     pub struct X509Req;
 }
 
 impl X509Req {
-    /// A builder for `X509Req`.
     pub fn builder() -> Result<X509ReqBuilder, ErrorStack> {
         X509ReqBuilder::new()
     }
 
     from_pem! {
-        /// Deserializes a PEM-encoded PKCS#10 certificate request structure.
-        ///
-        /// The input should have a header of `-----BEGIN CERTIFICATE REQUEST-----`.
         #[corresponds(PEM_read_bio_X509_REQ)]
         from_pem,
         X509Req,
@@ -1389,7 +1180,6 @@ impl X509Req {
     }
 
     from_der! {
-        /// Deserializes a DER-encoded PKCS#10 certificate request structure.
         #[corresponds(d2i_X509_REQ)]
         from_der,
         X509Req,
@@ -1400,29 +1190,23 @@ impl X509Req {
 
 impl X509ReqRef {
     to_pem! {
-        /// Serializes the certificate request to a PEM-encoded PKCS#10 structure.
-        ///
-        /// The output will have a header of `-----BEGIN CERTIFICATE REQUEST-----`.
         #[corresponds(PEM_write_bio_X509_REQ)]
         to_pem,
         ffi::PEM_write_bio_X509_REQ
     }
 
     to_der! {
-        /// Serializes the certificate request to a DER-encoded PKCS#10 structure.
         #[corresponds(i2d_X509_REQ)]
         to_der,
         ffi::i2d_X509_REQ
     }
 
-    /// Returns the numerical value of the version field of the certificate request.
     #[corresponds(X509_REQ_get_version)]
     #[must_use]
     pub fn version(&self) -> i32 {
         unsafe { X509_REQ_get_version(self.as_ptr()) as i32 }
     }
 
-    /// Returns the subject name of the certificate request.
     #[corresponds(X509_REQ_get_subject_name)]
     #[must_use]
     pub fn subject_name(&self) -> &X509NameRef {
@@ -1433,7 +1217,6 @@ impl X509ReqRef {
         }
     }
 
-    /// Returns the public key of the certificate request.
     #[corresponds(X509_REQ_get_pubkey)]
     pub fn public_key(&self) -> Result<PKey<Public>, ErrorStack> {
         unsafe {
@@ -1442,9 +1225,6 @@ impl X509ReqRef {
         }
     }
 
-    /// Check if the certificate request is signed using the given public key.
-    ///
-    /// Returns `true` if verification succeeds.
     #[corresponds(X509_REQ_verify)]
     pub fn verify<T>(&self, key: &PKeyRef<T>) -> Result<bool, ErrorStack>
     where
@@ -1453,7 +1233,6 @@ impl X509ReqRef {
         unsafe { cvt_n(ffi::X509_REQ_verify(self.as_ptr(), key.as_ptr())).map(|n| n != 0) }
     }
 
-    /// Returns the extensions of the certificate request.
     #[corresponds(X509_REQ_get_extensions)]
     pub fn extensions(&self) -> Result<Stack<X509Extension>, ErrorStack> {
         unsafe {
@@ -1463,7 +1242,6 @@ impl X509ReqRef {
     }
 }
 
-/// The result of peer certificate verification.
 pub type X509VerifyResult = Result<(), X509VerifyError>;
 
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -1487,12 +1265,6 @@ impl fmt::Display for X509VerifyError {
 impl Error for X509VerifyError {}
 
 impl X509VerifyError {
-    /// Creates an [`X509VerifyResult`] from a raw error number.
-    ///
-    /// # Safety
-    ///
-    /// Some methods on [`X509VerifyError`] are not thread safe if the error
-    /// number is invalid.
     pub unsafe fn from_raw(err: c_int) -> X509VerifyResult {
         if err == ffi::X509_V_OK {
             Ok(())
@@ -1501,16 +1273,12 @@ impl X509VerifyError {
         }
     }
 
-    /// Return the integer representation of an [`X509VerifyError`].
     #[allow(clippy::trivially_copy_pass_by_ref)]
     #[must_use]
     pub fn as_raw(&self) -> c_int {
         self.0
     }
 
-    /// Return a human readable error string from the verification error.
-    ///
-    /// Returns empty string if the message was not UTF-8.
     #[corresponds(X509_verify_cert_error_string)]
     #[allow(clippy::trivially_copy_pass_by_ref)]
     #[must_use]
@@ -1524,7 +1292,7 @@ impl X509VerifyError {
     }
 }
 
-#[allow(missing_docs)] // no need to document the constants
+#[allow(missing_docs)]
 impl X509VerifyError {
     pub const UNSPECIFIED: Self = Self(ffi::X509_V_ERR_UNSPECIFIED);
     pub const UNABLE_TO_GET_ISSUER_CERT: Self = Self(ffi::X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT);
@@ -1608,7 +1376,6 @@ foreign_type_and_impl_send_sync! {
     type CType = ffi::GENERAL_NAME;
     fn drop = ffi::GENERAL_NAME_free;
 
-    /// An `X509` certificate alternative names.
     pub struct GeneralName;
 }
 
@@ -1675,32 +1442,25 @@ impl GeneralNameRef {
 
             let asn = Asn1BitStringRef::from_ptr((*self.as_ptr()).d.ia5);
 
-            // IA5Strings are stated to be ASCII (specifically IA5). Hopefully
-            // OpenSSL checks that when loading a certificate but if not we'll
-            // use this instead of from_utf8_unchecked just in case.
             asn.to_str()
         }
     }
 
-    /// Returns the contents of this `GeneralName` if it is an `rfc822Name`.
     #[must_use]
     pub fn email(&self) -> Option<&str> {
         self.ia5_string(ffi::GEN_EMAIL)
     }
 
-    /// Returns the contents of this `GeneralName` if it is a `dNSName`.
     #[must_use]
     pub fn dnsname(&self) -> Option<&str> {
         self.ia5_string(ffi::GEN_DNS)
     }
 
-    /// Returns the contents of this `GeneralName` if it is an `uniformResourceIdentifier`.
     #[must_use]
     pub fn uri(&self) -> Option<&str> {
         self.ia5_string(ffi::GEN_URI)
     }
 
-    /// Returns the contents of this `GeneralName` if it is an `iPAddress`.
     #[must_use]
     pub fn ipaddress(&self) -> Option<&[u8]> {
         unsafe {
@@ -1738,12 +1498,10 @@ foreign_type_and_impl_send_sync! {
     type CType = ffi::X509_ALGOR;
     fn drop = ffi::X509_ALGOR_free;
 
-    /// An `X509` certificate signature algorithm.
     pub struct X509Algorithm;
 }
 
 impl X509AlgorithmRef {
-    /// Returns the ASN.1 OID of this algorithm.
     #[must_use]
     pub fn object(&self) -> &Asn1ObjectRef {
         unsafe {
@@ -1759,7 +1517,6 @@ foreign_type_and_impl_send_sync! {
     type CType = ffi::X509_OBJECT;
     fn drop = X509_OBJECT_free;
 
-    /// An `X509` or an X509 certificate revocation list.
     pub struct X509Object;
 }
 

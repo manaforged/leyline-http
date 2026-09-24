@@ -1,0 +1,30 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index aaf3bf1e4..d8232c905 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -851,8 +851,7 @@ if(BUILD_TESTING)
+   endif()
+ endif()
+ 
+-if(BORINGSSL_PREFIX)
+-  require_go()
++if(BORINGSSL_PREFIX AND GO_EXECUTABLE)
+   add_custom_target(
+     verify_boringssl_prefix ALL
+     COMMENT "Verifying symbol prefixing"
+diff --git a/include/openssl/prefix_symbols.h b/include/openssl/prefix_symbols.h
+index 096f9bc09..2669d249b 100644
+--- a/include/openssl/prefix_symbols.h
++++ b/include/openssl/prefix_symbols.h
+@@ -7863,6 +7863,11 @@
+ 
+ #endif  // !BORINGSSL_ALWAYS_USE_STATIC_INLINE && !__ASSEMBLER__
+ 
++#if !defined(__ASSEMBLER__)
++#define ssl_st BORINGSSL_ADD_PREFIX(ssl_st)
++#define ssl_session_st BORINGSSL_ADD_PREFIX(ssl_session_st)
++#endif
++
+ #endif  // BORINGSSL_PREFIX
+ 
+ #endif  // OPENSSL_HEADER_PREFIX_SYMBOLS_H

@@ -1,12 +1,12 @@
 use crate::ffi::{
-    self, BIO, BIO_CTRL_DGRAM_QUERY_MTU, BIO_CTRL_FLUSH, BIO_clear_retry_flags, BIO_new,
-    BIO_set_retry_read, BIO_set_retry_write,
+    self, BIO_clear_retry_flags, BIO_new, BIO_set_retry_read, BIO_set_retry_write, BIO,
+    BIO_CTRL_DGRAM_QUERY_MTU, BIO_CTRL_FLUSH,
 };
 use libc::{c_char, c_int, c_long, c_void, strlen};
 use std::any::Any;
 use std::io;
 use std::io::prelude::*;
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr;
 use std::slice;
 
@@ -20,7 +20,6 @@ pub struct StreamState<S> {
     pub dtls_mtu_size: c_long,
 }
 
-/// Safe wrapper for BIO_METHOD
 pub struct BioMethod(BIO_METHOD);
 
 impl BioMethod {
@@ -163,7 +162,7 @@ unsafe extern "C" fn bread<S: Read>(bio: *mut BIO, buf: *mut c_char, len: c_int)
     }
 }
 
-#[allow(clippy::match_like_matches_macro)] // matches macro requires rust 1.42.0
+#[allow(clippy::match_like_matches_macro)]
 fn retriable_error(err: &io::Error) -> bool {
     match err.kind() {
         io::ErrorKind::WouldBlock | io::ErrorKind::NotConnected => true,

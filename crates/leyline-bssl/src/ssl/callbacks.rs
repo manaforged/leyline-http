@@ -2,9 +2,9 @@
 
 use super::{
     AlpnError, CertificateCompressor, ClientHello, GetSessionPendingError, PrivateKeyMethod,
-    PrivateKeyMethodError, SESSION_CTX_INDEX, SelectCertError, SniError, Ssl, SslAlert, SslContext,
-    SslContextRef, SslInfoCallbackAlert, SslInfoCallbackMode, SslInfoCallbackValue, SslRef,
-    SslSession, SslSessionRef, SslSignatureAlgorithm, SslVerifyError,
+    PrivateKeyMethodError, SelectCertError, SniError, Ssl, SslAlert, SslContext, SslContextRef,
+    SslInfoCallbackAlert, SslInfoCallbackMode, SslInfoCallbackValue, SslRef, SslSession,
+    SslSessionRef, SslSignatureAlgorithm, SslVerifyError, SESSION_CTX_INDEX,
 };
 use crate::error::ErrorStack;
 use crate::ffi;
@@ -26,7 +26,7 @@ pub extern "C" fn raw_verify<F>(preverify_ok: c_int, x509_ctx: *mut ffi::X509_ST
 where
     F: Fn(bool, &mut X509StoreContextRef) -> bool + 'static + Sync + Send,
 {
-    // SAFETY: leyline-bssl provides valid inputs.
+    // SAFETY: boring provides valid inputs.
     let ctx = unsafe { X509StoreContextRef::from_ptr_mut(x509_ctx) };
 
     let ssl_idx = X509StoreContext::ssl_idx().expect("BUG: store context ssl index missing");
@@ -40,7 +40,6 @@ where
         .expect("BUG: verify callback missing");
 
     // SAFETY: The callback won't outlive the context it's associated with
-    // because there is no `X509StoreContextRef::ssl_mut(&mut self)` method.
     let verify = unsafe { &*std::ptr::from_ref::<F>(verify) };
 
     c_int::from(verify(preverify_ok != 0, ctx))
@@ -74,7 +73,7 @@ pub(super) unsafe extern "C" fn raw_cert_verify<F>(
 where
     F: Fn(&mut X509StoreContextRef) -> bool + 'static + Sync + Send,
 {
-    // SAFETY: leyline-bssl provides valid inputs.
+    // SAFETY: boring provides valid inputs.
     let ctx = unsafe { X509StoreContextRef::from_ptr_mut(x509_ctx) };
 
     let ssl_idx = X509StoreContext::ssl_idx().expect("BUG: store context ssl index missing");
@@ -88,8 +87,6 @@ where
         .expect("BUG: verify callback missing");
 
     // SAFETY: The callback won't outlive the context it's associated with
-    // because there is no way to get a mutable reference to the `SslContext`,
-    // so the callback can't replace itself.
     let verify = unsafe { &*std::ptr::from_ref::<F>(verify) };
 
     c_int::from(verify(ctx))
@@ -119,7 +116,7 @@ unsafe fn raw_custom_verify_callback(
     out_alert: *mut u8,
     callback: impl FnOnce(&mut SslRef) -> Result<(), SslVerifyError>,
 ) -> ffi::ssl_verify_result_t {
-    // SAFETY: leyline-bssl provides valid inputs.
+    // SAFETY: boring provides valid inputs.
     let ssl = unsafe { SslRef::from_ptr_mut(ssl) };
     let out_alert = unsafe { &mut *out_alert };
 
@@ -148,7 +145,7 @@ where
         + Sync
         + Send,
 {
-    // SAFETY: leyline-bssl provides valid inputs.
+    // SAFETY: boring provides valid inputs.
 
     let ssl = unsafe { SslRef::from_ptr_mut(ssl_ptr) };
 
@@ -158,7 +155,6 @@ where
         Some(unsafe { CStr::from_ptr(hint) }.to_bytes())
     };
 
-    // Give the callback mutable slices into which it can write the identity and psk.
     let identity_sl =
         unsafe { slice::from_raw_parts_mut(identity.cast::<u8>(), max_identity_len as usize) };
     let psk_sl = unsafe { slice::from_raw_parts_mut(psk, max_psk_len as usize) };
@@ -189,7 +185,7 @@ where
         + Sync
         + Send,
 {
-    // SAFETY: leyline-bssl provides valid inputs.
+    // SAFETY: boring provides valid inputs.
 
     let ssl = unsafe { SslRef::from_ptr_mut(ssl) };
 
@@ -199,7 +195,6 @@ where
         Some(unsafe { CStr::from_ptr(identity) }.to_bytes())
     };
 
-    // Give the callback mutable slices into which it can write the psk.
     let psk_sl = unsafe { slice::from_raw_parts_mut(psk, max_psk_len as usize) };
 
     let ssl_context = ssl.ssl_context().to_owned();
@@ -223,14 +218,11 @@ pub(super) unsafe extern "C" fn ssl_raw_verify<F>(
 where
     F: Fn(bool, &mut X509StoreContextRef) -> bool + 'static + Sync + Send,
 {
-    // SAFETY: leyline-bssl provides valid inputs.
+    // SAFETY: boring provides valid inputs.
     let ctx = unsafe { X509StoreContextRef::from_ptr_mut(x509_ctx) };
 
     let ssl_idx = X509StoreContext::ssl_idx().expect("BUG: store context ssl index missing");
 
-    // NOTE(nox): I'm pretty sure this Arc<F> is unnecessary here as there is
-    // no way to get a `&mut SslRef` from a `&mut X509StoreContextRef`, and I
-    // don't understand how this callback is different from `raw_verify` above.
     let callback = ctx
         .ex_data(ssl_idx)
         .expect("BUG: store context missing ssl")
@@ -249,15 +241,11 @@ pub(super) unsafe extern "C" fn raw_sni<F>(
 where
     F: Fn(&mut SslRef, &mut SslAlert) -> Result<(), SniError> + 'static + Sync + Send,
 {
-    // SAFETY: leyline-bssl provides valid inputs.
+    // SAFETY: boring provides valid inputs.
     let ssl = unsafe { SslRef::from_ptr_mut(ssl) };
     let al = unsafe { &mut *al };
 
     // SAFETY: We can make `callback` outlive `ssl` because it is a callback
-    // stored in the original context with which `ssl` was built. That
-    // original context is always stored as the session context in
-    // `Ssl::new` so it is always guaranteed to outlive the lifetime of
-    // this function's scope.
     let callback = unsafe { &*(arg as *const F) };
 
     let mut alert = SslAlert(*al);
@@ -298,7 +286,7 @@ where
         + Sync
         + Send,
 {
-    // SAFETY: leyline-bssl provides valid inputs.
+    // SAFETY: boring provides valid inputs.
     let ssl = unsafe { SslRef::from_ptr_mut(ssl) };
 
     let ssl_context = ssl.ssl_context().to_owned();
@@ -311,15 +299,10 @@ where
         unsafe { to_uninit(key_name.cast::<[u8; ffi::SSL_TICKET_KEY_NAME_LEN as usize]>()) };
 
     // SAFETY: the callback provides 16 bytes iv
-    //
-    // https://github.com/google/boringssl/blob/main/ssl/ssl_session.cc#L331
     let iv = unsafe { to_uninit(iv.cast::<[u8; ffi::EVP_MAX_IV_LENGTH as usize]>()) };
 
-    // When encrypting a new ticket, encrypt will be one.
     let encrypt = encrypt == 1;
 
-    // Zero-initialize the key_name and iv, since the application is expected to populate these
-    // fields in the encrypt mode.
     if encrypt {
         *key_name = MaybeUninit::zeroed();
         *iv = MaybeUninit::zeroed();
@@ -327,7 +310,6 @@ where
     let key_name = unsafe { key_name.assume_init_mut() };
     let iv = unsafe { iv.assume_init_mut() };
 
-    // The EVP_CIPHER_CTX and HMAC_CTX are owned by boringSSL.
     let evp_ctx = unsafe { CipherCtxRef::from_ptr_mut(evp_ctx) };
     let hmac_ctx = unsafe { HmacCtxRef::from_ptr_mut(hmac_ctx) };
 
@@ -345,7 +327,7 @@ pub(super) unsafe extern "C" fn raw_alpn_select<F>(
 where
     F: for<'a> Fn(&mut SslRef, &'a [u8]) -> Result<&'a [u8], AlpnError> + 'static + Sync + Send,
 {
-    // SAFETY: leyline-bssl provides valid inputs.
+    // SAFETY: boring provides valid inputs.
     let ssl = unsafe { SslRef::from_ptr_mut(ssl) };
     let protos = unsafe { slice::from_raw_parts(inbuf, inlen as usize) };
     let out = unsafe { &mut *out };
@@ -373,7 +355,7 @@ pub(super) unsafe extern "C" fn raw_select_cert<F>(
 where
     F: Fn(ClientHello<'_>) -> Result<(), SelectCertError> + Sync + Send + 'static,
 {
-    // SAFETY: leyline-bssl provides valid inputs.
+    // SAFETY: boring provides valid inputs.
     let client_hello = ClientHello(unsafe { &*client_hello });
 
     let ssl_context = client_hello.ssl().ssl_context().to_owned();
@@ -391,7 +373,7 @@ pub(super) unsafe extern "C" fn raw_tlsext_status<F>(ssl: *mut ffi::SSL, _: *mut
 where
     F: Fn(&mut SslRef) -> Result<bool, ErrorStack> + 'static + Sync + Send,
 {
-    // SAFETY: leyline-bssl provides valid inputs.
+    // SAFETY: boring provides valid inputs.
     let ssl = unsafe { SslRef::from_ptr_mut(ssl) };
 
     let ssl_context = ssl.ssl_context().to_owned();
@@ -429,7 +411,7 @@ pub(super) unsafe extern "C" fn raw_new_session<F>(
 where
     F: Fn(&mut SslRef, SslSession) + 'static + Sync + Send,
 {
-    // SAFETY: leyline-bssl provides valid inputs.
+    // SAFETY: boring provides valid inputs.
     let ssl = unsafe { SslRef::from_ptr_mut(ssl) };
     let session = unsafe { SslSession::from_ptr(session) };
 
@@ -440,13 +422,10 @@ where
         .expect("BUG: new session callback missing");
 
     // SAFETY: We can make `callback` outlive `ssl` because it is a callback
-    // stored in the session context set in `Ssl::new` so it is always
-    // guaranteed to outlive the lifetime of this function's scope.
     let callback = unsafe { &*std::ptr::from_ref::<F>(callback) };
 
     callback(ssl, session);
 
-    // the return code doesn't indicate error vs success, but whether or not we consumed the session
     1
 }
 
@@ -456,7 +435,7 @@ pub(super) unsafe extern "C" fn raw_remove_session<F>(
 ) where
     F: Fn(&SslContextRef, &SslSessionRef) + 'static + Sync + Send,
 {
-    // SAFETY: leyline-bssl provides valid inputs.
+    // SAFETY: boring provides valid inputs.
     let ctx = unsafe { SslContextRef::from_ptr(ctx) };
     let session = unsafe { SslSessionRef::from_ptr(session) };
 
@@ -481,7 +460,7 @@ where
         + Sync
         + Send,
 {
-    // SAFETY: leyline-bssl provides valid inputs.
+    // SAFETY: boring provides valid inputs.
     let ssl = unsafe { SslRef::from_ptr_mut(ssl) };
     let data = unsafe { slice::from_raw_parts(data, len as usize) };
     let copy = unsafe { &mut *copy };
@@ -493,8 +472,6 @@ where
         .expect("BUG: get session callback missing");
 
     // SAFETY: We can make `callback` outlive `ssl` because it is a callback
-    // stored in the session context set in `Ssl::new` so it is always
-    // guaranteed to outlive the lifetime of this function's scope.
     let callback = unsafe { &*std::ptr::from_ref::<F>(callback) };
 
     match callback(ssl, data) {
@@ -514,7 +491,7 @@ pub(super) unsafe extern "C" fn raw_keylog<F>(ssl: *const ffi::SSL, line: *const
 where
     F: Fn(&SslRef, &str) + 'static + Sync + Send,
 {
-    // SAFETY: leyline-bssl provides valid inputs.
+    // SAFETY: boring provides valid inputs.
     let ssl = unsafe { SslRef::from_ptr(ssl.cast_mut()) };
     let line = unsafe { CStr::from_ptr(line).to_string_lossy() };
 
@@ -538,7 +515,7 @@ pub(super) unsafe extern "C" fn raw_sign<M>(
 where
     M: PrivateKeyMethod,
 {
-    // SAFETY: leyline-bssl provides valid inputs.
+    // SAFETY: boring provides valid inputs.
     let input = unsafe { slice::from_raw_parts(in_, in_len) };
 
     let signature_algorithm = SslSignatureAlgorithm(signature_algorithm);
@@ -547,7 +524,7 @@ where
         method.sign(ssl, input, signature_algorithm, output)
     };
 
-    // SAFETY: leyline-bssl provides valid inputs.
+    // SAFETY: boring provides valid inputs.
     unsafe { raw_private_key_callback(ssl, out, out_len, max_out, callback) }
 }
 
@@ -562,12 +539,12 @@ pub(super) unsafe extern "C" fn raw_decrypt<M>(
 where
     M: PrivateKeyMethod,
 {
-    // SAFETY: leyline-bssl provides valid inputs.
+    // SAFETY: boring provides valid inputs.
     let input = unsafe { slice::from_raw_parts(in_, in_len) };
 
     let callback = |method: &M, ssl: &mut _, output: &mut _| method.decrypt(ssl, input, output);
 
-    // SAFETY: leyline-bssl provides valid inputs.
+    // SAFETY: boring provides valid inputs.
     unsafe { raw_private_key_callback(ssl, out, out_len, max_out, callback) }
 }
 
@@ -580,7 +557,7 @@ pub(super) unsafe extern "C" fn raw_complete<M>(
 where
     M: PrivateKeyMethod,
 {
-    // SAFETY: leyline-bssl provides valid inputs.
+    // SAFETY: boring provides valid inputs.
     unsafe { raw_private_key_callback::<M>(ssl, out, out_len, max_out, M::complete) }
 }
 
@@ -594,7 +571,7 @@ unsafe fn raw_private_key_callback<M>(
 where
     M: PrivateKeyMethod,
 {
-    // SAFETY: leyline-bssl provides valid inputs.
+    // SAFETY: boring provides valid inputs.
     let ssl = unsafe { SslRef::from_ptr_mut(ssl) };
     let output = unsafe { slice::from_raw_parts_mut(out, max_out) };
     let out_len = unsafe { &mut *out_len };
@@ -623,11 +600,9 @@ pub(super) unsafe extern "C" fn raw_info_callback<F>(
 ) where
     F: Fn(&SslRef, SslInfoCallbackMode, SslInfoCallbackValue) + Send + Sync + 'static,
 {
-    // Due to FFI signature requirements we have to pass a *const SSL into this function, but
-    // foreign-types requires a *mut SSL to get the Rust SslRef
     let mut_ref = ssl.cast_mut();
 
-    // SAFETY: leyline-bssl provides valid inputs.
+    // SAFETY: boring provides valid inputs.
     let ssl = unsafe { SslRef::from_ptr(mut_ref) };
     let ssl_context = ssl.ssl_context();
 
@@ -658,7 +633,7 @@ where
         assert!(C::CAN_COMPRESS);
     }
 
-    // SAFETY: leyline-bssl provides valid inputs.
+    // SAFETY: boring provides valid inputs.
     let ssl = unsafe { SslRef::from_ptr_mut(ssl) };
 
     let ssl_context = ssl.ssl_context();
@@ -689,7 +664,7 @@ where
         assert!(C::CAN_DECOMPRESS);
     }
 
-    // SAFETY: leyline-bssl provides valid inputs.
+    // SAFETY: boring provides valid inputs.
     let ssl = unsafe { SslRef::from_ptr_mut(ssl) };
 
     let ssl_context = ssl.ssl_context();
@@ -766,10 +741,8 @@ impl<'a> CryptoBufferBuilder<'a> {
     fn build(mut self) -> Result<*mut ffi::CRYPTO_BUFFER, ErrorStack> {
         let buffer_capacity = unsafe { ffi::CRYPTO_BUFFER_len(self.buffer) };
         if self.cursor.position() != buffer_capacity as u64 {
-            // Make sure all bytes in buffer initialized as required by Boring SSL.
             return Err(ErrorStack::internal_error_str("invalid len"));
         }
-        // Drop is no-op if the buffer is null
         Ok(mem::replace(&mut self.buffer, ptr::null_mut()))
     }
 }

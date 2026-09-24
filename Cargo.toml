@@ -40,9 +40,6 @@ thiserror = "2"
 url = "2"
 sha2 = "0.10"
 md-5 = "0.10"
-# Leyline's owned BoringSSL stack (vendored fork of 0x676e67/btls). Carries the
-# Firefox-specific C patches (record_size_limit, delegated_credentials, FFDHE,
-# 3DES) and pins the BoringSSL revision per Chrome era. Attribution in /NOTICE.
 leyline-bssl = { path = "crates/leyline-bssl", version = "=0.1.0" }
 leyline-bssl-sys = { path = "crates/leyline-bssl-sys", version = "=0.1.0" }
 leyline-bssl-tokio = { path = "crates/leyline-bssl-tokio", version = "=0.1.0" }

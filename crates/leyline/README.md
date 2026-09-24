@@ -12,15 +12,16 @@ Leyline supports HTTP/1.1, HTTP/2, HTTP/3, and WebSocket on Tokio.
 
 - Rust 1.96 or later.
 - Tokio.
-- One of these targets. The crate ships prebuilt BoringSSL libraries and
-  bindings for each:
+- One of these targets:
   - `aarch64-apple-darwin`
   - `x86_64-unknown-linux-gnu`
   - `aarch64-unknown-linux-gnu`
   - `x86_64-pc-windows-msvc`
+- The tools to build BoringSSL from source: CMake 3.22 or later, a C and C++
+  compiler, and libclang for `bindgen`. On Windows, the MSVC build tools and
+  NASM.
 
-Other targets, including Intel macOS and musl, are not supported. Setting
-`BORING_BSSL_PATH` does not add a target.
+Other targets, including Intel macOS and musl, are not supported.
 
 ## Install
 

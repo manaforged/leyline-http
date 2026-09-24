@@ -205,9 +205,6 @@ jobs:
         with:
           key: cross-${{ matrix.target }}
 
-      # leyline-bssl-sys ships a prebuilt BoringSSL for every target in this
-      # matrix, so no cmake/go/perl toolchain is needed. aarch64 Linux still
-      # needs a cross linker for build-script and rustc target artifacts.
       - name: Install the aarch64 Linux cross linker
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |

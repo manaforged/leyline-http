@@ -29,33 +29,34 @@ BoringSSL bindings (vendored under `crates/leyline-bssl*`)
 ================================================================================
 
 TLS is provided by `leyline-bssl`, `leyline-bssl-sys`, and `leyline-bssl-tokio`,
-vendored in-tree as a fork of 0x676e67's `btls` (itself a fork of `boring2`).
-They fork Cloudflare's `boring` crate and Google's BoringSSL C library, pin the
-BoringSSL revision per Chrome era, and add the fingerprint-critical extensions
-Leyline requires:
+vendored in-tree as a trimmed fork of Cloudflare's `boring`, `boring-sys`, and
+`tokio-boring` crates at tag v5.2.0 (commit
+6fdd0a54e81a1eecc76e587c685439d3f2ffdd09), over Google's BoringSSL C library.
+`leyline-bssl-sys` builds BoringSSL from source at build time with CMake. The
+fork keeps the modules Leyline uses, pins the BoringSSL revision per Chrome era,
+and carries these BoringSSL patches:
 
-- `SSL_CTX_set_record_size_limit` (RFC 8449) — Firefox profiles.
-- `SSL_CTX_set_delegated_credentials` (RFC 9345) — Firefox profiles.
-- MLKEM768 / post-quantum key agreement codepoints, native to the pinned
-  BoringSSL revision. The separate `mlkem` feature build is refused.
-- Deterministic GREASE ordering and ClientHello extension permutation hooks.
+- `0001-leyline-fingerprint.patch`: `SSL_CTX_set_record_size_limit`
+  (RFC 8449), `SSL_CTX_set_delegated_credentials` (RFC 9345),
+  `SSL_CTX_set_extension_order`, `SSL_CTX_set_tls13_cipher_order`, the
+  ECDHE 3DES cipher suites, and the FFDHE2048/3072 groups. These changes
+  first shipped in 0x676e67's `btls` and `boring2` forks
+  (https://github.com/0x676e67/btls); Leyline keeps them with that credit.
+- `0002-prefix-ssl-structs.patch`: renames the `ssl_st` and `ssl_session_st`
+  C++ structs under the `LEYLINE` symbol prefix.
 
-Upstream: https://github.com/0x676e67/btls
-Licenses: the Rust bindings are Apache-2.0 / MIT. The bundled BoringSSL C
-          library is Apache-2.0 (relicensed by Google), with a BSD-3-Clause
-          notice for Go-derived test tooling that is not linked into the
-          shipped libraries.
+Upstream: https://github.com/cloudflare/boring
+Licenses: the Rust bindings are Apache-2.0 / MIT. The BoringSSL C library is
+          Apache-2.0 (relicensed by Google), with a BSD-3-Clause notice for
+          Go-derived test tooling that is not linked into the built libraries.
 
 ================================================================================
-BoringSSL binary provenance (prebuilt static libraries)
+BoringSSL build
 ================================================================================
 
-`leyline-bssl-sys` ships prebuilt BoringSSL static libraries under
-`crates/leyline-bssl-sys/native/<target>/lib/` ({libcrypto,libssl}.a / {crypto,ssl}.lib)
-for x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, x86_64-pc-windows-msvc,
-and aarch64-apple-darwin.
-These are statically linked into binaries built from this crate. Their full
-license text (Apache-2.0 plus the BSD-3-Clause Go notice) is preserved at
+`leyline-bssl-sys` ships the BoringSSL source, not binaries. Each build
+compiles it from source and links it statically. The full license text
+(Apache-2.0 plus the BSD-3-Clause Go notice) is at
 `crates/leyline-bssl-sys/LICENSE-BORINGSSL`, and the MIT binding-glue grant at
 `crates/leyline-bssl-sys/LICENSE-MIT`.
 

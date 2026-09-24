@@ -10,6 +10,13 @@ change or a higher minimum Rust version needs a new minor release, such as
 
 ## Unreleased
 
+### Changed
+
+- `leyline-bssl-sys` builds BoringSSL from source with CMake and no longer
+  ships prebuilt libraries. A build needs CMake 3.22 or later, a C and C++
+  compiler, and libclang; on Windows, the MSVC build tools and NASM. The
+  BoringSSL crates are now trimmed forks of Cloudflare's `boring` v5.2.0.
+
 ## 0.1.0 - 2026-09-24
 
 First public release.

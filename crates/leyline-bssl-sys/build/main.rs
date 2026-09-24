@@ -1,4 +1,3 @@
-use core::panic;
 use fslock::LockFile;
 use std::ffi::OsString;
 use std::fs;
@@ -10,9 +9,8 @@ use std::process::{Command, Output};
 use std::sync::OnceLock;
 
 use crate::config::Config;
-use crate::prefix::{PREFIX, PrefixCallback};
+use crate::prefix::{PrefixCallback, PREFIX};
 
-mod cache;
 mod config;
 mod prefix;
 
@@ -21,16 +19,11 @@ fn should_use_cmake_cross_compilation(config: &Config) -> bool {
         return false;
     }
     match config.target_os.as_str() {
-        "macos" | "ios" => {
-            // Cross-compiling for Apple platforms on macOS is supported using the normal Xcode
-            // tools, along with the settings from `cmake_params_apple`.
-            !config.host.ends_with("-darwin")
-        }
+        "macos" | "ios" | "tvos" => !config.host.ends_with("-darwin"),
         _ => true,
     }
 }
 
-// Android NDK >= 19.
 const CMAKE_PARAMS_ANDROID_NDK: &[(&str, &[(&str, &str)])] = &[
     ("aarch64", &[("ANDROID_ABI", "arm64-v8a")]),
     ("arm", &[("ANDROID_ABI", "armeabi-v7a")]),
@@ -48,7 +41,6 @@ fn cmake_params_android(config: &Config) -> &'static [(&'static str, &'static st
 }
 
 const CMAKE_PARAMS_APPLE: &[(&str, &[(&str, &str)])] = &[
-    // iOS
     (
         "aarch64-apple-ios",
         &[
@@ -73,7 +65,30 @@ const CMAKE_PARAMS_APPLE: &[(&str, &[(&str, &str)])] = &[
             ("CMAKE_MACOSX_BUNDLE", "OFF"),
         ],
     ),
-    // macOS
+    (
+        "aarch64-apple-tvos",
+        &[
+            ("CMAKE_OSX_ARCHITECTURES", "arm64"),
+            ("CMAKE_OSX_SYSROOT", "appletvos"),
+            ("CMAKE_MACOSX_BUNDLE", "OFF"),
+        ],
+    ),
+    (
+        "aarch64-apple-tvos-sim",
+        &[
+            ("CMAKE_OSX_ARCHITECTURES", "arm64"),
+            ("CMAKE_OSX_SYSROOT", "appletvsimulator"),
+            ("CMAKE_MACOSX_BUNDLE", "OFF"),
+        ],
+    ),
+    (
+        "x86_64-apple-tvos",
+        &[
+            ("CMAKE_OSX_ARCHITECTURES", "x86_64"),
+            ("CMAKE_OSX_SYSROOT", "appletvsimulator"),
+            ("CMAKE_MACOSX_BUNDLE", "OFF"),
+        ],
+    ),
     (
         "aarch64-apple-darwin",
         &[
@@ -112,7 +127,6 @@ fn get_apple_sdk_name(config: &Config) -> &'static str {
     );
 }
 
-/// Returns an absolute path to the BoringSSL source.
 fn get_boringssl_source_path(config: &Config) -> &Path {
     static SOURCE_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -151,8 +165,6 @@ fn get_boringssl_source_path(config: &Config) -> &Path {
             })
             .expect("copying failed. Try running `cargo clean`");
 
-        // NOTE: .git can be both file and dir, depening on whether it was copied from a submodule
-        // or created by the patches code.
         let src_git_path = src_path.join(".git");
         let _ = fs::remove_file(&src_git_path);
         let _ = fs::remove_dir_all(&src_git_path);
@@ -161,14 +173,8 @@ fn get_boringssl_source_path(config: &Config) -> &Path {
     })
 }
 
-/// Returns the platform-specific output path for lib.
-///
-/// MSVC generator on Windows place static libs in a target sub-folder,
-/// so adjust library location based on platform and build target.
-/// See issue: <https://github.com/alexcrichton/cmake-rs/issues/18>
 fn msvc_lib_subdir(config: &Config) -> Option<&'static str> {
     if config.target.ends_with("-msvc") {
-        // Code under this branch should match the logic in cmake-rs
         let debug_env_var = config
             .env
             .debug
@@ -206,9 +212,26 @@ fn msvc_lib_subdir(config: &Config) -> Option<&'static str> {
     }
 }
 
-/// Returns a new `cmake::Config` for building BoringSSL.
-///
-/// It will add platform-specific parameters if needed.
+fn map_build_paths(config: &Config, cmake: &mut cmake::Config) {
+    let source = get_boringssl_source_path(config);
+    let mut maps = vec![(config.out_dir.as_path(), "/build")];
+    if !source.starts_with(&config.out_dir) {
+        maps.push((source, "/build/boringssl"));
+    }
+    for (from, to) in maps {
+        let flag = if config.target_env == "msvc" {
+            format!("\"/d1trimfile:{}\\\\\"", from.display())
+        } else {
+            format!("\"-ffile-prefix-map={}={to}\"", from.display())
+        };
+        cmake.cflag(&flag).cxxflag(&flag);
+    }
+    if config.target_os == "macos" {
+        let min = std::env::var("MACOSX_DEPLOYMENT_TARGET").unwrap_or_else(|_| "11.0".into());
+        cmake.define("CMAKE_OSX_DEPLOYMENT_TARGET", min);
+    }
+}
+
 fn get_boringssl_cmake_config(config: &Config) -> cmake::Config {
     let src_path = get_boringssl_source_path(config);
     let mut boringssl_cmake = cmake::Config::new(src_path);
@@ -217,17 +240,7 @@ fn get_boringssl_cmake_config(config: &Config) -> cmake::Config {
         return boringssl_cmake;
     }
 
-    if config.target == "x86_64-pc-windows-msvc" && config.host != config.target {
-        panic!(
-            "x86_64-pc-windows-msvc source builds require cargo-xwin so CMake receives its Windows/MSVC toolchain; run `cargo xwin build --target x86_64-pc-windows-msvc`"
-        );
-    }
-
     if config.target_os == "windows" {
-        // Explicitly use the non-debug CRT.
-        // This is required now because newest BoringSSL requires CMake 3.22 which
-        // uses the new logic with CMAKE_MSVC_RUNTIME_LIBRARY introduced in CMake 3.15.
-        // https://github.com/rust-lang/cmake-rs/pull/30#issuecomment-2969758499
         if config.target_features.iter().any(|f| f == "crt-static") {
             boringssl_cmake.define("CMAKE_MSVC_RUNTIME_LIBRARY", "MultiThreaded");
         } else {
@@ -247,13 +260,11 @@ fn get_boringssl_cmake_config(config: &Config) -> cmake::Config {
             .define("CMAKE_ASM_COMPILER_TARGET", &config.target);
     }
 
-    if !config.features.fips {
-        if let Some(cc) = &config.env.cc {
-            boringssl_cmake.define("CMAKE_C_COMPILER", cc);
-        }
-        if let Some(cxx) = &config.env.cxx {
-            boringssl_cmake.define("CMAKE_CXX_COMPILER", cxx);
-        }
+    if let Some(cc) = &config.env.cc {
+        boringssl_cmake.define("CMAKE_C_COMPILER", cc);
+    }
+    if let Some(cxx) = &config.env.cxx {
+        boringssl_cmake.define("CMAKE_CXX_COMPILER", cxx);
     }
 
     if let Some(sysroot) = &config.env.sysroot {
@@ -267,10 +278,8 @@ fn get_boringssl_cmake_config(config: &Config) -> cmake::Config {
             .define("CMAKE_ASM_COMPILER_EXTERNAL_TOOLCHAIN", toolchain);
     }
 
-    // Add platform-specific parameters for cross-compilation.
     match &*config.target_os {
         "android" => {
-            // We need ANDROID_NDK_HOME to be set properly.
             let android_ndk_home = config
                 .env
                 .android_ndk_home
@@ -285,7 +294,6 @@ fn get_boringssl_cmake_config(config: &Config) -> cmake::Config {
             eprintln!("android toolchain={toolchain_file}");
             boringssl_cmake.define("CMAKE_TOOLCHAIN_FILE", toolchain_file);
 
-            // 21 is the minimum level tested. You can give higher value.
             boringssl_cmake.define("CMAKE_SYSTEM_VERSION", "21");
             boringssl_cmake.define("CMAKE_ANDROID_STL_TYPE", "c++_shared");
         }
@@ -303,10 +311,8 @@ fn get_boringssl_cmake_config(config: &Config) -> cmake::Config {
                 boringssl_cmake.define(name, value);
             }
 
-            // Bitcode is always on.
             let bitcode_cflag = "-fembed-bitcode";
 
-            // Hack for Xcode 10.1.
             let target_cflag = if config.target_arch == "x86_64" {
                 "-target x86_64-apple-ios-simulator"
             } else {
@@ -318,9 +324,14 @@ fn get_boringssl_cmake_config(config: &Config) -> cmake::Config {
             boringssl_cmake.cflag(&cflag);
         }
 
+        "tvos" => {
+            for (name, value) in cmake_params_apple(config) {
+                eprintln!("tvos arch={} add {}={}", config.target_arch, name, value);
+                boringssl_cmake.define(name, value);
+            }
+        }
+
         "windows" if config.host.contains("windows") => {
-            // BoringSSL's CMakeLists.txt isn't set up for cross-compiling using Visual Studio.
-            // Disable assembly support so that it at least builds.
             boringssl_cmake.define("OPENSSL_NO_ASM", "YES");
         }
 
@@ -328,8 +339,6 @@ fn get_boringssl_cmake_config(config: &Config) -> cmake::Config {
             "x86" => {
                 boringssl_cmake.define(
                     "CMAKE_TOOLCHAIN_FILE",
-                    // `src_path` can be a path relative to the manifest dir, but
-                    // cmake hates that.
                     config
                         .manifest_dir
                         .join(src_path)
@@ -357,7 +366,7 @@ fn get_boringssl_cmake_config(config: &Config) -> cmake::Config {
             }
             _ => {
                 println!(
-                    "cargo:warning=no toolchain file configured by leyline-bssl-sys for {}",
+                    "cargo:warning=no toolchain file configured by boring-sys for {}",
                     config.target
                 );
             }
@@ -371,8 +380,6 @@ fn get_boringssl_cmake_config(config: &Config) -> cmake::Config {
 
 fn pick_best_android_ndk_toolchain(toolchains_dir: &Path) -> io::Result<OsString> {
     let toolchains = std::fs::read_dir(toolchains_dir)?.collect::<Result<Vec<_>, _>>()?;
-    // First look for one of the toolchains that Google has documented.
-    // https://developer.android.com/ndk/guides/other_build_systems
     for known_toolchain in ["linux-x86_64", "darwin-x86_64", "windows-x86_64"] {
         if let Some(toolchain) = toolchains
             .iter()
@@ -381,15 +388,12 @@ fn pick_best_android_ndk_toolchain(toolchains_dir: &Path) -> io::Result<OsString
             return Ok(toolchain.file_name());
         }
     }
-    // Then fall back to any subdirectory, in case Google has added support for a new host.
-    // (Maybe there's a linux-aarch64 toolchain now.)
     if let Some(toolchain) = toolchains
         .into_iter()
         .find(|entry| entry.file_type().map(|ty| ty.is_dir()).unwrap_or(false))
     {
         return Ok(toolchain.file_name());
     }
-    // Finally give up.
     Err(std::io::Error::new(
         std::io::ErrorKind::NotFound,
         "no subdirectories at given path",
@@ -399,22 +403,17 @@ fn pick_best_android_ndk_toolchain(toolchains_dir: &Path) -> io::Result<OsString
 fn get_extra_clang_args_for_bindgen(config: &Config) -> Vec<String> {
     let mut params = Vec::new();
 
-    // Add platform-specific parameters.
     match &*config.target_os {
-        "ios" | "macos" => {
-            // When cross-compiling for Apple targets, tell bindgen to use SDK sysroot,
-            // and *don't* use system headers of the host macOS.
+        "ios" | "macos" | "tvos" => {
             let sdk = get_apple_sdk_name(config);
             match run_command(Command::new("xcrun").args(["--show-sdk-path", "--sdk", sdk])) {
                 Ok(output) => {
                     let sysroot = std::str::from_utf8(&output.stdout).expect("xcrun output");
                     params.push("-isysroot".to_string());
-                    // There is typically a newline at the end which confuses clang.
                     params.push(sysroot.trim_end().to_string());
                 }
                 Err(e) => {
                     println!("cargo:warning={e}");
-                    // Uh... let's try anyway, I guess?
                 }
             }
         }
@@ -436,7 +435,6 @@ fn get_extra_clang_args_for_bindgen(config: &Config) -> Vec<String> {
                 }
                 Err(e) => {
                     println!("cargo:warning=failed to find prebuilt Android NDK toolchain for bindgen: {e}");
-                    // Uh... let's try anyway, I guess?
                 }
             }
         }
@@ -453,14 +451,6 @@ fn ensure_patches_applied(config: &Config) -> io::Result<()> {
             native BoringSSL is expected to have the patches included"
         );
         return Ok(());
-    } else if config.env.source_path.is_some()
-        && (config.features.rpk || config.features.underscore_wildcards)
-    {
-        panic!(
-            "BORING_BSSL_ASSUME_PATCHED must be set when setting
-               BORING_BSSL_SOURCE_PATH and using any of the following
-               features: rpk, underscore-wildcards"
-        );
     }
 
     let mut lock_file = LockFile::open(&config.out_dir.join(".patch_lock"))?;
@@ -469,36 +459,23 @@ fn ensure_patches_applied(config: &Config) -> io::Result<()> {
 
     lock_file.lock()?;
 
-    // init git in the copied files so we can apply patches; stage + commit the
-    // pristine tree so `git apply --3way` has a merge base.
     if !has_git {
         run_command(Command::new("git").arg("init").current_dir(src_path))?;
-        run_command(
-            Command::new("git")
-                .args(["add", "-A"])
-                .current_dir(src_path),
-        )?;
-        run_command(
-            Command::new("git")
-                .args([
-                    "-c",
-                    "user.email=build@example.com",
-                    "-c",
-                    "user.name=leyline build",
-                    "commit",
-                    "-q",
-                    "-m",
-                    "pristine",
-                ])
-                .current_dir(src_path),
-        )?;
     }
 
-    // Single fingerprint patch on the pinned revision: record_size_limit +
-    // delegated_credentials (Firefox), ECDHE-3DES cipher suites (Safari/iOS),
-    // FFDHE named groups (Firefox). ML-DSA (Chrome 150+) is native here.
-    println!("cargo:warning=applying leyline fingerprint patch to boringssl");
-    apply_patch(config, "leyline-fingerprint.patch")?;
+    let mut patches = fs::read_dir(config.manifest_dir.join("patches"))?
+        .map(|entry| entry.map(|e| e.file_name()))
+        .collect::<io::Result<Vec<_>>>()?;
+    patches.retain(|name| {
+        Path::new(name)
+            .extension()
+            .is_some_and(|ext| ext == "patch")
+    });
+    patches.sort();
+    for patch in patches {
+        println!("cargo:rerun-if-changed=patches/{}", patch.to_string_lossy());
+        apply_patch(config, &patch.to_string_lossy())?;
+    }
 
     Ok(())
 }
@@ -515,13 +492,8 @@ fn apply_patch(config: &Config, patch_name: &str) -> io::Result<()> {
     #[cfg(windows)]
     let cmd_path = config.manifest_dir.join("patches").join(patch_name);
 
-    // `--3way` falls back to a 3-way merge (using the patch's index blobs) when
-    // the target revision has drifted, leaving conflict markers and failing the
-    // build on a true conflict — so a revision bump degrades to an actionable
-    // rebase, never a silent mis-apply.
-    let mut args = vec!["apply", "-v", "--whitespace=fix", "--3way"];
+    let mut args = vec!["apply", "-v", "--whitespace=fix"];
 
-    // non-bazel versions of BoringSSL have no src/ dir
     if config.is_bazel {
         args.push("-p2");
     }
@@ -584,17 +556,8 @@ fn build_boringssl_or_get_prebuilt(config: &Config) -> &Path {
             cfg.env("CMAKE_BUILD_PARALLEL_LEVEL", num_jobs);
         }
 
-        if config.features.fips {
-            cfg.define("CMAKE_C_COMPILER", "clang")
-                .define("CMAKE_CXX_COMPILER", "clang++")
-                .define("CMAKE_ASM_COMPILER", "clang")
-                .define("FIPS", "1");
-        }
-
-        cfg.define("CMAKE_POSITION_INDEPENDENT_CODE", "ON");
         cfg.define("BORINGSSL_PREFIX", PREFIX);
-
-        cache::apply(config, &mut cfg);
+        map_build_paths(config, &mut cfg);
 
         cfg.build_target("ssl").build();
         let path = cfg.build_target("crypto").build();
@@ -613,57 +576,15 @@ fn get_cpp_runtime_lib(config: &Config) -> Option<String> {
     }
 
     match &*config.target_os {
-        "macos" | "ios" | "freebsd" | "openbsd" | "android" => Some("c++".into()),
+        "macos" | "ios" | "tvos" | "freebsd" | "openbsd" | "android" => Some("c++".into()),
         _ if config.unix || config.target_env == "gnu" => Some("stdc++".into()),
-        // TODO(rmehra): figure out how to do this for windows
         _ => None,
     }
 }
 
-/// Copies built BoringSSL artifacts (libraries and patched headers) into a
-/// user-specified directory. This is intended for producing a pre-built package.
-///
-/// The destination directory must exist and be empty. Writes:
-///
-///   - `lib/libcrypto.a`
-///   - `lib/libssl.a`
-///   - `lib/bcm.o` (if FIPS is enabled)
-///   - `include/openssl/...` (patched headers)
-fn install_artifacts(
-    config: &Config,
-    install_dir: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let install_dir = match install_dir.canonicalize() {
-        Ok(dir) if dir.read_dir().is_ok_and(|mut d| d.next().is_none()) => dir,
-        dir => {
-            let path = dir.as_deref().unwrap_or(install_dir).display();
-            return Err(format!("{path} must be an empty dir").into());
-        }
-    };
-    let bssl_build_dir = build_boringssl_or_get_prebuilt(config);
-
-    let lib_dir = install_dir.join("lib");
-    fs::create_dir(&lib_dir)?;
-
-    for lib in ["libcrypto.a", "libssl.a", "bcm.o"] {
-        if !config.features.fips && lib == "bcm.o" {
-            continue;
-        }
-        fs::copy(bssl_build_dir.join(lib), lib_dir.join(lib))?;
-    }
-
-    fs_extra::dir::copy(get_include_path(config)?, &install_dir, &Default::default())?;
-
-    eprintln!(
-        "installed BoringSSL artifacts into {}",
-        install_dir.display()
-    );
-    Ok(())
-}
-
 fn main() -> ExitCode {
     if let Err(e) = run() {
-        eprintln!("boring-sys failed: {e}");
+        eprintln!("leyline-bssl-sys failed: {e}");
         println!(
             "cargo::error={}",
             e.to_string().trim_ascii().replace('\n', "\ncargo::error=")
@@ -676,16 +597,12 @@ fn main() -> ExitCode {
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::from_env()?;
+    config.check_supported_target()?;
     ensure_patches_applied(&config)?;
     if !config.env.docs_rs {
         emit_link_directives(&config);
     }
-
     generate_bindings(&config).map_err(|e| format!("could not generate bindings: {e}"))?;
-    if let Some(install_dir) = &config.env.export_to_install_dir {
-        install_artifacts(&config, install_dir)
-            .map_err(|e| format!("install artifacts failed: {e}"))?;
-    }
     Ok(())
 }
 
@@ -693,12 +610,11 @@ fn emit_link_directives(config: &Config) {
     let bssl_dir = build_boringssl_or_get_prebuilt(config);
     let msvc_lib_subdir = msvc_lib_subdir(config);
 
-    let subdirs =
-        if config.is_bazel || (config.features.is_fips_like() && config.env.path.is_some()) {
-            &["lib"][..]
-        } else {
-            &["lib", "crypto", "ssl", ""][..]
-        };
+    let subdirs = if config.is_bazel {
+        &["lib"][..]
+    } else {
+        &["lib", "crypto", "ssl", ""][..]
+    };
 
     for subdir in subdirs {
         let dir = bssl_dir.join(subdir);
@@ -716,7 +632,6 @@ fn emit_link_directives(config: &Config) {
     println!("cargo:rustc-link-lib=static=ssl");
 
     if config.target_os == "windows" {
-        // Rust 1.87.0 compat - https://github.com/rust-lang/rust/pull/138233
         println!("cargo:rustc-link-lib=advapi32");
     }
 }
@@ -754,13 +669,11 @@ fn get_include_path(config: &Config) -> Result<PathBuf, String> {
 fn generate_bindings(config: &Config) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let include_path = get_include_path(config)?;
 
-    // bindgen emits `unsafe extern` blocks only for rust_target >= 1.82
-    // (unsafe_extern_blocks feature); the crate is edition 2024.
     let target_rust_version = bindgen::RustTarget::stable(82, 0)
         .map_err(|e| format!("bindgen does not recognize target rust version: {e}"))?;
 
     let mut builder = bindgen::Builder::default()
-        .rust_target(target_rust_version) // bindgen MSRV is 1.70, so this is enough
+        .rust_target(target_rust_version)
         .derive_copy(true)
         .derive_debug(true)
         .derive_default(true)
@@ -777,8 +690,7 @@ fn generate_bindings(config: &Config) -> Result<PathBuf, Box<dyn std::error::Err
         .layout_tests(config.env.debug.is_some())
         .merge_extern_blocks(true)
         .prepend_enum_name(true)
-        .blocklist_type("max_align_t") // Not supported by bindgen on all targets, not used by BoringSSL
-        .clang_arg(format!("--target={}", config.target))
+        .blocklist_type("max_align_t")
         .clang_args(get_extra_clang_args_for_bindgen(config))
         .clang_arg("-I")
         .clang_arg(include_path.display().to_string());
@@ -788,7 +700,6 @@ fn generate_bindings(config: &Config) -> Result<PathBuf, Box<dyn std::error::Err
             .clang_arg("--sysroot")
             .clang_arg(sysroot.display().to_string());
 
-        // we need to add special platform header file with env for support cross building
         let target_include_dir = sysroot.join(format!(
             "usr/include/{}-{}-{}",
             config.target_arch, config.target_os, config.target_env
@@ -831,6 +742,7 @@ fn generate_bindings(config: &Config) -> Result<PathBuf, Box<dyn std::error::Err
         "hrss.h",
         "md4.h",
         "md5.h",
+        "mldsa.h",
         "mlkem.h",
         "obj_mac.h",
         "objects.h",
@@ -871,7 +783,6 @@ fn generate_bindings(config: &Config) -> Result<PathBuf, Box<dyn std::error::Err
     Ok(bindings_path)
 }
 
-/// err.h has anonymous `enum { ERR_LIB_NONE = 1 }`, which makes a dodgy `_bindgen_ty_1` name
 fn ensure_err_lib_enum_is_named(source_code: &mut Vec<u8>) {
     let src = String::from_utf8_lossy(source_code);
     let enum_type = src

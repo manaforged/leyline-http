@@ -1,20 +1,3 @@
-//! Add extensions to an `X509` certificate or certificate request.
-//!
-//! The extensions defined for X.509 v3 certificates provide methods for
-//! associating additional attributes with users or public keys and for
-//! managing relationships between CAs. The extensions created using this
-//! module can be used with `X509v3Context` objects.
-//!
-//! # Example
-//!
-//! ```rust
-//! use leyline_bssl::x509::extension::BasicConstraints;
-//! use leyline_bssl::x509::X509Extension;
-//!
-//! let mut bc = BasicConstraints::new();
-//! let bc = bc.critical().ca().pathlen(1);
-//! let extension: X509Extension = bc.build().unwrap();
-//! ```
 use std::fmt::Write;
 
 use crate::asn1::Asn1Object;
@@ -23,7 +6,6 @@ use crate::nid::Nid;
 use crate::x509::{GeneralName, Stack, X509Extension, X509v3Context};
 use foreign_types::ForeignType;
 
-/// An extension which indicates whether a certificate is a CA certificate.
 pub struct BasicConstraints {
     critical: bool,
     ca: bool,
@@ -37,7 +19,6 @@ impl Default for BasicConstraints {
 }
 
 impl BasicConstraints {
-    /// Construct a new `BasicConstraints` extension.
     #[must_use]
     pub fn new() -> BasicConstraints {
         BasicConstraints {
@@ -47,26 +28,21 @@ impl BasicConstraints {
         }
     }
 
-    /// Sets the `critical` flag to `true`. The extension will be critical.
     pub fn critical(&mut self) -> &mut BasicConstraints {
         self.critical = true;
         self
     }
 
-    /// Sets the `ca` flag to `true`.
     pub fn ca(&mut self) -> &mut BasicConstraints {
         self.ca = true;
         self
     }
 
-    /// Sets the pathlen to an optional non-negative value. The pathlen is the
-    /// maximum number of CAs that can appear below this one in a chain.
     pub fn pathlen(&mut self, pathlen: u32) -> &mut BasicConstraints {
         self.pathlen = Some(pathlen);
         self
     }
 
-    /// Return the `BasicConstraints` extension as an `X509Extension`.
     pub fn build(&self) -> Result<X509Extension, ErrorStack> {
         let mut value = String::new();
         if self.critical {
@@ -79,13 +55,12 @@ impl BasicConstraints {
             value.push_str("FALSE");
         }
         if let Some(pathlen) = self.pathlen {
-            write!(value, ",pathlen:{pathlen}").unwrap();
+            write!(value, ",pathlen:{pathlen}").map_err(ErrorStack::internal_error)?;
         }
         X509Extension::new_nid(None, None, Nid::BASIC_CONSTRAINTS, &value)
     }
 }
 
-/// An extension consisting of a list of names of the permitted key usages.
 pub struct KeyUsage {
     critical: bool,
     digital_signature: bool,
@@ -106,7 +81,6 @@ impl Default for KeyUsage {
 }
 
 impl KeyUsage {
-    /// Construct a new `KeyUsage` extension.
     #[must_use]
     pub fn new() -> KeyUsage {
         KeyUsage {
@@ -123,67 +97,56 @@ impl KeyUsage {
         }
     }
 
-    /// Sets the `critical` flag to `true`. The extension will be critical.
     pub fn critical(&mut self) -> &mut KeyUsage {
         self.critical = true;
         self
     }
 
-    /// Sets the `digitalSignature` flag to `true`.
     pub fn digital_signature(&mut self) -> &mut KeyUsage {
         self.digital_signature = true;
         self
     }
 
-    /// Sets the `nonRepudiation` flag to `true`.
     pub fn non_repudiation(&mut self) -> &mut KeyUsage {
         self.non_repudiation = true;
         self
     }
 
-    /// Sets the `keyEncipherment` flag to `true`.
     pub fn key_encipherment(&mut self) -> &mut KeyUsage {
         self.key_encipherment = true;
         self
     }
 
-    /// Sets the `dataEncipherment` flag to `true`.
     pub fn data_encipherment(&mut self) -> &mut KeyUsage {
         self.data_encipherment = true;
         self
     }
 
-    /// Sets the `keyAgreement` flag to `true`.
     pub fn key_agreement(&mut self) -> &mut KeyUsage {
         self.key_agreement = true;
         self
     }
 
-    /// Sets the `keyCertSign` flag to `true`.
     pub fn key_cert_sign(&mut self) -> &mut KeyUsage {
         self.key_cert_sign = true;
         self
     }
 
-    /// Sets the `cRLSign` flag to `true`.
     pub fn crl_sign(&mut self) -> &mut KeyUsage {
         self.crl_sign = true;
         self
     }
 
-    /// Sets the `encipherOnly` flag to `true`.
     pub fn encipher_only(&mut self) -> &mut KeyUsage {
         self.encipher_only = true;
         self
     }
 
-    /// Sets the `decipherOnly` flag to `true`.
     pub fn decipher_only(&mut self) -> &mut KeyUsage {
         self.decipher_only = true;
         self
     }
 
-    /// Return the `KeyUsage` extension as an `X509Extension`.
     pub fn build(&self) -> Result<X509Extension, ErrorStack> {
         let mut value = String::new();
         let mut first = true;
@@ -221,8 +184,6 @@ impl KeyUsage {
     }
 }
 
-/// An extension consisting of a list of usages indicating purposes
-/// for which the certificate public key can be used for.
 pub struct ExtendedKeyUsage {
     critical: bool,
     items: Vec<String>,
@@ -235,7 +196,6 @@ impl Default for ExtendedKeyUsage {
 }
 
 impl ExtendedKeyUsage {
-    /// Construct a new `ExtendedKeyUsage` extension.
     #[must_use]
     pub fn new() -> ExtendedKeyUsage {
         ExtendedKeyUsage {
@@ -244,69 +204,56 @@ impl ExtendedKeyUsage {
         }
     }
 
-    /// Sets the `critical` flag to `true`. The extension will be critical.
     pub fn critical(&mut self) -> &mut ExtendedKeyUsage {
         self.critical = true;
         self
     }
 
-    /// Sets the `serverAuth` flag to `true`.
     pub fn server_auth(&mut self) -> &mut ExtendedKeyUsage {
         self.other("serverAuth")
     }
 
-    /// Sets the `clientAuth` flag to `true`.
     pub fn client_auth(&mut self) -> &mut ExtendedKeyUsage {
         self.other("clientAuth")
     }
 
-    /// Sets the `codeSigning` flag to `true`.
     pub fn code_signing(&mut self) -> &mut ExtendedKeyUsage {
         self.other("codeSigning")
     }
 
-    /// Sets the `timeStamping` flag to `true`.
     pub fn time_stamping(&mut self) -> &mut ExtendedKeyUsage {
         self.other("timeStamping")
     }
 
-    /// Sets the `msCodeInd` flag to `true`.
     pub fn ms_code_ind(&mut self) -> &mut ExtendedKeyUsage {
         self.other("msCodeInd")
     }
 
-    /// Sets the `msCodeCom` flag to `true`.
     pub fn ms_code_com(&mut self) -> &mut ExtendedKeyUsage {
         self.other("msCodeCom")
     }
 
-    /// Sets the `msCTLSign` flag to `true`.
     pub fn ms_ctl_sign(&mut self) -> &mut ExtendedKeyUsage {
         self.other("msCTLSign")
     }
 
-    /// Sets the `msSGC` flag to `true`.
     pub fn ms_sgc(&mut self) -> &mut ExtendedKeyUsage {
         self.other("msSGC")
     }
 
-    /// Sets the `msEFS` flag to `true`.
     pub fn ms_efs(&mut self) -> &mut ExtendedKeyUsage {
         self.other("msEFS")
     }
 
-    /// Sets the `nsSGC` flag to `true`.
     pub fn ns_sgc(&mut self) -> &mut ExtendedKeyUsage {
         self.other("nsSGC")
     }
 
-    /// Sets a flag not already defined.
     pub fn other(&mut self, other: &str) -> &mut ExtendedKeyUsage {
         self.items.push(other.to_string());
         self
     }
 
-    /// Return the `ExtendedKeyUsage` extension as an `X509Extension`.
     pub fn build(&self) -> Result<X509Extension, ErrorStack> {
         let mut stack = Stack::new()?;
         for item in &self.items {
@@ -318,8 +265,6 @@ impl ExtendedKeyUsage {
     }
 }
 
-/// An extension that provides a means of identifying certificates that contain a
-/// particular public key.
 pub struct SubjectKeyIdentifier {
     critical: bool,
 }
@@ -331,19 +276,16 @@ impl Default for SubjectKeyIdentifier {
 }
 
 impl SubjectKeyIdentifier {
-    /// Construct a new `SubjectKeyIdentifier` extension.
     #[must_use]
     pub fn new() -> SubjectKeyIdentifier {
         SubjectKeyIdentifier { critical: false }
     }
 
-    /// Sets the `critical` flag to `true`. The extension will be critical.
     pub fn critical(&mut self) -> &mut SubjectKeyIdentifier {
         self.critical = true;
         self
     }
 
-    /// Return a `SubjectKeyIdentifier` extension as an `X509Extension`.
     pub fn build(&self, ctx: &X509v3Context) -> Result<X509Extension, ErrorStack> {
         let mut value = String::new();
         let mut first = true;
@@ -353,8 +295,6 @@ impl SubjectKeyIdentifier {
     }
 }
 
-/// An extension that provides a means of identifying the public key corresponding
-/// to the private key used to sign a CRL.
 pub struct AuthorityKeyIdentifier {
     critical: bool,
     keyid: Option<bool>,
@@ -368,7 +308,6 @@ impl Default for AuthorityKeyIdentifier {
 }
 
 impl AuthorityKeyIdentifier {
-    /// Construct a new `AuthorityKeyIdentifier` extension.
     #[must_use]
     pub fn new() -> AuthorityKeyIdentifier {
         AuthorityKeyIdentifier {
@@ -378,25 +317,21 @@ impl AuthorityKeyIdentifier {
         }
     }
 
-    /// Sets the `critical` flag to `true`. The extension will be critical.
     pub fn critical(&mut self) -> &mut AuthorityKeyIdentifier {
         self.critical = true;
         self
     }
 
-    /// Sets the `keyid` flag.
     pub fn keyid(&mut self, always: bool) -> &mut AuthorityKeyIdentifier {
         self.keyid = Some(always);
         self
     }
 
-    /// Sets the `issuer` flag.
     pub fn issuer(&mut self, always: bool) -> &mut AuthorityKeyIdentifier {
         self.issuer = Some(always);
         self
     }
 
-    /// Return a `AuthorityKeyIdentifier` extension as an `X509Extension`.
     pub fn build(&self, ctx: &X509v3Context) -> Result<X509Extension, ErrorStack> {
         let mut value = String::new();
         let mut first = true;
@@ -423,8 +358,6 @@ enum RustGeneralName {
     Rid(String),
 }
 
-/// An extension that allows additional identities to be bound to the subject
-/// of the certificate.
 pub struct SubjectAlternativeName {
     critical: bool,
     items: Vec<RustGeneralName>,
@@ -437,7 +370,6 @@ impl Default for SubjectAlternativeName {
 }
 
 impl SubjectAlternativeName {
-    /// Construct a new `SubjectAlternativeName` extension.
     #[must_use]
     pub fn new() -> SubjectAlternativeName {
         SubjectAlternativeName {
@@ -446,45 +378,36 @@ impl SubjectAlternativeName {
         }
     }
 
-    /// Sets the `critical` flag to `true`. The extension will be critical.
     pub fn critical(&mut self) -> &mut SubjectAlternativeName {
         self.critical = true;
         self
     }
 
-    /// Sets the `email` flag.
     pub fn email(&mut self, email: &str) -> &mut SubjectAlternativeName {
-        self.items.push(RustGeneralName::Email(email.to_string()));
+        self.items.push(RustGeneralName::Email(email.to_owned()));
         self
     }
 
-    /// Sets the `uri` flag.
     pub fn uri(&mut self, uri: &str) -> &mut SubjectAlternativeName {
-        self.items.push(RustGeneralName::Uri(uri.to_string()));
+        self.items.push(RustGeneralName::Uri(uri.to_owned()));
         self
     }
 
-    /// Sets the `dns` flag.
     pub fn dns(&mut self, dns: &str) -> &mut SubjectAlternativeName {
-        self.items.push(RustGeneralName::Dns(dns.to_string()));
+        self.items.push(RustGeneralName::Dns(dns.to_owned()));
         self
     }
 
-    /// Sets the `rid` flag.
     pub fn rid(&mut self, rid: &str) -> &mut SubjectAlternativeName {
-        self.items.push(RustGeneralName::Rid(rid.to_string()));
+        self.items.push(RustGeneralName::Rid(rid.to_owned()));
         self
     }
 
-    /// Sets the `ip` flag.
     pub fn ip(&mut self, ip: &str) -> &mut SubjectAlternativeName {
-        self.items.push(RustGeneralName::Ip(ip.to_string()));
+        self.items.push(RustGeneralName::Ip(ip.to_owned()));
         self
     }
 
-    /// Sets the `dirName` flag.
-    ///
-    /// Not currently actually supported, always panics.
     #[deprecated = "dir_name is deprecated and always panics. Please file a bug if you have a use case for this."]
     pub fn dir_name(&mut self, _dir_name: &str) -> &mut SubjectAlternativeName {
         unimplemented!(
@@ -492,9 +415,6 @@ impl SubjectAlternativeName {
         );
     }
 
-    /// Sets the `otherName` flag.
-    ///
-    /// Not currently actually supported, always panics.
     #[deprecated = "other_name is deprecated and always panics. Please file a bug if you have a use case for this."]
     pub fn other_name(&mut self, _other_name: &str) -> &mut SubjectAlternativeName {
         unimplemented!(
@@ -502,7 +422,6 @@ impl SubjectAlternativeName {
         );
     }
 
-    /// Return a `SubjectAlternativeName` extension as an `X509Extension`.
     pub fn build(&self, _ctx: &X509v3Context<'_>) -> Result<X509Extension, ErrorStack> {
         let mut stack = Stack::new()?;
         for item in &self.items {

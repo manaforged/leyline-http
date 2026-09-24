@@ -60,28 +60,24 @@ case "$uname_s" in
     *)                 triple="" ;;
 esac
 
-prebuilt_dir="crates/leyline-bssl-sys/native/$triple/lib"
-if [[ -n "$triple" ]] \
-    && { [[ -f "$prebuilt_dir/ssl.lib" ]] || [[ -f "$prebuilt_dir/libssl.a" ]]; }; then
-    ok "prebuilt BoringSSL shim found for $triple — no CMake/Perl/libclang/Go needed"
-else
-    warn "no prebuilt BoringSSL shim for target '${triple:-$uname_s/$uname_m}'"
-    echo "  The in-workspace build will fail for this target. To proceed:"
-    echo "    - set BORING_BSSL_PATH to a BoringSSL build for it, OR"
-    echo "    - source-build via: (cd crates/leyline-bssl-sys && cargo build --features source-build)."
-    echo "  Source build needs these tools:"
-    case "$uname_s" in
-        Darwin)  need cmake || warn "install with: brew install cmake"
-                 need perl  || warn "install Xcode command line tools and Perl" ;;
-        Linux)   need cmake || warn "Debian/Ubuntu: sudo apt-get install cmake"
-                 need perl  || warn "Debian/Ubuntu: sudo apt-get install perl"
-                 need pkg-config || warn "Debian/Ubuntu: sudo apt-get install pkg-config" ;;
-        Windows|MINGW*|MSYS*|CYGWIN*)
-                 need cmake || warn "install Visual Studio Build Tools or CMake"
-                 need perl  || warn "install Strawberry Perl" ;;
-        *)       need cmake || true; need perl || true ;;
-    esac
-fi
+case "$triple" in
+    aarch64-apple-darwin|x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu|x86_64-pc-windows-msvc)
+        ok "supported target: $triple" ;;
+    *)  warn "unsupported target '${triple:-$uname_s/$uname_m}'; the leyline-bssl-sys build will stop" ;;
+esac
+echo "  leyline-bssl-sys builds BoringSSL from source. It needs:"
+case "$uname_s" in
+    Darwin)  need cmake || warn "install with: brew install cmake"
+             need clang || warn "install the Xcode Command Line Tools" ;;
+    Linux)   need cmake || warn "Debian/Ubuntu: sudo apt-get install cmake"
+             need c++   || warn "Debian/Ubuntu: sudo apt-get install build-essential"
+             need clang || warn "Debian/Ubuntu: sudo apt-get install clang libclang-dev" ;;
+    Windows|MINGW*|MSYS*|CYGWIN*)
+             need cmake || warn "install Visual Studio Build Tools with C++ CMake tools"
+             need nasm  || warn "install NASM: choco install nasm"
+             need clang || warn "install LLVM for libclang: choco install llvm" ;;
+    *)       need cmake || true ;;
+esac
 ok "prerequisite scan complete"
 
 step "fast offline build"

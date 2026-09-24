@@ -1,78 +1,90 @@
-# BoringSSL prebuilt provenance
+# BoringSSL provenance
 
-`native/CHECKSUMS` pins the committed `native/` libraries and
-`src/bindings/` files. Verify a checkout with `sha256sum -c native/CHECKSUMS`
-from this directory. A rebuild from source can differ across hosts and
-toolchains; run `scripts/package-bssl.sh --verify` and commit the new
-checksums when the artifacts change.
+## Upstream base
 
-## Source revision
+`leyline-bssl-sys`, `leyline-bssl`, and `leyline-bssl-tokio` are trimmed forks
+of Cloudflare's `boring-sys`, `boring`, and `tokio-boring`:
 
-- BoringSSL commit `3a9254f16eda7a4c5d2260039ff23456a0a34de4`
-- Upstream anchor: the `boringssl_revision` pinned by Chromium's DEPS at
-  tag `150.0.7871.26` (the Chrome 150 TLS stack, verbatim)
-- ML-DSA TLS signature algorithms are native at this revision (no patch
-  needed)
+- Repository: https://github.com/cloudflare/boring
+- Tag: `v5.2.0`
+- Commit: `6fdd0a54e81a1eecc76e587c685439d3f2ffdd09`
 
-## Symbol prefixing
+Changes from upstream:
 
-Every shipped library is built with `-DBORINGSSL_PREFIX=LEYLINE`, so each
-export is `LEYLINE_<name>` and a downstream crate can link `openssl-sys`
-or `boring-sys` into the same binary. The generated bindings keep the
-plain Rust identifier and carry `#[link_name]` for the prefixed export.
-Prefixing is not optional; there is no `prefix-symbols` feature.
+- Crates renamed. `leyline-bssl-sys` declares `links = "leyline_bssl"`.
+- Removed features: `fips`, `rpk`, `mlkem`, `mldsa`, `prf`, `credential`,
+  `pq-experimental`, `underscore-wildcards`, `relax-cert-validation`,
+  `allow-crl-extensions-bad-version`, and `legacy-compat-deprecated`.
+- Removed modules that Leyline does not use: `aead`, `aes`, `base64`,
+  `ecdsa`, `fips`, `memcmp`, `mldsa`, `mlkem`, `pkcs12`, `pkcs5`, `prf`,
+  `rand`, `sha`, `sign`, and `ssl::credential`.
+- Removed the upstream BoringSSL patches (`boring-pq`, `rpk`,
+  `underscore-wildcards`, `relax-cert-validation`, `bad-cert-verification`)
+  and the `BORING_BSSL_INSTALL_DIR` export.
+- Added wrappers: `SslContextBuilder::{set_sigalgs, set_record_size_limit,
+  set_delegated_credentials, set_extension_order, set_tls13_cipher_order}`,
+  `SslRef::{set_requested_trust_anchors, add_application_settings,
+  set_alps_use_new_codepoint}`, `SslConnector::bare_builder`, and
+  `CertificateCompressionAlgorithm::ZSTD`.
+- The build sets `BORINGSSL_PREFIX=LEYLINE`, maps build paths, and stops on
+  an unsupported target.
+- Edition 2021 is kept from upstream.
 
-`scripts/package-bssl.sh` fails the package if an unprefixed
-OpenSSL-style export survives.
+## BoringSSL revision
 
-Targets regenerated with the prefix:
-
-| Target | Prefixed | Date |
-| --- | --- | --- |
-| aarch64-apple-darwin | yes | 2026-09-01 (Apple clang, cmake 4, macOS 15 arm64) |
-| x86_64-unknown-linux-gnu | yes | quay.io/centos/centos:stream9, glibc 2.34, gcc 11.5.0, clang 22.1.8, cmake 3.31.8, go 1.26.7, ninja 1.10.2, rustc 1.98.1 |
-| aarch64-unknown-linux-gnu | yes | ubuntu-24.04-arm |
-| x86_64-pc-windows-msvc | yes | windows-2025, MSVC |
+- Commit `3a9254f16eda7a4c5d2260039ff23456a0a34de4`, vendored as the
+  `deps/boringssl` submodule.
+- It is the `boringssl_revision` in Chromium's DEPS at tag `150.0.7871.26`.
+  Cloudflare v5.2.0 pins `e2a57cfb4d915b4ba820585aef9fdee7bca13fe5`, 30
+  commits older. Leyline keeps the Chrome revision so that the TLS wire
+  output stays the same.
 
 ## Carried patches
 
-Applied by `build/main.rs` `ensure_patches_applied` over a fresh
-checkout of the source revision (`git apply --3way --whitespace=fix`):
+`build/main.rs` applies every `patches/*.patch` in name order with
+`git apply --whitespace=fix` to a copy of the source in `OUT_DIR`:
 
-- `patches/leyline-fingerprint.patch` — see its own SHA-256 in
-  `native/CHECKSUMS`:
-  - record_size_limit + delegated_credentials extensions (Firefox)
-  - ECDHE-ECDSA/RSA 3DES cipher suites (Safari/iOS)
-  - FFDHE2048/3072 named groups (Firefox)
-  - `include/openssl/prefix_symbols.h` entries for the five new exports,
-    so `-DBORINGSSL_PREFIX` renames them too
+1. `0001-leyline-fingerprint.patch`
+   - `SSL_CTX_set_record_size_limit` and `SSL_set_record_size_limit`
+     (RFC 8449).
+   - `SSL_CTX_set_delegated_credentials` (RFC 9345).
+   - `SSL_CTX_set_extension_order` and `SSL_CTX_set_tls13_cipher_order`.
+   - The ECDHE-ECDSA and ECDHE-RSA 3DES cipher suites.
+   - The FFDHE2048 and FFDHE3072 groups.
+   - Duplicate signature algorithms are allowed in the preference list.
+   - `prefix_symbols.h` entries for the new exports.
 
-## Reproduction
+   These changes first shipped in 0x676e67's `btls` and `boring2` forks
+   (https://github.com/0x676e67/btls).
+2. `0002-leyline-symbol-prefix.patch`
+   - Renames the `ssl_st` and `ssl_session_st` C++ structs to
+     `LEYLINE_ssl_st` and `LEYLINE_ssl_session_st`. Their destructors are
+     then prefixed too.
+   - Runs the Go symbol-prefix audit only when Go is installed, so the
+     build does not need Go.
 
-Run `scripts/package-bssl.sh` on a host of each target (see the script
-header for per-target prereqs; Windows/MSVC cross-builds via cargo-xwin
-from any host). The script strips and installs
-`native/<target>/lib/*.a|*.lib` plus `src/bindings/<target>.rs`; commit
-the output together with an updated `native/CHECKSUMS`.
+## Symbol prefix
 
-## How to regenerate
+Every C export is `LEYLINE_<name>`. BoringSSL's C++ code is in the
+`bssl::LEYLINE` namespace, and patch 0002 renames the two global C++
+structs. The generated bindings carry `#[link_name]` for the prefixed
+exports. The remaining unprefixed globals are C++ standard library and
+compiler support symbols (weak or COMDAT), which do not clash.
 
-The `prebuilt-rebuild` workflow builds the Linux and Windows targets. It is
-`workflow_dispatch` only, so dispatch it deliberately.
+## Build
 
-1. Dispatch `.github/workflows/prebuilt-rebuild.yml`. Leave `targets` at `all`,
-   or pass one triple to rebuild a single target.
-2. Download the `bssl-prebuilt-<target>` artifacts from the finished run.
-3. Copy each artifact over `native/<target>/lib/` and
-   `src/bindings/<target>.rs`.
-4. Regenerate `native/CHECKSUMS` from the new files. The `sha256-<target>.txt`
-   in each artifact records what the runner produced; compare it against the
-   copied files before you trust them.
-5. Run `scripts/package-bssl.sh --verify`, then commit the libs, the bindings,
-   and `native/CHECKSUMS` together.
+The build compiles BoringSSL from source with CMake and runs `bindgen`.
+It needs CMake 3.22 or later, a C and C++ compiler, and libclang. On
+Windows it also needs the MSVC build tools and NASM.
+
+- Build paths: `-ffile-prefix-map` (MSVC: `/d1trimfile`) maps `OUT_DIR` to
+  `/build`, and the source tree to `/build/boringssl`.
+- macOS: `CMAKE_OSX_DEPLOYMENT_TARGET` comes from
+  `MACOSX_DEPLOYMENT_TARGET`, or 11.0.
+- MSVC: `+crt-static` selects the static CRT (`MultiThreaded`).
 
 ## crates.io packaging
 
-The publish include list ships these artifacts to every user; the
-resulting `.crate` must stay under crates.io's 10 MB cap. Re-measure after
-any rebuild.
+The `.crate` ships the BoringSSL sources that the build needs, not binaries.
+Measure its size with `cargo package --no-verify` before a release. The
+crates.io limit is 10 MiB.

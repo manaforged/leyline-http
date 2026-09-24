@@ -57,17 +57,15 @@ fn transport_eof(msg: &str) -> bool {
 }
 
 impl TlsError {
-    pub(crate) fn from_ssl(e: leyline_bssl::ssl::Error) -> Self {
-        match e.into_io_error() {
-            Ok(e) => Self::HandshakeIo(e),
-            Err(e) => {
-                let msg = e.to_string();
-                if transport_eof(&msg) {
-                    Self::HandshakeIo(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, msg))
-                } else {
-                    Self::Handshake(msg)
-                }
-            }
+    pub(crate) fn from_handshake<S>(e: &leyline_bssl_tokio::HandshakeError<S>) -> Self {
+        if let Some(io) = e.as_io_error() {
+            return Self::HandshakeIo(std::io::Error::new(io.kind(), io.to_string()));
+        }
+        let msg = e.to_string();
+        if transport_eof(&msg) {
+            Self::HandshakeIo(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, msg))
+        } else {
+            Self::Handshake(msg)
         }
     }
 

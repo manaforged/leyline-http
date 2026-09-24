@@ -125,11 +125,9 @@ async fn spawn_tls_server(chain: &Chain) -> SocketAddr {
                 return;
             };
             let ssl = leyline_bssl::ssl::Ssl::new(acceptor.context()).unwrap();
-            let mut stream = match leyline_bssl_tokio::SslStream::new(ssl, tcp) {
-                Ok(s) => s,
-                Err(_) => continue,
-            };
-            let _ = std::pin::Pin::new(&mut stream).accept().await;
+            let _ = leyline_bssl_tokio::SslStreamBuilder::new(ssl, tcp)
+                .accept()
+                .await;
         }
     });
 

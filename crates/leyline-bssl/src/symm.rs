@@ -1,57 +1,3 @@
-//! High level interface to certain symmetric ciphers.
-//!
-//! # Examples
-//!
-//! Encrypt data in AES128 CBC mode
-//!
-//! ```
-//! use leyline_bssl::symm::{encrypt, Cipher};
-//!
-//! let cipher = Cipher::aes_128_cbc();
-//! let data = b"Some Crypto Text";
-//! let key = b"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0A\x0B\x0C\x0D\x0E\x0F";
-//! let iv = b"\x00\x01\x02\x03\x04\x05\x06\x07\x00\x01\x02\x03\x04\x05\x06\x07";
-//! let ciphertext = encrypt(
-//!     cipher,
-//!     key,
-//!     Some(iv),
-//!     data).unwrap();
-//!
-//! assert_eq!(
-//!     b"\xB4\xB9\xE7\x30\xD6\xD6\xF7\xDE\x77\x3F\x1C\xFF\xB3\x3E\x44\x5A\x91\xD7\x27\x62\x87\x4D\
-//!       \xFB\x3C\x5E\xC4\x59\x72\x4A\xF4\x7C\xA1",
-//!     &ciphertext[..]);
-//! ```
-//!
-//! Encrypting an asymmetric key with a symmetric cipher
-//!
-//! ```
-//! use leyline_bssl::rsa::{Padding, Rsa};
-//! use leyline_bssl::symm::Cipher;
-//!
-//! // Generate keypair and encrypt private key:
-//! let keypair = Rsa::generate(2048).unwrap();
-//! let cipher = Cipher::aes_256_cbc();
-//! let pubkey_pem = keypair.public_key_to_pem_pkcs1().unwrap();
-//! let privkey_pem = keypair.private_key_to_pem_passphrase(cipher, b"Rust").unwrap();
-//! // pubkey_pem and privkey_pem could be written to file here.
-//!
-//! // Load private and public key from string:
-//! let pubkey = Rsa::public_key_from_pem_pkcs1(&pubkey_pem).unwrap();
-//! let privkey = Rsa::private_key_from_pem_passphrase(&privkey_pem, b"Rust").unwrap();
-//!
-//! // Use the asymmetric keys to encrypt and decrypt a short message:
-//! let msg = b"Foo bar";
-//! let mut encrypted = vec![0; pubkey.size() as usize];
-//! let mut decrypted = vec![0; privkey.size() as usize];
-//! let len = pubkey.public_encrypt(msg, &mut encrypted, Padding::PKCS1).unwrap();
-//! assert!(len > msg.len());
-//! let len = privkey.private_decrypt(&encrypted, &mut decrypted, Padding::PKCS1).unwrap();
-//! let output_string = String::from_utf8(decrypted[..len].to_vec()).unwrap();
-//! assert_eq!("Foo bar", output_string);
-//! println!("Decrypted: '{}'", output_string);
-//! ```
-
 use crate::ffi;
 use foreign_types::ForeignTypeRef;
 use openssl_macros::corresponds;
@@ -77,8 +23,6 @@ foreign_type_and_impl_send_sync! {
 }
 
 impl CipherCtxRef {
-    /// Configures CipherCtx for a fresh encryption operation using `cipher`.
-    ///
     #[corresponds(EVP_EncryptInit_ex)]
     pub fn init_encrypt(
         &mut self,
@@ -96,7 +40,6 @@ impl CipherCtxRef {
             cvt(ffi::EVP_EncryptInit_ex(
                 self.as_ptr(),
                 cipher.as_ptr(),
-                // ENGINE api is deprecated
                 ptr::null_mut(),
                 key.as_ptr(),
                 iv.as_ptr(),
@@ -104,8 +47,6 @@ impl CipherCtxRef {
         }
     }
 
-    /// Configures CipherCtx for a fresh decryption operation using `cipher`.
-    ///
     #[corresponds(EVP_DecryptInit_ex)]
     pub fn init_decrypt(
         &mut self,
@@ -123,7 +64,6 @@ impl CipherCtxRef {
             cvt(ffi::EVP_DecryptInit_ex(
                 self.as_ptr(),
                 cipher.as_ptr(),
-                // ENGINE api is deprecated
                 ptr::null_mut(),
                 key.as_ptr(),
                 iv.as_ptr(),
@@ -132,16 +72,10 @@ impl CipherCtxRef {
     }
 }
 
-/// Represents a particular cipher algorithm.
-///
-/// See OpenSSL doc at [`EVP_EncryptInit`] for more information on each algorithms.
-///
-/// [`EVP_EncryptInit`]: https://www.openssl.org/docs/man1.1.0/crypto/EVP_EncryptInit.html
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Cipher(*const ffi::EVP_CIPHER);
 
 impl Cipher {
-    /// Looks up the cipher for a certain nid.
     #[corresponds(EVP_get_cipherbynid)]
     #[must_use]
     pub fn from_nid(nid: Nid) -> Option<Cipher> {
@@ -253,11 +187,6 @@ impl Cipher {
         unsafe { Cipher(ffi::EVP_rc4()) }
     }
 
-    /// Creates a `Cipher` from a raw pointer to its OpenSSL type.
-    ///
-    /// # Safety
-    ///
-    /// The caller must ensure the pointer is valid for the `'static` lifetime.
     #[must_use]
     pub unsafe fn from_ptr(ptr: *const ffi::EVP_CIPHER) -> Cipher {
         Cipher(ptr)
@@ -269,36 +198,31 @@ impl Cipher {
         self.0
     }
 
-    /// Returns the length of keys used with this cipher.
     #[allow(clippy::trivially_copy_pass_by_ref)]
     #[must_use]
     pub fn key_len(&self) -> usize {
         unsafe { EVP_CIPHER_key_length(self.0) as usize }
     }
 
-    /// Returns the length of the IV used with this cipher, or `None` if the
-    /// cipher does not use an IV.
     #[allow(clippy::trivially_copy_pass_by_ref)]
     #[must_use]
     pub fn iv_len(&self) -> Option<usize> {
         unsafe {
             let len = EVP_CIPHER_iv_length(self.0) as usize;
-            if len == 0 { None } else { Some(len) }
+            if len == 0 {
+                None
+            } else {
+                Some(len)
+            }
         }
     }
 
-    /// Returns the block size of the cipher.
-    ///
-    /// # Note
-    ///
-    /// Stream ciphers such as RC4 have a block size of 1.
     #[allow(clippy::trivially_copy_pass_by_ref)]
     #[must_use]
     pub fn block_size(&self) -> usize {
         unsafe { EVP_CIPHER_block_size(self.0) as usize }
     }
 
-    /// Returns the cipher's NID.
     #[corresponds(EVP_CIPHER_nid)]
     pub fn nid(&self) -> Nid {
         ffi::init();
@@ -310,66 +234,6 @@ impl Cipher {
 unsafe impl Sync for Cipher {}
 unsafe impl Send for Cipher {}
 
-/// Represents a symmetric cipher context.
-///
-/// Padding is enabled by default.
-///
-/// # Examples
-///
-/// Encrypt some plaintext in chunks, then decrypt the ciphertext back into plaintext, in AES 128
-/// CBC mode.
-///
-/// ```
-/// use leyline_bssl::symm::{Cipher, Mode, Crypter};
-///
-/// let plaintexts: [&[u8]; 2] = [b"Some Stream of", b" Crypto Text"];
-/// let key = b"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0A\x0B\x0C\x0D\x0E\x0F";
-/// let iv = b"\x00\x01\x02\x03\x04\x05\x06\x07\x00\x01\x02\x03\x04\x05\x06\x07";
-/// let data_len = plaintexts.iter().fold(0, |sum, x| sum + x.len());
-///
-/// // Create a cipher context for encryption.
-/// let mut encrypter = Crypter::new(
-///     Cipher::aes_128_cbc(),
-///     Mode::Encrypt,
-///     key,
-///     Some(iv)).unwrap();
-///
-/// let block_size = Cipher::aes_128_cbc().block_size();
-/// let mut ciphertext = vec![0; data_len + block_size];
-///
-/// // Encrypt 2 chunks of plaintexts successively.
-/// let mut count = encrypter.update(plaintexts[0], &mut ciphertext).unwrap();
-/// count += encrypter.update(plaintexts[1], &mut ciphertext[count..]).unwrap();
-/// count += encrypter.finalize(&mut ciphertext[count..]).unwrap();
-/// ciphertext.truncate(count);
-///
-/// assert_eq!(
-///     b"\x0F\x21\x83\x7E\xB2\x88\x04\xAF\xD9\xCC\xE2\x03\x49\xB4\x88\xF6\xC4\x61\x0E\x32\x1C\xF9\
-///       \x0D\x66\xB1\xE6\x2C\x77\x76\x18\x8D\x99",
-///     &ciphertext[..]
-/// );
-///
-///
-/// // Let's pretend we don't know the plaintext, and now decrypt the ciphertext.
-/// let data_len = ciphertext.len();
-/// let ciphertexts = [&ciphertext[..9], &ciphertext[9..]];
-///
-/// // Create a cipher context for decryption.
-/// let mut decrypter = Crypter::new(
-///     Cipher::aes_128_cbc(),
-///     Mode::Decrypt,
-///     key,
-///     Some(iv)).unwrap();
-/// let mut plaintext = vec![0; data_len + block_size];
-///
-/// // Decrypt 2 chunks of ciphertexts successively.
-/// let mut count = decrypter.update(ciphertexts[0], &mut plaintext).unwrap();
-/// count += decrypter.update(ciphertexts[1], &mut plaintext[count..]).unwrap();
-/// count += decrypter.finalize(&mut plaintext[count..]).unwrap();
-/// plaintext.truncate(count);
-///
-/// assert_eq!(b"Some Stream of Crypto Text", &plaintext[..]);
-/// ```
 pub struct Crypter {
     ctx: *mut ffi::EVP_CIPHER_CTX,
     block_size: usize,
@@ -379,13 +243,6 @@ unsafe impl Sync for Crypter {}
 unsafe impl Send for Crypter {}
 
 impl Crypter {
-    /// Creates a new `Crypter`.  The initialisation vector, `iv`, is not necesarry for certain
-    /// types of `Cipher`.
-    ///
-    /// # Panics
-    ///
-    /// Panics if an IV is required by the cipher but not provided.  Also make sure that the key
-    /// and IV size are appropriate for your cipher.
     pub fn new(
         t: Cipher,
         mode: Mode,
@@ -448,22 +305,14 @@ impl Crypter {
         }
     }
 
-    /// Enables or disables padding.
-    ///
-    /// If padding is disabled, total amount of data encrypted/decrypted must
-    /// be a multiple of the cipher's block size.
     pub fn pad(&mut self, padding: bool) {
         unsafe {
             ffi::EVP_CIPHER_CTX_set_padding(self.ctx, c_int::from(padding));
         }
     }
 
-    /// Sets the tag used to authenticate ciphertext in AEAD ciphers such as AES GCM.
-    ///
-    /// When decrypting cipher text using an AEAD cipher, this must be called before `finalize`.
     pub fn set_tag(&mut self, tag: &[u8]) -> Result<(), ErrorStack> {
         unsafe {
-            // NB: this constant is actually more general than just GCM.
             cvt(ffi::EVP_CIPHER_CTX_ctrl(
                 self.ctx,
                 ffi::EVP_CTRL_GCM_SET_TAG,
@@ -473,13 +322,8 @@ impl Crypter {
         }
     }
 
-    /// Sets the length of the authentication tag to generate in AES CCM.
-    ///
-    /// When encrypting with AES CCM, the tag length needs to be explicitly set in order
-    /// to use a value different than the default 12 bytes.
     pub fn set_tag_len(&mut self, tag_len: usize) -> Result<(), ErrorStack> {
         unsafe {
-            // NB: this constant is actually more general than just GCM.
             cvt(ffi::EVP_CIPHER_CTX_ctrl(
                 self.ctx,
                 ffi::EVP_CTRL_GCM_SET_TAG,
@@ -489,10 +333,6 @@ impl Crypter {
         }
     }
 
-    /// Feeds total plaintext length to the cipher.
-    ///
-    /// The total plaintext or ciphertext length MUST be passed to the cipher when it operates in
-    /// CCM mode.
     pub fn set_data_len(&mut self, data_len: usize) -> Result<(), ErrorStack> {
         unsafe {
             let mut len = 0;
@@ -506,11 +346,6 @@ impl Crypter {
         }
     }
 
-    /// Feeds Additional Authenticated Data (AAD) through the cipher.
-    ///
-    /// This can only be used with AEAD ciphers such as AES GCM. Data fed in is not encrypted, but
-    /// is factored into the authentication tag. It must be called before the first call to
-    /// `update`.
     pub fn aad_update(&mut self, input: &[u8]) -> Result<(), ErrorStack> {
         unsafe {
             let mut len = 0;
@@ -524,18 +359,6 @@ impl Crypter {
         }
     }
 
-    /// Feeds data from `input` through the cipher, writing encrypted/decrypted
-    /// bytes into `output`.
-    ///
-    /// The number of bytes written to `output` is returned. Note that this may
-    /// not be equal to the length of `input`.
-    ///
-    /// # Panics
-    ///
-    /// Panics for stream ciphers if `output.len() < input.len()`.
-    ///
-    /// Panics for block ciphers if `output.len() < input.len() + block_size`,
-    /// where `block_size` is the block size of the cipher (see `Cipher::block_size`).
     pub fn update(&mut self, input: &[u8], output: &mut [u8]) -> Result<usize, ErrorStack> {
         unsafe {
             let block_size = if self.block_size > 1 {
@@ -558,17 +381,6 @@ impl Crypter {
         }
     }
 
-    /// Finishes the encryption/decryption process, writing any remaining data
-    /// to `output`.
-    ///
-    /// The number of bytes written to `output` is returned.
-    ///
-    /// `update` should not be called after this method.
-    ///
-    /// # Panics
-    ///
-    /// Panics for block ciphers if `output.len() < block_size`,
-    /// where `block_size` is the block size of the cipher (see `Cipher::block_size`).
     pub fn finalize(&mut self, output: &mut [u8]) -> Result<usize, ErrorStack> {
         unsafe {
             if self.block_size > 1 {
@@ -586,14 +398,6 @@ impl Crypter {
         }
     }
 
-    /// Retrieves the authentication tag used to authenticate ciphertext in AEAD ciphers such
-    /// as AES GCM.
-    ///
-    /// When encrypting data with an AEAD cipher, this must be called after `finalize`.
-    ///
-    /// The size of the buffer indicates the required size of the tag. While some ciphers support a
-    /// range of tag sizes, it is recommended to pick the maximum size. For AES GCM, this is 16
-    /// bytes, for example.
     pub fn get_tag(&self, tag: &mut [u8]) -> Result<(), ErrorStack> {
         unsafe {
             cvt(ffi::EVP_CIPHER_CTX_ctrl(
@@ -614,36 +418,6 @@ impl Drop for Crypter {
     }
 }
 
-/// Encrypts data in one go, and returns the encrypted data.
-///
-/// Data is encrypted using the specified cipher type `t` in encrypt mode with the specified `key`
-/// and initailization vector `iv`. Padding is enabled.
-///
-/// This is a convenient interface to `Crypter` to encrypt all data in one go.  To encrypt a stream
-/// of data increamentally , use `Crypter` instead.
-///
-/// # Examples
-///
-/// Encrypt data in AES128 CBC mode
-///
-/// ```
-/// use leyline_bssl::symm::{encrypt, Cipher};
-///
-/// let cipher = Cipher::aes_128_cbc();
-/// let data = b"Some Crypto Text";
-/// let key = b"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0A\x0B\x0C\x0D\x0E\x0F";
-/// let iv = b"\x00\x01\x02\x03\x04\x05\x06\x07\x00\x01\x02\x03\x04\x05\x06\x07";
-/// let ciphertext = encrypt(
-///     cipher,
-///     key,
-///     Some(iv),
-///     data).unwrap();
-///
-/// assert_eq!(
-///     b"\xB4\xB9\xE7\x30\xD6\xD6\xF7\xDE\x77\x3F\x1C\xFF\xB3\x3E\x44\x5A\x91\xD7\x27\x62\x87\x4D\
-///       \xFB\x3C\x5E\xC4\x59\x72\x4A\xF4\x7C\xA1",
-///     &ciphertext[..]);
-/// ```
 pub fn encrypt(
     t: Cipher,
     key: &[u8],
@@ -653,36 +427,6 @@ pub fn encrypt(
     cipher(t, Mode::Encrypt, key, iv, data)
 }
 
-/// Decrypts data in one go, and returns the decrypted data.
-///
-/// Data is decrypted using the specified cipher type `t` in decrypt mode with the specified `key`
-/// and initailization vector `iv`. Padding is enabled.
-///
-/// This is a convenient interface to `Crypter` to decrypt all data in one go.  To decrypt a  stream
-/// of data increamentally , use `Crypter` instead.
-///
-/// # Examples
-///
-/// Decrypt data in AES128 CBC mode
-///
-/// ```
-/// use leyline_bssl::symm::{decrypt, Cipher};
-///
-/// let cipher = Cipher::aes_128_cbc();
-/// let data = b"\xB4\xB9\xE7\x30\xD6\xD6\xF7\xDE\x77\x3F\x1C\xFF\xB3\x3E\x44\x5A\x91\xD7\x27\x62\
-///              \x87\x4D\xFB\x3C\x5E\xC4\x59\x72\x4A\xF4\x7C\xA1";
-/// let key = b"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0A\x0B\x0C\x0D\x0E\x0F";
-/// let iv = b"\x00\x01\x02\x03\x04\x05\x06\x07\x00\x01\x02\x03\x04\x05\x06\x07";
-/// let ciphertext = decrypt(
-///     cipher,
-///     key,
-///     Some(iv),
-///     data).unwrap();
-///
-/// assert_eq!(
-///     b"Some Crypto Text",
-///     &ciphertext[..]);
-/// ```
 pub fn decrypt(
     t: Cipher,
     key: &[u8],
@@ -707,14 +451,6 @@ fn cipher(
     Ok(out)
 }
 
-/// Like `encrypt`, but for AEAD ciphers such as AES GCM.
-///
-/// Additional Authenticated Data can be provided in the `aad` field, and the authentication tag
-/// will be copied into the `tag` field.
-///
-/// The size of the `tag` buffer indicates the required size of the tag. While some ciphers support
-/// a range of tag sizes, it is recommended to pick the maximum size. For AES GCM, this is 16 bytes,
-/// for example.
 pub fn encrypt_aead(
     t: Cipher,
     key: &[u8],
@@ -734,10 +470,6 @@ pub fn encrypt_aead(
     Ok(out)
 }
 
-/// Like `decrypt`, but for AEAD ciphers such as AES GCM.
-///
-/// Additional Authenticated Data can be provided in the `aad` field, and the authentication tag
-/// should be provided in the `tag` field.
 pub fn decrypt_aead(
     t: Cipher,
     key: &[u8],
@@ -783,8 +515,6 @@ mod tests {
         assert_eq!(c.finalize(&mut [0u8; 0]).unwrap(), 0);
     }
 
-    // Test vectors from FIPS-197:
-    // http://csrc.nist.gov/publications/fips/fips197/fips-197.pdf
     #[test]
     fn test_aes_256_ecb() {
         let k0 = [
@@ -909,8 +639,6 @@ mod tests {
 
     #[test]
     fn test_aes128_ofb() {
-        // Lifted from http://csrc.nist.gov/publications/nistpubs/800-38a/sp800-38a.pdf
-
         let pt = "6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e5130c81c46a35ce411e5fbc1191a0a52eff69f2445df4f9b17ad2b417be66c3710";
         let ct = "3b3fd92eb72dad20333449f8e83cfb4a7789508d16918f03f53c52dac54ed8259740051e9c5fecf64344f7a82260edcc304c6528f659c77866a510d9c1d6ae5e";
         let key = "2b7e151628aed2a6abf7158809cf4f3c";
@@ -921,8 +649,6 @@ mod tests {
 
     #[test]
     fn test_aes192_ctr() {
-        // Lifted from http://csrc.nist.gov/publications/nistpubs/800-38a/sp800-38a.pdf
-
         let pt = "6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e5130c81c46a35ce411e5fbc1191a0a52eff69f2445df4f9b17ad2b417be66c3710";
         let ct = "1abc932417521ca24f2b0459fe7e6e0b090339ec0aa6faefd5ccc2c6f4ce8e941e36b26bd1ebc670d1bd1d665620abf74f78a7f6d29809585a97daec58c6b050";
         let key = "8e73b0f7da0e6452c810f32b809079e562f8ead2522c6b7b";
@@ -933,8 +659,6 @@ mod tests {
 
     #[test]
     fn test_aes192_ofb() {
-        // Lifted from http://csrc.nist.gov/publications/nistpubs/800-38a/sp800-38a.pdf
-
         let pt = "6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e5130c81c46a35ce411e5fbc1191a0a52eff69f2445df4f9b17ad2b417be66c3710";
         let ct = "cdc80d6fddf18cab34c25909c99a4174fcc28b8d4c63837c09e81700c11004018d9a9aeac0f6596f559c6d4daf59a5f26d9f200857ca6c3e9cac524bd9acc92a";
         let key = "8e73b0f7da0e6452c810f32b809079e562f8ead2522c6b7b";
@@ -945,8 +669,6 @@ mod tests {
 
     #[test]
     fn test_aes256_ofb() {
-        // Lifted from http://csrc.nist.gov/publications/nistpubs/800-38a/sp800-38a.pdf
-
         let pt = "6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e5130c81c46a35ce411e5fbc1191a0a52eff69f2445df4f9b17ad2b417be66c3710";
         let ct = "dc7e84bfda79164b7ecd8486985d38604febdc6740d20b3ac88f6ad82a4fb08d71ab47a086e86eedf39d1c5bba97c4080126141d67f37be8538f5a8be740e484";
         let key = "603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4";
@@ -1010,8 +732,6 @@ mod tests {
              f4fc97416ee52abe";
         let tag = "e20b6655";
 
-        // this tag is smaller than you'd normally want, but I pulled this test from the part of
-        // the NIST test vectors that cover 4 byte tags.
         let mut actual_tag = [0; 4];
         let out = encrypt_aead(
             Cipher::aes_128_gcm(),
@@ -1067,7 +787,6 @@ mod tests {
         assert_eq!(Cipher::from_nid(Cipher::des_ede3().nid()), None);
     }
 
-    // Make sure the NIDs don't actually change upstream.
     #[test]
     fn test_nid_regression() {
         struct TestCase {

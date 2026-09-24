@@ -36,7 +36,7 @@ version = 2
 unused-allowed-license = "allow"
 # SPDX identifiers we accept for dependencies. Leyline is MIT; vendored
 # forks keep their upstream licenses (see NOTICE). We only pull in
-# OSS-compatible crates. Modern BoringSSL (shipped prebuilt by leyline-bssl-sys) was relicensed
+# OSS-compatible crates. Modern BoringSSL (built by leyline-bssl-sys) was relicensed
 # by Google to Apache-2.0, already in this list; `OpenSSL` is intentionally
 # omitted — nothing in the graph requires it, so a future `openssl` pull
 # fails the gate.
@@ -57,8 +57,8 @@ allow = [
 confidence-threshold = 0.9
 
 # leyline-bssl-sys is the in-repo FFI crate (a workspace-excluded path
-# dependency). It ships the MIT FFI binding glue plus prebuilt BoringSSL static
-# libs. Modern BoringSSL is Apache-2.0 (Google relicense), with a BSD-3-Clause
+# dependency). It ships the MIT FFI binding glue plus the BoringSSL source.
+# Modern BoringSSL is Apache-2.0 (Google relicense), with a BSD-3-Clause
 # notice for unlinked Go test tooling — both already allow-listed. The crate
 # carries LICENSE-MIT + LICENSE-BORINGSSL so this clarification resolves against
 # real text. (leyline-bssl / leyline-bssl-tokio classify correctly on their own.)

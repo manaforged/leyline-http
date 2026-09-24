@@ -4,7 +4,7 @@ version = "0.0.0"
 edition = "2024"
 publish = false
 
-# Detached from leyline's workspace so its prebuilt-BoringSSL leyline dep does
+# Detached from leyline's workspace so its BoringSSL leyline dep does
 # not enter (or conflict with) the main build graph.
 [workspace]
 
