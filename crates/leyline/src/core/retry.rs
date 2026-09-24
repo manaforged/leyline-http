@@ -83,26 +83,6 @@ impl RetryPolicy {
         self
     }
 
-    pub fn on(mut self, trigger: RetryTrigger) -> Self {
-        self.retry_on.push(trigger);
-        self
-    }
-
-    pub fn retry_on(mut self, triggers: impl IntoIterator<Item = RetryTrigger>) -> Self {
-        self.retry_on = triggers.into_iter().collect();
-        self
-    }
-
-    pub fn backoff_factor(mut self, factor: f64) -> Self {
-        self.backoff_factor = factor;
-        self
-    }
-
-    pub fn jitter(mut self, on: bool) -> Self {
-        self.jitter = on;
-        self
-    }
-
     pub fn allow_non_idempotent(mut self, allow: bool) -> Self {
         self.allow_non_idempotent = allow;
         self

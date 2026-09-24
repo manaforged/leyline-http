@@ -33,18 +33,18 @@ it unless the request sets its own with `RequestBuilder::retry`.
 
 `RetryTrigger` has four variants: `ConnectionError`, `Status(u16)`,
 `ServerError` for any 5xx, and `Timeout`. Start from `none()` or `transient()`
-and set one field per call.
+and assign the fields you need.
 
 ```rust
 use leyline::{RetryPolicy, RetryTrigger};
 use std::time::Duration;
 
-let policy = RetryPolicy::none()
+let mut policy = RetryPolicy::none()
     .with_max_retries(5)
-    .with_backoff(Duration::from_millis(50), Duration::from_secs(2))
-    .backoff_factor(1.5)
-    .jitter(true)
-    .retry_on([RetryTrigger::ServerError, RetryTrigger::ConnectionError]);
+    .with_backoff(Duration::from_millis(50), Duration::from_secs(2));
+policy.backoff_factor = 1.5;
+policy.jitter = true;
+policy.retry_on = vec![RetryTrigger::ServerError, RetryTrigger::ConnectionError];
 assert_eq!(policy.max_retries, 5);
 
 let also = RetryPolicy::transient().on_status(408);

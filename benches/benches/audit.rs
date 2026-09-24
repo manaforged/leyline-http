@@ -1,9 +1,9 @@
 
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use leyline::audit::{
-    Ja3Input, Ja4Input, Ja4hInput, extension_ids, compute_ja3, compute_ja4, compute_ja4h,
-    compute_ja4t,
+    Ja3Input, Ja4Input, Ja4hInput, compute_ja3, compute_ja4, compute_ja4h, compute_ja4t,
 };
+use leyline::fuzz::extension_ids;
 use leyline::profile::{Browser, ProfileRegistry};
 
 fn chrome_147_inputs() -> (Vec<String>, Vec<String>, Vec<String>, Vec<u16>) {

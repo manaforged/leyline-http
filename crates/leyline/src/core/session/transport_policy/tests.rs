@@ -72,7 +72,7 @@ fn bare() {
 #[test]
 fn firefox_auto() {
     let session = Session::builder()
-        .browser(Browser::default_firefox())
+        .browser(Browser::latest(crate::profile::Family::Firefox))
         .build()
         .unwrap();
     assert_eq!(session.protocol_policy(), ProtocolPolicy::Auto);

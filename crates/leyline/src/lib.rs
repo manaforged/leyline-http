@@ -50,6 +50,18 @@ pub mod guide {
     pub struct Platforms;
 }
 
+macro_rules! bench_pub {
+    ($(#[$meta:meta])* fn $($rest:tt)*) => {
+        #[cfg(feature = "bench-internals")]
+        $(#[$meta])*
+        pub fn $($rest)*
+
+        #[cfg(not(feature = "bench-internals"))]
+        $(#[$meta])*
+        pub(crate) fn $($rest)*
+    };
+}
+
 pub mod audit;
 pub mod cookie;
 pub mod profile;
@@ -79,6 +91,10 @@ pub mod fuzz {
         let parsed = url::Url::parse(request_url).ok()?;
         crate::cookie::parse::parse_set_cookie(header, &parsed)
     }
+
+    pub fn extension_ids(tls: &crate::profile::TlsProfile) -> Vec<u16> {
+        crate::profile::permutation::extension_ids(tls)
+    }
 }
 #[cfg(feature = "http3")]
 pub(crate) mod quic;
@@ -106,19 +122,22 @@ pub mod multipart {
 }
 
 use crate::profile::ProfileRegistry;
-pub use crate::profile::{Browser, BrowserProfile, ChromiumBrand, Platform, Preset};
+pub use crate::profile::{Browser, BrowserProfile, ChromiumBrand, Family, Platform, Preset};
 
 pub use crate::tcp::TcpProfile;
 
 pub use crate::h2::{ErrorCode, H2Error};
 
-#[cfg(feature = "http3")]
+#[cfg(all(feature = "http3", feature = "bench-internals"))]
+#[doc(hidden)]
 pub use crate::quic::H3Config;
 
 #[cfg(feature = "websocket")]
 pub use crate::core::{CloseFrame, WsConnection, WsMessage, WsSink, WsStream};
 
-pub use crate::tls::{TlsContext, TlsError, TlsMinVersion, TlsTrustConfig};
+#[cfg(any(feature = "unstable-bssl", feature = "bench-internals"))]
+pub use crate::tls::TlsContext;
+pub use crate::tls::{TlsError, TlsMinVersion, TlsTrustConfig};
 
 impl Browser {
     pub fn profile(self) -> &'static BrowserProfile {

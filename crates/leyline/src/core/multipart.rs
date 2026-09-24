@@ -44,7 +44,7 @@ impl Part {
     {
         Self {
             name: String::new(),
-            body: Body::stream(stream),
+            body: Body::stream(stream, None),
             filename: None,
             mime: None,
             extra_headers: Vec::new(),
@@ -144,15 +144,10 @@ impl Form {
 
     pub(crate) fn into_stream_body(self) -> Body {
         let length_hint = self.len_hint();
-        let stream = FormStream::new(self);
-        if let Some(len) = length_hint {
-            Body::stream_with_length(stream, len)
-        } else {
-            Body::stream(stream)
-        }
+        Body::stream(FormStream::new(self), length_hint)
     }
 
-    pub fn content_type(&self) -> String {
+    pub(crate) fn content_type(&self) -> String {
         format!("multipart/form-data; boundary={}", self.boundary)
     }
 }

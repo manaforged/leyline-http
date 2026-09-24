@@ -85,7 +85,7 @@ async fn streaming_request_body_chunked_over_h1() {
         .map(|_| Ok(Bytes::from(vec![b'a'; 8 * 1024])))
         .collect();
     let expected_total: usize = 384 * 8 * 1024;
-    let body = Body::stream(stream::iter(chunks));
+    let body = Body::stream(stream::iter(chunks), None);
 
     let mut resp = session
         .post(&format!("http://{addr}/upload"))
@@ -150,7 +150,7 @@ async fn streaming_request_body_fixed_length_content_length() {
         Ok(Bytes::from(vec![b'y'; 32 * 1024])),
         Ok(Bytes::from(vec![b'z'; 17])),
     ];
-    let body = Body::stream_with_length(stream::iter(chunks), payload_len as u64);
+    let body = Body::stream(stream::iter(chunks), Some(payload_len as u64));
 
     let resp = session
         .post(&format!("http://{addr}/upload"))
@@ -372,7 +372,7 @@ async fn redirect_with_streaming_body_errors() {
         .build()
         .unwrap();
     let chunks: Vec<std::io::Result<Bytes>> = vec![Ok(Bytes::from_static(b"hello"))];
-    let body = Body::stream(stream::iter(chunks));
+    let body = Body::stream(stream::iter(chunks), None);
 
     let err = session
         .post(&format!("http://{addr}/before"))

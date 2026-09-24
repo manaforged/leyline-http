@@ -80,7 +80,7 @@ impl FingerprintConnector {
             socket_config: SocketConfig::default(),
             pins: trust.pinned_leaf_sha256().to_vec(),
             system_roots: trust.uses_system_roots(),
-            has_client_identity: trust.client_identity().is_some(),
+            has_client_identity: trust.has_client_identity(),
         })
     }
 

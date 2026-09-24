@@ -5,7 +5,7 @@
     feature = "compression-zstd"
 ))]
 use leyline_bssl::ssl::{CertificateCompressionAlgorithm, CertificateCompressor};
-use leyline_bssl::ssl::{SslContextBuilder, SslMethod, SslVerifyMode};
+use leyline_bssl::ssl::{SslContextBuilder, SslVerifyMode};
 
 use crate::profile::BrowserProfile;
 
@@ -23,21 +23,20 @@ pub enum TlsMinVersion {
     Tls13,
 }
 
-pub fn build_ssl_context(
+#[cfg(any(feature = "unstable-bssl", feature = "bench-internals"))]
+pub(crate) fn build_ssl_context(
     profile: &BrowserProfile,
     min_version: TlsMinVersion,
 ) -> Result<SslContextBuilder, TlsError> {
-    let mut builder = SslContextBuilder::new(SslMethod::tls()).map_err(TlsError::from_stack)?;
-    apply_profile(&mut builder, profile, min_version)?;
+    let mut builder = SslContextBuilder::new(leyline_bssl::ssl::SslMethod::tls())
+        .map_err(TlsError::from_stack)?;
+    apply_profile_with_trust(
+        &mut builder,
+        profile,
+        min_version,
+        &TlsTrustConfig::default(),
+    )?;
     Ok(builder)
-}
-
-pub(crate) fn apply_profile(
-    builder: &mut SslContextBuilder,
-    profile: &BrowserProfile,
-    min_version: TlsMinVersion,
-) -> Result<(), TlsError> {
-    apply_profile_with_trust(builder, profile, min_version, &TlsTrustConfig::default())
 }
 
 pub(crate) fn apply_profile_with_trust(

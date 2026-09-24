@@ -1,7 +1,18 @@
 use leyline::Platform;
-use leyline::audit::{Ja3Input, Ja4Input, compute_ja3, compute_ja4, compute_ja4t, extension_ids};
+use leyline::audit::{Ja3Input, Ja4Input, compute_ja3, compute_ja4, compute_ja4t};
+use leyline::fuzz::extension_ids;
 use leyline::h2::H2Config;
-use leyline::profile::{Browser, ProfileRegistry};
+use leyline::profile::{Browser, BrowserProfile, ProfileRegistry};
+
+fn expected_h2_for(profile: &BrowserProfile, platform: Platform) -> Option<&str> {
+    profile
+        .h2
+        .platforms
+        .get(platform.identity_key())
+        .and_then(|over| over.fingerprint.as_ref())
+        .and_then(|fp| fp.akamai.as_deref())
+        .or_else(|| profile.expected_h2_fingerprint())
+}
 
 #[derive(PartialEq, Clone, Copy)]
 enum Status {
@@ -68,7 +79,7 @@ fn fingerprint_conformance() {
                     &name,
                     &format!("Akamai-H2 [{}]", plat.identity_key()),
                     &fp,
-                    p.expected_h2_fingerprint_for(plat),
+                    expected_h2_for(p, plat),
                 ));
             }
         }

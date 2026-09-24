@@ -9,7 +9,6 @@ impl Session {
             session: self.clone(),
             url: url.to_string(),
             config: self.inner.websocket_config,
-            force_http1: false,
             proxy: None,
             headers: Vec::new(),
         }
@@ -19,7 +18,6 @@ impl Session {
         &self,
         url: &str,
         config: WebSocketConfig,
-        force_http1: bool,
         request_proxy: Option<&str>,
         extra_headers: &[(String, String)],
     ) -> Result<crate::core::websocket::WsConnection> {
@@ -33,7 +31,7 @@ impl Session {
                 .is_h1_only(host, parsed.port_or_known_default().unwrap_or(443), proxy)
         });
 
-        if config.prefer_http2 && !force_http1 && !h1_only {
+        if config.prefer_http2 && !h1_only {
             match crate::core::websocket::WsConnection::connect_h2(
                 &self.inner.pool,
                 &self.inner.connector,
@@ -83,7 +81,6 @@ pub struct WebSocketBuilder {
     session: Session,
     url: String,
     config: WebSocketConfig,
-    force_http1: bool,
     proxy: Option<String>,
     headers: Vec<(String, String)>,
 }
@@ -91,11 +88,6 @@ pub struct WebSocketBuilder {
 impl WebSocketBuilder {
     pub fn config(mut self, config: WebSocketConfig) -> Self {
         self.config = config;
-        self
-    }
-
-    pub fn http1(mut self) -> Self {
-        self.force_http1 = true;
         self
     }
 
@@ -125,7 +117,6 @@ impl WebSocketBuilder {
         let handshake = self.session.websocket_with_options(
             &self.url,
             self.config,
-            self.force_http1,
             self.proxy.as_deref(),
             &self.headers,
         );

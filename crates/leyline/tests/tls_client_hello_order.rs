@@ -42,9 +42,8 @@ async fn chrome_147_client_hello_carries_trust_anchor_identifiers() {
 }
 
 fn declared_extension_order(browser: Browser) -> Vec<u16> {
-    leyline::profile::ProfileRegistry::builtin()
-        .get_browser(browser)
-        .expect("built-in profile")
+    browser
+        .profile()
         .tls
         .extension_permutation
         .clone()

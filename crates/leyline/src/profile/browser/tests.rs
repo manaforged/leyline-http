@@ -43,5 +43,8 @@ fn latest_covers_every_bundled_family() {
 #[test]
 fn latest_matches_the_builder_defaults() {
     assert_eq!(Browser::latest(Family::Chrome), Browser::default_browser());
-    assert_eq!(Browser::latest(Family::Firefox), Browser::default_firefox());
+    assert_eq!(
+        Browser::get(Family::Firefox, Browser::latest(Family::Firefox).version()),
+        Some(Browser::latest(Family::Firefox))
+    );
 }

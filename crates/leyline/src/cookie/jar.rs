@@ -37,78 +37,69 @@ impl Jar {
         }
     }
 
-    pub fn deep_clone(&self) -> Self {
-        let cookies = {
-            let jar = lock(&self.inner);
-            jar.cookies.clone()
-        };
-        let total = cookies.values().map(|v| v.len()).sum();
-        Self {
-            inner: Arc::new(Mutex::new(JarInner { cookies, total })),
-        }
-    }
+    bench_pub! {
+        fn store_set_cookie(&self, header: &str, url: &Url) {
+            let mut cookie = match parse::parse_set_cookie(header, url) {
+                Some(c) => c,
+                None => return,
+            };
 
-    pub fn store_set_cookie(&self, header: &str, url: &Url) {
-        let mut cookie = match parse::parse_set_cookie(header, url) {
-            Some(c) => c,
-            None => return,
-        };
-
-        if cookie.is_expired() {
-            let mut jar = lock(&self.inner);
-            let domain = cookie.domain.to_lowercase();
-            if let Some(entries) = jar.cookies.get_mut(&domain)
-                && let Some(pos) = entries
-                    .iter()
-                    .position(|c| c.name == cookie.name && c.path == cookie.path)
-            {
-                if entries[pos].secure && url.scheme() != "https" {
-                    return;
+            if cookie.is_expired() {
+                let mut jar = lock(&self.inner);
+                let domain = cookie.domain.to_lowercase();
+                if let Some(entries) = jar.cookies.get_mut(&domain)
+                    && let Some(pos) = entries
+                        .iter()
+                        .position(|c| c.name == cookie.name && c.path == cookie.path)
+                {
+                    if entries[pos].secure && url.scheme() != "https" {
+                        return;
+                    }
+                    entries.remove(pos);
+                    jar.total -= 1;
                 }
-                entries.remove(pos);
-                jar.total -= 1;
-            }
-            return;
-        }
-
-        let mut jar = lock(&self.inner);
-        let domain = cookie.domain.to_lowercase();
-
-        let entries = jar.cookies.entry(domain.clone()).or_default();
-
-        let mut added = false;
-        if let Some(pos) = entries
-            .iter()
-            .position(|c| c.name == cookie.name && c.path == cookie.path)
-        {
-            if entries[pos].secure && !cookie.secure {
                 return;
             }
-            cookie.creation_time = entries[pos].creation_time;
-            entries[pos] = cookie;
-        } else {
-            entries.push(cookie);
-            added = true;
-        }
 
-        let mut evicted = 0;
-        if entries.len() > MAX_COOKIES_PER_DOMAIN {
-            evict_lru(entries, EVICT_PER_DOMAIN);
-            evicted = EVICT_PER_DOMAIN;
-        }
+            let mut jar = lock(&self.inner);
+            let domain = cookie.domain.to_lowercase();
 
-        if added {
-            jar.total += 1;
-        }
-        jar.total -= evicted;
+            let entries = jar.cookies.entry(domain.clone()).or_default();
 
-        if jar.total > MAX_COOKIES_GLOBAL {
-            evict_global(&mut jar.cookies, EVICT_GLOBAL);
-            jar.total = jar.cookies.values().map(|v| v.len()).sum();
+            let mut added = false;
+            if let Some(pos) = entries
+                .iter()
+                .position(|c| c.name == cookie.name && c.path == cookie.path)
+            {
+                if entries[pos].secure && !cookie.secure {
+                    return;
+                }
+                cookie.creation_time = entries[pos].creation_time;
+                entries[pos] = cookie;
+            } else {
+                entries.push(cookie);
+                added = true;
+            }
+
+            let mut evicted = 0;
+            if entries.len() > MAX_COOKIES_PER_DOMAIN {
+                evict_lru(entries, EVICT_PER_DOMAIN);
+                evicted = EVICT_PER_DOMAIN;
+            }
+
+            if added {
+                jar.total += 1;
+            }
+            jar.total -= evicted;
+
+            if jar.total > MAX_COOKIES_GLOBAL {
+                evict_global(&mut jar.cookies, EVICT_GLOBAL);
+                jar.total = jar.cookies.values().map(|v| v.len()).sum();
+            }
         }
     }
 
-    pub fn store_response_cookies(&self, headers: &[&str], url: &Url) {
+    pub(crate) fn store_response_cookies(&self, headers: &[&str], url: &Url) {
         for header in headers {
             self.store_set_cookie(header, url);
         }
@@ -173,70 +164,6 @@ impl Jar {
         Some(header)
     }
 
-    pub fn get_named(&self, name: &str) -> Option<String> {
-        let jar = lock(&self.inner);
-        for entries in jar.cookies.values() {
-            for cookie in entries {
-                if cookie.name == name && !cookie.is_expired() {
-                    return Some(cookie.value.clone());
-                }
-            }
-        }
-        None
-    }
-
-    pub fn contains_named(&self, name: &str) -> bool {
-        self.get_named(name).is_some()
-    }
-
-    pub fn set_named(&self, name: &str, value: &str) -> bool {
-        let mut jar = lock(&self.inner);
-        let now = SystemTime::now();
-        let mut updated = false;
-        for entries in jar.cookies.values_mut() {
-            for cookie in entries.iter_mut() {
-                if cookie.name == name {
-                    cookie.value = value.to_string();
-                    cookie.last_access = now;
-                    updated = true;
-                }
-            }
-        }
-        updated
-    }
-
-    pub fn set_named_on(&self, domain: &str, name: &str, value: &str) {
-        let mut jar = lock(&self.inner);
-        let key = domain.to_lowercase();
-        let entries = jar.cookies.entry(key.clone()).or_default();
-        let now = SystemTime::now();
-        let mut updated = false;
-        for c in entries.iter_mut() {
-            if c.name == name {
-                c.value = value.to_string();
-                c.last_access = now;
-                updated = true;
-            }
-        }
-        if updated {
-            return;
-        }
-        entries.push(Cookie {
-            name: name.to_string(),
-            value: value.to_string(),
-            domain: key,
-            path: "/".to_string(),
-            secure: false,
-            http_only: false,
-            same_site: crate::cookie::record::SameSite::Lax,
-            expires: None,
-            creation_time: now,
-            last_access: now,
-            host_only: true,
-        });
-        jar.total += 1;
-    }
-
     pub fn remove_named(&self, name: &str) -> bool {
         let mut jar = lock(&self.inner);
         for entries in jar.cookies.values_mut() {
@@ -249,74 +176,11 @@ impl Jar {
         false
     }
 
-    pub fn remove_all_named(&self, name: &str) -> usize {
-        let mut jar = lock(&self.inner);
-        let mut removed = 0;
-        for entries in jar.cookies.values_mut() {
-            let before = entries.len();
-            entries.retain(|c| c.name != name);
-            removed += before - entries.len();
-        }
-        jar.total -= removed;
-        removed
-    }
-
-    pub fn remove_named_for_host(&self, host: &str, name: &str) -> usize {
-        let mut jar = lock(&self.inner);
-        let host = host.to_lowercase();
-        let mut removed = 0;
-        for (domain, entries) in jar.cookies.iter_mut() {
-            if host == *domain || host.ends_with(&format!(".{domain}")) {
-                let before = entries.len();
-                entries.retain(|c| c.name != name);
-                removed += before - entries.len();
-            }
-        }
-        jar.total -= removed;
-        removed
-    }
-
     pub fn all_cookies(&self) -> Vec<Cookie> {
         let jar = lock(&self.inner);
         let mut out: Vec<Cookie> = jar.cookies.values().flatten().cloned().collect();
         out.sort_by(|a, b| a.domain.cmp(&b.domain).then_with(|| a.name.cmp(&b.name)));
         out
-    }
-
-    pub fn merge(&self, other: &Jar) {
-        let snapshots: Vec<Cookie> = {
-            let other_inner = lock(&other.inner);
-            other_inner.cookies.values().flatten().cloned().collect()
-        };
-        let mut jar = lock(&self.inner);
-        for c in snapshots {
-            if c.is_expired() {
-                continue;
-            }
-            let key = c.domain.to_lowercase();
-            let entries = jar.cookies.entry(key).or_default();
-            if let Some(pos) = entries
-                .iter()
-                .position(|e| e.name == c.name && e.path == c.path)
-            {
-                entries[pos] = c;
-            } else {
-                entries.push(c);
-                jar.total += 1;
-            }
-        }
-        let mut evicted = 0;
-        for entries in jar.cookies.values_mut() {
-            if entries.len() > MAX_COOKIES_PER_DOMAIN {
-                evict_lru(entries, EVICT_PER_DOMAIN);
-                evicted += EVICT_PER_DOMAIN;
-            }
-        }
-        jar.total = jar.total.saturating_sub(evicted);
-        if jar.total > MAX_COOKIES_GLOBAL {
-            evict_global(&mut jar.cookies, EVICT_GLOBAL);
-            jar.total = jar.cookies.values().map(|v| v.len()).sum();
-        }
     }
 
     pub fn get_cookie(&self, url: &str, name: &str) -> Option<String> {
@@ -376,14 +240,6 @@ impl Jar {
         let mut jar = lock(&self.inner);
         jar.cookies.clear();
         jar.total = 0;
-    }
-
-    pub fn is_empty(&self) -> bool {
-        lock(&self.inner).total == 0
-    }
-
-    pub fn len(&self) -> usize {
-        lock(&self.inner).total
     }
 }
 

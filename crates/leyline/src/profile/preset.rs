@@ -50,7 +50,7 @@ fn o(s: &str) -> Cow<'static, str> {
 const FIREFOX_DOC_ACCEPT: &str = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
 
 impl Preset {
-    pub fn build_headers(&self, ctx: &HeaderContext<'_>) -> Vec<HeaderPair> {
+    pub(crate) fn build_headers(&self, ctx: &HeaderContext<'_>) -> Vec<HeaderPair> {
         let mut headers = match self {
             Self::Native => vec![
                 (b("user-agent"), o(ctx.user_agent)),

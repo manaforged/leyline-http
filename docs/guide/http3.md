@@ -1,7 +1,7 @@
 # HTTP/3
 
 The `http3` feature is on by default. It pulls in `leyline-quiche` and adds
-`H3Config` and the `Http3` and `Race` protocol policies. Build with `default-features = false` to drop the
+the `Http3` and `Race` protocol policies. Build with `default-features = false` to drop the
 QUIC stack entirely.
 
 ## Protocol policy
@@ -23,7 +23,7 @@ use leyline::{Browser, ProtocolPolicy, Session};
 
 # fn run() -> leyline::Result<()> {
 let session = Session::builder()
-    .browser(Browser::default_browser())
+    .browser(Browser::default())
     .protocol(ProtocolPolicy::Http3)
     .build()?;
 # let _ = session;
@@ -62,23 +62,16 @@ sent once. If both fail, the `Auto` path runs.
 
 ## Transport configuration
 
-`H3Config` holds the QUIC transport parameters and the HTTP/3 settings a
-profile presents: the flow-control limits, `max_idle_timeout`,
-`max_udp_payload_size`, `active_connection_id_limit`, the initial destination
-connection ID length, the QPACK settings, `max_field_section_size`, and a cap
-on the response body the HTTP/3 client accepts, streaming included.
+The `[h3]` table of a profile sets the QUIC transport parameters and the
+HTTP/3 settings the profile presents: the flow-control limits,
+`max_idle_timeout`, `max_udp_payload_size`, `active_connection_id_limit`, the
+initial destination connection ID length, the QPACK settings,
+`max_field_section_size`, and a cap on the response body the HTTP/3 client
+accepts, streaming included. A profile with no `[h3]` table has no HTTP/3
+transport.
 
-`H3Config::from_profile` reads the `[h3]` table of a profile. A profile with
-no `[h3]` table has no HTTP/3 transport, and `from_profile` returns a
-`Kind::Config` error.
-
-```rust
-use leyline::{Browser, H3Config};
-
-let chrome = H3Config::from_profile(Browser::Chrome152.profile()).expect("chrome config");
-assert_eq!(chrome.dcid_length, 8);
-assert!(H3Config::from_profile(Browser::OkHttpAndroid10.profile()).is_err());
-```
+`Session::new()` races HTTP/3 against HTTP/2 when the bundled profile's `[h3]`
+table sets `race = true`. The bundled Chrome profiles do.
 
 ## QPACK
 

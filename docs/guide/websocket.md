@@ -12,10 +12,12 @@ origin needs them, and use `wss://`: plaintext `ws://` is not accepted.
 await the builder.
 
 ```rust,no_run
+use leyline::WsMessage;
+
 # async fn run() -> leyline::Result<()> {
 let session = leyline::Session::new();
 let mut ws = session.websocket("wss://example.com/live").connect().await?;
-ws.send("hello").await?;
+ws.send(WsMessage::Text("hello".to_owned())).await?;
 # Ok(())
 # }
 ```
@@ -26,7 +28,6 @@ Builder methods:
 - `header(name, value)` and `headers(pairs)` add handshake headers. A repeated
   name replaces the earlier value.
 - `proxy(url)` overrides the session proxy.
-- `http1()` forces the HTTP/1.1 path.
 
 ## HTTP/2 or HTTP/1.1
 
@@ -36,9 +37,8 @@ If the peer does not advertise `SETTINGS_ENABLE_CONNECT_PROTOCOL`, Leyline
 logs the reason and falls back to the RFC 6455 HTTP/1.1 upgrade. Any other
 error is returned rather than retried.
 
-`http1()` on the builder, or `prefer_http2: false` in the config, skips the
-HTTP/2 attempt. `WsConnection::is_http2()` tells you which transport you got,
-and `protocol()` returns the subprotocol the origin selected, if any.
+`WebSocketConfig::new().prefer_http2(false)` skips the HTTP/2 attempt.
+`protocol()` returns the subprotocol the origin selected, if any.
 
 ```rust,no_run
 use leyline::WebSocketConfig;
@@ -47,30 +47,34 @@ use leyline::WebSocketConfig;
 let session = leyline::Session::new();
 let ws = session
     .websocket("wss://example.com/live")
-    .config(WebSocketConfig::default().max_message_size(1 << 20))
-    .http1()
+    .config(
+        WebSocketConfig::new()
+            .max_message_size(1 << 20)
+            .prefer_http2(false),
+    )
     .connect()
     .await?;
-println!("http2={} protocol={:?}", ws.is_http2(), ws.protocol());
+println!("protocol={:?}", ws.protocol());
 # Ok(())
 # }
 ```
 
 ## Send and receive
 
-`send` takes text, `send_binary` takes bytes, and `send_raw` takes a
-`WsMessage`, Leyline's own message enum (`Text`, `Binary`, `Ping`, `Pong`,
+`send` takes a `WsMessage`, Leyline's own message enum (`Text`, `Binary`, `Ping`, `Pong`,
 `Close`). `recv` returns
 `Ok(None)` when the peer closed. `close` sends a close frame and shuts the
 connection down.
 
 ```rust,no_run
+use leyline::WsMessage;
+
 # async fn run() -> leyline::Result<()> {
 let session = leyline::Session::new();
 let mut ws = session.websocket("wss://example.com/live").connect().await?;
 
-ws.send("ping").await?;
-ws.send_binary(vec![1, 2, 3]).await?;
+ws.send(WsMessage::Text("ping".to_owned())).await?;
+ws.send(WsMessage::Binary(vec![1, 2, 3])).await?;
 
 if let Some(msg) = ws.recv().await? {
     println!("{msg:?}");
@@ -83,10 +87,11 @@ ws.close().await?;
 ## Split the connection
 
 `split()` divides the connection into a `WsSink` and a `WsStream`, so one task
-can write while another reads. The sink keeps `send`, `send_binary`,
-`send_raw`, and `close`. The stream keeps `recv`.
+can write while another reads. The sink keeps `send` and `close`. The stream keeps `recv`.
 
 ```rust,no_run
+use leyline::WsMessage;
+
 # async fn run() -> leyline::Result<()> {
 let session = leyline::Session::new();
 let ws = session.websocket("wss://example.com/live").connect().await?;
@@ -98,7 +103,7 @@ let reader = tokio::spawn(async move {
     }
 });
 
-sink.send("hello").await?;
+sink.send(WsMessage::Text("hello".to_owned())).await?;
 sink.close().await?;
 reader.await.expect("reader task panicked");
 # Ok(())

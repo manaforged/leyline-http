@@ -22,7 +22,7 @@ let session = Session::builder()
 # }
 ```
 
-`Session::new()` skips the builder. It selects `Browser::default_browser()`
+`Session::new()` skips the builder. It selects `Browser::default()`
 with a Windows identity, and it uses `ProtocolPolicy::Race` when the `http3`
 feature is on. `Session::default()` is the same session. Every other
 configuration goes through `Session::builder()`.
@@ -36,30 +36,30 @@ The `Browser` enum lists every bundled profile: Chrome 145 to 152, Brave 146,
 Firefox 148 to 154, Safari 18 and 26, Safari on iOS 17 and iOS 18, OkHttp on
 Android 10, and the CFNetwork stacks on iOS 18 and macOS 26.
 
-Three helpers name a current version instead of a fixed one:
+These helpers select a profile without naming a variant:
 
 - `Browser::latest(Family)` is the highest bundled version of a product line,
   so you pin the line and take whatever the crate release carries. The
   families are `Chrome`, `Brave`, `Firefox`, `Safari`, `SafariIos`,
   `CfNetwork`, and `OkHttp`.
-- `Browser::default_browser()` is what `Session::new()` selects.
-- `Browser::default_firefox()` is the current bundled Firefox.
+- `Browser::default()` is what `Session::new()` selects: the latest Chrome.
+- `Browser::get(Family, version)` returns the bundled profile for one version,
+  or `None`. `Browser::version()` returns the major version.
 
 ```rust
 use leyline::Browser;
-use leyline::profile::Family;
+use leyline::Family;
 
 let latest = Browser::latest(Family::Firefox);
 assert_eq!(latest.family(), "firefox");
-assert_eq!(Browser::default_browser().family(), "chrome");
+assert_eq!(Browser::default().family(), "chrome");
 ```
 
 `Browser::family` returns the product line as a string, for example
 `"chrome"` or `"safari-ios"`. The engine family (`chromium`, `gecko`,
 `webkit`) is the `meta.family` field of the profile that
-`ProfileRegistry::global().get_browser(browser)` returns. `Browser::for_platform` maps a
-profile to the sibling that exists on a platform. `Browser::hello_rep` names
-the profile that owns the ClientHello, since several versions share one.
+`Browser::profile()` returns. `Browser::for_platform` maps a profile to the
+sibling that exists on a platform.
 
 ## Choose a platform
 
@@ -69,13 +69,6 @@ compiled for, and falls back to `Windows` for an unrecognized target.
 
 The platform drives the `Sec-CH-UA-Platform` header, the `Sec-CH-UA-Mobile`
 flag, and the TCP fingerprint.
-
-```rust
-use leyline::Platform;
-
-assert_eq!(Platform::Windows.sec_ch_platform(), "Windows");
-assert_eq!(Platform::Android.mobile_flag(), "?1");
-```
 
 Pass the platform to the builder with `.platform(Platform::MacOS)`.
 
@@ -103,7 +96,7 @@ use leyline::{Browser, ChromiumBrand, Session};
 
 # fn run() -> leyline::Result<()> {
 let session = Session::builder()
-    .browser(Browser::default_browser())
+    .browser(Browser::default())
     .brand(ChromiumBrand::Edge)
     .build()?;
 # let _ = session;
@@ -112,14 +105,14 @@ let session = Session::builder()
 ```
 
 `ChromiumBrand::Chrome` is stock Chrome. Put Edge and Opera on
-`Browser::default_browser()`. Put Vivaldi on `Browser::Chrome147`, the last
+`Browser::default()`. Put Vivaldi on `Browser::Chrome147`, the last
 major with a recorded Vivaldi build string.
 
 Brave is not an overlay. `.browser(Browser::Brave146)` selects a first-class
 profile.
 
 If no capture exists for that brand, Chromium version, and platform, `build()`
-returns a `BrandOverlayError` that names all three.
+returns an error that names all three.
 
 ## What a session shares
 
@@ -162,7 +155,7 @@ use leyline::cookie::Jar;
 # fn run() -> leyline::Result<()> {
 let session = leyline::Session::new();
 let other_user = leyline::Session::builder()
-    .browser(leyline::Browser::default_browser())
+    .browser(leyline::Browser::default())
     .cookie_jar(Jar::new())
     .build()?;
 let via_proxy = session.with_proxy("http://user:pass@proxy.example:8080")?;
@@ -196,7 +189,7 @@ use leyline::PoolConfig;
 
 # async fn run() -> leyline::Result<()> {
 let session = leyline::Session::builder()
-    .browser(leyline::Browser::default_browser())
+    .browser(leyline::Browser::default())
     .pool(PoolConfig::new().h2_ping_after_idle(Duration::from_secs(10)))
     .build()?;
 session.preconnect("https://example.com/", None).await?;
@@ -242,10 +235,9 @@ Every event carries an `id` that is unique per attempt, so a listener shared by
 concurrent requests can group phases. A retried request is a new attempt with a
 new `id`.
 
-Two listeners ship with the crate. `leyline::trace::TracingTrace` writes each
+One listener ships with the crate. `leyline::trace::TracingTrace` writes each
 event as a `tracing` debug event under the `leyline::trace` target.
-`leyline::trace::Timing` records the same numbers as `ResponseTiming` and hands
-them back through `snapshot()`.
+`Response::timing()` returns the same numbers as a `ResponseTiming`.
 
 The events fire inline on the request task. A listener that blocks, locks, or
 sleeps slows the request that produced the event.

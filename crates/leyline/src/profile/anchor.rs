@@ -11,7 +11,7 @@ pub enum HeaderAnchor {
 }
 
 impl HeaderAnchor {
-    pub fn anchor_name(&self) -> &'static str {
+    pub(crate) fn anchor_name(&self) -> &'static str {
         match self {
             Self::AfterCchUa => "sec-ch-ua",
             Self::AfterCchUaMobile => "sec-ch-ua-mobile",
@@ -23,12 +23,12 @@ impl HeaderAnchor {
         }
     }
 
-    pub fn is_before(&self) -> bool {
+    pub(crate) fn is_before(&self) -> bool {
         matches!(self, Self::BeforeAcceptEncoding)
     }
 }
 
-pub fn infer_anchor(name: &str) -> Option<HeaderAnchor> {
+pub(crate) fn infer_anchor(name: &str) -> Option<HeaderAnchor> {
     let lower = name.to_ascii_lowercase();
     match lower.as_str() {
         "origin" => Some(HeaderAnchor::AfterContentType),

@@ -31,25 +31,6 @@ impl Identity {
         })
     }
 
-    pub fn rotate_hello(self) -> Result<Self> {
-        let hellos = self.http.family_hellos();
-        if hellos.len() < 2 {
-            return Err(Error::new(Kind::Config)
-                .with_message(format!("no other hello in family {}", self.http.family())));
-        }
-        let cur = self.tls.hello_rep();
-        let i = hellos.iter().position(|&b| b == cur).unwrap_or(0);
-        self.rotate_tls(hellos[(i + 1) % hellos.len()])
-    }
-
-    pub fn hello_library(self) -> Result<Vec<Self>> {
-        self.http
-            .family_hellos()
-            .iter()
-            .map(|&tls| self.rotate_tls(tls))
-            .collect()
-    }
-
     pub fn pass(self, dest: Browser) -> Result<Self> {
         if dest.family() == self.http.family() {
             return Err(Error::new(Kind::Config).with_message(format!(
@@ -63,34 +44,22 @@ impl Identity {
     }
 
     #[must_use]
-    pub fn pass_library(self) -> Vec<Self> {
-        Browser::cookie_pass_targets()
-            .iter()
-            .filter_map(|&dest| self.pass(dest).ok())
-            .collect()
-    }
-
-    #[must_use]
-    pub fn http(self) -> Browser {
+    pub(crate) fn http(self) -> Browser {
         self.http
     }
 
     #[must_use]
-    pub fn tls(self) -> Browser {
+    pub(crate) fn tls(self) -> Browser {
         self.tls
     }
 
     #[must_use]
-    pub fn platform(self) -> Platform {
+    pub(crate) fn platform(self) -> Platform {
         self.platform
     }
 
-    pub fn user_agent(self) -> Result<String> {
+    pub(crate) fn user_agent(self) -> Result<String> {
         Ok(self.http_platform()?.user_agent.clone())
-    }
-
-    pub fn sec_ch_ua(self) -> Result<String> {
-        Ok(self.http_platform()?.sec_ch_ua.clone())
     }
 
     fn http_platform(self) -> Result<&'static crate::profile::PlatformIdentity> {

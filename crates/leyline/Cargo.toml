@@ -264,6 +264,26 @@ required-features = ["bench-internals"]
 name = "tls_peet"
 required-features = ["bench-internals"]
 
+[[test]]
+name = "cookies_multidomain_replay"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "https_proxy"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "tls_happy_eyeballs"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "tls_pinning_hostname"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "tls_trust_scope"
+required-features = ["bench-internals"]
+
 [build-dependencies]
 serde = { workspace = true }
 toml = { workspace = true }

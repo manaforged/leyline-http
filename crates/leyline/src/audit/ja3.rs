@@ -13,7 +13,7 @@ pub fn compute_ja3(input: &Ja3Input<'_>) -> String {
     format!("{:x}", md5::Md5::digest(raw.as_bytes()))
 }
 
-pub fn compute_ja3_raw(input: &Ja3Input<'_>) -> String {
+pub(crate) fn compute_ja3_raw(input: &Ja3Input<'_>) -> String {
     let version = input.tls_record_version;
 
     let ciphers: String = non_grease_cipher_ids(input.ciphers)

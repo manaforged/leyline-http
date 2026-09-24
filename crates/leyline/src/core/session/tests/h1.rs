@@ -220,9 +220,12 @@ async fn compress_sets_header_and_puts_compressed_bytes_on_the_wire() {
 
 #[tokio::test]
 async fn compress_rejects_streaming_body() {
-    let body = Body::stream(futures_util::stream::iter(vec![Ok::<_, std::io::Error>(
-        bytes::Bytes::from_static(b"chunk"),
-    )]));
+    let body = Body::stream(
+        futures_util::stream::iter(vec![Ok::<_, std::io::Error>(bytes::Bytes::from_static(
+            b"chunk",
+        ))]),
+        None,
+    );
     let err = Session::new()
         .post("http://127.0.0.1:9/x")
         .body(body)

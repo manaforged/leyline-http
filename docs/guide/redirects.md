@@ -30,11 +30,11 @@ use leyline::{Browser, RedirectPolicy, Session};
 
 # fn run() -> leyline::Result<()> {
 let session = Session::builder()
-    .browser(Browser::default_browser())
+    .browser(Browser::default())
     .redirect(RedirectPolicy::limited(3))
     .build()?;
 let no_redirects = Session::builder()
-    .browser(Browser::default_browser())
+    .browser(Browser::default())
     .redirect(RedirectPolicy::none())
     .build()?;
 # let _ = (session, no_redirects);
@@ -67,7 +67,7 @@ let policy = RedirectPolicy::custom(|attempt| {
     }
 });
 let session = Session::builder()
-    .browser(Browser::default_browser())
+    .browser(Browser::default())
     .redirect(policy)
     .build()?;
 # let _ = session;

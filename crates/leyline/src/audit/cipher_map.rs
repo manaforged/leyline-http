@@ -1,4 +1,4 @@
-pub fn cipher_id(name: &str) -> Option<u16> {
+pub(crate) fn cipher_id(name: &str) -> Option<u16> {
     Some(match name {
         "TLS_AES_128_GCM_SHA256" => 0x1301,
         "TLS_AES_256_GCM_SHA384" => 0x1302,
@@ -36,7 +36,7 @@ pub fn cipher_id(name: &str) -> Option<u16> {
     })
 }
 
-pub fn sigalg_id(name: &str) -> Option<u16> {
+pub(crate) fn sigalg_id(name: &str) -> Option<u16> {
     Some(match name {
         "ecdsa_secp256r1_sha256" => 0x0403,
         "ecdsa_secp384r1_sha384" => 0x0503,
@@ -61,7 +61,7 @@ pub fn sigalg_id(name: &str) -> Option<u16> {
     })
 }
 
-pub fn curve_id(name: &str) -> Option<u16> {
+pub(crate) fn curve_id(name: &str) -> Option<u16> {
     Some(match name {
         "SECP256R1" | "P-256" => 0x0017,
         "SECP384R1" | "P-384" => 0x0018,
@@ -74,7 +74,7 @@ pub fn curve_id(name: &str) -> Option<u16> {
     })
 }
 
-pub fn is_grease(val: u16) -> bool {
+pub(crate) fn is_grease(val: u16) -> bool {
     val & 0x0f0f == 0x0a0a
 }
 

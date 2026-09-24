@@ -194,7 +194,7 @@ is computed once per response and cached.
 # fn run() -> leyline::Result<()> {
 # tokio::runtime::Runtime::new().expect("runtime").block_on(async {
 let session = leyline::Session::builder()
-    .browser(leyline::Browser::default_browser())
+    .browser(leyline::Browser::default())
     .audit(true)
     .build()?;
 let resp = session.get("https://example.com/").await?;

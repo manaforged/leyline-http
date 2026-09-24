@@ -3,7 +3,7 @@ use std::pin::Pin;
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
-use leyline::{Browser, Error, Kind, Platform, ProtocolPolicy, Result, Session};
+use leyline::{Browser, Family, Platform, ProtocolPolicy, Session};
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -11,6 +11,7 @@ const PEET_URL: &str = "https://tls.peet.ws/api/all";
 const H3_GET_HOST: &str = "cloudflare-quic.com";
 const H3_ECHO_HOST: &str = "httpbin.agrd.workers.dev";
 const SMOKE_TIMEOUT: Duration = Duration::from_secs(25);
+type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 type SmokeFuture<'a> = Pin<Box<dyn Future<Output = Result<String>> + 'a>>;
 
 #[tokio::test]
@@ -74,8 +75,7 @@ async fn smoke_suite() {
             let s = Session::new();
             let mut r = s.get(PEET_URL).await?;
             let body = r.text().await.unwrap();
-            let _: Value =
-                serde_json::from_str(&body).map_err(|e| Error::new(Kind::Json).with_source(e))?;
+            let _: Value = serde_json::from_str(&body)?;
             ensure(
                 body.contains("http2") && body.contains("tls"),
                 "tls.peet response missing protocol sections",
@@ -309,12 +309,14 @@ async fn exact_fingerprint(session: Session, browser: Browser) -> Result<String>
     )?);
 
     let profile = browser.profile();
-    let expected_ja4 = profile.expected_ja4().ok_or_else(|| {
-        Error::new(Kind::Request).with_message(format!("{browser} profile missing expected JA4"))
-    })?;
-    let expected_h2 = normalize_akamai(profile.expected_h2_fingerprint().ok_or_else(|| {
-        Error::new(Kind::Request).with_message(format!("{browser} profile missing expected H2"))
-    })?);
+    let expected_ja4 = profile
+        .expected_ja4()
+        .ok_or_else(|| format!("{browser} profile missing expected JA4"))?;
+    let expected_h2 = normalize_akamai(
+        profile
+            .expected_h2_fingerprint()
+            .ok_or_else(|| format!("{browser} profile missing expected H2"))?,
+    );
 
     ensure(
         ja4 == expected_ja4,
@@ -365,8 +367,7 @@ async fn h1_wire_shape() -> Result<String> {
 
     let text = server
         .await
-        .map_err(|e| Error::new(Kind::Request).with_message(format!("h1 server task failed: {e}")))?
-        .map_err(|e| Error::new(Kind::Request).with_message(e))?;
+        .map_err(|e| format!("h1 server task failed: {e}"))??;
 
     ensure(
         text.starts_with("GET /wire?q=1 HTTP/1.1\r\n"),
@@ -432,17 +433,17 @@ async fn h3_post_body() -> Result<String> {
 }
 
 fn firefox() -> Result<Session> {
-    Session::builder()
-        .browser(Browser::default_firefox())
+    Ok(Session::builder()
+        .browser(Browser::latest(Family::Firefox))
         .platform(Platform::Windows)
-        .build()
+        .build()?)
 }
 
 fn safari() -> Result<Session> {
-    Session::builder()
+    Ok(Session::builder()
         .browser(Browser::Safari26)
         .platform(Platform::MacOS)
-        .build()
+        .build()?)
 }
 
 fn smoke<'a>(fut: impl Future<Output = Result<String>> + 'a) -> SmokeFuture<'a> {
@@ -470,14 +471,14 @@ async fn run(name: &str, passed: &mut u32, failed: &mut u32, fut: SmokeFuture<'_
 fn json_str<'a>(value: &'a Value, name: &str) -> Result<&'a str> {
     value
         .as_str()
-        .ok_or_else(|| Error::new(Kind::Request).with_message(format!("missing {name}")))
+        .ok_or_else(|| format!("missing {name}").into())
 }
 
 fn ensure(condition: bool, message: impl Into<String>) -> Result<()> {
     if condition {
         Ok(())
     } else {
-        Err(Error::new(Kind::Request).with_message(message.into()))
+        Err(message.into().into())
     }
 }
 

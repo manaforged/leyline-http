@@ -91,7 +91,7 @@ fn chrome_reports_stock_brand() {
 fn firefox_and_bare_have_no_chromium_brand() {
     assert_eq!(
         Session::builder()
-            .browser(Browser::default_firefox())
+            .browser(Browser::latest(crate::profile::Family::Firefox))
             .build()
             .unwrap()
             .brand(),

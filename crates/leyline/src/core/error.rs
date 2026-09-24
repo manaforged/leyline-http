@@ -70,7 +70,6 @@ struct Inner {
     url: Option<Uri>,
     status: Option<StatusCode>,
     message: Option<Cow<'static, str>>,
-    body: Option<Vec<u8>>,
     alpn: Option<String>,
 }
 
@@ -79,7 +78,7 @@ pub struct Error {
 }
 
 impl Error {
-    pub fn new(kind: Kind) -> Self {
+    pub(crate) fn new(kind: Kind) -> Self {
         Self {
             inner: Box::new(Inner {
                 kind,
@@ -87,13 +86,12 @@ impl Error {
                 url: None,
                 status: None,
                 message: None,
-                body: None,
                 alpn: None,
             }),
         }
     }
 
-    pub fn with_source(mut self, source: impl Into<Source>) -> Self {
+    pub(crate) fn with_source(mut self, source: impl Into<Source>) -> Self {
         self.inner.source = Some(source.into());
         self
     }
@@ -103,18 +101,13 @@ impl Error {
         self
     }
 
-    pub fn with_status(mut self, status: StatusCode) -> Self {
+    pub(crate) fn with_status(mut self, status: StatusCode) -> Self {
         self.inner.status = Some(status);
         self
     }
 
-    pub fn with_message(mut self, message: impl Into<Cow<'static, str>>) -> Self {
+    pub(crate) fn with_message(mut self, message: impl Into<Cow<'static, str>>) -> Self {
         self.inner.message = Some(message.into());
-        self
-    }
-
-    pub(crate) fn with_body(mut self, body: Vec<u8>) -> Self {
-        self.inner.body = Some(body);
         self
     }
 
@@ -127,12 +120,8 @@ impl Error {
         self.inner.kind
     }
 
-    pub fn message(&self) -> Option<&str> {
+    pub(crate) fn message(&self) -> Option<&str> {
         self.inner.message.as_deref()
-    }
-
-    pub fn body_prefix(&self) -> Option<&[u8]> {
-        self.inner.body.as_deref()
     }
 
     pub fn status(&self) -> Option<StatusCode> {
@@ -195,19 +184,7 @@ impl Error {
         self.inner.kind == Kind::Status
     }
 
-    pub fn is_redirect(&self) -> bool {
-        self.inner.kind == Kind::Redirect
-    }
-
-    pub fn is_body(&self) -> bool {
-        self.inner.kind == Kind::Body
-    }
-
-    pub fn is_decode(&self) -> bool {
-        self.inner.kind == Kind::Decode
-    }
-
-    pub fn is_connection_closed(&self) -> bool {
+    pub(crate) fn is_connection_closed(&self) -> bool {
         if self.io().is_some_and(|e| {
             matches!(
                 e.kind(),

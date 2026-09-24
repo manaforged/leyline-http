@@ -41,7 +41,7 @@ use leyline::{Browser, Session};
 
 # fn run() -> leyline::Result<()> {
 let session = Session::builder()
-    .browser(Browser::default_browser())
+    .browser(Browser::default())
     .trace(TracingTrace)
     .build()?;
 # let _ = session;

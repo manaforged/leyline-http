@@ -20,8 +20,6 @@ struct FamilyRow {
     browsers: Vec<String>,
     #[serde(default)]
     default: bool,
-    #[serde(default)]
-    cookie_pass: bool,
 }
 
 #[derive(Deserialize)]
@@ -180,18 +178,6 @@ fn hello<'a>(rows: &'a [Row], row: &Row) -> BuildResult<&'a Row> {
     )
 }
 
-fn hellos<'a>(rows: &'a [Row], browser: &str) -> BuildResult<Vec<&'a Row>> {
-    let mut reps: Vec<&Row> = Vec::new();
-    for row in rows.iter().filter(|r| r.meta.browser == browser) {
-        let rep = hello(rows, row)?;
-        if !reps.iter().any(|r| r.meta.variant == rep.meta.variant) {
-            reps.push(rep);
-        }
-    }
-    reps.sort_by(|a, b| b.meta.version.cmp(&a.meta.version));
-    Ok(reps)
-}
-
 fn variant_list<'a>(rows: impl IntoIterator<Item = &'a Row>) -> String {
     rows.into_iter()
         .map(|r| format!("Browser::{}", r.meta.variant))
@@ -249,23 +235,11 @@ fn render(rows: &[Row], families: &Families) -> BuildResult<String> {
         "const DEFAULT_FAMILY: Family = Family::{};",
         default.variant
     )?;
-    let pass = families
-        .family
-        .iter()
-        .zip(&family_latest)
-        .filter(|(f, _)| f.cookie_pass)
-        .map(|(_, r)| *r);
-    writeln!(
-        out,
-        "const COOKIE_PASS: &[Browser] = &[{}];",
-        variant_list(pass)
-    )?;
     writeln!(out, "const ALL: &[Browser] = &[{}];", variant_list(rows))?;
 
     writeln!(out, "const ENTRIES: &[Entry] = &[")?;
     for row in rows {
         let rep = hello(rows, row)?;
-        let reps = hellos(rows, &row.meta.browser)?;
         let mut platforms = Vec::new();
         for (platform, browser) in &row.meta.platform_browser {
             let target = latest(rows, |r| &r.meta.browser == browser).ok_or_else(|| {
@@ -282,14 +256,14 @@ fn render(rows: &[Row], families: &Families) -> BuildResult<String> {
             .map_or_else(|| "None".to_string(), |m| format!("Some({m})"));
         writeln!(
             out,
-            "    Entry {{ key: {:?}, version: {}, name: {:?}, hello: Browser::{}, hellos: &[{}], \
+            "    Entry {{ family: Family::{}, key: {:?}, version: {}, name: {:?}, hello: Browser::{}, \
              chromium_major: {major}, platforms: &[{}], \
              source: include_str!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/profiles/{}\")) }},",
+            families.family[row.family].variant,
             row.meta.browser,
             row.meta.version,
             row.meta.name,
             rep.meta.variant,
-            variant_list(reps),
             platforms.join(", "),
             row.path,
         )?;

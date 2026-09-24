@@ -23,7 +23,7 @@ fn adapt(resp: Response) -> Result<HttpResponse<Body>> {
     for (name, value) in resp.headers() {
         builder = builder.header(name, value);
     }
-    let body = Body::stream(resp.into_stream()?);
+    let body = Body::stream(resp.into_stream()?, None);
     builder
         .body(body)
         .map_err(|e| crate::core::Error::new(Kind::Request).with_source(e))

@@ -173,9 +173,8 @@ let resp = session.post("https://example.com/upload").multipart(form).await?;
 
 ### Streaming bodies
 
-`Body::stream` wraps any `Stream` of `io::Result<Bytes>`.
-`Body::stream_with_length` does the same and declares an exact
-`Content-Length`. Give the length whenever you know it: a body with no length
+`Body::stream(s, len)` wraps any `Stream` of `io::Result<Bytes>`. Pass
+`Some(n)` to declare an exact `Content-Length`, or `None`. Give the length whenever you know it: a body with no length
 hint is sent chunked. See [Streaming](streaming.md). The example needs `bytes`
 and `futures-util` in your manifest.
 
@@ -186,7 +185,7 @@ use leyline::Body;
 # async fn run() -> leyline::Result<()> {
 let session = leyline::Session::new();
 let chunks = (0..4).map(|_| Ok::<Bytes, std::io::Error>(Bytes::from_static(b"data")));
-let body = Body::stream_with_length(futures_util::stream::iter(chunks), 16);
+let body = Body::stream(futures_util::stream::iter(chunks), Some(16));
 let resp = session
     .post("https://example.com/upload")
     .header("content-type", "application/octet-stream")

@@ -288,44 +288,13 @@ impl WsConnection {
                     .is_some_and(|s| s.contains(H2_NO_CONNECT_PROTOCOL))
     }
 
-    pub async fn send(&mut self, msg: &str) -> Result<()> {
-        match &mut self.inner {
-            WsInner::H1(s) => s
-                .send(Message::Text(msg.into()))
-                .await
-                .map_err(|e| Error::new(Kind::Request).with_message(format!("ws send: {e}"))),
-            WsInner::H2(s) => s
-                .send(Message::Text(msg.into()))
-                .await
-                .map_err(|e| Error::new(Kind::Request).with_message(format!("ws send: {e}"))),
-        }
-    }
-
-    pub async fn send_binary(&mut self, data: Vec<u8>) -> Result<()> {
-        match &mut self.inner {
-            WsInner::H1(s) => s
-                .send(Message::Binary(data.into()))
-                .await
-                .map_err(|e| Error::new(Kind::Request).with_message(format!("ws send: {e}"))),
-            WsInner::H2(s) => s
-                .send(Message::Binary(data.into()))
-                .await
-                .map_err(|e| Error::new(Kind::Request).with_message(format!("ws send: {e}"))),
-        }
-    }
-
-    pub async fn send_raw(&mut self, msg: WsMessage) -> Result<()> {
+    pub async fn send(&mut self, msg: WsMessage) -> Result<()> {
         let msg = msg.into_wire();
         match &mut self.inner {
-            WsInner::H1(s) => s
-                .send(msg)
-                .await
-                .map_err(|e| Error::new(Kind::Request).with_message(format!("ws send: {e}"))),
-            WsInner::H2(s) => s
-                .send(msg)
-                .await
-                .map_err(|e| Error::new(Kind::Request).with_message(format!("ws send: {e}"))),
+            WsInner::H1(s) => s.send(msg).await,
+            WsInner::H2(s) => s.send(msg).await,
         }
+        .map_err(|e| Error::new(Kind::Request).with_message(format!("ws send: {e}")))
     }
 
     pub async fn recv(&mut self) -> Result<Option<WsMessage>> {
@@ -351,10 +320,6 @@ impl WsConnection {
                 .await
                 .map_err(|e| Error::new(Kind::Request).with_message(format!("ws close: {e}"))),
         }
-    }
-
-    pub fn is_http2(&self) -> bool {
-        matches!(self.inner, WsInner::H2(_))
     }
 
     pub fn protocol(&self) -> Option<&str> {
@@ -406,15 +371,7 @@ pub struct WsSink {
 }
 
 impl WsSink {
-    pub async fn send(&mut self, msg: &str) -> Result<()> {
-        self.send_raw(WsMessage::Text(msg.to_owned())).await
-    }
-
-    pub async fn send_binary(&mut self, data: Vec<u8>) -> Result<()> {
-        self.send_raw(WsMessage::Binary(data)).await
-    }
-
-    pub async fn send_raw(&mut self, msg: WsMessage) -> Result<()> {
+    pub async fn send(&mut self, msg: WsMessage) -> Result<()> {
         let msg = msg.into_wire();
         match &mut self.inner {
             WsSinkInner::H1(s) => s.send(msg).await,

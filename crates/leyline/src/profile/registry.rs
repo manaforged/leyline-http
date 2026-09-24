@@ -81,18 +81,20 @@ impl ProfileRegistry {
         &BUILTIN
     }
 
-    pub fn new() -> Self {
+    fn new() -> Self {
         Self {
             profiles: HashMap::new(),
         }
     }
 
-    pub fn builtin() -> Self {
-        let mut reg = Self::new();
-        for browser in Browser::all() {
-            reg.load_toml(browser.profile_source());
+    bench_pub! {
+        fn builtin() -> Self {
+            let mut reg = Self::new();
+            for browser in Browser::all() {
+                reg.load_toml(browser.profile_source());
+            }
+            reg
         }
-        reg
     }
 
     pub fn load(dir: &Path) -> Result<Self, ProfileError> {
@@ -133,16 +135,14 @@ impl ProfileRegistry {
         self.profiles.get(&(browser.to_string(), version))
     }
 
-    pub fn get_browser(&self, browser: Browser) -> Option<&BrowserProfile> {
-        let (name, version) = browser.profile_key();
-        self.get(name, version)
+    bench_pub! {
+        fn get_browser(&self, browser: Browser) -> Option<&BrowserProfile> {
+            let (name, version) = browser.profile_key();
+            self.get(name, version)
+        }
     }
 
-    pub fn len(&self) -> usize {
-        self.profiles.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.profiles.is_empty()
     }
 }

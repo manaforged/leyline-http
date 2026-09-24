@@ -82,7 +82,7 @@ fn env_no_proxy_never_bypasses_explicit_proxies() {
         Some("http://sess:1"),
         "env NO_PROXY bypassed an explicit session proxy"
     );
-    let cfg = cfg_with_env_no_proxy("target.test").all("http://rule:1");
+    let cfg = cfg_with_env_no_proxy("target.test").with_rule(ProxyRule::all("http://rule:1"));
     assert_eq!(
         cfg.proxy_for(&url, None),
         Some("http://rule:1"),
@@ -112,7 +112,11 @@ fn explicit_no_proxy_bypasses_all_proxies() {
             .proxy_for(&url, None),
         None
     );
-    assert_eq!(cfg.all("http://rule:1").proxy_for(&url, None), None);
+    assert_eq!(
+        cfg.with_rule(ProxyRule::all("http://rule:1"))
+            .proxy_for(&url, None),
+        None
+    );
 }
 
 #[test]
@@ -144,17 +148,6 @@ fn proxy_url_validates_supported_schemes_and_hosts() {
             .as_str(),
         "https://proxy.example:8443"
     );
-}
-
-#[test]
-fn proxy_url_constructors_enforce_scheme() {
-    assert!(ProxyUrl::http("http://proxy.example:8080").is_ok());
-    assert!(ProxyUrl::https("https://proxy.example:8443").is_ok());
-    assert!(ProxyUrl::socks5("socks5://proxy.example:1080").is_ok());
-    assert!(ProxyUrl::socks5h("socks5h://proxy.example:1080").is_ok());
-    assert!(ProxyUrl::http("socks5://proxy.example:1080").is_err());
-    assert!(ProxyUrl::https("http://proxy.example:8080").is_err());
-    assert!(ProxyUrl::socks5("http://proxy.example:8080").is_err());
 }
 
 #[test]

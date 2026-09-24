@@ -13,7 +13,7 @@ let session = leyline::Session::new();
 session.get("https://example.com/login").await?;
 
 let jar = session.cookies();
-println!("{} cookies", jar.len());
+println!("{} cookies", jar.all_cookies().len());
 if let Some(id) = jar.get_cookie("https://example.com/", "session_id") {
     println!("session_id={id}");
 }
@@ -25,23 +25,17 @@ Useful jar methods:
 
 - `set_cookie(url, name, value)` and `get_cookie(url, name)` for one cookie
   scoped to a URL.
-- `get_named`, `contains_named`, `set_named`, and `set_named_on` when you know
-  the name but not the URL.
-- `remove_named`, `remove_all_named`, `remove_named_for_host`, and `clear` to
-  delete.
+- `remove_named` and `clear` to delete.
 - `all_cookies()` for a snapshot sorted by domain then name.
 - `load_cookies(header, url)` and `export_cookies(url)` to move a `Cookie`
   header string in and out.
-- `len()` and `is_empty()` to size the jar.
+- `cookie_header(url)` for the `Cookie` header the jar sends to a URL.
 
 ## Sharing and forking
 
 `Jar` is a handle over shared state, so `jar.clone()` gives you another handle
 onto the same cookies. Two sessions holding clones of one jar see each other's
 logins.
-
-`deep_clone()` forks instead: it copies every cookie into an independent jar,
-so later writes do not cross.
 
 ```rust,no_run
 use leyline::cookie::Jar;
@@ -51,16 +45,11 @@ let jar = Jar::new();
 jar.set_cookie("https://example.com/", "session_id", "abc");
 
 let shared = jar.clone();
-let forked = jar.deep_clone();
-
 jar.set_cookie("https://example.com/", "extra", "1");
-assert!(shared.contains_named("extra"));
-assert!(!forked.contains_named("extra"));
+assert!(shared.get_cookie("https://example.com/", "extra").is_some());
 # Ok(())
 # }
 ```
-
-`merge(other)` copies another jar's cookies into this one.
 
 ## Give a session its own jar
 

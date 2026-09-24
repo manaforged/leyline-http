@@ -20,15 +20,20 @@ pub use happy_eyeballs::HappyEyeballsConfig;
 pub use resolver::{ResolveFuture, Resolver, SystemResolver};
 pub use trust::{ClientIdentity, TlsTrustConfig};
 
+#[cfg(feature = "bench-internals")]
 #[doc(hidden)]
 pub use connector::FingerprintConnector;
+#[cfg(not(feature = "bench-internals"))]
+pub(crate) use connector::FingerprintConnector;
 
 pub(crate) use builder::apply_profile_with_trust;
+#[cfg(any(feature = "unstable-bssl", feature = "bench-internals"))]
 pub(crate) use builder::build_ssl_context;
 pub(crate) use session_cache::SessionCache;
 pub(crate) use stream::TlsIo;
 pub(crate) use trust::install_verifier_ctx;
 
+#[cfg(any(feature = "unstable-bssl", feature = "bench-internals"))]
 pub struct TlsContext(
     #[cfg_attr(
         not(feature = "unstable-bssl"),
@@ -37,6 +42,7 @@ pub struct TlsContext(
     leyline_bssl::ssl::SslContextBuilder,
 );
 
+#[cfg(any(feature = "unstable-bssl", feature = "bench-internals"))]
 impl TlsContext {
     pub fn from_profile(
         profile: &crate::profile::BrowserProfile,
@@ -56,8 +62,7 @@ impl TlsContext {
     }
 }
 
-#[doc(hidden)]
-pub struct TlsStream {
+pub(crate) struct TlsStream {
     pub(crate) stream: TlsIo,
     pub alpn: Option<Vec<u8>>,
     pub peer_cert_der: Option<Vec<u8>>,

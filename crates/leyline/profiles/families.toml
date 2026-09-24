@@ -3,7 +3,6 @@ variant = "Chrome"
 label = "Chrome"
 browsers = ["chrome"]
 default = true
-cookie_pass = true
 
 [[family]]
 variant = "Brave"
@@ -14,19 +13,16 @@ browsers = ["brave"]
 variant = "Firefox"
 label = "Firefox"
 browsers = ["firefox"]
-cookie_pass = true
 
 [[family]]
 variant = "Safari"
 label = "Safari"
 browsers = ["safari"]
-cookie_pass = true
 
 [[family]]
 variant = "SafariIos"
 label = "Safari iOS"
 browsers = ["safari-ios"]
-cookie_pass = true
 
 [[family]]
 variant = "CfNetwork"

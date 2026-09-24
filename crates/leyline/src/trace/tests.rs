@@ -159,28 +159,18 @@ async fn done_carries_the_error() {
 }
 
 #[tokio::test]
-async fn timing_fills_the_response_timing_numbers() {
+async fn response_timing_reports_a_fresh_dial() {
     let addr = serve(1).await;
-    let timing = Arc::new(super::Timing::new());
-    let session = Session::builder()
-        .trace(Arc::clone(&timing))
-        .build()
+    let session = Session::builder().build().unwrap();
+    let resp = session
+        .get(&format!("http://{addr}/one"))
+        .send()
+        .await
         .unwrap();
 
-    drop(
-        session
-            .get(&format!("http://{addr}/one"))
-            .send()
-            .await
-            .unwrap(),
-    );
-
-    let snapshot = timing.snapshot();
-    assert!(!snapshot.reused, "a fresh dial is not a reuse");
-    assert!(
-        snapshot.connect_ms.is_some(),
-        "a fresh dial records connect"
-    );
+    let timing = resp.timing();
+    assert!(!timing.reused, "a fresh dial is not a reuse");
+    assert!(timing.connect_ms.is_some(), "a fresh dial records connect");
 }
 
 #[tokio::test]

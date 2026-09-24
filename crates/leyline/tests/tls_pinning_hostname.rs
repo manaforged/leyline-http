@@ -226,7 +226,6 @@ async fn pinned_cert_rejects_mismatched_hostname() {
         .await;
     let err = res.err().expect("hostname mismatch must fail");
     assert!(matches!(err, TlsError::Hostname(_)), "got {err:?}");
-    assert!(!err.is_retryable());
 }
 
 #[tokio::test]
@@ -244,7 +243,6 @@ async fn default_verifier_reports_hostname_mismatch() {
         .err()
         .expect("hostname mismatch must fail");
     assert!(matches!(err, TlsError::Hostname(_)), "got {err:?}");
-    assert!(!err.is_retryable());
 }
 
 #[tokio::test]
@@ -270,7 +268,6 @@ async fn pinned_cert_rejects_mismatched_ip() {
         .await;
     let err = res.err().expect("IP mismatch must fail");
     assert!(matches!(err, TlsError::Hostname(_)), "got {err:?}");
-    assert!(!err.is_retryable());
 }
 
 #[tokio::test]
@@ -287,7 +284,6 @@ async fn certificate_and_pinning_failures_are_permanent() {
         .err()
         .expect("untrusted chain must fail");
     assert!(matches!(err, TlsError::Certificate(_)), "got {err:?}");
-    assert!(!err.is_retryable());
 
     let addr = spawn_tls_server(&r#gen).await;
     let trust = TlsTrustConfig::new()
@@ -301,7 +297,6 @@ async fn certificate_and_pinning_failures_are_permanent() {
         .err()
         .expect("wrong pin must fail");
     assert!(matches!(err, TlsError::Pinning(_)), "got {err:?}");
-    assert!(!err.is_retryable());
 }
 
 #[tokio::test]
@@ -319,7 +314,6 @@ async fn tcp_connect_failure_is_retryable() {
         .err()
         .expect("closed listener must reject the TCP connection");
     assert!(matches!(err, TlsError::TcpConnect(_)), "got {err:?}");
-    assert!(err.is_retryable());
 }
 
 #[tokio::test]
@@ -340,7 +334,6 @@ async fn handshake_transport_failure_is_retryable() {
         .err()
         .expect("peer closing during the handshake must fail");
     assert!(matches!(err, TlsError::HandshakeIo(_)), "got {err:?}");
-    assert!(err.is_retryable());
 }
 
 #[tokio::test]
@@ -365,5 +358,4 @@ async fn handshake_protocol_failure_is_retryable() {
         .expect("a non-TLS peer must fail the handshake");
     drop(peer.await.expect("peer task completes"));
     assert!(matches!(err, TlsError::Handshake(_)), "got {err:?}");
-    assert!(err.is_retryable());
 }

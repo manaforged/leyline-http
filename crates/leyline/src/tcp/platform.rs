@@ -26,7 +26,7 @@ unsafe fn set_int_opt(
 }
 
 #[cfg(target_os = "linux")]
-pub fn apply_platform_options(socket: &Socket, profile: &TcpProfile, is_v6: bool) {
+pub(super) fn apply_platform_options(socket: &Socket, profile: &TcpProfile, is_v6: bool) {
     use std::os::unix::io::AsRawFd;
     let fd = socket.as_raw_fd();
 
@@ -77,7 +77,7 @@ pub fn apply_platform_options(socket: &Socket, profile: &TcpProfile, is_v6: bool
 }
 
 #[cfg(target_os = "macos")]
-pub fn apply_platform_options(socket: &Socket, profile: &TcpProfile, is_v6: bool) {
+pub(super) fn apply_platform_options(socket: &Socket, profile: &TcpProfile, is_v6: bool) {
     use std::os::unix::io::AsRawFd;
     let fd = socket.as_raw_fd();
 
@@ -106,7 +106,7 @@ pub fn apply_platform_options(socket: &Socket, profile: &TcpProfile, is_v6: bool
 }
 
 #[cfg(target_os = "windows")]
-pub fn apply_platform_options(socket: &Socket, profile: &TcpProfile, is_v6: bool) {
+pub(super) fn apply_platform_options(socket: &Socket, profile: &TcpProfile, is_v6: bool) {
     use std::os::windows::io::AsRawSocket;
 
     if profile.df {
@@ -142,4 +142,4 @@ pub fn apply_platform_options(socket: &Socket, profile: &TcpProfile, is_v6: bool
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-pub fn apply_platform_options(_socket: &Socket, _profile: &TcpProfile, _is_v6: bool) {}
+pub(super) fn apply_platform_options(_socket: &Socket, _profile: &TcpProfile, _is_v6: bool) {}

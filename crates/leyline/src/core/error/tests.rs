@@ -98,33 +98,21 @@ fn h2_goaway_and_refused_stream_are_connection_closed() {
 }
 
 #[test]
-fn status_kind_carries_status_and_body() {
-    let err = Error::new(Kind::Status)
-        .with_status(http::StatusCode::FORBIDDEN)
-        .with_body(b"denied".to_vec());
+fn status_kind_carries_status() {
+    let err = Error::new(Kind::Status).with_status(http::StatusCode::FORBIDDEN);
     assert!(err.is_status());
     assert_eq!(err.status().map(|s| s.as_u16()), Some(403));
-    assert_eq!(err.body_prefix(), Some(&b"denied"[..]));
     assert!(!err.is_timeout());
     assert!(!err.is_connect());
 }
 
 #[test]
 fn predicates_are_kind_scoped() {
-    assert!(Error::new(Kind::Redirect).is_redirect());
-    assert!(!Error::new(Kind::Body).is_redirect());
-    assert!(Error::new(Kind::Body).is_body());
-    assert!(!Error::new(Kind::Decode).is_body());
-    assert!(Error::new(Kind::Decode).is_decode());
-    assert!(!Error::new(Kind::Status).is_decode());
     for kind in [Kind::Builder, Kind::Request, Kind::Config, Kind::Proxy] {
         let err = Error::new(kind);
         assert!(!err.is_timeout(), "{kind} must not be a timeout");
         assert!(!err.is_connect(), "{kind} must not be a connect failure");
         assert!(!err.is_status(), "{kind} must not carry a status");
-        assert!(!err.is_body(), "{kind} must not be a body failure");
-        assert!(!err.is_decode(), "{kind} must not be a decode failure");
-        assert!(!err.is_redirect(), "{kind} must not be a redirect failure");
     }
 }
 

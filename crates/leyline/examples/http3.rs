@@ -6,7 +6,7 @@ const URL: &str = "https://cloudflare.com";
 #[tokio::main]
 async fn main() -> leyline::Result<()> {
     let session = Session::builder()
-        .browser(Browser::default_browser())
+        .browser(Browser::default())
         .protocol(ProtocolPolicy::Http3)
         .build()?;
 

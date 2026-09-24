@@ -1,9 +1,9 @@
 use std::future::Future;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use crate::{Error, HttpVersion, ResponseTiming};
+use crate::{Error, HttpVersion};
 
 #[non_exhaustive]
 pub struct Dns<'a> {
@@ -235,49 +235,6 @@ impl Trace for TracingTrace {
 
 fn ms(d: Duration) -> u32 {
     u32::try_from(d.as_millis()).unwrap_or(u32::MAX)
-}
-
-#[derive(Debug, Default)]
-pub struct Timing {
-    reused: AtomicBool,
-    fresh: AtomicBool,
-    connect_ms: AtomicU32,
-    send_ms: AtomicU32,
-    total_ms: AtomicU32,
-}
-
-impl Timing {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn snapshot(&self) -> ResponseTiming {
-        ResponseTiming {
-            reused: self.reused.load(Ordering::Relaxed),
-            connect_ms: self
-                .fresh
-                .load(Ordering::Relaxed)
-                .then(|| self.connect_ms.load(Ordering::Relaxed)),
-            send_ms: self.send_ms.load(Ordering::Relaxed),
-            total_ms: self.total_ms.load(Ordering::Relaxed),
-        }
-    }
-}
-
-impl Trace for Timing {
-    fn connect(&self, ev: &Connect<'_>) {
-        self.reused.store(ev.reused, Ordering::Relaxed);
-        self.fresh.store(!ev.reused, Ordering::Relaxed);
-        self.connect_ms.store(ms(ev.elapsed), Ordering::Relaxed);
-    }
-
-    fn head(&self, ev: &Head<'_>) {
-        self.send_ms.store(ms(ev.elapsed), Ordering::Relaxed);
-    }
-
-    fn done(&self, ev: &Done<'_>) {
-        self.total_ms.store(ms(ev.elapsed), Ordering::Relaxed);
-    }
 }
 
 impl<T: Trace> Trace for Arc<T> {

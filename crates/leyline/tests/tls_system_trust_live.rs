@@ -3,7 +3,7 @@
 #[ignore = "live: needs UDP network access and current public PKI"]
 async fn macos_system_trust_accepts_public_quic_chain() {
     let session = leyline::Session::builder()
-        .browser(leyline::Browser::default_browser())
+        .browser(leyline::Browser::default())
         .protocol(leyline::ProtocolPolicy::Http3)
         .tls_trust(leyline::TlsTrustConfig::new().without_env_roots())
         .timeout(std::time::Duration::from_secs(10))
@@ -23,7 +23,7 @@ async fn macos_system_trust_accepts_public_quic_chain() {
 #[ignore = "live: needs network and current public PKI"]
 async fn macos_system_trust_accepts_public_chain() {
     let session = leyline::Session::builder()
-        .browser(leyline::Browser::default_browser())
+        .browser(leyline::Browser::default())
         .tls_trust(leyline::TlsTrustConfig::new().without_env_roots())
         .timeout(std::time::Duration::from_secs(10))
         .build()

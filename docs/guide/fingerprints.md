@@ -23,8 +23,9 @@ overrides sit beside it.
 
 **TCP.** `TcpProfile` carries the socket options that shape the SYN: TTL,
 MSS, window size, window scale, the don't-fragment bit, and `TCP_NODELAY`.
-`Platform::tcp_profile()` picks the profile for an OS, and
-`SessionBuilder::tcp_profile` overrides it. Each platform applies what it
+`TcpProfile::WINDOWS`, `MACOS`, `LINUX`, and `IOS` hold the per-OS values.
+The session picks one from its platform, and `SessionBuilder::tcp_profile`
+overrides it. Each platform applies what it
 can: Linux applies TTL, MSS, don't-fragment, and derives a
 `TCP_WINDOW_CLAMP` from the window fields; macOS applies TTL, MSS, and
 don't-fragment; Windows applies TTL and don't-fragment. The audit's JA4T is
@@ -92,19 +93,17 @@ and every bundled one is compiled into the binary.
 The [profile reference](profiles.md) lists what ships, which JA4 reference values
 are gated, and the update cadence.
 
-`ProfileRegistry::global()` borrows the built-in set, `get_browser` looks one
-up by `Browser`, and `get(name, version)` looks one up by name and version.
+`ProfileRegistry::global()` borrows the built-in set, and
+`get(name, version)` looks one up by name and version.
 `Browser::profile()` is the short path to the same value.
 
 ```rust
 use leyline::Browser;
 use leyline::profile::ProfileRegistry;
 
-let registry = ProfileRegistry::global();
-assert!(!registry.is_empty());
-
-let profile = registry
-    .get_browser(Browser::Chrome152)
+let browser = Browser::Chrome152;
+let profile = ProfileRegistry::global()
+    .get(browser.family(), browser.version())
     .expect("chrome 152 is bundled");
 assert_eq!(profile.meta.version, 152);
 

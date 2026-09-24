@@ -77,7 +77,7 @@ async fn dx_helpers_accept_common_pair_shapes_and_header_shortcuts() {
     let _bare = Session::builder().build().unwrap();
     let _chrome = Session::new();
     let _firefox = Session::builder()
-        .browser(Browser::default_firefox())
+        .browser(Browser::latest(leyline::Family::Firefox))
         .protocol(ProtocolPolicy::Http1)
         .build()
         .unwrap();
@@ -267,7 +267,7 @@ async fn redirect_same_origin_preserves_authorization() {
 async fn caller_dnt_wins_over_edge_brand_overlay() {
     let mut server = RawServer::start(vec![RawResponse::ok()]).await;
     let session = Session::builder()
-        .browser(Browser::default_browser())
+        .browser(Browser::default())
         .brand(ChromiumBrand::Edge)
         .protocol(ProtocolPolicy::Http1)
         .build()

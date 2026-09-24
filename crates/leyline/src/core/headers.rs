@@ -31,7 +31,7 @@ impl HeaderList {
         Self::default()
     }
 
-    pub fn from_pairs<N, V>(headers: Vec<(N, V)>) -> Result<Self>
+    pub(crate) fn from_pairs<N, V>(headers: Vec<(N, V)>) -> Result<Self>
     where
         N: TryInto<HeaderName>,
         V: TryInto<HeaderValue>,
@@ -43,7 +43,7 @@ impl HeaderList {
         Ok(list)
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
 
@@ -72,7 +72,7 @@ impl HeaderList {
         Ok(())
     }
 
-    pub fn append_anchored(
+    pub(crate) fn append_anchored(
         &mut self,
         anchor: HeaderAnchor,
         n: impl TryInto<HeaderName>,

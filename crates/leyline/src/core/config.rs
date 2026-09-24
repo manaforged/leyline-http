@@ -42,45 +42,8 @@ impl ProxyUrl {
         })
     }
 
-    fn parse_scheme(raw: impl AsRef<str>, expected: &'static str) -> crate::core::Result<Self> {
-        let raw = raw.as_ref().trim();
-        let parsed = Self::parse_inner(raw)?;
-        if parsed.scheme() != expected {
-            return Err(crate::core::Error::new(Kind::Config).with_message(format!(
-                "expected {expected} proxy URL, got {:?}",
-                parsed.scheme()
-            )));
-        }
-        if parsed.host_str().is_none() {
-            return Err(
-                crate::core::Error::new(Kind::Config).with_message("proxy URL must include a host")
-            );
-        }
-        Ok(Self(raw.to_string()))
-    }
-
-    pub fn http(raw: impl AsRef<str>) -> crate::core::Result<Self> {
-        Self::parse_scheme(raw, "http")
-    }
-
-    pub fn https(raw: impl AsRef<str>) -> crate::core::Result<Self> {
-        Self::parse_scheme(raw, "https")
-    }
-
-    pub fn socks5(raw: impl AsRef<str>) -> crate::core::Result<Self> {
-        Self::parse_scheme(raw, "socks5")
-    }
-
-    pub fn socks5h(raw: impl AsRef<str>) -> crate::core::Result<Self> {
-        Self::parse_scheme(raw, "socks5h")
-    }
-
-    pub fn as_str(&self) -> &str {
+    pub(crate) fn as_str(&self) -> &str {
         &self.0
-    }
-
-    pub fn into_string(self) -> String {
-        self.0
     }
 }
 
@@ -163,11 +126,6 @@ impl ProxyConfig {
             .map(|r| r.url.as_str())
     }
 
-    pub fn all(mut self, proxy_url: impl Into<String>) -> Self {
-        self.rules.push(ProxyRule::all(proxy_url));
-        self
-    }
-
     pub fn no_proxy(mut self, no_proxy: NoProxy) -> Self {
         self.no_proxy = no_proxy;
         self.no_proxy_explicit = true;
@@ -179,7 +137,7 @@ impl ProxyConfig {
         self
     }
 
-    pub fn uses_env(&self) -> bool {
+    pub(crate) fn uses_env(&self) -> bool {
         self.use_env
     }
 
@@ -272,7 +230,7 @@ impl ProxyRule {
         )
     }
 
-    pub fn url(&self) -> &str {
+    pub(crate) fn url(&self) -> &str {
         &self.url
     }
 }
@@ -290,7 +248,7 @@ pub struct NoProxy {
 }
 
 impl NoProxy {
-    pub fn from_string(raw: &str) -> Option<Self> {
+    pub(crate) fn from_string(raw: &str) -> Option<Self> {
         let patterns: Vec<String> = raw
             .split(',')
             .map(str::trim)
@@ -300,7 +258,7 @@ impl NoProxy {
         (!patterns.is_empty()).then_some(Self { patterns })
     }
 
-    pub fn from_env() -> Option<Self> {
+    pub(crate) fn from_env() -> Option<Self> {
         std::env::var("NO_PROXY")
             .ok()
             .or_else(|| std::env::var("no_proxy").ok())
@@ -317,7 +275,7 @@ impl NoProxy {
         }
     }
 
-    pub fn matches(&self, host: &str) -> bool {
+    pub(crate) fn matches(&self, host: &str) -> bool {
         let host = normalize_host(host);
         self.patterns.iter().any(|raw| pattern_matches(&host, raw))
     }
@@ -359,15 +317,6 @@ impl DnsConfig {
     pub fn resolve_host(mut self, host: impl AsRef<str>, addr: SocketAddr) -> Self {
         self.overrides
             .insert(normalize_host(host.as_ref()), vec![addr]);
-        self
-    }
-
-    pub fn resolve_host_to_addrs<I>(mut self, host: impl AsRef<str>, addrs: I) -> Self
-    where
-        I: IntoIterator<Item = SocketAddr>,
-    {
-        self.overrides
-            .insert(normalize_host(host.as_ref()), addrs.into_iter().collect());
         self
     }
 
@@ -568,16 +517,6 @@ impl SocketConfig {
         self
     }
 
-    pub fn local_ipv4(mut self, addr: impl Into<Option<Ipv4Addr>>) -> Self {
-        self.local_ipv4 = addr.into();
-        self
-    }
-
-    pub fn local_ipv6(mut self, addr: impl Into<Option<Ipv6Addr>>) -> Self {
-        self.local_ipv6 = addr.into();
-        self
-    }
-
     pub fn tcp_nodelay(mut self, on: impl Into<Option<bool>>) -> Self {
         self.tcp_nodelay = on.into();
         self
@@ -610,16 +549,6 @@ impl SocketConfig {
 
     pub fn recv_buffer_size(mut self, n: impl Into<Option<usize>>) -> Self {
         self.recv_buffer_size = n.into();
-        self
-    }
-
-    pub fn interface(mut self, name: impl Into<String>) -> Self {
-        self.interface = Some(name.into());
-        self
-    }
-
-    pub fn strict(mut self, on: bool) -> Self {
-        self.strict = on;
         self
     }
 

@@ -8,7 +8,8 @@ async fn main() -> leyline::Result<()> {
 
     let session = Session::new();
     let mut ws = session.websocket(&url).connect().await?;
-    ws.send("hello from leyline").await?;
+    ws.send(leyline::WsMessage::Text("hello from leyline".to_owned()))
+        .await?;
     if let Some(msg) = ws.recv().await? {
         println!("{msg:?}");
     }

@@ -221,7 +221,6 @@ use futures_util::StreamExt;
 
 async fn first_part_header(form: Form) -> std::io::Result<bytes::Bytes> {
     let body: leyline::Body = form.into();
-    assert!(body.is_stream(), "multipart body must be Stream");
     let mut stream = body;
     match stream.next().await {
         Some(Ok(b)) => Ok(b),

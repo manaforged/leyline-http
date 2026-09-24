@@ -31,7 +31,7 @@ fn gzip_without_feature_is_an_error() {
         &CompressionConfig::default(),
     )
     .expect_err("disabled response codec must fail");
-    assert!(err.is_decode(), "got: {err:?}");
+    assert_eq!(err.kind(), crate::core::Kind::Decode, "got: {err:?}");
 }
 
 #[cfg(not(feature = "compression-brotli"))]
@@ -39,7 +39,7 @@ fn gzip_without_feature_is_an_error() {
 fn brotli_without_feature_is_an_error() {
     let err = decompress_body(vec![0x0b], Some("br"), &CompressionConfig::default())
         .expect_err("disabled response codec must fail");
-    assert!(err.is_decode(), "got: {err:?}");
+    assert_eq!(err.kind(), crate::core::Kind::Decode, "got: {err:?}");
 }
 
 #[cfg(not(feature = "compression-deflate"))]
@@ -51,7 +51,7 @@ fn deflate_without_feature_is_an_error() {
         &CompressionConfig::default(),
     )
     .expect_err("disabled response codec must fail");
-    assert!(err.is_decode(), "got: {err:?}");
+    assert_eq!(err.kind(), crate::core::Kind::Decode, "got: {err:?}");
 }
 
 #[cfg(not(feature = "compression-zstd"))]
@@ -63,7 +63,7 @@ fn zstd_without_feature_is_an_error() {
         &CompressionConfig::default(),
     )
     .expect_err("disabled response codec must fail");
-    assert!(err.is_decode(), "got: {err:?}");
+    assert_eq!(err.kind(), crate::core::Kind::Decode, "got: {err:?}");
 }
 
 #[cfg(feature = "compression-gzip")]

@@ -27,6 +27,13 @@ impl Resolver for FailingResolver {
     }
 }
 
+fn eyeballs(resolve_delay: Duration, attempt_limit: usize) -> HappyEyeballsConfig {
+    let mut config = HappyEyeballsConfig::default();
+    config.resolve_delay = resolve_delay;
+    config.attempt_limit = attempt_limit;
+    config
+}
+
 fn load_profile() -> BrowserProfile {
     let toml_str = include_str!("../profiles/chrome/146.toml");
     BrowserProfile::from_toml(toml_str).expect("chrome 146 profile should parse")
@@ -39,11 +46,7 @@ async fn builder_accepts_custom_resolver() {
     let _connector = FingerprintConnector::new(&profile, TcpProfile::LINUX)
         .expect("connector build")
         .with_resolver(resolver)
-        .with_happy_eyeballs_config(
-            HappyEyeballsConfig::default()
-                .resolve_delay(Duration::from_millis(50))
-                .attempt_limit(4),
-        );
+        .with_happy_eyeballs_config(eyeballs(Duration::from_millis(50), 4));
 }
 
 #[tokio::test]
@@ -73,13 +76,7 @@ fn session_builder_exposes_dns_controls() {
     let _session = Session::builder()
         .browser(Browser::Chrome146)
         .dns(resolver)
-        .socket(
-            SocketConfig::new().happy_eyeballs(
-                HappyEyeballsConfig::default()
-                    .resolve_delay(Duration::from_millis(25))
-                    .attempt_limit(2),
-            ),
-        )
+        .socket(SocketConfig::new().happy_eyeballs(eyeballs(Duration::from_millis(25), 2)))
         .build()
         .expect("session build");
 }

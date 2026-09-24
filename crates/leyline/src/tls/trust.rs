@@ -73,7 +73,7 @@ impl TlsTrustConfig {
         self
     }
 
-    pub fn client_identity_files(
+    pub fn client_identity(
         mut self,
         certificate_chain_file: impl Into<PathBuf>,
         private_key_file: impl Into<PathBuf>,
@@ -94,27 +94,15 @@ impl TlsTrustConfig {
         self.accept_invalid_certs
     }
 
-    pub fn uses_env_roots(&self) -> bool {
-        self.use_env_roots
-    }
-
-    pub fn uses_system_roots(&self) -> bool {
+    pub(crate) fn uses_system_roots(&self) -> bool {
         self.use_system_roots
     }
 
-    pub fn ca_files(&self) -> &[PathBuf] {
-        &self.ca_files
+    pub(crate) fn has_client_identity(&self) -> bool {
+        self.client_identity.is_some()
     }
 
-    pub fn ca_der_count(&self) -> usize {
-        self.ca_der.len()
-    }
-
-    pub fn client_identity(&self) -> Option<&ClientIdentity> {
-        self.client_identity.as_ref()
-    }
-
-    pub fn pinned_leaf_sha256(&self) -> &[[u8; 32]] {
+    pub(crate) fn pinned_leaf_sha256(&self) -> &[[u8; 32]] {
         &self.pinned_leaf_sha256
     }
 }

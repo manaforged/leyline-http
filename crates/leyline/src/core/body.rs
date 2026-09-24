@@ -56,23 +56,13 @@ impl Body {
         Body(BodyKind::Bytes(bytes))
     }
 
-    pub fn stream<S>(stream: S) -> Self
+    pub fn stream<S>(stream: S, length: Option<u64>) -> Self
     where
         S: Stream<Item = io::Result<Bytes>> + Send + 'static,
     {
         Body(BodyKind::Stream {
             stream: Box::pin(stream),
-            length_hint: None,
-        })
-    }
-
-    pub fn stream_with_length<S>(stream: S, length: u64) -> Self
-    where
-        S: Stream<Item = io::Result<Bytes>> + Send + 'static,
-    {
-        Body(BodyKind::Stream {
-            stream: Box::pin(stream),
-            length_hint: Some(length),
+            length_hint: length,
         })
     }
 
@@ -84,15 +74,7 @@ impl Body {
         }
     }
 
-    pub fn is_empty(&self) -> bool {
-        match &self.0 {
-            BodyKind::Empty => true,
-            BodyKind::Bytes(b) => b.is_empty(),
-            BodyKind::Stream { .. } => false,
-        }
-    }
-
-    pub fn is_stream(&self) -> bool {
+    pub(crate) fn is_stream(&self) -> bool {
         matches!(self.0, BodyKind::Stream { .. })
     }
 

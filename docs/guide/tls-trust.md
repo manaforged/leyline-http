@@ -22,7 +22,7 @@ All trust settings live in one `TlsTrustConfig`. Pass it to
 ```rust,no_run
 # fn run() -> leyline::Result<()> {
 let session = leyline::Session::builder()
-    .browser(leyline::Browser::default_browser())
+    .browser(leyline::Browser::default())
     .tls_trust(
         leyline::TlsTrustConfig::new()
             .without_env_roots()
@@ -55,7 +55,7 @@ the leaf matches one of the pins. A pin narrows trust; it never widens it.
 # fn run() -> leyline::Result<()> {
 let pin: [u8; 32] = [0; 32];
 let session = leyline::Session::builder()
-    .browser(leyline::Browser::default_browser())
+    .browser(leyline::Browser::default())
     .tls_trust(leyline::TlsTrustConfig::new().add_pinned_leaf_sha256(pin))
     .build()?;
 # let _ = session;
@@ -76,16 +76,16 @@ the detail.
 
 ## Present a client certificate
 
-For mutual TLS, give `TlsTrustConfig::client_identity_files` a PEM certificate
+For mutual TLS, give `TlsTrustConfig::client_identity` a PEM certificate
 chain and its private key.
 
 ```rust,no_run
 # fn run() -> leyline::Result<()> {
 let session = leyline::Session::builder()
-    .browser(leyline::Browser::default_browser())
+    .browser(leyline::Browser::default())
     .tls_trust(
         leyline::TlsTrustConfig::new()
-            .client_identity_files("/etc/myorg/client.pem", "/etc/myorg/client.key"),
+            .client_identity("/etc/myorg/client.pem", "/etc/myorg/client.key"),
     )
     .build()?;
 # let _ = session;
@@ -107,11 +107,11 @@ let trust = TlsTrustConfig::new()
     .add_ca_file("/etc/myorg/ca.pem");
 
 let a = leyline::Session::builder()
-    .browser(leyline::Browser::default_browser())
+    .browser(leyline::Browser::default())
     .tls_trust(trust.clone())
     .build()?;
 let b = leyline::Session::builder()
-    .browser(leyline::Browser::default_firefox())
+    .browser(leyline::Browser::latest(leyline::Family::Firefox))
     .tls_trust(trust)
     .build()?;
 # let _ = (a, b);

@@ -64,6 +64,8 @@ pub struct H3Profile {
     pub qpack_max_table_capacity: u64,
     pub qpack_blocked_streams: u64,
     pub max_field_section_size: u64,
+    #[serde(default)]
+    pub race: bool,
 }
 
 #[expect(
@@ -269,114 +271,106 @@ impl BrowserProfile {
         }
     }
 
-    pub fn load_warnings(&self) -> Vec<String> {
-        let mut warnings = Vec::new();
-        let capture_unrecorded = self
-            .meta
-            .captured_against
-            .as_deref()
-            .is_none_or(|s| s.trim().is_empty());
-        if capture_unrecorded {
-            warnings.push(format!(
-                "{}: [meta] captured_against is missing — the exact browser build this \
-                 profile was captured against is unrecorded",
-                self.meta.name
-            ));
+    bench_pub! {
+        fn load_warnings(&self) -> Vec<String> {
+            let mut warnings = Vec::new();
+            let capture_unrecorded = self
+                .meta
+                .captured_against
+                .as_deref()
+                .is_none_or(|s| s.trim().is_empty());
+            if capture_unrecorded {
+                warnings.push(format!(
+                    "{}: [meta] captured_against is missing — the exact browser build this \
+                     profile was captured against is unrecorded",
+                    self.meta.name
+                ));
+            }
+            warnings
         }
-        warnings
     }
 
-    pub fn identity_for(&self, platform: crate::profile::Platform) -> Option<&PlatformIdentity> {
-        self.identity.get(platform.identity_key())
+    bench_pub! {
+        fn identity_for(&self, platform: crate::profile::Platform) -> Option<&PlatformIdentity> {
+            self.identity.get(platform.identity_key())
+        }
     }
 
     pub fn expected_ja4(&self) -> Option<&str> {
         self.tls.fingerprint.as_ref()?.ja4.as_deref()
     }
 
-    pub fn expected_resumed_ja4(&self) -> Option<&str> {
-        self.tls.fingerprint.as_ref()?.resumed_ja4.as_deref()
-    }
-
     pub fn expected_h2_fingerprint(&self) -> Option<&str> {
-        self.h2.fingerprint.as_ref()?.akamai.as_deref()
-    }
-
-    pub fn expected_h2_fingerprint_for(&self, platform: crate::profile::Platform) -> Option<&str> {
-        if let Some(p) = self.h2.platforms.get(platform.identity_key())
-            && let Some(ref fp) = p.fingerprint
-            && let Some(ref s) = fp.akamai
-        {
-            return Some(s.as_str());
-        }
         self.h2.fingerprint.as_ref()?.akamai.as_deref()
     }
 }
 
 impl H2Profile {
-    pub fn resolve_for_platform(
-        &self,
-        platform: crate::profile::Platform,
-    ) -> Result<H2Profile, Error> {
-        let Some(over) = self.platforms.get(platform.identity_key()) else {
-            return Ok(self.clone());
-        };
-        let mut out = self.clone();
+    bench_pub! {
+        fn resolve_for_platform(
+            &self,
+            platform: crate::profile::Platform,
+        ) -> Result<H2Profile, Error> {
+            let Some(over) = self.platforms.get(platform.identity_key()) else {
+                return Ok(self.clone());
+            };
+            let mut out = self.clone();
 
-        if let Some(v) = over.header_table_size {
-            out.header_table_size = Some(v);
-        }
-        if let Some(v) = over.enable_push {
-            out.enable_push = Some(v);
-        }
-        if let Some(v) = over.max_concurrent_streams {
-            out.max_concurrent_streams = Some(v);
-        }
-        if let Some(v) = over.initial_stream_window_size {
-            out.initial_stream_window_size = Some(v);
-        }
-        if let Some(v) = over.initial_connection_window_size {
-            out.initial_connection_window_size = Some(v);
-        }
-        if let Some(v) = over.max_frame_size {
-            out.max_frame_size = Some(v);
-        }
-        if let Some(v) = over.max_header_list_size {
-            out.max_header_list_size = Some(v);
-        }
-        if let Some(v) = over.unknown_setting8 {
-            out.unknown_setting8 = Some(v);
-        }
-        if let Some(v) = over.unknown_setting9 {
-            out.unknown_setting9 = Some(v);
-        }
-        if let Some(ref order) = over.pseudo_order {
-            out.pseudo_order = order.clone();
-        }
-        if let Some(ref order) = over.settings_order {
-            out.settings_order = order.clone();
-        }
+            if let Some(v) = over.header_table_size {
+                out.header_table_size = Some(v);
+            }
+            if let Some(v) = over.enable_push {
+                out.enable_push = Some(v);
+            }
+            if let Some(v) = over.max_concurrent_streams {
+                out.max_concurrent_streams = Some(v);
+            }
+            if let Some(v) = over.initial_stream_window_size {
+                out.initial_stream_window_size = Some(v);
+            }
+            if let Some(v) = over.initial_connection_window_size {
+                out.initial_connection_window_size = Some(v);
+            }
+            if let Some(v) = over.max_frame_size {
+                out.max_frame_size = Some(v);
+            }
+            if let Some(v) = over.max_header_list_size {
+                out.max_header_list_size = Some(v);
+            }
+            if let Some(v) = over.unknown_setting8 {
+                out.unknown_setting8 = Some(v);
+            }
+            if let Some(v) = over.unknown_setting9 {
+                out.unknown_setting9 = Some(v);
+            }
+            if let Some(ref order) = over.pseudo_order {
+                out.pseudo_order = order.clone();
+            }
+            if let Some(ref order) = over.settings_order {
+                out.settings_order = order.clone();
+            }
 
-        for name in &over.omit_settings {
-            match name.as_str() {
-                "header_table_size" => out.header_table_size = None,
-                "enable_push" => out.enable_push = None,
-                "max_concurrent_streams" => out.max_concurrent_streams = None,
-                "initial_stream_window_size" => out.initial_stream_window_size = None,
-                "max_frame_size" => out.max_frame_size = None,
-                "max_header_list_size" => out.max_header_list_size = None,
-                "unknown_setting8" => out.unknown_setting8 = None,
-                "unknown_setting9" => out.unknown_setting9 = None,
-                other => {
-                    return Err(Error::new(Kind::Config).with_message(format!(
-                        "unknown name in [h2.platforms.{}].omit_settings: {other:?}",
-                        platform.identity_key()
-                    )));
+            for name in &over.omit_settings {
+                match name.as_str() {
+                    "header_table_size" => out.header_table_size = None,
+                    "enable_push" => out.enable_push = None,
+                    "max_concurrent_streams" => out.max_concurrent_streams = None,
+                    "initial_stream_window_size" => out.initial_stream_window_size = None,
+                    "max_frame_size" => out.max_frame_size = None,
+                    "max_header_list_size" => out.max_header_list_size = None,
+                    "unknown_setting8" => out.unknown_setting8 = None,
+                    "unknown_setting9" => out.unknown_setting9 = None,
+                    other => {
+                        return Err(Error::new(Kind::Config).with_message(format!(
+                            "unknown name in [h2.platforms.{}].omit_settings: {other:?}",
+                            platform.identity_key()
+                        )));
+                    }
                 }
             }
-        }
 
-        Ok(out)
+            Ok(out)
+        }
     }
 }
 

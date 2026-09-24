@@ -30,8 +30,7 @@ assert!(ProxyUrl::parse("socks5://proxy.example:1080").is_ok());
 assert!(ProxyUrl::parse("ftp://proxy.example").is_err());
 ```
 
-`ProxyUrl::http`, `::https`, `::socks5`, and `::socks5h` each also require that
-scheme. `Debug` output for `ProxyUrl`, `ProxyRule`, and `Session` replaces the
+`Debug` output for `ProxyUrl`, `ProxyRule`, and `Session` replaces the
 password with `***`.
 
 ## Rules per scheme
@@ -53,19 +52,21 @@ let session = Session::builder().proxy(proxies).build()?;
 # }
 ```
 
-`ProxyConfig::all(url)` is shorthand for adding a `ProxyRule::all`.
+`ProxyRule::all(url)` applies to every scheme.
 
 ## Bypass with NO_PROXY
 
-`NoProxy` matches hosts that must not go through a proxy. Build one from a
-comma-separated list, from a pattern iterator, or from the environment.
+`NoProxy` matches hosts that must not go through a proxy. Build one
+from a pattern iterator with `NoProxy::new`.
 
 ```rust
-use leyline::NoProxy;
+use leyline::{NoProxy, ProxyConfig, ProxyRule};
 
 let bypass = NoProxy::new(["localhost", ".internal.example", "192.0.2.1"]);
-assert!(bypass.matches("api.internal.example"));
-assert!(!bypass.matches("api.example.com"));
+let proxies = ProxyConfig::new()
+    .with_rule(ProxyRule::all("http://proxy.example:8080"))
+    .no_proxy(bypass);
+# let _ = proxies;
 ```
 
 A pattern matches the host itself or any subdomain of it. A leading dot is
@@ -91,8 +92,7 @@ of `GATEWAY_INTERFACE`, `REQUEST_METHOD`, `SERVER_SOFTWARE`, `SCRIPT_NAME`,
 `SERVER_NAME`, or `SERVER_PORT`, and logs a warning on the
 `leyline::env_proxy::cgi` target.
 
-Turn discovery off with `ProxyConfig::without_env`. `ProxyConfig::uses_env` reports the current
-setting.
+Turn discovery off with `ProxyConfig::without_env`.
 
 ```rust,no_run
 # fn run() -> leyline::Result<()> {

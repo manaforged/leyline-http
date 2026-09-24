@@ -6,7 +6,10 @@ that is not on this page is private or deleted.
 
 The modules `leyline::h2`, `leyline::pool`, and `leyline::fuzz` exist only
 with the `bench-internals` feature, for leyline's own tests, benches, and
-fuzz targets. They are not part of the contract.
+fuzz targets. They are not part of the contract. The same feature also makes
+`tls::FingerprintConnector`, `H3Config`, `TlsContext`, and a few internal
+profile, cookie, and TLS methods public for those tests. None of them is part
+of the contract.
 
 ## Frame (one)
 
@@ -32,7 +35,7 @@ call:
 ```rust,no_run
 use std::time::Duration;
 
-use leyline::{Browser, Platform, ProtocolPolicy, Session, TimeoutConfig};
+use leyline::{Browser, Family, Platform, ProtocolPolicy, Session, TimeoutConfig};
 
 # async fn run() -> leyline::Result<()> {
 let session = Session::new();
@@ -40,7 +43,7 @@ let mut resp = session.get("https://example.com/").await?;
 let body = resp.text().await?;
 
 let session = Session::builder()
-    .browser(Browser::default_firefox())
+    .browser(Browser::latest(Family::Firefox))
     .platform(Platform::MacOS)
     .protocol(ProtocolPolicy::Http2)
     .timeout(Duration::from_secs(15))
@@ -125,7 +128,7 @@ counted.
 | `TimeoutConfig` | `new`, `total`, `connect`, `read`, `response_header`; `From<Duration>` | 5 |
 | `RetryPolicy`, `RetryTrigger` | `none`, `transient`, `with_max_retries`, `with_backoff`, `on_status`, `with_max_retry_after`, `allow_non_idempotent` | 7 |
 | `RedirectPolicy`, `RedirectAttempt`, `RedirectAction` | `limited`, `none`, `custom` | 3 |
-| `ProxyConfig`, `ProxyRule`, `ProxyUrl`, `NoProxy` | `ProxyConfig::new`, `with_rule`, `no_proxy`, `without_env`; `ProxyUrl::parse`; `NoProxy::new`; `From<&str>`, `From<String>`, `From<ProxyUrl>` | 6 |
+| `ProxyConfig`, `ProxyRule`, `ProxyUrl`, `NoProxy` | `ProxyConfig::new`, `with_rule`, `no_proxy`, `without_env`; `ProxyRule::all`, `http`, `https`; `ProxyUrl::parse`; `NoProxy::new`; `From<&str>`, `From<String>`, `From<ProxyUrl>` | 9 |
 | `DnsConfig` | `new`, `resolver`, `resolve_host`; `From<Arc<dyn Resolver>>` | 3 |
 | `TlsTrustConfig` | `new`, `add_ca_file`, `add_ca_der`, `add_pinned_leaf_sha256`, `without_env_roots`, `without_system_roots`, `client_identity`, `danger_accept_invalid_certs` | 8 |
 | `ProtocolPolicy` | enum: `Auto`, `Http1`, `Http2`, `Http3`, `Race` | 0 |
@@ -143,7 +146,8 @@ counted.
 | `Identity` | `locked`, `rotate_tls`, `pass` | 3 |
 | `BrowserProfile` | `from_toml`, `expected_ja4`, `expected_h2_fingerprint` | 3 |
 | `profile::ProfileRegistry` | `global`, `load(dir)`, `get` | 3 |
-| `profile::{TlsProfile, H2Profile, H3Profile, PlatformIdentity, HeaderAnchor}` | schema types, public fields | 0 |
+| `profile::{TlsProfile, H2Profile, H3Profile, PlatformIdentity, HeaderAnchor, HeaderStyle}` | schema types, public fields | 0 |
+| `profile::ProfileError` | error of `load` and `from_toml` | 0 |
 
 ### Modules
 
@@ -154,19 +158,22 @@ counted.
 | WebSocket (feature `websocket`) | `WebSocketBuilder`: `header`, `headers`, `proxy`, `config`, `connect`; `WsConnection`: `send(WsMessage)`, `recv`, `close`, `split`, `protocol`, `header`; `WsSink`: `send`, `close`; `WsStream`: `recv`; `WsMessage`; `CloseFrame::new`; `WebSocketConfig`: 7 setters | 23 |
 | `trace` | `Trace` (hook methods), events `Dns`, `Connect`, `Tls`, `Sent`, `Head`, `Done`, `TracingTrace` | 0 |
 | `audit` | `AuditData`, `compute_ja3`, `compute_ja4`, `compute_ja4h`, `compute_ja4t`, input types | 4 |
-| `tls` | `Resolver`, `SystemResolver`, `ClientIdentity`, `HappyEyeballsConfig`, `TlsMinVersion`, `TlsError` | 0 |
+| `tls` | `Resolver`, `ResolveFuture`, `SystemResolver`, `ClientIdentity`, `HappyEyeballsConfig` (public fields), `TlsMinVersion`, `TlsError` | 0 |
+| `TlsContext` (feature `unstable-bssl`) | `from_profile`, `builder_mut`, `into_inner`; outside semver | 0 |
+| `IntoParamPair`, `Result` | trait bound of `headers` and `query`; `Result<T, Error>` alias | 0 |
 | tower (feature `tower`) | `LeylineService::new` | 1 |
 | `http` | re-export of the `http` crate | 0 |
 | `H2Error`, `ErrorCode` | sources reachable from `Error::h2` | 0 |
 
-Total: 217 public functions.
+Total: 220 public functions.
 
 ## Semantics
 
 - `Session::new()` and `Session::default()` impersonate the latest bundled
   Chrome with a Windows identity. With the `http3` feature they race
-  HTTP/3 against HTTP/2. `Session::builder().build()` with no browser is a
-  bare session with no impersonation.
+  HTTP/3 against HTTP/2 when the profile's `[h3]` table sets `race = true`,
+  as the bundled Chrome profiles do. `Session::builder().build()` with no
+  browser is a bare session with no impersonation.
 - `SessionBuilder::browser` and `platform` commute: the browser maps to its
   platform twin whichever call comes first.
 - Every config setter replaces the whole value. Start from `::new()`, which

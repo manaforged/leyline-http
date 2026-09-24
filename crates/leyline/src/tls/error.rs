@@ -35,19 +35,6 @@ pub enum TlsError {
     TrustStore(String),
 }
 
-impl TlsError {
-    pub fn is_retryable(&self) -> bool {
-        matches!(
-            self,
-            Self::TcpConnect(_)
-                | Self::Dns(_)
-                | Self::HandshakeIo(_)
-                | Self::Handshake(_)
-                | Self::SslConnect(_)
-        )
-    }
-}
-
 fn transport_eof(msg: &str) -> bool {
     let lower = msg.to_ascii_lowercase();
     lower.contains("unexpected eof")
@@ -73,6 +60,3 @@ impl TlsError {
         Self::SslConfig(e.to_string())
     }
 }
-
-#[cfg(test)]
-mod tests;

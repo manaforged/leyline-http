@@ -54,20 +54,19 @@ The predicates look at the kind and at the source error:
 | --- | --- |
 | `is_timeout()` | `Kind::Timeout`, and I/O or TLS errors with `TimedOut` |
 | `is_connect()` | `Kind::Connect`, DNS, TCP connect, and TLS handshake failures, and refused or unreachable sockets |
-| `is_connection_closed()` | A reset, aborted, or closed connection, an HTTP/2 `GOAWAY` with no error, and a refused HTTP/2 stream |
-| `is_status()`, `is_redirect()`, `is_body()`, `is_decode()` | The matching `Kind` |
+| `is_status()` | `Kind::Status` |
+
+For other kinds, compare `err.kind()`, for example `err.kind() == Kind::Redirect`.
 
 ## Which errors a retry covers
 
 A `RetryPolicy` retries an error only in these cases:
 
 - `is_timeout()` is true and the policy has `RetryTrigger::Timeout`.
-- `is_connect()` or `is_connection_closed()` is true and the policy has
-  `RetryTrigger::ConnectionError`.
+- `is_connect()` is true, or the connection was reset, aborted, or closed,
+  and the policy has `RetryTrigger::ConnectionError`.
 
-Other errors are not retried. `RetryPolicy::transient()` has both triggers.
-`TlsError::is_retryable()` answers the same question for a TLS error that you
-get from `err.tls()`. See [Retries and timeouts](retries-and-timeouts.md).
+Other errors are not retried. `RetryPolicy::transient()` has both triggers. See [Retries and timeouts](retries-and-timeouts.md).
 
 ## Read the source error
 

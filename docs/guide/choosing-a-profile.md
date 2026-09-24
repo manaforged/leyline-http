@@ -7,7 +7,7 @@ session claims. Pick both.
 ## Start with the default
 
 `Session::new()` is the default choice. It selects
-`Browser::default_browser()`, which is Chrome 152, on Windows. With the
+`Browser::default()`, which is Chrome 152, on Windows. With the
 `http3` feature, it races HTTP/3 against HTTP/2.
 
 ```rust,no_run
@@ -16,7 +16,7 @@ use leyline::{Browser, Platform, Session};
 # fn run() -> leyline::Result<()> {
 let windows = Session::new();
 let mac = Session::builder()
-    .browser(Browser::default_browser())
+    .browser(Browser::default())
     .platform(Platform::MacOS)
     .build()?;
 # let _ = (windows, mac);
@@ -28,8 +28,8 @@ let mac = Session::builder()
 
 | You need | Use |
 | --- | --- |
-| The most common desktop browser | `.browser(Browser::default_browser())` |
-| Firefox | `.browser(Browser::default_firefox())` |
+| The most common desktop browser | `.browser(Browser::default())` |
+| Firefox | `.browser(Browser::latest(leyline::Family::Firefox))` |
 | Safari on macOS | `.browser(Browser::Safari26).platform(Platform::MacOS)` |
 | Edge, Opera, or Vivaldi | `.brand(ChromiumBrand::Edge)`, `Opera`, or `Vivaldi`: a brand on a Chrome profile |
 | Brave | `.browser(Browser::Brave146).platform(Platform::MacOS)` |

@@ -85,9 +85,5 @@ fn compute_section_c(input: &Ja4Input<'_>) -> String {
     hash12(&combined)
 }
 
-pub fn extension_ids(tls: &crate::profile::TlsProfile) -> Vec<u16> {
-    crate::profile::permutation::extension_ids(tls)
-}
-
 #[cfg(test)]
 mod tests;

@@ -4,11 +4,11 @@ use crate::profile::{Platform, ProfileRegistry};
 include!(concat!(env!("OUT_DIR"), "/browser.rs"));
 
 struct Entry {
+    family: Family,
     key: &'static str,
     version: u32,
     name: &'static str,
     hello: Browser,
-    hellos: &'static [Browser],
     chromium_major: Option<u32>,
     platforms: &'static [(&'static str, Browser)],
     source: &'static str,
@@ -29,9 +29,17 @@ impl Browser {
         &ENTRIES[self as usize]
     }
 
-    pub fn profile_key(&self) -> (&'static str, u32) {
+    pub(crate) fn profile_key(&self) -> (&'static str, u32) {
         let entry = self.entry();
         (entry.key, entry.version)
+    }
+
+    #[must_use]
+    pub fn get(family: Family, version: u32) -> Option<Self> {
+        ALL.iter().copied().find(|browser| {
+            let entry = browser.entry();
+            entry.family == family && entry.version == version
+        })
     }
 
     #[must_use]
@@ -45,7 +53,12 @@ impl Browser {
     }
 
     #[must_use]
-    pub fn hello_rep(self) -> Self {
+    pub fn version(&self) -> u32 {
+        self.entry().version
+    }
+
+    #[must_use]
+    pub(crate) fn hello_rep(self) -> Self {
         self.entry().hello
     }
 
@@ -62,15 +75,6 @@ impl Browser {
             .map_or(self, |&(_, browser)| browser)
     }
 
-    #[must_use]
-    pub fn family_hellos(self) -> &'static [Self] {
-        self.entry().hellos
-    }
-
-    pub(crate) fn cookie_pass_targets() -> &'static [Self] {
-        COOKIE_PASS
-    }
-
     pub(crate) fn header_style(self) -> HeaderStyle {
         ProfileRegistry::global()
             .get_browser(self)
@@ -81,16 +85,14 @@ impl Browser {
         self.entry().source
     }
 
-    pub fn default_browser() -> Self {
+    pub(crate) fn default_browser() -> Self {
         Self::latest(DEFAULT_FAMILY)
     }
 
-    pub fn default_firefox() -> Self {
-        Self::latest(Family::Firefox)
-    }
-
-    pub fn chromium_major(&self) -> Option<u32> {
-        self.entry().chromium_major
+    bench_pub! {
+        fn chromium_major(&self) -> Option<u32> {
+            self.entry().chromium_major
+        }
     }
 }
 

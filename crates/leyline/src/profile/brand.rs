@@ -45,16 +45,7 @@ impl std::fmt::Display for BrandOverlayError {
 impl std::error::Error for BrandOverlayError {}
 
 impl ChromiumBrand {
-    pub fn version_for(self, chromium_major: u32) -> Option<u32> {
-        let row = brand_row(self)?;
-        if row.follow_chromium {
-            return Some(chromium_major);
-        }
-        row.product.as_ref()?;
-        version_major(&row.version(chromium_major, 0)?)
-    }
-
-    pub fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         match self {
             Self::Chrome => "Chrome",
             Self::Edge => "Edge",
@@ -63,7 +54,7 @@ impl ChromiumBrand {
         }
     }
 
-    pub fn overlay(
+    pub(crate) fn overlay(
         self,
         chromium_major: u32,
         platform: Platform,

@@ -24,22 +24,6 @@ impl Default for HappyEyeballsConfig {
     }
 }
 
-impl HappyEyeballsConfig {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn resolve_delay(mut self, d: Duration) -> Self {
-        self.resolve_delay = d;
-        self
-    }
-
-    pub fn attempt_limit(mut self, n: usize) -> Self {
-        self.attempt_limit = n;
-        self
-    }
-}
-
 pub(crate) fn interleave_by_family(addrs: Vec<SocketAddr>) -> Vec<SocketAddr> {
     let mut v6: Vec<SocketAddr> = Vec::new();
     let mut v4: Vec<SocketAddr> = Vec::new();

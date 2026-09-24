@@ -36,7 +36,7 @@ fn load_reads_a_family_directory() {
     std::fs::write(family.join("1.toml"), MINIMAL).expect("write profile");
 
     let reg = ProfileRegistry::load(&dir).expect("load scratch registry");
-    assert_eq!(reg.len(), 1);
+    assert_eq!(reg.profiles.len(), 1);
     let profile = reg.get("test", 1).expect("test 1 not found");
     assert_eq!(profile.meta.name, "Test 1");
     assert_eq!(profile.tls.ciphers, vec!["TLS_AES_128_GCM_SHA256"]);
@@ -86,7 +86,7 @@ fn malformed_builtin_toml_panics_at_load() {
 fn builtin_loads_all_profiles() {
     let reg = ProfileRegistry::builtin();
     assert_eq!(
-        reg.len(),
+        reg.profiles.len(),
         crate::profile::Browser::all().len(),
         "registry count != Browser::all() length"
     );
@@ -188,7 +188,11 @@ fn firefox150_profile_parses() {
         Some("t13d1717h2_5b57614c22b0_3cbfd9057e0d")
     );
     assert_eq!(
-        profile.expected_resumed_ja4(),
+        profile
+            .tls
+            .fingerprint
+            .as_ref()
+            .and_then(|fp| fp.resumed_ja4.as_deref()),
         Some("t13d1717h2_5b57614c22b0_e6dcd7ae0a9e")
     );
 }

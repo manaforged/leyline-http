@@ -256,16 +256,9 @@ impl Response {
     }
 
     pub fn error_for_status(self) -> crate::core::Result<Self> {
-        const MAX_ERROR_BODY: usize = 16 * 1024;
         if self.status.as_u16() >= 400 {
-            let status = self.status;
-            let url = self.url.clone();
-            let full = self.buffered();
-            let body = full[..full.len().min(MAX_ERROR_BODY)].to_vec();
-            let mut err = crate::Error::new(Kind::Status)
-                .with_status(status)
-                .with_body(body);
-            if let Ok(uri) = url.parse::<http::Uri>() {
+            let mut err = crate::Error::new(Kind::Status).with_status(self.status);
+            if let Ok(uri) = self.url.parse::<http::Uri>() {
                 err = err.with_url(uri);
             }
             Err(err)

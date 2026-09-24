@@ -12,7 +12,7 @@ request.
 ```rust,no_run
 # fn run() -> leyline::Result<()> {
 let session = leyline::Session::builder()
-    .browser(leyline::Browser::default_browser())
+    .browser(leyline::Browser::default())
     .dns(leyline::DnsConfig::new().resolve_host(
         "example.com",
         "203.0.113.10:443".parse().unwrap(),
@@ -22,9 +22,6 @@ let session = leyline::Session::builder()
 # Ok(())
 # }
 ```
-
-`DnsConfig::resolve_host_to_addrs` takes several addresses for one host. Leyline tries
-them in the Happy Eyeballs order described below.
 
 Hosts without an override go to the resolver.
 
@@ -45,7 +42,7 @@ use leyline::DnsConfig;
 let dns = DnsConfig::new()
     .resolve_host("api.example.com", "203.0.113.10:443".parse().unwrap());
 let session = leyline::Session::builder()
-    .browser(leyline::Browser::default_browser())
+    .browser(leyline::Browser::default())
     .dns(dns)
     .build()?;
 # let _ = session;
@@ -59,7 +56,7 @@ When a host has IPv6 and IPv4 addresses, Leyline interleaves the two families
 and starts the next attempt if the current one has not connected in time. The
 first connection to complete wins.
 
-`tls::HappyEyeballsConfig` sets two values. Pass it to
+`tls::HappyEyeballsConfig` has two public fields. Pass it to
 `SocketConfig::happy_eyeballs`:
 
 | Setting | Default | Meaning |
@@ -73,13 +70,12 @@ use std::time::Duration;
 use leyline::SocketConfig;
 use leyline::tls::HappyEyeballsConfig;
 
+let mut he = HappyEyeballsConfig::default();
+he.resolve_delay = Duration::from_millis(100);
+he.attempt_limit = 4;
 let session = leyline::Session::builder()
-    .browser(leyline::Browser::default_browser())
-    .socket(SocketConfig::new().happy_eyeballs(
-        HappyEyeballsConfig::new()
-            .resolve_delay(Duration::from_millis(100))
-            .attempt_limit(4),
-    ))
+    .browser(leyline::Browser::default())
+    .socket(SocketConfig::new().happy_eyeballs(he))
     .build()?;
 # let _ = session;
 # Ok(())
@@ -98,10 +94,12 @@ let session = leyline::Session::builder()
 | `tcp_keepalive_retries` | 3 | Failed probes before the socket closes |
 | `tcp_user_timeout` | unset | `TCP_USER_TIMEOUT`: how long sent data may stay unacknowledged (Linux, Android) |
 | `send_buffer_size`, `recv_buffer_size` | unset | `SO_SNDBUF`, `SO_RCVBUF` |
-| `local_address`, `local_ipv4`, `local_ipv6` | unset | Source IP to bind |
-| `interface` | unset | Network interface to bind (accepted, not applied yet) |
-| `strict` | `false` | Fail when an option is unsupported |
+| `local_address` | unset | Source IP to bind |
 | `happy_eyeballs` | enabled | Happy Eyeballs settings, or `None` to turn it off |
+
+The fields `local_ipv4`, `local_ipv6`, `interface` (accepted, not applied
+yet), and `strict` (fail when an option is unsupported) are public. Assign
+them on a `SocketConfig` value.
 
 The timing and size setters take a value or `None`. Pass `None` to clear a
 default, for example `tcp_keepalive(None)` to turn keepalive off.
@@ -112,7 +110,7 @@ use std::time::Duration;
 use leyline::SocketConfig;
 
 let session = leyline::Session::builder()
-    .browser(leyline::Browser::default_browser())
+    .browser(leyline::Browser::default())
     .socket(
         SocketConfig::new()
             .tcp_nodelay(true)

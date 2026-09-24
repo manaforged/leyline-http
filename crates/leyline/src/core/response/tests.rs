@@ -177,41 +177,6 @@ async fn text_reads_a_buffered_body_and_a_stream() {
 }
 
 #[test]
-fn error_for_status_caps_retained_body() {
-    let mut resp = bare_response(None);
-    resp.status = http::StatusCode::INTERNAL_SERVER_ERROR;
-    resp.body = ResponseBody::Buffered(vec![b'x'; 2 * 1024 * 1024]);
-    let err = resp.error_for_status().unwrap_err();
-    assert_eq!(
-        err.kind(),
-        Kind::Status,
-        "expected a status error, got {err:?}"
-    );
-    assert_eq!(err.status().map(|s| s.as_u16()), Some(500));
-    let body = err.body_prefix().expect("status errors keep a body prefix");
-    assert_eq!(
-        body.len(),
-        16 * 1024,
-        "status body must be capped at 16 KiB"
-    );
-    assert!(body.iter().all(|&b| b == b'x'), "prefix content preserved");
-}
-
-#[test]
-fn error_for_status_keeps_short_body_intact() {
-    let mut resp = bare_response(None);
-    resp.status = http::StatusCode::NOT_FOUND;
-    resp.body = ResponseBody::Buffered(b"not found".to_vec());
-    let err = resp.error_for_status().unwrap_err();
-    assert_eq!(
-        err.kind(),
-        Kind::Status,
-        "expected a status error, got {err:?}"
-    );
-    assert_eq!(err.body_prefix(), Some(&b"not found"[..]));
-}
-
-#[test]
 fn timing_add_leg_saturates_not_wraps() {
     let mut acc = ResponseTiming::accumulator();
     acc.add_leg(&leg(false, Some(u32::MAX), u32::MAX, u32::MAX));

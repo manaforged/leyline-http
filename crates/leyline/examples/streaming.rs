@@ -16,11 +16,11 @@ async fn main() -> leyline::Result<()> {
         let meta = tokio::fs::metadata(&path).await.expect("stat input file");
         let file = tokio::fs::File::open(&path).await.expect("open input file");
         let reader = tokio_util::io::ReaderStream::new(file).map(|r| r);
-        Body::stream_with_length(reader, meta.len())
+        Body::stream(reader, Some(meta.len()))
     } else {
         let chunks = (0..16).map(|_| Ok::<Bytes, std::io::Error>(Bytes::from(vec![b'A'; 65536])));
         let stream = futures_util::stream::iter(chunks);
-        Body::stream_with_length(stream, 16 * 65536)
+        Body::stream(stream, Some(16 * 65536))
     };
 
     let resp = session

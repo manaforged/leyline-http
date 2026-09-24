@@ -12,12 +12,6 @@ use serde_json::Value;
 const PEET_URL: &str = "https://tls.peet.ws/api/all";
 
 #[test]
-fn profile_count_matches_constant() {
-    let reg = leyline::profile::ProfileRegistry::builtin();
-    assert_eq!(reg.len(), Browser::all().len());
-}
-
-#[test]
 fn every_browser_variant_has_profile() {
     let reg = leyline::profile::ProfileRegistry::builtin();
     for browser in Browser::all().iter().copied() {
@@ -70,7 +64,12 @@ fn h2_per_platform_overrides_resolve() {
         let h2 = leyline::h2::H2Config::from_profile(&resolved).unwrap();
         let actual = h2.akamai_fingerprint();
         let expected = profile
-            .expected_h2_fingerprint_for(Platform::MacOS)
+            .h2
+            .platforms
+            .get("macos")
+            .and_then(|over| over.fingerprint.as_ref())
+            .and_then(|fp| fp.akamai.as_deref())
+            .or_else(|| profile.expected_h2_fingerprint())
             .unwrap_or_else(|| panic!("{browser} has no macos H2 fingerprint expectation"));
         assert_eq!(actual, expected, "{browser} macOS H2 fingerprint mismatch");
         assert!(
@@ -254,12 +253,12 @@ fn session_shortcuts_work() {
         format!("{}", leyline::Session::new()),
         format!(
             "Session({}, {}, proxy=none)",
-            Browser::default_browser(),
+            Browser::default(),
             Platform::Windows
         )
     );
     let firefox = leyline::Session::builder()
-        .browser(Browser::default_firefox())
+        .browser(Browser::latest(leyline::Family::Firefox))
         .platform(Platform::Windows)
         .build()
         .unwrap();
@@ -267,7 +266,7 @@ fn session_shortcuts_work() {
         format!("{firefox}"),
         format!(
             "Session({}, {}, proxy=none)",
-            Browser::default_firefox(),
+            Browser::latest(leyline::Family::Firefox),
             Platform::Windows
         )
     );
@@ -1111,7 +1110,7 @@ async fn live_chrome147_pseudo_header_order() {
 #[ignore = "live: needs network"]
 async fn live_firefox150_pseudo_header_order() {
     let session = leyline::Session::builder()
-        .browser(Browser::default_firefox())
+        .browser(Browser::latest(leyline::Family::Firefox))
         .platform(Platform::Windows)
         .build()
         .unwrap();
@@ -1407,7 +1406,7 @@ async fn live_h3_streaming_request_body_roundtrips() {
         .map(|c| Ok(Bytes::copy_from_slice(c)))
         .collect();
     let chunk_count = chunks.len();
-    let body = Body::stream_with_length(stream::iter(chunks), total as u64);
+    let body = Body::stream(stream::iter(chunks), Some(total as u64));
 
     let mut resp = session
         .post("https://httpbin.agrd.workers.dev/post")
@@ -1616,7 +1615,9 @@ async fn live_websocket_echo() {
         .await
         .expect("ws connect failed");
 
-    ws.send("leyline-ping").await.expect("ws send failed");
+    ws.send(leyline::WsMessage::Text("leyline-ping".to_owned()))
+        .await
+        .expect("ws send failed");
 
     let reply = ws
         .recv()

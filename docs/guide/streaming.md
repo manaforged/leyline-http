@@ -7,8 +7,8 @@ default. The examples in this chapter also need `bytes`, `futures-util`, and
 
 ## Stream a request body
 
-`Body::stream` takes any `Stream` of `io::Result<Bytes>`.
-`Body::stream_with_length` takes the same stream plus an exact byte count.
+`Body::stream(s, len)` takes any `Stream` of `io::Result<Bytes>` and an
+`Option<u64>` byte count.
 
 Give the length whenever you know it. With a length, Leyline sends
 `Content-Length`. Without one, the body is sent with no declared length, which
@@ -21,7 +21,7 @@ use leyline::Body;
 let session = leyline::Session::new();
 let file = tokio::fs::File::open("upload.bin").await?;
 let len = tokio::fs::metadata("upload.bin").await?.len();
-let body = Body::stream_with_length(tokio_util::io::ReaderStream::new(file), len);
+let body = Body::stream(tokio_util::io::ReaderStream::new(file), Some(len));
 
 let resp = session
     .post("https://example.com/upload")
@@ -35,7 +35,6 @@ println!("{}", resp.status());
 
 `Body::len_hint()` reports the declared length: the buffer size for a buffered
 body, `Some(0)` for an empty one, and the hint you supplied for a stream. On a buffered response the same helpers give the decoded body.
-`Body::is_stream()` tells you which kind you hold.
 
 ## Stream a response body
 

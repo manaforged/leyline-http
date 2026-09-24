@@ -591,16 +591,3 @@ fn newest_chrome_profile_within_two_majors_of_current_stable() {
          {current} — more than one major behind; ship a fresh capture"
     );
 }
-
-#[test]
-fn hello_rep_maps_every_variant_to_a_family_hello() {
-    for browser in Browser::all().iter().copied() {
-        let owner = browser.hello_rep();
-        let hellos = browser.family_hellos();
-        assert!(
-            hellos.contains(&owner),
-            "{browser} resolves to hello owner {owner}, which is not in the {family} family hellos {hellos:?}",
-            family = browser.family(),
-        );
-    }
-}

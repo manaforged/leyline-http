@@ -28,7 +28,7 @@ pub struct Cookie {
 }
 
 impl Cookie {
-    pub fn is_expired(&self) -> bool {
+    pub(crate) fn is_expired(&self) -> bool {
         if let Some(expires) = self.expires {
             SystemTime::now() > expires
         } else {
@@ -36,7 +36,7 @@ impl Cookie {
         }
     }
 
-    pub fn matches(&self, url_domain: &str, url_path: &str, is_secure: bool) -> bool {
+    pub(crate) fn matches(&self, url_domain: &str, url_path: &str, is_secure: bool) -> bool {
         if self.secure && !is_secure {
             return false;
         }
@@ -73,7 +73,7 @@ impl Cookie {
 mod systime_ms {
     use super::*;
 
-    pub fn serialize<S: Serializer>(t: &SystemTime, s: S) -> Result<S::Ok, S::Error> {
+    pub(super) fn serialize<S: Serializer>(t: &SystemTime, s: S) -> Result<S::Ok, S::Error> {
         let ms = t
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_millis() as i64)
@@ -81,7 +81,7 @@ mod systime_ms {
         s.serialize_i64(ms)
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<SystemTime, D::Error> {
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<SystemTime, D::Error> {
         let ms = i64::deserialize(d)?;
         let ms = if ms < 0 { 0 } else { ms as u64 };
         Ok(UNIX_EPOCH + Duration::from_millis(ms))
@@ -91,7 +91,10 @@ mod systime_ms {
 mod systime_opt_ms {
     use super::*;
 
-    pub fn serialize<S: Serializer>(t: &Option<SystemTime>, s: S) -> Result<S::Ok, S::Error> {
+    pub(super) fn serialize<S: Serializer>(
+        t: &Option<SystemTime>,
+        s: S,
+    ) -> Result<S::Ok, S::Error> {
         match t {
             Some(t) => {
                 let ms = t
@@ -104,7 +107,9 @@ mod systime_opt_ms {
         }
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<SystemTime>, D::Error> {
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        d: D,
+    ) -> Result<Option<SystemTime>, D::Error> {
         let opt = Option::<i64>::deserialize(d)?;
         Ok(opt.map(|ms| {
             let ms = if ms < 0 { 0 } else { ms as u64 };

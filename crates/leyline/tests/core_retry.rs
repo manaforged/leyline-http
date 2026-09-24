@@ -191,7 +191,7 @@ async fn streaming_body_plus_retry_errors_clearly() {
         .build()
         .unwrap();
     let chunks: Vec<std::io::Result<Bytes>> = vec![Ok(Bytes::from_static(b"abc"))];
-    let body = Body::stream(stream::iter(chunks));
+    let body = Body::stream(stream::iter(chunks), None);
 
     let dead_port = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await

@@ -18,7 +18,7 @@ on by default: `cookies`, `charset`, `compression-gzip`, `compression-brotli`,
 | `multipart` | yes | Adds `leyline::multipart` and `RequestBuilder::multipart`. Pulls in `stream` and `async-stream`. |
 | `stream` | yes | Streaming request and response bodies. |
 | `websocket` | yes | Adds `Session::websocket` and the `Ws*` types. Pulls in tungstenite. |
-| `http3` | yes | Adds `H3Config`, the `Http3` and `Race` policies, and `leyline-quiche`. |
+| `http3` | yes | Adds the `Http3` and `Race` policies, and `leyline-quiche`. |
 | `system-trust` | yes | No effect in 0.1. Reserved. Platform trust-store loading always compiles. |
 | `socks` | no | SOCKS5 proxy tunnels. Without it, `build()` accepts a `socks5://` proxy URL and the first request fails. |
 | `native-interface-bind` | no | No effect in 0.1. Reserved. `SocketConfig::interface` compiles and is not applied. |

@@ -18,11 +18,14 @@ impl Session {
     }
 
     pub fn new() -> Self {
-        let builder = Self::builder()
-            .browser(Browser::default_browser())
-            .platform(Platform::Windows);
+        let browser = Browser::default_browser();
+        let builder = Self::builder().browser(browser).platform(Platform::Windows);
         #[cfg(feature = "http3")]
-        let builder = builder.protocol(super::ProtocolPolicy::Race);
+        let builder = if browser.profile().h3.as_ref().is_some_and(|h3| h3.race) {
+            builder.protocol(super::ProtocolPolicy::Race)
+        } else {
+            builder
+        };
         builder.into_builtin()
     }
 
