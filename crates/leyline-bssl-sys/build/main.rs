@@ -11,6 +11,7 @@ use std::sync::OnceLock;
 use crate::config::Config;
 use crate::prefix::{PrefixCallback, PREFIX};
 
+mod archive;
 mod config;
 mod prefix;
 
@@ -616,13 +617,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     config.check_supported_target()?;
     ensure_patches_applied(&config)?;
     if !config.env.docs_rs {
-        emit_link_directives(&config);
+        emit_link_directives(&config)?;
     }
     generate_bindings(&config).map_err(|e| format!("could not generate bindings: {e}"))?;
     Ok(())
 }
 
-fn emit_link_directives(config: &Config) {
+fn emit_link_directives(config: &Config) -> io::Result<()> {
     let bssl_dir = build_boringssl_or_get_prebuilt(config);
     let msvc_lib_subdir = msvc_lib_subdir(config);
 
@@ -632,24 +633,26 @@ fn emit_link_directives(config: &Config) {
         &["lib", "crypto", "ssl", ""][..]
     };
 
-    for subdir in subdirs {
-        let dir = bssl_dir.join(subdir);
-        let dir = msvc_lib_subdir
-            .map(|s| dir.join(s))
-            .filter(|d| d.exists())
-            .unwrap_or(dir);
-        println!("cargo:rustc-link-search=native={}", dir.display());
-    }
+    let search_dirs: Vec<PathBuf> = subdirs
+        .iter()
+        .map(|subdir| {
+            let dir = bssl_dir.join(subdir);
+            msvc_lib_subdir
+                .map(|s| dir.join(s))
+                .filter(|d| d.exists())
+                .unwrap_or(dir)
+        })
+        .collect();
+    archive::link_renamed(config, &search_dirs)?;
 
     if let Some(cpp_lib) = get_cpp_runtime_lib(config) {
         println!("cargo:rustc-link-lib={cpp_lib}");
     }
-    println!("cargo:rustc-link-lib=static=crypto");
-    println!("cargo:rustc-link-lib=static=ssl");
 
     if config.target_os == "windows" {
         println!("cargo:rustc-link-lib=advapi32");
     }
+    Ok(())
 }
 
 fn check_include_path(path: PathBuf) -> Result<PathBuf, String> {
