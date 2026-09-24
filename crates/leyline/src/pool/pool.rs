@@ -1,25 +1,18 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use futures_util::future::{BoxFuture, Shared};
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use crate::pool::connect::Inflight;
+use tokio::sync::Semaphore;
 
-use crate::h2::client::{DriverTask, H2Client};
+use crate::h2::client::H2Client;
 #[cfg(feature = "http3")]
-use crate::quic::{H3Client, H3DriverTask};
+use crate::quic::H3Client;
 
+use crate::pool::types::{PoolCounters, PoolKey, PoolStats, PooledConn};
 #[cfg(feature = "bench-internals")]
-use crate::pool::types::Transport;
-use crate::pool::types::{H1Slot, PoolCounters, PoolKey, PoolStats, PooledConn, TlsInfo};
-
-pub(crate) type SharedConnect =
-    Shared<BoxFuture<'static, Result<(H2Client, TlsInfo), Arc<crate::Error>>>>;
-
-#[cfg(feature = "http3")]
-pub(crate) type SharedH3Connect =
-    Shared<BoxFuture<'static, Result<(H3Client, TlsInfo), Arc<crate::Error>>>>;
+use crate::pool::types::{TlsInfo, Transport};
 
 pub const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
 
@@ -31,9 +24,9 @@ const POOL_REAP_INTERVAL: Duration = Duration::from_millis(250);
 
 pub struct Pool {
     pub(crate) inner: Mutex<HashMap<PoolKey, PooledConn>>,
-    pub(crate) inflight_h2: Mutex<HashMap<PoolKey, SharedConnect>>,
+    pub(crate) inflight_h2: Inflight<H2Client>,
     #[cfg(feature = "http3")]
-    pub(crate) inflight_h3: Mutex<HashMap<PoolKey, SharedH3Connect>>,
+    pub(crate) inflight_h3: Inflight<H3Client>,
     #[cfg(feature = "http3")]
     pub(crate) h3_known: Mutex<HashSet<(String, u16)>>,
     pub(crate) h1_only: Mutex<HashSet<(String, u16, Option<String>)>>,
@@ -92,9 +85,9 @@ impl Pool {
     pub fn new() -> Self {
         Self {
             inner: Mutex::new(HashMap::new()),
-            inflight_h2: Mutex::new(HashMap::new()),
+            inflight_h2: Inflight::default(),
             #[cfg(feature = "http3")]
-            inflight_h3: Mutex::new(HashMap::new()),
+            inflight_h3: Inflight::default(),
             #[cfg(feature = "http3")]
             h3_known: Mutex::new(HashSet::new()),
             h1_only: Mutex::new(HashSet::new()),
@@ -122,9 +115,9 @@ impl Pool {
         );
         Self {
             inner: Mutex::new(HashMap::new()),
-            inflight_h2: Mutex::new(HashMap::new()),
+            inflight_h2: Inflight::default(),
             #[cfg(feature = "http3")]
-            inflight_h3: Mutex::new(HashMap::new()),
+            inflight_h3: Inflight::default(),
             #[cfg(feature = "http3")]
             h3_known: Mutex::new(HashSet::new()),
             h1_only: Mutex::new(HashSet::new()),
@@ -138,50 +131,6 @@ impl Pool {
             created: Instant::now(),
             next_reap_ms: AtomicU64::new(0),
         }
-    }
-
-    pub(crate) fn inflight_h2_get_or_insert_with(
-        &self,
-        key: PoolKey,
-        make: impl FnOnce() -> SharedConnect,
-    ) -> SharedConnect {
-        let mut map = self.inflight_h2.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(existing) = map.get(&key) {
-            return existing.clone();
-        }
-        let shared = make();
-        map.insert(key, shared.clone());
-        shared
-    }
-
-    pub(crate) fn inflight_h2_remove(&self, key: &PoolKey) {
-        self.inflight_h2
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .remove(key);
-    }
-
-    #[cfg(feature = "http3")]
-    pub(crate) fn inflight_h3_get_or_insert_with(
-        &self,
-        key: PoolKey,
-        make: impl FnOnce() -> SharedH3Connect,
-    ) -> SharedH3Connect {
-        let mut map = self.inflight_h3.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(existing) = map.get(&key) {
-            return existing.clone();
-        }
-        let shared = make();
-        map.insert(key, shared.clone());
-        shared
-    }
-
-    #[cfg(feature = "http3")]
-    pub(crate) fn inflight_h3_remove(&self, key: &PoolKey) {
-        self.inflight_h3
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .remove(key);
     }
 
     pub fn stats(&self) -> PoolStats {
@@ -278,212 +227,6 @@ impl Pool {
         evicted
     }
 
-    pub(crate) fn checkout_h2(&self, key: &PoolKey) -> Option<(H2Client, TlsInfo)> {
-        let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let dead = map.get(key).is_some_and(PooledConn::is_dead);
-        if dead {
-            map.remove(key);
-            self.counters.evictions_dead.fetch_add(1, Ordering::Relaxed);
-            self.counters.h2_misses.fetch_add(1, Ordering::Relaxed);
-            return None;
-        }
-        match map.get_mut(key) {
-            Some(entry @ PooledConn::H2 { .. }) => {
-                entry.set_last_use(Instant::now());
-                if let PooledConn::H2 { handle, tls, .. } = entry {
-                    let out = (handle.clone(), tls.clone());
-                    self.counters.h2_hits.fetch_add(1, Ordering::Relaxed);
-                    Some(out)
-                } else {
-                    unreachable!()
-                }
-            }
-            _ => {
-                self.counters.h2_misses.fetch_add(1, Ordering::Relaxed);
-                None
-            }
-        }
-    }
-
-    #[cfg(feature = "http3")]
-    pub(crate) fn checkout_h3(&self, key: &PoolKey) -> Option<(H3Client, TlsInfo)> {
-        let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let dead = map.get(key).is_some_and(PooledConn::is_dead);
-        if dead {
-            map.remove(key);
-            self.counters.evictions_dead.fetch_add(1, Ordering::Relaxed);
-            self.counters.h3_misses.fetch_add(1, Ordering::Relaxed);
-            return None;
-        }
-        match map.get_mut(key) {
-            Some(entry @ PooledConn::H3 { .. }) => {
-                entry.set_last_use(Instant::now());
-                if let PooledConn::H3 { handle, tls, .. } = entry {
-                    let out = (handle.clone(), tls.clone());
-                    self.counters.h3_hits.fetch_add(1, Ordering::Relaxed);
-                    Some(out)
-                } else {
-                    unreachable!()
-                }
-            }
-            _ => {
-                self.counters.h3_misses.fetch_add(1, Ordering::Relaxed);
-                None
-            }
-        }
-    }
-
-    #[cfg(feature = "http3")]
-    pub(crate) fn install_or_get_h3(
-        &self,
-        key: PoolKey,
-        handle: H3Client,
-        driver: H3DriverTask,
-        tls: TlsInfo,
-    ) -> (H3Client, TlsInfo) {
-        let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(PooledConn::H3 {
-            handle: existing,
-            tls: existing_tls,
-            ..
-        }) = map.get(&key)
-            && !existing.is_closed()
-        {
-            self.counters.h3_hits.fetch_add(1, Ordering::Relaxed);
-            return (existing.clone(), existing_tls.clone());
-        }
-        if !map.contains_key(&key) {
-            let evicted = Self::evict_lru_if_needed(&mut map, self.max_connections);
-            if evicted > 0 {
-                self.counters
-                    .evictions_lru
-                    .fetch_add(evicted, Ordering::Relaxed);
-            }
-        }
-        let out = (handle.clone(), tls.clone());
-        map.insert(
-            key,
-            PooledConn::H3 {
-                handle,
-                _driver: Some(driver),
-                last_use: Instant::now(),
-                tls,
-            },
-        );
-        self.counters.installs.fetch_add(1, Ordering::Relaxed);
-        out
-    }
-
-    pub(crate) fn checkout_h1(&self, key: &PoolKey) -> Option<(H1Slot, TlsInfo)> {
-        let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        match map.get_mut(key) {
-            Some(PooledConn::H1 {
-                idle,
-                last_use,
-                tls,
-            }) => match idle.pop_back() {
-                Some((slot, _returned_at)) => {
-                    *last_use = Instant::now();
-                    let tls = tls.clone();
-                    self.counters.h1_hits.fetch_add(1, Ordering::Relaxed);
-                    Some((slot, tls))
-                }
-                None => {
-                    self.counters.h1_misses.fetch_add(1, Ordering::Relaxed);
-                    None
-                }
-            },
-            _ => {
-                self.counters.h1_misses.fetch_add(1, Ordering::Relaxed);
-                None
-            }
-        }
-    }
-
-    pub(crate) fn install_h2(
-        &self,
-        key: PoolKey,
-        handle: H2Client,
-        driver: DriverTask,
-        tls: TlsInfo,
-    ) -> (H2Client, TlsInfo) {
-        let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(PooledConn::H2 {
-            handle: existing,
-            tls: existing_tls,
-            ..
-        }) = map.get(&key)
-            && !existing.is_closed()
-        {
-            self.counters.h2_hits.fetch_add(1, Ordering::Relaxed);
-            return (existing.clone(), existing_tls.clone());
-        }
-        if !map.contains_key(&key) {
-            let evicted = Self::evict_lru_if_needed(&mut map, self.max_connections);
-            if evicted > 0 {
-                self.counters
-                    .evictions_lru
-                    .fetch_add(evicted, Ordering::Relaxed);
-            }
-        }
-        let out = (handle.clone(), tls.clone());
-        map.insert(
-            key,
-            PooledConn::H2 {
-                handle,
-                _driver: Some(driver),
-                last_use: Instant::now(),
-                tls,
-            },
-        );
-        self.counters.installs.fetch_add(1, Ordering::Relaxed);
-        out
-    }
-
-    pub(crate) fn return_h1(&self, key: PoolKey, slot: H1Slot, tls: TlsInfo) {
-        let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        match map.get_mut(&key) {
-            Some(PooledConn::H1 { idle, last_use, .. }) => {
-                idle.push_back((slot, Instant::now()));
-                *last_use = Instant::now();
-                return;
-            }
-            Some(PooledConn::H2 { .. }) => return,
-            #[cfg(feature = "http3")]
-            Some(PooledConn::H3 { .. }) => return,
-            None => {}
-        }
-        let evicted = Self::evict_lru_if_needed(&mut map, self.max_connections);
-        if evicted > 0 {
-            self.counters
-                .evictions_lru
-                .fetch_add(evicted, Ordering::Relaxed);
-        }
-        let mut idle = VecDeque::new();
-        idle.push_back((slot, Instant::now()));
-        map.insert(
-            key,
-            PooledConn::H1 {
-                idle,
-                last_use: Instant::now(),
-                tls,
-            },
-        );
-    }
-
-    pub(crate) async fn acquire_h1_permit(&self, key: &PoolKey) -> OwnedSemaphorePermit {
-        let sem = {
-            let mut permits = self.h1_permits.lock().unwrap_or_else(|e| e.into_inner());
-            permits
-                .entry(key.clone())
-                .or_insert_with(|| Arc::new(Semaphore::new(self.max_h1_conns_per_host)))
-                .clone()
-        };
-        sem.acquire_owned()
-            .await
-            .expect("h1 per-host semaphore is never closed")
-    }
-
     pub(crate) fn note_h1_install(&self) {
         self.counters.installs.fetch_add(1, Ordering::Relaxed);
     }
@@ -494,14 +237,6 @@ impl Pool {
 
     pub(crate) fn note_h1_stale_probed(&self) {
         self.counters.stale_probed.fetch_add(1, Ordering::Relaxed);
-    }
-
-    pub fn len(&self) -> usize {
-        self.inner.lock().unwrap_or_else(|e| e.into_inner()).len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
     }
 
     pub(crate) fn fresh(&self) -> Self {
@@ -535,7 +270,6 @@ impl Pool {
                 },
                 PooledConn::H2 {
                     handle: handle.clone(),
-                    _driver: None,
                     last_use: Instant::now(),
                     tls: TlsInfo::default(),
                 },
@@ -584,3 +318,5 @@ fn alt_svc_same_authority(entry: &str, host: &str, port: u16) -> bool {
 
 #[cfg(test)]
 mod tests;
+
+mod slots;

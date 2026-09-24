@@ -5,9 +5,9 @@ use crate::core::transport::send_request_h3;
 use crate::core::transport::{
     Prepared, TransportResponse, send_request_auto, send_request_h1, send_request_h2,
 };
-#[cfg(feature = "http3")]
-use crate::pool::checkout_h3_handle;
 use crate::pool::checkout_handle;
+#[cfg(feature = "http3")]
+use crate::pool::{H3Target, checkout_h3_handle};
 #[cfg(feature = "http3")]
 use crate::quic::H3Config;
 
@@ -18,6 +18,16 @@ impl Session {
         request_proxy: Option<&'a str>,
     ) -> Option<&'a str> {
         self.inner.proxy_config.proxy_for(url, request_proxy)
+    }
+
+    #[cfg(feature = "http3")]
+    fn h3_target<'a>(&'a self, config: &'a H3Config) -> H3Target<'a> {
+        H3Target {
+            config,
+            profile: self.inner.profile,
+            trust: &self.inner.tls_trust,
+            connector: &self.inner.connector,
+        }
     }
 
     #[cfg(feature = "http3")]
@@ -56,15 +66,7 @@ impl Session {
                     Error::new(Kind::Config)
                         .with_message("this browser profile has no HTTP/3 fingerprint")
                 })?;
-                Box::pin(send_request_h3(
-                    pool,
-                    h3_config,
-                    self.inner.profile,
-                    &self.inner.tls_trust,
-                    self.inner.connector.resolver(),
-                    req,
-                ))
-                .await
+                Box::pin(send_request_h3(pool, &self.h3_target(h3_config), req)).await
             }
             #[cfg(feature = "http3")]
             ProtocolPolicy::Race => {
@@ -105,15 +107,8 @@ impl Session {
             H2,
         }
 
-        let h3_connect = checkout_h3_handle(
-            pool,
-            h3_config,
-            self.inner.profile,
-            &self.inner.tls_trust,
-            connector.resolver(),
-            host,
-            port,
-        );
+        let target = self.h3_target(h3_config);
+        let h3_connect = checkout_h3_handle(pool, &target, host, port);
         let h2_connect = checkout_handle(pool, connector, h2_config, host, port, req.proxy);
         tokio::pin!(h3_connect, h2_connect);
 
@@ -146,15 +141,7 @@ impl Session {
         match winner {
             Some(Winner::H3) => {
                 pool.note_h3(host, port);
-                Box::pin(send_request_h3(
-                    pool,
-                    h3_config,
-                    self.inner.profile,
-                    &self.inner.tls_trust,
-                    self.inner.connector.resolver(),
-                    req,
-                ))
-                .await
+                Box::pin(send_request_h3(pool, &target, req)).await
             }
             Some(Winner::H2) => send_request_h2(pool, connector, h2_config, req).await,
             None => send_request_auto(pool, connector, h2_config, req).await,

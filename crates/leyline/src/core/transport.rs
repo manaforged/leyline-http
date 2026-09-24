@@ -6,14 +6,18 @@ use http::{HeaderName, HeaderValue, StatusCode};
 use crate::h2::config::H2Config;
 use crate::h2::connection::PseudoHeaders;
 use crate::header_str::HeaderStr;
-use crate::pool::{H1Body, H1PooledError, H1ResponseBody, H1Target, Pool};
+use crate::pool::Pool;
 use crate::profile::preset::HeaderPair;
 use crate::tls::FingerprintConnector;
 
-use crate::core::body::{Body, BodyKind};
+use crate::core::body::Body;
 use crate::core::body_stream::BodyStream;
 use crate::core::error::{Error, Kind, Result};
 use crate::core::response::HttpVersion;
+
+mod h1;
+
+pub(crate) use h1::{h1_error_to_core, send_request_h1};
 
 fn status(code: u16) -> Result<StatusCode> {
     StatusCode::from_u16(code)
@@ -96,11 +100,7 @@ pub(crate) async fn send_request_auto(
         stream_response,
     } = req;
 
-    let (h2_body, replay): (Body, Option<Body>) = match body.0 {
-        BodyKind::Empty => (Body::default(), Some(Body::default())),
-        BodyKind::Bytes(b) => (Body::bytes(b.clone()), Some(Body::bytes(b))),
-        kind @ BodyKind::Stream { .. } => (Body(kind), None),
-    };
+    let replay = body.replay();
 
     match send_request_h2(
         pool,
@@ -110,7 +110,7 @@ pub(crate) async fn send_request_auto(
             method,
             url,
             headers: headers.clone(),
-            body: h2_body,
+            body,
             proxy,
             stream_response,
         },
@@ -209,8 +209,6 @@ pub(crate) async fn send_request_h2(
         protocol: None,
     };
 
-    let h2_req_body = body_to_h2_request(body);
-
     strip_connection_specific_headers(&mut headers)?;
 
     let (resp, tls, timing) = crate::pool::send_request(
@@ -219,7 +217,7 @@ pub(crate) async fn send_request_h2(
         h2_config,
         pseudo,
         headers,
-        h2_req_body,
+        body,
         proxy,
         stream_response,
     )
@@ -242,20 +240,6 @@ pub(crate) async fn send_request_h2(
         tls: Some(tls),
         timing,
     })
-}
-
-fn body_to_h2_request(body: Body) -> crate::h2::client::RequestBody {
-    match body.0 {
-        BodyKind::Empty => crate::h2::client::RequestBody::None,
-        BodyKind::Bytes(b) => crate::h2::client::RequestBody::Buffered(b),
-        BodyKind::Stream {
-            stream,
-            length_hint,
-        } => crate::h2::client::RequestBody::Streaming {
-            stream,
-            length_hint,
-        },
-    }
 }
 
 pub(crate) fn check_framing(headers: &[HeaderPair]) -> Result<()> {
@@ -296,134 +280,6 @@ pub(crate) fn strip_connection_specific_headers(headers: &mut Vec<HeaderPair>) -
     Ok(())
 }
 
-fn body_to_h1(body: Body) -> H1Body {
-    match body.0 {
-        BodyKind::Empty => H1Body::Empty,
-        BodyKind::Bytes(b) => H1Body::Buffered(b),
-        BodyKind::Stream {
-            stream,
-            length_hint: Some(length),
-        } => H1Body::FixedStream { stream, length },
-        BodyKind::Stream {
-            stream,
-            length_hint: None,
-        } => H1Body::ChunkedStream { stream },
-    }
-}
-
-#[tracing::instrument(
-    name = "transport.h1",
-    level = "debug",
-    skip_all,
-    fields(
-        http.method = req.method,
-        http.scheme = req.url.scheme(),
-        http.host = req.url.host_str().unwrap_or(""),
-    )
-)]
-pub(crate) async fn send_request_h1(
-    pool: &Arc<Pool>,
-    connector: &FingerprintConnector,
-    req: Prepared<'_>,
-) -> Result<TransportResponse> {
-    let Prepared {
-        method,
-        url,
-        headers,
-        body,
-        proxy,
-        stream_response,
-    } = req;
-    check_framing(&headers)?;
-    let host = url
-        .host_str()
-        .ok_or_else(|| Error::new(Kind::Config).with_message("no host in URL"))?;
-    let port = url.port_or_known_default().ok_or_else(|| {
-        Error::new(Kind::Config)
-            .with_message(format!("no default port for scheme {}", url.scheme()))
-    })?;
-    let scheme = url.scheme();
-
-    let (target, headers) = match (scheme, proxy) {
-        ("http", Some(proxy_url)) => {
-            let parsed = url::Url::parse(proxy_url).map_err(|e| {
-                Error::new(Kind::Config).with_message(format!("invalid proxy URL: {e}"))
-            })?;
-            if parsed.scheme() != "http" {
-                return Err(Error::new(Kind::Config)
-                    .with_message("plaintext HTTP currently supports http:// proxies only"));
-            }
-            let mut headers = headers;
-            headers.retain(|(k, _)| !k.eq_ignore_ascii_case("priority"));
-            if let Some(credentials) = crate::util::proxy_basic_auth(&parsed) {
-                headers.push((
-                    "Proxy-Authorization".into(),
-                    std::borrow::Cow::Owned(credentials),
-                ));
-            }
-            (H1Target::AbsoluteForm, headers)
-        }
-        _ => {
-            let mut headers = headers;
-            headers.retain(|(k, _)| !k.eq_ignore_ascii_case("priority"));
-            (H1Target::OriginForm, headers)
-        }
-    };
-
-    let h1_body = body_to_h1(body);
-
-    let resp = crate::pool::send_request_h1_pooled(
-        pool,
-        connector,
-        scheme,
-        host,
-        port,
-        method,
-        url,
-        headers
-            .into_iter()
-            .map(|(k, v)| (k.into_owned(), v.into_owned()))
-            .collect(),
-        h1_body,
-        proxy,
-        target,
-        stream_response,
-    )
-    .await
-    .map_err(h1_error_to_core)?;
-
-    let transport_body = match resp.body {
-        H1ResponseBody::Buffered(b) => TransportBody::Buffered(b),
-        H1ResponseBody::Streaming(s) => TransportBody::Streaming(s),
-    };
-
-    Ok(TransportResponse {
-        status: status(resp.status)?,
-        headers: adopt(resp.headers),
-        trailers: Vec::new(),
-        body: transport_body,
-        final_url: url.as_str().to_owned(),
-        version: HttpVersion::Http1_1,
-        tls: resp.tls,
-        timing: crate::core::ResponseTiming::default(),
-    })
-}
-
-pub(crate) fn h1_error_to_core(e: H1PooledError) -> Error {
-    match e {
-        H1PooledError::Config(m) => Error::new(Kind::Config).with_message(m),
-        H1PooledError::Tls(error) => Error::new(Kind::Tls).with_source(error),
-        H1PooledError::Io(io) => Error::new(Kind::Io).with_source(io),
-        H1PooledError::Http(m) => Error::new(Kind::Request).with_message(m),
-        H1PooledError::ConnectionClosed(ctx) => {
-            Error::new(Kind::Io).with_source(std::io::Error::new(
-                std::io::ErrorKind::UnexpectedEof,
-                format!("connection closed {ctx}"),
-            ))
-        }
-    }
-}
-
 #[cfg(feature = "http3")]
 #[tracing::instrument(
     name = "transport.h3",
@@ -433,10 +289,7 @@ pub(crate) fn h1_error_to_core(e: H1PooledError) -> Error {
 )]
 pub(crate) async fn send_request_h3(
     pool: &Arc<Pool>,
-    h3_config: &crate::quic::H3Config,
-    profile: &crate::profile::BrowserProfile,
-    trust: &crate::tls::TlsTrustConfig,
-    resolver: &Arc<dyn crate::tls::Resolver>,
+    target: &crate::pool::H3Target<'_>,
     req: Prepared<'_>,
 ) -> Result<TransportResponse> {
     let Prepared {
@@ -462,29 +315,22 @@ pub(crate) async fn send_request_h3(
 
     strip_connection_specific_headers(&mut headers)?;
 
-    let (body_bytes, body_stream) = match body.0 {
-        BodyKind::Empty => (None, None),
-        BodyKind::Bytes(b) => (Some(b), None),
-        BodyKind::Stream { stream, .. } => (None, Some(stream)),
-    };
-
+    let headers: Vec<(String, String)> = headers
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
     let (resp, tls) = crate::pool::send_request_h3_pooled(
         pool,
-        h3_config,
-        profile,
-        trust,
-        resolver,
+        target,
         host,
         port,
-        method,
-        &authority,
-        &full_path,
-        &headers
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect::<Vec<_>>(),
-        body_bytes,
-        body_stream,
+        crate::pool::H3Request {
+            method,
+            authority: &authority,
+            path: &full_path,
+            headers: &headers,
+        },
+        body,
         stream_response,
     )
     .await?;

@@ -2,14 +2,11 @@ use std::collections::VecDeque;
 use std::sync::atomic::AtomicU64;
 use std::time::Instant;
 
-use crate::h2::client::{DriverTask, H2Client};
+use crate::h2::client::H2Client;
 #[cfg(feature = "http3")]
-use crate::quic::{H3Client, H3DriverTask};
+use crate::quic::H3Client;
 
 use crate::pool::h1::H1Io;
-use crate::tls::TlsIo;
-
-pub(crate) type H2Io = TlsIo;
 
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
@@ -42,7 +39,6 @@ pub struct H1Slot {
 pub(crate) enum PooledConn {
     H2 {
         handle: H2Client,
-        _driver: Option<DriverTask>,
         last_use: Instant,
         tls: TlsInfo,
     },
@@ -54,7 +50,6 @@ pub(crate) enum PooledConn {
     #[cfg(feature = "http3")]
     H3 {
         handle: H3Client,
-        _driver: Option<H3DriverTask>,
         last_use: Instant,
         tls: TlsInfo,
     },

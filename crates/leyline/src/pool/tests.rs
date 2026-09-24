@@ -1,3 +1,4 @@
+use super::connect::connect_err;
 use super::*;
 use crate::tls::TlsError;
 use crate::{Error, Kind};
