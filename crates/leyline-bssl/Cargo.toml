@@ -9,7 +9,11 @@ authors = [
     "Steven Fackler <sfackler@gmail.com>",
     "Ivan Nikulin <ifaaan@gmail.com>",
 ]
-description = "Leyline's owned safe BoringSSL wrapper: the SslConnector / SslContextBuilder surface leyline's TLS fingerprinting needs, over leyline-bssl-sys"
+description = "Safe BoringSSL bindings used by leyline-http"
+homepage = "https://github.com/manaforged/leyline-http"
+documentation = "https://docs.rs/leyline-bssl"
+keywords = ["boringssl", "tls", "ssl"]
+categories = ["cryptography", "api-bindings"]
 license = "Apache-2.0"
 repository = "https://github.com/manaforged/leyline-http"
 

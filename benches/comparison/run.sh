@@ -11,7 +11,7 @@ WREQ_TARGET="${WREQ_TARGET:-target}"
 mkdir -p bin
 
 echo "== build go =="
-( cd go && go build -o ../bin/server ./server && go build -o ../bin/tlsclient ./tlsclient && go build -o ../bin/azuretls ./azuretls )
+( cd go && go build -o ../bin/server ./server && go build -o ../bin/tlsclient ./tlsclient )
 
 echo "== build leyline client =="
 ( cd leyline-client && cargo build --release -q && cp target/release/leyline-cmp-client ../bin/leyline )
@@ -42,4 +42,3 @@ echo "== run (warm=$WARM conc=$CONC x$CONCURRENCY cold=$COLD) =="
 ./bin/wreq      "$URL" "$WARM" "$COLD" "$CONC" "$CONCURRENCY"
 ./bin/reqwest   "$URL" "$WARM" "$COLD" "$CONC" "$CONCURRENCY"
 ./bin/tlsclient "$URL" "$WARM" "$COLD" "$CONC" "$CONCURRENCY"
-./bin/azuretls  "$URL" "$WARM" "$COLD" "$CONC" "$CONCURRENCY"

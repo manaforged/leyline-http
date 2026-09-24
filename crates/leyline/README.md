@@ -98,7 +98,7 @@ lists the capture status of every profile.
 
 | Page | Contents |
 | --- | --- |
-| [API reference](https://docs.rs/leyline-http) | Rustdoc for every public type. |
+| [API reference](https://docs.rs/leyline-http) | Generated reference for the public API. |
 | [User guide](https://github.com/manaforged/leyline-http/blob/main/docs/guide/README.md) | Task pages: sessions, requests, streaming, proxies, cookies, HTTP/3, and TLS trust. |
 | [Profile reference](https://github.com/manaforged/leyline-http/blob/main/docs/guide/profiles.md) | Bundled profiles and their capture status. |
 | [API map](https://github.com/manaforged/leyline-http/blob/main/docs/api.md) | Each task mapped to its type or function, and the error model. |
@@ -118,7 +118,9 @@ describes the build and the checks.
 
 Leyline is licensed under the
 [MIT license](https://github.com/manaforged/leyline-http/blob/main/LICENSE).
-[NOTICE](https://github.com/manaforged/leyline-http/blob/main/NOTICE) lists the
-BoringSSL and quiche forks and their licenses.
+It depends on forks of BoringSSL (MIT, Apache-2.0, and BSD-3-Clause) and
+quiche (BSD-2-Clause), published as separate crates.
+[NOTICE](https://github.com/manaforged/leyline-http/blob/main/NOTICE) lists
+the forks and their licenses.
 
 Copyright 2026 Manaforge Technologies, LLC.

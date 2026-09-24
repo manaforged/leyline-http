@@ -13,9 +13,9 @@
    consumer checks, and with `--full` the live fingerprint and smoke
    suites. The vendored `leyline-quiche` crate is excluded from the
    clippy, rustdoc, and test gates; the vendored `leyline-bssl*` crates
-   still gate. The gate needs Python 3, Node, the 1.96 toolchain through
-   rustup, and `cargo-deny` installed; the live suites need network access.
-   Set `LEYLINE_SKIP_LIVE_TESTS=1` to skip the live matrix in the pre-commit hook.
+   still gate. The gate needs Python 3, Node, rustup (the toolchain comes from
+   `rust-toolchain.toml`), and `cargo-deny`. The live suites need network
+   access.
 
    Tests that need the network are marked `#[ignore]`. Run them with
    `cargo nextest run -p leyline-http --run-ignored all` when your change
@@ -27,16 +27,11 @@
 3. Add a line under `Unreleased` in `CHANGELOG.md` when the change is
    visible to a user of the crate.
 
-## Commit messages
+## Pull request description
 
-```
-area: what the commit does
-
-Problem: One sentence.
-Fix: One sentence.
-Impact: One sentence. "None" is valid.
-Test: The command you ran and the line that proves it.
-```
+Pull requests are squash-merged. Fill in the template: the problem, the fix,
+the user-visible impact, and the command you ran to test it. Commit messages
+inside the branch can use any clear style.
 
 ## Browser profiles
 
@@ -44,6 +39,8 @@ A profile under `crates/leyline/profiles/` describes a real capture. Name
 the browser build it was captured from in `captured_against`, and keep the
 `ja4` and `akamai` goldens next to the fields that produce them. The offline
 conformance test gates every profile that fixes its extension order.
+`scripts/profile-oneshot.sh` captures new browser builds and lands their
+profiles; run it with `status` to see which versions are missing.
 
 ## Style
 

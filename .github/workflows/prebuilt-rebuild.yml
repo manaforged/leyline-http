@@ -20,8 +20,7 @@ permissions:
 # commit into crates/leyline-bssl-sys/. Every target must be built with
 # -DBORINGSSL_PREFIX=LEYLINE so the whole bundle shares one export namespace.
 # aarch64-apple-darwin is built separately; the three targets below
-# run here. Never dispatch this casually: each job
-# spends real runner minutes.
+# run here.
 jobs:
   linux-x86_64:
     if: inputs.targets == 'all' || contains(inputs.targets, 'x86_64-unknown-linux-gnu')

@@ -48,8 +48,6 @@ settings_order = [
 
 [tls.fingerprint]
 # Pinned to leyline's current emission.
-# TODO: cross-reference against a real iOS 18 Safari ClientHello — the
-# pinned value is still leyline-self-referential, not externally verified.
 ja4 = "t13d2016h2_a09f3c656075_00894b3dd361"
 
 [h2.fingerprint]

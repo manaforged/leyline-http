@@ -62,7 +62,7 @@ g_parity() {
     python_version="$(awk -F'"' '/^version *= *"/{print $2; exit}' wrappers/python/pyproject.toml)"
     python_expected="$(printf '%s\n' "$workspace_version" | sed -E 's/-alpha\./a/; s/-beta\./b/; s/-rc\./rc/')"
     node -e '
-const p = require("./package.json");
+const p = require("./wrappers/node/package.json");
 const version = process.argv[1];
 if (p.version !== version) process.exit(1);
 for (const pin of Object.values(p.optionalDependencies || {})) {

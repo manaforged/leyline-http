@@ -1,8 +1,10 @@
 [package]
 name = "leyline-quiche"
-# Fork of cloudflare/quiche v0.23.7 that links against leyline-bssl instead of
-# boring, so leyline's H2 and H3 ClientHellos share the same patched BoringSSL.
-description = "Fork of cloudflare/quiche (v0.23.7) that links against leyline-bssl instead of boring, so leyline's H2 and H3 ClientHellos share the same patched BoringSSL."
+description = "Fork of cloudflare/quiche 0.23.7 that links against leyline-bssl"
+homepage = "https://github.com/manaforged/leyline-http"
+documentation = "https://docs.rs/leyline-quiche"
+keywords = ["quic", "http3", "boringssl"]
+categories = ["network-programming"]
 version.workspace = true
 edition.workspace = true
 license = "BSD-2-Clause"
@@ -25,8 +27,6 @@ include = [
     "/src",
 ]
 
-# Vendored third-party code (cloudflare/quiche). Hygiene gates (line caps,
-# clippy strictness) do not apply here. We track upstream.
 
 [features]
 default = ["boringssl-bssl-crate"]

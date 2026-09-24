@@ -10,7 +10,11 @@ authors = [
     "Steven Fackler <sfackler@gmail.com>",
     "Ivan Nikulin <ifaaan@gmail.com>",
 ]
-description = "Leyline's owned BoringSSL FFI: a pinned BoringSSL revision + carried patches, shipped prebuilt"
+description = "Prebuilt BoringSSL and raw FFI bindings used by leyline-http"
+homepage = "https://github.com/manaforged/leyline-http"
+documentation = "https://docs.rs/leyline-bssl-sys"
+keywords = ["boringssl", "tls", "ffi"]
+categories = ["cryptography", "external-ffi-bindings"]
 license = "MIT AND Apache-2.0 AND BSD-3-Clause"
 repository = "https://github.com/manaforged/leyline-http"
 build = "build.rs"
@@ -20,10 +24,6 @@ autobins = false
 autoexamples = false
 autotests = false
 autobenches = false
-# Prebuilt artifacts are the dev/release path (no CMake/bindgen). The source
-# tree (deps/boringssl submodule + patches/ + build/ + cmake/) is the CI path:
-# scripts/package-bssl.sh rebuilds the libraries and bindings from it. Its
-# x86_64-pc-windows-msvc path uses cargo-xwin's Microsoft SDK/UCRT sysroot.
 include = [
     "/Cargo.toml",
     "/README.md",

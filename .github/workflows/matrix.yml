@@ -1,9 +1,5 @@
 name: Pre-tag matrix
 
-# Broad pre-tag qualification. Runner minutes are paid, so this never runs
-# on a push to a branch and never on a pull request — an operator starts it
-# by hand before cutting a tag. scripts/verify.sh --full runs the same list
-# locally; this workflow adds the toolchains and targets a laptop lacks.
 on:
   workflow_dispatch:
 

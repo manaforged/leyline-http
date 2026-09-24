@@ -9,7 +9,11 @@ authors = [
     "Alex Crichton <alex@alexcrichton.com>",
     "Ivan Nikulin <ifaaan@gmail.com>",
 ]
-description = "Async (tokio) SSL streams backed by leyline-bssl / BoringSSL"
+description = "Async Tokio TLS streams over leyline-bssl"
+homepage = "https://github.com/manaforged/leyline-http"
+documentation = "https://docs.rs/leyline-bssl-tokio"
+keywords = ["boringssl", "tls", "tokio", "async"]
+categories = ["cryptography", "asynchronous"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/manaforged/leyline-http"
 
