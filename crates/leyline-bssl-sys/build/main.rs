@@ -152,7 +152,7 @@ fn get_boringssl_source_path(config: &Config) -> &Path {
             println!("cargo:warning=fetching boringssl git submodule");
 
             run_command(
-                Command::new("git")
+                git(&config.manifest_dir)
                     .args(["submodule", "update", "--init", "--recursive"])
                     .arg(&submodule_path),
             )
@@ -477,7 +477,7 @@ fn ensure_patches_applied(config: &Config) -> io::Result<()> {
     lock_file.lock()?;
 
     if !has_git {
-        run_command(Command::new("git").arg("init").current_dir(src_path))?;
+        run_command(git(src_path).arg("init"))?;
     }
 
     let mut patches = fs::read_dir(config.manifest_dir.join("patches"))?
@@ -515,14 +515,20 @@ fn apply_patch(config: &Config, patch_name: &str) -> io::Result<()> {
         args.push("-p2");
     }
 
-    run_command(
-        Command::new("git")
-            .args(&args)
-            .arg(cmd_path)
-            .current_dir(src_path),
-    )?;
+    run_command(git(src_path).args(&args).arg(cmd_path))?;
 
     Ok(())
+}
+
+fn git(dir: &Path) -> Command {
+    let mut command = Command::new("git");
+    for (key, _) in std::env::vars_os() {
+        if key.to_string_lossy().starts_with("GIT_") {
+            command.env_remove(key);
+        }
+    }
+    command.current_dir(dir);
+    command
 }
 
 fn run_command(command: &mut Command) -> io::Result<Output> {
