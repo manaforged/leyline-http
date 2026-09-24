@@ -1,12 +1,42 @@
 # Leyline
 
-An async Rust HTTP client that reproduces the TLS ClientHello, HTTP/2
-SETTINGS, and request header order recorded from selected browser builds. The
-[profile reference](https://github.com/manaforged/leyline-http/blob/main/docs/guide/profiles.md)
-states the capture status of each profile. Bundled profiles cover
-Chrome 145 to 152, Brave 146, Firefox 148 to 154, Safari 18 and 26, Safari on
-iOS 17 and 18, OkHttp on Android, and CFNetwork on iOS 18 and macOS 26.
-Leyline supports HTTP/1.1, HTTP/2, HTTP/3, and WebSocket on Tokio.
+An async Rust HTTP client that sends the TLS ClientHello, HTTP/2 SETTINGS, and
+request headers of a chosen browser profile. Leyline supports HTTP/1.1,
+HTTP/2, HTTP/3, and WebSocket on Tokio. Bundled profiles cover Chrome 145 to
+152, Brave 146, Firefox 148 to 154, Safari 18 and 26, Safari on iOS 17 and 18,
+OkHttp on Android, and CFNetwork on iOS 18 and macOS 26.
+
+## Why Leyline
+
+- **Stated provenance for every profile.** Each profile records the build it
+  was captured from in `captured_against` and its source in `capture`. The
+  [profile reference](https://github.com/manaforged/leyline-http/blob/main/docs/guide/profiles.md#provenance)
+  lists which profiles are browser captures, which are inferred, and which
+  pin Leyline's own output.
+- **A connection pool keyed by proxy.** `Session::with_proxy` switches the
+  proxy and keeps the warm connections of every proxy. `Session::fresh_pool`
+  takes a new pool, so the next request opens new connections.
+- **Safe connection reuse.** The pool sends an HTTP/2 PING before it reuses a
+  connection idle for 10 seconds, and counts failures in
+  `PoolStats::h2_ping_failures`. `SocketConfig::tcp_user_timeout` bounds
+  unacknowledged writes on Linux. Retries are off by default, and
+  `RetryPolicy::max_retry_after` caps the wait a `Retry-After` header can ask
+  for.
+- **Typed errors and named timeouts.** `Error::kind` returns a `Kind` such as
+  `Connect`, `Proxy`, `Tls`, or `Timeout`, and `Error::is_retryable` holds the
+  one retry rule. `TimeoutConfig` has four named limits: `connect`,
+  `response_header`, `read`, and `total`.
+- **Prefixed BoringSSL.** The bundled BoringSSL exports its symbols with a
+  `LEYLINE` prefix and declares `links = "leyline_bssl"`, so it can link into
+  the same binary as `boring-sys` or `openssl-sys`. You can move one route at
+  a time.
+- **Chromium's `sec-ch-ua` rule.** Chromium-family profiles derive
+  `sec-ch-ua` from the major version with the GREASE brand, version, and
+  order rule that Chromium uses. `Response::audit()` reports the values the
+  session was configured to send.
+- **Profiles you load at runtime.** `SessionBuilder::profile` sends a profile
+  from `ProfileRegistry::load` or `BrowserProfile::from_toml`, so a new
+  browser build does not need a crate release.
 
 ## Requirements
 
@@ -53,13 +83,39 @@ async fn main() -> leyline::Result<()> {
 }
 ```
 
-`Session::new()` uses the latest bundled Chrome profile with a Windows
-identity. Reuse one session to share connections and cookies. To select
-another browser or platform, use `Session::builder()`.
+Reuse one session to share connections and cookies. To select another
+browser or platform, use `Session::builder()`.
 
-The latest bundled Chrome changes when a release adds a newer Chrome
-profile, and a patch release can add one. To keep a fixed fingerprint, pin
-the browser with `Session::builder().browser(Browser::Chrome148)`.
+## What `Session::new()` sends
+
+`Session::new()` uses the newest bundled Chrome profile captured from a real
+browser, with a Windows identity. It sends that profile's ClientHello,
+HTTP/2 SETTINGS, user agent, `sec-ch-ua` headers, and header order. A patch
+release can add a newer browser capture and move this default. To keep a
+fixed fingerprint, pin the browser:
+
+```rust,no_run
+use leyline::{Browser, Platform, Session};
+
+# fn main() -> leyline::Result<()> {
+let session = Session::builder()
+    .browser(Browser::Chrome150)
+    .platform(Platform::MacOS)
+    .build()?;
+# drop(session);
+# Ok(())
+# }
+```
+
+`.platform()` selects the identity: `Windows`, `MacOS`, `Linux`, `Android`,
+or `IOS`, where the profile has one. `Session::builder().build()` with no
+browser is a bare session that impersonates no browser.
+
+## Intended use
+
+Leyline is for testing and automation of services that you are authorized to
+access. Respect the terms of each site and the law that applies to you.
+Leyline makes no claim that a site cannot detect it.
 
 ## Limits
 
@@ -68,8 +124,9 @@ the browser with `Session::builder().browser(Browser::Chrome148)`.
 - The Safari 18, Safari iOS 17, Safari iOS 18, Firefox 148, and OkHttp
   profiles pin a JA4 value taken from Leyline's own output, not from a capture.
 - Chrome 145, 146, 147, and 149 are inferred from neighbouring versions. Chrome
-  151 and 152 come from `chrome-headless-shell`. Safari 26 comes from a
-  WKWebView capture with a synthesized Safari HTTP identity.
+  151 and 152 come from `chrome-headless-shell`, so `Session::new()` does not
+  select them. Safari 26 comes from a WKWebView capture with a synthesized
+  Safari HTTP identity.
 - The Android identity of the Chrome profiles reuses the desktop TLS and
   HTTP/2 settings. No mobile Chrome capture exists.
 - The TCP/IP fingerprint (JA4T: window size, options, MSS, TTL) comes from the
@@ -79,6 +136,9 @@ the browser with `Session::builder().browser(Browser::Chrome148)`.
 - HTTP/3 has no browser capture golden. QUIC transport parameters are not
   checked against a browser. The QPACK decoder uses no dynamic table.
 - HTTP/3 through a proxy is not supported.
+- A profile loaded with `SessionBuilder::profile` has no platform twin. Its
+  header order comes from `header_style` in `[meta]`, and the order tables
+  for each style are part of the crate.
 - `Response::audit()` values come from the configured profile and request.
   They are not packet captures.
 - Detection by a remote site is not a security defect. See
