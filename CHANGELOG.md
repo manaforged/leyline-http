@@ -79,6 +79,8 @@ First public release.
   A per-request timeout overrides the session timeouts one field at a time.
 - `Jar::snapshot` copies a cookie jar, `Jar::extend_from` merges one jar into
   another, and `Jar::remove` deletes a cookie.
+- Cookie jar methods take a parsed `&Url`, like the reqwest cookie store,
+  and do not return a URL parse error.
 - `Session::with_redirect` derives a session with another redirect policy and
   the same pool and cookies.
 - `Session::identity` returns the browser, platform, brand, and user agent

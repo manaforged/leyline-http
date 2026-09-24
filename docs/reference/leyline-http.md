@@ -1069,16 +1069,16 @@ impl leyline::cookie::Jar
 pub fn leyline::cookie::Jar::all_cookies(&self) -> alloc::vec::Vec<leyline::cookie::Cookie>
 pub fn leyline::cookie::Jar::clear(&self)
 pub fn leyline::cookie::Jar::cookie_header(&self, url: &url::Url) -> core::option::Option<alloc::string::String>
-pub fn leyline::cookie::Jar::export_cookies(&self, url: impl leyline::IntoUrl) -> leyline::Result<alloc::string::String>
+pub fn leyline::cookie::Jar::export_cookies(&self, url: &url::Url) -> alloc::string::String
 pub fn leyline::cookie::Jar::extend_from(&self, other: &leyline::cookie::Jar)
-pub fn leyline::cookie::Jar::get_cookie(&self, url: impl leyline::IntoUrl, name: &str) -> leyline::Result<core::option::Option<alloc::string::String>>
-pub fn leyline::cookie::Jar::load_cookies(&self, cookie_str: &str, url: impl leyline::IntoUrl) -> leyline::Result<()>
+pub fn leyline::cookie::Jar::get_cookie(&self, url: &url::Url, name: &str) -> core::option::Option<alloc::string::String>
+pub fn leyline::cookie::Jar::load_cookies(&self, cookie_str: &str, url: &url::Url)
 pub fn leyline::cookie::Jar::new() -> Self
-pub fn leyline::cookie::Jar::remove(&self, url: impl leyline::IntoUrl, name: &str) -> leyline::Result<usize>
+pub fn leyline::cookie::Jar::remove(&self, url: &url::Url, name: &str) -> usize
 pub fn leyline::cookie::Jar::remove_named(&self, name: &str) -> usize
-pub fn leyline::cookie::Jar::set_cookie(&self, url: impl leyline::IntoUrl, name: &str, value: &str) -> leyline::Result<()>
+pub fn leyline::cookie::Jar::set_cookie(&self, url: &url::Url, name: &str, value: &str)
 pub fn leyline::cookie::Jar::snapshot(&self) -> Self
-pub fn leyline::cookie::Jar::store_set_cookie(&self, set_cookie: &str, url: impl leyline::IntoUrl) -> leyline::Result<()>
+pub fn leyline::cookie::Jar::store_set_cookie(&self, set_cookie: &str, url: &url::Url)
 impl core::default::Default for leyline::cookie::Jar
 pub fn leyline::cookie::Jar::default() -> Self
 impl core::fmt::Debug for leyline::cookie::Jar

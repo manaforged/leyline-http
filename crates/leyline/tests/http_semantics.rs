@@ -85,8 +85,7 @@ async fn response_cookies_use_the_rfc_parser_not_a_hand_parser() {
     assert_eq!(
         session
             .cookies()
-            .get_cookie(url::Url::parse(&format!("{base}/")).unwrap(), "token")
-            .unwrap()
+            .get_cookie(&url::Url::parse(&format!("{base}/")).unwrap(), "token")
             .as_deref(),
         Some("quoted value"),
         "Response::cookies() and the jar must not diverge"

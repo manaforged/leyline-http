@@ -8,22 +8,23 @@ stores what the response sets.
 `Session::cookies()` borrows the jar.
 
 ```rust,no_run
-# async fn run() -> leyline::Result<()> {
+# async fn run() -> Result<(), Box<dyn std::error::Error>> {
 let session = leyline::Session::new();
 session.get("https://example.com/login").await?;
 
 let jar = session.cookies();
 println!("{} cookies", jar.all_cookies().len());
-if let Some(id) = jar.get_cookie("https://example.com/", "session_id")? {
+let url = url::Url::parse("https://example.com/")?;
+if let Some(id) = jar.get_cookie(&url, "session_id") {
     println!("session_id={id}");
 }
 # Ok(())
 # }
 ```
 
-Every jar method that takes a URL accepts `impl IntoUrl`: a `&str`, a
-`String`, or a `url::Url`, the same input as `Session::get`. A URL that does
-not parse returns `Kind::Url`, so the jar never drops input without an error.
+Every jar method that takes a URL takes a parsed `&url::Url`, like the
+reqwest cookie store. The methods cannot fail on URL input, so none of them
+returns a `Result`. Parse the URL once and pass the same value to each call.
 
 Useful jar methods:
 
@@ -53,14 +54,14 @@ logins.
 ```rust,no_run
 use leyline::cookie::Jar;
 
-# fn run() -> leyline::Result<()> {
-let url = "https://example.com/";
+# fn run() -> Result<(), url::ParseError> {
+let url = url::Url::parse("https://example.com/")?;
 let jar = Jar::new();
-jar.set_cookie(url, "session_id", "abc")?;
+jar.set_cookie(&url, "session_id", "abc");
 
 let shared = jar.clone();
-jar.set_cookie(url, "extra", "1")?;
-assert!(shared.get_cookie(url, "extra")?.is_some());
+jar.set_cookie(&url, "extra", "1");
+assert!(shared.get_cookie(&url, "extra").is_some());
 # Ok(())
 # }
 ```
@@ -97,9 +98,9 @@ shares the pool and all other settings but reads and writes the given jar.
 ```rust,no_run
 use leyline::cookie::Jar;
 
-# fn run() -> leyline::Result<()> {
+# fn run() -> Result<(), Box<dyn std::error::Error>> {
 let jar = Jar::new();
-jar.load_cookies("session_id=abc; theme=dark", "https://example.com/")?;
+jar.load_cookies("session_id=abc; theme=dark", &url::Url::parse("https://example.com/")?);
 
 let session = leyline::Session::builder().cookie_jar(jar).build()?;
 let second_identity = session.with_cookie_jar(Jar::new());
@@ -113,14 +114,14 @@ Seed a domain cookie that `set_cookie` cannot express:
 ```rust,no_run
 use leyline::cookie::Jar;
 
-# fn run() -> leyline::Result<()> {
+# fn run() -> Result<(), url::ParseError> {
 let jar = Jar::new();
-let url = "https://www.example.com/";
-jar.store_set_cookie("token=abc; Domain=.example.com; Path=/; Secure", url)?;
-jar.store_set_cookie("token=; Domain=.example.com; Path=/; Max-Age=0", url)?;
+let url = url::Url::parse("https://www.example.com/")?;
+jar.store_set_cookie("token=abc; Domain=.example.com; Path=/; Secure", &url);
+jar.store_set_cookie("token=; Domain=.example.com; Path=/; Max-Age=0", &url);
 assert_eq!(jar.remove_named("token"), 0);
-jar.store_set_cookie("token=abc; Domain=.example.com; Path=/; Secure", url)?;
-assert_eq!(jar.remove(url, "token")?, 1);
+jar.store_set_cookie("token=abc; Domain=.example.com; Path=/; Secure", &url);
+assert_eq!(jar.remove(&url, "token"), 1);
 # Ok(())
 # }
 ```

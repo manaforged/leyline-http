@@ -89,9 +89,9 @@ let resp = session
 | Retry | `SessionBuilder::retry(RetryPolicy)`, `RequestBuilder::retry`, `RetryPolicy::retry_on(impl IntoIterator<Item = RetryTrigger>)` | `RequestBuilder::send` loop |
 | Redirect | `SessionBuilder::redirect(RedirectPolicy)`, `RequestBuilder::redirect(RedirectPolicy)`, `Session::with_redirect(RedirectPolicy)` | redirect loop in `Session::execute_inner` |
 | Cookies | `SessionBuilder::cookie_jar(Jar)`, `Session::cookies()`, `Session::with_cookie_jar(Jar)` | `cookie::Jar`, one Set-Cookie parser |
-| Seed a cookie with attributes | `Jar::store_set_cookie(&str, impl IntoUrl) -> Result<()>` | `cookie::parse`, the same parser responses use |
+| Seed a cookie with attributes | `Jar::store_set_cookie(&str, &Url)` | `cookie::parse`, the same parser responses use |
 | Copy and merge a jar | `Jar::snapshot() -> Jar`, `Jar::extend_from(&Jar)` | `cookie::Jar` |
-| Remove cookies by name | `Jar::remove(impl IntoUrl, &str) -> Result<usize>` (one host, every path), `Jar::remove_named(&str) -> usize` (every host) | `cookie::Jar` |
+| Remove cookies by name | `Jar::remove(&Url, &str) -> usize` (one host, every path), `Jar::remove_named(&str) -> usize` (every host) | `cookie::Jar` |
 | Identity values | `Browser::identity(Platform, Option<ChromiumBrand>) -> Option<PlatformIdentity>`; `Session::identity() -> SessionIdentity` (what a built session sends) | `profile::resolve_identity`, the one resolver the session builder also calls |
 | TCP fingerprint | `Platform::tcp_profile() -> TcpProfile`, `SessionBuilder::tcp_profile` | `profiles/platforms.toml` |
 | Proxy | `impl Into<ProxyConfig>` on `SessionBuilder::proxy`, `RequestBuilder::proxy`, `WebSocketBuilder::proxy`, `Session::with_proxy` | `ProxyConfig::proxy_for` |
@@ -169,7 +169,7 @@ counted.
 
 | Module | Surface | Count |
 |---|---|---:|
-| `cookie` | `Jar`: `new`, `get_cookie(impl IntoUrl, &str) -> Result<Option<String>>`, `set_cookie(impl IntoUrl, &str, &str) -> Result<()>`, `store_set_cookie(&str, impl IntoUrl) -> Result<()>`, `all_cookies`, `snapshot`, `extend_from(&Jar)`, `remove(impl IntoUrl, &str) -> Result<usize>`, `remove_named(&str) -> usize`, `clear`, `export_cookies(impl IntoUrl) -> Result<String>`, `load_cookies(&str, impl IntoUrl) -> Result<()>`, `cookie_header(&Url)`; `Cookie::is_expired`; `SameSite` | 14 |
+| `cookie` | `Jar`: `new`, `get_cookie(&Url, &str) -> Option<String>`, `set_cookie(&Url, &str, &str)`, `store_set_cookie(&str, &Url)`, `all_cookies`, `snapshot`, `extend_from(&Jar)`, `remove(&Url, &str) -> usize`, `remove_named(&str) -> usize`, `clear`, `export_cookies(&Url) -> String`, `load_cookies(&str, &Url)`, `cookie_header(&Url)`; `Cookie::is_expired`; `SameSite` | 14 |
 | `multipart` | `Form`: `new`, `text`, `part`, `file`, `boundary`; `Part`: `text`, `bytes`, `stream`, `filename`, `mime`, `header` | 11 |
 | WebSocket (feature `websocket`) | `WebSocketBuilder`: `header`, `headers`, `proxy`, `config`, `connect`; `WsConnection`: `send(WsMessage)`, `recv`, `close`, `split`, `protocol`, `header`; `WsSink`: `send`, `close`; `WsStream`: `recv`; `WsMessage`; `CloseFrame::new`; `WebSocketConfig`: 7 setters | 23 |
 | `trace` | `Trace` (hook methods), events `Dns`, `Connect`, `Tls`, `Sent` (with `method` and `path`), `Head` (with `headers`), `Done`, `TracingTrace` | 0 |
@@ -282,8 +282,8 @@ Total: 255 public functions.
 - `Jar::store_set_cookie` is the one Set-Cookie parser. The session calls it
   for every response. `Max-Age=0` or a past `Expires` deletes the cookie.
 - `Jar::get_cookie`, `set_cookie`, `store_set_cookie`, `load_cookies`,
-  `export_cookies`, and `remove` take `impl IntoUrl`, like `Session::get`.
-  A URL that does not parse returns `Kind::Url`; the jar does not change.
+  `export_cookies`, and `remove` take a parsed `&Url`, like the reqwest
+  cookie store. They do not return a URL parse error.
 - `Jar::snapshot` returns a new jar with its own store and a copy of every
   cookie with all attributes, creation order included. A write to one jar
   does not reach the other.

@@ -7,7 +7,6 @@ use url::Url;
 
 use crate::cookie::parse;
 use crate::cookie::record::Cookie;
-use crate::core::{IntoUrl, Result};
 
 const MAX_COOKIES_PER_DOMAIN: usize = 180;
 const EVICT_PER_DOMAIN: usize = 30;
@@ -75,9 +74,8 @@ impl Jar {
         }
     }
 
-    pub fn store_set_cookie(&self, set_cookie: &str, url: impl IntoUrl) -> Result<()> {
-        self.store(set_cookie, &url.into_url()?);
-        Ok(())
+    pub fn store_set_cookie(&self, set_cookie: &str, url: &Url) {
+        self.store(set_cookie, url);
     }
 
     fn store(&self, set_cookie: &str, url: &Url) {
@@ -202,8 +200,7 @@ impl Jar {
         removed
     }
 
-    pub fn remove(&self, url: impl IntoUrl, name: &str) -> Result<usize> {
-        let url = url.into_url()?;
+    pub fn remove(&self, url: &Url, name: &str) -> usize {
         let host = url.host_str().unwrap_or("");
         let mut jar = lock(&self.inner);
         let mut removed = 0;
@@ -213,7 +210,7 @@ impl Jar {
             removed += before - entries.len();
         }
         jar.total -= removed;
-        Ok(removed)
+        removed
     }
 
     pub fn all_cookies(&self) -> Vec<Cookie> {
@@ -223,38 +220,33 @@ impl Jar {
         out
     }
 
-    pub fn get_cookie(&self, url: impl IntoUrl, name: &str) -> Result<Option<String>> {
-        let url = url.into_url()?;
+    pub fn get_cookie(&self, url: &Url, name: &str) -> Option<String> {
         let domain = url.host_str().unwrap_or("");
         let path = url.path();
         let is_secure = url.scheme() == "https";
 
         let jar = lock(&self.inner);
-        Ok(jar
-            .cookies
+        jar.cookies
             .values()
             .flatten()
             .find(|c| c.name == name && c.matches(domain, path, is_secure) && !c.is_expired())
-            .map(|c| c.value.clone()))
+            .map(|c| c.value.clone())
     }
 
-    pub fn set_cookie(&self, url: impl IntoUrl, name: &str, value: &str) -> Result<()> {
-        self.store(&format!("{}={}; Path=/", name, value), &url.into_url()?);
-        Ok(())
+    pub fn set_cookie(&self, url: &Url, name: &str, value: &str) {
+        self.store(&format!("{}={}; Path=/", name, value), url);
     }
 
-    pub fn load_cookies(&self, cookie_str: &str, url: impl IntoUrl) -> Result<()> {
-        let url = url.into_url()?;
+    pub fn load_cookies(&self, cookie_str: &str, url: &Url) {
         for pair in cookie_str.split(';') {
             if let Some((name, value)) = pair.trim().split_once('=') {
-                self.store(&format!("{}={}; Path=/", name, value), &url);
+                self.store(&format!("{}={}; Path=/", name, value), url);
             }
         }
-        Ok(())
     }
 
-    pub fn export_cookies(&self, url: impl IntoUrl) -> Result<String> {
-        Ok(self.cookie_header(&url.into_url()?).unwrap_or_default())
+    pub fn export_cookies(&self, url: &Url) -> String {
+        self.cookie_header(url).unwrap_or_default()
     }
 
     pub fn clear(&self) {
