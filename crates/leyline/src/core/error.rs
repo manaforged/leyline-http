@@ -103,7 +103,7 @@ impl Error {
         self
     }
 
-    pub(crate) fn with_status(mut self, status: StatusCode) -> Self {
+    pub fn with_status(mut self, status: StatusCode) -> Self {
         self.inner.status = Some(status);
         self
     }
