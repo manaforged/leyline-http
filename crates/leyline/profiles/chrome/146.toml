@@ -2,6 +2,7 @@
 name = "Chrome 146"
 browser = "chrome"
 version = 146
+capture = "inferred"
 variant = "Chrome146"
 chromium_major = 146
 family = "chromium"

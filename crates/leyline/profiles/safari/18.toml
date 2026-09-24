@@ -2,6 +2,7 @@
 name = "Safari 18"
 browser = "safari"
 version = 18
+capture = "self-referential"
 variant = "Safari18"
 platform_browser = { ios = "safari-ios" }
 family = "webkit"

@@ -2,6 +2,7 @@
 name = "Firefox 152"
 browser = "firefox"
 version = 152
+capture = "browser"
 variant = "Firefox152"
 header_style = "gecko"
 family = "gecko"

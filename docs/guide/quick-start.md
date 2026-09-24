@@ -19,8 +19,8 @@ example below also needs `serde_json = "1"` in the same manifest.
 
 ## Send a GET request
 
-`Session::new()` builds a session that impersonates the latest bundled
-Chrome on Windows.
+`Session::new()` builds a session that impersonates the newest bundled
+Chrome captured from a real browser, on Windows.
 
 ```rust,no_run
 use leyline::Session;

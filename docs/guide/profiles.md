@@ -70,37 +70,43 @@ Each profile comes from one of four sources:
 - **Self-referential golden.** The JA4 golden is Leyline's own past output, so
   the offline test does not compare the profile with a browser.
 
-| Profile | Provenance | Source |
-| --- | --- | --- |
-| Chrome 145 | Inferred | Opera 129 (Chromium 145) capture |
-| Chrome 146 | Inferred | No capture reference |
-| Chrome 147 | Inferred | Chrome 148 TLS block |
-| Chrome 148 | Browser capture | `chrome-148`, exact build not recorded |
-| Chrome 149 | Inferred | Chrome 148 TLS block |
-| Chrome 150 | Browser capture | `chrome-150.0.7871.128` |
-| Chrome 151 | Non-browser build capture | `chrome-headless-shell-151.0.7922.138` |
-| Chrome 152 | Non-browser build capture | `chrome-headless-shell-152.0.7977.64` |
-| Brave (Chromium 146) | Browser capture | `brave-146` |
-| Firefox 148 | Self-referential golden | Leyline output |
-| Firefox 149 | Browser capture | `firefox-149.0` |
-| Firefox 150 | Browser capture | `firefox-150.0` |
-| Firefox 151 | Browser capture | `firefox-151.0` |
-| Firefox 152 | Browser capture | `firefox-152.0` |
-| Firefox 153 | Browser capture | `firefox-153.0.1` |
-| Firefox 154 | Browser capture | `firefox-154.0.1` |
-| Safari 18 | Self-referential golden | Leyline output |
-| Safari 26 | Non-browser build capture | `webkit-26.5` (WKWebView), synthesized HTTP identity |
-| Safari iOS 17 | Self-referential golden | Leyline output |
-| Safari iOS 18 | Self-referential golden | Leyline output |
-| OkHttp4 Android 10+ | Self-referential golden | Leyline output |
-| CFNetwork iOS 18 | Browser capture | `CFNetwork-3826.600.41-iOS-18.6-22G86-sim`, iOS simulator |
-| CFNetwork macOS 26 | Browser capture | `CFNetwork-3860.600.21-Darwin-25.5.0-macOS-26.5.1-25F80` |
+The `capture` key in each profile's `[meta]` table records the source:
+`browser`, `headless-shell`, `webview`, `inferred`, or `self-referential`.
+
+| Profile | Provenance | `capture` | Source |
+| --- | --- | --- | --- |
+| Chrome 145 | Inferred | `inferred` | Opera 129 (Chromium 145) capture |
+| Chrome 146 | Inferred | `inferred` | No capture reference |
+| Chrome 147 | Inferred | `inferred` | Chrome 148 TLS block |
+| Chrome 148 | Browser capture | `browser` | `chrome-148`, exact build not recorded |
+| Chrome 149 | Inferred | `inferred` | Chrome 148 TLS block |
+| Chrome 150 | Browser capture | `browser` | `chrome-150.0.7871.128` |
+| Chrome 151 | Non-browser build capture | `headless-shell` | `chrome-headless-shell-151.0.7922.138` |
+| Chrome 152 | Non-browser build capture | `headless-shell` | `chrome-headless-shell-152.0.7977.64` |
+| Brave (Chromium 146) | Browser capture | `browser` | `brave-146` |
+| Firefox 148 | Self-referential golden | `self-referential` | Leyline output |
+| Firefox 149 | Browser capture | `browser` | `firefox-149.0` |
+| Firefox 150 | Browser capture | `browser` | `firefox-150.0` |
+| Firefox 151 | Browser capture | `browser` | `firefox-151.0` |
+| Firefox 152 | Browser capture | `browser` | `firefox-152.0` |
+| Firefox 153 | Browser capture | `browser` | `firefox-153.0.1` |
+| Firefox 154 | Browser capture | `browser` | `firefox-154.0.1` |
+| Safari 18 | Self-referential golden | `self-referential` | Leyline output |
+| Safari 26 | Non-browser build capture | `webview` | `webkit-26.5` (WKWebView), synthesized HTTP identity |
+| Safari iOS 17 | Self-referential golden | `self-referential` | Leyline output |
+| Safari iOS 18 | Self-referential golden | `self-referential` | Leyline output |
+| OkHttp4 Android 10+ | Self-referential golden | `self-referential` | Leyline output |
+| CFNetwork iOS 18 | Browser capture | `browser` | `CFNetwork-3826.600.41-iOS-18.6-22G86-sim`, iOS simulator |
+| CFNetwork macOS 26 | Browser capture | `browser` | `CFNetwork-3860.600.21-Darwin-25.5.0-macOS-26.5.1-25F80` |
 
 Chromium-family profiles do not store `sec-ch-ua`. Leyline derives it from the
 major version and the `ch_ua_brand` field in `[meta]`, with the same GREASE
 brand, version, and order rule that Chromium uses.
 
-`Browser::latest` returns the highest bundled version of a family, so you can
+`Browser::latest` returns the newest profile of a family with
+`capture = "browser"`. A family with no browser capture returns its newest
+profile. `Session::new()` uses `Browser::latest(Family::Chrome)`, which is
+Chrome 150 until Chrome 151 and 152 are captured from desktop Chrome. You can
 pin the product line instead of a version:
 
 ```rust

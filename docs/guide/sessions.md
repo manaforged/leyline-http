@@ -38,11 +38,14 @@ Android 10, and the CFNetwork stacks on iOS 18 and macOS 26.
 
 These helpers select a profile without naming a variant:
 
-- `Browser::latest(Family)` is the highest bundled version of a product line,
-  so you pin the line and take whatever the crate release carries. The
+- `Browser::latest(Family)` is the newest profile of a product line captured
+  from a real browser (`capture = "browser"`), or the newest profile when the
+  line has no browser capture. You pin the line and take whatever the crate
+  release carries. The
   families are `Chrome`, `Brave`, `Firefox`, `Safari`, `SafariIos`,
   `CfNetwork`, and `OkHttp`.
-- `Browser::default()` is what `Session::new()` selects: the latest Chrome.
+- `Browser::default()` is what `Session::new()` selects:
+  `Browser::latest(Family::Chrome)`.
 - `Browser::get(Family, version)` returns the bundled profile for one version,
   or `None`. `Browser::version()` returns the major version.
 

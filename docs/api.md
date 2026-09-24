@@ -17,7 +17,7 @@ contract.
 ## Frame (one)
 
 ```text
-session     Session::new()                  latest bundled Chrome, Windows identity
+session     Session::new()                  newest browser-captured Chrome, Windows
             Session::builder() → SessionBuilder → build() → Session
             session.with_proxy(config)      clone that shares the pool, other proxy
             session.fresh_pool()            clone with a new pool and TLS session cache
@@ -185,14 +185,15 @@ Total: 255 public functions.
 
 ## Semantics
 
-- `Session::new()` and `Session::default()` impersonate the latest bundled
-  Chrome with a Windows identity. With the `http3` feature they race
+- `Session::new()` and `Session::default()` impersonate the newest bundled
+  Chrome captured from a real browser, with a Windows identity. With the `http3` feature they race
   HTTP/3 against HTTP/2 when the profile's `[h3]` table sets `race = true`,
   as the bundled Chrome profiles do. `Session::builder().build()` with no
   browser is a bare session with no impersonation.
-- "Latest bundled Chrome" moves: `Session::new()` and `Browser::latest`
-  select the newest Chrome profile in the installed release, and a patch
-  release may add a newer one. For a fixed fingerprint, pin the browser with
+- `Browser::latest(family)` returns the newest profile of the family whose
+  `[meta] capture` is `"browser"`. A family with no browser capture returns
+  its newest profile. `Session::new()` uses `Browser::latest(Family::Chrome)`.
+  This choice moves: a patch release may add a newer browser capture. For a fixed fingerprint, pin the browser with
   `Session::builder().browser(Browser::Chrome148)` or
   `Browser::get(Family::Chrome, 148)`.
 - `Session::new()` does not fail. The bundled profile data is fixed at

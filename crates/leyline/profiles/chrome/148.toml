@@ -2,6 +2,7 @@
 name = "Chrome 148"
 browser = "chrome"
 version = 148
+capture = "browser"
 variant = "Chrome148"
 hello = 147
 chromium_major = 148

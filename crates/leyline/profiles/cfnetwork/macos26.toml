@@ -2,6 +2,7 @@
 name = "CFNetwork macOS 26"
 browser = "cfnetwork-macos"
 version = 26
+capture = "browser"
 variant = "CfnetworkMacOS26"
 platform_browser = { ios = "cfnetwork-ios" }
 family = "cfnetwork"

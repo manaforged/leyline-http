@@ -2,6 +2,7 @@
 name = "OkHttp4 Android 10+"
 browser = "okhttp"
 version = 10
+capture = "self-referential"
 variant = "OkHttpAndroid10"
 family = "okhttp"
 verified_against = "tls.peet.ws"

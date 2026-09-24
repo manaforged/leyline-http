@@ -58,6 +58,10 @@ First public release.
 - `SocketConfig::tcp_user_timeout` applies on Linux and Android. On other
   systems, Leyline logs one warning per unsupported option per process.
 - A [user guide](docs/README.md) and an [API map](docs/api.md).
+- `[meta] capture` in each profile records its provenance. `Browser::latest`
+  and `Session::new()` select the newest profile with `capture = "browser"`,
+  so the default is Chrome 150, not the `chrome-headless-shell` captures of
+  Chrome 151 and 152.
 - `TimeoutConfig::connect` bounds plain `http://` connects. One request spends at
   most one connect timeout on an unreachable host.
 - `Session::with_proxy` keeps the shared connection pool, which is keyed by

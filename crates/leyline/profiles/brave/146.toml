@@ -2,6 +2,7 @@
 name = "Brave (Chromium 146)"
 browser = "brave"
 version = 146
+capture = "browser"
 variant = "Brave146"
 chromium_major = 146
 family = "chromium"

@@ -27,11 +27,22 @@ struct ProfileFile {
     meta: Meta,
 }
 
+#[derive(Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum Capture {
+    Browser,
+    HeadlessShell,
+    Webview,
+    Inferred,
+    SelfReferential,
+}
+
 #[derive(Deserialize)]
 struct Meta {
     name: String,
     browser: String,
     version: u32,
+    capture: Capture,
     variant: String,
     #[serde(default)]
     hello: Option<u32>,
@@ -219,8 +230,11 @@ fn render(rows: &[Row], families: &Families) -> BuildResult<String> {
     )?;
     let mut family_latest = Vec::new();
     for (index, family) in families.family.iter().enumerate() {
-        let row = latest(rows, |r| r.family == index)
-            .ok_or_else(|| format!("families.toml: family {} has no profile", family.variant))?;
+        let row = latest(rows, |r| {
+            r.family == index && r.meta.capture == Capture::Browser
+        })
+        .or_else(|| latest(rows, |r| r.family == index))
+        .ok_or_else(|| format!("families.toml: family {} has no profile", family.variant))?;
         family_latest.push(row);
     }
     writeln!(

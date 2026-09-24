@@ -2,6 +2,7 @@
 name = "Safari 26"
 browser = "safari"
 version = 26
+capture = "webview"
 variant = "Safari26"
 platform_browser = { ios = "safari-ios" }
 family = "webkit"
