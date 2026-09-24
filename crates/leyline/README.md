@@ -115,12 +115,10 @@ browser is a bare session that impersonates no browser.
 
 - A profile covers selected TLS, HTTP/2, and header properties. It does not
   reproduce every byte a browser sends.
-- The Safari 18, Safari iOS 17, Safari iOS 18, Firefox 148, and OkHttp
-  profiles pin a JA4 value taken from Leyline's own output, not from a capture.
+- The Safari 18, Safari iOS 17, Safari iOS 18, and OkHttp profiles pin a JA4 value taken from Leyline's own output, not from a capture.
 - Chrome 145, 146, 147, and 149 are inferred from neighbouring versions. Chrome
   151 and 152 come from `chrome-headless-shell`, so `Session::new()` does not
-  select them. Safari 26 comes from a WKWebView capture with a synthesized
-  Safari HTTP identity.
+  select them.
 - The Android identity of the Chrome profiles reuses the desktop TLS and
   HTTP/2 settings. No mobile Chrome capture exists.
 - The TCP/IP fingerprint (JA4T: window size, options, MSS, TTL) comes from the

@@ -41,8 +41,9 @@ unrecorded, not that the profile is wrong.
 | Chrome 150 | `Chrome150` | `chrome-150.0.7871.128` | estimated |
 | Chrome 151 | `Chrome151` | `chrome-headless-shell-151.0.7922.138` | estimated |
 | Chrome 152 | `Chrome152` | `chrome-headless-shell-152.0.7977.64` | estimated |
+| Chrome 153 | `Chrome153` | `chrome-153.0.8010.53` | estimated |
 | Brave (Chromium 146) | `Brave146` | `brave-146` | estimated |
-| Firefox 148 | `Firefox148` | unrecorded | gated (self-referential golden) |
+| Firefox 148 | `Firefox148` | `firefox-148.0.2` | gated |
 | Firefox 149 | `Firefox149` | `firefox-149.0` | gated |
 | Firefox 150 | `Firefox150` | `firefox-150.0` | gated |
 | Firefox 151 | `Firefox151` | `firefox-151.0` | gated |
@@ -50,7 +51,7 @@ unrecorded, not that the profile is wrong.
 | Firefox 153 | `Firefox153` | `firefox-153.0.1` | gated |
 | Firefox 154 | `Firefox154` | `firefox-154.0.1` | gated |
 | Safari 18 | `Safari18` | unrecorded | reconnaissance, needs recapture |
-| Safari 26 | `Safari26` | `webkit-26.5` | gated |
+| Safari 26 | `Safari26` | `safari-26.2-21623.1.14.11.9` | gated |
 | Safari iOS 17 | `SafariIOS17` | unrecorded | reconnaissance, needs recapture |
 | Safari iOS 18 | `SafariIOS18` | unrecorded | reconnaissance, needs recapture |
 | OkHttp4 Android 10+ | `OkHttpAndroid10` | unrecorded | estimated |
@@ -83,8 +84,9 @@ The `capture` key in each profile's `[meta]` table records the source:
 | Chrome 150 | Browser capture | `browser` | `chrome-150.0.7871.128` |
 | Chrome 151 | Non-browser build capture | `headless-shell` | `chrome-headless-shell-151.0.7922.138` |
 | Chrome 152 | Non-browser build capture | `headless-shell` | `chrome-headless-shell-152.0.7977.64` |
+| Chrome 153 | Browser capture | `browser` | `chrome-153.0.8010.53`, macOS, `--headless=new` |
 | Brave (Chromium 146) | Browser capture | `browser` | `brave-146` |
-| Firefox 148 | Self-referential golden | `self-referential` | Leyline output |
+| Firefox 148 | Browser capture | `browser` | `firefox-148.0.2` |
 | Firefox 149 | Browser capture | `browser` | `firefox-149.0` |
 | Firefox 150 | Browser capture | `browser` | `firefox-150.0` |
 | Firefox 151 | Browser capture | `browser` | `firefox-151.0` |
@@ -92,7 +94,7 @@ The `capture` key in each profile's `[meta]` table records the source:
 | Firefox 153 | Browser capture | `browser` | `firefox-153.0.1` |
 | Firefox 154 | Browser capture | `browser` | `firefox-154.0.1` |
 | Safari 18 | Self-referential golden | `self-referential` | Leyline output |
-| Safari 26 | Non-browser build capture | `webview` | `webkit-26.5` (WKWebView), synthesized HTTP identity |
+| Safari 26 | Browser capture | `browser` | `safari-26.2-21623.1.14.11.9`, Safari.app through safaridriver |
 | Safari iOS 17 | Self-referential golden | `self-referential` | Leyline output |
 | Safari iOS 18 | Self-referential golden | `self-referential` | Leyline output |
 | OkHttp4 Android 10+ | Self-referential golden | `self-referential` | Leyline output |
@@ -106,7 +108,7 @@ brand, version, and order rule that Chromium uses.
 `Browser::latest` returns the newest profile of a family with
 `capture = "browser"`. A family with no browser capture returns its newest
 profile. `Session::new()` uses `Browser::latest(Family::Chrome)`, which is
-Chrome 150 until Chrome 151 and 152 are captured from desktop Chrome. You can
+Chrome 153. You can
 pin the product line instead of a version:
 
 ```rust

@@ -77,8 +77,8 @@ fn builder_edge_impersonates() {
 
 #[test]
 fn builder_opera_impersonates() {
-    let s = branded(Browser::default_browser(), ChromiumBrand::Opera);
-    assert_eq!(s.browser(), Some(Browser::default_browser()));
+    let s = branded(Browser::Chrome152, ChromiumBrand::Opera);
+    assert_eq!(s.browser(), Some(Browser::Chrome152));
     assert_eq!(s.brand(), Some(ChromiumBrand::Opera));
 }
 

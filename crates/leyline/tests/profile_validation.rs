@@ -338,12 +338,14 @@ fn backfilled_builtin_profiles_carry_captured_against() {
         (Browser::Chrome150, "chrome-150.0.7871.128"),
         (Browser::Chrome151, "chrome-headless-shell-151.0.7922.138"),
         (Browser::Chrome152, "chrome-headless-shell-152.0.7977.64"),
+        (Browser::Chrome153, "chrome-153.0.8010.53"),
+        (Browser::Firefox148, "firefox-148.0.2"),
         (Browser::Firefox150, "firefox-150.0"),
         (Browser::Firefox151, "firefox-151.0"),
         (Browser::Firefox152, "firefox-152.0"),
         (Browser::Firefox153, "firefox-153.0.1"),
         (Browser::Firefox154, "firefox-154.0.1"),
-        (Browser::Safari26, "webkit-26.5"),
+        (Browser::Safari26, "safari-26.2-21623.1.14.11.9"),
         (Browser::Brave146, "brave-146"),
     ] {
         let profile = reg.get_browser(browser).expect("built-in profile");

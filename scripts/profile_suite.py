@@ -6,10 +6,10 @@
     scripts/profile-oneshot.sh --dry-run
     scripts/profile-oneshot.sh chrome|firefox|safari|edge
 
-Full Chrome (Chrome for Testing "chrome" build, or LEYLINE_CHROME) run with
+Installed Google Chrome (LEYLINE_CHROME) driven over the DevTools pipe with
 --headless=new, Firefox official dmg, and Safari.app through safaridriver.
 Edge is the ChromiumBrand overlay on the current Chrome hello (TLS/H2 stay
-Chrome). Refuses chrome-headless-shell, WKWebView, and any build whose user
+Chrome). Refuses Chrome for Testing, chrome-headless-shell, WKWebView, and any build whose user
 agent is headless. Writes capture = "browser". Does not invent JA4. No Brave.
 Mobile Safari has no automated capture.
 """
@@ -28,21 +28,13 @@ import tarfile
 import tempfile
 import time
 import urllib.request
-import zipfile
 from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 PEET_URL = os.environ.get("PEET_URL", "https://tls.peet.ws/api/all")
-CFT_STABLE = (
-    "https://googlechromelabs.github.io/chrome-for-testing/"
-    "last-known-good-versions-with-downloads.json"
-)
-CFT_MILESTONES = (
-    "https://googlechromelabs.github.io/chrome-for-testing/"
-    "latest-versions-per-milestone-with-downloads.json"
-)
 FF_URL = "https://product-details.mozilla.org/1.0/firefox_versions.json"
+FF_RELEASES_URL = "https://product-details.mozilla.org/1.0/firefox.json"
 CACHE = Path(os.environ.get("LEYLINE_CFT_CACHE", Path.home() / ".cache/leyline-cft"))
 OUT = Path(os.environ.get("LEYLINE_ONESHOT_OUT", Path(tempfile.gettempdir()) / "leyline-oneshot"))
 TODAY = date.today().isoformat()
@@ -73,10 +65,10 @@ def bundled_majors(family: str) -> list[int]:
 def skeleton_toml(family: str, major: int) -> Path:
     majors = bundled_majors(family)
     lower = [m for m in majors if m < major]
-    if lower:
-        src_major = lower[-1]
-    elif major in majors:
+    if major in majors:
         src_major = major
+    elif lower:
+        src_major = lower[-1]
     else:
         raise SystemExit(f"no {family} skeleton for {major}")
     return ROOT / "crates/leyline/profiles" / family / f"{src_major}.toml"
@@ -172,60 +164,113 @@ def chrome_product_version(binary: Path) -> str:
     if "headless-shell" in str(binary).lower():
         raise SystemExit(f"{binary} is chrome-headless-shell; capture from the full Chrome build")
     out = subprocess.check_output([str(binary), "--version"], text=True).strip()
-    m = re.fullmatch(r"Google Chrome(?: for Testing)? (\d+\.\d+\.\d+\.\d+)", out)
+    m = re.fullmatch(r"Google Chrome (\d+\.\d+\.\d+\.\d+)", out)
     if not m:
         raise SystemExit(f"{binary} reports {out!r}, not Google Chrome; refusing to capture")
     return m.group(1)
 
 
+class CdpPipe:
+    def __init__(self, proc: subprocess.Popen, send_fd: int, recv_fd: int) -> None:
+        self.proc = proc
+        self.send_fd = send_fd
+        self.recv_fd = recv_fd
+        self.buf = b""
+        self.next_id = 0
+
+    def read_message(self, deadline: float) -> dict:
+        while b"\0" not in self.buf:
+            if time.monotonic() > deadline:
+                raise SystemExit("Chrome DevTools pipe timed out")
+            chunk = os.read(self.recv_fd, 65536)
+            if not chunk:
+                raise SystemExit("Chrome closed the DevTools pipe")
+            self.buf += chunk
+        raw, self.buf = self.buf.split(b"\0", 1)
+        return json.loads(raw)
+
+    def call(self, method: str, params: dict, deadline: float, session: str | None = None) -> dict:
+        self.next_id += 1
+        msg: dict = {"id": self.next_id, "method": method, "params": params}
+        if session:
+            msg["sessionId"] = session
+        os.write(self.send_fd, json.dumps(msg).encode() + b"\0")
+        while True:
+            reply = self.read_message(deadline)
+            if reply.get("id") != self.next_id:
+                continue
+            if "error" in reply:
+                raise SystemExit(f"CDP {method} failed: {reply['error']}")
+            return reply.get("result") or {}
+
+
+def page_text_via_cdp(cmd: list[str], url: str, errp: Path, timeout: float = 45) -> str:
+    chrome_in, send_fd = os.pipe()
+    recv_fd, chrome_out = os.pipe()
+    with errp.open("wb") as err:
+        proc = subprocess.Popen(
+            ["/bin/sh", "-c", f'exec "$@" 3<&{chrome_in} 4>&{chrome_out}', "sh",
+             *cmd, "--remote-debugging-pipe", "about:blank"],
+            stdin=subprocess.DEVNULL,
+            stdout=err,
+            stderr=err,
+            pass_fds=(chrome_in, chrome_out),
+            start_new_session=True,
+        )
+    os.close(chrome_in)
+    os.close(chrome_out)
+    cdp = CdpPipe(proc, send_fd, recv_fd)
+    deadline = time.monotonic() + timeout
+    try:
+        target = cdp.call("Target.createTarget", {"url": url}, deadline)["targetId"]
+        session = cdp.call("Target.attachToTarget", {"targetId": target, "flatten": True}, deadline)["sessionId"]
+        while time.monotonic() < deadline:
+            result = cdp.call(
+                "Runtime.evaluate",
+                {"expression": "document.readyState === 'complete' ? document.body.innerText : ''",
+                 "returnByValue": True},
+                deadline,
+                session,
+            )
+            text = (result.get("result") or {}).get("value") or ""
+            if text.strip().startswith("{"):
+                return text
+            time.sleep(0.5)
+        raise SystemExit(f"{url} did not load within {timeout}s")
+    finally:
+        try:
+            cdp.call("Browser.close", {}, time.monotonic() + 5)
+        except (SystemExit, OSError):
+            pass
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            os.killpg(proc.pid, signal.SIGKILL)
+            proc.wait()
+        os.close(send_fd)
+        os.close(recv_fd)
+
+
 def dump_chrome(chrome: Path, version: str, dump: Path) -> dict:
     OUT.mkdir(parents=True, exist_ok=True)
     udd = Path(tempfile.mkdtemp(prefix="chrome-user.", dir=OUT))
-    raw = dump.with_suffix(".dump.html")
-    errp = dump.with_suffix(".stderr")
+    raw = dump.with_suffix(".dump.txt")
     cmd = [
         str(chrome),
         "--headless=new",
         "--no-first-run",
         f"--user-agent={chrome_desktop_ua(version)}",
-        "--timeout=20000",
         f"--user-data-dir={udd}",
-        "--dump-dom",
-        PEET_URL,
     ]
-    with raw.open("wb") as out, errp.open("wb") as err:
-        proc = subprocess.Popen(cmd, stdout=out, stderr=err, start_new_session=True)
-        try:
-            proc.wait(timeout=35)
-        except subprocess.TimeoutExpired:
-            os.killpg(proc.pid, signal.SIGKILL)
-            proc.wait()
+    try:
+        text = page_text_via_cdp(cmd, PEET_URL, dump.with_suffix(".stderr"))
+    finally:
+        shutil.rmtree(udd, ignore_errors=True)
+    raw.write_text(text)
     obj = extract_json_blob(raw)
     require_browser_ua(obj, f"Chrome/{version.split('.', 1)[0]}", f"Chrome {version}")
     dump.write_text(json.dumps(obj))
     return obj
-
-
-def cft_plat() -> str:
-    system = plat.system()
-    machine = plat.machine().lower()
-    if system == "Darwin":
-        return "mac-arm64" if machine in {"arm64", "aarch64"} else "mac-x64"
-    if system == "Linux":
-        if machine in {"arm64", "aarch64"}:
-            raise SystemExit("Chrome for Testing has no linux-arm64 Chrome build")
-        return "linux64"
-    if system == "Windows":
-        return "win64"
-    raise SystemExit(f"no Chrome for Testing platform for {system}/{plat.machine()}")
-
-
-CFT_CHROME_BINARY = {
-    "mac-arm64": "Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
-    "mac-x64": "Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
-    "linux64": "chrome",
-    "win64": "chrome.exe",
-}
 
 
 def installed_chrome(major: int) -> tuple[str, Path] | None:
@@ -240,52 +285,13 @@ def installed_chrome(major: int) -> tuple[str, Path] | None:
 
 
 def chrome_for_major(major: int) -> tuple[str, Path]:
-    """Return (full_version, full Chrome binary): LEYLINE_CHROME or the Chrome for Testing download."""
     installed = installed_chrome(major)
-    if installed:
-        return installed
-    CACHE.mkdir(parents=True, exist_ok=True)
-    if major == live_chrome_major()[0]:
-        data = http_json(CFT_STABLE)
-        channel = data["channels"]["Stable"]
-        ver = channel["version"]
-        downloads = channel.get("downloads", {})
-    else:
-        data = http_json(CFT_MILESTONES)
-        mile = data.get("milestones", {}).get(str(major))
-        if not mile:
-            raise SystemExit(f"no CFT milestone for Chrome {major}")
-        ver = mile["version"]
-        downloads = mile.get("downloads", {})
-    url = None
-    for item in downloads.get("chrome", []):
-        if item.get("platform") == cft_plat():
-            url = item["url"]
-            break
-    if not url:
-        raise SystemExit(f"no Chrome for Testing chrome build for Chrome {major} {cft_plat()}")
-    name = CFT_CHROME_BINARY[cft_plat()]
-    dest_dir = CACHE / f"chrome-{ver}-{cft_plat()}"
-    binary = next(dest_dir.glob(f"*/{name}"), None)
-    if binary is None or not os.access(binary, os.X_OK):
-        zpath = CACHE / f"chrome-{ver}-{cft_plat()}.zip"
-        print(f"downloading {url}")
-        http_bytes(url, zpath)
-        if dest_dir.exists():
-            shutil.rmtree(dest_dir)
-        dest_dir.mkdir(parents=True)
-        with zipfile.ZipFile(zpath) as zf:
-            for member in zf.infolist():
-                extracted = Path(zf.extract(member, dest_dir))
-                if member.external_attr >> 16 & 0o111:
-                    extracted.chmod(extracted.stat().st_mode | 0o111)
-        binary = next(dest_dir.glob(f"*/{name}"), None)
-    if binary is None or not os.access(binary, os.X_OK):
-        raise SystemExit(f"Chrome binary {name} missing under {dest_dir}")
-    reported = chrome_product_version(binary)
-    if reported != ver:
-        raise SystemExit(f"{binary} reports Chrome {reported}, expected {ver}")
-    return ver, binary
+    if installed is None:
+        raise SystemExit(
+            f"Chrome {major}: set LEYLINE_CHROME to an installed Google Chrome {major}; "
+            "Chrome for Testing and chrome-headless-shell differ from the shipped browser"
+        )
+    return installed
 
 
 def live_chrome_major() -> tuple[int, str]:
@@ -355,14 +361,42 @@ def firefox_bin_for(ver: str) -> Path:
 def firefox_try_versions(major: int, latest: str) -> list[str]:
     if latest.startswith(f"{major}."):
         return [latest]
-    return [f"{major}.0.1", f"{major}.0"]
+    releases = http_json(FF_RELEASES_URL).get("releases") or {}
+    found = [
+        key.removeprefix("firefox-")
+        for key in releases
+        if re.fullmatch(rf"firefox-{major}\.\d+(?:\.\d+)?", key)
+    ]
+    return sorted(found, key=lambda v: [int(part) for part in v.split(".")], reverse=True)
 
 
 def toml_str_list(items: list[str]) -> str:
     return "[\n" + "".join(f'    "{item}",\n' for item in items) + "]"
 
 
+def iana_names() -> dict[str, dict[int, str]]:
+    src = (ROOT / "crates/leyline/src/iana.rs").read_text()
+    sigalgs = {
+        int(num, 16): name
+        for name, num in re.findall(r'\("(\w+)", 0x([0-9a-f]+)\)', src.split("struct Curve", 1)[0])
+    }
+    curves = {
+        int(num, 16): name
+        for name, num in re.findall(r'name: "(\w+)",\s*boring: "[^"]*",\s*id: 0x([0-9a-f]+)', src)
+    }
+    return {"supported_groups": curves, "signature_algorithms": sigalgs}
+
+
+def peet_code(raw: str) -> int | None:
+    m = re.fullmatch(r"0x([0-9a-fA-F]+)", raw) or re.search(r"\((?:0x([0-9a-fA-F]+)|(\d+))\)$", raw)
+    if not m:
+        return None
+    hexval = m.group(1)
+    return int(hexval, 16) if hexval else int(m.group(2))
+
+
 def names_from_peet_ext(peet: dict, field: str) -> list[str]:
+    table = iana_names().get(field, {})
     out: list[str] = []
     for ext in (peet.get("tls") or {}).get("extensions") or []:
         if not isinstance(ext, dict):
@@ -371,8 +405,12 @@ def names_from_peet_ext(peet: dict, field: str) -> list[str]:
         if not isinstance(raw, list):
             continue
         for name in raw:
-            if isinstance(name, str) and "GREASE" not in name.upper():
-                out.append(name.split(" (", 1)[0].strip())
+            if not isinstance(name, str) or "GREASE" in name.upper():
+                continue
+            code = peet_code(name)
+            if code is not None and code & 0x0F0F == 0x0A0A:
+                continue
+            out.append(table.get(code) or name.split(" (", 1)[0].strip())
         if out:
             break
     return out
@@ -416,14 +454,16 @@ def clone_profile(src: Path, dest: Path, *, name: str, browser: str, version: in
     if sigalgs:
         text = re.sub(r"sigalgs = \[[^\]]*\]", f"sigalgs = {toml_str_list(sigalgs)}", text, count=1, flags=re.S)
     for section, (ua, sch) in identity.items():
-        sec = f"'{sch}'" if sch else '""'
-        block = f'[identity.{section}]\nuser_agent = "{ua}"\nsec_ch_ua = {sec}'
-        updated, n = re.subn(
-            rf'\[identity\.{section}\]\nuser_agent = "[^"]*"\nsec_ch_ua = (?:\'[^\']*\'|"")',
-            block,
-            text,
-            count=1,
-        )
+        pattern = rf'\[identity\.{section}\]\nuser_agent = "[^"]*"(\nsec_ch_ua = (?:\'[^\']*\'|""))?'
+
+        def rewrite(m: re.Match, section: str = section, ua: str = ua, sch: str = sch) -> str:
+            block = f'[identity.{section}]\nuser_agent = "{ua}"'
+            if m.group(1) is not None:
+                sec = f"'{sch}'" if sch else '""'
+                block += f"\nsec_ch_ua = {sec}"
+            return block
+
+        updated, n = re.subn(pattern, rewrite, text, count=1)
         if n != 1:
             raise SystemExit(f"could not rewrite [identity.{section}] in {src}")
         text = updated
@@ -448,7 +488,7 @@ def chrome_identity_blocks(major: int, sch: str) -> dict[str, tuple[str, str]]:
             sch,
         ),
         "android": (
-            f"Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 "
+            f"Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 "
             f"(KHTML, like Gecko) Chrome/{major}.0.0.0 Mobile Safari/537.36",
             sch,
         ),
@@ -544,9 +584,11 @@ def ja4_groups(family: str) -> list[list[int]]:
 
 
 def set_meta(text: str, key: str, value: str | None) -> str:
-    text = re.sub(rf"(?m)^{re.escape(key)} = .*\n", "", text, count=1)
+    line = rf"(?m)^{re.escape(key)} = .*\n"
     if value is None:
-        return text
+        return re.sub(line, "", text, count=1)
+    if re.search(line, text):
+        return re.sub(line, lambda _: f"{key} = {value}\n", text, count=1)
     updated, n = re.subn(r"(?m)^(version = \d+\n)", rf"\g<1>{key} = {value}\n", text, count=1)
     if n != 1:
         raise SystemExit(f"wire: no [meta] version line to anchor {key}")
@@ -571,16 +613,6 @@ def wire_family(family: str, prefix: str) -> None:
         text = set_meta(text, "hello", str(rep) if rep != major else None)
         path.write_text(text)
 
-    if family == "chrome":
-        newest = majors[-1]
-        brands = ROOT / "crates/leyline/profiles/brands.toml"
-        btxt = brands.read_text()
-        row = f'"{newest}" = ["{newest - 16}.0.0.0"]\n'
-        needle = "[Opera.versions]\n"
-        if f'"{newest}" = ' not in btxt.split(needle, 1)[-1].split("\n[", 1)[0]:
-            if needle not in btxt:
-                raise SystemExit(f"wire: missing marker {needle!r}")
-            brands.write_text(btxt.replace(needle, needle + row, 1))
     print(f"wired {prefix}{majors[-1]}  meta written from toml majors + ja4 groups")
 
 
@@ -677,9 +709,9 @@ def print_catalog(rows: list[tuple[str, str, str, str, str]]) -> None:
     print("suite: " + ", ".join(row[0] for row in rows))
 
 
-def fill_chrome(dry: bool, no_wire: bool) -> int:
+def fill_chrome(dry: bool, no_wire: bool, majors: list[int] | None = None) -> int:
     live_maj, live_ver = live_chrome_major()
-    missing = missing_majors("chrome", live_maj)
+    missing = sorted(set(majors)) if majors else missing_majors("chrome", live_maj)
     if not missing:
         print("chrome: current")
         return 0
@@ -704,10 +736,10 @@ def fill_chrome(dry: bool, no_wire: bool) -> int:
     return 0
 
 
-def fill_firefox(dry: bool, no_wire: bool) -> int:
+def fill_firefox(dry: bool, no_wire: bool, majors: list[int] | None = None) -> int:
     live = live_firefox_version()
     live_maj = int(live.split(".", 1)[0])
-    missing = missing_majors("firefox", live_maj)
+    missing = sorted(set(majors)) if majors else missing_majors("firefox", live_maj)
     if not missing:
         print("firefox: current")
         return 0
@@ -789,7 +821,7 @@ def dump_safari(short: str, dump: Path) -> dict:
         session = webdriver("POST", "/session", {"capabilities": {"alwaysMatch": {"browserName": "safari"}}})
         sid = session["sessionId"]
         caps = session.get("capabilities") or {}
-        if caps.get("browserName") != "safari" or caps.get("browserVersion") != short:
+        if str(caps.get("browserName")).lower() != "safari" or caps.get("browserVersion") != short:
             raise SystemExit(f"safaridriver opened {caps.get('browserName')} {caps.get('browserVersion')}, "
                              f"not Safari {short}; refusing to capture")
         try:
@@ -810,13 +842,13 @@ def dump_safari(short: str, dump: Path) -> dict:
     return peet
 
 
-def fill_safari(dry: bool, no_wire: bool) -> int:
+def fill_safari(dry: bool, no_wire: bool, majors: list[int] | None = None) -> int:
     host = safari_host_version()
     if not host[:1].isdigit():
         print("safari: no Safari.app")
         return 1
     major = int(host.split(".", 1)[0])
-    if major in bundled_majors("safari"):
+    if major in bundled_majors("safari") and major not in (majors or []):
         print(f"safari: current ({host})")
         return 0
     print(f"safari: fill {major} (host {host})")
@@ -863,6 +895,7 @@ def main(argv: list[str]) -> int:
     )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--no-wire", action="store_true", help="write TOML only")
+    parser.add_argument("--major", type=int, action="append", help="major to recapture")
     args = parser.parse_args(argv)
     if args.target == "safari" and plat.system() != "Darwin":
         parser.error("Safari collection requires macOS")
@@ -876,11 +909,11 @@ def main(argv: list[str]) -> int:
 
     rc = 0
     if args.target in {"all", "chrome"}:
-        rc |= fill_chrome(args.dry_run, args.no_wire)
+        rc |= fill_chrome(args.dry_run, args.no_wire, args.major)
     if args.target in {"all", "firefox"}:
-        rc |= fill_firefox(args.dry_run, args.no_wire)
+        rc |= fill_firefox(args.dry_run, args.no_wire, args.major)
     if args.target in {"all", "safari"} and plat.system() == "Darwin":
-        rc |= fill_safari(args.dry_run, args.no_wire)
+        rc |= fill_safari(args.dry_run, args.no_wire, args.major)
     if args.target in {"all", "edge"}:
         rc |= fill_edge(args.dry_run, args.no_wire)
     if args.target == "all" and not args.dry_run:
