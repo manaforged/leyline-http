@@ -10,7 +10,7 @@ async fn main() -> leyline::Result<()> {
     let page = session.get("https://example.com/").await?;
     println!("navigate: {}", page.status());
 
-    let mut js = session
+    let js = session
         .get("https://example.com/app.js")
         .preset(leyline::Preset::Script)
         .await?;

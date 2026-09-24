@@ -14,6 +14,7 @@ use crate::core::config::{RedirectPolicy, TimeoutConfig};
 use crate::core::digest::DigestAuth;
 use crate::core::error::{Error, Kind};
 use crate::core::headers::HeaderList;
+use crate::core::into_url::IntoUrl;
 #[cfg(feature = "multipart")]
 use crate::core::multipart::Form;
 use crate::core::retry::RetryPolicy;
@@ -96,10 +97,15 @@ impl RequestBuilder {
         }
     }
 
-    pub(crate) fn invalid(session: &Session, method: Method) -> Self {
-        let mut builder = Self::new(session, method, "");
-        builder.builder_error = Some(Error::new(Kind::Request).with_message("invalid request URL"));
-        builder
+    pub(crate) fn from_url(session: &Session, method: Method, url: impl IntoUrl) -> Self {
+        match url.into_url() {
+            Ok(url) => Self::new(session, method, url.as_str()),
+            Err(err) => {
+                let mut builder = Self::new(session, method, "");
+                builder.builder_error = Some(err);
+                builder
+            }
+        }
     }
 
     fn fail(&mut self, err: Error) {

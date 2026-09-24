@@ -257,7 +257,7 @@ impl Decoder {
     }
 }
 
-pub(super) fn decompress_body(
+pub(crate) fn decompress_body(
     body: Vec<u8>,
     encoding: Option<&str>,
     config: &CompressionConfig,

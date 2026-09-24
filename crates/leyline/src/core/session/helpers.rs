@@ -1,4 +1,4 @@
-use http::{Method, Uri};
+use http::Method;
 
 use crate::cookie::Jar;
 #[cfg(test)]
@@ -10,7 +10,7 @@ use super::Identity;
 use super::{Session, SessionBuilder};
 use crate::core::request::RequestBuilder;
 use crate::core::retry::RetryPolicy;
-use crate::core::{Body, RedirectPolicy, Response, Result, TimeoutConfig};
+use crate::core::{Body, IntoUrl, RedirectPolicy, Response, Result, TimeoutConfig};
 
 impl Session {
     pub fn builder() -> SessionBuilder {
@@ -94,8 +94,8 @@ impl Session {
         self.inner.pool.stats()
     }
 
-    pub async fn preconnect(&self, url: &str, proxy: Option<&str>) -> Result<()> {
-        let url = url::Url::parse(url).map_err(crate::core::Error::from_url_parse)?;
+    pub async fn preconnect(&self, url: impl IntoUrl, proxy: Option<&str>) -> Result<()> {
+        let url = url.into_url()?;
         if url.scheme() != "https" || self.inner.protocol_policy == super::ProtocolPolicy::Http1 {
             return Ok(());
         }
@@ -121,11 +121,8 @@ impl Session {
         }
     }
 
-    pub fn request(&self, method: Method, url: impl TryInto<Uri>) -> RequestBuilder {
-        match url.try_into() {
-            Ok(url) => RequestBuilder::new(self, method, &url.to_string()),
-            Err(_) => RequestBuilder::invalid(self, method),
-        }
+    pub fn request(&self, method: Method, url: impl IntoUrl) -> RequestBuilder {
+        RequestBuilder::from_url(self, method, url)
     }
 
     pub async fn execute(&self, req: http::Request<Body>) -> Result<Response> {
@@ -150,28 +147,28 @@ impl Session {
         builder.send().await
     }
 
-    pub fn get(&self, url: &str) -> RequestBuilder {
-        RequestBuilder::new(self, Method::GET, url)
+    pub fn get(&self, url: impl IntoUrl) -> RequestBuilder {
+        RequestBuilder::from_url(self, Method::GET, url)
     }
 
-    pub fn post(&self, url: &str) -> RequestBuilder {
-        RequestBuilder::new(self, Method::POST, url)
+    pub fn post(&self, url: impl IntoUrl) -> RequestBuilder {
+        RequestBuilder::from_url(self, Method::POST, url)
     }
 
-    pub fn put(&self, url: &str) -> RequestBuilder {
-        RequestBuilder::new(self, Method::PUT, url)
+    pub fn put(&self, url: impl IntoUrl) -> RequestBuilder {
+        RequestBuilder::from_url(self, Method::PUT, url)
     }
 
-    pub fn patch(&self, url: &str) -> RequestBuilder {
-        RequestBuilder::new(self, Method::PATCH, url)
+    pub fn patch(&self, url: impl IntoUrl) -> RequestBuilder {
+        RequestBuilder::from_url(self, Method::PATCH, url)
     }
 
-    pub fn delete(&self, url: &str) -> RequestBuilder {
-        RequestBuilder::new(self, Method::DELETE, url)
+    pub fn delete(&self, url: impl IntoUrl) -> RequestBuilder {
+        RequestBuilder::from_url(self, Method::DELETE, url)
     }
 
-    pub fn head(&self, url: &str) -> RequestBuilder {
-        RequestBuilder::new(self, Method::HEAD, url)
+    pub fn head(&self, url: impl IntoUrl) -> RequestBuilder {
+        RequestBuilder::from_url(self, Method::HEAD, url)
     }
 }
 

@@ -73,7 +73,7 @@ async fn smoke_suite() {
         &mut failed,
         smoke(async {
             let s = Session::new();
-            let mut r = s.get(PEET_URL).await?;
+            let r = s.get(PEET_URL).await?;
             let body = r.text().await.unwrap();
             let _: Value = serde_json::from_str(&body)?;
             ensure(
@@ -91,17 +91,12 @@ async fn smoke_suite() {
         &mut failed,
         smoke(async {
             let s = Session::new();
-            let mut r = s.get("https://httpbin.org/get").await?;
-            ensure(r.status() == 200, format!("status={}", r.status()))?;
-            ensure(
-                r.text().await.unwrap().contains("headers"),
-                "httpbin body missing headers",
-            )?;
-            Ok(format!(
-                "status={} body={}B",
-                r.status(),
-                r.bytes().await?.len()
-            ))
+            let r = s.get("https://httpbin.org/get").await?;
+            let status = r.status();
+            ensure(status == 200, format!("status={status}"))?;
+            let body = r.text().await?;
+            ensure(body.contains("headers"), "httpbin body missing headers")?;
+            Ok(format!("status={status} body={}B", body.len()))
         }),
     )
     .await;
@@ -113,7 +108,7 @@ async fn smoke_suite() {
         smoke(async {
             let s = Session::new();
             let payload = serde_json::json!({"test": "leyline", "v": 2});
-            let mut r = s.post("https://httpbin.org/post").json(&payload).await?;
+            let r = s.post("https://httpbin.org/post").json(&payload).await?;
             let v: Value = r.json().await?;
             let echoed = json_str(&v["json"]["test"], "json.test")?;
             ensure(echoed == "leyline", format!("echoed={echoed}"))?;
@@ -128,7 +123,7 @@ async fn smoke_suite() {
         &mut failed,
         smoke(async {
             let s = Session::new();
-            let mut r = s
+            let r = s
                 .post("https://httpbin.org/post")
                 .form([("user", "alice"), ("pass", "s3cret!")])
                 .await?;
@@ -150,7 +145,7 @@ async fn smoke_suite() {
         &mut failed,
         smoke(async {
             let s = Session::new();
-            let mut r = s
+            let r = s
                 .request(http::Method::GET, "https://httpbin.org/get")
                 .query([("foo", "bar"), ("n", "42")])
                 .send()
@@ -169,7 +164,7 @@ async fn smoke_suite() {
         &mut failed,
         smoke(async {
             let s = Session::new();
-            let mut r = s
+            let r = s
                 .request(http::Method::GET, "https://httpbin.org/get")
                 .bearer_auth("test-token-123")
                 .send()
@@ -215,9 +210,9 @@ async fn smoke_suite() {
         &mut passed,
         &mut failed,
         smoke(async {
-            let mut c = Session::new().get(PEET_URL).await?;
-            let mut f = firefox()?.get(PEET_URL).await?;
-            let mut s = safari()?.get(PEET_URL).await?;
+            let c = Session::new().get(PEET_URL).await?;
+            let f = firefox()?.get(PEET_URL).await?;
+            let s = safari()?.get(PEET_URL).await?;
             let ch: Value = c.json().await?;
             let fh: Value = f.json().await?;
             let sh: Value = s.json().await?;
@@ -280,7 +275,7 @@ async fn smoke_suite() {
         &mut failed,
         smoke(async {
             let s = Session::new();
-            let mut r = s.get("https://httpbin.org/bytes/50000").await?;
+            let r = s.get("https://httpbin.org/bytes/50000").await?;
             ensure(r.status() == 200, format!("status={}", r.status()))?;
             let n = r.bytes().await?.len();
             ensure(n == 50_000, format!("got {n} bytes"))?;
@@ -298,7 +293,7 @@ async fn smoke_suite() {
 }
 
 async fn exact_fingerprint(session: Session, browser: Browser) -> Result<String> {
-    let mut r = session.get(PEET_URL).await?;
+    let r = session.get(PEET_URL).await?;
     ensure(r.status() == 200, format!("status={}", r.status()))?;
     let v: Value = r.json().await?;
 
@@ -394,7 +389,7 @@ async fn h3_get(browser: Browser) -> Result<String> {
         .protocol(ProtocolPolicy::Http3)
         .build()?;
     let url = format!("https://{H3_GET_HOST}/");
-    let mut resp = session
+    let resp = session
         .request(http::Method::GET, url)
         .header("accept", "text/html,application/xhtml+xml")
         .send()
@@ -414,7 +409,7 @@ async fn h3_post_body() -> Result<String> {
         .protocol(ProtocolPolicy::Http3)
         .build()?;
     let url = format!("https://{H3_ECHO_HOST}/post");
-    let mut resp = session
+    let resp = session
         .post(&url)
         .header("accept", "application/json")
         .header("content-type", "application/json")
@@ -423,7 +418,7 @@ async fn h3_post_body() -> Result<String> {
         .await?;
 
     let status = resp.status();
-    let body = String::from_utf8_lossy(resp.bytes().await?).into_owned();
+    let body = String::from_utf8_lossy(&resp.bytes().await?).into_owned();
     ensure(status == 200, format!("status={status}"))?;
     ensure(
         body.contains("leyline-h3-body"),

@@ -127,7 +127,7 @@ async fn main() {
             let started = Instant::now();
             let session = build(ca.as_deref(), Some(Arc::clone(&stages)));
             build_ns += started.elapsed().as_nanos();
-            let mut response = session.get(url.as_str()).await.expect("trace request");
+            let response = session.get(url.as_str()).await.expect("trace request");
             assert_eq!(response.status().as_u16(), 200);
             assert!(
                 response.bytes().await.expect("trace body") == expected.as_ref(),
@@ -147,7 +147,7 @@ async fn main() {
     }
 
     if args.get(2).map(|s| s.as_str()) == Some("print") {
-        let mut resp = build(ca.as_deref(), None)
+        let resp = build(ca.as_deref(), None)
             .get(url.as_str())
             .await
             .expect("print req");
@@ -156,7 +156,7 @@ async fn main() {
     }
 
     if args.get(2).map(|s| s.as_str()) == Some("equiv") {
-        let mut resp = build(ca.as_deref(), None)
+        let resp = build(ca.as_deref(), None)
             .get(url.as_str())
             .await
             .expect("equiv req");
@@ -176,7 +176,7 @@ async fn main() {
         let concurrency: usize = args.get(5).and_then(|s| s.parse().ok()).expect("concurrency");
         assert!(rate > 0 && seconds > 0 && concurrency > 0);
         let session = build(ca.as_deref(), None);
-        let mut r = session.get(url.as_str()).await.expect("paced warmup");
+        let r = session.get(url.as_str()).await.expect("paced warmup");
         assert_eq!(r.status().as_u16(), 200);
         assert!(r.bytes().await.expect("paced warmup body") == expected.as_ref(), "response body mismatch");
         let (tx, rx) = tokio::sync::mpsc::channel::<tokio::time::Instant>(concurrency);
@@ -199,7 +199,7 @@ async fn main() {
                         }
                     };
                     let actual = tokio::time::Instant::now();
-                    let mut resp = s.get(u.as_str()).await.expect("paced req");
+                    let resp = s.get(u.as_str()).await.expect("paced req");
                     assert_eq!(resp.status().as_u16(), 200);
                     assert!(resp.bytes().await.expect("paced body") == expected.as_ref(), "response body mismatch");
                     let done = tokio::time::Instant::now();
@@ -254,14 +254,14 @@ async fn main() {
     let connections: usize = env::var("CMP_CONNECTIONS").ok().and_then(|v| v.parse().ok()).unwrap_or(1).max(1);
     let sessions: Vec<Session> = (0..connections).map(|_| build(ca.as_deref(), None)).collect();
     let session = sessions[0].clone();
-    let mut response = session.get(url.as_str()).await.expect("warmup");
+    let response = session.get(url.as_str()).await.expect("warmup");
     assert_eq!(response.status().as_u16(), 200);
     assert!(
         response.bytes().await.expect("warmup body") == expected.as_ref(),
         "response body mismatch"
     );
     for extra in sessions.iter().skip(1) {
-        let mut response = extra.get(url.as_str()).await.expect("connection warmup");
+        let response = extra.get(url.as_str()).await.expect("connection warmup");
         assert_eq!(response.status().as_u16(), 200);
         assert!(
             response.bytes().await.expect("connection warmup body") == expected.as_ref(),
@@ -273,7 +273,7 @@ async fn main() {
     let start = Instant::now();
     for _ in 0..warm_n {
         let t0 = Instant::now();
-        let mut resp = session.get(url.as_str()).await.expect("warm req");
+        let resp = session.get(url.as_str()).await.expect("warm req");
         assert_eq!(resp.status().as_u16(), 200);
         assert!(
             resp.bytes().await.expect("body") == expected.as_ref(),
@@ -302,7 +302,7 @@ async fn main() {
             let mut lat = Vec::with_capacity(per);
             for _ in 0..per {
                 let t0 = Instant::now();
-                let mut resp = s.get(u.as_str()).await.expect("conc req");
+                let resp = s.get(u.as_str()).await.expect("conc req");
                 assert_eq!(resp.status().as_u16(), 200);
                 assert!(
                     resp.bytes().await.expect("body") == expected.as_ref(),
@@ -330,7 +330,7 @@ async fn main() {
 
     let start = Instant::now();
     for _ in 0..cold_n {
-        let mut resp = build(ca.as_deref(), None)
+        let resp = build(ca.as_deref(), None)
             .get(url.as_str())
             .await
             .expect("cold req");

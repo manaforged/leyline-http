@@ -93,9 +93,9 @@ async fn origin(h2: bool) -> String {
 }
 
 async fn ley(session: &Session, url: &str) -> (Bytes, HttpVersion) {
-    let mut resp = session.get(url).await.expect("leyline request");
+    let resp = session.get(url).await.expect("leyline request");
     let version = resp.version();
-    let body = Bytes::copy_from_slice(resp.bytes().await.expect("leyline body"));
+    let body = resp.bytes().await.expect("leyline body");
     (body, version)
 }
 

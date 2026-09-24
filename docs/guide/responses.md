@@ -29,13 +29,12 @@ turns it into `"HTTP/1.1"`, `"HTTP/2"`, or `"HTTP/3"`.
 
 ## Headers
 
-`headers()` iterates `(&http::HeaderName, &http::HeaderValue)` pairs in wire
-order, duplicates included.
+`headers()` returns the `http::HeaderMap`, duplicates included. Use
+`get`, `get_all`, and iteration as with any `HeaderMap`.
 
 `header(name)` returns the first value for a name as a string slice,
 case-insensitively. It skips a value that is not valid UTF-8, because it hands
-you a `&str`; read `headers()` for the raw bytes. To read every value for one
-name, filter `headers()`.
+you a `&str`; read `headers()` for the raw bytes.
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
@@ -49,15 +48,19 @@ for (name, value) in resp.headers() {
 let ctype = resp.header("content-type");
 let links: Vec<&str> = resp
     .headers()
-    .filter(|(k, _)| k.as_str().eq_ignore_ascii_case("link"))
-    .filter_map(|(_, v)| v.to_str().ok())
+    .get_all(leyline::http::header::LINK)
+    .iter()
+    .filter_map(|v| v.to_str().ok())
     .collect();
 # let _ = (ctype, links);
 # Ok(())
 # }
 ```
 
-`content_length()` parses the `Content-Length` header. `request_headers()` reports the headers the session prepared to
+`content_length()` parses the `Content-Length` header. Reading the body does
+not change `headers()` or `content_length()`. When leyline decodes a buffered
+body, it removes `Content-Encoding` and `Content-Length` before it returns the
+response. A `.stream()` response keeps the wire values. `request_headers()` reports the headers the session prepared to
 send, in send order, after the preset block, the cookie jar, and your own
 headers were merged. It requires `.audit(true)` on the session; without audit
 it returns an empty list. The values are prepared before dispatch, not
@@ -98,7 +101,7 @@ HTTP/3 responses carry them. A streaming response and HTTP/1.1 yield none.
 
 The body is buffered unless the request called `.stream()`. The reading calls
 are async and work in both modes: a buffered body returns at once, and a
-streamed body is drained first, then decompressed and kept for later calls.
+streamed body is drained first, then decompressed.
 Draining honors the session `read_timeout` per chunk and the same 100 MiB cap
 that buffered mode applies.
 
@@ -106,14 +109,15 @@ that buffered mode applies.
 | --- | --- | --- |
 | `text().await` | `Result<String>` | Decodes with the `Content-Type` charset, default UTF-8. |
 | `text_with_charset(label).await` | `Result<String>` | Uses `label` when the response declares no charset. |
-| `bytes().await` | `Result<&[u8]>` | Borrowed raw bytes. Call `.to_vec()` to own them. |
+| `bytes().await` | `Result<bytes::Bytes>` | Owned body bytes. |
 | `json::<T>().await` | `Result<T>` | Deserializes with serde. |
 | `into_stream()` | `Result<BodyStream>` | Takes the body as a stream. |
 | `copy_to(writer).await` | `Result<u64>` | Streams into any `AsyncWrite`, such as a file. Consumes the response. |
 | `read_until(..).await` | See [Streaming](streaming.md) | Stops early on a predicate or a byte limit. |
 
-`text`, `text_with_charset`, `bytes`, and `json` take the response by `&mut`,
-so bind it with `let mut resp`.
+Every reading call consumes the response, so
+`session.get(url).await?.text().await?` is one expression. Read `status()`,
+`headers()`, and other metadata before the body call.
 
 On a buffered response, `into_stream` and `copy_to` give the decoded body. On a
 streamed response they give the bytes as sent, still compressed. The example
@@ -142,9 +146,11 @@ println!("{written} bytes");
 
 `error_for_status()` consumes the response and returns an error whose kind is
 `Kind::Status` for any status at or above 400. The error carries the code as a
-`StatusCode`, the URL with its password redacted, and the first 16 KiB of the
-body, so a 403 explains itself without a second request. The call does not await, so it
-attaches the body only when the body is already buffered; a streamed body gives an error with no body.
+`StatusCode` and the URL; `Display` redacts the password.
+
+`error_for_status_ref()` makes the same check on a borrowed response and
+returns `Ok(&Response)`. Use it when you need the headers or the body of an
+error response, such as a JSON error from an API or a `cf-ray` header.
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
@@ -153,6 +159,19 @@ match session.get("https://example.com/api").await?.error_for_status() {
     Ok(resp) => println!("ok {}", resp.status()),
     Err(e) if e.is_status() => println!("status {:?}", e.status()),
     Err(e) => return Err(e),
+}
+# Ok(())
+# }
+```
+
+```rust,no_run
+# async fn run() -> leyline::Result<()> {
+let session = leyline::Session::new();
+let resp = session.get("https://example.com/api").await?;
+if let Err(e) = resp.error_for_status_ref() {
+    let ray = resp.header("cf-ray").map(str::to_owned);
+    let body = resp.text().await?;
+    println!("{e}: {body} {ray:?}");
 }
 # Ok(())
 # }

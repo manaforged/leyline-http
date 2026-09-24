@@ -40,8 +40,7 @@ use leyline::{Browser, Family, Platform, ProtocolPolicy, Session, TimeoutConfig}
 
 # async fn run() -> leyline::Result<()> {
 let session = Session::new();
-let mut resp = session.get("https://example.com/").await?;
-let body = resp.text().await?;
+let body = session.get("https://example.com/").await?.text().await?;
 
 let session = Session::builder()
     .browser(Browser::latest(Family::Firefox))
@@ -72,6 +71,7 @@ let resp = session
 | Brand overlay | `SessionBuilder::brand(ChromiumBrand)` | brand table in the profile data |
 | Mix TLS and HTTP identities | `SessionBuilder::identity(Identity)` | `Identity` |
 | Session default headers | `SessionBuilder::headers(pairs)` | session header merge |
+| URL input | `impl IntoUrl`: `&str`, `String`, `&String`, `url::Url`, `&url::Url` | `IntoUrl::into_url` |
 | Build a request | `Session::request(Method, url)` and the verb shortcuts | `RequestBuilder` |
 | Prebuilt request | `Session::execute(http::Request<Body>)` | `RequestBuilder::send` |
 | Send | `RequestBuilder::send` or `.await` | `RequestBuilder::send` (the one retry loop) |
@@ -94,7 +94,9 @@ let resp = session
 | Socket and connect tuning | `SessionBuilder::socket(SocketConfig)` | `FingerprintConnector` |
 | Pool | `SessionBuilder::pool(PoolConfig)`, `Session::pool_stats`, `Session::preconnect` | `pool` |
 | Decompress | automatic; `SessionBuilder::compression(CompressionConfig)` | `session::decompress::Decoder` |
-| Read body | `text` / `bytes` / `json` / `into_stream` / `copy_to` / `read_until` | `Response::drain` and `Decoder` |
+| Response headers | `Response::headers() -> &http::HeaderMap`, `Response::header(name)` | `Response` |
+| Read body | `text` / `bytes` / `json` / `into_stream` / `copy_to` / `read_until` | `Response::bytes` and `Decoder` |
+| Status check | `Response::error_for_status` (consume) / `error_for_status_ref` (borrow) | `Response::status_error` |
 | Response cookies | `Response::cookies()` (read-only, this response's Set-Cookie) | `cookie::parse` |
 | TLS details | `Response::tls() -> Option<&TlsInfo>`, ALPN through `Response::version()` | `TlsInfo` |
 | Errors | `Error::kind` | `core::error` |
@@ -117,7 +119,7 @@ counted.
 | `Session` | `builder`, `new`, `get`, `post`, `put`, `patch`, `delete`, `head`, `request`, `execute(http::Request<Body>)`, `websocket`, `with_proxy`, `with_cookie_jar(Jar)`, `cookies`, `pool_stats`, `preconnect(url, Option<&str>)` | 16 |
 | `SessionBuilder` | `browser`, `platform`, `brand`, `identity`, `headers`, `proxy`, `timeout`, `retry`, `redirect`, `cookie_jar`, `dns`, `tls_trust`, `protocol`, `pool`, `socket`, `tcp_profile`, `compression`, `websocket_config`, `https_only`, `trace`, `audit`, `build` | 22 |
 | `RequestBuilder` | `header`, `headers`, `header_order`, `anchored`, `query`, `body`, `json`, `form`, `multipart`, `basic_auth`, `bearer_auth`, `digest_auth`, `timeout`, `retry`, `redirect(RedirectPolicy)`, `proxy`, `preset`, `stream`, `compress`, `send` | 20 |
-| `Response` | `status`, `version`, `url`, `headers`, `header`, `trailers`, `request_headers`, `redirect_chain`, `cookies`, `timing`, `tls`, `audit`, `content_length`, `error_for_status`, `text`, `text_with_charset`, `bytes`, `json`, `into_stream`, `copy_to`, `read_until` | 21 |
+| `Response` | `status`, `version`, `url`, `headers`, `header`, `trailers`, `request_headers`, `redirect_chain`, `cookies`, `timing`, `tls`, `audit`, `content_length`, `error_for_status`, `error_for_status_ref`, `text`, `text_with_charset`, `bytes`, `json`, `into_stream`, `copy_to`, `read_until` | 22 |
 | `Body` | `stream(s, Option<u64>)`, `len_hint` | 2 |
 | `BodyStream` | `Stream` impl only | 0 |
 | `Error` | `kind`, `status`, `url`, `is_timeout`, `is_connect`, `is_status`, `is_retryable`, `tls`, `h2`, `io` | 10 |
@@ -164,7 +166,7 @@ counted.
 | `audit` | `AuditData`, `compute_ja3`, `compute_ja4`, `compute_ja4h`, `compute_ja4t`, input types | 4 |
 | `tls` | `Resolver`, `ResolveFuture`, `SystemResolver`, `ClientIdentity`, `HappyEyeballsConfig` (public fields), `TlsMinVersion`, `TlsError` | 0 |
 | `TlsContext` (feature `unstable-bssl`) | `from_profile`, `builder_mut`, `into_inner`; outside semver | 0 |
-| `IntoParamPair`, `Result` | trait bound of `headers` and `query`; `Result<T, Error>` alias | 0 |
+| `IntoParamPair`, `IntoUrl`, `Result` | trait bound of `headers` and `query`; sealed URL input bound; `Result<T, Error>` alias | 0 |
 | tower (feature `tower`) | `LeylineService::new` | 1 |
 | `http` | re-export of the `http` crate | 0 |
 | `H2Error`, `ErrorCode` | sources reachable from `Error::h2` | 0 |
@@ -185,6 +187,18 @@ Total: 226 public functions.
 - `RequestBuilder::header` appends, with `http::HeaderMap::append`
   semantics. `json`, `form`, `multipart`, and the auth setters replace the
   header they own.
+- Header merge runs in three layers. The profile preset gives the base list
+  and its order. `SessionBuilder::headers` replaces a profile header of the
+  same name in its slot, or appends a new one; a repeated session name keeps
+  the last value. A request header replaces every profile or session header
+  of the same name: all request values for that name, in call order, take
+  the slot of the replaced header. Repeated `header` calls on one request
+  append, so they send every value. A request header with no match goes to
+  its anchor slot or to the end.
+- `Session::get`, `post`, `put`, `patch`, `delete`, `head`, `request`,
+  `websocket`, and `preconnect` take `impl IntoUrl`. `IntoUrl` is sealed.
+  A URL that does not parse gives `Kind::Url` with the `url::ParseError` as
+  source, at `send()` or `connect()`.
 - `Session::execute` reads per-request policy from `http::Extensions`:
   `TimeoutConfig`, `RetryPolicy`, `RedirectPolicy`, `Preset`. Other policy
   comes from the session.
@@ -210,10 +224,22 @@ Total: 226 public functions.
   list removes the override.
 - The session jar is the only cookie store. `Response::cookies()` parses
   the Set-Cookie headers of that response; it does not store anything.
-- `text`, `bytes`, and `json` buffer on first call. `text` and
-  `text_with_charset` decode the declared charset. `into_stream`,
-  `copy_to`, and `read_until` consume the response. `into_stream` returns
-  `Kind::Body` if the body was already taken.
+- `text`, `text_with_charset`, `bytes`, and `json` consume the response,
+  so `session.get(url).await?.bytes().await?` is one expression. `bytes`
+  returns an owned `bytes::Bytes`. `text` and `text_with_charset` decode
+  the declared charset. `into_stream`, `copy_to`, and `read_until` also
+  consume the response. Read `status`, `headers`, and other metadata before
+  the body call.
+- `Response::headers()` returns the `http::HeaderMap`, duplicates included.
+  `header(name)` returns the first value as `&str` and skips a value that is
+  not UTF-8; read it through `headers()`.
+- Reading the body never changes `headers()` or `content_length()`. A
+  buffered response that leyline decoded has no `Content-Encoding` and no
+  `Content-Length` from the moment it is returned. A `.stream()` response
+  keeps the wire values, also after `text`, `bytes`, or `json` decode it.
+- `error_for_status` consumes the response. `error_for_status_ref` borrows
+  it and returns `Ok(&Response)`, so the headers and the body stay readable
+  after a 4xx or 5xx. Both errors carry the status and the URL.
 - One decoder handles `Content-Encoding` for buffered and streamed reads:
   gzip, deflate (zlib or raw), brotli, zstd, at most 4 codings, 100 MiB
   decoded cap.

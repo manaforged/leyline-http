@@ -43,8 +43,8 @@ use leyline::Session;
 #[tokio::main]
 async fn main() -> leyline::Result<()> {
     let session = Session::new();
-    let mut response = session.get("https://example.com/").await?;
-    println!("{}", response.text().await?);
+    let body = session.get("https://example.com/").await?.text().await?;
+    println!("{body}");
     Ok(())
 }
 ```

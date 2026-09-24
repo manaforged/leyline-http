@@ -58,14 +58,14 @@ async fn redirect_retains_url_when_another_request_replaces_cache() {
         .await
         .unwrap()
         .unwrap();
-    let mut other = session
+    let other = session
         .get(&format!("{origin}/other?second=2"))
         .send()
         .await
         .unwrap();
     assert_eq!(other.url(), format!("{origin}/other?second=2"));
     assert_eq!(other.text().await.unwrap(), "other");
-    let mut response = initial.await.unwrap();
+    let response = initial.await.unwrap();
     assert_eq!(response.url(), format!("{origin}/done?first=1"));
     assert_eq!(
         response.redirect_chain(),

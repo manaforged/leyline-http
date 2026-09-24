@@ -1,12 +1,11 @@
 use std::sync::{Arc, OnceLock};
 
-use http::{HeaderName, HeaderValue, StatusCode};
+use bytes::Bytes;
+use http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 
 use crate::core::body_stream::BodyStream;
 use crate::core::error::{Error, Kind, Result};
-use crate::core::session::decompress::{
-    Decoder, decompress_and_strip as strip, drain_stream_into_vec,
-};
+use crate::core::session::decompress::{Decoder, decompress_body, drain_stream_into_vec};
 
 pub(crate) enum ResponseBody {
     Buffered(Vec<u8>),
@@ -88,7 +87,7 @@ impl ResponseTiming {
 pub struct Response {
     pub(crate) status: StatusCode,
     pub(crate) version: HttpVersion,
-    pub(crate) headers: Vec<(HeaderName, HeaderValue)>,
+    pub(crate) headers: HeaderMap,
     pub(crate) trailers: Vec<(HeaderName, HeaderValue)>,
     pub(crate) body: ResponseBody,
     pub(crate) url: String,
@@ -123,8 +122,8 @@ impl Response {
         &self.redirect_chain
     }
 
-    pub fn headers(&self) -> impl Iterator<Item = (&HeaderName, &HeaderValue)> {
-        self.headers.iter().map(|(k, v)| (k, v))
+    pub fn headers(&self) -> &HeaderMap {
+        &self.headers
     }
 
     pub fn trailers(&self) -> impl Iterator<Item = (&HeaderName, &HeaderValue)> {
@@ -134,9 +133,9 @@ impl Response {
     pub fn cookies(&self) -> impl Iterator<Item = crate::cookie::Cookie> + '_ {
         let url = url::Url::parse(&self.url).ok();
         self.headers
+            .get_all(http::header::SET_COOKIE)
             .iter()
-            .filter(|(name, _)| *name == http::header::SET_COOKIE)
-            .filter_map(move |(_, value)| {
+            .filter_map(move |value| {
                 crate::cookie::parse::parse_set_cookie(value.to_str().ok()?, url.as_ref()?)
             })
     }
@@ -151,30 +150,24 @@ impl Response {
             .map(|(k, v)| (k.as_str(), v.as_str()))
     }
 
-    pub async fn text(&mut self) -> crate::core::Result<String> {
+    pub async fn text(self) -> crate::core::Result<String> {
         self.text_with_charset("utf-8").await
     }
 
     #[cfg(feature = "charset")]
-    pub async fn text_with_charset(
-        &mut self,
-        default_encoding: &str,
-    ) -> crate::core::Result<String> {
-        self.drain().await?;
-        let bytes = self.buffered();
-        let label = self.charset_label();
-        let encoding =
-            encoding_rs::Encoding::for_label(label.unwrap_or(default_encoding).as_bytes())
-                .unwrap_or(encoding_rs::UTF_8);
-        Ok(encoding.decode(bytes).0.into_owned())
+    pub async fn text_with_charset(self, default_encoding: &str) -> crate::core::Result<String> {
+        let label = self.charset_label().map(str::to_owned);
+        let bytes = self.bytes().await?;
+        let encoding = encoding_rs::Encoding::for_label(
+            label.as_deref().unwrap_or(default_encoding).as_bytes(),
+        )
+        .unwrap_or(encoding_rs::UTF_8);
+        Ok(encoding.decode(&bytes).0.into_owned())
     }
 
     #[cfg(not(feature = "charset"))]
-    pub async fn text_with_charset(
-        &mut self,
-        _default_encoding: &str,
-    ) -> crate::core::Result<String> {
-        Ok(String::from_utf8_lossy(self.bytes().await?).to_string())
+    pub async fn text_with_charset(self, _default_encoding: &str) -> crate::core::Result<String> {
+        Ok(String::from_utf8_lossy(&self.bytes().await?).into_owned())
     }
 
     #[cfg(feature = "charset")]
@@ -188,24 +181,9 @@ impl Response {
         })
     }
 
-    pub async fn bytes(&mut self) -> crate::core::Result<&[u8]> {
-        self.drain().await?;
-        Ok(self.buffered())
-    }
-
-    fn buffered(&self) -> &[u8] {
-        match &self.body {
-            ResponseBody::Buffered(b) => b,
-            ResponseBody::Streaming(_) | ResponseBody::Taken => &[],
-        }
-    }
-
-    async fn drain(&mut self) -> Result<()> {
-        let stream = match std::mem::replace(&mut self.body, ResponseBody::Taken) {
-            ResponseBody::Buffered(b) => {
-                self.body = ResponseBody::Buffered(b);
-                return Ok(());
-            }
+    pub async fn bytes(self) -> crate::core::Result<Bytes> {
+        let stream = match self.body {
+            ResponseBody::Buffered(b) => return Ok(Bytes::from(b)),
             ResponseBody::Taken => {
                 return Err(Error::new(Kind::Body).with_message(
                     "response body stream was taken by `into_stream`; read the bytes from that stream",
@@ -214,14 +192,17 @@ impl Response {
             ResponseBody::Streaming(s) => s,
         };
         let buf = drain_stream_into_vec(stream).await?;
-        let (buf, headers) = strip(buf, std::mem::take(&mut self.headers), &self.compression)?;
-        self.headers = headers;
-        self.body = ResponseBody::Buffered(buf);
-        Ok(())
+        let encoding = self.headers.get(http::header::CONTENT_ENCODING).map(|v| {
+            String::from_utf8_lossy(v.as_bytes())
+                .trim()
+                .to_ascii_lowercase()
+        });
+        let (buf, _) = decompress_body(buf, encoding.as_deref(), &self.compression)?;
+        Ok(Bytes::from(buf))
     }
 
-    pub async fn json<T: serde::de::DeserializeOwned>(&mut self) -> crate::core::Result<T> {
-        serde_json::from_slice(self.bytes().await?).map_err(Error::from_json)
+    pub async fn json<T: serde::de::DeserializeOwned>(self) -> crate::core::Result<T> {
+        serde_json::from_slice(&self.bytes().await?).map_err(Error::from_json)
     }
 
     pub fn into_stream(mut self) -> Result<BodyStream> {
@@ -256,15 +237,28 @@ impl Response {
     }
 
     pub fn error_for_status(self) -> crate::core::Result<Self> {
-        if self.status.as_u16() >= 400 {
-            let mut err = crate::Error::new(Kind::Status).with_status(self.status);
-            if let Ok(uri) = self.url.parse::<http::Uri>() {
-                err = err.with_url(uri);
-            }
-            Err(err)
-        } else {
-            Ok(self)
+        match self.status_error() {
+            Some(err) => Err(err),
+            None => Ok(self),
         }
+    }
+
+    pub fn error_for_status_ref(&self) -> crate::core::Result<&Self> {
+        match self.status_error() {
+            Some(err) => Err(err),
+            None => Ok(self),
+        }
+    }
+
+    fn status_error(&self) -> Option<Error> {
+        if self.status.as_u16() < 400 {
+            return None;
+        }
+        let err = Error::new(Kind::Status).with_status(self.status);
+        Some(match self.url.parse::<http::Uri>() {
+            Ok(uri) => err.with_url(uri),
+            Err(_) => err,
+        })
     }
 
     pub fn audit(&self) -> Option<&crate::audit::AuditData> {
@@ -286,10 +280,7 @@ impl Response {
     }
 
     pub fn header(&self, name: &str) -> Option<&str> {
-        self.headers
-            .iter()
-            .find(|(k, _)| k.as_str().eq_ignore_ascii_case(name))
-            .and_then(|(_, v)| v.to_str().ok())
+        self.headers.get(name).and_then(|v| v.to_str().ok())
     }
 
     pub async fn read_until<F>(self, limit: usize, mut done: F) -> Result<Vec<u8>>

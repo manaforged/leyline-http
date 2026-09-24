@@ -48,7 +48,7 @@ async fn receive(delay: Duration, abandon: bool) {
             .serve_connection(TokioIo::new(stream), service)
             .await
     });
-    let mut response = timeout(
+    let response = timeout(
         Duration::from_secs(3),
         Session::builder()
             .protocol(leyline::ProtocolPolicy::Http2)

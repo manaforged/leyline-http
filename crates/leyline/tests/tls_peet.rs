@@ -436,7 +436,7 @@ async fn peet(session: &leyline::Session) -> Value {
         if attempt > 0 {
             tokio::time::sleep(std::time::Duration::from_millis(500 * attempt as u64)).await;
         }
-        let mut resp = match session.get(PEET_URL).await {
+        let resp = match session.get(PEET_URL).await {
             Ok(r) => r,
             Err(e) => {
                 last_err = format!("request error: {e}");
@@ -1139,7 +1139,7 @@ async fn live_h3_cloudflare() {
         .protocol(leyline::ProtocolPolicy::Http3)
         .build()
         .expect("h3 session builds");
-    let mut resp = session
+    let resp = session
         .get("https://cloudflare-quic.com/")
         .await
         .expect("H3 request failed");
@@ -1163,12 +1163,12 @@ async fn live_h3_cloudflare() {
             .is_some_and(|c| !c.is_empty()),
         "H3 peer certificate should be exposed"
     );
+    let cipher = resp.tls().and_then(|t| t.cipher.clone());
     let body_len = resp.bytes().await.expect("buffered H3 body").len();
     assert!(body_len > 0, "H3 body is empty");
     println!(
         "✓ HTTP/3 to cloudflare-quic.com: status 200, {} bytes, cipher {:?}",
-        body_len,
-        resp.tls().and_then(|t| t.cipher.as_deref())
+        body_len, cipher
     );
 }
 
@@ -1220,7 +1220,7 @@ async fn live_h3_pool_reuse() {
         .build()
         .expect("h3 session builds");
 
-    let mut r1 = session
+    let r1 = session
         .get("https://cloudflare-quic.com/")
         .await
         .expect("first H3 request failed");
@@ -1228,7 +1228,7 @@ async fn live_h3_pool_reuse() {
     drop(r1.bytes().await);
     let after_first = session.pool_stats();
 
-    let mut r2 = session
+    let r2 = session
         .get("https://cloudflare-quic.com/")
         .await
         .expect("second H3 request failed");
@@ -1266,7 +1266,7 @@ async fn live_race() {
         .build()
         .expect("race session builds");
 
-    let mut r1 = session
+    let r1 = session
         .get("https://cloudflare-quic.com/")
         .await
         .expect("first raced request failed");
@@ -1283,7 +1283,7 @@ async fn live_race() {
         after_first.h3_misses
     );
 
-    let mut r2 = session
+    let r2 = session
         .get("https://cloudflare-quic.com/")
         .await
         .expect("second raced request failed");
@@ -1341,7 +1341,7 @@ async fn live_h3_response_streaming_is_incremental() {
         .build()
         .expect("h3 session builds");
 
-    let mut buffered = session
+    let buffered = session
         .get("https://cloudflare-quic.com/")
         .await
         .expect("buffered H3 request failed");
@@ -1408,7 +1408,7 @@ async fn live_h3_streaming_request_body_roundtrips() {
     let chunk_count = chunks.len();
     let body = Body::stream(stream::iter(chunks), Some(total as u64));
 
-    let mut resp = session
+    let resp = session
         .post("https://httpbin.agrd.workers.dev/post")
         .header("content-type", "text/plain")
         .body(body)
@@ -1558,7 +1558,7 @@ async fn live_http_connect_proxy() {
         .build()
         .expect("build session with proxy");
 
-    let mut resp = session
+    let resp = session
         .get(PEET_URL)
         .await
         .expect("proxy-tunnelled fetch failed");
@@ -1591,7 +1591,7 @@ async fn live_socks5_proxy() {
         .build()
         .expect("build session with proxy");
 
-    let mut resp = session
+    let resp = session
         .get(PEET_URL)
         .await
         .expect("socks5-tunnelled fetch failed");

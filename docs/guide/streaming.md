@@ -71,8 +71,8 @@ close-delimited, and HTTP/3 streaming rejects them per chunk. Only HTTP/2
 streaming does not apply that cap; `copy_to` does not change this.
 
 You do not have to stream it yourself. `bytes().await`, `text().await`, and
-`json().await` drain a streaming body for you, decompress it, and keep the
-bytes for later calls, so they work in both modes. Draining honors the session
+`json().await` drain a streaming body for you and decompress it, so they work
+in both modes. They consume the response. Draining honors the session
 `read_timeout` per chunk and the same 100 MiB cap that buffered mode applies.
 Take the stream or drain it, not both: `into_stream()` consumes the response,
 so nothing is left to read after it. A streaming response also carries no trailers.
@@ -80,8 +80,7 @@ so nothing is left to read after it. A streaming response also carries no traile
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
 let session = leyline::Session::new();
-let mut resp = session.get("https://example.com/big").stream().await?;
-let body = resp.text().await?;
+let body = session.get("https://example.com/big").stream().await?.text().await?;
 println!("{} bytes", body.len());
 # Ok(())
 # }

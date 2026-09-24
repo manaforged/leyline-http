@@ -41,7 +41,7 @@ async fn plaintext_http_uses_h1_and_preserves_duplicate_headers() {
     });
 
     let session = Session::new();
-    let mut resp = session
+    let resp = session
         .request(http::Method::GET, format!("http://{addr}/wire?q=1"))
         .header("x-dup", "one")
         .header("x-dup", "two")
@@ -50,14 +50,15 @@ async fn plaintext_http_uses_h1_and_preserves_duplicate_headers() {
         .unwrap();
 
     assert_eq!(resp.version(), HttpVersion::Http1_1);
-    assert_eq!(resp.text().await.unwrap(), "ok");
     assert_eq!(
         resp.headers()
-            .filter(|(k, _)| k.as_str().eq_ignore_ascii_case("set-cookie"))
-            .filter_map(|(_, v)| v.to_str().ok())
+            .get_all(http::header::SET_COOKIE)
+            .iter()
+            .filter_map(|v| v.to_str().ok())
             .collect::<Vec<_>>(),
         vec!["a=1", "b=2"]
     );
+    assert_eq!(resp.text().await.unwrap(), "ok");
     server.await.unwrap();
 }
 
@@ -87,7 +88,7 @@ async fn owned() {
         .uri(format!("http://{addr}/owned"))
         .body(Body::from(Vec::new()))
         .unwrap();
-    let mut resp = Session::new().execute(req).await.unwrap();
+    let resp = Session::new().execute(req).await.unwrap();
     assert_eq!(resp.status(), 200);
     assert_eq!(resp.text().await.unwrap(), "ok");
     server.await.unwrap();

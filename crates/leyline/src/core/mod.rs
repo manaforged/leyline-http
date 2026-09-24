@@ -5,6 +5,7 @@ pub(crate) mod deadline;
 mod digest;
 mod error;
 mod headers;
+mod into_url;
 #[cfg(feature = "multipart")]
 pub mod multipart;
 mod request;
@@ -26,6 +27,7 @@ pub use config::{
 pub use digest::DigestAuth;
 pub use error::{Error, Kind, Result};
 pub use headers::HeaderList;
+pub use into_url::IntoUrl;
 pub use request::{ContentEncoding, IntoParamPair, RequestBuilder};
 pub use response::{HttpVersion, Response, ResponseTiming};
 pub use retry::{RetryPolicy, RetryTrigger};

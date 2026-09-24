@@ -62,7 +62,7 @@ async fn retries_503_then_succeeds() {
         .retry(policy)
         .build()
         .unwrap();
-    let mut resp = session.get(&format!("http://{addr}/flaky")).await.unwrap();
+    let resp = session.get(&format!("http://{addr}/flaky")).await.unwrap();
     assert_eq!(resp.status(), 200);
     assert_eq!(resp.text().await.unwrap(), "ok");
     assert_eq!(counter.load(Ordering::Relaxed), 3);

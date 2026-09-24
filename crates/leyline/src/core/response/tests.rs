@@ -4,7 +4,7 @@ fn bare_response(audit_tls: Option<Arc<crate::audit::AuditTlsCache>>) -> Respons
     Response {
         status: http::StatusCode::OK,
         version: HttpVersion::Http2,
-        headers: Vec::new(),
+        headers: http::HeaderMap::new(),
         trailers: Vec::new(),
         body: ResponseBody::Buffered(Vec::new()),
         url: "https://example.test/".to_string(),
@@ -67,10 +67,12 @@ fn audit_memoises_across_calls() {
 #[tokio::test]
 async fn text_decodes_declared_charset() {
     let mut resp = bare_response(None);
-    resp.headers = vec![(
+    resp.headers = [(
         http::HeaderName::from_static("content-type"),
         http::HeaderValue::from_static("text/html; charset=windows-1252"),
-    )];
+    )]
+    .into_iter()
+    .collect();
     resp.body = ResponseBody::Buffered(vec![0xE9, 0xA9]);
     assert_eq!(resp.text().await.unwrap(), "é©");
 }
@@ -79,10 +81,12 @@ async fn text_decodes_declared_charset() {
 #[tokio::test]
 async fn text_charset_param_is_case_insensitive_and_unquoted() {
     let mut resp = bare_response(None);
-    resp.headers = vec![(
+    resp.headers = [(
         http::HeaderName::from_static("content-type"),
         http::HeaderValue::from_static("text/plain; Charset=\"Shift_JIS\""),
-    )];
+    )]
+    .into_iter()
+    .collect();
     resp.body = ResponseBody::Buffered(vec![0x82, 0xA0]);
     assert_eq!(resp.text().await.unwrap(), "あ");
 }
@@ -99,10 +103,12 @@ async fn text_defaults_to_utf8_without_charset() {
 #[tokio::test]
 async fn declared_charset_overrides_text_with_charset_default() {
     let mut resp = bare_response(None);
-    resp.headers = vec![(
+    resp.headers = [(
         http::HeaderName::from_static("content-type"),
         http::HeaderValue::from_static("text/plain; charset=utf-8"),
-    )];
+    )]
+    .into_iter()
+    .collect();
     resp.body = ResponseBody::Buffered("héllo".as_bytes().to_vec());
     assert_eq!(
         resp.text_with_charset("windows-1252").await.unwrap(),
@@ -172,6 +178,7 @@ async fn text_reads_a_buffered_body_and_a_stream() {
     resp.body = ResponseBody::Buffered(b"hi".to_vec());
     assert_eq!(resp.text().await.unwrap(), "hi");
 
+    let mut resp = bare_response(None);
     resp.body = ResponseBody::Streaming(BodyStream::from_bytes(bytes::Bytes::from_static(b"hi")));
     assert_eq!(resp.text().await.unwrap(), "hi");
 }

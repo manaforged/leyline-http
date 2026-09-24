@@ -87,7 +87,7 @@ async fn streaming_request_body_chunked_over_h1() {
     let expected_total: usize = 384 * 8 * 1024;
     let body = Body::stream(stream::iter(chunks), None);
 
-    let mut resp = session
+    let resp = session
         .post(&format!("http://{addr}/upload"))
         .body(body)
         .send()
@@ -239,14 +239,13 @@ async fn text_drains_a_streamed_body() {
         .protocol(ProtocolPolicy::Http1)
         .build()
         .unwrap();
-    let mut resp = session
+    let resp = session
         .request(http::Method::GET, format!("http://{addr}/x"))
         .stream()
         .send()
         .await
         .unwrap();
     assert_eq!(resp.text().await.unwrap(), "hello stream");
-    assert_eq!(resp.bytes().await.unwrap(), b"hello stream");
 }
 
 #[tokio::test]
@@ -256,9 +255,8 @@ async fn buffered_body_is_visible_to_as_bytes() {
         .protocol(ProtocolPolicy::Http1)
         .build()
         .unwrap();
-    let mut resp = session.get(&format!("http://{addr}/x")).await.unwrap();
-    assert_eq!(resp.bytes().await.unwrap(), b"buffered");
-    assert_eq!(resp.text().await.unwrap(), "buffered");
+    let resp = session.get(&format!("http://{addr}/x")).await.unwrap();
+    assert_eq!(resp.bytes().await.unwrap(), &b"buffered"[..]);
 }
 
 #[tokio::test]

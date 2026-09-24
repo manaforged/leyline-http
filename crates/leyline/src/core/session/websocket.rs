@@ -1,13 +1,13 @@
 use super::Session;
-use crate::core::IntoParamPair;
 use crate::core::WebSocketConfig;
 use crate::core::error::{Error, Kind, Result};
+use crate::core::{IntoParamPair, IntoUrl};
 
 impl Session {
-    pub fn websocket(&self, url: &str) -> WebSocketBuilder {
+    pub fn websocket(&self, url: impl IntoUrl) -> WebSocketBuilder {
         WebSocketBuilder {
             session: self.clone(),
-            url: url.to_string(),
+            url: url.into_url(),
             config: self.inner.websocket_config,
             proxy: None,
             headers: Vec::new(),
@@ -79,7 +79,7 @@ impl Session {
 #[must_use = "builders are lazy: nothing happens until `.connect()` / await"]
 pub struct WebSocketBuilder {
     session: Session,
-    url: String,
+    url: Result<url::Url>,
     config: WebSocketConfig,
     proxy: Option<String>,
     headers: Vec<(String, String)>,
@@ -114,8 +114,9 @@ impl WebSocketBuilder {
     }
 
     pub async fn connect(self) -> Result<crate::core::websocket::WsConnection> {
+        let url = self.url?;
         let handshake = self.session.websocket_with_options(
-            &self.url,
+            url.as_str(),
             self.config,
             self.proxy.as_deref(),
             &self.headers,

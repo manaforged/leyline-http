@@ -85,7 +85,7 @@ async fn md5_challenge_round_trip() {
         .protocol(ProtocolPolicy::Http1)
         .build()
         .unwrap();
-    let mut resp = session
+    let resp = session
         .request(http::Method::GET, format!("http://{addr}/protected"))
         .digest_auth(DigestAuth::new("mufasa", "circle-of-life"))
         .send()

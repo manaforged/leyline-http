@@ -237,7 +237,7 @@ impl Session {
 
             return Ok(Response {
                 status,
-                headers: final_headers,
+                headers: final_headers.into_iter().collect(),
                 body: final_body,
                 url: final_url,
                 redirect_chain,

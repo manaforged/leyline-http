@@ -12,8 +12,9 @@ version of `Method`, `Uri`, `StatusCode`, `HeaderName`, and `HeaderValue`.
 ## Methods
 
 The session has one method per common verb: `get`, `post`, `put`, `patch`,
-`delete`, and `head`. For anything else, call `request` with an `http::Method`
-and anything that parses as an `http::Uri`.
+`delete`, and `head`. For anything else, call `request` with an `http::Method`.
+Every one of them takes `impl IntoUrl`: a `&str`, a `String`, a `&String`, a
+`url::Url`, or a `&url::Url`.
 
 ```rust,no_run
 use leyline::http::Method;
@@ -26,8 +27,9 @@ println!("{}", resp.status());
 # }
 ```
 
-A URL that does not parse as a `Uri` does not panic and does not fail at the
-call. The builder records the error, and `send` returns it.
+A URL that does not parse does not panic and does not fail at the call. The
+builder records the error, and `send` returns it as `Kind::Url` with the
+`url::ParseError` as its source.
 
 ## Headers
 
@@ -64,7 +66,10 @@ let resp = session
 
 Order matters to a fingerprint, so Leyline preserves it. Your headers merge
 into the profile's preset block, and the profile's own order applies on the
-wire.
+wire. A request header replaces a profile or `SessionBuilder::headers` header
+of the same name and takes its slot; repeated `header` calls for that name
+send every value there. See the header merge rule in the
+[API reference](../api.md).
 
 Two methods override the header order:
 
