@@ -42,15 +42,6 @@ pub enum H1Body {
     },
 }
 
-impl H1Body {
-    fn is_stream(&self) -> bool {
-        matches!(
-            self,
-            H1Body::FixedStream { .. } | H1Body::ChunkedStream { .. }
-        )
-    }
-}
-
 pub enum H1ResponseBody {
     Buffered(Vec<u8>),
     Streaming(BodyStream),
@@ -163,12 +154,7 @@ pub async fn send_request_h1_pooled(
         .await;
     }
 
-    let body_is_stream = body.is_stream();
-    let replayable = is_idempotent(method);
-    let retry_buf: Option<Bytes> = match &body {
-        H1Body::Buffered(b) => Some(b.clone()),
-        _ => None,
-    };
+    let replay = replay_body(method, &body);
     let mut body = body;
 
     if let Some((slot, tls)) = checkout_live_h1(pool, &key) {
@@ -207,14 +193,9 @@ pub async fn send_request_h1_pooled(
                     "pool stale hit -- pooled h1 stream failed mid-request, opening fresh"
                 );
                 pool.note_h1_dead();
-                if body_is_stream {
-                    return Err(e);
-                }
-                if !replayable {
-                    return Err(e);
-                }
-                if let Some(buf) = &retry_buf {
-                    body = H1Body::Buffered(buf.clone());
+                match replay {
+                    Some(replay) => body = replay,
+                    None => return Err(e),
                 }
             }
         }
@@ -241,6 +222,17 @@ pub async fn send_request_h1_pooled(
             })
         }
         Err(e) => Err(e),
+    }
+}
+
+fn replay_body(method: &str, body: &H1Body) -> Option<H1Body> {
+    if !is_idempotent(method) {
+        return None;
+    }
+    match body {
+        H1Body::Empty => Some(H1Body::Empty),
+        H1Body::Buffered(b) => Some(H1Body::Buffered(b.clone())),
+        _ => None,
     }
 }
 

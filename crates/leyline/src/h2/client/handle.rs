@@ -88,9 +88,9 @@ impl H2Client {
         stream_response: bool,
     ) -> Result<H2ResponseEx, H2Error> {
         if self.closed.load(Ordering::Acquire) {
-            return Err(H2Error::Connection {
-                code: ErrorCode::NoError,
-                reason: "connection closed".into(),
+            return Err(H2Error::Stream {
+                stream_id: 0,
+                code: ErrorCode::RefusedStream,
             });
         }
 
@@ -123,9 +123,9 @@ impl H2Client {
             body: body_in,
             sink,
         };
-        self.tx.send(cmd).await.map_err(|_| H2Error::Connection {
-            code: ErrorCode::NoError,
-            reason: "driver task has exited".into(),
+        self.tx.send(cmd).await.map_err(|_| H2Error::Stream {
+            stream_id: 0,
+            code: ErrorCode::RefusedStream,
         })?;
 
         match response_rx.await {
@@ -208,9 +208,9 @@ impl H2Client {
             write_rx,
             sink,
         };
-        self.tx.send(cmd).await.map_err(|_| H2Error::Connection {
-            code: ErrorCode::NoError,
-            reason: "driver task has exited".into(),
+        self.tx.send(cmd).await.map_err(|_| H2Error::Stream {
+            stream_id: 0,
+            code: ErrorCode::RefusedStream,
         })?;
 
         let resp = match headers_rx.await {

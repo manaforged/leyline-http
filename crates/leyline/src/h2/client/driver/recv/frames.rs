@@ -87,6 +87,8 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
 
     pub(super) fn on_goaway(&mut self, g: GoAwayFrame) -> Result<(), H2Error> {
         self.peer_goaway_last_stream = Some(g.last_stream_id);
+        self.closed
+            .store(true, std::sync::atomic::Ordering::Release);
         let to_fail: Vec<u32> = self
             .streams
             .keys()

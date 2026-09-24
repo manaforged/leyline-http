@@ -259,9 +259,9 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
 
     pub(super) fn reject_after_goaway(&self) -> Result<(), H2Error> {
         if self.peer_goaway_last_stream.is_some() {
-            return Err(H2Error::Connection {
-                code: ErrorCode::NoError,
-                reason: "peer sent GOAWAY, refusing new streams".into(),
+            return Err(H2Error::Stream {
+                stream_id: 0,
+                code: ErrorCode::RefusedStream,
             });
         }
         Ok(())
@@ -321,6 +321,25 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     }
 
     pub(super) async fn finish_remote(&mut self, stream_id: u32) -> Result<(), H2Error> {
+        if self
+            .streams
+            .get(stream_id)
+            .is_some_and(StreamActor::length_mismatch)
+        {
+            drop(
+                self.writer
+                    .write_rst_stream(stream_id, ErrorCode::ProtocolError)
+                    .await,
+            );
+            self.fail_stream(
+                stream_id,
+                H2Error::Stream {
+                    stream_id,
+                    code: ErrorCode::ProtocolError,
+                },
+            );
+            return Ok(());
+        }
         let local_open = self
             .streams
             .get(stream_id)

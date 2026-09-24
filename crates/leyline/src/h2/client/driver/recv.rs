@@ -87,6 +87,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 return Ok(());
             }
             let mut outcome = None;
+            actor.recv_len = actor.recv_len.saturating_add(d.data.len() as u64);
             if !actor.drop_body {
                 let is_streaming =
                     matches!(actor.response_tx, Some(ResponseSink::StreamingEx { .. }));

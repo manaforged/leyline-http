@@ -36,17 +36,23 @@ fn pseudo(actor: &mut StreamActor, decoded: Vec<(Bytes, Bytes)>) -> Option<u16> 
     status.filter(|status| !bad_status && *status != 101)
 }
 
+const BODY_RESERVE_CAP: usize = 64 * 1024;
+
 fn reserve_body(actor: &mut StreamActor, cap: usize) {
-    if actor.drop_body || matches!(actor.response_tx, Some(ResponseSink::StreamingEx { .. })) {
+    if actor.drop_body {
         return;
     }
-    let declared = actor
+    actor.declared_len = actor
         .resp_headers
         .iter()
         .find(|(name, _)| name.as_str() == "content-length")
-        .and_then(|(_, value)| value.as_str().parse::<usize>().ok());
-    if let Some(len) = declared {
-        actor.body.reserve_exact(len.min(cap));
+        .and_then(|(_, value)| value.as_str().parse::<u64>().ok());
+    if matches!(actor.response_tx, Some(ResponseSink::StreamingEx { .. })) {
+        return;
+    }
+    if let Some(len) = actor.declared_len {
+        let len = usize::try_from(len).unwrap_or(usize::MAX);
+        actor.body.reserve(len.min(cap).min(BODY_RESERVE_CAP));
     }
 }
 

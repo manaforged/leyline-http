@@ -192,6 +192,7 @@ pub(super) async fn send_request_h1_streaming(
     permit: OwnedSemaphorePermit,
     key: PoolKey,
 ) -> Result<H1Response, H1PooledError> {
+    let replay = replay_body(method, &body);
     let mut body = body;
 
     if let Some((slot, tls)) = checkout_live_h1(pool, &key) {
@@ -238,7 +239,10 @@ pub(super) async fn send_request_h1_streaming(
                     "pool stale hit -- pooled h1 stream failed before response, opening fresh"
                 );
                 pool.note_h1_dead();
-                return Err(e);
+                match replay {
+                    Some(replay) => body = replay,
+                    None => return Err(e),
+                }
             }
         }
     }

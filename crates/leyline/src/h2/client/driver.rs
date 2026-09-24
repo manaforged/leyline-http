@@ -138,6 +138,8 @@ struct StreamActor {
     send_closed: bool,
     stalled: std::collections::VecDeque<Bytes>,
     remote_done: bool,
+    declared_len: Option<u64>,
+    recv_len: u64,
 }
 
 impl StreamActor {
@@ -158,7 +160,13 @@ impl StreamActor {
             send_closed: false,
             stalled: std::collections::VecDeque::new(),
             remote_done: false,
+            declared_len: None,
+            recv_len: 0,
         }
+    }
+
+    fn length_mismatch(&self) -> bool {
+        !self.drop_body && self.declared_len.is_some_and(|len| len != self.recv_len)
     }
 
     fn deliver_headers_streaming(&mut self) {

@@ -27,7 +27,13 @@ impl Session {
         let parsed = url::Url::parse(url).map_err(crate::core::Error::from_url_parse)?;
         let proxy = self.inner.proxy_config.proxy_for(&parsed, request_proxy);
 
-        if config.prefer_http2 && !force_http1 {
+        let h1_only = parsed.host_str().is_some_and(|host| {
+            self.inner
+                .pool
+                .is_h1_only(host, parsed.port_or_known_default().unwrap_or(443), proxy)
+        });
+
+        if config.prefer_http2 && !force_http1 && !h1_only {
             match crate::core::websocket::WsConnection::connect_h2(
                 &self.inner.pool,
                 &self.inner.connector,
@@ -43,6 +49,12 @@ impl Session {
             {
                 Ok(conn) => return Ok(conn),
                 Err(e) if crate::core::websocket::WsConnection::is_h2_fallback_trigger(&e) => {
+                    if crate::core::transport::is_h2_alpn_mismatch(&e)
+                        && let Some(host) = parsed.host_str()
+                    {
+                        let port = parsed.port_or_known_default().unwrap_or(443);
+                        self.inner.pool.note_h1_only(host, port, proxy);
+                    }
                     tracing::debug!(
                         error = %e,
                         "H2 extended CONNECT not available, falling back to H1 Upgrade"
@@ -109,15 +121,16 @@ impl WebSocketBuilder {
     }
 
     pub async fn connect(self) -> Result<crate::core::websocket::WsConnection> {
-        self.session
-            .websocket_with_options(
-                &self.url,
-                self.config,
-                self.force_http1,
-                self.proxy.as_deref(),
-                &self.headers,
-            )
+        let handshake = self.session.websocket_with_options(
+            &self.url,
+            self.config,
+            self.force_http1,
+            self.proxy.as_deref(),
+            &self.headers,
+        );
+        tokio::time::timeout(self.session.inner.timeouts.total, handshake)
             .await
+            .map_err(|_| Error::new(Kind::Timeout))?
     }
 }
 

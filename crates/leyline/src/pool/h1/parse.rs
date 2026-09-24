@@ -12,13 +12,18 @@ where
         let (status, headers, minor) = parse_h1_head(&head)?;
         buf.drain(..body_start);
 
-        if (100..200).contains(&status) && status != 101 {
+        if status == 101 {
+            return Err(H1PooledError::Http(
+                "unexpected 101 Switching Protocols".into(),
+            ));
+        }
+        if (100..200).contains(&status) {
             continue;
         }
 
         validate_framing_headers(&headers)?;
 
-        let framing = if method.eq_ignore_ascii_case("HEAD") || matches!(status, 101 | 204 | 304) {
+        let framing = if method.eq_ignore_ascii_case("HEAD") || matches!(status, 204 | 304) {
             BodyFraming::None
         } else if header_contains_token(&headers, "transfer-encoding", "chunked") {
             BodyFraming::Chunked
@@ -54,13 +59,18 @@ where
         let (status, headers, minor) = parse_h1_head(&head)?;
         buf.drain(..body_start);
 
-        if (100..200).contains(&status) && status != 101 {
+        if status == 101 {
+            return Err(H1PooledError::Http(
+                "unexpected 101 Switching Protocols".into(),
+            ));
+        }
+        if (100..200).contains(&status) {
             continue;
         }
 
         validate_framing_headers(&headers)?;
 
-        if method.eq_ignore_ascii_case("HEAD") || matches!(status, 101 | 204 | 304) {
+        if method.eq_ignore_ascii_case("HEAD") || matches!(status, 204 | 304) {
             return Ok((status, headers, Vec::new(), minor));
         }
 

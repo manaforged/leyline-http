@@ -272,10 +272,11 @@ impl WsConnection {
     }
 
     pub(crate) fn is_h2_fallback_trigger(err: &Error) -> bool {
-        err.kind() == Kind::Request
-            && err
-                .message()
-                .is_some_and(|s| s.contains(H2_NO_CONNECT_PROTOCOL))
+        crate::core::transport::is_h2_alpn_mismatch(err)
+            || err.kind() == Kind::Request
+                && err
+                    .message()
+                    .is_some_and(|s| s.contains(H2_NO_CONNECT_PROTOCOL))
     }
 
     pub async fn send(&mut self, msg: &str) -> Result<()> {

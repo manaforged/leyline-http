@@ -9,6 +9,8 @@ use std::io::Read;
 use crate::core::CompressionConfig;
 use crate::core::error::{Error, Kind, Result};
 
+const MAX_CODINGS: usize = 4;
+
 pub(super) fn decompress_body(
     body: Vec<u8>,
     encoding: Option<&str>,
@@ -20,6 +22,12 @@ pub(super) fn decompress_body(
     };
 
     let encodings: Vec<&str> = encoding.split(',').map(|s| s.trim()).collect();
+    if encodings.len() > MAX_CODINGS {
+        return Err(Error::new(Kind::Decode).with_message(format!(
+            "content-encoding lists {} codings; at most {MAX_CODINGS} are decoded",
+            encodings.len()
+        )));
+    }
     if !encodings.iter().all(|enc| config.allows(enc)) {
         return Ok((body, false));
     }
