@@ -8,53 +8,6 @@ use crate::h2::stream_state::StreamState;
 use super::*;
 
 impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
-    pub(super) async fn maybe_top_up_conn_window(&mut self) -> Result<(), H2Error> {
-        let initial = self.config.initial_connection_window_size as i64;
-        if self.conn_recv_window < initial / 2 {
-            let increment = (initial - self.conn_recv_window).clamp(1, 0x7FFF_FFFF) as u32;
-            self.writer
-                .write_window_update(&WindowUpdateFrame {
-                    stream_id: 0,
-                    increment,
-                })
-                .await?;
-            self.conn_recv_window += increment as i64;
-        }
-        Ok(())
-    }
-
-    pub(super) async fn maybe_top_up_stream_window(
-        &mut self,
-        stream_id: u32,
-    ) -> Result<(), H2Error> {
-        let initial = self.config.advertised_initial_window_size() as i64;
-        let needs_update = self
-            .streams
-            .get(stream_id)
-            .map(|a| a.stalled.is_empty() && a.recv_window < initial / 2)
-            .unwrap_or(false);
-        if needs_update {
-            let current = self
-                .streams
-                .get(stream_id)
-                .map(|a| a.recv_window)
-                .unwrap_or(0);
-            let increment = (initial - current).clamp(1, 0x7FFF_FFFF) as u32;
-            self.writer
-                .write_window_update(&WindowUpdateFrame {
-                    stream_id,
-                    increment,
-                })
-                .await?;
-            if let Some(actor) = self.streams.get_mut(stream_id) {
-                actor.recv_window += increment as i64;
-            }
-        }
-        Ok(())
-    }
-}
-
-impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     pub(super) async fn run(mut self) -> Result<(), H2Error> {
         let result = self.event_loop().await;
         self.closed.store(true, Ordering::Release);
@@ -74,10 +27,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         }
         while let Some(cmd) = self.pending.pop_front() {
             match cmd {
-                DriverCommand::SendRequest { response_tx, .. } => {
-                    let _ = response_tx.send(Err(clone_err(&final_err)));
-                }
-                DriverCommand::SendRequestEx { sink, .. }
+                DriverCommand::SendRequest { sink, .. }
                 | DriverCommand::OpenConnect { sink, .. } => {
                     send_err_to_sink(sink, clone_err(&final_err));
                 }
@@ -86,10 +36,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         }
         while let Ok(cmd) = self.command_rx.try_recv() {
             match cmd {
-                DriverCommand::SendRequest { response_tx, .. } => {
-                    let _ = response_tx.send(Err(clone_err(&final_err)));
-                }
-                DriverCommand::SendRequestEx { sink, .. }
+                DriverCommand::SendRequest { sink, .. }
                 | DriverCommand::OpenConnect { sink, .. } => {
                     send_err_to_sink(sink, clone_err(&final_err));
                 }
@@ -224,7 +171,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 }
                 match actor.response_tx.as_ref() {
                     Some(ResponseSink::Buffered(tx)) => tx.is_closed(),
-                    Some(ResponseSink::BufferedEx(tx)) => tx.is_closed(),
                     Some(ResponseSink::StreamingEx {
                         headers_tx,
                         body_tx,

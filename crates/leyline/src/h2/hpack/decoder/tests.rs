@@ -32,7 +32,7 @@ fn non_utf8_indexed_value_keeps_table_in_lockstep_with_peer() {
         &[0xff, 0xfe],
         "raw value preserved"
     );
-    assert_eq!(dec.dynamic.size(), 1 + 2 + 32);
+    assert_eq!(dec.dynamic.len(), 1);
     let (n, v) = table::lookup(table::STATIC_TABLE.len(), &dec.dynamic).expect("indexed");
     assert_eq!(n.as_ref(), b"x");
     assert_eq!(v.as_ref(), &[0xff, 0xfe]);

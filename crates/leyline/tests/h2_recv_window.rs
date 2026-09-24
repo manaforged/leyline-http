@@ -1,13 +1,15 @@
 #[path = "h2_support/mod.rs"]
 mod support;
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::BytesMut;
 use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
-use leyline::h2::connection::{ClientConnection, PseudoHeaders};
+use leyline::h2::connection::PseudoHeaders;
 use leyline::h2::error::ErrorCode;
 use leyline::h2::frame::FrameType;
+use leyline::h2::{Head, RequestBody};
 use support::*;
 use tokio::io::AsyncReadExt;
 
@@ -101,17 +103,30 @@ async fn connection_recv_window_overrun_kills_connection() {
         }
     });
 
-    let (handle, driver) = ClientConnection::start(client_io, test_config())
+    let handle = leyline::h2::start(client_io, test_config())
         .await
         .expect("handshake");
 
     let (p, h) = get_req("/");
     let req_fut = tokio::spawn({
         let handle = handle.clone();
-        async move { handle.send_request(p, h, None).await }
+        async move {
+            handle
+                .send_shared(
+                    Arc::new(Head {
+                        pseudo: p,
+                        headers: h,
+                    }),
+                    RequestBody::None,
+                    false,
+                )
+                .await
+        }
     });
 
-    let driver_result = tokio::time::timeout(Duration::from_secs(2), driver.join()).await;
+    let driver_result = tokio::time::timeout(Duration::from_secs(2), req_fut)
+        .await
+        .map(|r| r.expect("request task"));
     let err = driver_result
         .expect("driver must terminate on a connection-window overrun")
         .expect_err("driver must report an error");
@@ -126,7 +141,6 @@ async fn connection_recv_window_overrun_kills_connection() {
         other => panic!("expected Connection error, got {other:?}"),
     }
 
-    let _ = req_fut.await;
     let _ = server.await;
 }
 
@@ -172,12 +186,21 @@ async fn stream_recv_window_overrun_rsts_stream_and_survives() {
         }
     });
 
-    let (handle, driver) = ClientConnection::start(client_io, small_stream_window_config())
+    let handle = leyline::h2::start(client_io, small_stream_window_config())
         .await
         .expect("handshake");
 
     let (p, h) = get_req("/");
-    let req_result = handle.send_request(p, h, None).await;
+    let req_result = handle
+        .send_shared(
+            Arc::new(Head {
+                pseudo: p,
+                headers: h,
+            }),
+            RequestBody::None,
+            false,
+        )
+        .await;
 
     match req_result {
         Err(leyline::h2::H2Error::Stream { stream_id, code }) => {
@@ -187,13 +210,11 @@ async fn stream_recv_window_overrun_rsts_stream_and_survives() {
         other => panic!("expected a stream FlowControlError, got {other:?}"),
     }
 
-    drop(handle);
-    let driver_result = tokio::time::timeout(Duration::from_secs(2), driver.join()).await;
-    let outcome = driver_result.expect("driver must finish after graceful shutdown");
     assert!(
-        outcome.is_ok(),
-        "connection must survive a stream-level flow violation, got {outcome:?}"
+        !handle.is_closed(),
+        "connection must survive a stream-level flow violation"
     );
+    drop(handle);
 
     let _ = server.await;
 }

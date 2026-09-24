@@ -1,11 +1,7 @@
 use std::collections::VecDeque;
 use std::time::Instant;
 
-use bytes::Bytes;
-use tokio::io::{AsyncRead, AsyncWrite};
-
-use crate::h2::client::{self, DriverTask, H2Client};
-use crate::h2::config::{H2Config, PseudoOrder, SettingId};
+use crate::h2::config::{PseudoOrder, SettingId};
 use crate::h2::error::{ErrorCode, H2Error};
 use crate::h2::hpack;
 use crate::header_str::HeaderStr;
@@ -103,14 +99,6 @@ impl PeerSettings {
     }
 }
 
-#[derive(Debug)]
-pub struct H2Response {
-    pub status: u16,
-    pub headers: Vec<(HeaderStr, HeaderStr)>,
-    pub body: Vec<u8>,
-    pub trailers: Option<Vec<(HeaderStr, HeaderStr)>>,
-}
-
 #[doc(hidden)]
 #[derive(Debug, Clone)]
 pub struct RstFloodDetector {
@@ -171,53 +159,6 @@ impl RstFloodDetector {
             });
         }
         Ok(())
-    }
-}
-
-pub struct ClientConnection<T> {
-    handle: H2Client,
-    _driver: Option<DriverTask>,
-    _io_marker: std::marker::PhantomData<T>,
-}
-
-impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> ClientConnection<T> {
-    #[tracing::instrument(name = "h2.handshake", level = "debug", skip_all)]
-    pub async fn handshake(io: T, config: H2Config) -> Result<Self, H2Error> {
-        let (handle, driver) = client::start(io, config).await?;
-        Ok(Self {
-            handle,
-            _driver: Some(driver),
-            _io_marker: std::marker::PhantomData,
-        })
-    }
-
-    pub async fn start(io: T, config: H2Config) -> Result<(H2Client, DriverTask), H2Error> {
-        client::start(io, config).await
-    }
-
-    pub fn handle(&self) -> &H2Client {
-        &self.handle
-    }
-
-    pub async fn send_request(
-        &mut self,
-        pseudo: PseudoHeaders,
-        headers: Vec<HeaderPair>,
-        body: Option<Bytes>,
-    ) -> Result<H2Response, H2Error> {
-        self.handle.send_request(pseudo, headers, body).await
-    }
-
-    pub async fn send_request_with_trailers(
-        &mut self,
-        pseudo: PseudoHeaders,
-        headers: Vec<HeaderPair>,
-        body: Option<Bytes>,
-        trailers: Vec<(String, String)>,
-    ) -> Result<H2Response, H2Error> {
-        self.handle
-            .send_request_with_trailers(pseudo, headers, body, trailers)
-            .await
     }
 }
 

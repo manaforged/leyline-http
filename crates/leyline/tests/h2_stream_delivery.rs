@@ -6,9 +6,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::BytesMut;
-use leyline::h2::connection::{ClientConnection, PseudoHeaders};
+use leyline::h2::connection::PseudoHeaders;
 use leyline::h2::frame::{FrameType, PingFrame, RstStreamFrame};
-use leyline::h2::{ErrorCode, H2Config, RequestBody, ResponseBody};
+use leyline::h2::{ErrorCode, H2Client, H2Config, Head, RequestBody, ResponseBody};
 use leyline::profile::BrowserProfile;
 use support::{
     read_frame, read_preface, write_data, write_raw_headers, write_response_headers,
@@ -26,7 +26,6 @@ enum Ending {
     Trailers,
     Reset,
     Disconnect,
-    Abort,
 }
 
 async fn barrier(peer: &mut DuplexStream) {
@@ -45,6 +44,16 @@ async fn barrier(peer: &mut DuplexStream) {
             return;
         }
     }
+}
+
+async fn closed(handle: &H2Client) {
+    timeout(Duration::from_secs(3), async {
+        while !handle.is_closed() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("connection closes");
 }
 
 async fn transfer(ending: Ending) -> (usize, Option<io::Error>) {
@@ -95,19 +104,21 @@ async fn transfer(ending: Ending) -> (usize, Option<io::Error>) {
             done_rx.await.expect("consumer finished");
         }
     });
-    let (handle, driver) = ClientConnection::start(client, config)
+    let handle = leyline::h2::start(client, config)
         .await
         .expect("H2 connection");
     let response = handle
-        .send_request_ex(
-            PseudoHeaders {
-                method: "GET".into(),
-                scheme: "https".into(),
-                authority: "example.test".into(),
-                path: "/".into(),
-                protocol: None,
-            },
-            Vec::new(),
+        .send_shared(
+            Arc::new(Head {
+                pseudo: PseudoHeaders {
+                    method: "GET".into(),
+                    scheme: "https".into(),
+                    authority: "example.test".into(),
+                    path: "/".into(),
+                    protocol: None,
+                },
+                headers: Vec::new(),
+            }),
             RequestBody::None,
             true,
         )
@@ -121,21 +132,8 @@ async fn transfer(ending: Ending) -> (usize, Option<io::Error>) {
         .await
         .expect("peer completed frames")
         .expect("peer barrier");
-    let mut driver = Some(driver);
-    match ending {
-        Ending::Complete | Ending::Trailers | Ending::Disconnect => {
-            assert!(
-                timeout(
-                    Duration::from_secs(3),
-                    driver.take().expect("driver").join()
-                )
-                .await
-                .expect("driver exits with body parked")
-                .is_err()
-            );
-        }
-        Ending::Abort => driver.take().expect("driver").abort(),
-        Ending::Reset => {}
+    if !matches!(ending, Ending::Reset) {
+        closed(&handle).await;
     }
     let mut received = 0;
     let mut failure = None;
@@ -162,18 +160,11 @@ async fn transfer(ending: Ending) -> (usize, Option<io::Error>) {
             }
         }
     }
-    if matches!(ending, Ending::Reset | Ending::Abort) {
+    if matches!(ending, Ending::Reset) {
         done_tx.send(()).expect("server waiting");
     }
     server.await.expect("peer task");
-    if let Some(driver) = driver {
-        assert!(
-            timeout(Duration::from_secs(3), driver.join())
-                .await
-                .expect("driver exits")
-                .is_err()
-        );
-    }
+    closed(&handle).await;
     (received, failure)
 }
 
@@ -195,12 +186,6 @@ async fn stream_reset_survives_a_full_body_queue() {
     let (_, failure) = transfer(Ending::Reset).await;
     let failure = failure.expect("stream reset");
     assert!(failure.to_string().contains("Cancel"), "{failure}");
-}
-
-#[tokio::test]
-async fn driver_abort_is_not_successful_eof() {
-    let (_, failure) = transfer(Ending::Abort).await;
-    assert!(failure.is_some(), "aborted response returned EOF");
 }
 
 #[tokio::test]

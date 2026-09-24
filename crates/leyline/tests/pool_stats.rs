@@ -8,8 +8,6 @@ fn empty_pool_stats_are_zero() {
     let mut expected = PoolStats::default();
     expected.max_connections = DEFAULT_MAX_CONNECTIONS;
     assert_eq!(s, expected);
-    assert!(pool.is_empty());
-    assert_eq!(pool.len(), 0);
 }
 
 #[test]

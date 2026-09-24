@@ -144,7 +144,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 if let Some(actor) = self.streams.get_mut(stream_id) {
                     actor.pending_send = Some(PendingSend {
                         remaining: chunk.clone(),
-                        trailers: Vec::new(),
                     });
                     if !self.buffered_pending.contains(&stream_id) {
                         self.buffered_pending.push_back(stream_id);
@@ -277,28 +276,19 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         &mut self,
         stream_id: u32,
         body: Bytes,
-        has_trailers: bool,
-        trailers: Vec<(String, String)>,
     ) -> Result<(), H2Error> {
         let mut remaining = body;
         while !remaining.is_empty() {
             let window = self.effective_send_window(stream_id);
             if window == 0 {
-                self.park_stream(
-                    stream_id,
-                    PendingSend {
-                        remaining,
-                        trailers,
-                    },
-                );
+                self.park_stream(stream_id, PendingSend { remaining });
                 return Ok(());
             }
             let max_frame = self.peer_settings.max_frame_size as usize;
             let chunk_size = remaining.len().min(max_frame).min(window);
             let chunk = remaining.slice(0..chunk_size);
             remaining = remaining.slice(chunk_size..);
-            let is_last = remaining.is_empty();
-            let data_end_stream = is_last && !has_trailers;
+            let data_end_stream = remaining.is_empty();
 
             if let Some(actor) = self.streams.get_mut(stream_id)
                 && let Err(e) = actor.state.transition(StreamEvent::SendData {
@@ -324,43 +314,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             }
         }
 
-        if has_trailers {
-            self.write_trailers(stream_id, trailers).await?;
-        }
-        Ok(())
-    }
-
-    pub(super) async fn write_trailers(
-        &mut self,
-        stream_id: u32,
-        trailers: Vec<(String, String)>,
-    ) -> Result<(), H2Error> {
-        if let Some(actor) = self.streams.get_mut(stream_id)
-            && let Err(e) = actor.state.transition(StreamEvent::SendTrailers)
-        {
-            return Err(map_state_err(stream_id, e));
-        }
-        let mut list: Vec<(&str, &str)> = Vec::with_capacity(trailers.len());
-        for (n, v) in &trailers {
-            list.push((n, v));
-        }
-        let fragment = self.encoder.encode_header_block(&list);
-        let max_frame = self.peer_settings.max_frame_size as usize;
-        let first_len = max_frame.min(fragment.len());
-        let end_headers = first_len == fragment.len();
-        self.writer
-            .write_headers(&HeadersFrame {
-                stream_id,
-                end_stream: true,
-                end_headers,
-                priority: None,
-                fragment: Bytes::copy_from_slice(&fragment[..first_len]),
-            })
-            .await?;
-        if !end_headers {
-            self.write_continuations(stream_id, &fragment, first_len, max_frame)
-                .await?;
-        }
         Ok(())
     }
 
@@ -404,10 +357,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 continue;
             }
 
-            let has_trailers = !pending.trailers.is_empty();
-            let result = self
-                .write_body_or_park(sid, pending.remaining, has_trailers, pending.trailers)
-                .await;
+            let result = self.write_body_or_park(sid, pending.remaining).await;
             match result {
                 Ok(()) => {
                     self.writer.flush().await?;

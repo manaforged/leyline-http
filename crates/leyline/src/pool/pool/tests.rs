@@ -35,7 +35,7 @@ fn evict_idle_drops_abandoned_empty_h1_entry() {
     pool.evict_idle();
 
     assert_eq!(
-        pool.len(),
+        pool.stats().entries,
         0,
         "an empty H1 entry idle past the timeout must be reaped, not linger until LRU"
     );
@@ -49,7 +49,7 @@ fn evict_idle_keeps_empty_h1_entry_with_live_checkouts() {
     pool.evict_idle();
 
     assert_eq!(
-        pool.len(),
+        pool.stats().entries,
         1,
         "an empty H1 entry touched within the idle window (checkouts in flight) must survive"
     );

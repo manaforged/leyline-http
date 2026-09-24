@@ -1,6 +1,7 @@
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::BytesMut;
@@ -10,7 +11,8 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt, DuplexStream};
 use tokio::runtime::Runtime;
 
 use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
-use leyline::h2::connection::{ClientConnection, PseudoHeaders};
+use leyline::h2::connection::PseudoHeaders;
+use leyline::h2::{H2Client, H2ResponseEx, Head, RequestBody};
 use leyline::h2::frame::{
     DataFrame, FRAME_HEADER_LEN, FrameHeader, FrameType, HeadersFrame, SettingsFrame,
 };
@@ -277,15 +279,15 @@ fn per_request_profile(
 ) {
     let rt = Runtime::new().expect("tokio runtime");
 
-    let (handle, server_task, _driver) = rt.block_on(async {
+    let (handle, server_task) = rt.block_on(async {
         let (cio, sio) = tokio::io::duplex(1024 * 1024);
         let server = tokio::spawn(run_mock_server(sio, profile));
-        let (h, d) = ClientConnection::start(cio, test_config())
+        let h = leyline::h2::start(cio, test_config())
             .await
             .expect("handshake");
         let (p, hh) = req();
-        let _ = h.send_request(p, hh, None).await.unwrap();
-        (h, server, d)
+        send(&h, p, hh).await;
+        (h, server)
     });
 
     const N: u64 = 100;
@@ -297,7 +299,7 @@ fn per_request_profile(
                 for _ in 0..iters {
                     for _ in 0..N {
                         let (p, hh) = req();
-                        let r = handle.send_request(p, hh, None).await.unwrap();
+                        let r = send(&handle, p, hh).await;
                         black_box(r);
                     }
                 }
@@ -336,8 +338,9 @@ fn bench_concurrent_footprint(c: &mut Criterion) {
                 for _ in 0..iters {
                     let (cio, sio) = tokio::io::duplex(1024 * 1024);
                     let server = tokio::spawn(run_mock_server(sio, RespProfile::Tiny));
-                    let (handle, _driver) =
-                        ClientConnection::start(cio, test_config()).await.expect("handshake");
+                    let handle = leyline::h2::start(cio, test_config())
+                        .await
+                        .expect("handshake");
 
                     reset_peak();
                     let before_peak = PEAK_BYTES.load(Ordering::Relaxed);
@@ -347,7 +350,7 @@ fn bench_concurrent_footprint(c: &mut Criterion) {
                         let h = handle.clone();
                         let (p, hh) = req();
                         futs.push(tokio::spawn(async move {
-                            h.send_request(p, hh, None).await.unwrap()
+                            send(&h, p, hh).await
                         }));
                     }
                     let results = join_all(futs).await;
@@ -470,3 +473,14 @@ criterion_group!(
     bench_response_header_materialize
 );
 criterion_main!(alloc_benches);
+
+async fn send(
+    handle: &H2Client,
+    pseudo: PseudoHeaders,
+    headers: Vec<(std::borrow::Cow<'static, str>, std::borrow::Cow<'static, str>)>,
+) -> H2ResponseEx {
+    handle
+        .send_shared(Arc::new(Head { pseudo, headers }), RequestBody::from(None::<bytes::Bytes>), false)
+        .await
+        .expect("req ok")
+}

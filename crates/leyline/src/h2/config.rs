@@ -16,8 +16,6 @@ pub enum SettingId {
     Unknown9 = 9,
 }
 
-pub const SETTINGS_ENABLE_CONNECT_PROTOCOL: u16 = 0x8;
-
 impl SettingId {
     pub fn parse_key(s: &str) -> Option<Self> {
         match s {

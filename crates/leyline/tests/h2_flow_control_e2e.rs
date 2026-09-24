@@ -1,14 +1,15 @@
 #[path = "h2_support/mod.rs"]
 mod support;
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::BytesMut;
 use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
-use leyline::h2::connection::{ClientConnection, PseudoHeaders};
+use leyline::h2::connection::PseudoHeaders;
 use leyline::h2::frame::{DataFrame, FrameType, HeadersFrame, PingFrame};
 use leyline::h2::hpack;
-use leyline::h2::{RequestBody, ResponseBody};
+use leyline::h2::{Head, RequestBody, ResponseBody};
 use leyline::profile::BrowserProfile;
 use support::*;
 use tokio::io::AsyncWriteExt;
@@ -178,22 +179,25 @@ async fn transfer(config: H2Config, body_len: usize, bulk: bool) {
         }
     });
 
-    let (handle, _driver) = ClientConnection::start(client_io, config)
+    let handle = leyline::h2::start(client_io, config)
         .await
         .expect("handshake");
 
     let resp = tokio::time::timeout(
         Duration::from_secs(10),
-        handle.send_request(
-            PseudoHeaders {
-                method: "GET".into(),
-                scheme: "https".into(),
-                authority: "example.com".into(),
-                path: "/big".into(),
-                protocol: None,
-            },
-            vec![("user-agent".into(), "test".into())],
-            None,
+        handle.send_shared(
+            Arc::new(Head {
+                pseudo: PseudoHeaders {
+                    method: "GET".into(),
+                    scheme: "https".into(),
+                    authority: "example.com".into(),
+                    path: "/big".into(),
+                    protocol: None,
+                },
+                headers: vec![("user-agent".into(), "test".into())],
+            }),
+            RequestBody::None,
+            false,
         ),
     )
     .await
@@ -201,8 +205,11 @@ async fn transfer(config: H2Config, body_len: usize, bulk: bool) {
     .expect("request failed");
 
     assert_eq!(resp.status, 200);
-    assert_eq!(resp.body.len(), body_len);
-    assert!(resp.body.iter().all(|byte| *byte == 0xAB));
+    let ResponseBody::Buffered(body) = resp.body else {
+        panic!("buffered body")
+    };
+    assert_eq!(body.len(), body_len);
+    assert!(body.iter().all(|byte| *byte == 0xAB));
 
     server.await.expect("mock server panicked");
 }
@@ -292,19 +299,21 @@ async fn backpressure(orphaned: bool) {
             }
         }
     });
-    let (handle, driver) = ClientConnection::start(client_io, config)
+    let handle = leyline::h2::start(client_io, config)
         .await
         .expect("H2 connection");
     let response = handle
-        .send_request_ex(
-            PseudoHeaders {
-                method: "GET".into(),
-                scheme: "https".into(),
-                authority: "example.test".into(),
-                path: "/".into(),
-                protocol: None,
-            },
-            Vec::new(),
+        .send_shared(
+            Arc::new(Head {
+                pseudo: PseudoHeaders {
+                    method: "GET".into(),
+                    scheme: "https".into(),
+                    authority: "example.test".into(),
+                    path: "/".into(),
+                    protocol: None,
+                },
+                headers: Vec::new(),
+            }),
             RequestBody::None,
             true,
         )
@@ -332,11 +341,8 @@ async fn backpressure(orphaned: bool) {
     assert_eq!(received.len(), window + 1);
     assert!(received.iter().all(|byte| *byte == 0xAB));
     done_tx.send(()).expect("server waiting");
-    server.await.expect("server");
-    if orphaned {
-        timeout(Duration::from_secs(3), driver.join())
-            .await
-            .expect("driver exits")
-            .expect("driver shutdown");
-    }
+    timeout(Duration::from_secs(3), server)
+        .await
+        .expect("server exits")
+        .expect("server");
 }

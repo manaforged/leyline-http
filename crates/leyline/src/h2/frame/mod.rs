@@ -13,7 +13,6 @@ pub use data::DataFrame;
 pub use goaway::GoAwayFrame;
 pub use headers::{HeadersFrame, StreamDependency};
 pub use ping::PingFrame;
-pub use priority::PriorityFrame;
 pub use push_promise::PushPromiseFrame;
 pub use rst_stream::RstStreamFrame;
 pub use settings::SettingsFrame;
@@ -106,7 +105,7 @@ impl FrameHeader {
 pub enum Frame {
     Data(DataFrame),
     Headers(HeadersFrame),
-    Priority(PriorityFrame),
+    Priority,
     RstStream(RstStreamFrame),
     Settings(SettingsFrame),
     PushPromise(PushPromiseFrame),
@@ -118,12 +117,7 @@ pub enum Frame {
         end_headers: bool,
         fragment: Bytes,
     },
-    Unknown {
-        frame_type: u8,
-        flags: u8,
-        stream_id: u32,
-        payload: Bytes,
-    },
+    Unknown,
 }
 
 impl Frame {
@@ -132,7 +126,8 @@ impl Frame {
             Some(FrameType::Data) => Ok(Frame::Data(DataFrame::parse(header, payload)?)),
             Some(FrameType::Headers) => Ok(Frame::Headers(HeadersFrame::parse(header, payload)?)),
             Some(FrameType::Priority) => {
-                Ok(Frame::Priority(PriorityFrame::parse(header, payload)?))
+                priority::validate(&header, &payload)?;
+                Ok(Frame::Priority)
             }
             Some(FrameType::RstStream) => {
                 Ok(Frame::RstStream(RstStreamFrame::parse(header, payload)?))
@@ -156,12 +151,7 @@ impl Frame {
                     fragment: payload,
                 })
             }
-            None => Ok(Frame::Unknown {
-                frame_type: header.frame_type,
-                flags: header.flags,
-                stream_id: header.stream_id,
-                payload,
-            }),
+            None => Ok(Frame::Unknown),
         }
     }
 }

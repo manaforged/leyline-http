@@ -72,7 +72,7 @@ pub(super) async fn relay_request_body(
         .await;
 }
 
-pub(crate) async fn start<T>(io: T, config: H2Config) -> Result<(H2Client, DriverTask), H2Error>
+pub async fn start<T>(io: T, config: H2Config) -> Result<H2Client, H2Error>
 where
     T: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
@@ -177,14 +177,11 @@ where
         stalled: 0,
     };
 
-    let join = tokio::spawn(driver.run());
+    drop(tokio::spawn(driver.run()));
 
-    Ok((
-        H2Client {
-            tx,
-            closed,
-            peer_settings: snapshot,
-        },
-        DriverTask { join },
-    ))
+    Ok(H2Client {
+        tx,
+        closed,
+        peer_settings: snapshot,
+    })
 }

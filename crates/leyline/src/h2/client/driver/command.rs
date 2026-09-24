@@ -25,36 +25,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 self.pings.push_back((payload, ack_tx));
                 Ok(())
             }
-            DriverCommand::SendRequest {
-                pseudo,
-                headers,
-                body,
-                trailers,
-                response_tx,
-            } => {
-                if let Err(e) = self.admit_new_stream() {
-                    if Self::deferrable_capacity_error(&e) {
-                        self.pending.push_back(DriverCommand::SendRequest {
-                            pseudo,
-                            headers,
-                            body,
-                            trailers,
-                            response_tx,
-                        });
-                        return Ok(());
-                    }
-                    let _ = response_tx.send(Err(e));
-                    return Ok(());
-                }
-                self.start_request(
-                    &pseudo,
-                    &headers,
-                    body,
-                    trailers,
-                    ResponseSink::Buffered(response_tx),
-                )
-                .await
-            }
             DriverCommand::OpenConnect {
                 pseudo,
                 headers,
@@ -82,15 +52,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 self.start_extended_connect(&pseudo, &headers, write_rx, sink)
                     .await
             }
-            DriverCommand::SendRequestEx { head, body, sink } => {
-                let deferrable = !matches!(
-                    body,
-                    crate::h2::client::driver::protocol::DriverRequestBody::Streaming { .. }
-                );
+            DriverCommand::SendRequest { head, body, sink } => {
+                let deferrable = !matches!(body, DriverRequestBody::Streaming(_));
                 if let Err(e) = self.admit_new_stream() {
                     if Self::deferrable_capacity_error(&e) && deferrable {
                         self.pending
-                            .push_back(DriverCommand::SendRequestEx { head, body, sink });
+                            .push_back(DriverCommand::SendRequest { head, body, sink });
                         return Ok(());
                     }
                     send_err_to_sink(sink, e);
@@ -126,7 +93,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         pseudo: &PseudoHeaders,
         headers: &[crate::h2::connection::HeaderPair],
         body: Option<Bytes>,
-        trailers: Vec<(String, String)>,
         sink: ResponseSink,
     ) -> Result<(), H2Error> {
         let stream_id = self.alloc_stream_id();
@@ -142,8 +108,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         let fragment =
             encode_request_pseudos(&mut self.encoder, &pseudo_list[..pseudo_len], headers);
 
-        let has_trailers = !trailers.is_empty();
-        let end_stream_on_headers = body.is_none() && !has_trailers;
+        let end_stream_on_headers = body.is_none();
 
         let initial_send = self.peer_settings.initial_window_size as i64;
         let initial_recv = self.config.advertised_initial_window_size() as i64;
@@ -167,22 +132,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             return Ok(());
         }
 
-        let had_body = body.is_some();
         if let Some(body) = body
-            && let Err(e) = self
-                .write_body_or_park(stream_id, body, has_trailers, trailers.clone())
-                .await
+            && let Err(e) = self.write_body_or_park(stream_id, body).await
         {
             self.fail_stream(stream_id, e);
-            return Ok(());
-        }
-
-        if !had_body
-            && has_trailers
-            && let Err(e) = self.write_trailers(stream_id, trailers).await
-        {
-            self.fail_stream(stream_id, e);
-            return Ok(());
         }
 
         Ok(())
@@ -196,16 +149,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         sink: ResponseSink,
     ) -> Result<(), H2Error> {
         match body {
-            DriverRequestBody::None => {
-                self.start_request(pseudo, headers, None, Vec::new(), sink)
-                    .await
-            }
+            DriverRequestBody::None => self.start_request(pseudo, headers, None, sink).await,
             DriverRequestBody::Buffered(b) => {
                 let body = if b.is_empty() { None } else { Some(b) };
-                self.start_request(pseudo, headers, body, Vec::new(), sink)
-                    .await
+                self.start_request(pseudo, headers, body, sink).await
             }
-            DriverRequestBody::Streaming { rx, length_hint: _ } => {
+            DriverRequestBody::Streaming(rx) => {
                 let stream_id = self.alloc_stream_id();
                 let is_head = pseudo.method.eq_ignore_ascii_case("HEAD");
 
@@ -227,7 +176,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                     pending_buf: VecDeque::new(),
                     closed: false,
                     error: None,
-                    trailers: Vec::new(),
                 };
 
                 if let Err(e) = actor
@@ -285,7 +233,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             pending_buf: VecDeque::new(),
             closed: false,
             error: None,
-            trailers: Vec::new(),
         };
 
         if let Err(e) = actor

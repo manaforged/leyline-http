@@ -14,8 +14,9 @@ use tokio::sync::oneshot;
 use tokio::time::timeout;
 
 use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
-use leyline::h2::connection::{ClientConnection, PseudoHeaders};
+use leyline::h2::connection::PseudoHeaders;
 use leyline::h2::frame::{FrameHeader, FrameType, HeadersFrame, PingFrame};
+use leyline::h2::{Head, RequestBody, ResponseBody};
 
 struct Counted {
     inner: DuplexStream,
@@ -147,7 +148,7 @@ async fn eight_concurrent_requests_share_one_write() {
         server_io
     });
 
-    let (handle, _driver) = ClientConnection::start(counted, test_config())
+    let handle = leyline::h2::start(counted, test_config())
         .await
         .expect("handshake");
     greeted_rx.await.expect("greeted");
@@ -156,7 +157,14 @@ async fn eight_concurrent_requests_share_one_write() {
     let reqs: Vec<_> = (0..8)
         .map(|i| {
             let (p, h) = get_req(&format!("/{i}"));
-            handle.send_request(p, h, None)
+            handle.send_shared(
+                Arc::new(Head {
+                    pseudo: p,
+                    headers: h,
+                }),
+                RequestBody::None,
+                false,
+            )
         })
         .collect();
     let mut all = Box::pin(futures_util::future::join_all(reqs));
@@ -198,7 +206,7 @@ async fn buffered_pings_share_one_write() {
         inner: client,
         writes: Arc::clone(&writes),
     };
-    let (handle, driver) = ClientConnection::start(counted, test_config())
+    let handle = leyline::h2::start(counted, test_config())
         .await
         .expect("start client");
     timeout(Duration::from_secs(2), async {
@@ -229,7 +237,6 @@ async fn buffered_pings_share_one_write() {
         }
         assert_eq!(writes.load(Ordering::Relaxed) - before, 1);
         drop(handle);
-        driver.join().await.expect("driver");
     })
     .await
     .expect("acknowledgement deadline");
@@ -238,7 +245,7 @@ async fn buffered_pings_share_one_write() {
 #[tokio::test]
 async fn ping_ack_precedes_continuation_wait() {
     let (client, mut peer) = tokio::io::duplex(65_536);
-    let (handle, driver) = ClientConnection::start(client, test_config())
+    let handle = leyline::h2::start(client, test_config())
         .await
         .expect("start client");
     let server = async move {
@@ -290,17 +297,26 @@ async fn ping_ack_precedes_continuation_wait() {
     };
     let (pseudo, headers) = get_req("/continued");
     let (peer, response) = timeout(Duration::from_secs(2), async {
-        tokio::join!(server, handle.send_request(pseudo, headers, None))
+        tokio::join!(
+            server,
+            handle.send_shared(
+                Arc::new(Head {
+                    pseudo: pseudo,
+                    headers: headers
+                }),
+                RequestBody::None,
+                false
+            )
+        )
     })
     .await
     .expect("request deadline");
     let response = response.expect("response");
     assert_eq!(response.status, 200);
-    assert!(response.body.is_empty());
+    let ResponseBody::Buffered(body) = response.body else {
+        panic!("buffered body")
+    };
+    assert!(body.is_empty());
     drop(handle);
-    timeout(Duration::from_secs(2), driver.join())
-        .await
-        .expect("driver deadline")
-        .expect("driver");
     drop(peer);
 }

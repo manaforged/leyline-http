@@ -1,14 +1,16 @@
 #[path = "h2_support/mod.rs"]
 mod support;
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use support::*;
 use tokio::io::AsyncReadExt;
 
 use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
-use leyline::h2::connection::{ClientConnection, PseudoHeaders};
+use leyline::h2::connection::PseudoHeaders;
 use leyline::h2::frame::FrameType;
+use leyline::h2::{Head, RequestBody};
 
 fn test_config() -> H2Config {
     H2Config {
@@ -85,7 +87,7 @@ async fn cancelled_send_request_rst_streams_the_slot() {
         let _ = server_io.read(&mut sink).await;
     });
 
-    let (handle, _driver) = ClientConnection::start(client_io, test_config())
+    let handle = leyline::h2::start(client_io, test_config())
         .await
         .expect("handshake");
 
@@ -99,7 +101,16 @@ async fn cancelled_send_request_rst_streams_the_slot() {
 
     let handle_clone = handle.clone();
     let pending = tokio::spawn(async move {
-        let _ = handle_clone.send_request(pseudo, vec![], None).await;
+        let _ = handle_clone
+            .send_shared(
+                Arc::new(Head {
+                    pseudo,
+                    headers: vec![],
+                }),
+                RequestBody::None,
+                false,
+            )
+            .await;
     });
 
     tokio::time::sleep(Duration::from_millis(100)).await;

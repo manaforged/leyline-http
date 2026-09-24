@@ -6,7 +6,7 @@ use bytes::Bytes;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::PollSender;
 
-use crate::h2::connection::{H2Response, PseudoHeaders};
+use crate::h2::connection::PseudoHeaders;
 use crate::h2::error::{ErrorCode, H2Error};
 
 use super::connect_stream::{H2ConnectStream, ShutdownState};
@@ -24,64 +24,7 @@ pub struct H2Client {
 }
 
 impl H2Client {
-    pub async fn send_request(
-        &self,
-        pseudo: PseudoHeaders,
-        headers: Vec<crate::h2::connection::HeaderPair>,
-        body: Option<Bytes>,
-    ) -> Result<H2Response, H2Error> {
-        self.send_request_with_trailers(pseudo, headers, body, Vec::new())
-            .await
-    }
-
-    pub async fn send_request_with_trailers(
-        &self,
-        pseudo: PseudoHeaders,
-        headers: Vec<crate::h2::connection::HeaderPair>,
-        body: Option<Bytes>,
-        trailers: Vec<(String, String)>,
-    ) -> Result<H2Response, H2Error> {
-        if self.closed.load(Ordering::Acquire) {
-            return Err(H2Error::Connection {
-                code: ErrorCode::NoError,
-                reason: "connection closed".into(),
-            });
-        }
-
-        let (response_tx, response_rx) = oneshot::channel();
-        let cmd = DriverCommand::SendRequest {
-            pseudo,
-            headers,
-            body,
-            trailers,
-            response_tx,
-        };
-        self.tx.send(cmd).await.map_err(|_| H2Error::Connection {
-            code: ErrorCode::NoError,
-            reason: "driver task has exited".into(),
-        })?;
-
-        match response_rx.await {
-            Ok(result) => result,
-            Err(_) => Err(H2Error::Connection {
-                code: ErrorCode::NoError,
-                reason: "driver dropped response sender".into(),
-            }),
-        }
-    }
-
-    pub async fn send_request_ex(
-        &self,
-        pseudo: PseudoHeaders,
-        headers: Vec<crate::h2::connection::HeaderPair>,
-        body: RequestBody,
-        stream_response: bool,
-    ) -> Result<H2ResponseEx, H2Error> {
-        self.send_shared(Arc::new(Head { pseudo, headers }), body, stream_response)
-            .await
-    }
-
-    pub(crate) async fn send_shared(
+    pub async fn send_shared(
         &self,
         head: Arc<Head>,
         body: RequestBody,
@@ -97,16 +40,10 @@ impl H2Client {
         let body_in = match body {
             RequestBody::None => DriverRequestBody::None,
             RequestBody::Buffered(b) => DriverRequestBody::Buffered(b),
-            RequestBody::Streaming {
-                stream,
-                length_hint,
-            } => {
+            RequestBody::Streaming { stream, .. } => {
                 let (body_tx, body_rx) = mpsc::channel(STREAM_REQ_BODY_CAPACITY);
                 tokio::spawn(pump_request_body(stream, body_tx));
-                DriverRequestBody::Streaming {
-                    rx: body_rx,
-                    length_hint,
-                }
+                DriverRequestBody::Streaming(body_rx)
             }
         };
 
@@ -115,10 +52,10 @@ impl H2Client {
             let (sink, receiver) = ResponseSink::streaming(response_tx);
             (sink, Some(receiver))
         } else {
-            (ResponseSink::BufferedEx(response_tx), None)
+            (ResponseSink::Buffered(response_tx), None)
         };
 
-        let cmd = DriverCommand::SendRequestEx {
+        let cmd = DriverCommand::SendRequest {
             head,
             body: body_in,
             sink,

@@ -229,10 +229,6 @@ name = "h2_stream_state"
 required-features = ["bench-internals"]
 
 [[test]]
-name = "h2_trailers_e2e"
-required-features = ["bench-internals"]
-
-[[test]]
 name = "h2_write_batching"
 required-features = ["bench-internals"]
 

@@ -44,7 +44,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 code: ErrorCode::ProtocolError,
                 reason: "unexpected CONTINUATION".into(),
             }),
-            Frame::Priority(_) | Frame::Unknown { .. } => Ok(()),
+            Frame::Priority | Frame::Unknown => Ok(()),
         }
     }
 
@@ -162,6 +162,53 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
 
         if complete {
             self.finish_remote(stream_id).await?;
+        }
+        Ok(())
+    }
+}
+
+impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
+    pub(super) async fn maybe_top_up_conn_window(&mut self) -> Result<(), H2Error> {
+        let initial = self.config.initial_connection_window_size as i64;
+        if self.conn_recv_window < initial / 2 {
+            let increment = (initial - self.conn_recv_window).clamp(1, 0x7FFF_FFFF) as u32;
+            self.writer
+                .write_window_update(&WindowUpdateFrame {
+                    stream_id: 0,
+                    increment,
+                })
+                .await?;
+            self.conn_recv_window += increment as i64;
+        }
+        Ok(())
+    }
+
+    pub(super) async fn maybe_top_up_stream_window(
+        &mut self,
+        stream_id: u32,
+    ) -> Result<(), H2Error> {
+        let initial = self.config.advertised_initial_window_size() as i64;
+        let needs_update = self
+            .streams
+            .get(stream_id)
+            .map(|a| a.stalled.is_empty() && a.recv_window < initial / 2)
+            .unwrap_or(false);
+        if needs_update {
+            let current = self
+                .streams
+                .get(stream_id)
+                .map(|a| a.recv_window)
+                .unwrap_or(0);
+            let increment = (initial - current).clamp(1, 0x7FFF_FFFF) as u32;
+            self.writer
+                .write_window_update(&WindowUpdateFrame {
+                    stream_id,
+                    increment,
+                })
+                .await?;
+            if let Some(actor) = self.streams.get_mut(stream_id) {
+                actor.recv_window += increment as i64;
+            }
         }
         Ok(())
     }

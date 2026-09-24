@@ -9,7 +9,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::h2::codec::{FrameReader, FrameWriter};
 use crate::h2::config::H2Config;
-use crate::h2::connection::{H2Response, PeerSettings, RstFloodDetector};
+use crate::h2::connection::{PeerSettings, RstFloodDetector};
 use crate::h2::error::{ErrorCode, H2Error};
 use crate::h2::frame::*;
 use crate::h2::hpack;
@@ -27,9 +27,9 @@ mod send;
 mod stream_map;
 
 pub(super) use self::bootstrap::pump_request_body;
-pub(crate) use self::bootstrap::start;
-pub use protocol::DriverTask;
-pub(crate) use protocol::{DriverCommand, DriverRequestBody, Head, checked_window_add};
+pub use self::bootstrap::start;
+pub use protocol::Head;
+pub(crate) use protocol::{DriverCommand, DriverRequestBody, checked_window_add};
 
 const COMMAND_CHANNEL_CAPACITY: usize = 1024;
 
@@ -75,12 +75,10 @@ impl PeerSettingsSnapshot {
 
 struct PendingSend {
     remaining: Bytes,
-    trailers: Vec<(String, String)>,
 }
 
 pub(crate) enum ResponseSink {
-    Buffered(oneshot::Sender<Result<H2Response, H2Error>>),
-    BufferedEx(oneshot::Sender<Result<H2ResponseEx, H2Error>>),
+    Buffered(oneshot::Sender<Result<H2ResponseEx, H2Error>>),
     StreamingEx {
         headers_tx: Option<oneshot::Sender<Result<H2ResponseEx, H2Error>>>,
         body_tx: mpsc::Sender<io::Result<Bytes>>,
@@ -114,11 +112,6 @@ enum SendBodyInput {
         pending_buf: VecDeque<Bytes>,
         closed: bool,
         error: Option<io::Error>,
-        #[expect(
-            dead_code,
-            reason = "reserved for a future send_request_ex_with_trailers entry point; not surfaced yet"
-        )]
-        trailers: Vec<(String, String)>,
     },
 }
 
@@ -185,14 +178,6 @@ impl StreamActor {
     fn deliver_ok(&mut self) {
         match self.response_tx.take() {
             Some(ResponseSink::Buffered(tx)) => {
-                let _ = tx.send(Ok(H2Response {
-                    status: self.status,
-                    headers: std::mem::take(&mut self.resp_headers),
-                    body: std::mem::take(&mut self.body),
-                    trailers: self.trailers.take(),
-                }));
-            }
-            Some(ResponseSink::BufferedEx(tx)) => {
                 let _ = tx.send(Ok(H2ResponseEx {
                     status: self.status,
                     headers: std::mem::take(&mut self.resp_headers),
@@ -216,9 +201,6 @@ impl StreamActor {
     fn deliver_err(&mut self, err: H2Error) {
         match self.response_tx.take() {
             Some(ResponseSink::Buffered(tx)) => {
-                let _ = tx.send(Err(err));
-            }
-            Some(ResponseSink::BufferedEx(tx)) => {
                 let _ = tx.send(Err(err));
             }
             Some(ResponseSink::StreamingEx {
@@ -290,9 +272,6 @@ struct Driver<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> {
 fn send_err_to_sink(sink: ResponseSink, err: H2Error) {
     match sink {
         ResponseSink::Buffered(tx) => {
-            let _ = tx.send(Err(err));
-        }
-        ResponseSink::BufferedEx(tx) => {
             let _ = tx.send(Err(err));
         }
         ResponseSink::StreamingEx { headers_tx, .. } => {

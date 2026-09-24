@@ -37,7 +37,8 @@ fn dynamic_table_insert_and_get() {
 
 #[test]
 fn dynamic_table_eviction() {
-    let mut dt = DynamicTable::with_max_size(70);
+    let mut dt = DynamicTable::new();
+    dt.set_max_size(70);
     dt.insert(b("aa"), b("bb"));
     assert_eq!(dt.len(), 1);
 
@@ -48,7 +49,8 @@ fn dynamic_table_eviction() {
 
 #[test]
 fn dynamic_table_oversized_entry_clears() {
-    let mut dt = DynamicTable::with_max_size(32);
+    let mut dt = DynamicTable::new();
+    dt.set_max_size(32);
     dt.insert(b("x"), b("y"));
     assert_eq!(dt.len(), 0);
 }

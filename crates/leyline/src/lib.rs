@@ -61,14 +61,12 @@ pub(crate) mod core;
 #[doc(hidden)]
 pub mod h2;
 #[cfg(not(feature = "bench-internals"))]
-#[allow(dead_code, unused_imports)]
 pub(crate) mod h2;
 pub(crate) mod header_str;
 #[cfg(feature = "bench-internals")]
 #[doc(hidden)]
 pub mod pool;
 #[cfg(not(feature = "bench-internals"))]
-#[allow(dead_code, unused_imports)]
 pub(crate) mod pool;
 #[cfg(feature = "bench-internals")]
 #[doc(hidden)]

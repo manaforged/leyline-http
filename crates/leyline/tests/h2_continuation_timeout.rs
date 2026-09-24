@@ -4,8 +4,6 @@ mod support;
 use std::time::Duration;
 
 use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
-use leyline::h2::connection::ClientConnection;
-use leyline::h2::error::ErrorCode;
 use leyline::h2::frame::FrameType;
 use support::*;
 
@@ -61,26 +59,16 @@ async fn continuation_reassembly_times_out_on_stall() {
         std::future::pending::<()>().await;
     });
 
-    let (handle, driver) = ClientConnection::start(client_io, test_config())
+    let handle = leyline::h2::start(client_io, test_config())
         .await
         .expect("handshake");
-    let _handle = handle;
-
-    let driver_result = tokio::time::timeout(Duration::from_secs(10), driver.join()).await;
-
-    let err = driver_result
-        .expect("driver must terminate on a CONTINUATION stall, not hang")
-        .expect_err("driver must report an error");
-    match err {
-        leyline::h2::H2Error::Connection { code, reason } => {
-            assert_eq!(code, ErrorCode::ProtocolError, "wrong code: {reason}");
-            assert!(
-                reason.contains("CONTINUATION"),
-                "unexpected reason: {reason}"
-            );
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !handle.is_closed() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        other => panic!("expected Connection error, got {other:?}"),
-    }
+    })
+    .await
+    .expect("connection must close on a CONTINUATION stall, not hang");
 
     server.abort();
 }

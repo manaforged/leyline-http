@@ -12,9 +12,12 @@ use tokio::time::{sleep, timeout};
 use leyline::h2::ErrorCode;
 use leyline::h2::codec::FrameReader;
 use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
-use leyline::h2::connection::{ClientConnection, PseudoHeaders};
+use std::sync::Arc;
+
+use leyline::h2::connection::PseudoHeaders;
 use leyline::h2::frame::{DataFrame, Frame, FrameType, HeadersFrame, PingFrame, RstStreamFrame};
 use leyline::h2::hpack;
+use leyline::h2::{Head, RequestBody, ResponseBody};
 
 fn test_config() -> H2Config {
     H2Config {
@@ -216,7 +219,7 @@ async fn h2_extended_connect_happy_path_echoes_payload() {
         let _ = tokio::time::timeout(Duration::from_millis(100), server_io.read(&mut sink)).await;
     });
 
-    let (handle, _driver) = ClientConnection::start(client_io, test_config())
+    let handle = leyline::h2::start(client_io, test_config())
         .await
         .expect("handshake");
 
@@ -268,7 +271,7 @@ async fn h2_without_connect_protocol_falls_back() {
         }
     });
 
-    let (handle, _driver) = ClientConnection::start(client_io, test_config())
+    let handle = leyline::h2::start(client_io, test_config())
         .await
         .expect("handshake");
 
@@ -306,7 +309,8 @@ async fn dropping_connect_stream_signals_end_stream() {
         assert!(!end, "extended CONNECT must not carry END_STREAM");
         write_connect_200(&mut server_io, sid1).await;
 
-        let mut reader = FrameReader::new(&mut server_io);
+        let (server_rd, mut server_wr) = tokio::io::split(server_io);
+        let mut reader = FrameReader::new(server_rd);
         let mut saw_end_stream = false;
         let mut saw_sibling = None::<u32>;
         let deadline = tokio::time::Instant::now() + Duration::from_millis(1_000);
@@ -323,7 +327,7 @@ async fn dropping_connect_stream_signals_end_stream() {
                 }
                 Frame::Headers(h) => {
                     saw_sibling = Some(h.stream_id);
-                    write_response(reader.inner_mut(), h.stream_id, b"sibling-ok").await;
+                    write_response(&mut server_wr, h.stream_id, b"sibling-ok").await;
                 }
                 _ => {}
             }
@@ -331,7 +335,7 @@ async fn dropping_connect_stream_signals_end_stream() {
         (saw_end_stream, saw_sibling)
     });
 
-    let (handle, _driver) = ClientConnection::start(client_io, test_config())
+    let handle = leyline::h2::start(client_io, test_config())
         .await
         .expect("handshake");
 
@@ -358,11 +362,21 @@ async fn dropping_connect_stream_signals_end_stream() {
         protocol: None,
     };
     let resp = handle
-        .send_request(pseudo, vec![("user-agent".into(), "x".into())], None)
+        .send_shared(
+            Arc::new(Head {
+                pseudo,
+                headers: vec![("user-agent".into(), "x".into())],
+            }),
+            RequestBody::from(None::<Bytes>),
+            false,
+        )
         .await
         .expect("sibling request");
     assert_eq!(resp.status, 200);
-    assert_eq!(resp.body, b"sibling-ok");
+    match resp.body {
+        ResponseBody::Buffered(body) => assert_eq!(body, b"sibling-ok"),
+        ResponseBody::Streaming(_) => panic!("expected buffered body"),
+    }
 
     drop(handle);
     let (saw_end, saw_sib) = tokio::time::timeout(Duration::from_millis(1_000), server)
@@ -413,7 +427,7 @@ async fn connect_reset_survives_a_full_receive_queue() {
         ready_tx.send(()).expect("parked consumer");
         done_rx.await.expect("consumer finished");
     });
-    let (handle, driver) = ClientConnection::start(client_io, test_config())
+    let handle = leyline::h2::start(client_io, test_config())
         .await
         .expect("H2 connection");
     timeout(Duration::from_secs(3), settings_rx)
@@ -445,10 +459,11 @@ async fn connect_reset_survives_a_full_receive_queue() {
     );
     done_tx.send(()).expect("server waiting");
     server.await.expect("server task");
-    assert!(
-        timeout(Duration::from_secs(3), driver.join())
-            .await
-            .expect("driver exits")
-            .is_err()
-    );
+    timeout(Duration::from_secs(3), async {
+        while !handle.is_closed() {
+            sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("driver exits");
 }

@@ -159,8 +159,4 @@ impl<W: AsyncWrite + Unpin> FrameWriter<W> {
         self.inner.flush().await?;
         Ok(())
     }
-
-    pub fn inner_mut(&mut self) -> &mut W {
-        &mut self.inner
-    }
 }

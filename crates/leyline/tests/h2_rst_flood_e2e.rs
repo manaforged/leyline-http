@@ -1,13 +1,15 @@
 #[path = "h2_support/mod.rs"]
 mod support;
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::BytesMut;
 use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
-use leyline::h2::connection::{ClientConnection, PseudoHeaders};
+use leyline::h2::connection::PseudoHeaders;
 use leyline::h2::error::ErrorCode;
 use leyline::h2::frame::FrameType;
+use leyline::h2::{Head, RequestBody};
 use support::*;
 use tokio::io::AsyncWriteExt;
 
@@ -110,7 +112,7 @@ async fn rst_stream_flood_trips_enhance_your_calm() {
         let _ = server_io.shutdown().await;
     });
 
-    let (handle, driver) = ClientConnection::start(client_io, flood_config())
+    let handle = leyline::h2::start(client_io, flood_config())
         .await
         .expect("handshake");
 
@@ -119,14 +121,32 @@ async fn rst_stream_flood_trips_enhance_your_calm() {
         let handle = handle.clone();
         let (p, h) = get_req(&format!("/{i}"));
         tasks.push(tokio::spawn(async move {
-            let _ = handle.send_request(p, h, None).await;
+            handle
+                .send_shared(
+                    Arc::new(Head {
+                        pseudo: p,
+                        headers: h,
+                    }),
+                    RequestBody::None,
+                    false,
+                )
+                .await
         }));
     }
 
-    let driver_result = tokio::time::timeout(Duration::from_secs(3), driver.join()).await;
-    let err = driver_result
-        .expect("driver must terminate on RST flood")
-        .expect_err("driver must report error");
+    let mut results = Vec::new();
+    for t in tasks {
+        let r = tokio::time::timeout(Duration::from_secs(3), t)
+            .await
+            .expect("request must finish on RST flood")
+            .expect("request task");
+        results.push(r);
+    }
+    let err = results
+        .into_iter()
+        .filter_map(Result::err)
+        .find(|e| matches!(e, leyline::h2::H2Error::Connection { .. }))
+        .expect("an in-flight request must carry the connection error");
     match err {
         leyline::h2::H2Error::Connection { code, .. } => {
             assert_eq!(
@@ -138,8 +158,5 @@ async fn rst_stream_flood_trips_enhance_your_calm() {
         other => panic!("expected Connection error, got {other:?}"),
     }
 
-    for t in tasks {
-        let _ = t.await;
-    }
     let _ = server.await;
 }

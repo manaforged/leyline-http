@@ -1,4 +1,5 @@
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::BytesMut;
@@ -6,9 +7,9 @@ use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt, DuplexStream};
 use tokio::runtime::Runtime;
 
-use leyline::h2::H2Client;
+use leyline::h2::{H2Client, H2ResponseEx, Head, RequestBody};
 use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
-use leyline::h2::connection::{ClientConnection, PseudoHeaders};
+use leyline::h2::connection::PseudoHeaders;
 use leyline::h2::frame::{
     DataFrame, FRAME_HEADER_LEN, FrameHeader, FrameType, HeadersFrame, SettingsFrame,
 };
@@ -150,10 +151,10 @@ async fn run_mock_server(mut io: DuplexStream) {
 
 fn bench_handle_clone_warm(c: &mut Criterion) {
     let rt = Runtime::new().expect("tokio runtime");
-    let (handle, server, _driver): (H2Client, _, _) = rt.block_on(async {
+    let (handle, server): (H2Client, _) = rt.block_on(async {
         let (cio, sio) = tokio::io::duplex(1024 * 1024);
         let server = tokio::spawn(run_mock_server(sio));
-        let (h, d) = ClientConnection::start(cio, test_config())
+        let h = leyline::h2::start(cio, test_config())
             .await
             .expect("handshake");
         let (p, hh) = (
@@ -166,8 +167,8 @@ fn bench_handle_clone_warm(c: &mut Criterion) {
             },
             vec![("ua".into(), "bench".into())],
         );
-        let _ = h.send_request(p, hh, None).await.unwrap();
-        (h, server, d)
+        send(&h, p, hh).await;
+        (h, server)
     });
 
     c.bench_function("pool::checkout_hit_equivalent", |b| {
@@ -186,10 +187,10 @@ fn bench_handle_clone_warm(c: &mut Criterion) {
 
 fn bench_checkout_scale(c: &mut Criterion) {
     let rt = Runtime::new().expect("tokio runtime");
-    let (handle, server, _driver): (H2Client, _, _) = rt.block_on(async {
+    let (handle, server): (H2Client, _) = rt.block_on(async {
         let (cio, sio) = tokio::io::duplex(1024 * 1024);
         let server = tokio::spawn(run_mock_server(sio));
-        let (h, d) = ClientConnection::start(cio, test_config())
+        let h = leyline::h2::start(cio, test_config())
             .await
             .expect("handshake");
         let p = PseudoHeaders {
@@ -199,11 +200,8 @@ fn bench_checkout_scale(c: &mut Criterion) {
             path: "/warmup".into(),
             protocol: None,
         };
-        let _ = h
-            .send_request(p, vec![("ua".into(), "bench".into())], None)
-            .await
-            .unwrap();
-        (h, server, d)
+        send(&h, p, vec![("ua".into(), "bench".into())]).await;
+        (h, server)
     });
 
     let mut group = c.benchmark_group("pool::checkout_at_occupancy");
@@ -237,3 +235,14 @@ criterion_group!(
     bench_checkout_scale
 );
 criterion_main!(pool_benches);
+
+async fn send(
+    handle: &H2Client,
+    pseudo: PseudoHeaders,
+    headers: Vec<(std::borrow::Cow<'static, str>, std::borrow::Cow<'static, str>)>,
+) -> H2ResponseEx {
+    handle
+        .send_shared(Arc::new(Head { pseudo, headers }), RequestBody::from(None::<bytes::Bytes>), false)
+        .await
+        .expect("req ok")
+}

@@ -94,8 +94,4 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
         let payload = self.buf.split_to(len).freeze();
         Frame::parse(header, payload).map(Some)
     }
-
-    pub fn inner_mut(&mut self) -> &mut R {
-        &mut self.inner
-    }
 }

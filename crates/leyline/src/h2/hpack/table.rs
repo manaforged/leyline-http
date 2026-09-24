@@ -82,14 +82,6 @@ impl DynamicTable {
         }
     }
 
-    pub fn with_max_size(max_size: usize) -> Self {
-        Self {
-            entries: VecDeque::new(),
-            size: 0,
-            max_size,
-        }
-    }
-
     pub fn set_max_size(&mut self, max_size: usize) {
         self.max_size = max_size;
         self.evict();
@@ -122,14 +114,6 @@ impl DynamicTable {
 
     pub fn len(&self) -> usize {
         self.entries.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-
-    pub fn size(&self) -> usize {
-        self.size
     }
 
     fn evict(&mut self) {

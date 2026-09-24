@@ -1,12 +1,13 @@
 #[path = "h2_support/mod.rs"]
 mod support;
 
-use std::borrow::Cow;
+use std::sync::Arc;
 use std::time::Duration;
 
 use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
-use leyline::h2::connection::{ClientConnection, PseudoHeaders};
+use leyline::h2::connection::PseudoHeaders;
 use leyline::h2::frame::FrameType;
+use leyline::h2::{Head, RequestBody};
 use support::*;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -42,19 +43,17 @@ fn test_config() -> H2Config {
     }
 }
 
-type CowHeaders = Vec<(Cow<'static, str>, Cow<'static, str>)>;
-
-fn get_req(path: &str) -> (PseudoHeaders, CowHeaders) {
-    (
-        PseudoHeaders {
+fn get_req(path: &str) -> Head {
+    Head {
+        pseudo: PseudoHeaders {
             method: "GET".into(),
             scheme: "https".into(),
             authority: "example.com".into(),
             path: path.into(),
             protocol: None,
         },
-        vec![("user-agent".into(), "test".into())],
-    )
+        headers: vec![("user-agent".into(), "test".into())],
+    }
 }
 
 #[tokio::test]
@@ -78,17 +77,19 @@ async fn peer_max_frame_size_does_not_raise_our_inbound_cap() {
         let _ = server_io.shutdown().await;
     });
 
-    let (handle, driver) = ClientConnection::start(client_io, test_config())
+    let handle = leyline::h2::start(client_io, test_config())
         .await
         .expect("handshake");
 
-    let (p, h) = get_req("/");
+    let head = Arc::new(get_req("/"));
     let req_fut = tokio::spawn({
         let handle = handle.clone();
-        async move { handle.send_request(p, h, None).await }
+        async move { handle.send_shared(head, RequestBody::None, false).await }
     });
 
-    let driver_result = tokio::time::timeout(Duration::from_secs(2), driver.join()).await;
+    let driver_result = tokio::time::timeout(Duration::from_secs(2), req_fut)
+        .await
+        .map(|r| r.expect("request task"));
     let err = driver_result
         .expect("driver must terminate on an oversized frame")
         .expect_err("driver must report an error");
@@ -103,7 +104,6 @@ async fn peer_max_frame_size_does_not_raise_our_inbound_cap() {
         other => panic!("expected FrameTooLarge, got {other:?}"),
     }
 
-    let _ = req_fut.await;
     server.abort();
 }
 
@@ -150,17 +150,17 @@ async fn bad_status_fails_stream_but_not_connection() {
             let _ = server_io.read(&mut sink).await;
         });
 
-        let (handle, _driver) = ClientConnection::start(client_io, test_config())
+        let handle = leyline::h2::start(client_io, test_config())
             .await
             .expect("handshake");
 
-        let (p, h) = get_req("/a");
-        let a = handle.send_request(p, h, None).await;
+        let head = Arc::new(get_req("/a"));
+        let a = handle.send_shared(head, RequestBody::None, false).await;
         assert!(a.is_err(), "a bad :status must fail the stream, got {a:?}");
 
-        let (p, h) = get_req("/b");
+        let head = Arc::new(get_req("/b"));
         let b = handle
-            .send_request(p, h, None)
+            .send_shared(head, RequestBody::None, false)
             .await
             .expect("connection must survive a malformed-response stream error");
         assert_eq!(b.status, 200);
@@ -194,12 +194,12 @@ async fn trailers_without_end_stream_fail_the_stream() {
         let _ = server_io.read(&mut sink).await;
     });
 
-    let (handle, _driver) = ClientConnection::start(client_io, test_config())
+    let handle = leyline::h2::start(client_io, test_config())
         .await
         .expect("handshake");
 
-    let (p, h) = get_req("/");
-    let result = handle.send_request(p, h, None).await;
+    let head = Arc::new(get_req("/"));
+    let result = handle.send_shared(head, RequestBody::None, false).await;
     assert!(
         result.is_err(),
         "trailers without END_STREAM must fail the stream, got {result:?}"
@@ -232,12 +232,12 @@ async fn pseudo_header_in_trailers_fails_the_stream() {
         let _ = server_io.read(&mut sink).await;
     });
 
-    let (handle, _driver) = ClientConnection::start(client_io, test_config())
+    let handle = leyline::h2::start(client_io, test_config())
         .await
         .expect("handshake");
 
-    let (p, h) = get_req("/");
-    let result = handle.send_request(p, h, None).await;
+    let head = Arc::new(get_req("/"));
+    let result = handle.send_shared(head, RequestBody::None, false).await;
     assert!(
         result.is_err(),
         "trailers with pseudo-headers must fail the stream, got {result:?}"
@@ -286,13 +286,13 @@ async fn push_promise_field_block_is_hpack_decoded_before_reset() {
         }
     });
 
-    let (handle, _driver) = ClientConnection::start(client_io, test_config())
+    let handle = leyline::h2::start(client_io, test_config())
         .await
         .expect("handshake");
 
-    let (p, h) = get_req("/a");
+    let head = Arc::new(get_req("/a"));
     let resp = handle
-        .send_request(p, h, None)
+        .send_shared(head, RequestBody::None, false)
         .await
         .expect("push + dynamic reference must decode cleanly");
 
@@ -332,14 +332,20 @@ async fn trailers_with_end_stream_reach_the_response() {
         let _ = server_io.read(&mut sink).await;
     });
 
-    let (handle, _driver) = ClientConnection::start(client_io, test_config())
+    let handle = leyline::h2::start(client_io, test_config())
         .await
         .expect("handshake");
 
-    let (p, h) = get_req("/");
-    let resp = handle.send_request(p, h, None).await.expect("response");
+    let head = Arc::new(get_req("/"));
+    let resp = handle
+        .send_shared(head, RequestBody::None, false)
+        .await
+        .expect("response");
     assert_eq!(resp.status, 200);
-    assert_eq!(resp.body, b"body");
+    let leyline::h2::ResponseBody::Buffered(body) = resp.body else {
+        panic!("buffered body")
+    };
+    assert_eq!(body, b"body");
     let trailers: Vec<(&str, &str)> = resp
         .trailers
         .as_deref()
@@ -384,11 +390,14 @@ async fn goaway_no_error_refuses_streams_above_last_id() {
         let _ = server_io.read(&mut sink).await;
     });
 
-    let (handle, _driver) = ClientConnection::start(client_io, test_config())
+    let handle = leyline::h2::start(client_io, test_config())
         .await
         .expect("handshake");
-    let (p, h) = get_req("/");
-    let err = handle.send_request(p, h, None).await.expect_err("refused");
+    let head = Arc::new(get_req("/"));
+    let err = handle
+        .send_shared(head, RequestBody::None, false)
+        .await
+        .expect_err("refused");
     assert!(
         matches!(
             err,
@@ -425,12 +434,12 @@ async fn slow_streaming_consumer_is_not_cancelled() {
         }
     });
 
-    let (handle, _driver) = ClientConnection::start(client_io, test_config())
+    let handle = leyline::h2::start(client_io, test_config())
         .await
         .expect("handshake");
-    let (p, h) = get_req("/");
+    let head = Arc::new(get_req("/"));
     let resp = handle
-        .send_request_ex(p, h, leyline::h2::RequestBody::None, true)
+        .send_shared(head, RequestBody::None, true)
         .await
         .expect("head");
     let leyline::h2::ResponseBody::Streaming(mut rx) = resp.body else {
@@ -468,11 +477,11 @@ async fn early_end_stream_resets_open_request_body() {
         }
     });
 
-    let (handle, _driver) = ClientConnection::start(client_io, test_config())
+    let handle = leyline::h2::start(client_io, test_config())
         .await
         .expect("handshake");
-    let (mut p, h) = get_req("/");
-    p.method = "POST".into();
+    let mut head = get_req("/");
+    head.pseudo.method = "POST".into();
     let (body_tx, body_rx) = tokio::sync::mpsc::channel::<std::io::Result<bytes::Bytes>>(4);
     body_tx
         .send(Ok(bytes::Bytes::from_static(b"first")))
@@ -482,10 +491,9 @@ async fn early_end_stream_resets_open_request_body() {
         rx.recv().await.map(|item| (item, rx))
     });
     let resp = handle
-        .send_request_ex(
-            p,
-            h,
-            leyline::h2::RequestBody::Streaming {
+        .send_shared(
+            Arc::new(head),
+            RequestBody::Streaming {
                 stream: Box::pin(stream),
                 length_hint: None,
             },

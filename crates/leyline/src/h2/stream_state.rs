@@ -3,9 +3,7 @@ use crate::h2::error::ErrorCode;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClosedReason {
     EndStream,
-    RstLocal(ErrorCode),
     RstRemote(ErrorCode),
-    Error,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,8 +19,6 @@ pub enum StreamState {
 pub enum StreamEvent {
     SendHeaders { end_stream: bool },
     SendData { end_stream: bool },
-    SendTrailers,
-    SendRstStream(ErrorCode),
     RecvHeaders { end_stream: bool },
     RecvData { end_stream: bool },
     RecvTrailers,
@@ -48,14 +44,6 @@ impl StreamState {
     pub fn is_closed(&self) -> bool {
         matches!(self, StreamState::Closed { .. })
     }
-
-    pub fn can_send_data(&self) -> bool {
-        matches!(self, StreamState::Open | StreamState::HalfClosedRemote)
-    }
-
-    pub fn can_recv_data(&self) -> bool {
-        matches!(self, StreamState::Open | StreamState::HalfClosedLocal)
-    }
 }
 
 fn state_name(state: StreamState) -> &'static str {
@@ -72,8 +60,6 @@ fn event_name(event: StreamEvent) -> &'static str {
     match event {
         StreamEvent::SendHeaders { .. } => "SendHeaders",
         StreamEvent::SendData { .. } => "SendData",
-        StreamEvent::SendTrailers => "SendTrailers",
-        StreamEvent::SendRstStream(_) => "SendRstStream",
         StreamEvent::RecvHeaders { .. } => "RecvHeaders",
         StreamEvent::RecvData { .. } => "RecvData",
         StreamEvent::RecvTrailers => "RecvTrailers",
@@ -93,13 +79,8 @@ fn next_state(from: StreamState, event: StreamEvent) -> Result<StreamState, Stre
     use StreamState as S;
 
     match (from, event) {
-        (S::Idle, E::SendRstStream(_)) | (S::Idle, E::RecvRstStream(_)) => {
+        (S::Idle, E::RecvRstStream(_)) => {
             return Err(invalid(from, event));
-        }
-        (_, E::SendRstStream(code)) => {
-            return Ok(S::Closed {
-                reason: ClosedReason::RstLocal(code),
-            });
         }
         (_, E::RecvRstStream(code)) => {
             return Ok(S::Closed {
@@ -118,7 +99,6 @@ fn next_state(from: StreamState, event: StreamEvent) -> Result<StreamState, Stre
         S::Open => match event {
             E::SendData { end_stream: false } => Ok(S::Open),
             E::SendData { end_stream: true } => Ok(S::HalfClosedLocal),
-            E::SendTrailers => Ok(S::HalfClosedLocal),
             E::RecvHeaders { end_stream: false } => Ok(S::Open),
             E::RecvHeaders { end_stream: true } => Ok(S::HalfClosedRemote),
             E::RecvData { end_stream: false } => Ok(S::Open),
@@ -143,9 +123,6 @@ fn next_state(from: StreamState, event: StreamEvent) -> Result<StreamState, Stre
         S::HalfClosedRemote => match event {
             E::SendData { end_stream: false } => Ok(S::HalfClosedRemote),
             E::SendData { end_stream: true } => Ok(S::Closed {
-                reason: ClosedReason::EndStream,
-            }),
-            E::SendTrailers => Ok(S::Closed {
                 reason: ClosedReason::EndStream,
             }),
             _ => Err(invalid(from, event)),

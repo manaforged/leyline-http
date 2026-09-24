@@ -22,6 +22,7 @@ impl Encoder {
         self.pending_size_update = Some(size);
     }
 
+    #[cfg(any(test, feature = "bench-internals"))]
     pub fn encode_header_block(&mut self, headers: &[(&str, &str)]) -> Vec<u8> {
         self.encode_header_block_iter(headers.iter().copied(), headers.len())
     }

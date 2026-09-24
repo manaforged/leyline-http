@@ -1,4 +1,5 @@
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::BytesMut;
@@ -7,9 +8,9 @@ use futures_util::future::join_all;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt, DuplexStream};
 use tokio::runtime::Runtime;
 
-use leyline::h2::H2Client;
+use leyline::h2::{H2Client, H2ResponseEx, Head, RequestBody};
 use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
-use leyline::h2::connection::{ClientConnection, PseudoHeaders};
+use leyline::h2::connection::PseudoHeaders;
 use leyline::h2::frame::{
     DataFrame, FRAME_HEADER_LEN, FrameHeader, FrameType, HeadersFrame, SettingsFrame,
 };
@@ -150,17 +151,13 @@ fn req() -> (
     )
 }
 
-async fn build_client() -> (
-    H2Client,
-    tokio::task::JoinHandle<()>,
-    leyline::h2::DriverTask,
-) {
+async fn build_client() -> (H2Client, tokio::task::JoinHandle<()>) {
     let (client_io, server_io) = tokio::io::duplex(1024 * 1024);
     let server = tokio::spawn(run_mock_server(server_io));
-    let (handle, driver) = ClientConnection::start(client_io, test_config())
+    let handle = leyline::h2::start(client_io, test_config())
         .await
         .expect("handshake");
-    (handle, server, driver)
+    (handle, server)
 }
 
 fn bench_serial_1k(c: &mut Criterion) {
@@ -176,11 +173,11 @@ fn bench_serial_1k(c: &mut Criterion) {
             rt.block_on(async {
                 let mut total = Duration::ZERO;
                 for _ in 0..iters {
-                    let (handle, server, _driver) = build_client().await;
+                    let (handle, server) = build_client().await;
                     let start = std::time::Instant::now();
                     for _ in 0..N {
                         let (p, h) = req();
-                        let resp = handle.send_request(p, h, None).await.expect("req ok");
+                        let resp = send(&handle, p, h).await;
                         black_box(resp);
                     }
                     total += start.elapsed();
@@ -208,14 +205,14 @@ fn bench_concurrent_100(c: &mut Criterion) {
             rt.block_on(async {
                 let mut total = Duration::ZERO;
                 for _ in 0..iters {
-                    let (handle, server, _driver) = build_client().await;
+                    let (handle, server) = build_client().await;
                     let start = std::time::Instant::now();
                     let mut futs = Vec::with_capacity(N);
                     for _ in 0..N {
                         let h = handle.clone();
                         let (p, hh) = req();
                         futs.push(tokio::spawn(async move {
-                            h.send_request(p, hh, None).await.expect("req ok")
+                            send(&h, p, hh).await
                         }));
                     }
                     let results = join_all(futs).await;
@@ -236,7 +233,7 @@ fn bench_concurrent_100(c: &mut Criterion) {
 
 fn bench_handle_clone(c: &mut Criterion) {
     let rt = Runtime::new().expect("tokio runtime");
-    let (handle, server, _driver) = rt.block_on(build_client());
+    let (handle, server) = rt.block_on(build_client());
     c.bench_function("multiplex::handle_clone", |b| {
         b.iter(|| {
             let c = handle.clone();
@@ -257,3 +254,14 @@ criterion_group!(
     bench_concurrent_100
 );
 criterion_main!(multiplex_benches);
+
+async fn send(
+    handle: &H2Client,
+    pseudo: PseudoHeaders,
+    headers: Vec<(std::borrow::Cow<'static, str>, std::borrow::Cow<'static, str>)>,
+) -> H2ResponseEx {
+    handle
+        .send_shared(Arc::new(Head { pseudo, headers }), RequestBody::from(None::<bytes::Bytes>), false)
+        .await
+        .expect("req ok")
+}

@@ -1,13 +1,15 @@
 #[path = "h2_support/mod.rs"]
 mod support;
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::BytesMut;
 use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
-use leyline::h2::connection::{ClientConnection, PseudoHeaders};
+use leyline::h2::connection::PseudoHeaders;
 use leyline::h2::frame::{DataFrame, FrameType, HeadersFrame};
 use leyline::h2::hpack;
+use leyline::h2::{Head, RequestBody};
 use support::*;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
@@ -113,22 +115,25 @@ async fn early_hints_103_is_skipped_final_status_wins() {
         let _ = server_io.shutdown().await;
     });
 
-    let (handle, _driver) = ClientConnection::start(client_io, config())
+    let handle = leyline::h2::start(client_io, config())
         .await
         .expect("handshake");
 
     let resp = tokio::time::timeout(
         Duration::from_secs(5),
-        handle.send_request(
-            PseudoHeaders {
-                method: "GET".into(),
-                scheme: "https".into(),
-                authority: "example.com".into(),
-                path: "/".into(),
-                protocol: None,
-            },
-            vec![],
-            None,
+        handle.send_shared(
+            Arc::new(Head {
+                pseudo: PseudoHeaders {
+                    method: "GET".into(),
+                    scheme: "https".into(),
+                    authority: "example.com".into(),
+                    path: "/".into(),
+                    protocol: None,
+                },
+                headers: vec![],
+            }),
+            RequestBody::None,
+            false,
         ),
     )
     .await
@@ -139,7 +144,10 @@ async fn early_hints_103_is_skipped_final_status_wins() {
         resp.status, 200,
         "1xx Early Hints must be skipped, not returned as the final status"
     );
-    assert_eq!(resp.body, b"<html>ok</html>");
+    let leyline::h2::ResponseBody::Buffered(body) = resp.body else {
+        panic!("buffered body")
+    };
+    assert_eq!(body, b"<html>ok</html>");
     assert!(
         resp.headers
             .iter()

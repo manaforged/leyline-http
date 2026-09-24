@@ -1,14 +1,15 @@
 #[path = "h2_support/mod.rs"]
 mod support;
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
 use futures_util::StreamExt;
 use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
-use leyline::h2::connection::{ClientConnection, PseudoHeaders};
+use leyline::h2::connection::PseudoHeaders;
 use leyline::h2::frame::FrameType;
-use leyline::h2::{RequestBody, ResponseBody};
+use leyline::h2::{Head, RequestBody, ResponseBody};
 use support::*;
 use tokio::io::AsyncWriteExt;
 use tokio::time::{sleep, timeout};
@@ -109,7 +110,7 @@ async fn streaming_upload_completes_after_last_handle_drops() {
         let _ = server_io.shutdown().await;
     });
 
-    let (handle, driver) = ClientConnection::start(client_io, config())
+    let handle = leyline::h2::start(client_io, config())
         .await
         .expect("handshake");
 
@@ -122,15 +123,17 @@ async fn streaming_upload_completes_after_last_handle_drops() {
     });
 
     let resp = handle
-        .send_request_ex(
-            PseudoHeaders {
-                method: "POST".into(),
-                scheme: "https".into(),
-                authority: "example.com".into(),
-                path: "/upload".into(),
-                protocol: None,
-            },
-            vec![("user-agent".into(), "test".into())],
+        .send_shared(
+            Arc::new(Head {
+                pseudo: PseudoHeaders {
+                    method: "POST".into(),
+                    scheme: "https".into(),
+                    authority: "example.com".into(),
+                    path: "/upload".into(),
+                    protocol: None,
+                },
+                headers: vec![("user-agent".into(), "test".into())],
+            }),
             RequestBody::Streaming {
                 stream: Box::pin(stream),
                 length_hint: None,
@@ -156,11 +159,10 @@ async fn streaming_upload_completes_after_last_handle_drops() {
     }
     assert_eq!(got, b"done");
 
-    tokio::time::timeout(Duration::from_secs(5), driver.join())
+    tokio::time::timeout(Duration::from_secs(5), server)
         .await
-        .expect("driver hung")
-        .expect("driver errored");
-    server.await.expect("mock server panicked");
+        .expect("mock server hung")
+        .expect("mock server panicked");
 }
 
 #[tokio::test]
@@ -205,19 +207,21 @@ async fn abandoned_response_is_reset_before_shutdown() {
             }
         }
     });
-    let (handle, driver) = ClientConnection::start(client, config())
+    let handle = leyline::h2::start(client, config())
         .await
         .expect("connection");
     let response = handle
-        .send_request_ex(
-            PseudoHeaders {
-                method: "GET".into(),
-                scheme: "https".into(),
-                authority: "example.test".into(),
-                path: "/".into(),
-                protocol: None,
-            },
-            Vec::new(),
+        .send_shared(
+            Arc::new(Head {
+                pseudo: PseudoHeaders {
+                    method: "GET".into(),
+                    scheme: "https".into(),
+                    authority: "example.test".into(),
+                    path: "/".into(),
+                    protocol: None,
+                },
+                headers: Vec::new(),
+            }),
             RequestBody::None,
             true,
         )
@@ -226,9 +230,8 @@ async fn abandoned_response_is_reset_before_shutdown() {
     assert_eq!(response.status, 200);
     drop(handle);
     drop(response);
-    timeout(Duration::from_secs(3), driver.join())
+    timeout(Duration::from_secs(3), server)
         .await
-        .expect("driver exits after cancellation")
-        .expect("driver shutdown");
-    server.await.expect("peer task");
+        .expect("peer sees cancellation and shutdown")
+        .expect("peer task");
 }

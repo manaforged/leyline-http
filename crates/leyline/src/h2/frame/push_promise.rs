@@ -6,8 +6,6 @@ use crate::h2::error::ErrorCode;
 
 #[derive(Debug)]
 pub struct PushPromiseFrame {
-    pub stream_id: u32,
-    pub end_headers: bool,
     pub promised_stream_id: u32,
     pub fragment: Bytes,
 }
@@ -21,7 +19,6 @@ impl PushPromiseFrame {
             });
         }
 
-        let end_headers = header.flags & 0x4 != 0;
         let padded = header.flags & 0x8 != 0;
 
         let mut offset = 0;
@@ -59,8 +56,6 @@ impl PushPromiseFrame {
         let fragment = payload.slice(offset..end);
 
         Ok(Self {
-            stream_id: header.stream_id,
-            end_headers,
             promised_stream_id,
             fragment,
         })

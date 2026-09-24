@@ -1,13 +1,15 @@
 #[path = "h2_support/mod.rs"]
 mod support;
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::BytesMut;
 use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
-use leyline::h2::connection::{ClientConnection, PseudoHeaders};
+use leyline::h2::connection::PseudoHeaders;
 use leyline::h2::error::ErrorCode;
 use leyline::h2::frame::FrameType;
+use leyline::h2::{Head, RequestBody};
 use support::*;
 use tokio::io::AsyncReadExt;
 
@@ -90,17 +92,30 @@ async fn connection_window_update_overflow_kills_connection() {
         }
     });
 
-    let (handle, driver) = ClientConnection::start(client_io, test_config())
+    let handle = leyline::h2::start(client_io, test_config())
         .await
         .expect("handshake");
 
     let (p, h) = get_req("/");
     let req_fut = tokio::spawn({
         let handle = handle.clone();
-        async move { handle.send_request(p, h, None).await }
+        async move {
+            handle
+                .send_shared(
+                    Arc::new(Head {
+                        pseudo: p,
+                        headers: h,
+                    }),
+                    RequestBody::None,
+                    false,
+                )
+                .await
+        }
     });
 
-    let driver_result = tokio::time::timeout(Duration::from_secs(2), driver.join()).await;
+    let driver_result = tokio::time::timeout(Duration::from_secs(2), req_fut)
+        .await
+        .map(|r| r.expect("request task"));
 
     let err = driver_result
         .expect("driver must terminate on overflow")
@@ -112,7 +127,6 @@ async fn connection_window_update_overflow_kills_connection() {
         other => panic!("expected Connection error, got {other:?}"),
     }
 
-    let _ = req_fut.await;
     let _ = server.await;
 }
 
@@ -156,17 +170,30 @@ async fn settings_initial_window_overflow_kills_connection() {
         let _ = server_io.shutdown().await;
     });
 
-    let (handle, driver) = ClientConnection::start(client_io, test_config())
+    let handle = leyline::h2::start(client_io, test_config())
         .await
         .expect("handshake");
 
     let (p, h) = get_req("/");
     let req_fut = tokio::spawn({
         let handle = handle.clone();
-        async move { handle.send_request(p, h, None).await }
+        async move {
+            handle
+                .send_shared(
+                    Arc::new(Head {
+                        pseudo: p,
+                        headers: h,
+                    }),
+                    RequestBody::None,
+                    false,
+                )
+                .await
+        }
     });
 
-    let driver_result = tokio::time::timeout(Duration::from_secs(2), driver.join()).await;
+    let driver_result = tokio::time::timeout(Duration::from_secs(2), req_fut)
+        .await
+        .map(|r| r.expect("request task"));
     let err = driver_result
         .expect("driver must terminate on SETTINGS overflow")
         .expect_err("driver must report error");
@@ -181,6 +208,5 @@ async fn settings_initial_window_overflow_kills_connection() {
         other => panic!("expected Connection error, got {other:?}"),
     }
 
-    let _ = req_fut.await;
     let _ = server.await;
 }

@@ -7,5 +7,4 @@ pub use connect_stream::H2ConnectStream;
 pub use handle::H2Client;
 pub use types::{H2ResponseEx, RequestBody, ResponseBody};
 
-pub use driver::DriverTask;
-pub(crate) use driver::{Head, start};
+pub use driver::{Head, start};

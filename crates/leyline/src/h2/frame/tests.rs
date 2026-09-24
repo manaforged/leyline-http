@@ -38,11 +38,5 @@ fn unknown_frame_types_parse() {
     };
     let payload = Bytes::from_static(&[0, 0, 0, 0]);
     let frame = Frame::parse(header, payload).unwrap();
-    assert!(matches!(
-        frame,
-        Frame::Unknown {
-            frame_type: 0xFF,
-            ..
-        }
-    ));
+    assert!(matches!(frame, Frame::Unknown));
 }

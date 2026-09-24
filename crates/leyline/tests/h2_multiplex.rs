@@ -1,6 +1,7 @@
 #[path = "h2_support/mod.rs"]
 mod support;
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::BytesMut;
@@ -11,10 +12,10 @@ use tokio::sync::oneshot;
 use tokio::time::timeout;
 
 use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
-use leyline::h2::connection::{ClientConnection, PseudoHeaders};
+use leyline::h2::connection::PseudoHeaders;
 use leyline::h2::error::{ErrorCode, H2Error};
 use leyline::h2::frame::{FrameType, GoAwayFrame};
-use leyline::h2::{RequestBody, ResponseBody};
+use leyline::h2::{Head, RequestBody, ResponseBody};
 
 fn test_config() -> H2Config {
     H2Config {
@@ -46,6 +47,23 @@ fn test_config() -> H2Config {
         settings_flood_window: std::time::Duration::from_secs(10),
         header_block_reassembly_timeout: std::time::Duration::from_secs(10),
     }
+}
+
+fn head(
+    pseudo: PseudoHeaders,
+    headers: Vec<(
+        std::borrow::Cow<'static, str>,
+        std::borrow::Cow<'static, str>,
+    )>,
+) -> Arc<Head> {
+    Arc::new(Head { pseudo, headers })
+}
+
+fn buffered(body: ResponseBody) -> Vec<u8> {
+    let ResponseBody::Buffered(body) = body else {
+        panic!("buffered body")
+    };
+    body
 }
 
 #[allow(clippy::type_complexity)]
@@ -98,7 +116,7 @@ async fn two_concurrent_requests_respond_out_of_order() {
         let _ = server_io.read(&mut sink).await;
     });
 
-    let (handle, _driver) = ClientConnection::start(client_io, test_config())
+    let handle = leyline::h2::start(client_io, test_config())
         .await
         .expect("handshake");
 
@@ -107,16 +125,24 @@ async fn two_concurrent_requests_respond_out_of_order() {
 
     let h1_clone = handle.clone();
     let h2_clone = handle.clone();
-    let fut_a = tokio::spawn(async move { h1_clone.send_request(p1, h1, None).await });
-    let fut_b = tokio::spawn(async move { h2_clone.send_request(p2, h2, None).await });
+    let fut_a = tokio::spawn(async move {
+        h1_clone
+            .send_shared(head(p1, h1), RequestBody::None, false)
+            .await
+    });
+    let fut_b = tokio::spawn(async move {
+        h2_clone
+            .send_shared(head(p2, h2), RequestBody::None, false)
+            .await
+    });
 
     let (a, b) = tokio::join!(fut_a, fut_b);
     let a = a.unwrap().expect("req a");
     let b = b.unwrap().expect("req b");
     assert_eq!(a.status, 200);
     assert_eq!(b.status, 200);
-    assert_eq!(a.body, b"first-response");
-    assert_eq!(b.body, b"second-response");
+    assert_eq!(buffered(a.body), b"first-response");
+    assert_eq!(buffered(b.body), b"second-response");
 
     drop(handle);
     let _ = server.await;
@@ -196,7 +222,7 @@ async fn parked_stream_does_not_block_others() {
         let _ = server_io.read(&mut sink).await;
     });
 
-    let (handle, _driver) = ClientConnection::start(client_io, test_config())
+    let handle = leyline::h2::start(client_io, test_config())
         .await
         .expect("handshake");
 
@@ -209,24 +235,30 @@ async fn parked_stream_does_not_block_others() {
     let ha = handle.clone();
     let hb = handle.clone();
     let fut_a = tokio::spawn(async move {
-        ha.send_request(
-            PseudoHeaders {
-                method: "POST".into(),
-                ..p_a
-            },
-            h_a,
-            Some(body_a),
+        ha.send_shared(
+            head(
+                PseudoHeaders {
+                    method: "POST".into(),
+                    ..p_a
+                },
+                h_a,
+            ),
+            RequestBody::from(Some(body_a)),
+            false,
         )
         .await
     });
     let fut_b = tokio::spawn(async move {
-        hb.send_request(
-            PseudoHeaders {
-                method: "POST".into(),
-                ..p_b
-            },
-            h_b,
-            Some(body_b),
+        hb.send_shared(
+            head(
+                PseudoHeaders {
+                    method: "POST".into(),
+                    ..p_b
+                },
+                h_b,
+            ),
+            RequestBody::from(Some(body_b)),
+            false,
         )
         .await
     });
@@ -236,14 +268,14 @@ async fn parked_stream_does_not_block_others() {
         .expect("B timeout");
     let b = b_result.unwrap().expect("req B");
     assert_eq!(b.status, 200);
-    assert_eq!(b.body, b"bbb");
+    assert_eq!(buffered(b.body), b"bbb");
 
     let a_result = tokio::time::timeout(Duration::from_secs(3), fut_a)
         .await
         .expect("A timeout");
     let a = a_result.unwrap().expect("req A");
     assert_eq!(a.status, 200);
-    assert_eq!(a.body, b"aaa");
+    assert_eq!(buffered(a.body), b"aaa");
 
     drop(handle);
     let _ = server.await;
@@ -265,7 +297,7 @@ async fn driver_shuts_down_on_last_handle_drop() {
         assert_eq!(g.error_code as u32, 0, "NO_ERROR goaway expected");
     });
 
-    let (handle, driver) = ClientConnection::start(client_io, test_config())
+    let handle = leyline::h2::start(client_io, test_config())
         .await
         .expect("handshake");
 
@@ -275,12 +307,10 @@ async fn driver_shuts_down_on_last_handle_drop() {
     drop(clone1);
     drop(clone2);
 
-    tokio::time::timeout(Duration::from_secs(2), driver.join())
+    tokio::time::timeout(Duration::from_secs(2), server)
         .await
-        .expect("driver join timeout")
-        .expect("driver error");
-
-    let _ = tokio::time::timeout(Duration::from_secs(1), server).await;
+        .expect("goaway timeout")
+        .expect("server");
 }
 
 #[tokio::test]
@@ -299,7 +329,7 @@ async fn reader_eof_fails_pending_requests() {
         drop(server_io);
     });
 
-    let (handle, _driver) = ClientConnection::start(client_io, test_config())
+    let handle = leyline::h2::start(client_io, test_config())
         .await
         .expect("handshake");
 
@@ -308,8 +338,10 @@ async fn reader_eof_fails_pending_requests() {
 
     let ha = handle.clone();
     let hb = handle.clone();
-    let fut_a = tokio::spawn(async move { ha.send_request(p1, h1, None).await });
-    let fut_b = tokio::spawn(async move { hb.send_request(p2, h2, None).await });
+    let fut_a =
+        tokio::spawn(async move { ha.send_shared(head(p1, h1), RequestBody::None, false).await });
+    let fut_b =
+        tokio::spawn(async move { hb.send_shared(head(p2, h2), RequestBody::None, false).await });
 
     let (a, b) = tokio::time::timeout(Duration::from_secs(3), async { tokio::join!(fut_a, fut_b) })
         .await
@@ -350,15 +382,14 @@ async fn zero_stream_limit_waits_for_peer_update() {
             write_response(&mut server_io, request.stream_id, b"resumed").await;
             finished.await.expect("client assertions complete");
         });
-        let (handle, _driver) = ClientConnection::start(client_io, test_config())
+        let handle = leyline::h2::start(client_io, test_config())
             .await
             .expect("response or connection");
         greeting.await.expect("peer settings applied");
         let (pseudo, headers) = get_req("/blocked");
         let error = handle
-            .send_request_ex(
-                pseudo,
-                headers,
+            .send_shared(
+                head(pseudo, headers),
                 RequestBody::Streaming {
                     stream: Box::pin(empty()),
                     length_hint: None,
@@ -377,11 +408,11 @@ async fn zero_stream_limit_waits_for_peer_update() {
         release.send(()).expect("release server");
         let (pseudo, headers) = get_req("/resumed");
         let response = handle
-            .send_request(pseudo, headers, None)
+            .send_shared(head(pseudo, headers), RequestBody::None, false)
             .await
             .expect("response");
         assert_eq!(response.status, 200);
-        assert_eq!(response.body, b"resumed");
+        assert_eq!(buffered(response.body), b"resumed");
         done.send(()).expect("complete server");
         server.await.expect("server task");
     })
@@ -422,12 +453,12 @@ async fn closed_stream_with_unread_chunks_releases_peer_capacity() {
             }
             finished.await.expect("client assertions complete");
         });
-        let (handle, _driver) = ClientConnection::start(client_io, test_config())
+        let handle = leyline::h2::start(client_io, test_config())
             .await
             .expect("response or connection");
         let (pseudo, headers) = get_req("/stream");
         let response = handle
-            .send_request_ex(pseudo, headers, RequestBody::None, true)
+            .send_shared(head(pseudo, headers), RequestBody::None, true)
             .await
             .expect("response or connection");
         assert_eq!(response.status, 200);
@@ -436,9 +467,8 @@ async fn closed_stream_with_unread_chunks_releases_peer_capacity() {
         };
         let (pseudo, headers) = get_req("/blocked");
         let error = handle
-            .send_request_ex(
-                pseudo,
-                headers,
+            .send_shared(
+                head(pseudo, headers),
                 RequestBody::Streaming {
                     stream: Box::pin(empty()),
                     length_hint: None,
@@ -457,11 +487,11 @@ async fn closed_stream_with_unread_chunks_releases_peer_capacity() {
         release.send(()).expect("release server");
         let (pseudo, headers) = get_req("/next");
         let response = handle
-            .send_request(pseudo, headers, None)
+            .send_shared(head(pseudo, headers), RequestBody::None, false)
             .await
             .expect("response");
         assert_eq!(response.status, 200);
-        assert_eq!(response.body, b"next");
+        assert_eq!(buffered(response.body), b"next");
         let mut received = Vec::new();
         while let Some(chunk) = body.recv().await {
             received.extend_from_slice(&chunk.expect("response chunk"));
@@ -496,11 +526,11 @@ async fn queued_request_uses_acknowledged_settings() {
         let mut closed = [0; 9];
         let _ = peer.read(&mut closed).await;
     });
-    let (handle, driver) = ClientConnection::start(client, test_config())
+    let handle = leyline::h2::start(client, test_config())
         .await
         .expect("start client");
     let (pseudo, headers) = get_req("/");
-    let mut request = Box::pin(handle.send_request(pseudo, headers, None));
+    let mut request = Box::pin(handle.send_shared(head(pseudo, headers), RequestBody::None, false));
     assert!(
         timeout(Duration::from_millis(10), request.as_mut())
             .await
@@ -512,15 +542,11 @@ async fn queued_request_uses_acknowledged_settings() {
         .expect("response deadline")
         .expect("response");
     assert_eq!(response.status, 200);
-    assert_eq!(response.body, b"configured");
+    assert_eq!(buffered(response.body), b"configured");
     drop(request);
     drop(handle);
     timeout(Duration::from_secs(2), server)
         .await
         .expect("server deadline")
         .expect("server");
-    timeout(Duration::from_secs(2), driver.join())
-        .await
-        .expect("driver deadline")
-        .expect("driver");
 }
