@@ -101,9 +101,8 @@ are gated, and the update cadence.
 use leyline::Browser;
 use leyline::profile::ProfileRegistry;
 
-let browser = Browser::Chrome152;
 let profile = ProfileRegistry::global()
-    .get(browser.family(), browser.version())
+    .get("chrome", 152)
     .expect("chrome 152 is bundled");
 assert_eq!(profile.meta.version, 152);
 

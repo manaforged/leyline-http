@@ -48,8 +48,8 @@ impl Browser {
     }
 
     #[must_use]
-    pub fn family(&self) -> &'static str {
-        self.entry().key
+    pub fn family(&self) -> Family {
+        self.entry().family
     }
 
     #[must_use]

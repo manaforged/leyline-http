@@ -51,12 +51,12 @@ use leyline::Browser;
 use leyline::Family;
 
 let latest = Browser::latest(Family::Firefox);
-assert_eq!(latest.family(), "firefox");
-assert_eq!(Browser::default().family(), "chrome");
+assert_eq!(latest.family(), Family::Firefox);
+assert_eq!(Browser::default().family(), Family::Chrome);
 ```
 
-`Browser::family` returns the product line as a string, for example
-`"chrome"` or `"safari-ios"`. The engine family (`chromium`, `gecko`,
+`Browser::family` returns the product line as a `Family` value, for example
+`Family::Chrome` or `Family::SafariIos`. The engine family (`chromium`, `gecko`,
 `webkit`) is the `meta.family` field of the profile that
 `Browser::profile()` returns. `Browser::for_platform` maps a profile to the
 sibling that exists on a platform.

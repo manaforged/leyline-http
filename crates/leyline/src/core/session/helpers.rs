@@ -58,7 +58,9 @@ impl Session {
     pub(crate) fn brand(&self) -> Option<ChromiumBrand> {
         match self.inner.brand {
             ChromiumBrand::Chrome => match self.inner.browser {
-                Some(browser) if browser.family() == "chrome" => Some(ChromiumBrand::Chrome),
+                Some(browser) if browser.family() == crate::profile::Family::Chrome => {
+                    Some(ChromiumBrand::Chrome)
+                }
                 _ => None,
             },
             other => Some(other),

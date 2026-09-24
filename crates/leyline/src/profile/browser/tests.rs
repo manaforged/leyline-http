@@ -30,13 +30,11 @@ fn latest_is_the_highest_bundled_version() {
 #[test]
 fn latest_covers_every_bundled_family() {
     for browser in Browser::all() {
-        let key = browser.family();
-        let named = ALL_FAMILIES.iter().any(|f| {
-            let latest = Browser::latest(*f);
-            latest.family() == key
-                || latest.for_platform(crate::profile::Platform::IOS).family() == key
-        });
-        assert!(named, "no Family variant reaches the {key} profiles");
+        let family = browser.family();
+        let named = ALL_FAMILIES
+            .iter()
+            .any(|f| Browser::latest(*f).family() == family);
+        assert!(named, "no Family variant reaches the {family:?} profiles");
     }
 }
 
