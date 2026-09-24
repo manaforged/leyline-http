@@ -18,7 +18,7 @@ env:
 
 jobs:
   lint:
-    name: comments + parity + fmt
+    name: comments + fmt
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -34,7 +34,7 @@ jobs:
           node-version: '22'
 
       - name: verify gates
-        run: scripts/verify.sh --only comments,parity,fmt
+        run: scripts/verify.sh --only comments,fmt
 
   msrv:
     name: msrv workspace check

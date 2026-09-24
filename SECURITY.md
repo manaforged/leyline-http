@@ -14,9 +14,6 @@ otherwise.
 
 - The `leyline-http` crate and the crates it bundles: `leyline-bssl`,
   `leyline-bssl-sys`, `leyline-bssl-tokio`, and `leyline-quiche`.
-- The Node and Python wrappers under `wrappers/`. They are developed
-  in-tree but are not part of the 0.1.0 release line and are not published
-  to public registries.
 
 ## Out of scope
 

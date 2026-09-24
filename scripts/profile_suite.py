@@ -475,14 +475,6 @@ def insert_once(text: str, needle: str, extra: str) -> str:
     return text.replace(needle, needle + extra, 1)
 
 
-def pin_after_latest(bind: str, latest_arm: str, dedicated: str) -> str:
-    if dedicated.strip() in bind:
-        return bind
-    if latest_arm not in bind:
-        raise SystemExit(f"wire: missing latest arm {latest_arm!r}")
-    return bind.replace(latest_arm, latest_arm + dedicated, 1)
-
-
 def wire_family(family: str, prefix: str) -> None:
     majors = bundled_majors(family)
     if not majors:
@@ -490,7 +482,6 @@ def wire_family(family: str, prefix: str) -> None:
     newest = majors[-1]
     browser_rs = ROOT / "crates/leyline/src/profile/browser.rs"
     registry = ROOT / "crates/leyline/src/profile/registry.rs"
-    bindings = ROOT / "crates/leyline-ffi/src/profile.rs"
     identity = ROOT / "crates/leyline/src/core/session/identity.rs"
     brand = ROOT / "crates/leyline/src/profile/brand.rs"
     text = browser_rs.read_text()
@@ -605,77 +596,6 @@ def wire_family(family: str, prefix: str) -> None:
         prev_line = f'        reg.load_toml(include_str!("../../profiles/{family}/{prev}.toml"));\n'
         reg = insert_once(reg, prev_line, load_line)
         registry.write_text(reg)
-
-    bind = bindings.read_text()
-    if family == "chrome":
-        bind = re.sub(
-            r'"chrome" \| "chrome-latest" \| "chrome\d+" \| "chrome-\d+" => \{\n            \(Chrome\d+, Windows, Brand::Chrome\)',
-            f'"chrome" | "chrome-latest" | "chrome{newest}" | "chrome-{newest}" => {{\n            (Chrome{newest}, Windows, Brand::Chrome)',
-            bind,
-            count=1,
-        )
-        if len(majors) > 1:
-            older = majors[-2]
-            latest_arm = (
-                f'        "chrome" | "chrome-latest" | "chrome{newest}" | "chrome-{newest}" => {{\n'
-                f'            (Chrome{newest}, Windows, Brand::Chrome)\n'
-                f'        }}\n'
-            )
-            dedicated = (
-                f'        "chrome{older}" | "chrome-{older}" => '
-                f'(Chrome{older}, Windows, Brand::Chrome),\n'
-            )
-            bind = pin_after_latest(bind, latest_arm, dedicated)
-        bind = re.sub(
-            r'"edge" \| "edge-latest" \| "edge\d+" \| "edge-\d+" => \(Chrome\d+, Windows, Brand::Edge\)',
-            f'"edge" | "edge-latest" | "edge{newest}" | "edge-{newest}" => (Chrome{newest}, Windows, Brand::Edge)',
-            bind,
-            count=1,
-        )
-        bind = re.sub(
-            r'"opera" \| "opera-latest" => \(Chrome\d+, Windows, Brand::Opera\)',
-            f'"opera" | "opera-latest" => (Chrome{newest}, Windows, Brand::Opera)',
-            bind,
-            count=1,
-        )
-    if family == "firefox":
-        bind = re.sub(
-            r'"firefox" \| "firefox-latest" \| "firefox\d+" \| "firefox-\d+" => \{\n            \(Firefox\d+, Windows, Brand::Chrome\)',
-            f'"firefox" | "firefox-latest" | "firefox{newest}" | "firefox-{newest}" => {{\n            (Firefox{newest}, Windows, Brand::Chrome)',
-            bind,
-            count=1,
-        )
-        if len(majors) > 1:
-            older = majors[-2]
-            latest_arm = (
-                f'        "firefox" | "firefox-latest" | "firefox{newest}" | "firefox-{newest}" => {{\n'
-                f'            (Firefox{newest}, Windows, Brand::Chrome)\n'
-                f'        }}\n'
-            )
-            dedicated = (
-                f'        "firefox{older}" | "firefox-{older}" => '
-                f'(Firefox{older}, Windows, Brand::Chrome),\n'
-            )
-            bind = pin_after_latest(bind, latest_arm, dedicated)
-    if family == "safari":
-        bind = re.sub(
-            r'"safari" \| "safari-latest" \| "safari\d+" \| "safari-\d+" => \(Safari\d+, MacOS, Brand::Chrome\)',
-            f'"safari" | "safari-latest" | "safari{newest}" | "safari-{newest}" => (Safari{newest}, MacOS, Brand::Chrome)',
-            bind,
-            count=1,
-        )
-        if len(majors) > 1:
-            older = majors[-2]
-            latest_arm = (
-                f'        "safari" | "safari-latest" | "safari{newest}" | '
-                f'"safari-{newest}" => (Safari{newest}, MacOS, Brand::Chrome),\n'
-            )
-            dedicated = (
-                f'        "safari{older}" | "safari-{older}" => '
-                f'(Safari{older}, MacOS, Brand::Chrome),\n'
-            )
-            bind = pin_after_latest(bind, latest_arm, dedicated)
-    bindings.write_text(bind)
 
     ident = identity.read_text()
     if family == "chrome":

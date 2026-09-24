@@ -148,38 +148,6 @@ predicates `is_timeout`/`is_connect`/`is_status`/`is_redirect`/`is_body`/
 - The supported public surface is `leyline-http`. The BoringSSL crates it
   depends on are outside the semver promise.
 
-## Bindings
-
-`leyline-node` (napi) and `leyline-python` (pyo3) wrap
-`leyline-ffi::BindingClient` with a flat config surface.
-
-Client options (`ClientOptions` / `Client(**kwargs)`): `profile`,
-`browser`, `platform`, `proxy`, `timeout`, `audit`, `max_redirects`,
-`disable_redirects`, `accept_language`, `extra_headers`,
-`pinned_leaf_sha256` (hex strings), `ca_files`, `client_cert` +
-`client_key`, `danger_accept_invalid_certs`, `disable_env_roots`,
-`disable_system_roots`, `disable_env_proxies`, `dns` (host to address
-list), `interface`, `local_address`, `tcp_keepalive*`,
-`tcp_user_timeout`, `send_buffer_size`, `recv_buffer_size`,
-`retry_max_retries`, `retry_initial_backoff`, `retry_max_backoff`,
-`retry_on_status`, `https_only`, `protocol` (`http1`/`http2`/`http3`/
-`race`/`default`).
-
-Request options: `headers`, `query`/`params`, `body`/`content`/`data`/
-`json`, `form`, `timeout`, `proxy`, `bearer_auth`, `auth` (basic),
-`digest_auth`, `header_order`, `anchored` (anchor, name, value),
-`preset`.
-
-Client methods beyond the verbs: `read_until(url, marker, limit)`,
-`preconnect(url, proxy)`, `cookies()`, `export_cookies(url)`,
-`load_cookies(str, url)`, `get_cookie`/`set_cookie`, `clear_cookies`,
-`pool_stats()`.
-
-Response fields: `status`, `ok`, `url`, `http_version`, `headers`,
-`cookies`, `request_headers`, `trailers`, `redirect_chain`, `body`/
-`bytes`/`text`, `content_type`, `tls` (`version`, `cipher`, `alpn`,
-`peer_certificate`), `timing`, `audit`.
-
 ## Profile schema
 
 `BrowserProfile`, `profile::TlsProfile`, `profile::H2Profile`,

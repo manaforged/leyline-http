@@ -2,9 +2,6 @@
 resolver = "2"
 members = [
     "crates/leyline",
-    "crates/leyline-ffi",
-    "crates/leyline-node",
-    "crates/leyline-python",
     "crates/leyline-quiche",
 ]
 

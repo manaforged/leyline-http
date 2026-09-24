@@ -56,24 +56,6 @@ g_comments() {
     ok "comment lint"
 }
 
-g_parity() {
-    step "package version parity"
-    workspace_version="$(awk -F'"' '/^version *= *"/{print $2; exit}' Cargo.toml)"
-    python_version="$(awk -F'"' '/^version *= *"/{print $2; exit}' wrappers/python/pyproject.toml)"
-    python_expected="$(printf '%s\n' "$workspace_version" | sed -E 's/-alpha\./a/; s/-beta\./b/; s/-rc\./rc/')"
-    node -e '
-const p = require("./wrappers/node/package.json");
-const version = process.argv[1];
-if (p.version !== version) process.exit(1);
-for (const pin of Object.values(p.optionalDependencies || {})) {
-  if (pin !== version) process.exit(1);
-}
-' "$workspace_version" || fail "Node package versions differ from the workspace"
-    [[ "$python_version" == "$python_expected" ]] \
-        || fail "Python package version differs from the workspace"
-    ok "package versions match $workspace_version"
-}
-
 g_msrv() {
     step "rust toolchain"
     rustc --version
@@ -98,9 +80,6 @@ g_package() {
     cargo package \
         --manifest-path "$package_stage/Cargo.toml" \
         --workspace \
-        --exclude leyline-ffi \
-        --exclude leyline-node \
-        --exclude leyline-python \
         --no-verify \
         || fail "cargo package failed"
     ok "publishable crates packaged"
@@ -316,12 +295,12 @@ g_fuzz_timed() {
 }
 
 gate_order=(
-    comments parity msrv package bssl-source
+    comments msrv package bssl-source
     fmt clippy doc api book test live deny semver external-types benches
     fuzz-replay fuzz-timed
 )
-quick_gates=(comments parity msrv package)
-full_gates=(comments parity msrv package fmt clippy doc api book test live
+quick_gates=(comments msrv package)
+full_gates=(comments msrv package fmt clippy doc api book test live
     deny semver external-types benches fuzz-replay)
 
 if [[ -n "$only" ]]; then

@@ -11,9 +11,6 @@ ROOTS = [
     Path("crates/leyline/src"),
     Path("crates/leyline/examples"),
     Path("crates/leyline/tests"),
-    Path("crates/leyline-ffi/src"),
-    Path("crates/leyline-node/src"),
-    Path("crates/leyline-python/src"),
     Path("fuzz/fuzz_targets"),
 ]
 SKIP_PARTS = ("leyline-quiche", "leyline-bssl")
