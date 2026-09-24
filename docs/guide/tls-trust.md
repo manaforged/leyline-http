@@ -12,7 +12,7 @@ does not change your fingerprint.
 
 A session trusts two sources:
 
-- The system trust store (feature `system-trust`, on by default).
+- The system trust store.
 - The files named by the `SSL_CERT_FILE` and `SSL_CERT_DIR` environment
   variables, when they are set.
 

@@ -39,7 +39,6 @@ targets = ["x86_64-unknown-linux-gnu"]
 
 [features]
 default = [
-    "cookies",
     "charset",
     "compression-gzip",
     "compression-brotli",
@@ -49,9 +48,7 @@ default = [
     "stream",
     "websocket",
     "http3",
-    "system-trust",
 ]
-cookies = []
 # Charset-aware response-body text decoding (Content-Type charset + BOM, via
 # encoding_rs). Off → Response::text falls back to UTF-8 lossy.
 charset = ["dep:encoding_rs"]
@@ -68,8 +65,6 @@ stream = []
 websocket = ["dep:tokio-tungstenite"]
 http3 = ["dep:leyline-quiche"]
 socks = []
-system-trust = []
-native-interface-bind = []
 # Exposes pub bench-only probes into otherwise pub(crate) pool internals
 # (checkout + evict path). Off by default; only leyline-benches enables it.
 bench-internals = []
@@ -78,7 +73,6 @@ bench-internals = []
 unstable-bssl = []
 tower = ["dep:tower-service"]
 full = [
-    "cookies",
     "compression-gzip",
     "compression-brotli",
     "compression-deflate",
@@ -89,8 +83,6 @@ full = [
     "http3",
     "tower",
     "socks",
-    "system-trust",
-    "native-interface-bind",
     "charset",
 ]
 

@@ -376,11 +376,10 @@ handshake), `Handshake`, `HandshakeIo`, `Certificate { verify_code, reason, .. }
 
 ## Features
 
-Default: `cookies`, `charset`, `compression-gzip`, `compression-brotli`,
+Default: `charset`, `compression-gzip`, `compression-brotli`,
 `compression-deflate`, `compression-zstd`, `multipart`, `stream`,
-`websocket`, `http3`, `system-trust`. Opt-in: `socks`, `tower`,
-`native-interface-bind`, `unstable-bssl`, `bench-internals` (outside
-semver). `full` enables every opt-in except `bench-internals` and
+`websocket`, `http3`. Opt-in: `socks`, `tower`, `unstable-bssl`,
+`bench-internals` (outside semver). `full` enables every opt-in except `bench-internals` and
 `unstable-bssl`. The BoringSSL crates are outside the semver promise.
 
 ## Do not add

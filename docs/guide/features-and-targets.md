@@ -3,13 +3,12 @@
 ## Cargo features
 
 The package is `leyline-http` and the library is `leyline`. These features are
-on by default: `cookies`, `charset`, `compression-gzip`, `compression-brotli`,
+on by default: `charset`, `compression-gzip`, `compression-brotli`,
 `compression-deflate`, `compression-zstd`, `multipart`, `stream`, `websocket`,
-`http3`, and `system-trust`.
+and `http3`. The cookie jar and system trust-store loading always compile.
 
 | Feature | Default | What it changes |
 | --- | --- | --- |
-| `cookies` | yes | No effect in 0.1. Reserved. The cookie jar always compiles. |
 | `charset` | yes | Adds `encoding_rs`. Without it, `Response::text` falls back to lossy UTF-8 instead of honoring the `Content-Type` charset. |
 | `compression-gzip` | yes | gzip response bodies, gzip request bodies, and the zlib certificate decompressor. Pulls in `flate2`. |
 | `compression-brotli` | yes | Brotli bodies and the Brotli certificate decompressor. Pulls in `brotli`. |
@@ -19,9 +18,7 @@ on by default: `cookies`, `charset`, `compression-gzip`, `compression-brotli`,
 | `stream` | yes | Streaming request and response bodies. |
 | `websocket` | yes | Adds `Session::websocket` and the `Ws*` types. Pulls in tungstenite. |
 | `http3` | yes | Adds the `Http3` and `Race` policies, and `leyline-quiche`. |
-| `system-trust` | yes | No effect in 0.1. Reserved. Platform trust-store loading always compiles. |
 | `socks` | no | SOCKS5 proxy tunnels. Without it, `build()` accepts a `socks5://` proxy URL and the first request fails. |
-| `native-interface-bind` | no | No effect in 0.1. Reserved. `SocketConfig::interface` compiles and is not applied. |
 | `tower` | no | Adds `LeylineService`, a `tower_service::Service` over a session. |
 | `unstable-bssl` | no | Exposes the BoringSSL `SslContextBuilder` behind `TlsContext`. The BoringSSL types are outside this crate's semver promise. |
 | `bench-internals` | no | Exposes pool probes for the benchmark crate. Not for application use. |
