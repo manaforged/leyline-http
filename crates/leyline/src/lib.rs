@@ -75,6 +75,7 @@ pub mod h2;
 #[cfg(not(feature = "bench-internals"))]
 pub(crate) mod h2;
 pub(crate) mod header_str;
+pub(crate) mod iana;
 #[cfg(feature = "bench-internals")]
 #[doc(hidden)]
 pub mod pool;

@@ -5,7 +5,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use leyline::TcpProfile;
+use leyline::Platform;
 use leyline::profile::BrowserProfile;
 use leyline::tls::{FingerprintConnector, ResolveFuture, Resolver, TlsTrustConfig};
 use leyline_bssl::asn1::Asn1Time;
@@ -152,11 +152,15 @@ async fn without_env_roots_excludes_environment_roots() {
     let addr = spawn_tls_server(&chain).await;
 
     let control = TlsTrustConfig::new();
-    let res = FingerprintConnector::new_with_trust(&load_profile(), TcpProfile::LINUX, &control)
-        .expect("connector build")
-        .with_resolver(Arc::new(LoopbackResolver(addr)))
-        .connect("trust.example", 443, None)
-        .await;
+    let res = FingerprintConnector::new_with_trust(
+        &load_profile(),
+        Platform::Linux.tcp_profile(),
+        &control,
+    )
+    .expect("connector build")
+    .with_resolver(Arc::new(LoopbackResolver(addr)))
+    .connect("trust.example", 443, None)
+    .await;
     assert!(
         res.is_ok(),
         "default trust must honour SSL_CERT_FILE (err: {:?})",
@@ -164,11 +168,15 @@ async fn without_env_roots_excludes_environment_roots() {
     );
 
     let restricted = TlsTrustConfig::new().without_env_roots();
-    let res = FingerprintConnector::new_with_trust(&load_profile(), TcpProfile::LINUX, &restricted)
-        .expect("connector build")
-        .with_resolver(Arc::new(LoopbackResolver(addr)))
-        .connect("trust.example", 443, None)
-        .await;
+    let res = FingerprintConnector::new_with_trust(
+        &load_profile(),
+        Platform::Linux.tcp_profile(),
+        &restricted,
+    )
+    .expect("connector build")
+    .with_resolver(Arc::new(LoopbackResolver(addr)))
+    .connect("trust.example", 443, None)
+    .await;
     assert!(
         res.is_err(),
         "without_env_roots() must not trust a CA that only SSL_CERT_FILE provides"
@@ -177,11 +185,15 @@ async fn without_env_roots_excludes_environment_roots() {
     let explicit = TlsTrustConfig::new()
         .without_env_roots()
         .add_ca_file(&ca_path);
-    let res = FingerprintConnector::new_with_trust(&load_profile(), TcpProfile::LINUX, &explicit)
-        .expect("connector build")
-        .with_resolver(Arc::new(LoopbackResolver(addr)))
-        .connect("trust.example", 443, None)
-        .await;
+    let res = FingerprintConnector::new_with_trust(
+        &load_profile(),
+        Platform::Linux.tcp_profile(),
+        &explicit,
+    )
+    .expect("connector build")
+    .with_resolver(Arc::new(LoopbackResolver(addr)))
+    .connect("trust.example", 443, None)
+    .await;
     assert!(
         res.is_ok(),
         "explicit private root must be trusted: {:?}",

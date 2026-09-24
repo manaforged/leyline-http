@@ -1,5 +1,7 @@
 use crate::profile::preset::HeaderStyle;
-use crate::profile::{ChromiumBrand, Platform, PlatformIdentity, ProfileRegistry};
+use crate::profile::{
+    ChromiumBrand, Platform, PlatformIdentity, ProfileRegistry, resolve_identity,
+};
 
 include!(concat!(env!("OUT_DIR"), "/browser.rs"));
 
@@ -81,18 +83,11 @@ impl Browser {
         platform: Platform,
         brand: Option<ChromiumBrand>,
     ) -> Option<PlatformIdentity> {
-        let mut identity = ProfileRegistry::global()
-            .get_browser(self.for_platform(platform))?
-            .identity_for(platform)?
-            .clone();
-        if let Some(brand) = brand.filter(|brand| *brand != ChromiumBrand::Chrome) {
-            let (extra_headers, navigate_accept) = brand
-                .apply(self.chromium_major()?, platform, &mut identity)
-                .ok()?;
-            identity.extra_headers.extend(extra_headers);
-            if navigate_accept.is_some() {
-                identity.navigate_accept_override = navigate_accept;
-            }
+        let resolved = resolve_identity(Some(self), platform, brand.unwrap_or_default()).ok()?;
+        let mut identity = resolved.identity;
+        identity.extra_headers.extend(resolved.brand_extra_headers);
+        if resolved.brand_navigate_accept.is_some() {
+            identity.navigate_accept_override = resolved.brand_navigate_accept;
         }
         Some(identity)
     }

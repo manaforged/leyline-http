@@ -184,3 +184,10 @@ fn debug_redacts_userinfo() {
         "userinfo leaked in Display"
     );
 }
+
+impl Error {
+    fn without_url(mut self) -> Self {
+        self.inner.url = None;
+        self
+    }
+}

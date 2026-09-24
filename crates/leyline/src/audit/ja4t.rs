@@ -1,11 +1,16 @@
-pub fn compute_ja4t(window_size: u32, mss: u16, window_scale: u8, is_windows: bool) -> String {
-    let options = if is_windows {
-        "2-1-3-1-1-4"
-    } else {
-        "2-4-8-1-3"
-    };
+use crate::tcp::TcpProfile;
 
-    format!("{window_size}_{options}_{mss}_{window_scale}")
+pub fn compute_ja4t(tcp: &TcpProfile) -> String {
+    let options = tcp
+        .options
+        .iter()
+        .map(u8::to_string)
+        .collect::<Vec<_>>()
+        .join("-");
+    format!(
+        "{}_{options}_{}_{}",
+        tcp.window_size, tcp.mss, tcp.window_scale
+    )
 }
 
 #[cfg(test)]

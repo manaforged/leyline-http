@@ -17,7 +17,7 @@ pub enum ChromiumBrand {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum BrandOverlayError {
+pub(crate) enum BrandOverlayError {
     Unverified {
         brand: ChromiumBrand,
         chromium_major: u32,
@@ -106,11 +106,11 @@ impl ChromiumBrand {
 
 #[derive(Debug, Clone)]
 #[non_exhaustive]
-pub struct BrandOverlay {
-    pub user_agent: String,
-    pub sec_ch_ua: String,
-    pub extra_headers: Vec<(String, String)>,
-    pub navigate_accept: Option<String>,
+pub(crate) struct BrandOverlay {
+    pub(crate) user_agent: String,
+    pub(crate) sec_ch_ua: String,
+    pub(crate) extra_headers: Vec<(String, String)>,
+    pub(crate) navigate_accept: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -1,12 +1,8 @@
 use http::Method;
 
 use crate::cookie::Jar;
-#[cfg(test)]
-use crate::profile::ChromiumBrand;
 use crate::profile::{Browser, Platform, Preset};
 
-#[cfg(test)]
-use super::Identity;
 use super::{Session, SessionBuilder};
 use crate::core::request::RequestBuilder;
 use crate::core::retry::RetryPolicy;
@@ -56,34 +52,6 @@ impl Session {
 
     pub(crate) fn browser(&self) -> Option<Browser> {
         self.inner.browser
-    }
-
-    #[cfg(test)]
-    pub(crate) fn identity(&self) -> Option<Identity> {
-        self.inner.identity
-    }
-
-    #[cfg(test)]
-    pub(crate) fn brand(&self) -> Option<ChromiumBrand> {
-        match self.inner.brand {
-            ChromiumBrand::Chrome => match self.inner.browser {
-                Some(browser) if browser.family() == crate::profile::Family::Chrome => {
-                    Some(ChromiumBrand::Chrome)
-                }
-                _ => None,
-            },
-            other => Some(other),
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn platform(&self) -> Platform {
-        self.inner.platform
-    }
-
-    #[cfg(test)]
-    pub(crate) fn protocol_policy(&self) -> crate::core::ProtocolPolicy {
-        self.inner.protocol_policy
     }
 
     pub(crate) fn default_retry(&self) -> &crate::core::retry::RetryPolicy {

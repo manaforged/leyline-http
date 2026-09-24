@@ -1,10 +1,11 @@
 use super::*;
+use crate::profile::Platform;
 
 #[test]
 fn profile_constants() {
-    assert_eq!(TcpProfile::WINDOWS.ttl, 128);
-    assert_eq!(TcpProfile::MACOS.ttl, 64);
-    assert_eq!(TcpProfile::LINUX.window_scale, 7);
+    assert_eq!(Platform::Windows.tcp_profile().ttl, 128);
+    assert_eq!(Platform::MacOS.tcp_profile().ttl, 64);
+    assert_eq!(Platform::Linux.tcp_profile().window_scale, 7);
 }
 
 #[test]
@@ -15,10 +16,10 @@ fn apply_does_not_panic() {
         Some(socket2::Protocol::TCP),
     )
     .unwrap();
-    TcpProfile::WINDOWS.apply(&socket, false);
-    TcpProfile::LINUX.apply(&socket, false);
-    TcpProfile::MACOS.apply(&socket, false);
-    TcpProfile::IOS.apply(&socket, false);
+    Platform::Windows.tcp_profile().apply(&socket, false);
+    Platform::Linux.tcp_profile().apply(&socket, false);
+    Platform::MacOS.tcp_profile().apply(&socket, false);
+    Platform::IOS.tcp_profile().apply(&socket, false);
 
     let socket_v6 = Socket::new(
         socket2::Domain::IPV6,
@@ -26,8 +27,8 @@ fn apply_does_not_panic() {
         Some(socket2::Protocol::TCP),
     )
     .unwrap();
-    TcpProfile::WINDOWS.apply(&socket_v6, true);
-    TcpProfile::LINUX.apply(&socket_v6, true);
-    TcpProfile::MACOS.apply(&socket_v6, true);
-    TcpProfile::IOS.apply(&socket_v6, true);
+    Platform::Windows.tcp_profile().apply(&socket_v6, true);
+    Platform::Linux.tcp_profile().apply(&socket_v6, true);
+    Platform::MacOS.tcp_profile().apply(&socket_v6, true);
+    Platform::IOS.tcp_profile().apply(&socket_v6, true);
 }

@@ -1,19 +1,19 @@
 use crate::audit::AuditTlsCache;
-use crate::core::error::{Error, Kind, Result};
+use crate::core::error::{Error, Result};
 use crate::h2::H2Config;
 use crate::pool::Pool;
-use crate::profile::{BrowserProfile, ChromiumBrand, Platform};
+use crate::profile::BrowserProfile;
 use crate::tcp::TcpProfile;
 use crate::tls::FingerprintConnector;
 
-use super::{BrandOverlayEdits, SessionBuilder};
+use super::SessionBuilder;
 
 impl SessionBuilder {
     pub(super) fn compute_audit_cache(
         &self,
         profile: &'static BrowserProfile,
         h2_config: &H2Config,
-        tcp_profile: TcpProfile,
+        tcp_profile: &TcpProfile,
     ) -> AuditTlsCache {
         let extension_ids = crate::audit::extension_ids(&profile.tls);
         let ja4 = {
@@ -38,13 +38,7 @@ impl SessionBuilder {
             crate::audit::compute_ja3(&input)
         };
         let h2_fp = h2_config.akamai_fingerprint();
-        let is_windows = self.platform == Platform::Windows;
-        let ja4t = crate::audit::compute_ja4t(
-            tcp_profile.window_size,
-            tcp_profile.mss as u16,
-            tcp_profile.window_scale as u8,
-            is_windows,
-        );
+        let ja4t = crate::audit::compute_ja4t(tcp_profile);
         AuditTlsCache {
             ja4,
             ja3,
@@ -56,7 +50,7 @@ impl SessionBuilder {
     pub(super) fn build_connector(
         &self,
         profile: &'static BrowserProfile,
-        tcp_profile: TcpProfile,
+        tcp_profile: &TcpProfile,
     ) -> Result<FingerprintConnector> {
         let accept_invalid_certs = self.tls_trust.accepts_invalid_certs();
         let tls_trust = if accept_invalid_certs {
@@ -64,7 +58,7 @@ impl SessionBuilder {
         } else {
             self.tls_trust.clone()
         };
-        let mut fp = FingerprintConnector::new_with_trust(profile, tcp_profile, &tls_trust)
+        let mut fp = FingerprintConnector::new_with_trust(profile, tcp_profile.clone(), &tls_trust)
             .map_err(Error::from)?;
         if accept_invalid_certs {
             fp.set_accept_invalid_certs(true);
@@ -78,28 +72,6 @@ impl SessionBuilder {
             fp = fp.with_happy_eyeballs_config(config);
         }
         Ok(fp)
-    }
-
-    pub(super) fn apply_brand_overlay(
-        &self,
-        identity: &mut crate::profile::PlatformIdentity,
-    ) -> Result<BrandOverlayEdits> {
-        if self.brand == ChromiumBrand::Chrome {
-            return Ok((Vec::new(), None));
-        }
-        let Some(chromium_major) = self
-            .http_identity
-            .or(self.browser)
-            .and_then(|b| b.chromium_major())
-        else {
-            return Err(Error::new(Kind::Config).with_message(format!(
-                "{} overlay requires a Chromium HTTP identity",
-                self.brand.label()
-            )));
-        };
-        self.brand
-            .apply(chromium_major, self.platform, identity)
-            .map_err(|e| Error::new(Kind::Config).with_message(format!("{e}")))
     }
 
     pub(super) fn build_pool(&self) -> Pool {

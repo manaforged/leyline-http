@@ -2,8 +2,7 @@ use super::*;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
-use crate::profile::{Browser, ProfileRegistry};
-use crate::tcp::TcpProfile;
+use crate::profile::{Browser, Platform, ProfileRegistry};
 use crate::tls::{FingerprintConnector, ResolveFuture, Resolver};
 
 struct RecordingResolver {
@@ -24,7 +23,7 @@ fn base_connector() -> FingerprintConnector {
     let profile = reg
         .get_browser(Browser::default_browser())
         .expect("default profile present");
-    FingerprintConnector::new(profile, TcpProfile::LINUX).expect("connector build")
+    FingerprintConnector::new(profile, Platform::Linux.tcp_profile()).expect("connector build")
 }
 
 #[tokio::test]

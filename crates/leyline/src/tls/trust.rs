@@ -9,6 +9,16 @@ use sha2::{Digest, Sha256};
 
 use crate::tls::error::TlsError;
 
+mod env;
+#[cfg(not(target_os = "macos"))]
+mod system;
+
+#[cfg(test)]
+use env::collect_ca_dir_candidates;
+use env::wire_env_trust;
+#[cfg(not(target_os = "macos"))]
+use system::wire_system_trust_cached;
+
 #[derive(Debug, Clone)]
 pub struct TlsTrustConfig {
     use_env_roots: bool,
@@ -190,80 +200,6 @@ pub struct ClientIdentity {
     pub private_key_file: PathBuf,
 }
 
-pub(crate) fn wire_env_trust(builder: &mut SslContextBuilder) -> bool {
-    let mut loaded_any = false;
-    if let Ok(file) = std::env::var("SSL_CERT_FILE") {
-        let file = file.trim();
-        if !file.is_empty() {
-            match builder.set_ca_file(file) {
-                Ok(()) => {
-                    loaded_any = true;
-                    tracing::warn!(
-                        target: "leyline::tls::trust",
-                        ca_file = %file,
-                        "SSL_CERT_FILE honoured — environment trust root added"
-                    );
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        target: "leyline::tls::trust",
-                        ca_file = %file,
-                        err = %e,
-                        "SSL_CERT_FILE could not be loaded"
-                    );
-                }
-            }
-        }
-    }
-    if let Ok(dir) = std::env::var("SSL_CERT_DIR") {
-        let dir = dir.trim();
-        if !dir.is_empty() {
-            let dir_path = std::path::PathBuf::from(dir);
-            if dir_path.is_dir() {
-                let candidates = collect_ca_dir_candidates(&dir_path);
-                if !candidates.is_empty() || dir_path.exists() {
-                    let mut loaded = 0usize;
-                    for p in &candidates {
-                        match builder.set_ca_file(p) {
-                            Ok(()) => loaded += 1,
-                            Err(e) => {
-                                tracing::debug!(
-                                    target: "leyline::tls::trust",
-                                    ca_file = %p.display(),
-                                    err = %e,
-                                    "SSL_CERT_DIR entry skipped"
-                                );
-                            }
-                        }
-                    }
-                    if loaded > 0 {
-                        loaded_any = true;
-                        tracing::warn!(
-                            target: "leyline::tls::trust",
-                            ca_dir = %dir,
-                            files_loaded = loaded,
-                            "SSL_CERT_DIR honoured — environment trust roots added"
-                        );
-                    } else {
-                        tracing::warn!(
-                            target: "leyline::tls::trust",
-                            ca_dir = %dir,
-                            "SSL_CERT_DIR contained no loadable certificates"
-                        );
-                    }
-                }
-            } else {
-                tracing::warn!(
-                    target: "leyline::tls::trust",
-                    ca_dir = %dir,
-                    "SSL_CERT_DIR does not exist"
-                );
-            }
-        }
-    }
-    loaded_any
-}
-
 pub(crate) fn wire_configured_trust(
     builder: &mut SslContextBuilder,
     config: &TlsTrustConfig,
@@ -333,178 +269,6 @@ pub(crate) fn install_verifier(
         })
     });
     failure
-}
-
-#[cfg(not(target_os = "macos"))]
-pub(crate) fn wire_system_trust(builder: &mut SslContextBuilder) -> Result<(), TlsError> {
-    #[cfg(windows)]
-    {
-        wire_windows_system_trust(builder)
-    }
-    #[cfg(all(not(windows), not(target_os = "macos")))]
-    {
-        wire_linux_system_trust(builder)
-    }
-}
-
-#[cfg(windows)]
-fn wire_system_trust_cached(
-    builder: &mut SslContextBuilder,
-    config: &TlsTrustConfig,
-    env_roots_loaded: bool,
-) -> Result<(), TlsError> {
-    if !env_roots_loaded && config.ca_files.is_empty() && config.ca_der.is_empty() {
-        builder.set_cert_store_ref(cached_windows_system_store()?);
-        return Ok(());
-    }
-    wire_system_trust(builder)
-}
-
-#[cfg(all(not(windows), not(target_os = "macos")))]
-fn wire_system_trust_cached(
-    builder: &mut SslContextBuilder,
-    _config: &TlsTrustConfig,
-    _env_roots_loaded: bool,
-) -> Result<(), TlsError> {
-    wire_system_trust(builder)
-}
-
-#[cfg(windows)]
-fn cached_windows_system_store() -> Result<&'static leyline_bssl::x509::store::X509Store, TlsError>
-{
-    use leyline_bssl::x509::store::{X509Store, X509StoreBuilder};
-    use std::sync::OnceLock;
-
-    static STORE: OnceLock<X509Store> = OnceLock::new();
-    if let Some(s) = STORE.get() {
-        return Ok(s);
-    }
-
-    let roots = crate::tls::windows_trust::load_system_roots().map_err(|e| {
-        TlsError::TrustStore(format!("failed to open Windows system ROOT store: {e}"))
-    })?;
-    let mut store = X509StoreBuilder::new()
-        .map_err(|e| TlsError::TrustStore(format!("X509 store allocation failed: {e}")))?;
-    let mut loaded = 0usize;
-    for der in &roots {
-        if let Ok(cert) = X509::from_der(der) {
-            if store.add_cert(cert).is_ok() {
-                loaded += 1;
-            }
-        }
-    }
-    if loaded == 0 {
-        return Err(TlsError::TrustStore(
-            "Windows system ROOT store bridged zero certificates".into(),
-        ));
-    }
-    tracing::info!(
-        target: "leyline::tls::trust",
-        loaded,
-        "Windows system ROOT store parsed and cached for reuse"
-    );
-    Ok(STORE.get_or_init(|| store.build()))
-}
-
-#[cfg(all(not(windows), not(target_os = "macos")))]
-fn wire_linux_system_trust(builder: &mut SslContextBuilder) -> Result<(), TlsError> {
-    const BUNDLES: &[&str] = &[
-        "/etc/ssl/certs/ca-certificates.crt",
-        "/etc/pki/tls/certs/ca-bundle.crt",
-        "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
-        "/etc/ssl/ca-bundle.pem",
-        "/etc/ssl/cert.pem",
-    ];
-    for &path in BUNDLES {
-        if std::path::Path::new(path).exists() {
-            return builder
-                .set_ca_file(path)
-                .map_err(|e| TlsError::TrustStore(format!("failed to load {path}: {e}")));
-        }
-    }
-    Err(TlsError::TrustStore(
-        "no supported Linux system CA bundle found".into(),
-    ))
-}
-
-#[cfg(windows)]
-fn wire_windows_system_trust(builder: &mut SslContextBuilder) -> Result<(), TlsError> {
-    use leyline_bssl::x509::X509;
-
-    let roots = match crate::tls::windows_trust::load_system_roots() {
-        Ok(r) => r,
-        Err(e) => {
-            return Err(TlsError::TrustStore(format!(
-                "failed to open Windows system ROOT store: {e}"
-            )));
-        }
-    };
-
-    let store = builder.cert_store_mut();
-    let mut loaded = 0usize;
-    let mut skipped = 0usize;
-    for der in &roots {
-        match X509::from_der(der) {
-            Ok(cert) => match store.add_cert(cert) {
-                Ok(()) => loaded += 1,
-                Err(e) => {
-                    skipped += 1;
-                    tracing::debug!(
-                        target: "leyline::tls::trust",
-                        err = %e,
-                        "Windows ROOT cert rejected by BoringSSL store"
-                    );
-                }
-            },
-            Err(e) => {
-                skipped += 1;
-                tracing::debug!(
-                    target: "leyline::tls::trust",
-                    err = %e,
-                    "Windows ROOT cert failed DER parse"
-                );
-            }
-        }
-    }
-
-    if loaded == 0 {
-        return Err(TlsError::TrustStore(format!(
-            "Windows system ROOT store bridged zero certificates ({skipped} skipped)"
-        )));
-    }
-    tracing::info!(
-        target: "leyline::tls::trust",
-        loaded,
-        skipped,
-        "Windows system ROOT store bridged into BoringSSL"
-    );
-    Ok(())
-}
-
-pub(crate) fn collect_ca_dir_candidates(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    let mut out = Vec::new();
-    for entry in entries.flatten() {
-        let p = entry.path();
-        let ext_ok = p
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(|e| matches!(e.to_ascii_lowercase().as_str(), "pem" | "crt" | "cer"))
-            .unwrap_or(false);
-        if !ext_ok {
-            continue;
-        }
-        let Ok(resolved) = std::fs::metadata(&p) else {
-            continue;
-        };
-        if !resolved.is_file() {
-            continue;
-        }
-        out.push(p);
-    }
-    out
 }
 
 #[cfg(test)]

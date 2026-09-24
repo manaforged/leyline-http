@@ -1,4 +1,19 @@
+use std::collections::HashMap;
+use std::sync::LazyLock;
+
+use serde::Deserialize;
+
 use crate::tcp::TcpProfile;
+
+#[derive(Deserialize)]
+struct PlatformData {
+    tcp: TcpProfile,
+}
+
+static PLATFORMS: LazyLock<HashMap<String, PlatformData>> = LazyLock::new(|| {
+    toml::from_str(include_str!("../../profiles/platforms.toml"))
+        .expect("built-in platform table is statically valid")
+});
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
@@ -74,16 +89,12 @@ impl Platform {
         }
     }
 
-    bench_pub! {
-        fn tcp_profile(&self) -> TcpProfile {
-            match self {
-                Self::Windows => TcpProfile::WINDOWS,
-                Self::MacOS => TcpProfile::MACOS,
-                Self::Linux | Self::Android => TcpProfile::LINUX,
-                Self::IOS => TcpProfile::IOS,
-                Self::Host => Self::detect_host().tcp_profile(),
-            }
-        }
+    #[must_use]
+    pub fn tcp_profile(&self) -> TcpProfile {
+        PLATFORMS
+            .get(self.identity_key())
+            .map(|data| data.tcp.clone())
+            .unwrap_or_default()
     }
 
     bench_pub! {

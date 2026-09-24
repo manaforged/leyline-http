@@ -1,10 +1,11 @@
 use std::sync::Mutex;
 
+use serde::Deserialize;
 use socket2::Socket;
 
 mod platform;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[non_exhaustive]
 pub struct TcpProfile {
     pub ttl: u32,
@@ -13,45 +14,10 @@ pub struct TcpProfile {
     pub df: bool,
     pub window_scale: u32,
     pub no_delay: bool,
+    pub options: Vec<u8>,
 }
 
 impl TcpProfile {
-    pub const WINDOWS: Self = Self {
-        ttl: 128,
-        mss: 1460,
-        window_size: 64240,
-        df: true,
-        window_scale: 8,
-        no_delay: true,
-    };
-
-    pub const MACOS: Self = Self {
-        ttl: 64,
-        mss: 1460,
-        window_size: 65535,
-        df: true,
-        window_scale: 6,
-        no_delay: true,
-    };
-
-    pub const LINUX: Self = Self {
-        ttl: 64,
-        mss: 1460,
-        window_size: 65535,
-        df: true,
-        window_scale: 7,
-        no_delay: true,
-    };
-
-    pub const IOS: Self = Self {
-        ttl: 64,
-        mss: 1460,
-        window_size: 65535,
-        df: true,
-        window_scale: 0,
-        no_delay: false,
-    };
-
     pub(crate) fn apply(&self, socket: &Socket, is_v6: bool) {
         if self.ttl > 0 {
             let result = if is_v6 {

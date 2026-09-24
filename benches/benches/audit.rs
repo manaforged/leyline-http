@@ -4,6 +4,7 @@ use leyline::audit::{
     Ja3Input, Ja4Input, Ja4hInput, compute_ja3, compute_ja4, compute_ja4h, compute_ja4t,
 };
 use leyline::fuzz::extension_ids;
+use leyline::Platform;
 use leyline::profile::{Browser, ProfileRegistry};
 
 fn chrome_147_inputs() -> (Vec<String>, Vec<String>, Vec<String>, Vec<u16>) {
@@ -52,14 +53,10 @@ fn bench_ja4(c: &mut Criterion) {
 }
 
 fn bench_ja4t(c: &mut Criterion) {
+    let tcp = Platform::Windows.tcp_profile();
     c.bench_function("audit::compute_ja4t", |b| {
         b.iter(|| {
-            black_box(compute_ja4t(
-                black_box(65535),
-                black_box(1460),
-                black_box(8),
-                black_box(true),
-            ));
+            black_box(compute_ja4t(black_box(&tcp)));
         });
     });
 }

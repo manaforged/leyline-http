@@ -5,7 +5,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use leyline::TcpProfile;
+use leyline::Platform;
 use leyline::profile::BrowserProfile;
 use leyline::tls::{FingerprintConnector, ResolveFuture, Resolver, TlsError, TlsTrustConfig};
 use leyline_bssl::asn1::Asn1Time;
@@ -159,13 +159,13 @@ fn connector(r#gen: &Generated, addr: SocketAddr) -> FingerprintConnector {
         .without_system_roots()
         .add_ca_der(r#gen.ca_der.clone())
         .add_pinned_leaf_sha256(r#gen.leaf_pin);
-    FingerprintConnector::new_with_trust(&load_profile(), TcpProfile::LINUX, &trust)
+    FingerprintConnector::new_with_trust(&load_profile(), Platform::Linux.tcp_profile(), &trust)
         .expect("connector build")
         .with_resolver(Arc::new(LoopbackResolver(addr)))
 }
 
 fn connector_with_trust(trust: TlsTrustConfig, addr: SocketAddr) -> FingerprintConnector {
-    FingerprintConnector::new_with_trust(&load_profile(), TcpProfile::LINUX, &trust)
+    FingerprintConnector::new_with_trust(&load_profile(), Platform::Linux.tcp_profile(), &trust)
         .expect("connector build")
         .with_resolver(Arc::new(LoopbackResolver(addr)))
 }

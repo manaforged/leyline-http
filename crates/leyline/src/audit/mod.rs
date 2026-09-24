@@ -1,5 +1,4 @@
 #![forbid(unsafe_code)]
-mod cipher_map;
 mod ja3;
 mod ja4;
 mod ja4h;
@@ -12,8 +11,7 @@ pub use ja4t::compute_ja4t;
 
 use sha2::{Digest, Sha256};
 
-pub(crate) use cipher_map::sigalg_id;
-use cipher_map::{cipher_id, curve_id, is_grease};
+use crate::iana::{cipher_id, curve_id, is_grease};
 
 fn non_grease_cipher_ids(ciphers: &[String]) -> Vec<u16> {
     ciphers

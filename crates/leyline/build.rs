@@ -39,6 +39,8 @@ struct Meta {
     chromium_major: Option<u32>,
     #[serde(default)]
     platform_browser: BTreeMap<String, String>,
+    #[serde(default)]
+    deprecated: Option<String>,
 }
 
 struct Row {
@@ -166,7 +168,7 @@ fn find(rows: &[Row], browser: &str, version: u32) -> BuildResult<&Row> {
 
 fn latest<'a>(rows: &'a [Row], keep: impl Fn(&Row) -> bool) -> Option<&'a Row> {
     rows.iter()
-        .filter(|r| keep(r))
+        .filter(|r| r.meta.deprecated.is_none() && keep(r))
         .max_by_key(|r| r.meta.version)
 }
 
@@ -200,6 +202,9 @@ fn render(rows: &[Row], families: &Families) -> BuildResult<String> {
         "#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]\n#[non_exhaustive]\npub enum Browser {{"
     )?;
     for row in rows {
+        if let Some(note) = &row.meta.deprecated {
+            writeln!(out, "    #[deprecated(note = {note:?})]")?;
+        }
         writeln!(out, "    {},", row.meta.variant)?;
     }
     writeln!(out, "}}\n")?;
@@ -222,7 +227,7 @@ fn render(rows: &[Row], families: &Families) -> BuildResult<String> {
     }
     writeln!(
         out,
-        "const FAMILY_LATEST: &[Browser] = &[{}];",
+        "#[allow(deprecated)]\nconst FAMILY_LATEST: &[Browser] = &[{}];",
         variant_list(family_latest.iter().copied())
     )?;
     let default = families
@@ -235,9 +240,13 @@ fn render(rows: &[Row], families: &Families) -> BuildResult<String> {
         "const DEFAULT_FAMILY: Family = Family::{};",
         default.variant
     )?;
-    writeln!(out, "const ALL: &[Browser] = &[{}];", variant_list(rows))?;
+    writeln!(
+        out,
+        "#[allow(deprecated)]\nconst ALL: &[Browser] = &[{}];",
+        variant_list(rows)
+    )?;
 
-    writeln!(out, "const ENTRIES: &[Entry] = &[")?;
+    writeln!(out, "#[allow(deprecated)]\nconst ENTRIES: &[Entry] = &[")?;
     for row in rows {
         let rep = hello(rows, row)?;
         let mut platforms = Vec::new();

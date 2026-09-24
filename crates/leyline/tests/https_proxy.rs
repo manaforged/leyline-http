@@ -5,7 +5,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use leyline::TcpProfile;
+use leyline::Platform;
 use leyline::profile::BrowserProfile;
 use leyline::tls::{FingerprintConnector, TlsTrustConfig};
 use leyline_bssl::asn1::Asn1Time;
@@ -165,7 +165,7 @@ fn connector(r#gen: &Generated) -> FingerprintConnector {
         .without_env_roots()
         .without_system_roots()
         .add_ca_der(r#gen.ca_der.clone());
-    FingerprintConnector::new_with_trust(&load_profile(), TcpProfile::LINUX, &trust)
+    FingerprintConnector::new_with_trust(&load_profile(), Platform::Linux.tcp_profile(), &trust)
         .expect("connector build")
 }
 
@@ -204,8 +204,12 @@ async fn https_proxy_refused_when_connector_has_origin_identity() {
         .without_system_roots()
         .add_ca_der(r#gen.ca_der.clone())
         .add_pinned_leaf_sha256([0u8; 32]);
-    let conn = FingerprintConnector::new_with_trust(&load_profile(), TcpProfile::LINUX, &trust)
-        .expect("connector build");
+    let conn = FingerprintConnector::new_with_trust(
+        &load_profile(),
+        Platform::Linux.tcp_profile(),
+        &trust,
+    )
+    .expect("connector build");
 
     let err = match conn
         .connect("right.example", 443, Some("https://localhost:1"))

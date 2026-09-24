@@ -130,12 +130,6 @@ impl Error {
         self.inner.url.as_ref()
     }
 
-    #[cfg(test)]
-    pub(crate) fn without_url(mut self) -> Self {
-        self.inner.url = None;
-        self
-    }
-
     pub fn is_timeout(&self) -> bool {
         self.inner.kind == Kind::Timeout
             || self

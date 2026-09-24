@@ -1,7 +1,6 @@
 use socket2::{Domain, SockRef, Socket, Type};
 use tokio::net::{TcpListener, TcpStream};
 
-use crate::tcp::TcpProfile;
 use crate::{Browser, Platform, Session, SocketConfig};
 
 async fn limits(session: Option<Session>) -> (u32, usize, bool) {
@@ -37,14 +36,14 @@ async fn bare_tcp_uses_os_limits() {
 
 #[tokio::test]
 async fn tcp_profiles_keep_mss_and_nodelay() {
-    let profile = TcpProfile::LINUX;
+    let profile = Platform::Linux.tcp_profile();
     let browser = Session::builder()
         .browser(Browser::Chrome149)
         .platform(Platform::Linux)
         .build()
         .expect("Chrome session");
     let explicit = Session::builder()
-        .tcp_profile(profile)
+        .tcp_profile(profile.clone())
         .build()
         .expect("TCP profile session");
     for session in [browser, explicit] {
@@ -57,9 +56,10 @@ async fn tcp_profiles_keep_mss_and_nodelay() {
 #[test]
 fn profile_does_not_cap_receive_buffer() {
     let socket = Socket::new(Domain::IPV4, Type::STREAM, None).expect("TCP socket");
-    TcpProfile::WINDOWS.apply(&socket, false);
+    let profile = Platform::Windows.tcp_profile();
+    profile.apply(&socket, false);
     let buffer = socket.recv_buffer_size().expect("receive buffer");
-    assert_ne!(buffer as u32, TcpProfile::WINDOWS.window_size);
+    assert_ne!(buffer as u32, profile.window_size);
 }
 
 #[tokio::test]

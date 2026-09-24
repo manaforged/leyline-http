@@ -1,6 +1,6 @@
 use leyline_bssl::ssl::{SslContextBuilder, SslOptions, SslVersion};
 
-use crate::audit::sigalg_id;
+use crate::iana::{boring_curve_name, sigalg_id};
 use crate::profile::TlsProfile;
 use crate::tls::error::TlsError;
 
@@ -16,7 +16,7 @@ use super::ZstdDecompressor;
     any(feature = "compression-gzip", feature = "compression-deflate")
 )))]
 use super::missing;
-use super::{TlsMinVersion, boring_curve_name, profile_min_version, tls13_cipher_ids};
+use super::{TlsMinVersion, profile_min_version, tls13_cipher_ids};
 
 pub(super) fn ciphers(builder: &mut SslContextBuilder, tls: &TlsProfile) -> Result<(), TlsError> {
     let list = tls.ciphers.join(":");

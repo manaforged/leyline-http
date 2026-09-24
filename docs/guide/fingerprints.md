@@ -23,9 +23,9 @@ overrides sit beside it.
 
 **TCP.** `TcpProfile` carries the socket options that shape the SYN: TTL,
 MSS, window size, window scale, the don't-fragment bit, and `TCP_NODELAY`.
-`TcpProfile::WINDOWS`, `MACOS`, `LINUX`, and `IOS` hold the per-OS values.
-The session picks one from its platform, and `SessionBuilder::tcp_profile`
-overrides it. Each platform applies what it
+The per-OS values live in `profiles/platforms.toml`, and
+`Platform::tcp_profile` reads them. The session picks one from its platform,
+and `SessionBuilder::tcp_profile` overrides it. Each platform applies what it
 can: Linux applies TTL, MSS, don't-fragment, and derives a
 `TCP_WINDOW_CLAMP` from the window fields; macOS applies TTL, MSS, and
 don't-fragment; Windows applies TTL and don't-fragment. The audit's JA4T is

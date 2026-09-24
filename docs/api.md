@@ -7,9 +7,12 @@ that is not on this page is private or deleted.
 The modules `leyline::h2`, `leyline::pool`, and `leyline::fuzz` exist only
 with the `bench-internals` feature, for leyline's own tests, benches, and
 fuzz targets. They are not part of the contract. The same feature also makes
-`tls::FingerprintConnector`, `H3Config`, `TlsContext`, and a few internal
-profile, cookie, and TLS methods public for those tests. None of them is part
-of the contract.
+`tls::FingerprintConnector`, `H3Config`, `TlsContext`, and these internal
+methods public for those tests: `ProfileRegistry::builtin` and `get_browser`;
+`BrowserProfile::load_warnings`, `identity_for`, `resolve_for_platform`, and
+`bare`; `Browser::chromium_major`; `Platform::identity_key`; and
+`Pool::bench_populate_h2` and `bench_probe`. None of them is part of the
+contract.
 
 ## Frame (one)
 
@@ -86,7 +89,8 @@ let resp = session
 | Cookies | `SessionBuilder::cookie_jar(Jar)`, `Session::cookies()`, `Session::with_cookie_jar(Jar)` | `cookie::Jar`, one Set-Cookie parser |
 | Seed a cookie with attributes | `Jar::store_set_cookie(&str, &Url)` | `cookie::parse`, the same parser responses use |
 | Remove cookies by name | `Jar::remove_named(&str) -> usize` (every host) | `cookie::Jar` |
-| Identity values | `Browser::identity(Platform, Option<ChromiumBrand>) -> Option<PlatformIdentity>` | profile data, `ChromiumBrand::apply`, `brand::sec_ch_ua` |
+| Identity values | `Browser::identity(Platform, Option<ChromiumBrand>) -> Option<PlatformIdentity>` | `profile::resolve_identity`, the one resolver the session builder also calls |
+| TCP fingerprint | `Platform::tcp_profile() -> TcpProfile`, `SessionBuilder::tcp_profile` | `profiles/platforms.toml` |
 | Proxy | `SessionBuilder::proxy(impl Into<ProxyConfig>)`, `RequestBuilder::proxy`, `Session::with_proxy` | `ProxyConfig::proxy_for` |
 | DNS | `SessionBuilder::dns(impl Into<DnsConfig>)`, `DnsConfig::resolve_host(host, impl IntoIterator<Item = SocketAddr>)` | `DnsConfig` |
 | TLS trust | `SessionBuilder::tls_trust(TlsTrustConfig)` | `tls::trust` |
@@ -141,18 +145,19 @@ counted.
 | `PoolConfig` | `new`, `idle_timeout`, `max_connections`, `max_h1_conns_per_host`, `keepalive`, `h2_ping_after_idle`, `h2_ping_timeout` | 7 |
 | `SocketConfig` | `new`, `local_address`, `tcp_nodelay`, `tcp_keepalive`, `tcp_keepalive_interval`, `tcp_keepalive_retries`, `tcp_user_timeout`, `send_buffer_size`, `recv_buffer_size`, `happy_eyeballs` | 10 |
 | `CompressionConfig`, `ContentEncoding` | `new`, `none`, `gzip`, `deflate`, `brotli`, `zstd` | 6 |
-| `TcpProfile`, `DigestAuth` | `DigestAuth::new` | 1 |
+| `TcpProfile` | public fields `ttl`, `mss`, `window_size`, `df`, `window_scale`, `no_delay`, `options`, `#[non_exhaustive]` | 0 |
+| `DigestAuth` | `new` | 1 |
 
 ### Identity
 
 | Type | Functions | Count |
 |---|---|---:|
 | `Browser` | `get(family, version)`, `latest(Family)`, `all`, `family`, `version`, `profile`, `for_platform`, `identity(Platform, Option<ChromiumBrand>) -> Option<PlatformIdentity>` | 8 |
-| `Family`, `Platform`, `ChromiumBrand`, `Preset` | enums; `Platform::detect_host` | 1 |
-| `Identity` | `locked`, `rotate_tls`, `pass` | 3 |
+| `Family`, `Platform`, `ChromiumBrand`, `Preset` | enums; `Platform::detect_host`, `Platform::tcp_profile` | 2 |
+| `Identity` | `locked`, `rotate_tls`, `switch_family`, `http`, `tls`, `platform` | 6 |
 | `BrowserProfile` | `from_toml`, `expected_ja4`, `expected_h2_fingerprint` | 3 |
 | `profile::ProfileRegistry` | `global`, `load(dir)`, `get` | 3 |
-| `profile::{TlsProfile, H2Profile, H3Profile, PlatformIdentity, HeaderAnchor, HeaderStyle}` | schema types, public fields | 0 |
+| `profile::{ProfileMeta, TlsProfile, TlsFingerprint, H2Profile, H2PriorityProfile, H2PlatformOverride, H2Fingerprint, H3Profile, PlatformIdentity, HeaderAnchor, HeaderStyle}` | schema types, public fields | 0 |
 | `profile::ProfileError` | error of `load` and `from_toml` | 0 |
 
 ### Modules
@@ -163,7 +168,7 @@ counted.
 | `multipart` | `Form`: `new`, `text`, `part`, `file`, `boundary`; `Part`: `text`, `bytes`, `stream`, `filename`, `mime`, `header` | 11 |
 | WebSocket (feature `websocket`) | `WebSocketBuilder`: `header`, `headers`, `proxy`, `config`, `connect`; `WsConnection`: `send(WsMessage)`, `recv`, `close`, `split`, `protocol`, `header`; `WsSink`: `send`, `close`; `WsStream`: `recv`; `WsMessage`; `CloseFrame::new`; `WebSocketConfig`: 7 setters | 23 |
 | `trace` | `Trace` (hook methods), events `Dns`, `Connect`, `Tls`, `Sent` (with `method` and `path`), `Head`, `Done`, `TracingTrace` | 0 |
-| `audit` | `AuditData`, `compute_ja3`, `compute_ja4`, `compute_ja4h`, `compute_ja4t`, input types | 4 |
+| `audit` | `AuditData`; `compute_ja3(&Ja3Input)`, `compute_ja4(&Ja4Input)`, `compute_ja4h(&Ja4hInput)`, `compute_ja4t(&TcpProfile)`; input types `Ja3Input`, `Ja4Input`, `Ja4hInput` (public fields) | 4 |
 | `tls` | `Resolver`, `ResolveFuture`, `SystemResolver`, `ClientIdentity`, `HappyEyeballsConfig` (public fields), `TlsMinVersion`, `TlsError` | 0 |
 | `TlsContext` (feature `unstable-bssl`) | `from_profile`, `builder_mut`, `into_inner`; outside semver | 0 |
 | `IntoParamPair`, `IntoUrl`, `Result` | trait bound of `headers` and `query`; sealed URL input bound; `Result<T, Error>` alias | 0 |
@@ -171,7 +176,7 @@ counted.
 | `http` | re-export of the `http` crate | 0 |
 | `H2Error`, `ErrorCode` | sources reachable from `Error::h2` | 0 |
 
-Total: 226 public functions.
+Total: 231 public functions.
 
 ## Semantics
 
@@ -180,6 +185,14 @@ Total: 226 public functions.
   HTTP/3 against HTTP/2 when the profile's `[h3]` table sets `race = true`,
   as the bundled Chrome profiles do. `Session::builder().build()` with no
   browser is a bare session with no impersonation.
+- "Latest bundled Chrome" moves: `Session::new()` and `Browser::latest`
+  select the newest Chrome profile in the installed release, and a patch
+  release may add a newer one. For a fixed fingerprint, pin the browser with
+  `Session::builder().browser(Browser::Chrome148)` or
+  `Browser::get(Family::Chrome, 148)`.
+- `Session::new()` does not fail. The bundled profile data is fixed at
+  compile time, and trust-store problems at startup log a warning; a
+  request that then cannot verify a certificate fails with `Kind::Tls`.
 - `SessionBuilder::browser` and `platform` commute: the browser maps to its
   platform twin whichever call comes first.
 - Every config setter replaces the whole value. Start from `::new()`, which
@@ -215,9 +228,21 @@ Total: 226 public functions.
 - `Jar::remove_named` removes every cookie with that name on every host and
   returns the count.
 - `Browser::identity` returns the identity a session sends for that browser,
-  platform, and brand, from the same code the session builder runs. It
+  platform, and brand. It calls `profile::resolve_identity`, the same
+  function the session builder calls. It
   returns `None` when the profile has no identity for the platform or the
   brand overlay has no capture.
+- `Identity::locked(browser, platform)` sends one browser's TLS and HTTP
+  identity. `rotate_tls` keeps the HTTP identity and changes the TLS hello
+  to another version of the same family. `switch_family` moves the whole
+  identity to a browser of another family on the same platform, for example
+  to hand a cookie jar from a Chrome session to a Firefox session.
+  `rotate_tls` and `switch_family` check their input and return
+  `Kind::Config` at the call.
+- `Browser` variants are never removed within 0.x. A retired profile keeps
+  its variant and its data. Its profile TOML sets `deprecated = "..."` in
+  `[meta]`, and the build marks the variant `#[deprecated]` with that note.
+  A deprecated profile is never `Browser::latest` or a platform twin target.
 - `RetryPolicy::retry_on` replaces the trigger set. `on_status` appends one
   status.
 - `DnsConfig::resolve_host` replaces the address list for a host. An empty
@@ -251,6 +276,7 @@ Total: 226 public functions.
   `audit(true)`.
 - Public enums and config structs are `#[non_exhaustive]`.
 - Builder input errors surface at `build()` or `send()`, never eagerly.
+  `Identity` is a value type, not a builder; its checks run at the call.
 
 ## Errors
 
@@ -321,5 +347,7 @@ semver). `full` enables every opt-in except `bench-internals` and
 `BrowserProfile`, `profile::TlsProfile`, `profile::H2Profile`,
 `profile::PlatformIdentity`, and the other `leyline::profile` types mirror
 the bundled `profiles/<family>/<version>.toml` files; field names are the
-TOML keys. Load custom profiles with `profile::ProfileRegistry::load(dir)`
+TOML keys. `profiles/bare.toml` holds the bare profile and
+`profiles/platforms.toml` holds the per-platform TCP values. Load custom
+profiles with `profile::ProfileRegistry::load(dir)`
 or `BrowserProfile::from_toml`.

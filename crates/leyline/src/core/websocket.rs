@@ -1,13 +1,8 @@
 use std::sync::Arc;
 
-use base64::Engine as _;
-use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::tungstenite::handshake::derive_accept_key;
-use tokio_tungstenite::tungstenite::http::{HeaderName, HeaderValue};
 use tokio_tungstenite::tungstenite::protocol::{CloseFrame as WireClose, Role};
 
 use crate::core::headers::reorder;
@@ -21,6 +16,16 @@ use crate::tls::{FingerprintConnector, TlsIo};
 
 use crate::core::WebSocketConfig;
 use crate::core::error::{Error, Kind, Result};
+
+mod handshake;
+mod split;
+
+use handshake::{
+    H2_NO_CONNECT_PROTOCOL, check_upgrade_response, is_reserved_ws_header, random_sec_ws_key,
+    response_header, tungstenite_config, ws_header_pair,
+};
+pub use split::{WsSink, WsStream};
+use split::{WsSinkInner, WsStreamInner};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -359,146 +364,6 @@ impl WsConnection {
             }
         }
     }
-}
-
-enum WsSinkInner {
-    H1(SplitSink<WebSocketStream<TlsIo>, Message>),
-    H2(SplitSink<WebSocketStream<H2ConnectStream>, Message>),
-}
-
-pub struct WsSink {
-    inner: WsSinkInner,
-}
-
-impl WsSink {
-    pub async fn send(&mut self, msg: WsMessage) -> Result<()> {
-        let msg = msg.into_wire();
-        match &mut self.inner {
-            WsSinkInner::H1(s) => s.send(msg).await,
-            WsSinkInner::H2(s) => s.send(msg).await,
-        }
-        .map_err(|e| Error::new(Kind::Request).with_message(format!("ws send: {e}")))
-    }
-
-    pub async fn close(&mut self) -> Result<()> {
-        match &mut self.inner {
-            WsSinkInner::H1(s) => s.close().await,
-            WsSinkInner::H2(s) => s.close().await,
-        }
-        .map_err(|e| Error::new(Kind::Request).with_message(format!("ws close: {e}")))
-    }
-}
-
-enum WsStreamInner {
-    H1(SplitStream<WebSocketStream<TlsIo>>),
-    H2(SplitStream<WebSocketStream<H2ConnectStream>>),
-}
-
-pub struct WsStream {
-    inner: WsStreamInner,
-}
-
-impl WsStream {
-    pub async fn recv(&mut self) -> Result<Option<WsMessage>> {
-        let next = match &mut self.inner {
-            WsStreamInner::H1(s) => s.next().await,
-            WsStreamInner::H2(s) => s.next().await,
-        };
-        match next {
-            Some(Ok(msg)) => Ok(Some(WsMessage::wire(msg))),
-            Some(Err(e)) => Err(Error::new(Kind::Request).with_message(format!("ws recv: {e}"))),
-            None => Ok(None),
-        }
-    }
-}
-
-const H2_NO_CONNECT_PROTOCOL: &str = "h2-no-connect-protocol";
-
-fn tungstenite_config(
-    cfg: &WebSocketConfig,
-) -> tokio_tungstenite::tungstenite::protocol::WebSocketConfig {
-    let mut out = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default();
-    if let Some(n) = cfg.read_buffer_size {
-        out.read_buffer_size = n;
-    }
-    if let Some(n) = cfg.write_buffer_size {
-        out.write_buffer_size = n;
-    }
-    if let Some(n) = cfg.max_write_buffer_size {
-        out.max_write_buffer_size = n;
-    }
-    if let Some(n) = cfg.max_message_size {
-        out.max_message_size = Some(n);
-    }
-    if let Some(n) = cfg.max_frame_size {
-        out.max_frame_size = Some(n);
-    }
-    out.accept_unmasked_frames = cfg.accept_unmasked_frames;
-    out
-}
-
-fn ws_header_pair(name: &str, value: &str) -> Result<(HeaderName, HeaderValue)> {
-    let hn = HeaderName::from_bytes(name.as_bytes()).map_err(|_| {
-        Error::new(Kind::Request).with_message(format!("invalid websocket header name: {name}"))
-    })?;
-    let hv = HeaderValue::from_str(value).map_err(|_| {
-        Error::new(Kind::Request).with_message(format!("invalid websocket header value for {name}"))
-    })?;
-    Ok((hn, hv))
-}
-
-fn is_reserved_ws_header(name: &str) -> bool {
-    matches!(
-        name.to_ascii_lowercase().as_str(),
-        "host"
-            | "connection"
-            | "upgrade"
-            | "sec-websocket-key"
-            | "sec-websocket-version"
-            | "sec-websocket-extensions"
-            | "content-length"
-    )
-}
-
-fn response_header<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
-    headers
-        .iter()
-        .find(|(n, _)| n.eq_ignore_ascii_case(name))
-        .map(|(_, v)| v.as_str())
-}
-
-fn has_token(headers: &[(String, String)], name: &str, token: &str) -> bool {
-    response_header(headers, name).is_some_and(|v| {
-        v.split(',')
-            .any(|part| part.trim().eq_ignore_ascii_case(token))
-    })
-}
-
-fn check_upgrade_response(status: u16, headers: &[(String, String)], sec_key: &str) -> Result<()> {
-    let fail =
-        |m: String| Err(Error::new(Kind::Request).with_message(format!("ws handshake: {m}")));
-    if status != 101 {
-        return fail(format!("expected 101 Switching Protocols, got {status}"));
-    }
-    if !has_token(headers, "upgrade", "websocket") || !has_token(headers, "connection", "upgrade") {
-        return fail("missing Upgrade: websocket or Connection: Upgrade".into());
-    }
-    if response_header(headers, "sec-websocket-accept")
-        != Some(&derive_accept_key(sec_key.as_bytes()))
-    {
-        return fail("Sec-WebSocket-Accept does not match the key".into());
-    }
-    if response_header(headers, "sec-websocket-extensions").is_some() {
-        return fail("server selected an extension the client did not offer".into());
-    }
-    Ok(())
-}
-
-fn random_sec_ws_key() -> String {
-    use rand::RngCore;
-    let mut bytes = [0u8; 16];
-    rand::rng().fill_bytes(&mut bytes);
-    BASE64_STANDARD.encode(bytes)
 }
 
 #[cfg(test)]

@@ -3,12 +3,11 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use leyline::TcpProfile;
 use leyline::profile::BrowserProfile;
 use leyline::tls::{
     FingerprintConnector, HappyEyeballsConfig, ResolveFuture, Resolver, SystemResolver,
 };
-use leyline::{Browser, Session, SocketConfig, TlsError, TlsTrustConfig};
+use leyline::{Browser, Platform, Session, SocketConfig, TlsError, TlsTrustConfig};
 
 struct StaticResolver(Vec<SocketAddr>);
 
@@ -43,7 +42,7 @@ fn load_profile() -> BrowserProfile {
 async fn builder_accepts_custom_resolver() {
     let profile = load_profile();
     let resolver = Arc::new(StaticResolver(vec!["127.0.0.1:443".parse().unwrap()]));
-    let _connector = FingerprintConnector::new(&profile, TcpProfile::LINUX)
+    let _connector = FingerprintConnector::new(&profile, Platform::Linux.tcp_profile())
         .expect("connector build")
         .with_resolver(resolver)
         .with_happy_eyeballs_config(eyeballs(Duration::from_millis(50), 4));
@@ -52,7 +51,7 @@ async fn builder_accepts_custom_resolver() {
 #[tokio::test]
 async fn builder_accepts_system_resolver() {
     let profile = load_profile();
-    let _connector = FingerprintConnector::new(&profile, TcpProfile::LINUX)
+    let _connector = FingerprintConnector::new(&profile, Platform::Linux.tcp_profile())
         .expect("connector build")
         .with_resolver(Arc::new(SystemResolver));
 }

@@ -114,12 +114,7 @@ fn fingerprint_conformance() {
         ));
 
         let tcp = Platform::Windows.tcp_profile();
-        let ja4t = compute_ja4t(
-            tcp.window_size,
-            tcp.mss as u16,
-            tcp.window_scale as u8,
-            true,
-        );
+        let ja4t = compute_ja4t(&tcp);
         rows.push(Row::new(
             &name,
             "JA4T (TCP)",

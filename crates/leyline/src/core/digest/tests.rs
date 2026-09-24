@@ -134,3 +134,8 @@ fn sha256_response_matches_manual_computation() {
         "header: {header}"
     );
 }
+
+fn reset_nonce_cache_for_test() {
+    let mut guard = nonce_cache().lock().unwrap_or_else(|e| e.into_inner());
+    guard.clear();
+}

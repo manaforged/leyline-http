@@ -213,12 +213,13 @@ impl FingerprintConnector {
             )));
         }
 
-        let tcp_profile = self.tcp_profile;
+        let tcp_profile = self.tcp_profile.clone();
         let socket_config = self.socket_config.clone();
         let started = Instant::now();
         let (tcp_stream, _addr) =
             happy_eyeballs_connect(addrs, self.happy_eyeballs, move |sock_addr| {
                 let socket_config = socket_config.clone();
+                let tcp_profile = tcp_profile.clone();
                 async move { connect_one(sock_addr, &tcp_profile, &socket_config).await }
             })
             .await

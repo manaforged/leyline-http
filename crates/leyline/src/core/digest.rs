@@ -253,10 +253,4 @@ pub(crate) fn next_nc_for_nonce(nonce: &str) -> u32 {
 }
 
 #[cfg(test)]
-pub(crate) fn reset_nonce_cache_for_test() {
-    let mut guard = nonce_cache().lock().unwrap_or_else(|e| e.into_inner());
-    guard.clear();
-}
-
-#[cfg(test)]
 mod tests;

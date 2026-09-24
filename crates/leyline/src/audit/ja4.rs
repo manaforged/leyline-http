@@ -1,5 +1,5 @@
-use crate::audit::cipher_map::sigalg_id;
 use crate::audit::{hash12, non_grease_cipher_ids, non_grease_ext_ids};
+use crate::iana::sigalg_id;
 
 pub struct Ja4Input<'a> {
     pub ciphers: &'a [String],

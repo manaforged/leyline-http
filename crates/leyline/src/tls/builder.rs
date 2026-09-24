@@ -64,10 +64,8 @@ pub(crate) fn apply_profile_with_trust(
 fn tls13_cipher_ids(ciphers: &[String]) -> Result<Vec<u16>, TlsError> {
     ciphers
         .iter()
-        .filter_map(|cipher| match cipher.as_str() {
-            "TLS_AES_128_GCM_SHA256" => Some(Ok(0x1301)),
-            "TLS_AES_256_GCM_SHA384" => Some(Ok(0x1302)),
-            "TLS_CHACHA20_POLY1305_SHA256" => Some(Ok(0x1303)),
+        .filter_map(|cipher| match crate::iana::cipher_id(cipher) {
+            Some(id) if crate::iana::is_tls13_cipher(id) => Some(Ok(id)),
             _ if cipher.starts_with("TLS_AES_") || cipher.starts_with("TLS_CHACHA20_") => {
                 Some(Err(TlsError::Profile(format!(
                     "unknown TLS 1.3 cipher: {cipher}"
@@ -87,18 +85,6 @@ fn profile_min_version(declared: &Option<String>) -> Result<Option<TlsMinVersion
         Some(other) => Err(TlsError::Profile(format!(
             "unsupported min_tls_version {other:?}; expected \"1.0\", \"1.2\", or \"1.3\""
         ))),
-    }
-}
-
-fn boring_curve_name(name: &str) -> &str {
-    match name {
-        "X25519_MLKEM768" => "X25519MLKEM768",
-        "X25519_KYBER768" => "X25519Kyber768Draft00",
-        "X25519" => "X25519",
-        "SECP256R1" => "P-256",
-        "SECP384R1" => "P-384",
-        "SECP521R1" => "P-521",
-        other => other,
     }
 }
 

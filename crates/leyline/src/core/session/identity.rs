@@ -1,5 +1,5 @@
 use crate::core::error::{Error, Kind, Result};
-use crate::profile::{Browser, Platform, ProfileRegistry};
+use crate::profile::{Browser, ChromiumBrand, Platform, resolve_identity};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Identity {
@@ -31,46 +31,36 @@ impl Identity {
         })
     }
 
-    pub fn pass(self, dest: Browser) -> Result<Self> {
+    pub fn switch_family(self, dest: Browser) -> Result<Self> {
         if dest.family() == self.http.family() {
             return Err(Error::new(Kind::Config).with_message(format!(
-                "cookie pass {dest} is the same family as {} — rotate_tls instead",
+                "switch_family {dest} is the same family as {} — rotate_tls instead",
                 self.http
             )));
         }
         let id = Self::locked(dest, self.platform);
-        let _ = id.user_agent()?;
+        drop(id.user_agent()?);
         Ok(id)
     }
 
     #[must_use]
-    pub(crate) fn http(self) -> Browser {
+    pub fn http(self) -> Browser {
         self.http
     }
 
     #[must_use]
-    pub(crate) fn tls(self) -> Browser {
+    pub fn tls(self) -> Browser {
         self.tls
     }
 
     #[must_use]
-    pub(crate) fn platform(self) -> Platform {
+    pub fn platform(self) -> Platform {
         self.platform
     }
 
     pub(crate) fn user_agent(self) -> Result<String> {
-        Ok(self.http_platform()?.user_agent.clone())
-    }
-
-    fn http_platform(self) -> Result<&'static crate::profile::PlatformIdentity> {
-        let profile = ProfileRegistry::global()
-            .get_browser(self.http)
-            .ok_or_else(|| {
-                Error::new(Kind::Config).with_message(format!("no profile for {}", self.http))
-            })?;
-        profile.identity_for(self.platform).ok_or_else(|| {
-            Error::new(Kind::Config)
-                .with_message(format!("no {} identity for {}", self.platform, self.http))
-        })
+        resolve_identity(Some(self.http), self.platform, ChromiumBrand::Chrome)
+            .map(|resolved| resolved.identity.user_agent)
+            .map_err(|e| Error::new(Kind::Config).with_message(e.to_string()))
     }
 }

@@ -53,6 +53,14 @@ async fn main() -> leyline::Result<()> {
 identity. Reuse one session to share connections and cookies. To select
 another browser or platform, use `Session::builder()`.
 
+The latest bundled Chrome changes when a release adds a newer Chrome
+profile, and a patch release can add one. To keep a fixed fingerprint, pin
+the browser with `Session::builder().browser(Browser::Chrome148)`.
+
+The latest bundled Chrome changes when a release adds a newer Chrome
+profile, and a patch release can add one. To keep a fixed fingerprint, pin
+the browser with `Session::builder().browser(Browser::Chrome148)`.
+
 ## Limits
 
 - A profile covers selected TLS, HTTP/2, and header properties. It does not

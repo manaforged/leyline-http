@@ -33,7 +33,7 @@ fn rotate_tls_same_family_keeps_http() {
 #[test]
 fn switch_family_chrome_to_firefox_keeps_platform() {
     let id = Identity::locked(Browser::Chrome150, Platform::Windows)
-        .pass(Browser::Firefox152)
+        .switch_family(Browser::Firefox152)
         .expect("chrome to firefox family switch");
     assert_eq!(id.http(), Browser::Firefox152);
     assert_eq!(id.tls(), Browser::Firefox152);
@@ -47,8 +47,12 @@ fn switch_family_chrome_to_firefox_keeps_platform() {
 #[test]
 fn switch_family_safari_macos_to_chrome_and_firefox() {
     let safari = Identity::locked(Browser::Safari18, Platform::MacOS);
-    let chrome = safari.pass(Browser::Chrome150).expect("safari → chrome");
-    let firefox = safari.pass(Browser::Firefox152).expect("safari → firefox");
+    let chrome = safari
+        .switch_family(Browser::Chrome150)
+        .expect("safari → chrome");
+    let firefox = safari
+        .switch_family(Browser::Firefox152)
+        .expect("safari → firefox");
     assert_eq!(chrome.http(), Browser::Chrome150);
     assert_eq!(chrome.platform(), Platform::MacOS);
     assert_eq!(firefox.http(), Browser::Firefox152);
@@ -65,7 +69,7 @@ fn switch_family_safari_macos_to_chrome_and_firefox() {
 #[test]
 fn switch_family_rejects_same_family() {
     let err = Identity::locked(Browser::Chrome150, Platform::Windows)
-        .pass(Browser::Chrome146)
+        .switch_family(Browser::Chrome146)
         .expect_err("a switch needs another family");
     assert_eq!(err.kind(), Kind::Config, "expected Config, got {err}");
     let message = err.message().expect("config errors carry a message");
@@ -78,7 +82,7 @@ fn switch_family_rejects_same_family() {
 #[test]
 fn switch_family_rejects_safari_on_windows() {
     let err = Identity::locked(Browser::Chrome150, Platform::Windows)
-        .pass(Browser::Safari18)
+        .switch_family(Browser::Safari18)
         .expect_err("safari has no windows identity");
     assert_eq!(err.kind(), Kind::Config, "expected Config, got {err}");
 }

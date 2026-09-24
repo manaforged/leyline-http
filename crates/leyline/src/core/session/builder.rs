@@ -1,4 +1,4 @@
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use crate::cookie::Jar;
 use crate::core::{
@@ -6,7 +6,10 @@ use crate::core::{
     SocketConfig, TimeoutConfig, WebSocketConfig,
 };
 use crate::h2::H2Config;
-use crate::profile::{Browser, BrowserProfile, ChromiumBrand, Platform, ProfileRegistry};
+use crate::profile::{
+    Browser, BrowserProfile, ChromiumBrand, Platform, ProfileRegistry, ResolvedIdentity,
+    resolve_identity,
+};
 use crate::tcp::TcpProfile;
 use crate::tls::TlsTrustConfig;
 use crate::trace::Trace;
@@ -16,8 +19,6 @@ use super::{Identity, ProtocolPolicy, Session, SessionInner};
 use crate::core::error::{Error, Kind, Result};
 
 mod connect;
-
-static BARE_PROFILE: LazyLock<BrowserProfile> = LazyLock::new(BrowserProfile::bare);
 
 #[must_use = "builders are lazy: nothing happens until `.send()` / `.build()`"]
 pub struct SessionBuilder {
@@ -45,8 +46,6 @@ pub struct SessionBuilder {
     default_retry: crate::core::retry::RetryPolicy,
     trace: Option<Arc<dyn Trace>>,
 }
-
-type BrandOverlayEdits = (Vec<(String, String)>, Option<String>);
 
 impl SessionBuilder {
     pub(super) fn new() -> Self {
@@ -208,10 +207,8 @@ impl SessionBuilder {
     }
 
     pub(super) fn into_builtin(self) -> Session {
-        match self.build() {
-            Ok(session) => session,
-            Err(err) => unreachable!("bundled profile failed to build: {err}"),
-        }
+        self.build()
+            .expect("bundled profile data is statically valid; default trust loading only warns")
     }
 
     pub fn build(mut self) -> Result<Session> {
@@ -268,44 +265,21 @@ impl SessionBuilder {
             Some(b) => ProfileRegistry::global().get_browser(b).ok_or_else(|| {
                 Error::new(Kind::Config).with_message(format!("no profile for {b}"))
             })?,
-            None => &BARE_PROFILE,
+            None => BrowserProfile::bare_static(),
         };
 
-        let browser_label = self
-            .browser
-            .map(|b| b.to_string())
-            .unwrap_or_else(|| "bare".to_string());
+        let ResolvedIdentity {
+            identity,
+            brand_extra_headers,
+            brand_navigate_accept,
+        } = resolve_identity(
+            self.http_identity.or(self.browser),
+            self.platform,
+            self.brand,
+        )
+        .map_err(|e| Error::new(Kind::Config).with_message(e.to_string()))?;
 
-        let mut identity = if let Some(http_b) = self.http_identity {
-            let http_profile = ProfileRegistry::global()
-                .get_browser(http_b)
-                .ok_or_else(|| {
-                    Error::new(Kind::Config)
-                        .with_message(format!("no profile for http identity {http_b}"))
-                })?;
-            http_profile
-                .identity_for(self.platform)
-                .ok_or_else(|| {
-                    Error::new(Kind::Config).with_message(format!(
-                        "no {} identity for http identity {http_b}",
-                        self.platform
-                    ))
-                })?
-                .clone()
-        } else {
-            profile
-                .identity_for(self.platform)
-                .ok_or_else(|| {
-                    Error::new(Kind::Config)
-                        .with_message(format!("no {} identity for {browser_label}", self.platform))
-                })?
-                .clone()
-        };
-
-        let (brand_extra_headers, brand_navigate_accept) =
-            self.apply_brand_overlay(&mut identity)?;
-
-        let tcp_profile = self.tcp_profile.unwrap_or_else(|| {
+        let tcp_profile = self.tcp_profile.clone().unwrap_or_else(|| {
             let mut tcp = self.platform.tcp_profile();
             if self.browser.is_none() {
                 tcp.mss = 0;
@@ -315,14 +289,14 @@ impl SessionBuilder {
             tcp
         });
 
-        let connector = self.build_connector(profile, tcp_profile)?;
+        let connector = self.build_connector(profile, &tcp_profile)?;
 
         let resolved_h2 = profile.h2.resolve_for_platform(self.platform)?;
         let h2_config = H2Config::from_profile(&resolved_h2)?;
 
         let audit_cache = self
             .audit
-            .then(|| Arc::new(self.compute_audit_cache(profile, &h2_config, tcp_profile)));
+            .then(|| Arc::new(self.compute_audit_cache(profile, &h2_config, &tcp_profile)));
 
         let pool = Arc::new(self.build_pool());
         let cookie_jar = self.cookie_jar.unwrap_or_default();
