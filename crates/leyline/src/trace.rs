@@ -50,6 +50,7 @@ pub struct Head<'a> {
     pub status: u16,
     pub protocol: HttpVersion,
     pub elapsed: Duration,
+    pub headers: &'a http::HeaderMap,
 }
 
 #[non_exhaustive]
@@ -179,14 +180,26 @@ pub(crate) fn sent(host: &str, method: &str, path: &str, protocol: HttpVersion, 
     });
 }
 
-pub(crate) fn head(host: &str, status: u16, protocol: HttpVersion, elapsed: Duration) {
+pub(crate) fn head<I, N, V>(
+    host: &str,
+    status: u16,
+    protocol: HttpVersion,
+    elapsed: Duration,
+    headers: I,
+) where
+    I: IntoIterator<Item = (N, V)>,
+    N: AsRef<[u8]>,
+    V: Into<bytes::Bytes>,
+{
     with(|ctx| {
+        let headers = crate::core::header_map(headers);
         ctx.hook.head(&Head {
             id: ctx.id,
             host,
             status,
             protocol,
             elapsed,
+            headers: &headers,
         });
     });
 }

@@ -86,11 +86,12 @@ let resp = session
 | Auth | `basic_auth` / `bearer_auth` / `digest_auth` | `core::digest` |
 | Timeout | `SessionBuilder::timeout(impl Into<TimeoutConfig>)`, `RequestBuilder::timeout(..)` | `core::deadline::Deadline` |
 | Retry | `SessionBuilder::retry(RetryPolicy)`, `RequestBuilder::retry`, `RetryPolicy::retry_on(impl IntoIterator<Item = RetryTrigger>)` | `RequestBuilder::send` loop |
-| Redirect | `SessionBuilder::redirect(RedirectPolicy)`, `RequestBuilder::redirect(RedirectPolicy)` | redirect loop in `Session::execute_inner` |
+| Redirect | `SessionBuilder::redirect(RedirectPolicy)`, `RequestBuilder::redirect(RedirectPolicy)`, `Session::with_redirect(RedirectPolicy)` | redirect loop in `Session::execute_inner` |
 | Cookies | `SessionBuilder::cookie_jar(Jar)`, `Session::cookies()`, `Session::with_cookie_jar(Jar)` | `cookie::Jar`, one Set-Cookie parser |
-| Seed a cookie with attributes | `Jar::store_set_cookie(&str, &Url)` | `cookie::parse`, the same parser responses use |
-| Remove cookies by name | `Jar::remove(&Url, &str) -> usize` (one host, every path), `Jar::remove_named(&str) -> usize` (every host) | `cookie::Jar` |
-| Identity values | `Browser::identity(Platform, Option<ChromiumBrand>) -> Option<PlatformIdentity>` | `profile::resolve_identity`, the one resolver the session builder also calls |
+| Seed a cookie with attributes | `Jar::store_set_cookie(&str, impl IntoUrl) -> Result<()>` | `cookie::parse`, the same parser responses use |
+| Copy and merge a jar | `Jar::snapshot() -> Jar`, `Jar::extend_from(&Jar)` | `cookie::Jar` |
+| Remove cookies by name | `Jar::remove(impl IntoUrl, &str) -> Result<usize>` (one host, every path), `Jar::remove_named(&str) -> usize` (every host) | `cookie::Jar` |
+| Identity values | `Browser::identity(Platform, Option<ChromiumBrand>) -> Option<PlatformIdentity>`; `Session::identity() -> SessionIdentity` (what a built session sends) | `profile::resolve_identity`, the one resolver the session builder also calls |
 | TCP fingerprint | `Platform::tcp_profile() -> TcpProfile`, `SessionBuilder::tcp_profile` | `profiles/platforms.toml` |
 | Proxy | `impl Into<ProxyConfig>` on `SessionBuilder::proxy`, `RequestBuilder::proxy`, `WebSocketBuilder::proxy`, `Session::with_proxy` | `ProxyConfig::proxy_for` |
 | DNS | `SessionBuilder::dns(impl Into<DnsConfig>)`, `DnsConfig::resolve_host(host, impl IntoIterator<Item = SocketAddr>)` | `DnsConfig` |
@@ -106,7 +107,7 @@ let resp = session
 | Response cookies | `Response::cookies()` (read-only, this response's Set-Cookie) | `cookie::parse` |
 | TLS details | `Response::tls() -> Option<&TlsInfo>`, ALPN through `Response::version()` | `TlsInfo` |
 | Errors | `Error::kind` | `core::error` |
-| Trace | `SessionBuilder::trace(impl Trace)`; `Sent` carries `method` and `path` | `trace` |
+| Trace | `SessionBuilder::trace(impl Trace)`; `Sent` carries `method` and `path`; `Head` carries `headers: &http::HeaderMap` | `trace` |
 | Timing | `Response::timing` | `ResponseTiming` |
 | Fingerprint audit | `SessionBuilder::audit(true)`, `Response::audit`, `audit::compute_*` | `audit` |
 | WebSocket | `Session::websocket(url)` | `core::websocket` |
@@ -122,7 +123,7 @@ counted.
 
 | Type | Functions | Count |
 |---|---|---:|
-| `Session` | `builder`, `new`, `get`, `post`, `put`, `patch`, `delete`, `head`, `request`, `execute(http::Request<Body>)`, `websocket`, `with_proxy(impl Into<ProxyConfig>)`, `fresh_pool`, `with_cookie_jar(Jar)`, `cookies`, `pool_stats`, `preconnect(url)` | 17 |
+| `Session` | `builder`, `new`, `get`, `post`, `put`, `patch`, `delete`, `head`, `request`, `execute(http::Request<Body>)`, `websocket`, `with_proxy(impl Into<ProxyConfig>)`, `fresh_pool`, `with_cookie_jar(Jar)`, `with_redirect(RedirectPolicy)`, `identity() -> SessionIdentity`, `cookies`, `pool_stats`, `preconnect(url)` | 19 |
 | `SessionBuilder` | `browser`, `platform`, `brand`, `identity`, `headers`, `proxy`, `timeout`, `retry`, `redirect`, `cookie_jar`, `dns`, `tls_trust`, `protocol`, `pool`, `socket`, `tcp_profile`, `compression`, `websocket_config`, `https_only`, `trace`, `audit`, `build` | 22 |
 | `RequestBuilder` | `header`, `headers`, `header_order`, `anchored`, `query`, `body`, `json`, `form`, `multipart`, `basic_auth`, `bearer_auth`, `digest_auth`, `timeout`, `retry`, `redirect(RedirectPolicy)`, `proxy`, `preset`, `stream`, `compress`, `send` | 20 |
 | `Response` | `status`, `version`, `url`, `headers`, `header`, `trailers`, `request_headers`, `redirect_chain`, `cookies`, `timing`, `tls`, `audit`, `content_length`, `error_for_status`, `error_for_status_ref`, `text`, `text_with_charset`, `bytes`, `json`, `into_stream`, `copy_to`, `read_until` | 22 |
@@ -157,6 +158,7 @@ counted.
 | `Browser` | `get(family, version)`, `latest(Family)`, `all`, `family`, `version`, `profile`, `for_platform`, `identity(Platform, Option<ChromiumBrand>) -> Option<PlatformIdentity>` | 8 |
 | `Family`, `Platform`, `ChromiumBrand`, `Preset` | enums; `Platform::detect_host`, `Platform::tcp_profile` | 2 |
 | `Identity` | `locked`, `rotate_tls`, `switch_family`, `http`, `tls`, `platform` | 6 |
+| `SessionIdentity` | `identity`, `browser`, `platform`, `brand`, `user_agent` | 5 |
 | `BrowserProfile` | `from_toml`, `expected_ja4`, `expected_h2_fingerprint` | 3 |
 | `profile::ProfileRegistry` | `global`, `load(dir)`, `get` | 3 |
 | `profile::{ProfileMeta, TlsProfile, TlsFingerprint, H2Profile, H2PriorityProfile, H2PlatformOverride, H2Fingerprint, H3Profile, PlatformIdentity, HeaderAnchor, HeaderStyle}` | schema types, public fields | 0 |
@@ -166,10 +168,10 @@ counted.
 
 | Module | Surface | Count |
 |---|---|---:|
-| `cookie` | `Jar`: `new`, `get_cookie(&Url, &str)`, `set_cookie(&Url, &str, &str)`, `store_set_cookie(&str, &Url)`, `all_cookies`, `remove(&Url, &str) -> usize`, `remove_named(&str) -> usize`, `clear`, `export_cookies(&Url)`, `load_cookies(&str, &Url)`, `cookie_header(&Url)`; `Cookie`, `SameSite` | 11 |
+| `cookie` | `Jar`: `new`, `get_cookie(impl IntoUrl, &str) -> Result<Option<String>>`, `set_cookie(impl IntoUrl, &str, &str) -> Result<()>`, `store_set_cookie(&str, impl IntoUrl) -> Result<()>`, `all_cookies`, `snapshot`, `extend_from(&Jar)`, `remove(impl IntoUrl, &str) -> Result<usize>`, `remove_named(&str) -> usize`, `clear`, `export_cookies(impl IntoUrl) -> Result<String>`, `load_cookies(&str, impl IntoUrl) -> Result<()>`, `cookie_header(&Url)`; `Cookie::is_expired`; `SameSite` | 14 |
 | `multipart` | `Form`: `new`, `text`, `part`, `file`, `boundary`; `Part`: `text`, `bytes`, `stream`, `filename`, `mime`, `header` | 11 |
 | WebSocket (feature `websocket`) | `WebSocketBuilder`: `header`, `headers`, `proxy`, `config`, `connect`; `WsConnection`: `send(WsMessage)`, `recv`, `close`, `split`, `protocol`, `header`; `WsSink`: `send`, `close`; `WsStream`: `recv`; `WsMessage`; `CloseFrame::new`; `WebSocketConfig`: 7 setters | 23 |
-| `trace` | `Trace` (hook methods), events `Dns`, `Connect`, `Tls`, `Sent` (with `method` and `path`), `Head`, `Done`, `TracingTrace` | 0 |
+| `trace` | `Trace` (hook methods), events `Dns`, `Connect`, `Tls`, `Sent` (with `method` and `path`), `Head` (with `headers`), `Done`, `TracingTrace` | 0 |
 | `audit` | `AuditData`; `compute_ja3(&Ja3Input)`, `compute_ja4(&Ja4Input)`, `compute_ja4h(&Ja4hInput)`, `compute_ja4t(&TcpProfile)`; input types `Ja3Input`, `Ja4Input`, `Ja4hInput` (public fields) | 4 |
 | `tls` | `Resolver`, `ResolveFuture`, `SystemResolver`, `ClientIdentity`, `TlsMinVersion`, `TlsError`; `HappyEyeballsConfig`: `new`, `resolve_delay`, `attempt_limit` | 3 |
 | `TlsContext` (feature `unstable-bssl`) | `from_profile`, `builder_mut`, `into_inner`; outside semver | 0 |
@@ -178,7 +180,7 @@ counted.
 | `http` | re-export of the `http` crate | 0 |
 | `H2Error`, `ErrorCode` | sources reachable from `Error::h2` | 0 |
 
-Total: 244 public functions.
+Total: 254 public functions.
 
 ## Semantics
 
@@ -257,10 +259,30 @@ Total: 244 public functions.
 - `Session::with_cookie_jar` derives a clone through the same path as
   `with_proxy`. It shares the pool and every other setting and uses the
   given jar.
+- `Session::with_redirect` derives a clone through the same path and uses
+  the given redirect policy. `RequestBuilder::redirect` still overrides it
+  for one request.
+- `Session::identity` returns what the session sends, read from the values
+  `build()` resolved: the `Identity` (`None` for a bare session), the HTTP
+  browser, the platform, the brand (`None` when no Chromium brand applies),
+  and the `User-Agent`.
+- The `trace::Head` event carries the response headers as received, before
+  decompression, as an `http::HeaderMap` built by the same converter that
+  builds `Response::headers()`.
 - `Jar::store_set_cookie` is the one Set-Cookie parser. The session calls it
   for every response. `Max-Age=0` or a past `Expires` deletes the cookie.
-- `Jar` functions take a parsed `&Url`, so a bad URL fails at
-  `Url::parse`, not inside the jar.
+- `Jar::get_cookie`, `set_cookie`, `store_set_cookie`, `load_cookies`,
+  `export_cookies`, and `remove` take `impl IntoUrl`, like `Session::get`.
+  A URL that does not parse returns `Kind::Url`; the jar does not change.
+- `Jar::snapshot` returns a new jar with its own store and a copy of every
+  cookie with all attributes, creation order included. A write to one jar
+  does not reach the other.
+- `Jar::extend_from(other)` copies every cookie of `other` into the jar with
+  its attributes. On the same name, domain, and path, the cookie from
+  `other` wins. The jar limits apply after the merge. Merging a jar into
+  itself does nothing.
+- `Cookie::is_expired` is true when the cookie has an expiry that has
+  passed. The jar never sends or returns an expired cookie.
 - `Jar::remove(url, name)` removes every cookie with that name that the host
   of `url` receives, on every path, and returns the count.
 - `Jar::remove_named` removes every cookie with that name on every host and

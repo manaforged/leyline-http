@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use http::{HeaderName, HeaderValue, StatusCode};
+use http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 
 use crate::h2::config::H2Config;
 use crate::h2::connection::PseudoHeaders;
@@ -38,6 +38,15 @@ where
             Some((name, value))
         })
         .collect()
+}
+
+pub(crate) fn header_map<I, N, V>(headers: I) -> HeaderMap
+where
+    I: IntoIterator<Item = (N, V)>,
+    N: AsRef<[u8]>,
+    V: Into<Bytes>,
+{
+    adopt(headers).into_iter().collect()
 }
 
 pub(crate) enum TransportBody {

@@ -36,6 +36,7 @@ pub use retry::{RetryPolicy, RetryTrigger};
 pub use service::LeylineService;
 #[cfg(feature = "websocket")]
 pub use session::WebSocketBuilder;
-pub use session::{Identity, ProtocolPolicy, Session, SessionBuilder};
+pub use session::{Identity, ProtocolPolicy, Session, SessionBuilder, SessionIdentity};
+pub(crate) use transport::header_map;
 #[cfg(feature = "websocket")]
 pub use websocket::{CloseFrame, WsConnection, WsMessage, WsSink, WsStream};

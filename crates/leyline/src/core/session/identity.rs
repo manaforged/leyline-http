@@ -1,5 +1,7 @@
 use crate::core::error::{Error, Kind, Result};
-use crate::profile::{Browser, ChromiumBrand, Platform, resolve_identity};
+use crate::profile::{Browser, ChromiumBrand, Family, Platform, resolve_identity};
+
+use super::Session;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Identity {
@@ -62,5 +64,61 @@ impl Identity {
         resolve_identity(Some(self.http), self.platform, ChromiumBrand::Chrome)
             .map(|resolved| resolved.identity.user_agent)
             .map_err(|e| Error::new(Kind::Config).with_message(e.to_string()))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct SessionIdentity {
+    identity: Option<Identity>,
+    platform: Platform,
+    brand: Option<ChromiumBrand>,
+    user_agent: String,
+}
+
+impl SessionIdentity {
+    #[must_use]
+    pub fn identity(&self) -> Option<Identity> {
+        self.identity
+    }
+
+    #[must_use]
+    pub fn browser(&self) -> Option<Browser> {
+        self.identity.map(Identity::http)
+    }
+
+    #[must_use]
+    pub fn platform(&self) -> Platform {
+        self.platform
+    }
+
+    #[must_use]
+    pub fn brand(&self) -> Option<ChromiumBrand> {
+        self.brand
+    }
+
+    #[must_use]
+    pub fn user_agent(&self) -> &str {
+        &self.user_agent
+    }
+}
+
+impl Session {
+    #[must_use]
+    pub fn identity(&self) -> SessionIdentity {
+        let brand = match self.inner.brand {
+            ChromiumBrand::Chrome => self
+                .inner
+                .browser
+                .filter(|browser| browser.family() == Family::Chrome)
+                .map(|_| ChromiumBrand::Chrome),
+            other => Some(other),
+        };
+        SessionIdentity {
+            identity: self.inner.identity,
+            platform: self.inner.platform,
+            brand,
+            user_agent: self.inner.user_agent.clone(),
+        }
     }
 }

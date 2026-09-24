@@ -113,7 +113,7 @@ pub use crate::core::{
     HttpVersion, Identity, IntoParamPair, IntoUrl, Kind, NoProxy, PoolConfig, ProtocolPolicy,
     ProxyConfig, ProxyRule, ProxyUrl, RedirectAction, RedirectAttempt, RedirectPolicy,
     RequestBuilder, Response, ResponseTiming, Result, RetryPolicy, RetryTrigger, Session,
-    SessionBuilder, SocketConfig, TimeoutConfig, WebSocketConfig,
+    SessionBuilder, SessionIdentity, SocketConfig, TimeoutConfig, WebSocketConfig,
 };
 pub use crate::pool::{PoolStats, TlsInfo};
 

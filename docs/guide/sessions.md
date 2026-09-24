@@ -126,6 +126,20 @@ let edge = Browser::default().identity(Platform::Windows, Some(ChromiumBrand::Ed
 assert!(edge.is_some_and(|id| id.user_agent.contains("Edg/")));
 ```
 
+`Session::identity()` returns a `SessionIdentity` with what a built session
+sends: `identity()` (the `Identity`, or `None` for a bare session),
+`browser()`, `platform()`, `brand()`, and `user_agent()`. It reads the values
+that `build()` resolved, so it matches the request headers.
+
+```rust,no_run
+# fn run() -> leyline::Result<()> {
+let session = leyline::Session::new();
+let sent = session.identity();
+println!("{:?} on {} sends {}", sent.browser(), sent.platform(), sent.user_agent());
+# Ok(())
+# }
+```
+
 ## What a session shares
 
 One session holds:
@@ -165,6 +179,10 @@ Call it when the next request must open new connections.
 cookie jar. The pool, TLS session cache, and every other setting stay shared.
 Use it to run one jar per task on a warm pool.
 
+`with_redirect(policy)` derives a session the same way and swaps only the
+redirect policy. Use it for a step that must read a redirect response itself,
+such as a login probe.
+
 ```rust,no_run
 use leyline::cookie::Jar;
 
@@ -173,7 +191,8 @@ let session = leyline::Session::new();
 let other_user = session.with_cookie_jar(Jar::new());
 let via_proxy = session.with_proxy("http://user:pass@proxy.example:8080");
 let new_exit = via_proxy.fresh_pool();
-# let _ = (other_user, new_exit);
+let no_follow = session.with_redirect(leyline::RedirectPolicy::none());
+# let _ = (other_user, new_exit, no_follow);
 # Ok(())
 # }
 ```
@@ -223,7 +242,8 @@ your own builder calls.
 `trace()` installs a listener that reports each phase of every request: name
 resolution, connect, TLS handshake, request send, response head, and
 completion. Implement `leyline::trace::Trace` and override only the events you
-want; every method has a no-op default.
+want; every method has a no-op default. The `Head` event carries the response
+headers as `&http::HeaderMap`, before decompression and redirect handling.
 
 ```rust,no_run
 use leyline::Session;

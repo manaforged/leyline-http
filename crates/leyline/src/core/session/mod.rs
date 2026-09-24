@@ -14,7 +14,7 @@ mod websocket;
 mod tests;
 
 pub use builder::SessionBuilder;
-pub use identity::Identity;
+pub use identity::{Identity, SessionIdentity};
 #[cfg(feature = "websocket")]
 pub use websocket::WebSocketBuilder;
 

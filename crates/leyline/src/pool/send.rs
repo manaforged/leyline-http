@@ -70,7 +70,13 @@ pub(crate) async fn send_request_h3_pooled(
             .await
         {
             Ok(resp) => {
-                trace::head(host, resp.status, HttpVersion::Http3, started.elapsed());
+                trace::head(
+                    host,
+                    resp.status,
+                    HttpVersion::Http3,
+                    started.elapsed(),
+                    resp.headers.iter().cloned(),
+                );
                 return Ok((resp, tls));
             }
             Err(e) if !e.is_retryable() => {
@@ -129,7 +135,13 @@ pub(crate) async fn send_request_h3_pooled(
         )
         .await
         .map_err(|e| Error::new(Kind::Http3).with_message(e.message().to_string()))?;
-    trace::head(host, resp.status, HttpVersion::Http3, started.elapsed());
+    trace::head(
+        host,
+        resp.status,
+        HttpVersion::Http3,
+        started.elapsed(),
+        resp.headers.iter().cloned(),
+    );
     Ok((resp, tls))
 }
 
@@ -201,6 +213,7 @@ pub(crate) async fn send_request(
                     resp.status,
                     HttpVersion::Http2,
                     send_started.elapsed(),
+                    resp.headers.iter().cloned(),
                 );
                 let timing = ResponseTiming {
                     reused: true,
@@ -265,6 +278,7 @@ pub(crate) async fn send_request(
                 r.status,
                 HttpVersion::Http2,
                 send_started.elapsed(),
+                r.headers.iter().cloned(),
             );
             r
         }

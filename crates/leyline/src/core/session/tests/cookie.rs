@@ -96,7 +96,8 @@ async fn cross_origin_redirect_strips_explicit_cookie_and_uses_target_jar() {
         .unwrap();
     session
         .cookies()
-        .set_cookie(&url::Url::parse(&second_origin).unwrap(), "other", "3");
+        .set_cookie(&url::Url::parse(&second_origin).unwrap(), "other", "3")
+        .unwrap();
     let body = session
         .get(&format!("{first_origin}/start"))
         .header("cookie", "mine=2")

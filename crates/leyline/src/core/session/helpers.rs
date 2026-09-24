@@ -45,6 +45,10 @@ impl Session {
         self.derive(|inner| inner.cookie_jar = jar)
     }
 
+    pub fn with_redirect(&self, policy: RedirectPolicy) -> Self {
+        self.derive(|inner| inner.redirect_policy = policy)
+    }
+
     fn derive(&self, change: impl FnOnce(&mut super::SessionInner)) -> Self {
         let mut s = self.clone();
         change(std::sync::Arc::make_mut(&mut s.inner));

@@ -72,7 +72,7 @@ The session jar stores `Set-Cookie` automatically. `cookies()` iterates the
 `leyline::cookie::Cookie` records parsed from this response's `Set-Cookie`
 headers. It does not list cookies from redirect legs or cookies the jar
 rejected. The jar is the store: read it with
-`session.cookies().get_cookie(&url, name)`. See [Cookies](cookies.md).
+`session.cookies().get_cookie(url, name)?`. See [Cookies](cookies.md).
 
 ## Redirect chain
 

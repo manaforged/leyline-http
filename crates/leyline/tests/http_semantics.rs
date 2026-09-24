@@ -86,6 +86,7 @@ async fn response_cookies_use_the_rfc_parser_not_a_hand_parser() {
         session
             .cookies()
             .get_cookie(&url::Url::parse(&format!("{base}/")).unwrap(), "token")
+            .unwrap()
             .as_deref(),
         Some("quoted value"),
         "Response::cookies() and the jar must not diverge"

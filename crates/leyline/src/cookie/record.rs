@@ -30,7 +30,7 @@ pub struct Cookie {
 }
 
 impl Cookie {
-    pub(crate) fn is_expired(&self) -> bool {
+    pub fn is_expired(&self) -> bool {
         if let Some(expires) = self.expires {
             SystemTime::now() > expires
         } else {

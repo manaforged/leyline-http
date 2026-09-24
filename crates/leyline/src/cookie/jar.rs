@@ -7,6 +7,7 @@ use url::Url;
 
 use crate::cookie::parse;
 use crate::cookie::record::Cookie;
+use crate::core::{IntoUrl, Result};
 
 const MAX_COOKIES_PER_DOMAIN: usize = 180;
 const EVICT_PER_DOMAIN: usize = 30;
@@ -29,15 +30,57 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 
 impl Jar {
     pub fn new() -> Self {
+        Self::from_buckets(HashMap::new(), 0)
+    }
+
+    fn from_buckets(cookies: HashMap<String, Vec<Cookie>>, total: usize) -> Self {
         Self {
-            inner: Arc::new(Mutex::new(JarInner {
-                cookies: HashMap::new(),
-                total: 0,
-            })),
+            inner: Arc::new(Mutex::new(JarInner { cookies, total })),
         }
     }
 
-    pub fn store_set_cookie(&self, set_cookie: &str, url: &Url) {
+    pub fn snapshot(&self) -> Self {
+        let jar = lock(&self.inner);
+        Self::from_buckets(jar.cookies.clone(), jar.total)
+    }
+
+    pub fn extend_from(&self, other: &Jar) {
+        if Arc::ptr_eq(&self.inner, &other.inner) {
+            return;
+        }
+        let incoming: Vec<Cookie> = lock(&other.inner)
+            .cookies
+            .values()
+            .flatten()
+            .cloned()
+            .collect();
+        let mut jar = lock(&self.inner);
+        for cookie in incoming {
+            let domain = cookie.domain.to_lowercase();
+            let entries = jar.cookies.entry(domain.clone()).or_default();
+            let added = match entries
+                .iter()
+                .position(|c| c.name == cookie.name && c.path == cookie.path)
+            {
+                Some(pos) => {
+                    entries[pos] = cookie;
+                    false
+                }
+                None => {
+                    entries.push(cookie);
+                    true
+                }
+            };
+            settle(&mut jar, &domain, added);
+        }
+    }
+
+    pub fn store_set_cookie(&self, set_cookie: &str, url: impl IntoUrl) -> Result<()> {
+        self.store(set_cookie, &url.into_url()?);
+        Ok(())
+    }
+
+    fn store(&self, set_cookie: &str, url: &Url) {
         let mut cookie = match parse::parse_set_cookie(set_cookie, url) {
             Some(c) => c,
             None => return,
@@ -79,27 +122,12 @@ impl Jar {
             entries.push(cookie);
             added = true;
         }
-
-        let mut evicted = 0;
-        if entries.len() > MAX_COOKIES_PER_DOMAIN {
-            evict_lru(entries, EVICT_PER_DOMAIN);
-            evicted = EVICT_PER_DOMAIN;
-        }
-
-        if added {
-            jar.total += 1;
-        }
-        jar.total -= evicted;
-
-        if jar.total > MAX_COOKIES_GLOBAL {
-            evict_global(&mut jar.cookies, EVICT_GLOBAL);
-            jar.total = jar.cookies.values().map(|v| v.len()).sum();
-        }
+        settle(&mut jar, &domain, added);
     }
 
     pub(crate) fn store_response_cookies(&self, headers: &[&str], url: &Url) {
         for header in headers {
-            self.store_set_cookie(header, url);
+            self.store(header, url);
         }
     }
 
@@ -174,7 +202,8 @@ impl Jar {
         removed
     }
 
-    pub fn remove(&self, url: &Url, name: &str) -> usize {
+    pub fn remove(&self, url: impl IntoUrl, name: &str) -> Result<usize> {
+        let url = url.into_url()?;
         let host = url.host_str().unwrap_or("");
         let mut jar = lock(&self.inner);
         let mut removed = 0;
@@ -184,7 +213,7 @@ impl Jar {
             removed += before - entries.len();
         }
         jar.total -= removed;
-        removed
+        Ok(removed)
     }
 
     pub fn all_cookies(&self) -> Vec<Cookie> {
@@ -194,44 +223,38 @@ impl Jar {
         out
     }
 
-    pub fn get_cookie(&self, url: &Url, name: &str) -> Option<String> {
+    pub fn get_cookie(&self, url: impl IntoUrl, name: &str) -> Result<Option<String>> {
+        let url = url.into_url()?;
         let domain = url.host_str().unwrap_or("");
         let path = url.path();
         let is_secure = url.scheme() == "https";
 
         let jar = lock(&self.inner);
-        for entries in jar.cookies.values() {
-            for cookie in entries {
-                if cookie.name == name
-                    && cookie.matches(domain, path, is_secure)
-                    && !cookie.is_expired()
-                {
-                    return Some(cookie.value.clone());
-                }
-            }
-        }
-        None
+        Ok(jar
+            .cookies
+            .values()
+            .flatten()
+            .find(|c| c.name == name && c.matches(domain, path, is_secure) && !c.is_expired())
+            .map(|c| c.value.clone()))
     }
 
-    pub fn set_cookie(&self, url: &Url, name: &str, value: &str) {
-        let header = format!("{}={}; Path=/", name, value);
-        self.store_set_cookie(&header, url);
+    pub fn set_cookie(&self, url: impl IntoUrl, name: &str, value: &str) -> Result<()> {
+        self.store(&format!("{}={}; Path=/", name, value), &url.into_url()?);
+        Ok(())
     }
 
-    pub fn load_cookies(&self, cookie_str: &str, url: &Url) {
+    pub fn load_cookies(&self, cookie_str: &str, url: impl IntoUrl) -> Result<()> {
+        let url = url.into_url()?;
         for pair in cookie_str.split(';') {
-            let pair = pair.trim();
-            if let Some(eq) = pair.find('=') {
-                let name = &pair[..eq];
-                let value = &pair[eq + 1..];
-                let header = format!("{}={}; Path=/", name, value);
-                self.store_set_cookie(&header, url);
+            if let Some((name, value)) = pair.trim().split_once('=') {
+                self.store(&format!("{}={}; Path=/", name, value), &url);
             }
         }
+        Ok(())
     }
 
-    pub fn export_cookies(&self, url: &Url) -> String {
-        self.cookie_header(url).unwrap_or_default()
+    pub fn export_cookies(&self, url: impl IntoUrl) -> Result<String> {
+        Ok(self.cookie_header(&url.into_url()?).unwrap_or_default())
     }
 
     pub fn clear(&self) {
@@ -282,12 +305,25 @@ impl<'de> Deserialize<'de> for Jar {
             buckets.entry(key).or_default().push(c);
             total += 1;
         }
-        Ok(Self {
-            inner: Arc::new(Mutex::new(JarInner {
-                cookies: buckets,
-                total,
-            })),
-        })
+        Ok(Self::from_buckets(buckets, total))
+    }
+}
+
+fn settle(jar: &mut JarInner, domain: &str, added: bool) {
+    let mut evicted = 0;
+    if let Some(entries) = jar.cookies.get_mut(domain)
+        && entries.len() > MAX_COOKIES_PER_DOMAIN
+    {
+        evict_lru(entries, EVICT_PER_DOMAIN);
+        evicted = EVICT_PER_DOMAIN;
+    }
+    if added {
+        jar.total += 1;
+    }
+    jar.total -= evicted;
+    if jar.total > MAX_COOKIES_GLOBAL {
+        evict_global(&mut jar.cookies, EVICT_GLOBAL);
+        jar.total = jar.cookies.values().map(|v| v.len()).sum();
     }
 }
 

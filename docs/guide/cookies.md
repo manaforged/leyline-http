@@ -14,16 +14,16 @@ session.get("https://example.com/login").await?;
 
 let jar = session.cookies();
 println!("{} cookies", jar.all_cookies().len());
-let url = url::Url::parse("https://example.com/").expect("valid URL");
-if let Some(id) = jar.get_cookie(&url, "session_id") {
+if let Some(id) = jar.get_cookie("https://example.com/", "session_id")? {
     println!("session_id={id}");
 }
 # Ok(())
 # }
 ```
 
-Every jar method takes a parsed `&url::Url`. A bad URL fails at
-`Url::parse`, so the jar never drops input without an error.
+Every jar method that takes a URL accepts `impl IntoUrl`: a `&str`, a
+`String`, or a `url::Url`, the same input as `Session::get`. A URL that does
+not parse returns `Kind::Url`, so the jar never drops input without an error.
 
 Useful jar methods:
 
@@ -37,7 +37,9 @@ Useful jar methods:
   `url` receives, on every path. It returns the number removed.
 - `remove_named(name)` to delete every cookie with that name on every host.
   It returns the number removed. `clear` deletes all cookies.
-- `all_cookies()` for a snapshot sorted by domain then name.
+- `all_cookies()` for a list sorted by domain then name.
+- `snapshot()` for an independent copy of the jar with every attribute.
+- `extend_from(other)` to merge the cookies of another jar.
 - `load_cookies(header, url)` and `export_cookies(url)` to move a `Cookie`
   header string in and out.
 - `cookie_header(url)` for the `Cookie` header the jar sends to a URL.
@@ -51,14 +53,36 @@ logins.
 ```rust,no_run
 use leyline::cookie::Jar;
 
-# fn run() -> Result<(), url::ParseError> {
-let url = url::Url::parse("https://example.com/")?;
+# fn run() -> leyline::Result<()> {
+let url = "https://example.com/";
 let jar = Jar::new();
-jar.set_cookie(&url, "session_id", "abc");
+jar.set_cookie(url, "session_id", "abc")?;
 
 let shared = jar.clone();
-jar.set_cookie(&url, "extra", "1");
-assert!(shared.get_cookie(&url, "extra").is_some());
+jar.set_cookie(url, "extra", "1")?;
+assert!(shared.get_cookie(url, "extra")?.is_some());
+# Ok(())
+# }
+```
+
+`jar.snapshot()` is a fork: a new store with a copy of every cookie and all
+of its attributes (domain, path, `Secure`, `HttpOnly`, `SameSite`, expiry,
+host-only, and creation order). A write to the copy does not reach the
+original. `jar.extend_from(&other)` merges the cookies of `other` into `jar`
+with their attributes. On the same name, domain, and path, the cookie from
+`other` replaces the one in `jar`.
+
+Use the pair to try a step without touching a stored login: run the step on a
+session that uses a snapshot, and merge the snapshot back only when the step
+succeeds.
+
+```rust,no_run
+# async fn run(session: leyline::Session) -> leyline::Result<()> {
+let probe_jar = session.cookies().snapshot();
+let probe = session.with_cookie_jar(probe_jar.clone());
+if probe.get("https://example.com/check").await?.status().is_success() {
+    session.cookies().extend_from(&probe_jar);
+}
 # Ok(())
 # }
 ```
@@ -75,8 +99,7 @@ use leyline::cookie::Jar;
 
 # fn run() -> leyline::Result<()> {
 let jar = Jar::new();
-let url = url::Url::parse("https://example.com/").expect("valid URL");
-jar.load_cookies("session_id=abc; theme=dark", &url);
+jar.load_cookies("session_id=abc; theme=dark", "https://example.com/")?;
 
 let session = leyline::Session::builder().cookie_jar(jar).build()?;
 let second_identity = session.with_cookie_jar(Jar::new());
@@ -90,14 +113,14 @@ Seed a domain cookie that `set_cookie` cannot express:
 ```rust,no_run
 use leyline::cookie::Jar;
 
-# fn run() -> Result<(), url::ParseError> {
+# fn run() -> leyline::Result<()> {
 let jar = Jar::new();
-let url = url::Url::parse("https://www.example.com/")?;
-jar.store_set_cookie("token=abc; Domain=.example.com; Path=/; Secure", &url);
-jar.store_set_cookie("token=; Domain=.example.com; Path=/; Max-Age=0", &url);
+let url = "https://www.example.com/";
+jar.store_set_cookie("token=abc; Domain=.example.com; Path=/; Secure", url)?;
+jar.store_set_cookie("token=; Domain=.example.com; Path=/; Max-Age=0", url)?;
 assert_eq!(jar.remove_named("token"), 0);
-jar.store_set_cookie("token=abc; Domain=.example.com; Path=/; Secure", &url);
-assert_eq!(jar.remove(&url, "token"), 1);
+jar.store_set_cookie("token=abc; Domain=.example.com; Path=/; Secure", url)?;
+assert_eq!(jar.remove(url, "token")?, 1);
 # Ok(())
 # }
 ```
@@ -107,7 +130,8 @@ assert_eq!(jar.remove(&url, "token"), 1);
 A `Cookie` carries the full RFC 6265bis attribute set: `name`, `value`,
 `domain`, `path`, `secure`, `http_only`, `same_site`, `expires`,
 `creation_time`, `last_access`, and `host_only`. `SameSite` is `Strict`,
-`Lax`, or `None`.
+`Lax`, or `None`. `Cookie::is_expired()` tells whether the expiry has
+passed.
 
 The jar follows Chrome's behavior:
 
