@@ -157,15 +157,25 @@ let rotated = session.with_proxy("http://gateway.example:8080").fresh_pool();
 The pool is keyed by host, port, and proxy, so two proxies never share a
 connection.
 
-## HTTP/3 is not proxied
+## HTTP/3 through a SOCKS5 proxy
 
-QUIC has no proxy path here. `build()` rejects `ProtocolPolicy::Http3` when the
-proxy config sends every URL through a proxy. Otherwise, an `Http3` request
-fails with `Kind::Config` when `ProxyConfig::proxy_for` picks a proxy for its
-URL, and a request that `NO_PROXY` or a scheme rule sends direct runs over
-HTTP/3.
-Under `ProtocolPolicy::Race`, a proxied request is not raced: it goes down the
-`Auto` path instead. See [HTTP/3](http3.md).
+HTTP/3 runs over a `socks5://` or `socks5h://` proxy with the `socks`
+feature. Leyline opens a TCP control connection to the proxy, negotiates
+authentication, and sends `UDP ASSOCIATE` (RFC 1928, section 7). Each QUIC
+datagram goes to the relay address with the SOCKS5 UDP header, and the reply
+header is removed before QUIC reads the datagram. The target host goes in the
+UDP header as a domain name, so the proxy resolves it. When the control
+connection closes, the QUIC connection fails and leaves the pool.
+
+HTTP/3 connections are pooled by host, port, and proxy, as HTTP/2 connections
+are.
+
+An `http://` or `https://` proxy cannot carry HTTP/3. `build()` rejects
+`ProtocolPolicy::Http3` when such a proxy takes every URL. An `Http3` request
+fails with `Kind::Config` when `ProxyConfig::proxy_for` picks such a proxy.
+Under `ProtocolPolicy::Race`, a request through such a proxy is not raced: it
+goes down the `Auto` path. MASQUE (`CONNECT-UDP`, RFC 9298) is not supported.
+See [HTTP/3](http3.md).
 
 ## Next
 

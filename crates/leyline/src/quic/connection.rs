@@ -1,9 +1,12 @@
 use leyline_quiche as quiche;
 
 use crate::profile::BrowserProfile;
-use crate::tls::{Resolver, TlsMinVersion, TlsTrustConfig, apply_profile_with_trust};
+use crate::tls::{
+    FingerprintConnector, Resolver, TlsMinVersion, TlsTrustConfig, apply_profile_with_trust,
+};
 
 use crate::quic::config::H3Config;
+use crate::quic::transport::DatagramTransport;
 
 #[derive(Debug)]
 pub struct H3Response {
@@ -14,7 +17,7 @@ pub struct H3Response {
 }
 
 pub(crate) struct EstablishedH3 {
-    pub(crate) socket: tokio::net::UdpSocket,
+    pub(crate) socket: DatagramTransport,
     pub(crate) conn: Box<quiche::Connection>,
     pub(crate) h3: quiche::h3::Connection,
     pub(crate) peer_addr: std::net::SocketAddr,
@@ -79,28 +82,16 @@ pub(crate) async fn connect_and_handshake(
     h3_cfg: &H3Config,
     profile: &BrowserProfile,
     trust: &TlsTrustConfig,
-    resolver: &dyn Resolver,
+    connector: &FingerprintConnector,
     host: &str,
     port: u16,
+    proxy: Option<&str>,
 ) -> Result<EstablishedH3, String> {
     validate_connection_id_len(h3_cfg.dcid_length)?;
     let host = crate::util::bare_host(host);
 
     let mut config = build_quic_config(h3_cfg, profile, trust, host)?;
-    let peer_addr = resolve_peer(resolver, host, port).await?;
-
-    let bind = match peer_addr {
-        std::net::SocketAddr::V4(_) => "0.0.0.0:0",
-        std::net::SocketAddr::V6(_) => "[::]:0",
-    };
-
-    let socket = tokio::net::UdpSocket::bind(bind)
-        .await
-        .map_err(|e| format!("udp bind: {e}"))?;
-    socket
-        .connect(peer_addr)
-        .await
-        .map_err(|e| format!("udp connect: {e}"))?;
+    let (socket, peer_addr) = DatagramTransport::open(connector, host, port, proxy).await?;
     let local_addr = socket
         .local_addr()
         .map_err(|e| format!("local addr: {e}"))?;
@@ -183,7 +174,7 @@ pub(crate) async fn connect_and_handshake(
 }
 
 pub(crate) async fn flush_egress(
-    socket: &tokio::net::UdpSocket,
+    socket: &DatagramTransport,
     conn: &mut quiche::Connection,
     out: &mut [u8],
 ) -> Result<(), String> {
@@ -222,7 +213,7 @@ pub(crate) fn close_reason(ctx: &str, iter: u32, conn: &quiche::Connection) -> S
     )
 }
 
-async fn resolve_peer(
+pub(super) async fn resolve_peer(
     resolver: &dyn Resolver,
     host: &str,
     port: u16,

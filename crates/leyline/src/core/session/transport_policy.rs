@@ -10,7 +10,7 @@ use crate::pool::checkout_handle;
 #[cfg(feature = "http3")]
 use crate::pool::{H3Target, checkout_h3_handle};
 #[cfg(feature = "http3")]
-use crate::quic::H3Config;
+use crate::quic::{H3Config, proxy_carries_h3};
 
 impl Session {
     pub(crate) fn proxy_for<'a>(
@@ -53,9 +53,10 @@ impl Session {
             ProtocolPolicy::Http2 => send_request_h2(pool, connector, h2_config, req).await,
             #[cfg(feature = "http3")]
             ProtocolPolicy::Http3 => {
-                if req.proxy.is_some() {
+                if !proxy_carries_h3(req.proxy) {
                     return Err(Error::new(Kind::Config).with_message(
-                        "HTTP/3 over proxies is not implemented; use Auto or Http2",
+                        "HTTP/3 needs a socks5:// or socks5h:// proxy with UDP ASSOCIATE; \
+                         http and https proxies cannot carry QUIC, use Auto or Http2",
                     ));
                 }
                 let h3_config = self.inner.h3_config.as_ref().ok_or_else(|| {
@@ -74,7 +75,7 @@ impl Session {
                 let raceable = known_h3
                     && !req.body.is_stream()
                     && !req.stream_response
-                    && req.proxy.is_none()
+                    && proxy_carries_h3(req.proxy)
                     && req.url.scheme() == "https";
                 match (raceable, self.inner.h3_config.as_ref()) {
                     (true, Some(h3_config)) => self.send_raced(h3_config, req).await,
@@ -104,7 +105,7 @@ impl Session {
         }
 
         let target = self.h3_target(h3_config);
-        let h3_connect = checkout_h3_handle(pool, &target, host, port);
+        let h3_connect = checkout_h3_handle(pool, &target, host, port, req.proxy);
         let h2_connect = checkout_handle(pool, connector, h2_config, host, port, req.proxy);
         tokio::pin!(h3_connect, h2_connect);
 

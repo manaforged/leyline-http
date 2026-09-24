@@ -339,15 +339,9 @@ pub(crate) async fn open_fresh_h3(
     connector: &FingerprintConnector,
     host: &str,
     port: u16,
+    proxy: Option<&str>,
 ) -> Result<(H3Client, TlsInfo), String> {
-    let handshake = connect_and_handshake(
-        h3_cfg,
-        profile,
-        trust,
-        connector.resolver().as_ref(),
-        host,
-        port,
-    );
+    let handshake = connect_and_handshake(h3_cfg, profile, trust, connector, host, port, proxy);
     let established = within(connector.connect_timeout(), handshake)
         .await
         .map_err(|Elapsed| format!("h3 handshake to {host}:{port}: connect timeout"))??;

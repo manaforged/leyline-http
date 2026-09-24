@@ -307,6 +307,7 @@ pub(crate) async fn send_request_h3(
         mut headers,
         body,
         stream_response,
+        proxy,
         ..
     } = req;
     let host = url
@@ -338,6 +339,7 @@ pub(crate) async fn send_request_h3(
             authority: &authority,
             path: &full_path,
             headers: &headers,
+            proxy,
         },
         body,
         stream_response,

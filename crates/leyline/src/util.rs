@@ -34,6 +34,14 @@ pub(crate) fn bare_host(host: &str) -> &str {
         .unwrap_or(host)
 }
 
+pub(crate) fn unspecified_for(peer: std::net::SocketAddr) -> std::net::SocketAddr {
+    let ip: std::net::IpAddr = match peer {
+        std::net::SocketAddr::V4(_) => std::net::Ipv4Addr::UNSPECIFIED.into(),
+        std::net::SocketAddr::V6(_) => std::net::Ipv6Addr::UNSPECIFIED.into(),
+    };
+    std::net::SocketAddr::new(ip, 0)
+}
+
 pub(crate) fn base64_encode(input: &str) -> String {
     use base64::Engine;
     base64::engine::general_purpose::STANDARD.encode(input.as_bytes())

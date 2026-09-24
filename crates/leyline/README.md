@@ -127,7 +127,8 @@ browser is a bare session that impersonates no browser.
   only.
 - HTTP/3 has no browser capture golden. QUIC transport parameters are not
   checked against a browser. The QPACK decoder uses no dynamic table.
-- HTTP/3 through a proxy is not supported.
+- HTTP/3 through a proxy needs a SOCKS5 proxy with `UDP ASSOCIATE`. HTTP
+  and HTTPS proxies cannot carry HTTP/3; MASQUE is not supported.
 - A profile loaded with `SessionBuilder::profile` has no platform twin. Its
   header order comes from `header_style` in `[meta]`, and the order tables
   for each style are part of the crate.

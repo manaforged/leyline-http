@@ -269,10 +269,12 @@ Total: 264 public functions.
 - `ProxyConfig::proxy_for` picks the proxy for each URL, rules first, then
   `no_proxy`. `send()` checks the proxy URL it picks and fails with
   `Kind::Config` if the URL is invalid. `build()` checks the session rules.
-- HTTP/3 does not run over a proxy. `build()` rejects `ProtocolPolicy::Http3`
-  when the proxy config sends every URL through a proxy. `send()` rejects an
-  HTTP/3 request when `proxy_for` picks a proxy, and a `Race` session sends
-  that request over HTTP/2.
+- HTTP/3 runs over a `socks5://` or `socks5h://` proxy through SOCKS5
+  `UDP ASSOCIATE` when the `socks` feature is on. The pool keys HTTP/3
+  connections by proxy. An `http://` or `https://` proxy cannot carry HTTP/3:
+  `build()` rejects `ProtocolPolicy::Http3` when such a proxy takes every URL,
+  `send()` rejects an HTTP/3 request when `proxy_for` picks one, and a `Race`
+  session sends that request over HTTP/2.
 - Connection setup has no retry of its own. A failed connect returns the
   error to `RequestBuilder::send`, and `RetryTrigger::ConnectionError`
   decides whether to retry it.

@@ -273,11 +273,12 @@ impl SessionBuilder {
         {
             if self.proxy_config.proxies_every_url()
                 && matches!(self.protocol_policy, ProtocolPolicy::Http3)
+                && !crate::quic::proxy_carries_h3(self.proxy_config.primary())
             {
                 return Err(Error::new(Kind::Config).with_message(
-                    "HTTP/3 cannot run over a proxy (QUIC/UDP needs MASQUE, which proxies don't \
-                     speak): use another `.protocol(..)` to run HTTP/2 over the proxy's CONNECT tunnel, \
-                     or drop `.proxy(..)` to dial HTTP/3 direct",
+                    "HTTP/3 needs a socks5:// or socks5h:// proxy with UDP ASSOCIATE; http and \
+                     https proxies cannot carry QUIC: use another `.protocol(..)` to run HTTP/2 \
+                     over the proxy's CONNECT tunnel, or use a SOCKS5 proxy",
                 ));
             }
         }

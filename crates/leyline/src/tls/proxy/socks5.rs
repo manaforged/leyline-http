@@ -1,3 +1,5 @@
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
@@ -6,6 +8,9 @@ use crate::tls::{SessionCache, TlsStream};
 
 use crate::util::percent_decode;
 
+const CMD_CONNECT: u8 = 0x01;
+const CMD_UDP_ASSOCIATE: u8 = 0x03;
+
 pub(crate) async fn connect<C: crate::tls::TlsHandshake>(
     connector: &C,
     host: &str,
@@ -13,6 +18,52 @@ pub(crate) async fn connect<C: crate::tls::TlsHandshake>(
     proxy: &url::Url,
     include_alps: bool,
 ) -> Result<TlsStream, TlsError> {
+    let mut tcp_stream = open_control(connector, proxy).await?;
+    send_connect(&mut tcp_stream, host, port).await?;
+
+    let session_key = SessionCache::key(host, port, Some(proxy));
+    connector
+        .do_tls_handshake(tcp_stream, host, &session_key, include_alps)
+        .await
+}
+
+pub(crate) async fn udp_associate<C: crate::tls::TlsHandshake>(
+    connector: &C,
+    proxy: &url::Url,
+) -> Result<(TcpStream, SocketAddr), TlsError> {
+    let mut control = open_control(connector, proxy).await?;
+    let unspecified = SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0));
+    let bound = request(
+        &mut control,
+        CMD_UDP_ASSOCIATE,
+        &encode_socket_addr(unspecified),
+    )
+    .await?;
+    let relay = match bound {
+        Bound::Ip(addr) if addr.ip().is_unspecified() => {
+            let proxy_ip = control.peer_addr().map_err(TlsError::proxy_io)?.ip();
+            SocketAddr::new(proxy_ip, addr.port())
+        }
+        Bound::Ip(addr) => addr,
+        Bound::Domain => {
+            return Err(TlsError::proxy(
+                "socks5: UDP ASSOCIATE relay address is a domain name",
+            ));
+        }
+    };
+    Ok((control, relay))
+}
+
+async fn send_connect(tcp_stream: &mut TcpStream, host: &str, port: u16) -> Result<(), TlsError> {
+    request(tcp_stream, CMD_CONNECT, &encode_addr(host, port)?)
+        .await
+        .map(drop)
+}
+
+async fn open_control<C: crate::tls::TlsHandshake>(
+    connector: &C,
+    proxy: &url::Url,
+) -> Result<TcpStream, TlsError> {
     let auth = auth_request(proxy)?;
     let mut tcp_stream = super::connect_to_proxy(connector, proxy, 1080).await?;
 
@@ -50,13 +101,7 @@ pub(crate) async fn connect<C: crate::tls::TlsHandshake>(
             )));
         }
     }
-
-    send_connect(&mut tcp_stream, host, port).await?;
-
-    let session_key = SessionCache::key(host, port, Some(proxy));
-    connector
-        .do_tls_handshake(tcp_stream, host, &session_key, include_alps)
-        .await
+    Ok(tcp_stream)
 }
 
 fn auth_request(proxy: &url::Url) -> Result<Option<Vec<u8>>, TlsError> {
@@ -114,33 +159,76 @@ async fn authenticate(tcp_stream: &mut TcpStream, auth: &[u8]) -> Result<(), Tls
     Ok(())
 }
 
-async fn send_connect(tcp_stream: &mut TcpStream, host: &str, port: u16) -> Result<(), TlsError> {
-    let mut connect_req = vec![0x05, 0x01, 0x00];
-    match crate::util::bare_host(host).parse::<std::net::IpAddr>() {
-        Ok(std::net::IpAddr::V4(ip)) => {
-            connect_req.push(0x01);
-            connect_req.extend_from_slice(&ip.octets());
+pub(crate) enum Bound {
+    Ip(SocketAddr),
+    Domain,
+}
+
+pub(crate) fn encode_addr(host: &str, port: u16) -> Result<Vec<u8>, TlsError> {
+    let bare = crate::util::bare_host(host);
+    if let Ok(ip) = bare.parse::<IpAddr>() {
+        return Ok(encode_socket_addr(SocketAddr::new(ip, port)));
+    }
+    let host_bytes = host.as_bytes();
+    let len = u8::try_from(host_bytes.len()).map_err(|_| {
+        TlsError::proxy(format!(
+            "socks5: hostname too long ({} bytes, max 255)",
+            host_bytes.len()
+        ))
+    })?;
+    let mut out = Vec::with_capacity(4 + host_bytes.len());
+    out.push(0x03);
+    out.push(len);
+    out.extend_from_slice(host_bytes);
+    out.extend_from_slice(&port.to_be_bytes());
+    Ok(out)
+}
+
+fn encode_socket_addr(addr: SocketAddr) -> Vec<u8> {
+    let mut out = Vec::with_capacity(19);
+    match addr.ip() {
+        IpAddr::V4(ip) => {
+            out.push(0x01);
+            out.extend_from_slice(&ip.octets());
         }
-        Ok(std::net::IpAddr::V6(ip)) => {
-            connect_req.push(0x04);
-            connect_req.extend_from_slice(&ip.octets());
-        }
-        Err(_) => {
-            let host_bytes = host.as_bytes();
-            let len = u8::try_from(host_bytes.len()).map_err(|_| {
-                TlsError::proxy(format!(
-                    "socks5: hostname too long ({} bytes, max 255)",
-                    host_bytes.len()
-                ))
-            })?;
-            connect_req.push(0x03);
-            connect_req.push(len);
-            connect_req.extend_from_slice(host_bytes);
+        IpAddr::V6(ip) => {
+            out.push(0x04);
+            out.extend_from_slice(&ip.octets());
         }
     }
-    connect_req.extend_from_slice(&port.to_be_bytes());
+    out.extend_from_slice(&addr.port().to_be_bytes());
+    out
+}
+
+pub(crate) fn addr_len(atyp: u8, next: Option<u8>) -> Result<usize, TlsError> {
+    match (atyp, next) {
+        (0x01, _) => Ok(4 + 2),
+        (0x04, _) => Ok(16 + 2),
+        (0x03, Some(len)) => Ok(1 + len as usize + 2),
+        (0x03, None) => Err(TlsError::proxy("socks5: truncated domain address")),
+        (other, _) => Err(TlsError::proxy(format!(
+            "socks5: unknown address type 0x{other:02x}"
+        ))),
+    }
+}
+
+pub(crate) fn decode_bound(atyp: u8, body: &[u8]) -> Bound {
+    let port_at = body.len() - 2;
+    let port = u16::from_be_bytes([body[port_at], body[port_at + 1]]);
+    let ip = match atyp {
+        0x01 => <[u8; 4]>::try_from(&body[..4]).map(IpAddr::from).ok(),
+        0x04 => <[u8; 16]>::try_from(&body[..16]).map(IpAddr::from).ok(),
+        _ => None,
+    };
+    ip.map_or(Bound::Domain, |ip| Bound::Ip(SocketAddr::new(ip, port)))
+}
+
+async fn request(tcp_stream: &mut TcpStream, cmd: u8, addr: &[u8]) -> Result<Bound, TlsError> {
+    let mut req = Vec::with_capacity(3 + addr.len());
+    req.extend_from_slice(&[0x05, cmd, 0x00]);
+    req.extend_from_slice(addr);
     tcp_stream
-        .write_all(&connect_req)
+        .write_all(&req)
         .await
         .map_err(TlsError::proxy_io)?;
 
@@ -151,7 +239,7 @@ async fn send_connect(tcp_stream: &mut TcpStream, host: &str, port: u16) -> Resu
         .map_err(TlsError::proxy_io)?;
 
     if resp_buf[0] != 0x05 {
-        return Err(TlsError::proxy("socks5: invalid CONNECT response version"));
+        return Err(TlsError::proxy("socks5: invalid reply version"));
     }
     if resp_buf[1] != 0x00 {
         let reason = match resp_buf[1] {
@@ -165,46 +253,35 @@ async fn send_connect(tcp_stream: &mut TcpStream, host: &str, port: u16) -> Resu
             0x08 => "address type not supported",
             _ => "unknown error",
         };
-        return Err(TlsError::proxy(format!("socks5: CONNECT failed: {reason}")));
+        let name = if cmd == CMD_UDP_ASSOCIATE {
+            "UDP ASSOCIATE"
+        } else {
+            "CONNECT"
+        };
+        return Err(TlsError::proxy(format!("socks5: {name} failed: {reason}")));
     }
 
-    match resp_buf[3] {
-        0x01 => {
-            let mut skip = [0u8; 6];
-            tcp_stream
-                .read_exact(&mut skip)
-                .await
-                .map_err(TlsError::proxy_io)?;
-        }
-        0x03 => {
-            let mut len_buf = [0u8; 1];
-            tcp_stream
-                .read_exact(&mut len_buf)
-                .await
-                .map_err(TlsError::proxy_io)?;
-            let skip_len = len_buf[0] as usize + 2;
-            let mut skip = vec![0u8; skip_len];
-            tcp_stream
-                .read_exact(&mut skip)
-                .await
-                .map_err(TlsError::proxy_io)?;
-        }
-        0x04 => {
-            let mut skip = [0u8; 18];
-            tcp_stream
-                .read_exact(&mut skip)
-                .await
-                .map_err(TlsError::proxy_io)?;
-        }
-        other => {
-            return Err(TlsError::proxy(format!(
-                "socks5: unknown address type 0x{other:02x}"
-            )));
-        }
-    }
-
-    Ok(())
+    let atyp = resp_buf[3];
+    let mut first = [0u8; 1];
+    let domain_len = if atyp == 0x03 {
+        tcp_stream
+            .read_exact(&mut first)
+            .await
+            .map_err(TlsError::proxy_io)?;
+        Some(first[0])
+    } else {
+        None
+    };
+    let len = addr_len(atyp, domain_len)? - usize::from(domain_len.is_some());
+    let mut body = vec![0u8; len];
+    tcp_stream
+        .read_exact(&mut body)
+        .await
+        .map_err(TlsError::proxy_io)?;
+    Ok(decode_bound(atyp, &body))
 }
+
+pub(crate) mod udp;
 
 #[cfg(test)]
 mod tests;

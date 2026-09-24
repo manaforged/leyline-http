@@ -53,7 +53,7 @@ A request is raced only when all of these hold:
 - The origin is known to speak HTTP/3.
 - The request body is not a stream.
 - The response is not streamed.
-- No proxy applies.
+- No proxy applies, or the proxy is `socks5://` or `socks5h://`.
 - The scheme is `https`.
 
 Otherwise the request falls back to `Auto`. When the race runs, the first
@@ -81,12 +81,15 @@ direction, so header fields are encoded against the static table and
 literals only. Browsers use the QPACK dynamic table. Leyline does not, so an
 observer can tell the two apart.
 
-## No proxy support
+## Proxies
 
-HTTP/3 does not go through a proxy. A forced `Http3` request with a session
-proxy or a per-request proxy fails with `Kind::Config`, telling you to use
-`Auto` or `Http2`. Under `Race`, a proxied request is not raced and takes the
-`Auto` path.
+HTTP/3 goes through a `socks5://` or `socks5h://` proxy with the `socks`
+feature. Leyline uses SOCKS5 `UDP ASSOCIATE` to relay the QUIC datagrams. See
+[Proxies](proxies.md).
+
+An `http://` or `https://` proxy cannot carry QUIC. A forced `Http3` request
+through such a proxy fails with `Kind::Config`, telling you to use `Auto` or
+`Http2`. Under `Race`, such a request is not raced and takes the `Auto` path.
 
 ## Next
 

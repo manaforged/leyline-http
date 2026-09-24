@@ -193,9 +193,17 @@ async fn open_fresh_h3_installed(
     connector: FingerprintConnector,
     key: PoolKey,
 ) -> Result<(H3Client, TlsInfo), Error> {
-    let (handle, tls) = open_fresh_h3(&config, &profile, &trust, &connector, &key.host, key.port)
-        .await
-        .map_err(|e| Error::new(Kind::Http3).with_message(e))?;
+    let (handle, tls) = open_fresh_h3(
+        &config,
+        &profile,
+        &trust,
+        &connector,
+        &key.host,
+        key.port,
+        key.proxy.as_deref(),
+    )
+    .await
+    .map_err(|e| Error::new(Kind::Http3).with_message(e))?;
     Ok(pool.install_or_get_h3(key, handle, tls))
 }
 
@@ -229,15 +237,16 @@ pub(crate) async fn open_h3(
     name = "pool.checkout_h3_handle",
     level = "debug",
     skip_all,
-    fields(host, port)
+    fields(host, port, proxied = proxy.is_some())
 )]
 pub async fn checkout_h3_handle(
     pool: &Arc<Pool>,
     target: &H3Target<'_>,
     host: &str,
     port: u16,
+    proxy: Option<&str>,
 ) -> Result<(H3Client, TlsInfo), Error> {
-    let key = super::make_key("https", host, port, None, Transport::Quic);
+    let key = super::make_key("https", host, port, proxy, Transport::Quic);
 
     pool.evict_idle();
 

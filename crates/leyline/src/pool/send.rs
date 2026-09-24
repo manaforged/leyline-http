@@ -27,6 +27,7 @@ pub(crate) struct H3Request<'a> {
     pub(crate) authority: &'a str,
     pub(crate) path: &'a str,
     pub(crate) headers: &'a [(String, String)],
+    pub(crate) proxy: Option<&'a str>,
 }
 
 #[cfg(feature = "http3")]
@@ -39,7 +40,7 @@ pub(crate) async fn send_request_h3_pooled(
     body: Body,
     stream_response: bool,
 ) -> Result<(H3ResponseParts, TlsInfo), Error> {
-    let key = make_key("https", host, port, None, Transport::Quic);
+    let key = make_key("https", host, port, request.proxy, Transport::Quic);
 
     pool.evict_idle();
 
