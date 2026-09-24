@@ -28,7 +28,7 @@ pub(crate) async fn connect_via_tls<C: crate::tls::TlsHandshake>(
     include_alps: bool,
 ) -> Result<TlsStream, TlsError> {
     if connector.has_origin_tls_identity() {
-        return Err(TlsError::Profile(
+        return Err(TlsError::proxy(
             "https:// proxy is not supported together with a client certificate or certificate \
              pins: the origin TLS identity must not be presented to the proxy. Use an http:// \
              CONNECT or socks5:// proxy, or drop the client cert / pins."
@@ -38,7 +38,7 @@ pub(crate) async fn connect_via_tls<C: crate::tls::TlsHandshake>(
 
     let proxy_host = proxy
         .host_str()
-        .ok_or_else(|| TlsError::Profile("https proxy has no host".into()))?;
+        .ok_or_else(|| TlsError::proxy("https proxy has no host".into()))?;
     let tcp_stream = super::connect_to_proxy(connector, proxy, 443).await?;
 
     let proxy_key = SessionCache::key(
@@ -48,7 +48,8 @@ pub(crate) async fn connect_via_tls<C: crate::tls::TlsHandshake>(
     );
     let proxy_tls = connector
         .do_tls_handshake(tcp_stream, proxy_host, &proxy_key, false)
-        .await?;
+        .await
+        .map_err(TlsError::into_proxy)?;
     let mut tunnel = proxy_tls.stream;
     write_connect_and_validate(&mut tunnel, host, port, proxy).await?;
 
@@ -78,20 +79,20 @@ where
     stream
         .write_all(connect_req.as_bytes())
         .await
-        .map_err(TlsError::TcpConnect)?;
+        .map_err(TlsError::proxy_io)?;
 
     let mut response_buf = Vec::with_capacity(1024);
     let mut tmp = [0u8; 256];
     let end_idx = loop {
-        let n = stream.read(&mut tmp).await.map_err(TlsError::TcpConnect)?;
+        let n = stream.read(&mut tmp).await.map_err(TlsError::proxy_io)?;
         if n == 0 {
-            return Err(TlsError::Profile(
+            return Err(TlsError::proxy(
                 "proxy closed connection before CONNECT response".into(),
             ));
         }
         response_buf.extend_from_slice(&tmp[..n]);
         if response_buf.len() > 8192 {
-            return Err(TlsError::Profile("proxy CONNECT response too large".into()));
+            return Err(TlsError::proxy("proxy CONNECT response too large".into()));
         }
         if let Some(i) = response_buf.windows(4).position(|w| w == b"\r\n\r\n") {
             break i + 4;
@@ -103,14 +104,14 @@ where
 
 pub fn validate_connect_response(buf: &[u8], end_idx: usize) -> Result<(), TlsError> {
     if end_idx < 4 || end_idx > buf.len() {
-        return Err(TlsError::Profile(format!(
+        return Err(TlsError::proxy(format!(
             "proxy CONNECT response validator called with out-of-contract end_idx={end_idx} buf.len={}",
             buf.len()
         )));
     }
 
     let response = std::str::from_utf8(&buf[..end_idx])
-        .map_err(|_| TlsError::Profile("proxy CONNECT response is not UTF-8".into()))?;
+        .map_err(|_| TlsError::proxy("proxy CONNECT response is not UTF-8".into()))?;
     let mut lines = response.split("\r\n");
     let status_line = lines.next().unwrap_or("");
 
@@ -118,9 +119,11 @@ pub fn validate_connect_response(buf: &[u8], end_idx: usize) -> Result<(), TlsEr
     let version = parts.next().unwrap_or("");
     let code = parts.next().unwrap_or("");
     if !matches!(version, "HTTP/1.1" | "HTTP/1.0") || code != "200" {
-        return Err(TlsError::Profile(format!(
-            "proxy CONNECT failed: {status_line}"
-        )));
+        return Err(TlsError::Proxy {
+            status: code.parse().ok(),
+            detail: format!("proxy CONNECT failed: {status_line}"),
+            source: None,
+        });
     }
 
     for line in lines {
@@ -132,7 +135,7 @@ pub fn validate_connect_response(buf: &[u8], end_idx: usize) -> Result<(), TlsEr
             if name.eq_ignore_ascii_case("content-length")
                 || name.eq_ignore_ascii_case("transfer-encoding")
             {
-                return Err(TlsError::Profile(format!(
+                return Err(TlsError::proxy(format!(
                     "proxy CONNECT response contains forbidden framing header `{name}` \
                      (RFC 9110 §9.3.6)"
                 )));
@@ -141,7 +144,7 @@ pub fn validate_connect_response(buf: &[u8], end_idx: usize) -> Result<(), TlsEr
     }
 
     if end_idx < buf.len() {
-        return Err(TlsError::Profile(
+        return Err(TlsError::proxy(
             "proxy CONNECT response carries trailing bytes after headers \
              (possible TLS-stream injection)"
                 .into(),

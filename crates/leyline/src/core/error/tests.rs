@@ -108,7 +108,7 @@ fn status_kind_carries_status() {
 
 #[test]
 fn predicates_are_kind_scoped() {
-    for kind in [Kind::Builder, Kind::Request, Kind::Config, Kind::Proxy] {
+    for kind in [Kind::Request, Kind::Config, Kind::Proxy] {
         let err = Error::new(kind);
         assert!(!err.is_timeout(), "{kind} must not be a timeout");
         assert!(!err.is_connect(), "{kind} must not be a connect failure");
@@ -155,7 +155,7 @@ fn display_names_the_kind_and_appends_the_url() {
     );
 
     let sourced = tls(TlsError::Hostname("wrong host".into()));
-    assert_eq!(sourced.to_string(), "tls: hostname: wrong host");
+    assert_eq!(sourced.to_string(), "tls");
 }
 
 #[test]
@@ -166,7 +166,7 @@ fn without_url_drops_the_url_from_display() {
     assert!(err.to_string().contains("example.test"));
     let bare = err.without_url();
     assert!(bare.url().is_none());
-    assert_eq!(bare.to_string(), "http: boom");
+    assert_eq!(bare.to_string(), "request: boom");
 }
 
 #[test]

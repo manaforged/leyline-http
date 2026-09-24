@@ -15,9 +15,12 @@ pub(crate) async fn connect_to_proxy<C: crate::tls::TlsHandshake>(
 ) -> Result<TcpStream, TlsError> {
     let host = proxy
         .host_str()
-        .ok_or_else(|| TlsError::Profile(format!("{} proxy has no host", proxy.scheme())))?;
+        .ok_or_else(|| TlsError::proxy(format!("{} proxy has no host", proxy.scheme())))?;
     let port = proxy.port_or_known_default().unwrap_or(fallback_port);
-    connector.dial_tcp(host, port).await
+    connector
+        .dial_tcp(host, port)
+        .await
+        .map_err(TlsError::into_proxy)
 }
 
 pub(crate) async fn connect_through_proxy<C: crate::tls::TlsHandshake>(
@@ -28,20 +31,20 @@ pub(crate) async fn connect_through_proxy<C: crate::tls::TlsHandshake>(
     include_alps: bool,
 ) -> Result<TlsStream, TlsError> {
     let proxy = url::Url::parse(proxy_url)
-        .map_err(|e| TlsError::Profile(format!("invalid proxy URL: {e}")))?;
+        .map_err(|e| TlsError::proxy(format!("invalid proxy URL: {e}")))?;
 
     match proxy.scheme() {
         "socks5" | "socks5h" => {
             #[cfg(feature = "socks")]
             return socks5::connect(connector, host, port, &proxy, include_alps).await;
             #[cfg(not(feature = "socks"))]
-            return Err(TlsError::Profile(
+            return Err(TlsError::proxy(
                 "SOCKS proxy support requires the `socks` feature".into(),
             ));
         }
         "http" => http::connect(connector, host, port, &proxy, include_alps).await,
         "https" => http::connect_via_tls(connector, host, port, &proxy, include_alps).await,
-        other => Err(TlsError::Profile(format!(
+        other => Err(TlsError::proxy(format!(
             "unsupported proxy scheme `{other}`: leyline tunnels through http://, https://, or \
              socks5:// proxies. Sending CONNECT to a `{other}` proxy would transmit it — including \
              any Proxy-Authorization credentials — in cleartext."

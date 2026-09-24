@@ -281,8 +281,14 @@ async fn open_new(
                 ),
                 None => (host, port),
             };
+            let via_proxy = parsed.is_some();
             let stream = connector
-                .with_timeout(connector.dial_tcp(dial_host, dial_port))
+                .with_timeout(async {
+                    connector
+                        .dial_tcp(dial_host, dial_port)
+                        .await
+                        .map_err(|e| if via_proxy { e.into_proxy() } else { e })
+                })
                 .await?;
             let io: Box<dyn H1Io> = Box::new(stream);
             Ok((io, TlsInfo::default()))

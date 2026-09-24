@@ -17,7 +17,6 @@ type Source = Box<dyn StdError + Send + Sync>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Kind {
-    Builder,
     Request,
     Redirect,
     Status,
@@ -38,8 +37,7 @@ pub enum Kind {
 impl Kind {
     pub fn as_str(self) -> &'static str {
         match self {
-            Kind::Builder => "builder",
-            Kind::Request => "http",
+            Kind::Request => "request",
             Kind::Redirect => "redirect",
             Kind::Status => "status",
             Kind::Body => "body",
@@ -139,18 +137,10 @@ impl Error {
     }
 
     pub fn is_timeout(&self) -> bool {
-        if self.inner.kind == Kind::Timeout {
-            return true;
-        }
-        if self
-            .io()
-            .is_some_and(|e| e.kind() == io::ErrorKind::TimedOut)
-        {
-            return true;
-        }
-        self.tls()
-            .and_then(io_kind)
-            .is_some_and(|k| k == io::ErrorKind::TimedOut)
+        self.inner.kind == Kind::Timeout
+            || self
+                .io_cause()
+                .is_some_and(|e| e.kind() == io::ErrorKind::TimedOut)
     }
 
     pub fn is_connect(&self) -> bool {
@@ -164,7 +154,7 @@ impl Error {
                     | TlsError::Dns(_)
                     | TlsError::Handshake(_)
                     | TlsError::HandshakeIo(_)
-                    | TlsError::SslConnect(_)
+                    | TlsError::Rejected(_)
             )
         ) {
             return true;
@@ -182,6 +172,20 @@ impl Error {
 
     pub fn is_status(&self) -> bool {
         self.inner.kind == Kind::Status
+    }
+
+    pub fn is_retryable(&self) -> bool {
+        self.is_timeout() || self.is_connect() || self.is_connection_closed() || self.is_proxy_io()
+    }
+
+    fn is_proxy_io(&self) -> bool {
+        matches!(
+            self.tls(),
+            Some(TlsError::Proxy {
+                source: Some(_),
+                ..
+            })
+        )
     }
 
     pub(crate) fn is_connection_closed(&self) -> bool {
@@ -214,8 +218,13 @@ impl Error {
         }
         matches!(
             self.tls(),
-            Some(TlsError::Handshake(_) | TlsError::HandshakeIo(_) | TlsError::SslConnect(_))
+            Some(TlsError::Handshake(_) | TlsError::HandshakeIo(_) | TlsError::Rejected(_))
         )
+    }
+
+    fn io_cause(&self) -> Option<&io::Error> {
+        self.io()
+            .or_else(|| self.tls().and_then(TlsError::io_source))
     }
 
     pub fn io(&self) -> Option<&io::Error> {
@@ -237,13 +246,6 @@ impl Error {
     fn source_as<T: StdError + 'static>(&self) -> Option<&T> {
         self.inner.source.as_ref()?.downcast_ref::<T>()
     }
-
-    fn detail(&self) -> Option<String> {
-        if let Some(message) = &self.inner.message {
-            return Some(message.to_string());
-        }
-        self.inner.source.as_ref().map(ToString::to_string)
-    }
 }
 
 impl fmt::Display for Error {
@@ -252,8 +254,8 @@ impl fmt::Display for Error {
         if let Some(status) = self.inner.status {
             write!(f, " {}", status.as_u16())?;
         }
-        if let Some(detail) = self.detail() {
-            write!(f, ": {detail}")?;
+        if let Some(message) = &self.inner.message {
+            write!(f, ": {message}")?;
         }
         if let Some(url) = &self.inner.url {
             write!(f, " for {}", crate::util::redact(&url.to_string()))?;
@@ -288,13 +290,6 @@ impl StdError for Error {
     }
 }
 
-fn io_kind(err: &TlsError) -> Option<io::ErrorKind> {
-    match err {
-        TlsError::TcpConnect(e) | TlsError::Dns(e) | TlsError::HandshakeIo(e) => Some(e.kind()),
-        _ => None,
-    }
-}
-
 impl Error {
     pub(crate) fn from_url_parse(e: url::ParseError) -> Self {
         Error::new(Kind::Url).with_source(e)
@@ -313,7 +308,13 @@ impl From<io::Error> for Error {
 
 impl From<TlsError> for Error {
     fn from(e: TlsError) -> Self {
-        Error::new(Kind::Tls).with_source(e)
+        let kind = match &e {
+            TlsError::Dns(_) | TlsError::TcpConnect(_) => Kind::Connect,
+            TlsError::Proxy { .. } => Kind::Proxy,
+            TlsError::SslConfig(_) | TlsError::Profile(_) | TlsError::TrustStore(_) => Kind::Config,
+            _ => Kind::Tls,
+        };
+        Error::new(kind).with_source(e)
     }
 }
 

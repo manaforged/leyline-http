@@ -20,22 +20,22 @@ pub(crate) async fn connect<C: crate::tls::TlsHandshake>(
         tcp_stream
             .write_all(&[0x05, 0x02, 0x00, 0x02])
             .await
-            .map_err(TlsError::TcpConnect)?;
+            .map_err(TlsError::proxy_io)?;
     } else {
         tcp_stream
             .write_all(&[0x05, 0x01, 0x00])
             .await
-            .map_err(TlsError::TcpConnect)?;
+            .map_err(TlsError::proxy_io)?;
     }
 
     let mut method_resp = [0u8; 2];
     tcp_stream
         .read_exact(&mut method_resp)
         .await
-        .map_err(TlsError::TcpConnect)?;
+        .map_err(TlsError::proxy_io)?;
 
     if method_resp[0] != 0x05 {
-        return Err(TlsError::Profile(
+        return Err(TlsError::proxy(
             "socks5: invalid version in response".into(),
         ));
     }
@@ -44,12 +44,10 @@ pub(crate) async fn connect<C: crate::tls::TlsHandshake>(
         (0x00, _) => {}
         (0x02, Some(auth)) => authenticate(&mut tcp_stream, auth).await?,
         (0xFF, _) => {
-            return Err(TlsError::Profile(
-                "socks5: no acceptable auth method".into(),
-            ));
+            return Err(TlsError::proxy("socks5: no acceptable auth method".into()));
         }
         (other, _) => {
-            return Err(TlsError::Profile(format!(
+            return Err(TlsError::proxy(format!(
                 "socks5: unsupported auth method 0x{other:02x}"
             )));
         }
@@ -72,17 +70,17 @@ fn auth_request(proxy: &url::Url) -> Result<Option<Vec<u8>>, TlsError> {
     }
 
     let Some(password) = password else {
-        return Err(TlsError::Profile(
+        return Err(TlsError::proxy(
             "socks5: username and password must both be present".into(),
         ));
     };
     if username.is_empty() || password.is_empty() {
-        return Err(TlsError::Profile(
+        return Err(TlsError::proxy(
             "socks5: username and password must both be non-empty".into(),
         ));
     }
     if username.len() > 255 || password.len() > 255 {
-        return Err(TlsError::Profile(
+        return Err(TlsError::proxy(
             "socks5: username or password exceeds 255 bytes".into(),
         ));
     }
@@ -99,21 +97,21 @@ async fn authenticate(tcp_stream: &mut TcpStream, auth: &[u8]) -> Result<(), Tls
     tcp_stream
         .write_all(auth)
         .await
-        .map_err(TlsError::TcpConnect)?;
+        .map_err(TlsError::proxy_io)?;
 
     let mut auth_resp = [0u8; 2];
     tcp_stream
         .read_exact(&mut auth_resp)
         .await
-        .map_err(TlsError::TcpConnect)?;
+        .map_err(TlsError::proxy_io)?;
     if auth_resp[0] != 0x01 {
-        return Err(TlsError::Profile(format!(
+        return Err(TlsError::proxy(format!(
             "socks5: invalid auth sub-negotiation version 0x{:02x}",
             auth_resp[0]
         )));
     }
     if auth_resp[1] != 0x00 {
-        return Err(TlsError::Profile("socks5: authentication failed".into()));
+        return Err(TlsError::proxy("socks5: authentication failed".into()));
     }
     Ok(())
 }
@@ -132,7 +130,7 @@ async fn send_connect(tcp_stream: &mut TcpStream, host: &str, port: u16) -> Resu
         Err(_) => {
             let host_bytes = host.as_bytes();
             let len = u8::try_from(host_bytes.len()).map_err(|_| {
-                TlsError::Profile(format!(
+                TlsError::proxy(format!(
                     "socks5: hostname too long ({} bytes, max 255)",
                     host_bytes.len()
                 ))
@@ -146,16 +144,16 @@ async fn send_connect(tcp_stream: &mut TcpStream, host: &str, port: u16) -> Resu
     tcp_stream
         .write_all(&connect_req)
         .await
-        .map_err(TlsError::TcpConnect)?;
+        .map_err(TlsError::proxy_io)?;
 
     let mut resp_buf = [0u8; 4];
     tcp_stream
         .read_exact(&mut resp_buf)
         .await
-        .map_err(TlsError::TcpConnect)?;
+        .map_err(TlsError::proxy_io)?;
 
     if resp_buf[0] != 0x05 {
-        return Err(TlsError::Profile(
+        return Err(TlsError::proxy(
             "socks5: invalid CONNECT response version".into(),
         ));
     }
@@ -171,9 +169,7 @@ async fn send_connect(tcp_stream: &mut TcpStream, host: &str, port: u16) -> Resu
             0x08 => "address type not supported",
             _ => "unknown error",
         };
-        return Err(TlsError::Profile(format!(
-            "socks5: CONNECT failed: {reason}"
-        )));
+        return Err(TlsError::proxy(format!("socks5: CONNECT failed: {reason}")));
     }
 
     match resp_buf[3] {
@@ -182,30 +178,30 @@ async fn send_connect(tcp_stream: &mut TcpStream, host: &str, port: u16) -> Resu
             tcp_stream
                 .read_exact(&mut skip)
                 .await
-                .map_err(TlsError::TcpConnect)?;
+                .map_err(TlsError::proxy_io)?;
         }
         0x03 => {
             let mut len_buf = [0u8; 1];
             tcp_stream
                 .read_exact(&mut len_buf)
                 .await
-                .map_err(TlsError::TcpConnect)?;
+                .map_err(TlsError::proxy_io)?;
             let skip_len = len_buf[0] as usize + 2;
             let mut skip = vec![0u8; skip_len];
             tcp_stream
                 .read_exact(&mut skip)
                 .await
-                .map_err(TlsError::TcpConnect)?;
+                .map_err(TlsError::proxy_io)?;
         }
         0x04 => {
             let mut skip = [0u8; 18];
             tcp_stream
                 .read_exact(&mut skip)
                 .await
-                .map_err(TlsError::TcpConnect)?;
+                .map_err(TlsError::proxy_io)?;
         }
         other => {
-            return Err(TlsError::Profile(format!(
+            return Err(TlsError::proxy(format!(
                 "socks5: unknown address type 0x{other:02x}"
             )));
         }

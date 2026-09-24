@@ -196,7 +196,7 @@ async fn native_system_trust_preserves_custom_ca_hostname_and_pins() {
             "ok" => assert!(result.is_ok(), "{host}: {:?}", result.err()),
             "hostname" => assert!(matches!(result, Err(TlsError::Hostname(_)))),
             "pin" => assert!(matches!(result, Err(TlsError::Pinning(_)))),
-            "certificate" => assert!(matches!(result, Err(TlsError::Certificate(_)))),
+            "certificate" => assert!(matches!(result, Err(TlsError::Certificate { .. }))),
             _ => unreachable!(),
         }
     }
@@ -283,7 +283,7 @@ async fn certificate_and_pinning_failures_are_permanent() {
         .await
         .err()
         .expect("untrusted chain must fail");
-    assert!(matches!(err, TlsError::Certificate(_)), "got {err:?}");
+    assert!(matches!(err, TlsError::Certificate { .. }), "got {err:?}");
 
     let addr = spawn_tls_server(&r#gen).await;
     let trust = TlsTrustConfig::new()
@@ -333,7 +333,7 @@ async fn handshake_transport_failure_is_retryable() {
         .await
         .err()
         .expect("peer closing during the handshake must fail");
-    assert!(matches!(err, TlsError::HandshakeIo(_)), "got {err:?}");
+    assert!(matches!(err, TlsError::Rejected(_)), "got {err:?}");
 }
 
 #[tokio::test]

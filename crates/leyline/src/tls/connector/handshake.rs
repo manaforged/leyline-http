@@ -153,7 +153,7 @@ fn classify_handshake<S>(
 ) -> TlsError {
     let verify_error = verify_error.filter(|error| *error != X509VerifyError::INVALID_CALL);
     match failure.and_then(take_verification_failure) {
-        Some(TrustFailure::Certificate) => TlsError::Certificate(error.to_string()),
+        Some(TrustFailure::Certificate) => certificate(verify_error, &error),
         Some(TrustFailure::Hostname) => TlsError::Hostname(error.to_string()),
         Some(TrustFailure::Pinning) => TlsError::Pinning(error.to_string()),
         None if matches!(
@@ -163,8 +163,19 @@ fn classify_handshake<S>(
         {
             TlsError::Hostname(error.to_string())
         }
-        None if verify_error.is_some() => TlsError::Certificate(error.to_string()),
+        None if verify_error.is_some() => certificate(verify_error, &error),
         None => TlsError::from_handshake(&error),
+    }
+}
+
+fn certificate<S>(
+    verify_error: Option<X509VerifyError>,
+    error: &leyline_bssl_tokio::HandshakeError<S>,
+) -> TlsError {
+    TlsError::Certificate {
+        verify_code: verify_error.map(|e| e.as_raw()),
+        reason: verify_error.map(|e| e.error_string()),
+        detail: error.to_string(),
     }
 }
 

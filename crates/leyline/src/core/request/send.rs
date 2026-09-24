@@ -203,9 +203,7 @@ fn plan_retry(
     let should_retry = match result {
         Ok(resp) => retry_policy.matches_status(resp.status().as_u16()),
         Err(err) if err.is_timeout() => retry_policy.matches_timeout(),
-        Err(err) if err.is_connect() || err.is_connection_closed() => {
-            retry_policy.matches_connection_error()
-        }
+        Err(err) if err.is_retryable() => retry_policy.matches_connection_error(),
         Err(_) => false,
     };
     if !should_retry || !retryable_method || !body_retryable {

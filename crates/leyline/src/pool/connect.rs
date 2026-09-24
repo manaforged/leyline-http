@@ -11,9 +11,9 @@ use crate::h2::config::H2Config;
 use crate::profile::BrowserProfile;
 #[cfg(feature = "http3")]
 use crate::quic::{H3Client, H3Config, open_fresh_h3};
+use crate::tls::FingerprintConnector;
 #[cfg(feature = "http3")]
 use crate::tls::TlsTrustConfig;
-use crate::tls::{FingerprintConnector, TlsError};
 use crate::trace;
 use crate::{Error, Kind};
 
@@ -259,7 +259,7 @@ pub(super) fn connect_err(err: &Error) -> Error {
     let mut out = Error::new(err.kind());
     let mut sourced = true;
     if let Some(tls) = err.tls() {
-        out = out.with_source(clone_tls(tls));
+        out = out.with_source(tls.duplicate());
     } else if let Some(io) = err.io() {
         out = out.with_source(std::io::Error::new(io.kind(), io.to_string()));
     } else {
@@ -280,24 +280,4 @@ pub(super) fn connect_err(err: &Error) -> Error {
         out = out.with_status(status);
     }
     out
-}
-
-fn clone_tls(err: &TlsError) -> TlsError {
-    match err {
-        TlsError::SslConfig(msg) => TlsError::SslConfig(msg.clone()),
-        TlsError::Handshake(msg) => TlsError::Handshake(msg.clone()),
-        TlsError::HandshakeIo(err) => {
-            TlsError::HandshakeIo(std::io::Error::new(err.kind(), err.to_string()))
-        }
-        TlsError::Certificate(msg) => TlsError::Certificate(msg.clone()),
-        TlsError::Hostname(msg) => TlsError::Hostname(msg.clone()),
-        TlsError::Pinning(msg) => TlsError::Pinning(msg.clone()),
-        TlsError::TcpConnect(err) => {
-            TlsError::TcpConnect(std::io::Error::new(err.kind(), err.to_string()))
-        }
-        TlsError::Dns(err) => TlsError::Dns(std::io::Error::new(err.kind(), err.to_string())),
-        TlsError::SslConnect(msg) => TlsError::SslConnect(msg.clone()),
-        TlsError::Profile(msg) => TlsError::Profile(msg.clone()),
-        TlsError::TrustStore(msg) => TlsError::TrustStore(msg.clone()),
-    }
 }

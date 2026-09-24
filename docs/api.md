@@ -120,7 +120,7 @@ counted.
 | `Response` | `status`, `version`, `url`, `headers`, `header`, `trailers`, `request_headers`, `redirect_chain`, `cookies`, `timing`, `tls`, `audit`, `content_length`, `error_for_status`, `text`, `text_with_charset`, `bytes`, `json`, `into_stream`, `copy_to`, `read_until` | 21 |
 | `Body` | `stream(s, Option<u64>)`, `len_hint` | 2 |
 | `BodyStream` | `Stream` impl only | 0 |
-| `Error` | `kind`, `status`, `url`, `is_timeout`, `is_connect`, `is_status`, `tls`, `h2`, `io` | 9 |
+| `Error` | `kind`, `status`, `url`, `is_timeout`, `is_connect`, `is_status`, `is_retryable`, `tls`, `h2`, `io` | 10 |
 | `Kind`, `HttpVersion` | `as_str` | 2 |
 | `ResponseTiming`, `TlsInfo`, `PoolStats` | public fields, `#[non_exhaustive]` | 0 |
 | `HeaderList` | `new`, `append`, `set`, `get`, `iter`, `remove_all` | 6 |
@@ -169,7 +169,7 @@ counted.
 | `http` | re-export of the `http` crate | 0 |
 | `H2Error`, `ErrorCode` | sources reachable from `Error::h2` | 0 |
 
-Total: 225 public functions.
+Total: 226 public functions.
 
 ## Semantics
 
@@ -230,24 +230,32 @@ Total: 225 public functions.
 
 One error type: `leyline::Error`. Read `err.kind()` for the `Kind`.
 Downcast the source with `err.tls()`, `err.h2()`, or `err.io()`.
-`Kind::as_str()` gives a stable lowercase label.
+`Kind::as_str()` gives a stable lowercase label equal to the variant name.
+`Display` prints the kind, status, message, and URL. It does not repeat the
+source; walk `source()` for the cause.
+`Error::is_retryable()` is true when `RetryTrigger::Timeout` or
+`RetryTrigger::ConnectionError` would match. `RequestBuilder::send` uses the
+same function.
+`TlsError` is `#[non_exhaustive]`: `Rejected` (peer closed or reset the
+handshake), `Handshake`, `HandshakeIo`, `Certificate { verify_code, reason, .. }`,
+`Hostname`, `Pinning`, `Dns`, `TcpConnect`, `Proxy { status, .. }`,
+`SslConfig`, `Profile`, `TrustStore`.
 
 | Kind | Meaning |
 |---|---|
-| `Builder` | Configuration rejected at `build()` or `send()` |
 | `Request` | HTTP-level failure (bad header, malformed request) |
 | `Redirect` | Redirect policy stopped the chain |
 | `Status` | `error_for_status` rejected the status |
 | `Body` | Body read or write failed |
 | `Decode` | Decompression or charset decode failed |
 | `Timeout` | A timeout expired |
-| `Connect` | TCP or TLS connect failed |
-| `Tls` | TLS handshake or verification |
+| `Connect` | DNS resolution or TCP connect failed |
+| `Tls` | TLS handshake or certificate verification failed |
 | `Http2` | HTTP/2 protocol failure |
 | `Http3` | HTTP/3 protocol failure |
-| `Proxy` | Proxy connect or tunnel failed |
+| `Proxy` | Proxy dial, handshake, authentication, or `CONNECT` failed |
 | `Io` | Socket I/O |
-| `Config` | Invalid configuration |
+| `Config` | Invalid session, request, TLS profile, or trust store configuration |
 | `Url` | URL parse failure |
 | `Json` | JSON serialize or deserialize failure |
 
