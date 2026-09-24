@@ -101,8 +101,9 @@ impl H3Driver {
                     Some(cmd) => {
                         if draining {
                             let H3Command::Request { resp_tx, .. } = cmd;
-                            drop(resp_tx
-                                .send(Err("server sent GOAWAY: request not sent".into())));
+                            drop(resp_tx.send(Err(H3SendError::NotSent(
+                                "server sent GOAWAY: request not sent".into(),
+                            ))));
                         } else {
                             pending.push_back(cmd);
                         }
@@ -139,9 +140,9 @@ impl H3Driver {
                                 closed.store(true, Ordering::Release);
                                 for cmd in pending.drain(..) {
                                     let H3Command::Request { resp_tx, .. } = cmd;
-                                    drop(resp_tx.send(Err(
-                                        "server sent GOAWAY: request not sent".into()
-                                    )));
+                                    drop(resp_tx.send(Err(H3SendError::NotSent(
+                                        "server sent GOAWAY: request not sent".into(),
+                                    ))));
                                 }
                                 tracing::debug!(
                                     target: "leyline::quic",
@@ -184,6 +185,9 @@ pub(super) fn start_pending(
         let streaming = body_stream.is_some();
         let fin = !streaming && body.as_ref().is_none_or(Bytes::is_empty);
         let retry = (!streaming && !*retried).then(|| (headers.clone(), body.clone()));
+        let expects_body = !headers
+            .iter()
+            .any(|h| h.name() == b":method" && h.value() == b"HEAD");
         match h3.send_request(conn, headers, fin) {
             Ok(stream_id) => {
                 let Some(H3Command::Request {
@@ -198,6 +202,7 @@ pub(super) fn start_pending(
                 };
                 let mut stream = H3Stream::new(resp_tx, body, stream_body_tx, streaming);
                 stream.retry = retry;
+                stream.expects_body = expects_body;
                 if let Some(body_stream) = body_stream {
                     let credit = Arc::new(Semaphore::new(UPLOAD_WINDOW));
                     let pump = tokio::spawn(pump_request_body(
@@ -215,7 +220,7 @@ pub(super) fn start_pending(
             Err(quiche::h3::Error::StreamBlocked) | Err(quiche::h3::Error::Done) => break,
             Err(e) => {
                 if let Some(H3Command::Request { resp_tx, .. }) = pending.pop_front() {
-                    drop(resp_tx.send(Err(format!("h3 send_request: {e}"))));
+                    drop(resp_tx.send(Err(H3SendError::Failed(format!("h3 send_request: {e}")))));
                 }
             }
         }
@@ -261,6 +266,7 @@ pub(super) fn write_request_body(
             Err(quiche::h3::Error::Done) | Err(quiche::h3::Error::StreamBlocked) => return,
             Err(e) => {
                 stream.deliver(Err(format!("h3 send_body: {e}")));
+                stream.retry = None;
                 stream.out_chunks.clear();
                 stream.out_offset = 0;
                 stream.fin_sent = true;
@@ -275,6 +281,7 @@ pub(super) fn write_request_body(
             Err(quiche::h3::Error::Done) | Err(quiche::h3::Error::StreamBlocked) => {}
             Err(e) => {
                 stream.deliver(Err(format!("h3 send_body fin: {e}")));
+                stream.retry = None;
                 stream.fin_sent = true;
             }
         }
@@ -525,6 +532,9 @@ pub(super) fn forward_stream_body(
         && stream.stalled.is_none()
         && (stream.peer_finished || conn.stream_finished(stream_id))
     {
+        if stream.length_mismatch() {
+            deliver_stream_error(&tx, std::io::Error::other(LENGTH_MISMATCH));
+        }
         stream.stream_tx = None;
         return true;
     }
@@ -587,6 +597,6 @@ pub(super) fn fail_all(
     }
     for cmd in pending.drain(..) {
         let H3Command::Request { resp_tx, .. } = cmd;
-        drop(resp_tx.send(Err(reason.clone())));
+        drop(resp_tx.send(Err(H3SendError::NotSent(reason.clone()))));
     }
 }

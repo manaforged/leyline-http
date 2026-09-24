@@ -1,9 +1,7 @@
-use std::net::ToSocketAddrs;
-
 use leyline_quiche as quiche;
 
 use crate::profile::BrowserProfile;
-use crate::tls::{TlsMinVersion, TlsTrustConfig, apply_profile_with_trust};
+use crate::tls::{Resolver, TlsMinVersion, TlsTrustConfig, apply_profile_with_trust};
 
 use crate::quic::config::H3Config;
 
@@ -81,13 +79,15 @@ pub(crate) async fn connect_and_handshake(
     h3_cfg: &H3Config,
     profile: &BrowserProfile,
     trust: &TlsTrustConfig,
+    resolver: &dyn Resolver,
     host: &str,
     port: u16,
 ) -> Result<EstablishedH3, String> {
     validate_connection_id_len(h3_cfg.dcid_length)?;
+    let host = crate::util::bare_host(host);
 
     let mut config = build_quic_config(h3_cfg, profile, trust, host)?;
-    let peer_addr = resolve_peer(host, port).await?;
+    let peer_addr = resolve_peer(resolver, host, port).await?;
 
     let bind = match peer_addr {
         std::net::SocketAddr::V4(_) => "0.0.0.0:0",
@@ -232,18 +232,15 @@ pub(crate) fn close_reason(ctx: &str, iter: u32, conn: &quiche::Connection) -> S
     )
 }
 
-async fn resolve_peer(host: &str, port: u16) -> Result<std::net::SocketAddr, String> {
-    let addr_str = if host.contains(':') {
-        format!("[{host}]:{port}")
-    } else {
-        format!("{host}:{port}")
-    };
-    let addrs = tokio::task::spawn_blocking(move || {
-        addr_str.to_socket_addrs().map(|i| i.collect::<Vec<_>>())
-    })
-    .await
-    .map_err(|e| format!("dns task: {e}"))?
-    .map_err(|e| format!("dns: {e}"))?;
+async fn resolve_peer(
+    resolver: &dyn Resolver,
+    host: &str,
+    port: u16,
+) -> Result<std::net::SocketAddr, String> {
+    let addrs = resolver
+        .resolve(host, port)
+        .await
+        .map_err(|e| format!("dns: {e}"))?;
     addrs
         .iter()
         .find(|a| a.is_ipv4())

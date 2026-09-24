@@ -1,9 +1,8 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use leyline_bssl::ssl::{NameType, SslConnector, SslSession, SslSessionCacheMode, SslVerifyMode};
+use leyline_bssl::ssl::{SslConnector, SslVerifyMode};
 use leyline_bssl::x509::X509VerifyError;
-use lru::LruCache;
 use tokio::net::TcpStream;
 
 use crate::core::SocketConfig;
@@ -15,6 +14,7 @@ use crate::tls::error::TlsError;
 use crate::tls::happy_eyeballs::{HappyEyeballsConfig, happy_eyeballs_connect};
 use crate::tls::nonblocking::connect_one;
 use crate::tls::resolver::{Resolver, SystemResolver};
+use crate::tls::session_cache::SessionCache;
 use crate::tls::trust::{
     TlsTrustConfig, TrustFailure, VerificationFailure, install_verifier, take_verification_failure,
 };
@@ -29,7 +29,7 @@ pub struct FingerprintConnector {
     alps_proto: Option<Vec<u8>>,
     alps_new_codepoint: bool,
     request_trust_anchors: bool,
-    session_cache: Arc<Mutex<LruCache<String, Vec<u8>>>>,
+    session_cache: SessionCache,
     accept_invalid_certs: std::sync::Arc<std::sync::atomic::AtomicBool>,
     resolver: Arc<dyn Resolver>,
     happy_eyeballs: HappyEyeballsConfig,
@@ -62,24 +62,8 @@ impl FingerprintConnector {
             .set_alpn_protos(b"\x02h2\x08http/1.1")
             .map_err(TlsError::from_stack)?;
 
-        let session_cache = Arc::new(Mutex::new(LruCache::new(
-            std::num::NonZeroUsize::new(256).expect("cache capacity literal is non-zero"),
-        )));
-        builder
-            .set_session_cache_mode(SslSessionCacheMode::CLIENT | SslSessionCacheMode::NO_INTERNAL);
-        let cache_clone = session_cache.clone();
+        SessionCache::register(&mut builder)?;
         let accept_invalid_certs = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let insecure_flag = accept_invalid_certs.clone();
-        builder.set_new_session_callback(move |ssl, session| {
-            if insecure_flag.load(std::sync::atomic::Ordering::Relaxed) {
-                return;
-            }
-            if let Some(hostname) = ssl.servername(NameType::HOST_NAME)
-                && let Ok(der) = session.to_der()
-            {
-                lock_unpoisoned(&cache_clone).put(hostname.to_string(), der);
-            }
-        });
 
         Ok(Self {
             ssl_connector: builder.build(),
@@ -88,7 +72,7 @@ impl FingerprintConnector {
             alps_proto: tls.alps.as_ref().map(|s| s.as_bytes().to_vec()),
             alps_new_codepoint: tls.alps_new_codepoint,
             request_trust_anchors: tls.request_trust_anchors,
-            session_cache,
+            session_cache: SessionCache::new(),
             accept_invalid_certs,
             resolver: Arc::new(SystemResolver),
             happy_eyeballs: HappyEyeballsConfig::default(),
@@ -98,6 +82,17 @@ impl FingerprintConnector {
             system_roots: trust.uses_system_roots(),
             has_client_identity: trust.client_identity().is_some(),
         })
+    }
+
+    pub(crate) fn with_fresh_session_cache(&self) -> Self {
+        Self {
+            session_cache: SessionCache::new(),
+            ..self.clone()
+        }
+    }
+
+    pub(crate) fn resolver(&self) -> &Arc<dyn Resolver> {
+        &self.resolver
     }
 
     pub(crate) fn has_origin_tls_identity(&self) -> bool {
@@ -195,7 +190,8 @@ impl FingerprintConnector {
         alpn_override: Option<&[u8]>,
     ) -> Result<TlsStream, TlsError> {
         let tcp_stream = self.dial_tcp(host, port).await?;
-        self.tls_handshake(tcp_stream, host, alpn_override.is_none())
+        let session_key = SessionCache::key(host, port, None);
+        self.tls_handshake(tcp_stream, host, &session_key, alpn_override.is_none())
             .await
     }
 
@@ -233,9 +229,12 @@ impl FingerprintConnector {
         &self,
         tcp_stream: TcpStream,
         host: &str,
+        session_key: &str,
         include_alps: bool,
     ) -> Result<TlsStream, TlsError> {
-        let (stream, meta) = self.handshake_over(tcp_stream, host, include_alps).await?;
+        let (stream, meta) = self
+            .handshake_over(tcp_stream, host, session_key, include_alps)
+            .await?;
         Ok(meta.into_tls_stream(TlsIo::Boring(stream)))
     }
 
@@ -243,9 +242,12 @@ impl FingerprintConnector {
         &self,
         inner: TlsIo,
         host: &str,
+        session_key: &str,
         include_alps: bool,
     ) -> Result<TlsStream, TlsError> {
-        let (stream, meta) = self.handshake_over(inner, host, include_alps).await?;
+        let (stream, meta) = self
+            .handshake_over(inner, host, session_key, include_alps)
+            .await?;
         Ok(meta.into_tls_stream(TlsIo::Nested(Box::new(stream))))
     }
 
@@ -253,6 +255,7 @@ impl FingerprintConnector {
         &self,
         io: S,
         host: &str,
+        session_key: &str,
         include_alps: bool,
     ) -> Result<(leyline_bssl_tokio::SslStream<S>, TlsMeta), TlsError>
     where
@@ -279,6 +282,7 @@ impl FingerprintConnector {
                 .map_err(TlsError::from_stack)?;
         }
 
+        let host = crate::util::bare_host(host);
         let mut ssl = config.into_ssl(host).map_err(TlsError::from_stack)?;
 
         let insecure = self.insecure_mode();
@@ -289,16 +293,8 @@ impl FingerprintConnector {
             && (!self.pins.is_empty() || cfg!(target_os = "macos") && self.system_roots))
             .then(|| install_verifier(&mut ssl, &self.pins, host, self.system_roots));
 
-        {
-            let mut cache = lock_unpoisoned(&self.session_cache);
-            if let Some(der) = (!insecure).then(|| cache.get(host).cloned()).flatten()
-                && let Ok(session) = SslSession::from_der(&der)
-            {
-                // SAFETY: BoringSSL requires `set_session` to be called on an Ssl not yet handed to `connect()`. `ssl` was just constructed via `config.into_ssl` and has not started its handshake; it will be driven via `leyline_bssl_tokio::connect` below. The `SslSession` is owned for the duration of this block. No concurrent access.
-                unsafe {
-                    let _ = ssl.set_session(&session);
-                }
-            }
+        if !insecure {
+            self.session_cache.attach(&mut ssl, session_key)?;
         }
 
         if self.ech_grease {
@@ -405,16 +401,6 @@ impl std::fmt::Debug for FingerprintConnector {
             .field("ech_grease", &self.ech_grease)
             .finish_non_exhaustive()
     }
-}
-
-fn lock_unpoisoned<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(|poisoned| {
-        tracing::warn!(
-            target: "leyline::tls",
-            "session cache mutex was poisoned; recovering"
-        );
-        poisoned.into_inner()
-    })
 }
 
 #[cfg(test)]

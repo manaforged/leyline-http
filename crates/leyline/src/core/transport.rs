@@ -9,7 +9,6 @@ use crate::header_str::HeaderStr;
 use crate::pool::{H1Body, H1PooledError, H1ResponseBody, H1Target, Pool};
 use crate::profile::preset::HeaderPair;
 use crate::tls::FingerprintConnector;
-use crate::util::{base64_encode, percent_decode};
 
 use crate::core::body::{Body, BodyKind};
 use crate::core::body_stream::BodyStream;
@@ -362,15 +361,10 @@ pub(crate) async fn send_request_h1(
             }
             let mut headers = headers;
             headers.retain(|(k, _)| !k.eq_ignore_ascii_case("priority"));
-            if let Some(password) = parsed.password() {
-                let credentials = base64_encode(&format!(
-                    "{}:{}",
-                    percent_decode(parsed.username()),
-                    percent_decode(password)
-                ));
+            if let Some(credentials) = crate::util::proxy_basic_auth(&parsed) {
                 headers.push((
                     "Proxy-Authorization".into(),
-                    std::borrow::Cow::Owned(format!("Basic {credentials}")),
+                    std::borrow::Cow::Owned(credentials),
                 ));
             }
             (H1Target::AbsoluteForm, headers)
@@ -461,6 +455,7 @@ pub(crate) async fn send_request_h3(
     h3_config: &crate::quic::H3Config,
     profile: &crate::profile::BrowserProfile,
     trust: &crate::tls::TlsTrustConfig,
+    resolver: &Arc<dyn crate::tls::Resolver>,
     req: Prepared<'_>,
 ) -> Result<TransportResponse> {
     let Prepared {
@@ -497,6 +492,7 @@ pub(crate) async fn send_request_h3(
         h3_config,
         profile,
         trust,
+        resolver,
         host,
         port,
         method,
@@ -532,7 +528,7 @@ pub(crate) async fn send_request_h3(
     })
 }
 
-fn is_h2_alpn_mismatch(err: &Error) -> bool {
+pub(crate) fn is_h2_alpn_mismatch(err: &Error) -> bool {
     err.alpn().is_some()
 }
 

@@ -98,7 +98,7 @@ fn quic_verifier_checks_host_ca_and_pin() {
 
 #[tokio::test]
 async fn resolve_peer_prefers_ipv4_for_localhost() {
-    let addr = resolve_peer("localhost", 443)
+    let addr = resolve_peer(&crate::tls::SystemResolver, "localhost", 443)
         .await
         .expect("resolve localhost");
     assert!(addr.is_ipv4(), "got {addr}");
@@ -106,7 +106,9 @@ async fn resolve_peer_prefers_ipv4_for_localhost() {
 
 #[tokio::test]
 async fn resolve_peer_falls_back_on_ipv6_only_hosts() {
-    let addr = resolve_peer("::1", 443).await.expect("resolve ::1");
+    let addr = resolve_peer(&crate::tls::SystemResolver, "::1", 443)
+        .await
+        .expect("resolve ::1");
     assert!(addr.is_ipv6(), "got {addr}");
 }
 

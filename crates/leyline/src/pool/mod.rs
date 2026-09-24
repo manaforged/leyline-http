@@ -11,9 +11,9 @@ use crate::h2::{ErrorCode, H2Error};
 use crate::profile::BrowserProfile;
 #[cfg(feature = "http3")]
 use crate::quic::{H3Client, H3Config, H3RequestBodyStream, H3ResponseParts, open_fresh_h3};
-#[cfg(feature = "http3")]
-use crate::tls::TlsTrustConfig;
 use crate::tls::{FingerprintConnector, TlsError};
+#[cfg(feature = "http3")]
+use crate::tls::{Resolver, TlsTrustConfig};
 use crate::trace;
 use crate::util::is_idempotent;
 use crate::{Error, Kind, ResponseTiming};
@@ -257,6 +257,7 @@ pub async fn checkout_h3_handle(
     h3_config: &H3Config,
     profile: &BrowserProfile,
     trust: &TlsTrustConfig,
+    resolver: &Arc<dyn Resolver>,
     host: &str,
     port: u16,
 ) -> Result<(H3Client, TlsInfo), Error> {
@@ -268,31 +269,41 @@ pub async fn checkout_h3_handle(
         return Ok(hit);
     }
 
-    open_h3_coalesced(pool, h3_config, profile, trust, key, host, port).await
+    open_h3_coalesced(pool, h3_config, profile, trust, resolver, key, host, port).await
 }
 
 #[cfg(feature = "http3")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "flat per-request wire fields across one internal call path"
+)]
 async fn open_fresh_h3_installed(
     pool: &Arc<Pool>,
     h3_config: &H3Config,
     profile: &BrowserProfile,
     trust: &TlsTrustConfig,
+    resolver: &dyn Resolver,
     key: PoolKey,
     host: &str,
     port: u16,
 ) -> Result<(H3Client, TlsInfo), Error> {
-    let (handle, driver, tls) = open_fresh_h3(h3_config, profile, trust, host, port)
+    let (handle, driver, tls) = open_fresh_h3(h3_config, profile, trust, resolver, host, port)
         .await
         .map_err(|e| Error::new(Kind::Http3).with_message(e.to_string()))?;
     Ok(pool.install_or_get_h3(key, handle, driver, tls))
 }
 
 #[cfg(feature = "http3")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "flat per-request wire fields across one internal call path"
+)]
 fn h3_inflight_connect(
     pool: &Arc<Pool>,
     h3_config: &H3Config,
     profile: &BrowserProfile,
     trust: &TlsTrustConfig,
+    resolver: &Arc<dyn Resolver>,
     key: &PoolKey,
     host: &str,
     port: u16,
@@ -304,6 +315,7 @@ fn h3_inflight_connect(
         let h3_config = h3_config.clone();
         let profile = profile.clone();
         let trust = trust.clone();
+        let resolver = Arc::clone(resolver);
         let connect_key = key.clone();
         let cleanup_key = key.clone();
         let host = host.to_string();
@@ -313,6 +325,7 @@ fn h3_inflight_connect(
                 &h3_config,
                 &profile,
                 &trust,
+                resolver.as_ref(),
                 connect_key,
                 &host,
                 port,
@@ -335,11 +348,16 @@ fn h3_inflight_connect(
 }
 
 #[cfg(feature = "http3")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "flat per-request wire fields across one internal call path"
+)]
 async fn open_h3_coalesced(
     pool: &Arc<Pool>,
     h3_config: &H3Config,
     profile: &BrowserProfile,
     trust: &TlsTrustConfig,
+    resolver: &Arc<dyn Resolver>,
     key: PoolKey,
     host: &str,
     port: u16,
@@ -355,7 +373,8 @@ async fn open_h3_coalesced(
         {
             return Ok(hit);
         }
-        let shared = h3_inflight_connect(pool, h3_config, profile, trust, &key, host, port);
+        let shared =
+            h3_inflight_connect(pool, h3_config, profile, trust, resolver, &key, host, port);
         match shared.await {
             Ok(pair) => return Ok(pair),
             Err(e) => last_err = Some(e),
@@ -376,6 +395,7 @@ pub async fn send_request_h3_pooled(
     h3_config: &H3Config,
     profile: &BrowserProfile,
     trust: &TlsTrustConfig,
+    resolver: &Arc<dyn Resolver>,
     host: &str,
     port: u16,
     method: &str,
@@ -436,7 +456,8 @@ pub async fn send_request_h3_pooled(
     }
 
     let connect_started = Instant::now();
-    let (handle, tls) = open_h3_coalesced(pool, h3_config, profile, trust, key, host, port).await?;
+    let (handle, tls) =
+        open_h3_coalesced(pool, h3_config, profile, trust, resolver, key, host, port).await?;
     trace::connect(host, port, false, connect_started.elapsed());
     if trace::on() {
         trace::tls(

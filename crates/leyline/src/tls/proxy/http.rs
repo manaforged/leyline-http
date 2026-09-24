@@ -1,9 +1,9 @@
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::tls::TlsStream;
 use crate::tls::error::TlsError;
+use crate::tls::{SessionCache, TlsStream};
 
-use crate::util::{base64_encode, percent_decode};
+use crate::util::proxy_basic_auth;
 
 pub(crate) async fn connect<C: crate::tls::TlsHandshake>(
     connector: &C,
@@ -14,8 +14,9 @@ pub(crate) async fn connect<C: crate::tls::TlsHandshake>(
 ) -> Result<TlsStream, TlsError> {
     let mut tcp_stream = super::connect_to_proxy(connector, proxy, 8080).await?;
     write_connect_and_validate(&mut tcp_stream, host, port, proxy).await?;
+    let session_key = SessionCache::key(host, port, Some(proxy));
     connector
-        .do_tls_handshake(tcp_stream, host, include_alps)
+        .do_tls_handshake(tcp_stream, host, &session_key, include_alps)
         .await
 }
 
@@ -40,14 +41,20 @@ pub(crate) async fn connect_via_tls<C: crate::tls::TlsHandshake>(
         .ok_or_else(|| TlsError::Profile("https proxy has no host".into()))?;
     let tcp_stream = super::connect_to_proxy(connector, proxy, 443).await?;
 
+    let proxy_key = SessionCache::key(
+        proxy_host,
+        proxy.port_or_known_default().unwrap_or(443),
+        None,
+    );
     let proxy_tls = connector
-        .do_tls_handshake(tcp_stream, proxy_host, false)
+        .do_tls_handshake(tcp_stream, proxy_host, &proxy_key, false)
         .await?;
     let mut tunnel = proxy_tls.stream;
     write_connect_and_validate(&mut tunnel, host, port, proxy).await?;
 
+    let session_key = SessionCache::key(host, port, Some(proxy));
     connector
-        .do_tls_handshake_nested(tunnel, host, include_alps)
+        .do_tls_handshake_nested(tunnel, host, &session_key, include_alps)
         .await
 }
 
@@ -60,12 +67,9 @@ async fn write_connect_and_validate<S>(
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
-    let connect_req = if let Some(password) = proxy.password() {
-        let username = percent_decode(proxy.username());
-        let password = percent_decode(password);
-        let credentials = base64_encode(&format!("{username}:{password}"));
+    let connect_req = if let Some(credentials) = proxy_basic_auth(proxy) {
         format!(
-            "CONNECT {host}:{port} HTTP/1.1\r\nHost: {host}:{port}\r\nProxy-Authorization: Basic {credentials}\r\n\r\n"
+            "CONNECT {host}:{port} HTTP/1.1\r\nHost: {host}:{port}\r\nProxy-Authorization: {credentials}\r\n\r\n"
         )
     } else {
         format!("CONNECT {host}:{port} HTTP/1.1\r\nHost: {host}:{port}\r\n\r\n")

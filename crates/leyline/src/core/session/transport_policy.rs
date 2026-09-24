@@ -81,6 +81,7 @@ impl Session {
                     h3_config,
                     self.inner.profile,
                     &self.inner.tls_trust,
+                    self.inner.connector.resolver(),
                     req,
                 ))
                 .await
@@ -129,6 +130,7 @@ impl Session {
             h3_config,
             self.inner.profile,
             &self.inner.tls_trust,
+            connector.resolver(),
             host,
             port,
         );
@@ -169,6 +171,7 @@ impl Session {
                     h3_config,
                     self.inner.profile,
                     &self.inner.tls_trust,
+                    self.inner.connector.resolver(),
                     req,
                 ))
                 .await

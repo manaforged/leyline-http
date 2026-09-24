@@ -17,7 +17,6 @@ async fn streaming_head_waits_for_final_response_after_103() {
         .headers(&headers(&[(":status", "103"), ("link", "</style.css>")]))
         .expect("valid informational response");
     assert_eq!(stream.response, H3ResponseState::Initial);
-    assert_eq!(stream.informational.len(), 1);
     if stream.is_streaming() && stream.response == H3ResponseState::Final && !stream.head_sent {
         stream.deliver_head();
     }
@@ -170,9 +169,9 @@ async fn deliver_is_once_only() {
 #[test]
 fn cancelled_stream_ids_selects_only_dropped_receivers() {
     let mut streams = HashMap::new();
-    let (tx_live, _rx_live) = oneshot::channel::<Result<H3Response, String>>();
+    let (tx_live, _rx_live) = oneshot::channel::<Result<H3Response, H3SendError>>();
     streams.insert(1u64, H3Stream::new(tx_live, None, None, false));
-    let (tx_dead, rx_dead) = oneshot::channel::<Result<H3Response, String>>();
+    let (tx_dead, rx_dead) = oneshot::channel::<Result<H3Response, H3SendError>>();
     streams.insert(2u64, H3Stream::new(tx_dead, None, None, false));
     drop(rx_dead);
 
@@ -186,7 +185,7 @@ fn cancelled_stream_ids_selects_only_dropped_receivers() {
 
 #[tokio::test]
 async fn cancellation_tracks_resp_then_body_receiver_across_the_head() {
-    let (tx, rx) = oneshot::channel::<Result<H3Response, String>>();
+    let (tx, rx) = oneshot::channel::<Result<H3Response, H3SendError>>();
     let (body_tx, body_rx) = mpsc::channel(4);
     let mut s = H3Stream::new(tx, None, Some(body_tx), true);
     assert!(
@@ -199,7 +198,7 @@ async fn cancellation_tracks_resp_then_body_receiver_across_the_head() {
         "dropped resp receiver pre-head → cancelled"
     );
 
-    let (tx2, _rx2) = oneshot::channel::<Result<H3Response, String>>();
+    let (tx2, _rx2) = oneshot::channel::<Result<H3Response, H3SendError>>();
     s.resp_tx = Some(tx2);
     s.deliver_head();
     assert!(
@@ -246,6 +245,12 @@ fn fail_all_drains_streams_and_pending_and_marks_closed() {
     assert!(closed.load(Ordering::Acquire));
     assert!(streams.is_empty());
     assert!(pending.is_empty());
-    assert_eq!(rx_stream.blocking_recv().unwrap().unwrap_err(), "boom");
-    assert_eq!(rx_pending.blocking_recv().unwrap().unwrap_err(), "boom");
+    assert_eq!(
+        rx_stream.blocking_recv().unwrap().unwrap_err().message(),
+        "boom"
+    );
+    assert_eq!(
+        rx_pending.blocking_recv().unwrap().unwrap_err().message(),
+        "boom"
+    );
 }

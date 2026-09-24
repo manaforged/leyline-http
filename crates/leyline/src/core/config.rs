@@ -19,13 +19,17 @@ pub(crate) fn redact(raw: &str) -> String {
     let Ok(mut parsed) = url::Url::parse(raw) else {
         return raw.to_string();
     };
-    if parsed.password().is_none() {
+    let masked = if parsed.password().is_some() {
+        parsed.set_password(Some("***"))
+    } else if !parsed.username().is_empty() {
+        parsed.set_username("***")
+    } else {
         return raw.to_string();
+    };
+    match masked {
+        Ok(()) => parsed.to_string(),
+        Err(()) => raw.to_string(),
     }
-    if parsed.set_password(Some("***")).is_err() {
-        return raw.to_string();
-    }
-    parsed.to_string()
 }
 
 impl ProxyUrl {

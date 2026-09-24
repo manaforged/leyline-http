@@ -1,4 +1,4 @@
-use super::lock_unpoisoned;
+use crate::tls::session_cache::lock_unpoisoned;
 use std::sync::{Arc, Mutex};
 
 #[test]

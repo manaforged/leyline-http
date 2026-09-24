@@ -65,6 +65,7 @@ impl Session {
         let inner = std::sync::Arc::make_mut(&mut s.inner);
         if inner.proxy_config.primary() == Some(proxy.as_str()) {
             inner.pool = std::sync::Arc::new(inner.pool.fresh());
+            inner.connector = inner.connector.with_fresh_session_cache();
         }
         inner.proxy_config = inner.proxy_config.clone().set_default_proxy(proxy.as_str());
         Ok(s)

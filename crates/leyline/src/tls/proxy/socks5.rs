@@ -1,8 +1,8 @@
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-use crate::tls::TlsStream;
 use crate::tls::error::TlsError;
+use crate::tls::{SessionCache, TlsStream};
 
 use crate::util::percent_decode;
 
@@ -57,8 +57,9 @@ pub(crate) async fn connect<C: crate::tls::TlsHandshake>(
 
     send_connect(&mut tcp_stream, host, port).await?;
 
+    let session_key = SessionCache::key(host, port, Some(proxy));
     connector
-        .do_tls_handshake(tcp_stream, host, include_alps)
+        .do_tls_handshake(tcp_stream, host, &session_key, include_alps)
         .await
 }
 
@@ -118,22 +119,30 @@ async fn authenticate(tcp_stream: &mut TcpStream, auth: &[u8]) -> Result<(), Tls
 }
 
 async fn send_connect(tcp_stream: &mut TcpStream, host: &str, port: u16) -> Result<(), TlsError> {
-    let host_bytes = host.as_bytes();
-    if host_bytes.len() > 255 {
-        return Err(TlsError::Profile(format!(
-            "socks5: hostname too long ({} bytes, max 255)",
-            host_bytes.len()
-        )));
+    let mut connect_req = vec![0x05, 0x01, 0x00];
+    match crate::util::bare_host(host).parse::<std::net::IpAddr>() {
+        Ok(std::net::IpAddr::V4(ip)) => {
+            connect_req.push(0x01);
+            connect_req.extend_from_slice(&ip.octets());
+        }
+        Ok(std::net::IpAddr::V6(ip)) => {
+            connect_req.push(0x04);
+            connect_req.extend_from_slice(&ip.octets());
+        }
+        Err(_) => {
+            let host_bytes = host.as_bytes();
+            let len = u8::try_from(host_bytes.len()).map_err(|_| {
+                TlsError::Profile(format!(
+                    "socks5: hostname too long ({} bytes, max 255)",
+                    host_bytes.len()
+                ))
+            })?;
+            connect_req.push(0x03);
+            connect_req.push(len);
+            connect_req.extend_from_slice(host_bytes);
+        }
     }
-    let mut connect_req = Vec::with_capacity(7 + host_bytes.len());
-    connect_req.push(0x05);
-    connect_req.push(0x01);
-    connect_req.push(0x00);
-    connect_req.push(0x03);
-    connect_req.push(host_bytes.len() as u8);
-    connect_req.extend_from_slice(host_bytes);
-    connect_req.push((port >> 8) as u8);
-    connect_req.push(port as u8);
+    connect_req.extend_from_slice(&port.to_be_bytes());
     tcp_stream
         .write_all(&connect_req)
         .await

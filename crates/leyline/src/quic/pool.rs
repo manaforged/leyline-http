@@ -15,7 +15,7 @@ use crate::quic::config::H3Config;
 use crate::quic::connection::{
     EstablishedH3, H3Response, check_body_budget, close_reason, connect_and_handshake, flush_egress,
 };
-use crate::tls::TlsTrustConfig;
+use crate::tls::{Resolver, TlsTrustConfig};
 
 const COMMAND_CHANNEL_CAPACITY: usize = 1024;
 
@@ -30,6 +30,8 @@ const UPLOAD_CHUNK: usize = 16 * 1024;
 const STREAM_PUMP_INTERVAL: Duration = Duration::from_millis(2);
 
 const CANCEL_SWEEP_INTERVAL: Duration = Duration::from_millis(100);
+
+const LENGTH_MISMATCH: &str = "h3: response body length does not match content-length";
 
 pub type H3RequestBodyStream =
     std::pin::Pin<Box<dyn futures_util::Stream<Item = std::io::Result<Bytes>> + Send + 'static>>;
@@ -52,7 +54,7 @@ enum H3Command {
         body_stream: Option<H3RequestBodyStream>,
         stream_body_tx: Option<mpsc::Sender<std::io::Result<Bytes>>>,
         retried: bool,
-        resp_tx: oneshot::Sender<Result<H3Response, String>>,
+        resp_tx: oneshot::Sender<Result<H3Response, H3SendError>>,
     },
 }
 
@@ -68,6 +70,7 @@ pub struct H3ResponseParts {
     pub body: H3RespBody,
 }
 
+#[derive(Debug)]
 pub enum H3SendError {
     NotSent(String),
     Failed(String),
@@ -150,7 +153,7 @@ impl H3Client {
                     None => H3RespBody::Buffered(head.body),
                 },
             }),
-            Ok(Err(e)) => Err(H3SendError::Failed(e)),
+            Ok(Err(e)) => Err(e),
             Err(_) => Err(H3SendError::Failed(
                 "h3 driver dropped response sender".into(),
             )),
@@ -170,97 +173,11 @@ pub struct H3DriverTask(
     tokio::task::JoinHandle<()>,
 );
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum H3ResponseState {
-    Initial,
-    Final,
-    Trailers,
-}
-
-type H3Headers = Vec<(String, String)>;
-
-enum H3HeaderBlock {
-    Informational(H3Headers),
-    Final { status: u16, headers: H3Headers },
-    Trailers(H3Headers),
-}
-
-impl H3ResponseState {
-    fn headers(&mut self, list: &[(String, String)]) -> Result<H3HeaderBlock, &'static str> {
-        match self {
-            Self::Initial => {
-                let (status, headers) = parse_response_head(list)?;
-                if (100..200).contains(&status) {
-                    Ok(H3HeaderBlock::Informational(headers))
-                } else {
-                    *self = Self::Final;
-                    Ok(H3HeaderBlock::Final { status, headers })
-                }
-            }
-            Self::Final => {
-                if list.iter().any(|(name, _)| name.starts_with(':')) {
-                    return Err("h3: trailers must not contain pseudo-headers");
-                }
-                *self = Self::Trailers;
-                Ok(H3HeaderBlock::Trailers(list.to_vec()))
-            }
-            Self::Trailers => Err("h3: response contains headers after trailers"),
-        }
-    }
-
-    fn data(self) -> Result<(), &'static str> {
-        match self {
-            Self::Final => Ok(()),
-            Self::Initial => Err("h3: response DATA arrived before a final response head"),
-            Self::Trailers => Err("h3: response DATA arrived after trailers"),
-        }
-    }
-
-    fn finish(self) -> Result<(), &'static str> {
-        match self {
-            Self::Initial => Err("h3: response ended before a final response head"),
-            Self::Final | Self::Trailers => Ok(()),
-        }
-    }
-}
-
-fn parse_response_head(list: &[(String, String)]) -> Result<(u16, H3Headers), &'static str> {
-    let mut status = None;
-    let mut headers = Vec::with_capacity(list.len());
-    let mut regular = false;
-
-    for (name, value) in list {
-        if name.starts_with(':') {
-            if regular || name != ":status" || status.is_some() {
-                return Err("h3: response contains malformed pseudo-headers");
-            }
-            if value.len() != 3 || !value.bytes().all(|byte| byte.is_ascii_digit()) {
-                return Err("h3: response contains malformed :status pseudo-header");
-            }
-            let code = value
-                .bytes()
-                .fold(0, |status, byte| status * 10 + u16::from(byte - b'0'));
-            if code == 101 {
-                return Err("h3: status 101 is forbidden");
-            }
-            status = Some(code);
-        } else {
-            regular = true;
-            headers.push((name.clone(), value.clone()));
-        }
-    }
-
-    status
-        .map(|status| (status, headers))
-        .ok_or("h3: response missing :status pseudo-header")
-}
-
 struct H3Stream {
-    resp_tx: Option<oneshot::Sender<Result<H3Response, String>>>,
+    resp_tx: Option<oneshot::Sender<Result<H3Response, H3SendError>>>,
     response: H3ResponseState,
     status: u16,
     headers: Vec<(String, String)>,
-    informational: Vec<Vec<(String, String)>>,
     trailers: Vec<(String, String)>,
     body: Vec<u8>,
     stream_tx: Option<mpsc::Sender<std::io::Result<Bytes>>>,
@@ -268,6 +185,8 @@ struct H3Stream {
     stalled: Option<Bytes>,
     peer_finished: bool,
     body_bytes_seen: usize,
+    declared_len: Option<u64>,
+    expects_body: bool,
     out_chunks: VecDeque<Bytes>,
     out_offset: usize,
     body_eof: bool,
@@ -287,7 +206,7 @@ impl Drop for H3Stream {
 
 impl H3Stream {
     fn new(
-        resp_tx: oneshot::Sender<Result<H3Response, String>>,
+        resp_tx: oneshot::Sender<Result<H3Response, H3SendError>>,
         body: Option<Bytes>,
         stream_tx: Option<mpsc::Sender<std::io::Result<Bytes>>>,
         streaming: bool,
@@ -309,7 +228,6 @@ impl H3Stream {
             response: H3ResponseState::Initial,
             status: 0,
             headers: Vec::new(),
-            informational: Vec::new(),
             trailers: Vec::new(),
             body: Vec::new(),
             stream_tx,
@@ -317,6 +235,8 @@ impl H3Stream {
             stalled: None,
             peer_finished: false,
             body_bytes_seen: 0,
+            declared_len: None,
+            expects_body: true,
             out_chunks,
             out_offset: 0,
             body_eof,
@@ -350,9 +270,13 @@ impl H3Stream {
 
     fn headers(&mut self, list: &[(String, String)]) -> Result<(), &'static str> {
         match self.response.headers(list)? {
-            H3HeaderBlock::Informational(headers) => self.informational.push(headers),
+            H3HeaderBlock::Informational => {}
             H3HeaderBlock::Final { status, headers } => {
                 self.status = status;
+                self.declared_len = headers
+                    .iter()
+                    .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+                    .and_then(|(_, value)| value.trim().parse().ok());
                 self.headers = headers;
             }
             H3HeaderBlock::Trailers(headers) => self.trailers = headers,
@@ -365,12 +289,30 @@ impl H3Stream {
     }
 
     fn finish(&self) -> Result<(), &'static str> {
-        self.response.finish()
+        self.response.finish()?;
+        if !self.is_streaming() && self.length_mismatch() {
+            return Err(LENGTH_MISMATCH);
+        }
+        Ok(())
+    }
+
+    fn length_mismatch(&self) -> bool {
+        self.expects_body
+            && !matches!(self.status, 204 | 304)
+            && self
+                .declared_len
+                .is_some_and(|len| len != self.body_bytes_seen as u64)
     }
 
     fn deliver(&mut self, result: Result<H3Response, String>) {
         if let Some(tx) = self.resp_tx.take() {
-            drop(tx.send(result));
+            drop(tx.send(result.map_err(H3SendError::Failed)));
+        }
+    }
+
+    fn deliver_unsent(&mut self, message: String) {
+        if let Some(tx) = self.resp_tx.take() {
+            drop(tx.send(Err(H3SendError::NotSent(message))));
         }
     }
 
@@ -401,10 +343,11 @@ pub(crate) async fn open_fresh_h3(
     h3_cfg: &H3Config,
     profile: &BrowserProfile,
     trust: &TlsTrustConfig,
+    resolver: &dyn Resolver,
     host: &str,
     port: u16,
 ) -> Result<(H3Client, H3DriverTask, TlsInfo), String> {
-    let established = connect_and_handshake(h3_cfg, profile, trust, host, port).await?;
+    let established = connect_and_handshake(h3_cfg, profile, trust, resolver, host, port).await?;
     let tls = established.tls.clone();
 
     let (tx, command_rx) = mpsc::channel(COMMAND_CHANNEL_CAPACITY);
@@ -435,6 +378,8 @@ struct H3Driver {
 
 mod driver;
 use driver::*;
+mod response;
+use response::*;
 
 #[cfg(test)]
 mod tests;

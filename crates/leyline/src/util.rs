@@ -9,6 +9,24 @@ pub(crate) fn redacted_url(raw: &str) -> String {
     }
 }
 
+pub(crate) fn proxy_basic_auth(proxy: &url::Url) -> Option<String> {
+    if proxy.username().is_empty() && proxy.password().is_none() {
+        return None;
+    }
+    let username = percent_decode(proxy.username());
+    let password = proxy.password().map(percent_decode).unwrap_or_default();
+    Some(format!(
+        "Basic {}",
+        base64_encode(&format!("{username}:{password}"))
+    ))
+}
+
+pub(crate) fn bare_host(host: &str) -> &str {
+    host.strip_prefix('[')
+        .and_then(|h| h.strip_suffix(']'))
+        .unwrap_or(host)
+}
+
 pub(crate) fn base64_encode(input: &str) -> String {
     use base64::Engine;
     base64::engine::general_purpose::STANDARD.encode(input.as_bytes())

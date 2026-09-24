@@ -2,6 +2,7 @@ use super::*;
 
 impl Drain<'_> {
     pub(super) fn run(&mut self) -> Result<bool, String> {
+        let mut goaway = false;
         loop {
             match self.h3.poll(self.conn) {
                 Ok((id, quiche::h3::Event::Headers { list, .. })) => self.headers(id, &list),
@@ -9,8 +10,11 @@ impl Drain<'_> {
                 Ok((id, quiche::h3::Event::Finished)) => self.finish(id),
                 Ok((id, quiche::h3::Event::Reset(e))) => self.reset(id, e),
                 Ok((_, quiche::h3::Event::PriorityUpdate)) => {}
-                Ok((_, quiche::h3::Event::GoAway)) => return Ok(true),
-                Err(quiche::h3::Error::Done) => return Ok(false),
+                Ok((last_id, quiche::h3::Event::GoAway)) => {
+                    goaway = true;
+                    self.goaway(last_id);
+                }
+                Err(quiche::h3::Error::Done) => return Ok(goaway),
                 Err(e) => return Err(format!("h3 poll: {e}")),
             }
         }
@@ -154,29 +158,46 @@ impl Drain<'_> {
             };
             *self.admit = Some(next);
         }
-        if let Some(mut stream) = self.streams.remove(&id)
-            && e == 0x10b
+        let Some(mut stream) = self.streams.remove(&id) else {
+            return;
+        };
+        if e == 0x10b
             && !stream.head_sent
             && let Some((headers, body)) = stream.retry.take()
+            && let Some(resp_tx) = stream.resp_tx.take()
         {
             self.pending.push_back(H3Command::Request {
                 headers,
                 body,
                 body_stream: None,
                 stream_body_tx: None,
-                resp_tx: stream.resp_tx.take().expect("buffered keeps resp_tx"),
+                resp_tx,
                 retried: true,
             });
             return;
         }
-        if let Some(mut stream) = self.streams.remove(&id) {
-            let msg = format!("h3 stream reset: {e}");
-            if stream.head_sent {
-                if let Some(tx) = &stream.stream_tx {
-                    deliver_stream_error(tx, std::io::Error::other(msg));
+        stream.deliver_error(format!("h3 stream reset: {e}"));
+    }
+
+    fn goaway(&mut self, last_id: u64) {
+        let rejected: Vec<u64> = self
+            .streams
+            .keys()
+            .copied()
+            .filter(|&id| id >= last_id)
+            .collect();
+        for id in rejected {
+            if let Some(mut stream) = self.streams.remove(&id) {
+                close(
+                    self.conn,
+                    id,
+                    quiche::h3::WireErrorCode::RequestCancelled as u64,
+                );
+                if stream.head_sent {
+                    stream.deliver_error("server sent GOAWAY: stream rejected".into());
+                } else {
+                    stream.deliver_unsent("server sent GOAWAY: request not processed".into());
                 }
-            } else {
-                stream.deliver(Err(msg));
             }
         }
     }
