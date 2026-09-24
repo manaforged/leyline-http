@@ -1,5 +1,3 @@
-#![warn(missing_docs)]
-
 use leyline_bssl::ssl::{
     self, ConnectConfiguration, ErrorCode, MidHandshakeSslStream, ShutdownResult, SslAcceptor,
     SslRef,

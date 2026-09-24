@@ -1,5 +1,3 @@
-#![deny(missing_docs)]
-
 use crate::ffi;
 use foreign_types::{ForeignType, ForeignTypeRef};
 use libc::{c_int, c_long, time_t};
