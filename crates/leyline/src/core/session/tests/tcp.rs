@@ -20,9 +20,9 @@ async fn limits(session: Option<Session>) -> (u32, usize, bool) {
     };
     let socket = SockRef::from(&stream);
     (
-        socket.mss().expect("TCP MSS"),
+        socket.tcp_mss().expect("TCP MSS"),
         socket.recv_buffer_size().expect("receive buffer"),
-        socket.nodelay().expect("TCP_NODELAY"),
+        socket.tcp_nodelay().expect("TCP_NODELAY"),
     )
 }
 

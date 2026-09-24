@@ -57,7 +57,7 @@ impl TcpProfile {
             let result = if is_v6 {
                 socket.set_unicast_hops_v6(self.ttl)
             } else {
-                socket.set_ttl(self.ttl)
+                socket.set_ttl_v4(self.ttl)
             };
             if let Err(e) = result {
                 log_once(if is_v6 { "IPV6_UNICAST_HOPS" } else { "IP_TTL" }, &e);
@@ -65,7 +65,7 @@ impl TcpProfile {
         }
 
         if self.no_delay
-            && let Err(e) = socket.set_nodelay(true)
+            && let Err(e) = socket.set_tcp_nodelay(true)
         {
             log_once("TCP_NODELAY", &e);
         }

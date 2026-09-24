@@ -61,7 +61,7 @@ fn apply_socket_config(
     config: &SocketConfig,
 ) -> Result<(), std::io::Error> {
     if let Some(enabled) = config.tcp_nodelay {
-        socket.set_nodelay(enabled)?;
+        socket.set_tcp_nodelay(enabled)?;
     }
     if let Some(size) = config.send_buffer_size {
         socket.set_send_buffer_size(size)?;
