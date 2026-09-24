@@ -1,3 +1,8 @@
+use std::collections::HashMap;
+use std::sync::LazyLock;
+
+use serde::Deserialize;
+
 use crate::profile::Platform;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -41,13 +46,12 @@ impl std::error::Error for BrandOverlayError {}
 
 impl ChromiumBrand {
     pub fn version_for(self, chromium_major: u32) -> Option<u32> {
-        match self {
-            Self::Chrome | Self::Edge => Some(chromium_major),
-            Self::Opera => OPERA_PER_CHROMIUM
-                .iter()
-                .find_map(|(chromium, opera)| (*chromium == chromium_major).then_some(*opera)),
-            Self::Vivaldi => None,
+        let row = brand_row(self)?;
+        if row.follow_chromium {
+            return Some(chromium_major);
         }
+        row.product.as_ref()?;
+        version_major(&row.version(chromium_major, 0)?)
     }
 
     pub fn label(self) -> &'static str {
@@ -65,14 +69,31 @@ impl ChromiumBrand {
         platform: Platform,
         profile_user_agent: &str,
     ) -> Result<Option<BrandOverlay>, BrandOverlayError> {
-        match self {
-            Self::Chrome => Ok(None),
-            Self::Edge => edge_overlay(chromium_major, platform, profile_user_agent).map(Some),
-            Self::Opera => opera_overlay(chromium_major, platform, profile_user_agent).map(Some),
-            Self::Vivaldi => {
-                vivaldi_overlay(chromium_major, platform, profile_user_agent).map(Some)
-            }
+        let unverified = || BrandOverlayError::Unverified {
+            brand: self,
+            chromium_major,
+            platform,
+        };
+        let row = brand_row(self).ok_or_else(unverified)?;
+        let Some(token) = row.ua_token.as_deref() else {
+            return Ok(None);
+        };
+        if row.desktop_only && !is_desktop(platform) {
+            return Err(unverified());
         }
+        let version = row
+            .version(chromium_major, ua_seed(profile_user_agent))
+            .ok_or_else(unverified)?;
+        let product = match row.product.as_deref() {
+            Some(name) => Some((name, version_major(&version).ok_or_else(unverified)?)),
+            None => None,
+        };
+        Ok(Some(BrandOverlay {
+            user_agent: format!("{profile_user_agent} {token}/{version}"),
+            sec_ch_ua: sec_ch_ua(chromium_major, product),
+            extra_headers: row.extra_headers.clone(),
+            navigate_accept: row.navigate_accept.clone(),
+        }))
     }
 }
 
@@ -85,110 +106,57 @@ pub struct BrandOverlay {
     pub navigate_accept: Option<String>,
 }
 
-fn desktop_only(platform: Platform) -> bool {
+#[derive(Debug, Deserialize)]
+struct BrandRow {
+    product: Option<String>,
+    ua_token: Option<String>,
+    #[serde(default)]
+    follow_chromium: bool,
+    #[serde(default)]
+    desktop_only: bool,
+    #[serde(default)]
+    versions: HashMap<String, Vec<String>>,
+    #[serde(default)]
+    extra_headers: Vec<(String, String)>,
+    navigate_accept: Option<String>,
+}
+
+impl BrandRow {
+    fn version(&self, chromium_major: u32, seed: u64) -> Option<String> {
+        if self.follow_chromium {
+            return Some(format!("{chromium_major}.0.0.0"));
+        }
+        let builds = self.versions.get(&chromium_major.to_string())?;
+        let count = u64::try_from(builds.len()).ok().filter(|n| *n > 0)?;
+        builds.get(usize::try_from(seed % count).ok()?).cloned()
+    }
+}
+
+static BRANDS: LazyLock<HashMap<String, BrandRow>> = LazyLock::new(|| {
+    toml::from_str(include_str!("../../profiles/brands.toml"))
+        .expect("built-in brand table is statically valid")
+});
+
+fn brand_row(brand: ChromiumBrand) -> Option<&'static BrandRow> {
+    BRANDS.get(brand.label())
+}
+
+fn version_major(version: &str) -> Option<u32> {
+    version.split('.').next()?.parse().ok()
+}
+
+fn ua_seed(profile_user_agent: &str) -> u64 {
+    profile_user_agent.bytes().fold(0u64, |acc, b| {
+        acc.wrapping_mul(1099511628211).wrapping_add(u64::from(b))
+    })
+}
+
+fn is_desktop(platform: Platform) -> bool {
     match platform {
         Platform::Windows | Platform::MacOS | Platform::Linux => true,
         Platform::Android | Platform::IOS => false,
-        Platform::Host => desktop_only(Platform::detect_host()),
+        Platform::Host => is_desktop(Platform::detect_host()),
     }
-}
-
-fn edge_overlay(
-    chromium_major: u32,
-    platform: Platform,
-    profile_user_agent: &str,
-) -> Result<BrandOverlay, BrandOverlayError> {
-    if !desktop_only(platform) {
-        return Err(BrandOverlayError::Unverified {
-            brand: ChromiumBrand::Edge,
-            chromium_major,
-            platform,
-        });
-    }
-    Ok(BrandOverlay {
-        user_agent: format!("{profile_user_agent} Edg/{chromium_major}.0.0.0"),
-        sec_ch_ua: sec_ch_ua(chromium_major, Some(("Microsoft Edge", chromium_major))),
-        extra_headers: Vec::new(),
-        navigate_accept: None,
-    })
-}
-
-const OPERA_PER_CHROMIUM: &[(u32, u32)] = &[
-    (152, 136),
-    (151, 135),
-    (150, 134),
-    (149, 133),
-    (148, 132),
-    (147, 131),
-    (146, 130),
-    (145, 129),
-];
-
-fn opera_overlay(
-    chromium_major: u32,
-    platform: Platform,
-    profile_user_agent: &str,
-) -> Result<BrandOverlay, BrandOverlayError> {
-    if !desktop_only(platform) {
-        return Err(BrandOverlayError::Unverified {
-            brand: ChromiumBrand::Opera,
-            chromium_major,
-            platform,
-        });
-    }
-    let opera_version = OPERA_PER_CHROMIUM
-        .iter()
-        .find_map(|(chromium, opera)| (*chromium == chromium_major).then_some(*opera))
-        .ok_or(BrandOverlayError::Unverified {
-            brand: ChromiumBrand::Opera,
-            chromium_major,
-            platform,
-        })?;
-    Ok(BrandOverlay {
-        user_agent: format!("{profile_user_agent} OPR/{opera_version}.0.0.0"),
-        sec_ch_ua: sec_ch_ua(chromium_major, Some(("Opera", opera_version))),
-        extra_headers: Vec::new(),
-        navigate_accept: None,
-    })
-}
-
-const VIVALDI_BUILDS_PER_MAJOR: &[(u32, &[&str])] = &[(147, &["7.9.3970.59"])];
-
-fn vivaldi_build_for(chromium_major: u32, fallback_seed: u64) -> Option<&'static str> {
-    for (major, builds) in VIVALDI_BUILDS_PER_MAJOR {
-        if *major == chromium_major {
-            return Some(builds[(fallback_seed as usize) % builds.len()]);
-        }
-    }
-    None
-}
-
-fn vivaldi_overlay(
-    chromium_major: u32,
-    platform: Platform,
-    profile_user_agent: &str,
-) -> Result<BrandOverlay, BrandOverlayError> {
-    if !desktop_only(platform) {
-        return Err(BrandOverlayError::Unverified {
-            brand: ChromiumBrand::Vivaldi,
-            chromium_major,
-            platform,
-        });
-    }
-    let seed = profile_user_agent.bytes().fold(0u64, |acc, b| {
-        acc.wrapping_mul(1099511628211).wrapping_add(b as u64)
-    });
-    let build = vivaldi_build_for(chromium_major, seed).ok_or(BrandOverlayError::Unverified {
-        brand: ChromiumBrand::Vivaldi,
-        chromium_major,
-        platform,
-    })?;
-    Ok(BrandOverlay {
-        user_agent: format!("{profile_user_agent} Vivaldi/{build}"),
-        sec_ch_ua: sec_ch_ua(chromium_major, None),
-        extra_headers: Vec::new(),
-        navigate_accept: None,
-    })
 }
 
 const GREASE_CHARS: [char; 11] = [' ', '(', ':', '-', '.', '/', ')', ';', '=', '?', '_'];
