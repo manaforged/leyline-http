@@ -25,9 +25,6 @@ version = 2
 db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
 yanked = "deny"
-# The resolved rand (0.8.6 direct, 0.9.x via tungstenite) is already past the
-# RUSTSEC-2026-0097 fix, so no ignore is needed; re-add (with the correct path)
-# only if a future lockfile resolves rand to an affected, unpatched version.
 ignore = []
 
 # ─── Licenses ───────────────────────────────────────────────────────────
