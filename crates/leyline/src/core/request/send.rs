@@ -1,6 +1,6 @@
 use super::RequestBuilder;
 use crate::core::Result;
-use crate::core::body::Body;
+use crate::core::body::{Body, BodyKind};
 use crate::core::error::{Error, Kind};
 use crate::core::response::Response;
 use crate::core::session::execute::Attempt;
@@ -22,10 +22,7 @@ impl RequestBuilder {
 
         let retryable_method = allow_non_idempotent_retry || is_idempotent(attempt.method.as_str());
         let body_retryable = !attempt.body.is_stream();
-        let replay: Option<bytes::Bytes> = match &attempt.body {
-            Body::Bytes(b) => Some(b.clone()),
-            _ => None,
-        };
+        let replay: Option<bytes::Bytes> = attempt.body.as_bytes().cloned();
         let base_headers = attempt.headers.clone();
 
         let session_timeout = timeout.unwrap_or_else(|| session.default_timeout());
@@ -48,7 +45,8 @@ impl RequestBuilder {
                 && let Some(header) = resp.header("www-authenticate")
                 && let Ok(challenge) = crate::core::digest::parse_challenge(header)
             {
-                let parsed = url::Url::parse(resp.url())?;
+                let parsed =
+                    url::Url::parse(resp.url()).map_err(crate::core::Error::from_url_parse)?;
                 let uri_path = match parsed.query() {
                     Some(q) => format!("{}?{}", parsed.path(), q),
                     None => parsed.path().to_string(),
@@ -56,7 +54,7 @@ impl RequestBuilder {
                 if is_stream_body {
                     return Err(Error::new(Kind::Request).with_message(
                         "digest auth: cannot replay streaming request body. \
-                         Buffer the body via `Body::Bytes` before sending.",
+                         Buffer the body into bytes before sending.",
                     ));
                 }
                 return Self::digest_followup(
@@ -74,7 +72,7 @@ impl RequestBuilder {
             let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
             tokio::time::sleep(sleep.min(remaining)).await;
             n += 1;
-            attempt.body = replay.clone().map(Body::Bytes).unwrap_or(Body::Empty);
+            attempt.body = replay.clone().map(Body::bytes).unwrap_or_default();
         }
     }
 
@@ -105,7 +103,7 @@ impl RequestBuilder {
         self.infer_from_content_type();
 
         if !self.query_params.is_empty() {
-            let mut url = url::Url::parse(&self.url)?;
+            let mut url = url::Url::parse(&self.url).map_err(crate::core::Error::from_url_parse)?;
             {
                 let mut pairs = url.query_pairs_mut();
                 for (k, v) in &self.query_params {
@@ -116,18 +114,18 @@ impl RequestBuilder {
         }
 
         if let Some(encoding) = self.compress {
-            match &self.body {
-                Body::Bytes(b) => {
+            match &self.body.0 {
+                BodyKind::Bytes(b) => {
                     let compressed = encoding.encode(b)?;
                     self.headers
                         .set("content-encoding", encoding.header_value())?;
                     self.body = Body::from(compressed);
                 }
-                Body::Empty => {}
-                Body::Stream { .. } => {
+                BodyKind::Empty => {}
+                BodyKind::Stream { .. } => {
                     return Err(Error::new(Kind::Body).with_message(
                         "request-body compression is not supported for streaming bodies; \
-                         buffer the body via `Body::Bytes` before calling `.compress(..)`",
+                         buffer the body into bytes before calling `.compress(..)`",
                     ));
                 }
             }
@@ -169,7 +167,7 @@ impl RequestBuilder {
             };
             let mut digest_headers = attempt.headers.clone().unwrap_or_default();
             digest_headers.set("authorization", auth_header)?;
-            let replay_body = replay.clone().map(Body::Bytes).unwrap_or(Body::Empty);
+            let replay_body = replay.clone().map(Body::bytes).unwrap_or_default();
             let digest_remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
             if digest_remaining.is_zero() {
                 return Err(Error::new(Kind::Timeout));

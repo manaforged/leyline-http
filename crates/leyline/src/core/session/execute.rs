@@ -13,7 +13,7 @@ use crate::profile::preset::HeaderPair;
 use super::Session;
 use super::decompress::{decompress_and_strip, drain_stream_into_vec};
 use super::header_merge::apply_extra_headers;
-use crate::core::body::Body;
+use crate::core::body::{Body, BodyKind};
 use crate::core::error::{Error, Kind, Result};
 use crate::core::headers::HeaderList;
 use crate::core::response::Response;
@@ -104,7 +104,8 @@ impl Session {
             match cache.as_mut() {
                 Some((raw, parsed)) if raw == raw_url => Arc::clone(parsed),
                 _ => {
-                    let parsed = Arc::new(Url::parse(raw_url)?);
+                    let parsed =
+                        Arc::new(Url::parse(raw_url).map_err(crate::core::Error::from_url_parse)?);
                     *cache = Some((raw_url.to_string(), Arc::clone(&parsed)));
                     parsed
                 }
@@ -152,10 +153,7 @@ impl Session {
 
             let hop_body = std::mem::take(&mut current_body);
             let hop_body_was_stream = hop_body.is_stream();
-            let replay_body = match &hop_body {
-                Body::Bytes(b) => Some(b.clone()),
-                _ => None,
-            };
+            let replay_body = hop_body.as_bytes().cloned();
 
             let send = self.dispatch(Prepared {
                 method: &current_method,
@@ -218,7 +216,11 @@ impl Session {
                 } else {
                     drop(resp_body_shape);
                     redirect_chain.push(current_url.to_string());
-                    current_url = Arc::new(current_url.join(&location)?);
+                    current_url = Arc::new(
+                        current_url
+                            .join(&location)
+                            .map_err(crate::core::Error::from_url_parse)?,
+                    );
                     if !matches!(current_url.scheme(), "http" | "https") {
                         return Err(Error::new(Kind::Redirect).with_message(format!(
                             "refusing to follow redirect to non-http(s) scheme `{}`",
@@ -228,7 +230,7 @@ impl Session {
 
                     if matches!(code, 301..=303) {
                         current_method = "GET".to_string();
-                        current_body = Body::Empty;
+                        current_body = Body::default();
                     } else if hop_body_was_stream {
                         return Err(Error::new(Kind::Redirect).with_message(format!(
                             "cannot follow {code} redirect: streaming request bodies are \
@@ -236,7 +238,7 @@ impl Session {
                              max_redirects(0)."
                         )));
                     } else if let Some(bytes) = replay_body {
-                        current_body = Body::Bytes(bytes);
+                        current_body = Body::bytes(bytes);
                     }
                     continue;
                 }
@@ -370,7 +372,7 @@ impl Session {
         }
 
         if let Some(len) = current_body.len_hint()
-            && (!matches!(current_body, Body::Empty) || len > 0)
+            && (!matches!(current_body.0, BodyKind::Empty) || len > 0)
         {
             headers.retain(|(k, _)| !k.eq_ignore_ascii_case("content-length"));
             headers.insert(0, ("content-length".into(), Cow::Owned(len.to_string())));

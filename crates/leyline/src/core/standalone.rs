@@ -3,23 +3,24 @@ use std::time::Duration;
 use http::{HeaderName, HeaderValue, Method, Uri};
 
 use crate::core::body::Body;
+use crate::core::config::TimeoutConfig;
 use crate::core::digest::DigestAuth;
 use crate::core::headers::HeaderList;
 use crate::core::retry::RetryPolicy;
 use crate::profile::Preset;
 
-#[non_exhaustive]
 pub struct Request {
-    pub method: Method,
-    pub url: Uri,
-    pub headers: HeaderList,
-    pub body: Body,
-    pub timeout: Option<Duration>,
-    pub retry_policy: Option<RetryPolicy>,
-    pub digest_auth: Option<DigestAuth>,
-    pub allow_non_idempotent_retry: bool,
-    pub stream_response: bool,
-    pub preset: Option<Preset>,
+    pub(crate) method: Method,
+    pub(crate) url: Uri,
+    pub(crate) headers: HeaderList,
+    pub(crate) body: Body,
+    pub(crate) timeout: Option<Duration>,
+    pub(crate) timeouts: Option<TimeoutConfig>,
+    pub(crate) retry: Option<RetryPolicy>,
+    pub(crate) digest_auth: Option<DigestAuth>,
+    pub(crate) allow_non_idempotent_retry: bool,
+    pub(crate) stream: bool,
+    pub(crate) preset: Option<Preset>,
 }
 
 impl std::fmt::Debug for Request {
@@ -40,18 +41,35 @@ impl Request {
             method,
             url: url.try_into().unwrap_or_default(),
             headers: HeaderList::new(),
-            body: Body::Empty,
+            body: Body::default(),
             timeout: None,
-            retry_policy: None,
+            timeouts: None,
+            retry: None,
             digest_auth: None,
             allow_non_idempotent_retry: false,
-            stream_response: false,
+            stream: false,
             preset: None,
         }
     }
 
+    pub fn method(&self) -> &Method {
+        &self.method
+    }
+
+    pub fn url(&self) -> &Uri {
+        &self.url
+    }
+
+    pub fn headers(&self) -> &HeaderList {
+        &self.headers
+    }
+
+    pub fn headers_mut(&mut self) -> &mut HeaderList {
+        &mut self.headers
+    }
+
     pub fn retry(mut self, policy: RetryPolicy) -> Self {
-        self.retry_policy = Some(policy);
+        self.retry = Some(policy);
         self
     }
 
@@ -66,7 +84,7 @@ impl Request {
     }
 
     pub fn stream(mut self) -> Self {
-        self.stream_response = true;
+        self.stream = true;
         self
     }
 
@@ -91,6 +109,12 @@ impl Request {
 
     pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
+        self
+    }
+
+    pub fn timeouts(mut self, timeouts: TimeoutConfig) -> Self {
+        self.timeout = Some(timeouts.total);
+        self.timeouts = Some(timeouts);
         self
     }
 }

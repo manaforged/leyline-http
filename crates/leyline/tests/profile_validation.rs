@@ -1,5 +1,5 @@
 use leyline::h2::H2Config;
-use leyline::profile::{ALL_BROWSERS, BrowserProfile, H2Profile, ProfileRegistry};
+use leyline::profile::{BrowserProfile, H2Profile, ProfileRegistry};
 use leyline::{Browser, Platform, TlsContext, TlsMinVersion};
 
 const ALL_PLATFORMS: [Platform; 5] = [
@@ -241,8 +241,9 @@ fn positioning_pre_shared_key_is_rejected() {
 #[test]
 fn builtin_profiles_declaring_an_extension_order_still_load() {
     let reg = ProfileRegistry::builtin();
-    let declaring = ALL_BROWSERS
-        .into_iter()
+    let declaring = Browser::all()
+        .iter()
+        .copied()
         .filter(|browser| {
             reg.get_browser(*browser)
                 .expect("built-in profile")
@@ -260,7 +261,7 @@ fn builtin_profiles_declaring_an_extension_order_still_load() {
 #[test]
 fn every_builtin_profile_declares_verified_against() {
     let reg = ProfileRegistry::builtin();
-    for browser in ALL_BROWSERS {
+    for browser in Browser::all().iter().copied() {
         let profile = reg.get_browser(browser).expect("built-in profile");
         assert!(
             !profile.meta.verified_against.trim().is_empty(),
@@ -397,7 +398,7 @@ fn chrome150_identity_matches_capture_on_every_supported_platform() {
 ))]
 fn every_builtin_profile_builds_ssl_context() {
     let reg = ProfileRegistry::builtin();
-    for browser in ALL_BROWSERS {
+    for browser in Browser::all().iter().copied() {
         let profile = reg.get_browser(browser).expect("built-in profile");
         for min in [TlsMinVersion::Tls12, TlsMinVersion::Tls13] {
             TlsContext::from_profile(profile, min).unwrap_or_else(|e| {
@@ -412,7 +413,7 @@ fn every_builtin_profile_builds_ssl_context() {
 #[test]
 fn every_builtin_h2config_resolves_on_all_platforms() {
     let reg = ProfileRegistry::builtin();
-    for browser in ALL_BROWSERS {
+    for browser in Browser::all().iter().copied() {
         let profile = reg.get_browser(browser).expect("built-in profile");
         for platform in ALL_PLATFORMS {
             let resolved = profile
@@ -514,13 +515,13 @@ fn cfnetwork_profiles_disable_session_tickets() {
 }
 
 fn newest_chrome_browser() -> Browser {
-    ALL_BROWSERS
+    Browser::all()
         .iter()
         .copied()
         .filter_map(|b| b.chromium_major().map(|m| (b, m)))
         .max_by_key(|(_, m)| *m)
         .map(|(b, _)| b)
-        .expect("at least one Chrome-family profile in ALL_BROWSERS")
+        .expect("at least one Chrome-family profile in Browser::all()")
 }
 
 #[test]
@@ -597,7 +598,7 @@ fn newest_chrome_profile_within_two_majors_of_current_stable() {
 
 #[test]
 fn hello_rep_maps_every_variant_to_a_family_hello() {
-    for browser in ALL_BROWSERS {
+    for browser in Browser::all().iter().copied() {
         let owner = browser.hello_rep();
         let hellos = browser.family_hellos();
         assert!(

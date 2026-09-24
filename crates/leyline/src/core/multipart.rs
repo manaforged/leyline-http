@@ -6,7 +6,7 @@ use std::task::{Context, Poll};
 use bytes::Bytes;
 use futures_util::Stream;
 
-use crate::core::body::Body;
+use crate::core::body::{Body, BodyKind};
 
 pub struct Part {
     pub(crate) name: String,
@@ -21,7 +21,7 @@ impl Part {
         let s = value.into();
         Self {
             name: String::new(),
-            body: Body::Bytes(Bytes::from(s.into_bytes())),
+            body: Body::bytes(Bytes::from(s.into_bytes())),
             filename: None,
             mime: Some("text/plain; charset=utf-8".into()),
             extra_headers: Vec::new(),
@@ -31,7 +31,7 @@ impl Part {
     pub fn bytes(bytes: impl Into<Bytes>) -> Self {
         Self {
             name: String::new(),
-            body: Body::Bytes(bytes.into()),
+            body: Body::bytes(bytes.into()),
             filename: None,
             mime: None,
             extra_headers: Vec::new(),
@@ -124,10 +124,10 @@ impl Form {
 
         let mut part = Part::stream(stream).filename(filename);
         part.name = name.into();
-        if let Body::Stream {
+        if let BodyKind::Stream {
             ref mut length_hint,
             ..
-        } = part.body
+        } = part.body.0
         {
             *length_hint = Some(metadata.len());
         }
@@ -312,12 +312,12 @@ impl Stream for FormStream {
                     let body = part.body;
                     let body_stream: Pin<
                         Box<dyn Stream<Item = io::Result<Bytes>> + Send + 'static>,
-                    > = match body {
-                        Body::Empty => Box::pin(futures_util::stream::empty()),
-                        Body::Bytes(b) => {
+                    > = match body.0 {
+                        BodyKind::Empty => Box::pin(futures_util::stream::empty()),
+                        BodyKind::Bytes(b) => {
                             Box::pin(futures_util::stream::once(async move { Ok(b) }))
                         }
-                        Body::Stream { stream, .. } => stream,
+                        BodyKind::Stream { stream, .. } => stream,
                     };
                     this.state = FormState::InBody(body_stream);
                     return Poll::Ready(Some(Ok(headers)));

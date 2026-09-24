@@ -11,7 +11,7 @@ mod types;
 
 pub use anchor::{HeaderAnchor, infer_anchor};
 pub use brand::{BrandOverlay, BrandOverlayError, ChromiumBrand};
-pub use browser::{ALL_BROWSERS, Browser, Family, PROFILE_COUNT};
+pub use browser::{Browser, Family};
 pub use platform::Platform;
 pub use preset::Preset;
 pub use registry::{ProfileError, ProfileRegistry};

@@ -31,6 +31,8 @@ allowed_external_types = [
     "futures_core::*",
     "url::*",
     "tokio::io::async_write::AsyncWrite",
+    "tower_service::*",
+    "tower_layer::*",
 ]
 
 [package.metadata.docs.rs]
@@ -169,6 +171,114 @@ windows-sys = { version = "0.61", features = ["Win32_Security_Cryptography", "Wi
 [[example]]
 name = "layer"
 required-features = ["tower"]
+
+[[test]]
+name = "fingerprint_conformance"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_cancel_safety"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_connect_method"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_continuation_timeout"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_extended_connect"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_flow_control_e2e"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_flow_overflow"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_frame_roundtrip"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_hostile_server"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_informational_e2e"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_multiplex"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_recv_window"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_rst_flood_e2e"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_rst_flood"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_shutdown_streaming_e2e"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_stream_delivery"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_stream_state"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_trailers_e2e"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_write_batching"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "hpack_encoding"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "pool_h1_framing"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "pool_h1_injection"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "pool_h1_keepalive"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "pool_reconnect_storm"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "pool_stats"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "profile_validation"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "tls_peet"
+required-features = ["bench-internals"]
 
 [dev-dependencies]
 bytes = { workspace = true }

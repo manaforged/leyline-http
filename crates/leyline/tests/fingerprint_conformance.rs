@@ -1,7 +1,7 @@
 use leyline::Platform;
 use leyline::audit::{Ja3Input, Ja4Input, compute_ja3, compute_ja4, compute_ja4t, extension_ids};
 use leyline::h2::H2Config;
-use leyline::profile::{ALL_BROWSERS, ProfileRegistry};
+use leyline::profile::{Browser, ProfileRegistry};
 
 #[derive(PartialEq, Clone, Copy)]
 enum Status {
@@ -47,7 +47,7 @@ fn fingerprint_conformance() {
     let reg = ProfileRegistry::builtin();
     let mut rows: Vec<Row> = Vec::new();
 
-    for browser in ALL_BROWSERS {
+    for browser in Browser::all().iter().copied() {
         let p = reg.get_browser(browser).expect("built-in profile");
         let name = browser.to_string();
 

@@ -14,58 +14,35 @@ impl Session {
     }
 
     pub fn new() -> Self {
-        Self::builder()
-            .build()
-            .expect("bare session profile is always valid")
+        Self::builder().into_builtin()
     }
 
     pub fn chrome() -> Self {
-        Self::builder()
-            .chrome()
-            .build()
-            .expect("built-in Chrome profile is always valid")
+        Self::builder().chrome().into_builtin()
     }
 
     pub fn firefox() -> Self {
-        Self::builder()
-            .firefox()
-            .build()
-            .expect("built-in Firefox profile is always valid")
+        Self::builder().firefox().into_builtin()
     }
 
     pub fn safari() -> Self {
-        Self::builder()
-            .safari()
-            .build()
-            .expect("built-in Safari profile is always valid")
+        Self::builder().safari().into_builtin()
     }
 
     pub fn edge() -> Self {
-        Self::builder()
-            .edge()
-            .build()
-            .expect("built-in Edge overlay is always valid")
+        Self::builder().edge().into_builtin()
     }
 
     pub fn brave() -> Self {
-        Self::builder()
-            .brave()
-            .build()
-            .expect("built-in Brave profile is always valid")
+        Self::builder().brave().into_builtin()
     }
 
     pub fn opera() -> Self {
-        Self::builder()
-            .opera()
-            .build()
-            .expect("built-in Opera overlay is always valid")
+        Self::builder().opera().into_builtin()
     }
 
     pub fn vivaldi() -> Self {
-        Self::builder()
-            .vivaldi()
-            .build()
-            .expect("built-in Vivaldi overlay is always valid")
+        Self::builder().vivaldi().into_builtin()
     }
 
     pub fn profile(browser: Browser, platform: Platform) -> Result<Self> {
@@ -147,7 +124,7 @@ impl Session {
     }
 
     pub async fn preconnect_via(&self, url: &str, proxy: Option<&str>) -> Result<()> {
-        let url = url::Url::parse(url)?;
+        let url = url::Url::parse(url).map_err(crate::core::Error::from_url_parse)?;
         if url.scheme() != "https" || self.inner.protocol_policy == super::ProtocolPolicy::Http1 {
             return Ok(());
         }
@@ -196,17 +173,19 @@ impl Session {
         if let Some(preset) = req.preset {
             builder = builder.preset(preset);
         }
-        if let Some(timeout) = req.timeout {
+        if let Some(timeouts) = req.timeouts {
+            builder = builder.timeouts(timeouts);
+        } else if let Some(timeout) = req.timeout {
             builder = builder.timeout(timeout);
         }
-        if let Some(policy) = req.retry_policy {
+        if let Some(policy) = req.retry {
             builder = builder.retry(policy);
         }
         builder = builder.allow_non_idempotent_retry(req.allow_non_idempotent_retry);
         if let Some(auth) = req.digest_auth {
             builder = builder.digest_auth(auth);
         }
-        if req.stream_response {
+        if req.stream {
             builder = builder.stream();
         }
         builder.send().await

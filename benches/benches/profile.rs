@@ -1,7 +1,5 @@
-
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use leyline::Browser;
-use leyline::profile::ALL_BROWSERS;
 
 fn bench_profile_lookup_chrome147(c: &mut Criterion) {
     c.bench_function("profile::lookup_chrome147", |b| {
@@ -15,7 +13,7 @@ fn bench_profile_lookup_chrome147(c: &mut Criterion) {
 fn bench_profile_lookup_all(c: &mut Criterion) {
     c.bench_function("profile::lookup_all_browsers", |b| {
         b.iter(|| {
-            for br in ALL_BROWSERS {
+            for br in Browser::all().iter().copied() {
                 black_box(br.profile());
             }
         });

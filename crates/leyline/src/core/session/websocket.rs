@@ -24,7 +24,7 @@ impl Session {
         extra_headers: &[(String, String)],
     ) -> Result<crate::core::websocket::WsConnection> {
         let origin = ws_origin(url)?;
-        let parsed = url::Url::parse(url)?;
+        let parsed = url::Url::parse(url).map_err(crate::core::Error::from_url_parse)?;
         let proxy = self.inner.proxy_config.proxy_for(&parsed, request_proxy);
 
         if config.prefer_http2 && !force_http1 {
@@ -131,7 +131,7 @@ impl std::future::IntoFuture for WebSocketBuilder {
 }
 
 fn ws_origin(url: &str) -> Result<String> {
-    let parsed = url::Url::parse(url)?;
+    let parsed = url::Url::parse(url).map_err(crate::core::Error::from_url_parse)?;
     let scheme = match parsed.scheme() {
         "wss" => "https",
         "ws" => {

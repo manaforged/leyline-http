@@ -1,10 +1,11 @@
 # Leyline API map
 
 The supported surface below is stable within semver.
-The modules `leyline::h2`, `leyline::pool`, `leyline::fuzz`, and
-`leyline::tls::FingerprintConnector` are `#[doc(hidden)]` internals for
-leyline's own tests, benches, and fuzz targets. They are public but not part
-of the contract; they change without notice. Do not call them.
+The modules `leyline::h2`, `leyline::pool`, and `leyline::fuzz` exist only
+with the `bench-internals` feature, for leyline's own tests, benches, and
+fuzz targets. `leyline::tls::FingerprintConnector` is a `#[doc(hidden)]`
+internal. None of these are part of the contract; they change without
+notice. Do not call them.
 
 Crate: `leyline-http` on crates.io. Import name: `leyline`.
 
@@ -14,7 +15,7 @@ Crate: `leyline-http` on crates.io. Import name: `leyline`.
 |---|---|
 | Client | `leyline::Session` |
 | Configure | `leyline::SessionBuilder` (via `Session::builder()`) |
-| Request | `leyline::RequestBuilder` (via `session.get(url)` etc.), `leyline::Request` for `Session::execute` |
+| Request | `leyline::RequestBuilder` (via `session.get(url)` etc.), `leyline::Request` for `Session::execute` (`method`/`url`/`headers` getters; `retry`, `stream`, `timeout`, `timeouts` setters match `RequestBuilder`) |
 | Response | `leyline::Response`, `leyline::BodyStream`, `leyline::ResponseTiming`, `leyline::HttpVersion` |
 | Error | `leyline::Error`, `leyline::Kind`, `leyline::Result<T>` |
 
@@ -57,13 +58,13 @@ not at the root.
 
 | Job | Symbols |
 |---|---|
-| Pick a browser | `Session::chrome`/`firefox`/`safari`/`edge`/`brave`/`opera`/`vivaldi`, `Session::profile(Browser, Platform)`, `SessionBuilder::browser`, `Browser`, `Browser::latest(Family)`, `Preset`, `profile::ALL_BROWSERS`, `profile::Family` |
+| Pick a browser | `Session::chrome`/`firefox`/`safari`/`edge`/`brave`/`opera`/`vivaldi`, `Session::profile(Browser, Platform)`, `SessionBuilder::browser`, `Browser`, `Browser::latest(Family)`, `Preset`, `Browser::all`, `profile::Family` |
 | Pick a platform | `SessionBuilder::platform`/`windows`/`macos`/`linux`/`android`/`ios`, `Platform::Host` |
 | Brand overlay | `SessionBuilder::brand`, `ChromiumBrand`, `profile::BrandOverlayError` |
 | Composed identity | `Identity::locked`, `Identity::rotate_tls`, `Identity::rotate_hello`, `Identity::pass`, `SessionBuilder::identity`, `SessionBuilder::http_identity` |
 | HTTP methods | `Session::get`/`post`/`put`/`patch`/`delete`/`head`, `Session::request(Method, url)`, `Session::execute(Request)` |
 | Headers | `RequestBuilder::header`/`append_header`/`headers`/`append_headers`, `accept`/`accept_language`/`user_agent`/`referer`/`origin`/`content_type`, `anchored(profile::HeaderAnchor, ..)`, `header_order`, `HeaderList` |
-| Body out | `RequestBuilder::body`/`json`/`form`/`form_str`/`multipart`, `Body::stream`, `multipart::Form`, `multipart::Part` |
+| Body out | `RequestBuilder::body`/`json`/`form`/`form_str`/`multipart`, `Body::stream`/`stream_with_length`, `Body` as a `Stream`, `multipart::Form`, `multipart::Part` |
 | Query | `RequestBuilder::query`, `IntoParamPair` |
 | Session defaults | `SessionBuilder::accept_language`/`extra_headers`/`https_only`, `Session::default_timeout`/`response_header_timeout` |
 | Auth | `RequestBuilder::basic_auth`/`bearer_auth`/`digest_auth`, `DigestAuth` |
@@ -141,8 +142,8 @@ predicates `is_timeout`/`is_connect`/`is_status`/`is_redirect`/`is_body`/
   `compression-brotli`, `compression-deflate`, `compression-zstd`,
   `multipart`, `stream`, `websocket`, `http3`, `system-trust`. Opt-in
   features: `socks`, `tower`, `native-interface-bind`, `unstable-bssl`
-  (exposes BoringSSL types on `TlsContext`), `bench-internals` (bench-only
-  pool probes). `full` enables every opt-in except `bench-internals` and
+  (exposes BoringSSL types on `TlsContext`), `bench-internals` (HTTP/2, pool, and fuzz
+  internals for tests, benches, and fuzz targets; outside semver). `full` enables every opt-in except `bench-internals` and
   `unstable-bssl`.
 - The supported public surface is `leyline-http`. The BoringSSL crates it
   depends on are outside the semver promise.

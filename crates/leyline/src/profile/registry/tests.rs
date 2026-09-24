@@ -87,15 +87,15 @@ fn builtin_loads_all_profiles() {
     let reg = ProfileRegistry::builtin();
     assert_eq!(
         reg.len(),
-        crate::profile::PROFILE_COUNT,
-        "registry count != PROFILE_COUNT constant"
+        crate::profile::Browser::all().len(),
+        "registry count != Browser::all() length"
     );
 }
 
 #[test]
 fn every_browser_variant_resolves() {
     let reg = ProfileRegistry::builtin();
-    for browser in crate::profile::ALL_BROWSERS {
+    for browser in crate::profile::Browser::all().iter().copied() {
         assert!(
             reg.get_browser(browser).is_some(),
             "no profile for {browser}"
@@ -106,7 +106,7 @@ fn every_browser_variant_resolves() {
 #[test]
 fn every_profile_has_fingerprint() {
     let reg = ProfileRegistry::builtin();
-    for browser in crate::profile::ALL_BROWSERS {
+    for browser in crate::profile::Browser::all().iter().copied() {
         let profile = reg.get_browser(browser).unwrap();
         let has_ja4 = profile.expected_ja4().is_some();
         let has_h2 = profile.expected_h2_fingerprint().is_some();

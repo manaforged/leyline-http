@@ -83,7 +83,7 @@ impl RequestBuilder {
             method,
             url: url.to_string(),
             preset,
-            body: Body::Empty,
+            body: Body::default(),
             headers: HeaderList::new(),
             query_params: Vec::new(),
             timeout: None,

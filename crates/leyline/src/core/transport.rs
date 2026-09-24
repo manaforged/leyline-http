@@ -11,7 +11,7 @@ use crate::profile::preset::HeaderPair;
 use crate::tls::FingerprintConnector;
 use crate::util::{base64_encode, percent_decode};
 
-use crate::core::body::Body;
+use crate::core::body::{Body, BodyKind};
 use crate::core::body_stream::BodyStream;
 use crate::core::error::{Error, Kind, Result};
 use crate::core::response::HttpVersion;
@@ -100,10 +100,10 @@ pub(crate) async fn send_request_auto(
         stream_response,
     } = req;
 
-    let (h2_body, replay): (Body, Option<Body>) = match body {
-        Body::Empty => (Body::Empty, Some(Body::Empty)),
-        Body::Bytes(b) => (Body::Bytes(b.clone()), Some(Body::Bytes(b))),
-        stream @ Body::Stream { .. } => (stream, None),
+    let (h2_body, replay): (Body, Option<Body>) = match body.0 {
+        BodyKind::Empty => (Body::default(), Some(Body::default())),
+        BodyKind::Bytes(b) => (Body::bytes(b.clone()), Some(Body::bytes(b))),
+        kind @ BodyKind::Stream { .. } => (Body(kind), None),
     };
 
     match send_request_h2(
@@ -252,10 +252,10 @@ pub(crate) async fn send_request_h2(
 }
 
 fn body_to_h2_request(body: Body) -> crate::h2::client::RequestBody {
-    match body {
-        Body::Empty => crate::h2::client::RequestBody::None,
-        Body::Bytes(b) => crate::h2::client::RequestBody::Buffered(b),
-        Body::Stream {
+    match body.0 {
+        BodyKind::Empty => crate::h2::client::RequestBody::None,
+        BodyKind::Bytes(b) => crate::h2::client::RequestBody::Buffered(b),
+        BodyKind::Stream {
             stream,
             length_hint,
         } => crate::h2::client::RequestBody::Streaming {
@@ -304,14 +304,14 @@ pub(crate) fn strip_connection_specific_headers(headers: &mut Vec<HeaderPair>) -
 }
 
 fn body_to_h1(body: Body) -> H1Body {
-    match body {
-        Body::Empty => H1Body::Empty,
-        Body::Bytes(b) => H1Body::Buffered(b),
-        Body::Stream {
+    match body.0 {
+        BodyKind::Empty => H1Body::Empty,
+        BodyKind::Bytes(b) => H1Body::Buffered(b),
+        BodyKind::Stream {
             stream,
             length_hint: Some(length),
         } => H1Body::FixedStream { stream, length },
-        Body::Stream {
+        BodyKind::Stream {
             stream,
             length_hint: None,
         } => H1Body::ChunkedStream { stream },
@@ -486,10 +486,10 @@ pub(crate) async fn send_request_h3(
 
     strip_connection_specific_headers(&mut headers)?;
 
-    let (body_bytes, body_stream) = match body {
-        Body::Empty => (None, None),
-        Body::Bytes(b) => (Some(b), None),
-        Body::Stream { stream, .. } => (None, Some(stream)),
+    let (body_bytes, body_stream) = match body.0 {
+        BodyKind::Empty => (None, None),
+        BodyKind::Bytes(b) => (Some(b), None),
+        BodyKind::Stream { stream, .. } => (None, Some(stream)),
     };
 
     let (resp, tls) = crate::pool::send_request_h3_pooled(

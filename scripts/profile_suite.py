@@ -523,13 +523,6 @@ def wire_family(family: str, prefix: str) -> None:
                     f"            Self::{prev_v} => Some({prev[-1]}),\n",
                     f"            Self::{variant} => Some({major}),\n",
                 )
-    count = len(re.findall(r"^    Browser::\w+,$", text, re.M))
-    text = re.sub(
-        r"pub const PROFILE_COUNT: usize = \d+;",
-        f"pub const PROFILE_COUNT: usize = {count};",
-        text,
-        count=1,
-    )
     groups = ja4_groups(family)
     arms = []
     reps = []
@@ -720,7 +713,7 @@ def wire_family(family: str, prefix: str) -> None:
             f"self.browser(Browser::Safari{newest}).macos()",
         )
         builder.write_text(bld)
-    print(f"wired {prefix}{newest}  PROFILE_COUNT from toml majors + siblings")
+    print(f"wired {prefix}{newest}  from toml majors + siblings")
 
 
 def missing_majors(family: str, live_major: int) -> list[int]:

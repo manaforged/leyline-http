@@ -96,7 +96,7 @@ impl WsConnection {
         extra_headers: &[(String, String)],
         ws_config: &WebSocketConfig,
     ) -> Result<Self> {
-        let parsed = url::Url::parse(url)?;
+        let parsed = url::Url::parse(url).map_err(crate::core::Error::from_url_parse)?;
         let host = parsed
             .host_str()
             .ok_or_else(|| Error::new(Kind::Config).with_message("no host in WebSocket URL"))?;
@@ -176,7 +176,7 @@ impl WsConnection {
         extra_headers: &[(String, String)],
         ws_config: &WebSocketConfig,
     ) -> Result<Self> {
-        let parsed = url::Url::parse(url)?;
+        let parsed = url::Url::parse(url).map_err(crate::core::Error::from_url_parse)?;
         let host = parsed
             .host_str()
             .ok_or_else(|| Error::new(Kind::Config).with_message("no host in WebSocket URL"))?

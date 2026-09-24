@@ -238,7 +238,7 @@ g_semver() {
 
 g_external_types() {
     external_types_nightly="nightly-2026-06-20"
-    step "cargo check-external-types leyline-http ($external_types_nightly)"
+    step "cargo check-external-types leyline-http --features full ($external_types_nightly)"
     if ! command -v cargo-check-external-types >/dev/null; then
         echo "  (cargo-check-external-types not installed; skipping — install with"
         echo "   'cargo install --locked cargo-check-external-types')"
@@ -249,7 +249,7 @@ g_external_types() {
         echo "   'rustup toolchain install $external_types_nightly')"
     else
         cargo "+$external_types_nightly" check-external-types \
-            --manifest-path crates/leyline/Cargo.toml \
+            --manifest-path crates/leyline/Cargo.toml --features full \
             || fail "public API leaks unapproved external types"
         external_types_status="ran"
         ok "external types clean"

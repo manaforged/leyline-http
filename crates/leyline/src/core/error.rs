@@ -98,12 +98,12 @@ impl Error {
         self
     }
 
-    pub fn with_url(mut self, url: Uri) -> Self {
+    pub(crate) fn with_url(mut self, url: Uri) -> Self {
         self.inner.url = Some(url);
         self
     }
 
-    pub fn with_status(mut self, status: StatusCode) -> Self {
+    pub(crate) fn with_status(mut self, status: StatusCode) -> Self {
         self.inner.status = Some(status);
         self
     }
@@ -113,12 +113,12 @@ impl Error {
         self
     }
 
-    pub fn with_body(mut self, body: Vec<u8>) -> Self {
+    pub(crate) fn with_body(mut self, body: Vec<u8>) -> Self {
         self.inner.body = Some(body);
         self
     }
 
-    pub fn with_alpn(mut self, negotiated: impl Into<String>) -> Self {
+    pub(crate) fn with_alpn(mut self, negotiated: impl Into<String>) -> Self {
         self.inner.alpn = Some(negotiated.into());
         self
     }
@@ -143,7 +143,8 @@ impl Error {
         self.inner.url.as_ref()
     }
 
-    pub fn without_url(mut self) -> Self {
+    #[cfg(test)]
+    pub(crate) fn without_url(mut self) -> Self {
         self.inner.url = None;
         self
     }
@@ -337,14 +338,12 @@ fn io_kind(err: &TlsError) -> Option<io::ErrorKind> {
     }
 }
 
-impl From<url::ParseError> for Error {
-    fn from(e: url::ParseError) -> Self {
+impl Error {
+    pub(crate) fn from_url_parse(e: url::ParseError) -> Self {
         Error::new(Kind::Url).with_source(e)
     }
-}
 
-impl From<serde_json::Error> for Error {
-    fn from(e: serde_json::Error) -> Self {
+    pub(crate) fn from_json(e: serde_json::Error) -> Self {
         Error::new(Kind::Json).with_source(e)
     }
 }

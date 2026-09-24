@@ -15,7 +15,7 @@ fn latest_is_the_highest_bundled_version() {
     for family in ALL_FAMILIES {
         let latest = Browser::latest(family);
         let (key, version) = latest.profile_key();
-        let higher = ALL_BROWSERS
+        let higher = Browser::all()
             .iter()
             .filter(|b| b.profile_key().0 == key)
             .find(|b| b.profile_key().1 > version);
@@ -29,7 +29,7 @@ fn latest_is_the_highest_bundled_version() {
 
 #[test]
 fn latest_covers_every_bundled_family() {
-    for browser in ALL_BROWSERS {
+    for browser in Browser::all() {
         let key = browser.family();
         let named = ALL_FAMILIES.iter().any(|f| {
             let latest = Browser::latest(*f);

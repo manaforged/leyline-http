@@ -6,7 +6,6 @@
     clippy::panic,
     reason = "test harness helper: explicit panic on unexpected error shape is the assertion"
 )]
-use leyline::profile::{ALL_BROWSERS, PROFILE_COUNT};
 use leyline::{Browser, Platform};
 use serde_json::Value;
 
@@ -15,13 +14,13 @@ const PEET_URL: &str = "https://tls.peet.ws/api/all";
 #[test]
 fn profile_count_matches_constant() {
     let reg = leyline::profile::ProfileRegistry::builtin();
-    assert_eq!(reg.len(), PROFILE_COUNT);
+    assert_eq!(reg.len(), Browser::all().len());
 }
 
 #[test]
 fn every_browser_variant_has_profile() {
     let reg = leyline::profile::ProfileRegistry::builtin();
-    for browser in ALL_BROWSERS {
+    for browser in Browser::all().iter().copied() {
         assert!(
             reg.get_browser(browser).is_some(),
             "no profile for {browser}"
@@ -32,7 +31,7 @@ fn every_browser_variant_has_profile() {
 #[test]
 fn every_profile_has_fingerprint_expectation() {
     let reg = leyline::profile::ProfileRegistry::builtin();
-    for browser in ALL_BROWSERS {
+    for browser in Browser::all().iter().copied() {
         let profile = reg.get_browser(browser).unwrap();
         let has_ja4 = profile.expected_ja4().is_some();
         let has_h2 = profile.expected_h2_fingerprint().is_some();
@@ -47,7 +46,7 @@ fn every_profile_has_fingerprint_expectation() {
 fn h2_fingerprints_match_toml_expectations() {
     let reg = leyline::profile::ProfileRegistry::builtin();
     let mut checked = 0;
-    for browser in ALL_BROWSERS {
+    for browser in Browser::all().iter().copied() {
         let profile = reg.get_browser(browser).unwrap();
         if let Some(expected) = profile.expected_h2_fingerprint() {
             let h2 = leyline::h2::H2Config::from_profile(&profile.h2).unwrap();
@@ -150,7 +149,7 @@ fn crate_root_context_helpers_work() {
         assert!(quic.is_ok(), "quic context failed: {:?}", quic.err());
     }
 
-    for browser in ALL_BROWSERS {
+    for browser in Browser::all().iter().copied() {
         assert!(
             leyline::TlsContext::from_profile(browser.profile(), leyline::TlsMinVersion::Tls12)
                 .is_ok(),
@@ -498,7 +497,7 @@ async fn live_wire_audit_every_profile() {
     let reg = leyline::profile::ProfileRegistry::builtin();
     let mut checked = 0;
 
-    for browser in ALL_BROWSERS {
+    for browser in Browser::all().iter().copied() {
         let platform = live_platform_for(browser);
         let session = leyline::Session::builder()
             .browser(browser)
@@ -735,7 +734,7 @@ async fn live_ja4_exact_match_every_profile_with_expectation() {
     let mut checked = 0;
     let mut skipped: Vec<String> = Vec::new();
 
-    for browser in ALL_BROWSERS {
+    for browser in Browser::all().iter().copied() {
         let profile = reg.get_browser(browser).unwrap();
         let expected = match profile.expected_ja4() {
             Some(e) => e,
@@ -773,7 +772,7 @@ async fn live_h2_akamai_every_profile() {
     let reg = leyline::profile::ProfileRegistry::builtin();
     let mut checked = 0;
 
-    for browser in ALL_BROWSERS {
+    for browser in Browser::all().iter().copied() {
         let platform = live_platform_for(browser);
 
         let session = leyline::Session::builder()
@@ -799,7 +798,8 @@ async fn live_h2_akamai_every_profile() {
     }
 
     assert_eq!(
-        checked, PROFILE_COUNT,
+        checked,
+        Browser::all().len(),
         "expected to check every first-class profile"
     );
 }

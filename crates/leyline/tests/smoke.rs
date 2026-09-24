@@ -74,7 +74,8 @@ async fn smoke_suite() {
             let s = Session::chrome();
             let mut r = s.get(PEET_URL).await?;
             let body = r.text().await.unwrap();
-            let _: Value = serde_json::from_str(&body)?;
+            let _: Value =
+                serde_json::from_str(&body).map_err(|e| Error::new(Kind::Json).with_source(e))?;
             ensure(
                 body.contains("http2") && body.contains("tls"),
                 "tls.peet response missing protocol sections",

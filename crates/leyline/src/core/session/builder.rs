@@ -479,6 +479,13 @@ impl SessionBuilder {
         self
     }
 
+    pub(super) fn into_builtin(self) -> Session {
+        match self.build() {
+            Ok(session) => session,
+            Err(err) => unreachable!("bundled profile failed to build: {err}"),
+        }
+    }
+
     pub fn build(mut self) -> Result<Session> {
         if let Some(error) = self.config_error.take() {
             return Err(Error::new(Kind::Config).with_message(error));

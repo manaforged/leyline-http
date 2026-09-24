@@ -10,7 +10,7 @@ Regenerate with `python3 scripts/generate-api.py`. The release check runs
 <details>
 <summary>Symbol index</summary>
 
-`0` · `ALL_BROWSERS` · `AfterAccept` · `AfterCchUa` · `AfterCchUaMobile` · `AfterCchUaPlatform` · `AfterContentType` · `AfterUserAgent` · `Android` · `AuditData` · `Auto` · `BeforeAcceptEncoding` · `Binary` · `Body` · `BodyStream` · `BrandOverlay` · `BrandOverlayError` · `Brave` · `Brave146` · `Brotli` · `Browser` · `BrowserProfile` · `Builder` · `Bytes` · `Call` · `Certificate` · `CfNetwork` · `CfnetworkIOS18` · `CfnetworkMacOS26` · `Chrome` · `Chrome145` · `Chrome146` · `Chrome147` · `Chrome148` · `Chrome149` · `Chrome150` · `Chrome151` · `Chrome152` · `ChromiumBrand` · `ClientIdentity` · `Close` · `CloseFrame` · `CompressionConfig` · `Config` · `Connect` · `ConnectionError` · `ContentEncoding` · `Cookie` · `CrossOrigin` · `Decode` · `Deflate` · `DigestAuth` · `Dns` · `DnsConfig` · `Done` · `Edge` · `Empty` · `Error` · `Family` · `Firefox` · `Firefox148` · `Firefox149` · `Firefox150` · `Firefox151` · `Firefox152` · `Firefox153` · `Firefox154` · `Follow` · `Form` · `FormNavigate` · `Future` · `Gzip` · `H2Fingerprint` · `H2PlatformOverride` · `H2PriorityProfile` · `H2Profile` · `H3Config` · `Handshake` · `HandshakeIo` · `HappyEyeballsConfig` · `Head` · `HeaderAnchor` · `HeaderContext` · `HeaderList` · `HeaderPair` · `Host` · `Hostname` · `Http1` · `Http1_1` · `Http2` · `Http3` · `HttpVersion` · `IOS` · `Identity` · `IntoFuture` · `IntoParamPair` · `Io` · `Item` · `Ja3Input` · `Ja4Input` · `Ja4hInput` · `Jar` · `Json` · `Kind` · `LINUX` · `Lax` · `LeylineService` · `Linux` · `Log` · `Logged` · `MACOS` · `MacOS` · `Native` · `Navigate` · `NoProxy` · `None` · `OkHttp` · `OkHttpAndroid10` · `Opera` · `Output` · `PROFILE_COUNT` · `Parse` · `Part` · `Pending` · `Ping` · `Pinning` · `Platform` · `PlatformIdentity` · `Pong` · `PoolConfig` · `Preset` · `Profile` · `ProfileError` · `ProfileMeta` · `ProfileRegistry` · `ProtocolPolicy` · `Proxy` · `ProxyConfig` · `ProxyRule` · `ProxyUrl` · `Race` · `Redirect` · `RedirectAction` · `RedirectAttempt` · `RedirectPolicy` · `Reply` · `Request` · `RequestBuilder` · `ResolveFuture` · `Resolver` · `Response` · `ResponseTiming` · `Result` · `RetryPolicy` · `RetryTrigger` · `Safari` · `Safari18` · `Safari26` · `SafariIOS17` · `SafariIOS18` · `SafariIos` · `SameSite` · `Script` · `Sent` · `ServerError` · `Service` · `Session` · `SessionBuilder` · `SocketConfig` · `SslConfig` · `SslConnect` · `Status` · `Stop` · `Stream` · `Strict` · `SystemResolver` · `TcpConnect` · `TcpProfile` · `Text` · `Timeout` · `TimeoutConfig` · `Timing` · `Tls` · `Tls10` · `Tls12` · `Tls13` · `TlsContext` · `TlsError` · `TlsFingerprint` · `TlsMinVersion` · `TlsProfile` · `TlsTrustConfig` · `Trace` · `TracingTrace` · `Transport` · `TrustStore` · `Unverified` · `Url` · `Vivaldi` · `WINDOWS` · `WebSocketBuilder` · `WebSocketConfig` · `Windows` · `WsConnection` · `WsMessage` · `WsSink` · `WsStream` · `Xhr` · `Zstd` · `accept` · `accept_language` · `accept_unmasked_frames` · `active_connection_id_limit` · `add_ca_der` · `add_ca_file` · `add_pinned_leaf_sha256` · `add_root_certificate_der` · `add_root_certificate_file` · `addrs` · `akamai` · `all` · `all_cookies` · `allow_non_idempotent_retry` · `alpn` · `alps` · `alps_new_codepoint` · `anchor` · `anchor_name` · `anchored` · `android` · `append` · `append_anchored` · `append_header` · `append_headers` · `as_bytes` · `as_str` · `as_text` · `attempt_limit` · `audit` · `backoff_factor` · `bare` · `basic_auth` · `bearer_auth` · `body` · `body_prefix` · `boundary` · `brand` · `brave` · `brotli` · `browser` · `build` · `build_headers` · `builder` · `builtin` · `bytes` · `ca_der_count` · `ca_files` · `call` · `captured_against` · `cert_compression` · `certificate_chain_file` · `chrome` · `chromium_major` · `cipher` · `ciphers` · `clear` · `client_identity` · `client_identity_files` · `clone` · `close` · `cmp` · `code` · `compress` · `compression` · `compute_ja3` · `compute_ja4` · `compute_ja4h` · `compute_ja4t` · `config` · `connect` · `connect_ms` · `connect_timeout` · `contains_named` · `content_length` · `content_type` · `cookie` · `cookie_header` · `cookie_jar` · `cookies` · `copy_to` · `creation_time` · `curves` · `custom` · `danger_accept_invalid_certs` · `dcid_length` · `deep_clone` · `default` · `default_browser` · `default_firefox` · `default_priority` · `default_timeout` · `deflate` · `delegated_credentials` · `delete` · `deserialize` · `detect_host` · `df` · `digest_auth` · `disable_env_proxies` · `dns` · `domain` · `done` · `download_to` · `ech_grease` · `edge` · `elapsed` · `enable_push` · `eq` · `error_for_status` · `exclusive` · `execute` · `expected_h2_fingerprint` · `expected_h2_fingerprint_for` · `expected_ja4` · `expected_resumed_ja4` · `expires` · `export_cookies` · `extension_ids` · `extension_permutation` · `extra_headers` · `family` · `family_hellos` · `file` · `filename` · `fingerprint` · `firefox` · `fmt` · `for_family` · `for_platform` · `form` · `form_str` · `from` · `from_env` · `from_pairs` · `from_profile` · `from_string` · `from_toml` · `get` · `get_browser` · `get_cookie` · `get_named` · `global` · `grease` · `gzip` · `h2` · `h2_fingerprint` · `h2_ping_after_idle` · `h2_ping_timeout` · `happy_eyeballs` · `has_sni` · `hash` · `head` · `header` · `header_all` · `header_map` · `header_order` · `header_table_size` · `headers` · `headers_mut` · `hello_library` · `hello_rep` · `host` · `host_only` · `http` · `http1` · `http2` · `http3` · `http_identity` · `http_only` · `http_version` · `https` · `https_only` · `id` · `identity` · `identity_for` · `identity_key` · `idle_timeout` · `infer_anchor` · `initial_backoff` · `initial_connection_window_size` · `initial_max_data` · `initial_max_stream_data_bidi_local` · `initial_max_stream_data_bidi_remote` · `initial_max_stream_data_uni` · `initial_max_streams_bidi` · `initial_max_streams_uni` · `initial_stream_window_size` · `interface` · `into_bytes` · `into_future` · `into_param_pair` · `into_stream` · `into_string` · `into_text` · `io` · `ios` · `is_before` · `is_body` · `is_client_error` · `is_connect` · `is_connection_closed` · `is_decode` · `is_empty` · `is_expired` · `is_firefox` · `is_http2` · `is_redirect` · `is_retryable` · `is_server_error` · `is_status` · `is_stream` · `is_success` · `is_timeout` · `iter` · `ja3` · `ja4` · `ja4h` · `ja4t` · `jitter` · `json` · `keepalive` · `kind` · `label` · `last_access` · `latest` · `layer` · `len` · `len_hint` · `length_hint` · `leyline` · `limited` · `linux` · `load` · `load_cookies` · `load_warnings` · `local_address` · `local_ipv4` · `local_ipv6` · `location` · `locked` · `macos` · `matches` · `max_backoff` · `max_concurrent_streams` · `max_connections` · `max_field_section_size` · `max_frame_size` · `max_h1_conns_per_host` · `max_header_list_size` · `max_idle_timeout` · `max_message_size` · `max_redirects` · `max_response_body_bytes` · `max_retries` · `max_retry_after` · `max_tls_12` · `max_udp_payload_size` · `max_write_buffer_size` · `merge` · `message` · `meta` · `method` · `mime` · `min_tls_version` · `mobile_flag` · `mss` · `multipart` · `name` · `navigate_accept` · `navigate_accept_override` · `new` · `no_delay` · `no_proxy` · `none` · `ocsp_stapling` · `omit_settings` · `on` · `on_status` · `opera` · `origin` · `outcome` · `overlay` · `padding` · `parse` · `part` · `partial_cmp` · `pass` · `pass_library` · `patch` · `path` · `permute_extensions` · `pinned_leaf_sha256` · `platform` · `platforms` · `poll_next` · `poll_ready` · `pool_config` · `pool_stats` · `port` · `post` · `pre_shared_key` · `preconnect` · `preconnect_via` · `prefer_http2` · `preset` · `previous` · `private_key_file` · `profile` · `profile_key` · `protocol` · `protocol_policy` · `proxies` · `proxy` · `pseudo_order` · `put` · `qpack_blocked_streams` · `qpack_max_table_capacity` · `query` · `race` · `read` · `read_buffer_size` · `read_until` · `reason` · `record_size_limit` · `recv` · `recv_buffer_size` · `redirect_chain` · `redirect_policy` · `referer` · `remove_all` · `remove_all_named` · `remove_named` · `remove_named_for_host` · `request` · `request_header_order` · `request_headers` · `request_trust_anchors` · `resolve` · `resolve_delay` · `resolve_for_platform` · `resolve_host` · `resolve_host_to_addrs` · `resolver` · `response_header` · `response_header_timeout` · `resumed_ja4` · `retry` · `retry_on` · `retry_policy` · `reused` · `rotate_hello` · `rotate_tls` · `safari` · `same_site` · `sec_ch_platform` · `sec_ch_ua` · `sec_ch_ua_mobile` · `sec_ch_ua_platform` · `secure` · `send` · `send_binary` · `send_buffer_size` · `send_ms` · `send_raw` · `sent` · `serialize` · `session` · `session_tickets` · `set` · `set_cookie` · `set_named` · `set_named_on` · `settings_order` · `sigalgs` · `signed_cert_timestamps` · `snapshot` · `socket_config` · `socks5` · `socks5h` · `source` · `split` · `status` · `store_response_cookies` · `store_set_cookie` · `stream` · `stream_dependency` · `stream_response` · `stream_with_length` · `strict` · `tcp_keepalive` · `tcp_keepalive_interval` · `tcp_keepalive_retries` · `tcp_nodelay` · `tcp_profile` · `tcp_user_timeout` · `text` · `text_utf8` · `text_with_charset` · `timeout` · `timeouts` · `timing` · `tls` · `tls_alpn` · `tls_cipher` · `tls_peer_certificate` · `tls_record_version` · `tls_trust` · `tls_version` · `total` · `total_ms` · `trace` · `trailers` · `transient` · `try_from` · `ttl` · `unknown_setting8` · `unknown_setting9` · `uri` · `url` · `user_agent` · `uses_env` · `uses_env_roots` · `uses_system_roots` · `value` · `verified_against` · `version` · `version_for` · `vivaldi` · `websocket` · `websocket_config` · `weight` · `window_scale` · `window_size` · `windows` · `with_alpn` · `with_backoff` · `with_body` · `with_cookie_jar` · `with_max_retries` · `with_max_retry_after` · `with_message` · `with_proxy` · `with_redirect_policy` · `with_rule` · `with_source` · `with_status` · `with_url` · `without_env` · `without_env_roots` · `without_system_roots` · `without_url` · `write_buffer_size` · `zstd`
+`0` · `AfterAccept` · `AfterCchUa` · `AfterCchUaMobile` · `AfterCchUaPlatform` · `AfterContentType` · `AfterUserAgent` · `Android` · `AuditData` · `Auto` · `BeforeAcceptEncoding` · `Binary` · `Body` · `BodyStream` · `BrandOverlay` · `BrandOverlayError` · `Brave` · `Brave146` · `Brotli` · `Browser` · `BrowserProfile` · `Builder` · `Call` · `Cancel` · `Certificate` · `CfNetwork` · `CfnetworkIOS18` · `CfnetworkMacOS26` · `Chrome` · `Chrome145` · `Chrome146` · `Chrome147` · `Chrome148` · `Chrome149` · `Chrome150` · `Chrome151` · `Chrome152` · `ChromiumBrand` · `ClientIdentity` · `Close` · `CloseFrame` · `CompressionConfig` · `CompressionError` · `Config` · `Connect` · `ConnectError` · `Connection` · `ConnectionError` · `ContentEncoding` · `Cookie` · `CrossOrigin` · `Decode` · `Deflate` · `DigestAuth` · `Dns` · `DnsConfig` · `Done` · `Edge` · `Empty` · `EnhanceYourCalm` · `Error` · `ErrorCode` · `Family` · `Firefox` · `Firefox148` · `Firefox149` · `Firefox150` · `Firefox151` · `Firefox152` · `Firefox153` · `Firefox154` · `FlowControlError` · `Follow` · `Form` · `FormNavigate` · `FrameSizeError` · `FrameTooLarge` · `Future` · `Gzip` · `H2Error` · `H2Fingerprint` · `H2PlatformOverride` · `H2PriorityProfile` · `H2Profile` · `H3Config` · `Handshake` · `HandshakeIo` · `HappyEyeballsConfig` · `Head` · `HeaderAnchor` · `HeaderContext` · `HeaderList` · `HeaderPair` · `Host` · `Hostname` · `Hpack` · `Http1` · `Http11Required` · `Http1_1` · `Http2` · `Http3` · `HttpVersion` · `IOS` · `Identity` · `InadequateSecurity` · `InternalError` · `IntoFuture` · `IntoParamPair` · `Io` · `Item` · `Ja3Input` · `Ja4Input` · `Ja4hInput` · `Jar` · `Json` · `Kind` · `LINUX` · `Lax` · `LeylineService` · `Linux` · `Log` · `Logged` · `MACOS` · `MacOS` · `Native` · `Navigate` · `NoError` · `NoProxy` · `None` · `OkHttp` · `OkHttpAndroid10` · `Opera` · `Output` · `Parse` · `Part` · `Pending` · `Ping` · `Pinning` · `Platform` · `PlatformIdentity` · `Pong` · `PoolConfig` · `PoolStats` · `Preset` · `Profile` · `ProfileError` · `ProfileMeta` · `ProfileRegistry` · `ProtocolError` · `ProtocolPolicy` · `Proxy` · `ProxyConfig` · `ProxyRule` · `ProxyUrl` · `Race` · `Redirect` · `RedirectAction` · `RedirectAttempt` · `RedirectPolicy` · `RefusedStream` · `Reply` · `Request` · `RequestBuilder` · `ResolveFuture` · `Resolver` · `Response` · `ResponseTiming` · `Result` · `RetryPolicy` · `RetryTrigger` · `Safari` · `Safari18` · `Safari26` · `SafariIOS17` · `SafariIOS18` · `SafariIos` · `SameSite` · `Script` · `Sent` · `ServerError` · `Service` · `Session` · `SessionBuilder` · `SettingsTimeout` · `SocketConfig` · `SslConfig` · `SslConnect` · `Status` · `Stop` · `Stream` · `StreamClosed` · `Strict` · `SystemResolver` · `TcpConnect` · `TcpProfile` · `Text` · `Timeout` · `TimeoutConfig` · `Timing` · `Tls` · `Tls10` · `Tls12` · `Tls13` · `TlsContext` · `TlsError` · `TlsFingerprint` · `TlsMinVersion` · `TlsProfile` · `TlsTrustConfig` · `Trace` · `TracingTrace` · `Transport` · `TrustStore` · `Unverified` · `Url` · `Vivaldi` · `WINDOWS` · `WebSocketBuilder` · `WebSocketConfig` · `Windows` · `WsConnection` · `WsMessage` · `WsSink` · `WsStream` · `Xhr` · `Zstd` · `accept` · `accept_language` · `accept_unmasked_frames` · `active_connection_id_limit` · `add_ca_der` · `add_ca_file` · `add_pinned_leaf_sha256` · `add_root_certificate_der` · `add_root_certificate_file` · `addrs` · `akamai` · `all` · `all_cookies` · `allow_non_idempotent_retry` · `alpn` · `alps` · `alps_new_codepoint` · `anchor` · `anchor_name` · `anchored` · `android` · `append` · `append_anchored` · `append_header` · `append_headers` · `as_bytes` · `as_str` · `as_text` · `attempt_limit` · `audit` · `backoff_factor` · `bare` · `basic_auth` · `bearer_auth` · `body` · `body_prefix` · `boundary` · `brand` · `brave` · `brotli` · `browser` · `build` · `build_headers` · `builder` · `builtin` · `bytes` · `ca_der_count` · `ca_files` · `call` · `captured_against` · `cert_compression` · `certificate_chain_file` · `chrome` · `chromium_major` · `cipher` · `ciphers` · `clear` · `client_identity` · `client_identity_files` · `clone` · `close` · `cmp` · `code` · `compress` · `compression` · `compute_ja3` · `compute_ja4` · `compute_ja4h` · `compute_ja4t` · `config` · `connect` · `connect_ms` · `connect_timeout` · `contains_named` · `content_length` · `content_type` · `cookie` · `cookie_header` · `cookie_jar` · `cookies` · `copy_to` · `creation_time` · `curves` · `custom` · `danger_accept_invalid_certs` · `dcid_length` · `deep_clone` · `default` · `default_browser` · `default_firefox` · `default_priority` · `default_timeout` · `deflate` · `delegated_credentials` · `delete` · `deserialize` · `detect_host` · `df` · `digest_auth` · `disable_env_proxies` · `dns` · `domain` · `done` · `download_to` · `ech_grease` · `edge` · `elapsed` · `enable_push` · `entries` · `eq` · `error_for_status` · `evictions_dead` · `evictions_idle` · `evictions_lru` · `exclusive` · `execute` · `expected_h2_fingerprint` · `expected_h2_fingerprint_for` · `expected_ja4` · `expected_resumed_ja4` · `expires` · `export_cookies` · `extension_ids` · `extension_permutation` · `extra_headers` · `family` · `family_hellos` · `file` · `filename` · `fingerprint` · `firefox` · `fmt` · `for_family` · `for_platform` · `form` · `form_str` · `from` · `from_env` · `from_pairs` · `from_profile` · `from_string` · `from_toml` · `from_u32` · `get` · `get_browser` · `get_cookie` · `get_named` · `global` · `grease` · `gzip` · `h1_hits` · `h1_misses` · `h2` · `h2_fingerprint` · `h2_hits` · `h2_misses` · `h2_ping_after_idle` · `h2_ping_failures` · `h2_ping_timeout` · `h3_hits` · `h3_misses` · `happy_eyeballs` · `has_sni` · `hash` · `head` · `header` · `header_all` · `header_map` · `header_order` · `header_table_size` · `headers` · `headers_mut` · `hello_library` · `hello_rep` · `host` · `host_only` · `http` · `http1` · `http2` · `http3` · `http_identity` · `http_only` · `http_version` · `https` · `https_only` · `id` · `identity` · `identity_for` · `identity_key` · `idle_timeout` · `infer_anchor` · `initial_backoff` · `initial_connection_window_size` · `initial_max_data` · `initial_max_stream_data_bidi_local` · `initial_max_stream_data_bidi_remote` · `initial_max_stream_data_uni` · `initial_max_streams_bidi` · `initial_max_streams_uni` · `initial_stream_window_size` · `installs` · `interface` · `into_bytes` · `into_future` · `into_param_pair` · `into_stream` · `into_string` · `into_text` · `io` · `ios` · `is_before` · `is_body` · `is_client_error` · `is_connect` · `is_connection_closed` · `is_decode` · `is_empty` · `is_expired` · `is_firefox` · `is_http2` · `is_redirect` · `is_retryable` · `is_server_error` · `is_status` · `is_stream` · `is_success` · `is_timeout` · `iter` · `ja3` · `ja4` · `ja4h` · `ja4t` · `jitter` · `json` · `keepalive` · `kind` · `label` · `last_access` · `latest` · `layer` · `len` · `len_hint` · `leyline` · `limited` · `linux` · `load` · `load_cookies` · `load_warnings` · `local_address` · `local_ipv4` · `local_ipv6` · `location` · `locked` · `macos` · `matches` · `max` · `max_backoff` · `max_concurrent_streams` · `max_connections` · `max_field_section_size` · `max_frame_size` · `max_h1_conns_per_host` · `max_header_list_size` · `max_idle_timeout` · `max_message_size` · `max_redirects` · `max_response_body_bytes` · `max_retries` · `max_retry_after` · `max_tls_12` · `max_udp_payload_size` · `max_write_buffer_size` · `merge` · `message` · `meta` · `method` · `mime` · `min_tls_version` · `mobile_flag` · `mss` · `multipart` · `name` · `navigate_accept` · `navigate_accept_override` · `new` · `no_delay` · `no_proxy` · `none` · `ocsp_stapling` · `omit_settings` · `on` · `on_status` · `opera` · `origin` · `outcome` · `overlay` · `padding` · `parse` · `part` · `partial_cmp` · `pass` · `pass_library` · `patch` · `path` · `permute_extensions` · `pinned_leaf_sha256` · `platform` · `platforms` · `poll_next` · `poll_ready` · `pool_config` · `pool_stats` · `port` · `post` · `pre_shared_key` · `preconnect` · `preconnect_via` · `prefer_http2` · `preset` · `previous` · `private_key_file` · `profile` · `profile_key` · `protocol` · `protocol_policy` · `proxies` · `proxy` · `pseudo_order` · `put` · `qpack_blocked_streams` · `qpack_max_table_capacity` · `query` · `race` · `read` · `read_buffer_size` · `read_until` · `reason` · `record_size_limit` · `recv` · `recv_buffer_size` · `redirect_chain` · `redirect_policy` · `referer` · `remove_all` · `remove_all_named` · `remove_named` · `remove_named_for_host` · `request` · `request_header_order` · `request_headers` · `request_trust_anchors` · `resolve` · `resolve_delay` · `resolve_for_platform` · `resolve_host` · `resolve_host_to_addrs` · `resolver` · `response_header` · `response_header_timeout` · `resumed_ja4` · `retry` · `retry_on` · `reused` · `rotate_hello` · `rotate_tls` · `safari` · `same_site` · `sec_ch_platform` · `sec_ch_ua` · `sec_ch_ua_mobile` · `sec_ch_ua_platform` · `secure` · `send` · `send_binary` · `send_buffer_size` · `send_ms` · `send_raw` · `sent` · `serialize` · `session` · `session_tickets` · `set` · `set_cookie` · `set_named` · `set_named_on` · `settings_order` · `sigalgs` · `signed_cert_timestamps` · `size` · `snapshot` · `socket_config` · `socks5` · `socks5h` · `source` · `split` · `stale_probed` · `status` · `store_response_cookies` · `store_set_cookie` · `stream` · `stream_dependency` · `stream_id` · `stream_with_length` · `strict` · `tcp_keepalive` · `tcp_keepalive_interval` · `tcp_keepalive_retries` · `tcp_nodelay` · `tcp_profile` · `tcp_user_timeout` · `text` · `text_utf8` · `text_with_charset` · `timeout` · `timeouts` · `timing` · `tls` · `tls_alpn` · `tls_cipher` · `tls_peer_certificate` · `tls_record_version` · `tls_trust` · `tls_version` · `total` · `total_ms` · `trace` · `trailers` · `transient` · `try_from` · `ttl` · `unknown_setting8` · `unknown_setting9` · `uri` · `url` · `user_agent` · `uses_env` · `uses_env_roots` · `uses_system_roots` · `value` · `verified_against` · `version` · `version_for` · `vivaldi` · `websocket` · `websocket_config` · `weight` · `window_scale` · `window_size` · `windows` · `with_backoff` · `with_cookie_jar` · `with_max_retries` · `with_max_retry_after` · `with_message` · `with_proxy` · `with_redirect_policy` · `with_rule` · `with_source` · `without_env` · `without_env_roots` · `without_system_roots` · `write_buffer_size` · `zstd`
 
 </details>
 
@@ -26,12 +26,7 @@ pub fn (K, V)::into_param_pair(self) -> (alloc::string::String, alloc::string::S
 
 ```rust,ignore
 pub fn leyline::Body::from(form: leyline::multipart::Form) -> leyline::Body
-#[non_exhaustive] pub enum leyline::Body
-pub leyline::Body::Bytes(bytes::bytes::Bytes)
-pub leyline::Body::Empty
-pub leyline::Body::Stream
-pub leyline::Body::Stream::length_hint: core::option::Option<u64>
-pub leyline::Body::Stream::stream: core::pin::Pin<alloc::boxed::Box<(dyn futures_core::stream::Stream<Item = core::io::error::Result<bytes::bytes::Bytes>> + core::marker::Send + 'static)>>
+pub struct leyline::Body(_)
 impl leyline::Body
 pub fn leyline::Body::is_empty(&self) -> bool
 pub fn leyline::Body::is_stream(&self) -> bool
@@ -55,6 +50,9 @@ impl core::default::Default for leyline::Body
 pub fn leyline::Body::default() -> leyline::Body
 impl core::fmt::Debug for leyline::Body
 pub fn leyline::Body::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl futures_core::stream::Stream for leyline::Body
+pub type leyline::Body::Item = core::result::Result<bytes::bytes::Bytes, core::io::error::Error>
+pub fn leyline::Body::poll_next(self: core::pin::Pin<&mut Self>, cx: &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::option::Option<Self::Item>>
 impl !core::marker::Freeze for leyline::Body
 impl core::marker::Send for leyline::Body
 impl !core::marker::Sync for leyline::Body
@@ -88,6 +86,7 @@ impl !core::panic::unwind_safe::UnwindSafe for leyline::BodyStream
 
 ```rust,ignore
 impl leyline::Browser
+pub fn leyline::Browser::all() -> &'static [leyline::Browser]
 pub fn leyline::Browser::chromium_major(&self) -> core::option::Option<u32>
 pub fn leyline::Browser::default_browser() -> Self
 pub fn leyline::Browser::default_firefox() -> Self
@@ -148,6 +147,7 @@ pub leyline::Browser::Safari26
 pub leyline::Browser::SafariIOS17
 pub leyline::Browser::SafariIOS18
 impl leyline::Browser
+pub fn leyline::Browser::all() -> &'static [leyline::Browser]
 pub fn leyline::Browser::chromium_major(&self) -> core::option::Option<u32>
 pub fn leyline::Browser::default_browser() -> Self
 pub fn leyline::Browser::default_firefox() -> Self
@@ -386,11 +386,12 @@ impl !core::panic::unwind_safe::UnwindSafe for leyline::DnsConfig
 
 ```rust,ignore
 pub fn leyline::Error::from(e: leyline::TlsError) -> Self
+pub fn leyline::Error::from(e: leyline::H2Error) -> Self
 pub fn leyline::Error::from(e: leyline::TlsError) -> Self
 pub struct leyline::Error
 impl leyline::Error
 pub fn leyline::Error::body_prefix(&self) -> core::option::Option<&[u8]>
-pub fn leyline::Error::h2(&self) -> core::option::Option<&H2Error>
+pub fn leyline::Error::h2(&self) -> core::option::Option<&leyline::H2Error>
 pub fn leyline::Error::io(&self) -> core::option::Option<&core::io::error::Error>
 pub fn leyline::Error::is_body(&self) -> bool
 pub fn leyline::Error::is_connect(&self) -> bool
@@ -405,13 +406,8 @@ pub fn leyline::Error::new(kind: leyline::Kind) -> Self
 pub fn leyline::Error::status(&self) -> core::option::Option<http::status::StatusCode>
 pub fn leyline::Error::tls(&self) -> core::option::Option<&leyline::TlsError>
 pub fn leyline::Error::url(&self) -> core::option::Option<&http::uri::Uri>
-pub fn leyline::Error::with_alpn(self, negotiated: impl core::convert::Into<alloc::string::String>) -> Self
-pub fn leyline::Error::with_body(self, body: alloc::vec::Vec<u8>) -> Self
 pub fn leyline::Error::with_message(self, message: impl core::convert::Into<alloc::borrow::Cow<'static, str>>) -> Self
 pub fn leyline::Error::with_source(self, source: impl core::convert::Into<alloc::boxed::Box<(dyn core::error::Error + core::marker::Send + core::marker::Sync)>>) -> Self
-pub fn leyline::Error::with_status(self, status: http::status::StatusCode) -> Self
-pub fn leyline::Error::with_url(self, url: http::uri::Uri) -> Self
-pub fn leyline::Error::without_url(self) -> Self
 impl core::convert::From<core::io::error::Error> for leyline::Error
 pub fn leyline::Error::from(e: core::io::error::Error) -> Self
 impl core::convert::From<http::error::Error> for leyline::Error
@@ -422,11 +418,8 @@ impl core::convert::From<http::header::value::InvalidHeaderValue> for leyline::E
 pub fn leyline::Error::from(e: http::header::value::InvalidHeaderValue) -> Self
 impl core::convert::From<http::uri::InvalidUri> for leyline::Error
 pub fn leyline::Error::from(e: http::uri::InvalidUri) -> Self
+pub fn leyline::Error::from(e: leyline::H2Error) -> Self
 pub fn leyline::Error::from(e: leyline::TlsError) -> Self
-impl core::convert::From<serde_json::error::Error> for leyline::Error
-pub fn leyline::Error::from(e: serde_json::error::Error) -> Self
-impl core::convert::From<url::parser::ParseError> for leyline::Error
-pub fn leyline::Error::from(e: url::parser::ParseError) -> Self
 impl core::error::Error for leyline::Error
 pub fn leyline::Error::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Debug for leyline::Error
@@ -445,13 +438,73 @@ impl !core::panic::unwind_safe::UnwindSafe for leyline::Error
 ### `ErrorCode`
 
 ```rust,ignore
-pub use leyline::ErrorCode
+#[non_exhaustive] #[repr(u32)] pub enum leyline::ErrorCode
+pub leyline::ErrorCode::Cancel = 8
+pub leyline::ErrorCode::CompressionError = 9
+pub leyline::ErrorCode::ConnectError = 10
+pub leyline::ErrorCode::EnhanceYourCalm = 11
+pub leyline::ErrorCode::FlowControlError = 3
+pub leyline::ErrorCode::FrameSizeError = 6
+pub leyline::ErrorCode::Http11Required = 13
+pub leyline::ErrorCode::InadequateSecurity = 12
+pub leyline::ErrorCode::InternalError = 2
+pub leyline::ErrorCode::NoError = 0
+pub leyline::ErrorCode::ProtocolError = 1
+pub leyline::ErrorCode::RefusedStream = 7
+pub leyline::ErrorCode::SettingsTimeout = 4
+pub leyline::ErrorCode::StreamClosed = 5
+impl leyline::ErrorCode
+pub fn leyline::ErrorCode::from_u32(val: u32) -> Self
+impl core::clone::Clone for leyline::ErrorCode
+pub fn leyline::ErrorCode::clone(&self) -> leyline::ErrorCode
+impl core::cmp::Eq for leyline::ErrorCode
+impl core::cmp::PartialEq for leyline::ErrorCode
+pub fn leyline::ErrorCode::eq(&self, other: &leyline::ErrorCode) -> bool
+impl core::fmt::Debug for leyline::ErrorCode
+pub fn leyline::ErrorCode::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for leyline::ErrorCode
+impl core::marker::StructuralPartialEq for leyline::ErrorCode
+impl core::marker::Freeze for leyline::ErrorCode
+impl core::marker::Send for leyline::ErrorCode
+impl core::marker::Sync for leyline::ErrorCode
+impl core::marker::Unpin for leyline::ErrorCode
+impl core::marker::UnsafeUnpin for leyline::ErrorCode
+impl core::panic::unwind_safe::RefUnwindSafe for leyline::ErrorCode
+impl core::panic::unwind_safe::UnwindSafe for leyline::ErrorCode
 ```
 
 ### `H2Error`
 
 ```rust,ignore
-pub use leyline::H2Error
+#[non_exhaustive] pub enum leyline::H2Error
+pub leyline::H2Error::Connection
+pub leyline::H2Error::Connection::code: leyline::ErrorCode
+pub leyline::H2Error::Connection::reason: alloc::string::String
+pub leyline::H2Error::FrameTooLarge
+pub leyline::H2Error::FrameTooLarge::max: u32
+pub leyline::H2Error::FrameTooLarge::size: u32
+pub leyline::H2Error::Hpack(alloc::string::String)
+pub leyline::H2Error::Io(core::io::error::Error)
+pub leyline::H2Error::Stream
+pub leyline::H2Error::Stream::code: leyline::ErrorCode
+pub leyline::H2Error::Stream::stream_id: u32
+impl core::convert::From<core::io::error::Error> for leyline::H2Error
+pub fn leyline::H2Error::from(source: core::io::error::Error) -> Self
+impl core::convert::From<leyline::H2Error> for leyline::Error
+impl core::error::Error for leyline::H2Error
+pub fn leyline::H2Error::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for leyline::H2Error
+pub fn leyline::H2Error::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for leyline::H2Error
+pub fn leyline::H2Error::fmt(&self, __formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for leyline::H2Error
+impl core::marker::Send for leyline::H2Error
+impl core::marker::Sync for leyline::H2Error
+impl core::marker::Unpin for leyline::H2Error
+impl core::marker::UnsafeUnpin for leyline::H2Error
+impl !core::panic::unwind_safe::RefUnwindSafe for leyline::H2Error
+impl !core::panic::unwind_safe::UnwindSafe for leyline::H2Error
+impl core::convert::From<leyline::H2Error> for leyline::Error
 ```
 
 ### `H3Config`
@@ -814,7 +867,39 @@ impl core::panic::unwind_safe::UnwindSafe for leyline::PoolConfig
 ### `PoolStats`
 
 ```rust,ignore
-pub use leyline::PoolStats
+#[non_exhaustive] pub struct leyline::PoolStats
+pub leyline::PoolStats::entries: usize
+pub leyline::PoolStats::evictions_dead: u64
+pub leyline::PoolStats::evictions_idle: u64
+pub leyline::PoolStats::evictions_lru: u64
+pub leyline::PoolStats::h1_hits: u64
+pub leyline::PoolStats::h1_misses: u64
+pub leyline::PoolStats::h2_hits: u64
+pub leyline::PoolStats::h2_misses: u64
+pub leyline::PoolStats::h2_ping_failures: u64
+pub leyline::PoolStats::h3_hits: u64
+pub leyline::PoolStats::h3_misses: u64
+pub leyline::PoolStats::installs: u64
+pub leyline::PoolStats::max_connections: usize
+pub leyline::PoolStats::stale_probed: u64
+impl core::clone::Clone for leyline::PoolStats
+pub fn leyline::PoolStats::clone(&self) -> leyline::PoolStats
+impl core::cmp::Eq for leyline::PoolStats
+impl core::cmp::PartialEq for leyline::PoolStats
+pub fn leyline::PoolStats::eq(&self, other: &leyline::PoolStats) -> bool
+impl core::default::Default for leyline::PoolStats
+pub fn leyline::PoolStats::default() -> leyline::PoolStats
+impl core::fmt::Debug for leyline::PoolStats
+pub fn leyline::PoolStats::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for leyline::PoolStats
+impl core::marker::StructuralPartialEq for leyline::PoolStats
+impl core::marker::Freeze for leyline::PoolStats
+impl core::marker::Send for leyline::PoolStats
+impl core::marker::Sync for leyline::PoolStats
+impl core::marker::Unpin for leyline::PoolStats
+impl core::marker::UnsafeUnpin for leyline::PoolStats
+impl core::panic::unwind_safe::RefUnwindSafe for leyline::PoolStats
+impl core::panic::unwind_safe::UnwindSafe for leyline::PoolStats
 ```
 
 ### `Preset`
@@ -1018,27 +1103,22 @@ impl !core::panic::unwind_safe::UnwindSafe for leyline::RedirectPolicy
 
 ```rust,ignore
 impl tower_service::Service<leyline::Request> for leyline::LeylineService
-#[non_exhaustive] pub struct leyline::Request
-pub leyline::Request::allow_non_idempotent_retry: bool
-pub leyline::Request::body: leyline::Body
-pub leyline::Request::digest_auth: core::option::Option<leyline::DigestAuth>
-pub leyline::Request::headers: leyline::HeaderList
-pub leyline::Request::method: http::method::Method
-pub leyline::Request::preset: core::option::Option<leyline::profile::preset::Preset>
-pub leyline::Request::retry_policy: core::option::Option<leyline::RetryPolicy>
-pub leyline::Request::stream_response: bool
-pub leyline::Request::timeout: core::option::Option<core::time::Duration>
-pub leyline::Request::url: http::uri::Uri
+pub struct leyline::Request
 impl leyline::Request
 pub fn leyline::Request::allow_non_idempotent_retry(self, v: bool) -> Self
 pub fn leyline::Request::body(self, body: impl core::convert::Into<leyline::Body>) -> Self
 pub fn leyline::Request::digest_auth(self, auth: leyline::DigestAuth) -> Self
 pub fn leyline::Request::header(self, name: impl core::convert::TryInto<http::header::name::HeaderName>, value: impl core::convert::TryInto<http::header::value::HeaderValue>) -> Self
+pub fn leyline::Request::headers(&self) -> &leyline::HeaderList
+pub fn leyline::Request::headers_mut(&mut self) -> &mut leyline::HeaderList
+pub fn leyline::Request::method(&self) -> &http::method::Method
 pub fn leyline::Request::new(method: http::method::Method, url: impl core::convert::TryInto<http::uri::Uri>) -> Self
 pub fn leyline::Request::preset(self, preset: leyline::profile::preset::Preset) -> Self
 pub fn leyline::Request::retry(self, policy: leyline::RetryPolicy) -> Self
 pub fn leyline::Request::stream(self) -> Self
 pub fn leyline::Request::timeout(self, timeout: core::time::Duration) -> Self
+pub fn leyline::Request::timeouts(self, timeouts: leyline::TimeoutConfig) -> Self
+pub fn leyline::Request::url(&self) -> &http::uri::Uri
 pub fn leyline::Request::from(req: http::request::Request<leyline::Body>) -> Self
 impl core::fmt::Debug for leyline::Request
 pub fn leyline::Request::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
@@ -1272,7 +1352,7 @@ pub fn leyline::Session::new() -> Self
 pub fn leyline::Session::opera() -> Self
 pub fn leyline::Session::patch(&self, url: &str) -> leyline::RequestBuilder
 pub fn leyline::Session::platform(&self) -> leyline::Platform
-pub fn leyline::Session::pool_stats(&self) -> crate::PoolStats
+pub fn leyline::Session::pool_stats(&self) -> leyline::PoolStats
 pub fn leyline::Session::post(&self, url: &str) -> leyline::RequestBuilder
 pub async fn leyline::Session::preconnect(&self, url: &str) -> leyline::Result<()>
 pub async fn leyline::Session::preconnect_via(&self, url: &str, proxy: core::option::Option<&str>) -> leyline::Result<()>
@@ -2226,12 +2306,6 @@ impl !core::panic::unwind_safe::UnwindSafe for leyline::multipart::Part
 pub mod leyline::profile
 ```
 
-### `ALL_BROWSERS`
-
-```rust,ignore
-pub const leyline::profile::ALL_BROWSERS: [leyline::Browser; 23]
-```
-
 ### `BrandOverlay`
 
 ```rust,ignore
@@ -2538,12 +2612,6 @@ pub leyline::profile::HeaderAnchor::AfterCchUaPlatform
 pub leyline::profile::HeaderAnchor::AfterContentType
 pub leyline::profile::HeaderAnchor::AfterUserAgent
 pub leyline::profile::HeaderAnchor::BeforeAcceptEncoding
-```
-
-### `PROFILE_COUNT`
-
-```rust,ignore
-pub const leyline::profile::PROFILE_COUNT: usize
 ```
 
 ### `Platform`

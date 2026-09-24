@@ -1,116 +1,105 @@
 use std::fmt;
 use std::io;
 use std::pin::Pin;
+use std::task::{Context, Poll};
 
 use bytes::Bytes;
 use futures_util::Stream;
 
+pub(crate) type BoxedStream = Pin<Box<dyn Stream<Item = io::Result<Bytes>> + Send + 'static>>;
+
 #[derive(Default)]
-#[non_exhaustive]
-pub enum Body {
+pub(crate) enum BodyKind {
     #[default]
     Empty,
     Bytes(Bytes),
     Stream {
-        stream: Pin<Box<dyn Stream<Item = io::Result<Bytes>> + Send + 'static>>,
+        stream: BoxedStream,
         length_hint: Option<u64>,
     },
 }
 
+#[derive(Default)]
+pub struct Body(pub(crate) BodyKind);
+
 impl fmt::Debug for Body {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Empty => f.debug_struct("Body::Empty").finish(),
-            Self::Bytes(b) => f
-                .debug_struct("Body::Bytes")
-                .field("len", &b.len())
-                .finish(),
-            Self::Stream { length_hint, .. } => f
-                .debug_struct("Body::Stream")
-                .field("length_hint", length_hint)
-                .finish(),
+        let mut out = f.debug_struct("Body");
+        match &self.0 {
+            BodyKind::Empty => out.field("kind", &"empty"),
+            BodyKind::Bytes(b) => out.field("kind", &"bytes").field("len", &b.len()),
+            BodyKind::Stream { length_hint, .. } => out
+                .field("kind", &"stream")
+                .field("length_hint", length_hint),
+        }
+        .finish()
+    }
+}
+
+impl Stream for Body {
+    type Item = io::Result<Bytes>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match &mut self.0 {
+            BodyKind::Empty => Poll::Ready(None),
+            BodyKind::Bytes(_) => match std::mem::take(&mut self.0) {
+                BodyKind::Bytes(b) => Poll::Ready(Some(Ok(b))),
+                _ => Poll::Ready(None),
+            },
+            BodyKind::Stream { stream, .. } => stream.as_mut().poll_next(cx),
         }
     }
 }
 
 impl Body {
+    pub(crate) fn bytes(bytes: Bytes) -> Self {
+        Body(BodyKind::Bytes(bytes))
+    }
+
     pub fn stream<S>(stream: S) -> Self
     where
         S: Stream<Item = io::Result<Bytes>> + Send + 'static,
     {
-        Body::Stream {
+        Body(BodyKind::Stream {
             stream: Box::pin(stream),
             length_hint: None,
-        }
+        })
     }
 
     pub fn stream_with_length<S>(stream: S, length: u64) -> Self
     where
         S: Stream<Item = io::Result<Bytes>> + Send + 'static,
     {
-        Body::Stream {
+        Body(BodyKind::Stream {
             stream: Box::pin(stream),
             length_hint: Some(length),
-        }
+        })
     }
 
     pub fn len_hint(&self) -> Option<u64> {
-        match self {
-            Body::Empty => Some(0),
-            Body::Bytes(b) => Some(b.len() as u64),
-            Body::Stream { length_hint, .. } => *length_hint,
+        match &self.0 {
+            BodyKind::Empty => Some(0),
+            BodyKind::Bytes(b) => Some(b.len() as u64),
+            BodyKind::Stream { length_hint, .. } => *length_hint,
         }
     }
 
     pub fn is_empty(&self) -> bool {
-        match self {
-            Body::Empty => true,
-            Body::Bytes(b) => b.is_empty(),
-            Body::Stream { .. } => false,
+        match &self.0 {
+            BodyKind::Empty => true,
+            BodyKind::Bytes(b) => b.is_empty(),
+            BodyKind::Stream { .. } => false,
         }
     }
 
     pub fn is_stream(&self) -> bool {
-        matches!(self, Body::Stream { .. })
+        matches!(self.0, BodyKind::Stream { .. })
     }
-}
 
-impl From<Vec<u8>> for Body {
-    fn from(v: Vec<u8>) -> Self {
-        if v.is_empty() {
-            Body::Empty
-        } else {
-            Body::Bytes(Bytes::from(v))
-        }
-    }
-}
-
-impl From<&'static [u8]> for Body {
-    fn from(v: &'static [u8]) -> Self {
-        if v.is_empty() {
-            Body::Empty
-        } else {
-            Body::Bytes(Bytes::from_static(v))
-        }
-    }
-}
-
-impl From<String> for Body {
-    fn from(s: String) -> Self {
-        if s.is_empty() {
-            Body::Empty
-        } else {
-            Body::Bytes(Bytes::from(s.into_bytes()))
-        }
-    }
-}
-
-impl From<&'static str> for Body {
-    fn from(s: &'static str) -> Self {
-        if s.is_empty() {
-            Body::Empty
-        } else {
-            Body::Bytes(Bytes::from_static(s.as_bytes()))
+    pub(crate) fn as_bytes(&self) -> Option<&Bytes> {
+        match &self.0 {
+            BodyKind::Bytes(b) => Some(b),
+            _ => None,
         }
     }
 }
@@ -118,16 +107,40 @@ impl From<&'static str> for Body {
 impl From<Bytes> for Body {
     fn from(b: Bytes) -> Self {
         if b.is_empty() {
-            Body::Empty
+            Body::default()
         } else {
-            Body::Bytes(b)
+            Body::bytes(b)
         }
+    }
+}
+
+impl From<Vec<u8>> for Body {
+    fn from(v: Vec<u8>) -> Self {
+        Body::from(Bytes::from(v))
+    }
+}
+
+impl From<&'static [u8]> for Body {
+    fn from(v: &'static [u8]) -> Self {
+        Body::from(Bytes::from_static(v))
+    }
+}
+
+impl From<String> for Body {
+    fn from(s: String) -> Self {
+        Body::from(Bytes::from(s.into_bytes()))
+    }
+}
+
+impl From<&'static str> for Body {
+    fn from(s: &'static str) -> Self {
+        Body::from(Bytes::from_static(s.as_bytes()))
     }
 }
 
 impl From<()> for Body {
     fn from(_: ()) -> Self {
-        Body::Empty
+        Body::default()
     }
 }
 

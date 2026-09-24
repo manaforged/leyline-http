@@ -142,11 +142,11 @@ fn source_returns_the_wrapped_error() {
     assert!(plain.source().is_some());
     assert!(plain.io().is_some());
 
-    let url = Error::from(url::Url::parse("::").expect_err("not a url"));
+    let url = Error::from_url_parse(url::Url::parse("::").expect_err("not a url"));
     assert_eq!(url.kind(), Kind::Url);
     assert!(url.source().is_some());
 
-    let json = Error::from(serde_json::from_str::<u32>("nope").expect_err("not json"));
+    let json = Error::from_json(serde_json::from_str::<u32>("nope").expect_err("not json"));
     assert_eq!(json.kind(), Kind::Json);
     assert!(json.source().is_some());
 

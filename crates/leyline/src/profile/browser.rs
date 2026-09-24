@@ -53,9 +53,7 @@ pub enum Browser {
     CfnetworkMacOS26,
 }
 
-pub const PROFILE_COUNT: usize = 23;
-
-pub const ALL_BROWSERS: [Browser; PROFILE_COUNT] = [
+const ALL: &[Browser] = &[
     Browser::Chrome145,
     Browser::Chrome146,
     Browser::Chrome147,
@@ -82,6 +80,10 @@ pub const ALL_BROWSERS: [Browser; PROFILE_COUNT] = [
 ];
 
 impl Browser {
+    pub fn all() -> &'static [Browser] {
+        ALL
+    }
+
     pub fn profile_key(&self) -> (&'static str, u32) {
         match self {
             Self::Chrome145 => ("chrome", 145),

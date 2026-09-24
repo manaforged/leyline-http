@@ -283,7 +283,7 @@ impl Response {
     }
 
     pub async fn json<T: serde::de::DeserializeOwned>(&mut self) -> crate::core::Result<T> {
-        Ok(serde_json::from_slice(self.bytes().await?)?)
+        serde_json::from_slice(self.bytes().await?).map_err(Error::from_json)
     }
 
     pub fn into_stream(mut self) -> Result<BodyStream> {

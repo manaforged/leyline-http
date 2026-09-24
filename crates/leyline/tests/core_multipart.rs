@@ -2,10 +2,6 @@
     clippy::unwrap_used,
     reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
 )]
-#![expect(
-    clippy::panic,
-    reason = "test harness helper: explicit panic on unexpected error shape is the assertion"
-)]
 use std::io::Write;
 
 use leyline::Session;
@@ -216,10 +212,8 @@ use futures_util::StreamExt;
 
 async fn first_part_header(form: Form) -> std::io::Result<bytes::Bytes> {
     let body: leyline::Body = form.into();
-    let mut stream = match body {
-        leyline::Body::Stream { stream, .. } => stream,
-        _ => panic!("multipart body must be Stream"),
-    };
+    assert!(body.is_stream(), "multipart body must be Stream");
+    let mut stream = body;
     match stream.next().await {
         Some(Ok(b)) => Ok(b),
         Some(Err(e)) => Err(e),

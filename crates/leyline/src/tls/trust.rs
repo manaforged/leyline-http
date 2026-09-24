@@ -276,8 +276,14 @@ pub(crate) fn wire_configured_trust(
     #[cfg(not(target_os = "macos"))]
     {
         let env_roots_loaded = config.use_env_roots && wire_env_trust(builder);
-        if config.use_system_roots {
-            wire_system_trust_cached(builder, config, env_roots_loaded)?;
+        if config.use_system_roots
+            && let Err(err) = wire_system_trust_cached(builder, config, env_roots_loaded)
+        {
+            tracing::warn!(
+                target: "leyline::tls::trust",
+                %err,
+                "system trust roots could not be loaded; certificate verification will fail"
+            );
         }
     }
 

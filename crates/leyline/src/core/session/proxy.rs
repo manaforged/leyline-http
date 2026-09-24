@@ -12,7 +12,18 @@ pub(crate) const CGI_SIGNAL_ENV_VARS: &[&str] = &[
 ];
 
 pub(super) fn env_proxy() -> Option<String> {
-    env_proxy_from(|k| std::env::var(k).ok(), |k| std::env::var_os(k).is_some())
+    let proxy = env_proxy_from(|k| std::env::var(k).ok(), |k| std::env::var_os(k).is_some())?;
+    match crate::core::ProxyUrl::parse(&proxy) {
+        Ok(_) => Some(proxy),
+        Err(err) => {
+            tracing::warn!(
+                target: "leyline::env_proxy",
+                %err,
+                "ignoring invalid proxy URL from the environment"
+            );
+            None
+        }
+    }
 }
 
 pub(crate) fn env_proxy_from<F, G>(get_var: F, has_var: G) -> Option<String>

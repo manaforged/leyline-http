@@ -18,7 +18,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 bytes = "1"
-leyline = { package = "leyline-http", path = "../crates/leyline" }
+leyline = { package = "leyline-http", path = "../crates/leyline", features = ["bench-internals"] }
 leyline-quiche = { path = "../crates/leyline-quiche" }
 tokio = { version = "1", features = ["rt", "io-util"] }
 url = "2"
