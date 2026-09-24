@@ -1,5 +1,5 @@
 use crate::profile::preset::HeaderStyle;
-use crate::profile::{Platform, ProfileRegistry};
+use crate::profile::{ChromiumBrand, Platform, PlatformIdentity, ProfileRegistry};
 
 include!(concat!(env!("OUT_DIR"), "/browser.rs"));
 
@@ -73,6 +73,28 @@ impl Browser {
             .iter()
             .find(|(name, _)| *name == key)
             .map_or(self, |&(_, browser)| browser)
+    }
+
+    #[must_use]
+    pub fn identity(
+        self,
+        platform: Platform,
+        brand: Option<ChromiumBrand>,
+    ) -> Option<PlatformIdentity> {
+        let mut identity = ProfileRegistry::global()
+            .get_browser(self.for_platform(platform))?
+            .identity_for(platform)?
+            .clone();
+        if let Some(brand) = brand.filter(|brand| *brand != ChromiumBrand::Chrome) {
+            let (extra_headers, navigate_accept) = brand
+                .apply(self.chromium_major()?, platform, &mut identity)
+                .ok()?;
+            identity.extra_headers.extend(extra_headers);
+            if navigate_accept.is_some() {
+                identity.navigate_accept_override = navigate_accept;
+            }
+        }
+        Some(identity)
     }
 
     pub(crate) fn header_style(self) -> HeaderStyle {

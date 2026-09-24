@@ -3,7 +3,7 @@ use std::sync::LazyLock;
 
 use serde::Deserialize;
 
-use crate::profile::Platform;
+use crate::profile::{Platform, PlatformIdentity};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[non_exhaustive]
@@ -85,6 +85,22 @@ impl ChromiumBrand {
             extra_headers: row.extra_headers.clone(),
             navigate_accept: row.navigate_accept.clone(),
         }))
+    }
+}
+
+impl ChromiumBrand {
+    pub(crate) fn apply(
+        self,
+        chromium_major: u32,
+        platform: Platform,
+        identity: &mut PlatformIdentity,
+    ) -> Result<(Vec<(String, String)>, Option<String>), BrandOverlayError> {
+        let Some(overlay) = self.overlay(chromium_major, platform, &identity.user_agent)? else {
+            return Ok((Vec::new(), None));
+        };
+        identity.user_agent = overlay.user_agent;
+        identity.sec_ch_ua = overlay.sec_ch_ua;
+        Ok((overlay.extra_headers, overlay.navigate_accept))
     }
 }
 

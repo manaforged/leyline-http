@@ -114,6 +114,18 @@ profile.
 If no capture exists for that brand, Chromium version, and platform, `build()`
 returns an error that names all three.
 
+`Browser::identity(platform, brand)` returns the `PlatformIdentity` a session
+sends for that browser, platform, and brand: `user_agent`, `sec_ch_ua`,
+`accept_language`, and the extra headers. Use it when a payload that is not a
+header must carry the same values. It returns `None` when no capture exists.
+
+```rust,no_run
+use leyline::{Browser, ChromiumBrand, Platform};
+
+let edge = Browser::default().identity(Platform::Windows, Some(ChromiumBrand::Edge));
+assert!(edge.is_some_and(|id| id.user_agent.contains("Edg/")));
+```
+
 ## What a session shares
 
 One session holds:
@@ -146,18 +158,16 @@ the next request opens new connections. It returns
 `Result<Session>`: an invalid URL or an unsupported scheme fails here, the same
 way `build()` does.
 
-For an independent cookie jar, build a second session with
-`.cookie_jar(Jar::new())`.
+`with_cookie_jar(jar)` derives a session the same way and swaps only the
+cookie jar. The pool, TLS session cache, and every other setting stay shared.
+Use it to run one jar per task on a warm pool.
 
 ```rust,no_run
 use leyline::cookie::Jar;
 
 # fn run() -> leyline::Result<()> {
 let session = leyline::Session::new();
-let other_user = leyline::Session::builder()
-    .browser(leyline::Browser::default())
-    .cookie_jar(Jar::new())
-    .build()?;
+let other_user = session.with_cookie_jar(Jar::new());
 let via_proxy = session.with_proxy("http://user:pass@proxy.example:8080")?;
 # let _ = (other_user, via_proxy);
 # Ok(())
@@ -244,7 +254,8 @@ sleeps slows the request that produced the event.
 
 `dns` fires where the client resolves the name itself, which is every `https://`
 connect. On a plaintext `http://` connect the operating system resolves inside
-`connect`, so only `connect` fires. On HTTP/2 and HTTP/3, `sent` fires when the
+`connect`, so only `connect` fires. `sent` carries the request method and the
+path with the query. On HTTP/2 and HTTP/3, `sent` fires when the
 request is handed to the connection driver, and its `elapsed` covers framing
 only.
 

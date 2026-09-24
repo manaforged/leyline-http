@@ -32,8 +32,9 @@ it unless the request sets its own with `RequestBuilder::retry`.
 ## Custom triggers
 
 `RetryTrigger` has four variants: `ConnectionError`, `Status(u16)`,
-`ServerError` for any 5xx, and `Timeout`. Start from `none()` or `transient()`
-and assign the fields you need.
+`ServerError` for any 5xx, and `Timeout`. Start from `none()` or `transient()`.
+`retry_on(triggers)` replaces the trigger set. The other fields are public;
+assign the ones that have no setter.
 
 ```rust
 use leyline::{RetryPolicy, RetryTrigger};
@@ -44,7 +45,7 @@ let mut policy = RetryPolicy::none()
     .with_backoff(Duration::from_millis(50), Duration::from_secs(2));
 policy.backoff_factor = 1.5;
 policy.jitter = true;
-policy.retry_on = vec![RetryTrigger::ServerError, RetryTrigger::ConnectionError];
+let policy = policy.retry_on([RetryTrigger::ServerError, RetryTrigger::ConnectionError]);
 assert_eq!(policy.max_retries, 5);
 
 let also = RetryPolicy::transient().on_status(408);

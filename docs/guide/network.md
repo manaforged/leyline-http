@@ -5,7 +5,8 @@ Leyline picks between IPv4 and IPv6, and which socket options it sets.
 
 ## Map a host to an address
 
-`DnsConfig::resolve_host` sends one host to one address without a DNS lookup. The host
+`DnsConfig::resolve_host` sends one host to a fixed list of addresses without
+a DNS lookup. Leyline tries them in order, as curl `--resolve` does. The host
 name still goes into SNI and the `Host` header, so the server sees a normal
 request.
 
@@ -15,7 +16,7 @@ let session = leyline::Session::builder()
     .browser(leyline::Browser::default())
     .dns(leyline::DnsConfig::new().resolve_host(
         "example.com",
-        "203.0.113.10:443".parse().unwrap(),
+        ["203.0.113.10:443".parse().unwrap()],
     ))
     .build()?;
 # let _ = session;
@@ -23,7 +24,8 @@ let session = leyline::Session::builder()
 # }
 ```
 
-Hosts without an override go to the resolver.
+Hosts without an override go to the resolver. A later call for the same host
+replaces its list. An empty list removes the override.
 
 ## Replace the resolver
 
@@ -40,7 +42,13 @@ call replaces the first.
 use leyline::DnsConfig;
 
 let dns = DnsConfig::new()
-    .resolve_host("api.example.com", "203.0.113.10:443".parse().unwrap());
+    .resolve_host(
+        "api.example.com",
+        [
+            "203.0.113.10:443".parse().unwrap(),
+            "203.0.113.11:443".parse().unwrap(),
+        ],
+    );
 let session = leyline::Session::builder()
     .browser(leyline::Browser::default())
     .dns(dns)

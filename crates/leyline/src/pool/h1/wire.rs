@@ -85,7 +85,13 @@ pub(super) async fn exchange_on_stream(
     let host = url.host_str().unwrap_or("");
     let started = Instant::now();
     let client_asked_close = send_h1_request(stream, method, url, headers, body, target).await?;
-    trace::sent(host, HttpVersion::Http1_1, started.elapsed());
+    trace::sent(
+        host,
+        method,
+        &url[url::Position::BeforePath..url::Position::AfterQuery],
+        HttpVersion::Http1_1,
+        started.elapsed(),
+    );
     let started = Instant::now();
     let (status, resp_headers, resp_body, minor) = read_h1_response(stream, method).await?;
     trace::head(host, status, HttpVersion::Http1_1, started.elapsed());
@@ -110,7 +116,13 @@ pub(super) async fn exchange_head_on_stream(
     let host = url.host_str().unwrap_or("");
     let started = Instant::now();
     let client_asked_close = send_h1_request(stream, method, url, headers, body, target).await?;
-    trace::sent(host, HttpVersion::Http1_1, started.elapsed());
+    trace::sent(
+        host,
+        method,
+        &url[url::Position::BeforePath..url::Position::AfterQuery],
+        HttpVersion::Http1_1,
+        started.elapsed(),
+    );
     let started = Instant::now();
     let head = read_h1_head(stream, method).await?;
     trace::head(host, head.status, HttpVersion::Http1_1, started.elapsed());

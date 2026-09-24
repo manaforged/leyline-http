@@ -85,6 +85,7 @@ impl RequestBuilder {
             stream_response: self.stream_response,
             proxy: self.proxy.take(),
             header_order: self.header_order.take(),
+            redirect: self.redirect.take(),
         }
     }
 

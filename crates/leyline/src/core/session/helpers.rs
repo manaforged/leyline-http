@@ -10,7 +10,7 @@ use super::Identity;
 use super::{Session, SessionBuilder};
 use crate::core::request::RequestBuilder;
 use crate::core::retry::RetryPolicy;
-use crate::core::{Body, Response, Result, TimeoutConfig};
+use crate::core::{Body, RedirectPolicy, Response, Result, TimeoutConfig};
 
 impl Session {
     pub fn builder() -> SessionBuilder {
@@ -35,14 +35,23 @@ impl Session {
 
     pub fn with_proxy(&self, proxy_url: &str) -> Result<Self> {
         let proxy = crate::core::ProxyUrl::parse(proxy_url)?;
+        Ok(self.derive(|inner| {
+            if inner.proxy_config.primary() == Some(proxy.as_str()) {
+                inner.pool = std::sync::Arc::new(inner.pool.fresh());
+                inner.connector = inner.connector.with_fresh_session_cache();
+            }
+            inner.proxy_config = inner.proxy_config.clone().set_default_proxy(proxy.as_str());
+        }))
+    }
+
+    pub fn with_cookie_jar(&self, jar: Jar) -> Self {
+        self.derive(|inner| inner.cookie_jar = jar)
+    }
+
+    fn derive(&self, change: impl FnOnce(&mut super::SessionInner)) -> Self {
         let mut s = self.clone();
-        let inner = std::sync::Arc::make_mut(&mut s.inner);
-        if inner.proxy_config.primary() == Some(proxy.as_str()) {
-            inner.pool = std::sync::Arc::new(inner.pool.fresh());
-            inner.connector = inner.connector.with_fresh_session_cache();
-        }
-        inner.proxy_config = inner.proxy_config.clone().set_default_proxy(proxy.as_str());
-        Ok(s)
+        change(std::sync::Arc::make_mut(&mut s.inner));
+        s
     }
 
     pub(crate) fn browser(&self) -> Option<Browser> {
@@ -134,6 +143,9 @@ impl Session {
         }
         if let Some(policy) = parts.extensions.remove::<RetryPolicy>() {
             builder = builder.retry(policy);
+        }
+        if let Some(policy) = parts.extensions.remove::<RedirectPolicy>() {
+            builder = builder.redirect(policy);
         }
         builder.send().await
     }

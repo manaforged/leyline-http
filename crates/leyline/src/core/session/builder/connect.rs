@@ -84,31 +84,22 @@ impl SessionBuilder {
         &self,
         identity: &mut crate::profile::PlatformIdentity,
     ) -> Result<BrandOverlayEdits> {
-        let mut brand_extra_headers: Vec<(String, String)> = Vec::new();
-        let mut brand_navigate_accept: Option<String> = None;
-        if self.brand != ChromiumBrand::Chrome {
-            let Some(chromium_major) = self
-                .http_identity
-                .or(self.browser)
-                .and_then(|b| b.chromium_major())
-            else {
-                return Err(Error::new(Kind::Config).with_message(format!(
-                    "{} overlay requires a Chromium HTTP identity",
-                    self.brand.label()
-                )));
-            };
-            let overlay = self
-                .brand
-                .overlay(chromium_major, self.platform, &identity.user_agent)
-                .map_err(|e| Error::new(Kind::Config).with_message(format!("{e}")))?;
-            if let Some(overlay) = overlay {
-                identity.user_agent = overlay.user_agent;
-                identity.sec_ch_ua = overlay.sec_ch_ua;
-                brand_extra_headers = overlay.extra_headers;
-                brand_navigate_accept = overlay.navigate_accept;
-            }
+        if self.brand == ChromiumBrand::Chrome {
+            return Ok((Vec::new(), None));
         }
-        Ok((brand_extra_headers, brand_navigate_accept))
+        let Some(chromium_major) = self
+            .http_identity
+            .or(self.browser)
+            .and_then(|b| b.chromium_major())
+        else {
+            return Err(Error::new(Kind::Config).with_message(format!(
+                "{} overlay requires a Chromium HTTP identity",
+                self.brand.label()
+            )));
+        };
+        self.brand
+            .apply(chromium_major, self.platform, identity)
+            .map_err(|e| Error::new(Kind::Config).with_message(format!("{e}")))
     }
 
     pub(super) fn build_pool(&self) -> Pool {

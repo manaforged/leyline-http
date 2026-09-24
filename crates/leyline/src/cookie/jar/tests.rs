@@ -229,15 +229,14 @@ fn secure_cookie_not_sent_over_http() {
 }
 
 #[test]
-fn remove_named_first_match() {
+fn remove_named_removes_every_match() {
     let jar = Jar::new();
     jar.set_cookie("https://a.example.com", "k", "1");
     jar.set_cookie("https://b.example.com", "k", "2");
     assert_eq!(jar.all_cookies().len(), 2);
-    assert!(jar.remove_named("k"));
-    assert_eq!(jar.all_cookies().len(), 1);
-    assert!(jar.remove_named("k"));
-    assert!(!jar.remove_named("k"));
+    assert_eq!(jar.remove_named("k"), 2);
+    assert!(jar.all_cookies().is_empty());
+    assert_eq!(jar.remove_named("k"), 0);
 }
 
 #[test]

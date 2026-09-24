@@ -49,7 +49,13 @@ pub(crate) async fn send_request_h3_pooled(
     if let Some((handle, tls)) = pool.checkout_h3(&key) {
         trace::connect(host, port, true, Duration::ZERO);
         let started = Instant::now();
-        trace::sent(host, HttpVersion::Http3, Duration::ZERO);
+        trace::sent(
+            host,
+            request.method,
+            request.path,
+            HttpVersion::Http3,
+            Duration::ZERO,
+        );
         let (bytes, stream) = body.take().unwrap_or_default().into_parts();
         match handle
             .send_request(
@@ -103,7 +109,13 @@ pub(crate) async fn send_request_h3_pooled(
         );
     }
     let started = Instant::now();
-    trace::sent(host, HttpVersion::Http3, Duration::ZERO);
+    trace::sent(
+        host,
+        request.method,
+        request.path,
+        HttpVersion::Http3,
+        Duration::ZERO,
+    );
     let (bytes, stream) = body.unwrap_or_default().into_parts();
     let resp = handle
         .send_request(
@@ -170,7 +182,13 @@ pub(crate) async fn send_request(
         trace::connect(connect_host, connect_port, true, Duration::ZERO);
         let pooled_body = body.take().unwrap_or_default().into_h2();
         let send_started = Instant::now();
-        trace::sent(connect_host, HttpVersion::Http2, Duration::ZERO);
+        trace::sent(
+            connect_host,
+            pseudo.method.as_str(),
+            pseudo.path.as_str(),
+            HttpVersion::Http2,
+            Duration::ZERO,
+        );
         match handle
             .send_shared(Arc::clone(&head), pooled_body, stream_response)
             .await
@@ -229,7 +247,13 @@ pub(crate) async fn send_request(
 
     let send_started = Instant::now();
     let traced_host = trace::on().then(|| connect_host.to_string());
-    trace::sent(connect_host, HttpVersion::Http2, Duration::ZERO);
+    trace::sent(
+        connect_host,
+        pseudo.method.as_str(),
+        pseudo.path.as_str(),
+        HttpVersion::Http2,
+        Duration::ZERO,
+    );
     let body = body.unwrap_or_default().into_h2();
     let resp = match handle
         .send_shared(Arc::clone(&head), body, stream_response)

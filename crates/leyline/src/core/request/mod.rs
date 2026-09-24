@@ -10,7 +10,7 @@ use http::{HeaderName, HeaderValue, Method};
 use crate::profile::{HeaderAnchor, Preset};
 
 use crate::core::body::Body;
-use crate::core::config::TimeoutConfig;
+use crate::core::config::{RedirectPolicy, TimeoutConfig};
 use crate::core::digest::DigestAuth;
 use crate::core::error::{Error, Kind};
 use crate::core::headers::HeaderList;
@@ -61,6 +61,7 @@ pub struct RequestBuilder {
     pub(super) proxy: Option<String>,
     pub(super) header_order: Option<Vec<String>>,
     pub(super) preset_user: bool,
+    pub(super) redirect: Option<RedirectPolicy>,
 }
 
 fn default_preset(session: &Session, method: &Method) -> Option<Preset> {
@@ -91,6 +92,7 @@ impl RequestBuilder {
             proxy: None,
             header_order: None,
             preset_user: false,
+            redirect: None,
         }
     }
 
@@ -248,6 +250,11 @@ impl RequestBuilder {
 
     pub fn retry(mut self, policy: RetryPolicy) -> Self {
         self.retry_policy = policy;
+        self
+    }
+
+    pub fn redirect(mut self, policy: RedirectPolicy) -> Self {
+        self.redirect = Some(policy);
         self
     }
 

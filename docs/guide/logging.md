@@ -49,5 +49,7 @@ let session = Session::builder()
 # }
 ```
 
-To handle the phases in your own code, implement `leyline::trace::Trace`. See
+To handle the phases in your own code, implement `leyline::trace::Trace`. The
+`sent` event carries the method and the path with the query, so a
+per-request log line needs no other hook. See
 [Trace the request lifecycle](sessions.md#trace-the-request-lifecycle).

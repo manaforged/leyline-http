@@ -14,7 +14,7 @@ use crate::core::deadline::Deadline;
 use crate::core::error::{Error, Kind, Result};
 use crate::core::headers::HeaderList;
 use crate::core::response::Response;
-use crate::core::{RedirectAction, RedirectAttempt};
+use crate::core::{RedirectAction, RedirectAttempt, RedirectPolicy};
 use crate::trace;
 use crate::util::redact;
 
@@ -31,6 +31,7 @@ pub(crate) struct Attempt {
     pub(crate) stream_response: bool,
     pub(crate) proxy: Option<String>,
     pub(crate) header_order: Option<Vec<String>>,
+    pub(crate) redirect: Option<RedirectPolicy>,
 }
 
 impl Attempt {
@@ -45,6 +46,7 @@ impl Attempt {
             stream_response: self.stream_response,
             proxy: self.proxy.clone(),
             header_order: self.header_order.clone(),
+            redirect: self.redirect.clone(),
         }
     }
 }
@@ -91,7 +93,9 @@ impl Session {
             stream_response,
             proxy: request_proxy,
             header_order,
+            redirect,
         } = attempt;
+        let redirect_policy = redirect.as_ref().unwrap_or(&self.inner.redirect_policy);
         let raw_url = raw_url.as_str();
         let request_proxy = request_proxy.as_deref();
         let header_order = header_order.as_deref();
@@ -113,7 +117,7 @@ impl Session {
         let mut redirect_chain = Vec::new();
         let mut acc_timing = crate::core::ResponseTiming::accumulator();
 
-        let redirect_cap = self.inner.redirect_policy.max_redirects_hint();
+        let redirect_cap = redirect_policy.max_redirects_hint();
         for _ in 0..=redirect_cap {
             let origin = if redirect_chain.is_empty() {
                 Cow::Borrowed(original_origin.as_str())
@@ -189,7 +193,7 @@ impl Session {
                     .map(|(_, v)| String::from_utf8_lossy(v.as_bytes()).into_owned())
             {
                 let attempt_url: Uri = current_url.as_str().parse().unwrap_or_default();
-                let action = self.inner.redirect_policy.action(RedirectAttempt {
+                let action = redirect_policy.action(RedirectAttempt {
                     status: code,
                     url: &attempt_url,
                     location: Some(location.as_str()),

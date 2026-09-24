@@ -37,6 +37,8 @@ pub struct Tls<'a> {
 pub struct Sent<'a> {
     pub id: u64,
     pub host: &'a str,
+    pub method: &'a str,
+    pub path: &'a str,
     pub protocol: HttpVersion,
     pub elapsed: Duration,
 }
@@ -164,11 +166,13 @@ pub(crate) fn tls(
     });
 }
 
-pub(crate) fn sent(host: &str, protocol: HttpVersion, elapsed: Duration) {
+pub(crate) fn sent(host: &str, method: &str, path: &str, protocol: HttpVersion, elapsed: Duration) {
     with(|ctx| {
         ctx.hook.sent(&Sent {
             id: ctx.id,
             host,
+            method,
+            path,
             protocol,
             elapsed,
         });
@@ -214,7 +218,7 @@ impl Trace for TracingTrace {
     }
 
     fn sent(&self, ev: &Sent<'_>) {
-        tracing::debug!(target: "leyline::trace", id = ev.id, host = ev.host, protocol = ?ev.protocol, elapsed_ms = ms(ev.elapsed), "sent");
+        tracing::debug!(target: "leyline::trace", id = ev.id, host = ev.host, method = ev.method, path = ev.path, protocol = ?ev.protocol, elapsed_ms = ms(ev.elapsed), "sent");
     }
 
     fn head(&self, ev: &Head<'_>) {

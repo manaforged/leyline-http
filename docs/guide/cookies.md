@@ -25,7 +25,12 @@ Useful jar methods:
 
 - `set_cookie(url, name, value)` and `get_cookie(url, name)` for one cookie
   scoped to a URL.
-- `remove_named` and `clear` to delete.
+- `store_set_cookie(set_cookie, url)` to seed a cookie from a full
+  `Set-Cookie` value, with `Domain`, `Path`, `Secure`, `HttpOnly`,
+  `SameSite`, `Max-Age`, and `Expires`. It is the same parser the session
+  uses for responses. `Max-Age=0` deletes the matching cookie.
+- `remove_named(name)` to delete every cookie with that name on every host.
+  It returns the number removed. `clear` deletes all cookies.
 - `all_cookies()` for a snapshot sorted by domain then name.
 - `load_cookies(header, url)` and `export_cookies(url)` to move a `Cookie`
   header string in and out.
@@ -54,8 +59,9 @@ assert!(shared.get_cookie("https://example.com/", "extra").is_some());
 ## Give a session its own jar
 
 `SessionBuilder::cookie_jar(jar)` starts a session from a jar you built,
-which is how you restore a saved login. To run a second identity, build a
-second session with its own jar.
+which is how you restore a saved login. To run a second identity on the same
+connections, call `session.with_cookie_jar(jar)`. It derives a session that
+shares the pool and all other settings but reads and writes the given jar.
 
 ```rust,no_run
 use leyline::cookie::Jar;
@@ -65,8 +71,23 @@ let jar = Jar::new();
 jar.load_cookies("session_id=abc; theme=dark", "https://example.com/");
 
 let session = leyline::Session::builder().cookie_jar(jar).build()?;
-let second_identity = leyline::Session::builder().cookie_jar(Jar::new()).build()?;
+let second_identity = session.with_cookie_jar(Jar::new());
 # let _ = (session, second_identity);
+# Ok(())
+# }
+```
+
+Seed a domain cookie that `set_cookie` cannot express:
+
+```rust,no_run
+use leyline::cookie::Jar;
+
+# fn run() -> Result<(), url::ParseError> {
+let jar = Jar::new();
+let url = url::Url::parse("https://www.example.com/")?;
+jar.store_set_cookie("token=abc; Domain=.example.com; Path=/; Secure", &url);
+jar.store_set_cookie("token=; Domain=.example.com; Path=/; Max-Age=0", &url);
+assert_eq!(jar.remove_named("token"), 0);
 # Ok(())
 # }
 ```

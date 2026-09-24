@@ -314,9 +314,18 @@ impl DnsConfig {
         self
     }
 
-    pub fn resolve_host(mut self, host: impl AsRef<str>, addr: SocketAddr) -> Self {
-        self.overrides
-            .insert(normalize_host(host.as_ref()), vec![addr]);
+    pub fn resolve_host(
+        mut self,
+        host: impl AsRef<str>,
+        addrs: impl IntoIterator<Item = SocketAddr>,
+    ) -> Self {
+        let host = normalize_host(host.as_ref());
+        let addrs: Vec<SocketAddr> = addrs.into_iter().collect();
+        if addrs.is_empty() {
+            self.overrides.remove(&host);
+        } else {
+            self.overrides.insert(host, addrs);
+        }
         self
     }
 

@@ -43,7 +43,28 @@ let no_redirects = Session::builder()
 ```
 
 `RedirectPolicy::limited(10)` is the default. `RedirectPolicy::none()` follows
-no redirect. The policy is set once per session, at build time.
+no redirect. The session policy is set at build time.
+
+## Override one request
+
+`RequestBuilder::redirect` sets the policy for one request. The session
+default applies to every other request. `Session::execute` reads a
+`RedirectPolicy` from the request extensions in the same way.
+
+```rust,no_run
+use leyline::RedirectPolicy;
+
+# async fn run() -> leyline::Result<()> {
+let session = leyline::Session::new();
+let resp = session
+    .post("https://example.com/login")
+    .redirect(RedirectPolicy::none())
+    .await?;
+let location = resp.header("location");
+# let _ = location;
+# Ok(())
+# }
+```
 
 ## Decide each redirect
 
