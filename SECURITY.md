@@ -6,9 +6,15 @@ Report vulnerabilities privately through
 [GitHub security advisories](https://github.com/manaforged/leyline-http/security/advisories/new).
 Do not open a public issue for a vulnerability.
 
-You will get an acknowledgement within seven days. Fixes ship as a patch
-release with a changelog entry that credits the reporter unless you ask
-otherwise.
+You will get an acknowledgement within 7 days of your report.
+
+For a high or critical issue, the target is a fix or a mitigation within 30
+days of the acknowledgement. The fix ships as a patch release. Its
+[CHANGELOG.md](CHANGELOG.md) entry has a `### Security` line that describes
+the issue and credits the reporter, unless you ask otherwise.
+
+One maintainer reviews reports. If a fix will miss the 30-day target, the
+maintainer tells you the new date in the advisory thread.
 
 ## Scope
 
