@@ -32,7 +32,7 @@ pub(super) async fn capture_navigate_headers(session: Session) -> String {
             .unwrap();
         String::from_utf8_lossy(&req).to_string()
     });
-    let _ = session.get(&format!("http://{addr}/")).await.unwrap();
+    let _ = session.get(format!("http://{addr}/")).await.unwrap();
     server.await.unwrap()
 }
 
@@ -76,7 +76,7 @@ async fn brand_overlay_follows_http_major_not_tls() {
 
 #[tokio::test]
 async fn edge_brand_overlay_matches_capture() {
-    let session = branded(Browser::default_browser(), ChromiumBrand::Edge);
+    let session = branded(Browser::Chrome152, ChromiumBrand::Edge);
     let req = capture_navigate_headers(session).await;
     assert!(
         req.contains("Chrome/152.0.0.0 Safari/537.36 Edg/152.0.0.0"),
@@ -135,7 +135,7 @@ async fn brave_first_class_profile_matches_capture() {
 
 #[tokio::test]
 async fn opera_brand_overlay_matches_capture() {
-    let session = branded(Browser::default_browser(), ChromiumBrand::Opera);
+    let session = branded(Browser::Chrome152, ChromiumBrand::Opera);
     let req = capture_navigate_headers(session).await;
     assert!(
         req.contains("Chrome/152.0.0.0 Safari/537.36 OPR/136.0.0.0"),
@@ -299,9 +299,10 @@ async fn chrome_default_has_no_brand_overlay() {
         .find(|l| l.to_lowercase().starts_with("sec-ch-ua:"))
         .expect("sec-ch-ua header present")
         .to_lowercase();
+    let major = Browser::default_browser().version();
     assert!(
-        sec_ch_ua_line.contains(r#""google chrome";v="152""#),
-        "Chrome sec-ch-ua should identify as Google Chrome 152:\n{req}"
+        sec_ch_ua_line.contains(&format!(r#""google chrome";v="{major}""#)),
+        "Chrome sec-ch-ua should identify as Google Chrome {major}:\n{req}"
     );
     assert!(
         !sec_ch_ua_line.contains("microsoft edge")

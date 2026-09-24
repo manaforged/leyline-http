@@ -11,18 +11,33 @@ const ALL_FAMILIES: [Family; 7] = [
 ];
 
 #[test]
-fn latest_is_the_highest_bundled_version() {
+fn latest_is_the_newest_browser_capture() {
+    let meta = |browser: &Browser| -> (bool, bool) {
+        let table: toml::Table = toml::from_str(browser.entry().source).unwrap();
+        let meta = &table["meta"];
+        (
+            meta.get("capture").and_then(toml::Value::as_str) == Some("browser"),
+            meta.get("deprecated").is_none(),
+        )
+    };
     for family in ALL_FAMILIES {
         let latest = Browser::latest(family);
-        let (key, version) = latest.profile_key();
-        let higher = Browser::all()
-            .iter()
-            .filter(|b| b.profile_key().0 == key)
-            .find(|b| b.profile_key().1 > version);
+        let version = latest.version();
+        let (latest_captured, _) = meta(&latest);
+        let better = Browser::all().iter().find(|b| {
+            let (captured, live) = meta(b);
+            b.family() == family
+                && live
+                && if latest_captured {
+                    captured && b.version() > version
+                } else {
+                    captured || b.version() > version
+                }
+        });
         assert!(
-            higher.is_none(),
-            "{family} latest is {latest}, but {} is bundled and newer",
-            higher.map(ToString::to_string).unwrap_or_default()
+            better.is_none(),
+            "{family} latest is {latest}, but {} is the newer browser capture",
+            better.map(ToString::to_string).unwrap_or_default()
         );
     }
 }

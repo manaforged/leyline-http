@@ -117,7 +117,7 @@ async fn one_shot_get(builder: SessionBuilder, path: &str) -> Response {
             .unwrap();
     });
     let session = builder.build().unwrap();
-    let resp = session.get(&format!("http://{addr}{path}")).await.unwrap();
+    let resp = session.get(format!("http://{addr}{path}")).await.unwrap();
     server.await.unwrap();
     resp
 }
@@ -204,7 +204,7 @@ async fn compress_sets_header_and_puts_compressed_bytes_on_the_wire() {
 
     let payload = b"the quick brown fox jumps over the lazy dog. ".repeat(64);
     let resp = Session::new()
-        .post(&format!("http://{addr}/upload"))
+        .post(format!("http://{addr}/upload"))
         .body(payload.clone())
         .compress(ContentEncoding::Gzip)
         .send()
@@ -247,7 +247,7 @@ async fn unsupported_scheme_proxy_is_refused_not_sent_in_cleartext() {
         .unwrap_err();
     let msg = format!("{err}").to_lowercase();
     assert!(
-        msg.contains("ftp") && msg.contains("cleartext"),
+        msg.contains("ftp") && msg.contains("unsupported proxy scheme"),
         "expected an unsupported-scheme cleartext-refusal error, got: {msg}"
     );
 }
@@ -304,7 +304,7 @@ async fn compress_strips_stale_caller_content_length() {
 
     let payload = b"the quick brown fox jumps over the lazy dog. ".repeat(64);
     let resp = Session::new()
-        .post(&format!("http://{addr}/upload"))
+        .post(format!("http://{addr}/upload"))
         .header("content-length", "999999")
         .body(payload.clone())
         .compress(ContentEncoding::Gzip)
