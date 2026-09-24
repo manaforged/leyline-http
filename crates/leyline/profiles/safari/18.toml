@@ -36,7 +36,7 @@ pre_shared_key = true
 [tls.fingerprint]
 # JA4 is leyline's current emission. Recapture from Safari.app before
 # treating this as a browser match.
-ja4 = "t13d2015h2_a09f3c656075_52cf856b4c42"
+ja4 = "t13d2014h2_a09f3c656075_2bb9581e7de5"
 
 [h2]
 enable_push = false
