@@ -42,8 +42,22 @@ inside the branch can use any clear style.
 
 A profile under `crates/leyline/profiles/` describes a real capture. Name
 the browser build it was captured from in `captured_against`, and keep the
-`ja4` and `akamai` goldens next to the fields that produce them. The offline
-conformance test gates every profile that fixes its extension order.
+`ja4` and `akamai` recorded reference values next to the fields that produce
+them. The offline conformance test gates every profile that fixes its
+extension order. It puts each profile and dimension into one of five states:
+
+- Gated: a fixed-order profile's reconstruction matches its reference value.
+- Gated fail: that reconstruction differs from the reference value, so the
+  test fails.
+- Recon accurate: a reconstruction matches the reference value without a
+  fixed order.
+- Recon diverges: reconstructed and not matching, so `audit()` is not
+  wire-exact there.
+- Unanchored: no reference value, so nothing is claimed.
+
+`docs/reference/leyline-http.md` is generated. Regenerate it with
+`python3 scripts/generate-api.py`. The release check runs
+`python3 scripts/generate-api.py --check` and fails when the page is stale.
 `scripts/profile-oneshot.sh` captures new browser builds and lands their
 profiles; run it with `status` to see which versions are missing.
 

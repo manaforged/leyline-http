@@ -141,7 +141,7 @@ JA4 golden taken from that capture.
 set, `<family>/<version>.toml`, and runs the same parse and extension-order
 validation as the compiled-in registry:
 
-```rust
+```rust,no_run
 use std::path::Path;
 use leyline::profile::ProfileRegistry;
 

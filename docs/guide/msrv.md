@@ -1,8 +1,7 @@
 # Minimum supported Rust version
 
 The minimum supported Rust version (MSRV) is the `rust-version` field in the
-workspace `Cargo.toml`. It is **1.96**. Read that field rather than this
-number if the two disagree.
+workspace `Cargo.toml`. It is **1.96**.
 
 ## When the MSRV moves
 

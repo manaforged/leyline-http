@@ -99,13 +99,13 @@ A streaming request body is never retried, whatever the method. See
 
 ## The four timeouts
 
-`TimeoutConfig` holds all of them. It is the single source of truth: the
-session's total request timeout is `timeouts.total`.
+`TimeoutConfig` holds all of them. The session's total timeout is
+`timeouts.total`.
 
 | Field | Default | Covers |
 | --- | --- | --- |
 | `total` | 300 s | Wall clock for one `send`, covering every redirect hop, retry, backoff sleep, and buffered body read. On expiry the call returns `Kind::Timeout`. |
-| `connect` | `Some(10 s)` | DNS, TCP connect, and TLS setup for one new `https` connection, fired before the request is written. Pooled reuse and plaintext `http` connects are not covered. |
+| `connect` | `Some(10 s)` | DNS, TCP connect, and TLS setup for one new connection, over `http` or `https`. One request spends at most one connect window. Pooled reuse is not covered. |
 | `read` | `None` | Idle gap between chunks of a streamed response body. It fires only on a request that called `stream`; a buffered body is read inside the `response_header` and `total` windows instead. |
 | `response_header` | `None` | Wait from dispatch start until the transport response resolves, per redirect hop: connection acquisition, DNS and TLS setup, and request transmission are inside this window. A buffered response resolves only after its body is read. |
 

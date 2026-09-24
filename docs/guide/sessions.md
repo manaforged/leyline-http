@@ -55,7 +55,10 @@ assert_eq!(latest.family(), "firefox");
 assert_eq!(Browser::default_browser().family(), "chrome");
 ```
 
-`Browser::family` gives the engine family as a string. `Browser::for_platform` maps a
+`Browser::family` returns the product line as a string, for example
+`"chrome"` or `"safari-ios"`. The engine family (`chromium`, `gecko`,
+`webkit`) is the `meta.family` field of the profile that
+`ProfileRegistry::global().get_browser(browser)` returns. `Browser::for_platform` maps a
 profile to the sibling that exists on a platform. `Browser::hello_rep` names
 the profile that owns the ClientHello, since several versions share one.
 
@@ -78,6 +81,20 @@ assert_eq!(Platform::Android.mobile_flag(), "?1");
 The builder also has one method per platform: `.windows()`, `.macos()`,
 `.linux()`, `.android()`, and `.ios()`.
 
+### Platform defaults and call order
+
+- If you select a browser and no platform, the session claims Windows. The
+  builder logs one `info` event under the `leyline::session` target the first
+  time this happens.
+- `.safari()` and `.brave()` claim macOS when no platform is set.
+- `Browser::Safari26` has a macOS identity only. `.browser(Browser::Safari26)`
+  with no platform fails at `build()` with `Kind::Config`. Use `.safari()`, or
+  add `.macos()`.
+- `.platform()` maps a browser that is already set to its sibling for that
+  platform. `.browser()` after `.platform()` does not map. Call `.platform()`
+  after `.browser()`, or use `.profile(browser, platform)`.
+- A session with no browser claims the host platform.
+
 ## Apply a brand overlay
 
 Edge, Opera, and Vivaldi are Chromium browsers. Leyline treats them as an
@@ -96,16 +113,15 @@ assert_eq!(session.brand(), Some(ChromiumBrand::Edge));
 ```
 
 `ChromiumBrand::Chrome` is stock Chrome. `.edge()`, `.opera()`, and
-`.vivaldi()` are shorthand for `.brand(...)` on the matching anchor: Edge and
+`.vivaldi()` are shorthand for `.brand(...)` on the matching Chrome version: Edge and
 Opera sit on `Browser::default_browser()`, and Vivaldi sits on Chrome 147, the
 last major with a recorded Vivaldi build string.
 
 Brave is not an overlay. `Session::brave()` selects `Browser::Brave146`, a
 first-class profile.
 
-An overlay a capture never verified is refused rather than guessed. The
-builder reports it as a `BrandOverlayError` naming the brand, the Chromium
-major, and the platform.
+If no capture exists for that brand, Chromium version, and platform, `build()`
+returns a `BrandOverlayError` that names all three.
 
 ## What a session shares
 
@@ -115,9 +131,8 @@ One session holds:
 - The connection pool, keyed by host, port, and proxy.
 - The TLS context built from the profile, plus the HTTP/2 and HTTP/3 settings.
 
-Clone the session freely. `Session` is a `#[derive(Clone)]` newtype over an
-`Arc`, so a clone costs one atomic increment and shares all of the above with
-the original. Pass clones into tasks instead of building a second session.
+A clone is cheap and shares the pool, the jar, and the TLS context with the
+original. Pass clones into tasks instead of building a second session.
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
@@ -140,7 +155,7 @@ parts:
 - `with_proxy(url)` keeps the cookie jar, TLS, the identity, and the pool,
   and swaps only the proxy. Pool entries are keyed by proxy, so connections
   never cross proxies. A rebind to the current proxy URL takes a fresh pool,
-  so a next request opens new connections. It returns `Result<Session>`: an invalid URL or an
+  so the next request opens new connections. It returns `Result<Session>`: an invalid URL or an
   unsupported scheme fails here, the same way `build()` does.
 
 ```rust,no_run

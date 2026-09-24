@@ -83,7 +83,7 @@ lists the capture status of every profile.
 | Page | Contents |
 | --- | --- |
 | [User guide](https://manaforged.github.io/leyline-http/) | Task pages: sessions, requests, streaming, proxies, cookies, HTTP/3, and TLS trust. |
-| [API reference](https://manaforged.github.io/leyline-http/reference/leyline-http.html) | Every public item, generated from the compiler. The release check fails when it is stale. |
+| [API reference](https://manaforged.github.io/leyline-http/reference/leyline-http.html) | Every public item, generated from the compiler. |
 | [Profile reference](https://manaforged.github.io/leyline-http/guide/profiles.html) | Bundled profiles and their capture status. |
 | [API map](https://manaforged.github.io/leyline-http/api.html) | Each task mapped to its type or function, and the error model. |
 | [Changelog](https://github.com/manaforged/leyline-http/blob/main/CHANGELOG.md) | Release notes and the version policy. |

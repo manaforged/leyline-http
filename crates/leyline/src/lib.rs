@@ -36,6 +36,18 @@ pub mod guide {
     pub struct Fingerprints;
     #[doc = include_str!("../../../docs/guide/features-and-targets.md")]
     pub struct Features;
+    #[doc = include_str!("../../../docs/guide/profiles.md")]
+    pub struct Profiles;
+    #[doc = include_str!("../../../docs/guide/choosing-a-profile.md")]
+    pub struct ChoosingAProfile;
+    #[doc = include_str!("../../../docs/guide/redirects.md")]
+    pub struct Redirects;
+    #[doc = include_str!("../../../docs/guide/errors.md")]
+    pub struct Errors;
+    #[doc = include_str!("../../../docs/guide/logging.md")]
+    pub struct Logging;
+    #[doc = include_str!("../../../docs/guide/platforms.md")]
+    pub struct Platforms;
 }
 
 pub mod audit;

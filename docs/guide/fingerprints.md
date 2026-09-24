@@ -78,18 +78,10 @@ requested, and the kernel decides what the SYN carries.
 
 ## The offline conformance test
 
-`crates/leyline/tests/fingerprint_conformance.rs` puts each profile and
-dimension into one of five states, without touching the network:
-
-- Gated: a fixed-order profile's reconstruction matches its configured golden.
-- Gated fail: that reconstruction differs from the golden, so the test fails.
-- Recon accurate: a reconstruction matches the golden without a fixed order.
-- Recon diverges: reconstructed and not matching, so `audit()` is not
-  wire-exact there.
-- Unanchored: no golden value, so nothing is claimed.
-
-Run it with `cargo test -p leyline-http --test fingerprint_conformance`. The
-report checks agreement between the profile data and its configured goldens.
+The offline test checks each profile's JA4 against a recorded reference value,
+without touching the network. Run it with
+`cargo test -p leyline-http --test fingerprint_conformance`. The report checks
+agreement between the profile data and its recorded reference values.
 Establishing browser fidelity also requires a browser capture and a comparison
 with Leyline's emitted handshake.
 
@@ -97,8 +89,8 @@ with Leyline's emitted handshake.
 
 Profiles are TOML files under `crates/leyline/profiles/<family>/<version>.toml`,
 and every bundled one is compiled into the binary.
-The [profile reference](profiles.md) lists what ships, which JA4 goldens are
-gated, and the update cadence.
+The [profile reference](profiles.md) lists what ships, which JA4 reference values
+are gated, and the update cadence.
 
 `ProfileRegistry::global()` borrows the built-in set, `get_browser` looks one
 up by `Browser`, and `get(name, version)` looks one up by name and version.

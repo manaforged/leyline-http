@@ -9,7 +9,7 @@ on by default: `cookies`, `charset`, `compression-gzip`, `compression-brotli`,
 
 | Feature | Default | What it changes |
 | --- | --- | --- |
-| `cookies` | yes | Marks cookie support. The jar itself always compiles. |
+| `cookies` | yes | No effect in 0.1. Reserved. The cookie jar always compiles. |
 | `charset` | yes | Adds `encoding_rs`. Without it, `Response::text` falls back to lossy UTF-8 instead of honoring the `Content-Type` charset. |
 | `compression-gzip` | yes | gzip response bodies, gzip request bodies, and the zlib certificate decompressor. Pulls in `flate2`. |
 | `compression-brotli` | yes | Brotli bodies and the Brotli certificate decompressor. Pulls in `brotli`. |
@@ -19,9 +19,9 @@ on by default: `cookies`, `charset`, `compression-gzip`, `compression-brotli`,
 | `stream` | yes | Streaming request and response bodies. |
 | `websocket` | yes | Adds `Session::websocket` and the `Ws*` types. Pulls in tungstenite. |
 | `http3` | yes | Adds `H3Config`, the `Http3` and `Race` policies, and `leyline-quiche`. |
-| `system-trust` | yes | Marks platform trust-store loading. The trust code compiles either way. |
-| `socks` | no | SOCKS5 proxy tunnels. Without it, a `socks5://` proxy URL fails at connect time. |
-| `native-interface-bind` | no | Marks binding a socket to a named network interface. `SocketConfig::interface` compiles either way. |
+| `system-trust` | yes | No effect in 0.1. Reserved. Platform trust-store loading always compiles. |
+| `socks` | no | SOCKS5 proxy tunnels. Without it, `build()` accepts a `socks5://` proxy URL and the first request fails. |
+| `native-interface-bind` | no | No effect in 0.1. Reserved. `SocketConfig::interface` compiles and is not applied. |
 | `tower` | no | Adds `LeylineService`, a `tower_service::Service` over a session. |
 | `unstable-bssl` | no | Exposes the BoringSSL `SslContextBuilder` behind `TlsContext`. The BoringSSL types are outside this crate's semver promise. |
 | `bench-internals` | no | Exposes pool probes for the benchmark crate. Not for application use. |
@@ -57,7 +57,8 @@ CMake, bindgen, Perl, or Go.
 
 ## Other targets
 
-Other targets are not supported by the packaged crate. Adding one requires
+Other targets are not supported by the packaged crate. See
+[Supported platforms](platforms.md) for the build error and the minimum glibc. Adding one requires
 native BoringSSL libraries, generated Rust bindings, and a matching target
 configuration in `leyline-bssl-sys`.
 
@@ -77,8 +78,8 @@ binary link `openssl-sys` or `boring-sys` beside Leyline.
 
 `leyline-bssl-sys` declares `links = "leyline_bssl"`, its own key, so it does
 not collide with another crate claiming `boringssl`. The packaging script
-fails if an unprefixed OpenSSL-style export survives. `PROVENANCE.md` records
-which target artifacts have been regenerated with the prefix so far.
+fails if an unprefixed OpenSSL-style export survives. All four shipped targets
+are prefixed, and `PROVENANCE.md` records when each was built.
 
 The `fips` and `mlkem` features are refused outright, because the packaged
 artifacts do not carry those builds.

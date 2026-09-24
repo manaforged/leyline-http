@@ -34,7 +34,7 @@ println!("{}", resp.status());
 ```
 
 `Body::len_hint()` reports the declared length: the buffer size for a buffered
-body, `Some(0)` for an empty one, and the hint you supplied for a stream.
+body, `Some(0)` for an empty one, and the hint you supplied for a stream. On a buffered response the same helpers give the decoded body.
 `Body::is_stream()` tells you which kind you hold.
 
 ## Stream a response body
@@ -61,8 +61,8 @@ println!("{total} bytes");
 ```
 
 `copy_to(writer)` and `download_to(path)` do the same loop for you and return
-the byte count. All three stream helpers hand back the content-encoded bytes
-as they arrive; `bytes()`, `text()`, and `json()` decode compression when they
+the byte count. On a response from `.stream()`, all three helpers hand back
+the content-encoded bytes as they arrive; `bytes()`, `text()`, and `json()` decode compression when they
 drain a body. Request identity encoding, or use `read_until` (see
 [Stop at a marker](#stop-at-a-marker)), when you need decoded bytes from a
 stream.

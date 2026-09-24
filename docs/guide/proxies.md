@@ -18,7 +18,8 @@ let session = leyline::Session::builder()
 # }
 ```
 
-The URL is validated at `build()`. `ProxyUrl` does the same validation on its
+The URL is validated at `build()`. One exception: without the `socks` feature,
+`build()` accepts a `socks5://` URL, and the first request fails. `ProxyUrl` does the same validation on its
 own, if you want to check a URL before you store it.
 
 ```rust
@@ -107,8 +108,9 @@ An `https://` proxy means TLS to the proxy first, then `CONNECT` through it.
 It works with the default feature set.
 
 A `socks5://` or `socks5h://` proxy needs the `socks` feature, which is off by
-default. Without it, a SOCKS URL fails with a TLS profile error saying that
-SOCKS proxy support requires the `socks` feature. Both schemes behave the same
+default. Without it, `build()` accepts a SOCKS URL, and the first request fails with an
+error whose message says that SOCKS proxy support requires the
+`socks` feature. Both schemes behave the same
 way: the proxy resolves the hostname.
 
 ```toml
@@ -125,7 +127,7 @@ entries are keyed by proxy, so the derived session never reuses a connection
 opened through another proxy. A rotation back to a proxy with warm connections
 reuses them, and the rotation closes no connection that another session uses.
 A rebind to the session's current proxy URL takes a fresh pool instead, so the
-next request opens a new socket and a next request opens new connections.
+next request opens a new socket.
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {

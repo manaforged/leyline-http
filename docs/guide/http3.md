@@ -36,7 +36,11 @@ assert_eq!(session.protocol_policy(), ProtocolPolicy::Http3);
 
 Select a browser before forcing HTTP/3: the bare profile has no HTTP/3
 configuration, so a forced `Http3` request from a bare session fails.
-`Session::chrome()` and the other Chromium constructors select `Race`.
+`.chrome()`, `.edge()`, `.opera()`, `.vivaldi()`, and `.brave()` select
+`Race`, on the builder and as `Session` constructors. `.browser(Browser::...)`
+keeps `Auto`, so a session built that way does not try HTTP/3. Call `.race()`
+after `.browser(...)` to get the same policy. An explicit protocol policy set
+before these shortcuts is kept.
 
 A profile without an HTTP/3 fingerprint fails a forced `Http3` request with
 `Kind::Config`.
@@ -85,10 +89,8 @@ assert!(H3Config::for_family("nonesuch").is_err());
 Every bundled profile advertises `qpack_max_table_capacity: 0` and
 `qpack_blocked_streams: 0`. The dynamic table is not used in either
 direction, so header fields are encoded against the static table and
-literals only. This is a deliberate implementation limit: it keeps the
-encoder deterministic, and it is a fingerprint difference from stacks whose
-QPACK encoder uses a dynamic table. Version-specific captures would be
-needed to establish full QPACK equivalence.
+literals only. Browsers use the QPACK dynamic table. Leyline does not, so an
+observer can tell the two apart.
 
 ## No proxy support
 

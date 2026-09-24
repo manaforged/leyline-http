@@ -114,10 +114,15 @@ that buffered mode applies.
 | `as_bytes()` | `Option<&[u8]>` | Sync. `Some` only when the body is already buffered. |
 | `as_text()` | `Option<Result<&str>>` | Sync. `Some` only when the body is already buffered. |
 | `into_stream()` | `Result<BodyStream>` | Takes the body as a stream. |
-| `copy_to(writer)` | `Result<u64>` | Streams into any `AsyncWrite`. |
-| `download_to(path)` | `Result<u64>` | Streams to a file. |
+| `copy_to(writer).await` | `Result<u64>` | Streams into any `AsyncWrite`. Consumes the response. |
+| `download_to(path).await` | `Result<u64>` | Streams to a file. Consumes the response. |
 
-The async calls need the response by `&mut`, so bind it with `let mut resp`.
+`text`, `text_with_charset`, `text_utf8`, `bytes`, and `json` take the response
+by `&mut`, so bind it with `let mut resp`.
+
+On a buffered response, `into_stream`, `copy_to`, and `download_to` give the
+decoded body. On a streamed response they give the bytes as sent, still
+compressed. The example below is buffered, so the file holds the decoded body.
 
 `text()` replaces invalid sequences with U+FFFD, and a leading byte order mark
 overrides the declared charset. The charset handling comes from the `charset`

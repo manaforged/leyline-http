@@ -67,7 +67,7 @@ Order matters to a fingerprint, so Leyline preserves it. Your headers merge
 into the profile's preset block, and the profile's own order applies on the
 wire.
 
-Two escape hatches let you take control:
+Two methods override the header order:
 
 - `header_order(&["a", "b"])` pins the wire order of the regular headers for
   this request, on every protocol. It wins over the identity's own order.
