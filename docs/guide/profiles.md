@@ -3,8 +3,7 @@
 A profile is one TOML file that describes a single browser build's TLS
 ClientHello, HTTP/2 SETTINGS, and per-platform identity. Leyline compiles the
 bundled profiles into the crate and indexes them in `ProfileRegistry`. You
-select one with `SessionBuilder::browser`, `SessionBuilder::profile`, or a
-family shortcut such as `SessionBuilder::firefox`.
+select a bundled profile with `SessionBuilder::browser`.
 
 Profiles live under `crates/leyline/profiles/<family>/<version>.toml`.
 

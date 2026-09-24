@@ -18,8 +18,12 @@ Leyline supports HTTP/1.1, HTTP/2, HTTP/3, and WebSocket on Tokio.
   - `aarch64-unknown-linux-gnu`
   - `x86_64-pc-windows-msvc`
 - The tools to build BoringSSL from source: CMake 3.22 or later, a C and C++
-  compiler, and libclang for `bindgen`. On Windows, the MSVC build tools and
-  NASM.
+  compiler, libclang for `bindgen`, and `git`. The build script applies the
+  BoringSSL patches with `git apply`. On Windows, also the MSVC build tools
+  and NASM.
+
+The first build compiles BoringSSL from source with CMake, so it takes longer
+than a pure Rust dependency. Later builds reuse the compiled library.
 
 Other targets, including Intel macOS and musl, are not supported.
 
@@ -52,10 +56,6 @@ async fn main() -> leyline::Result<()> {
 `Session::new()` uses the latest bundled Chrome profile with a Windows
 identity. Reuse one session to share connections and cookies. To select
 another browser or platform, use `Session::builder()`.
-
-The latest bundled Chrome changes when a release adds a newer Chrome
-profile, and a patch release can add one. To keep a fixed fingerprint, pin
-the browser with `Session::builder().browser(Browser::Chrome148)`.
 
 The latest bundled Chrome changes when a release adds a newer Chrome
 profile, and a patch release can add one. To keep a fixed fingerprint, pin

@@ -42,7 +42,7 @@ and carries these BoringSSL patches:
   ECDHE 3DES cipher suites, and the FFDHE2048/3072 groups. These changes
   first shipped in 0x676e67's `btls` and `boring2` forks
   (https://github.com/0x676e67/btls); Leyline keeps them with that credit.
-- `0002-prefix-ssl-structs.patch`: renames the `ssl_st` and `ssl_session_st`
+- `0002-leyline-symbol-prefix.patch`: renames the `ssl_st` and `ssl_session_st`
   C++ structs under the `LEYLINE` symbol prefix.
 
 Upstream: https://github.com/cloudflare/boring

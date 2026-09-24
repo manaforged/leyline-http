@@ -10,16 +10,23 @@ change or a higher minimum Rust version needs a new minor release, such as
 
 ## Unreleased
 
-### Changed
-
-- `leyline-bssl-sys` builds BoringSSL from source with CMake and no longer
-  ships prebuilt libraries. A build needs CMake 3.22 or later, a C and C++
-  compiler, and libclang; on Windows, the MSVC build tools and NASM. The
-  BoringSSL crates are now trimmed forks of Cloudflare's `boring` v5.2.0.
-
 ## 0.1.0 - 2026-09-24
 
 First public release.
+
+### Build
+
+- `leyline-bssl-sys` builds BoringSSL from source with CMake and links it
+  statically. The crates ship source, not prebuilt libraries. A build needs
+  CMake 3.22 or later, a C and C++ compiler, libclang, and `git`; on Windows,
+  also the MSVC build tools and NASM. The BoringSSL crates are trimmed forks
+  of Cloudflare's `boring` v5.2.0.
+
+### API contract
+
+- [docs/api.md](docs/api.md) lists every public type and function. The crate
+  root exposes only the items on that page. Within `0.1.x`, the page changes
+  only by addition.
 
 ### Added
 
@@ -50,14 +57,29 @@ First public release.
   request (`SessionBuilder::audit`).
 - `SocketConfig::tcp_user_timeout` applies on Linux and Android. On other
   systems, Leyline logs one warning per unsupported option per process.
-- Prebuilt BoringSSL libraries and Rust bindings for macOS arm64, Linux x86_64
-  and arm64 with glibc, and Windows x86_64 with MSVC.
 - A [user guide](docs/README.md) and an [API map](docs/api.md).
 - `TimeoutConfig::connect` bounds plain `http://` connects. One request spends at
   most one connect timeout on an unreachable host.
 - `Session::with_proxy` keeps the shared connection pool, which is keyed by
   proxy. `Session::fresh_pool` takes a new pool, so the next request opens
   new connections.
+- `Error::kind` returns a typed `Kind`. DNS, TCP, and proxy failures report
+  `Kind::Connect` and `Kind::Proxy`, not `Kind::Tls`. `Error::is_retryable`
+  holds the one retry rule that the retry policy also uses.
+- Request functions take any `IntoUrl` input. A URL that does not parse
+  returns `Kind::Url` with its source error.
+- `Response::text`, `bytes`, and `json` consume the response and return the
+  body. `Response::headers` returns the `HeaderMap`, and
+  `Response::error_for_status_ref` checks the status without a move.
+- Configuration types use private fields with setters named after the field.
+  A per-request timeout overrides the session timeouts one field at a time.
+- `Jar::snapshot` copies a cookie jar, `Jar::extend_from` merges one jar into
+  another, and `Jar::remove` deletes a cookie.
+- `Session::with_redirect` derives a session with another redirect policy and
+  the same pool and cookies.
+- `Session::identity` returns the browser, platform, brand, and user agent
+  that the session sends.
+- The `trace::Head` event carries the response headers.
 
 ### Security
 
