@@ -72,7 +72,7 @@ The session jar stores `Set-Cookie` automatically. `cookies()` iterates the
 `leyline::cookie::Cookie` records parsed from this response's `Set-Cookie`
 headers. It does not list cookies from redirect legs or cookies the jar
 rejected. The jar is the store: read it with
-`session.cookies().get_cookie(url, name)`. See [Cookies](cookies.md).
+`session.cookies().get_cookie(&url, name)`. See [Cookies](cookies.md).
 
 ## Redirect chain
 
@@ -102,8 +102,9 @@ HTTP/3 responses carry them. A streaming response and HTTP/1.1 yield none.
 The body is buffered unless the request called `.stream()`. The reading calls
 are async and work in both modes: a buffered body returns at once, and a
 streamed body is drained first, then decompressed.
-Draining honors the session `read_timeout` per chunk and the same 100 MiB cap
-that buffered mode applies.
+Draining honors the `read` timeout for each chunk and the same
+`CompressionConfig::max_body_size` cap (100 MiB by default) that buffered mode
+applies.
 
 | Call | Returns | Notes |
 | --- | --- | --- |

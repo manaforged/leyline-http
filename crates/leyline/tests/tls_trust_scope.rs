@@ -167,7 +167,7 @@ async fn without_env_roots_excludes_environment_roots() {
         res.err().map(|e| e.to_string())
     );
 
-    let restricted = TlsTrustConfig::new().without_env_roots();
+    let restricted = TlsTrustConfig::new().env_roots(false);
     let res = FingerprintConnector::new_with_trust(
         &load_profile(),
         Platform::Linux.tcp_profile(),
@@ -179,12 +179,10 @@ async fn without_env_roots_excludes_environment_roots() {
     .await;
     assert!(
         res.is_err(),
-        "without_env_roots() must not trust a CA that only SSL_CERT_FILE provides"
+        "env_roots(false) must not trust a CA that only SSL_CERT_FILE provides"
     );
 
-    let explicit = TlsTrustConfig::new()
-        .without_env_roots()
-        .add_ca_file(&ca_path);
+    let explicit = TlsTrustConfig::new().env_roots(false).add_ca_file(&ca_path);
     let res = FingerprintConnector::new_with_trust(
         &load_profile(),
         Platform::Linux.tcp_profile(),

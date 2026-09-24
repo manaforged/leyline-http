@@ -8,7 +8,7 @@ use crate::core::error::{Error, Kind, Result};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Deadline {
-    at: Instant,
+    at: Option<Instant>,
     response_header: Option<Duration>,
     read: Option<Duration>,
 }
@@ -17,23 +17,19 @@ pub(crate) struct Deadline {
 pub(crate) struct Elapsed;
 
 impl Deadline {
-    pub(crate) fn new(
-        session: &TimeoutConfig,
-        request: Option<&TimeoutConfig>,
-        total: Option<Duration>,
-    ) -> Self {
-        let pick = |field: fn(&TimeoutConfig) -> Option<Duration>| {
-            request.and_then(field).or_else(|| field(session))
-        };
+    pub(crate) fn new(session: &TimeoutConfig, request: Option<&TimeoutConfig>) -> Self {
+        let merged = request.map_or(*session, |request| request.over(session));
         Self {
-            at: Instant::now() + total.unwrap_or(session.total),
-            response_header: pick(|t| t.response_header),
-            read: pick(|t| t.read),
+            at: merged.total_limit().map(|total| Instant::now() + total),
+            response_header: merged.response_header_limit(),
+            read: merged.read_limit(),
         }
     }
 
     pub(crate) fn remaining(&self) -> Duration {
-        self.at.saturating_duration_since(Instant::now())
+        self.at.map_or(Duration::MAX, |at| {
+            at.saturating_duration_since(Instant::now())
+        })
     }
 
     pub(crate) fn check(&self) -> Result<()> {
@@ -52,9 +48,12 @@ impl Deadline {
     }
 
     pub(crate) async fn total<T>(&self, fut: impl Future<Output = Result<T>>) -> Result<T> {
-        tokio::time::timeout_at(self.at, fut)
-            .await
-            .map_err(|_| Error::new(Kind::Timeout))?
+        match self.at {
+            Some(at) => tokio::time::timeout_at(at, fut)
+                .await
+                .map_err(|_| Error::new(Kind::Timeout))?,
+            None => fut.await,
+        }
     }
 
     pub(crate) async fn response_header<T>(
@@ -62,12 +61,6 @@ impl Deadline {
         fut: impl Future<Output = Result<T>>,
     ) -> Result<T> {
         within(self.response_header, fut)
-            .await
-            .map_err(|Elapsed| Error::new(Kind::Timeout))?
-    }
-
-    pub(crate) async fn read_body<T>(&self, fut: impl Future<Output = Result<T>>) -> Result<T> {
-        within(self.read, fut)
             .await
             .map_err(|Elapsed| Error::new(Kind::Timeout))?
     }

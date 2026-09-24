@@ -10,6 +10,6 @@ fuzz_target!(|data: &[u8]| {
         .expect("current-thread runtime");
     rt.block_on(async {
         let mut wire = data;
-        drop(read_chunked_body(&mut wire, Vec::new()).await);
+        drop(read_chunked_body(&mut wire, Vec::new(), 1 << 20).await);
     });
 });

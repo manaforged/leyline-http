@@ -59,7 +59,7 @@ fn quic_verifier_checks_host_ca_and_pin() {
         ("quic.tech", true, Some([0; 32]), false),
         ("quic.tech", false, None, false),
     ] {
-        let mut trust = TlsTrustConfig::new().without_env_roots();
+        let mut trust = TlsTrustConfig::new().env_roots(false);
         if anchor {
             trust = trust.add_ca_der(der.clone());
         }

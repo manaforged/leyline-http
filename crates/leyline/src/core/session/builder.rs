@@ -242,7 +242,7 @@ impl SessionBuilder {
         for rule in self.proxy_config.rules() {
             ProxyUrl::parse(rule.url())?;
         }
-        if self.proxy_config.primary().is_none()
+        if self.proxy_config.rules().is_empty()
             && self.proxy_config.uses_env()
             && let Some(p) = env_proxy()
         {
@@ -250,7 +250,7 @@ impl SessionBuilder {
         }
         #[cfg(feature = "http3")]
         {
-            if self.proxy_config.primary().is_some()
+            if self.proxy_config.proxies_every_url()
                 && matches!(self.protocol_policy, ProtocolPolicy::Http3)
             {
                 return Err(Error::new(Kind::Config).with_message(
@@ -292,7 +292,10 @@ impl SessionBuilder {
         let connector = self.build_connector(profile, &tcp_profile)?;
 
         let resolved_h2 = profile.h2.resolve_for_platform(self.platform)?;
-        let h2_config = H2Config::from_profile(&resolved_h2)?;
+        let mut h2_config = H2Config::from_profile(&resolved_h2)?;
+        h2_config.max_response_body_bytes = self.compression.max_body_size;
+        #[cfg(feature = "http3")]
+        let h3_config = self.h3_config(profile)?;
 
         let audit_cache = self
             .audit
@@ -351,18 +354,7 @@ impl SessionBuilder {
                 trace: self.trace,
                 tls_trust: self.tls_trust.clone(),
                 #[cfg(feature = "http3")]
-                h3_config: match crate::quic::H3Config::from_profile(profile) {
-                    Ok(cfg) => Some(cfg),
-                    Err(e)
-                        if matches!(
-                            self.protocol_policy,
-                            ProtocolPolicy::Http3 | ProtocolPolicy::Race
-                        ) =>
-                    {
-                        return Err(e);
-                    }
-                    Err(_) => None,
-                },
+                h3_config,
                 #[cfg(feature = "http3")]
                 profile,
             }),

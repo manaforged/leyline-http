@@ -191,7 +191,7 @@ impl Response {
             }
             ResponseBody::Streaming(s) => s,
         };
-        let buf = drain_stream_into_vec(stream).await?;
+        let buf = drain_stream_into_vec(stream, self.compression.max_body_size).await?;
         let encoding = self.headers.get(http::header::CONTENT_ENCODING).map(|v| {
             String::from_utf8_lossy(v.as_bytes())
                 .trim()

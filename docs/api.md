@@ -19,7 +19,8 @@ contract.
 ```text
 session     Session::new()                  latest bundled Chrome, Windows identity
             Session::builder() → SessionBuilder → build() → Session
-            session.with_proxy(url)         clone that shares the pool
+            session.with_proxy(config)      clone that shares the pool, other proxy
+            session.fresh_pool()            clone with a new pool and TLS session cache
             session.with_cookie_jar(jar)    clone that shares the pool, other jar
 request     session.get / post / put / patch / delete / head / request(Method, url) → RequestBuilder
 send        RequestBuilder.send() or .await → Response
@@ -83,21 +84,22 @@ let resp = session
 | Body | `body` / `json` / `form` / `multipart` | `Body` |
 | Query | `RequestBuilder::query` | `url::Url` |
 | Auth | `basic_auth` / `bearer_auth` / `digest_auth` | `core::digest` |
-| Timeout | `SessionBuilder::timeout(impl Into<TimeoutConfig>)`, `RequestBuilder::timeout(..)` | `RequestBuilder::send` deadline |
+| Timeout | `SessionBuilder::timeout(impl Into<TimeoutConfig>)`, `RequestBuilder::timeout(..)` | `core::deadline::Deadline` |
 | Retry | `SessionBuilder::retry(RetryPolicy)`, `RequestBuilder::retry`, `RetryPolicy::retry_on(impl IntoIterator<Item = RetryTrigger>)` | `RequestBuilder::send` loop |
 | Redirect | `SessionBuilder::redirect(RedirectPolicy)`, `RequestBuilder::redirect(RedirectPolicy)` | redirect loop in `Session::execute_inner` |
 | Cookies | `SessionBuilder::cookie_jar(Jar)`, `Session::cookies()`, `Session::with_cookie_jar(Jar)` | `cookie::Jar`, one Set-Cookie parser |
 | Seed a cookie with attributes | `Jar::store_set_cookie(&str, &Url)` | `cookie::parse`, the same parser responses use |
-| Remove cookies by name | `Jar::remove_named(&str) -> usize` (every host) | `cookie::Jar` |
+| Remove cookies by name | `Jar::remove(&Url, &str) -> usize` (one host, every path), `Jar::remove_named(&str) -> usize` (every host) | `cookie::Jar` |
 | Identity values | `Browser::identity(Platform, Option<ChromiumBrand>) -> Option<PlatformIdentity>` | `profile::resolve_identity`, the one resolver the session builder also calls |
 | TCP fingerprint | `Platform::tcp_profile() -> TcpProfile`, `SessionBuilder::tcp_profile` | `profiles/platforms.toml` |
-| Proxy | `SessionBuilder::proxy(impl Into<ProxyConfig>)`, `RequestBuilder::proxy`, `Session::with_proxy` | `ProxyConfig::proxy_for` |
+| Proxy | `impl Into<ProxyConfig>` on `SessionBuilder::proxy`, `RequestBuilder::proxy`, `WebSocketBuilder::proxy`, `Session::with_proxy` | `ProxyConfig::proxy_for` |
 | DNS | `SessionBuilder::dns(impl Into<DnsConfig>)`, `DnsConfig::resolve_host(host, impl IntoIterator<Item = SocketAddr>)` | `DnsConfig` |
 | TLS trust | `SessionBuilder::tls_trust(TlsTrustConfig)` | `tls::trust` |
 | Protocol | `SessionBuilder::protocol(ProtocolPolicy)` | `transport_policy` |
 | Socket and connect tuning | `SessionBuilder::socket(SocketConfig)` | `FingerprintConnector` |
-| Pool | `SessionBuilder::pool(PoolConfig)`, `Session::pool_stats`, `Session::preconnect` | `pool` |
+| Pool | `SessionBuilder::pool(PoolConfig)`, `Session::pool_stats`, `Session::preconnect`, `Session::fresh_pool` | `pool` |
 | Decompress | automatic; `SessionBuilder::compression(CompressionConfig)` | `session::decompress::Decoder` |
+| Response body cap | `CompressionConfig::max_body_size` | the one limit that HTTP/1.1, HTTP/2, HTTP/3, and `Decoder` read |
 | Response headers | `Response::headers() -> &http::HeaderMap`, `Response::header(name)` | `Response` |
 | Read body | `text` / `bytes` / `json` / `into_stream` / `copy_to` / `read_until` | `Response::bytes` and `Decoder` |
 | Status check | `Response::error_for_status` (consume) / `error_for_status_ref` (borrow) | `Response::status_error` |
@@ -120,7 +122,7 @@ counted.
 
 | Type | Functions | Count |
 |---|---|---:|
-| `Session` | `builder`, `new`, `get`, `post`, `put`, `patch`, `delete`, `head`, `request`, `execute(http::Request<Body>)`, `websocket`, `with_proxy`, `with_cookie_jar(Jar)`, `cookies`, `pool_stats`, `preconnect(url, Option<&str>)` | 16 |
+| `Session` | `builder`, `new`, `get`, `post`, `put`, `patch`, `delete`, `head`, `request`, `execute(http::Request<Body>)`, `websocket`, `with_proxy(impl Into<ProxyConfig>)`, `fresh_pool`, `with_cookie_jar(Jar)`, `cookies`, `pool_stats`, `preconnect(url)` | 17 |
 | `SessionBuilder` | `browser`, `platform`, `brand`, `identity`, `headers`, `proxy`, `timeout`, `retry`, `redirect`, `cookie_jar`, `dns`, `tls_trust`, `protocol`, `pool`, `socket`, `tcp_profile`, `compression`, `websocket_config`, `https_only`, `trace`, `audit`, `build` | 22 |
 | `RequestBuilder` | `header`, `headers`, `header_order`, `anchored`, `query`, `body`, `json`, `form`, `multipart`, `basic_auth`, `bearer_auth`, `digest_auth`, `timeout`, `retry`, `redirect(RedirectPolicy)`, `proxy`, `preset`, `stream`, `compress`, `send` | 20 |
 | `Response` | `status`, `version`, `url`, `headers`, `header`, `trailers`, `request_headers`, `redirect_chain`, `cookies`, `timing`, `tls`, `audit`, `content_length`, `error_for_status`, `error_for_status_ref`, `text`, `text_with_charset`, `bytes`, `json`, `into_stream`, `copy_to`, `read_until` | 22 |
@@ -136,15 +138,15 @@ counted.
 | Type | Functions | Count |
 |---|---|---:|
 | `TimeoutConfig` | `new`, `total`, `connect`, `read`, `response_header`; `From<Duration>` | 5 |
-| `RetryPolicy`, `RetryTrigger` | `none`, `transient`, `with_max_retries`, `with_backoff`, `on_status`, `retry_on(impl IntoIterator<Item = RetryTrigger>)`, `with_max_retry_after`, `allow_non_idempotent`; public fields `max_retries`, `initial_backoff`, `max_backoff`, `max_retry_after`, `backoff_factor`, `jitter`, `retry_on`, `allow_non_idempotent` | 8 |
+| `RetryPolicy`, `RetryTrigger` | `none`, `transient`, `max_retries`, `initial_backoff`, `max_backoff`, `backoff_factor`, `jitter`, `max_retry_after`, `on_status`, `retry_on(impl IntoIterator<Item = RetryTrigger>)`, `allow_non_idempotent` | 11 |
 | `RedirectPolicy`, `RedirectAttempt`, `RedirectAction` | `limited`, `none`, `custom` | 3 |
-| `ProxyConfig`, `ProxyRule`, `ProxyUrl`, `NoProxy` | `ProxyConfig::new`, `with_rule`, `no_proxy`, `without_env`; `ProxyRule::all`, `http`, `https`; `ProxyUrl::parse`; `NoProxy::new`; `From<&str>`, `From<String>`, `From<ProxyUrl>` | 9 |
+| `ProxyConfig`, `ProxyRule`, `ProxyUrl`, `NoProxy` | `ProxyConfig::new`, `rule`, `no_proxy`, `env(bool)`; `ProxyRule::all`, `http`, `https`; `ProxyUrl::parse`; `NoProxy::new`; `From<&str>`, `From<&String>`, `From<String>`, `From<ProxyUrl>` | 9 |
 | `DnsConfig` | `new`, `resolver`, `resolve_host(host, impl IntoIterator<Item = SocketAddr>)`; `From<Arc<dyn Resolver>>` | 3 |
-| `TlsTrustConfig` | `new`, `add_ca_file`, `add_ca_der`, `add_pinned_leaf_sha256`, `without_env_roots`, `without_system_roots`, `client_identity`, `danger_accept_invalid_certs` | 8 |
+| `TlsTrustConfig` | `new`, `add_ca_file`, `add_ca_der`, `add_pinned_leaf_sha256`, `env_roots(bool)`, `system_roots(bool)`, `client_identity`, `danger_accept_invalid_certs(bool)` | 8 |
 | `ProtocolPolicy` | enum: `Auto`, `Http1`, `Http2`, `Http3`, `Race` | 0 |
 | `PoolConfig` | `new`, `idle_timeout`, `max_connections`, `max_h1_conns_per_host`, `keepalive`, `h2_ping_after_idle`, `h2_ping_timeout` | 7 |
-| `SocketConfig` | `new`, `local_address`, `tcp_nodelay`, `tcp_keepalive`, `tcp_keepalive_interval`, `tcp_keepalive_retries`, `tcp_user_timeout`, `send_buffer_size`, `recv_buffer_size`, `happy_eyeballs` | 10 |
-| `CompressionConfig`, `ContentEncoding` | `new`, `none`, `gzip`, `deflate`, `brotli`, `zstd` | 6 |
+| `SocketConfig` | `new`, `local_address`, `local_ipv4`, `local_ipv6`, `tcp_nodelay`, `tcp_keepalive`, `tcp_keepalive_interval`, `tcp_keepalive_retries`, `tcp_user_timeout`, `send_buffer_size`, `recv_buffer_size`, `interface`, `strict`, `happy_eyeballs` | 14 |
+| `CompressionConfig`, `ContentEncoding` | `new`, `none`, `gzip`, `deflate`, `brotli`, `zstd`, `max_body_size` | 7 |
 | `TcpProfile` | public fields `ttl`, `mss`, `window_size`, `df`, `window_scale`, `no_delay`, `options`, `#[non_exhaustive]` | 0 |
 | `DigestAuth` | `new` | 1 |
 
@@ -164,19 +166,19 @@ counted.
 
 | Module | Surface | Count |
 |---|---|---:|
-| `cookie` | `Jar`: `new`, `get_cookie`, `set_cookie`, `store_set_cookie(&str, &Url)`, `all_cookies`, `remove_named(&str) -> usize`, `clear`, `export_cookies`, `load_cookies`, `cookie_header`; `Cookie`, `SameSite` | 10 |
+| `cookie` | `Jar`: `new`, `get_cookie(&Url, &str)`, `set_cookie(&Url, &str, &str)`, `store_set_cookie(&str, &Url)`, `all_cookies`, `remove(&Url, &str) -> usize`, `remove_named(&str) -> usize`, `clear`, `export_cookies(&Url)`, `load_cookies(&str, &Url)`, `cookie_header(&Url)`; `Cookie`, `SameSite` | 11 |
 | `multipart` | `Form`: `new`, `text`, `part`, `file`, `boundary`; `Part`: `text`, `bytes`, `stream`, `filename`, `mime`, `header` | 11 |
 | WebSocket (feature `websocket`) | `WebSocketBuilder`: `header`, `headers`, `proxy`, `config`, `connect`; `WsConnection`: `send(WsMessage)`, `recv`, `close`, `split`, `protocol`, `header`; `WsSink`: `send`, `close`; `WsStream`: `recv`; `WsMessage`; `CloseFrame::new`; `WebSocketConfig`: 7 setters | 23 |
 | `trace` | `Trace` (hook methods), events `Dns`, `Connect`, `Tls`, `Sent` (with `method` and `path`), `Head`, `Done`, `TracingTrace` | 0 |
 | `audit` | `AuditData`; `compute_ja3(&Ja3Input)`, `compute_ja4(&Ja4Input)`, `compute_ja4h(&Ja4hInput)`, `compute_ja4t(&TcpProfile)`; input types `Ja3Input`, `Ja4Input`, `Ja4hInput` (public fields) | 4 |
-| `tls` | `Resolver`, `ResolveFuture`, `SystemResolver`, `ClientIdentity`, `HappyEyeballsConfig` (public fields), `TlsMinVersion`, `TlsError` | 0 |
+| `tls` | `Resolver`, `ResolveFuture`, `SystemResolver`, `ClientIdentity`, `TlsMinVersion`, `TlsError`; `HappyEyeballsConfig`: `new`, `resolve_delay`, `attempt_limit` | 3 |
 | `TlsContext` (feature `unstable-bssl`) | `from_profile`, `builder_mut`, `into_inner`; outside semver | 0 |
 | `IntoParamPair`, `IntoUrl`, `Result` | trait bound of `headers` and `query`; sealed URL input bound; `Result<T, Error>` alias | 0 |
 | tower (feature `tower`) | `LeylineService::new` | 1 |
 | `http` | re-export of the `http` crate | 0 |
 | `H2Error`, `ErrorCode` | sources reachable from `Error::h2` | 0 |
 
-Total: 231 public functions.
+Total: 244 public functions.
 
 ## Semantics
 
@@ -195,8 +197,25 @@ Total: 231 public functions.
   request that then cannot verify a certificate fails with `Kind::Tls`.
 - `SessionBuilder::browser` and `platform` commute: the browser maps to its
   platform twin whichever call comes first.
-- Every config setter replaces the whole value. Start from `::new()`, which
-  carries the defaults.
+- Config types (`TimeoutConfig`, `RetryPolicy`, `RedirectPolicy`,
+  `ProxyConfig`, `DnsConfig`, `TlsTrustConfig`, `PoolConfig`, `SocketConfig`,
+  `HappyEyeballsConfig`, `CompressionConfig`, `WebSocketConfig`) have private
+  fields and consuming setters named after the field, with no `with_`
+  prefix. A setter for an optional value takes `impl Into<Option<T>>`;
+  `None` turns that setting off. A setter that adds to a list starts with
+  `add_` or appends one item (`rule`, `on_status`).
+- Every `SessionBuilder` config setter replaces the whole value. Start from
+  `::new()`, which carries the defaults.
+- `TimeoutConfig`: `total` bounds the exchange from send to the last byte of
+  a buffered body. It defaults to 300 s; `total(None)` turns it off.
+  `read` is an idle limit for each body read, buffered or streamed; a
+  streamed body read after `send` returns has only this limit.
+  `response_header` bounds the wait for the response head. `connect` bounds
+  each TCP, proxy, and TLS connect; it is a session setting, and a request
+  value for it has no effect.
+- `RequestBuilder::timeout` merges over the session timeouts field by field.
+  A field that the request sets wins. Every other field keeps the session
+  value. `Deadline` does the merge.
 - `RequestBuilder::header` appends, with `http::HeaderMap::append`
   semantics. `json`, `form`, `multipart`, and the auth setters replace the
   header they own.
@@ -217,14 +236,33 @@ Total: 231 public functions.
   comes from the session.
 - `RequestBuilder::redirect` overrides the session redirect policy for one
   request. The one redirect loop reads it.
-- `Session::with_proxy` derives a clone that shares the pool. Pool entries
-  are keyed by proxy. `with_proxy` with the current proxy URL takes a fresh
-  pool, so the next request opens new connections.
+- `Session::with_proxy` derives a clone with the given proxy config. The
+  clone shares the pool. Pool entries are keyed by proxy URL, so a clone with
+  the same proxy reuses its connections.
+- `Session::fresh_pool` derives a clone with a new, empty pool and TLS
+  session cache, so the next request opens new connections.
+- A proxy set on `RequestBuilder` or `WebSocketBuilder` replaces the session
+  proxy config for that request. A `ProxyConfig::new()` with no rule sends
+  that request direct.
+- `ProxyConfig::proxy_for` picks the proxy for each URL, rules first, then
+  `no_proxy`. `send()` checks the proxy URL it picks and fails with
+  `Kind::Config` if the URL is invalid. `build()` checks the session rules.
+- HTTP/3 does not run over a proxy. `build()` rejects `ProtocolPolicy::Http3`
+  when the proxy config sends every URL through a proxy. `send()` rejects an
+  HTTP/3 request when `proxy_for` picks a proxy, and a `Race` session sends
+  that request over HTTP/2.
+- Connection setup has no retry of its own. A failed connect returns the
+  error to `RequestBuilder::send`, and `RetryTrigger::ConnectionError`
+  decides whether to retry it.
 - `Session::with_cookie_jar` derives a clone through the same path as
   `with_proxy`. It shares the pool and every other setting and uses the
   given jar.
 - `Jar::store_set_cookie` is the one Set-Cookie parser. The session calls it
   for every response. `Max-Age=0` or a past `Expires` deletes the cookie.
+- `Jar` functions take a parsed `&Url`, so a bad URL fails at
+  `Url::parse`, not inside the jar.
+- `Jar::remove(url, name)` removes every cookie with that name that the host
+  of `url` receives, on every path, and returns the count.
 - `Jar::remove_named` removes every cookie with that name on every host and
   returns the count.
 - `Browser::identity` returns the identity a session sends for that browser,
@@ -266,15 +304,18 @@ Total: 231 public functions.
   it and returns `Ok(&Response)`, so the headers and the body stay readable
   after a 4xx or 5xx. Both errors carry the status and the URL.
 - One decoder handles `Content-Encoding` for buffered and streamed reads:
-  gzip, deflate (zlib or raw), brotli, zstd, at most 4 codings, 100 MiB
-  decoded cap.
+  gzip, deflate (zlib or raw), brotli, zstd, at most 4 codings.
+- `CompressionConfig::max_body_size` is the one response body cap, 100 MiB
+  by default. HTTP/1.1, HTTP/2, and HTTP/3 reads and the decoded size all
+  stop at it.
 - `Response::read_until(limit, done)` calls `done(body, from)` after each
   decoded chunk. `body` is every decoded byte so far; `from` is where the
   newest chunk starts. It stops on `true`, at `limit` decoded bytes, or at
   end of stream.
 - `Response::audit` is `None` unless the session was built with
   `audit(true)`.
-- Public enums and config structs are `#[non_exhaustive]`.
+- Public enums and public structs are `#[non_exhaustive]`, including
+  `Cookie` and `SameSite`. Config types have no public fields.
 - Builder input errors surface at `build()` or `send()`, never eagerly.
   `Identity` is a value type, not a builder; its checks run at the call.
 

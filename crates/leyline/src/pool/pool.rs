@@ -35,6 +35,7 @@ pub struct Pool {
     pub(crate) max_h1_conns_per_host: usize,
     pub(crate) h2_ping_after_idle: Option<Duration>,
     pub(crate) h2_ping_timeout: Duration,
+    pub(crate) max_body_size: usize,
     pub(crate) h1_permits: Mutex<HashMap<PoolKey, Arc<Semaphore>>>,
     pub(crate) counters: PoolCounters,
     created: Instant,
@@ -96,6 +97,7 @@ impl Pool {
             max_h1_conns_per_host: DEFAULT_MAX_H1_CONNS_PER_HOST,
             h2_ping_after_idle: super::liveness::DEFAULT_H2_PING_AFTER_IDLE,
             h2_ping_timeout: super::liveness::DEFAULT_H2_PING_TIMEOUT,
+            max_body_size: crate::core::DEFAULT_MAX_BODY_SIZE,
             h1_permits: Mutex::new(HashMap::new()),
             counters: PoolCounters::default(),
             created: Instant::now(),
@@ -126,6 +128,7 @@ impl Pool {
             max_h1_conns_per_host,
             h2_ping_after_idle: super::liveness::DEFAULT_H2_PING_AFTER_IDLE,
             h2_ping_timeout: super::liveness::DEFAULT_H2_PING_TIMEOUT,
+            max_body_size: crate::core::DEFAULT_MAX_BODY_SIZE,
             h1_permits: Mutex::new(HashMap::new()),
             counters: PoolCounters::default(),
             created: Instant::now(),
@@ -246,6 +249,13 @@ impl Pool {
             self.max_h1_conns_per_host,
         )
         .with_h2_ping(self.h2_ping_after_idle, self.h2_ping_timeout)
+        .with_max_body_size(self.max_body_size)
+    }
+
+    #[must_use]
+    pub fn with_max_body_size(mut self, bytes: usize) -> Self {
+        self.max_body_size = bytes;
+        self
     }
 
     pub(crate) fn invalidate(&self, key: &PoolKey) {

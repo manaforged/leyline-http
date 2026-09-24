@@ -13,9 +13,9 @@ fn builder_accepts_wreq_parity_transport_knobs() {
         [SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 443)],
     );
     let proxy = ProxyConfig::new()
-        .with_rule(ProxyRule::https("http://127.0.0.1:8080"))
+        .rule(ProxyRule::https("http://127.0.0.1:8080"))
         .no_proxy(NoProxy::new(["localhost", ".internal"]))
-        .without_env();
+        .env(false);
     let timeouts = TimeoutConfig::default()
         .total(Duration::from_secs(5))
         .connect(Duration::from_secs(1))

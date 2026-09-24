@@ -12,14 +12,14 @@ pub enum RetryTrigger {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct RetryPolicy {
-    pub max_retries: u32,
-    pub initial_backoff: Duration,
-    pub max_backoff: Duration,
-    pub max_retry_after: Duration,
-    pub backoff_factor: f64,
-    pub jitter: bool,
-    pub retry_on: Vec<RetryTrigger>,
-    pub allow_non_idempotent: bool,
+    pub(crate) max_retries: u32,
+    pub(crate) initial_backoff: Duration,
+    pub(crate) max_backoff: Duration,
+    pub(crate) max_retry_after: Duration,
+    pub(crate) backoff_factor: f64,
+    pub(crate) jitter: bool,
+    pub(crate) retry_on: Vec<RetryTrigger>,
+    pub(crate) allow_non_idempotent: bool,
 }
 
 impl Default for RetryPolicy {
@@ -62,19 +62,33 @@ impl RetryPolicy {
         }
     }
 
-    pub fn with_max_retries(mut self, n: u32) -> Self {
+    pub fn max_retries(mut self, n: u32) -> Self {
         self.max_retries = n;
         self
     }
 
-    pub fn with_backoff(mut self, initial: Duration, max: Duration) -> Self {
-        self.initial_backoff = initial;
-        self.max_backoff = max;
+    pub fn initial_backoff(mut self, d: Duration) -> Self {
+        self.initial_backoff = d;
         self
     }
 
-    pub fn with_max_retry_after(mut self, max: Duration) -> Self {
-        self.max_retry_after = max;
+    pub fn max_backoff(mut self, d: Duration) -> Self {
+        self.max_backoff = d;
+        self
+    }
+
+    pub fn backoff_factor(mut self, factor: f64) -> Self {
+        self.backoff_factor = factor;
+        self
+    }
+
+    pub fn jitter(mut self, on: bool) -> Self {
+        self.jitter = on;
+        self
+    }
+
+    pub fn max_retry_after(mut self, d: Duration) -> Self {
+        self.max_retry_after = d;
         self
     }
 
@@ -120,7 +134,7 @@ impl RetryPolicy {
             .any(|t| matches!(t, RetryTrigger::Timeout))
     }
 
-    pub(crate) fn backoff(&self, attempt: u32) -> Duration {
+    pub(crate) fn delay(&self, attempt: u32) -> Duration {
         let base = self.initial_backoff.as_secs_f64();
         let raw = base * self.backoff_factor.powi(attempt as i32);
         let capped = raw.min(self.max_backoff.as_secs_f64());

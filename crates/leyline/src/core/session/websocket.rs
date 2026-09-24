@@ -1,7 +1,6 @@
 use super::Session;
-use crate::core::WebSocketConfig;
 use crate::core::error::{Error, Kind, Result};
-use crate::core::{IntoParamPair, IntoUrl};
+use crate::core::{IntoParamPair, IntoUrl, ProxyConfig, WebSocketConfig};
 
 impl Session {
     pub fn websocket(&self, url: impl IntoUrl) -> WebSocketBuilder {
@@ -18,12 +17,12 @@ impl Session {
         &self,
         url: &str,
         config: WebSocketConfig,
-        request_proxy: Option<&str>,
+        request_proxy: Option<&ProxyConfig>,
         extra_headers: &[(String, String)],
     ) -> Result<crate::core::websocket::WsConnection> {
         let origin = ws_origin(url)?;
         let parsed = url::Url::parse(url).map_err(crate::core::Error::from_url_parse)?;
-        let proxy = self.inner.proxy_config.proxy_for(&parsed, request_proxy);
+        let proxy = self.proxy_for(&parsed, request_proxy)?;
 
         let h1_only = parsed.host_str().is_some_and(|host| {
             self.inner
@@ -81,7 +80,7 @@ pub struct WebSocketBuilder {
     session: Session,
     url: Result<url::Url>,
     config: WebSocketConfig,
-    proxy: Option<String>,
+    proxy: Option<ProxyConfig>,
     headers: Vec<(String, String)>,
 }
 
@@ -91,8 +90,8 @@ impl WebSocketBuilder {
         self
     }
 
-    pub fn proxy(mut self, proxy_url: impl Into<String>) -> Self {
-        self.proxy = Some(proxy_url.into());
+    pub fn proxy(mut self, config: impl Into<ProxyConfig>) -> Self {
+        self.proxy = Some(config.into());
         self
     }
 
@@ -118,10 +117,10 @@ impl WebSocketBuilder {
         let handshake = self.session.websocket_with_options(
             url.as_str(),
             self.config,
-            self.proxy.as_deref(),
+            self.proxy.as_ref(),
             &self.headers,
         );
-        self.session.deadline(None, None).total(handshake).await
+        self.session.deadline(None).total(handshake).await
     }
 }
 

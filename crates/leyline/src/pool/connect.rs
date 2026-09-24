@@ -84,20 +84,13 @@ where
     C: Clone + Send + Sync + 'static,
     Fut: Future<Output = Result<(C, TlsInfo), Error>> + Send + 'static,
 {
-    let mut last_err: Option<Arc<Error>> = None;
-    for _ in 0..2u8 {
-        if let Some(hit) = checkout() {
-            return Ok(hit);
-        }
-        match inflight.join_or_spawn(key, failed, &open).await {
-            Ok(pair) => return Ok(pair),
-            Err(e) if e.alpn().is_some() || e.is_timeout() => return Err(connect_err(&e)),
-            Err(e) => last_err = Some(e),
-        }
+    if let Some(hit) = checkout() {
+        return Ok(hit);
     }
-    Err(connect_err(
-        &last_err.expect("the connect loop runs at least once"),
-    ))
+    inflight
+        .join_or_spawn(key, failed, &open)
+        .await
+        .map_err(|e| connect_err(&e))
 }
 
 async fn open_fresh_h2(

@@ -19,7 +19,7 @@ async fn response_header_timeout_fires_when_upstream_goes_silent() {
 
     let session = Session::builder()
         .protocol(ProtocolPolicy::Http1)
-        .proxy(ProxyConfig::new().without_env())
+        .proxy(ProxyConfig::new().env(false))
         .timeout(
             leyline::TimeoutConfig::default()
                 .total(Duration::from_secs(10))
@@ -63,7 +63,7 @@ async fn no_response_header_timeout_means_request_survives_past_the_ttfb_window(
 
     let session = Session::builder()
         .protocol(ProtocolPolicy::Http1)
-        .proxy(ProxyConfig::new().without_env())
+        .proxy(ProxyConfig::new().env(false))
         .timeout(Duration::from_secs(10))
         .build()
         .expect("session builds");
@@ -106,7 +106,7 @@ async fn session_recovers_after_ttfb_timeout_no_pool_wedge() {
 
     let session = Session::builder()
         .protocol(ProtocolPolicy::Http1)
-        .proxy(ProxyConfig::new().without_env())
+        .proxy(ProxyConfig::new().env(false))
         .timeout(
             leyline::TimeoutConfig::default()
                 .total(Duration::from_secs(10))
@@ -145,7 +145,7 @@ async fn total_backstop_bounds_silence_when_ttfb_unset() {
 
     let session = Session::builder()
         .protocol(ProtocolPolicy::Http1)
-        .proxy(ProxyConfig::new().without_env())
+        .proxy(ProxyConfig::new().env(false))
         .timeout(Duration::from_millis(400))
         .build()
         .expect("session builds");

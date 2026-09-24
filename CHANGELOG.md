@@ -31,13 +31,13 @@ First public release.
   each.
 - Cookies, proxy configuration, redirect policies, opt-in retries, streaming
   request and response bodies, and response decompression.
-- `RetryPolicy::with_max_retry_after` caps the wait that a `Retry-After`
+- `RetryPolicy::max_retry_after` caps the wait that a `Retry-After`
   header can request. A longer wait stops the retry and returns the
   response. By default there is no cap.
 - `Response::read_until` decodes a compressed body and stops when a predicate
   holds or a byte limit is reached.
 - `Session::preconnect` opens and pools an HTTP/2 connection before the
-  first request, directly or through a given proxy.
+  first request, through the session proxy config.
 - The pool sends an HTTP/2 PING before it reuses a connection idle for 10
   seconds. It replaces the connection if the PING is not acknowledged within
   2 seconds. `PoolConfig::h2_ping_after_idle` and
@@ -56,8 +56,8 @@ First public release.
 - `TimeoutConfig::connect` bounds plain `http://` connects. One request spends at
   most one connect timeout on an unreachable host.
 - `Session::with_proxy` keeps the shared connection pool, which is keyed by
-  proxy. A rebind to the session's current proxy URL takes a new pool, so a
-  next request opens new connections.
+  proxy. `Session::fresh_pool` takes a new pool, so the next request opens
+  new connections.
 
 ### Security
 

@@ -22,7 +22,7 @@ async fn connect_timeout_does_not_bound_the_response_phase() {
 
     let session = Session::builder()
         .protocol(ProtocolPolicy::Http1)
-        .proxy(ProxyConfig::new().without_env())
+        .proxy(ProxyConfig::new().env(false))
         .timeout(
             TimeoutConfig::new()
                 .total(Duration::from_secs(10))
@@ -50,7 +50,7 @@ async fn connect_timeout_does_not_bound_the_response_phase() {
 #[tokio::test]
 async fn connect_timeout_bounds_an_unreachable_endpoint() {
     let session = Session::builder()
-        .proxy(ProxyConfig::new().without_env())
+        .proxy(ProxyConfig::new().env(false))
         .timeout(
             TimeoutConfig::new()
                 .total(Duration::from_secs(10))
@@ -80,7 +80,7 @@ async fn connect_timeout_bounds_an_unreachable_endpoint() {
 #[tokio::test]
 async fn connect_timeout_is_one_window_per_request_on_http_and_https() {
     let session = Session::builder()
-        .proxy(ProxyConfig::new().without_env())
+        .proxy(ProxyConfig::new().env(false))
         .timeout(TimeoutConfig::new().connect(Duration::from_millis(300)))
         .build()
         .expect("session builds");

@@ -19,7 +19,7 @@ use leyline::RetryPolicy;
 let session = leyline::Session::new();
 let resp = session
     .get("https://example.com/flaky")
-    .retry(RetryPolicy::transient().with_max_retries(4))
+    .retry(RetryPolicy::transient().max_retries(4))
     .await?;
 # let _ = resp;
 # Ok(())
@@ -33,27 +33,32 @@ it unless the request sets its own with `RequestBuilder::retry`.
 
 `RetryTrigger` has four variants: `ConnectionError`, `Status(u16)`,
 `ServerError` for any 5xx, and `Timeout`. Start from `none()` or `transient()`.
-`retry_on(triggers)` replaces the trigger set. The other fields are public;
-assign the ones that have no setter.
+`retry_on(triggers)` replaces the trigger set. Every other setting has a
+setter named after it: `max_retries`, `initial_backoff`, `max_backoff`,
+`backoff_factor`, `jitter`, `max_retry_after`, and `allow_non_idempotent`.
 
 ```rust
 use leyline::{RetryPolicy, RetryTrigger};
 use std::time::Duration;
 
-let mut policy = RetryPolicy::none()
-    .with_max_retries(5)
-    .with_backoff(Duration::from_millis(50), Duration::from_secs(2));
-policy.backoff_factor = 1.5;
-policy.jitter = true;
-let policy = policy.retry_on([RetryTrigger::ServerError, RetryTrigger::ConnectionError]);
-assert_eq!(policy.max_retries, 5);
+let policy = RetryPolicy::none()
+    .max_retries(5)
+    .initial_backoff(Duration::from_millis(50))
+    .max_backoff(Duration::from_secs(2))
+    .backoff_factor(1.5)
+    .jitter(true)
+    .retry_on([RetryTrigger::ServerError, RetryTrigger::ConnectionError]);
 
 let also = RetryPolicy::transient().on_status(408);
-assert_eq!(also.max_retries, 3);
+# let _ = (policy, also);
 ```
 
-`with_max_retries` and `with_backoff` adjust an existing policy. `on_status`
-adds a status code to the trigger set.
+The setters adjust an existing policy. `on_status` adds a status code to the
+trigger set.
+
+`RetryPolicy` is the only retry owner. Connection setup has no hidden retry: a
+failed connect returns its error, and `RetryTrigger::ConnectionError` decides
+whether the request runs again.
 
 Backoff for attempt `n` is `initial_backoff * backoff_factor.powi(n)`, capped
 at `max_backoff`. With `jitter` set, the result is multiplied by a uniform
@@ -67,7 +72,7 @@ IMF-fixdate with a `GMT` or `UTC` zone. An unparsable value falls back to the
 computed backoff.
 
 By default Leyline waits as long as `Retry-After` asks. To cap the wait, call
-`with_max_retry_after`. If `Retry-After` then asks for longer than the cap,
+`max_retry_after`. If `Retry-After` then asks for longer than the cap,
 Leyline stops retrying and returns the response, as it does when retries run
 out. The caller can then fall back.
 
@@ -100,15 +105,15 @@ A streaming request body is never retried, whatever the method. See
 
 ## The four timeouts
 
-`TimeoutConfig` holds all of them. The session's total timeout is
-`timeouts.total`.
+`TimeoutConfig` holds all of them. Each setter takes a `Duration` or `None`;
+`None` turns that timeout off.
 
-| Field | Default | Covers |
+| Setter | Default | Covers |
 | --- | --- | --- |
-| `total` | 300 s | Wall clock for one `send`, covering every redirect hop, retry, backoff sleep, and buffered body read. On expiry the call returns `Kind::Timeout`. |
+| `total` | `Some(300 s)` | Wall clock for one `send`, covering every redirect, retry, backoff sleep, and buffered body read. On expiry the call returns `Kind::Timeout`. `total(None)` removes the limit, for example for a long poll. |
 | `connect` | `Some(10 s)` | DNS, TCP connect, and TLS setup for one new connection, over `http` or `https`. One request spends at most one connect window. Pooled reuse is not covered. |
-| `read` | `None` | Idle gap between chunks of a streamed response body. It fires only on a request that called `stream`; a buffered body is read inside the `response_header` and `total` windows instead. |
-| `response_header` | `None` | Wait from dispatch start until the transport response resolves, per redirect hop: connection acquisition, DNS and TLS setup, and request transmission are inside this window. A buffered response resolves only after its body is read. |
+| `read` | `None` | Idle limit for each body read: the longest gap between two chunks. It applies to a streamed body and to a buffered body that Leyline drains from a stream. A body that the transport reads before the head resolves falls under `response_header` and `total`. `total` stays the limit for the whole body. |
+| `response_header` | `None` | Wait from dispatch start until the transport response resolves, per redirect: connection acquisition, DNS and TLS setup, and request transmission are inside this window. |
 
 ```rust,no_run
 use leyline::{Session, TimeoutConfig};
@@ -117,7 +122,7 @@ use std::time::Duration;
 # fn run() -> leyline::Result<()> {
 let session = Session::builder()
     .timeout(
-        TimeoutConfig::default()
+        TimeoutConfig::new()
             .total(Duration::from_secs(60))
             .connect(Duration::from_secs(5))
             .read(Duration::from_secs(15))
@@ -130,16 +135,19 @@ let session = Session::builder()
 ```
 
 `SessionBuilder::timeout` takes a `Duration` or a `TimeoutConfig`. A
-`Duration` becomes `TimeoutConfig::new().total(duration)`, so the other fields
-keep their defaults. A later `timeout` call replaces the whole configuration.
-To change `connect` alone, pass `TimeoutConfig::new().connect(duration)`.
+`Duration` becomes `TimeoutConfig::new().total(duration)`, so the other
+settings keep their defaults. A later `timeout` call replaces the whole
+configuration. To change `connect` alone, pass
+`TimeoutConfig::new().connect(duration)`.
 
 ## Per-request timeouts
 
-`RequestBuilder::timeout` with a `Duration` overrides `total` for one request.
-With a `TimeoutConfig`, it overrides `total`, `read`, and `response_header`.
-A `None` keeps the session value for that field. `connect` stays session-wide
-either way, because connections are pooled and coalesced across requests.
+`RequestBuilder::timeout` merges over the session timeouts, setting by
+setting. A setting that the request sets wins, including `None`, which turns
+it off for that request. Every setting the request does not touch keeps the
+session value. A `Duration` sets only `total`. `connect` stays session-wide,
+because connections are pooled and coalesced across requests; a request value
+for it has no effect.
 
 ```rust,no_run
 use leyline::TimeoutConfig;
@@ -157,8 +165,8 @@ let streamed = session
     .get("https://example.com/feed")
     .stream()
     .timeout(
-        TimeoutConfig::default()
-            .total(Duration::from_secs(120))
+        TimeoutConfig::new()
+            .total(None)
             .read(Duration::from_secs(10))
             .response_header(Duration::from_secs(15)),
     )

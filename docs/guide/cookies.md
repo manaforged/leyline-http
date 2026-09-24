@@ -14,12 +14,16 @@ session.get("https://example.com/login").await?;
 
 let jar = session.cookies();
 println!("{} cookies", jar.all_cookies().len());
-if let Some(id) = jar.get_cookie("https://example.com/", "session_id") {
+let url = url::Url::parse("https://example.com/").expect("valid URL");
+if let Some(id) = jar.get_cookie(&url, "session_id") {
     println!("session_id={id}");
 }
 # Ok(())
 # }
 ```
+
+Every jar method takes a parsed `&url::Url`. A bad URL fails at
+`Url::parse`, so the jar never drops input without an error.
 
 Useful jar methods:
 
@@ -29,6 +33,8 @@ Useful jar methods:
   `Set-Cookie` value, with `Domain`, `Path`, `Secure`, `HttpOnly`,
   `SameSite`, `Max-Age`, and `Expires`. It is the same parser the session
   uses for responses. `Max-Age=0` deletes the matching cookie.
+- `remove(url, name)` to delete every cookie with that name that the host of
+  `url` receives, on every path. It returns the number removed.
 - `remove_named(name)` to delete every cookie with that name on every host.
   It returns the number removed. `clear` deletes all cookies.
 - `all_cookies()` for a snapshot sorted by domain then name.
@@ -45,13 +51,14 @@ logins.
 ```rust,no_run
 use leyline::cookie::Jar;
 
-# fn run() -> leyline::Result<()> {
+# fn run() -> Result<(), url::ParseError> {
+let url = url::Url::parse("https://example.com/")?;
 let jar = Jar::new();
-jar.set_cookie("https://example.com/", "session_id", "abc");
+jar.set_cookie(&url, "session_id", "abc");
 
 let shared = jar.clone();
-jar.set_cookie("https://example.com/", "extra", "1");
-assert!(shared.get_cookie("https://example.com/", "extra").is_some());
+jar.set_cookie(&url, "extra", "1");
+assert!(shared.get_cookie(&url, "extra").is_some());
 # Ok(())
 # }
 ```
@@ -68,7 +75,8 @@ use leyline::cookie::Jar;
 
 # fn run() -> leyline::Result<()> {
 let jar = Jar::new();
-jar.load_cookies("session_id=abc; theme=dark", "https://example.com/");
+let url = url::Url::parse("https://example.com/").expect("valid URL");
+jar.load_cookies("session_id=abc; theme=dark", &url);
 
 let session = leyline::Session::builder().cookie_jar(jar).build()?;
 let second_identity = session.with_cookie_jar(Jar::new());
@@ -88,6 +96,8 @@ let url = url::Url::parse("https://www.example.com/")?;
 jar.store_set_cookie("token=abc; Domain=.example.com; Path=/; Secure", &url);
 jar.store_set_cookie("token=; Domain=.example.com; Path=/; Max-Age=0", &url);
 assert_eq!(jar.remove_named("token"), 0);
+jar.store_set_cookie("token=abc; Domain=.example.com; Path=/; Secure", &url);
+assert_eq!(jar.remove(&url, "token"), 1);
 # Ok(())
 # }
 ```

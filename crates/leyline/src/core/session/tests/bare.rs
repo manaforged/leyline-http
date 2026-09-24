@@ -85,7 +85,7 @@ async fn chrome_get_emits_navigate_headers() {
 #[test]
 fn session_retry_default_is_inherited_by_requests() {
     use crate::RetryPolicy;
-    let policy = RetryPolicy::transient().with_max_retries(7);
+    let policy = RetryPolicy::transient().max_retries(7);
     let session = Session::builder().retry(policy).build().unwrap();
     let req = session.request(http::Method::GET, "https://example.test/");
     assert_eq!(req.retry_policy.max_retries, 7);

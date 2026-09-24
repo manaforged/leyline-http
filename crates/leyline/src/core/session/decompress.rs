@@ -10,13 +10,13 @@ use crate::core::CompressionConfig;
 use crate::core::error::{Error, Kind, Result};
 
 const MAX_CODINGS: usize = 4;
-const MAX_DECOMPRESSED: usize = 100 * 1024 * 1024;
 
 type HeaderPairs = Vec<(http::HeaderName, http::HeaderValue)>;
 
 pub(crate) struct Decoder {
     stages: Vec<Stage>,
     produced: usize,
+    limit: usize,
 }
 
 enum Stage {
@@ -223,6 +223,7 @@ impl Decoder {
         Ok(Some(Self {
             stages,
             produced: 0,
+            limit: config.max_body_size,
         }))
     }
 
@@ -247,10 +248,9 @@ impl Decoder {
 
     fn emit(&mut self, data: Vec<u8>, out: &mut Vec<u8>) -> Result<()> {
         self.produced += data.len();
-        if self.produced > MAX_DECOMPRESSED {
-            return Err(Error::new(Kind::Decode).with_message(format!(
-                "decompressed size exceeds {MAX_DECOMPRESSED} bytes"
-            )));
+        if self.produced > self.limit {
+            return Err(Error::new(Kind::Decode)
+                .with_message(format!("decompressed size exceeds {} bytes", self.limit)));
         }
         out.extend_from_slice(&data);
         Ok(())
@@ -294,18 +294,28 @@ pub(crate) fn decompress_and_strip(
 
 pub(crate) async fn drain_stream_into_vec(
     mut bs: crate::core::body_stream::BodyStream,
+    limit: usize,
 ) -> Result<Vec<u8>> {
     use futures_util::StreamExt;
     let mut out = Vec::new();
     while let Some(chunk) = bs.next().await {
-        let chunk = chunk.map_err(Error::from)?;
-        if out.len() + chunk.len() > MAX_DECOMPRESSED {
-            return Err(Error::new(Kind::Body)
-                .with_message(format!("response body exceeds {MAX_DECOMPRESSED} bytes")));
+        let chunk = chunk.map_err(body_read_error)?;
+        if out.len() + chunk.len() > limit {
+            return Err(
+                Error::new(Kind::Body).with_message(format!("response body exceeds {limit} bytes"))
+            );
         }
         out.extend_from_slice(&chunk);
     }
     Ok(out)
+}
+
+fn body_read_error(e: std::io::Error) -> Error {
+    if e.kind() == std::io::ErrorKind::TimedOut {
+        Error::new(Kind::Timeout).with_source(e)
+    } else {
+        Error::from(e)
+    }
 }
 
 #[cfg(test)]

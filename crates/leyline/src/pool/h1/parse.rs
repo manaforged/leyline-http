@@ -47,6 +47,7 @@ where
 pub(super) async fn read_h1_response<S>(
     stream: &mut S,
     method: &str,
+    limit: usize,
 ) -> Result<ParsedResponse, H1PooledError>
 where
     S: AsyncRead + Unpin + ?Sized,
@@ -75,13 +76,13 @@ where
         }
 
         let body = if header_contains_token(&headers, "transfer-encoding", "chunked") {
-            read_chunked_body(stream, buf).await?
+            read_chunked_body(stream, buf, limit).await?
         } else if let Some(len) =
             header_first(&headers, "content-length").and_then(|v| v.trim().parse::<usize>().ok())
         {
-            read_fixed_body(stream, buf, len).await?
+            read_fixed_body(stream, buf, len, limit).await?
         } else {
-            read_to_close(stream, buf).await?
+            read_to_close(stream, buf, limit).await?
         };
 
         return Ok((status, headers, body, minor));
@@ -171,14 +172,13 @@ pub(super) async fn read_fixed_body<S>(
     stream: &mut S,
     mut body: Vec<u8>,
     len: usize,
+    limit: usize,
 ) -> Result<Vec<u8>, H1PooledError>
 where
     S: AsyncRead + Unpin + ?Sized,
 {
-    if len > MAX_H1_BODY_BYTES {
-        return Err(H1PooledError::Http(format!(
-            "HTTP/1.1 body exceeds {MAX_H1_BODY_BYTES} bytes"
-        )));
+    if len > limit {
+        return Err(body_too_large(limit));
     }
     while body.len() < len {
         let remaining = len - body.len();
@@ -197,6 +197,7 @@ where
 pub(super) async fn read_to_close<S>(
     stream: &mut S,
     mut body: Vec<u8>,
+    limit: usize,
 ) -> Result<Vec<u8>, H1PooledError>
 where
     S: AsyncRead + Unpin + ?Sized,
@@ -208,16 +209,15 @@ where
             return Ok(body);
         }
         body.extend_from_slice(&tmp[..n]);
-        if body.len() > MAX_H1_BODY_BYTES {
-            return Err(H1PooledError::Http(format!(
-                "HTTP/1.1 body exceeds {MAX_H1_BODY_BYTES} bytes"
-            )));
+        if body.len() > limit {
+            return Err(body_too_large(limit));
         }
     }
 }
 pub async fn read_chunked_body<S>(
     stream: &mut S,
     mut buf: Vec<u8>,
+    limit: usize,
 ) -> Result<Vec<u8>, H1PooledError>
 where
     S: AsyncRead + Unpin + ?Sized,
@@ -229,10 +229,8 @@ where
         let size_token = size_line.split(';').next().unwrap_or("").trim();
         let size_u64 = u64::from_str_radix(size_token, 16)
             .map_err(|e| H1PooledError::Http(format!("invalid chunk size: {e}")))?;
-        if size_u64 > MAX_H1_BODY_BYTES as u64 {
-            return Err(H1PooledError::Http(format!(
-                "HTTP/1.1 chunk size {size_u64} exceeds {MAX_H1_BODY_BYTES}-byte body cap"
-            )));
+        if size_u64 > limit as u64 {
+            return Err(body_too_large(limit));
         }
         let size = size_u64 as usize;
         buf.drain(..line_end + 2);
@@ -244,14 +242,16 @@ where
 
         read_until_available(stream, &mut buf, size + 2).await?;
         out.extend_from_slice(&buf[..size]);
-        if out.len() > MAX_H1_BODY_BYTES {
-            return Err(H1PooledError::Http(format!(
-                "HTTP/1.1 body exceeds {MAX_H1_BODY_BYTES} bytes"
-            )));
+        if out.len() > limit {
+            return Err(body_too_large(limit));
         }
         if &buf[size..size + 2] != b"\r\n" {
             return Err(H1PooledError::Http("chunk missing CRLF terminator".into()));
         }
         buf.drain(..size + 2);
     }
+}
+
+fn body_too_large(limit: usize) -> H1PooledError {
+    H1PooledError::Http(format!("HTTP/1.1 body exceeds {limit} bytes"))
 }

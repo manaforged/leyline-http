@@ -151,8 +151,14 @@ fn ip_domain_cookie_does_not_reach_sibling_ip() {
     let jar = Jar::new();
     let a = url::Url::parse("https://1.2.3.4/").unwrap();
     jar.store_set_cookie("k=v; Domain=3.4; Path=/", &a);
-    assert_eq!(jar.get_cookie("https://5.6.3.4/", "k"), None);
-    assert_eq!(jar.get_cookie("https://1.2.3.4/", "k"), Some("v".into()));
+    assert_eq!(
+        jar.get_cookie(&url::Url::parse("https://5.6.3.4/").unwrap(), "k"),
+        None
+    );
+    assert_eq!(
+        jar.get_cookie(&url::Url::parse("https://1.2.3.4/").unwrap(), "k"),
+        Some("v".into())
+    );
 }
 
 #[test]

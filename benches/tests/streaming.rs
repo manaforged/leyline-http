@@ -54,8 +54,8 @@ async fn receive(delay: Duration, abandon: bool) {
             .protocol(leyline::ProtocolPolicy::Http2)
             .tls_trust(
                 leyline::TlsTrustConfig::new()
-                    .without_system_roots()
-                    .without_env_roots()
+                    .system_roots(false)
+                    .env_roots(false)
                     .add_ca_der(certificate.to_vec()),
             )
             .build()

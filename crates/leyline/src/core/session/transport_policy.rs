@@ -5,6 +5,7 @@ use crate::core::transport::send_request_h3;
 use crate::core::transport::{
     Prepared, TransportResponse, send_request_auto, send_request_h1, send_request_h2,
 };
+use crate::core::{ProxyConfig, ProxyUrl};
 use crate::pool::checkout_handle;
 #[cfg(feature = "http3")]
 use crate::pool::{H3Target, checkout_h3_handle};
@@ -12,12 +13,16 @@ use crate::pool::{H3Target, checkout_h3_handle};
 use crate::quic::H3Config;
 
 impl Session {
-    fn effective_proxy_for<'a>(
+    pub(crate) fn proxy_for<'a>(
         &'a self,
         url: &url::Url,
-        request_proxy: Option<&'a str>,
-    ) -> Option<&'a str> {
-        self.inner.proxy_config.proxy_for(url, request_proxy)
+        request: Option<&'a ProxyConfig>,
+    ) -> Result<Option<&'a str>> {
+        let proxy = request.unwrap_or(&self.inner.proxy_config).proxy_for(url);
+        if let Some(proxy) = proxy {
+            ProxyUrl::parse(proxy)?;
+        }
+        Ok(proxy)
     }
 
     #[cfg(feature = "http3")]
@@ -30,11 +35,6 @@ impl Session {
         }
     }
 
-    #[cfg(feature = "http3")]
-    fn proxy_requested(&self, request_proxy: Option<&str>) -> bool {
-        request_proxy.is_some() || self.inner.proxy_config.primary().is_some()
-    }
-
     pub(crate) async fn send_with_policy<'a>(
         &'a self,
         req: Prepared<'a>,
@@ -44,10 +44,6 @@ impl Session {
                 Error::new(Kind::Config).with_message("https_only session rejected non-HTTPS URL")
             );
         }
-        let req = Prepared {
-            proxy: self.effective_proxy_for(req.url, req.proxy),
-            ..req
-        };
         let pool = &self.inner.pool;
         let connector = &self.inner.connector;
         let h2_config = &self.inner.h2_config;
@@ -57,7 +53,7 @@ impl Session {
             ProtocolPolicy::Http2 => send_request_h2(pool, connector, h2_config, req).await,
             #[cfg(feature = "http3")]
             ProtocolPolicy::Http3 => {
-                if self.proxy_requested(req.proxy) {
+                if req.proxy.is_some() {
                     return Err(Error::new(Kind::Config).with_message(
                         "HTTP/3 over proxies is not implemented; use Auto or Http2",
                     ));
@@ -78,7 +74,7 @@ impl Session {
                 let raceable = known_h3
                     && !req.body.is_stream()
                     && !req.stream_response
-                    && !self.proxy_requested(req.proxy)
+                    && req.proxy.is_none()
                     && req.url.scheme() == "https";
                 match (raceable, self.inner.h3_config.as_ref()) {
                     (true, Some(h3_config)) => self.send_raced(h3_config, req).await,

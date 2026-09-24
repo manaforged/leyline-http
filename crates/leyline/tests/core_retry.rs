@@ -55,8 +55,9 @@ async fn retries_503_then_succeeds() {
         }
     });
 
-    let policy =
-        RetryPolicy::transient().with_backoff(Duration::from_millis(1), Duration::from_millis(10));
+    let policy = RetryPolicy::transient()
+        .initial_backoff(Duration::from_millis(1))
+        .max_backoff(Duration::from_millis(10));
     let session = Session::builder()
         .protocol(ProtocolPolicy::Http1)
         .retry(policy)
@@ -123,8 +124,9 @@ async fn does_not_retry_on_400() {
         .protocol(ProtocolPolicy::Http1)
         .build()
         .unwrap();
-    let policy =
-        RetryPolicy::transient().with_backoff(Duration::from_millis(1), Duration::from_millis(5));
+    let policy = RetryPolicy::transient()
+        .initial_backoff(Duration::from_millis(1))
+        .max_backoff(Duration::from_millis(5));
     let resp = session
         .request(http::Method::GET, format!("http://{addr}/bad"))
         .retry(policy)
@@ -170,8 +172,9 @@ async fn post_without_opt_in_does_not_retry() {
         .protocol(ProtocolPolicy::Http1)
         .build()
         .unwrap();
-    let policy =
-        RetryPolicy::transient().with_backoff(Duration::from_millis(1), Duration::from_millis(5));
+    let policy = RetryPolicy::transient()
+        .initial_backoff(Duration::from_millis(1))
+        .max_backoff(Duration::from_millis(5));
     let resp = session
         .post(&format!("http://{addr}/payment"))
         .body(vec![1u8, 2, 3])
@@ -201,8 +204,9 @@ async fn streaming_body_plus_retry_errors_clearly() {
         .port();
 
     let policy = RetryPolicy::transient()
-        .with_max_retries(3)
-        .with_backoff(Duration::from_millis(1), Duration::from_millis(5));
+        .max_retries(3)
+        .initial_backoff(Duration::from_millis(1))
+        .max_backoff(Duration::from_millis(5));
     let err = session
         .put(&format!("http://127.0.0.1:{dead_port}/upload"))
         .body(body)
@@ -248,8 +252,9 @@ async fn retries_exhausted_returns_last_response() {
         .build()
         .unwrap();
     let policy = RetryPolicy::transient()
-        .with_max_retries(3)
-        .with_backoff(Duration::from_millis(1), Duration::from_millis(5));
+        .max_retries(3)
+        .initial_backoff(Duration::from_millis(1))
+        .max_backoff(Duration::from_millis(5));
     let resp = session
         .request(http::Method::GET, format!("http://{addr}/bad"))
         .retry(policy)

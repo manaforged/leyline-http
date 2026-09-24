@@ -11,8 +11,9 @@ async fn main() -> leyline::Result<()> {
     let session = Session::builder().browser(Browser::Chrome147).build()?;
 
     let policy = RetryPolicy::transient()
-        .with_max_retries(4)
-        .with_backoff(Duration::from_millis(100), Duration::from_secs(2));
+        .max_retries(4)
+        .initial_backoff(Duration::from_millis(100))
+        .max_backoff(Duration::from_secs(2));
 
     let resp = session
         .request(http::Method::GET, url)

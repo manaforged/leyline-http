@@ -25,8 +25,8 @@ let session = leyline::Session::builder()
     .browser(leyline::Browser::default())
     .tls_trust(
         leyline::TlsTrustConfig::new()
-            .without_env_roots()
-            .without_system_roots()
+            .env_roots(false)
+            .system_roots(false)
             .add_ca_file("/etc/myorg/ca.pem"),
     )
     .build()?;
@@ -103,7 +103,7 @@ builders.
 use leyline::TlsTrustConfig;
 
 let trust = TlsTrustConfig::new()
-    .without_env_roots()
+    .env_roots(false)
     .add_ca_file("/etc/myorg/ca.pem");
 
 let a = leyline::Session::builder()

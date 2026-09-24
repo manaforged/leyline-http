@@ -21,8 +21,8 @@ fn build(ca: Option<&[u8]>, stages: Option<Arc<Stages>>) -> Session {
     if let Some(ca) = ca {
         b = b.tls_trust(
             TlsTrustConfig::new()
-                .without_system_roots()
-                .without_env_roots()
+                .system_roots(false)
+                .env_roots(false)
                 .add_ca_der(ca),
         );
     } else {

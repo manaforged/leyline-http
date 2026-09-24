@@ -25,7 +25,7 @@ where
 #[tokio::test]
 async fn connect_timeout_fires_on_a_black_hole_address() {
     let session = Session::builder()
-        .proxy(ProxyConfig::new().without_env())
+        .proxy(ProxyConfig::new().env(false))
         .timeout(
             TimeoutConfig::new()
                 .total(Duration::from_secs(10))
@@ -60,7 +60,7 @@ async fn response_header_timeout_fires_when_the_server_never_writes() {
 
     let session = Session::builder()
         .protocol(ProtocolPolicy::Http1)
-        .proxy(ProxyConfig::new().without_env())
+        .proxy(ProxyConfig::new().env(false))
         .build()
         .expect("session builds");
 
@@ -100,7 +100,7 @@ async fn read_timeout_fires_between_chunks_of_a_streamed_body() {
 
     let session = Session::builder()
         .protocol(ProtocolPolicy::Http1)
-        .proxy(ProxyConfig::new().without_env())
+        .proxy(ProxyConfig::new().env(false))
         .build()
         .expect("session builds");
 
@@ -142,7 +142,7 @@ async fn read_timeout_does_not_cover_a_buffered_body() {
 
     let session = Session::builder()
         .protocol(ProtocolPolicy::Http1)
-        .proxy(ProxyConfig::new().without_env())
+        .proxy(ProxyConfig::new().env(false))
         .build()
         .expect("session builds");
 
@@ -184,7 +184,7 @@ async fn total_timeout_bounds_a_slow_server() {
 
     let session = Session::builder()
         .protocol(ProtocolPolicy::Http1)
-        .proxy(ProxyConfig::new().without_env())
+        .proxy(ProxyConfig::new().env(false))
         .build()
         .expect("session builds");
 

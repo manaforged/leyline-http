@@ -14,7 +14,7 @@ use crate::core::deadline::Deadline;
 use crate::core::error::{Error, Kind, Result};
 use crate::core::headers::HeaderList;
 use crate::core::response::Response;
-use crate::core::{RedirectAction, RedirectAttempt, RedirectPolicy};
+use crate::core::{ProxyConfig, RedirectAction, RedirectAttempt, RedirectPolicy};
 use crate::trace;
 use crate::util::redact;
 
@@ -29,7 +29,7 @@ pub(crate) struct Attempt {
     pub(crate) headers: Option<HeaderList>,
     pub(crate) deadline: Deadline,
     pub(crate) stream_response: bool,
-    pub(crate) proxy: Option<String>,
+    pub(crate) proxy: Option<ProxyConfig>,
     pub(crate) header_order: Option<Vec<String>>,
     pub(crate) redirect: Option<RedirectPolicy>,
 }
@@ -52,12 +52,8 @@ impl Attempt {
 }
 
 impl Session {
-    pub(crate) fn deadline(
-        &self,
-        request: Option<&TimeoutConfig>,
-        total: Option<std::time::Duration>,
-    ) -> Deadline {
-        Deadline::new(&self.inner.timeouts, request, total)
+    pub(crate) fn deadline(&self, request: Option<&TimeoutConfig>) -> Deadline {
+        Deadline::new(&self.inner.timeouts, request)
     }
 
     pub(crate) async fn attempt(&self, attempt: Attempt) -> Result<Response> {
@@ -97,7 +93,7 @@ impl Session {
         } = attempt;
         let redirect_policy = redirect.as_ref().unwrap_or(&self.inner.redirect_policy);
         let raw_url = raw_url.as_str();
-        let request_proxy = request_proxy.as_deref();
+        let request_proxy = request_proxy.as_ref();
         let header_order = header_order.as_deref();
         let mut current_url = {
             let mut cache = lock(&self.inner.url_cache);
@@ -153,12 +149,13 @@ impl Session {
             let step_body = std::mem::take(&mut current_body);
             let replay_body = step_body.replay();
 
+            let proxy = self.proxy_for(&current_url, request_proxy)?;
             let send = self.send_with_policy(Prepared {
                 method: &current_method,
                 url: &current_url,
                 headers,
                 body: step_body,
-                proxy: request_proxy,
+                proxy,
                 stream_response,
             });
             let transport_resp = deadline.response_header(send).await?;

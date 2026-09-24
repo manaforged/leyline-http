@@ -10,13 +10,11 @@ fn rotate() {
         .proxy("http://first:1")
         .build()
         .expect("bare session builds");
-    let rotated = session
-        .with_proxy("http://second:2")
-        .expect("valid proxy url");
+    let rotated = session.with_proxy("http://second:2");
 
     let url = url::Url::parse("https://example.test/").unwrap();
     assert_eq!(
-        rotated.effective_proxy_for(&url, None),
+        rotated.proxy_for(&url, None).expect("valid proxy url"),
         Some("http://second:2"),
         "with_proxy must win over the build-time proxy"
     );

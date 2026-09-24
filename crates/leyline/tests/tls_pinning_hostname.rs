@@ -155,8 +155,8 @@ async fn spawn_tls_server(r#gen: &Generated) -> SocketAddr {
 
 fn connector(r#gen: &Generated, addr: SocketAddr) -> FingerprintConnector {
     let trust = TlsTrustConfig::new()
-        .without_env_roots()
-        .without_system_roots()
+        .env_roots(false)
+        .system_roots(false)
         .add_ca_der(r#gen.ca_der.clone())
         .add_pinned_leaf_sha256(r#gen.leaf_pin);
     FingerprintConnector::new_with_trust(&load_profile(), Platform::Linux.tcp_profile(), &trust)
@@ -181,7 +181,7 @@ async fn native_system_trust_preserves_custom_ca_hostname_and_pins() {
         ("native.example", true, Some([0; 32]), "pin"),
         ("native.example", false, None, "certificate"),
     ] {
-        let mut trust = TlsTrustConfig::new().without_env_roots();
+        let mut trust = TlsTrustConfig::new().env_roots(false);
         if ca {
             trust = trust.add_ca_der(generated.ca_der.clone());
         }
@@ -233,8 +233,8 @@ async fn default_verifier_reports_hostname_mismatch() {
     let r#gen = generate_chain("wrong.example", San::Dns("wrong.example"));
     let addr = spawn_tls_server(&r#gen).await;
     let trust = TlsTrustConfig::new()
-        .without_env_roots()
-        .without_system_roots()
+        .env_roots(false)
+        .system_roots(false)
         .add_ca_der(r#gen.ca_der.clone());
 
     let err = connector_with_trust(trust, addr)
@@ -275,9 +275,7 @@ async fn certificate_and_pinning_failures_are_permanent() {
     let r#gen = generate_chain("right.example", San::Dns("right.example"));
 
     let addr = spawn_tls_server(&r#gen).await;
-    let trust = TlsTrustConfig::new()
-        .without_env_roots()
-        .without_system_roots();
+    let trust = TlsTrustConfig::new().env_roots(false).system_roots(false);
     let err = connector_with_trust(trust, addr)
         .connect("right.example", 443, None)
         .await
@@ -287,8 +285,8 @@ async fn certificate_and_pinning_failures_are_permanent() {
 
     let addr = spawn_tls_server(&r#gen).await;
     let trust = TlsTrustConfig::new()
-        .without_env_roots()
-        .without_system_roots()
+        .env_roots(false)
+        .system_roots(false)
         .add_ca_der(r#gen.ca_der.clone())
         .add_pinned_leaf_sha256([0; 32]);
     let err = connector_with_trust(trust, addr)
@@ -305,9 +303,7 @@ async fn tcp_connect_failure_is_retryable() {
     let addr = listener.local_addr().unwrap();
     drop(listener);
 
-    let trust = TlsTrustConfig::new()
-        .without_env_roots()
-        .without_system_roots();
+    let trust = TlsTrustConfig::new().env_roots(false).system_roots(false);
     let err = connector_with_trust(trust, addr)
         .connect("offline.example", 443, None)
         .await
@@ -325,9 +321,7 @@ async fn handshake_transport_failure_is_retryable() {
         drop(tcp);
     });
 
-    let trust = TlsTrustConfig::new()
-        .without_env_roots()
-        .without_system_roots();
+    let trust = TlsTrustConfig::new().env_roots(false).system_roots(false);
     let err = connector_with_trust(trust, addr)
         .connect("closed.example", 443, None)
         .await
@@ -348,9 +342,7 @@ async fn handshake_protocol_failure_is_retryable() {
         tcp
     });
 
-    let trust = TlsTrustConfig::new()
-        .without_env_roots()
-        .without_system_roots();
+    let trust = TlsTrustConfig::new().env_roots(false).system_roots(false);
     let err = connector_with_trust(trust, addr)
         .connect("plaintext.example", 443, None)
         .await

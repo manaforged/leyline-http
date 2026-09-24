@@ -1,4 +1,6 @@
 use crate::audit::AuditTlsCache;
+#[cfg(feature = "http3")]
+use crate::core::ProtocolPolicy;
 use crate::core::error::{Error, Result};
 use crate::h2::H2Config;
 use crate::pool::Pool;
@@ -54,7 +56,7 @@ impl SessionBuilder {
     ) -> Result<FingerprintConnector> {
         let accept_invalid_certs = self.tls_trust.accepts_invalid_certs();
         let tls_trust = if accept_invalid_certs {
-            self.tls_trust.clone().without_system_roots()
+            self.tls_trust.clone().system_roots(false)
         } else {
             self.tls_trust.clone()
         };
@@ -65,13 +67,35 @@ impl SessionBuilder {
         }
         fp = fp.with_resolver(self.dns_config.clone().into_resolver());
         fp = fp.with_socket_config(self.socket_config.clone());
-        if let Some(connect_timeout) = self.timeouts.connect {
+        if let Some(connect_timeout) = self.timeouts.connect_limit() {
             fp = fp.with_connect_timeout(connect_timeout);
         }
         if let Some(config) = self.socket_config.happy_eyeballs {
             fp = fp.with_happy_eyeballs_config(config);
         }
         Ok(fp)
+    }
+
+    #[cfg(feature = "http3")]
+    pub(super) fn h3_config(
+        &self,
+        profile: &BrowserProfile,
+    ) -> Result<Option<crate::quic::H3Config>> {
+        match crate::quic::H3Config::from_profile(profile) {
+            Ok(mut cfg) => {
+                cfg.max_response_body_bytes = self.compression.max_body_size as u64;
+                Ok(Some(cfg))
+            }
+            Err(e)
+                if matches!(
+                    self.protocol_policy,
+                    ProtocolPolicy::Http3 | ProtocolPolicy::Race
+                ) =>
+            {
+                Err(e)
+            }
+            Err(_) => Ok(None),
+        }
     }
 
     pub(super) fn build_pool(&self) -> Pool {
@@ -87,5 +111,6 @@ impl SessionBuilder {
             config.max_h1_conns_per_host.max(1),
         )
         .with_h2_ping(config.h2_ping_after_idle, config.h2_ping_timeout)
+        .with_max_body_size(self.compression.max_body_size)
     }
 }

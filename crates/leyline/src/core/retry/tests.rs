@@ -34,9 +34,9 @@ fn backoff_grows_and_caps() {
         retry_on: vec![RetryTrigger::ConnectionError],
         allow_non_idempotent: false,
     };
-    assert!(p.backoff(0).as_millis() <= 100);
-    assert!(p.backoff(1).as_millis() <= 200);
-    assert!(p.backoff(10).as_millis() <= 800);
+    assert!(p.delay(0).as_millis() <= 100);
+    assert!(p.delay(1).as_millis() <= 200);
+    assert!(p.delay(10).as_millis() <= 800);
 }
 
 #[test]

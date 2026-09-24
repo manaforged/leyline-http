@@ -27,10 +27,9 @@ impl Resolver for FailingResolver {
 }
 
 fn eyeballs(resolve_delay: Duration, attempt_limit: usize) -> HappyEyeballsConfig {
-    let mut config = HappyEyeballsConfig::default();
-    config.resolve_delay = resolve_delay;
-    config.attempt_limit = attempt_limit;
-    config
+    HappyEyeballsConfig::new()
+        .resolve_delay(resolve_delay)
+        .attempt_limit(attempt_limit)
 }
 
 fn load_profile() -> BrowserProfile {
@@ -58,9 +57,10 @@ async fn builder_accepts_system_resolver() {
 
 #[tokio::test]
 async fn default_happy_eyeballs_is_250ms() {
-    let config = HappyEyeballsConfig::default();
-    assert_eq!(config.resolve_delay, Duration::from_millis(250));
-    assert_eq!(config.attempt_limit, 8);
+    assert_eq!(
+        HappyEyeballsConfig::default(),
+        eyeballs(Duration::from_millis(250), 8)
+    );
 }
 
 #[tokio::test]
@@ -86,8 +86,8 @@ fn session_builder_exposes_trust_controls() {
         .browser(Browser::Chrome146)
         .tls_trust(
             TlsTrustConfig::new()
-                .without_env_roots()
-                .without_system_roots()
+                .env_roots(false)
+                .system_roots(false)
                 .add_pinned_leaf_sha256([7; 32]),
         )
         .build()

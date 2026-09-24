@@ -81,6 +81,7 @@ pub(super) async fn exchange_on_stream(
     headers: Vec<(String, String)>,
     body: H1Body,
     target: H1Target,
+    limit: usize,
 ) -> Result<(WireResponse, bool), H1PooledError> {
     let host = url.host_str().unwrap_or("");
     let started = Instant::now();
@@ -93,7 +94,7 @@ pub(super) async fn exchange_on_stream(
         started.elapsed(),
     );
     let started = Instant::now();
-    let (status, resp_headers, resp_body, minor) = read_h1_response(stream, method).await?;
+    let (status, resp_headers, resp_body, minor) = read_h1_response(stream, method, limit).await?;
     trace::head(host, status, HttpVersion::Http1_1, started.elapsed());
     let reusable = compute_reusable(client_asked_close, &resp_headers, minor);
     Ok((

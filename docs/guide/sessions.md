@@ -150,13 +150,16 @@ tokio::spawn(async move { worker.get("https://example.com/").await })
 
 ## Derive a session
 
-`with_proxy(url)` derives a new session from an existing one and keeps the
-expensive parts. It keeps the cookie jar, TLS, the identity, and the pool,
-and swaps only the proxy. Pool entries are keyed by proxy, so connections
-never cross proxies. A rebind to the current proxy URL takes a fresh pool, so
-the next request opens new connections. It returns
-`Result<Session>`: an invalid URL or an unsupported scheme fails here, the same
-way `build()` does.
+`with_proxy(config)` derives a new session from an existing one and keeps the
+expensive parts. It takes `impl Into<ProxyConfig>`, keeps the cookie jar, TLS,
+the identity, and the pool, and swaps only the proxy config. Pool entries are
+keyed by proxy URL, so connections never cross proxies, and a session with the
+same proxy reuses the warm connections. It does not fail: an invalid URL or an
+unsupported scheme fails the first `send()` that picks it, with
+`Kind::Config`.
+
+`fresh_pool()` derives a session with a new, empty pool and TLS session cache.
+Call it when the next request must open new connections.
 
 `with_cookie_jar(jar)` derives a session the same way and swaps only the
 cookie jar. The pool, TLS session cache, and every other setting stay shared.
@@ -168,21 +171,23 @@ use leyline::cookie::Jar;
 # fn run() -> leyline::Result<()> {
 let session = leyline::Session::new();
 let other_user = session.with_cookie_jar(Jar::new());
-let via_proxy = session.with_proxy("http://user:pass@proxy.example:8080")?;
-# let _ = (other_user, via_proxy);
+let via_proxy = session.with_proxy("http://user:pass@proxy.example:8080");
+let new_exit = via_proxy.fresh_pool();
+# let _ = (other_user, new_exit);
 # Ok(())
 # }
 ```
 
 ## Keep connections warm
 
-`preconnect(url, proxy)` opens the TCP, proxy, TLS, and HTTP/2 connection for an
+`preconnect(url)` opens the TCP, proxy, TLS, and HTTP/2 connection for an
 `https` origin and stores it in the pool. The first request to that origin
 then reuses it and skips the handshake. For an `http` URL, or when the session
-uses `ProtocolPolicy::Http1`, `preconnect` does nothing. Pass `None` as the
-proxy to use the session's proxy, or `Some(url)` to connect through a given
-proxy. If the origin only
-speaks HTTP/1.1, the session records that and returns `Ok`.
+uses `ProtocolPolicy::Http1`, `preconnect` does nothing. It uses the session
+proxy config. To warm a connection through another proxy, call
+`session.with_proxy(proxy).preconnect(url)`: the derived session shares the
+pool. If the origin only speaks HTTP/1.1, the session records that and returns
+`Ok`.
 
 Before the pool reuses an HTTP/2 connection that has been idle for 10 seconds,
 it sends a PING. Chrome does the same. If no acknowledgement arrives within 2
@@ -202,7 +207,7 @@ let session = leyline::Session::builder()
     .browser(leyline::Browser::default())
     .pool(PoolConfig::new().h2_ping_after_idle(Duration::from_secs(10)))
     .build()?;
-session.preconnect("https://example.com/", None).await?;
+session.preconnect("https://example.com/").await?;
 # Ok(())
 # }
 ```

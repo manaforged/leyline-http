@@ -6,7 +6,9 @@ request, and any `Proxy-Authorization` credentials, in cleartext.
 
 ## Set one proxy
 
-`SessionBuilder::proxy` takes a URL string, a `ProxyUrl`, or a `ProxyConfig`.
+Every proxy setter takes `impl Into<ProxyConfig>`: a URL string, a
+`ProxyUrl`, or a `ProxyConfig`. That covers `SessionBuilder::proxy`,
+`RequestBuilder::proxy`, `WebSocketBuilder::proxy`, and `Session::with_proxy`.
 A URL applies to every scheme.
 
 ```rust,no_run
@@ -19,8 +21,10 @@ let session = leyline::Session::builder()
 # }
 ```
 
-The URL is validated at `build()`. One exception: without the `socks` feature,
-`build()` accepts a `socks5://` URL, and the first request fails. `ProxyUrl` does the same validation on its
+The session URL is validated at `build()`. A request, WebSocket, or
+`with_proxy` URL is validated when a request picks it, and an invalid URL
+fails that `send()` with `Kind::Config`. One exception: without the `socks`
+feature, a `socks5://` URL passes validation, and the first request fails. `ProxyUrl` does the same validation on its
 own, if you want to check a URL before you store it.
 
 ```rust
@@ -44,8 +48,8 @@ use leyline::{ProxyConfig, ProxyRule, Session};
 
 # fn run() -> leyline::Result<()> {
 let proxies = ProxyConfig::new()
-    .with_rule(ProxyRule::https("http://secure-proxy.example:8080"))
-    .with_rule(ProxyRule::http("http://plain-proxy.example:3128"));
+    .rule(ProxyRule::https("http://secure-proxy.example:8080"))
+    .rule(ProxyRule::http("http://plain-proxy.example:3128"));
 let session = Session::builder().proxy(proxies).build()?;
 # let _ = session;
 # Ok(())
@@ -64,7 +68,7 @@ use leyline::{NoProxy, ProxyConfig, ProxyRule};
 
 let bypass = NoProxy::new(["localhost", ".internal.example", "192.0.2.1"]);
 let proxies = ProxyConfig::new()
-    .with_rule(ProxyRule::all("http://proxy.example:8080"))
+    .rule(ProxyRule::all("http://proxy.example:8080"))
     .no_proxy(bypass);
 # let _ = proxies;
 ```
@@ -75,8 +79,9 @@ case-insensitive, and a trailing dot on the host is ignored.
 
 The bypass list applies in two cases: when you set it yourself with
 `ProxyConfig::no_proxy`, and when the session's
-proxy was discovered from the environment. An explicit `NoProxy` also
-suppresses a per-request `proxy()` override for a matching host.
+proxy was discovered from the environment. A per-request `proxy()` override
+replaces the session config, so it uses its own `NoProxy`, not the session
+one.
 
 ## Environment discovery
 
@@ -92,12 +97,12 @@ of `GATEWAY_INTERFACE`, `REQUEST_METHOD`, `SERVER_SOFTWARE`, `SCRIPT_NAME`,
 `SERVER_NAME`, or `SERVER_PORT`, and logs a warning on the
 `leyline::env_proxy::cgi` target.
 
-Turn discovery off with `ProxyConfig::without_env`.
+Turn discovery off with `ProxyConfig::env(false)`.
 
 ```rust,no_run
 # fn run() -> leyline::Result<()> {
 let session = leyline::Session::builder()
-    .proxy(leyline::ProxyConfig::new().without_env())
+    .proxy(leyline::ProxyConfig::new().env(false))
     .build()?;
 # let _ = session;
 # Ok(())
@@ -122,14 +127,19 @@ leyline-http = { version = "0.1", features = ["socks"] }
 
 ## Per-request override
 
-`RequestBuilder::proxy` replaces the session proxy for one request.
-`Session::with_proxy` derives a whole session that differs only in its proxy,
-and keeps the cookie jar, the TLS context, the identity, and the pool. Pool
-entries are keyed by proxy, so the derived session never reuses a connection
-opened through another proxy. A rotation back to a proxy with warm connections
-reuses them, and the rotation closes no connection that another session uses.
-A rebind to the session's current proxy URL takes a fresh pool instead, so the
-next request opens a new socket.
+`RequestBuilder::proxy` replaces the session proxy config for one request. A
+`ProxyConfig::new()` with no rule sends that request direct.
+`Session::with_proxy` derives a whole session that differs only in its proxy
+config, and keeps the cookie jar, the TLS context, the identity, and the pool.
+Pool entries are keyed by proxy URL, so the derived session never reuses a
+connection opened through another proxy. A rotation back to a proxy with warm
+connections reuses them, and the rotation closes no connection that another
+session uses. `with_proxy` with the current proxy URL also reuses the warm
+connections.
+
+To open new connections through the same proxy, call
+`Session::fresh_pool`. It derives a session with a new, empty pool and TLS
+session cache, so the next request opens a new socket.
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
@@ -138,7 +148,8 @@ let resp = session
     .get("https://example.com/ip")
     .proxy("http://other-proxy.example:8080")
     .await?;
-# let _ = resp;
+let rotated = session.with_proxy("http://gateway.example:8080").fresh_pool();
+# let _ = (resp, rotated);
 # Ok(())
 # }
 ```
@@ -148,8 +159,11 @@ connection.
 
 ## HTTP/3 is not proxied
 
-QUIC has no proxy path here. A request with `ProtocolPolicy::Http3` and any
-proxy set fails with `Kind::Config`, telling you to use `Auto` or `Http2`.
+QUIC has no proxy path here. `build()` rejects `ProtocolPolicy::Http3` when the
+proxy config sends every URL through a proxy. Otherwise, an `Http3` request
+fails with `Kind::Config` when `ProxyConfig::proxy_for` picks a proxy for its
+URL, and a request that `NO_PROXY` or a scheme rule sends direct runs over
+HTTP/3.
 Under `ProtocolPolicy::Race`, a proxied request is not raced: it goes down the
 `Auto` path instead. See [HTTP/3](http3.md).
 

@@ -135,10 +135,7 @@ async fn streamed_read_timeout_fires_on_stall() {
     });
 
     let session = Session::builder()
-        .timeout(crate::TimeoutConfig {
-            read: Some(Duration::from_millis(200)),
-            ..crate::TimeoutConfig::default()
-        })
+        .timeout(crate::TimeoutConfig::new().read(Duration::from_millis(200)))
         .build()
         .unwrap();
     let resp = session

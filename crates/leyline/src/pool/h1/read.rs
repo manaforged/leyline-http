@@ -65,10 +65,5 @@ where
         ));
     }
     buf.extend_from_slice(&tmp[..n]);
-    if buf.len() > MAX_H1_BODY_BYTES {
-        return Err(H1PooledError::Http(format!(
-            "HTTP/1.1 body exceeds {MAX_H1_BODY_BYTES} bytes"
-        )));
-    }
     Ok(())
 }

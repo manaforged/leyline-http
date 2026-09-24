@@ -11,8 +11,8 @@ use tokio::time::sleep;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct HappyEyeballsConfig {
-    pub resolve_delay: Duration,
-    pub attempt_limit: usize,
+    pub(crate) resolve_delay: Duration,
+    pub(crate) attempt_limit: usize,
 }
 
 impl Default for HappyEyeballsConfig {
@@ -21,6 +21,22 @@ impl Default for HappyEyeballsConfig {
             resolve_delay: Duration::from_millis(250),
             attempt_limit: 8,
         }
+    }
+}
+
+impl HappyEyeballsConfig {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn resolve_delay(mut self, d: Duration) -> Self {
+        self.resolve_delay = d;
+        self
+    }
+
+    pub fn attempt_limit(mut self, n: usize) -> Self {
+        self.attempt_limit = n;
+        self
     }
 }
 

@@ -6,7 +6,7 @@ use crate::profile::{Browser, Platform, Preset};
 use super::{Session, SessionBuilder};
 use crate::core::request::RequestBuilder;
 use crate::core::retry::RetryPolicy;
-use crate::core::{Body, IntoUrl, RedirectPolicy, Response, Result, TimeoutConfig};
+use crate::core::{Body, IntoUrl, ProxyConfig, RedirectPolicy, Response, Result, TimeoutConfig};
 
 impl Session {
     pub fn builder() -> SessionBuilder {
@@ -29,15 +29,16 @@ impl Session {
         &self.inner.cookie_jar
     }
 
-    pub fn with_proxy(&self, proxy_url: &str) -> Result<Self> {
-        let proxy = crate::core::ProxyUrl::parse(proxy_url)?;
-        Ok(self.derive(|inner| {
-            if inner.proxy_config.primary() == Some(proxy.as_str()) {
-                inner.pool = std::sync::Arc::new(inner.pool.fresh());
-                inner.connector = inner.connector.with_fresh_session_cache();
-            }
-            inner.proxy_config = inner.proxy_config.clone().set_default_proxy(proxy.as_str());
-        }))
+    pub fn with_proxy(&self, config: impl Into<ProxyConfig>) -> Self {
+        let config = config.into();
+        self.derive(|inner| inner.proxy_config = config)
+    }
+
+    pub fn fresh_pool(&self) -> Self {
+        self.derive(|inner| {
+            inner.pool = std::sync::Arc::new(inner.pool.fresh());
+            inner.connector = inner.connector.with_fresh_session_cache();
+        })
     }
 
     pub fn with_cookie_jar(&self, jar: Jar) -> Self {
@@ -62,14 +63,14 @@ impl Session {
         self.inner.pool.stats()
     }
 
-    pub async fn preconnect(&self, url: impl IntoUrl, proxy: Option<&str>) -> Result<()> {
+    pub async fn preconnect(&self, url: impl IntoUrl) -> Result<()> {
         let url = url.into_url()?;
         if url.scheme() != "https" || self.inner.protocol_policy == super::ProtocolPolicy::Http1 {
             return Ok(());
         }
         let host = url.host_str().unwrap_or("");
         let port = url.port_or_known_default().unwrap_or(443);
-        let proxy = self.inner.proxy_config.proxy_for(&url, proxy);
+        let proxy = self.proxy_for(&url, None)?;
         let opened = crate::pool::checkout_handle(
             &self.inner.pool,
             &self.inner.connector,
@@ -156,7 +157,7 @@ impl std::fmt::Debug for Session {
                 "proxy",
                 &self.inner.proxy_config.primary().map(crate::util::redact),
             )
-            .field("timeout", &self.inner.timeouts.total)
+            .field("timeout", &self.inner.timeouts.total_limit())
             .field("protocol_policy", &self.inner.protocol_policy);
         if let Some(audit) = &self.inner.audit_tls {
             debug.field("ja4", &audit.ja4);

@@ -20,6 +20,7 @@ mod websocket;
 
 pub use body::Body;
 pub use body_stream::BodyStream;
+pub(crate) use config::DEFAULT_MAX_BODY_SIZE;
 pub use config::{
     CompressionConfig, DnsConfig, NoProxy, PoolConfig, ProxyConfig, ProxyRule, ProxyUrl,
     RedirectAction, RedirectAttempt, RedirectPolicy, SocketConfig, TimeoutConfig, WebSocketConfig,

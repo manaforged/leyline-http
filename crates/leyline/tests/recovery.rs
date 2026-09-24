@@ -30,10 +30,11 @@ async fn explicit_retry_policy_recovers_from_transient_connection_drop() {
 
     let session = Session::builder()
         .protocol(ProtocolPolicy::Http1)
-        .proxy(ProxyConfig::new().without_env())
+        .proxy(ProxyConfig::new().env(false))
         .retry(
             RetryPolicy::transient()
-                .with_backoff(Duration::from_millis(1), Duration::from_millis(5)),
+                .initial_backoff(Duration::from_millis(1))
+                .max_backoff(Duration::from_millis(5)),
         )
         .build()
         .unwrap();
@@ -73,7 +74,7 @@ async fn default_session_does_not_retry_a_transient_connection_drop() {
 
     let session = Session::builder()
         .protocol(ProtocolPolicy::Http1)
-        .proxy(ProxyConfig::new().without_env())
+        .proxy(ProxyConfig::new().env(false))
         .build()
         .unwrap();
 
@@ -102,7 +103,7 @@ async fn connect_timeout_bounds_a_stalled_tls_handshake() {
     });
 
     let session = Session::builder()
-        .proxy(ProxyConfig::new().without_env())
+        .proxy(ProxyConfig::new().env(false))
         .timeout(
             TimeoutConfig::new()
                 .total(Duration::from_secs(30))

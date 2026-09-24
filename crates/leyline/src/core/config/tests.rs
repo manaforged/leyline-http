@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use super::*;
 
 #[test]
@@ -69,22 +71,21 @@ fn cfg_with_env_no_proxy(patterns: &str) -> ProxyConfig {
 
 #[test]
 fn env_no_proxy_never_bypasses_explicit_proxies() {
-    let cfg = cfg_with_env_no_proxy("target.test");
     let url = url::Url::parse("https://target.test/x").unwrap();
     assert_eq!(
-        cfg.proxy_for(&url, Some("http://req:1")),
+        ProxyConfig::from("http://req:1").proxy_for(&url),
         Some("http://req:1"),
         "env NO_PROXY bypassed a per-request proxy override"
     );
     let sess = cfg_with_env_no_proxy("target.test").set_default_proxy("http://sess:1");
     assert_eq!(
-        sess.proxy_for(&url, None),
+        sess.proxy_for(&url),
         Some("http://sess:1"),
         "env NO_PROXY bypassed an explicit session proxy"
     );
-    let cfg = cfg_with_env_no_proxy("target.test").with_rule(ProxyRule::all("http://rule:1"));
+    let cfg = cfg_with_env_no_proxy("target.test").rule(ProxyRule::all("http://rule:1"));
     assert_eq!(
-        cfg.proxy_for(&url, None),
+        cfg.proxy_for(&url),
         Some("http://rule:1"),
         "env NO_PROXY bypassed an explicit proxy rule"
     );
@@ -96,25 +97,24 @@ fn env_no_proxy_bypasses_env_derived_proxy() {
         .set_default_proxy("http://env:1")
         .set_from_env();
     let url = url::Url::parse("https://target.test/x").unwrap();
-    assert_eq!(cfg.proxy_for(&url, None), None);
+    assert_eq!(cfg.proxy_for(&url), None);
     let other = url::Url::parse("https://other.test/x").unwrap();
-    assert_eq!(cfg.proxy_for(&other, None), Some("http://env:1"));
+    assert_eq!(cfg.proxy_for(&other), Some("http://env:1"));
 }
 
 #[test]
 fn explicit_no_proxy_bypasses_all_proxies() {
     let cfg = ProxyConfig::new().no_proxy(NoProxy::from_string("target.test").unwrap());
     let url = url::Url::parse("https://target.test/x").unwrap();
-    assert_eq!(cfg.proxy_for(&url, Some("http://req:1")), None);
+    assert_eq!(cfg.proxy_for(&url), None);
     assert_eq!(
         cfg.clone()
             .set_default_proxy("http://sess:1")
-            .proxy_for(&url, None),
+            .proxy_for(&url),
         None
     );
     assert_eq!(
-        cfg.with_rule(ProxyRule::all("http://rule:1"))
-            .proxy_for(&url, None),
+        cfg.rule(ProxyRule::all("http://rule:1")).proxy_for(&url),
         None
     );
 }
@@ -129,7 +129,10 @@ fn compression_none_disables_known_codecs() {
 
 #[test]
 fn default_timeout_matches_browser_scale_patience() {
-    assert_eq!(TimeoutConfig::default().total, Duration::from_secs(300));
+    assert_eq!(
+        TimeoutConfig::default().total_limit(),
+        Some(Duration::from_secs(300))
+    );
 }
 
 #[test]

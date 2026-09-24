@@ -3,6 +3,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum SameSite {
     Strict,
     Lax,
@@ -10,6 +11,7 @@ pub enum SameSite {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct Cookie {
     pub name: String,
     pub value: String,
@@ -23,7 +25,7 @@ pub struct Cookie {
     #[serde(with = "systime_ms")]
     pub creation_time: SystemTime,
     #[serde(skip, default = "SystemTime::now")]
-    pub last_access: SystemTime,
+    pub(crate) last_access: SystemTime,
     pub host_only: bool,
 }
 

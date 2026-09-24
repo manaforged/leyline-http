@@ -41,8 +41,9 @@ impl Session {
                     resp_headers,
                 )
             }
-            crate::core::transport::TransportBody::Streaming(bs) => {
-                let buf = deadline.read_body(drain_stream_into_vec(bs)).await?;
+            crate::core::transport::TransportBody::Streaming(mut bs) => {
+                bs.set_read_timeout(deadline.read());
+                let buf = drain_stream_into_vec(bs, self.inner.compression.max_body_size).await?;
                 let (buf, resp_headers) =
                     decompress_and_strip(buf, resp_headers, &self.inner.compression)?;
                 (

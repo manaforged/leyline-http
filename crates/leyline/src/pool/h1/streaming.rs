@@ -2,7 +2,9 @@ use super::*;
 
 pub(super) async fn run_h1_stream_pump(mut pump: H1StreamPump) {
     let initial = std::mem::take(&mut pump.initial_body);
-    let drained_clean = stream_body_into(pump.io.as_mut(), pump.framing, initial, &pump.tx).await;
+    let limit = pump.pool.max_body_size;
+    let drained_clean =
+        stream_body_into(pump.io.as_mut(), pump.framing, initial, &pump.tx, limit).await;
     if drained_clean && pump.reusable {
         pump.pool
             .return_h1(pump.key, H1Slot { io: pump.io }, pump.tls);
@@ -17,12 +19,13 @@ pub(super) async fn stream_body_into(
     framing: BodyFraming,
     initial: Vec<u8>,
     tx: &mpsc::Sender<io::Result<Bytes>>,
+    limit: usize,
 ) -> bool {
     let result = match framing {
         BodyFraming::None => Ok(true),
-        BodyFraming::Fixed(len) => stream_fixed_into(stream, initial, len, tx).await,
-        BodyFraming::Chunked => stream_chunked_into(stream, initial, tx).await,
-        BodyFraming::ToClose => stream_to_close_into(stream, initial, tx).await,
+        BodyFraming::Fixed(len) => stream_fixed_into(stream, initial, len, tx, limit).await,
+        BodyFraming::Chunked => stream_chunked_into(stream, initial, tx, limit).await,
+        BodyFraming::ToClose => stream_to_close_into(stream, initial, tx, limit).await,
     };
     match result {
         Ok(clean) => clean,
@@ -37,12 +40,10 @@ pub(super) async fn stream_fixed_into(
     initial: Vec<u8>,
     len: u64,
     tx: &mpsc::Sender<io::Result<Bytes>>,
+    limit: usize,
 ) -> io::Result<bool> {
-    if len > MAX_H1_BODY_BYTES as u64 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("HTTP/1.1 body exceeds {MAX_H1_BODY_BYTES} bytes"),
-        ));
+    if len > limit as u64 {
+        return Err(body_too_large_io(limit));
     }
     let mut remaining = len;
     if !initial.is_empty() {
@@ -83,13 +84,11 @@ pub(super) async fn stream_to_close_into(
     stream: &mut dyn H1Io,
     initial: Vec<u8>,
     tx: &mpsc::Sender<io::Result<Bytes>>,
+    limit: usize,
 ) -> io::Result<bool> {
     let mut total = initial.len();
-    if total > MAX_H1_BODY_BYTES {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("HTTP/1.1 body exceeds {MAX_H1_BODY_BYTES} bytes"),
-        ));
+    if total > limit {
+        return Err(body_too_large_io(limit));
     }
     if !initial.is_empty() && tx.send(Ok(Bytes::from(initial))).await.is_err() {
         return Ok(false);
@@ -101,11 +100,8 @@ pub(super) async fn stream_to_close_into(
             return Ok(true);
         }
         total += n;
-        if total > MAX_H1_BODY_BYTES {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("HTTP/1.1 body exceeds {MAX_H1_BODY_BYTES} bytes"),
-            ));
+        if total > limit {
+            return Err(body_too_large_io(limit));
         }
         if tx
             .send(Ok(Bytes::copy_from_slice(&tmp[..n])))
@@ -120,6 +116,7 @@ pub(super) async fn stream_chunked_into(
     stream: &mut dyn H1Io,
     mut buf: Vec<u8>,
     tx: &mpsc::Sender<io::Result<Bytes>>,
+    limit: usize,
 ) -> io::Result<bool> {
     let mut total: usize = 0;
     loop {
@@ -134,11 +131,8 @@ pub(super) async fn stream_chunked_into(
                 format!("invalid chunk size: {e}"),
             )
         })?;
-        if size_u64 > MAX_H1_BODY_BYTES as u64 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("HTTP/1.1 chunk size {size_u64} exceeds {MAX_H1_BODY_BYTES}-byte body cap"),
-            ));
+        if size_u64 > limit as u64 {
+            return Err(body_too_large_io(limit));
         }
         let size = size_u64 as usize;
         buf.drain(..line_end + 2);
@@ -154,11 +148,8 @@ pub(super) async fn stream_chunked_into(
             .await
             .map_err(h1err_to_io)?;
         total += size;
-        if total > MAX_H1_BODY_BYTES {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("HTTP/1.1 body exceeds {MAX_H1_BODY_BYTES} bytes"),
-            ));
+        if total > limit {
+            return Err(body_too_large_io(limit));
         }
         if &buf[size..size + 2] != b"\r\n" {
             return Err(io::Error::new(
@@ -272,4 +263,11 @@ pub(super) async fn send_request_h1_streaming(
         body: H1ResponseBody::Streaming(BodyStream::new(rx)),
         tls: tls_for_scheme(scheme, &tls),
     })
+}
+
+fn body_too_large_io(limit: usize) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!("HTTP/1.1 body exceeds {limit} bytes"),
+    )
 }

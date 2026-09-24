@@ -64,7 +64,7 @@ When a host has IPv6 and IPv4 addresses, Leyline interleaves the two families
 and starts the next attempt if the current one has not connected in time. The
 first connection to complete wins.
 
-`tls::HappyEyeballsConfig` has two public fields. Pass it to
+`tls::HappyEyeballsConfig` has two setters. Pass it to
 `SocketConfig::happy_eyeballs`:
 
 | Setting | Default | Meaning |
@@ -78,9 +78,9 @@ use std::time::Duration;
 use leyline::SocketConfig;
 use leyline::tls::HappyEyeballsConfig;
 
-let mut he = HappyEyeballsConfig::default();
-he.resolve_delay = Duration::from_millis(100);
-he.attempt_limit = 4;
+let he = HappyEyeballsConfig::new()
+    .resolve_delay(Duration::from_millis(100))
+    .attempt_limit(4);
 let session = leyline::Session::builder()
     .browser(leyline::Browser::default())
     .socket(SocketConfig::new().happy_eyeballs(he))
@@ -103,11 +103,10 @@ let session = leyline::Session::builder()
 | `tcp_user_timeout` | unset | `TCP_USER_TIMEOUT`: how long sent data may stay unacknowledged (Linux, Android) |
 | `send_buffer_size`, `recv_buffer_size` | unset | `SO_SNDBUF`, `SO_RCVBUF` |
 | `local_address` | unset | Source IP to bind |
+| `local_ipv4`, `local_ipv6` | unset | Source IP to bind for that address family |
+| `interface` | unset | Interface name (accepted, not applied yet) |
+| `strict` | `false` | Fail when the platform does not support an option |
 | `happy_eyeballs` | enabled | Happy Eyeballs settings, or `None` to turn it off |
-
-The fields `local_ipv4`, `local_ipv6`, `interface` (accepted, not applied
-yet), and `strict` (fail when an option is unsupported) are public. Assign
-them on a `SocketConfig` value.
 
 The timing and size setters take a value or `None`. Pass `None` to clear a
 default, for example `tcp_keepalive(None)` to turn keepalive off.

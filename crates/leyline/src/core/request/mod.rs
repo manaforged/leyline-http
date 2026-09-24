@@ -10,7 +10,7 @@ use http::{HeaderName, HeaderValue, Method};
 use crate::profile::{HeaderAnchor, Preset};
 
 use crate::core::body::Body;
-use crate::core::config::{RedirectPolicy, TimeoutConfig};
+use crate::core::config::{ProxyConfig, RedirectPolicy, TimeoutConfig};
 use crate::core::digest::DigestAuth;
 use crate::core::error::{Error, Kind};
 use crate::core::headers::HeaderList;
@@ -59,7 +59,7 @@ pub struct RequestBuilder {
     pub(super) compress: Option<ContentEncoding>,
     pub(super) retry_policy: RetryPolicy,
     pub(super) digest_auth: Option<DigestAuth>,
-    pub(super) proxy: Option<String>,
+    pub(super) proxy: Option<ProxyConfig>,
     pub(super) header_order: Option<Vec<String>>,
     pub(super) preset_user: bool,
     pub(super) redirect: Option<RedirectPolicy>,
@@ -276,8 +276,8 @@ impl RequestBuilder {
         self
     }
 
-    pub fn proxy(mut self, proxy_url: &str) -> Self {
-        self.proxy = Some(proxy_url.to_string());
+    pub fn proxy(mut self, config: impl Into<ProxyConfig>) -> Self {
+        self.proxy = Some(config.into());
         self
     }
 }

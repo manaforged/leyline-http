@@ -44,7 +44,7 @@ async fn spawn_counting_proxy() -> (String, Arc<AtomicUsize>) {
 }
 
 #[tokio::test]
-async fn with_proxy_on_the_same_url_opens_a_new_connection() {
+async fn fresh_pool_on_the_same_proxy_opens_a_new_connection() {
     let (proxy, accepted) = spawn_counting_proxy().await;
     let session = Session::builder()
         .browser(Browser::Chrome148)
@@ -62,11 +62,11 @@ async fn with_proxy_on_the_same_url_opens_a_new_connection() {
         "same session reuses the socket"
     );
 
-    let rebound = session.with_proxy(&proxy).unwrap();
+    let rebound = session.with_proxy(&proxy).fresh_pool();
     rebound.get(url).send().await.unwrap().text().await.unwrap();
     assert_eq!(
         accepted.load(Ordering::SeqCst),
         2,
-        "with_proxy on the same proxy URL must open a new connection"
+        "fresh_pool on the same gateway URL must open a new connection"
     );
 }

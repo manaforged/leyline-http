@@ -174,6 +174,19 @@ impl Jar {
         removed
     }
 
+    pub fn remove(&self, url: &Url, name: &str) -> usize {
+        let host = url.host_str().unwrap_or("");
+        let mut jar = lock(&self.inner);
+        let mut removed = 0;
+        for entries in jar.cookies.values_mut() {
+            let before = entries.len();
+            entries.retain(|c| c.name != name || !c.matches(host, &c.path, true));
+            removed += before - entries.len();
+        }
+        jar.total -= removed;
+        removed
+    }
+
     pub fn all_cookies(&self) -> Vec<Cookie> {
         let jar = lock(&self.inner);
         let mut out: Vec<Cookie> = jar.cookies.values().flatten().cloned().collect();
@@ -181,8 +194,7 @@ impl Jar {
         out
     }
 
-    pub fn get_cookie(&self, url: &str, name: &str) -> Option<String> {
-        let url = Url::parse(url).ok()?;
+    pub fn get_cookie(&self, url: &Url, name: &str) -> Option<String> {
         let domain = url.host_str().unwrap_or("");
         let path = url.path();
         let is_secure = url.scheme() == "https";
@@ -201,37 +213,25 @@ impl Jar {
         None
     }
 
-    pub fn set_cookie(&self, url: &str, name: &str, value: &str) {
-        let parsed_url = match Url::parse(url) {
-            Ok(u) => u,
-            Err(_) => return,
-        };
+    pub fn set_cookie(&self, url: &Url, name: &str, value: &str) {
         let header = format!("{}={}; Path=/", name, value);
-        self.store_set_cookie(&header, &parsed_url);
+        self.store_set_cookie(&header, url);
     }
 
-    pub fn load_cookies(&self, cookie_str: &str, raw_url: &str) {
-        let url = match Url::parse(raw_url) {
-            Ok(u) => u,
-            Err(_) => return,
-        };
+    pub fn load_cookies(&self, cookie_str: &str, url: &Url) {
         for pair in cookie_str.split(';') {
             let pair = pair.trim();
             if let Some(eq) = pair.find('=') {
                 let name = &pair[..eq];
                 let value = &pair[eq + 1..];
                 let header = format!("{}={}; Path=/", name, value);
-                self.store_set_cookie(&header, &url);
+                self.store_set_cookie(&header, url);
             }
         }
     }
 
-    pub fn export_cookies(&self, raw_url: &str) -> String {
-        let url = match Url::parse(raw_url) {
-            Ok(u) => u,
-            Err(_) => return String::new(),
-        };
-        self.cookie_header(&url).unwrap_or_default()
+    pub fn export_cookies(&self, url: &Url) -> String {
+        self.cookie_header(url).unwrap_or_default()
     }
 
     pub fn clear(&self) {

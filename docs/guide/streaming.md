@@ -66,14 +66,15 @@ drain a body. Request identity encoding, or use `read_until` (see
 [Stop at a marker](#stop-at-a-marker)), when you need decoded bytes from a
 stream.
 
-HTTP/1.1 streaming rejects bodies above 100 MiB, fixed-length, chunked, or
+HTTP/1.1 streaming rejects bodies above `CompressionConfig::max_body_size`
+(100 MiB by default), fixed-length, chunked, or
 close-delimited, and HTTP/3 streaming rejects them per chunk. Only HTTP/2
 streaming does not apply that cap; `copy_to` does not change this.
 
 You do not have to stream it yourself. `bytes().await`, `text().await`, and
 `json().await` drain a streaming body for you and decompress it, so they work
-in both modes. They consume the response. Draining honors the session
-`read_timeout` per chunk and the same 100 MiB cap that buffered mode applies.
+in both modes. They consume the response. Draining honors the `read` timeout
+for each chunk and the same `max_body_size` cap that buffered mode applies.
 Take the stream or drain it, not both: `into_stream()` consumes the response,
 so nothing is left to read after it. A streaming response also carries no trailers.
 

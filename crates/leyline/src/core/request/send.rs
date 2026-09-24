@@ -13,7 +13,7 @@ impl RequestBuilder {
         let retry_policy = self.retry_policy.clone();
         let digest_auth = self.digest_auth.take();
         let session = self.session.clone();
-        let deadline = session.deadline(self.timeouts.as_ref(), self.timeouts.map(|t| t.total));
+        let deadline = session.deadline(self.timeouts.as_ref());
         let mut attempt = self.into_attempt(deadline);
 
         if retry_policy.is_none() && digest_auth.is_none() {
@@ -218,7 +218,7 @@ fn plan_retry(
     match retry_after {
         Some(wait) if wait > retry_policy.max_retry_after => RetryPlan::Stop,
         Some(wait) => RetryPlan::Backoff(wait),
-        None => RetryPlan::Backoff(retry_policy.backoff(attempt)),
+        None => RetryPlan::Backoff(retry_policy.delay(attempt)),
     }
 }
 

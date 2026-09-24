@@ -49,7 +49,7 @@ async fn explicit_cookie_replaces_jar_cookie_and_jar_still_emits_alone() {
             .unwrap();
     });
     let session = Session::builder()
-        .tls_trust(crate::TlsTrustConfig::new().without_system_roots())
+        .tls_trust(crate::TlsTrustConfig::new().system_roots(false))
         .timeout(Duration::from_secs(3))
         .build()
         .unwrap();
@@ -90,11 +90,13 @@ async fn cross_origin_redirect_strips_explicit_cookie_and_uses_target_jar() {
             .unwrap();
     });
     let session = Session::builder()
-        .tls_trust(crate::TlsTrustConfig::new().without_system_roots())
+        .tls_trust(crate::TlsTrustConfig::new().system_roots(false))
         .timeout(Duration::from_secs(3))
         .build()
         .unwrap();
-    session.cookies().set_cookie(&second_origin, "other", "3");
+    session
+        .cookies()
+        .set_cookie(&url::Url::parse(&second_origin).unwrap(), "other", "3");
     let body = session
         .get(&format!("{first_origin}/start"))
         .header("cookie", "mine=2")

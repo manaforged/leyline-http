@@ -162,8 +162,8 @@ async fn spawn_mock_https_proxy(r#gen: &Generated) -> (SocketAddr, oneshot::Rece
 
 fn connector(r#gen: &Generated) -> FingerprintConnector {
     let trust = TlsTrustConfig::new()
-        .without_env_roots()
-        .without_system_roots()
+        .env_roots(false)
+        .system_roots(false)
         .add_ca_der(r#gen.ca_der.clone());
     FingerprintConnector::new_with_trust(&load_profile(), Platform::Linux.tcp_profile(), &trust)
         .expect("connector build")
@@ -200,8 +200,8 @@ async fn https_proxy_tunnels_with_encrypted_connect() {
 async fn https_proxy_refused_when_connector_has_origin_identity() {
     let r#gen = generate_chain(&["right.example"]);
     let trust = TlsTrustConfig::new()
-        .without_env_roots()
-        .without_system_roots()
+        .env_roots(false)
+        .system_roots(false)
         .add_ca_der(r#gen.ca_der.clone())
         .add_pinned_leaf_sha256([0u8; 32]);
     let conn = FingerprintConnector::new_with_trust(

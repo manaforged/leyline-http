@@ -24,8 +24,6 @@ pub struct H3Config {
     pub max_response_body_bytes: u64,
 }
 
-const MAX_RESPONSE_BODY_BYTES: u64 = 100 * 1024 * 1024;
-
 impl H3Config {
     pub fn from_profile(profile: &BrowserProfile) -> Result<Self, Error> {
         let h3 = profile.h3.as_ref().ok_or_else(|| {
@@ -48,7 +46,7 @@ impl H3Config {
             qpack_max_table_capacity: h3.qpack_max_table_capacity,
             qpack_blocked_streams: h3.qpack_blocked_streams,
             max_field_section_size: h3.max_field_section_size,
-            max_response_body_bytes: MAX_RESPONSE_BODY_BYTES,
+            max_response_body_bytes: crate::core::DEFAULT_MAX_BODY_SIZE as u64,
         })
     }
 }

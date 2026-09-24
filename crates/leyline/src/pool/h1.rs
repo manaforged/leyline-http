@@ -19,8 +19,6 @@ use crate::pool::{H1Slot, Pool, TlsInfo, make_key};
 
 pub const MAX_H1_HEADER_BYTES: usize = 64 * 1024;
 
-pub const MAX_H1_BODY_BYTES: usize = 100 * 1024 * 1024;
-
 pub trait H1Io: AsyncRead + AsyncWrite + Send + Unpin + 'static {}
 impl<T> H1Io for T where T: AsyncRead + AsyncWrite + Send + Unpin + 'static {}
 
@@ -168,6 +166,7 @@ pub async fn send_request_h1_pooled(
             headers.clone(),
             pooled_body,
             target,
+            pool.max_body_size,
         )
         .await
         {
@@ -206,7 +205,16 @@ pub async fn send_request_h1_pooled(
         open_new(connector, scheme, host, port, proxy).await?;
 
     let mut slot = H1Slot { io };
-    let result = exchange_on_stream(slot.io.as_mut(), method, url, headers, body, target).await;
+    let result = exchange_on_stream(
+        slot.io.as_mut(),
+        method,
+        url,
+        headers,
+        body,
+        target,
+        pool.max_body_size,
+    )
+    .await;
 
     match result {
         Ok((resp, reusable)) => {
