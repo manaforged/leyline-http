@@ -394,19 +394,31 @@ impl Session {
             headers.push(("cookie".into(), Cow::Owned(cookie_val)));
         }
 
-        if let Some(order) = header_order {
-            reorder(&mut headers, order);
-        } else if let Some(order) = self.inner.identity_request_header_order.as_deref() {
-            reorder(&mut headers, order);
-        } else if self.inner.browser.as_ref().is_some_and(|b| b.is_firefox()) {
-            let order: Vec<String> = crate::profile::preset::FIREFOX_HEADER_ORDER
-                .iter()
-                .map(|s| (*s).to_string())
-                .collect();
+        if let Some(order) = header_order
+            .map(Cow::Borrowed)
+            .or_else(|| self.session_header_order())
+        {
             reorder(&mut headers, &order);
         }
 
         headers
+    }
+    pub(super) fn session_header_order(&self) -> Option<Cow<'_, [String]>> {
+        if let Some(order) = self.inner.identity_request_header_order.as_deref() {
+            return Some(Cow::Borrowed(order));
+        }
+        self.inner
+            .browser
+            .as_ref()
+            .is_some_and(|b| b.is_firefox())
+            .then(|| {
+                Cow::Owned(
+                    crate::profile::preset::FIREFOX_HEADER_ORDER
+                        .iter()
+                        .map(|s| (*s).to_string())
+                        .collect(),
+                )
+            })
     }
     fn collect_cookies(
         &self,

@@ -177,3 +177,24 @@ pub(super) fn validate_framing_headers(headers: &[(String, String)]) -> Result<(
     }
     Ok(())
 }
+#[cfg(feature = "websocket")]
+pub(crate) async fn upgrade_on_stream(
+    stream: &mut dyn H1Io,
+    url: &url::Url,
+    headers: Vec<(String, String)>,
+) -> Result<(ParsedHead, Vec<u8>), H1PooledError> {
+    send_h1_request(
+        stream,
+        "GET",
+        url,
+        headers,
+        H1Body::Empty,
+        H1Target::OriginForm,
+    )
+    .await?;
+    let mut buf = Vec::with_capacity(4096);
+    let header_end = read_h1_headers(stream, &mut buf).await?;
+    let head = parse_h1_head(&String::from_utf8_lossy(&buf[..header_end]))?;
+    buf.drain(..header_end + 4);
+    Ok((head, buf))
+}

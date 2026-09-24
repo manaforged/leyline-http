@@ -428,7 +428,7 @@ pub(crate) async fn send_request_h1(
     })
 }
 
-fn h1_error_to_core(e: H1PooledError) -> Error {
+pub(crate) fn h1_error_to_core(e: H1PooledError) -> Error {
     match e {
         H1PooledError::Config(m) => Error::new(Kind::Config).with_message(m),
         H1PooledError::Tls(error) => Error::new(Kind::Tls).with_source(error),

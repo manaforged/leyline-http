@@ -69,7 +69,7 @@ compression-deflate = ["dep:flate2"]
 compression-zstd = ["dep:zstd"]
 multipart = ["stream"]
 stream = []
-websocket = ["dep:tungstenite", "dep:tokio-tungstenite"]
+websocket = ["dep:tokio-tungstenite"]
 http3 = ["dep:leyline-quiche"]
 socks = []
 system-trust = []
@@ -131,12 +131,10 @@ thiserror = { workspace = true }
 # -- crypto / hashing
 sha2 = { workspace = true }
 md-5 = { workspace = true }
-sha1 = { workspace = true }
 hex = "0.4"
 base64 = { workspace = true }
 
 # -- HTTP / WebSocket
-tungstenite = { workspace = true, optional = true }
 tokio-tungstenite = { workspace = true, optional = true }
 http = "1"
 

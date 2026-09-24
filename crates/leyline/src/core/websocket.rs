@@ -6,15 +6,17 @@ use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-use tokio_tungstenite::tungstenite::http::{HeaderName, HeaderValue, Uri};
+use tokio_tungstenite::tungstenite::handshake::derive_accept_key;
+use tokio_tungstenite::tungstenite::http::{HeaderName, HeaderValue};
 use tokio_tungstenite::tungstenite::protocol::{CloseFrame as WireClose, Role};
 
+use crate::core::headers::reorder;
 use crate::h2::client::H2ConnectStream;
 use crate::h2::config::H2Config;
 use crate::h2::connection::PseudoHeaders;
 use crate::header_str::HeaderStr;
 use crate::pool::Pool;
+use crate::profile::preset::HeaderPair;
 use crate::tls::{FingerprintConnector, TlsIo};
 
 use crate::core::WebSocketConfig;
@@ -87,6 +89,10 @@ pub struct WsConnection {
 }
 
 impl WsConnection {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "flat per-request wire fields across one internal call path"
+    )]
     pub(crate) async fn connect_h1(
         connector: &FingerprintConnector,
         url: &str,
@@ -94,65 +100,68 @@ impl WsConnection {
         user_agent: &str,
         origin: &str,
         extra_headers: &[(String, String)],
+        header_order: Option<&[String]>,
         ws_config: &WebSocketConfig,
     ) -> Result<Self> {
-        let parsed = url::Url::parse(url).map_err(crate::core::Error::from_url_parse)?;
+        let mut parsed = url::Url::parse(url).map_err(crate::core::Error::from_url_parse)?;
         let host = parsed
             .host_str()
-            .ok_or_else(|| Error::new(Kind::Config).with_message("no host in WebSocket URL"))?;
+            .ok_or_else(|| Error::new(Kind::Config).with_message("no host in WebSocket URL"))?
+            .to_string();
         let port = parsed.port_or_known_default().unwrap_or(443);
+        parsed
+            .set_scheme("https")
+            .map_err(|()| Error::new(Kind::Config).with_message("WebSocket URL must use wss://"))?;
 
-        let tls_stream = connector
-            .connect_h1(host, port, proxy)
+        let mut stream = connector
+            .connect_h1(&host, port, proxy)
             .await
-            .map_err(Error::from)?;
+            .map_err(Error::from)?
+            .stream;
 
-        let ws_url = if let Some(rest) = url.strip_prefix("wss://") {
-            format!("ws://{rest}")
-        } else {
-            url.to_string()
-        };
-        let uri: Uri = ws_url.parse().map_err(|e: http::uri::InvalidUri| {
-            Error::new(Kind::Config).with_message(e.to_string())
-        })?;
-        let mut request = uri
-            .into_client_request()
-            .map_err(|e| Error::new(Kind::Request).with_message(format!("ws request: {e}")))?;
-
-        let headers = request.headers_mut();
-        if let Ok(val) = HeaderValue::from_str(user_agent) {
-            headers.insert("User-Agent", val);
-        }
-        if let Ok(val) = HeaderValue::from_str(origin) {
-            headers.insert("Origin", val);
-        }
-
+        let sec_key = random_sec_ws_key();
+        let mut request: Vec<HeaderPair> = vec![
+            ("Connection".into(), "Upgrade".into()),
+            ("Upgrade".into(), "websocket".into()),
+            ("User-Agent".into(), user_agent.to_owned().into()),
+            ("Origin".into(), origin.to_owned().into()),
+            ("Sec-WebSocket-Version".into(), "13".into()),
+            ("Sec-WebSocket-Key".into(), sec_key.clone().into()),
+        ];
         for (name, value) in extra_headers {
             if is_reserved_ws_header(name) {
                 continue;
             }
-            let (hn, hv) = ws_header_pair(name, value)?;
-            headers.insert(hn, hv);
+            match request
+                .iter_mut()
+                .find(|(n, _)| n.eq_ignore_ascii_case(name))
+            {
+                Some(slot) => slot.1 = value.clone().into(),
+                None => request.push((name.clone().into(), value.clone().into())),
+            }
         }
+        if let Some(order) = header_order {
+            reorder(&mut request, order);
+        }
+        let request = request
+            .into_iter()
+            .map(|(n, v)| (n.into_owned(), v.into_owned()))
+            .collect();
 
-        let (ws_stream, response) = tokio_tungstenite::client_async_with_config(
-            request,
-            tls_stream.stream,
+        let ((status, headers, _), leftover) =
+            crate::pool::upgrade_on_stream(&mut stream, &parsed, request)
+                .await
+                .map_err(crate::core::transport::h1_error_to_core)?;
+        check_upgrade_response(status, &headers, &sec_key)?;
+
+        let protocol = response_header(&headers, "sec-websocket-protocol").map(str::to_owned);
+        let ws_stream = WebSocketStream::from_partially_read(
+            stream,
+            leftover,
+            Role::Client,
             Some(tungstenite_config(ws_config)),
         )
-        .await
-        .map_err(|e| Error::new(Kind::Request).with_message(format!("ws handshake: {e}")))?;
-
-        let protocol = response
-            .headers()
-            .get("sec-websocket-protocol")
-            .and_then(|v| v.to_str().ok())
-            .map(str::to_owned);
-        let headers = response
-            .headers()
-            .iter()
-            .filter_map(|(n, v)| Some((n.as_str().to_owned(), v.to_str().ok()?.to_owned())))
-            .collect();
+        .await;
 
         Ok(Self {
             inner: WsInner::H1(ws_stream),
@@ -492,6 +501,40 @@ fn is_reserved_ws_header(name: &str) -> bool {
             | "sec-websocket-extensions"
             | "content-length"
     )
+}
+
+fn response_header<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
+    headers
+        .iter()
+        .find(|(n, _)| n.eq_ignore_ascii_case(name))
+        .map(|(_, v)| v.as_str())
+}
+
+fn has_token(headers: &[(String, String)], name: &str, token: &str) -> bool {
+    response_header(headers, name).is_some_and(|v| {
+        v.split(',')
+            .any(|part| part.trim().eq_ignore_ascii_case(token))
+    })
+}
+
+fn check_upgrade_response(status: u16, headers: &[(String, String)], sec_key: &str) -> Result<()> {
+    let fail =
+        |m: String| Err(Error::new(Kind::Request).with_message(format!("ws handshake: {m}")));
+    if status != 101 {
+        return fail(format!("expected 101 Switching Protocols, got {status}"));
+    }
+    if !has_token(headers, "upgrade", "websocket") || !has_token(headers, "connection", "upgrade") {
+        return fail("missing Upgrade: websocket or Connection: Upgrade".into());
+    }
+    if response_header(headers, "sec-websocket-accept")
+        != Some(&derive_accept_key(sec_key.as_bytes()))
+    {
+        return fail("Sec-WebSocket-Accept does not match the key".into());
+    }
+    if response_header(headers, "sec-websocket-extensions").is_some() {
+        return fail("server selected an extension the client did not offer".into());
+    }
+    Ok(())
 }
 
 fn random_sec_ws_key() -> String {

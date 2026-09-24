@@ -27,6 +27,8 @@ mod liveness;
 mod pool;
 mod types;
 
+#[cfg(feature = "websocket")]
+pub(crate) use h1::upgrade_on_stream;
 pub use h1::{
     H1Body, H1Io, H1PooledError, H1Response, H1ResponseBody, H1Target, MAX_H1_BODY_BYTES,
     MAX_H1_HEADER_BYTES, send_request_h1_pooled,

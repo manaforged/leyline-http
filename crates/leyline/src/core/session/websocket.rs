@@ -71,6 +71,7 @@ impl Session {
             &self.inner.user_agent,
             &origin,
             extra_headers,
+            self.session_header_order().as_deref(),
             &config,
         )
         .await

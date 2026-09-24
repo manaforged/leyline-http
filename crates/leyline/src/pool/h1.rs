@@ -514,5 +514,8 @@ use parse::*;
 use streaming::*;
 use wire::*;
 
+#[cfg(feature = "websocket")]
+pub(crate) use wire::upgrade_on_stream;
+
 #[cfg(test)]
 mod tests;
