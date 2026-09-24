@@ -34,7 +34,7 @@ def public_api(json_path):
             "--include",
             "function-parameter-names",
             "--omit",
-            "blanket-impls",
+            "blanket-impls,auto-trait-impls,auto-derived-impls",
         ]
     ).rstrip()
     if not api:
@@ -88,9 +88,6 @@ def render(api, json_path, version):
         "Every public item of the crate, generated from the compiler's view of the",
         f"code with `{version}`. Features: `{FEATURES}`. Target: `{HOST}`.",
         "Items marked `#[doc(hidden)]` are internal and not listed.",
-        "",
-        "Regenerate with `python3 scripts/generate-api.py`. The release check runs",
-        "`python3 scripts/generate-api.py --check` and fails when this page is stale.",
         "",
         "<details>",
         "<summary>Symbol index</summary>",
