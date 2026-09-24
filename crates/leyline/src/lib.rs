@@ -6,7 +6,7 @@ pub struct ApiMap;
 
 #[cfg(doctest)]
 pub mod guide {
-    #[doc = include_str!("../../../docs/guide/README.md")]
+    #[doc = include_str!("../../../docs/README.md")]
     pub struct Index;
     #[doc = include_str!("../../../docs/guide/quick-start.md")]
     pub struct QuickStart;

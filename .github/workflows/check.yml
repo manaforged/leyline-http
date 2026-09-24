@@ -52,6 +52,7 @@ jobs:
           pkgs=$(printf '%s\n' "$all" | grep -v '^leyline-quiche$' || true)
           args=""
           for p in $pkgs; do args="$args -p $p"; done
+          case " $pkgs " in *" leyline-http "*) args="$args --features leyline-http/full,leyline-http/bench-internals" ;; esac
           echo "args=$args" >> "$GITHUB_OUTPUT"
           echo "clippy scope: ${args:-none}" >> "$GITHUB_STEP_SUMMARY"
 

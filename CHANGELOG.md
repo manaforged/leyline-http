@@ -45,7 +45,7 @@ First public release.
   systems, Leyline logs one warning per unsupported option per process.
 - Prebuilt BoringSSL libraries and Rust bindings for macOS arm64, Linux x86_64
   and arm64 with glibc, and Windows x86_64 with MSVC.
-- A [user guide](docs/guide/README.md) and an [API map](docs/api.md).
+- A [user guide](docs/README.md) and an [API map](docs/api.md).
 - `connect_timeout` bounds plain `http://` connects. One request spends at
   most one connect timeout on an unreachable host.
 - `Session::with_proxy` keeps the shared connection pool, which is keyed by

@@ -1,6 +1,6 @@
 # Summary
 
-[Introduction](guide/README.md)
+[Introduction](README.md)
 
 # Using the client
 

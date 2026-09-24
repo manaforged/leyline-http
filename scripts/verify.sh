@@ -197,7 +197,8 @@ g_book() {
 
 g_test() {
     step "cargo test --workspace --exclude leyline-quiche"
-    cargo test --workspace --exclude leyline-quiche || fail "tests failed"
+    cargo test --workspace --exclude leyline-quiche \
+        --features leyline-http/full,leyline-http/bench-internals || fail "tests failed"
     ok "tests pass"
 }
 

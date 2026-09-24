@@ -323,7 +323,7 @@ let mut svc = LeylineService::new(Session::chrome());
 let req = HttpRequest::builder()
     .method(Method::GET)
     .uri("https://example.com/")
-    .body(Body::Empty)
+    .body(Body::default())
     .expect("valid request");
 let resp = svc.call(req).await?;
 println!("{}", resp.status());
