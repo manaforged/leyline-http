@@ -210,7 +210,7 @@ async fn caller_referer_wins_over_navigate_preset_referer() {
 }
 
 #[tokio::test]
-async fn redirect_cross_origin_strips_authorization_after_first_hop() {
+async fn redirect_cross_origin_strips_authorization_after_first_step() {
     let mut target = RawServer::start(vec![RawResponse::ok()]).await;
     let target_url = target.url("/landing");
     let mut redirector = RawServer::start(vec![RawResponse::redirect(target_url)]).await;

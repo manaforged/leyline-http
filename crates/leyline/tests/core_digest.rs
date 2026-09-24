@@ -213,7 +213,7 @@ async fn digest_uri_tracks_the_redirected_challenge_url() {
         let (mut sock, _) = listener.accept().await.unwrap();
         let head = read_headers(&mut sock).await;
         assert!(head.starts_with("GET /start "), "{head}");
-        let auth = extract_authorization(&head).expect("auth on retry first hop");
+        let auth = extract_authorization(&head).expect("auth on retry first step");
         assert!(
             auth.contains("uri=\"/protected\""),
             "digest uri must track the redirected challenge URL, got: {auth}"
@@ -235,7 +235,7 @@ async fn digest_uri_tracks_the_redirected_challenge_url() {
         let (mut sock, _) = listener.accept().await.unwrap();
         let head = read_headers(&mut sock).await;
         assert!(head.starts_with("GET /protected "), "{head}");
-        let auth = extract_authorization(&head).expect("auth on retry final hop");
+        let auth = extract_authorization(&head).expect("auth on retry final step");
         assert!(auth.contains("uri=\"/protected\""), "{auth}");
         sock.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\nok")
             .await

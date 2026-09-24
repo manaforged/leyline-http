@@ -462,7 +462,11 @@ async fn redirect_307_308_replays_buffered_body() {
             200,
             "{status}: should follow through to /post"
         );
-        assert_eq!(resp.redirect_chain().len(), 1, "{status}: exactly one hop");
+        assert_eq!(
+            resp.redirect_chain().len(),
+            1,
+            "{status}: exactly one redirect"
+        );
         let json: Value = serde_json::from_str(&resp.text().await.unwrap()).unwrap();
         assert_eq!(
             json["data"], payload,

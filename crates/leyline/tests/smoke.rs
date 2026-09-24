@@ -205,7 +205,7 @@ async fn smoke_suite() {
             let r = s.get("https://httpbin.org/redirect/2").await?;
             ensure(r.status() == 200, format!("status={}", r.status()))?;
             ensure(!r.redirect_chain().is_empty(), "redirect chain empty")?;
-            Ok(format!("{} hops", r.redirect_chain().len()))
+            Ok(format!("{} redirects", r.redirect_chain().len()))
         }),
     )
     .await;

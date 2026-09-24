@@ -19,7 +19,7 @@ fn same_origin_redirect_keeps_path_strips_credentials_and_fragment() {
 }
 
 #[test]
-fn first_hop_uses_target_origin() {
+fn first_step_uses_target_origin() {
     assert_eq!(
         referer_for(None, "https://example.com"),
         "https://example.com/"
