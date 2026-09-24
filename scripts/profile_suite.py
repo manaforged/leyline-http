@@ -6,9 +6,12 @@
     scripts/profile-oneshot.sh --dry-run
     scripts/profile-oneshot.sh chrome|firefox|safari|edge
 
-Chrome for Testing + Firefox official dmg + WKWebView Safari. Edge is the
-ChromiumBrand overlay on the current Chrome hello (TLS/H2 stay Chrome).
-Does not invent JA4. Does not land HeadlessChrome as the UA. No Brave.
+Full Chrome (Chrome for Testing "chrome" build, or LEYLINE_CHROME) run with
+--headless=new, Firefox official dmg, and Safari.app through safaridriver.
+Edge is the ChromiumBrand overlay on the current Chrome hello (TLS/H2 stay
+Chrome). Refuses chrome-headless-shell, WKWebView, and any build whose user
+agent is headless. Writes capture = "browser". Does not invent JA4. No Brave.
+Mobile Safari has no automated capture.
 """
 from __future__ import annotations
 
@@ -23,6 +26,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import urllib.request
 import zipfile
 from datetime import date
@@ -138,14 +142,52 @@ def ciphers_from_peet(peet: dict) -> list[str]:
     return out
 
 
-def dump_chrome_headless(chrome: Path, dump: Path) -> dict:
+def require_browser_ua(peet: dict, product: str, source: str) -> str:
+    ua = peet.get("user_agent") or ""
+    if not ua:
+        raise SystemExit(f"{source}: peet dump has no user agent; refusing to land a profile")
+    if "HeadlessChrome" in ua or "Headless" in ua:
+        raise SystemExit(f"{source}: user agent {ua!r} is a headless build; refusing to land it")
+    if product not in ua:
+        raise SystemExit(f"{source}: user agent {ua!r} lacks {product!r}; refusing to land it")
+    return ua
+
+
+def chrome_desktop_ua(version: str) -> str:
+    major = version.split(".", 1)[0]
+    system = plat.system()
+    if system == "Darwin":
+        os_part = "Macintosh; Intel Mac OS X 10_15_7"
+    elif system == "Windows":
+        os_part = "Windows NT 10.0; Win64; x64"
+    else:
+        os_part = "X11; Linux x86_64"
+    return (
+        f"Mozilla/5.0 ({os_part}) AppleWebKit/537.36 (KHTML, like Gecko) "
+        f"Chrome/{major}.0.0.0 Safari/537.36"
+    )
+
+
+def chrome_product_version(binary: Path) -> str:
+    if "headless-shell" in str(binary).lower():
+        raise SystemExit(f"{binary} is chrome-headless-shell; capture from the full Chrome build")
+    out = subprocess.check_output([str(binary), "--version"], text=True).strip()
+    m = re.fullmatch(r"Google Chrome(?: for Testing)? (\d+\.\d+\.\d+\.\d+)", out)
+    if not m:
+        raise SystemExit(f"{binary} reports {out!r}, not Google Chrome; refusing to capture")
+    return m.group(1)
+
+
+def dump_chrome(chrome: Path, version: str, dump: Path) -> dict:
     OUT.mkdir(parents=True, exist_ok=True)
     udd = Path(tempfile.mkdtemp(prefix="chrome-user.", dir=OUT))
     raw = dump.with_suffix(".dump.html")
     errp = dump.with_suffix(".stderr")
     cmd = [
         str(chrome),
+        "--headless=new",
         "--no-first-run",
+        f"--user-agent={chrome_desktop_ua(version)}",
         "--timeout=20000",
         f"--user-data-dir={udd}",
         "--dump-dom",
@@ -159,6 +201,7 @@ def dump_chrome_headless(chrome: Path, dump: Path) -> dict:
             os.killpg(proc.pid, signal.SIGKILL)
             proc.wait()
     obj = extract_json_blob(raw)
+    require_browser_ua(obj, f"Chrome/{version.split('.', 1)[0]}", f"Chrome {version}")
     dump.write_text(json.dumps(obj))
     return obj
 
@@ -170,15 +213,37 @@ def cft_plat() -> str:
         return "mac-arm64" if machine in {"arm64", "aarch64"} else "mac-x64"
     if system == "Linux":
         if machine in {"arm64", "aarch64"}:
-            raise SystemExit("Chrome for Testing has no linux-arm64 chrome-headless-shell")
+            raise SystemExit("Chrome for Testing has no linux-arm64 Chrome build")
         return "linux64"
     if system == "Windows":
         return "win64"
     raise SystemExit(f"no Chrome for Testing platform for {system}/{plat.machine()}")
 
 
-def chrome_shell_for_major(major: int) -> tuple[str, Path]:
-    """Return (full_version, chrome-headless-shell binary), downloading if needed."""
+CFT_CHROME_BINARY = {
+    "mac-arm64": "Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+    "mac-x64": "Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+    "linux64": "chrome",
+    "win64": "chrome.exe",
+}
+
+
+def installed_chrome(major: int) -> tuple[str, Path] | None:
+    path = os.environ.get("LEYLINE_CHROME")
+    if not path:
+        return None
+    binary = Path(path)
+    ver = chrome_product_version(binary)
+    if int(ver.split(".", 1)[0]) != major:
+        raise SystemExit(f"LEYLINE_CHROME is Chrome {ver}, not Chrome {major}")
+    return ver, binary
+
+
+def chrome_for_major(major: int) -> tuple[str, Path]:
+    """Return (full_version, full Chrome binary): LEYLINE_CHROME or the Chrome for Testing download."""
+    installed = installed_chrome(major)
+    if installed:
+        return installed
     CACHE.mkdir(parents=True, exist_ok=True)
     if major == live_chrome_major()[0]:
         data = http_json(CFT_STABLE)
@@ -193,16 +258,17 @@ def chrome_shell_for_major(major: int) -> tuple[str, Path]:
         ver = mile["version"]
         downloads = mile.get("downloads", {})
     url = None
-    for item in downloads.get("chrome-headless-shell", []):
+    for item in downloads.get("chrome", []):
         if item.get("platform") == cft_plat():
             url = item["url"]
             break
     if not url:
-        raise SystemExit(f"no chrome-headless-shell for Chrome {major} {cft_plat()}")
-    dest_dir = CACHE / f"headless-{ver}-{cft_plat()}"
-    binary = next(dest_dir.rglob("chrome-headless-shell"), None)
+        raise SystemExit(f"no Chrome for Testing chrome build for Chrome {major} {cft_plat()}")
+    name = CFT_CHROME_BINARY[cft_plat()]
+    dest_dir = CACHE / f"chrome-{ver}-{cft_plat()}"
+    binary = next(dest_dir.glob(f"*/{name}"), None)
     if binary is None or not os.access(binary, os.X_OK):
-        zpath = CACHE / f"headless-{ver}-{cft_plat()}.zip"
+        zpath = CACHE / f"chrome-{ver}-{cft_plat()}.zip"
         print(f"downloading {url}")
         http_bytes(url, zpath)
         if dest_dir.exists():
@@ -213,9 +279,12 @@ def chrome_shell_for_major(major: int) -> tuple[str, Path]:
                 extracted = Path(zf.extract(member, dest_dir))
                 if member.external_attr >> 16 & 0o111:
                     extracted.chmod(extracted.stat().st_mode | 0o111)
-        binary = next(dest_dir.rglob("chrome-headless-shell"), None)
+        binary = next(dest_dir.glob(f"*/{name}"), None)
     if binary is None or not os.access(binary, os.X_OK):
-        raise SystemExit(f"chrome-headless-shell missing under {dest_dir}")
+        raise SystemExit(f"Chrome binary {name} missing under {dest_dir}")
+    reported = chrome_product_version(binary)
+    if reported != ver:
+        raise SystemExit(f"{binary} reports Chrome {reported}, expected {ver}")
     return ver, binary
 
 
@@ -330,6 +399,10 @@ def clone_profile(src: Path, dest: Path, *, name: str, browser: str, version: in
         text = re.sub(r'(?m)^verified_at = ".*"$', f'verified_at = "{TODAY}"', text, count=1)
     else:
         text = text.replace("[meta]\n", f"[meta]\nverified_at = \"{TODAY}\"\n", 1)
+    if re.search(r'(?m)^capture = ', text):
+        text = re.sub(r'(?m)^capture = ".*"$', 'capture = "browser"', text, count=1)
+    else:
+        text = re.sub(r'(?m)^(version = \d+\n)', r'\1capture = "browser"\n', text, count=1)
     if re.search(r'(?m)^captured_against = ', text):
         text = re.sub(r'(?m)^captured_against = ".*"$', f'captured_against = "{captured}"', text, count=1)
     else:
@@ -552,7 +625,7 @@ def catalog() -> list[tuple[str, str, str, str, str]]:
             ",".join(str(m) for m in safari_have) or "none",
             safari_host,
             "fill" if safari_gap else "ok",
-            f"WKWebView dump {safari_gap}" if safari_gap else "current",
+            f"Safari.app capture {safari_gap}" if safari_gap else "current",
         ))
     chrome_newest = chrome_have[-1] if chrome_have else 0
     edge_maj, edge_ver = live_edge_major()
@@ -615,16 +688,16 @@ def fill_chrome(dry: bool, no_wire: bool) -> int:
         return 0
     OUT.mkdir(parents=True, exist_ok=True)
     for major in missing:
-        ver, binary = chrome_shell_for_major(major)
+        ver, binary = chrome_for_major(major)
         dump = OUT / f"chrome-{major}.peet.json"
-        print(f"capturing Chrome {ver}")
-        peet = dump_chrome_headless(binary, dump)
+        print(f"capturing Chrome {ver} from {binary}")
+        peet = dump_chrome(binary, ver, dump)
         land_from_peet(
             "chrome",
             major,
             peet,
-            captured=f"chrome-headless-shell-{ver}",
-            verified=f"tls.peet.ws {TODAY} chrome-headless-shell {ver}",
+            captured=f"chrome-{ver}",
+            verified=f"tls.peet.ws {TODAY} Chrome {ver} --headless=new",
         )
     if not no_wire:
         wire_family("chrome", "Chrome")
@@ -656,6 +729,7 @@ def fill_firefox(dry: bool, no_wire: bool) -> int:
             print(f"capturing Firefox {ver}")
             subprocess.check_call([sys.executable, str(peet_py), str(binary), PEET_URL, str(dump)])
             peet = json.loads(dump.read_text())
+            require_browser_ua(peet, f"Firefox/{major}", f"Firefox {ver}")
             land_from_peet(
                 "firefox",
                 major,
@@ -672,6 +746,70 @@ def fill_firefox(dry: bool, no_wire: bool) -> int:
     return 0
 
 
+SAFARI_APP = Path("/Applications/Safari.app")
+SAFARIDRIVER = Path("/usr/bin/safaridriver")
+SAFARIDRIVER_PORT = int(os.environ.get("LEYLINE_SAFARIDRIVER_PORT", "4444"))
+
+
+def safari_build() -> tuple[str, str]:
+    info = SAFARI_APP / "Contents/Info"
+    ident = subprocess.check_output(["defaults", "read", str(info), "CFBundleIdentifier"], text=True).strip()
+    if ident != "com.apple.Safari":
+        raise SystemExit(f"{SAFARI_APP} is {ident!r}, not com.apple.Safari; refusing to capture")
+    short = safari_host_version()
+    bundle = subprocess.check_output(["defaults", "read", str(info), "CFBundleVersion"], text=True).strip()
+    return short, bundle
+
+
+def webdriver(method: str, path: str, body: dict | None = None) -> dict:
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{SAFARIDRIVER_PORT}{path}",
+        data=data,
+        method=method,
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        return json.loads(resp.read()).get("value") or {}
+
+
+def dump_safari(short: str, dump: Path) -> dict:
+    if not SAFARIDRIVER.exists():
+        raise SystemExit(f"{SAFARIDRIVER} missing; Safari capture needs safaridriver")
+    driver = subprocess.Popen(
+        [str(SAFARIDRIVER), "--port", str(SAFARIDRIVER_PORT)], start_new_session=True
+    )
+    try:
+        for _ in range(50):
+            try:
+                webdriver("GET", "/status")
+                break
+            except OSError:
+                time.sleep(0.2)
+        session = webdriver("POST", "/session", {"capabilities": {"alwaysMatch": {"browserName": "safari"}}})
+        sid = session["sessionId"]
+        caps = session.get("capabilities") or {}
+        if caps.get("browserName") != "safari" or caps.get("browserVersion") != short:
+            raise SystemExit(f"safaridriver opened {caps.get('browserName')} {caps.get('browserVersion')}, "
+                             f"not Safari {short}; refusing to capture")
+        try:
+            webdriver("POST", f"/session/{sid}/url", {"url": PEET_URL})
+            text = webdriver("POST", f"/session/{sid}/execute/sync",
+                             {"script": "return document.body.innerText", "args": []})
+        finally:
+            webdriver("DELETE", f"/session/{sid}")
+    finally:
+        os.killpg(driver.pid, signal.SIGTERM)
+        driver.wait()
+    m = re.search(r"(\{.*\})", str(text), re.S)
+    if not m:
+        raise SystemExit(f"Safari dump was not JSON: {str(text)[:200]!r}")
+    peet = json.loads(m.group(1))
+    require_browser_ua(peet, f"Version/{short.split('.', 1)[0]}", f"Safari {short}")
+    dump.write_text(json.dumps(peet))
+    return peet
+
+
 def fill_safari(dry: bool, no_wire: bool) -> int:
     host = safari_host_version()
     if not host[:1].isdigit():
@@ -682,31 +820,20 @@ def fill_safari(dry: bool, no_wire: bool) -> int:
         print(f"safari: current ({host})")
         return 0
     print(f"safari: fill {major} (host {host})")
+    print("safari-ios: no automated capture; Mobile Safari profiles need a hand capture")
     if dry:
         return 0
-    pkg = ROOT / "tools/webkit-capture"
-    print("safari: building webkit-probe")
-    subprocess.check_call(["swift", "build", "-c", "release", "--package-path", str(pkg)])
-    bins = [p for p in (pkg / ".build").rglob("webkit-probe") if p.is_file() and "dSYM" not in str(p)]
-    if not bins:
-        raise SystemExit("webkit-probe build produced no binary")
-    probe = bins[0]
+    short, bundle = safari_build()
     OUT.mkdir(parents=True, exist_ok=True)
     dump = OUT / f"safari-{major}.peet.json"
-    print(f"safari: WKWebView {PEET_URL}")
-    raw = subprocess.check_output([str(probe), PEET_URL], timeout=45)
-    text = raw.decode("utf-8", errors="replace")
-    m = re.search(r"(\{.*\})", text, re.S)
-    if not m:
-        raise SystemExit(f"safari dump was not JSON: {text[:200]!r}")
-    peet = json.loads(m.group(1))
-    dump.write_text(json.dumps(peet))
+    print(f"safari: Safari.app {short} ({bundle}) via safaridriver {PEET_URL}")
+    peet = dump_safari(short, dump)
     land_from_peet(
         "safari",
         major,
         peet,
-        captured=f"webkit-{host}",
-        verified=f"tls.peet.ws {TODAY} WKWebView Safari {host}",
+        captured=f"safari-{short}-{bundle}",
+        verified=f"tls.peet.ws {TODAY} Safari.app {short} ({bundle}) safaridriver",
     )
     if not no_wire:
         wire_family("safari", "Safari")

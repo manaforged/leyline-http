@@ -5,7 +5,6 @@
 /node_modules/
 scripts/__pycache__/
 # cargo-fuzz build output (corpus is tracked, target/artifacts aren't)
-tools/webkit-capture/.build/
 fuzz/target/
 fuzz/artifacts/
 # benches sub-workspace build output

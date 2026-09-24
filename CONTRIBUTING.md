@@ -68,7 +68,25 @@ extension order. It puts each profile and dimension into one of five states:
 `python3 scripts/generate-api.py`. The release check runs
 `python3 scripts/generate-api.py --check` and fails when the page is stale.
 `scripts/profile-oneshot.sh` captures new browser builds and lands their
-profiles; run it with `status` to see which versions are missing.
+profiles; run it with `status` to see which versions are missing. It captures
+from these sources only:
+
+- Chrome: the full Chrome build from Chrome for Testing, or the Chrome binary
+  named by `LEYLINE_CHROME`, run with `--headless=new`. The script refuses
+  `chrome-headless-shell`.
+- Firefox: the official release build.
+- Safari: Safari.app, driven by `safaridriver`. Mobile Safari has no automated
+  capture.
+
+The script checks the binary and the user agent it captured. It records the
+exact build in `captured_against` and writes `capture = "browser"`. It exits
+with an error instead of landing a profile from another source.
+
+Before the first Safari capture, do these steps once:
+
+1. In Safari, turn on Settings > Advanced > Show features for web developers.
+2. In the Develop menu, select Allow Remote Automation.
+3. Run `safaridriver --enable` and enter your password.
 
 ## Style
 
