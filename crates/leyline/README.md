@@ -50,32 +50,6 @@ async fn main() -> leyline::Result<()> {
 identity. Reuse one session to share connections and cookies. To select
 another browser or platform, use `Session::builder()`.
 
-## Benchmarks
-
-Leyline's request rate relative to each peer. A positive number means Leyline
-completed more requests per second. Each cell is the mean of 20 paired rounds.
-Every difference below is outside its 95% confidence interval of zero.
-
-| Scenario | vs wreq 0.16.1 | vs reqwest 0.13.5 | vs tls-client 1.16.0 (Go) |
-| --- | ---: | ---: | ---: |
-| Sequential requests on one connection | +15.3% | +10.0% | -7.7% |
-| New client per request (full TLS handshake) | +10.6% | -17.7% | +39.5% |
-| 1 connection, 64 concurrent streams | +10.7% | -4.1% | +105.4% |
-| 8 connections, 8 requests in flight | +9.8% | -1.4% | +18.1% |
-| 8 connections, 256 requests in flight | +29.9% | +5.7% | +98.4% |
-
-Leyline and wreq both use a Chrome 149 profile. Leyline and
-[tls-client](https://github.com/bogdanfinn/tls-client) both use a Chrome 152
-profile. reqwest uses rustls and sends no browser profile, so it skips the
-work of matching a browser's TLS and HTTP/2 fingerprint. All four clients
-verify the server certificate over HTTP/2 and check every response body. The
-runs used one AMD Ryzen 9 9950X3D on Linux over loopback against a Hyper
-server. The Rust clients were built with `cargo build --release` and
-tls-client with `go build`, with no other tuning.
-[BENCHMARKS.md](https://github.com/manaforged/leyline-http/blob/main/BENCHMARKS.md)
-has the method, latency percentiles, confidence intervals, raw data, and the
-commands to rerun them.
-
 ## Limits
 
 - A profile covers selected TLS, HTTP/2, and header properties. It does not
