@@ -7,8 +7,7 @@ use crate::core::{
 };
 use crate::h2::H2Config;
 use crate::profile::{
-    Browser, BrowserProfile, ChromiumBrand, Platform, ProfileRegistry, ResolvedIdentity,
-    resolve_identity,
+    Browser, BrowserProfile, ChromiumBrand, Platform, ResolvedIdentity, resolve_identity,
 };
 use crate::tcp::TcpProfile;
 use crate::tls::TlsTrustConfig;
@@ -23,6 +22,7 @@ mod connect;
 #[must_use = "builders are lazy: nothing happens until `.send()` / `.build()`"]
 pub struct SessionBuilder {
     browser: Option<Browser>,
+    profile: Option<Arc<BrowserProfile>>,
     platform: Platform,
     platform_explicit: bool,
     brand: ChromiumBrand,
@@ -51,6 +51,7 @@ impl SessionBuilder {
     pub(super) fn new() -> Self {
         Self {
             browser: None,
+            profile: None,
             platform: Platform::default(),
             platform_explicit: false,
             brand: ChromiumBrand::default(),
@@ -97,11 +98,31 @@ impl SessionBuilder {
     }
 
     pub fn browser(mut self, browser: Browser) -> Self {
+        self.profile = None;
         self.browser = Some(browser);
         if self.platform_explicit {
             self.browser = Some(browser.for_platform(self.platform));
         }
         self
+    }
+
+    pub fn profile(mut self, profile: BrowserProfile) -> Self {
+        self.browser = None;
+        self.http_identity = None;
+        self.profile = Some(Arc::new(profile));
+        self
+    }
+
+    fn impersonates(&self) -> bool {
+        self.browser.is_some() || self.profile.is_some()
+    }
+
+    fn tls_profile(&self) -> Arc<BrowserProfile> {
+        match (&self.profile, self.browser) {
+            (Some(profile), _) => Arc::clone(profile),
+            (None, Some(browser)) => browser.shared_profile(),
+            (None, None) => BrowserProfile::bare_shared(),
+        }
     }
 
     pub fn brand(mut self, brand: ChromiumBrand) -> Self {
@@ -225,7 +246,7 @@ impl SessionBuilder {
 
         self.platform = if self.platform_explicit {
             self.platform.resolve()
-        } else if self.browser.is_some() {
+        } else if self.impersonates() {
             static NOTICE: std::sync::Once = std::sync::Once::new();
             NOTICE.call_once(|| {
                 tracing::info!(
@@ -261,27 +282,23 @@ impl SessionBuilder {
             }
         }
 
-        let profile: &'static BrowserProfile = match self.browser {
-            Some(b) => ProfileRegistry::global().get_browser(b).ok_or_else(|| {
-                Error::new(Kind::Config).with_message(format!("no profile for {b}"))
-            })?,
-            None => BrowserProfile::bare_static(),
+        let profile = self.tls_profile();
+        let http_profile = match self.http_identity.or(self.browser) {
+            Some(browser) => browser.platform_profile(self.platform),
+            None => &*profile,
         };
+        let header_style = http_profile.meta.header_style;
 
         let ResolvedIdentity {
             identity,
             brand_extra_headers,
             brand_navigate_accept,
-        } = resolve_identity(
-            self.http_identity.or(self.browser),
-            self.platform,
-            self.brand,
-        )
-        .map_err(|e| Error::new(Kind::Config).with_message(e.to_string()))?;
+        } = resolve_identity(http_profile, self.platform, self.brand)
+            .map_err(|e| Error::new(Kind::Config).with_message(e.to_string()))?;
 
         let tcp_profile = self.tcp_profile.clone().unwrap_or_else(|| {
             let mut tcp = self.platform.tcp_profile();
-            if self.browser.is_none() {
+            if !self.impersonates() {
                 tcp.mss = 0;
                 tcp.window_size = 0;
                 tcp.window_scale = 0;
@@ -289,18 +306,19 @@ impl SessionBuilder {
             tcp
         });
 
-        let connector = self.build_connector(profile, &tcp_profile)?;
+        let connector = self.build_connector(&profile, &tcp_profile)?;
 
         let resolved_h2 = profile.h2.resolve_for_platform(self.platform)?;
         let mut h2_config = H2Config::from_profile(&resolved_h2)?;
         h2_config.max_response_body_bytes = self.compression.max_body_size;
         #[cfg(feature = "http3")]
-        let h3_config = self.h3_config(profile)?;
+        let h3_config = self.h3_config(&profile)?;
 
         let audit_cache = self
             .audit
-            .then(|| Arc::new(self.compute_audit_cache(profile, &h2_config, &tcp_profile)));
+            .then(|| Arc::new(self.compute_audit_cache(&profile, &h2_config, &tcp_profile)));
 
+        let impersonates = self.impersonates();
         let pool = Arc::new(self.build_pool());
         let cookie_jar = self.cookie_jar.unwrap_or_default();
 
@@ -319,6 +337,8 @@ impl SessionBuilder {
         Ok(Session {
             inner: std::sync::Arc::new(SessionInner {
                 browser: self.browser,
+                impersonates,
+                header_style,
                 identity: presentation,
                 platform: self.platform,
                 brand: self.brand,
@@ -355,7 +375,6 @@ impl SessionBuilder {
                 tls_trust: self.tls_trust.clone(),
                 #[cfg(feature = "http3")]
                 h3_config,
-                #[cfg(feature = "http3")]
                 profile,
             }),
         })

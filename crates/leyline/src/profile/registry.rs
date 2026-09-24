@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fs::{read_dir, read_to_string};
 use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use crate::profile::Browser;
 use crate::profile::types::BrowserProfile;
@@ -70,7 +70,7 @@ impl std::error::Error for ProfileError {
 }
 
 pub struct ProfileRegistry {
-    profiles: HashMap<(String, u32), BrowserProfile>,
+    profiles: HashMap<(String, u32), Arc<BrowserProfile>>,
 }
 
 static BUILTIN: LazyLock<ProfileRegistry> = LazyLock::new(ProfileRegistry::builtin);
@@ -113,7 +113,7 @@ impl ProfileRegistry {
                 })?;
                 let profile = BrowserProfile::from_toml(&text).map_err(|e| e.at(&file))?;
                 let key = (profile.meta.browser.clone(), profile.meta.version);
-                drop(reg.profiles.insert(key, profile));
+                drop(reg.profiles.insert(key, Arc::new(profile)));
             }
         }
         if reg.is_empty() {
@@ -128,11 +128,18 @@ impl ProfileRegistry {
         let profile = BrowserProfile::from_toml(toml_str)
             .expect("built-in profile is statically valid (profile_validation)");
         let key = (profile.meta.browser.clone(), profile.meta.version);
-        self.profiles.insert(key, profile);
+        self.profiles.insert(key, Arc::new(profile));
     }
 
     pub fn get(&self, browser: &str, version: u32) -> Option<&BrowserProfile> {
-        self.profiles.get(&(browser.to_string(), version))
+        self.profiles
+            .get(&(browser.to_string(), version))
+            .map(|profile| &**profile)
+    }
+
+    pub(crate) fn shared(&self, browser: Browser) -> Option<Arc<BrowserProfile>> {
+        let (name, version) = browser.profile_key();
+        self.profiles.get(&(name.to_string(), version)).cloned()
     }
 
     bench_pub! {

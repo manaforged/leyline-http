@@ -36,8 +36,6 @@ struct Meta {
     #[serde(default)]
     hello: Option<u32>,
     #[serde(default)]
-    chromium_major: Option<u32>,
-    #[serde(default)]
     platform_browser: BTreeMap<String, String>,
     #[serde(default)]
     deprecated: Option<String>,
@@ -259,14 +257,10 @@ fn render(rows: &[Row], families: &Families) -> BuildResult<String> {
             })?;
             platforms.push(format!("({platform:?}, Browser::{})", target.meta.variant));
         }
-        let major = row
-            .meta
-            .chromium_major
-            .map_or_else(|| "None".to_string(), |m| format!("Some({m})"));
         writeln!(
             out,
             "    Entry {{ family: Family::{}, key: {:?}, version: {}, name: {:?}, hello: Browser::{}, \
-             chromium_major: {major}, platforms: &[{}], \
+             platforms: &[{}], \
              source: include_str!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/profiles/{}\")) }},",
             families.family[row.family].variant,
             row.meta.browser,

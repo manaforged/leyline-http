@@ -146,4 +146,10 @@ impl Browser {
             "built-in profile missing - registry integrity check in tests would have caught this",
         )
     }
+
+    pub(crate) fn shared_profile(self) -> std::sync::Arc<BrowserProfile> {
+        ProfileRegistry::global().shared(self).expect(
+            "built-in profile missing - registry integrity check in tests would have caught this",
+        )
+    }
 }

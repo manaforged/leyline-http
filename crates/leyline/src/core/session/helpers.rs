@@ -59,6 +59,10 @@ impl Session {
         self.inner.browser
     }
 
+    pub(crate) fn impersonates(&self) -> bool {
+        self.inner.impersonates
+    }
+
     pub(crate) fn default_retry(&self) -> &crate::core::retry::RetryPolicy {
         &self.inner.default_retry
     }
@@ -172,28 +176,20 @@ impl std::fmt::Debug for Session {
 
 impl std::fmt::Display for Session {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.inner.browser {
-            Some(b) => write!(
-                f,
-                "Session({}, {}, proxy={})",
-                b,
-                self.inner.platform,
-                self.inner
-                    .proxy_config
-                    .primary()
-                    .map(crate::util::redact)
-                    .unwrap_or_else(|| "none".into())
-            ),
-            None => write!(
-                f,
-                "Session(bare, {}, proxy={})",
-                self.inner.platform,
-                self.inner
-                    .proxy_config
-                    .primary()
-                    .map(crate::util::redact)
-                    .unwrap_or_else(|| "none".into())
-            ),
-        }
+        let label = match self.inner.browser {
+            Some(browser) => browser.to_string(),
+            None if self.inner.impersonates => self.inner.profile.meta.name.clone(),
+            None => "bare".to_string(),
+        };
+        write!(
+            f,
+            "Session({label}, {}, proxy={})",
+            self.inner.platform,
+            self.inner
+                .proxy_config
+                .primary()
+                .map(crate::util::redact)
+                .unwrap_or_else(|| "none".into())
+        )
     }
 }

@@ -29,7 +29,7 @@ impl Session {
     fn h3_target<'a>(&'a self, config: &'a H3Config) -> H3Target<'a> {
         H3Target {
             config,
-            profile: self.inner.profile,
+            profile: &self.inner.profile,
             trust: &self.inner.tls_trust,
             connector: &self.inner.connector,
         }

@@ -39,6 +39,8 @@ pub struct ProfileMeta {
     #[serde(default)]
     pub captured_against: Option<String>,
     #[serde(default)]
+    pub chromium_major: Option<u32>,
+    #[serde(default)]
     pub ch_ua_brand: Option<String>,
     #[serde(default)]
     pub header_style: HeaderStyle,

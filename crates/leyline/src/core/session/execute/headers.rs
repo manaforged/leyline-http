@@ -33,12 +33,7 @@ impl Session {
                 accept_language: &self.inner.accept_language,
                 origin,
                 referer,
-                firefox: self
-                    .inner
-                    .identity
-                    .map(|id| id.http())
-                    .or(self.inner.browser)
-                    .is_some_and(|b| b.header_style() == HeaderStyle::Gecko),
+                firefox: self.inner.header_style == HeaderStyle::Gecko,
             };
             preset.build_headers(&ctx)
         } else {

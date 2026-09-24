@@ -71,6 +71,7 @@ let resp = session
 |---|---|---|
 | Default session | `Session::new()` | `SessionBuilder` |
 | Pick a browser | `SessionBuilder::browser(Browser)` | `profile::ProfileRegistry` |
+| Send a loaded profile | `SessionBuilder::profile(BrowserProfile)` | `profile::resolve_identity` |
 | Pick a platform | `SessionBuilder::platform(Platform)` | platform twins in the profile data |
 | Brand overlay | `SessionBuilder::brand(ChromiumBrand)` | brand table in the profile data |
 | Mix TLS and HTTP identities | `SessionBuilder::identity(Identity)` | `Identity` |
@@ -124,7 +125,7 @@ counted.
 | Type | Functions | Count |
 |---|---|---:|
 | `Session` | `builder`, `new`, `get`, `post`, `put`, `patch`, `delete`, `head`, `request`, `execute(http::Request<Body>)`, `websocket`, `with_proxy(impl Into<ProxyConfig>)`, `fresh_pool`, `with_cookie_jar(Jar)`, `with_redirect(RedirectPolicy)`, `identity() -> SessionIdentity`, `cookies`, `pool_stats`, `preconnect(url)` | 19 |
-| `SessionBuilder` | `browser`, `platform`, `brand`, `identity`, `headers`, `proxy`, `timeout`, `retry`, `redirect`, `cookie_jar`, `dns`, `tls_trust`, `protocol`, `pool`, `socket`, `tcp_profile`, `compression`, `websocket_config`, `https_only`, `trace`, `audit`, `build` | 22 |
+| `SessionBuilder` | `browser`, `profile(BrowserProfile)`, `platform`, `brand`, `identity`, `headers`, `proxy`, `timeout`, `retry`, `redirect`, `cookie_jar`, `dns`, `tls_trust`, `protocol`, `pool`, `socket`, `tcp_profile`, `compression`, `websocket_config`, `https_only`, `trace`, `audit`, `build` | 23 |
 | `RequestBuilder` | `header`, `headers`, `header_order`, `anchored`, `query`, `body`, `json`, `form`, `multipart`, `basic_auth`, `bearer_auth`, `digest_auth`, `timeout`, `retry`, `redirect(RedirectPolicy)`, `proxy`, `preset`, `stream`, `compress`, `send` | 20 |
 | `Response` | `status`, `version`, `url`, `headers`, `header`, `trailers`, `request_headers`, `redirect_chain`, `cookies`, `timing`, `tls`, `audit`, `content_length`, `error_for_status`, `error_for_status_ref`, `text`, `text_with_charset`, `bytes`, `json`, `into_stream`, `copy_to`, `read_until` | 22 |
 | `Body` | `stream(s, Option<u64>)`, `len_hint` | 2 |
@@ -180,7 +181,7 @@ counted.
 | `http` | re-export of the `http` crate | 0 |
 | `H2Error`, `ErrorCode` | sources reachable from `Error::h2` | 0 |
 
-Total: 254 public functions.
+Total: 255 public functions.
 
 ## Semantics
 
@@ -199,6 +200,14 @@ Total: 254 public functions.
   request that then cannot verify a certificate fails with `Kind::Tls`.
 - `SessionBuilder::browser` and `platform` commute: the browser maps to its
   platform twin whichever call comes first.
+- `SessionBuilder::profile` takes a profile from `ProfileRegistry::load` or
+  `BrowserProfile::from_toml`. The session sends that profile's TLS, HTTP/2,
+  HTTP/3, and `[identity.<platform>]` tables. The last call of `browser`,
+  `identity`, or `profile` wins. A loaded profile has no platform twin, so
+  `build` returns `Kind::Config` when the profile has no identity table for
+  the platform. Without `.platform()`, the platform is Windows.
+  `Session::identity().browser()` is `None` for a loaded profile.
+- A brand overlay needs `chromium_major` in the profile `[meta]` table.
 - Config types (`TimeoutConfig`, `RetryPolicy`, `RedirectPolicy`,
   `ProxyConfig`, `DnsConfig`, `TlsTrustConfig`, `PoolConfig`, `SocketConfig`,
   `HappyEyeballsConfig`, `CompressionConfig`, `WebSocketConfig`) have private

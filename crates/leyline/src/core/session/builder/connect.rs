@@ -13,7 +13,7 @@ use super::SessionBuilder;
 impl SessionBuilder {
     pub(super) fn compute_audit_cache(
         &self,
-        profile: &'static BrowserProfile,
+        profile: &BrowserProfile,
         h2_config: &H2Config,
         tcp_profile: &TcpProfile,
     ) -> AuditTlsCache {
@@ -51,7 +51,7 @@ impl SessionBuilder {
 
     pub(super) fn build_connector(
         &self,
-        profile: &'static BrowserProfile,
+        profile: &BrowserProfile,
         tcp_profile: &TcpProfile,
     ) -> Result<FingerprintConnector> {
         let accept_invalid_certs = self.tls_trust.accepts_invalid_certs();

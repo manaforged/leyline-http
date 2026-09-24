@@ -61,9 +61,13 @@ impl Identity {
     }
 
     pub(crate) fn user_agent(self) -> Result<String> {
-        resolve_identity(Some(self.http), self.platform, ChromiumBrand::Chrome)
-            .map(|resolved| resolved.identity.user_agent)
-            .map_err(|e| Error::new(Kind::Config).with_message(e.to_string()))
+        resolve_identity(
+            self.http.platform_profile(self.platform),
+            self.platform,
+            ChromiumBrand::Chrome,
+        )
+        .map(|resolved| resolved.identity.user_agent)
+        .map_err(|e| Error::new(Kind::Config).with_message(e.to_string()))
     }
 }
 

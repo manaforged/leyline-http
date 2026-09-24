@@ -29,7 +29,7 @@ use crate::core::retry::RetryPolicy;
 use crate::core::{CompressionConfig, ProxyConfig, RedirectPolicy, TimeoutConfig};
 use crate::h2::H2Config;
 use crate::pool::Pool;
-use crate::profile::{Browser, ChromiumBrand, Platform};
+use crate::profile::{Browser, ChromiumBrand, HeaderStyle, Platform};
 use crate::tls::FingerprintConnector;
 use crate::tls::TlsTrustConfig;
 
@@ -53,6 +53,8 @@ pub struct Session {
 #[derive(Clone)]
 pub(crate) struct SessionInner {
     browser: Option<Browser>,
+    impersonates: bool,
+    header_style: HeaderStyle,
     identity: Option<Identity>,
     platform: Platform,
     brand: ChromiumBrand,
@@ -81,8 +83,7 @@ pub(crate) struct SessionInner {
     #[cfg(feature = "http3")]
     h3_config: Option<crate::quic::H3Config>,
     tls_trust: TlsTrustConfig,
-    #[cfg(feature = "http3")]
-    profile: &'static crate::profile::BrowserProfile,
+    profile: Arc<crate::profile::BrowserProfile>,
     trace: Option<Arc<dyn crate::trace::Trace>>,
     #[expect(
         clippy::type_complexity,

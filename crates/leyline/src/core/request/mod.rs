@@ -66,7 +66,9 @@ pub struct RequestBuilder {
 }
 
 fn default_preset(session: &Session, method: &Method) -> Option<Preset> {
-    session.browser()?;
+    if !session.impersonates() {
+        return None;
+    }
     match *method {
         Method::GET | Method::HEAD => Some(Preset::Navigate),
         _ => None,
@@ -115,7 +117,7 @@ impl RequestBuilder {
     }
 
     fn infer_from_content_type(&mut self) {
-        if self.preset_user || self.session.browser().is_none() {
+        if self.preset_user || !self.session.impersonates() {
             return;
         }
         if !matches!(self.method, Method::POST | Method::PUT | Method::PATCH) {

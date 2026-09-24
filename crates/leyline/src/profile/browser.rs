@@ -1,7 +1,4 @@
-use crate::profile::preset::HeaderStyle;
-use crate::profile::{
-    ChromiumBrand, Platform, PlatformIdentity, ProfileRegistry, resolve_identity,
-};
+use crate::profile::{BrowserProfile, ChromiumBrand, Platform, PlatformIdentity, resolve_identity};
 
 include!(concat!(env!("OUT_DIR"), "/browser.rs"));
 
@@ -11,7 +8,6 @@ struct Entry {
     version: u32,
     name: &'static str,
     hello: Browser,
-    chromium_major: Option<u32>,
     platforms: &'static [(&'static str, Browser)],
     source: &'static str,
 }
@@ -83,7 +79,12 @@ impl Browser {
         platform: Platform,
         brand: Option<ChromiumBrand>,
     ) -> Option<PlatformIdentity> {
-        let resolved = resolve_identity(Some(self), platform, brand.unwrap_or_default()).ok()?;
+        let resolved = resolve_identity(
+            self.platform_profile(platform),
+            platform,
+            brand.unwrap_or_default(),
+        )
+        .ok()?;
         let mut identity = resolved.identity;
         identity.extra_headers.extend(resolved.brand_extra_headers);
         if resolved.brand_navigate_accept.is_some() {
@@ -92,10 +93,8 @@ impl Browser {
         Some(identity)
     }
 
-    pub(crate) fn header_style(self) -> HeaderStyle {
-        ProfileRegistry::global()
-            .get_browser(self)
-            .map_or_else(HeaderStyle::default, |profile| profile.meta.header_style)
+    pub(crate) fn platform_profile(self, platform: Platform) -> &'static BrowserProfile {
+        self.for_platform(platform).profile()
     }
 
     pub(crate) fn profile_source(self) -> &'static str {
@@ -106,10 +105,9 @@ impl Browser {
         Self::latest(DEFAULT_FAMILY)
     }
 
-    bench_pub! {
-        fn chromium_major(&self) -> Option<u32> {
-            self.entry().chromium_major
-        }
+    #[cfg(feature = "bench-internals")]
+    pub fn chromium_major(&self) -> Option<u32> {
+        self.profile().meta.chromium_major
     }
 }
 

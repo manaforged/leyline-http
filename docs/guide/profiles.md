@@ -134,28 +134,42 @@ The fix is a fresh capture from Safari.app and Mobile Safari.
 Every new profile carries `captured_against` with the exact build string, and a
 JA4 golden taken from that capture.
 
-## Load a newer profile without a crate release
+## Load your own profile directory
 
 `ProfileRegistry::load` reads a directory laid out the same way as the bundled
 set, `<family>/<version>.toml`, and runs the same parse and extension-order
-validation as the compiled-in registry:
+validation as the compiled-in registry. `SessionBuilder::profile` sends a
+loaded profile:
 
 ```rust,no_run
 use std::path::Path;
+use leyline::{Platform, Session};
 use leyline::profile::ProfileRegistry;
 
+# fn main() -> leyline::Result<()> {
 let registry = ProfileRegistry::load(Path::new("./profiles"))
     .expect("profile directory loads");
-let profile = registry.get("chrome", 153).expect("chrome 153 profile");
+let profile = registry.get("chrome", 153).expect("chrome 153 profile").clone();
+let session = Session::builder()
+    .profile(profile)
+    .platform(Platform::MacOS)
+    .build()?;
+# drop(session);
+# Ok(())
+# }
 ```
+
+`BrowserProfile::from_toml` parses one profile from a string, and its result
+goes to `SessionBuilder::profile` the same way.
 
 `load` returns `ProfileError::Io` when a file cannot be read,
 `ProfileError::Parse` when a TOML file is invalid or its
 `extension_permutation` disagrees with the extensions its `[tls]` block turns
 on, and `ProfileError::Empty` when the directory holds no profile.
 
-Use this to author and validate a profile for a browser release that the
-installed crate version does not bundle yet. In 0.1 the session builder still
-selects a profile by `Browser` variant, so a loaded profile is available for
-inspection and validation but is not usable in a session; sending one requires a crate
-release that adds the variant.
+A loaded profile carries its own `[identity.<platform>]` tables. The session
+reads the user agent, `sec-ch-ua`, and extra headers for the chosen platform
+from those tables. `build` returns `Kind::Config` when the profile has no
+table for that platform. Without `.platform()`, the platform is Windows. A
+brand overlay (`SessionBuilder::brand`) needs `chromium_major` in `[meta]`.
+The request header order follows `header_style` in `[meta]`.

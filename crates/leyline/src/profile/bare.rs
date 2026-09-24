@@ -1,11 +1,11 @@
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use super::types::BrowserProfile;
 
 const SOURCE: &str = include_str!("../../profiles/bare.toml");
 const VERSION_TOKEN: &str = "{crate_version}";
 
-static BARE: LazyLock<BrowserProfile> = LazyLock::new(BrowserProfile::bare);
+static BARE: LazyLock<Arc<BrowserProfile>> = LazyLock::new(|| Arc::new(BrowserProfile::bare()));
 
 impl BrowserProfile {
     bench_pub! {
@@ -16,7 +16,7 @@ impl BrowserProfile {
         }
     }
 
-    pub(crate) fn bare_static() -> &'static Self {
-        &BARE
+    pub(crate) fn bare_shared() -> Arc<Self> {
+        Arc::clone(&*BARE)
     }
 }
