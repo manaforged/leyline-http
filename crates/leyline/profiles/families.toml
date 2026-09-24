@@ -28,6 +28,7 @@ browsers = ["safari-ios"]
 variant = "CfNetwork"
 label = "CFNetwork"
 browsers = ["cfnetwork-ios", "cfnetwork-macos"]
+latest_capture = ["native"]
 
 [[family]]
 variant = "OkHttp"

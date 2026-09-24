@@ -20,6 +20,12 @@ struct FamilyRow {
     browsers: Vec<String>,
     #[serde(default)]
     default: bool,
+    #[serde(default = "browser_capture")]
+    latest_capture: Vec<Capture>,
+}
+
+fn browser_capture() -> Vec<Capture> {
+    vec![Capture::Browser]
 }
 
 #[derive(Deserialize)]
@@ -31,6 +37,7 @@ struct ProfileFile {
 #[serde(rename_all = "kebab-case")]
 enum Capture {
     Browser,
+    Native,
     HeadlessShell,
     Webview,
     Inferred,
@@ -231,7 +238,7 @@ fn render(rows: &[Row], families: &Families) -> BuildResult<String> {
     let mut family_latest = Vec::new();
     for (index, family) in families.family.iter().enumerate() {
         let row = latest(rows, |r| {
-            r.family == index && r.meta.capture == Capture::Browser
+            r.family == index && family.latest_capture.contains(&r.meta.capture)
         })
         .or_else(|| latest(rows, |r| r.family == index))
         .ok_or_else(|| format!("families.toml: family {} has no profile", family.variant))?;

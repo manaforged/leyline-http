@@ -2,7 +2,7 @@
 name = "CFNetwork iOS 18"
 browser = "cfnetwork-ios"
 version = 18
-capture = "browser"
+capture = "native"
 variant = "CfnetworkIOS18"
 platform_browser = { macos = "cfnetwork-macos" }
 family = "cfnetwork"

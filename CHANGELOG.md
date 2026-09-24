@@ -58,7 +58,9 @@ First public release.
 - `SocketConfig::tcp_user_timeout` applies on Linux and Android. On other
   systems, Leyline logs one warning per unsupported option per process.
 - A [user guide](docs/README.md) and an [API map](docs/api.md).
-- `[meta] capture` in each profile records its provenance. `Browser::latest`
+- `[meta] capture` in each profile records its provenance: `browser`,
+  `native` for an OS HTTP stack such as CFNetwork, `headless-shell`,
+  `webview`, `inferred`, or `self-referential`. `Browser::latest`
   and `Session::new()` select the newest profile with `capture = "browser"`,
   so the default is Chrome 153, not the `chrome-headless-shell` captures of
   Chrome 151 and 152.

@@ -60,10 +60,13 @@ unrecorded, not that the profile is wrong.
 
 ## Provenance
 
-Each profile comes from one of four sources:
+Each profile comes from one of five sources:
 
 - **Browser capture.** A capture of the named browser, with the build recorded
   in `captured_against`.
+- **Native stack capture.** A capture of an operating system HTTP stack, such
+  as a URLSession app for CFNetwork, with the build recorded in
+  `captured_against`.
 - **Non-browser build capture.** A capture of a related build that is not the
   shipped browser, such as `chrome-headless-shell` or a WKWebView host.
 - **Inferred.** No capture of this version. Values come from a neighbouring
@@ -72,7 +75,8 @@ Each profile comes from one of four sources:
   the offline test does not compare the profile with a browser.
 
 The `capture` key in each profile's `[meta]` table records the source:
-`browser`, `headless-shell`, `webview`, `inferred`, or `self-referential`.
+`browser`, `native`, `headless-shell`, `webview`, `inferred`, or
+`self-referential`.
 
 | Profile | Provenance | `capture` | Source |
 | --- | --- | --- | --- |
@@ -98,18 +102,18 @@ The `capture` key in each profile's `[meta]` table records the source:
 | Safari iOS 17 | Self-referential golden | `self-referential` | Leyline output |
 | Safari iOS 18 | Self-referential golden | `self-referential` | Leyline output |
 | OkHttp4 Android 10+ | Self-referential golden | `self-referential` | Leyline output |
-| CFNetwork iOS 18 | Browser capture | `browser` | `CFNetwork-3826.600.41-iOS-18.6-22G86-sim`, iOS simulator |
-| CFNetwork macOS 26 | Browser capture | `browser` | `CFNetwork-3860.600.21-Darwin-25.5.0-macOS-26.5.1-25F80` |
+| CFNetwork iOS 18 | Native stack capture | `native` | `CFNetwork-3826.600.41-iOS-18.6-22G86-sim`, iOS simulator |
+| CFNetwork macOS 26 | Native stack capture | `native` | `CFNetwork-3860.600.21-Darwin-25.5.0-macOS-26.5.1-25F80` |
 
 Chromium-family profiles do not store `sec-ch-ua`. Leyline derives it from the
 major version and the `ch_ua_brand` field in `[meta]`, with the same GREASE
 brand, version, and order rule that Chromium uses.
 
-`Browser::latest` returns the newest profile of a family with
-`capture = "browser"`. A family with no browser capture returns its newest
-profile. `Session::new()` uses `Browser::latest(Family::Chrome)`, which is
-Chrome 153. You can
-pin the product line instead of a version:
+`Browser::latest` returns the newest profile of a family whose `capture` is in
+the family's `latest_capture` list in `families.toml`. The list defaults to
+`browser`; CFNetwork uses `native`. A family with no such profile returns its
+newest profile. `Session::new()` uses `Browser::latest(Family::Chrome)`, which
+is Chrome 153. You can pin the product line instead of a version:
 
 ```rust
 use leyline::profile::{Browser, Family};
@@ -127,7 +131,7 @@ from a Safari capture:
 - `safari/ios18.toml`
 
 These profiles send no ALPS extension and no ECH GREASE, the same as the
-Safari 26 capture (`webkit-26.5`). Their goldens are not evidence about Safari.
+Safari 26 capture (`safari-26.2-21623.1.14.11.9`). Their goldens are not evidence about Safari.
 The fix is a fresh capture from Safari.app and Mobile Safari.
 
 ## Update cadence
