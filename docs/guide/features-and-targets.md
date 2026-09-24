@@ -42,11 +42,13 @@ leyline-http = { version = "0.1", default-features = false, features = ["stream"
 ## BoringSSL build
 
 `leyline-bssl-sys` builds BoringSSL from source with CMake and generates the
-Rust bindings with `bindgen`. It supports four targets:
+Rust bindings with `bindgen`. It supports six targets:
 
 - `aarch64-apple-darwin`
 - `x86_64-unknown-linux-gnu`
 - `aarch64-unknown-linux-gnu`
+- `x86_64-unknown-linux-musl`
+- `aarch64-unknown-linux-musl`
 - `x86_64-pc-windows-msvc`
 
 The build needs CMake 3.22 or later, a C and C++ compiler, and libclang. On
@@ -61,7 +63,7 @@ libraries embed no local paths.
 ## Other targets
 
 Other targets are not supported. The build stops with an error that names the
-four targets.
+six targets.
 
 `BORING_BSSL_PATH` links a BoringSSL that you built yourself for a supported
 target. `BORING_BSSL_SOURCE_PATH` builds another BoringSSL source tree, and

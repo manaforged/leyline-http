@@ -46,16 +46,18 @@ OkHttp on Android, and CFNetwork on iOS 18 and macOS 26.
   - `aarch64-apple-darwin`
   - `x86_64-unknown-linux-gnu`
   - `aarch64-unknown-linux-gnu`
+  - `x86_64-unknown-linux-musl`
+  - `aarch64-unknown-linux-musl`
   - `x86_64-pc-windows-msvc`
 - The tools to build BoringSSL from source: CMake 3.22 or later, a C and C++
   compiler, libclang for `bindgen`, and `git`. The build script applies the
   BoringSSL patches with `git apply`. On Windows, also the MSVC build tools
-  and NASM.
+  and NASM. On musl, a musl C and C++ cross toolchain.
 
 The first build compiles BoringSSL from source with CMake, so it takes longer
 than a pure Rust dependency. Later builds reuse the compiled library.
 
-Other targets, including Intel macOS and musl, are not supported.
+Other targets, including Intel macOS, are not supported.
 
 ## Install
 

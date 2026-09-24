@@ -182,6 +182,10 @@ jobs:
             os: ubuntu-24.04
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-24.04
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-24.04
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-24.04
           - target: x86_64-pc-windows-msvc
             os: windows-2025
     steps:
@@ -202,6 +206,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu
           echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >>"$GITHUB_ENV"
+
+      - name: Install the musl cross toolchain
+        if: endsWith(matrix.target, '-linux-musl')
+        uses: taiki-e/setup-cross-toolchain-action@12b7ad4acfa95a1476779d6c06699b96ec1691f8 # v1
+        with:
+          target: ${{ matrix.target }}
 
       - name: cargo check
         run: cargo check -p leyline-http --locked --target ${{ matrix.target }}

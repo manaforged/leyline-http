@@ -10,6 +10,13 @@ change or a higher minimum Rust version needs a new minor release, such as
 
 ## Unreleased
 
+### Build
+
+- `leyline-bssl-sys` supports `x86_64-unknown-linux-musl` and
+  `aarch64-unknown-linux-musl`. A musl build needs a musl C and C++
+  toolchain. When you cross-compile for Linux, the build script finds the
+  target compiler on `PATH` if `CC_<target>` and `CXX_<target>` are not set.
+
 ## 0.1.0 - 2026-09-24
 
 First public release.

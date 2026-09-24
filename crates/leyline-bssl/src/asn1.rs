@@ -1,6 +1,7 @@
 use crate::ffi;
+use crate::ffi::time_t;
 use foreign_types::{ForeignType, ForeignTypeRef};
-use libc::{c_int, c_long, time_t};
+use libc::{c_int, c_long};
 use std::cmp::Ordering;
 use std::ffi::CString;
 use std::fmt;

@@ -614,6 +614,7 @@ name = "leyline-bssl-sys"
 version = "0.1.0"
 dependencies = [
  "bindgen",
+ "cc",
  "cmake",
  "fs_extra",
  "fslock",

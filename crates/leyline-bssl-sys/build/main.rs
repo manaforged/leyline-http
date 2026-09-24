@@ -232,6 +232,20 @@ fn map_build_paths(config: &Config, cmake: &mut cmake::Config) {
     }
 }
 
+fn linux_cross_compiler(config: &Config, cpp: bool) -> Option<OsString> {
+    if config.target_os != "linux" {
+        return None;
+    }
+    cc::Build::new()
+        .cargo_metadata(false)
+        .cpp(cpp)
+        .target(&config.target)
+        .host(&config.host)
+        .try_get_compiler()
+        .ok()
+        .map(|tool| tool.path().as_os_str().to_owned())
+}
+
 fn get_boringssl_cmake_config(config: &Config) -> cmake::Config {
     let src_path = get_boringssl_source_path(config);
     let mut boringssl_cmake = cmake::Config::new(src_path);
@@ -260,10 +274,11 @@ fn get_boringssl_cmake_config(config: &Config) -> cmake::Config {
             .define("CMAKE_ASM_COMPILER_TARGET", &config.target);
     }
 
-    if let Some(cc) = &config.env.cc {
+    let detect = |cpp: bool| linux_cross_compiler(config, cpp);
+    if let Some(cc) = config.env.cc.clone().or_else(|| detect(false)) {
         boringssl_cmake.define("CMAKE_C_COMPILER", cc);
     }
-    if let Some(cxx) = &config.env.cxx {
+    if let Some(cxx) = config.env.cxx.clone().or_else(|| detect(true)) {
         boringssl_cmake.define("CMAKE_CXX_COMPILER", cxx);
     }
 
@@ -364,6 +379,7 @@ fn get_boringssl_cmake_config(config: &Config) -> cmake::Config {
                         .as_os_str(),
                 );
             }
+            "x86_64" => {}
             _ => {
                 println!(
                     "cargo:warning=no toolchain file configured by boring-sys for {}",
