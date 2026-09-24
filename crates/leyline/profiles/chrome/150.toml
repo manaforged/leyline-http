@@ -3,6 +3,7 @@ name = "Chrome 150"
 browser = "chrome"
 version = 150
 family = "chromium"
+ch_ua_brand = "Google Chrome"
 verified_against = "Chrome 150.0.7871.128 on macOS via tls.peet.ws"
 verified_at = "2026-07-18"
 captured_against = "chrome-150.0.7871.128"
@@ -81,16 +82,12 @@ akamai = "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p"
 
 [identity.windows]
 user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
-sec_ch_ua = '"Not;A=Brand";v="8", "Chromium";v="150", "Google Chrome";v="150"'
 
 [identity.macos]
 user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
-sec_ch_ua = '"Not;A=Brand";v="8", "Chromium";v="150", "Google Chrome";v="150"'
 
 [identity.linux]
 user_agent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
-sec_ch_ua = '"Not;A=Brand";v="8", "Chromium";v="150", "Google Chrome";v="150"'
 
 [identity.android]
-user_agent = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Mobile Safari/537.36"
-sec_ch_ua = '"Not;A=Brand";v="8", "Chromium";v="150", "Google Chrome";v="150"'
+user_agent = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Mobile Safari/537.36"

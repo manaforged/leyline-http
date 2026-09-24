@@ -43,7 +43,7 @@ unrecorded, not that the profile is wrong.
 | Chrome 151 | `Chrome151` | `chrome-headless-shell-151.0.7922.138` | estimated |
 | Chrome 152 | `Chrome152` | `chrome-headless-shell-152.0.7977.64` | estimated |
 | Brave (Chromium 146) | `Brave146` | `brave-146` | estimated |
-| Firefox 148 | `Firefox148` | unrecorded | gated |
+| Firefox 148 | `Firefox148` | unrecorded | gated (self-referential golden) |
 | Firefox 149 | `Firefox149` | `firefox-149.0` | gated |
 | Firefox 150 | `Firefox150` | `firefox-150.0` | gated |
 | Firefox 151 | `Firefox151` | `firefox-151.0` | gated |
@@ -58,6 +58,49 @@ unrecorded, not that the profile is wrong.
 | CFNetwork iOS 18 | `CfnetworkIOS18` | `CFNetwork-3826.600.41-iOS-18.6-22G86-sim` | gated |
 | CFNetwork macOS 26 | `CfnetworkMacOS26` | `CFNetwork-3860.600.21-Darwin-25.5.0-macOS-26.5.1-25F80` | gated |
 
+## Provenance
+
+Each profile comes from one of four sources:
+
+- **Browser capture.** A capture of the named browser, with the build recorded
+  in `captured_against`.
+- **Non-browser build capture.** A capture of a related build that is not the
+  shipped browser, such as `chrome-headless-shell` or a WKWebView host.
+- **Inferred.** No capture of this version. Values come from a neighbouring
+  version.
+- **Self-referential golden.** The JA4 golden is Leyline's own past output, so
+  the offline test does not compare the profile with a browser.
+
+| Profile | Provenance | Source |
+| --- | --- | --- |
+| Chrome 145 | Inferred | Opera 129 (Chromium 145) capture |
+| Chrome 146 | Inferred | No capture reference |
+| Chrome 147 | Inferred | Chrome 148 TLS block |
+| Chrome 148 | Browser capture | `chrome-148`, exact build not recorded |
+| Chrome 149 | Inferred | Chrome 148 TLS block |
+| Chrome 150 | Browser capture | `chrome-150.0.7871.128` |
+| Chrome 151 | Non-browser build capture | `chrome-headless-shell-151.0.7922.138` |
+| Chrome 152 | Non-browser build capture | `chrome-headless-shell-152.0.7977.64` |
+| Brave (Chromium 146) | Browser capture | `brave-146` |
+| Firefox 148 | Self-referential golden | Leyline output |
+| Firefox 149 | Browser capture | `firefox-149.0` |
+| Firefox 150 | Browser capture | `firefox-150.0` |
+| Firefox 151 | Browser capture | `firefox-151.0` |
+| Firefox 152 | Browser capture | `firefox-152.0` |
+| Firefox 153 | Browser capture | `firefox-153.0.1` |
+| Firefox 154 | Browser capture | `firefox-154.0.1` |
+| Safari 18 | Self-referential golden | Leyline output |
+| Safari 26 | Non-browser build capture | `webkit-26.5` (WKWebView), synthesized HTTP identity |
+| Safari iOS 17 | Self-referential golden | Leyline output |
+| Safari iOS 18 | Self-referential golden | Leyline output |
+| OkHttp4 Android 10+ | Self-referential golden | Leyline output |
+| CFNetwork iOS 18 | Browser capture | `CFNetwork-3826.600.41-iOS-18.6-22G86-sim`, iOS simulator |
+| CFNetwork macOS 26 | Browser capture | `CFNetwork-3860.600.21-Darwin-25.5.0-macOS-26.5.1-25F80` |
+
+Chromium-family profiles do not store `sec-ch-ua`. Leyline derives it from the
+major version and the `ch_ua_brand` field in `[meta]`, with the same GREASE
+brand, version, and order rule that Chromium uses.
+
 `Browser::latest` returns the highest bundled version of a family, so you can
 pin the product line instead of a version:
 
@@ -69,21 +112,16 @@ let chrome = Browser::latest(Family::Chrome);
 
 ## Profiles that need a recapture
 
-Three WebKit profiles pin a JA4 golden that the offline reconstruction does not
-reproduce. In each case the golden and the reconstruction differ by exactly one
-extension: the golden hashes ALPS at the new codepoint (`0x44cd`), and the
-profile advertises ALPS at the old draft codepoint (`0x4469`), which is what
-`alps_new_codepoint = false` selects.
+Three WebKit profiles pin a JA4 golden taken from Leyline's own output, not
+from a Safari capture:
 
 - `safari/18.toml`
 - `safari/ios17.toml`
 - `safari/ios18.toml`
 
-Do not reconcile these by flipping the flag. Each file records that its golden
-was re-pinned to leyline's own emission rather than to a browser capture, so
-the golden is not evidence about Safari. Safari 26 is the one WebKit profile
-with a first-party capture (`webkit-26.5`), and it sends no ALPS extension.
-The fix is a fresh capture from Safari.app and Mobile Safari, not a hash edit.
+These profiles send no ALPS extension and no ECH GREASE, the same as the
+Safari 26 capture (`webkit-26.5`). Their goldens are not evidence about Safari.
+The fix is a fresh capture from Safari.app and Mobile Safari.
 
 ## Update cadence
 

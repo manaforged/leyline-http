@@ -1018,7 +1018,7 @@ async fn live_chrome147_android_identity_headers() {
 
     let ua = header_value(&headers, "user-agent").expect("no user-agent");
     assert!(
-        ua.contains("Android 14") && ua.contains("Mobile"),
+        ua.contains("Android 10; K") && ua.contains("Mobile"),
         "Android UA wrong: {ua}"
     );
     assert!(ua.contains("Chrome/147.0.0.0"), "UA version wrong: {ua}");

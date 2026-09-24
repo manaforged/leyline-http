@@ -79,8 +79,8 @@ async fn edge_brand_overlay_matches_capture() {
         "Edge sec-ch-ua brand missing:\n{req}"
     );
     assert!(
-        req.to_lowercase().contains("\r\ndnt: 1\r\n"),
-        "Edge dnt missing:\n{req}"
+        !req.to_lowercase().contains("\r\ndnt:"),
+        "Edge must not send dnt by default:\n{req}"
     );
 }
 
@@ -131,8 +131,8 @@ async fn opera_brand_overlay_matches_capture() {
     );
     assert!(
         req.to_lowercase()
-            .contains(r#"sec-ch-ua: "not:a-brand";v="99", "opera";v="136""#),
-        "Opera sec-ch-ua placeholder form missing:\n{req}"
+            .contains(r#"sec-ch-ua: "chromium";v="152", "not?a_brand";v="24", "opera";v="136""#),
+        "Opera sec-ch-ua missing:\n{req}"
     );
     assert!(
         req.to_lowercase().contains(r#""chromium";v="152""#),
@@ -154,7 +154,7 @@ async fn opera_146_overlay_emits_130() {
     );
     assert!(
         req.to_lowercase()
-            .contains(r#"sec-ch-ua: "not:a-brand";v="99", "opera";v="130", "chromium";v="146""#),
+            .contains(r#"sec-ch-ua: "chromium";v="146", "not-a.brand";v="24", "opera";v="130""#),
         "Opera 146 sec-ch-ua missing:\n{req}"
     );
 }
@@ -173,7 +173,7 @@ async fn opera_148_overlay_emits_132() {
     );
     assert!(
         req.to_lowercase()
-            .contains(r#"sec-ch-ua: "not:a-brand";v="99", "opera";v="132", "chromium";v="148""#),
+            .contains(r#"sec-ch-ua: "chromium";v="148", "opera";v="132", "not/a)brand";v="99""#),
         "Opera 148 sec-ch-ua missing:\n{req}"
     );
 }
@@ -192,7 +192,7 @@ async fn opera_150_overlay_emits_134() {
     );
     assert!(
         req.to_lowercase()
-            .contains(r#"sec-ch-ua: "not:a-brand";v="99", "opera";v="134", "chromium";v="150""#),
+            .contains(r#"sec-ch-ua: "not;a=brand";v="8", "chromium";v="150", "opera";v="134""#),
         "Opera 150 sec-ch-ua missing:\n{req}"
     );
 }
@@ -256,7 +256,7 @@ async fn vivaldi_brand_overlay_matches_capture() {
 fn vivaldi_overlay_on_unverified_anchor_errors() {
     for bad in [144u32, 145, 146, 148, 150] {
         let err = ChromiumBrand::Vivaldi
-            .overlay(bad, Platform::Windows, "ua", r#""Google Chrome";v="147""#)
+            .overlay(bad, Platform::Windows, "ua")
             .expect_err(&format!(
                 "Vivaldi on Chromium {bad} must be rejected until captured"
             ));
@@ -266,10 +266,9 @@ fn vivaldi_overlay_on_unverified_anchor_errors() {
 
 #[test]
 fn vivaldi_overlay_on_mobile_errors() {
-    let sch = r#""Google Chrome";v="147", "Not.A/Brand";v="8", "Chromium";v="147""#;
     for p in [Platform::Android, Platform::IOS] {
         let err = ChromiumBrand::Vivaldi
-            .overlay(147, p, "ua", sch)
+            .overlay(147, p, "ua")
             .expect_err("mobile Vivaldi overlay must be rejected");
         assert!(format!("{err}").contains("not verified"));
     }
@@ -336,8 +335,8 @@ async fn edge_overlay_on_chrome_145_preserves_chrome_145_grease_token() {
         "Edge brand missing on 145 anchor:\n{req}"
     );
     assert!(
-        lower.contains(r#""not_a brand";v="24""#),
-        "Chrome 145 GREASE placeholder (\"Not_A Brand\";v=\"24\") missing \
+        lower.contains(r#""not:a-brand";v="99""#),
+        "Chrome 145 GREASE placeholder (\"Not:A-Brand\";v=\"99\") missing \
              — overlay did not track active profile:\n{req}"
     );
     assert!(
@@ -360,7 +359,7 @@ fn edge_overlay_on_mobile_platform_errors() {
 #[test]
 fn opera_overlay_on_unverified_anchor_errors() {
     let err = ChromiumBrand::Opera
-        .overlay(144, Platform::Windows, "ua", "")
+        .overlay(144, Platform::Windows, "ua")
         .expect_err("Opera on Chromium 144 must be rejected until captured");
     assert!(format!("{err}").contains("not verified"));
 }

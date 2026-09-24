@@ -26,7 +26,6 @@ sigalgs = [
     "rsa_pss_rsae_sha384", "rsa_pss_rsae_sha512",
     "rsa_pkcs1_sha384", "rsa_pkcs1_sha512", "rsa_pkcs1_sha1",
 ]
-alps = "h2"
 ocsp_stapling = true
 signed_cert_timestamps = true
 cert_compression = ["brotli"]

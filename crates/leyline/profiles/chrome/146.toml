@@ -3,6 +3,7 @@ name = "Chrome 146"
 browser = "chrome"
 version = 146
 family = "chromium"
+ch_ua_brand = "Google Chrome"
 verified_against = "tls.peet.ws"
 
 [tls]
@@ -55,6 +56,7 @@ settings_order = [
     "max_header_list_size", "unknown8", "unknown9",
     "max_concurrent_streams",
 ]
+default_priority = { exclusive = true, stream_dependency = 0, weight = 255 }
 
 [h2.fingerprint]
 akamai = "1:65536;2:0;4:6291456;6:262144;8:1|15663105|0|m,a,s,p"
@@ -69,16 +71,12 @@ akamai = "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p"
 
 [identity.windows]
 user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
-sec_ch_ua = '"Google Chrome";v="146", "Chromium";v="146", "Not_A Brand";v="24"'
 
 [identity.macos]
 user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
-sec_ch_ua = '"Google Chrome";v="146", "Chromium";v="146", "Not_A Brand";v="24"'
 
 [identity.linux]
 user_agent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
-sec_ch_ua = '"Google Chrome";v="146", "Chromium";v="146", "Not_A Brand";v="24"'
 
 [identity.android]
-user_agent = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Mobile Safari/537.36"
-sec_ch_ua = '"Google Chrome";v="146", "Chromium";v="146", "Not_A Brand";v="24"'
+user_agent = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Mobile Safari/537.36"

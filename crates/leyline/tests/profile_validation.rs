@@ -371,7 +371,7 @@ fn chrome150_identity_matches_capture_on_every_supported_platform() {
         (Platform::Windows, "Windows NT 10.0"),
         (Platform::MacOS, "Macintosh; Intel Mac OS X 10_15_7"),
         (Platform::Linux, "X11; Linux x86_64"),
-        (Platform::Android, "Linux; Android 14; Pixel 8"),
+        (Platform::Android, "Linux; Android 10; K"),
     ] {
         let identity = profile
             .identity_for(platform)

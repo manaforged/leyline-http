@@ -1,7 +1,9 @@
 # Leyline
 
-An async HTTP client for Rust that matches the TLS ClientHello, HTTP/2
-settings, and header order of a chosen browser build. Bundled profiles cover
+An async Rust HTTP client that reproduces the TLS ClientHello, HTTP/2
+SETTINGS, and request header order recorded from selected browser builds. The
+[profile reference](https://github.com/manaforged/leyline-http/blob/main/docs/guide/profiles.md)
+states the capture status of each profile. Bundled profiles cover
 Chrome 145 to 152, Brave 146, Firefox 148 to 154, Safari 18 and 26, Safari on
 iOS 17 and 18, OkHttp on Android, and CFNetwork on iOS 18 and macOS 26.
 Leyline supports HTTP/1.1, HTTP/2, HTTP/3, and WebSocket on Tokio.
@@ -54,11 +56,19 @@ another browser or platform, use `Session::builder()`.
 
 - A profile covers selected TLS, HTTP/2, and header properties. It does not
   reproduce every byte a browser sends.
-- The Safari 18, Safari iOS 17, and Safari iOS 18 profiles pin a JA4 value
-  taken from Leyline's own output, not from a Safari capture. Safari 26 comes
-  from a WKWebView capture with a synthesized Safari HTTP identity.
-- The HTTP/3 QPACK decoder uses no dynamic table. This differs from
-  Chromium's QPACK parameters.
+- The Safari 18, Safari iOS 17, Safari iOS 18, Firefox 148, and OkHttp
+  profiles pin a JA4 value taken from Leyline's own output, not from a capture.
+- Chrome 145, 146, 147, and 149 are inferred from neighbouring versions. Chrome
+  151 and 152 come from `chrome-headless-shell`. Safari 26 comes from a
+  WKWebView capture with a synthesized Safari HTTP identity.
+- The Android identity of the Chrome profiles reuses the desktop TLS and
+  HTTP/2 settings. No mobile Chrome capture exists.
+- The TCP/IP fingerprint (JA4T: window size, options, MSS, TTL) comes from the
+  host OS. A profile does not change it.
+- BoringSSL chooses the TLS key shares. A profile sets the supported groups
+  only.
+- HTTP/3 has no browser capture golden. QUIC transport parameters are not
+  checked against a browser. The QPACK decoder uses no dynamic table.
 - HTTP/3 through a proxy is not supported.
 - `Response::audit()` values come from the configured profile and request.
   They are not packet captures.

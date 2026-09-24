@@ -778,12 +778,7 @@ impl SessionBuilder {
             };
             let overlay = self
                 .brand
-                .overlay(
-                    chromium_major,
-                    self.platform,
-                    &identity.user_agent,
-                    &identity.sec_ch_ua,
-                )
+                .overlay(chromium_major, self.platform, &identity.user_agent)
                 .map_err(|e| Error::new(Kind::Config).with_message(format!("{e}")))?;
             if let Some(overlay) = overlay {
                 identity.user_agent = overlay.user_agent;

@@ -35,6 +35,8 @@ pub struct ProfileMeta {
     pub verified_against: String,
     #[serde(default)]
     pub captured_against: Option<String>,
+    #[serde(default)]
+    pub ch_ua_brand: Option<String>,
 }
 
 #[expect(
@@ -203,6 +205,7 @@ pub struct H2Fingerprint {
 #[non_exhaustive]
 pub struct PlatformIdentity {
     pub user_agent: String,
+    #[serde(default)]
     pub sec_ch_ua: String,
     #[serde(default)]
     pub accept_language: Option<String>,
@@ -216,13 +219,27 @@ pub struct PlatformIdentity {
 
 impl BrowserProfile {
     pub fn from_toml(toml_str: &str) -> Result<Self, ProfileError> {
-        let profile: Self = toml::from_str(toml_str).map_err(ProfileError::parse)?;
+        let mut profile: Self = toml::from_str(toml_str).map_err(ProfileError::parse)?;
+        profile.derive_sec_ch_ua();
         crate::profile::permutation::validate(&profile.tls)
             .map_err(|why| ProfileError::parse(format!("{}: {why}", profile.meta.name)))?;
         for warning in profile.load_warnings() {
             tracing::warn!(target: "leyline::profile", "{warning}");
         }
         Ok(profile)
+    }
+
+    fn derive_sec_ch_ua(&mut self) {
+        let Some(brand) = self.meta.ch_ua_brand.as_deref() else {
+            return;
+        };
+        let derived =
+            crate::profile::brand::sec_ch_ua(self.meta.version, Some((brand, self.meta.version)));
+        for identity in self.identity.values_mut() {
+            if identity.sec_ch_ua.is_empty() {
+                identity.sec_ch_ua.clone_from(&derived);
+            }
+        }
     }
 
     pub fn load_warnings(&self) -> Vec<String> {

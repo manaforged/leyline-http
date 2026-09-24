@@ -64,25 +64,14 @@ impl ChromiumBrand {
         chromium_major: u32,
         platform: Platform,
         profile_user_agent: &str,
-        profile_sec_ch_ua: &str,
     ) -> Result<Option<BrandOverlay>, BrandOverlayError> {
         match self {
             Self::Chrome => Ok(None),
-            Self::Edge => edge_overlay(
-                chromium_major,
-                platform,
-                profile_user_agent,
-                profile_sec_ch_ua,
-            )
-            .map(Some),
+            Self::Edge => edge_overlay(chromium_major, platform, profile_user_agent).map(Some),
             Self::Opera => opera_overlay(chromium_major, platform, profile_user_agent).map(Some),
-            Self::Vivaldi => vivaldi_overlay(
-                chromium_major,
-                platform,
-                profile_user_agent,
-                profile_sec_ch_ua,
-            )
-            .map(Some),
+            Self::Vivaldi => {
+                vivaldi_overlay(chromium_major, platform, profile_user_agent).map(Some)
+            }
         }
     }
 }
@@ -108,7 +97,6 @@ fn edge_overlay(
     chromium_major: u32,
     platform: Platform,
     profile_user_agent: &str,
-    profile_sec_ch_ua: &str,
 ) -> Result<BrandOverlay, BrandOverlayError> {
     if !desktop_only(platform) {
         return Err(BrandOverlayError::Unverified {
@@ -119,8 +107,8 @@ fn edge_overlay(
     }
     Ok(BrandOverlay {
         user_agent: format!("{profile_user_agent} Edg/{chromium_major}.0.0.0"),
-        sec_ch_ua: swap_brand(profile_sec_ch_ua, "Microsoft Edge"),
-        extra_headers: vec![("dnt".into(), "1".into())],
+        sec_ch_ua: sec_ch_ua(chromium_major, Some(("Microsoft Edge", chromium_major))),
+        extra_headers: Vec::new(),
         navigate_accept: None,
     })
 }
@@ -158,9 +146,7 @@ fn opera_overlay(
         })?;
     Ok(BrandOverlay {
         user_agent: format!("{profile_user_agent} OPR/{opera_version}.0.0.0"),
-        sec_ch_ua: format!(
-            r#""Not:A-Brand";v="99", "Opera";v="{opera_version}", "Chromium";v="{chromium_major}""#
-        ),
+        sec_ch_ua: sec_ch_ua(chromium_major, Some(("Opera", opera_version))),
         extra_headers: Vec::new(),
         navigate_accept: None,
     })
@@ -181,7 +167,6 @@ fn vivaldi_overlay(
     chromium_major: u32,
     platform: Platform,
     profile_user_agent: &str,
-    profile_sec_ch_ua: &str,
 ) -> Result<BrandOverlay, BrandOverlayError> {
     if !desktop_only(platform) {
         return Err(BrandOverlayError::Unverified {
@@ -200,61 +185,51 @@ fn vivaldi_overlay(
     })?;
     Ok(BrandOverlay {
         user_agent: format!("{profile_user_agent} Vivaldi/{build}"),
-        sec_ch_ua: drop_brand(profile_sec_ch_ua, "Google Chrome"),
+        sec_ch_ua: sec_ch_ua(chromium_major, None),
         extra_headers: Vec::new(),
         navigate_accept: None,
     })
 }
 
-pub(crate) fn swap_brand(chrome_sec_ch_ua: &str, new_brand: &str) -> String {
-    const CHROME_NAME: &str = r#""Google Chrome""#;
-    let mut swapped = false;
-    let result = chrome_sec_ch_ua
-        .split(',')
-        .map(|entry| {
-            let ws_len = entry
-                .bytes()
-                .take_while(|b| b.is_ascii_whitespace())
-                .count();
-            let (lead, rest) = entry.split_at(ws_len);
-            if let Some(tail) = rest.strip_prefix(CHROME_NAME) {
-                swapped = true;
-                format!("{lead}\"{new_brand}\"{tail}")
-            } else {
-                entry.to_string()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-    debug_assert!(
-        swapped,
-        "swap_brand called with sec-ch-ua that does not contain `\"Google Chrome\"`: \
-         {chrome_sec_ch_ua:?}",
-    );
-    result
+const GREASE_CHARS: [char; 11] = [' ', '(', ':', '-', '.', '/', ')', ';', '=', '?', '_'];
+const GREASE_VERSIONS: [&str; 3] = ["8", "99", "24"];
+const BRAND_ORDERS: [[usize; 3]; 6] = [
+    [0, 1, 2],
+    [0, 2, 1],
+    [1, 0, 2],
+    [1, 2, 0],
+    [2, 0, 1],
+    [2, 1, 0],
+];
+
+fn cycle<T: Copy>(table: &[T], seed: u32) -> T {
+    table[usize::try_from(seed).unwrap_or_default() % table.len()]
 }
 
-pub(crate) fn drop_brand(chrome_sec_ch_ua: &str, brand_name: &str) -> String {
-    let needle = format!("\"{brand_name}\"");
-    let mut dropped = false;
-    let result = chrome_sec_ch_ua
-        .split(',')
-        .filter(|entry| {
-            let trimmed = entry.trim_start();
-            if trimmed.starts_with(&needle) {
-                dropped = true;
-                false
-            } else {
-                true
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-    debug_assert!(
-        dropped,
-        "drop_brand called with sec-ch-ua that does not contain {needle}: {chrome_sec_ch_ua:?}",
+pub(crate) fn sec_ch_ua(chromium_major: u32, product: Option<(&str, u32)>) -> String {
+    let grease = format!(
+        "Not{}A{}Brand",
+        cycle(&GREASE_CHARS, chromium_major),
+        cycle(&GREASE_CHARS, chromium_major.wrapping_add(1)),
     );
-    result.trim_start().to_string()
+    let entries = [
+        Some((grease, cycle(&GREASE_VERSIONS, chromium_major).to_string())),
+        Some(("Chromium".to_string(), chromium_major.to_string())),
+        product.map(|(name, version)| (name.to_string(), version.to_string())),
+    ];
+    let mut slots: [Option<(String, String)>; 3] = Default::default();
+    for (entry, slot) in entries
+        .into_iter()
+        .zip(cycle(&BRAND_ORDERS, chromium_major))
+    {
+        slots[slot] = entry;
+    }
+    slots
+        .iter()
+        .flatten()
+        .map(|(name, version)| format!(r#""{name}";v="{version}""#))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 #[cfg(test)]

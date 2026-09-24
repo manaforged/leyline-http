@@ -25,6 +25,7 @@ impl BrowserProfile {
                 family: "bare".to_string(),
                 verified_against: "n/a (synthetic non-impersonating profile)".to_string(),
                 captured_against: None,
+                ch_ua_brand: None,
             },
             tls: TlsProfile {
                 ciphers: vec![

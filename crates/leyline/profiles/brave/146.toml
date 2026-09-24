@@ -3,6 +3,7 @@ name = "Brave (Chromium 146)"
 browser = "brave"
 version = 146
 family = "chromium"
+ch_ua_brand = "Brave"
 verified_against = "tls.peet.ws"
 captured_against = "brave-146"
 
@@ -65,6 +66,7 @@ settings_order = [
     "initial_window_size",
     "max_header_list_size",
 ]
+default_priority = { exclusive = true, stream_dependency = 0, weight = 255 }
 
 [h2.fingerprint]
 akamai = "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p"
@@ -73,10 +75,8 @@ akamai = "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p"
 # Brave reduces its UA to look like Chrome on desktop (privacy feature).
 # TLS+H2 fingerprint comes from the global [tls]/[h2] blocks above —
 # `unknown_setting8` is not set, so Brave-on-Windows emits the same
-# 4-setting H2 frame as Brave-on-Mac. sec-ch-ua keeps Brave's three-slot
-# Chromium-leads order with the `Not-A.Brand` GREASE form.
+# 4-setting H2 frame as Brave-on-Mac.
 user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
-sec_ch_ua = '"Chromium";v="146", "Not-A.Brand";v="24", "Brave";v="146"'
 accept_language = "en-US,en;q=0.8"
 extra_headers = [["sec-gpc", "1"]]
 navigate_accept_override = "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
@@ -100,9 +100,6 @@ request_header_order = [
 
 [identity.macos]
 user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
-# Brave uses a different sec-ch-ua slot order and GREASE form than Chrome:
-# Chromium leads, Brave trails, GREASE token is `"Not-A.Brand";v="24"`.
-sec_ch_ua = '"Chromium";v="146", "Not-A.Brand";v="24", "Brave";v="146"'
 accept_language = "en-US,en;q=0.8"
 extra_headers = [["sec-gpc", "1"]]
 navigate_accept_override = "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
