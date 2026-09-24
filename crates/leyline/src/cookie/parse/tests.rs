@@ -17,24 +17,6 @@ fn parse_basic_cookie() {
 }
 
 #[test]
-fn rejected_cookie_name_value_reports_server_sent_but_unstorable() {
-    let rejected = "sid=abc|1|0|def; Path=/; Max-Age=1577847600; Domain=other.example; Secure";
-    let (name, value) = rejected_cookie_name_value(rejected).unwrap();
-    assert_eq!(name, "sid");
-    assert_eq!(value, "abc|1|0|def");
-
-    let (name, value) = rejected_cookie_name_value("n=\"quoted value\"").unwrap();
-    assert_eq!(name, "n");
-    assert_eq!(value, "quoted value");
-
-    assert!(rejected_cookie_name_value("n=v; Max-Age=0").is_none());
-    assert!(rejected_cookie_name_value("n=v; Max-Age=-1").is_none());
-
-    assert!(rejected_cookie_name_value("no-equals-sign").is_none());
-    assert!(rejected_cookie_name_value("=v").is_none());
-}
-
-#[test]
 fn parse_full_attributes() {
     let url = test_url("https://example.com/app/page");
     let c = parse_set_cookie(

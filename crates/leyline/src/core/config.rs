@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::core::Kind;
-use crate::tls::{Resolver, SystemResolver};
+use crate::tls::{HappyEyeballsConfig, Resolver, SystemResolver};
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct ProxyUrl(String);
@@ -223,6 +223,24 @@ impl ProxyConfig {
     }
 }
 
+impl From<&str> for ProxyConfig {
+    fn from(proxy_url: &str) -> Self {
+        Self::new().set_default_proxy(proxy_url)
+    }
+}
+
+impl From<String> for ProxyConfig {
+    fn from(proxy_url: String) -> Self {
+        Self::new().set_default_proxy(proxy_url)
+    }
+}
+
+impl From<ProxyUrl> for ProxyConfig {
+    fn from(proxy_url: ProxyUrl) -> Self {
+        Self::new().set_default_proxy(proxy_url)
+    }
+}
+
 #[derive(Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ProxyRule {
@@ -381,6 +399,12 @@ impl DnsConfig {
     }
 }
 
+impl From<Arc<dyn Resolver>> for DnsConfig {
+    fn from(resolver: Arc<dyn Resolver>) -> Self {
+        Self::new().resolver(resolver)
+    }
+}
+
 struct LayeredResolver {
     resolver: Arc<dyn Resolver>,
     overrides: HashMap<String, Vec<SocketAddr>>,
@@ -443,6 +467,12 @@ impl TimeoutConfig {
     pub fn response_header(mut self, d: impl Into<Option<Duration>>) -> Self {
         self.response_header = d.into();
         self
+    }
+}
+
+impl From<Duration> for TimeoutConfig {
+    fn from(total: Duration) -> Self {
+        Self::new().total(total)
     }
 }
 
@@ -521,6 +551,7 @@ pub struct SocketConfig {
     pub recv_buffer_size: Option<usize>,
     pub interface: Option<String>,
     pub strict: bool,
+    pub happy_eyeballs: Option<HappyEyeballsConfig>,
 }
 
 impl Default for SocketConfig {
@@ -538,6 +569,7 @@ impl Default for SocketConfig {
             recv_buffer_size: None,
             interface: None,
             strict: false,
+            happy_eyeballs: None,
         }
     }
 }
@@ -604,6 +636,11 @@ impl SocketConfig {
 
     pub fn strict(mut self, on: bool) -> Self {
         self.strict = on;
+        self
+    }
+
+    pub fn happy_eyeballs(mut self, config: impl Into<Option<HappyEyeballsConfig>>) -> Self {
+        self.happy_eyeballs = config.into();
         self
     }
 }

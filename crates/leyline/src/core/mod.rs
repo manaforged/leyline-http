@@ -4,18 +4,14 @@ mod config;
 mod digest;
 mod error;
 mod headers;
-#[cfg(feature = "tower")]
-pub(crate) mod layer;
 #[cfg(feature = "multipart")]
 pub mod multipart;
-mod read_until;
 mod request;
 mod response;
 pub(crate) mod retry;
 #[cfg(feature = "tower")]
 mod service;
 pub(crate) mod session;
-mod standalone;
 mod transport;
 #[cfg(feature = "websocket")]
 mod websocket;
@@ -37,6 +33,5 @@ pub use service::LeylineService;
 #[cfg(feature = "websocket")]
 pub use session::WebSocketBuilder;
 pub use session::{Identity, ProtocolPolicy, Session, SessionBuilder};
-pub use standalone::Request;
 #[cfg(feature = "websocket")]
 pub use websocket::{CloseFrame, WsConnection, WsMessage, WsSink, WsStream};

@@ -11,8 +11,7 @@ impl RequestBuilder {
         self.prepare()?;
         let retry_policy = self.retry_policy.clone();
         let digest_auth = self.digest_auth.take();
-        let allow_non_idempotent_retry = self.allow_non_idempotent_retry;
-        let timeout = self.timeout;
+        let timeout = self.timeouts.map(|t| t.total);
         let session = self.session.clone();
         let mut attempt = self.into_attempt();
 
@@ -20,7 +19,8 @@ impl RequestBuilder {
             return session.run(attempt).await;
         }
 
-        let retryable_method = allow_non_idempotent_retry || is_idempotent(attempt.method.as_str());
+        let retryable_method =
+            retry_policy.allow_non_idempotent || is_idempotent(attempt.method.as_str());
         let body_retryable = !attempt.body.is_stream();
         let replay: Option<bytes::Bytes> = attempt.body.as_bytes().cloned();
         let base_headers = attempt.headers.clone();
@@ -88,7 +88,7 @@ impl RequestBuilder {
             preset: self.preset,
             body: std::mem::take(&mut self.body),
             headers,
-            timeout: self.timeout,
+            timeout: self.timeouts.map(|t| t.total),
             timeouts: self.timeouts,
             stream_response: self.stream_response,
             proxy: self.proxy.take(),

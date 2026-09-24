@@ -4,7 +4,6 @@ use url::Url;
 use crate::core::headers::reorder;
 use crate::core::transport::Prepared;
 use std::borrow::Cow;
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::profile::Preset;
@@ -115,7 +114,6 @@ impl Session {
         let mut current_method = method.to_string();
         let mut current_body = body;
         let mut redirect_chain = Vec::new();
-        let mut all_cookies = HashMap::new();
         let mut acc_timing = crate::core::ResponseTiming::accumulator();
 
         let redirect_cap = self.inner.redirect_policy.max_redirects_hint();
@@ -155,7 +153,7 @@ impl Session {
             let hop_body_was_stream = hop_body.is_stream();
             let replay_body = hop_body.as_bytes().cloned();
 
-            let send = self.dispatch(Prepared {
+            let send = self.send_with_policy(Prepared {
                 method: &current_method,
                 url: &current_url,
                 headers,
@@ -178,13 +176,10 @@ impl Session {
             let resp_body_shape = transport_resp.body;
             let final_url = transport_resp.final_url;
             let response_version = transport_resp.version;
-            let tls_alpn = transport_resp.tls_alpn;
-            let peer_cert_der = transport_resp.peer_cert_der;
-            let tls_version = transport_resp.tls_version;
-            let tls_cipher = transport_resp.tls_cipher;
+            let tls = transport_resp.tls;
             acc_timing.add_leg(&transport_resp.timing);
 
-            self.collect_cookies(&resp_headers, &current_url, &mut all_cookies);
+            self.store_cookies(&resp_headers, &current_url);
             #[cfg(feature = "http3")]
             if let Some(host) = current_url.host_str()
                 && let Some(port) = current_url.port_or_known_default()
@@ -252,16 +247,12 @@ impl Session {
                 status,
                 headers: final_headers,
                 body: final_body,
-                cookies: all_cookies,
                 url: final_url,
                 redirect_chain,
                 version: response_version,
                 trailers: resp_trailers,
                 request_headers: audit_headers,
-                tls_alpn,
-                tls_peer_certificate: peer_cert_der,
-                tls_version,
-                tls_cipher,
+                tls,
                 request_method: if self.inner.audit_tls.is_some() {
                     current_method.clone()
                 } else {
@@ -410,12 +401,7 @@ impl Session {
             .as_deref()
             .map(Cow::Borrowed)
     }
-    fn collect_cookies(
-        &self,
-        resp_headers: &[(http::HeaderName, http::HeaderValue)],
-        current_url: &Url,
-        all_cookies: &mut HashMap<String, String>,
-    ) {
+    fn store_cookies(&self, resp_headers: &[(http::HeaderName, http::HeaderValue)], url: &Url) {
         let set_cookies: Vec<&str> = resp_headers
             .iter()
             .filter(|(k, _)| *k == "set-cookie")
@@ -424,22 +410,7 @@ impl Session {
         if !set_cookies.is_empty() {
             self.inner
                 .cookie_jar
-                .store_response_cookies(set_cookies.as_slice(), current_url);
-            let url_str = current_url.as_str();
-            for sc in &set_cookies {
-                let Some((name, _)) = sc.split(';').next().and_then(|nv| nv.split_once('=')) else {
-                    continue;
-                };
-                let name = name.trim();
-                if name.is_empty() {
-                    continue;
-                }
-                if let Some(value) = self.inner.cookie_jar.get_cookie(url_str, name) {
-                    all_cookies.insert(name.to_string(), value);
-                } else if let Some((_, value)) = crate::cookie::rejected_cookie_name_value(sc) {
-                    all_cookies.insert(name.to_string(), value);
-                }
-            }
+                .store_response_cookies(set_cookies.as_slice(), url);
         }
     }
 

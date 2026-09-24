@@ -48,29 +48,18 @@ fn builder_accepts_wreq_parity_transport_knobs() {
 
     let session = Session::builder()
         .browser(Browser::Chrome147)
-        .proxies(proxy)
+        .proxy(proxy)
         .dns(dns)
-        .timeouts(timeouts)
-        .pool_config(pool)
-        .socket_config(socket)
-        .redirect_policy(redirects)
+        .timeout(timeouts)
+        .pool(pool)
+        .socket(socket)
+        .redirect(redirects)
         .compression(compression)
         .websocket_config(websocket)
         .https_only(true)
         .build()
         .expect("builder accepts parity knobs");
 
-    assert_eq!(session.browser(), Some(Browser::Chrome147));
-    assert_eq!(session.default_timeout(), Duration::from_secs(5));
+    assert!(format!("{session}").contains(&Browser::Chrome147.to_string()));
     assert_eq!(session.pool_stats().max_connections, 8);
-}
-
-#[test]
-fn default_session_timeout_is_five_minutes() {
-    let session = Session::builder()
-        .disable_env_proxies()
-        .build()
-        .expect("default session builds");
-
-    assert_eq!(session.default_timeout(), Duration::from_secs(300));
 }

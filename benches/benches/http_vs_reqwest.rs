@@ -1,4 +1,3 @@
-
 use std::time::{Duration, Instant};
 
 use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
@@ -54,7 +53,7 @@ const CONC_N: usize = 100;
 fn bench_leyline_serial(c: &mut Criterion) {
     let rt = Runtime::new().expect("tokio runtime");
     let url = rt.block_on(spawn_server());
-    let session = Session::new();
+    let session = Session::builder().build().expect("leyline session");
     rt.block_on(async {
         session.get(&url).await.expect("warm");
     });
@@ -130,7 +129,7 @@ fn bench_reqwest_serial(c: &mut Criterion) {
 fn bench_leyline_concurrent(c: &mut Criterion) {
     let rt = Runtime::new().expect("tokio runtime");
     let url = rt.block_on(spawn_server());
-    let session = Session::new();
+    let session = Session::builder().build().expect("leyline session");
     rt.block_on(async {
         session.get(&url).await.expect("warm");
     });
@@ -149,9 +148,9 @@ fn bench_leyline_concurrent(c: &mut Criterion) {
                     for _ in 0..CONC_N {
                         let s = session.clone();
                         let u = url.clone();
-                        futs.push(tokio::spawn(async move {
-                            s.get(&u).await.expect("req ok")
-                        }));
+                        futs.push(tokio::spawn(
+                            async move { s.get(&u).await.expect("req ok") },
+                        ));
                     }
                     let results = join_all(futs).await;
                     total += start.elapsed();

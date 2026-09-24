@@ -11,7 +11,8 @@ use crate::tls::TlsIo;
 
 pub(crate) type H2Io = TlsIo;
 
-#[derive(Clone, Default)]
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct TlsInfo {
     pub peer_cert_der: Option<Vec<u8>>,
     pub version: Option<String>,

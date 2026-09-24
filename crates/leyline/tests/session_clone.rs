@@ -13,7 +13,5 @@ fn session_is_clone_and_sharing_pool_with_cookies() {
     assert_eq!(a.entries, b.entries);
     assert_eq!(a.max_connections, b.max_connections);
 
-    assert_eq!(session.browser(), clone.browser());
-    assert_eq!(session.platform(), clone.platform());
-    assert_eq!(session.default_timeout(), clone.default_timeout());
+    assert_eq!(format!("{session}"), format!("{clone}"));
 }

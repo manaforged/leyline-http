@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use leyline::{RetryPolicy, Session};
+use leyline::{ProtocolPolicy, ProxyConfig, RetryPolicy, Session, TimeoutConfig};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -29,8 +29,8 @@ async fn explicit_retry_policy_recovers_from_transient_connection_drop() {
     });
 
     let session = Session::builder()
-        .http1()
-        .disable_env_proxies()
+        .protocol(ProtocolPolicy::Http1)
+        .proxy(ProxyConfig::new().without_env())
         .retry(
             RetryPolicy::transient()
                 .with_backoff(Duration::from_millis(1), Duration::from_millis(5)),
@@ -72,8 +72,8 @@ async fn default_session_does_not_retry_a_transient_connection_drop() {
     });
 
     let session = Session::builder()
-        .http1()
-        .disable_env_proxies()
+        .protocol(ProtocolPolicy::Http1)
+        .proxy(ProxyConfig::new().without_env())
         .build()
         .unwrap();
 
@@ -102,9 +102,12 @@ async fn connect_timeout_bounds_a_stalled_tls_handshake() {
     });
 
     let session = Session::builder()
-        .disable_env_proxies()
-        .connect_timeout(Duration::from_millis(400))
-        .timeout(Duration::from_secs(30))
+        .proxy(ProxyConfig::new().without_env())
+        .timeout(
+            TimeoutConfig::new()
+                .total(Duration::from_secs(30))
+                .connect(Duration::from_millis(400)),
+        )
         .build()
         .unwrap();
 

@@ -29,7 +29,7 @@ async fn limits(session: Option<Session>) -> (u32, usize, bool) {
 #[tokio::test]
 async fn bare_tcp_uses_os_limits() {
     let native = limits(None).await;
-    let bare = limits(Some(Session::new())).await;
+    let bare = limits(Some(Session::builder().build().unwrap())).await;
     assert_eq!(bare.0, native.0);
     assert_eq!(bare.1, native.1);
     assert!(bare.2);
@@ -38,7 +38,11 @@ async fn bare_tcp_uses_os_limits() {
 #[tokio::test]
 async fn tcp_profiles_keep_mss_and_nodelay() {
     let profile = TcpProfile::LINUX;
-    let browser = Session::profile(Browser::Chrome149, Platform::Linux).expect("Chrome session");
+    let browser = Session::builder()
+        .browser(Browser::Chrome149)
+        .platform(Platform::Linux)
+        .build()
+        .expect("Chrome session");
     let explicit = Session::builder()
         .tcp_profile(profile)
         .build()
@@ -65,7 +69,7 @@ async fn socket_config_keeps_explicit_buffer() {
         .set_recv_buffer_size(262_144)
         .expect("receive buffer override");
     let session = Session::builder()
-        .socket_config(SocketConfig::default().recv_buffer_size(262_144))
+        .socket(SocketConfig::default().recv_buffer_size(262_144))
         .build()
         .expect("socket configuration");
     let (_, buffer, _) = limits(Some(session)).await;

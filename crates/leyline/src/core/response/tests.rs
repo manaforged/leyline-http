@@ -7,7 +7,6 @@ fn bare_response(audit_tls: Option<Arc<crate::audit::AuditTlsCache>>) -> Respons
         headers: Vec::new(),
         trailers: Vec::new(),
         body: ResponseBody::Buffered(Vec::new()),
-        cookies: HashMap::new(),
         url: "https://example.test/".to_string(),
         redirect_chain: Vec::new(),
         request_headers: vec![
@@ -15,10 +14,7 @@ fn bare_response(audit_tls: Option<Arc<crate::audit::AuditTlsCache>>) -> Respons
             ("accept-language".to_string(), "en-US,en;q=0.9".to_string()),
             ("referer".to_string(), "https://example.test/".to_string()),
         ],
-        tls_alpn: None,
-        tls_peer_certificate: None,
-        tls_version: None,
-        tls_cipher: None,
+        tls: None,
         request_method: "GET".to_string(),
         audit_tls,
         audit_cache: OnceLock::new(),
@@ -77,7 +73,6 @@ async fn text_decodes_declared_charset() {
     )];
     resp.body = ResponseBody::Buffered(vec![0xE9, 0xA9]);
     assert_eq!(resp.text().await.unwrap(), "é©");
-    assert_eq!(resp.into_text().await.unwrap(), "é©");
 }
 
 #[cfg(feature = "charset")]
@@ -172,14 +167,12 @@ async fn bytes_on_a_taken_stream_reports_a_body_error() {
 }
 
 #[tokio::test]
-async fn as_bytes_sees_a_buffered_body_and_skips_a_stream() {
+async fn text_reads_a_buffered_body_and_a_stream() {
     let mut resp = bare_response(None);
     resp.body = ResponseBody::Buffered(b"hi".to_vec());
-    assert_eq!(resp.as_bytes(), Some(&b"hi"[..]));
-    assert_eq!(resp.as_text().expect("buffered").unwrap(), "hi");
+    assert_eq!(resp.text().await.unwrap(), "hi");
 
     resp.body = ResponseBody::Streaming(BodyStream::from_bytes(bytes::Bytes::from_static(b"hi")));
-    assert!(resp.as_bytes().is_none());
     assert_eq!(resp.text().await.unwrap(), "hi");
 }
 

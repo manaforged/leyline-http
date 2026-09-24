@@ -1,12 +1,16 @@
 use http::{Method, Uri};
-use std::sync::Arc;
 
 use crate::cookie::Jar;
-use crate::profile::{Browser, ChromiumBrand, Platform};
+#[cfg(test)]
+use crate::profile::ChromiumBrand;
+use crate::profile::{Browser, Platform, Preset};
 
-use super::{Identity, Session, SessionBuilder};
+#[cfg(test)]
+use super::Identity;
+use super::{Session, SessionBuilder};
 use crate::core::request::RequestBuilder;
-use crate::core::{RedirectPolicy, Request, Response, Result};
+use crate::core::retry::RetryPolicy;
+use crate::core::{Body, Response, Result, TimeoutConfig};
 
 impl Session {
     pub fn builder() -> SessionBuilder {
@@ -14,49 +18,16 @@ impl Session {
     }
 
     pub fn new() -> Self {
-        Self::builder().into_builtin()
-    }
-
-    pub fn chrome() -> Self {
-        Self::builder().chrome().into_builtin()
-    }
-
-    pub fn firefox() -> Self {
-        Self::builder().firefox().into_builtin()
-    }
-
-    pub fn safari() -> Self {
-        Self::builder().safari().into_builtin()
-    }
-
-    pub fn edge() -> Self {
-        Self::builder().edge().into_builtin()
-    }
-
-    pub fn brave() -> Self {
-        Self::builder().brave().into_builtin()
-    }
-
-    pub fn opera() -> Self {
-        Self::builder().opera().into_builtin()
-    }
-
-    pub fn vivaldi() -> Self {
-        Self::builder().vivaldi().into_builtin()
-    }
-
-    pub fn profile(browser: Browser, platform: Platform) -> Result<Self> {
-        Self::builder().profile(browser, platform).build()
+        let builder = Self::builder()
+            .browser(Browser::default_browser())
+            .platform(Platform::Windows);
+        #[cfg(feature = "http3")]
+        let builder = builder.protocol(super::ProtocolPolicy::Race);
+        builder.into_builtin()
     }
 
     pub fn cookies(&self) -> &Jar {
         &self.inner.cookie_jar
-    }
-
-    pub fn with_cookie_jar(&self, cookie_jar: Jar) -> Self {
-        let mut s = self.clone();
-        std::sync::Arc::make_mut(&mut s.inner).cookie_jar = cookie_jar;
-        s
     }
 
     pub fn with_proxy(&self, proxy_url: &str) -> Result<Self> {
@@ -71,22 +42,17 @@ impl Session {
         Ok(s)
     }
 
-    pub fn with_redirect_policy(&self, policy: RedirectPolicy) -> Self {
-        let mut session = self.clone();
-        Arc::make_mut(&mut session.inner).redirect_policy = policy;
-        session
-    }
-
-    pub fn browser(&self) -> Option<Browser> {
+    pub(crate) fn browser(&self) -> Option<Browser> {
         self.inner.browser
     }
 
-    #[must_use]
-    pub fn identity(&self) -> Option<Identity> {
+    #[cfg(test)]
+    pub(crate) fn identity(&self) -> Option<Identity> {
         self.inner.identity
     }
 
-    pub fn brand(&self) -> Option<ChromiumBrand> {
+    #[cfg(test)]
+    pub(crate) fn brand(&self) -> Option<ChromiumBrand> {
         match self.inner.brand {
             ChromiumBrand::Chrome => match self.inner.browser {
                 Some(browser) if browser.family() == "chrome" => Some(ChromiumBrand::Chrome),
@@ -96,20 +62,18 @@ impl Session {
         }
     }
 
-    pub fn platform(&self) -> Platform {
+    #[cfg(test)]
+    pub(crate) fn platform(&self) -> Platform {
         self.inner.platform
     }
 
-    pub fn protocol_policy(&self) -> crate::core::ProtocolPolicy {
+    #[cfg(test)]
+    pub(crate) fn protocol_policy(&self) -> crate::core::ProtocolPolicy {
         self.inner.protocol_policy
     }
 
-    pub fn default_timeout(&self) -> std::time::Duration {
+    pub(crate) fn default_timeout(&self) -> std::time::Duration {
         self.inner.timeouts.total
-    }
-
-    pub fn response_header_timeout(&self) -> Option<std::time::Duration> {
-        self.inner.timeouts.response_header
     }
 
     pub(crate) fn default_retry(&self) -> &crate::core::retry::RetryPolicy {
@@ -120,11 +84,7 @@ impl Session {
         self.inner.pool.stats()
     }
 
-    pub async fn preconnect(&self, url: &str) -> Result<()> {
-        self.preconnect_via(url, None).await
-    }
-
-    pub async fn preconnect_via(&self, url: &str, proxy: Option<&str>) -> Result<()> {
+    pub async fn preconnect(&self, url: &str, proxy: Option<&str>) -> Result<()> {
         let url = url::Url::parse(url).map_err(crate::core::Error::from_url_parse)?;
         if url.scheme() != "https" || self.inner.protocol_policy == super::ProtocolPolicy::Http1 {
             return Ok(());
@@ -165,29 +125,21 @@ impl Session {
         }
     }
 
-    pub async fn execute(&self, req: Request) -> Result<Response> {
-        let mut builder = RequestBuilder::new(self, req.method, &req.url.to_string());
-        for (name, value) in req.headers.iter() {
-            builder = builder.append_header(name.clone(), value.clone());
+    pub async fn execute(&self, req: http::Request<Body>) -> Result<Response> {
+        let (mut parts, body) = req.into_parts();
+        let mut builder = RequestBuilder::new(self, parts.method, &parts.uri.to_string());
+        for (name, value) in &parts.headers {
+            builder = builder.header(name.clone(), value.clone());
         }
-        builder = builder.body(req.body);
-        if let Some(preset) = req.preset {
+        builder = builder.body(body);
+        if let Some(preset) = parts.extensions.remove::<Preset>() {
             builder = builder.preset(preset);
         }
-        if let Some(timeouts) = req.timeouts {
-            builder = builder.timeouts(timeouts);
-        } else if let Some(timeout) = req.timeout {
-            builder = builder.timeout(timeout);
+        if let Some(timeouts) = parts.extensions.remove::<TimeoutConfig>() {
+            builder = builder.timeout(timeouts);
         }
-        if let Some(policy) = req.retry {
+        if let Some(policy) = parts.extensions.remove::<RetryPolicy>() {
             builder = builder.retry(policy);
-        }
-        builder = builder.allow_non_idempotent_retry(req.allow_non_idempotent_retry);
-        if let Some(auth) = req.digest_auth {
-            builder = builder.digest_auth(auth);
-        }
-        if req.stream {
-            builder = builder.stream();
         }
         builder.send().await
     }

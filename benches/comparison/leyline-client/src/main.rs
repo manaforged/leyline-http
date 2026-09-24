@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use leyline::trace::{Connect, Dns, Head, Tls, Trace};
-use leyline::{Browser, Session};
+use leyline::{Browser, ProtocolPolicy, Session, TlsTrustConfig};
 
 fn build(ca: Option<&[u8]>, stages: Option<Arc<Stages>>) -> Session {
     let browser = match std::env::var("LEYLINE_CHROME").as_deref() {
@@ -17,21 +17,23 @@ fn build(ca: Option<&[u8]>, stages: Option<Arc<Stages>>) -> Session {
         Ok("149") => Some(Browser::Chrome149),
         _ => Some(Browser::Chrome152),
     };
-    let mut b = Session::builder().http2();
+    let mut b = Session::builder().protocol(ProtocolPolicy::Http2);
     if let Some(ca) = ca {
-        b = b
-            .without_system_roots()
-            .without_env_roots()
-            .add_root_certificate_der(ca);
+        b = b.tls_trust(
+            TlsTrustConfig::new()
+                .without_system_roots()
+                .without_env_roots()
+                .add_ca_der(ca),
+        );
     } else {
-        b = b.danger_accept_invalid_certs(true);
+        b = b.tls_trust(TlsTrustConfig::new().danger_accept_invalid_certs(true));
     }
     if let Some(browser) = browser {
         b = b.browser(browser);
     }
     if let Some(path) = env::var_os("CMP_HEADERS") {
         let headers = fs::read_to_string(path).expect("read request headers");
-        b = b.extra_headers(
+        b = b.headers(
             headers
                 .lines()
                 .map(|line| line.split_once('\t').expect("header name and value")),

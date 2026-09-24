@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
 use leyline::http::Method;
-use leyline::{RetryPolicy, Session, TimeoutConfig};
+use leyline::{ProtocolPolicy, ProxyConfig, RetryPolicy, Session, TimeoutConfig};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -25,9 +25,12 @@ where
 #[tokio::test]
 async fn connect_timeout_fires_on_a_black_hole_address() {
     let session = Session::builder()
-        .disable_env_proxies()
-        .connect_timeout(Duration::from_millis(300))
-        .timeout(Duration::from_secs(10))
+        .proxy(ProxyConfig::new().without_env())
+        .timeout(
+            TimeoutConfig::new()
+                .total(Duration::from_secs(10))
+                .connect(Duration::from_millis(300)),
+        )
         .build()
         .expect("session builds");
 
@@ -56,15 +59,15 @@ async fn response_header_timeout_fires_when_the_server_never_writes() {
     .await;
 
     let session = Session::builder()
-        .http1()
-        .disable_env_proxies()
+        .protocol(ProtocolPolicy::Http1)
+        .proxy(ProxyConfig::new().without_env())
         .build()
         .expect("session builds");
 
     let start = Instant::now();
     let err = session
         .request(Method::GET, format!("http://{addr}/"))
-        .timeouts(
+        .timeout(
             TimeoutConfig::default()
                 .total(Duration::from_secs(10))
                 .response_header(Duration::from_millis(300)),
@@ -96,14 +99,14 @@ async fn read_timeout_fires_between_chunks_of_a_streamed_body() {
     let addr = serve(half_chunked).await;
 
     let session = Session::builder()
-        .http1()
-        .disable_env_proxies()
+        .protocol(ProtocolPolicy::Http1)
+        .proxy(ProxyConfig::new().without_env())
         .build()
         .expect("session builds");
 
     let resp = session
         .request(Method::GET, format!("http://{addr}/"))
-        .timeouts(
+        .timeout(
             TimeoutConfig::default()
                 .total(Duration::from_secs(10))
                 .read(Duration::from_millis(300)),
@@ -138,15 +141,15 @@ async fn read_timeout_does_not_cover_a_buffered_body() {
     let addr = serve(half_chunked).await;
 
     let session = Session::builder()
-        .http1()
-        .disable_env_proxies()
+        .protocol(ProtocolPolicy::Http1)
+        .proxy(ProxyConfig::new().without_env())
         .build()
         .expect("session builds");
 
     let start = Instant::now();
     let err = session
         .request(Method::GET, format!("http://{addr}/"))
-        .timeouts(
+        .timeout(
             TimeoutConfig::default()
                 .total(Duration::from_secs(10))
                 .read(Duration::from_millis(200))
@@ -180,15 +183,15 @@ async fn total_timeout_bounds_a_slow_server() {
     .await;
 
     let session = Session::builder()
-        .http1()
-        .disable_env_proxies()
+        .protocol(ProtocolPolicy::Http1)
+        .proxy(ProxyConfig::new().without_env())
         .build()
         .expect("session builds");
 
     let start = Instant::now();
     let err = session
         .request(Method::GET, format!("http://{addr}/"))
-        .timeouts(TimeoutConfig::default().total(Duration::from_millis(400)))
+        .timeout(TimeoutConfig::default().total(Duration::from_millis(400)))
         .send()
         .await
         .expect_err("a 30s server must not beat a 400ms total");

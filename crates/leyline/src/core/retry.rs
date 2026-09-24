@@ -19,6 +19,7 @@ pub struct RetryPolicy {
     pub backoff_factor: f64,
     pub jitter: bool,
     pub retry_on: Vec<RetryTrigger>,
+    pub allow_non_idempotent: bool,
 }
 
 impl Default for RetryPolicy {
@@ -37,6 +38,7 @@ impl RetryPolicy {
             backoff_factor: 1.0,
             jitter: false,
             retry_on: Vec::new(),
+            allow_non_idempotent: false,
         }
     }
 
@@ -56,6 +58,7 @@ impl RetryPolicy {
                 RetryTrigger::Status(504),
                 RetryTrigger::Timeout,
             ],
+            allow_non_idempotent: false,
         }
     }
 
@@ -97,6 +100,11 @@ impl RetryPolicy {
 
     pub fn jitter(mut self, on: bool) -> Self {
         self.jitter = on;
+        self
+    }
+
+    pub fn allow_non_idempotent(mut self, allow: bool) -> Self {
+        self.allow_non_idempotent = allow;
         self
     }
 

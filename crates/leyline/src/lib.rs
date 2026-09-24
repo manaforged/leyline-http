@@ -90,22 +90,17 @@ mod util;
 pub use http;
 
 #[cfg(feature = "tower")]
-pub mod layer {
-    pub use crate::core::layer::{Call, Log, Logged, Pending, Reply, Transport};
-}
-
-#[cfg(feature = "tower")]
 pub use crate::core::LeylineService;
 #[cfg(feature = "websocket")]
 pub use crate::core::WebSocketBuilder;
 pub use crate::core::{
     Body, BodyStream, CompressionConfig, ContentEncoding, DigestAuth, DnsConfig, Error, HeaderList,
     HttpVersion, Identity, IntoParamPair, Kind, NoProxy, PoolConfig, ProtocolPolicy, ProxyConfig,
-    ProxyRule, ProxyUrl, RedirectAction, RedirectAttempt, RedirectPolicy, Request, RequestBuilder,
-    Response, ResponseTiming, Result, RetryPolicy, RetryTrigger, Session, SessionBuilder,
-    SocketConfig, TimeoutConfig, WebSocketConfig,
+    ProxyRule, ProxyUrl, RedirectAction, RedirectAttempt, RedirectPolicy, RequestBuilder, Response,
+    ResponseTiming, Result, RetryPolicy, RetryTrigger, Session, SessionBuilder, SocketConfig,
+    TimeoutConfig, WebSocketConfig,
 };
-pub use crate::pool::PoolStats;
+pub use crate::pool::{PoolStats, TlsInfo};
 
 #[cfg(feature = "multipart")]
 pub mod multipart {

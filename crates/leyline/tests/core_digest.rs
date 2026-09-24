@@ -2,7 +2,7 @@
     clippy::unwrap_used,
     reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
 )]
-use leyline::{DigestAuth, Session};
+use leyline::{DigestAuth, ProtocolPolicy, Session};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 async fn read_headers(sock: &mut tokio::net::TcpStream) -> String {
@@ -81,7 +81,10 @@ async fn md5_challenge_round_trip() {
         run_digest_server(listener, "MD5", "mufasa", "example.org").await;
     });
 
-    let session = Session::builder().http1().build().unwrap();
+    let session = Session::builder()
+        .protocol(ProtocolPolicy::Http1)
+        .build()
+        .unwrap();
     let mut resp = session
         .request(http::Method::GET, format!("http://{addr}/protected"))
         .digest_auth(DigestAuth::new("mufasa", "circle-of-life"))
@@ -101,7 +104,10 @@ async fn sha256_challenge_round_trip() {
         run_digest_server(listener, "SHA-256", "admin", "secure.local").await;
     });
 
-    let session = Session::builder().http1().build().unwrap();
+    let session = Session::builder()
+        .protocol(ProtocolPolicy::Http1)
+        .build()
+        .unwrap();
     let resp = session
         .request(http::Method::GET, format!("http://{addr}/"))
         .digest_auth(DigestAuth::new("admin", "hunter2"))
@@ -154,7 +160,10 @@ async fn stale_nonce_is_retried_transparently() {
         sock.flush().await.unwrap();
     });
 
-    let session = Session::builder().http1().build().unwrap();
+    let session = Session::builder()
+        .protocol(ProtocolPolicy::Http1)
+        .build()
+        .unwrap();
     let resp = session
         .request(http::Method::GET, format!("http://{addr}/protected"))
         .digest_auth(DigestAuth::new("u", "p"))
@@ -234,7 +243,10 @@ async fn digest_uri_tracks_the_redirected_challenge_url() {
         sock.flush().await.unwrap();
     });
 
-    let session = Session::builder().http1().build().unwrap();
+    let session = Session::builder()
+        .protocol(ProtocolPolicy::Http1)
+        .build()
+        .unwrap();
     let resp = session
         .request(http::Method::GET, format!("http://{addr}/start"))
         .digest_auth(DigestAuth::new("u", "p"))
@@ -267,7 +279,10 @@ async fn non_digest_401_is_passed_through() {
         sock.flush().await.unwrap();
     });
 
-    let session = Session::builder().http1().build().unwrap();
+    let session = Session::builder()
+        .protocol(ProtocolPolicy::Http1)
+        .build()
+        .unwrap();
     let resp = session
         .request(http::Method::GET, format!("http://{addr}/"))
         .digest_auth(DigestAuth::new("u", "p"))

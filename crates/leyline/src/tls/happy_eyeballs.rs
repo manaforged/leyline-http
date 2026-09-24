@@ -8,7 +8,7 @@ use futures_util::stream::{FuturesUnordered, StreamExt};
 use tokio::net::TcpStream;
 use tokio::time::sleep;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct HappyEyeballsConfig {
     pub resolve_delay: Duration,

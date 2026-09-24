@@ -32,7 +32,6 @@ allowed_external_types = [
     "url::*",
     "tokio::io::async_write::AsyncWrite",
     "tower_service::*",
-    "tower_layer::*",
 ]
 
 [package.metadata.docs.rs]
@@ -77,7 +76,7 @@ bench-internals = []
 # Exposes the BoringSSL `SslContextBuilder` behind `TlsContext`. Off by default;
 # the BoringSSL types are not covered by this crate's semver promise.
 unstable-bssl = []
-tower = ["dep:tower-service", "dep:tower-layer"]
+tower = ["dep:tower-service"]
 full = [
     "cookies",
     "compression-gzip",
@@ -150,7 +149,6 @@ lru = "0.18"
 rand = "0.9"
 libc = "0.2"
 tower-service = { version = "0.3", optional = true }
-tower-layer = { version = "0.3", optional = true }
 
 # -- compression (optional: each codec is pulled in by its own feature, for
 #    both HTTP body compression and RFC 8879 certificate decompression)
@@ -161,10 +159,6 @@ zstd = { version = "0.13", optional = true }
 # Windows: read the platform trust store via Win32 crypto API.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Security_Cryptography", "Win32_Foundation"] }
-
-[[example]]
-name = "layer"
-required-features = ["tower"]
 
 [[test]]
 name = "fingerprint_conformance"

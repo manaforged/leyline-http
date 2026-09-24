@@ -111,22 +111,6 @@ fn rotate_tls_rejects_other_family() {
 }
 
 #[test]
-fn build_rejects_http_family_mismatch() {
-    let err = Session::builder()
-        .browser(Browser::Firefox152)
-        .http_identity(Browser::Chrome150)
-        .platform(Platform::Windows)
-        .build()
-        .expect_err("chrome HTTP on firefox TLS must fail");
-    assert_eq!(err.kind(), Kind::Config, "expected Config, got {err}");
-    let message = err.message().expect("config errors carry a message");
-    assert!(
-        message.contains("not the same family"),
-        "unexpected config: {message}"
-    );
-}
-
-#[test]
 fn identity_apply_locked_builds() {
     let id = Identity::locked(Browser::Chrome150, Platform::Windows);
     Session::builder()

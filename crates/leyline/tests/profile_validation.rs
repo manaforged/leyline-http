@@ -436,7 +436,7 @@ fn every_builtin_h2config_resolves_on_all_platforms() {
 fn danger_accept_invalid_certs_session_builds() {
     leyline::Session::builder()
         .browser(Browser::Chrome147)
-        .danger_accept_invalid_certs(true)
+        .tls_trust(leyline::TlsTrustConfig::new().danger_accept_invalid_certs(true))
         .build()
         .expect("-k session must build even when system trust is unavailable");
 }

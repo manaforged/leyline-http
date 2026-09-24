@@ -170,7 +170,7 @@ fn profile_helper_returns_builtin() {
 fn session_builder_rejects_http3_with_proxy_at_build_time() {
     let err = leyline::Session::builder()
         .browser(Browser::Chrome147)
-        .http3()
+        .protocol(leyline::ProtocolPolicy::Http3)
         .proxy("http://127.0.0.1:8080")
         .build()
         .expect_err("should reject http3+proxy at build");
@@ -186,7 +186,7 @@ fn session_builder_rejects_http3_with_proxy_at_build_time() {
 async fn http3_session_rejects_per_request_proxy_at_send_time() {
     let session = leyline::Session::builder()
         .browser(Browser::Chrome147)
-        .http3()
+        .protocol(leyline::ProtocolPolicy::Http3)
         .build()
         .expect("http3 session without proxy builds");
     let err = session
@@ -207,7 +207,7 @@ async fn http3_session_rejects_per_request_proxy_at_send_time() {
 async fn race_proxy() {
     let session = leyline::Session::builder()
         .browser(Browser::Chrome147)
-        .race()
+        .protocol(leyline::ProtocolPolicy::Race)
         .timeout(std::time::Duration::from_secs(5))
         .build()
         .expect("race session builds");
@@ -251,16 +251,38 @@ async fn request_builder_timeout_overrides_session_default() {
 #[test]
 fn session_shortcuts_work() {
     assert_eq!(
-        leyline::Session::chrome().browser(),
-        Some(Browser::Chrome152)
+        format!("{}", leyline::Session::new()),
+        format!(
+            "Session({}, {}, proxy=none)",
+            Browser::default_browser(),
+            Platform::Windows
+        )
     );
+    let firefox = leyline::Session::builder()
+        .browser(Browser::default_firefox())
+        .platform(Platform::Windows)
+        .build()
+        .unwrap();
     assert_eq!(
-        leyline::Session::firefox().browser(),
-        Some(Browser::Firefox154)
+        format!("{firefox}"),
+        format!(
+            "Session({}, {}, proxy=none)",
+            Browser::default_firefox(),
+            Platform::Windows
+        )
     );
+    let safari = leyline::Session::builder()
+        .browser(Browser::Safari26)
+        .platform(Platform::MacOS)
+        .build()
+        .unwrap();
     assert_eq!(
-        leyline::Session::safari().browser(),
-        Some(Browser::Safari26)
+        format!("{safari}"),
+        format!(
+            "Session({}, {}, proxy=none)",
+            Browser::Safari26,
+            Platform::MacOS
+        )
     );
 }
 
@@ -865,7 +887,7 @@ async fn live_tcp_windows_distinguishable_from_linux() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_chrome147_ciphers_match_profile_order() {
-    let session = leyline::Session::chrome();
+    let session = leyline::Session::new();
     let json = peet(&session).await;
 
     let reg = leyline::profile::ProfileRegistry::builtin();
@@ -898,7 +920,7 @@ async fn live_chrome147_ciphers_match_profile_order() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_chrome147_has_alps_extension() {
-    let session = leyline::Session::chrome();
+    let session = leyline::Session::new();
     let json = peet(&session).await;
 
     let extensions = json["tls"]["extensions"]
@@ -920,7 +942,7 @@ async fn live_chrome147_has_alps_extension() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_chrome147_has_cert_compression() {
-    let session = leyline::Session::chrome();
+    let session = leyline::Session::new();
     let json = peet(&session).await;
 
     let extensions = json["tls"]["extensions"]
@@ -1067,7 +1089,7 @@ async fn live_chrome147_linux_identity_headers() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_chrome147_pseudo_header_order() {
-    let session = leyline::Session::chrome();
+    let session = leyline::Session::new();
     let json = peet(&session).await;
     let headers = extract_sent_headers(&json);
 
@@ -1088,7 +1110,11 @@ async fn live_chrome147_pseudo_header_order() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_firefox150_pseudo_header_order() {
-    let session = leyline::Session::firefox();
+    let session = leyline::Session::builder()
+        .browser(Browser::default_firefox())
+        .platform(Platform::Windows)
+        .build()
+        .unwrap();
     let json = peet(&session).await;
     let headers = extract_sent_headers(&json);
 
@@ -1111,7 +1137,7 @@ async fn live_firefox150_pseudo_header_order() {
 async fn live_h3_cloudflare() {
     let session = leyline::Session::builder()
         .browser(Browser::Chrome147)
-        .http3()
+        .protocol(leyline::ProtocolPolicy::Http3)
         .build()
         .expect("h3 session builds");
     let mut resp = session
@@ -1119,28 +1145,31 @@ async fn live_h3_cloudflare() {
         .await
         .expect("H3 request failed");
     assert_eq!(resp.status(), 200, "H3 status: {}", resp.status());
-    assert_eq!(resp.tls_alpn(), Some("h3"), "H3 ALPN");
+    assert_eq!(resp.version(), leyline::HttpVersion::Http3, "H3 ALPN");
     assert_eq!(
-        resp.tls_version(),
+        resp.tls().and_then(|t| t.version.as_deref()),
         Some("TLSv1.3"),
         "QUIC is always TLS 1.3 (RFC 9001 §4.2)"
     );
     assert!(
-        resp.tls_cipher()
+        resp.tls()
+            .and_then(|t| t.cipher.as_deref())
             .is_some_and(|c| c.starts_with("TLS_") && c.contains("_SHA")),
         "expected a TLS 1.3 cipher suite, got {:?}",
-        resp.tls_cipher()
+        resp.tls().and_then(|t| t.cipher.as_deref())
     );
     assert!(
-        resp.tls_peer_certificate().is_some_and(|c| !c.is_empty()),
+        resp.tls()
+            .and_then(|t| t.peer_cert_der.as_deref())
+            .is_some_and(|c| !c.is_empty()),
         "H3 peer certificate should be exposed"
     );
-    let body = resp.bytes().await.expect("buffered H3 body");
-    assert!(!body.is_empty(), "H3 body is empty");
+    let body_len = resp.bytes().await.expect("buffered H3 body").len();
+    assert!(body_len > 0, "H3 body is empty");
     println!(
         "✓ HTTP/3 to cloudflare-quic.com: status 200, {} bytes, cipher {:?}",
-        body.len(),
-        resp.tls_cipher()
+        body_len,
+        resp.tls().and_then(|t| t.cipher.as_deref())
     );
 }
 
@@ -1149,7 +1178,7 @@ async fn live_h3_cloudflare() {
 async fn live_h3_cloudflare_firefox_profile() {
     let session = leyline::Session::builder()
         .browser(Browser::Firefox150)
-        .http3()
+        .protocol(leyline::ProtocolPolicy::Http3)
         .build()
         .expect("h3 session builds");
     let resp = session
@@ -1170,7 +1199,7 @@ async fn live_h3_cloudflare_firefox_profile() {
 async fn live_h3_google() {
     let session = leyline::Session::builder()
         .browser(Browser::Chrome147)
-        .http3()
+        .protocol(leyline::ProtocolPolicy::Http3)
         .build()
         .expect("h3 session builds");
     let resp = session
@@ -1188,7 +1217,7 @@ async fn live_h3_google() {
 async fn live_h3_pool_reuse() {
     let session = leyline::Session::builder()
         .browser(Browser::Chrome147)
-        .http3()
+        .protocol(leyline::ProtocolPolicy::Http3)
         .build()
         .expect("h3 session builds");
 
@@ -1234,7 +1263,7 @@ async fn live_h3_pool_reuse() {
 async fn live_race() {
     let session = leyline::Session::builder()
         .browser(Browser::Chrome147)
-        .race()
+        .protocol(leyline::ProtocolPolicy::Race)
         .build()
         .expect("race session builds");
 
@@ -1279,7 +1308,7 @@ async fn live_h3_concurrent_cold_requests_single_flight() {
 
     let session = leyline::Session::builder()
         .browser(Browser::Chrome147)
-        .http3()
+        .protocol(leyline::ProtocolPolicy::Http3)
         .build()
         .expect("h3 session builds");
 
@@ -1309,17 +1338,15 @@ async fn live_h3_response_streaming_is_incremental() {
 
     let session = leyline::Session::builder()
         .browser(Browser::Chrome147)
-        .http3()
+        .protocol(leyline::ProtocolPolicy::Http3)
         .build()
         .expect("h3 session builds");
 
-    let expected = session
+    let mut buffered = session
         .get("https://cloudflare-quic.com/")
         .await
-        .expect("buffered H3 request failed")
-        .into_bytes()
-        .await
-        .expect("buffered H3 body");
+        .expect("buffered H3 request failed");
+    let expected = buffered.bytes().await.expect("buffered H3 body").to_vec();
 
     let resp = session
         .request(http::Method::GET, "https://cloudflare-quic.com/")
@@ -1369,7 +1396,7 @@ async fn live_h3_streaming_request_body_roundtrips() {
 
     let session = leyline::Session::builder()
         .browser(Browser::Chrome147)
-        .http3()
+        .protocol(leyline::ProtocolPolicy::Http3)
         .build()
         .expect("h3 session builds");
 
@@ -1456,7 +1483,7 @@ fn decode_content_encoding(body: &[u8], encoding: Option<&str>) -> Vec<u8> {
 async fn live_session_resumption_pre_shared_key() {
     let session = leyline::Session::builder()
         .browser(Browser::Chrome147)
-        .http1()
+        .protocol(leyline::ProtocolPolicy::Http1)
         .build()
         .unwrap();
 
@@ -1486,7 +1513,7 @@ async fn live_session_resumption_pre_shared_key() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_h2_connection_reuse() {
-    let session = leyline::Session::chrome();
+    let session = leyline::Session::new();
     let resp1 = session.get(PEET_URL).await.unwrap();
     assert_eq!(resp1.status(), 200);
     let resp2 = session.get(PEET_URL).await.unwrap();
@@ -1499,11 +1526,12 @@ async fn live_h2_connection_reuse() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_tls_peer_certificate_exposed() {
-    let session = leyline::Session::chrome();
+    let session = leyline::Session::new();
     let resp = session.get(PEET_URL).await.unwrap();
     assert_eq!(resp.status(), 200);
     let cert = resp
-        .tls_peer_certificate()
+        .tls()
+        .and_then(|t| t.peer_cert_der.as_deref())
         .expect("peer certificate should be exposed on HTTPS responses");
     assert!(
         cert.len() > 100 && cert[0] == 0x30,
@@ -1582,7 +1610,7 @@ async fn live_socks5_proxy() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_websocket_echo() {
-    let session = leyline::Session::chrome();
+    let session = leyline::Session::new();
     let mut ws = session
         .websocket("wss://ws.postman-echo.com/raw")
         .await

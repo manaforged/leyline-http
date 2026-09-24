@@ -17,6 +17,7 @@ pub struct TlsTrustConfig {
     ca_der: Vec<Vec<u8>>,
     client_identity: Option<ClientIdentity>,
     pinned_leaf_sha256: Vec<[u8; 32]>,
+    accept_invalid_certs: bool,
 }
 
 pub(crate) type VerificationFailure = Arc<Mutex<Option<TrustFailure>>>;
@@ -37,6 +38,7 @@ impl Default for TlsTrustConfig {
             ca_der: Vec::new(),
             client_identity: None,
             pinned_leaf_sha256: Vec::new(),
+            accept_invalid_certs: false,
         }
     }
 }
@@ -81,6 +83,15 @@ impl TlsTrustConfig {
             private_key_file: private_key_file.into(),
         });
         self
+    }
+
+    pub fn danger_accept_invalid_certs(mut self, accept: bool) -> Self {
+        self.accept_invalid_certs = accept;
+        self
+    }
+
+    pub(crate) fn accepts_invalid_certs(&self) -> bool {
+        self.accept_invalid_certs
     }
 
     pub fn uses_env_roots(&self) -> bool {

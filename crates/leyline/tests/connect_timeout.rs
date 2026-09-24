@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use leyline::{RetryPolicy, Session};
+use leyline::{ProtocolPolicy, ProxyConfig, RetryPolicy, Session, TimeoutConfig};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -21,10 +21,13 @@ async fn connect_timeout_does_not_bound_the_response_phase() {
     });
 
     let session = Session::builder()
-        .http1()
-        .disable_env_proxies()
-        .connect_timeout(Duration::from_millis(300))
-        .timeout(Duration::from_secs(10))
+        .protocol(ProtocolPolicy::Http1)
+        .proxy(ProxyConfig::new().without_env())
+        .timeout(
+            TimeoutConfig::new()
+                .total(Duration::from_secs(10))
+                .connect(Duration::from_millis(300)),
+        )
         .build()
         .expect("session builds");
 
@@ -47,9 +50,12 @@ async fn connect_timeout_does_not_bound_the_response_phase() {
 #[tokio::test]
 async fn connect_timeout_bounds_an_unreachable_endpoint() {
     let session = Session::builder()
-        .disable_env_proxies()
-        .connect_timeout(Duration::from_millis(300))
-        .timeout(Duration::from_secs(10))
+        .proxy(ProxyConfig::new().without_env())
+        .timeout(
+            TimeoutConfig::new()
+                .total(Duration::from_secs(10))
+                .connect(Duration::from_millis(300)),
+        )
         .build()
         .expect("session builds");
 
@@ -74,8 +80,8 @@ async fn connect_timeout_bounds_an_unreachable_endpoint() {
 #[tokio::test]
 async fn connect_timeout_is_one_window_per_request_on_http_and_https() {
     let session = Session::builder()
-        .disable_env_proxies()
-        .connect_timeout(Duration::from_millis(300))
+        .proxy(ProxyConfig::new().without_env())
+        .timeout(TimeoutConfig::new().connect(Duration::from_millis(300)))
         .build()
         .expect("session builds");
 

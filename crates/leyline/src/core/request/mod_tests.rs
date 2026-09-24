@@ -2,7 +2,9 @@ use crate::Session;
 
 #[tokio::test]
 async fn crlf_header_fails_before_io() {
-    let err = Session::new()
+    let err = Session::builder()
+        .build()
+        .unwrap()
         .get("https://example.test/")
         .header("x-a", "1\r\nHost: evil")
         .send()
@@ -16,7 +18,9 @@ async fn crlf_header_fails_before_io() {
 
 #[tokio::test]
 async fn crlf_url_fails_before_io() {
-    let err = Session::new()
+    let err = Session::builder()
+        .build()
+        .unwrap()
         .request(http::Method::GET, "https://example.test/\r\nHost: evil")
         .send()
         .await
@@ -27,7 +31,7 @@ async fn crlf_url_fails_before_io() {
 #[test]
 fn content_type_infers_the_preset_on_the_builder_path() {
     use crate::profile::Preset;
-    let session = Session::chrome();
+    let session = Session::new();
     let mut json = session
         .post("https://example.test/")
         .header("content-type", "application/json")

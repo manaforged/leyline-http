@@ -1,4 +1,3 @@
-
 use std::convert::Infallible;
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
@@ -165,7 +164,7 @@ fn bench(c: &mut Criterion) {
     let big = format!("{h1}big");
 
     let session = Session::builder()
-        .danger_accept_invalid_certs(true)
+        .tls_trust(leyline::TlsTrustConfig::new().danger_accept_invalid_certs(true))
         .build()
         .expect("leyline session");
     let client = reqwest13::Client::builder()

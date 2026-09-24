@@ -1,0 +1,128 @@
+use crate::audit::AuditTlsCache;
+use crate::core::error::{Error, Kind, Result};
+use crate::h2::H2Config;
+use crate::pool::Pool;
+use crate::profile::{BrowserProfile, ChromiumBrand, Platform};
+use crate::tcp::TcpProfile;
+use crate::tls::FingerprintConnector;
+
+use super::{BrandOverlayEdits, SessionBuilder};
+
+impl SessionBuilder {
+    pub(super) fn compute_audit_cache(
+        &self,
+        profile: &'static BrowserProfile,
+        h2_config: &H2Config,
+        tcp_profile: TcpProfile,
+    ) -> AuditTlsCache {
+        let extension_ids = crate::audit::extension_ids(&profile.tls);
+        let ja4 = {
+            let input = crate::audit::Ja4Input {
+                ciphers: &profile.tls.ciphers,
+                sigalgs: &profile.tls.sigalgs,
+                curves: &profile.tls.curves,
+                extension_ids: &extension_ids,
+                tls_version: "1.3",
+                has_sni: true,
+                alpn: "h2",
+            };
+            crate::audit::compute_ja4(&input)
+        };
+        let ja3 = {
+            let input = crate::audit::Ja3Input {
+                ciphers: &profile.tls.ciphers,
+                curves: &profile.tls.curves,
+                extension_ids: &extension_ids,
+                tls_record_version: 771,
+            };
+            crate::audit::compute_ja3(&input)
+        };
+        let h2_fp = h2_config.akamai_fingerprint();
+        let is_windows = self.platform == Platform::Windows;
+        let ja4t = crate::audit::compute_ja4t(
+            tcp_profile.window_size,
+            tcp_profile.mss as u16,
+            tcp_profile.window_scale as u8,
+            is_windows,
+        );
+        AuditTlsCache {
+            ja4,
+            ja3,
+            h2_fingerprint: h2_fp,
+            ja4t,
+        }
+    }
+
+    pub(super) fn build_connector(
+        &self,
+        profile: &'static BrowserProfile,
+        tcp_profile: TcpProfile,
+    ) -> Result<FingerprintConnector> {
+        let accept_invalid_certs = self.tls_trust.accepts_invalid_certs();
+        let tls_trust = if accept_invalid_certs {
+            self.tls_trust.clone().without_system_roots()
+        } else {
+            self.tls_trust.clone()
+        };
+        let mut fp = FingerprintConnector::new_with_trust(profile, tcp_profile, &tls_trust)
+            .map_err(Error::from)?;
+        if accept_invalid_certs {
+            fp.set_accept_invalid_certs(true);
+        }
+        fp = fp.with_resolver(self.dns_config.clone().into_resolver());
+        fp = fp.with_socket_config(self.socket_config.clone());
+        if let Some(connect_timeout) = self.timeouts.connect {
+            fp = fp.with_connect_timeout(connect_timeout);
+        }
+        if let Some(config) = self.socket_config.happy_eyeballs {
+            fp = fp.with_happy_eyeballs_config(config);
+        }
+        Ok(fp)
+    }
+
+    pub(super) fn apply_brand_overlay(
+        &self,
+        identity: &mut crate::profile::PlatformIdentity,
+    ) -> Result<BrandOverlayEdits> {
+        let mut brand_extra_headers: Vec<(String, String)> = Vec::new();
+        let mut brand_navigate_accept: Option<String> = None;
+        if self.brand != ChromiumBrand::Chrome {
+            let Some(chromium_major) = self
+                .http_identity
+                .or(self.browser)
+                .and_then(|b| b.chromium_major())
+            else {
+                return Err(Error::new(Kind::Config).with_message(format!(
+                    "{} overlay requires a Chromium HTTP identity",
+                    self.brand.label()
+                )));
+            };
+            let overlay = self
+                .brand
+                .overlay(chromium_major, self.platform, &identity.user_agent)
+                .map_err(|e| Error::new(Kind::Config).with_message(format!("{e}")))?;
+            if let Some(overlay) = overlay {
+                identity.user_agent = overlay.user_agent;
+                identity.sec_ch_ua = overlay.sec_ch_ua;
+                brand_extra_headers = overlay.extra_headers;
+                brand_navigate_accept = overlay.navigate_accept;
+            }
+        }
+        Ok((brand_extra_headers, brand_navigate_accept))
+    }
+
+    pub(super) fn build_pool(&self) -> Pool {
+        let config = &self.pool_config;
+        let (idle_timeout, max_connections) = if config.keepalive {
+            (config.idle_timeout, config.max_connections.max(1))
+        } else {
+            (std::time::Duration::ZERO, 1)
+        };
+        Pool::with_limits(
+            idle_timeout,
+            max_connections,
+            config.max_h1_conns_per_host.max(1),
+        )
+        .with_h2_ping(config.h2_ping_after_idle, config.h2_ping_timeout)
+    }
+}

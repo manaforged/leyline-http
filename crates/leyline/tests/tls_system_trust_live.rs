@@ -3,9 +3,9 @@
 #[ignore = "live: needs UDP network access and current public PKI"]
 async fn macos_system_trust_accepts_public_quic_chain() {
     let session = leyline::Session::builder()
-        .chrome()
-        .http3()
-        .without_env_roots()
+        .browser(leyline::Browser::default_browser())
+        .protocol(leyline::ProtocolPolicy::Http3)
+        .tls_trust(leyline::TlsTrustConfig::new().without_env_roots())
         .timeout(std::time::Duration::from_secs(10))
         .build()
         .expect("build HTTP/3 session");
@@ -15,7 +15,7 @@ async fn macos_system_trust_accepts_public_quic_chain() {
         .await
         .expect("public HTTP/3 request with system trust");
     assert_eq!(response.version(), leyline::HttpVersion::Http3);
-    assert!(response.tls_version().is_some());
+    assert!(response.tls().and_then(|t| t.version.as_deref()).is_some());
 }
 
 #[cfg(target_os = "macos")]
@@ -23,8 +23,8 @@ async fn macos_system_trust_accepts_public_quic_chain() {
 #[ignore = "live: needs network and current public PKI"]
 async fn macos_system_trust_accepts_public_chain() {
     let session = leyline::Session::builder()
-        .chrome()
-        .without_env_roots()
+        .browser(leyline::Browser::default_browser())
+        .tls_trust(leyline::TlsTrustConfig::new().without_env_roots())
         .timeout(std::time::Duration::from_secs(10))
         .build()
         .expect("build system-trust session");
@@ -32,7 +32,7 @@ async fn macos_system_trust_accepts_public_chain() {
 
     let response = result.expect("macOS system trust accepts a public chain");
     assert_ne!(response.version(), leyline::HttpVersion::Http3);
-    assert!(response.tls_version().is_some());
+    assert!(response.tls().and_then(|t| t.version.as_deref()).is_some());
 }
 
 #[cfg(target_os = "macos")]
@@ -43,7 +43,7 @@ async fn macos_system_trust_accepts_public_chain_through_proxy() {
     let session = leyline::Session::builder()
         .browser(leyline::Browser::Chrome150)
         .platform(leyline::Platform::Windows)
-        .proxy(&proxy)
+        .proxy(proxy.as_str())
         .build()
         .expect("build production-shaped session");
     let result = session

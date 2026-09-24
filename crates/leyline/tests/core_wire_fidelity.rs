@@ -1,15 +1,17 @@
 #[path = "core_support/raw_server.rs"]
 mod raw_server;
 
-use leyline::Session;
 use leyline::profile::{HeaderAnchor, Preset};
-use leyline::{Browser, Platform};
+use leyline::{Browser, ChromiumBrand, Platform, ProtocolPolicy, Session};
 use raw_server::{RawResponse, RawServer};
 
 #[tokio::test]
 async fn caller_user_agent_replaces_no_preset_default() {
     let mut server = RawServer::start(vec![RawResponse::ok()]).await;
-    let session = Session::builder().http1().build().unwrap();
+    let session = Session::builder()
+        .protocol(ProtocolPolicy::Http1)
+        .build()
+        .unwrap();
 
     let resp = session
         .request(http::Method::GET, server.url("/ua"))
@@ -29,7 +31,10 @@ async fn caller_user_agent_replaces_no_preset_default() {
 #[tokio::test]
 async fn bulk_headers_replace_all_no_preset_defaults() {
     let mut server = RawServer::start(vec![RawResponse::ok()]).await;
-    let session = Session::builder().http1().build().unwrap();
+    let session = Session::builder()
+        .protocol(ProtocolPolicy::Http1)
+        .build()
+        .unwrap();
 
     let resp = session
         .request(http::Method::GET, server.url("/defaults"))
@@ -60,14 +65,22 @@ async fn bulk_headers_replace_all_no_preset_defaults() {
 async fn dx_helpers_accept_common_pair_shapes_and_header_shortcuts() {
     let mut server = RawServer::start(vec![RawResponse::ok(), RawResponse::ok()]).await;
 
-    let client = Session::builder().http1().build().unwrap();
-    let _explicit = Session::builder()
-        .profile(Browser::Chrome147, Platform::Windows)
+    let client = Session::builder()
+        .protocol(ProtocolPolicy::Http1)
         .build()
         .unwrap();
-    let _default = Session::new();
-    let _chrome = Session::chrome();
-    let _firefox = Session::builder().firefox().http1().build().unwrap();
+    let _explicit = Session::builder()
+        .browser(Browser::Chrome147)
+        .platform(Platform::Windows)
+        .build()
+        .unwrap();
+    let _bare = Session::builder().build().unwrap();
+    let _chrome = Session::new();
+    let _firefox = Session::builder()
+        .browser(Browser::default_firefox())
+        .protocol(ProtocolPolicy::Http1)
+        .build()
+        .unwrap();
 
     let owned_headers = vec![
         ("x-owned".to_string(), "yes".to_string()),
@@ -78,10 +91,10 @@ async fn dx_helpers_accept_common_pair_shapes_and_header_shortcuts() {
         .request(http::Method::GET, server.url("/dx"))
         .query([("a", "1"), ("space", "hello world")])
         .headers(&owned_headers)
-        .accept("application/json")
-        .accept_language("en-US,en;q=0.9")
-        .referer("https://example.test/from")
-        .origin("https://example.test")
+        .header("accept", "application/json")
+        .header("accept-language", "en-US,en;q=0.9")
+        .header("referer", "https://example.test/from")
+        .header("origin", "https://example.test")
         .header("cache-control", "no-cache")
         .send()
         .await
@@ -112,7 +125,6 @@ async fn dx_helpers_accept_common_pair_shapes_and_header_shortcuts() {
     let resp = client
         .post(&server.url("/login"))
         .form(&form_pairs)
-        .content_type("application/x-www-form-urlencoded; charset=UTF-8")
         .send()
         .await
         .unwrap();
@@ -122,7 +134,7 @@ async fn dx_helpers_accept_common_pair_shapes_and_header_shortcuts() {
     assert!(req.request_line.starts_with("POST /login HTTP/1.1"));
     assert_eq!(
         req.header_values("content-type"),
-        vec!["application/x-www-form-urlencoded; charset=UTF-8"]
+        vec!["application/x-www-form-urlencoded"]
     );
     server.finish().await;
 }
@@ -130,12 +142,15 @@ async fn dx_helpers_accept_common_pair_shapes_and_header_shortcuts() {
 #[tokio::test]
 async fn append_header_preserves_duplicate_order() {
     let mut server = RawServer::start(vec![RawResponse::ok()]).await;
-    let session = Session::builder().http1().build().unwrap();
+    let session = Session::builder()
+        .protocol(ProtocolPolicy::Http1)
+        .build()
+        .unwrap();
 
     let resp = session
         .request(http::Method::GET, server.url("/dup"))
-        .append_header("x-dup", "a")
-        .append_header("x-dup", "b")
+        .header("x-dup", "a")
+        .header("x-dup", "b")
         .send()
         .await
         .unwrap();
@@ -149,12 +164,15 @@ async fn append_header_preserves_duplicate_order() {
 #[tokio::test]
 async fn set_then_append_user_agent_preserves_caller_order() {
     let mut server = RawServer::start(vec![RawResponse::ok()]).await;
-    let session = Session::builder().http1().build().unwrap();
+    let session = Session::builder()
+        .protocol(ProtocolPolicy::Http1)
+        .build()
+        .unwrap();
 
     let resp = session
         .request(http::Method::GET, server.url("/ua-append"))
         .header("user-agent", "X")
-        .append_header("user-agent", "Y")
+        .header("user-agent", "Y")
         .send()
         .await
         .unwrap();
@@ -168,7 +186,10 @@ async fn set_then_append_user_agent_preserves_caller_order() {
 #[tokio::test]
 async fn caller_referer_wins_over_navigate_preset_referer() {
     let mut server = RawServer::start(vec![RawResponse::ok()]).await;
-    let session = Session::builder().http1().build().unwrap();
+    let session = Session::builder()
+        .protocol(ProtocolPolicy::Http1)
+        .build()
+        .unwrap();
 
     let resp = session
         .request(http::Method::GET, server.url("/nav"))
@@ -193,7 +214,10 @@ async fn redirect_cross_origin_strips_authorization_after_first_hop() {
     let mut target = RawServer::start(vec![RawResponse::ok()]).await;
     let target_url = target.url("/landing");
     let mut redirector = RawServer::start(vec![RawResponse::redirect(target_url)]).await;
-    let session = Session::builder().http1().build().unwrap();
+    let session = Session::builder()
+        .protocol(ProtocolPolicy::Http1)
+        .build()
+        .unwrap();
 
     let resp = session
         .request(http::Method::GET, redirector.url("/start"))
@@ -219,7 +243,10 @@ async fn redirect_cross_origin_strips_authorization_after_first_hop() {
 async fn redirect_same_origin_preserves_authorization() {
     let mut server =
         RawServer::start(vec![RawResponse::redirect("/landing"), RawResponse::ok()]).await;
-    let session = Session::builder().http1().build().unwrap();
+    let session = Session::builder()
+        .protocol(ProtocolPolicy::Http1)
+        .build()
+        .unwrap();
 
     let resp = session
         .request(http::Method::GET, server.url("/start"))
@@ -239,7 +266,12 @@ async fn redirect_same_origin_preserves_authorization() {
 #[tokio::test]
 async fn caller_dnt_wins_over_edge_brand_overlay() {
     let mut server = RawServer::start(vec![RawResponse::ok()]).await;
-    let session = Session::builder().http1().edge().build().unwrap();
+    let session = Session::builder()
+        .browser(Browser::default_browser())
+        .brand(ChromiumBrand::Edge)
+        .protocol(ProtocolPolicy::Http1)
+        .build()
+        .unwrap();
 
     let resp = session
         .request(http::Method::GET, server.url("/edge"))
@@ -258,7 +290,10 @@ async fn caller_dnt_wins_over_edge_brand_overlay() {
 #[tokio::test]
 async fn anchored_headers_interleave_at_preset_slots() {
     let mut server = RawServer::start(vec![RawResponse::ok()]).await;
-    let session = Session::builder().http1().build().unwrap();
+    let session = Session::builder()
+        .protocol(ProtocolPolicy::Http1)
+        .build()
+        .unwrap();
 
     let resp = session
         .post(&server.url("/collect"))
@@ -309,7 +344,10 @@ async fn anchored_headers_interleave_at_preset_slots() {
 #[tokio::test]
 async fn plain_authorization_rides_after_user_agent() {
     let mut server = RawServer::start(vec![RawResponse::ok()]).await;
-    let session = Session::builder().http1().build().unwrap();
+    let session = Session::builder()
+        .protocol(ProtocolPolicy::Http1)
+        .build()
+        .unwrap();
 
     let resp = session
         .request(http::Method::GET, server.url("/auth"))

@@ -174,32 +174,6 @@ fn is_public_suffix(domain: &str) -> bool {
         .is_some_and(|s| s.as_bytes().eq_ignore_ascii_case(domain.as_bytes()))
 }
 
-pub(crate) fn rejected_cookie_name_value(header: &str) -> Option<(String, String)> {
-    let name_value = header.split(';').next()?;
-    let (name, value) = name_value.split_once('=')?;
-    let name = name.trim();
-    if name.is_empty() {
-        return None;
-    }
-    let value = value.trim();
-    let value = value
-        .strip_prefix('"')
-        .and_then(|v| v.strip_suffix('"'))
-        .unwrap_or(value);
-    for attr in header.split(';').skip(1) {
-        let attr = attr.trim();
-        if let Some(v) = attr
-            .split_once('=')
-            .filter(|(k, _)| k.trim().eq_ignore_ascii_case("max-age"))
-            .map(|(_, v)| v.trim())
-            && v.parse::<i64>().is_ok_and(|secs| secs <= 0)
-        {
-            return None;
-        }
-    }
-    Some((name.to_string(), value.to_string()))
-}
-
 pub(crate) fn registrable_domain(host: &str) -> Option<String> {
     psl::domain(host.as_bytes()).map(|d| String::from_utf8_lossy(d.as_bytes()).into_owned())
 }

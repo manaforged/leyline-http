@@ -8,7 +8,7 @@ use leyline::profile::BrowserProfile;
 use leyline::tls::{
     FingerprintConnector, HappyEyeballsConfig, ResolveFuture, Resolver, SystemResolver,
 };
-use leyline::{Browser, Session, TlsError, TlsTrustConfig};
+use leyline::{Browser, Session, SocketConfig, TlsError, TlsTrustConfig};
 
 struct StaticResolver(Vec<SocketAddr>);
 
@@ -68,14 +68,17 @@ async fn failing_resolver_is_pluggable() {
 
 #[test]
 fn session_builder_exposes_dns_controls() {
-    let resolver = Arc::new(StaticResolver(vec!["127.0.0.1:443".parse().unwrap()]));
+    let resolver: Arc<dyn Resolver> =
+        Arc::new(StaticResolver(vec!["127.0.0.1:443".parse().unwrap()]));
     let _session = Session::builder()
         .browser(Browser::Chrome146)
-        .resolver(resolver)
-        .happy_eyeballs(
-            HappyEyeballsConfig::default()
-                .resolve_delay(Duration::from_millis(25))
-                .attempt_limit(2),
+        .dns(resolver)
+        .socket(
+            SocketConfig::new().happy_eyeballs(
+                HappyEyeballsConfig::default()
+                    .resolve_delay(Duration::from_millis(25))
+                    .attempt_limit(2),
+            ),
         )
         .build()
         .expect("session build");
@@ -99,7 +102,7 @@ fn session_builder_exposes_trust_controls() {
 fn invalid_der_root_is_rejected_at_build_time() {
     let err = Session::builder()
         .browser(Browser::Chrome146)
-        .add_root_certificate_der([1, 2, 3, 4])
+        .tls_trust(TlsTrustConfig::new().add_ca_der([1, 2, 3, 4]))
         .build()
         .expect_err("invalid DER CA should fail TLS setup");
     assert!(matches!(err.tls(), Some(TlsError::SslConfig(_))));

@@ -51,10 +51,13 @@ async fn receive(delay: Duration, abandon: bool) {
     let mut response = timeout(
         Duration::from_secs(3),
         Session::builder()
-            .http2()
-            .without_system_roots()
-            .without_env_roots()
-            .add_root_certificate_der(certificate.as_ref())
+            .protocol(leyline::ProtocolPolicy::Http2)
+            .tls_trust(
+                leyline::TlsTrustConfig::new()
+                    .without_system_roots()
+                    .without_env_roots()
+                    .add_ca_der(certificate.to_vec()),
+            )
             .build()
             .expect("session")
             .get(&url)

@@ -1,7 +1,5 @@
 use super::{ProtocolPolicy, Session};
 use crate::core::error::{Error, Kind, Result};
-#[cfg(feature = "tower")]
-use crate::core::layer::Call;
 #[cfg(feature = "http3")]
 use crate::core::transport::send_request_h3;
 use crate::core::transport::{
@@ -25,24 +23,6 @@ impl Session {
     #[cfg(feature = "http3")]
     fn proxy_requested(&self, request_proxy: Option<&str>) -> bool {
         request_proxy.is_some() || self.inner.proxy_config.primary().is_some()
-    }
-
-    pub(crate) async fn dispatch<'a>(&'a self, req: Prepared<'a>) -> Result<TransportResponse> {
-        #[cfg(feature = "tower")]
-        if let Some(stack) = self.inner.layer.clone() {
-            if self.inner.https_only && req.url.scheme() != "https" {
-                return Err(Error::new(Kind::Config)
-                    .with_message("https_only session rejected non-HTTPS URL"));
-            }
-            let url = req.url.clone();
-            let req = Prepared {
-                proxy: self.effective_proxy_for(req.url, req.proxy),
-                ..req
-            };
-            let call = Call::new(self.clone(), req)?;
-            return Ok(stack.call(call).await?.seal(&url));
-        }
-        self.send_with_policy(req).await
     }
 
     pub(crate) async fn send_with_policy<'a>(

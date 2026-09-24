@@ -1,6 +1,6 @@
 #[tokio::main]
 async fn main() {
-    match leyline::Session::chrome()
+    match leyline::Session::new()
         .get("https://tls.peet.ws/api/all")
         .await
     {

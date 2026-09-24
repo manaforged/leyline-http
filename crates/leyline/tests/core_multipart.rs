@@ -4,8 +4,8 @@
 )]
 use std::io::Write;
 
-use leyline::Session;
 use leyline::multipart::{Form, Part};
+use leyline::{ProtocolPolicy, Session};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 async fn read_full_request(sock: &mut tokio::net::TcpStream) -> (String, Vec<u8>) {
@@ -74,7 +74,10 @@ async fn text_plus_text_form_roundtrips() {
         sock.flush().await.unwrap();
     });
 
-    let session = Session::builder().http1().build().unwrap();
+    let session = Session::builder()
+        .protocol(ProtocolPolicy::Http1)
+        .build()
+        .unwrap();
     let form = Form::new().text("user", "alice").text("role", "admin");
     let resp = session
         .post(&format!("http://{addr}/submit"))
@@ -106,7 +109,10 @@ async fn text_plus_bytes_part() {
         sock.flush().await.unwrap();
     });
 
-    let session = Session::builder().http1().build().unwrap();
+    let session = Session::builder()
+        .protocol(ProtocolPolicy::Http1)
+        .build()
+        .unwrap();
     let form = Form::new().text("caption", "a tiny image").part(
         "image",
         Part::bytes(bytes::Bytes::from_static(b"hello-world-bytes"))
@@ -149,7 +155,10 @@ async fn text_plus_file() {
         sock.flush().await.unwrap();
     });
 
-    let session = Session::builder().http1().build().unwrap();
+    let session = Session::builder()
+        .protocol(ProtocolPolicy::Http1)
+        .build()
+        .unwrap();
     let form = Form::new()
         .text("user", "alice")
         .file("payload", &path)

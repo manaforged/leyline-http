@@ -1,7 +1,7 @@
 use super::super::{Session, SessionBuilder};
 use crate::core::error::Kind;
 use crate::core::response::{HttpVersion, Response};
-use crate::{Body, ContentEncoding, Request};
+use crate::{Body, ContentEncoding};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[tokio::test]
@@ -40,11 +40,11 @@ async fn plaintext_http_uses_h1_and_preserves_duplicate_headers() {
                 .unwrap();
     });
 
-    let session = Session::chrome();
+    let session = Session::new();
     let mut resp = session
         .request(http::Method::GET, format!("http://{addr}/wire?q=1"))
-        .append_header("x-dup", "one")
-        .append_header("x-dup", "two")
+        .header("x-dup", "one")
+        .header("x-dup", "two")
         .send()
         .await
         .unwrap();
@@ -52,7 +52,10 @@ async fn plaintext_http_uses_h1_and_preserves_duplicate_headers() {
     assert_eq!(resp.version(), HttpVersion::Http1_1);
     assert_eq!(resp.text().await.unwrap(), "ok");
     assert_eq!(
-        resp.header_all("set-cookie").collect::<Vec<_>>(),
+        resp.headers()
+            .filter(|(k, _)| k.as_str().eq_ignore_ascii_case("set-cookie"))
+            .filter_map(|(_, v)| v.to_str().ok())
+            .collect::<Vec<_>>(),
         vec!["a=1", "b=2"]
     );
     server.await.unwrap();
@@ -79,8 +82,12 @@ async fn owned() {
             .await
             .unwrap();
     });
-    let req = Request::new(http::Method::GET, format!("http://{addr}/owned"));
-    let mut resp = Session::chrome().execute(req).await.unwrap();
+    let req = http::Request::builder()
+        .method(http::Method::GET)
+        .uri(format!("http://{addr}/owned"))
+        .body(Body::from(Vec::new()))
+        .unwrap();
+    let mut resp = Session::new().execute(req).await.unwrap();
     assert_eq!(resp.status(), 200);
     assert_eq!(resp.text().await.unwrap(), "ok");
     server.await.unwrap();
@@ -195,7 +202,7 @@ async fn compress_sets_header_and_puts_compressed_bytes_on_the_wire() {
     });
 
     let payload = b"the quick brown fox jumps over the lazy dog. ".repeat(64);
-    let resp = Session::chrome()
+    let resp = Session::new()
         .post(&format!("http://{addr}/upload"))
         .body(payload.clone())
         .compress(ContentEncoding::Gzip)
@@ -216,7 +223,7 @@ async fn compress_rejects_streaming_body() {
     let body = Body::stream(futures_util::stream::iter(vec![Ok::<_, std::io::Error>(
         bytes::Bytes::from_static(b"chunk"),
     )]));
-    let err = Session::chrome()
+    let err = Session::new()
         .post("http://127.0.0.1:9/x")
         .body(body)
         .compress(ContentEncoding::Gzip)
@@ -228,7 +235,7 @@ async fn compress_rejects_streaming_body() {
 
 #[tokio::test]
 async fn unsupported_scheme_proxy_is_refused_not_sent_in_cleartext() {
-    let err = Session::chrome()
+    let err = Session::new()
         .request(http::Method::GET, "https://example.test/")
         .proxy("ftp://user:secret@127.0.0.1:1")
         .send()
@@ -292,7 +299,7 @@ async fn compress_strips_stale_caller_content_length() {
     });
 
     let payload = b"the quick brown fox jumps over the lazy dog. ".repeat(64);
-    let resp = Session::chrome()
+    let resp = Session::new()
         .post(&format!("http://{addr}/upload"))
         .header("content-length", "999999")
         .body(payload.clone())
@@ -308,7 +315,7 @@ async fn compress_strips_stale_caller_content_length() {
 
 #[tokio::test]
 async fn https_scheme_proxy_is_accepted_and_dialed_over_tls() {
-    let err = Session::chrome()
+    let err = Session::new()
         .request(http::Method::GET, "https://example.test/")
         .proxy("https://user:secret@127.0.0.1:1")
         .send()
@@ -334,7 +341,7 @@ async fn json_builder_returns_error_instead_of_panicking() {
         }
     }
 
-    let session = Session::chrome();
+    let session = Session::new();
     let err = session
         .post("http://127.0.0.1:9/no-network")
         .json(&BadJson)
@@ -342,209 +349,4 @@ async fn json_builder_returns_error_instead_of_panicking() {
         .await
         .unwrap_err();
     assert_eq!(err.kind(), Kind::Json);
-}
-
-async fn read_request_head(sock: &mut tokio::net::TcpStream) -> bool {
-    let mut buf = Vec::new();
-    let mut tmp = [0u8; 1024];
-    loop {
-        let n = sock.read(&mut tmp).await.unwrap();
-        if n == 0 {
-            return !buf.is_empty();
-        }
-        buf.extend_from_slice(&tmp[..n]);
-        if buf.windows(4).any(|w| w == b"\r\n\r\n") {
-            return true;
-        }
-    }
-}
-
-#[tokio::test]
-async fn streamed_chunked_response_reassembles() {
-    use futures_util::StreamExt;
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let server = tokio::spawn(async move {
-        let (mut sock, _) = listener.accept().await.unwrap();
-        read_request_head(&mut sock).await;
-        sock.write_all(
-            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n\
-              7\r\nHello, \r\nA\r\nstreaming \r\n6\r\nworld!\r\n0\r\n\r\n",
-        )
-        .await
-        .unwrap();
-    });
-
-    let resp = Session::chrome()
-        .request(http::Method::GET, format!("http://{addr}/x"))
-        .stream()
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), 200);
-    let mut body = Vec::new();
-    let mut stream = resp.into_stream().unwrap();
-    while let Some(chunk) = stream.next().await {
-        body.extend_from_slice(&chunk.unwrap());
-    }
-    assert_eq!(body, b"Hello, streaming world!");
-    server.await.unwrap();
-}
-
-#[tokio::test]
-async fn streamed_fixed_length_response_reassembles() {
-    use futures_util::StreamExt;
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let payload = b"the quick brown fox ".repeat(500);
-    let payload_srv = payload.clone();
-    let server = tokio::spawn(async move {
-        let (mut sock, _) = listener.accept().await.unwrap();
-        read_request_head(&mut sock).await;
-        let head = format!(
-            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n",
-            payload_srv.len()
-        );
-        sock.write_all(head.as_bytes()).await.unwrap();
-        sock.write_all(&payload_srv).await.unwrap();
-    });
-
-    let resp = Session::chrome()
-        .request(http::Method::GET, format!("http://{addr}/x"))
-        .stream()
-        .send()
-        .await
-        .unwrap();
-    let mut body = Vec::new();
-    let mut stream = resp.into_stream().unwrap();
-    while let Some(chunk) = stream.next().await {
-        body.extend_from_slice(&chunk.unwrap());
-    }
-    assert_eq!(body, payload);
-    server.await.unwrap();
-}
-
-#[tokio::test]
-async fn streamed_connection_is_reused_after_full_drain() {
-    use futures_util::StreamExt;
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let server = tokio::spawn(async move {
-        let (mut sock, _) = listener.accept().await.unwrap();
-        for body in [b"first".as_slice(), b"second".as_slice()] {
-            assert!(read_request_head(&mut sock).await, "expected a request");
-            let head = format!(
-                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: keep-alive\r\n\r\n",
-                body.len()
-            );
-            sock.write_all(head.as_bytes()).await.unwrap();
-            sock.write_all(body).await.unwrap();
-        }
-    });
-
-    let session = Session::chrome();
-    let r1 = session
-        .request(http::Method::GET, format!("http://{addr}/a"))
-        .stream()
-        .send()
-        .await
-        .unwrap();
-    let mut b1 = Vec::new();
-    let mut s1 = r1.into_stream().unwrap();
-    while let Some(chunk) = s1.next().await {
-        b1.extend_from_slice(&chunk.unwrap());
-    }
-    assert_eq!(b1, b"first");
-
-    let mut r2 = session.get(&format!("http://{addr}/b")).await.unwrap();
-    assert_eq!(r2.text().await.unwrap(), "second");
-    server.await.unwrap();
-}
-
-#[tokio::test]
-async fn streamed_read_timeout_fires_on_stall() {
-    use futures_util::StreamExt;
-    use std::time::Duration;
-
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let server = tokio::spawn(async move {
-        let (mut sock, _) = listener.accept().await.unwrap();
-        read_request_head(&mut sock).await;
-        sock.write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n")
-            .await
-            .unwrap();
-        tokio::time::sleep(Duration::from_secs(5)).await;
-    });
-
-    let session = Session::builder()
-        .timeouts(crate::TimeoutConfig {
-            read: Some(Duration::from_millis(200)),
-            ..crate::TimeoutConfig::default()
-        })
-        .build()
-        .unwrap();
-    let resp = session
-        .request(http::Method::GET, format!("http://{addr}/x"))
-        .stream()
-        .send()
-        .await
-        .unwrap();
-    let mut stream = resp.into_stream().unwrap();
-    assert_eq!(&stream.next().await.unwrap().unwrap()[..], b"hello");
-    let err = stream.next().await.unwrap().unwrap_err();
-    assert_eq!(err.kind(), std::io::ErrorKind::TimedOut, "{err}");
-    server.abort();
-}
-
-#[tokio::test]
-async fn streamed_connection_dropped_when_consumer_drops_early() {
-    use futures_util::StreamExt;
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let accepts = Arc::new(AtomicUsize::new(0));
-    let accepts_srv = accepts.clone();
-    tokio::spawn(async move {
-        loop {
-            let Ok((mut sock, _)) = listener.accept().await else {
-                break;
-            };
-            accepts_srv.fetch_add(1, Ordering::SeqCst);
-            tokio::spawn(async move {
-                while read_request_head(&mut sock).await {
-                    let mut resp =
-                        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: keep-alive\r\n\r\n"
-                            .to_vec();
-                    for _ in 0..50 {
-                        resp.extend_from_slice(b"A\r\n0123456789\r\n");
-                    }
-                    resp.extend_from_slice(b"0\r\n\r\n");
-                    if sock.write_all(&resp).await.is_err() {
-                        break;
-                    }
-                }
-            });
-        }
-    });
-
-    let session = Session::chrome();
-    let r1 = session
-        .request(http::Method::GET, format!("http://{addr}/a"))
-        .stream()
-        .send()
-        .await
-        .unwrap();
-    let mut s1 = r1.into_stream().unwrap();
-    let _first = s1.next().await.unwrap().unwrap();
-    drop(s1);
-    let r2 = session.get(&format!("http://{addr}/b")).await.unwrap();
-    assert_eq!(r2.status(), 200);
-    assert_eq!(
-        accepts.load(Ordering::SeqCst),
-        2,
-        "an early-dropped stream's connection must not be reused"
-    );
 }

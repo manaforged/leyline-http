@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use futures_util::stream;
-use leyline::{Body, RetryPolicy, Session};
+use leyline::{Body, ProtocolPolicy, RetryPolicy, Session};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 async fn read_one_request(sock: &mut tokio::net::TcpStream) {
@@ -57,7 +57,11 @@ async fn retries_503_then_succeeds() {
 
     let policy =
         RetryPolicy::transient().with_backoff(Duration::from_millis(1), Duration::from_millis(10));
-    let session = Session::builder().http1().retry(policy).build().unwrap();
+    let session = Session::builder()
+        .protocol(ProtocolPolicy::Http1)
+        .retry(policy)
+        .build()
+        .unwrap();
     let mut resp = session.get(&format!("http://{addr}/flaky")).await.unwrap();
     assert_eq!(resp.status(), 200);
     assert_eq!(resp.text().await.unwrap(), "ok");
@@ -85,7 +89,7 @@ async fn new_sessions_do_not_retry_503() {
     });
 
     let resp = Session::builder()
-        .http1()
+        .protocol(ProtocolPolicy::Http1)
         .build()
         .unwrap()
         .get(&format!("http://{addr}/flaky"))
@@ -115,7 +119,10 @@ async fn does_not_retry_on_400() {
         sock.flush().await.unwrap();
     });
 
-    let session = Session::builder().http1().build().unwrap();
+    let session = Session::builder()
+        .protocol(ProtocolPolicy::Http1)
+        .build()
+        .unwrap();
     let policy =
         RetryPolicy::transient().with_backoff(Duration::from_millis(1), Duration::from_millis(5));
     let resp = session
@@ -159,7 +166,10 @@ async fn post_without_opt_in_does_not_retry() {
         sock.flush().await.unwrap();
     });
 
-    let session = Session::builder().http1().build().unwrap();
+    let session = Session::builder()
+        .protocol(ProtocolPolicy::Http1)
+        .build()
+        .unwrap();
     let policy =
         RetryPolicy::transient().with_backoff(Duration::from_millis(1), Duration::from_millis(5));
     let resp = session
@@ -176,7 +186,10 @@ async fn post_without_opt_in_does_not_retry() {
 
 #[tokio::test]
 async fn streaming_body_plus_retry_errors_clearly() {
-    let session = Session::builder().http1().build().unwrap();
+    let session = Session::builder()
+        .protocol(ProtocolPolicy::Http1)
+        .build()
+        .unwrap();
     let chunks: Vec<std::io::Result<Bytes>> = vec![Ok(Bytes::from_static(b"abc"))];
     let body = Body::stream(stream::iter(chunks));
 
@@ -230,7 +243,10 @@ async fn retries_exhausted_returns_last_response() {
         }
     });
 
-    let session = Session::builder().http1().build().unwrap();
+    let session = Session::builder()
+        .protocol(ProtocolPolicy::Http1)
+        .build()
+        .unwrap();
     let policy = RetryPolicy::transient()
         .with_max_retries(3)
         .with_backoff(Duration::from_millis(1), Duration::from_millis(5));

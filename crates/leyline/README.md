@@ -42,14 +42,14 @@ use leyline::Session;
 
 #[tokio::main]
 async fn main() -> leyline::Result<()> {
-    let session = Session::chrome();
+    let session = Session::new();
     let mut response = session.get("https://example.com/").await?;
     println!("{}", response.text().await?);
     Ok(())
 }
 ```
 
-`Session::chrome()` uses the latest bundled Chrome profile with a Windows
+`Session::new()` uses the latest bundled Chrome profile with a Windows
 identity. Reuse one session to share connections and cookies. To select
 another browser or platform, use `Session::builder()`.
 

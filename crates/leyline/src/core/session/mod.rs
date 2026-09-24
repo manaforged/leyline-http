@@ -25,8 +25,6 @@ use url::Url;
 use crate::cookie::Jar;
 #[cfg(feature = "websocket")]
 use crate::core::WebSocketConfig;
-#[cfg(feature = "tower")]
-use crate::core::layer::Stack;
 use crate::core::retry::RetryPolicy;
 use crate::core::{CompressionConfig, ProxyConfig, RedirectPolicy, TimeoutConfig};
 use crate::h2::H2Config;
@@ -85,8 +83,6 @@ pub(crate) struct SessionInner {
     tls_trust: TlsTrustConfig,
     #[cfg(feature = "http3")]
     profile: &'static crate::profile::BrowserProfile,
-    #[cfg(feature = "tower")]
-    layer: Option<Arc<dyn Stack>>,
     trace: Option<Arc<dyn crate::trace::Trace>>,
     #[expect(
         clippy::type_complexity,

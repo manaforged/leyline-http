@@ -5,8 +5,6 @@ mod send;
 
 pub use compress::ContentEncoding;
 
-use std::time::Duration;
-
 use http::{HeaderName, HeaderValue, Method};
 
 use crate::profile::{HeaderAnchor, Preset};
@@ -54,13 +52,11 @@ pub struct RequestBuilder {
     pub(super) body: Body,
     pub(super) headers: HeaderList,
     pub(super) query_params: Vec<(String, String)>,
-    pub(super) timeout: Option<Duration>,
     pub(super) timeouts: Option<TimeoutConfig>,
     pub(super) builder_error: Option<Error>,
     pub(super) stream_response: bool,
     pub(super) compress: Option<ContentEncoding>,
     pub(super) retry_policy: RetryPolicy,
-    pub(super) allow_non_idempotent_retry: bool,
     pub(super) digest_auth: Option<DigestAuth>,
     pub(super) proxy: Option<String>,
     pub(super) header_order: Option<Vec<String>>,
@@ -86,13 +82,11 @@ impl RequestBuilder {
             body: Body::default(),
             headers: HeaderList::new(),
             query_params: Vec::new(),
-            timeout: None,
             timeouts: None,
             builder_error: None,
             stream_response: false,
             compress: None,
             retry_policy: session.default_retry().clone(),
-            allow_non_idempotent_retry: false,
             digest_auth: None,
             proxy: None,
             header_order: None,
@@ -130,14 +124,8 @@ impl RequestBuilder {
         }
     }
 
-    pub fn timeout(mut self, timeout: Duration) -> Self {
-        self.timeout = Some(timeout);
-        self
-    }
-
-    pub fn timeouts(mut self, timeouts: TimeoutConfig) -> Self {
-        self.timeout = Some(timeouts.total);
-        self.timeouts = Some(timeouts);
+    pub fn timeout(mut self, config: impl Into<TimeoutConfig>) -> Self {
+        self.timeouts = Some(config.into());
         self
     }
 
@@ -182,12 +170,6 @@ impl RequestBuilder {
         self
     }
 
-    pub fn form_str(mut self, encoded: &str) -> Self {
-        self.put("content-type", "application/x-www-form-urlencoded");
-        self.body = Body::from(encoded.as_bytes().to_vec());
-        self
-    }
-
     pub fn stream(mut self) -> Self {
         self.stream_response = true;
         self
@@ -214,15 +196,6 @@ impl RequestBuilder {
         name: impl TryInto<HeaderName>,
         value: impl TryInto<HeaderValue>,
     ) -> Self {
-        self.put(name, value);
-        self
-    }
-
-    pub fn append_header(
-        mut self,
-        name: impl TryInto<HeaderName>,
-        value: impl TryInto<HeaderValue>,
-    ) -> Self {
         if let Err(err) = self.headers.append(name, value) {
             self.fail(err);
         }
@@ -242,48 +215,12 @@ impl RequestBuilder {
     {
         for pair in headers {
             let (k, v) = pair.into_param_pair();
-            self.put(k, v);
-        }
-        self
-    }
-
-    pub fn append_headers<I, P>(mut self, headers: I) -> Self
-    where
-        I: IntoIterator<Item = P>,
-        P: IntoParamPair,
-    {
-        for pair in headers {
-            let (k, v) = pair.into_param_pair();
             if let Err(err) = self.headers.append(k, v) {
                 self.fail(err);
                 return self;
             }
         }
         self
-    }
-
-    pub fn accept(self, value: &str) -> Self {
-        self.header("accept", value)
-    }
-
-    pub fn accept_language(self, value: &str) -> Self {
-        self.header("accept-language", value)
-    }
-
-    pub fn user_agent(self, value: &str) -> Self {
-        self.header("user-agent", value)
-    }
-
-    pub fn referer(self, value: &str) -> Self {
-        self.header("referer", value)
-    }
-
-    pub fn origin(self, value: &str) -> Self {
-        self.header("origin", value)
-    }
-
-    pub fn content_type(self, value: &str) -> Self {
-        self.header("content-type", value)
     }
 
     pub fn anchored(
@@ -311,11 +248,6 @@ impl RequestBuilder {
 
     pub fn retry(mut self, policy: RetryPolicy) -> Self {
         self.retry_policy = policy;
-        self
-    }
-
-    pub fn allow_non_idempotent_retry(mut self, allow: bool) -> Self {
-        self.allow_non_idempotent_retry = allow;
         self
     }
 

@@ -48,10 +48,7 @@ pub(crate) struct TransportResponse {
     pub(crate) body: TransportBody,
     pub(crate) final_url: String,
     pub(crate) version: HttpVersion,
-    pub(crate) tls_alpn: Option<HeaderStr>,
-    pub(crate) peer_cert_der: Option<Vec<u8>>,
-    pub(crate) tls_version: Option<String>,
-    pub(crate) tls_cipher: Option<String>,
+    pub(crate) tls: Option<crate::pool::TlsInfo>,
     pub(crate) timing: crate::core::ResponseTiming,
 }
 
@@ -242,10 +239,7 @@ pub(crate) async fn send_request_h2(
         body: transport_body,
         final_url: url.as_str().to_owned(),
         version: HttpVersion::Http2,
-        tls_alpn: Some(HeaderStr::from_static("h2")),
-        peer_cert_der: tls.peer_cert_der,
-        tls_version: tls.version,
-        tls_cipher: tls.cipher,
+        tls: Some(tls),
         timing,
     })
 }
@@ -403,16 +397,6 @@ pub(crate) async fn send_request_h1(
         H1ResponseBody::Streaming(s) => TransportBody::Streaming(s),
     };
 
-    let (tls_alpn, peer_cert_der, tls_version, tls_cipher) = match resp.tls {
-        Some(info) => (
-            Some(HeaderStr::from_static("http/1.1")),
-            info.peer_cert_der,
-            info.version,
-            info.cipher,
-        ),
-        None => (None, None, None, None),
-    };
-
     Ok(TransportResponse {
         status: status(resp.status)?,
         headers: adopt(resp.headers),
@@ -420,10 +404,7 @@ pub(crate) async fn send_request_h1(
         body: transport_body,
         final_url: url.as_str().to_owned(),
         version: HttpVersion::Http1_1,
-        tls_alpn,
-        peer_cert_der,
-        tls_version,
-        tls_cipher,
+        tls: resp.tls,
         timing: crate::core::ResponseTiming::default(),
     })
 }
@@ -520,10 +501,7 @@ pub(crate) async fn send_request_h3(
         body: transport_body,
         final_url: url.as_str().to_owned(),
         version: HttpVersion::Http3,
-        tls_alpn: Some(HeaderStr::from_static("h3")),
-        peer_cert_der: tls.peer_cert_der,
-        tls_version: tls.version,
-        tls_cipher: tls.cipher,
+        tls: Some(tls),
         timing: crate::core::ResponseTiming::default(),
     })
 }
