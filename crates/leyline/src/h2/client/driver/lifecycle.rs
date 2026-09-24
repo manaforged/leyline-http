@@ -26,21 +26,13 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             }
         }
         while let Some(cmd) = self.pending.pop_front() {
-            match cmd {
-                DriverCommand::SendRequest { sink, .. }
-                | DriverCommand::OpenConnect { sink, .. } => {
-                    send_err_to_sink(sink, clone_err(&final_err));
-                }
-                DriverCommand::Ping { .. } => {}
+            if let Some(sink) = cmd.into_sink() {
+                send_err_to_sink(sink, clone_err(&final_err));
             }
         }
         while let Ok(cmd) = self.command_rx.try_recv() {
-            match cmd {
-                DriverCommand::SendRequest { sink, .. }
-                | DriverCommand::OpenConnect { sink, .. } => {
-                    send_err_to_sink(sink, clone_err(&final_err));
-                }
-                DriverCommand::Ping { .. } => {}
+            if let Some(sink) = cmd.into_sink() {
+                send_err_to_sink(sink, clone_err(&final_err));
             }
         }
         result

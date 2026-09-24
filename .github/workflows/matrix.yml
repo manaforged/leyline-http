@@ -68,23 +68,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
           toolchain: stable
+          components: clippy
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: features
 
-      - name: each-feature check
-        run: |
-          mapfile -t feats < <(cargo metadata --locked --no-deps --format-version=1 \
-            | jq -r '.packages[] | select(.name == "leyline-http") | .features | keys[]')
-          [ "${#feats[@]}" -eq 0 ] && exit 1
-          rc=0
-          for combo in none "${feats[@]}"; do
-            args=(--locked --no-default-features)
-            [ "$combo" != none ] && args+=(--features "$combo")
-            cargo check -p leyline-http "${args[@]}" || rc=1
-          done
-          exit $rc
+      - name: verify gates
+        run: scripts/verify.sh --only features
 
   minimal-versions:
     name: minimal versions

@@ -92,6 +92,7 @@ impl FingerprintConnector {
         }
     }
 
+    #[cfg(feature = "http3")]
     pub(crate) fn resolver(&self) -> &Arc<dyn Resolver> {
         &self.resolver
     }

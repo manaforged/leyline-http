@@ -6,6 +6,7 @@ use crate::core::transport::{
     Prepared, TransportResponse, send_request_auto, send_request_h1, send_request_h2,
 };
 use crate::core::{ProxyConfig, ProxyUrl};
+#[cfg(feature = "http3")]
 use crate::pool::checkout_handle;
 #[cfg(feature = "http3")]
 use crate::pool::{H3Target, checkout_h3_handle};

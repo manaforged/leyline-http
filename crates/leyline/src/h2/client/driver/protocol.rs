@@ -36,6 +36,7 @@ pub(crate) enum DriverCommand {
         body: DriverRequestBody,
         sink: ResponseSink,
     },
+    #[cfg(feature = "websocket")]
     OpenConnect {
         pseudo: PseudoHeaders,
         headers: Vec<crate::h2::connection::HeaderPair>,
@@ -45,6 +46,17 @@ pub(crate) enum DriverCommand {
     Ping {
         ack_tx: oneshot::Sender<()>,
     },
+}
+
+impl DriverCommand {
+    pub(crate) fn into_sink(self) -> Option<ResponseSink> {
+        match self {
+            DriverCommand::SendRequest { sink, .. } => Some(sink),
+            #[cfg(feature = "websocket")]
+            DriverCommand::OpenConnect { sink, .. } => Some(sink),
+            DriverCommand::Ping { .. } => None,
+        }
+    }
 }
 
 #[cfg(test)]

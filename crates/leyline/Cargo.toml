@@ -152,6 +152,22 @@ zstd = { version = "0.13", optional = true }
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Security_Cryptography", "Win32_Foundation"] }
 
+[[example]]
+name = "http3"
+required-features = ["http3"]
+
+[[example]]
+name = "websocket"
+required-features = ["websocket"]
+
+[[test]]
+name = "smoke"
+required-features = ["http3"]
+
+[[test]]
+name = "core_multipart"
+required-features = ["multipart"]
+
 [[test]]
 name = "fingerprint_conformance"
 required-features = ["bench-internals"]
@@ -170,7 +186,7 @@ required-features = ["bench-internals"]
 
 [[test]]
 name = "h2_extended_connect"
-required-features = ["bench-internals"]
+required-features = ["bench-internals", "websocket"]
 
 [[test]]
 name = "h2_flow_control_e2e"
@@ -254,7 +270,7 @@ required-features = ["bench-internals"]
 
 [[test]]
 name = "tls_peet"
-required-features = ["bench-internals"]
+required-features = ["bench-internals", "http3", "websocket"]
 
 [[test]]
 name = "cookies_multidomain_replay"

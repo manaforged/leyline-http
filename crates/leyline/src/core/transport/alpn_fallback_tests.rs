@@ -1,3 +1,4 @@
+use super::h1::h1_error_to_core;
 use super::*;
 
 #[test]

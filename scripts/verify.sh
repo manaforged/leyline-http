@@ -137,6 +137,12 @@ g_clippy() {
     ok "clippy clean"
 }
 
+g_features() {
+    step "feature matrix (clippy -p leyline-http per feature set)"
+    scripts/feature-matrix.sh || fail "a feature set fails to build or lint"
+    ok "feature matrix clean"
+}
+
 g_doc() {
     step "cargo doc (workspace, excluding vendored leyline-quiche)"
     RUSTDOCFLAGS="-D warnings" cargo doc \
@@ -281,11 +287,11 @@ g_fuzz_timed() {
 
 gate_order=(
     comments msrv package
-    fmt clippy doc api book test live deny semver external-types benches
+    fmt clippy features doc api book test live deny semver external-types benches
     fuzz-replay fuzz-timed
 )
 quick_gates=(comments msrv package)
-full_gates=(comments msrv package fmt clippy doc api book test live
+full_gates=(comments msrv package fmt clippy features doc api book test live
     deny semver external-types benches fuzz-replay)
 
 if [[ -n "$only" ]]; then
@@ -314,7 +320,7 @@ if [[ -z "$only" && $full -eq 1 ]]; then
         'check (MSRV)'        "ran (cargo +$msrv check --workspace)" \
         'check (stable)'      'ran (this toolchain)' \
         'check (beta)'        'matrix only' \
-        'each feature'        'matrix only (per-feature cargo check)' \
+        'each feature'        'ran (scripts/feature-matrix.sh)' \
         'minimal versions'    'matrix only (cargo minimal-versions check)' \
         'semver'              "$semver_status" \
         'external types'      "$external_types_status" \

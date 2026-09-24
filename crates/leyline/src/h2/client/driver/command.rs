@@ -1,8 +1,10 @@
 use std::collections::VecDeque;
+#[cfg(feature = "websocket")]
 use std::io;
 
 use bytes::Bytes;
 use tokio::io::{AsyncRead, AsyncWrite};
+#[cfg(feature = "websocket")]
 use tokio::sync::mpsc;
 
 use crate::h2::connection::{PseudoHeaders, encode_request_pseudos};
@@ -25,6 +27,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 self.pings.push_back((payload, ack_tx));
                 Ok(())
             }
+            #[cfg(feature = "websocket")]
             DriverCommand::OpenConnect {
                 pseudo,
                 headers,
@@ -207,6 +210,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         }
     }
 
+    #[cfg(feature = "websocket")]
     pub(super) async fn start_extended_connect(
         &mut self,
         pseudo: &PseudoHeaders,

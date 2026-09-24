@@ -17,7 +17,9 @@ use crate::core::response::HttpVersion;
 
 mod h1;
 
-pub(crate) use h1::{h1_error_to_core, send_request_h1};
+#[cfg(feature = "websocket")]
+pub(crate) use h1::h1_error_to_core;
+pub(crate) use h1::send_request_h1;
 
 fn status(code: u16) -> Result<StatusCode> {
     StatusCode::from_u16(code)

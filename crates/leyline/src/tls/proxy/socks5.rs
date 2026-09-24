@@ -1,4 +1,4 @@
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, SocketAddr};
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -25,33 +25,6 @@ pub(crate) async fn connect<C: crate::tls::TlsHandshake>(
     connector
         .do_tls_handshake(tcp_stream, host, &session_key, include_alps)
         .await
-}
-
-pub(crate) async fn udp_associate<C: crate::tls::TlsHandshake>(
-    connector: &C,
-    proxy: &url::Url,
-) -> Result<(TcpStream, SocketAddr), TlsError> {
-    let mut control = open_control(connector, proxy).await?;
-    let unspecified = SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0));
-    let bound = request(
-        &mut control,
-        CMD_UDP_ASSOCIATE,
-        &encode_socket_addr(unspecified),
-    )
-    .await?;
-    let relay = match bound {
-        Bound::Ip(addr) if addr.ip().is_unspecified() => {
-            let proxy_ip = control.peer_addr().map_err(TlsError::proxy_io)?.ip();
-            SocketAddr::new(proxy_ip, addr.port())
-        }
-        Bound::Ip(addr) => addr,
-        Bound::Domain => {
-            return Err(TlsError::proxy(
-                "socks5: UDP ASSOCIATE relay address is a domain name",
-            ));
-        }
-    };
-    Ok((control, relay))
 }
 
 async fn send_connect(tcp_stream: &mut TcpStream, host: &str, port: u16) -> Result<(), TlsError> {
@@ -159,11 +132,6 @@ async fn authenticate(tcp_stream: &mut TcpStream, auth: &[u8]) -> Result<(), Tls
     Ok(())
 }
 
-pub(crate) enum Bound {
-    Ip(SocketAddr),
-    Domain,
-}
-
 pub(crate) fn encode_addr(host: &str, port: u16) -> Result<Vec<u8>, TlsError> {
     let bare = crate::util::bare_host(host);
     if let Ok(ip) = bare.parse::<IpAddr>() {
@@ -212,18 +180,11 @@ pub(crate) fn addr_len(atyp: u8, next: Option<u8>) -> Result<usize, TlsError> {
     }
 }
 
-pub(crate) fn decode_bound(atyp: u8, body: &[u8]) -> Bound {
-    let port_at = body.len() - 2;
-    let port = u16::from_be_bytes([body[port_at], body[port_at + 1]]);
-    let ip = match atyp {
-        0x01 => <[u8; 4]>::try_from(&body[..4]).map(IpAddr::from).ok(),
-        0x04 => <[u8; 16]>::try_from(&body[..16]).map(IpAddr::from).ok(),
-        _ => None,
-    };
-    ip.map_or(Bound::Domain, |ip| Bound::Ip(SocketAddr::new(ip, port)))
-}
-
-async fn request(tcp_stream: &mut TcpStream, cmd: u8, addr: &[u8]) -> Result<Bound, TlsError> {
+async fn request(
+    tcp_stream: &mut TcpStream,
+    cmd: u8,
+    addr: &[u8],
+) -> Result<(u8, Vec<u8>), TlsError> {
     let mut req = Vec::with_capacity(3 + addr.len());
     req.extend_from_slice(&[0x05, cmd, 0x00]);
     req.extend_from_slice(addr);
@@ -278,9 +239,10 @@ async fn request(tcp_stream: &mut TcpStream, cmd: u8, addr: &[u8]) -> Result<Bou
         .read_exact(&mut body)
         .await
         .map_err(TlsError::proxy_io)?;
-    Ok(decode_bound(atyp, &body))
+    Ok((atyp, body))
 }
 
+#[cfg(feature = "http3")]
 pub(crate) mod udp;
 
 #[cfg(test)]

@@ -89,30 +89,9 @@ pub(super) fn compression(
 ) -> Result<(), TlsError> {
     for algo in &tls.cert_compression {
         match algo.as_str() {
-            "brotli" => {
-                #[cfg(feature = "compression-brotli")]
-                builder
-                    .add_certificate_compression_algorithm(BrotliDecompressor)
-                    .map_err(TlsError::from_stack)?;
-                #[cfg(not(feature = "compression-brotli"))]
-                return Err(missing("brotli", "compression-brotli"));
-            }
-            "zlib" => {
-                #[cfg(any(feature = "compression-gzip", feature = "compression-deflate"))]
-                builder
-                    .add_certificate_compression_algorithm(ZlibDecompressor)
-                    .map_err(TlsError::from_stack)?;
-                #[cfg(not(any(feature = "compression-gzip", feature = "compression-deflate")))]
-                return Err(missing("zlib", "compression-deflate"));
-            }
-            "zstd" => {
-                #[cfg(feature = "compression-zstd")]
-                builder
-                    .add_certificate_compression_algorithm(ZstdDecompressor)
-                    .map_err(TlsError::from_stack)?;
-                #[cfg(not(feature = "compression-zstd"))]
-                return Err(missing("zstd", "compression-zstd"));
-            }
+            "brotli" => add_brotli(builder)?,
+            "zlib" => add_zlib(builder)?,
+            "zstd" => add_zstd(builder)?,
             other => {
                 return Err(TlsError::Profile(format!(
                     "unknown cert compression algorithm: {other:?}"
@@ -121,6 +100,42 @@ pub(super) fn compression(
         }
     }
     Ok(())
+}
+
+#[cfg(feature = "compression-brotli")]
+fn add_brotli(builder: &mut SslContextBuilder) -> Result<(), TlsError> {
+    builder
+        .add_certificate_compression_algorithm(BrotliDecompressor)
+        .map_err(TlsError::from_stack)
+}
+
+#[cfg(not(feature = "compression-brotli"))]
+fn add_brotli(_builder: &mut SslContextBuilder) -> Result<(), TlsError> {
+    Err(missing("brotli", "compression-brotli"))
+}
+
+#[cfg(any(feature = "compression-gzip", feature = "compression-deflate"))]
+fn add_zlib(builder: &mut SslContextBuilder) -> Result<(), TlsError> {
+    builder
+        .add_certificate_compression_algorithm(ZlibDecompressor)
+        .map_err(TlsError::from_stack)
+}
+
+#[cfg(not(any(feature = "compression-gzip", feature = "compression-deflate")))]
+fn add_zlib(_builder: &mut SslContextBuilder) -> Result<(), TlsError> {
+    Err(missing("zlib", "compression-deflate"))
+}
+
+#[cfg(feature = "compression-zstd")]
+fn add_zstd(builder: &mut SslContextBuilder) -> Result<(), TlsError> {
+    builder
+        .add_certificate_compression_algorithm(ZstdDecompressor)
+        .map_err(TlsError::from_stack)
+}
+
+#[cfg(not(feature = "compression-zstd"))]
+fn add_zstd(_builder: &mut SslContextBuilder) -> Result<(), TlsError> {
+    Err(missing("zstd", "compression-zstd"))
 }
 
 pub(super) fn extensions(

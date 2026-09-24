@@ -74,10 +74,12 @@ impl Body {
         }
     }
 
+    #[cfg(feature = "http3")]
     pub(crate) fn is_stream(&self) -> bool {
         matches!(self.0, BodyKind::Stream { .. })
     }
 
+    #[cfg(feature = "http3")]
     pub(crate) fn into_parts(self) -> (Option<Bytes>, Option<BoxedStream>) {
         match self.0 {
             BodyKind::Empty => (None, None),

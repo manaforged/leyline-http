@@ -182,6 +182,7 @@ where
     Ok(H2Client {
         tx,
         closed,
+        #[cfg(feature = "websocket")]
         peer_settings: snapshot,
     })
 }

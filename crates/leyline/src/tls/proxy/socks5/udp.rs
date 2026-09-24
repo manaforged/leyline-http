@@ -1,12 +1,55 @@
 use std::io;
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use tokio::net::{TcpStream, UdpSocket};
 
-use super::{addr_len, encode_addr, udp_associate};
+use super::{CMD_UDP_ASSOCIATE, addr_len, encode_addr, encode_socket_addr, open_control, request};
 use crate::tls::error::TlsError;
 
 const HEADER_PREFIX: [u8; 3] = [0x00, 0x00, 0x00];
+
+async fn udp_associate<C: crate::tls::TlsHandshake>(
+    connector: &C,
+    proxy: &url::Url,
+) -> Result<(TcpStream, SocketAddr), TlsError> {
+    let mut control = open_control(connector, proxy).await?;
+    let unspecified = SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0));
+    let (atyp, body) = request(
+        &mut control,
+        CMD_UDP_ASSOCIATE,
+        &encode_socket_addr(unspecified),
+    )
+    .await?;
+    let relay = match decode_bound(atyp, &body) {
+        Bound::Ip(addr) if addr.ip().is_unspecified() => {
+            let proxy_ip = control.peer_addr().map_err(TlsError::proxy_io)?.ip();
+            SocketAddr::new(proxy_ip, addr.port())
+        }
+        Bound::Ip(addr) => addr,
+        Bound::Domain => {
+            return Err(TlsError::proxy(
+                "socks5: UDP ASSOCIATE relay address is a domain name",
+            ));
+        }
+    };
+    Ok((control, relay))
+}
+
+enum Bound {
+    Ip(SocketAddr),
+    Domain,
+}
+
+fn decode_bound(atyp: u8, body: &[u8]) -> Bound {
+    let port_at = body.len() - 2;
+    let port = u16::from_be_bytes([body[port_at], body[port_at + 1]]);
+    let ip = match atyp {
+        0x01 => <[u8; 4]>::try_from(&body[..4]).map(IpAddr::from).ok(),
+        0x04 => <[u8; 16]>::try_from(&body[..16]).map(IpAddr::from).ok(),
+        _ => None,
+    };
+    ip.map_or(Bound::Domain, |ip| Bound::Ip(SocketAddr::new(ip, port)))
+}
 
 pub(crate) struct Socks5Udp {
     socket: UdpSocket,

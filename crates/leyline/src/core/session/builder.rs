@@ -373,6 +373,7 @@ impl SessionBuilder {
                 protocol_policy: self.protocol_policy,
                 default_retry: self.default_retry,
                 trace: self.trace,
+                #[cfg(feature = "http3")]
                 tls_trust: self.tls_trust.clone(),
                 #[cfg(feature = "http3")]
                 h3_config,

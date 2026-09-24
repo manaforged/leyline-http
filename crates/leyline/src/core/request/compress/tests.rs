@@ -8,6 +8,12 @@ fn header_tokens() {
     assert_eq!(ContentEncoding::Deflate.header_value(), "deflate");
 }
 
+#[cfg(any(
+    feature = "compression-gzip",
+    feature = "compression-brotli",
+    feature = "compression-zstd",
+    feature = "compression-deflate"
+))]
 fn sample() -> Vec<u8> {
     b"the quick brown fox jumps over the lazy dog. ".repeat(16)
 }

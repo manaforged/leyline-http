@@ -34,6 +34,7 @@ pub(crate) fn bare_host(host: &str) -> &str {
         .unwrap_or(host)
 }
 
+#[cfg(feature = "http3")]
 pub(crate) fn unspecified_for(peer: std::net::SocketAddr) -> std::net::SocketAddr {
     let ip: std::net::IpAddr = match peer {
         std::net::SocketAddr::V4(_) => std::net::Ipv4Addr::UNSPECIFIED.into(),

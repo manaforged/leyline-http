@@ -135,6 +135,7 @@ impl ProxyConfig {
             .map(|r| r.url.as_str())
     }
 
+    #[cfg(feature = "http3")]
     pub(crate) fn proxies_every_url(&self) -> bool {
         let bypass =
             (self.no_proxy_explicit || self.from_env) && !self.no_proxy.patterns.is_empty();

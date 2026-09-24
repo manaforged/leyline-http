@@ -31,6 +31,7 @@ use crate::h2::H2Config;
 use crate::pool::Pool;
 use crate::profile::{Browser, ChromiumBrand, HeaderStyle, Platform};
 use crate::tls::FingerprintConnector;
+#[cfg(feature = "http3")]
 use crate::tls::TlsTrustConfig;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,6 +83,7 @@ pub(crate) struct SessionInner {
     default_retry: RetryPolicy,
     #[cfg(feature = "http3")]
     h3_config: Option<crate::quic::H3Config>,
+    #[cfg(feature = "http3")]
     tls_trust: TlsTrustConfig,
     profile: Arc<crate::profile::BrowserProfile>,
     trace: Option<Arc<dyn crate::trace::Trace>>,

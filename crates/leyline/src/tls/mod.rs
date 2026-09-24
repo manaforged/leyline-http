@@ -26,6 +26,7 @@ pub use connector::FingerprintConnector;
 #[cfg(not(feature = "bench-internals"))]
 pub(crate) use connector::FingerprintConnector;
 
+#[cfg(feature = "http3")]
 pub(crate) use builder::apply_profile_with_trust;
 #[cfg(any(feature = "unstable-bssl", feature = "bench-internals"))]
 pub(crate) use builder::build_ssl_context;
@@ -36,6 +37,7 @@ pub(crate) use stream::TlsIo;
 pub use stream::TlsStream;
 #[cfg(not(feature = "bench-internals"))]
 pub(crate) use stream::TlsStream;
+#[cfg(feature = "http3")]
 pub(crate) use trust::install_verifier_ctx;
 
 #[cfg(any(feature = "unstable-bssl", feature = "bench-internals"))]

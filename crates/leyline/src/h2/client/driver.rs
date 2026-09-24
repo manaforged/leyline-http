@@ -68,6 +68,7 @@ impl PeerSettingsSnapshot {
         self.enable_connect_protocol.store(value, Ordering::Relaxed);
     }
 
+    #[cfg(feature = "websocket")]
     pub fn enable_connect_protocol(&self) -> bool {
         self.enable_connect_protocol.load(Ordering::Relaxed)
     }
