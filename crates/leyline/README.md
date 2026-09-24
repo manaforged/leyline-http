@@ -111,12 +111,6 @@ let session = Session::builder()
 or `IOS`, where the profile has one. `Session::builder().build()` with no
 browser is a bare session that impersonates no browser.
 
-## Intended use
-
-Leyline is for testing and automation of services that you are authorized to
-access. Respect the terms of each site and the law that applies to you.
-Leyline makes no claim that a site cannot detect it.
-
 ## Limits
 
 - A profile covers selected TLS, HTTP/2, and header properties. It does not
