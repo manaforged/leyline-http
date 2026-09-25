@@ -64,6 +64,7 @@ settings_order = [
     "initial_window_size", "max_frame_size",
     "max_header_list_size", "max_concurrent_streams",
 ]
+default_priority = { exclusive = true, stream_dependency = 0, weight = 255 }
 
 [h2.fingerprint]
 akamai = "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p"
