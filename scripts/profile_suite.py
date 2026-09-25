@@ -16,6 +16,7 @@ Mobile Safari has no automated capture.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import platform as plat
@@ -38,6 +39,9 @@ FF_RELEASES_URL = "https://product-details.mozilla.org/1.0/firefox.json"
 CACHE = Path(os.environ.get("LEYLINE_CFT_CACHE", Path.home() / ".cache/leyline-cft"))
 OUT = Path(os.environ.get("LEYLINE_ONESHOT_OUT", Path(tempfile.gettempdir()) / "leyline-oneshot"))
 TODAY = date.today().isoformat()
+CHROME_DEB_BASE = "https://dl.google.com/linux/chrome/deb/"
+CHROME_DEB_INDEX = CHROME_DEB_BASE + "dists/stable/main/binary-amd64/Packages"
+MAC_CHROME = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
 
 
 def http_json(url: str, timeout: int = 30) -> dict:
@@ -262,6 +266,8 @@ def dump_chrome(chrome: Path, version: str, dump: Path) -> dict:
         f"--user-agent={chrome_desktop_ua(version)}",
         f"--user-data-dir={udd}",
     ]
+    if plat.system() == "Linux":
+        cmd.append("--no-sandbox")
     try:
         text = page_text_via_cdp(cmd, PEET_URL, dump.with_suffix(".stderr"))
     finally:
@@ -284,8 +290,46 @@ def installed_chrome(major: int) -> tuple[str, Path] | None:
     return ver, binary
 
 
+def stable_chrome_deb() -> tuple[str, str, str]:
+    with urllib.request.urlopen(CHROME_DEB_INDEX, timeout=30) as resp:
+        index = resp.read().decode()
+    for block in index.split("\n\n"):
+        fields = dict(line.split(": ", 1) for line in block.splitlines() if ": " in line)
+        if fields.get("Package") == "google-chrome-stable":
+            return fields["Version"].split("-", 1)[0], fields["Filename"], fields["SHA256"]
+    raise SystemExit("google-chrome-stable is missing from the Chrome apt index")
+
+
+def linux_chrome(major: int) -> tuple[str, Path] | None:
+    ver, filename, sha256 = stable_chrome_deb()
+    if int(ver.split(".", 1)[0]) != major:
+        return None
+    directory = CACHE / f"chrome-{ver}-linux"
+    binary = directory / "opt/google/chrome/chrome"
+    if not binary.is_file():
+        deb = CACHE / f"google-chrome-stable-{ver}.deb"
+        print(f"downloading Google Chrome {ver}")
+        http_bytes(CHROME_DEB_BASE + filename, deb)
+        if hashlib.sha256(deb.read_bytes()).hexdigest() != sha256:
+            deb.unlink()
+            raise SystemExit(f"Google Chrome {ver}: package hash does not match the apt index")
+        subprocess.run(["dpkg-deb", "-x", str(deb), str(directory)], check=True)
+        deb.unlink()
+    return chrome_product_version(binary), binary
+
+
+def fetched_chrome(major: int) -> tuple[str, Path] | None:
+    if plat.system() == "Linux":
+        return linux_chrome(major)
+    if plat.system() == "Darwin" and MAC_CHROME.is_file():
+        ver = chrome_product_version(MAC_CHROME)
+        if int(ver.split(".", 1)[0]) == major:
+            return ver, MAC_CHROME
+    return None
+
+
 def chrome_for_major(major: int) -> tuple[str, Path]:
-    installed = installed_chrome(major)
+    installed = installed_chrome(major) or fetched_chrome(major)
     if installed is None:
         raise SystemExit(
             f"Chrome {major}: set LEYLINE_CHROME to an installed Google Chrome {major}; "
