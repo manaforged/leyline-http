@@ -4,14 +4,32 @@ use std::sync::{Arc, LazyLock};
 use serde::Deserialize;
 
 use crate::profile::{BrowserProfile, HeaderStyle, Platform, PlatformIdentity, TlsProfile};
+use crate::{Error, Kind};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-#[non_exhaustive]
-pub enum ChromiumBrand {
-    #[default]
-    Chrome,
-    Edge,
-    Opera,
+include!(concat!(env!("OUT_DIR"), "/chromium_brand.rs"));
+
+impl std::fmt::Display for ChromiumBrand {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(BRAND_KEYS[*self as usize])
+    }
+}
+
+impl std::str::FromStr for ChromiumBrand {
+    type Err = Error;
+
+    fn from_str(name: &str) -> Result<Self, Self::Err> {
+        BRAND_ALL
+            .iter()
+            .zip(BRAND_KEYS)
+            .find(|(_, key)| key.eq_ignore_ascii_case(name))
+            .map(|(brand, _)| *brand)
+            .ok_or_else(|| {
+                Error::new(Kind::Config).with_message(format!(
+                    "unknown Chromium brand {name:?}; expected one of {}",
+                    BRAND_KEYS.join(", ")
+                ))
+            })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,12 +62,12 @@ impl std::fmt::Display for BrandOverlayError {
 impl std::error::Error for BrandOverlayError {}
 
 impl ChromiumBrand {
+    pub fn all() -> &'static [ChromiumBrand] {
+        BRAND_ALL
+    }
+
     pub(crate) fn label(self) -> &'static str {
-        match self {
-            Self::Chrome => "Chrome",
-            Self::Edge => "Edge",
-            Self::Opera => "Opera",
-        }
+        BRAND_LABELS[self as usize]
     }
 
     pub(crate) fn overlay(

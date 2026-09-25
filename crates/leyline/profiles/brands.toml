@@ -1,4 +1,5 @@
 [Chrome]
+default = true
 follow_chromium = true
 
 [Edge]

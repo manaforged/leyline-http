@@ -112,6 +112,11 @@ let session = Session::builder()
 `ChromiumBrand::Chrome` is stock Chrome. Put Edge and Opera on
 `Browser::default()`.
 
+`ChromiumBrand::all()` lists every brand in `profiles/brands.toml`. A brand
+prints as its lowercase name (`chrome`, `edge`, `opera`), and `str::parse`
+reads that name back without case. An unknown name returns an error of kind
+`Config`. To add a brand, add a row to `brands.toml`.
+
 Brave is not an overlay. `.browser(Browser::Brave146)` selects a first-class
 profile.
 

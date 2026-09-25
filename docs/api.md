@@ -157,7 +157,8 @@ counted.
 | Type | Functions | Count |
 |---|---|---:|
 | `Browser` | `get(family, version)`, `latest(Family)`, `all`, `family`, `version`, `profile`, `for_platform`, `identity(Platform, Option<ChromiumBrand>) -> Option<PlatformIdentity>` | 8 |
-| `Family`, `Platform`, `ChromiumBrand`, `Preset` | enums; `Platform::detect_host`, `Platform::tcp_profile` | 2 |
+| `Family`, `Platform`, `Preset` | enums; `Platform::detect_host`, `Platform::tcp_profile` | 2 |
+| `ChromiumBrand` | enum from `profiles/brands.toml`; `all`; `Display` writes the lowercase name (`chrome`, `edge`, `opera`); `FromStr` parses it without case, and an unknown name returns `Error` of kind `Config` | 1 |
 | `Identity` | `locked`, `rotate_tls`, `switch_family`, `http`, `tls`, `platform` | 6 |
 | `SessionIdentity` | `identity`, `browser`, `platform`, `brand`, `user_agent` | 5 |
 | `BrowserProfile` | `from_toml`, `from_fingerprint(FingerprintSpec)`, `expected_ja4`, `expected_h2_fingerprint` | 4 |
@@ -182,7 +183,7 @@ counted.
 | `http` | re-export of the `http` crate | 0 |
 | `H2Error`, `ErrorCode` | sources reachable from `Error::h2` | 0 |
 
-Total: 264 public functions.
+Total: 265 public functions.
 
 ## Semantics
 
