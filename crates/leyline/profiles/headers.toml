@@ -371,3 +371,25 @@ navigate = [
     ["accept-language", "{accept_language}"],
     ["priority", "u=0, i"],
 ]
+
+[brave-154]
+variant = "Brave154"
+extends = "brave"
+append = [["sec-gpc", "1"]]
+order = [
+    "sec-ch-ua",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-platform",
+    "upgrade-insecure-requests",
+    "user-agent",
+    "accept",
+    "sec-gpc",
+    "sec-fetch-site",
+    "sec-fetch-mode",
+    "sec-fetch-user",
+    "sec-fetch-dest",
+    "referer",
+    "accept-encoding",
+    "accept-language",
+    "priority",
+]

@@ -1,15 +1,15 @@
 [meta]
-name = "Brave (Chromium 146)"
+name = "Brave (Chromium 154)"
 browser = "brave"
-version = 146
-variant = "Brave146"
-chromium_major = 146
+version = 154
+variant = "Brave154"
+chromium_major = 154
 family = "chromium"
 ch_ua_brand = "Brave"
-header_style = "brave"
+header_style = "brave-154"
 capture = "browser"
-captured_against = "brave-146.1.88.138"
-verified_against = "tls.peet.ws 2026-09-25 Brave 1.88.138 (Chromium 146.0.7680.178) macOS and Windows headful, Linux --headless=new"
+captured_against = "brave-154.1.96.59"
+verified_against = "tls.peet.ws 2026-09-25 Brave 1.96.59 (Chromium 154.0.8037.58) macOS and Windows headful, Linux --headless=new"
 verified_at = "2026-09-25"
 
 [tls]
@@ -32,6 +32,9 @@ ciphers = [
 ]
 curves = ["X25519_MLKEM768", "X25519", "SECP256R1", "SECP384R1"]
 sigalgs = [
+    "mldsa44",
+    "mldsa65",
+    "mldsa87",
     "ecdsa_secp256r1_sha256",
     "rsa_pss_rsae_sha256",
     "rsa_pkcs1_sha256",
@@ -49,9 +52,10 @@ cert_compression = ["brotli"]
 permute_extensions = true
 ech_grease = true
 pre_shared_key = true
+request_trust_anchors = false
 
 [tls.fingerprint]
-ja4 = "t13d1516h2_8daaf6152771_d8a2da3f94cd"
+ja4 = "t13d1516h2_8daaf6152771_806a8c22fdea"
 
 [h2]
 header_table_size = 65536
@@ -72,11 +76,11 @@ default_priority = { exclusive = true, stream_dependency = 0, weight = 255 }
 akamai = "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p"
 
 [identity.windows]
-user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
 accept_language = "en-US,en;q=0.8"
 
 [identity.macos]
-user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
 accept_language = "en-US,en;q=0.9"
 
 [h3]
