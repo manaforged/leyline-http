@@ -33,7 +33,7 @@ unrecorded, not that the profile is wrong.
 
 | Profile | `Browser` variant | `captured_against` | JA4 |
 | --- | --- | --- | --- |
-| Chrome 145 | `Chrome145` | unrecorded | estimated |
+| Chrome 145 | `Chrome145` | `chrome-android-145.0.7632.218-android-17-emulator` | estimated |
 | Chrome 146 | `Chrome146` | unrecorded | estimated |
 | Chrome 147 | `Chrome147` | unrecorded | estimated |
 | Chrome 148 | `Chrome148` | `chrome-148` | estimated |
@@ -54,13 +54,13 @@ unrecorded, not that the profile is wrong.
 | Safari 26 | `Safari26` | `safari-26.2-21623.1.14.11.9` | gated |
 | Safari iOS 17 | `SafariIOS17` | unrecorded | reconnaissance, needs recapture |
 | Safari iOS 18 | `SafariIOS18` | unrecorded | reconnaissance, needs recapture |
-| OkHttp4 Android 10+ | `OkHttpAndroid10` | unrecorded | estimated |
+| OkHttp4 Android 10+ | `OkHttpAndroid10` | `okhttp-4.12.0-android-17-emulator` | estimated |
 | CFNetwork iOS 18 | `CfnetworkIOS18` | `CFNetwork-3826.600.41-iOS-18.6-22G86-sim` | gated |
 | CFNetwork macOS 26 | `CfnetworkMacOS26` | `CFNetwork-3860.600.21-Darwin-25.5.0-macOS-26.5.1-25F80` | gated |
 
 ## Provenance
 
-Each profile comes from one of five sources:
+Each profile comes from one of six sources:
 
 - **Browser capture.** A capture of the named browser, with the build recorded
   in `captured_against`.
@@ -69,18 +69,22 @@ Each profile comes from one of five sources:
   `captured_against`.
 - **Non-browser build capture.** A capture of a related build that is not the
   shipped browser, such as `chrome-headless-shell` or a WKWebView host.
+- **Emulator capture.** A capture of the shipped app on an Android emulator.
+  The app and Android's own TLS stack are real, but the device is not a
+  physical phone. The build and Android version are recorded in
+  `captured_against`.
 - **Inferred.** No capture of this version. Values come from a neighbouring
   version.
 - **Self-referential golden.** The JA4 golden is Leyline's own past output, so
   the offline test does not compare the profile with a browser.
 
 The `capture` key in each profile's `[meta]` table records the source:
-`browser`, `native`, `headless-shell`, `webview`, `inferred`, or
+`browser`, `native`, `headless-shell`, `webview`, `emulator`, `inferred`, or
 `self-referential`.
 
 | Profile | Provenance | `capture` | Source |
 | --- | --- | --- | --- |
-| Chrome 145 | Inferred | `inferred` | Opera 129 (Chromium 145) capture |
+| Chrome 145 | Emulator capture | `emulator` | `chrome-android-145.0.7632.218-android-17-emulator` for TLS and Android H2; desktop H2 from the Opera 129 (Chromium 145) capture |
 | Chrome 146 | Inferred | `inferred` | No capture reference |
 | Chrome 147 | Inferred | `inferred` | Chrome 148 TLS block |
 | Chrome 148 | Browser capture | `browser` | `chrome-148`, exact build not recorded |
@@ -101,7 +105,7 @@ The `capture` key in each profile's `[meta]` table records the source:
 | Safari 26 | Browser capture | `browser` | `safari-26.2-21623.1.14.11.9`, Safari.app through safaridriver |
 | Safari iOS 17 | Self-referential golden | `self-referential` | Leyline output |
 | Safari iOS 18 | Self-referential golden | `self-referential` | Leyline output |
-| OkHttp4 Android 10+ | Self-referential golden | `self-referential` | Leyline output |
+| OkHttp4 Android 10+ | Emulator capture | `emulator` | `okhttp-4.12.0-android-17-emulator`, test app on the platform TLS stack |
 | CFNetwork iOS 18 | Native stack capture | `native` | `CFNetwork-3826.600.41-iOS-18.6-22G86-sim`, iOS simulator |
 | CFNetwork macOS 26 | Native stack capture | `native` | `CFNetwork-3860.600.21-Darwin-25.5.0-macOS-26.5.1-25F80` |
 

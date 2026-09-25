@@ -2,17 +2,20 @@
 name = "OkHttp4 Android 10+"
 browser = "okhttp"
 version = 10
-capture = "self-referential"
+capture = "emulator"
 variant = "OkHttpAndroid10"
 family = "okhttp"
-verified_against = "tls.peet.ws"
+verified_against = "tls.peet.ws 2026-09-24 OkHttp 4.12.0 test app on an Android 17 emulator"
+verified_at = "2026-09-24"
+captured_against = "okhttp-4.12.0-android-17-emulator"
 
 [tls]
 ciphers = [
     "TLS_AES_128_GCM_SHA256", "TLS_AES_256_GCM_SHA384", "TLS_CHACHA20_POLY1305_SHA256",
-    "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256", "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
-    "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384", "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
-    "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256", "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
+    "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256", "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
+    "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256",
+    "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256", "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+    "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
     "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA", "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA",
     "TLS_RSA_WITH_AES_128_GCM_SHA256", "TLS_RSA_WITH_AES_256_GCM_SHA384",
     "TLS_RSA_WITH_AES_128_CBC_SHA", "TLS_RSA_WITH_AES_256_CBC_SHA",
@@ -21,13 +24,12 @@ curves = ["X25519", "SECP256R1", "SECP384R1"]
 sigalgs = [
     "ecdsa_secp256r1_sha256", "rsa_pss_rsae_sha256", "rsa_pkcs1_sha256",
     "ecdsa_secp384r1_sha384", "rsa_pss_rsae_sha384", "rsa_pkcs1_sha384",
-    "rsa_pss_rsae_sha512", "rsa_pkcs1_sha512",
+    "rsa_pss_rsae_sha512", "rsa_pkcs1_sha512", "rsa_pkcs1_sha1",
 ]
 ocsp_stapling = true
-signed_cert_timestamps = true
-# BoringSSL appends RFC 7685 padding (21) to this hello: the wire golden below
-# counts 14 extensions where the 13 the [tls] block turns on account for only
-# 13, and padding is the one extension BoringSSL adds without a profile flag.
+grease = false
+permute_extensions = false
+extension_permutation = [0, 23, 65281, 10, 11, 35, 16, 5, 13, 51, 45, 43]
 padding = true
 
 [h2]
@@ -41,8 +43,7 @@ settings_order = [
 ]
 
 [tls.fingerprint]
-# Pinned to leyline's wire; not yet checked against a real OkHttp 4.12 ClientHello.
-ja4 = "t13d1514h2_8daaf6152771_827b515c4f52"
+ja4 = "t13d1513h2_8daaf6152771_eca864cca44a"
 
 [h2.fingerprint]
 akamai = "4:16777216|16711681|0|m,p,a,s"

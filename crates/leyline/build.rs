@@ -40,6 +40,7 @@ enum Capture {
     Native,
     HeadlessShell,
     Webview,
+    Emulator,
     Inferred,
     SelfReferential,
 }

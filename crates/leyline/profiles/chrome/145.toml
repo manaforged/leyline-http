@@ -2,13 +2,15 @@
 name = "Chrome 145"
 browser = "chrome"
 version = 145
-capture = "inferred"
+capture = "emulator"
 variant = "Chrome145"
 hello = 146
 chromium_major = 145
 family = "chromium"
 ch_ua_brand = "Google Chrome"
-verified_against = "tls.peet.ws"
+verified_against = "tls.peet.ws 2026-09-24 Chrome Android 145.0.7632.218 on an Android 17 emulator"
+verified_at = "2026-09-24"
+captured_against = "chrome-android-145.0.7632.218-android-17-emulator"
 
 [tls]
 ciphers = [
@@ -65,6 +67,12 @@ akamai = "1:65536;2:0;3:1000;4:6291456;6:262144;8:1|15663105|0|m,a,s,p"
 omit_settings = ["max_concurrent_streams", "unknown_setting8"]
 
 [h2.platforms.macos.fingerprint]
+akamai = "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p"
+
+[h2.platforms.android]
+omit_settings = ["max_concurrent_streams", "unknown_setting8"]
+
+[h2.platforms.android.fingerprint]
 akamai = "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p"
 
 [identity.windows]
