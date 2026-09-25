@@ -19,6 +19,17 @@ The build needs these tools:
   Linux, and the MSVC build tools on Windows.
 - libclang, because `bindgen` generates the bindings at build time.
 - NASM on Windows, for the BoringSSL assembly.
+- Git, to fetch the BoringSSL submodule in a source checkout.
+
+On Windows, install Visual Studio Build Tools with the C++ workload, which
+includes CMake. Install LLVM and NASM. Then:
+
+1. Put the LLVM `bin` directory, the NASM directory, and the CMake `bin`
+   directory on `PATH`.
+2. Set `LIBCLANG_PATH` to the LLVM `bin` directory, so `bindgen` finds
+   `libclang.dll`.
+
+A Developer Command Prompt is not required.
 
 The first build compiles BoringSSL. Later builds reuse it.
 
