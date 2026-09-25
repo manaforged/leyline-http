@@ -69,7 +69,6 @@ fn examples_avoid_known_footguns() {
         "edge()?",
         "brave()?",
         "opera()?",
-        "vivaldi()?",
         ".audit().unwrap()",
     ];
     let mut hits = Vec::new();

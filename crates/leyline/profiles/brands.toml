@@ -1,5 +1,4 @@
 [Chrome]
-overlay = false
 follow_chromium = true
 
 [Edge]
@@ -25,9 +24,3 @@ desktop_only = true
 "147" = ["131.0.0.0"]
 "146" = ["130.0.0.0"]
 "145" = ["129.0.0.0"]
-
-[Vivaldi]
-desktop_only = true
-
-[Vivaldi.versions]
-"146" = ["7.9.3970.59"]

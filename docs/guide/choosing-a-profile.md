@@ -31,7 +31,7 @@ let mac = Session::builder()
 | The most common desktop browser | `.browser(Browser::default())` |
 | Firefox | `.browser(Browser::latest(leyline::Family::Firefox))` |
 | Safari on macOS | `.browser(Browser::Safari26).platform(Platform::MacOS)` |
-| Edge, Opera, or Vivaldi | `.brand(ChromiumBrand::Edge)`, `Opera`, or `Vivaldi`: a brand on a Chrome profile |
+| Edge or Opera | `.brand(ChromiumBrand::Edge)` or `Opera`: a brand on a Chrome profile |
 | Brave | `.browser(Browser::Brave146).platform(Platform::MacOS)` |
 | A phone | `.platform(Platform::Android)` or `.platform(Platform::IOS)` with a browser that has that platform, or an app profile such as `Browser::OkHttpAndroid10` or `Browser::CfnetworkIOS18` |
 | One fixed version | `.browser(Browser::Chrome150)`, then `.platform(...)` |

@@ -12,7 +12,6 @@ pub enum ChromiumBrand {
     Chrome,
     Edge,
     Opera,
-    Vivaldi,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,7 +49,6 @@ impl ChromiumBrand {
             Self::Chrome => "Chrome",
             Self::Edge => "Edge",
             Self::Opera => "Opera",
-            Self::Vivaldi => "Vivaldi",
         }
     }
 
@@ -66,25 +64,21 @@ impl ChromiumBrand {
             platform,
         };
         let row = brand_row(self).ok_or_else(unverified)?;
+        let Some(token) = row.ua_token.as_deref() else {
+            return Ok(None);
+        };
         if row.desktop_only && !is_desktop(platform) {
             return Err(unverified());
         }
         let version = row
             .version(chromium_major, ua_seed(profile_user_agent))
             .ok_or_else(unverified)?;
-        if !row.overlay {
-            return Ok(None);
-        }
         let product = match row.product.as_deref() {
             Some(name) => Some((name, version_major(&version).ok_or_else(unverified)?)),
             None => None,
         };
-        let user_agent = match row.ua_token.as_deref() {
-            Some(token) => format!("{profile_user_agent} {token}/{version}"),
-            None => profile_user_agent.to_string(),
-        };
         Ok(Some(BrandOverlay {
-            user_agent,
+            user_agent: format!("{profile_user_agent} {token}/{version}"),
             sec_ch_ua: sec_ch_ua(chromium_major, product),
             extra_headers: row.extra_headers.clone(),
             navigate_accept: row.navigate_accept.clone(),
@@ -133,8 +127,6 @@ pub(crate) struct BrandOverlay {
 
 #[derive(Debug, Deserialize)]
 struct BrandRow {
-    #[serde(default = "overlay_default")]
-    overlay: bool,
     product: Option<String>,
     ua_token: Option<String>,
     #[serde(default)]
@@ -148,10 +140,6 @@ struct BrandRow {
     navigate_accept: Option<String>,
     #[serde(default)]
     tls: BrandTls,
-}
-
-const fn overlay_default() -> bool {
-    true
 }
 
 #[derive(Debug, Default, Deserialize)]

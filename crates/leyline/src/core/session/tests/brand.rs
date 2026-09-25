@@ -229,64 +229,6 @@ async fn opera_145_overlay_still_supported() {
 }
 
 #[tokio::test]
-async fn vivaldi_brand_overlay_matches_capture() {
-    let session = branded(Browser::Chrome147, ChromiumBrand::Vivaldi);
-    let req = capture_navigate_headers(session).await;
-
-    assert!(
-        req.contains("Chrome/147.0.0.0 Safari/537.36 Vivaldi/7.9."),
-        "Vivaldi UA suffix missing:\n{req}"
-    );
-    let lower = req.to_lowercase();
-    let sec_ch_ua_line = req
-        .lines()
-        .find(|l| l.to_lowercase().starts_with("sec-ch-ua:"))
-        .expect("sec-ch-ua header present");
-    assert!(
-        !sec_ch_ua_line.to_lowercase().contains("google chrome"),
-        "Vivaldi must drop \"Google Chrome\" from sec-ch-ua:\n{sec_ch_ua_line}"
-    );
-    assert!(
-        !sec_ch_ua_line.to_lowercase().contains("vivaldi"),
-        "Vivaldi must NOT advertise itself in sec-ch-ua (per vendor docs):\n{sec_ch_ua_line}"
-    );
-    assert!(
-        lower.contains(r#""chromium";v="147""#),
-        "Vivaldi sec-ch-ua should still carry Chromium anchor:\n{req}"
-    );
-    assert!(
-        !lower.contains("\r\ndnt:"),
-        "Vivaldi must not ship dnt by default:\n{req}"
-    );
-    assert!(
-        !lower.contains("\r\nsec-gpc:"),
-        "Vivaldi must not ship sec-gpc by default:\n{req}"
-    );
-}
-
-#[test]
-fn vivaldi_overlay_on_unverified_anchor_errors() {
-    for bad in [144u32, 145, 146, 148, 150] {
-        let err = ChromiumBrand::Vivaldi
-            .overlay(bad, Platform::Windows, "ua")
-            .expect_err(&format!(
-                "Vivaldi on Chromium {bad} must be rejected until captured"
-            ));
-        assert!(format!("{err}").contains("not verified"), "{err}");
-    }
-}
-
-#[test]
-fn vivaldi_overlay_on_mobile_errors() {
-    for p in [Platform::Android, Platform::IOS] {
-        let err = ChromiumBrand::Vivaldi
-            .overlay(147, p, "ua")
-            .expect_err("mobile Vivaldi overlay must be rejected");
-        assert!(format!("{err}").contains("not verified"));
-    }
-}
-
-#[tokio::test]
 async fn chrome_default_has_no_brand_overlay() {
     let session = Session::new();
     let req = capture_navigate_headers(session).await;
