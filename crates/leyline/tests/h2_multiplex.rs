@@ -13,7 +13,6 @@ use tokio::time::timeout;
 
 use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
 use leyline::h2::connection::PseudoHeaders;
-use leyline::h2::error::{ErrorCode, H2Error};
 use leyline::h2::frame::{FrameType, GoAwayFrame};
 use leyline::h2::{Head, RequestBody, ResponseBody};
 
@@ -360,7 +359,6 @@ async fn zero_stream_limit_waits_for_peer_update() {
         let (client_io, mut server_io) = tokio::io::duplex(65_536);
         let (release, ready) = oneshot::channel();
         let (greeted, greeting) = oneshot::channel();
-        let (done, finished) = oneshot::channel();
         let server = tokio::spawn(async move {
             read_preface(&mut server_io).await;
             read_frame(&mut server_io).await;
@@ -380,40 +378,36 @@ async fn zero_stream_limit_waits_for_peer_update() {
             };
             assert_eq!(request.stream_id, 1);
             write_response(&mut server_io, request.stream_id, b"resumed").await;
-            finished.await.expect("client assertions complete");
         });
         let handle = leyline::h2::start(client_io, test_config())
             .await
             .expect("response or connection");
         greeting.await.expect("peer settings applied");
         let (pseudo, headers) = get_req("/blocked");
-        let error = handle
-            .send_shared(
-                head(pseudo, headers),
-                RequestBody::Streaming {
-                    stream: Box::pin(empty()),
-                    length_hint: None,
-                },
-                false,
-            )
-            .await
-            .expect_err("peer capacity exhausted");
-        assert!(matches!(
-            error,
-            H2Error::Connection {
-                code: ErrorCode::RefusedStream,
-                ..
-            }
-        ));
+        let blocked = tokio::spawn(async move {
+            handle
+                .send_shared(
+                    head(pseudo, headers),
+                    RequestBody::Streaming {
+                        stream: Box::pin(empty()),
+                        length_hint: None,
+                    },
+                    false,
+                )
+                .await
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(
+            !blocked.is_finished(),
+            "streaming request must wait for stream capacity"
+        );
         release.send(()).expect("release server");
-        let (pseudo, headers) = get_req("/resumed");
-        let response = handle
-            .send_shared(head(pseudo, headers), RequestBody::None, false)
+        let response = blocked
             .await
-            .expect("response");
+            .expect("request task")
+            .expect("queued streaming request completes");
         assert_eq!(response.status, 200);
         assert_eq!(buffered(response.body), b"resumed");
-        done.send(()).expect("complete server");
         server.await.expect("server task");
     })
     .await
@@ -425,7 +419,6 @@ async fn closed_stream_with_unread_chunks_releases_peer_capacity() {
     timeout(Duration::from_secs(5), async {
         let (client_io, mut server_io) = tokio::io::duplex(65_536);
         let (release, ready) = oneshot::channel();
-        let (done, finished) = oneshot::channel();
         let server = tokio::spawn(async move {
             read_preface(&mut server_io).await;
             read_frame(&mut server_io).await;
@@ -451,7 +444,6 @@ async fn closed_stream_with_unread_chunks_releases_peer_capacity() {
                     break;
                 }
             }
-            finished.await.expect("client assertions complete");
         });
         let handle = leyline::h2::start(client_io, test_config())
             .await
@@ -466,30 +458,28 @@ async fn closed_stream_with_unread_chunks_releases_peer_capacity() {
             panic!("expected streaming body");
         };
         let (pseudo, headers) = get_req("/blocked");
-        let error = handle
-            .send_shared(
-                head(pseudo, headers),
-                RequestBody::Streaming {
-                    stream: Box::pin(empty()),
-                    length_hint: None,
-                },
-                false,
-            )
-            .await
-            .expect_err("peer capacity exhausted");
-        assert!(matches!(
-            error,
-            H2Error::Connection {
-                code: ErrorCode::RefusedStream,
-                ..
-            }
-        ));
+        let blocked = tokio::spawn(async move {
+            handle
+                .send_shared(
+                    head(pseudo, headers),
+                    RequestBody::Streaming {
+                        stream: Box::pin(empty()),
+                        length_hint: None,
+                    },
+                    false,
+                )
+                .await
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(
+            !blocked.is_finished(),
+            "streaming request must wait while stream 1 is open"
+        );
         release.send(()).expect("release server");
-        let (pseudo, headers) = get_req("/next");
-        let response = handle
-            .send_shared(head(pseudo, headers), RequestBody::None, false)
+        let response = blocked
             .await
-            .expect("response");
+            .expect("request task")
+            .expect("queued streaming request completes after stream 1 closes");
         assert_eq!(response.status, 200);
         assert_eq!(buffered(response.body), b"next");
         let mut received = Vec::new();
@@ -497,7 +487,6 @@ async fn closed_stream_with_unread_chunks_releases_peer_capacity() {
             received.extend_from_slice(&chunk.expect("response chunk"));
         }
         assert_eq!(received, (0..40u8).collect::<Vec<_>>());
-        done.send(()).expect("complete server");
         server.await.expect("server task");
     })
     .await
