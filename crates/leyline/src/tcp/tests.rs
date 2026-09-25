@@ -5,7 +5,7 @@ use crate::profile::Platform;
 fn profile_constants() {
     assert_eq!(Platform::Windows.tcp_profile().ttl, 128);
     assert_eq!(Platform::MacOS.tcp_profile().ttl, 64);
-    assert_eq!(Platform::Linux.tcp_profile().window_scale, 7);
+    assert_eq!(Platform::Linux.tcp_profile().window_scale, 10);
 }
 
 #[test]

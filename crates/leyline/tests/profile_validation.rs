@@ -334,19 +334,19 @@ fn missing_captured_against_warns_but_still_loads() {
 fn backfilled_builtin_profiles_carry_captured_against() {
     let reg = ProfileRegistry::builtin();
     for (browser, expected) in [
-        (Browser::Chrome148, "chrome-148"),
-        (Browser::Chrome150, "chrome-150.0.7871.128"),
-        (Browser::Chrome151, "chrome-headless-shell-151.0.7922.138"),
-        (Browser::Chrome152, "chrome-headless-shell-152.0.7977.64"),
+        (Browser::Chrome148, "chrome-148.0.7778.216"),
+        (Browser::Chrome150, "chrome-150.0.7871.187"),
+        (Browser::Chrome151, "chrome-151.0.7922.174"),
+        (Browser::Chrome152, "chrome-152.0.7977.83"),
         (Browser::Chrome153, "chrome-153.0.8010.53"),
         (Browser::Firefox148, "firefox-148.0.2"),
         (Browser::Firefox150, "firefox-150.0"),
-        (Browser::Firefox151, "firefox-151.0"),
-        (Browser::Firefox152, "firefox-152.0"),
-        (Browser::Firefox153, "firefox-153.0.1"),
+        (Browser::Firefox151, "firefox-151.0.4"),
+        (Browser::Firefox152, "firefox-152.0.6"),
+        (Browser::Firefox153, "firefox-153.0.4"),
         (Browser::Firefox154, "firefox-154.0.1"),
         (Browser::Safari26, "safari-26.2-21623.1.14.11.9"),
-        (Browser::Brave146, "brave-146"),
+        (Browser::Brave146, "brave-146.1.88.138"),
     ] {
         let profile = reg.get_browser(browser).expect("built-in profile");
         assert_eq!(

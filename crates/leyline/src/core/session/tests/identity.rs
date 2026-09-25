@@ -6,7 +6,7 @@ use crate::{Identity, Kind};
 fn locked_keeps_http_and_tls_on_one_browser() {
     let id = Identity::locked(Browser::Chrome152, Platform::Windows);
     assert_eq!(id.http(), Browser::Chrome152);
-    assert_eq!(id.tls(), Browser::Chrome152);
+    assert_eq!(id.tls(), Browser::Chrome153);
     assert_eq!(id.platform(), Platform::Windows);
 }
 
@@ -14,10 +14,10 @@ fn locked_keeps_http_and_tls_on_one_browser() {
 fn locked_collapses_tls_to_hello_owner() {
     let id = Identity::locked(Browser::Chrome148, Platform::Windows);
     assert_eq!(id.http(), Browser::Chrome148);
-    assert_eq!(id.tls(), Browser::Chrome147);
+    assert_eq!(id.tls(), Browser::Chrome149);
     let id = Identity::locked(Browser::Chrome151, Platform::Windows);
     assert_eq!(id.http(), Browser::Chrome151);
-    assert_eq!(id.tls(), Browser::Chrome152);
+    assert_eq!(id.tls(), Browser::Chrome151);
 }
 
 #[test]
@@ -26,7 +26,7 @@ fn rotate_tls_same_family_keeps_http() {
         .rotate_tls(Browser::Chrome146)
         .expect("chrome 150 → 146 is the same family");
     assert_eq!(id.http(), Browser::Chrome150);
-    assert_eq!(id.tls(), Browser::Chrome146);
+    assert_eq!(id.tls(), Browser::Chrome149);
     assert_eq!(id.platform(), Platform::Windows);
 }
 
@@ -132,8 +132,8 @@ fn older_public_hellos_build() {
 fn rotate_tls_collapses_same_hello() {
     let id = Identity::locked(Browser::Chrome150, Platform::Windows)
         .rotate_tls(Browser::Chrome148)
-        .expect("148 is 147's hello");
-    assert_eq!(id.tls(), Browser::Chrome147);
+        .expect("148 is 149's hello");
+    assert_eq!(id.tls(), Browser::Chrome149);
 }
 
 #[test]

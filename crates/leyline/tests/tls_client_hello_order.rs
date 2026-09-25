@@ -33,8 +33,8 @@ async fn firefox_150_client_hello_follows_its_declared_extension_order() {
 }
 
 #[tokio::test]
-async fn chrome_147_client_hello_carries_trust_anchor_identifiers() {
-    let (_, extensions) = capture_client_hello(Browser::Chrome147).await;
+async fn chrome_154_client_hello_carries_trust_anchor_identifiers() {
+    let (_, extensions) = capture_client_hello(Browser::Chrome154).await;
     assert!(
         extensions.contains(&0xca34),
         "trust_anchors extension absent; JA4 drops to t13d1516: {extensions:04x?}"

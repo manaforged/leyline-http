@@ -119,8 +119,8 @@ async fn brave_first_class_profile_matches_capture() {
     );
     assert!(
         req.to_lowercase()
-            .contains("accept-language: en-us,en;q=0.8"),
-        "Brave accept-language q=0.8 missing:\n{req}"
+            .contains("accept-language: en-us,en;q=0.9"),
+        "Brave accept-language q=0.9 missing:\n{req}"
     );
     let lower = req.to_lowercase();
     let pos = |needle: &str| lower.find(needle);

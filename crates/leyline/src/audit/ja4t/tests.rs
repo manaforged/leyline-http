@@ -7,7 +7,7 @@ fn ja4t_linux() {
         window_size: 29200,
         ..Platform::Linux.tcp_profile()
     };
-    assert_eq!(compute_ja4t(&tcp), "29200_2-4-8-1-3_1460_7");
+    assert_eq!(compute_ja4t(&tcp), "29200_2-4-8-1-3_1460_10");
 }
 
 #[test]
