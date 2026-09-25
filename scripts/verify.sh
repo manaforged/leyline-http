@@ -72,6 +72,9 @@ g_package() {
     step "cargo package (publishable Rust crates)"
     package_stage="$(mktemp -d)"
     git archive --format=tar HEAD | tar -xf - -C "$package_stage"
+    git submodule foreach --quiet --recursive \
+        "git archive --format=tar --prefix=\"\$displaypath/\" HEAD | tar -xf - -C \"$package_stage\"" \
+        || fail "failed to stage the submodules"
     node scripts/stage-package-workspace.mjs "$package_stage" \
         || fail "failed to stage the package workspace"
     rm -rf "$CARGO_TARGET_DIR/package"

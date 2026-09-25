@@ -8,7 +8,9 @@ change or a higher minimum Rust version needs a new minor release, such as
 `0.2.0`. The BoringSSL crates `leyline-bssl`, `leyline-bssl-sys`, and
 `leyline-bssl-tokio` share this version and publish as separate crates.
 
-## Unreleased
+## 0.1.0 - 2026-09-25
+
+First public release.
 
 ### Build
 
@@ -16,13 +18,6 @@ change or a higher minimum Rust version needs a new minor release, such as
   `aarch64-unknown-linux-musl`. A musl build needs a musl C and C++
   toolchain. When you cross-compile for Linux, the build script finds the
   target compiler on `PATH` if `CC_<target>` and `CXX_<target>` are not set.
-
-## 0.1.0 - 2026-09-24
-
-First public release.
-
-### Build
-
 - `leyline-bssl-sys` builds BoringSSL from source with CMake and links it
   statically. The crates ship source, not prebuilt libraries. A build needs
   CMake 3.22 or later, a C and C++ compiler, libclang, and `git`; on Windows,

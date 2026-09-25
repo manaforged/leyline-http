@@ -12,6 +12,7 @@ keywords.workspace = true
 categories.workspace = true
 documentation = "https://docs.rs/leyline-http"
 readme = "README.md"
+exclude = ["profiles/captures/"]
 
 [lib]
 name = "leyline"
@@ -36,6 +37,7 @@ allowed_external_types = [
 
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]
+features = ["full"]
 
 [features]
 default = [
