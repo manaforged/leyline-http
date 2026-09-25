@@ -2,6 +2,7 @@ mod builder;
 mod connector;
 mod error;
 mod happy_eyeballs;
+mod hello;
 mod keylog;
 #[cfg(target_os = "macos")]
 mod macos_trust;
@@ -27,9 +28,11 @@ pub use connector::FingerprintConnector;
 pub(crate) use connector::FingerprintConnector;
 
 #[cfg(feature = "http3")]
-pub(crate) use builder::apply_profile_with_trust;
+pub(crate) use builder::apply_tls_with_trust;
 #[cfg(any(feature = "unstable-bssl", feature = "bench-internals"))]
 pub(crate) use builder::build_ssl_context;
+#[cfg(feature = "http3")]
+pub(crate) use hello::HelloOptions;
 pub(crate) use session_cache::SessionCache;
 pub(crate) use stream::TlsIo;
 #[cfg(feature = "bench-internals")]

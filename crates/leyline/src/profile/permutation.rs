@@ -4,7 +4,7 @@ use crate::profile::extension::{PADDING, PRE_SHARED_KEY, advertised_extensions};
 pub(crate) fn extension_ids(tls: &TlsProfile) -> Vec<u16> {
     let mut ids = match tls.extension_permutation.as_deref() {
         Some(order) => order.to_vec(),
-        None => advertised_extensions(tls)
+        None => advertised_extensions(tls, false)
             .into_iter()
             .map(|(id, _)| id)
             .collect(),
@@ -15,7 +15,7 @@ pub(crate) fn extension_ids(tls: &TlsProfile) -> Vec<u16> {
     ids
 }
 
-pub(super) fn validate(tls: &TlsProfile) -> Result<(), String> {
+pub(super) fn validate(tls: &TlsProfile, quic: bool) -> Result<(), String> {
     let Some(order) = tls.extension_permutation.as_deref() else {
         return Ok(());
     };
@@ -27,7 +27,7 @@ pub(super) fn validate(tls: &TlsProfile) -> Result<(), String> {
         );
     }
 
-    let advertised = advertised_extensions(tls);
+    let advertised = advertised_extensions(tls, quic);
     for (index, id) in order.iter().enumerate() {
         if *id == PRE_SHARED_KEY {
             return Err(format!(

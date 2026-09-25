@@ -7,7 +7,7 @@ Items marked `#[doc(hidden)]` are internal and not listed.
 <details>
 <summary>Symbol index</summary>
 
-`0` · `AfterAccept` · `AfterCchUa` · `AfterCchUaMobile` · `AfterCchUaPlatform` · `AfterContentType` · `AfterFetchDest` · `AfterUserAgent` · `Android` · `AuditData` · `Auto` · `BeforeAcceptEncoding` · `Binary` · `Body` · `BodyStream` · `Brave` · `Brave146` · `Brave154` · `Brotli` · `Browser` · `BrowserProfile` · `Cancel` · `Certificate` · `CfNetwork` · `CfnetworkIOS18` · `CfnetworkIOS27` · `CfnetworkMacOS26` · `Chrome` · `Chrome145` · `Chrome146` · `Chrome147` · `Chrome148` · `Chrome149` · `Chrome150` · `Chrome151` · `Chrome152` · `Chrome153` · `Chrome154` · `Chromium` · `ChromiumBrand` · `ClientIdentity` · `Close` · `CloseFrame` · `CompressionConfig` · `CompressionError` · `Config` · `Connect` · `ConnectError` · `Connection` · `ConnectionError` · `ContentEncoding` · `Cookie` · `CrossOrigin` · `CrossSite` · `Decode` · `Deflate` · `DigestAuth` · `Dns` · `DnsConfig` · `Done` · `Edge` · `Empty` · `EnhanceYourCalm` · `Err` · `Error` · `ErrorCode` · `Family` · `FetchSite` · `FingerprintSpec` · `Firefox` · `Firefox148` · `Firefox149` · `Firefox150` · `Firefox151` · `Firefox152` · `Firefox153` · `Firefox154` · `Firefox155` · `Firefox156` · `FlowControlError` · `Follow` · `Form` · `FormNavigate` · `FrameSizeError` · `FrameTooLarge` · `Future` · `Gecko` · `Gzip` · `H2Error` · `H2Fingerprint` · `H2PlatformOverride` · `H2PriorityProfile` · `H2Profile` · `H3Profile` · `Handshake` · `HandshakeIo` · `HappyEyeballsConfig` · `Head` · `HeaderAnchor` · `HeaderList` · `HeaderStyle` · `Host` · `Hostname` · `Hpack` · `Http1` · `Http11Required` · `Http1_1` · `Http2` · `Http3` · `HttpVersion` · `IOS` · `Identity` · `InadequateSecurity` · `InternalError` · `IntoFuture` · `IntoParamPair` · `IntoUrl` · `Io` · `Item` · `Ja3Input` · `Ja4Input` · `Ja4hInput` · `Jar` · `Json` · `Kind` · `Lax` · `LeylineService` · `Linux` · `MacOS` · `Native` · `Navigate` · `NoError` · `NoProxy` · `None` · `OkHttp` · `OkHttpAndroid10` · `Opera` · `Output` · `Parse` · `Part` · `Ping` · `Pinning` · `Platform` · `PlatformIdentity` · `Pong` · `PoolConfig` · `PoolStats` · `Preset` · `Profile` · `ProfileError` · `ProfileMeta` · `ProfileRegistry` · `ProtocolError` · `ProtocolPolicy` · `Proxy` · `ProxyConfig` · `ProxyRule` · `ProxyUrl` · `Race` · `Redirect` · `RedirectAction` · `RedirectAttempt` · `RedirectPolicy` · `RefusedStream` · `Rejected` · `Request` · `RequestBuilder` · `ResolveFuture` · `Resolver` · `Response` · `ResponseTiming` · `Result` · `RetryPolicy` · `RetryTrigger` · `Safari` · `Safari18` · `Safari26` · `SafariIOS17` · `SafariIOS18` · `SafariIOS27` · `SafariIos` · `SameOrigin` · `SameSite` · `Script` · `Sealed` · `Sent` · `ServerError` · `Session` · `SessionBuilder` · `SessionIdentity` · `SettingsTimeout` · `SocketConfig` · `SslConfig` · `Status` · `Stop` · `Stream` · `StreamClosed` · `Strict` · `SystemResolver` · `TcpConnect` · `TcpProfile` · `Text` · `Timeout` · `TimeoutConfig` · `Tls` · `Tls10` · `Tls12` · `Tls13` · `TlsError` · `TlsFingerprint` · `TlsInfo` · `TlsMinVersion` · `TlsProfile` · `TlsTrustConfig` · `Trace` · `TracingTrace` · `TrustStore` · `Url` · `WebKit` · `WebSocketBuilder` · `WebSocketConfig` · `Windows` · `WsConnection` · `WsMessage` · `WsSink` · `WsStream` · `Xhr` · `Zstd` · `accept_language` · `accept_unmasked_frames` · `active_connection_id_limit` · `add_ca_der` · `add_ca_file` · `add_pinned_leaf_sha256` · `addrs` · `akamai` · `all` · `all_cookies` · `allow_non_idempotent` · `alpn` · `alps` · `alps_new_codepoint` · `anchored` · `append` · `as_str` · `attempt_limit` · `audit` · `backoff_factor` · `base` · `basic_auth` · `bearer_auth` · `body` · `boundary` · `brand` · `brotli` · `browser` · `build` · `builder` · `bytes` · `call` · `captured_against` · `cert_compression` · `ch_ua_brand` · `chromium_major` · `cipher` · `ciphers` · `clear` · `client_identity` · `close` · `code` · `compress` · `compression` · `compute_ja3` · `compute_ja4` · `compute_ja4h` · `compute_ja4t` · `config` · `connect` · `connect_ms` · `content_length` · `cookie` · `cookie_header` · `cookie_jar` · `cookies` · `copy_to` · `creation_time` · `curves` · `custom` · `danger_accept_invalid_certs` · `dcid_length` · `default` · `default_priority` · `deflate` · `delegated_credentials` · `delete` · `deserialize` · `detail` · `detect_host` · `df` · `digest_auth` · `dns` · `domain` · `done` · `ech_grease` · `elapsed` · `enable_push` · `entries` · `env` · `env_roots` · `eq` · `error_for_status` · `error_for_status_ref` · `evictions_dead` · `evictions_idle` · `evictions_lru` · `exclusive` · `execute` · `expected_h2_fingerprint` · `expected_ja4` · `expires` · `export_cookies` · `extend_from` · `extension_ids` · `extension_permutation` · `family` · `file` · `filename` · `fingerprint` · `fmt` · `for_platform` · `form` · `fresh_pool` · `from` · `from_fingerprint` · `from_str` · `from_toml` · `from_u32` · `get` · `get_cookie` · `global` · `grease` · `gzip` · `h1_hits` · `h1_misses` · `h2` · `h2_fingerprint` · `h2_hits` · `h2_misses` · `h2_ping_after_idle` · `h2_ping_failures` · `h2_ping_timeout` · `h3` · `h3_hits` · `h3_misses` · `happy_eyeballs` · `has_sni` · `hash` · `head` · `header` · `header_order` · `header_style` · `header_table_size` · `headers` · `host` · `host_only` · `http` · `http_only` · `http_version` · `https` · `https_only` · `id` · `identity` · `idle_timeout` · `initial_backoff` · `initial_connection_window_size` · `initial_max_data` · `initial_max_stream_data_bidi_local` · `initial_max_stream_data_bidi_remote` · `initial_max_stream_data_uni` · `initial_max_streams_bidi` · `initial_max_streams_uni` · `initial_stream_window_size` · `installs` · `interface` · `into_future` · `into_param_pair` · `into_stream` · `into_url` · `io` · `is_connect` · `is_expired` · `is_retryable` · `is_status` · `is_timeout` · `iter` · `ja3` · `ja4` · `ja4_r` · `ja4h` · `ja4t` · `jitter` · `json` · `keepalive` · `key_shares` · `kind` · `latest` · `len_hint` · `leyline` · `limited` · `load` · `load_cookies` · `local_address` · `local_ipv4` · `local_ipv6` · `location` · `locked` · `max` · `max_backoff` · `max_body_size` · `max_concurrent_streams` · `max_connections` · `max_field_section_size` · `max_frame_size` · `max_h1_conns_per_host` · `max_header_list_size` · `max_idle_timeout_secs` · `max_message_size` · `max_retries` · `max_retry_after` · `max_udp_payload_size` · `max_write_buffer_size` · `meta` · `method` · `mime` · `min_tls_version` · `mss` · `multipart` · `name` · `new` · `no_delay` · `no_proxy` · `none` · `ocsp_stapling` · `of` · `omit_settings` · `on_status` · `options` · `outcome` · `padding` · `parse` · `part` · `patch` · `path` · `peer_cert_der` · `permute_extensions` · `platform` · `platforms` · `poll_next` · `poll_ready` · `pool` · `pool_stats` · `port` · `post` · `pre_shared_key` · `preconnect` · `prefer_http2` · `preset` · `previous` · `profile` · `protocol` · `proxy` · `pseudo_order` · `put` · `qpack_blocked_streams` · `qpack_max_table_capacity` · `query` · `race` · `read` · `read_buffer_size` · `read_until` · `reason` · `record_size_limit` · `recv` · `recv_buffer_size` · `redirect` · `redirect_chain` · `remove` · `remove_all` · `remove_named` · `request` · `request_headers` · `request_trust_anchors` · `resolve` · `resolve_delay` · `resolve_host` · `resolver` · `response_header` · `resumed_ja4` · `retry` · `retry_on` · `reused` · `rotate_tls` · `rule` · `same_site` · `sec_ch_ua` · `secure` · `send` · `send_buffer_size` · `send_ms` · `sent` · `serialize` · `session_tickets` · `set` · `set_cookie` · `settings_order` · `sigalgs` · `signed_cert_timestamps` · `size` · `snapshot` · `socket` · `source` · `split` · `stale_probed` · `status` · `store_set_cookie` · `stream` · `stream_dependency` · `stream_id` · `strict` · `switch_family` · `system_roots` · `tcp_keepalive` · `tcp_keepalive_interval` · `tcp_keepalive_retries` · `tcp_nodelay` · `tcp_profile` · `tcp_user_timeout` · `text` · `text_with_charset` · `timeout` · `timing` · `tls` · `tls_record_version` · `tls_trust` · `tls_version` · `total` · `total_ms` · `trace` · `trailers` · `transient` · `try_from` · `ttl` · `unknown_setting8` · `unknown_setting9` · `url` · `user_agent` · `value` · `verified_against` · `verify_code` · `version` · `websocket` · `websocket_config` · `weight` · `window_scale` · `window_size` · `with_cookie_jar` · `with_proxy` · `with_redirect` · `write_buffer_size` · `zstd`
+`0` · `AfterAccept` · `AfterCchUa` · `AfterCchUaMobile` · `AfterCchUaPlatform` · `AfterContentType` · `AfterFetchDest` · `AfterUserAgent` · `Android` · `AuditData` · `Auto` · `BeforeAcceptEncoding` · `Binary` · `Body` · `BodyStream` · `Brave` · `Brave146` · `Brave154` · `Brotli` · `Browser` · `BrowserProfile` · `Cancel` · `Certificate` · `CfNetwork` · `CfnetworkIOS18` · `CfnetworkIOS27` · `CfnetworkMacOS26` · `Chrome` · `Chrome145` · `Chrome146` · `Chrome147` · `Chrome148` · `Chrome149` · `Chrome150` · `Chrome151` · `Chrome152` · `Chrome153` · `Chrome154` · `Chromium` · `ChromiumBrand` · `ClientIdentity` · `Close` · `CloseFrame` · `CompressionConfig` · `CompressionError` · `Config` · `Connect` · `ConnectError` · `Connection` · `ConnectionError` · `ContentEncoding` · `Cookie` · `CrossOrigin` · `CrossSite` · `Decode` · `Deflate` · `DigestAuth` · `Dns` · `DnsConfig` · `Done` · `Edge` · `Empty` · `EnhanceYourCalm` · `Err` · `Error` · `ErrorCode` · `Family` · `FetchSite` · `FingerprintSpec` · `Firefox` · `Firefox148` · `Firefox149` · `Firefox150` · `Firefox151` · `Firefox152` · `Firefox153` · `Firefox154` · `Firefox155` · `Firefox156` · `First` · `Fixed` · `FlowControlError` · `Follow` · `Form` · `FormNavigate` · `FrameSizeError` · `FrameTooLarge` · `Future` · `Gecko` · `Gzip` · `H2Error` · `H2Fingerprint` · `H2PlatformOverride` · `H2PriorityProfile` · `H2Profile` · `H3ConnectionIdLength` · `H3Grease` · `H3Order` · `H3Profile` · `H3Setting` · `H3TransportParam` · `H3VersionGrease` · `H3VersionInformation` · `Handshake` · `HandshakeIo` · `HappyEyeballsConfig` · `Head` · `HeaderAnchor` · `HeaderList` · `HeaderStyle` · `Host` · `Hostname` · `Hpack` · `Http1` · `Http11Required` · `Http1_1` · `Http2` · `Http3` · `HttpVersion` · `IOS` · `Identity` · `InadequateSecurity` · `InternalError` · `IntoFuture` · `IntoParamPair` · `IntoUrl` · `Io` · `Item` · `Ja3Input` · `Ja4Input` · `Ja4hInput` · `Jar` · `Json` · `Kind` · `Lax` · `LeylineService` · `Linux` · `MacOS` · `Native` · `Navigate` · `NoError` · `NoProxy` · `None` · `OkHttp` · `OkHttpAndroid10` · `Opera` · `Output` · `Parse` · `Part` · `Ping` · `Pinning` · `Platform` · `PlatformIdentity` · `Pong` · `PoolConfig` · `PoolStats` · `Preset` · `Profile` · `ProfileError` · `ProfileMeta` · `ProfileRegistry` · `ProtocolError` · `ProtocolPolicy` · `Proxy` · `ProxyConfig` · `ProxyRule` · `ProxyUrl` · `Race` · `Random` · `Redirect` · `RedirectAction` · `RedirectAttempt` · `RedirectPolicy` · `RefusedStream` · `Rejected` · `Request` · `RequestBuilder` · `ResolveFuture` · `Resolver` · `Response` · `ResponseTiming` · `Result` · `RetryPolicy` · `RetryTrigger` · `Rotate` · `Safari` · `Safari18` · `Safari26` · `SafariIOS17` · `SafariIOS18` · `SafariIOS27` · `SafariIos` · `SameOrigin` · `SameSite` · `Script` · `Sealed` · `Sent` · `ServerError` · `Session` · `SessionBuilder` · `SessionIdentity` · `SettingsTimeout` · `Shuffle` · `SocketConfig` · `SslConfig` · `Status` · `Stop` · `Stream` · `StreamClosed` · `Strict` · `SystemResolver` · `TcpConnect` · `TcpProfile` · `Text` · `Timeout` · `TimeoutConfig` · `Tls` · `Tls10` · `Tls12` · `Tls13` · `TlsError` · `TlsFingerprint` · `TlsInfo` · `TlsMinVersion` · `TlsProfile` · `TlsTrustConfig` · `Trace` · `TracingTrace` · `TrustStore` · `Url` · `WebKit` · `WebKit26` · `WebSocketBuilder` · `WebSocketConfig` · `Weighted` · `Windows` · `WsConnection` · `WsMessage` · `WsSink` · `WsStream` · `Xhr` · `Zstd` · `accept_language` · `accept_unmasked_frames` · `active_connection_id_limit` · `add_ca_der` · `add_ca_file` · `add_pinned_leaf_sha256` · `addrs` · `akamai` · `all` · `all_cookies` · `allow_non_idempotent` · `alpn` · `alps` · `alps_new_codepoint` · `anchored` · `append` · `as_str` · `attempt_limit` · `audit` · `available` · `backoff_factor` · `base` · `basic_auth` · `bearer_auth` · `body` · `boundary` · `brand` · `brotli` · `browser` · `build` · `builder` · `bytes` · `call` · `captured_against` · `cert_compression` · `ch_ua_brand` · `chosen` · `chromium_major` · `cipher` · `ciphers` · `clear` · `client_identity` · `close` · `code` · `compress` · `compression` · `compute_ja3` · `compute_ja4` · `compute_ja4h` · `compute_ja4t` · `config` · `connect` · `connect_ms` · `content_length` · `control_grease_frame` · `cookie` · `cookie_header` · `cookie_jar` · `cookies` · `copy_to` · `creation_time` · `curves` · `custom` · `danger_accept_invalid_certs` · `dcid_length` · `default` · `default_priority` · `deflate` · `delegated_credentials` · `delete` · `deserialize` · `detail` · `detect_host` · `df` · `digest_auth` · `dns` · `domain` · `done` · `ech_grease` · `elapsed` · `enable_push` · `entries` · `env` · `env_roots` · `eq` · `error_for_status` · `error_for_status_ref` · `evictions_dead` · `evictions_idle` · `evictions_lru` · `exclusive` · `execute` · `expected_h2_fingerprint` · `expected_ja4` · `expires` · `export_cookies` · `extend_from` · `extension_ids` · `extension_permutation` · `family` · `file` · `filename` · `fingerprint` · `fmt` · `for_platform` · `form` · `fresh_pool` · `from` · `from_fingerprint` · `from_str` · `from_toml` · `from_u32` · `get` · `get_cookie` · `global` · `grease` · `gzip` · `h1_hits` · `h1_misses` · `h2` · `h2_fingerprint` · `h2_hits` · `h2_misses` · `h2_ping_after_idle` · `h2_ping_failures` · `h2_ping_timeout` · `h3` · `h3_hits` · `h3_misses` · `happy_eyeballs` · `has_sni` · `hash` · `head` · `header` · `header_order` · `header_style` · `header_table_size` · `headers` · `hex` · `host` · `host_only` · `http` · `http_only` · `http_version` · `https` · `https_only` · `id` · `id_bits` · `identity` · `idle_timeout` · `initial_backoff` · `initial_connection_window_size` · `initial_max_data` · `initial_max_stream_data_bidi_local` · `initial_max_stream_data_bidi_remote` · `initial_max_stream_data_uni` · `initial_max_streams_bidi` · `initial_max_streams_uni` · `initial_stream_window_size` · `installs` · `interface` · `into_future` · `into_param_pair` · `into_stream` · `into_url` · `io` · `is_connect` · `is_expired` · `is_retryable` · `is_status` · `is_timeout` · `iter` · `ja3` · `ja4` · `ja4_r` · `ja4h` · `ja4t` · `jitter` · `json` · `keepalive` · `key_shares` · `kind` · `latest` · `len_hint` · `leyline` · `limited` · `load` · `load_cookies` · `local_address` · `local_ipv4` · `local_ipv6` · `location` · `locked` · `max` · `max_ack_delay_ms` · `max_backoff` · `max_body_size` · `max_concurrent_streams` · `max_connections` · `max_field_section_size` · `max_frame_size` · `max_h1_conns_per_host` · `max_header_list_size` · `max_idle_timeout_secs` · `max_len` · `max_message_size` · `max_retries` · `max_retry_after` · `max_udp_payload_size` · `max_write_buffer_size` · `meta` · `method` · `mime` · `min_tls_version` · `mss` · `multipart` · `name` · `new` · `no_delay` · `no_proxy` · `none` · `ocsp_stapling` · `of` · `omit_settings` · `on_status` · `options` · `outcome` · `padding` · `parse` · `part` · `patch` · `path` · `peer_cert_der` · `permute_extensions` · `pinned` · `platform` · `platforms` · `poll_next` · `poll_ready` · `pool` · `pool_stats` · `port` · `post` · `pre_shared_key` · `preconnect` · `prefer_http2` · `preset` · `previous` · `priority_update` · `profile` · `protocol` · `proxy` · `pseudo_order` · `put` · `qpack_blocked_streams` · `qpack_max_table_capacity` · `query` · `race` · `read` · `read_buffer_size` · `read_until` · `reason` · `record_size_limit` · `recv` · `recv_buffer_size` · `redirect` · `redirect_chain` · `remove` · `remove_all` · `remove_named` · `request` · `request_headers` · `request_trust_anchors` · `resolve` · `resolve_delay` · `resolve_host` · `resolver` · `response_header` · `resumed_ja4` · `retry` · `retry_on` · `reused` · `rotate_tls` · `rule` · `same_site` · `scid_length` · `sec_ch_ua` · `secure` · `send` · `send_buffer_size` · `send_ms` · `sent` · `serialize` · `session_tickets` · `set` · `set_cookie` · `settings` · `settings_order` · `sigalgs` · `signed_cert_timestamps` · `size` · `snapshot` · `socket` · `source` · `split` · `stale_probed` · `status` · `store_set_cookie` · `stream` · `stream_dependency` · `stream_id` · `strict` · `switch_family` · `system_roots` · `tcp_keepalive` · `tcp_keepalive_interval` · `tcp_keepalive_retries` · `tcp_nodelay` · `tcp_profile` · `tcp_user_timeout` · `text` · `text_with_charset` · `timeout` · `timing` · `tls` · `tls12_extensions` · `tls_record_version` · `tls_trust` · `tls_version` · `total` · `total_ms` · `trace` · `trailers` · `transient` · `transport_order` · `transport_parameters` · `try_from` · `ttl` · `unknown_setting8` · `unknown_setting9` · `url` · `user_agent` · `value` · `value_bits` · `varint` · `verified_against` · `verify_code` · `version` · `versions` · `websocket` · `websocket_config` · `weight` · `weights` · `window_scale` · `window_size` · `with_cookie_jar` · `with_proxy` · `with_redirect` · `write_buffer_size` · `zstd`
 
 </details>
 
@@ -1330,24 +1330,98 @@ pub leyline::profile::H2Profile::unknown_setting8: core::option::Option<u32>
 pub leyline::profile::H2Profile::unknown_setting9: core::option::Option<u32>
 ```
 
+### `H3ConnectionIdLength`
+
+```rust,ignore
+#[non_exhaustive] pub enum leyline::profile::H3ConnectionIdLength
+pub leyline::profile::H3ConnectionIdLength::Fixed(usize)
+pub leyline::profile::H3ConnectionIdLength::Weighted
+pub leyline::profile::H3ConnectionIdLength::Weighted::weights: alloc::vec::Vec<(usize, u32)>
+```
+
+### `H3Grease`
+
+```rust,ignore
+#[non_exhaustive] pub struct leyline::profile::H3Grease
+pub leyline::profile::H3Grease::id_bits: u32
+pub leyline::profile::H3Grease::max_len: usize
+pub leyline::profile::H3Grease::value_bits: u32
+```
+
+### `H3Order`
+
+```rust,ignore
+#[non_exhaustive] pub enum leyline::profile::H3Order
+pub leyline::profile::H3Order::Fixed
+pub leyline::profile::H3Order::Rotate
+pub leyline::profile::H3Order::Shuffle
+```
+
 ### `H3Profile`
 
 ```rust,ignore
 #[non_exhaustive] pub struct leyline::profile::H3Profile
 pub leyline::profile::H3Profile::active_connection_id_limit: u64
-pub leyline::profile::H3Profile::dcid_length: usize
+pub leyline::profile::H3Profile::control_grease_frame: core::option::Option<leyline::profile::H3Grease>
+pub leyline::profile::H3Profile::dcid_length: leyline::profile::H3ConnectionIdLength
 pub leyline::profile::H3Profile::initial_max_data: u64
 pub leyline::profile::H3Profile::initial_max_stream_data_bidi_local: u64
 pub leyline::profile::H3Profile::initial_max_stream_data_bidi_remote: u64
 pub leyline::profile::H3Profile::initial_max_stream_data_uni: u64
 pub leyline::profile::H3Profile::initial_max_streams_bidi: u64
 pub leyline::profile::H3Profile::initial_max_streams_uni: u64
-pub leyline::profile::H3Profile::max_field_section_size: u64
+pub leyline::profile::H3Profile::max_ack_delay_ms: core::option::Option<u64>
+pub leyline::profile::H3Profile::max_field_section_size: core::option::Option<u64>
 pub leyline::profile::H3Profile::max_idle_timeout_secs: u64
 pub leyline::profile::H3Profile::max_udp_payload_size: u16
-pub leyline::profile::H3Profile::qpack_blocked_streams: u64
-pub leyline::profile::H3Profile::qpack_max_table_capacity: u64
+pub leyline::profile::H3Profile::priority_update: bool
+pub leyline::profile::H3Profile::pseudo_order: core::option::Option<alloc::vec::Vec<alloc::string::String>>
+pub leyline::profile::H3Profile::qpack_blocked_streams: core::option::Option<u64>
+pub leyline::profile::H3Profile::qpack_max_table_capacity: core::option::Option<u64>
 pub leyline::profile::H3Profile::race: bool
+pub leyline::profile::H3Profile::scid_length: core::option::Option<usize>
+pub leyline::profile::H3Profile::settings: core::option::Option<alloc::vec::Vec<leyline::profile::H3Setting>>
+pub leyline::profile::H3Profile::tls: core::option::Option<leyline::profile::TlsProfile>
+pub leyline::profile::H3Profile::transport_order: leyline::profile::H3Order
+pub leyline::profile::H3Profile::transport_parameters: core::option::Option<alloc::vec::Vec<leyline::profile::H3TransportParam>>
+```
+
+### `H3Setting`
+
+```rust,ignore
+#[non_exhaustive] pub struct leyline::profile::H3Setting
+pub leyline::profile::H3Setting::grease: core::option::Option<leyline::profile::H3Grease>
+pub leyline::profile::H3Setting::id: core::option::Option<u64>
+pub leyline::profile::H3Setting::value: core::option::Option<u64>
+```
+
+### `H3TransportParam`
+
+```rust,ignore
+#[non_exhaustive] pub struct leyline::profile::H3TransportParam
+pub leyline::profile::H3TransportParam::grease: core::option::Option<leyline::profile::H3Grease>
+pub leyline::profile::H3TransportParam::hex: core::option::Option<alloc::string::String>
+pub leyline::profile::H3TransportParam::id: core::option::Option<u64>
+pub leyline::profile::H3TransportParam::pinned: bool
+pub leyline::profile::H3TransportParam::varint: core::option::Option<u64>
+pub leyline::profile::H3TransportParam::versions: core::option::Option<leyline::profile::H3VersionInformation>
+```
+
+### `H3VersionGrease`
+
+```rust,ignore
+#[non_exhaustive] pub enum leyline::profile::H3VersionGrease
+pub leyline::profile::H3VersionGrease::First
+pub leyline::profile::H3VersionGrease::Random
+```
+
+### `H3VersionInformation`
+
+```rust,ignore
+#[non_exhaustive] pub struct leyline::profile::H3VersionInformation
+pub leyline::profile::H3VersionInformation::available: alloc::vec::Vec<u32>
+pub leyline::profile::H3VersionInformation::chosen: u32
+pub leyline::profile::H3VersionInformation::grease: core::option::Option<leyline::profile::H3VersionGrease>
 ```
 
 ### `HeaderAnchor`
@@ -1374,6 +1448,7 @@ pub leyline::profile::HeaderStyle::Chromium
 pub leyline::profile::HeaderStyle::Gecko
 pub leyline::profile::HeaderStyle::OkHttp
 pub leyline::profile::HeaderStyle::WebKit
+pub leyline::profile::HeaderStyle::WebKit26
 ```
 
 ### `Platform`
@@ -1490,6 +1565,7 @@ pub leyline::profile::TlsProfile::request_trust_anchors: bool
 pub leyline::profile::TlsProfile::session_tickets: bool
 pub leyline::profile::TlsProfile::sigalgs: alloc::vec::Vec<alloc::string::String>
 pub leyline::profile::TlsProfile::signed_cert_timestamps: bool
+pub leyline::profile::TlsProfile::tls12_extensions: bool
 ```
 
 ## `leyline::tls`

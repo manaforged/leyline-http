@@ -1,12 +1,15 @@
 use leyline_quiche as quiche;
 
-use crate::profile::BrowserProfile;
 use crate::tls::{
-    FingerprintConnector, Resolver, TlsMinVersion, TlsTrustConfig, apply_profile_with_trust,
+    FingerprintConnector, HelloOptions, Resolver, TlsMinVersion, TlsTrustConfig,
+    apply_tls_with_trust,
 };
 
 use crate::quic::config::H3Config;
 use crate::quic::transport::DatagramTransport;
+use crate::quic::wire;
+
+const DGRAM_QUEUE_LEN: usize = 16;
 
 #[derive(Debug)]
 pub struct H3Response {
@@ -24,19 +27,19 @@ pub(crate) struct EstablishedH3 {
     pub(crate) local_addr: std::net::SocketAddr,
     pub(crate) max_udp_payload: usize,
     pub(crate) max_response_body_bytes: u64,
+    pub(crate) priority_update: bool,
     pub(crate) tls: crate::pool::TlsInfo,
 }
 
 fn build_quic_config(
     h3_cfg: &H3Config,
-    profile: &BrowserProfile,
     trust: &TlsTrustConfig,
     host: &str,
 ) -> Result<quiche::Config, String> {
     let mut ssl_builder =
         leyline_bssl::ssl::SslContextBuilder::new(leyline_bssl::ssl::SslMethod::tls())
             .map_err(|e| format!("quic ssl ctx: {e}"))?;
-    apply_profile_with_trust(&mut ssl_builder, profile, TlsMinVersion::Tls13, trust)
+    apply_tls_with_trust(&mut ssl_builder, &h3_cfg.tls, TlsMinVersion::Tls13, trust)
         .map_err(|e| format!("quic ssl ctx: {e}"))?;
 
     let pins = trust.pinned_leaf_sha256();
@@ -68,47 +71,87 @@ fn build_quic_config(
     config.set_initial_max_streams_uni(h3_cfg.initial_max_streams_uni);
     config.set_active_connection_id_limit(h3_cfg.active_connection_id_limit);
     config.set_disable_active_migration(true);
+    let wire = &h3_cfg.wire;
+    if let Some(ms) = wire.max_ack_delay_ms {
+        config.set_max_ack_delay(ms);
+    }
+    if wire::sends_datagrams(wire) {
+        config.enable_dgram(true, DGRAM_QUEUE_LEN, DGRAM_QUEUE_LEN);
+    }
+    if let Some(plan) = wire::transport_plan(wire)? {
+        config.set_transport_params_plan(plan);
+    }
+    if wire.settings.is_some() {
+        config.grease(false);
+    }
     Ok(config)
 }
 
 fn build_h3_config(h3_cfg: &H3Config) -> Result<quiche::h3::Config, String> {
+    let wire = &h3_cfg.wire;
     let mut h3_config = quiche::h3::Config::new().map_err(|e| format!("h3 config: {e}"))?;
-    h3_config.set_qpack_max_table_capacity(h3_cfg.qpack_max_table_capacity);
-    h3_config.set_qpack_blocked_streams(h3_cfg.qpack_blocked_streams);
-    h3_config.set_max_field_section_size(h3_cfg.max_field_section_size);
+    match &wire.settings {
+        Some(settings) => {
+            h3_config.set_settings_plan(wire::settings_plan(settings));
+            h3_config.set_control_frames(wire::control_frames(wire.control_grease_frame.as_ref()));
+        }
+        None => {
+            h3_config.set_qpack_max_table_capacity(wire.qpack_max_table_capacity.unwrap_or(0));
+            h3_config.set_qpack_blocked_streams(wire.qpack_blocked_streams.unwrap_or(0));
+            if let Some(size) = wire.max_field_section_size {
+                h3_config.set_max_field_section_size(size);
+            }
+        }
+    }
     Ok(h3_config)
 }
 
 pub(crate) async fn connect_and_handshake(
     h3_cfg: &H3Config,
-    profile: &BrowserProfile,
     trust: &TlsTrustConfig,
     connector: &FingerprintConnector,
     host: &str,
     port: u16,
     proxy: Option<&str>,
 ) -> Result<EstablishedH3, String> {
-    validate_connection_id_len(h3_cfg.dcid_length)?;
+    let dcid_len = wire::connection_id_len(&h3_cfg.wire.dcid_length);
+    validate_connection_id_len(dcid_len)?;
+    let scid_len = h3_cfg.wire.scid_length.unwrap_or(dcid_len);
+    if scid_len > quiche::MAX_CONN_ID_LEN {
+        return Err(format!(
+            "h3: scid_length must be 0..={} bytes, got {scid_len}",
+            quiche::MAX_CONN_ID_LEN
+        ));
+    }
     let host = crate::util::bare_host(host);
 
-    let mut config = build_quic_config(h3_cfg, profile, trust, host)?;
+    let mut config = build_quic_config(h3_cfg, trust, host)?;
+    let hello = HelloOptions::from_tls(&h3_cfg.tls).map_err(|e| format!("quic hello: {e}"))?;
     let (socket, peer_addr) = DatagramTransport::open(connector, host, port, proxy).await?;
     let local_addr = socket
         .local_addr()
         .map_err(|e| format!("local addr: {e}"))?;
 
-    let mut scid_bytes = vec![0u8; h3_cfg.dcid_length];
-    use rand::TryRngCore;
-    rand::rngs::OsRng
-        .try_fill_bytes(scid_bytes.as_mut_slice())
-        .map_err(|e| format!("scid entropy: {e}"))?;
+    let scid_bytes = wire::random_bytes(scid_len);
+    let dcid_bytes = wire::random_bytes(dcid_len);
     let scid = quiche::ConnectionId::from_ref(&scid_bytes);
+    let dcid = quiche::ConnectionId::from_ref(&dcid_bytes);
 
     let server_name = host.parse::<std::net::IpAddr>().is_err().then_some(host);
     let mut conn = Box::new(
-        quiche::connect(server_name, &scid, local_addr, peer_addr, &mut config)
-            .map_err(|e| format!("quic connect: {e}"))?,
+        quiche::connect_with_dcid(
+            server_name,
+            &scid,
+            &dcid,
+            local_addr,
+            peer_addr,
+            &mut config,
+        )
+        .map_err(|e| format!("quic connect: {e}"))?,
     );
+    hello
+        .apply(conn.ssl_mut(), true)
+        .map_err(|e| format!("quic hello: {e}"))?;
 
     let h3_config = build_h3_config(h3_cfg)?;
 
@@ -155,6 +198,7 @@ pub(crate) async fn connect_and_handshake(
                 local_addr,
                 max_udp_payload: h3_cfg.max_udp_payload_size as usize,
                 max_response_body_bytes: h3_cfg.max_response_body_bytes,
+                priority_update: h3_cfg.wire.priority_update,
                 tls,
             });
         }

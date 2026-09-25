@@ -13,6 +13,7 @@ use crate::tls::TlsStream;
 use crate::tls::builder::{TlsMinVersion, apply_profile_with_trust};
 use crate::tls::error::TlsError;
 use crate::tls::happy_eyeballs::{HappyEyeballsConfig, happy_eyeballs_connect};
+use crate::tls::hello::HelloOptions;
 use crate::tls::nonblocking::connect_one;
 use crate::tls::resolver::{Resolver, SystemResolver};
 use crate::tls::session_cache::SessionCache;
@@ -25,11 +26,7 @@ mod handshake;
 pub struct FingerprintConnector {
     ssl_connector: SslConnector,
     tcp_profile: TcpProfile,
-    ech_grease: bool,
-    alps_proto: Option<Vec<u8>>,
-    alps_new_codepoint: bool,
-    request_trust_anchors: bool,
-    key_shares: Option<Vec<u16>>,
+    hello: HelloOptions,
     session_cache: SessionCache,
     accept_invalid_certs: std::sync::Arc<std::sync::atomic::AtomicBool>,
     resolver: Arc<dyn Resolver>,
@@ -58,8 +55,7 @@ impl FingerprintConnector {
 
         apply_profile_with_trust(&mut builder, profile, TlsMinVersion::Tls12, &trust)?;
 
-        let tls = &profile.tls;
-        let key_shares = key_share_ids(tls)?;
+        let hello = HelloOptions::from_tls(&profile.tls)?;
 
         builder
             .set_alpn_protos(b"\x02h2\x08http/1.1")
@@ -71,11 +67,7 @@ impl FingerprintConnector {
         Ok(Self {
             ssl_connector: builder.build(),
             tcp_profile: tcp,
-            ech_grease: tls.ech_grease,
-            alps_proto: tls.alps.as_ref().map(|s| s.as_bytes().to_vec()),
-            alps_new_codepoint: tls.alps_new_codepoint,
-            request_trust_anchors: tls.request_trust_anchors,
-            key_shares,
+            hello,
             session_cache: SessionCache::new(),
             accept_invalid_certs,
             resolver: Arc::new(SystemResolver),
@@ -238,34 +230,10 @@ impl std::fmt::Debug for FingerprintConnector {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FingerprintConnector")
             .field("tcp_profile", &self.tcp_profile)
-            .field("ech_grease", &self.ech_grease)
+            .field("ech_grease", &self.hello.ech_grease())
             .finish_non_exhaustive()
     }
 }
 
 #[cfg(test)]
 mod tests;
-
-fn key_share_ids(tls: &crate::profile::TlsProfile) -> Result<Option<Vec<u16>>, TlsError> {
-    let Some(names) = tls.key_shares.as_deref() else {
-        return Ok(None);
-    };
-    let ids = names
-        .iter()
-        .map(|name| {
-            crate::iana::curve_id(name)
-                .ok_or_else(|| TlsError::Profile(format!("unknown key share group: {name}")))
-        })
-        .collect::<Result<Vec<u16>, _>>()?;
-    let mut curves = tls
-        .curves
-        .iter()
-        .filter_map(|name| crate::iana::curve_id(name));
-    if !ids.iter().all(|id| curves.any(|curve| curve == *id)) {
-        return Err(TlsError::Profile(format!(
-            "key_shares {names:?} must be an ordered subsequence of curves {:?}",
-            tls.curves
-        )));
-    }
-    Ok(Some(ids))
-}

@@ -90,7 +90,7 @@ impl BrowserProfile {
         if let Some(raw) = spec.ja3.as_deref() {
             ja3::apply(&mut profile.tls, raw).map_err(|why| config_error("JA3", why))?;
         }
-        crate::profile::permutation::validate(&profile.tls)
+        crate::profile::permutation::validate(&profile.tls, false)
             .map_err(|why| config_error("TLS", why))?;
         if let Some(raw) = spec.akamai.as_deref() {
             akamai::apply(&mut profile.h2, raw).map_err(|why| config_error("Akamai", why))?;

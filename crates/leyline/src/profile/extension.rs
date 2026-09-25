@@ -12,6 +12,9 @@ const ALPS_OLD: u16 = 0x4469;
 #[derive(Clone, Copy)]
 enum Switch {
     Always,
+    Tls12,
+    TcpOnly,
+    QuicOnly,
     SessionTickets,
     SupportedGroups,
     SignatureAlgorithms,
@@ -37,9 +40,9 @@ const fn ext(id: u16, name: &'static str, switch: Switch) -> Extension {
 
 const EXTENSIONS: &[Extension] = &[
     ext(0x0000, "server_name", Switch::Always),
-    ext(0x0017, "extended_master_secret", Switch::Always),
-    ext(0xff01, "renegotiation_info", Switch::Always),
-    ext(0x000b, "ec_point_formats", Switch::Always),
+    ext(0x0017, "extended_master_secret", Switch::Tls12),
+    ext(0xff01, "renegotiation_info", Switch::Tls12),
+    ext(0x000b, "ec_point_formats", Switch::TcpOnly),
     ext(0x0023, "session_ticket", Switch::SessionTickets),
     ext(0x0010, "alpn", Switch::Always),
     ext(0x0033, "key_share", Switch::Always),
@@ -75,6 +78,7 @@ const EXTENSIONS: &[Extension] = &[
         },
     ),
     ext(0xca34, "trust_anchors", Switch::TrustAnchors),
+    ext(0x0039, "quic_transport_parameters", Switch::QuicOnly),
     ext(
         0xfe0d,
         "encrypted_client_hello",
@@ -84,14 +88,19 @@ const EXTENSIONS: &[Extension] = &[
 
 const ALWAYS_SENT: &str = "leyline always sends it";
 
+const QUIC_ONLY: &str = "leyline sends it only in the HTTP/3 ClientHello";
+
 const NO_BASE_VALUE: &str =
     "the base profile sets no value for it; pass a base profile whose [tls] table sets one";
 
 impl Switch {
-    fn advertised(self, tls: &TlsProfile) -> bool {
+    fn advertised(self, tls: &TlsProfile, quic: bool) -> bool {
         match self {
             Self::Always => true,
-            Self::SessionTickets => tls.session_tickets,
+            Self::Tls12 => !quic || tls.tls12_extensions,
+            Self::TcpOnly => !quic,
+            Self::QuicOnly => quic,
+            Self::SessionTickets => !quic && tls.session_tickets,
             Self::SupportedGroups => !tls.curves.is_empty(),
             Self::SignatureAlgorithms => !tls.sigalgs.is_empty(),
             Self::StatusRequest => tls.ocsp_stapling,
@@ -109,9 +118,18 @@ impl Switch {
 
     fn set(self, tls: &mut TlsProfile, base: &TlsProfile, on: bool) -> Result<(), &'static str> {
         match self {
-            Self::Always | Self::SupportedGroups | Self::SignatureAlgorithms => {
+            Self::Always
+            | Self::Tls12
+            | Self::TcpOnly
+            | Self::SupportedGroups
+            | Self::SignatureAlgorithms => {
                 if !on {
                     return Err(ALWAYS_SENT);
+                }
+            }
+            Self::QuicOnly => {
+                if on {
+                    return Err(QUIC_ONLY);
                 }
             }
             Self::SessionTickets => tls.session_tickets = on,
@@ -150,10 +168,10 @@ fn carried<T>(on: bool, base: Option<T>) -> Result<Option<T>, &'static str> {
     }
 }
 
-pub(crate) fn advertised_extensions(tls: &TlsProfile) -> Vec<(u16, &'static str)> {
+pub(crate) fn advertised_extensions(tls: &TlsProfile, quic: bool) -> Vec<(u16, &'static str)> {
     EXTENSIONS
         .iter()
-        .filter(|ext| ext.switch.advertised(tls))
+        .filter(|ext| ext.switch.advertised(tls, quic))
         .map(|ext| (ext.id, ext.name))
         .collect()
 }

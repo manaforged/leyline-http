@@ -8,8 +8,6 @@ use futures_util::future::{BoxFuture, Shared};
 use crate::h2::client::H2Client;
 use crate::h2::config::H2Config;
 #[cfg(feature = "http3")]
-use crate::profile::BrowserProfile;
-#[cfg(feature = "http3")]
 use crate::quic::{H3Client, H3Config, open_fresh_h3};
 use crate::tls::FingerprintConnector;
 #[cfg(feature = "http3")]
@@ -179,7 +177,6 @@ pub async fn checkout_handle(
 #[cfg(feature = "http3")]
 pub(crate) struct H3Target<'a> {
     pub(crate) config: &'a H3Config,
-    pub(crate) profile: &'a BrowserProfile,
     pub(crate) trust: &'a TlsTrustConfig,
     pub(crate) connector: &'a FingerprintConnector,
 }
@@ -188,14 +185,12 @@ pub(crate) struct H3Target<'a> {
 async fn open_fresh_h3_installed(
     pool: Arc<Pool>,
     config: H3Config,
-    profile: BrowserProfile,
     trust: TlsTrustConfig,
     connector: FingerprintConnector,
     key: PoolKey,
 ) -> Result<(H3Client, TlsInfo), Error> {
     let (handle, tls) = open_fresh_h3(
         &config,
-        &profile,
         &trust,
         &connector,
         &key.host,
@@ -222,7 +217,6 @@ pub(crate) async fn open_h3(
             open_fresh_h3_installed(
                 Arc::clone(pool),
                 target.config.clone(),
-                target.profile.clone(),
                 target.trust.clone(),
                 target.connector.clone(),
                 key.clone(),

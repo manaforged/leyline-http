@@ -59,6 +59,14 @@ pub enum Error {
 
     /// The decoded header list exceeded the size limit.
     HeaderListTooLarge,
+
+    InvalidDynamicTableIndex,
+
+    InvalidRequiredInsertCount,
+
+    EncoderStream,
+
+    BlockedStreamLimit,
 }
 
 impl std::fmt::Display for Error {
@@ -240,3 +248,4 @@ pub use encoder::Encoder;
 mod decoder;
 mod encoder;
 mod static_table;
+mod table;

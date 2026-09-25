@@ -55,16 +55,7 @@ impl FingerprintConnector {
             .configure()
             .map_err(TlsError::from_stack)?;
 
-        if include_alps {
-            if let Some(ref alps) = self.alps_proto {
-                config
-                    .add_application_settings(alps)
-                    .map_err(TlsError::from_stack)?;
-                if self.alps_new_codepoint {
-                    config.set_alps_use_new_codepoint(true);
-                }
-            }
-        } else {
+        if !include_alps {
             config
                 .set_alpn_protos(b"\x08http/1.1")
                 .map_err(TlsError::from_stack)?;
@@ -85,23 +76,7 @@ impl FingerprintConnector {
             self.session_cache.attach(&mut ssl, session_key)?;
         }
 
-        if self.ech_grease {
-            ssl.set_enable_ech_grease(true);
-        }
-
-        if let Some(ids) = &self.key_shares {
-            ssl.set_client_key_shares(ids)
-                .map_err(TlsError::from_stack)?;
-        }
-
-        if self.request_trust_anchors {
-            ssl.set_requested_trust_anchors(&[]).map_err(|e| {
-                TlsError::SslConfig(format!(
-                    "profile requires the trust_anchors extension (0xCA34), which BoringSSL \
-                     rejected ({e}); the ClientHello JA4 would not match the captured browser"
-                ))
-            })?;
-        }
+        self.hello.apply(&mut ssl, include_alps)?;
 
         let stream = match leyline_bssl_tokio::SslStreamBuilder::new(ssl, io)
             .connect()

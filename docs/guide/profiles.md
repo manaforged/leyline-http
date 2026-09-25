@@ -55,7 +55,7 @@ unrecorded, not that the profile is wrong.
 | Firefox 155 | `Firefox155` | `firefox-155.0.1` | gated |
 | Firefox 156 | `Firefox156` | `firefox-156.0.1` | gated |
 | Safari 18 | `Safari18` | `safari-18.6-20621.3.11.11.3` | gated |
-| Safari 26 | `Safari26` | `safari-26.2-21623.1.14.11.9` | gated |
+| Safari 26 | `Safari26` | `safari-26.6.2-21624.5.1.11.3` | gated |
 | Safari iOS 17 | `SafariIOS17` | `safari-ios-17.5-21F79-simulator` | gated |
 | Safari iOS 18 | `SafariIOS18` | `safari-ios-18.6-22G86-simulator` | gated |
 | Safari iOS 27 | `SafariIOS27` | `safari-ios-27.0-24A434-simulator` | gated |
@@ -112,7 +112,7 @@ The `capture` key in each profile's `[meta]` table records the source:
 | Firefox 155 | Browser capture | `browser` | `firefox-155.0.1`, macOS and Linux `--headless`, Windows headful |
 | Firefox 156 | Browser capture | `browser` | `firefox-156.0.1`, macOS and Linux `--headless`, Windows headful |
 | Safari 18 | Browser capture | `browser` | `safari-18.6-20621.3.11.11.3`, Safari.app on macOS 15.7.7 in a VM through safaridriver |
-| Safari 26 | Browser capture | `browser` | `safari-26.2-21623.1.14.11.9`, Safari.app through safaridriver |
+| Safari 26 | Browser capture | `browser` | `safari-26.6.2-21624.5.1.11.3`, Safari.app on macOS 26.6.2 in a VM through safaridriver |
 | Safari iOS 17 | Emulator capture | `emulator` | `safari-ios-17.5-21F79-simulator`, Mobile Safari in the iOS 17.5 simulator |
 | Safari iOS 18 | Emulator capture | `emulator` | `safari-ios-18.6-22G86-simulator`, Mobile Safari in the iOS 18.6 simulator |
 | Safari iOS 27 | Emulator capture | `emulator` | `safari-ios-27.0-24A434-simulator`, Mobile Safari in the iOS 27.0 simulator |
@@ -223,11 +223,19 @@ These facts come from the captures behind the bundled profiles.
   HEADERS frame carries a priority with weight 256. The capture ran in a VM, so
   its TCP SYN is not a Mac's; only the TLS, HTTP/2, and header values come from
   it.
+- **Safari 26.** Safari 26.6.2 (21624.5.1.11.3) on macOS 26.6.2 sends the
+  same ClientHello and HTTP/2 SETTINGS as Safari 26.2. Its header list adds
+  `zstd` to `accept-encoding`, so the profile uses the `webkit-26` header
+  style. Safari 18 and Mobile Safari 17 and 18 keep the `webkit` style. The
+  capture ran in a VM from the `macos-tahoe-base` image, so its TCP SYN is not
+  a Mac's; only the TLS, HTTP/2, and header values come from it. Two
+  safaridriver runs against `tls.peet.ws/api/all` gave the same JA3, JA4,
+  peetprint, and Akamai HTTP/2 fingerprint.
 - **Safari iOS 27 and CFNetwork iOS 27.** The iOS 27.0 simulator loads
   `CFNetwork`, `Network`, `libcoretls`, and `libboringssl` from the iOS runtime,
   not from macOS. Its ClientHello is the same as Safari 26 and CFNetwork macOS
-  26. Mobile Safari differs from Safari 26.2 in the header list:
-  `accept-encoding` adds `zstd`, as Safari 26.6 on macOS does. CFNetwork iOS 27
+  26. Mobile Safari and Safari 26.6.2 send the `webkit-26` header style, where
+  `accept-encoding` adds `zstd`. CFNetwork iOS 27
   sends a 2 MiB initial stream window, where macOS sends 4 MiB. The simulator
   takes the Darwin version in the CFNetwork user agent from the host kernel, so
   `Darwin/25.6.0` is the host's value, not a phone's.
@@ -268,25 +276,31 @@ desktop browsers ran in a macOS 26.6.2 VM (Safari 18 in a macOS 15.7.7 VM).
 Mobile Safari captures are QUIC Initial packets, decrypted with the RFC 9001
 initial keys. The `[h3]` tables of the other profiles have no QUIC capture.
 
-A profile sets the values that the table can express. These browser values
-have no `[h3]` field, so Leyline does not send them:
+Each of these profiles reproduces its capture: the QUIC ClientHello through
+`[h3.tls]`, the transport parameter set, values, and order policy, the
+connection ID lengths, the SETTINGS list, the control stream frames, and the
+pseudo-header order. Values the browser picks at random per connection
+(GREASE IDs and values, the Chromium parameter shuffle, the Safari rotation,
+the Firefox destination connection ID length) are random in Leyline in the
+same way. See [HTTP/3](http3.md) for the keys.
 
-- **Chromium.** Transport parameters `version_information`,
-  `max_datagram_frame_size`, `google_connection_options`, `initial_rtt`, and a
-  GREASE parameter, in a random order. SETTINGS `QPACK_MAX_TABLE_CAPACITY`
-  65536, `H3_DATAGRAM`, and a GREASE setting. The source connection ID is
+- **Chromium.** The transport parameters come in a random order, with
+  `version_information`, `max_datagram_frame_size`, `google_connection_options`
+  and a GREASE parameter. SETTINGS end with a GREASE setting, and a GREASE
+  frame and a PRIORITY_UPDATE frame follow them. The source connection ID is
   empty.
-- **Firefox.** Transport parameters `max_ack_delay` 20, `version_information`,
-  `max_datagram_frame_size` 65535, and parameter 29, and no
-  `max_udp_payload_size`. A 3-byte source connection ID. SETTINGS
-  `QPACK_MAX_TABLE_CAPACITY` 65536, `QPACK_BLOCKED_STREAMS` 20,
-  `ENABLE_CONNECT_PROTOCOL`, `H3_DATAGRAM`, and two unregistered settings, and
-  no `MAX_FIELD_SECTION_SIZE`.
-- **Safari.** No `max_udp_payload_size`. The transport parameter order rotates
-  between connections. Safari 18 and iOS 18 add Apple parameter `0xff080808`.
-  SETTINGS `QPACK_MAX_TABLE_CAPACITY` 16383, `QPACK_BLOCKED_STREAMS` 100, and a
-  GREASE setting, and no `MAX_FIELD_SECTION_SIZE`. The source connection ID is
-  empty.
+- **Firefox.** The transport parameters include `max_ack_delay` 20,
+  `version_information`, `reset_stream_at`, `min_ack_delay`, and
+  `max_datagram_frame_size` 65535. The destination connection ID is 8 to 20
+  bytes, biased to 8, and the source connection ID has 3 bytes. The QUIC
+  ClientHello keeps `extended_master_secret` and `renegotiation_info`.
+- **Safari.** The transport parameter order rotates between connections.
+  Safari 18 and iOS 18 add Apple parameter `0xff080808` last. SETTINGS end with
+  a GREASE setting. The source connection ID is empty.
+
+The Chrome 154 capture negotiated real ECH, because its browser had the
+server's ECH configuration. Leyline sends an ECH GREASE extension with the
+same extension ID, so the JA4 is the same.
 
 ## Update cadence
 
@@ -341,7 +355,7 @@ brand overlay (`SessionBuilder::brand`) needs `chromium_major` in `[meta]`.
 The request headers follow `header_style` in `[meta]`. `profiles/headers.toml`
 is the one owner of request header shapes. Each top-level table is one shape,
 and its key is the `header_style` value: `chromium`, `gecko`, `webkit`,
-`okhttp`, and `brave`. The build generates the `HeaderStyle` enum from this
+`webkit-26`, `okhttp`, `brave`, and `brave-154`. The build generates the `HeaderStyle` enum from this
 file, so a new shape needs only a new table. The build fails when a profile or
 a brand names a shape that the file does not define.
 

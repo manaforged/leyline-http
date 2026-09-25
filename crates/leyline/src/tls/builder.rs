@@ -7,7 +7,7 @@
 use leyline_bssl::ssl::{CertificateCompressionAlgorithm, CertificateCompressor};
 use leyline_bssl::ssl::{SslContextBuilder, SslVerifyMode};
 
-use crate::profile::BrowserProfile;
+use crate::profile::{BrowserProfile, TlsProfile};
 
 use crate::tls::error::TlsError;
 use crate::tls::keylog::install_from_env;
@@ -45,8 +45,15 @@ pub(crate) fn apply_profile_with_trust(
     min_version: TlsMinVersion,
     trust: &TlsTrustConfig,
 ) -> Result<(), TlsError> {
-    let tls = &profile.tls;
+    apply_tls_with_trust(builder, &profile.tls, min_version, trust)
+}
 
+pub(crate) fn apply_tls_with_trust(
+    builder: &mut SslContextBuilder,
+    tls: &TlsProfile,
+    min_version: TlsMinVersion,
+    trust: &TlsTrustConfig,
+) -> Result<(), TlsError> {
     phase::ciphers(builder, tls)?;
     phase::curves(builder, tls)?;
     phase::sigalgs(builder, tls)?;

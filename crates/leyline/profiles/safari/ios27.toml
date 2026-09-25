@@ -3,7 +3,7 @@ name = "Safari iOS 27"
 browser = "safari-ios"
 version = 27
 variant = "SafariIOS27"
-header_style = "webkit"
+header_style = "webkit-26"
 capture = "emulator"
 platform_browser = { macos = "safari" }
 family = "webkit"
@@ -95,6 +95,72 @@ max_idle_timeout_secs = 300
 max_udp_payload_size = 1452
 active_connection_id_limit = 64
 dcid_length = 8
-qpack_max_table_capacity = 0
-qpack_blocked_streams = 0
-max_field_section_size = 262144
+scid_length = 0
+transport_order = "rotate"
+transport_parameters = [
+    { id = 4 },
+    { id = 5 },
+    { id = 6 },
+    { id = 7 },
+    { id = 9 },
+    { id = 14 },
+    { id = 15 },
+    { id = 1 },
+]
+settings = [
+    { id = 1, value = 16383 },
+    { id = 7, value = 100 },
+    { grease = { id_bits = 32, value_bits = 32 } },
+]
+
+[h3.tls]
+ciphers = [
+    "TLS_AES_256_GCM_SHA384",
+    "TLS_CHACHA20_POLY1305_SHA256",
+    "TLS_AES_128_GCM_SHA256",
+    "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
+    "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+    "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256",
+    "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+    "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+    "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
+    "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA",
+    "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA",
+    "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA",
+    "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA",
+    "TLS_RSA_WITH_AES_256_GCM_SHA384",
+    "TLS_RSA_WITH_AES_128_GCM_SHA256",
+    "TLS_RSA_WITH_AES_256_CBC_SHA",
+    "TLS_RSA_WITH_AES_128_CBC_SHA",
+    "TLS_ECDHE_ECDSA_WITH_3DES_EDE_CBC_SHA",
+    "TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA",
+    "TLS_RSA_WITH_3DES_EDE_CBC_SHA",
+]
+curves = [
+    "X25519_MLKEM768",
+    "X25519",
+    "SECP256R1",
+    "SECP384R1",
+    "SECP521R1",
+]
+sigalgs = [
+    "ecdsa_secp256r1_sha256",
+    "rsa_pss_rsae_sha256",
+    "rsa_pkcs1_sha256",
+    "ecdsa_secp384r1_sha384",
+    "rsa_pss_rsae_sha384",
+    "rsa_pss_rsae_sha384",
+    "rsa_pkcs1_sha384",
+    "rsa_pss_rsae_sha512",
+    "rsa_pkcs1_sha512",
+    "rsa_pkcs1_sha1",
+]
+ocsp_stapling = true
+signed_cert_timestamps = true
+cert_compression = ["zlib"]
+grease = true
+ech_grease = false
+pre_shared_key = false
+session_tickets = false
+permute_extensions = false
+extension_permutation = [0, 10, 16, 5, 13, 18, 51, 45, 43, 57, 27]

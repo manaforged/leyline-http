@@ -329,6 +329,25 @@ impl Frame {
 
             0x30 | 0x31 => parse_datagram_frame(frame_type, b)?,
 
+            0x1f => Frame::Ping { mtu_probe: None },
+
+            0x24 => {
+                let frame = Frame::ResetStream {
+                    stream_id: b.get_varint()?,
+                    error_code: b.get_varint()?,
+                    final_size: b.get_varint()?,
+                };
+                b.get_varint()?;
+                frame
+            }
+
+            0xaf => {
+                for _ in 0..4 {
+                    b.get_varint()?;
+                }
+                Frame::Ping { mtu_probe: None }
+            }
+
             _ => return Err(Error::InvalidFrame),
         };
 

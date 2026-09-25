@@ -424,10 +424,16 @@ impl Handshake {
         &mut self,
         params: &crate::TransportParams,
         is_server: bool,
+        plan: Option<&[crate::TransportParamEntry]>,
     ) -> Result<()> {
-        let mut raw_params = [0; 128];
+        let mut raw_params = [0; 512];
 
-        let raw_params = crate::TransportParams::encode(params, is_server, &mut raw_params)?;
+        let raw_params = match plan {
+            Some(plan) if !is_server => {
+                crate::TransportParams::encode_plan(params, plan, &mut raw_params)?
+            }
+            _ => crate::TransportParams::encode(params, is_server, &mut raw_params)?,
+        };
 
         let rc = unsafe {
             SSL_set_quic_transport_params(self.as_mut_ptr(), raw_params.as_ptr(), raw_params.len())

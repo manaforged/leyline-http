@@ -1,7 +1,15 @@
 use std::time::Duration;
 
-use crate::profile::BrowserProfile;
+use crate::h2::config::{PseudoOrder, parse_pseudo_order};
+use crate::profile::{BrowserProfile, H3Profile, TlsProfile};
 use crate::{Error, Kind};
+
+const DEFAULT_PSEUDO_ORDER: [PseudoOrder; 4] = [
+    PseudoOrder::Method,
+    PseudoOrder::Scheme,
+    PseudoOrder::Authority,
+    PseudoOrder::Path,
+];
 
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -15,13 +23,12 @@ pub struct H3Config {
     pub max_idle_timeout: Duration,
     pub max_udp_payload_size: u16,
     pub active_connection_id_limit: u64,
-    pub dcid_length: usize,
-
-    pub qpack_max_table_capacity: u64,
-    pub qpack_blocked_streams: u64,
-    pub max_field_section_size: u64,
 
     pub max_response_body_bytes: u64,
+
+    pub(crate) wire: H3Profile,
+    pub(crate) tls: TlsProfile,
+    pub(crate) pseudo_order: [PseudoOrder; 4],
 }
 
 impl H3Config {
@@ -32,6 +39,10 @@ impl H3Config {
                 profile.meta.name
             ))
         })?;
+        let pseudo_order = match &h3.pseudo_order {
+            Some(tokens) => parse_pseudo_order(tokens, "H3")?,
+            None => DEFAULT_PSEUDO_ORDER,
+        };
         Ok(Self {
             initial_max_data: h3.initial_max_data,
             initial_max_stream_data_bidi_local: h3.initial_max_stream_data_bidi_local,
@@ -42,11 +53,10 @@ impl H3Config {
             max_idle_timeout: Duration::from_secs(h3.max_idle_timeout_secs),
             max_udp_payload_size: h3.max_udp_payload_size,
             active_connection_id_limit: h3.active_connection_id_limit,
-            dcid_length: h3.dcid_length,
-            qpack_max_table_capacity: h3.qpack_max_table_capacity,
-            qpack_blocked_streams: h3.qpack_blocked_streams,
-            max_field_section_size: h3.max_field_section_size,
             max_response_body_bytes: crate::core::DEFAULT_MAX_BODY_SIZE as u64,
+            tls: h3.tls.clone().unwrap_or_else(|| profile.tls.clone()),
+            wire: h3.clone(),
+            pseudo_order,
         })
     }
 }

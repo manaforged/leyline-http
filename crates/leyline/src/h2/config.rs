@@ -166,32 +166,7 @@ impl H2Config {
             .filter_map(|id| available.get(id).map(|v| (*id, *v)))
             .collect();
 
-        if h2.pseudo_order.len() != 4 {
-            return Err(Error::new(Kind::Config).with_message(format!(
-                "H2 pseudo_order must have exactly 4 entries, got {}",
-                h2.pseudo_order.len()
-            )));
-        }
-        let mut pseudo_order = [
-            PseudoOrder::Method,
-            PseudoOrder::Authority,
-            PseudoOrder::Scheme,
-            PseudoOrder::Path,
-        ];
-        for (slot, s) in pseudo_order.iter_mut().zip(h2.pseudo_order.iter()) {
-            *slot = PseudoOrder::parse_key(s).ok_or_else(|| {
-                Error::new(Kind::Config)
-                    .with_message(format!("unknown H2 pseudo_order token: {s:?}"))
-            })?;
-        }
-        for i in 1..pseudo_order.len() {
-            if pseudo_order[..i].contains(&pseudo_order[i]) {
-                return Err(Error::new(Kind::Config).with_message(format!(
-                    "duplicate H2 pseudo_order token: {:?}",
-                    h2.pseudo_order[i]
-                )));
-            }
-        }
+        let pseudo_order = parse_pseudo_order(&h2.pseudo_order, "H2")?;
 
         let initial_connection_window_size =
             h2.initial_connection_window_size.ok_or_else(|| {
@@ -243,6 +218,39 @@ impl H2Config {
 
         format!("{}|{}|0|{}", settings_str, window_update, pseudo_str)
     }
+}
+
+pub(crate) fn parse_pseudo_order(
+    tokens: &[String],
+    label: &str,
+) -> Result<[PseudoOrder; 4], Error> {
+    if tokens.len() != 4 {
+        return Err(Error::new(Kind::Config).with_message(format!(
+            "{label} pseudo_order must have exactly 4 entries, got {}",
+            tokens.len()
+        )));
+    }
+    let mut pseudo_order = [
+        PseudoOrder::Method,
+        PseudoOrder::Authority,
+        PseudoOrder::Scheme,
+        PseudoOrder::Path,
+    ];
+    for (slot, s) in pseudo_order.iter_mut().zip(tokens.iter()) {
+        *slot = PseudoOrder::parse_key(s).ok_or_else(|| {
+            Error::new(Kind::Config)
+                .with_message(format!("unknown {label} pseudo_order token: {s:?}"))
+        })?;
+    }
+    for i in 1..pseudo_order.len() {
+        if pseudo_order[..i].contains(&pseudo_order[i]) {
+            return Err(Error::new(Kind::Config).with_message(format!(
+                "duplicate {label} pseudo_order token: {:?}",
+                tokens[i]
+            )));
+        }
+    }
+    Ok(pseudo_order)
 }
 
 #[cfg(test)]

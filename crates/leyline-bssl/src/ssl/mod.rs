@@ -2901,6 +2901,11 @@ impl SslRef {
         }
     }
 
+    #[corresponds(SSL_set_tls12_extensions)]
+    pub fn set_tls12_extensions(&mut self, enabled: bool) {
+        unsafe { ffi::SSL_set_tls12_extensions(self.as_ptr(), c_int::from(enabled)) }
+    }
+
     #[corresponds(SSL_add_application_settings)]
     pub fn add_application_settings(&mut self, alps: &[u8]) -> Result<(), ErrorStack> {
         unsafe {

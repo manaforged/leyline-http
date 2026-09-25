@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use serde::Deserialize;
 
+use crate::profile::H3Profile;
 use crate::profile::preset::HeaderStyle;
 use crate::profile::registry::ProfileError;
 use crate::{Error, Kind};
@@ -69,31 +70,6 @@ pub struct ProfileMeta {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
-pub struct H3Profile {
-    pub initial_max_data: u64,
-    pub initial_max_stream_data_bidi_local: u64,
-    pub initial_max_stream_data_bidi_remote: u64,
-    pub initial_max_stream_data_uni: u64,
-    pub initial_max_streams_bidi: u64,
-    pub initial_max_streams_uni: u64,
-    pub max_idle_timeout_secs: u64,
-    pub max_udp_payload_size: u16,
-    pub active_connection_id_limit: u64,
-    pub dcid_length: usize,
-    pub qpack_max_table_capacity: u64,
-    pub qpack_blocked_streams: u64,
-    pub max_field_section_size: u64,
-    #[serde(default)]
-    pub race: bool,
-}
-
-#[expect(
-    missing_docs,
-    reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
-)]
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-#[non_exhaustive]
 pub struct TlsProfile {
     pub ciphers: Vec<String>,
     pub curves: Vec<String>,
@@ -134,6 +110,8 @@ pub struct TlsProfile {
     pub padding: bool,
     #[serde(default)]
     pub min_tls_version: Option<String>,
+    #[serde(default)]
+    pub tls12_extensions: bool,
 }
 
 const fn default_grease() -> bool {
@@ -272,8 +250,12 @@ impl BrowserProfile {
     pub fn from_toml(toml_str: &str) -> Result<Self, ProfileError> {
         let mut profile: Self = toml::from_str(toml_str).map_err(ProfileError::parse)?;
         profile.derive_sec_ch_ua();
-        crate::profile::permutation::validate(&profile.tls)
+        crate::profile::permutation::validate(&profile.tls, false)
             .map_err(|why| ProfileError::parse(format!("{}: {why}", profile.meta.name)))?;
+        if let Some(h3) = &profile.h3 {
+            h3.validate()
+                .map_err(|why| ProfileError::parse(format!("{}: {why}", profile.meta.name)))?;
+        }
         for warning in profile.load_warnings() {
             tracing::warn!(target: "leyline::profile", "{warning}");
         }

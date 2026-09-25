@@ -377,7 +377,6 @@
 //! [qlog]: https://datatracker.ietf.org/doc/html/draft-ietf-quic-qlog-main-schema
 
 #![allow(clippy::upper_case_acronyms)]
-#![warn(missing_docs)]
 #![warn(unused_qualifications)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
@@ -605,6 +604,8 @@ pub struct Config {
     track_unknown_transport_params: Option<usize>,
 
     initial_rtt: Duration,
+
+    transport_params_plan: Option<Vec<TransportParamEntry>>,
 }
 
 // See https://quicwg.org/base-drafts/rfc9000.html#section-15
@@ -682,6 +683,7 @@ impl Config {
 
             track_unknown_transport_params: None,
             initial_rtt: DEFAULT_INITIAL_RTT,
+            transport_params_plan: None,
         })
     }
 
@@ -801,6 +803,10 @@ impl Config {
     /// The default value is `true`.
     pub fn grease(&mut self, grease: bool) {
         self.grease = grease;
+    }
+
+    pub fn set_transport_params_plan(&mut self, plan: Vec<TransportParamEntry>) {
+        self.transport_params_plan = Some(plan);
     }
 
     /// Enables logging of secrets.
@@ -1514,6 +1520,8 @@ where
     /// Whether to send GREASE.
     grease: bool,
 
+    transport_params_plan: Option<Vec<TransportParamEntry>>,
+
     /// Whether to send STREAMS_BLOCKED frames when bidi or uni stream quota
     /// exhausted.
     enable_send_streams_blocked: bool,
@@ -1719,8 +1727,6 @@ pub fn connect(
 /// certificate.
 ///
 /// [RFC 9000]: <https://datatracker.ietf.org/doc/html/rfc9000#section-7.2-3>
-#[cfg(feature = "custom-client-dcid")]
-#[cfg_attr(docsrs, doc(cfg(feature = "custom-client-dcid")))]
 pub fn connect_with_dcid(
     server_name: Option<&str>,
     scid: &ConnectionId,
@@ -2008,17 +2014,12 @@ impl<F: BufFactory> Connection<F> {
             // other.
             return Err(Error::InvalidDcidInitialization);
         }
-        #[cfg(feature = "custom-client-dcid")]
         if let Some(client_dcid) = client_dcid {
             // The Minimum length is 8.
             // See https://datatracker.ietf.org/doc/html/rfc9000#section-7.2-3
             if client_dcid.to_vec().len() < 8 {
                 return Err(Error::InvalidDcidInitialization);
             }
-        }
-        #[cfg(not(feature = "custom-client-dcid"))]
-        if client_dcid.is_some() {
-            return Err(Error::InvalidDcidInitialization);
         }
 
         let max_rx_data = config.local_transport_params.initial_max_data;
@@ -2193,6 +2194,8 @@ impl<F: BufFactory> Connection<F> {
             timed_out: false,
 
             grease: config.grease,
+
+            transport_params_plan: config.transport_params_plan.clone(),
 
             enable_send_streams_blocked: config.enable_send_streams_blocked,
 
@@ -2778,7 +2781,7 @@ impl<F: BufFactory> Connection<F> {
         let mut handshake =
             ManuallyDrop::new(unsafe { tls::Handshake::from_ptr(ssl.as_ptr() as _)? });
 
-        handshake.set_quic_transport_params(&params, is_server)
+        handshake.set_quic_transport_params(&params, is_server, None)
     }
 
     /// Sets the `use_initial_max_data_as_flow_control_win` flag during SSL
@@ -7834,9 +7837,17 @@ impl<F: BufFactory> Connection<F> {
         self.is_server
     }
 
+    #[cfg(feature = "boringssl-bssl-crate")]
+    pub fn ssl_mut(&mut self) -> &mut leyline_bssl::ssl::SslRef {
+        self.handshake.ssl_mut()
+    }
+
     fn encode_transport_params(&mut self) -> Result<()> {
-        self.handshake
-            .set_quic_transport_params(&self.local_transport_params, self.is_server)
+        self.handshake.set_quic_transport_params(
+            &self.local_transport_params,
+            self.is_server,
+            self.transport_params_plan.as_deref(),
+        )
     }
 
     fn parse_peer_transport_params(&mut self, peer_params: TransportParams) -> Result<()> {
@@ -9429,6 +9440,7 @@ pub use crate::recovery::StartupExitReason;
 pub use crate::stream::StreamIter;
 
 pub use crate::transport_params::MAX_ACK_DELAY_EXPONENT;
+pub use crate::transport_params::TransportParamEntry;
 pub use crate::transport_params::TransportParams;
 pub use crate::transport_params::UnknownTransportParameter;
 pub use crate::transport_params::UnknownTransportParameterIterator;

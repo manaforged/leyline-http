@@ -111,13 +111,41 @@ fn firefox_profile_carries_firefox_h3_not_chrome() {
 #[cfg(feature = "http3")]
 #[test]
 fn qpack() {
-    use leyline::H3Config;
+    let captured = [
+        (Browser::Chrome154, 65536, 100),
+        (Browser::Brave154, 65536, 100),
+        (Browser::Firefox156, 65536, 20),
+        (Browser::Safari18, 16383, 100),
+        (Browser::Safari26, 16383, 100),
+        (Browser::SafariIOS18, 16383, 100),
+        (Browser::SafariIOS27, 16383, 100),
+    ];
     for browser in Browser::all().iter().copied() {
-        let Ok(config) = H3Config::from_profile(browser.profile()) else {
+        let Some(h3) = browser.profile().h3.as_ref() else {
             continue;
         };
-        assert_eq!(config.qpack_max_table_capacity, 0, "{browser}");
-        assert_eq!(config.qpack_blocked_streams, 0, "{browser}");
+        let setting = |id: u64| {
+            h3.settings.as_ref().map_or(0, |list| {
+                list.iter()
+                    .find(|s| s.id == Some(id))
+                    .and_then(|s| s.value)
+                    .unwrap_or(0)
+            })
+        };
+        let legacy = (
+            h3.qpack_max_table_capacity.unwrap_or(0),
+            h3.qpack_blocked_streams.unwrap_or(0),
+        );
+        let advertised = if h3.settings.is_some() {
+            (setting(1), setting(7))
+        } else {
+            legacy
+        };
+        let expected = captured
+            .iter()
+            .find(|(b, _, _)| *b == browser)
+            .map_or((0, 0), |(_, cap, blocked)| (*cap, *blocked));
+        assert_eq!(advertised, expected, "{browser}");
     }
 }
 
@@ -345,7 +373,7 @@ fn backfilled_builtin_profiles_carry_captured_against() {
         (Browser::Firefox152, "firefox-152.0.6"),
         (Browser::Firefox153, "firefox-153.0.4"),
         (Browser::Firefox154, "firefox-154.0.1"),
-        (Browser::Safari26, "safari-26.2-21623.1.14.11.9"),
+        (Browser::Safari26, "safari-26.6.2-21624.5.1.11.3"),
         (Browser::Brave146, "brave-146.1.88.138"),
     ] {
         let profile = reg.get_browser(browser).expect("built-in profile");

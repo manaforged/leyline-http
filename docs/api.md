@@ -167,7 +167,7 @@ counted.
 | `BrowserProfile` | `from_toml`, `from_fingerprint(FingerprintSpec)`, `expected_ja4`, `expected_h2_fingerprint` | 4 |
 | `profile::FingerprintSpec` | `new`, `ja3`, `ja4_r`, `akamai`, `user_agent`, `header_order`, `base(BrowserProfile)`, `name` | 8 |
 | `profile::ProfileRegistry` | `global`, `load(dir)`, `get` | 3 |
-| `profile::{ProfileMeta, TlsProfile, TlsFingerprint, H2Profile, H2PriorityProfile, H2PlatformOverride, H2Fingerprint, H3Profile, PlatformIdentity, HeaderAnchor, HeaderStyle}` | schema types, public fields | 0 |
+| `profile::{ProfileMeta, TlsProfile, TlsFingerprint, H2Profile, H2PriorityProfile, H2PlatformOverride, H2Fingerprint, H3Profile, H3ConnectionIdLength, H3Grease, H3Order, H3Setting, H3TransportParam, H3VersionGrease, H3VersionInformation, PlatformIdentity, HeaderAnchor, HeaderStyle}` | schema types, public fields | 0 |
 | `profile::ProfileError` | error of `load` and `from_toml` | 0 |
 
 ### Modules

@@ -64,22 +64,49 @@ sent once. If both fail, the `Auto` path runs.
 
 The `[h3]` table of a profile sets the QUIC transport parameters and the
 HTTP/3 settings the profile presents: the flow-control limits,
-`max_idle_timeout`, `max_udp_payload_size`, `active_connection_id_limit`, the
-initial destination connection ID length, the QPACK settings,
-`max_field_section_size`, and a cap on the response body the HTTP/3 client
-accepts, streaming included. A profile with no `[h3]` table has no HTTP/3
-transport.
+`max_idle_timeout`, `max_udp_payload_size`, `active_connection_id_limit`, and
+a cap on the response body the HTTP/3 client accepts, streaming included. A
+profile with no `[h3]` table has no HTTP/3 transport.
 
 `Session::new()` races HTTP/3 against HTTP/2 when the bundled profile's `[h3]`
 table sets `race = true`. The bundled Chrome profiles do.
 
+## QUIC fingerprint
+
+These `[h3]` keys shape the QUIC Initial and the HTTP/3 control stream. All
+of them are optional; a profile without them keeps quiche's defaults.
+
+| Key | Effect |
+| --- | --- |
+| `[h3.tls]` | A full `[tls]` table for the QUIC ClientHello. Without it, QUIC uses `[tls]`. Its `extension_permutation` may list `quic_transport_parameters` (57). `tls12_extensions = true` sends `extended_master_secret` and `renegotiation_info` although QUIC is TLS 1.3 only. |
+| `dcid_length` | The initial destination connection ID length: a number, or `{ weights = [[length, weight], ...] }` for a weighted random length. |
+| `scid_length` | The source connection ID length, 0 to 20. The default is `dcid_length`. |
+| `transport_parameters` | The exact transport parameter list. `{ id = N }` sends the value from the `[h3]` fields. `{ id = N, varint = V }` and `{ id = N, hex = "..." }` send a fixed value. `{ id = 17, versions = { chosen, available, grease } }` sends `version_information`, with a GREASE version `first` or at a `random` position. `{ grease = { id_bits, max_len } }` sends a reserved parameter with a random ID `31 * N + 27` (N below `2^id_bits`) and 0 to `max_len` random bytes. |
+| `transport_order` | `fixed`, `shuffle` (a new random order per connection), or `rotate` (the list rotated by a random offset). Entries with `pinned = true` keep their place. |
+| `max_ack_delay_ms` | The `max_ack_delay` value, when the list sends parameter 11. |
+| `settings` | The exact SETTINGS list, in order. `{ id, value }` sends a fixed setting. `{ grease = { id_bits, value_bits } }` sends a reserved setting `31 * N + 33` with a random value. The known settings in the list also configure the connection. |
+| `control_grease_frame` | A reserved frame `{ id_bits, max_len }` sent on the control stream after SETTINGS. |
+| `pseudo_order` | The pseudo-header order, as in `[h2]`. The default is `method`, `scheme`, `authority`, `path`. |
+| `priority_update` | Sends a PRIORITY_UPDATE frame with the request's `priority` header value. |
+
+A transport parameter list that sends `max_datagram_frame_size` (32) turns on
+QUIC DATAGRAM receipt. Leyline reads RESET_STREAM_AT as RESET_STREAM and
+ignores ACK_FREQUENCY and IMMEDIATE_ACK, so a profile can advertise
+`reset_stream_at` and `min_ack_delay`.
+
 ## QPACK
 
-Every bundled profile advertises `qpack_max_table_capacity: 0` and
-`qpack_blocked_streams: 0`. The dynamic table is not used in either
-direction, so header fields are encoded against the static table and
-literals only. Browsers use the QPACK dynamic table. Leyline does not, so an
-observer can tell the two apart.
+The QPACK decoder keeps a dynamic table. A profile's `settings` list sets the
+advertised `QPACK_MAX_TABLE_CAPACITY` and `QPACK_BLOCKED_STREAMS`. The decoder
+applies the peer's encoder stream instructions, decodes field sections that
+reference the table, holds a field section that needs inserts which have not
+arrived yet (up to the advertised number of blocked streams), and sends
+Section Acknowledgment, Insert Count Increment, and Stream Cancellation on the
+decoder stream. The encoder does not use the dynamic table, as the peer
+allows.
+
+Profiles without a `settings` list use `qpack_max_table_capacity`,
+`qpack_blocked_streams`, and `max_field_section_size` instead.
 
 ## Proxies
 

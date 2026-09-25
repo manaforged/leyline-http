@@ -456,13 +456,18 @@ async fn peet(session: &leyline::Session) -> Value {
 }
 
 fn live_platform_for(browser: Browser) -> Platform {
-    match browser {
-        Browser::SafariIOS17 | Browser::SafariIOS18 | Browser::SafariIOS27 => Platform::IOS,
-        Browser::CfnetworkIOS18 | Browser::CfnetworkIOS27 => Platform::IOS,
-        Browser::OkHttpAndroid10 => Platform::Android,
-        Browser::Safari18 | Browser::Safari26 | Browser::CfnetworkMacOS26 => Platform::MacOS,
-        _ => Platform::Windows,
-    }
+    [
+        Platform::Windows,
+        Platform::MacOS,
+        Platform::Linux,
+        Platform::Android,
+        Platform::IOS,
+    ]
+    .into_iter()
+    .find(|&platform| {
+        browser.for_platform(platform) == browser && browser.identity(platform, None).is_some()
+    })
+    .unwrap_or_else(|| panic!("{browser} defines no platform identity"))
 }
 
 fn normalize_akamai(fp: &str) -> String {

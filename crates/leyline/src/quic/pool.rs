@@ -10,8 +10,8 @@ use tokio::sync::{Semaphore, mpsc, oneshot};
 use tokio::task::AbortHandle;
 
 use crate::core::deadline::{Elapsed, within};
+use crate::h2::config::PseudoOrder;
 use crate::pool::TlsInfo;
-use crate::profile::BrowserProfile;
 use crate::quic::config::H3Config;
 use crate::quic::connection::{
     EstablishedH3, H3Response, check_body_budget, close_reason, connect_and_handshake, flush_egress,
@@ -93,6 +93,7 @@ impl H3SendError {
 pub struct H3Client {
     tx: mpsc::Sender<H3Command>,
     closed: Arc<AtomicBool>,
+    pseudo_order: [PseudoOrder; 4],
 }
 
 impl H3Client {
@@ -116,10 +117,15 @@ impl H3Client {
 
         let uri_path = if path.is_empty() { "/" } else { path };
         let mut h3_headers: Vec<quiche::h3::Header> = Vec::with_capacity(4 + headers.len());
-        h3_headers.push(quiche::h3::Header::new(b":method", method.as_bytes()));
-        h3_headers.push(quiche::h3::Header::new(b":scheme", b"https"));
-        h3_headers.push(quiche::h3::Header::new(b":authority", authority.as_bytes()));
-        h3_headers.push(quiche::h3::Header::new(b":path", uri_path.as_bytes()));
+        for pseudo in self.pseudo_order {
+            let (name, value): (&[u8], &[u8]) = match pseudo {
+                PseudoOrder::Method => (b":method", method.as_bytes()),
+                PseudoOrder::Scheme => (b":scheme", b"https"),
+                PseudoOrder::Authority => (b":authority", authority.as_bytes()),
+                PseudoOrder::Path => (b":path", uri_path.as_bytes()),
+            };
+            h3_headers.push(quiche::h3::Header::new(name, value));
+        }
         for (k, v) in headers {
             h3_headers.push(quiche::h3::Header::new(k.as_bytes(), v.as_bytes()));
         }
@@ -334,14 +340,13 @@ impl H3Stream {
 
 pub(crate) async fn open_fresh_h3(
     h3_cfg: &H3Config,
-    profile: &BrowserProfile,
     trust: &TlsTrustConfig,
     connector: &FingerprintConnector,
     host: &str,
     port: u16,
     proxy: Option<&str>,
 ) -> Result<(H3Client, TlsInfo), String> {
-    let handshake = connect_and_handshake(h3_cfg, profile, trust, connector, host, port, proxy);
+    let handshake = connect_and_handshake(h3_cfg, trust, connector, host, port, proxy);
     let established = within(connector.connect_timeout(), handshake)
         .await
         .map_err(|Elapsed| format!("h3 handshake to {host}:{port}: connect timeout"))??;
@@ -361,7 +366,14 @@ pub(crate) async fn open_fresh_h3(
     };
     drop(tokio::spawn(driver.run()));
 
-    Ok((H3Client { tx, closed }, tls))
+    Ok((
+        H3Client {
+            tx,
+            closed,
+            pseudo_order: h3_cfg.pseudo_order,
+        },
+        tls,
+    ))
 }
 
 struct H3Driver {

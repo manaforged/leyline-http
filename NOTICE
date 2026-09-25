@@ -25,6 +25,22 @@ Modifications from upstream:
   is provided by `leyline-bssl-sys` instead.
 - BoringSSL symbols are linked under the `LEYLINE_` prefix.
 - `Connection::cipher` returns the negotiated TLS 1.3 cipher suite name.
+- `Connection::ssl_mut` exposes the TLS handle, so a client can set
+  ClientHello options on it before the first packet.
+- `connect_with_dcid` is always available (upstream gates it behind the
+  `custom-client-dcid` feature).
+- `Config::set_transport_params_plan` sets the exact client transport
+  parameter list and order (`TransportParamEntry`), including raw and GREASE
+  parameters. The transport parameter buffer grows from 128 to 512 bytes.
+- `h3::Config::set_settings_plan` sets the exact SETTINGS list and order;
+  `h3::Config::set_control_frames` adds frames after SETTINGS on the control
+  stream. `h3::Connection::send_priority_update_field_value` sends a
+  PRIORITY_UPDATE frame with a caller-supplied field value.
+- The QPACK decoder keeps a dynamic table (RFC 9204): encoder stream
+  instructions, Required Insert Count and Base, post-base references, blocked
+  streams up to the advertised limit, and decoder stream instructions.
+- RESET_STREAM_AT frames are read as RESET_STREAM; ACK_FREQUENCY and
+  IMMEDIATE_ACK frames are accepted and ignored.
 
 ================================================================================
 BoringSSL bindings (vendored under `crates/leyline-bssl*`)
@@ -46,6 +62,9 @@ and carries these BoringSSL patches:
   (https://github.com/0x676e67/btls); Leyline keeps them with that credit.
 - `0002-leyline-symbol-prefix.patch`: renames the `ssl_st` and `ssl_session_st`
   C++ structs under the `LEYLINE` symbol prefix.
+- `0003-leyline-tls12-extensions.patch`: `SSL_set_tls12_extensions`, which
+  keeps `extended_master_secret` and `renegotiation_info` in a ClientHello
+  whose minimum version is TLS 1.3, as in Firefox's QUIC ClientHello.
 
 The `boring` crate derives from Steven Fackler's `rust-openssl`
 (https://github.com/sfackler/rust-openssl), and `tokio-boring` derives from

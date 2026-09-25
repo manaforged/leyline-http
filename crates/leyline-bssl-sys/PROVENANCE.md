@@ -24,8 +24,8 @@ Changes from upstream:
 - Added wrappers: `SslContextBuilder::{set_sigalgs, set_record_size_limit,
   set_delegated_credentials, set_extension_order, set_tls13_cipher_order}`,
   `SslRef::{set_requested_trust_anchors, add_application_settings,
-  set_alps_use_new_codepoint}`, `SslConnector::bare_builder`, and
-  `CertificateCompressionAlgorithm::ZSTD`.
+  set_alps_use_new_codepoint, set_tls12_extensions}`,
+  `SslConnector::bare_builder`, and `CertificateCompressionAlgorithm::ZSTD`.
 - The build sets `BORINGSSL_PREFIX=LEYLINE`, maps build paths, and stops on
   an unsupported target.
 - Edition 2021 is kept from upstream.
@@ -62,6 +62,10 @@ Changes from upstream:
      then prefixed too.
    - Runs the Go symbol-prefix audit only when Go is installed, so the
      build does not need Go.
+3. `0003-leyline-tls12-extensions.patch`
+   - `SSL_set_tls12_extensions` keeps `extended_master_secret` and
+     `renegotiation_info` in a ClientHello whose minimum version is TLS 1.3.
+     Firefox sends both in its QUIC ClientHello.
 
 ## Symbol prefix
 

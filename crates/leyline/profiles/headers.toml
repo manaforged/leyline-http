@@ -328,6 +328,99 @@ form-navigate = [
     ["accept-encoding", "gzip, deflate, br"],
 ]
 
+[webkit-26]
+variant = "WebKit26"
+fallback = [
+    ["user-agent", "{user_agent}"],
+    ["accept", "*/*"],
+    ["accept-encoding", "gzip, deflate, br, zstd"],
+    ["accept-language", "{accept_language}"],
+]
+
+[webkit-26.presets]
+navigate = [
+    ["sec-fetch-dest", "document"],
+    ["user-agent", "{user_agent}"],
+    ["accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"],
+    ["sec-fetch-site", "none"],
+    ["sec-fetch-mode", "navigate"],
+    ["accept-language", "{accept_language}"],
+    ["priority", "u=0, i"],
+    ["accept-encoding", "gzip, deflate, br, zstd"],
+]
+script = [
+    ["user-agent", "{user_agent}"],
+    ["accept", "*/*"],
+    ["sec-fetch-site", "{fetch_site}"],
+    ["sec-fetch-mode", "no-cors"],
+    ["sec-fetch-dest", "script"],
+    ["referer", "{referer}"],
+    ["accept-encoding", "gzip, deflate, br, zstd"],
+    ["accept-language", "{accept_language}"],
+]
+xhr = [
+    ["user-agent", "{user_agent}"],
+    ["accept", "application/json, text/plain, */*"],
+    ["accept-language", "{accept_language}"],
+    ["origin", "{origin}"],
+    ["sec-fetch-site", "same-origin"],
+    ["sec-fetch-mode", "cors"],
+    ["sec-fetch-dest", "empty"],
+    ["referer", "{referer}"],
+    ["accept-encoding", "gzip, deflate, br, zstd"],
+    ["priority", "u=1, i"],
+]
+form = [
+    ["user-agent", "{user_agent}"],
+    ["accept", "application/json, text/plain, */*"],
+    ["content-type", "application/x-www-form-urlencoded"],
+    ["origin", "{origin}"],
+    ["sec-fetch-site", "same-origin"],
+    ["sec-fetch-mode", "cors"],
+    ["sec-fetch-dest", "empty"],
+    ["referer", "{referer}"],
+    ["accept-encoding", "gzip, deflate, br, zstd"],
+    ["accept-language", "{accept_language}"],
+]
+cross-origin = [
+    ["user-agent", "{user_agent}"],
+    ["accept", "application/json, text/plain, */*"],
+    ["accept-language", "{accept_language}"],
+    ["origin", "{origin}"],
+    ["sec-fetch-site", "cross-site"],
+    ["sec-fetch-mode", "cors"],
+    ["sec-fetch-dest", "empty"],
+    ["referer", "{referer}"],
+    ["accept-encoding", "gzip, deflate, br, zstd"],
+    ["priority", "u=1, i"],
+]
+same-site = [
+    ["user-agent", "{user_agent}"],
+    ["accept", "application/json, text/plain, */*"],
+    ["accept-language", "{accept_language}"],
+    ["origin", "{origin}"],
+    ["sec-fetch-site", "same-site"],
+    ["sec-fetch-mode", "cors"],
+    ["sec-fetch-dest", "empty"],
+    ["referer", "{referer}"],
+    ["accept-encoding", "gzip, deflate, br, zstd"],
+    ["priority", "u=1, i"],
+]
+form-navigate = [
+    ["cache-control", "max-age=0"],
+    ["sec-fetch-dest", "document"],
+    ["user-agent", "{user_agent}"],
+    ["content-type", "application/x-www-form-urlencoded"],
+    ["accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"],
+    ["origin", "{origin}"],
+    ["sec-fetch-site", "same-origin"],
+    ["sec-fetch-mode", "navigate"],
+    ["referer", "{referer}"],
+    ["accept-language", "{accept_language}"],
+    ["priority", "u=0, i"],
+    ["accept-encoding", "gzip, deflate, br, zstd"],
+]
+
 [okhttp]
 variant = "OkHttp"
 fallback = [

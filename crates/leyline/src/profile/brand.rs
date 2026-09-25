@@ -121,14 +121,17 @@ impl ChromiumBrand {
     }
 
     pub(crate) fn tls_profile(self, profile: Arc<BrowserProfile>) -> Arc<BrowserProfile> {
-        let Some(tls) = brand_row(self)
-            .map(|row| &row.tls)
-            .filter(|tls| tls.changes(&profile.tls))
-        else {
+        let quic_tls = profile.h3.as_ref().and_then(|h3| h3.tls.as_ref());
+        let Some(tls) = brand_row(self).map(|row| &row.tls).filter(|tls| {
+            tls.changes(&profile.tls) || quic_tls.is_some_and(|quic| tls.changes(quic))
+        }) else {
             return profile;
         };
         let mut branded = (*profile).clone();
         tls.apply(&mut branded.tls);
+        if let Some(quic) = branded.h3.as_mut().and_then(|h3| h3.tls.as_mut()) {
+            tls.apply(quic);
+        }
         Arc::new(branded)
     }
 }

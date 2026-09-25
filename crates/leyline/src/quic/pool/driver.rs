@@ -26,6 +26,7 @@ impl H3Driver {
             local_addr,
             max_udp_payload,
             max_response_body_bytes,
+            priority_update,
             tls: _,
         } = self.established;
         let mut command_rx = self.command_rx;
@@ -51,6 +52,7 @@ impl H3Driver {
                 &mut pending,
                 &body_chunk_tx,
                 admit_cap,
+                priority_update,
             );
             write_pending_request_bodies(&mut h3, &mut conn, &mut streams);
             let stream_backpressured = pump_streaming_bodies(
@@ -174,6 +176,7 @@ pub(super) fn start_pending(
     pending: &mut VecDeque<H3Command>,
     body_chunk_tx: &mpsc::Sender<H3BodyChunk>,
     admit_cap: Option<usize>,
+    priority_update: bool,
 ) {
     while let Some(H3Command::Request {
         headers,
@@ -192,8 +195,22 @@ pub(super) fn start_pending(
         let expects_body = !headers
             .iter()
             .any(|h| h.name() == b":method" && h.value() == b"HEAD");
+        let priority = priority_update
+            .then(|| headers.iter().find(|h| h.name() == b"priority"))
+            .flatten()
+            .map(|h| h.value().to_vec());
         match h3.send_request(conn, headers, fin) {
             Ok(stream_id) => {
+                if let Some(value) = priority
+                    && let Err(e) = h3.send_priority_update_field_value(conn, stream_id, &value)
+                {
+                    tracing::debug!(
+                        target: "leyline::quic",
+                        stream_id,
+                        error = %e,
+                        "h3 PRIORITY_UPDATE not sent"
+                    );
+                }
                 let Some(H3Command::Request {
                     body,
                     body_stream,

@@ -579,6 +579,9 @@ pub struct Config {
     additional_settings: Option<Vec<(u64, u64)>>,
 
     max_priority_update_size: u64,
+
+    settings_plan: Option<Vec<(u64, u64)>>,
+    control_frames: Vec<(u64, Vec<u8>)>,
 }
 
 impl Config {
@@ -591,7 +594,22 @@ impl Config {
             connect_protocol_enabled: None,
             additional_settings: None,
             max_priority_update_size: PRIORITY_UPDATE_FRAME_PAYLOAD_MAX_SIZE_DEFAULT,
+            settings_plan: None,
+            control_frames: Vec::new(),
         })
+    }
+
+    pub fn set_settings_plan(&mut self, plan: Vec<(u64, u64)>) {
+        let value = |id: u64| plan.iter().find(|(k, _)| *k == id).map(|(_, v)| *v);
+        self.max_field_section_size = value(frame::SETTINGS_MAX_FIELD_SECTION_SIZE);
+        self.qpack_max_table_capacity = value(frame::SETTINGS_QPACK_MAX_TABLE_CAPACITY);
+        self.qpack_blocked_streams = value(frame::SETTINGS_QPACK_BLOCKED_STREAMS);
+        self.connect_protocol_enabled = value(frame::SETTINGS_ENABLE_CONNECT_PROTOCOL);
+        self.settings_plan = Some(plan);
+    }
+
+    pub fn set_control_frames(&mut self, frames: Vec<(u64, Vec<u8>)>) {
+        self.control_frames = frames;
     }
 
     /// Sets the `SETTINGS_MAX_FIELD_SECTION_SIZE` setting.
@@ -1017,6 +1035,9 @@ pub struct Connection {
     peer_goaway_id: Option<u64>,
 
     max_priority_update_size: u64,
+
+    settings_plan: Option<Vec<(u64, u64)>>,
+    control_frames: Vec<(u64, Vec<u8>)>,
 }
 
 impl Connection {
@@ -1057,7 +1078,10 @@ impl Connection {
             peer_control_stream_id: None,
 
             qpack_encoder: qpack::Encoder::new(),
-            qpack_decoder: qpack::Decoder::new(),
+            qpack_decoder: qpack::Decoder::with_limits(
+                config.qpack_max_table_capacity.unwrap_or(0),
+                config.qpack_blocked_streams.unwrap_or(0),
+            ),
 
             local_qpack_streams: Default::default(),
             peer_qpack_streams: Default::default(),
@@ -1072,6 +1096,9 @@ impl Connection {
             peer_goaway_id: None,
 
             max_priority_update_size: config.max_priority_update_size,
+
+            settings_plan: config.settings_plan.clone(),
+            control_frames: config.control_frames.clone(),
         })
     }
 
@@ -1968,6 +1995,25 @@ impl Connection {
         stream_id: u64,
         priority: &Priority,
     ) -> Result<()> {
+        let urgency = priority
+            .urgency
+            .clamp(PRIORITY_URGENCY_LOWER_BOUND, PRIORITY_URGENCY_UPPER_BOUND);
+
+        let mut field_value = format!("u={urgency}");
+
+        if priority.incremental {
+            field_value.push_str(",i");
+        }
+
+        self.send_priority_update_field_value(conn, stream_id, field_value.as_bytes())
+    }
+
+    pub fn send_priority_update_field_value<F: BufFactory>(
+        &mut self,
+        conn: &mut super::Connection<F>,
+        stream_id: u64,
+        priority_field_value: &[u8],
+    ) -> Result<()> {
         let mut d = [42; 20];
         let mut b = octets::OctetsMut::with_slice(&mut d);
 
@@ -1982,17 +2028,6 @@ impl Connection {
 
         let control_stream_id = self.control_stream_id.ok_or(Error::FrameUnexpected)?;
 
-        let urgency = priority
-            .urgency
-            .clamp(PRIORITY_URGENCY_LOWER_BOUND, PRIORITY_URGENCY_UPPER_BOUND);
-
-        let mut field_value = format!("u={urgency}");
-
-        if priority.incremental {
-            field_value.push_str(",i");
-        }
-
-        let priority_field_value = field_value.as_bytes();
         let frame_payload_len = octets::varint_len(stream_id) + priority_field_value.len();
 
         let overhead = octets::varint_len(frame::PRIORITY_UPDATE_FRAME_REQUEST_TYPE_ID)
@@ -2023,14 +2058,14 @@ impl Connection {
             "{} tx frm PRIORITY_UPDATE request_stream={} priority_field_value={}",
             conn.trace_id(),
             stream_id,
-            field_value,
+            String::from_utf8_lossy(priority_field_value),
         );
 
         qlog_with_type!(QLOG_FRAME_CREATED, conn.qlog, q, {
             let frame = Http3Frame::PriorityUpdate {
                 stream_id: Some(stream_id),
                 push_id: None,
-                priority_field_value: field_value.clone(),
+                priority_field_value: String::from_utf8_lossy(priority_field_value).into_owned(),
                 raw: None,
             };
 
@@ -2114,6 +2149,76 @@ impl Connection {
             return Err(Error::Done);
         }
 
+        let event = self.poll_events(conn);
+
+        if conn.local_error.is_none() {
+            self.flush_qpack_decoder_stream(conn)?;
+        }
+
+        event
+    }
+
+    fn flush_qpack_decoder_stream<F: BufFactory>(
+        &mut self,
+        conn: &mut super::Connection<F>,
+    ) -> Result<()> {
+        let Some(stream_id) = self.local_qpack_streams.decoder_stream_id else {
+            return Ok(());
+        };
+
+        let bytes = self.qpack_decoder.take_instructions();
+        if bytes.is_empty() {
+            return Ok(());
+        }
+
+        let sent = match conn.stream_send(stream_id, &bytes, false) {
+            Ok(n) => n,
+            Err(crate::Error::Done) => 0,
+            Err(e) => return Err(e.into()),
+        };
+        self.qpack_decoder.requeue_instructions(&bytes[sent..]);
+
+        Ok(())
+    }
+
+    fn unblocked_headers<F: BufFactory>(
+        &mut self,
+        conn: &mut super::Connection<F>,
+    ) -> Result<Option<(u64, Event)>> {
+        let Some((stream_id, decoded)) = self.qpack_decoder.take_unblocked() else {
+            return Ok(None);
+        };
+
+        let list = match decoded {
+            Ok(list) => list,
+            Err(e) => {
+                let e = match e {
+                    qpack::Error::HeaderListTooLarge => Error::ExcessiveLoad,
+                    _ => Error::QpackDecompressionFailed,
+                };
+                conn.close(true, e.to_wire(), b"Error parsing headers.")?;
+                return Err(e);
+            }
+        };
+
+        let finished = conn.stream_finished(stream_id);
+        if finished {
+            self.process_finished_stream(stream_id);
+        }
+
+        Ok(Some((
+            stream_id,
+            Event::Headers {
+                list,
+                more_frames: !finished,
+            },
+        )))
+    }
+
+    fn poll_events<F: BufFactory>(
+        &mut self,
+        conn: &mut super::Connection<F>,
+    ) -> Result<(u64, Event)> {
         // Process control streams first.
         if let Some(stream_id) = self.peer_control_stream_id {
             match self.process_control_stream(conn, stream_id) {
@@ -2145,6 +2250,10 @@ impl Connection {
             };
         }
 
+        if let Some(ev) = self.unblocked_headers(conn)? {
+            return Ok(ev);
+        }
+
         // Process finished streams list.
         if let Some(ev) = self.pop_finished_stream(conn) {
             return Ok(ev);
@@ -2163,6 +2272,7 @@ impl Connection {
                 // a Finished event later as well.
                 Err(Error::TransportError(crate::Error::StreamReset(e))) => {
                     self.remove_local_finished_stream(s);
+                    self.qpack_decoder.cancel_stream(s);
 
                     return Ok((s, Event::Reset(e)));
                 }
@@ -2170,7 +2280,7 @@ impl Connection {
                 Err(e) => return Err(e),
             };
 
-            if conn.stream_finished(s) {
+            if conn.stream_finished(s) && !self.qpack_decoder.is_blocked(s) {
                 self.process_finished_stream(s);
             }
 
@@ -2518,21 +2628,47 @@ impl Connection {
             None
         };
 
-        let frame = frame::Frame::Settings {
-            max_field_section_size: self.local_settings.max_field_section_size,
-            qpack_max_table_capacity: self.local_settings.qpack_max_table_capacity,
-            qpack_blocked_streams: self.local_settings.qpack_blocked_streams,
-            connect_protocol_enabled: self.local_settings.connect_protocol_enabled,
-            h3_datagram: self.local_settings.h3_datagram,
-            grease,
-            additional_settings: self.local_settings.additional_settings.clone(),
-            raw: Default::default(),
+        let frame = match &self.settings_plan {
+            Some(plan) => {
+                let mut payload = Vec::new();
+                for (id, value) in plan {
+                    let mut buf = [0; 16];
+                    let mut b = octets::OctetsMut::with_slice(&mut buf);
+                    b.put_varint(*id)?;
+                    b.put_varint(*value)?;
+                    let off = b.off();
+                    payload.extend_from_slice(&buf[..off]);
+                }
+                frame::Frame::Unknown {
+                    raw_type: frame::SETTINGS_FRAME_TYPE_ID,
+                    payload,
+                }
+            }
+
+            None => frame::Frame::Settings {
+                max_field_section_size: self.local_settings.max_field_section_size,
+                qpack_max_table_capacity: self.local_settings.qpack_max_table_capacity,
+                qpack_blocked_streams: self.local_settings.qpack_blocked_streams,
+                connect_protocol_enabled: self.local_settings.connect_protocol_enabled,
+                h3_datagram: self.local_settings.h3_datagram,
+                grease,
+                additional_settings: self.local_settings.additional_settings.clone(),
+                raw: Default::default(),
+            },
         };
 
-        let mut d = [42; 128];
+        let mut d = [42; 512];
         let mut b = octets::OctetsMut::with_slice(&mut d);
 
         frame.to_bytes(&mut b)?;
+
+        for (raw_type, payload) in &self.control_frames {
+            frame::Frame::Unknown {
+                raw_type: *raw_type,
+                payload: payload.clone(),
+            }
+            .to_bytes(&mut b)?;
+        }
 
         let off = b.off();
 
@@ -2608,6 +2744,10 @@ impl Connection {
         // of the loop, because we'll need to borrow it again in the
         // `State::FramePayload` case below.
         while let Some(stream) = self.streams.get_mut(&stream_id) {
+            if self.qpack_decoder.is_blocked(stream_id) {
+                break;
+            }
+
             match stream.state() {
                 stream::State::StreamType => {
                     stream.try_fill_buffer(conn)?;
@@ -2864,7 +3004,17 @@ impl Connection {
 
                         match stream.ty() {
                             Some(stream::Type::QpackEncoder) => {
-                                self.peer_qpack_streams.encoder_stream_bytes += recv as u64
+                                self.peer_qpack_streams.encoder_stream_bytes += recv as u64;
+
+                                if self.qpack_decoder.control(&mut d[..recv]).is_err() {
+                                    conn.close(
+                                        true,
+                                        QPACK_ENCODER_STREAM_ERROR,
+                                        b"Error parsing QPACK encoder stream.",
+                                    )?;
+
+                                    return Err(Error::QpackDecompressionFailed);
+                                }
                             }
                             Some(stream::Type::QpackDecoder) => {
                                 self.peer_qpack_streams.decoder_stream_bytes += recv as u64
@@ -3069,21 +3219,27 @@ impl Connection {
                     .max_field_section_size
                     .unwrap_or(u64::MAX);
 
-                let headers = match self.qpack_decoder.decode(&header_block[..], max_size) {
-                    Ok(v) => v,
+                let headers =
+                    match self
+                        .qpack_decoder
+                        .decode_section(stream_id, &header_block[..], max_size)
+                    {
+                        Ok(Some(v)) => v,
 
-                    Err(e) => {
-                        let e = match e {
-                            qpack::Error::HeaderListTooLarge => Error::ExcessiveLoad,
+                        Ok(None) => return Err(Error::Done),
 
-                            _ => Error::QpackDecompressionFailed,
-                        };
+                        Err(e) => {
+                            let e = match e {
+                                qpack::Error::HeaderListTooLarge => Error::ExcessiveLoad,
 
-                        conn.close(true, e.to_wire(), b"Error parsing headers.")?;
+                                _ => Error::QpackDecompressionFailed,
+                            };
 
-                        return Err(e);
-                    }
-                };
+                            conn.close(true, e.to_wire(), b"Error parsing headers.")?;
+
+                            return Err(e);
+                        }
+                    };
 
                 qlog_with_type!(QLOG_FRAME_PARSED, conn.qlog, q, {
                     let qlog_headers = headers
@@ -3313,6 +3469,8 @@ impl Connection {
         }
     }
 }
+
+const QPACK_ENCODER_STREAM_ERROR: u64 = 0x201;
 
 /// Generates an HTTP/3 GREASE variable length integer.
 pub fn grease_value() -> u64 {
