@@ -17,7 +17,7 @@ contract.
 ## Frame (one)
 
 ```text
-session     Session::new()                  newest browser-captured Chrome, Windows
+session     Session::new()                  newest captured Chrome, Windows
             Session::builder() → SessionBuilder → build() → Session
             session.with_proxy(config)      clone that shares the pool, other proxy
             session.fresh_pool()            clone with a new pool and TLS session cache
@@ -187,8 +187,8 @@ Total: 265 public functions.
 
 ## Semantics
 
-- `Session::new()` and `Session::default()` impersonate the newest bundled
-  Chrome captured from a real browser, with a Windows identity. With the `http3` feature they race
+- `Session::new()` and `Session::default()` impersonate the newest captured
+  Chrome, currently Chrome 154, with a Windows identity. With the `http3` feature they race
   HTTP/3 against HTTP/2 when the profile's `[h3]` table sets `race = true`,
   as the bundled Chrome profiles do. `Session::builder().build()` with no
   browser is a bare session with no impersonation.

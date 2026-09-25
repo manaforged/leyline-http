@@ -3,7 +3,6 @@
 This page compares Leyline with wreq, reqwest, and tls-client on one machine. All numbers
 come from the files in
 [`benches/comparison/results/2026-09-24`](benches/comparison/results/2026-09-24).
-The measured Leyline revision is commit `ef292aa`.
 
 ## Results
 

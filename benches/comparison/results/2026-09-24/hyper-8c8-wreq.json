@@ -13,7 +13,6 @@
  "cold_count": 1,
  "conc_count": 200000,
  "host": {
-  "leyline_rev": "ef292aa",
   "kernel": "7.0.0-31-generic",
   "cpu": "AMD Ryzen 9 9950X3D 16-Core Processor",
   "governor": "performance",

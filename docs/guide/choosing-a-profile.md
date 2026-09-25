@@ -7,7 +7,8 @@ session claims. Pick both.
 ## Start with the default
 
 `Session::new()` is the default choice. It selects
-`Browser::default()`, which is Chrome 152, on Windows. With the
+`Browser::default()`, the newest captured Chrome, currently Chrome 154, on
+Windows. With the
 `http3` feature, it races HTTP/3 against HTTP/2.
 
 ```rust,no_run

@@ -45,7 +45,16 @@ and carries these BoringSSL patches:
 - `0002-leyline-symbol-prefix.patch`: renames the `ssl_st` and `ssl_session_st`
   C++ structs under the `LEYLINE` symbol prefix.
 
+The `boring` crate derives from Steven Fackler's `rust-openssl`
+(https://github.com/sfackler/rust-openssl), and `tokio-boring` derives from
+`tokio-openssl` (https://github.com/tokio-rs/tokio-openssl). Their copyright
+notices are kept in `crates/leyline-bssl/LICENSE`,
+`crates/leyline-bssl-tokio/LICENSE-APACHE`, and
+`crates/leyline-bssl-tokio/LICENSE-MIT`.
+
 Upstream: https://github.com/cloudflare/boring
+Copyright: Google Inc., Jack Lloyd, Steven Fackler, Ivan Nikulin, and the
+           Tokio contributors, as listed in the license files above.
 Licenses: the Rust bindings are Apache-2.0 / MIT. The BoringSSL C library is
           Apache-2.0 (relicensed by Google), with a BSD-3-Clause notice for
           Go-derived test tooling that is not linked into the built libraries.

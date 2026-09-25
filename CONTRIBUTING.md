@@ -48,7 +48,8 @@ inside the branch can use any clear style.
 
 A profile under `crates/leyline/profiles/` describes a real capture. Name
 the browser build it was captured from in `captured_against`, set `capture`
-to `browser`, `headless-shell`, `webview`, `inferred`, or `self-referential`
+to `browser`, `native`, `headless-shell`, `webview`, `emulator`, `inferred`, or
+`self-referential`
 (the build fails without it, and only `browser` profiles become
 `Browser::latest`), and keep the
 `ja4` and `akamai` recorded reference values next to the fields that produce

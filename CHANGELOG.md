@@ -39,7 +39,7 @@ First public release.
 
 - An asynchronous `Session` API for HTTP/1.1, HTTP/2, and HTTP/3 on Tokio.
 - Browser profiles for TLS, HTTP/2 settings, and request headers: Chrome 145
-  to 153, Brave 146, Firefox 148 to 154, Safari 18 and 26, Safari on iOS 17
+  to 154, Brave 146 and 154, Firefox 148 to 156, Safari 18 and 26, Safari on iOS 17
   and 18, OkHttp on Android, and CFNetwork on iOS 18 and macOS 26. The
   [profile reference](docs/guide/profiles.md) lists the capture status of
   each.
@@ -67,10 +67,9 @@ First public release.
 - A [user guide](docs/README.md) and an [API map](docs/api.md).
 - `[meta] capture` in each profile records its provenance: `browser`,
   `native` for an OS HTTP stack such as CFNetwork, `headless-shell`,
-  `webview`, `inferred`, or `self-referential`. `Browser::latest`
-  and `Session::new()` select the newest profile with `capture = "browser"`,
-  so the default is Chrome 153, not the `chrome-headless-shell` captures of
-  Chrome 151 and 152.
+  `webview`, `emulator`, `inferred`, or `self-referential`. Every Chrome,
+  Brave, and Firefox profile is a browser capture. `Browser::latest` and
+  `Session::new()` select the newest captured Chrome, currently Chrome 154.
 - `TimeoutConfig::connect` bounds plain `http://` connects. One request spends at
   most one connect timeout on an unreachable host.
 - `Session::with_proxy` keeps the shared connection pool, which is keyed by

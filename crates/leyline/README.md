@@ -3,16 +3,16 @@
 An async Rust HTTP client that sends the TLS ClientHello, HTTP/2 SETTINGS, and
 request headers of a chosen browser profile. Leyline supports HTTP/1.1,
 HTTP/2, HTTP/3, and WebSocket on Tokio. Bundled profiles cover Chrome 145 to
-152, Brave 146, Firefox 148 to 154, Safari 18 and 26, Safari on iOS 17 and 18,
-OkHttp on Android, and CFNetwork on iOS 18 and macOS 26.
+154, Brave 146 and 154, Firefox 148 to 156, Safari 18 and 26, Safari on iOS 17
+and 18, OkHttp on Android, and CFNetwork on iOS 18 and macOS 26.
 
 ## Why Leyline
 
 - **Stated provenance for every profile.** Each profile records the build it
   was captured from in `captured_against` and its source in `capture`. The
   [profile reference](https://github.com/manaforged/leyline-http/blob/main/docs/guide/profiles.md#provenance)
-  lists which profiles are browser captures, which are inferred, and which
-  pin Leyline's own output.
+  lists which profiles are browser, native stack, or emulator captures, and
+  which pin Leyline's own output.
 - **A connection pool keyed by proxy.** `Session::with_proxy` switches the
   proxy and keeps the warm connections of every proxy. `Session::fresh_pool`
   takes a new pool, so the next request opens new connections.
@@ -90,8 +90,8 @@ browser or platform, use `Session::builder()`.
 
 ## What `Session::new()` sends
 
-`Session::new()` uses the newest bundled Chrome profile captured from a real
-browser, with a Windows identity. It sends that profile's ClientHello,
+`Session::new()` uses the newest captured Chrome, currently Chrome 154, with a
+Windows identity. It sends that profile's ClientHello,
 HTTP/2 SETTINGS, user agent, `sec-ch-ua` headers, and header order. A patch
 release can add a newer browser capture and move this default. To keep a
 fixed fingerprint, pin the browser:
@@ -118,9 +118,6 @@ browser is a bare session that impersonates no browser.
 - A profile covers selected TLS, HTTP/2, and header properties. It does not
   reproduce every byte a browser sends.
 - The Safari 18, Safari iOS 17, and Safari iOS 18 profiles pin a JA4 value taken from Leyline's own output, not from a capture.
-- Chrome 145, 146, 147, and 149 are inferred from neighbouring versions. Chrome
-  151 and 152 come from `chrome-headless-shell`, so `Session::new()` does not
-  select them.
 - The Android identity of the Chrome profiles reuses the desktop TLS and
   HTTP/2 settings.
 - The TCP/IP fingerprint (JA4T: window size, options, MSS, TTL) comes from the

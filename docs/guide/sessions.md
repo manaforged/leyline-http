@@ -32,8 +32,8 @@ session impersonates nothing.
 
 ## Choose a browser
 
-The `Browser` enum lists every bundled profile: Chrome 145 to 152, Brave 146,
-Firefox 148 to 154, Safari 18 and 26, Safari on iOS 17 and iOS 18, OkHttp on
+The `Browser` enum lists every bundled profile: Chrome 145 to 154, Brave 146
+and 154, Firefox 148 to 156, Safari 18 and 26, Safari on iOS 17 and iOS 18, OkHttp on
 Android 10, and the CFNetwork stacks on iOS 18 and macOS 26.
 
 These helpers select a profile without naming a variant:
