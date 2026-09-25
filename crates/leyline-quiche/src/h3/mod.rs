@@ -582,6 +582,7 @@ pub struct Config {
 
     settings_plan: Option<Vec<(u64, u64)>>,
     control_frames: Vec<(u64, Vec<u8>)>,
+    field_section_limit: Option<u64>,
 }
 
 impl Config {
@@ -596,6 +597,7 @@ impl Config {
             max_priority_update_size: PRIORITY_UPDATE_FRAME_PAYLOAD_MAX_SIZE_DEFAULT,
             settings_plan: None,
             control_frames: Vec::new(),
+            field_section_limit: None,
         })
     }
 
@@ -610,6 +612,10 @@ impl Config {
 
     pub fn set_control_frames(&mut self, frames: Vec<(u64, Vec<u8>)>) {
         self.control_frames = frames;
+    }
+
+    pub fn set_field_section_limit(&mut self, v: u64) {
+        self.field_section_limit = Some(v);
     }
 
     /// Sets the `SETTINGS_MAX_FIELD_SECTION_SIZE` setting.
@@ -1038,6 +1044,7 @@ pub struct Connection {
 
     settings_plan: Option<Vec<(u64, u64)>>,
     control_frames: Vec<(u64, Vec<u8>)>,
+    field_section_limit: Option<u64>,
 }
 
 impl Connection {
@@ -1099,7 +1106,24 @@ impl Connection {
 
             settings_plan: config.settings_plan.clone(),
             control_frames: config.control_frames.clone(),
+            field_section_limit: config.field_section_limit,
         })
+    }
+
+    fn field_section_limit(&self) -> u64 {
+        match (
+            self.local_settings.max_field_section_size,
+            self.field_section_limit,
+        ) {
+            (Some(advertised), Some(limit)) => advertised.min(limit),
+            (advertised, limit) => advertised
+                .or(limit)
+                .unwrap_or(SETTINGS_MAX_FIELD_SECTION_SIZE_DEFAULT),
+        }
+    }
+
+    pub fn cancel_stream(&mut self, stream_id: u64) {
+        self.qpack_decoder.cancel_stream(stream_id);
     }
 
     /// Creates a new HTTP/3 connection using the provided QUIC connection.
@@ -1187,15 +1211,14 @@ impl Connection {
         }
 
         let stream_id = self.next_request_stream_id;
+        let field_section_limit = self.field_section_limit();
 
         self.streams.insert(
             stream_id,
             <stream::Stream>::new(
                 stream_id,
                 true,
-                self.local_settings
-                    .max_field_section_size
-                    .unwrap_or(SETTINGS_MAX_FIELD_SECTION_SIZE_DEFAULT),
+                field_section_limit,
                 self.max_priority_update_size,
             ),
         );
@@ -2178,6 +2201,15 @@ impl Connection {
         };
         self.qpack_decoder.requeue_instructions(&bytes[sent..]);
 
+        if self.qpack_decoder.instructions_backlogged() {
+            conn.close(
+                true,
+                Error::ExcessiveLoad.to_wire(),
+                b"QPACK decoder stream backlog.",
+            )?;
+            return Err(Error::ExcessiveLoad);
+        }
+
         Ok(())
     }
 
@@ -2728,13 +2760,12 @@ impl Connection {
         stream_id: u64,
         polling: bool,
     ) -> Result<(u64, Event)> {
+        let field_section_limit = self.field_section_limit();
         self.streams.entry(stream_id).or_insert_with(|| {
             <stream::Stream>::new(
                 stream_id,
                 false,
-                self.local_settings
-                    .max_field_section_size
-                    .unwrap_or(SETTINGS_MAX_FIELD_SECTION_SIZE_DEFAULT),
+                field_section_limit,
                 self.max_priority_update_size,
             )
         });
@@ -2745,6 +2776,10 @@ impl Connection {
         // `State::FramePayload` case below.
         while let Some(stream) = self.streams.get_mut(&stream_id) {
             if self.qpack_decoder.is_blocked(stream_id) {
+                if let Err(e @ crate::Error::StreamReset(_)) = conn.stream_recv(stream_id, &mut [])
+                {
+                    return Err(Error::TransportError(e));
+                }
                 break;
             }
 
@@ -3212,12 +3247,7 @@ impl Connection {
                     s.increment_headers_received();
                 }
 
-                // Use "infinite" as default value for max_field_section_size if
-                // it is not configured by the application.
-                let max_size = self
-                    .local_settings
-                    .max_field_section_size
-                    .unwrap_or(u64::MAX);
+                let max_size = self.field_section_limit();
 
                 let headers =
                     match self
@@ -3400,6 +3430,8 @@ impl Connection {
                     return Err(Error::Done);
                 }
 
+                let field_section_limit = self.field_section_limit();
+
                 // If the stream did not yet exist, create it and store.
                 let stream = self
                     .streams
@@ -3408,9 +3440,7 @@ impl Connection {
                         <stream::Stream>::new(
                             prioritized_element_id,
                             false,
-                            self.local_settings
-                                .max_field_section_size
-                                .unwrap_or(SETTINGS_MAX_FIELD_SECTION_SIZE_DEFAULT),
+                            field_section_limit,
                             self.max_priority_update_size,
                         )
                     });

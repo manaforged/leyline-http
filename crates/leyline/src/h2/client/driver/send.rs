@@ -52,6 +52,13 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
 
     pub(super) async fn try_pump_streaming_body(&mut self, stream_id: u32) -> Result<(), H2Error> {
         loop {
+            let parked = self
+                .streams
+                .get(stream_id)
+                .is_some_and(|a| a.pending_send.is_some());
+            if parked {
+                return Ok(());
+            }
             let next_chunk: Option<Bytes> =
                 self.streams
                     .get_mut(stream_id)
@@ -96,14 +103,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             match next_chunk {
                 Some(chunk) if !chunk.is_empty() => {
                     self.write_streaming_chunk(stream_id, chunk, closed).await?;
-                    let parked = self
-                        .streams
-                        .get(stream_id)
-                        .map(|a| a.pending_send.is_some())
-                        .unwrap_or(false);
-                    if parked {
-                        return Ok(());
-                    }
                 }
                 _ => {
                     if closed && !already_closed {

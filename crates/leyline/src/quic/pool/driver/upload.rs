@@ -112,6 +112,7 @@ pub(super) async fn pump_request_body(
 }
 
 pub(in crate::quic::pool) fn on_request_body_chunk(
+    h3: &mut quiche::h3::Connection,
     conn: &mut quiche::Connection,
     streams: &mut HashMap<u64, H3Stream>,
     chunk: H3BodyChunk,
@@ -131,6 +132,7 @@ pub(in crate::quic::pool) fn on_request_body_chunk(
                 Some(e) => {
                     shutdown(conn, stream_id, quiche::Shutdown::Write, 0);
                     shutdown(conn, stream_id, quiche::Shutdown::Read, 0);
+                    h3.cancel_stream(stream_id);
                     let msg = format!("h3 request body stream error: {e}");
                     if stream.head_sent {
                         if let Some(tx) = &stream.stream_tx {

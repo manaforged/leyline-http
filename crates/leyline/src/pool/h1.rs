@@ -278,37 +278,10 @@ async fn open_new(
             let io: Box<dyn H1Io> = Box::new(tls_stream.stream);
             Ok((io, tls))
         }
-        "http" => {
-            let parsed = proxy
-                .map(url::Url::parse)
-                .transpose()
-                .map_err(|e| H1PooledError::Config(format!("invalid proxy URL: {e}")))?;
-            let (dial_host, dial_port) = match &parsed {
-                Some(parsed) if parsed.scheme() != "http" => {
-                    return Err(H1PooledError::Config(
-                        "plaintext HTTP currently supports http:// proxies only".into(),
-                    ));
-                }
-                Some(parsed) => (
-                    parsed
-                        .host_str()
-                        .ok_or_else(|| H1PooledError::Config("proxy has no host".into()))?,
-                    parsed.port_or_known_default().unwrap_or(8080),
-                ),
-                None => (host, port),
-            };
-            let via_proxy = parsed.is_some();
-            let stream = connector
-                .with_timeout(async {
-                    connector
-                        .dial_tcp(dial_host, dial_port)
-                        .await
-                        .map_err(|e| if via_proxy { e.into_proxy() } else { e })
-                })
-                .await?;
-            let io: Box<dyn H1Io> = Box::new(stream);
-            Ok((io, TlsInfo::default()))
-        }
+        "http" => Ok((
+            dial_plain(connector, host, port, proxy).await?,
+            TlsInfo::default(),
+        )),
         other => Err(H1PooledError::Config(format!(
             "unsupported URL scheme for HTTP/1.1: {other}"
         ))),
@@ -356,11 +329,13 @@ type ParsedHead = (u16, Vec<(String, String)>, u8);
 
 const MAX_H1_INFORMATIONAL: usize = 16;
 
+mod dial;
 mod headers;
 pub(crate) mod parse;
 mod read;
 mod streaming;
 mod wire;
+use dial::dial_plain;
 use headers::*;
 use parse::*;
 use read::*;

@@ -97,6 +97,8 @@ pub struct TlsProfile {
     #[serde(default = "default_grease")]
     pub grease: bool,
     #[serde(default)]
+    pub sigalg_grease: bool,
+    #[serde(default)]
     pub ech_grease: bool,
     #[serde(default)]
     pub pre_shared_key: bool,

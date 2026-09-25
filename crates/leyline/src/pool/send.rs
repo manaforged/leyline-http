@@ -235,9 +235,9 @@ pub(crate) async fn send_request(
                 );
                 pool.invalidate(&key);
                 let Some(replay) = replay else {
-                    return Err(Error::new(Kind::Body).with_message(format!(
-                        "pooled connection died and streaming body cannot be retried: {e}"
-                    )));
+                    return Err(Error::new(Kind::Http2)
+                        .with_message("pooled connection died and streaming body cannot be retried")
+                        .with_source(e));
                 };
                 let refused = matches!(
                     &e,

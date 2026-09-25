@@ -59,8 +59,8 @@ impl RequestBuilder {
 
             let sleep =
                 match plan_retry(&result, &retry_policy, n, retryable_method, body_retryable) {
-                    RetryPlan::Stop => return result,
-                    RetryPlan::Backoff(sleep) => sleep,
+                    RetryPlan::Backoff(sleep) if sleep < deadline.remaining() => sleep,
+                    _ => return result,
                 };
 
             deadline.sleep(sleep).await;

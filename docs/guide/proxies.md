@@ -4,6 +4,10 @@ Leyline tunnels through `http://`, `https://`, and `socks5://` proxies. Any
 other scheme is refused, because sending `CONNECT` to it would transmit the
 request, and any `Proxy-Authorization` credentials, in cleartext.
 
+A plain `http://` URL goes to an `http://` or `https://` proxy as an
+absolute-form request. Through a `socks5://` or `socks5h://` proxy, it goes
+over a SOCKS5 `CONNECT` tunnel to the origin.
+
 ## Set one proxy
 
 Every proxy setter takes `impl Into<ProxyConfig>`: a URL string, a

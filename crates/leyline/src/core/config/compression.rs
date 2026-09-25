@@ -1,4 +1,5 @@
 pub(crate) const DEFAULT_MAX_BODY_SIZE: usize = 100 * 1024 * 1024;
+pub(crate) const DEFAULT_MAX_HEADER_LIST_BYTES: usize = 256 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]

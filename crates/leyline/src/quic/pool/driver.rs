@@ -43,7 +43,7 @@ impl H3Driver {
         let mut admit_cap: Option<usize> = None;
 
         loop {
-            sweep_cancelled_streams(&mut conn, &mut streams);
+            sweep_cancelled_streams(&mut h3, &mut conn, &mut streams);
 
             start_pending(
                 &mut h3,
@@ -118,7 +118,7 @@ impl H3Driver {
                 },
                 chunk = body_chunk_rx.recv() => {
                     if let Some(chunk) = chunk {
-                        on_request_body_chunk(&mut conn, &mut streams, chunk);
+                        on_request_body_chunk(&mut h3, &mut conn, &mut streams, chunk);
                     }
                 }
                 recv = socket.recv(&mut buf) => match recv {
@@ -287,11 +287,13 @@ pub(super) fn cancelled_stream_ids(streams: &HashMap<u64, H3Stream>) -> Vec<u64>
 }
 
 pub(super) fn sweep_cancelled_streams(
+    h3: &mut quiche::h3::Connection,
     conn: &mut quiche::Connection,
     streams: &mut HashMap<u64, H3Stream>,
 ) {
     for id in cancelled_stream_ids(streams) {
         if let Some(mut stream) = streams.remove(&id) {
+            h3.cancel_stream(id);
             shutdown(conn, id, quiche::Shutdown::Read, 0);
             reset_upload_half(conn, id, &mut stream);
         }

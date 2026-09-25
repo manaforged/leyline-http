@@ -67,6 +67,8 @@ pub enum Error {
     EncoderStream,
 
     BlockedStreamLimit,
+
+    IntegerOverflow,
 }
 
 impl std::fmt::Display for Error {

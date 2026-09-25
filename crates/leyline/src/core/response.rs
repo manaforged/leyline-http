@@ -316,12 +316,14 @@ impl Response {
                 Some(decoder) => decoder.feed(&chunk, &mut out)?,
                 None => out.extend_from_slice(&chunk),
             }
+            out.truncate(limit);
             if done(&out, from) || out.len() >= limit {
                 return Ok(out);
             }
         }
         if let Some(decoder) = decoder.as_mut() {
             decoder.finish(&mut out)?;
+            out.truncate(limit);
         }
         Ok(out)
     }

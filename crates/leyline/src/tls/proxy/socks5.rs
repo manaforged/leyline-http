@@ -18,13 +18,22 @@ pub(crate) async fn connect<C: crate::tls::TlsHandshake>(
     proxy: &url::Url,
     include_alps: bool,
 ) -> Result<TlsStream, TlsError> {
-    let mut tcp_stream = open_control(connector, proxy).await?;
-    send_connect(&mut tcp_stream, host, port).await?;
-
+    let tcp_stream = tunnel(connector, host, port, proxy).await?;
     let session_key = SessionCache::key(host, port, Some(proxy));
     connector
         .do_tls_handshake(tcp_stream, host, &session_key, include_alps)
         .await
+}
+
+pub(crate) async fn tunnel<C: crate::tls::TlsHandshake>(
+    connector: &C,
+    host: &str,
+    port: u16,
+    proxy: &url::Url,
+) -> Result<TcpStream, TlsError> {
+    let mut tcp_stream = open_control(connector, proxy).await?;
+    send_connect(&mut tcp_stream, host, port).await?;
+    Ok(tcp_stream)
 }
 
 async fn send_connect(tcp_stream: &mut TcpStream, host: &str, port: u16) -> Result<(), TlsError> {

@@ -84,5 +84,4 @@ Other errors are not retried. `RetryPolicy::transient()` has both triggers. See 
 `TlsError::Rejected` for a peer that closed or reset the handshake, and
 `TlsError::Certificate { verify_code, reason, .. }` for a failed certificate
 check. `err.url()`
-returns the request URL, and `without_url()` removes it before you log the
-error.
+returns the request URL.

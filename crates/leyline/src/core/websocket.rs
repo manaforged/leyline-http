@@ -22,7 +22,7 @@ mod split;
 
 use handshake::{
     H2_NO_CONNECT_PROTOCOL, check_upgrade_response, is_reserved_ws_header, random_sec_ws_key,
-    response_header, tungstenite_config, ws_header_pair,
+    response_header, tungstenite_config, wire_error, ws_header_pair,
 };
 pub use split::{WsSink, WsStream};
 use split::{WsSinkInner, WsStreamInner};
@@ -299,7 +299,7 @@ impl WsConnection {
             WsInner::H1(s) => s.send(msg).await,
             WsInner::H2(s) => s.send(msg).await,
         }
-        .map_err(|e| Error::new(Kind::Request).with_message(format!("ws send: {e}")))
+        .map_err(|e| wire_error("ws send", e))
     }
 
     pub async fn recv(&mut self) -> Result<Option<WsMessage>> {
@@ -309,21 +309,15 @@ impl WsConnection {
         };
         match next {
             Some(Ok(msg)) => Ok(Some(WsMessage::wire(msg))),
-            Some(Err(e)) => Err(Error::new(Kind::Request).with_message(format!("ws recv: {e}"))),
+            Some(Err(e)) => Err(wire_error("ws recv", e)),
             None => Ok(None),
         }
     }
 
     pub async fn close(&mut self) -> Result<()> {
         match &mut self.inner {
-            WsInner::H1(s) => s
-                .close(None)
-                .await
-                .map_err(|e| Error::new(Kind::Request).with_message(format!("ws close: {e}"))),
-            WsInner::H2(s) => s
-                .close(None)
-                .await
-                .map_err(|e| Error::new(Kind::Request).with_message(format!("ws close: {e}"))),
+            WsInner::H1(s) => s.close(None).await.map_err(|e| wire_error("ws close", e)),
+            WsInner::H2(s) => s.close(None).await.map_err(|e| wire_error("ws close", e)),
         }
     }
 

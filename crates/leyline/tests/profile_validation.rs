@@ -103,7 +103,7 @@ fn firefox_profile_carries_firefox_h3_not_chrome() {
     let firefox = H3Config::from_profile(Browser::Firefox154.profile()).expect("firefox h3");
     let chrome = H3Config::from_profile(Browser::Chrome152.profile()).expect("chrome h3");
     assert_ne!(
-        firefox.initial_max_streams_bidi, chrome.initial_max_streams_bidi,
+        firefox.initial_max_data, chrome.initial_max_data,
         "firefox is still resolving to Chrome's H3 params"
     );
 }
@@ -112,8 +112,26 @@ fn firefox_profile_carries_firefox_h3_not_chrome() {
 #[test]
 fn qpack() {
     let captured = [
+        (Browser::Chrome145, 65536, 100),
+        (Browser::Chrome146, 65536, 100),
+        (Browser::Chrome147, 65536, 100),
+        (Browser::Chrome148, 65536, 100),
+        (Browser::Chrome149, 65536, 100),
+        (Browser::Chrome150, 65536, 100),
+        (Browser::Chrome151, 65536, 100),
+        (Browser::Chrome152, 65536, 100),
+        (Browser::Chrome153, 65536, 100),
         (Browser::Chrome154, 65536, 100),
+        (Browser::Brave146, 65536, 100),
         (Browser::Brave154, 65536, 100),
+        (Browser::Firefox148, 65536, 20),
+        (Browser::Firefox149, 65536, 20),
+        (Browser::Firefox150, 65536, 20),
+        (Browser::Firefox151, 65536, 20),
+        (Browser::Firefox152, 65536, 20),
+        (Browser::Firefox153, 65536, 20),
+        (Browser::Firefox154, 65536, 20),
+        (Browser::Firefox155, 65536, 20),
         (Browser::Firefox156, 65536, 20),
         (Browser::Safari18, 16383, 100),
         (Browser::Safari26, 16383, 100),

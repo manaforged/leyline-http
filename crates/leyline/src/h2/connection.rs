@@ -186,8 +186,8 @@ impl PseudoHeaders {
         &'a self,
         pseudo_order: &[PseudoOrder; 4],
     ) -> Result<PseudoList<'a>, H2Error> {
-        let is_connect = self.method.eq_ignore_ascii_case("CONNECT");
-        if is_connect && self.authority.is_empty() {
+        let is_connect = self.method.eq_ignore_ascii_case("CONNECT") && self.protocol.is_none();
+        if self.method.eq_ignore_ascii_case("CONNECT") && self.authority.is_empty() {
             return Err(H2Error::Connection {
                 code: ErrorCode::ProtocolError,
                 reason: "CONNECT requires :authority".into(),

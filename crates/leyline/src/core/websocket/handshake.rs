@@ -1,5 +1,6 @@
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use tokio_tungstenite::tungstenite::Error as WireError;
 use tokio_tungstenite::tungstenite::handshake::derive_accept_key;
 use tokio_tungstenite::tungstenite::http::{HeaderName, HeaderValue};
 
@@ -29,6 +30,18 @@ pub(super) fn tungstenite_config(
     }
     out.accept_unmasked_frames = cfg.accept_unmasked_frames;
     out
+}
+
+pub(super) fn wire_error(op: &'static str, e: WireError) -> Error {
+    let kind = match &e {
+        WireError::Capacity(_) | WireError::Protocol(_) | WireError::Utf8 => Kind::Body,
+        _ => Kind::Io,
+    };
+    let err = Error::new(kind).with_message(format!("{op}: {e}"));
+    match e {
+        WireError::Io(io) => err.with_source(io),
+        other => err.with_source(other),
+    }
 }
 
 pub(super) fn ws_header_pair(name: &str, value: &str) -> Result<(HeaderName, HeaderValue)> {

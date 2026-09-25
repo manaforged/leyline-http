@@ -4,11 +4,12 @@ browser = "cfnetwork-ios"
 version = 27
 capture = "emulator"
 variant = "CfnetworkIOS27"
+header_style = "cfnetwork-26"
 platform_browser = { macos = "cfnetwork-macos" }
 family = "cfnetwork"
 verified_against = "tls.peet.ws 2026-09-25 URLSession CFNetwork/3896.100.1.2.1 iOS 27.0 (24A434) simulator"
 verified_at = "2026-09-25"
-captured_against = "CFNetwork-3896.100.1.2.1-iOS-27.0-24A434-sim"
+captured_against = "cfnetwork-3896.100.1.2.1-ios27.0-simulator"
 
 [tls]
 ciphers = [

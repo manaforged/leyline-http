@@ -1522,6 +1522,8 @@ where
 
     transport_params_plan: Option<Vec<TransportParamEntry>>,
 
+    frame_extensions: frame::Extensions,
+
     /// Whether to send STREAMS_BLOCKED frames when bidi or uni stream quota
     /// exhausted.
     enable_send_streams_blocked: bool,
@@ -2196,6 +2198,8 @@ impl<F: BufFactory> Connection<F> {
             grease: config.grease,
 
             transport_params_plan: config.transport_params_plan.clone(),
+
+            frame_extensions: frame::Extensions::from_plan(config.transport_params_plan.as_deref()),
 
             enable_send_streams_blocked: config.enable_send_streams_blocked,
 
@@ -3416,7 +3420,7 @@ impl<F: BufFactory> Connection<F> {
 
         // Process packet payload.
         while payload.cap() > 0 {
-            let frame = frame::Frame::from_bytes(&mut payload, hdr.ty)?;
+            let frame = frame::Frame::from_bytes_with(&mut payload, hdr.ty, self.frame_extensions)?;
 
             qlog_with_type!(QLOG_PACKET_RX, self.qlog, _q, {
                 qlog_frames.push(frame.to_qlog());

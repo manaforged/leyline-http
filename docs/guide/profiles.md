@@ -60,10 +60,10 @@ unrecorded, not that the profile is wrong.
 | Safari iOS 17 | `SafariIOS17` | `safari-ios-17.5-21F79-simulator` | gated |
 | Safari iOS 18 | `SafariIOS18` | `safari-ios-18.6-22G86-simulator` | gated |
 | Safari iOS 27 | `SafariIOS27` | `safari-ios-27.0-24A434-simulator` | gated |
-| OkHttp4 Android 10+ | `OkHttpAndroid10` | `okhttp-4.12.0-android-17-emulator` | estimated |
-| CFNetwork iOS 18 | `CfnetworkIOS18` | `CFNetwork-3826.600.41-iOS-18.6-22G86-sim` | gated |
-| CFNetwork iOS 27 | `CfnetworkIOS27` | `CFNetwork-3896.100.1.2.1-iOS-27.0-24A434-sim` | gated |
-| CFNetwork macOS 26 | `CfnetworkMacOS26` | `CFNetwork-3860.700.1-Darwin-25.6.0-macOS-26.6.2-25G83` | gated |
+| OkHttp4 Android 10+ | `OkHttpAndroid10` | `okhttp-4.12.0` | estimated |
+| CFNetwork iOS 18 | `CfnetworkIOS18` | `cfnetwork-3826.600.41-ios18.6-simulator` | gated |
+| CFNetwork iOS 27 | `CfnetworkIOS27` | `cfnetwork-3896.100.1.2.1-ios27.0-simulator` | gated |
+| CFNetwork macOS 26 | `CfnetworkMacOS26` | `cfnetwork-3860.700.1-macos26.6.2-vm` | gated |
 
 ## Provenance
 
@@ -118,10 +118,10 @@ The `capture` key in each profile's `[meta]` table records the source:
 | Safari iOS 17 | Emulator capture | `emulator` | `safari-ios-17.5-21F79-simulator`, Mobile Safari in the iOS 17.5 simulator |
 | Safari iOS 18 | Emulator capture | `emulator` | `safari-ios-18.6-22G86-simulator`, Mobile Safari in the iOS 18.6 simulator |
 | Safari iOS 27 | Emulator capture | `emulator` | `safari-ios-27.0-24A434-simulator`, Mobile Safari in the iOS 27.0 simulator |
-| OkHttp4 Android 10+ | Emulator capture | `emulator` | `okhttp-4.12.0-android-17-emulator`, test app on the platform TLS stack |
-| CFNetwork iOS 18 | Native stack capture | `native` | `CFNetwork-3826.600.41-iOS-18.6-22G86-sim`, iOS simulator |
-| CFNetwork iOS 27 | Emulator capture | `emulator` | `CFNetwork-3896.100.1.2.1-iOS-27.0-24A434-sim`, URLSession test binary in the iOS 27.0 simulator |
-| CFNetwork macOS 26 | Native stack capture | `native` | `CFNetwork-3860.700.1-Darwin-25.6.0-macOS-26.6.2-25G83`, URLSession test binary on macOS 26.6.2 in a VM; macOS 26.2 on hardware sends the same ClientHello |
+| OkHttp4 Android 10+ | Emulator capture | `emulator` | `okhttp-4.12.0`, test app on the platform TLS stack of an Android 17 emulator |
+| CFNetwork iOS 18 | Emulator capture | `emulator` | `cfnetwork-3826.600.41-ios18.6-simulator`, URLSession test binary in the iOS 18.6 simulator |
+| CFNetwork iOS 27 | Emulator capture | `emulator` | `cfnetwork-3896.100.1.2.1-ios27.0-simulator`, URLSession test binary in the iOS 27.0 simulator |
+| CFNetwork macOS 26 | Native stack capture | `native` | `cfnetwork-3860.700.1-macos26.6.2-vm`, URLSession test binary on macOS 26.6.2 in a VM; macOS 26.2 on hardware sends the same ClientHello |
 
 Chromium-family profiles do not store `sec-ch-ua`. Leyline derives it from the
 major version and the `ch_ua_brand` field in `[meta]`, with the same GREASE
@@ -174,8 +174,11 @@ These facts come from the captures behind the bundled profiles.
   changes the `accept-language` q value between requests (macOS 0.9 and 0.5,
   Windows 0.8 and 0.6). The profiles use the value that both versions sent on
   each platform: 0.9 on macOS and 0.8 on Windows. On Linux, headful under
-  Xvfb, Brave 146 sent 0.8 and 0.6 and Brave 154 sent 0.6 and 0.8; the Linux
-  rows use 0.8.
+  Xvfb, Brave 146 sent 0.8 and 0.6. Brave 154 sent 0.6 in three navigations
+  (`brave-154.1.96.59-linux-headful.json` and two other runs) and 0.9 and 0.5 in
+  the preset captures. The Brave 154 Linux row uses 0.6, the value seen most.
+  Brave picks the q value at random, so any fixed value matches only some
+  requests.
 - **Edge 154 and Opera 136 on Linux.** Edge 154.0.4258.37 and Opera
   136.0.6008.52 (Chromium 152), captured headful under Xvfb with no user agent
   override. They send the Chrome user agent form with `Edg/154.0.0.0` and
@@ -189,11 +192,8 @@ These facts come from the captures behind the bundled profiles.
   Linux. Every build sends three key shares
   (X25519MLKEM768, X25519, P-256) and a HEADERS PRIORITY with weight 42 and no
   exclusive bit, sent as 41.
-- **Firefox 149.** Firefox 149.0 (BuildID 20260318190823) on macOS aarch64
-  matches the Firefox 150 capture field for field, cold and resumed.
 - **Firefox 150.** Firefox 150.0 sends 17 cipher suites
-  (`t13d1717h2_5b57614c22b0_3cbfd9057e0d`). The resumed ClientHello adds
-  `pre_shared_key` (41). Firefox 150.0.3 drops
+  (`t13d1717h2_5b57614c22b0_3cbfd9057e0d`). Firefox 150.0.3 drops
   `TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA` (`t13d1617h2_86a278354501_3cbfd9057e0d`);
   the profile follows 150.0. Both builds are captured
   (`firefox-150.0` and `firefox-150.0.3`); a Firefox 150 user on the last
@@ -246,8 +246,9 @@ These facts come from the captures behind the bundled profiles.
   adds `ecdsa_sha1` to the signature algorithms, sends no SETTINGS parameter 9,
   uses the `m,s,p,a` pseudo-header order, and a priority weight of 255. Its
   header order is `accept`, `sec-fetch-site`, `accept-encoding`,
-  `sec-fetch-mode`, `user-agent`, `accept-language`, `sec-fetch-dest`, which
-  the `webkit` header style does not produce. Mobile Safari 17.5 did not use
+  `sec-fetch-mode`, `user-agent`, `accept-language`, `sec-fetch-dest`. The
+  `webkit-17` header style sends that navigate order; its other presets come
+  from `webkit` and have no iOS 17 capture. Mobile Safari 17.5 did not use
   HTTP/3 after an Alt-Svc response in three fresh simulators, so its profile
   has no `[h3]` table. The iOS 18.6 simulator ran on a macOS 15 host, so
   `CFNetwork/3826.600.41 Darwin/24.6.0` carries the Darwin version of iOS 18.
@@ -269,40 +270,145 @@ These facts come from the captures behind the bundled profiles.
   duplicate 0x0805, zlib compression, the leading GREASE cipher, and the
   `m,s,p,a` pseudo-header order with macOS.
 
+- **GREASE signature algorithm.** Chrome 152 to 154, Brave 1.96.59, Edge
+  153 and 154, and Opera 136 put one GREASE value first in
+  `signature_algorithms` on every captured platform. Chrome 145 to 151 and
+  Brave 1.88.138 do not. The value is random per connection and independent
+  of the cipher GREASE. `sigalg_grease = true` in `[tls]` turns it on; it
+  needs `grease = true`. BoringSSL patch
+  `0004-leyline-grease-signature-algorithms.patch` adds it. JA4 and JA3 drop
+  GREASE, so only the raw list shows it. The QUIC ClientHello of these
+  builds has no GREASE value, so `[h3.tls]` leaves it off.
+- **Resumed ClientHello.** The second request to `tls.peet.ws` in the same
+  browser process resumes with `pre_shared_key` (41). Official Linux builds,
+  two fresh processes each, on 2026-09-27 (`<browser>-<version>-linux-resumed-run<n>.json`),
+  and Chrome 154.0.8037.58 and Firefox 156.0.1 on Windows
+  (`-windows-resumed-run<n>.json`), give `resumed_ja4`:
+  Chrome 145 to 149 and Brave 1.88.138 `t13d1517h2_8daaf6152771_b6f405a00624`;
+  Chrome 150, 151 and Brave 1.96.59 `t13d1517h2_8daaf6152771_a87ad97598a9`;
+  Chrome 152 to 154 `t13d1518h2_8daaf6152771_e2d80978ab2e`; Firefox 148 to
+  150 `t13d1717h2_5b57614c22b0_e6dcd7ae0a9e`; Firefox 151 to 153
+  `t13d1617h2_86a278354501_e6dcd7ae0a9e`; Firefox 154 to 156
+  `t13d1517h2_8daaf6152771_e6dcd7ae0a9e`. Firefox drops `session_ticket` (35)
+  when it adds `pre_shared_key`. Safari 18.6, 26.6.2, and 27.0 under
+  safaridriver sent no `pre_shared_key` on a second connection in two fresh
+  processes each (`safari-<version>-<build>-macos-<version>-vm-resumed-run<n>.json`),
+  so the Safari profiles keep `pre_shared_key = false`.
+- **CFNetwork headers.** URLSession sends a fixed header list with no
+  `sec-*` headers. CFNetwork iOS 18 sends `user-agent`, `accept: */*`,
+  `accept-language`, `accept-encoding: gzip, deflate, br` (the `cfnetwork`
+  style; CFNetwork 1496 on iOS 17.5 sends the same order). CFNetwork macOS 26
+  and iOS 27 send `accept: */*`, `user-agent`, `priority: u=3`,
+  `accept-language`, `accept-encoding: gzip, deflate, br` (the
+  `cfnetwork-26` style). The captured `priority: u=3` is on iOS 27 as well as
+  macOS 26, so it is not a macOS-only header.
+- **Android.** Chrome 145.0.7632.218, preinstalled and Google-signed in an
+  Android 17 (API 37) Google Play emulator image, sends the same ClientHello
+  and HTTP/2 values as Chrome 145 on desktop, the `Android 10; K` user agent,
+  and `accept-language: en-US,en;q=0.9`
+  (`chrome-android-145.0.7632.218-emulator-run<n>.json`). Firefox for Android
+  156.0.1 and 154.0.1 from archive.mozilla.org (arm64-v8a APKs, signer
+  Mozilla Release Engineering, certificate SHA-256
+  `a78b62a5165b4494b2fead9e76a280d22d937fee6251aece599446b2ea319b04`; the
+  Fenix releases publish no SHA256SUMS) ran in the same emulator under
+  geckodriver. Both send `Android 17; Mobile`, `accept-language: en-US`, and
+  the HTTP/2 SETTINGS `1:4096;2:0;4:32768;5:16384`, which
+  `[h2.platforms.android]` of Firefox 154 and 156 sets. Firefox 156 on Android
+  sends the desktop ClientHello. Firefox 154 on Android omits
+  `signed_certificate_timestamp` (`t13d1516h2_8daaf6152771_eeeea6562960`);
+  a profile has no per-platform TLS table, so Leyline sends the desktop
+  Firefox 154 ClientHello on Android.
+- **Opera on Windows.** Opera 136.0.6008.52 from get.geo.opera.com
+  (Authenticode signer Opera Norway AS, checksum from Opera's `.sha256sum`)
+  sends the Chrome 152 ClientHello, `OPR/136.0.0.0`, the `Opera` brand in
+  `sec-ch-ua`, and `accept-language: en-US,en;q=0.9`
+  (`opera-136.0.6008.52-windows-run<n>.json`).
+- **TCP rows.** `platforms.toml` has Windows, macOS, and Linux rows. The
+  option order, window, window scale, and TTL of each row match every browser
+  SYN captured from that host. The browser captures show MSS 1400 because the
+  path clamps it. The hosts' own SYNs show the default: the Linux host
+  (MTU 1500) sends MSS 1460, window 64240, and options `mss, sackOK, TS, nop,
+  wscale 10`, and the Windows VM (MTU 1500) sends MSS 1460, window 64240, and
+  `mss, nop, wscale 8, nop, nop, sackOK`. The macOS row's MSS 1460 has no host
+  No host SYN capture exists for macOS. Android and iOS
+  have no row, because no capture comes from a device; the simulator and
+  emulator SYNs are the macOS host's.
+
 ## HTTP/3 captures
 
-The `[h3]` tables of Chrome 154, Brave (Chromium 154), Firefox 156, Safari 18,
-Safari 26, Safari iOS 18, and Safari iOS 27 come from QUIC captures against
-`https://quic.browserleaks.com/?minify=1`. The raw files end in `-h3.json`. The
-desktop browsers ran in a macOS 26.6.2 VM (Safari 18 in a macOS 15.7.7 VM).
-Mobile Safari captures are QUIC Initial packets, decrypted with the RFC 9001
-initial keys. The `[h3]` tables of the other profiles have no QUIC capture.
+Every `[h3]` table comes from QUIC captures against
+`https://quic.browserleaks.com/?minify=1`. The raw files end in `-h3.json` or
+`-h3-run<n>.json`.
 
-Each of these profiles reproduces its capture: the QUIC ClientHello through
+- Chrome 145 to 154, Brave 1.88.138 and 1.96.59, and Firefox 148 to 156:
+  official Linux builds, headful under Xvfb, two fresh processes each, eight
+  for Chrome 154 and Firefox 156, on 2026-09-27. Every build used HTTP/3 on
+  the first navigation with no QUIC flag or preference.
+- Chrome 154.0.8037.58 and Firefox 156.0.1 on Windows, two runs each. The
+  HTTP/3 HEADERS carry `sec-ch-ua-platform: "Windows"`.
+- Chrome 154, Brave 1.96.59, Edge 154, Firefox 156, Safari 26.6.2, and Safari
+  27.0 in a macOS 26.6.2 VM, and Safari 18.6 in a macOS 15.7.7 VM.
+- Mobile Safari 18.6 in the iOS 18.6 simulator, two runs with the HTTP/3
+  frames (`safari-ios-18.6-22G86-simulator-h3-run<n>.json`), and Mobile
+  Safari 27.0 in the iOS 27.0 simulator.
+
+Each profile reproduces its capture: the QUIC ClientHello through
 `[h3.tls]`, the transport parameter set, values, and order policy, the
 connection ID lengths, the SETTINGS list, the control stream frames, and the
-pseudo-header order. Values the browser picks at random per connection
-(GREASE IDs and values, the Chromium parameter shuffle, the Safari rotation,
-the Firefox destination connection ID length) are random in Leyline in the
-same way. See [HTTP/3](http3.md) for the keys.
+pseudo-header order. `[h3.tls]` lists only the TLS 1.3 ciphers, in the
+captured order, and no `min_tls_version` or `padding`, because QUIC sends
+neither. Values the browser picks at random per connection are random in
+Leyline in the same way. See [HTTP/3](http3.md) for the keys.
 
-- **Chromium.** The transport parameters come in a random order, with
-  `version_information`, `max_datagram_frame_size`, `google_connection_options`
-  and a GREASE parameter. SETTINGS end with a GREASE setting, and a GREASE
-  frame and a PRIORITY_UPDATE frame follow them. The source connection ID is
-  empty.
-- **Firefox.** The transport parameters include `max_ack_delay` 20,
-  `version_information`, `reset_stream_at`, `min_ack_delay`, and
-  `max_datagram_frame_size` 65535. The destination connection ID is 8 to 20
-  bytes, biased to 8, and the source connection ID has 3 bytes. The QUIC
-  ClientHello keeps `extended_master_secret` and `renegotiation_info`.
+- **Chromium.** The transport parameters come in a random order. All builds
+  send `version_information` with a GREASE version at a random position,
+  `max_datagram_frame_size` 65536, `initial_max_streams_uni` 103, and a GREASE
+  parameter of up to 15 bytes. Chrome 145 adds `google_version` (18258) with
+  QUICv1. Chrome 149 and later add `google_connection_options` `ORIG`.
+  Chrome 152 to 154 add Trust Anchor Identifiers to the QUIC ClientHello;
+  Brave 1.96.59 does not. SETTINGS are `1:65536;6:262144;7:100;51:1` and a
+  GREASE setting, followed by a GREASE frame of 0 to 3 bytes and a
+  PRIORITY_UPDATE frame. The connection IDs are 8 and 0 bytes.
+- **Firefox.** The transport parameter order is fixed. Firefox 155 and 156
+  add parameter 29 and offer QUICv2 in `version_information` (GREASE, QUICv2,
+  QUICv1); Firefox 148 to 154 offer GREASE and QUICv1. The QUIC stack in
+  Leyline speaks QUICv1 only, so the Firefox 155 and 156 profiles offer
+  GREASE and QUICv1, which differs from their capture. Every run of every
+  build, 27 in all, sends GREASE-form parameter 4278378010 with the value
+  1000, so the profiles pin it. The source connection ID has 3 bytes. The
+  destination connection ID length varies per connection; `dcid_length`
+  weights are the 27 observed lengths: 8 (12), 10 (4), 11 (1), 13 (5), 15
+  (2), 16 (1), 19 (1), 20 (1). Firefox 156 adds the ML-DSA schemes to the
+  QUIC signature algorithms and delegated credentials; 148 to 155 do not.
+  The QUIC ClientHello keeps `extended_master_secret` and
+  `renegotiation_info`. Firefox shuffles the QUIC ClientHello extensions on
+  every connection and keeps `quic_transport_parameters` and ECH last.
+  BoringSSL cannot express that rule, so `[h3.tls]` uses the one fixed order
+  of the macOS capture.
 - **Safari.** The transport parameter order rotates between connections.
-  Safari 18 and iOS 18 add Apple parameter `0xff080808` last. SETTINGS end with
-  a GREASE setting. The source connection ID is empty.
+  Safari 18 and iOS 18 add Apple parameter `0xff080808` last. SETTINGS are
+  `1:16383;7:100` and a GREASE setting, with `m,s,a,p` pseudo-headers. The
+  source connection ID is empty.
 
 The Chrome 154 capture negotiated real ECH, because its browser had the
 server's ECH configuration. Leyline sends an ECH GREASE extension with the
 same extension ID, so the JA4 is the same.
+
+## Uncaptured values
+
+These values have no capture of the official build on their own platform.
+Leyline keeps them so that the API stays complete, but no capture backs them.
+
+- Chrome `[identity.android]` 146 to 154: only Chrome 145 on Android is
+  captured. The rows follow the reduced `Android 10; K` user agent.
+- Firefox `[identity.android]` 148 to 153 and 155 (`Android 14; Mobile`).
+  Firefox 154 and 156 on Android are captured.
+- Edge 145 to 152: Microsoft serves only the current stable build
+  (`edgeupdates.microsoft.com/api/products` lists only 154.0.4258.37).
+- Opera on Linux for Opera 129 to 135.
+- The macOS TCP row's MSS 1460.
+- Header presets other than `navigate` for the `webkit`, `webkit-26`, and
+  `webkit-17` styles, and every preset on Windows and macOS.
 
 ## Update cadence
 
@@ -357,7 +463,8 @@ brand overlay (`SessionBuilder::brand`) needs `chromium_major` in `[meta]`.
 The request headers follow `header_style` in `[meta]`. `profiles/headers.toml`
 is the one owner of request header shapes. Each top-level table is one shape,
 and its key is the `header_style` value: `chromium`, `gecko`, `webkit`,
-`webkit-26`, `okhttp`, `brave`, and `brave-154`. The build generates the `HeaderStyle` enum from this
+`webkit-26`, `webkit-17`, `okhttp`, `cfnetwork`, `cfnetwork-26`, `brave`, and
+`brave-154`. The build generates the `HeaderStyle` enum from this
 file, so a new shape needs only a new table. The build fails when a profile or
 a brand names a shape that the file does not define.
 

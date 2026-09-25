@@ -3,7 +3,7 @@ name = "Safari iOS 17"
 browser = "safari-ios"
 version = 17
 variant = "SafariIOS17"
-header_style = "webkit"
+header_style = "webkit-17"
 capture = "emulator"
 platform_browser = { macos = "safari" }
 family = "webkit"

@@ -60,19 +60,19 @@ pub(crate) async fn send_request_h1(
             let parsed = url::Url::parse(proxy_url).map_err(|e| {
                 Error::new(Kind::Config).with_message(format!("invalid proxy URL: {e}"))
             })?;
-            if parsed.scheme() != "http" {
-                return Err(Error::new(Kind::Config)
-                    .with_message("plaintext HTTP currently supports http:// proxies only"));
-            }
             let mut headers = headers;
             headers.retain(|(k, _)| !k.eq_ignore_ascii_case("priority"));
-            if let Some(credentials) = crate::util::proxy_basic_auth(&parsed) {
-                headers.push((
-                    "Proxy-Authorization".into(),
-                    std::borrow::Cow::Owned(credentials),
-                ));
+            if !matches!(parsed.scheme(), "http" | "https") {
+                (H1Target::OriginForm, headers)
+            } else {
+                if let Some(credentials) = crate::util::proxy_basic_auth(&parsed) {
+                    headers.push((
+                        "Proxy-Authorization".into(),
+                        std::borrow::Cow::Owned(credentials),
+                    ));
+                }
+                (H1Target::AbsoluteForm, headers)
             }
-            (H1Target::AbsoluteForm, headers)
         }
         _ => {
             let mut headers = headers;

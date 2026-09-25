@@ -30,7 +30,7 @@ script = [
     ["sec-ch-ua", "{sec_ch_ua}"],
     ["sec-ch-ua-mobile", "{sec_ch_ua_mobile}"],
     ["accept", "*/*"],
-    ["sec-fetch-site", "same-origin"],
+    ["sec-fetch-site", "{fetch_site}"],
     ["sec-fetch-mode", "no-cors"],
     ["sec-fetch-dest", "script"],
     ["referer", "{referer}"],
@@ -46,7 +46,7 @@ xhr = [
     ["content-type", "application/json"],
     ["sec-ch-ua-mobile", "{sec_ch_ua_mobile}"],
     ["origin", "{origin}"],
-    ["sec-fetch-site", "same-origin"],
+    ["sec-fetch-site", "{fetch_site}"],
     ["sec-fetch-mode", "cors"],
     ["sec-fetch-dest", "empty"],
     ["referer", "{referer}"],
@@ -62,7 +62,7 @@ form = [
     ["content-type", "application/x-www-form-urlencoded"],
     ["sec-ch-ua-mobile", "{sec_ch_ua_mobile}"],
     ["origin", "{origin}"],
-    ["sec-fetch-site", "same-origin"],
+    ["sec-fetch-site", "{fetch_site}"],
     ["sec-fetch-mode", "cors"],
     ["sec-fetch-dest", "empty"],
     ["referer", "{referer}"],
@@ -110,7 +110,7 @@ form-navigate = [
     ["user-agent", "{user_agent}"],
     ["origin", "{origin}"],
     ["accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"],
-    ["sec-fetch-site", "same-origin"],
+    ["sec-fetch-site", "{fetch_site}"],
     ["sec-fetch-mode", "navigate"],
     ["sec-fetch-user", "?1"],
     ["sec-fetch-dest", "document"],
@@ -160,7 +160,7 @@ script = [
     ["referer", "{referer}"],
     ["sec-fetch-dest", "script"],
     ["sec-fetch-mode", "no-cors"],
-    ["sec-fetch-site", "same-origin"],
+    ["sec-fetch-site", "{fetch_site}"],
     ["priority", "u=2"],
     ["te", "trailers"],
 ]
@@ -174,7 +174,7 @@ xhr = [
     ["origin", "{origin}"],
     ["sec-fetch-dest", "empty"],
     ["sec-fetch-mode", "cors"],
-    ["sec-fetch-site", "same-origin"],
+    ["sec-fetch-site", "{fetch_site}"],
     ["priority", "u=4"],
     ["te", "trailers"],
 ]
@@ -188,7 +188,7 @@ form = [
     ["origin", "{origin}"],
     ["sec-fetch-dest", "empty"],
     ["sec-fetch-mode", "cors"],
-    ["sec-fetch-site", "same-origin"],
+    ["sec-fetch-site", "{fetch_site}"],
     ["priority", "u=4"],
     ["te", "trailers"],
 ]
@@ -229,7 +229,7 @@ form-navigate = [
     ["upgrade-insecure-requests", "1"],
     ["sec-fetch-dest", "document"],
     ["sec-fetch-mode", "navigate"],
-    ["sec-fetch-site", "same-origin"],
+    ["sec-fetch-site", "{fetch_site}"],
     ["sec-fetch-user", "?1"],
     ["priority", "u=0, i"],
     ["te", "trailers"],
@@ -270,7 +270,7 @@ xhr = [
     ["accept", "application/json, text/plain, */*"],
     ["accept-language", "{accept_language}"],
     ["origin", "{origin}"],
-    ["sec-fetch-site", "same-origin"],
+    ["sec-fetch-site", "{fetch_site}"],
     ["sec-fetch-mode", "cors"],
     ["sec-fetch-dest", "empty"],
     ["referer", "{referer}"],
@@ -282,7 +282,7 @@ form = [
     ["accept", "application/json, text/plain, */*"],
     ["content-type", "application/x-www-form-urlencoded"],
     ["origin", "{origin}"],
-    ["sec-fetch-site", "same-origin"],
+    ["sec-fetch-site", "{fetch_site}"],
     ["sec-fetch-mode", "cors"],
     ["sec-fetch-dest", "empty"],
     ["referer", "{referer}"],
@@ -320,7 +320,7 @@ form-navigate = [
     ["content-type", "application/x-www-form-urlencoded"],
     ["accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"],
     ["origin", "{origin}"],
-    ["sec-fetch-site", "same-origin"],
+    ["sec-fetch-site", "{fetch_site}"],
     ["sec-fetch-mode", "navigate"],
     ["referer", "{referer}"],
     ["accept-language", "{accept_language}"],
@@ -363,7 +363,7 @@ xhr = [
     ["accept", "application/json, text/plain, */*"],
     ["accept-language", "{accept_language}"],
     ["origin", "{origin}"],
-    ["sec-fetch-site", "same-origin"],
+    ["sec-fetch-site", "{fetch_site}"],
     ["sec-fetch-mode", "cors"],
     ["sec-fetch-dest", "empty"],
     ["referer", "{referer}"],
@@ -375,7 +375,7 @@ form = [
     ["accept", "application/json, text/plain, */*"],
     ["content-type", "application/x-www-form-urlencoded"],
     ["origin", "{origin}"],
-    ["sec-fetch-site", "same-origin"],
+    ["sec-fetch-site", "{fetch_site}"],
     ["sec-fetch-mode", "cors"],
     ["sec-fetch-dest", "empty"],
     ["referer", "{referer}"],
@@ -413,7 +413,7 @@ form-navigate = [
     ["content-type", "application/x-www-form-urlencoded"],
     ["accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"],
     ["origin", "{origin}"],
-    ["sec-fetch-site", "same-origin"],
+    ["sec-fetch-site", "{fetch_site}"],
     ["sec-fetch-mode", "navigate"],
     ["referer", "{referer}"],
     ["accept-language", "{accept_language}"],
@@ -429,6 +429,44 @@ fallback = [
 ]
 
 [okhttp.presets]
+
+[cfnetwork]
+variant = "CfNetwork"
+fallback = [
+    ["user-agent", "{user_agent}"],
+    ["accept", "*/*"],
+    ["accept-language", "{accept_language}"],
+    ["accept-encoding", "gzip, deflate, br"],
+]
+
+[cfnetwork.presets]
+
+[cfnetwork-26]
+variant = "CfNetwork26"
+fallback = [
+    ["accept", "*/*"],
+    ["user-agent", "{user_agent}"],
+    ["priority", "u=3"],
+    ["accept-language", "{accept_language}"],
+    ["accept-encoding", "gzip, deflate, br"],
+]
+
+[cfnetwork-26.presets]
+
+[webkit-17]
+variant = "WebKit17"
+extends = "webkit"
+
+[webkit-17.presets]
+navigate = [
+    ["accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"],
+    ["sec-fetch-site", "none"],
+    ["accept-encoding", "gzip, deflate, br"],
+    ["sec-fetch-mode", "navigate"],
+    ["user-agent", "{user_agent}"],
+    ["accept-language", "{accept_language}"],
+    ["sec-fetch-dest", "document"],
+]
 
 [brave]
 variant = "Brave"
@@ -498,7 +536,7 @@ script = [
     ["sec-ch-ua-mobile", "{sec_ch_ua_mobile}"],
     ["accept", "*/*"],
     ["sec-gpc", "1"],
-    ["sec-fetch-site", "same-origin"],
+    ["sec-fetch-site", "{fetch_site}"],
     ["sec-fetch-mode", "no-cors"],
     ["sec-fetch-dest", "script"],
     ["referer", "{referer}"],
@@ -515,7 +553,7 @@ xhr = [
     ["sec-ch-ua-mobile", "{sec_ch_ua_mobile}"],
     ["sec-gpc", "1"],
     ["origin", "{origin}"],
-    ["sec-fetch-site", "same-origin"],
+    ["sec-fetch-site", "{fetch_site}"],
     ["sec-fetch-mode", "cors"],
     ["sec-fetch-dest", "empty"],
     ["referer", "{referer}"],
@@ -532,7 +570,7 @@ form = [
     ["sec-ch-ua-mobile", "{sec_ch_ua_mobile}"],
     ["sec-gpc", "1"],
     ["origin", "{origin}"],
-    ["sec-fetch-site", "same-origin"],
+    ["sec-fetch-site", "{fetch_site}"],
     ["sec-fetch-mode", "cors"],
     ["sec-fetch-dest", "empty"],
     ["referer", "{referer}"],
@@ -583,7 +621,7 @@ form-navigate = [
     ["origin", "{origin}"],
     ["accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"],
     ["sec-gpc", "1"],
-    ["sec-fetch-site", "same-origin"],
+    ["sec-fetch-site", "{fetch_site}"],
     ["sec-fetch-mode", "navigate"],
     ["sec-fetch-user", "?1"],
     ["sec-fetch-dest", "document"],

@@ -27,6 +27,20 @@ pub(crate) async fn connect_via_tls<C: crate::tls::TlsHandshake>(
     proxy: &url::Url,
     include_alps: bool,
 ) -> Result<TlsStream, TlsError> {
+    let proxy_tls = open_tls_to_proxy(connector, proxy).await?;
+    let mut tunnel = proxy_tls.stream;
+    write_connect_and_validate(&mut tunnel, host, port, proxy).await?;
+
+    let session_key = SessionCache::key(host, port, Some(proxy));
+    connector
+        .do_tls_handshake_nested(tunnel, host, &session_key, include_alps)
+        .await
+}
+
+pub(crate) async fn open_tls_to_proxy<C: crate::tls::TlsHandshake>(
+    connector: &C,
+    proxy: &url::Url,
+) -> Result<TlsStream, TlsError> {
     if connector.has_origin_tls_identity() {
         return Err(TlsError::proxy(
             "https:// proxy is not supported together with a client certificate or certificate \
@@ -45,17 +59,10 @@ pub(crate) async fn connect_via_tls<C: crate::tls::TlsHandshake>(
         proxy.port_or_known_default().unwrap_or(443),
         None,
     );
-    let proxy_tls = connector
+    connector
         .do_tls_handshake(tcp_stream, proxy_host, &proxy_key, false)
         .await
-        .map_err(TlsError::into_proxy)?;
-    let mut tunnel = proxy_tls.stream;
-    write_connect_and_validate(&mut tunnel, host, port, proxy).await?;
-
-    let session_key = SessionCache::key(host, port, Some(proxy));
-    connector
-        .do_tls_handshake_nested(tunnel, host, &session_key, include_alps)
-        .await
+        .map_err(TlsError::into_proxy)
 }
 
 async fn write_connect_and_validate<S>(

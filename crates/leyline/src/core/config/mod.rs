@@ -9,7 +9,7 @@ mod timeout;
 mod websocket;
 
 pub use compression::CompressionConfig;
-pub(crate) use compression::DEFAULT_MAX_BODY_SIZE;
+pub(crate) use compression::{DEFAULT_MAX_BODY_SIZE, DEFAULT_MAX_HEADER_LIST_BYTES};
 pub use dns::DnsConfig;
 pub use pool::PoolConfig;
 pub use proxy::{NoProxy, ProxyConfig, ProxyRule, ProxyUrl};

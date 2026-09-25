@@ -4,7 +4,8 @@ use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
 
 use super::WsMessage;
-use crate::core::error::{Error, Kind, Result};
+use super::handshake::wire_error;
+use crate::core::error::Result;
 use crate::h2::client::H2ConnectStream;
 use crate::tls::TlsIo;
 
@@ -24,7 +25,7 @@ impl WsSink {
             WsSinkInner::H1(s) => s.send(msg).await,
             WsSinkInner::H2(s) => s.send(msg).await,
         }
-        .map_err(|e| Error::new(Kind::Request).with_message(format!("ws send: {e}")))
+        .map_err(|e| wire_error("ws send", e))
     }
 
     pub async fn close(&mut self) -> Result<()> {
@@ -32,7 +33,7 @@ impl WsSink {
             WsSinkInner::H1(s) => s.close().await,
             WsSinkInner::H2(s) => s.close().await,
         }
-        .map_err(|e| Error::new(Kind::Request).with_message(format!("ws close: {e}")))
+        .map_err(|e| wire_error("ws close", e))
     }
 }
 
@@ -53,7 +54,7 @@ impl WsStream {
         };
         match next {
             Some(Ok(msg)) => Ok(Some(WsMessage::wire(msg))),
-            Some(Err(e)) => Err(Error::new(Kind::Request).with_message(format!("ws recv: {e}"))),
+            Some(Err(e)) => Err(wire_error("ws recv", e)),
             None => Ok(None),
         }
     }

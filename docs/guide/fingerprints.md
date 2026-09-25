@@ -29,9 +29,13 @@ The per-OS values live in `profiles/platforms.toml`, and
 and `SessionBuilder::tcp_profile` overrides it. Each platform applies what it
 can: Linux applies TTL, MSS, don't-fragment, and derives a
 `TCP_WINDOW_CLAMP` from the window fields; macOS applies TTL, MSS, and
-don't-fragment; Windows applies TTL and don't-fragment. The audit's JA4T is
-computed from the configured values, including fields the running platform
-does not apply.
+don't-fragment; Windows applies TTL and don't-fragment. `options` is the SYN
+option order that the operating system kernel sends. No platform lets a socket
+set it, so Leyline does not apply it; only the audit's JA4T reads it. The audit's
+JA4T is computed from the configured values, including fields the running
+platform does not apply. `platforms.toml` has rows for Windows, macOS, and
+Linux only. Android and iOS have no captured SYN, so their `TcpProfile` is
+empty and the kernel defaults apply.
 
 ## Audit a session
 
@@ -66,7 +70,7 @@ The five fields of `AuditData`:
 | --- | --- |
 | `ja3` | JA3 TLS fingerprint, the MD5 form. |
 | `ja4` | JA4 TLS fingerprint. Derived from the profile's fixed extension order when it has one. |
-| `ja4t` | JA4T from the TCP options Leyline applies with `setsockopt`, not captured from the SYN. |
+| `ja4t` | JA4T from the platform's `TcpProfile` values, not captured from the SYN. |
 | `ja4h` | JA4H over the request line and headers this response's request sent. |
 | `h2_fingerprint` | Akamai-style HTTP/2 fingerprint. |
 

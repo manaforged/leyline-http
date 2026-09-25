@@ -186,9 +186,44 @@ pub enum Frame {
     },
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Extensions {
+    pub reset_stream_at: bool,
+    pub ack_frequency: bool,
+}
+
+const RESET_STREAM_AT_PARAMS: [u64; 1] = [0x17f7_586d_2cb5_71];
+const MIN_ACK_DELAY_PARAMS: [u64; 2] = [0xff04_de1a, 0xff04_de1b];
+
+impl Extensions {
+    pub fn from_plan(plan: Option<&[crate::TransportParamEntry]>) -> Extensions {
+        let advertised = |ids: &[u64]| {
+            plan.into_iter().flatten().any(|entry| match entry {
+                crate::TransportParamEntry::Local(id) | crate::TransportParamEntry::Raw(id, _) => {
+                    ids.contains(id)
+                }
+            })
+        };
+        Extensions {
+            reset_stream_at: advertised(&RESET_STREAM_AT_PARAMS),
+            ack_frequency: advertised(&MIN_ACK_DELAY_PARAMS),
+        }
+    }
+}
+
 impl Frame {
+    #[cfg(any(test, feature = "internal"))]
     pub fn from_bytes(b: &mut octets::Octets, pkt: packet::Type) -> Result<Frame> {
+        Frame::from_bytes_with(b, pkt, Extensions::default())
+    }
+
+    pub fn from_bytes_with(
+        b: &mut octets::Octets,
+        pkt: packet::Type,
+        extensions: Extensions,
+    ) -> Result<Frame> {
         let frame_type = b.get_varint()?;
+        let one_rtt = pkt == packet::Type::Short;
 
         let frame = match frame_type {
             0x00 => {
@@ -329,19 +364,23 @@ impl Frame {
 
             0x30 | 0x31 => parse_datagram_frame(frame_type, b)?,
 
-            0x1f => Frame::Ping { mtu_probe: None },
+            0x1f if extensions.ack_frequency && one_rtt => Frame::Ping { mtu_probe: None },
 
-            0x24 => {
-                let frame = Frame::ResetStream {
-                    stream_id: b.get_varint()?,
-                    error_code: b.get_varint()?,
-                    final_size: b.get_varint()?,
-                };
-                b.get_varint()?;
-                frame
+            0x24 if extensions.reset_stream_at && one_rtt => {
+                let stream_id = b.get_varint()?;
+                let error_code = b.get_varint()?;
+                let final_size = b.get_varint()?;
+                if b.get_varint()? > final_size {
+                    return Err(Error::InvalidFrame);
+                }
+                Frame::ResetStream {
+                    stream_id,
+                    error_code,
+                    final_size,
+                }
             }
 
-            0xaf => {
+            0xaf if extensions.ack_frequency && one_rtt => {
                 for _ in 0..4 {
                     b.get_varint()?;
                 }

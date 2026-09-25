@@ -19,10 +19,6 @@ include = [
     "/*.toml",
     "/COPYING",
     "/LICENSE",
-    "/examples/cert-big.crt",
-    "/examples/cert.crt",
-    "/examples/cert.key",
-    "/examples/rootca.crt",
     "/src",
 ]
 

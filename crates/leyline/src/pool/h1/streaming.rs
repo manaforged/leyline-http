@@ -2,10 +2,11 @@ use super::*;
 
 pub(super) async fn run_h1_stream_pump(mut pump: H1StreamPump) {
     let initial = std::mem::take(&mut pump.initial_body);
+    let excess = has_excess(pump.framing, initial.len());
     let limit = pump.pool.max_body_size;
     let drained_clean =
         stream_body_into(pump.io.as_mut(), pump.framing, initial, &pump.tx, limit).await;
-    if drained_clean && pump.reusable {
+    if drained_clean && pump.reusable && !excess {
         pump.pool
             .return_h1(pump.key, H1Slot { io: pump.io }, pump.tls);
         if pump.count_install {

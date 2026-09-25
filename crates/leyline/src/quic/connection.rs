@@ -90,6 +90,7 @@ fn build_quic_config(
 fn build_h3_config(h3_cfg: &H3Config) -> Result<quiche::h3::Config, String> {
     let wire = &h3_cfg.wire;
     let mut h3_config = quiche::h3::Config::new().map_err(|e| format!("h3 config: {e}"))?;
+    h3_config.set_field_section_limit(h3_cfg.max_header_list_bytes);
     match &wire.settings {
         Some(settings) => {
             h3_config.set_settings_plan(wire::settings_plan(settings));

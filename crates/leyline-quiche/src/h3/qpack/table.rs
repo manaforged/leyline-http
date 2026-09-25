@@ -1,4 +1,31 @@
+// Copyright (C) 2026, Manaforge Technologies, LLC.
+// All rights reserved.
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are
+// met:
+//
+//     * Redistributions of source code must retain the above copyright notice,
+//       this list of conditions and the following disclaimer.
+//
+//     * Redistributions in binary form must reproduce the above copyright
+//       notice, this list of conditions and the following disclaimer in the
+//       documentation and/or other materials provided with the distribution.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+// IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+// THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+// PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR
+// CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+// EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+// PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+// LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+// NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+// SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
 use std::collections::VecDeque;
+use std::sync::Arc;
 
 use super::Error;
 use super::Result;
@@ -6,10 +33,13 @@ use super::decoder::decode_int;
 use super::encode_int;
 
 const ENTRY_OVERHEAD: u64 = 32;
+const DECODER_STREAM_BACKLOG: usize = 64 * 1024;
+
+type Field = Arc<[u8]>;
 
 #[derive(Default)]
 pub(super) struct DynamicTable {
-    entries: VecDeque<(Vec<u8>, Vec<u8>)>,
+    entries: VecDeque<(Field, Field)>,
     size: u64,
     capacity: u64,
     max_capacity: u64,
@@ -33,12 +63,16 @@ impl DynamicTable {
     }
 
     pub(super) fn get(&self, absolute: u64) -> Result<(&[u8], &[u8])> {
+        self.entry(absolute)
+            .map(|(name, value)| (name.as_ref(), value.as_ref()))
+    }
+
+    fn entry(&self, absolute: u64) -> Result<&(Field, Field)> {
         let dropped = self.inserted - self.entries.len() as u64;
         if absolute < dropped || absolute >= self.inserted {
             return Err(Error::InvalidDynamicTableIndex);
         }
-        let (name, value) = &self.entries[(absolute - dropped) as usize];
-        Ok((name, value))
+        Ok(&self.entries[(absolute - dropped) as usize])
     }
 
     fn relative(&self, index: u64) -> Result<u64> {
@@ -57,7 +91,7 @@ impl DynamicTable {
         Ok(())
     }
 
-    fn insert(&mut self, name: Vec<u8>, value: Vec<u8>) -> Result<()> {
+    fn insert(&mut self, name: Field, value: Field) -> Result<()> {
         let size = entry_size(&name, &value);
         if size > self.capacity {
             return Err(Error::EncoderStream);
@@ -131,6 +165,7 @@ impl EncoderStream {
             let instruction = match parse_instruction(&mut b, limit) {
                 Ok(v) => v,
                 Err(Error::BufferTooShort) => break,
+                Err(Error::IntegerOverflow) => return Err(Error::EncoderStream),
                 Err(e) => return Err(e),
             };
             consumed += b.off();
@@ -171,18 +206,17 @@ fn apply(table: &mut DynamicTable, instruction: Instruction) -> Result<()> {
         Instruction::SetCapacity(capacity) => table.set_capacity(capacity),
         Instruction::InsertStaticName(index, value) => {
             let (name, _) = super::decoder::lookup_static(index)?;
-            table.insert(name.to_vec(), value)
+            table.insert(name.into(), value.into())
         }
         Instruction::InsertDynamicName(index, value) => {
             let absolute = table.relative(index)?;
-            let name = table.get(absolute)?.0.to_vec();
-            table.insert(name, value)
+            let name = Arc::clone(&table.entry(absolute)?.0);
+            table.insert(name, value.into())
         }
-        Instruction::InsertLiteral(name, value) => table.insert(name, value),
+        Instruction::InsertLiteral(name, value) => table.insert(name.into(), value.into()),
         Instruction::Duplicate(index) => {
             let absolute = table.relative(index)?;
-            let (name, value) = table.get(absolute)?;
-            let (name, value) = (name.to_vec(), value.to_vec());
+            let (name, value) = table.entry(absolute)?.clone();
             table.insert(name, value)
         }
     }
@@ -234,6 +268,10 @@ impl DecoderStream {
         if increment > 0 {
             self.put(increment, 0x00, 6);
         }
+    }
+
+    pub(super) fn is_backlogged(&self) -> bool {
+        self.out.len() > DECODER_STREAM_BACKLOG
     }
 
     pub(super) fn take(&mut self) -> Vec<u8> {

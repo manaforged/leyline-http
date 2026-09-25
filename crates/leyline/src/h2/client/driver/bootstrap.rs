@@ -124,7 +124,7 @@ where
         .iter()
         .find(|(id, _)| matches!(id, crate::h2::config::SettingId::MaxHeaderListSize))
         .map(|(_, v)| *v as usize)
-        .unwrap_or(256 * 1024);
+        .unwrap_or(crate::core::DEFAULT_MAX_HEADER_LIST_BYTES);
     let our_header_table_size = config
         .settings
         .iter()

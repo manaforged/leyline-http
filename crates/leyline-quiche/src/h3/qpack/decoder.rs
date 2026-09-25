@@ -173,6 +173,10 @@ impl Decoder {
         self.decoder_stream.requeue(bytes);
     }
 
+    pub fn instructions_backlogged(&self) -> bool {
+        self.decoder_stream.is_backlogged()
+    }
+
     pub fn is_blocked(&self, stream_id: u64) -> bool {
         self.blocked.iter().any(|b| b.stream_id == stream_id)
     }
@@ -408,11 +412,13 @@ pub(super) fn decode_int(b: &mut octets::Octets, prefix: usize) -> Result<u64> {
     while b.cap() > 0 {
         let byte = b.get_u8()?;
 
-        let inc = u64::from(byte & 0x7f)
+        let bits = u64::from(byte & 0x7f);
+        let inc = bits
             .checked_shl(shift)
-            .ok_or(Error::BufferTooShort)?;
+            .filter(|inc| inc >> shift == bits)
+            .ok_or(Error::IntegerOverflow)?;
 
-        val = val.checked_add(inc).ok_or(Error::BufferTooShort)?;
+        val = val.checked_add(inc).ok_or(Error::IntegerOverflow)?;
 
         shift += 7;
 

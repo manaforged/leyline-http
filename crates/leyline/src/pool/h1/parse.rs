@@ -63,12 +63,13 @@ pub(super) async fn read_h1_response<S>(
     stream: &mut S,
     method: &str,
     limit: usize,
-) -> Result<(H1Head, Vec<u8>), H1PooledError>
+) -> Result<(H1Head, Vec<u8>, bool), H1PooledError>
 where
     S: AsyncRead + Unpin + ?Sized,
 {
     let mut head = read_h1_head(stream, method).await?;
     let buf = std::mem::take(&mut head.initial_body);
+    let excess = has_excess(head.framing, buf.len());
     let body = match head.framing {
         BodyFraming::None => Vec::new(),
         BodyFraming::Chunked => read_chunked_body(stream, buf, limit).await?,
@@ -78,7 +79,21 @@ where
         }
         BodyFraming::ToClose => read_to_close(stream, buf, limit).await?,
     };
-    Ok((head, body))
+    Ok((head, body, excess))
+}
+
+pub(super) fn has_excess(framing: BodyFraming, buffered: usize) -> bool {
+    match framing {
+        BodyFraming::None => buffered > 0,
+        BodyFraming::Fixed(len) => buffered as u64 > len,
+        BodyFraming::Chunked | BodyFraming::ToClose => false,
+    }
+}
+
+fn bare_lf(head: &[u8]) -> bool {
+    head.iter()
+        .enumerate()
+        .any(|(i, &b)| b == b'\n' && (i == 0 || head[i - 1] != b'\r'))
 }
 pub(super) async fn read_h1_headers<S>(
     stream: &mut S,
@@ -89,6 +104,12 @@ where
 {
     let mut tmp = [0u8; 2048];
     loop {
+        let scanned = find_header_end(buf).map_or(buf.len(), |end| end + 4);
+        if bare_lf(&buf[..scanned]) {
+            return Err(H1PooledError::Http(
+                "HTTP/1.1 head has a bare LF line ending".into(),
+            ));
+        }
         if let Some(header_end) = find_header_end(buf) {
             if header_end + 4 > MAX_H1_HEADER_BYTES {
                 return Err(H1PooledError::Http(format!(
@@ -151,10 +172,14 @@ pub fn parse_h1_head(head: &str) -> Result<ParsedHead, H1PooledError> {
             continue;
         }
         let Some((name, value)) = line.split_once(':') else {
-            continue;
+            return Err(H1PooledError::Http(format!(
+                "HTTP/1.1 header line has no colon: {line}"
+            )));
         };
         if name.is_empty() || name.ends_with(' ') || name.ends_with('\t') {
-            continue;
+            return Err(H1PooledError::Http(format!(
+                "invalid HTTP/1.1 header name: {name}"
+            )));
         }
         headers.push((name.to_string(), value.trim_start().to_string()));
     }

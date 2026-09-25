@@ -97,12 +97,7 @@ pub fn parse_set_cookie(header: &str, request_url: &url::Url) -> Option<Cookie> 
 
     let (name, value) = {
         let i = name_value.find('=')?;
-        let v = name_value[i + 1..].trim();
-        let v = v
-            .strip_prefix('"')
-            .and_then(|v| v.strip_suffix('"'))
-            .unwrap_or(v);
-        (name_value[..i].trim(), v)
+        (name_value[..i].trim(), name_value[i + 1..].trim())
     };
 
     if name.is_empty() {

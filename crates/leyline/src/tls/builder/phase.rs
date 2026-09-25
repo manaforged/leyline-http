@@ -19,12 +19,22 @@ use super::missing;
 use super::{TlsMinVersion, profile_min_version, tls13_cipher_ids};
 
 pub(super) fn ciphers(builder: &mut SslContextBuilder, tls: &TlsProfile) -> Result<(), TlsError> {
-    let list = tls.ciphers.join(":");
-    builder
-        .set_cipher_list(&list)
-        .map_err(TlsError::from_stack)?;
-
     let tls13 = tls13_cipher_ids(&tls.ciphers)?;
+    let list = tls
+        .ciphers
+        .iter()
+        .filter(|name| {
+            crate::iana::cipher_id(name).is_none_or(|id| !crate::iana::is_tls13_cipher(id))
+        })
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .join(":");
+    if !list.is_empty() {
+        builder
+            .set_cipher_list(&list)
+            .map_err(TlsError::from_stack)?;
+    }
+
     #[cfg(any(
         target_os = "linux",
         target_os = "windows",
@@ -169,6 +179,7 @@ pub(super) fn extensions(
     order(builder, tls)?;
 
     builder.set_grease_enabled(tls.grease);
+    builder.set_grease_signature_algorithms(tls.grease && tls.sigalg_grease);
 
     if !tls.session_tickets {
         builder.set_options(SslOptions::NO_TICKET);

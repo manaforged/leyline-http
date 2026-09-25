@@ -56,9 +56,8 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                     .await
             }
             DriverCommand::SendRequest { head, body, sink } => {
-                let deferrable = !matches!(body, DriverRequestBody::Streaming(_));
                 if let Err(e) = self.admit_new_stream() {
-                    if Self::deferrable_capacity_error(&e) && deferrable {
+                    if Self::deferrable_capacity_error(&e) {
                         self.pending
                             .push_back(DriverCommand::SendRequest { head, body, sink });
                         return Ok(());

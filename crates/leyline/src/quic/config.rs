@@ -4,6 +4,8 @@ use crate::h2::config::{PseudoOrder, parse_pseudo_order};
 use crate::profile::{BrowserProfile, H3Profile, TlsProfile};
 use crate::{Error, Kind};
 
+const SETTINGS_MAX_FIELD_SECTION_SIZE: u64 = 0x06;
+
 const DEFAULT_PSEUDO_ORDER: [PseudoOrder; 4] = [
     PseudoOrder::Method,
     PseudoOrder::Scheme,
@@ -29,6 +31,7 @@ pub struct H3Config {
     pub(crate) wire: H3Profile,
     pub(crate) tls: TlsProfile,
     pub(crate) pseudo_order: [PseudoOrder; 4],
+    pub(crate) max_header_list_bytes: u64,
 }
 
 impl H3Config {
@@ -57,6 +60,17 @@ impl H3Config {
             tls: h3.tls.clone().unwrap_or_else(|| profile.tls.clone()),
             wire: h3.clone(),
             pseudo_order,
+            max_header_list_bytes: advertised_field_section_size(h3)
+                .unwrap_or(crate::core::DEFAULT_MAX_HEADER_LIST_BYTES as u64),
         })
     }
+}
+
+fn advertised_field_section_size(h3: &H3Profile) -> Option<u64> {
+    h3.settings
+        .iter()
+        .flatten()
+        .find(|setting| setting.id == Some(SETTINGS_MAX_FIELD_SECTION_SIZE))
+        .and_then(|setting| setting.value)
+        .or(h3.max_field_section_size)
 }

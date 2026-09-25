@@ -282,7 +282,9 @@ Total: 267 public functions.
   session sends that request over HTTP/2.
 - Connection setup has no retry of its own. A failed connect returns the
   error to `RequestBuilder::send`, and `RetryTrigger::ConnectionError`
-  decides whether to retry it.
+  decides whether to retry it. When a pooled keep-alive connection fails
+  before the response, the pool sends an idempotent request with a buffered
+  or empty body once more on a new connection, outside `RetryPolicy`.
 - `Session::with_cookie_jar` derives a clone through the same path as
   `with_proxy`. It shares the pool and every other setting and uses the
   given jar.
@@ -361,6 +363,9 @@ Total: 267 public functions.
   decoded chunk. `body` is every decoded byte so far; `from` is where the
   newest chunk starts. It stops on `true`, at `limit` decoded bytes, or at
   end of stream.
+- A WebSocket `send`, `recv`, or `close` that fails on the transport, or on a
+  closed connection, gives `Kind::Io`. A protocol violation or a message over
+  `WebSocketConfig` limits gives `Kind::Body`.
 - `Response::audit` is `None` unless the session was built with
   `audit(true)`.
 - Public enums and public structs are `#[non_exhaustive]`, including

@@ -1,8 +1,8 @@
 use http::Uri;
 use url::Url;
 
+use crate::FetchSite;
 use crate::core::transport::Prepared;
-use std::borrow::Cow;
 use std::sync::Arc;
 
 use crate::profile::Preset;
@@ -108,6 +108,17 @@ impl Session {
             }
         };
         let original_origin = url_origin(&current_url);
+        let caller_referrer = extra_headers
+            .as_ref()
+            .and_then(|h| h.get("referer"))
+            .and_then(|v| v.to_str().ok())
+            .filter(|r| !r.is_empty())
+            .map(str::to_owned);
+        let referrer = caller_referrer
+            .clone()
+            .unwrap_or_else(|| format!("{original_origin}/"));
+        let initiator = Url::parse(&referrer).ok();
+        let mut tainted = false;
         let mut current_method = method.to_string();
         let mut current_body = body;
         let mut redirect_chain = Vec::new();
@@ -115,18 +126,22 @@ impl Session {
 
         let redirect_cap = redirect_policy.max_redirects_hint();
         for _ in 0..=redirect_cap {
-            let origin = if redirect_chain.is_empty() {
-                Cow::Borrowed(original_origin.as_str())
+            let origin = url_origin(&current_url);
+            let referer = referer_for(Some(&referrer), &origin);
+            let fetch_site = fetch_site_for(initiator.as_ref(), &redirect_chain, &current_url);
+            let strip_sensitive = !redirect_chain.is_empty() && origin != original_origin;
+            let request_origin = if tainted {
+                "null"
             } else {
-                Cow::Owned(url_origin(&current_url))
+                original_origin.as_str()
             };
-            let referer = referer_for(redirect_chain.last().map(|s: &String| s.as_str()), &origin);
-
-            let strip_sensitive = !redirect_chain.is_empty() && origin.as_ref() != original_origin;
             let headers = self.attempt_headers(
                 preset,
-                &origin,
-                &referer,
+                RequestContext {
+                    origin: request_origin,
+                    referer: &referer,
+                    fetch_site,
+                },
                 &current_url,
                 &current_method,
                 &redirect_chain,
@@ -200,11 +215,23 @@ impl Session {
                 } else {
                     drop(resp_body_shape);
                     redirect_chain.push(redact_userinfo(current_url.as_str()));
+                    let from_origin = url_origin(&current_url);
                     current_url = Arc::new(
                         current_url
                             .join(&location)
                             .map_err(crate::core::Error::from_url_parse)?,
                     );
+                    let to_origin = url_origin(&current_url);
+                    tainted |= from_origin != to_origin && original_origin != to_origin;
+                    if let (Some(caller), Some(extra)) =
+                        (caller_referrer.as_deref(), extra_headers.as_mut())
+                    {
+                        extra.remove_all("referer");
+                        let hop_referer = referer_for(Some(caller), &to_origin);
+                        if !hop_referer.is_empty() {
+                            extra.set("referer", hop_referer)?;
+                        }
+                    }
                     if !matches!(current_url.scheme(), "http" | "https") {
                         return Err(Error::new(Kind::Redirect).with_message(format!(
                             "refusing to follow redirect to non-http(s) scheme `{}`",
@@ -226,8 +253,8 @@ impl Session {
                     } else {
                         return Err(Error::new(Kind::Redirect).with_message(format!(
                             "cannot follow {code} redirect: streaming request bodies are \
-                             not replayable. Either buffer the body before sending or set \
-                             max_redirects(0)."
+                             not replayable. Buffer the body before sending, or set \
+                             RedirectPolicy::none()."
                         )));
                     }
                     continue;
@@ -271,6 +298,20 @@ fn rewrites_to_get(code: u16, method: &str) -> bool {
         303 => !method.eq_ignore_ascii_case("HEAD"),
         _ => false,
     }
+}
+
+pub(super) struct RequestContext<'a> {
+    pub(super) origin: &'a str,
+    pub(super) referer: &'a str,
+    pub(super) fetch_site: FetchSite,
+}
+
+fn fetch_site_for(initiator: Option<&Url>, chain: &[String], current: &Url) -> FetchSite {
+    let Some(initiator) = initiator else {
+        return FetchSite::CrossSite;
+    };
+    let hops: Vec<Url> = chain.iter().filter_map(|u| Url::parse(u).ok()).collect();
+    FetchSite::across(initiator, hops.iter().chain(std::iter::once(current)))
 }
 
 fn url_origin(url: &Url) -> String {

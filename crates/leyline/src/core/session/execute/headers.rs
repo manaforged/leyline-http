@@ -3,6 +3,7 @@ use std::borrow::Cow;
 use url::Url;
 
 use super::super::header_merge::apply_extra_headers;
+use super::RequestContext;
 use crate::core::Session;
 use crate::core::body::{Body, BodyKind};
 use crate::core::headers::{HeaderList, reorder};
@@ -14,8 +15,7 @@ impl Session {
     pub(super) fn attempt_headers(
         &self,
         preset: Option<Preset>,
-        origin: &str,
-        referer: &str,
+        request: RequestContext<'_>,
         current_url: &Url,
         current_method: &str,
         redirect_chain: &[String],
@@ -24,28 +24,28 @@ impl Session {
         strip_sensitive: bool,
         header_order: Option<&[String]>,
     ) -> Vec<HeaderPair> {
+        let referer = request.referer;
         let caller_referer = extra_headers
             .and_then(|h| h.get("referer"))
             .and_then(|v| v.to_str().ok())
             .filter(|r| !r.is_empty());
-        let fetch_site = caller_referer
-            .map_or(crate::FetchSite::SameOrigin, |r| {
-                url::Url::parse(r).map_or(crate::FetchSite::CrossSite, |r| {
-                    crate::FetchSite::of(&r, current_url)
-                })
-            })
-            .as_str();
         let ctx = crate::profile::preset::HeaderContext {
             user_agent: &self.inner.user_agent,
             sec_ch_ua: &self.inner.sec_ch_ua,
             sec_ch_ua_mobile: self.inner.platform.mobile_flag(),
             sec_ch_ua_platform: self.inner.platform.sec_ch_platform(),
             accept_language: &self.inner.accept_language,
-            origin,
+            origin: request.origin,
             referer,
-            fetch_site,
+            fetch_site: request.fetch_site.as_str(),
         };
         let mut headers = self.inner.header_style.build_headers(preset, &ctx);
+        if matches!(current_body.0, BodyKind::Empty) {
+            headers.retain(|(k, _)| !is_request_body_header(k));
+        }
+        if !sends_origin(current_method, &headers) {
+            headers.retain(|(k, _)| !k.eq_ignore_ascii_case("origin"));
+        }
         if referer.is_empty() && caller_referer.is_none() {
             headers.retain(|(k, _)| !k.eq_ignore_ascii_case("referer"));
         }
@@ -136,6 +136,42 @@ impl Session {
             .or_else(|| self.inner.header_style.order())
             .map(Cow::Borrowed)
     }
+}
+
+const REQUEST_BODY_HEADERS: [&str; 4] = [
+    "content-encoding",
+    "content-language",
+    "content-location",
+    "content-type",
+];
+
+const CORS_MODES: [&str; 2] = ["cors", "websocket"];
+
+fn is_request_body_header(name: &str) -> bool {
+    REQUEST_BODY_HEADERS
+        .iter()
+        .any(|h| name.eq_ignore_ascii_case(h))
+}
+
+fn header_value<'a>(headers: &'a [HeaderPair], name: &str) -> Option<&'a str> {
+    headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case(name))
+        .map(|(_, v)| v.as_ref())
+}
+
+fn sends_origin(method: &str, headers: &[HeaderPair]) -> bool {
+    if !["GET", "HEAD"]
+        .iter()
+        .any(|m| method.eq_ignore_ascii_case(m))
+    {
+        return true;
+    }
+    let cors = header_value(headers, "sec-fetch-mode")
+        .is_some_and(|mode| CORS_MODES.iter().any(|m| mode.eq_ignore_ascii_case(m)));
+    let cross_origin = header_value(headers, "sec-fetch-site")
+        .is_some_and(|site| !site.eq_ignore_ascii_case(crate::FetchSite::SameOrigin.as_str()));
+    cors && cross_origin
 }
 
 fn is_sensitive(name: &str) -> bool {

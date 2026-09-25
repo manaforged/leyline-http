@@ -40,22 +40,13 @@ fn whitespace_before_colon_drops_the_line() {
                     Transfer-Encoding : chunked\r\n\
                     X-Ok: 1\r\n\
                     \r\n";
-    let (_, headers, _) = parse_h1_head(head).unwrap();
-    assert!(
-        !headers
-            .iter()
-            .any(|(k, _)| k.eq_ignore_ascii_case("transfer-encoding"))
-    );
-    assert!(!headers.iter().any(|(k, _)| k.contains(' ')));
-    assert!(headers.iter().any(|(k, _)| k == "X-Ok"));
+    assert!(parse_h1_head(head).is_err());
 }
 
 #[test]
 fn empty_header_name_dropped() {
     let head = "HTTP/1.1 200 OK\r\n: value\r\nX-Real: ok\r\n\r\n";
-    let (_, headers, _) = parse_h1_head(head).unwrap();
-    assert_eq!(headers.len(), 1, "{headers:?}");
-    assert_eq!(headers[0].0, "X-Real");
+    assert!(parse_h1_head(head).is_err());
 }
 
 async fn tcp_pair() -> (TcpStream, TcpStream) {

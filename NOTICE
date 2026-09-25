@@ -38,9 +38,24 @@ Modifications from upstream:
   PRIORITY_UPDATE frame with a caller-supplied field value.
 - The QPACK decoder keeps a dynamic table (RFC 9204): encoder stream
   instructions, Required Insert Count and Base, post-base references, blocked
-  streams up to the advertised limit, and decoder stream instructions.
-- RESET_STREAM_AT frames are read as RESET_STREAM; ACK_FREQUENCY and
-  IMMEDIATE_ACK frames are accepted and ignored.
+  streams up to the advertised limit, and decoder stream instructions. Table
+  entries are shared, so Duplicate and indexed references do not copy them.
+  An integer overflow on the encoder stream is a QPACK_ENCODER_STREAM_ERROR.
+  A decoder stream backlog above 64 KiB closes the connection with
+  H3_EXCESSIVE_LOAD.
+- `h3::Config::set_field_section_limit` sets a local limit on decoded header
+  sections that applies even when SETTINGS omits
+  SETTINGS_MAX_FIELD_SECTION_SIZE.
+- A RESET_STREAM on a QPACK-blocked stream sends Stream Cancellation and
+  returns `Event::Reset`; `h3::Connection::cancel_stream` frees the blocked
+  slot of a dropped request.
+- RESET_STREAM_AT frames are read as RESET_STREAM after a check that the
+  Reliable Size does not exceed the Final Size; ACK_FREQUENCY and
+  IMMEDIATE_ACK frames are accepted and ignored. Each is accepted only in
+  1-RTT packets and only when the local transport parameters advertise it.
+- `src/h3/qpack/table.rs` is new in this fork (Copyright Manaforge
+  Technologies, LLC, BSD-2-Clause).
+- Upstream test certificates and keys are not part of the published package.
 
 ================================================================================
 BoringSSL bindings (vendored under `crates/leyline-bssl*`)

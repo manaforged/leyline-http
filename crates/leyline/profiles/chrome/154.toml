@@ -55,11 +55,13 @@ signed_cert_timestamps = true
 cert_compression = ["brotli"]
 permute_extensions = true
 ech_grease = true
+sigalg_grease = true
 pre_shared_key = true
 request_trust_anchors = true
 
 [tls.fingerprint]
 ja4 = "t13d1517h2_8daaf6152771_cb7bf5808d99"
+resumed_ja4 = "t13d1518h2_8daaf6152771_e2d80978ab2e"
 
 [h2]
 header_table_size = 65536
@@ -131,18 +133,6 @@ ciphers = [
     "TLS_AES_128_GCM_SHA256",
     "TLS_AES_256_GCM_SHA384",
     "TLS_CHACHA20_POLY1305_SHA256",
-    "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
-    "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
-    "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
-    "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
-    "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256",
-    "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
-    "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA",
-    "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA",
-    "TLS_RSA_WITH_AES_128_GCM_SHA256",
-    "TLS_RSA_WITH_AES_256_GCM_SHA384",
-    "TLS_RSA_WITH_AES_128_CBC_SHA",
-    "TLS_RSA_WITH_AES_256_CBC_SHA",
 ]
 curves = [
     "X25519_MLKEM768",

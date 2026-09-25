@@ -143,8 +143,29 @@ impl Form {
     }
 
     pub(crate) fn into_stream_body(self) -> Body {
+        if let Some(bytes) = self.buffered() {
+            return Body::bytes(bytes);
+        }
         let length_hint = self.len_hint();
         Body::stream(FormStream::new(self), length_hint)
+    }
+
+    fn buffered(&self) -> Option<Bytes> {
+        let mut out = Vec::with_capacity(usize::try_from(self.len_hint()?).ok()?);
+        for part in &self.parts {
+            let body: &[u8] = match &part.body.0 {
+                BodyKind::Empty => &[],
+                BodyKind::Bytes(b) => b,
+                BodyKind::Stream { .. } => return None,
+            };
+            out.extend_from_slice(&render_part_headers(&self.boundary, part).ok()?);
+            out.extend_from_slice(body);
+            out.extend_from_slice(b"\r\n");
+        }
+        out.extend_from_slice(b"--");
+        out.extend_from_slice(self.boundary.as_bytes());
+        out.extend_from_slice(b"--\r\n");
+        Some(Bytes::from(out))
     }
 
     pub(crate) fn content_type(&self) -> String {

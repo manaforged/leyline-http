@@ -31,6 +31,18 @@ impl FetchSite {
         }
     }
 
+    pub(crate) fn across<'a>(context: &Url, chain: impl IntoIterator<Item = &'a Url>) -> Self {
+        chain
+            .into_iter()
+            .map(|url| Self::of(context, url))
+            .max_by_key(|site| match site {
+                Self::SameOrigin => 0,
+                Self::SameSite => 1,
+                Self::CrossSite => 2,
+            })
+            .unwrap_or(Self::SameOrigin)
+    }
+
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {

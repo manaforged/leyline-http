@@ -22,9 +22,22 @@ import `leyline`. It pulls `leyline-quiche` in when the `http3` feature is on.
   `h3::Connection::send_priority_update_field_value` sends a PRIORITY_UPDATE
   frame with a caller-supplied field value.
 - The QPACK decoder keeps a dynamic table (RFC 9204), with blocked streams and
-  decoder stream instructions.
-- RESET_STREAM_AT is read as RESET_STREAM; ACK_FREQUENCY and IMMEDIATE_ACK are
-  accepted and ignored.
+  decoder stream instructions. Table entries are shared, so Duplicate and
+  indexed references do not copy them. An integer that overflows on the
+  encoder stream is a QPACK_ENCODER_STREAM_ERROR. The connection closes with
+  H3_EXCESSIVE_LOAD when more than 64 KiB of decoder stream instructions wait
+  for flow-control credit.
+- `h3::Config::set_field_section_limit` sets a local limit on decoded header
+  sections and HEADERS frames. It applies even when SETTINGS does not
+  advertise SETTINGS_MAX_FIELD_SECTION_SIZE.
+- A RESET_STREAM on a stream that waits for QPACK inserts cancels the stream:
+  the decoder sends Stream Cancellation and `poll` returns `Event::Reset`.
+  `h3::Connection::cancel_stream` frees the blocked slot of a stream that the
+  application drops.
+- RESET_STREAM_AT is read as RESET_STREAM, and a Reliable Size larger than the
+  Final Size is a FRAME_ENCODING_ERROR. ACK_FREQUENCY and IMMEDIATE_ACK are
+  accepted and ignored. Each frame type is accepted only in 1-RTT packets, and
+  only when the local transport parameter plan advertises its extension.
 
 ## License
 

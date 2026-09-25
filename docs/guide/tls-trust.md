@@ -43,7 +43,7 @@ With both sources off, the session trusts only the roots you add.
 bytes of one certificate. Both add to the default roots; they do not
 replace them.
 
-A file or certificate that cannot be parsed returns a `Kind::Tls` error.
+A file or certificate that cannot be parsed returns a `Kind::Config` error.
 
 ## Pin a certificate
 

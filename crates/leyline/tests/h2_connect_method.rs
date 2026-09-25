@@ -40,8 +40,11 @@ fn extended_connect_emits_protocol() {
     };
     let (list, len) = p.build_pseudo_list(&CHROME_ORDER).unwrap();
     let list = &list[..len];
-    assert_eq!(names(list), vec![":method", ":authority", ":protocol"]);
-    assert_eq!(list[2].1, "websocket");
+    assert_eq!(
+        names(list),
+        vec![":method", ":authority", ":scheme", ":path", ":protocol"]
+    );
+    assert_eq!(list[4].1, "websocket");
 }
 
 #[test]

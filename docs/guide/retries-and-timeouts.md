@@ -58,7 +58,10 @@ trigger set.
 
 `RetryPolicy` is the only retry owner. Connection setup has no hidden retry: a
 failed connect returns its error, and `RetryTrigger::ConnectionError` decides
-whether the request runs again.
+whether the request runs again. One case sits outside the policy: when a
+pooled keep-alive connection fails before the response, the pool sends an
+idempotent request with a buffered or empty body once more on a new
+connection. The new connection's result then goes to `RetryPolicy`.
 
 Backoff for attempt `n` is `initial_backoff * backoff_factor.powi(n)`, capped
 at `max_backoff`. With `jitter` set, the result is multiplied by a uniform
@@ -74,7 +77,9 @@ computed backoff.
 By default Leyline waits as long as `Retry-After` asks. To cap the wait, call
 `max_retry_after`. If `Retry-After` then asks for longer than the cap,
 Leyline stops retrying and returns the response, as it does when retries run
-out. The caller can then fall back.
+out. The caller can then fall back. Leyline also returns the response, or the
+last error, when the wait is longer than the time left before the `total`
+timeout.
 
 ## The idempotency rule
 

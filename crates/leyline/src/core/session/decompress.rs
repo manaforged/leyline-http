@@ -30,6 +30,7 @@ type HeaderPairs = Vec<(http::HeaderName, http::HeaderValue)>;
 
 pub(crate) struct Decoder {
     stages: Vec<Stage>,
+    fed: bool,
     produced: usize,
     limit: usize,
 }
@@ -47,7 +48,7 @@ enum Stage {
     #[cfg(feature = "compression-brotli")]
     Brotli(Box<brotli::DecompressorWriter<Sink>>),
     #[cfg(feature = "compression-zstd")]
-    Zstd(Box<zstd::stream::write::Decoder<'static, Sink>>),
+    Zstd(Box<zstd::stream::zio::Writer<Sink, zstd::stream::raw::Decoder<'static>>>),
 }
 
 #[cfg(not(all(
@@ -85,12 +86,35 @@ fn size_error(limit: usize) -> Error {
     feature = "compression-deflate",
     feature = "compression-zstd"
 ))]
+#[cfg(feature = "compression-deflate")]
+fn require_end(writer: &mut dyn Write, name: &str) -> Result<()> {
+    match writer.write(&[0]) {
+        Ok(0) => Ok(()),
+        _ => Err(Error::new(Kind::Decode).with_message(format!("{name}: truncated stream"))),
+    }
+}
+
+#[cfg(any(
+    feature = "compression-gzip",
+    feature = "compression-brotli",
+    feature = "compression-deflate",
+    feature = "compression-zstd"
+))]
 fn pump(writer: &mut dyn Write, input: &[u8], name: &str) -> Result<()> {
     writer.write_all(input).map_err(|e| decode_error(name, e))?;
     writer.flush().map_err(|e| decode_error(name, e))
 }
 
 impl Stage {
+    #[cfg_attr(
+        not(any(
+            feature = "compression-gzip",
+            feature = "compression-brotli",
+            feature = "compression-deflate",
+            feature = "compression-zstd"
+        )),
+        expect(unused_variables)
+    )]
     fn new(encoding: &str, limit: usize) -> Result<Self> {
         match encoding {
             "gzip" | "x-gzip" => {
@@ -131,8 +155,13 @@ impl Stage {
             "zstd" => {
                 #[cfg(feature = "compression-zstd")]
                 {
-                    zstd::stream::write::Decoder::new(Sink::new(limit))
-                        .map(|d| Self::Zstd(Box::new(d)))
+                    zstd::stream::raw::Decoder::new()
+                        .map(|d| {
+                            Self::Zstd(Box::new(zstd::stream::zio::Writer::new(
+                                Sink::new(limit),
+                                d,
+                            )))
+                        })
                         .map_err(|e| Error::new(Kind::Decode).with_message(format!("zstd: {e}")))
                 }
                 #[cfg(not(feature = "compression-zstd"))]
@@ -185,7 +214,7 @@ impl Stage {
             #[cfg(feature = "compression-zstd")]
             Self::Zstd(d) => {
                 pump(&mut **d, input, "zstd")?;
-                Ok(std::mem::take(&mut d.get_mut().buf))
+                Ok(std::mem::take(&mut d.writer_mut().buf))
             }
         }
     }
@@ -203,22 +232,24 @@ impl Stage {
             #[cfg(feature = "compression-deflate")]
             Self::Zlib(d) => {
                 d.try_finish().map_err(|e| decode_error("deflate", e))?;
+                require_end(&mut **d, "deflate")?;
                 Ok(std::mem::take(&mut d.get_mut().buf))
             }
             #[cfg(feature = "compression-deflate")]
             Self::RawDeflate(d) => {
                 d.try_finish().map_err(|e| decode_error("deflate", e))?;
+                require_end(&mut **d, "deflate")?;
                 Ok(std::mem::take(&mut d.get_mut().buf))
             }
             #[cfg(feature = "compression-brotli")]
             Self::Brotli(d) => {
-                d.flush().map_err(|e| decode_error("brotli", e))?;
+                d.close().map_err(|e| decode_error("brotli", e))?;
                 Ok(std::mem::take(&mut d.get_mut().buf))
             }
             #[cfg(feature = "compression-zstd")]
             Self::Zstd(d) => {
-                d.flush().map_err(|e| decode_error("zstd", e))?;
-                Ok(std::mem::take(&mut d.get_mut().buf))
+                d.finish().map_err(|e| decode_error("zstd", e))?;
+                Ok(std::mem::take(&mut d.writer_mut().buf))
             }
         }
     }
@@ -247,12 +278,17 @@ impl Decoder {
             .collect::<Result<Vec<_>>>()?;
         Ok(Some(Self {
             stages,
+            fed: false,
             produced: 0,
             limit: config.max_body_size,
         }))
     }
 
     pub(crate) fn feed(&mut self, chunk: &[u8], out: &mut Vec<u8>) -> Result<()> {
+        if chunk.is_empty() {
+            return Ok(());
+        }
+        self.fed = true;
         let mut data = chunk.to_vec();
         for stage in &mut self.stages {
             data = stage.write(&data)?;
@@ -261,6 +297,9 @@ impl Decoder {
     }
 
     pub(crate) fn finish(&mut self, out: &mut Vec<u8>) -> Result<()> {
+        if !self.fed {
+            return Ok(());
+        }
         for index in 0..self.stages.len() {
             let mut data = self.stages[index].finish()?;
             for stage in &mut self.stages[index + 1..] {

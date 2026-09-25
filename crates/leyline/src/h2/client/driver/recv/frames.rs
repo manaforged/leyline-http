@@ -98,26 +98,17 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             .copied()
             .filter(|sid| *sid > g.last_stream_id)
             .collect();
-        if matches!(g.error_code, ErrorCode::NoError) {
-            for sid in to_fail {
-                self.fail_stream(
-                    sid,
-                    H2Error::Stream {
-                        stream_id: sid,
-                        code: ErrorCode::RefusedStream,
-                    },
-                );
-            }
-            return Ok(());
-        }
         for sid in to_fail {
             self.fail_stream(
                 sid,
-                H2Error::Connection {
-                    code: g.error_code,
-                    reason: format!("peer GOAWAY: {:?}", g.error_code),
+                H2Error::Stream {
+                    stream_id: sid,
+                    code: ErrorCode::RefusedStream,
                 },
             );
+        }
+        if matches!(g.error_code, ErrorCode::NoError) {
+            return Ok(());
         }
         Err(H2Error::Connection {
             code: g.error_code,

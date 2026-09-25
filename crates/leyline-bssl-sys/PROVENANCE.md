@@ -22,7 +22,8 @@ Changes from upstream:
   `underscore-wildcards`, `relax-cert-validation`, `bad-cert-verification`)
   and the `BORING_BSSL_INSTALL_DIR` export.
 - Added wrappers: `SslContextBuilder::{set_sigalgs, set_record_size_limit,
-  set_delegated_credentials, set_extension_order, set_tls13_cipher_order}`,
+  set_delegated_credentials, set_extension_order, set_tls13_cipher_order,
+  set_grease_signature_algorithms}`,
   `SslRef::{set_requested_trust_anchors, add_application_settings,
   set_alps_use_new_codepoint, set_tls12_extensions}`,
   `SslConnector::bare_builder`, and `CertificateCompressionAlgorithm::ZSTD`.
@@ -66,6 +67,10 @@ Changes from upstream:
    - `SSL_set_tls12_extensions` keeps `extended_master_secret` and
      `renegotiation_info` in a ClientHello whose minimum version is TLS 1.3.
      Firefox sends both in its QUIC ClientHello.
+4. `0004-leyline-grease-signature-algorithms.patch`
+   - `SSL_CTX_set_grease_signature_algorithms` puts one GREASE value
+     (RFC 8701) first in the ClientHello `signature_algorithms` list, with
+     its own GREASE seed index. Chrome 152 and later send it.
 
 ## Symbol prefix
 
