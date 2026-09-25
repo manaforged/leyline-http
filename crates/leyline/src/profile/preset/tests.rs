@@ -17,6 +17,7 @@ fn ctx() -> HeaderContext<'static> {
         accept_language: "en-US,en;q=0.9",
         origin: "https://x.com",
         referer: "https://x.com/",
+        fetch_site: "same-origin",
     }
 }
 

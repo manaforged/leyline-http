@@ -30,7 +30,7 @@ script = [
     ["sec-ch-ua-platform", '"{sec_ch_ua_platform}"'],
     ["user-agent", "{user_agent}"],
     ["accept", "*/*"],
-    ["sec-fetch-site", "same-origin"],
+    ["sec-fetch-site", "{fetch_site}"],
     ["sec-fetch-mode", "no-cors"],
     ["sec-fetch-dest", "script"],
     ["referer", "{referer}"],
@@ -151,7 +151,7 @@ navigate = [
 script = [
     ["user-agent", "{user_agent}"],
     ["accept", "*/*"],
-    ["sec-fetch-site", "same-origin"],
+    ["sec-fetch-site", "{fetch_site}"],
     ["sec-fetch-mode", "no-cors"],
     ["sec-fetch-dest", "script"],
     ["referer", "{referer}"],
@@ -254,7 +254,7 @@ navigate = [
 script = [
     ["user-agent", "{user_agent}"],
     ["accept", "*/*"],
-    ["sec-fetch-site", "same-origin"],
+    ["sec-fetch-site", "{fetch_site}"],
     ["sec-fetch-mode", "no-cors"],
     ["sec-fetch-dest", "script"],
     ["referer", "{referer}"],

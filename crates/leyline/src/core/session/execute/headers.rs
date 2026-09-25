@@ -24,6 +24,13 @@ impl Session {
         strip_sensitive: bool,
         header_order: Option<&[String]>,
     ) -> Vec<HeaderPair> {
+        let caller_referer = extra_headers
+            .and_then(|h| h.get("referer"))
+            .and_then(|v| v.to_str().ok())
+            .filter(|r| !r.is_empty());
+        let fetch_site = caller_referer
+            .map(|r| crate::fetch_site(r, current_url.as_str()))
+            .unwrap_or("same-origin");
         let ctx = crate::profile::preset::HeaderContext {
             user_agent: &self.inner.user_agent,
             sec_ch_ua: &self.inner.sec_ch_ua,
@@ -32,9 +39,10 @@ impl Session {
             accept_language: &self.inner.accept_language,
             origin,
             referer,
+            fetch_site,
         };
         let mut headers = self.inner.header_style.build_headers(preset, &ctx);
-        if referer.is_empty() {
+        if referer.is_empty() && caller_referer.is_none() {
             headers.retain(|(k, _)| !k.eq_ignore_ascii_case("referer"));
         }
         let caller_has = |name: &str| {

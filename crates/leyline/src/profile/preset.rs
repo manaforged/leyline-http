@@ -17,6 +17,7 @@ pub struct HeaderContext<'a> {
     pub accept_language: &'a str,
     pub origin: &'a str,
     pub referer: &'a str,
+    pub fetch_site: &'a str,
 }
 
 pub type HeaderPair = (Cow<'static, str>, Cow<'static, str>);
@@ -75,7 +76,7 @@ fn resolve_shape(rows: &HashMap<HeaderStyle, ShapeRow>, style: HeaderStyle) -> H
 }
 
 impl HeaderContext<'_> {
-    fn placeholders(&self) -> [(&'static str, &str); 7] {
+    fn placeholders(&self) -> [(&'static str, &str); 8] {
         [
             ("{user_agent}", self.user_agent),
             ("{sec_ch_ua}", self.sec_ch_ua),
@@ -84,6 +85,7 @@ impl HeaderContext<'_> {
             ("{accept_language}", self.accept_language),
             ("{origin}", self.origin),
             ("{referer}", self.referer),
+            ("{fetch_site}", self.fetch_site),
         ]
     }
 

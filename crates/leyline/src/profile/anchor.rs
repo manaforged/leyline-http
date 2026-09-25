@@ -7,6 +7,7 @@ pub enum HeaderAnchor {
     AfterUserAgent,
     AfterAccept,
     AfterContentType,
+    AfterFetchDest,
     BeforeAcceptEncoding,
 }
 
@@ -19,6 +20,7 @@ impl HeaderAnchor {
             Self::AfterUserAgent => "user-agent",
             Self::AfterAccept => "accept",
             Self::AfterContentType => "content-type",
+            Self::AfterFetchDest => "sec-fetch-dest",
             Self::BeforeAcceptEncoding => "accept-encoding",
         }
     }
