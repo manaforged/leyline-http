@@ -1,4 +1,9 @@
+use crate::Error;
+use crate::Result;
 use crate::packet;
+use crate::recovery::INITIAL_TIME_THRESHOLD_OVERHEAD;
+use crate::recovery::OnLossDetectionTimeoutOutcome;
+use crate::recovery::TIME_THRESHOLD_OVERHEAD_MULTIPLIER;
 
 use std::collections::VecDeque;
 use std::time::Duration;
@@ -23,23 +28,25 @@ use crate::recovery::LossDetectionTimer;
 use crate::recovery::MAX_OUTSTANDING_NON_ACK_ELICITING;
 use crate::recovery::MAX_PACKET_THRESHOLD;
 use crate::recovery::MAX_PTO_PROBES_COUNT;
+use crate::recovery::OnAckReceivedOutcome;
+use crate::recovery::PACKET_REORDER_TIME_THRESHOLD;
 use crate::recovery::RangeSet;
 use crate::recovery::RecoveryConfig;
 use crate::recovery::RecoveryOps;
+use crate::recovery::RecoveryStats;
 use crate::recovery::ReleaseDecision;
 use crate::recovery::Sent;
+use crate::recovery::StartupExit;
+use crate::recovery::bytes_in_flight::BytesInFlight;
+use crate::recovery::gcongestion::Bandwidth;
 use crate::recovery::rtt::RttStats;
 
 use super::Acked;
-use super::Congestion;
-use super::CongestionControl;
 use super::Lost;
-use super::bandwidth::Bandwidth;
+use super::bbr2::BBRv2;
 use super::pacer::Pacer;
 
 // Congestion Control
-const INITIAL_WINDOW_PACKETS: usize = 10;
-
 const MAX_WINDOW_PACKETS: usize = 20_000;
 
 #[derive(Debug)]
@@ -55,7 +62,7 @@ enum SentStatus {
         ack_eliciting: bool,
         in_flight: bool,
         has_data: bool,
-        pmtud: bool,
+        is_pmtud_probe: bool,
         sent_bytes: usize,
         frames: SmallVec<[frame::Frame; 1]>,
     },
@@ -97,8 +104,17 @@ struct RecoveryEpoch {
     loss_probes: usize,
     pkts_in_flight: usize,
 
-    acked_frames: Vec<frame::Frame>,
-    lost_frames: Vec<frame::Frame>,
+    acked_frames: VecDeque<frame::Frame>,
+
+    // Frames scheduled for retransmission due to PTO are tracked
+    // separately so we can check that frames were drained before
+    // generating more PTO probes.
+    lost_frames_ack: VecDeque<frame::Frame>,
+    lost_frames_pto: VecDeque<frame::Frame>,
+
+    /// The largest packet number sent in the packet number space so far.
+    #[allow(dead_code)]
+    test_largest_sent_pkt_num_on_path: Option<u64>,
 }
 
 struct AckedDetectionResult {
@@ -119,7 +135,7 @@ struct LossDetectionResult {
 impl RecoveryEpoch {
     /// Discard the Epoch state and return the total size of unacked packets
     /// that were discarded
-    fn discard(&mut self, cc: &mut impl CongestionControl) -> usize {
+    fn discard(&mut self, cc: &mut Pacer) -> usize {
         let unacked_bytes = self
             .sent_packets
             .drain(..)
@@ -144,6 +160,8 @@ impl RecoveryEpoch {
             .sum();
 
         std::mem::take(&mut self.sent_packets);
+        self.clear_lost_frames();
+        std::mem::take(&mut self.acked_frames);
         self.time_of_last_ack_eliciting_packet = None;
         self.loss_time = None;
         self.loss_probes = 0;
@@ -152,19 +170,14 @@ impl RecoveryEpoch {
         unacked_bytes
     }
 
+    // `peer_sent_ack_ranges` should not be used without validation.
     fn detect_and_remove_acked_packets(
         &mut self,
-        acked: &RangeSet,
+        peer_sent_ack_ranges: &RangeSet,
         newly_acked: &mut Vec<Acked>,
+        skip_pn: Option<u64>,
         trace_id: &str,
-    ) -> AckedDetectionResult {
-        // Update the largest acked packet
-        self.largest_acked_packet.replace(
-            self.largest_acked_packet
-                .unwrap_or(0)
-                .max(acked.last().unwrap()),
-        );
-
+    ) -> Result<AckedDetectionResult> {
         newly_acked.clear();
 
         let mut acked_bytes = 0;
@@ -172,27 +185,39 @@ impl RecoveryEpoch {
         let mut spurious_pkt_thresh = None;
         let mut has_ack_eliciting = false;
 
-        let largest_acked = self.largest_acked_packet.unwrap();
+        let largest_ack_received = peer_sent_ack_ranges.last().unwrap();
+        let largest_acked = self
+            .largest_acked_packet
+            .unwrap_or(0)
+            .max(largest_ack_received);
 
-        for ack in acked.iter() {
+        for peer_sent_range in peer_sent_ack_ranges.iter() {
+            if skip_pn.is_some_and(|skip_pn| peer_sent_range.contains(&skip_pn)) {
+                // https://www.rfc-editor.org/rfc/rfc9000#section-13.1
+                // An endpoint SHOULD treat receipt of an acknowledgment
+                // for a packet it did not send as
+                // a connection error of type PROTOCOL_VIOLATION
+                return Err(Error::OptimisticAckDetected);
+            }
+
             // Because packets always have incrementing numbers, they are always
             // in sorted order.
             let start = if self
                 .sent_packets
                 .front()
-                .filter(|e| e.pkt_num >= ack.start)
+                .filter(|e| e.pkt_num >= peer_sent_range.start)
                 .is_some()
             {
                 // Usually it will be the first packet.
                 0
             } else {
                 self.sent_packets
-                    .binary_search_by_key(&ack.start, |p| p.pkt_num)
+                    .binary_search_by_key(&peer_sent_range.start, |p| p.pkt_num)
                     .unwrap_or_else(|e| e)
             };
 
             for SentPacket { pkt_num, status } in self.sent_packets.range_mut(start..) {
-                if *pkt_num < ack.end {
+                if *pkt_num < peer_sent_range.end {
                     match status.ack() {
                         SentStatus::Sent {
                             time_sent,
@@ -215,7 +240,7 @@ impl RecoveryEpoch {
 
                             has_ack_eliciting |= ack_eliciting;
 
-                            trace!("{} packet newly acked {}", trace_id, pkt_num);
+                            trace!("{trace_id} packet newly acked {pkt_num}");
                         }
 
                         SentStatus::Acked => {}
@@ -233,18 +258,18 @@ impl RecoveryEpoch {
 
         self.drain_acked_and_lost_packets();
 
-        AckedDetectionResult {
+        Ok(AckedDetectionResult {
             acked_bytes,
             spurious_losses,
             spurious_pkt_thresh,
             has_ack_eliciting,
-        }
+        })
     }
 
     fn detect_and_remove_lost_packets(
         &mut self,
         loss_delay: Duration,
-        pkt_thresh: u64,
+        pkt_thresh: Option<u64>,
         now: Instant,
         newly_lost: &mut Vec<Lost>,
     ) -> LossDetectionResult {
@@ -263,21 +288,27 @@ impl RecoveryEpoch {
             }
 
             if let SentStatus::Sent { time_sent, .. } = status {
-                if *time_sent <= lost_send_time || largest_acked >= *pkt_num + pkt_thresh {
+                let loss_by_time = *time_sent <= lost_send_time;
+                let loss_by_pkt = match pkt_thresh {
+                    Some(pkt_thresh) => largest_acked >= *pkt_num + pkt_thresh,
+                    None => false,
+                };
+
+                if loss_by_time || loss_by_pkt {
                     if let SentStatus::Sent {
                         in_flight,
                         sent_bytes,
                         frames,
-                        pmtud,
+                        is_pmtud_probe,
                         ..
                     } = status.lose()
                     {
-                        self.lost_frames.extend(frames);
+                        self.lost_frames_ack.extend(frames);
 
                         if in_flight {
                             self.pkts_in_flight -= 1;
 
-                            if pmtud {
+                            if is_pmtud_probe {
                                 pmtud_lost_bytes += sent_bytes;
                                 pmtud_lost_packets.push(*pkt_num);
                                 // Do not track PMTUD probes losses
@@ -334,6 +365,96 @@ impl RecoveryEpoch {
 
         self.largest_acked_packet.unwrap_or(0) + 1
     }
+
+    /// Returns the next lost frame, trying ACK-based lost frames first,
+    /// then PTO-based lost frames.
+    fn next_lost_frame(&mut self) -> Option<frame::Frame> {
+        self.lost_frames_ack
+            .pop_front()
+            .or_else(|| self.lost_frames_pto.pop_front())
+    }
+
+    /// Returns true if there are any lost frames (ACK or PTO).
+    fn has_lost_frames(&self) -> bool {
+        !self.lost_frames_ack.is_empty() || !self.lost_frames_pto.is_empty()
+    }
+
+    /// Returns the total count of lost frames (ACK + PTO).
+    #[cfg(test)]
+    fn lost_frames_count(&self) -> usize {
+        self.lost_frames_ack.len() + self.lost_frames_pto.len()
+    }
+
+    /// Clears all lost frames (both ACK and PTO).
+    fn clear_lost_frames(&mut self) {
+        self.lost_frames_ack.clear();
+        self.lost_frames_pto.clear();
+    }
+}
+
+struct LossThreshold {
+    pkt_thresh: Option<u64>,
+    time_thresh: f64,
+
+    // # Experiment: enable_relaxed_loss_threshold
+    //
+    // If `Some` this will disable pkt_thresh on the first loss and then double
+    // time_thresh on subsequent loss.
+    //
+    // The actual threshold is calcualted as `1.0 +
+    // INITIAL_TIME_THRESHOLD_OVERHEAD` and equivalent to the initial value
+    // of INITIAL_TIME_THRESHOLD.
+    time_thresh_overhead: Option<f64>,
+}
+
+impl LossThreshold {
+    fn new(recovery_config: &RecoveryConfig) -> Self {
+        let time_thresh_overhead = if recovery_config.enable_relaxed_loss_threshold {
+            Some(INITIAL_TIME_THRESHOLD_OVERHEAD)
+        } else {
+            None
+        };
+        LossThreshold {
+            pkt_thresh: Some(INITIAL_PACKET_THRESHOLD),
+            time_thresh: INITIAL_TIME_THRESHOLD,
+            time_thresh_overhead,
+        }
+    }
+
+    fn pkt_thresh(&self) -> Option<u64> {
+        self.pkt_thresh
+    }
+
+    fn time_thresh(&self) -> f64 {
+        self.time_thresh
+    }
+
+    fn on_spurious_loss(&mut self, new_pkt_thresh: u64) {
+        match &mut self.time_thresh_overhead {
+            Some(time_thresh_overhead) => {
+                if self.pkt_thresh.is_some() {
+                    // Disable packet threshold on first spurious loss.
+                    self.pkt_thresh = None;
+                } else {
+                    // Double time threshold but cap it at `1.0`, which ends up
+                    // being 2x the RTT.
+                    *time_thresh_overhead *= TIME_THRESHOLD_OVERHEAD_MULTIPLIER;
+                    *time_thresh_overhead = time_thresh_overhead.min(1.0);
+
+                    self.time_thresh = 1.0 + *time_thresh_overhead;
+                }
+            }
+            None => {
+                let new_packet_threshold = self
+                    .pkt_thresh
+                    .expect("packet threshold should always be Some when `enable_relaxed_loss_threshold` is false")
+                    .max(new_pkt_thresh.min(MAX_PACKET_THRESHOLD));
+                self.pkt_thresh = Some(new_packet_threshold);
+
+                self.time_thresh = PACKET_REORDER_TIME_THRESHOLD;
+            }
+        }
+    }
 }
 
 pub struct GRecovery {
@@ -345,24 +466,28 @@ pub struct GRecovery {
 
     rtt_stats: RttStats,
 
+    recovery_stats: RecoveryStats,
+
     pub lost_count: usize,
 
     pub lost_spurious_count: usize,
 
-    pkt_thresh: u64,
+    loss_thresh: LossThreshold,
 
-    time_thresh: f64,
-
-    bytes_in_flight: usize,
+    bytes_in_flight: BytesInFlight,
 
     bytes_sent: usize,
 
     pub bytes_lost: u64,
 
     max_datagram_size: usize,
+    time_sent_set_to_now: bool,
 
     #[cfg(feature = "qlog")]
     qlog_metrics: QlogMetrics,
+
+    #[cfg(feature = "qlog")]
+    qlog_prev_cc_state: &'static str,
 
     /// How many non-ack-eliciting packets have been sent.
     outstanding_non_ack_eliciting: usize,
@@ -371,43 +496,58 @@ pub struct GRecovery {
     newly_acked: Vec<Acked>,
 
     /// A [`Vec`] that can be reused for calls of
-    /// [`detect_and_remove_lost_packets`] to avoid allocations
+    /// [`Self::detect_and_remove_lost_packets`] to avoid allocations
     lost_reuse: Vec<Lost>,
 
     pacer: Pacer,
 }
 
 impl GRecovery {
+    #[cfg(feature = "qlog")]
+    fn send_rate(&self) -> Bandwidth {
+        self.pacer.send_rate().unwrap_or(Bandwidth::zero())
+    }
+
+    #[cfg(feature = "qlog")]
+    fn ack_rate(&self) -> Bandwidth {
+        self.pacer.ack_rate().unwrap_or(Bandwidth::zero())
+    }
+
     pub fn new(recovery_config: &RecoveryConfig) -> Option<Self> {
         let cc = match recovery_config.cc_algorithm {
-            CongestionControlAlgorithm::Bbr2Gcongestion => Congestion::bbrv2(
-                INITIAL_WINDOW_PACKETS,
+            CongestionControlAlgorithm::Bbr2Gcongestion => BBRv2::new(
+                recovery_config.initial_congestion_window_packets,
                 MAX_WINDOW_PACKETS,
                 recovery_config.max_send_udp_payload_size,
+                recovery_config.initial_rtt,
+                recovery_config.custom_bbr_params.as_ref(),
             ),
             _ => return None,
         };
 
         Some(Self {
             epochs: Default::default(),
-            rtt_stats: RttStats::new(recovery_config.max_ack_delay),
+            rtt_stats: RttStats::new(recovery_config.initial_rtt, recovery_config.max_ack_delay),
+            recovery_stats: RecoveryStats::default(),
             loss_timer: Default::default(),
             pto_count: 0,
 
             lost_count: 0,
             lost_spurious_count: 0,
 
-            pkt_thresh: INITIAL_PACKET_THRESHOLD,
-            time_thresh: INITIAL_TIME_THRESHOLD,
-
-            bytes_in_flight: 0,
+            loss_thresh: LossThreshold::new(recovery_config),
+            bytes_in_flight: Default::default(),
             bytes_sent: 0,
             bytes_lost: 0,
 
             max_datagram_size: recovery_config.max_send_udp_payload_size,
+            time_sent_set_to_now: cc.time_sent_set_to_now(),
 
             #[cfg(feature = "qlog")]
             qlog_metrics: QlogMetrics::default(),
+
+            #[cfg(feature = "qlog")]
+            qlog_prev_cc_state: "",
 
             outstanding_non_ack_eliciting: 0,
 
@@ -429,22 +569,23 @@ impl GRecovery {
         epoch: packet::Epoch,
         now: Instant,
     ) -> (usize, usize) {
+        let loss_delay = self.rtt_stats.loss_delay(self.loss_thresh.time_thresh());
         let lost = &mut self.lost_reuse;
 
         let LossDetectionResult {
             lost_bytes,
             lost_packets,
-
             pmtud_lost_bytes,
             pmtud_lost_packets,
         } = self.epochs[epoch].detect_and_remove_lost_packets(
-            self.rtt_stats.loss_delay(self.time_thresh),
-            self.pkt_thresh,
+            loss_delay,
+            self.loss_thresh.pkt_thresh(),
             now,
             lost,
         );
 
-        self.bytes_in_flight -= lost_bytes + pmtud_lost_bytes;
+        self.bytes_in_flight
+            .saturating_subtract(lost_bytes + pmtud_lost_bytes, now);
 
         for pkt in pmtud_lost_packets {
             self.pacer.on_packet_neutered(pkt);
@@ -474,10 +615,10 @@ impl GRecovery {
         handshake_status: HandshakeStatus,
         now: Instant,
     ) -> (Option<Instant>, packet::Epoch) {
-        let mut duration = self.pto() * (1 << self.pto_count);
+        let mut duration = self.pto() * 2_u32.saturating_pow(self.pto_count);
 
         // Arm PTO from now when there are no inflight packets.
-        if self.bytes_in_flight == 0 {
+        if self.bytes_in_flight.is_zero() {
             if handshake_status.has_handshake_keys {
                 return (Some(now + duration), packet::Epoch::Handshake);
             } else {
@@ -501,7 +642,7 @@ impl GRecovery {
                 }
 
                 // Include max_ack_delay and backoff for Application Data.
-                duration += self.rtt_stats.max_ack_delay * 2_u32.pow(self.pto_count);
+                duration += self.rtt_stats.max_ack_delay * 2_u32.saturating_pow(self.pto_count);
             }
 
             let new_time = self.epochs[e]
@@ -524,7 +665,7 @@ impl GRecovery {
             return;
         }
 
-        if self.bytes_in_flight == 0 && handshake_status.peer_verified_address {
+        if self.bytes_in_flight.is_zero() && handshake_status.peer_verified_address {
             self.loss_timer.clear();
             return;
         }
@@ -532,6 +673,8 @@ impl GRecovery {
         // PTO timer.
         if let (Some(timeout), _) = self.pto_time_and_space(handshake_status, now) {
             self.loss_timer.update(timeout);
+        } else {
+            self.loss_timer.clear();
         }
     }
 }
@@ -550,12 +693,12 @@ impl RecoveryOps for GRecovery {
             || self.outstanding_non_ack_eliciting >= MAX_OUTSTANDING_NON_ACK_ELICITING
     }
 
-    fn get_acked_frames(&mut self, epoch: packet::Epoch) -> Vec<frame::Frame> {
-        std::mem::take(&mut self.epochs[epoch].acked_frames)
+    fn next_acked_frame(&mut self, epoch: packet::Epoch) -> Option<frame::Frame> {
+        self.epochs[epoch].acked_frames.pop_front()
     }
 
-    fn get_lost_frames(&mut self, epoch: packet::Epoch) -> Vec<frame::Frame> {
-        std::mem::take(&mut self.epochs[epoch].lost_frames)
+    fn next_lost_frame(&mut self, epoch: packet::Epoch) -> Option<frame::Frame> {
+        self.epochs[epoch].next_lost_frame()
     }
 
     fn get_largest_acked_on_epoch(&self, epoch: packet::Epoch) -> Option<u64> {
@@ -563,7 +706,7 @@ impl RecoveryOps for GRecovery {
     }
 
     fn has_lost_frames(&self, epoch: packet::Epoch) -> bool {
-        !self.epochs[epoch].lost_frames.is_empty()
+        self.epochs[epoch].has_lost_frames()
     }
 
     fn loss_probes(&self, epoch: packet::Epoch) -> usize {
@@ -573,6 +716,11 @@ impl RecoveryOps for GRecovery {
     #[cfg(test)]
     fn inc_loss_probes(&mut self, epoch: packet::Epoch) {
         self.epochs[epoch].loss_probes += 1;
+    }
+
+    #[cfg(test)]
+    fn lost_frames_count(&self, epoch: packet::Epoch) -> usize {
+        self.epochs[epoch].lost_frames_count()
     }
 
     fn ping_sent(&mut self, epoch: packet::Epoch) {
@@ -587,14 +735,19 @@ impl RecoveryOps for GRecovery {
         now: Instant,
         trace_id: &str,
     ) {
-        let time_sent = self.get_next_release_time().time(now).unwrap_or(now);
+        let time_sent = if self.time_sent_set_to_now {
+            now
+        } else {
+            self.get_next_release_time().time(now).unwrap_or(now)
+        };
 
         let epoch = &mut self.epochs[epoch];
 
         let ack_eliciting = pkt.ack_eliciting;
         let in_flight = pkt.in_flight;
-        let sent_bytes = pkt.size;
+        let is_pmtud_probe = pkt.is_pmtud_probe;
         let pkt_num = pkt.pkt_num;
+        let sent_bytes = pkt.size;
 
         if let Some(SentPacket { pkt_num, .. }) = epoch.sent_packets.back() {
             assert!(*pkt_num < pkt.pkt_num, "Packet numbers must increase");
@@ -604,11 +757,18 @@ impl RecoveryOps for GRecovery {
             time_sent,
             ack_eliciting,
             in_flight,
-            pmtud: pkt.pmtud,
+            is_pmtud_probe,
             has_data: pkt.has_data,
             sent_bytes,
             frames: pkt.frames,
         };
+
+        #[cfg(test)]
+        {
+            epoch.test_largest_sent_pkt_num_on_path = epoch
+                .test_largest_sent_pkt_num_on_path
+                .max(Some(pkt.pkt_num));
+        }
 
         epoch.sent_packets.push_back(SentPacket { pkt_num, status });
 
@@ -622,38 +782,39 @@ impl RecoveryOps for GRecovery {
         if in_flight {
             self.pacer.on_packet_sent(
                 time_sent,
-                self.bytes_in_flight,
+                self.bytes_in_flight.get(),
                 pkt_num,
                 sent_bytes,
                 pkt.has_data,
                 &self.rtt_stats,
             );
 
-            self.bytes_in_flight += sent_bytes;
+            self.bytes_in_flight.add(sent_bytes, now);
             epoch.pkts_in_flight += 1;
             self.set_loss_detection_timer(handshake_status, time_sent);
         }
 
         self.bytes_sent += sent_bytes;
 
-        trace!("{} {:?}", trace_id, self);
+        trace!("{trace_id} {self:?}");
     }
 
-    fn get_packet_send_time(&self) -> Instant {
-        let now = Instant::now();
+    fn get_packet_send_time(&self, now: Instant) -> Instant {
         self.pacer.get_next_release_time().time(now).unwrap_or(now)
     }
 
+    // `peer_sent_ack_ranges` should not be used without validation.
     fn on_ack_received(
         &mut self,
-        ranges: &RangeSet,
+        peer_sent_ack_ranges: &RangeSet,
         ack_delay: u64,
         epoch: packet::Epoch,
         handshake_status: HandshakeStatus,
         now: Instant,
+        skip_pn: Option<u64>,
         trace_id: &str,
-    ) -> (usize, usize, usize) {
-        let prior_in_flight = self.bytes_in_flight;
+    ) -> Result<OnAckReceivedOutcome> {
+        let prior_in_flight = self.bytes_in_flight.get();
 
         let AckedDetectionResult {
             acked_bytes,
@@ -661,26 +822,39 @@ impl RecoveryOps for GRecovery {
             spurious_pkt_thresh,
             has_ack_eliciting,
         } = self.epochs[epoch].detect_and_remove_acked_packets(
-            ranges,
+            peer_sent_ack_ranges,
             &mut self.newly_acked,
+            skip_pn,
             trace_id,
-        );
+        )?;
 
         self.lost_spurious_count += spurious_losses;
         if let Some(thresh) = spurious_pkt_thresh {
-            self.pkt_thresh = self.pkt_thresh.max(thresh.min(MAX_PACKET_THRESHOLD));
+            self.loss_thresh.on_spurious_loss(thresh);
         }
 
         if self.newly_acked.is_empty() {
-            return (0, 0, 0);
+            return Ok(OnAckReceivedOutcome {
+                acked_bytes,
+                spurious_losses,
+                ..Default::default()
+            });
         }
 
-        self.bytes_in_flight -= acked_bytes;
+        self.bytes_in_flight.saturating_subtract(acked_bytes, now);
+
+        let largest_newly_acked = self.newly_acked.last().unwrap();
+
+        // Update `largest_acked_packet` based on the validated `newly_acked`
+        // value.
+        let largest_acked_pkt_num = self.epochs[epoch]
+            .largest_acked_packet
+            .unwrap_or(0)
+            .max(largest_newly_acked.pkt_num);
+        self.epochs[epoch].largest_acked_packet = Some(largest_acked_pkt_num);
 
         // Check if largest packet is newly acked.
-        let largest_newly_acked = self.newly_acked.last().unwrap();
-        let update_rtt: bool =
-            largest_newly_acked.pkt_num == ranges.last().unwrap() && has_ack_eliciting;
+        let update_rtt = largest_newly_acked.pkt_num == largest_acked_pkt_num && has_ack_eliciting;
         if update_rtt {
             let latest_rtt = now - largest_newly_acked.time_sent;
             self.rtt_stats.update_rtt(
@@ -696,12 +870,13 @@ impl RecoveryOps for GRecovery {
         self.pacer.on_congestion_event(
             update_rtt,
             prior_in_flight,
-            self.bytes_in_flight,
+            self.bytes_in_flight.get(),
             now,
             &self.newly_acked,
             &self.lost_reuse,
             self.epochs[epoch].least_unacked(),
             &self.rtt_stats,
+            &mut self.recovery_stats,
         );
 
         self.pto_count = 0;
@@ -709,9 +884,14 @@ impl RecoveryOps for GRecovery {
 
         self.set_loss_detection_timer(handshake_status, now);
 
-        trace!("{} {:?}", trace_id, self);
+        trace!("{trace_id} {self:?}");
 
-        (lost_packets, lost_bytes, acked_bytes)
+        Ok(OnAckReceivedOutcome {
+            lost_packets,
+            lost_bytes,
+            acked_bytes,
+            spurious_losses,
+        })
     }
 
     fn on_loss_detection_timeout(
@@ -719,34 +899,38 @@ impl RecoveryOps for GRecovery {
         handshake_status: HandshakeStatus,
         now: Instant,
         trace_id: &str,
-    ) -> (usize, usize) {
+    ) -> OnLossDetectionTimeoutOutcome {
         let (earliest_loss_time, epoch) = self.loss_time_and_space();
 
         if earliest_loss_time.is_some() {
-            let prior_in_flight = self.bytes_in_flight;
+            let prior_in_flight = self.bytes_in_flight.get();
 
             let (lost_bytes, lost_packets) = self.detect_and_remove_lost_packets(epoch, now);
 
             self.pacer.on_congestion_event(
                 false,
                 prior_in_flight,
-                self.bytes_in_flight,
+                self.bytes_in_flight.get(),
                 now,
                 &[],
                 &self.lost_reuse,
                 self.epochs[epoch].least_unacked(),
                 &self.rtt_stats,
+                &mut self.recovery_stats,
             );
 
             self.lost_count += lost_packets;
 
             self.set_loss_detection_timer(handshake_status, now);
 
-            trace!("{} {:?}", trace_id, self);
-            return (lost_packets, lost_bytes);
+            trace!("{trace_id} {self:?}");
+            return OnLossDetectionTimeoutOutcome {
+                lost_packets,
+                lost_bytes,
+            };
         }
 
-        let epoch = if self.bytes_in_flight > 0 {
+        let epoch = if self.bytes_in_flight.get() > 0 {
             // Send new data if available, else retransmit old data. If neither
             // is available, send a single PING frame.
             let (_, e) = self.pto_time_and_space(handshake_status, now);
@@ -769,12 +953,21 @@ impl RecoveryOps for GRecovery {
 
         epoch.loss_probes = MAX_PTO_PROBES_COUNT.min(self.pto_count as usize);
 
+        let sent_packets_iter_limit = if !epoch.lost_frames_pto.is_empty() {
+            // Skip the search for frames to add to PTO probes if frames
+            // added in a prior PTO haven't been processed yet.
+            0
+        } else {
+            usize::MAX
+        };
+
         // Skip packets that have already been acked or lost, and packets
         // that don't contain either CRYPTO or STREAM frames and only return as
         // many packets as the number of probe packets that will be sent.
         let unacked_frames = epoch
             .sent_packets
-            .iter_mut()
+            .iter()
+            .take(sent_packets_iter_limit)
             .filter_map(|p| {
                 if let SentStatus::Sent {
                     has_data: true,
@@ -798,15 +991,18 @@ impl RecoveryOps for GRecovery {
         // This will also trigger sending an ACK and retransmitting frames like
         // HANDSHAKE_DONE and MAX_DATA / MAX_STREAM_DATA as well, in addition
         // to CRYPTO and STREAM, if the original packet carried them.
-        epoch.lost_frames.extend(unacked_frames.cloned());
+        epoch.lost_frames_pto.extend(unacked_frames.cloned());
 
         self.pacer
-            .on_retransmission_timeout(!epoch.lost_frames.is_empty());
+            .on_retransmission_timeout(epoch.has_lost_frames());
 
         self.set_loss_detection_timer(handshake_status, now);
 
-        trace!("{} {:?}", trace_id, self);
-        (0, 0)
+        trace!("{trace_id} {self:?}");
+        OnLossDetectionTimeoutOutcome {
+            lost_packets: 0,
+            lost_bytes: 0,
+        }
     }
 
     fn on_pkt_num_space_discarded(
@@ -816,9 +1012,8 @@ impl RecoveryOps for GRecovery {
         now: Instant,
     ) {
         let epoch = &mut self.epochs[epoch];
-        self.bytes_in_flight = self
-            .bytes_in_flight
-            .saturating_sub(epoch.discard(&mut self.pacer));
+        self.bytes_in_flight
+            .saturating_subtract(epoch.discard(&mut self.pacer), now);
         self.set_loss_detection_timer(handshake_status, now);
     }
 
@@ -847,7 +1042,7 @@ impl RecoveryOps for GRecovery {
             return usize::MAX;
         }
 
-        self.cwnd().saturating_sub(self.bytes_in_flight)
+        self.cwnd().saturating_sub(self.bytes_in_flight.get())
     }
 
     fn rtt(&self) -> Duration {
@@ -856,6 +1051,10 @@ impl RecoveryOps for GRecovery {
 
     fn min_rtt(&self) -> Option<Duration> {
         self.rtt_stats.min_rtt()
+    }
+
+    fn max_rtt(&self) -> Option<Duration> {
+        self.rtt_stats.max_rtt()
     }
 
     fn rttvar(&self) -> Duration {
@@ -867,10 +1066,22 @@ impl RecoveryOps for GRecovery {
         r.rtt() + (r.rttvar() * 4).max(GRANULARITY)
     }
 
-    fn delivery_rate(&self) -> u64 {
-        self.pacer
-            .bandwidth_estimate(&self.rtt_stats)
-            .to_bits_per_second()
+    /// The most recent data delivery rate estimate.
+    fn delivery_rate(&self) -> Bandwidth {
+        self.pacer.bandwidth_estimate(&self.rtt_stats)
+    }
+
+    fn max_bandwidth(&self) -> Option<Bandwidth> {
+        Some(self.pacer.max_bandwidth())
+    }
+
+    fn rtt_persistent_jump_count(&self) -> u64 {
+        self.pacer.rtt_persistent_jump_count()
+    }
+
+    /// Statistics from when a CCA first exited the startup phase.
+    fn startup_exit(&self) -> Option<StartupExit> {
+        self.recovery_stats.startup_exit
     }
 
     fn max_datagram_size(&self) -> usize {
@@ -886,8 +1097,9 @@ impl RecoveryOps for GRecovery {
         self.pmtud_update_max_datagram_size(self.max_datagram_size.min(new_max_datagram_size))
     }
 
+    // FIXME only used by gcongestion
     fn on_app_limited(&mut self) {
-        self.pacer.on_app_limited(self.bytes_in_flight)
+        self.pacer.on_app_limited(self.bytes_in_flight.get())
     }
 
     #[cfg(test)]
@@ -900,15 +1112,18 @@ impl RecoveryOps for GRecovery {
         self.epochs[epoch].pkts_in_flight
     }
 
-    #[cfg(test)]
     fn bytes_in_flight(&self) -> usize {
-        self.bytes_in_flight
+        self.bytes_in_flight.get()
+    }
+
+    fn bytes_in_flight_duration(&self) -> Duration {
+        self.bytes_in_flight.get_duration()
     }
 
     #[cfg(test)]
     fn pacing_rate(&self) -> u64 {
         self.pacer
-            .pacing_rate(self.bytes_in_flight, &self.rtt_stats)
+            .pacing_rate(self.bytes_in_flight.get(), &self.rtt_stats)
             .to_bytes_per_period(Duration::from_secs(1))
     }
 
@@ -918,8 +1133,13 @@ impl RecoveryOps for GRecovery {
     }
 
     #[cfg(test)]
-    fn pkt_thresh(&self) -> u64 {
-        self.pkt_thresh
+    fn pkt_thresh(&self) -> Option<u64> {
+        self.loss_thresh.pkt_thresh()
+    }
+
+    #[cfg(test)]
+    fn time_thresh(&self) -> f64 {
+        self.loss_thresh.time_thresh()
     }
 
     #[cfg(test)]
@@ -939,14 +1159,21 @@ impl RecoveryOps for GRecovery {
     }
 
     #[cfg(test)]
-    fn app_limited(&self) -> bool {
-        self.pacer.is_app_limited(self.bytes_in_flight)
+    fn largest_sent_pkt_num_on_path(&self, epoch: packet::Epoch) -> Option<u64> {
+        self.epochs[epoch].test_largest_sent_pkt_num_on_path
     }
 
+    #[cfg(any(test, feature = "qlog"))]
+    fn app_limited(&self) -> bool {
+        self.pacer.is_app_limited(self.bytes_in_flight.get())
+    }
+
+    // FIXME only used by congestion
     fn update_app_limited(&mut self, _v: bool) {
         // TODO
     }
 
+    // FIXME only used by congestion
     fn delivery_rate_update_app_limited(&mut self, _v: bool) {
         // TODO
     }
@@ -964,25 +1191,53 @@ impl RecoveryOps for GRecovery {
     }
 
     #[cfg(feature = "qlog")]
-    fn maybe_qlog(&mut self) -> Option<EventData> {
+    fn state_str(&self, _now: Instant) -> &'static str {
+        self.pacer.state_str()
+    }
+
+    #[cfg(feature = "qlog")]
+    fn get_updated_qlog_event_data(&mut self) -> Option<EventData> {
         let qlog_metrics = QlogMetrics {
-            min_rtt: self.rtt_stats.min_rtt().unwrap_or(Duration::MAX),
+            min_rtt: *self.rtt_stats.min_rtt,
             smoothed_rtt: self.rtt(),
             latest_rtt: self.rtt_stats.latest_rtt(),
             rttvar: self.rtt_stats.rttvar(),
             cwnd: self.cwnd() as u64,
-            bytes_in_flight: self.bytes_in_flight as u64,
+            bytes_in_flight: self.bytes_in_flight.get() as u64,
             ssthresh: self.pacer.ssthresh(),
-            pacing_rate: self.delivery_rate(),
+
+            pacing_rate: Some(
+                self.pacer
+                    .pacing_rate(self.bytes_in_flight.get(), &self.rtt_stats)
+                    .to_bytes_per_second(),
+            ),
+            delivery_rate: Some(self.delivery_rate().to_bytes_per_second()),
+            send_rate: Some(self.send_rate().to_bytes_per_second()),
+            ack_rate: Some(self.ack_rate().to_bytes_per_second()),
+            lost_packets: Some(self.lost_count as u64),
+            lost_bytes: Some(self.bytes_lost),
+            pto_count: Some(self.pto_count),
+            app_limited: Some(self.app_limited()),
         };
 
         self.qlog_metrics.maybe_update(qlog_metrics)
     }
 
+    #[cfg(feature = "qlog")]
+    fn get_updated_qlog_cc_state(&mut self, now: Instant) -> Option<&'static str> {
+        let cc_state = self.state_str(now);
+        if cc_state != self.qlog_prev_cc_state {
+            self.qlog_prev_cc_state = cc_state;
+            Some(cc_state)
+        } else {
+            None
+        }
+    }
+
     fn send_quantum(&self) -> usize {
         let pacing_rate = self
             .pacer
-            .pacing_rate(self.bytes_in_flight, &self.rtt_stats);
+            .pacing_rate(self.bytes_in_flight.get(), &self.rtt_stats);
 
         let floor = if pacing_rate < Bandwidth::from_kbits_per_second(1200) {
             self.max_datagram_size
@@ -1001,8 +1256,130 @@ impl std::fmt::Debug for GRecovery {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "timer={:?} ", self.loss_detection_timer())?;
         write!(f, "rtt_stats={:?} ", self.rtt_stats)?;
-        write!(f, "bytes_in_flight={} ", self.bytes_in_flight)?;
+        write!(f, "bytes_in_flight={} ", self.bytes_in_flight.get())?;
         write!(f, "{:?} ", self.pacer)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Config;
+
+    #[test]
+    fn loss_threshold() {
+        let config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        let recovery_config = RecoveryConfig::from_config(&config);
+        assert!(!recovery_config.enable_relaxed_loss_threshold);
+
+        let mut loss_thresh = LossThreshold::new(&recovery_config);
+        assert_eq!(loss_thresh.time_thresh_overhead, None);
+        assert_eq!(loss_thresh.pkt_thresh().unwrap(), INITIAL_PACKET_THRESHOLD);
+        assert_eq!(loss_thresh.time_thresh(), INITIAL_TIME_THRESHOLD);
+
+        // First spurious loss.
+        loss_thresh.on_spurious_loss(INITIAL_PACKET_THRESHOLD);
+        assert_eq!(loss_thresh.pkt_thresh().unwrap(), INITIAL_PACKET_THRESHOLD);
+        assert_eq!(loss_thresh.time_thresh(), PACKET_REORDER_TIME_THRESHOLD);
+
+        // Packet gaps < INITIAL_PACKET_THRESHOLD will NOT change packet
+        // threshold.
+        for packet_gap in 0..INITIAL_PACKET_THRESHOLD {
+            loss_thresh.on_spurious_loss(packet_gap);
+
+            // Packet threshold only increases once the packet gap increases.
+            assert_eq!(loss_thresh.pkt_thresh().unwrap(), INITIAL_PACKET_THRESHOLD);
+            assert_eq!(loss_thresh.time_thresh(), PACKET_REORDER_TIME_THRESHOLD);
+        }
+
+        // Subsequent spurious loss with packet_gaps > INITIAL_PACKET_THRESHOLD.
+        // Test values much larger than MAX_PACKET_THRESHOLD, i.e.
+        // `MAX_PACKET_THRESHOLD * 2`
+        for packet_gap in INITIAL_PACKET_THRESHOLD + 1..MAX_PACKET_THRESHOLD * 2 {
+            loss_thresh.on_spurious_loss(packet_gap);
+
+            // Packet threshold is equal to packet gap beyond
+            // INITIAL_PACKET_THRESHOLD, but capped
+            // at MAX_PACKET_THRESHOLD.
+            let new_packet_threshold = if packet_gap < MAX_PACKET_THRESHOLD {
+                packet_gap
+            } else {
+                MAX_PACKET_THRESHOLD
+            };
+            assert_eq!(loss_thresh.pkt_thresh().unwrap(), new_packet_threshold);
+            assert_eq!(loss_thresh.time_thresh(), PACKET_REORDER_TIME_THRESHOLD);
+        }
+        // Packet threshold is capped at MAX_PACKET_THRESHOLD
+        assert_eq!(loss_thresh.pkt_thresh().unwrap(), MAX_PACKET_THRESHOLD);
+        assert_eq!(loss_thresh.time_thresh(), PACKET_REORDER_TIME_THRESHOLD);
+
+        // Packet threshold is monotonically increasing
+        loss_thresh.on_spurious_loss(INITIAL_PACKET_THRESHOLD);
+        assert_eq!(loss_thresh.pkt_thresh().unwrap(), MAX_PACKET_THRESHOLD);
+        assert_eq!(loss_thresh.time_thresh(), PACKET_REORDER_TIME_THRESHOLD);
+    }
+
+    #[test]
+    fn relaxed_loss_threshold() {
+        // The max time threshold when operating in relaxed loss mode.
+        const MAX_TIME_THRESHOLD: f64 = 2.0;
+
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config.set_enable_relaxed_loss_threshold(true);
+        let recovery_config = RecoveryConfig::from_config(&config);
+        assert!(recovery_config.enable_relaxed_loss_threshold);
+
+        let mut loss_thresh = LossThreshold::new(&recovery_config);
+        assert_eq!(
+            loss_thresh.time_thresh_overhead,
+            Some(INITIAL_TIME_THRESHOLD_OVERHEAD)
+        );
+        assert_eq!(loss_thresh.pkt_thresh().unwrap(), INITIAL_PACKET_THRESHOLD);
+        assert_eq!(loss_thresh.time_thresh(), INITIAL_TIME_THRESHOLD);
+
+        // First spurious loss.
+        loss_thresh.on_spurious_loss(INITIAL_PACKET_THRESHOLD);
+        assert_eq!(loss_thresh.pkt_thresh(), None);
+        assert_eq!(loss_thresh.time_thresh(), INITIAL_TIME_THRESHOLD);
+
+        // Subsequent spurious loss.
+        for subsequent_loss_count in 1..100 {
+            // Double the overhead until it caps at `2.0`.
+            //
+            // The initial time-threshold overhead reaches `1.0` after three
+            // rounds of doubling.
+            let new_time_threshold = if subsequent_loss_count <= 3 {
+                1.0 + INITIAL_TIME_THRESHOLD_OVERHEAD * 2_f64.powi(subsequent_loss_count as i32)
+            } else {
+                2.0
+            };
+
+            loss_thresh.on_spurious_loss(subsequent_loss_count);
+            assert_eq!(loss_thresh.pkt_thresh(), None);
+            assert_eq!(loss_thresh.time_thresh(), new_time_threshold);
+        }
+        // Time threshold is capped at 2.0.
+        assert_eq!(loss_thresh.pkt_thresh(), None);
+        assert_eq!(loss_thresh.time_thresh(), MAX_TIME_THRESHOLD);
+    }
+
+    #[test]
+    fn test_high_pto_count_no_panic() {
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config.set_cc_algorithm(CongestionControlAlgorithm::Bbr2Gcongestion);
+        let recovery_config = RecoveryConfig::from_config(&config);
+        let mut r = GRecovery::new(&recovery_config).unwrap();
+
+        r.pto_count = 99999;
+
+        let handshake_status = HandshakeStatus {
+            completed: true,
+            has_handshake_keys: true,
+            peer_verified_address: true,
+        };
+        let now = Instant::now();
+
+        let _ = r.pto_time_and_space(handshake_status, now);
     }
 }

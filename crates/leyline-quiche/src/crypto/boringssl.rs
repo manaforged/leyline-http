@@ -4,19 +4,16 @@ use std::convert::TryFrom;
 
 use std::mem::MaybeUninit;
 
+use std::ptr::NonNull;
+
 use libc::c_int;
 use libc::c_uint;
 use libc::c_void;
 
-// NOTE: This structure is copied from <openssl/aead.h> in order to be able to
-// statically allocate it. While it is not often modified upstream, it needs to
-// be kept in sync.
-#[repr(C)]
+#[allow(non_camel_case_types)]
+#[repr(transparent)]
 struct EVP_AEAD_CTX {
-    aead: libc::uintptr_t,
-    opaque: [u8; 580],
-    alignment: u64,
-    tag_len: u8,
+    _unused: c_void,
 }
 
 #[derive(Clone)]
@@ -39,7 +36,7 @@ impl Algorithm {
 pub(crate) struct PacketKey {
     alg: Algorithm,
 
-    ctx: EVP_AEAD_CTX,
+    ctx: NonNull<EVP_AEAD_CTX>,
 
     nonce: Vec<u8>,
 }
@@ -63,7 +60,7 @@ impl PacketKey {
         derive_pkt_key(aead, secret, &mut key)?;
         derive_pkt_iv(aead, secret, &mut iv)?;
 
-        let pkt_key = Self::new(aead, key, iv, enc)?;
+        let mut pkt_key = Self::new(aead, key, iv, enc)?;
 
         // Dummy seal operation to prime the AEAD context with the nonce mask.
         //
@@ -90,7 +87,7 @@ impl PacketKey {
 
         let rc = unsafe {
             EVP_AEAD_CTX_open(
-                &self.ctx,          // ctx
+                self.ctx.as_ptr(),  // ctx
                 buf.as_mut_ptr(),   // out
                 &mut out_len,       // out_len
                 max_out_len,        // max_out_len
@@ -111,7 +108,7 @@ impl PacketKey {
     }
 
     pub fn seal_with_u64_counter(
-        &self,
+        &mut self,
         counter: u64,
         ad: &[u8],
         buf: &mut [u8],
@@ -137,7 +134,7 @@ impl PacketKey {
 
         let rc = unsafe {
             EVP_AEAD_CTX_seal_scatter(
-                &self.ctx,                  // ctx
+                self.ctx.as_ptr(),          // ctx
                 buf.as_mut_ptr(),           // out
                 buf[in_len..].as_mut_ptr(), // out_tag
                 &mut out_tag_len,           // out_tag_len
@@ -158,6 +155,17 @@ impl PacketKey {
         }
 
         Ok(in_len + out_tag_len)
+    }
+}
+
+// PacketKey uniquely owns the context. Its API requires exclusive access for
+// stateful seal operations, while open operations support shared access.
+unsafe impl Send for PacketKey {}
+unsafe impl Sync for PacketKey {}
+
+impl Drop for PacketKey {
+    fn drop(&mut self) {
+        unsafe { EVP_AEAD_CTX_free(self.ctx.as_ptr()) }
     }
 }
 
@@ -220,7 +228,7 @@ impl HeaderProtectionKey {
                         PLAINTEXT.as_ptr(),
                         PLAINTEXT.len(),
                         key.as_ptr(),
-                        sample[std::mem::size_of::<u32>()..].as_ptr(),
+                        sample[size_of::<u32>()..].as_ptr(),
                         counter,
                     );
                 };
@@ -231,29 +239,14 @@ impl HeaderProtectionKey {
     }
 }
 
-fn make_aead_ctx(alg: Algorithm, key: &[u8]) -> Result<EVP_AEAD_CTX> {
-    let mut ctx = MaybeUninit::uninit();
-
+fn make_aead_ctx(alg: Algorithm, key: &[u8]) -> Result<NonNull<EVP_AEAD_CTX>> {
     let ctx = unsafe {
         let aead = alg.get_evp_aead();
 
-        let rc = EVP_AEAD_CTX_init(
-            ctx.as_mut_ptr(),
-            aead,
-            key.as_ptr(),
-            alg.key_len(),
-            alg.tag_len(),
-            std::ptr::null_mut(),
-        );
-
-        if rc != 1 {
-            return Err(Error::CryptoFail);
-        }
-
-        ctx.assume_init()
+        EVP_AEAD_CTX_new(aead, key.as_ptr(), alg.key_len(), alg.tag_len())
     };
 
-    Ok(ctx)
+    NonNull::new(ctx).ok_or(Error::CryptoFail)
 }
 
 pub(crate) fn hkdf_extract(
@@ -342,15 +335,16 @@ unsafe extern "C" {
     ) -> c_int;
 
     // EVP_AEAD_CTX
-    #[link_name = "LEYLINE_EVP_AEAD_CTX_init"]
-    fn EVP_AEAD_CTX_init(
-        ctx: *mut EVP_AEAD_CTX,
+    #[link_name = "LEYLINE_EVP_AEAD_CTX_new"]
+    fn EVP_AEAD_CTX_new(
         aead: *const EVP_AEAD,
         key: *const u8,
         key_len: usize,
         tag_len: usize,
-        engine: *mut c_void,
-    ) -> c_int;
+    ) -> *mut EVP_AEAD_CTX;
+
+    #[link_name = "LEYLINE_EVP_AEAD_CTX_free"]
+    fn EVP_AEAD_CTX_free(ctx: *mut EVP_AEAD_CTX);
 
     #[link_name = "LEYLINE_EVP_AEAD_CTX_open"]
     fn EVP_AEAD_CTX_open(
@@ -368,7 +362,7 @@ unsafe extern "C" {
 
     #[link_name = "LEYLINE_EVP_AEAD_CTX_seal_scatter"]
     fn EVP_AEAD_CTX_seal_scatter(
-        ctx: *const EVP_AEAD_CTX,
+        ctx: *mut EVP_AEAD_CTX,
         out: *mut u8,
         out_tag: *mut u8,
         out_tag_len: *mut usize,
@@ -388,7 +382,7 @@ unsafe extern "C" {
     fn AES_set_encrypt_key(key: *const u8, bits: c_uint, aeskey: *mut AES_KEY) -> c_int;
 
     #[link_name = "LEYLINE_AES_ecb_encrypt"]
-    fn AES_ecb_encrypt(inp: *const u8, out: *mut u8, key: *const AES_KEY, enc: c_int) -> c_void;
+    fn AES_ecb_encrypt(inp: *const u8, out: *mut u8, key: *const AES_KEY, enc: c_int);
 
     // ChaCha20
     #[link_name = "LEYLINE_CRYPTO_chacha_20"]
@@ -399,5 +393,5 @@ unsafe extern "C" {
         key: *const u8,
         nonce: *const u8,
         counter: u32,
-    ) -> c_void;
+    );
 }

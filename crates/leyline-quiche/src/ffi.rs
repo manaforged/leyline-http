@@ -107,7 +107,7 @@ pub extern "C" fn quiche_version() -> *const u8 {
 
 struct Logger {
     cb: extern "C" fn(line: *const u8, argp: *mut c_void),
-    argp: std::sync::atomic::AtomicPtr<c_void>,
+    argp: atomic::AtomicPtr<c_void>,
 }
 
 impl log::Log for Logger {
@@ -206,6 +206,20 @@ pub extern "C" fn quiche_config_load_verify_locations_from_directory(
 }
 
 #[no_mangle]
+pub extern "C" fn quiche_config_set_curves_list(
+    config: &mut Config,
+    curves: *const c_char,
+) -> c_int {
+    let curves = unsafe { ffi::CStr::from_ptr(curves).to_str().unwrap() };
+
+    match config.set_curves_list(curves) {
+        Ok(_) => 0,
+
+        Err(e) => e.to_c() as c_int,
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn quiche_config_verify_peer(config: &mut Config, v: bool) {
     config.verify_peer(v);
 }
@@ -218,6 +232,11 @@ pub extern "C" fn quiche_config_grease(config: &mut Config, v: bool) {
 #[no_mangle]
 pub extern "C" fn quiche_config_discover_pmtu(config: &mut Config, v: bool) {
     config.discover_pmtu(v);
+}
+
+#[no_mangle]
+pub extern "C" fn quiche_config_set_pmtud_max_probes(config: &mut Config, max_probes: u8) {
+    config.set_pmtud_max_probes(max_probes);
 }
 
 #[no_mangle]
@@ -353,6 +372,19 @@ pub extern "C" fn quiche_config_enable_pacing(config: &mut Config, v: bool) {
 }
 
 #[no_mangle]
+pub extern "C" fn quiche_config_set_enable_cubic_idle_restart_fix(config: &mut Config, v: bool) {
+    config.set_enable_cubic_idle_restart_fix(v);
+}
+
+/// Deprecated: this is now always enabled and this function is a no-op.
+#[no_mangle]
+pub extern "C" fn quiche_config_set_use_initial_max_data_as_flow_control_win(
+    _config: &mut Config,
+    _v: bool,
+) {
+}
+
+#[no_mangle]
 pub extern "C" fn quiche_config_set_max_pacing_rate(config: &mut Config, v: u64) {
     config.set_max_pacing_rate(v);
 }
@@ -420,7 +452,9 @@ pub extern "C" fn quiche_config_set_ticket_key(
 
 #[no_mangle]
 pub extern "C" fn quiche_config_free(config: *mut Config) {
-    drop(unsafe { Box::from_raw(config) });
+    if !config.is_null() {
+        drop(unsafe { Box::from_raw(config) });
+    }
 }
 
 #[no_mangle]
@@ -622,6 +656,78 @@ pub extern "C" fn quiche_retry(
 }
 
 #[no_mangle]
+#[cfg(feature = "custom-client-dcid")]
+pub extern "C" fn quiche_conn_new_with_tls_and_client_dcid(
+    scid: *const u8,
+    scid_len: size_t,
+    dcid: *const u8,
+    dcid_len: size_t,
+    local: &sockaddr,
+    local_len: socklen_t,
+    peer: &sockaddr,
+    peer_len: socklen_t,
+    config: &Config,
+    ssl: *mut c_void,
+) -> *mut Connection {
+    {
+        let scid = unsafe { slice::from_raw_parts(scid, scid_len) };
+        let scid = ConnectionId::from_ref(scid);
+
+        let dcid = if !dcid.is_null() && dcid_len > 0 {
+            Some(ConnectionId::from_ref(unsafe {
+                slice::from_raw_parts(dcid, dcid_len)
+            }))
+        } else {
+            None
+        };
+
+        let local = std_addr_from_c(local, local_len);
+        let peer = std_addr_from_c(peer, peer_len);
+
+        let tls = match unsafe { tls::Handshake::from_ptr(ssl) } {
+            Ok(v) => v,
+
+            Err(_) => return ptr::null_mut(),
+        };
+
+        match Connection::with_tls(
+            &scid,
+            None, // retry_cids
+            dcid.as_ref(),
+            local,
+            peer,
+            config,
+            tls,
+            false,
+        ) {
+            Ok(c) => Box::into_raw(Box::new(c)),
+
+            Err(_) => ptr::null_mut(),
+        }
+    }
+}
+
+#[no_mangle]
+#[cfg(not(feature = "custom-client-dcid"))]
+#[allow(unused_variables)]
+pub extern "C" fn quiche_conn_new_with_tls_and_client_dcid(
+    scid: *const u8,
+    scid_len: size_t,
+    dcid: *const u8,
+    dcid_len: size_t,
+    local: &sockaddr,
+    local_len: socklen_t,
+    peer: &sockaddr,
+    peer_len: socklen_t,
+    config: &Config,
+    ssl: *mut c_void,
+) -> *mut Connection {
+    // It's always an error to call this function without the custom-client-dcid
+    // feature enabled.
+    ptr::null_mut()
+}
+
+#[no_mangle]
 pub extern "C" fn quiche_conn_new_with_tls(
     scid: *const u8,
     scid_len: size_t,
@@ -646,12 +752,21 @@ pub extern "C" fn quiche_conn_new_with_tls(
         None
     };
 
+    let retry_cids = odcid.as_ref().map(|odcid| RetryConnectionIds {
+        original_destination_cid: odcid,
+        retry_source_cid: &scid,
+    });
+
     let local = std_addr_from_c(local, local_len);
     let peer = std_addr_from_c(peer, peer_len);
 
-    let tls = unsafe { tls::Handshake::from_ptr(ssl) };
+    let tls = match unsafe { tls::Handshake::from_ptr(ssl) } {
+        Ok(v) => v,
 
-    match Connection::with_tls(&scid, odcid.as_ref(), local, peer, config, tls, is_server) {
+        Err(_) => return ptr::null_mut(),
+    };
+
+    match Connection::with_tls(&scid, retry_cids, None, local, peer, config, tls, is_server) {
         Ok(c) => Box::into_raw(Box::new(c)),
 
         Err(_) => ptr::null_mut(),
@@ -968,7 +1083,7 @@ pub extern "C" fn quiche_conn_stream_shutdown(
 }
 
 #[no_mangle]
-pub extern "C" fn quiche_conn_stream_capacity(conn: &Connection, stream_id: u64) -> ssize_t {
+pub extern "C" fn quiche_conn_stream_capacity(conn: &mut Connection, stream_id: u64) -> ssize_t {
     match conn.stream_capacity(stream_id) {
         Ok(v) => v as ssize_t,
 
@@ -1095,19 +1210,8 @@ pub struct ConnectionIdIter<'a> {
     index: usize,
 }
 
-impl<'a> Iterator for ConnectionIdIter<'a> {
-    type Item = ConnectionId<'a>;
-
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        let v = self.cids.get(self.index)?;
-        self.index += 1;
-        Some(v.clone())
-    }
-}
-
 #[no_mangle]
-pub extern "C" fn quiche_conn_source_ids(conn: &Connection) -> *mut ConnectionIdIter {
+pub extern "C" fn quiche_conn_source_ids(conn: &Connection) -> *mut ConnectionIdIter<'_> {
     let vec = conn.source_ids().cloned().collect();
     Box::into_raw(Box::new(ConnectionIdIter {
         cids: vec,
@@ -1121,10 +1225,11 @@ pub extern "C" fn quiche_connection_id_iter_next(
     out: &mut *const u8,
     out_len: &mut size_t,
 ) -> bool {
-    if let Some(conn_id) = iter.next() {
+    if let Some(conn_id) = iter.cids.get(iter.index) {
         let id = conn_id.as_ref();
         *out = id.as_ptr();
         *out_len = id.len();
+        iter.index += 1;
         return true;
     }
 
@@ -1133,7 +1238,9 @@ pub extern "C" fn quiche_connection_id_iter_next(
 
 #[no_mangle]
 pub extern "C" fn quiche_connection_id_iter_free(iter: *mut ConnectionIdIter) {
-    drop(unsafe { Box::from_raw(iter) });
+    if !iter.is_null() {
+        drop(unsafe { Box::from_raw(iter) });
+    }
 }
 
 #[no_mangle]
@@ -1307,7 +1414,9 @@ pub extern "C" fn quiche_stream_iter_next(iter: &mut StreamIter, stream_id: *mut
 
 #[no_mangle]
 pub extern "C" fn quiche_stream_iter_free(iter: *mut StreamIter) {
-    drop(unsafe { Box::from_raw(iter) });
+    if !iter.is_null() {
+        drop(unsafe { Box::from_raw(iter) });
+    }
 }
 
 #[repr(C)]
@@ -1315,17 +1424,29 @@ pub struct Stats {
     recv: usize,
     sent: usize,
     lost: usize,
+    spurious_lost: usize,
     retrans: usize,
     sent_bytes: u64,
     recv_bytes: u64,
     acked_bytes: u64,
     lost_bytes: u64,
     stream_retrans_bytes: u64,
+    dgram_recv: usize,
+    dgram_sent: usize,
     paths_count: usize,
     reset_stream_count_local: u64,
     stopped_stream_count_local: u64,
     reset_stream_count_remote: u64,
     stopped_stream_count_remote: u64,
+    data_blocked_sent_count: u64,
+    stream_data_blocked_sent_count: u64,
+    data_blocked_recv_count: u64,
+    stream_data_blocked_recv_count: u64,
+    streams_blocked_bidi_recv_count: u64,
+    streams_blocked_uni_recv_count: u64,
+    path_challenge_rx_count: u64,
+    bytes_in_flight_duration_msec: u64,
+    tx_buffered_inconsistent: bool,
 }
 
 pub struct TransportParams {
@@ -1351,17 +1472,29 @@ pub extern "C" fn quiche_conn_stats(conn: &Connection, out: &mut Stats) {
     out.recv = stats.recv;
     out.sent = stats.sent;
     out.lost = stats.lost;
+    out.spurious_lost = stats.spurious_lost;
     out.retrans = stats.retrans;
     out.sent_bytes = stats.sent_bytes;
     out.recv_bytes = stats.recv_bytes;
     out.acked_bytes = stats.acked_bytes;
     out.lost_bytes = stats.lost_bytes;
     out.stream_retrans_bytes = stats.stream_retrans_bytes;
+    out.dgram_recv = stats.dgram_recv;
+    out.dgram_sent = stats.dgram_sent;
     out.paths_count = stats.paths_count;
     out.reset_stream_count_local = stats.reset_stream_count_local;
     out.stopped_stream_count_local = stats.stopped_stream_count_local;
     out.reset_stream_count_remote = stats.reset_stream_count_remote;
     out.stopped_stream_count_remote = stats.stopped_stream_count_remote;
+    out.data_blocked_sent_count = stats.data_blocked_sent_count;
+    out.stream_data_blocked_sent_count = stats.stream_data_blocked_sent_count;
+    out.data_blocked_recv_count = stats.data_blocked_recv_count;
+    out.stream_data_blocked_recv_count = stats.stream_data_blocked_recv_count;
+    out.streams_blocked_bidi_recv_count = stats.streams_blocked_bidi_recv_count;
+    out.streams_blocked_uni_recv_count = stats.streams_blocked_uni_recv_count;
+    out.path_challenge_rx_count = stats.path_challenge_rx_count;
+    out.bytes_in_flight_duration_msec = stats.bytes_in_flight_duration.as_millis() as u64;
+    out.tx_buffered_inconsistent = stats.tx_buffered_state != TxBufferTrackingState::Ok;
 }
 
 #[no_mangle]
@@ -1407,8 +1540,12 @@ pub struct PathStats {
     sent: usize,
     lost: usize,
     retrans: usize,
+    total_pto_count: usize,
+    dgram_recv: usize,
+    dgram_sent: usize,
     rtt: u64,
     min_rtt: u64,
+    max_rtt: u64,
     rttvar: u64,
     cwnd: usize,
     sent_bytes: u64,
@@ -1417,6 +1554,8 @@ pub struct PathStats {
     stream_retrans_bytes: u64,
     pmtu: usize,
     delivery_rate: u64,
+    max_bandwidth: u64,
+    startup_exit_cwnd: u64,
 }
 
 #[no_mangle]
@@ -1438,6 +1577,9 @@ pub extern "C" fn quiche_conn_path_stats(
     out.sent = stats.sent;
     out.lost = stats.lost;
     out.retrans = stats.retrans;
+    out.total_pto_count = stats.total_pto_count;
+    out.dgram_recv = stats.dgram_recv;
+    out.dgram_sent = stats.dgram_sent;
     out.rtt = stats.rtt.as_nanos() as u64;
     out.min_rtt = stats.min_rtt.unwrap_or_default().as_nanos() as u64;
     out.rttvar = stats.rttvar.as_nanos() as u64;
@@ -1448,6 +1590,8 @@ pub extern "C" fn quiche_conn_path_stats(
     out.stream_retrans_bytes = stats.stream_retrans_bytes;
     out.pmtu = stats.pmtu;
     out.delivery_rate = stats.delivery_rate;
+    out.max_bandwidth = stats.max_bandwidth.unwrap_or(0);
+    out.startup_exit_cwnd = stats.startup_exit.map(|s| s.cwnd as u64).unwrap_or(0);
 
     0
 }
@@ -1584,7 +1728,9 @@ pub extern "C" fn quiche_conn_send_ack_eliciting_on_path(
 
 #[no_mangle]
 pub extern "C" fn quiche_conn_free(conn: *mut Connection) {
-    drop(unsafe { Box::from_raw(conn) });
+    if !conn.is_null() {
+        drop(unsafe { Box::from_raw(conn) });
+    }
 }
 
 #[no_mangle]
@@ -1659,21 +1805,14 @@ pub extern "C" fn quiche_conn_retired_scids(conn: &Connection) -> size_t {
 }
 
 #[no_mangle]
-pub extern "C" fn quiche_conn_retired_scid_next(
+pub extern "C" fn quiche_conn_retired_scid_iter(
     conn: &mut Connection,
-    out: &mut *const u8,
-    out_len: &mut size_t,
-) -> bool {
-    match conn.retired_scid_next() {
-        None => false,
-
-        Some(conn_id) => {
-            let id = conn_id.as_ref();
-            *out = id.as_ptr();
-            *out_len = id.len();
-            true
-        }
+) -> *mut ConnectionIdIter<'_> {
+    let mut cids = Vec::with_capacity(conn.retired_scids());
+    while let Some(cid) = conn.retired_scid_next() {
+        cids.push(cid);
     }
+    Box::into_raw(Box::new(ConnectionIdIter { cids, index: 0 }))
 }
 
 #[no_mangle]
@@ -1717,7 +1856,9 @@ pub extern "C" fn quiche_socket_addr_iter_next(
 
 #[no_mangle]
 pub extern "C" fn quiche_socket_addr_iter_free(iter: *mut SocketAddrIter) {
-    drop(unsafe { Box::from_raw(iter) });
+    if !iter.is_null() {
+        drop(unsafe { Box::from_raw(iter) });
+    }
 }
 
 #[no_mangle]
@@ -1815,6 +1956,8 @@ pub extern "C" fn quiche_path_event_type(ev: &PathEvent) -> u32 {
         PathEvent::ReusedSourceConnectionId { .. } => 4,
 
         PathEvent::PeerMigrated { .. } => 5,
+
+        PathEvent::PmtuUpdated { .. } => 6,
     }
 }
 
@@ -1936,8 +2079,34 @@ pub extern "C" fn quiche_path_event_peer_migrated(
 }
 
 #[no_mangle]
+pub extern "C" fn quiche_path_event_pmtu_updated(
+    ev: &PathEvent,
+    local_addr: &mut sockaddr_storage,
+    local_addr_len: &mut socklen_t,
+    peer_addr: &mut sockaddr_storage,
+    peer_addr_len: &mut socklen_t,
+    pmtu: &mut size_t,
+) {
+    match ev {
+        PathEvent::PmtuUpdated {
+            local,
+            peer,
+            pmtu: value,
+        } => {
+            *local_addr_len = std_addr_to_c(local, local_addr);
+            *peer_addr_len = std_addr_to_c(peer, peer_addr);
+            *pmtu = *value;
+        }
+
+        _ => unreachable!(),
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn quiche_path_event_free(ev: *mut PathEvent) {
-    drop(unsafe { Box::from_raw(ev) });
+    if !ev.is_null() {
+        drop(unsafe { Box::from_raw(ev) });
+    }
 }
 
 #[no_mangle]
@@ -1977,16 +2146,13 @@ fn optional_std_addr_from_c(addr: *const sockaddr, addr_len: socklen_t) -> Optio
         return None;
     }
 
-    Some({
-        let addr = unsafe { slice::from_raw_parts(addr, addr_len as usize) };
-        std_addr_from_c(addr.first().unwrap(), addr_len)
-    })
+    Some(std_addr_from_c(unsafe { &*addr }, addr_len))
 }
 
 fn std_addr_from_c(addr: &sockaddr, addr_len: socklen_t) -> SocketAddr {
     match addr.sa_family as _ {
         AF_INET => {
-            assert!(addr_len as usize == std::mem::size_of::<sockaddr_in>());
+            assert!(addr_len as usize == size_of::<sockaddr_in>());
 
             let in4 = unsafe { *(addr as *const _ as *const sockaddr_in) };
 
@@ -2007,7 +2173,7 @@ fn std_addr_from_c(addr: &sockaddr, addr_len: socklen_t) -> SocketAddr {
         }
 
         AF_INET6 => {
-            assert!(addr_len as usize == std::mem::size_of::<sockaddr_in6>());
+            assert!(addr_len as usize == size_of::<sockaddr_in6>());
 
             let in6 = unsafe { *(addr as *const _ as *const sockaddr_in6) };
 
@@ -2041,7 +2207,7 @@ fn std_addr_to_c(addr: &SocketAddr, out: &mut sockaddr_storage) -> socklen_t {
 
     match addr {
         SocketAddr::V4(addr) => unsafe {
-            let sa_len = std::mem::size_of::<sockaddr_in>();
+            let sa_len = size_of::<sockaddr_in>();
             let out_in = out as *mut _ as *mut sockaddr_in;
 
             let s_addr = u32::from_ne_bytes(addr.ip().octets());
@@ -2078,7 +2244,7 @@ fn std_addr_to_c(addr: &SocketAddr, out: &mut sockaddr_storage) -> socklen_t {
         },
 
         SocketAddr::V6(addr) => unsafe {
-            let sa_len = std::mem::size_of::<sockaddr_in6>();
+            let sa_len = size_of::<sockaddr_in6>();
             let out_in6 = out as *mut _ as *mut sockaddr_in6;
 
             #[cfg(not(windows))]
@@ -2126,8 +2292,8 @@ fn std_addr_to_c(addr: &SocketAddr, out: &mut sockaddr_storage) -> socklen_t {
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "windows")))]
-fn std_time_to_c(time: &std::time::Instant, out: &mut timespec) {
-    const INSTANT_ZERO: std::time::Instant = unsafe { std::mem::transmute(std::time::UNIX_EPOCH) };
+fn std_time_to_c(time: &Instant, out: &mut timespec) {
+    const INSTANT_ZERO: Instant = unsafe { std::mem::transmute(std::time::UNIX_EPOCH) };
 
     let raw_time = time.duration_since(INSTANT_ZERO);
 
@@ -2136,7 +2302,7 @@ fn std_time_to_c(time: &std::time::Instant, out: &mut timespec) {
 }
 
 #[cfg(any(target_os = "macos", target_os = "ios", target_os = "windows"))]
-fn std_time_to_c(_time: &std::time::Instant, out: &mut timespec) {
+fn std_time_to_c(_time: &Instant, out: &mut timespec) {
     // TODO: implement Instant conversion for systems that don't use timespec.
     out.tv_sec = 0;
     out.tv_nsec = 0;
@@ -2151,6 +2317,43 @@ mod tests {
     use windows_sys::Win32::Networking::WinSock::inet_ntop;
 
     #[test]
+    fn pmtu_updated_path_event() {
+        let local = "127.0.0.1:8080".parse().unwrap();
+        let peer = "127.0.0.2:443".parse().unwrap();
+
+        let event = PathEvent::PmtuUpdated {
+            local,
+            peer,
+            pmtu: 1400,
+        };
+        assert_eq!(quiche_path_event_type(&event), 6);
+
+        let mut local_out: sockaddr_storage = unsafe { std::mem::zeroed() };
+        let mut peer_out: sockaddr_storage = unsafe { std::mem::zeroed() };
+        let mut local_len = 0;
+        let mut peer_len = 0;
+        let mut pmtu = usize::MAX;
+
+        quiche_path_event_pmtu_updated(
+            &event,
+            &mut local_out,
+            &mut local_len,
+            &mut peer_out,
+            &mut peer_len,
+            &mut pmtu,
+        );
+        assert_eq!(pmtu, 1400);
+        assert_eq!(
+            unsafe { std_addr_from_c(&*(&local_out as *const _ as *const sockaddr), local_len,) },
+            local
+        );
+        assert_eq!(
+            unsafe { std_addr_from_c(&*(&peer_out as *const _ as *const sockaddr), peer_len,) },
+            peer
+        );
+    }
+
+    #[test]
     fn addr_v4() {
         let addr = "127.0.0.1:8080".parse().unwrap();
 
@@ -2158,10 +2361,10 @@ mod tests {
 
         assert_eq!(
             std_addr_to_c(&addr, &mut out),
-            std::mem::size_of::<sockaddr_in>() as socklen_t
+            size_of::<sockaddr_in>() as socklen_t
         );
 
-        let s = std::ffi::CString::new("ddd.ddd.ddd.ddd").unwrap();
+        let s = ffi::CString::new("ddd.ddd.ddd.ddd").unwrap();
 
         let s = unsafe {
             let in_addr = &out as *const _ as *const sockaddr_in;
@@ -2176,7 +2379,7 @@ mod tests {
                 16,
             );
 
-            std::ffi::CString::from_raw(dst).into_string().unwrap()
+            ffi::CString::from_raw(dst).into_string().unwrap()
         };
 
         assert_eq!(s, "127.0.0.1");
@@ -2184,7 +2387,7 @@ mod tests {
         let addr = unsafe {
             std_addr_from_c(
                 &*(&out as *const _ as *const sockaddr),
-                std::mem::size_of::<sockaddr_in>() as socklen_t,
+                size_of::<sockaddr_in>() as socklen_t,
             )
         };
 
@@ -2201,10 +2404,10 @@ mod tests {
 
         assert_eq!(
             std_addr_to_c(&addr, &mut out),
-            std::mem::size_of::<sockaddr_in6>() as socklen_t
+            size_of::<sockaddr_in6>() as socklen_t
         );
 
-        let s = std::ffi::CString::new("dddd:dddd:dddd:dddd:dddd:dddd:dddd:dddd").unwrap();
+        let s = ffi::CString::new("dddd:dddd:dddd:dddd:dddd:dddd:dddd:dddd").unwrap();
 
         let s = unsafe {
             let in6_addr = &out as *const _ as *const sockaddr_in6;
@@ -2219,7 +2422,7 @@ mod tests {
                 45,
             );
 
-            std::ffi::CString::from_raw(dst).into_string().unwrap()
+            ffi::CString::from_raw(dst).into_string().unwrap()
         };
 
         assert_eq!(s, "2001:db8:85a3::8a2e:370:7334");
@@ -2227,7 +2430,7 @@ mod tests {
         let addr = unsafe {
             std_addr_from_c(
                 &*(&out as *const _ as *const sockaddr),
-                std::mem::size_of::<sockaddr_in6>() as socklen_t,
+                size_of::<sockaddr_in6>() as socklen_t,
             )
         };
 
@@ -2239,8 +2442,100 @@ mod tests {
         );
     }
 
+    #[test]
+    fn connection_id_iter_next() {
+        let cids = vec![
+            ConnectionId::from_vec(vec![1, 2, 3, 4]),
+            ConnectionId::from_vec(vec![5, 6]),
+        ];
+
+        let mut iter = ConnectionIdIter { cids, index: 0 };
+
+        let mut out: *const u8 = ptr::null();
+        let mut out_len: size_t = 0;
+
+        // First CID.
+        assert!(quiche_connection_id_iter_next(
+            &mut iter,
+            &mut out,
+            &mut out_len
+        ));
+        assert_eq!(out_len, 4);
+        let slice = unsafe { slice::from_raw_parts(out, out_len) };
+        assert_eq!(slice, &[1, 2, 3, 4]);
+
+        // Second CID.
+        assert!(quiche_connection_id_iter_next(
+            &mut iter,
+            &mut out,
+            &mut out_len
+        ));
+        assert_eq!(out_len, 2);
+        let slice = unsafe { slice::from_raw_parts(out, out_len) };
+        assert_eq!(slice, &[5, 6]);
+
+        // Exhausted.
+        assert!(!quiche_connection_id_iter_next(
+            &mut iter,
+            &mut out,
+            &mut out_len
+        ));
+    }
+
+    #[test]
+    fn retired_scid_iter() {
+        let mut config = Config::new(PROTOCOL_VERSION).unwrap();
+        config
+            .load_cert_chain_from_pem_file("examples/cert.crt")
+            .unwrap();
+        config
+            .load_priv_key_from_pem_file("examples/cert.key")
+            .unwrap();
+        config
+            .set_application_protos(&[b"proto1", b"proto2"])
+            .unwrap();
+        config.verify_peer(false);
+        config.set_active_connection_id_limit(2);
+
+        let mut pipe = test_utils::Pipe::with_config(&mut config).unwrap();
+        assert_eq!(pipe.handshake(), Ok(()));
+
+        let scid = pipe.client.source_id().into_owned();
+
+        let (scid_1, reset_token_1) = test_utils::create_cid_and_reset_token(16);
+        assert_eq!(pipe.client.new_scid(&scid_1, reset_token_1, false), Ok(1));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // Retire the initial SCID by advertising a new one with
+        // retire_prior_to.
+        let (scid_2, reset_token_2) = test_utils::create_cid_and_reset_token(16);
+        assert_eq!(pipe.client.new_scid(&scid_2, reset_token_2, true), Ok(2));
+        assert_eq!(pipe.advance(), Ok(()));
+
+        // Use the FFI iterator to collect retired SCIDs.
+        let iter = quiche_conn_retired_scid_iter(&mut pipe.client);
+        let iter = unsafe { &mut *iter };
+
+        let mut out: *const u8 = ptr::null();
+        let mut out_len: size_t = 0;
+
+        // The initial SCID should have been retired.
+        assert!(quiche_connection_id_iter_next(iter, &mut out, &mut out_len));
+        let slice = unsafe { slice::from_raw_parts(out, out_len) };
+        assert_eq!(slice, scid.as_ref());
+
+        // No more retired SCIDs.
+        assert!(!quiche_connection_id_iter_next(
+            iter,
+            &mut out,
+            &mut out_len
+        ));
+
+        quiche_connection_id_iter_free(iter);
+    }
+
     #[cfg(not(windows))]
-    unsafe extern "C" {
+    extern "C" {
         fn inet_ntop(
             af: c_int,
             src: *const c_void,

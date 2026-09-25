@@ -23,6 +23,9 @@ First public release.
   CMake 3.22 or later, a C and C++ compiler, libclang, and `git`; on Windows,
   also the MSVC build tools and NASM. The BoringSSL crates are trimmed forks
   of Cloudflare's `boring` v5.2.0.
+- `leyline-quiche` is Cloudflare's `quiche` 0.30.0 linked against
+  `leyline-bssl`. It includes the upstream fixes for CVE-2025-4820,
+  CVE-2025-4821, CVE-2025-7054, CVE-2026-12523, and CVE-2026-12707.
 
 ### API contract
 

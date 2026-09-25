@@ -24,22 +24,28 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::time;
-
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
+
 use std::net::SocketAddr;
+
+use std::time::Duration;
+use std::time::Instant;
 
 use smallvec::SmallVec;
 
 use slab::Slab;
 
+use crate::Config;
 use crate::Error;
 use crate::Result;
+use crate::StartupExit;
 
 use crate::pmtud;
 use crate::recovery;
+use crate::recovery::Bandwidth;
 use crate::recovery::HandshakeStatus;
+use crate::recovery::OnLossDetectionTimeoutOutcome;
 use crate::recovery::RecoveryOps;
 
 /// The different states of the path validation.
@@ -76,6 +82,7 @@ impl PathState {
 
 /// A path-specific event.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum PathEvent {
     /// A new network path (local address, peer address) has been seen on a
     /// received packet. Note that this event is only triggered for servers, as
@@ -107,6 +114,37 @@ pub enum PathEvent {
     ///
     /// Note that this event is only raised if the path has been validated.
     PeerMigrated(SocketAddr, SocketAddr),
+
+    /// The validated PMTU available for normal application traffic changed on
+    /// the network path between `local` and `peer`.
+    ///
+    /// This event is generated only while PMTUD is enabled. It reports the
+    /// largest successfully probed size, falling back to QUIC's minimum packet
+    /// size while no larger size is validated. Unvalidated probe sizes and the
+    /// initial minimum set when the path is created are not reported.
+    PmtuUpdated {
+        /// The path's local address.
+        local: SocketAddr,
+
+        /// The path's peer address.
+        peer: SocketAddr,
+
+        /// The current validated PMTU limit for normal application traffic.
+        pmtu: usize,
+    },
+}
+
+pub(crate) fn pmtu_event(
+    local: SocketAddr,
+    peer: SocketAddr,
+    old: usize,
+    new: usize,
+) -> Option<PathEvent> {
+    (old != new).then_some(PathEvent::PmtuUpdated {
+        local,
+        peer,
+        pmtu: new,
+    })
 }
 
 /// A network path on which QUIC packets can be sent.
@@ -133,12 +171,12 @@ pub struct Path {
     /// Loss recovery and congestion control state.
     pub recovery: recovery::Recovery,
 
-    /// Path MTU discovery state.
-    pub pmtud: pmtud::Pmtud,
+    /// Path MTU discovery state. None if PMTUD is disabled on the path.
+    pub pmtud: Option<pmtud::Pmtud>,
 
     /// Pending challenge data with the size of the packet containing them and
     /// when they were sent.
-    in_flight_challenges: VecDeque<([u8; 8], usize, time::Instant)>,
+    in_flight_challenges: VecDeque<([u8; 8], usize, Instant)>,
 
     /// The maximum challenge size that got acknowledged.
     max_challenge_size: usize,
@@ -147,7 +185,7 @@ pub struct Path {
     probing_lost: usize,
 
     /// Last instant when a probing packet got lost.
-    last_probe_lost_time: Option<time::Instant>,
+    last_probe_lost_time: Option<Instant>,
 
     /// Received challenge data.
     received_challenges: VecDeque<[u8; 8]>,
@@ -164,8 +202,19 @@ pub struct Path {
     /// Total number of packets sent with data retransmitted from this path.
     pub retrans_count: usize,
 
+    /// Total number of times PTO (probe timeout) fired.
+    ///
+    /// Loss usually happens in a burst so the number of packets lost will
+    /// depend on the volume of inflight packets at the time of loss (which
+    /// can be arbitrary). PTO count measures the number of loss events and
+    /// provides a normalized loss metric.
+    pub total_pto_count: usize,
+
     /// Number of DATAGRAM frames sent on this path.
     pub dgram_sent_count: usize,
+
+    /// Number of DATAGRAM frames marked lost on this path.
+    pub dgram_lost_count: usize,
 
     /// Number of DATAGRAM frames received on this path.
     pub dgram_recv_count: usize,
@@ -212,14 +261,31 @@ impl Path {
         peer_addr: SocketAddr,
         recovery_config: &recovery::RecoveryConfig,
         path_challenge_recv_max_queue_len: usize,
-        pmtud_init: usize,
         is_initial: bool,
+        config: Option<&Config>,
     ) -> Self {
         let (state, active_scid_seq, active_dcid_seq) = if is_initial {
             (PathState::Validated, Some(0), Some(0))
         } else {
             (PathState::Unknown, None, None)
         };
+
+        let pmtud = config.and_then(|c| {
+            if c.pmtud {
+                let maximum_supported_mtu: usize = std::cmp::min(
+                    // if the max_udp_payload_size doesn't fit into a usize, then
+                    // max_send_udp_payload_size must be smaller so use that
+                    c.local_transport_params
+                        .max_udp_payload_size
+                        .try_into()
+                        .unwrap_or(c.max_send_udp_payload_size),
+                    c.max_send_udp_payload_size,
+                );
+                Some(pmtud::Pmtud::new(maximum_supported_mtu, c.pmtud_max_probes))
+            } else {
+                None
+            }
+        });
 
         Self {
             local_addr,
@@ -229,7 +295,7 @@ impl Path {
             state,
             active: false,
             recovery: recovery::Recovery::new_with_config(recovery_config),
-            pmtud: pmtud::Pmtud::new(pmtud_init),
+            pmtud,
             in_flight_challenges: VecDeque::new(),
             max_challenge_size: 0,
             probing_lost: 0,
@@ -239,7 +305,9 @@ impl Path {
             sent_count: 0,
             recv_count: 0,
             retrans_count: 0,
+            total_pto_count: 0,
             dgram_sent_count: 0,
+            dgram_lost_count: 0,
             dgram_recv_count: 0,
             sent_bytes: 0,
             recv_bytes: 0,
@@ -343,11 +411,14 @@ impl Path {
         is_closing: bool,
         frames_empty: bool,
     ) -> bool {
+        let Some(pmtud) = self.pmtud.as_mut() else {
+            return false;
+        };
+
         (hs_confirmed && hs_done)
-            && self.pmtud.get_probe_size() > self.pmtud.get_current()
-            && self.recovery.cwnd_available() > self.pmtud.get_probe_size()
-            && out_len >= self.pmtud.get_probe_size()
-            && self.pmtud.get_probe_status()
+            && self.recovery.cwnd_available() > pmtud.get_probe_size()
+            && out_len >= pmtud.get_probe_size()
+            && pmtud.should_probe()
             && !is_closing
             && frames_empty
     }
@@ -358,7 +429,7 @@ impl Path {
     }
 
     /// Handles the sending of PATH_CHALLENGE.
-    pub fn add_challenge_sent(&mut self, data: [u8; 8], pkt_size: usize, sent_time: time::Instant) {
+    pub fn add_challenge_sent(&mut self, data: [u8; 8], pkt_size: usize, sent_time: Instant) {
         self.on_challenge_sent();
         self.in_flight_challenges
             .push_back((data, pkt_size, sent_time));
@@ -425,13 +496,13 @@ impl Path {
     pub fn on_loss_detection_timeout(
         &mut self,
         handshake_status: HandshakeStatus,
-        now: time::Instant,
+        now: Instant,
         is_server: bool,
         trace_id: &str,
-    ) -> (usize, usize) {
-        let (lost_packets, lost_bytes) =
-            self.recovery
-                .on_loss_detection_timeout(handshake_status, now, trace_id);
+    ) -> OnLossDetectionTimeoutOutcome {
+        let outcome = self
+            .recovery
+            .on_loss_detection_timeout(handshake_status, now, trace_id);
 
         let mut lost_probe_time = None;
         self.in_flight_challenges.retain(|(_, _, sent_time)| {
@@ -475,7 +546,22 @@ impl Path {
             }
         }
 
-        (lost_packets, lost_bytes)
+        // Track PTO timeout event
+        self.total_pto_count += 1;
+
+        outcome
+    }
+
+    /// Returns true if the path's recovery module hasn't processed any non-ACK
+    /// packets, and it is still OK to fully reinitialize the recovery module to
+    /// pickup changes to congestion control config.
+    pub fn can_reinit_recovery(&self) -> bool {
+        // Recovery can be reinitialized until the connection sends in-flight
+        // data. The congestion controller has no relevant state before then.
+        // ACK-only packets sent before the full ClientHello arrives should not
+        // prevent reinitialization.
+        self.recovery.bytes_in_flight() == 0
+            && self.recovery.bytes_in_flight_duration() == Duration::ZERO
     }
 
     pub fn reinit_recovery(&mut self, recovery_config: &recovery::RecoveryConfig) {
@@ -483,6 +569,12 @@ impl Path {
     }
 
     pub fn stats(&self) -> PathStats {
+        let pmtu = match self.pmtud.as_ref().map(|p| p.get_current_mtu()) {
+            Some(v) => v,
+
+            None => self.recovery.max_datagram_size(),
+        };
+
         PathStats {
             local_addr: self.local_addr,
             peer_addr: self.peer_addr,
@@ -492,19 +584,32 @@ impl Path {
             sent: self.sent_count,
             lost: self.recovery.lost_count(),
             retrans: self.retrans_count,
+            total_pto_count: self.total_pto_count,
             dgram_recv: self.dgram_recv_count,
             dgram_sent: self.dgram_sent_count,
+            dgram_lost: self.dgram_lost_count,
             rtt: self.recovery.rtt(),
             min_rtt: self.recovery.min_rtt(),
+            max_rtt: self.recovery.max_rtt(),
             rttvar: self.recovery.rttvar(),
             cwnd: self.recovery.cwnd(),
             sent_bytes: self.sent_bytes,
             recv_bytes: self.recv_bytes,
             lost_bytes: self.recovery.bytes_lost(),
             stream_retrans_bytes: self.stream_retrans_bytes,
-            pmtu: self.recovery.max_datagram_size(),
-            delivery_rate: self.recovery.delivery_rate(),
+            pmtu,
+            delivery_rate: self.recovery.delivery_rate().to_bytes_per_second(),
+            max_bandwidth: self
+                .recovery
+                .max_bandwidth()
+                .map(Bandwidth::to_bytes_per_second),
+            rtt_persistent_jump_count: self.recovery.rtt_persistent_jump_count(),
+            startup_exit: self.recovery.startup_exit(),
         }
+    }
+
+    pub fn bytes_in_flight_duration(&self) -> Duration {
+        self.recovery.bytes_in_flight_duration()
     }
 }
 
@@ -556,14 +661,9 @@ pub struct PathMap {
 impl PathMap {
     /// Creates a new `PathMap` with the initial provided `path` and a
     /// capacity limit.
-    pub fn new(
-        mut initial_path: Path,
-        max_concurrent_paths: usize,
-        is_server: bool,
-        enable_pmtud: bool,
-        max_send_udp_payload_size: usize,
-    ) -> Self {
-        let mut paths = Slab::with_capacity(1); // most connections only have one path
+    pub fn new(mut initial_path: Path, max_concurrent_paths: usize, is_server: bool) -> Self {
+        // Most connections only have one path.
+        let mut paths = Slab::with_capacity(1);
         let mut addrs_to_paths = BTreeMap::new();
 
         let local_addr = initial_path.local_addr;
@@ -571,14 +671,6 @@ impl PathMap {
 
         // As it is the first path, it is active by default.
         initial_path.active = true;
-
-        // Enable path MTU Discovery and start probing with the largest datagram
-        // size.
-        if enable_pmtud {
-            initial_path.pmtud.should_probe(enable_pmtud);
-            initial_path.pmtud.set_probe_size(max_send_udp_payload_size);
-            initial_path.pmtud.enable(enable_pmtud);
-        }
 
         let active_path_id = paths.insert(initial_path);
         addrs_to_paths.insert((local_addr, peer_addr), active_path_id);
@@ -656,14 +748,23 @@ impl PathMap {
 
     /// Returns an iterator over all existing paths.
     #[inline]
-    pub fn iter(&self) -> slab::Iter<Path> {
+    pub fn iter(&self) -> slab::Iter<'_, Path> {
         self.paths.iter()
     }
 
     /// Returns a mutable iterator over all existing paths.
     #[inline]
-    pub fn iter_mut(&mut self) -> slab::IterMut<Path> {
+    pub fn iter_mut(&mut self) -> slab::IterMut<'_, Path> {
         self.paths.iter_mut()
+    }
+
+    /// Returns a mutable iterator over all existing paths and the path event
+    /// queue.
+    #[inline]
+    pub(crate) fn iter_mut_and_events(
+        &mut self,
+    ) -> (slab::IterMut<'_, Path>, &mut VecDeque<PathEvent>) {
+        (self.paths.iter_mut(), &mut self.events)
     }
 
     /// Returns the number of existing paths.
@@ -829,6 +930,43 @@ impl PathMap {
 
         Ok(())
     }
+
+    /// Configures path MTU discovery on all existing paths.
+    pub fn set_discover_pmtu_on_existing_paths(
+        &mut self,
+        discover: bool,
+        max_send_udp_payload_size: usize,
+        pmtud_max_probes: u8,
+    ) {
+        for (_, path) in self.paths.iter_mut() {
+            let old_pmtu = path
+                .pmtud
+                .as_ref()
+                .map_or(path.recovery.max_datagram_size(), |pmtud| {
+                    pmtud.get_current_mtu()
+                });
+
+            path.pmtud = if discover {
+                Some(pmtud::Pmtud::new(
+                    max_send_udp_payload_size,
+                    pmtud_max_probes,
+                ))
+            } else {
+                None
+            };
+
+            if let Some(pmtud) = path.pmtud.as_ref() {
+                if let Some(event) = pmtu_event(
+                    path.local_addr,
+                    path.peer_addr,
+                    old_pmtu,
+                    pmtud.get_current_mtu(),
+                ) {
+                    self.events.push_back(event);
+                }
+            }
+        }
+    }
 }
 
 /// Statistics about the path of a connection.
@@ -838,6 +976,7 @@ impl PathMap {
 ///
 /// [`path_stats()`]: struct.Connection.html#method.path_stats
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct PathStats {
     /// The local address of the path.
     pub local_addr: SocketAddr,
@@ -863,21 +1002,35 @@ pub struct PathStats {
     /// The number of sent QUIC packets with retransmitted data.
     pub retrans: usize,
 
+    /// The number of times PTO (probe timeout) fired.
+    ///
+    /// Loss usually happens in a burst so the number of packets lost will
+    /// depend on the volume of inflight packets at the time of loss (which
+    /// can be arbitrary). PTO count measures the number of loss events and
+    /// provides a normalized loss metric.
+    pub total_pto_count: usize,
+
     /// The number of DATAGRAM frames received.
     pub dgram_recv: usize,
 
     /// The number of DATAGRAM frames sent.
     pub dgram_sent: usize,
 
+    /// The number of DATAGRAM frames lost.
+    pub dgram_lost: usize,
+
     /// The estimated round-trip time of the connection.
-    pub rtt: time::Duration,
+    pub rtt: Duration,
 
     /// The minimum round-trip time observed.
-    pub min_rtt: Option<time::Duration>,
+    pub min_rtt: Option<Duration>,
+
+    /// The maximum round-trip time observed.
+    pub max_rtt: Option<Duration>,
 
     /// The estimated round-trip time variation in samples using a mean
     /// variation.
-    pub rttvar: time::Duration,
+    pub rttvar: Duration,
 
     /// The size of the connection's congestion window in bytes.
     pub cwnd: usize,
@@ -906,6 +1059,18 @@ pub struct PathStats {
     /// [`SendInfo.at`]: struct.SendInfo.html#structfield.at
     /// [Pacing]: index.html#pacing
     pub delivery_rate: u64,
+
+    /// The maximum bandwidth estimate for the connection in bytes/s.
+    ///
+    /// Note: not all congestion control algorithms provide this metric;
+    /// it is currently only implemented for bbr2_gcongestion.
+    pub max_bandwidth: Option<u64>,
+
+    /// The total number of confirmed persistent RTT jump episodes.
+    pub rtt_persistent_jump_count: u64,
+
+    /// Statistics from when a CCA first exited the startup phase.
+    pub startup_exit: Option<StartupExit>,
 }
 
 impl std::fmt::Debug for PathStats {
@@ -942,8 +1107,11 @@ impl std::fmt::Debug for PathStats {
 
         write!(
             f,
-            " stream_retrans_bytes={} pmtu={} delivery_rate={}",
-            self.stream_retrans_bytes, self.pmtu, self.delivery_rate,
+            " stream_retrans_bytes={} pmtu={} delivery_rate={} rtt_persistent_jump_count={}",
+            self.stream_retrans_bytes,
+            self.pmtu,
+            self.delivery_rate,
+            self.rtt_persistent_jump_count,
         )
     }
 }
@@ -959,6 +1127,39 @@ mod tests {
     use super::*;
 
     #[test]
+    fn reinitializing_pmtud_notifies_fallback_limit() {
+        let local = "127.0.0.1:1234".parse().unwrap();
+        let peer = "127.0.0.1:4321".parse().unwrap();
+        let mut config = Config::new(crate::PROTOCOL_VERSION).unwrap();
+        config.discover_pmtu(true);
+        config.set_max_send_udp_payload_size(1400);
+        let recovery_config = RecoveryConfig::from_config(&config);
+        let mut path = Path::new(
+            local,
+            peer,
+            &recovery_config,
+            config.path_challenge_recv_max_queue_len,
+            true,
+            Some(&config),
+        );
+        path.pmtud.as_mut().unwrap().successful_probe(1400);
+        let mut paths = PathMap::new(path, 1, false);
+
+        paths.set_discover_pmtu_on_existing_paths(false, 1400, 1);
+        assert_eq!(paths.pop_event(), None);
+
+        paths.set_discover_pmtu_on_existing_paths(true, 1400, 1);
+        assert_eq!(
+            paths.pop_event(),
+            Some(PathEvent::PmtuUpdated {
+                local,
+                peer,
+                pmtu: MIN_CLIENT_INITIAL_LEN,
+            })
+        );
+    }
+
+    #[test]
     fn path_validation_limited_mtu() {
         let client_addr = "127.0.0.1:1234".parse().unwrap();
         let client_addr_2 = "127.0.0.1:5678".parse().unwrap();
@@ -972,18 +1173,18 @@ mod tests {
             server_addr,
             &recovery_config,
             config.path_challenge_recv_max_queue_len,
-            1200,
             true,
+            None,
         );
-        let mut path_mgr = PathMap::new(path, 2, false, true, 1200);
+        let mut path_mgr = PathMap::new(path, 2, false);
 
         let probed_path = Path::new(
             client_addr_2,
             server_addr,
             &recovery_config,
             config.path_challenge_recv_max_queue_len,
-            1200,
             false,
+            None,
         );
         path_mgr.insert_path(probed_path, false).unwrap();
 
@@ -994,13 +1195,12 @@ mod tests {
         assert!(path_mgr.get_mut(pid).unwrap().validation_requested());
         assert!(path_mgr.get_mut(pid).unwrap().probing_required());
 
-        // Fake sending of PathChallenge in a packet of MIN_CLIENT_INITIAL_LEN - 1
-        // bytes.
+        // Send `PathChallenge` one byte below `MIN_CLIENT_INITIAL_LEN`.
         let data = rand::rand_u64().to_be_bytes();
         path_mgr.get_mut(pid).unwrap().add_challenge_sent(
             data,
             MIN_CLIENT_INITIAL_LEN - 1,
-            time::Instant::now(),
+            Instant::now(),
         );
 
         assert!(!path_mgr.get_mut(pid).unwrap().validation_requested());
@@ -1030,7 +1230,7 @@ mod tests {
         path_mgr.get_mut(pid).unwrap().add_challenge_sent(
             data,
             MIN_CLIENT_INITIAL_LEN,
-            time::Instant::now(),
+            Instant::now(),
         );
 
         path_mgr.on_response_received(data).unwrap();
@@ -1059,17 +1259,17 @@ mod tests {
             server_addr,
             &recovery_config,
             config.path_challenge_recv_max_queue_len,
-            1200,
             true,
+            None,
         );
-        let mut client_path_mgr = PathMap::new(path, 2, false, false, 1200);
+        let mut client_path_mgr = PathMap::new(path, 2, false);
         let mut server_path = Path::new(
             server_addr,
             client_addr,
             &recovery_config,
             config.path_challenge_recv_max_queue_len,
-            1200,
             false,
+            None,
         );
 
         let client_pid = client_path_mgr
@@ -1082,7 +1282,7 @@ mod tests {
         client_path_mgr
             .get_mut(client_pid)
             .unwrap()
-            .add_challenge_sent(data, MIN_CLIENT_INITIAL_LEN, time::Instant::now());
+            .add_challenge_sent(data, MIN_CLIENT_INITIAL_LEN, Instant::now());
 
         // Second probe.
         let data_2 = rand::rand_u64().to_be_bytes();
@@ -1090,7 +1290,7 @@ mod tests {
         client_path_mgr
             .get_mut(client_pid)
             .unwrap()
-            .add_challenge_sent(data_2, MIN_CLIENT_INITIAL_LEN, time::Instant::now());
+            .add_challenge_sent(data_2, MIN_CLIENT_INITIAL_LEN, Instant::now());
         assert_eq!(
             client_path_mgr
                 .get(client_pid)
@@ -1143,17 +1343,17 @@ mod tests {
             server_addr,
             &recovery_config,
             config.path_challenge_recv_max_queue_len,
-            1200,
             true,
+            None,
         );
-        let mut client_path_mgr = PathMap::new(path, 2, false, false, 1200);
+        let mut client_path_mgr = PathMap::new(path, 2, false);
         let mut server_path = Path::new(
             server_addr,
             client_addr,
             &recovery_config,
             config.path_challenge_recv_max_queue_len,
-            1200,
             false,
+            None,
         );
 
         let client_pid = client_path_mgr
@@ -1166,7 +1366,7 @@ mod tests {
         client_path_mgr
             .get_mut(client_pid)
             .unwrap()
-            .add_challenge_sent(data, MIN_CLIENT_INITIAL_LEN, time::Instant::now());
+            .add_challenge_sent(data, MIN_CLIENT_INITIAL_LEN, Instant::now());
 
         // Second probe.
         let data_2 = rand::rand_u64().to_be_bytes();
@@ -1174,7 +1374,7 @@ mod tests {
         client_path_mgr
             .get_mut(client_pid)
             .unwrap()
-            .add_challenge_sent(data_2, MIN_CLIENT_INITIAL_LEN, time::Instant::now());
+            .add_challenge_sent(data_2, MIN_CLIENT_INITIAL_LEN, Instant::now());
         assert_eq!(
             client_path_mgr
                 .get(client_pid)
@@ -1190,7 +1390,7 @@ mod tests {
         client_path_mgr
             .get_mut(client_pid)
             .unwrap()
-            .add_challenge_sent(data_3, MIN_CLIENT_INITIAL_LEN, time::Instant::now());
+            .add_challenge_sent(data_3, MIN_CLIENT_INITIAL_LEN, Instant::now());
         assert_eq!(
             client_path_mgr
                 .get(client_pid)
@@ -1206,7 +1406,7 @@ mod tests {
         client_path_mgr
             .get_mut(client_pid)
             .unwrap()
-            .add_challenge_sent(data_4, MIN_CLIENT_INITIAL_LEN, time::Instant::now());
+            .add_challenge_sent(data_4, MIN_CLIENT_INITIAL_LEN, Instant::now());
         assert_eq!(
             client_path_mgr
                 .get(client_pid)

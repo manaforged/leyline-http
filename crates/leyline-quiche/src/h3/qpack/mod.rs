@@ -26,10 +26,13 @@
 
 //! HTTP/3 header compression (QPACK).
 
-const INDEXED: u8 = 0b1000_0000;
-const INDEXED_WITH_POST_BASE: u8 = 0b0001_0000;
-const LITERAL: u8 = 0b0010_0000;
-const LITERAL_WITH_NAME_REF: u8 = 0b0100_0000;
+pub use encoder::encode_int;
+pub use encoder::encode_str;
+
+pub const INDEXED: u8 = 0b1000_0000;
+pub const INDEXED_WITH_POST_BASE: u8 = 0b0001_0000;
+pub const LITERAL: u8 = 0b0010_0000;
+pub const LITERAL_WITH_NAME_REF: u8 = 0b0100_0000;
 
 /// A specialized [`Result`] type for quiche QPACK operations.
 ///
@@ -44,9 +47,6 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     /// The provided buffer is too short.
     BufferTooShort,
-
-    /// The provided string would be larger after huffman encoding.
-    InflatedHuffmanEncoding,
 
     /// The QPACK header block's huffman encoding is invalid.
     InvalidHuffmanEncoding,
@@ -73,7 +73,7 @@ impl std::error::Error for Error {
     }
 }
 
-impl std::convert::From<octets::BufferTooShortError> for Error {
+impl From<octets::BufferTooShortError> for Error {
     fn from(_err: octets::BufferTooShortError) -> Self {
         Error::BufferTooShort
     }
@@ -81,6 +81,7 @@ impl std::convert::From<octets::BufferTooShortError> for Error {
 
 #[cfg(test)]
 mod tests {
+    use crate::h3::qpack::Error::HeaderListTooLarge;
     use crate::*;
 
     use super::*;
@@ -109,24 +110,63 @@ mod tests {
     }
 
     #[test]
+    fn encode_decode_small_max_field_section_size() {
+        let mut encoded = [0u8; 102];
+
+        const NUM_HDRS: usize = 10;
+
+        let headers = vec![h3::Header::new(b"hello", b"world"); NUM_HDRS];
+
+        // The size of a field list is calculated based on the uncompressed size
+        // of fields, including the length of the name and value in bytes plus
+        // an overhead of 32 bytes for each field. See
+        // https://datatracker.ietf.org/doc/html/rfc9114#section-4.2.2
+        let qpack_field_section_size = (b"hello".len() + b"world".len() + 32) * NUM_HDRS;
+
+        let mut enc = Encoder::new();
+        assert_eq!(enc.encode(&headers, &mut encoded), Ok(102));
+
+        let mut dec = Decoder::new();
+
+        // Equal max_size param ok
+        assert_eq!(
+            dec.decode(&encoded, qpack_field_section_size as u64),
+            Ok(headers.clone())
+        );
+
+        // Oversized max_size param ok
+        assert_eq!(
+            dec.decode(&encoded, qpack_field_section_size as u64 + 1),
+            Ok(headers.clone())
+        );
+
+        // Smaller max_size param (forgetting 32 byte overhead) fails
+        let wrong_qpack_field_section_size = (b"hello".len() + b"world".len()) * NUM_HDRS;
+        assert_eq!(
+            dec.decode(&encoded, wrong_qpack_field_section_size as u64),
+            Err(HeaderListTooLarge)
+        );
+    }
+
+    #[test]
     fn lower_case() {
         let mut encoded = [0u8; 35];
 
         let headers_expected = vec![
-            crate::h3::Header::new(b":status", b"200"),
-            crate::h3::Header::new(b":path", b"/HeLlO"),
-            crate::h3::Header::new(b"woot", b"woot"),
-            crate::h3::Header::new(b"hello", b"WorlD"),
-            crate::h3::Header::new(b"foo", b"BaR"),
+            h3::Header::new(b":status", b"200"),
+            h3::Header::new(b":path", b"/HeLlO"),
+            h3::Header::new(b"woot", b"woot"),
+            h3::Header::new(b"hello", b"WorlD"),
+            h3::Header::new(b"foo", b"BaR"),
         ];
 
         // Header.
         let headers_in = vec![
-            crate::h3::Header::new(b":StAtUs", b"200"),
-            crate::h3::Header::new(b":PaTh", b"/HeLlO"),
-            crate::h3::Header::new(b"WooT", b"woot"),
-            crate::h3::Header::new(b"hello", b"WorlD"),
-            crate::h3::Header::new(b"fOo", b"BaR"),
+            h3::Header::new(b":StAtUs", b"200"),
+            h3::Header::new(b":PaTh", b"/HeLlO"),
+            h3::Header::new(b"WooT", b"woot"),
+            h3::Header::new(b"hello", b"WorlD"),
+            h3::Header::new(b"fOo", b"BaR"),
         ];
 
         let mut enc = Encoder::new();
@@ -139,11 +179,11 @@ mod tests {
 
         // HeaderRef.
         let headers_in = vec![
-            crate::h3::HeaderRef::new(b":StAtUs", b"200"),
-            crate::h3::HeaderRef::new(b":PaTh", b"/HeLlO"),
-            crate::h3::HeaderRef::new(b"WooT", b"woot"),
-            crate::h3::HeaderRef::new(b"hello", b"WorlD"),
-            crate::h3::HeaderRef::new(b"fOo", b"BaR"),
+            h3::HeaderRef::new(b":StAtUs", b"200"),
+            h3::HeaderRef::new(b":PaTh", b"/HeLlO"),
+            h3::HeaderRef::new(b"WooT", b"woot"),
+            h3::HeaderRef::new(b"hello", b"WorlD"),
+            h3::HeaderRef::new(b"fOo", b"BaR"),
         ];
 
         let mut enc = Encoder::new();
@@ -161,14 +201,14 @@ mod tests {
         let mut enc = Encoder::new();
 
         // Indexed name with literal value
-        let headers1 = vec![crate::h3::Header::new(b"location", b"															")];
+        let headers1 = vec![h3::Header::new(b"location", b"															")];
         assert_eq!(enc.encode(&headers1, &mut encoded), Ok(19));
 
         // Literal name and value
-        let headers2 = vec![crate::h3::Header::new(b"a", b"")];
+        let headers2 = vec![h3::Header::new(b"a", b"")];
         assert_eq!(enc.encode(&headers2, &mut encoded), Ok(20));
 
-        let headers3 = vec![crate::h3::Header::new(b"															", b"hello")];
+        let headers3 = vec![h3::Header::new(b"															", b"hello")];
         assert_eq!(enc.encode(&headers3, &mut encoded), Ok(24));
     }
 
@@ -181,15 +221,15 @@ mod tests {
         let value = "£££££££££££££££";
 
         // Indexed name with literal value
-        let headers1 = vec![crate::h3::Header::new(name, value.as_bytes())];
+        let headers1 = vec![h3::Header::new(name, value.as_bytes())];
         assert_eq!(enc.encode(&headers1, &mut encoded), Ok(34));
 
         // Literal name and value
         let value = "ððððððððððððððð";
-        let headers2 = vec![crate::h3::Header::new(b"a", value.as_bytes())];
+        let headers2 = vec![h3::Header::new(b"a", value.as_bytes())];
         assert_eq!(enc.encode(&headers2, &mut encoded), Ok(35));
 
-        let headers3 = vec![crate::h3::Header::new(value.as_bytes(), b"hello")];
+        let headers3 = vec![h3::Header::new(value.as_bytes(), b"hello")];
         assert_eq!(enc.encode(&headers3, &mut encoded), Ok(39));
     }
 }
@@ -199,5 +239,4 @@ pub use encoder::Encoder;
 
 mod decoder;
 mod encoder;
-mod huffman;
 mod static_table;

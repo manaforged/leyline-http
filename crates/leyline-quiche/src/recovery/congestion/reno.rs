@@ -47,7 +47,8 @@ pub(crate) static RENO: CongestionControlOps = CongestionControlOps {
     congestion_event,
     checkpoint,
     rollback,
-    has_custom_pacing,
+    #[cfg(feature = "qlog")]
+    state_str,
     debug_fmt,
 };
 
@@ -82,7 +83,7 @@ fn on_packet_acked(r: &mut Congestion, packet: &Acked, now: Instant, rtt_stats: 
         return;
     }
 
-    if r.congestion_window < r.ssthresh {
+    if r.congestion_window < r.ssthresh.get() {
         // In Slow slart, bytes_acked_sl is used for counting
         // acknowledged bytes.
         r.bytes_acked_sl += packet.size;
@@ -95,7 +96,7 @@ fn on_packet_acked(r: &mut Congestion, packet: &Acked, now: Instant, rtt_stats: 
 
         if r.hystart.on_packet_acked(packet, rtt_stats.latest_rtt, now) {
             // Exit to congestion avoidance if CSS ends.
-            r.ssthresh = r.congestion_window;
+            r.ssthresh.update(r.congestion_window, true);
         }
     } else {
         // Congestion avoidance.
@@ -131,7 +132,7 @@ fn congestion_event(
 
         r.bytes_acked_ca = (r.congestion_window as f64 * LOSS_REDUCTION_FACTOR) as usize;
 
-        r.ssthresh = r.congestion_window;
+        r.ssthresh.update(r.congestion_window, r.hystart.in_css());
 
         if r.hystart.in_css() {
             r.hystart.congestion_event();
@@ -145,8 +146,17 @@ fn rollback(_r: &mut Congestion) -> bool {
     true
 }
 
-fn has_custom_pacing() -> bool {
-    false
+#[cfg(feature = "qlog")]
+pub fn state_str(r: &Congestion, now: Instant) -> &'static str {
+    if r.hystart.in_css() {
+        "conservative_slow_start"
+    } else if r.congestion_window < r.ssthresh.get() {
+        "slow_start"
+    } else if r.in_congestion_recovery(now) {
+        "recovery"
+    } else {
+        "congestion_avoidance"
+    }
 }
 
 fn debug_fmt(_r: &Congestion, _f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -177,7 +187,7 @@ mod tests {
         let r = LegacyRecovery::new(&cfg);
 
         assert!(r.cwnd() > 0);
-        assert_eq!(r.bytes_in_flight, 0);
+        assert_eq!(r.bytes_in_flight(), 0);
     }
 
     #[test]
@@ -240,20 +250,46 @@ mod tests {
             sender.send_packet(size);
         }
 
+        let rtt = Duration::from_millis(100);
         let prev_cwnd = sender.congestion_window;
 
+        sender.advance_time(rtt);
         sender.lose_n_packets(1, size, None);
 
         // After congestion event, cwnd will be reduced.
         let cur_cwnd = (prev_cwnd as f64 * LOSS_REDUCTION_FACTOR) as usize;
         assert_eq!(sender.congestion_window, cur_cwnd);
 
-        let rtt = Duration::from_millis(100);
         sender.update_rtt(rtt);
         sender.advance_time(2 * rtt);
 
-        sender.ack_n_packets(8, size);
-        // After acking more than cwnd, expect cwnd increased by MSS
+        sender.ack_n_packets(13, size);
+        // Acked packets were sent before the loss event, window does not
+        // increase.
+        assert_eq!(sender.congestion_window, cur_cwnd);
+
+        for _ in 0..7 {
+            sender.send_packet(size);
+        }
+        sender.advance_time(rtt);
+        sender.ack_n_packets(2, size);
+        // Not enough ACKed, window does not increase.
+        assert_eq!(sender.congestion_window, cur_cwnd);
+
+        sender.ack_n_packets(1, size);
+        // Expect cwnd increased by MSS
         assert_eq!(sender.congestion_window, cur_cwnd + size);
+
+        for _ in 0..7 {
+            sender.send_packet(size);
+        }
+
+        // Expect a second window increase after a cwnd's worth of ACKs.
+        sender.ack_n_packets(5, size);
+        // Not yet, one more ACK needed.
+        assert_eq!(sender.congestion_window, cur_cwnd + size);
+        sender.ack_n_packets(1, size);
+        // Expect cwnd increased by MSS
+        assert_eq!(sender.congestion_window, cur_cwnd + 2 * size);
     }
 }

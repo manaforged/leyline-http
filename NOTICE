@@ -8,7 +8,7 @@ component retains its own license; the grants below are informative.
 Vendored quiche (`crates/leyline-quiche/`)
 ================================================================================
 
-`leyline-quiche` is a fork of Cloudflare's `quiche` (v0.23.7) that links
+`leyline-quiche` is a fork of Cloudflare's `quiche` (v0.30.0) that links
 against `leyline-bssl` instead of upstream `boring`, so Leyline's HTTP/2 and
 HTTP/3 ClientHellos share the same patched BoringSSL.
 
@@ -23,6 +23,8 @@ Modifications from upstream:
   `leyline-bssl-tokio`.
 - Bundled BoringSSL build (`boringssl-vendored` feature) removed — BoringSSL
   is provided by `leyline-bssl-sys` instead.
+- BoringSSL symbols are linked under the `LEYLINE_` prefix.
+- `Connection::cipher` returns the negotiated TLS 1.3 cipher suite name.
 
 ================================================================================
 BoringSSL bindings (vendored under `crates/leyline-bssl*`)

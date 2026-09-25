@@ -24,19 +24,19 @@
 // NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-pub mod bandwidth;
 mod bbr;
 mod bbr2;
 pub mod pacer;
 mod recovery;
 
 use std::fmt::Debug;
+use std::str::FromStr;
 use std::time::Instant;
 
-use self::bandwidth::Bandwidth;
 pub use self::recovery::GRecovery;
+use crate::recovery::bandwidth::Bandwidth;
 
-use crate::recovery::rtt::INITIAL_RTT;
+use crate::recovery::RecoveryStats;
 use crate::recovery::rtt::RttStats;
 
 #[derive(Debug)]
@@ -51,30 +51,12 @@ pub struct Acked {
     pub(super) time_sent: Instant,
 }
 
-#[enum_dispatch::enum_dispatch(CongestionControl)]
-#[allow(clippy::large_enum_variant)]
-#[derive(Debug)]
-pub(crate) enum Congestion {
-    BBRv2(bbr2::BBRv2),
-}
-
-impl Congestion {
-    pub(super) fn bbrv2(
-        initial_tcp_congestion_window: usize,
-        max_congestion_window: usize,
-        max_segment_size: usize,
-    ) -> Self {
-        Congestion::BBRv2(bbr2::BBRv2::new(
-            initial_tcp_congestion_window,
-            max_congestion_window,
-            max_segment_size,
-            INITIAL_RTT,
-        ))
-    }
-}
-
-#[enum_dispatch::enum_dispatch]
 pub(super) trait CongestionControl: Debug {
+    /// Returns the name of the current state of the congestion control state
+    /// machine. Used to annotate qlogs after state transitions.
+    #[cfg(feature = "qlog")]
+    fn state_str(&self) -> &'static str;
+
     /// Returns the size of the current congestion window in bytes. Note, this
     /// is not the *available* window. Some send algorithms may not use a
     /// congestion window and will return 0.
@@ -100,7 +82,6 @@ pub(super) trait CongestionControl: Debug {
         packet_number: u64,
         bytes: usize,
         is_retransmissible: bool,
-        rtt_stats: &RttStats,
     );
 
     /// Inform that `packet_number` has been neutered.
@@ -123,6 +104,7 @@ pub(super) trait CongestionControl: Debug {
         lost_packets: &[Lost],
         least_unacked: u64,
         rtt_stats: &RttStats,
+        recovery_stats: &mut RecoveryStats,
     );
 
     /// Called when an RTO fires.  Resets the retransmission alarm if there are
@@ -141,14 +123,11 @@ pub(super) trait CongestionControl: Debug {
     #[allow(dead_code)]
     fn is_cwnd_limited(&self, bytes_in_flight: usize) -> bool;
 
-    #[cfg(test)]
-    fn is_app_limited(&self, bytes_in_flight: usize) -> bool {
-        !self.is_cwnd_limited(bytes_in_flight)
-    }
-
     fn pacing_rate(&self, bytes_in_flight: usize, rtt_stats: &RttStats) -> Bandwidth;
 
     fn bandwidth_estimate(&self, rtt_stats: &RttStats) -> Bandwidth;
+
+    fn max_bandwidth(&self) -> Bandwidth;
 
     fn update_mss(&mut self, new_mss: usize);
 
@@ -157,5 +136,193 @@ pub(super) trait CongestionControl: Debug {
     #[cfg(feature = "qlog")]
     fn ssthresh(&self) -> Option<u64> {
         None
+    }
+}
+
+/// BBR settings used to customize the algorithm's behavior.
+///
+/// This functionality is experimental and will be removed in the future.
+///
+/// A congestion control algorithm has dual-responsibility of effective network
+/// utilization and avoiding congestion. Custom values should be choosen
+/// carefully since incorrect values can lead to network degradation for all
+/// connections on the shared network.
+#[derive(Debug, Default, Copy, Clone, PartialEq)]
+#[repr(C)]
+#[doc(hidden)]
+pub struct BbrParams {
+    /// Controls the BBR startup gain.
+    pub startup_cwnd_gain: Option<f32>,
+
+    /// Controls the BBR startup pacing gain.
+    pub startup_pacing_gain: Option<f32>,
+
+    /// Controls the BBR full bandwidth threshold.
+    pub full_bw_threshold: Option<f32>,
+
+    /// Controls the number of rounds to stay in STARTUP before
+    /// exiting due to bandwidth plateau.
+    pub startup_full_bw_rounds: Option<usize>,
+
+    /// Controls the BBR startup loss count necessary to exit startup.
+    pub startup_full_loss_count: Option<usize>,
+
+    /// Controls the BBR drain cwnd gain.
+    pub drain_cwnd_gain: Option<f32>,
+
+    /// Controls the BBR drain pacing gain.
+    pub drain_pacing_gain: Option<f32>,
+
+    /// Controls if BBR should respect Reno coexistence.
+    pub enable_reno_coexistence: Option<bool>,
+
+    /// Controls if BBR should enable code in Bandwidth Sampler that
+    /// attempts to avoid overestimating bandwidth on ack compression.
+    pub enable_overestimate_avoidance: Option<bool>,
+
+    /// Controls if BBR should enable a possible fix in Bandwidth
+    /// Sampler that attempts to bandwidth over estimation avoidance.
+    pub choose_a0_point_fix: Option<bool>,
+
+    /// Controls the BBR bandwidth probe up pacing gain.
+    pub probe_bw_probe_up_pacing_gain: Option<f32>,
+
+    /// Controls the BBR bandwidth probe down pacing gain.
+    pub probe_bw_probe_down_pacing_gain: Option<f32>,
+
+    /// Controls the BBR probe bandwidth DOWN/CRUISE/REFILL cwnd gain.
+    pub probe_bw_cwnd_gain: Option<f32>,
+
+    /// Controls the BBR probe bandwidth UP cwnd gain.
+    pub probe_bw_up_cwnd_gain: Option<f32>,
+
+    /// Controls the BBR probe RTT pacing gain.
+    pub probe_rtt_pacing_gain: Option<f32>,
+
+    /// Controls the BBR probe RTT cwnd gain.
+    pub probe_rtt_cwnd_gain: Option<f32>,
+
+    /// Controls the number of rounds BBR should stay in probe up if
+    /// bytes_in_flight doesn't drop below target.
+    pub max_probe_up_queue_rounds: Option<usize>,
+
+    /// Controls the BBR loss threshold.
+    pub loss_threshold: Option<f32>,
+
+    /// Controls if BBR should use bytes delievered as an estimate for
+    /// inflight_hi.
+    pub use_bytes_delivered_for_inflight_hi: Option<bool>,
+
+    /// Controls if BBR should adjust startup pacing at round end.
+    pub decrease_startup_pacing_at_end_of_round: Option<bool>,
+
+    /// Controls the BBR bandwidth lo reduction strategy.
+    pub bw_lo_reduction_strategy: Option<BbrBwLoReductionStrategy>,
+
+    /// Determines whether app limited rounds with no bandwidth growth count
+    /// towards the rounds threshold to exit startup.
+    pub ignore_app_limited_for_no_bandwidth_growth: Option<bool>,
+
+    /// Initial pacing rate for a new connection before an RTT
+    /// estimate is available.  This rate serves as an upper bound on
+    /// the initial pacing rate, which is calculated by dividing the
+    /// initial cwnd by the first RTT estimate.
+    pub initial_pacing_rate_bytes_per_second: Option<u64>,
+
+    /// Lower bound on the congestion window in packets.  If not set,
+    /// the initial congestion window is used as the lower bound.
+    pub min_cwnd_packets: Option<usize>,
+
+    /// If true, scale the pacing rate when updating mss when doing pmtud.
+    pub scale_pacing_rate_by_mss: Option<bool>,
+
+    /// Disable `has_stayed_long_enough_in_probe_down` which can cause ProbeDown
+    /// to exit early.
+    pub disable_probe_down_early_exit: Option<bool>,
+
+    /// Set the expected send time for packets when using BBR to `now`
+    /// instead of `get_next_release_time()`.  Setting the time based
+    /// on `get_next_release_time()` can result in artificially low
+    /// minRTT measurements which will make BBR misbehave.
+    pub time_sent_set_to_now: Option<bool>,
+
+    /// Selects the RTT jump detector implementation.
+    #[cfg(feature = "internal")]
+    pub rtt_jump_detector: Option<BbrRttJumpDetector>,
+}
+
+/// Selects which RTT jump detector BBR uses.
+///
+/// This functionality is experimental and will be removed in the future.
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
+#[repr(C)]
+#[doc(hidden)]
+pub enum BbrRttJumpDetector {
+    /// Disables RTT jump detection.
+    #[default]
+    Disabled = 0,
+
+    /// Connection-lifetime minimum baseline with a strict multiplicative jump
+    /// test and a sample/duration confirmation gate.
+    GlobalMin = 1,
+
+    /// 3-state Hidden Markov Model (HMM) decoded with a scaled forward filter.
+    Hmm = 2,
+}
+
+#[doc(hidden)]
+impl FromStr for BbrRttJumpDetector {
+    type Err = crate::Error;
+
+    /// Converts a string to `BbrRttJumpDetector`.
+    ///
+    /// If `name` is not valid, `Error::CongestionControl` is returned.
+    fn from_str(name: &str) -> Result<Self, Self::Err> {
+        match name {
+            "none" => Ok(BbrRttJumpDetector::Disabled),
+            "global_min" => Ok(BbrRttJumpDetector::GlobalMin),
+            "hmm" => Ok(BbrRttJumpDetector::Hmm),
+
+            _ => Err(crate::Error::CongestionControl),
+        }
+    }
+}
+
+/// Controls BBR's bandwidth reduction strategy on congestion event.
+///
+/// This functionality is experimental and will be removed in the future.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[repr(C)]
+#[doc(hidden)]
+pub enum BbrBwLoReductionStrategy {
+    /// Uses the default strategy based on `BBRBeta`.
+    Default = 0,
+
+    /// Considers min-rtt to estimate bandwidth reduction.
+    MinRttReduction = 1,
+
+    /// Considers inflight data to estimate bandwidth reduction.
+    InflightReduction = 2,
+
+    /// Considers cwnd to estimate bandwidth reduction.
+    CwndReduction = 3,
+}
+
+#[doc(hidden)]
+impl FromStr for BbrBwLoReductionStrategy {
+    type Err = crate::Error;
+
+    /// Converts a string to `BbrBwLoReductionStrategy`.
+    ///
+    /// If `name` is not valid, `Error::CongestionControl` is returned.
+    fn from_str(name: &str) -> Result<Self, Self::Err> {
+        match name {
+            "default" => Ok(BbrBwLoReductionStrategy::Default),
+            "minrtt" => Ok(BbrBwLoReductionStrategy::MinRttReduction),
+            "inflight" => Ok(BbrBwLoReductionStrategy::InflightReduction),
+            "cwnd" => Ok(BbrBwLoReductionStrategy::CwndReduction),
+
+            _ => Err(crate::Error::CongestionControl),
+        }
     }
 }

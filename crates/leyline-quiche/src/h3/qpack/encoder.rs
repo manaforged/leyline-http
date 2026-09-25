@@ -113,7 +113,7 @@ fn lookup_static<T: NameValue>(h: &T) -> Option<(u64, bool)> {
     None
 }
 
-fn encode_int(mut v: u64, first: u8, prefix: usize, b: &mut octets::OctetsMut) -> Result<()> {
+pub fn encode_int(mut v: u64, first: u8, prefix: usize, b: &mut octets::OctetsMut) -> Result<()> {
     let mask = 2u64.pow(prefix as u32) - 1;
 
     // Encode I on N bits.
@@ -141,7 +141,7 @@ fn encode_int(mut v: u64, first: u8, prefix: usize, b: &mut octets::OctetsMut) -
 }
 
 #[inline]
-fn encode_str<const LOWER_CASE: bool>(
+pub fn encode_str<const LOWER_CASE: bool>(
     v: &[u8],
     first: u8,
     prefix: usize,
@@ -149,13 +149,13 @@ fn encode_str<const LOWER_CASE: bool>(
 ) -> Result<()> {
     // Huffman-encoding generally saves space but in some cases it doesn't, for
     // those just encode the literal string.
-    match super::huffman::encode_output_length::<LOWER_CASE>(v) {
+    match octets::huffman_encoding_len::<LOWER_CASE>(v) {
         Ok(len) => {
             encode_int(len as u64, first | (1 << prefix), prefix, b)?;
-            super::huffman::encode::<LOWER_CASE>(v, b)?;
+            b.put_huffman_encoded::<LOWER_CASE>(v)?;
         }
 
-        Err(super::Error::InflatedHuffmanEncoding) => {
+        Err(_) => {
             encode_int(v.len() as u64, first, prefix, b)?;
             if LOWER_CASE {
                 b.put_bytes(&v.to_ascii_lowercase())?;
@@ -163,8 +163,6 @@ fn encode_str<const LOWER_CASE: bool>(
                 b.put_bytes(v)?;
             }
         }
-
-        Err(e) => return Err(e),
     }
 
     Ok(())

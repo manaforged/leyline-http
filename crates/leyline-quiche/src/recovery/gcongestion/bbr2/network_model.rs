@@ -32,16 +32,15 @@ use std::ops::Add;
 use std::time::Duration;
 use std::time::Instant;
 
+use crate::recovery::gcongestion::Bandwidth;
 use crate::recovery::gcongestion::Lost;
-use crate::recovery::gcongestion::bandwidth::Bandwidth;
 use crate::recovery::gcongestion::bbr::BandwidthSampler;
-use crate::recovery::rtt::INITIAL_RTT;
-use crate::recovery::rtt::RttStats;
+use crate::recovery::gcongestion::bbr2::Params;
 
 use super::Acked;
 use super::BBRv2CongestionEvent;
 use super::BwLoMode;
-use super::PARAMS;
+use super::rtt_jump_detector::RttJumpDetector;
 
 pub(super) const DEFAULT_MSS: usize = 1300;
 
@@ -182,18 +181,31 @@ pub(super) struct BBRv2NetworkModel {
     full_bandwidth_baseline: Bandwidth,
     rounds_without_bandwidth_growth: usize,
 
-    // Used by STARTUP and PROBE_UP to decide when to exit.
+    /// Used by STARTUP and PROBE_UP to decide when to exit.
     rounds_with_queueing: usize,
+
+    /// Determines whether app limited rounds with no bandwidth growth count
+    /// towards the rounds threshold to exit startup.
+    ignore_app_limited_for_no_bandwidth_growth: bool,
+
+    /// The most recent send rate from the BandwidthSampler.
+    latest_send_rate: Option<Bandwidth>,
+    /// The most recent ack rate from the BandwidthSampler.
+    latest_ack_rate: Option<Bandwidth>,
+
+    /// Detector for persistent RTT jump episodes.
+    rtt_jump_detector: RttJumpDetector,
 }
 
 impl BBRv2NetworkModel {
-    pub(super) fn new(cwnd_gain: f32, pacing_gain: f32, overestimate_avoidance: bool) -> Self {
+    pub(super) fn new(params: &Params, initial_rtt: Duration) -> Self {
         BBRv2NetworkModel {
             min_bytes_in_flight_in_round: usize::MAX,
             inflight_hi_limited_in_round: false,
             bandwidth_sampler: BandwidthSampler::new(
-                PARAMS.initial_max_ack_height_filter_window,
-                overestimate_avoidance,
+                params.initial_max_ack_height_filter_window,
+                params.enable_overestimate_avoidance,
+                params.choose_a0_point_fix,
             ),
             round_trip_counter: RoundTripCounter {
                 round_trip_count: 0,
@@ -201,15 +213,15 @@ impl BBRv2NetworkModel {
                 end_of_round_trip: None,
             },
             min_rtt_filter: MinRttFilter {
-                min_rtt: INITIAL_RTT,
+                min_rtt: initial_rtt,
                 min_rtt_timestamp: Instant::now(),
             },
             max_bandwidth_filter: MaxBandwidthFilter {
                 max_bandwidth: [Bandwidth::zero(), Bandwidth::zero()],
             },
             cwnd_limited_before_aggregation_epoch: false,
-            cwnd_gain,
-            pacing_gain,
+            cwnd_gain: params.startup_cwnd_gain,
+            pacing_gain: params.startup_pacing_gain,
             full_bandwidth_reached: false,
             bytes_lost_in_round: 0,
             loss_events_in_round: 0,
@@ -224,7 +236,25 @@ impl BBRv2NetworkModel {
             full_bandwidth_baseline: Bandwidth::zero(),
             rounds_without_bandwidth_growth: 0,
             rounds_with_queueing: 0,
+
+            ignore_app_limited_for_no_bandwidth_growth: params
+                .ignore_app_limited_for_no_bandwidth_growth,
+
+            latest_send_rate: None,
+            latest_ack_rate: None,
+
+            rtt_jump_detector: RttJumpDetector::new(params.rtt_jump_detector),
         }
+    }
+
+    #[cfg(feature = "qlog")]
+    pub(super) fn send_rate(&self) -> Option<Bandwidth> {
+        self.latest_send_rate
+    }
+
+    #[cfg(feature = "qlog")]
+    pub(super) fn ack_rate(&self) -> Option<Bandwidth> {
+        self.latest_ack_rate
     }
 
     pub(super) fn max_ack_height(&self) -> usize {
@@ -269,7 +299,6 @@ impl BBRv2NetworkModel {
         packet_number: u64,
         bytes: usize,
         is_retransmissible: bool,
-        _rtt_stats: &RttStats,
     ) {
         // Updating the min here ensures a more realistic (0) value when flows
         // exit quiescence.
@@ -294,6 +323,7 @@ impl BBRv2NetworkModel {
         acked_packets: &[Acked],
         lost_packets: &[Lost],
         congestion_event: &mut BBRv2CongestionEvent,
+        params: &Params,
     ) {
         let prior_bytes_acked = self.total_bytes_acked();
         let prior_bytes_lost = self.total_bytes_lost();
@@ -325,10 +355,9 @@ impl BBRv2NetworkModel {
             congestion_event.last_packet_send_state = sample.last_packet_send_state;
         }
 
-        // Avoid updating `max_bandwidth_filter` if a) this is a loss-only event,
-        // or b) all packets in `acked_packets` did not generate valid
-        // samples. (e.g. ack of ack-only packets). In both cases,
-        // total_bytes_acked() will not change.
+        // Do not update `max_bandwidth_filter` for a loss-only event or when no
+        // acknowledged packet produced a valid sample. In either case,
+        // `total_bytes_acked()` remains unchanged.
         if let Some(sample_max) = sample.sample_max_bandwidth {
             if prior_bytes_acked != self.total_bytes_acked() {
                 congestion_event.sample_max_bandwidth = Some(sample_max);
@@ -340,8 +369,18 @@ impl BBRv2NetworkModel {
 
         if let Some(rtt_sample) = sample.sample_rtt {
             congestion_event.sample_min_rtt = Some(rtt_sample);
+
+            self.rtt_jump_detector.on_rtt_sample(
+                rtt_sample,
+                event_time,
+                self.full_bandwidth_reached,
+            );
+
             self.min_rtt_filter.update(rtt_sample, event_time);
         }
+
+        self.latest_send_rate = sample.sample_max_send_rate;
+        self.latest_ack_rate = sample.sample_max_ack_rate;
 
         congestion_event.bytes_acked = self.total_bytes_acked() - prior_bytes_acked;
         congestion_event.bytes_lost = self.total_bytes_lost() - prior_bytes_lost;
@@ -381,7 +420,7 @@ impl BBRv2NetworkModel {
         }
 
         // Adapt lower bounds(bandwidth_lo and inflight_lo).
-        self.adapt_lower_bounds(congestion_event);
+        self.adapt_lower_bounds(congestion_event, params);
 
         if !congestion_event.end_of_round_trip {
             return;
@@ -400,8 +439,8 @@ impl BBRv2NetworkModel {
         self.bandwidth_sampler.on_packet_neutered(packet_number)
     }
 
-    fn adapt_lower_bounds(&mut self, congestion_event: &BBRv2CongestionEvent) {
-        if PARAMS.bw_lo_mode == BwLoMode::Default {
+    fn adapt_lower_bounds(&mut self, congestion_event: &BBRv2CongestionEvent, params: &Params) {
+        if params.bw_lo_mode == BwLoMode::Default {
             if !congestion_event.end_of_round_trip || congestion_event.is_probing_for_bandwidth {
                 return;
             }
@@ -413,14 +452,14 @@ impl BBRv2NetworkModel {
 
                 self.bandwidth_lo = Some(
                     self.bandwidth_latest
-                        .max(self.bandwidth_lo.unwrap() * (1.0 - PARAMS.beta)),
+                        .max(self.bandwidth_lo.unwrap() * (1.0 - params.beta)),
                 );
 
                 if self.inflight_lo == usize::MAX {
                     self.inflight_lo = congestion_event.prior_cwnd;
                 }
 
-                let inflight_lo_new = (self.inflight_lo as f32 * (1.0 - PARAMS.beta)) as usize;
+                let inflight_lo_new = (self.inflight_lo as f32 * (1.0 - params.beta)) as usize;
                 self.inflight_lo = self.inflight_latest.max(inflight_lo_new);
             }
             return;
@@ -447,7 +486,7 @@ impl BBRv2NetworkModel {
             self.prior_bandwidth_lo = self.bandwidth_lo;
         }
 
-        match PARAMS.bw_lo_mode {
+        match params.bw_lo_mode {
             BwLoMode::Default => unreachable!("Handled above"),
             BwLoMode::MinRttReduction => {
                 let reduction = Bandwidth::from_bytes_and_time_delta(
@@ -483,30 +522,29 @@ impl BBRv2NetworkModel {
         // sample_max_bandwidth will be None if the loss is triggered by a timer
         // expiring. Ideally we'd use the most recent bandwidth sample,
         // but bandwidth_latest is safer than None.
-        if congestion_event.sample_max_bandwidth.is_some() {
+        if let Some(sample_max_bandwidth) = congestion_event.sample_max_bandwidth {
             // bandwidth_latest is the max bandwidth for the round, but to allow
             // fast, conservation style response to loss, use the last sample.
-            last_bandwidth = congestion_event.sample_max_bandwidth.unwrap();
+            last_bandwidth = sample_max_bandwidth;
         }
-        if self.pacing_gain > PARAMS.full_bw_threshold {
-            // In STARTUP, `pacing_gain` is applied to `bandwidth_lo` in
-            // update_pacing_rate, so this backs that multiplication out to allow
-            // the pacing rate to decrease, but not below
-            // last_bandwidth * full_bw_threshold.
+        if self.pacing_gain > params.full_bw_threshold {
+            // STARTUP applies `pacing_gain` to `bandwidth_lo`. Remove that
+            // factor so pacing can decrease without falling below
+            // the threshold.
             self.bandwidth_lo = self.bandwidth_lo.max(Some(
-                last_bandwidth * (PARAMS.full_bw_threshold / self.pacing_gain),
+                last_bandwidth * (params.full_bw_threshold / self.pacing_gain),
             ));
         } else {
             // Ensure bandwidth_lo isn't lower than last_bandwidth.
             self.bandwidth_lo = self.bandwidth_lo.max(Some(last_bandwidth))
         }
-        // If it's the end of the round, ensure bandwidth_lo doesn't decrease more
-        // than beta.
+        // At the end of a round, ensure `bandwidth_lo` does not decrease by
+        // more than `beta`.
         if congestion_event.end_of_round_trip {
             self.bandwidth_lo = self.bandwidth_lo.max(
                 self.prior_bandwidth_lo
                     .take()
-                    .map(|b| b * (1.0 - PARAMS.beta)),
+                    .map(|b| b * (1.0 - params.beta)),
             )
         }
         // These modes ignore inflight_lo as well.
@@ -525,13 +563,17 @@ impl BBRv2NetworkModel {
             .remove_obsolete_packets(least_unacked_packet);
     }
 
-    pub(super) fn maybe_expire_min_rtt(&mut self, congestion_event: &BBRv2CongestionEvent) -> bool {
+    pub(super) fn maybe_expire_min_rtt(
+        &mut self,
+        congestion_event: &BBRv2CongestionEvent,
+        params: &Params,
+    ) -> bool {
         if congestion_event.sample_min_rtt.is_none() {
             return false;
         }
 
         if congestion_event.event_time
-            < self.min_rtt_filter.min_rtt_timestamp + PARAMS.probe_rtt_period
+            < self.min_rtt_filter.min_rtt_timestamp + params.probe_rtt_period
         {
             return false;
         }
@@ -548,6 +590,7 @@ impl BBRv2NetworkModel {
         &self,
         congestion_event: &BBRv2CongestionEvent,
         max_loss_events: usize,
+        params: &Params,
     ) -> bool {
         let send_state = &congestion_event.last_packet_send_state;
 
@@ -567,7 +610,7 @@ impl BBRv2NetworkModel {
 
         if inflight_at_send > 0 && bytes_lost_in_round > 0 {
             let lost_in_round_threshold =
-                (inflight_at_send as f32 * PARAMS.loss_threshold) as usize;
+                (inflight_at_send as f32 * params.loss_threshold) as usize;
             if bytes_lost_in_round > lost_in_round_threshold {
                 return true;
             }
@@ -590,8 +633,12 @@ impl BBRv2NetworkModel {
         self.inflight_hi_limited_in_round = false;
     }
 
-    pub(super) fn has_bandwidth_growth(&mut self, congestion_event: &BBRv2CongestionEvent) -> bool {
-        let threshold = self.full_bandwidth_baseline * PARAMS.full_bw_threshold;
+    pub(super) fn has_bandwidth_growth(
+        &mut self,
+        congestion_event: &BBRv2CongestionEvent,
+        params: &Params,
+    ) -> bool {
+        let threshold = self.full_bandwidth_baseline * params.full_bw_threshold;
 
         if self.max_bandwidth() >= threshold {
             self.full_bandwidth_baseline = self.max_bandwidth();
@@ -599,10 +646,21 @@ impl BBRv2NetworkModel {
             return true;
         }
 
-        self.rounds_without_bandwidth_growth += 1;
+        if !congestion_event.last_packet_send_state.is_valid {
+            // last_packet_send_state not available because the
+            // congestion event did not contain any non-ACK frames.
+            return false;
+        }
+
+        let ignore_round = self.ignore_app_limited_for_no_bandwidth_growth
+            && congestion_event.last_packet_send_state.is_app_limited;
+
+        if !ignore_round {
+            self.rounds_without_bandwidth_growth += 1;
+        }
 
         // full_bandwidth_reached is only set to true when not app-limited
-        if self.rounds_without_bandwidth_growth >= PARAMS.startup_full_bw_rounds
+        if self.rounds_without_bandwidth_growth >= params.startup_full_bw_rounds
             && !congestion_event.last_packet_send_state.is_app_limited
         {
             self.full_bandwidth_reached = true;
@@ -616,7 +674,7 @@ impl BBRv2NetworkModel {
         2 * DEFAULT_MSS
     }
 
-    pub(super) fn check_persistent_queue(&mut self, target_gain: f32) {
+    pub(super) fn check_persistent_queue(&mut self, target_gain: f32, params: &Params) {
         let target = self
             .bdp(self.max_bandwidth(), target_gain)
             .max(self.bdp0() + self.queueing_threshold_extra_bytes());
@@ -628,7 +686,7 @@ impl BBRv2NetworkModel {
 
         self.rounds_with_queueing += 1;
         #[allow(clippy::absurd_extreme_comparisons)]
-        if self.rounds_with_queueing >= PARAMS.max_startup_queue_rounds {
+        if self.rounds_with_queueing >= params.max_startup_queue_rounds {
             self.full_bandwidth_reached = true;
         }
     }
@@ -643,6 +701,33 @@ impl BBRv2NetworkModel {
 
     pub(super) fn total_bytes_lost(&self) -> usize {
         self.bandwidth_sampler.total_bytes_lost()
+    }
+
+    /// Total number of confirmed persistent RTT jump episodes over the
+    /// lifetime of the connection.
+    pub(super) fn rtt_persistent_jump_count(&self) -> u64 {
+        self.rtt_jump_detector.rtt_persistent_jump_count()
+    }
+
+    /// The start time of the most recently confirmed persistent RTT jump
+    /// episode, if any.
+    #[cfg(test)]
+    pub(super) fn last_persistent_jump_time(&self) -> Option<Instant> {
+        self.rtt_jump_detector.last_persistent_jump_time()
+    }
+
+    /// Whether an RTT jump episode is currently active (elevated but not yet
+    /// resolved), regardless of whether it has been confirmed persistent.
+    #[cfg(test)]
+    pub(super) fn is_rtt_jump_active(&self) -> bool {
+        self.rtt_jump_detector.is_rtt_jump_active()
+    }
+
+    /// Whether the current RTT jump episode has been confirmed as a persistent
+    /// network condition.
+    #[cfg(test)]
+    pub(super) fn is_rtt_jump_persistent(&self) -> bool {
+        self.rtt_jump_detector.is_rtt_jump_persistent()
     }
 
     fn round_trip_count(&self) -> usize {
@@ -677,8 +762,8 @@ impl BBRv2NetworkModel {
         self.inflight_hi
     }
 
-    pub(super) fn inflight_hi_with_headroom(&self) -> usize {
-        let headroom = (self.inflight_hi as f32 * PARAMS.inflight_hi_headroom) as usize;
+    pub(super) fn inflight_hi_with_headroom(&self, params: &Params) -> usize {
+        let headroom = (self.inflight_hi as f32 * params.inflight_hi_headroom) as usize;
         self.inflight_hi.saturating_sub(headroom)
     }
 
@@ -727,5 +812,246 @@ impl BBRv2NetworkModel {
 
     pub(super) fn rounds_with_queueing(&self) -> usize {
         self.rounds_with_queueing
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::recovery::gcongestion::BbrRttJumpDetector;
+    use crate::recovery::gcongestion::bbr2::DEFAULT_PARAMS;
+
+    fn ms(millis: u64) -> Duration {
+        Duration::from_millis(millis)
+    }
+
+    const RTT: Duration = Duration::from_millis(50);
+    const RTT_3X: Duration = Duration::from_millis(150);
+    const RTT_JUMP: Duration = Duration::from_millis(151);
+
+    /// Ack a packet with the given RTT through the real congestion-event path.
+    fn ack_with_rtt(
+        model: &mut BBRv2NetworkModel,
+        params: &Params,
+        pkt_num: u64,
+        base: Instant,
+        sent_offset: Duration,
+        rtt: Duration,
+    ) -> BBRv2CongestionEvent {
+        ack_with_rtt_util(
+            model,
+            params,
+            pkt_num,
+            base,
+            sent_offset,
+            rtt,
+            100_000,
+            1200,
+        )
+    }
+
+    /// As `ack_with_rtt`, but with explicit cwnd and inflight inputs.
+    // Test harness: the extra cwnd/inflight knobs push this one over the
+    // argument-count lint, which is not worth a builder struct in tests.
+    #[allow(clippy::too_many_arguments)]
+    fn ack_with_rtt_util(
+        model: &mut BBRv2NetworkModel,
+        params: &Params,
+        pkt_num: u64,
+        base: Instant,
+        sent_offset: Duration,
+        rtt: Duration,
+        prior_cwnd: usize,
+        prior_in_flight: usize,
+    ) -> BBRv2CongestionEvent {
+        let bytes = 1200;
+        let sent_time = base + sent_offset;
+        model.on_packet_sent(sent_time, 0, pkt_num, bytes, true);
+
+        let ack_time = sent_time + rtt;
+        let acked = [Acked {
+            pkt_num,
+            time_sent: sent_time,
+        }];
+        let mut event = BBRv2CongestionEvent::new(ack_time, prior_cwnd, prior_in_flight, false);
+        model.on_congestion_event_start(&acked, &[], &mut event, params);
+        event
+    }
+
+    fn rtt_jump_params(detector: BbrRttJumpDetector) -> Params {
+        Params {
+            rtt_jump_detector: detector,
+            ..DEFAULT_PARAMS
+        }
+    }
+
+    #[test]
+    fn rtt_jump_detector_is_disabled_by_default() {
+        let params = &DEFAULT_PARAMS;
+        let mut model = BBRv2NetworkModel::new(params, RTT);
+        let base = Instant::now();
+
+        for pkt in 1..5 {
+            ack_with_rtt(&mut model, params, pkt, base, ms(pkt * 10), RTT);
+        }
+
+        let mut offset = 100;
+        for pkt in 5..20 {
+            ack_with_rtt(&mut model, params, pkt, base, ms(offset), RTT_3X);
+            offset += 100;
+        }
+
+        assert_eq!(model.rtt_persistent_jump_count(), 0);
+        assert!(!model.is_rtt_jump_active());
+        assert_eq!(model.last_persistent_jump_time(), None);
+    }
+
+    #[test]
+    fn global_min_detector_can_be_enabled() {
+        let params = &rtt_jump_params(BbrRttJumpDetector::GlobalMin);
+        let mut model = BBRv2NetworkModel::new(params, RTT);
+        let base = Instant::now();
+
+        for pkt in 1..5 {
+            ack_with_rtt(&mut model, params, pkt, base, ms(pkt * 10), RTT);
+        }
+        model.set_full_bandwidth_reached();
+
+        ack_with_rtt(&mut model, params, 5, base, ms(100), RTT_JUMP);
+        ack_with_rtt(&mut model, params, 6, base, ms(110), RTT_JUMP);
+        ack_with_rtt(&mut model, params, 7, base, ms(300), RTT_JUMP);
+
+        assert_eq!(model.rtt_persistent_jump_count(), 1);
+        assert!(model.is_rtt_jump_persistent());
+        assert!(model.last_persistent_jump_time().is_some());
+    }
+
+    #[test]
+    fn hmm_detector_can_be_enabled() {
+        let params = &rtt_jump_params(BbrRttJumpDetector::Hmm);
+        let mut model = BBRv2NetworkModel::new(params, RTT);
+        let base = Instant::now();
+
+        for pkt in 1..9u64 {
+            ack_with_rtt(&mut model, params, pkt, base, ms(pkt * 10), RTT);
+        }
+        model.set_full_bandwidth_reached();
+
+        let mut offset = 200u64;
+        for pkt in 9u64..40 {
+            ack_with_rtt(&mut model, params, pkt, base, ms(offset), RTT_3X);
+            offset += 100;
+        }
+
+        assert_eq!(model.rtt_persistent_jump_count(), 1);
+        assert!(model.is_rtt_jump_persistent());
+        assert!(model.last_persistent_jump_time().is_some());
+    }
+
+    #[test]
+    fn global_min_detector_sustained_step_becomes_persistent() {
+        let params = &rtt_jump_params(BbrRttJumpDetector::GlobalMin);
+        let mut model = BBRv2NetworkModel::new(params, RTT);
+        let base = Instant::now();
+
+        for pkt in 1..5 {
+            ack_with_rtt(&mut model, params, pkt, base, ms(pkt * 10), RTT);
+        }
+        model.set_full_bandwidth_reached();
+
+        ack_with_rtt(&mut model, params, 5, base, ms(100), RTT_JUMP);
+        assert!(model.is_rtt_jump_active());
+        assert!(!model.is_rtt_jump_persistent());
+
+        ack_with_rtt(&mut model, params, 6, base, ms(110), RTT_JUMP);
+        assert!(!model.is_rtt_jump_persistent());
+
+        ack_with_rtt(&mut model, params, 7, base, ms(300), RTT_JUMP);
+        assert!(model.is_rtt_jump_persistent());
+        assert_eq!(model.rtt_persistent_jump_count(), 1);
+        assert!(model.last_persistent_jump_time().is_some());
+    }
+
+    #[test]
+    fn global_min_detector_uses_strict_3x_threshold() {
+        let params = &rtt_jump_params(BbrRttJumpDetector::GlobalMin);
+        let base = Instant::now();
+
+        let mut at_edge = BBRv2NetworkModel::new(params, RTT);
+        ack_with_rtt(&mut at_edge, params, 1, base, ms(10), RTT);
+        at_edge.set_full_bandwidth_reached();
+        ack_with_rtt(&mut at_edge, params, 2, base, ms(20), RTT_3X);
+        assert!(!at_edge.is_rtt_jump_active());
+
+        let mut just_above = BBRv2NetworkModel::new(params, RTT);
+        ack_with_rtt(&mut just_above, params, 1, base, ms(10), RTT);
+        just_above.set_full_bandwidth_reached();
+        ack_with_rtt(&mut just_above, params, 2, base, ms(20), RTT_JUMP);
+        assert!(just_above.is_rtt_jump_active());
+    }
+
+    #[test]
+    fn global_min_detector_tracks_downward_baseline() {
+        let params = &rtt_jump_params(BbrRttJumpDetector::GlobalMin);
+        let mut model = BBRv2NetworkModel::new(params, RTT);
+        let base = Instant::now();
+
+        ack_with_rtt(&mut model, params, 1, base, ms(100), ms(100));
+        ack_with_rtt(&mut model, params, 2, base, ms(200), ms(299));
+        assert!(!model.is_rtt_jump_active());
+
+        ack_with_rtt(&mut model, params, 3, base, ms(300), RTT);
+        assert!(!model.is_rtt_jump_active());
+
+        model.set_full_bandwidth_reached();
+        ack_with_rtt(&mut model, params, 4, base, ms(400), RTT_JUMP);
+        assert!(model.is_rtt_jump_active());
+    }
+
+    #[test]
+    fn global_min_detector_ignores_startup_rtt_jump_until_full_bandwidth() {
+        let params = &rtt_jump_params(BbrRttJumpDetector::GlobalMin);
+        let mut model = BBRv2NetworkModel::new(params, RTT);
+        let base = Instant::now();
+
+        ack_with_rtt(&mut model, params, 1, base, ms(10), RTT);
+        ack_with_rtt(&mut model, params, 2, base, ms(20), RTT_JUMP);
+        ack_with_rtt(&mut model, params, 3, base, ms(30), RTT_JUMP);
+        ack_with_rtt(&mut model, params, 4, base, ms(200), RTT_JUMP);
+
+        assert_eq!(model.rtt_persistent_jump_count(), 0);
+        assert!(!model.is_rtt_jump_active());
+
+        model.set_full_bandwidth_reached();
+        ack_with_rtt(&mut model, params, 5, base, ms(210), RTT_JUMP);
+        ack_with_rtt(&mut model, params, 6, base, ms(220), RTT_JUMP);
+        ack_with_rtt(&mut model, params, 7, base, ms(360), RTT_JUMP);
+
+        assert_eq!(model.rtt_persistent_jump_count(), 1);
+        assert!(model.is_rtt_jump_persistent());
+    }
+
+    #[test]
+    fn hmm_detector_ignores_startup_rtt_jump_until_full_bandwidth() {
+        let params = &rtt_jump_params(BbrRttJumpDetector::Hmm);
+        let mut model = BBRv2NetworkModel::new(params, RTT);
+        let base = Instant::now();
+
+        for pkt in 1..9u64 {
+            ack_with_rtt(&mut model, params, pkt, base, ms(pkt * 10), RTT);
+        }
+
+        for pkt in 9u64..20 {
+            ack_with_rtt(&mut model, params, pkt, base, ms(pkt * 100), RTT_3X);
+        }
+
+        assert_eq!(model.rtt_persistent_jump_count(), 0);
+        assert!(!model.is_rtt_jump_active());
+
+        model.set_full_bandwidth_reached();
+        ack_with_rtt(&mut model, params, 20, base, ms(2100), RTT_3X);
+
+        assert_eq!(model.rtt_persistent_jump_count(), 0);
+        assert!(!model.is_rtt_jump_persistent());
     }
 }

@@ -25,7 +25,9 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::ffi;
+use std::mem::ManuallyDrop;
 use std::ptr;
+use std::ptr::NonNull;
 use std::slice;
 
 use std::io::Write;
@@ -127,14 +129,14 @@ pub static QUICHE_EX_DATA_INDEX: LazyLock<c_int> = LazyLock::new(|| unsafe {
     SSL_get_ex_new_index(0, ptr::null(), ptr::null(), ptr::null(), ptr::null())
 });
 
-pub struct Context(*mut SSL_CTX);
+pub struct Context(NonNull<SSL_CTX>);
 
 impl Context {
-    // Note: some vendor-specific methods are implemented by each vendor's
-    // submodule (openssl-quictls / boringssl).
+    // Note: some vendor-specific methods are implemented in the boringssl
+    // submodule.
     pub fn new() -> Result<Context> {
         unsafe {
-            let ctx_raw = SSL_CTX_new(TLS_method());
+            let ctx_raw = NonNull::new(SSL_CTX_new(TLS_method())).ok_or(Error::TlsFail)?;
 
             let mut ctx = Context(ctx_raw);
 
@@ -147,18 +149,22 @@ impl Context {
     }
 
     #[cfg(feature = "boringssl-bssl-crate")]
-    pub fn from_bssl(ssl_ctx_builder: leyline_bssl::ssl::SslContextBuilder) -> Context {
+    pub fn from_bssl(ssl_ctx_builder: leyline_bssl::ssl::SslContextBuilder) -> Result<Context> {
         use foreign_types_shared::ForeignType;
 
-        let mut ctx = Context(ssl_ctx_builder.build().into_ptr() as _);
+        let ctx_raw =
+            NonNull::new(ssl_ctx_builder.build().into_ptr() as _).ok_or(Error::TlsFail)?;
+
+        let mut ctx = Context(ctx_raw);
         ctx.set_session_callback();
 
-        ctx
+        Ok(ctx)
     }
 
     pub fn new_handshake(&mut self) -> Result<Handshake> {
         unsafe {
-            let ssl = SSL_new(self.as_mut_ptr());
+            let ssl = NonNull::new(SSL_new(self.as_mut_ptr())).ok_or(Error::TlsFail)?;
+
             Ok(Handshake::new(ssl))
         }
     }
@@ -166,14 +172,14 @@ impl Context {
     pub fn load_verify_locations_from_file(&mut self, file: &str) -> Result<()> {
         let file = ffi::CString::new(file).map_err(|_| Error::TlsFail)?;
         map_result(unsafe {
-            SSL_CTX_load_verify_locations(self.as_mut_ptr(), file.as_ptr(), std::ptr::null())
+            SSL_CTX_load_verify_locations(self.as_mut_ptr(), file.as_ptr(), ptr::null())
         })
     }
 
     pub fn load_verify_locations_from_directory(&mut self, path: &str) -> Result<()> {
         let path = ffi::CString::new(path).map_err(|_| Error::TlsFail)?;
         map_result(unsafe {
-            SSL_CTX_load_verify_locations(self.as_mut_ptr(), std::ptr::null(), path.as_ptr())
+            SSL_CTX_load_verify_locations(self.as_mut_ptr(), ptr::null(), path.as_ptr())
         })
     }
 
@@ -255,8 +261,8 @@ impl Context {
         // false -> 0x00 SSL_VERIFY_NONE
         let mode = i32::from(verify);
 
-        // Note: Base on two used modes(see above), it seems ok for both, bssl and
-        // ossl. If mode needs to be ored then it may need to be adjusted.
+        // The two modes above work for both BoringSSL and OpenSSL. This may
+        // need adjustment if modes must be combined.
         unsafe {
             SSL_CTX_set_verify(self.as_mut_ptr(), mode, None);
         }
@@ -293,18 +299,26 @@ impl Context {
         })
     }
 
+    pub fn set_curves_list(&mut self, curves: &str) -> Result<()> {
+        // Note: BoringSSL exports `SSL_CTX_set1_groups_list` as a real
+        // function; OpenSSL (and openssl-quictls) defines it as a macro
+        // that expands to `SSL_CTX_ctrl`. Each backend provides a
+        // `SSL_CTX_set1_groups_list` shim in the per-vendor module so this
+        // call site can be backend-agnostic.
+        let cstr = ffi::CString::new(curves).map_err(|_| Error::TlsFail)?;
+        map_result(unsafe { SSL_CTX_set1_groups_list(self.as_mut_ptr(), cstr.as_ptr()) })
+    }
+
     fn as_mut_ptr(&mut self) -> *mut SSL_CTX {
-        self.0
+        self.0.as_ptr()
     }
 }
 
-// NOTE: These traits are not automatically implemented for Context due to the
-// raw pointer it wraps. However, the underlying data is not aliased (as Context
-// should be its only owner), and there is no interior mutability, as the
-// pointer is not accessed directly outside of this module, and the Context
-// object API should preserve Rust's borrowing guarantees.
-unsafe impl std::marker::Send for Context {}
-unsafe impl std::marker::Sync for Context {}
+// These traits are not automatically implemented because NonNull does not
+// convey ownership. Context uniquely owns the underlying data, and its API
+// preserves Rust's borrowing guarantees.
+unsafe impl Send for Context {}
+unsafe impl Sync for Context {}
 
 impl Drop for Context {
     fn drop(&mut self) {
@@ -313,22 +327,23 @@ impl Drop for Context {
 }
 
 pub struct Handshake {
-    /// Raw pointer
-    ptr: *mut SSL,
+    ptr: NonNull<SSL>,
     /// SSL_process_quic_post_handshake should be called when whenever
     /// SSL_provide_quic_data is called to process the provided data.
     provided_data_outstanding: bool,
 }
 
 impl Handshake {
-    // Note: some vendor-specific methods are implemented by each vendor's
-    // submodule (openssl-quictls / boringssl).
-    #[cfg(feature = "ffi")]
-    pub unsafe fn from_ptr(ssl: *mut c_void) -> Handshake {
-        Handshake::new(ssl as *mut SSL)
+    // Note: some vendor-specific methods are implemented in the boringssl
+    // submodule.
+    #[cfg(any(feature = "ffi", feature = "boringssl-bssl-crate"))]
+    pub unsafe fn from_ptr(ssl: *mut c_void) -> Result<Handshake> {
+        let ptr = NonNull::new(ssl.cast()).ok_or(Error::TlsFail)?;
+
+        Ok(Handshake::new(ptr))
     }
 
-    fn new(ptr: *mut SSL) -> Handshake {
+    fn new(ptr: NonNull<SSL>) -> Handshake {
         Handshake {
             ptr,
             provided_data_outstanding: false,
@@ -405,9 +420,18 @@ impl Handshake {
         map_result(unsafe { X509_VERIFY_PARAM_set1_host(param, cstr.as_ptr(), name.len()) })
     }
 
-    pub fn set_quic_transport_params(&mut self, buf: &[u8]) -> Result<()> {
-        let rc =
-            unsafe { SSL_set_quic_transport_params(self.as_mut_ptr(), buf.as_ptr(), buf.len()) };
+    pub fn set_quic_transport_params(
+        &mut self,
+        params: &crate::TransportParams,
+        is_server: bool,
+    ) -> Result<()> {
+        let mut raw_params = [0; 128];
+
+        let raw_params = crate::TransportParams::encode(params, is_server, &mut raw_params)?;
+
+        let rc = unsafe {
+            SSL_set_quic_transport_params(self.as_mut_ptr(), raw_params.as_ptr(), raw_params.len())
+        };
         self.map_result_ssl(rc)
     }
 
@@ -468,7 +492,7 @@ impl Handshake {
     pub fn do_handshake(&mut self, ex_data: &mut ExData) -> Result<()> {
         self.set_ex_data(*QUICHE_EX_DATA_INDEX, ex_data)?;
         let rc = unsafe { SSL_do_handshake(self.as_mut_ptr()) };
-        self.set_ex_data::<Connection>(*QUICHE_EX_DATA_INDEX, std::ptr::null())?;
+        self.set_ex_data::<Connection>(*QUICHE_EX_DATA_INDEX, ptr::null())?;
 
         self.set_transport_error(ex_data, rc);
         self.map_result_ssl(rc)
@@ -484,7 +508,7 @@ impl Handshake {
 
         self.set_ex_data(*QUICHE_EX_DATA_INDEX, ex_data)?;
         let rc = unsafe { SSL_process_quic_post_handshake(self.as_mut_ptr()) };
-        self.set_ex_data::<Connection>(*QUICHE_EX_DATA_INDEX, std::ptr::null())?;
+        self.set_ex_data::<Connection>(*QUICHE_EX_DATA_INDEX, ptr::null())?;
 
         self.set_transport_error(ex_data, rc);
         self.map_result_ssl(rc)
@@ -521,11 +545,11 @@ impl Handshake {
     }
 
     fn as_ptr(&self) -> *const SSL {
-        self.ptr
+        self.ptr.as_ptr()
     }
 
     fn as_mut_ptr(&mut self) -> *mut SSL {
-        self.ptr
+        self.ptr.as_ptr()
     }
 
     fn map_result_ssl(&mut self, bssl_result: c_int) -> Result<()> {
@@ -605,13 +629,11 @@ impl Handshake {
     }
 }
 
-// NOTE: These traits are not automatically implemented for Handshake due to the
-// raw pointer it wraps. However, the underlying data is not aliased (as
-// Handshake should be its only owner), and there is no interior mutability, as
-// the pointer is not accessed directly outside of this module, and the
-// Handshake object API should preserve Rust's borrowing guarantees.
-unsafe impl std::marker::Send for Handshake {}
-unsafe impl std::marker::Sync for Handshake {}
+// These traits are not automatically implemented because NonNull does not
+// convey ownership. Handshake uniquely owns the underlying data, and its API
+// preserves Rust's borrowing guarantees.
+unsafe impl Send for Handshake {}
+unsafe impl Sync for Handshake {}
 
 impl Drop for Handshake {
     fn drop(&mut self) {
@@ -622,17 +644,24 @@ impl Drop for Handshake {
 pub struct ExData<'a> {
     pub application_protos: &'a Vec<Vec<u8>>,
 
-    pub pkt_num_spaces: &'a mut [packet::PktNumSpace; packet::Epoch::count()],
+    pub crypto_ctx: &'a mut [packet::CryptoContext; packet::Epoch::count()],
 
     pub session: &'a mut Option<Vec<u8>>,
 
-    pub local_error: &'a mut Option<super::ConnectionError>,
+    pub local_error: &'a mut Option<ConnectionError>,
 
-    pub keylog: Option<&'a mut Box<dyn std::io::Write + Send + Sync>>,
+    pub keylog: Option<&'a mut Box<dyn Write + Send + Sync>>,
 
     pub trace_id: &'a str,
 
+    pub local_transport_params: crate::TransportParams,
+
     pub recovery_config: crate::recovery::RecoveryConfig,
+
+    pub tx_cap_factor: f64,
+
+    /// PMTUD configuration: (enable, max_probes)
+    pub pmtud: Option<(bool, u8)>,
 
     pub is_server: bool,
 }
@@ -691,10 +720,10 @@ extern "C" fn set_read_secret(
     trace!("{} set read secret lvl={:?}", ex_data.trace_id, level);
 
     let space = match level {
-        crypto::Level::Initial => &mut ex_data.pkt_num_spaces[packet::Epoch::Initial],
-        crypto::Level::ZeroRTT => &mut ex_data.pkt_num_spaces[packet::Epoch::Application],
-        crypto::Level::Handshake => &mut ex_data.pkt_num_spaces[packet::Epoch::Handshake],
-        crypto::Level::OneRTT => &mut ex_data.pkt_num_spaces[packet::Epoch::Application],
+        crypto::Level::Initial => &mut ex_data.crypto_ctx[packet::Epoch::Initial],
+        crypto::Level::ZeroRTT => &mut ex_data.crypto_ctx[packet::Epoch::Application],
+        crypto::Level::Handshake => &mut ex_data.crypto_ctx[packet::Epoch::Handshake],
+        crypto::Level::OneRTT => &mut ex_data.crypto_ctx[packet::Epoch::Application],
     };
 
     let aead = match get_cipher_from_ptr(cipher) {
@@ -740,10 +769,10 @@ extern "C" fn set_write_secret(
     trace!("{} set write secret lvl={:?}", ex_data.trace_id, level);
 
     let space = match level {
-        crypto::Level::Initial => &mut ex_data.pkt_num_spaces[packet::Epoch::Initial],
-        crypto::Level::ZeroRTT => &mut ex_data.pkt_num_spaces[packet::Epoch::Application],
-        crypto::Level::Handshake => &mut ex_data.pkt_num_spaces[packet::Epoch::Handshake],
-        crypto::Level::OneRTT => &mut ex_data.pkt_num_spaces[packet::Epoch::Application],
+        crypto::Level::Initial => &mut ex_data.crypto_ctx[packet::Epoch::Initial],
+        crypto::Level::ZeroRTT => &mut ex_data.crypto_ctx[packet::Epoch::Application],
+        crypto::Level::Handshake => &mut ex_data.crypto_ctx[packet::Epoch::Handshake],
+        crypto::Level::OneRTT => &mut ex_data.crypto_ctx[packet::Epoch::Application],
     };
 
     let aead = match get_cipher_from_ptr(cipher) {
@@ -788,10 +817,10 @@ extern "C" fn add_handshake_data(
     let buf = unsafe { slice::from_raw_parts(data, len) };
 
     let space = match level {
-        crypto::Level::Initial => &mut ex_data.pkt_num_spaces[packet::Epoch::Initial],
+        crypto::Level::Initial => &mut ex_data.crypto_ctx[packet::Epoch::Initial],
         crypto::Level::ZeroRTT => unreachable!(),
-        crypto::Level::Handshake => &mut ex_data.pkt_num_spaces[packet::Epoch::Handshake],
-        crypto::Level::OneRTT => &mut ex_data.pkt_num_spaces[packet::Epoch::Application],
+        crypto::Level::Handshake => &mut ex_data.crypto_ctx[packet::Epoch::Handshake],
+        crypto::Level::OneRTT => &mut ex_data.crypto_ctx[packet::Epoch::Application],
     };
 
     if space.crypto_stream.send.write(buf, false).is_err() {
@@ -862,12 +891,9 @@ extern "C" fn select_alpn(
     // SSL_TLSEXT_ERR_ALERT_FATAL 2
     // SSL_TLSEXT_ERR_NOACK 3
 
-    // Boringssl internally overwrite the return value from this callback, if the
-    // returned value is SSL_TLSEXT_ERR_NOACK and is quic, then the value gets
-    // overwritten to SSL_TLSEXT_ERR_ALERT_FATAL. In contrast openssl/quictls does
-    // not do that, so we need to explicitly respond with
-    // SSL_TLSEXT_ERR_ALERT_FATAL in case it is needed.
-    // TLS_ERROR is redefined for each vendor.
+    // Boringssl internally overwrite the return value from this callback, if
+    // the returned value is SSL_TLSEXT_ERR_NOACK and is quic, then the value
+    // gets overwritten to SSL_TLSEXT_ERR_ALERT_FATAL.
     let ex_data = match ExData::from_ssl_ptr(ssl) {
         Some(v) => v,
 
@@ -910,13 +936,21 @@ extern "C" fn select_alpn(
 }
 
 extern "C" fn new_session(ssl: *mut SSL, session: *mut SSL_SESSION) -> c_int {
-    let ex_data = match ExData::from_ssl_ptr(ssl) {
+    let ssl = match NonNull::new(ssl) {
         Some(v) => v,
 
         None => return 0,
     };
 
-    let handshake = Handshake::new(ssl);
+    let ex_data = match ExData::from_ssl_ptr(ssl.as_ptr()) {
+        Some(v) => v,
+
+        None => return 0,
+    };
+
+    // This callback receives a borrowed `SSL*`, so the temporary `Handshake`
+    // must not free it on any return path.
+    let handshake = ManuallyDrop::new(Handshake::new(ssl));
     let peer_params = handshake.quic_transport_params();
 
     // Serialize session object into buffer.
@@ -930,31 +964,24 @@ extern "C" fn new_session(ssl: *mut SSL, session: *mut SSL_SESSION) -> c_int {
     let session_bytes_len = session_bytes.len() as u64;
 
     if buffer.write(&session_bytes_len.to_be_bytes()).is_err() {
-        std::mem::forget(handshake);
         return 0;
     }
 
     if buffer.write(&session_bytes).is_err() {
-        std::mem::forget(handshake);
         return 0;
     }
 
     let peer_params_len = peer_params.len() as u64;
 
     if buffer.write(&peer_params_len.to_be_bytes()).is_err() {
-        std::mem::forget(handshake);
         return 0;
     }
 
     if buffer.write(peer_params).is_err() {
-        std::mem::forget(handshake);
         return 0;
     }
 
     *ex_data.session = Some(buffer);
-
-    // Prevent handshake from being freed, as we still need it.
-    std::mem::forget(handshake);
 
     0
 }
@@ -999,8 +1026,8 @@ fn log_ssl_error() {
 }
 
 unsafe extern "C" {
-    // Note: some vendor-specific methods are implemented by each vendor's
-    // submodule (openssl-quictls / boringssl).
+    // Note: some vendor-specific methods are implemented in the boringssl
+    // submodule.
 
     // SSL_METHOD
     #[link_name = "LEYLINE_TLS_method"]
@@ -1201,12 +1228,5 @@ unsafe extern "C" {
 
 }
 
-#[cfg(not(feature = "openssl"))]
 mod boringssl;
-#[cfg(not(feature = "openssl"))]
 use boringssl::*;
-
-#[cfg(feature = "openssl")]
-mod openssl_quictls;
-#[cfg(feature = "openssl")]
-use openssl_quictls::*;

@@ -34,24 +34,25 @@ use std::collections::VecDeque;
 use super::RecoveryConfig;
 use super::Sent;
 
-use crate::recovery::HandshakeStatus;
-use crate::recovery::RecoveryOps;
-
+use crate::Error;
+use crate::Result;
 use crate::packet::Epoch;
 use crate::ranges::RangeSet;
+use crate::recovery::Bandwidth;
+use crate::recovery::HandshakeStatus;
+use crate::recovery::OnLossDetectionTimeoutOutcome;
+use crate::recovery::RecoveryOps;
+use crate::recovery::StartupExit;
 
 #[cfg(feature = "qlog")]
 use crate::recovery::QlogMetrics;
 
 use crate::frame;
-use crate::packet;
-use crate::ranges;
 
 #[cfg(feature = "qlog")]
 use qlog::events::EventData;
 
 use super::Congestion;
-use super::pacer;
 use crate::recovery::GRANULARITY;
 use crate::recovery::INITIAL_PACKET_THRESHOLD;
 use crate::recovery::INITIAL_TIME_THRESHOLD;
@@ -59,8 +60,11 @@ use crate::recovery::LossDetectionTimer;
 use crate::recovery::MAX_OUTSTANDING_NON_ACK_ELICITING;
 use crate::recovery::MAX_PACKET_THRESHOLD;
 use crate::recovery::MAX_PTO_PROBES_COUNT;
+use crate::recovery::OnAckReceivedOutcome;
+use crate::recovery::PACKET_REORDER_TIME_THRESHOLD;
 use crate::recovery::ReleaseDecision;
 use crate::recovery::ReleaseTime;
+use crate::recovery::bytes_in_flight::BytesInFlight;
 use crate::recovery::rtt::RttStats;
 
 #[derive(Default)]
@@ -84,7 +88,16 @@ struct RecoveryEpoch {
     in_flight_count: usize,
 
     acked_frames: Vec<frame::Frame>,
-    lost_frames: Vec<frame::Frame>,
+
+    // Frames scheduled for retransmission due to PTO are tracked
+    // separately so we can check that frames were drained before
+    // generating more PTO probes.
+    lost_frames_ack: Vec<frame::Frame>,
+    lost_frames_pto: Vec<frame::Frame>,
+
+    /// The largest packet number sent in the packet number space so far.
+    #[cfg(test)]
+    test_largest_sent_pkt_num_on_path: Option<u64>,
 }
 
 struct AckedDetectionResult {
@@ -103,14 +116,16 @@ struct LossDetectionResult {
 }
 
 impl RecoveryEpoch {
+    // `peer_sent_ack_ranges` should not be used without validation.
     fn detect_and_remove_acked_packets(
         &mut self,
         now: Instant,
-        acked: &RangeSet,
+        peer_sent_ack_ranges: &RangeSet,
         newly_acked: &mut Vec<Acked>,
         rtt_stats: &RttStats,
+        skip_pn: Option<u64>,
         trace_id: &str,
-    ) -> AckedDetectionResult {
+    ) -> Result<AckedDetectionResult> {
         newly_acked.clear();
 
         let mut acked_bytes = 0;
@@ -119,27 +134,41 @@ impl RecoveryEpoch {
         let mut has_ack_eliciting = false;
         let mut has_in_flight_spurious_loss = false;
 
-        let largest_acked = self.largest_acked_packet.unwrap();
+        let largest_ack_received = peer_sent_ack_ranges
+            .last()
+            .expect("ACK frames should always have at least one ack range");
+        let largest_acked = self
+            .largest_acked_packet
+            .unwrap_or(0)
+            .max(largest_ack_received);
 
-        for ack in acked.iter() {
+        for peer_sent_range in peer_sent_ack_ranges.iter() {
+            if skip_pn.is_some_and(|skip_pn| peer_sent_range.contains(&skip_pn)) {
+                // https://www.rfc-editor.org/rfc/rfc9000#section-13.1
+                // An endpoint SHOULD treat receipt of an acknowledgment
+                // for a packet it did not send as
+                // a connection error of type PROTOCOL_VIOLATION
+                return Err(Error::OptimisticAckDetected);
+            }
+
             // Because packets always have incrementing numbers, they are always
             // in sorted order.
             let start = if self
                 .sent_packets
                 .front()
-                .filter(|e| e.pkt_num >= ack.start)
+                .filter(|e| e.pkt_num >= peer_sent_range.start)
                 .is_some()
             {
                 // Usually it will be the first packet.
                 0
             } else {
                 self.sent_packets
-                    .binary_search_by_key(&ack.start, |p| p.pkt_num)
+                    .binary_search_by_key(&peer_sent_range.start, |p| p.pkt_num)
                     .unwrap_or_else(|e| e)
             };
 
             for unacked in self.sent_packets.range_mut(start..) {
-                if unacked.pkt_num >= ack.end {
+                if unacked.pkt_num >= peer_sent_range.end {
                     break;
                 }
 
@@ -185,13 +214,13 @@ impl RecoveryEpoch {
 
         self.drain_acked_and_lost_packets(now - rtt_stats.rtt());
 
-        AckedDetectionResult {
+        Ok(AckedDetectionResult {
             acked_bytes,
             spurious_losses,
             spurious_pkt_thresh,
             has_ack_eliciting,
             has_in_flight_spurious_loss,
-        }
+        })
     }
 
     fn detect_lost_packets(
@@ -229,11 +258,11 @@ impl RecoveryEpoch {
             // Mark packet as lost, or set time when it should be marked.
             if unacked.time_sent <= lost_send_time || largest_acked >= unacked.pkt_num + pkt_thresh
             {
-                self.lost_frames.extend(unacked.frames.drain(..));
+                self.lost_frames_ack.extend(unacked.frames.drain(..));
 
                 unacked.time_lost = Some(now);
 
-                if unacked.pmtud {
+                if unacked.is_pmtud_probe {
                     pmtud_lost_bytes += unacked.size;
                     self.in_flight_count -= 1;
 
@@ -300,10 +329,35 @@ impl RecoveryEpoch {
             self.sent_packets.pop_front();
         }
     }
+
+    /// Returns the next lost frame, trying ACK-based lost frames first,
+    /// then PTO-based lost frames.
+    fn next_lost_frame(&mut self) -> Option<frame::Frame> {
+        self.lost_frames_ack
+            .pop()
+            .or_else(|| self.lost_frames_pto.pop())
+    }
+
+    /// Returns true if there are any lost frames (ACK or PTO).
+    fn has_lost_frames(&self) -> bool {
+        !self.lost_frames_ack.is_empty() || !self.lost_frames_pto.is_empty()
+    }
+
+    /// Returns the total count of lost frames (ACK + PTO).
+    #[cfg(test)]
+    fn lost_frames_count(&self) -> usize {
+        self.lost_frames_ack.len() + self.lost_frames_pto.len()
+    }
+
+    /// Clears all lost frames (both ACK and PTO).
+    fn clear_lost_frames(&mut self) {
+        self.lost_frames_ack.clear();
+        self.lost_frames_pto.clear();
+    }
 }
 
 pub struct LegacyRecovery {
-    epochs: [RecoveryEpoch; packet::Epoch::count()],
+    epochs: [RecoveryEpoch; Epoch::count()],
 
     loss_timer: LossDetectionTimer,
 
@@ -317,7 +371,7 @@ pub struct LegacyRecovery {
 
     time_thresh: f64,
 
-    pub bytes_in_flight: usize,
+    bytes_in_flight: BytesInFlight,
 
     bytes_sent: usize,
 
@@ -327,6 +381,9 @@ pub struct LegacyRecovery {
 
     #[cfg(feature = "qlog")]
     qlog_metrics: QlogMetrics,
+
+    #[cfg(feature = "qlog")]
+    qlog_prev_cc_state: &'static str,
 
     /// How many non-ack-eliciting packets have been sent.
     outstanding_non_ack_eliciting: usize,
@@ -346,7 +403,7 @@ impl LegacyRecovery {
 
             pto_count: 0,
 
-            rtt_stats: RttStats::new(recovery_config.max_ack_delay),
+            rtt_stats: RttStats::new(recovery_config.initial_rtt, recovery_config.max_ack_delay),
 
             lost_spurious_count: 0,
 
@@ -354,7 +411,7 @@ impl LegacyRecovery {
 
             time_thresh: INITIAL_TIME_THRESHOLD,
 
-            bytes_in_flight: 0,
+            bytes_in_flight: Default::default(),
 
             bytes_sent: 0,
 
@@ -364,6 +421,9 @@ impl LegacyRecovery {
 
             #[cfg(feature = "qlog")]
             qlog_metrics: QlogMetrics::default(),
+
+            #[cfg(feature = "qlog")]
+            qlog_prev_cc_state: "",
 
             outstanding_non_ack_eliciting: 0,
 
@@ -378,12 +438,12 @@ impl LegacyRecovery {
         Self::new_with_config(&RecoveryConfig::from_config(config))
     }
 
-    fn loss_time_and_space(&self) -> (Option<Instant>, packet::Epoch) {
-        let mut epoch = packet::Epoch::Initial;
+    fn loss_time_and_space(&self) -> (Option<Instant>, Epoch) {
+        let mut epoch = Epoch::Initial;
         let mut time = self.epochs[epoch].loss_time;
 
         // Iterate over all packet number spaces starting from Handshake.
-        for e in [packet::Epoch::Handshake, packet::Epoch::Application] {
+        for e in [Epoch::Handshake, Epoch::Application] {
             let new_time = self.epochs[e].loss_time;
             if time.is_none() || new_time < time {
                 time = new_time;
@@ -398,40 +458,36 @@ impl LegacyRecovery {
         &self,
         handshake_status: HandshakeStatus,
         now: Instant,
-    ) -> (Option<Instant>, packet::Epoch) {
-        let mut duration = self.pto() * 2_u32.pow(self.pto_count);
+    ) -> (Option<Instant>, Epoch) {
+        let mut duration = self.pto() * 2_u32.saturating_pow(self.pto_count);
 
         // Arm PTO from now when there are no inflight packets.
-        if self.bytes_in_flight == 0 {
+        if self.bytes_in_flight.is_zero() {
             if handshake_status.has_handshake_keys {
-                return (Some(now + duration), packet::Epoch::Handshake);
+                return (Some(now + duration), Epoch::Handshake);
             } else {
-                return (Some(now + duration), packet::Epoch::Initial);
+                return (Some(now + duration), Epoch::Initial);
             }
         }
 
         let mut pto_timeout = None;
-        let mut pto_space = packet::Epoch::Initial;
+        let mut pto_space = Epoch::Initial;
 
         // Iterate over all packet number spaces.
-        for e in [
-            packet::Epoch::Initial,
-            packet::Epoch::Handshake,
-            packet::Epoch::Application,
-        ] {
+        for e in [Epoch::Initial, Epoch::Handshake, Epoch::Application] {
             let epoch = &self.epochs[e];
             if epoch.in_flight_count == 0 {
                 continue;
             }
 
-            if e == packet::Epoch::Application {
+            if e == Epoch::Application {
                 // Skip Application Data until handshake completes.
                 if !handshake_status.completed {
                     return (pto_timeout, pto_space);
                 }
 
                 // Include max_ack_delay and backoff for Application Data.
-                duration += self.rtt_stats.max_ack_delay * 2_u32.pow(self.pto_count);
+                duration += self.rtt_stats.max_ack_delay * 2_u32.saturating_pow(self.pto_count);
             }
 
             let new_time = epoch
@@ -456,7 +512,7 @@ impl LegacyRecovery {
             return;
         }
 
-        if self.bytes_in_flight == 0 && handshake_status.peer_verified_address {
+        if self.bytes_in_flight.is_zero() && handshake_status.peer_verified_address {
             self.loss_timer.clear();
             return;
         }
@@ -464,12 +520,14 @@ impl LegacyRecovery {
         // PTO timer.
         if let (Some(timeout), _) = self.pto_time_and_space(handshake_status, now) {
             self.loss_timer.update(timeout);
+        } else {
+            self.loss_timer.clear();
         }
     }
 
     fn detect_lost_packets(
         &mut self,
-        epoch: packet::Epoch,
+        epoch: Epoch,
         now: Instant,
         trace_id: &str,
     ) -> (usize, usize) {
@@ -490,16 +548,18 @@ impl LegacyRecovery {
 
             (self.congestion.cc_ops.congestion_event)(
                 &mut self.congestion,
-                self.bytes_in_flight,
+                self.bytes_in_flight.get(),
                 loss.lost_bytes,
                 &pkt,
                 now,
             );
 
-            self.bytes_in_flight -= loss.lost_bytes;
+            self.bytes_in_flight
+                .saturating_subtract(loss.lost_bytes, now);
         };
 
-        self.bytes_in_flight -= loss.pmtud_lost_bytes;
+        self.bytes_in_flight
+            .saturating_subtract(loss.pmtud_lost_bytes, now);
 
         self.epochs[epoch].drain_acked_and_lost_packets(now - self.rtt_stats.rtt());
 
@@ -512,44 +572,49 @@ impl LegacyRecovery {
 impl RecoveryOps for LegacyRecovery {
     /// Returns whether or not we should elicit an ACK even if we wouldn't
     /// otherwise have constructed an ACK eliciting packet.
-    fn should_elicit_ack(&self, epoch: packet::Epoch) -> bool {
+    fn should_elicit_ack(&self, epoch: Epoch) -> bool {
         self.epochs[epoch].loss_probes > 0
             || self.outstanding_non_ack_eliciting >= MAX_OUTSTANDING_NON_ACK_ELICITING
     }
 
-    fn get_acked_frames(&mut self, epoch: packet::Epoch) -> Vec<frame::Frame> {
-        std::mem::take(&mut self.epochs[epoch].acked_frames)
+    fn next_acked_frame(&mut self, epoch: Epoch) -> Option<frame::Frame> {
+        self.epochs[epoch].acked_frames.pop()
     }
 
-    fn get_lost_frames(&mut self, epoch: packet::Epoch) -> Vec<frame::Frame> {
-        std::mem::take(&mut self.epochs[epoch].lost_frames)
+    fn next_lost_frame(&mut self, epoch: Epoch) -> Option<frame::Frame> {
+        self.epochs[epoch].next_lost_frame()
     }
 
-    fn get_largest_acked_on_epoch(&self, epoch: packet::Epoch) -> Option<u64> {
+    fn get_largest_acked_on_epoch(&self, epoch: Epoch) -> Option<u64> {
         self.epochs[epoch].largest_acked_packet
     }
 
-    fn has_lost_frames(&self, epoch: packet::Epoch) -> bool {
-        !self.epochs[epoch].lost_frames.is_empty()
+    fn has_lost_frames(&self, epoch: Epoch) -> bool {
+        self.epochs[epoch].has_lost_frames()
     }
 
-    fn loss_probes(&self, epoch: packet::Epoch) -> usize {
+    fn loss_probes(&self, epoch: Epoch) -> usize {
         self.epochs[epoch].loss_probes
     }
 
     #[cfg(test)]
-    fn inc_loss_probes(&mut self, epoch: packet::Epoch) {
+    fn inc_loss_probes(&mut self, epoch: Epoch) {
         self.epochs[epoch].loss_probes += 1;
     }
 
-    fn ping_sent(&mut self, epoch: packet::Epoch) {
+    #[cfg(test)]
+    fn lost_frames_count(&self, epoch: Epoch) -> usize {
+        self.epochs[epoch].lost_frames_count()
+    }
+
+    fn ping_sent(&mut self, epoch: Epoch) {
         self.epochs[epoch].loss_probes = self.epochs[epoch].loss_probes.saturating_sub(1);
     }
 
     fn on_packet_sent(
         &mut self,
         mut pkt: Sent,
-        epoch: packet::Epoch,
+        epoch: Epoch,
         handshake_status: HandshakeStatus,
         now: Instant,
         trace_id: &str,
@@ -569,53 +634,50 @@ impl RecoveryOps for LegacyRecovery {
         }
 
         self.congestion.on_packet_sent(
-            self.bytes_in_flight,
+            self.bytes_in_flight.get(),
             sent_bytes,
             now,
             &mut pkt,
-            &self.rtt_stats,
             self.bytes_lost,
             in_flight,
         );
 
         if in_flight {
             self.epochs[epoch].in_flight_count += 1;
-            self.bytes_in_flight += sent_bytes;
+            self.bytes_in_flight.add(sent_bytes, now);
 
             self.set_loss_detection_timer(handshake_status, now);
         }
 
         self.bytes_sent += sent_bytes;
 
+        #[cfg(test)]
+        {
+            self.epochs[epoch].test_largest_sent_pkt_num_on_path = self.epochs[epoch]
+                .test_largest_sent_pkt_num_on_path
+                .max(Some(pkt.pkt_num));
+        }
+
         self.epochs[epoch].sent_packets.push_back(pkt);
 
-        trace!("{} {:?}", trace_id, self);
+        trace!("{trace_id} {self:?}");
     }
 
-    fn get_packet_send_time(&self) -> Instant {
-        self.congestion.get_packet_send_time()
+    fn get_packet_send_time(&self, now: Instant) -> Instant {
+        now
     }
 
-    #[allow(clippy::too_many_arguments)]
+    // `peer_sent_ack_ranges` should not be used without validation.
     fn on_ack_received(
         &mut self,
-        ranges: &ranges::RangeSet,
+        peer_sent_ack_ranges: &RangeSet,
         ack_delay: u64,
-        epoch: packet::Epoch,
+        epoch: Epoch,
         handshake_status: HandshakeStatus,
         now: Instant,
+        skip_pn: Option<u64>,
         trace_id: &str,
-    ) -> (usize, usize, usize) {
-        let largest_acked = ranges.last().unwrap();
-
-        // Update the largest acked packet.
-        let largest_acked = self.epochs[epoch]
-            .largest_acked_packet
-            .unwrap_or(0)
-            .max(largest_acked);
-
-        self.epochs[epoch].largest_acked_packet = Some(largest_acked);
-
+    ) -> Result<OnAckReceivedOutcome> {
         let AckedDetectionResult {
             acked_bytes,
             spurious_losses,
@@ -624,15 +686,17 @@ impl RecoveryOps for LegacyRecovery {
             has_in_flight_spurious_loss,
         } = self.epochs[epoch].detect_and_remove_acked_packets(
             now,
-            ranges,
+            peer_sent_ack_ranges,
             &mut self.newly_acked,
             &self.rtt_stats,
+            skip_pn,
             trace_id,
-        );
+        )?;
 
         self.lost_spurious_count += spurious_losses;
         if let Some(thresh) = spurious_pkt_thresh {
             self.pkt_thresh = self.pkt_thresh.max(thresh.min(MAX_PACKET_THRESHOLD));
+            self.time_thresh = PACKET_REORDER_TIME_THRESHOLD;
         }
 
         // Undo congestion window update.
@@ -641,13 +705,21 @@ impl RecoveryOps for LegacyRecovery {
         }
 
         if self.newly_acked.is_empty() {
-            return (0, 0, 0);
+            return Ok(OnAckReceivedOutcome::default());
         }
 
-        // Check if largest packet is newly acked.
         let largest_newly_acked = self.newly_acked.last().unwrap();
 
-        if largest_newly_acked.pkt_num == largest_acked && has_ack_eliciting {
+        // Update `largest_acked_packet` based on the validated `newly_acked`
+        // value.
+        let largest_acked_pkt_num = self.epochs[epoch]
+            .largest_acked_packet
+            .unwrap_or(0)
+            .max(largest_newly_acked.pkt_num);
+        self.epochs[epoch].largest_acked_packet = Some(largest_acked_pkt_num);
+
+        // Check if largest packet is newly acked.
+        if largest_newly_acked.pkt_num == largest_acked_pkt_num && has_ack_eliciting {
             let latest_rtt = now - largest_newly_acked.time_sent;
             self.rtt_stats.update_rtt(
                 latest_rtt,
@@ -659,16 +731,16 @@ impl RecoveryOps for LegacyRecovery {
 
         // Detect and mark lost packets without removing them from the sent
         // packets list.
-        let loss = self.detect_lost_packets(epoch, now, trace_id);
+        let (lost_packets, lost_bytes) = self.detect_lost_packets(epoch, now, trace_id);
 
         self.congestion.on_packets_acked(
-            self.bytes_in_flight,
+            self.bytes_in_flight.get(),
             &mut self.newly_acked,
             &self.rtt_stats,
             now,
         );
 
-        self.bytes_in_flight -= acked_bytes;
+        self.bytes_in_flight.saturating_subtract(acked_bytes, now);
 
         self.pto_count = 0;
 
@@ -676,7 +748,12 @@ impl RecoveryOps for LegacyRecovery {
 
         self.epochs[epoch].drain_acked_and_lost_packets(now - self.rtt_stats.rtt());
 
-        (loss.0, loss.1, acked_bytes)
+        Ok(OnAckReceivedOutcome {
+            lost_packets,
+            lost_bytes,
+            acked_bytes,
+            spurious_losses,
+        })
     }
 
     fn on_loss_detection_timeout(
@@ -684,20 +761,23 @@ impl RecoveryOps for LegacyRecovery {
         handshake_status: HandshakeStatus,
         now: Instant,
         trace_id: &str,
-    ) -> (usize, usize) {
+    ) -> OnLossDetectionTimeoutOutcome {
         let (earliest_loss_time, epoch) = self.loss_time_and_space();
 
         if earliest_loss_time.is_some() {
             // Time threshold loss detection.
-            let loss = self.detect_lost_packets(epoch, now, trace_id);
+            let (lost_packets, lost_bytes) = self.detect_lost_packets(epoch, now, trace_id);
 
             self.set_loss_detection_timer(handshake_status, now);
 
-            trace!("{} {:?}", trace_id, self);
-            return loss;
+            trace!("{trace_id} {self:?}");
+            return OnLossDetectionTimeoutOutcome {
+                lost_packets,
+                lost_bytes,
+            };
         }
 
-        let epoch = if self.bytes_in_flight > 0 {
+        let epoch = if self.bytes_in_flight.get() > 0 {
             // Send new data if available, else retransmit old data. If neither
             // is available, send a single PING frame.
             let (_, e) = self.pto_time_and_space(handshake_status, now);
@@ -708,9 +788,9 @@ impl RecoveryOps for LegacyRecovery {
             // more anti-amplification credit, a Handshake packet proves address
             // ownership.
             if handshake_status.has_handshake_keys {
-                packet::Epoch::Handshake
+                Epoch::Handshake
             } else {
-                packet::Epoch::Initial
+                Epoch::Initial
             }
         };
 
@@ -720,9 +800,18 @@ impl RecoveryOps for LegacyRecovery {
 
         epoch.loss_probes = cmp::min(self.pto_count as usize, MAX_PTO_PROBES_COUNT);
 
+        let sent_packets_iter_limit = if !epoch.lost_frames_pto.is_empty() {
+            // Skip the search for frames to add to PTO probes if frames
+            // added in a prior PTO haven't been processed yet.
+            0
+        } else {
+            usize::MAX
+        };
+
         let unacked_iter = epoch
             .sent_packets
-            .iter_mut()
+            .iter()
+            .take(sent_packets_iter_limit)
             // Skip packets that have already been acked or lost, and packets
             // that don't contain either CRYPTO or STREAM frames.
             .filter(|p| p.has_data && p.time_acked.is_none() && p.time_lost.is_none())
@@ -738,19 +827,22 @@ impl RecoveryOps for LegacyRecovery {
         // HANDSHAKE_DONE and MAX_DATA / MAX_STREAM_DATA as well, in addition
         // to CRYPTO and STREAM, if the original packet carried them.
         for unacked in unacked_iter {
-            epoch.lost_frames.extend_from_slice(&unacked.frames);
+            epoch.lost_frames_pto.extend_from_slice(&unacked.frames);
         }
 
         self.set_loss_detection_timer(handshake_status, now);
 
-        trace!("{} {:?}", trace_id, self);
+        trace!("{trace_id} {self:?}");
 
-        (0, 0)
+        OnLossDetectionTimeoutOutcome {
+            lost_packets: 0,
+            lost_bytes: 0,
+        }
     }
 
     fn on_pkt_num_space_discarded(
         &mut self,
-        epoch: packet::Epoch,
+        epoch: Epoch,
         handshake_status: HandshakeStatus,
         now: Instant,
     ) {
@@ -762,10 +854,10 @@ impl RecoveryOps for LegacyRecovery {
             .filter(|p| p.in_flight && p.time_acked.is_none() && p.time_lost.is_none())
             .fold(0, |acc, p| acc + p.size);
 
-        self.bytes_in_flight -= unacked_bytes;
+        self.bytes_in_flight.saturating_subtract(unacked_bytes, now);
 
         epoch.sent_packets.clear();
-        epoch.lost_frames.clear();
+        epoch.clear_lost_frames();
         epoch.acked_frames.clear();
 
         epoch.time_of_last_ack_eliciting_packet = None;
@@ -776,12 +868,7 @@ impl RecoveryOps for LegacyRecovery {
         self.set_loss_detection_timer(handshake_status, now);
     }
 
-    fn on_path_change(
-        &mut self,
-        epoch: packet::Epoch,
-        now: Instant,
-        trace_id: &str,
-    ) -> (usize, usize) {
+    fn on_path_change(&mut self, epoch: Epoch, now: Instant, trace_id: &str) -> (usize, usize) {
         // Time threshold loss detection.
         self.detect_lost_packets(epoch, now, trace_id)
     }
@@ -801,7 +888,7 @@ impl RecoveryOps for LegacyRecovery {
         }
 
         // Open more space (snd_cnt) for PRR when allowed.
-        self.cwnd().saturating_sub(self.bytes_in_flight) + self.congestion.prr.snd_cnt
+        self.cwnd().saturating_sub(self.bytes_in_flight.get()) + self.congestion.prr.snd_cnt
     }
 
     fn rtt(&self) -> Duration {
@@ -812,6 +899,10 @@ impl RecoveryOps for LegacyRecovery {
         self.rtt_stats.min_rtt()
     }
 
+    fn max_rtt(&self) -> Option<Duration> {
+        self.rtt_stats.max_rtt()
+    }
+
     fn rttvar(&self) -> Duration {
         self.rtt_stats.rttvar
     }
@@ -820,8 +911,29 @@ impl RecoveryOps for LegacyRecovery {
         self.rtt() + cmp::max(self.rtt_stats.rttvar * 4, GRANULARITY)
     }
 
-    fn delivery_rate(&self) -> u64 {
+    /// The most recent data delivery rate estimate.
+    fn delivery_rate(&self) -> Bandwidth {
         self.congestion.delivery_rate()
+    }
+
+    fn max_bandwidth(&self) -> Option<Bandwidth> {
+        // TODO implement
+        None
+    }
+
+    fn rtt_persistent_jump_count(&self) -> u64 {
+        // Persistent RTT jump counts are produced by the BBR2 RTT jump
+        // detector. Legacy Reno/CUBIC recovery does not own a BBR2 network
+        // model or run that detector, but it still implements
+        // RecoveryOps so PathStats can be populated through one shared
+        // interface. Report zero to indicate that no detector is active on
+        // this path.
+        0
+    }
+
+    /// Statistics from when a CCA first exited the startup phase.
+    fn startup_exit(&self) -> Option<StartupExit> {
+        self.congestion.ssthresh.startup_exit()
     }
 
     fn max_datagram_size(&self) -> usize {
@@ -837,14 +949,6 @@ impl RecoveryOps for LegacyRecovery {
                 new_max_datagram_size * self.congestion.initial_congestion_window_packets;
         }
 
-        self.congestion.pacer = pacer::Pacer::new(
-            self.congestion.pacer.enabled(),
-            self.cwnd(),
-            0,
-            new_max_datagram_size,
-            self.congestion.pacer.max_pacing_rate(),
-        );
-
         self.max_datagram_size = new_max_datagram_size;
     }
 
@@ -853,23 +957,26 @@ impl RecoveryOps for LegacyRecovery {
     }
 
     #[cfg(test)]
-    fn sent_packets_len(&self, epoch: packet::Epoch) -> usize {
+    fn sent_packets_len(&self, epoch: Epoch) -> usize {
         self.epochs[epoch].sent_packets.len()
     }
 
     #[cfg(test)]
-    fn in_flight_count(&self, epoch: packet::Epoch) -> usize {
+    fn in_flight_count(&self, epoch: Epoch) -> usize {
         self.epochs[epoch].in_flight_count
     }
 
-    #[cfg(test)]
     fn bytes_in_flight(&self) -> usize {
-        self.bytes_in_flight
+        self.bytes_in_flight.get()
+    }
+
+    fn bytes_in_flight_duration(&self) -> Duration {
+        self.bytes_in_flight.get_duration()
     }
 
     #[cfg(test)]
     fn pacing_rate(&self) -> u64 {
-        self.congestion.pacer.rate()
+        0
     }
 
     #[cfg(test)]
@@ -878,8 +985,13 @@ impl RecoveryOps for LegacyRecovery {
     }
 
     #[cfg(test)]
-    fn pkt_thresh(&self) -> u64 {
-        self.pkt_thresh
+    fn pkt_thresh(&self) -> Option<u64> {
+        Some(self.pkt_thresh)
+    }
+
+    #[cfg(test)]
+    fn time_thresh(&self) -> f64 {
+        self.time_thresh
     }
 
     #[cfg(test)]
@@ -888,70 +1000,84 @@ impl RecoveryOps for LegacyRecovery {
     }
 
     #[cfg(test)]
-    fn detect_lost_packets_for_test(
-        &mut self,
-        epoch: packet::Epoch,
-        now: Instant,
-    ) -> (usize, usize) {
+    fn detect_lost_packets_for_test(&mut self, epoch: Epoch, now: Instant) -> (usize, usize) {
         self.detect_lost_packets(epoch, now, "")
     }
 
+    // FIXME only used by gcongestion
     fn on_app_limited(&mut self) {
         // Not implemented for legacy recovery, update_app_limited and
         // delivery_rate_update_app_limited used instead.
     }
 
     #[cfg(test)]
+    fn largest_sent_pkt_num_on_path(&self, epoch: Epoch) -> Option<u64> {
+        self.epochs[epoch].test_largest_sent_pkt_num_on_path
+    }
+
+    #[cfg(any(test, feature = "qlog"))]
     fn app_limited(&self) -> bool {
         self.congestion.app_limited
     }
 
     fn update_app_limited(&mut self, v: bool) {
-        self.congestion.app_limited = v;
+        self.congestion.update_app_limited(v);
     }
 
+    // FIXME only used by congestion
     fn delivery_rate_update_app_limited(&mut self, v: bool) {
         self.congestion.delivery_rate.update_app_limited(v);
     }
 
+    // FIXME only used by congestion
     fn update_max_ack_delay(&mut self, max_ack_delay: Duration) {
         self.rtt_stats.max_ack_delay = max_ack_delay;
     }
 
     #[cfg(feature = "qlog")]
-    fn maybe_qlog(&mut self) -> Option<EventData> {
+    fn state_str(&self, now: Instant) -> &'static str {
+        (self.congestion.cc_ops.state_str)(&self.congestion, now)
+    }
+
+    #[cfg(feature = "qlog")]
+    fn get_updated_qlog_event_data(&mut self) -> Option<EventData> {
         let qlog_metrics = QlogMetrics {
             min_rtt: *self.rtt_stats.min_rtt,
             smoothed_rtt: self.rtt(),
             latest_rtt: self.rtt_stats.latest_rtt,
             rttvar: self.rtt_stats.rttvar,
             cwnd: self.cwnd() as u64,
-            bytes_in_flight: self.bytes_in_flight as u64,
-            ssthresh: Some(self.congestion.ssthresh as u64),
-            pacing_rate: self.congestion.pacer.rate(),
+            bytes_in_flight: self.bytes_in_flight.get() as u64,
+            ssthresh: Some(self.congestion.ssthresh.get() as u64),
+            lost_packets: Some(self.congestion.lost_count as u64),
+            lost_bytes: Some(self.bytes_lost),
+            pto_count: Some(self.pto_count),
+            app_limited: Some(self.app_limited()),
+            ..Default::default()
         };
 
         self.qlog_metrics.maybe_update(qlog_metrics)
+    }
+
+    #[cfg(feature = "qlog")]
+    fn get_updated_qlog_cc_state(&mut self, now: Instant) -> Option<&'static str> {
+        let cc_state = self.state_str(now);
+        if cc_state != self.qlog_prev_cc_state {
+            self.qlog_prev_cc_state = cc_state;
+            Some(cc_state)
+        } else {
+            None
+        }
     }
 
     fn send_quantum(&self) -> usize {
         self.congestion.send_quantum()
     }
 
-    // TODO tests
     fn get_next_release_time(&self) -> ReleaseDecision {
-        let now = Instant::now();
-        let next_send_time = self.congestion.get_packet_send_time();
-        if next_send_time > now {
-            ReleaseDecision {
-                time: ReleaseTime::At(next_send_time),
-                allow_burst: false,
-            }
-        } else {
-            ReleaseDecision {
-                time: ReleaseTime::Immediate,
-                allow_burst: false,
-            }
+        ReleaseDecision {
+            time: ReleaseTime::Immediate,
+            allow_burst: false,
         }
     }
 
@@ -976,8 +1102,8 @@ impl std::fmt::Debug for LegacyRecovery {
         write!(f, "min_rtt={:?} ", *self.rtt_stats.min_rtt)?;
         write!(f, "rttvar={:?} ", self.rtt_stats.rttvar)?;
         write!(f, "cwnd={} ", self.cwnd())?;
-        write!(f, "ssthresh={} ", self.congestion.ssthresh)?;
-        write!(f, "bytes_in_flight={} ", self.bytes_in_flight)?;
+        write!(f, "ssthresh={} ", self.congestion.ssthresh.get())?;
+        write!(f, "bytes_in_flight={} ", self.bytes_in_flight.get())?;
         write!(f, "app_limited={} ", self.congestion.app_limited)?;
         write!(
             f,
@@ -985,7 +1111,6 @@ impl std::fmt::Debug for LegacyRecovery {
             self.congestion.congestion_recovery_start_time
         )?;
         write!(f, "{:?} ", self.congestion.delivery_rate)?;
-        write!(f, "pacer={:?} ", self.congestion.pacer)?;
 
         if self.congestion.hystart.enabled() {
             write!(f, "hystart={:?} ", self.congestion.hystart)?;
@@ -1015,4 +1140,30 @@ pub struct Acked {
     pub first_sent_time: Instant,
 
     pub is_app_limited: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::recovery::HandshakeStatus;
+    use crate::recovery::RecoveryConfig;
+    use std::time::Instant;
+
+    #[test]
+    fn test_high_pto_count_no_panic() {
+        let config = crate::Config::new(crate::PROTOCOL_VERSION).unwrap();
+        let recovery_config = RecoveryConfig::from_config(&config);
+        let mut r = LegacyRecovery::new_with_config(&recovery_config);
+
+        r.pto_count = 99999;
+
+        let handshake_status = HandshakeStatus {
+            completed: true,
+            has_handshake_keys: true,
+            peer_verified_address: true,
+        };
+        let now = Instant::now();
+
+        let _ = r.pto_time_and_space(handshake_status, now);
+    }
 }

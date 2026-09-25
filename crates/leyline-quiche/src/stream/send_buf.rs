@@ -28,18 +28,56 @@ use std::cmp;
 
 use std::collections::VecDeque;
 
+use crate::BufFactory;
 use crate::Error;
 use crate::Result;
+use crate::buffers::BufSplit;
+use crate::range_buf::RangeBuf;
 
+use crate::buffers::DefaultBufFactory;
 use crate::ranges;
-
-use super::RangeBuf;
 
 #[cfg(test)]
 const SEND_BUFFER_SIZE: usize = 5;
 
 #[cfg(not(test))]
 const SEND_BUFFER_SIZE: usize = 4096;
+
+struct SendReserve<'a, F: BufFactory> {
+    inner: &'a mut SendBuf<F>,
+    reserved: usize,
+    fin: bool,
+}
+
+impl<F: BufFactory> SendReserve<'_, F> {
+    fn append_buf(&mut self, buf: F::Buf) -> Result<()> {
+        let len = buf.as_ref().len();
+        let inner = &mut self.inner;
+
+        if len > self.reserved {
+            return Err(Error::BufferTooShort);
+        }
+
+        let fin: bool = self.reserved == len && self.fin;
+
+        let buf = RangeBuf::from_raw(buf, inner.off, fin);
+
+        // The new data can simply be appended at the end of the send buffer.
+        inner.data.push_back(buf);
+
+        inner.off += len as u64;
+        inner.buffered_bytes += len as u64;
+        self.reserved -= len;
+
+        Ok(())
+    }
+}
+
+impl<F: BufFactory> Drop for SendReserve<'_, F> {
+    fn drop(&mut self) {
+        assert_eq!(self.reserved, 0)
+    }
+}
 
 /// Send-side stream buffer.
 ///
@@ -51,9 +89,12 @@ const SEND_BUFFER_SIZE: usize = 4096;
 /// inserted at the start of the buffer (this is to allow data that needs to be
 /// retransmitted to be re-buffered).
 #[derive(Debug, Default)]
-pub struct SendBuf {
+pub struct SendBuf<F = DefaultBufFactory>
+where
+    F: BufFactory,
+{
     /// Chunks of data to be sent, ordered by offset.
-    data: VecDeque<RangeBuf>,
+    data: VecDeque<RangeBuf<F>>,
 
     /// The index of the buffer that needs to be sent next.
     pos: usize,
@@ -65,8 +106,12 @@ pub struct SendBuf {
     /// retransmissions.
     emit_off: u64,
 
-    /// The amount of data currently buffered.
-    len: u64,
+    /// The number of bytes buffered and ready to be emitted to the peer.
+    ///
+    /// This includes fresh data that has not yet been sent, as well as data
+    /// marked for retransmission. It excludes data that has been emitted but
+    /// not yet acknowledged (in-flight data).
+    buffered_bytes: u64,
 
     /// The maximum offset we are allowed to send to the peer.
     max_data: u64,
@@ -87,33 +132,23 @@ pub struct SendBuf {
     error: Option<u64>,
 }
 
-impl SendBuf {
+impl<F: BufFactory> SendBuf<F> {
     /// Creates a new send buffer.
-    pub fn new(max_data: u64) -> SendBuf {
+    pub fn new(max_data: u64) -> SendBuf<F> {
         SendBuf {
             max_data,
             ..SendBuf::default()
         }
     }
 
-    /// Inserts the given slice of data at the end of the buffer.
-    ///
-    /// The number of bytes that were actually stored in the buffer is returned
-    /// (this may be lower than the size of the input buffer, in case of partial
-    /// writes).
-    pub fn write(&mut self, mut data: &[u8], mut fin: bool) -> Result<usize> {
-        let max_off = self.off + data.len() as u64;
+    /// Try to reserve the required number of bytes to be sent
+    fn reserve_for_write(&mut self, mut len: usize, mut fin: bool) -> Result<SendReserve<'_, F>> {
+        let max_off = self.off + len as u64;
 
         // Get the stream send capacity. This will return an error if the stream
         // was stopped.
-        let capacity = self.cap()?;
-
-        if data.len() > capacity {
-            // Truncate the input buffer according to the stream's capacity.
-            let len = capacity;
-            data = &data[..len];
-
-            // We are not buffering the full input, so clear the fin flag.
+        if len > self.cap()? {
+            len = self.cap()?;
             fin = false;
         }
 
@@ -135,34 +170,71 @@ impl SendBuf {
 
         // Don't queue data that was already fully acked.
         if self.ack_off() >= max_off {
-            return Ok(data.len());
+            return Ok(SendReserve {
+                inner: self,
+                reserved: 0,
+                fin,
+            });
         }
 
-        // We already recorded the final offset, so we can just discard the
-        // empty buffer now.
-        if data.is_empty() {
-            return Ok(data.len());
+        Ok(SendReserve {
+            inner: self,
+            reserved: len,
+            fin,
+        })
+    }
+
+    /// Inserts the given slice of data at the end of the buffer.
+    ///
+    /// The number of bytes that were actually stored in the buffer is returned
+    /// (this may be lower than the size of the input buffer, in case of partial
+    /// writes).
+    pub fn write(&mut self, data: &[u8], fin: bool) -> Result<usize> {
+        let mut reserve = self.reserve_for_write(data.len(), fin)?;
+
+        if reserve.reserved == 0 {
+            return Ok(0);
         }
 
-        let mut len = 0;
+        let ret = reserve.reserved;
 
         // Split the remaining input data into consistently-sized buffers to
         // avoid fragmentation.
-        for chunk in data.chunks(SEND_BUFFER_SIZE) {
-            len += chunk.len();
-
-            let fin = len == data.len() && fin;
-
-            let buf = RangeBuf::from(chunk, self.off, fin);
-
-            // The new data can simply be appended at the end of the send buffer.
-            self.data.push_back(buf);
-
-            self.off += chunk.len() as u64;
-            self.len += chunk.len() as u64;
+        for chunk in data[..reserve.reserved].chunks(SEND_BUFFER_SIZE) {
+            reserve.append_buf(F::buf_from_slice(chunk))?;
         }
 
-        Ok(len)
+        Ok(ret)
+    }
+
+    /// Inserts the given buffer of data at the end of the buffer.
+    ///
+    /// The number of bytes that were actually stored in the buffer is returned
+    /// (this may be lower than the size of the input buffer, in case of partial
+    /// writes, in which case the unwritten buffer is also returned).
+    pub fn append_buf(
+        &mut self,
+        mut data: F::Buf,
+        cap: usize,
+        fin: bool,
+    ) -> Result<(usize, Option<F::Buf>)>
+    where
+        F::Buf: BufSplit,
+    {
+        let len = data.as_ref().len();
+        let mut reserve = self.reserve_for_write(cap.min(len), fin)?;
+
+        if reserve.reserved == 0 {
+            return Ok((0, Some(data)));
+        }
+
+        let remainder = (reserve.reserved < len).then(|| data.split_at(reserve.reserved));
+
+        let ret = reserve.reserved;
+
+        reserve.append_buf(data)?;
+
+        Ok((ret, remainder))
     }
 
     /// Writes data from the send buffer into the given output buffer.
@@ -201,7 +273,7 @@ impl SendBuf {
             let out_pos = (next_off - out_off) as usize;
             out[out_pos..out_pos + buf_len].copy_from_slice(&buf[..buf_len]);
 
-            self.len -= buf_len as u64;
+            self.buffered_bytes -= buf_len as u64;
 
             out_len -= buf_len;
 
@@ -252,17 +324,17 @@ impl SendBuf {
         self.acked.insert(off..off + len as u64);
     }
 
-    pub fn ack_and_drop(&mut self, off: u64, len: usize) {
+    pub fn ack_and_drop(&mut self, off: u64, len: usize) -> usize {
         self.ack(off, len);
 
         let ack_off = self.ack_off();
 
         if self.data.is_empty() {
-            return;
+            return 0;
         }
 
         if off > ack_off {
-            return;
+            return 0;
         }
 
         let mut drop_until = None;
@@ -286,26 +358,37 @@ impl SendBuf {
         }
 
         if let Some(drop) = drop_until {
+            // Calculate the total length of buffers being dropped and subtract
+            // from buffered_bytes.
+            let dropped_len: u64 = (0..=drop).map(|i| self.data[i].len() as u64).sum();
+            self.buffered_bytes = self.buffered_bytes.saturating_sub(dropped_len);
+
             self.data.drain(..=drop);
 
             // When a buffer is marked for retransmission, but then acked before
             // it could be retransmitted, we might end up decreasing the SendBuf
             // position too much, so make sure that doesn't happen.
             self.pos = self.pos.saturating_sub(drop + 1);
+
+            dropped_len as usize
+        } else {
+            0
         }
     }
 
-    pub fn retransmit(&mut self, off: u64, len: usize) {
+    pub fn retransmit(&mut self, off: u64, len: usize) -> usize {
         let max_off = off + len as u64;
         let ack_off = self.ack_off();
 
         if self.data.is_empty() {
-            return;
+            return 0;
         }
 
         if max_off <= ack_off {
-            return;
+            return 0;
         }
+
+        let mut total_retransmitted = 0;
 
         for i in 0..self.data.len() {
             let buf = &mut self.data[i];
@@ -328,8 +411,8 @@ impl SendBuf {
 
             let prev_pos = buf.pos;
 
-            // Reduce the buffer's position (expand the buffer) if the retransmit
-            // range is past the buffer's starting offset.
+            // Expand the buffer by moving its position back when the retransmit
+            // range starts after the buffer offset.
             buf.pos = if off > buf.off && off <= buf.max_off() {
                 cmp::min(buf.pos, buf.start + (off - buf.off) as usize)
             } else {
@@ -338,12 +421,16 @@ impl SendBuf {
 
             self.pos = cmp::min(self.pos, i);
 
-            self.len += (prev_pos - buf.pos) as u64;
+            let retransmitted = (prev_pos - buf.pos) as u64;
+            self.buffered_bytes += retransmitted;
+            total_retransmitted += retransmitted;
 
             if let Some(b) = new_buf {
                 self.data.insert(i + 1, b);
             }
         }
+
+        total_retransmitted as usize
     }
 
     /// Resets the stream at the current offset and clears all buffered data.
@@ -361,7 +448,7 @@ impl SendBuf {
         self.ack(0, self.off as usize);
 
         self.pos = 0;
-        self.len = 0;
+        self.buffered_bytes = 0;
 
         (self.emit_off, unsent_len)
     }
@@ -390,6 +477,14 @@ impl SendBuf {
         self.shutdown = true;
 
         Ok(self.reset())
+    }
+
+    /// Seeds send offsets without buffering the preceding data.
+    #[cfg(test)]
+    pub fn seed_offsets_for_test(&mut self, off: u64) {
+        assert!(self.data.is_empty());
+        self.off = off;
+        self.emit_off = off;
     }
 
     /// Returns the largest offset of data buffered.
@@ -485,6 +580,15 @@ impl SendBuf {
     pub fn bufs_count(&self) -> usize {
         self.data.len()
     }
+
+    /// Returns the number of bytes ready to be emitted to the peer.
+    ///
+    /// This includes fresh data that has not yet been sent, as well as data
+    /// marked for retransmission. It excludes data that has been emitted but
+    /// not yet acknowledged (in-flight data).
+    pub fn buffered_bytes(&self) -> u64 {
+        self.buffered_bytes
+    }
 }
 
 #[cfg(test)]
@@ -495,8 +599,8 @@ mod tests {
     fn empty_write() {
         let mut buf = [0; 5];
 
-        let mut send = SendBuf::new(u64::MAX);
-        assert_eq!(send.len, 0);
+        let mut send = <SendBuf>::new(u64::MAX);
+        assert_eq!(send.buffered_bytes, 0);
 
         let (written, fin) = send.emit(&mut buf).unwrap();
         assert_eq!(written, 0);
@@ -507,40 +611,40 @@ mod tests {
     fn multi_write() {
         let mut buf = [0; 128];
 
-        let mut send = SendBuf::new(u64::MAX);
-        assert_eq!(send.len, 0);
+        let mut send = <SendBuf>::new(u64::MAX);
+        assert_eq!(send.buffered_bytes, 0);
 
         let first = b"something";
         let second = b"helloworld";
 
         assert!(send.write(first, false).is_ok());
-        assert_eq!(send.len, 9);
+        assert_eq!(send.buffered_bytes, 9);
 
         assert!(send.write(second, true).is_ok());
-        assert_eq!(send.len, 19);
+        assert_eq!(send.buffered_bytes, 19);
 
         let (written, fin) = send.emit(&mut buf[..128]).unwrap();
         assert_eq!(written, 19);
         assert!(fin);
         assert_eq!(&buf[..written], b"somethinghelloworld");
-        assert_eq!(send.len, 0);
+        assert_eq!(send.buffered_bytes, 0);
     }
 
     #[test]
     fn split_write() {
         let mut buf = [0; 10];
 
-        let mut send = SendBuf::new(u64::MAX);
-        assert_eq!(send.len, 0);
+        let mut send = <SendBuf>::new(u64::MAX);
+        assert_eq!(send.buffered_bytes, 0);
 
         let first = b"something";
         let second = b"helloworld";
 
         assert!(send.write(first, false).is_ok());
-        assert_eq!(send.len, 9);
+        assert_eq!(send.buffered_bytes, 9);
 
         assert!(send.write(second, true).is_ok());
-        assert_eq!(send.len, 19);
+        assert_eq!(send.buffered_bytes, 19);
 
         assert_eq!(send.off_front(), 0);
 
@@ -548,7 +652,7 @@ mod tests {
         assert_eq!(written, 10);
         assert!(!fin);
         assert_eq!(&buf[..written], b"somethingh");
-        assert_eq!(send.len, 9);
+        assert_eq!(send.buffered_bytes, 9);
 
         assert_eq!(send.off_front(), 10);
 
@@ -556,7 +660,7 @@ mod tests {
         assert_eq!(written, 5);
         assert!(!fin);
         assert_eq!(&buf[..written], b"ellow");
-        assert_eq!(send.len, 4);
+        assert_eq!(send.buffered_bytes, 4);
 
         assert_eq!(send.off_front(), 15);
 
@@ -564,7 +668,7 @@ mod tests {
         assert_eq!(written, 4);
         assert!(fin);
         assert_eq!(&buf[..written], b"orld");
-        assert_eq!(send.len, 0);
+        assert_eq!(send.buffered_bytes, 0);
 
         assert_eq!(send.off_front(), 19);
     }
@@ -573,8 +677,8 @@ mod tests {
     fn resend() {
         let mut buf = [0; 15];
 
-        let mut send = SendBuf::new(u64::MAX);
-        assert_eq!(send.len, 0);
+        let mut send = <SendBuf>::new(u64::MAX);
+        assert_eq!(send.buffered_bytes, 0);
         assert_eq!(send.off_front(), 0);
 
         let first = b"something";
@@ -586,49 +690,49 @@ mod tests {
         assert!(send.write(second, true).is_ok());
         assert_eq!(send.off_front(), 0);
 
-        assert_eq!(send.len, 19);
+        assert_eq!(send.buffered_bytes, 19);
 
         let (written, fin) = send.emit(&mut buf[..4]).unwrap();
         assert_eq!(written, 4);
         assert!(!fin);
         assert_eq!(&buf[..written], b"some");
-        assert_eq!(send.len, 15);
+        assert_eq!(send.buffered_bytes, 15);
         assert_eq!(send.off_front(), 4);
 
         let (written, fin) = send.emit(&mut buf[..5]).unwrap();
         assert_eq!(written, 5);
         assert!(!fin);
         assert_eq!(&buf[..written], b"thing");
-        assert_eq!(send.len, 10);
+        assert_eq!(send.buffered_bytes, 10);
         assert_eq!(send.off_front(), 9);
 
         let (written, fin) = send.emit(&mut buf[..5]).unwrap();
         assert_eq!(written, 5);
         assert!(!fin);
         assert_eq!(&buf[..written], b"hello");
-        assert_eq!(send.len, 5);
+        assert_eq!(send.buffered_bytes, 5);
         assert_eq!(send.off_front(), 14);
 
         send.retransmit(4, 5);
-        assert_eq!(send.len, 10);
+        assert_eq!(send.buffered_bytes, 10);
         assert_eq!(send.off_front(), 4);
 
         send.retransmit(0, 4);
-        assert_eq!(send.len, 14);
+        assert_eq!(send.buffered_bytes, 14);
         assert_eq!(send.off_front(), 0);
 
         let (written, fin) = send.emit(&mut buf[..11]).unwrap();
         assert_eq!(written, 9);
         assert!(!fin);
         assert_eq!(&buf[..written], b"something");
-        assert_eq!(send.len, 5);
+        assert_eq!(send.buffered_bytes, 5);
         assert_eq!(send.off_front(), 14);
 
         let (written, fin) = send.emit(&mut buf[..11]).unwrap();
         assert_eq!(written, 5);
         assert!(fin);
         assert_eq!(&buf[..written], b"world");
-        assert_eq!(send.len, 0);
+        assert_eq!(send.buffered_bytes, 0);
         assert_eq!(send.off_front(), 19);
     }
 
@@ -636,25 +740,25 @@ mod tests {
     fn write_blocked_by_off() {
         let mut buf = [0; 10];
 
-        let mut send = SendBuf::default();
-        assert_eq!(send.len, 0);
+        let mut send = <SendBuf>::default();
+        assert_eq!(send.buffered_bytes, 0);
 
         let first = b"something";
         let second = b"helloworld";
 
         assert_eq!(send.write(first, false), Ok(0));
-        assert_eq!(send.len, 0);
+        assert_eq!(send.buffered_bytes, 0);
 
         assert_eq!(send.write(second, true), Ok(0));
-        assert_eq!(send.len, 0);
+        assert_eq!(send.buffered_bytes, 0);
 
         send.update_max_data(5);
 
         assert_eq!(send.write(first, false), Ok(5));
-        assert_eq!(send.len, 5);
+        assert_eq!(send.buffered_bytes, 5);
 
         assert_eq!(send.write(second, true), Ok(0));
-        assert_eq!(send.len, 5);
+        assert_eq!(send.buffered_bytes, 5);
 
         assert_eq!(send.off_front(), 0);
 
@@ -662,7 +766,7 @@ mod tests {
         assert_eq!(written, 5);
         assert!(!fin);
         assert_eq!(&buf[..written], b"somet");
-        assert_eq!(send.len, 0);
+        assert_eq!(send.buffered_bytes, 0);
 
         assert_eq!(send.off_front(), 5);
 
@@ -670,15 +774,15 @@ mod tests {
         assert_eq!(written, 0);
         assert!(!fin);
         assert_eq!(&buf[..written], b"");
-        assert_eq!(send.len, 0);
+        assert_eq!(send.buffered_bytes, 0);
 
         send.update_max_data(15);
 
         assert_eq!(send.write(&first[5..], false), Ok(4));
-        assert_eq!(send.len, 4);
+        assert_eq!(send.buffered_bytes, 4);
 
         assert_eq!(send.write(second, true), Ok(6));
-        assert_eq!(send.len, 10);
+        assert_eq!(send.buffered_bytes, 10);
 
         assert_eq!(send.off_front(), 5);
 
@@ -686,12 +790,12 @@ mod tests {
         assert_eq!(written, 10);
         assert!(!fin);
         assert_eq!(&buf[..10], b"hinghellow");
-        assert_eq!(send.len, 0);
+        assert_eq!(send.buffered_bytes, 0);
 
         send.update_max_data(25);
 
         assert_eq!(send.write(&second[6..], true), Ok(4));
-        assert_eq!(send.len, 4);
+        assert_eq!(send.buffered_bytes, 4);
 
         assert_eq!(send.off_front(), 15);
 
@@ -699,23 +803,23 @@ mod tests {
         assert_eq!(written, 4);
         assert!(fin);
         assert_eq!(&buf[..written], b"orld");
-        assert_eq!(send.len, 0);
+        assert_eq!(send.buffered_bytes, 0);
     }
 
     #[test]
     fn zero_len_write() {
         let mut buf = [0; 10];
 
-        let mut send = SendBuf::new(u64::MAX);
-        assert_eq!(send.len, 0);
+        let mut send = <SendBuf>::new(u64::MAX);
+        assert_eq!(send.buffered_bytes, 0);
 
         let first = b"something";
 
         assert!(send.write(first, false).is_ok());
-        assert_eq!(send.len, 9);
+        assert_eq!(send.buffered_bytes, 9);
 
         assert!(send.write(&[], true).is_ok());
-        assert_eq!(send.len, 9);
+        assert_eq!(send.buffered_bytes, 9);
 
         assert_eq!(send.off_front(), 0);
 
@@ -723,7 +827,7 @@ mod tests {
         assert_eq!(written, 9);
         assert!(fin);
         assert_eq!(&buf[..written], b"something");
-        assert_eq!(send.len, 0);
+        assert_eq!(send.buffered_bytes, 0);
     }
 
     /// Check SendBuf::len calculation on a retransmit case
@@ -731,8 +835,8 @@ mod tests {
     fn send_buf_len_on_retransmit() {
         let mut buf = [0; 15];
 
-        let mut send = SendBuf::new(u64::MAX);
-        assert_eq!(send.len, 0);
+        let mut send = <SendBuf>::new(u64::MAX);
+        assert_eq!(send.buffered_bytes, 0);
         assert_eq!(send.off_front(), 0);
 
         let first = b"something";
@@ -740,24 +844,24 @@ mod tests {
         assert!(send.write(first, false).is_ok());
         assert_eq!(send.off_front(), 0);
 
-        assert_eq!(send.len, 9);
+        assert_eq!(send.buffered_bytes, 9);
 
         let (written, fin) = send.emit(&mut buf[..4]).unwrap();
         assert_eq!(written, 4);
         assert!(!fin);
         assert_eq!(&buf[..written], b"some");
-        assert_eq!(send.len, 5);
+        assert_eq!(send.buffered_bytes, 5);
         assert_eq!(send.off_front(), 4);
 
         send.retransmit(3, 5);
-        assert_eq!(send.len, 6);
+        assert_eq!(send.buffered_bytes, 6);
         assert_eq!(send.off_front(), 3);
     }
 
     #[test]
     fn send_buf_final_size_retransmit() {
         let mut buf = [0; 50];
-        let mut send = SendBuf::new(u64::MAX);
+        let mut send = <SendBuf>::new(u64::MAX);
 
         send.write(&buf, false).unwrap();
         assert_eq!(send.off_front(), 0);

@@ -71,8 +71,8 @@ pub enum Algorithm {
     ChaCha20_Poly1305,
 }
 
-// Note: some vendor-specific methods are implemented by each vendor's submodule
-// (openssl-quictls / boringssl).
+// Note: some vendor-specific methods are implemented in the boringssl
+// submodule.
 impl Algorithm {
     fn get_evp_digest(self) -> *const EVP_MD {
         match self {
@@ -92,7 +92,7 @@ impl Algorithm {
 
     pub const fn tag_len(self) -> usize {
         if cfg!(feature = "fuzzing") {
-            return 0;
+            return 16;
         }
 
         match self {
@@ -136,8 +136,8 @@ pub struct Open {
 }
 
 impl Open {
-    // Note: some vendor-specific methods are implemented by each vendor's
-    // submodule (openssl-quictls / boringssl).
+    // Note: some vendor-specific methods are implemented in the boringssl
+    // submodule.
 
     pub const DECRYPT: u32 = 0;
 
@@ -201,7 +201,15 @@ impl Open {
 
     pub fn open_with_u64_counter(&self, counter: u64, ad: &[u8], buf: &mut [u8]) -> Result<usize> {
         if cfg!(feature = "fuzzing") {
-            return Ok(buf.len());
+            let tag_len = self.alg.tag_len();
+            let out_len = match buf.len().checked_sub(tag_len) {
+                Some(n) => n,
+                None => return Err(Error::CryptoFail),
+            };
+            if ad.len() > tag_len && buf[out_len..] == ad[..tag_len] {
+                return Err(Error::CryptoFail);
+            }
+            return Ok(out_len);
         }
 
         self.packet.open_with_u64_counter(counter, ad, buf)
@@ -219,8 +227,8 @@ pub struct Seal {
 }
 
 impl Seal {
-    // Note: some vendor-specific methods are implemented by each vendor's
-    // submodule (openssl-quictls / boringssl).
+    // Note: some vendor-specific methods are implemented in the boringssl
+    // submodule.
 
     pub const ENCRYPT: u32 = 1;
 
@@ -283,7 +291,7 @@ impl Seal {
     }
 
     pub fn seal_with_u64_counter(
-        &self,
+        &mut self,
         counter: u64,
         ad: &[u8],
         buf: &mut [u8],
@@ -291,12 +299,20 @@ impl Seal {
         extra_in: Option<&[u8]>,
     ) -> Result<usize> {
         if cfg!(feature = "fuzzing") {
+            let tag_len = self.alg.tag_len();
+
             if let Some(extra) = extra_in {
+                if in_len + tag_len + extra.len() > buf.len() {
+                    return Err(Error::CryptoFail);
+                }
                 buf[in_len..in_len + extra.len()].copy_from_slice(extra);
                 return Ok(in_len + extra.len());
             }
+            if in_len + tag_len > buf.len() {
+                return Err(Error::CryptoFail);
+            }
 
-            return Ok(in_len);
+            return Ok(in_len + tag_len);
         }
 
         self.packet
@@ -418,7 +434,7 @@ fn derive_server_initial_secret(aead: Algorithm, prk: &[u8], out: &mut [u8]) -> 
 fn derive_next_secret(aead: Algorithm, secret: &[u8]) -> Result<Vec<u8>> {
     const LABEL: &[u8] = b"quic ku";
 
-    let mut next_secret = vec![0u8; 32];
+    let mut next_secret = vec![0u8; secret.len()];
 
     hkdf_expand_label(aead, secret, LABEL, &mut next_secret)?;
 
@@ -630,15 +646,16 @@ mod tests {
             0x0a, 0xb7, 0xa7, 0xa4,
         ];
         assert_eq!(&hdr_key, &expected_hdr_key);
+
+        let next_secret = derive_next_secret(aead, &secret).unwrap();
+        let expected_secret = [
+            0x12, 0x23, 0x50, 0x47, 0x55, 0x03, 0x6d, 0x55, 0x63, 0x42, 0xee, 0x93, 0x61, 0xd2,
+            0x53, 0x42, 0x1a, 0x82, 0x6c, 0x9e, 0xcd, 0xf3, 0xc7, 0x14, 0x86, 0x84, 0xb3, 0x6b,
+            0x71, 0x48, 0x81, 0xf9,
+        ];
+        assert_eq!(&next_secret, &expected_secret);
     }
 }
 
-#[cfg(not(feature = "openssl"))]
 mod boringssl;
-#[cfg(not(feature = "openssl"))]
 pub(crate) use boringssl::*;
-
-#[cfg(feature = "openssl")]
-mod openssl_quictls;
-#[cfg(feature = "openssl")]
-pub(crate) use openssl_quictls::*;

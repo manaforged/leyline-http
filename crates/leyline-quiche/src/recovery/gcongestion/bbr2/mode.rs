@@ -29,17 +29,16 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use std::fmt::Debug;
-use std::ops::Deref;
-use std::ops::DerefMut;
 use std::time::Duration;
 use std::time::Instant;
 
+use crate::recovery::RecoveryStats;
 use crate::recovery::gcongestion::Lost;
+use crate::recovery::gcongestion::bbr2::Params;
 
 use super::Acked;
 use super::BBRv2CongestionEvent;
 use super::Limits;
-use super::PARAMS;
 use super::drain::Drain;
 use super::network_model::BBRv2NetworkModel;
 use super::probe_bw::ProbeBW;
@@ -57,11 +56,18 @@ pub(super) enum CyclePhase {
 }
 
 impl CyclePhase {
-    pub(super) fn gain(&self) -> f32 {
+    pub(super) fn pacing_gain(&self, params: &Params) -> f32 {
         match self {
-            CyclePhase::Up => PARAMS.probe_bw_probe_up_pacing_gain,
-            CyclePhase::Down => PARAMS.probe_bw_probe_down_pacing_gain,
-            _ => PARAMS.probe_bw_default_pacing_gain,
+            CyclePhase::Up => params.probe_bw_probe_up_pacing_gain,
+            CyclePhase::Down => params.probe_bw_probe_down_pacing_gain,
+            _ => params.probe_bw_default_pacing_gain,
+        }
+    }
+
+    pub(super) fn cwnd_gain(&self, params: &Params) -> f32 {
+        match self {
+            CyclePhase::Up => params.probe_bw_up_cwnd_gain,
+            _ => params.probe_bw_cwnd_gain,
         }
     }
 }
@@ -113,12 +119,21 @@ impl Default for Cycle {
 
 #[enum_dispatch::enum_dispatch]
 pub(super) trait ModeImpl: Debug {
-    fn enter(&mut self, now: Instant, congestion_event: Option<&BBRv2CongestionEvent>);
+    #[cfg(feature = "qlog")]
+    fn state_str(&self) -> &'static str;
+
+    fn enter(
+        &mut self,
+        now: Instant,
+        congestion_event: Option<&BBRv2CongestionEvent>,
+        params: &Params,
+    );
 
     fn leave(&mut self, now: Instant, congestion_event: Option<&BBRv2CongestionEvent>);
 
     fn is_probing_for_bandwidth(&self) -> bool;
 
+    #[allow(clippy::too_many_arguments)]
     fn on_congestion_event(
         self,
         prior_in_flight: usize,
@@ -127,11 +142,19 @@ pub(super) trait ModeImpl: Debug {
         lost_packets: &[Lost],
         congestion_event: &mut BBRv2CongestionEvent,
         target_bytes_inflight: usize,
+        params: &Params,
+        recovery_stats: &mut RecoveryStats,
+        cwnd: usize,
     ) -> Mode;
 
-    fn get_cwnd_limits(&self) -> Limits<usize>;
+    fn get_cwnd_limits(&self, params: &Params) -> Limits<usize>;
 
-    fn on_exit_quiescence(self, now: Instant, quiescence_start_time: Instant) -> Mode;
+    fn on_exit_quiescence(
+        self,
+        now: Instant,
+        quiescence_start_time: Instant,
+        params: &Params,
+    ) -> Mode;
 }
 
 #[enum_dispatch::enum_dispatch(ModeImpl)]
@@ -170,6 +193,7 @@ impl Mode {
         Mode::ProbeRTT(ProbeRTT::new(model, cycle))
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn do_on_congestion_event(
         &mut self,
         prior_in_flight: usize,
@@ -178,6 +202,9 @@ impl Mode {
         lost_packets: &[Lost],
         congestion_event: &mut BBRv2CongestionEvent,
         target_bytes_inflight: usize,
+        params: &Params,
+        recovery_stats: &mut RecoveryStats,
+        cwnd: usize,
     ) -> bool {
         let mode_before = std::mem::discriminant(self);
 
@@ -188,6 +215,9 @@ impl Mode {
             lost_packets,
             congestion_event,
             target_bytes_inflight,
+            params,
+            recovery_stats,
+            cwnd,
         );
 
         let mode_after = std::mem::discriminant(self);
@@ -195,15 +225,16 @@ impl Mode {
         mode_before != mode_after
     }
 
-    pub(super) fn do_on_exit_quiescence(&mut self, now: Instant, quiescence_start_time: Instant) {
-        *self = std::mem::take(self).on_exit_quiescence(now, quiescence_start_time)
+    pub(super) fn do_on_exit_quiescence(
+        &mut self,
+        now: Instant,
+        quiescence_start_time: Instant,
+        params: &Params,
+    ) {
+        *self = std::mem::take(self).on_exit_quiescence(now, quiescence_start_time, params)
     }
-}
 
-impl Deref for Mode {
-    type Target = BBRv2NetworkModel;
-
-    fn deref(&self) -> &Self::Target {
+    pub fn network_model(&self) -> &BBRv2NetworkModel {
         match self {
             Mode::Startup(Startup { model }) => model,
             Mode::Drain(Drain { model, .. }) => model,
@@ -212,10 +243,8 @@ impl Deref for Mode {
             Mode::Placheolder(_) => unreachable!(),
         }
     }
-}
 
-impl DerefMut for Mode {
-    fn deref_mut(&mut self) -> &mut Self::Target {
+    pub fn network_model_mut(&mut self) -> &mut BBRv2NetworkModel {
         match self {
             Mode::Startup(Startup { model }) => model,
             Mode::Drain(Drain { model, .. }) => model,
@@ -230,7 +259,12 @@ impl DerefMut for Mode {
 pub(super) struct Placeholder {}
 
 impl ModeImpl for Placeholder {
-    fn enter(&mut self, _: Instant, _: Option<&BBRv2CongestionEvent>) {
+    #[cfg(feature = "qlog")]
+    fn state_str(&self) -> &'static str {
+        unreachable!()
+    }
+
+    fn enter(&mut self, _: Instant, _: Option<&BBRv2CongestionEvent>, _params: &Params) {
         unreachable!()
     }
 
@@ -250,15 +284,50 @@ impl ModeImpl for Placeholder {
         _: &[Lost],
         _: &mut BBRv2CongestionEvent,
         _: usize,
+        _params: &Params,
+        _recovery_stats: &mut RecoveryStats,
+        _cwnd: usize,
     ) -> Mode {
         unreachable!()
     }
 
-    fn get_cwnd_limits(&self) -> Limits<usize> {
+    fn get_cwnd_limits(&self, _params: &Params) -> Limits<usize> {
         unreachable!()
     }
 
-    fn on_exit_quiescence(self, _: Instant, _: Instant) -> Mode {
+    fn on_exit_quiescence(self, _: Instant, _: Instant, _params: &Params) -> Mode {
         unreachable!()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::BbrParams;
+    use crate::recovery::gcongestion::bbr2::DEFAULT_PARAMS;
+
+    #[test]
+    fn cycle_params() {
+        let custom_bbr_settings = BbrParams {
+            probe_bw_up_cwnd_gain: Some(2.25),
+            probe_bw_cwnd_gain: Some(2.0),
+            ..Default::default()
+        };
+        let params = &DEFAULT_PARAMS.with_overrides(&custom_bbr_settings);
+
+        assert_eq!(CyclePhase::Up.pacing_gain(params), 1.25);
+        assert_eq!(CyclePhase::Up.cwnd_gain(params), 2.25);
+
+        assert_eq!(CyclePhase::Down.pacing_gain(params), 0.9);
+        assert_eq!(CyclePhase::Down.cwnd_gain(params), 2.0);
+
+        assert_eq!(CyclePhase::NotStarted.pacing_gain(params), 1.0);
+        assert_eq!(CyclePhase::NotStarted.cwnd_gain(params), 2.0);
+
+        assert_eq!(CyclePhase::Cruise.pacing_gain(params), 1.0);
+        assert_eq!(CyclePhase::Cruise.cwnd_gain(params), 2.0);
+
+        assert_eq!(CyclePhase::Refill.pacing_gain(params), 1.0);
+        assert_eq!(CyclePhase::Refill.cwnd_gain(params), 2.0);
     }
 }

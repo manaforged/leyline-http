@@ -300,6 +300,10 @@ toml = { workspace = true }
 
 [dev-dependencies]
 bytes = { workspace = true }
+leyline-quiche = { path = "../leyline-quiche", version = "=0.1.0", default-features = false, features = [
+    "boringssl-bssl-crate",
+    "internal",
+] }
 # In-test cert generation + a localhost TLS acceptor for the
 # pinning hostname-verification integration test.
 leyline-bssl = { workspace = true }

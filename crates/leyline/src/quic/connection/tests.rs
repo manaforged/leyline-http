@@ -11,7 +11,7 @@ use leyline_bssl::rsa::Rsa;
 use leyline_bssl::ssl::{SslContextBuilder, SslMethod};
 use leyline_bssl::x509::extension::{BasicConstraints, ExtendedKeyUsage, SubjectAlternativeName};
 use leyline_bssl::x509::{X509, X509NameBuilder};
-use leyline_quiche::testing::{Pipe, emit_flight, process_flight};
+use leyline_quiche::test_utils::{Pipe, emit_flight, process_flight};
 use sha2::{Digest, Sha256};
 
 #[test]
