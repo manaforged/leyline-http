@@ -72,9 +72,10 @@ extension order. It puts each profile and dimension into one of five states:
 profiles; run it with `status` to see which versions are missing. It captures
 from these sources only:
 
-- Chrome: the full Chrome build from Chrome for Testing, or the Chrome binary
-  named by `LEYLINE_CHROME`, run with `--headless=new`. The script refuses
-  `chrome-headless-shell`.
+- Chrome: the Chrome binary named by `LEYLINE_CHROME`, the installed Google
+  Chrome on macOS, or the stable package from Google's apt repository on
+  Linux, checked against the SHA-256 in Google's signed index. The script
+  refuses Chrome for Testing and `chrome-headless-shell`.
 - Firefox: the official release build.
 - Safari: Safari.app, driven by `safaridriver`. Mobile Safari has no automated
   capture.
@@ -88,6 +89,24 @@ Before the first Safari capture, do these steps once:
 1. In Safari, turn on Settings > Advanced > Show features for web developers.
 2. In the Develop menu, select Allow Remote Automation.
 3. Run `safaridriver --enable` and enter your password.
+
+### Keeping profiles current
+
+The `release-watch` workflow runs once a day. It compares each browser's
+stable release (Chrome, Firefox, Brave, Edge, Opera, and Safari and iOS)
+with the newest bundled profile, and checks the forked crates against upstream
+security advisories:
+
+```sh
+python3 scripts/release-check.py
+python3 scripts/upstream-check.py
+```
+
+Either command exits with status 1 when a new major release has no profile or
+an advisory applies to a fork's base version. The workflow then fails, and
+GitHub notifies the maintainers. A BoringSSL revision behind Chrome's, a newer
+upstream release, or a vendor API error is only reported in the run log. A new release is captured on request with
+the capture scripts above; nothing is captured on a schedule.
 
 ## Style
 

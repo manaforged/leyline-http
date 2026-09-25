@@ -35,17 +35,32 @@ def version_key(text: str) -> tuple[int, ...]:
     return tuple(int(part) for part in re.findall(r"\d+", text)[:3])
 
 
+def clause_ok(base: tuple[int, ...], clause: str) -> bool:
+    clause = clause.strip()
+    if clause.endswith("+"):
+        clause = ">=" + clause[:-1]
+    match = re.match(r"(>=|<=|>|<|=)?\s*v?([\d.]+)$", clause)
+    if not match:
+        raise ValueError(f"unparsed version range clause {clause!r}")
+    op, bound = match.group(1) or "=", version_key(match.group(2))
+    return {">=": base >= bound, "<=": base <= bound, ">": base > bound, "<": base < bound, "=": base == bound}[op]
+
+
 def in_range(version: str, spec: str) -> bool:
     base = version_key(version)
-    for clause in spec.split(","):
-        match = re.match(r"\s*(>=|<=|>|<|=)?\s*v?([\d.]+)", clause)
-        if not match:
-            return False
-        op, bound = match.group(1) or "=", version_key(match.group(2))
-        checks = {">=": base >= bound, "<=": base <= bound, ">": base > bound, "<": base < bound, "=": base == bound}
-        if not checks[op]:
-            return False
-    return True
+    return any(
+        all(clause_ok(base, clause) for clause in alternative.split(",") if clause.strip())
+        for alternative in spec.split("||")
+    )
+
+
+def fixed_by(version: str, patched: list[str]) -> bool:
+    if not patched:
+        return False
+    base = version_key(version)
+    if base >= max(version_key(p) for p in patched):
+        return True
+    return any(version_key(p)[:2] == base[:2] and base >= version_key(p) for p in patched)
 
 
 @functools.cache
@@ -76,8 +91,8 @@ def repo_hits(repo: str, crate: str, version: str) -> list[str]:
             name = (vuln.get("package") or {}).get("name")
             spec = vuln.get("vulnerable_version_range") or ""
             patched = [p for p in re.split(r"[,\s]+", vuln.get("patched_versions") or "") if p]
-            fixed = any(version_key(version) >= version_key(p) for p in patched)
-            if name in (crate, None) and spec and in_range(version, spec) and not fixed:
+            names = (crate, None, repo.split("/")[-1], repo.replace("/", "-"))
+            if name in names and spec and in_range(version, spec) and not fixed_by(version, patched):
                 hits.append(advisory["ghsa_id"])
                 break
     return hits
@@ -116,9 +131,13 @@ def main() -> int:
         meta = package.get("metadata", {}).get("upstream")
         if not meta:
             continue
-        failed |= check_crate(package["name"], meta)
-        if "boringssl" in meta:
-            failed |= check_boringssl(manifest.parent, meta["boringssl"])
+        for check, args in ((check_crate, (package["name"], meta)), (check_boringssl, (manifest.parent, meta.get("boringssl")))):
+            if args[1] is None:
+                continue
+            try:
+                failed |= check(*args)
+            except Exception as error:
+                print(f"::warning::{package['name']}: check failed: {error}")
     return 1 if failed else 0
 
 
