@@ -62,7 +62,7 @@ impl Cookie {
             && existing.name == self.name
             && (domain_match(&self.domain, &existing.domain)
                 || domain_match(&existing.domain, &self.domain))
-            && path_match(&self.path, &existing.path)
+            && (path_match(&self.path, &existing.path) || path_match(&existing.path, &self.path))
     }
 }
 

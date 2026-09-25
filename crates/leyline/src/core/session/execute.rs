@@ -216,7 +216,10 @@ impl Session {
                         current_method = "GET".to_string();
                         current_body = Body::default();
                         if let Some(extra) = extra_headers.as_mut() {
-                            extra.remove_where(|name| name.as_str().starts_with("content-"));
+                            extra.remove_where(|name| {
+                                let name = name.as_str();
+                                name.starts_with("content-") || name == "transfer-encoding"
+                            });
                         }
                     } else if let Some(replay) = replay_body {
                         current_body = replay;
