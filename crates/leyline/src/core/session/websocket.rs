@@ -23,6 +23,7 @@ impl Session {
         let origin = ws_origin(url)?;
         let parsed = url::Url::parse(url).map_err(crate::core::Error::from_url_parse)?;
         let proxy = self.proxy_for(&parsed, request_proxy)?;
+        let extra_headers = &self.websocket_headers(&parsed, extra_headers);
 
         let h1_only = parsed.host_str().is_some_and(|host| {
             self.inner
@@ -130,6 +131,34 @@ impl std::future::IntoFuture for WebSocketBuilder {
 
     fn into_future(self) -> Self::IntoFuture {
         Box::pin(async move { self.connect().await })
+    }
+}
+
+impl Session {
+    fn websocket_headers(
+        &self,
+        url: &url::Url,
+        caller: &[(String, String)],
+    ) -> Vec<(String, String)> {
+        let caller_has = |name: &str| caller.iter().any(|(k, _)| k.eq_ignore_ascii_case(name));
+        let mut headers = Vec::new();
+        self.merge_session_headers(&mut headers, &caller_has, false);
+        headers.extend(
+            caller
+                .iter()
+                .map(|(k, v)| (k.clone().into(), v.clone().into())),
+        );
+        let mut cookie_url = url.clone();
+        let lookup = if cookie_url.set_scheme("https").is_ok() {
+            &cookie_url
+        } else {
+            url
+        };
+        self.add_jar_cookie(&mut headers, lookup, &[], "GET");
+        headers
+            .into_iter()
+            .map(|(k, v)| (k.into_owned(), v.into_owned()))
+            .collect()
     }
 }
 

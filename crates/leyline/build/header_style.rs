@@ -1,17 +1,54 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Write as _;
 
 use serde::Deserialize;
 
+use crate::preset_kind::Preset;
 use crate::{BuildResult, is_ident};
 
+type Template = Vec<(String, String)>;
+
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct Shape {
     variant: String,
     #[serde(default)]
     default: bool,
     extends: Option<String>,
-    fallback: Option<toml::Value>,
+    fallback: Option<Template>,
+    #[serde(default)]
+    presets: HashMap<Preset, Template>,
+    #[serde(default)]
+    append: Template,
+    order: Option<Vec<String>>,
+}
+
+fn check_names<'a>(key: &str, names: impl IntoIterator<Item = &'a str>) -> BuildResult<()> {
+    let mut seen = HashSet::new();
+    for name in names {
+        let valid = !name.is_empty()
+            && name
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+        if !valid || !seen.insert(name) {
+            return Err(
+                format!("headers.toml: {key} has a bad or repeated header {name:?}").into(),
+            );
+        }
+    }
+    Ok(())
+}
+
+fn check_fields(key: &str, shape: &Shape) -> BuildResult<()> {
+    let templates = shape
+        .fallback
+        .iter()
+        .chain(shape.presets.values())
+        .chain(std::iter::once(&shape.append));
+    for template in templates {
+        check_names(key, template.iter().map(|(name, _)| name.as_str()))?;
+    }
+    check_names(key, shape.order.iter().flatten().map(String::as_str))
 }
 
 pub(crate) fn check_shapes(shapes: &BTreeMap<String, Shape>) -> BuildResult<()> {
@@ -22,6 +59,7 @@ pub(crate) fn check_shapes(shapes: &BTreeMap<String, Shape>) -> BuildResult<()> 
                 format!("headers.toml: bad or repeated variant {:?}", shape.variant).into(),
             );
         }
+        check_fields(key, shape)?;
         let mut seen = HashSet::from([key.as_str()]);
         let mut has_fallback = shape.fallback.is_some();
         let mut current = shape;

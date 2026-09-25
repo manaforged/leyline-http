@@ -6,19 +6,8 @@ use serde::Deserialize;
 
 include!(concat!(env!("OUT_DIR"), "/header_style.rs"));
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-#[non_exhaustive]
-pub enum Preset {
-    Native,
-    Navigate,
-    Script,
-    Xhr,
-    Form,
-    CrossOrigin,
-    SameSite,
-    FormNavigate,
-}
+mod kind;
+pub use kind::Preset;
 
 pub struct HeaderContext<'a> {
     pub user_agent: &'a str,
@@ -102,10 +91,24 @@ impl HeaderContext<'_> {
         if !template.contains('{') {
             return Cow::Borrowed(template);
         }
-        let mut value = template.to_string();
-        for (key, replacement) in self.placeholders() {
-            value = value.replace(key, replacement);
+        let placeholders = self.placeholders();
+        let mut value = String::with_capacity(template.len());
+        let mut rest = template;
+        while let Some(start) = rest.find('{') {
+            value.push_str(&rest[..start]);
+            rest = &rest[start..];
+            match placeholders.iter().find(|(key, _)| rest.starts_with(key)) {
+                Some((key, replacement)) => {
+                    value.push_str(replacement);
+                    rest = &rest[key.len()..];
+                }
+                None => {
+                    value.push('{');
+                    rest = &rest[1..];
+                }
+            }
         }
+        value.push_str(rest);
         Cow::Owned(value)
     }
 }

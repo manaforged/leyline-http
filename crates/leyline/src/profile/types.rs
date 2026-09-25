@@ -11,6 +11,7 @@ use crate::{Error, Kind};
     reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
 )]
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct BrowserProfile {
     pub meta: ProfileMeta,
@@ -27,6 +28,7 @@ pub struct BrowserProfile {
     reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
 )]
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct ProfileMeta {
     pub name: String,
@@ -46,6 +48,18 @@ pub struct ProfileMeta {
     pub header_style: HeaderStyle,
     #[serde(skip)]
     pub(crate) header_order: Option<Vec<String>>,
+    #[serde(default, rename = "capture")]
+    _capture: serde::de::IgnoredAny,
+    #[serde(default, rename = "variant")]
+    _variant: serde::de::IgnoredAny,
+    #[serde(default, rename = "hello")]
+    _hello: serde::de::IgnoredAny,
+    #[serde(default, rename = "platform_browser")]
+    _platform_browser: serde::de::IgnoredAny,
+    #[serde(default, rename = "deprecated")]
+    _deprecated: serde::de::IgnoredAny,
+    #[serde(default, rename = "verified_at")]
+    _verified_at: serde::de::IgnoredAny,
 }
 
 #[expect(
@@ -53,6 +67,7 @@ pub struct ProfileMeta {
     reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
 )]
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct H3Profile {
     pub initial_max_data: u64,
@@ -77,6 +92,7 @@ pub struct H3Profile {
     reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
 )]
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct TlsProfile {
     pub ciphers: Vec<String>,
@@ -133,6 +149,7 @@ const fn default_true() -> bool {
     reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
 )]
 #[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct TlsFingerprint {
     #[serde(default)]
@@ -148,6 +165,7 @@ pub struct TlsFingerprint {
     reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
 )]
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct H2Profile {
     #[serde(default)]
@@ -179,6 +197,7 @@ pub struct H2Profile {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct H2PriorityProfile {
     pub exclusive: bool,
@@ -191,6 +210,7 @@ pub struct H2PriorityProfile {
     reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
 )]
 #[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct H2PlatformOverride {
     #[serde(default)]
@@ -226,6 +246,7 @@ pub struct H2PlatformOverride {
     reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
 )]
 #[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct H2Fingerprint {
     #[serde(default)]
@@ -237,6 +258,7 @@ pub struct H2Fingerprint {
     reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
 )]
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct PlatformIdentity {
     pub user_agent: String,

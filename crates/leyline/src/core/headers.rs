@@ -124,18 +124,24 @@ where
 mod tests;
 
 pub(crate) fn reorder(headers: &mut Vec<HeaderPair>, order: &[String]) {
-    let lc_order: Vec<String> = order.iter().map(|s| s.to_ascii_lowercase()).collect();
-    let mut buckets: Vec<Vec<HeaderPair>> = vec![Vec::new(); lc_order.len()];
+    let rank = |name: &str| order.iter().position(|n| n.eq_ignore_ascii_case(name));
+    let mut groups: Vec<(usize, Vec<HeaderPair>)> = Vec::new();
     let mut tail: Vec<HeaderPair> = Vec::new();
-    for h in std::mem::take(headers) {
-        let lc = h.0.to_ascii_lowercase();
-        match lc_order.iter().position(|n| *n == lc) {
-            Some(idx) => buckets[idx].push(h),
-            None => tail.push(h),
+    let mut interior: Vec<HeaderPair> = Vec::new();
+    for header in std::mem::take(headers) {
+        match (rank(&header.0), groups.last_mut()) {
+            (Some(pos), _) => {
+                if let Some(last) = groups.last_mut() {
+                    last.1.append(&mut interior);
+                }
+                groups.push((pos, vec![header]));
+            }
+            (None, Some(_)) => interior.push(header),
+            (None, None) => tail.push(header),
         }
     }
-    for b in buckets {
-        headers.extend(b);
-    }
+    tail.append(&mut interior);
+    groups.sort_by_key(|group| group.0);
+    headers.extend(groups.into_iter().flat_map(|group| group.1));
     headers.extend(tail);
 }

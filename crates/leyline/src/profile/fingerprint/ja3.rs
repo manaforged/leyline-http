@@ -33,6 +33,9 @@ pub(super) fn apply(tls: &mut TlsProfile, raw: &str) -> Result<(), String> {
         "cipher",
     )?;
     tls.curves = iana_names(tls, &parse_list(curves, 10, "curve")?, curve_name, "curve")?;
+    if let Some(shares) = tls.key_shares.as_mut() {
+        shares.retain(|share| tls.curves.contains(share));
+    }
     let order = apply_extensions(tls, &parse_list(extensions, 10, "extension")?)?;
     tls.extension_permutation = Some(order);
     tls.permute_extensions = false;

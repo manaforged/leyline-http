@@ -117,16 +117,16 @@ browser is a bare session that impersonates no browser.
 
 - A profile covers selected TLS, HTTP/2, and header properties. It does not
   reproduce every byte a browser sends.
-- The Safari 18, Safari iOS 17, Safari iOS 18, and OkHttp profiles pin a JA4 value taken from Leyline's own output, not from a capture.
+- The Safari 18, Safari iOS 17, and Safari iOS 18 profiles pin a JA4 value taken from Leyline's own output, not from a capture.
 - Chrome 145, 146, 147, and 149 are inferred from neighbouring versions. Chrome
   151 and 152 come from `chrome-headless-shell`, so `Session::new()` does not
   select them.
 - The Android identity of the Chrome profiles reuses the desktop TLS and
-  HTTP/2 settings. No mobile Chrome capture exists.
+  HTTP/2 settings.
 - The TCP/IP fingerprint (JA4T: window size, options, MSS, TTL) comes from the
   host OS. A profile does not change it.
-- BoringSSL chooses the TLS key shares. A profile sets the supported groups
-  only.
+- Over HTTP/3, the QUIC ClientHello ignores the profile's `key_shares` and
+  `request_trust_anchors`.
 - HTTP/3 has no browser capture golden. QUIC transport parameters are not
   checked against a browser. The QPACK decoder uses no dynamic table.
 - HTTP/3 through a proxy needs a SOCKS5 proxy with `UDP ASSOCIATE`. HTTP

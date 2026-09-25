@@ -109,8 +109,11 @@ let session = Session::builder()
 # }
 ```
 
-`ChromiumBrand::Chrome` is stock Chrome. Put Edge and Opera on
-`Browser::default()`.
+`ChromiumBrand::Chrome` is stock Chrome. Put a brand on a Chrome profile whose
+Chromium version `profiles/brands.toml` lists for that brand. The Opera rows
+can end before the newest Chrome, so `Browser::default()` with
+`ChromiumBrand::Opera` can fail. Use the newest Chrome profile that the Opera
+rows list.
 
 `ChromiumBrand::all()` lists every brand in `profiles/brands.toml`. A brand
 prints as its lowercase name (`chrome`, `edge`, `opera`), and `str::parse`

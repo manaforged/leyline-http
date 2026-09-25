@@ -123,7 +123,7 @@ impl ChromiumBrand {
     pub(crate) fn tls_profile(self, profile: Arc<BrowserProfile>) -> Arc<BrowserProfile> {
         let Some(tls) = brand_row(self)
             .map(|row| &row.tls)
-            .filter(|tls| tls.overrides())
+            .filter(|tls| tls.changes(&profile.tls))
         else {
             return profile;
         };
@@ -161,8 +161,9 @@ struct BrandTls {
 }
 
 impl BrandTls {
-    fn overrides(&self) -> bool {
-        self.request_trust_anchors.is_some()
+    fn changes(&self, tls: &TlsProfile) -> bool {
+        self.request_trust_anchors
+            .is_some_and(|request| request != tls.request_trust_anchors)
     }
 
     fn apply(&self, tls: &mut TlsProfile) {

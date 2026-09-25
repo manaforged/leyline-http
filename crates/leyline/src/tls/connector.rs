@@ -59,7 +59,7 @@ impl FingerprintConnector {
         apply_profile_with_trust(&mut builder, profile, TlsMinVersion::Tls12, &trust)?;
 
         let tls = &profile.tls;
-        let key_shares = tls.key_shares.as_deref().map(key_share_ids).transpose()?;
+        let key_shares = key_share_ids(tls)?;
 
         builder
             .set_alpn_protos(b"\x02h2\x08http/1.1")
@@ -246,12 +246,26 @@ impl std::fmt::Debug for FingerprintConnector {
 #[cfg(test)]
 mod tests;
 
-fn key_share_ids(names: &[String]) -> Result<Vec<u16>, TlsError> {
-    names
+fn key_share_ids(tls: &crate::profile::TlsProfile) -> Result<Option<Vec<u16>>, TlsError> {
+    let Some(names) = tls.key_shares.as_deref() else {
+        return Ok(None);
+    };
+    let ids = names
         .iter()
         .map(|name| {
             crate::iana::curve_id(name)
                 .ok_or_else(|| TlsError::Profile(format!("unknown key share group: {name}")))
         })
-        .collect()
+        .collect::<Result<Vec<u16>, _>>()?;
+    let mut curves = tls
+        .curves
+        .iter()
+        .filter_map(|name| crate::iana::curve_id(name));
+    if !ids.iter().all(|id| curves.any(|curve| curve == *id)) {
+        return Err(TlsError::Profile(format!(
+            "key_shares {names:?} must be an ordered subsequence of curves {:?}",
+            tls.curves
+        )));
+    }
+    Ok(Some(ids))
 }

@@ -9,6 +9,8 @@ mod brand;
 mod browser;
 #[path = "build/header_style.rs"]
 mod header_style;
+#[path = "src/profile/preset/kind.rs"]
+mod preset_kind;
 
 type BuildResult<T> = Result<T, Box<dyn Error>>;
 
@@ -21,6 +23,7 @@ fn main() -> BuildResult<()> {
     let root = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR")?).join("profiles");
     println!("cargo:rerun-if-changed={}", root.display());
     println!("cargo:rerun-if-changed=build");
+    println!("cargo:rerun-if-changed=src/profile/preset/kind.rs");
     let families: browser::Families =
         toml::from_str(&fs::read_to_string(root.join("families.toml"))?)?;
     let rows = browser::load_rows(&root, &families)?;
