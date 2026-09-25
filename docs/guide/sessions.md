@@ -90,9 +90,10 @@ Pass the platform to the builder with `.platform(Platform::MacOS)`.
 ## Apply a brand overlay
 
 Edge, Opera, and Vivaldi are Chromium browsers. Leyline treats them as an
-identity overlay on a Chrome profile: the ClientHello and the HTTP/2 settings
-stay Chrome's, while the `User-Agent`, the `sec-ch-ua` brand list, and a few
-extra headers change.
+identity overlay on a Chrome profile: the HTTP/2 settings stay Chrome's,
+while the `User-Agent`, the `sec-ch-ua` brand list, and a few extra headers
+change. A brand can also change a ClientHello setting: Edge does not send the
+trust anchors extension.
 
 ```rust,no_run
 use leyline::{Browser, ChromiumBrand, Session};
@@ -108,8 +109,8 @@ let session = Session::builder()
 ```
 
 `ChromiumBrand::Chrome` is stock Chrome. Put Edge and Opera on
-`Browser::default()`. Put Vivaldi on `Browser::Chrome147`, the last
-major with a recorded Vivaldi build string.
+`Browser::default()`. Put Vivaldi on `Browser::Chrome146`: Vivaldi 7.9 runs
+on Chromium 146. Vivaldi sends the Chrome `User-Agent` with no Vivaldi token.
 
 Brave is not an overlay. `.browser(Browser::Brave146)` selects a first-class
 profile.

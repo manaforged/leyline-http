@@ -283,7 +283,7 @@ impl SessionBuilder {
             }
         }
 
-        let profile = self.tls_profile();
+        let profile = self.brand.tls_profile(self.tls_profile());
         let http_profile = match self.http_identity.or(self.browser) {
             Some(browser) => browser.platform_profile(self.platform),
             None => &*profile,

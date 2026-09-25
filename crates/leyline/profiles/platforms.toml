@@ -14,7 +14,7 @@ window_size = 65535
 df = true
 window_scale = 6
 no_delay = true
-options = [2, 4, 8, 1, 3]
+options = [2, 1, 3, 1, 1, 8, 4, 0]
 
 [linux.tcp]
 ttl = 64

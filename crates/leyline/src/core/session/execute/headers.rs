@@ -7,7 +7,7 @@ use crate::core::Session;
 use crate::core::body::{Body, BodyKind};
 use crate::core::headers::{HeaderList, reorder};
 use crate::profile::Preset;
-use crate::profile::preset::{HeaderPair, HeaderStyle};
+use crate::profile::preset::HeaderPair;
 
 impl Session {
     #[allow(clippy::too_many_arguments)]
@@ -24,35 +24,16 @@ impl Session {
         strip_sensitive: bool,
         header_order: Option<&[String]>,
     ) -> Vec<HeaderPair> {
-        let mut headers: Vec<HeaderPair> = if let Some(preset) = preset {
-            let ctx = crate::profile::preset::HeaderContext {
-                user_agent: &self.inner.user_agent,
-                sec_ch_ua: &self.inner.sec_ch_ua,
-                sec_ch_ua_mobile: self.inner.platform.mobile_flag(),
-                sec_ch_ua_platform: self.inner.platform.sec_ch_platform(),
-                accept_language: &self.inner.accept_language,
-                origin,
-                referer,
-                firefox: self.inner.header_style == HeaderStyle::Gecko,
-            };
-            preset.build_headers(&ctx)
-        } else {
-            vec![
-                (
-                    "user-agent".into(),
-                    Cow::Owned(self.inner.user_agent.clone()),
-                ),
-                ("accept".into(), Cow::Borrowed("*/*")),
-                (
-                    "accept-encoding".into(),
-                    Cow::Borrowed("gzip, deflate, br, zstd"),
-                ),
-                (
-                    "accept-language".into(),
-                    Cow::Owned(self.inner.accept_language.clone()),
-                ),
-            ]
+        let ctx = crate::profile::preset::HeaderContext {
+            user_agent: &self.inner.user_agent,
+            sec_ch_ua: &self.inner.sec_ch_ua,
+            sec_ch_ua_mobile: self.inner.platform.mobile_flag(),
+            sec_ch_ua_platform: self.inner.platform.sec_ch_platform(),
+            accept_language: &self.inner.accept_language,
+            origin,
+            referer,
         };
+        let mut headers = self.inner.header_style.build_headers(preset, &ctx);
 
         let navigate_accept_override = self
             .inner

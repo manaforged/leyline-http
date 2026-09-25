@@ -19,9 +19,9 @@ fn firefox_navigate_order_matches_the_live_capture() {
         accept_language: "en-US,en;q=0.9",
         origin: "https://tls.peet.ws",
         referer: "",
-        firefox: true,
     };
-    let mut headers = Preset::Navigate.build_headers(&ctx);
+    let mut headers =
+        crate::profile::HeaderStyle::Gecko.build_headers(Some(Preset::Navigate), &ctx);
     let order = Browser::Firefox153
         .profile()
         .identity_for(Platform::Windows)

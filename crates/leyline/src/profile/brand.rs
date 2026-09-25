@@ -1,9 +1,9 @@
 use std::collections::HashMap;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use serde::Deserialize;
 
-use crate::profile::{Platform, PlatformIdentity};
+use crate::profile::{BrowserProfile, Platform, PlatformIdentity, TlsProfile};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[non_exhaustive]
@@ -66,21 +66,25 @@ impl ChromiumBrand {
             platform,
         };
         let row = brand_row(self).ok_or_else(unverified)?;
-        let Some(token) = row.ua_token.as_deref() else {
-            return Ok(None);
-        };
         if row.desktop_only && !is_desktop(platform) {
             return Err(unverified());
         }
         let version = row
             .version(chromium_major, ua_seed(profile_user_agent))
             .ok_or_else(unverified)?;
+        if !row.overlay {
+            return Ok(None);
+        }
         let product = match row.product.as_deref() {
             Some(name) => Some((name, version_major(&version).ok_or_else(unverified)?)),
             None => None,
         };
+        let user_agent = match row.ua_token.as_deref() {
+            Some(token) => format!("{profile_user_agent} {token}/{version}"),
+            None => profile_user_agent.to_string(),
+        };
         Ok(Some(BrandOverlay {
-            user_agent: format!("{profile_user_agent} {token}/{version}"),
+            user_agent,
             sec_ch_ua: sec_ch_ua(chromium_major, product),
             extra_headers: row.extra_headers.clone(),
             navigate_accept: row.navigate_accept.clone(),
@@ -104,6 +108,18 @@ impl ChromiumBrand {
         identity.sec_ch_ua = overlay.sec_ch_ua;
         Ok((overlay.extra_headers, overlay.navigate_accept))
     }
+
+    pub(crate) fn tls_profile(self, profile: Arc<BrowserProfile>) -> Arc<BrowserProfile> {
+        let Some(tls) = brand_row(self)
+            .map(|row| &row.tls)
+            .filter(|tls| tls.overrides())
+        else {
+            return profile;
+        };
+        let mut branded = (*profile).clone();
+        tls.apply(&mut branded.tls);
+        Arc::new(branded)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -117,6 +133,8 @@ pub(crate) struct BrandOverlay {
 
 #[derive(Debug, Deserialize)]
 struct BrandRow {
+    #[serde(default = "overlay_default")]
+    overlay: bool,
     product: Option<String>,
     ua_token: Option<String>,
     #[serde(default)]
@@ -128,6 +146,30 @@ struct BrandRow {
     #[serde(default)]
     extra_headers: Vec<(String, String)>,
     navigate_accept: Option<String>,
+    #[serde(default)]
+    tls: BrandTls,
+}
+
+const fn overlay_default() -> bool {
+    true
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct BrandTls {
+    request_trust_anchors: Option<bool>,
+}
+
+impl BrandTls {
+    fn overrides(&self) -> bool {
+        self.request_trust_anchors.is_some()
+    }
+
+    fn apply(&self, tls: &mut TlsProfile) {
+        if let Some(request) = self.request_trust_anchors {
+            tls.request_trust_anchors = request;
+        }
+        tls.fingerprint = None;
+    }
 }
 
 impl BrandRow {

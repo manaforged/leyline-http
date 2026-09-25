@@ -3,6 +3,7 @@ name = "Safari 26"
 browser = "safari"
 version = 26
 variant = "Safari26"
+header_style = "webkit"
 capture = "browser"
 platform_browser = { ios = "safari-ios" }
 family = "webkit"

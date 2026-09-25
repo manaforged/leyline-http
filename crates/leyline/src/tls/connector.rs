@@ -29,6 +29,7 @@ pub struct FingerprintConnector {
     alps_proto: Option<Vec<u8>>,
     alps_new_codepoint: bool,
     request_trust_anchors: bool,
+    key_shares: Option<Vec<u16>>,
     session_cache: SessionCache,
     accept_invalid_certs: std::sync::Arc<std::sync::atomic::AtomicBool>,
     resolver: Arc<dyn Resolver>,
@@ -58,6 +59,7 @@ impl FingerprintConnector {
         apply_profile_with_trust(&mut builder, profile, TlsMinVersion::Tls12, &trust)?;
 
         let tls = &profile.tls;
+        let key_shares = tls.key_shares.as_deref().map(key_share_ids).transpose()?;
 
         builder
             .set_alpn_protos(b"\x02h2\x08http/1.1")
@@ -73,6 +75,7 @@ impl FingerprintConnector {
             alps_proto: tls.alps.as_ref().map(|s| s.as_bytes().to_vec()),
             alps_new_codepoint: tls.alps_new_codepoint,
             request_trust_anchors: tls.request_trust_anchors,
+            key_shares,
             session_cache: SessionCache::new(),
             accept_invalid_certs,
             resolver: Arc::new(SystemResolver),
@@ -242,3 +245,13 @@ impl std::fmt::Debug for FingerprintConnector {
 
 #[cfg(test)]
 mod tests;
+
+fn key_share_ids(names: &[String]) -> Result<Vec<u16>, TlsError> {
+    names
+        .iter()
+        .map(|name| {
+            crate::iana::curve_id(name)
+                .ok_or_else(|| TlsError::Profile(format!("unknown key share group: {name}")))
+        })
+        .collect()
+}

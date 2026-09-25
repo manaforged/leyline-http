@@ -4,6 +4,7 @@ browser = "okhttp"
 version = 10
 capture = "emulator"
 variant = "OkHttpAndroid10"
+header_style = "okhttp"
 family = "okhttp"
 verified_against = "tls.peet.ws 2026-09-24 OkHttp 4.12.0 test app on an Android 17 emulator"
 verified_at = "2026-09-24"

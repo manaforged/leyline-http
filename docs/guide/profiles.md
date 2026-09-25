@@ -115,8 +115,10 @@ brand, version, and order rule that Chromium uses.
 
 `Browser::latest` returns the newest profile of a family whose `capture` is in
 the family's `latest_capture` list in `families.toml`. The list defaults to
-`browser`; CFNetwork uses `native`. A family with no such profile returns its
-newest profile. `Session::new()` uses `Browser::latest(Family::Chrome)`, which
+`browser`. CFNetwork uses `native`, Safari iOS adds `self-referential`, and
+OkHttp adds `emulator`. The build fails when a family has no such profile. A
+`platform_browser` target resolves the same way, with the target family's
+`latest_capture` list. `Session::new()` uses `Browser::latest(Family::Chrome)`, which
 is Chrome 153. You can pin the product line instead of a version:
 
 ```rust
@@ -188,7 +190,23 @@ reads the user agent, `sec-ch-ua`, and extra headers for the chosen platform
 from those tables. `build` returns `Kind::Config` when the profile has no
 table for that platform. Without `.platform()`, the platform is Windows. A
 brand overlay (`SessionBuilder::brand`) needs `chromium_major` in `[meta]`.
-The request header order follows `header_style` in `[meta]`.
+The request headers follow `header_style` in `[meta]`: `chromium` (the
+default), `gecko`, `webkit`, or `okhttp`. `profiles/headers.toml` holds one
+header shape per style. A shape lists the header names, order, and values for
+each `Preset`, plus a `fallback` list for a request without a preset or for a
+preset the shape does not list. The placeholders `{user_agent}`, `{sec_ch_ua}`,
+`{sec_ch_ua_mobile}`, `{sec_ch_ua_platform}`, `{accept_language}`, `{origin}`,
+and `{referer}` take the session values. `request_header_order` in an identity
+table reorders the result.
+
+`key_shares` in `[tls]` lists the groups that the ClientHello `key_share`
+extension carries, in order. Each group must also be in `curves`. Without it,
+BoringSSL sends key shares for the first one or two groups.
+
+A brand in `profiles/brands.toml` can set a `[<brand>.tls]` table. Its
+`request_trust_anchors` value replaces the base profile's value when the brand
+is active. Edge sets it to `false`: Edge 154 does not send the trust anchors
+extension that Chrome 153 sends.
 
 ## Build a profile from a JA3 or Akamai string
 

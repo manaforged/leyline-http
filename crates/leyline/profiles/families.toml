@@ -23,6 +23,7 @@ browsers = ["safari"]
 variant = "SafariIos"
 label = "Safari iOS"
 browsers = ["safari-ios"]
+latest_capture = ["browser", "self-referential"]
 
 [[family]]
 variant = "CfNetwork"
@@ -34,3 +35,4 @@ latest_capture = ["native"]
 variant = "OkHttp"
 label = "OkHttp"
 browsers = ["okhttp"]
+latest_capture = ["browser", "emulator"]

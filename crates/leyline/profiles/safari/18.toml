@@ -4,6 +4,7 @@ browser = "safari"
 version = 18
 capture = "self-referential"
 variant = "Safari18"
+header_style = "webkit"
 platform_browser = { ios = "safari-ios" }
 family = "webkit"
 verified_against = "tls.peet.ws"

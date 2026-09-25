@@ -89,6 +89,11 @@ impl FingerprintConnector {
             ssl.set_enable_ech_grease(true);
         }
 
+        if let Some(ids) = &self.key_shares {
+            ssl.set_client_key_shares(ids)
+                .map_err(TlsError::from_stack)?;
+        }
+
         if self.request_trust_anchors {
             ssl.set_requested_trust_anchors(&[]).map_err(|e| {
                 TlsError::SslConfig(format!(

@@ -57,6 +57,7 @@ mod callbacks;
 mod connector;
 mod ech;
 mod error;
+mod key_shares;
 mod mut_only;
 
 bitflags! {

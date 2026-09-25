@@ -1,4 +1,5 @@
 [Chrome]
+overlay = false
 follow_chromium = true
 
 [Edge]
@@ -6,6 +7,9 @@ product = "Microsoft Edge"
 ua_token = "Edg"
 follow_chromium = true
 desktop_only = true
+
+[Edge.tls]
+request_trust_anchors = false
 
 [Opera]
 product = "Opera"
@@ -23,8 +27,7 @@ desktop_only = true
 "145" = ["129.0.0.0"]
 
 [Vivaldi]
-ua_token = "Vivaldi"
 desktop_only = true
 
 [Vivaldi.versions]
-"147" = ["7.9.3970.59"]
+"146" = ["7.9.3970.59"]

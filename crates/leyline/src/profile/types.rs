@@ -79,6 +79,8 @@ pub struct H3Profile {
 pub struct TlsProfile {
     pub ciphers: Vec<String>,
     pub curves: Vec<String>,
+    #[serde(default)]
+    pub key_shares: Option<Vec<String>>,
     pub sigalgs: Vec<String>,
     #[serde(default)]
     pub delegated_credentials: Option<String>,

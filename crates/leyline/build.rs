@@ -241,8 +241,12 @@ fn render(rows: &[Row], families: &Families) -> BuildResult<String> {
         let row = latest(rows, |r| {
             r.family == index && family.latest_capture.contains(&r.meta.capture)
         })
-        .or_else(|| latest(rows, |r| r.family == index))
-        .ok_or_else(|| format!("families.toml: family {} has no profile", family.variant))?;
+        .ok_or_else(|| {
+            format!(
+                "families.toml: family {} has no profile whose capture is in latest_capture",
+                family.variant
+            )
+        })?;
         family_latest.push(row);
     }
     writeln!(
@@ -271,9 +275,16 @@ fn render(rows: &[Row], families: &Families) -> BuildResult<String> {
         let rep = hello(rows, row)?;
         let mut platforms = Vec::new();
         for (platform, browser) in &row.meta.platform_browser {
-            let target = latest(rows, |r| &r.meta.browser == browser).ok_or_else(|| {
+            let target = latest(rows, |r| {
+                &r.meta.browser == browser
+                    && families.family[r.family]
+                        .latest_capture
+                        .contains(&r.meta.capture)
+            })
+            .ok_or_else(|| {
                 format!(
-                    "{}: platform_browser names unknown browser {browser:?}",
+                    "{}: platform_browser names {browser:?}, which has no profile whose capture \
+                     is in its family's latest_capture",
                     row.path
                 )
             })?;
