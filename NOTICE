@@ -53,6 +53,21 @@ Modifications from upstream:
   Reliable Size does not exceed the Final Size; ACK_FREQUENCY and
   IMMEDIATE_ACK frames are accepted and ignored. Each is accepted only in
   1-RTT packets and only when the local transport parameters advertise it.
+- QUIC version 2 (RFC 9369): the Initial salt, the `quicv2` HKDF labels, the
+  long header packet type bits, and the Retry integrity key and nonce.
+  `Config::set_compatible_versions` lets a client follow a server that
+  switches to another listed version by compatible version negotiation
+  (RFC 9368), once a packet in that version decrypts. Version Negotiation
+  picks only a listed version. The client writes its current version as the
+  Chosen Version, stops 0-RTT after a switch, checks the server's
+  `version_information` (RFC 9368 section 4), and closes with
+  VERSION_NEGOTIATION_ERROR on a mismatch.
+- `Config::set_initial_datagram_size` sets the size of client datagrams that
+  carry Initial packets during the handshake and pads first-flight Initial
+  packets with PADDING frames to that size. The size is at most 1232 bytes
+  over IPv6, and it falls back to 1200 bytes after a loss timeout with no
+  packet received. A padded first-flight Initial leaves no room for a
+  coalesced 0-RTT packet.
 - `src/h3/qpack/table.rs` is new in this fork (Copyright Manaforge
   Technologies, LLC, BSD-2-Clause).
 - Upstream test certificates and keys are not part of the published package.
@@ -80,6 +95,9 @@ and carries these BoringSSL patches:
 - `0003-leyline-tls12-extensions.patch`: `SSL_set_tls12_extensions`, which
   keeps `extended_master_secret` and `renegotiation_info` in a ClientHello
   whose minimum version is TLS 1.3, as in Firefox's QUIC ClientHello.
+- `0005-leyline-extension-tail.patch`: `SSL_CTX_set_extension_tail`, which
+  keeps the listed extensions last, in order, when `permute_extensions`
+  shuffles the ClientHello, as in Firefox's QUIC ClientHello.
 
 The `boring` crate derives from Steven Fackler's `rust-openssl`
 (https://github.com/sfackler/rust-openssl), and `tokio-boring` derives from

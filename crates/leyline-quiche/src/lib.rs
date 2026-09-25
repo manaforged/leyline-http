@@ -435,11 +435,15 @@ pub const PROTOCOL_VERSION: u32 = PROTOCOL_VERSION_V1;
 /// Supported QUIC versions.
 const PROTOCOL_VERSION_V1: u32 = 0x0000_0001;
 
+const PROTOCOL_VERSION_V2: u32 = 0x6b33_43cf;
+
 /// The maximum length of a connection ID.
 pub const MAX_CONN_ID_LEN: usize = packet::MAX_CID_LEN as usize;
 
 /// The minimum length of Initial packets sent by a client.
 pub const MIN_CLIENT_INITIAL_LEN: usize = 1200;
+
+const MAX_IPV6_INITIAL_LEN: usize = 1232;
 
 /// The default initial RTT.
 const DEFAULT_INITIAL_RTT: Duration = Duration::from_millis(333);
@@ -606,6 +610,10 @@ pub struct Config {
     initial_rtt: Duration,
 
     transport_params_plan: Option<Vec<TransportParamEntry>>,
+
+    compatible_versions: Vec<u32>,
+
+    initial_datagram_size: Option<usize>,
 }
 
 // See https://quicwg.org/base-drafts/rfc9000.html#section-15
@@ -684,6 +692,8 @@ impl Config {
             track_unknown_transport_params: None,
             initial_rtt: DEFAULT_INITIAL_RTT,
             transport_params_plan: None,
+            compatible_versions: Vec::new(),
+            initial_datagram_size: None,
         })
     }
 
@@ -807,6 +817,18 @@ impl Config {
 
     pub fn set_transport_params_plan(&mut self, plan: Vec<TransportParamEntry>) {
         self.transport_params_plan = Some(plan);
+    }
+
+    pub fn set_compatible_versions(&mut self, versions: &[u32]) {
+        self.compatible_versions = versions
+            .iter()
+            .copied()
+            .filter(|version| version_is_supported(*version))
+            .collect();
+    }
+
+    pub fn set_initial_datagram_size(&mut self, size: usize) {
+        self.initial_datagram_size = Some(size.max(MIN_CLIENT_INITIAL_LEN));
     }
 
     /// Enables logging of secrets.
@@ -1522,6 +1544,14 @@ where
 
     transport_params_plan: Option<Vec<TransportParamEntry>>,
 
+    compatible_versions: Vec<u32>,
+
+    did_compatible_version_negotiation: bool,
+
+    initial_datagram_size: Option<usize>,
+
+    initial_size_fallback: bool,
+
     frame_extensions: frame::Extensions,
 
     /// Whether to send STREAMS_BLOCKED frames when bidi or uni stream quota
@@ -1901,7 +1931,7 @@ pub fn retry(
 /// Returns true if the given protocol version is supported.
 #[inline]
 pub fn version_is_supported(version: u32) -> bool {
-    matches!(version, PROTOCOL_VERSION_V1)
+    matches!(version, PROTOCOL_VERSION_V1 | PROTOCOL_VERSION_V2)
 }
 
 /// Pushes a frame to the output packet if there is enough space.
@@ -2199,6 +2229,14 @@ impl<F: BufFactory> Connection<F> {
 
             transport_params_plan: config.transport_params_plan.clone(),
 
+            compatible_versions: config.compatible_versions.clone(),
+
+            did_compatible_version_negotiation: false,
+
+            initial_datagram_size: config.initial_datagram_size,
+
+            initial_size_fallback: false,
+
             frame_extensions: frame::Extensions::from_plan(config.transport_params_plan.as_deref()),
 
             enable_send_streams_blocked: config.enable_send_streams_blocked,
@@ -2253,7 +2291,7 @@ impl<F: BufFactory> Connection<F> {
         conn.handshake.init(is_server)?;
 
         conn.handshake
-            .use_legacy_codepoint(config.version != PROTOCOL_VERSION_V1);
+            .use_legacy_codepoint(!version_is_supported(config.version));
 
         conn.encode_transport_params()?;
 
@@ -3042,7 +3080,11 @@ impl<F: BufFactory> Connection<F> {
                 return Err(Error::Done);
             }
 
-            let supported_versions = versions.iter().filter(|&&v| version_is_supported(v));
+            let supported_versions = versions.iter().filter(|&&v| {
+                version_is_supported(v)
+                    && (self.compatible_versions.is_empty()
+                        || self.compatible_versions.contains(&v))
+            });
 
             let mut found_version = false;
 
@@ -3088,7 +3130,7 @@ impl<F: BufFactory> Connection<F> {
             self.crypto_ctx[packet::Epoch::Initial].crypto_seal = Some(aead_seal);
 
             self.handshake
-                .use_legacy_codepoint(self.version != PROTOCOL_VERSION_V1);
+                .use_legacy_codepoint(!version_is_supported(self.version));
 
             // Encode transport parameters again, as the new version might be
             // using a different format.
@@ -3149,14 +3191,39 @@ impl<F: BufFactory> Connection<F> {
             self.did_version_negotiation = true;
 
             self.handshake
-                .use_legacy_codepoint(self.version != PROTOCOL_VERSION_V1);
+                .use_legacy_codepoint(!version_is_supported(self.version));
 
             // Encode transport parameters again, as the new version might be
             // using a different format.
             self.encode_transport_params()?;
         }
 
-        if hdr.ty != Type::Short && hdr.version != self.version {
+        let mut compatible_switch = None;
+
+        if !self.is_server
+            && !self.did_compatible_version_negotiation
+            && self.crypto_ctx[packet::Epoch::Handshake]
+                .crypto_open
+                .is_none()
+            && hdr.ty == Type::Initial
+            && hdr.version != self.version
+            && self.compatible_versions.contains(&hdr.version)
+        {
+            let initial_dcid = self
+                .rscid
+                .clone()
+                .or_else(|| self.odcid.clone())
+                .unwrap_or_else(|| self.destination_id().into_owned());
+
+            compatible_switch = Some(crypto::derive_initial_key_material(
+                &initial_dcid,
+                hdr.version,
+                self.is_server,
+                true,
+            )?);
+        }
+
+        if hdr.ty != Type::Short && hdr.version != self.version && compatible_switch.is_none() {
             // At this point version negotiation was already performed, so
             // ignore packets that don't match the connection's version.
             return Err(Error::Done);
@@ -3202,7 +3269,9 @@ impl<F: BufFactory> Connection<F> {
         let epoch = hdr.ty.to_epoch()?;
 
         // Select AEAD context used to open incoming packet.
-        let aead = if hdr.ty == Type::ZeroRTT {
+        let aead = if let Some((open, _)) = compatible_switch.as_ref() {
+            Some(open)
+        } else if hdr.ty == Type::ZeroRTT {
             // Only use 0-RTT key if incoming packet is 0-RTT.
             self.crypto_ctx[epoch].crypto_0rtt_open.as_ref()
         } else {
@@ -3302,6 +3371,15 @@ impl<F: BufFactory> Connection<F> {
 
         let mut payload = packet::decrypt_pkt(&mut b, pn, pn_len, payload_len, aead)
             .map_err(|e| drop_pkt_on_err(e, self.recv_count, self.is_server, &self.trace_id))?;
+
+        if let Some((aead_open, aead_seal)) = compatible_switch {
+            self.version = hdr.version;
+            self.did_compatible_version_negotiation = true;
+
+            self.crypto_ctx[packet::Epoch::Initial].crypto_open = Some(aead_open);
+            self.crypto_ctx[packet::Epoch::Initial].crypto_seal = Some(aead_seal);
+            self.crypto_ctx[packet::Epoch::Application].crypto_seal = None;
+        }
 
         if self.pkt_num_spaces[epoch].recv_pkt_num.contains(pn) {
             trace!("{} ignored duplicate packet {}", self.trace_id, pn);
@@ -4042,8 +4120,12 @@ impl<F: BufFactory> Connection<F> {
             return Err(Error::Done);
         }
 
-        if has_initial && left > 0 && done < MIN_CLIENT_INITIAL_LEN {
-            let pad_len = cmp::min(left, MIN_CLIENT_INITIAL_LEN - done);
+        let min_initial_len = self
+            .client_initial_datagram_size()
+            .unwrap_or(MIN_CLIENT_INITIAL_LEN);
+
+        if has_initial && left > 0 && done < min_initial_len {
+            let pad_len = cmp::min(left, min_initial_len - done);
 
             // Fill padding area with null bytes, to avoid leaking information
             // in case the application reuses the packet buffer.
@@ -4086,6 +4168,13 @@ impl<F: BufFactory> Connection<F> {
         let mut b = octets::OctetsMut::with_slice(out);
 
         let pkt_type = self.write_pkt_type(send_pid)?;
+
+        let pad_initial = pkt_type == Type::Initial
+            && !self.is_server
+            && self.client_initial_datagram_size().is_some()
+            && self.crypto_ctx[packet::Epoch::Handshake]
+                .crypto_seal
+                .is_none();
 
         let max_dgram_len = if !self.dgram_send_queue.is_empty() {
             self.dgram_max_writable_len()
@@ -5297,7 +5386,9 @@ impl<F: BufFactory> Connection<F> {
         // as Initial always requires padding.
         //
         // 2) this is a probing packet towards an unvalidated peer address.
-        if (has_initial || !path.validated()) && pkt_type == Type::Short && left >= 1 {
+        if (((has_initial || !path.validated()) && pkt_type == Type::Short) || pad_initial)
+            && left >= 1
+        {
             let frame = frame::Frame::Padding { len: left };
 
             if push_frame_to_pkt!(b, frames, frame, left) {
@@ -6629,7 +6720,22 @@ impl<F: BufFactory> Connection<F> {
 
         // Allow for 1200 bytes (minimum QUIC packet size) during the
         // handshake.
-        MIN_CLIENT_INITIAL_LEN
+        self.client_initial_datagram_size()
+            .unwrap_or(MIN_CLIENT_INITIAL_LEN)
+    }
+
+    fn client_initial_datagram_size(&self) -> Option<usize> {
+        if self.initial_size_fallback {
+            return None;
+        }
+
+        let size = self.initial_datagram_size?;
+
+        match self.paths.get_active() {
+            Ok(path) if path.peer_addr().is_ipv6() => Some(size.min(MAX_IPV6_INITIAL_LEN)),
+
+            _ => Some(size),
+        }
     }
 
     /// Schedule an ack-eliciting packet on the active path.
@@ -7029,10 +7135,14 @@ impl<F: BufFactory> Connection<F> {
 
         let handshake_status = self.handshake_status();
 
+        let initial_unanswered = !self.is_server && self.recv_count == 0;
+
         for (_, p) in self.paths.iter_mut() {
             if let Some(timer) = p.recovery.loss_detection_timer() {
                 if timer <= now {
                     trace!("{} loss detection timeout expired", self.trace_id);
+
+                    self.initial_size_fallback |= initial_unanswered;
 
                     let OnLossDetectionTimeoutOutcome {
                         lost_packets,
@@ -7847,11 +7957,58 @@ impl<F: BufFactory> Connection<F> {
     }
 
     fn encode_transport_params(&mut self) -> Result<()> {
+        let version = self.version;
+
+        let plan = self.transport_params_plan.as_ref().map(|plan| {
+            plan.iter()
+                .map(|entry| match entry {
+                    TransportParamEntry::Raw(0x0011, value) if value.len() >= 4 => {
+                        let mut value = value.clone();
+                        value[..4].copy_from_slice(&version.to_be_bytes());
+                        TransportParamEntry::Raw(0x0011, value)
+                    }
+
+                    other => other.clone(),
+                })
+                .collect::<Vec<_>>()
+        });
+
         self.handshake.set_quic_transport_params(
             &self.local_transport_params,
             self.is_server,
-            self.transport_params_plan.as_deref(),
+            plan.as_deref(),
         )
+    }
+
+    fn check_version_information(&self, info: Option<&[u32]>) -> Result<()> {
+        let Some((&chosen, available)) = info.and_then(|info| info.split_first()) else {
+            if self.did_compatible_version_negotiation
+                || (self.did_version_negotiation && !self.compatible_versions.is_empty())
+            {
+                return Err(Error::VersionNegotiation);
+            }
+
+            return Ok(());
+        };
+
+        if chosen != self.version {
+            return Err(Error::VersionNegotiation);
+        }
+
+        if self.did_version_negotiation {
+            let preferred = self
+                .compatible_versions
+                .iter()
+                .take_while(|&&v| v != self.version);
+
+            for v in preferred {
+                if available.contains(v) {
+                    return Err(Error::VersionNegotiation);
+                }
+            }
+        }
+
+        Ok(())
     }
 
     fn parse_peer_transport_params(&mut self, peer_params: TransportParams) -> Result<()> {
@@ -7892,6 +8049,10 @@ impl<F: BufFactory> Connection<F> {
                 // the server.
                 None => return Err(Error::InvalidTransportParam),
             }
+        }
+
+        if !self.is_server {
+            self.check_version_information(peer_params.version_information.as_deref())?;
         }
 
         self.process_peer_transport_params(peer_params)?;
@@ -7975,6 +8136,8 @@ impl<F: BufFactory> Connection<F> {
             pmtud: None,
 
             is_server: self.is_server,
+
+            version: self.version,
         };
 
         if self.handshake_completed {

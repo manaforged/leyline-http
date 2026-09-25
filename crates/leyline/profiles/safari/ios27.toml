@@ -4,12 +4,12 @@ browser = "safari-ios"
 version = 27
 variant = "SafariIOS27"
 header_style = "webkit-26"
-capture = "emulator"
+capture = "browser"
 platform_browser = { macos = "safari" }
 family = "webkit"
-verified_against = "tls.peet.ws 2026-09-25 Mobile Safari 27.0 iOS 27.0 (24A434) simulator, Xcode 27.0 (27A266a)"
+verified_against = "tls.peet.ws and quic.browserleaks.com 2026-09-25 Mobile Safari 27.0 on an iPhone 15 Pro Max, iOS 27.0, through safaridriver; matches the iOS 27.0 simulator capture"
 verified_at = "2026-09-25"
-captured_against = "safari-ios-27.0-24A434-simulator"
+captured_against = "safari-ios-27.0-iphone16,2-device"
 
 [tls]
 ciphers = [
@@ -93,6 +93,7 @@ initial_max_streams_bidi = 0
 initial_max_streams_uni = 8
 max_idle_timeout_secs = 300
 max_udp_payload_size = 1452
+initial_datagram_size = 1200
 active_connection_id_limit = 64
 dcid_length = 8
 scid_length = 0

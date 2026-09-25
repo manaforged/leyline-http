@@ -94,6 +94,8 @@ pub struct TlsProfile {
     pub permute_extensions: bool,
     #[serde(default)]
     pub extension_permutation: Option<Vec<u16>>,
+    #[serde(default)]
+    pub extension_tail: Vec<u16>,
     #[serde(default = "default_grease")]
     pub grease: bool,
     #[serde(default)]

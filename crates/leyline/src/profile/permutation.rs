@@ -16,6 +16,7 @@ pub(crate) fn extension_ids(tls: &TlsProfile) -> Vec<u16> {
 }
 
 pub(super) fn validate(tls: &TlsProfile, quic: bool) -> Result<(), String> {
+    validate_tail(tls, quic)?;
     let Some(order) = tls.extension_permutation.as_deref() else {
         return Ok(());
     };
@@ -63,5 +64,32 @@ pub(super) fn validate(tls: &TlsProfile, quic: bool) -> Result<(), String> {
         ));
     }
 
+    Ok(())
+}
+
+fn validate_tail(tls: &TlsProfile, quic: bool) -> Result<(), String> {
+    if tls.extension_tail.is_empty() {
+        return Ok(());
+    }
+    if !quic || tls.grease || !tls.permute_extensions || tls.extension_permutation.is_some() {
+        return Err(
+            "extension_tail belongs in [h3.tls] with permute_extensions = true, grease = false \
+             and no extension_permutation; it pins the last extensions of a shuffled ClientHello"
+                .to_string(),
+        );
+    }
+    let advertised = advertised_extensions(tls, quic);
+    for (index, id) in tls.extension_tail.iter().enumerate() {
+        if *id == PRE_SHARED_KEY || tls.extension_tail[..index].contains(id) {
+            return Err(format!(
+                "extension_tail entry {index} (0x{id:04x}) is pre_shared_key or a repeat"
+            ));
+        }
+        if !advertised.iter().any(|(known, _)| known == id) {
+            return Err(format!(
+                "extension_tail entry {index} is 0x{id:04x}, which this profile never advertises"
+            ));
+        }
+    }
     Ok(())
 }

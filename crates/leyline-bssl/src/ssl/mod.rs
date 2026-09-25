@@ -1438,6 +1438,17 @@ impl SslContextBuilder {
         }
     }
 
+    #[corresponds(SSL_CTX_set_extension_tail)]
+    pub fn set_extension_tail(&mut self, tail: &[u16]) -> Result<(), ErrorStack> {
+        unsafe {
+            cvt(ffi::SSL_CTX_set_extension_tail(
+                self.as_ptr(),
+                tail.as_ptr(),
+                tail.len(),
+            ))
+        }
+    }
+
     #[corresponds(SSL_CTX_set_tls13_cipher_order)]
     pub fn set_tls13_cipher_order(&mut self, order: &[u16]) -> Result<(), ErrorStack> {
         unsafe {

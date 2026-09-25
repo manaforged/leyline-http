@@ -78,16 +78,22 @@ of them are optional; a profile without them keeps quiche's defaults.
 
 | Key | Effect |
 | --- | --- |
-| `[h3.tls]` | A full `[tls]` table for the QUIC ClientHello. Without it, QUIC uses `[tls]`. Its `extension_permutation` may list `quic_transport_parameters` (57). `tls12_extensions = true` sends `extended_master_secret` and `renegotiation_info` although QUIC is TLS 1.3 only. |
+| `[h3.tls]` | A full `[tls]` table for the QUIC ClientHello. Without it, QUIC uses `[tls]`. Its `extension_permutation` may list `quic_transport_parameters` (57). `permute_extensions = true` with `extension_tail = [57, 65037]` shuffles the extensions on each connection and keeps the listed IDs last, in that order. `tls12_extensions = true` sends `extended_master_secret` and `renegotiation_info` although QUIC is TLS 1.3 only. |
 | `dcid_length` | The initial destination connection ID length: a number, or `{ weights = [[length, weight], ...] }` for a weighted random length. |
 | `scid_length` | The source connection ID length, 0 to 20. The default is `dcid_length`. |
 | `transport_parameters` | The exact transport parameter list. `{ id = N }` sends the value from the `[h3]` fields. `{ id = N, varint = V }` and `{ id = N, hex = "..." }` send a fixed value. `{ id = 17, versions = { chosen, available, grease } }` sends `version_information`, with a GREASE version `first` or at a `random` position. `{ grease = { id_bits, max_len } }` sends a reserved parameter with a random ID `31 * N + 27` (N below `2^id_bits`) and 0 to `max_len` random bytes. |
+| `initial_datagram_size` | The size of each client datagram that carries an Initial packet during the handshake, 1200 to `max_udp_payload_size`. Leyline pads each first-flight Initial packet with PADDING frames to this size. Over IPv6 the size is at most 1232. After a loss timeout with no reply, Leyline falls back to 1200. Without it, the Initial packets are not padded and the datagram is filled with zeros to 1200 bytes. |
 | `transport_order` | `fixed`, `shuffle` (a new random order per connection), or `rotate` (the list rotated by a random offset). Entries with `pinned = true` keep their place. |
 | `max_ack_delay_ms` | The `max_ack_delay` value, when the list sends parameter 11. |
 | `settings` | The exact SETTINGS list, in order. `{ id, value }` sends a fixed setting. `{ grease = { id_bits, value_bits } }` sends a reserved setting `31 * N + 33` with a random value. The known settings in the list also configure the connection. |
 | `control_grease_frame` | A reserved frame `{ id_bits, max_len }` sent on the control stream after SETTINGS. |
 | `pseudo_order` | The pseudo-header order, as in `[h2]`. The default is `method`, `scheme`, `authority`, `path`. |
 | `priority_update` | Sends a PRIORITY_UPDATE frame with the request's `priority` header value. |
+
+Leyline speaks QUICv1 and QUICv2 (RFC 9369). It sends its first Initial in
+the `chosen` version of `version_information`. A server can switch to another
+version in `available` by compatible version negotiation (RFC 9368), and
+Leyline follows it.
 
 A transport parameter list that sends `max_datagram_frame_size` (32) turns on
 QUIC DATAGRAM receipt. Leyline reads RESET_STREAM_AT as RESET_STREAM and

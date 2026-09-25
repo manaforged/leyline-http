@@ -197,6 +197,7 @@ pub struct TransportParams {
     pub max_datagram_frame_size: Option<u64>,
     /// Unknown peer transport parameters and values, if any.
     pub unknown_params: Option<UnknownTransportParameters>,
+    pub version_information: Option<Vec<u32>>,
     // pub preferred_address: ...,
 }
 
@@ -221,6 +222,7 @@ impl Default for TransportParams {
             retry_source_connection_id: None,
             max_datagram_frame_size: None,
             unknown_params: Default::default(),
+            version_information: None,
         }
     }
 }
@@ -379,6 +381,14 @@ impl TransportParams {
 
                 0x0020 => {
                     tp.max_datagram_frame_size = Some(val.get_varint()?);
+                }
+
+                0x0011 => {
+                    let mut versions = vec![val.get_u32()?];
+                    while val.cap() > 0 {
+                        versions.push(val.get_u32()?);
+                    }
+                    tp.version_information = Some(versions);
                 }
 
                 // Track unknown transport parameters specially.

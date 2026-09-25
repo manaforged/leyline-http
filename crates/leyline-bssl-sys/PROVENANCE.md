@@ -22,8 +22,8 @@ Changes from upstream:
   `underscore-wildcards`, `relax-cert-validation`, `bad-cert-verification`)
   and the `BORING_BSSL_INSTALL_DIR` export.
 - Added wrappers: `SslContextBuilder::{set_sigalgs, set_record_size_limit,
-  set_delegated_credentials, set_extension_order, set_tls13_cipher_order,
-  set_grease_signature_algorithms}`,
+  set_delegated_credentials, set_extension_order, set_extension_tail,
+  set_tls13_cipher_order, set_grease_signature_algorithms}`,
   `SslRef::{set_requested_trust_anchors, add_application_settings,
   set_alps_use_new_codepoint, set_tls12_extensions}`,
   `SslConnector::bare_builder`, and `CertificateCompressionAlgorithm::ZSTD`.
@@ -71,6 +71,11 @@ Changes from upstream:
    - `SSL_CTX_set_grease_signature_algorithms` puts one GREASE value
      (RFC 8701) first in the ClientHello `signature_algorithms` list, with
      its own GREASE seed index. Chrome 152 and later send it.
+5. `0005-leyline-extension-tail.patch`
+   - `SSL_CTX_set_extension_tail` keeps the listed extensions last, in the
+     listed order, when `permute_extensions` shuffles the ClientHello.
+     Firefox shuffles its QUIC ClientHello and keeps
+     `quic_transport_parameters` and ECH last.
 
 ## Symbol prefix
 

@@ -60,6 +60,11 @@ settings_order = [
 [h2.fingerprint]
 akamai = "1:65536;2:0;4:131072;5:16384|12517377|0|m,p,a,s"
 
+[h2.platforms.android]
+header_table_size = 4096
+initial_stream_window_size = 32768
+fingerprint = { akamai = "1:4096;2:0;4:32768;5:16384|12517377|0|m,p,a,s" }
+
 [identity.windows]
 user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:152.0) Gecko/20100101 Firefox/152.0"
 sec_ch_ua = ""
@@ -73,7 +78,8 @@ user_agent = "Mozilla/5.0 (X11; Linux x86_64; rv:152.0) Gecko/20100101 Firefox/1
 sec_ch_ua = ""
 
 [identity.android]
-user_agent = "Mozilla/5.0 (Android 14; Mobile; rv:152.0) Gecko/152.0 Firefox/152.0"
+user_agent = "Mozilla/5.0 (Android 17; Mobile; rv:152.0) Gecko/152.0 Firefox/152.0"
+accept_language = "en-US"
 sec_ch_ua = ""
 
 [h3]
@@ -131,7 +137,8 @@ delegated_credentials = "ecdsa_secp256r1_sha256:ecdsa_secp384r1_sha384:ecdsa_sec
 record_size_limit = 16385
 ocsp_stapling = true
 cert_compression = ["zlib", "zstd", "brotli"]
-extension_permutation = [45, 10, 0, 13, 43, 27, 51, 16, 23, 34, 65281, 28, 5, 57, 65037]
+permute_extensions = true
+extension_tail = [57, 65037]
 grease = false
 ech_grease = true
 tls12_extensions = true

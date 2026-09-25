@@ -93,6 +93,7 @@ initial_max_streams_bidi = 0
 initial_max_streams_uni = 8
 max_idle_timeout_secs = 0
 max_udp_payload_size = 1452
+initial_datagram_size = 1200
 active_connection_id_limit = 64
 dcid_length = 8
 scid_length = 0

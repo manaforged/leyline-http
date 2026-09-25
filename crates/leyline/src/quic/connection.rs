@@ -81,6 +81,10 @@ fn build_quic_config(
     if let Some(plan) = wire::transport_plan(wire)? {
         config.set_transport_params_plan(plan);
     }
+    config.set_compatible_versions(&wire::compatible_versions(wire));
+    if let Some(size) = wire.initial_datagram_size {
+        config.set_initial_datagram_size(usize::from(size));
+    }
     if wire.settings.is_some() {
         config.grease(false);
     }

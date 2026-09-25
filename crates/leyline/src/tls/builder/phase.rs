@@ -175,6 +175,11 @@ pub(super) fn extensions(
     if tls.permute_extensions {
         builder.set_permute_extensions(true);
     }
+    if !tls.extension_tail.is_empty() {
+        builder
+            .set_extension_tail(&tls.extension_tail)
+            .map_err(TlsError::from_stack)?;
+    }
 
     order(builder, tls)?;
 

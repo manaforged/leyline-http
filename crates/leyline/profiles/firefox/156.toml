@@ -105,7 +105,7 @@ transport_parameters = [
     { id = 11 },
     { id = 14 },
     { id = 15 },
-    { id = 17, versions = { chosen = 1, available = [1], grease = "first" } },
+    { id = 17, versions = { chosen = 1, available = [1798521807, 1], grease = "first" } },
     { id = 29, hex = "" },
     { id = 4278378010, varint = 1000 },
     { id = 32, varint = 65535 },
@@ -138,7 +138,8 @@ delegated_credentials = "ecdsa_secp256r1_sha256:ecdsa_secp384r1_sha384:ecdsa_sec
 record_size_limit = 16385
 ocsp_stapling = true
 cert_compression = ["zlib", "zstd", "brotli"]
-extension_permutation = [45, 10, 0, 13, 43, 27, 51, 16, 23, 34, 65281, 28, 5, 57, 65037]
+permute_extensions = true
+extension_tail = [57, 65037]
 grease = false
 ech_grease = true
 tls12_extensions = true

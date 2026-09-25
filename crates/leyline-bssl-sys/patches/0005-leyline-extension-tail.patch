@@ -1,0 +1,95 @@
+diff --git a/include/openssl/prefix_symbols.h b/include/openssl/prefix_symbols.h
+index 421fa3330..1bfe0ab3a 100644
+--- a/include/openssl/prefix_symbols.h
++++ b/include/openssl/prefix_symbols.h
+@@ -3151,6 +3151,7 @@
+ 
+ #pragma redefine_extname SSL_CTX_set_delegated_credentials BORINGSSL_ADD_USER_LABEL_AND_PREFIX(SSL_CTX_set_delegated_credentials)
+ #pragma redefine_extname SSL_CTX_set_extension_order BORINGSSL_ADD_USER_LABEL_AND_PREFIX(SSL_CTX_set_extension_order)
++#pragma redefine_extname SSL_CTX_set_extension_tail BORINGSSL_ADD_USER_LABEL_AND_PREFIX(SSL_CTX_set_extension_tail)
+ #pragma redefine_extname SSL_CTX_set_record_size_limit BORINGSSL_ADD_USER_LABEL_AND_PREFIX(SSL_CTX_set_record_size_limit)
+ #pragma redefine_extname SSL_CTX_set_grease_signature_algorithms BORINGSSL_ADD_USER_LABEL_AND_PREFIX(SSL_CTX_set_grease_signature_algorithms)
+ #pragma redefine_extname SSL_CTX_set_tls13_cipher_order BORINGSSL_ADD_USER_LABEL_AND_PREFIX(SSL_CTX_set_tls13_cipher_order)
+@@ -6273,6 +6274,7 @@
+ 
+ #define SSL_CTX_set_delegated_credentials BORINGSSL_ADD_PREFIX(SSL_CTX_set_delegated_credentials)
+ #define SSL_CTX_set_extension_order BORINGSSL_ADD_PREFIX(SSL_CTX_set_extension_order)
++#define SSL_CTX_set_extension_tail BORINGSSL_ADD_PREFIX(SSL_CTX_set_extension_tail)
+ #define SSL_CTX_set_record_size_limit BORINGSSL_ADD_PREFIX(SSL_CTX_set_record_size_limit)
+ #define SSL_CTX_set_grease_signature_algorithms BORINGSSL_ADD_PREFIX(SSL_CTX_set_grease_signature_algorithms)
+ #define SSL_CTX_set_tls13_cipher_order BORINGSSL_ADD_PREFIX(SSL_CTX_set_tls13_cipher_order)
+diff --git a/include/openssl/ssl.h b/include/openssl/ssl.h
+index fc224fd85..68ed964f6 100644
+--- a/include/openssl/ssl.h
++++ b/include/openssl/ssl.h
+@@ -5551,6 +5551,10 @@ OPENSSL_EXPORT int SSL_CTX_set_tls13_cipher_order(SSL_CTX *ctx,
+                                                   const uint16_t *order,
+                                                   size_t order_len);
+ 
++OPENSSL_EXPORT int SSL_CTX_set_extension_tail(SSL_CTX *ctx,
++                                              const uint16_t *tail,
++                                              size_t tail_len);
++
+ OPENSSL_EXPORT void SSL_CTX_set_grease_signature_algorithms(SSL_CTX *ctx,
+                                                             int enabled);
+ 
+diff --git a/ssl/extensions.cc b/ssl/extensions.cc
+index cdd3f61b1..3deb0e131 100644
+--- a/ssl/extensions.cc
++++ b/ssl/extensions.cc
+@@ -4386,6 +4386,22 @@ bool ssl_setup_extension_permutation(SSL_HANDSHAKE *hs) {
+     for (size_t i = kNumExtensions - 1; i > 0; i--) {
+       std::swap(permutation[i], permutation[seeds[i - 1] % (i + 1)]);
+     }
++    Span<const uint16_t> tail = hs->ssl->ctx->extension_tail;
++    size_t next = 0;
++    for (size_t i = 0; i < kNumExtensions; i++) {
++      if (std::find(tail.begin(), tail.end(),
++                    kExtensions[permutation[i]].value) == tail.end()) {
++        permutation[next++] = permutation[i];
++      }
++    }
++    for (uint16_t value : tail) {
++      for (size_t i = 0; i < kNumExtensions; i++) {
++        if (kExtensions[i].value == value) {
++          permutation[next++] = i;
++          break;
++        }
++      }
++    }
+   } else {
+     size_t next = 0;
+     for (uint16_t value : hs->config->extension_order) {
+diff --git a/ssl/internal.h b/ssl/internal.h
+index 32ea4dd4b..9d2d2dd04 100644
+--- a/ssl/internal.h
++++ b/ssl/internal.h
+@@ -4169,6 +4169,7 @@ class SSLContext : public ssl_ctx_st, public RefCounted<SSLContext> {
+   Array<uint16_t> delegated_credentials;
+ 
+   Array<uint16_t> extension_order;
++  Array<uint16_t> extension_tail;
+   Array<uint16_t> tls13_cipher_order;
+ 
+   // accepted_peer_cert_types inherited by SSL struct.
+diff --git a/ssl/ssl_lib.cc b/ssl/ssl_lib.cc
+index 5f367bbf3..25cf19fdf 100644
+--- a/ssl/ssl_lib.cc
++++ b/ssl/ssl_lib.cc
+@@ -3213,6 +3213,16 @@ int SSL_CTX_set_extension_order(SSL_CTX *ctx, const uint16_t *order,
+   return 1;
+ }
+ 
++int SSL_CTX_set_extension_tail(SSL_CTX *ctx, const uint16_t *tail,
++                               size_t tail_len) {
++  if (!ssl_extension_order_valid(Span(tail, tail_len)) ||
++      !FromOpaque(ctx)->extension_tail.CopyFrom(Span(tail, tail_len))) {
++    OPENSSL_PUT_ERROR(SSL, SSL_R_INVALID_COMMAND);
++    return 0;
++  }
++  return 1;
++}
++
+ int SSL_CTX_set_tls13_cipher_order(SSL_CTX *ctx, const uint16_t *order,
+                                     size_t order_len) {
+   for (size_t i = 0; i < order_len; i++) {

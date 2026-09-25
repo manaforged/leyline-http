@@ -34,6 +34,20 @@ import `leyline`. It pulls `leyline-quiche` in when the `http3` feature is on.
   the decoder sends Stream Cancellation and `poll` returns `Event::Reset`.
   `h3::Connection::cancel_stream` frees the blocked slot of a stream that the
   application drops.
+- QUIC version 2 (RFC 9369): the Initial salt, the `quicv2` HKDF labels, the
+  long header packet types, and the Retry integrity key and nonce.
+  `Config::set_compatible_versions` lets a client follow a server that
+  switches to another listed version (RFC 9368 compatible version
+  negotiation) once a packet in that version decrypts. Version Negotiation
+  picks only a listed version. The client writes its current version as the
+  Chosen Version, stops 0-RTT after a switch, and checks the server's
+  `version_information` (RFC 9368 section 4). A mismatch closes the
+  connection with VERSION_NEGOTIATION_ERROR (0x11).
+- `Config::set_initial_datagram_size` sets the size of client datagrams that
+  carry Initial packets during the handshake. First-flight Initial packets
+  are padded with PADDING frames to that size. The size is at most 1232
+  bytes over IPv6. After a loss timeout with no packet received, Initials
+  fall back to 1200 bytes.
 - RESET_STREAM_AT is read as RESET_STREAM, and a Reliable Size larger than the
   Final Size is a FRAME_ENCODING_ERROR. ACK_FREQUENCY and IMMEDIATE_ACK are
   accepted and ignored. Each frame type is accepted only in 1-RTT packets, and

@@ -2,14 +2,14 @@
 name = "CFNetwork iOS 27"
 browser = "cfnetwork-ios"
 version = 27
-capture = "emulator"
+capture = "native"
 variant = "CfnetworkIOS27"
 header_style = "cfnetwork-26"
 platform_browser = { macos = "cfnetwork-macos" }
 family = "cfnetwork"
-verified_against = "tls.peet.ws 2026-09-25 URLSession CFNetwork/3896.100.1.2.1 iOS 27.0 (24A434) simulator"
+verified_against = "tls.peet.ws 2026-09-25 URLSession through Shortcuts, CFNetwork/3892.100.1 on an iPhone 15 Pro Max, iOS 27.0"
 verified_at = "2026-09-25"
-captured_against = "cfnetwork-3896.100.1.2.1-ios27.0-simulator"
+captured_against = "cfnetwork-3892.100.1-ios27.0-device"
 
 [tls]
 ciphers = [
@@ -62,7 +62,7 @@ ja4 = "t13d2013h2_a09f3c656075_7f0f34a4126d"
 
 [h2]
 enable_push = false
-initial_stream_window_size = 2097152
+initial_stream_window_size = 524288
 max_concurrent_streams = 100
 unknown_setting9 = 1
 initial_connection_window_size = 10551295
@@ -70,10 +70,10 @@ pseudo_order = ["method", "scheme", "path", "authority"]
 settings_order = ["enable_push", "initial_window_size", "max_concurrent_streams", "unknown9"]
 
 [h2.fingerprint]
-akamai = "2:0;4:2097152;3:100;9:1|10485760|0|m,s,p,a"
+akamai = "2:0;4:524288;3:100;9:1|10485760|0|m,s,p,a"
 
 [identity.ios]
-user_agent = "CFNetwork/3896.100.1.2.1 Darwin/25.6.0"
+user_agent = "CFNetwork/3892.100.1 Darwin/27.0.0"
 sec_ch_ua = ""
 
 [identity.macos]

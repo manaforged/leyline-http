@@ -12,6 +12,7 @@ const SERVER_TRANSPORT_PARAMS: [u64; 4] = [0x00, 0x02, 0x0d, 0x10];
 const INITIAL_SOURCE_CONNECTION_ID: u64 = 0x0f;
 const HTTP2_RESERVED_SETTINGS: [u64; 4] = [0x02, 0x03, 0x04, 0x05];
 const MAX_VARINT: u64 = (1 << 62) - 1;
+const MIN_INITIAL_DATAGRAM_SIZE: u16 = 1200;
 
 #[expect(
     missing_docs,
@@ -29,6 +30,8 @@ pub struct H3Profile {
     pub initial_max_streams_uni: u64,
     pub max_idle_timeout_secs: u64,
     pub max_udp_payload_size: u16,
+    #[serde(default)]
+    pub initial_datagram_size: Option<u16>,
     pub active_connection_id_limit: u64,
     pub dcid_length: H3ConnectionIdLength,
     #[serde(default)]
@@ -185,6 +188,14 @@ impl H3Profile {
         if let Some(params) = &self.transport_parameters {
             validate_transport_parameters(params)?;
         }
+        if let Some(size) = self.initial_datagram_size
+            && !(MIN_INITIAL_DATAGRAM_SIZE..=self.max_udp_payload_size).contains(&size)
+        {
+            return Err(format!(
+                "[h3] initial_datagram_size {size} must be {MIN_INITIAL_DATAGRAM_SIZE}..={}",
+                self.max_udp_payload_size
+            ));
+        }
         if let H3ConnectionIdLength::Weighted { weights } = &self.dcid_length
             && weights.iter().all(|(_, weight)| *weight == 0)
         {
@@ -278,6 +289,12 @@ impl H3TransportParam {
 
 impl H3VersionInformation {
     fn validate(&self) -> Result<(), String> {
+        if self.chosen != QUIC_START_VERSION || !self.available.contains(&self.chosen) {
+            return Err(format!(
+                "[h3] version_information chosen must be {QUIC_START_VERSION:#010x}, the version \
+                 the connection starts in, and must appear in available"
+            ));
+        }
         match std::iter::once(&self.chosen)
             .chain(&self.available)
             .find(|version| !quic_version_supported(**version))
@@ -294,6 +311,12 @@ impl H3VersionInformation {
 fn quic_version_supported(version: u32) -> bool {
     leyline_quiche::version_is_supported(version)
 }
+
+#[cfg(feature = "http3")]
+const QUIC_START_VERSION: u32 = leyline_quiche::PROTOCOL_VERSION;
+
+#[cfg(not(feature = "http3"))]
+const QUIC_START_VERSION: u32 = 1;
 
 #[cfg(not(feature = "http3"))]
 fn quic_version_supported(_version: u32) -> bool {

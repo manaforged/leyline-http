@@ -99,6 +99,21 @@ fn reorder<T>(entries: Vec<T>, pinned: &[bool], order: H3Order) -> Vec<T> {
         .collect()
 }
 
+pub(crate) fn compatible_versions(wire: &H3Profile) -> Vec<u32> {
+    let versions: Vec<u32> = wire
+        .transport_parameters
+        .iter()
+        .flatten()
+        .filter_map(|param| param.versions.as_ref())
+        .flat_map(|info| info.available.iter().copied())
+        .collect();
+    if versions.is_empty() {
+        vec![quiche::PROTOCOL_VERSION]
+    } else {
+        versions
+    }
+}
+
 fn version_information(info: &H3VersionInformation) -> Vec<u8> {
     let mut versions = info.available.clone();
     if let Some(position) = info.grease {
