@@ -8,7 +8,7 @@ header_style = "gecko"
 family = "gecko"
 capture = "browser"
 captured_against = "firefox-148.0.2"
-verified_against = "tls.peet.ws 2026-09-25 Firefox 148.0.2 macOS and Linux, --headless"
+verified_against = "tls.peet.ws 2026-09-25 Firefox 148.0.2 macOS and Linux --headless, Windows headful"
 verified_at = "2026-09-25"
 
 [tls]

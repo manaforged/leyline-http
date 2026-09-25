@@ -9,7 +9,7 @@ family = "chromium"
 ch_ua_brand = "Google Chrome"
 capture = "browser"
 captured_against = "chrome-147.0.7727.138"
-verified_against = "tls.peet.ws 2026-09-25 Google Chrome 147.0.7727.138 macOS headful, 147.0.7727.138 Windows headful, 147.0.7727.137 Linux --headless=new"
+verified_against = "tls.peet.ws 2026-09-25 Google Chrome 147.0.7727.138 macOS headful, 147.0.7727.138 Windows headful, 147.0.7727.137 Linux headful"
 verified_at = "2026-09-25"
 
 [tls]

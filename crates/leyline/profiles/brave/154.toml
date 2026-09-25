@@ -9,7 +9,7 @@ ch_ua_brand = "Brave"
 header_style = "brave-154"
 capture = "browser"
 captured_against = "brave-154.1.96.59"
-verified_against = "tls.peet.ws 2026-09-25 Brave 1.96.59 (Chromium 154.0.8037.58) macOS and Windows headful, Linux --headless=new"
+verified_against = "tls.peet.ws 2026-09-25 Brave 1.96.59 (Chromium 154.0.8037.58) macOS, Windows and Linux headful"
 verified_at = "2026-09-25"
 
 [tls]
@@ -82,6 +82,10 @@ accept_language = "en-US,en;q=0.8"
 [identity.macos]
 user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
 accept_language = "en-US,en;q=0.9"
+
+[identity.linux]
+user_agent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
+accept_language = "en-US,en;q=0.8"
 
 [h3]
 initial_max_data = 15728640

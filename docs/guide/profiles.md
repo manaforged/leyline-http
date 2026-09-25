@@ -88,27 +88,27 @@ The `capture` key in each profile's `[meta]` table records the source:
 
 | Profile | Provenance | `capture` | Source |
 | --- | --- | --- | --- |
-| Chrome 145 | Browser capture | `browser` | `chrome-145.0.7632.160` macOS and `145.0.7632.160` Windows headful; `145.0.7632.159` Linux `--headless=new` |
-| Chrome 146 | Browser capture | `browser` | `chrome-146.0.7680.178` macOS and `146.0.7680.178` Windows headful; `146.0.7680.177` Linux `--headless=new` |
-| Chrome 147 | Browser capture | `browser` | `chrome-147.0.7727.138` macOS and `147.0.7727.138` Windows headful; `147.0.7727.137` Linux `--headless=new` |
-| Chrome 148 | Browser capture | `browser` | `chrome-148.0.7778.216` macOS and `148.0.7778.217` Windows headful; `148.0.7778.215` Linux `--headless=new` |
-| Chrome 149 | Browser capture | `browser` | `chrome-149.0.7827.201` macOS and `149.0.7827.201` Windows headful; `149.0.7827.200` Linux `--headless=new` |
-| Chrome 150 | Browser capture | `browser` | `chrome-150.0.7871.187` macOS and `150.0.7871.187` Windows headful; `150.0.7871.186` Linux `--headless=new` |
-| Chrome 151 | Browser capture | `browser` | `chrome-151.0.7922.174` macOS and `151.0.7922.174` Windows headful; `151.0.7922.173` Linux `--headless=new` |
-| Chrome 152 | Browser capture | `browser` | `chrome-152.0.7977.83` macOS and `152.0.7977.83` Windows headful; `152.0.7977.82` Linux `--headless=new` |
-| Chrome 153 | Browser capture | `browser` | `chrome-153.0.8010.53` macOS and `153.0.8010.53` Windows headful; `153.0.8010.52` Linux `--headless=new` |
-| Chrome 154 | Browser capture | `browser` | `chrome-154.0.8037.58` macOS and `154.0.8037.58` Windows headful; `154.0.8037.57` Linux `--headless=new` |
-| Brave (Chromium 146) | Browser capture | `browser` | `brave-146.1.88.138`, macOS and Windows headful; Linux `--headless=new` |
-| Brave (Chromium 154) | Browser capture | `browser` | `brave-154.1.96.59`, macOS and Windows headful; Linux `--headless=new` |
-| Firefox 148 | Browser capture | `browser` | `firefox-148.0.2`, macOS and Linux, `--headless` |
-| Firefox 149 | Browser capture | `browser` | `firefox-149.0.2`, macOS and Linux, `--headless` |
-| Firefox 150 | Browser capture | `browser` | `firefox-150.0`, macOS and Linux, `--headless` |
-| Firefox 151 | Browser capture | `browser` | `firefox-151.0.4`, macOS and Linux, `--headless` |
-| Firefox 152 | Browser capture | `browser` | `firefox-152.0.6`, macOS and Linux, `--headless` |
-| Firefox 153 | Browser capture | `browser` | `firefox-153.0.4`, macOS and Linux, `--headless` |
-| Firefox 154 | Browser capture | `browser` | `firefox-154.0.1`, macOS and Linux, `--headless` |
-| Firefox 155 | Browser capture | `browser` | `firefox-155.0.1`, macOS and Linux, `--headless` |
-| Firefox 156 | Browser capture | `browser` | `firefox-156.0.1`, macOS and Linux, `--headless` |
+| Chrome 145 | Browser capture | `browser` | `chrome-145.0.7632.160` macOS and `145.0.7632.160` Windows headful; `145.0.7632.159` Linux headful |
+| Chrome 146 | Browser capture | `browser` | `chrome-146.0.7680.178` macOS and `146.0.7680.178` Windows headful; `146.0.7680.177` Linux headful |
+| Chrome 147 | Browser capture | `browser` | `chrome-147.0.7727.138` macOS and `147.0.7727.138` Windows headful; `147.0.7727.137` Linux headful |
+| Chrome 148 | Browser capture | `browser` | `chrome-148.0.7778.216` macOS and `148.0.7778.217` Windows headful; `148.0.7778.215` Linux headful |
+| Chrome 149 | Browser capture | `browser` | `chrome-149.0.7827.201` macOS and `149.0.7827.201` Windows headful; `149.0.7827.200` Linux headful |
+| Chrome 150 | Browser capture | `browser` | `chrome-150.0.7871.187` macOS and `150.0.7871.187` Windows headful; `150.0.7871.186` Linux headful |
+| Chrome 151 | Browser capture | `browser` | `chrome-151.0.7922.174` macOS and `151.0.7922.174` Windows headful; `151.0.7922.173` Linux headful |
+| Chrome 152 | Browser capture | `browser` | `chrome-152.0.7977.83` macOS and `152.0.7977.83` Windows headful; `152.0.7977.82` Linux headful |
+| Chrome 153 | Browser capture | `browser` | `chrome-153.0.8010.53` macOS and `153.0.8010.53` Windows headful; `153.0.8010.52` Linux headful |
+| Chrome 154 | Browser capture | `browser` | `chrome-154.0.8037.58` macOS and `154.0.8037.58` Windows headful; `154.0.8037.57` Linux headful |
+| Brave (Chromium 146) | Browser capture | `browser` | `brave-146.1.88.138`, macOS, Windows, and Linux headful |
+| Brave (Chromium 154) | Browser capture | `browser` | `brave-154.1.96.59`, macOS, Windows, and Linux headful |
+| Firefox 148 | Browser capture | `browser` | `firefox-148.0.2`, macOS and Linux `--headless`, Windows headful |
+| Firefox 149 | Browser capture | `browser` | `firefox-149.0.2`, macOS and Linux `--headless`, Windows headful |
+| Firefox 150 | Browser capture | `browser` | `firefox-150.0`, macOS and Linux `--headless`, Windows headful |
+| Firefox 151 | Browser capture | `browser` | `firefox-151.0.4`, macOS and Linux `--headless`, Windows headful |
+| Firefox 152 | Browser capture | `browser` | `firefox-152.0.6`, macOS and Linux `--headless`, Windows headful |
+| Firefox 153 | Browser capture | `browser` | `firefox-153.0.4`, macOS and Linux `--headless`, Windows headful |
+| Firefox 154 | Browser capture | `browser` | `firefox-154.0.1`, macOS and Linux `--headless`, Windows headful |
+| Firefox 155 | Browser capture | `browser` | `firefox-155.0.1`, macOS and Linux `--headless`, Windows headful |
+| Firefox 156 | Browser capture | `browser` | `firefox-156.0.1`, macOS and Linux `--headless`, Windows headful |
 | Safari 18 | Self-referential golden | `self-referential` | Leyline output |
 | Safari 26 | Browser capture | `browser` | `safari-26.2-21623.1.14.11.9`, Safari.app through safaridriver |
 | Safari iOS 17 | Self-referential golden | `self-referential` | Leyline output |
@@ -142,8 +142,10 @@ These facts come from the captures behind the bundled profiles.
 - **Chrome 145 to 154.** Branded Google Chrome builds from Google's update
   server and apt repository, captured on 2026-09-25. macOS and Windows ran
   headful with no user agent override, after the variations seed arrived.
-  Linux ran with `--headless=new` and a `--user-agent` override, so the Linux
-  captures back the TLS and H2 values but not the Linux user agent. Every
+  Linux ran headful under Xvfb with no user agent override, from the official
+  `.deb` packages extracted without installation. The Linux captures back the
+  user agent (`X11; Linux x86_64`), `sec-ch-ua-platform: "Linux"`, the
+  navigate header order, and the TLS and H2 values. Every
   build sends the four core SETTINGS (1, 2, 4, 6) on every platform, without
   `max_concurrent_streams` and without setting 8. The ClientHello has three
   forms: 145 to 149 send no ML-DSA signature schemes and no Trust Anchor
@@ -165,9 +167,20 @@ These facts come from the captures behind the bundled profiles.
   Identifiers) and moves `accept-language` after `accept-encoding`. Brave
   changes the `accept-language` q value between requests (macOS 0.9 and 0.5,
   Windows 0.8 and 0.6). The profiles use the value that both versions sent on
-  each platform: 0.9 on macOS and 0.8 on Windows.
+  each platform: 0.9 on macOS and 0.8 on Windows. On Linux, headful under
+  Xvfb, Brave 146 sent 0.8 and 0.6 and Brave 154 sent 0.6 and 0.8; the Linux
+  rows use 0.8.
+- **Edge 154 and Opera 136 on Linux.** Edge 154.0.4258.37 and Opera
+  136.0.6008.52 (Chromium 152), captured headful under Xvfb with no user agent
+  override. They send the Chrome user agent form with `Edg/154.0.0.0` and
+  `OPR/136.0.0.0`, `sec-ch-ua-platform: "Linux"`, and the Chrome navigate
+  header order.
 - **Firefox 148 to 156.** Official Mozilla builds captured on macOS and
-  Linux with `--headless` on 2026-09-25. Every build sends three key shares
+  Linux with `--headless` on 2026-09-25, and on Windows headful from the
+  `win64` installers, with the SHA256SUMS signature and the Authenticode
+  signature checked. The Windows builds send
+  `Windows NT 10.0; Win64; x64` and the same TLS and H2 values as macOS and
+  Linux. Every build sends three key shares
   (X25519MLKEM768, X25519, P-256) and a HEADERS PRIORITY with weight 42 and no
   exclusive bit, sent as 41.
 - **Firefox 149.** Firefox 149.0 (BuildID 20260318190823) on macOS aarch64
@@ -183,6 +196,23 @@ These facts come from the captures behind the bundled profiles.
   cipher list drops `TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA`.
 - **Firefox 156.** Firefox 156 drops `ffdhe2048` and `ffdhe3072` from the
   supported groups. The JA4 is the same as Firefox 154 and 155.
+- **Request header presets.** tls.peet.ws records only the top-level
+  navigation. The other presets come from a local HTTPS server that logs
+  each HTTP/2 HEADERS frame in wire order. Its page loads a `<script src>`,
+  sends a JSON `POST` (`xhr`), a form-encoded
+  `fetch()` `POST` (`form`), a `fetch()` to a sibling subdomain
+  (`same-site`) and to another site (`cross-origin`), and then a clicked
+  form `POST` (`form-navigate`). Chrome 154.0.8037.57, Edge 154.0.4258.37,
+  Brave 1.96.59, and Firefox 156.0.1 ran headful on Linux, twice each, with
+  the same result both times. Edge sends the Chrome shapes. Brave adds
+  `sec-gpc: 1` after `accept` on navigations, scripts, and plain fetches,
+  and after `sec-ch-ua-mobile` on CORS fetches, and drops
+  `application/signed-exchange` from the navigate `accept`. A
+  parser-blocking script carries `priority: u=1` in Chrome and `u=2` in
+  Firefox. Firefox sends `priority: u=4` on each `fetch()`. Every browser
+  sends the cookie last. The `native` preset describes a client that is not a
+  browser, so no browser capture applies to it. The captures are
+  `captures/presets-<browser>-<version>-linux-run<n>.json`.
 - **Safari 18 and Safari iOS 17.** The earlier cipher tables held BoringSSL
   ordinals, not TLS IDs. Exact extension order stays unsupported until a
   version-matched capture exists.
@@ -295,8 +325,8 @@ The placeholders `{user_agent}`, `{sec_ch_ua}`, `{sec_ch_ua_mobile}`,
 the session values. The `brave` shape extends `chromium`. It sends
 `sec-gpc: 1`, a navigate `accept` without `application/signed-exchange`, and
 the header order of the Brave 146 capture of 2026-09-25 from tls.peet.ws. The
-`brave-154` shape moves `accept-language` after `accept-encoding`, as Brave
-1.96.59 does. A
+`brave-154` shape carries every preset from the Brave 1.96.59 capture, with
+`sec-gpc` in the position that Brave sends it, and has no `order`. A
 brand row in `profiles/brands.toml` can set `header_style` to replace the
 profile's shape.
 

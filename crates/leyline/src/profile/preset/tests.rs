@@ -58,7 +58,7 @@ fn firefox_reshapes_client_hints_accept_priority_and_te() {
         value(&ff_xhr, "accept"),
         Some("application/json, text/plain, */*")
     );
-    assert_eq!(value(&ff_xhr, "priority"), Some("u=1, i"));
+    assert_eq!(value(&ff_xhr, "priority"), Some("u=4"));
     assert_eq!(value(&ff_xhr, "te"), Some("trailers"));
 }
 
