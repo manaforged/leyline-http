@@ -17,36 +17,7 @@ impl SessionBuilder {
         h2_config: &H2Config,
         tcp_profile: &TcpProfile,
     ) -> AuditTlsCache {
-        let extension_ids = crate::profile::permutation::extension_ids(&profile.tls);
-        let ja4 = {
-            let input = crate::audit::Ja4Input {
-                ciphers: &profile.tls.ciphers,
-                sigalgs: &profile.tls.sigalgs,
-                curves: &profile.tls.curves,
-                extension_ids: &extension_ids,
-                tls_version: "1.3",
-                has_sni: true,
-                alpn: "h2",
-            };
-            crate::audit::compute_ja4(&input)
-        };
-        let ja3 = {
-            let input = crate::audit::Ja3Input {
-                ciphers: &profile.tls.ciphers,
-                curves: &profile.tls.curves,
-                extension_ids: &extension_ids,
-                tls_record_version: 771,
-            };
-            crate::audit::compute_ja3(&input)
-        };
-        let h2_fp = h2_config.akamai_fingerprint();
-        let ja4t = crate::audit::compute_ja4t(tcp_profile);
-        AuditTlsCache {
-            ja4,
-            ja3,
-            h2_fingerprint: h2_fp,
-            ja4t,
-        }
+        audit_cache(profile, h2_config, tcp_profile)
     }
 
     pub(super) fn build_connector(
@@ -112,5 +83,42 @@ impl SessionBuilder {
         )
         .with_h2_ping(config.h2_ping_after_idle, config.h2_ping_timeout)
         .with_max_body_size(self.compression.max_body_size)
+    }
+}
+
+pub(crate) fn audit_cache(
+    profile: &BrowserProfile,
+    h2_config: &H2Config,
+    tcp_profile: &TcpProfile,
+) -> AuditTlsCache {
+    let extension_ids = crate::profile::permutation::extension_ids(&profile.tls);
+    let ja4 = {
+        let input = crate::audit::Ja4Input {
+            ciphers: &profile.tls.ciphers,
+            sigalgs: &profile.tls.sigalgs,
+            curves: &profile.tls.curves,
+            extension_ids: &extension_ids,
+            tls_version: "1.3",
+            has_sni: true,
+            alpn: "h2",
+        };
+        crate::audit::compute_ja4(&input)
+    };
+    let ja3 = {
+        let input = crate::audit::Ja3Input {
+            ciphers: &profile.tls.ciphers,
+            curves: &profile.tls.curves,
+            extension_ids: &extension_ids,
+            tls_record_version: 771,
+        };
+        crate::audit::compute_ja3(&input)
+    };
+    let h2_fp = h2_config.akamai_fingerprint();
+    let ja4t = crate::audit::compute_ja4t(tcp_profile);
+    AuditTlsCache {
+        ja4,
+        ja3,
+        h2_fingerprint: h2_fp,
+        ja4t,
     }
 }

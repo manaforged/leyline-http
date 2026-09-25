@@ -26,6 +26,7 @@ mod handshake;
 pub struct FingerprintConnector {
     ssl_connector: SslConnector,
     tcp_profile: TcpProfile,
+    trust: TlsTrustConfig,
     hello: HelloOptions,
     session_cache: SessionCache,
     accept_invalid_certs: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -77,6 +78,7 @@ impl FingerprintConnector {
             pins: trust.pinned_leaf_sha256().to_vec(),
             system_roots: trust.uses_system_roots(),
             has_client_identity: trust.has_client_identity(),
+            trust,
         })
     }
 
@@ -85,6 +87,19 @@ impl FingerprintConnector {
             session_cache: SessionCache::new(),
             ..self.clone()
         }
+    }
+
+    pub(crate) fn with_profile(&self, profile: &BrowserProfile) -> Result<Self, TlsError> {
+        use std::sync::atomic::Ordering;
+        let mut next = Self::new_with_trust(profile, self.tcp_profile.clone(), &self.trust)?;
+        next.resolver = self.resolver.clone();
+        next.happy_eyeballs = self.happy_eyeballs;
+        next.connect_timeout = self.connect_timeout;
+        next.socket_config = self.socket_config.clone();
+        if self.accept_invalid_certs.load(Ordering::Relaxed) {
+            next.set_accept_invalid_certs(true);
+        }
+        Ok(next)
     }
 
     #[cfg(feature = "http3")]
@@ -163,6 +178,10 @@ impl FingerprintConnector {
             }
         };
         self.with_timeout(fut).await
+    }
+
+    pub(crate) fn tcp_profile(&self) -> &TcpProfile {
+        &self.tcp_profile
     }
 
     #[cfg(feature = "http3")]

@@ -15,7 +15,7 @@ use super::proxy::env_proxy;
 use super::{Identity, ProtocolPolicy, Session, SessionInner};
 use crate::core::error::{Error, Kind, Result};
 
-mod connect;
+pub(super) mod connect;
 
 #[must_use = "builders are lazy: nothing happens until `.send()` / `.build()`"]
 pub struct SessionBuilder {
