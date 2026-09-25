@@ -37,9 +37,9 @@ pub(super) fn target(url: &url::Url, target: H1Target) -> Result<(String, String
         }
     };
     if !is_valid_request_target(&request_target) {
-        return Err(H1PooledError::Config(format!(
-            "invalid request target `{request_target}`: control characters not allowed"
-        )));
+        return Err(H1PooledError::Config(
+            "invalid request target: control characters not allowed".to_string(),
+        ));
     }
     Ok((request_target, authority))
 }

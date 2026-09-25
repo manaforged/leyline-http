@@ -257,6 +257,7 @@ struct Driver<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> {
     buffered_pending: VecDeque<u32>,
     rst_flood: RstFloodDetector,
     settings_flood: RstFloodDetector,
+    control_flood: RstFloodDetector,
     config: H2Config,
     command_rx: mpsc::Receiver<DriverCommand>,
     closed: Arc<AtomicBool>,

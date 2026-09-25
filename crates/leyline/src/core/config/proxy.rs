@@ -46,7 +46,7 @@ impl ProxyUrl {
 
 impl std::fmt::Display for ProxyUrl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
+        f.write_str(&redact(&self.0))
     }
 }
 

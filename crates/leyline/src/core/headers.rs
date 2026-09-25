@@ -91,6 +91,10 @@ impl HeaderList {
             .retain(|entry| !entry.name.as_str().eq_ignore_ascii_case(name));
     }
 
+    pub(crate) fn remove_where(&mut self, drop: impl Fn(&HeaderName) -> bool) {
+        self.inner.retain(|entry| !drop(&entry.name));
+    }
+
     pub fn get(&self, name: &str) -> Option<&HeaderValue> {
         self.inner
             .iter()

@@ -10,7 +10,9 @@ use tokio::sync::mpsc;
 
 use crate::h2::codec::{FrameReader, FrameWriter};
 use crate::h2::config::H2Config;
-use crate::h2::connection::{PeerSettings, RstFloodDetector, id_to_u16};
+use crate::h2::connection::{
+    CONTROL_FLOOD_THRESHOLD, CONTROL_FLOOD_WINDOW, PeerSettings, RstFloodDetector, id_to_u16,
+};
 use crate::h2::error::H2Error;
 use crate::h2::hpack;
 
@@ -163,6 +165,12 @@ where
             config.settings_flood_window,
             "leyline::h2::settings_flood",
             "peer sent excessive SETTINGS updates",
+        ),
+        control_flood: RstFloodDetector::with_label(
+            CONTROL_FLOOD_THRESHOLD,
+            CONTROL_FLOOD_WINDOW,
+            "leyline::h2::control_flood",
+            "peer sent excessive PING, WINDOW_UPDATE or empty CONTINUATION frames",
         ),
         config: config.clone(),
         command_rx: rx,

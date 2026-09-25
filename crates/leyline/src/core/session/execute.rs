@@ -16,7 +16,7 @@ use crate::core::headers::HeaderList;
 use crate::core::response::Response;
 use crate::core::{ProxyConfig, RedirectAction, RedirectAttempt, RedirectPolicy};
 use crate::trace;
-use crate::util::redact;
+use crate::util::{redact, redact_userinfo};
 
 mod headers;
 mod response;
@@ -84,7 +84,7 @@ impl Session {
             url: raw_url,
             preset,
             body,
-            headers: extra_headers,
+            headers: mut extra_headers,
             deadline,
             stream_response,
             proxy: request_proxy,
@@ -199,7 +199,7 @@ impl Session {
                 if action == RedirectAction::Stop {
                 } else {
                     drop(resp_body_shape);
-                    redirect_chain.push(current_url.to_string());
+                    redirect_chain.push(redact_userinfo(current_url.as_str()));
                     current_url = Arc::new(
                         current_url
                             .join(&location)
@@ -212,9 +212,12 @@ impl Session {
                         )));
                     }
 
-                    if matches!(code, 301..=303) {
+                    if rewrites_to_get(code, &current_method) {
                         current_method = "GET".to_string();
                         current_body = Body::default();
+                        if let Some(extra) = extra_headers.as_mut() {
+                            extra.remove_where(|name| name.as_str().starts_with("content-"));
+                        }
                     } else if let Some(replay) = replay_body {
                         current_body = replay;
                     } else {
@@ -259,6 +262,14 @@ impl Session {
     }
 }
 
+fn rewrites_to_get(code: u16, method: &str) -> bool {
+    match code {
+        301 | 302 => method.eq_ignore_ascii_case("POST"),
+        303 => !method.eq_ignore_ascii_case("HEAD"),
+        _ => false,
+    }
+}
+
 fn url_origin(url: &Url) -> String {
     let host = url.host_str().unwrap_or("");
     match url.port() {
@@ -274,6 +285,9 @@ fn referer_for(prev: Option<&str>, current_origin: &str) -> String {
     let Ok(mut parsed) = Url::parse(prev) else {
         return format!("{current_origin}/");
     };
+    if parsed.scheme() == "https" && !current_origin.starts_with("https:") {
+        return String::new();
+    }
     if url_origin(&parsed) != current_origin {
         let origin = url_origin(&parsed);
         return format!("{origin}/");

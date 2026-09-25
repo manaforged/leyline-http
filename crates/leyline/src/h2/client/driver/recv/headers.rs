@@ -118,6 +118,9 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                     end_headers,
                     fragment,
                 } if stream_id == h.stream_id => {
+                    if fragment.is_empty() && !end_headers {
+                        self.control_flood.record(std::time::Instant::now())?;
+                    }
                     assembled.extend_from_slice(&fragment);
                     if end_headers {
                         break;

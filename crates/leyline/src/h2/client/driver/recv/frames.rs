@@ -65,12 +65,15 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                     self.fail_stream(w.stream_id, err);
                 }
             }
+        } else {
+            self.control_flood.record(Instant::now())?;
         }
         Ok(())
     }
 
     pub(super) async fn on_ping(&mut self, p: PingFrame) -> Result<(), H2Error> {
         if !p.ack {
+            self.control_flood.record(Instant::now())?;
             self.writer.write_ping_ack(p.payload).await?;
             return Ok(());
         }

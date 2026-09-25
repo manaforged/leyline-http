@@ -47,29 +47,38 @@ impl Cookie {
             if !url_domain.eq_ignore_ascii_case(&self.domain) {
                 return false;
             }
-        } else {
-            let cookie_domain = self.domain.to_lowercase();
-            let req_domain = url_domain.to_lowercase();
-            if req_domain != cookie_domain && !req_domain.ends_with(&format!(".{}", cookie_domain))
-            {
-                return false;
-            }
+        } else if !domain_match(url_domain, &self.domain) {
+            return false;
         }
-
-        if url_path == self.path {
-            return true;
-        }
-        if url_path.starts_with(&self.path) {
-            if self.path.ends_with('/') {
-                return true;
-            }
-            if url_path.as_bytes().get(self.path.len()) == Some(&b'/') {
-                return true;
-            }
-        }
-
-        false
+        path_match(url_path, &self.path)
     }
+
+    pub(crate) fn same_slot(&self, other: &Cookie) -> bool {
+        self.name == other.name && self.path == other.path && self.host_only == other.host_only
+    }
+
+    pub(crate) fn shadows_secure(&self, existing: &Cookie) -> bool {
+        existing.secure
+            && existing.name == self.name
+            && (domain_match(&self.domain, &existing.domain)
+                || domain_match(&existing.domain, &self.domain))
+            && path_match(&self.path, &existing.path)
+    }
+}
+
+fn domain_match(host: &str, domain: &str) -> bool {
+    let host = host.to_lowercase();
+    let domain = domain.to_lowercase();
+    host == domain || host.ends_with(&format!(".{domain}"))
+}
+
+fn path_match(request_path: &str, cookie_path: &str) -> bool {
+    if request_path == cookie_path {
+        return true;
+    }
+    request_path.starts_with(cookie_path)
+        && (cookie_path.ends_with('/')
+            || request_path.as_bytes().get(cookie_path.len()) == Some(&b'/'))
 }
 
 mod systime_ms {

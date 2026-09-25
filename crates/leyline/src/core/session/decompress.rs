@@ -6,6 +6,21 @@
 ))]
 use std::io::Write;
 
+#[cfg(any(
+    feature = "compression-gzip",
+    feature = "compression-brotli",
+    feature = "compression-deflate",
+    feature = "compression-zstd"
+))]
+mod sink;
+#[cfg(any(
+    feature = "compression-gzip",
+    feature = "compression-brotli",
+    feature = "compression-deflate",
+    feature = "compression-zstd"
+))]
+use sink::{Oversize, Sink};
+
 use crate::core::CompressionConfig;
 use crate::core::error::{Error, Kind, Result};
 
@@ -22,17 +37,17 @@ pub(crate) struct Decoder {
 enum Stage {
     Identity,
     #[cfg(feature = "compression-gzip")]
-    Gzip(Box<flate2::write::MultiGzDecoder<Vec<u8>>>),
+    Gzip(Box<flate2::write::MultiGzDecoder<Sink>>),
     #[cfg(feature = "compression-deflate")]
-    DeflatePending,
+    DeflatePending(usize),
     #[cfg(feature = "compression-deflate")]
-    Zlib(Box<flate2::write::ZlibDecoder<Vec<u8>>>),
+    Zlib(Box<flate2::write::ZlibDecoder<Sink>>),
     #[cfg(feature = "compression-deflate")]
-    RawDeflate(Box<flate2::write::DeflateDecoder<Vec<u8>>>),
+    RawDeflate(Box<flate2::write::DeflateDecoder<Sink>>),
     #[cfg(feature = "compression-brotli")]
-    Brotli(Box<brotli::DecompressorWriter<Vec<u8>>>),
+    Brotli(Box<brotli::DecompressorWriter<Sink>>),
     #[cfg(feature = "compression-zstd")]
-    Zstd(Box<zstd::stream::write::Decoder<'static, Vec<u8>>>),
+    Zstd(Box<zstd::stream::write::Decoder<'static, Sink>>),
 }
 
 #[cfg(not(all(
@@ -54,7 +69,14 @@ fn missing_feature(name: &str, feature: &str) -> Error {
     feature = "compression-zstd"
 ))]
 fn decode_error(name: &str, error: std::io::Error) -> Error {
-    Error::new(Kind::Decode).with_message(format!("{name}: {error}"))
+    match error.get_ref().and_then(|e| e.downcast_ref::<Oversize>()) {
+        Some(Oversize(limit)) => size_error(*limit),
+        None => Error::new(Kind::Decode).with_message(format!("{name}: {error}")),
+    }
+}
+
+fn size_error(limit: usize) -> Error {
+    Error::new(Kind::Decode).with_message(format!("decompressed size exceeds {limit} bytes"))
 }
 
 #[cfg(any(
@@ -69,13 +91,13 @@ fn pump(writer: &mut dyn Write, input: &[u8], name: &str) -> Result<()> {
 }
 
 impl Stage {
-    fn new(encoding: &str) -> Result<Self> {
+    fn new(encoding: &str, limit: usize) -> Result<Self> {
         match encoding {
             "gzip" | "x-gzip" => {
                 #[cfg(feature = "compression-gzip")]
                 {
                     Ok(Self::Gzip(Box::new(flate2::write::MultiGzDecoder::new(
-                        Vec::new(),
+                        Sink::new(limit),
                     ))))
                 }
                 #[cfg(not(feature = "compression-gzip"))]
@@ -86,7 +108,7 @@ impl Stage {
             "deflate" => {
                 #[cfg(feature = "compression-deflate")]
                 {
-                    Ok(Self::DeflatePending)
+                    Ok(Self::DeflatePending(limit))
                 }
                 #[cfg(not(feature = "compression-deflate"))]
                 {
@@ -97,7 +119,7 @@ impl Stage {
                 #[cfg(feature = "compression-brotli")]
                 {
                     Ok(Self::Brotli(Box::new(brotli::DecompressorWriter::new(
-                        Vec::new(),
+                        Sink::new(limit),
                         4096,
                     ))))
                 }
@@ -109,7 +131,7 @@ impl Stage {
             "zstd" => {
                 #[cfg(feature = "compression-zstd")]
                 {
-                    zstd::stream::write::Decoder::new(Vec::new())
+                    zstd::stream::write::Decoder::new(Sink::new(limit))
                         .map(|d| Self::Zstd(Box::new(d)))
                         .map_err(|e| Error::new(Kind::Decode).with_message(format!("zstd: {e}")))
                 }
@@ -128,39 +150,42 @@ impl Stage {
             #[cfg(feature = "compression-gzip")]
             Self::Gzip(d) => {
                 pump(&mut **d, input, "gzip")?;
-                Ok(std::mem::take(d.get_mut()))
+                Ok(std::mem::take(&mut d.get_mut().buf))
             }
             #[cfg(feature = "compression-deflate")]
-            Self::DeflatePending => {
+            Self::DeflatePending(limit) => {
+                let limit = *limit;
                 let Some(&first) = input.first() else {
                     return Ok(Vec::new());
                 };
                 *self = if first == 0x78 {
-                    Self::Zlib(Box::new(flate2::write::ZlibDecoder::new(Vec::new())))
+                    Self::Zlib(Box::new(flate2::write::ZlibDecoder::new(Sink::new(limit))))
                 } else {
-                    Self::RawDeflate(Box::new(flate2::write::DeflateDecoder::new(Vec::new())))
+                    Self::RawDeflate(Box::new(flate2::write::DeflateDecoder::new(Sink::new(
+                        limit,
+                    ))))
                 };
                 self.write(input)
             }
             #[cfg(feature = "compression-deflate")]
             Self::Zlib(d) => {
                 pump(&mut **d, input, "deflate")?;
-                Ok(std::mem::take(d.get_mut()))
+                Ok(std::mem::take(&mut d.get_mut().buf))
             }
             #[cfg(feature = "compression-deflate")]
             Self::RawDeflate(d) => {
                 pump(&mut **d, input, "deflate")?;
-                Ok(std::mem::take(d.get_mut()))
+                Ok(std::mem::take(&mut d.get_mut().buf))
             }
             #[cfg(feature = "compression-brotli")]
             Self::Brotli(d) => {
                 pump(&mut **d, input, "brotli")?;
-                Ok(std::mem::take(d.get_mut()))
+                Ok(std::mem::take(&mut d.get_mut().buf))
             }
             #[cfg(feature = "compression-zstd")]
             Self::Zstd(d) => {
                 pump(&mut **d, input, "zstd")?;
-                Ok(std::mem::take(d.get_mut()))
+                Ok(std::mem::take(&mut d.get_mut().buf))
             }
         }
     }
@@ -171,29 +196,29 @@ impl Stage {
             #[cfg(feature = "compression-gzip")]
             Self::Gzip(d) => {
                 d.try_finish().map_err(|e| decode_error("gzip", e))?;
-                Ok(std::mem::take(d.get_mut()))
+                Ok(std::mem::take(&mut d.get_mut().buf))
             }
             #[cfg(feature = "compression-deflate")]
-            Self::DeflatePending => Ok(Vec::new()),
+            Self::DeflatePending(_) => Ok(Vec::new()),
             #[cfg(feature = "compression-deflate")]
             Self::Zlib(d) => {
                 d.try_finish().map_err(|e| decode_error("deflate", e))?;
-                Ok(std::mem::take(d.get_mut()))
+                Ok(std::mem::take(&mut d.get_mut().buf))
             }
             #[cfg(feature = "compression-deflate")]
             Self::RawDeflate(d) => {
                 d.try_finish().map_err(|e| decode_error("deflate", e))?;
-                Ok(std::mem::take(d.get_mut()))
+                Ok(std::mem::take(&mut d.get_mut().buf))
             }
             #[cfg(feature = "compression-brotli")]
             Self::Brotli(d) => {
                 d.flush().map_err(|e| decode_error("brotli", e))?;
-                Ok(std::mem::take(d.get_mut()))
+                Ok(std::mem::take(&mut d.get_mut().buf))
             }
             #[cfg(feature = "compression-zstd")]
             Self::Zstd(d) => {
                 d.flush().map_err(|e| decode_error("zstd", e))?;
-                Ok(std::mem::take(d.get_mut()))
+                Ok(std::mem::take(&mut d.get_mut().buf))
             }
         }
     }
@@ -218,7 +243,7 @@ impl Decoder {
             .iter()
             .rev()
             .copied()
-            .map(Stage::new)
+            .map(|enc| Stage::new(enc, config.max_body_size))
             .collect::<Result<Vec<_>>>()?;
         Ok(Some(Self {
             stages,
@@ -249,8 +274,7 @@ impl Decoder {
     fn emit(&mut self, data: Vec<u8>, out: &mut Vec<u8>) -> Result<()> {
         self.produced += data.len();
         if self.produced > self.limit {
-            return Err(Error::new(Kind::Decode)
-                .with_message(format!("decompressed size exceeds {} bytes", self.limit)));
+            return Err(size_error(self.limit));
         }
         out.extend_from_slice(&data);
         Ok(())

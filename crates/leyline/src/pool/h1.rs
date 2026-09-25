@@ -354,7 +354,7 @@ struct H1StreamPump {
 
 type ParsedHead = (u16, Vec<(String, String)>, u8);
 
-type ParsedResponse = (u16, Vec<(String, String)>, Vec<u8>, u8);
+const MAX_H1_INFORMATIONAL: usize = 16;
 
 mod headers;
 pub(crate) mod parse;

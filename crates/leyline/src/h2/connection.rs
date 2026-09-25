@@ -99,6 +99,9 @@ impl PeerSettings {
     }
 }
 
+pub(crate) const CONTROL_FLOOD_THRESHOLD: u32 = 1000;
+pub(crate) const CONTROL_FLOOD_WINDOW: std::time::Duration = std::time::Duration::from_secs(10);
+
 #[doc(hidden)]
 #[derive(Debug, Clone)]
 pub struct RstFloodDetector {

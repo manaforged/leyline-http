@@ -34,6 +34,9 @@ impl Session {
             referer,
         };
         let mut headers = self.inner.header_style.build_headers(preset, &ctx);
+        if referer.is_empty() {
+            headers.retain(|(k, _)| !k.eq_ignore_ascii_case("referer"));
+        }
         let caller_has = |name: &str| {
             extra_headers
                 .is_some_and(|h| h.iter().any(|(k, _)| k.as_str().eq_ignore_ascii_case(name)))

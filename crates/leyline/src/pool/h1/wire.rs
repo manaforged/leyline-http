@@ -94,19 +94,20 @@ pub(super) async fn exchange_on_stream(
         started.elapsed(),
     );
     let started = Instant::now();
-    let (status, resp_headers, resp_body, minor) = read_h1_response(stream, method, limit).await?;
+    let (head, resp_body) = read_h1_response(stream, method, limit).await?;
     trace::head(
         host,
-        status,
+        head.status,
         HttpVersion::Http1_1,
         started.elapsed(),
-        resp_headers.iter().cloned(),
+        head.headers.iter().cloned(),
     );
-    let reusable = compute_reusable(client_asked_close, &resp_headers, minor);
+    let reusable = compute_reusable(client_asked_close, &head.headers, head.minor)
+        && !matches!(head.framing, BodyFraming::ToClose);
     Ok((
         WireResponse {
-            status,
-            headers: resp_headers,
+            status: head.status,
+            headers: head.headers,
             body: resp_body,
         },
         reusable,

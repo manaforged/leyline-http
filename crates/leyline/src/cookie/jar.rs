@@ -57,10 +57,7 @@ impl Jar {
         for cookie in incoming {
             let domain = cookie.domain.to_lowercase();
             let entries = jar.cookies.entry(domain.clone()).or_default();
-            let added = match entries
-                .iter()
-                .position(|c| c.name == cookie.name && c.path == cookie.path)
-            {
+            let added = match entries.iter().position(|c| c.same_slot(&cookie)) {
                 Some(pos) => {
                     entries[pos] = cookie;
                     false
@@ -83,14 +80,22 @@ impl Jar {
             Some(c) => c,
             None => return,
         };
+        if !cookie.secure
+            && url.scheme() != "https"
+            && lock(&self.inner)
+                .cookies
+                .values()
+                .flatten()
+                .any(|existing| cookie.shadows_secure(existing))
+        {
+            return;
+        }
 
         if cookie.is_expired() {
             let mut jar = lock(&self.inner);
             let domain = cookie.domain.to_lowercase();
             if let Some(entries) = jar.cookies.get_mut(&domain)
-                && let Some(pos) = entries
-                    .iter()
-                    .position(|c| c.name == cookie.name && c.path == cookie.path)
+                && let Some(pos) = entries.iter().position(|c| c.same_slot(&cookie))
             {
                 if entries[pos].secure && url.scheme() != "https" {
                     return;
@@ -107,10 +112,7 @@ impl Jar {
         let entries = jar.cookies.entry(domain.clone()).or_default();
 
         let mut added = false;
-        if let Some(pos) = entries
-            .iter()
-            .position(|c| c.name == cookie.name && c.path == cookie.path)
-        {
+        if let Some(pos) = entries.iter().position(|c| c.same_slot(&cookie)) {
             if entries[pos].secure && !cookie.secure {
                 return;
             }
@@ -234,13 +236,15 @@ impl Jar {
     }
 
     pub fn set_cookie(&self, url: &Url, name: &str, value: &str) {
-        self.store(&format!("{}={}; Path=/", name, value), url);
+        if plain_token(name) && !name.contains('=') && plain_token(value) {
+            self.store(&format!("{name}={value}; Path=/"), url);
+        }
     }
 
     pub fn load_cookies(&self, cookie_str: &str, url: &Url) {
         for pair in cookie_str.split(';') {
             if let Some((name, value)) = pair.trim().split_once('=') {
-                self.store(&format!("{}={}; Path=/", name, value), url);
+                self.set_cookie(url, name, value);
             }
         }
     }
@@ -299,6 +303,10 @@ impl<'de> Deserialize<'de> for Jar {
         }
         Ok(Self::from_buckets(buckets, total))
     }
+}
+
+fn plain_token(text: &str) -> bool {
+    !text.chars().any(|c| c == ';' || c.is_control())
 }
 
 fn settle(jar: &mut JarInner, domain: &str, added: bool) {

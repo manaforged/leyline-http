@@ -40,7 +40,8 @@ fn build_quic_config(
         .map_err(|e| format!("quic ssl ctx: {e}"))?;
 
     let pins = trust.pinned_leaf_sha256();
-    if !pins.is_empty() || cfg!(target_os = "macos") && trust.uses_system_roots() {
+    let ip_host = host.parse::<std::net::IpAddr>().is_ok();
+    if !pins.is_empty() || ip_host || cfg!(target_os = "macos") && trust.uses_system_roots() {
         crate::tls::install_verifier_ctx(
             &mut ssl_builder,
             pins,
@@ -103,8 +104,9 @@ pub(crate) async fn connect_and_handshake(
         .map_err(|e| format!("scid entropy: {e}"))?;
     let scid = quiche::ConnectionId::from_ref(&scid_bytes);
 
+    let server_name = host.parse::<std::net::IpAddr>().is_err().then_some(host);
     let mut conn = Box::new(
-        quiche::connect(Some(host), &scid, local_addr, peer_addr, &mut config)
+        quiche::connect(server_name, &scid, local_addr, peer_addr, &mut config)
             .map_err(|e| format!("quic connect: {e}"))?,
     );
 

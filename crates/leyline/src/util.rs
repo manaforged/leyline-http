@@ -1,18 +1,34 @@
 #![forbid(unsafe_code)]
 pub(crate) fn redact(raw: &str) -> String {
+    mask(raw, true)
+}
+
+pub(crate) fn redact_userinfo(raw: &str) -> String {
+    mask(raw, false)
+}
+
+fn mask(raw: &str, query: bool) -> String {
     let Ok(mut parsed) = url::Url::parse(raw) else {
         return raw.to_string();
     };
-    let masked = if parsed.password().is_some() {
-        parsed.set_password(Some("***"))
+    let mut changed = if parsed.password().is_some() {
+        parsed.set_password(Some("***")).is_ok()
     } else if !parsed.username().is_empty() {
-        parsed.set_username("***")
+        parsed.set_username("***").is_ok()
     } else {
-        return raw.to_string();
+        false
     };
-    match masked {
-        Ok(()) => parsed.to_string(),
-        Err(()) => raw.to_string(),
+    if query && (parsed.query().is_some() || parsed.fragment().is_some()) {
+        if parsed.query().is_some() {
+            parsed.set_query(Some("***"));
+        }
+        parsed.set_fragment(None);
+        changed = true;
+    }
+    if changed {
+        parsed.to_string()
+    } else {
+        raw.to_string()
     }
 }
 

@@ -5,9 +5,17 @@ where
     S: AsyncRead + Unpin + ?Sized,
 {
     let mut buf = Vec::with_capacity(4096);
+    let mut informational = 0usize;
+    let mut head_bytes = 0usize;
     loop {
         let header_end = read_h1_headers(stream, &mut buf).await?;
         let body_start = header_end + 4;
+        head_bytes += body_start;
+        if head_bytes > MAX_H1_HEADER_BYTES {
+            return Err(H1PooledError::Http(format!(
+                "HTTP/1.1 headers exceed {MAX_H1_HEADER_BYTES} bytes"
+            )));
+        }
         let head = String::from_utf8_lossy(&buf[..header_end]);
         let (status, headers, minor) = parse_h1_head(&head)?;
         buf.drain(..body_start);
@@ -18,6 +26,12 @@ where
             ));
         }
         if (100..200).contains(&status) {
+            informational += 1;
+            if informational > MAX_H1_INFORMATIONAL {
+                return Err(H1PooledError::Http(format!(
+                    "more than {MAX_H1_INFORMATIONAL} informational responses"
+                )));
+            }
             continue;
         }
 
@@ -44,49 +58,27 @@ where
         });
     }
 }
+
 pub(super) async fn read_h1_response<S>(
     stream: &mut S,
     method: &str,
     limit: usize,
-) -> Result<ParsedResponse, H1PooledError>
+) -> Result<(H1Head, Vec<u8>), H1PooledError>
 where
     S: AsyncRead + Unpin + ?Sized,
 {
-    let mut buf = Vec::with_capacity(4096);
-    loop {
-        let header_end = read_h1_headers(stream, &mut buf).await?;
-        let body_start = header_end + 4;
-        let head = String::from_utf8_lossy(&buf[..header_end]);
-        let (status, headers, minor) = parse_h1_head(&head)?;
-        buf.drain(..body_start);
-
-        if status == 101 {
-            return Err(H1PooledError::Http(
-                "unexpected 101 Switching Protocols".into(),
-            ));
-        }
-        if (100..200).contains(&status) {
-            continue;
-        }
-
-        validate_framing_headers(&headers)?;
-
-        if method.eq_ignore_ascii_case("HEAD") || matches!(status, 204 | 304) {
-            return Ok((status, headers, Vec::new(), minor));
-        }
-
-        let body = if header_contains_token(&headers, "transfer-encoding", "chunked") {
-            read_chunked_body(stream, buf, limit).await?
-        } else if let Some(len) =
-            header_first(&headers, "content-length").and_then(|v| v.trim().parse::<usize>().ok())
-        {
+    let mut head = read_h1_head(stream, method).await?;
+    let buf = std::mem::take(&mut head.initial_body);
+    let body = match head.framing {
+        BodyFraming::None => Vec::new(),
+        BodyFraming::Chunked => read_chunked_body(stream, buf, limit).await?,
+        BodyFraming::Fixed(len) => {
+            let len = usize::try_from(len).map_err(|_| body_too_large(limit))?;
             read_fixed_body(stream, buf, len, limit).await?
-        } else {
-            read_to_close(stream, buf, limit).await?
-        };
-
-        return Ok((status, headers, body, minor));
-    }
+        }
+        BodyFraming::ToClose => read_to_close(stream, buf, limit).await?,
+    };
+    Ok((head, body))
 }
 pub(super) async fn read_h1_headers<S>(
     stream: &mut S,
