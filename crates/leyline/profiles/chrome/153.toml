@@ -56,7 +56,7 @@ cert_compression = ["brotli"]
 permute_extensions = true
 ech_grease = true
 pre_shared_key = true
-request_trust_anchors = false
+request_trust_anchors = true
 
 [tls.fingerprint]
 ja4 = "t13d1517h2_8daaf6152771_cb7bf5808d99"
