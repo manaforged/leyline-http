@@ -1,0 +1,353 @@
+{
+  "source": "Mobile Safari 27.0, iOS 27.0 (24A434) simulator, Xcode 27.0 (27A266a), macOS 26.6.2 VM; QUIC Initial packets from a pcap on the VM, decrypted with the RFC 9001 initial keys, filtered to SNI quic.browserleaks.com; simulator erased before each run",
+  "url": "https://quic.browserleaks.com/?minify=1",
+  "h3_text_from_page": "1:16383;7:100;GREASE|m,s,a,p",
+  "runs": [
+    {
+      "sni": "quic.browserleaks.com",
+      "initial_packets": [
+        {
+          "dcid_len": 8,
+          "scid_len": 0,
+          "token_len": 0,
+          "packet_len": 1200,
+          "pn": 0
+        },
+        {
+          "dcid_len": 8,
+          "scid_len": 0,
+          "token_len": 0,
+          "packet_len": 1200,
+          "pn": 1
+        }
+      ],
+      "client_hello_len": 1490,
+      "ciphers": [
+        47802,
+        4866,
+        4867,
+        4865
+      ],
+      "extensions": [
+        {
+          "type": 51914,
+          "len": 0,
+          "hex": ""
+        },
+        {
+          "type": 0,
+          "sni_len": 26
+        },
+        {
+          "type": 10,
+          "groups": [
+            64250,
+            4588,
+            29,
+            23,
+            24,
+            25
+          ]
+        },
+        {
+          "type": 16,
+          "alpn": [
+            "h3"
+          ]
+        },
+        {
+          "type": 5,
+          "len": 5,
+          "hex": "0100000000"
+        },
+        {
+          "type": 13,
+          "sigalgs": [
+            1027,
+            2052,
+            1025,
+            1283,
+            2053,
+            2053,
+            1281,
+            2054,
+            1537,
+            513
+          ]
+        },
+        {
+          "type": 18,
+          "len": 0,
+          "hex": ""
+        },
+        {
+          "type": 51,
+          "key_shares": [
+            [
+              64250,
+              1
+            ],
+            [
+              4588,
+              1216
+            ],
+            [
+              29,
+              32
+            ]
+          ]
+        },
+        {
+          "type": 45,
+          "psk_modes": [
+            1
+          ]
+        },
+        {
+          "type": 43,
+          "versions": [
+            56026,
+            772
+          ]
+        },
+        {
+          "type": 57,
+          "transport_parameters": [
+            {
+              "id": 4,
+              "len": 4,
+              "value": 16777216,
+              "raw": null
+            },
+            {
+              "id": 5,
+              "len": 4,
+              "value": 2097152,
+              "raw": null
+            },
+            {
+              "id": 6,
+              "len": 4,
+              "value": 2097152,
+              "raw": null
+            },
+            {
+              "id": 7,
+              "len": 4,
+              "value": 2097152,
+              "raw": null
+            },
+            {
+              "id": 9,
+              "len": 1,
+              "value": 8,
+              "raw": null
+            },
+            {
+              "id": 14,
+              "len": 2,
+              "value": 64,
+              "raw": null
+            },
+            {
+              "id": 15,
+              "len": 0,
+              "value": null,
+              "raw": ""
+            },
+            {
+              "id": 1,
+              "len": 4,
+              "value": 300000,
+              "raw": null
+            }
+          ]
+        },
+        {
+          "type": 27,
+          "cert_compression": [
+            1
+          ]
+        },
+        {
+          "type": 47802,
+          "len": 1,
+          "hex": "00"
+        }
+      ]
+    },
+    {
+      "sni": "quic.browserleaks.com",
+      "initial_packets": [
+        {
+          "dcid_len": 8,
+          "scid_len": 0,
+          "token_len": 0,
+          "packet_len": 1200,
+          "pn": 0
+        },
+        {
+          "dcid_len": 8,
+          "scid_len": 0,
+          "token_len": 0,
+          "packet_len": 1200,
+          "pn": 1
+        }
+      ],
+      "client_hello_len": 1490,
+      "ciphers": [
+        64250,
+        4866,
+        4867,
+        4865
+      ],
+      "extensions": [
+        {
+          "type": 43690,
+          "len": 0,
+          "hex": ""
+        },
+        {
+          "type": 0,
+          "sni_len": 26
+        },
+        {
+          "type": 10,
+          "groups": [
+            39578,
+            4588,
+            29,
+            23,
+            24,
+            25
+          ]
+        },
+        {
+          "type": 16,
+          "alpn": [
+            "h3"
+          ]
+        },
+        {
+          "type": 5,
+          "len": 5,
+          "hex": "0100000000"
+        },
+        {
+          "type": 13,
+          "sigalgs": [
+            1027,
+            2052,
+            1025,
+            1283,
+            2053,
+            2053,
+            1281,
+            2054,
+            1537,
+            513
+          ]
+        },
+        {
+          "type": 18,
+          "len": 0,
+          "hex": ""
+        },
+        {
+          "type": 51,
+          "key_shares": [
+            [
+              39578,
+              1
+            ],
+            [
+              4588,
+              1216
+            ],
+            [
+              29,
+              32
+            ]
+          ]
+        },
+        {
+          "type": 45,
+          "psk_modes": [
+            1
+          ]
+        },
+        {
+          "type": 43,
+          "versions": [
+            10794,
+            772
+          ]
+        },
+        {
+          "type": 57,
+          "transport_parameters": [
+            {
+              "id": 15,
+              "len": 0,
+              "value": null,
+              "raw": ""
+            },
+            {
+              "id": 1,
+              "len": 4,
+              "value": 300000,
+              "raw": null
+            },
+            {
+              "id": 4,
+              "len": 4,
+              "value": 16777216,
+              "raw": null
+            },
+            {
+              "id": 5,
+              "len": 4,
+              "value": 2097152,
+              "raw": null
+            },
+            {
+              "id": 6,
+              "len": 4,
+              "value": 2097152,
+              "raw": null
+            },
+            {
+              "id": 7,
+              "len": 4,
+              "value": 2097152,
+              "raw": null
+            },
+            {
+              "id": 9,
+              "len": 1,
+              "value": 8,
+              "raw": null
+            },
+            {
+              "id": 14,
+              "len": 2,
+              "value": 64,
+              "raw": null
+            }
+          ]
+        },
+        {
+          "type": 27,
+          "cert_compression": [
+            1
+          ]
+        },
+        {
+          "type": 60138,
+          "len": 1,
+          "hex": "00"
+        }
+      ]
+    }
+  ]
+}

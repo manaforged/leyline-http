@@ -77,10 +77,10 @@ sec_ch_ua = ""
 [h3]
 initial_max_data = 25165824
 initial_max_stream_data_bidi_local = 12582912
-initial_max_stream_data_bidi_remote = 12582912
-initial_max_stream_data_uni = 12582912
-initial_max_streams_bidi = 16
-initial_max_streams_uni = 16
+initial_max_stream_data_bidi_remote = 1048576
+initial_max_stream_data_uni = 1048576
+initial_max_streams_bidi = 100
+initial_max_streams_uni = 100
 max_idle_timeout_secs = 30
 max_udp_payload_size = 1472
 active_connection_id_limit = 8

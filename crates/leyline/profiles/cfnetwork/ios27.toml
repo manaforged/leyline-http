@@ -1,21 +1,20 @@
 [meta]
-name = "Safari 18"
-browser = "safari"
-version = 18
-variant = "Safari18"
-header_style = "webkit"
-capture = "browser"
-platform_browser = { ios = "safari-ios" }
-family = "webkit"
-verified_against = "tls.peet.ws 2026-09-25 Safari 18.6 (20621.3.11.11.3) macOS 15.7.7 (24G720) VM through safaridriver"
+name = "CFNetwork iOS 27"
+browser = "cfnetwork-ios"
+version = 27
+capture = "emulator"
+variant = "CfnetworkIOS27"
+platform_browser = { macos = "cfnetwork-macos" }
+family = "cfnetwork"
+verified_against = "tls.peet.ws 2026-09-25 URLSession CFNetwork/3896.100.1.2.1 iOS 27.0 (24A434) simulator"
 verified_at = "2026-09-25"
-captured_against = "safari-18.6-20621.3.11.11.3"
+captured_against = "CFNetwork-3896.100.1.2.1-iOS-27.0-24A434-sim"
 
 [tls]
 ciphers = [
-    "TLS_AES_128_GCM_SHA256",
     "TLS_AES_256_GCM_SHA384",
     "TLS_CHACHA20_POLY1305_SHA256",
+    "TLS_AES_128_GCM_SHA256",
     "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
     "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
     "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256",
@@ -34,7 +33,7 @@ ciphers = [
     "TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA",
     "TLS_RSA_WITH_3DES_EDE_CBC_SHA",
 ]
-curves = ["X25519", "SECP256R1", "SECP384R1", "SECP521R1"]
+curves = ["X25519_MLKEM768", "X25519", "SECP256R1", "SECP384R1", "SECP521R1"]
 sigalgs = [
     "ecdsa_secp256r1_sha256",
     "rsa_pss_rsae_sha256",
@@ -55,43 +54,27 @@ ech_grease = false
 pre_shared_key = false
 session_tickets = false
 permute_extensions = false
-min_tls_version = "1.0"
 extension_permutation = [0, 23, 65281, 10, 11, 16, 5, 13, 18, 51, 45, 43, 27]
-padding = true
 
 [tls.fingerprint]
-ja4 = "t13d2014h2_a09f3c656075_e42f34c56612"
+ja4 = "t13d2013h2_a09f3c656075_7f0f34a4126d"
 
 [h2]
 enable_push = false
-max_concurrent_streams = 100
 initial_stream_window_size = 2097152
+max_concurrent_streams = 100
 unknown_setting9 = 1
-initial_connection_window_size = 10485760
-pseudo_order = ["method", "scheme", "authority", "path"]
-settings_order = [
-    "enable_push", "max_concurrent_streams", "initial_window_size", "unknown9",
-]
-default_priority = { exclusive = false, stream_dependency = 0, weight = 255 }
+initial_connection_window_size = 10551295
+pseudo_order = ["method", "scheme", "path", "authority"]
+settings_order = ["enable_push", "initial_window_size", "max_concurrent_streams", "unknown9"]
 
 [h2.fingerprint]
-akamai = "2:0;3:100;4:2097152;9:1|10420225|0|m,s,a,p"
+akamai = "2:0;4:2097152;3:100;9:1|10485760|0|m,s,p,a"
 
-[identity.macos]
-user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15"
+[identity.ios]
+user_agent = "CFNetwork/3896.100.1.2.1 Darwin/25.6.0"
 sec_ch_ua = ""
 
-[h3]
-initial_max_data = 16777216
-initial_max_stream_data_bidi_local = 2097152
-initial_max_stream_data_bidi_remote = 2097152
-initial_max_stream_data_uni = 2097152
-initial_max_streams_bidi = 0
-initial_max_streams_uni = 8
-max_idle_timeout_secs = 0
-max_udp_payload_size = 1452
-active_connection_id_limit = 64
-dcid_length = 8
-qpack_max_table_capacity = 0
-qpack_blocked_streams = 0
-max_field_section_size = 262144
+[identity.macos]
+user_agent = "CFNetwork/3860.700.1 Darwin/25.6.0"
+sec_ch_ua = ""

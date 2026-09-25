@@ -457,8 +457,8 @@ async fn peet(session: &leyline::Session) -> Value {
 
 fn live_platform_for(browser: Browser) -> Platform {
     match browser {
-        Browser::SafariIOS17 | Browser::SafariIOS18 => Platform::IOS,
-        Browser::CfnetworkIOS18 => Platform::IOS,
+        Browser::SafariIOS17 | Browser::SafariIOS18 | Browser::SafariIOS27 => Platform::IOS,
+        Browser::CfnetworkIOS18 | Browser::CfnetworkIOS27 => Platform::IOS,
         Browser::OkHttpAndroid10 => Platform::Android,
         Browser::Safari18 | Browser::Safari26 | Browser::CfnetworkMacOS26 => Platform::MacOS,
         _ => Platform::Windows,

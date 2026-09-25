@@ -85,15 +85,15 @@ user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.
 sec_ch_ua = ""
 
 [h3]
-initial_max_data = 8388608
-initial_max_stream_data_bidi_local = 1048576
-initial_max_stream_data_bidi_remote = 1048576
-initial_max_stream_data_uni = 1048576
-initial_max_streams_bidi = 100
-initial_max_streams_uni = 100
-max_idle_timeout_secs = 600
+initial_max_data = 16777216
+initial_max_stream_data_bidi_local = 2097152
+initial_max_stream_data_bidi_remote = 2097152
+initial_max_stream_data_uni = 2097152
+initial_max_streams_bidi = 0
+initial_max_streams_uni = 8
+max_idle_timeout_secs = 0
 max_udp_payload_size = 1452
-active_connection_id_limit = 4
+active_connection_id_limit = 64
 dcid_length = 8
 qpack_max_table_capacity = 0
 qpack_blocked_streams = 0

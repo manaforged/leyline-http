@@ -54,13 +54,15 @@ unrecorded, not that the profile is wrong.
 | Firefox 154 | `Firefox154` | `firefox-154.0.1` | gated |
 | Firefox 155 | `Firefox155` | `firefox-155.0.1` | gated |
 | Firefox 156 | `Firefox156` | `firefox-156.0.1` | gated |
-| Safari 18 | `Safari18` | unrecorded | reconnaissance, needs recapture |
+| Safari 18 | `Safari18` | `safari-18.6-20621.3.11.11.3` | gated |
 | Safari 26 | `Safari26` | `safari-26.2-21623.1.14.11.9` | gated |
-| Safari iOS 17 | `SafariIOS17` | unrecorded | reconnaissance, needs recapture |
-| Safari iOS 18 | `SafariIOS18` | unrecorded | reconnaissance, needs recapture |
+| Safari iOS 17 | `SafariIOS17` | `safari-ios-17.5-21F79-simulator` | gated |
+| Safari iOS 18 | `SafariIOS18` | `safari-ios-18.6-22G86-simulator` | gated |
+| Safari iOS 27 | `SafariIOS27` | `safari-ios-27.0-24A434-simulator` | gated |
 | OkHttp4 Android 10+ | `OkHttpAndroid10` | `okhttp-4.12.0-android-17-emulator` | estimated |
 | CFNetwork iOS 18 | `CfnetworkIOS18` | `CFNetwork-3826.600.41-iOS-18.6-22G86-sim` | gated |
-| CFNetwork macOS 26 | `CfnetworkMacOS26` | `CFNetwork-3860.600.21-Darwin-25.5.0-macOS-26.5.1-25F80` | gated |
+| CFNetwork iOS 27 | `CfnetworkIOS27` | `CFNetwork-3896.100.1.2.1-iOS-27.0-24A434-sim` | gated |
+| CFNetwork macOS 26 | `CfnetworkMacOS26` | `CFNetwork-3860.700.1-Darwin-25.6.0-macOS-26.6.2-25G83` | gated |
 
 ## Provenance
 
@@ -73,10 +75,10 @@ Each profile comes from one of six sources:
   `captured_against`.
 - **Non-browser build capture.** A capture of a related build that is not the
   shipped browser, such as `chrome-headless-shell` or a WKWebView host.
-- **Emulator capture.** A capture of the shipped app on an Android emulator.
-  The app and Android's own TLS stack are real, but the device is not a
-  physical phone. The build and Android version are recorded in
-  `captured_against`.
+- **Emulator capture.** A capture of the shipped app on an Android emulator or
+  an iOS simulator. The app and the operating system's own TLS stack are real,
+  but the device is not a physical phone. The build and OS version are
+  recorded in `captured_against`.
 - **Inferred.** No capture of this version. Values come from a neighbouring
   version.
 - **Self-referential golden.** The JA4 golden is Leyline's own past output, so
@@ -109,13 +111,15 @@ The `capture` key in each profile's `[meta]` table records the source:
 | Firefox 154 | Browser capture | `browser` | `firefox-154.0.1`, macOS and Linux `--headless`, Windows headful |
 | Firefox 155 | Browser capture | `browser` | `firefox-155.0.1`, macOS and Linux `--headless`, Windows headful |
 | Firefox 156 | Browser capture | `browser` | `firefox-156.0.1`, macOS and Linux `--headless`, Windows headful |
-| Safari 18 | Self-referential golden | `self-referential` | Leyline output |
+| Safari 18 | Browser capture | `browser` | `safari-18.6-20621.3.11.11.3`, Safari.app on macOS 15.7.7 in a VM through safaridriver |
 | Safari 26 | Browser capture | `browser` | `safari-26.2-21623.1.14.11.9`, Safari.app through safaridriver |
-| Safari iOS 17 | Self-referential golden | `self-referential` | Leyline output |
-| Safari iOS 18 | Self-referential golden | `self-referential` | Leyline output |
+| Safari iOS 17 | Emulator capture | `emulator` | `safari-ios-17.5-21F79-simulator`, Mobile Safari in the iOS 17.5 simulator |
+| Safari iOS 18 | Emulator capture | `emulator` | `safari-ios-18.6-22G86-simulator`, Mobile Safari in the iOS 18.6 simulator |
+| Safari iOS 27 | Emulator capture | `emulator` | `safari-ios-27.0-24A434-simulator`, Mobile Safari in the iOS 27.0 simulator |
 | OkHttp4 Android 10+ | Emulator capture | `emulator` | `okhttp-4.12.0-android-17-emulator`, test app on the platform TLS stack |
 | CFNetwork iOS 18 | Native stack capture | `native` | `CFNetwork-3826.600.41-iOS-18.6-22G86-sim`, iOS simulator |
-| CFNetwork macOS 26 | Native stack capture | `native` | `CFNetwork-3860.600.21-Darwin-25.5.0-macOS-26.5.1-25F80` |
+| CFNetwork iOS 27 | Emulator capture | `emulator` | `CFNetwork-3896.100.1.2.1-iOS-27.0-24A434-sim`, URLSession test binary in the iOS 27.0 simulator |
+| CFNetwork macOS 26 | Native stack capture | `native` | `CFNetwork-3860.700.1-Darwin-25.6.0-macOS-26.6.2-25G83`, URLSession test binary on macOS 26.6.2 in a VM; macOS 26.2 on hardware sends the same ClientHello |
 
 Chromium-family profiles do not store `sec-ch-ua`. Leyline derives it from the
 major version and the `ch_ua_brand` field in `[meta]`, with the same GREASE
@@ -123,8 +127,8 @@ brand, version, and order rule that Chromium uses.
 
 `Browser::latest` returns the newest profile of a family whose `capture` is in
 the family's `latest_capture` list in `families.toml`. The list defaults to
-`browser`. CFNetwork uses `native`, Safari iOS adds `self-referential`, and
-OkHttp adds `emulator`. The build fails when a family has no such profile. A
+`browser`. CFNetwork uses `native` and `emulator`, and Safari iOS and OkHttp
+add `emulator`. The build fails when a family has no such profile. A
 `platform_browser` target resolves the same way, with the target family's
 `latest_capture` list. `Session::new()` uses `Browser::latest(Family::Chrome)`, which
 is Chrome 154. You can pin the product line instead of a version:
@@ -213,9 +217,30 @@ These facts come from the captures behind the bundled profiles.
   sends the cookie last. The `native` preset describes a client that is not a
   browser, so no browser capture applies to it. The captures are
   `captures/presets-<browser>-<version>-linux-run<n>.json`.
-- **Safari 18 and Safari iOS 17.** The earlier cipher tables held BoringSSL
-  ordinals, not TLS IDs. Exact extension order stays unsupported until a
-  version-matched capture exists.
+- **Safari 18.** Safari 18.6 on macOS 15.7.7 sends the same ClientHello as
+  CFNetwork iOS 18: AES_128 first in the TLS 1.3 ciphers, no X25519MLKEM768,
+  TLS 1.0 and 1.1 in `supported_versions`, and the padding extension last. The
+  HEADERS frame carries a priority with weight 256. The capture ran in a VM, so
+  its TCP SYN is not a Mac's; only the TLS, HTTP/2, and header values come from
+  it.
+- **Safari iOS 27 and CFNetwork iOS 27.** The iOS 27.0 simulator loads
+  `CFNetwork`, `Network`, `libcoretls`, and `libboringssl` from the iOS runtime,
+  not from macOS. Its ClientHello is the same as Safari 26 and CFNetwork macOS
+  26. Mobile Safari differs from Safari 26.2 in the header list:
+  `accept-encoding` adds `zstd`, as Safari 26.6 on macOS does. CFNetwork iOS 27
+  sends a 2 MiB initial stream window, where macOS sends 4 MiB. The simulator
+  takes the Darwin version in the CFNetwork user agent from the host kernel, so
+  `Darwin/25.6.0` is the host's value, not a phone's.
+- **Safari iOS 18 and Safari iOS 17.** Mobile Safari 18.6 sends the same
+  ClientHello and HTTP/2 SETTINGS as Safari 18.6 on macOS. Mobile Safari 17.5
+  adds `ecdsa_sha1` to the signature algorithms, sends no SETTINGS parameter 9,
+  uses the `m,s,p,a` pseudo-header order, and a priority weight of 255. Its
+  header order is `accept`, `sec-fetch-site`, `accept-encoding`,
+  `sec-fetch-mode`, `user-agent`, `accept-language`, `sec-fetch-dest`, which
+  the `webkit` header style does not produce. Mobile Safari 17.5 did not use
+  HTTP/3 after an Alt-Svc response in three fresh simulators, so its profile
+  has no `[h3]` table. The iOS 18.6 simulator ran on a macOS 15 host, so
+  `CFNetwork/3826.600.41 Darwin/24.6.0` carries the Darwin version of iOS 18.
 - **CFNetwork macOS 26.** The ClientHello has one GREASE cipher first, TLS 1.3
   ciphers in the order AES_256, CHACHA20, AES_128, and `rsa_pss_rsae_sha384`
   (0x0805) twice in the signature algorithms. The groups are GREASE, then
@@ -234,18 +259,34 @@ These facts come from the captures behind the bundled profiles.
   duplicate 0x0805, zlib compression, the leading GREASE cipher, and the
   `m,s,p,a` pseudo-header order with macOS.
 
-## Profiles that need a recapture
+## HTTP/3 captures
 
-Three WebKit profiles pin a JA4 golden taken from Leyline's own output, not
-from a Safari capture:
+The `[h3]` tables of Chrome 154, Brave (Chromium 154), Firefox 156, Safari 18,
+Safari 26, Safari iOS 18, and Safari iOS 27 come from QUIC captures against
+`https://quic.browserleaks.com/?minify=1`. The raw files end in `-h3.json`. The
+desktop browsers ran in a macOS 26.6.2 VM (Safari 18 in a macOS 15.7.7 VM).
+Mobile Safari captures are QUIC Initial packets, decrypted with the RFC 9001
+initial keys. The `[h3]` tables of the other profiles have no QUIC capture.
 
-- `safari/18.toml`
-- `safari/ios17.toml`
-- `safari/ios18.toml`
+A profile sets the values that the table can express. These browser values
+have no `[h3]` field, so Leyline does not send them:
 
-These profiles send no ALPS extension and no ECH GREASE, the same as the
-Safari 26 capture (`safari-26.2-21623.1.14.11.9`). Their goldens are not evidence about Safari.
-The fix is a fresh capture from Safari.app and Mobile Safari.
+- **Chromium.** Transport parameters `version_information`,
+  `max_datagram_frame_size`, `google_connection_options`, `initial_rtt`, and a
+  GREASE parameter, in a random order. SETTINGS `QPACK_MAX_TABLE_CAPACITY`
+  65536, `H3_DATAGRAM`, and a GREASE setting. The source connection ID is
+  empty.
+- **Firefox.** Transport parameters `max_ack_delay` 20, `version_information`,
+  `max_datagram_frame_size` 65535, and parameter 29, and no
+  `max_udp_payload_size`. A 3-byte source connection ID. SETTINGS
+  `QPACK_MAX_TABLE_CAPACITY` 65536, `QPACK_BLOCKED_STREAMS` 20,
+  `ENABLE_CONNECT_PROTOCOL`, `H3_DATAGRAM`, and two unregistered settings, and
+  no `MAX_FIELD_SECTION_SIZE`.
+- **Safari.** No `max_udp_payload_size`. The transport parameter order rotates
+  between connections. Safari 18 and iOS 18 add Apple parameter `0xff080808`.
+  SETTINGS `QPACK_MAX_TABLE_CAPACITY` 16383, `QPACK_BLOCKED_STREAMS` 100, and a
+  GREASE setting, and no `MAX_FIELD_SECTION_SIZE`. The source connection ID is
+  empty.
 
 ## Update cadence
 

@@ -54,7 +54,7 @@ fn safari18_h2_fingerprint() {
     let profile = reg.get("safari", 18).unwrap();
     let h2 = H2Config::from_profile(&profile.h2).unwrap();
     let fp = h2.akamai_fingerprint();
-    assert_eq!(fp, "2:0;3:100;4:2097152;8:1;9:1|10420225|0|m,s,a,p");
+    assert_eq!(fp, "2:0;3:100;4:2097152;9:1|10420225|0|m,s,a,p");
 }
 
 #[test]

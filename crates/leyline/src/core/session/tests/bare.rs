@@ -130,7 +130,7 @@ fn safari_ios_picks_iphone_profile() {
         .platform(Platform::IOS)
         .build()
         .unwrap();
-    assert_eq!(s.browser(), Some(Browser::SafariIOS18));
+    assert_eq!(s.browser(), Some(Browser::SafariIOS27));
     assert_eq!(s.platform(), Platform::IOS);
 }
 
@@ -141,7 +141,7 @@ fn ios_then_safari_still_iphone() {
         .browser(Browser::Safari26)
         .build()
         .unwrap();
-    assert_eq!(s.browser(), Some(Browser::SafariIOS18));
+    assert_eq!(s.browser(), Some(Browser::SafariIOS27));
     assert_eq!(s.platform(), Platform::IOS);
 }
 
