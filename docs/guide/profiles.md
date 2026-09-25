@@ -56,6 +56,7 @@ unrecorded, not that the profile is wrong.
 | Firefox 156 | `Firefox156` | `firefox-156.0.1` | gated |
 | Safari 18 | `Safari18` | `safari-18.6-20621.3.11.11.3` | gated |
 | Safari 26 | `Safari26` | `safari-26.6.2-21624.5.1.11.3` | gated |
+| Safari 27 | `Safari27` | `safari-27.0-21625.1.29.18.28` | gated |
 | Safari iOS 17 | `SafariIOS17` | `safari-ios-17.5-21F79-simulator` | gated |
 | Safari iOS 18 | `SafariIOS18` | `safari-ios-18.6-22G86-simulator` | gated |
 | Safari iOS 27 | `SafariIOS27` | `safari-ios-27.0-24A434-simulator` | gated |
@@ -113,6 +114,7 @@ The `capture` key in each profile's `[meta]` table records the source:
 | Firefox 156 | Browser capture | `browser` | `firefox-156.0.1`, macOS and Linux `--headless`, Windows headful |
 | Safari 18 | Browser capture | `browser` | `safari-18.6-20621.3.11.11.3`, Safari.app on macOS 15.7.7 in a VM through safaridriver |
 | Safari 26 | Browser capture | `browser` | `safari-26.6.2-21624.5.1.11.3`, Safari.app on macOS 26.6.2 in a VM through safaridriver |
+| Safari 27 | Browser capture | `browser` | `safari-27.0-21625.1.29.18.28`, Safari.app 27.0 on macOS 26.6.2 in a VM through safaridriver |
 | Safari iOS 17 | Emulator capture | `emulator` | `safari-ios-17.5-21F79-simulator`, Mobile Safari in the iOS 17.5 simulator |
 | Safari iOS 18 | Emulator capture | `emulator` | `safari-ios-18.6-22G86-simulator`, Mobile Safari in the iOS 18.6 simulator |
 | Safari iOS 27 | Emulator capture | `emulator` | `safari-ios-27.0-24A434-simulator`, Mobile Safari in the iOS 27.0 simulator |
