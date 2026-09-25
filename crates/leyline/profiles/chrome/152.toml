@@ -2,14 +2,15 @@
 name = "Chrome 152"
 browser = "chrome"
 version = 152
-capture = "headless-shell"
+hello = 153
 variant = "Chrome152"
 chromium_major = 152
 family = "chromium"
 ch_ua_brand = "Google Chrome"
-verified_against = "tls.peet.ws 2026-08-29 chrome-headless-shell 152.0.7977.64"
-verified_at = "2026-08-29"
-captured_against = "chrome-headless-shell-152.0.7977.64"
+capture = "browser"
+captured_against = "chrome-152.0.7977.83"
+verified_against = "tls.peet.ws 2026-09-25 Google Chrome 152.0.7977.83 macOS headful, 152.0.7977.83 Windows headful, 152.0.7977.82 Linux --headless=new"
+verified_at = "2026-09-25"
 
 [tls]
 ciphers = [
@@ -51,10 +52,10 @@ cert_compression = ["brotli"]
 permute_extensions = true
 ech_grease = true
 pre_shared_key = true
-request_trust_anchors = false
+request_trust_anchors = true
 
 [tls.fingerprint]
-ja4 = "t13d1516h2_8daaf6152771_806a8c22fdea"
+ja4 = "t13d1517h2_8daaf6152771_cb7bf5808d99"
 
 [h2]
 header_table_size = 65536

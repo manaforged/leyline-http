@@ -2,12 +2,15 @@
 name = "Chrome 147"
 browser = "chrome"
 version = 147
-capture = "inferred"
+hello = 149
 variant = "Chrome147"
 chromium_major = 147
 family = "chromium"
 ch_ua_brand = "Google Chrome"
-verified_against = "Chrome 148 TLS parity (byte-identical [tls] block) + Trust Anchor Identifiers ext; pending live Chrome 147 re-capture"
+capture = "browser"
+captured_against = "chrome-147.0.7727.138"
+verified_against = "tls.peet.ws 2026-09-25 Google Chrome 147.0.7727.138 macOS headful, 147.0.7727.138 Windows headful, 147.0.7727.137 Linux --headless=new"
+verified_at = "2026-09-25"
 
 [tls]
 ciphers = [
@@ -46,10 +49,10 @@ cert_compression = ["brotli"]
 permute_extensions = true
 ech_grease = true
 pre_shared_key = true
-request_trust_anchors = true
+request_trust_anchors = false
 
 [tls.fingerprint]
-ja4 = "t13d1517h2_8daaf6152771_dcad5a053991"
+ja4 = "t13d1516h2_8daaf6152771_d8a2da3f94cd"
 
 [h2]
 header_table_size = 65536

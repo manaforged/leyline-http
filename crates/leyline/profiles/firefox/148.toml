@@ -1,15 +1,15 @@
 [meta]
-captured_against = "firefox-148.0.2"
-verified_at = "2026-09-24"
 name = "Firefox 148"
 browser = "firefox"
 version = 148
 hello = 150
 variant = "Firefox148"
-capture = "browser"
 header_style = "gecko"
 family = "gecko"
-verified_against = "tls.peet.ws 2026-09-24 Firefox 148.0.2"
+capture = "browser"
+captured_against = "firefox-148.0.2"
+verified_against = "tls.peet.ws 2026-09-25 Firefox 148.0.2 macOS and Linux, --headless"
+verified_at = "2026-09-25"
 
 [tls]
 ciphers = [
@@ -74,6 +74,7 @@ initial_stream_window_size = 131072
 initial_connection_window_size = 12582912
 max_frame_size = 16384
 pseudo_order = ["method", "path", "authority", "scheme"]
+default_priority = { exclusive = false, stream_dependency = 0, weight = 41 }
 settings_order = [
     "header_table_size", "enable_push", "initial_window_size",
     "max_frame_size", "max_header_list_size", "max_concurrent_streams",

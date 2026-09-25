@@ -2,15 +2,15 @@
 name = "Chrome 145"
 browser = "chrome"
 version = 145
-capture = "emulator"
 variant = "Chrome145"
-hello = 146
+hello = 149
 chromium_major = 145
 family = "chromium"
 ch_ua_brand = "Google Chrome"
-verified_against = "tls.peet.ws 2026-09-24 Chrome Android 145.0.7632.218 on an Android 17 emulator"
-verified_at = "2026-09-24"
-captured_against = "chrome-android-145.0.7632.218-android-17-emulator"
+capture = "browser"
+captured_against = "chrome-145.0.7632.160"
+verified_against = "tls.peet.ws 2026-09-25 Google Chrome 145.0.7632.160 macOS headful, 145.0.7632.160 Windows headful, 145.0.7632.159 Linux --headless=new"
+verified_at = "2026-09-25"
 
 [tls]
 ciphers = [
@@ -44,32 +44,14 @@ ja4 = "t13d1516h2_8daaf6152771_d8a2da3f94cd"
 [h2]
 header_table_size = 65536
 enable_push = false
-max_concurrent_streams = 1000
 initial_stream_window_size = 6291456
 initial_connection_window_size = 15728640
 max_header_list_size = 262144
-unknown_setting8 = 1
 pseudo_order = ["method", "authority", "scheme", "path"]
-settings_order = [
-    "header_table_size", "enable_push", "max_concurrent_streams",
-    "initial_window_size", "max_frame_size", "max_header_list_size",
-    "unknown8", "unknown9",
-]
+settings_order = ["header_table_size", "enable_push", "initial_window_size", "max_header_list_size"]
 default_priority = { exclusive = true, stream_dependency = 0, weight = 255 }
 
 [h2.fingerprint]
-akamai = "1:65536;2:0;3:1000;4:6291456;6:262144;8:1|15663105|0|m,a,s,p"
-
-[h2.platforms.macos]
-omit_settings = ["max_concurrent_streams", "unknown_setting8"]
-
-[h2.platforms.macos.fingerprint]
-akamai = "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p"
-
-[h2.platforms.android]
-omit_settings = ["max_concurrent_streams", "unknown_setting8"]
-
-[h2.platforms.android.fingerprint]
 akamai = "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p"
 
 [identity.windows]

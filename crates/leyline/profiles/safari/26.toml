@@ -7,8 +7,8 @@ header_style = "webkit"
 capture = "browser"
 platform_browser = { ios = "safari-ios" }
 family = "webkit"
-verified_against = "tls.peet.ws 2026-09-24 Safari.app 26.2 (21623.1.14.11.9) safaridriver"
-verified_at = "2026-09-24"
+verified_against = "tls.peet.ws 2026-09-25 Safari 26.2 (21623.1.14.11.9) macOS 26.2 through safaridriver"
+verified_at = "2026-09-25"
 captured_against = "safari-26.2-21623.1.14.11.9"
 
 [tls]

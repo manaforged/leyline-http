@@ -2,15 +2,15 @@
 name = "Chrome 148"
 browser = "chrome"
 version = 148
-capture = "browser"
 variant = "Chrome148"
-hello = 147
+hello = 149
 chromium_major = 148
 family = "chromium"
 ch_ua_brand = "Google Chrome"
-verified_against = "tls.peet.ws"
-verified_at = "2026-06-17"
-captured_against = "chrome-148"
+capture = "browser"
+captured_against = "chrome-148.0.7778.216"
+verified_against = "tls.peet.ws 2026-09-25 Google Chrome 148.0.7778.216 macOS headful, 148.0.7778.217 Windows headful, 148.0.7778.215 Linux --headless=new"
+verified_at = "2026-09-25"
 
 [tls]
 ciphers = [
@@ -49,10 +49,10 @@ cert_compression = ["brotli"]
 permute_extensions = true
 ech_grease = true
 pre_shared_key = true
-request_trust_anchors = true
+request_trust_anchors = false
 
 [tls.fingerprint]
-ja4 = "t13d1517h2_8daaf6152771_dcad5a053991"
+ja4 = "t13d1516h2_8daaf6152771_d8a2da3f94cd"
 
 [h2]
 header_table_size = 65536

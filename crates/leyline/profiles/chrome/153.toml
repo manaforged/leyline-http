@@ -4,12 +4,12 @@ browser = "chrome"
 version = 153
 chromium_major = 153
 variant = "Chrome153"
-capture = "browser"
 family = "chromium"
 ch_ua_brand = "Google Chrome"
-verified_against = "tls.peet.ws 2026-09-24 Chrome 153.0.8010.53 --headless=new"
-verified_at = "2026-09-24"
+capture = "browser"
 captured_against = "chrome-153.0.8010.53"
+verified_against = "tls.peet.ws 2026-09-25 Google Chrome 153.0.8010.53 macOS headful, 153.0.8010.53 Windows headful, 153.0.8010.52 Linux --headless=new"
+verified_at = "2026-09-25"
 
 [tls]
 ciphers = [

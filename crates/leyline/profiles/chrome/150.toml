@@ -2,15 +2,15 @@
 name = "Chrome 150"
 browser = "chrome"
 version = 150
-capture = "browser"
+hello = 151
 variant = "Chrome150"
-hello = 152
 chromium_major = 150
 family = "chromium"
 ch_ua_brand = "Google Chrome"
-verified_against = "Chrome 150.0.7871.128 on macOS via tls.peet.ws"
-verified_at = "2026-07-18"
-captured_against = "chrome-150.0.7871.128"
+capture = "browser"
+captured_against = "chrome-150.0.7871.187"
+verified_against = "tls.peet.ws 2026-09-25 Google Chrome 150.0.7871.187 macOS headful, 150.0.7871.187 Windows headful, 150.0.7871.186 Linux --headless=new"
+verified_at = "2026-09-25"
 
 [tls]
 ciphers = [

@@ -2,12 +2,13 @@
 name = "Firefox 152"
 browser = "firefox"
 version = 152
-capture = "browser"
 variant = "Firefox152"
 header_style = "gecko"
 family = "gecko"
-verified_against = "tls.peet.ws capture 2026-07-07"
-captured_against = "firefox-152.0"
+capture = "browser"
+captured_against = "firefox-152.0.6"
+verified_against = "tls.peet.ws 2026-09-25 Firefox 152.0.6 macOS and Linux, --headless"
+verified_at = "2026-09-25"
 
 [tls]
 ciphers = [
@@ -48,6 +49,7 @@ initial_stream_window_size = 131072
 initial_connection_window_size = 12582912
 max_frame_size = 16384
 pseudo_order = ["method", "path", "authority", "scheme"]
+default_priority = { exclusive = false, stream_dependency = 0, weight = 41 }
 settings_order = [
     "header_table_size", "enable_push", "initial_window_size",
     "max_frame_size", "max_header_list_size", "max_concurrent_streams",
