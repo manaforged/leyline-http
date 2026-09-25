@@ -48,6 +48,12 @@ import `leyline`. It pulls `leyline-quiche` in when the `http3` feature is on.
   are padded with PADDING frames to that size. The size is at most 1232
   bytes over IPv6. After a loss timeout with no packet received, Initials
   fall back to 1200 bytes.
+- `Config::set_initial_crypto_split` sets how a client lays out the first
+  flight of Initial CRYPTO data. `Fill` is the upstream behavior. `Even`
+  limits the first Initial packet to an even share of the ClientHello and
+  sends it alone in its datagram. `EvenSniSlice` also cuts the ClientHello
+  at the midpoint of the server name and sends the chunk after the cut
+  before the chunk that holds offset 0.
 - RESET_STREAM_AT is read as RESET_STREAM, and a Reliable Size larger than the
   Final Size is a FRAME_ENCODING_ERROR. ACK_FREQUENCY and IMMEDIATE_ACK are
   accepted and ignored. Each frame type is accepted only in 1-RTT packets, and

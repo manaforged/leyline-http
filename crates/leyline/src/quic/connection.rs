@@ -82,6 +82,7 @@ fn build_quic_config(
         config.set_transport_params_plan(plan);
     }
     config.set_compatible_versions(&wire::compatible_versions(wire));
+    config.set_initial_crypto_split(wire::initial_crypto_split(wire));
     if let Some(size) = wire.initial_datagram_size {
         config.set_initial_datagram_size(usize::from(size));
     }

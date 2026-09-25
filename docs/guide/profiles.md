@@ -197,6 +197,14 @@ These facts come from the captures behind the bundled profiles.
   same major, `Edg/<major>.0.0.0`, and the `Microsoft Edge` brand in
   `sec-ch-ua`. Edge 152 does not send the Trust Anchor Identifiers extension
   that Chrome 152 sends.
+- **Edge 145 to 152 on macOS.** Edge 145.0.3800.97, 146.0.3856.97,
+  147.0.3912.98, 148.0.3967.96, 149.0.4022.98, 150.0.4078.105,
+  151.0.4129.107, and 152.0.4191.66 come from the macOS DMGs on the Microsoft
+  download CDN. Each DMG matches its published SHA-256, and Gatekeeper accepts
+  each app as notarized Developer ID, Microsoft Corporation (UBF8T346G9). Each
+  build ran headful, twice, from an empty profile
+  (`edge-<version>-macos-run<n>.json`), and sends the ClientHello and HTTP/2
+  settings of Chrome on macOS for the same major, with `Edg/<major>.0.0.0`.
 - **Opera 129 to 135 on Linux.** Opera 129.0.5823.65, 130.0.5847.92,
   131.0.5877.116, 132.0.5905.114, 133.0.5932.85, 134.0.5954.66, and
   135.0.5973.142 from get.geo.opera.com. Each `.rpm` matches Opera's
@@ -431,7 +439,12 @@ Leyline in the same way. See [HTTP/3](http3.md) for the keys.
   every connection and keeps `quic_transport_parameters` and ECH last, so
   `[h3.tls]` sets `permute_extensions` and `extension_tail = [57, 65037]`.
   The Initial packets carry no PADDING frames, so the profiles set no
-  `initial_datagram_size`.
+  `initial_datagram_size`. Every capture shows two Initial packets that
+  differ by 3 or 4 bytes: the first holds two CRYPTO frames, the second
+  holds one. Firefox splits the ClientHello evenly and cuts it at the
+  midpoint of the server name, so the profiles set
+  `initial_crypto_split = "even"` and
+  `initial_crypto_reorder = "sni_midpoint"`.
 - **Safari.** The transport parameter order rotates between connections.
   Safari 18 and iOS 18 add Apple parameter `0xff080808` last. SETTINGS are
   `1:16383;7:100` and a GREASE setting, with `m,s,a,p` pseudo-headers. The

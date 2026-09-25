@@ -614,6 +614,8 @@ pub struct Config {
     compatible_versions: Vec<u32>,
 
     initial_datagram_size: Option<usize>,
+
+    initial_crypto_split: InitialCryptoSplit,
 }
 
 // See https://quicwg.org/base-drafts/rfc9000.html#section-15
@@ -694,6 +696,7 @@ impl Config {
             transport_params_plan: None,
             compatible_versions: Vec::new(),
             initial_datagram_size: None,
+            initial_crypto_split: InitialCryptoSplit::Fill,
         })
     }
 
@@ -829,6 +832,10 @@ impl Config {
 
     pub fn set_initial_datagram_size(&mut self, size: usize) {
         self.initial_datagram_size = Some(size.max(MIN_CLIENT_INITIAL_LEN));
+    }
+
+    pub fn set_initial_crypto_split(&mut self, split: InitialCryptoSplit) {
+        self.initial_crypto_split = split;
     }
 
     /// Enables logging of secrets.
@@ -1552,6 +1559,10 @@ where
 
     initial_size_fallback: bool,
 
+    initial_crypto_split: InitialCryptoSplit,
+
+    initial_crypto_split_sent: bool,
+
     frame_extensions: frame::Extensions,
 
     /// Whether to send STREAMS_BLOCKED frames when bidi or uni stream quota
@@ -2236,6 +2247,10 @@ impl<F: BufFactory> Connection<F> {
             initial_datagram_size: config.initial_datagram_size,
 
             initial_size_fallback: false,
+
+            initial_crypto_split: config.initial_crypto_split,
+
+            initial_crypto_split_sent: false,
 
             frame_extensions: frame::Extensions::from_plan(config.transport_params_plan.as_deref()),
 
@@ -4079,6 +4094,7 @@ impl<F: BufFactory> Connection<F> {
 
         // Generate coalesced packets.
         while left > 0 {
+            let split_sent = self.initial_crypto_split_sent;
             let (ty, written) =
                 match self.send_single(&mut out[done..done + left], send_pid, has_initial, now) {
                     Ok(v) => v,
@@ -4099,6 +4115,10 @@ impl<F: BufFactory> Connection<F> {
 
                 _ => (),
             };
+
+            if !split_sent && self.initial_crypto_split_sent {
+                break;
+            }
 
             // When sending multiple PTO probes, don't coalesce them together,
             // so they are sent on separate UDP datagrams.
@@ -5055,7 +5075,52 @@ impl<F: BufFactory> Connection<F> {
         }
 
         // Create CRYPTO frame.
-        if crypto_ctx.crypto_stream.is_flushable()
+        let split_first_flight = !self.is_server
+            && epoch == packet::Epoch::Initial
+            && self.initial_crypto_split != InitialCryptoSplit::Fill
+            && !self.initial_crypto_split_sent
+            && crypto_ctx.crypto_stream.send.off_front() == 0;
+
+        if split_first_flight
+            && crypto_ctx.crypto_stream.is_flushable()
+            && left > 2 * frame::MAX_CRYPTO_OVERHEAD
+            && !is_closing
+            && path.active()
+        {
+            let send = &mut crypto_ctx.crypto_stream.send;
+            let mut hello = vec![0; send.off_back() as usize];
+            let (len, _) = send.emit(&mut hello)?;
+            hello.truncate(len);
+
+            let chunks = crypto_split::first_packet_chunks(
+                self.initial_crypto_split,
+                &hello,
+                left - 2 * frame::MAX_CRYPTO_OVERHEAD,
+            );
+
+            for gap in crypto_split::unsent(&chunks, hello.len()) {
+                send.retransmit(gap.start as u64, gap.len());
+            }
+
+            for chunk in chunks {
+                let offset = chunk.start as u64;
+                frame::encode_crypto_header(offset, chunk.len() as u64, &mut b)?;
+                b.put_bytes(&hello[chunk.clone()])?;
+
+                let frame = frame::Frame::CryptoHeader {
+                    offset,
+                    length: chunk.len(),
+                };
+
+                if push_frame_to_pkt!(b, frames, frame, left) {
+                    ack_eliciting = true;
+                    in_flight = true;
+                    has_data = true;
+                }
+            }
+
+            self.initial_crypto_split_sent = true;
+        } else if crypto_ctx.crypto_stream.is_flushable()
             && left > frame::MAX_CRYPTO_OVERHEAD
             && !is_closing
             && path.active()
@@ -9616,6 +9681,7 @@ pub use crate::transport_params::UnknownTransportParameters;
 pub use crate::buffers::BufFactory;
 pub use crate::buffers::BufSplit;
 
+pub use crate::crypto_split::InitialCryptoSplit;
 pub use crate::error::ConnectionError;
 pub use crate::error::Error;
 pub use crate::error::Result;
@@ -9624,6 +9690,7 @@ pub use crate::error::WireErrorCode;
 mod buffers;
 mod cid;
 mod crypto;
+mod crypto_split;
 mod dgram;
 mod error;
 #[cfg(feature = "ffi")]

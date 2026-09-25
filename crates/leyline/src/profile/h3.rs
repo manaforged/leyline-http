@@ -32,6 +32,10 @@ pub struct H3Profile {
     pub max_udp_payload_size: u16,
     #[serde(default)]
     pub initial_datagram_size: Option<u16>,
+    #[serde(default)]
+    pub initial_crypto_split: H3CryptoSplit,
+    #[serde(default)]
+    pub initial_crypto_reorder: H3CryptoReorder,
     pub active_connection_id_limit: u64,
     pub dcid_length: H3ConnectionIdLength,
     #[serde(default)]
@@ -86,6 +90,32 @@ pub enum H3Order {
     Fixed,
     Shuffle,
     Rotate,
+}
+
+#[expect(
+    missing_docs,
+    reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
+)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum H3CryptoSplit {
+    #[default]
+    Fill,
+    Even,
+}
+
+#[expect(
+    missing_docs,
+    reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
+)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum H3CryptoReorder {
+    #[default]
+    None,
+    SniMidpoint,
 }
 
 #[expect(
@@ -195,6 +225,11 @@ impl H3Profile {
                 "[h3] initial_datagram_size {size} must be {MIN_INITIAL_DATAGRAM_SIZE}..={}",
                 self.max_udp_payload_size
             ));
+        }
+        if self.initial_crypto_reorder != H3CryptoReorder::None
+            && self.initial_crypto_split != H3CryptoSplit::Even
+        {
+            return Err("[h3] initial_crypto_reorder needs initial_crypto_split = \"even\"".into());
         }
         if let H3ConnectionIdLength::Weighted { weights } = &self.dcid_length
             && weights.iter().all(|(_, weight)| *weight == 0)

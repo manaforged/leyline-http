@@ -68,6 +68,13 @@ Modifications from upstream:
   over IPv6, and it falls back to 1200 bytes after a loss timeout with no
   packet received. A padded first-flight Initial leaves no room for a
   coalesced 0-RTT packet.
+- `Config::set_initial_crypto_split` sets how a client lays out the first
+  flight of Initial CRYPTO data. `Fill` is the upstream behavior. `Even`
+  limits the first Initial packet to an even share of the ClientHello and
+  sends it with no other packet in the datagram. `EvenSniSlice` also cuts
+  the ClientHello at the midpoint of the server name and sends the chunk
+  after the cut before the chunk that holds offset 0. `src/crypto_split.rs`
+  is new in this fork (Copyright Manaforge Technologies, LLC, BSD-2-Clause).
 - `src/h3/qpack/table.rs` is new in this fork (Copyright Manaforge
   Technologies, LLC, BSD-2-Clause).
 - Upstream test certificates and keys are not part of the published package.

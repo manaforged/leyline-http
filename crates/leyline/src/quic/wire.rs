@@ -4,8 +4,8 @@ use rand::seq::SliceRandom;
 use rand::{Rng, RngCore};
 
 use crate::profile::{
-    H3ConnectionIdLength, H3Grease, H3Order, H3Profile, H3Setting, H3TransportParam,
-    H3VersionGrease, H3VersionInformation,
+    H3ConnectionIdLength, H3CryptoReorder, H3CryptoSplit, H3Grease, H3Order, H3Profile, H3Setting,
+    H3TransportParam, H3VersionGrease, H3VersionInformation,
 };
 
 const TRANSPORT_GREASE_BASE: u64 = 27;
@@ -97,6 +97,16 @@ fn reorder<T>(entries: Vec<T>, pinned: &[bool], order: H3Order) -> Vec<T> {
         .into_iter()
         .filter_map(|slot| slot.or_else(|| movable.next()))
         .collect()
+}
+
+pub(crate) fn initial_crypto_split(wire: &H3Profile) -> quiche::InitialCryptoSplit {
+    match (wire.initial_crypto_split, wire.initial_crypto_reorder) {
+        (H3CryptoSplit::Fill, _) => quiche::InitialCryptoSplit::Fill,
+        (H3CryptoSplit::Even, H3CryptoReorder::None) => quiche::InitialCryptoSplit::Even,
+        (H3CryptoSplit::Even, H3CryptoReorder::SniMidpoint) => {
+            quiche::InitialCryptoSplit::EvenSniSlice
+        }
+    }
 }
 
 pub(crate) fn compatible_versions(wire: &H3Profile) -> Vec<u32> {
