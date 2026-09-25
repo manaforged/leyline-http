@@ -55,10 +55,10 @@ fn cached_windows_system_store() -> Result<&'static leyline_bssl::x509::store::X
         .map_err(|e| TlsError::TrustStore(format!("X509 store allocation failed: {e}")))?;
     let mut loaded = 0usize;
     for der in &roots {
-        if let Ok(cert) = X509::from_der(der) {
-            if store.add_cert(cert).is_ok() {
-                loaded += 1;
-            }
+        if let Ok(cert) = X509::from_der(der)
+            && store.add_cert(cert).is_ok()
+        {
+            loaded += 1;
         }
     }
     if loaded == 0 {
