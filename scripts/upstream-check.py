@@ -1,0 +1,126 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import functools
+import json
+import os
+import re
+import subprocess
+import sys
+import tomllib
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+GITHUB = "https://api.github.com"
+OSV = "https://api.osv.dev/v1/query"
+
+
+def request(url: str, body: dict | None = None) -> object:
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "leyline-upstream-check"}
+    token = os.environ.get("GITHUB_TOKEN")
+    if token and url.startswith(GITHUB):
+        headers["Authorization"] = f"Bearer {token}"
+    data = None
+    if body is not None:
+        data = json.dumps(body).encode()
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=data, headers=headers)
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return json.load(resp)
+
+
+def version_key(text: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in re.findall(r"\d+", text)[:3])
+
+
+def in_range(version: str, spec: str) -> bool:
+    base = version_key(version)
+    for clause in spec.split(","):
+        match = re.match(r"\s*(>=|<=|>|<|=)?\s*v?([\d.]+)", clause)
+        if not match:
+            return False
+        op, bound = match.group(1) or "=", version_key(match.group(2))
+        checks = {">=": base >= bound, "<=": base <= bound, ">": base > bound, "<": base < bound, "=": base == bound}
+        if not checks[op]:
+            return False
+    return True
+
+
+@functools.cache
+def github_advisories(repo: str) -> list[dict]:
+    return request(f"{GITHUB}/repos/{repo}/security-advisories?per_page=100&state=published")
+
+
+@functools.cache
+def latest(repo: str) -> str:
+    try:
+        return request(f"{GITHUB}/repos/{repo}/releases/latest")["tag_name"]
+    except urllib.error.HTTPError as err:
+        if err.code != 404:
+            raise
+    tags = request(f"{GITHUB}/repos/{repo}/tags?per_page=100")
+    names = [tag["name"] for tag in tags if re.fullmatch(r"v?\d+\.\d+\.\d+", tag["name"])]
+    return max(names, key=version_key) if names else "unknown"
+
+
+def osv(body: dict) -> list[str]:
+    return [vuln["id"] for vuln in request(OSV, body).get("vulns", [])]
+
+
+def repo_hits(repo: str, crate: str, version: str) -> list[str]:
+    hits = []
+    for advisory in github_advisories(repo):
+        for vuln in advisory.get("vulnerabilities") or []:
+            name = (vuln.get("package") or {}).get("name")
+            spec = vuln.get("vulnerable_version_range") or ""
+            patched = [p for p in re.split(r"[,\s]+", vuln.get("patched_versions") or "") if p]
+            fixed = any(version_key(version) >= version_key(p) for p in patched)
+            if name in (crate, None) and spec and in_range(version, spec) and not fixed:
+                hits.append(advisory["ghsa_id"])
+                break
+    return hits
+
+
+def check_crate(name: str, meta: dict) -> bool:
+    repo, crate, version = meta["repo"], meta["crate"], meta["version"]
+    hits = repo_hits(repo, crate, version)
+    hits += osv({"version": version, "package": {"name": crate, "ecosystem": "crates.io"}})
+    hits = sorted(set(hits))
+    newest = latest(repo)
+    behind = version_key(newest) > version_key(version)
+    status = "behind" if behind else "current"
+    print(f"{name}: {repo} {crate} base {version} latest {newest} ({status}) advisories: {', '.join(hits) or 'none'}")
+    return bool(hits)
+
+
+def check_boringssl(crate_dir: Path, meta: dict) -> bool:
+    repo, gitlink = meta["repo"], meta["gitlink"]
+    rel = (crate_dir / gitlink).relative_to(ROOT).as_posix()
+    tree = subprocess.run(["git", "-C", str(ROOT), "ls-tree", "HEAD", rel], capture_output=True, text=True, check=True)
+    revision = tree.stdout.split()[2]
+    compare = request(f"{GITHUB}/repos/{repo}/compare/{revision}...main")
+    hits = osv({"commit": revision})
+    print(
+        f"{crate_dir.name}: {repo} gitlink {revision[:12]} behind main by {compare['ahead_by']} commits"
+        f" advisories: {', '.join(hits) or 'none'}"
+    )
+    return bool(hits)
+
+
+def main() -> int:
+    failed = False
+    for manifest in sorted(ROOT.glob("crates/*/Cargo.toml")):
+        package = tomllib.loads(manifest.read_text())["package"]
+        meta = package.get("metadata", {}).get("upstream")
+        if not meta:
+            continue
+        failed |= check_crate(package["name"], meta)
+        if "boringssl" in meta:
+            failed |= check_boringssl(manifest.parent, meta["boringssl"])
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

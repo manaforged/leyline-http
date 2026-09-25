@@ -81,3 +81,8 @@ perf = { level = "allow", priority = -1 }
 [lints.rust]
 missing_docs = { level = "allow", priority = -1 }
 unexpected_cfgs = { level = "allow", priority = -1 }
+
+[package.metadata.upstream]
+repo = "cloudflare/quiche"
+crate = "quiche"
+version = "0.30.0"

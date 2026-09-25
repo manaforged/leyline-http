@@ -65,3 +65,12 @@ fslock = "0.2"
 unexpected_cfgs = { level = "allow", check-cfg = ["cfg(const_fn)"] }
 
 [workspace]
+
+[package.metadata.upstream]
+repo = "cloudflare/boring"
+crate = "boring-sys"
+version = "5.2.0"
+
+[package.metadata.upstream.boringssl]
+repo = "google/boringssl"
+gitlink = "deps/boringssl"

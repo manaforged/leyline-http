@@ -32,3 +32,8 @@ name = "leyline_bssl"
 path = "src/lib.rs"
 
 [workspace]
+
+[package.metadata.upstream]
+repo = "cloudflare/boring"
+crate = "boring"
+version = "5.2.0"

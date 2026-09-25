@@ -31,3 +31,8 @@ name = "leyline_bssl_tokio"
 path = "src/lib.rs"
 
 [workspace]
+
+[package.metadata.upstream]
+repo = "cloudflare/boring"
+crate = "tokio-boring"
+version = "5.2.0"
