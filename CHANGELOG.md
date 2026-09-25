@@ -36,11 +36,23 @@ First public release.
 ### Added
 
 - An asynchronous `Session` API for HTTP/1.1, HTTP/2, and HTTP/3 on Tokio.
-- Browser profiles for TLS, HTTP/2 settings, and request headers: Chrome 145
-  to 154, Brave 146 and 154, Firefox 148 to 156, Safari 18 and 26, Safari on iOS 17
-  and 18, OkHttp on Android, and CFNetwork on iOS 18 and macOS 26. The
-  [profile reference](docs/guide/profiles.md) lists the capture status of
-  each.
+- Browser profiles for TLS, HTTP/2, HTTP/3, and request headers: Chrome 145
+  to 154, Brave 146 and 154, Firefox 148 to 156, Safari 18, 26, and 27, Safari
+  on iOS 17, 18, and 27, OkHttp on Android, and CFNetwork on iOS 18, iOS 27,
+  and macOS 26, with Edge and Opera brand overlays. Values come from captures
+  of signed vendor builds; the [profile reference](docs/guide/profiles.md)
+  names the capture behind each.
+- Header shapes per request kind (`profiles/headers.toml`): navigate, script,
+  XHR, form, form navigation, same-site, and cross-origin. Redirects set
+  `sec-fetch-site`, `Origin`, and `Referer` by the Fetch rules. `FetchSite`
+  computes the `sec-fetch-site` value.
+- HTTP/3 fingerprints: a QUIC ClientHello per profile, transport parameter
+  plans with GREASE and order policy, connection ID lengths, HTTP/3 SETTINGS
+  plans, the first Initial datagram size, and QUIC v2 with compatible version
+  negotiation (RFC 9368, RFC 9369). The QPACK decoder supports the dynamic
+  table.
+- `TlsProfile::key_shares`, a GREASE signature algorithm switch, and
+  per-platform TCP profiles captured from each OS's own SYN.
 - Cookies, proxy configuration, redirect policies, opt-in retries, streaming
   request and response bodies, and response decompression.
 - `RetryPolicy::max_retry_after` caps the wait that a `Retry-After`
@@ -97,3 +109,10 @@ First public release.
 
 - Release builds ignore `SSLKEYLOGFILE` and contain no code that reads it.
   Debug builds keep TLS key logging for development.
+- Decompression is bounded by `CompressionConfig::max_body_size` at every
+  decoder stage, and a truncated compressed body is an error.
+- QPACK header sections are bounded by a local limit that does not depend on
+  the peer's SETTINGS, and HTTP/2 PING, WINDOW_UPDATE, and empty CONTINUATION
+  floods close the connection.
+- A plain-HTTP origin cannot shadow a Secure cookie (RFC 6265bis), and
+  `ProxyUrl` and error messages redact credentials and query strings.

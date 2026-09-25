@@ -3,8 +3,9 @@
 An async Rust HTTP client that sends the TLS ClientHello, HTTP/2 SETTINGS, and
 request headers of a chosen browser profile. Leyline supports HTTP/1.1,
 HTTP/2, HTTP/3, and WebSocket on Tokio. Bundled profiles cover Chrome 145 to
-154, Brave 146 and 154, Firefox 148 to 156, Safari 18 and 26, Safari on iOS 17
-and 18, OkHttp on Android, and CFNetwork on iOS 18 and macOS 26.
+154, Brave 146 and 154, Firefox 148 to 156, Safari 18, 26, and 27, Safari on
+iOS 17, 18, and 27, OkHttp on Android, and CFNetwork on iOS 18, iOS 27, and
+macOS 26. Edge and Opera are brand overlays on the Chrome profiles.
 
 ## Why Leyline
 
@@ -13,6 +14,16 @@ and 18, OkHttp on Android, and CFNetwork on iOS 18 and macOS 26.
   [profile reference](https://github.com/manaforged/leyline-http/blob/main/docs/guide/profiles.md#provenance)
   lists which profiles are browser, native stack, or emulator captures, and
   which pin Leyline's own output.
+- **Captured from signed builds.** Profile values come from captures of the
+  vendors' signed builds on Windows, macOS, Linux, Android, and an iPhone. The
+  raw captures ship in the repository next to the profiles.
+- **Headers for every request kind.** Navigation, script, XHR, form, and
+  cross-origin requests each use the header order and values the browser
+  sends, and redirects follow the Fetch rules for `sec-fetch-site`, `Origin`,
+  and `Referer`.
+- **HTTP/3 that matches the browser.** The QUIC ClientHello, transport
+  parameters, connection ID lengths, HTTP/3 SETTINGS, and first datagram size
+  follow each profile's capture, including QUIC v2 where the browser offers it.
 - **A connection pool keyed by proxy.** `Session::with_proxy` switches the
   proxy and keeps the warm connections of every proxy. `Session::fresh_pool`
   takes a new pool, so the next request opens new connections.
@@ -115,17 +126,14 @@ browser is a bare session that impersonates no browser.
 
 ## Limits
 
-- A profile covers selected TLS, HTTP/2, and header properties. It does not
-  reproduce every byte a browser sends.
-- The Safari 18, Safari iOS 17, and Safari iOS 18 profiles pin a JA4 value taken from Leyline's own output, not from a capture.
-- The Android identity of the Chrome profiles reuses the desktop TLS and
-  HTTP/2 settings.
-- The TCP/IP fingerprint (JA4T: window size, options, MSS, TTL) comes from the
-  host OS. A profile does not change it.
-- Over HTTP/3, the QUIC ClientHello ignores the profile's `key_shares` and
-  `request_trust_anchors`.
-- HTTP/3 has no browser capture golden. QUIC transport parameters are not
-  checked against a browser. The QPACK decoder uses no dynamic table.
+- A profile covers the TLS, HTTP/2, HTTP/3, and header properties its capture
+  shows. It does not reproduce every byte a browser sends.
+- Chrome on Android is captured for Chrome 145 only. Firefox on Android sends
+  the desktop Firefox ClientHello, because a profile has one TLS table for all
+  platforms.
+- Leyline sets TTL, MSS, and window scale where the OS allows. The TCP option
+  order comes from the host OS.
+- HTTP/3 does not send 0-RTT data.
 - HTTP/3 through a proxy needs a SOCKS5 proxy with `UDP ASSOCIATE`. HTTP
   and HTTPS proxies cannot carry HTTP/3; MASQUE is not supported.
 - A profile loaded with `SessionBuilder::profile` has no platform twin. Its
