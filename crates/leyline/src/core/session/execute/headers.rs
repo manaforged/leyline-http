@@ -29,8 +29,12 @@ impl Session {
             .and_then(|v| v.to_str().ok())
             .filter(|r| !r.is_empty());
         let fetch_site = caller_referer
-            .map(|r| crate::fetch_site(r, current_url.as_str()))
-            .unwrap_or("same-origin");
+            .map_or(crate::FetchSite::SameOrigin, |r| {
+                url::Url::parse(r).map_or(crate::FetchSite::CrossSite, |r| {
+                    crate::FetchSite::of(&r, current_url)
+                })
+            })
+            .as_str();
         let ctx = crate::profile::preset::HeaderContext {
             user_agent: &self.inner.user_agent,
             sec_ch_ua: &self.inner.sec_ch_ua,

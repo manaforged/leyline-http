@@ -82,6 +82,7 @@ let resp = session
 | Send | `RequestBuilder::send` or `.await` | `RequestBuilder::send` (the one retry loop) |
 | Headers | `RequestBuilder::header` (append) / `headers` (append each) | `HeaderList` |
 | Header order | `RequestBuilder::header_order`, `FingerprintSpec::header_order`, header shape `order` | `core::headers::reorder` |
+| `sec-fetch-site` value | `FetchSite::of(&Url, &Url)` | `core::fetch_site` |
 | Body | `body` / `json` / `form` / `multipart` | `Body` |
 | Query | `RequestBuilder::query` | `url::Url` |
 | Auth | `basic_auth` / `bearer_auth` / `digest_auth` | `core::digest` |
@@ -134,6 +135,8 @@ counted.
 | `Kind`, `HttpVersion` | `as_str` | 2 |
 | `ResponseTiming`, `TlsInfo`, `PoolStats` | public fields, `#[non_exhaustive]` | 0 |
 | `HeaderList` | `new`, `append`, `set`, `get`, `iter`, `remove_all` | 6 |
+| `FetchSite` | `of(&Url, &Url)`, `as_str`; `Display` | 2 |
+| `HeaderAnchor` | root re-export of `profile::HeaderAnchor` | 0 |
 
 ### Policy and config
 
@@ -183,7 +186,7 @@ counted.
 | `http` | re-export of the `http` crate | 0 |
 | `H2Error`, `ErrorCode` | sources reachable from `Error::h2` | 0 |
 
-Total: 265 public functions.
+Total: 267 public functions.
 
 ## Semantics
 

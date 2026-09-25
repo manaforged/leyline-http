@@ -109,11 +109,11 @@ pub use crate::core::LeylineService;
 #[cfg(feature = "websocket")]
 pub use crate::core::WebSocketBuilder;
 pub use crate::core::{
-    Body, BodyStream, CompressionConfig, ContentEncoding, DigestAuth, DnsConfig, Error, HeaderList,
-    HttpVersion, Identity, IntoParamPair, IntoUrl, Kind, NoProxy, PoolConfig, ProtocolPolicy,
-    ProxyConfig, ProxyRule, ProxyUrl, RedirectAction, RedirectAttempt, RedirectPolicy,
-    RequestBuilder, Response, ResponseTiming, Result, RetryPolicy, RetryTrigger, Session,
-    SessionBuilder, SessionIdentity, SocketConfig, TimeoutConfig, WebSocketConfig,
+    Body, BodyStream, CompressionConfig, ContentEncoding, DigestAuth, DnsConfig, Error, FetchSite,
+    HeaderList, HttpVersion, Identity, IntoParamPair, IntoUrl, Kind, NoProxy, PoolConfig,
+    ProtocolPolicy, ProxyConfig, ProxyRule, ProxyUrl, RedirectAction, RedirectAttempt,
+    RedirectPolicy, RequestBuilder, Response, ResponseTiming, Result, RetryPolicy, RetryTrigger,
+    Session, SessionBuilder, SessionIdentity, SocketConfig, TimeoutConfig, WebSocketConfig,
 };
 pub use crate::pool::{PoolStats, TlsInfo};
 
@@ -154,29 +154,4 @@ impl Browser {
             "built-in profile missing - registry integrity check in tests would have caught this",
         )
     }
-}
-
-#[must_use]
-pub fn fetch_site(context_url: &str, request_url: &str) -> &'static str {
-    let (Ok(context), Ok(request)) = (url::Url::parse(context_url), url::Url::parse(request_url))
-    else {
-        return "cross-site";
-    };
-    if context.origin() == request.origin() {
-        return "same-origin";
-    }
-    let same_site = context.scheme() == request.scheme()
-        && match (context.host_str(), request.host_str()) {
-            (Some(a), Some(b)) => {
-                match (
-                    crate::cookie::parse::registrable_domain(a),
-                    crate::cookie::parse::registrable_domain(b),
-                ) {
-                    (Some(da), Some(db)) => da == db,
-                    _ => a == b,
-                }
-            }
-            _ => false,
-        };
-    if same_site { "same-site" } else { "cross-site" }
 }

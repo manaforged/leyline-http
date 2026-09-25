@@ -4,6 +4,7 @@ mod config;
 pub(crate) mod deadline;
 mod digest;
 mod error;
+mod fetch_site;
 mod headers;
 mod into_url;
 #[cfg(feature = "multipart")]
@@ -27,6 +28,7 @@ pub use config::{
 };
 pub use digest::DigestAuth;
 pub use error::{Error, Kind, Result};
+pub use fetch_site::FetchSite;
 pub use headers::HeaderList;
 pub use into_url::IntoUrl;
 pub use request::{ContentEncoding, IntoParamPair, RequestBuilder};
