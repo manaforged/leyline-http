@@ -58,6 +58,22 @@ struct Meta {
     platform_browser: BTreeMap<String, String>,
     #[serde(default)]
     deprecated: Option<String>,
+    #[serde(default)]
+    header_style: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct Shape {
+    variant: String,
+    #[serde(default)]
+    default: bool,
+    extends: Option<String>,
+    fallback: Option<toml::Value>,
+}
+
+#[derive(Deserialize)]
+struct BrandHeaders {
+    header_style: Option<String>,
 }
 
 struct Row {
@@ -73,9 +89,76 @@ fn main() -> BuildResult<()> {
     let rows = load_rows(&root, &families)?;
     check_unique(&rows, &families)?;
     let code = render(&rows, &families)?;
-    let out = PathBuf::from(std::env::var("OUT_DIR")?).join("browser.rs");
-    fs::write(out, code)?;
+    let out = PathBuf::from(std::env::var("OUT_DIR")?);
+    fs::write(out.join("browser.rs"), code)?;
+    let shapes: BTreeMap<String, Shape> =
+        toml::from_str(&fs::read_to_string(root.join("headers.toml"))?)?;
+    let brands: BTreeMap<String, BrandHeaders> =
+        toml::from_str(&fs::read_to_string(root.join("brands.toml"))?)?;
+    check_shapes(&shapes)?;
+    let named = rows
+        .iter()
+        .map(|r| (r.path.as_str(), &r.meta.header_style))
+        .chain(
+            brands
+                .iter()
+                .map(|(name, b)| (name.as_str(), &b.header_style)),
+        );
+    for (owner, style) in named {
+        if let Some(style) = style.as_deref().filter(|s| !shapes.contains_key(*s)) {
+            return Err(format!("{owner}: header_style {style:?} is not in headers.toml").into());
+        }
+    }
+    fs::write(out.join("header_style.rs"), render_shapes(&shapes)?)?;
     Ok(())
+}
+
+fn check_shapes(shapes: &BTreeMap<String, Shape>) -> BuildResult<()> {
+    let mut variants = HashSet::new();
+    for (key, shape) in shapes {
+        if !is_ident(&shape.variant) || !variants.insert(shape.variant.as_str()) {
+            return Err(
+                format!("headers.toml: bad or repeated variant {:?}", shape.variant).into(),
+            );
+        }
+        let mut seen = HashSet::from([key.as_str()]);
+        let mut has_fallback = shape.fallback.is_some();
+        let mut current = shape;
+        while let Some(parent) = current.extends.as_deref() {
+            if !seen.insert(parent) {
+                return Err(format!("headers.toml: {key} has an extends cycle").into());
+            }
+            current = shapes
+                .get(parent)
+                .ok_or_else(|| format!("headers.toml: {key} extends unknown shape {parent:?}"))?;
+            has_fallback |= current.fallback.is_some();
+        }
+        if !has_fallback {
+            return Err(format!("headers.toml: {key} has no fallback in its extends chain").into());
+        }
+    }
+    if shapes.values().filter(|s| s.default).count() != 1 {
+        return Err("headers.toml: exactly one shape needs default = true".into());
+    }
+    Ok(())
+}
+
+fn render_shapes(shapes: &BTreeMap<String, Shape>) -> BuildResult<String> {
+    let mut out = String::from(
+        "#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Deserialize)]\n#[non_exhaustive]\npub enum HeaderStyle {\n",
+    );
+    for (key, shape) in shapes {
+        if shape.default {
+            writeln!(out, "    #[default]")?;
+        }
+        writeln!(
+            out,
+            "    #[serde(rename = {key:?})]\n    {},",
+            shape.variant
+        )?;
+    }
+    writeln!(out, "}}")?;
+    Ok(out)
 }
 
 fn load_rows(root: &Path, families: &Families) -> BuildResult<Vec<Row>> {

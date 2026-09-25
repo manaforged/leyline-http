@@ -1,12 +1,6 @@
 use crate::profile::brand::BrandOverlayError;
 use crate::profile::{BrowserProfile, ChromiumBrand, Platform, PlatformIdentity};
 
-pub(crate) struct ResolvedIdentity {
-    pub(crate) identity: PlatformIdentity,
-    pub(crate) brand_extra_headers: Vec<(String, String)>,
-    pub(crate) brand_navigate_accept: Option<String>,
-}
-
 #[derive(Debug)]
 pub(crate) enum IdentityError {
     NoPlatform(String, Platform),
@@ -32,28 +26,20 @@ pub(crate) fn resolve_identity(
     profile: &BrowserProfile,
     platform: Platform,
     brand: ChromiumBrand,
-) -> Result<ResolvedIdentity, IdentityError> {
+) -> Result<PlatformIdentity, IdentityError> {
     let mut identity = profile
         .identity_for(platform)
         .ok_or_else(|| IdentityError::NoPlatform(profile.meta.name.clone(), platform))?
         .clone();
     if brand == ChromiumBrand::Chrome {
-        return Ok(ResolvedIdentity {
-            identity,
-            brand_extra_headers: Vec::new(),
-            brand_navigate_accept: None,
-        });
+        return Ok(identity);
     }
     let chromium_major = profile
         .meta
         .chromium_major
         .ok_or(IdentityError::NotChromium(brand))?;
-    let (brand_extra_headers, brand_navigate_accept) = brand
+    brand
         .apply(chromium_major, platform, &mut identity)
         .map_err(IdentityError::Brand)?;
-    Ok(ResolvedIdentity {
-        identity,
-        brand_extra_headers,
-        brand_navigate_accept,
-    })
+    Ok(identity)
 }

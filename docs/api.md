@@ -81,7 +81,7 @@ let resp = session
 | Prebuilt request | `Session::execute(http::Request<Body>)` | `RequestBuilder::send` |
 | Send | `RequestBuilder::send` or `.await` | `RequestBuilder::send` (the one retry loop) |
 | Headers | `RequestBuilder::header` (append) / `headers` (append each) | `HeaderList` |
-| Header order | `RequestBuilder::header_order`, profile order | `core::headers::reorder` |
+| Header order | `RequestBuilder::header_order`, `FingerprintSpec::header_order`, header shape `order` | `core::headers::reorder` |
 | Body | `body` / `json` / `form` / `multipart` | `Body` |
 | Query | `RequestBuilder::query` | `url::Url` |
 | Auth | `basic_auth` / `bearer_auth` / `digest_auth` | `core::digest` |
@@ -241,8 +241,9 @@ Total: 264 public functions.
 - `RequestBuilder::header` appends, with `http::HeaderMap::append`
   semantics. `json`, `form`, `multipart`, and the auth setters replace the
   header they own.
-- Header merge runs in three layers. The profile preset gives the base list
-  and its order. `SessionBuilder::headers` replaces a profile header of the
+- Header merge runs in three layers. The profile's header shape in
+  `profiles/headers.toml` gives the base list for the preset, its order, and
+  the headers it appends. `HeaderStyle` is generated from that file. `SessionBuilder::headers` replaces a profile header of the
   same name in its slot, or appends a new one; a repeated session name keeps
   the last value. A request header replaces every profile or session header
   of the same name: all request values for that name, in call order, take

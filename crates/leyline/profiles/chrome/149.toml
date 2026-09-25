@@ -47,18 +47,9 @@ cert_compression = ["brotli"]
 permute_extensions = true
 ech_grease = true
 pre_shared_key = true
-# Chrome 149 advertises Trust Anchor Identifiers (ext 0xCA34/51764) with an empty
-# list, same as Chrome 148 (the feature shipped after the original 147-clone
-# capture this profile was built from). Without it the cold ClientHello carries
-# only 16 extensions → t13d1516, which mislabels this profile as Chrome 145-147.
 request_trust_anchors = true
 
 [tls.fingerprint]
-# Cold form. 149's TLS params (ciphers/curves/sigalgs/extensions) are byte-identical
-# to Chrome 148 — no ML-DSA sigalgs (that arrives in 150+) — so with Trust Anchor
-# Identifiers the cold ClientHello carries 17 extensions and yields the SAME JA4 as
-# 148. INFERRED from 148 parity (tls.peet.ws 2026-06-17); confirm against a live
-# Chrome 149 capture before relying on it — the pre-commit live test is the gate.
 ja4 = "t13d1517h2_8daaf6152771_dcad5a053991"
 
 [h2]
@@ -73,15 +64,6 @@ settings_order = [
     "initial_window_size", "max_frame_size",
     "max_header_list_size", "max_concurrent_streams",
 ]
-
-# Chrome 147 dropped SETTINGS parameter 8 (SETTINGS_ENABLE_CONNECT_PROTOCOL)
-# across all platforms. Verified against tls.peet.ws on 2026-05-08 with
-# Chrome 147 on Windows: SETTINGS frame carries only the 4 standard
-# parameters (HEADER_TABLE_SIZE, ENABLE_PUSH, INITIAL_WINDOW_SIZE,
-# MAX_HEADER_LIST_SIZE). Keeping `;8:1` in the Akamai fingerprint is what
-# trips a CDN/WAF edge's JA4+H2 join check — it completes the TLS handshake
-# and replies with no ALPN extension as a soft-block, surfacing in leyline
-# as `alpn: negotiated none, expected h2`.default_priority = { exclusive = true, stream_dependency = 0, weight = 255 }
 
 [h2.fingerprint]
 akamai = "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p"

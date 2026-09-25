@@ -64,8 +64,6 @@ default_priority = { exclusive = true, stream_dependency = 0, weight = 255 }
 [h2.fingerprint]
 akamai = "1:65536;2:0;4:6291456;6:262144;8:1|15663105|0|m,a,s,p"
 
-# Chromium-on-macOS doesn't emit SETTINGS parameter 8.
-# Verified 2026-04-25 against tls.peet.ws.
 [h2.platforms.macos]
 omit_settings = ["unknown_setting8"]
 

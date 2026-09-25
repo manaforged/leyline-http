@@ -6,9 +6,7 @@ use crate::core::{
     SocketConfig, TimeoutConfig, WebSocketConfig,
 };
 use crate::h2::H2Config;
-use crate::profile::{
-    Browser, BrowserProfile, ChromiumBrand, Platform, ResolvedIdentity, resolve_identity,
-};
+use crate::profile::{Browser, BrowserProfile, ChromiumBrand, Platform, resolve_identity};
 use crate::tcp::TcpProfile;
 use crate::tls::TlsTrustConfig;
 use crate::trace::Trace;
@@ -288,13 +286,13 @@ impl SessionBuilder {
             Some(browser) => browser.platform_profile(self.platform),
             None => &*profile,
         };
-        let header_style = http_profile.meta.header_style;
+        let header_style = self
+            .brand
+            .header_style()
+            .unwrap_or(http_profile.meta.header_style);
+        let header_order = http_profile.meta.header_order.clone();
 
-        let ResolvedIdentity {
-            identity,
-            brand_extra_headers,
-            brand_navigate_accept,
-        } = resolve_identity(http_profile, self.platform, self.brand)
+        let identity = resolve_identity(http_profile, self.platform, self.brand)
             .map_err(|e| Error::new(Kind::Config).with_message(e.to_string()))?;
 
         let tcp_profile = self.tcp_profile.clone().unwrap_or_else(|| {
@@ -348,15 +346,8 @@ impl SessionBuilder {
                 accept_language: identity
                     .accept_language
                     .unwrap_or_else(|| "en-US,en;q=0.9".to_string()),
-                brand_extra_headers,
-                brand_navigate_accept,
-                identity_extra_headers: {
-                    let mut h = identity.extra_headers.clone();
-                    h.extend(self.default_headers);
-                    h
-                },
-                identity_navigate_accept: identity.navigate_accept_override.clone(),
-                identity_request_header_order: identity.request_header_order.clone(),
+                header_order,
+                default_headers: self.default_headers,
                 proxy_config: self.proxy_config,
                 timeouts: self.timeouts,
                 redirect_policy: self.redirect_policy,

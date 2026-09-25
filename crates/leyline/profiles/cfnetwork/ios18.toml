@@ -10,23 +10,6 @@ verified_against = "CFNetwork/3826.600.41 iOS 18.6 sim first-party loopback pcap
 verified_at = "2026-08-29"
 captured_against = "CFNetwork-3826.600.41-iOS-18.6-22G86-sim"
 
-# First-party URLSession probe pcap (iOS 18.6 sim / 22G86).
-#
-# iOS 18.6 vs macOS 26 deltas in this hello:
-#   - NO X25519MLKEM768: groups = GREASE, X25519, P-256, P-384, P-521;
-#     key_share = GREASE + X25519 only
-#   - NO unknown_setting9 in H2 SETTINGS; initial window 2 MiB (vs 4 MiB)
-#   - TLS 1.3 cipher order AES_128 first (hardware order; macOS is AES_256 first)
-#   - supported_versions advertises TLS 1.0/1.1 too (min_tls_version = "1.0")
-#   - ADDS the padding extension (21) LAST: BoringSSL's RFC 7685 padding
-#     (ext block -> 512) lands on the same byte count as CFNetwork's
-#     handshake -> 512 for this CH shape (394 bytes at SNI tls.peet.ws).
-#     CFNetwork's PUBLIC-destination padding target (~704) is unconfirmed
-#     (one peet.ws data point) — revisit when a controlled public capture
-#     leg exists; private/local captures (record 517) match BoringSSL's 512.
-#   - shared with macOS: dup rsa_pss_rsae_sha384, zlib cert compression,
-#     GREASE cipher at front, m,s,p,a pseudo-header order
-
 [tls]
 ciphers = [
     "TLS_AES_128_GCM_SHA256",
@@ -57,8 +40,6 @@ sigalgs = [
     "rsa_pkcs1_sha256",
     "ecdsa_secp384r1_sha384",
     "rsa_pss_rsae_sha384",
-    # Deliberate duplicate: CFNetwork advertises 0x0805 twice (captured on
-    # the wire by tls.peet.ws and by our own server).
     "rsa_pss_rsae_sha384",
     "rsa_pkcs1_sha384",
     "rsa_pss_rsae_sha512",
@@ -74,8 +55,6 @@ pre_shared_key = false
 session_tickets = false
 permute_extensions = false
 min_tls_version = "1.0"
-# Exact extension order from the capture, excluding GREASE (BoringSSL
-# inserts those first/last itself). iOS adds the padding extension (21)
 extension_permutation = [0, 23, 65281, 10, 11, 16, 5, 13, 18, 51, 45, 43, 27]
 padding = true
 
@@ -86,7 +65,7 @@ ja4 = "t13d2014h2_a09f3c656075_e42f34c56612"
 enable_push = false
 initial_stream_window_size = 2097152
 max_concurrent_streams = 100
-initial_connection_window_size = 10551295  # wire increment 10485760 (10 MiB) = window - 65535, matching CFNetwork
+initial_connection_window_size = 10551295
 pseudo_order = ["method", "scheme", "path", "authority"]
 settings_order = ["enable_push", "initial_window_size", "max_concurrent_streams"]
 

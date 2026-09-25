@@ -33,8 +33,6 @@ sigalgs = [
 ocsp_stapling = true
 signed_cert_timestamps = true
 cert_compression = ["brotli"]
-# The previous table contained BoringSSL ordinals, not captured TLS IDs.
-# Leave exact ordering unsupported until a version-matched capture exists.
 pre_shared_key = true
 
 [h2]
@@ -52,8 +50,6 @@ settings_order = [
 ]
 
 [tls.fingerprint]
-# JA4 is leyline's current emission. Recapture from Safari before
-# treating this as a browser match.
 ja4 = "t13d2014h2_a09f3c656075_2bb9581e7de5"
 
 [h2.fingerprint]

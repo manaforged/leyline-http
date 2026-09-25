@@ -74,7 +74,7 @@ send every value there. See the header merge rule in the
 Two methods override the header order:
 
 - `header_order(&["a", "b"])` pins the wire order of the regular headers for
-  this request, on every protocol. It wins over the identity's own order.
+  this request, on every protocol. It wins over the order of the profile's header shape.
 - `anchored(anchor, name, value)` inserts one header at a named slot, such as
   immediately after `user-agent`.
 

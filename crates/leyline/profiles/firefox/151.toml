@@ -7,12 +7,7 @@ variant = "Firefox151"
 hello = 152
 header_style = "gecko"
 family = "gecko"
-# Real Firefox 151.0 Windows, captured against tls.peet.ws.
-# The prior 2026-04-28 profile was a hand-authored 15-cipher list that matched
-# no real Firefox and hash-collided with Chrome 149 (dropped both ECDSA CBC
-# ciphers + ecdsa_sha1) — corrected here. TLS is byte-identical to real FF152.0.
 verified_against = "tls.peet.ws capture 2026-07-07"
-# Real Firefox 151.0 Windows (selenium->tls.peet.ws 2026-07-07); point build not recorded.
 captured_against = "firefox-151.0"
 
 [tls]
@@ -44,7 +39,6 @@ ech_grease = true
 pre_shared_key = true
 
 [tls.fingerprint]
-# Real Firefox 151.0 Windows (cold first-flight) against tls.peet.ws 2026-07-07.
 ja4 = "t13d1617h2_86a278354501_3cbfd9057e0d"
 
 [h2]
@@ -66,22 +60,18 @@ akamai = "1:65536;2:0;4:131072;5:16384|12517377|0|m,p,a,s"
 [identity.windows]
 user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:151.0) Gecko/20100101 Firefox/151.0"
 sec_ch_ua = ""
-request_header_order = ["user-agent", "accept", "accept-language", "accept-encoding", "content-type", "upgrade-insecure-requests", "origin", "referer", "cookie", "sec-fetch-dest", "sec-fetch-mode", "sec-fetch-site", "sec-fetch-user", "priority", "te"]
 
 [identity.macos]
 user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:151.0) Gecko/20100101 Firefox/151.0"
 sec_ch_ua = ""
-request_header_order = ["user-agent", "accept", "accept-language", "accept-encoding", "content-type", "upgrade-insecure-requests", "origin", "referer", "cookie", "sec-fetch-dest", "sec-fetch-mode", "sec-fetch-site", "sec-fetch-user", "priority", "te"]
 
 [identity.linux]
 user_agent = "Mozilla/5.0 (X11; Linux x86_64; rv:151.0) Gecko/20100101 Firefox/151.0"
 sec_ch_ua = ""
-request_header_order = ["user-agent", "accept", "accept-language", "accept-encoding", "content-type", "upgrade-insecure-requests", "origin", "referer", "cookie", "sec-fetch-dest", "sec-fetch-mode", "sec-fetch-site", "sec-fetch-user", "priority", "te"]
 
 [identity.android]
 user_agent = "Mozilla/5.0 (Android 14; Mobile; rv:151.0) Gecko/151.0 Firefox/151.0"
 sec_ch_ua = ""
-request_header_order = ["user-agent", "accept", "accept-language", "accept-encoding", "content-type", "upgrade-insecure-requests", "origin", "referer", "cookie", "sec-fetch-dest", "sec-fetch-mode", "sec-fetch-site", "sec-fetch-user", "priority", "te"]
 
 [h3]
 initial_max_data = 25165824

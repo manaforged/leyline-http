@@ -127,6 +127,62 @@ use leyline::profile::{Browser, Family};
 let chrome = Browser::latest(Family::Chrome);
 ```
 
+## Capture notes
+
+These facts come from the captures behind the bundled profiles.
+
+- **Chrome 145.** Chromium on macOS sends only the four core SETTINGS (1, 2,
+  4, 6), without `max_concurrent_streams` and without setting 8. The value is
+  inferred from the Opera 129 (Chromium 145) macOS capture.
+- **Chrome 146.** Chromium on macOS does not send SETTINGS parameter 8. A
+  tls.peet.ws check confirmed this.
+- **Chrome 147 and 149.** The `[tls]` values match Chrome 148. Both profiles
+  send Trust Anchor Identifiers (0xCA34) with an empty list, so the cold
+  ClientHello carries 17 extensions and has the Chrome 148 JA4. Without the
+  extension the JA4 reads `t13d1516` and matches an older Chrome. Chrome 147
+  stopped sending SETTINGS parameter 8 on every platform (Windows capture). An Akamai string that keeps `8:1` makes some CDN edges finish
+  the handshake without ALPN, which Leyline reports as
+  `alpn: negotiated none, expected h2`.
+- **Chrome 150.** Chrome 150 puts the ML-DSA signature schemes (0x0904,
+  0x0905, 0x0906) before the classical list. It needs a BoringSSL revision
+  with `SSL_SIGN_ML_DSA_*` (3a9254f or later). Chrome changes the extension
+  order and the GREASE values on each connection, so the profile keeps
+  BoringSSL permutation and random GREASE. Each request HEADERS frame carries
+  PRIORITY with the exclusive bit and weight 256, sent as 255.
+- **Brave 146.** The JA4 golden is the cold form. The warm form with a cached
+  PSK is `t13d1517h2_8daaf6152771_b6f405a00624` (macOS, 2026-04-25). Brave
+  sends no SETTINGS parameter 8 on Windows or macOS, and it reduces its user
+  agent to the Chrome form on desktop.
+- **Firefox 149.** Firefox 149.0 (BuildID 20260318190823) on macOS aarch64
+  matches the Firefox 150 capture field for field, cold and resumed. Firefox
+  148 to 152 share two ClientHellos.
+- **Firefox 150.** Cold and resumed captures of Firefox 150.0 on Windows. The
+  resumed ClientHello adds `pre_shared_key` (41).
+- **Firefox 151 and 152.** Captures of Firefox 151.0 and 152.0 on Windows
+  through Selenium and tls.peet.ws, 2026-07-07. The TLS values are the same in
+  both. The cipher list changed at 151: it dropped
+  `TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA`.
+- **Safari 18 and Safari iOS 17.** The earlier cipher tables held BoringSSL
+  ordinals, not TLS IDs. Exact extension order stays unsupported until a
+  version-matched capture exists.
+- **CFNetwork macOS 26.** The ClientHello has one GREASE cipher first, TLS 1.3
+  ciphers in the order AES_256, CHACHA20, AES_128, and `rsa_pss_rsae_sha384`
+  (0x0805) twice in the signature algorithms. The groups are GREASE, then
+  X25519MLKEM768; the key shares are GREASE, X25519MLKEM768, and X25519.
+  Certificate compression is zlib. The ClientHello has no ALPS, no ECH GREASE,
+  and no padding. `extension_order` omits the GREASE extensions, which
+  BoringSSL places itself. `initial_connection_window_size` is 10551295 so
+  that the WINDOW_UPDATE increment is 10 MiB.
+- **CFNetwork iOS 18.** Compared with macOS 26: no X25519MLKEM768 (groups are
+  GREASE, X25519, P-256, P-384, P-521; key shares are GREASE and X25519), no
+  SETTINGS parameter 9, a 2 MiB initial stream window, AES_128 first in the TLS
+  1.3 ciphers, TLS 1.0 and 1.1 in `supported_versions`, and the padding
+  extension (21) last. BoringSSL padding to 512 bytes matches this ClientHello
+  at SNI `tls.peet.ws`. The padding target for a public destination (about
+  704) has one data point and is not confirmed. The iOS 18 build shares the
+  duplicate 0x0805, zlib compression, the leading GREASE cipher, and the
+  `m,s,p,a` pseudo-header order with macOS.
+
 ## Profiles that need a recapture
 
 Three WebKit profiles pin a JA4 golden taken from Leyline's own output, not
@@ -186,18 +242,40 @@ goes to `SessionBuilder::profile` the same way.
 on, and `ProfileError::Empty` when the directory holds no profile.
 
 A loaded profile carries its own `[identity.<platform>]` tables. The session
-reads the user agent, `sec-ch-ua`, and extra headers for the chosen platform
-from those tables. `build` returns `Kind::Config` when the profile has no
+reads the user agent, `sec-ch-ua`, and `accept_language` for the chosen
+platform from those tables. `build` returns `Kind::Config` when the profile has no
 table for that platform. Without `.platform()`, the platform is Windows. A
 brand overlay (`SessionBuilder::brand`) needs `chromium_major` in `[meta]`.
-The request headers follow `header_style` in `[meta]`: `chromium` (the
-default), `gecko`, `webkit`, or `okhttp`. `profiles/headers.toml` holds one
-header shape per style. A shape lists the header names, order, and values for
-each `Preset`, plus a `fallback` list for a request without a preset or for a
-preset the shape does not list. The placeholders `{user_agent}`, `{sec_ch_ua}`,
-`{sec_ch_ua_mobile}`, `{sec_ch_ua_platform}`, `{accept_language}`, `{origin}`,
-and `{referer}` take the session values. `request_header_order` in an identity
-table reorders the result.
+The request headers follow `header_style` in `[meta]`. `profiles/headers.toml`
+is the one owner of request header shapes. Each top-level table is one shape,
+and its key is the `header_style` value: `chromium`, `gecko`, `webkit`,
+`okhttp`, and `brave`. The build generates the `HeaderStyle` enum from this
+file, so a new shape needs only a new table. The build fails when a profile or
+a brand names a shape that the file does not define.
+
+A shape has these keys:
+
+- `variant`: the `HeaderStyle` variant name.
+- `default`: `true` on the one shape that a profile without `header_style`
+  uses. That shape is `chromium`.
+- `fallback`: the header list for a request without a preset, or for a preset
+  that the shape does not list.
+- `presets`: one header list for each `Preset`, with names, order, and values.
+- `extends`: another shape. The shape takes each preset and the fallback that
+  it does not define from that shape.
+- `append`: headers that every request of the shape carries. A session or
+  request header of the same name wins.
+- `order`: a header order that the session applies after the merge, including
+  the cookie and caller headers. `RequestBuilder::header_order` and
+  `FingerprintSpec::header_order` replace it.
+
+The placeholders `{user_agent}`, `{sec_ch_ua}`, `{sec_ch_ua_mobile}`,
+`{sec_ch_ua_platform}`, `{accept_language}`, `{origin}`, and `{referer}` take
+the session values. The `brave` shape extends `chromium`. It sends
+`sec-gpc: 1`, a navigate `accept` without `application/signed-exchange`, and
+the header order of the Brave 146 capture of 2026-04-25 from tls.peet.ws. A
+brand row in `profiles/brands.toml` can set `header_style` to replace the
+profile's shape.
 
 `key_shares` in `[tls]` lists the groups that the ClientHello `key_share`
 extension carries, in order. Each group must also be in `curves`. Without it,
@@ -230,8 +308,8 @@ instead of a TOML file. It returns the same `BrowserProfile` type, and
   the strings do not carry: the identity tables, the headers, HTTP/3, the
   signature algorithms for a JA3 string, and the curves for a JA4_r string.
   Without a base, the bare profile is the start.
-- `user_agent(ua)` and `header_order(names)`: replace the user agent and the
-  request header order in every identity table.
+- `user_agent(ua)`: replaces the user agent in every identity table.
+- `header_order(names)`: replaces the order of the profile's header shape.
 - `name(name)`: the profile name in logs and errors.
 
 This example takes the JA3 and Akamai values of the bundled Chrome 152

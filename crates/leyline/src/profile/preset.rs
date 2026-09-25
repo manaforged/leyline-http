@@ -4,16 +4,7 @@ use std::sync::LazyLock;
 
 use serde::Deserialize;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Deserialize)]
-#[serde(rename_all = "lowercase")]
-#[non_exhaustive]
-pub enum HeaderStyle {
-    #[default]
-    Chromium,
-    Gecko,
-    WebKit,
-    OkHttp,
-}
+include!(concat!(env!("OUT_DIR"), "/header_style.rs"));
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -44,16 +35,55 @@ pub type HeaderPair = (Cow<'static, str>, Cow<'static, str>);
 type HeaderTemplate = Vec<(String, String)>;
 
 #[derive(Debug, Deserialize)]
-struct HeaderShape {
-    fallback: HeaderTemplate,
+struct ShapeRow {
+    fallback: Option<HeaderTemplate>,
     #[serde(default)]
     presets: HashMap<Preset, HeaderTemplate>,
+    extends: Option<HeaderStyle>,
+    #[serde(default)]
+    append: HeaderTemplate,
+    order: Option<Vec<String>>,
+}
+
+#[derive(Debug)]
+struct HeaderShape {
+    fallback: HeaderTemplate,
+    presets: HashMap<Preset, HeaderTemplate>,
+    append: HeaderTemplate,
+    order: Option<Vec<String>>,
 }
 
 static SHAPES: LazyLock<HashMap<HeaderStyle, HeaderShape>> = LazyLock::new(|| {
-    toml::from_str(include_str!("../../profiles/headers.toml"))
-        .expect("built-in header table is statically valid")
+    let rows: HashMap<HeaderStyle, ShapeRow> =
+        toml::from_str(include_str!("../../profiles/headers.toml"))
+            .expect("built-in header table is statically valid");
+    rows.keys()
+        .map(|&style| (style, resolve_shape(&rows, style)))
+        .collect()
 });
+
+fn resolve_shape(rows: &HashMap<HeaderStyle, ShapeRow>, style: HeaderStyle) -> HeaderShape {
+    let row = rows
+        .get(&style)
+        .expect("build.rs checks every extends target");
+    let base = row.extends.map(|parent| resolve_shape(rows, parent));
+    let mut presets = base
+        .as_ref()
+        .map(|base| base.presets.clone())
+        .unwrap_or_default();
+    presets.extend(row.presets.clone());
+    let fallback = row
+        .fallback
+        .clone()
+        .or_else(|| base.map(|base| base.fallback))
+        .expect("build.rs checks every shape reaches a fallback");
+    HeaderShape {
+        fallback,
+        presets,
+        append: row.append.clone(),
+        order: row.order.clone(),
+    }
+}
 
 impl HeaderContext<'_> {
     fn placeholders(&self) -> [(&'static str, &str); 7] {
@@ -81,14 +111,26 @@ impl HeaderContext<'_> {
 }
 
 impl HeaderStyle {
+    fn shape(self) -> &'static HeaderShape {
+        SHAPES
+            .get(&self)
+            .expect("built-in header table covers every header style")
+    }
+
+    pub(crate) fn append(self) -> &'static [(String, String)] {
+        &self.shape().append
+    }
+
+    pub(crate) fn order(self) -> Option<&'static [String]> {
+        self.shape().order.as_deref()
+    }
+
     pub(crate) fn build_headers(
         self,
         preset: Option<Preset>,
         ctx: &HeaderContext<'_>,
     ) -> Vec<HeaderPair> {
-        let shape = SHAPES
-            .get(&self)
-            .expect("built-in header table covers every header style");
+        let shape = self.shape();
         let template = preset
             .and_then(|preset| shape.presets.get(&preset))
             .unwrap_or(&shape.fallback);

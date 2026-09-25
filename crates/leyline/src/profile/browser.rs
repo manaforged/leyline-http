@@ -79,18 +79,12 @@ impl Browser {
         platform: Platform,
         brand: Option<ChromiumBrand>,
     ) -> Option<PlatformIdentity> {
-        let resolved = resolve_identity(
+        resolve_identity(
             self.platform_profile(platform),
             platform,
             brand.unwrap_or_default(),
         )
-        .ok()?;
-        let mut identity = resolved.identity;
-        identity.extra_headers.extend(resolved.brand_extra_headers);
-        if resolved.brand_navigate_accept.is_some() {
-            identity.navigate_accept_override = resolved.brand_navigate_accept;
-        }
-        Some(identity)
+        .ok()
     }
 
     pub(crate) fn platform_profile(self, platform: Platform) -> &'static BrowserProfile {

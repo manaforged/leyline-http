@@ -1,4 +1,6 @@
 [chromium]
+variant = "Chromium"
+default = true
 fallback = [
     ["user-agent", "{user_agent}"],
     ["accept", "*/*"],
@@ -115,6 +117,8 @@ form-navigate = [
 ]
 
 [gecko]
+variant = "Gecko"
+order = ["user-agent", "accept", "accept-language", "accept-encoding", "content-type", "upgrade-insecure-requests", "origin", "referer", "cookie", "sec-fetch-dest", "sec-fetch-mode", "sec-fetch-site", "sec-fetch-user", "priority", "te"]
 fallback = [
     ["user-agent", "{user_agent}"],
     ["accept", "*/*"],
@@ -228,6 +232,7 @@ form-navigate = [
 ]
 
 [webkit]
+variant = "WebKit"
 fallback = [
     ["user-agent", "{user_agent}"],
     ["accept", "*/*"],
@@ -320,9 +325,49 @@ form-navigate = [
 ]
 
 [okhttp]
+variant = "OkHttp"
 fallback = [
     ["accept-encoding", "gzip"],
     ["user-agent", "{user_agent}"],
 ]
 
 [okhttp.presets]
+
+[brave]
+variant = "Brave"
+extends = "chromium"
+append = [["sec-gpc", "1"]]
+order = [
+    "sec-ch-ua",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-platform",
+    "upgrade-insecure-requests",
+    "user-agent",
+    "accept",
+    "sec-gpc",
+    "accept-language",
+    "sec-fetch-site",
+    "sec-fetch-mode",
+    "sec-fetch-user",
+    "sec-fetch-dest",
+    "referer",
+    "accept-encoding",
+    "priority",
+]
+
+[brave.presets]
+navigate = [
+    ["sec-ch-ua", "{sec_ch_ua}"],
+    ["sec-ch-ua-mobile", "{sec_ch_ua_mobile}"],
+    ["sec-ch-ua-platform", '"{sec_ch_ua_platform}"'],
+    ["upgrade-insecure-requests", "1"],
+    ["user-agent", "{user_agent}"],
+    ["accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"],
+    ["sec-fetch-site", "none"],
+    ["sec-fetch-mode", "navigate"],
+    ["sec-fetch-user", "?1"],
+    ["sec-fetch-dest", "document"],
+    ["accept-encoding", "gzip, deflate, br, zstd"],
+    ["accept-language", "{accept_language}"],
+    ["priority", "u=0, i"],
+]

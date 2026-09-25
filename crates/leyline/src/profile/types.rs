@@ -44,6 +44,8 @@ pub struct ProfileMeta {
     pub ch_ua_brand: Option<String>,
     #[serde(default)]
     pub header_style: HeaderStyle,
+    #[serde(skip)]
+    pub(crate) header_order: Option<Vec<String>>,
 }
 
 #[expect(
@@ -242,12 +244,6 @@ pub struct PlatformIdentity {
     pub sec_ch_ua: String,
     #[serde(default)]
     pub accept_language: Option<String>,
-    #[serde(default)]
-    pub request_header_order: Option<Vec<String>>,
-    #[serde(default)]
-    pub extra_headers: Vec<(String, String)>,
-    #[serde(default)]
-    pub navigate_accept_override: Option<String>,
 }
 
 impl BrowserProfile {

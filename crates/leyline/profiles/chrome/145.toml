@@ -60,9 +60,6 @@ default_priority = { exclusive = true, stream_dependency = 0, weight = 255 }
 [h2.fingerprint]
 akamai = "1:65536;2:0;3:1000;4:6291456;6:262144;8:1|15663105|0|m,a,s,p"
 
-# Chromium-on-macOS sends only the 4 core SETTINGS (1, 2, 4, 6).
-# `max_concurrent_streams` (setting 3) and `unknown_setting8` are both
-# absent.
 [h2.platforms.macos]
 omit_settings = ["max_concurrent_streams", "unknown_setting8"]
 

@@ -3,7 +3,7 @@ use std::sync::{Arc, LazyLock};
 
 use serde::Deserialize;
 
-use crate::profile::{BrowserProfile, Platform, PlatformIdentity, TlsProfile};
+use crate::profile::{BrowserProfile, HeaderStyle, Platform, PlatformIdentity, TlsProfile};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[non_exhaustive]
@@ -80,13 +80,9 @@ impl ChromiumBrand {
         Ok(Some(BrandOverlay {
             user_agent: format!("{profile_user_agent} {token}/{version}"),
             sec_ch_ua: sec_ch_ua(chromium_major, product),
-            extra_headers: row.extra_headers.clone(),
-            navigate_accept: row.navigate_accept.clone(),
         }))
     }
 }
-
-type BrandExtras = (Vec<(String, String)>, Option<String>);
 
 impl ChromiumBrand {
     pub(crate) fn apply(
@@ -94,13 +90,16 @@ impl ChromiumBrand {
         chromium_major: u32,
         platform: Platform,
         identity: &mut PlatformIdentity,
-    ) -> Result<BrandExtras, BrandOverlayError> {
-        let Some(overlay) = self.overlay(chromium_major, platform, &identity.user_agent)? else {
-            return Ok((Vec::new(), None));
-        };
-        identity.user_agent = overlay.user_agent;
-        identity.sec_ch_ua = overlay.sec_ch_ua;
-        Ok((overlay.extra_headers, overlay.navigate_accept))
+    ) -> Result<(), BrandOverlayError> {
+        if let Some(overlay) = self.overlay(chromium_major, platform, &identity.user_agent)? {
+            identity.user_agent = overlay.user_agent;
+            identity.sec_ch_ua = overlay.sec_ch_ua;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn header_style(self) -> Option<HeaderStyle> {
+        brand_row(self).and_then(|row| row.header_style)
     }
 
     pub(crate) fn tls_profile(self, profile: Arc<BrowserProfile>) -> Arc<BrowserProfile> {
@@ -121,8 +120,6 @@ impl ChromiumBrand {
 pub(crate) struct BrandOverlay {
     pub(crate) user_agent: String,
     pub(crate) sec_ch_ua: String,
-    pub(crate) extra_headers: Vec<(String, String)>,
-    pub(crate) navigate_accept: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -135,9 +132,7 @@ struct BrandRow {
     desktop_only: bool,
     #[serde(default)]
     versions: HashMap<String, Vec<String>>,
-    #[serde(default)]
-    extra_headers: Vec<(String, String)>,
-    navigate_accept: Option<String>,
+    header_style: Option<HeaderStyle>,
     #[serde(default)]
     tls: BrandTls,
 }

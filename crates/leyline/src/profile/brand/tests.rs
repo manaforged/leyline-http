@@ -24,8 +24,6 @@ fn edge_overlay_populates_ua_and_headers() {
         o.user_agent
     );
     assert!(o.sec_ch_ua.contains(r#""Microsoft Edge";v="147""#));
-    assert!(o.extra_headers.is_empty());
-    assert!(o.navigate_accept.is_none());
 }
 
 #[test]

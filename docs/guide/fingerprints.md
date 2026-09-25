@@ -16,9 +16,10 @@ pre-shared key, padding, trust anchor requests, and the minimum TLS version.
 sent in, the pseudo-header order, and the default priority frame. Per-platform
 overrides sit beside it.
 
-**Headers.** Each platform block in a profile supplies the `User-Agent`, the
-`sec-ch-ua` brand list, and the identity extras. The `Preset` decides the
-`sec-fetch-*` set and the header order for the fetch context. See
+**Headers.** Each platform block in a profile supplies the `User-Agent` and
+the `sec-ch-ua` brand list. The profile's header shape in
+`profiles/headers.toml` and the `Preset` decide the other headers and their
+order for the fetch context. See
 [Requests](requests.md).
 
 **TCP.** `TcpProfile` carries the socket options that shape the SYN: TTL,

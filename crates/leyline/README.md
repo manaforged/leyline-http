@@ -132,8 +132,8 @@ browser is a bare session that impersonates no browser.
 - HTTP/3 through a proxy needs a SOCKS5 proxy with `UDP ASSOCIATE`. HTTP
   and HTTPS proxies cannot carry HTTP/3; MASQUE is not supported.
 - A profile loaded with `SessionBuilder::profile` has no platform twin. Its
-  header order comes from `header_style` in `[meta]`, and the order tables
-  for each style are part of the crate.
+  header order comes from `header_style` in `[meta]`, and the header shapes
+  in `profiles/headers.toml` are part of the crate.
 - `Response::audit()` values come from the configured profile and request.
   They are not packet captures.
 - Detection by a remote site is not a security defect. See

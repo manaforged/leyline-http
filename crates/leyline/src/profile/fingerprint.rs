@@ -95,13 +95,13 @@ impl BrowserProfile {
         if let Some(raw) = spec.akamai.as_deref() {
             akamai::apply(&mut profile.h2, raw).map_err(|why| config_error("Akamai", why))?;
         }
-        for identity in profile.identity.values_mut() {
-            if let Some(user_agent) = &spec.user_agent {
+        if let Some(user_agent) = &spec.user_agent {
+            for identity in profile.identity.values_mut() {
                 identity.user_agent.clone_from(user_agent);
             }
-            if let Some(order) = &spec.header_order {
-                identity.request_header_order = Some(order.clone());
-            }
+        }
+        if spec.header_order.is_some() {
+            profile.meta.header_order = spec.header_order;
         }
         Ok(profile)
     }

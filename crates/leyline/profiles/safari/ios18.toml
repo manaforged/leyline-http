@@ -49,8 +49,6 @@ settings_order = [
 ]
 
 [tls.fingerprint]
-# JA4 is leyline's current emission. Recapture from Safari before
-# treating this as a browser match.
 ja4 = "t13d2014h2_a09f3c656075_2bb9581e7de5"
 
 [h2.fingerprint]

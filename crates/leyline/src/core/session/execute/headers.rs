@@ -34,21 +34,6 @@ impl Session {
             referer,
         };
         let mut headers = self.inner.header_style.build_headers(preset, &ctx);
-
-        let navigate_accept_override = self
-            .inner
-            .identity_navigate_accept
-            .as_deref()
-            .or(self.inner.brand_navigate_accept.as_deref());
-        if let (Some(accept_override), Some(Preset::Navigate)) = (navigate_accept_override, preset)
-        {
-            for (name, value) in headers.iter_mut() {
-                if name == "accept" {
-                    *value = Cow::Owned(accept_override.to_string());
-                    break;
-                }
-            }
-        }
         let sensitive = |name: &str| {
             let lower = name.to_ascii_lowercase();
             lower == "authorization" || lower == "proxy-authorization" || lower == "cookie"
@@ -56,9 +41,10 @@ impl Session {
 
         for (k, v) in self
             .inner
-            .brand_extra_headers
+            .header_style
+            .append()
             .iter()
-            .chain(self.inner.identity_extra_headers.iter())
+            .chain(self.inner.default_headers.iter())
         {
             let user_has_it = extra_headers
                 .as_ref()
@@ -114,8 +100,9 @@ impl Session {
     }
     pub(in crate::core::session) fn session_header_order(&self) -> Option<Cow<'_, [String]>> {
         self.inner
-            .identity_request_header_order
+            .header_order
             .as_deref()
+            .or_else(|| self.inner.header_style.order())
             .map(Cow::Borrowed)
     }
 }

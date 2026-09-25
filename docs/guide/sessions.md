@@ -91,8 +91,9 @@ Pass the platform to the builder with `.platform(Platform::MacOS)`.
 
 Edge and Opera are Chromium browsers. Leyline treats them as an
 identity overlay on a Chrome profile: the HTTP/2 settings stay Chrome's,
-while the `User-Agent`, the `sec-ch-ua` brand list, and a few extra headers
-change. A brand can also change a ClientHello setting: Edge does not send the
+while the `User-Agent` and the `sec-ch-ua` brand list change. A brand row in
+`profiles/brands.toml` can name a header shape with `header_style`; no bundled
+brand does. A brand can also change a ClientHello setting: Edge does not send the
 trust anchors extension.
 
 ```rust,no_run
@@ -119,7 +120,7 @@ returns an error that names all three.
 
 `Browser::identity(platform, brand)` returns the `PlatformIdentity` a session
 sends for that browser, platform, and brand: `user_agent`, `sec_ch_ua`,
-`accept_language`, and the extra headers. Use it when a payload that is not a
+and `accept_language`. The header shape supplies every other header. Use it when a payload that is not a
 header must carry the same values. It returns `None` when no capture exists.
 
 ```rust,no_run

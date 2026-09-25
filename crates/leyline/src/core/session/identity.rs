@@ -66,7 +66,7 @@ impl Identity {
             self.platform,
             ChromiumBrand::Chrome,
         )
-        .map(|resolved| resolved.identity.user_agent)
+        .map(|identity| identity.user_agent)
         .map_err(|e| Error::new(Kind::Config).with_message(e.to_string()))
     }
 }

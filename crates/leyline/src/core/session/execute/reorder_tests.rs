@@ -8,9 +8,9 @@ fn h(name: &str, value: &str) -> HeaderPair {
 
 #[test]
 fn firefox_navigate_order_matches_the_live_capture() {
+    use crate::profile::Browser;
     use crate::profile::Preset;
     use crate::profile::preset::HeaderContext;
-    use crate::profile::{Browser, Platform};
     let ctx = HeaderContext {
         user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:153.0) Gecko/20100101 Firefox/153.0",
         sec_ch_ua: "",
@@ -24,10 +24,11 @@ fn firefox_navigate_order_matches_the_live_capture() {
         crate::profile::HeaderStyle::Gecko.build_headers(Some(Preset::Navigate), &ctx);
     let order = Browser::Firefox153
         .profile()
-        .identity_for(Platform::Windows)
-        .and_then(|identity| identity.request_header_order.clone())
-        .expect("firefox profile declares a request header order");
-    reorder_headers(&mut headers, &order);
+        .meta
+        .header_style
+        .order()
+        .expect("firefox header shape declares a request header order");
+    reorder_headers(&mut headers, order);
     let names: Vec<&str> = headers.iter().map(|(n, _)| n.as_ref()).collect();
     assert_eq!(
         names,

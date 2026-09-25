@@ -17,7 +17,7 @@ pub(crate) use anchor::infer_anchor;
 pub use brand::ChromiumBrand;
 pub use browser::{Browser, Family};
 pub use fingerprint::FingerprintSpec;
-pub(crate) use identity::{ResolvedIdentity, resolve_identity};
+pub(crate) use identity::resolve_identity;
 pub use platform::Platform;
 pub use preset::{HeaderStyle, Preset};
 pub use registry::{ProfileError, ProfileRegistry};
