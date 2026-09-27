@@ -34,6 +34,10 @@ impl Session {
         self.derive(|inner| inner.proxy_config = config)
     }
 
+    pub fn proxy_url(&self) -> Option<String> {
+        self.inner.proxy_config.primary().map(str::to_owned)
+    }
+
     pub fn fresh_pool(&self) -> Self {
         self.derive(|inner| {
             inner.pool = std::sync::Arc::new(inner.pool.fresh());
