@@ -34,8 +34,11 @@ use crate::{cvt, cvt_n, cvt_p};
 use crate::{ffi, free_data_box};
 
 pub mod extension;
+mod purpose;
 pub mod store;
 pub mod verify;
+
+pub use purpose::X509Purpose;
 
 static STORE_INDEX: LazyLock<Index<X509StoreContext, store::X509Store>> =
     LazyLock::new(|| X509StoreContext::new_ex_index().unwrap());

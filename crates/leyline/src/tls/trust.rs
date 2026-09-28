@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use leyline_bssl::ssl::{
     NameType, Ssl, SslAlert, SslContextBuilder, SslFiletype, SslRef, SslVerifyError, SslVerifyMode,
 };
-use leyline_bssl::x509::{X509, X509StoreContext};
+use leyline_bssl::x509::{X509, X509Purpose, X509StoreContext};
 use sha2::{Digest, Sha256};
 
 use crate::tls::error::TlsError;
@@ -54,6 +54,7 @@ fn trusted(ssl: &SslRef, _host: &str, _system_roots: bool) -> Result<bool, Trust
     let configured = X509StoreContext::new()
         .map_err(|_| TrustFailure::Certificate)?
         .init(ssl.ssl_context().cert_store(), &cert, chain, |context| {
+            context.set_purpose(X509Purpose::SSL_SERVER)?;
             Ok(context.verify_cert()? && context.verify_result().is_ok())
         })
         .map_err(|_| TrustFailure::Certificate)?;

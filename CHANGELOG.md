@@ -130,3 +130,6 @@ First public release.
   trace events, and the `leyline::trace` log mask them.
   `Session::proxy_url` returns a `ProxyUrl`, whose `Display` hides the
   password.
+- Certificate verification through pins, custom roots on macOS, and HTTP/3
+  to an IP address checks that the leaf certificate is issued for TLS
+  servers, as the default verifier does.

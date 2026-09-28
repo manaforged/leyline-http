@@ -12,7 +12,7 @@ use leyline_bssl::bn::{BigNum, MsbOption};
 use leyline_bssl::hash::MessageDigest;
 use leyline_bssl::pkey::PKey;
 use leyline_bssl::rsa::Rsa;
-use leyline_bssl::x509::extension::{BasicConstraints, SubjectAlternativeName};
+use leyline_bssl::x509::extension::{BasicConstraints, ExtendedKeyUsage, SubjectAlternativeName};
 use leyline_bssl::x509::{X509, X509NameBuilder};
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
@@ -42,7 +42,13 @@ enum San<'a> {
     Ip(&'a str),
 }
 
-fn generate_chain(leaf_cn: &str, leaf_san: San) -> Generated {
+#[derive(Clone, Copy)]
+enum Usage {
+    Any,
+    ClientOnly,
+}
+
+fn generate_chain(leaf_cn: &str, leaf_san: San, usage: Usage) -> Generated {
     let ca_key = PKey::from_rsa(Rsa::generate(2048).unwrap()).unwrap();
     let mut name = X509NameBuilder::new().unwrap();
     name.append_entry_by_text("CN", "leyline-test-ca").unwrap();
@@ -97,6 +103,10 @@ fn generate_chain(leaf_cn: &str, leaf_san: San) -> Generated {
         .build(&leaf.x509v3_context(Some(&ca), None))
         .unwrap();
     leaf.append_extension(&san).unwrap();
+    if let Usage::ClientOnly = usage {
+        leaf.append_extension(&ExtendedKeyUsage::new().client_auth().build().unwrap())
+            .unwrap();
+    }
     leaf.sign(&ca_key, MessageDigest::sha256()).unwrap();
     let leaf = leaf.build();
 
@@ -172,7 +182,7 @@ fn connector_with_trust(trust: TlsTrustConfig, addr: SocketAddr) -> FingerprintC
 #[cfg(target_os = "macos")]
 #[tokio::test]
 async fn native_system_trust_preserves_custom_ca_hostname_and_pins() {
-    let generated = generate_chain("native.example", San::Dns("native.example"));
+    let generated = generate_chain("native.example", San::Dns("native.example"), Usage::Any);
     for (host, ca, pin, expected) in [
         ("native.example", true, Some(generated.leaf_pin), "ok"),
         ("native.example", true, None, "ok"),
@@ -203,7 +213,7 @@ async fn native_system_trust_preserves_custom_ca_hostname_and_pins() {
 
 #[tokio::test]
 async fn pinned_cert_still_accepts_matching_hostname() {
-    let r#gen = generate_chain("wrong.example", San::Dns("wrong.example"));
+    let r#gen = generate_chain("wrong.example", San::Dns("wrong.example"), Usage::Any);
     let _ = r#gen.leaf_der;
     let addr = spawn_tls_server(&r#gen).await;
     let res = connector(&r#gen, addr)
@@ -218,7 +228,7 @@ async fn pinned_cert_still_accepts_matching_hostname() {
 
 #[tokio::test]
 async fn pinned_cert_rejects_mismatched_hostname() {
-    let r#gen = generate_chain("wrong.example", San::Dns("wrong.example"));
+    let r#gen = generate_chain("wrong.example", San::Dns("wrong.example"), Usage::Any);
     let addr = spawn_tls_server(&r#gen).await;
     let res = connector(&r#gen, addr)
         .connect("right.example", 443, None)
@@ -229,7 +239,7 @@ async fn pinned_cert_rejects_mismatched_hostname() {
 
 #[tokio::test]
 async fn default_verifier_reports_hostname_mismatch() {
-    let r#gen = generate_chain("wrong.example", San::Dns("wrong.example"));
+    let r#gen = generate_chain("wrong.example", San::Dns("wrong.example"), Usage::Any);
     let addr = spawn_tls_server(&r#gen).await;
     let trust = TlsTrustConfig::new()
         .env_roots(false)
@@ -246,7 +256,7 @@ async fn default_verifier_reports_hostname_mismatch() {
 
 #[tokio::test]
 async fn pinned_cert_accepts_matching_ip_san() {
-    let r#gen = generate_chain("127.0.0.1", San::Ip("127.0.0.1"));
+    let r#gen = generate_chain("127.0.0.1", San::Ip("127.0.0.1"), Usage::Any);
     let addr = spawn_tls_server(&r#gen).await;
     let res = connector(&r#gen, addr)
         .connect("127.0.0.1", 443, None)
@@ -260,7 +270,7 @@ async fn pinned_cert_accepts_matching_ip_san() {
 
 #[tokio::test]
 async fn pinned_cert_rejects_mismatched_ip() {
-    let r#gen = generate_chain("127.0.0.1", San::Ip("127.0.0.1"));
+    let r#gen = generate_chain("127.0.0.1", San::Ip("127.0.0.1"), Usage::Any);
     let addr = spawn_tls_server(&r#gen).await;
     let res = connector(&r#gen, addr)
         .connect("127.0.0.2", 443, None)
@@ -271,7 +281,7 @@ async fn pinned_cert_rejects_mismatched_ip() {
 
 #[tokio::test]
 async fn certificate_and_pinning_failures_are_permanent() {
-    let r#gen = generate_chain("right.example", San::Dns("right.example"));
+    let r#gen = generate_chain("right.example", San::Dns("right.example"), Usage::Any);
 
     let addr = spawn_tls_server(&r#gen).await;
     let trust = TlsTrustConfig::new().env_roots(false).system_roots(false);
@@ -349,4 +359,22 @@ async fn handshake_protocol_failure_is_retryable() {
         .expect("a non-TLS peer must fail the handshake");
     drop(peer.await.expect("peer task completes"));
     assert!(matches!(err, TlsError::Handshake(_)), "got {err:?}");
+}
+
+#[tokio::test]
+async fn pinned_verifier_rejects_a_leaf_not_issued_for_servers() {
+    let r#gen = generate_chain(
+        "client.example",
+        San::Dns("client.example"),
+        Usage::ClientOnly,
+    );
+    let addr = spawn_tls_server(&r#gen).await;
+    let res = connector(&r#gen, addr)
+        .connect("client.example", 443, None)
+        .await;
+    assert!(
+        matches!(res, Err(TlsError::Certificate { .. })),
+        "a leaf issued only for client auth must fail server verification, got {:?}",
+        res.map(|_| ()).map_err(|e| e.to_string())
+    );
 }
