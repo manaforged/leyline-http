@@ -9,6 +9,7 @@ pub enum Preset {
     FrameNavigate,
     Reload,
     Script,
+    Image,
     Xhr,
     Form,
     CrossOrigin,

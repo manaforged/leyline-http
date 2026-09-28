@@ -55,6 +55,20 @@ reload = [
     ["accept-language", "{accept_language}"],
     ["priority", "u=0, i"],
 ]
+image = [
+    ["sec-ch-ua-platform", '"{sec_ch_ua_platform}"'],
+    ["user-agent", "{user_agent}"],
+    ["sec-ch-ua", "{sec_ch_ua}"],
+    ["sec-ch-ua-mobile", "{sec_ch_ua_mobile}"],
+    ["accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"],
+    ["sec-fetch-site", "{fetch_site}"],
+    ["sec-fetch-mode", "no-cors"],
+    ["sec-fetch-dest", "image"],
+    ["referer", "{referer}"],
+    ["accept-encoding", "gzip, deflate, br, zstd"],
+    ["accept-language", "{accept_language}"],
+    ["priority", "u=1, i"],
+]
 script = [
     ["sec-ch-ua-platform", '"{sec_ch_ua_platform}"'],
     ["user-agent", "{user_agent}"],
