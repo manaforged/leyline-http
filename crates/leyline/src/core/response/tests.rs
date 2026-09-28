@@ -7,7 +7,7 @@ fn bare_response(audit_tls: Option<Arc<crate::audit::AuditTlsCache>>) -> Respons
         headers: http::HeaderMap::new(),
         trailers: Vec::new(),
         body: ResponseBody::Buffered(Vec::new()),
-        url: "https://example.test/".to_string(),
+        url: Url::parse("https://example.test/").unwrap(),
         redirect_chain: Vec::new(),
         request_headers: vec![
             (":method".to_string(), "GET".to_string()),

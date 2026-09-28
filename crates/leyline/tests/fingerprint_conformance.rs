@@ -1,8 +1,8 @@
-use leyline::Platform;
 use leyline::audit::{Ja3Input, Ja4Input, compute_ja3, compute_ja4, compute_ja4t};
 use leyline::fuzz::extension_ids;
 use leyline::h2::H2Config;
-use leyline::profile::{Browser, BrowserProfile, ProfileRegistry};
+use leyline::profile::ProfileRegistry;
+use leyline::{Browser, BrowserProfile, Platform};
 
 fn expected_h2_for(profile: &BrowserProfile, platform: Platform) -> Option<&str> {
     profile

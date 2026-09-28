@@ -5,8 +5,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use leyline::Session;
-use leyline::profile::{Browser, Platform};
+use leyline::{Browser, Platform, Session};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 

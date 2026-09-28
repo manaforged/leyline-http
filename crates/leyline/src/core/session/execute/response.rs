@@ -1,9 +1,12 @@
 use url::Url;
 
 use super::super::decompress::{decompress_and_strip, drain_stream_into_vec};
+use super::journey::Journey;
 use crate::core::Session;
 use crate::core::deadline::Deadline;
 use crate::core::error::Result;
+use crate::core::response::Response;
+use crate::core::transport::TransportResponse;
 
 impl Session {
     pub(super) fn store_cookies(
@@ -21,6 +24,67 @@ impl Session {
                 .cookie_jar
                 .store_response_cookies(set_cookies.as_slice(), url);
         }
+    }
+
+    #[cfg(feature = "http3")]
+    pub(super) fn note_alt_svc(
+        &self,
+        url: &Url,
+        resp_headers: &[(http::HeaderName, http::HeaderValue)],
+    ) {
+        if let Some(host) = url.host_str()
+            && let Some(port) = url.port_or_known_default()
+        {
+            for (_, v) in resp_headers.iter().filter(|(k, _)| *k == "alt-svc") {
+                self.inner
+                    .pool
+                    .note_alt_svc(host, port, &String::from_utf8_lossy(v.as_bytes()));
+            }
+        }
+    }
+
+    pub(super) async fn assemble_response(
+        &self,
+        leg: TransportResponse,
+        journey: Journey,
+        audit_headers: Vec<(String, String)>,
+        stream_response: bool,
+        deadline: &Deadline,
+    ) -> Result<Response> {
+        let TransportResponse {
+            status,
+            headers,
+            trailers,
+            body,
+            final_url,
+            version,
+            tls,
+            ..
+        } = leg;
+        let (body, headers) = self
+            .finalize_response_body(body, headers, stream_response, deadline)
+            .await?;
+        let audited = self.inner.audit_tls.is_some();
+        Ok(Response {
+            status,
+            headers: headers.into_iter().collect(),
+            body,
+            url: final_url,
+            redirect_chain: journey.chain,
+            version,
+            trailers,
+            request_headers: audit_headers,
+            tls,
+            request_method: if audited {
+                journey.method
+            } else {
+                String::new()
+            },
+            audit_tls: self.inner.audit_tls.clone(),
+            audit_cache: std::sync::OnceLock::new(),
+            compression: self.inner.compression,
+            timing: journey.timing,
+        })
     }
 
     pub(super) async fn finalize_response_body(

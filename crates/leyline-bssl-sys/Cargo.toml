@@ -24,6 +24,7 @@ include = [
     "/README.md",
     "/PROVENANCE.md",
     "/LICENSE-MIT",
+    "/NOTICE",
     "/LICENSE-BORINGSSL",
     "/deps/boringssl/third_party/*/LICENSE",
     "/build/*",

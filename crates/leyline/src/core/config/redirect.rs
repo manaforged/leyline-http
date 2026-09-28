@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use url::Url;
+
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct RedirectPolicy {
@@ -80,9 +82,9 @@ impl RedirectPolicy {
 #[non_exhaustive]
 pub struct RedirectAttempt<'a> {
     pub status: u16,
-    pub url: &'a http::Uri,
+    pub url: &'a Url,
     pub location: Option<&'a str>,
-    pub previous: &'a [String],
+    pub previous: &'a [Url],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -7,9 +7,10 @@ public item and maps each task to its one call. It is generated from the
 compiler, and `cargo truesight check` fails when it no longer matches the
 code.
 
-The `bench-internals` and `unstable-bssl` features make internal items
-public for Leyline's own tests, benches, and fuzz targets. Those items are
-not part of the contract, and the API reference leaves them out.
+The `bench-internals` feature makes internal items public for Leyline's own
+tests, benches, and fuzz targets, and the `leyline_unstable_bssl` compiler flag
+exposes the BoringSSL context builder. Neither is part of the contract, and the
+API reference leaves both out.
 
 ## Frame (one)
 
@@ -142,6 +143,9 @@ let resp = session
   the same proxy reuses its connections.
 - `Session::fresh_pool` derives a clone with a new, empty pool and TLS
   session cache, so the next request opens new connections.
+- `Session::proxy_url` returns the exit a session is bound to as a
+  `ProxyUrl`. Its `Display` and `Debug` hide the password; `with_proxy`
+  takes it back, and `String::from` gives the full URL.
 - A proxy set on `RequestBuilder` or `WebSocketBuilder` replaces the session
   proxy config for that request. A `ProxyConfig::new()` with no rule sends
   that request direct.
@@ -175,7 +179,7 @@ let resp = session
 - `Jar::store_set_cookie` is the one Set-Cookie parser. The session calls it
   for every response. `Max-Age=0` or a past `Expires` deletes the cookie.
 - `Jar::get_cookie`, `set_cookie`, `store_set_cookie`, `load_cookies`,
-  `export_cookies`, and `remove` take a parsed `&Url`, like the reqwest
+  `cookie_header`, and `remove` take a parsed `&Url`, like the reqwest
   cookie store. They do not return a URL parse error.
 - `Jar::snapshot` returns a new jar with its own store and a copy of every
   cookie with all attributes, creation order included. A write to one jar
@@ -252,8 +256,9 @@ let resp = session
 One error type: `leyline::Error`. Read `err.kind()` for the `Kind`.
 Downcast the source with `err.tls()`, `err.h2()`, or `err.io()`.
 `Kind::as_str()` gives a stable lowercase label equal to the variant name.
-`Display` prints the kind, status, message, and URL. It does not repeat the
-source; walk `source()` for the cause.
+`Display` prints the kind, the status and message when present, and the URL
+when the error carries one, with its password and query masked. It does not
+repeat the source; walk `source()` for the cause.
 `Error::is_retryable()` is true when `RetryTrigger::Timeout` or
 `RetryTrigger::ConnectionError` would match. `RequestBuilder::send` uses the
 same function.
@@ -283,10 +288,12 @@ handshake), `Handshake`, `HandshakeIo`, `Certificate { verify_code, reason, .. }
 ## Features
 
 Default: `charset`, `compression-gzip`, `compression-brotli`,
-`compression-deflate`, `compression-zstd`, `multipart`, `stream`,
-`websocket`, `http3`. Opt-in: `socks`, `tower`, `unstable-bssl`,
-`bench-internals` (outside semver). `full` enables every opt-in except `bench-internals` and
-`unstable-bssl`. The BoringSSL crates are outside the semver promise.
+`compression-deflate`, `compression-zstd`, `multipart`, `websocket`,
+`http3`. Opt-in: `socks`, `tower`, `bench-internals` (outside semver). `full`
+enables every opt-in except `bench-internals`. Build with
+`RUSTFLAGS="--cfg leyline_unstable_bssl"` to reach the BoringSSL
+`SslContextBuilder` behind `TlsContext`. The BoringSSL crates are outside the
+semver promise.
 
 ## Do not add
 
@@ -319,3 +326,8 @@ TOML keys. `profiles/bare.toml` holds the bare profile and
 `profiles/platforms.toml` holds the per-platform TCP values. Load custom
 profiles with `profile::ProfileRegistry::load(dir)`
 or `BrowserProfile::from_toml`.
+
+The schema is part of the API. A patch release can add fields; removing or
+renaming one needs a minor release. `Browser` gains a variant for each captured
+release. A retired profile keeps its variant, marked `#[deprecated]` through its
+`[meta] deprecated` note, until a minor release removes it.

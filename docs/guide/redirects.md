@@ -15,8 +15,9 @@ A session follows redirects by default, up to 10 per request. It follows a
   removes the `Authorization`, `Proxy-Authorization`, and `Cookie` headers
   that you set. The cookie jar still adds the cookies that match the new URL.
 
-`Response::redirect_chain` lists the URLs that the session left, in order.
-`Response::url` is the final URL.
+`Response::redirect_chain` lists the URLs that the session left, in order, as
+`url::Url` values without a user name or password. `Response::url` is the final
+URL, also a `url::Url`.
 
 ## Set the limit
 
@@ -69,9 +70,11 @@ let location = resp.header("location");
 ## Decide each redirect
 
 `RedirectPolicy::custom` calls your function for each redirect. The function
-gets a `RedirectAttempt` with the status, the current URL, the `Location`
-value, and the URLs followed so far. It returns `RedirectAction::Follow` or
-`RedirectAction::Stop`. On `Stop`, the session returns the `3xx` response.
+gets a `RedirectAttempt` with the status, the current URL as a `&url::Url`, the
+`Location` value as a string, and the URLs followed so far as a `&[url::Url]`.
+Both URL fields have no user name or password. The function returns
+`RedirectAction::Follow` or `RedirectAction::Stop`. On `Stop`, the session
+returns the `3xx` response.
 
 ```rust,no_run
 use leyline::{Browser, RedirectAction, RedirectPolicy, Session};
@@ -80,7 +83,8 @@ use leyline::{Browser, RedirectAction, RedirectPolicy, Session};
 let policy = RedirectPolicy::custom(|attempt| {
     let same_host = attempt
         .location
-        .is_some_and(|location| location.starts_with('/'));
+        .and_then(|location| attempt.url.join(location).ok())
+        .is_some_and(|next| next.host_str() == attempt.url.host_str());
     if same_host && attempt.previous.len() < 5 {
         RedirectAction::Follow
     } else {

@@ -3,12 +3,14 @@ use std::borrow::Cow;
 use url::Url;
 
 use super::super::header_merge::apply_extra_headers;
-use super::RequestContext;
+use super::journey::Journey;
+use super::{RequestContext, fetch_site_for, referer_for, url_origin};
 use crate::core::Session;
 use crate::core::body::{Body, BodyKind};
 use crate::core::headers::{HeaderList, reorder};
 use crate::profile::Preset;
 use crate::profile::preset::HeaderPair;
+use crate::util::sensitive_header;
 
 impl Session {
     #[allow(clippy::too_many_arguments)]
@@ -18,7 +20,7 @@ impl Session {
         request: RequestContext<'_>,
         current_url: &Url,
         current_method: &str,
-        redirect_chain: &[String],
+        redirect_chain: &[Url],
         current_body: &Body,
         extra_headers: Option<&HeaderList>,
         strip_sensitive: bool,
@@ -56,7 +58,7 @@ impl Session {
         self.merge_session_headers(&mut headers, &caller_has, strip_sensitive);
 
         if let Some(extra) = extra_headers {
-            apply_extra_headers(&mut headers, extra, strip_sensitive, &is_sensitive);
+            apply_extra_headers(&mut headers, extra, strip_sensitive, &sensitive_header);
         }
 
         if let Some(len) = current_body.len_hint()
@@ -77,6 +79,49 @@ impl Session {
 
         headers
     }
+
+    pub(super) fn leg_headers(
+        &self,
+        journey: &Journey,
+        preset: Option<Preset>,
+        header_order: Option<&[String]>,
+    ) -> Vec<HeaderPair> {
+        let origin = url_origin(&journey.url);
+        let referer = referer_for(Some(&journey.referrer), &origin);
+        let fetch_site = fetch_site_for(journey.initiator.as_ref(), &journey.chain, &journey.url);
+        let strip_sensitive = !journey.chain.is_empty() && origin != journey.original_origin;
+        let request_origin = if journey.tainted {
+            "null"
+        } else {
+            journey.original_origin.as_str()
+        };
+        self.attempt_headers(
+            preset,
+            RequestContext {
+                origin: request_origin,
+                referer: &referer,
+                fetch_site,
+            },
+            &journey.url,
+            &journey.method,
+            &journey.chain,
+            &journey.body,
+            journey.extra.as_ref(),
+            strip_sensitive,
+            header_order,
+        )
+    }
+
+    pub(super) fn audit_copy(&self, headers: &[HeaderPair]) -> Vec<(String, String)> {
+        if self.inner.audit_tls.is_none() {
+            return Vec::new();
+        }
+        headers
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
     pub(in crate::core::session) fn merge_session_headers(
         &self,
         headers: &mut Vec<HeaderPair>,
@@ -90,7 +135,7 @@ impl Session {
             .iter()
             .chain(self.inner.default_headers.iter())
         {
-            if caller_has(k) || (strip_sensitive && is_sensitive(k)) {
+            if caller_has(k) || (strip_sensitive && sensitive_header(k)) {
                 continue;
             }
             match headers
@@ -107,7 +152,7 @@ impl Session {
         &self,
         headers: &mut Vec<HeaderPair>,
         url: &Url,
-        redirect_chain: &[String],
+        redirect_chain: &[Url],
         method: &str,
     ) {
         if headers
@@ -172,10 +217,4 @@ fn sends_origin(method: &str, headers: &[HeaderPair]) -> bool {
     let cross_origin = header_value(headers, "sec-fetch-site")
         .is_some_and(|site| !site.eq_ignore_ascii_case(crate::FetchSite::SameOrigin.as_str()));
     cors && cross_origin
-}
-
-fn is_sensitive(name: &str) -> bool {
-    ["authorization", "proxy-authorization", "cookie"]
-        .iter()
-        .any(|s| name.eq_ignore_ascii_case(s))
 }

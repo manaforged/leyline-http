@@ -22,6 +22,7 @@ keywords = ["tls", "fingerprint", "http", "browser", "ja4"]
 categories = ["web-programming::http-client", "cryptography"]
 
 [workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(leyline_unstable_bssl)"] }
 
 [workspace.lints.clippy]
 undocumented_unsafe_blocks = "deny"

@@ -41,9 +41,8 @@ Useful jar methods:
 - `all_cookies()` for a list sorted by domain then name.
 - `snapshot()` for an independent copy of the jar with every attribute.
 - `extend_from(other)` to merge the cookies of another jar.
-- `load_cookies(header, url)` and `export_cookies(url)` to move a `Cookie`
-  header string in and out.
-- `cookie_header(url)` for the `Cookie` header the jar sends to a URL.
+- `load_cookies(header, url)` to load a `Cookie` header string, and
+  `cookie_header(url)` for the `Cookie` header the jar sends to a URL.
 
 ## Sharing and forking
 

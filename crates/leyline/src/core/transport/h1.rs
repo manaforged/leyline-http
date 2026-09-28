@@ -113,7 +113,7 @@ pub(crate) async fn send_request_h1(
         headers: adopt(resp.headers),
         trailers: Vec::new(),
         body: transport_body,
-        final_url: url.as_str().to_owned(),
+        final_url: url.clone(),
         version: HttpVersion::Http1_1,
         tls: resp.tls,
         timing: resp.timing,

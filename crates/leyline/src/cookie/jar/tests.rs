@@ -77,7 +77,9 @@ fn load_and_export() {
         "a=1; b=2",
         &url::Url::parse("https://example.com/page").unwrap(),
     );
-    let export = jar.export_cookies(&url::Url::parse("https://example.com/other").unwrap());
+    let export = jar
+        .cookie_header(&url::Url::parse("https://example.com/other").unwrap())
+        .unwrap_or_default();
     assert_eq!(export, "a=1; b=2");
 }
 
@@ -94,7 +96,9 @@ fn same_path_cookies_keep_creation_order() {
         "abc123",
     );
 
-    let export = jar.export_cookies(&url::Url::parse("https://www.example.com/v1/items").unwrap());
+    let export = jar
+        .cookie_header(&url::Url::parse("https://www.example.com/v1/items").unwrap())
+        .unwrap_or_default();
     assert_eq!(
         export,
         "zeta=r; alpha=i; mid=v; late=abc123"
@@ -128,7 +132,9 @@ fn longer_path_cookies_precede_same_path_creation_order() {
         &url,
     );
 
-    let export = jar.export_cookies(&url::Url::parse("https://example.com/cart/items").unwrap());
+    let export = jar
+        .cookie_header(&url::Url::parse("https://example.com/cart/items").unwrap())
+        .unwrap_or_default();
     assert_eq!(export, "deep=1; root=1; tail=1");
 }
 

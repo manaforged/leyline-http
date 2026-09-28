@@ -1,4 +1,3 @@
-use http::Uri;
 use url::Url;
 
 use crate::FetchSite;
@@ -7,6 +6,7 @@ use std::sync::Arc;
 
 use crate::profile::Preset;
 
+use self::journey::{Journey, redirect_location};
 use super::Session;
 use crate::core::body::Body;
 use crate::core::config::TimeoutConfig;
@@ -14,11 +14,12 @@ use crate::core::deadline::Deadline;
 use crate::core::error::{Error, Kind, Result};
 use crate::core::headers::HeaderList;
 use crate::core::response::Response;
-use crate::core::{ProxyConfig, RedirectAction, RedirectAttempt, RedirectPolicy};
+use crate::core::{ProxyConfig, RedirectPolicy};
 use crate::trace;
-use crate::util::{redact, redact_userinfo};
+use crate::util::{redact, without_userinfo};
 
 mod headers;
+mod journey;
 mod response;
 
 pub(crate) struct Attempt {
@@ -84,7 +85,7 @@ impl Session {
             url: raw_url,
             preset,
             body,
-            headers: mut extra_headers,
+            headers: extra_headers,
             deadline,
             stream_response,
             proxy: request_proxy,
@@ -92,211 +93,67 @@ impl Session {
             redirect,
         } = attempt;
         let redirect_policy = redirect.as_ref().unwrap_or(&self.inner.redirect_policy);
-        let raw_url = raw_url.as_str();
         let request_proxy = request_proxy.as_ref();
         let header_order = header_order.as_deref();
-        let mut current_url = {
-            let mut cache = lock(&self.inner.url_cache);
-            match cache.as_mut() {
-                Some((raw, parsed)) if raw == raw_url => Arc::clone(parsed),
-                _ => {
-                    let parsed =
-                        Arc::new(Url::parse(raw_url).map_err(crate::core::Error::from_url_parse)?);
-                    *cache = Some((raw_url.to_string(), Arc::clone(&parsed)));
-                    parsed
-                }
-            }
-        };
-        let original_origin = url_origin(&current_url);
-        let caller_referrer = extra_headers
-            .as_ref()
-            .and_then(|h| h.get("referer"))
-            .and_then(|v| v.to_str().ok())
-            .filter(|r| !r.is_empty())
-            .map(str::to_owned);
-        let referrer = caller_referrer
-            .clone()
-            .unwrap_or_else(|| format!("{original_origin}/"));
-        let initiator = Url::parse(&referrer).ok();
-        let mut tainted = false;
-        let mut current_method = method.to_string();
-        let mut current_body = body;
-        let mut redirect_chain = Vec::new();
-        let mut acc_timing = crate::core::ResponseTiming::accumulator();
+        let mut journey = Journey::begin(
+            self.resolve_url(&raw_url)?,
+            method.to_string(),
+            body,
+            extra_headers,
+        );
 
         let redirect_cap = redirect_policy.max_redirects_hint();
         for _ in 0..=redirect_cap {
-            let origin = url_origin(&current_url);
-            let referer = referer_for(Some(&referrer), &origin);
-            let fetch_site = fetch_site_for(initiator.as_ref(), &redirect_chain, &current_url);
-            let strip_sensitive = !redirect_chain.is_empty() && origin != original_origin;
-            let request_origin = if tainted {
-                "null"
-            } else {
-                original_origin.as_str()
-            };
-            let headers = self.attempt_headers(
-                preset,
-                RequestContext {
-                    origin: request_origin,
-                    referer: &referer,
-                    fetch_site,
-                },
-                &current_url,
-                &current_method,
-                &redirect_chain,
-                &current_body,
-                extra_headers.as_ref(),
-                strip_sensitive,
-                header_order,
-            );
+            let headers = self.leg_headers(&journey, preset, header_order);
+            let audit_headers = self.audit_copy(&headers);
 
-            let want_introspect = self.inner.audit_tls.is_some();
-            let audit_headers: Vec<(String, String)> = if want_introspect {
-                headers
-                    .iter()
-                    .map(|(k, v)| (k.to_string(), v.to_string()))
-                    .collect()
-            } else {
-                Vec::new()
-            };
-
-            let step_body = std::mem::take(&mut current_body);
+            let step_body = std::mem::take(&mut journey.body);
             let replay_body = step_body.replay();
 
-            let proxy = self.proxy_for(&current_url, request_proxy)?;
+            let proxy = self.proxy_for(&journey.url, request_proxy)?;
             let send = self.send_with_policy(Prepared {
-                method: &current_method,
-                url: &current_url,
+                method: &journey.method,
+                url: &journey.url,
                 headers,
                 body: step_body,
                 proxy,
                 stream_response,
             });
-            let transport_resp = deadline.response_header(send).await?;
-            let status = transport_resp.status;
-            let resp_headers = transport_resp.headers;
-            let resp_trailers = transport_resp.trailers;
-            let resp_body_shape = transport_resp.body;
-            let final_url = transport_resp.final_url;
-            let response_version = transport_resp.version;
-            let tls = transport_resp.tls;
-            acc_timing.add_leg(&transport_resp.timing);
+            let leg = deadline.response_header(send).await?;
+            journey.timing.add_leg(&leg.timing);
 
-            self.store_cookies(&resp_headers, &current_url);
+            self.store_cookies(&leg.headers, &journey.url);
             #[cfg(feature = "http3")]
-            if let Some(host) = current_url.host_str()
-                && let Some(port) = current_url.port_or_known_default()
+            self.note_alt_svc(&journey.url, &leg.headers);
+
+            let code = leg.status.as_u16();
+            if let Some(location) = redirect_location(code, &leg.headers)
+                && let Some(hop) = journey.approved_hop(redirect_policy, code, &location)
             {
-                for (_, v) in resp_headers.iter().filter(|(k, _)| *k == "alt-svc") {
-                    self.inner.pool.note_alt_svc(
-                        host,
-                        port,
-                        &String::from_utf8_lossy(v.as_bytes()),
-                    );
-                }
+                drop(leg.body);
+                journey.follow(hop, code, &location, replay_body)?;
+                continue;
             }
 
-            let code = status.as_u16();
-            if matches!(code, 301 | 302 | 303 | 307 | 308)
-                && let Some(location) = resp_headers
-                    .iter()
-                    .find(|(k, _)| *k == "location")
-                    .map(|(_, v)| String::from_utf8_lossy(v.as_bytes()).into_owned())
-            {
-                let attempt_url: Uri = current_url.as_str().parse().unwrap_or_default();
-                let action = redirect_policy.action(RedirectAttempt {
-                    status: code,
-                    url: &attempt_url,
-                    location: Some(location.as_str()),
-                    previous: &redirect_chain,
-                });
-                if action == RedirectAction::Stop {
-                } else {
-                    drop(resp_body_shape);
-                    redirect_chain.push(redact_userinfo(current_url.as_str()));
-                    let from_origin = url_origin(&current_url);
-                    current_url = Arc::new(
-                        current_url
-                            .join(&location)
-                            .map_err(crate::core::Error::from_url_parse)?,
-                    );
-                    let to_origin = url_origin(&current_url);
-                    tainted |= from_origin != to_origin && original_origin != to_origin;
-                    if let (Some(caller), Some(extra)) =
-                        (caller_referrer.as_deref(), extra_headers.as_mut())
-                    {
-                        extra.remove_all("referer");
-                        let hop_referer = referer_for(Some(caller), &to_origin);
-                        if !hop_referer.is_empty() {
-                            extra.set("referer", hop_referer)?;
-                        }
-                    }
-                    if !matches!(current_url.scheme(), "http" | "https") {
-                        return Err(Error::new(Kind::Redirect).with_message(format!(
-                            "refusing to follow redirect to non-http(s) scheme `{}`",
-                            current_url.scheme()
-                        )));
-                    }
-
-                    if rewrites_to_get(code, &current_method) {
-                        current_method = "GET".to_string();
-                        current_body = Body::default();
-                        if let Some(extra) = extra_headers.as_mut() {
-                            extra.remove_where(|name| {
-                                let name = name.as_str();
-                                name.starts_with("content-") || name == "transfer-encoding"
-                            });
-                        }
-                    } else if let Some(replay) = replay_body {
-                        current_body = replay;
-                    } else {
-                        return Err(Error::new(Kind::Redirect).with_message(format!(
-                            "cannot follow {code} redirect: streaming request bodies are \
-                             not replayable. Buffer the body before sending, or set \
-                             RedirectPolicy::none()."
-                        )));
-                    }
-                    continue;
-                }
-            }
-
-            let (final_body, final_headers) = self
-                .finalize_response_body(resp_body_shape, resp_headers, stream_response, &deadline)
-                .await?;
-
-            return Ok(Response {
-                status,
-                headers: final_headers.into_iter().collect(),
-                body: final_body,
-                url: final_url,
-                redirect_chain,
-                version: response_version,
-                trailers: resp_trailers,
-                request_headers: audit_headers,
-                tls,
-                request_method: if self.inner.audit_tls.is_some() {
-                    current_method.clone()
-                } else {
-                    String::new()
-                },
-                audit_tls: self.inner.audit_tls.clone(),
-                audit_cache: std::sync::OnceLock::new(),
-                compression: self.inner.compression,
-                timing: acc_timing,
-            });
+            return self
+                .assemble_response(leg, journey, audit_headers, stream_response, &deadline)
+                .await;
         }
 
         Err(Error::new(Kind::Redirect)
-            .with_message(format!("too many redirects (max {})", redirect_cap)))
+            .with_message(format!("too many redirects (max {redirect_cap})")))
     }
-}
 
-fn rewrites_to_get(code: u16, method: &str) -> bool {
-    match code {
-        301 | 302 => method.eq_ignore_ascii_case("POST"),
-        303 => !method.eq_ignore_ascii_case("HEAD"),
-        _ => false,
+    fn resolve_url(&self, raw_url: &str) -> Result<Arc<Url>> {
+        let mut cache = lock(&self.inner.url_cache);
+        match cache.as_mut() {
+            Some((raw, parsed)) if raw == raw_url => Ok(Arc::clone(parsed)),
+            _ => {
+                let parsed = Arc::new(Url::parse(raw_url).map_err(Error::from_url_parse)?);
+                *cache = Some((raw_url.to_string(), Arc::clone(&parsed)));
+                Ok(parsed)
+            }
+        }
     }
 }
 
@@ -306,12 +163,11 @@ pub(super) struct RequestContext<'a> {
     pub(super) fetch_site: FetchSite,
 }
 
-fn fetch_site_for(initiator: Option<&Url>, chain: &[String], current: &Url) -> FetchSite {
+fn fetch_site_for(initiator: Option<&Url>, chain: &[Url], current: &Url) -> FetchSite {
     let Some(initiator) = initiator else {
         return FetchSite::CrossSite;
     };
-    let hops: Vec<Url> = chain.iter().filter_map(|u| Url::parse(u).ok()).collect();
-    FetchSite::across(initiator, hops.iter().chain(std::iter::once(current)))
+    FetchSite::across(initiator, chain.iter().chain(std::iter::once(current)))
 }
 
 fn url_origin(url: &Url) -> String {
@@ -326,7 +182,7 @@ fn referer_for(prev: Option<&str>, current_origin: &str) -> String {
     let Some(prev) = prev else {
         return format!("{current_origin}/");
     };
-    let Ok(mut parsed) = Url::parse(prev) else {
+    let Ok(parsed) = Url::parse(prev) else {
         return format!("{current_origin}/");
     };
     if parsed.scheme() == "https" && !current_origin.starts_with("https:") {
@@ -336,8 +192,7 @@ fn referer_for(prev: Option<&str>, current_origin: &str) -> String {
         let origin = url_origin(&parsed);
         return format!("{origin}/");
     }
-    let _ = parsed.set_username("");
-    let _ = parsed.set_password(None);
+    let mut parsed = without_userinfo(parsed);
     parsed.set_fragment(None);
     parsed.to_string()
 }

@@ -1,9 +1,25 @@
+use std::fmt;
+
 use crate::audit::hash12;
+use crate::trace::masked;
 
 pub struct Ja4hInput<'a> {
     pub method: &'a str,
     pub http_version: &'a str,
     pub headers: &'a [(String, String)],
+}
+
+impl fmt::Debug for Ja4hInput<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Ja4hInput")
+            .field("method", &self.method)
+            .field("http_version", &self.http_version)
+            .field(
+                "headers",
+                &masked(self.headers.iter().map(|(k, v)| (k.as_str(), v.as_bytes()))),
+            )
+            .finish()
+    }
 }
 
 pub fn compute_ja4h(input: &Ja4hInput<'_>) -> String {

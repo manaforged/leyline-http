@@ -4,7 +4,7 @@ use std::fmt;
 use std::io;
 
 use http::StatusCode;
-use http::Uri;
+use url::Url;
 
 use crate::h2::H2Error;
 use crate::h2::error::ErrorCode;
@@ -65,7 +65,7 @@ impl fmt::Display for Kind {
 struct Inner {
     kind: Kind,
     source: Option<Source>,
-    url: Option<Uri>,
+    url: Option<Url>,
     status: Option<StatusCode>,
     message: Option<Cow<'static, str>>,
     alpn: Option<String>,
@@ -94,7 +94,7 @@ impl Error {
         self
     }
 
-    pub(crate) fn with_url(mut self, url: Uri) -> Self {
+    pub(crate) fn with_url(mut self, url: Url) -> Self {
         self.inner.url = Some(url);
         self
     }
@@ -126,7 +126,7 @@ impl Error {
         self.inner.status
     }
 
-    pub fn url(&self) -> Option<&Uri> {
+    pub fn url(&self) -> Option<&Url> {
         self.inner.url.as_ref()
     }
 
@@ -252,7 +252,7 @@ impl fmt::Display for Error {
             write!(f, ": {message}")?;
         }
         if let Some(url) = &self.inner.url {
-            write!(f, " for {}", crate::util::redact(&url.to_string()))?;
+            write!(f, " for {}", crate::util::redact(url.as_str()))?;
         }
         Ok(())
     }
@@ -266,7 +266,7 @@ impl fmt::Debug for Error {
             out.field("status", &status.as_u16());
         }
         if let Some(url) = &self.inner.url {
-            out.field("url", &crate::util::redact(&url.to_string()));
+            out.field("url", &crate::util::redact(url.as_str()));
         }
         if let Some(message) = &self.inner.message {
             out.field("message", message);

@@ -17,6 +17,7 @@ use crate::tls::{FingerprintConnector, TlsIo};
 use crate::core::WebSocketConfig;
 use crate::core::error::{Error, Kind, Result};
 
+mod debug;
 mod handshake;
 mod split;
 

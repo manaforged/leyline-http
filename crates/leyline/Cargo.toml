@@ -47,7 +47,6 @@ default = [
     "compression-deflate",
     "compression-zstd",
     "multipart",
-    "stream",
     "websocket",
     "http3",
 ]
@@ -62,17 +61,13 @@ compression-gzip = ["dep:flate2"]
 compression-brotli = ["dep:brotli"]
 compression-deflate = ["dep:flate2"]
 compression-zstd = ["dep:zstd"]
-multipart = ["stream"]
-stream = []
+multipart = []
 websocket = ["dep:tokio-tungstenite"]
 http3 = ["dep:leyline-quiche"]
 socks = []
 # Exposes pub bench-only probes into otherwise pub(crate) pool internals
 # (checkout + evict path). Off by default; only leyline-benches enables it.
 bench-internals = []
-# Exposes the BoringSSL `SslContextBuilder` behind `TlsContext`. Off by default;
-# the BoringSSL types are not covered by this crate's semver promise.
-unstable-bssl = []
 tower = ["dep:tower-service"]
 full = [
     "compression-gzip",
@@ -80,7 +75,6 @@ full = [
     "compression-deflate",
     "compression-zstd",
     "multipart",
-    "stream",
     "websocket",
     "http3",
     "tower",

@@ -5,9 +5,8 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use leyline::Platform;
-use leyline::profile::BrowserProfile;
-use leyline::tls::{FingerprintConnector, ResolveFuture, Resolver, TlsError, TlsTrustConfig};
+use leyline::tls::{FingerprintConnector, ResolveFuture, Resolver};
+use leyline::{BrowserProfile, Platform, TlsError, TlsTrustConfig};
 use leyline_bssl::asn1::Asn1Time;
 use leyline_bssl::bn::{BigNum, MsbOption};
 use leyline_bssl::hash::MessageDigest;

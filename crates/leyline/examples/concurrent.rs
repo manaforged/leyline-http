@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use std::time::Instant;
 
 use http::StatusCode;
@@ -10,19 +9,17 @@ async fn main() -> leyline::Result<()> {
         .nth(1)
         .unwrap_or_else(|| "https://tls.peet.ws/api/all".to_string());
 
-    let session = Arc::new(
-        Session::builder()
-            .browser(Browser::Chrome147)
-            .platform(Platform::Linux)
-            .build()?,
-    );
+    let session = Session::builder()
+        .browser(Browser::Chrome147)
+        .platform(Platform::Linux)
+        .build()?;
 
     let n = 50usize;
     let started = Instant::now();
 
     let mut handles = Vec::with_capacity(n);
     for i in 0..n {
-        let session = Arc::clone(&session);
+        let session = session.clone();
         let url = url.clone();
         handles.push(tokio::spawn(async move {
             let resp = session.get(&url).await?;

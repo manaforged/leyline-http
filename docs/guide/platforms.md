@@ -19,7 +19,8 @@ The build needs these tools:
   Linux, and the MSVC build tools on Windows.
 - libclang, because `bindgen` generates the bindings at build time.
 - NASM on Windows, for the BoringSSL assembly.
-- Git, to fetch the BoringSSL submodule in a source checkout.
+- Git. The BoringSSL build applies Leyline's patches with `git apply`, and a
+  source checkout fetches the BoringSSL submodule with it.
 
 On Windows, install Visual Studio Build Tools with the C++ workload, which
 includes CMake. Install LLVM and NASM. Then:

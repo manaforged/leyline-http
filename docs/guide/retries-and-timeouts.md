@@ -117,7 +117,7 @@ A streaming request body is never retried, whatever the method. See
 | --- | --- | --- |
 | `total` | `Some(300 s)` | Wall clock for one `send`, covering every redirect, retry, backoff sleep, and buffered body read. On expiry the call returns `Kind::Timeout`. `total(None)` removes the limit, for example for a long poll. |
 | `connect` | `Some(10 s)` | DNS, TCP connect, and TLS setup for one new connection, over `http` or `https`. One request spends at most one connect window. Pooled reuse is not covered. |
-| `read` | `None` | Idle limit for each body read: the longest gap between two chunks. It applies to a streamed body and to a buffered body that Leyline drains from a stream. A body that the transport reads before the head resolves falls under `response_header` and `total`. `total` stays the limit for the whole body. |
+| `read` | `None` | Idle limit for each body read: the longest gap between two chunks. It applies to a streamed body and to a buffered body that Leyline drains from a stream. A body that the transport reads before the head resolves falls under `response_header` and `total`. `total` also bounds a buffered body; a streamed body has only `read`. |
 | `response_header` | `None` | Wait from dispatch start until the transport response resolves, per redirect: connection acquisition, DNS and TLS setup, and request transmission are inside this window. |
 
 ```rust,no_run

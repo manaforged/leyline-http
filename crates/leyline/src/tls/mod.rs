@@ -1,6 +1,6 @@
-mod builder;
+pub(crate) mod builder;
 mod connector;
-mod error;
+pub(crate) mod error;
 mod happy_eyeballs;
 mod hello;
 mod keylog;
@@ -11,15 +11,15 @@ pub(crate) mod proxy;
 mod resolver;
 mod session_cache;
 mod stream;
-mod trust;
+pub(crate) mod trust;
 #[cfg(windows)]
 mod windows_trust;
 
-pub use builder::TlsMinVersion;
-pub use error::TlsError;
+pub(crate) use error::TlsError;
 pub use happy_eyeballs::HappyEyeballsConfig;
 pub use resolver::{ResolveFuture, Resolver, SystemResolver};
-pub use trust::{ClientIdentity, TlsTrustConfig};
+pub use trust::ClientIdentity;
+pub(crate) use trust::TlsTrustConfig;
 
 #[cfg(feature = "bench-internals")]
 #[doc(hidden)]
@@ -27,9 +27,11 @@ pub use connector::FingerprintConnector;
 #[cfg(not(feature = "bench-internals"))]
 pub(crate) use connector::FingerprintConnector;
 
+#[cfg(any(feature = "http3", feature = "bench-internals", leyline_unstable_bssl))]
+pub(crate) use builder::TlsMinVersion;
 #[cfg(feature = "http3")]
 pub(crate) use builder::apply_tls_with_trust;
-#[cfg(any(feature = "unstable-bssl", feature = "bench-internals"))]
+#[cfg(any(leyline_unstable_bssl, feature = "bench-internals"))]
 pub(crate) use builder::build_ssl_context;
 #[cfg(feature = "http3")]
 pub(crate) use hello::HelloOptions;
@@ -43,16 +45,19 @@ pub(crate) use stream::TlsStream;
 #[cfg(feature = "http3")]
 pub(crate) use trust::install_verifier_ctx;
 
-#[cfg(any(feature = "unstable-bssl", feature = "bench-internals"))]
+#[cfg(any(leyline_unstable_bssl, feature = "bench-internals"))]
 pub struct TlsContext(
     #[cfg_attr(
-        not(feature = "unstable-bssl"),
-        expect(dead_code, reason = "read only through the unstable-bssl accessors")
+        not(leyline_unstable_bssl),
+        expect(
+            dead_code,
+            reason = "read only through the leyline_unstable_bssl accessors"
+        )
     )]
     leyline_bssl::ssl::SslContextBuilder,
 );
 
-#[cfg(any(feature = "unstable-bssl", feature = "bench-internals"))]
+#[cfg(any(leyline_unstable_bssl, feature = "bench-internals"))]
 impl TlsContext {
     pub fn from_profile(
         profile: &crate::profile::BrowserProfile,
@@ -61,12 +66,12 @@ impl TlsContext {
         build_ssl_context(profile, min_version).map(Self)
     }
 
-    #[cfg(feature = "unstable-bssl")]
+    #[cfg(leyline_unstable_bssl)]
     pub fn builder_mut(&mut self) -> &mut leyline_bssl::ssl::SslContextBuilder {
         &mut self.0
     }
 
-    #[cfg(feature = "unstable-bssl")]
+    #[cfg(leyline_unstable_bssl)]
     pub fn into_inner(self) -> leyline_bssl::ssl::SslContextBuilder {
         self.0
     }

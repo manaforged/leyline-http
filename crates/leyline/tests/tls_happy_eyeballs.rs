@@ -3,11 +3,10 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use leyline::profile::BrowserProfile;
 use leyline::tls::{
     FingerprintConnector, HappyEyeballsConfig, ResolveFuture, Resolver, SystemResolver,
 };
-use leyline::{Browser, Platform, Session, SocketConfig, TlsError, TlsTrustConfig};
+use leyline::{Browser, BrowserProfile, Platform, Session, SocketConfig, TlsError, TlsTrustConfig};
 
 struct StaticResolver(Vec<SocketAddr>);
 

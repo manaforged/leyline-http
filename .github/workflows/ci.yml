@@ -274,11 +274,11 @@ jobs:
         with:
           toolchain: stable
 
-      # docs.rs builds the published crate with default features on
+      # docs.rs builds the published crate with the `full` feature on
       # x86_64-unknown-linux-gnu; any rustdoc warning breaks that build, so
       # fail here first. leyline-quiche is excluded like verify.sh.
       - name: rustdoc (docs.rs conditions)
-        run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps -p leyline-http -p leyline-bssl -p leyline-bssl-tokio -p leyline-bssl-sys
+        run: DOCS_RS=1 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --features leyline-http/full -p leyline-http -p leyline-bssl -p leyline-bssl-tokio -p leyline-bssl-sys
 
       # Doctests compile the README's rust blocks and every ```rust fence in
       # the API docs against the real public API — drift between docs and

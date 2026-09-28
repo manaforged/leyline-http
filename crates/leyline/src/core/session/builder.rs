@@ -16,6 +16,7 @@ use super::{Identity, ProtocolPolicy, Session, SessionInner};
 use crate::core::error::{Error, Kind, Result};
 
 pub(super) mod connect;
+mod debug;
 
 #[must_use = "builders are lazy: nothing happens until `.send()` / `.build()`"]
 pub struct SessionBuilder {

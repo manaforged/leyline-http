@@ -136,7 +136,7 @@ add `emulator`. The build fails when a family has no such profile. A
 is Chrome 154. You can pin the product line instead of a version:
 
 ```rust
-use leyline::profile::{Browser, Family};
+use leyline::{Browser, Family};
 
 let chrome = Browser::latest(Family::Chrome);
 ```

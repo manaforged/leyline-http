@@ -1,8 +1,8 @@
 # Streaming
 
 Stream when a body is larger than you want in memory, or when you want to act
-on the first bytes before the last ones arrive. The `stream` feature is on by
-default. The examples in this chapter also need `bytes`, `futures-util`, and
+on the first bytes before the last ones arrive. Streaming needs no feature.
+The examples in this chapter also need `bytes`, `futures-util`, and
 `tokio-util` with the `io` feature in your manifest.
 
 ## Stream a request body

@@ -76,8 +76,9 @@ rejected. The jar is the store: read it with
 
 ## Redirect chain
 
-`url()` is the final URL. `redirect_chain()` lists the URLs visited on the way,
-in order, and is empty when nothing redirected.
+`url()` returns the final URL as a `&url::Url`. `redirect_chain()` returns the
+URLs visited on the way as a `&[url::Url]`, in order, and is empty when nothing
+redirected. The chain holds each URL without its user name and password.
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
@@ -87,6 +88,9 @@ for hop in resp.redirect_chain() {
     println!("via {hop}");
 }
 println!("landed on {}", resp.url());
+if resp.url().host_str() != Some("example.com") {
+    println!("left the site");
+}
 # Ok(())
 # }
 ```
@@ -147,7 +151,8 @@ println!("{written} bytes");
 
 `error_for_status()` consumes the response and returns an error whose kind is
 `Kind::Status` for any status at or above 400. The error carries the code as a
-`StatusCode` and the URL; `Display` redacts the password.
+`StatusCode` and the request URL as a `url::Url`. `Display` and `Debug` hide
+the password and the query.
 
 `error_for_status_ref()` makes the same check on a borrowed response and
 returns `Ok(&Response)`. Use it when you need the headers or the body of an
@@ -228,6 +233,14 @@ if let Some(a) = resp.audit() {
 
 See [Fingerprints](fingerprints.md) for what each field means and how far to
 trust it.
+
+## Print a response
+
+`{:?}` prints the status, version, URL, redirect chain, headers, trailers,
+request headers, and timing. It does not print the body. The URL and each entry
+in the redirect chain print with the password and the query hidden. The value of
+an `Authorization`, `Proxy-Authorization`, `Cookie`, or `Set-Cookie` header
+prints as `***` wherever it appears.
 
 ## Next
 

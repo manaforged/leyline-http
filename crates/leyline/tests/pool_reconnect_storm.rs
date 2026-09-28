@@ -4,8 +4,9 @@ use std::time::Duration;
 
 use leyline::h2::H2Config;
 use leyline::pool::Pool;
-use leyline::profile::{Browser, Platform, ProfileRegistry};
+use leyline::profile::ProfileRegistry;
 use leyline::tls::FingerprintConnector;
+use leyline::{Browser, Platform};
 use tokio::net::TcpListener;
 
 fn bare_connector() -> FingerprintConnector {
@@ -75,7 +76,7 @@ async fn coalesced_h2_connect_failure_shares_one_retry() {
         assert!(
             matches!(
                 err.tls(),
-                Some(leyline::tls::TlsError::HandshakeIo(_) | leyline::tls::TlsError::Rejected(_))
+                Some(leyline::TlsError::HandshakeIo(_) | leyline::TlsError::Rejected(_))
             ),
             "coalescing must preserve the typed TLS handshake I/O failure, got {err:?}"
         );

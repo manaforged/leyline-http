@@ -7,7 +7,7 @@ use http::{Request as HttpRequest, Response as HttpResponse};
 use crate::core::body::Body;
 use crate::core::{Kind, Response, Result, Session};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct LeylineService {
     session: Session,
 }

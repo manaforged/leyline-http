@@ -7,8 +7,9 @@ use std::time::Duration;
 
 use futures_util::StreamExt;
 use leyline::pool::{H1Body, H1Response, H1ResponseBody, H1Target, Pool, send_request_h1_pooled};
-use leyline::profile::{Browser, Platform, ProfileRegistry};
+use leyline::profile::ProfileRegistry;
 use leyline::tls::FingerprintConnector;
+use leyline::{Browser, Platform};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 fn connector() -> FingerprintConnector {

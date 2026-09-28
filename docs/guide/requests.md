@@ -79,7 +79,7 @@ Two methods override the header order:
   immediately after `user-agent`.
 
 ```rust,no_run
-use leyline::profile::HeaderAnchor;
+use leyline::HeaderAnchor;
 
 # async fn run() -> leyline::Result<()> {
 let session = leyline::Session::new();

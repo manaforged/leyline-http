@@ -103,6 +103,7 @@ pub(crate) mod tcp;
 mod util;
 
 pub use http;
+pub use url::Url;
 
 #[cfg(feature = "tower")]
 pub use crate::core::LeylineService;
@@ -123,9 +124,12 @@ pub mod multipart {
 }
 
 use crate::profile::ProfileRegistry;
-pub use crate::profile::{
-    Browser, BrowserProfile, ChromiumBrand, Family, HeaderAnchor, Platform, Preset,
-};
+pub use crate::profile::anchor::HeaderAnchor;
+pub use crate::profile::brand::ChromiumBrand;
+pub use crate::profile::browser::{Browser, Family};
+pub use crate::profile::platform::Platform;
+pub use crate::profile::preset::Preset;
+pub use crate::profile::types::BrowserProfile;
 
 pub use crate::tcp::TcpProfile;
 
@@ -138,9 +142,11 @@ pub use crate::quic::H3Config;
 #[cfg(feature = "websocket")]
 pub use crate::core::{CloseFrame, WsConnection, WsMessage, WsSink, WsStream};
 
-#[cfg(any(feature = "unstable-bssl", feature = "bench-internals"))]
+#[cfg(any(leyline_unstable_bssl, feature = "bench-internals"))]
 pub use crate::tls::TlsContext;
-pub use crate::tls::{TlsError, TlsMinVersion, TlsTrustConfig};
+pub use crate::tls::builder::TlsMinVersion;
+pub use crate::tls::error::TlsError;
+pub use crate::tls::trust::TlsTrustConfig;
 
 impl Browser {
     pub fn profile(self) -> &'static BrowserProfile {

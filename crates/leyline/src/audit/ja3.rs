@@ -1,5 +1,6 @@
 use crate::audit::{non_grease_cipher_ids, non_grease_curve_ids, non_grease_ext_ids};
 
+#[derive(Debug)]
 pub struct Ja3Input<'a> {
     pub ciphers: &'a [String],
     pub curves: &'a [String],

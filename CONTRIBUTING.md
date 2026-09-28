@@ -12,9 +12,10 @@
    warnings denied, the workspace test suite, `cargo-deny`, package and
    consumer checks, and with `--full` the live fingerprint and smoke
    suites. The vendored `leyline-quiche` crate is excluded from the
-   clippy, rustdoc, and test gates; the vendored `leyline-bssl*` crates
-   still gate. The gate needs Python 3, Node, rustup (the toolchain comes from
-   `rust-toolchain.toml`), and `cargo-deny`. Every build compiles BoringSSL
+   clippy, rustdoc, and test gates. The `leyline-bssl*` crates sit outside
+   the workspace: the package gate packages them, and their own tests run
+   with `cargo test --manifest-path crates/<crate>/Cargo.toml`. The gate needs Python 3, Node, rustup (the toolchain comes from
+   `rust-toolchain.toml`), `cargo-deny`, and `cargo-truesight`. Every build compiles BoringSSL
    from source, so it also needs CMake 3.22 or later, a C and C++ compiler,
    and libclang; on Windows, the MSVC build tools and NASM. The live suites
    need network access.
@@ -24,8 +25,9 @@
    `crates/leyline-bssl-sys/PROVENANCE.md`.
 
    Tests that need the network are marked `#[ignore]`. Run them with
-   `cargo nextest run -p leyline-http --run-ignored all` when your change
-   touches a browser profile or the TLS, HTTP/2, or HTTP/3 wire path.
+   `cargo test -p leyline-http --features full -- --include-ignored`
+   when your change touches a browser profile or the TLS, HTTP/2, or
+   HTTP/3 wire path.
 
 2. Keep the change to one topic. A bug fix, its regression test, and its
    changelog line are one pull request.
@@ -106,6 +108,19 @@ an advisory applies to a fork's base version. The workflow then fails, and
 GitHub notifies the maintainers. A BoringSSL revision behind Chrome's, a newer
 upstream release, or a vendor API error is only reported in the run log. A new release is captured on request with
 the capture scripts above; nothing is captured on a schedule.
+
+## Releasing
+
+crates.io rejects a crate whose dependencies it does not have yet, so the
+five crates publish in dependency order:
+
+1. `leyline-bssl-sys`
+2. `leyline-bssl`
+3. `leyline-bssl-tokio` and `leyline-quiche`
+4. `leyline-http`
+
+`./scripts/verify.sh --full` passes on the release commit first. Its package
+gate packages all five crates together.
 
 ## Style
 

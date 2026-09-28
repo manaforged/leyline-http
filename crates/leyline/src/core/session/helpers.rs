@@ -6,7 +6,9 @@ use crate::profile::{Browser, Platform, Preset};
 use super::{Session, SessionBuilder};
 use crate::core::request::RequestBuilder;
 use crate::core::retry::RetryPolicy;
-use crate::core::{Body, IntoUrl, ProxyConfig, RedirectPolicy, Response, Result, TimeoutConfig};
+use crate::core::{
+    Body, IntoUrl, ProxyConfig, ProxyUrl, RedirectPolicy, Response, Result, TimeoutConfig,
+};
 
 impl Session {
     pub fn builder() -> SessionBuilder {
@@ -34,8 +36,8 @@ impl Session {
         self.derive(|inner| inner.proxy_config = config)
     }
 
-    pub fn proxy_url(&self) -> Option<String> {
-        self.inner.proxy_config.primary().map(str::to_owned)
+    pub fn proxy_url(&self) -> Option<ProxyUrl> {
+        self.inner.proxy_config.primary().map(ProxyUrl::configured)
     }
 
     pub fn fresh_pool(&self) -> Self {

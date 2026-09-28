@@ -23,7 +23,7 @@ pub enum TlsMinVersion {
     Tls13,
 }
 
-#[cfg(any(feature = "unstable-bssl", feature = "bench-internals"))]
+#[cfg(any(leyline_unstable_bssl, feature = "bench-internals"))]
 pub(crate) fn build_ssl_context(
     profile: &BrowserProfile,
     min_version: TlsMinVersion,

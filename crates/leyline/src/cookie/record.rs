@@ -10,7 +10,7 @@ pub enum SameSite {
     None,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Cookie {
     pub name: String,
@@ -27,6 +27,22 @@ pub struct Cookie {
     #[serde(skip, default = "SystemTime::now")]
     pub(crate) last_access: SystemTime,
     pub host_only: bool,
+}
+
+impl std::fmt::Debug for Cookie {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Cookie")
+            .field("name", &self.name)
+            .field("value", &"***")
+            .field("domain", &self.domain)
+            .field("path", &self.path)
+            .field("secure", &self.secure)
+            .field("http_only", &self.http_only)
+            .field("same_site", &self.same_site)
+            .field("expires", &self.expires)
+            .field("host_only", &self.host_only)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Cookie {

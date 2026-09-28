@@ -21,9 +21,21 @@ pub(crate) struct HeaderEntry {
     pub anchor: Option<HeaderAnchor>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Clone, Default, PartialEq, Eq)]
 pub struct HeaderList {
     inner: Vec<HeaderEntry>,
+}
+
+impl std::fmt::Debug for HeaderList {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list()
+            .entries(crate::trace::masked(
+                self.inner
+                    .iter()
+                    .map(|entry| (entry.name.as_str(), entry.value.as_bytes())),
+            ))
+            .finish()
+    }
 }
 
 impl HeaderList {

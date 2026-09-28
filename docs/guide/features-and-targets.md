@@ -4,8 +4,9 @@
 
 The package is `leyline-http` and the library is `leyline`. These features are
 on by default: `charset`, `compression-gzip`, `compression-brotli`,
-`compression-deflate`, `compression-zstd`, `multipart`, `stream`, `websocket`,
-and `http3`. The cookie jar and system trust-store loading always compile.
+`compression-deflate`, `compression-zstd`, `multipart`, `websocket`, and
+`http3`. The cookie jar, system trust-store loading, and streaming bodies
+always compile.
 
 | Feature | Default | What it changes |
 | --- | --- | --- |
@@ -14,15 +15,13 @@ and `http3`. The cookie jar and system trust-store loading always compile.
 | `compression-brotli` | yes | Brotli bodies and the Brotli certificate decompressor. Pulls in `brotli`. |
 | `compression-deflate` | yes | deflate bodies and the zlib certificate decompressor. Pulls in `flate2`. |
 | `compression-zstd` | yes | zstd bodies and the zstd certificate decompressor. Pulls in `zstd`. |
-| `multipart` | yes | Adds `leyline::multipart` and `RequestBuilder::multipart`. Pulls in `stream` and `async-stream`. |
-| `stream` | yes | Streaming request and response bodies. |
+| `multipart` | yes | Adds `leyline::multipart` and `RequestBuilder::multipart`. |
 | `websocket` | yes | Adds `Session::websocket` and the `Ws*` types. Pulls in tungstenite. |
 | `http3` | yes | Adds the `Http3` and `Race` policies, and `leyline-quiche`. |
 | `socks` | no | SOCKS5 proxy tunnels. Without it, `build()` accepts a `socks5://` proxy URL and the first request fails. |
 | `tower` | no | Adds `LeylineService`, a `tower_service::Service` over a session. |
-| `unstable-bssl` | no | Exposes the BoringSSL `SslContextBuilder` behind `TlsContext`. The BoringSSL types are outside this crate's semver promise. |
-| `bench-internals` | no | Exposes pool probes for the benchmark crate. Not for application use. |
-| `full` | no | Every feature above except `bench-internals` and `unstable-bssl`. |
+| `bench-internals` | no | Makes internal modules and functions public for Leyline's own tests, benches, and fuzz targets. Not for application use. |
+| `full` | no | Every feature above except `bench-internals`. |
 
 Each compression flag pulls in its own codec crate and gates two things: the
 HTTP body path and the matching RFC 8879 certificate decompressor in the TLS
@@ -36,8 +35,12 @@ Turn everything off and add back what you need:
 
 ```toml
 [dependencies]
-leyline-http = { version = "0.1", default-features = false, features = ["stream", "socks"] }
+leyline-http = { version = "0.1", default-features = false, features = ["compression-brotli", "socks"] }
 ```
+
+Build with `RUSTFLAGS="--cfg leyline_unstable_bssl"` to reach the BoringSSL
+`SslContextBuilder` behind `TlsContext`. This is a compiler flag, not a Cargo
+feature, and it is outside the semver promise.
 
 ## BoringSSL build
 

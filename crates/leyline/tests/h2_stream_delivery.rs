@@ -6,10 +6,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::BytesMut;
+use leyline::BrowserProfile;
 use leyline::h2::connection::PseudoHeaders;
 use leyline::h2::frame::{FrameType, PingFrame, RstStreamFrame};
 use leyline::h2::{ErrorCode, H2Client, H2Config, Head, RequestBody, ResponseBody};
-use leyline::profile::BrowserProfile;
 use support::{
     read_frame, read_preface, write_data, write_raw_headers, write_response_headers,
     write_server_settings, write_settings_ack,

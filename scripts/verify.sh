@@ -147,13 +147,13 @@ g_features() {
 }
 
 g_doc() {
-    step "cargo doc (workspace, excluding vendored leyline-quiche)"
-    RUSTDOCFLAGS="-D warnings" cargo doc \
-        --workspace \
-        --exclude leyline-quiche \
+    step "rustdoc as docs.rs runs it (DOCS_RS=1, feature full)"
+    DOCS_RS=1 RUSTDOCFLAGS="-D warnings" CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/docs-rs" cargo doc \
         --no-deps \
-        || fail "rustdoc warnings"
-    ok "docs clean"
+        --features leyline-http/full \
+        -p leyline-http -p leyline-bssl -p leyline-bssl-tokio -p leyline-bssl-sys \
+        || fail "rustdoc fails under docs.rs conditions"
+    ok "docs.rs build clean"
 }
 
 g_api() {

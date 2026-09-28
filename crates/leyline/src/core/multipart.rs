@@ -8,6 +8,8 @@ use futures_util::{Stream, TryFutureExt};
 
 use crate::core::body::{Body, BodyKind};
 
+mod debug;
+
 pub struct Part {
     pub(crate) name: String,
     pub(crate) body: Body,

@@ -108,12 +108,13 @@ release can add a newer browser capture and move this default. To keep a
 fixed fingerprint, pin the browser:
 
 ```rust,no_run
-use leyline::{Browser, Platform, Session};
+use leyline::{Browser, Platform, ProtocolPolicy, Session};
 
 # fn main() -> leyline::Result<()> {
 let session = Session::builder()
     .browser(Browser::Chrome150)
     .platform(Platform::MacOS)
+    .protocol(ProtocolPolicy::Race)
     .build()?;
 # drop(session);
 # Ok(())

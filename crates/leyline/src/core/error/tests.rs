@@ -148,7 +148,7 @@ fn display_names_the_kind_and_appends_the_url() {
 
     let with_url = Error::new(Kind::Status)
         .with_status(http::StatusCode::NOT_FOUND)
-        .with_url("https://example.test/a".parse().expect("uri"));
+        .with_url("https://example.test/a".parse().expect("url"));
     assert_eq!(
         with_url.to_string(),
         "status 404 for https://example.test/a"
@@ -162,7 +162,7 @@ fn display_names_the_kind_and_appends_the_url() {
 fn without_url_drops_the_url_from_display() {
     let err = Error::new(Kind::Request)
         .with_message("boom")
-        .with_url("https://example.test/a".parse().expect("uri"));
+        .with_url("https://example.test/a".parse().expect("url"));
     assert!(err.to_string().contains("example.test"));
     let bare = err.without_url();
     assert!(bare.url().is_none());
@@ -172,7 +172,7 @@ fn without_url_drops_the_url_from_display() {
 #[test]
 fn debug_redacts_userinfo() {
     let err = Error::new(Kind::Request)
-        .with_url("https://user:pass@example.test/a".parse().expect("uri"));
+        .with_url("https://user:pass@example.test/a".parse().expect("url"));
     let text = format!("{err:?}");
     assert!(!text.contains("user:pass"), "userinfo leaked: {text}");
     assert!(

@@ -4,8 +4,8 @@ use leyline::audit::{
     Ja3Input, Ja4Input, Ja4hInput, compute_ja3, compute_ja4, compute_ja4h, compute_ja4t,
 };
 use leyline::fuzz::extension_ids;
-use leyline::Platform;
-use leyline::profile::{Browser, ProfileRegistry};
+use leyline::profile::ProfileRegistry;
+use leyline::{Browser, Platform};
 
 fn chrome_147_inputs() -> (Vec<String>, Vec<String>, Vec<String>, Vec<u16>) {
     let profiles = ProfileRegistry::builtin();

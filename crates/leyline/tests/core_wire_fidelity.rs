@@ -1,8 +1,7 @@
 #[path = "core_support/raw_server.rs"]
 mod raw_server;
 
-use leyline::profile::{HeaderAnchor, Preset};
-use leyline::{Browser, ChromiumBrand, Platform, ProtocolPolicy, Session};
+use leyline::{Browser, ChromiumBrand, HeaderAnchor, Platform, Preset, ProtocolPolicy, Session};
 use raw_server::{RawResponse, RawServer};
 
 #[tokio::test]

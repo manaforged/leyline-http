@@ -1,6 +1,10 @@
+use std::fmt;
+
 use super::Session;
 use crate::core::error::{Error, Kind, Result};
 use crate::core::{IntoParamPair, IntoUrl, ProxyConfig, WebSocketConfig};
+use crate::trace::masked;
+use crate::util::without_userinfo;
 
 impl Session {
     pub fn websocket(&self, url: impl IntoUrl) -> WebSocketBuilder {
@@ -83,6 +87,24 @@ pub struct WebSocketBuilder {
     config: WebSocketConfig,
     proxy: Option<ProxyConfig>,
     headers: Vec<(String, String)>,
+}
+
+impl fmt::Debug for WebSocketBuilder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let url = self
+            .url
+            .as_ref()
+            .map(|url| without_userinfo(url.clone()).to_string());
+        f.debug_struct("WebSocketBuilder")
+            .field("url", &url)
+            .field("config", &self.config)
+            .field("proxy", &self.proxy)
+            .field(
+                "headers",
+                &masked(self.headers.iter().map(|(k, v)| (k.as_str(), v.as_bytes()))),
+            )
+            .finish_non_exhaustive()
+    }
 }
 
 impl WebSocketBuilder {

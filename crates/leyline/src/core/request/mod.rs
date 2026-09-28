@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 mod compress;
+mod debug;
 mod encode;
 mod send;
 

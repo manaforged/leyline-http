@@ -8,7 +8,7 @@ change or a higher minimum Rust version needs a new minor release, such as
 `0.2.0`. The BoringSSL crates `leyline-bssl`, `leyline-bssl-sys`, and
 `leyline-bssl-tokio` share this version and publish as separate crates.
 
-## 0.1.0 - 2026-09-25
+## Unreleased
 
 First public release.
 
@@ -32,6 +32,15 @@ First public release.
 - The [API reference](docs/reference/leyline-http/index.md) lists every
   public item, generated from the compiler. Within `0.1.x`, the list changes
   only by addition.
+- Each public type has one path. `Browser`, `BrowserProfile`, `Platform`,
+  `TlsTrustConfig`, and the other session types live at the crate root.
+- Every URL the API returns is a `url::Url`, re-exported as `leyline::Url`:
+  `Response::url`, `Response::redirect_chain`, `Error::url`, and
+  `RedirectAttempt::url`.
+- Every public type implements `Debug`.
+- The BoringSSL `SslContextBuilder` behind `TlsContext` is outside semver and
+  needs `RUSTFLAGS="--cfg leyline_unstable_bssl"`, so a dependency cannot
+  turn it on for you. Streaming needs no feature.
 
 ### Added
 
@@ -116,3 +125,8 @@ First public release.
   floods close the connection.
 - A plain-HTTP origin cannot shadow a Secure cookie (RFC 6265bis), and
   `ProxyUrl` and error messages redact credentials and query strings.
+- `Debug` output never prints a password, token, cookie value, or query
+  string. `Response`, `DigestAuth`, `Cookie`, `HeaderList`, the builders, the
+  trace events, and the `leyline::trace` log mask them.
+  `Session::proxy_url` returns a `ProxyUrl`, whose `Display` hides the
+  password.

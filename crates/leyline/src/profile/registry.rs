@@ -73,6 +73,20 @@ pub struct ProfileRegistry {
     profiles: HashMap<(String, u32), Arc<BrowserProfile>>,
 }
 
+impl std::fmt::Debug for ProfileRegistry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut keys: Vec<(&str, u32)> = self
+            .profiles
+            .keys()
+            .map(|(browser, version)| (browser.as_str(), *version))
+            .collect();
+        keys.sort_unstable();
+        f.debug_struct("ProfileRegistry")
+            .field("profiles", &keys)
+            .finish_non_exhaustive()
+    }
+}
+
 static BUILTIN: LazyLock<ProfileRegistry> = LazyLock::new(ProfileRegistry::builtin);
 
 impl ProfileRegistry {

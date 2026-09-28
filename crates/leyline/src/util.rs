@@ -1,13 +1,5 @@
 #![forbid(unsafe_code)]
 pub(crate) fn redact(raw: &str) -> String {
-    mask(raw, true)
-}
-
-pub(crate) fn redact_userinfo(raw: &str) -> String {
-    mask(raw, false)
-}
-
-fn mask(raw: &str, query: bool) -> String {
     let Ok(mut parsed) = url::Url::parse(raw) else {
         return raw.to_string();
     };
@@ -18,7 +10,7 @@ fn mask(raw: &str, query: bool) -> String {
     } else {
         false
     };
-    if query && (parsed.query().is_some() || parsed.fragment().is_some()) {
+    if parsed.query().is_some() || parsed.fragment().is_some() {
         if parsed.query().is_some() {
             parsed.set_query(Some("***"));
         }
@@ -30,6 +22,39 @@ fn mask(raw: &str, query: bool) -> String {
     } else {
         raw.to_string()
     }
+}
+
+pub(crate) fn without_userinfo(mut url: url::Url) -> url::Url {
+    let _ = url.set_username("");
+    let _ = url.set_password(None);
+    url
+}
+
+pub(crate) fn redact_target(target: &str) -> String {
+    match target.split_once('?') {
+        Some((path, _)) => format!("{path}?***"),
+        None => target.to_owned(),
+    }
+}
+
+pub(crate) fn request_target(url: &url::Url) -> String {
+    match url.query() {
+        Some(query) => format!("{}?{query}", url.path()),
+        None => url.path().to_owned(),
+    }
+}
+
+const SENSITIVE_HEADERS: [&str; 4] = [
+    "authorization",
+    "proxy-authorization",
+    "cookie",
+    "set-cookie",
+];
+
+pub(crate) fn sensitive_header(name: &str) -> bool {
+    SENSITIVE_HEADERS
+        .iter()
+        .any(|s| name.eq_ignore_ascii_case(s))
 }
 
 pub(crate) fn proxy_basic_auth(proxy: &url::Url) -> Option<String> {

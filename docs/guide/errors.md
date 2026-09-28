@@ -6,7 +6,10 @@ lists what each `Kind` means.
 
 ## Match on the kind
 
-`Kind` is `#[non_exhaustive]`, so a `match` needs a wildcard arm.
+`Kind` is `#[non_exhaustive]`, so a `match` needs a wildcard arm. Test
+`is_timeout()` before the kind: a connect timeout reports `Kind::Connect`
+and a stalled body read reports `Kind::Io`, and `is_timeout()` is true for
+both.
 
 ```rust,no_run
 use leyline::{Kind, Session};
@@ -15,8 +18,8 @@ use leyline::{Kind, Session};
 let session = Session::new();
 match session.get("https://example.com/").await {
     Ok(resp) => println!("{}", resp.status()),
+    Err(err) if err.is_timeout() => eprintln!("timed out: {err}"),
     Err(err) => match err.kind() {
-        Kind::Timeout => eprintln!("timed out: {err}"),
         Kind::Connect | Kind::Tls | Kind::Proxy => eprintln!("no connection: {err}"),
         Kind::Config | Kind::Url => eprintln!("fix the request: {err}"),
         _ => eprintln!("request failed: {err}"),
@@ -83,5 +86,16 @@ Other errors are not retried. `RetryPolicy::transient()` has both triggers. See 
 `err.io()` returns the `std::io::Error`, when that is the source. Match
 `TlsError::Rejected` for a peer that closed or reset the handshake, and
 `TlsError::Certificate { verify_code, reason, .. }` for a failed certificate
-check. `err.url()`
-returns the request URL.
+check. `err.url()` returns the request URL as an `Option<&url::Url>`. `Display`
+and `Debug` show it with the password and the query hidden.
+
+```rust,no_run
+# async fn run() {
+let session = leyline::Session::new();
+if let Err(err) = session.get("https://example.com/").await {
+    if let Some(url) = err.url() {
+        eprintln!("failed on {}", url.host_str().unwrap_or("?"));
+    }
+}
+# }
+```

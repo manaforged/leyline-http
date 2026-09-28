@@ -10,7 +10,7 @@ async fn main() {
             if text.len() > 100 {
                 println!("Body: {}... ({} bytes)", &text[..100], text.len());
             }
-            println!("\nThat's it. One function call. No Session, no Builder, no config.");
+            println!("\nThat's it: the default Chrome profile, no builder, no config.");
         }
         Err(e) => eprintln!("Error: {e}"),
     }

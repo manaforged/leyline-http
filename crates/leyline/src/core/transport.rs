@@ -4,8 +4,6 @@ use bytes::Bytes;
 use http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 
 use crate::h2::config::H2Config;
-use crate::h2::connection::PseudoHeaders;
-use crate::header_str::HeaderStr;
 use crate::pool::Pool;
 use crate::profile::preset::HeaderPair;
 use crate::tls::FingerprintConnector;
@@ -16,6 +14,7 @@ use crate::core::error::{Error, Kind, Result};
 use crate::core::response::HttpVersion;
 
 mod h1;
+mod h2;
 
 #[cfg(feature = "websocket")]
 pub(crate) use h1::h1_error_to_core;
@@ -61,7 +60,7 @@ pub(crate) struct TransportResponse {
     pub(crate) headers: Vec<(HeaderName, HeaderValue)>,
     pub(crate) trailers: Vec<(HeaderName, HeaderValue)>,
     pub(crate) body: TransportBody,
-    pub(crate) final_url: String,
+    pub(crate) final_url: url::Url,
     pub(crate) version: HttpVersion,
     pub(crate) tls: Option<crate::pool::TlsInfo>,
     pub(crate) timing: crate::core::ResponseTiming,
@@ -177,51 +176,8 @@ pub(crate) async fn send_request_h2(
         proxy,
         stream_response,
     } = req;
-    if url.scheme() != "https" {
-        return Err(Error::new(Kind::Config).with_message("HTTP/2 requires an https:// URL"));
-    }
-
-    let host = url
-        .host_str()
-        .ok_or_else(|| Error::new(Kind::Config).with_message("no host in URL"))?;
-    let port = url.port_or_known_default().unwrap_or(443);
-
-    let path = url.path();
-    let query = url.query();
-    let pseudo = PseudoHeaders {
-        method: match method {
-            "GET" => HeaderStr::from_static("GET"),
-            "HEAD" => HeaderStr::from_static("HEAD"),
-            "POST" => HeaderStr::from_static("POST"),
-            "PUT" => HeaderStr::from_static("PUT"),
-            "DELETE" => HeaderStr::from_static("DELETE"),
-            "OPTIONS" => HeaderStr::from_static("OPTIONS"),
-            "PATCH" => HeaderStr::from_static("PATCH"),
-            "TRACE" => HeaderStr::from_static("TRACE"),
-            "CONNECT" => HeaderStr::from_static("CONNECT"),
-            m => HeaderStr::from(m),
-        },
-        scheme: HeaderStr::from_static("https"),
-        authority: if port == 443 {
-            HeaderStr::from(host)
-        } else {
-            HeaderStr::from(format!("{host}:{port}"))
-        },
-        path: HeaderStr::from(match query {
-            Some(q) => {
-                let mut target = String::with_capacity(path.len() + q.len() + 1);
-                target.push_str(path);
-                target.push('?');
-                target.push_str(q);
-                target
-            }
-            None => path.to_owned(),
-        }),
-        protocol: None,
-    };
-
+    let pseudo = h2::request_pseudo(method, url)?;
     strip_connection_specific_headers(&mut headers)?;
-
     let (resp, tls, timing) = crate::pool::send_request(
         pool,
         connector,
@@ -233,24 +189,7 @@ pub(crate) async fn send_request_h2(
         stream_response,
     )
     .await?;
-
-    let transport_body = match resp.body {
-        crate::h2::client::ResponseBody::Buffered(b) => TransportBody::Buffered(b),
-        crate::h2::client::ResponseBody::Streaming(rx) => {
-            TransportBody::Streaming(BodyStream::new(rx))
-        }
-    };
-
-    Ok(TransportResponse {
-        status: status(resp.status)?,
-        headers: adopt(resp.headers),
-        trailers: adopt(resp.trailers.unwrap_or_default()),
-        body: transport_body,
-        final_url: url.as_str().to_owned(),
-        version: HttpVersion::Http2,
-        tls: Some(tls),
-        timing,
-    })
+    h2::transport_response(resp, tls, timing, url)
 }
 
 pub(crate) fn check_framing(headers: &[HeaderPair]) -> Result<()> {
@@ -321,9 +260,7 @@ pub(crate) async fn send_request_h3(
     } else {
         format!("{host}:{port}")
     };
-    let path = url.path();
-    let query = url.query().map(|q| format!("?{q}")).unwrap_or_default();
-    let full_path = format!("{path}{query}");
+    let full_path = crate::util::request_target(url);
 
     strip_connection_specific_headers(&mut headers)?;
 
@@ -358,7 +295,7 @@ pub(crate) async fn send_request_h3(
         headers: adopt(resp.headers),
         trailers: adopt(resp.trailers),
         body: transport_body,
-        final_url: url.as_str().to_owned(),
+        final_url: url.clone(),
         version: HttpVersion::Http3,
         tls: Some(tls),
         timing: crate::core::ResponseTiming::default(),

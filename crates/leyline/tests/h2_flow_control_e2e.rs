@@ -5,12 +5,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::BytesMut;
+use leyline::BrowserProfile;
 use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
 use leyline::h2::connection::PseudoHeaders;
 use leyline::h2::frame::{DataFrame, FrameType, HeadersFrame, PingFrame};
 use leyline::h2::hpack;
 use leyline::h2::{Head, RequestBody, ResponseBody};
-use leyline::profile::BrowserProfile;
 use support::*;
 use tokio::io::AsyncWriteExt;
 use tokio::time::{sleep, timeout};

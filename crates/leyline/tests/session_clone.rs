@@ -25,7 +25,7 @@ fn session_reports_the_exit_it_is_bound_to() {
     assert!(session.proxy_url().is_none());
     let bound = session.with_proxy("http://user:pw@127.0.0.1:9000");
     assert_eq!(
-        bound.proxy_url().as_deref(),
+        bound.proxy_url().map(String::from).as_deref(),
         Some("http://user:pw@127.0.0.1:9000")
     );
 }

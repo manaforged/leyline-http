@@ -3,8 +3,9 @@
     reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
 )]
 use leyline::pool::{H1Body, H1PooledError, H1Target, Pool, send_request_h1_pooled};
-use leyline::profile::{Browser, Platform, ProfileRegistry};
+use leyline::profile::ProfileRegistry;
 use leyline::tls::FingerprintConnector;
+use leyline::{Browser, Platform};
 use std::sync::Arc;
 
 fn connector() -> FingerprintConnector {

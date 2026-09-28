@@ -102,6 +102,10 @@ and carries these BoringSSL patches:
 - `0003-leyline-tls12-extensions.patch`: `SSL_set_tls12_extensions`, which
   keeps `extended_master_secret` and `renegotiation_info` in a ClientHello
   whose minimum version is TLS 1.3, as in Firefox's QUIC ClientHello.
+- `0004-leyline-grease-signature-algorithms.patch`:
+  `SSL_CTX_set_grease_signature_algorithms`, which adds a GREASE value to the
+  ClientHello's `signature_algorithms` list when a profile sets
+  `sigalg_grease`.
 - `0005-leyline-extension-tail.patch`: `SSL_CTX_set_extension_tail`, which
   keeps the listed extensions last, in order, when `permute_extensions`
   shuffles the ClientHello, as in Firefox's QUIC ClientHello.
@@ -129,6 +133,12 @@ compiles it from source and links it statically. The full license text
 (Apache-2.0 plus the BSD-3-Clause Go notice) is at
 `crates/leyline-bssl-sys/LICENSE-BORINGSSL`, and the MIT binding-glue grant at
 `crates/leyline-bssl-sys/LICENSE-MIT`.
+
+The package also ships BoringSSL's `third_party` code, each with its license
+file under `deps/boringssl/third_party/`: fiat-crypto (Apache-2.0), which is
+compiled into the library, and googletest (BSD-3-Clause) and Google Benchmark
+(Apache-2.0), which serve BoringSSL's own tests and benchmarks and are not
+linked into the built libraries.
 
 ================================================================================
 Runtime dependencies pulled from crates.io

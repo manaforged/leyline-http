@@ -1,3 +1,4 @@
+use std::fmt;
 use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -5,6 +6,11 @@ use std::time::{Duration, Instant};
 
 use crate::{Error, HttpVersion};
 
+mod headers;
+
+pub(crate) use headers::masked;
+
+#[derive(Debug)]
 #[non_exhaustive]
 pub struct Dns<'a> {
     pub id: u64,
@@ -14,6 +20,7 @@ pub struct Dns<'a> {
     pub elapsed: Duration,
 }
 
+#[derive(Debug)]
 #[non_exhaustive]
 pub struct Connect<'a> {
     pub id: u64,
@@ -23,6 +30,7 @@ pub struct Connect<'a> {
     pub elapsed: Duration,
 }
 
+#[derive(Debug)]
 #[non_exhaustive]
 pub struct Tls<'a> {
     pub id: u64,
@@ -43,6 +51,19 @@ pub struct Sent<'a> {
     pub elapsed: Duration,
 }
 
+impl std::fmt::Debug for Sent<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Sent")
+            .field("id", &self.id)
+            .field("host", &self.host)
+            .field("method", &self.method)
+            .field("path", &crate::util::redact_target(self.path))
+            .field("protocol", &self.protocol)
+            .field("elapsed", &self.elapsed)
+            .finish()
+    }
+}
+
 #[non_exhaustive]
 pub struct Head<'a> {
     pub id: u64,
@@ -53,6 +74,23 @@ pub struct Head<'a> {
     pub headers: &'a http::HeaderMap,
 }
 
+impl fmt::Debug for Head<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Head")
+            .field("id", &self.id)
+            .field("host", &self.host)
+            .field("status", &self.status)
+            .field("protocol", &self.protocol)
+            .field("elapsed", &self.elapsed)
+            .field(
+                "headers",
+                &masked(self.headers.iter().map(|(k, v)| (k.as_str(), v.as_bytes()))),
+            )
+            .finish()
+    }
+}
+
+#[derive(Debug)]
 #[non_exhaustive]
 pub struct Done<'a> {
     pub id: u64,
@@ -231,7 +269,7 @@ impl Trace for TracingTrace {
     }
 
     fn sent(&self, ev: &Sent<'_>) {
-        tracing::debug!(target: "leyline::trace", id = ev.id, host = ev.host, method = ev.method, path = ev.path, protocol = ?ev.protocol, elapsed_ms = ms(ev.elapsed), "sent");
+        tracing::debug!(target: "leyline::trace", id = ev.id, host = ev.host, method = ev.method, path = %crate::util::redact_target(ev.path), protocol = ?ev.protocol, elapsed_ms = ms(ev.elapsed), "sent");
     }
 
     fn head(&self, ev: &Head<'_>) {

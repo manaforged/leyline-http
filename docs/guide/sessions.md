@@ -32,9 +32,10 @@ session impersonates nothing.
 
 ## Choose a browser
 
-The `Browser` enum lists every bundled profile: Chrome 145 to 154, Brave 146
-and 154, Firefox 148 to 156, Safari 18 and 26, Safari on iOS 17 and iOS 18, OkHttp on
-Android 10, and the CFNetwork stacks on iOS 18 and macOS 26.
+The `Browser` enum has a variant for each bundled profile: Chrome, Brave,
+Firefox, Safari on macOS and iOS, OkHttp on Android, and the CFNetwork stacks
+on iOS and macOS. The [API reference](../reference/leyline-http/leyline.md#browser)
+lists every variant.
 
 These helpers select a profile without naming a variant:
 

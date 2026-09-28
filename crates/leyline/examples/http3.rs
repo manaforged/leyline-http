@@ -1,5 +1,4 @@
-use leyline::profile::Browser;
-use leyline::{ProtocolPolicy, Session};
+use leyline::{Browser, ProtocolPolicy, Session};
 
 const URL: &str = "https://cloudflare.com";
 

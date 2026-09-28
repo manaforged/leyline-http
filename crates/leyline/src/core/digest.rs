@@ -7,10 +7,18 @@ mod scan;
 
 use scan::{Pair, pairs};
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct DigestAuth {
     pub(crate) username: String,
     pub(crate) password: String,
+}
+
+impl std::fmt::Debug for DigestAuth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DigestAuth")
+            .field("username", &self.username)
+            .finish_non_exhaustive()
+    }
 }
 
 impl DigestAuth {

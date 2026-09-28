@@ -249,10 +249,6 @@ impl Jar {
         }
     }
 
-    pub fn export_cookies(&self, url: &Url) -> String {
-        self.cookie_header(url).unwrap_or_default()
-    }
-
     pub fn clear(&self) {
         let mut jar = lock(&self.inner);
         jar.cookies.clear();

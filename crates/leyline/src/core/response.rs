@@ -1,31 +1,20 @@
+use std::fmt;
 use std::sync::{Arc, OnceLock};
 
 use bytes::Bytes;
 use http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
+use url::Url;
 
 use crate::core::body_stream::BodyStream;
 use crate::core::error::{Error, Kind, Result};
 use crate::core::session::decompress::{Decoder, decompress_body, drain_stream_into_vec};
+use crate::trace::masked;
+use crate::util::redact;
 
 pub(crate) enum ResponseBody {
     Buffered(Vec<u8>),
     Streaming(BodyStream),
     Taken,
-}
-
-impl std::fmt::Debug for ResponseBody {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Buffered(b) => f
-                .debug_struct("ResponseBody::Buffered")
-                .field("len", &b.len())
-                .finish(),
-            Self::Streaming(_) => f
-                .debug_struct("ResponseBody::Streaming")
-                .finish_non_exhaustive(),
-            Self::Taken => f.debug_struct("ResponseBody::Taken").finish(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,15 +86,14 @@ impl ResponseTiming {
     }
 }
 
-#[derive(Debug)]
 pub struct Response {
     pub(crate) status: StatusCode,
     pub(crate) version: HttpVersion,
     pub(crate) headers: HeaderMap,
     pub(crate) trailers: Vec<(HeaderName, HeaderValue)>,
     pub(crate) body: ResponseBody,
-    pub(crate) url: String,
-    pub(crate) redirect_chain: Vec<String>,
+    pub(crate) url: Url,
+    pub(crate) redirect_chain: Vec<Url>,
     pub(crate) request_headers: Vec<(String, String)>,
     pub(crate) tls: Option<crate::pool::TlsInfo>,
     pub(crate) request_method: String,
@@ -128,11 +116,11 @@ impl Response {
         &self.timing
     }
 
-    pub fn url(&self) -> &str {
+    pub fn url(&self) -> &Url {
         &self.url
     }
 
-    pub fn redirect_chain(&self) -> &[String] {
+    pub fn redirect_chain(&self) -> &[Url] {
         &self.redirect_chain
     }
 
@@ -145,12 +133,12 @@ impl Response {
     }
 
     pub fn cookies(&self) -> impl Iterator<Item = crate::cookie::Cookie> + '_ {
-        let url = url::Url::parse(&self.url).ok();
+        let url = &self.url;
         self.headers
             .get_all(http::header::SET_COOKIE)
             .iter()
             .filter_map(move |value| {
-                crate::cookie::parse::parse_set_cookie(value.to_str().ok()?, url.as_ref()?)
+                crate::cookie::parse::parse_set_cookie(value.to_str().ok()?, url)
             })
     }
 
@@ -268,11 +256,11 @@ impl Response {
         if self.status.as_u16() < 400 {
             return None;
         }
-        let err = Error::new(Kind::Status).with_status(self.status);
-        Some(match self.url.parse::<http::Uri>() {
-            Ok(uri) => err.with_url(uri),
-            Err(_) => err,
-        })
+        Some(
+            Error::new(Kind::Status)
+                .with_status(self.status)
+                .with_url(self.url.clone()),
+        )
     }
 
     pub fn audit(&self) -> Option<&crate::audit::AuditData> {
@@ -326,6 +314,43 @@ impl Response {
             out.truncate(limit);
         }
         Ok(out)
+    }
+}
+
+impl fmt::Debug for Response {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let chain: Vec<String> = self
+            .redirect_chain
+            .iter()
+            .map(|url| redact(url.as_str()))
+            .collect();
+        f.debug_struct("Response")
+            .field("status", &self.status)
+            .field("version", &self.version)
+            .field("url", &redact(self.url.as_str()))
+            .field("redirect_chain", &chain)
+            .field(
+                "headers",
+                &masked(self.headers.iter().map(|(k, v)| (k.as_str(), v.as_bytes()))),
+            )
+            .field(
+                "trailers",
+                &masked(
+                    self.trailers
+                        .iter()
+                        .map(|(k, v)| (k.as_str(), v.as_bytes())),
+                ),
+            )
+            .field(
+                "request_headers",
+                &masked(
+                    self.request_headers
+                        .iter()
+                        .map(|(k, v)| (k.as_str(), v.as_bytes())),
+                ),
+            )
+            .field("timing", &self.timing)
+            .finish_non_exhaustive()
     }
 }
 

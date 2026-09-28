@@ -32,6 +32,10 @@ impl ProxyUrl {
         Ok(Self(raw.to_string()))
     }
 
+    pub(crate) fn configured(raw: &str) -> Self {
+        Self(raw.to_owned())
+    }
+
     fn parse_inner(raw: &str) -> crate::core::Result<url::Url> {
         url::Url::parse(raw).map_err(|e| {
             crate::core::Error::new(Kind::Config).with_message(format!("invalid proxy URL: {e}"))

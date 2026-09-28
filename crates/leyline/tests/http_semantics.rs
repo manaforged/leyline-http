@@ -104,7 +104,7 @@ async fn redirect_follows_and_rewrites_url() {
         "expected 3 redirects in chain"
     );
     assert!(
-        resp.url().ends_with("/get"),
+        resp.url().path().ends_with("/get"),
         "final URL wrong: {}",
         resp.url()
     );

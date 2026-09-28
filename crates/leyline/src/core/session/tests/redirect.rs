@@ -74,13 +74,17 @@ async fn redirect_retains_url_when_another_request_replaces_cache() {
         .send()
         .await
         .unwrap();
-    assert_eq!(other.url(), format!("{origin}/other?second=2"));
+    assert_eq!(other.url().as_str(), format!("{origin}/other?second=2"));
     assert_eq!(other.text().await.unwrap(), "other");
     let response = initial.await.unwrap();
-    assert_eq!(response.url(), format!("{origin}/done?first=1"));
+    assert_eq!(response.url().as_str(), format!("{origin}/done?first=1"));
     assert_eq!(
-        response.redirect_chain(),
-        &[format!("{origin}/start?first=1")]
+        response
+            .redirect_chain()
+            .iter()
+            .map(url::Url::as_str)
+            .collect::<Vec<_>>(),
+        [format!("{origin}/start?first=1")]
     );
     assert_eq!(response.text().await.unwrap(), "done");
     server.await.unwrap();
