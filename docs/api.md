@@ -313,7 +313,9 @@ semver promise.
 - A second body reader for a job on this page (`text_utf8`, `into_text`,
   `as_bytes`, `download_to`), or a second `Content-Encoding` decoder.
 - A second cookie store, such as a per-response cookie map.
-- A getter that copies session configuration back out.
+- A getter that copies session configuration back out. The exceptions report
+  what a built session sends: `Session::identity`, and `Session::proxy_url`,
+  which returns the exit as a `ProxyUrl` whose `Display` hides the password.
 - A second timing, retry, or redirect owner.
 - A browser, version, or brand table in Rust. Profile data owns it.
 
