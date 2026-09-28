@@ -24,6 +24,37 @@ navigate = [
     ["accept-language", "{accept_language}"],
     ["priority", "u=0, i"],
 ]
+frame-navigate = [
+    ["sec-ch-ua", "{sec_ch_ua}"],
+    ["sec-ch-ua-mobile", "{sec_ch_ua_mobile}"],
+    ["sec-ch-ua-platform", '"{sec_ch_ua_platform}"'],
+    ["upgrade-insecure-requests", "1"],
+    ["user-agent", "{user_agent}"],
+    ["accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"],
+    ["sec-fetch-site", "{fetch_site}"],
+    ["sec-fetch-mode", "navigate"],
+    ["sec-fetch-dest", "iframe"],
+    ["referer", "{referer}"],
+    ["accept-encoding", "gzip, deflate, br, zstd"],
+    ["accept-language", "{accept_language}"],
+    ["priority", "u=0, i"],
+]
+reload = [
+    ["sec-ch-ua", "{sec_ch_ua}"],
+    ["sec-ch-ua-mobile", "{sec_ch_ua_mobile}"],
+    ["sec-ch-ua-platform", '"{sec_ch_ua_platform}"'],
+    ["cache-control", "max-age=0"],
+    ["upgrade-insecure-requests", "1"],
+    ["user-agent", "{user_agent}"],
+    ["accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"],
+    ["sec-fetch-site", "{fetch_site}"],
+    ["sec-fetch-mode", "navigate"],
+    ["sec-fetch-dest", "document"],
+    ["referer", "{referer}"],
+    ["accept-encoding", "gzip, deflate, br, zstd"],
+    ["accept-language", "{accept_language}"],
+    ["priority", "u=0, i"],
+]
 script = [
     ["sec-ch-ua-platform", '"{sec_ch_ua_platform}"'],
     ["user-agent", "{user_agent}"],

@@ -6,6 +6,8 @@ use serde::Deserialize;
 pub enum Preset {
     Native,
     Navigate,
+    FrameNavigate,
+    Reload,
     Script,
     Xhr,
     Form,
