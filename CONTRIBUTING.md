@@ -31,9 +31,8 @@
    changelog line are one pull request.
 
 3. If the change adds, removes, or changes a public item, run
-   `python3 scripts/generate-api.py` and commit `docs/reference/`. It needs
-   `cargo-public-api` 0.52.0 and the `nightly-2026-09-16` toolchain. The
-   release gate runs it with `--check`.
+   `cargo truesight sync` and commit `api/` and `docs/`. The release gate
+   runs `cargo truesight check`.
 
 4. Add a line under `Unreleased` in `CHANGELOG.md` when the change is
    visible to a user of the crate.
@@ -65,9 +64,9 @@ extension order. It puts each profile and dimension into one of five states:
   wire-exact there.
 - Unanchored: no reference value, so nothing is claimed.
 
-`docs/reference/leyline-http.md` is generated. Regenerate it with
-`python3 scripts/generate-api.py`. The release check runs
-`python3 scripts/generate-api.py --check` and fails when the page is stale.
+`api/leyline-http.txt`, `docs/reference/leyline-http/`, and `docs/llms.txt`
+are generated. Regenerate them with `cargo truesight sync`. The release
+check runs `cargo truesight check` and fails when a file is stale.
 `scripts/profile-oneshot.sh` captures new browser builds and lands their
 profiles; run it with `status` to see which versions are missing. It captures
 from these sources only:

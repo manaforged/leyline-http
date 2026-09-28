@@ -29,8 +29,8 @@ First public release.
 
 ### API contract
 
-- [docs/api.md](docs/api.md) lists every public type and function. The crate
-  root exposes only the items on that page. Within `0.1.x`, the page changes
+- The [API reference](docs/reference/leyline-http/index.md) lists every
+  public item, generated from the compiler. Within `0.1.x`, the list changes
   only by addition.
 
 ### Added

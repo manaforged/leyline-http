@@ -1,18 +1,15 @@
 # Leyline API
 
-**Locked.** This page is the public contract of `leyline-http` (import name
-`leyline`). Code, guides, bindings, and reviews follow it. A public item
-that is not on this page is private or deleted.
+**Locked.** This page and the [API reference](reference/leyline-http/index.md)
+are the public contract of `leyline-http` (import name `leyline`). Code,
+guides, bindings, and reviews follow them. The API reference lists every
+public item and maps each task to its one call. It is generated from the
+compiler, and `cargo truesight check` fails when it no longer matches the
+code.
 
-The modules `leyline::h2`, `leyline::pool`, and `leyline::fuzz` exist only
-with the `bench-internals` feature, for leyline's own tests, benches, and
-fuzz targets. They are not part of the contract. The same feature also makes
-`tls::FingerprintConnector`, `H3Config`, `TlsContext`, and these internal
-methods public for those tests: `ProfileRegistry::builtin` and `get_browser`;
-`BrowserProfile::load_warnings`, `identity_for`, `resolve_for_platform`, and
-`bare`; `Browser::chromium_major`; `Platform::identity_key`; and
-`Pool::bench_populate_h2` and `bench_probe`. None of them is part of the
-contract.
+The `bench-internals` and `unstable-bssl` features make internal items
+public for Leyline's own tests, benches, and fuzz targets. Those items are
+not part of the contract, and the API reference leaves them out.
 
 ## Frame (one)
 
@@ -64,129 +61,6 @@ let resp = session
 # Ok(())
 # }
 ```
-
-## Owners
-
-| Job | The one call | Internal owner |
-|---|---|---|
-| Default session | `Session::new()` | `SessionBuilder` |
-| Pick a browser | `SessionBuilder::browser(Browser)` | `profile::ProfileRegistry` |
-| Send a loaded profile | `SessionBuilder::profile(BrowserProfile)` | `profile::resolve_identity` |
-| Pick a platform | `SessionBuilder::platform(Platform)` | platform twins in the profile data |
-| Brand overlay | `SessionBuilder::brand(ChromiumBrand)` | brand table in the profile data |
-| Mix TLS and HTTP identities | `SessionBuilder::identity(Identity)` | `Identity` |
-| Session default headers | `SessionBuilder::headers(pairs)` | session header merge |
-| URL input | `impl IntoUrl`: `&str`, `String`, `&String`, `url::Url`, `&url::Url` | `IntoUrl::into_url` |
-| Build a request | `Session::request(Method, url)` and the verb shortcuts | `RequestBuilder` |
-| Prebuilt request | `Session::execute(http::Request<Body>)` | `RequestBuilder::send` |
-| Send | `RequestBuilder::send` or `.await` | `RequestBuilder::send` (the one retry loop) |
-| Headers | `RequestBuilder::header` (append) / `headers` (append each) | `HeaderList` |
-| Header order | `RequestBuilder::header_order`, `FingerprintSpec::header_order`, header shape `order` | `core::headers::reorder` |
-| `sec-fetch-site` value | `FetchSite::of(&Url, &Url)` | `core::fetch_site` |
-| Body | `body` / `json` / `form` / `multipart` | `Body` |
-| Query | `RequestBuilder::query` | `url::Url` |
-| Auth | `basic_auth` / `bearer_auth` / `digest_auth` | `core::digest` |
-| Timeout | `SessionBuilder::timeout(impl Into<TimeoutConfig>)`, `RequestBuilder::timeout(..)` | `core::deadline::Deadline` |
-| Retry | `SessionBuilder::retry(RetryPolicy)`, `RequestBuilder::retry`, `RetryPolicy::retry_on(impl IntoIterator<Item = RetryTrigger>)` | `RequestBuilder::send` loop |
-| Redirect | `SessionBuilder::redirect(RedirectPolicy)`, `RequestBuilder::redirect(RedirectPolicy)`, `Session::with_redirect(RedirectPolicy)` | redirect loop in `Session::execute_inner` |
-| Cookies | `SessionBuilder::cookie_jar(Jar)`, `Session::cookies()`, `Session::with_cookie_jar(Jar)` | `cookie::Jar`, one Set-Cookie parser |
-| Seed a cookie with attributes | `Jar::store_set_cookie(&str, &Url)` | `cookie::parse`, the same parser responses use |
-| Copy and merge a jar | `Jar::snapshot() -> Jar`, `Jar::extend_from(&Jar)` | `cookie::Jar` |
-| Remove cookies by name | `Jar::remove(&Url, &str) -> usize` (one host, every path), `Jar::remove_named(&str) -> usize` (every host) | `cookie::Jar` |
-| Identity values | `Browser::identity(Platform, Option<ChromiumBrand>) -> Option<PlatformIdentity>`; `Session::identity() -> SessionIdentity` (what a built session sends) | `profile::resolve_identity`, the one resolver the session builder also calls |
-| TCP fingerprint | `Platform::tcp_profile() -> TcpProfile`, `SessionBuilder::tcp_profile` | `profiles/platforms.toml` |
-| Proxy | `impl Into<ProxyConfig>` on `SessionBuilder::proxy`, `RequestBuilder::proxy`, `WebSocketBuilder::proxy`, `Session::with_proxy` | `ProxyConfig::proxy_for` |
-| DNS | `SessionBuilder::dns(impl Into<DnsConfig>)`, `DnsConfig::resolve_host(host, impl IntoIterator<Item = SocketAddr>)` | `DnsConfig` |
-| TLS trust | `SessionBuilder::tls_trust(TlsTrustConfig)` | `tls::trust` |
-| Protocol | `SessionBuilder::protocol(ProtocolPolicy)` | `transport_policy` |
-| Socket and connect tuning | `SessionBuilder::socket(SocketConfig)` | `FingerprintConnector` |
-| Pool | `SessionBuilder::pool(PoolConfig)`, `Session::pool_stats`, `Session::preconnect`, `Session::fresh_pool` | `pool` |
-| Decompress | automatic; `SessionBuilder::compression(CompressionConfig)` | `session::decompress::Decoder` |
-| Response body cap | `CompressionConfig::max_body_size` | the one limit that HTTP/1.1, HTTP/2, HTTP/3, and `Decoder` read |
-| Response headers | `Response::headers() -> &http::HeaderMap`, `Response::header(name)` | `Response` |
-| Read body | `text` / `bytes` / `json` / `into_stream` / `copy_to` / `read_until` | `Response::bytes` and `Decoder` |
-| Status check | `Response::error_for_status` (consume) / `error_for_status_ref` (borrow) | `Response::status_error` |
-| Response cookies | `Response::cookies()` (read-only, this response's Set-Cookie) | `cookie::parse` |
-| TLS details | `Response::tls() -> Option<&TlsInfo>`, ALPN through `Response::version()` | `TlsInfo` |
-| Errors | `Error::kind` | `core::error` |
-| Trace | `SessionBuilder::trace(impl Trace)`; `Sent` carries `method` and `path`; `Head` carries `headers: &http::HeaderMap` | `trace` |
-| Timing | `Response::timing` | `ResponseTiming` |
-| Fingerprint audit | `SessionBuilder::audit(true)`, `Response::audit`, `audit::compute_*` | `audit` |
-| WebSocket | `Session::websocket(url)` | `core::websocket` |
-| tower | `LeylineService::new(session)` | `Session::execute` |
-
-## Public surface
-
-Counts are public functions. Trait impls (`Default`, `Clone`, `Debug`,
-`Display`, `From`, `IntoFuture`, `Stream`, `tower_service::Service`) are not
-counted.
-
-### Root
-
-| Type | Functions | Count |
-|---|---|---:|
-| `Session` | `builder`, `new`, `get`, `post`, `put`, `patch`, `delete`, `head`, `request`, `execute(http::Request<Body>)`, `websocket`, `with_proxy(impl Into<ProxyConfig>)`, `fresh_pool`, `with_cookie_jar(Jar)`, `with_redirect(RedirectPolicy)`, `identity() -> SessionIdentity`, `cookies`, `pool_stats`, `preconnect(url)` | 19 |
-| `SessionBuilder` | `browser`, `profile(BrowserProfile)`, `platform`, `brand`, `identity`, `headers`, `proxy`, `timeout`, `retry`, `redirect`, `cookie_jar`, `dns`, `tls_trust`, `protocol`, `pool`, `socket`, `tcp_profile`, `compression`, `websocket_config`, `https_only`, `trace`, `audit`, `build` | 23 |
-| `RequestBuilder` | `header`, `headers`, `header_order`, `anchored`, `query`, `body`, `json`, `form`, `multipart`, `basic_auth`, `bearer_auth`, `digest_auth`, `timeout`, `retry`, `redirect(RedirectPolicy)`, `proxy`, `preset`, `stream`, `compress`, `send` | 20 |
-| `Response` | `status`, `version`, `url`, `headers`, `header`, `trailers`, `request_headers`, `redirect_chain`, `cookies`, `timing`, `tls`, `audit`, `content_length`, `error_for_status`, `error_for_status_ref`, `text`, `text_with_charset`, `bytes`, `json`, `into_stream`, `copy_to`, `read_until` | 22 |
-| `Body` | `stream(s, Option<u64>)`, `len_hint` | 2 |
-| `BodyStream` | `Stream` impl only | 0 |
-| `Error` | `kind`, `status`, `url`, `is_timeout`, `is_connect`, `is_status`, `is_retryable`, `tls`, `h2`, `io` | 10 |
-| `Kind`, `HttpVersion` | `as_str` | 2 |
-| `ResponseTiming`, `TlsInfo`, `PoolStats` | public fields, `#[non_exhaustive]` | 0 |
-| `HeaderList` | `new`, `append`, `set`, `get`, `iter`, `remove_all` | 6 |
-| `FetchSite` | `of(&Url, &Url)`, `as_str`; `Display` | 2 |
-| `HeaderAnchor` | root re-export of `profile::HeaderAnchor` | 0 |
-
-### Policy and config
-
-| Type | Functions | Count |
-|---|---|---:|
-| `TimeoutConfig` | `new`, `total`, `connect`, `read`, `response_header`; `From<Duration>` | 5 |
-| `RetryPolicy`, `RetryTrigger` | `none`, `transient`, `max_retries`, `initial_backoff`, `max_backoff`, `backoff_factor`, `jitter`, `max_retry_after`, `on_status`, `retry_on(impl IntoIterator<Item = RetryTrigger>)`, `allow_non_idempotent` | 11 |
-| `RedirectPolicy`, `RedirectAttempt`, `RedirectAction` | `limited`, `none`, `custom` | 3 |
-| `ProxyConfig`, `ProxyRule`, `ProxyUrl`, `NoProxy` | `ProxyConfig::new`, `rule`, `no_proxy`, `env(bool)`; `ProxyRule::all`, `http`, `https`; `ProxyUrl::parse`; `NoProxy::new`; `From<&str>`, `From<&String>`, `From<String>`, `From<ProxyUrl>` | 9 |
-| `DnsConfig` | `new`, `resolver`, `resolve_host(host, impl IntoIterator<Item = SocketAddr>)`; `From<Arc<dyn Resolver>>` | 3 |
-| `TlsTrustConfig` | `new`, `add_ca_file`, `add_ca_der`, `add_pinned_leaf_sha256`, `env_roots(bool)`, `system_roots(bool)`, `client_identity`, `danger_accept_invalid_certs(bool)` | 8 |
-| `ProtocolPolicy` | enum: `Auto`, `Http1`, `Http2`, `Http3`, `Race` | 0 |
-| `PoolConfig` | `new`, `idle_timeout`, `max_connections`, `max_h1_conns_per_host`, `keepalive`, `h2_ping_after_idle`, `h2_ping_timeout` | 7 |
-| `SocketConfig` | `new`, `local_address`, `local_ipv4`, `local_ipv6`, `tcp_nodelay`, `tcp_keepalive`, `tcp_keepalive_interval`, `tcp_keepalive_retries`, `tcp_user_timeout`, `send_buffer_size`, `recv_buffer_size`, `interface`, `strict`, `happy_eyeballs` | 14 |
-| `CompressionConfig`, `ContentEncoding` | `new`, `none`, `gzip`, `deflate`, `brotli`, `zstd`, `max_body_size` | 7 |
-| `TcpProfile` | public fields `ttl`, `mss`, `window_size`, `df`, `window_scale`, `no_delay`, `options`, `#[non_exhaustive]` | 0 |
-| `DigestAuth` | `new` | 1 |
-
-### Identity
-
-| Type | Functions | Count |
-|---|---|---:|
-| `Browser` | `get(family, version)`, `latest(Family)`, `all`, `family`, `version`, `profile`, `for_platform`, `identity(Platform, Option<ChromiumBrand>) -> Option<PlatformIdentity>` | 8 |
-| `Family`, `Platform`, `Preset` | enums; `Platform::detect_host`, `Platform::tcp_profile` | 2 |
-| `ChromiumBrand` | enum from `profiles/brands.toml`; `all`; `Display` writes the lowercase name (`chrome`, `edge`, `opera`); `FromStr` parses it without case, and an unknown name returns `Error` of kind `Config` | 1 |
-| `Identity` | `locked`, `rotate_tls`, `switch_family`, `http`, `tls`, `platform` | 6 |
-| `SessionIdentity` | `identity`, `browser`, `platform`, `brand`, `user_agent` | 5 |
-| `BrowserProfile` | `from_toml`, `from_fingerprint(FingerprintSpec)`, `expected_ja4`, `expected_h2_fingerprint` | 4 |
-| `profile::FingerprintSpec` | `new`, `ja3`, `ja4_r`, `akamai`, `user_agent`, `header_order`, `base(BrowserProfile)`, `name` | 8 |
-| `profile::ProfileRegistry` | `global`, `load(dir)`, `get` | 3 |
-| `profile::{ProfileMeta, TlsProfile, TlsFingerprint, H2Profile, H2PriorityProfile, H2PlatformOverride, H2Fingerprint, H3Profile, H3ConnectionIdLength, H3Grease, H3Order, H3Setting, H3TransportParam, H3VersionGrease, H3VersionInformation, PlatformIdentity, HeaderAnchor, HeaderStyle}` | schema types, public fields | 0 |
-| `profile::ProfileError` | error of `load` and `from_toml` | 0 |
-
-### Modules
-
-| Module | Surface | Count |
-|---|---|---:|
-| `cookie` | `Jar`: `new`, `get_cookie(&Url, &str) -> Option<String>`, `set_cookie(&Url, &str, &str)`, `store_set_cookie(&str, &Url)`, `all_cookies`, `snapshot`, `extend_from(&Jar)`, `remove(&Url, &str) -> usize`, `remove_named(&str) -> usize`, `clear`, `export_cookies(&Url) -> String`, `load_cookies(&str, &Url)`, `cookie_header(&Url)`; `Cookie::is_expired`; `SameSite` | 14 |
-| `multipart` | `Form`: `new`, `text`, `part`, `file`, `boundary`; `Part`: `text`, `bytes`, `stream`, `filename`, `mime`, `header` | 11 |
-| WebSocket (feature `websocket`) | `WebSocketBuilder`: `header`, `headers`, `proxy`, `config`, `connect`; `WsConnection`: `send(WsMessage)`, `recv`, `close`, `split`, `protocol`, `header`; `WsSink`: `send`, `close`; `WsStream`: `recv`; `WsMessage`; `CloseFrame::new`; `WebSocketConfig`: 7 setters | 23 |
-| `trace` | `Trace` (hook methods), events `Dns`, `Connect`, `Tls`, `Sent` (with `method` and `path`), `Head` (with `headers`), `Done`, `TracingTrace` | 0 |
-| `audit` | `AuditData`; `compute_ja3(&Ja3Input)`, `compute_ja4(&Ja4Input)`, `compute_ja4h(&Ja4hInput)`, `compute_ja4t(&TcpProfile)`; input types `Ja3Input`, `Ja4Input`, `Ja4hInput` (public fields) | 4 |
-| `tls` | `Resolver`, `ResolveFuture`, `SystemResolver`, `ClientIdentity`, `TlsMinVersion`, `TlsError`; `HappyEyeballsConfig`: `new`, `resolve_delay`, `attempt_limit` | 3 |
-| `TlsContext` (feature `unstable-bssl`) | `from_profile`, `builder_mut`, `into_inner`; outside semver | 0 |
-| `IntoParamPair`, `IntoUrl`, `Result` | trait bound of `headers` and `query`; sealed URL input bound; `Result<T, Error>` alias | 0 |
-| tower (feature `tower`) | `LeylineService::new` | 1 |
-| `http` | re-export of the `http` crate | 0 |
-| `H2Error`, `ErrorCode` | sources reachable from `Error::h2` | 0 |
-
-Total: 267 public functions.
 
 ## Semantics
 

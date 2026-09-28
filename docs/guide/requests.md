@@ -69,7 +69,7 @@ into the profile's preset block, and the profile's own order applies on the
 wire. A request header replaces a profile or `SessionBuilder::headers` header
 of the same name and takes its slot; repeated `header` calls for that name
 send every value there. See the header merge rule in the
-[API reference](../api.md).
+[API map](../api.md).
 
 Two methods override the header order:
 

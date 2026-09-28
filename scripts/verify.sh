@@ -158,7 +158,7 @@ g_doc() {
 
 g_api() {
     step "generated API reference"
-    python3 scripts/generate-api.py --check || fail "run python3 scripts/generate-api.py"
+    cargo truesight check || fail "run cargo truesight sync"
     ok "API reference current"
 }
 
