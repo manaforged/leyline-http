@@ -54,12 +54,13 @@ Rust bindings with `bindgen`. It supports six targets:
 - `aarch64-unknown-linux-musl`
 - `x86_64-pc-windows-msvc`
 
-The build needs CMake 3.22 or later, a C and C++ compiler, and libclang. On
-Windows it also needs the MSVC build tools and NASM. See
-[Supported platforms](platforms.md).
+The build needs CMake 3.22 or later, a C and C++ compiler, libclang, and Git.
+Every build from source runs `git apply` to add Leyline's patches, unless
+`LEYLINE_BSSL_ASSUME_PATCHED` is set. On Windows the build also needs the MSVC
+build tools and NASM. See [Supported platforms](platforms.md).
 
 The build uses the macOS deployment target that Rust uses
-(`MACOSX_DEPLOYMENT_TARGET`, 11.0 by default) and honours `+crt-static` on
+(`MACOSX_DEPLOYMENT_TARGET`, 11.0 by default) and honors `+crt-static` on
 MSVC. It maps the source and output directories to `/build`, so the
 libraries embed no local paths.
 
@@ -68,11 +69,23 @@ libraries embed no local paths.
 Other targets are not supported. The build stops with an error that names the
 six targets.
 
-`BORING_BSSL_PATH` links a BoringSSL that you built yourself for a supported
-target. `BORING_BSSL_SOURCE_PATH` builds another BoringSSL source tree, and
-`BORING_BSSL_ASSUME_PATCHED` skips the carried patches for it.
-`BORING_BSSL_RUST_CPPLIB` names an extra C++ standard library to link when
-your toolchain needs one.
+For a supported target, you can point the build at your own BoringSSL with
+environment variables. The `LEYLINE_BSSL_*` variables apply to Leyline only.
+Leyline links under `LEYLINE_` symbol names and declares
+`links = "leyline_bssl"`, so it builds alongside `boring-sys`. Each crate reads
+its own variables, so a value set for `boring-sys` never reaches Leyline.
+
+- `LEYLINE_BSSL_PATH` links a BoringSSL that you built yourself. The build
+  applies no patches to it, so it must carry Leyline's patches and be built
+  with `-DBORINGSSL_PREFIX=LEYLINE`.
+- `LEYLINE_BSSL_SOURCE_PATH` builds another BoringSSL source tree. The build
+  applies Leyline's patches to that tree in place.
+- `LEYLINE_BSSL_ASSUME_PATCHED` skips the patches for a tree that already
+  carries them, such as a tree that an earlier build patched. It needs
+  `LEYLINE_BSSL_PATH` or `LEYLINE_BSSL_SOURCE_PATH`.
+- `LEYLINE_BSSL_RUST_CPPLIB` replaces the C++ standard library that the build
+  links. It does not add a second one. The default is `c++` on macOS,
+  `stdc++` on Linux, and none on Windows.
 
 ## Symbol prefixing and openssl-sys
 
@@ -91,12 +104,16 @@ The crates have no `fips`, `mlkem`, or `rpk` feature.
 ## MSRV
 
 The workspace sets `rust-version = "1.96"`, and every crate sets it. The
-edition is 2024; the forked `leyline-bssl*` crates keep upstream's 2021. The release gate compile-checks 1.96 and runs the test
-suite on current stable. [MSRV](msrv.md) states the policy: a bump gets
+edition is 2024; the forked `leyline-bssl*` crates keep upstream's 2021. The
+release gate compile-checks 1.96 and runs the test suite on the toolchain
+pinned in `rust-toolchain.toml`. [MSRV](msrv.md) states the policy: a bump gets
 its own minor release and its own changelog line, and never lands in a patch
 release.
 
 ## Documentation build
 
-`docs.rs` builds `leyline-http` for `x86_64-unknown-linux-gnu` only, with the
-default feature set, because one target stays within the docs.rs build limits.
+`docs.rs` builds `leyline-http` for `x86_64-unknown-linux-gnu` only, because
+one target stays within the docs.rs build limits. It builds with
+`features = ["full"]`, so the docs cover every feature except `bench-internals`.
+
+Read [Supported platforms](platforms.md) for what each operating system and target needs.

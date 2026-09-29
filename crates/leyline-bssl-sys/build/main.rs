@@ -464,7 +464,7 @@ fn get_extra_clang_args_for_bindgen(config: &Config) -> Vec<String> {
 fn ensure_patches_applied(config: &Config) -> io::Result<()> {
     if config.env.assume_patched || config.env.path.is_some() {
         println!(
-            "cargo:warning=skipping git patches application, provided\
+            "cargo:warning=skipping git patches application, provided \
             native BoringSSL is expected to have the patches included"
         );
         return Ok(());

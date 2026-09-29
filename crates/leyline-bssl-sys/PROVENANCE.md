@@ -29,6 +29,9 @@ Changes from upstream:
   `SslConnector::bare_builder`, and `CertificateCompressionAlgorithm::ZSTD`.
 - The build sets `BORINGSSL_PREFIX=LEYLINE`, maps build paths, and stops on
   an unsupported target.
+- The build variables use the `LEYLINE_BSSL_` prefix where `boring-sys` uses
+  `BORING_BSSL_`. The build reads no `BORING_BSSL_*` variable, so a value set
+  for `boring-sys` does not reach Leyline.
 - Edition 2021 is kept from upstream.
 
 ## BoringSSL revision
@@ -43,7 +46,10 @@ Changes from upstream:
 ## Carried patches
 
 `build/main.rs` applies every `patches/*.patch` in name order with
-`git apply --whitespace=fix` to a copy of the source in `OUT_DIR`:
+`git apply --whitespace=fix`. If `LEYLINE_BSSL_SOURCE_PATH` is set, it applies
+them in place to that tree. Otherwise, it applies them to a copy of the source
+in `OUT_DIR`. `LEYLINE_BSSL_PATH` and `LEYLINE_BSSL_ASSUME_PATCHED` skip this
+step. The patches are:
 
 1. `0001-leyline-fingerprint.patch`
    - `SSL_CTX_set_record_size_limit` and `SSL_set_record_size_limit`
@@ -88,7 +94,7 @@ compiler support symbols (weak or COMDAT), which do not clash.
 ## Build
 
 The build compiles BoringSSL from source with CMake and runs `bindgen`.
-It needs CMake 3.22 or later, a C and C++ compiler, and libclang. On
+It needs CMake 3.22 or later, a C and C++ compiler, libclang, and Git. On
 Windows it also needs the MSVC build tools and NASM.
 
 - Build paths: `-ffile-prefix-map` (MSVC: `/d1trimfile`) maps `OUT_DIR` to

@@ -110,8 +110,8 @@ impl Config {
 
         if self.env.assume_patched && is_external_native_lib_source {
             return Err(
-                "`BORING_BSSL_ASSUME_PATCHED` env variable is supposed to be used with\
-                `BORING_BSSL_PATH` or `BORING_BSSL_SOURCE_PATH` env variables",
+                "`LEYLINE_BSSL_ASSUME_PATCHED` env variable is supposed to be used with \
+                `LEYLINE_BSSL_PATH` or `LEYLINE_BSSL_SOURCE_PATH` env variables",
             );
         }
         Ok(())
@@ -131,18 +131,19 @@ impl Env {
         let target_var = |name: &str| target_only_var(name).or_else(|| var(name));
 
         Self {
-            path: target_var("BORING_BSSL_PATH").map(PathBuf::from),
-            include_path: target_var("BORING_BSSL_INCLUDE_PATH").map(PathBuf::from),
-            source_path: target_var("BORING_BSSL_SOURCE_PATH").map(PathBuf::from),
-            assume_patched: target_var("BORING_BSSL_ASSUME_PATCHED").is_some_and(|v| !v.is_empty()),
-            sysroot: target_var("BORING_BSSL_SYSROOT").map(PathBuf::from),
-            compiler_external_toolchain: target_var("BORING_BSSL_COMPILER_EXTERNAL_TOOLCHAIN")
+            path: target_var("LEYLINE_BSSL_PATH").map(PathBuf::from),
+            include_path: target_var("LEYLINE_BSSL_INCLUDE_PATH").map(PathBuf::from),
+            source_path: target_var("LEYLINE_BSSL_SOURCE_PATH").map(PathBuf::from),
+            assume_patched: target_var("LEYLINE_BSSL_ASSUME_PATCHED")
+                .is_some_and(|v| !v.is_empty()),
+            sysroot: target_var("LEYLINE_BSSL_SYSROOT").map(PathBuf::from),
+            compiler_external_toolchain: target_var("LEYLINE_BSSL_COMPILER_EXTERNAL_TOOLCHAIN")
                 .map(PathBuf::from),
             debug: target_var("DEBUG"),
             opt_level: target_var("OPT_LEVEL"),
             android_ndk_home: target_var("ANDROID_NDK_HOME").map(Into::into),
             cmake_toolchain_file: target_var("CMAKE_TOOLCHAIN_FILE").map(Into::into),
-            cpp_runtime_lib: target_var("BORING_BSSL_RUST_CPPLIB"),
+            cpp_runtime_lib: target_var("LEYLINE_BSSL_RUST_CPPLIB"),
             cc: target_only_var("CC"),
             cxx: target_only_var("CXX"),
             docs_rs: var("DOCS_RS").is_some(),

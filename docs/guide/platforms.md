@@ -19,8 +19,9 @@ The build needs these tools:
   Linux, and the MSVC build tools on Windows.
 - libclang, because `bindgen` generates the bindings at build time.
 - NASM on Windows, for the BoringSSL assembly.
-- Git. The BoringSSL build applies Leyline's patches with `git apply`, and a
-  source checkout fetches the BoringSSL submodule with it.
+- Git. Every build from source runs `git apply` to add Leyline's patches,
+  unless `LEYLINE_BSSL_ASSUME_PATCHED` is set. A source checkout also uses Git
+  to fetch the BoringSSL submodule.
 
 On Windows, install Visual Studio Build Tools with the C++ workload, which
 includes CMake. Install LLVM and NASM. Then:
@@ -58,7 +59,7 @@ Use a full cross toolchain, such as the musl.cc builds or the toolchain that
 
 The build script finds `<arch>-linux-musl-gcc` and `<arch>-linux-musl-g++` on
 `PATH`. To use another compiler, set `CC_<target>` and `CXX_<target>`. To
-give `bindgen` a musl sysroot, set `BORING_BSSL_SYSROOT`. The linker links
+give `bindgen` a musl sysroot, set `LEYLINE_BSSL_SYSROOT`. The linker links
 the musl `libstdc++` statically.
 
 ## Unsupported targets
@@ -71,3 +72,5 @@ names the supported targets. This includes Intel macOS
 The platform that a session claims is separate from the target you build
 for. A Linux build can claim Windows or macOS. See
 [Choose a platform](sessions.md#choose-a-platform).
+
+Read the [Profile reference](profiles.md) for each bundled profile and the capture it comes from.
