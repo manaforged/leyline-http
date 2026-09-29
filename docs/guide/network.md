@@ -117,7 +117,6 @@ To make Leyline try one address only, set `attempt_limit(1)`.
 | `send_buffer_size`, `recv_buffer_size` | unset | `SO_SNDBUF`, `SO_RCVBUF` |
 | `local_address` | unset | Source IP to bind |
 | `local_ipv4`, `local_ipv6` | unset | Source IP to bind for that address family |
-| `interface` | unset | Interface name (accepted and ignored) |
 | `strict` | `false` | Fail when the platform does not support an option |
 | `happy_eyeballs` | 250 ms delay, 8 attempts | Happy Eyeballs settings. `None` keeps the defaults |
 
@@ -159,16 +158,12 @@ the request fails, and a retry policy can use a fresh connection.
 
 ### Unsupported options
 
-Leyline applies `tcp_user_timeout` on Linux and Android only. Leyline accepts
-`interface` and ignores it on every system; bind a source IP with
-`local_address` instead.
+Leyline applies `tcp_user_timeout` on Linux and Android only.
 
 Where an option is unsupported, Leyline logs one warning for that option and
 continues. With `strict(true)`, the connect fails with an
-`io::ErrorKind::Unsupported` error. A session that sets `interface` therefore
-logs one warning, or fails the connect under `strict(true)`.
-`tcp_keepalive_retries` falls back to the operating system default on systems
-that cannot set it.
+`io::ErrorKind::Unsupported` error. `tcp_keepalive_retries` falls back to the
+operating system default on systems that cannot set it.
 
 ## TCP fingerprint
 

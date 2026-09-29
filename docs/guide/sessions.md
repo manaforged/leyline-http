@@ -143,9 +143,12 @@ assert!(edge.is_some_and(|id| id.user_agent.contains("Edg/")));
 ```
 
 `Session::identity()` returns a `SessionIdentity` with what a built session
-sends: `identity()` (the `Identity`, or `None` for a bare session),
-`browser()`, `platform()`, `brand()`, and `user_agent()`. It reads the values
-that `build()` resolved, so it matches the request headers.
+sends: `identity()` (the `Identity`, or `None` for a bare or loaded-profile
+session), `browser()`, `platform()`, `brand()`, and `user_agent()`. It reads
+the values that `build()` resolved, so it matches the request headers. A
+`user-agent` header from `SessionBuilder::headers` is the session's
+`User-Agent`: `user_agent()` returns it, and the `{user_agent}` placeholder of
+the header style expands to it.
 
 ```rust,no_run
 # fn run() -> leyline::Result<()> {

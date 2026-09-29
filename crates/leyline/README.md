@@ -55,10 +55,10 @@ to desktop platforms only, and the Opera overlay covers Chrome 145 to 152.
   `Authorization`, `Proxy-Authorization`, `Cookie`, and `Set-Cookie` headers.
 - `TlsTrustConfig` sets the trust roots, certificate pins, a client
   certificate, and a TLS version floor with `min_tls_version`.
-- The bundled BoringSSL exports its symbols with a `LEYLINE` prefix, the
+- The bundled BoringSSL prefixes every C export with `LEYLINE_`, the
   `leyline-bssl-sys` crate declares `links = "leyline_bssl"`, and its build
-  reads `LEYLINE_BSSL_*` variables. Leyline builds alongside Cloudflare's
-  `boring-sys` in one dependency graph.
+  reads `LEYLINE_BSSL_*` variables. Its link name and symbols therefore do not
+  collide with those of Cloudflare's `boring-sys`.
 - Chromium profiles derive `sec-ch-ua` from the major version and the
   `ch_ua_brand` field of the profile, with the GREASE brand, version, and
   order rule that Chromium uses. `Response::audit()` returns `Some` when the
@@ -163,8 +163,9 @@ browser is a bare session that impersonates no browser.
   and the window scale. The Android identity has no row and sets no TCP
   options.
 - HTTP/3 does not send 0-RTT data.
-- HTTP/3 through a proxy needs a SOCKS5 proxy with `UDP ASSOCIATE`. HTTP
-  and HTTPS proxies cannot carry HTTP/3; MASQUE is not supported.
+- HTTP/3 through a proxy needs the `socks` feature and a SOCKS5 proxy with
+  `UDP ASSOCIATE`. HTTP and HTTPS proxies cannot carry HTTP/3; MASQUE is not
+  supported.
 - A bundled Safari or CFNetwork browser switches to its per-platform variant
   when you call `.platform()`. A profile loaded with `SessionBuilder::profile`
   has no per-platform variant and is used as it is. Its header order comes

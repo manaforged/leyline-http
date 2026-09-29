@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::future::Future;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex};
 
 use futures_util::FutureExt;
 use futures_util::future::{BoxFuture, Shared};
@@ -13,6 +13,7 @@ use crate::tls::FingerprintConnector;
 #[cfg(feature = "http3")]
 use crate::tls::TlsTrustConfig;
 use crate::trace;
+use crate::util::lock;
 use crate::{Error, Kind};
 
 use super::checkout_live_h2;
@@ -29,10 +30,6 @@ impl<C> Default for Inflight<C> {
     fn default() -> Self {
         Self(Arc::new(Mutex::new(HashMap::new())))
     }
-}
-
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 impl<C: Clone + Send + Sync + 'static> Inflight<C> {

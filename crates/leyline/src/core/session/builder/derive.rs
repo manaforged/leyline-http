@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use http::header::USER_AGENT;
+
 use crate::audit::AuditTlsCache;
 use crate::core::error::{Error, Kind, Result};
 use crate::core::{CompressionConfig, Identity};
@@ -27,6 +29,7 @@ pub(in crate::core::session) struct IdentityInputs<'a> {
     pub h3_required: bool,
     pub tcp: &'a TcpProfile,
     pub audit: bool,
+    pub default_headers: &'a [(String, String)],
 }
 
 pub(in crate::core::session) struct DerivedIdentity {
@@ -91,6 +94,14 @@ pub(in crate::core::session) fn resolve_presented(
         .map_err(|e| Error::new(Kind::Config).with_message(e.to_string()))
 }
 
+fn session_user_agent(default_headers: &[(String, String)]) -> Option<&str> {
+    default_headers
+        .iter()
+        .rev()
+        .find(|(name, _)| name.eq_ignore_ascii_case(USER_AGENT.as_str()))
+        .map(|(_, value)| value.as_str())
+}
+
 fn derive_h2(profile: &BrowserProfile, platform: Platform, max_body: usize) -> Result<H2Config> {
     let resolved = profile.h2.resolve_for_platform(platform)?;
     let mut config = H2Config::from_profile(&resolved)?;
@@ -142,11 +153,10 @@ pub(in crate::core::session) fn derive_identity(
         profile,
         header_style,
         header_order,
-        user_agent: resolved.user_agent,
+        user_agent: session_user_agent(input.default_headers)
+            .map_or(resolved.user_agent, str::to_owned),
         sec_ch_ua: resolved.sec_ch_ua,
-        accept_language: resolved
-            .accept_language
-            .unwrap_or_else(|| "en-US,en;q=0.9".to_string()),
+        accept_language: resolved.accept_language.unwrap_or_default(),
         h2_config,
         #[cfg(feature = "http3")]
         h3_config,

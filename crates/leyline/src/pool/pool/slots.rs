@@ -10,10 +10,11 @@ use crate::h2::client::H2Client;
 use crate::pool::types::{H1Slot, PoolKey, PooledConn, TlsInfo};
 #[cfg(feature = "http3")]
 use crate::quic::H3Client;
+use crate::util::lock;
 
 impl Pool {
     pub(crate) fn checkout_h2(&self, key: &PoolKey) -> Option<(H2Client, TlsInfo)> {
-        let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut map = lock(&self.inner);
         let dead = map.get(key).is_some_and(PooledConn::is_dead);
         if dead {
             map.remove(key);
@@ -41,7 +42,7 @@ impl Pool {
 
     #[cfg(feature = "http3")]
     pub(crate) fn checkout_h3(&self, key: &PoolKey) -> Option<(H3Client, TlsInfo)> {
-        let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut map = lock(&self.inner);
         let dead = map.get(key).is_some_and(PooledConn::is_dead);
         if dead {
             map.remove(key);
@@ -74,7 +75,7 @@ impl Pool {
         handle: H3Client,
         tls: TlsInfo,
     ) -> (H3Client, TlsInfo) {
-        let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut map = lock(&self.inner);
         if let Some(PooledConn::H3 {
             handle: existing,
             tls: existing_tls,
@@ -107,7 +108,7 @@ impl Pool {
     }
 
     pub(crate) fn checkout_h1(&self, key: &PoolKey) -> Option<(H1Slot, TlsInfo)> {
-        let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut map = lock(&self.inner);
         match map.get_mut(key) {
             Some(PooledConn::H1 {
                 idle,
@@ -138,7 +139,7 @@ impl Pool {
         handle: H2Client,
         tls: TlsInfo,
     ) -> (H2Client, TlsInfo) {
-        let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut map = lock(&self.inner);
         if let Some(PooledConn::H2 {
             handle: existing,
             tls: existing_tls,
@@ -171,7 +172,7 @@ impl Pool {
     }
 
     pub(crate) fn return_h1(&self, key: PoolKey, slot: H1Slot, tls: TlsInfo) {
-        let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut map = lock(&self.inner);
         match map.get_mut(&key) {
             Some(PooledConn::H1 { idle, last_use, .. }) => {
                 idle.push_back((slot, Instant::now()));
@@ -203,7 +204,7 @@ impl Pool {
 
     pub(crate) async fn acquire_h1_permit(&self, key: &PoolKey) -> OwnedSemaphorePermit {
         let sem = {
-            let mut permits = self.h1_permits.lock().unwrap_or_else(|e| e.into_inner());
+            let mut permits = lock(&self.h1_permits);
             permits
                 .entry(key.clone())
                 .or_insert_with(|| Arc::new(Semaphore::new(self.max_h1_conns_per_host)))

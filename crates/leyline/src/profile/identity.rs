@@ -31,6 +31,11 @@ pub(crate) fn resolve_identity(
         .identity_for(platform)
         .ok_or_else(|| IdentityError::NoPlatform(profile.meta.name.clone(), platform))?
         .clone();
+    if identity.accept_language.is_none() {
+        identity.accept_language = BrowserProfile::bare_shared()
+            .identity_for(platform)
+            .and_then(|bare| bare.accept_language.clone());
+    }
     if brand == ChromiumBrand::Chrome {
         return Ok(identity);
     }

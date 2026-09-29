@@ -247,10 +247,14 @@ where
         let size_token = size_line.split(';').next().unwrap_or("").trim();
         let size_u64 = u64::from_str_radix(size_token, 16)
             .map_err(|e| H1PooledError::Http(format!("invalid chunk size: {e}")))?;
-        if size_u64 > limit as u64 {
+        let size = usize::try_from(size_u64).map_err(|_| body_too_large(limit))?;
+        let total = out
+            .len()
+            .checked_add(size)
+            .ok_or_else(|| body_too_large(limit))?;
+        if total > limit {
             return Err(body_too_large(limit));
         }
-        let size = size_u64 as usize;
         buf.drain(..line_end + 2);
 
         if size == 0 {
@@ -258,15 +262,13 @@ where
             return Ok(out);
         }
 
-        read_until_available(stream, &mut buf, size + 2).await?;
+        let chunk_end = size.checked_add(2).ok_or_else(|| body_too_large(limit))?;
+        read_until_available(stream, &mut buf, chunk_end).await?;
         out.extend_from_slice(&buf[..size]);
-        if out.len() > limit {
-            return Err(body_too_large(limit));
-        }
-        if &buf[size..size + 2] != b"\r\n" {
+        if &buf[size..chunk_end] != b"\r\n" {
             return Err(H1PooledError::Http("chunk missing CRLF terminator".into()));
         }
-        buf.drain(..size + 2);
+        buf.drain(..chunk_end);
     }
 }
 

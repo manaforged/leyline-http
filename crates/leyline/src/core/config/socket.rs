@@ -16,7 +16,6 @@ pub struct SocketConfig {
     pub(crate) tcp_user_timeout: Option<Duration>,
     pub(crate) send_buffer_size: Option<usize>,
     pub(crate) recv_buffer_size: Option<usize>,
-    pub(crate) interface: Option<String>,
     pub(crate) strict: bool,
     pub(crate) happy_eyeballs: Option<HappyEyeballsConfig>,
 }
@@ -34,7 +33,6 @@ impl Default for SocketConfig {
             tcp_user_timeout: None,
             send_buffer_size: None,
             recv_buffer_size: None,
-            interface: None,
             strict: false,
             happy_eyeballs: None,
         }
@@ -93,11 +91,6 @@ impl SocketConfig {
 
     pub fn recv_buffer_size(mut self, n: impl Into<Option<usize>>) -> Self {
         self.recv_buffer_size = n.into();
-        self
-    }
-
-    pub fn interface(mut self, name: impl Into<Option<String>>) -> Self {
-        self.interface = name.into();
         self
     }
 

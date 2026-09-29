@@ -27,7 +27,9 @@ Reference pages beside this guide: [profiles](guide/profiles.md) and
 [MSRV](guide/msrv.md).
 
 The Rust blocks in these pages are doctests of the `leyline-http` crate. The
-Tower block in [Requests](guide/requests.md) compiles only under `--features tower`,
-and the default test run does not enable it. The `toml`, `sh`, and `js` blocks
-are not compiled. Blocks that open a socket are marked `no_run`, so they
-compile but do not send traffic.
+Tower block in [Requests](guide/requests.md) compiles only with the `tower`
+feature. A plain `cargo test` does not enable it. The pull-request check in CI
+runs `cargo test` with
+`--features leyline-http/full,leyline-http/bench-internals`, which does. The
+`toml`, `sh`, and `js` blocks are not compiled. Blocks that open a socket are
+marked `no_run`, so they compile but do not send traffic.

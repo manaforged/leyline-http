@@ -62,10 +62,7 @@ impl Browser {
 
     #[must_use]
     pub fn for_platform(self, platform: Platform) -> Self {
-        if platform == Platform::Host {
-            return self;
-        }
-        let key = platform.identity_key();
+        let key = platform.resolve().identity_key();
         self.entry()
             .platforms
             .iter()

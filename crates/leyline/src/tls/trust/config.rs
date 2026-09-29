@@ -100,8 +100,7 @@ impl TlsTrustConfig {
 }
 
 #[derive(Debug, Clone)]
-#[non_exhaustive]
-pub struct ClientIdentity {
+pub(crate) struct ClientIdentity {
     pub(crate) certificate_chain_file: PathBuf,
     pub(crate) private_key_file: PathBuf,
 }

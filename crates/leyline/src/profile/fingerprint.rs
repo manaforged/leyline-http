@@ -12,7 +12,6 @@ pub struct FingerprintSpec {
     ja3: Option<String>,
     ja4_r: Option<String>,
     akamai: Option<String>,
-    user_agent: Option<String>,
     header_order: Option<Vec<String>>,
     base: Option<BrowserProfile>,
     name: Option<String>,
@@ -39,12 +38,6 @@ impl FingerprintSpec {
     #[must_use]
     pub fn akamai(mut self, raw: impl Into<String>) -> Self {
         self.akamai = Some(raw.into());
-        self
-    }
-
-    #[must_use]
-    pub fn user_agent(mut self, user_agent: impl Into<String>) -> Self {
-        self.user_agent = Some(user_agent.into());
         self
     }
 
@@ -94,11 +87,6 @@ impl BrowserProfile {
             .map_err(|why| config_error("TLS", why))?;
         if let Some(raw) = spec.akamai.as_deref() {
             akamai::apply(&mut profile.h2, raw).map_err(|why| config_error("Akamai", why))?;
-        }
-        if let Some(user_agent) = &spec.user_agent {
-            for identity in profile.identity.values_mut() {
-                identity.user_agent.clone_from(user_agent);
-            }
         }
         if spec.header_order.is_some() {
             profile.meta.header_order = spec.header_order;

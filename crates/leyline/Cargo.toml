@@ -217,6 +217,10 @@ name = "h2_recv_window"
 required-features = ["bench-internals"]
 
 [[test]]
+name = "h2_resend"
+required-features = ["bench-internals"]
+
+[[test]]
 name = "h2_rst_flood_e2e"
 required-features = ["bench-internals"]
 

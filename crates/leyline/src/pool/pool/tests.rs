@@ -14,7 +14,7 @@ fn h1_key(host: &str) -> PoolKey {
 }
 
 fn insert_empty_h1(pool: &Pool, host: &str, last_use: Instant) {
-    pool.inner.lock().unwrap_or_else(|e| e.into_inner()).insert(
+    crate::util::lock(&pool.inner).insert(
         h1_key(host),
         PooledConn::H1 {
             idle: VecDeque::new(),

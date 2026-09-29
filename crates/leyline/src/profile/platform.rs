@@ -29,7 +29,7 @@ pub enum Platform {
 }
 
 impl Platform {
-    pub fn detect_host() -> Self {
+    pub(crate) fn detect_host() -> Self {
         #[cfg(target_os = "windows")]
         {
             Self::Windows

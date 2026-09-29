@@ -5,6 +5,7 @@ use tokio::net::TcpListener;
 
 use super::{Connect, Done, Head, Sent, Trace};
 use crate::Session;
+use crate::util::lock;
 
 #[derive(Default)]
 struct Recorder {
@@ -25,10 +26,6 @@ impl Recorder {
         lock(&self.lines).push(line);
         lock(&self.ids).push(id);
     }
-}
-
-fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 impl Trace for Recorder {

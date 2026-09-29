@@ -8,15 +8,16 @@ pub(crate) mod http;
 #[cfg(feature = "socks")]
 pub(crate) mod socks5;
 
+const SOCKS5_DEFAULT_PORT: u16 = 1080;
+
 pub(crate) async fn connect_to_proxy<C: crate::tls::TlsHandshake>(
     connector: &C,
     proxy: &url::Url,
-    fallback_port: u16,
 ) -> Result<TcpStream, TlsError> {
     let host = proxy
         .host_str()
         .ok_or_else(|| TlsError::proxy(format!("{} proxy has no host", proxy.scheme())))?;
-    let port = proxy.port_or_known_default().unwrap_or(fallback_port);
+    let port = proxy.port_or_known_default().unwrap_or(SOCKS5_DEFAULT_PORT);
     connector
         .dial_tcp(host, port)
         .await

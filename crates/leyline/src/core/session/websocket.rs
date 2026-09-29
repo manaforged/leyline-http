@@ -1,10 +1,13 @@
 use std::fmt;
 
+use http::{HeaderName, HeaderValue};
+
 use super::Session;
+use super::header_merge::apply_extra_headers;
 use crate::core::error::{Error, Kind, Result};
+use crate::core::headers::HeaderList;
 use crate::core::{IntoParamPair, IntoUrl, ProxyConfig, WebSocketConfig};
-use crate::trace::masked;
-use crate::util::redact;
+use crate::util::{redact, sensitive_header};
 
 impl Session {
     pub fn websocket(&self, url: impl IntoUrl) -> WebSocketBuilder {
@@ -13,7 +16,7 @@ impl Session {
             url: url.into_url(),
             config: self.inner.websocket_config,
             proxy: None,
-            headers: Vec::new(),
+            headers: Ok(HeaderList::new()),
         }
     }
 
@@ -22,7 +25,7 @@ impl Session {
         url: &str,
         config: WebSocketConfig,
         request_proxy: Option<&ProxyConfig>,
-        extra_headers: &[(String, String)],
+        extra_headers: &HeaderList,
     ) -> Result<crate::core::websocket::WsConnection> {
         let origin = ws_origin(url)?;
         let parsed = url::Url::parse(url).map_err(crate::core::Error::from_url_parse)?;
@@ -86,7 +89,7 @@ pub struct WebSocketBuilder {
     url: Result<url::Url>,
     config: WebSocketConfig,
     proxy: Option<ProxyConfig>,
-    headers: Vec<(String, String)>,
+    headers: Result<HeaderList>,
 }
 
 impl fmt::Debug for WebSocketBuilder {
@@ -96,10 +99,7 @@ impl fmt::Debug for WebSocketBuilder {
             .field("url", &url)
             .field("config", &self.config)
             .field("proxy", &self.proxy)
-            .field(
-                "headers",
-                &masked(self.headers.iter().map(|(k, v)| (k.as_str(), v.as_bytes()))),
-            )
+            .field("headers", &self.headers)
             .finish_non_exhaustive()
     }
 }
@@ -122,23 +122,32 @@ impl WebSocketBuilder {
     {
         for pair in headers {
             let (name, value) = pair.into_param_pair();
-            set_header(&mut self.headers, name, value);
+            self = self.header(name, value);
         }
         self
     }
 
-    pub fn header(mut self, name: &str, value: &str) -> Self {
-        set_header(&mut self.headers, name.to_string(), value.to_string());
+    pub fn header(
+        mut self,
+        name: impl TryInto<HeaderName>,
+        value: impl TryInto<HeaderValue>,
+    ) -> Self {
+        if let Ok(headers) = &mut self.headers
+            && let Err(err) = headers.append(name, value)
+        {
+            self.headers = Err(err);
+        }
         self
     }
 
     pub async fn connect(self) -> Result<crate::core::websocket::WsConnection> {
         let url = self.url?;
+        let headers = self.headers?;
         let handshake = self.session.websocket_with_options(
             url.as_str(),
             self.config,
             self.proxy.as_ref(),
-            &self.headers,
+            &headers,
         );
         self.session.deadline(None).total(handshake).await
     }
@@ -154,19 +163,11 @@ impl std::future::IntoFuture for WebSocketBuilder {
 }
 
 impl Session {
-    fn websocket_headers(
-        &self,
-        url: &url::Url,
-        caller: &[(String, String)],
-    ) -> Vec<(String, String)> {
-        let caller_has = |name: &str| caller.iter().any(|(k, _)| k.eq_ignore_ascii_case(name));
+    fn websocket_headers(&self, url: &url::Url, caller: &HeaderList) -> Vec<(String, String)> {
+        let caller_has = |name: &str| caller.get(name).is_some();
         let mut headers = Vec::new();
         self.merge_session_headers(&mut headers, &caller_has, false);
-        headers.extend(
-            caller
-                .iter()
-                .map(|(k, v)| (k.clone().into(), v.clone().into())),
-        );
+        apply_extra_headers(&mut headers, caller, false, &sensitive_header);
         let mut cookie_url = url.clone();
         let lookup = if cookie_url.set_scheme("https").is_ok() {
             &cookie_url
@@ -199,17 +200,6 @@ fn ws_origin(url: &str) -> Result<String> {
         Some(port) => format!("{scheme}://{host}:{port}"),
         None => format!("{scheme}://{host}"),
     })
-}
-
-fn set_header(headers: &mut Vec<(String, String)>, name: String, value: String) {
-    if let Some((_, existing)) = headers
-        .iter_mut()
-        .find(|(key, _)| key.eq_ignore_ascii_case(&name))
-    {
-        *existing = value;
-    } else {
-        headers.push((name, value));
-    }
 }
 
 #[cfg(test)]

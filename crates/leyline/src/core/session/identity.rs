@@ -167,6 +167,7 @@ impl Session {
             h3_required: inner.protocol_policy.requires_h3(),
             tcp: inner.connector.tcp_profile(),
             audit: inner.audit_tls.is_some(),
+            default_headers: &inner.default_headers,
         })?;
         inner.connector = inner
             .connector

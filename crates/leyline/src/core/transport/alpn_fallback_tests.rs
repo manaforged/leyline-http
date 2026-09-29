@@ -35,8 +35,13 @@ fn h1_connection_closed_is_typed_retryable_but_framing_is_not() {
     let framing = h1_error_to_core(H1PooledError::Http(
         "invalid Transfer-Encoding: connection-close".into(),
     ));
-    assert_eq!(framing.kind(), Kind::Request);
-    assert!(framing.message().is_some());
+    assert!(
+        framing.kind() == Kind::Io
+            && framing
+                .io()
+                .is_some_and(|e| e.kind() == std::io::ErrorKind::InvalidData),
+        "a malformed response must map to Io(InvalidData), got {framing:?}"
+    );
     assert!(!framing.is_connection_closed());
 
     let pinning = h1_error_to_core(H1PooledError::Tls(crate::tls::TlsError::Pinning(

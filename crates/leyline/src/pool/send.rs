@@ -91,10 +91,7 @@ pub(crate) async fn send_request_h3_pooled(
                 );
                 pool.invalidate(&key);
                 let Some(replay) = replay else {
-                    return Err(Error::new(Kind::Body).with_message(format!(
-                        "pooled h3 connection died and a streaming request body cannot be retried: {}",
-                        e.message()
-                    )));
+                    return Err(not_resendable(e.message().into_owned()));
                 };
                 body = Some(replay);
             }
@@ -236,9 +233,7 @@ pub(crate) async fn send_request(
                 );
                 pool.invalidate(&key);
                 let Some(replay) = replay else {
-                    return Err(Error::new(Kind::Http2)
-                        .with_message("pooled connection died and streaming body cannot be retried")
-                        .with_source(e));
+                    return Err(not_resendable(e));
                 };
                 let refused = matches!(
                     &e,
@@ -299,6 +294,12 @@ pub(crate) async fn send_request(
         total_ms: ResponseTiming::millis(started),
     };
     Ok((resp, tls, timing))
+}
+
+pub(crate) fn not_resendable(cause: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> Error {
+    Error::new(Kind::Body)
+        .with_message("pooled connection died and the streaming request body cannot be resent")
+        .with_source(cause)
 }
 
 fn parse_authority(authority: &str, default_port: u16) -> (&str, u16) {

@@ -25,6 +25,21 @@ fn the_last_browser_call_wins_over_an_earlier_identity() {
     assert!(agent.contains("Chrome/154"), "{agent}");
 }
 
+#[test]
+fn a_session_user_agent_header_is_the_identity_user_agent() {
+    let session = Session::builder()
+        .browser(Browser::Chrome154)
+        .platform(Platform::Windows)
+        .headers([("user-agent", "probe/1.0")])
+        .build()
+        .unwrap();
+    assert_eq!(session.identity().user_agent(), "probe/1.0");
+    let switched = session
+        .with_identity(Identity::locked(Browser::Firefox156, Platform::Windows))
+        .unwrap();
+    assert_eq!(switched.identity().user_agent(), "probe/1.0");
+}
+
 #[cfg(feature = "http3")]
 #[test]
 fn an_http3_session_refuses_an_identity_without_http3() {

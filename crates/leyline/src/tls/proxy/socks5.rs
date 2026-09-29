@@ -47,7 +47,7 @@ async fn open_control<C: crate::tls::TlsHandshake>(
     proxy: &url::Url,
 ) -> Result<TcpStream, TlsError> {
     let auth = auth_request(proxy)?;
-    let mut tcp_stream = super::connect_to_proxy(connector, proxy, 1080).await?;
+    let mut tcp_stream = super::connect_to_proxy(connector, proxy).await?;
 
     if auth.is_some() {
         tcp_stream

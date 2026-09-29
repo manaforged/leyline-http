@@ -20,7 +20,7 @@ impl Pool {
     }
 
     fn idle_for(&self, key: &PoolKey) -> Option<Duration> {
-        let map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let map = crate::util::lock(&self.inner);
         map.get(key)
             .map(|entry| Instant::now().saturating_duration_since(entry.last_use()))
     }

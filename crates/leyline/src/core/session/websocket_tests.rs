@@ -35,13 +35,30 @@ fn origin_rejects_plaintext_ws() {
 }
 
 #[test]
-fn headers_set_same_name_and_keep_distinct() {
+fn headers_append_every_value() {
     let builder = Session::new()
         .websocket("wss://example.com/socket")
         .headers([("a", "1")])
         .headers([("a", "2"), ("b", "3")]);
-    assert_eq!(
-        builder.headers,
-        vec![("a".into(), "2".into()), ("b".into(), "3".into())]
-    );
+    let headers = builder.headers.unwrap();
+    let sent: Vec<(&str, &str)> = headers
+        .iter()
+        .map(|(name, value)| (name.as_str(), value.to_str().unwrap()))
+        .collect();
+    assert_eq!(sent, [("a", "1"), ("a", "2"), ("b", "3")]);
+}
+
+#[tokio::test]
+async fn an_invalid_header_fails_before_the_connection_opens() {
+    let session = Session::builder()
+        .proxy(crate::ProxyConfig::new().env(false))
+        .build()
+        .unwrap();
+    let err = session
+        .websocket("wss://127.0.0.1:9/socket")
+        .header("bad name", "value")
+        .connect()
+        .await
+        .unwrap_err();
+    assert_eq!(err.kind(), crate::Kind::Request, "{err:?}");
 }

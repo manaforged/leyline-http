@@ -151,4 +151,5 @@ gate packages all five crates together.
 ## Style
 
 Rust code is formatted by `rustfmt` with the repository defaults. Tests live
-in `*_tests.rs` files or under `tests/`, not inside production modules.
+in the module's `tests.rs`, in a `*_tests.rs` file beside the module, or under
+`tests/`, not inside production modules.

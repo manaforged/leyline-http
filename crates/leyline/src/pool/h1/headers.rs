@@ -1,27 +1,5 @@
 use super::*;
 
-pub(super) fn path_and_query(url: &url::Url) -> String {
-    let path = if url.path().is_empty() {
-        "/"
-    } else {
-        url.path()
-    };
-    match url.query() {
-        Some(query) => format!("{path}?{query}"),
-        None => path.to_string(),
-    }
-}
-
-pub(super) fn authority_for(url: &url::Url, host: &str, port: u16) -> String {
-    let is_default_port =
-        (url.scheme() == "https" && port == 443) || (url.scheme() == "http" && port == 80);
-    if is_default_port {
-        host.to_string()
-    } else {
-        format!("{host}:{port}")
-    }
-}
-
 pub(super) fn contains_header(headers: &[(String, String)], name: &str) -> bool {
     headers.iter().any(|(k, _)| k.eq_ignore_ascii_case(name))
 }

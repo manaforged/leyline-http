@@ -57,16 +57,7 @@ pub(super) fn start_pending(
             .map(|h| h.value().to_vec());
         match h3.send_request(conn, headers, fin) {
             Ok(stream_id) => {
-                if let Some(value) = priority
-                    && let Err(e) = h3.send_priority_update_field_value(conn, stream_id, &value)
-                {
-                    tracing::debug!(
-                        target: "leyline::quic",
-                        stream_id,
-                        error = %e,
-                        "h3 PRIORITY_UPDATE not sent"
-                    );
-                }
+                send_priority_update(h3, conn, stream_id, priority);
                 let Some(H3Command::Request {
                     body,
                     body_stream,
@@ -91,8 +82,9 @@ pub(super) fn start_pending(
                     stream.upload_credit = Some(credit);
                     stream.pump = Some(pump.abort_handle());
                 }
-                write_request_body(h3, conn, stream_id, &mut stream);
-                streams.insert(stream_id, stream);
+                if !write_request_body(h3, conn, stream_id, &mut stream) {
+                    streams.insert(stream_id, stream);
+                }
             }
             Err(quiche::h3::Error::StreamBlocked) | Err(quiche::h3::Error::Done) => break,
             Err(e) => {
@@ -104,8 +96,31 @@ pub(super) fn start_pending(
     }
 }
 
-fn shutdown(conn: &mut quiche::Connection, id: u64, dir: quiche::Shutdown, err: u64) {
-    match conn.stream_shutdown(id, dir, err) {
+fn send_priority_update(
+    h3: &mut quiche::h3::Connection,
+    conn: &mut quiche::Connection,
+    stream_id: u64,
+    priority: Option<Vec<u8>>,
+) {
+    if let Some(value) = priority
+        && let Err(e) = h3.send_priority_update_field_value(conn, stream_id, &value)
+    {
+        tracing::debug!(
+            target: "leyline::quic",
+            stream_id,
+            error = %e,
+            "h3 PRIORITY_UPDATE not sent"
+        );
+    }
+}
+
+fn shutdown(
+    conn: &mut quiche::Connection,
+    id: u64,
+    dir: quiche::Shutdown,
+    code: quiche::h3::WireErrorCode,
+) {
+    match conn.stream_shutdown(id, dir, code as u64) {
         Ok(()) | Err(quiche::Error::Done) => {}
         Err(e) => tracing::warn!(
             target: "leyline::quic",
@@ -116,11 +131,28 @@ fn shutdown(conn: &mut quiche::Connection, id: u64, dir: quiche::Shutdown, err: 
     }
 }
 
-fn reset_upload_half(conn: &mut quiche::Connection, stream_id: u64, stream: &mut H3Stream) {
+fn reset_upload_half(
+    conn: &mut quiche::Connection,
+    stream_id: u64,
+    stream: &mut H3Stream,
+    code: quiche::h3::WireErrorCode,
+) {
     if stream.send_side_open() {
-        shutdown(conn, stream_id, quiche::Shutdown::Write, 0);
+        shutdown(conn, stream_id, quiche::Shutdown::Write, code);
     }
     stream.cancel_upload();
+}
+
+fn abort_stream(
+    h3: &mut quiche::h3::Connection,
+    conn: &mut quiche::Connection,
+    stream_id: u64,
+    stream: &mut H3Stream,
+    code: quiche::h3::WireErrorCode,
+) {
+    h3.cancel_stream(stream_id);
+    shutdown(conn, stream_id, quiche::Shutdown::Read, code);
+    reset_upload_half(conn, stream_id, stream, code);
 }
 
 pub(super) fn stream_is_cancelled(stream: &H3Stream) -> bool {
@@ -149,9 +181,13 @@ pub(super) fn sweep_cancelled_streams(
 ) {
     for id in cancelled_stream_ids(streams) {
         if let Some(mut stream) = streams.remove(&id) {
-            h3.cancel_stream(id);
-            shutdown(conn, id, quiche::Shutdown::Read, 0);
-            reset_upload_half(conn, id, &mut stream);
+            abort_stream(
+                h3,
+                conn,
+                id,
+                &mut stream,
+                quiche::h3::WireErrorCode::RequestCancelled,
+            );
         }
     }
 }
@@ -187,21 +223,24 @@ pub(super) fn deliver_stream_error(tx: &mpsc::Sender<std::io::Result<Bytes>>, er
 pub(super) fn fail_all(
     streams: &mut HashMap<u64, H3Stream>,
     pending: &mut VecDeque<H3Command>,
+    commands: &mut mpsc::Receiver<H3Command>,
     closed: &AtomicBool,
     reason: String,
 ) {
     closed.store(true, Ordering::Release);
+    commands.close();
+    while let Ok(cmd) = commands.try_recv() {
+        pending.push_back(cmd);
+    }
     for (_, mut stream) in streams.drain() {
-        if stream.head_sent {
-            if let Some(tx) = &stream.stream_tx {
-                deliver_stream_error(tx, std::io::Error::other(reason.clone()));
-            }
-        } else {
-            stream.deliver(Err(reason.clone()));
-        }
+        stream.deliver_error(reason.clone());
     }
     for cmd in pending.drain(..) {
-        let H3Command::Request { resp_tx, .. } = cmd;
-        drop(resp_tx.send(Err(H3SendError::NotSent(reason.clone()))));
+        reject_unsent(cmd, reason.clone());
     }
+}
+
+fn reject_unsent(cmd: H3Command, reason: String) {
+    let H3Command::Request { resp_tx, .. } = cmd;
+    drop(resp_tx.send(Err(H3SendError::NotSent(reason))));
 }

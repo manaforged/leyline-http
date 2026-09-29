@@ -199,7 +199,6 @@ pub fn leyline::profile::FingerprintSpec::ja3(self, raw: impl core::convert::Int
 pub fn leyline::profile::FingerprintSpec::ja4_r(self, raw: impl core::convert::Into<alloc::string::String>) -> Self
 pub fn leyline::profile::FingerprintSpec::name(self, name: impl core::convert::Into<alloc::string::String>) -> Self
 pub fn leyline::profile::FingerprintSpec::new() -> Self
-pub fn leyline::profile::FingerprintSpec::user_agent(self, user_agent: impl core::convert::Into<alloc::string::String>) -> Self
 impl core::clone::Clone for leyline::profile::FingerprintSpec
 impl core::default::Default for leyline::profile::FingerprintSpec
 impl core::fmt::Debug for leyline::profile::FingerprintSpec
@@ -395,9 +394,6 @@ impl core::clone::Clone for leyline::profile::TlsProfile
 impl core::fmt::Debug for leyline::profile::TlsProfile
 impl<'de> serde_core::de::Deserialize<'de> for leyline::profile::TlsProfile
 pub mod leyline::tls
-#[non_exhaustive] pub struct leyline::tls::ClientIdentity
-impl core::clone::Clone for leyline::tls::ClientIdentity
-impl core::fmt::Debug for leyline::tls::ClientIdentity
 #[non_exhaustive] pub struct leyline::tls::HappyEyeballsConfig
 impl leyline::tls::HappyEyeballsConfig
 pub fn leyline::tls::HappyEyeballsConfig::attempt_limit(self, n: usize) -> Self
@@ -688,7 +684,6 @@ pub leyline::Platform::Linux
 pub leyline::Platform::MacOS
 pub leyline::Platform::Windows
 impl leyline::Platform
-pub fn leyline::Platform::detect_host() -> Self
 pub fn leyline::Platform::tcp_profile(&self) -> leyline::TcpProfile
 impl core::clone::Clone for leyline::Platform
 impl core::cmp::Eq for leyline::Platform
@@ -886,22 +881,6 @@ impl core::convert::From<http::uri::InvalidUri> for leyline::Error
 impl core::error::Error for leyline::Error
 impl core::fmt::Debug for leyline::Error
 impl core::fmt::Display for leyline::Error
-pub struct leyline::HeaderList
-impl leyline::HeaderList
-pub fn leyline::HeaderList::append(&mut self, n: impl core::convert::TryInto<http::header::name::HeaderName>, v: impl core::convert::TryInto<http::header::value::HeaderValue>) -> leyline::Result<()>
-pub fn leyline::HeaderList::get(&self, name: &str) -> core::option::Option<&http::header::value::HeaderValue>
-pub fn leyline::HeaderList::iter(&self) -> impl core::iter::traits::iterator::Iterator<Item = (&http::header::name::HeaderName, &http::header::value::HeaderValue)>
-pub fn leyline::HeaderList::new() -> Self
-pub fn leyline::HeaderList::remove_all(&mut self, name: &str)
-pub fn leyline::HeaderList::set(&mut self, n: impl core::convert::TryInto<http::header::name::HeaderName>, v: impl core::convert::TryInto<http::header::value::HeaderValue>) -> leyline::Result<()>
-impl core::clone::Clone for leyline::HeaderList
-impl core::cmp::Eq for leyline::HeaderList
-impl core::cmp::PartialEq for leyline::HeaderList
-impl core::default::Default for leyline::HeaderList
-impl core::fmt::Debug for leyline::HeaderList
-impl core::marker::StructuralPartialEq for leyline::HeaderList
-impl<N, V> core::convert::TryFrom<alloc::vec::Vec<(N, V)>> for leyline::HeaderList where N: core::convert::TryInto<http::header::name::HeaderName>, V: core::convert::TryInto<http::header::value::HeaderValue>
-pub type leyline::HeaderList::Error = leyline::Error
 pub struct leyline::Identity
 impl leyline::Identity
 pub fn leyline::Identity::http(self) -> leyline::Browser
@@ -1172,7 +1151,6 @@ impl core::marker::StructuralPartialEq for leyline::SessionIdentity
 #[non_exhaustive] pub struct leyline::SocketConfig
 impl leyline::SocketConfig
 pub fn leyline::SocketConfig::happy_eyeballs(self, config: impl core::convert::Into<core::option::Option<leyline::tls::HappyEyeballsConfig>>) -> Self
-pub fn leyline::SocketConfig::interface(self, name: impl core::convert::Into<core::option::Option<alloc::string::String>>) -> Self
 pub fn leyline::SocketConfig::local_address(self, addr: impl core::convert::Into<core::option::Option<core::net::ip_addr::IpAddr>>) -> Self
 pub fn leyline::SocketConfig::local_ipv4(self, addr: impl core::convert::Into<core::option::Option<core::net::ip_addr::Ipv4Addr>>) -> Self
 pub fn leyline::SocketConfig::local_ipv6(self, addr: impl core::convert::Into<core::option::Option<core::net::ip_addr::Ipv6Addr>>) -> Self
@@ -1246,7 +1224,7 @@ impl core::fmt::Debug for leyline::TlsTrustConfig
 #[cfg(feature = "websocket")] impl leyline::WebSocketBuilder
 #[cfg(feature = "websocket")] pub fn leyline::WebSocketBuilder::config(self, config: leyline::WebSocketConfig) -> Self
 #[cfg(feature = "websocket")] pub async fn leyline::WebSocketBuilder::connect(self) -> leyline::Result<leyline::WsConnection>
-#[cfg(feature = "websocket")] pub fn leyline::WebSocketBuilder::header(self, name: &str, value: &str) -> Self
+#[cfg(feature = "websocket")] pub fn leyline::WebSocketBuilder::header(self, name: impl core::convert::TryInto<http::header::name::HeaderName>, value: impl core::convert::TryInto<http::header::value::HeaderValue>) -> Self
 #[cfg(feature = "websocket")] pub fn leyline::WebSocketBuilder::headers<I, P>(self, headers: I) -> Self where I: core::iter::traits::collect::IntoIterator<Item = P>, P: leyline::IntoParamPair
 #[cfg(feature = "websocket")] pub fn leyline::WebSocketBuilder::proxy(self, config: impl core::convert::Into<leyline::ProxyConfig>) -> Self
 #[cfg(feature = "websocket")] impl core::fmt::Debug for leyline::WebSocketBuilder

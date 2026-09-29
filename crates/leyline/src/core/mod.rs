@@ -29,7 +29,6 @@ pub(crate) use config::{DEFAULT_MAX_BODY_SIZE, DEFAULT_MAX_HEADER_LIST_BYTES};
 pub use digest::DigestAuth;
 pub use error::{Error, Kind, Result};
 pub use fetch_site::FetchSite;
-pub use headers::HeaderList;
 pub use into_url::IntoUrl;
 pub use request::{ContentEncoding, IntoParamPair, RequestBuilder};
 pub use response::{HttpVersion, Response, ResponseTiming};

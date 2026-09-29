@@ -330,8 +330,9 @@ These facts come from the captures behind the bundled profiles.
   `signature_algorithms` on every captured platform. Chrome 145 to 151 and
   Brave 1.88.138 do not. The value is random per connection and independent
   of the cipher GREASE. `sigalg_grease = true` in `[tls]` turns it on; it
-  needs `grease = true`. BoringSSL patch
-  `0004-leyline-grease-signature-algorithms.patch` adds it. JA4 and JA3 drop
+  needs `grease = true`. Upstream BoringSSL sends the value after a call to
+  `SSL_CTX_set_grease_sigalgs_enabled`, which
+  `SslContextBuilder::set_grease_sigalgs_enabled` wraps. JA4 and JA3 drop
   GREASE, so only the raw list shows it. The QUIC ClientHello of these
   builds has no GREASE value, so `[h3.tls]` leaves it off.
 - **Resumed ClientHello.** The second request to `tls.peet.ws` in the same
@@ -518,9 +519,11 @@ on, and `ProfileError::Empty` when the directory holds no profile.
 
 A loaded profile carries its own `[identity.<platform>]` tables. The session
 reads the user agent, `sec-ch-ua`, and `accept_language` for the chosen
-platform from those tables. `build` returns `Kind::Config` when the profile has no
-table for that platform. Without `.platform()`, the platform is Windows. A
-brand overlay (`SessionBuilder::brand`) needs `chromium_major` in `[meta]`.
+platform from those tables. A table without `accept_language` takes the value
+that `profiles/bare.toml` sets for the platform. `build` returns `Kind::Config`
+when the profile has no table for that platform. Without `.platform()`, the
+platform is Windows. A brand overlay (`SessionBuilder::brand`) needs
+`chromium_major` in `[meta]`.
 The request headers follow `header_style` in `[meta]`. `profiles/headers.toml`
 defines every header style. Each top-level table is one style, and its key is
 the `header_style` value: `chromium`, `gecko`, `webkit`, `webkit-26`,
@@ -587,7 +590,6 @@ instead of a TOML file. It returns the same `BrowserProfile` type, and
   the strings do not carry: the identity tables, the headers, HTTP/3, the
   signature algorithms for a JA3 string, and the curves for a JA4_r string.
   Without a base, the bare profile is the start.
-- `user_agent(ua)`: replaces the user agent in every identity table.
 - `header_order(names)`: replaces the order of the profile's header style.
 - `name(name)`: the profile name in logs and errors.
 

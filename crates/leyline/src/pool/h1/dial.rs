@@ -21,7 +21,7 @@ pub(super) async fn dial_plain(
     let io: Box<dyn H1Io> = match parsed.scheme() {
         "http" => Box::new(
             connector
-                .with_timeout(proxy::connect_to_proxy(connector, &parsed, 8080))
+                .with_timeout(proxy::connect_to_proxy(connector, &parsed))
                 .await?,
         ),
         "https" => Box::new(

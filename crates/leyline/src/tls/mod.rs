@@ -18,7 +18,6 @@ mod windows_trust;
 pub(crate) use error::TlsError;
 pub use happy_eyeballs::HappyEyeballsConfig;
 pub use resolver::{ResolveFuture, Resolver, SystemResolver};
-pub use trust::ClientIdentity;
 pub(crate) use trust::TlsTrustConfig;
 
 #[cfg(feature = "bench-internals")]

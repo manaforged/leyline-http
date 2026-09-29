@@ -16,6 +16,7 @@ use crate::trace;
 use crate::util::is_idempotent;
 use std::time::Instant;
 
+use crate::pool::send::not_resendable;
 use crate::pool::types::PoolKey;
 use crate::pool::types::Transport;
 use crate::pool::{H1Slot, Pool, TlsInfo, make_key};
@@ -68,13 +69,16 @@ pub enum H1PooledError {
     Http(String),
     #[error("connection closed: {0}")]
     ConnectionClosed(String),
+    #[error(transparent)]
+    NotResendable(crate::Error),
 }
 
 impl H1PooledError {
-    pub(crate) fn body_limit(&self) -> Option<BodyLimit> {
+    fn connection_failed(&self) -> bool {
         match self {
-            Self::Io(io) => BodyLimit::of_io(io),
-            _ => None,
+            Self::Io(io) => BodyLimit::of_io(io).is_none(),
+            Self::ConnectionClosed(_) => true,
+            _ => false,
         }
     }
 }
@@ -133,7 +137,7 @@ pub async fn send_request_h1_pooled(
     target: H1Target,
     stream: bool,
 ) -> Result<H1Response, H1PooledError> {
-    check_request(method, &headers)?;
+    validate(method, &headers)?;
     pool.evict_idle();
 
     let key = make_key(scheme, host, port, proxy, Transport::Tcp);
@@ -149,7 +153,7 @@ pub async fn send_request_h1_pooled(
     }
 
     let started = Instant::now();
-    let replay = replay_body(method, &body);
+    let replay = replay_body(&body);
     let mut body = body;
 
     if let Some((slot, tls)) = checkout_live_h1(pool, &key) {
@@ -180,24 +184,7 @@ pub async fn send_request_h1_pooled(
                     timing: ResponseTiming::leg(started, None),
                 });
             }
-            Err(e) => {
-                if e.body_limit().is_some() {
-                    return Err(e);
-                }
-                tracing::info!(
-                    target: "leyline::pool",
-                    host = %key.host,
-                    port = key.port,
-                    proxied = key.proxy.is_some(),
-                    error = %e,
-                    "pool stale hit -- pooled h1 stream failed mid-request, opening fresh"
-                );
-                pool.note_h1_dead();
-                match replay {
-                    Some(replay) => body = replay,
-                    None => return Err(e),
-                }
-            }
+            Err(e) => body = resend_after_failure(pool, &key, method, replay, e)?,
         }
     }
     tracing::Span::current().record("pool.hit", false);
@@ -237,35 +224,39 @@ pub async fn send_request_h1_pooled(
     }
 }
 
-fn check_request(method: &str, headers: &[(String, String)]) -> Result<(), H1PooledError> {
-    if !is_valid_token(method) {
-        return Err(H1PooledError::Config(format!(
-            "invalid HTTP method `{method}`: non-token bytes not allowed"
-        )));
-    }
-    for (name, value) in headers {
-        if !is_valid_token(name) {
-            return Err(H1PooledError::Config(format!(
-                "invalid header name `{name}`: non-token bytes not allowed"
-            )));
-        }
-        if !is_valid_header_value(value) {
-            return Err(H1PooledError::Config(format!(
-                "invalid value for header `{name}`: control characters not allowed"
-            )));
-        }
-    }
-    Ok(())
-}
-
-fn replay_body(method: &str, body: &H1Body) -> Option<H1Body> {
-    if !is_idempotent(method) {
-        return None;
-    }
+fn replay_body(body: &H1Body) -> Option<H1Body> {
     match body {
         H1Body::Empty => Some(H1Body::Empty),
         H1Body::Buffered(b) => Some(H1Body::Buffered(b.clone())),
         _ => None,
+    }
+}
+
+fn resend_after_failure(
+    pool: &Pool,
+    key: &PoolKey,
+    method: &str,
+    replay: Option<H1Body>,
+    error: H1PooledError,
+) -> Result<H1Body, H1PooledError> {
+    if !error.connection_failed() {
+        return Err(error);
+    }
+    tracing::info!(
+        target: "leyline::pool",
+        host = %key.host,
+        port = key.port,
+        proxied = key.proxy.is_some(),
+        error = %error,
+        "pool stale hit -- pooled h1 connection failed, opening fresh"
+    );
+    pool.note_h1_dead();
+    match replay {
+        None => Err(H1PooledError::NotResendable(not_resendable(h1err_to_io(
+            error,
+        )))),
+        Some(_) if !is_idempotent(method) => Err(error),
+        Some(body) => Ok(body),
     }
 }
 
@@ -358,6 +349,8 @@ use parse::*;
 use read::*;
 use streaming::*;
 use wire::*;
+
+pub(crate) use wire::h1err_to_io;
 
 #[cfg(feature = "websocket")]
 pub(crate) use wire::upgrade_on_stream;

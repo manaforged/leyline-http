@@ -43,7 +43,7 @@ impl TcpProfile {
 static LOGGED: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
 
 fn log_once(option: &'static str, err: &std::io::Error) {
-    let mut logged = LOGGED.lock().unwrap_or_else(|e| e.into_inner());
+    let mut logged = crate::util::lock(&LOGGED);
     if !logged.contains(&option) {
         logged.push(option);
         tracing::warn!(option, error = %err, "setsockopt failed (non-fatal)");

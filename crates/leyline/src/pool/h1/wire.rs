@@ -8,6 +8,8 @@ use crate::trace;
 mod body;
 mod head;
 
+pub(super) use head::validate;
+
 type BodyStream =
     Pin<Box<dyn futures_util::Stream<Item = std::io::Result<Bytes>> + Send + 'static>>;
 
@@ -89,7 +91,7 @@ pub(super) async fn exchange_on_stream(
     trace::sent(
         host,
         method,
-        &url[url::Position::BeforePath..url::Position::AfterQuery],
+        crate::util::request_target(url),
         HttpVersion::Http1_1,
         started.elapsed(),
     );
@@ -128,7 +130,7 @@ pub(super) async fn exchange_head_on_stream(
     trace::sent(
         host,
         method,
-        &url[url::Position::BeforePath..url::Position::AfterQuery],
+        crate::util::request_target(url),
         HttpVersion::Http1_1,
         started.elapsed(),
     );
@@ -145,10 +147,12 @@ pub(super) async fn exchange_head_on_stream(
         && !matches!(head.framing, BodyFraming::ToClose);
     Ok((head, reusable))
 }
-pub(super) fn h1err_to_io(e: H1PooledError) -> io::Error {
+pub(crate) fn h1err_to_io(e: H1PooledError) -> io::Error {
     match e {
         H1PooledError::Io(io) => io,
-        H1PooledError::ConnectionClosed(m) => io::Error::new(io::ErrorKind::UnexpectedEof, m),
+        H1PooledError::ConnectionClosed(_) => {
+            io::Error::new(io::ErrorKind::UnexpectedEof, e.to_string())
+        }
         other => io::Error::new(io::ErrorKind::InvalidData, other.to_string()),
     }
 }

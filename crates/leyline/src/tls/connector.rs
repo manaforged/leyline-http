@@ -248,6 +248,3 @@ impl std::fmt::Debug for FingerprintConnector {
             .finish_non_exhaustive()
     }
 }
-
-#[cfg(test)]
-mod tests;

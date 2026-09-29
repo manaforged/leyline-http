@@ -34,10 +34,12 @@ impl Drain<'_> {
             return;
         };
         if let Err(message) = stream.headers(&list) {
-            close(
+            abort_stream(
+                self.h3,
                 self.conn,
                 id,
-                quiche::h3::WireErrorCode::MessageError as u64,
+                stream,
+                quiche::h3::WireErrorCode::GeneralProtocolError,
             );
             stream.deliver_error(message.into());
             self.streams.remove(&id);
@@ -54,10 +56,12 @@ impl Drain<'_> {
             return;
         };
         if let Err(message) = stream.data() {
-            close(
+            abort_stream(
+                self.h3,
                 self.conn,
                 id,
-                quiche::h3::WireErrorCode::MessageError as u64,
+                stream,
+                quiche::h3::WireErrorCode::GeneralProtocolError,
             );
             stream.deliver_error(message.into());
             self.streams.remove(&id);
@@ -90,11 +94,12 @@ impl Drain<'_> {
                 break;
             }
             if check_body_budget(stream.body_bytes_seen, n, max).is_err() {
-                shutdown(
+                abort_stream(
+                    self.h3,
                     self.conn,
                     id,
-                    quiche::Shutdown::Read,
-                    quiche::h3::WireErrorCode::ExcessiveLoad as u64,
+                    stream,
+                    quiche::h3::WireErrorCode::RequestCancelled,
                 );
                 stream.deliver_body_limit(BodyLimit(usize::try_from(max).unwrap_or(usize::MAX)));
                 self.streams.remove(&id);
@@ -111,12 +116,14 @@ impl Drain<'_> {
             .get(&id)
             .and_then(|stream| stream.finish().err());
         if let Some(message) = invalid {
-            close(
-                self.conn,
-                id,
-                quiche::h3::WireErrorCode::MessageError as u64,
-            );
             if let Some(mut stream) = self.streams.remove(&id) {
+                abort_stream(
+                    self.h3,
+                    self.conn,
+                    id,
+                    &mut stream,
+                    quiche::h3::WireErrorCode::GeneralProtocolError,
+                );
                 stream.deliver_error(message.into());
             }
             return;
@@ -125,15 +132,23 @@ impl Drain<'_> {
         match streaming {
             Some(true) => {
                 if let Some(stream) = self.streams.get_mut(&id) {
-                    reset_upload_half(self.conn, id, stream);
+                    reset_upload_half(
+                        self.conn,
+                        id,
+                        stream,
+                        quiche::h3::WireErrorCode::RequestCancelled,
+                    );
                     stream.peer_finished = true;
                 }
             }
             Some(false) => {
                 if let Some(mut stream) = self.streams.remove(&id) {
-                    if stream.send_side_open() {
-                        shutdown(self.conn, id, quiche::Shutdown::Write, 0);
-                    }
+                    reset_upload_half(
+                        self.conn,
+                        id,
+                        &mut stream,
+                        quiche::h3::WireErrorCode::RequestCancelled,
+                    );
                     let resp = H3Response {
                         status: stream.status,
                         headers: std::mem::take(&mut stream.headers),
@@ -148,7 +163,8 @@ impl Drain<'_> {
     }
 
     fn reset(&mut self, id: u64, e: u64) {
-        if e == 0x10b {
+        let rejected = e == quiche::h3::WireErrorCode::RequestRejected as u64;
+        if rejected {
             let cur = self.streams.len().max(1);
             let next = match *self.admit {
                 Some(c) => c.min(cur / 2).max(1),
@@ -159,7 +175,7 @@ impl Drain<'_> {
         let Some(mut stream) = self.streams.remove(&id) else {
             return;
         };
-        if e == 0x10b
+        if rejected
             && !stream.head_sent
             && let Some((headers, body)) = stream.retry.take()
             && let Some(resp_tx) = stream.resp_tx.take()
@@ -168,7 +184,7 @@ impl Drain<'_> {
                 headers,
                 body,
                 body_stream: None,
-                stream_body_tx: None,
+                stream_body_tx: stream.stream_tx.take(),
                 resp_tx,
                 retried: true,
             });
@@ -186,10 +202,12 @@ impl Drain<'_> {
             .collect();
         for id in rejected {
             if let Some(mut stream) = self.streams.remove(&id) {
-                close(
+                abort_stream(
+                    self.h3,
                     self.conn,
                     id,
-                    quiche::h3::WireErrorCode::RequestCancelled as u64,
+                    &mut stream,
+                    quiche::h3::WireErrorCode::RequestCancelled,
                 );
                 if stream.head_sent {
                     stream.deliver_error("server sent GOAWAY: stream rejected".into());
@@ -199,9 +217,4 @@ impl Drain<'_> {
             }
         }
     }
-}
-
-fn close(conn: &mut quiche::Connection, id: u64, code: u64) {
-    shutdown(conn, id, quiche::Shutdown::Read, code);
-    shutdown(conn, id, quiche::Shutdown::Write, 0);
 }

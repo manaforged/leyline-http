@@ -22,7 +22,7 @@ pub(crate) struct HeaderEntry {
 }
 
 #[derive(Clone, Default, PartialEq, Eq)]
-pub struct HeaderList {
+pub(crate) struct HeaderList {
     inner: Vec<HeaderEntry>,
 }
 

@@ -22,8 +22,9 @@ mod handshake;
 mod split;
 
 use handshake::{
-    H2_NO_CONNECT_PROTOCOL, check_upgrade_response, is_reserved_ws_header, random_sec_ws_key,
-    response_header, tungstenite_config, wire_error, ws_header_pair,
+    H2_NO_CONNECT_PROTOCOL, check_upgrade_response, handshake_target, is_reserved_ws_header,
+    overlay_headers, random_sec_ws_key, response_header, tungstenite_config, wire_error,
+    ws_header_pair,
 };
 pub use split::{WsSink, WsStream};
 use split::{WsSinkInner, WsStreamInner};
@@ -109,15 +110,7 @@ impl WsConnection {
         header_order: Option<&[String]>,
         ws_config: &WebSocketConfig,
     ) -> Result<Self> {
-        let mut parsed = url::Url::parse(url).map_err(crate::core::Error::from_url_parse)?;
-        let host = parsed
-            .host_str()
-            .ok_or_else(|| Error::new(Kind::Config).with_message("no host in WebSocket URL"))?
-            .to_string();
-        let port = parsed.port_or_known_default().unwrap_or(443);
-        parsed
-            .set_scheme("https")
-            .map_err(|()| Error::new(Kind::Config).with_message("WebSocket URL must use wss://"))?;
+        let (parsed, host, port) = handshake_target(url)?;
 
         let mut stream = connector
             .connect_h1(&host, port, proxy)
@@ -134,18 +127,7 @@ impl WsConnection {
             ("Sec-WebSocket-Version".into(), "13".into()),
             ("Sec-WebSocket-Key".into(), sec_key.clone().into()),
         ];
-        for (name, value) in extra_headers {
-            if is_reserved_ws_header(name) {
-                continue;
-            }
-            match request
-                .iter_mut()
-                .find(|(n, _)| n.eq_ignore_ascii_case(name))
-            {
-                Some(slot) => slot.1 = value.clone().into(),
-                None => request.push((name.clone().into(), value.clone().into())),
-            }
-        }
+        overlay_headers(&mut request, extra_headers);
         if let Some(order) = header_order {
             reorder(&mut request, order);
         }
@@ -191,28 +173,9 @@ impl WsConnection {
         extra_headers: &[(String, String)],
         ws_config: &WebSocketConfig,
     ) -> Result<Self> {
-        let parsed = url::Url::parse(url).map_err(crate::core::Error::from_url_parse)?;
-        let host = parsed
-            .host_str()
-            .ok_or_else(|| Error::new(Kind::Config).with_message("no host in WebSocket URL"))?
-            .to_string();
-        let port = parsed.port_or_known_default().unwrap_or(443);
-        let path = {
-            let mut p = parsed.path().to_string();
-            if p.is_empty() {
-                p.push('/');
-            }
-            if let Some(q) = parsed.query() {
-                p.push('?');
-                p.push_str(q);
-            }
-            p
-        };
-        let authority = if port == 443 {
-            host.clone()
-        } else {
-            format!("{host}:{port}")
-        };
+        let (parsed, host, port) = handshake_target(url)?;
+        let path = crate::util::request_target(&parsed);
+        let authority = crate::util::authority(&parsed, &host, port);
 
         let (h2_client, _tls) =
             crate::pool::checkout_handle(pool, connector, h2_config, &host, port, proxy).await?;
@@ -221,24 +184,20 @@ impl WsConnection {
             return Err(Error::new(Kind::Request).with_message(H2_NO_CONNECT_PROTOCOL));
         }
 
-        let sec_key = random_sec_ws_key();
-        let mut headers: Vec<(String, String)> = Vec::with_capacity(8);
-        headers.push(("sec-websocket-version".into(), "13".into()));
-        headers.push(("sec-websocket-key".into(), sec_key));
-        headers.push(("user-agent".into(), user_agent.into()));
-        headers.push(("origin".into(), origin.into()));
-
-        for (name, value) in extra_headers {
-            let lname = name.to_ascii_lowercase();
-            if is_reserved_ws_header(&lname) {
-                continue;
-            }
+        for (name, value) in extra_headers
+            .iter()
+            .filter(|(name, _)| !is_reserved_ws_header(name))
+        {
             drop(ws_header_pair(name, value)?);
-            match headers.iter_mut().find(|(n, _)| n == &lname) {
-                Some(slot) => slot.1 = value.clone(),
-                None => headers.push((lname, value.clone())),
-            }
         }
+        let sec_key = random_sec_ws_key();
+        let mut headers: Vec<HeaderPair> = vec![
+            ("sec-websocket-version".into(), "13".into()),
+            ("sec-websocket-key".into(), sec_key.into()),
+            ("user-agent".into(), user_agent.to_owned().into()),
+            ("origin".into(), origin.to_owned().into()),
+        ];
+        overlay_headers(&mut headers, extra_headers);
 
         let pseudo = PseudoHeaders {
             method: HeaderStr::from_static("CONNECT"),
@@ -253,7 +212,9 @@ impl WsConnection {
                 pseudo,
                 headers
                     .into_iter()
-                    .map(|(k, v)| (std::borrow::Cow::Owned(k), std::borrow::Cow::Owned(v)))
+                    .map(|(name, value)| {
+                        (std::borrow::Cow::Owned(name.to_ascii_lowercase()), value)
+                    })
                     .collect(),
             )
             .await

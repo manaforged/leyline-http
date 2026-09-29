@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use tokio_tungstenite::tungstenite::Error as WireError;
@@ -6,8 +8,39 @@ use tokio_tungstenite::tungstenite::http::{HeaderName, HeaderValue};
 
 use crate::core::WebSocketConfig;
 use crate::core::error::{Error, Kind, Result};
+use crate::profile::preset::HeaderPair;
 
 pub(super) const H2_NO_CONNECT_PROTOCOL: &str = "h2-no-connect-protocol";
+
+pub(super) fn handshake_target(url: &str) -> Result<(url::Url, String, u16)> {
+    let mut parsed = url::Url::parse(url).map_err(Error::from_url_parse)?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| Error::new(Kind::Config).with_message("no host in WebSocket URL"))?
+        .to_owned();
+    let port = parsed.port_or_known_default().unwrap_or(443);
+    parsed
+        .set_scheme("https")
+        .map_err(|()| Error::new(Kind::Config).with_message("WebSocket URL must use wss://"))?;
+    Ok((parsed, host, port))
+}
+
+pub(super) fn overlay_headers(request: &mut Vec<HeaderPair>, extra: &[(String, String)]) {
+    let defaults = request.len();
+    for (name, value) in extra
+        .iter()
+        .filter(|(name, _)| !is_reserved_ws_header(name))
+    {
+        match request
+            .iter_mut()
+            .take(defaults)
+            .find(|(default, _)| default.eq_ignore_ascii_case(name))
+        {
+            Some(slot) => slot.1 = Cow::Owned(value.clone()),
+            None => request.push((Cow::Owned(name.clone()), Cow::Owned(value.clone()))),
+        }
+    }
+}
 
 pub(super) fn tungstenite_config(
     cfg: &WebSocketConfig,

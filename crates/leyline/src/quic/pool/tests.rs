@@ -240,7 +240,14 @@ fn fail_all_drains_streams_and_pending_and_marks_closed() {
         retried: false,
     });
 
-    fail_all(&mut streams, &mut pending, &closed, "boom".into());
+    let (_commands_tx, mut commands) = mpsc::channel(1);
+    fail_all(
+        &mut streams,
+        &mut pending,
+        &mut commands,
+        &closed,
+        "boom".into(),
+    );
 
     assert!(closed.load(Ordering::Acquire));
     assert!(streams.is_empty());
@@ -253,4 +260,30 @@ fn fail_all_drains_streams_and_pending_and_marks_closed() {
         rx_pending.blocking_recv().unwrap().unwrap_err().message(),
         "boom"
     );
+}
+
+#[test]
+fn fail_all_answers_queued_commands_as_not_sent() {
+    let closed = AtomicBool::new(false);
+    let (commands_tx, mut commands) = mpsc::channel(1);
+    let (resp_tx, queued) = oneshot::channel();
+    commands_tx
+        .try_send(H3Command::Request {
+            headers: Vec::new(),
+            body: None,
+            body_stream: None,
+            stream_body_tx: None,
+            resp_tx,
+            retried: false,
+        })
+        .unwrap();
+    fail_all(
+        &mut HashMap::new(),
+        &mut VecDeque::new(),
+        &mut commands,
+        &closed,
+        "boom".into(),
+    );
+    let err = queued.blocking_recv().unwrap().unwrap_err();
+    assert!(err.is_retryable(), "{}", err.message());
 }

@@ -1,11 +1,12 @@
 use std::num::NonZeroUsize;
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use leyline_bssl::ex_data::Index;
 use leyline_bssl::ssl::{Ssl, SslConnectorBuilder, SslRef, SslSession, SslSessionCacheMode};
 use lru::LruCache;
 
 use crate::tls::error::TlsError;
+use crate::util::lock;
 
 const CAPACITY: NonZeroUsize = match NonZeroUsize::new(256) {
     Some(n) => n,
@@ -33,7 +34,7 @@ fn store(ssl: &mut SslRef, session: SslSession, index: Index<Ssl, Slot>) {
     if let Some(slot) = ssl.ex_data(index)
         && let Ok(der) = session.to_der()
     {
-        lock_unpoisoned(&slot.cache.0).put(slot.key.clone(), der);
+        lock(&slot.cache.0).put(slot.key.clone(), der);
     }
 }
 
@@ -57,7 +58,7 @@ impl SessionCache {
 
     pub(crate) fn attach(&self, ssl: &mut Ssl, key: &str) -> Result<(), TlsError> {
         let index = slot_index()?;
-        let der = lock_unpoisoned(&self.0).get(key).cloned();
+        let der = lock(&self.0).get(key).cloned();
         if let Some(der) = der
             && let Ok(session) = SslSession::from_der(&der)
         {
@@ -73,14 +74,4 @@ impl SessionCache {
         );
         Ok(())
     }
-}
-
-pub(crate) fn lock_unpoisoned<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(|poisoned| {
-        tracing::warn!(
-            target: "leyline::tls",
-            "session cache mutex was poisoned; recovering"
-        );
-        poisoned.into_inner()
-    })
 }

@@ -255,11 +255,7 @@ pub(crate) async fn send_request_h3(
         .host_str()
         .ok_or_else(|| Error::new(Kind::Config).with_message("no host in URL"))?;
     let port = url.port_or_known_default().unwrap_or(443);
-    let authority = if url.scheme() == "https" && port == 443 {
-        host.to_string()
-    } else {
-        format!("{host}:{port}")
-    };
+    let authority = crate::util::authority(url, host, port);
     let full_path = crate::util::request_target(url);
 
     strip_connection_specific_headers(&mut headers)?;
@@ -276,7 +272,7 @@ pub(crate) async fn send_request_h3(
         crate::pool::H3Request {
             method,
             authority: &authority,
-            path: &full_path,
+            path: full_path,
             headers: &headers,
             proxy,
         },

@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -7,6 +7,7 @@ use url::Url;
 
 use crate::cookie::parse;
 use crate::cookie::record::Cookie;
+use crate::util::lock;
 
 const MAX_COOKIES_PER_DOMAIN: usize = 180;
 const EVICT_PER_DOMAIN: usize = 30;
@@ -21,10 +22,6 @@ pub struct Jar {
 struct JarInner {
     cookies: HashMap<String, Vec<Cookie>>,
     total: usize,
-}
-
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 impl Jar {

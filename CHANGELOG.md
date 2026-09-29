@@ -69,6 +69,10 @@ First public release.
   plans, the first Initial datagram size, and QUIC v2 with compatible version
   negotiation (RFC 9368, RFC 9369). The QPACK decoder supports the dynamic
   table.
+- HTTP/3 stream resets carry the codes that Chrome sends:
+  `H3_REQUEST_CANCELLED` for a cancelled request and
+  `H3_GENERAL_PROTOCOL_ERROR` for a malformed response. An idle connection
+  closes without a CONNECTION_CLOSE frame.
 - `TlsProfile::key_shares`, a GREASE signature algorithm switch, and
   per-platform TCP profiles captured from each OS's own SYN.
 - Cookies, proxy configuration, redirect policies, opt-in retries, streaming
@@ -84,8 +88,9 @@ First public release.
   seconds. It replaces the connection if the PING is not acknowledged within
   2 seconds. `PoolConfig::h2_ping_after_idle` and
   `PoolConfig::h2_ping_timeout` change the thresholds.
-- WebSocket connections through the session. `WsConnection::header` reads the
-  handshake response headers. A `wss://` URL uses the `https` proxy rule, and a
+- WebSocket connections through the session. `WebSocketBuilder::header`
+  takes the same arguments as `RequestBuilder::header` and appends.
+  `WsConnection::header` reads the handshake response headers. A `wss://` URL uses the `https` proxy rule, and a
   `ws://` URL uses the `http` rule.
 - Lifecycle tracing and a Tower `Service`, `LeylineService`, that wraps a
   session (feature `tower`).
@@ -113,6 +118,11 @@ First public release.
 - `Error::kind` returns a typed `Kind`. DNS, TCP, and proxy failures report
   `Kind::Connect` and `Kind::Proxy`, not `Kind::Tls`. `Error::is_retryable`
   holds the one retry rule that the retry policy also uses.
+- When a pooled connection fails before the response, Leyline resends a
+  buffered request on a new connection if the method is idempotent or the
+  server did not process it (HTTP/2 `REFUSED_STREAM`, or an HTTP/3 request
+  that was not sent). A streaming request body cannot be resent, so that
+  request fails with `Kind::Body`.
 - Request functions take any `IntoUrl` input. A URL that does not parse
   returns `Kind::Url` with its source error.
 - `Response::text`, `bytes`, and `json` consume the response and return the
@@ -132,7 +142,8 @@ First public release.
   `Race` session returns `Kind::Config` for an identity with no HTTP/3
   profile.
 - `Session::identity` returns the browser, platform, brand, and user agent
-  that the session sends.
+  that the session sends. A `user-agent` header set on the builder is that
+  user agent.
 - The `trace::Head` event carries the response headers.
 
 ### Security
@@ -156,8 +167,8 @@ First public release.
 - A plain-HTTP origin cannot shadow a Secure cookie (RFC 6265bis), and
   `ProxyUrl` and error messages redact credentials and query strings.
 - `Debug` output never prints a password, token, cookie value, or query
-  value. `Response`, `DigestAuth`, `Cookie`, `HeaderList`, `RedirectAttempt`,
-  the request and WebSocket builders, the trace events, and the
+  value. `Response`, `DigestAuth`, `Cookie`, `RedirectAttempt`, the request
+  and WebSocket builders, the trace events, and the
   `leyline::trace` log mask them, including a proxy URL written without a
   scheme.
   `Session::proxy_url` returns a `ProxyUrl`, whose `Display` hides the

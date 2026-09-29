@@ -111,6 +111,14 @@ QUIC DATAGRAM receipt. Leyline reads RESET_STREAM_AT as RESET_STREAM and
 ignores ACK_FREQUENCY and IMMEDIATE_ACK, so a profile can advertise
 `reset_stream_at` and `min_ack_delay`.
 
+A request that ends early resets both halves of its stream with the code
+that Chrome sends. The code is `H3_REQUEST_CANCELLED` when the caller drops
+the response or its body, when a buffered body passes `max_body_size`, or
+when the response ends before the request body. It is
+`H3_GENERAL_PROTOCOL_ERROR` for a malformed response or a request body stream
+that fails. When the pool drops an idle connection, Leyline sends no
+CONNECTION_CLOSE frame, as Chrome does not.
+
 ## QPACK
 
 The QPACK decoder keeps a dynamic table. A profile's `settings` list sets the

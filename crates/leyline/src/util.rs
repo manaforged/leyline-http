@@ -70,11 +70,24 @@ pub(crate) fn redact_target(target: &str) -> String {
     }
 }
 
-pub(crate) fn request_target(url: &url::Url) -> String {
-    match url.query() {
-        Some(query) => format!("{}?{query}", url.path()),
-        None => url.path().to_owned(),
+pub(crate) fn request_target(url: &url::Url) -> &str {
+    &url[url::Position::BeforePath..url::Position::AfterQuery]
+}
+
+pub(crate) fn authority(url: &url::Url, host: &str, port: u16) -> String {
+    let is_default_port =
+        (url.scheme() == "https" && port == 443) || (url.scheme() == "http" && port == 80);
+    if is_default_port {
+        host.to_string()
+    } else {
+        format!("{host}:{port}")
     }
+}
+
+pub(crate) fn lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 const SENSITIVE_HEADERS: [&str; 4] = [

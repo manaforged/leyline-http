@@ -47,7 +47,7 @@ fn keylog_writer(path: &str) -> std::io::Result<impl Fn(&str) + Send + Sync + 's
     let file = OpenOptions::new().create(true).append(true).open(path)?;
     let file = Arc::new(Mutex::new(file));
     Ok(move |line: &str| {
-        let mut file = file.lock().unwrap_or_else(|e| e.into_inner());
+        let mut file = crate::util::lock(&file);
         let _ = writeln!(file, "{line}");
         let _ = file.flush();
     })

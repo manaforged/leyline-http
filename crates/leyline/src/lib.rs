@@ -111,10 +111,10 @@ pub use crate::core::LeylineService;
 pub use crate::core::WebSocketBuilder;
 pub use crate::core::{
     Body, BodyStream, CompressionConfig, ContentEncoding, DigestAuth, DnsConfig, Error, FetchSite,
-    HeaderList, HttpVersion, Identity, IntoParamPair, IntoUrl, Kind, NoProxy, PoolConfig,
-    ProtocolPolicy, ProxyConfig, ProxyRule, ProxyUrl, RedirectAction, RedirectAttempt,
-    RedirectPolicy, RequestBuilder, Response, ResponseTiming, Result, RetryPolicy, RetryTrigger,
-    Session, SessionBuilder, SessionIdentity, SocketConfig, TimeoutConfig, WebSocketConfig,
+    HttpVersion, Identity, IntoParamPair, IntoUrl, Kind, NoProxy, PoolConfig, ProtocolPolicy,
+    ProxyConfig, ProxyRule, ProxyUrl, RedirectAction, RedirectAttempt, RedirectPolicy,
+    RequestBuilder, Response, ResponseTiming, Result, RetryPolicy, RetryTrigger, Session,
+    SessionBuilder, SessionIdentity, SocketConfig, TimeoutConfig, WebSocketConfig,
 };
 pub use crate::pool::{PoolStats, TlsInfo};
 

@@ -5,7 +5,7 @@
 use std::sync::{Arc, Mutex};
 
 use leyline::trace::{Sent, Trace};
-use leyline::{DigestAuth, HeaderList, RedirectAction, RedirectPolicy, Session};
+use leyline::{DigestAuth, RedirectAction, RedirectPolicy, Session};
 
 #[path = "http_support/httpbin_lite.rs"]
 mod httpbin_lite;
@@ -61,18 +61,6 @@ async fn response_debug_hides_the_credentials_it_sent() {
         .unwrap();
     let shown = format!("{resp:?}");
     assert!(shown.contains("200"), "{shown}");
-    assert!(!shown.contains(SECRET), "{shown}");
-}
-
-#[test]
-fn header_list_debug_hides_credentials() {
-    let mut headers = HeaderList::new();
-    headers
-        .append("authorization", format!("Bearer {SECRET}"))
-        .unwrap();
-    headers.append("x-trace", "1").unwrap();
-    let shown = format!("{headers:?}");
-    assert!(shown.contains("x-trace"), "{shown}");
     assert!(!shown.contains(SECRET), "{shown}");
 }
 

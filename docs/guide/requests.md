@@ -98,8 +98,9 @@ The `HeaderAnchor` slots are `AfterCchUa`, `AfterCchUaMobile`,
 `AfterCchUaPlatform`, `AfterUserAgent`, `AfterAccept`, `AfterContentType`,
 `AfterFetchDest`, and `BeforeAcceptEncoding`.
 
-To see the headers a request actually sent, read `Response::request_headers`.
-See [Responses](responses.md).
+To see the headers the session prepared for a request, build the session with
+`SessionBuilder::audit(true)` and read `Response::request_headers`. See
+[Responses](responses.md).
 
 ## Query parameters
 

@@ -5,6 +5,8 @@ use std::ops::ControlFlow;
 use super::*;
 use crate::quic::transport::DatagramTransport;
 
+const GOAWAY_NOT_SENT: &str = "server sent GOAWAY: request not sent";
+
 pub(super) struct H3Loop {
     socket: DatagramTransport,
     conn: Box<quiche::Connection>,
@@ -96,7 +98,7 @@ impl H3Loop {
             return self.stop(reason);
         }
         if self.is_idle() {
-            self.close_idle().await;
+            self.closed.store(true, Ordering::Release);
             return ControlFlow::Break(());
         }
         ControlFlow::Continue(())
@@ -122,31 +124,18 @@ impl H3Loop {
     }
 
     fn stop(&mut self, reason: String) -> ControlFlow<()> {
-        fail_all(&mut self.streams, &mut self.pending, &self.closed, reason);
+        fail_all(
+            &mut self.streams,
+            &mut self.pending,
+            &mut self.command_rx,
+            &self.closed,
+            reason,
+        );
         ControlFlow::Break(())
     }
 
     fn is_idle(&self) -> bool {
         self.commands_closed && self.streams.is_empty() && self.pending.is_empty()
-    }
-
-    async fn close_idle(&mut self) {
-        match self.conn.close(true, 0x100, b"done") {
-            Ok(()) | Err(quiche::Error::Done) => {}
-            Err(e) => tracing::warn!(
-                target: "leyline::quic",
-                error = %e,
-                "h3 connection close failed"
-            ),
-        }
-        if let Err(e) = self.flush().await {
-            tracing::warn!(
-                target: "leyline::quic",
-                error = %e,
-                "h3 final egress flush failed"
-            );
-        }
-        self.closed.store(true, Ordering::Release);
     }
 
     fn wake_timeout(&self, backpressured: bool) -> Duration {
@@ -162,7 +151,7 @@ impl H3Loop {
 
     fn on_command(&mut self, cmd: Option<H3Command>) {
         match cmd {
-            Some(cmd) if self.draining => reject_unsent(cmd),
+            Some(cmd) if self.draining => reject_unsent(cmd, GOAWAY_NOT_SENT.into()),
             Some(cmd) => self.pending.push_back(cmd),
             None => self.commands_closed = true,
         }
@@ -202,18 +191,11 @@ impl H3Loop {
         self.draining = true;
         self.closed.store(true, Ordering::Release);
         for cmd in self.pending.drain(..) {
-            reject_unsent(cmd);
+            reject_unsent(cmd, GOAWAY_NOT_SENT.into());
         }
         tracing::debug!(
             target: "leyline::quic",
             "h3 server GOAWAY: connection draining, pool handle closed"
         );
     }
-}
-
-fn reject_unsent(cmd: H3Command) {
-    let H3Command::Request { resp_tx, .. } = cmd;
-    drop(resp_tx.send(Err(H3SendError::NotSent(
-        "server sent GOAWAY: request not sent".into(),
-    ))));
 }

@@ -1,7 +1,16 @@
 #![allow(dead_code)]
 
+use std::future::Future;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use bytes::BytesMut;
+use leyline_bssl::pkey::{PKey, Private};
+use leyline_bssl::ssl::{AlpnError, Ssl, SslContextBuilder, SslMethod, select_next_proto};
+use leyline_bssl::x509::X509;
+use leyline_bssl_tokio::SslStream;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
 
 use leyline::h2::frame::{
     DataFrame, FRAME_HEADER_LEN, FrameHeader, HeadersFrame, SettingsFrame, WindowUpdateFrame,
@@ -153,4 +162,38 @@ pub async fn write_window_update<S: AsyncWrite + Unpin>(s: &mut S, stream_id: u3
     let mut buf = BytesMut::new();
     w.encode(&mut buf);
     s.write_all(&buf).await.expect("window update write");
+}
+
+pub async fn tls_server<F, Fut>(
+    cert: X509,
+    key: PKey<Private>,
+    connections: Arc<AtomicUsize>,
+    serve: F,
+) -> u16
+where
+    F: Fn(SslStream<TcpStream>) -> Fut + Send + 'static,
+    Fut: Future<Output = ()> + Send + 'static,
+{
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let port = listener.local_addr().expect("local address").port();
+    let mut context = SslContextBuilder::new(SslMethod::tls()).expect("TLS context");
+    context.set_certificate(&cert).expect("certificate");
+    context.set_private_key(&key).expect("private key");
+    context.set_alpn_select_callback(|_, offered| {
+        select_next_proto(b"\x02h2", offered).ok_or(AlpnError::NOACK)
+    });
+    let context = context.build();
+    tokio::spawn(async move {
+        while let Ok((tcp, _)) = listener.accept().await {
+            connections.fetch_add(1, Ordering::SeqCst);
+            let ssl = Ssl::new(&context).expect("TLS session");
+            if let Ok(stream) = leyline_bssl_tokio::SslStreamBuilder::new(ssl, tcp)
+                .accept()
+                .await
+            {
+                tokio::spawn(serve(stream));
+            }
+        }
+    });
+    port
 }

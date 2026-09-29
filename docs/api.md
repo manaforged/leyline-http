@@ -156,7 +156,9 @@ let resp = session
 - `Session::with_identity` derives a clone that sends another `Identity`. The
   `tls()` browser supplies the ClientHello and the HTTP/2 and HTTP/3
   settings. The `http()` browser supplies `User-Agent`, `sec-ch-ua`,
-  `Accept-Language`, and the header shape and order. The clone gets a new pool
+  `Accept-Language`, and the header shape and order. A `user-agent` header
+  from `SessionBuilder::headers` stays the `User-Agent` of the clone. The
+  clone gets a new pool
   and TLS session cache, shares the cookie jar, and keeps the brand, proxy,
   timeouts, compression, and TCP profile. A session built without a bundled
   browser, a bare session or a loaded profile, returns `Kind::Config`. So does
@@ -233,6 +235,9 @@ let resp = session
   repeated calls with one name add values, and Leyline sends all of them.
   `json`, `form`, `multipart`, and the auth setters replace the header they
   own.
+- `WebSocketBuilder::header` and `headers` take the same input and append the
+  same way. A `user-agent` or `origin` header replaces the value that the
+  handshake sends, so the handshake carries one of each, with the last value.
 - Header merge runs in three layers:
   - The profile's header shape in `profiles/headers.toml` gives the base list
     for the preset, its order, and the headers it appends. `HeaderStyle` is
@@ -347,6 +352,10 @@ let resp = session
   decoded bytes, or at end of stream.
 - `Response::audit` is `None` unless the session was built with
   `audit(true)`.
+- `Response::request_headers`, the `request_headers` field of the `Response`
+  `Debug` output, and a JA4H input built from those headers are empty unless
+  the session was built with `SessionBuilder::audit(true)`. The values are the
+  headers the session prepared, not a capture of the wire.
 - The `trace::Head` event carries the response headers as received, before
   decompression, as an `http::HeaderMap`.
 
@@ -356,7 +365,8 @@ let resp = session
   including `Cookie` and `SameSite`. The exceptions are `audit::Ja3Input`,
   `Ja4Input`, and `Ja4hInput`, which callers fill with a struct literal. Other
   public structs have private fields, and config types use consuming setters.
-- Builder input errors surface at `build()` or `send()`, never eagerly.
+- Builder input errors surface at `build()`, `send()`, or `connect()`, never
+  eagerly.
   `Identity` is a value type, so its checks run at the call.
 
 ## Errors
@@ -401,7 +411,7 @@ closed connection, gives `Kind::Io`. A protocol violation or a message over
 | `Http2` | HTTP/2 protocol failure |
 | `Http3` | HTTP/3 protocol or handshake failure |
 | `Proxy` | Proxy dial, handshake, authentication, or `CONNECT` failed, or a request of a session that rejected an invalid environment proxy |
-| `Io` | Socket I/O |
+| `Io` | Socket I/O, or an HTTP/1.1 response that breaks the wire format; `err.io()` then has kind `InvalidData` |
 | `Config` | Invalid session, request, TLS profile, trust store, or proxy configuration, including an invalid environment proxy at `build()` |
 | `Url` | URL parse failure |
 | `Json` | JSON serialize or deserialize failure |
@@ -435,8 +445,11 @@ semver promise.
   `as_bytes`, `download_to`), or a second `Content-Encoding` decoder.
 - A second cookie store, such as a per-response cookie map.
 - A getter that copies session configuration back out. The exceptions report
-  what a built session sends: `Session::identity`, and `Session::proxy_url`,
-  which returns the exit as a `ProxyUrl` whose `Display` hides the password.
+  the state of a built session. `Session::identity` and `Session::proxy_url`
+  report what it sends, and `proxy_url` returns the exit as a `ProxyUrl` whose
+  `Display` hides the password. `Session::cookies` returns the session's
+  cookie jar, and `Session::pool_stats` returns a `PoolStats` snapshot of the
+  pool.
 - A second timing, retry, or redirect owner.
 - A browser, version, or brand table in Rust. Profile data owns it.
 

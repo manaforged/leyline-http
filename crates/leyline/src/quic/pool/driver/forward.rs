@@ -26,7 +26,7 @@ pub(in crate::quic::pool) fn forward_stream_body(
     };
 
     if let Some(chunk) = stream.stalled.take() {
-        match push_chunk(conn, stream_id, stream, &tx, chunk) {
+        match push_chunk(h3, conn, stream_id, stream, &tx, chunk) {
             Push::Sent => {}
             Push::Stalled => return false,
             Push::Closed => return true,
@@ -41,6 +41,7 @@ pub(in crate::quic::pool) fn forward_stream_body(
 }
 
 fn push_chunk(
+    h3: &mut quiche::h3::Connection,
     conn: &mut quiche::Connection,
     stream_id: u64,
     stream: &mut H3Stream,
@@ -56,8 +57,13 @@ fn push_chunk(
             Push::Stalled
         }
         Err(TrySendError::Closed(_)) => {
-            shutdown(conn, stream_id, quiche::Shutdown::Read, 0);
-            reset_upload_half(conn, stream_id, stream);
+            abort_stream(
+                h3,
+                conn,
+                stream_id,
+                stream,
+                quiche::h3::WireErrorCode::RequestCancelled,
+            );
             Push::Closed
         }
     }
@@ -77,7 +83,7 @@ fn pull_body(
             Ok(n) => {
                 stream.body_bytes_seen += n;
                 let chunk = Bytes::copy_from_slice(&scratch[..n]);
-                match push_chunk(conn, stream_id, stream, tx, chunk) {
+                match push_chunk(h3, conn, stream_id, stream, tx, chunk) {
                     Push::Sent => {}
                     Push::Stalled => return Pull::Stalled,
                     Push::Closed => return Pull::Closed,

@@ -20,14 +20,6 @@ fn method_header(method: &str) -> HeaderStr {
         .map_or_else(|| HeaderStr::from(method), HeaderStr::from_static)
 }
 
-fn authority_header(host: &str, port: u16) -> HeaderStr {
-    if port == 443 {
-        HeaderStr::from(host)
-    } else {
-        HeaderStr::from(format!("{host}:{port}"))
-    }
-}
-
 pub(super) fn request_pseudo(method: &str, url: &url::Url) -> Result<PseudoHeaders> {
     if url.scheme() != "https" {
         return Err(Error::new(Kind::Config).with_message("HTTP/2 requires an https:// URL"));
@@ -39,7 +31,7 @@ pub(super) fn request_pseudo(method: &str, url: &url::Url) -> Result<PseudoHeade
     Ok(PseudoHeaders {
         method: method_header(method),
         scheme: HeaderStr::from_static("https"),
-        authority: authority_header(host, port),
+        authority: HeaderStr::from(crate::util::authority(url, host, port)),
         path: HeaderStr::from(request_target(url)),
         protocol: None,
     })

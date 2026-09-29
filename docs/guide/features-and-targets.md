@@ -72,8 +72,9 @@ six targets.
 For a supported target, you can point the build at your own BoringSSL with
 environment variables. The `LEYLINE_BSSL_*` variables apply to Leyline only.
 Leyline links under `LEYLINE_` symbol names and declares
-`links = "leyline_bssl"`, so it builds alongside `boring-sys`. Each crate reads
-its own variables, so a value set for `boring-sys` never reaches Leyline.
+`links = "leyline_bssl"`, so its link name and symbols do not collide with
+those of `boring-sys`. Each crate reads its own variables, so a value set for
+`boring-sys` never reaches Leyline.
 
 - `LEYLINE_BSSL_PATH` links a BoringSSL that you built yourself. The build
   applies no patches to it, so it must carry Leyline's patches and be built
@@ -93,8 +94,8 @@ BoringSSL is built with `-DBORINGSSL_PREFIX=LEYLINE`, so every C export is
 `LEYLINE_<name>`. The C++ structs behind `SSL` and `SSL_SESSION` are renamed
 to `LEYLINE_ssl_st` and `LEYLINE_ssl_session_st`, and BoringSSL's internal
 C++ code is in the `bssl::LEYLINE` namespace. The generated bindings keep the
-plain Rust identifier and carry a `#[link_name]` for the prefixed export. That
-lets a binary link `openssl-sys` or `boring-sys` beside Leyline.
+plain Rust identifier and carry a `#[link_name]` for the prefixed export, so
+Leyline's symbols do not collide with those of `openssl-sys` or `boring-sys`.
 
 `leyline-bssl-sys` declares `links = "leyline_bssl"`, its own key, so it does
 not collide with another crate claiming `boringssl`.

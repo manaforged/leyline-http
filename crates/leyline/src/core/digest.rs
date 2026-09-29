@@ -242,7 +242,7 @@ fn nonce_cache() -> &'static std::sync::Mutex<lru::LruCache<String, u32>> {
 }
 
 pub(crate) fn next_nc_for_nonce(nonce: &str) -> u32 {
-    let mut guard = nonce_cache().lock().unwrap_or_else(|e| e.into_inner());
+    let mut guard = crate::util::lock(nonce_cache());
     if let Some(existing) = guard.get(nonce)
         && *existing >= u32::MAX - 1
     {

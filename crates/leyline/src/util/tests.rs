@@ -25,3 +25,18 @@ fn idempotent_matches_rfc_set() {
         assert!(!is_idempotent(m), "{m}");
     }
 }
+
+#[test]
+fn lock_recovers_after_panic() {
+    let cache = std::sync::Arc::new(std::sync::Mutex::new(vec![1u8]));
+    let poisoner = cache.clone();
+    let _ = std::thread::spawn(move || {
+        let _guard = poisoner.lock().unwrap();
+        panic!("poison the mutex");
+    })
+    .join();
+    assert!(cache.is_poisoned(), "test setup failed to poison the mutex");
+
+    lock(&cache).push(2);
+    assert_eq!(*lock(&cache), vec![1, 2]);
+}

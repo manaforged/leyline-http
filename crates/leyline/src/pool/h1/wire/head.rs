@@ -1,6 +1,9 @@
 use super::*;
 
-pub(super) fn validate(method: &str, headers: &[(String, String)]) -> Result<(), H1PooledError> {
+pub(in crate::pool::h1) fn validate(
+    method: &str,
+    headers: &[(String, String)],
+) -> Result<(), H1PooledError> {
     if !is_valid_token(method) {
         return Err(H1PooledError::Config(format!(
             "invalid HTTP method `{method}`: non-token bytes not allowed"
@@ -28,10 +31,10 @@ pub(super) fn target(url: &url::Url, target: H1Target) -> Result<(String, String
     let port = url.port_or_known_default().ok_or_else(|| {
         H1PooledError::Config(format!("no default port for scheme {}", url.scheme()))
     })?;
-    let authority = authority_for(url, host, port);
-    let path = path_and_query(url);
+    let authority = crate::util::authority(url, host, port);
+    let path = crate::util::request_target(url);
     let request_target = match target {
-        H1Target::OriginForm => path,
+        H1Target::OriginForm => path.to_owned(),
         H1Target::AbsoluteForm => {
             format!("{}://{}{}", url.scheme(), authority, path)
         }

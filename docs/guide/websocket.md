@@ -25,8 +25,11 @@ ws.send(WsMessage::Text("hello".to_owned())).await?;
 Builder methods:
 
 - `config(WebSocketConfig)` sets limits for this connection.
-- `header(name, value)` and `headers(pairs)` add handshake headers. A repeated
-  name replaces the earlier value.
+- `header(name, value)` and `headers(pairs)` append handshake headers, as on a
+  request: a repeated name adds a value and keeps the earlier ones. An invalid
+  name or value fails `connect()` with `Kind::Request`. A `user-agent` or
+  `origin` header replaces the value that Leyline sends, so the handshake
+  carries one of each, with the last value.
 - `proxy(url)` overrides the session proxy.
 
 ## Cookies and proxies

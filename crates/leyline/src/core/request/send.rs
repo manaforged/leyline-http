@@ -39,7 +39,7 @@ impl RequestBuilder {
                 && let Some(header) = resp.header("www-authenticate")
                 && let Ok(challenge) = crate::core::digest::parse_challenge(header)
             {
-                let uri_path = crate::util::request_target(resp.url());
+                let uri_path = crate::util::request_target(resp.url()).to_owned();
                 let Some(replay) = replay else {
                     return Err(Error::new(Kind::Request).with_message(
                         "digest auth: cannot replay streaming request body. \

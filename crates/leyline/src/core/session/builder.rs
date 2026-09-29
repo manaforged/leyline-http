@@ -128,7 +128,7 @@ impl SessionBuilder {
         }
     }
 
-    fn identity_inputs<'a>(&self, tcp: &'a TcpProfile) -> IdentityInputs<'a> {
+    fn identity_inputs<'a>(&'a self, tcp: &'a TcpProfile) -> IdentityInputs<'a> {
         IdentityInputs {
             source: self.identity_source(),
             platform: self.platform,
@@ -138,6 +138,7 @@ impl SessionBuilder {
             h3_required: self.protocol_policy.requires_h3(),
             tcp,
             audit: self.audit,
+            default_headers: &self.default_headers,
         }
     }
 

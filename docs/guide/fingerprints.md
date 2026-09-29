@@ -231,7 +231,9 @@ values from the identity, as `SessionBuilder::identity` does:
 - A separate connection pool. The copy opens its own connections.
 
 The copy shares the cookie jar with the session it came from. It keeps the
-brand, the proxy, the timeouts, the `TcpProfile`, and every other setting.
+brand, the proxy, the timeouts, the `TcpProfile`, and every other setting. A
+`user-agent` header from `SessionBuilder::headers` replaces the identity's
+`User-Agent` in the copy, as it does in the session.
 `Session::identity()` reports the identity that the copy sends.
 
 ```rust,no_run
@@ -257,10 +259,12 @@ let switched = session.with_identity(firefox)?;
 - The `http()` browser has no identity for the platform.
 - The session brand, Edge or Opera, has no overlay for the `http()` browser on
   the platform. Only Chromium browsers have one.
+- The session policy is `ProtocolPolicy::Http3` or `ProtocolPolicy::Race`, and
+  the `tls()` browser has no `[h3]` table.
 
-If the `tls()` browser has no `[h3]` table, the copy has no HTTP/3 transport.
-`ProtocolPolicy::Race` then behaves like `ProtocolPolicy::Auto`, and a forced
-`ProtocolPolicy::Http3` request returns `Kind::Config`. See [HTTP/3](http3.md).
+Under `ProtocolPolicy::Auto`, `Http1`, or `Http2`, `with_identity` accepts a
+`tls()` browser with no `[h3]` table. Those policies do not send HTTP/3, so the
+copy needs no HTTP/3 transport. See [HTTP/3](http3.md).
 
 ## Next
 

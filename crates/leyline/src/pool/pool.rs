@@ -13,6 +13,7 @@ use crate::quic::H3Client;
 use crate::pool::types::{PoolCounters, PoolKey, PoolStats, PooledConn};
 #[cfg(feature = "bench-internals")]
 use crate::pool::types::{TlsInfo, Transport};
+use crate::util::lock;
 
 pub const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
 
@@ -44,25 +45,16 @@ pub struct Pool {
 
 impl Pool {
     pub(crate) fn note_h1_only(&self, host: &str, port: u16, proxy: Option<&str>) {
-        self.h1_only
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert((host.to_string(), port, proxy.map(str::to_string)));
+        lock(&self.h1_only).insert((host.to_string(), port, proxy.map(str::to_string)));
     }
 
     pub(crate) fn is_h1_only(&self, host: &str, port: u16, proxy: Option<&str>) -> bool {
-        self.h1_only
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .contains(&(host.to_string(), port, proxy.map(str::to_string)))
+        lock(&self.h1_only).contains(&(host.to_string(), port, proxy.map(str::to_string)))
     }
 
     #[cfg(feature = "http3")]
     pub(crate) fn note_h3(&self, host: &str, port: u16) {
-        self.h3_known
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert((host.to_string(), port));
+        lock(&self.h3_known).insert((host.to_string(), port));
     }
 
     #[cfg(feature = "http3")]
@@ -77,10 +69,7 @@ impl Pool {
 
     #[cfg(feature = "http3")]
     pub(crate) fn knows_h3(&self, host: &str, port: u16) -> bool {
-        self.h3_known
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .contains(&(host.to_string(), port))
+        lock(&self.h3_known).contains(&(host.to_string(), port))
     }
 
     pub fn new() -> Self {
@@ -137,7 +126,7 @@ impl Pool {
     }
 
     pub fn stats(&self) -> PoolStats {
-        let entries = self.inner.lock().unwrap_or_else(|e| e.into_inner()).len();
+        let entries = lock(&self.inner).len();
         PoolStats {
             entries,
             max_connections: self.max_connections,
@@ -168,7 +157,7 @@ impl Pool {
         );
         let mut idle_evicted = 0u64;
         {
-            let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+            let mut map = lock(&self.inner);
             map.retain(|_, entry| match entry {
                 PooledConn::H1 { idle, last_use, .. } => {
                     let before = idle.len();
@@ -202,7 +191,7 @@ impl Pool {
             });
         }
         {
-            let mut permits = self.h1_permits.lock().unwrap_or_else(|e| e.into_inner());
+            let mut permits = lock(&self.h1_permits);
             permits.retain(|_, sem| Arc::strong_count(sem) > 1);
         }
         if idle_evicted > 0 {
@@ -259,7 +248,7 @@ impl Pool {
     }
 
     pub(crate) fn invalidate(&self, key: &PoolKey) {
-        let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut map = lock(&self.inner);
         if map.remove(key).is_some() {
             self.counters.evictions_dead.fetch_add(1, Ordering::Relaxed);
         }
@@ -267,7 +256,7 @@ impl Pool {
 
     #[cfg(feature = "bench-internals")]
     pub fn bench_populate_h2(&self, n: usize, handle: &H2Client) {
-        let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut map = lock(&self.inner);
         map.clear();
         for i in 0..n {
             map.insert(

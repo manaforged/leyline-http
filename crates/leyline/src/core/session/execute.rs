@@ -16,7 +16,7 @@ use crate::core::headers::HeaderList;
 use crate::core::response::Response;
 use crate::core::{ProxyConfig, RedirectPolicy};
 use crate::trace;
-use crate::util::{redact, without_userinfo};
+use crate::util::{lock, redact, without_userinfo};
 
 mod headers;
 mod journey;
@@ -203,7 +203,3 @@ mod redact_tests;
 mod referer_tests;
 #[cfg(test)]
 mod reorder_tests;
-
-fn lock<T>(m: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
-}

@@ -101,12 +101,10 @@ fn apply_socket_config(
     if config.tcp_user_timeout.is_some() {
         unsupported_socket_option(config.strict, "tcp_user_timeout")?;
     }
-    if config.interface.is_some() {
-        unsupported_socket_option(config.strict, "interface")?;
-    }
     Ok(())
 }
 
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 fn unsupported_socket_option(strict: bool, name: &str) -> Result<(), std::io::Error> {
     if strict {
         return Err(std::io::Error::new(
@@ -120,14 +118,11 @@ fn unsupported_socket_option(strict: bool, name: &str) -> Result<(), std::io::Er
     Ok(())
 }
 
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 fn warned_once(name: &str) -> bool {
     static WARNED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
         std::sync::OnceLock::new();
-    WARNED
-        .get_or_init(std::sync::Mutex::default)
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .insert(name.to_owned())
+    crate::util::lock(WARNED.get_or_init(std::sync::Mutex::default)).insert(name.to_owned())
 }
 
 fn nonblocking_connect_started(error: &std::io::Error) -> bool {

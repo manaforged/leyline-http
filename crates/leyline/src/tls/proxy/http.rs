@@ -12,7 +12,7 @@ pub(crate) async fn connect<C: crate::tls::TlsHandshake>(
     proxy: &url::Url,
     include_alps: bool,
 ) -> Result<TlsStream, TlsError> {
-    let mut tcp_stream = super::connect_to_proxy(connector, proxy, 8080).await?;
+    let mut tcp_stream = super::connect_to_proxy(connector, proxy).await?;
     write_connect_and_validate(&mut tcp_stream, host, port, proxy).await?;
     let session_key = SessionCache::key(host, port, Some(proxy));
     connector
@@ -52,7 +52,7 @@ pub(crate) async fn open_tls_to_proxy<C: crate::tls::TlsHandshake>(
     let proxy_host = proxy
         .host_str()
         .ok_or_else(|| TlsError::proxy("https proxy has no host"))?;
-    let tcp_stream = super::connect_to_proxy(connector, proxy, 443).await?;
+    let tcp_stream = super::connect_to_proxy(connector, proxy).await?;
 
     let proxy_key = SessionCache::key(
         proxy_host,

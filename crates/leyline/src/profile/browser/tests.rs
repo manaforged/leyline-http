@@ -61,3 +61,35 @@ fn latest_matches_the_builder_defaults() {
         Some(Browser::latest(Family::Firefox))
     );
 }
+
+#[test]
+fn host_resolves_to_the_running_platform() {
+    for browser in Browser::all() {
+        assert_eq!(
+            browser.for_platform(Platform::Host),
+            browser.for_platform(Platform::detect_host()),
+            "{browser}"
+        );
+    }
+}
+
+#[test]
+fn every_bundled_identity_sends_an_accept_language() {
+    let platforms = [
+        Platform::Windows,
+        Platform::MacOS,
+        Platform::Linux,
+        Platform::Android,
+        Platform::IOS,
+    ];
+    for browser in Browser::all() {
+        for platform in platforms {
+            if let Some(identity) = browser.identity(platform, None) {
+                assert!(
+                    identity.accept_language.is_some(),
+                    "{browser} on {platform:?}"
+                );
+            }
+        }
+    }
+}

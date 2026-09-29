@@ -5,10 +5,14 @@ pub(in crate::quic::pool) fn write_pending_request_bodies(
     conn: &mut quiche::Connection,
     streams: &mut HashMap<u64, H3Stream>,
 ) {
-    for (stream_id, stream) in streams.iter_mut() {
-        if stream.body_write_pending() {
-            write_request_body(h3, conn, *stream_id, stream);
+    let mut failed = Vec::new();
+    for (&stream_id, stream) in streams.iter_mut() {
+        if stream.body_write_pending() && write_request_body(h3, conn, stream_id, stream) {
+            failed.push(stream_id);
         }
+    }
+    for stream_id in failed {
+        streams.remove(&stream_id);
     }
 }
 
@@ -17,12 +21,34 @@ pub(in crate::quic::pool) fn write_request_body(
     conn: &mut quiche::Connection,
     stream_id: u64,
     stream: &mut H3Stream,
-) {
+) -> bool {
+    let Err(message) = send_queued_body(h3, conn, stream_id, stream) else {
+        return false;
+    };
+    abort_stream(
+        h3,
+        conn,
+        stream_id,
+        stream,
+        quiche::h3::WireErrorCode::RequestCancelled,
+    );
+    stream.deliver_error(message);
+    true
+}
+
+fn send_queued_body(
+    h3: &mut quiche::h3::Connection,
+    conn: &mut quiche::Connection,
+    stream_id: u64,
+    stream: &mut H3Stream,
+) -> Result<(), String> {
     while let Some(front) = stream.out_chunks.front() {
         let remaining = &front[stream.out_offset..];
         let last_chunk = stream.body_eof && stream.out_chunks.len() == 1;
         match h3.send_body(conn, stream_id, remaining, last_chunk) {
-            Ok(0) => return,
+            Ok(0) | Err(quiche::h3::Error::Done) | Err(quiche::h3::Error::StreamBlocked) => {
+                return Ok(());
+            }
             Ok(written) => {
                 stream.out_offset += written;
                 if let Some(credit) = &stream.upload_credit {
@@ -36,15 +62,7 @@ pub(in crate::quic::pool) fn write_request_body(
                     }
                 }
             }
-            Err(quiche::h3::Error::Done) | Err(quiche::h3::Error::StreamBlocked) => return,
-            Err(e) => {
-                stream.deliver(Err(format!("h3 send_body: {e}")));
-                stream.retry = None;
-                stream.out_chunks.clear();
-                stream.out_offset = 0;
-                stream.fin_sent = true;
-                return;
-            }
+            Err(e) => return Err(format!("h3 send_body: {e}")),
         }
     }
 
@@ -52,13 +70,10 @@ pub(in crate::quic::pool) fn write_request_body(
         match h3.send_body(conn, stream_id, &[], true) {
             Ok(_) => stream.fin_sent = true,
             Err(quiche::h3::Error::Done) | Err(quiche::h3::Error::StreamBlocked) => {}
-            Err(e) => {
-                stream.deliver(Err(format!("h3 send_body fin: {e}")));
-                stream.retry = None;
-                stream.fin_sent = true;
-            }
+            Err(e) => return Err(format!("h3 send_body fin: {e}")),
         }
     }
+    Ok(())
 }
 
 pub(super) async fn pump_request_body(
@@ -130,17 +145,14 @@ pub(in crate::quic::pool) fn on_request_body_chunk(
             match error {
                 None => stream.body_eof = true,
                 Some(e) => {
-                    shutdown(conn, stream_id, quiche::Shutdown::Write, 0);
-                    shutdown(conn, stream_id, quiche::Shutdown::Read, 0);
-                    h3.cancel_stream(stream_id);
-                    let msg = format!("h3 request body stream error: {e}");
-                    if stream.head_sent {
-                        if let Some(tx) = &stream.stream_tx {
-                            deliver_stream_error(tx, std::io::Error::other(msg));
-                        }
-                    } else {
-                        stream.deliver(Err(msg));
-                    }
+                    abort_stream(
+                        h3,
+                        conn,
+                        stream_id,
+                        stream,
+                        quiche::h3::WireErrorCode::GeneralProtocolError,
+                    );
+                    stream.deliver_error(format!("h3 request body stream error: {e}"));
                     streams.remove(&stream_id);
                 }
             }

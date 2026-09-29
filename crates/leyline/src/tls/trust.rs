@@ -19,7 +19,7 @@ use env::wire_env_trust;
 #[cfg(not(target_os = "macos"))]
 use system::wire_system_trust_cached;
 
-pub use config::{ClientIdentity, TlsTrustConfig};
+pub use config::TlsTrustConfig;
 
 pub(crate) type VerificationFailure = Arc<Mutex<Option<TrustFailure>>>;
 
@@ -100,11 +100,11 @@ fn verify(
 }
 
 pub(crate) fn take_verification_failure(failure: &VerificationFailure) -> Option<TrustFailure> {
-    failure.lock().unwrap_or_else(|e| e.into_inner()).take()
+    crate::util::lock(failure).take()
 }
 
 fn record_verification_failure(failure: &VerificationFailure, reason: TrustFailure) {
-    *failure.lock().unwrap_or_else(|e| e.into_inner()) = Some(reason);
+    *crate::util::lock(failure) = Some(reason);
 }
 
 pub(crate) fn wire_configured_trust(

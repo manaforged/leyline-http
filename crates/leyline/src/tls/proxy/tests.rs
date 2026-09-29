@@ -36,7 +36,7 @@ async fn connect_to_proxy_routes_through_connector_resolver() {
         seen: seen.clone(),
     }));
     let url: url::Url = "http://proxy.test.invalid:8080".parse().unwrap();
-    let stream = connect_to_proxy(&connector, &url, 8080)
+    let stream = connect_to_proxy(&connector, &url)
         .await
         .expect("dial reaches listener");
     assert_eq!(stream.peer_addr().unwrap().port(), addr.port());
@@ -50,9 +50,5 @@ async fn connect_to_proxy_routes_through_connector_resolver() {
 #[tokio::test]
 async fn connect_to_proxy_requires_host() {
     let url: url::Url = "mailto:a@b".parse().unwrap();
-    assert!(
-        connect_to_proxy(&base_connector(), &url, 8080)
-            .await
-            .is_err()
-    );
+    assert!(connect_to_proxy(&base_connector(), &url).await.is_err());
 }

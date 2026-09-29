@@ -168,7 +168,7 @@ pub(super) async fn send_request_h1_streaming(
     key: PoolKey,
 ) -> Result<H1Response, H1PooledError> {
     let started = Instant::now();
-    let replay = replay_body(method, &body);
+    let replay = replay_body(&body);
     let mut body = body;
 
     if let Some((slot, tls)) = checkout_live_h1(pool, &key) {
@@ -207,20 +207,7 @@ pub(super) async fn send_request_h1_streaming(
                     timing: ResponseTiming::leg(started, None),
                 });
             }
-            Err(e) => {
-                tracing::info!(
-                    target: "leyline::pool",
-                    host = %key.host,
-                    port = key.port,
-                    error = %e,
-                    "pool stale hit -- pooled h1 stream failed before response, opening fresh"
-                );
-                pool.note_h1_dead();
-                match replay {
-                    Some(replay) => body = replay,
-                    None => return Err(e),
-                }
-            }
+            Err(e) => body = resend_after_failure(pool, &key, method, replay, e)?,
         }
     }
     tracing::Span::current().record("pool.hit", false);

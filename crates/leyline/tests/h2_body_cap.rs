@@ -12,14 +12,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use leyline::h2::frame::{FRAME_HEADER_LEN, FrameHeader, FrameType};
 use leyline::{CompressionConfig, Kind, Session, TlsTrustConfig};
-use leyline_bssl::pkey::{PKey, Private};
-use leyline_bssl::ssl::{AlpnError, Ssl, SslContextBuilder, SslMethod, select_next_proto};
-use leyline_bssl::x509::X509;
 use support::{
     read_preface, write_data, write_response_headers, write_server_settings, write_settings_ack,
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
-use tokio::net::TcpListener;
 
 const CAP: usize = 1024;
 const SMALL: usize = 16;
@@ -53,37 +49,12 @@ async fn serve<S: AsyncRead + AsyncWrite + Unpin>(mut stream: S) {
     }
 }
 
-async fn h2_server(cert: X509, key: PKey<Private>, connections: Arc<AtomicUsize>) -> u16 {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let mut context = SslContextBuilder::new(SslMethod::tls()).unwrap();
-    context.set_certificate(&cert).unwrap();
-    context.set_private_key(&key).unwrap();
-    context.set_alpn_select_callback(|_, offered| {
-        select_next_proto(b"\x02h2", offered).ok_or(AlpnError::NOACK)
-    });
-    let context = context.build();
-    tokio::spawn(async move {
-        while let Ok((tcp, _)) = listener.accept().await {
-            connections.fetch_add(1, Ordering::SeqCst);
-            let ssl = Ssl::new(&context).unwrap();
-            if let Ok(stream) = leyline_bssl_tokio::SslStreamBuilder::new(ssl, tcp)
-                .accept()
-                .await
-            {
-                tokio::spawn(serve(stream));
-            }
-        }
-    });
-    port
-}
-
 #[tokio::test]
 async fn an_h2_body_over_the_cap_fails_on_the_kept_connection() {
     let (cert, key) = tls_support::self_signed();
     let der = cert.to_der().unwrap();
     let connections = Arc::new(AtomicUsize::new(0));
-    let port = h2_server(cert, key, Arc::clone(&connections)).await;
+    let port = support::tls_server(cert, key, Arc::clone(&connections), serve).await;
     let session = Session::builder()
         .compression(CompressionConfig::new().max_body_size(CAP))
         .tls_trust(
