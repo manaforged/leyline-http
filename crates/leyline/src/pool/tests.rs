@@ -1,5 +1,6 @@
 use super::connect::connect_err;
 use super::*;
+use crate::h2::{ErrorCode, H2Error};
 use crate::tls::TlsError;
 use crate::{Error, Kind};
 
@@ -47,4 +48,24 @@ fn kinds() {
         io.io()
             .is_some_and(|e| e.kind() == std::io::ErrorKind::ConnectionAborted)
     );
+}
+
+#[test]
+fn a_joined_connect_error_keeps_its_http2_cause() {
+    let goaway = Error::new(Kind::Http2).with_source(H2Error::Connection {
+        code: ErrorCode::NoError,
+        reason: "server shutting down".into(),
+    });
+    let joined = connect_err(&goaway);
+    assert!(
+        matches!(
+            joined.h2(),
+            Some(H2Error::Connection {
+                code: ErrorCode::NoError,
+                ..
+            })
+        ),
+        "{joined:?}"
+    );
+    assert!(goaway.is_retryable() && joined.is_retryable(), "{joined:?}");
 }

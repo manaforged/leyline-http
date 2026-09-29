@@ -62,6 +62,25 @@ pub enum H2Error {
 }
 
 impl H2Error {
+    pub(crate) fn duplicate(&self) -> Self {
+        match self {
+            Self::Connection { code, reason } => Self::Connection {
+                code: *code,
+                reason: reason.clone(),
+            },
+            Self::Stream { stream_id, code } => Self::Stream {
+                stream_id: *stream_id,
+                code: *code,
+            },
+            Self::Io(io) => Self::Io(std::io::Error::new(io.kind(), io.to_string())),
+            Self::Hpack(message) => Self::Hpack(message.clone()),
+            Self::FrameTooLarge { size, max } => Self::FrameTooLarge {
+                size: *size,
+                max: *max,
+            },
+        }
+    }
+
     pub(crate) fn body_limit(&self) -> Option<BodyLimit> {
         match self {
             Self::Io(io) => BodyLimit::of_io(io),

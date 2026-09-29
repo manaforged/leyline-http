@@ -252,6 +252,8 @@ pub(super) fn connect_err(err: &Error) -> Error {
     let mut sourced = true;
     if let Some(tls) = err.tls() {
         out = out.with_source(tls.duplicate());
+    } else if let Some(h2) = err.h2() {
+        out = out.with_source(h2.duplicate());
     } else if let Some(io) = err.io() {
         out = out.with_source(std::io::Error::new(io.kind(), io.to_string()));
     } else {
