@@ -45,7 +45,7 @@ Changes from upstream:
 
 ## Carried patches
 
-`build/main.rs` applies every `patches/*.patch` in name order with
+`build/source.rs` applies every `patches/*.patch` in name order with
 `git apply --whitespace=fix`. If `LEYLINE_BSSL_SOURCE_PATH` is set, it applies
 them in place to that tree. Otherwise, it applies them to a copy of the source
 in `OUT_DIR`. `LEYLINE_BSSL_PATH` and `LEYLINE_BSSL_ASSUME_PATCHED` skip this

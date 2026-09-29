@@ -4,11 +4,8 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-/// Prefix BoringSSL applies to its exported symbols under `-DBORINGSSL_PREFIX`.
 pub const PREFIX: &str = "LEYLINE";
 
-/// Points generated bindings at the `LEYLINE_`-prefixed export while keeping
-/// the plain Rust identifier.
 #[derive(Debug)]
 pub struct PrefixCallback {
     syms: HashSet<String>,
@@ -16,7 +13,6 @@ pub struct PrefixCallback {
 }
 
 impl PrefixCallback {
-    /// Reads the exported-symbol list BoringSSL renames under the prefix.
     pub fn read(include: &Path, target_os: &str) -> io::Result<Self> {
         let text = fs::read_to_string(include.join("openssl").join("prefix_symbols.h"))?;
         let syms: HashSet<String> = text
