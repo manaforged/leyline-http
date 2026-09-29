@@ -97,7 +97,8 @@ Chromium 154's DEPS, and carries these BoringSSL patches:
   `SSL_CTX_set_extension_order`, `SSL_CTX_set_tls13_cipher_order`, the
   ECDHE 3DES cipher suites, and the FFDHE2048/3072 groups. These changes
   first shipped in 0x676e67's `btls` and `boring2` forks
-  (https://github.com/0x676e67/btls); Leyline keeps them with that credit.
+  (https://github.com/0x676e67/btls), licensed under the Apache License,
+  Version 2.0; Leyline keeps them with that credit.
 - `0002-leyline-symbol-prefix.patch`: renames the `ssl_st` and `ssl_session_st`
   C++ structs under the `LEYLINE` symbol prefix.
 - `0003-leyline-tls12-extensions.patch`: `SSL_set_tls12_extensions`, which
@@ -136,9 +137,10 @@ compiles it from source and links it statically. The full license text
 
 The package also ships BoringSSL's `third_party` code, each with its license
 file under `deps/boringssl/third_party/`: fiat-crypto (Apache-2.0), which is
-compiled into the library, and googletest (BSD-3-Clause) and Google Benchmark
-(Apache-2.0), which serve BoringSSL's own tests and benchmarks and are not
-linked into the built libraries.
+compiled into the library, and googletest (BSD-3-Clause), Google Benchmark
+(Apache-2.0), and the Wycheproof test vectors (Apache-2.0), which serve
+BoringSSL's own tests and benchmarks and are not linked into the built
+libraries.
 
 ================================================================================
 Runtime dependencies pulled from crates.io

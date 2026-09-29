@@ -24,7 +24,6 @@ impl HmacCtxRef {
                 key.as_ptr().cast(),
                 key.len(),
                 md.as_ptr(),
-                // ENGINE api is deprecated
                 core::ptr::null_mut(),
             ))
         }
@@ -46,7 +45,6 @@ impl Hmac {
                 key.as_ptr().cast(),
                 key.len(),
                 md.as_ptr(),
-                // ENGINE api is deprecated
                 core::ptr::null_mut(),
             ))?;
             ctx
@@ -68,7 +66,6 @@ impl Hmac {
             cvt(ffi::HMAC_Final(
                 self.0,
                 out.as_mut_ptr().cast(),
-                // ENGINE api is deprecated
                 core::ptr::null_mut(),
             ))?;
         }

@@ -573,7 +573,6 @@ impl Rsa<Private> {
         }
     }
 
-    // FIXME these need to identify input formats
     private_key_from_pem! {
         /// Deserializes a private key from a PEM-encoded PKCS#1 RSAPrivateKey structure.
         #[corresponds(PEM_read_bio_RSAPrivateKey)]

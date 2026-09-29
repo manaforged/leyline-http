@@ -402,7 +402,6 @@ mod tests {
         assert_eq!(hex::encode(res), hashtest.1);
     }
 
-    // Test vectors from http://www.nsrl.nist.gov/testdata/
     const MD5_TESTS: [(&str, &str); 13] = [
         ("", "d41d8cd98f00b204e9800998ecf8427e"),
         ("7F", "83acb6e67e50e31db6ed341dd2de1595"),

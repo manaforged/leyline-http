@@ -209,7 +209,6 @@ impl error::Error for Error {
 }
 
 /// An error or intermediate state after a TLS handshake attempt.
-// FIXME overhaul
 #[derive(Debug)]
 pub enum HandshakeError<S> {
     /// Setup failed.
@@ -256,8 +255,6 @@ fn fmt_mid_handshake_error(
     }
 
     match s.ssl().verify_result() {
-        // INVALID_CALL is returned if no verification took place,
-        // such as before a cert is sent.
         Ok(()) | Err(X509VerifyError::INVALID_CALL) => write!(f, "{prefix}")?,
         Err(verify) => write!(f, "{prefix}: cert verification failed - {verify}")?,
     }

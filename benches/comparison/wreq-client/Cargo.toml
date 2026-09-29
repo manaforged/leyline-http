@@ -4,9 +4,6 @@ version = "0.0.0"
 edition = "2024"
 publish = false
 
-# Detached workspace: wreq vendors its own BoringSSL (links = "boring"), which
-# would collide with leyline-bssl-sys (links = "boringssl") if linked into one
-# binary — so wreq lives in its own process, never the same build graph.
 [workspace]
 
 [dependencies]

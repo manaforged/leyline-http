@@ -11,10 +11,11 @@ permissions:
 
 jobs:
   hygiene:
-    runs-on: ubuntu-latest
+    if: github.repository == 'manaforged/leyline-http'
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
@@ -50,7 +51,7 @@ jobs:
             git cat-file blob "$object" | strings > "$RUNNER_TEMP/hygiene-content"
             scan "$RUNNER_TEMP/hygiene-content" "Repository content"
           done < <(git ls-tree -r -z "$HEAD")
-          if [ -z "$BASE" ] || [[ "$BASE" =~ ^0+$ ]]; then
+          if [ -z "$BASE" ] || [[ "$BASE" =~ ^0+$ ]] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
             range="$HEAD"
           else
             range="$BASE..$HEAD"
