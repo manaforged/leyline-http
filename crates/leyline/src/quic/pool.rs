@@ -10,21 +10,13 @@ use quiche::h3::NameValue;
 use tokio::sync::{Semaphore, mpsc, oneshot};
 use tokio::task::AbortHandle;
 
-use crate::core::deadline::{Elapsed, within};
 use crate::core::session::decompress::BodyLimit;
 use crate::h2::config::PseudoOrder;
-use crate::pool::TlsInfo;
-use crate::quic::config::H3Config;
 use crate::quic::connection::{
-    EstablishedH3, H3Response, check_body_budget, close_reason, connect_and_handshake, flush_egress,
+    EstablishedH3, H3Response, check_body_budget, close_reason, flush_egress,
 };
-use crate::tls::{FingerprintConnector, TlsTrustConfig};
-
-const COMMAND_CHANNEL_CAPACITY: usize = 1024;
 
 const STREAM_RESP_CAPACITY: usize = 32;
-
-const STREAM_REQ_CAPACITY: usize = 64;
 
 const UPLOAD_WINDOW: usize = 256 * 1024;
 
@@ -348,44 +340,6 @@ impl H3Stream {
     }
 }
 
-pub(crate) async fn open_fresh_h3(
-    h3_cfg: &H3Config,
-    trust: &TlsTrustConfig,
-    connector: &FingerprintConnector,
-    host: &str,
-    port: u16,
-    proxy: Option<&str>,
-) -> Result<(H3Client, TlsInfo), String> {
-    let handshake = connect_and_handshake(h3_cfg, trust, connector, host, port, proxy);
-    let established = within(connector.connect_timeout(), handshake)
-        .await
-        .map_err(|Elapsed| format!("h3 handshake to {host}:{port}: connect timeout"))??;
-    let tls = established.tls.clone();
-
-    let (tx, command_rx) = mpsc::channel(COMMAND_CHANNEL_CAPACITY);
-    let (body_chunk_tx, body_chunk_rx) = mpsc::channel(STREAM_REQ_CAPACITY);
-    let closed = Arc::new(AtomicBool::new(false));
-
-    let driver = H3Driver {
-        established,
-        command_rx,
-        body_chunk_tx,
-        body_chunk_rx,
-        closed: Arc::clone(&closed),
-        streams: HashMap::new(),
-    };
-    drop(tokio::spawn(driver.run()));
-
-    Ok((
-        H3Client {
-            tx,
-            closed,
-            pseudo_order: h3_cfg.pseudo_order,
-        },
-        tls,
-    ))
-}
-
 struct H3Driver {
     established: EstablishedH3,
     command_rx: mpsc::Receiver<H3Command>,
@@ -397,6 +351,8 @@ struct H3Driver {
 
 mod driver;
 use driver::*;
+mod open;
+pub(crate) use open::open_fresh_h3;
 mod response;
 use response::*;
 

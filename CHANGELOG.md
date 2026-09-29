@@ -94,6 +94,8 @@ First public release.
   `Session::new()` select the newest captured Chrome, currently Chrome 154.
 - `TimeoutConfig::connect` bounds plain `http://` connects. One request spends at
   most one connect timeout on an unreachable host.
+- `TimeoutConfig::connect` also bounds the HTTP/3 handshake. A QUIC handshake
+  that runs out of time is a `Kind::Connect` error, and `is_timeout()` is true.
 - `Session::with_proxy` keeps the shared connection pool, which is keyed by
   proxy. `Session::fresh_pool` takes a new pool, so the next request opens
   new connections.

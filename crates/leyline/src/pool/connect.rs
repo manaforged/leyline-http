@@ -197,8 +197,7 @@ async fn open_fresh_h3_installed(
         key.port,
         key.proxy.as_deref(),
     )
-    .await
-    .map_err(|e| Error::new(Kind::Http3).with_message(e))?;
+    .await?;
     Ok(pool.install_or_get_h3(key, handle, tls))
 }
 

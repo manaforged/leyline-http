@@ -184,11 +184,6 @@ impl FingerprintConnector {
         &self.tcp_profile
     }
 
-    #[cfg(feature = "http3")]
-    pub(crate) fn connect_timeout(&self) -> Option<Duration> {
-        self.connect_timeout
-    }
-
     pub(crate) async fn with_timeout<T, F>(&self, fut: F) -> Result<T, TlsError>
     where
         F: std::future::Future<Output = Result<T, TlsError>>,
