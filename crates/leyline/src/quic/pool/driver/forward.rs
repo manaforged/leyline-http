@@ -90,7 +90,8 @@ fn pull_body(
                 }
             }
             Err(e) => {
-                deliver_stream_error(tx, std::io::Error::other(format!("h3 recv_body: {e}")));
+                let message = on_body_read_error(h3, conn, stream_id, stream, e);
+                deliver_stream_error(tx, std::io::Error::other(message));
                 return Pull::Closed;
             }
         }
@@ -103,11 +104,18 @@ fn finish_stream(
     stream: &mut H3Stream,
     tx: &mpsc::Sender<std::io::Result<Bytes>>,
 ) -> bool {
-    let finished =
-        stream.stalled.is_none() && (stream.peer_finished || conn.stream_finished(stream_id));
+    let finished = stream.stalled.is_none()
+        && (stream.peer_finished
+            || (conn.stream_finished(stream_id) && !conn.stream_readable(stream_id)));
     if !finished {
         return false;
     }
+    reset_upload_half(
+        conn,
+        stream_id,
+        stream,
+        quiche::h3::WireErrorCode::RequestCancelled,
+    );
     if stream.length_mismatch() {
         deliver_stream_error(tx, std::io::Error::other(LENGTH_MISMATCH));
     }

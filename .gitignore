@@ -7,5 +7,3 @@ scripts/__pycache__/
 fuzz/target/
 fuzz/artifacts/
 benches/target/
-docs/book/
-docs/api/

@@ -16,7 +16,7 @@ Supported targets:
 - `aarch64-unknown-linux-musl`
 - `x86_64-pc-windows-msvc`
 
-The build needs CMake 3.22 or later, a C and C++ compiler, and libclang. On
+The build needs CMake 3.22 or later, Git, a C and C++ compiler, and libclang. On
 Windows it also needs the MSVC build tools and NASM. On musl it needs a musl
 C and C++ toolchain, such as `x86_64-linux-musl-g++` from musl.cc. Every export carries the
 `LEYLINE` symbol prefix, so the library can share a binary with `openssl-sys`

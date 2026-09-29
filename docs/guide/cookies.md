@@ -145,6 +145,9 @@ The jar follows Chrome's behavior:
 - `SameSite` is enforced against the navigation that started the request, so a
   redirect chain that crosses sites makes the request cross-site.
 - The jar sends no expired cookie.
+- A cookie lives at most 400 days. A `Max-Age` or `Expires` further out is
+  cut to 400 days from when the cookie is set, and so is an `Expires` date
+  past the range of the platform clock.
 - Limits match Chrome: 180 cookies per domain and 3300 overall. Crossing a
   limit evicts the least recently accessed entries, 30 per domain or 300
   globally.
@@ -156,7 +159,8 @@ serde include them.
 `Jar` and `Cookie` implement `Serialize` and `Deserialize`, so a jar
 round-trips through serde with the times stored as unix milliseconds. Serde
 writes every stored cookie, expired ones included. That is how you persist a
-login between runs.
+login between runs. Loading cuts a stored expiry to at most 400 days after
+the load.
 
 ## The public suffix rule
 

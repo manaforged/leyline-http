@@ -614,6 +614,7 @@ pub leyline::H2Error::FrameTooLarge::max: u32
 pub leyline::H2Error::FrameTooLarge::size: u32
 pub leyline::H2Error::Hpack(alloc::string::String)
 pub leyline::H2Error::Io(core::io::error::Error)
+pub leyline::H2Error::RequestBody(core::io::error::Error)
 pub leyline::H2Error::Stream
 pub leyline::H2Error::Stream::code: leyline::ErrorCode
 pub leyline::H2Error::Stream::stream_id: u32

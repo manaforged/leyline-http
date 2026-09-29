@@ -2,6 +2,7 @@ use std::borrow::Cow;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use http::header::SEC_WEBSOCKET_PROTOCOL;
 use tokio_tungstenite::tungstenite::Error as WireError;
 use tokio_tungstenite::tungstenite::handshake::derive_accept_key;
 use tokio_tungstenite::tungstenite::http::{HeaderName, HeaderValue};
@@ -100,11 +101,15 @@ pub(super) fn is_reserved_ws_header(name: &str) -> bool {
     )
 }
 
-pub(super) fn response_header<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
+fn header_values<'a>(headers: &'a [(String, String)], name: &str) -> impl Iterator<Item = &'a str> {
     headers
         .iter()
-        .find(|(n, _)| n.eq_ignore_ascii_case(name))
+        .filter(move |(n, _)| n.eq_ignore_ascii_case(name))
         .map(|(_, v)| v.as_str())
+}
+
+pub(super) fn response_header<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
+    header_values(headers, name).next()
 }
 
 pub(super) fn has_token(headers: &[(String, String)], name: &str, token: &str) -> bool {
@@ -114,13 +119,16 @@ pub(super) fn has_token(headers: &[(String, String)], name: &str, token: &str) -
     })
 }
 
+fn fail(m: String) -> Result<()> {
+    Err(Error::new(Kind::Request).with_message(format!("ws handshake: {m}")))
+}
+
 pub(super) fn check_upgrade_response(
     status: u16,
     headers: &[(String, String)],
     sec_key: &str,
+    request: &[(String, String)],
 ) -> Result<()> {
-    let fail =
-        |m: String| Err(Error::new(Kind::Request).with_message(format!("ws handshake: {m}")));
     if status != 101 {
         return fail(format!("expected 101 Switching Protocols, got {status}"));
     }
@@ -135,7 +143,29 @@ pub(super) fn check_upgrade_response(
     if response_header(headers, "sec-websocket-extensions").is_some() {
         return fail("server selected an extension the client did not offer".into());
     }
-    Ok(())
+    check_subprotocol(headers, request)
+}
+
+pub(super) fn check_subprotocol(
+    headers: &[(String, String)],
+    request: &[(String, String)],
+) -> Result<()> {
+    let offered: Vec<&str> = header_values(request, SEC_WEBSOCKET_PROTOCOL.as_str())
+        .flat_map(|line| line.split(','))
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .collect();
+    let mut selected = header_values(headers, SEC_WEBSOCKET_PROTOCOL.as_str()).map(str::trim);
+    match (selected.next(), selected.next()) {
+        (Some(_), Some(_)) => fail("server sent more than one subprotocol".into()),
+        (Some(chosen), None) if !offered.contains(&chosen) => fail(format!(
+            "server selected subprotocol {chosen:?}, which the client did not offer"
+        )),
+        (None, _) if !offered.is_empty() => {
+            fail("client offered subprotocols and the server selected none".into())
+        }
+        _ => Ok(()),
+    }
 }
 
 pub(super) fn random_sec_ws_key() -> String {

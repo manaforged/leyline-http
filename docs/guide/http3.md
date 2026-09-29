@@ -35,7 +35,8 @@ Select a browser before you choose `Http3` or `Race`. `build()` fails with
 `Kind::Config` when either policy meets a profile that has no `[h3]` table, and
 the bare profile has none.
 
-`Session::new()` selects `Race`. `Session::builder()` keeps `Auto`, so a
+`Session::new()` selects `Race`, because the default Chrome profile sets
+`race = true` in `[h3]`. `Session::builder()` keeps `Auto`, so a
 session built that way does not try HTTP/3. Add
 `.protocol(ProtocolPolicy::Race)` to get the same policy.
 

@@ -295,6 +295,12 @@ impl Error {
     pub(crate) fn from_json(e: serde_json::Error) -> Self {
         Error::new(Kind::Json).with_source(e)
     }
+
+    pub(crate) fn from_request_body(e: io::Error) -> Self {
+        Error::new(Kind::Body)
+            .with_message("request body stream failed")
+            .with_source(e)
+    }
 }
 
 impl From<io::Error> for Error {
@@ -317,9 +323,12 @@ impl From<TlsError> for Error {
 
 impl From<H2Error> for Error {
     fn from(e: H2Error) -> Self {
-        match e.body_limit() {
-            Some(limit) => limit.error(),
-            None => Error::new(Kind::Http2).with_source(e),
+        if let Some(limit) = e.body_limit() {
+            return limit.error();
+        }
+        match e {
+            H2Error::RequestBody(io) => Error::from_request_body(io),
+            other => Error::new(Kind::Http2).with_source(other),
         }
     }
 }
@@ -329,6 +338,7 @@ impl From<H3SendError> for Error {
     fn from(e: H3SendError) -> Self {
         match e {
             H3SendError::BodyLimit(limit) => limit.error(),
+            H3SendError::RequestBody(io) => Error::from_request_body(io),
             other => Error::new(Kind::Http3).with_message(other.message().into_owned()),
         }
     }

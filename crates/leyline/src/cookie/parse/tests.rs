@@ -122,7 +122,7 @@ fn pre_epoch_expires_does_not_overflow() {
     let t = parse_cookie_date("Thu, 01 Jan 1970 00:00:00 GMT");
     assert!(t.is_some());
     let t = parse_cookie_date("Wed, 31 Dec 1969 23:59:59 GMT");
-    assert_eq!(t, Some(SystemTime::UNIX_EPOCH));
+    assert_eq!(t, Some(Duration::ZERO));
 }
 
 #[test]

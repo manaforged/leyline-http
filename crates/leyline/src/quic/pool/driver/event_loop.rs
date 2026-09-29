@@ -5,8 +5,6 @@ use std::ops::ControlFlow;
 use super::*;
 use crate::quic::transport::DatagramTransport;
 
-const GOAWAY_NOT_SENT: &str = "server sent GOAWAY: request not sent";
-
 pub(super) struct H3Loop {
     socket: DatagramTransport,
     conn: Box<quiche::Connection>,
@@ -172,15 +170,17 @@ impl H3Loop {
         self.conn
             .recv(&mut self.buf[..len], recv_info)
             .map_err(|e| format!("quic recv: {e}"))?;
-        let goaway = drain_h3_events(
-            &mut self.h3,
-            &mut self.conn,
-            &mut self.streams,
-            &mut self.pending,
-            &mut self.buf,
-            self.max_response_body_bytes,
-            &mut self.admit_cap,
-        )?;
+        let goaway = Drain {
+            h3: &mut self.h3,
+            conn: &mut self.conn,
+            streams: &mut self.streams,
+            pending: &mut self.pending,
+            scratch: &mut self.buf,
+            max_body: self.max_response_body_bytes,
+            admit: &mut self.admit_cap,
+            draining: self.draining,
+        }
+        .run()?;
         if goaway {
             self.begin_draining();
         }

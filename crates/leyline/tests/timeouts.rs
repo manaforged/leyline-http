@@ -203,3 +203,28 @@ async fn total_timeout_bounds_a_slow_server() {
         "total cap should fire near 400ms, took {elapsed:?}"
     );
 }
+
+#[tokio::test]
+async fn a_total_timeout_of_duration_max_sets_no_deadline() {
+    let addr = serve(|mut sock| async move {
+        drop(
+            sock.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+                .await,
+        );
+    })
+    .await;
+
+    let session = Session::builder()
+        .protocol(ProtocolPolicy::Http1)
+        .proxy(ProxyConfig::new().env(false))
+        .timeout(TimeoutConfig::default().total(Duration::MAX))
+        .build()
+        .expect("session builds");
+
+    let response = session
+        .request(Method::GET, format!("http://{addr}/"))
+        .send()
+        .await
+        .expect("Duration::MAX means no total deadline");
+    assert_eq!(&response.bytes().await.expect("body")[..], b"ok");
+}

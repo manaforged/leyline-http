@@ -297,22 +297,3 @@ pub(super) fn map_state_err(stream_id: u32, e: StreamStateError) -> H2Error {
         code: ErrorCode::ProtocolError,
     }
 }
-
-pub(super) fn clone_err(e: &H2Error) -> H2Error {
-    match e {
-        H2Error::Connection { code, reason } => H2Error::Connection {
-            code: *code,
-            reason: reason.clone(),
-        },
-        H2Error::Stream { stream_id, code } => H2Error::Stream {
-            stream_id: *stream_id,
-            code: *code,
-        },
-        H2Error::Io(e) => H2Error::Io(std::io::Error::new(e.kind(), e.to_string())),
-        H2Error::Hpack(s) => H2Error::Hpack(s.clone()),
-        H2Error::FrameTooLarge { size, max } => H2Error::FrameTooLarge {
-            size: *size,
-            max: *max,
-        },
-    }
-}

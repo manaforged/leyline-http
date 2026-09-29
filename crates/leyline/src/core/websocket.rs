@@ -22,10 +22,11 @@ mod handshake;
 mod split;
 
 use handshake::{
-    H2_NO_CONNECT_PROTOCOL, check_upgrade_response, handshake_target, is_reserved_ws_header,
-    overlay_headers, random_sec_ws_key, response_header, tungstenite_config, wire_error,
-    ws_header_pair,
+    H2_NO_CONNECT_PROTOCOL, check_subprotocol, check_upgrade_response, handshake_target,
+    is_reserved_ws_header, overlay_headers, random_sec_ws_key, response_header, tungstenite_config,
+    wire_error, ws_header_pair,
 };
+use http::header::SEC_WEBSOCKET_PROTOCOL;
 pub use split::{WsSink, WsStream};
 use split::{WsSinkInner, WsStreamInner};
 
@@ -140,9 +141,10 @@ impl WsConnection {
             crate::pool::upgrade_on_stream(&mut stream, &parsed, request)
                 .await
                 .map_err(crate::core::transport::h1_error_to_core)?;
-        check_upgrade_response(status, &headers, &sec_key)?;
+        check_upgrade_response(status, &headers, &sec_key, extra_headers)?;
 
-        let protocol = response_header(&headers, "sec-websocket-protocol").map(str::to_owned);
+        let protocol =
+            response_header(&headers, SEC_WEBSOCKET_PROTOCOL.as_str()).map(str::to_owned);
         let ws_stream = WebSocketStream::from_partially_read(
             stream,
             leftover,
@@ -227,11 +229,10 @@ impl WsConnection {
             )));
         }
 
-        let protocol = stream
-            .response_headers()
-            .iter()
-            .find(|(n, _)| n.eq_ignore_ascii_case("sec-websocket-protocol"))
-            .map(|(_, v)| v.clone());
+        check_subprotocol(stream.response_headers(), extra_headers)?;
+
+        let protocol = response_header(stream.response_headers(), SEC_WEBSOCKET_PROTOCOL.as_str())
+            .map(str::to_owned);
         let headers = stream.response_headers().to_vec();
 
         let ws_stream = WebSocketStream::from_raw_socket(

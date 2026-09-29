@@ -29,7 +29,8 @@ The per-OS values live in `profiles/platforms.toml`, and
 and `SessionBuilder::tcp_profile` overrides it. Each platform applies what it
 can: Linux applies TTL, MSS, don't-fragment, and derives a
 `TCP_WINDOW_CLAMP` from the window fields; macOS applies TTL, MSS, and
-don't-fragment; Windows applies TTL and don't-fragment. `options` is the SYN
+don't-fragment; Windows applies TTL and don't-fragment. Every platform sets
+`TCP_NODELAY` when the profile asks for it. `options` is the SYN
 option order that the operating system kernel sends. No platform lets a socket
 set it, so Leyline does not apply it; only the audit's JA4T reads it. The audit's
 JA4T is computed from the configured values, including fields the running

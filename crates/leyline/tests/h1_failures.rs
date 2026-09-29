@@ -106,3 +106,36 @@ async fn a_streaming_body_on_a_dead_pooled_connection_is_a_body_error() {
     assert_eq!(err.kind(), Kind::Body, "{err:?}");
     assert_eq!(counts.connections.load(Ordering::SeqCst), 1);
 }
+
+fn failing_body() -> Body {
+    let chunks =
+        futures_util::stream::iter([Err::<Bytes, _>(std::io::Error::other("caller body failed"))]);
+    Body::stream(chunks, None)
+}
+
+#[tokio::test]
+async fn a_failing_request_body_stream_is_a_body_error() {
+    let (addr, _) = server(&[Some(OK)]).await;
+    let err = session()
+        .put(format!("http://{addr}/"))
+        .body(failing_body())
+        .await
+        .unwrap_err();
+    assert_eq!(err.kind(), Kind::Body, "{err:?}");
+    assert_eq!(
+        err.io().map(ToString::to_string).as_deref(),
+        Some("caller body failed"),
+        "{err:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_failing_request_body_stream_is_not_a_dead_connection() {
+    let (addr, _) = server(&[Some(OK)]).await;
+    let session = session();
+    let url = format!("http://{addr}/");
+    session.get(&url).await.unwrap().bytes().await.unwrap();
+    let err = session.put(&url).body(failing_body()).await.unwrap_err();
+    assert_eq!(err.kind(), Kind::Body, "{err:?}");
+    assert_eq!(session.pool_stats().evictions_dead, 0);
+}

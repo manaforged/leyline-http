@@ -7,7 +7,7 @@ pub(super) async fn fixed(
 ) -> Result<(), H1PooledError> {
     let mut sent: u64 = 0;
     while let Some(chunk) = body.next().await {
-        let chunk: Bytes = chunk?;
+        let chunk: Bytes = chunk.map_err(H1PooledError::RequestBody)?;
         if sent + chunk.len() as u64 > length {
             return Err(H1PooledError::Http(
                 "streaming body exceeded declared content-length".into(),
@@ -29,7 +29,7 @@ pub(super) async fn chunked(
     mut body: BodyStream,
 ) -> Result<(), H1PooledError> {
     while let Some(chunk) = body.next().await {
-        let chunk: Bytes = chunk?;
+        let chunk: Bytes = chunk.map_err(H1PooledError::RequestBody)?;
         if chunk.is_empty() {
             continue;
         }

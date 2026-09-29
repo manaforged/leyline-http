@@ -70,6 +70,7 @@ pub enum H3SendError {
     NotSent(String),
     Failed(String),
     BodyLimit(BodyLimit),
+    RequestBody(std::io::Error),
 }
 
 impl H3SendError {
@@ -77,6 +78,9 @@ impl H3SendError {
         match self {
             H3SendError::NotSent(m) | H3SendError::Failed(m) => Cow::Borrowed(m.as_str()),
             H3SendError::BodyLimit(limit) => Cow::Owned(limit.to_string()),
+            H3SendError::RequestBody(error) => {
+                Cow::Owned(format!("request body stream failed: {error}"))
+            }
         }
     }
 
@@ -327,6 +331,16 @@ impl H3Stream {
             })));
         }
         self.head_sent = true;
+    }
+
+    fn deliver_request_body_error(&mut self, error: std::io::Error) {
+        if self.head_sent {
+            if let Some(tx) = &self.stream_tx {
+                deliver_stream_error(tx, error);
+            }
+        } else if let Some(tx) = self.resp_tx.take() {
+            drop(tx.send(Err(H3SendError::RequestBody(error))));
+        }
     }
 
     fn deliver_error(&mut self, message: String) {

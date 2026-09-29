@@ -90,6 +90,10 @@ pub(crate) fn lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, 
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+pub(crate) fn epoch_plus(after: std::time::Duration) -> Option<std::time::SystemTime> {
+    std::time::SystemTime::UNIX_EPOCH.checked_add(after)
+}
+
 const SENSITIVE_HEADERS: [&str; 4] = [
     "authorization",
     "proxy-authorization",

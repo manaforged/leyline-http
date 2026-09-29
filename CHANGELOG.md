@@ -33,8 +33,9 @@ First public release.
   `LEYLINE_BSSL_PATH` and `LEYLINE_BSSL_SOURCE_PATH`. A `BORING_BSSL_*`
   value set for `boring-sys` does not reach Leyline.
 - `leyline-quiche` is Cloudflare's `quiche` 0.30.0 linked against
-  `leyline-bssl`. It includes the upstream fixes for CVE-2025-4820,
-  CVE-2025-4821, CVE-2025-7054, CVE-2026-12523, and CVE-2026-12707.
+  `leyline-bssl`. It includes the fix for every quiche security advisory
+  published before 0.30.0, among them CVE-2025-4820, CVE-2025-4821,
+  CVE-2025-7054, CVE-2026-11941, CVE-2026-12523, and CVE-2026-12707.
 
 ### API contract
 
@@ -47,9 +48,9 @@ First public release.
   `Response::url`, `Response::redirect_chain`, `Error::url`, and
   `RedirectAttempt::url`.
 - Every public type implements `Debug`.
-- The BoringSSL `SslContextBuilder` behind `TlsContext` is outside semver and
-  needs `RUSTFLAGS="--cfg leyline_unstable_bssl"`, so a dependency cannot
-  turn it on for you. Streaming needs no feature.
+- The BoringSSL `SslContextBuilder` behind `TlsContext` is outside semver. It
+  needs `RUSTFLAGS="--cfg leyline_unstable_bssl"` or the `bench-internals`
+  feature. Streaming needs no feature.
 
 ### Added
 
@@ -73,6 +74,12 @@ First public release.
   `H3_REQUEST_CANCELLED` for a cancelled request and
   `H3_GENERAL_PROTOCOL_ERROR` for a malformed response. An idle connection
   closes without a CONNECTION_CLOSE frame.
+- An HTTP/3 request past the server's stream limit waits for stream credit
+  instead of failing. When a response ends or is reset while the request body
+  still uploads, Leyline resets the upload with `H3_REQUEST_CANCELLED`, so the
+  server returns the stream. A request the server rejects after its GOAWAY is
+  resent on a new connection, and a streamed response reset before its end
+  fails the body stream instead of ending it early.
 - `TlsProfile::key_shares`, a GREASE signature algorithm switch, and
   per-platform TCP profiles captured from each OS's own SYN.
 - Cookies, proxy configuration, redirect policies, opt-in retries, streaming
@@ -90,8 +97,11 @@ First public release.
   `PoolConfig::h2_ping_timeout` change the thresholds.
 - WebSocket connections through the session. `WebSocketBuilder::header`
   takes the same arguments as `RequestBuilder::header` and appends.
-  `WsConnection::header` reads the handshake response headers. A `wss://` URL uses the `https` proxy rule, and a
-  `ws://` URL uses the `http` rule.
+  `WsConnection::header` reads the handshake response headers. A `wss://`
+  URL uses the `https` proxy rule, and a `ws://` URL uses the `http` rule.
+  As in Chrome, the handshake fails when the response's
+  `Sec-WebSocket-Protocol` names a subprotocol the client did not offer,
+  appears twice, or is missing after the client offered one.
 - Lifecycle tracing and a Tower `Service`, `LeylineService`, that wraps a
   session (feature `tower`).
 - Opt-in fingerprint diagnostics derived from the configured profile and
@@ -123,6 +133,10 @@ First public release.
   server did not process it (HTTP/2 `REFUSED_STREAM`, or an HTTP/3 request
   that was not sent). A streaming request body cannot be resent, so that
   request fails with `Kind::Body`.
+- When the caller's request body stream returns an error, the request fails
+  with `Kind::Body` and that error as its source, on HTTP/1.1, HTTP/2, and
+  HTTP/3. The pool does not count the connection as dead, and a pooled
+  HTTP/2 connection stays open for other requests.
 - Request functions take any `IntoUrl` input. A URL that does not parse
   returns `Kind::Url` with its source error.
 - `Response::text`, `bytes`, and `json` consume the response and return the
@@ -176,3 +190,14 @@ First public release.
 - Certificate verification through pins, custom roots on macOS, and HTTP/3
   to an IP address checks that the leaf certificate is issued for TLS
   servers, as the default verifier does.
+- A redirect to another origin drops a caller-set `Host` header, as it drops
+  `Authorization`, `Proxy-Authorization`, and `Cookie`.
+- The HPACK decoder rejects a dynamic table size update that follows a
+  header field, or a third update in one header block (RFC 7541 section 4.2),
+  as Chrome's decoder does.
+- A cookie lives at most 400 days (RFC 6265bis). A longer `Max-Age` or
+  `Expires`, an `Expires` date past the platform clock's range, and an expiry
+  loaded through serde are cut to 400 days.
+- A `TimeoutConfig::total` of `Duration::MAX` sets no deadline, and a
+  `Retry-After` date past the platform clock's range is ignored. Neither
+  panics.

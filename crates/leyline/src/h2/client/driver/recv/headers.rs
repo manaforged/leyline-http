@@ -1,5 +1,6 @@
 use bytes::Bytes;
 
+use crate::core::deadline::within;
 use crate::header_str::HeaderStr;
 
 use super::*;
@@ -88,7 +89,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         }
         let max_header_block = self.config.max_header_block_bytes;
         let reassembly_timeout = self.config.header_block_reassembly_timeout;
-        let deadline = tokio::time::Instant::now() + reassembly_timeout;
+        let started = tokio::time::Instant::now();
         let mut assembled = h.fragment.to_vec();
         loop {
             if assembled.len() > max_header_block {
@@ -99,20 +100,11 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                     ),
                 });
             }
-            let cont = match tokio::time::timeout_at(deadline, self.reader.next()).await {
-                Ok(inner) => inner?,
-                Err(_) => {
-                    return Err(H2Error::Connection {
-                        code: ErrorCode::ProtocolError,
-                        reason: format!("CONTINUATION reassembly exceeded {reassembly_timeout:?}"),
-                    });
-                }
-            }
-            .ok_or_else(|| H2Error::Connection {
-                code: ErrorCode::ProtocolError,
-                reason: "connection closed during CONTINUATION".into(),
-            })?;
-            match cont {
+            let remaining = reassembly_timeout.saturating_sub(started.elapsed());
+            match self
+                .next_continuation(remaining, reassembly_timeout)
+                .await?
+            {
                 Frame::Continuation {
                     stream_id,
                     end_headers,
@@ -135,6 +127,23 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             }
         }
         Ok(Bytes::from(assembled))
+    }
+
+    async fn next_continuation(
+        &mut self,
+        remaining: std::time::Duration,
+        limit: std::time::Duration,
+    ) -> Result<Frame, H2Error> {
+        let next = within(Some(remaining), self.reader.next())
+            .await
+            .map_err(|_| H2Error::Connection {
+                code: ErrorCode::ProtocolError,
+                reason: format!("CONTINUATION reassembly exceeded {limit:?}"),
+            })??;
+        next.ok_or_else(|| H2Error::Connection {
+            code: ErrorCode::ProtocolError,
+            reason: "connection closed during CONTINUATION".into(),
+        })
     }
 
     async fn respond(

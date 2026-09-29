@@ -5,41 +5,30 @@ use crate::cookie::record::SameSite;
 use super::{CookieAttributes, parse_cookie_date};
 
 pub(super) fn set(a: &mut CookieAttributes, name: &str, value: Option<&str>) {
-    match name.to_lowercase().as_str() {
+    match (name.to_lowercase().as_str(), value) {
+        ("secure", _) => a.secure = true,
+        ("httponly", _) => a.http_only = true,
+        (name, Some(value)) => set_valued(a, name, value),
+        _ => {}
+    }
+}
+
+fn set_valued(a: &mut CookieAttributes, name: &str, value: &str) {
+    match name {
         "domain" => {
-            if let Some(v) = value {
-                let d = v.strip_prefix('.').unwrap_or(v);
-                if !d.is_empty() {
-                    a.domain = Some(d.to_lowercase());
-                }
+            let d = value.strip_prefix('.').unwrap_or(value);
+            if !d.is_empty() {
+                a.domain = Some(d.to_lowercase());
             }
         }
-        "path" => {
-            if let Some(v) = value
-                && v.starts_with('/')
-            {
-                a.path = Some(v.to_string());
-            }
-        }
-        "secure" => a.secure = true,
-        "httponly" => a.http_only = true,
-        "samesite" => {
-            if let Some(v) = value {
-                a.same_site = same_site(v);
-            }
-        }
+        "path" if value.starts_with('/') => a.path = Some(value.to_string()),
+        "samesite" => a.same_site = same_site(value),
         "max-age" => {
-            if let Some(v) = value
-                && let Some(d) = max_age(v)
-            {
+            if let Some(d) = max_age(value) {
                 a.max_age = Some(d);
             }
         }
-        "expires" => {
-            if let Some(v) = value {
-                a.expires = parse_cookie_date(v);
-            }
-        }
+        "expires" => a.expires_after_epoch = parse_cookie_date(value),
         _ => {}
     }
 }

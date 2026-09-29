@@ -36,6 +36,13 @@ println!("{}", resp.status());
 `Body::len_hint()` reports the declared length: the buffer size for a buffered
 body, `Some(0)` for an empty one, and the hint you supplied for a stream.
 
+When your stream returns an error, the request fails with `Kind::Body`, and
+`Error::io()` returns the error your stream gave. Leyline does not send the
+request again, because a stream cannot be replayed. The pool does not count
+the connection as dead. An HTTP/2 or HTTP/3 connection resets only that
+stream and stays open, and an HTTP/1.1 connection closes because it holds
+part of the request.
+
 ## Stream a response body
 
 Call `.stream()` on the request builder. The response then arrives as soon as

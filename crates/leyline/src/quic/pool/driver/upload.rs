@@ -152,7 +152,7 @@ pub(in crate::quic::pool) fn on_request_body_chunk(
                         stream,
                         quiche::h3::WireErrorCode::GeneralProtocolError,
                     );
-                    stream.deliver_error(format!("h3 request body stream error: {e}"));
+                    stream.deliver_request_body_error(e);
                     streams.remove(&stream_id);
                 }
             }

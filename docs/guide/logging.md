@@ -15,7 +15,6 @@ Every target starts with `leyline`.
 | `leyline::pool` | Connection pool events |
 | `leyline::socket` | A `SocketConfig` option that the platform does not support |
 | `leyline::tcp` | A `TcpProfile` socket option that the operating system rejected, logged once per option |
-| `leyline::tls` | TLS setup |
 | `leyline::tls::trust` | Loading and checking the trust store |
 | `leyline::h2`, `leyline::h2::flood_guard` | HTTP/2 connection events and flood protection |
 | `leyline::quic` | HTTP/3 and QUIC events |

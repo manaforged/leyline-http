@@ -89,10 +89,17 @@ impl Drain<'_> {
         let Some(stream) = self.streams.get_mut(&id) else {
             return;
         };
-        while let Ok(n) = self.h3.recv_body(self.conn, id, self.scratch) {
-            if n == 0 {
-                break;
-            }
+        loop {
+            let n = match self.h3.recv_body(self.conn, id, self.scratch) {
+                Ok(0) | Err(quiche::h3::Error::Done) => break,
+                Ok(n) => n,
+                Err(e) => {
+                    let message = on_body_read_error(self.h3, self.conn, id, stream, e);
+                    stream.deliver_error(message);
+                    self.streams.remove(&id);
+                    break;
+                }
+            };
             if check_body_budget(stream.body_bytes_seen, n, max).is_err() {
                 abort_stream(
                     self.h3,
@@ -175,22 +182,33 @@ impl Drain<'_> {
         let Some(mut stream) = self.streams.remove(&id) else {
             return;
         };
+        reset_upload_half(
+            self.conn,
+            id,
+            &mut stream,
+            quiche::h3::WireErrorCode::RequestCancelled,
+        );
         if rejected
-            && !stream.head_sent
+            && stream.response == H3ResponseState::Initial
             && let Some((headers, body)) = stream.retry.take()
             && let Some(resp_tx) = stream.resp_tx.take()
         {
-            self.pending.push_back(H3Command::Request {
+            let cmd = H3Command::Request {
                 headers,
                 body,
                 body_stream: None,
                 stream_body_tx: stream.stream_tx.take(),
                 resp_tx,
                 retried: true,
-            });
+            };
+            if self.draining {
+                reject_unsent(cmd, GOAWAY_NOT_SENT.into());
+            } else {
+                self.pending.push_back(cmd);
+            }
             return;
         }
-        stream.deliver_error(format!("h3 stream reset: {e}"));
+        stream.deliver_error(stream_reset_message(e));
     }
 
     fn goaway(&mut self, last_id: u64) {

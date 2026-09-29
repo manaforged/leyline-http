@@ -1,23 +1,20 @@
 #![allow(dead_code)]
 
-use std::future::Future;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 use bytes::BytesMut;
-use leyline_bssl::pkey::{PKey, Private};
-use leyline_bssl::ssl::{AlpnError, Ssl, SslContextBuilder, SslMethod, select_next_proto};
-use leyline_bssl::x509::X509;
-use leyline_bssl_tokio::SslStream;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
 
+use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
+use leyline::h2::connection::PseudoHeaders;
 use leyline::h2::frame::{
-    DataFrame, FRAME_HEADER_LEN, FrameHeader, HeadersFrame, SettingsFrame, WindowUpdateFrame,
+    DataFrame, FRAME_HEADER_LEN, FrameHeader, FrameType, HeadersFrame, SettingsFrame,
+    WindowUpdateFrame,
 };
-use leyline::h2::hpack;
+use leyline::h2::{Head, hpack};
 
 const PREFACE: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
+const END_HEADERS: u8 = 0x4;
 
 pub async fn read_preface<S: AsyncRead + Unpin>(s: &mut S) {
     let mut buf = [0u8; 24];
@@ -122,6 +119,59 @@ pub async fn write_headers_without_end<S: AsyncWrite + Unpin>(s: &mut S, stream_
     s.write_all(&buf).await.expect("partial headers write");
 }
 
+pub fn test_config() -> H2Config {
+    H2Config {
+        settings: vec![
+            (SettingId::HeaderTableSize, 4096),
+            (SettingId::EnablePush, 0),
+            (SettingId::InitialWindowSize, 65535),
+            (SettingId::MaxFrameSize, 16384),
+        ],
+        settings_order: vec![
+            SettingId::HeaderTableSize,
+            SettingId::EnablePush,
+            SettingId::InitialWindowSize,
+            SettingId::MaxFrameSize,
+        ],
+        pseudo_order: [
+            PseudoOrder::Method,
+            PseudoOrder::Authority,
+            PseudoOrder::Scheme,
+            PseudoOrder::Path,
+        ],
+        initial_connection_window_size: 65535,
+        default_priority: None,
+        rst_stream_flood_threshold: 100,
+        rst_stream_flood_window: Duration::from_secs(10),
+        max_response_body_bytes: 100 * 1024 * 1024,
+        max_header_block_bytes: 256 * 1024,
+        settings_flood_threshold: 100,
+        settings_flood_window: Duration::from_secs(10),
+        header_block_reassembly_timeout: Duration::from_secs(10),
+    }
+}
+
+pub fn get_head(path: &str) -> Head {
+    Head {
+        pseudo: PseudoHeaders {
+            method: "GET".into(),
+            scheme: "https".into(),
+            authority: "example.com".into(),
+            path: path.into(),
+            protocol: None,
+        },
+        headers: vec![("user-agent".into(), "test".into())],
+    }
+}
+
+pub async fn write_end_headers<S: AsyncWrite + Unpin>(s: &mut S, stream_id: u32) {
+    let mut frame = [0u8; FRAME_HEADER_LEN];
+    frame[3] = FrameType::Continuation as u8;
+    frame[4] = END_HEADERS;
+    frame[5..].copy_from_slice(&stream_id.to_be_bytes());
+    s.write_all(&frame).await.expect("continuation write");
+}
+
 pub async fn write_response_headers<S: AsyncWrite + Unpin>(s: &mut S, stream_id: u32) {
     let mut enc = hpack::Encoder::new();
     let fragment = enc.encode_header_block(&[(":status", "200")]);
@@ -162,38 +212,4 @@ pub async fn write_window_update<S: AsyncWrite + Unpin>(s: &mut S, stream_id: u3
     let mut buf = BytesMut::new();
     w.encode(&mut buf);
     s.write_all(&buf).await.expect("window update write");
-}
-
-pub async fn tls_server<F, Fut>(
-    cert: X509,
-    key: PKey<Private>,
-    connections: Arc<AtomicUsize>,
-    serve: F,
-) -> u16
-where
-    F: Fn(SslStream<TcpStream>) -> Fut + Send + 'static,
-    Fut: Future<Output = ()> + Send + 'static,
-{
-    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
-    let port = listener.local_addr().expect("local address").port();
-    let mut context = SslContextBuilder::new(SslMethod::tls()).expect("TLS context");
-    context.set_certificate(&cert).expect("certificate");
-    context.set_private_key(&key).expect("private key");
-    context.set_alpn_select_callback(|_, offered| {
-        select_next_proto(b"\x02h2", offered).ok_or(AlpnError::NOACK)
-    });
-    let context = context.build();
-    tokio::spawn(async move {
-        while let Ok((tcp, _)) = listener.accept().await {
-            connections.fetch_add(1, Ordering::SeqCst);
-            let ssl = Ssl::new(&context).expect("TLS session");
-            if let Ok(stream) = leyline_bssl_tokio::SslStreamBuilder::new(ssl, tcp)
-                .accept()
-                .await
-            {
-                tokio::spawn(serve(stream));
-            }
-        }
-    });
-    port
 }

@@ -137,10 +137,10 @@ compiles it from source and links it statically. The full license text
 
 The package also ships BoringSSL's `third_party` code, each with its license
 file under `deps/boringssl/third_party/`: fiat-crypto (Apache-2.0), which is
-compiled into the library, and googletest (BSD-3-Clause), Google Benchmark
-(Apache-2.0), and the Wycheproof test vectors (Apache-2.0), which serve
-BoringSSL's own tests and benchmarks and are not linked into the built
-libraries.
+compiled into the library, and googletest (BSD-3-Clause) and Google Benchmark
+(Apache-2.0), which serve BoringSSL's own tests and benchmarks and are not
+linked into the built libraries. The Wycheproof test vectors (Apache-2.0) stay
+out of the package; only their license file ships.
 
 ================================================================================
 Runtime dependencies pulled from crates.io

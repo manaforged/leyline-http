@@ -130,6 +130,7 @@ pub(crate) fn h1_error_to_core(e: H1PooledError) -> Error {
             Some(limit) => limit.error(),
             None => Error::new(Kind::Io).with_source(io),
         },
+        H1PooledError::RequestBody(io) => Error::from_request_body(io),
         H1PooledError::NotResendable(error) => error,
         other => Error::new(Kind::Io).with_source(h1err_to_io(other)),
     }

@@ -24,7 +24,8 @@ let session = Session::builder()
 
 `Session::new()` skips the builder. It selects `Browser::default()`
 with a Windows identity, and it uses `ProtocolPolicy::Race` when the `http3`
-feature is on. Race tries HTTP/3 only for an `https://` origin that
+feature is on, because the default Chrome profile sets `race = true` in
+`[h3]`. Race tries HTTP/3 only for an `https://` origin that
 advertised `h3` in an `Alt-Svc` header. A streamed request body, a streamed
 response, or an `http://` or `https://` proxy keeps the request on HTTP/2 or
 HTTP/1.1. `Session::default()` is the same session. Every other
@@ -65,7 +66,8 @@ assert_eq!(Browser::default().family(), Family::Chrome);
 
 `Browser::family` returns the product line as a `Family` value, for example
 `Family::Chrome` or `Family::SafariIos`. The engine family (`chromium`, `gecko`,
-`webkit`) is the `meta.family` field of the profile that
+`webkit`, `okhttp`, `cfnetwork`, or `bare` for the bare profile) is the
+`meta.family` field of the profile that
 `Browser::profile()` returns. `Browser::for_platform` maps a profile to the
 sibling that exists on a platform.
 
@@ -125,15 +127,17 @@ back without case. An unknown name returns an error of kind `Config`.
 
 Brave has its own profiles. `.browser(Browser::Brave146)` selects one.
 
-Edge and Opera exist on desktop platforms only. If no capture exists for that
-brand, Chromium version, and platform, `build()` returns an error that names
-all three.
+Edge and Opera exist on desktop platforms only; a mobile platform fails at
+`build()`. Opera also needs its Chromium version in the brand's version table
+(145 to 152). Edge follows the Chromium version and builds on every desktop
+Chrome profile.
 
 `Browser::identity(platform, brand)` returns the `PlatformIdentity` a session
 sends for that browser, platform, and brand: `user_agent`, `sec_ch_ua`, and
 `accept_language`. The header style supplies every other header. Use it when a
 payload that is not a header must carry the same values. It returns `None`
-when no capture exists.
+when the browser has no identity for the platform or the brand overlay does
+not apply.
 
 ```rust,no_run
 use leyline::{Browser, ChromiumBrand, Platform};

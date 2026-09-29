@@ -157,6 +157,10 @@ name = "websocket"
 required-features = ["websocket"]
 
 [[test]]
+name = "websocket_subprotocol"
+required-features = ["websocket"]
+
+[[test]]
 name = "smoke"
 required-features = ["http3"]
 
@@ -202,6 +206,10 @@ required-features = ["bench-internals"]
 
 [[test]]
 name = "h2_hostile_server"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_stream_lifecycle"
 required-features = ["bench-internals"]
 
 [[test]]

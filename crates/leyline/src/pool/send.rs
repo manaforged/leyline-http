@@ -220,7 +220,7 @@ pub(crate) async fn send_request(
                 return Ok((resp, tls, timing));
             }
             Err(e) => {
-                if e.body_limit().is_some() {
+                if !e.connection_failed() {
                     return Err(Error::from(e));
                 }
                 tracing::info!(
@@ -280,7 +280,7 @@ pub(crate) async fn send_request(
             r
         }
         Err(e) => {
-            if e.body_limit().is_none() {
+            if e.connection_failed() {
                 pool.invalidate(&key);
             }
             return Err(Error::from(e));

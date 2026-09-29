@@ -16,23 +16,23 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 code: ErrorCode::NoError,
                 reason: "connection closed".into(),
             },
-            Err(e) => clone_err(e),
+            Err(e) => e.duplicate(),
         };
         for (_, mut actor) in self.streams.drain() {
             if actor.remote_done {
                 actor.deliver_ok();
             } else {
-                actor.deliver_err(clone_err(&final_err));
+                actor.deliver_err(final_err.duplicate());
             }
         }
         while let Some(cmd) = self.pending.pop_front() {
             if let Some(sink) = cmd.into_sink() {
-                send_err_to_sink(sink, clone_err(&final_err));
+                send_err_to_sink(sink, final_err.duplicate());
             }
         }
         while let Ok(cmd) = self.command_rx.try_recv() {
             if let Some(sink) = cmd.into_sink() {
-                send_err_to_sink(sink, clone_err(&final_err));
+                send_err_to_sink(sink, final_err.duplicate());
             }
         }
         result

@@ -1,8 +1,9 @@
 #![allow(dead_code)]
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use leyline::{
     Browser, ProtocolPolicy, RetryPolicy, Session, SessionBuilder, TimeoutConfig, TlsTrustConfig,
@@ -15,8 +16,21 @@ use tokio::net::UdpSocket;
 const DATAGRAM: usize = 1350;
 const IDLE: Duration = Duration::from_millis(50);
 const WATCH: Duration = Duration::from_secs(5);
+const GOAWAY_LAG: Duration = Duration::from_millis(200);
+const NEXT_REQUEST: u64 = 4;
 
-fn server_config(cert: &X509, key: &PKey<Private>) -> leyline_quiche::Config {
+#[derive(Clone, Copy)]
+pub struct Limits {
+    pub streams: u64,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self { streams: 100 }
+    }
+}
+
+fn server_config(cert: &X509, key: &PKey<Private>, limits: Limits) -> leyline_quiche::Config {
     let mut tls = SslContextBuilder::new(SslMethod::tls()).expect("TLS context");
     tls.set_certificate(cert).expect("certificate");
     tls.set_private_key(key).expect("private key");
@@ -33,7 +47,7 @@ fn server_config(cert: &X509, key: &PKey<Private>) -> leyline_quiche::Config {
     config.set_initial_max_stream_data_bidi_local(1_000_000);
     config.set_initial_max_stream_data_bidi_remote(1_000_000);
     config.set_initial_max_stream_data_uni(1_000_000);
-    config.set_initial_max_streams_bidi(100);
+    config.set_initial_max_streams_bidi(limits.streams);
     config.set_initial_max_streams_uni(100);
     config.set_disable_active_migration(true);
     config
@@ -45,6 +59,15 @@ pub enum Reply {
     Hold(usize),
     Status(&'static [u8]),
     Reset(u64),
+    ResetResponse(u64),
+    GoawayThenReset(u64),
+    Truncate(usize, u64),
+}
+
+#[derive(Clone, Copy)]
+enum Halves {
+    Both,
+    Response,
 }
 
 #[derive(Default)]
@@ -94,27 +117,45 @@ impl H3Server {
     }
 }
 
+struct Deferred {
+    stream: u64,
+    code: u64,
+    halves: Halves,
+    due: Instant,
+}
+
 struct Peer {
     quic: leyline_quiche::Connection,
     h3: Option<leyline_quiche::h3::Connection>,
-    answered: usize,
     held: Vec<u64>,
+    deferred: Vec<Deferred>,
 }
 
 fn status(code: &[u8]) -> [leyline_quiche::h3::Header; 1] {
     [leyline_quiche::h3::Header::new(b":status", code)]
 }
 
+fn reset(quic: &mut leyline_quiche::Connection, stream: u64, code: u64, halves: Halves) {
+    let _ = quic.stream_shutdown(stream, leyline_quiche::Shutdown::Write, code);
+    if let Halves::Both = halves {
+        let _ = quic.stream_shutdown(stream, leyline_quiche::Shutdown::Read, code);
+    }
+}
+
 impl Peer {
-    fn respond(&mut self, replies: &[Reply]) {
+    fn respond(&mut self, replies: &[Reply], answered: &mut usize) {
         let (Some(h3), quic) = (self.h3.as_mut(), &mut self.quic) else {
             return;
         };
+        let mut sink = vec![0u8; DATAGRAM];
         while let Ok((stream, event)) = h3.poll(quic) {
+            if matches!(event, leyline_quiche::h3::Event::Data) {
+                while matches!(h3.recv_body(quic, stream, &mut sink), Ok(read) if read > 0) {}
+            }
             if !matches!(event, leyline_quiche::h3::Event::Headers { .. }) {
                 continue;
             }
-            match replies[self.answered.min(replies.len() - 1)] {
+            match replies[(*answered).min(replies.len() - 1)] {
                 Reply::Body(length) => {
                     h3.send_response(quic, stream, &status(b"200"), false)
                         .expect("response head");
@@ -133,17 +174,45 @@ impl Peer {
                         .expect("response head");
                     self.held.push(stream);
                 }
-                Reply::Reset(code) => {
-                    let _ = quic.stream_shutdown(stream, leyline_quiche::Shutdown::Write, code);
-                    let _ = quic.stream_shutdown(stream, leyline_quiche::Shutdown::Read, code);
+                Reply::Reset(code) => reset(quic, stream, code, Halves::Both),
+                Reply::ResetResponse(code) => reset(quic, stream, code, Halves::Response),
+                Reply::GoawayThenReset(code) => {
+                    h3.send_goaway(quic, stream + NEXT_REQUEST).expect("GOAWAY");
+                    self.deferred.push(Deferred {
+                        stream,
+                        code,
+                        halves: Halves::Both,
+                        due: Instant::now() + GOAWAY_LAG,
+                    });
+                }
+                Reply::Truncate(length, code) => {
+                    h3.send_response(quic, stream, &status(b"200"), false)
+                        .expect("response head");
+                    let _ = h3.send_body(quic, stream, &vec![b'x'; length], false);
+                    self.deferred.push(Deferred {
+                        stream,
+                        code,
+                        halves: Halves::Response,
+                        due: Instant::now(),
+                    });
                 }
             }
-            self.answered += 1;
+            *answered += 1;
         }
     }
-}
 
-impl Peer {
+    fn reset_due(&mut self) {
+        let now = Instant::now();
+        let quic = &mut self.quic;
+        self.deferred.retain(|deferred| {
+            if deferred.due > now {
+                return true;
+            }
+            reset(quic, deferred.stream, deferred.code, deferred.halves);
+            false
+        });
+    }
+
     fn watch(&mut self, seen: &Mutex<Seen>) {
         let mut seen = seen.lock().expect("seen");
         let quic = &mut self.quic;
@@ -160,6 +229,44 @@ impl Peer {
             seen.peer_close = quic.peer_error().map(|error| error.error_code);
         }
     }
+
+    fn advance(&mut self, replies: &[Reply], answered: &mut usize, seen: &Mutex<Seen>) {
+        if self.h3.is_none() && self.quic.is_established() {
+            let h3_config = leyline_quiche::h3::Config::new().expect("HTTP/3 config");
+            self.h3 = Some(
+                leyline_quiche::h3::Connection::with_transport(&mut self.quic, &h3_config)
+                    .expect("HTTP/3 connection"),
+            );
+        }
+        self.reset_due();
+        self.respond(replies, answered);
+        self.watch(seen);
+    }
+}
+
+fn accept(
+    peers: &mut HashMap<SocketAddr, Peer>,
+    datagram: &mut [u8],
+    from: SocketAddr,
+    local: SocketAddr,
+    config: &mut leyline_quiche::Config,
+) {
+    let Ok(header) = leyline_quiche::Header::from_slice(datagram, leyline_quiche::MAX_CONN_ID_LEN)
+    else {
+        return;
+    };
+    if header.ty != leyline_quiche::Type::Initial {
+        return;
+    }
+    let scid = leyline_quiche::ConnectionId::from_vec(vec![7; 16]);
+    let quic = leyline_quiche::accept(&scid, None, local, from, config).expect("accept");
+    let peer = Peer {
+        quic,
+        h3: None,
+        held: Vec::new(),
+        deferred: Vec::new(),
+    };
+    peers.insert(from, peer);
 }
 
 async fn serve(
@@ -171,65 +278,41 @@ async fn serve(
     let local = socket.local_addr().expect("local address");
     let mut inbound = vec![0u8; 65_535];
     let mut outbound = vec![0u8; DATAGRAM];
-    let mut peer: Option<(SocketAddr, Peer)> = None;
+    let mut peers: HashMap<SocketAddr, Peer> = HashMap::new();
+    let mut answered = 0;
     loop {
-        let wait = peer
-            .as_ref()
-            .and_then(|(_, peer)| peer.quic.timeout())
-            .unwrap_or(IDLE);
+        let wait = peers
+            .values()
+            .filter_map(|peer| peer.quic.timeout())
+            .min()
+            .map_or(IDLE, |timeout| timeout.min(IDLE));
         match tokio::time::timeout(wait, socket.recv_from(&mut inbound)).await {
             Ok(Ok((len, from))) => {
-                if peer.is_none() {
-                    let scid = leyline_quiche::ConnectionId::from_vec(vec![7; 16]);
-                    let quic = leyline_quiche::accept(&scid, None, local, from, &mut config)
-                        .expect("accept");
-                    peer = Some((
-                        from,
-                        Peer {
-                            quic,
-                            h3: None,
-                            answered: 0,
-                            held: Vec::new(),
-                        },
-                    ));
+                if !peers.contains_key(&from) {
+                    accept(&mut peers, &mut inbound[..len], from, local, &mut config);
                 }
-                if let Some((_, peer)) = peer.as_mut() {
+                if let Some(peer) = peers.get_mut(&from) {
                     let info = leyline_quiche::RecvInfo { from, to: local };
                     let _ = peer.quic.recv(&mut inbound[..len], info);
                 }
             }
             Ok(Err(_)) => return,
-            Err(_) => {
-                if let Some((_, peer)) = peer.as_mut() {
-                    peer.quic.on_timeout();
-                }
+            Err(_) => peers.values_mut().for_each(|peer| peer.quic.on_timeout()),
+        }
+        for (address, peer) in &mut peers {
+            peer.advance(&replies, &mut answered, &seen);
+            while let Ok((len, _)) = peer.quic.send(&mut outbound) {
+                let _ = socket.send_to(&outbound[..len], *address).await;
             }
         }
-        let Some((address, state)) = peer.as_mut() else {
-            continue;
-        };
-        if state.h3.is_none() && state.quic.is_established() {
-            let h3_config = leyline_quiche::h3::Config::new().expect("HTTP/3 config");
-            state.h3 = Some(
-                leyline_quiche::h3::Connection::with_transport(&mut state.quic, &h3_config)
-                    .expect("HTTP/3 connection"),
-            );
-        }
-        state.respond(&replies);
-        state.watch(&seen);
-        while let Ok((len, _)) = state.quic.send(&mut outbound) {
-            let _ = socket.send_to(&outbound[..len], *address).await;
-        }
-        if state.quic.is_closed() {
-            return;
-        }
+        peers.retain(|_, peer| !peer.quic.is_closed());
     }
 }
 
-pub async fn h3_server(replies: Vec<Reply>) -> H3Server {
+pub async fn h3_server(replies: Vec<Reply>, limits: Limits) -> H3Server {
     let (cert, key) = crate::tls_support::self_signed();
     let der = cert.to_der().expect("certificate DER");
-    let config = server_config(&cert, &key);
+    let config = server_config(&cert, &key, limits);
     let socket = UdpSocket::bind("127.0.0.1:0").await.expect("bind");
     let port = socket.local_addr().expect("local address").port();
     let seen = Arc::new(Mutex::new(Seen::default()));

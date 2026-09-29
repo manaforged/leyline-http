@@ -69,3 +69,9 @@ fn imf_fixdate_epoch() {
         Some(std::time::UNIX_EPOCH)
     );
 }
+
+#[test]
+fn a_retry_after_date_past_the_platform_clock_does_not_panic() {
+    let wait = parse_retry_after("Fri, 01 Jan 99999 00:00:00 GMT");
+    assert!(wait.is_none_or(|wait| wait > Duration::from_secs(1 << 40)));
+}

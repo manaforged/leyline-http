@@ -1,4 +1,4 @@
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use super::days_since_epoch;
 
@@ -60,19 +60,19 @@ fn month(tok: &str) -> u32 {
     }
 }
 
-pub(super) fn stamp(d: &Date) -> Option<SystemTime> {
+pub(super) fn stamp(d: &Date) -> Option<Duration> {
     if d.day == 0 || d.month == 0 || d.year == 0 {
         return None;
     }
 
     let days = days_since_epoch(d.year, d.month, d.day)?;
     if days < 0 {
-        return Some(SystemTime::UNIX_EPOCH);
+        return Some(Duration::ZERO);
     }
     let secs = (days as u64)
         .checked_mul(86400)?
         .checked_add(d.hour as u64 * 3600)?
         .checked_add(d.minute as u64 * 60)?
         .checked_add(d.second as u64)?;
-    Some(SystemTime::UNIX_EPOCH + Duration::from_secs(secs))
+    Some(Duration::from_secs(secs))
 }

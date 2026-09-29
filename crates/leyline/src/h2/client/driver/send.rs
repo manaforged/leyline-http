@@ -67,16 +67,13 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                         _ => None,
                     });
 
-            let (closed, stream_err) = self
+            let closed = self
                 .streams
                 .get(stream_id)
-                .and_then(|a| match &a.send_body_input {
-                    SendBodyInput::Streaming { closed, error, .. } => {
-                        Some((*closed, error.as_ref().map(|e| e.to_string())))
-                    }
-                    _ => None,
-                })
-                .unwrap_or((false, None));
+                .is_some_and(|a| match &a.send_body_input {
+                    SendBodyInput::Streaming { closed, .. } => *closed,
+                    SendBodyInput::None => false,
+                });
 
             let already_closed = self
                 .streams
@@ -87,16 +84,14 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 return Ok(());
             }
 
-            if stream_err.is_some() && next_chunk.is_none() {
+            if next_chunk.is_none()
+                && let Some(cause) = self.take_body_error(stream_id)
+            {
                 let _ = self
                     .writer
                     .write_rst_stream(stream_id, ErrorCode::InternalError)
                     .await;
-                let err = H2Error::Stream {
-                    stream_id,
-                    code: ErrorCode::InternalError,
-                };
-                self.fail_stream(stream_id, err);
+                self.fail_stream(stream_id, H2Error::RequestBody(cause));
                 return Ok(());
             }
 
@@ -105,29 +100,39 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                     self.write_streaming_chunk(stream_id, chunk, closed).await?;
                 }
                 _ => {
-                    if closed && !already_closed {
-                        if let Some(actor) = self.streams.get_mut(stream_id) {
-                            if let Err(e) = actor
-                                .state
-                                .transition(StreamEvent::SendData { end_stream: true })
-                            {
-                                return Err(map_state_err(stream_id, e));
-                            }
-                            actor.send_closed = true;
-                        }
-                        self.writer
-                            .write_data(&DataFrame {
-                                stream_id,
-                                end_stream: true,
-                                data: Bytes::new(),
-                                wire_len: 0,
-                            })
-                            .await?;
-                        self.writer.flush().await?;
+                    if closed {
+                        self.end_send_side(stream_id).await?;
                     }
                     return Ok(());
                 }
             }
+        }
+    }
+
+    async fn end_send_side(&mut self, stream_id: u32) -> Result<(), H2Error> {
+        if let Some(actor) = self.streams.get_mut(stream_id) {
+            actor
+                .state
+                .transition(StreamEvent::SendData { end_stream: true })
+                .map_err(|e| map_state_err(stream_id, e))?;
+            actor.send_closed = true;
+        }
+        self.writer
+            .write_data(&DataFrame {
+                stream_id,
+                end_stream: true,
+                data: Bytes::new(),
+                wire_len: 0,
+            })
+            .await?;
+        self.writer.flush().await?;
+        Ok(())
+    }
+
+    fn take_body_error(&mut self, stream_id: u32) -> Option<std::io::Error> {
+        match &mut self.streams.get_mut(stream_id)?.send_body_input {
+            SendBodyInput::Streaming { error, .. } => error.take(),
+            SendBodyInput::None => None,
         }
     }
 

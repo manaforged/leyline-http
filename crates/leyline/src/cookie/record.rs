@@ -2,6 +2,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use crate::util::epoch_plus;
+
+const MAX_LIFETIME: Duration = Duration::from_secs(400 * 24 * 60 * 60);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum SameSite {
@@ -97,21 +101,32 @@ fn path_match(request_path: &str, cookie_path: &str) -> bool {
             || request_path.as_bytes().get(cookie_path.len()) == Some(&b'/'))
 }
 
+pub(crate) fn capped_expiry(now: SystemTime, requested: Option<SystemTime>) -> SystemTime {
+    let cap = now + MAX_LIFETIME;
+    requested.map_or(cap, |at| at.min(cap))
+}
+
+fn from_unix_millis(ms: i64) -> Option<SystemTime> {
+    let ms = if ms < 0 { 0 } else { ms as u64 };
+    epoch_plus(Duration::from_millis(ms))
+}
+
+fn unix_millis(t: &SystemTime) -> i64 {
+    t.duration_since(UNIX_EPOCH).map_or(0, |since| {
+        i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
+    })
+}
+
 mod systime_ms {
     use super::*;
 
     pub(super) fn serialize<S: Serializer>(t: &SystemTime, s: S) -> Result<S::Ok, S::Error> {
-        let ms = t
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_millis() as i64)
-            .unwrap_or(0);
-        s.serialize_i64(ms)
+        s.serialize_i64(unix_millis(t))
     }
 
     pub(super) fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<SystemTime, D::Error> {
         let ms = i64::deserialize(d)?;
-        let ms = if ms < 0 { 0 } else { ms as u64 };
-        Ok(UNIX_EPOCH + Duration::from_millis(ms))
+        Ok(from_unix_millis(ms).unwrap_or_else(SystemTime::now))
     }
 }
 
@@ -123,13 +138,7 @@ mod systime_opt_ms {
         s: S,
     ) -> Result<S::Ok, S::Error> {
         match t {
-            Some(t) => {
-                let ms = t
-                    .duration_since(UNIX_EPOCH)
-                    .map(|d| d.as_millis() as i64)
-                    .unwrap_or(0);
-                s.serialize_some(&ms)
-            }
+            Some(t) => s.serialize_some(&unix_millis(t)),
             None => s.serialize_none(),
         }
     }
@@ -138,9 +147,6 @@ mod systime_opt_ms {
         d: D,
     ) -> Result<Option<SystemTime>, D::Error> {
         let opt = Option::<i64>::deserialize(d)?;
-        Ok(opt.map(|ms| {
-            let ms = if ms < 0 { 0 } else { ms as u64 };
-            UNIX_EPOCH + Duration::from_millis(ms)
-        }))
+        Ok(opt.map(|ms| capped_expiry(SystemTime::now(), from_unix_millis(ms))))
     }
 }

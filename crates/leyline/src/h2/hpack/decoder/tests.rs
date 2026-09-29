@@ -130,3 +130,24 @@ fn invalid_index_rejected() {
     let result = dec.decode_header_block(&[0xFF, 0x49]);
     assert!(result.is_err());
 }
+
+#[test]
+fn a_table_size_update_after_a_header_is_rejected() {
+    let mut dec = Decoder::new();
+    assert!(dec.decode_header_block(&[0x88, 0x20]).is_err());
+}
+
+#[test]
+fn a_third_table_size_update_in_one_block_is_rejected() {
+    let mut dec = Decoder::new();
+    assert!(dec.decode_header_block(&[0x20, 0x20, 0x20, 0x88]).is_err());
+}
+
+#[test]
+fn two_table_size_updates_at_the_block_start_are_accepted() {
+    let mut dec = Decoder::new();
+    let headers = dec
+        .decode_header_block(&[0x20, 0x3f, 0xe1, 0x1f, 0x88])
+        .unwrap();
+    assert_eq!(headers.len(), 1);
+}

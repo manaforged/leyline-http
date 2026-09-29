@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+use crate::util::epoch_plus;
+
 pub(crate) const GATEWAY_STATUSES: [u16; 3] = [502, 503, 504];
 
 #[derive(Debug, Clone, Copy)]
@@ -226,7 +228,7 @@ fn unix_from_ymd_hms(
     if secs < 0 {
         return None;
     }
-    Some(std::time::UNIX_EPOCH + Duration::from_secs(secs as u64))
+    epoch_plus(Duration::from_secs(secs as u64))
 }
 
 #[cfg(test)]

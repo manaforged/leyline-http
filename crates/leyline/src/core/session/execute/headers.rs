@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 
+use http::header::HOST;
 use url::Url;
 
 use super::super::header_merge::apply_extra_headers;
@@ -58,7 +59,7 @@ impl Session {
         self.merge_session_headers(&mut headers, &caller_has, strip_sensitive);
 
         if let Some(extra) = extra_headers {
-            apply_extra_headers(&mut headers, extra, strip_sensitive, &sensitive_header);
+            apply_extra_headers(&mut headers, extra, strip_sensitive, &cross_origin_stripped);
         }
 
         if let Some(len) = current_body.len_hint()
@@ -135,7 +136,7 @@ impl Session {
             .iter()
             .chain(self.inner.default_headers.iter())
         {
-            if caller_has(k) || (strip_sensitive && sensitive_header(k)) {
+            if caller_has(k) || (strip_sensitive && cross_origin_stripped(k)) {
                 continue;
             }
             match headers
@@ -191,6 +192,10 @@ const REQUEST_BODY_HEADERS: [&str; 4] = [
 ];
 
 const CORS_MODES: [&str; 2] = ["cors", "websocket"];
+
+fn cross_origin_stripped(name: &str) -> bool {
+    sensitive_header(name) || name.eq_ignore_ascii_case(HOST.as_str())
+}
 
 fn is_request_body_header(name: &str) -> bool {
     REQUEST_BODY_HEADERS

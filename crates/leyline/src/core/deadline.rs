@@ -20,7 +20,9 @@ impl Deadline {
     pub(crate) fn new(session: &TimeoutConfig, request: Option<&TimeoutConfig>) -> Self {
         let merged = request.map_or(*session, |request| request.over(session));
         Self {
-            at: merged.total_limit().map(|total| Instant::now() + total),
+            at: merged
+                .total_limit()
+                .and_then(|total| Instant::now().checked_add(total)),
             response_header: merged.response_header_limit(),
             read: merged.read_limit(),
         }

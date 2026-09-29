@@ -74,13 +74,10 @@ license-files = [
 
 [bans]
 multiple-versions = "warn"
-# Wildcards are warn, not deny: the workspace crates publish to
-# crates.io and depend on each other via `path = ...` without a
-# version (intentional — the workspace version is bumped in a single
-# place). cargo-deny counts those as wildcards even with
-# `allow-wildcard-paths = true` because the crates are marked
-# publishable. Real crates.io `"*"` wildcards would still show up in
-# output as warnings.
+# Wildcards are warn, not deny. Path dependencies between the published
+# crates carry an exact `=0.1.0` version, and `allow-wildcard-paths`
+# covers the unpublished bench and fuzz crates. A crates.io `"*"`
+# requirement still shows up as a warning.
 wildcards = "warn"
 allow-wildcard-paths = true
 highlight = "all"

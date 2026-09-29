@@ -59,6 +59,13 @@ pub enum H2Error {
 
     #[error("frame size {size} exceeds max {max}")]
     FrameTooLarge { size: u32, max: u32 },
+
+    #[error("request body stream failed")]
+    RequestBody(#[source] std::io::Error),
+}
+
+fn copy_io(io: &std::io::Error) -> std::io::Error {
+    std::io::Error::new(io.kind(), io.to_string())
 }
 
 impl H2Error {
@@ -72,13 +79,18 @@ impl H2Error {
                 stream_id: *stream_id,
                 code: *code,
             },
-            Self::Io(io) => Self::Io(std::io::Error::new(io.kind(), io.to_string())),
+            Self::Io(io) => Self::Io(copy_io(io)),
             Self::Hpack(message) => Self::Hpack(message.clone()),
             Self::FrameTooLarge { size, max } => Self::FrameTooLarge {
                 size: *size,
                 max: *max,
             },
+            Self::RequestBody(io) => Self::RequestBody(copy_io(io)),
         }
+    }
+
+    pub(crate) fn connection_failed(&self) -> bool {
+        self.body_limit().is_none() && !matches!(self, Self::RequestBody(_))
     }
 
     pub(crate) fn body_limit(&self) -> Option<BodyLimit> {

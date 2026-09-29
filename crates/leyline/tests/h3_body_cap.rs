@@ -9,7 +9,7 @@ mod h3_support;
 mod tls_support;
 
 use futures_util::StreamExt;
-use h3_support::{H3Server, Reply, h3_server};
+use h3_support::{H3Server, Limits, Reply, h3_server};
 use leyline::{CompressionConfig, Kind, Session};
 
 const CAP: usize = 1024;
@@ -26,7 +26,11 @@ fn capped(server: &H3Server) -> Session {
 
 #[tokio::test]
 async fn an_h3_body_over_the_cap_is_a_body_error() {
-    let server = h3_server(vec![Reply::Body(SMALL), Reply::Body(LARGE)]).await;
+    let server = h3_server(
+        vec![Reply::Body(SMALL), Reply::Body(LARGE)],
+        Limits::default(),
+    )
+    .await;
     let session = capped(&server);
     let url = server.url();
     let first = session.get(&url).await.unwrap().bytes().await.unwrap();
@@ -38,7 +42,7 @@ async fn an_h3_body_over_the_cap_is_a_body_error() {
 
 #[tokio::test]
 async fn a_streamed_h3_body_is_not_capped() {
-    let server = h3_server(vec![Reply::Body(LARGE)]).await;
+    let server = h3_server(vec![Reply::Body(LARGE)], Limits::default()).await;
     let session = capped(&server);
     let url = server.url();
     let mut body = session

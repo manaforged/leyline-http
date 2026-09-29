@@ -65,6 +65,8 @@ pub enum H1PooledError {
     Tls(#[from] TlsError),
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    #[error("request body stream failed")]
+    RequestBody(#[source] std::io::Error),
     #[error("http: {0}")]
     Http(String),
     #[error("connection closed: {0}")]

@@ -54,7 +54,7 @@ async fn an_h2_body_over_the_cap_fails_on_the_kept_connection() {
     let (cert, key) = tls_support::self_signed();
     let der = cert.to_der().unwrap();
     let connections = Arc::new(AtomicUsize::new(0));
-    let port = support::tls_server(cert, key, Arc::clone(&connections), serve).await;
+    let port = tls_support::tls_server(cert, key, Arc::clone(&connections), serve).await;
     let session = Session::builder()
         .compression(CompressionConfig::new().max_body_size(CAP))
         .tls_trust(

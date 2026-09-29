@@ -5,6 +5,7 @@ use super::integer;
 use super::table::{self, DynamicTable};
 
 const MAX_HEADER_LIST_SIZE: usize = 64 * 1024;
+const MAX_TABLE_SIZE_UPDATES: u8 = 2;
 
 pub struct Decoder {
     dynamic: DynamicTable,
@@ -40,11 +41,12 @@ impl Decoder {
         let mut headers = Vec::new();
         let mut total_size = 0usize;
         let mut pos = 0;
+        let mut size_updates_left = MAX_TABLE_SIZE_UPDATES;
 
         while pos < src.len() {
             let byte = src[pos];
 
-            if byte & 0x80 != 0 {
+            let decoded = if byte & 0x80 != 0 {
                 let (index, consumed) =
                     integer::decode(byte, 7, &src[pos + 1..], 0).map_err(|e| e.to_string())?;
                 pos += 1 + consumed;
@@ -55,43 +57,60 @@ impl Decoder {
 
                 let (name, value) = table::lookup(index, &self.dynamic)
                     .ok_or_else(|| format!("invalid index {index}"))?;
-                headers.push(Header { name, value });
+                Some(Header { name, value })
             } else if byte & 0xC0 == 0x40 {
                 let (header, consumed) = self.decode_literal(src, pos, 6, 0x3F, true)?;
                 pos += consumed;
-                headers.push(header);
+                Some(header)
             } else if byte & 0xE0 == 0x00 {
                 let (header, consumed) = self.decode_literal(src, pos, 4, 0x0F, false)?;
                 pos += consumed;
-                headers.push(header);
+                Some(header)
             } else if byte & 0xE0 == 0x20 {
-                let (new_size, consumed) =
-                    integer::decode(byte, 5, &src[pos + 1..], 0).map_err(|e| e.to_string())?;
-                pos += 1 + consumed;
-
-                if new_size > self.max_table_size {
-                    return Err(format!(
-                        "dynamic table size update {new_size} exceeds max {}",
-                        self.max_table_size
-                    ));
-                }
-                self.dynamic.set_max_size(new_size);
+                pos += self.decode_table_size_update(src, pos, &mut size_updates_left)?;
+                None
             } else {
                 return Err(format!("unexpected byte {byte:#04x} at position {pos}"));
-            }
+            };
 
-            if let Some(last) = headers.last() {
-                total_size += last.name.len() + last.value.len() + 32;
+            if let Some(header) = decoded {
+                size_updates_left = 0;
+                total_size += header.name.len() + header.value.len() + 32;
                 if total_size > self.max_header_list_size {
                     return Err(format!(
                         "decoded header list size {} exceeds max {}",
                         total_size, self.max_header_list_size
                     ));
                 }
+                headers.push(header);
             }
         }
 
         Ok(headers)
+    }
+
+    fn decode_table_size_update(
+        &mut self,
+        src: &[u8],
+        pos: usize,
+        updates_left: &mut u8,
+    ) -> Result<usize, String> {
+        if *updates_left == 0 {
+            return Err(format!(
+                "dynamic table size update at position {pos} not allowed (RFC 7541 §4.2)"
+            ));
+        }
+        *updates_left -= 1;
+        let (new_size, consumed) =
+            integer::decode(src[pos], 5, &src[pos + 1..], 0).map_err(|e| e.to_string())?;
+        if new_size > self.max_table_size {
+            return Err(format!(
+                "dynamic table size update {new_size} exceeds max {}",
+                self.max_table_size
+            ));
+        }
+        self.dynamic.set_max_size(new_size);
+        Ok(1 + consumed)
     }
 
     fn decode_literal(

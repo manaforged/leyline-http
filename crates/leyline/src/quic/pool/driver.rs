@@ -8,6 +8,8 @@ use event_loop::H3Loop;
 pub(super) use forward::*;
 pub(super) use upload::*;
 
+const GOAWAY_NOT_SENT: &str = "server sent GOAWAY: request not sent";
+
 struct Drain<'a> {
     h3: &'a mut quiche::h3::Connection,
     conn: &'a mut quiche::Connection,
@@ -16,6 +18,7 @@ struct Drain<'a> {
     scratch: &'a mut [u8],
     max_body: u64,
     admit: &'a mut Option<usize>,
+    draining: bool,
 }
 
 impl H3Driver {
@@ -86,7 +89,9 @@ pub(super) fn start_pending(
                     streams.insert(stream_id, stream);
                 }
             }
-            Err(quiche::h3::Error::StreamBlocked) | Err(quiche::h3::Error::Done) => break,
+            Err(quiche::h3::Error::StreamBlocked)
+            | Err(quiche::h3::Error::Done)
+            | Err(quiche::h3::Error::TransportError(quiche::Error::StreamLimit)) => break,
             Err(e) => {
                 if let Some(H3Command::Request { resp_tx, .. }) = pending.pop_front() {
                     drop(resp_tx.send(Err(H3SendError::Failed(format!("h3 send_request: {e}")))));
@@ -155,6 +160,40 @@ fn abort_stream(
     reset_upload_half(conn, stream_id, stream, code);
 }
 
+fn stream_reset_message(code: u64) -> String {
+    format!("h3 stream reset: {code}")
+}
+
+fn on_body_read_error(
+    h3: &mut quiche::h3::Connection,
+    conn: &mut quiche::Connection,
+    stream_id: u64,
+    stream: &mut H3Stream,
+    error: quiche::h3::Error,
+) -> String {
+    match error {
+        quiche::h3::Error::TransportError(quiche::Error::StreamReset(code)) => {
+            reset_upload_half(
+                conn,
+                stream_id,
+                stream,
+                quiche::h3::WireErrorCode::RequestCancelled,
+            );
+            stream_reset_message(code)
+        }
+        _ => {
+            abort_stream(
+                h3,
+                conn,
+                stream_id,
+                stream,
+                quiche::h3::WireErrorCode::GeneralProtocolError,
+            );
+            format!("h3 recv_body: {error}")
+        }
+    }
+}
+
 pub(super) fn stream_is_cancelled(stream: &H3Stream) -> bool {
     match stream.resp_tx.as_ref() {
         Some(tx) => tx.is_closed(),
@@ -190,27 +229,6 @@ pub(super) fn sweep_cancelled_streams(
             );
         }
     }
-}
-
-pub(super) fn drain_h3_events(
-    h3: &mut quiche::h3::Connection,
-    conn: &mut quiche::Connection,
-    streams: &mut HashMap<u64, H3Stream>,
-    pending: &mut VecDeque<H3Command>,
-    scratch: &mut [u8],
-    max_response_body_bytes: u64,
-    admit_cap: &mut Option<usize>,
-) -> Result<bool, String> {
-    Drain {
-        h3,
-        conn,
-        streams,
-        pending,
-        scratch,
-        max_body: max_response_body_bytes,
-        admit: admit_cap,
-    }
-    .run()
 }
 
 pub(super) fn deliver_stream_error(tx: &mpsc::Sender<std::io::Result<Bytes>>, err: std::io::Error) {

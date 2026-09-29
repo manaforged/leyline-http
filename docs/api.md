@@ -172,7 +172,8 @@ let resp = session
   `HappyEyeballsConfig`, `CompressionConfig`, `WebSocketConfig`) have private
   fields and consuming setters named after the field, with no `with_`
   prefix. A setter for an optional value takes `impl Into<Option<T>>`;
-  `None` turns that setting off. A setter that adds to a list starts with
+  `None` turns that setting off. `RetryPolicy::max_retry_after` is the
+  exception: it takes a `Duration`, and the cap is off until you set it. A setter that adds to a list starts with
   `add_` or appends one item (`rule`, `on_status`).
 - Every `SessionBuilder` config setter replaces the whole value. Start from
   `::new()`, which carries the defaults.
@@ -422,9 +423,9 @@ Default: `charset`, `compression-gzip`, `compression-brotli`,
 `compression-deflate`, `compression-zstd`, `multipart`, `websocket`,
 `http3`. Opt-in: `socks`, `tower`, `bench-internals` (outside semver). `full`
 enables every opt-in except `bench-internals`. Build with
-`RUSTFLAGS="--cfg leyline_unstable_bssl"` to reach the BoringSSL
-`SslContextBuilder` behind `TlsContext`. The BoringSSL crates are outside the
-semver promise.
+`RUSTFLAGS="--cfg leyline_unstable_bssl"`, or enable `bench-internals`, to
+reach the BoringSSL `SslContextBuilder` behind `TlsContext`. Both, and the
+BoringSSL crates, are outside the semver promise.
 
 ## Do not add
 

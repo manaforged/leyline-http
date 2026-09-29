@@ -1,14 +1,13 @@
 use std::time::{Duration, SystemTime};
 
-use crate::cookie::record::{Cookie, SameSite};
+use crate::cookie::record::{Cookie, SameSite, capped_expiry};
+use crate::util::epoch_plus;
 
 mod attr;
 mod date;
 
 use attr::set;
 use date::{Date, stamp, token};
-
-const MAX_LIFETIME: Duration = Duration::from_secs(400 * 24 * 60 * 60);
 
 #[derive(Default)]
 struct CookieAttributes {
@@ -18,7 +17,7 @@ struct CookieAttributes {
     http_only: bool,
     same_site: Option<SameSite>,
     max_age: Option<Duration>,
-    expires: Option<SystemTime>,
+    expires_after_epoch: Option<Duration>,
 }
 
 fn parse_attributes(attrs_str: &str) -> CookieAttributes {
@@ -61,13 +60,13 @@ fn prefix_rejected(name: &str, attrs: &CookieAttributes) -> bool {
 fn compute_expiry(
     now: SystemTime,
     max_age: Option<Duration>,
-    expires: Option<SystemTime>,
+    expires_after_epoch: Option<Duration>,
 ) -> Option<SystemTime> {
-    match max_age {
-        Some(Duration::ZERO) => Some(now),
-        Some(ma) => Some(now + ma.min(MAX_LIFETIME)),
-        None => expires.map(|exp| exp.min(now + MAX_LIFETIME)),
-    }
+    let requested = match max_age {
+        Some(age) => now.checked_add(age),
+        None => epoch_plus(expires_after_epoch?),
+    };
+    Some(capped_expiry(now, requested))
 }
 
 fn resolve_cookie_domain(request_url: &url::Url, domain: Option<String>) -> Option<(bool, String)> {
@@ -87,45 +86,39 @@ fn resolve_cookie_domain(request_url: &url::Url, domain: Option<String>) -> Opti
     Some((host_only, cookie_domain))
 }
 
+fn split_pair(header: &str) -> Option<(&str, &str, &str)> {
+    let (name_value, attrs) = header.split_once(';').unwrap_or((header, ""));
+    let (name, value) = name_value.split_once('=')?;
+    let (name, value) = (name.trim(), value.trim());
+    let has_ctl = |s: &str| s.bytes().any(|b| b < 0x20 || b == 0x7F);
+    if name.is_empty() || has_ctl(name) || has_ctl(value) || name.len() + value.len() > 4096 {
+        return None;
+    }
+    Some((name, value, attrs))
+}
+
+fn admitted_same_site(
+    name: &str,
+    attrs: &CookieAttributes,
+    request_url: &url::Url,
+) -> Option<SameSite> {
+    if (attrs.secure && !secure_origin(request_url)) || prefix_rejected(name, attrs) {
+        return None;
+    }
+    match attrs.same_site {
+        Some(SameSite::None) if !attrs.secure => None,
+        Some(same_site) => Some(same_site),
+        None => Some(SameSite::Lax),
+    }
+}
+
 pub fn parse_set_cookie(header: &str, request_url: &url::Url) -> Option<Cookie> {
     let now = SystemTime::now();
-
-    let (name_value, attrs_str) = match header.find(';') {
-        Some(i) => (&header[..i], &header[i + 1..]),
-        None => (header, ""),
-    };
-
-    let (name, value) = {
-        let i = name_value.find('=')?;
-        (name_value[..i].trim(), name_value[i + 1..].trim())
-    };
-
-    if name.is_empty() {
-        return None;
-    }
-
-    let has_ctl = |s: &str| s.bytes().any(|b| b < 0x20 || b == 0x7F);
-    if has_ctl(name) || has_ctl(value) {
-        return None;
-    }
-
+    let (name, value, attrs_str) = split_pair(header)?;
     let attrs = parse_attributes(attrs_str);
+    let same_site = admitted_same_site(name, &attrs, request_url)?;
 
-    if attrs.secure && !secure_origin(request_url) {
-        return None;
-    }
-
-    let same_site = match attrs.same_site {
-        Some(SameSite::None) if !attrs.secure => return None,
-        Some(s) => s,
-        None => SameSite::Lax,
-    };
-
-    if prefix_rejected(name, &attrs) {
-        return None;
-    }
-
-    let computed_expires = compute_expiry(now, attrs.max_age, attrs.expires);
+    let computed_expires = compute_expiry(now, attrs.max_age, attrs.expires_after_epoch);
 
     let domain = if matches!(
         request_url.host(),
@@ -141,10 +134,6 @@ pub fn parse_set_cookie(header: &str, request_url: &url::Url) -> Option<Cookie> 
     let cookie_path = attrs
         .path
         .unwrap_or_else(|| default_path(request_url.path()));
-
-    if name.len() + value.len() > 4096 {
-        return None;
-    }
 
     Some(Cookie {
         name: name.to_string(),
@@ -183,7 +172,7 @@ fn default_path(request_path: &str) -> String {
     }
 }
 
-pub fn parse_cookie_date(s: &str) -> Option<SystemTime> {
+pub fn parse_cookie_date(s: &str) -> Option<Duration> {
     let mut d = Date::default();
     for tok in s.trim().split([' ', '-', ',']) {
         let tok = tok.trim();

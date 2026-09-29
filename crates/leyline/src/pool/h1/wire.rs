@@ -149,7 +149,7 @@ pub(super) async fn exchange_head_on_stream(
 }
 pub(crate) fn h1err_to_io(e: H1PooledError) -> io::Error {
     match e {
-        H1PooledError::Io(io) => io,
+        H1PooledError::Io(io) | H1PooledError::RequestBody(io) => io,
         H1PooledError::ConnectionClosed(_) => {
             io::Error::new(io::ErrorKind::UnexpectedEof, e.to_string())
         }

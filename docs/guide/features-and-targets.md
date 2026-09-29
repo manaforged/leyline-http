@@ -39,8 +39,8 @@ leyline-http = { version = "0.1", default-features = false, features = ["compres
 ```
 
 Build with `RUSTFLAGS="--cfg leyline_unstable_bssl"` to reach the BoringSSL
-`SslContextBuilder` behind `TlsContext`. This is a compiler flag, not a Cargo
-feature, and it is outside the semver promise.
+`SslContextBuilder` behind `TlsContext`. The `bench-internals` feature also
+exposes it. Both are outside the semver promise.
 
 ## BoringSSL build
 
