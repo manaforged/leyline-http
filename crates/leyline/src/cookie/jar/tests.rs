@@ -99,10 +99,7 @@ fn same_path_cookies_keep_creation_order() {
     let export = jar
         .cookie_header(&url::Url::parse("https://www.example.com/v1/items").unwrap())
         .unwrap_or_default();
-    assert_eq!(
-        export,
-        "zeta=r; alpha=i; mid=v; late=abc123"
-    );
+    assert_eq!(export, "zeta=r; alpha=i; mid=v; late=abc123");
 }
 
 #[test]

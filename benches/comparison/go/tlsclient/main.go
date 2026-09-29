@@ -1,4 +1,4 @@
-// bogdanfinn/tls-client (utls) Chrome-146 head-to-head client.
+// bogdanfinn/tls-client (utls) Chrome-152 head-to-head client.
 package main
 
 import (

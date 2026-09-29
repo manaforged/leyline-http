@@ -7,7 +7,7 @@ fuzz_seconds=300
 only=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --quick) shift ;; # compatibility: quick is now the default
+        --quick) shift ;;
         --full) full=1; shift ;;
         --only) only="${2:?--only needs a comma-separated gate list}"; shift 2 ;;
         --fuzz)

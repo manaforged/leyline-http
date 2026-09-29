@@ -86,9 +86,8 @@ step. The patches are:
 BoringSSL provides `SSL_CTX_set_grease_sigalgs_enabled` since commit
 `29e593e29165df578ab778269a1f04da2055c32f`. It puts one GREASE value
 (RFC 8701) first in the ClientHello `signature_algorithms` list, which
-Chrome 152 and later send. It replaces the patch that Leyline carried for
-the same value. BoringSSL runs its symbol-prefix audit only in its test
-targets, so a prefixed build does not need Go.
+Chrome 152 and later send. BoringSSL runs its symbol-prefix audit only in its
+test targets, so a prefixed build does not need Go.
 
 ## Symbol prefix
 

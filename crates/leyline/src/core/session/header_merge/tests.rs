@@ -42,7 +42,7 @@ fn plain_known_header_rides_inferred_anchor() {
 fn anchored_header_splices_after_anchor() {
     let mut headers = preset_xhr();
     let mut extra = HeaderList::new();
-    drop(extra.append_anchored(HeaderAnchor::AfterUserAgent, "x-extra-6", "c"));
+    drop(extra.append_anchored(HeaderAnchor::AfterUserAgent, "x-extra-6", "6"));
     apply_extra_headers(&mut headers, &extra, false, &never_sensitive);
     let ua = headers.iter().position(|(k, _)| k == "user-agent").unwrap();
     assert_eq!(headers[ua + 1].0, "x-extra-6");
@@ -85,13 +85,13 @@ fn anchored_headers_interleave_at_each_anchor() {
         ("accept-encoding".into(), "gzip".into()),
     ];
     let mut extra = HeaderList::new();
-    drop(extra.append_anchored(HeaderAnchor::AfterCchUaPlatform, "x-extra-5", "z"));
-    drop(extra.append_anchored(HeaderAnchor::AfterCchUa, "x-extra-1", "f"));
-    drop(extra.append_anchored(HeaderAnchor::AfterCchUaMobile, "x-extra-2", "a0"));
-    drop(extra.append_anchored(HeaderAnchor::AfterCchUaMobile, "x-extra-3", "b"));
-    drop(extra.append_anchored(HeaderAnchor::AfterCchUaMobile, "x-extra-4", "a"));
-    drop(extra.append_anchored(HeaderAnchor::AfterUserAgent, "x-extra-6", "c"));
-    drop(extra.append_anchored(HeaderAnchor::AfterContentType, "x-extra-7", "d"));
+    drop(extra.append_anchored(HeaderAnchor::AfterCchUaPlatform, "x-extra-5", "5"));
+    drop(extra.append_anchored(HeaderAnchor::AfterCchUa, "x-extra-1", "1"));
+    drop(extra.append_anchored(HeaderAnchor::AfterCchUaMobile, "x-extra-2", "2"));
+    drop(extra.append_anchored(HeaderAnchor::AfterCchUaMobile, "x-extra-3", "3"));
+    drop(extra.append_anchored(HeaderAnchor::AfterCchUaMobile, "x-extra-4", "4"));
+    drop(extra.append_anchored(HeaderAnchor::AfterUserAgent, "x-extra-6", "6"));
+    drop(extra.append_anchored(HeaderAnchor::AfterContentType, "x-extra-7", "7"));
     apply_extra_headers(&mut headers, &extra, false, &never_sensitive);
     let names: Vec<&str> = headers.iter().map(|(k, _)| k.as_ref()).collect();
     assert_eq!(

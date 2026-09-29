@@ -285,10 +285,6 @@ name = "tls_peet"
 required-features = ["bench-internals", "http3", "websocket"]
 
 [[test]]
-name = "cookies_multidomain_replay"
-required-features = ["bench-internals"]
-
-[[test]]
 name = "https_proxy"
 required-features = ["bench-internals"]
 

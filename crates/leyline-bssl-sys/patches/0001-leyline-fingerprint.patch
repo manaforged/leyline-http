@@ -560,7 +560,7 @@ index ae7c9bbd5..3475ae63c 100644
 -    }
 -  }
 -
-+  // Leyline carry: allow duplicate signature algorithms. CFNetwork advertises
++  // Allow duplicate signature algorithms. CFNetwork advertises
 +  // rsa_pss_rsae_sha384 (0x0805) twice in its ClientHello; the duplicate is
 +  // part of the wire fingerprint. The uniqueness check exists for BoringSSL's
 +  // own preference handling (a set is unique by design); keeping a duplicate

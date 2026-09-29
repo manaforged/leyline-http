@@ -297,13 +297,13 @@ async fn anchored_headers_interleave_at_preset_slots() {
     let resp = session
         .post(server.url("/submit"))
         .preset(Preset::Form)
-        .anchored(HeaderAnchor::AfterCchUa, "x-extra-1", "f")
-        .anchored(HeaderAnchor::AfterCchUaMobile, "x-extra-2", "a0")
-        .anchored(HeaderAnchor::AfterCchUaMobile, "x-extra-3", "b")
-        .anchored(HeaderAnchor::AfterCchUaMobile, "x-extra-4", "a")
-        .anchored(HeaderAnchor::AfterCchUaPlatform, "x-extra-5", "z")
-        .anchored(HeaderAnchor::AfterUserAgent, "x-extra-6", "c")
-        .anchored(HeaderAnchor::AfterContentType, "x-extra-7", "d")
+        .anchored(HeaderAnchor::AfterCchUa, "x-extra-1", "1")
+        .anchored(HeaderAnchor::AfterCchUaMobile, "x-extra-2", "2")
+        .anchored(HeaderAnchor::AfterCchUaMobile, "x-extra-3", "3")
+        .anchored(HeaderAnchor::AfterCchUaMobile, "x-extra-4", "4")
+        .anchored(HeaderAnchor::AfterCchUaPlatform, "x-extra-5", "5")
+        .anchored(HeaderAnchor::AfterUserAgent, "x-extra-6", "6")
+        .anchored(HeaderAnchor::AfterContentType, "x-extra-7", "7")
         .body("field=payload")
         .send()
         .await
@@ -322,12 +322,7 @@ async fn anchored_headers_interleave_at_preset_slots() {
     };
 
     assert_eq!(pos("x-extra-1"), pos("sec-ch-ua") + 1, "{}", wire);
-    assert_eq!(
-        pos("x-extra-2"),
-        pos("sec-ch-ua-mobile") + 1,
-        "{}",
-        wire
-    );
+    assert_eq!(pos("x-extra-2"), pos("sec-ch-ua-mobile") + 1, "{}", wire);
     assert_eq!(pos("x-extra-3"), pos("x-extra-2") + 1);
     assert_eq!(pos("x-extra-4"), pos("x-extra-3") + 1);
     assert_eq!(pos("x-extra-5"), pos("sec-ch-ua-platform") + 1);

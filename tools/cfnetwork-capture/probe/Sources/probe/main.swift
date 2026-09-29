@@ -5,7 +5,7 @@ import Foundation
 // Usage: cfnetwork-probe <url> [count] [delaySec]
 //
 // Accepts any server certificate — this rig talks ONLY to our own capture
-// server (see tools/cfnetwork-capture/README.md). The ClientHello is sent
+// server (capture.sh starts it on 127.0.0.1). The ClientHello is sent
 // before the server certificate is ever evaluated, so even a rejecting
 // delegate would not lose the handshake capture; accepting just lets the
 // HTTP/2 exchange complete for the full frame-order evidence pack.
