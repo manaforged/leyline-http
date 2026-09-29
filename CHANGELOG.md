@@ -123,6 +123,9 @@ First public release.
   Debug builds keep TLS key logging for development.
 - Decompression is bounded by `CompressionConfig::max_body_size` at every
   decoder stage, and a truncated compressed body is an error.
+- `TlsTrustConfig::min_tls_version` sets a TLS version floor for every TCP
+  handshake, including the one with an `https://` proxy. The handshake
+  minimum is the higher of the profile's minimum and the floor.
 - QPACK header sections are bounded by a local limit that does not depend on
   the peer's SETTINGS, and HTTP/2 PING, WINDOW_UPDATE, and empty CONTINUATION
   floods close the connection.

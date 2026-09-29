@@ -58,7 +58,7 @@ pub(crate) fn apply_tls_with_trust(
     phase::curves(builder, tls)?;
     phase::sigalgs(builder, tls)?;
     phase::extensions(builder, tls)?;
-    phase::versions(builder, tls, min_version)?;
+    phase::versions(builder, tls, min_version, trust.min_tls_version)?;
 
     wire_configured_trust(builder, trust)?;
     builder.set_verify(SslVerifyMode::PEER);

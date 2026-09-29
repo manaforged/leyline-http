@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use crate::tls::builder::TlsMinVersion;
+
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct TlsTrustConfig {
@@ -10,6 +12,7 @@ pub struct TlsTrustConfig {
     pub(crate) client_identity: Option<ClientIdentity>,
     pub(crate) pinned_leaf_sha256: Vec<[u8; 32]>,
     pub(crate) accept_invalid_certs: bool,
+    pub(crate) min_tls_version: TlsMinVersion,
 }
 
 impl Default for TlsTrustConfig {
@@ -22,6 +25,7 @@ impl Default for TlsTrustConfig {
             client_identity: None,
             pinned_leaf_sha256: Vec::new(),
             accept_invalid_certs: false,
+            min_tls_version: TlsMinVersion::Tls10,
         }
     }
 }
@@ -70,6 +74,11 @@ impl TlsTrustConfig {
 
     pub fn danger_accept_invalid_certs(mut self, accept: bool) -> Self {
         self.accept_invalid_certs = accept;
+        self
+    }
+
+    pub fn min_tls_version(mut self, version: TlsMinVersion) -> Self {
+        self.min_tls_version = version;
         self
     }
 

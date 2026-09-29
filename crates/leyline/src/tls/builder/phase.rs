@@ -219,17 +219,15 @@ fn order(builder: &mut SslContextBuilder, tls: &TlsProfile) -> Result<(), TlsErr
 pub(super) fn versions(
     builder: &mut SslContextBuilder,
     tls: &TlsProfile,
+    default_min: TlsMinVersion,
     floor: TlsMinVersion,
 ) -> Result<(), TlsError> {
-    let min = if floor == TlsMinVersion::Tls13 {
+    let base = if default_min == TlsMinVersion::Tls13 {
         TlsMinVersion::Tls13
     } else {
-        match profile_min_version(&tls.min_tls_version)? {
-            Some(declared) => declared,
-            None => floor,
-        }
+        profile_min_version(&tls.min_tls_version)?.unwrap_or(default_min)
     };
-    let min = match min {
+    let min = match base.max(floor) {
         TlsMinVersion::Tls10 => SslVersion::TLS1,
         TlsMinVersion::Tls12 => SslVersion::TLS1_2,
         TlsMinVersion::Tls13 => SslVersion::TLS1_3,
