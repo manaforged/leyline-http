@@ -1,0 +1,27 @@
+[Chrome]
+default = true
+follow_chromium = true
+
+[Edge]
+product = "Microsoft Edge"
+ua_token = "Edg"
+follow_chromium = true
+desktop_only = true
+
+[Edge.tls]
+request_trust_anchors = false
+
+[Opera]
+product = "Opera"
+ua_token = "OPR"
+desktop_only = true
+
+[Opera.versions]
+"152" = ["136.0.0.0"]
+"151" = ["135.0.0.0"]
+"150" = ["134.0.0.0"]
+"149" = ["133.0.0.0"]
+"148" = ["132.0.0.0"]
+"147" = ["131.0.0.0"]
+"146" = ["130.0.0.0"]
+"145" = ["129.0.0.0"]

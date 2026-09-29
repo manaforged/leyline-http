@@ -1,0 +1,685 @@
+[
+  {
+    "t": 0,
+    "stream": 3,
+    "headers": [
+      [
+        ":method",
+        "GET"
+      ],
+      [
+        ":path",
+        "/"
+      ],
+      [
+        ":authority",
+        "shop.example.test:8443"
+      ],
+      [
+        ":scheme",
+        "https"
+      ],
+      [
+        "user-agent",
+        "Mozilla/5.0 (X11; Linux x86_64; rv:156.0) Gecko/20100101 Firefox/156.0"
+      ],
+      [
+        "accept",
+        "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+      ],
+      [
+        "accept-language",
+        "en-US,en;q=0.9"
+      ],
+      [
+        "accept-encoding",
+        "gzip, deflate, br, zstd"
+      ],
+      [
+        "upgrade-insecure-requests",
+        "1"
+      ],
+      [
+        "sec-fetch-dest",
+        "document"
+      ],
+      [
+        "sec-fetch-mode",
+        "navigate"
+      ],
+      [
+        "sec-fetch-site",
+        "none"
+      ],
+      [
+        "sec-fetch-user",
+        "?1"
+      ],
+      [
+        "priority",
+        "u=0, i"
+      ],
+      [
+        "te",
+        "trailers"
+      ]
+    ],
+    "priority": {
+      "weight": 42,
+      "depends_on": 0,
+      "exclusive": false
+    }
+  },
+  {
+    "t": 0,
+    "stream": 5,
+    "headers": [
+      [
+        ":method",
+        "GET"
+      ],
+      [
+        ":path",
+        "/app.js"
+      ],
+      [
+        ":authority",
+        "shop.example.test:8443"
+      ],
+      [
+        ":scheme",
+        "https"
+      ],
+      [
+        "user-agent",
+        "Mozilla/5.0 (X11; Linux x86_64; rv:156.0) Gecko/20100101 Firefox/156.0"
+      ],
+      [
+        "accept",
+        "*/*"
+      ],
+      [
+        "accept-language",
+        "en-US,en;q=0.9"
+      ],
+      [
+        "accept-encoding",
+        "gzip, deflate, br, zstd"
+      ],
+      [
+        "referer",
+        "https://shop.example.test:8443/"
+      ],
+      [
+        "sec-fetch-dest",
+        "script"
+      ],
+      [
+        "sec-fetch-mode",
+        "no-cors"
+      ],
+      [
+        "sec-fetch-site",
+        "same-origin"
+      ],
+      [
+        "priority",
+        "u=2"
+      ],
+      [
+        "te",
+        "trailers"
+      ],
+      [
+        "cookie",
+        "sid=1"
+      ]
+    ],
+    "priority": {
+      "weight": 22,
+      "depends_on": 0,
+      "exclusive": false
+    }
+  },
+  {
+    "t": 0,
+    "stream": 7,
+    "headers": [
+      [
+        ":method",
+        "GET"
+      ],
+      [
+        ":path",
+        "/native"
+      ],
+      [
+        ":authority",
+        "shop.example.test:8443"
+      ],
+      [
+        ":scheme",
+        "https"
+      ],
+      [
+        "user-agent",
+        "Mozilla/5.0 (X11; Linux x86_64; rv:156.0) Gecko/20100101 Firefox/156.0"
+      ],
+      [
+        "accept",
+        "*/*"
+      ],
+      [
+        "accept-language",
+        "en-US,en;q=0.9"
+      ],
+      [
+        "accept-encoding",
+        "gzip, deflate, br, zstd"
+      ],
+      [
+        "referer",
+        "https://shop.example.test:8443/"
+      ],
+      [
+        "sec-fetch-dest",
+        "empty"
+      ],
+      [
+        "sec-fetch-mode",
+        "cors"
+      ],
+      [
+        "sec-fetch-site",
+        "same-origin"
+      ],
+      [
+        "priority",
+        "u=4"
+      ],
+      [
+        "te",
+        "trailers"
+      ],
+      [
+        "cookie",
+        "sid=1"
+      ]
+    ],
+    "priority": {
+      "weight": 22,
+      "depends_on": 0,
+      "exclusive": false
+    }
+  },
+  {
+    "t": 0,
+    "stream": 9,
+    "headers": [
+      [
+        ":method",
+        "GET"
+      ],
+      [
+        ":path",
+        "/favicon.ico"
+      ],
+      [
+        ":authority",
+        "shop.example.test:8443"
+      ],
+      [
+        ":scheme",
+        "https"
+      ],
+      [
+        "user-agent",
+        "Mozilla/5.0 (X11; Linux x86_64; rv:156.0) Gecko/20100101 Firefox/156.0"
+      ],
+      [
+        "accept",
+        "image/avif,image/webp,image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5"
+      ],
+      [
+        "accept-language",
+        "en-US,en;q=0.9"
+      ],
+      [
+        "accept-encoding",
+        "gzip, deflate, br, zstd"
+      ],
+      [
+        "referer",
+        "https://shop.example.test:8443/"
+      ],
+      [
+        "sec-fetch-dest",
+        "image"
+      ],
+      [
+        "sec-fetch-mode",
+        "no-cors"
+      ],
+      [
+        "sec-fetch-site",
+        "same-origin"
+      ],
+      [
+        "priority",
+        "u=6"
+      ],
+      [
+        "te",
+        "trailers"
+      ],
+      [
+        "cookie",
+        "sid=1"
+      ]
+    ],
+    "priority": {
+      "weight": 22,
+      "depends_on": 0,
+      "exclusive": false
+    }
+  },
+  {
+    "t": 0,
+    "stream": 11,
+    "headers": [
+      [
+        ":method",
+        "POST"
+      ],
+      [
+        ":path",
+        "/xhr"
+      ],
+      [
+        ":authority",
+        "shop.example.test:8443"
+      ],
+      [
+        ":scheme",
+        "https"
+      ],
+      [
+        "user-agent",
+        "Mozilla/5.0 (X11; Linux x86_64; rv:156.0) Gecko/20100101 Firefox/156.0"
+      ],
+      [
+        "accept",
+        "application/json, text/plain, */*"
+      ],
+      [
+        "accept-language",
+        "en-US,en;q=0.9"
+      ],
+      [
+        "accept-encoding",
+        "gzip, deflate, br, zstd"
+      ],
+      [
+        "referer",
+        "https://shop.example.test:8443/"
+      ],
+      [
+        "content-type",
+        "application/json"
+      ],
+      [
+        "content-length",
+        "7"
+      ],
+      [
+        "origin",
+        "https://shop.example.test:8443"
+      ],
+      [
+        "sec-fetch-dest",
+        "empty"
+      ],
+      [
+        "sec-fetch-mode",
+        "cors"
+      ],
+      [
+        "sec-fetch-site",
+        "same-origin"
+      ],
+      [
+        "priority",
+        "u=4"
+      ],
+      [
+        "te",
+        "trailers"
+      ],
+      [
+        "cookie",
+        "sid=1"
+      ]
+    ],
+    "priority": {
+      "weight": 22,
+      "depends_on": 0,
+      "exclusive": false
+    }
+  },
+  {
+    "t": 0,
+    "stream": 13,
+    "headers": [
+      [
+        ":method",
+        "POST"
+      ],
+      [
+        ":path",
+        "/form"
+      ],
+      [
+        ":authority",
+        "shop.example.test:8443"
+      ],
+      [
+        ":scheme",
+        "https"
+      ],
+      [
+        "user-agent",
+        "Mozilla/5.0 (X11; Linux x86_64; rv:156.0) Gecko/20100101 Firefox/156.0"
+      ],
+      [
+        "accept",
+        "application/json, text/plain, */*"
+      ],
+      [
+        "accept-language",
+        "en-US,en;q=0.9"
+      ],
+      [
+        "accept-encoding",
+        "gzip, deflate, br, zstd"
+      ],
+      [
+        "referer",
+        "https://shop.example.test:8443/"
+      ],
+      [
+        "content-type",
+        "application/x-www-form-urlencoded"
+      ],
+      [
+        "content-length",
+        "3"
+      ],
+      [
+        "origin",
+        "https://shop.example.test:8443"
+      ],
+      [
+        "sec-fetch-dest",
+        "empty"
+      ],
+      [
+        "sec-fetch-mode",
+        "cors"
+      ],
+      [
+        "sec-fetch-site",
+        "same-origin"
+      ],
+      [
+        "priority",
+        "u=4"
+      ],
+      [
+        "te",
+        "trailers"
+      ],
+      [
+        "cookie",
+        "sid=1"
+      ]
+    ],
+    "priority": {
+      "weight": 22,
+      "depends_on": 0,
+      "exclusive": false
+    }
+  },
+  {
+    "t": 0,
+    "stream": 3,
+    "headers": [
+      [
+        ":method",
+        "GET"
+      ],
+      [
+        ":path",
+        "/same-site"
+      ],
+      [
+        ":authority",
+        "api.example.test:8443"
+      ],
+      [
+        ":scheme",
+        "https"
+      ],
+      [
+        "user-agent",
+        "Mozilla/5.0 (X11; Linux x86_64; rv:156.0) Gecko/20100101 Firefox/156.0"
+      ],
+      [
+        "accept",
+        "application/json, text/plain, */*"
+      ],
+      [
+        "accept-language",
+        "en-US,en;q=0.9"
+      ],
+      [
+        "accept-encoding",
+        "gzip, deflate, br, zstd"
+      ],
+      [
+        "referer",
+        "https://shop.example.test:8443/"
+      ],
+      [
+        "origin",
+        "https://shop.example.test:8443"
+      ],
+      [
+        "sec-fetch-dest",
+        "empty"
+      ],
+      [
+        "sec-fetch-mode",
+        "cors"
+      ],
+      [
+        "sec-fetch-site",
+        "same-site"
+      ],
+      [
+        "priority",
+        "u=4"
+      ],
+      [
+        "te",
+        "trailers"
+      ]
+    ],
+    "priority": {
+      "weight": 22,
+      "depends_on": 0,
+      "exclusive": false
+    }
+  },
+  {
+    "t": 0,
+    "stream": 5,
+    "headers": [
+      [
+        ":method",
+        "GET"
+      ],
+      [
+        ":path",
+        "/cross-origin"
+      ],
+      [
+        ":authority",
+        "api.partner.test:8443"
+      ],
+      [
+        ":scheme",
+        "https"
+      ],
+      [
+        "user-agent",
+        "Mozilla/5.0 (X11; Linux x86_64; rv:156.0) Gecko/20100101 Firefox/156.0"
+      ],
+      [
+        "accept",
+        "application/json, text/plain, */*"
+      ],
+      [
+        "accept-language",
+        "en-US,en;q=0.9"
+      ],
+      [
+        "accept-encoding",
+        "gzip, deflate, br, zstd"
+      ],
+      [
+        "referer",
+        "https://shop.example.test:8443/"
+      ],
+      [
+        "origin",
+        "https://shop.example.test:8443"
+      ],
+      [
+        "sec-fetch-dest",
+        "empty"
+      ],
+      [
+        "sec-fetch-mode",
+        "cors"
+      ],
+      [
+        "sec-fetch-site",
+        "cross-site"
+      ],
+      [
+        "priority",
+        "u=4"
+      ],
+      [
+        "te",
+        "trailers"
+      ]
+    ],
+    "priority": {
+      "weight": 22,
+      "depends_on": 0,
+      "exclusive": false
+    }
+  },
+  {
+    "t": 0,
+    "stream": 15,
+    "headers": [
+      [
+        ":method",
+        "POST"
+      ],
+      [
+        ":path",
+        "/submit"
+      ],
+      [
+        ":authority",
+        "shop.example.test:8443"
+      ],
+      [
+        ":scheme",
+        "https"
+      ],
+      [
+        "user-agent",
+        "Mozilla/5.0 (X11; Linux x86_64; rv:156.0) Gecko/20100101 Firefox/156.0"
+      ],
+      [
+        "accept",
+        "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+      ],
+      [
+        "accept-language",
+        "en-US,en;q=0.9"
+      ],
+      [
+        "accept-encoding",
+        "gzip, deflate, br, zstd"
+      ],
+      [
+        "content-type",
+        "application/x-www-form-urlencoded"
+      ],
+      [
+        "content-length",
+        "3"
+      ],
+      [
+        "origin",
+        "https://shop.example.test:8443"
+      ],
+      [
+        "referer",
+        "https://shop.example.test:8443/"
+      ],
+      [
+        "upgrade-insecure-requests",
+        "1"
+      ],
+      [
+        "sec-fetch-dest",
+        "document"
+      ],
+      [
+        "sec-fetch-mode",
+        "navigate"
+      ],
+      [
+        "sec-fetch-site",
+        "same-origin"
+      ],
+      [
+        "sec-fetch-user",
+        "?1"
+      ],
+      [
+        "priority",
+        "u=0, i"
+      ],
+      [
+        "te",
+        "trailers"
+      ],
+      [
+        "cookie",
+        "sid=1"
+      ]
+    ],
+    "priority": {
+      "weight": 42,
+      "depends_on": 0,
+      "exclusive": false
+    }
+  }
+]

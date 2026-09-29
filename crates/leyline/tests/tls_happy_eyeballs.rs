@@ -1,0 +1,104 @@
+use std::io;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Duration;
+
+use leyline::tls::{
+    FingerprintConnector, HappyEyeballsConfig, ResolveFuture, Resolver, SystemResolver,
+};
+use leyline::{Browser, BrowserProfile, Platform, Session, SocketConfig, TlsError, TlsTrustConfig};
+
+struct StaticResolver(Vec<SocketAddr>);
+
+impl Resolver for StaticResolver {
+    fn resolve<'a>(&'a self, _host: &'a str, _port: u16) -> ResolveFuture<'a> {
+        let list = self.0.clone();
+        Box::pin(async move { Ok(list) })
+    }
+}
+
+struct FailingResolver;
+
+impl Resolver for FailingResolver {
+    fn resolve<'a>(&'a self, _host: &'a str, _port: u16) -> ResolveFuture<'a> {
+        Box::pin(async move { Err(io::Error::other("boom")) })
+    }
+}
+
+fn eyeballs(resolve_delay: Duration, attempt_limit: usize) -> HappyEyeballsConfig {
+    HappyEyeballsConfig::new()
+        .resolve_delay(resolve_delay)
+        .attempt_limit(attempt_limit)
+}
+
+fn load_profile() -> BrowserProfile {
+    let toml_str = include_str!("../profiles/chrome/146.toml");
+    BrowserProfile::from_toml(toml_str).expect("chrome 146 profile should parse")
+}
+
+#[tokio::test]
+async fn builder_accepts_custom_resolver() {
+    let profile = load_profile();
+    let resolver = Arc::new(StaticResolver(vec!["127.0.0.1:443".parse().unwrap()]));
+    let _connector = FingerprintConnector::new(&profile, Platform::Linux.tcp_profile())
+        .expect("connector build")
+        .with_resolver(resolver)
+        .with_happy_eyeballs_config(eyeballs(Duration::from_millis(50), 4));
+}
+
+#[tokio::test]
+async fn builder_accepts_system_resolver() {
+    let profile = load_profile();
+    let _connector = FingerprintConnector::new(&profile, Platform::Linux.tcp_profile())
+        .expect("connector build")
+        .with_resolver(Arc::new(SystemResolver));
+}
+
+#[tokio::test]
+async fn default_happy_eyeballs_is_250ms() {
+    assert_eq!(
+        HappyEyeballsConfig::default(),
+        eyeballs(Duration::from_millis(250), 8)
+    );
+}
+
+#[tokio::test]
+async fn failing_resolver_is_pluggable() {
+    let _: Arc<dyn Resolver> = Arc::new(FailingResolver);
+}
+
+#[test]
+fn session_builder_exposes_dns_controls() {
+    let resolver: Arc<dyn Resolver> =
+        Arc::new(StaticResolver(vec!["127.0.0.1:443".parse().unwrap()]));
+    let _session = Session::builder()
+        .browser(Browser::Chrome146)
+        .dns(resolver)
+        .socket(SocketConfig::new().happy_eyeballs(eyeballs(Duration::from_millis(25), 2)))
+        .build()
+        .expect("session build");
+}
+
+#[test]
+fn session_builder_exposes_trust_controls() {
+    let _session = Session::builder()
+        .browser(Browser::Chrome146)
+        .tls_trust(
+            TlsTrustConfig::new()
+                .env_roots(false)
+                .system_roots(false)
+                .add_pinned_leaf_sha256([7; 32]),
+        )
+        .build()
+        .expect("session build");
+}
+
+#[test]
+fn invalid_der_root_is_rejected_at_build_time() {
+    let err = Session::builder()
+        .browser(Browser::Chrome146)
+        .tls_trust(TlsTrustConfig::new().add_ca_der([1, 2, 3, 4]))
+        .build()
+        .expect_err("invalid DER CA should fail TLS setup");
+    assert!(matches!(err.tls(), Some(TlsError::SslConfig(_))));
+}

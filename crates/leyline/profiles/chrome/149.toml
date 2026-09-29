@@ -1,0 +1,152 @@
+[meta]
+name = "Chrome 149"
+browser = "chrome"
+version = 149
+variant = "Chrome149"
+chromium_major = 149
+family = "chromium"
+ch_ua_brand = "Google Chrome"
+capture = "browser"
+captured_against = "chrome-149.0.7827.201"
+verified_against = "tls.peet.ws 2026-09-25 Google Chrome 149.0.7827.201 macOS headful, 149.0.7827.201 Windows headful, 149.0.7827.200 Linux headful"
+verified_at = "2026-09-25"
+
+[tls]
+ciphers = [
+    "TLS_AES_128_GCM_SHA256",
+    "TLS_AES_256_GCM_SHA384",
+    "TLS_CHACHA20_POLY1305_SHA256",
+    "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+    "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+    "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
+    "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+    "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256",
+    "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
+    "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA",
+    "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA",
+    "TLS_RSA_WITH_AES_128_GCM_SHA256",
+    "TLS_RSA_WITH_AES_256_GCM_SHA384",
+    "TLS_RSA_WITH_AES_128_CBC_SHA",
+    "TLS_RSA_WITH_AES_256_CBC_SHA",
+]
+curves = ["X25519_MLKEM768", "X25519", "SECP256R1", "SECP384R1"]
+sigalgs = [
+    "ecdsa_secp256r1_sha256",
+    "rsa_pss_rsae_sha256",
+    "rsa_pkcs1_sha256",
+    "ecdsa_secp384r1_sha384",
+    "rsa_pss_rsae_sha384",
+    "rsa_pkcs1_sha384",
+    "rsa_pss_rsae_sha512",
+    "rsa_pkcs1_sha512",
+]
+alps = "h2"
+alps_new_codepoint = true
+ocsp_stapling = true
+signed_cert_timestamps = true
+cert_compression = ["brotli"]
+permute_extensions = true
+ech_grease = true
+pre_shared_key = true
+request_trust_anchors = false
+
+[tls.fingerprint]
+ja4 = "t13d1516h2_8daaf6152771_d8a2da3f94cd"
+resumed_ja4 = "t13d1517h2_8daaf6152771_b6f405a00624"
+
+[h2]
+header_table_size = 65536
+enable_push = false
+initial_stream_window_size = 6291456
+initial_connection_window_size = 15728640
+max_header_list_size = 262144
+pseudo_order = ["method", "authority", "scheme", "path"]
+settings_order = ["header_table_size", "enable_push", "initial_window_size", "max_header_list_size"]
+default_priority = { exclusive = true, stream_dependency = 0, weight = 255 }
+
+[h2.fingerprint]
+akamai = "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p"
+
+[identity.windows]
+user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
+
+[identity.macos]
+user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
+
+[identity.linux]
+user_agent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
+
+[identity.android]
+user_agent = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Mobile Safari/537.36"
+
+[h3]
+race = true
+initial_max_data = 15728640
+initial_max_stream_data_bidi_local = 6291456
+initial_max_stream_data_bidi_remote = 6291456
+initial_max_stream_data_uni = 6291456
+initial_max_streams_bidi = 100
+initial_max_streams_uni = 103
+max_idle_timeout_secs = 30
+max_udp_payload_size = 1472
+initial_datagram_size = 1250
+active_connection_id_limit = 2
+dcid_length = 8
+scid_length = 0
+pseudo_order = ["method", "authority", "scheme", "path"]
+priority_update = true
+transport_order = "shuffle"
+transport_parameters = [
+    { id = 5 },
+    { id = 7 },
+    { id = 15 },
+    { id = 6 },
+    { id = 3 },
+    { id = 12584, hex = "4f524947" },
+    { id = 9 },
+    { id = 32 },
+    { grease = { id_bits = 57, max_len = 15 } },
+    { id = 4 },
+    { id = 8 },
+    { id = 1 },
+    { id = 17, versions = { chosen = 1, available = [1], grease = "random" } },
+]
+settings = [
+    { id = 1, value = 65536 },
+    { id = 6, value = 262144 },
+    { id = 7, value = 100 },
+    { id = 51, value = 1 },
+    { grease = { id_bits = 32, value_bits = 32 } },
+]
+control_grease_frame = { id_bits = 32, max_len = 3 }
+
+[h3.tls]
+ciphers = [
+    "TLS_AES_128_GCM_SHA256",
+    "TLS_AES_256_GCM_SHA384",
+    "TLS_CHACHA20_POLY1305_SHA256",
+]
+curves = [
+    "X25519_MLKEM768",
+    "X25519",
+    "SECP256R1",
+    "SECP384R1",
+]
+sigalgs = [
+    "ecdsa_secp256r1_sha256",
+    "rsa_pss_rsae_sha256",
+    "rsa_pkcs1_sha256",
+    "ecdsa_secp384r1_sha384",
+    "rsa_pss_rsae_sha384",
+    "rsa_pkcs1_sha384",
+    "rsa_pss_rsae_sha512",
+    "rsa_pkcs1_sha512",
+    "rsa_pkcs1_sha1",
+]
+alps = "h3"
+alps_new_codepoint = true
+cert_compression = ["brotli"]
+permute_extensions = true
+ech_grease = true
+request_trust_anchors = false
+grease = false

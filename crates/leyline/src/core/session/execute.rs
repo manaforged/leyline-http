@@ -1,0 +1,205 @@
+use url::Url;
+
+use crate::FetchSite;
+use crate::core::transport::Prepared;
+use std::sync::Arc;
+
+use crate::profile::Preset;
+
+use self::journey::{Journey, redirect_location};
+use super::Session;
+use crate::core::body::Body;
+use crate::core::config::TimeoutConfig;
+use crate::core::deadline::Deadline;
+use crate::core::error::{Error, Kind, Result};
+use crate::core::headers::HeaderList;
+use crate::core::response::Response;
+use crate::core::{ProxyConfig, RedirectPolicy};
+use crate::trace;
+use crate::util::{lock, redact, without_userinfo};
+
+mod headers;
+mod journey;
+mod response;
+
+pub(crate) struct Attempt {
+    pub(crate) method: http::Method,
+    pub(crate) url: String,
+    pub(crate) preset: Option<Preset>,
+    pub(crate) body: Body,
+    pub(crate) headers: Option<HeaderList>,
+    pub(crate) deadline: Deadline,
+    pub(crate) stream_response: bool,
+    pub(crate) proxy: Option<ProxyConfig>,
+    pub(crate) header_order: Option<Vec<String>>,
+    pub(crate) redirect: Option<RedirectPolicy>,
+}
+
+impl Attempt {
+    pub(crate) fn again(&self, body: Body, headers: Option<HeaderList>) -> Attempt {
+        Attempt {
+            method: self.method.clone(),
+            url: self.url.clone(),
+            preset: self.preset,
+            body,
+            headers,
+            deadline: self.deadline,
+            stream_response: self.stream_response,
+            proxy: self.proxy.clone(),
+            header_order: self.header_order.clone(),
+            redirect: self.redirect.clone(),
+        }
+    }
+}
+
+impl Session {
+    pub(crate) fn deadline(&self, request: Option<&TimeoutConfig>) -> Deadline {
+        Deadline::new(&self.inner.timeouts, request)
+    }
+
+    pub(crate) async fn attempt(&self, attempt: Attempt) -> Result<Response> {
+        let deadline = attempt.deadline;
+        let inner: std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<Response>> + Send + '_>,
+        > = Box::pin(self.execute_inner(attempt));
+        trace::scope(self.inner.trace.as_ref(), async move {
+            let out = deadline.total(inner).await;
+            trace::done(match &out {
+                Ok(_) => Ok(()),
+                Err(e) => Err(e),
+            });
+            out
+        })
+        .await
+    }
+
+    #[tracing::instrument(
+        name = "session.execute",
+        level = "debug",
+        skip_all,
+        fields(http.method = attempt.method.as_str(), http.url = redact(&attempt.url))
+    )]
+    async fn execute_inner(&self, attempt: Attempt) -> Result<Response> {
+        let Attempt {
+            method,
+            url: raw_url,
+            preset,
+            body,
+            headers: extra_headers,
+            deadline,
+            stream_response,
+            proxy: request_proxy,
+            header_order,
+            redirect,
+        } = attempt;
+        let redirect_policy = redirect.as_ref().unwrap_or(&self.inner.redirect_policy);
+        let request_proxy = request_proxy.as_ref();
+        let header_order = header_order.as_deref();
+        let mut journey = Journey::begin(
+            self.resolve_url(&raw_url)?,
+            method.to_string(),
+            body,
+            extra_headers,
+        );
+
+        let redirect_cap = redirect_policy.max_redirects_hint();
+        for _ in 0..=redirect_cap {
+            let headers = self.leg_headers(&journey, preset, header_order);
+            let audit_headers = self.audit_copy(&headers);
+
+            let step_body = std::mem::take(&mut journey.body);
+            let replay_body = step_body.replay();
+
+            let proxy = self.proxy_for(&journey.url, request_proxy)?;
+            let send = self.send_with_policy(Prepared {
+                method: &journey.method,
+                url: &journey.url,
+                headers,
+                body: step_body,
+                proxy,
+                stream_response,
+            });
+            let leg = deadline.response_header(send).await?;
+            journey.timing.add_leg(&leg.timing);
+
+            self.store_cookies(&leg.headers, &journey.url);
+            #[cfg(feature = "http3")]
+            self.note_alt_svc(&journey.url, &leg.headers);
+
+            let code = leg.status.as_u16();
+            if let Some(location) = redirect_location(code, &leg.headers)
+                && let Some(hop) = journey.approved_hop(redirect_policy, code, &location)
+            {
+                drop(leg.body);
+                journey.follow(hop, code, &location, replay_body)?;
+                continue;
+            }
+
+            return self
+                .assemble_response(leg, journey, audit_headers, stream_response, &deadline)
+                .await;
+        }
+
+        Err(Error::new(Kind::Redirect)
+            .with_message(format!("too many redirects (max {redirect_cap})")))
+    }
+
+    fn resolve_url(&self, raw_url: &str) -> Result<Arc<Url>> {
+        let mut cache = lock(&self.inner.url_cache);
+        match cache.as_mut() {
+            Some((raw, parsed)) if raw == raw_url => Ok(Arc::clone(parsed)),
+            _ => {
+                let parsed = Arc::new(Url::parse(raw_url).map_err(Error::from_url_parse)?);
+                *cache = Some((raw_url.to_string(), Arc::clone(&parsed)));
+                Ok(parsed)
+            }
+        }
+    }
+}
+
+pub(super) struct RequestContext<'a> {
+    pub(super) origin: &'a str,
+    pub(super) referer: &'a str,
+    pub(super) fetch_site: FetchSite,
+}
+
+fn fetch_site_for(initiator: Option<&Url>, chain: &[Url], current: &Url) -> FetchSite {
+    let Some(initiator) = initiator else {
+        return FetchSite::CrossSite;
+    };
+    FetchSite::across(initiator, chain.iter().chain(std::iter::once(current)))
+}
+
+fn url_origin(url: &Url) -> String {
+    let host = url.host_str().unwrap_or("");
+    match url.port() {
+        Some(port) => format!("{}://{}:{}", url.scheme(), host, port),
+        None => format!("{}://{}", url.scheme(), host),
+    }
+}
+
+fn referer_for(prev: Option<&str>, current_origin: &str) -> String {
+    let Some(prev) = prev else {
+        return format!("{current_origin}/");
+    };
+    let Ok(parsed) = Url::parse(prev) else {
+        return format!("{current_origin}/");
+    };
+    if parsed.scheme() == "https" && !current_origin.starts_with("https:") {
+        return String::new();
+    }
+    if url_origin(&parsed) != current_origin {
+        let origin = url_origin(&parsed);
+        return format!("{origin}/");
+    }
+    let mut parsed = without_userinfo(parsed);
+    parsed.set_fragment(None);
+    parsed.to_string()
+}
+
+#[cfg(test)]
+mod redact_tests;
+#[cfg(test)]
+mod referer_tests;
+#[cfg(test)]
+mod reorder_tests;

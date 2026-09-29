@@ -1,0 +1,586 @@
+diff --git a/include/openssl/nid.h b/include/openssl/nid.h
+index 216c06603..b5d528566 100644
+--- a/include/openssl/nid.h
++++ b/include/openssl/nid.h
+@@ -5531,6 +5531,12 @@ extern "C" {
+ #define OBJ_ENC_pe_mtcCertificationAuthority_draft \
+   0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0xda, 0x4b, 0x2f, 0x02
+ 
++#define SN_ffdhe2048 "ffdhe2048"
++#define NID_ffdhe2048 973
++
++#define SN_ffdhe3072 "ffdhe3072"
++#define NID_ffdhe3072 974
++
+ 
+ #if defined(__cplusplus)
+ } /* extern C */
+diff --git a/include/openssl/prefix_symbols.h b/include/openssl/prefix_symbols.h
+index ad6faef10..8a39e7e17 100644
+--- a/include/openssl/prefix_symbols.h
++++ b/include/openssl/prefix_symbols.h
+@@ -3176,6 +3176,12 @@
+ #pragma redefine_extname sk_push BORINGSSL_ADD_USER_LABEL_AND_PREFIX(sk_push)
+ #pragma redefine_extname sk_value BORINGSSL_ADD_USER_LABEL_AND_PREFIX(sk_value)
+ 
++#pragma redefine_extname SSL_CTX_set_delegated_credentials BORINGSSL_ADD_USER_LABEL_AND_PREFIX(SSL_CTX_set_delegated_credentials)
++#pragma redefine_extname SSL_CTX_set_extension_order BORINGSSL_ADD_USER_LABEL_AND_PREFIX(SSL_CTX_set_extension_order)
++#pragma redefine_extname SSL_CTX_set_record_size_limit BORINGSSL_ADD_USER_LABEL_AND_PREFIX(SSL_CTX_set_record_size_limit)
++#pragma redefine_extname SSL_CTX_set_tls13_cipher_order BORINGSSL_ADD_USER_LABEL_AND_PREFIX(SSL_CTX_set_tls13_cipher_order)
++#pragma redefine_extname SSL_set_record_size_limit BORINGSSL_ADD_USER_LABEL_AND_PREFIX(SSL_set_record_size_limit)
++
+ #else  // __PRAGMA_REDEFINE_EXTNAME && !__ASSEMBLER__
+ 
+ #define ACCESS_DESCRIPTION_free BORINGSSL_ADD_PREFIX(ACCESS_DESCRIPTION_free)
+@@ -6317,6 +6323,12 @@
+ #define sk_push BORINGSSL_ADD_PREFIX(sk_push)
+ #define sk_value BORINGSSL_ADD_PREFIX(sk_value)
+ 
++#define SSL_CTX_set_delegated_credentials BORINGSSL_ADD_PREFIX(SSL_CTX_set_delegated_credentials)
++#define SSL_CTX_set_extension_order BORINGSSL_ADD_PREFIX(SSL_CTX_set_extension_order)
++#define SSL_CTX_set_record_size_limit BORINGSSL_ADD_PREFIX(SSL_CTX_set_record_size_limit)
++#define SSL_CTX_set_tls13_cipher_order BORINGSSL_ADD_PREFIX(SSL_CTX_set_tls13_cipher_order)
++#define SSL_set_record_size_limit BORINGSSL_ADD_PREFIX(SSL_set_record_size_limit)
++
+ #endif  // __PRAGMA_REDEFINE_EXTNAME && !__ASSEMBLER__
+ 
+ #if !defined(BORINGSSL_ALWAYS_USE_STATIC_INLINE) && !defined(__ASSEMBLER__)
+diff --git a/include/openssl/ssl.h b/include/openssl/ssl.h
+index 7c9929ae6..0b63ff753 100644
+--- a/include/openssl/ssl.h
++++ b/include/openssl/ssl.h
+@@ -1519,8 +1519,10 @@ DEFINE_CONST_STACK_OF(SSL_CIPHER)
+ #define SSL_CIPHER_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256 0xcca8
+ #define SSL_CIPHER_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256 0xcca9
+ #define SSL_CIPHER_ECDHE_PSK_WITH_CHACHA20_POLY1305_SHA256 0xccac
++#define SSL_CIPHER_ECDHE_ECDSA_WITH_3DES_EDE_CBC_SHA 0xc008
+ #define SSL_CIPHER_ECDHE_ECDSA_WITH_AES_128_CBC_SHA 0xc009
+ #define SSL_CIPHER_ECDHE_ECDSA_WITH_AES_256_CBC_SHA 0xc00a
++#define SSL_CIPHER_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA 0xc012
+ #define SSL_CIPHER_ECDHE_RSA_WITH_AES_128_CBC_SHA 0xc013
+ #define SSL_CIPHER_ECDHE_RSA_WITH_AES_256_CBC_SHA 0xc014
+ #define SSL_CIPHER_ECDHE_PSK_WITH_AES_128_CBC_SHA 0xc035
+@@ -2639,6 +2641,8 @@ OPENSSL_EXPORT size_t SSL_CTX_get_num_tickets(const SSL_CTX *ctx);
+ #define SSL_GROUP_SECP521R1 25
+ #define SSL_GROUP_X25519 29
+ #define SSL_GROUP_X25519_MLKEM768 0x11ec
++#define SSL_GROUP_FFDHE2048 256
++#define SSL_GROUP_FFDHE3072 257
+ #define SSL_GROUP_MLKEM1024 0x0202
+ 
+ // SSL_CTX_set1_group_ids sets the preferred groups for `ctx` to `group_ids`.
+@@ -3155,6 +3159,22 @@ OPENSSL_EXPORT int SSL_set_verify_algorithm_prefs(SSL *ssl,
+                                                   const uint16_t *prefs,
+                                                   size_t num_prefs);
+ 
++// SSL_CTX_set_record_size_limit configures the value `ctx` advertises in the
++// record_size_limit extension (RFC 8449) on the ClientHello. A zero value (the
++// default) disables the extension.
++OPENSSL_EXPORT void SSL_CTX_set_record_size_limit(SSL_CTX *ctx, uint16_t limit);
++
++// SSL_set_record_size_limit configures the record_size_limit value for `ssl`.
++OPENSSL_EXPORT void SSL_set_record_size_limit(SSL *ssl, uint16_t limit);
++
++// SSL_CTX_set_delegated_credentials configures the signature algorithms `ctx`
++// advertises in the delegated_credential extension (RFC 9345) on the
++// ClientHello. `str` is a colon-separated list of signature algorithm names or
++// numeric codepoints, parsed like SSL_CTX_set1_sigalgs_list. An empty list
++// disables the extension. Returns one on success and zero on error.
++OPENSSL_EXPORT int SSL_CTX_set_delegated_credentials(SSL_CTX *ctx,
++                                                     const char *str);
++
+ 
+ // Certificate authorities.
+ //
+@@ -5586,6 +5606,21 @@ OPENSSL_EXPORT void SSL_CTX_set_grease_sigalgs_enabled(SSL_CTX *ctx,
+ // permute extensions. For now, this is only implemented for the ClientHello.
+ OPENSSL_EXPORT void SSL_CTX_set_permute_extensions(SSL_CTX *ctx, int enabled);
+ 
++// SSL_CTX_set_extension_order configures a deterministic ClientHello extension
++// order. |order| is a prefix of TLS extension type IDs; unspecified supported
++// extensions follow in BoringSSL's internal order. Returns one on success and
++// zero if |order| contains an unknown or duplicate extension.
++OPENSSL_EXPORT int SSL_CTX_set_extension_order(SSL_CTX *ctx,
++                                               const uint16_t *order,
++                                               size_t order_len);
++
++// SSL_CTX_set_tls13_cipher_order configures the TLS 1.3 ClientHello cipher
++// order. Returns one on success and zero if a value is not a TLS 1.3 cipher or
++// appears more than once.
++OPENSSL_EXPORT int SSL_CTX_set_tls13_cipher_order(SSL_CTX *ctx,
++                                                  const uint16_t *order,
++                                                  size_t order_len);
++
+ // SSL_set_permute_extensions configures whether sockets on `ssl` should
+ // permute extensions. For now, this is only implemented for the ClientHello.
+ OPENSSL_EXPORT void SSL_set_permute_extensions(SSL *ssl, int enabled);
+diff --git a/include/openssl/tls1.h b/include/openssl/tls1.h
+index f4b348481..6d18435ee 100644
+--- a/include/openssl/tls1.h
++++ b/include/openssl/tls1.h
+@@ -113,6 +113,9 @@ extern "C" {
+ // ExtensionType value from RFC 9345
+ #define TLSEXT_TYPE_delegated_credential 34
+ 
++// ExtensionType value from RFC 8449
++#define TLSEXT_TYPE_record_size_limit 28
++
+ // ExtensionType value from draft-vvv-tls-alps. This is not an IANA defined
+ // extension number.
+ #define TLSEXT_TYPE_application_settings_old 17513
+@@ -192,6 +195,8 @@ extern "C" {
+ #define TLS1_CK_RSA_WITH_AES_128_GCM_SHA256 0x0300009C
+ #define TLS1_CK_RSA_WITH_AES_256_GCM_SHA384 0x0300009D
+ #define TLS1_CK_ECDHE_ECDSA_WITH_AES_128_CBC_SHA 0x0300C009
++#define TLS1_CK_ECDHE_ECDSA_WITH_DES_192_CBC3_SHA 0x0300C008
++#define TLS1_CK_ECDHE_RSA_WITH_DES_192_CBC3_SHA 0x0300C012
+ #define TLS1_CK_ECDHE_ECDSA_WITH_AES_256_CBC_SHA 0x0300C00A
+ #define TLS1_CK_ECDHE_RSA_WITH_AES_128_CBC_SHA 0x0300C013
+ #define TLS1_CK_ECDHE_RSA_WITH_AES_256_CBC_SHA 0x0300C014
+@@ -226,6 +231,8 @@ extern "C" {
+ #define TLS1_TXT_RSA_WITH_AES_128_GCM_SHA256 "AES128-GCM-SHA256"
+ #define TLS1_TXT_RSA_WITH_AES_256_GCM_SHA384 "AES256-GCM-SHA384"
+ #define TLS1_TXT_ECDHE_ECDSA_WITH_AES_128_CBC_SHA "ECDHE-ECDSA-AES128-SHA"
++#define TLS1_TXT_ECDHE_ECDSA_WITH_DES_192_CBC3_SHA "ECDHE-ECDSA-DES-CBC3-SHA"
++#define TLS1_TXT_ECDHE_RSA_WITH_DES_192_CBC3_SHA "ECDHE-RSA-DES-CBC3-SHA"
+ #define TLS1_TXT_ECDHE_ECDSA_WITH_AES_256_CBC_SHA "ECDHE-ECDSA-AES256-SHA"
+ #define TLS1_TXT_ECDHE_RSA_WITH_AES_128_CBC_SHA "ECDHE-RSA-AES128-SHA"
+ #define TLS1_TXT_ECDHE_RSA_WITH_AES_256_CBC_SHA "ECDHE-RSA-AES256-SHA"
+diff --git a/ssl/extensions.cc b/ssl/extensions.cc
+index 954af185b..7ed80120b 100644
+--- a/ssl/extensions.cc
++++ b/ssl/extensions.cc
+@@ -3284,6 +3284,27 @@ static bool ext_quic_transport_params_add_serverhello_legacy(SSL_HANDSHAKE *hs,
+ static bool ext_delegated_credential_add_clienthello(
+     const SSL_HANDSHAKE *hs, CBB *out, CBB *out_compressible,
+     ssl_client_hello_type_t type) {
++  if (hs->config->delegated_credentials.empty()) {
++    return true;
++  }
++
++  CBB contents, sigalgs_cbb;
++  if (!CBB_add_u16(out_compressible, TLSEXT_TYPE_delegated_credential) ||
++      !CBB_add_u16_length_prefixed(out_compressible, &contents) ||
++      !CBB_add_u16_length_prefixed(&contents, &sigalgs_cbb)) {
++    return false;
++  }
++
++  for (const uint16_t alg : hs->config->delegated_credentials) {
++    if (!CBB_add_u16(&sigalgs_cbb, alg)) {
++      return false;
++    }
++  }
++
++  if (!CBB_flush(out_compressible)) {
++    return false;
++  }
++
+   return true;
+ }
+ 
+@@ -4083,6 +4104,35 @@ static bool ext_server_cert_type_add_serverhello(SSL_HANDSHAKE *hs, CBB *out) {
+   return true;
+ }
+ 
++// Record Size Limit
++//
++// https://www.rfc-editor.org/rfc/rfc8449.html
++static bool ext_record_size_limit_add_clienthello(const SSL_HANDSHAKE *hs,
++                                                  CBB *out,
++                                                  CBB *out_compressible,
++                                                  ssl_client_hello_type_t type) {
++  if (hs->config->record_size_limit == 0) {
++    return true;
++  }
++
++  CBB contents;
++  const uint16_t limit = hs->config->record_size_limit;
++  if (!CBB_add_u16(out_compressible, TLSEXT_TYPE_record_size_limit) ||
++      !CBB_add_u16_length_prefixed(out_compressible, &contents) ||
++      !CBB_add_u16(&contents, limit) ||
++      !CBB_flush(out_compressible)) {
++    return false;
++  }
++
++  return true;
++}
++
++static bool ext_record_size_limit_parse_serverhello(SSL_HANDSHAKE *hs,
++                                                    uint8_t *out_alert,
++                                                    CBS *contents) {
++  return true;
++}
++
+ // kExtensions contains all the supported extensions.
+ static const struct tls_extension kExtensions[] = {
+     {
+@@ -4312,6 +4362,13 @@ static const struct tls_extension kExtensions[] = {
+         ext_server_padding_parse_clienthello,
+         ext_server_padding_add_serverhello,
+     },
++    {
++        TLSEXT_TYPE_record_size_limit,
++        ext_record_size_limit_add_clienthello,
++        ext_record_size_limit_parse_serverhello,
++        ignore_parse_clienthello,
++        dont_add_serverhello,
++    },
+ };
+ 
+ #define kNumExtensions (sizeof(kExtensions) / sizeof(struct tls_extension))
+@@ -4324,24 +4381,56 @@ static_assert(kNumExtensions <=
+               "too many extensions for received bitset");
+ 
+ bool ssl_setup_extension_permutation(SSL_HANDSHAKE *hs) {
+-  if (!hs->config->permute_extensions) {
++  if (!hs->config->permute_extensions && hs->config->extension_order.empty()) {
+     return true;
+   }
+ 
+   static_assert(kNumExtensions <= UINT8_MAX,
+                 "extensions_permutation type is too small");
+-  uint32_t seeds[kNumExtensions - 1];
+   Array<uint8_t> permutation;
+-  if (!RAND_bytes(reinterpret_cast<uint8_t *>(seeds), sizeof(seeds)) ||
+-      !permutation.InitForOverwrite(kNumExtensions)) {
++  if (!permutation.InitForOverwrite(kNumExtensions)) {
+     return false;
+   }
+-  for (size_t i = 0; i < kNumExtensions; i++) {
+-    permutation[i] = i;
+-  }
+-  for (size_t i = kNumExtensions - 1; i > 0; i--) {
+-    // Set element `i` to a randomly-selected element 0 <= j <= i.
+-    std::swap(permutation[i], permutation[seeds[i - 1] % (i + 1)]);
++  if (hs->config->extension_order.empty()) {
++    uint32_t seeds[kNumExtensions - 1];
++    if (!RAND_bytes(reinterpret_cast<uint8_t *>(seeds), sizeof(seeds))) {
++      return false;
++    }
++    for (size_t i = 0; i < kNumExtensions; i++) {
++      permutation[i] = i;
++    }
++    for (size_t i = kNumExtensions - 1; i > 0; i--) {
++      // Set element `i` to a randomly-selected element 0 <= j <= i.
++      std::swap(permutation[i], permutation[seeds[i - 1] % (i + 1)]);
++    }
++  } else {
++    size_t next = 0;
++    for (uint16_t value : hs->config->extension_order) {
++      if (value == TLSEXT_TYPE_pre_shared_key) {
++        continue;
++      }
++      for (size_t i = 0; i < kNumExtensions; i++) {
++        if (kExtensions[i].value == value) {
++          permutation[next++] = i;
++          break;
++        }
++      }
++    }
++    for (size_t i = 0; i < kNumExtensions; i++) {
++      bool present = false;
++      for (size_t j = 0; j < next; j++) {
++        present |= permutation[j] == i;
++      }
++      if (!present && kExtensions[i].value != TLSEXT_TYPE_pre_shared_key) {
++        permutation[next++] = i;
++      }
++    }
++    for (size_t i = 0; i < kNumExtensions; i++) {
++      if (kExtensions[i].value == TLSEXT_TYPE_pre_shared_key) {
++        permutation[next] = i;
++        break;
++      }
++    }
+   }
+   hs->extension_permutation = std::move(permutation);
+   return true;
+@@ -4360,6 +4449,21 @@ static const struct tls_extension *tls_extension_find(uint32_t *out_index,
+   return nullptr;
+ }
+ 
++bool ssl_extension_order_valid(Span<const uint16_t> order) {
++  for (size_t i = 0; i < order.size(); i++) {
++    uint32_t index;
++    if (tls_extension_find(&index, order[i]) == nullptr) {
++      return false;
++    }
++    for (size_t j = 0; j < i; j++) {
++      if (order[j] == order[i]) {
++        return false;
++      }
++    }
++  }
++  return true;
++}
++
+ static bool add_padding_extension(CBB *cbb, uint16_t ext, size_t len) {
+   CBB child;
+   if (!CBB_add_u16(cbb, ext) ||  //
+diff --git a/ssl/handshake_client.cc b/ssl/handshake_client.cc
+index 62d5a0b24..37aa6951f 100644
+--- a/ssl/handshake_client.cc
++++ b/ssl/handshake_client.cc
+@@ -102,9 +102,18 @@ static bool ssl_write_client_cipher_list(const SSL_HANDSHAKE *hs, CBB *out,
+ 
+   // Add TLS 1.3 ciphers in configured preference order.
+   if (hs->max_version >= TLS1_3_VERSION) {
+-    for (const SSL_CIPHER *cipher : hs->config->tls13_cipher_list.ciphers()) {
+-      if (!CBB_add_u16(&child, SSL_CIPHER_get_protocol_id(cipher))) {
+-        return false;
++    if (!hs->config->tls13_cipher_order.empty()) {
++      for (uint16_t cipher : hs->config->tls13_cipher_order) {
++        if (!CBB_add_u16(&child, cipher)) {
++          return false;
++        }
++      }
++    } else {
++      for (const SSL_CIPHER *cipher :
++           hs->config->tls13_cipher_list.ciphers()) {
++        if (!CBB_add_u16(&child, SSL_CIPHER_get_protocol_id(cipher))) {
++          return false;
++        }
+       }
+     }
+   }
+diff --git a/ssl/internal.h b/ssl/internal.h
+index 60ee51b00..c45b03859 100644
+--- a/ssl/internal.h
++++ b/ssl/internal.h
+@@ -953,8 +953,10 @@ struct NamedGroup {
+ // NamedGroups returns all supported groups.
+ Span<const NamedGroup> NamedGroups();
+ 
++bool ssl_extension_order_valid(Span<const uint16_t> order);
++
+ // kNumNamedGroups is the number of supported groups.
+-constexpr size_t kNumNamedGroups = 6u;
++constexpr size_t kNumNamedGroups = 8u;
+ 
+ // DefaultSupportedGroupIds returns the list of IDs for the default groups that
+ // are supported when the caller hasn't explicitly configured supported groups.
+@@ -3545,6 +3547,18 @@ struct SSL_CONFIG {
+   // accepted from the peer in decreasing order of preference.
+   Array<uint16_t> verify_sigalgs;
+ 
++  // record_size_limit, if non-zero, is advertised in the record_size_limit
++  // extension (RFC 8449) in the ClientHello.
++  uint16_t record_size_limit = 0;
++
++  // delegated_credentials, if not empty, is the list of signature algorithm
++  // codepoints advertised in the delegated_credential extension (RFC 9345).
++  Array<uint16_t> delegated_credentials;
++
++  // Caller-configured ClientHello prefixes. Empty preserves BoringSSL defaults.
++  Array<uint16_t> extension_order;
++  Array<uint16_t> tls13_cipher_order;
++
+   // srtp_profiles is the list of configured SRTP protection profiles for
+   // DTLS-SRTP.
+   UniquePtr<STACK_OF(SRTP_PROTECTION_PROFILE)> srtp_profiles;
+@@ -4229,6 +4243,17 @@ class SSLContext : public ssl_ctx_st, public RefCounted<SSLContext> {
+   // accepted from the peer in decreasing order of preference.
+   Array<uint16_t> verify_sigalgs;
+ 
++  // record_size_limit, if non-zero, is advertised in the record_size_limit
++  // extension (RFC 8449); copied to SSL_CONFIG at SSL_new.
++  uint16_t record_size_limit = 0;
++
++  // delegated_credentials, if not empty, is advertised in the
++  // delegated_credential extension (RFC 9345); copied to SSL_CONFIG at SSL_new.
++  Array<uint16_t> delegated_credentials;
++
++  Array<uint16_t> extension_order;
++  Array<uint16_t> tls13_cipher_order;
++
+   // accepted_peer_cert_types inherited by SSL struct.
+   InplaceVector<uint8_t, kNumCertTypes> accepted_peer_cert_types;
+ 
+diff --git a/ssl/ssl_cipher.cc b/ssl/ssl_cipher.cc
+index c36c194dc..1a5fc3348 100644
+--- a/ssl/ssl_cipher.cc
++++ b/ssl/ssl_cipher.cc
+@@ -167,6 +167,18 @@ static constexpr SSL_CIPHER kCiphers[] = {
+         SSL_HANDSHAKE_MAC_SHA256,
+     },
+ 
++    // Cipher C008
++    {
++        TLS1_TXT_ECDHE_ECDSA_WITH_DES_192_CBC3_SHA,
++        "TLS_ECDHE_ECDSA_WITH_3DES_EDE_CBC_SHA",
++        SSL_CIPHER_ECDHE_ECDSA_WITH_3DES_EDE_CBC_SHA,
++        SSL_kECDHE,
++        SSL_aECDSA,
++        SSL_3DES,
++        SSL_SHA1,
++        SSL_HANDSHAKE_MAC_DEFAULT,
++    },
++
+     // Cipher C009
+     {
+         TLS1_TXT_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
+@@ -191,6 +203,18 @@ static constexpr SSL_CIPHER kCiphers[] = {
+         SSL_HANDSHAKE_MAC_DEFAULT,
+     },
+ 
++    // Cipher C012
++    {
++        TLS1_TXT_ECDHE_RSA_WITH_DES_192_CBC3_SHA,
++        "TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA",
++        SSL_CIPHER_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA,
++        SSL_kECDHE,
++        SSL_aRSA_SIGN,
++        SSL_3DES,
++        SSL_SHA1,
++        SSL_HANDSHAKE_MAC_DEFAULT,
++    },
++
+     // Cipher C013
+     {
+         TLS1_TXT_ECDHE_RSA_WITH_AES_128_CBC_SHA,
+@@ -1174,6 +1198,8 @@ bool ssl_create_cipher_list(UniquePtr<SSLCipherPreferenceList> *out_cipher_list,
+       SSL_CIPHER_RSA_WITH_AES_256_CBC_SHA,
+       SSL_CIPHER_PSK_WITH_AES_256_CBC_SHA,
+       SSL_CIPHER_RSA_WITH_3DES_EDE_CBC_SHA,
++      SSL_CIPHER_ECDHE_ECDSA_WITH_3DES_EDE_CBC_SHA,
++      SSL_CIPHER_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA,
+   };
+ 
+   // Set up a linked list of ciphers.
+diff --git a/ssl/ssl_key_share.cc b/ssl/ssl_key_share.cc
+index 84394b247..a554126a2 100644
+--- a/ssl/ssl_key_share.cc
++++ b/ssl/ssl_key_share.cc
+@@ -352,6 +352,8 @@ constexpr NamedGroup kNamedGroups[] = {
+     {NID_X25519, SSL_GROUP_X25519, "X25519", "x25519"},
+     {NID_X25519MLKEM768, SSL_GROUP_X25519_MLKEM768, "X25519MLKEM768", ""},
+     {NID_ML_KEM_1024, SSL_GROUP_MLKEM1024, "MLKEM1024", ""},
++    {NID_ffdhe2048, SSL_GROUP_FFDHE2048, "ffdhe2048", "dhe2048"},
++    {NID_ffdhe3072, SSL_GROUP_FFDHE3072, "ffdhe3072", "dhe3072"},
+ };
+ 
+ static_assert(std::size(kNamedGroups) == kNumNamedGroups,
+diff --git a/ssl/ssl_lib.cc b/ssl/ssl_lib.cc
+index b7d99807f..dfbcd834a 100644
+--- a/ssl/ssl_lib.cc
++++ b/ssl/ssl_lib.cc
+@@ -514,6 +514,7 @@ SSL *SSL_new(SSL_CTX *ctx) {
+       ctx_impl->retain_only_sha256_of_client_certs;
+   ssl->config->permute_extensions = ctx_impl->permute_extensions;
+   ssl->config->compliance_policy = ctx_impl->compliance_policy;
++  ssl->config->record_size_limit = ctx_impl->record_size_limit;
+ 
+   if (!ssl->config->tls13_cipher_list.CopyFrom(ctx_impl->tls13_cipher_list)) {
+     return nullptr;
+@@ -529,7 +530,11 @@ SSL *SSL_new(SSL_CTX *ctx) {
+       !ssl->config->accepted_peer_cert_types.TryCopyFrom(
+           ctx_impl->accepted_peer_cert_types) ||
+       !ssl->config->available_client_cert_types.TryCopyFrom(
+-          ctx_impl->available_client_cert_types)) {
++          ctx_impl->available_client_cert_types) ||
++      !ssl->config->extension_order.CopyFrom(ctx_impl->extension_order) ||
++      !ssl->config->tls13_cipher_order.CopyFrom(ctx_impl->tls13_cipher_order) ||
++      !ssl->config->delegated_credentials.CopyFrom(
++          ctx_impl->delegated_credentials)) {
+     return nullptr;
+   }
+ 
+@@ -3268,6 +3273,49 @@ void SSL_set_permute_extensions(SSL *ssl, int enabled) {
+   ssl_impl->config->permute_extensions = !!enabled;
+ }
+ 
++int SSL_CTX_set_extension_order(SSL_CTX *ctx, const uint16_t *order,
++                                size_t order_len) {
++  if (!ssl_extension_order_valid(Span(order, order_len)) ||
++      !FromOpaque(ctx)->extension_order.CopyFrom(Span(order, order_len))) {
++    OPENSSL_PUT_ERROR(SSL, SSL_R_INVALID_COMMAND);
++    return 0;
++  }
++  return 1;
++}
++
++int SSL_CTX_set_tls13_cipher_order(SSL_CTX *ctx, const uint16_t *order,
++                                    size_t order_len) {
++  for (size_t i = 0; i < order_len; i++) {
++    const SSL_CIPHER *cipher = SSL_get_cipher_by_value(order[i]);
++    if (cipher == nullptr || SSL_CIPHER_get_min_version(cipher) != TLS1_3_VERSION) {
++      OPENSSL_PUT_ERROR(SSL, SSL_R_INVALID_COMMAND);
++      return 0;
++    }
++    for (size_t j = 0; j < i; j++) {
++      if (order[j] == order[i]) {
++        OPENSSL_PUT_ERROR(SSL, SSL_R_INVALID_COMMAND);
++        return 0;
++      }
++    }
++  }
++  if (!FromOpaque(ctx)->tls13_cipher_order.CopyFrom(Span(order, order_len))) {
++    return 0;
++  }
++  return 1;
++}
++
++void SSL_CTX_set_record_size_limit(SSL_CTX *ctx, uint16_t limit) {
++  FromOpaque(ctx)->record_size_limit = limit;
++}
++
++void SSL_set_record_size_limit(SSL *ssl, uint16_t limit) {
++  auto *ssl_impl = FromOpaque(ssl);
++  if (!ssl_impl->config) {
++    return;
++  }
++  ssl_impl->config->record_size_limit = limit;
++}
++
+ int32_t SSL_get_ticket_age_skew(const SSL *ssl) {
+   return FromOpaque(ssl)->s3->ticket_age_skew;
+ }
+diff --git a/ssl/ssl_privkey.cc b/ssl/ssl_privkey.cc
+index ae7c9bbd5..3475ae63c 100644
+--- a/ssl/ssl_privkey.cc
++++ b/ssl/ssl_privkey.cc
+@@ -574,23 +574,13 @@ int SSL_is_signature_algorithm_rsa_pss(uint16_t sigalg) {
+ }
+ 
+ static bool sigalgs_unique(Span<const uint16_t> in_sigalgs) {
+-  if (in_sigalgs.size() < 2) {
+-    return true;
+-  }
+-
+-  Array<uint16_t> sigalgs;
+-  if (!sigalgs.CopyFrom(in_sigalgs)) {
+-    return false;
+-  }
+-
+-  std::sort(sigalgs.begin(), sigalgs.end());
+-  for (size_t i = 1; i < sigalgs.size(); i++) {
+-    if (sigalgs[i - 1] == sigalgs[i]) {
+-      OPENSSL_PUT_ERROR(SSL, SSL_R_DUPLICATE_SIGNATURE_ALGORITHM);
+-      return false;
+-    }
+-  }
+-
++  // Allow duplicate signature algorithms. CFNetwork advertises
++  // rsa_pss_rsae_sha384 (0x0805) twice in its ClientHello; the duplicate is
++  // part of the wire fingerprint. The uniqueness check exists for BoringSSL's
++  // own preference handling (a set is unique by design); keeping a duplicate
++  // is harmless for signing/verification lookups (first match wins) and the
++  // ClientHello writer emits the configured list verbatim, duplicate and all.
++  (void)in_sigalgs;
+   return true;
+ }
+ 
+@@ -971,3 +961,13 @@ int SSL_set_verify_algorithm_prefs(SSL *ssl, const uint16_t *prefs,
+   return set_sigalg_prefs(&ssl_impl->config->verify_sigalgs,
+                           Span(prefs, num_prefs));
+ }
++
++int SSL_CTX_set_delegated_credentials(SSL_CTX *ctx, const char *str) {
++  Array<uint16_t> sigalgs;
++  if (!parse_sigalgs_list(&sigalgs, str)) {
++    return 0;
++  }
++
++  return set_sigalg_prefs(&FromOpaque(ctx)->delegated_credentials,
++                          Span(sigalgs.data(), sigalgs.size()));
++}

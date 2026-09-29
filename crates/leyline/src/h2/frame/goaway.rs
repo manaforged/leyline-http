@@ -1,0 +1,62 @@
+use bytes::{BufMut, Bytes};
+
+use super::{FrameHeader, FrameType, be_u32};
+use crate::h2::H2Error;
+use crate::h2::error::ErrorCode;
+
+#[derive(Debug)]
+pub struct GoAwayFrame {
+    pub last_stream_id: u32,
+    pub error_code: ErrorCode,
+    pub debug_data: Bytes,
+}
+
+impl GoAwayFrame {
+    pub fn parse(header: FrameHeader, payload: Bytes) -> Result<Self, H2Error> {
+        if header.stream_id != 0 {
+            return Err(H2Error::Connection {
+                code: ErrorCode::ProtocolError,
+                reason: "GOAWAY on non-zero stream".into(),
+            });
+        }
+        if payload.len() < 8 {
+            return Err(H2Error::Connection {
+                code: ErrorCode::FrameSizeError,
+                reason: format!("GOAWAY must be at least 8 bytes, got {}", payload.len()),
+            });
+        }
+
+        let last_stream_id = be_u32(&payload[..4]);
+        let last_stream_id = last_stream_id & 0x7FFF_FFFF;
+
+        let error_code = be_u32(&payload[4..8]);
+
+        let debug_data = if payload.len() > 8 {
+            payload.slice(8..)
+        } else {
+            Bytes::new()
+        };
+
+        Ok(Self {
+            last_stream_id,
+            error_code: ErrorCode::from_u32(error_code),
+            debug_data,
+        })
+    }
+
+    pub fn encode(&self, buf: &mut impl BufMut) {
+        let length = 8 + self.debug_data.len() as u32;
+        let header = FrameHeader {
+            length,
+            frame_type: FrameType::GoAway as u8,
+            flags: 0,
+            stream_id: 0,
+        };
+        header.encode(buf);
+        buf.put_u32(self.last_stream_id & 0x7FFF_FFFF);
+        buf.put_u32(self.error_code as u32);
+        if !self.debug_data.is_empty() {
+            buf.put_slice(&self.debug_data);
+        }
+    }
+}

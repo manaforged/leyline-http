@@ -1,0 +1,110 @@
+# leyline-http
+
+> Public API reference that truesight generates from the compiler's rustdoc output, except the task names and calls, which come from the task file.
+
+## leyline-http 0.1.0
+
+- [Every public item, one per line](reference/leyline-http/api.txt): 1281 lines
+- [API overview](reference/leyline-http/index.html): tasks, modules, features, and examples
+- [API changes by release](reference/leyline-http/changes.html)
+- [leyline](reference/leyline-http/leyline.html): 472 items
+- [leyline::audit](reference/leyline-http/leyline-audit.html): 27 items
+- [leyline::cookie](reference/leyline-http/leyline-cookie.html): 29 items
+- [leyline::multipart](reference/leyline-http/leyline-multipart.html): 13 items
+- [leyline::profile](reference/leyline-http/leyline-profile.html): 173 items
+- [leyline::tls](reference/leyline-http/leyline-tls.html): 8 items
+- [leyline::trace](reference/leyline-http/leyline-trace.html): 45 items
+- [Example audit](reference/leyline-http/examples/audit.html): `cargo run -p leyline-http --example audit`
+- [Example concurrent](reference/leyline-http/examples/concurrent.html): `cargo run -p leyline-http --example concurrent`
+- [Example cookies](reference/leyline-http/examples/cookies.html): `cargo run -p leyline-http --example cookies`
+- [Example headers](reference/leyline-http/examples/headers.html): `cargo run -p leyline-http --example headers`
+- [Example http3](reference/leyline-http/examples/http3.html): `cargo run -p leyline-http --example http3 --features http3`
+- [Example oneliner](reference/leyline-http/examples/oneliner.html): `cargo run -p leyline-http --example oneliner`
+- [Example post_json](reference/leyline-http/examples/post_json.html): `cargo run -p leyline-http --example post_json`
+- [Example presets](reference/leyline-http/examples/presets.html): `cargo run -p leyline-http --example presets`
+- [Example retry](reference/leyline-http/examples/retry.html): `cargo run -p leyline-http --example retry`
+- [Example streaming](reference/leyline-http/examples/streaming.html): `cargo run -p leyline-http --example streaming`
+- [Example trace](reference/leyline-http/examples/trace.html): `cargo run -p leyline-http --example trace`
+- [Example websocket](reference/leyline-http/examples/websocket.html): `cargo run -p leyline-http --example websocket --features websocket`
+
+## leyline-http tasks
+
+- [Default session](reference/leyline-http/leyline.html#session): `Session::new`
+- [Pick a browser](reference/leyline-http/leyline.html#sessionbuilder): `SessionBuilder::browser`
+- [Pin a browser version](reference/leyline-http/leyline.html#browser): `Browser::get`
+- [Send a loaded profile](reference/leyline-http/leyline.html#sessionbuilder): `SessionBuilder::profile`
+- [Load profiles from a directory](reference/leyline-http/leyline-profile.html#profileregistry): `profile::ProfileRegistry::load`
+- [Parse a profile from TOML](reference/leyline-http/leyline.html#browserprofile): `BrowserProfile::from_toml`
+- [Pick a platform](reference/leyline-http/leyline.html#sessionbuilder): `SessionBuilder::platform`
+- [Brand overlay](reference/leyline-http/leyline.html#sessionbuilder): `SessionBuilder::brand`
+- [Mix TLS and HTTP identities](reference/leyline-http/leyline.html#sessionbuilder): `SessionBuilder::identity`
+- [Rotate the TLS side of an identity](reference/leyline-http/leyline.html#identity): `Identity::rotate_tls`
+- [Derive a session with another identity](reference/leyline-http/leyline.html#session): `Session::with_identity`
+- [Session default headers](reference/leyline-http/leyline.html#sessionbuilder): `SessionBuilder::headers`
+- [URL input](reference/leyline-http/leyline.html#intourl): `IntoUrl`
+- [Build a request](reference/leyline-http/leyline.html#session): `Session::request`
+- [Prebuilt request](reference/leyline-http/leyline.html#session): `Session::execute`
+- [Send](reference/leyline-http/leyline.html#requestbuilder): `RequestBuilder::send`
+- [Stream a response](reference/leyline-http/leyline.html#requestbuilder): `RequestBuilder::stream`
+- [Set the fetch context](reference/leyline-http/leyline.html#requestbuilder): `RequestBuilder::preset`
+- [Proxy one request](reference/leyline-http/leyline.html#requestbuilder): `RequestBuilder::proxy`
+- [Headers](reference/leyline-http/leyline.html#requestbuilder): `RequestBuilder::header`
+- [Header order](reference/leyline-http/leyline.html#requestbuilder): `RequestBuilder::header_order`
+- [sec-fetch-site value](reference/leyline-http/leyline.html#fetchsite): `FetchSite::of`
+- [Raw or streamed body](reference/leyline-http/leyline.html#requestbuilder): `RequestBuilder::body`
+- [JSON body](reference/leyline-http/leyline.html#requestbuilder): `RequestBuilder::json`
+- [Form body](reference/leyline-http/leyline.html#requestbuilder): `RequestBuilder::form`
+- [Multipart body](reference/leyline-http/leyline.html#requestbuilder): `RequestBuilder::multipart`
+- [Compress a request body](reference/leyline-http/leyline.html#requestbuilder): `RequestBuilder::compress`
+- [Query](reference/leyline-http/leyline.html#requestbuilder): `RequestBuilder::query`
+- [Basic auth](reference/leyline-http/leyline.html#requestbuilder): `RequestBuilder::basic_auth`
+- [Bearer auth](reference/leyline-http/leyline.html#requestbuilder): `RequestBuilder::bearer_auth`
+- [Digest auth](reference/leyline-http/leyline.html#requestbuilder): `RequestBuilder::digest_auth`
+- [Session timeout](reference/leyline-http/leyline.html#sessionbuilder): `SessionBuilder::timeout`
+- [Request timeout](reference/leyline-http/leyline.html#requestbuilder): `RequestBuilder::timeout`
+- [Retry](reference/leyline-http/leyline.html#sessionbuilder): `SessionBuilder::retry`
+- [Retry triggers](reference/leyline-http/leyline.html#retrypolicy): `RetryPolicy::retry_on`
+- [Redirect](reference/leyline-http/leyline.html#sessionbuilder): `SessionBuilder::redirect`
+- [Cookies](reference/leyline-http/leyline.html#sessionbuilder): `SessionBuilder::cookie_jar`
+- [Derive a session with another jar](reference/leyline-http/leyline.html#session): `Session::with_cookie_jar`
+- [Read a cookie](reference/leyline-http/leyline-cookie.html#jar): `cookie::Jar::get_cookie`
+- [Set a cookie](reference/leyline-http/leyline-cookie.html#jar): `cookie::Jar::set_cookie`
+- [Seed a cookie with attributes](reference/leyline-http/leyline-cookie.html#jar): `cookie::Jar::store_set_cookie`
+- [Copy a jar](reference/leyline-http/leyline-cookie.html#jar): `cookie::Jar::snapshot`
+- [Merge a jar](reference/leyline-http/leyline-cookie.html#jar): `cookie::Jar::extend_from`
+- [Remove cookies on one host](reference/leyline-http/leyline-cookie.html#jar): `cookie::Jar::remove`
+- [Remove cookies on every host](reference/leyline-http/leyline-cookie.html#jar): `cookie::Jar::remove_named`
+- [Identity values](reference/leyline-http/leyline.html#browser): `Browser::identity`
+- [What a session sends](reference/leyline-http/leyline.html#session): `Session::identity`
+- [TCP fingerprint](reference/leyline-http/leyline.html#sessionbuilder): `SessionBuilder::tcp_profile`
+- [Proxy](reference/leyline-http/leyline.html#sessionbuilder): `SessionBuilder::proxy`
+- [Derive a session with another proxy](reference/leyline-http/leyline.html#session): `Session::with_proxy`
+- [Open new connections through the same proxy](reference/leyline-http/leyline.html#session): `Session::fresh_pool`
+- [DNS](reference/leyline-http/leyline.html#sessionbuilder): `SessionBuilder::dns`
+- [TLS trust](reference/leyline-http/leyline.html#sessionbuilder): `SessionBuilder::tls_trust`
+- [Set a TLS version floor](reference/leyline-http/leyline.html#tlstrustconfig): `TlsTrustConfig::min_tls_version`
+- [Protocol](reference/leyline-http/leyline.html#sessionbuilder): `SessionBuilder::protocol`
+- [Socket and connect tuning](reference/leyline-http/leyline.html#sessionbuilder): `SessionBuilder::socket`
+- [Pool](reference/leyline-http/leyline.html#sessionbuilder): `SessionBuilder::pool`
+- [Warm a connection](reference/leyline-http/leyline.html#session): `Session::preconnect`
+- [Refuse plain HTTP](reference/leyline-http/leyline.html#sessionbuilder): `SessionBuilder::https_only`
+- [Decompress](reference/leyline-http/leyline.html#sessionbuilder): `SessionBuilder::compression`
+- [Response body cap](reference/leyline-http/leyline.html#compressionconfig): `CompressionConfig::max_body_size`
+- [Response headers](reference/leyline-http/leyline.html#response): `Response::headers`
+- [Read body](reference/leyline-http/leyline.html#response): `Response::bytes`
+- [Read the body as text](reference/leyline-http/leyline.html#response): `Response::text`
+- [Read the body as JSON](reference/leyline-http/leyline.html#response): `Response::json`
+- [Stream body](reference/leyline-http/leyline.html#response): `Response::into_stream`
+- [Save a body to a file](reference/leyline-http/leyline.html#response): `Response::copy_to`
+- [Read a prefix of a body](reference/leyline-http/leyline.html#response): `Response::read_until`
+- [Status check](reference/leyline-http/leyline.html#response): `Response::error_for_status`
+- [Response cookies](reference/leyline-http/leyline.html#response): `Response::cookies`
+- [TLS details](reference/leyline-http/leyline.html#response): `Response::tls`
+- [Errors](reference/leyline-http/leyline.html#error): `Error::kind`
+- [Trace](reference/leyline-http/leyline.html#sessionbuilder): `SessionBuilder::trace`
+- [Timing](reference/leyline-http/leyline.html#response): `Response::timing`
+- [Fingerprint audit](reference/leyline-http/leyline.html#sessionbuilder): `SessionBuilder::audit`
+- [Compute a JA4 offline](reference/leyline-http/leyline-audit.html#compute_ja4): `audit::compute_ja4`
+- [WebSocket](reference/leyline-http/leyline.html#session): `Session::websocket`
+- [Set WebSocket limits](reference/leyline-http/leyline.html#sessionbuilder): `SessionBuilder::websocket_config`
+- [tower](reference/leyline-http/leyline.html#leylineservice): `LeylineService::new`

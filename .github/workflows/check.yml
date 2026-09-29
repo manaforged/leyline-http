@@ -1,0 +1,64 @@
+name: check
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: leyline-check-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+  CARGO_PROFILE_DEV_DEBUG: '0'
+
+jobs:
+  check:
+    name: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: workflow lint
+        run: |
+          docker build --tag ci-actionlint .github/actionlint
+          docker run --rm --volume "$PWD:/repo:ro" --workdir /repo ci-actionlint
+
+      - name: Rust toolchain
+        run: rustup show active-toolchain
+
+      - name: comment lint
+        run: python3 scripts/check-comments.py
+
+      - name: cargo fmt
+        run: cargo fmt --all -- --check
+
+      - name: Select affected packages
+        id: scope
+        run: |
+          all=$(node scripts/affected-packages.mjs \
+            --base "${{ github.event.pull_request.base.sha }}" \
+            --head "${{ github.event.pull_request.head.sha }}" \
+            --explain)
+          pkgs=$(printf '%s\n' "$all" | grep -v '^leyline-quiche$' || true)
+          args=""
+          for p in $pkgs; do args="$args -p $p"; done
+          case " $pkgs " in *" leyline-http "*) args="$args --features leyline-http/full,leyline-http/bench-internals" ;; esac
+          echo "args=$args" >> "$GITHUB_OUTPUT"
+          echo "clippy scope: ${args:-none}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: cargo clippy
+        if: steps.scope.outputs.args != ''
+        run: cargo clippy ${{ steps.scope.outputs.args }} --all-targets --locked --no-deps -- -D warnings
+
+      - name: cargo test
+        if: steps.scope.outputs.args != ''
+        run: cargo test ${{ steps.scope.outputs.args }} --locked

@@ -1,0 +1,55 @@
+[meta]
+name = "Bare (no impersonation)"
+browser = "bare"
+version = 0
+family = "bare"
+verified_against = "n/a (synthetic non-impersonating profile)"
+captured_against = "n/a (synthetic non-impersonating profile)"
+
+[tls]
+ciphers = [
+    "TLS_AES_128_GCM_SHA256", "TLS_AES_256_GCM_SHA384", "TLS_CHACHA20_POLY1305_SHA256",
+    "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256", "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+    "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384", "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+    "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256", "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
+]
+curves = ["X25519", "SECP256R1", "SECP384R1"]
+sigalgs = [
+    "ecdsa_secp256r1_sha256", "rsa_pss_rsae_sha256", "rsa_pkcs1_sha256",
+    "ecdsa_secp384r1_sha384", "rsa_pss_rsae_sha384", "rsa_pkcs1_sha384",
+]
+grease = false
+session_tickets = true
+
+[h2]
+header_table_size = 4096
+enable_push = false
+max_concurrent_streams = 100
+initial_stream_window_size = 2097152
+initial_connection_window_size = 5242880
+max_frame_size = 16384
+pseudo_order = ["method", "scheme", "authority", "path"]
+settings_order = [
+    "header_table_size", "enable_push", "max_concurrent_streams",
+    "initial_window_size", "max_frame_size",
+]
+
+[identity.windows]
+user_agent = "leyline/{crate_version}"
+accept_language = "en-US,en;q=0.9"
+
+[identity.macos]
+user_agent = "leyline/{crate_version}"
+accept_language = "en-US,en;q=0.9"
+
+[identity.linux]
+user_agent = "leyline/{crate_version}"
+accept_language = "en-US,en;q=0.9"
+
+[identity.android]
+user_agent = "leyline/{crate_version}"
+accept_language = "en-US,en;q=0.9"
+
+[identity.ios]
+user_agent = "leyline/{crate_version}"
+accept_language = "en-US,en;q=0.9"

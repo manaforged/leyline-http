@@ -1,0 +1,12 @@
+[package]
+name = "wreq-cmp-client"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+wreq = "=0.16.1"
+wreq-util = "=0.2.0"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

@@ -1,0 +1,336 @@
+[package]
+name = "leyline-http"
+description = "HTTP client that mimics browsers on the wire"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+documentation = "https://docs.rs/leyline-http"
+readme = "README.md"
+exclude = ["profiles/captures/"]
+
+[lib]
+name = "leyline"
+
+[package.metadata.cargo_check_external_types]
+# Types on the public API that callers are expected to name themselves.
+# `url` is the shared URL type of the Rust HTTP ecosystem (reqwest exposes it
+# too), so `Jar` takes `url::Url` instead of a wrapper. `tokio::io::AsyncWrite`
+# is the sink type of `Response::copy_to`; the crate is tokio-only, so a
+# private sink trait would only add a conversion.
+allowed_external_types = [
+    "http",
+    "http::*",
+    "bytes::*",
+    "serde_core::*",
+    "serde_json::*",
+    "futures_core::*",
+    "url::*",
+    "tokio::io::async_write::AsyncWrite",
+    "tower_service::*",
+]
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
+features = ["full"]
+
+[features]
+default = [
+    "charset",
+    "compression-gzip",
+    "compression-brotli",
+    "compression-deflate",
+    "compression-zstd",
+    "multipart",
+    "websocket",
+    "http3",
+]
+# Charset-aware response-body text decoding (Content-Type charset + BOM, via
+# encoding_rs). Off → Response::text falls back to UTF-8 lossy.
+charset = ["dep:encoding_rs"]
+# Body compression codecs. Each flag also gates the matching RFC 8879
+# certificate decompressor in the TLS layer, so a profile that lists a
+# cert-compression algorithm whose feature is off fails when the session
+# builds instead of silently dropping the codepoint.
+compression-gzip = ["dep:flate2"]
+compression-brotli = ["dep:brotli"]
+compression-deflate = ["dep:flate2"]
+compression-zstd = ["dep:zstd"]
+multipart = []
+websocket = ["dep:tokio-tungstenite"]
+http3 = ["dep:leyline-quiche"]
+socks = []
+# Exposes pub bench-only probes into otherwise pub(crate) pool internals
+# (checkout + evict path). Off by default; only leyline-benches enables it.
+bench-internals = []
+tower = ["dep:tower-service"]
+full = [
+    "compression-gzip",
+    "compression-brotli",
+    "compression-deflate",
+    "compression-zstd",
+    "multipart",
+    "websocket",
+    "http3",
+    "tower",
+    "socks",
+    "charset",
+]
+
+[dependencies]
+# External deps absorbed from sub-crates
+# -- from leyline-quiche (external BSD-2 fork, stays as path dep)
+leyline-quiche = { path = "../leyline-quiche", version = "=0.1.0", default-features = false, optional = true, features = [
+    "boringssl-bssl-crate",
+] }
+
+# -- BoringSSL (leyline-owned stack). leyline talks only to the safe wrapper;
+# the FFI crate (leyline-bssl-sys) is pulled transitively by leyline-bssl.
+leyline-bssl = { workspace = true }
+leyline-bssl-tokio = { workspace = true }
+
+# -- async runtime
+tokio = { workspace = true, features = ["net", "rt", "time", "io-util", "macros", "fs", "sync"] }
+
+# -- serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+
+# -- networking / TLS
+socket2 = { workspace = true }
+url = { workspace = true }
+
+# -- tracing
+tracing = { workspace = true }
+
+# -- errors
+thiserror = { workspace = true }
+
+# -- crypto / hashing
+sha2 = { workspace = true }
+md-5 = { workspace = true }
+hex = "0.4"
+base64 = { workspace = true }
+
+# -- HTTP / WebSocket
+tokio-tungstenite = { workspace = true, optional = true }
+http = "1"
+
+# -- misc
+bytes = { workspace = true }
+encoding_rs = { version = "0.8", optional = true }
+# Mozilla Public Suffix List (compile-time embedded) for cookie
+# registrable-domain + public-suffix checks. Non-optional: the cookie module
+# compiles unconditionally and the list cannot be hand-rolled.
+psl = "2.1"
+futures-util = "0.3"
+# Non-optional: h2::client::H2ConnectStream needs PollSender for
+# cancel-safe AsyncWrite backpressure (waker survives across polls).
+tokio-util = { version = "0.7", features = ["io"] }
+lru = "0.18"
+rand = "0.9"
+libc = "0.2"
+tower-service = { version = "0.3", optional = true }
+
+# -- compression (optional: each codec is pulled in by its own feature, for
+#    both HTTP body compression and RFC 8879 certificate decompression)
+flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"], optional = true }
+brotli = { version = "8", optional = true }
+zstd = { version = "0.13", optional = true }
+
+# Windows: read the platform trust store via Win32 crypto API.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Security_Cryptography", "Win32_Foundation"] }
+
+[[example]]
+name = "http3"
+required-features = ["http3"]
+
+[[example]]
+name = "websocket"
+required-features = ["websocket"]
+
+[[test]]
+name = "websocket_subprotocol"
+required-features = ["websocket"]
+
+[[test]]
+name = "smoke"
+required-features = ["http3"]
+
+[[test]]
+name = "core_multipart"
+required-features = ["multipart"]
+
+[[test]]
+name = "fingerprint_conformance"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_body_cap"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_cancel_safety"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_connect_method"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_continuation_timeout"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_extended_connect"
+required-features = ["bench-internals", "websocket"]
+
+[[test]]
+name = "h2_flow_control_e2e"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_flow_overflow"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_frame_roundtrip"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_hostile_server"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_stream_lifecycle"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_informational_e2e"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_multiplex"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_recv_window"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_resend"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_rst_flood_e2e"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_rst_flood"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_shutdown_streaming_e2e"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_stream_delivery"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_stream_state"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_write_batching"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "hpack_encoding"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "pool_h1_framing"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "pool_h1_injection"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "pool_h1_keepalive"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "pool_reconnect_storm"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "pool_stats"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "profile_validation"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "tls_peet"
+required-features = ["bench-internals", "http3", "websocket"]
+
+[[test]]
+name = "https_proxy"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "tls_happy_eyeballs"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "tls_pinning_hostname"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "tls_trust_scope"
+required-features = ["bench-internals"]
+
+[build-dependencies]
+serde = { workspace = true }
+toml = { workspace = true }
+
+[dev-dependencies]
+bytes = { workspace = true }
+leyline-quiche = { path = "../leyline-quiche", version = "=0.1.0", default-features = false, features = [
+    "boringssl-bssl-crate",
+    "internal",
+] }
+# In-test cert generation + a localhost TLS acceptor for the
+# pinning hostname-verification integration test.
+leyline-bssl = { workspace = true }
+leyline-bssl-tokio = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tokio-util = { version = "0.7", features = ["io"] }
+futures-util = "0.3"
+serde_json = { workspace = true }
+url = { workspace = true }
+base64 = { workspace = true }
+# Codecs for the in-process httpbin-lite mock (tests/http_semantics.rs) and the
+# live H3 streaming test, which decodes the raw streamed body per its
+# content-encoding. zstd is a normal dep of leyline but integration tests only
+# see dev-deps, so it is restated here.
+flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"] }
+brotli = "8"
+zstd = "0.13"
+
+[package.metadata.cargo-machete]
+# imported as `md5` (crate `md-5`); used by the digest-auth MD5 algorithm
+ignore = ["md-5"]
+
+[lints]
+workspace = true

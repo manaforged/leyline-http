@@ -1,0 +1,447 @@
+[[task]]
+name = "Default session"
+call = "Session::new"
+owner = "SessionBuilder"
+guide = "docs/guide/sessions.md"
+
+[[task]]
+name = "Pick a browser"
+call = "SessionBuilder::browser"
+owner = "profile::ProfileRegistry"
+guide = "docs/guide/choosing-a-profile.md"
+
+[[task]]
+name = "Pin a browser version"
+call = "Browser::get"
+guide = "docs/guide/sessions.md"
+
+[[task]]
+name = "Send a loaded profile"
+call = "SessionBuilder::profile"
+owner = "SessionBuilder::build"
+guide = "docs/guide/profiles.md"
+
+[[task]]
+name = "Load profiles from a directory"
+call = "profile::ProfileRegistry::load"
+guide = "docs/guide/profiles.md"
+
+[[task]]
+name = "Parse a profile from TOML"
+call = "BrowserProfile::from_toml"
+guide = "docs/guide/profiles.md"
+
+[[task]]
+name = "Pick a platform"
+call = "SessionBuilder::platform"
+guide = "docs/guide/choosing-a-profile.md"
+
+[[task]]
+name = "Brand overlay"
+call = "SessionBuilder::brand"
+guide = "docs/guide/choosing-a-profile.md"
+
+[[task]]
+name = "Mix TLS and HTTP identities"
+call = "SessionBuilder::identity"
+owner = "Identity"
+guide = "docs/guide/fingerprints.md"
+
+[[task]]
+name = "Rotate the TLS side of an identity"
+call = "Identity::rotate_tls"
+owner = "Identity"
+guide = "docs/guide/fingerprints.md"
+
+[[task]]
+name = "Derive a session with another identity"
+call = "Session::with_identity"
+guide = "docs/guide/fingerprints.md"
+
+[[task]]
+name = "Session default headers"
+call = "SessionBuilder::headers"
+guide = "docs/guide/requests.md"
+
+[[task]]
+name = "URL input"
+call = "IntoUrl"
+owner = "IntoUrl::into_url"
+guide = "docs/guide/requests.md"
+
+[[task]]
+name = "Build a request"
+call = "Session::request"
+owner = "RequestBuilder"
+guide = "docs/guide/requests.md"
+
+[[task]]
+name = "Prebuilt request"
+call = "Session::execute"
+owner = "RequestBuilder::send"
+guide = "docs/guide/requests.md"
+
+[[task]]
+name = "Send"
+call = "RequestBuilder::send"
+owner = "RequestBuilder::send"
+guide = "docs/guide/requests.md"
+
+[[task]]
+name = "Stream a response"
+call = "RequestBuilder::stream"
+guide = "docs/guide/streaming.md"
+
+[[task]]
+name = "Set the fetch context"
+call = "RequestBuilder::preset"
+guide = "docs/guide/requests.md"
+
+[[task]]
+name = "Proxy one request"
+call = "RequestBuilder::proxy"
+guide = "docs/guide/proxies.md"
+
+[[task]]
+name = "Headers"
+call = "RequestBuilder::header"
+owner = "core::session::header_merge::apply_extra_headers"
+guide = "docs/guide/requests.md"
+
+[[task]]
+name = "Header order"
+call = "RequestBuilder::header_order"
+owner = "core::headers::reorder"
+guide = "docs/guide/requests.md"
+
+[[task]]
+name = "sec-fetch-site value"
+call = "FetchSite::of"
+owner = "core::fetch_site"
+guide = "docs/guide/requests.md"
+
+[[task]]
+name = "Raw or streamed body"
+call = "RequestBuilder::body"
+owner = "Body"
+guide = "docs/guide/requests.md"
+
+[[task]]
+name = "JSON body"
+call = "RequestBuilder::json"
+owner = "RequestBuilder::json"
+guide = "docs/guide/requests.md"
+
+[[task]]
+name = "Form body"
+call = "RequestBuilder::form"
+owner = "core::request::encode::url_encode_pairs"
+guide = "docs/guide/requests.md"
+
+[[task]]
+name = "Multipart body"
+call = "RequestBuilder::multipart"
+owner = "multipart::Form"
+guide = "docs/guide/requests.md"
+
+[[task]]
+name = "Compress a request body"
+call = "RequestBuilder::compress"
+guide = "docs/guide/requests.md"
+
+[[task]]
+name = "Query"
+call = "RequestBuilder::query"
+guide = "docs/guide/requests.md"
+
+[[task]]
+name = "Basic auth"
+call = "RequestBuilder::basic_auth"
+guide = "docs/guide/requests.md"
+
+[[task]]
+name = "Bearer auth"
+call = "RequestBuilder::bearer_auth"
+guide = "docs/guide/requests.md"
+
+[[task]]
+name = "Digest auth"
+call = "RequestBuilder::digest_auth"
+owner = "RequestBuilder::digest_followup"
+guide = "docs/guide/requests.md"
+
+[[task]]
+name = "Session timeout"
+call = "SessionBuilder::timeout"
+owner = "core::deadline::Deadline"
+guide = "docs/guide/retries-and-timeouts.md"
+
+[[task]]
+name = "Request timeout"
+call = "RequestBuilder::timeout"
+owner = "core::deadline::Deadline"
+guide = "docs/guide/retries-and-timeouts.md"
+
+[[task]]
+name = "Retry"
+call = "SessionBuilder::retry"
+owner = "RequestBuilder::send"
+guide = "docs/guide/retries-and-timeouts.md"
+
+[[task]]
+name = "Retry triggers"
+call = "RetryPolicy::retry_on"
+owner = "RequestBuilder::send"
+guide = "docs/guide/retries-and-timeouts.md"
+
+[[task]]
+name = "Redirect"
+call = "SessionBuilder::redirect"
+owner = "Session::execute_inner"
+guide = "docs/guide/redirects.md"
+
+[[task]]
+name = "Cookies"
+call = "SessionBuilder::cookie_jar"
+owner = "cookie::Jar"
+guide = "docs/guide/cookies.md"
+
+[[task]]
+name = "Derive a session with another jar"
+call = "Session::with_cookie_jar"
+guide = "docs/guide/cookies.md"
+
+[[task]]
+name = "Read a cookie"
+call = "cookie::Jar::get_cookie"
+owner = "cookie::Jar"
+guide = "docs/guide/cookies.md"
+
+[[task]]
+name = "Set a cookie"
+call = "cookie::Jar::set_cookie"
+owner = "cookie::Jar"
+guide = "docs/guide/cookies.md"
+
+[[task]]
+name = "Seed a cookie with attributes"
+call = "cookie::Jar::store_set_cookie"
+owner = "cookie::parse"
+guide = "docs/guide/cookies.md"
+
+[[task]]
+name = "Copy a jar"
+call = "cookie::Jar::snapshot"
+owner = "cookie::Jar"
+guide = "docs/guide/cookies.md"
+
+[[task]]
+name = "Merge a jar"
+call = "cookie::Jar::extend_from"
+owner = "cookie::Jar"
+guide = "docs/guide/cookies.md"
+
+[[task]]
+name = "Remove cookies on one host"
+call = "cookie::Jar::remove"
+owner = "cookie::Jar"
+guide = "docs/guide/cookies.md"
+
+[[task]]
+name = "Remove cookies on every host"
+call = "cookie::Jar::remove_named"
+owner = "cookie::Jar"
+guide = "docs/guide/cookies.md"
+
+[[task]]
+name = "Identity values"
+call = "Browser::identity"
+owner = "profile::identity::resolve_identity"
+guide = "docs/guide/sessions.md"
+
+[[task]]
+name = "What a session sends"
+call = "Session::identity"
+owner = "SessionBuilder::build"
+guide = "docs/guide/sessions.md"
+
+[[task]]
+name = "TCP fingerprint"
+call = "SessionBuilder::tcp_profile"
+owner = "TcpProfile::apply"
+guide = "docs/guide/fingerprints.md"
+
+[[task]]
+name = "Proxy"
+call = "SessionBuilder::proxy"
+owner = "ProxyConfig::proxy_for"
+guide = "docs/guide/proxies.md"
+
+[[task]]
+name = "Derive a session with another proxy"
+call = "Session::with_proxy"
+guide = "docs/guide/proxies.md"
+
+[[task]]
+name = "Open new connections through the same proxy"
+call = "Session::fresh_pool"
+guide = "docs/guide/proxies.md"
+
+[[task]]
+name = "DNS"
+call = "SessionBuilder::dns"
+owner = "DnsConfig"
+guide = "docs/guide/network.md"
+
+[[task]]
+name = "TLS trust"
+call = "SessionBuilder::tls_trust"
+owner = "tls::trust"
+guide = "docs/guide/tls-trust.md"
+
+[[task]]
+name = "Set a TLS version floor"
+call = "TlsTrustConfig::min_tls_version"
+guide = "docs/guide/tls-trust.md"
+
+[[task]]
+name = "Protocol"
+call = "SessionBuilder::protocol"
+owner = "core::session::transport_policy"
+guide = "docs/guide/http3.md"
+
+[[task]]
+name = "Socket and connect tuning"
+call = "SessionBuilder::socket"
+owner = "tls::connector::FingerprintConnector"
+guide = "docs/guide/network.md"
+
+[[task]]
+name = "Pool"
+call = "SessionBuilder::pool"
+owner = "pool"
+guide = "docs/guide/sessions.md"
+
+[[task]]
+name = "Warm a connection"
+call = "Session::preconnect"
+guide = "docs/guide/sessions.md"
+
+[[task]]
+name = "Refuse plain HTTP"
+call = "SessionBuilder::https_only"
+owner = "core::session::transport_policy"
+guide = "docs/guide/sessions.md"
+
+[[task]]
+name = "Decompress"
+call = "SessionBuilder::compression"
+owner = "core::session::decompress::Decoder"
+guide = "docs/guide/responses.md"
+
+[[task]]
+name = "Response body cap"
+call = "CompressionConfig::max_body_size"
+guide = "docs/guide/responses.md"
+
+[[task]]
+name = "Response headers"
+call = "Response::headers"
+owner = "Response"
+guide = "docs/guide/responses.md"
+
+[[task]]
+name = "Read body"
+call = "Response::bytes"
+owner = "Session::finalize_response_body"
+guide = "docs/guide/responses.md"
+
+[[task]]
+name = "Read the body as text"
+call = "Response::text"
+guide = "docs/guide/responses.md"
+
+[[task]]
+name = "Read the body as JSON"
+call = "Response::json"
+guide = "docs/guide/responses.md"
+
+[[task]]
+name = "Stream body"
+call = "Response::into_stream"
+owner = "BodyStream"
+guide = "docs/guide/streaming.md"
+
+[[task]]
+name = "Save a body to a file"
+call = "Response::copy_to"
+guide = "docs/guide/responses.md"
+
+[[task]]
+name = "Read a prefix of a body"
+call = "Response::read_until"
+guide = "docs/guide/streaming.md"
+
+[[task]]
+name = "Status check"
+call = "Response::error_for_status"
+owner = "Response::status_error"
+guide = "docs/guide/responses.md"
+
+[[task]]
+name = "Response cookies"
+call = "Response::cookies"
+owner = "cookie::parse"
+guide = "docs/guide/cookies.md"
+
+[[task]]
+name = "TLS details"
+call = "Response::tls"
+owner = "TlsInfo"
+guide = "docs/guide/tls-trust.md"
+
+[[task]]
+name = "Errors"
+call = "Error::kind"
+owner = "core::error"
+guide = "docs/guide/errors.md"
+
+[[task]]
+name = "Trace"
+call = "SessionBuilder::trace"
+owner = "trace"
+guide = "docs/guide/logging.md"
+
+[[task]]
+name = "Timing"
+call = "Response::timing"
+owner = "ResponseTiming"
+guide = "docs/guide/responses.md"
+
+[[task]]
+name = "Fingerprint audit"
+call = "SessionBuilder::audit"
+owner = "audit"
+guide = "docs/guide/fingerprints.md"
+
+[[task]]
+name = "Compute a JA4 offline"
+call = "audit::compute_ja4"
+guide = "docs/guide/fingerprints.md"
+
+[[task]]
+name = "WebSocket"
+call = "Session::websocket"
+owner = "core::websocket"
+guide = "docs/guide/websocket.md"
+
+[[task]]
+name = "Set WebSocket limits"
+call = "SessionBuilder::websocket_config"
+guide = "docs/guide/websocket.md"
+
+[[task]]
+name = "tower"
+call = "LeylineService::new"
+owner = "Session::execute"
+guide = "docs/guide/requests.md"

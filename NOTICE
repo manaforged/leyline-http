@@ -1,0 +1,150 @@
+Leyline
+Copyright 2026 Manaforge Technologies, LLC.
+
+This product includes software developed by third parties. Each upstream
+component retains its own license; the grants below are informative.
+
+================================================================================
+Vendored quiche (`crates/leyline-quiche/`)
+================================================================================
+
+`leyline-quiche` is a fork of Cloudflare's `quiche` (v0.30.0) that links
+against `leyline-bssl` instead of upstream `boring`, so Leyline's HTTP/2 and
+HTTP/3 ClientHellos share the same patched BoringSSL.
+
+Upstream: https://github.com/cloudflare/quiche
+Copyright: Cloudflare, Inc.
+License:   BSD-2-Clause. The full text is at
+           `crates/leyline-quiche/LICENSE` and `crates/leyline-quiche/COPYING`.
+
+Modifications from upstream:
+- Package renamed `quiche` -> `leyline-quiche`.
+- `boring` / `tokio-boring` dependencies replaced with `leyline-bssl` /
+  `leyline-bssl-tokio`.
+- Bundled BoringSSL build (`boringssl-vendored` feature) removed.
+  `leyline-bssl-sys` provides BoringSSL instead.
+- BoringSSL symbols are linked under the `LEYLINE_` prefix.
+- `Connection::cipher` returns the negotiated TLS 1.3 cipher suite name.
+- `Connection::ssl_mut` exposes the TLS handle, so a client can set
+  ClientHello options on it before the first packet.
+- `connect_with_dcid` is always available (upstream gates it behind the
+  `custom-client-dcid` feature).
+- `Config::set_transport_params_plan` sets the exact client transport
+  parameter list and order (`TransportParamEntry`), including raw and GREASE
+  parameters. The transport parameter buffer grows from 128 to 512 bytes.
+- `h3::Config::set_settings_plan` sets the exact SETTINGS list and order;
+  `h3::Config::set_control_frames` adds frames after SETTINGS on the control
+  stream. `h3::Connection::send_priority_update_field_value` sends a
+  PRIORITY_UPDATE frame with a caller-supplied field value.
+- The QPACK decoder keeps a dynamic table (RFC 9204): encoder stream
+  instructions, Required Insert Count and Base, post-base references, blocked
+  streams up to the advertised limit, and decoder stream instructions. Table
+  entries are shared, so Duplicate and indexed references do not copy them.
+  An integer overflow on the encoder stream is a QPACK_ENCODER_STREAM_ERROR.
+  A decoder stream backlog above 64 KiB closes the connection with
+  H3_EXCESSIVE_LOAD.
+- `h3::Config::set_field_section_limit` sets a local limit on decoded header
+  sections that applies even when SETTINGS omits
+  SETTINGS_MAX_FIELD_SECTION_SIZE.
+- A RESET_STREAM on a QPACK-blocked stream sends Stream Cancellation and
+  returns `Event::Reset`; `h3::Connection::cancel_stream` frees the blocked
+  slot of a dropped request.
+- RESET_STREAM_AT frames are read as RESET_STREAM after a check that the
+  Reliable Size does not exceed the Final Size; ACK_FREQUENCY and
+  IMMEDIATE_ACK frames are accepted and ignored. Each is accepted only in
+  1-RTT packets and only when the local transport parameters advertise it.
+- QUIC version 2 (RFC 9369): the Initial salt, the `quicv2` HKDF labels, the
+  long header packet type bits, and the Retry integrity key and nonce.
+  `Config::set_compatible_versions` lets a client follow a server that
+  switches to another listed version by compatible version negotiation
+  (RFC 9368), once a packet in that version decrypts. Version Negotiation
+  picks only a listed version. The client writes its current version as the
+  Chosen Version, stops 0-RTT after a switch, checks the server's
+  `version_information` (RFC 9368 section 4), and closes with
+  VERSION_NEGOTIATION_ERROR on a mismatch.
+- `Config::set_initial_datagram_size` sets the size of client datagrams that
+  carry Initial packets during the handshake and pads first-flight Initial
+  packets with PADDING frames to that size. The size is at most 1232 bytes
+  over IPv6, and it falls back to 1200 bytes after a loss timeout with no
+  packet received. A padded first-flight Initial leaves no room for a
+  coalesced 0-RTT packet.
+- `Config::set_initial_crypto_split` sets how a client lays out the first
+  flight of Initial CRYPTO data. `Fill` is the upstream behavior. `Even`
+  limits the first Initial packet to an even share of the ClientHello and
+  sends it with no other packet in the datagram. `EvenSniSlice` also cuts
+  the ClientHello at the midpoint of the server name and sends the chunk
+  after the cut before the chunk that holds offset 0. `src/crypto_split.rs`
+  was added in this fork (Copyright Manaforge Technologies, LLC,
+  BSD-2-Clause).
+- `src/h3/qpack/table.rs` was added in this fork (Copyright Manaforge
+  Technologies, LLC, BSD-2-Clause).
+- Upstream test certificates and keys are not part of the published package.
+
+================================================================================
+BoringSSL bindings (vendored under `crates/leyline-bssl*`)
+================================================================================
+
+TLS is provided by `leyline-bssl`, `leyline-bssl-sys`, and `leyline-bssl-tokio`,
+vendored in-tree as a trimmed fork of Cloudflare's `boring`, `boring-sys`, and
+`tokio-boring` crates at tag v5.2.0 (commit
+6fdd0a54e81a1eecc76e587c685439d3f2ffdd09), over Google's BoringSSL C library.
+`leyline-bssl-sys` builds BoringSSL from source at build time with CMake. The
+fork keeps the modules Leyline uses, pins BoringSSL to the revision in
+Chromium 154's DEPS, and carries these BoringSSL patches:
+
+- `0001-leyline-fingerprint.patch`: `SSL_CTX_set_record_size_limit`
+  (RFC 8449), `SSL_CTX_set_delegated_credentials` (RFC 9345),
+  `SSL_CTX_set_extension_order`, `SSL_CTX_set_tls13_cipher_order`, the
+  ECDHE 3DES cipher suites, and the FFDHE2048/3072 groups. These changes
+  first shipped in 0x676e67's `btls` and `boring2` forks
+  (https://github.com/0x676e67/btls), licensed under the Apache License,
+  Version 2.0; Leyline keeps them with that credit.
+- `0002-leyline-symbol-prefix.patch`: renames the `ssl_st` and `ssl_session_st`
+  C++ structs under the `LEYLINE` symbol prefix.
+- `0003-leyline-tls12-extensions.patch`: `SSL_set_tls12_extensions`, which
+  keeps `extended_master_secret` and `renegotiation_info` in a ClientHello
+  whose minimum version is TLS 1.3, as in Firefox's QUIC ClientHello.
+- `0004-leyline-extension-tail.patch`: `SSL_CTX_set_extension_tail`, which
+  keeps the listed extensions last, in order, when `permute_extensions`
+  shuffles the ClientHello, as in Firefox's QUIC ClientHello.
+- `0005-leyline-client-hello-padding.patch`: restores the RFC 7685 padding
+  extension that BoringSSL removed, which Safari 18 and other ClientHellos
+  without a post-quantum key share send.
+
+The `boring` crate derives from Steven Fackler's `rust-openssl`
+(https://github.com/sfackler/rust-openssl), and `tokio-boring` derives from
+`tokio-openssl` (https://github.com/tokio-rs/tokio-openssl). Their copyright
+notices are kept in `crates/leyline-bssl/LICENSE`,
+`crates/leyline-bssl-tokio/LICENSE-APACHE`, and
+`crates/leyline-bssl-tokio/LICENSE-MIT`.
+
+Upstream: https://github.com/cloudflare/boring
+Copyright: Google Inc., Jack Lloyd, Steven Fackler, Ivan Nikulin, and the
+           Tokio contributors, as listed in the license files above.
+Licenses: the Rust bindings are Apache-2.0 / MIT. The BoringSSL C library is
+          Apache-2.0 (relicensed by Google), with a BSD-3-Clause notice for
+          Go-derived test tooling that is not linked into the built libraries.
+
+================================================================================
+BoringSSL build
+================================================================================
+
+`leyline-bssl-sys` ships the BoringSSL source, not binaries. Each build
+compiles it from source and links it statically. The full license text
+(Apache-2.0 plus the BSD-3-Clause Go notice) is at
+`crates/leyline-bssl-sys/LICENSE-BORINGSSL`, and the MIT binding-glue grant at
+`crates/leyline-bssl-sys/LICENSE-MIT`.
+
+The package also ships BoringSSL's `third_party` code, each with its license
+file under `deps/boringssl/third_party/`: fiat-crypto (Apache-2.0), which is
+compiled into the library, and googletest (BSD-3-Clause) and Google Benchmark
+(Apache-2.0), which serve BoringSSL's own tests and benchmarks and are not
+linked into the built libraries. The Wycheproof test vectors (Apache-2.0) stay
+out of the package; only their license file ships.
+
+================================================================================
+Runtime dependencies pulled from crates.io
+================================================================================
+
+`cargo deny` enforces the third-party license policy in `deny.toml`.
+`cargo deny list` prints each license with the crates that use it.

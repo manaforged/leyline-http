@@ -1,0 +1,6 @@
+book = "docs"
+
+[[crate]]
+package = "leyline-http"
+features = ["full"]
+gates = ["charset", "multipart", "websocket", "http3", "socks", "tower"]

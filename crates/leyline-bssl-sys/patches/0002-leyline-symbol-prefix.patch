@@ -1,0 +1,16 @@
+diff --git a/include/openssl/prefix_symbols.h b/include/openssl/prefix_symbols.h
+index 8a39e7e17..772ddeb62 100644
+--- a/include/openssl/prefix_symbols.h
++++ b/include/openssl/prefix_symbols.h
+@@ -7917,6 +7917,11 @@
+ 
+ #endif  // !BORINGSSL_ALWAYS_USE_STATIC_INLINE && !__ASSEMBLER__
+ 
++#if !defined(__ASSEMBLER__)
++#define ssl_st BORINGSSL_ADD_PREFIX(ssl_st)
++#define ssl_session_st BORINGSSL_ADD_PREFIX(ssl_session_st)
++#endif
++
+ #endif  // BORINGSSL_PREFIX
+ 
+ #endif  // OPENSSL_HEADER_PREFIX_SYMBOLS_H

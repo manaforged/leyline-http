@@ -1,0 +1,39 @@
+[package]
+name = "leyline-bssl"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.96"
+authors = [
+    "Thomas Gardiner <thomas@manaforge.tech>",
+    "Steven Fackler <sfackler@gmail.com>",
+    "Ivan Nikulin <ifaaan@gmail.com>",
+]
+description = "Safe BoringSSL bindings for leyline-http, forked from Cloudflare boring"
+homepage = "https://github.com/manaforged/leyline-http"
+documentation = "https://docs.rs/leyline-bssl"
+keywords = ["boringssl", "tls", "ssl"]
+categories = ["cryptography", "api-bindings"]
+license = "Apache-2.0"
+repository = "https://github.com/manaforged/leyline-http"
+
+[dependencies]
+bitflags = "2.11.1"
+foreign-types = "0.5"
+openssl-macros = "0.1.1"
+libc = "0.2.185"
+leyline-bssl-sys = { path = "../leyline-bssl-sys", version = "=0.1.0" }
+
+[dev-dependencies]
+hex = "0.4"
+brotli = "8.0.2"
+
+[lib]
+name = "leyline_bssl"
+path = "src/lib.rs"
+
+[package.metadata.upstream]
+repo = "cloudflare/boring"
+crate = "boring"
+version = "5.2.0"
+
+[workspace]

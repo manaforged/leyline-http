@@ -1,0 +1,106 @@
+# cargo-deny supply-chain gate for the Leyline workspace.
+#
+# Run locally with:
+#   cargo install --locked cargo-deny
+#   cargo deny --all-features check
+#
+# Checks run:
+#   - advisories  — RustSec advisory DB, yanked crates, unmaintained
+#   - licenses    — allowlist of SPDX identifiers
+#   - bans        — duplicate versions, wildcard deps
+#   - sources     — only crates.io (vendored crypto lives in-repo)
+
+[graph]
+all-features = true
+# Exclude dev-only doc/bench targets if they pull in exotic deps later.
+exclude-dev = false
+
+[output]
+feature-depth = 1
+
+# ─── Advisories ─────────────────────────────────────────────────────────
+
+[advisories]
+version = 2
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+yanked = "deny"
+ignore = []
+
+# ─── Licenses ───────────────────────────────────────────────────────────
+
+[licenses]
+version = 2
+# Keep forward-looking allow-list entries (MPL-2.0/CC0-1.0/BSL-1.0/Unicode-*)
+# without "license not encountered" noise drowning a real new warning.
+unused-allowed-license = "allow"
+# SPDX identifiers we accept for dependencies. Leyline is MIT; vendored
+# forks keep their upstream licenses (see NOTICE). We only pull in
+# OSS-compatible crates. Modern BoringSSL (built by leyline-bssl-sys) was relicensed
+# by Google to Apache-2.0, already in this list; `OpenSSL` is intentionally
+# omitted — nothing in the graph requires it, so a future `openssl` pull
+# fails the gate.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-DFS-2016",
+    "Unicode-3.0",
+    "Zlib",
+    "MPL-2.0",
+    "CC0-1.0",
+    "BSL-1.0",
+]
+confidence-threshold = 0.9
+
+# leyline-bssl-sys is the in-repo FFI crate (a workspace-excluded path
+# dependency). It ships the MIT FFI binding glue plus the BoringSSL source.
+# Modern BoringSSL is Apache-2.0 (Google relicense), with a BSD-3-Clause
+# notice for unlinked Go test tooling — both already allow-listed. The crate
+# carries LICENSE-MIT + LICENSE-BORINGSSL so this clarification resolves against
+# real text. (leyline-bssl / leyline-bssl-tokio classify correctly on their own.)
+[[licenses.clarify]]
+name = "leyline-bssl-sys"
+expression = "MIT AND Apache-2.0 AND BSD-3-Clause"
+license-files = [
+    { path = "LICENSE-MIT", hash = 0 },
+    { path = "LICENSE-BORINGSSL", hash = 0 },
+]
+
+# ─── Bans ───────────────────────────────────────────────────────────────
+
+[bans]
+multiple-versions = "warn"
+# Wildcards are warn, not deny. Path dependencies between the published
+# crates carry an exact `=0.1.0` version, and `allow-wildcard-paths`
+# covers the unpublished bench and fuzz crates. A crates.io `"*"`
+# requirement still shows up as a warning.
+wildcards = "warn"
+allow-wildcard-paths = true
+highlight = "all"
+workspace-default-features = "allow"
+external-default-features = "allow"
+deny = [
+    { name = "openssl" },
+    { name = "openssl-sys" },
+    { name = "native-tls" },
+    { name = "rustls" },
+    { name = "rustls-native-certs" },
+    { name = "rustls-pemfile" },
+    { name = "schannel" },
+    { name = "security-framework" },
+    { name = "h2" },
+    { name = "hyper" },
+]
+skip = []
+
+# ─── Sources ────────────────────────────────────────────────────────────
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

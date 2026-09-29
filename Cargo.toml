@@ -1,0 +1,56 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/leyline",
+    "crates/leyline-quiche",
+]
+
+exclude = [
+    "crates/leyline-bssl-sys",
+    "crates/leyline-bssl",
+    "crates/leyline-bssl-tokio",
+]
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96" # MSRV: two releases behind stable
+authors = ["Thomas Gardiner <thomas@manaforge.tech>"]
+license = "MIT"
+repository = "https://github.com/manaforged/leyline-http"
+homepage = "https://github.com/manaforged/leyline-http"
+keywords = ["tls", "fingerprint", "http", "browser", "ja4"]
+categories = ["web-programming::http-client", "cryptography"]
+
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(leyline_unstable_bssl)"] }
+
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+rc_mutex = "deny"
+
+[workspace.dependencies]
+tokio = { version = "1.32", features = ["net", "rt", "time", "io-util"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = { version = "0.9", default-features = false, features = ["parse", "serde", "std"] }
+tracing = "0.1.36"
+thiserror = "2"
+url = "2"
+sha2 = "0.10"
+md-5 = "0.10"
+leyline-bssl = { path = "crates/leyline-bssl", version = "=0.1.0" }
+leyline-bssl-sys = { path = "crates/leyline-bssl-sys", version = "=0.1.0" }
+leyline-bssl-tokio = { path = "crates/leyline-bssl-tokio", version = "=0.1.0" }
+socket2 = { version = "0.6", features = ["all"] }
+bytes = "1"
+tokio-tungstenite = "0.26"
+base64 = "0.22"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+opt-level = 3

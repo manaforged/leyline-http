@@ -1,0 +1,80 @@
+[meta]
+name = "Safari iOS 17"
+browser = "safari-ios"
+version = 17
+variant = "SafariIOS17"
+header_style = "webkit-17"
+capture = "emulator"
+platform_browser = { macos = "safari" }
+family = "webkit"
+verified_against = "tls.peet.ws 2026-09-25 Mobile Safari 17.5 iOS 17.5 (21F79) simulator, Xcode 15.4"
+verified_at = "2026-09-25"
+captured_against = "safari-ios-17.5-21F79-simulator"
+
+[tls]
+ciphers = [
+    "TLS_AES_128_GCM_SHA256",
+    "TLS_AES_256_GCM_SHA384",
+    "TLS_CHACHA20_POLY1305_SHA256",
+    "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
+    "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+    "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256",
+    "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+    "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+    "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
+    "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA",
+    "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA",
+    "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA",
+    "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA",
+    "TLS_RSA_WITH_AES_256_GCM_SHA384",
+    "TLS_RSA_WITH_AES_128_GCM_SHA256",
+    "TLS_RSA_WITH_AES_256_CBC_SHA",
+    "TLS_RSA_WITH_AES_128_CBC_SHA",
+    "TLS_ECDHE_ECDSA_WITH_3DES_EDE_CBC_SHA",
+    "TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA",
+    "TLS_RSA_WITH_3DES_EDE_CBC_SHA",
+]
+curves = ["X25519", "SECP256R1", "SECP384R1", "SECP521R1"]
+sigalgs = [
+    "ecdsa_secp256r1_sha256",
+    "rsa_pss_rsae_sha256",
+    "rsa_pkcs1_sha256",
+    "ecdsa_secp384r1_sha384",
+    "ecdsa_sha1",
+    "rsa_pss_rsae_sha384",
+    "rsa_pss_rsae_sha384",
+    "rsa_pkcs1_sha384",
+    "rsa_pss_rsae_sha512",
+    "rsa_pkcs1_sha512",
+    "rsa_pkcs1_sha1",
+]
+ocsp_stapling = true
+signed_cert_timestamps = true
+cert_compression = ["zlib"]
+grease = true
+ech_grease = false
+pre_shared_key = false
+session_tickets = false
+permute_extensions = false
+min_tls_version = "1.0"
+extension_permutation = [0, 23, 65281, 10, 11, 16, 5, 13, 18, 51, 45, 43, 27]
+padding = true
+
+[tls.fingerprint]
+ja4 = "t13d2014h2_a09f3c656075_14788d8d241b"
+
+[h2]
+enable_push = false
+initial_stream_window_size = 2097152
+max_concurrent_streams = 100
+initial_connection_window_size = 10551295
+pseudo_order = ["method", "scheme", "path", "authority"]
+settings_order = ["enable_push", "initial_window_size", "max_concurrent_streams"]
+default_priority = { exclusive = false, stream_dependency = 0, weight = 254 }
+
+[h2.fingerprint]
+akamai = "2:0;4:2097152;3:100|10485760|0|m,s,p,a"
+
+[identity.ios]
+user_agent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
+sec_ch_ua = ""

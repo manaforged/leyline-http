@@ -1,0 +1,9 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Upstream quiche example key and BoringSSL sources that quote PEM headers and NIST vectors"
+paths = [
+  '''crates/leyline-quiche/examples/cert\.key''',
+  '''crates/leyline-bssl/src/(dsa|ec|pkey|rsa|symm)\.rs''',
+]

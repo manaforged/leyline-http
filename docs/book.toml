@@ -1,0 +1,24 @@
+[book]
+title = "Leyline"
+description = "User guide and API reference for leyline-http, an async Rust HTTP client that matches the TLS, HTTP/2, and header fingerprint of a chosen browser build"
+src = "."
+authors = ["Manaforge Technologies, LLC"]
+language = "en"
+
+[build]
+build-dir = "../target/book"
+create-missing = false
+
+[output.html]
+git-repository-url = "https://github.com/manaforged/leyline-http"
+edit-url-template = "https://github.com/manaforged/leyline-http/edit/main/docs/{path}"
+default-theme = "light"
+preferred-dark-theme = "navy"
+
+[output.html.fold]
+enable = true
+level = 1
+
+[output.html.search]
+enable = true
+use-boolean-and = true

@@ -1,0 +1,38 @@
+[[family]]
+variant = "Chrome"
+label = "Chrome"
+browsers = ["chrome"]
+default = true
+
+[[family]]
+variant = "Brave"
+label = "Brave"
+browsers = ["brave"]
+
+[[family]]
+variant = "Firefox"
+label = "Firefox"
+browsers = ["firefox"]
+
+[[family]]
+variant = "Safari"
+label = "Safari"
+browsers = ["safari"]
+
+[[family]]
+variant = "SafariIos"
+label = "Safari iOS"
+browsers = ["safari-ios"]
+latest_capture = ["browser", "emulator"]
+
+[[family]]
+variant = "CfNetwork"
+label = "CFNetwork"
+browsers = ["cfnetwork-ios", "cfnetwork-macos"]
+latest_capture = ["native", "emulator"]
+
+[[family]]
+variant = "OkHttp"
+label = "OkHttp"
+browsers = ["okhttp"]
+latest_capture = ["browser", "emulator"]

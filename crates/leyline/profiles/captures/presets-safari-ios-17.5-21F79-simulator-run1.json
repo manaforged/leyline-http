@@ -1,0 +1,573 @@
+[
+  {
+    "t": 0,
+    "stream": 1,
+    "headers": [
+      [
+        ":method",
+        "GET"
+      ],
+      [
+        ":scheme",
+        "https"
+      ],
+      [
+        ":path",
+        "/?auto"
+      ],
+      [
+        ":authority",
+        "shop.example.test:8443"
+      ],
+      [
+        "accept",
+        "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+      ],
+      [
+        "sec-fetch-site",
+        "none"
+      ],
+      [
+        "accept-encoding",
+        "gzip, deflate, br"
+      ],
+      [
+        "sec-fetch-mode",
+        "navigate"
+      ],
+      [
+        "user-agent",
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
+      ],
+      [
+        "accept-language",
+        "en-US,en;q=0.9"
+      ],
+      [
+        "sec-fetch-dest",
+        "document"
+      ]
+    ],
+    "priority": {
+      "weight": 255,
+      "depends_on": 0,
+      "exclusive": false
+    }
+  },
+  {
+    "t": 0,
+    "stream": 3,
+    "headers": [
+      [
+        ":method",
+        "GET"
+      ],
+      [
+        ":scheme",
+        "https"
+      ],
+      [
+        ":path",
+        "/app.js"
+      ],
+      [
+        ":authority",
+        "shop.example.test:8443"
+      ],
+      [
+        "accept",
+        "*/*"
+      ],
+      [
+        "sec-fetch-site",
+        "same-origin"
+      ],
+      [
+        "sec-fetch-dest",
+        "script"
+      ],
+      [
+        "accept-language",
+        "en-US,en;q=0.9"
+      ],
+      [
+        "sec-fetch-mode",
+        "no-cors"
+      ],
+      [
+        "user-agent",
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
+      ],
+      [
+        "referer",
+        "https://shop.example.test:8443/?auto"
+      ],
+      [
+        "accept-encoding",
+        "gzip, deflate, br"
+      ],
+      [
+        "cookie",
+        "sid=1"
+      ]
+    ],
+    "priority": {
+      "weight": 24,
+      "depends_on": 0,
+      "exclusive": false
+    }
+  },
+  {
+    "t": 0,
+    "stream": 5,
+    "headers": [
+      [
+        ":method",
+        "GET"
+      ],
+      [
+        ":scheme",
+        "https"
+      ],
+      [
+        ":path",
+        "/native"
+      ],
+      [
+        ":authority",
+        "shop.example.test:8443"
+      ],
+      [
+        "accept",
+        "*/*"
+      ],
+      [
+        "sec-fetch-site",
+        "same-origin"
+      ],
+      [
+        "sec-fetch-dest",
+        "empty"
+      ],
+      [
+        "accept-language",
+        "en-US,en;q=0.9"
+      ],
+      [
+        "sec-fetch-mode",
+        "cors"
+      ],
+      [
+        "user-agent",
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
+      ],
+      [
+        "referer",
+        "https://shop.example.test:8443/?auto"
+      ],
+      [
+        "accept-encoding",
+        "gzip, deflate, br"
+      ],
+      [
+        "cookie",
+        "sid=1"
+      ]
+    ],
+    "priority": null
+  },
+  {
+    "t": 0,
+    "stream": 7,
+    "headers": [
+      [
+        ":method",
+        "POST"
+      ],
+      [
+        ":scheme",
+        "https"
+      ],
+      [
+        ":path",
+        "/xhr"
+      ],
+      [
+        ":authority",
+        "shop.example.test:8443"
+      ],
+      [
+        "content-type",
+        "application/json"
+      ],
+      [
+        "accept",
+        "application/json, text/plain, */*"
+      ],
+      [
+        "sec-fetch-site",
+        "same-origin"
+      ],
+      [
+        "accept-language",
+        "en-US,en;q=0.9"
+      ],
+      [
+        "accept-encoding",
+        "gzip, deflate, br"
+      ],
+      [
+        "sec-fetch-mode",
+        "cors"
+      ],
+      [
+        "origin",
+        "https://shop.example.test:8443"
+      ],
+      [
+        "user-agent",
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
+      ],
+      [
+        "referer",
+        "https://shop.example.test:8443/?auto"
+      ],
+      [
+        "content-length",
+        "7"
+      ],
+      [
+        "sec-fetch-dest",
+        "empty"
+      ],
+      [
+        "cookie",
+        "sid=1"
+      ]
+    ],
+    "priority": null
+  },
+  {
+    "t": 0,
+    "stream": 9,
+    "headers": [
+      [
+        ":method",
+        "POST"
+      ],
+      [
+        ":scheme",
+        "https"
+      ],
+      [
+        ":path",
+        "/form"
+      ],
+      [
+        ":authority",
+        "shop.example.test:8443"
+      ],
+      [
+        "content-type",
+        "application/x-www-form-urlencoded"
+      ],
+      [
+        "accept",
+        "application/json, text/plain, */*"
+      ],
+      [
+        "sec-fetch-site",
+        "same-origin"
+      ],
+      [
+        "accept-language",
+        "en-US,en;q=0.9"
+      ],
+      [
+        "accept-encoding",
+        "gzip, deflate, br"
+      ],
+      [
+        "sec-fetch-mode",
+        "cors"
+      ],
+      [
+        "origin",
+        "https://shop.example.test:8443"
+      ],
+      [
+        "user-agent",
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
+      ],
+      [
+        "referer",
+        "https://shop.example.test:8443/?auto"
+      ],
+      [
+        "content-length",
+        "3"
+      ],
+      [
+        "sec-fetch-dest",
+        "empty"
+      ],
+      [
+        "cookie",
+        "sid=1"
+      ]
+    ],
+    "priority": null
+  },
+  {
+    "t": 0,
+    "stream": 1,
+    "headers": [
+      [
+        ":method",
+        "GET"
+      ],
+      [
+        ":scheme",
+        "https"
+      ],
+      [
+        ":path",
+        "/same-site"
+      ],
+      [
+        ":authority",
+        "api.example.test:8443"
+      ],
+      [
+        "sec-fetch-site",
+        "same-site"
+      ],
+      [
+        "accept",
+        "application/json, text/plain, */*"
+      ],
+      [
+        "origin",
+        "https://shop.example.test:8443"
+      ],
+      [
+        "sec-fetch-dest",
+        "empty"
+      ],
+      [
+        "accept-language",
+        "en-US,en;q=0.9"
+      ],
+      [
+        "sec-fetch-mode",
+        "cors"
+      ],
+      [
+        "user-agent",
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
+      ],
+      [
+        "referer",
+        "https://shop.example.test:8443/"
+      ],
+      [
+        "accept-encoding",
+        "gzip, deflate, br"
+      ]
+    ],
+    "priority": null
+  },
+  {
+    "t": 0,
+    "stream": 3,
+    "headers": [
+      [
+        ":method",
+        "GET"
+      ],
+      [
+        ":scheme",
+        "https"
+      ],
+      [
+        ":path",
+        "/cross-origin"
+      ],
+      [
+        ":authority",
+        "api.partner.test:8443"
+      ],
+      [
+        "sec-fetch-site",
+        "cross-site"
+      ],
+      [
+        "accept",
+        "application/json, text/plain, */*"
+      ],
+      [
+        "origin",
+        "https://shop.example.test:8443"
+      ],
+      [
+        "sec-fetch-dest",
+        "empty"
+      ],
+      [
+        "accept-language",
+        "en-US,en;q=0.9"
+      ],
+      [
+        "sec-fetch-mode",
+        "cors"
+      ],
+      [
+        "user-agent",
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
+      ],
+      [
+        "referer",
+        "https://shop.example.test:8443/"
+      ],
+      [
+        "accept-encoding",
+        "gzip, deflate, br"
+      ]
+    ],
+    "priority": null
+  },
+  {
+    "t": 0,
+    "stream": 11,
+    "headers": [
+      [
+        ":method",
+        "GET"
+      ],
+      [
+        ":scheme",
+        "https"
+      ],
+      [
+        ":path",
+        "/favicon.ico"
+      ],
+      [
+        ":authority",
+        "shop.example.test:8443"
+      ],
+      [
+        "accept",
+        "*/*"
+      ],
+      [
+        "sec-fetch-site",
+        "same-origin"
+      ],
+      [
+        "sec-fetch-dest",
+        "image"
+      ],
+      [
+        "accept-language",
+        "en-US,en;q=0.9"
+      ],
+      [
+        "sec-fetch-mode",
+        "no-cors"
+      ],
+      [
+        "user-agent",
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
+      ],
+      [
+        "referer",
+        "https://shop.example.test:8443/?auto"
+      ],
+      [
+        "accept-encoding",
+        "gzip, deflate, br"
+      ],
+      [
+        "cookie",
+        "sid=1"
+      ]
+    ],
+    "priority": null
+  },
+  {
+    "t": 0,
+    "stream": 13,
+    "headers": [
+      [
+        ":method",
+        "POST"
+      ],
+      [
+        ":scheme",
+        "https"
+      ],
+      [
+        ":path",
+        "/submit"
+      ],
+      [
+        ":authority",
+        "shop.example.test:8443"
+      ],
+      [
+        "content-type",
+        "application/x-www-form-urlencoded"
+      ],
+      [
+        "accept",
+        "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+      ],
+      [
+        "sec-fetch-site",
+        "same-origin"
+      ],
+      [
+        "accept-language",
+        "en-US,en;q=0.9"
+      ],
+      [
+        "accept-encoding",
+        "gzip, deflate, br"
+      ],
+      [
+        "sec-fetch-mode",
+        "navigate"
+      ],
+      [
+        "origin",
+        "https://shop.example.test:8443"
+      ],
+      [
+        "user-agent",
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
+      ],
+      [
+        "referer",
+        "https://shop.example.test:8443/?auto"
+      ],
+      [
+        "content-length",
+        "3"
+      ],
+      [
+        "sec-fetch-dest",
+        "document"
+      ],
+      [
+        "cookie",
+        "sid=1"
+      ]
+    ],
+    "priority": {
+      "weight": 255,
+      "depends_on": 0,
+      "exclusive": false
+    }
+  }
+]

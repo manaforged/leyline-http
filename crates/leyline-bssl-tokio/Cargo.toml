@@ -1,0 +1,38 @@
+[package]
+name = "leyline-bssl-tokio"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.96"
+authors = [
+    "Thomas Gardiner <thomas@manaforge.tech>",
+    "Alex Crichton <alex@alexcrichton.com>",
+    "Ivan Nikulin <ifaaan@gmail.com>",
+]
+description = "Async Tokio TLS streams over leyline-bssl, forked from Cloudflare tokio-boring"
+homepage = "https://github.com/manaforged/leyline-http"
+documentation = "https://docs.rs/leyline-bssl-tokio"
+keywords = ["boringssl", "tls", "tokio", "async"]
+categories = ["cryptography", "asynchronous"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/manaforged/leyline-http"
+
+[dependencies]
+leyline-bssl = { path = "../leyline-bssl", version = "=0.1.0" }
+leyline-bssl-sys = { path = "../leyline-bssl-sys", version = "=0.1.0" }
+tokio = "1"
+
+[dev-dependencies]
+futures = "0.3"
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+
+[lib]
+name = "leyline_bssl_tokio"
+path = "src/lib.rs"
+
+[package.metadata.upstream]
+repo = "cloudflare/boring"
+crate = "tokio-boring"
+version = "5.2.0"
+
+[workspace]

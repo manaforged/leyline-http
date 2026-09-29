@@ -1,0 +1,85 @@
+[package]
+name = "leyline-quiche"
+description = "Fork of cloudflare/quiche 0.30.0 that links against leyline-bssl"
+homepage = "https://github.com/manaforged/leyline-http"
+documentation = "https://docs.rs/leyline-quiche"
+keywords = ["quic", "http3", "boringssl"]
+categories = ["network-programming"]
+version.workspace = true
+edition.workspace = true
+license = "BSD-2-Clause"
+repository.workspace = true
+authors = [
+    "Alessandro Ghedini <alessandro@ghedini.me>",
+    "Thomas Gardiner <thomas@manaforge.tech>",
+]
+rust-version = "1.96"
+include = [
+    "/*.md",
+    "/*.toml",
+    "/COPYING",
+    "/LICENSE",
+    "/NOTICE",
+    "/src",
+]
+
+
+[features]
+default = ["boringssl-bssl-crate"]
+
+# Use the BoringSSL library provided by the leyline-bssl crate (replaces
+# upstream boringssl-boring-crate). This is the only supported mode in
+# leyline-quiche; leyline-bssl-sys owns the BoringSSL build.
+boringssl-bssl-crate = ["leyline-bssl", "foreign-types-shared"]
+
+internal = []
+
+[dependencies]
+leyline-bssl = { workspace = true, optional = true }
+bytes = { workspace = true }
+debug_panic = "0.2.1"
+either = { version = "1.8", default-features = false }
+foreign-types-shared = { version = "0.3.0", optional = true }
+intrusive-collections = "0.10.3"
+libc = { version = "0.2.76", default-features = false }
+libm = "0.2"
+log = { version = "0.4.20", features = ["std"] }
+octets = { version = "0.3.7", features = ["huffman_hpack"] }
+slab = "0.4"
+smallvec = { version = "1.10", default-features = false, features = ["union"] }
+enum_dispatch = "0.3"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Networking_WinSock",
+    "Win32_Security_Cryptography",
+] }
+
+[dev-dependencies]
+mio = { version = "1", features = ["net", "os-poll"] }
+ring = "0.17.8"
+rstest = "0.26.1"
+url = { workspace = true }
+
+[lib]
+crate-type = ["lib"]
+doctest = false
+
+# Vendored quiche upstream — blanket-allow lint groups to keep upstream diffs
+# small and avoid chasing style lints in code we don't own.
+[lints.clippy]
+all = { level = "allow", priority = -1 }
+pedantic = { level = "allow", priority = -1 }
+style = { level = "allow", priority = -1 }
+correctness = { level = "allow", priority = -1 }
+complexity = { level = "allow", priority = -1 }
+perf = { level = "allow", priority = -1 }
+
+[lints.rust]
+missing_docs = { level = "allow", priority = -1 }
+unexpected_cfgs = { level = "allow", priority = -1 }
+
+[package.metadata.upstream]
+repo = "cloudflare/quiche"
+crate = "quiche"
+version = "0.30.0"
