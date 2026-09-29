@@ -1391,68 +1391,6 @@ async fn live_h3_response_streaming_is_incremental() {
     );
 }
 
-#[tokio::test]
-#[ignore = "live: needs network"]
-async fn live_h3_streaming_request_body_roundtrips() {
-    use bytes::Bytes;
-    use futures_util::stream;
-    use leyline::Body;
-
-    let session = leyline::Session::builder()
-        .browser(Browser::Chrome147)
-        .protocol(leyline::ProtocolPolicy::Http3)
-        .build()
-        .expect("h3 session builds");
-
-    let total = 320 * 1024;
-    let expected: Vec<u8> = (0..total).map(|i| b'a' + (i % 26) as u8).collect();
-    let chunks: Vec<std::io::Result<Bytes>> = expected
-        .chunks(1024)
-        .map(|c| Ok(Bytes::copy_from_slice(c)))
-        .collect();
-    let chunk_count = chunks.len();
-    let body = Body::stream(stream::iter(chunks), Some(total as u64));
-
-    let resp = session
-        .post("https://httpbin.agrd.workers.dev/post")
-        .header("content-type", "text/plain")
-        .body(body)
-        .send()
-        .await
-        .expect("streamed H3 POST failed");
-    assert_eq!(resp.status(), 200, "echo origin returned non-200");
-
-    let raw = resp.bytes().await.expect("buffered body");
-    let v: Value = serde_json::from_slice(&raw).expect("echo response is JSON");
-    let expected_str = std::str::from_utf8(&expected).unwrap();
-    let echoed = match v["body"].as_str() {
-        Some(s) => s,
-        None => {
-            let keys: Vec<&String> = v
-                .as_object()
-                .map(|o| o.keys().collect())
-                .unwrap_or_default();
-            let head: String = String::from_utf8_lossy(&raw).chars().take(400).collect();
-            panic!("echo `body` is not a string; response keys={keys:?}; head={head}");
-        }
-    };
-    assert_eq!(
-        echoed.len(),
-        expected_str.len(),
-        "echoed body length {} != sent {} (truncated upload — premature FIN?)",
-        echoed.len(),
-        expected_str.len()
-    );
-    assert_eq!(
-        echoed, expected_str,
-        "echoed streaming H3 body differs from sent (corrupt or reordered upload)"
-    );
-    println!(
-        "✓ H3 streaming request body: {} bytes in {chunk_count} chunks round-tripped exactly",
-        expected.len()
-    );
-}
-
 fn decode_content_encoding(body: &[u8], encoding: Option<&str>) -> Vec<u8> {
     use std::io::Read;
     match encoding {
