@@ -68,6 +68,23 @@ pub struct ProxyConfig {
     pub(super) no_proxy_explicit: bool,
     pub(super) use_env: bool,
     pub(super) from_env: bool,
+    pub(super) rejected: Option<RejectedProxy>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct RejectedProxy {
+    variable: &'static str,
+}
+
+impl RejectedProxy {
+    fn error(self, kind: Kind) -> crate::core::Error {
+        crate::core::Error::new(kind).with_message(format!(
+            "the {} environment variable is not a valid proxy URL (expected an http, https, \
+             socks5, or socks5h URL with a host); fix or unset it, or set a proxy with \
+             `SessionBuilder::proxy`",
+            self.variable
+        ))
+    }
 }
 
 impl std::fmt::Debug for ProxyConfig {
@@ -78,6 +95,7 @@ impl std::fmt::Debug for ProxyConfig {
             .field("no_proxy_explicit", &self.no_proxy_explicit)
             .field("use_env", &self.use_env)
             .field("from_env", &self.from_env)
+            .field("rejected", &self.rejected)
             .finish()
     }
 }
@@ -90,6 +108,7 @@ impl Default for ProxyConfig {
             no_proxy_explicit: false,
             use_env: true,
             from_env: false,
+            rejected: None,
         }
     }
 }
@@ -127,6 +146,19 @@ impl ProxyConfig {
         self
     }
 
+    pub(crate) fn reject_env(mut self, variable: &'static str) -> Self {
+        self.rejected = Some(RejectedProxy { variable });
+        self
+    }
+
+    pub(crate) fn rejects(&self) -> bool {
+        self.rejected.is_some()
+    }
+
+    pub(crate) fn rejection(&self, kind: Kind) -> Option<crate::core::Error> {
+        self.rejected.map(|rejected| rejected.error(kind))
+    }
+
     pub(crate) fn rules(&self) -> &[ProxyRule] {
         &self.rules
     }
@@ -150,17 +182,23 @@ impl ProxyConfig {
         self.use_env
     }
 
-    pub(crate) fn proxy_for(&self, url: &url::Url) -> Option<&str> {
+    pub(crate) fn proxy_for(&self, url: &url::Url) -> crate::core::Result<Option<&str>> {
+        if let Some(rejected) = self.rejected {
+            return Err(rejected.error(Kind::Proxy));
+        }
         let host = url.host_str().unwrap_or("");
-        let winner = self
+        let Some(winner) = self
             .rules
             .iter()
             .find(|rule| rule.matches(url.scheme()))
-            .map(|rule| rule.url.as_str())?;
+            .map(|rule| rule.url.as_str())
+        else {
+            return Ok(None);
+        };
         if (self.no_proxy_explicit || self.from_env) && self.no_proxy.matches(host) {
-            return None;
+            return Ok(None);
         }
-        Some(winner)
+        Ok(Some(winner))
     }
 }
 
@@ -225,12 +263,8 @@ impl ProxyRule {
     }
 
     fn matches(&self, scheme: &str) -> bool {
-        matches!(
-            (self.scheme, scheme),
-            (ProxyRuleScheme::All, _)
-                | (ProxyRuleScheme::Http, "http")
-                | (ProxyRuleScheme::Https, "https")
-        )
+        self.scheme == ProxyRuleScheme::All
+            || ProxyRuleScheme::for_url_scheme(scheme) == Some(self.scheme)
     }
 
     pub(crate) fn url(&self) -> &str {
@@ -243,6 +277,16 @@ enum ProxyRuleScheme {
     All,
     Http,
     Https,
+}
+
+impl ProxyRuleScheme {
+    fn for_url_scheme(scheme: &str) -> Option<Self> {
+        match scheme {
+            "http" | "ws" => Some(Self::Http),
+            "https" | "wss" => Some(Self::Https),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

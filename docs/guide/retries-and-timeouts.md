@@ -37,6 +37,13 @@ it unless the request sets its own with `RequestBuilder::retry`.
 setter named after it: `max_retries`, `initial_backoff`, `max_backoff`,
 `backoff_factor`, `jitter`, `max_retry_after`, and `allow_non_idempotent`.
 
+`Status(u16)` and `ServerError` match the status of a response. `Timeout`
+matches an error for which `Error::is_timeout()` is true. `ConnectionError`
+matches any other error for which `Error::is_retryable()` is true: a failed
+connect, a reset, aborted, or closed connection, an I/O error on the way to a
+proxy, and a proxy that answers `CONNECT` with 502, 503, or 504. The `CONNECT`
+answer ends the request with an error, so only `ConnectionError` matches it.
+
 ```rust
 use leyline::{RetryPolicy, RetryTrigger};
 use std::time::Duration;
@@ -56,12 +63,34 @@ let also = RetryPolicy::transient().on_status(408);
 The setters adjust an existing policy. `on_status` adds a status code to the
 trigger set.
 
-`RetryPolicy` is the only retry owner. Connection setup has no hidden retry: a
-failed connect returns its error, and `RetryTrigger::ConnectionError` decides
-whether the request runs again. One case sits outside the policy: when a
-pooled keep-alive connection fails before the response, the pool sends an
-idempotent request with a buffered or empty body once more on a new
-connection. The new connection's result then goes to `RetryPolicy`.
+`RetryPolicy` decides whether a whole request runs again. Connection setup has
+no retry loop of its own: a failed connect returns its error, and
+`RetryTrigger::ConnectionError` decides whether the request runs again.
+
+These cases send a request again, or connect again, without asking the policy.
+Each happens at most once for one attempt, and the result then goes to
+`RetryPolicy` like any other:
+
+- HTTP/1.1: a pooled keep-alive connection fails before you receive the
+  response. The pool sends an idempotent request with a buffered or empty body
+  once more on a new connection.
+- HTTP/2: a pooled connection fails before you receive the response. The pool
+  sends a request with a buffered or empty body once more on a new connection
+  when the method is idempotent. After a `REFUSED_STREAM` reset, it does so for
+  any method, because the server refused the stream before it processed the
+  request.
+- HTTP/3: a pooled connection reports that it did not send the request, for
+  example after a `GOAWAY` frame. The pool sends a request with a buffered or
+  empty body once more on a new connection, for any method. After an
+  `H3_REQUEST_REJECTED` reset that arrives before the response head, the
+  connection sends a buffered request once more on the same connection.
+- ALPN fallback: under `ProtocolPolicy::Auto`, an origin that does not select
+  `h2` gets the request again over HTTP/1.1 on a new connection, and Leyline
+  remembers that the origin speaks HTTP/1.1 only. A streaming request body
+  cannot be sent twice, so that request fails with `Kind::Request`.
+- `Race` fallback: under `ProtocolPolicy::Race`, when both the HTTP/3 connect
+  and the HTTP/2 connect fail, Leyline falls back to `Auto` and connects
+  again.
 
 Backoff for attempt `n` is `initial_backoff * backoff_factor.powi(n)`, capped
 at `max_backoff`. With `jitter` set, the result is multiplied by a uniform
@@ -116,9 +145,9 @@ A streaming request body is never retried, whatever the method. See
 | Setter | Default | Covers |
 | --- | --- | --- |
 | `total` | `Some(300 s)` | Wall clock for one `send`, covering every redirect, retry, backoff sleep, and buffered body read. On expiry the call returns `Kind::Timeout`. `total(None)` removes the limit, for example for a long poll. |
-| `connect` | `Some(10 s)` | DNS, TCP connect, and TLS setup for one new connection, over `http` or `https`. One request spends at most one connect window. Pooled reuse is not covered. |
-| `read` | `None` | Idle limit for each body read: the longest gap between two chunks. It applies to a streamed body and to a buffered body that Leyline drains from a stream. A body that the transport reads before the head resolves falls under `response_header` and `total`. `total` also bounds a buffered body; a streamed body has only `read`. |
-| `response_header` | `None` | Wait from dispatch start until the transport response resolves, per redirect: connection acquisition, DNS and TLS setup, and request transmission are inside this window. |
+| `connect` | `Some(10 s)` | DNS, TCP connect, proxy negotiation, and TLS setup for one new connection, over `http` or `https`. An HTTP/3 connection counts the DNS lookup, the UDP setup, and the QUIC handshake. Each new connection gets its own window, so a retry, a pool resend, the ALPN fallback, and the `Race` fallback each start a full window, and `total` bounds the sum. Pooled reuse is not covered. |
+| `read` | `None` | Idle limit for each body read of a `.stream()` response: the longest gap between two chunks. A buffered response has no `read` limit, because its whole body arrives before the response resolves, and `response_header` and `total` cover that wait. A streamed body has only `read`. |
+| `response_header` | `None` | Wait from dispatch start until the transport response resolves, per redirect: connection acquisition, DNS and TLS setup, and request transmission are inside this window. On a buffered response, the transport resolves after the whole body has arrived, so the body read is inside this window too. |
 
 ```rust,no_run
 use leyline::{Session, TimeoutConfig};
@@ -182,9 +211,17 @@ let streamed = session
 # }
 ```
 
-A timeout surfaces as `Kind::Timeout`, and `Error::is_timeout()` returns true
-for it and for an underlying `TimedOut` I/O error.
+`Error::is_timeout()` returns true for every timeout, but the error kind
+depends on which timeout elapsed:
+
+- `total` and `response_header` return `Kind::Timeout`.
+- `connect` returns `Kind::Connect` with a `TimedOut` I/O source, on HTTP/1.1,
+  HTTP/2, and HTTP/3.
+- A `read` stall on a `.stream()` body returns `Kind::Timeout` from `bytes()`,
+  `text()`, and `json()`. It returns `Kind::Io` with a `TimedOut` I/O source
+  from `copy_to` and `read_until`.
 
 ## Next
 
-Read [Proxies](proxies.md).
+Read [Errors](errors.md) to match on `Kind` and find out which errors a
+retry covers.

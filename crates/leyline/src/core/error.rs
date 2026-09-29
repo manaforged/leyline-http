@@ -6,6 +6,7 @@ use std::io;
 use http::StatusCode;
 use url::Url;
 
+use crate::core::retry::GATEWAY_STATUSES;
 use crate::h2::H2Error;
 use crate::h2::error::ErrorCode;
 #[cfg(feature = "http3")]
@@ -171,17 +172,17 @@ impl Error {
     }
 
     pub fn is_retryable(&self) -> bool {
-        self.is_timeout() || self.is_connect() || self.is_connection_closed() || self.is_proxy_io()
+        self.is_timeout()
+            || self.is_connect()
+            || self.is_connection_closed()
+            || self.is_proxy_transient()
     }
 
-    fn is_proxy_io(&self) -> bool {
-        matches!(
-            self.tls(),
-            Some(TlsError::Proxy {
-                source: Some(_),
-                ..
-            })
-        )
+    fn is_proxy_transient(&self) -> bool {
+        let Some(TlsError::Proxy { status, source, .. }) = self.tls() else {
+            return false;
+        };
+        source.is_some() || status.is_some_and(|code| GATEWAY_STATUSES.contains(&code))
     }
 
     pub(crate) fn is_connection_closed(&self) -> bool {

@@ -13,7 +13,10 @@ fn mock_env_has<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> bool + 
 
 #[test]
 fn env_proxy_no_env_returns_none() {
-    assert_eq!(env_proxy_from(mock_env(&[]), mock_env_has(&[])), None);
+    assert_eq!(
+        env_proxy_from(mock_env(&[]), mock_env_has(&[])).map(|p| p.value),
+        None
+    );
 }
 
 #[test]
@@ -23,14 +26,14 @@ fn env_proxy_prefers_https_proxy_upper() {
         ("https_proxy", "http://lo.example:3128"),
         ("HTTP_PROXY", "http://httpup.example:3128"),
     ];
-    let v = env_proxy_from(mock_env(pairs), mock_env_has(pairs));
+    let v = env_proxy_from(mock_env(pairs), mock_env_has(pairs)).map(|p| p.value);
     assert_eq!(v, Some("http://up.example:3128".to_string()));
 }
 
 #[test]
 fn env_proxy_honours_http_proxy_when_no_cgi() {
     let pairs = &[("HTTP_PROXY", "http://ok.example:3128")];
-    let v = env_proxy_from(mock_env(pairs), mock_env_has(pairs));
+    let v = env_proxy_from(mock_env(pairs), mock_env_has(pairs)).map(|p| p.value);
     assert_eq!(v, Some("http://ok.example:3128".to_string()));
 }
 
@@ -41,14 +44,14 @@ fn env_proxy_trims_whitespace_and_skips_empty() {
         ("https_proxy", ""),
         ("HTTP_PROXY", "  http://trim.example:3128  "),
     ];
-    let v = env_proxy_from(mock_env(pairs), mock_env_has(pairs));
+    let v = env_proxy_from(mock_env(pairs), mock_env_has(pairs)).map(|p| p.value);
     assert_eq!(v, Some("http://trim.example:3128".to_string()));
 }
 
 #[test]
 fn env_proxy_uses_all_proxy_as_fallback() {
     let pairs = &[("ALL_PROXY", "socks5://proxy.example:1080")];
-    let v = env_proxy_from(mock_env(pairs), mock_env_has(pairs));
+    let v = env_proxy_from(mock_env(pairs), mock_env_has(pairs)).map(|p| p.value);
     assert_eq!(v, Some("socks5://proxy.example:1080".to_string()));
 }
 
@@ -58,7 +61,7 @@ fn env_proxy_prefers_scheme_specific_proxy_over_all_proxy() {
         ("ALL_PROXY", "socks5://fallback.example:1080"),
         ("HTTPS_PROXY", "http://https.example:3128"),
     ];
-    let v = env_proxy_from(mock_env(pairs), mock_env_has(pairs));
+    let v = env_proxy_from(mock_env(pairs), mock_env_has(pairs)).map(|p| p.value);
     assert_eq!(v, Some("http://https.example:3128".to_string()));
 }
 
@@ -69,7 +72,7 @@ fn env_proxy_ignores_http_proxy_under_cgi() {
             (*signal, "set"),
             ("HTTP_PROXY", "http://evil.attacker:3128"),
         ];
-        let v = env_proxy_from(mock_env(pairs), mock_env_has(pairs));
+        let v = env_proxy_from(mock_env(pairs), mock_env_has(pairs)).map(|p| p.value);
         assert_eq!(
             v, None,
             "CGI signal {signal} should have blocked HTTP_PROXY but got {v:?}"
@@ -84,7 +87,7 @@ fn env_proxy_under_cgi_still_honours_https_proxy() {
         ("HTTPS_PROXY", "http://legit.example:3128"),
         ("HTTP_PROXY", "http://evil.attacker:3128"),
     ];
-    let v = env_proxy_from(mock_env(pairs), mock_env_has(pairs));
+    let v = env_proxy_from(mock_env(pairs), mock_env_has(pairs)).map(|p| p.value);
     assert_eq!(v, Some("http://legit.example:3128".to_string()));
 }
 
@@ -95,7 +98,7 @@ fn env_proxy_skips_present_but_unreadable_vars() {
         None
     };
     let has_var = |k: &str| matches!(k, "HTTPS_PROXY" | "HTTP_PROXY");
-    assert_eq!(env_proxy_from(get_var, has_var), None);
+    assert_eq!(env_proxy_from(get_var, has_var).map(|p| p.value), None);
 }
 
 #[test]
@@ -105,7 +108,7 @@ fn env_proxy_under_cgi_with_unreadable_http_proxy() {
         None
     };
     let has_var = |k: &str| matches!(k, "GATEWAY_INTERFACE" | "HTTP_PROXY");
-    assert_eq!(env_proxy_from(get_var, has_var), None);
+    assert_eq!(env_proxy_from(get_var, has_var).map(|p| p.value), None);
 }
 
 #[test]
@@ -119,7 +122,10 @@ fn env_proxy_under_cgi_with_unreadable_http_proxy_but_readable_https() {
         }
     };
     let has_var = |k: &str| matches!(k, "GATEWAY_INTERFACE" | "HTTPS_PROXY" | "HTTP_PROXY");
-    assert_eq!(env_proxy_from(get_var, has_var), Some(legit.to_string()));
+    assert_eq!(
+        env_proxy_from(get_var, has_var).map(|p| p.value),
+        Some(legit.to_string())
+    );
 }
 
 #[test]
@@ -129,6 +135,6 @@ fn env_proxy_under_cgi_still_honours_lowercase_http_proxy() {
         ("http_proxy", "http://user.example:3128"),
         ("HTTP_PROXY", "http://evil.attacker:3128"),
     ];
-    let v = env_proxy_from(mock_env(pairs), mock_env_has(pairs));
+    let v = env_proxy_from(mock_env(pairs), mock_env_has(pairs)).map(|p| p.value);
     assert_eq!(v, Some("http://user.example:3128".to_string()));
 }

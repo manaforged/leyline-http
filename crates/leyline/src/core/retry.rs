@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+pub(crate) const GATEWAY_STATUSES: [u16; 3] = [502, 503, 504];
+
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub enum RetryTrigger {
@@ -50,14 +52,11 @@ impl RetryPolicy {
             max_retry_after: Duration::MAX,
             backoff_factor: 2.0,
             jitter: true,
-            retry_on: vec![
-                RetryTrigger::ConnectionError,
-                RetryTrigger::Status(429),
-                RetryTrigger::Status(502),
-                RetryTrigger::Status(503),
-                RetryTrigger::Status(504),
-                RetryTrigger::Timeout,
-            ],
+            retry_on: [RetryTrigger::ConnectionError, RetryTrigger::Status(429)]
+                .into_iter()
+                .chain(GATEWAY_STATUSES.map(RetryTrigger::Status))
+                .chain([RetryTrigger::Timeout])
+                .collect(),
             allow_non_idempotent: false,
         }
     }

@@ -79,7 +79,8 @@ First public release.
   2 seconds. `PoolConfig::h2_ping_after_idle` and
   `PoolConfig::h2_ping_timeout` change the thresholds.
 - WebSocket connections through the session. `WsConnection::header` reads the
-  handshake response headers.
+  handshake response headers. A `wss://` URL uses the `https` proxy rule, and a
+  `ws://` URL uses the `http` rule.
 - Lifecycle tracing and a Tower `Service`, `LeylineService`, that wraps a
   session (feature `tower`).
 - Opt-in fingerprint diagnostics derived from the configured profile and
@@ -96,6 +97,9 @@ First public release.
   most one connect timeout on an unreachable host.
 - `TimeoutConfig::connect` also bounds the HTTP/3 handshake. A QUIC handshake
   that runs out of time is a `Kind::Connect` error, and `is_timeout()` is true.
+- A proxy that answers CONNECT with 502, 503, or 504 fails with a retryable
+  error. A retry policy with `RetryTrigger::ConnectionError`, such as
+  `RetryPolicy::transient()`, tries again.
 - `Session::with_proxy` keeps the shared connection pool, which is keyed by
   proxy. `Session::fresh_pool` takes a new pool, so the next request opens
   new connections.
@@ -138,6 +142,10 @@ First public release.
 - QPACK header sections are bounded by a local limit that does not depend on
   the peer's SETTINGS, and HTTP/2 PING, WINDOW_UPDATE, and empty CONTINUATION
   floods close the connection.
+- An invalid proxy URL in `HTTPS_PROXY`, `HTTP_PROXY`, or `ALL_PROXY` never
+  falls back to a direct connection. `SessionBuilder::build` returns a
+  `Kind::Config` error that names the variable, and a `Session::new` session
+  fails each request with `Kind::Proxy`.
 - A plain-HTTP origin cannot shadow a Secure cookie (RFC 6265bis), and
   `ProxyUrl` and error messages redact credentials and query strings.
 - `Debug` output never prints a password, token, cookie value, or query

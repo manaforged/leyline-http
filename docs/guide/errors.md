@@ -7,9 +7,14 @@ lists what each `Kind` means.
 ## Match on the kind
 
 `Kind` is `#[non_exhaustive]`, so a `match` needs a wildcard arm. Test
-`is_timeout()` before the kind: a connect timeout reports `Kind::Connect`
-and a stalled body read reports `Kind::Io`, and `is_timeout()` is true for
-both.
+`is_timeout()` before the kind, because a timeout has more than one kind:
+
+- A connect timeout is `Kind::Connect`, on HTTP/1.1, HTTP/2, and HTTP/3.
+- A `total` or `response_header` timeout is `Kind::Timeout`.
+- A stalled read of a `.stream()` body is `Kind::Timeout` from `bytes()`,
+  `text()`, and `json()`. It is `Kind::Io` from `copy_to` and `read_until`.
+
+`is_timeout()` is true for all of them.
 
 ```rust,no_run
 use leyline::{Kind, Session};
@@ -31,12 +36,21 @@ match session.get("https://example.com/").await {
 `Kind::as_str()` returns a stable lowercase label for logs and metrics.
 
 `Config` means that a value or a combination of settings cannot work, for
-example a forced HTTP/3 policy with a proxy, or a browser with no identity for
-the platform. `Connect` means DNS resolution or the TCP connect failed.
+example a forced HTTP/3 policy with a proxy that cannot carry HTTP/3, or a
+browser with no identity for the platform. `SessionBuilder::build()` also
+returns it when a proxy environment variable is not a valid proxy URL.
+
+`Connect` means DNS resolution or the TCP connect failed, or the connect
+timeout elapsed. The connect window also covers proxy negotiation and the TLS
+handshake, and on HTTP/3 the QUIC handshake. An HTTP/3 handshake that fails
+before the window ends is `Kind::Http3`.
+
 `Proxy` means the proxy dial, handshake, authentication, or `CONNECT` failed;
 `err.tls()` returns `TlsError::Proxy`, whose `status` holds the proxy's HTTP
-status, for example `407`. `Tls` means the TLS handshake or certificate
-verification failed.
+status, for example `407`. A session from `Session::new()` fails every request
+with `Kind::Proxy` when a proxy environment variable is not a valid proxy URL,
+and the message names the variable. `Tls` means the TLS handshake or
+certificate verification failed.
 
 `Display` prints the kind, status, message, and URL once. Walk
 `std::error::Error::source()` for the cause.
@@ -64,7 +78,7 @@ The predicates look at the kind and at the source error:
 | `is_timeout()` | `Kind::Timeout`, and I/O or TLS errors with `TimedOut` |
 | `is_connect()` | `Kind::Connect`, DNS, TCP connect, and TLS handshake failures, and refused or unreachable sockets |
 | `is_status()` | `Kind::Status` |
-| `is_retryable()` | `is_timeout()`, `is_connect()`, a reset, aborted, or closed connection, or a proxy dial failure |
+| `is_retryable()` | `is_timeout()`, `is_connect()`, a reset, aborted, or closed connection, an I/O failure while dialing or talking to a proxy, or a proxy answer of 502, 503, or 504 to `CONNECT` |
 
 For other kinds, compare `err.kind()`, for example `err.kind() == Kind::Redirect`.
 
@@ -76,9 +90,15 @@ A `RetryPolicy` retries an error only in these cases:
 - `is_retryable()` is true for another reason and the policy has
   `RetryTrigger::ConnectionError`.
 
+A proxy that answers `CONNECT` with 502, 503, or 504 gives an error, not a
+response, so the `Status` and `ServerError` triggers do not match it. Only
+`ConnectionError` retries it. Other `CONNECT` answers, for example 407, are not
+retried.
+
 A custom retry loop calls `err.is_retryable()` to use the same rule.
 
-Other errors are not retried. `RetryPolicy::transient()` has both triggers. See [Retries and timeouts](retries-and-timeouts.md).
+Other errors are not retried. `RetryPolicy::transient()` has both triggers. See
+[Retries and timeouts](retries-and-timeouts.md).
 
 ## Read the source error
 
@@ -86,16 +106,27 @@ Other errors are not retried. `RetryPolicy::transient()` has both triggers. See 
 `err.io()` returns the `std::io::Error`, when that is the source. Match
 `TlsError::Rejected` for a peer that closed or reset the handshake, and
 `TlsError::Certificate { verify_code, reason, .. }` for a failed certificate
-check. `err.url()` returns the request URL as an `Option<&url::Url>`. `Display`
-and `Debug` show it with the password and the query hidden.
+check.
+
+Only a `Kind::Status` error carries a URL. `err.url()` returns the URL of the
+response, after any redirects, as an `Option<&url::Url>`, and returns `None` for
+every other kind. `Display` and `Debug` show it with the password and the query
+hidden.
 
 ```rust,no_run
-# async fn run() {
+# async fn run() -> leyline::Result<()> {
 let session = leyline::Session::new();
-if let Err(err) = session.get("https://example.com/").await {
+let resp = session.get("https://example.com/").await?;
+if let Err(err) = resp.error_for_status() {
     if let Some(url) = err.url() {
-        eprintln!("failed on {}", url.host_str().unwrap_or("?"));
+        eprintln!("status error on {}", url.host_str().unwrap_or("?"));
     }
 }
+# Ok(())
 # }
 ```
+
+## Next
+
+Read [Proxies](proxies.md) to set proxy rules, bypass lists, and environment
+discovery.

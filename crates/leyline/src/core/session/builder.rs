@@ -11,6 +11,7 @@ use crate::tls::TlsTrustConfig;
 use crate::trace::Trace;
 
 use self::derive::{IdentityInputs, IdentitySource, derive_identity};
+use super::proxy::InvalidEnvProxy;
 use super::{Identity, ProtocolPolicy, Session};
 use crate::core::error::Result;
 
@@ -240,12 +241,16 @@ impl SessionBuilder {
     }
 
     pub(super) fn into_builtin(self) -> Session {
-        self.build()
+        self.build_with(InvalidEnvProxy::FailRequests)
             .expect("bundled profile data is statically valid; default trust loading only warns")
     }
 
-    pub fn build(mut self) -> Result<Session> {
-        self.validate()?;
+    pub fn build(self) -> Result<Session> {
+        self.build_with(InvalidEnvProxy::FailBuild)
+    }
+
+    fn build_with(mut self, on_invalid: InvalidEnvProxy) -> Result<Session> {
+        self.validate(on_invalid)?;
         let tcp_profile = self.resolve_tcp_profile();
         let derived = derive_identity(self.identity_inputs(&tcp_profile))?;
         let connector = self.build_connector(&derived.profile, &tcp_profile)?;

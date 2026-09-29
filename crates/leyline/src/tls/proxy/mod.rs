@@ -45,9 +45,7 @@ pub(crate) async fn connect_through_proxy<C: crate::tls::TlsHandshake>(
         "http" => http::connect(connector, host, port, &proxy, include_alps).await,
         "https" => http::connect_via_tls(connector, host, port, &proxy, include_alps).await,
         other => Err(TlsError::proxy(format!(
-            "unsupported proxy scheme `{other}`: leyline tunnels through http://, https://, or \
-             socks5:// proxies. Sending CONNECT to a `{other}` proxy would transmit it — including \
-             any Proxy-Authorization credentials — in cleartext."
+            "unsupported proxy scheme `{other}`: use an http, https, socks5, or socks5h proxy URL"
         ))),
     }
 }

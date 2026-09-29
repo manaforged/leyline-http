@@ -4,14 +4,14 @@ use crate::core::ProxyUrl;
 use crate::core::error::{Error, Kind, Result};
 use crate::profile::Platform;
 
-use super::super::proxy::env_proxy;
+use super::super::proxy::{InvalidEnvProxy, apply_env_proxy};
 use super::SessionBuilder;
 
 impl SessionBuilder {
-    pub(super) fn validate(&mut self) -> Result<()> {
+    pub(super) fn validate(&mut self, on_invalid: InvalidEnvProxy) -> Result<()> {
         self.check_config()?;
         self.resolve_platform();
-        self.resolve_proxies()?;
+        self.resolve_proxies(on_invalid)?;
         #[cfg(feature = "http3")]
         self.check_h3_proxy()?;
         Ok(())
@@ -42,20 +42,11 @@ impl SessionBuilder {
         };
     }
 
-    fn resolve_proxies(&mut self) -> Result<()> {
+    fn resolve_proxies(&mut self, on_invalid: InvalidEnvProxy) -> Result<()> {
         for rule in self.proxy_config.rules() {
             ProxyUrl::parse(rule.url())?;
         }
-        if self.proxy_config.rules().is_empty()
-            && self.proxy_config.uses_env()
-            && let Some(p) = env_proxy()
-        {
-            self.proxy_config = self
-                .proxy_config
-                .clone()
-                .set_default_proxy(p)
-                .set_from_env();
-        }
+        self.proxy_config = apply_env_proxy(std::mem::take(&mut self.proxy_config), on_invalid)?;
         Ok(())
     }
 

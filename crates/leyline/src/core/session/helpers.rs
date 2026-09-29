@@ -188,15 +188,16 @@ impl std::fmt::Display for Session {
             None if self.inner.impersonates => self.inner.profile.meta.name.clone(),
             None => "bare".to_string(),
         };
+        let config = &self.inner.proxy_config;
+        let proxy = match config.primary() {
+            _ if config.rejects() => "rejected".into(),
+            Some(url) => crate::util::redact(url),
+            None => "none".into(),
+        };
         write!(
             f,
-            "Session({label}, {}, proxy={})",
-            self.inner.platform,
-            self.inner
-                .proxy_config
-                .primary()
-                .map(crate::util::redact)
-                .unwrap_or_else(|| "none".into())
+            "Session({label}, {}, proxy={proxy})",
+            self.inner.platform
         )
     }
 }

@@ -19,7 +19,7 @@ impl Session {
         url: &url::Url,
         request: Option<&'a ProxyConfig>,
     ) -> Result<Option<&'a str>> {
-        let proxy = request.unwrap_or(&self.inner.proxy_config).proxy_for(url);
+        let proxy = request.unwrap_or(&self.inner.proxy_config).proxy_for(url)?;
         if let Some(proxy) = proxy {
             ProxyUrl::parse(proxy)?;
         }
