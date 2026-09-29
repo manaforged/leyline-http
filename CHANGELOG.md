@@ -113,6 +113,11 @@ First public release.
   and do not return a URL parse error.
 - `Session::with_redirect` derives a session with another redirect policy and
   the same pool and cookies.
+- `Session::with_identity` derives a session that presents another identity.
+  The TLS profile, `User-Agent`, client hints, header order, and HTTP/2 and
+  HTTP/3 settings switch together, on a new connection pool. An `Http3` or
+  `Race` session returns `Kind::Config` for an identity with no HTTP/3
+  profile.
 - `Session::identity` returns the browser, platform, brand, and user agent
   that the session sends.
 - The `trace::Head` event carries the response headers.

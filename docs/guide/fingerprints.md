@@ -33,9 +33,9 @@ don't-fragment; Windows applies TTL and don't-fragment. `options` is the SYN
 option order that the operating system kernel sends. No platform lets a socket
 set it, so Leyline does not apply it; only the audit's JA4T reads it. The audit's
 JA4T is computed from the configured values, including fields the running
-platform does not apply. `platforms.toml` has rows for Windows, macOS, and
-Linux only. Android and iOS have no captured SYN, so their `TcpProfile` is
-empty and the kernel defaults apply.
+platform does not apply. `platforms.toml` has rows for Windows, macOS, Linux,
+and iOS. Android has no row, so its `TcpProfile` is empty and the kernel
+defaults apply.
 
 ## Audit a session
 
@@ -70,7 +70,7 @@ The five fields of `AuditData`:
 | --- | --- |
 | `ja3` | JA3 TLS fingerprint, the MD5 form. |
 | `ja4` | JA4 TLS fingerprint. Derived from the profile's fixed extension order when it has one. |
-| `ja4t` | JA4T from the platform's `TcpProfile` values, not captured from the SYN. |
+| `ja4t` | JA4T computed from the session's `TcpProfile` values. |
 | `ja4h` | JA4H over the request line and headers this response's request sent. |
 | `h2_fingerprint` | Akamai-style HTTP/2 fingerprint. |
 
@@ -78,18 +78,23 @@ The connection-level fields are computed once per session from the profile and
 shared by `Arc` with every response. `ja4h` is computed on the first `audit()`
 call for a response and cached.
 
-Read these as a self-report: they say what Leyline built from the profile, not
-what a packet capture observed. `ja4t` in particular describes the options
-requested, and the kernel decides what the SYN carries.
+The audit values report what Leyline built from the profile. A packet capture
+shows what the connection sent. `ja4t` describes the TCP options that the
+`TcpProfile` requests, and the kernel decides what the SYN carries.
 
 ## The offline conformance test
 
 The offline test checks each profile's JA4 against a recorded reference value,
-without touching the network. Run it with
-`cargo test -p leyline-http --test fingerprint_conformance`. The report checks
-agreement between the profile data and its recorded reference values.
-Establishing browser fidelity also requires a browser capture and a comparison
-with Leyline's emitted handshake.
+without touching the network. The test needs the `bench-internals` feature.
+Run it with:
+
+```sh
+cargo test -p leyline-http --features bench-internals --test fingerprint_conformance
+```
+
+The report checks agreement between the profile data and its recorded reference
+values. Establishing browser fidelity also requires a browser capture and a
+comparison with Leyline's emitted handshake.
 
 ## Read a profile
 
@@ -142,10 +147,6 @@ returns a `ProfileError`:
   disagrees with the extensions its `[tls]` block turns on.
 - `Empty` when the directory holds no `<family>/<version>.toml` file.
 
-In 0.1 the session builder still selects a profile by `Browser` variant, so a
-loaded profile is available for inspection and validation but is not usable in a
-session. Sending one needs a crate release that adds the variant.
-
 To parse a single file rather than a directory, call
 `BrowserProfile::from_toml`. It runs the same validation.
 
@@ -154,6 +155,112 @@ use leyline::BrowserProfile;
 
 assert!(BrowserProfile::from_toml("not a profile").is_err());
 ```
+
+## Mix and rotate identities
+
+An `Identity` holds two browsers and a platform. The `tls()` browser supplies
+the ClientHello, the HTTP/2 settings, the HTTP/3 settings, and the `ja3`, `ja4`,
+and `h2_fingerprint` audit values. The `http()` browser supplies the
+`User-Agent`, `sec-ch-ua`, `Accept-Language`, the header shape, and the header
+order. The platform selects the operating system that the `User-Agent` names,
+the HTTP/2 platform overrides, and the `TcpProfile`.
+
+| Function | `tls()` side | `http()` side |
+| --- | --- | --- |
+| `Identity::locked(browser, platform)` | `browser` | `browser` |
+| `rotate_tls(tls)` | `tls` | unchanged |
+| `rotate_hello()` | the next ClientHello of the family | unchanged |
+| `switch_family(dest)` | `dest` | `dest` |
+
+`rotate_hello` moves to the next ClientHello of the family in `Browser::all()`
+order and wraps from the last to the first. A profile can share its ClientHello
+with another version of the same browser. Its `[meta]` table names that version
+in `hello`. `tls()` returns the version that holds the ClientHello, so on an
+identity from `locked` it can differ from `http()`. `rotate_hello` counts
+versions that share a ClientHello once.
+
+`locked` accepts any browser and platform. `SessionBuilder::build` and
+`Session::with_identity` return `Kind::Config` when the `http()` browser has no
+identity for the platform, for example Safari 26 on Windows. The three
+functions that change an identity return `Kind::Config` at the call when:
+
+- `rotate_tls` gets a `tls` browser of another `Family` than `http()`.
+- `rotate_hello` runs on a family with one ClientHello.
+- `switch_family` gets a `dest` browser of the same `Family`, or one that has no
+  identity for the platform. Use `rotate_tls` to change the ClientHello inside a
+  family.
+
+### Build a session from an identity
+
+`SessionBuilder::identity(identity)` sets the `tls()` browser, the `http()`
+browser, and the platform in one call. This session sends the headers of
+Chrome 154 on Linux over the ClientHello, HTTP/2 settings, and HTTP/3 settings
+of Chrome 152:
+
+```rust,no_run
+use leyline::{Browser, Identity, Platform, Session};
+
+# fn run() -> leyline::Result<()> {
+let identity = Identity::locked(Browser::Chrome154, Platform::Linux)
+    .rotate_tls(Browser::Chrome152)?;
+let session = Session::builder().identity(identity).build()?;
+assert_eq!(session.identity().browser(), Some(Browser::Chrome154));
+# Ok(())
+# }
+```
+
+`browser`, `profile`, and `identity` replace each other. The last call of the
+three sets the browser or profile and the `http()` browser. `browser` and
+`profile` keep the platform in either call order. `identity` sets the platform
+too. A `platform` call before `identity` has no effect, and a `platform` call
+after it replaces the platform of the identity. A session built with
+`SessionBuilder::profile` sends that one profile on both sides.
+
+### Change the identity of a session
+
+`Session::with_identity(identity)` returns a copy of a session that sends
+another identity. The session it came from keeps its own. The copy takes these
+values from the identity, as `SessionBuilder::identity` does:
+
+- The ClientHello, with an empty TLS session cache.
+- The HTTP/2 and HTTP/3 settings.
+- The `User-Agent`, `sec-ch-ua`, `Accept-Language`, header shape, and header
+  order.
+- The `ja3`, `ja4`, and `h2_fingerprint` audit values, when the session was
+  built with `.audit(true)`.
+- A separate connection pool. The copy opens its own connections.
+
+The copy shares the cookie jar with the session it came from. It keeps the
+brand, the proxy, the timeouts, the `TcpProfile`, and every other setting.
+`Session::identity()` reports the identity that the copy sends.
+
+```rust,no_run
+use leyline::{Browser, Family, Identity, Platform, Session};
+
+# fn run() -> leyline::Result<()> {
+let chrome = Identity::locked(Browser::latest(Family::Chrome), Platform::Linux);
+let session = Session::builder().identity(chrome).build()?;
+
+let next_hello = session.with_identity(chrome.rotate_hello()?)?;
+
+let firefox = chrome.switch_family(Browser::latest(Family::Firefox))?;
+let switched = session.with_identity(firefox)?;
+# let _ = (next_hello, switched);
+# Ok(())
+# }
+```
+
+`with_identity` returns `Kind::Config` when:
+
+- The session has no `Browser`: a bare session, or a session built with
+  `SessionBuilder::profile`.
+- The `http()` browser has no identity for the platform.
+- The session brand, Edge or Opera, has no overlay for the `http()` browser on
+  the platform. Only Chromium browsers have one.
+
+If the `tls()` browser has no `[h3]` table, the copy has no HTTP/3 transport.
+`ProtocolPolicy::Race` then behaves like `ProtocolPolicy::Auto`, and a forced
+`ProtocolPolicy::Http3` request returns `Kind::Config`. See [HTTP/3](http3.md).
 
 ## Next
 

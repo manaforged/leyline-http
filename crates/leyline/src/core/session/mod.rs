@@ -46,6 +46,13 @@ pub enum ProtocolPolicy {
     Race,
 }
 
+impl ProtocolPolicy {
+    #[cfg(feature = "http3")]
+    pub(crate) fn requires_h3(self) -> bool {
+        matches!(self, Self::Http3 | Self::Race)
+    }
+}
+
 #[derive(Clone)]
 pub struct Session {
     inner: Arc<SessionInner>,

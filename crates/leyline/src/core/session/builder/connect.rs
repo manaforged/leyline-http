@@ -1,6 +1,4 @@
 use crate::audit::AuditTlsCache;
-#[cfg(feature = "http3")]
-use crate::core::ProtocolPolicy;
 use crate::core::error::{Error, Result};
 use crate::h2::H2Config;
 use crate::pool::Pool;
@@ -11,13 +9,16 @@ use crate::tls::FingerprintConnector;
 use super::SessionBuilder;
 
 impl SessionBuilder {
-    pub(super) fn compute_audit_cache(
-        &self,
-        profile: &BrowserProfile,
-        h2_config: &H2Config,
-        tcp_profile: &TcpProfile,
-    ) -> AuditTlsCache {
-        audit_cache(profile, h2_config, tcp_profile)
+    pub(super) fn resolve_tcp_profile(&self) -> TcpProfile {
+        self.tcp_profile.clone().unwrap_or_else(|| {
+            let mut tcp = self.platform.tcp_profile();
+            if !self.impersonates() {
+                tcp.mss = 0;
+                tcp.window_size = 0;
+                tcp.window_scale = 0;
+            }
+            tcp
+        })
     }
 
     pub(super) fn build_connector(
@@ -45,28 +46,6 @@ impl SessionBuilder {
             fp = fp.with_happy_eyeballs_config(config);
         }
         Ok(fp)
-    }
-
-    #[cfg(feature = "http3")]
-    pub(super) fn h3_config(
-        &self,
-        profile: &BrowserProfile,
-    ) -> Result<Option<crate::quic::H3Config>> {
-        match crate::quic::H3Config::from_profile(profile) {
-            Ok(mut cfg) => {
-                cfg.max_response_body_bytes = self.compression.max_body_size as u64;
-                Ok(Some(cfg))
-            }
-            Err(e)
-                if matches!(
-                    self.protocol_policy,
-                    ProtocolPolicy::Http3 | ProtocolPolicy::Race
-                ) =>
-            {
-                Err(e)
-            }
-            Err(_) => Ok(None),
-        }
     }
 
     pub(super) fn build_pool(&self) -> Pool {

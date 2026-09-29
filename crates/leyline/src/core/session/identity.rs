@@ -1,7 +1,10 @@
 use crate::core::error::{Error, Kind, Result};
-use crate::profile::{Browser, ChromiumBrand, Family, Platform, resolve_identity};
+use crate::profile::{Browser, ChromiumBrand, Family, Platform};
 
-use super::Session;
+use super::builder::derive::{
+    DerivedIdentity, IdentityInputs, IdentitySource, derive_identity, resolve_presented,
+};
+use super::{Session, SessionInner};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Identity {
@@ -81,13 +84,12 @@ impl Identity {
     }
 
     pub(crate) fn user_agent(self) -> Result<String> {
-        resolve_identity(
+        resolve_presented(
             self.http.platform_profile(self.platform),
             self.platform,
             ChromiumBrand::Chrome,
         )
         .map(|identity| identity.user_agent)
-        .map_err(|e| Error::new(Kind::Config).with_message(e.to_string()))
     }
 }
 
@@ -153,38 +155,60 @@ impl Session {
         }
         let mut session = self.clone();
         let inner = std::sync::Arc::make_mut(&mut session.inner);
-        let tls = identity.tls();
-        let profile = inner.brand.tls_profile(tls.shared_profile());
-        let resolved_h2 = profile.h2.resolve_for_platform(inner.platform)?;
-        let mut h2_config = crate::h2::H2Config::from_profile(&resolved_h2)?;
-        h2_config.max_response_body_bytes = inner.compression.max_body_size;
+        let derived = derive_identity(IdentityInputs {
+            source: IdentitySource::Browser {
+                tls: identity.tls(),
+                http: identity.http(),
+            },
+            platform: identity.platform(),
+            brand: inner.brand,
+            compression: inner.compression,
+            #[cfg(feature = "http3")]
+            h3_required: inner.protocol_policy.requires_h3(),
+            tcp: inner.connector.tcp_profile(),
+            audit: inner.audit_tls.is_some(),
+        })?;
         inner.connector = inner
             .connector
-            .with_profile(&profile)
+            .with_profile(&derived.profile)
             .map_err(Error::from)?;
-        inner.h2_config = h2_config;
-        inner.browser = Some(tls);
-        inner.identity = Some(identity);
-        inner.platform = identity.platform();
         inner.pool = std::sync::Arc::new(inner.pool.fresh());
+        inner.adopt(derived);
+        Ok(session)
+    }
+}
+
+impl SessionInner {
+    fn adopt(&mut self, derived: DerivedIdentity) {
+        let DerivedIdentity {
+            browser,
+            identity,
+            platform,
+            profile,
+            header_style,
+            header_order,
+            user_agent,
+            sec_ch_ua,
+            accept_language,
+            h2_config,
+            #[cfg(feature = "http3")]
+            h3_config,
+            audit_tls,
+        } = derived;
+        self.browser = browser;
+        self.identity = identity;
+        self.platform = platform;
+        self.profile = profile;
+        self.header_style = header_style;
+        self.header_order = header_order;
+        self.user_agent = user_agent;
+        self.sec_ch_ua = sec_ch_ua;
+        self.accept_language = accept_language;
+        self.h2_config = h2_config;
         #[cfg(feature = "http3")]
         {
-            inner.h3_config = match crate::quic::H3Config::from_profile(&inner.profile) {
-                Ok(mut config) => {
-                    config.max_response_body_bytes = inner.compression.max_body_size as u64;
-                    Some(config)
-                }
-                Err(_) => None,
-            };
+            self.h3_config = h3_config;
         }
-        if inner.audit_tls.is_some() {
-            let tcp = inner.connector.tcp_profile().clone();
-            inner.audit_tls = Some(std::sync::Arc::new(super::builder::connect::audit_cache(
-                &inner.profile,
-                &inner.h2_config,
-                &tcp,
-            )));
-        }
-        Ok(session)
+        self.audit_tls = audit_tls;
     }
 }
