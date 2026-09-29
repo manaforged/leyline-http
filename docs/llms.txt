@@ -4,16 +4,16 @@
 
 ## leyline-http 0.1.0
 
-- [Every public item, one per line](reference/leyline-http/api.txt): 1302 items
+- [Every public item, one per line](reference/leyline-http/api.txt): 1302 lines
 - [API overview](reference/leyline-http/index.html): tasks, modules, features, and examples
 - [API changes by release](reference/leyline-http/changes.html)
-- [leyline](reference/leyline-http/leyline.html): 827 items
-- [leyline::audit](reference/leyline-http/leyline-audit.html): 32 items
-- [leyline::cookie](reference/leyline-http/leyline-cookie.html): 48 items
-- [leyline::multipart](reference/leyline-http/leyline-multipart.html): 18 items
-- [leyline::profile](reference/leyline-http/leyline-profile.html): 290 items
-- [leyline::tls](reference/leyline-http/leyline-tls.html): 24 items
-- [leyline::trace](reference/leyline-http/leyline-trace.html): 56 items
+- [leyline](reference/leyline-http/leyline.html): 480 items
+- [leyline::audit](reference/leyline-http/leyline-audit.html): 27 items
+- [leyline::cookie](reference/leyline-http/leyline-cookie.html): 29 items
+- [leyline::multipart](reference/leyline-http/leyline-multipart.html): 13 items
+- [leyline::profile](reference/leyline-http/leyline-profile.html): 174 items
+- [leyline::tls](reference/leyline-http/leyline-tls.html): 9 items
+- [leyline::trace](reference/leyline-http/leyline-trace.html): 45 items
 - [Example audit](reference/leyline-http/examples/audit.html): `cargo run -p leyline-http --example audit`
 - [Example concurrent](reference/leyline-http/examples/concurrent.html): `cargo run -p leyline-http --example concurrent`
 - [Example cookies](reference/leyline-http/examples/cookies.html): `cargo run -p leyline-http --example cookies`
