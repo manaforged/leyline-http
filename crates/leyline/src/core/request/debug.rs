@@ -4,14 +4,14 @@ use http::HeaderValue;
 
 use super::RequestBuilder;
 use crate::trace::masked;
-use crate::util::without_userinfo;
+use crate::util::redact;
 
 impl fmt::Debug for RequestBuilder {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RequestBuilder")
             .field("method", &self.method)
-            .field("url", &shown_url(&self.url))
-            .field("query", &self.query_params)
+            .field("url", &redact(&self.url))
+            .field("query", &masked_query(&self.query_params))
             .field(
                 "headers",
                 &masked(self.headers.iter().map(|(k, v)| (k.as_str(), shown(v)))),
@@ -39,9 +39,9 @@ fn shown(value: &HeaderValue) -> &[u8] {
     }
 }
 
-fn shown_url(raw: &str) -> String {
-    match url::Url::parse(raw) {
-        Ok(parsed) => without_userinfo(parsed).to_string(),
-        Err(_) => raw.to_owned(),
-    }
+fn masked_query(params: &[(String, String)]) -> Vec<(&str, &str)> {
+    params
+        .iter()
+        .map(|(name, _)| (name.as_str(), "***"))
+        .collect()
 }

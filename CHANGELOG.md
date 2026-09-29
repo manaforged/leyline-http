@@ -132,8 +132,10 @@ First public release.
 - A plain-HTTP origin cannot shadow a Secure cookie (RFC 6265bis), and
   `ProxyUrl` and error messages redact credentials and query strings.
 - `Debug` output never prints a password, token, cookie value, or query
-  string. `Response`, `DigestAuth`, `Cookie`, `HeaderList`, the builders, the
-  trace events, and the `leyline::trace` log mask them.
+  value. `Response`, `DigestAuth`, `Cookie`, `HeaderList`, `RedirectAttempt`,
+  the request and WebSocket builders, the trace events, and the
+  `leyline::trace` log mask them, including a proxy URL written without a
+  scheme.
   `Session::proxy_url` returns a `ProxyUrl`, whose `Display` hides the
   password.
 - Certificate verification through pins, custom roots on macOS, and HTTP/3

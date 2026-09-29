@@ -4,7 +4,7 @@ use super::Session;
 use crate::core::error::{Error, Kind, Result};
 use crate::core::{IntoParamPair, IntoUrl, ProxyConfig, WebSocketConfig};
 use crate::trace::masked;
-use crate::util::without_userinfo;
+use crate::util::redact;
 
 impl Session {
     pub fn websocket(&self, url: impl IntoUrl) -> WebSocketBuilder {
@@ -91,10 +91,7 @@ pub struct WebSocketBuilder {
 
 impl fmt::Debug for WebSocketBuilder {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let url = self
-            .url
-            .as_ref()
-            .map(|url| without_userinfo(url.clone()).to_string());
+        let url = self.url.as_ref().map(|url| redact(url.as_str()));
         f.debug_struct("WebSocketBuilder")
             .field("url", &url)
             .field("config", &self.config)

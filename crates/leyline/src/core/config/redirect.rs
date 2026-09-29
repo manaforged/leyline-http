@@ -2,6 +2,8 @@ use std::sync::Arc;
 
 use url::Url;
 
+use crate::util::redact;
+
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct RedirectPolicy {
@@ -78,13 +80,25 @@ impl RedirectPolicy {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 #[non_exhaustive]
 pub struct RedirectAttempt<'a> {
     pub status: u16,
     pub url: &'a Url,
     pub location: Option<&'a str>,
     pub previous: &'a [Url],
+}
+
+impl std::fmt::Debug for RedirectAttempt<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let previous: Vec<String> = self.previous.iter().map(Url::as_str).map(redact).collect();
+        f.debug_struct("RedirectAttempt")
+            .field("status", &self.status)
+            .field("url", &redact(self.url.as_str()))
+            .field("location", &self.location.map(redact))
+            .field("previous", &previous)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

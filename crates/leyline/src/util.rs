@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 pub(crate) fn redact(raw: &str) -> String {
     let Ok(mut parsed) = url::Url::parse(raw) else {
-        return raw.to_string();
+        return mask_userinfo(&mask_query(raw));
     };
     let mut changed = if parsed.password().is_some() {
         parsed.set_password(Some("***")).is_ok()
@@ -17,11 +17,44 @@ pub(crate) fn redact(raw: &str) -> String {
         parsed.set_fragment(None);
         changed = true;
     }
-    if changed {
+    let shown = if changed {
         parsed.to_string()
     } else {
         raw.to_string()
+    };
+    if parsed.has_host() {
+        shown
+    } else {
+        mask_userinfo(&shown)
     }
+}
+
+fn mask_query(text: &str) -> String {
+    let text = text.split_once('#').map_or(text, |(head, _)| head);
+    match text.split_once('?') {
+        Some((head, _)) => format!("{head}?***"),
+        None => text.to_owned(),
+    }
+}
+
+fn mask_userinfo(text: &str) -> String {
+    let Some((head, host)) = text.rsplit_once('@') else {
+        return text.to_owned();
+    };
+    let (prefix, userinfo) = match head.split_once("://") {
+        Some((scheme, _)) if is_scheme(scheme) => head.split_at(scheme.len() + 3),
+        _ => ("", head),
+    };
+    let masked = match userinfo.split_once(':') {
+        Some((user, _)) => format!("{user}:***"),
+        None => "***".to_owned(),
+    };
+    format!("{prefix}{masked}@{host}")
+}
+
+fn is_scheme(text: &str) -> bool {
+    text.chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
 }
 
 pub(crate) fn without_userinfo(mut url: url::Url) -> url::Url {

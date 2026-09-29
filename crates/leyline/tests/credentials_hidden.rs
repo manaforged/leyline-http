@@ -5,7 +5,7 @@
 use std::sync::{Arc, Mutex};
 
 use leyline::trace::{Sent, Trace};
-use leyline::{DigestAuth, HeaderList, RedirectPolicy, Session};
+use leyline::{DigestAuth, HeaderList, RedirectAction, RedirectPolicy, Session};
 
 #[path = "http_support/httpbin_lite.rs"]
 mod httpbin_lite;
@@ -124,5 +124,53 @@ async fn sent_event_debug_hides_the_query() {
         .unwrap();
     let shown = seen.lock().unwrap().join("\n");
     assert!(shown.contains("/get"), "{shown}");
+    assert!(!shown.contains(SECRET), "{shown}");
+}
+
+#[test]
+fn a_proxy_url_without_a_scheme_hides_its_password() {
+    let bound = Session::new().with_proxy(format!("user:{SECRET}@127.0.0.1:9000"));
+    let exit = bound.proxy_url().unwrap();
+    let shown = format!("{exit} {exit:?}");
+    assert!(!shown.contains(SECRET), "{shown}");
+}
+
+#[test]
+fn request_builder_debug_hides_query_values() {
+    let session = Session::new();
+    let request = session
+        .get(format!("https://example.com/?token={SECRET}"))
+        .query([("key", SECRET)]);
+    let shown = format!("{request:?}");
+    assert!(!shown.contains(SECRET), "{shown}");
+}
+
+#[cfg(feature = "websocket")]
+#[test]
+fn websocket_builder_debug_hides_query_values() {
+    let session = Session::new();
+    let builder = session.websocket(format!("wss://example.com/socket?token={SECRET}"));
+    let shown = format!("{builder:?}");
+    assert!(!shown.contains(SECRET), "{shown}");
+}
+
+#[tokio::test]
+async fn redirect_attempt_debug_hides_the_location_query() {
+    let base = httpbin_lite::spawn().await;
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&seen);
+    let session = Session::builder()
+        .redirect(RedirectPolicy::custom(move |attempt| {
+            sink.lock().unwrap().push(format!("{attempt:?}"));
+            RedirectAction::Stop
+        }))
+        .build()
+        .unwrap();
+    session
+        .get(format!("{base}/redirect-to?url=/get?token={SECRET}"))
+        .await
+        .unwrap();
+    let shown = seen.lock().unwrap().join("\n");
+    assert!(shown.contains("302"), "{shown}");
     assert!(!shown.contains(SECRET), "{shown}");
 }
