@@ -1,7 +1,7 @@
 # Responses
 
-A `Response` carries the status, the headers in wire order, the body, and the
-metadata Leyline collected while sending.
+A `Response` carries the status, the headers, the body, and the metadata
+Leyline collected while sending.
 
 ## Status
 
@@ -30,11 +30,14 @@ turns it into `"HTTP/1.1"`, `"HTTP/2"`, or `"HTTP/3"`.
 ## Headers
 
 `headers()` returns the `http::HeaderMap`, duplicates included. Use
-`get`, `get_all`, and iteration as with any `HeaderMap`.
+`get`, `get_all`, and iteration as with any `HeaderMap`. Iteration does not
+follow wire order. `get_all` yields the values of one name in the order they
+arrived.
 
 `header(name)` returns the first value for a name as a string slice,
-case-insensitively. It skips a value that is not valid UTF-8, because it hands
-you a `&str`; read `headers()` for the raw bytes.
+case-insensitively. It returns `None` when that first value has a byte outside
+visible ASCII, even if the bytes are valid UTF-8, and it does not look at later
+values. Read `headers()` for the raw bytes.
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
@@ -58,20 +61,24 @@ let links: Vec<&str> = resp
 ```
 
 `content_length()` parses the `Content-Length` header. Reading the body does
-not change `headers()` or `content_length()`. When leyline decodes a buffered
+not change `headers()` or `content_length()`. When Leyline decodes a buffered
 body, it removes `Content-Encoding` and `Content-Length` before it returns the
-response. A `.stream()` response keeps the wire values. `request_headers()` reports the headers the session prepared to
-send, in send order, after the preset block, the cookie jar, and your own
-headers were merged. It requires `.audit(true)` on the session; without audit
-it returns an empty list. The values are prepared before dispatch, not
-captured from the transport.
+response. A `.stream()` response keeps the wire values.
+
+`request_headers()` reports the headers the session prepared to send, in send
+order, after the preset block, the cookie jar, and your own headers were
+merged. It requires `.audit(true)` on the session; without audit it returns an
+empty list. The values are prepared before dispatch, not captured from the
+transport.
 
 ## Cookies
 
 The session jar stores `Set-Cookie` automatically. `cookies()` iterates the
-`leyline::cookie::Cookie` records parsed from this response's `Set-Cookie`
-headers. It does not list cookies from redirect legs or cookies the jar
-rejected. The jar is the store: read it with
+`leyline::cookie::Cookie` records parsed from the `Set-Cookie` headers of the
+final response. It lists every header that parses, including a deletion (a
+`Max-Age=0` or a past `Expires`), and it skips a header that does not parse. It
+does not ask the jar, so it can include a cookie that the jar refuses, and it
+does not list cookies from redirect legs. The jar is the store: read it with
 `session.cookies().get_cookie(&url, name)`. See [Cookies](cookies.md).
 
 ## Redirect chain
@@ -84,8 +91,8 @@ redirected. The chain holds each URL without its user name and password.
 # async fn run() -> leyline::Result<()> {
 let session = leyline::Session::new();
 let resp = session.get("https://example.com/old").await?;
-for hop in resp.redirect_chain() {
-    println!("via {hop}");
+for url in resp.redirect_chain() {
+    println!("via {url}");
 }
 println!("landed on {}", resp.url());
 if resp.url().host_str() != Some("example.com") {
@@ -105,10 +112,17 @@ HTTP/3 responses carry them. A streaming response and HTTP/1.1 yield none.
 
 The body is buffered unless the request called `.stream()`. The reading calls
 are async and work in both modes: a buffered body returns at once, and a
-streamed body is drained first, then decompressed.
-Draining honors the `read` timeout for each chunk and the same
-`CompressionConfig::max_body_size` cap (100 MiB by default) that buffered mode
-applies.
+streamed body is drained first, then decompressed. Draining honors the `read`
+timeout for each chunk.
+
+`CompressionConfig::max_body_size` (100 MiB by default) caps a buffered body:
+the bytes Leyline holds in memory for `bytes()`, `text()`, and `json()`, and
+the decoded body. It applies on HTTP/1.1, HTTP/2, and HTTP/3. A body over the
+cap fails with `Kind::Body`, and the message names `max_body_size`.
+
+A streamed body that you read with `into_stream()` or `copy_to()` has no cap.
+You read the chunks, so you control the memory, and Leyline does not decode the
+bytes.
 
 | Call | Returns | Notes |
 | --- | --- | --- |
@@ -124,17 +138,14 @@ Every reading call consumes the response, so
 `session.get(url).await?.text().await?` is one expression. Read `status()`,
 `headers()`, and other metadata before the body call.
 
-On a buffered response, `into_stream` and `copy_to` give the decoded body. On a
-streamed response they give the bytes as sent, still compressed. The example
-below is buffered, so the file holds the decoded body.
-
 `text()` replaces invalid sequences with U+FFFD, and a leading byte order mark
 overrides the declared charset. The charset handling comes from the `charset`
 feature, on by default. Without it, `text()` falls back to lossy UTF-8.
 
-`into_stream()` works in both modes: a
-buffered body is handed back as a one-chunk stream. `into_stream()` consumes
-the response, so nothing is left to read after it.
+On a buffered response, `into_stream` hands back the decoded body as one chunk,
+and `copy_to` writes it. On a streamed response they give the bytes as sent,
+still compressed. The example below is buffered, so the file holds the decoded
+body.
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
@@ -151,8 +162,8 @@ println!("{written} bytes");
 
 `error_for_status()` consumes the response and returns an error whose kind is
 `Kind::Status` for any status at or above 400. The error carries the code as a
-`StatusCode` and the request URL as a `url::Url`. `Display` and `Debug` hide
-the password and the query.
+`StatusCode` and the final URL as a `url::Url`. `Display` and `Debug` hide the
+password and the query.
 
 `error_for_status_ref()` makes the same check on a borrowed response and
 returns `Ok(&Response)`. Use it when you need the headers or the body of an
@@ -194,6 +205,10 @@ if let Err(e) = resp.error_for_status_ref() {
   legs that opened a fresh connection. `None` when every leg was warm.
 - `send_ms`: request sent to response, in milliseconds.
 - `total_ms`: connect plus send.
+
+An HTTP/3 leg records no timing. It adds nothing to `connect_ms`, `send_ms`, or
+`total_ms`, and it counts as not reused, so a response that includes an HTTP/3
+leg reports `reused` as `false`.
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {

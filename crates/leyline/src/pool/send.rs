@@ -80,9 +80,7 @@ pub(crate) async fn send_request_h3_pooled(
                 );
                 return Ok((resp, tls));
             }
-            Err(e) if !e.is_retryable() => {
-                return Err(Error::new(Kind::Http3).with_message(e.message().to_string()));
-            }
+            Err(e) if !e.is_retryable() => return Err(Error::from(e)),
             Err(e) => {
                 tracing::info!(
                     target: "leyline::pool",
@@ -135,7 +133,7 @@ pub(crate) async fn send_request_h3_pooled(
             stream_response,
         )
         .await
-        .map_err(|e| Error::new(Kind::Http3).with_message(e.message().to_string()))?;
+        .map_err(Error::from)?;
     trace::head(
         host,
         resp.status,
@@ -225,6 +223,9 @@ pub(crate) async fn send_request(
                 return Ok((resp, tls, timing));
             }
             Err(e) => {
+                if e.body_limit().is_some() {
+                    return Err(Error::from(e));
+                }
                 tracing::info!(
                     target: "leyline::pool",
                     host = %key.host,
@@ -247,7 +248,7 @@ pub(crate) async fn send_request(
                     }
                 );
                 if !refused && !is_idempotent(&pseudo.method) {
-                    return Err(Error::new(Kind::Http2).with_source(e));
+                    return Err(Error::from(e));
                 }
                 body = Some(replay);
             }
@@ -284,8 +285,10 @@ pub(crate) async fn send_request(
             r
         }
         Err(e) => {
-            pool.invalidate(&key);
-            return Err(Error::new(Kind::Http2).with_source(e));
+            if e.body_limit().is_none() {
+                pool.invalidate(&key);
+            }
+            return Err(Error::from(e));
         }
     };
 

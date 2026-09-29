@@ -64,7 +64,7 @@ impl Drain<'_> {
             return;
         }
         if stream.is_streaming() {
-            if forward_stream_body(self.h3, self.conn, id, stream, self.scratch, self.max_body) {
+            if forward_stream_body(self.h3, self.conn, id, stream, self.scratch) {
                 self.streams.remove(&id);
             }
             return;
@@ -89,16 +89,14 @@ impl Drain<'_> {
             if n == 0 {
                 break;
             }
-            if let Err(new_len) = check_body_budget(stream.body_bytes_seen, n, max) {
+            if check_body_budget(stream.body_bytes_seen, n, max).is_err() {
                 shutdown(
                     self.conn,
                     id,
                     quiche::Shutdown::Read,
                     quiche::h3::WireErrorCode::ExcessiveLoad as u64,
                 );
-                stream.deliver(Err(format!(
-                    "h3: response body exceeded max_response_body_bytes ({new_len} > {max})"
-                )));
+                stream.deliver_body_limit(BodyLimit(usize::try_from(max).unwrap_or(usize::MAX)));
                 self.streams.remove(&id);
                 break;
             }

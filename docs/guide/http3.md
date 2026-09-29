@@ -31,22 +31,25 @@ let session = Session::builder()
 # }
 ```
 
-Select a browser before forcing HTTP/3: the bare profile has no HTTP/3
-configuration, so a forced `Http3` request from a bare session fails.
+Select a browser before you choose `Http3` or `Race`. `build()` fails with
+`Kind::Config` when either policy meets a profile that has no `[h3]` table, and
+the bare profile has none.
+
 `Session::new()` selects `Race`. `Session::builder()` keeps `Auto`, so a
 session built that way does not try HTTP/3. Add
 `.protocol(ProtocolPolicy::Race)` to get the same policy.
 
-A profile without an HTTP/3 fingerprint fails a forced `Http3` request with
-`Kind::Config`.
-
 ## The Alt-Svc gate
 
-Chrome does not open a speculative QUIC connection to an origin it has never
-seen speak HTTP/3, and neither does Leyline. `Race` only races an origin the
-pool already knows: one that advertised `h3` in an `Alt-Svc` response header,
-or that already completed a QUIC handshake. Every other origin takes the
-`Auto` path and pays one TCP handshake.
+Under `Race`, Leyline does not open a speculative QUIC connection to an origin
+it has never seen speak HTTP/3, as Chrome does not. `Race` only races an origin
+that advertised `h3` in an `Alt-Svc` response header. Every other origin takes
+the `Auto` path and pays one TCP handshake.
+
+Only an `h3=` entry for the same port counts. Its host must be empty or equal
+to the host of the origin. Leyline ignores the `ma` parameter and the `clear`
+value, so an origin that the pool has noted stays known for the life of the
+pool.
 
 A request is raced only when all of these hold:
 
@@ -64,17 +67,23 @@ sent once. If both fail, the `Auto` path runs.
 
 The `[h3]` table of a profile sets the QUIC transport parameters and the
 HTTP/3 settings the profile presents: the flow-control limits,
-`max_idle_timeout`, `max_udp_payload_size`, `active_connection_id_limit`, and
-a cap on the response body the HTTP/3 client accepts, streaming included. A
-profile with no `[h3]` table has no HTTP/3 transport.
+`max_idle_timeout_secs`, `max_udp_payload_size`, and
+`active_connection_id_limit`. A profile with no `[h3]` table has no HTTP/3
+transport.
+
+The response body cap is not a profile field. HTTP/3 uses
+`CompressionConfig::max_body_size`, as HTTP/1.1 and HTTP/2 do. It caps a
+buffered body and fails with `Kind::Body`. A `.stream()` response has no cap.
+See [Responses](responses.md#bodies).
 
 `Session::new()` races HTTP/3 against HTTP/2 when the bundled profile's `[h3]`
 table sets `race = true`. The bundled Chrome profiles do.
 
 ## QUIC fingerprint
 
-These `[h3]` keys shape the QUIC Initial and the HTTP/3 control stream. All
-of them are optional; a profile without them keeps quiche's defaults.
+These `[h3]` keys shape the QUIC Initial and the HTTP/3 control stream.
+`dcid_length` is required. The other keys are optional; a profile without them
+keeps quiche's defaults.
 
 | Key | Effect |
 | --- | --- |

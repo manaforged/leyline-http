@@ -1,3 +1,5 @@
+use crate::core::session::decompress::BodyLimit;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
 #[non_exhaustive]
@@ -57,4 +59,13 @@ pub enum H2Error {
 
     #[error("frame size {size} exceeds max {max}")]
     FrameTooLarge { size: u32, max: u32 },
+}
+
+impl H2Error {
+    pub(crate) fn body_limit(&self) -> Option<BodyLimit> {
+        match self {
+            Self::Io(io) => BodyLimit::of_io(io),
+            _ => None,
+        }
+    }
 }

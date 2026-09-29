@@ -4,6 +4,7 @@ use super::{Prepared, TransportBody, TransportResponse, adopt, check_framing, st
 use crate::core::body::{Body, BodyKind};
 use crate::core::error::{Error, Kind, Result};
 use crate::core::response::HttpVersion;
+use crate::core::session::decompress::BodyLimit;
 use crate::pool::{H1Body, H1PooledError, H1ResponseBody, H1Target, Pool};
 use crate::tls::FingerprintConnector;
 
@@ -124,7 +125,10 @@ pub(crate) fn h1_error_to_core(e: H1PooledError) -> Error {
     match e {
         H1PooledError::Config(m) => Error::new(Kind::Config).with_message(m),
         H1PooledError::Tls(error) => Error::from(error),
-        H1PooledError::Io(io) => Error::new(Kind::Io).with_source(io),
+        H1PooledError::Io(io) => match BodyLimit::of_io(&io) {
+            Some(limit) => limit.error(),
+            None => Error::new(Kind::Io).with_source(io),
+        },
         H1PooledError::Http(m) => Error::new(Kind::Request).with_message(m),
         H1PooledError::ConnectionClosed(ctx) => {
             Error::new(Kind::Io).with_source(std::io::Error::new(

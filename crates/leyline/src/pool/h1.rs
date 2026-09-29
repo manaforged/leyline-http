@@ -10,6 +10,7 @@ use tokio::sync::{OwnedSemaphorePermit, mpsc};
 
 use crate::BodyStream;
 use crate::ResponseTiming;
+use crate::core::session::decompress::BodyLimit;
 use crate::tls::{FingerprintConnector, TlsError};
 use crate::trace;
 use crate::util::is_idempotent;
@@ -69,6 +70,15 @@ pub enum H1PooledError {
     ConnectionClosed(String),
 }
 
+impl H1PooledError {
+    pub(crate) fn body_limit(&self) -> Option<BodyLimit> {
+        match self {
+            Self::Io(io) => BodyLimit::of_io(io),
+            _ => None,
+        }
+    }
+}
+
 fn conn_is_live(io: &mut dyn H1Io) -> bool {
     use std::task::{Context, Poll};
     use tokio::io::ReadBuf;
@@ -123,24 +133,7 @@ pub async fn send_request_h1_pooled(
     target: H1Target,
     stream: bool,
 ) -> Result<H1Response, H1PooledError> {
-    if !is_valid_token(method) {
-        return Err(H1PooledError::Config(format!(
-            "invalid HTTP method `{method}`: non-token bytes not allowed"
-        )));
-    }
-    for (name, value) in &headers {
-        if !is_valid_token(name) {
-            return Err(H1PooledError::Config(format!(
-                "invalid header name `{name}`: non-token bytes not allowed"
-            )));
-        }
-        if !is_valid_header_value(value) {
-            return Err(H1PooledError::Config(format!(
-                "invalid value for header `{name}`: control characters not allowed"
-            )));
-        }
-    }
-
+    check_request(method, &headers)?;
     pool.evict_idle();
 
     let key = make_key(scheme, host, port, proxy, Transport::Tcp);
@@ -188,6 +181,9 @@ pub async fn send_request_h1_pooled(
                 });
             }
             Err(e) => {
+                if e.body_limit().is_some() {
+                    return Err(e);
+                }
                 tracing::info!(
                     target: "leyline::pool",
                     host = %key.host,
@@ -239,6 +235,27 @@ pub async fn send_request_h1_pooled(
         }
         Err(e) => Err(e),
     }
+}
+
+fn check_request(method: &str, headers: &[(String, String)]) -> Result<(), H1PooledError> {
+    if !is_valid_token(method) {
+        return Err(H1PooledError::Config(format!(
+            "invalid HTTP method `{method}`: non-token bytes not allowed"
+        )));
+    }
+    for (name, value) in headers {
+        if !is_valid_token(name) {
+            return Err(H1PooledError::Config(format!(
+                "invalid header name `{name}`: non-token bytes not allowed"
+            )));
+        }
+        if !is_valid_header_value(value) {
+            return Err(H1PooledError::Config(format!(
+                "invalid value for header `{name}`: control characters not allowed"
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn replay_body(method: &str, body: &H1Body) -> Option<H1Body> {

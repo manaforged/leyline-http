@@ -169,6 +169,10 @@ name = "fingerprint_conformance"
 required-features = ["bench-internals"]
 
 [[test]]
+name = "h2_body_cap"
+required-features = ["bench-internals"]
+
+[[test]]
 name = "h2_cancel_safety"
 required-features = ["bench-internals"]
 

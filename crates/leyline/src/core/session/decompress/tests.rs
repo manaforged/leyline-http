@@ -1,7 +1,9 @@
 use super::*;
 use http::{HeaderName, HeaderValue};
 #[cfg(all(feature = "compression-gzip", feature = "compression-brotli"))]
-use std::io::{Read, Write};
+use std::io::Read;
+#[cfg(feature = "compression-gzip")]
+use std::io::Write;
 
 #[cfg(all(feature = "compression-gzip", feature = "compression-brotli"))]
 #[test]

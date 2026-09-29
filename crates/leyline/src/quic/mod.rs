@@ -6,5 +6,5 @@ mod transport;
 mod wire;
 
 pub use config::H3Config;
-pub(crate) use pool::{H3Client, H3RespBody, H3ResponseParts, open_fresh_h3};
+pub(crate) use pool::{H3Client, H3RespBody, H3ResponseParts, H3SendError, open_fresh_h3};
 pub(crate) use transport::proxy_carries_h3;

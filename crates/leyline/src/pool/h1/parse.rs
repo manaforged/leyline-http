@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::session::decompress::BodyLimit;
 
 pub(super) async fn read_h1_head<S>(stream: &mut S, method: &str) -> Result<H1Head, H1PooledError>
 where
@@ -270,5 +271,5 @@ where
 }
 
 fn body_too_large(limit: usize) -> H1PooledError {
-    H1PooledError::Http(format!("HTTP/1.1 body exceeds {limit} bytes"))
+    H1PooledError::Io(BodyLimit(limit).into_io())
 }

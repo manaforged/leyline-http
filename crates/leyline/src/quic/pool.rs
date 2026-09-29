@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -10,6 +11,7 @@ use tokio::sync::{Semaphore, mpsc, oneshot};
 use tokio::task::AbortHandle;
 
 use crate::core::deadline::{Elapsed, within};
+use crate::core::session::decompress::BodyLimit;
 use crate::h2::config::PseudoOrder;
 use crate::pool::TlsInfo;
 use crate::quic::config::H3Config;
@@ -75,12 +77,14 @@ pub struct H3ResponseParts {
 pub enum H3SendError {
     NotSent(String),
     Failed(String),
+    BodyLimit(BodyLimit),
 }
 
 impl H3SendError {
-    pub(crate) fn message(&self) -> &str {
+    pub(crate) fn message(&self) -> Cow<'_, str> {
         match self {
-            H3SendError::NotSent(m) | H3SendError::Failed(m) => m,
+            H3SendError::NotSent(m) | H3SendError::Failed(m) => Cow::Borrowed(m.as_str()),
+            H3SendError::BodyLimit(limit) => Cow::Owned(limit.to_string()),
         }
     }
 
@@ -312,6 +316,12 @@ impl H3Stream {
     fn deliver_unsent(&mut self, message: String) {
         if let Some(tx) = self.resp_tx.take() {
             drop(tx.send(Err(H3SendError::NotSent(message))));
+        }
+    }
+
+    fn deliver_body_limit(&mut self, limit: BodyLimit) {
+        if let Some(tx) = self.resp_tx.take() {
+            drop(tx.send(Err(H3SendError::BodyLimit(limit))));
         }
     }
 

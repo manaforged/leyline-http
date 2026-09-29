@@ -8,6 +8,8 @@ use url::Url;
 
 use crate::h2::H2Error;
 use crate::h2::error::ErrorCode;
+#[cfg(feature = "http3")]
+use crate::quic::H3SendError;
 use crate::tls::TlsError;
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -314,7 +316,20 @@ impl From<TlsError> for Error {
 
 impl From<H2Error> for Error {
     fn from(e: H2Error) -> Self {
-        Error::new(Kind::Http2).with_source(e)
+        match e.body_limit() {
+            Some(limit) => limit.error(),
+            None => Error::new(Kind::Http2).with_source(e),
+        }
+    }
+}
+
+#[cfg(feature = "http3")]
+impl From<H3SendError> for Error {
+    fn from(e: H3SendError) -> Self {
+        match e {
+            H3SendError::BodyLimit(limit) => limit.error(),
+            other => Error::new(Kind::Http3).with_message(other.message().into_owned()),
+        }
     }
 }
 

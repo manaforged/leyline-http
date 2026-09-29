@@ -34,7 +34,7 @@ println!("{}", resp.status());
 ```
 
 `Body::len_hint()` reports the declared length: the buffer size for a buffered
-body, `Some(0)` for an empty one, and the hint you supplied for a stream. On a buffered response the same helpers give the decoded body.
+body, `Some(0)` for an empty one, and the hint you supplied for a stream.
 
 ## Stream a response body
 
@@ -60,23 +60,24 @@ println!("{total} bytes");
 ```
 
 `copy_to(writer)` does the same loop for you and returns the byte count. On a
-response from `.stream()`, `into_stream` and `copy_to` hand back
-the content-encoded bytes as they arrive; `bytes()`, `text()`, and `json()` decode compression when they
-drain a body. Request identity encoding, or use `read_until` (see
-[Stop at a marker](#stop-at-a-marker)), when you need decoded bytes from a
-stream.
+response from `.stream()`, `into_stream` and `copy_to` hand back the
+content-encoded bytes as they arrive. `bytes()`, `text()`, and `json()` decode
+compression when they drain a body. When you need decoded bytes from a stream,
+request identity encoding or use `read_until` (see
+[Stop at a marker](#stop-at-a-marker)).
 
-HTTP/1.1 streaming rejects bodies above `CompressionConfig::max_body_size`
-(100 MiB by default), fixed-length, chunked, or
-close-delimited, and HTTP/3 streaming rejects them per chunk. Only HTTP/2
-streaming does not apply that cap; `copy_to` does not change this.
+A `.stream()` body has no size cap on HTTP/1.1, HTTP/2, or HTTP/3, and
+`into_stream` and `copy_to` add none. You read the chunks, so you decide how
+much stays in memory. `CompressionConfig::max_body_size` (100 MiB by default)
+caps what Leyline holds in memory: the bytes that `bytes()`, `text()`, and
+`json()` collect, and the decoded output of a compressed body. A body over the
+cap fails with `Kind::Body`, and the message names `max_body_size`.
 
 You do not have to stream it yourself. `bytes().await`, `text().await`, and
 `json().await` drain a streaming body for you and decompress it, so they work
-in both modes. They consume the response. Draining honors the `read` timeout
-for each chunk and the same `max_body_size` cap that buffered mode applies.
-Take the stream or drain it, not both: `into_stream()` consumes the response,
-so nothing is left to read after it. A streaming response also carries no trailers.
+in both modes. They consume the response. Take the stream or drain it, not
+both: `into_stream()` consumes the response, so nothing is left to read after
+it. A streaming response also carries no trailers.
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
@@ -120,19 +121,30 @@ straddle two chunks, and a scan of the whole body on every chunk costs
 quadratic time on a large page.
 
 `read_until` consumes the response. Read the status, headers, `timing()`, and
-`audit()` before you call it. An unknown `Content-Encoding` returns a
-`Kind::Decode` error.
+`audit()` before you call it.
+
+An unknown `Content-Encoding`, or one that the session's `CompressionConfig`
+turns off, is not decoded, and `read_until` returns the raw bytes. Corrupt
+compressed data fails with `Kind::Decode`. Decoded output over `max_body_size`
+fails with `Kind::Body`.
 
 ## Back-pressure
 
-Both directions are bounded channels, so a slow consumer slows the producer
-instead of growing a buffer.
+A streamed response body reaches you through a bounded channel, so a slow
+reader slows the sender instead of growing a buffer.
 
-On HTTP/2, the streaming request body channel and the streaming response body
-channel each hold 32 chunks. When the reader stops polling, the channel fills,
-the connection driver stops draining, and the peer stops receiving window
-updates. On the response side, the effect is the same in reverse: stop polling
-the `BodyStream` and the sender stops.
+On HTTP/1.1, the task that reads the socket waits while the channel of 16
+chunks is full. The receive buffer of the socket then fills, and TCP flow
+control slows the peer.
+
+On HTTP/2, the response channel holds 32 chunks. When you stop polling the
+`BodyStream`, the driver keeps reading the connection, so other streams keep
+going. It queues the data of the stalled stream and sends no window updates for
+that stream while the queue is not empty. The queue cannot grow past the
+receive window of the stream, so the peer stops sending on it.
+
+On HTTP/3, Leyline stops reading the QUIC stream while the channel of 32
+chunks is full, and QUIC flow control slows the peer.
 
 The `read` timeout applies per chunk, not to the whole body. It measures the
 gap between chunks, so a slow but steady download does not trip it. A gap
@@ -144,18 +156,22 @@ stream. See [Retries and timeouts](retries-and-timeouts.md).
 A buffered body can be sent again. A streaming body cannot: the stream has
 already been consumed by the first attempt. That has two consequences.
 
-**Redirects.** A 301, 302, or 303 turns the request into a GET with an empty
-body, so it follows normally. A 307 or 308 must replay the original body. With
-a streaming body Leyline stops and returns `Kind::Redirect`, telling you to
-buffer the body before sending or to set `RedirectPolicy::none()`.
+**Redirects.** A redirect either changes the request to a GET or replays it.
+After a 301 or 302, only a POST becomes a GET with an empty body. After a 303,
+every method except HEAD does. A request that becomes a GET follows normally.
+Every other request keeps its method and its body, so a 307 or 308, or a 302
+for a PUT, must replay the body. A streaming body cannot be replayed. Leyline
+then stops and returns `Kind::Redirect`, telling you to buffer the body before
+sending or to set `RedirectPolicy::none()`.
 
 **Retries.** The retry loop checks the body before it sleeps. A streaming body
 is not retryable, so the policy is skipped and the first outcome is returned,
 whatever the policy says.
 
-If you need retries or a 307-safe request, buffer the body yourself and send it
-as `Bytes`.
+If you need retries, or a request that a redirect can replay, buffer the body
+yourself and send it as `Bytes`.
 
 ## Next
 
-Read [Retries and timeouts](retries-and-timeouts.md).
+Read [Redirects](redirects.md) to see what a redirect changes in the next
+request.

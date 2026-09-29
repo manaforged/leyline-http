@@ -126,8 +126,10 @@ First public release.
 
 - Release builds ignore `SSLKEYLOGFILE` and contain no code that reads it.
   Debug builds keep TLS key logging for development.
-- Decompression is bounded by `CompressionConfig::max_body_size` at every
-  decoder stage, and a truncated compressed body is an error.
+- `CompressionConfig::max_body_size` caps a buffered body on HTTP/1.1,
+  HTTP/2, and HTTP/3, and the output of every decoder stage. A body over the
+  cap fails with `Kind::Body` and is not retried. A `.stream()` body has no
+  cap. A truncated compressed body is an error.
 - `TlsTrustConfig::min_tls_version` sets a TLS version floor for every TCP
   handshake, including the one with an `https://` proxy. The handshake
   minimum is the higher of the profile's minimum and the floor.

@@ -3,9 +3,7 @@ use super::*;
 pub(super) async fn run_h1_stream_pump(mut pump: H1StreamPump) {
     let initial = std::mem::take(&mut pump.initial_body);
     let excess = has_excess(pump.framing, initial.len());
-    let limit = pump.pool.max_body_size;
-    let drained_clean =
-        stream_body_into(pump.io.as_mut(), pump.framing, initial, &pump.tx, limit).await;
+    let drained_clean = stream_body_into(pump.io.as_mut(), pump.framing, initial, &pump.tx).await;
     if drained_clean && pump.reusable && !excess {
         pump.pool
             .return_h1(pump.key, H1Slot { io: pump.io }, pump.tls);
@@ -20,13 +18,12 @@ pub(super) async fn stream_body_into(
     framing: BodyFraming,
     initial: Vec<u8>,
     tx: &mpsc::Sender<io::Result<Bytes>>,
-    limit: usize,
 ) -> bool {
     let result = match framing {
         BodyFraming::None => Ok(true),
-        BodyFraming::Fixed(len) => stream_fixed_into(stream, initial, len, tx, limit).await,
-        BodyFraming::Chunked => stream_chunked_into(stream, initial, tx, limit).await,
-        BodyFraming::ToClose => stream_to_close_into(stream, initial, tx, limit).await,
+        BodyFraming::Fixed(len) => stream_fixed_into(stream, initial, len, tx).await,
+        BodyFraming::Chunked => stream_chunked_into(stream, initial, tx).await,
+        BodyFraming::ToClose => stream_to_close_into(stream, initial, tx).await,
     };
     match result {
         Ok(clean) => clean,
@@ -41,11 +38,7 @@ pub(super) async fn stream_fixed_into(
     initial: Vec<u8>,
     len: u64,
     tx: &mpsc::Sender<io::Result<Bytes>>,
-    limit: usize,
 ) -> io::Result<bool> {
-    if len > limit as u64 {
-        return Err(body_too_large_io(limit));
-    }
     let mut remaining = len;
     if !initial.is_empty() {
         let take = (initial.len() as u64).min(remaining) as usize;
@@ -85,12 +78,7 @@ pub(super) async fn stream_to_close_into(
     stream: &mut dyn H1Io,
     initial: Vec<u8>,
     tx: &mpsc::Sender<io::Result<Bytes>>,
-    limit: usize,
 ) -> io::Result<bool> {
-    let mut total = initial.len();
-    if total > limit {
-        return Err(body_too_large_io(limit));
-    }
     if !initial.is_empty() && tx.send(Ok(Bytes::from(initial))).await.is_err() {
         return Ok(false);
     }
@@ -99,10 +87,6 @@ pub(super) async fn stream_to_close_into(
         let n = stream.read(&mut tmp).await?;
         if n == 0 {
             return Ok(true);
-        }
-        total += n;
-        if total > limit {
-            return Err(body_too_large_io(limit));
         }
         if tx
             .send(Ok(Bytes::copy_from_slice(&tmp[..n])))
@@ -117,52 +101,51 @@ pub(super) async fn stream_chunked_into(
     stream: &mut dyn H1Io,
     mut buf: Vec<u8>,
     tx: &mpsc::Sender<io::Result<Bytes>>,
-    limit: usize,
 ) -> io::Result<bool> {
-    let mut total: usize = 0;
     loop {
         let line_end = read_until_crlf(stream, &mut buf)
             .await
             .map_err(h1err_to_io)?;
         let size_line = String::from_utf8_lossy(&buf[..line_end]);
         let size_token = size_line.split(';').next().unwrap_or("").trim();
-        let size_u64 = u64::from_str_radix(size_token, 16).map_err(|e| {
+        let mut remaining = u64::from_str_radix(size_token, 16).map_err(|e| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("invalid chunk size: {e}"),
             )
         })?;
-        if size_u64 > limit as u64 {
-            return Err(body_too_large_io(limit));
-        }
-        let size = size_u64 as usize;
         buf.drain(..line_end + 2);
 
-        if size == 0 {
+        if remaining == 0 {
             read_chunk_trailers(stream, &mut buf)
                 .await
                 .map_err(h1err_to_io)?;
             return Ok(true);
         }
 
-        read_until_available(stream, &mut buf, size + 2)
+        while remaining > 0 {
+            if buf.is_empty() {
+                read_more(stream, &mut buf).await.map_err(h1err_to_io)?;
+            }
+            let take = usize::try_from(remaining).map_or(buf.len(), |wanted| wanted.min(buf.len()));
+            let piece = Bytes::copy_from_slice(&buf[..take]);
+            buf.drain(..take);
+            remaining -= take as u64;
+            if tx.send(Ok(piece)).await.is_err() {
+                return Ok(false);
+            }
+        }
+
+        read_until_available(stream, &mut buf, 2)
             .await
             .map_err(h1err_to_io)?;
-        total += size;
-        if total > limit {
-            return Err(body_too_large_io(limit));
-        }
-        if &buf[size..size + 2] != b"\r\n" {
+        if &buf[..2] != b"\r\n" {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "chunk missing CRLF terminator",
             ));
         }
-        let chunk = Bytes::copy_from_slice(&buf[..size]);
-        buf.drain(..size + 2);
-        if tx.send(Ok(chunk)).await.is_err() {
-            return Ok(false);
-        }
+        buf.drain(..2);
     }
 }
 #[expect(
@@ -269,11 +252,4 @@ pub(super) async fn send_request_h1_streaming(
         tls: tls_for_scheme(scheme, &tls),
         timing: ResponseTiming::leg(started, Some(connect_ms)),
     })
-}
-
-fn body_too_large_io(limit: usize) -> io::Error {
-    io::Error::new(
-        io::ErrorKind::InvalidData,
-        format!("HTTP/1.1 body exceeds {limit} bytes"),
-    )
 }
