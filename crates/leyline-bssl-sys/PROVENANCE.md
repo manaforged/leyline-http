@@ -23,7 +23,7 @@ Changes from upstream:
   and the `BORING_BSSL_INSTALL_DIR` export.
 - Added wrappers: `SslContextBuilder::{set_sigalgs, set_record_size_limit,
   set_delegated_credentials, set_extension_order, set_extension_tail,
-  set_tls13_cipher_order, set_grease_signature_algorithms}`,
+  set_tls13_cipher_order, set_grease_sigalgs_enabled}`,
   `SslRef::{set_requested_trust_anchors, add_application_settings,
   set_alps_use_new_codepoint, set_tls12_extensions}`,
   `SslConnector::bare_builder`, and `CertificateCompressionAlgorithm::ZSTD`.
@@ -36,10 +36,10 @@ Changes from upstream:
 
 ## BoringSSL revision
 
-- Commit `3a9254f16eda7a4c5d2260039ff23456a0a34de4`, vendored as the
+- Commit `ac39ea6853833c1f18fd23614091d11855e71752`, vendored as the
   `deps/boringssl` submodule.
-- It is the `boringssl_revision` in Chromium's DEPS at tag `150.0.7871.26`.
-  Cloudflare v5.2.0 pins `e2a57cfb4d915b4ba820585aef9fdee7bca13fe5`, 30
+- It is the `boringssl_revision` in Chromium's DEPS at tag `154.0.8037.58`.
+  Cloudflare v5.2.0 pins `e2a57cfb4d915b4ba820585aef9fdee7bca13fe5`, 372
   commits older. Leyline keeps the Chrome revision so that the TLS wire
   output stays the same.
 
@@ -67,21 +67,28 @@ step. The patches are:
    - Renames the `ssl_st` and `ssl_session_st` C++ structs to
      `LEYLINE_ssl_st` and `LEYLINE_ssl_session_st`. Their destructors are
      then prefixed too.
-   - Runs the Go symbol-prefix audit only when Go is installed, so the
-     build does not need Go.
 3. `0003-leyline-tls12-extensions.patch`
    - `SSL_set_tls12_extensions` keeps `extended_master_secret` and
      `renegotiation_info` in a ClientHello whose minimum version is TLS 1.3.
      Firefox sends both in its QUIC ClientHello.
-4. `0004-leyline-grease-signature-algorithms.patch`
-   - `SSL_CTX_set_grease_signature_algorithms` puts one GREASE value
-     (RFC 8701) first in the ClientHello `signature_algorithms` list, with
-     its own GREASE seed index. Chrome 152 and later send it.
-5. `0005-leyline-extension-tail.patch`
+4. `0004-leyline-extension-tail.patch`
    - `SSL_CTX_set_extension_tail` keeps the listed extensions last, in the
      listed order, when `permute_extensions` shuffles the ClientHello.
      Firefox shuffles its QUIC ClientHello and keeps
      `quic_transport_parameters` and ECH last.
+5. `0005-leyline-client-hello-padding.patch`
+   - Restores the padding extension (RFC 7685), which pads a cleartext
+     ClientHello of 256 to 511 bytes to 512 bytes. BoringSSL removed it in
+     commit `eae46df1e6c1df0556ee4106bcab75657eb8181e`. A ClientHello
+     without a post-quantum key share, such as Safari 18's, falls in that
+     range, and the browser sends the extension.
+
+BoringSSL provides `SSL_CTX_set_grease_sigalgs_enabled` since commit
+`29e593e29165df578ab778269a1f04da2055c32f`. It puts one GREASE value
+(RFC 8701) first in the ClientHello `signature_algorithms` list, which
+Chrome 152 and later send. It replaces the patch that Leyline carried for
+the same value. BoringSSL runs its symbol-prefix audit only in its test
+targets, so a prefixed build does not need Go.
 
 ## Symbol prefix
 

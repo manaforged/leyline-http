@@ -1393,9 +1393,9 @@ impl SslContextBuilder {
         unsafe { ffi::SSL_CTX_set_grease_enabled(self.as_ptr(), enabled as _) }
     }
 
-    #[corresponds(SSL_CTX_set_grease_signature_algorithms)]
-    pub fn set_grease_signature_algorithms(&mut self, enabled: bool) {
-        unsafe { ffi::SSL_CTX_set_grease_signature_algorithms(self.as_ptr(), enabled as _) }
+    #[corresponds(SSL_CTX_set_grease_sigalgs_enabled)]
+    pub fn set_grease_sigalgs_enabled(&mut self, enabled: bool) {
+        unsafe { ffi::SSL_CTX_set_grease_sigalgs_enabled(self.as_ptr(), enabled as _) }
     }
 
     #[corresponds(SSL_CTX_set_signing_algorithm_prefs)]

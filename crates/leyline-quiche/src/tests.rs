@@ -41,7 +41,7 @@ use rstest::rstest;
 /// such assertion has two flavours. Wrap them in this macro so the
 /// per-version values stay side-by-side at the call site.
 macro_rules! by_boring {
-    (b4: $b4:expr, b5: $b5:expr $(,)?) => {{ $b4 }};
+    (b4: $b4:expr, b5: $b5:expr $(,)?) => {{ $b5 }};
 }
 
 #[test]
@@ -6687,7 +6687,7 @@ fn sends_ack_only_pkt_when_full_cwnd_and_ack_elicited(
         if cc_algorithm_name == "cubic" {
             Ok(12000)
         } else {
-            Ok(by_boring!(b4: 12299, b5: 13587))
+            Ok(13585)
         }
     );
 
@@ -6764,7 +6764,7 @@ fn sends_ack_only_pkt_when_full_cwnd_and_ack_elicited_despite_max_unacknowledgin
         if cc_algorithm_name == "cubic" {
             Ok(12000)
         } else {
-            Ok(by_boring!(b4: 12299, b5: 13587))
+            Ok(13585)
         }
     );
 

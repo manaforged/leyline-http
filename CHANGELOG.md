@@ -23,6 +23,12 @@ First public release.
   CMake 3.22 or later, a C and C++ compiler, libclang, and `git`; on Windows,
   also the MSVC build tools and NASM. The BoringSSL crates are trimmed forks
   of Cloudflare's `boring` v5.2.0.
+- BoringSSL is pinned to `ac39ea6`, the `boringssl_revision` in Chromium's
+  DEPS at tag `154.0.8037.58`, and carries five patches. One restores the
+  ClientHello padding extension that Safari sends and BoringSSL removed.
+  BoringSSL's own `SSL_CTX_set_grease_sigalgs_enabled` sends the GREASE
+  signature algorithm, and `SslContextBuilder::set_grease_sigalgs_enabled`
+  wraps it.
 - The build reads its settings from `LEYLINE_BSSL_*` variables, such as
   `LEYLINE_BSSL_PATH` and `LEYLINE_BSSL_SOURCE_PATH`. A `BORING_BSSL_*`
   value set for `boring-sys` does not reach Leyline.

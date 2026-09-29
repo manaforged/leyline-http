@@ -1,8 +1,8 @@
 diff --git a/include/openssl/prefix_symbols.h b/include/openssl/prefix_symbols.h
-index 2669d24..d4c1076 100644
+index 772ddeb62..5e3bd3fff 100644
 --- a/include/openssl/prefix_symbols.h
 +++ b/include/openssl/prefix_symbols.h
-@@ -3154,6 +3154,7 @@
+@@ -3181,6 +3181,7 @@
  #pragma redefine_extname SSL_CTX_set_record_size_limit BORINGSSL_ADD_USER_LABEL_AND_PREFIX(SSL_CTX_set_record_size_limit)
  #pragma redefine_extname SSL_CTX_set_tls13_cipher_order BORINGSSL_ADD_USER_LABEL_AND_PREFIX(SSL_CTX_set_tls13_cipher_order)
  #pragma redefine_extname SSL_set_record_size_limit BORINGSSL_ADD_USER_LABEL_AND_PREFIX(SSL_set_record_size_limit)
@@ -10,7 +10,7 @@ index 2669d24..d4c1076 100644
  
  #else  // __PRAGMA_REDEFINE_EXTNAME && !__ASSEMBLER__
  
-@@ -6274,6 +6275,7 @@
+@@ -6328,6 +6329,7 @@
  #define SSL_CTX_set_record_size_limit BORINGSSL_ADD_PREFIX(SSL_CTX_set_record_size_limit)
  #define SSL_CTX_set_tls13_cipher_order BORINGSSL_ADD_PREFIX(SSL_CTX_set_tls13_cipher_order)
  #define SSL_set_record_size_limit BORINGSSL_ADD_PREFIX(SSL_set_record_size_limit)
@@ -19,10 +19,10 @@ index 2669d24..d4c1076 100644
  #endif  // __PRAGMA_REDEFINE_EXTNAME && !__ASSEMBLER__
  
 diff --git a/include/openssl/ssl.h b/include/openssl/ssl.h
-index 3244630..8ca1d0c 100644
+index 0b63ff753..312f03685 100644
 --- a/include/openssl/ssl.h
 +++ b/include/openssl/ssl.h
-@@ -3119,6 +3119,8 @@ OPENSSL_EXPORT void SSL_CTX_set_record_size_limit(SSL_CTX *ctx, uint16_t limit);
+@@ -3167,6 +3167,8 @@ OPENSSL_EXPORT void SSL_CTX_set_record_size_limit(SSL_CTX *ctx, uint16_t limit);
  // SSL_set_record_size_limit configures the record_size_limit value for `ssl`.
  OPENSSL_EXPORT void SSL_set_record_size_limit(SSL *ssl, uint16_t limit);
  
@@ -32,19 +32,19 @@ index 3244630..8ca1d0c 100644
  // advertises in the delegated_credential extension (RFC 9345) on the
  // ClientHello. `str` is a colon-separated list of signature algorithm names or
 diff --git a/ssl/extensions.cc b/ssl/extensions.cc
-index 80db965..e594ec2 100644
+index 7ed80120b..7c20e097b 100644
 --- a/ssl/extensions.cc
 +++ b/ssl/extensions.cc
-@@ -702,7 +702,7 @@ static bool ext_ri_add_clienthello(const SSL_HANDSHAKE *hs, CBB *out,
+@@ -697,7 +697,7 @@ static bool ext_ri_add_clienthello(const SSL_HANDSHAKE *hs, CBB *out,
                                     ssl_client_hello_type_t type) {
-   const SSL *const ssl = hs->ssl;
+   const SSLImpl *const ssl = hs->ssl;
    // Renegotiation indication is not necessary in TLS 1.3.
 -  if (hs->min_version >= TLS1_3_VERSION ||  //
 +  if ((hs->min_version >= TLS1_3_VERSION && !hs->config->tls12_extensions) ||
        type == ssl_client_hello_inner) {
      return true;
    }
-@@ -866,7 +866,8 @@ static bool ext_ems_add_clienthello(const SSL_HANDSHAKE *hs, CBB *out,
+@@ -861,7 +861,8 @@ static bool ext_ems_add_clienthello(const SSL_HANDSHAKE *hs, CBB *out,
                                      CBB *out_compressible,
                                      ssl_client_hello_type_t type) {
    // Extended master secret is not necessary in TLS 1.3.
@@ -55,10 +55,10 @@ index 80db965..e594ec2 100644
    }
  
 diff --git a/ssl/internal.h b/ssl/internal.h
-index f636baf..e2ff882 100644
+index c45b03859..030e092bb 100644
 --- a/ssl/internal.h
 +++ b/ssl/internal.h
-@@ -3459,6 +3459,8 @@ struct SSL_CONFIG {
+@@ -3551,6 +3551,8 @@ struct SSL_CONFIG {
    // extension (RFC 8449) in the ClientHello.
    uint16_t record_size_limit = 0;
  
@@ -68,20 +68,21 @@ index f636baf..e2ff882 100644
    // codepoints advertised in the delegated_credential extension (RFC 9345).
    Array<uint16_t> delegated_credentials;
 diff --git a/ssl/ssl_lib.cc b/ssl/ssl_lib.cc
-index 733b3bd..94d311e 100644
+index dfbcd834a..5e7d4de48 100644
 --- a/ssl/ssl_lib.cc
 +++ b/ssl/ssl_lib.cc
-@@ -3233,6 +3233,13 @@ void SSL_CTX_set_record_size_limit(SSL_CTX *ctx, uint16_t limit) {
+@@ -3308,6 +3308,14 @@ void SSL_CTX_set_record_size_limit(SSL_CTX *ctx, uint16_t limit) {
    FromOpaque(ctx)->record_size_limit = limit;
  }
  
 +void SSL_set_tls12_extensions(SSL *ssl, int enabled) {
-+  if (!ssl->config) {
++  auto *ssl_impl = FromOpaque(ssl);
++  if (!ssl_impl->config) {
 +    return;
 +  }
-+  ssl->config->tls12_extensions = !!enabled;
++  ssl_impl->config->tls12_extensions = !!enabled;
 +}
 +
  void SSL_set_record_size_limit(SSL *ssl, uint16_t limit) {
-   if (!ssl->config) {
-     return;
+   auto *ssl_impl = FromOpaque(ssl);
+   if (!ssl_impl->config) {

@@ -184,7 +184,7 @@ pub(super) fn extensions(
     order(builder, tls)?;
 
     builder.set_grease_enabled(tls.grease);
-    builder.set_grease_signature_algorithms(tls.grease && tls.sigalg_grease);
+    builder.set_grease_sigalgs_enabled(tls.grease && tls.sigalg_grease);
 
     if !tls.session_tickets {
         builder.set_options(SslOptions::NO_TICKET);
