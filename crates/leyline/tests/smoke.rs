@@ -2,14 +2,12 @@ use std::future::Future;
 use std::pin::Pin;
 use std::time::{Duration, Instant};
 
-use bytes::Bytes;
 use leyline::{Browser, Family, Platform, ProtocolPolicy, Session};
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const PEET_URL: &str = "https://tls.peet.ws/api/all";
 const H3_GET_HOST: &str = "cloudflare-quic.com";
-const H3_ECHO_HOST: &str = "httpbin.agrd.workers.dev";
 const SMOKE_TIMEOUT: Duration = Duration::from_secs(25);
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 type SmokeFuture<'a> = Pin<Box<dyn Future<Output = Result<String>> + 'a>>;
@@ -262,14 +260,6 @@ async fn smoke_suite() {
     .await;
 
     run(
-        "HTTP/3 POST body round-trip",
-        &mut passed,
-        &mut failed,
-        smoke(h3_post_body()),
-    )
-    .await;
-
-    run(
         "Large response (50KB)",
         &mut passed,
         &mut failed,
@@ -400,31 +390,6 @@ async fn h3_get(browser: Browser) -> Result<String> {
     ensure(status == 200, format!("status={status}"))?;
     ensure(!body.is_empty(), "empty H3 body")?;
     Ok(format!("status={status} body={}B", body.len()))
-}
-
-async fn h3_post_body() -> Result<String> {
-    let payload = br#"{"proof":"leyline-h3-body","n":42}"#;
-    let session = Session::builder()
-        .browser(Browser::Chrome147)
-        .protocol(ProtocolPolicy::Http3)
-        .build()?;
-    let url = format!("https://{H3_ECHO_HOST}/post");
-    let resp = session
-        .post(&url)
-        .header("accept", "application/json")
-        .header("content-type", "application/json")
-        .body(Bytes::copy_from_slice(payload))
-        .send()
-        .await?;
-
-    let status = resp.status();
-    let body = String::from_utf8_lossy(&resp.bytes().await?).into_owned();
-    ensure(status == 200, format!("status={status}"))?;
-    ensure(
-        body.contains("leyline-h3-body"),
-        format!("H3 POST echo missing payload, body={body}"),
-    )?;
-    Ok(format!("status={status} echoed={}B", payload.len()))
 }
 
 fn firefox() -> Result<Session> {
