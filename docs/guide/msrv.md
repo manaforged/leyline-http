@@ -17,12 +17,17 @@ A patch release never raises the MSRV.
 
 ## What you can build with
 
-Leyline compiles on the MSRV, 1.96, and is tested on current stable. The
-release gate compile-checks 1.96 and runs the test suite on stable. A
-toolchain between them is expected to work but is not part of the gate.
+Leyline compiles on the MSRV, 1.96. The release gate runs `cargo check` for
+the workspace on 1.96, and it runs the tests on the toolchain that
+`rust-toolchain.toml` pins. A toolchain between them is expected to work but
+is not part of the gate.
 
 To check your toolchain, run:
 
 ```sh
 rustc --version
 ```
+
+## Next
+
+Read the [API map](../api.md) to see how the public API fits together.

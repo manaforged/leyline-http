@@ -176,8 +176,8 @@ g_test() {
 }
 
 g_live() {
-    step "cargo test -p leyline-http --test tls_peet --release -- --ignored"
-    cargo test -p leyline-http --test tls_peet --release -- --ignored || fail "live tls_peet tests failed"
+    step "cargo test -p leyline-http --features bench-internals --test tls_peet --release -- --ignored"
+    cargo test -p leyline-http --features bench-internals --test tls_peet --release -- --ignored || fail "live tls_peet tests failed"
     ok "live tls_peet pass"
 
     step "cargo test -p leyline-http --test smoke -- --ignored --nocapture"
@@ -197,7 +197,7 @@ g_deny() {
 g_semver() {
     step "cargo semver-checks check-release -p leyline-http"
     if ! command -v cargo-semver-checks >/dev/null; then
-        echo "  (cargo-semver-checks not installed; skipping — install with"
+        echo "  (cargo-semver-checks not installed; skipping. Install with"
         echo "   'cargo install --locked cargo-semver-checks')"
     elif [[ -z "$(git tag --list 'v*')" ]]; then
         semver_status="skipped (no v* tag to compare against)"
@@ -214,11 +214,11 @@ g_external_types() {
     external_types_nightly="nightly-2026-06-20"
     step "cargo check-external-types leyline-http --features full ($external_types_nightly)"
     if ! command -v cargo-check-external-types >/dev/null; then
-        echo "  (cargo-check-external-types not installed; skipping — install with"
+        echo "  (cargo-check-external-types not installed; skipping. Install with"
         echo "   'cargo install --locked cargo-check-external-types')"
     elif ! rustup toolchain list 2>/dev/null | grep -q "^$external_types_nightly"; then
         external_types_status="skipped ($external_types_nightly toolchain not installed)"
-        echo "  ($external_types_nightly not installed; skipping — rustdoc JSON format"
+        echo "  ($external_types_nightly not installed; skipping. Rustdoc JSON format"
         echo "   57 requires this nightly. Install with"
         echo "   'rustup toolchain install $external_types_nightly')"
     else
@@ -253,11 +253,11 @@ g_fuzz_replay() {
     if [[ ! -d fuzz ]]; then
         echo "  (fuzz/ not present; skipping corpus replay)"
     elif ! command -v cargo-fuzz >/dev/null; then
-        echo "  (cargo-fuzz not installed; skipping corpus replay — install with"
+        echo "  (cargo-fuzz not installed; skipping corpus replay. Install with"
         echo "   'cargo install --locked cargo-fuzz' to enable this gate)"
     elif ! command -v rustc >/dev/null || ! rustup toolchain list 2>/dev/null | grep -q nightly; then
-        echo "  (nightly toolchain not installed; skipping corpus replay —"
-        echo "   install with 'rustup toolchain install nightly')"
+        echo "  (nightly toolchain not installed; skipping corpus replay."
+        echo "   Install with 'rustup toolchain install nightly')"
     else
         for target in "${FUZZ_TARGETS[@]}"; do
             echo "  replaying corpus/$target ..."
@@ -283,7 +283,7 @@ g_fuzz_timed() {
     for target in "${FUZZ_TARGETS[@]}"; do
         echo "  fuzzing $target for ${fuzz_seconds}s ..."
         fuzz_run "$target" -- -max_total_time="$fuzz_seconds" </dev/null \
-            || fail "fuzz run found a crash on $target — inspect fuzz/artifacts/"
+            || fail "fuzz run found a crash on $target; inspect fuzz/artifacts/"
     done
     ok "fuzz time-bounded runs clean"
 }

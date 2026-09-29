@@ -5,15 +5,18 @@ A session follows redirects by default, up to 10 per request. It follows a
 
 ## What a redirect changes
 
-- After a `301`, `302`, or `303`, the next request is a `GET` with no body.
+- After a `301` or `302`, a `POST` becomes a `GET` with no body. Every other
+  method keeps its method and its body.
+- After a `303`, every method except `HEAD` becomes a `GET` with no body. A
+  `HEAD` request stays a `HEAD`.
 - After a `307` or `308`, the next request keeps the method and the body.
-- A streamed request body cannot be sent twice. A `307` or `308` on a streamed
-  body fails with `Kind::Redirect`.
+- A streamed request body cannot be sent twice. When a redirect keeps the body
+  and the body is a stream, the request fails with `Kind::Redirect`.
 - A `Location` with a scheme other than `http` or `https` fails with
   `Kind::Redirect`.
 - When the redirect leaves the origin of the first request, the session
   removes the `Authorization`, `Proxy-Authorization`, and `Cookie` headers
-  that you set. The cookie jar still adds the cookies that match the new URL.
+  that you set. The cookie jar adds the cookies that match the new URL.
 
 `Response::redirect_chain` lists the URLs that the session left, in order, as
 `url::Url` values without a user name or password. `Response::url` is the final
@@ -102,3 +105,7 @@ let session = Session::builder()
 
 A custom policy can follow at most 32 redirects. The next redirect fails with
 `Kind::Redirect`.
+
+## Next
+
+Read [Retries and timeouts](retries-and-timeouts.md).

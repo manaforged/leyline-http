@@ -58,12 +58,12 @@ Ok "docs clean"
 
 Step "cargo test --workspace --exclude leyline-quiche"
 $env:RUSTDOC = (& rustup which rustdoc)
-Run "cargo" @("test", "--workspace", "--exclude", "leyline-quiche")
+Run "cargo" @("test", "--workspace", "--exclude", "leyline-quiche", "--features", "leyline-http/full,leyline-http/bench-internals")
 Ok "tests pass"
 
 if (-not $Quick) {
     Step "live tls_peet"
-    Run "cargo" @("test", "-p", "leyline-http", "--test", "tls_peet", "--", "--ignored")
+    Run "cargo" @("test", "-p", "leyline-http", "--features", "bench-internals", "--test", "tls_peet", "--release", "--", "--ignored")
     Ok "live tls_peet pass"
 
     Step "live smoke"

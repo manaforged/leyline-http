@@ -13,7 +13,8 @@ let session = leyline::Session::new();
 session.get("https://example.com/login").await?;
 
 let jar = session.cookies();
-println!("{} cookies", jar.all_cookies().len());
+let live = jar.all_cookies().iter().filter(|c| !c.is_expired()).count();
+println!("{live} cookies");
 let url = url::Url::parse("https://example.com/")?;
 if let Some(id) = jar.get_cookie(&url, "session_id") {
     println!("session_id={id}");
@@ -22,9 +23,9 @@ if let Some(id) = jar.get_cookie(&url, "session_id") {
 # }
 ```
 
-Every jar method that takes a URL takes a parsed `&url::Url`, like the
-reqwest cookie store. The methods cannot fail on URL input, so none of them
-returns a `Result`. Parse the URL once and pass the same value to each call.
+Every jar method that takes a URL takes a parsed `&url::Url`. The methods
+cannot fail on URL input, so none of them returns a `Result`. Parse the URL
+once and pass the same value to each call.
 
 Useful jar methods:
 
@@ -38,8 +39,11 @@ Useful jar methods:
   `url` receives, on every path. It returns the number removed.
 - `remove_named(name)` to delete every cookie with that name on every host.
   It returns the number removed. `clear` deletes all cookies.
-- `all_cookies()` for a list sorted by domain then name.
-- `snapshot()` for an independent copy of the jar with every attribute.
+- `all_cookies()` for a list of every stored cookie, sorted by domain then
+  name. The list includes expired cookies. Filter them with
+  `Cookie::is_expired()`.
+- `snapshot()` for an independent copy of the jar with every attribute. The
+  copy includes expired cookies.
 - `extend_from(other)` to merge the cookies of another jar.
 - `load_cookies(header, url)` to load a `Cookie` header string, and
   `cookie_header(url)` for the `Cookie` header the jar sends to a URL.
@@ -67,7 +71,7 @@ assert!(shared.get_cookie(&url, "extra").is_some());
 
 `jar.snapshot()` is a fork: a new store with a copy of every cookie and all
 of its attributes (domain, path, `Secure`, `HttpOnly`, `SameSite`, expiry,
-host-only, and creation order). A write to the copy does not reach the
+host-only, and creation time). A write to the copy does not reach the
 original. `jar.extend_from(&other)` merges the cookies of `other` into `jar`
 with their attributes. On the same name, domain, and path, the cookie from
 `other` replaces the one in `jar`.
@@ -127,11 +131,10 @@ assert_eq!(jar.remove(&url, "token"), 1);
 
 ## What the jar stores
 
-A `Cookie` carries the full RFC 6265bis attribute set: `name`, `value`,
-`domain`, `path`, `secure`, `http_only`, `same_site`, `expires`,
-`creation_time`, `last_access`, and `host_only`. `SameSite` is `Strict`,
-`Lax`, or `None`. `Cookie::is_expired()` tells whether the expiry has
-passed.
+A `Cookie` has these public fields: `name`, `value`, `domain`, `path`,
+`secure`, `http_only`, `same_site`, `expires`, `creation_time`, and
+`host_only`. `SameSite` is `Strict`, `Lax`, or `None`. `Cookie::is_expired()`
+tells whether the expiry has passed.
 
 The jar follows Chrome's behavior:
 
@@ -141,14 +144,19 @@ The jar follows Chrome's behavior:
 - `Secure` cookies go only over HTTPS.
 - `SameSite` is enforced against the navigation that started the request, so a
   redirect chain that crosses sites makes the request cross-site.
-- Expired cookies are not returned.
+- The jar sends no expired cookie.
 - Limits match Chrome: 180 cookies per domain and 3300 overall. Crossing a
   limit evicts the least recently accessed entries, 30 per domain or 300
   globally.
 
+The jar keeps a cookie after its expiry passes. `get_cookie` skips expired
+cookies, and the `Cookie` header omits them. `all_cookies()`, `snapshot()`, and
+serde include them.
+
 `Jar` and `Cookie` implement `Serialize` and `Deserialize`, so a jar
-round-trips through serde with the times stored as unix milliseconds. That is
-how you persist a login between runs.
+round-trips through serde with the times stored as unix milliseconds. Serde
+writes every stored cookie, expired ones included. That is how you persist a
+login between runs.
 
 ## The public suffix rule
 

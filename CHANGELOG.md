@@ -92,7 +92,8 @@ First public release.
   `native` for an OS HTTP stack such as CFNetwork, `headless-shell`,
   `webview`, `emulator`, `inferred`, or `self-referential`. Every Chrome,
   Brave, and Firefox profile is a browser capture. `Browser::latest` and
-  `Session::new()` select the newest captured Chrome, currently Chrome 154.
+  `Session::new()` select the newest captured Chrome, Chrome 154 in this
+  release.
 - `TimeoutConfig::connect` bounds plain `http://` connects. One request spends at
   most one connect timeout on an unreachable host.
 - `TimeoutConfig::connect` also bounds the HTTP/3 handshake. A QUIC handshake

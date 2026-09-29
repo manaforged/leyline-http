@@ -5,16 +5,16 @@ on the builder and then await it.
 
 ## The http types
 
-The public surface speaks the `http` crate, the way reqwest and hyper do.
-Leyline re-exports it as `leyline::http`, so you and the client share one
-version of `Method`, `Uri`, `StatusCode`, `HeaderName`, and `HeaderValue`.
+The public API uses the types of the `http` crate. Leyline re-exports the
+crate as `leyline::http`, so you and the client share one version of `Method`,
+`Uri`, `StatusCode`, `HeaderName`, and `HeaderValue`.
 
 ## Methods
 
-The session has one method per common verb: `get`, `post`, `put`, `patch`,
-`delete`, and `head`. For anything else, call `request` with an `http::Method`.
-Every one of them takes `impl IntoUrl`: a `&str`, a `String`, a `&String`, a
-`url::Url`, or a `&url::Url`.
+The session has a function for each common HTTP method: `get`, `post`, `put`,
+`patch`, `delete`, and `head`. For any other HTTP method, call `request` with
+an `http::Method`. All of them take `impl IntoUrl`: a `&str`, a `String`, a
+`&String`, a `url::Url`, or a `&url::Url`.
 
 ```rust,no_run
 use leyline::http::Method;
@@ -34,9 +34,9 @@ builder records the error, and `send` returns it as `Kind::Url` with the
 ## Headers
 
 Header setters take anything that converts to an `http::HeaderName` and an
-`http::HeaderValue`, so `&str` and `String` keep working, and a `HeaderName`
-constant costs no parse. An invalid name or value surfaces as an error from
-`send`, not at the call site.
+`http::HeaderValue`. That includes `&str` and `String`. A `HeaderName` constant
+costs no parse. An invalid name or value surfaces as an error from `send`, not
+at the call site.
 
 `header` appends. A second call with the same name adds a second value and
 keeps the first.
@@ -65,7 +65,7 @@ let resp = session
 ### Order
 
 Order matters to a fingerprint, so Leyline preserves it. Your headers merge
-into the profile's preset block, and the profile's own order applies on the
+into the profile's preset headers, and the profile's own order applies on the
 wire. A request header replaces a profile or `SessionBuilder::headers` header
 of the same name and takes its slot; repeated `header` calls for that name
 send every value there. See the header merge rule in the
@@ -74,7 +74,8 @@ send every value there. See the header merge rule in the
 Two methods override the header order:
 
 - `header_order(&["a", "b"])` pins the wire order of the regular headers for
-  this request, on every protocol. It wins over the order of the profile's header shape.
+  this request, on every protocol. It wins over the order of the profile's
+  header style.
 - `anchored(anchor, name, value)` inserts one header at a named slot, such as
   immediately after `user-agent`.
 
@@ -94,8 +95,8 @@ let resp = session
 ```
 
 The `HeaderAnchor` slots are `AfterCchUa`, `AfterCchUaMobile`,
-`AfterCchUaPlatform`, `AfterUserAgent`, `AfterAccept`, `AfterContentType`, and
-`BeforeAcceptEncoding`.
+`AfterCchUaPlatform`, `AfterUserAgent`, `AfterAccept`, `AfterContentType`,
+`AfterFetchDest`, and `BeforeAcceptEncoding`.
 
 To see the headers a request actually sent, read `Response::request_headers`.
 See [Responses](responses.md).
@@ -179,9 +180,11 @@ let resp = session.post("https://example.com/upload").multipart(form).await?;
 ### Streaming bodies
 
 `Body::stream(s, len)` wraps any `Stream` of `io::Result<Bytes>`. Pass
-`Some(n)` to declare an exact `Content-Length`, or `None`. Give the length whenever you know it: a body with no length
-hint is sent chunked. See [Streaming](streaming.md). The example needs `bytes`
-and `futures-util` in your manifest.
+`Some(n)` to declare an exact `Content-Length` on every protocol, or `None` to
+declare none. Give the length whenever you know it. On HTTP/1.1, a body with
+no length hint is sent with `Transfer-Encoding: chunked`. HTTP/2 and HTTP/3
+send it with no declared length. See [Streaming](streaming.md). The example
+needs `bytes` and `futures-util` in your manifest.
 
 ```rust,no_run
 use bytes::Bytes;
@@ -204,8 +207,8 @@ let resp = session
 ## Presets and content-type inference
 
 A `Preset` decides the `sec-fetch-*` headers and the header order for a fetch
-context: `Navigate`, `Script`, `Xhr`, `Form`, `CrossOrigin`, `SameSite`, and
-`FormNavigate`.
+context: `Native`, `Navigate`, `FrameNavigate`, `Reload`, `Script`, `Image`,
+`Xhr`, `Form`, `CrossOrigin`, `SameSite`, and `FormNavigate`.
 
 When the session impersonates a browser and you set no preset, a POST, PUT, or
 PATCH infers one from the `content-type` header: `application/json` gives
@@ -250,10 +253,10 @@ let resp = session
 
 `timeout` takes a `Duration` or a `TimeoutConfig`. A `Duration` sets the total
 request timeout alone. A `TimeoutConfig` sets `total`, `read`, and
-`response_header` for this one request. A `None` keeps
-the session value for that field, so a session `read` or `response_header`
-timeout cannot be disabled per request. `connect` stays session-wide,
-because connections are pooled and coalesced across requests.
+`response_header` for this one request. A field you leave unset keeps the
+session value. Pass `None` to a field to turn that timeout off for this
+request. `connect` stays session-wide, because connections are pooled and
+coalesced across requests.
 
 ```rust,no_run
 use leyline::TimeoutConfig;
@@ -279,8 +282,9 @@ See [Retries and timeouts](retries-and-timeouts.md).
 ## Send an http::Request
 
 `Session::execute` sends an `http::Request<Body>`. It carries the method, the
-URI, the headers, and the body across. It reads three optional values from the
-request extensions: a `Preset`, a `TimeoutConfig`, and a `RetryPolicy`.
+URI, the headers, and the body across. It reads four optional values from the
+request extensions: a `Preset`, a `TimeoutConfig`, a `RetryPolicy`, and a
+`RedirectPolicy`.
 
 ```rust,no_run
 use leyline::Body;
@@ -313,10 +317,11 @@ and implements `tower_service::Service<http::Request<Body>>`, answering with an
 The error type is `leyline::Error`.
 
 The service sends each request through `Session::execute`. The version is
-dropped, because the profile picks the protocol. The response body comes back
-as a stream. To add middleware, wrap the service with any Tower layer.
-Redirects, retries, cookies, and tracing stay in the session, inside the
-service.
+dropped, because the profile picks the protocol. `execute` reads the whole
+response before it returns, so the response body is one chunk. To read a body
+in chunks, see [Streaming](streaming.md). To add middleware, wrap the service
+with any Tower layer. Redirects, retries, cookies, and tracing stay in the
+session, inside the service.
 
 ```rust,no_run
 # #[cfg(feature = "tower")]

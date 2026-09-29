@@ -24,7 +24,10 @@ let session = Session::builder()
 
 `Session::new()` skips the builder. It selects `Browser::default()`
 with a Windows identity, and it uses `ProtocolPolicy::Race` when the `http3`
-feature is on. `Session::default()` is the same session. Every other
+feature is on. Race tries HTTP/3 only for an `https://` origin that
+advertised `h3` in an `Alt-Svc` header. A streamed request body, a streamed
+response, or an `http://` or `https://` proxy keeps the request on HTTP/2 or
+HTTP/1.1. `Session::default()` is the same session. Every other
 configuration goes through `Session::builder()`.
 
 `Session::builder().build()` with no browser builds a bare session. A bare
@@ -39,11 +42,12 @@ lists every variant.
 
 These helpers select a profile without naming a variant:
 
-- `Browser::latest(Family)` is the newest profile of a product line captured
-  from a real browser (`capture = "browser"`), or the newest profile when the
-  line has no browser capture. You pin the line and take whatever the crate
-  release carries. The
-  families are `Chrome`, `Brave`, `Firefox`, `Safari`, `SafariIos`,
+- `Browser::latest(Family)` is the newest profile of a product line that is
+  not deprecated and whose capture kind the line accepts. Most lines accept
+  only captures from a real browser. A newer profile with another capture kind
+  does not count. [Browser profiles](profiles.md) lists the capture kind of
+  each profile. You pin the line and take whatever the crate release carries.
+  The families are `Chrome`, `Brave`, `Firefox`, `Safari`, `SafariIos`,
   `CfNetwork`, and `OkHttp`.
 - `Browser::default()` is what `Session::new()` selects:
   `Browser::latest(Family::Chrome)`.
@@ -92,10 +96,8 @@ Pass the platform to the builder with `.platform(Platform::MacOS)`.
 
 Edge and Opera are Chromium browsers. Leyline treats them as an
 identity overlay on a Chrome profile: the HTTP/2 settings stay Chrome's,
-while the `User-Agent` and the `sec-ch-ua` brand list change. A brand row in
-`profiles/brands.toml` can name a header shape with `header_style`; no bundled
-brand does. A brand can also change a ClientHello setting: Edge does not send the
-trust anchors extension.
+while the `User-Agent` and the `sec-ch-ua` brand list change. A brand can also
+change a ClientHello setting: Edge does not send the trust anchors extension.
 
 ```rust,no_run
 use leyline::{Browser, ChromiumBrand, Session};
@@ -111,26 +113,27 @@ let session = Session::builder()
 ```
 
 `ChromiumBrand::Chrome` is stock Chrome. Put a brand on a Chrome profile whose
-Chromium version `profiles/brands.toml` lists for that brand. The Opera rows
-can end before the newest Chrome, so `Browser::default()` with
-`ChromiumBrand::Opera` can fail. Use the newest Chrome profile that the Opera
-rows list.
+Chromium version the brand supports. Edge takes its version from the Chromium
+version, so it fits every Chrome profile. Opera supports a fixed list of
+Chromium versions that can end before the newest Chrome, so
+`Browser::default()` with `ChromiumBrand::Opera` can fail at `build()`. For
+Opera, pin an older Chrome profile, for example `Browser::Chrome152`.
 
-`ChromiumBrand::all()` lists every brand in `profiles/brands.toml`. A brand
-prints as its lowercase name (`chrome`, `edge`, `opera`), and `str::parse`
-reads that name back without case. An unknown name returns an error of kind
-`Config`. To add a brand, add a row to `brands.toml`.
+`ChromiumBrand::all()` lists the bundled brands. A brand prints as its
+lowercase name (`chrome`, `edge`, `opera`), and `str::parse` reads that name
+back without case. An unknown name returns an error of kind `Config`.
 
-Brave is not an overlay. `.browser(Browser::Brave146)` selects a first-class
-profile.
+Brave has its own profiles. `.browser(Browser::Brave146)` selects one.
 
-If no capture exists for that brand, Chromium version, and platform, `build()`
-returns an error that names all three.
+Edge and Opera exist on desktop platforms only. If no capture exists for that
+brand, Chromium version, and platform, `build()` returns an error that names
+all three.
 
 `Browser::identity(platform, brand)` returns the `PlatformIdentity` a session
-sends for that browser, platform, and brand: `user_agent`, `sec_ch_ua`,
-and `accept_language`. The header shape supplies every other header. Use it when a payload that is not a
-header must carry the same values. It returns `None` when no capture exists.
+sends for that browser, platform, and brand: `user_agent`, `sec_ch_ua`, and
+`accept_language`. The header style supplies every other header. Use it when a
+payload that is not a header must carry the same values. It returns `None`
+when no capture exists.
 
 ```rust,no_run
 use leyline::{Browser, ChromiumBrand, Platform};
@@ -285,18 +288,23 @@ new `id`.
 
 One listener ships with the crate. `leyline::trace::TracingTrace` writes each
 event as a `tracing` debug event under the `leyline::trace` target.
-`Response::timing()` returns the same numbers as a `ResponseTiming`.
+`Response::timing()` does not need a listener. It returns a `ResponseTiming`
+summed across redirect legs. See [Responses](responses.md).
 
-The events fire inline on the request task. A listener that blocks, locks, or
-sleeps slows the request that produced the event.
+An event fires on the task that produced it. Most events fire on the request
+task. Leyline opens a new HTTP/2 or HTTP/3 connection on a task that it
+spawns, so an event from that open fires on the spawned task, with the `id` of
+the request that started the open. A listener that blocks, locks, or sleeps
+slows the task that produced the event. When that task opens a connection,
+every request that waits for the connection waits longer.
 
-`dns` fires where the client resolves the name itself, which is every `https://`
-connect. On a plaintext `http://` connect the operating system resolves inside
-`connect`, so only `connect` fires. `sent` carries the request method and the
-path with the query. On HTTP/2 and HTTP/3, `sent` fires when the
-request is handed to the connection driver, and its `elapsed` covers framing
-only.
+`dns` fires each time Leyline resolves a name to open a TCP connection, for
+`http://` and `https://` alike. Through a proxy, `dns` reports the proxy host.
+A direct HTTP/3 connection fires no `dns` event. `sent` carries the request
+method and the path with the query. On HTTP/2 and HTTP/3, `sent` fires before
+Leyline hands the request to the connection driver, and its `elapsed` is zero.
 
 ## Next
 
-Read [Requests](requests.md) to shape a single request.
+Read [Choosing a profile](choosing-a-profile.md) to compare the bundled
+profiles.

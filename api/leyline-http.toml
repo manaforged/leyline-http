@@ -11,9 +11,24 @@ owner = "profile::ProfileRegistry"
 guide = "docs/guide/choosing-a-profile.md"
 
 [[task]]
+name = "Pin a browser version"
+call = "Browser::get"
+guide = "docs/guide/sessions.md"
+
+[[task]]
 name = "Send a loaded profile"
 call = "SessionBuilder::profile"
-owner = "profile::identity::resolve_identity"
+owner = "SessionBuilder::build"
+guide = "docs/guide/profiles.md"
+
+[[task]]
+name = "Load profiles from a directory"
+call = "profile::ProfileRegistry::load"
+guide = "docs/guide/profiles.md"
+
+[[task]]
+name = "Parse a profile from TOML"
+call = "BrowserProfile::from_toml"
 guide = "docs/guide/profiles.md"
 
 [[task]]
@@ -33,9 +48,20 @@ owner = "Identity"
 guide = "docs/guide/fingerprints.md"
 
 [[task]]
+name = "Rotate the TLS side of an identity"
+call = "Identity::rotate_tls"
+owner = "Identity"
+guide = "docs/guide/fingerprints.md"
+
+[[task]]
+name = "Derive a session with another identity"
+call = "Session::with_identity"
+guide = "docs/guide/fingerprints.md"
+
+[[task]]
 name = "Session default headers"
 call = "SessionBuilder::headers"
-guide = "docs/guide/sessions.md"
+guide = "docs/guide/requests.md"
 
 [[task]]
 name = "URL input"
@@ -62,16 +88,31 @@ owner = "RequestBuilder::send"
 guide = "docs/guide/requests.md"
 
 [[task]]
+name = "Stream a response"
+call = "RequestBuilder::stream"
+guide = "docs/guide/streaming.md"
+
+[[task]]
+name = "Set the fetch context"
+call = "RequestBuilder::preset"
+guide = "docs/guide/requests.md"
+
+[[task]]
+name = "Proxy one request"
+call = "RequestBuilder::proxy"
+guide = "docs/guide/proxies.md"
+
+[[task]]
 name = "Headers"
 call = "RequestBuilder::header"
-owner = "HeaderList"
+owner = "core::session::header_merge::apply_extra_headers"
 guide = "docs/guide/requests.md"
 
 [[task]]
 name = "Header order"
 call = "RequestBuilder::header_order"
 owner = "core::headers::reorder"
-guide = "docs/guide/fingerprints.md"
+guide = "docs/guide/requests.md"
 
 [[task]]
 name = "sec-fetch-site value"
@@ -88,19 +129,24 @@ guide = "docs/guide/requests.md"
 [[task]]
 name = "JSON body"
 call = "RequestBuilder::json"
-owner = "Body"
+owner = "RequestBuilder::json"
 guide = "docs/guide/requests.md"
 
 [[task]]
 name = "Form body"
 call = "RequestBuilder::form"
-owner = "Body"
+owner = "core::request::encode::url_encode_pairs"
 guide = "docs/guide/requests.md"
 
 [[task]]
 name = "Multipart body"
 call = "RequestBuilder::multipart"
 owner = "multipart::Form"
+guide = "docs/guide/requests.md"
+
+[[task]]
+name = "Compress a request body"
+call = "RequestBuilder::compress"
 guide = "docs/guide/requests.md"
 
 [[task]]
@@ -121,7 +167,7 @@ guide = "docs/guide/requests.md"
 [[task]]
 name = "Digest auth"
 call = "RequestBuilder::digest_auth"
-owner = "core::digest"
+owner = "RequestBuilder::digest_followup"
 guide = "docs/guide/requests.md"
 
 [[task]]
@@ -161,6 +207,23 @@ owner = "cookie::Jar"
 guide = "docs/guide/cookies.md"
 
 [[task]]
+name = "Derive a session with another jar"
+call = "Session::with_cookie_jar"
+guide = "docs/guide/cookies.md"
+
+[[task]]
+name = "Read a cookie"
+call = "cookie::Jar::get_cookie"
+owner = "cookie::Jar"
+guide = "docs/guide/cookies.md"
+
+[[task]]
+name = "Set a cookie"
+call = "cookie::Jar::set_cookie"
+owner = "cookie::Jar"
+guide = "docs/guide/cookies.md"
+
+[[task]]
 name = "Seed a cookie with attributes"
 call = "cookie::Jar::store_set_cookie"
 owner = "cookie::parse"
@@ -194,24 +257,34 @@ guide = "docs/guide/cookies.md"
 name = "Identity values"
 call = "Browser::identity"
 owner = "profile::identity::resolve_identity"
-guide = "docs/guide/fingerprints.md"
+guide = "docs/guide/sessions.md"
 
 [[task]]
 name = "What a session sends"
 call = "Session::identity"
-owner = "profile::identity::resolve_identity"
+owner = "SessionBuilder::build"
 guide = "docs/guide/sessions.md"
 
 [[task]]
 name = "TCP fingerprint"
 call = "SessionBuilder::tcp_profile"
-owner = "Platform::tcp_profile"
+owner = "TcpProfile::apply"
 guide = "docs/guide/fingerprints.md"
 
 [[task]]
 name = "Proxy"
 call = "SessionBuilder::proxy"
 owner = "ProxyConfig::proxy_for"
+guide = "docs/guide/proxies.md"
+
+[[task]]
+name = "Derive a session with another proxy"
+call = "Session::with_proxy"
+guide = "docs/guide/proxies.md"
+
+[[task]]
+name = "Open new connections through the same proxy"
+call = "Session::fresh_pool"
 guide = "docs/guide/proxies.md"
 
 [[task]]
@@ -224,6 +297,11 @@ guide = "docs/guide/network.md"
 name = "TLS trust"
 call = "SessionBuilder::tls_trust"
 owner = "tls::trust"
+guide = "docs/guide/tls-trust.md"
+
+[[task]]
+name = "Set a TLS version floor"
+call = "TlsTrustConfig::min_tls_version"
 guide = "docs/guide/tls-trust.md"
 
 [[task]]
@@ -242,7 +320,18 @@ guide = "docs/guide/network.md"
 name = "Pool"
 call = "SessionBuilder::pool"
 owner = "pool"
-guide = "docs/guide/network.md"
+guide = "docs/guide/sessions.md"
+
+[[task]]
+name = "Warm a connection"
+call = "Session::preconnect"
+guide = "docs/guide/sessions.md"
+
+[[task]]
+name = "Refuse plain HTTP"
+call = "SessionBuilder::https_only"
+owner = "core::session::transport_policy"
+guide = "docs/guide/sessions.md"
 
 [[task]]
 name = "Decompress"
@@ -264,13 +353,33 @@ guide = "docs/guide/responses.md"
 [[task]]
 name = "Read body"
 call = "Response::bytes"
-owner = "core::session::decompress::Decoder"
+owner = "Session::finalize_response_body"
+guide = "docs/guide/responses.md"
+
+[[task]]
+name = "Read the body as text"
+call = "Response::text"
+guide = "docs/guide/responses.md"
+
+[[task]]
+name = "Read the body as JSON"
+call = "Response::json"
 guide = "docs/guide/responses.md"
 
 [[task]]
 name = "Stream body"
 call = "Response::into_stream"
-owner = "core::session::decompress::Decoder"
+owner = "BodyStream"
+guide = "docs/guide/streaming.md"
+
+[[task]]
+name = "Save a body to a file"
+call = "Response::copy_to"
+guide = "docs/guide/responses.md"
+
+[[task]]
+name = "Read a prefix of a body"
+call = "Response::read_until"
 guide = "docs/guide/streaming.md"
 
 [[task]]
@@ -307,12 +416,17 @@ guide = "docs/guide/logging.md"
 name = "Timing"
 call = "Response::timing"
 owner = "ResponseTiming"
-guide = "docs/guide/logging.md"
+guide = "docs/guide/responses.md"
 
 [[task]]
 name = "Fingerprint audit"
 call = "SessionBuilder::audit"
 owner = "audit"
+guide = "docs/guide/fingerprints.md"
+
+[[task]]
+name = "Compute a JA4 offline"
+call = "audit::compute_ja4"
 guide = "docs/guide/fingerprints.md"
 
 [[task]]
@@ -322,7 +436,12 @@ owner = "core::websocket"
 guide = "docs/guide/websocket.md"
 
 [[task]]
+name = "Set WebSocket limits"
+call = "SessionBuilder::websocket_config"
+guide = "docs/guide/websocket.md"
+
+[[task]]
 name = "tower"
 call = "LeylineService::new"
 owner = "Session::execute"
-guide = "docs/guide/features-and-targets.md"
+guide = "docs/guide/requests.md"

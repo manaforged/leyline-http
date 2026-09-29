@@ -16,6 +16,10 @@ the issue and credits the reporter, unless you ask otherwise.
 One maintainer reviews reports. If a fix will miss the 30-day target, the
 maintainer tells you the new date in the advisory thread.
 
+## Supported versions
+
+Security fixes go to the latest 0.1.x release.
+
 ## Scope
 
 - The `leyline-http` crate and the crates it bundles: `leyline-bssl`,
@@ -25,19 +29,17 @@ maintainer tells you the new date in the advisory thread.
 
 - Detection of the client by a remote site. Leyline mimics browsers on the
   wire, but a site that can tell the difference is not a security defect.
-- Vulnerabilities in upstream BoringSSL or quiche that the bundled revision
-  has not yet picked up. Open an issue so the revision can be bumped.
+- Vulnerabilities in upstream BoringSSL or quiche. Report them to the
+  upstream project.
 
 ## Bundled BoringSSL and quiche
 
 `leyline-bssl-sys` builds BoringSSL from source, pinned to commit
-`3a9254f16eda7a4c5d2260039ff23456a0a34de4`, the revision Chromium's DEPS
-pinned at tag `150.0.7871.26`. See
+`3a9254f16eda7a4c5d2260039ff23456a0a34de4`, the `boringssl_revision` in
+Chromium's DEPS at tag `150.0.7871.26`. See
 [`crates/leyline-bssl-sys/PROVENANCE.md`](crates/leyline-bssl-sys/PROVENANCE.md)
-for the carried patches and the rebuild steps.
+for the carried patches and the build notes.
 
-A security fix released upstream in BoringSSL or quiche is picked up and
-released in the next Leyline patch release. Each pickup gets a
-`### Security` line in [CHANGELOG.md](CHANGELOG.md) that names the upstream
-advisory and the new pinned revision, and the pinned revision is recorded in
-`PROVENANCE.md`.
+A daily workflow checks the forked crates and the pinned BoringSSL revision
+against upstream security advisories. `PROVENANCE.md` records the pinned
+revision.

@@ -9,25 +9,30 @@ Profiles live under `crates/leyline/profiles/<family>/<version>.toml`.
 
 ## What the fingerprint columns mean
 
-Each profile can pin a JA4 golden under `[tls.fingerprint]`. The offline
-`fingerprint_conformance` test compares that golden against the fingerprint
-leyline reconstructs from the profile's own `[tls]` block, and reports one of
-two trust levels:
+A profile records a JA4 reference value under `[tls.fingerprint]` and an Akamai
+HTTP/2 reference value under `[h2.fingerprint]`. The offline
+`fingerprint_conformance` test computes both values from the profile's own
+`[tls]` and `[h2]` tables and compares them with the reference values. The
+`JA4` column of the table below shows how the JA4 check treats each profile:
 
-- **Gated.** The profile declares `extension_permutation`. The test compares
-  the reconstructed fingerprint with the configured golden and fails on a
-  mismatch. This check does not establish the golden's browser provenance.
-- **Reconnaissance.** The profile leaves the order to BoringSSL, so the
-  reconstruction is an estimate. A mismatch is reported, not failed. The live
-  `tls_peet` suite checks Leyline's emission against the configured golden.
+- **Gated.** The profile sets `extension_permutation`, so the ClientHello
+  extension order is fixed and the computed JA4 is exact. The test fails when
+  it differs from the reference value. The test gates the HTTP/2 value of
+  every profile the same way.
+- **Estimated.** The profile leaves the extension order to BoringSSL, so the
+  computed JA4 is an estimate. The test reports a difference and passes.
 
-A browser capture provides the reference for either category. Neither the
-offline test nor a live Leyline request captures the browser itself. Matching
-JA4 does not establish equality of every ClientHello field.
+The live `tls_peet` suite sends a request with each profile to a fingerprint
+echo server and compares the JA4 and HTTP/2 values that the server reports
+with the reference values.
+
+The reference values come from the capture that the profile's `capture` and
+`captured_against` keys name. Neither test captures a browser. A matching JA4
+does not prove that every ClientHello field is equal.
 
 `captured_against` records the exact browser build a profile was captured from.
-A missing value logs a load-time warning and means the capture build is
-unrecorded, not that the profile is wrong.
+A profile without it logs a `tracing` warning when it loads. The warning says
+the capture build is unrecorded.
 
 ## Bundled profiles
 
@@ -60,7 +65,7 @@ unrecorded, not that the profile is wrong.
 | Safari iOS 17 | `SafariIOS17` | `safari-ios-17.5-21F79-simulator` | gated |
 | Safari iOS 18 | `SafariIOS18` | `safari-ios-18.6-22G86-simulator` | gated |
 | Safari iOS 27 | `SafariIOS27` | `safari-ios-27.0-iphone16,2-device` | gated |
-| OkHttp4 Android 10+ | `OkHttpAndroid10` | `okhttp-4.12.0` | estimated |
+| OkHttp4 Android 10+ | `OkHttpAndroid10` | `okhttp-4.12.0` | gated |
 | CFNetwork iOS 18 | `CfnetworkIOS18` | `cfnetwork-3826.600.41-ios18.6-simulator` | gated |
 | CFNetwork iOS 27 | `CfnetworkIOS27` | `cfnetwork-3892.100.1-ios27.0-device` | gated |
 | CFNetwork macOS 26 | `CfnetworkMacOS26` | `cfnetwork-3860.700.1-macos26.6.2-vm` | gated |
@@ -72,17 +77,16 @@ Each profile comes from one of six sources:
 - **Browser capture.** A capture of the named browser, with the build recorded
   in `captured_against`.
 - **Native stack capture.** A capture of an operating system HTTP stack, such
-  as a URLSession app for CFNetwork, with the build recorded in
-  `captured_against`.
+  as URLSession for CFNetwork, with the build recorded in `captured_against`.
 - **Non-browser build capture.** A capture of a related build that is not the
   shipped browser, such as `chrome-headless-shell` or a WKWebView host.
 - **Emulator capture.** A capture of the shipped app on an Android emulator or
   an iOS simulator. The app and the operating system's own TLS stack are real,
   but the device is not a physical phone. The build and OS version are
   recorded in `captured_against`.
-- **Inferred.** No capture of this version. Values come from a neighbouring
+- **Inferred.** No capture of this version. Values come from a neighboring
   version.
-- **Self-referential golden.** The JA4 golden is Leyline's own past output, so
+- **Self-referential.** The reference values are Leyline's own past output, so
   the offline test does not compare the profile with a browser.
 
 The `capture` key in each profile's `[meta]` table records the source:
@@ -120,7 +124,7 @@ The `capture` key in each profile's `[meta]` table records the source:
 | Safari iOS 27 | Browser capture | `browser` | `safari-ios-27.0-iphone16,2-device`, Mobile Safari 27.0 on an iPhone 15 Pro Max (iOS 27.0); the iOS 27.0 simulator capture matches it |
 | OkHttp4 Android 10+ | Emulator capture | `emulator` | `okhttp-4.12.0`, test app on the platform TLS stack of an Android 17 emulator |
 | CFNetwork iOS 18 | Emulator capture | `emulator` | `cfnetwork-3826.600.41-ios18.6-simulator`, URLSession test binary in the iOS 18.6 simulator |
-| CFNetwork iOS 27 | Native capture | `native` | `cfnetwork-3892.100.1-ios27.0-device`, URLSession through Shortcuts on an iPhone 15 Pro Max (iOS 27.0) |
+| CFNetwork iOS 27 | Native stack capture | `native` | `cfnetwork-3892.100.1-ios27.0-device`, URLSession through Shortcuts on an iPhone 15 Pro Max (iOS 27.0) |
 | CFNetwork macOS 26 | Native stack capture | `native` | `cfnetwork-3860.700.1-macos26.6.2-vm`, URLSession test binary on macOS 26.6.2 in a VM; macOS 26.2 on hardware sends the same ClientHello |
 
 Chromium-family profiles do not store `sec-ch-ua`. Leyline derives it from the
@@ -132,8 +136,9 @@ the family's `latest_capture` list in `families.toml`. The list defaults to
 `browser`. CFNetwork uses `native` and `emulator`, and Safari iOS and OkHttp
 add `emulator`. The build fails when a family has no such profile. A
 `platform_browser` target resolves the same way, with the target family's
-`latest_capture` list. `Session::new()` uses `Browser::latest(Family::Chrome)`, which
-is Chrome 154. You can pin the product line instead of a version:
+`latest_capture` list. `Session::new()` uses `Browser::latest(Family::Chrome)`,
+the newest Chrome in the table above. You can pin the product line instead of
+a version:
 
 ```rust
 use leyline::{Browser, Family};
@@ -224,11 +229,11 @@ These facts come from the captures behind the bundled profiles.
   (X25519MLKEM768, X25519, P-256) and a HEADERS PRIORITY with weight 42 and no
   exclusive bit, sent as 41.
 - **Firefox 150.** Firefox 150.0 sends 17 cipher suites
-  (`t13d1717h2_5b57614c22b0_3cbfd9057e0d`). Firefox 150.0.3 drops
-  `TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA` (`t13d1617h2_86a278354501_3cbfd9057e0d`);
-  the profile follows 150.0. Both builds are captured
-  (`firefox-150.0` and `firefox-150.0.3`); a Firefox 150 user on the last
-  point release sends the 16-cipher hello.
+  (`t13d1717h2_5b57614c22b0_3cbfd9057e0d`), and the profile follows that
+  capture. Firefox 150.0.3 on Android and Firefox 151 to 153 on desktop send 16,
+  without `TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA`. No desktop capture of a
+  Firefox 150 point release exists, so the cipher list of desktop 150.0.3 is
+  unconfirmed.
 - **Firefox 151 to 153.** The TLS values are the same in all three. The
   cipher list drops `TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA`.
 - **Firefox 156.** Firefox 156 drops `ffdhe2048` and `ffdhe3072` from the
@@ -241,7 +246,7 @@ These facts come from the captures behind the bundled profiles.
   (`same-site`) and to another site (`cross-origin`), and then a clicked
   form `POST` (`form-navigate`). Chrome 154.0.8037.57, Edge 154.0.4258.37,
   Brave 1.96.59, and Firefox 156.0.1 ran headful on Linux, twice each, with
-  the same result both times. Edge sends the Chrome shapes. Brave adds
+  the same result both times. Edge sends the same headers as Chrome. Brave adds
   `sec-gpc: 1` after `accept` on navigations, scripts, and plain fetches,
   and after `sec-ch-ua-mobile` on CORS fetches, and drops
   `application/signed-exchange` from the navigate `accept`. A
@@ -267,20 +272,20 @@ These facts come from the captures behind the bundled profiles.
   CFNetwork iOS 18: AES_128 first in the TLS 1.3 ciphers, no X25519MLKEM768,
   TLS 1.0 and 1.1 in `supported_versions`, and the padding extension last. The
   HEADERS frame carries a priority with weight 256. The capture ran in a VM, so
-  its TCP SYN is not a Mac's; only the TLS, HTTP/2, and header values come from
-  it.
+  it gives no TCP SYN values for a Mac. The profile takes only its TLS, HTTP/2,
+  and header values from the capture.
 - **Safari 26.** Safari 26.6.2 (21624.5.1.11.3) on macOS 26.6.2 sends the
   same ClientHello and HTTP/2 SETTINGS as Safari 26.2. Its header list adds
   `zstd` to `accept-encoding`, so the profile uses the `webkit-26` header
   style. Safari 18 and Mobile Safari 17 and 18 keep the `webkit` style. The
-  capture ran in a VM from the `macos-tahoe-base` image, so its TCP SYN is not
-  a Mac's; only the TLS, HTTP/2, and header values come from it. Two
-  safaridriver runs against `tls.peet.ws/api/all` gave the same JA3, JA4,
+  capture ran in a macOS 26.6.2 VM, so it gives no TCP SYN values for a Mac.
+  The profile takes only its TLS, HTTP/2, and header values from the capture.
+  Two safaridriver runs against `tls.peet.ws/api/all` gave the same JA3, JA4,
   peetprint, and Akamai HTTP/2 fingerprint.
 - **Safari iOS 27 and CFNetwork iOS 27.** The iOS 27.0 simulator loads
-  `CFNetwork`, `Network`, `libcoretls`, and `libboringssl` from the iOS runtime,
-  not from macOS. Its ClientHello is the same as Safari 26 and CFNetwork macOS
-  26. Mobile Safari and Safari 26.6.2 send the `webkit-26` header style, where
+  `CFNetwork`, `Network`, `libcoretls`, and `libboringssl` from its own iOS
+  runtime. Its ClientHello is the same as Safari 26 and CFNetwork macOS 26.
+  Mobile Safari and Safari 26.6.2 send the `webkit-26` header style, where
   `accept-encoding` adds `zstd`. Safari iOS 27 and CFNetwork iOS 27 were then
   captured on an iPhone 15 Pro Max running iOS 27.0. Mobile Safari matches the
   simulator on TLS, HTTP/2, HTTP/3, and headers. CFNetwork on the device sends
@@ -350,8 +355,8 @@ These facts come from the captures behind the bundled profiles.
   style; CFNetwork 1496 on iOS 17.5 sends the same order). CFNetwork macOS 26
   and iOS 27 send `accept: */*`, `user-agent`, `priority: u=3`,
   `accept-language`, `accept-encoding: gzip, deflate, br` (the
-  `cfnetwork-26` style). The captured `priority: u=3` is on iOS 27 as well as
-  macOS 26, so it is not a macOS-only header.
+  `cfnetwork-26` style). The captured `priority: u=3` appears on iOS 27 and on
+  macOS 26.
 - **Android.** Chrome 145.0.7632.218, preinstalled and Google-signed in an
   Android 17 (API 37) Google Play emulator image, sends the same ClientHello
   and HTTP/2 values as Chrome 145 on desktop, the `Android 10; K` user agent,
@@ -376,18 +381,19 @@ These facts come from the captures behind the bundled profiles.
   sends the Chrome 152 ClientHello, `OPR/136.0.0.0`, the `Opera` brand in
   `sec-ch-ua`, and `accept-language: en-US,en;q=0.9`
   (`opera-136.0.6008.52-windows-run<n>.json`).
-- **TCP rows.** `platforms.toml` has Windows, macOS, and Linux rows. The
-  option order, window, window scale, and TTL of each row match every browser
-  SYN captured from that host. The browser captures show MSS 1400 because the
-  path clamps it. The hosts' own SYNs show the default: the Linux host
-  (MTU 1500) sends MSS 1460, window 64240, and options `mss, sackOK, TS, nop,
-  wscale 10`, and the Windows VM (MTU 1500) sends MSS 1460, window 64240, and
-  `mss, nop, wscale 8, nop, nop, sackOK`. The macOS row's MSS 1460 has no host
-  No host SYN capture exists for macOS. The iOS row comes
+- **TCP rows.** `platforms.toml` has Windows, macOS, Linux, and iOS rows. The
+  option order, window, window scale, and TTL of the Windows, macOS, and Linux
+  rows match every browser SYN captured from that host. The browser captures
+  show MSS 1400 because the path clamps it. The hosts' own SYNs show the
+  default: the Linux host (MTU 1500) sends MSS 1460, window 64240, and options
+  `mss, sackOK, TS, nop, wscale 10`, and the Windows VM (MTU 1500) sends MSS
+  1460, window 64240, and `mss, nop, wscale 8, nop, nop, sackOK`. No host SYN
+  capture exists for macOS, so its MSS 1460 is unconfirmed. The iOS row comes
   from an iPhone 15 Pro Max on iOS 27.0: window 65535, window scale 6, TTL 64,
-  and `mss, nop, wscale, nop, nop, TS, sackOK, eol`; its SYN also shows MSS
-  1400 from the path, so MSS 1460 is the interface default, not a capture.
-  Android has no row, because the emulator SYNs are the macOS host's.
+  and `mss, nop, wscale, nop, nop, TS, sackOK, eol`. Its SYN shows MSS 1400
+  because of the path, and the row's MSS 1460 is the interface default, which
+  no capture shows. Android has no row: the emulator sends the SYNs of its
+  host.
 
 ## HTTP/3 captures
 
@@ -462,20 +468,20 @@ Leyline keeps them so that the API stays complete, but no capture backs them.
 
 - Chrome `[identity.android]` 146 to 154: only Chrome 145 on Android is
   captured. The rows follow the reduced `Android 10; K` user agent.
-- The macOS TCP row's MSS 1460.
+- The MSS 1460 of the macOS and iOS TCP rows.
 - Header presets on Windows and macOS for the Chromium and Gecko styles.
 
 ## Update cadence
 
-- **Chrome and Firefox:** Leyline adds profiles for new stable releases. Both
-  browsers ship every four weeks.
-- **Safari:** add a profile when Apple ships an OS release. Safari's TLS stack
-  moves with macOS and iOS, not with the browser version alone.
-- **Brave, OkHttp, and CFNetwork:** recapture when the upstream engine version
-  in `captured_against` moves, not on a fixed schedule.
+- **Chrome and Firefox:** Leyline adds a profile for each new stable major
+  release. Both browsers ship a major release every four weeks.
+- **Safari:** Leyline adds a profile when Apple ships an OS release, because
+  Safari's TLS stack changes with macOS and iOS.
+- **Brave, OkHttp, and CFNetwork:** Leyline recaptures the profile when the
+  upstream engine version in `captured_against` changes.
 
-Every new profile carries `captured_against` with the exact build string, and a
-JA4 golden taken from that capture.
+Every new profile records the exact build in `captured_against`, and the JA4
+and HTTP/2 reference values from that capture.
 
 ## Load your own profile directory
 
@@ -516,38 +522,39 @@ platform from those tables. `build` returns `Kind::Config` when the profile has 
 table for that platform. Without `.platform()`, the platform is Windows. A
 brand overlay (`SessionBuilder::brand`) needs `chromium_major` in `[meta]`.
 The request headers follow `header_style` in `[meta]`. `profiles/headers.toml`
-is the one owner of request header shapes. Each top-level table is one shape,
-and its key is the `header_style` value: `chromium`, `gecko`, `webkit`,
-`webkit-26`, `webkit-17`, `okhttp`, `cfnetwork`, `cfnetwork-26`, `brave`, and
-`brave-154`. The build generates the `HeaderStyle` enum from this
-file, so a new shape needs only a new table. The build fails when a profile or
-a brand names a shape that the file does not define.
+defines every header style. Each top-level table is one style, and its key is
+the `header_style` value: `chromium`, `gecko`, `webkit`, `webkit-26`,
+`webkit-17`, `okhttp`, `cfnetwork`, `cfnetwork-26`, `brave`, and `brave-154`.
+The build generates the `HeaderStyle` enum from this file, so a new style needs
+only a new table. The build fails when a profile or a brand names a style that
+the file does not define.
 
-A shape has these keys:
+A style has these keys:
 
 - `variant`: the `HeaderStyle` variant name.
-- `default`: `true` on the one shape that a profile without `header_style`
-  uses. That shape is `chromium`.
+- `default`: `true` on the one style that a profile without `header_style`
+  uses. That style is `chromium`.
 - `fallback`: the header list for a request without a preset, or for a preset
-  that the shape does not list.
+  that the style does not list.
 - `presets`: one header list for each `Preset`, with names, order, and values.
-- `extends`: another shape. The shape takes each preset and the fallback that
-  it does not define from that shape.
-- `append`: headers that every request of the shape carries. A session or
+- `extends`: another style. The style takes each preset and the fallback that
+  it does not define from that style.
+- `append`: headers that every request of the style carries. A session or
   request header of the same name wins.
 - `order`: a header order that the session applies after the merge, including
   the cookie and caller headers. `RequestBuilder::header_order` and
   `FingerprintSpec::header_order` replace it.
 
 The placeholders `{user_agent}`, `{sec_ch_ua}`, `{sec_ch_ua_mobile}`,
-`{sec_ch_ua_platform}`, `{accept_language}`, `{origin}`, and `{referer}` take
-the session values. The `brave` shape extends `chromium`. It sends
+`{sec_ch_ua_platform}`, `{accept_language}`, `{origin}`, `{referer}`, and
+`{fetch_site}` take the values of the session and the request. The `brave`
+style extends `chromium`. It sends
 `sec-gpc: 1`, a navigate `accept` without `application/signed-exchange`, and
 the header order of the Brave 146 capture of 2026-09-25 from tls.peet.ws. The
-`brave-154` shape carries every preset from the Brave 1.96.59 capture, with
-`sec-gpc` in the position that Brave sends it, and has no `order`. A
-brand row in `profiles/brands.toml` can set `header_style` to replace the
-profile's shape.
+`brave-154` style carries every preset from the Brave 1.96.59 capture, with
+`sec-gpc` in the position that Brave sends it, and has no `order`. A brand row
+in `profiles/brands.toml` can set `header_style` to replace the profile's
+style.
 
 `key_shares` in `[tls]` lists the groups that the ClientHello `key_share`
 extension carries, in order. Each group must also be in `curves`. Without it,
@@ -581,7 +588,7 @@ instead of a TOML file. It returns the same `BrowserProfile` type, and
   signature algorithms for a JA3 string, and the curves for a JA4_r string.
   Without a base, the bare profile is the start.
 - `user_agent(ua)`: replaces the user agent in every identity table.
-- `header_order(names)`: replaces the order of the profile's header shape.
+- `header_order(names)`: replaces the order of the profile's header style.
 - `name(name)`: the profile name in logs and errors.
 
 This example takes the JA3 and Akamai values of the bundled Chrome 152
@@ -657,8 +664,13 @@ These rules apply to the strings:
   `padding = true` and must be the last extension.
 - The JA3 version must be 771 and the point formats must be `0`. The Akamai
   PRIORITY field must be `0`.
-- An ID that is not in the leyline IANA registry fails. An extension or
-  SETTINGS ID that leyline cannot send also fails.
+- A cipher, curve, or signature algorithm ID that is not in Leyline's
+  built-in table fails. An extension or SETTINGS ID that Leyline cannot send
+  also fails.
 
 Every failure returns `Kind::Config` with a message that names the format and
 the field.
+
+## Next
+
+Read [MSRV](msrv.md) for the Rust version Leyline supports.

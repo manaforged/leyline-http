@@ -11,9 +11,10 @@ Every target starts with `leyline`.
 | Target | Events |
 | --- | --- |
 | `leyline::session` | Session setup, for example the notice that a session defaults to Windows |
-| `leyline::env_proxy::cgi` | A `HTTP_PROXY` value that the CGI guard ignored |
+| `leyline::env_proxy::cgi` | An `HTTP_PROXY` value that the CGI guard ignored |
 | `leyline::pool` | Connection pool events |
-| `leyline::socket` | Socket options that the platform does not support |
+| `leyline::socket` | A `SocketConfig` option that the platform does not support |
+| `leyline::tcp` | A `TcpProfile` socket option that the operating system rejected, logged once per option |
 | `leyline::tls` | TLS setup |
 | `leyline::tls::trust` | Loading and checking the trust store |
 | `leyline::h2`, `leyline::h2::flood_guard` | HTTP/2 connection events and flood protection |
@@ -54,3 +55,8 @@ To handle the phases in your own code, implement `leyline::trace::Trace`. The
 event carries the status and the response headers as `&http::HeaderMap`, so a
 per-request log line needs no other hook. See
 [Trace the request lifecycle](sessions.md#trace-the-request-lifecycle).
+
+## Next
+
+Read [Fingerprints](fingerprints.md) to see what a profile sends on each
+layer.

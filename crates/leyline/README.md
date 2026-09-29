@@ -5,49 +5,69 @@ request headers of a chosen browser profile. Leyline supports HTTP/1.1,
 HTTP/2, HTTP/3, and WebSocket on Tokio. Bundled profiles cover Chrome 145 to
 154, Brave 146 and 154, Firefox 148 to 156, Safari 18, 26, and 27, Safari on
 iOS 17, 18, and 27, OkHttp on Android, and CFNetwork on iOS 18, iOS 27, and
-macOS 26. Edge and Opera are brand overlays on the Chrome profiles.
+macOS 26. Edge and Opera are brand overlays on the Chrome profiles. They apply
+to desktop platforms only, and the Opera overlay covers Chrome 145 to 152.
 
-## Why Leyline
+## What it does
 
-- **Stated provenance for every profile.** Each profile records the build it
-  was captured from in `captured_against` and its source in `capture`. The
+- Each profile records the build it was captured from in `captured_against`
+  and the kind of capture in `capture`. Of the 31 bundled profiles, 25 are
+  captures of the shipped browser. The other six come from other sources:
+  Safari on iOS 17 and 18 (Mobile Safari in the iOS simulator), OkHttp (a
+  test app in an Android emulator), CFNetwork on iOS 18 (a test binary in the
+  iOS simulator), CFNetwork on iOS 27 (Shortcuts on an iPhone), and CFNetwork
+  on macOS 26 (a test binary in a macOS virtual machine). The raw captures
+  are in the repository under `crates/leyline/profiles/captures/`, and the
+  published crate does not include them. The
   [profile reference](https://github.com/manaforged/leyline-http/blob/main/docs/guide/profiles.md#provenance)
-  lists which profiles are browser, native stack, or emulator captures, and
-  which pin Leyline's own output.
-- **Captured from signed builds.** Profile values come from captures of the
-  vendors' signed builds on Windows, macOS, Linux, Android, and an iPhone. The
-  raw captures ship in the repository next to the profiles.
-- **Headers for every request kind.** Navigation, script, XHR, form, and
-  cross-origin requests each use the header order and values the browser
-  sends, and redirects follow the Fetch rules for `sec-fetch-site`, `Origin`,
-  and `Referer`.
-- **HTTP/3 that matches the browser.** The QUIC ClientHello, transport
-  parameters, connection ID lengths, HTTP/3 SETTINGS, and first datagram size
-  follow each profile's capture, including QUIC v2 where the browser offers it.
-- **A connection pool keyed by proxy.** `Session::with_proxy` switches the
-  proxy and keeps the warm connections of every proxy. `Session::fresh_pool`
-  takes a new pool, so the next request opens new connections.
-- **Safe connection reuse.** The pool sends an HTTP/2 PING before it reuses a
-  connection idle for 10 seconds, and counts failures in
-  `PoolStats::h2_ping_failures`. `SocketConfig::tcp_user_timeout` bounds
-  unacknowledged writes on Linux. Retries are off by default, and
-  `RetryPolicy::max_retry_after` caps the wait a `Retry-After` header can ask
-  for.
-- **Typed errors and named timeouts.** `Error::kind` returns a `Kind` such as
-  `Connect`, `Proxy`, `Tls`, or `Timeout`, and `Error::is_retryable` holds the
-  one retry rule. `TimeoutConfig` has four named limits: `connect`,
-  `response_header`, `read`, and `total`.
-- **Prefixed BoringSSL.** The bundled BoringSSL exports its symbols with a
-  `LEYLINE` prefix and declares `links = "leyline_bssl"`, so it can link into
-  the same binary as `boring-sys` or `openssl-sys`. You can move one route at
-  a time.
-- **Chromium's `sec-ch-ua` rule.** Chromium-family profiles derive
-  `sec-ch-ua` from the major version with the GREASE brand, version, and
-  order rule that Chromium uses. `Response::audit()` reports the values the
-  session was configured to send.
-- **Profiles you load at runtime.** `SessionBuilder::profile` sends a profile
-  from `ProfileRegistry::load` or `BrowserProfile::from_toml`, so a new
-  browser build does not need a crate release.
+  lists the source of every profile.
+- `RequestBuilder::preset` selects the header list for a kind of request, such
+  as navigation, form submission, script, XHR, cross-origin, or same-site.
+  Chromium profiles also have frame, reload, and image lists. OkHttp and
+  CFNetwork profiles send one fixed list. Across a redirect chain,
+  `sec-fetch-site` covers the whole chain, `Origin` becomes `null` after a hop
+  to another origin, and `Referer` is set again for each hop.
+- With the `http3` feature, which is on by default, the QUIC ClientHello,
+  transport parameters, connection ID lengths, HTTP/3 SETTINGS, and the size
+  of the first datagram come from the `[h3]` table of each profile. Firefox
+  155 and 156 also list QUIC v2 as an available version. Five profiles have no
+  `[h3]` table: Safari on iOS 17, OkHttp, and the three CFNetwork profiles.
+  For those, `ProtocolPolicy::Http3` and `ProtocolPolicy::Race` make `build()`
+  fail with `Kind::Config`.
+- `Session::with_proxy` keeps the session's pool, which is keyed by proxy, so
+  connections to other proxies stay warm. `Session::fresh_pool` takes a new
+  pool and a new TLS session cache, so the next request opens new
+  connections.
+- Before it reuses an HTTP/2 connection that has been idle for 10 seconds, the
+  pool sends a PING. `PoolConfig::h2_ping_after_idle` changes the delay, and
+  `PoolStats::h2_ping_failures` counts the failures.
+  `SocketConfig::tcp_user_timeout` bounds unacknowledged writes on Linux and
+  Android.
+- Retries are off by default. When a response carries a `Retry-After` value
+  longer than `RetryPolicy::max_retry_after`, the retry stops and Leyline
+  returns that response.
+- `Error::kind` returns a `Kind` such as `Connect`, `Proxy`, `Tls`, or
+  `Timeout`. `Error::is_retryable` is true for timeouts, failed connections,
+  and closed connections, and for a proxy CONNECT answered with 502, 503, or
+  504. `TimeoutConfig` has four limits: `connect`, `response_header`, `read`,
+  and `total`.
+- `Debug` output masks passwords, query values, and the values of the
+  `Authorization`, `Proxy-Authorization`, `Cookie`, and `Set-Cookie` headers.
+- `TlsTrustConfig` sets the trust roots, certificate pins, a client
+  certificate, and a TLS version floor with `min_tls_version`.
+- The bundled BoringSSL exports its symbols with a `LEYLINE` prefix, the
+  `leyline-bssl-sys` crate declares `links = "leyline_bssl"`, and its build
+  reads `LEYLINE_BSSL_*` variables. Leyline builds alongside Cloudflare's
+  `boring-sys` in one dependency graph.
+- Chromium profiles derive `sec-ch-ua` from the major version and the
+  `ch_ua_brand` field of the profile, with the GREASE brand, version, and
+  order rule that Chromium uses. `Response::audit()` returns `Some` when the
+  session was built with `SessionBuilder::audit(true)`. It holds the JA3, JA4,
+  JA4T, and JA4H fingerprints and the HTTP/2 fingerprint.
+- `SessionBuilder::profile` sends a profile from `ProfileRegistry::load` or
+  `BrowserProfile::from_toml`. A profile that uses an existing header style
+  and needs no new BoringSSL patch works without a crate release. A new header
+  style or a new BoringSSL patch still needs a crate release.
 
 ## Requirements
 
@@ -101,11 +121,13 @@ browser or platform, use `Session::builder()`.
 
 ## What `Session::new()` sends
 
-`Session::new()` uses the newest captured Chrome, currently Chrome 154, with a
-Windows identity. It sends that profile's ClientHello,
-HTTP/2 SETTINGS, user agent, `sec-ch-ua` headers, and header order. A patch
-release can add a newer browser capture and move this default. To keep a
-fixed fingerprint, pin the browser:
+`Session::new()` uses the newest bundled Chrome with a Windows identity. It
+sends that profile's ClientHello, HTTP/2 SETTINGS, user agent, `sec-ch-ua`
+headers, and header order. With the `http3` feature it races HTTP/3 against
+HTTP/2 for origins that advertised `h3` in an `Alt-Svc` header, because the
+bundled Chrome profiles set `race = true` in `[h3]`. A patch release can add a
+newer browser capture and move this default. To keep a fixed fingerprint, pin
+the browser:
 
 ```rust,no_run
 use leyline::{Browser, Platform, ProtocolPolicy, Session};
@@ -129,17 +151,25 @@ browser is a bare session that impersonates no browser.
 
 - A profile covers the TLS, HTTP/2, HTTP/3, and header properties its capture
   shows. It does not reproduce every byte a browser sends.
-- Chrome on Android is captured for Chrome 145 only. Firefox on Android sends
-  the desktop Firefox ClientHello, because a profile has one TLS table for all
-  platforms.
-- Leyline sets TTL, MSS, and window scale where the OS allows. The TCP option
-  order comes from the host OS.
+- Chrome on Android is captured for Chrome 145 only. A profile has one TLS
+  table for all platforms, so Firefox on Android sends the desktop Firefox
+  ClientHello. Firefox 148 to 154 on Android omit
+  `signed_certificate_timestamp`, so Leyline's Android identity differs from
+  those versions of Firefox.
+- The TCP settings come from the platform rows in `platforms.toml`, which
+  exist for Windows, macOS, Linux, and iOS. Leyline sets TTL and `TCP_NODELAY`
+  on every OS, don't-fragment on Linux, macOS, and Windows, MSS on Linux and
+  macOS, and a window clamp on Linux. The kernel picks the TCP option order
+  and the window scale. The Android identity has no row and sets no TCP
+  options.
 - HTTP/3 does not send 0-RTT data.
 - HTTP/3 through a proxy needs a SOCKS5 proxy with `UDP ASSOCIATE`. HTTP
   and HTTPS proxies cannot carry HTTP/3; MASQUE is not supported.
-- A profile loaded with `SessionBuilder::profile` has no platform twin. Its
-  header order comes from `header_style` in `[meta]`, and the header shapes
-  in `profiles/headers.toml` are part of the crate.
+- A bundled Safari or CFNetwork browser switches to its per-platform variant
+  when you call `.platform()`. A profile loaded with `SessionBuilder::profile`
+  has no per-platform variant and is used as it is. Its header order comes
+  from `header_style` in `[meta]`, and the header styles in
+  `profiles/headers.toml` are part of the crate.
 - `Response::audit()` values come from the configured profile and request.
   They are not packet captures.
 - Detection by a remote site is not a security defect. See

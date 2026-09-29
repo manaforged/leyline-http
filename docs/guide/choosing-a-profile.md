@@ -1,15 +1,15 @@
 # Choosing a profile
 
-A profile decides the TLS ClientHello, the HTTP/2 settings, and the headers
-that a session sends. The platform decides the operating system that the
-session claims. Pick both.
+A session that impersonates a browser has a profile and a platform. The
+profile sets the TLS ClientHello, the HTTP/2 settings, and the headers that
+the session sends. The platform sets the operating system that the session
+claims.
 
 ## Start with the default
 
-`Session::new()` is the default choice. It selects
-`Browser::default()`, the newest captured Chrome, currently Chrome 154, on
-Windows. With the
-`http3` feature, it races HTTP/3 against HTTP/2.
+`Session::new()` selects `Browser::default()`, the newest bundled Chrome, on
+Windows. With the `http3` feature, it races HTTP/3 against HTTP/2 for an
+origin that advertised `h3` in an `Alt-Svc` header.
 
 ```rust,no_run
 use leyline::{Browser, Platform, Session};
@@ -32,7 +32,7 @@ let mac = Session::builder()
 | The most common desktop browser | `.browser(Browser::default())` |
 | Firefox | `.browser(Browser::latest(leyline::Family::Firefox))` |
 | Safari on macOS | `.browser(Browser::Safari26).platform(Platform::MacOS)` |
-| Edge or Opera | `.brand(ChromiumBrand::Edge)` or `Opera`: a brand on a Chrome profile |
+| Edge or Opera | `.brand(ChromiumBrand::Edge)` or `.brand(ChromiumBrand::Opera)` on a Chrome profile. [Sessions](sessions.md#apply-a-brand-overlay) lists the Chrome profiles that each brand accepts |
 | Brave | `.browser(Browser::Brave146).platform(Platform::MacOS)` |
 | A phone | `.platform(Platform::Android)` or `.platform(Platform::IOS)` with a browser that has that platform, or an app profile such as `Browser::OkHttpAndroid10` or `Browser::CfnetworkIOS18` |
 | One fixed version | `.browser(Browser::Chrome150)`, then `.platform(...)` |
@@ -49,18 +49,20 @@ fingerprint, so a claim that differs from the real host is visible. Use
 
 ## What the JA4 labels mean
 
-The [profile reference](profiles.md) labels each profile's JA4 as `gated` or
-`reconnaissance`.
+The [profile reference](profiles.md) labels the JA4 of each profile `gated` or
+`estimated`.
 
-- **Gated** profiles fix their TLS extension order. The offline test fails
-  when the profile's JA4 differs from the recorded reference value. Firefox,
-  Safari 26, and the CFNetwork profiles are gated.
-- **Reconnaissance** profiles do not fix the extension order. Chrome
-  randomizes the extension order on every connection, so a Chrome profile
-  cannot fix one. JA4 sorts the extensions before it hashes them, so the
-  label says nothing about how closely the profile matches Chrome. The live
-  `tls_peet` suite still compares the JA4 that Leyline sends with the
-  recorded value.
+- A `gated` profile has a fixed extension order. Its JA4 equals the value
+  recorded from the browser. The Firefox, Safari, OkHttp, and CFNetwork
+  profiles are gated.
+- An `estimated` profile has a randomized extension order. Chrome randomizes
+  the extension order on every connection, so a Chrome profile cannot fix one.
+  The Chrome and Brave profiles are estimated.
 
-The label is not a trust ranking. The default Chrome profile is labeled
-`reconnaissance` for the reason above.
+JA4 sorts the extensions before it hashes them, so the label says nothing
+about how closely a profile matches its browser. The default Chrome profile is
+`estimated` for the reason above.
+
+## Next
+
+Read [Requests](requests.md) to build and send a request.

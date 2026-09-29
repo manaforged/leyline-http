@@ -6,9 +6,11 @@ Leyline picks between IPv4 and IPv6, and which socket options it sets.
 ## Map a host to an address
 
 `DnsConfig::resolve_host` sends one host to a fixed list of addresses without
-a DNS lookup. Leyline tries them in order, as curl `--resolve` does. The host
-name still goes into SNI and the `Host` header, so the server sees a normal
-request.
+a DNS lookup. Leyline replaces the port of each address with the port of the
+request URL, so the port you give is a placeholder. The order of the attempts
+follows [Happy Eyeballs](#happy-eyeballs): IPv6 first, then alternating
+families. The host name goes into SNI and the `Host` header, so the server
+sees a normal request.
 
 ```rust,no_run
 # fn run() -> leyline::Result<()> {
@@ -16,7 +18,7 @@ let session = leyline::Session::builder()
     .browser(leyline::Browser::default())
     .dns(leyline::DnsConfig::new().resolve_host(
         "example.com",
-        ["203.0.113.10:443".parse().unwrap()],
+        ["203.0.113.10:0".parse().unwrap()],
     ))
     .build()?;
 # let _ = session;
@@ -45,8 +47,8 @@ let dns = DnsConfig::new()
     .resolve_host(
         "api.example.com",
         [
-            "203.0.113.10:443".parse().unwrap(),
-            "203.0.113.11:443".parse().unwrap(),
+            "203.0.113.10:0".parse().unwrap(),
+            "203.0.113.11:0".parse().unwrap(),
         ],
     );
 let session = leyline::Session::builder()
@@ -60,9 +62,17 @@ let session = leyline::Session::builder()
 
 ## Happy Eyeballs
 
-When a host has IPv6 and IPv4 addresses, Leyline interleaves the two families
-and starts the next attempt if the current one has not connected in time. The
-first connection to complete wins.
+Leyline connects to the addresses of a host in this order: IPv6 first, then
+alternating between the two families. Inside one family, the order stays as
+the resolver or `resolve_host` gave it. Leyline starts one attempt. It starts
+the next when `resolve_delay` passes with no connection, or at once when every
+running attempt has failed. Attempts in progress keep running, and the first
+connection to complete wins. Leyline tries at most `attempt_limit`
+addresses for one connect.
+
+This applies to every TCP connection Leyline opens, including a host that you
+map with `resolve_host`. A direct HTTP/3 connection uses one address: the first
+IPv4 address, or the first address when the host has no IPv4 address.
 
 `tls::HappyEyeballsConfig` has two setters. Pass it to
 `SocketConfig::happy_eyeballs`:
@@ -90,6 +100,9 @@ let session = leyline::Session::builder()
 # }
 ```
 
+`happy_eyeballs(None)` keeps the defaults. Nothing turns Happy Eyeballs off.
+To make Leyline try one address only, set `attempt_limit(1)`.
+
 ## Socket options
 
 `SocketConfig` sets options on each TCP socket before it connects.
@@ -104,12 +117,14 @@ let session = leyline::Session::builder()
 | `send_buffer_size`, `recv_buffer_size` | unset | `SO_SNDBUF`, `SO_RCVBUF` |
 | `local_address` | unset | Source IP to bind |
 | `local_ipv4`, `local_ipv6` | unset | Source IP to bind for that address family |
-| `interface` | unset | Interface name (accepted, not applied yet) |
+| `interface` | unset | Interface name (accepted and ignored) |
 | `strict` | `false` | Fail when the platform does not support an option |
-| `happy_eyeballs` | enabled | Happy Eyeballs settings, or `None` to turn it off |
+| `happy_eyeballs` | 250 ms delay, 8 attempts | Happy Eyeballs settings. `None` keeps the defaults |
 
-The timing and size setters take a value or `None`. Pass `None` to clear a
-default, for example `tcp_keepalive(None)` to turn keepalive off.
+The timing and size setters take a value or `None`. `None` clears the value.
+Leyline sets TCP keepalive when any of its three values is set. To turn
+keepalive off, pass `None` to `tcp_keepalive`, `tcp_keepalive_interval`, and
+`tcp_keepalive_retries`.
 
 ```rust,no_run
 # fn run() -> leyline::Result<()> {
@@ -144,22 +159,24 @@ the request fails, and a retry policy can use a fresh connection.
 
 ### Unsupported options
 
-Leyline applies `tcp_user_timeout` on Linux and Android. Other systems have no
-equivalent socket option. Leyline does not apply `interface` on any system
-yet; bind a source IP with `local_address` instead.
+Leyline applies `tcp_user_timeout` on Linux and Android only. Leyline accepts
+`interface` and ignores it on every system; bind a source IP with
+`local_address` instead.
 
 Where an option is unsupported, Leyline logs one warning for that option and
 continues. With `strict(true)`, the connect fails with an
-`io::ErrorKind::Unsupported` error. `tcp_keepalive_retries` falls back to the
-operating system default on systems that cannot set it.
+`io::ErrorKind::Unsupported` error. A session that sets `interface` therefore
+logs one warning, or fails the connect under `strict(true)`.
+`tcp_keepalive_retries` falls back to the operating system default on systems
+that cannot set it.
 
 ## TCP fingerprint
 
 `SocketConfig` is separate from `TcpProfile`. `TcpProfile` sets the values
-that make up the JA4T fingerprint and comes from the browser profile. Change
-it only when you need a different TCP fingerprint. See
-[Fingerprints](fingerprints.md).
+that make up the JA4T fingerprint. It comes from the platform of the session,
+unless you pass your own to `SessionBuilder::tcp_profile`. Change it only when
+you need a different TCP fingerprint. See [Fingerprints](fingerprints.md).
 
 ## Next
 
-Read [Fingerprints](fingerprints.md).
+Read [Logging and tracing](logging.md).

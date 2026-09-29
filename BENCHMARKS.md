@@ -45,8 +45,9 @@ What the table shows:
   on one connection, and by a small margin at 8 in flight. Its p99 latency is
   higher at 64 streams and at 256 in flight.
 - Against tls-client, Leyline is faster in every scenario except sequential
-  requests on one connection, where tls-client is 7.7% faster. Leyline's p99
-  latency is lower in every concurrent scenario.
+  requests on one connection, where Leyline is 7.7% slower (39,031 requests
+  per second against 42,294). Leyline's p99 latency is lower in every
+  concurrent scenario.
 - reqwest sends no browser profile, so it does less work per request and per
   new connection than Leyline or wreq. The comparison with reqwest includes
   that difference.
@@ -78,8 +79,8 @@ Each result file records the Leyline revision, the kernel, the CPU, the
 governor, the CPU pinning, the load average, the peer versions, and the
 SHA-256 of each client binary.
 
-They were mostly idle, and CPUs 7 and 23 were left
-free for them.
+The host was not dedicated. The pinning left CPUs 7 and 23 free of the
+server and the clients.
 
 ## Limits
 

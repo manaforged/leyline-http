@@ -16,12 +16,12 @@ how to use it, in reading order.
 11. [Cookies](guide/cookies.md): the jar, sharing it, and what it stores.
 12. [WebSocket](guide/websocket.md): connect over HTTP/2 or HTTP/1.1.
 13. [HTTP/3](guide/http3.md): the `http3` feature and the protocol policy.
-14. [TLS trust](guide/tls-trust.md): roots, certificate pins, client certificates.
+14. [TLS trust](guide/tls-trust.md): roots, certificate pins, client certificates, the TLS version floor.
 15. [Network](guide/network.md): DNS overrides, Happy Eyeballs, socket options.
 16. [Logging and tracing](guide/logging.md): `tracing` targets and request phases.
 17. [Fingerprints](guide/fingerprints.md): what a profile pins and how to audit it.
 18. [Features and targets](guide/features-and-targets.md): cargo features, targets, MSRV.
-19. [Supported platforms](guide/platforms.md): build targets and the minimum glibc.
+19. [Supported platforms](guide/platforms.md): the six build targets and the tools each one needs.
 
 Reference pages beside this guide: [profiles](guide/profiles.md) and
 [MSRV](guide/msrv.md).
