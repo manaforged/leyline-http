@@ -349,3 +349,19 @@ fn serialize_order_is_stable_across_runs() {
     assert_eq!(s1, s2, "serialization must be byte-stable");
     assert_eq!(s2, s3, "serialization must be byte-stable");
 }
+
+#[test]
+fn churn_across_hosts_leaves_no_empty_domain_buckets() {
+    let jar = Jar::new();
+    let host = |i: usize| url::Url::parse(&format!("https://h{i}.example/")).unwrap();
+    for i in 0..MAX_COOKIES_GLOBAL + 100 {
+        jar.store_set_cookie("a=1", &host(i));
+    }
+    jar.store_set_cookie("a=1; Max-Age=0", &host(MAX_COOKIES_GLOBAL + 99));
+
+    let live = jar.all_cookies().len();
+    assert_eq!(
+        format!("{jar:?}"),
+        format!("Jar {{ domains: {live}, total: {live} }}")
+    );
+}

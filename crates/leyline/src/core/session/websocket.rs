@@ -174,7 +174,7 @@ impl Session {
         } else {
             url
         };
-        self.add_jar_cookie(&mut headers, lookup, &[], "GET");
+        self.add_jar_cookie(&mut headers, lookup, crate::FetchSite::SameOrigin, "GET");
         headers
             .into_iter()
             .map(|(k, v)| (k.into_owned(), v.into_owned()))

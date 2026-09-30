@@ -167,7 +167,7 @@ guide = "docs/guide/requests.md"
 [[task]]
 name = "Digest auth"
 call = "RequestBuilder::digest_auth"
-owner = "RequestBuilder::digest_followup"
+owner = "core::session::execute::auth::DigestLeg"
 guide = "docs/guide/requests.md"
 
 [[task]]

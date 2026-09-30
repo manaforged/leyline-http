@@ -337,7 +337,8 @@ let resp = session
   it and returns `Ok(&Response)`, so the headers and the body stay readable
   after a 4xx or 5xx. Both errors carry the status and the URL.
 - One decoder handles `Content-Encoding` for buffered and streamed reads:
-  gzip, deflate (zlib or raw), brotli, and zstd. More than 4 codings fail with
+  gzip, deflate (zlib or raw), brotli, and zstd. Repeated `Content-Encoding`
+  fields combine in order into one list. More than 4 codings fail with
   `Kind::Decode`. When `CompressionConfig` turns off any coding in the list,
   Leyline returns the body as received, with its `Content-Encoding` header.
 - `CompressionConfig::max_body_size` (100 MiB by default) caps a buffered body

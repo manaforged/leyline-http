@@ -20,7 +20,10 @@ pub(super) enum Stage {
     #[cfg(feature = "compression-gzip")]
     Gzip(Box<flate2::write::MultiGzDecoder<Sink>>),
     #[cfg(feature = "compression-deflate")]
-    DeflatePending(usize),
+    DeflatePending {
+        limit: usize,
+        head: Vec<u8>,
+    },
     #[cfg(feature = "compression-deflate")]
     Zlib(Box<flate2::write::ZlibDecoder<Sink>>),
     #[cfg(feature = "compression-deflate")]
@@ -75,7 +78,30 @@ fn pump(writer: &mut dyn Write, input: &[u8], name: &str) -> Result<()> {
     writer.flush().map_err(|e| decode_error(name, e))
 }
 
+#[cfg(feature = "compression-deflate")]
+fn is_zlib_header(cmf: u8, flg: u8) -> bool {
+    cmf & 0x0f == 8 && cmf >> 4 <= 7 && (u16::from(cmf) << 8 | u16::from(flg)) % 31 == 0
+}
+
 impl Stage {
+    #[cfg(feature = "compression-deflate")]
+    fn finish_pending(&mut self, limit: usize, head: &[u8]) -> Result<Vec<u8>> {
+        if head.is_empty() {
+            return Ok(Vec::new());
+        }
+        *self = Self::raw_deflate(limit);
+        let mut out = self.write(head)?;
+        out.extend(self.finish()?);
+        Ok(out)
+    }
+
+    #[cfg(feature = "compression-deflate")]
+    fn raw_deflate(limit: usize) -> Self {
+        Self::RawDeflate(Box::new(flate2::write::DeflateDecoder::new(Sink::new(
+            limit,
+        ))))
+    }
+
     #[cfg_attr(
         not(any(
             feature = "compression-gzip",
@@ -102,7 +128,10 @@ impl Stage {
             "deflate" => {
                 #[cfg(feature = "compression-deflate")]
                 {
-                    Ok(Self::DeflatePending(limit))
+                    Ok(Self::DeflatePending {
+                        limit,
+                        head: Vec::new(),
+                    })
                 }
                 #[cfg(not(feature = "compression-deflate"))]
                 {
@@ -152,19 +181,19 @@ impl Stage {
                 Ok(std::mem::take(&mut d.get_mut().buf))
             }
             #[cfg(feature = "compression-deflate")]
-            Self::DeflatePending(limit) => {
-                let limit = *limit;
-                let Some(&first) = input.first() else {
+            Self::DeflatePending { limit, head } => {
+                head.extend_from_slice(input);
+                let [cmf, flg, ..] = head[..] else {
                     return Ok(Vec::new());
                 };
-                *self = if first == 0x78 {
+                let limit = *limit;
+                let head = std::mem::take(head);
+                *self = if is_zlib_header(cmf, flg) {
                     Self::Zlib(Box::new(flate2::write::ZlibDecoder::new(Sink::new(limit))))
                 } else {
-                    Self::RawDeflate(Box::new(flate2::write::DeflateDecoder::new(Sink::new(
-                        limit,
-                    ))))
+                    Self::raw_deflate(limit)
                 };
-                self.write(input)
+                self.write(&head)
             }
             #[cfg(feature = "compression-deflate")]
             Self::Zlib(d) => {
@@ -198,7 +227,10 @@ impl Stage {
                 Ok(std::mem::take(&mut d.get_mut().buf))
             }
             #[cfg(feature = "compression-deflate")]
-            Self::DeflatePending(_) => Ok(Vec::new()),
+            Self::DeflatePending { limit, head } => {
+                let (limit, head) = (*limit, std::mem::take(head));
+                self.finish_pending(limit, &head)
+            }
             #[cfg(feature = "compression-deflate")]
             Self::Zlib(d) => {
                 d.try_finish().map_err(|e| decode_error("deflate", e))?;

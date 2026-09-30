@@ -11,12 +11,11 @@ impl RequestBuilder {
     pub async fn send(mut self) -> Result<Response> {
         self.prepare()?;
         let retry_policy = self.retry_policy.clone();
-        let digest_auth = self.digest_auth.take();
         let session = self.session.clone();
         let deadline = session.deadline(self.timeouts.as_ref());
         let mut attempt = self.into_attempt(deadline);
 
-        if retry_policy.is_none() && digest_auth.is_none() {
+        if retry_policy.is_none() {
             return session.attempt(attempt).await;
         }
 
@@ -32,25 +31,6 @@ impl RequestBuilder {
             let attempt_body = std::mem::take(&mut attempt.body);
             let this = attempt.again(attempt_body, base_headers.clone());
             let result = session.attempt(this).await;
-
-            if let (Some(auth), Ok(resp)) = (&digest_auth, result.as_ref())
-                && resp.status() == 401
-                && n == 0
-                && let Some(header) = resp.header("www-authenticate")
-                && let Ok(challenge) = crate::core::digest::parse_challenge(header)
-            {
-                let uri_path = crate::util::request_target(resp.url()).to_owned();
-                let Some(replay) = replay else {
-                    return Err(Error::new(Kind::Request).with_message(
-                        "digest auth: cannot replay streaming request body. \
-                         Buffer the body into bytes before sending.",
-                    ));
-                };
-                return Self::digest_followup(
-                    &session, attempt, auth, challenge, &uri_path, replay,
-                )
-                .await;
-            }
 
             let sleep =
                 match plan_retry(&result, &retry_policy, n, retryable_method, body_retryable) {
@@ -81,6 +61,7 @@ impl RequestBuilder {
             proxy: self.proxy.take(),
             header_order: self.header_order.take(),
             redirect: self.redirect.take(),
+            digest: self.digest_auth.take(),
         }
     }
 
@@ -119,64 +100,6 @@ impl RequestBuilder {
             }
         }
         Ok(())
-    }
-
-    async fn digest_followup(
-        session: &crate::core::Session,
-        attempt: Attempt,
-        auth: &crate::core::digest::DigestAuth,
-        challenge: crate::core::digest::Challenge,
-        uri_path: &str,
-        replay: Body,
-    ) -> Result<Response> {
-        let mut challenge = challenge;
-        let mut stale_retried = false;
-        loop {
-            let cnonce = crate::core::digest::generate_cnonce();
-            let nc = crate::core::digest::next_nc_for_nonce(&challenge.nonce);
-            let auth_header = match crate::core::digest::build_auth_header(
-                &challenge,
-                auth,
-                attempt.method.as_str(),
-                uri_path,
-                nc,
-                &cnonce,
-            ) {
-                Some(h) => h,
-                None => {
-                    return Err(Error::new(Kind::Request).with_message(
-                        "digest auth: server offered only qop=auth-int, \
-                         which Leyline does not implement (RFC 7616 §3.4.3 \
-                         requires the entity-body hash in HA2). Pass through \
-                         the 401 or remove digest_auth().",
-                    ));
-                }
-            };
-            let mut digest_headers = attempt.headers.clone().unwrap_or_default();
-            digest_headers.set("authorization", auth_header)?;
-            let replay_body = replay.replay().unwrap_or_default();
-            attempt.deadline.check()?;
-            let resp = session
-                .attempt(attempt.again(replay_body, Some(digest_headers)))
-                .await?;
-            if resp.status() == 401
-                && !stale_retried
-                && let Some(next) = resp
-                    .header("www-authenticate")
-                    .and_then(|v| crate::core::digest::parse_challenge(v).ok())
-                && next.stale
-            {
-                tracing::debug!(
-                    target: "leyline::digest",
-                    nonce = %next.nonce,
-                    "stale nonce — retrying with fresh challenge"
-                );
-                challenge = next;
-                stale_retried = true;
-                continue;
-            }
-            return Ok(resp);
-        }
     }
 }
 

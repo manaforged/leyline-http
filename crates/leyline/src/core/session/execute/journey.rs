@@ -19,6 +19,7 @@ pub(super) struct Journey {
     pub(super) method: String,
     pub(super) body: Body,
     pub(super) extra: Option<HeaderList>,
+    pub(super) authorized: Option<HeaderList>,
     pub(super) chain: Vec<Url>,
     pub(super) tainted: bool,
     pub(super) timing: ResponseTiming,
@@ -52,6 +53,7 @@ impl Journey {
         method: String,
         body: Body,
         extra: Option<HeaderList>,
+        session_referer: Option<&str>,
     ) -> Self {
         let original_origin = url_origin(&url);
         let caller_referrer = extra
@@ -63,7 +65,13 @@ impl Journey {
         let referrer = caller_referrer
             .clone()
             .unwrap_or_else(|| format!("{original_origin}/"));
-        let initiator = Url::parse(&referrer).ok();
+        let initiator = Url::parse(
+            caller_referrer
+                .as_deref()
+                .or(session_referer)
+                .unwrap_or(&referrer),
+        )
+        .ok();
         Self {
             original_origin,
             referrer,
@@ -72,6 +80,7 @@ impl Journey {
             method,
             body,
             extra,
+            authorized: None,
             chain: Vec::new(),
             tainted: false,
             timing: ResponseTiming::accumulator(),

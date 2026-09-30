@@ -48,9 +48,11 @@ that advertised `h3` in an `Alt-Svc` response header. Every other origin takes
 the `Auto` path and pays one TCP handshake.
 
 Only an `h3=` entry for the same port counts. Its host must be empty or equal
-to the host of the origin. Leyline ignores the `ma` parameter and the `clear`
-value, so an origin that the pool has noted stays known for the life of the
-pool.
+to the host of the origin. The pool keeps the origin until the entry's `ma`
+age, less the response's `Age`, ends, 24 hours when `ma` is absent. Each
+`Alt-Svc` value replaces the one before it: `ma=0`, `clear` anywhere in the
+fields, or a value with no matching `h3=` entry removes the origin. The pool keeps at most 1024 origins and drops the one that
+expires first to make room.
 
 A request is raced only when all of these hold:
 
