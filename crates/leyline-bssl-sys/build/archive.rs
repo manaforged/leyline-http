@@ -37,7 +37,9 @@ fn link_renamed(config: &Config, search_dirs: &[PathBuf]) -> io::Result<()> {
     for (source, target) in ARCHIVES {
         let from = find_archive(search_dirs, &archive_file(config, source))?;
         fs::copy(&from, link_dir.join(archive_file(config, target)))?;
-        println!("cargo:rerun-if-changed={}", from.display());
+        if !from.starts_with(&config.out_dir) {
+            println!("cargo:rerun-if-changed={}", from.display());
+        }
     }
     println!("cargo:rustc-link-search=native={}", link_dir.display());
     for (_, target) in ARCHIVES {
