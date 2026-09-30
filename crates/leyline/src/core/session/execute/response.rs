@@ -32,14 +32,23 @@ impl Session {
         url: &Url,
         resp_headers: &[(http::HeaderName, http::HeaderValue)],
     ) {
-        if let Some(host) = url.host_str()
+        let fields: Vec<_> = resp_headers
+            .iter()
+            .filter(|(k, _)| *k == "alt-svc")
+            .map(|(_, v)| String::from_utf8_lossy(v.as_bytes()))
+            .collect();
+        if !fields.is_empty()
+            && let Some(host) = url.host_str()
             && let Some(port) = url.port_or_known_default()
         {
-            for (_, v) in resp_headers.iter().filter(|(k, _)| *k == "alt-svc") {
-                self.inner
-                    .pool
-                    .note_alt_svc(host, port, &String::from_utf8_lossy(v.as_bytes()));
-            }
+            let age = resp_headers
+                .iter()
+                .find(|(k, _)| *k == "age")
+                .and_then(|(_, v)| v.to_str().ok()?.trim().parse::<u64>().ok())
+                .map_or(std::time::Duration::ZERO, std::time::Duration::from_secs);
+            self.inner
+                .pool
+                .note_alt_svc(host, port, &fields.join(", "), age);
         }
     }
 

@@ -7,7 +7,9 @@ use url::Url;
 
 use crate::core::body_stream::BodyStream;
 use crate::core::error::{Error, Kind, Result};
-use crate::core::session::decompress::{Decoder, decompress_body, drain_stream_into_vec};
+use crate::core::session::decompress::{
+    Decoder, content_codings, decompress_body, drain_stream_into_vec,
+};
 use crate::trace::masked;
 use crate::util::redact;
 
@@ -194,11 +196,7 @@ impl Response {
             ResponseBody::Streaming(s) => s,
         };
         let buf = drain_stream_into_vec(stream, self.compression.max_body_size).await?;
-        let encoding = self.headers.get(http::header::CONTENT_ENCODING).map(|v| {
-            String::from_utf8_lossy(v.as_bytes())
-                .trim()
-                .to_ascii_lowercase()
-        });
+        let encoding = content_codings(self.headers.get_all(http::header::CONTENT_ENCODING));
         let (buf, _) = decompress_body(buf, encoding.as_deref(), &self.compression)?;
         Ok(Bytes::from(buf))
     }
@@ -291,9 +289,7 @@ impl Response {
     {
         use futures_util::StreamExt;
 
-        let encoding = self
-            .header("content-encoding")
-            .map(|v| v.trim().to_ascii_lowercase());
+        let encoding = content_codings(self.headers.get_all(http::header::CONTENT_ENCODING));
         let mut decoder = Decoder::new(encoding.as_deref(), &self.compression)?;
         let mut stream = self.into_stream()?;
         let mut out = Vec::new();

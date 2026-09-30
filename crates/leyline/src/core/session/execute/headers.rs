@@ -6,6 +6,7 @@ use url::Url;
 use super::super::header_merge::apply_extra_headers;
 use super::journey::Journey;
 use super::{RequestContext, fetch_site_for, referer_for, url_origin};
+use crate::FetchSite;
 use crate::core::Session;
 use crate::core::body::{Body, BodyKind};
 use crate::core::headers::{HeaderList, reorder};
@@ -21,7 +22,6 @@ impl Session {
         request: RequestContext<'_>,
         current_url: &Url,
         current_method: &str,
-        redirect_chain: &[Url],
         current_body: &Body,
         extra_headers: Option<&HeaderList>,
         strip_sensitive: bool,
@@ -69,7 +69,12 @@ impl Session {
             headers.insert(0, ("content-length".into(), Cow::Owned(len.to_string())));
         }
 
-        self.add_jar_cookie(&mut headers, current_url, redirect_chain, current_method);
+        self.add_jar_cookie(
+            &mut headers,
+            current_url,
+            request.fetch_site,
+            current_method,
+        );
 
         if let Some(order) = header_order
             .map(Cow::Borrowed)
@@ -105,9 +110,8 @@ impl Session {
             },
             &journey.url,
             &journey.method,
-            &journey.chain,
             &journey.body,
-            journey.extra.as_ref(),
+            journey.authorized.as_ref().or(journey.extra.as_ref()),
             strip_sensitive,
             header_order,
         )
@@ -153,7 +157,7 @@ impl Session {
         &self,
         headers: &mut Vec<HeaderPair>,
         url: &Url,
-        redirect_chain: &[Url],
+        fetch_site: FetchSite,
         method: &str,
     ) {
         if headers
@@ -162,14 +166,19 @@ impl Session {
         {
             return;
         }
-        let cross_site = crate::cookie::is_cross_site(url, redirect_chain);
+        let cross_site = header_value(headers, "sec-fetch-site")
+            .map_or(fetch_site == FetchSite::CrossSite, |site| {
+                site.eq_ignore_ascii_case(FetchSite::CrossSite.as_str())
+            });
         let safe_method = ["GET", "HEAD"]
             .iter()
             .any(|m| method.eq_ignore_ascii_case(m));
+        let top_level = header_value(headers, "sec-fetch-dest")
+            .is_none_or(|dest| dest.eq_ignore_ascii_case("document"));
         if let Some(cookie_val) =
             self.inner
                 .cookie_jar
-                .cookie_header_for(url, cross_site, safe_method)
+                .cookie_header_for(url, cross_site, safe_method && top_level)
         {
             headers.push(("cookie".into(), Cow::Owned(cookie_val)));
         }

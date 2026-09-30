@@ -136,10 +136,7 @@ impl Session {
         };
 
         match winner {
-            Some(Winner::H3) => {
-                pool.note_h3(host, port);
-                Box::pin(send_request_h3(pool, &target, req)).await
-            }
+            Some(Winner::H3) => Box::pin(send_request_h3(pool, &target, req)).await,
             Some(Winner::H2) => send_request_h2(pool, connector, h2_config, req).await,
             None => send_request_auto(pool, connector, h2_config, req).await,
         }

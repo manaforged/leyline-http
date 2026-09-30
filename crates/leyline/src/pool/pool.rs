@@ -3,6 +3,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+#[cfg(feature = "http3")]
+use self::alt_svc::AltSvcCache;
 use crate::pool::connect::Inflight;
 use tokio::sync::Semaphore;
 
@@ -29,7 +31,7 @@ pub struct Pool {
     #[cfg(feature = "http3")]
     pub(crate) inflight_h3: Inflight<H3Client>,
     #[cfg(feature = "http3")]
-    pub(crate) h3_known: Mutex<HashSet<(String, u16)>>,
+    pub(crate) alt_svc: Mutex<AltSvcCache>,
     pub(crate) h1_only: Mutex<HashSet<(String, u16, Option<String>)>>,
     pub(crate) idle_timeout: Duration,
     pub(crate) max_connections: usize,
@@ -53,23 +55,13 @@ impl Pool {
     }
 
     #[cfg(feature = "http3")]
-    pub(crate) fn note_h3(&self, host: &str, port: u16) {
-        lock(&self.h3_known).insert((host.to_string(), port));
-    }
-
-    #[cfg(feature = "http3")]
-    pub(crate) fn note_alt_svc(&self, host: &str, port: u16, alt_svc: &str) {
-        if alt_svc
-            .split(',')
-            .any(|alt| alt_svc_same_authority(alt.trim_start(), host, port))
-        {
-            self.note_h3(host, port);
-        }
+    pub(crate) fn note_alt_svc(&self, host: &str, port: u16, alt_svc: &str, age: Duration) {
+        lock(&self.alt_svc).note(host, port, alt_svc, age, Instant::now());
     }
 
     #[cfg(feature = "http3")]
     pub(crate) fn knows_h3(&self, host: &str, port: u16) -> bool {
-        lock(&self.h3_known).contains(&(host.to_string(), port))
+        lock(&self.alt_svc).knows_h3(host, port, Instant::now())
     }
 
     pub fn new() -> Self {
@@ -79,7 +71,7 @@ impl Pool {
             #[cfg(feature = "http3")]
             inflight_h3: Inflight::default(),
             #[cfg(feature = "http3")]
-            h3_known: Mutex::new(HashSet::new()),
+            alt_svc: Mutex::new(AltSvcCache::default()),
             h1_only: Mutex::new(HashSet::new()),
             idle_timeout: DEFAULT_IDLE_TIMEOUT,
             max_connections: DEFAULT_MAX_CONNECTIONS,
@@ -110,7 +102,7 @@ impl Pool {
             #[cfg(feature = "http3")]
             inflight_h3: Inflight::default(),
             #[cfg(feature = "http3")]
-            h3_known: Mutex::new(HashSet::new()),
+            alt_svc: Mutex::new(AltSvcCache::default()),
             h1_only: Mutex::new(HashSet::new()),
             idle_timeout,
             max_connections,
@@ -296,26 +288,10 @@ impl Default for Pool {
     }
 }
 
-#[cfg(feature = "http3")]
-fn alt_svc_same_authority(entry: &str, host: &str, port: u16) -> bool {
-    let Some(value) = entry.strip_prefix("h3=") else {
-        return false;
-    };
-    let authority = value.split(';').next().unwrap_or_default().trim();
-    let authority = authority
-        .strip_prefix('"')
-        .and_then(|a| a.strip_suffix('"'))
-        .unwrap_or(authority);
-    match authority.rsplit_once(':') {
-        Some((alt_host, alt_port)) => {
-            alt_port.parse::<u16>() == Ok(port)
-                && (alt_host.is_empty() || alt_host.eq_ignore_ascii_case(host))
-        }
-        None => false,
-    }
-}
-
 #[cfg(test)]
 mod tests;
 
 mod slots;
+
+#[cfg(feature = "http3")]
+mod alt_svc;

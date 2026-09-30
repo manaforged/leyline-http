@@ -124,3 +124,19 @@ fn decompress_and_strip_preserves_headers_when_not_decoded() {
     assert_eq!(body, b"plain");
     assert_eq!(out, headers);
 }
+
+#[cfg(feature = "compression-deflate")]
+#[test]
+fn zlib_with_a_small_window_decodes_when_the_header_is_split() {
+    let zlib_13_bit_window =
+        hex::decode("58854b2aca2f2f4e2dd22dce482c484d5148aa2c492d56481a7c820060c74069").unwrap();
+    let mut decoder = Decoder::new(Some("deflate"), &CompressionConfig::default())
+        .unwrap()
+        .unwrap();
+    let mut out = Vec::new();
+    for byte in &zlib_13_bit_window {
+        decoder.feed(std::slice::from_ref(byte), &mut out).unwrap();
+    }
+    decoder.finish(&mut out).unwrap();
+    assert_eq!(out, b"browser-shaped bytes ".repeat(8));
+}

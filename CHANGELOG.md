@@ -159,6 +159,17 @@ First public release.
   that the session sends. A `user-agent` header set on the builder is that
   user agent.
 - The `trace::Head` event carries the response headers.
+- Repeated `Content-Encoding` fields combine in order, as one
+  comma-separated list does, and every coding is decoded. A `deflate` body
+  is read as zlib when its first two bytes are a valid zlib header for any
+  window size, and as raw DEFLATE otherwise.
+- `Alt-Svc` keeps HTTP/3 support for an origin until its `ma` age, less the
+  response's `Age`, ends (24 hours by default). `ma=0`, `clear` anywhere in
+  the fields, or a new `Alt-Svc` value with no `h3` alternative for the same
+  authority removes it. The pool remembers at
+  most 1024 origins.
+- A cookie jar drops a domain when its last cookie is evicted or deleted, so
+  a long session over many hosts keeps a bounded domain map.
 
 ### Security
 
@@ -201,3 +212,12 @@ First public release.
 - A `TimeoutConfig::total` of `Duration::MAX` sets no deadline, and a
   `Retry-After` date past the platform clock's range is ignored. Neither
   panics.
+- `digest_auth` answers a Digest challenge on the request that received it,
+  with that request's method and URL, once per redirect hop. A `POST`
+  redirected by a 303 is not sent again, and a challenge from an origin that
+  a redirect reached is not answered.
+- Cookie `SameSite` rules use the `sec-fetch-site` value the request sends,
+  which compares schemes. A `Referer` set on the session counts as the
+  initiator, as a per-request one does. A cross-site request withholds `Strict` cookies and sends
+  `Lax` cookies only on a top-level navigation (`sec-fetch-dest: document`)
+  with a safe method.

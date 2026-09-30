@@ -98,6 +98,9 @@ impl Jar {
                     return;
                 }
                 entries.remove(pos);
+                if entries.is_empty() {
+                    jar.cookies.remove(&domain);
+                }
                 jar.total -= 1;
             }
             return;
@@ -136,7 +139,7 @@ impl Jar {
         &self,
         url: &Url,
         cross_site: bool,
-        safe_method: bool,
+        lax_allowed: bool,
     ) -> Option<String> {
         use crate::cookie::record::SameSite;
         let domain = url.host_str().unwrap_or("");
@@ -158,7 +161,7 @@ impl Jar {
                 if cross_site {
                     match cookie.same_site {
                         SameSite::Strict => continue,
-                        SameSite::Lax if !safe_method => continue,
+                        SameSite::Lax if !lax_allowed => continue,
                         _ => {}
                     }
                 }
@@ -195,6 +198,7 @@ impl Jar {
             entries.retain(|c| c.name != name);
             removed += before - entries.len();
         }
+        jar.cookies.retain(|_, entries| !entries.is_empty());
         jar.total -= removed;
         removed
     }
@@ -208,6 +212,7 @@ impl Jar {
             entries.retain(|c| c.name != name || !c.matches(host, &c.path, true));
             removed += before - entries.len();
         }
+        jar.cookies.retain(|_, entries| !entries.is_empty());
         jar.total -= removed;
         removed
     }
@@ -349,6 +354,7 @@ fn evict_global(all: &mut HashMap<String, Vec<Cookie>>, count: usize) {
             }
         }
     }
+    all.retain(|_, entries| !entries.is_empty());
 }
 
 #[cfg(test)]

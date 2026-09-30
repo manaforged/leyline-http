@@ -104,15 +104,31 @@ pub(crate) fn decompress_body(
     Ok((out, true))
 }
 
+pub(crate) fn content_codings<'a>(
+    values: impl IntoIterator<Item = &'a http::HeaderValue>,
+) -> Option<String> {
+    let codings: Vec<String> = values
+        .into_iter()
+        .map(|v| {
+            String::from_utf8_lossy(v.as_bytes())
+                .trim()
+                .to_ascii_lowercase()
+        })
+        .collect();
+    (!codings.is_empty()).then(|| codings.join(", "))
+}
+
 pub(crate) fn decompress_and_strip(
     body: Vec<u8>,
     headers: HeaderPairs,
     config: &CompressionConfig,
 ) -> Result<(Vec<u8>, HeaderPairs)> {
-    let content_encoding = headers
-        .iter()
-        .find(|(k, _)| *k == "content-encoding")
-        .map(|(_, v)| String::from_utf8_lossy(v.as_bytes()).to_lowercase());
+    let content_encoding = content_codings(
+        headers
+            .iter()
+            .filter(|(k, _)| *k == "content-encoding")
+            .map(|(_, v)| v),
+    );
     let (body, decoded) = decompress_body(body, content_encoding.as_deref(), config)?;
     let headers = if decoded {
         headers

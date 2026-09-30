@@ -178,69 +178,52 @@ async fn stale_nonce_is_retried_transparently() {
     server.await.unwrap();
 }
 
+async fn reply(sock: &mut tokio::net::TcpStream, response: &[u8]) {
+    sock.write_all(response).await.unwrap();
+    sock.flush().await.unwrap();
+}
+
+const CHALLENGE_401: &[u8] = b"HTTP/1.1 401 Unauthorized\r\n\
+    WWW-Authenticate: Digest realm=\"r\", nonce=\"n1\", qop=\"auth\", algorithm=MD5\r\n\
+    content-length: 0\r\nconnection: close\r\n\r\n";
+
 #[tokio::test]
-async fn digest_uri_tracks_the_redirected_challenge_url() {
+async fn digest_answers_the_redirected_hop_without_replaying_the_post() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
 
     let server = tokio::spawn(async move {
         let (mut sock, _) = listener.accept().await.unwrap();
-        let head = read_headers(&mut sock).await;
-        assert!(head.starts_with("GET /start "), "{head}");
-        sock.write_all(
-            b"HTTP/1.1 302 Found\r\n\
-              location: /protected\r\n\
+        let mut head = read_headers(&mut sock).await;
+        while !head.ends_with("x=1") {
+            let mut buf = [0u8; 64];
+            let n = sock.read(&mut buf).await.unwrap();
+            assert!(n > 0, "{head}");
+            head.push_str(&String::from_utf8_lossy(&buf[..n]));
+        }
+        assert!(head.starts_with("POST /submit "), "{head}");
+        reply(
+            &mut sock,
+            b"HTTP/1.1 303 See Other\r\nlocation: /protected\r\n\
               content-length: 0\r\nconnection: close\r\n\r\n",
         )
-        .await
-        .unwrap();
-        sock.flush().await.unwrap();
+        .await;
         drop(sock);
 
         let (mut sock, _) = listener.accept().await.unwrap();
         let head = read_headers(&mut sock).await;
         assert!(head.starts_with("GET /protected "), "{head}");
-        sock.write_all(
-            b"HTTP/1.1 401 Unauthorized\r\n\
-              WWW-Authenticate: Digest realm=\"r\", nonce=\"n1\", qop=\"auth\", algorithm=MD5\r\n\
-              content-length: 0\r\nconnection: close\r\n\r\n",
-        )
-        .await
-        .unwrap();
-        sock.flush().await.unwrap();
+        reply(&mut sock, CHALLENGE_401).await;
         drop(sock);
 
         let (mut sock, _) = listener.accept().await.unwrap();
         let head = read_headers(&mut sock).await;
-        assert!(head.starts_with("GET /start "), "{head}");
-        let auth = extract_authorization(&head).expect("auth on retry first step");
-        assert!(
-            auth.contains("uri=\"/protected\""),
-            "digest uri must track the redirected challenge URL, got: {auth}"
-        );
-        assert!(
-            !auth.contains("uri=\"/start\""),
-            "digest uri wrongly used the caller's original URL: {auth}"
-        );
-        sock.write_all(
-            b"HTTP/1.1 302 Found\r\n\
-              location: /protected\r\n\
-              content-length: 0\r\nconnection: close\r\n\r\n",
+        reply(
+            &mut sock,
+            b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\nok",
         )
-        .await
-        .unwrap();
-        sock.flush().await.unwrap();
-        drop(sock);
-
-        let (mut sock, _) = listener.accept().await.unwrap();
-        let head = read_headers(&mut sock).await;
-        assert!(head.starts_with("GET /protected "), "{head}");
-        let auth = extract_authorization(&head).expect("auth on retry final step");
-        assert!(auth.contains("uri=\"/protected\""), "{auth}");
-        sock.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\nok")
-            .await
-            .unwrap();
-        sock.flush().await.unwrap();
+        .await;
+        head
     });
 
     let session = Session::builder()
@@ -248,17 +231,116 @@ async fn digest_uri_tracks_the_redirected_challenge_url() {
         .build()
         .unwrap();
     let resp = session
-        .request(http::Method::GET, format!("http://{addr}/start"))
+        .post(format!("http://{addr}/submit"))
+        .body("x=1")
+        .digest_auth(DigestAuth::new("u", "p"))
+        .send()
+        .await;
+    let answered = server.await.unwrap();
+    assert!(
+        answered.starts_with("GET /protected "),
+        "the digest answer must go to the challenged GET, not replay the POST: {answered}"
+    );
+    let auth = extract_authorization(&answered).expect("authorization on the challenged hop");
+    assert!(auth.contains("uri=\"/protected\""), "{auth}");
+    assert_eq!(resp.unwrap().status(), 200);
+}
+
+#[tokio::test]
+async fn digest_answers_a_new_challenge_after_an_authenticated_redirect() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let server = tokio::spawn(async move {
+        let (mut sock, _) = listener.accept().await.unwrap();
+        let _ = read_headers(&mut sock).await;
+        reply(&mut sock, CHALLENGE_401).await;
+        drop(sock);
+
+        let (mut sock, _) = listener.accept().await.unwrap();
+        let _ = read_headers(&mut sock).await;
+        reply(
+            &mut sock,
+            b"HTTP/1.1 302 Found\r\nlocation: /next\r\n\
+              content-length: 0\r\nconnection: close\r\n\r\n",
+        )
+        .await;
+        drop(sock);
+
+        let (mut sock, _) = listener.accept().await.unwrap();
+        let head = read_headers(&mut sock).await;
+        assert!(head.starts_with("GET /next "), "{head}");
+        reply(&mut sock, CHALLENGE_401).await;
+        drop(sock);
+
+        let (mut sock, _) = listener.accept().await.unwrap();
+        let head = read_headers(&mut sock).await;
+        reply(
+            &mut sock,
+            b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\nok",
+        )
+        .await;
+        head
+    });
+
+    let session = Session::builder()
+        .protocol(ProtocolPolicy::Http1)
+        .build()
+        .unwrap();
+    let resp = session
+        .get(format!("http://{addr}/protected"))
         .digest_auth(DigestAuth::new("u", "p"))
         .send()
         .await
         .unwrap();
-    assert_eq!(
-        resp.status(),
-        200,
-        "digest auth across a same-origin redirect must succeed"
+    assert_eq!(resp.status(), 200);
+    let answered = server.await.unwrap();
+    let auth = extract_authorization(&answered).expect("authorization after the redirect");
+    assert!(auth.contains("uri=\"/next\""), "{auth}");
+}
+
+#[tokio::test]
+async fn digest_challenge_from_a_redirected_origin_is_not_answered() {
+    let first = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let other = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let first_addr = first.local_addr().unwrap();
+    let other_addr = other.local_addr().unwrap();
+
+    let origin = tokio::spawn(async move {
+        let (mut sock, _) = first.accept().await.unwrap();
+        let _ = read_headers(&mut sock).await;
+        let redirect = format!(
+            "HTTP/1.1 302 Found\r\nlocation: http://{other_addr}/protected\r\n\
+             content-length: 0\r\nconnection: close\r\n\r\n"
+        );
+        reply(&mut sock, redirect.as_bytes()).await;
+    });
+    let challenger = tokio::spawn(async move {
+        let (mut sock, _) = other.accept().await.unwrap();
+        let _ = read_headers(&mut sock).await;
+        reply(&mut sock, CHALLENGE_401).await;
+        drop(sock);
+        tokio::time::timeout(std::time::Duration::from_millis(300), other.accept())
+            .await
+            .is_err()
+    });
+
+    let session = Session::builder()
+        .protocol(ProtocolPolicy::Http1)
+        .build()
+        .unwrap();
+    let resp = session
+        .get(format!("http://{first_addr}/start"))
+        .digest_auth(DigestAuth::new("u", "p"))
+        .send()
+        .await
+        .unwrap();
+    origin.await.unwrap();
+    assert!(
+        challenger.await.unwrap(),
+        "credentials must not be sent to an origin the caller did not target"
     );
-    server.await.unwrap();
+    assert_eq!(resp.status(), 401);
 }
 
 #[tokio::test]

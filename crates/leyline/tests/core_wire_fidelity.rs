@@ -365,3 +365,120 @@ async fn plain_authorization_rides_after_user_agent() {
     assert_eq!(auth, ua + 1, "{}", req.text());
     server.finish().await;
 }
+
+#[tokio::test]
+async fn cross_site_initiator_withholds_samesite_cookies_by_destination() {
+    let mut server = RawServer::start(vec![RawResponse::ok(), RawResponse::ok()]).await;
+    let session = Session::builder()
+        .browser(Browser::default())
+        .protocol(ProtocolPolicy::Http1)
+        .build()
+        .unwrap();
+    let site = url::Url::parse(&server.url("/")).unwrap();
+    session
+        .cookies()
+        .store_set_cookie("strict=1; SameSite=Strict", &site);
+    session
+        .cookies()
+        .store_set_cookie("lax=1; SameSite=Lax", &site);
+
+    for (path, preset) in [("/nav", Preset::FormNavigate), ("/xhr", Preset::Xhr)] {
+        session
+            .request(http::Method::GET, server.url(path))
+            .preset(preset)
+            .header("referer", "https://other.test/")
+            .send()
+            .await
+            .unwrap();
+    }
+
+    let navigation = server.next_request().await;
+    let subresource = server.next_request().await;
+    assert_eq!(
+        navigation.header_values("cookie"),
+        vec!["lax=1"],
+        "{}",
+        navigation.text()
+    );
+    assert_eq!(
+        subresource.header_count("cookie"),
+        0,
+        "{}",
+        subresource.text()
+    );
+    server.finish().await;
+}
+
+#[tokio::test]
+async fn samesite_follows_the_sent_fetch_site() {
+    let mut server = RawServer::start(vec![RawResponse::ok(), RawResponse::ok()]).await;
+    let site = url::Url::parse(&server.url("/")).unwrap();
+    let preset_session = Session::builder()
+        .browser(Browser::default())
+        .protocol(ProtocolPolicy::Http1)
+        .build()
+        .unwrap();
+    let referer_session = Session::builder()
+        .browser(Browser::default())
+        .protocol(ProtocolPolicy::Http1)
+        .headers([("referer", "https://other.test/")])
+        .build()
+        .unwrap();
+
+    for (session, preset) in [
+        (&preset_session, Preset::CrossOrigin),
+        (&referer_session, Preset::Xhr),
+    ] {
+        session
+            .cookies()
+            .store_set_cookie("strict=1; SameSite=Strict", &site);
+        session
+            .cookies()
+            .store_set_cookie("lax=1; SameSite=Lax", &site);
+        session
+            .get(server.url("/"))
+            .preset(preset)
+            .send()
+            .await
+            .unwrap();
+        let req = server.next_request().await;
+        assert_eq!(req.header_values("sec-fetch-site"), vec!["cross-site"]);
+        assert_eq!(req.header_count("cookie"), 0, "{}", req.text());
+    }
+    server.finish().await;
+}
+
+#[tokio::test]
+async fn the_last_session_referer_sets_the_fetch_site() {
+    let mut server = RawServer::start(vec![RawResponse::ok()]).await;
+    let site = url::Url::parse(&server.url("/")).unwrap();
+    let session = Session::builder()
+        .browser(Browser::default())
+        .protocol(ProtocolPolicy::Http1)
+        .headers([
+            ("referer", "https://other.test/"),
+            ("referer", site.as_str()),
+        ])
+        .build()
+        .unwrap();
+    session
+        .cookies()
+        .store_set_cookie("strict=1; SameSite=Strict", &site);
+
+    session
+        .get(server.url("/"))
+        .preset(Preset::Xhr)
+        .send()
+        .await
+        .unwrap();
+
+    let req = server.next_request().await;
+    assert_eq!(req.header_values("sec-fetch-site"), vec!["same-origin"]);
+    assert_eq!(
+        req.header_values("cookie"),
+        vec!["strict=1"],
+        "{}",
+        req.text()
+    );
+    server.finish().await;
+}
