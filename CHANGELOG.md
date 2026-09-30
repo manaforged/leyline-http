@@ -163,11 +163,11 @@ First public release.
   comma-separated list does, and every coding is decoded. A `deflate` body
   is read as zlib when its first two bytes are a valid zlib header for any
   window size, and as raw DEFLATE otherwise.
-- `Alt-Svc` keeps HTTP/3 support for an origin until its `ma` age, less the
-  response's `Age`, ends (24 hours by default). `ma=0`, `clear` anywhere in
-  the fields, or a new `Alt-Svc` value with no `h3` alternative for the same
-  authority removes it. The pool remembers at
-  most 1024 origins.
+- `Alt-Svc` keeps HTTP/3 support for an origin until the longest `ma` of its
+  `h3` entries, less the response's `Age`, ends on the wall clock (24 hours
+  by default). `ma=0`, `clear` in any `Alt-Svc` field, or a new value with no
+  `h3` alternative for the same authority removes it. Each field is parsed on
+  its own, and the pool remembers at most 1024 origins.
 - A cookie jar drops a domain when its last cookie is evicted or deleted, so
   a long session over many hosts keeps a bounded domain map.
 
@@ -213,11 +213,16 @@ First public release.
   `Retry-After` date past the platform clock's range is ignored. Neither
   panics.
 - `digest_auth` answers a Digest challenge on the request that received it,
-  with that request's method and URL, once per redirect hop. A `POST`
-  redirected by a 303 is not sent again, and a challenge from an origin that
-  a redirect reached is not answered.
+  with that request's method and URL, and prefers a challenge it can answer.
+  A later same-origin redirect step carries a fresh `Authorization` for its
+  own method and URL. A `POST` redirected by a 303 is not sent again, and a
+  challenge from an origin that a redirect reached is not answered.
 - Cookie `SameSite` rules use the `sec-fetch-site` value the request sends,
-  which compares schemes. A `Referer` set on the session counts as the
-  initiator, as a per-request one does. A cross-site request withholds `Strict` cookies and sends
-  `Lax` cookies only on a top-level navigation (`sec-fetch-dest: document`)
-  with a safe method.
+  which compares schemes. A cross-site request withholds `Strict` cookies and
+  sends `Lax` cookies only on a top-level navigation
+  (`sec-fetch-dest: document`) with a safe method. Firefox profiles also
+  treat a request as cross-site when its redirect chain crosses sites, as
+  Firefox does; Chrome judges the final target only.
+- A session `Referer` that is an absolute URL counts as the initiator when
+  the request sets no `Referer`. The `Origin` header names the initiator's
+  origin.

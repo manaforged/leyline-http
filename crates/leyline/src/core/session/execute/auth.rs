@@ -9,22 +9,27 @@ use crate::util::request_target;
 
 pub(super) struct DigestLeg {
     auth: DigestAuth,
-    answered: bool,
-    stale_retried: bool,
+    answers: u8,
+    challenge: Option<Challenge>,
 }
 
 impl DigestLeg {
     pub(super) fn new(auth: DigestAuth) -> Self {
         Self {
             auth,
-            answered: false,
-            stale_retried: false,
+            answers: 0,
+            challenge: None,
         }
     }
 
-    pub(super) fn next_hop(&mut self) {
-        self.answered = false;
-        self.stale_retried = false;
+    pub(super) fn next_hop(&mut self, journey: &Journey) -> Result<Option<HeaderList>> {
+        self.answers = 0;
+        match &self.challenge {
+            Some(challenge) if in_scope(journey) => {
+                self.authorized_headers(journey, challenge).map(Some)
+            }
+            _ => Ok(None),
+        }
     }
 
     pub(super) fn answer(
@@ -32,30 +37,37 @@ impl DigestLeg {
         journey: &Journey,
         headers: &[(HeaderName, HeaderValue)],
     ) -> Result<Option<HeaderList>> {
-        if !journey.chain.is_empty() && url_origin(&journey.url) != journey.original_origin {
+        if !in_scope(journey) {
             return Ok(None);
         }
-        let Some(challenge) = headers
+        let challenges: Vec<Challenge> = headers
             .iter()
             .filter(|(k, _)| *k == "www-authenticate")
             .filter_map(|(_, v)| v.to_str().ok())
-            .find_map(|v| digest::parse_challenge(v).ok())
+            .filter_map(|v| digest::parse_challenge(v).ok())
+            .collect();
+        let Some(challenge) = challenges
+            .iter()
+            .find(|c| answerable(c))
+            .or(challenges.first())
+            .cloned()
         else {
             return Ok(None);
         };
-        if !self.answered {
-            self.answered = true;
-        } else if !self.stale_retried && challenge.stale {
+        match (self.answers, challenge.stale) {
+            (0, _) | (1, true) => self.answers += 1,
+            _ => return Ok(None),
+        }
+        if self.answers > 1 {
             tracing::debug!(
                 target: "leyline::digest",
                 nonce = %challenge.nonce,
                 "stale nonce — retrying with fresh challenge"
             );
-            self.stale_retried = true;
-        } else {
-            return Ok(None);
         }
-        self.authorized_headers(journey, &challenge).map(Some)
+        let authorized = self.authorized_headers(journey, &challenge)?;
+        self.challenge = Some(challenge);
+        Ok(Some(authorized))
     }
 
     fn authorized_headers(&self, journey: &Journey, challenge: &Challenge) -> Result<HeaderList> {
@@ -81,6 +93,17 @@ impl DigestLeg {
         headers.set("authorization", header)?;
         Ok(headers)
     }
+}
+
+fn in_scope(journey: &Journey) -> bool {
+    journey.chain.is_empty() || url_origin(&journey.url) == journey.original_origin
+}
+
+fn answerable(challenge: &Challenge) -> bool {
+    challenge
+        .qop
+        .as_deref()
+        .is_none_or(|qop| digest::pick_supported_qop(qop).is_some())
 }
 
 pub(super) fn unreplayable_body() -> Error {

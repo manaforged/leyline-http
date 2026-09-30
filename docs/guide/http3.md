@@ -48,11 +48,12 @@ that advertised `h3` in an `Alt-Svc` response header. Every other origin takes
 the `Auto` path and pays one TCP handshake.
 
 Only an `h3=` entry for the same port counts. Its host must be empty or equal
-to the host of the origin. The pool keeps the origin until the entry's `ma`
-age, less the response's `Age`, ends, 24 hours when `ma` is absent. Each
-`Alt-Svc` value replaces the one before it: `ma=0`, `clear` anywhere in the
-fields, or a value with no matching `h3=` entry removes the origin. The pool keeps at most 1024 origins and drops the one that
-expires first to make room.
+to the host of the origin. The pool keeps the origin until the longest `ma`
+of the matching entries, less the response's `Age`, ends on the wall clock,
+24 hours when `ma` is absent. Each `Alt-Svc` value replaces the one before
+it: `ma=0`, `clear` in any field, or a value with no matching `h3=` entry
+removes the origin. Each field is parsed on its own. The pool keeps at most
+1024 origins and drops the one that expires first to make room.
 
 A request is raced only when all of these hold:
 

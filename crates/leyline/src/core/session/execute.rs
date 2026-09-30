@@ -111,7 +111,6 @@ impl Session {
 
         let mut digest = digest.map(DigestLeg::new);
         let redirect_cap = redirect_policy.max_redirects_hint();
-        let mut followed = 0;
         loop {
             let headers = self.leg_headers(&journey, preset, header_order);
             journey.authorized = None;
@@ -143,10 +142,9 @@ impl Session {
                 drop(leg.body);
                 journey.follow(hop, code, &location, replay_body)?;
                 if let Some(digest) = digest.as_mut() {
-                    digest.next_hop();
+                    journey.authorized = digest.next_hop(&journey)?;
                 }
-                followed += 1;
-                if followed > redirect_cap {
+                if journey.chain.len() > redirect_cap {
                     return Err(Error::new(Kind::Redirect)
                         .with_message(format!("too many redirects (max {redirect_cap})")));
                 }
@@ -195,6 +193,7 @@ pub(super) struct RequestContext<'a> {
     pub(super) origin: &'a str,
     pub(super) referer: &'a str,
     pub(super) fetch_site: FetchSite,
+    pub(super) redirect_cross_site: bool,
 }
 
 fn fetch_site_for(initiator: Option<&Url>, chain: &[Url], current: &Url) -> FetchSite {

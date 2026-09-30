@@ -1,19 +1,31 @@
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::{Duration, SystemTime};
 
 const DEFAULT_MAX_AGE: Duration = Duration::from_secs(86_400);
 
-const MAX_ORIGINS: usize = 1024;
-
-#[derive(Default)]
 pub(crate) struct AltSvcCache {
-    h3: HashMap<(String, u16), Instant>,
+    h3: HashMap<(String, u16), SystemTime>,
+    max_origins: usize,
 }
 
 impl AltSvcCache {
-    pub(crate) fn note(&mut self, host: &str, port: u16, value: &str, age: Duration, now: Instant) {
+    pub(crate) fn new(max_origins: usize) -> Self {
+        Self {
+            h3: HashMap::new(),
+            max_origins: max_origins.max(1),
+        }
+    }
+
+    pub(crate) fn note(
+        &mut self,
+        host: &str,
+        port: u16,
+        fields: &[&str],
+        age: Duration,
+        now: SystemTime,
+    ) {
         let key = (host.to_string(), port);
-        let expiry = h3_max_age(value, host, port)
+        let expiry = h3_max_age(fields, host, port)
             .and_then(|max_age| max_age.checked_sub(age))
             .filter(|fresh| !fresh.is_zero())
             .and_then(|fresh| now.checked_add(fresh));
@@ -21,13 +33,13 @@ impl AltSvcCache {
             self.h3.remove(&key);
             return;
         };
-        if !self.h3.contains_key(&key) && self.h3.len() >= MAX_ORIGINS {
+        if !self.h3.contains_key(&key) && self.h3.len() >= self.max_origins {
             self.make_room(now);
         }
         self.h3.insert(key, expiry);
     }
 
-    pub(crate) fn knows_h3(&mut self, host: &str, port: u16, now: Instant) -> bool {
+    pub(crate) fn knows_h3(&mut self, host: &str, port: u16, now: SystemTime) -> bool {
         let key = (host.to_string(), port);
         match self.h3.get(&key) {
             Some(expiry) if *expiry > now => true,
@@ -39,9 +51,9 @@ impl AltSvcCache {
         }
     }
 
-    fn make_room(&mut self, now: Instant) {
+    fn make_room(&mut self, now: SystemTime) {
         self.h3.retain(|_, expiry| *expiry > now);
-        if self.h3.len() < MAX_ORIGINS {
+        if self.h3.len() < self.max_origins {
             return;
         }
         if let Some(oldest) = self
@@ -55,11 +67,14 @@ impl AltSvcCache {
     }
 }
 
-fn h3_max_age(value: &str, host: &str, port: u16) -> Option<Duration> {
-    if split_unquoted(value, ',').any(|alt| alt.trim().eq_ignore_ascii_case("clear")) {
+fn h3_max_age(fields: &[&str], host: &str, port: u16) -> Option<Duration> {
+    let entries = || fields.iter().flat_map(|field| split_unquoted(field, ','));
+    if entries().any(|alt| alt.trim().eq_ignore_ascii_case("clear")) {
         return None;
     }
-    split_unquoted(value, ',').find_map(|alt| same_authority_h3(alt.trim_start(), host, port))
+    entries()
+        .filter_map(|alt| same_authority_h3(alt.trim_start(), host, port))
+        .max()
 }
 
 fn same_authority_h3(entry: &str, host: &str, port: u16) -> Option<Duration> {
@@ -76,8 +91,9 @@ fn same_authority_h3(entry: &str, host: &str, port: u16) -> Option<Duration> {
         return None;
     }
     let max_age = parts
-        .filter_map(|param| param.trim().strip_prefix("ma="))
-        .find_map(|secs| secs.trim().trim_matches('"').parse::<u64>().ok())
+        .filter_map(|param| param.trim().split_once('='))
+        .filter(|(name, _)| name.trim().eq_ignore_ascii_case("ma"))
+        .find_map(|(_, secs)| crate::util::delta_seconds(secs.trim().trim_matches('"')))
         .map_or(DEFAULT_MAX_AGE, |secs| {
             Duration::from_secs(secs.min(u64::from(u32::MAX)))
         });

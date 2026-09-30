@@ -97,11 +97,7 @@ impl Jar {
                 if entries[pos].secure && url.scheme() != "https" {
                     return;
                 }
-                entries.remove(pos);
-                if entries.is_empty() {
-                    jar.cookies.remove(&domain);
-                }
-                jar.total -= 1;
+                jar.remove_where(|c| c.same_slot(&cookie));
             }
             return;
         }
@@ -191,30 +187,12 @@ impl Jar {
     }
 
     pub fn remove_named(&self, name: &str) -> usize {
-        let mut jar = lock(&self.inner);
-        let mut removed = 0;
-        for entries in jar.cookies.values_mut() {
-            let before = entries.len();
-            entries.retain(|c| c.name != name);
-            removed += before - entries.len();
-        }
-        jar.cookies.retain(|_, entries| !entries.is_empty());
-        jar.total -= removed;
-        removed
+        lock(&self.inner).remove_where(|c| c.name == name)
     }
 
     pub fn remove(&self, url: &Url, name: &str) -> usize {
         let host = url.host_str().unwrap_or("");
-        let mut jar = lock(&self.inner);
-        let mut removed = 0;
-        for entries in jar.cookies.values_mut() {
-            let before = entries.len();
-            entries.retain(|c| c.name != name || !c.matches(host, &c.path, true));
-            removed += before - entries.len();
-        }
-        jar.cookies.retain(|_, entries| !entries.is_empty());
-        jar.total -= removed;
-        removed
+        lock(&self.inner).remove_where(|c| c.name == name && c.matches(host, &c.path, true))
     }
 
     pub fn all_cookies(&self) -> Vec<Cookie> {
@@ -307,6 +285,24 @@ fn plain_token(text: &str) -> bool {
     !text.chars().any(|c| c == ';' || c.is_control())
 }
 
+impl JarInner {
+    fn remove_where(&mut self, mut doomed: impl FnMut(&Cookie) -> bool) -> usize {
+        let mut removed = 0;
+        for entries in self.cookies.values_mut() {
+            let before = entries.len();
+            entries.retain(|c| !doomed(c));
+            removed += before - entries.len();
+        }
+        self.prune();
+        self.total -= removed;
+        removed
+    }
+
+    fn prune(&mut self) {
+        self.cookies.retain(|_, entries| !entries.is_empty());
+    }
+}
+
 fn settle(jar: &mut JarInner, domain: &str, added: bool) {
     let mut evicted = 0;
     if let Some(entries) = jar.cookies.get_mut(domain)
@@ -321,6 +317,7 @@ fn settle(jar: &mut JarInner, domain: &str, added: bool) {
     jar.total -= evicted;
     if jar.total > MAX_COOKIES_GLOBAL {
         evict_global(&mut jar.cookies, EVICT_GLOBAL);
+        jar.prune();
         jar.total = jar.cookies.values().map(|v| v.len()).sum();
     }
 }
@@ -354,7 +351,6 @@ fn evict_global(all: &mut HashMap<String, Vec<Cookie>>, count: usize) {
             }
         }
     }
-    all.retain(|_, entries| !entries.is_empty());
 }
 
 #[cfg(test)]

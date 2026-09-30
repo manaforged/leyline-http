@@ -65,13 +65,14 @@ impl Journey {
         let referrer = caller_referrer
             .clone()
             .unwrap_or_else(|| format!("{original_origin}/"));
-        let initiator = Url::parse(
-            caller_referrer
-                .as_deref()
-                .or(session_referer)
-                .unwrap_or(&referrer),
-        )
-        .ok();
+        let caller_sets_referer = extra.as_ref().is_some_and(|h| h.get("referer").is_some());
+        let initiator = if caller_sets_referer {
+            caller_referrer.as_deref()
+        } else {
+            session_referer
+        }
+        .and_then(|r| Url::parse(r).ok())
+        .or_else(|| Url::parse(&referrer).ok());
         Self {
             original_origin,
             referrer,

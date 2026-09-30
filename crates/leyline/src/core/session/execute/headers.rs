@@ -73,6 +73,7 @@ impl Session {
             &mut headers,
             current_url,
             request.fetch_site,
+            request.redirect_cross_site,
             current_method,
         );
 
@@ -96,17 +97,27 @@ impl Session {
         let referer = referer_for(Some(&journey.referrer), &origin);
         let fetch_site = fetch_site_for(journey.initiator.as_ref(), &journey.chain, &journey.url);
         let strip_sensitive = !journey.chain.is_empty() && origin != journey.original_origin;
-        let request_origin = if journey.tainted {
-            "null"
-        } else {
-            journey.original_origin.as_str()
+        let initiator_origin = journey
+            .initiator
+            .as_ref()
+            .filter(|url| matches!(url.scheme(), "http" | "https"))
+            .map(url_origin);
+        let request_origin = match (&initiator_origin, journey.tainted) {
+            (_, true) => "null",
+            (Some(origin), false) => origin.as_str(),
+            (None, false) => journey.original_origin.as_str(),
         };
+        let redirect_cross_site = journey.chain.first().is_some_and(|first| {
+            FetchSite::across(first, journey.chain.iter().chain([journey.url.as_ref()]))
+                == FetchSite::CrossSite
+        });
         self.attempt_headers(
             preset,
             RequestContext {
                 origin: request_origin,
                 referer: &referer,
                 fetch_site,
+                redirect_cross_site,
             },
             &journey.url,
             &journey.method,
@@ -158,6 +169,7 @@ impl Session {
         headers: &mut Vec<HeaderPair>,
         url: &Url,
         fetch_site: FetchSite,
+        redirect_cross_site: bool,
         method: &str,
     ) {
         if headers
@@ -166,10 +178,12 @@ impl Session {
         {
             return;
         }
-        let cross_site = header_value(headers, "sec-fetch-site")
+        let sent_cross_site = header_value(headers, "sec-fetch-site")
             .map_or(fetch_site == FetchSite::CrossSite, |site| {
                 site.eq_ignore_ascii_case(FetchSite::CrossSite.as_str())
             });
+        let cross_site =
+            sent_cross_site || (redirect_cross_site && self.samesite_checks_redirect_chain());
         let safe_method = ["GET", "HEAD"]
             .iter()
             .any(|m| method.eq_ignore_ascii_case(m));
@@ -182,6 +196,14 @@ impl Session {
         {
             headers.push(("cookie".into(), Cow::Owned(cookie_val)));
         }
+    }
+
+    fn samesite_checks_redirect_chain(&self) -> bool {
+        self.inner
+            .identity
+            .map(super::super::Identity::http)
+            .or(self.inner.browser)
+            .is_some_and(|browser| browser.family().samesite_checks_redirect_chain())
     }
 
     pub(in crate::core::session) fn session_header_order(&self) -> Option<Cow<'_, [String]>> {
