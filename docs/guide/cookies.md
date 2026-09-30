@@ -143,12 +143,15 @@ The jar follows Chrome's behavior:
   limit applies per exact domain.
 - `Secure` cookies go only over HTTPS.
 - `SameSite` uses the `sec-fetch-site` value the request sends. Leyline
-  computes it from the initiator (the request's or the session's `Referer`,
-  or the first URL) and every URL in the redirect chain, schemes included, so
-  `http://` to `https://` on one host is cross-site. A preset or header that
-  sets `sec-fetch-site` sets it for cookies too. A cross-site request sends no `Strict` cookie. It sends `Lax`
-  cookies only on a top-level navigation (`sec-fetch-dest: document`, or no
-  `sec-fetch-dest` header) with `GET` or `HEAD`.
+  computes it from the initiator and every URL in the redirect chain,
+  schemes included, so `http://` to `https://` on one host is cross-site.
+  The initiator is the request's `Referer`; without one, the session's
+  `Referer` when it is an absolute URL; otherwise the first URL. A preset or
+  header that sets `sec-fetch-site` sets it for cookies too.
+- A cross-site request sends no `Strict` cookie. It sends `Lax` cookies only
+  on a top-level navigation (`sec-fetch-dest: document`, or no
+  `sec-fetch-dest` header) with `GET` or `HEAD`. Firefox profiles also treat
+  a request as cross-site when its redirect chain crosses sites.
 - The jar sends no expired cookie.
 - A cookie lives at most 400 days. A `Max-Age` or `Expires` further out is
   cut to 400 days from when the cookie is set, and so is an `Expires` date

@@ -2,6 +2,7 @@
     clippy::unwrap_used,
     reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
 )]
+#![allow(dead_code)]
 use std::collections::VecDeque;
 use std::net::SocketAddr;
 

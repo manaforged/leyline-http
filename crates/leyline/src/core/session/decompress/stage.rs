@@ -96,6 +96,15 @@ impl Stage {
     }
 
     #[cfg(feature = "compression-deflate")]
+    fn deflate_for(cmf: u8, flg: u8, limit: usize) -> Self {
+        if is_zlib_header(cmf, flg) {
+            Self::Zlib(Box::new(flate2::write::ZlibDecoder::new(Sink::new(limit))))
+        } else {
+            Self::raw_deflate(limit)
+        }
+    }
+
+    #[cfg(feature = "compression-deflate")]
     fn raw_deflate(limit: usize) -> Self {
         Self::RawDeflate(Box::new(flate2::write::DeflateDecoder::new(Sink::new(
             limit,
@@ -182,17 +191,17 @@ impl Stage {
             }
             #[cfg(feature = "compression-deflate")]
             Self::DeflatePending { limit, head } => {
+                let limit = *limit;
+                if head.is_empty() && input.len() >= 2 {
+                    *self = Self::deflate_for(input[0], input[1], limit);
+                    return self.write(input);
+                }
                 head.extend_from_slice(input);
                 let [cmf, flg, ..] = head[..] else {
                     return Ok(Vec::new());
                 };
-                let limit = *limit;
                 let head = std::mem::take(head);
-                *self = if is_zlib_header(cmf, flg) {
-                    Self::Zlib(Box::new(flate2::write::ZlibDecoder::new(Sink::new(limit))))
-                } else {
-                    Self::raw_deflate(limit)
-                };
+                *self = Self::deflate_for(cmf, flg, limit);
                 self.write(&head)
             }
             #[cfg(feature = "compression-deflate")]

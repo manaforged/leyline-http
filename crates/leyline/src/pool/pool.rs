@@ -23,6 +23,9 @@ pub const DEFAULT_MAX_CONNECTIONS: usize = 2048;
 
 pub const DEFAULT_MAX_H1_CONNS_PER_HOST: usize = 256;
 
+#[cfg(feature = "http3")]
+pub(crate) const DEFAULT_MAX_ALT_SVC_ORIGINS: usize = 1024;
+
 const POOL_REAP_INTERVAL: Duration = Duration::from_millis(250);
 
 pub struct Pool {
@@ -55,13 +58,19 @@ impl Pool {
     }
 
     #[cfg(feature = "http3")]
-    pub(crate) fn note_alt_svc(&self, host: &str, port: u16, alt_svc: &str, age: Duration) {
-        lock(&self.alt_svc).note(host, port, alt_svc, age, Instant::now());
+    pub(crate) fn note_alt_svc(&self, host: &str, port: u16, fields: &[&str], age: Duration) {
+        lock(&self.alt_svc).note(host, port, fields, age, std::time::SystemTime::now());
     }
 
     #[cfg(feature = "http3")]
     pub(crate) fn knows_h3(&self, host: &str, port: u16) -> bool {
-        lock(&self.alt_svc).knows_h3(host, port, Instant::now())
+        lock(&self.alt_svc).knows_h3(host, port, std::time::SystemTime::now())
+    }
+
+    #[cfg(feature = "http3")]
+    pub(crate) fn with_max_alt_svc_origins(mut self, max_origins: usize) -> Self {
+        self.alt_svc = Mutex::new(AltSvcCache::new(max_origins));
+        self
     }
 
     pub fn new() -> Self {
@@ -71,7 +80,7 @@ impl Pool {
             #[cfg(feature = "http3")]
             inflight_h3: Inflight::default(),
             #[cfg(feature = "http3")]
-            alt_svc: Mutex::new(AltSvcCache::default()),
+            alt_svc: Mutex::new(AltSvcCache::new(DEFAULT_MAX_ALT_SVC_ORIGINS)),
             h1_only: Mutex::new(HashSet::new()),
             idle_timeout: DEFAULT_IDLE_TIMEOUT,
             max_connections: DEFAULT_MAX_CONNECTIONS,
@@ -102,7 +111,7 @@ impl Pool {
             #[cfg(feature = "http3")]
             inflight_h3: Inflight::default(),
             #[cfg(feature = "http3")]
-            alt_svc: Mutex::new(AltSvcCache::default()),
+            alt_svc: Mutex::new(AltSvcCache::new(DEFAULT_MAX_ALT_SVC_ORIGINS)),
             h1_only: Mutex::new(HashSet::new()),
             idle_timeout,
             max_connections,

@@ -60,29 +60,34 @@ fn evict_idle_keeps_empty_h1_entry_with_live_checkouts() {
 fn alt_svc_marks_h3_origin() {
     let pool = Pool::new();
     assert!(!pool.knows_h3("example.com", 443));
-    pool.note_alt_svc("example.com", 443, "h2=\":443\"; ma=86400", Duration::ZERO);
+    pool.note_alt_svc(
+        "example.com",
+        443,
+        &["h2=\":443\"; ma=86400"],
+        Duration::ZERO,
+    );
     assert!(!pool.knows_h3("example.com", 443));
     pool.note_alt_svc(
         "example.com",
         443,
-        "h3=\":443\"; ma=86400, h3-29=\":443\"",
+        &["h3=\":443\"; ma=86400, h3-29=\":443\""],
         Duration::ZERO,
     );
     assert!(pool.knows_h3("example.com", 443));
     assert!(!pool.knows_h3("example.com", 8443));
-    pool.note_alt_svc("other.example", 443, "h3=\":8443\"", Duration::ZERO);
+    pool.note_alt_svc("other.example", 443, &["h3=\":8443\""], Duration::ZERO);
     assert!(!pool.knows_h3("other.example", 443));
     pool.note_alt_svc(
         "cross.example",
         443,
-        "h3=\"elsewhere.example:443\"",
+        &["h3=\"elsewhere.example:443\""],
         Duration::ZERO,
     );
     assert!(!pool.knows_h3("cross.example", 443));
     pool.note_alt_svc(
         "same.example",
         443,
-        "h3=\"same.example:443\"",
+        &["h3=\"same.example:443\""],
         Duration::ZERO,
     );
     assert!(pool.knows_h3("same.example", 443));
@@ -109,8 +114,8 @@ fn alt_svc_withdrawal_forgets_h3() {
         "h3=\":443\"; ma=60, clear",
     ] {
         let pool = Pool::new();
-        pool.note_alt_svc("example.com", 443, advertised, Duration::ZERO);
-        pool.note_alt_svc("example.com", 443, withdrawal, Duration::ZERO);
+        pool.note_alt_svc("example.com", 443, &[advertised], Duration::ZERO);
+        pool.note_alt_svc("example.com", 443, &[withdrawal], Duration::ZERO);
         assert!(!pool.knows_h3("example.com", 443), "{withdrawal}");
     }
 }
@@ -118,12 +123,12 @@ fn alt_svc_withdrawal_forgets_h3() {
 #[cfg(feature = "http3")]
 #[test]
 fn alt_svc_expires_after_max_age() {
-    let now = Instant::now();
-    let mut cache = super::alt_svc::AltSvcCache::default();
+    let now = std::time::SystemTime::now();
+    let mut cache = super::alt_svc::AltSvcCache::new(1024);
     cache.note(
         "example.com",
         443,
-        "h3=\":443\"; ma=60",
+        &["h3=\":443\"; ma=60"],
         Duration::ZERO,
         now,
     );
@@ -138,7 +143,7 @@ fn alt_svc_ignores_separators_inside_quoted_parameters() {
     pool.note_alt_svc(
         "example.com",
         443,
-        "h3=\":443\"; ma=60; note=\"one, clear, two\"",
+        &["h3=\":443\"; ma=60; note=\"one, clear, two\""],
         Duration::ZERO,
     );
     assert!(pool.knows_h3("example.com", 443));

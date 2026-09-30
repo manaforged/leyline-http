@@ -12,6 +12,12 @@ struct Entry {
     source: &'static str,
 }
 
+impl Family {
+    pub(crate) fn samesite_checks_redirect_chain(self) -> bool {
+        FAMILY_SAMESITE_REDIRECT_CHAIN[self as usize]
+    }
+}
+
 impl std::fmt::Display for Family {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(FAMILY_LABELS[*self as usize])

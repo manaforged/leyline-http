@@ -32,23 +32,24 @@ impl Session {
         url: &Url,
         resp_headers: &[(http::HeaderName, http::HeaderValue)],
     ) {
-        let fields: Vec<_> = resp_headers
+        let fields: Vec<&str> = resp_headers
             .iter()
             .filter(|(k, _)| *k == "alt-svc")
-            .map(|(_, v)| String::from_utf8_lossy(v.as_bytes()))
+            .filter_map(|(_, v)| v.to_str().ok())
             .collect();
-        if !fields.is_empty()
-            && let Some(host) = url.host_str()
+        if fields.is_empty() {
+            return;
+        }
+        let age = resp_headers
+            .iter()
+            .find(|(k, _)| *k == "age")
+            .and_then(|(_, v)| v.to_str().ok())
+            .and_then(|v| crate::util::delta_seconds(v.split(',').next().unwrap_or_default()))
+            .map_or(std::time::Duration::ZERO, std::time::Duration::from_secs);
+        if let Some(host) = url.host_str()
             && let Some(port) = url.port_or_known_default()
         {
-            let age = resp_headers
-                .iter()
-                .find(|(k, _)| *k == "age")
-                .and_then(|(_, v)| v.to_str().ok()?.trim().parse::<u64>().ok())
-                .map_or(std::time::Duration::ZERO, std::time::Duration::from_secs);
-            self.inner
-                .pool
-                .note_alt_svc(host, port, &fields.join(", "), age);
+            self.inner.pool.note_alt_svc(host, port, &fields, age);
         }
     }
 

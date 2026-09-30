@@ -13,6 +13,7 @@ browsers = ["brave"]
 variant = "Firefox"
 label = "Firefox"
 browsers = ["firefox"]
+samesite_redirect_chain = true
 
 [[family]]
 variant = "Safari"

@@ -21,6 +21,8 @@ struct FamilyRow {
     default: bool,
     #[serde(default = "browser_capture")]
     latest_capture: Vec<Capture>,
+    #[serde(default)]
+    samesite_redirect_chain: bool,
 }
 
 fn browser_capture() -> Vec<Capture> {
@@ -219,6 +221,16 @@ pub(crate) fn render(rows: &[Row], families: &Families) -> BuildResult<String> {
         out,
         "const FAMILY_LABELS: &[&str] = &[{}];",
         labels.join(", ")
+    )?;
+    let redirect_chain: Vec<String> = families
+        .family
+        .iter()
+        .map(|f| f.samesite_redirect_chain.to_string())
+        .collect();
+    writeln!(
+        out,
+        "const FAMILY_SAMESITE_REDIRECT_CHAIN: &[bool] = &[{}];",
+        redirect_chain.join(", ")
     )?;
     let mut family_latest = Vec::new();
     for (index, family) in families.family.iter().enumerate() {
