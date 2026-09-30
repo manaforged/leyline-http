@@ -29,8 +29,14 @@ jobs:
 
       - name: workflow lint
         run: |
-          docker build --tag ci-actionlint .github/actionlint
-          docker run --rm --volume "$PWD:/repo:ro" --workdir /repo ci-actionlint
+          os=$(uname -s | tr '[:upper:]' '[:lower:]')
+          arch=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
+          file="actionlint_1.7.12_${os}_${arch}.tar.gz"
+          dir=$(mktemp -d)
+          curl -fsSL -o "$dir/$file" "https://github.com/rhysd/actionlint/releases/download/v1.7.12/$file"
+          (cd "$dir" && grep " $file\$" "$GITHUB_WORKSPACE/.github/actionlint/checksums.txt" | shasum -a 256 -c -)
+          tar -xzf "$dir/$file" -C "$dir" actionlint
+          "$dir/actionlint"
 
       - name: Rust toolchain
         run: rustup show active-toolchain
