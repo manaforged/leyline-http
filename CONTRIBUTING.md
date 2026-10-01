@@ -147,16 +147,27 @@ captured on a schedule.
 
 ## Releasing
 
-crates.io rejects a crate whose dependencies it does not have yet, so the
-five crates publish in dependency order:
+A release is a `v*` tag on a commit on `main`. Pushing the tag runs
+`release.yml`:
 
-1. `leyline-bssl-sys`
-2. `leyline-bssl`
-3. `leyline-bssl-tokio` and `leyline-quiche`
-4. `leyline-http`
+1. `qualify` runs every gate in `ci.yml`, and `release qualification` checks
+   the tag against the crate versions, the `=` pins between the crates, and a
+   dated `CHANGELOG.md` heading.
+2. `publish` waits for a maintainer to approve the `release` environment. It
+   then packages the five crates, records build provenance for each `.crate`
+   file, and publishes them in dependency order with a short-lived crates.io
+   token from Trusted Publishing. No crates.io token is stored in the
+   repository or on a maintainer's machine.
+3. The same job creates the GitHub release from the changelog section, with
+   the `.crate` files attached, and `book` deploys the guide.
 
-`./scripts/verify.sh --full` passes on the release commit first. Its package
-gate packages all five crates together.
+crates.io publishes in dependency order: `leyline-bssl-sys`, `leyline-bssl`,
+`leyline-bssl-tokio` and `leyline-quiche`, then `leyline-http`. A published
+version cannot be replaced. If `publish` stops partway, fix the cause, tag
+the next patch version, and release that.
+
+`nightly.yml` runs the live fingerprint and smoke suites against public
+servers once a day. They do not block a release.
 
 ## Style
 

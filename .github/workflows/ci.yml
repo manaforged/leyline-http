@@ -1,14 +1,8 @@
 name: ci
 
-# Leyline qualifies releases, not ordinary pushes.
 on:
-  push:
-    tags: ['v*']
+  workflow_call:
   workflow_dispatch:
-
-concurrency:
-  group: leyline-release-${{ github.ref }}
-  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -180,24 +174,6 @@ jobs:
       - name: verify gates
         run: scripts/verify.sh --only package
 
-  live:
-    name: live fingerprint + smoke
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
-      - name: Rust toolchain
-        run: rustup show active-toolchain || rustup toolchain install
-
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          key: ci-live
-          workspaces: ". -> target/verify"
-
-      - name: verify gates
-        run: scripts/verify.sh --only live
-
   supply:
     name: cargo deny
     runs-on: ubuntu-24.04
@@ -269,23 +245,3 @@ jobs:
       - name: verify gates
         run: scripts/verify.sh --only subcrates
 
-  release:
-    name: release qualification
-    if: github.ref_type == 'tag'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
-      - name: verify gates
-        run: scripts/verify.sh --only release
-
-  book:
-    name: book
-    if: github.ref_type == 'tag'
-    needs: [lint, msrv, clippy, features, rustdoc, test, musl, package, supply, benches, fuzz-replay, subcrates, release]
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
-    uses: ./.github/workflows/book.yml

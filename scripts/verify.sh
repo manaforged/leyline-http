@@ -76,9 +76,10 @@ g_msrv() {
     ok "MSRV compile sanity"
 }
 
-g_package() {
-    step "cargo package (publishable Rust crates)"
-    ensure_msrv
+stage_workspace() {
+    [[ -z "$package_stage" ]] || return 0
+    [[ -z "$(git status --porcelain --untracked-files=no)" ]] \
+        || fail "the tree has uncommitted changes; packages build from HEAD"
     package_stage="$(mktemp -d)"
     git archive --format=tar HEAD | tar -xf - -C "$package_stage"
     git submodule foreach --quiet --recursive \
@@ -86,6 +87,12 @@ g_package() {
         || fail "failed to stage the submodules"
     node scripts/stage-package-workspace.mjs "$package_stage" \
         || fail "failed to stage the package workspace"
+}
+
+g_package() {
+    step "cargo package (publishable Rust crates)"
+    ensure_msrv
+    stage_workspace
     rm -rf "$CARGO_TARGET_DIR/package"
     cargo package \
         --manifest-path "$package_stage/Cargo.toml" \
@@ -338,13 +345,28 @@ g_release() {
     done
     grep -qE "^## ${version//./\\.} - [0-9]{4}-[0-9]{2}-[0-9]{2}$" CHANGELOG.md \
         || fail "CHANGELOG.md has no '## $version - YYYY-MM-DD' heading"
+    mkdir -p "$CARGO_TARGET_DIR"
+    awk -v head="## $version " 'index($0, head) == 1 {on = 1; next} on && /^## / {exit} on' CHANGELOG.md \
+        >"$CARGO_TARGET_DIR/release-notes.md"
     ok "release $tag qualified"
+}
+
+g_publish() {
+    step "cargo publish (every publishable crate, in dependency order)"
+    [[ -n "${CARGO_REGISTRY_TOKEN:-}" ]] || fail "CARGO_REGISTRY_TOKEN is unset; publish runs from the release workflow"
+    stage_workspace
+    cargo publish \
+        --manifest-path "$package_stage/Cargo.toml" \
+        --workspace \
+        --no-verify \
+        || fail "cargo publish failed"
+    ok "crates published"
 }
 
 gate_order=(
     comments msrv package
     fmt clippy features doc api book test live deny semver external-types benches
-    subcrates release
+    subcrates release publish
     fuzz-replay fuzz-timed
 )
 quick_gates=(comments msrv package)
