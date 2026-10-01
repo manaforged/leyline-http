@@ -37,6 +37,7 @@ export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$repo_root/target/verify}"
 step() { printf '\n\033[1;34m== %s ==\033[0m\n' "$*"; }
 ok()   { printf '\033[1;32m✓ %s\033[0m\n'  "$*"; }
 fail() { printf '\033[1;31m✗ %s\033[0m\n'  "$*" >&2; exit 1; }
+skip() { [[ -z "${CI:-}" ]] || fail "$1"; printf '  (%s; skipping)\n' "$1"; }
 
 msrv="$(awk -F'"' '/^rust-version *= *"/{print $2; exit}' Cargo.toml)"
 
@@ -236,7 +237,7 @@ g_benches() {
         ( cd benches && cargo bench --no-run ) || fail "benches fail to compile"
         ok "benches compile"
     else
-        echo "  (benches/ not present; skipping bench compile gate)"
+        skip "benches/ not present"
     fi
 }
 
@@ -251,13 +252,11 @@ fuzz_run() {
 g_fuzz_replay() {
     step "fuzz corpus replay (cargo fuzz, -runs=0)"
     if [[ ! -d fuzz ]]; then
-        echo "  (fuzz/ not present; skipping corpus replay)"
+        skip "fuzz/ not present"
     elif ! command -v cargo-fuzz >/dev/null; then
-        echo "  (cargo-fuzz not installed; skipping corpus replay. Install with"
-        echo "   'cargo install --locked cargo-fuzz' to enable this gate)"
+        skip "cargo-fuzz not installed: cargo install --locked cargo-fuzz"
     elif ! command -v rustc >/dev/null || ! rustup toolchain list 2>/dev/null | grep -q nightly; then
-        echo "  (nightly toolchain not installed; skipping corpus replay."
-        echo "   Install with 'rustup toolchain install nightly')"
+        skip "nightly toolchain not installed: rustup toolchain install nightly"
     else
         for target in "${FUZZ_TARGETS[@]}"; do
             echo "  replaying corpus/$target ..."
@@ -323,11 +322,9 @@ if [[ -z "$only" && $full -eq 1 ]]; then
         'check (MSRV)'        "ran (cargo +$msrv check --workspace)" \
         'check (stable)'      'ran (this toolchain)' \
         'check (beta)'        'matrix only' \
-        'each feature'        'ran (scripts/feature-matrix.sh)' \
         'minimal versions'    'matrix only (cargo minimal-versions check)' \
         'semver'              "$semver_status" \
         'external types'      "$external_types_status" \
-        'supply chain'        'ran (cargo deny --all-features check)' \
         'cross aarch64-macos' 'matrix only' \
         'cross x86_64-linux'  'matrix only' \
         'cross aarch64-linux' 'matrix only' \
