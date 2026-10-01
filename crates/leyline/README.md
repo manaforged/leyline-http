@@ -165,6 +165,9 @@ To report a vulnerability, follow
 
 ## Contributing
 
+Leyline does not accept external pull requests until its API is more stable.
+To report a bug or request a feature, open an
+[issue](https://github.com/manaforged/leyline-http/issues).
 [CONTRIBUTING.md](https://github.com/manaforged/leyline-http/blob/main/CONTRIBUTING.md)
 describes the build and the checks.
 

@@ -49,6 +49,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
+ensure_msrv() {
+    [[ -n "$msrv" ]] || return 0
+    rustup toolchain list | grep -q "^$msrv" || rustup toolchain install "$msrv" --profile minimal \
+        || fail "could not install Rust $msrv"
+}
+
 g_comments() {
     step "rust comments (one line)"
     python3 scripts/check-comments.py || fail "comments must be one-line rustdoc or // SAFETY:"
@@ -61,6 +67,7 @@ g_msrv() {
     cargo --version
     if [[ -n "$msrv" ]]; then
         echo "workspace MSRV pinned to: $msrv"
+        ensure_msrv
         cargo +"$msrv" --version || fail "Rust $msrv is required; install it with rustup toolchain install $msrv"
     fi
 
@@ -71,6 +78,7 @@ g_msrv() {
 
 g_package() {
     step "cargo package (publishable Rust crates)"
+    ensure_msrv
     package_stage="$(mktemp -d)"
     git archive --format=tar HEAD | tar -xf - -C "$package_stage"
     git submodule foreach --quiet --recursive \

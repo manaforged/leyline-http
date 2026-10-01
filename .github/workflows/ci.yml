@@ -44,12 +44,6 @@ jobs:
       - name: Rust toolchain
         run: rustup show active-toolchain || rustup toolchain install
 
-      - name: Install the MSRV toolchain
-        run: |
-          set -euo pipefail
-          msrv="$(awk -F'"' '/^rust-version *= *"/{print $2; exit}' Cargo.toml)"
-          rustup toolchain install "$msrv" --profile minimal
-
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: ci-msrv
@@ -177,12 +171,6 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
-
-      - name: Install the MSRV toolchain
-        run: |
-          set -euo pipefail
-          msrv="$(awk -F'"' '/^rust-version *= *"/{print $2; exit}' Cargo.toml)"
-          rustup toolchain install "$msrv" --profile minimal
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:

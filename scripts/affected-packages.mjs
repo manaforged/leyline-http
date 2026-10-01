@@ -7,6 +7,7 @@ const args = process.argv.slice(2);
 let base = null;
 let head = "HEAD";
 let explain = false;
+let gates = false;
 let json = false;
 let filesOverride = null;
 for (let i = 0; i < args.length; i += 1) {
@@ -15,6 +16,7 @@ for (let i = 0; i < args.length; i += 1) {
   else if (args[i] === "--files") filesOverride = args[++i].split(",").filter(Boolean);
   else if (args[i] === "--explain") explain = true;
   else if (args[i] === "--json") json = true;
+  else if (args[i] === "--gates") gates = true;
   else {
     process.stderr.write(`affected-packages: unknown argument ${args[i]}\n`);
     process.exit(2);
@@ -73,6 +75,12 @@ const GLOBAL_RUST_INPUTS = new Set([
 const OWNED_PATHS = [
   { path: "crates/leyline/README.md", package: "leyline-http" },
   { path: "docs/", package: "leyline-http" },
+];
+
+const PR_GATES = [
+  { gate: "deny", pattern: /(^|\/)Cargo\.(toml|lock)$|^deny\.toml$/ },
+  { gate: "msrv", pattern: /(^|\/)Cargo\.(toml|lock)$|^rust-toolchain(\.toml)?$/ },
+  { gate: "package", pattern: /(^|\/)Cargo\.(toml|lock)$|^scripts\/stage-package-workspace\.mjs$/ },
 ];
 
 const CI_LOGIC_FILES = new Set([
@@ -181,6 +189,7 @@ const plan = {
   packages: names,
   workflows,
   dependencyAudit,
+  gates: PR_GATES.filter(({ pattern }) => full || changed.some((file) => pattern.test(file))).map(({ gate }) => gate),
 };
 
 if (explain) {
@@ -190,4 +199,5 @@ if (explain) {
   if (changed.length) process.stderr.write(`changed files: ${changed.length}\n`);
   process.stderr.write(`packages: ${names.length ? names.join(", ") : "none (non-Rust change)"}\n`);
 }
-process.stdout.write(json ? `${JSON.stringify(plan)}\n` : names.length ? `${names.join("\n")}\n` : "");
+if (gates) process.stdout.write(plan.gates.length ? `${plan.gates.join(",")}\n` : "");
+else process.stdout.write(json ? `${JSON.stringify(plan)}\n` : names.length ? `${names.join("\n")}\n` : "");
