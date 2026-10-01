@@ -2,11 +2,14 @@ name: check
 
 on:
   pull_request:
+  merge_group:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
   group: leyline-check-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -17,14 +20,57 @@ env:
   CARGO_PROFILE_DEV_DEBUG: '0'
 
 jobs:
-  check:
-    name: lint
+  scope:
+    name: scope
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 10
+    outputs:
+      args: ${{ steps.scope.outputs.args }}
+      gates: ${{ steps.scope.outputs.gates }}
+      api: ${{ steps.scope.outputs.api }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
+          persist-credentials: false
+
+      - name: Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - name: Select affected packages and gates
+        id: scope
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          pkgs=$(node scripts/affected-packages.mjs --base "$BASE" --head "$HEAD" --explain | grep -v '^leyline-quiche$' || true)
+          gates=$(node scripts/affected-packages.mjs --base "$BASE" --head "$HEAD" --gates)
+          args=""
+          for p in $pkgs; do args="$args -p $p"; done
+          api=false
+          case " $pkgs " in *" leyline-http "*)
+            args="$args --features leyline-http/full,leyline-http/bench-internals"
+            api=true
+            ;;
+          esac
+          {
+            echo "args=$args"
+            echo "gates=$gates"
+            echo "api=$api"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "clippy and test scope: ${args:-none}"
+            echo "extra gates: ${gates:-none}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  lint:
+    name: lint
+    needs: scope
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
           persist-credentials: false
 
       - name: workflow lint
@@ -43,7 +89,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          key: check
+          key: check-lint
 
       - name: comment lint
         run: python3 scripts/check-comments.py
@@ -51,47 +97,96 @@ jobs:
       - name: cargo fmt
         run: cargo fmt --all -- --check
 
-      - name: Select affected packages
-        id: scope
-        run: |
-          all=$(node scripts/affected-packages.mjs \
-            --base "${{ github.event.pull_request.base.sha }}" \
-            --head "${{ github.event.pull_request.head.sha }}" \
-            --explain)
-          pkgs=$(printf '%s\n' "$all" | grep -v '^leyline-quiche$' || true)
-          args=""
-          for p in $pkgs; do args="$args -p $p"; done
-          case " $pkgs " in *" leyline-http "*) args="$args --features leyline-http/full,leyline-http/bench-internals" ;; esac
-          echo "args=$args" >> "$GITHUB_OUTPUT"
-          echo "clippy scope: ${args:-none}" >> "$GITHUB_STEP_SUMMARY"
-
       - name: cargo clippy
-        if: steps.scope.outputs.args != ''
-        run: cargo clippy ${{ steps.scope.outputs.args }} --all-targets --locked --no-deps -- -D warnings
+        if: needs.scope.outputs.args != ''
+        run: cargo clippy ${{ needs.scope.outputs.args }} --all-targets --locked --no-deps -- -D warnings
+
+  test:
+    name: test (Linux)
+    needs: scope
+    if: needs.scope.outputs.args != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: check-test
 
       - name: cargo test
-        if: steps.scope.outputs.args != ''
-        run: cargo test ${{ steps.scope.outputs.args }} --locked
+        run: cargo test ${{ needs.scope.outputs.args }} --locked
 
-      - name: Select extra gates
-        id: gates
-        run: |
-          gates=$(node scripts/affected-packages.mjs \
-            --base "${{ github.event.pull_request.base.sha }}" \
-            --head "${{ github.event.pull_request.head.sha }}" \
-            --gates)
-          echo "gates=$gates" >> "$GITHUB_OUTPUT"
-          echo "extra gates: ${gates:-none}" >> "$GITHUB_STEP_SUMMARY"
+  platforms:
+    name: test (${{ matrix.os }})
+    needs: scope
+    if: needs.scope.outputs.api == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-2025]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: ilammy/setup-nasm@72793074d3c8cdda771dba85f6deafe00623038b # v1.5.2
+        if: runner.os == 'Windows'
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: check-${{ matrix.os }}
+
+      - name: cargo test
+        run: cargo test -p leyline-http --lib --locked
+
+  gates:
+    name: gates
+    needs: scope
+    if: needs.scope.outputs.gates != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: check-gates
+          workspaces: ". -> target/verify"
 
       - uses: taiki-e/install-action@0758d235715de2f3551eacc980d9ae8fce9342c3 # v2.87.3
-        if: contains(steps.gates.outputs.gates, 'deny')
         with:
-          tool: cargo-deny
-
-      - name: Fetch submodules
-        if: contains(steps.gates.outputs.gates, 'package')
-        run: git submodule update --init --recursive
+          tool: cargo-deny,cargo-semver-checks
 
       - name: verify gates
-        if: steps.gates.outputs.gates != ''
-        run: scripts/verify.sh --only "${{ steps.gates.outputs.gates }}"
+        run: scripts/verify.sh --only "${{ needs.scope.outputs.gates }}"
+
+  required:
+    name: required
+    needs: [scope, lint, test, platforms, gates]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: every check passed or was not needed
+        run: test "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = false

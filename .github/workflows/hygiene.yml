@@ -6,6 +6,7 @@ on:
     tags: ['**']
   pull_request_target:
     types: [opened, edited, synchronize, reopened]
+  merge_group:
   workflow_dispatch:
 
 permissions:
@@ -25,7 +26,7 @@ jobs:
       - name: Check repository content and change metadata
         env:
           HYGIENE_PATTERNS: ${{ secrets.HYGIENE_PATTERNS }}
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         shell: bash
         run: |
