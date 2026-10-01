@@ -76,7 +76,7 @@ fn quoted_values_escape_backslash_and_quote() {
 
 #[test]
 fn nonce_count_increments_per_nonce() {
-    reset_nonce_cache_for_test();
+    let _serial = reset_nonce_cache_for_test();
     let n1 = next_nc_for_nonce("nonce-A");
     let n2 = next_nc_for_nonce("nonce-A");
     let n3 = next_nc_for_nonce("nonce-B");
@@ -86,7 +86,7 @@ fn nonce_count_increments_per_nonce() {
 
 #[test]
 fn nonce_cache_lru_evicts_beyond_cap() {
-    reset_nonce_cache_for_test();
+    let _serial = reset_nonce_cache_for_test();
     for i in 0..DIGEST_NONCE_CACHE_CAP + 16 {
         let nonce = format!("lru-test-{i}");
         let n = next_nc_for_nonce(&nonce);
@@ -139,7 +139,10 @@ fn sha256_response_matches_manual_computation() {
     );
 }
 
-fn reset_nonce_cache_for_test() {
-    let mut guard = crate::util::lock(nonce_cache());
-    guard.clear();
+static NONCE_CACHE_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn reset_nonce_cache_for_test() -> std::sync::MutexGuard<'static, ()> {
+    let serial = crate::util::lock(&NONCE_CACHE_TESTS);
+    crate::util::lock(nonce_cache()).clear();
+    serial
 }

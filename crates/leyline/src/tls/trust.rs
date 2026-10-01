@@ -1,7 +1,9 @@
 use std::sync::{Arc, Mutex};
 
+#[cfg(any(target_os = "macos", feature = "http3"))]
+use leyline_bssl::ssl::NameType;
 use leyline_bssl::ssl::{
-    NameType, Ssl, SslAlert, SslContextBuilder, SslFiletype, SslRef, SslVerifyError, SslVerifyMode,
+    Ssl, SslAlert, SslContextBuilder, SslFiletype, SslRef, SslVerifyError, SslVerifyMode,
 };
 use leyline_bssl::x509::{X509, X509Purpose, X509StoreContext};
 use sha2::{Digest, Sha256};
@@ -30,6 +32,7 @@ pub(crate) enum TrustFailure {
     Pinning,
 }
 
+#[cfg(any(target_os = "macos", feature = "http3"))]
 pub(crate) fn install_verifier_ctx(
     builder: &mut SslContextBuilder,
     pins: &[[u8; 32]],
