@@ -99,6 +99,11 @@ g_package() {
         --workspace \
         --no-verify \
         || fail "cargo package failed"
+    local archive
+    for archive in "$CARGO_TARGET_DIR"/package/*.crate; do
+        (( $(wc -c <"$archive") <= MAX_CRATE_BYTES )) \
+            || fail "$(basename "$archive") is over the crates.io limit of $MAX_CRATE_BYTES bytes"
+    done
     ok "publishable crates packaged"
 
     step "packaged leyline consumer smoke check"
@@ -298,6 +303,8 @@ g_fuzz_timed() {
     ok "fuzz time-bounded runs clean"
 }
 
+MAX_CRATE_BYTES=10485760
+CRATES_INDEX=https://index.crates.io
 SUBCRATE_MANIFESTS=(
     crates/leyline-bssl-sys/Cargo.toml
     crates/leyline-bssl/Cargo.toml
@@ -341,20 +348,55 @@ g_release() {
     done
     grep -qE "^## ${version//./\\.} - [0-9]{4}-[0-9]{2}-[0-9]{2}$" CHANGELOG.md \
         || fail "CHANGELOG.md has no '## $version - YYYY-MM-DD' heading"
+    git fetch --quiet origin main 2>/dev/null || true
+    git rev-parse --quiet --verify origin/main >/dev/null || fail "origin/main is unknown; fetch it before qualifying a release"
+    git merge-base --is-ancestor HEAD origin/main || fail "tag $tag is on a commit that is not on main"
     mkdir -p "$CARGO_TARGET_DIR"
     awk -v head="## $version " 'index($0, head) == 1 {on = 1; next} on && /^## / {exit} on' CHANGELOG.md \
         >"$CARGO_TARGET_DIR/release-notes.md"
     ok "release $tag qualified"
 }
 
+published_on_crates_io() {
+    local name="$1" version="$2" path
+    case ${#name} in
+        1) path="1/$name" ;;
+        2) path="2/$name" ;;
+        3) path="3/${name:0:1}/$name" ;;
+        *) path="${name:0:2}/${name:2:2}/$name" ;;
+    esac
+    curl -fsS "$CRATES_INDEX/$path" 2>/dev/null | grep -q "\"vers\":\"$version\""
+}
+
 g_publish() {
-    step "cargo publish (every publishable crate, in dependency order)"
+    step "cargo publish (every publishable crate not yet on crates.io, in dependency order)"
     [[ -n "${CARGO_REGISTRY_TOKEN:-}" ]] || fail "CARGO_REGISTRY_TOKEN is unset; publish runs from the release workflow"
     stage_workspace
-    cargo publish \
-        --manifest-path "$package_stage/Cargo.toml" \
-        --workspace \
-        --no-verify \
+    local name version pending=() excluded=()
+    while read -r name version; do
+        if published_on_crates_io "$name" "$version"; then
+            excluded+=(--exclude "$name")
+        else
+            pending+=("$name")
+        fi
+    done < <(cargo metadata --manifest-path "$package_stage/Cargo.toml" --no-deps --format-version 1 \
+        | python3 -c 'import json, sys; [print(p["name"], p["version"]) for p in json.load(sys.stdin)["packages"] if p.get("publish") != []]')
+    if (( ${#pending[@]} == 0 )); then
+        ok "every crate is already on crates.io"
+        return 0
+    fi
+    echo "  publishing: ${pending[*]}"
+    rm -rf "$CARGO_TARGET_DIR/package"
+    cargo package --manifest-path "$package_stage/Cargo.toml" --workspace --no-verify "${excluded[@]}" \
+        || fail "cargo package failed"
+    if [[ -n "${RELEASE_PACKAGES:-}" ]]; then
+        local archive
+        for archive in "$CARGO_TARGET_DIR"/package/*.crate; do
+            cmp -s "$archive" "$RELEASE_PACKAGES/$(basename "$archive")" \
+                || fail "$(basename "$archive") differs from the package the release job tested"
+        done
+    fi
+    cargo publish --manifest-path "$package_stage/Cargo.toml" --workspace --no-verify "${excluded[@]}" \
         || fail "cargo publish failed"
     ok "crates published"
 }

@@ -83,9 +83,18 @@ const PR_GATES = [
   { gate: "package", pattern: /(^|\/)Cargo\.(toml|lock)$|^scripts\/stage-package-workspace\.mjs$/, anyPackage: true },
   { gate: "subcrates", pattern: /^crates\/leyline-bssl(-sys|-tokio)?\// },
   { gate: "semver", packages: ["leyline-http"] },
+  { gate: "doc", packages: ["leyline-http"] },
+  { gate: "features", packages: ["leyline-http"] },
+  { gate: "book", pattern: /^docs\// },
+  { gate: "benches", pattern: /^benches\// },
+  { gate: "fuzz-replay", pattern: /^fuzz\// },
 ];
 
 const CI_LOGIC_FILES = new Set([
+  ".github/workflows/check.yml",
+  ".github/workflows/ci.yml",
+  ".github/workflows/release.yml",
+  ".github/workflows/book.yml",
   "scripts/affected-packages.mjs",
   "scripts/verify.sh",
   "scripts/feature-matrix.sh",
