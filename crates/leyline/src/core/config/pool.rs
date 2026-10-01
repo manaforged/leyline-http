@@ -9,8 +9,6 @@ pub struct PoolConfig {
     pub(crate) keepalive: bool,
     pub(crate) h2_ping_after_idle: Option<Duration>,
     pub(crate) h2_ping_timeout: Duration,
-    #[cfg(feature = "http3")]
-    pub(crate) max_alt_svc_origins: usize,
 }
 
 impl Default for PoolConfig {
@@ -22,8 +20,6 @@ impl Default for PoolConfig {
             keepalive: true,
             h2_ping_after_idle: crate::pool::DEFAULT_H2_PING_AFTER_IDLE,
             h2_ping_timeout: crate::pool::DEFAULT_H2_PING_TIMEOUT,
-            #[cfg(feature = "http3")]
-            max_alt_svc_origins: crate::pool::DEFAULT_MAX_ALT_SVC_ORIGINS,
         }
     }
 }

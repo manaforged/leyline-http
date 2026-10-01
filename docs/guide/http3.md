@@ -51,8 +51,9 @@ Only an `h3=` entry for the same port counts. Its host must be empty or equal
 to the host of the origin. The pool keeps the origin until the longest `ma`
 of the matching entries, less the response's `Age`, ends on the wall clock,
 24 hours when `ma` is absent. Each `Alt-Svc` value replaces the one before
-it: `ma=0`, `clear` in any field, or a value with no matching `h3=` entry
-removes the origin. Each field is parsed on its own. The pool keeps at most
+it: `ma=0` on every matching entry, `clear` in any field, or a value with no
+usable `h3=` entry removes the origin. An entry whose `ma` is not a number is
+ignored. Each field is parsed on its own. The pool keeps at most
 1024 origins and drops the one that expires first to make room.
 
 A request is raced only when all of these hold:

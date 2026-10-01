@@ -32,11 +32,12 @@ impl Session {
         url: &Url,
         resp_headers: &[(http::HeaderName, http::HeaderValue)],
     ) {
-        let fields: Vec<&str> = resp_headers
+        let owned: Vec<String> = resp_headers
             .iter()
             .filter(|(k, _)| *k == "alt-svc")
-            .filter_map(|(_, v)| v.to_str().ok())
+            .map(|(_, v)| String::from_utf8_lossy(v.as_bytes()).into_owned())
             .collect();
+        let fields: Vec<&str> = owned.iter().map(String::as_str).collect();
         if fields.is_empty() {
             return;
         }

@@ -155,7 +155,7 @@ fn cheap_jitter() -> f64 {
 
 pub(crate) fn parse_retry_after(value: &str) -> Option<Duration> {
     let value = value.trim();
-    if let Some(secs) = crate::util::delta_seconds(value) {
+    if let Ok(secs) = value.parse::<u64>() {
         return Some(Duration::from_secs(secs));
     }
     let when = parse_imf_fixdate(value)?;

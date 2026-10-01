@@ -55,16 +55,13 @@ impl SessionBuilder {
         } else {
             (std::time::Duration::ZERO, 1)
         };
-        let pool = Pool::with_limits(
+        Pool::with_limits(
             idle_timeout,
             max_connections,
             config.max_h1_conns_per_host.max(1),
         )
         .with_h2_ping(config.h2_ping_after_idle, config.h2_ping_timeout)
-        .with_max_body_size(self.compression.max_body_size);
-        #[cfg(feature = "http3")]
-        let pool = pool.with_max_alt_svc_origins(config.max_alt_svc_origins);
-        pool
+        .with_max_body_size(self.compression.max_body_size)
     }
 }
 

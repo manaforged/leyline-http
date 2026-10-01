@@ -38,6 +38,7 @@ pub(crate) struct Challenge {
     pub algorithm: Algorithm,
     pub opaque: Option<String>,
     pub stale: bool,
+    pub domain: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -125,6 +126,7 @@ fn fill(ch: &mut Challenge, pair: Pair<'_>) -> Result<()> {
         "opaque" => ch.opaque = Some(val),
         "stale" => ch.stale = val.eq_ignore_ascii_case("true"),
         "algorithm" => ch.algorithm = algorithm(val.trim())?,
+        "domain" => ch.domain = val.split_whitespace().map(str::to_owned).collect(),
         _ => {}
     }
     Ok(())
@@ -212,6 +214,14 @@ pub(crate) fn build_auth_header(
         out.push_str(&format!(", opaque={}", quoted(opaque)));
     }
     Some(out)
+}
+
+pub(crate) fn covers(challenge: &Challenge, url: &url::Url) -> bool {
+    challenge.domain.is_empty()
+        || challenge.domain.iter().any(|space| match url.join(space) {
+            Ok(space) => space.origin() == url.origin() && url.path().starts_with(space.path()),
+            Err(_) => false,
+        })
 }
 
 pub(crate) fn pick_supported_qop(qop: &str) -> Option<&'static str> {

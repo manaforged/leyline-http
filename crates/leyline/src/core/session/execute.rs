@@ -141,12 +141,12 @@ impl Session {
             {
                 drop(leg.body);
                 journey.follow(hop, code, &location, replay_body)?;
-                if let Some(digest) = digest.as_mut() {
-                    journey.authorized = digest.next_hop(&journey)?;
-                }
                 if journey.chain.len() > redirect_cap {
                     return Err(Error::new(Kind::Redirect)
                         .with_message(format!("too many redirects (max {redirect_cap})")));
+                }
+                if let Some(digest) = digest.as_mut() {
+                    journey.authorized = digest.next_hop(&journey)?;
                 }
                 continue;
             }
@@ -191,9 +191,15 @@ impl Session {
 
 pub(super) struct RequestContext<'a> {
     pub(super) origin: &'a str,
+    pub(super) origin_downgrade: bool,
     pub(super) referer: &'a str,
-    pub(super) fetch_site: FetchSite,
-    pub(super) redirect_cross_site: bool,
+    pub(super) site: SiteContext<'a>,
+}
+
+pub(in crate::core::session) struct SiteContext<'a> {
+    pub(in crate::core::session) fetch_site: FetchSite,
+    pub(in crate::core::session) initiator: Option<&'a Url>,
+    pub(in crate::core::session) chain: &'a [Url],
 }
 
 fn fetch_site_for(initiator: Option<&Url>, chain: &[Url], current: &Url) -> FetchSite {

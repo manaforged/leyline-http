@@ -25,7 +25,11 @@ impl DigestLeg {
     pub(super) fn next_hop(&mut self, journey: &Journey) -> Result<Option<HeaderList>> {
         self.answers = 0;
         match &self.challenge {
-            Some(challenge) if in_scope(journey) => {
+            Some(challenge)
+                if !journey.tainted
+                    && in_scope(journey)
+                    && digest::covers(challenge, &journey.url) =>
+            {
                 self.authorized_headers(journey, challenge).map(Some)
             }
             _ => Ok(None),

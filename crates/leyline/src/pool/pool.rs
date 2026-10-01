@@ -23,9 +23,6 @@ pub const DEFAULT_MAX_CONNECTIONS: usize = 2048;
 
 pub const DEFAULT_MAX_H1_CONNS_PER_HOST: usize = 256;
 
-#[cfg(feature = "http3")]
-pub(crate) const DEFAULT_MAX_ALT_SVC_ORIGINS: usize = 1024;
-
 const POOL_REAP_INTERVAL: Duration = Duration::from_millis(250);
 
 pub struct Pool {
@@ -67,12 +64,6 @@ impl Pool {
         lock(&self.alt_svc).knows_h3(host, port, std::time::SystemTime::now())
     }
 
-    #[cfg(feature = "http3")]
-    pub(crate) fn with_max_alt_svc_origins(mut self, max_origins: usize) -> Self {
-        self.alt_svc = Mutex::new(AltSvcCache::new(max_origins));
-        self
-    }
-
     pub fn new() -> Self {
         Self {
             inner: Mutex::new(HashMap::new()),
@@ -80,7 +71,7 @@ impl Pool {
             #[cfg(feature = "http3")]
             inflight_h3: Inflight::default(),
             #[cfg(feature = "http3")]
-            alt_svc: Mutex::new(AltSvcCache::new(DEFAULT_MAX_ALT_SVC_ORIGINS)),
+            alt_svc: Mutex::new(AltSvcCache::default()),
             h1_only: Mutex::new(HashSet::new()),
             idle_timeout: DEFAULT_IDLE_TIMEOUT,
             max_connections: DEFAULT_MAX_CONNECTIONS,
@@ -111,7 +102,7 @@ impl Pool {
             #[cfg(feature = "http3")]
             inflight_h3: Inflight::default(),
             #[cfg(feature = "http3")]
-            alt_svc: Mutex::new(AltSvcCache::new(DEFAULT_MAX_ALT_SVC_ORIGINS)),
+            alt_svc: Mutex::new(AltSvcCache::default()),
             h1_only: Mutex::new(HashSet::new()),
             idle_timeout,
             max_connections,
