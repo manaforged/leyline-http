@@ -105,8 +105,7 @@ jobs:
         with:
           tool: cargo-semver-checks
 
-      - name: cargo semver-checks against the previous tag (expected to fail before the first tag)
-        continue-on-error: true
+      - name: cargo semver-checks against the previous tag
         run: cargo semver-checks check-release -p leyline-http
 
   external-types:

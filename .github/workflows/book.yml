@@ -1,8 +1,7 @@
 name: book
 
 on:
-  push:
-    tags: ['v*']
+  workflow_call:
   workflow_dispatch:
 
 permissions:

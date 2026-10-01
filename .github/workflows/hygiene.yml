@@ -13,10 +13,7 @@ permissions:
 
 jobs:
   hygiene:
-    if: >-
-      github.repository == 'manaforged/leyline-http' &&
-      (github.event_name != 'pull_request_target' ||
-       github.event.pull_request.head.repo.full_name == github.repository)
+    if: github.repository == 'manaforged/leyline-http'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
