@@ -365,3 +365,16 @@ fn churn_across_hosts_leaves_no_empty_domain_buckets() {
         format!("Jar {{ domains: {live}, total: {live} }}")
     );
 }
+
+#[test]
+fn deleting_a_cookie_leaves_other_sites_alone() {
+    let bank = url::Url::parse("https://bank.test/").unwrap();
+    let evil = url::Url::parse("http://evil.test/").unwrap();
+    let jar = Jar::new();
+    jar.store_set_cookie("sid=keep; Path=/; Secure", &bank);
+    jar.store_set_cookie("sid=1; Path=/", &evil);
+    jar.store_set_cookie("sid=; Path=/; Max-Age=0", &evil);
+
+    assert_eq!(jar.get_cookie(&bank, "sid"), Some("keep".into()));
+    assert_eq!(jar.get_cookie(&evil, "sid"), None);
+}

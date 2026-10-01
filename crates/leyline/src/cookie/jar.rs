@@ -97,7 +97,7 @@ impl Jar {
                 if entries[pos].secure && url.scheme() != "https" {
                     return;
                 }
-                jar.remove_where(|c| c.same_slot(&cookie));
+                jar.remove_in(&domain, |c| c.same_slot(&cookie));
             }
             return;
         }
@@ -294,6 +294,20 @@ impl JarInner {
             removed += before - entries.len();
         }
         self.prune();
+        self.total -= removed;
+        removed
+    }
+
+    fn remove_in(&mut self, domain: &str, mut doomed: impl FnMut(&Cookie) -> bool) -> usize {
+        let Some(entries) = self.cookies.get_mut(domain) else {
+            return 0;
+        };
+        let before = entries.len();
+        entries.retain(|c| !doomed(c));
+        let removed = before - entries.len();
+        if entries.is_empty() {
+            self.cookies.remove(domain);
+        }
         self.total -= removed;
         removed
     }

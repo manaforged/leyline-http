@@ -124,7 +124,7 @@ fn alt_svc_withdrawal_forgets_h3() {
 #[test]
 fn alt_svc_expires_after_max_age() {
     let now = std::time::SystemTime::now();
-    let mut cache = super::alt_svc::AltSvcCache::new(1024);
+    let mut cache = super::alt_svc::AltSvcCache::default();
     cache.note(
         "example.com",
         443,

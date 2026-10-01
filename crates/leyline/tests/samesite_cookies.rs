@@ -250,3 +250,101 @@ async fn origin_names_the_initiator() {
     );
     server.finish().await;
 }
+
+#[tokio::test]
+async fn chrome_judges_the_final_target_after_a_cross_site_bounce() {
+    let listener = RawServer::bind().await;
+    let port = listener.local_addr().unwrap().port();
+    let mut server = RawServer::serve(
+        listener,
+        vec![
+            RawResponse::redirect(format!("http://site-b.test:{port}/hop")),
+            RawResponse::redirect(format!("http://site-a.test:{port}/end")),
+            RawResponse::ok(),
+        ],
+    );
+    let site_a = url::Url::parse(&format!("http://site-a.test:{port}/")).unwrap();
+    let session = Session::builder()
+        .browser(Browser::default())
+        .protocol(ProtocolPolicy::Http1)
+        .dns(two_sites())
+        .build()
+        .unwrap();
+    session
+        .cookies()
+        .store_set_cookie("strict=1; SameSite=Strict", &site_a);
+
+    session
+        .get(format!("http://site-a.test:{port}/start"))
+        .preset(Preset::Xhr)
+        .header("referer", site_a.as_str())
+        .send()
+        .await
+        .unwrap();
+
+    server.next_request().await;
+    server.next_request().await;
+    let end = server.next_request().await;
+    assert_eq!(
+        end.header_values("cookie"),
+        vec!["strict=1"],
+        "{}",
+        end.text()
+    );
+    server.finish().await;
+}
+
+#[tokio::test]
+async fn a_relative_request_referer_is_same_origin() {
+    let mut server = RawServer::start(vec![RawResponse::ok()]).await;
+    let site = url::Url::parse(&server.url("/")).unwrap();
+    let session = Session::builder()
+        .browser(Browser::default())
+        .protocol(ProtocolPolicy::Http1)
+        .build()
+        .unwrap();
+    session
+        .cookies()
+        .store_set_cookie("strict=1; SameSite=Strict", &site);
+
+    session
+        .get(server.url("/x"))
+        .preset(Preset::Xhr)
+        .header("referer", "/home")
+        .send()
+        .await
+        .unwrap();
+
+    let req = server.next_request().await;
+    assert_eq!(req.header_values("sec-fetch-site"), vec!["same-origin"]);
+    assert_eq!(
+        req.header_values("cookie"),
+        vec!["strict=1"],
+        "{}",
+        req.text()
+    );
+    server.finish().await;
+}
+
+#[tokio::test]
+async fn an_https_initiator_sends_a_null_origin_to_http() {
+    let mut server = RawServer::start(vec![RawResponse::ok()]).await;
+    let session = Session::builder()
+        .browser(Browser::default())
+        .protocol(ProtocolPolicy::Http1)
+        .headers([("referer", "https://other.test/page")])
+        .build()
+        .unwrap();
+
+    session
+        .post(server.url("/form"))
+        .preset(Preset::FormNavigate)
+        .body("a=1")
+        .send()
+        .await
+        .unwrap();
+
+    let req = server.next_request().await;
+    assert_eq!(req.header_values("origin"), vec!["null"], "{}", req.text());
+    server.finish().await;
+}

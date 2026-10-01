@@ -74,6 +74,10 @@ impl RawResponse {
         Self::new(302, "Found", Vec::new()).header("location", location.into())
     }
 
+    pub fn status(status: u16, reason: &'static str) -> Self {
+        Self::new(status, reason, Vec::new())
+    }
+
     fn new(status: u16, reason: &'static str, body: Vec<u8>) -> Self {
         Self {
             status,
@@ -113,7 +117,14 @@ pub struct RawServer {
 
 impl RawServer {
     pub async fn start(responses: Vec<RawResponse>) -> Self {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        Self::serve(Self::bind().await, responses)
+    }
+
+    pub async fn bind() -> tokio::net::TcpListener {
+        tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap()
+    }
+
+    pub fn serve(listener: tokio::net::TcpListener, responses: Vec<RawResponse>) -> Self {
         let addr = listener.local_addr().unwrap();
         let (tx, rx) = tokio::sync::mpsc::channel(responses.len().max(1));
         let task = tokio::spawn(async move {

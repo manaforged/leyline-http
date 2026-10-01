@@ -165,14 +165,13 @@ pub(crate) fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-const DELTA_SECONDS_OVERFLOW: u64 = 1 << 31;
-
+#[cfg(feature = "http3")]
 pub(crate) fn delta_seconds(value: &str) -> Option<u64> {
     let value = value.trim();
     if value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
-    Some(value.parse().unwrap_or(DELTA_SECONDS_OVERFLOW))
+    Some(value.parse().unwrap_or(u64::MAX))
 }
 
 pub(crate) fn is_idempotent(method: &str) -> bool {

@@ -62,3 +62,40 @@ fn alt_svc_parses_each_field_line_alone() {
 fn alt_svc_reads_ma_in_any_case() {
     assert!(!noted(&[("alt-svc", "h3=\":443\"; MA=0")]));
 }
+
+#[test]
+fn alt_svc_clear_survives_non_ascii_bytes() {
+    let session = crate::Session::builder().build().unwrap();
+    let url = url::Url::parse("https://example.com/").unwrap();
+    session.note_alt_svc(
+        &url,
+        &[(
+            HeaderName::from_static("alt-svc"),
+            HeaderValue::from_static("h3=\":443\"; ma=3600"),
+        )],
+    );
+    session.note_alt_svc(
+        &url,
+        &[(
+            HeaderName::from_static("alt-svc"),
+            HeaderValue::from_bytes(b"clear, x=\"caf\xc3\xa9\"").unwrap(),
+        )],
+    );
+    assert!(!session.inner.pool.knows_h3("example.com", 443));
+}
+
+#[test]
+fn alt_svc_ignores_an_entry_with_a_malformed_ma() {
+    assert!(!noted(&[(
+        "alt-svc",
+        "h3=\":443\"; ma=0, h3=\":443\"; ma=abc"
+    )]));
+}
+
+#[test]
+fn alt_svc_age_overflow_is_the_largest_age() {
+    assert!(!noted(&[
+        ("alt-svc", "h3=\":443\"; ma=4294967295"),
+        ("age", "18446744073709551616"),
+    ]));
+}

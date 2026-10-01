@@ -19,6 +19,7 @@ fn rfc7616_md5_vector() {
         algorithm: Algorithm::Md5,
         opaque: Some("FQhe/qaU925kfnzjCev0ciny7QMkPqMAFRtzCUYo5tdS".into()),
         stale: false,
+        domain: Vec::new(),
     };
     let auth = DigestAuth::new("Mufasa", "Circle of Life");
     let h = build_auth_header(
@@ -46,6 +47,7 @@ fn refuses_auth_int_only_challenge() {
         algorithm: Algorithm::Md5,
         opaque: None,
         stale: false,
+        domain: Vec::new(),
     };
     let auth = DigestAuth::new("u", "p");
     assert!(
@@ -63,6 +65,7 @@ fn quoted_values_escape_backslash_and_quote() {
         algorithm: Algorithm::Md5,
         opaque: Some("o\"p".into()),
         stale: false,
+        domain: Vec::new(),
     };
     let auth = DigestAuth::new("fo\"o", "p");
     let header = build_auth_header(&challenge, &auth, "GET", "/x", 1, "cn\\").expect("auth qop");
@@ -121,6 +124,7 @@ fn sha256_response_matches_manual_computation() {
         algorithm: Algorithm::Sha256,
         opaque: None,
         stale: false,
+        domain: Vec::new(),
     };
     let auth = DigestAuth::new("u", "p");
     let header =

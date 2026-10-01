@@ -5,7 +5,7 @@ use url::Url;
 
 use super::super::header_merge::apply_extra_headers;
 use super::journey::Journey;
-use super::{RequestContext, fetch_site_for, referer_for, url_origin};
+use super::{RequestContext, SiteContext, fetch_site_for, referer_for, url_origin};
 use crate::FetchSite;
 use crate::core::Session;
 use crate::core::body::{Body, BodyKind};
@@ -40,15 +40,13 @@ impl Session {
             accept_language: &self.inner.accept_language,
             origin: request.origin,
             referer,
-            fetch_site: request.fetch_site.as_str(),
+            fetch_site: request.site.fetch_site.as_str(),
         };
         let mut headers = self.inner.header_style.build_headers(preset, &ctx);
         if matches!(current_body.0, BodyKind::Empty) {
             headers.retain(|(k, _)| !is_request_body_header(k));
         }
-        if !sends_origin(current_method, &headers) {
-            headers.retain(|(k, _)| !k.eq_ignore_ascii_case("origin"));
-        }
+        shape_origin(&mut headers, current_method, request.origin_downgrade);
         if referer.is_empty() && caller_referer.is_none() {
             headers.retain(|(k, _)| !k.eq_ignore_ascii_case("referer"));
         }
@@ -69,13 +67,7 @@ impl Session {
             headers.insert(0, ("content-length".into(), Cow::Owned(len.to_string())));
         }
 
-        self.add_jar_cookie(
-            &mut headers,
-            current_url,
-            request.fetch_site,
-            request.redirect_cross_site,
-            current_method,
-        );
+        self.add_jar_cookie(&mut headers, current_url, &request.site, current_method);
 
         if let Some(order) = header_order
             .map(Cow::Borrowed)
@@ -102,22 +94,25 @@ impl Session {
             .as_ref()
             .filter(|url| matches!(url.scheme(), "http" | "https"))
             .map(url_origin);
+        let downgrade = initiator_origin
+            .as_deref()
+            .is_some_and(|origin| origin.starts_with("https:") && journey.url.scheme() != "https");
         let request_origin = match (&initiator_origin, journey.tainted) {
             (_, true) => "null",
             (Some(origin), false) => origin.as_str(),
             (None, false) => journey.original_origin.as_str(),
         };
-        let redirect_cross_site = journey.chain.first().is_some_and(|first| {
-            FetchSite::across(first, journey.chain.iter().chain([journey.url.as_ref()]))
-                == FetchSite::CrossSite
-        });
         self.attempt_headers(
             preset,
             RequestContext {
                 origin: request_origin,
+                origin_downgrade: downgrade,
                 referer: &referer,
-                fetch_site,
-                redirect_cross_site,
+                site: SiteContext {
+                    fetch_site,
+                    initiator: journey.initiator.as_ref(),
+                    chain: &journey.chain,
+                },
             },
             &journey.url,
             &journey.method,
@@ -168,8 +163,7 @@ impl Session {
         &self,
         headers: &mut Vec<HeaderPair>,
         url: &Url,
-        fetch_site: FetchSite,
-        redirect_cross_site: bool,
+        site: &SiteContext<'_>,
         method: &str,
     ) {
         if headers
@@ -178,12 +172,27 @@ impl Session {
         {
             return;
         }
-        let sent_cross_site = header_value(headers, "sec-fetch-site")
-            .map_or(fetch_site == FetchSite::CrossSite, |site| {
-                site.eq_ignore_ascii_case(FetchSite::CrossSite.as_str())
-            });
-        let cross_site =
-            sent_cross_site || (redirect_cross_site && self.samesite_checks_redirect_chain());
+        let chain_rule = self.samesite_checks_redirect_chain();
+        let computed = || {
+            if chain_rule {
+                site.fetch_site == FetchSite::CrossSite
+            } else {
+                site.initiator
+                    .is_none_or(|initiator| FetchSite::of(initiator, url) == FetchSite::CrossSite)
+            }
+        };
+        let cross_site = match header_value(headers, "sec-fetch-site") {
+            Some(sent) if sent.eq_ignore_ascii_case(site.fetch_site.as_str()) => computed(),
+            Some(sent) if sent.eq_ignore_ascii_case("none") => {
+                chain_rule
+                    && site.chain.first().is_some_and(|first| {
+                        FetchSite::across(first, site.chain.iter().chain([url]))
+                            == FetchSite::CrossSite
+                    })
+            }
+            Some(sent) => sent.eq_ignore_ascii_case(FetchSite::CrossSite.as_str()),
+            None => computed(),
+        };
         let safe_method = ["GET", "HEAD"]
             .iter()
             .any(|m| method.eq_ignore_ascii_case(m));
@@ -241,6 +250,23 @@ fn header_value<'a>(headers: &'a [HeaderPair], name: &str) -> Option<&'a str> {
         .map(|(_, v)| v.as_ref())
 }
 
+fn shape_origin(headers: &mut Vec<HeaderPair>, method: &str, downgrade: bool) {
+    if !sends_origin(method, headers) {
+        headers.retain(|(k, _)| !k.eq_ignore_ascii_case("origin"));
+    } else if downgrade && !cors_mode(headers) {
+        for (k, v) in headers.iter_mut() {
+            if k.eq_ignore_ascii_case("origin") {
+                *v = Cow::Borrowed("null");
+            }
+        }
+    }
+}
+
+fn cors_mode(headers: &[HeaderPair]) -> bool {
+    header_value(headers, "sec-fetch-mode")
+        .is_some_and(|mode| CORS_MODES.iter().any(|m| mode.eq_ignore_ascii_case(m)))
+}
+
 fn sends_origin(method: &str, headers: &[HeaderPair]) -> bool {
     if !["GET", "HEAD"]
         .iter()
@@ -248,8 +274,7 @@ fn sends_origin(method: &str, headers: &[HeaderPair]) -> bool {
     {
         return true;
     }
-    let cors = header_value(headers, "sec-fetch-mode")
-        .is_some_and(|mode| CORS_MODES.iter().any(|m| mode.eq_ignore_ascii_case(m)));
+    let cors = cors_mode(headers);
     let cross_origin = header_value(headers, "sec-fetch-site")
         .is_some_and(|site| !site.eq_ignore_ascii_case(crate::FetchSite::SameOrigin.as_str()));
     cors && cross_origin

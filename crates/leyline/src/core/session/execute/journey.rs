@@ -71,8 +71,8 @@ impl Journey {
         } else {
             session_referer
         }
-        .and_then(|r| Url::parse(r).ok())
-        .or_else(|| Url::parse(&referrer).ok());
+        .and_then(|r| url.join(r).ok())
+        .or_else(|| Url::parse(&format!("{original_origin}/")).ok());
         Self {
             original_origin,
             referrer,

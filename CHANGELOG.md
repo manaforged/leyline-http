@@ -165,8 +165,9 @@ First public release.
   window size, and as raw DEFLATE otherwise.
 - `Alt-Svc` keeps HTTP/3 support for an origin until the longest `ma` of its
   `h3` entries, less the response's `Age`, ends on the wall clock (24 hours
-  by default). `ma=0`, `clear` in any `Alt-Svc` field, or a new value with no
-  `h3` alternative for the same authority removes it. Each field is parsed on
+  by default). An entry whose `ma` is not a number is ignored. `ma=0` on every
+  matching entry, `clear` in any `Alt-Svc` field, or a new value with no `h3`
+  alternative for the same authority removes it. Each field is parsed on
   its own, and the pool remembers at most 1024 origins.
 - A cookie jar drops a domain when its last cookie is evicted or deleted, so
   a long session over many hosts keeps a bounded domain map.

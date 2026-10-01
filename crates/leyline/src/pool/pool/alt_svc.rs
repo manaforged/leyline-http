@@ -3,19 +3,14 @@ use std::time::{Duration, SystemTime};
 
 const DEFAULT_MAX_AGE: Duration = Duration::from_secs(86_400);
 
+const MAX_ORIGINS: usize = 1024;
+
+#[derive(Default)]
 pub(crate) struct AltSvcCache {
     h3: HashMap<(String, u16), SystemTime>,
-    max_origins: usize,
 }
 
 impl AltSvcCache {
-    pub(crate) fn new(max_origins: usize) -> Self {
-        Self {
-            h3: HashMap::new(),
-            max_origins: max_origins.max(1),
-        }
-    }
-
     pub(crate) fn note(
         &mut self,
         host: &str,
@@ -33,7 +28,7 @@ impl AltSvcCache {
             self.h3.remove(&key);
             return;
         };
-        if !self.h3.contains_key(&key) && self.h3.len() >= self.max_origins {
+        if !self.h3.contains_key(&key) && self.h3.len() >= MAX_ORIGINS {
             self.make_room(now);
         }
         self.h3.insert(key, expiry);
@@ -53,7 +48,7 @@ impl AltSvcCache {
 
     fn make_room(&mut self, now: SystemTime) {
         self.h3.retain(|_, expiry| *expiry > now);
-        if self.h3.len() < self.max_origins {
+        if self.h3.len() < MAX_ORIGINS {
             return;
         }
         if let Some(oldest) = self
@@ -90,14 +85,14 @@ fn same_authority_h3(entry: &str, host: &str, port: u16) -> Option<Duration> {
     {
         return None;
     }
-    let max_age = parts
+    let ma = parts
         .filter_map(|param| param.trim().split_once('='))
-        .filter(|(name, _)| name.trim().eq_ignore_ascii_case("ma"))
-        .find_map(|(_, secs)| crate::util::delta_seconds(secs.trim().trim_matches('"')))
-        .map_or(DEFAULT_MAX_AGE, |secs| {
-            Duration::from_secs(secs.min(u64::from(u32::MAX)))
-        });
-    Some(max_age)
+        .find(|(name, _)| name.trim().eq_ignore_ascii_case("ma"));
+    match ma {
+        None => Some(DEFAULT_MAX_AGE),
+        Some((_, secs)) => crate::util::delta_seconds(secs.trim().trim_matches('"'))
+            .map(|secs| Duration::from_secs(secs.min(u64::from(u32::MAX)))),
+    }
 }
 
 fn split_unquoted(value: &str, separator: char) -> impl Iterator<Item = &str> {

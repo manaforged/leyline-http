@@ -174,13 +174,12 @@ impl Session {
         } else {
             url
         };
-        self.add_jar_cookie(
-            &mut headers,
-            lookup,
-            crate::FetchSite::SameOrigin,
-            false,
-            "GET",
-        );
+        let site = super::execute::SiteContext {
+            fetch_site: crate::FetchSite::SameOrigin,
+            initiator: Some(lookup),
+            chain: &[],
+        };
+        self.add_jar_cookie(&mut headers, lookup, &site, "GET");
         headers
             .into_iter()
             .map(|(k, v)| (k.into_owned(), v.into_owned()))

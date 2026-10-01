@@ -21,8 +21,6 @@ pub(crate) use h1::upgrade_on_stream;
 pub use h1::{H1Body, H1PooledError, H1ResponseBody, H1Target, send_request_h1_pooled};
 pub(crate) use liveness::checkout_live_h2;
 pub use liveness::{DEFAULT_H2_PING_AFTER_IDLE, DEFAULT_H2_PING_TIMEOUT};
-#[cfg(feature = "http3")]
-pub(crate) use pool::DEFAULT_MAX_ALT_SVC_ORIGINS;
 pub use pool::{
     DEFAULT_IDLE_TIMEOUT, DEFAULT_MAX_CONNECTIONS, DEFAULT_MAX_H1_CONNS_PER_HOST, Pool,
 };
