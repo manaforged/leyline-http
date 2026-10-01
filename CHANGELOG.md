@@ -8,7 +8,7 @@ change or a higher minimum Rust version needs a new minor release, such as
 `0.2.0`. The BoringSSL crates `leyline-bssl`, `leyline-bssl-sys`, and
 `leyline-bssl-tokio` share this version and publish as separate crates.
 
-## Unreleased
+## 0.1.0 - 2026-09-30
 
 First public release.
 
