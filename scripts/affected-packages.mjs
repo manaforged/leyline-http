@@ -79,8 +79,10 @@ const OWNED_PATHS = [
 
 const PR_GATES = [
   { gate: "deny", pattern: /(^|\/)Cargo\.(toml|lock)$|^deny\.toml$/ },
-  { gate: "msrv", pattern: /(^|\/)Cargo\.(toml|lock)$|^rust-toolchain(\.toml)?$/ },
-  { gate: "package", pattern: /(^|\/)Cargo\.(toml|lock)$|^scripts\/stage-package-workspace\.mjs$/ },
+  { gate: "msrv", pattern: /(^|\/)Cargo\.(toml|lock)$|^rust-toolchain(\.toml)?$/, anyPackage: true },
+  { gate: "package", pattern: /(^|\/)Cargo\.(toml|lock)$|^scripts\/stage-package-workspace\.mjs$/, anyPackage: true },
+  { gate: "subcrates", pattern: /^crates\/leyline-bssl(-sys|-tokio)?\// },
+  { gate: "semver", packages: ["leyline-http"] },
 ];
 
 const CI_LOGIC_FILES = new Set([
@@ -189,7 +191,13 @@ const plan = {
   packages: names,
   workflows,
   dependencyAudit,
-  gates: PR_GATES.filter(({ pattern }) => full || changed.some((file) => pattern.test(file))).map(({ gate }) => gate),
+  gates: PR_GATES.filter(
+    ({ pattern, anyPackage, packages }) =>
+      full ||
+      (pattern && changed.some((file) => pattern.test(file))) ||
+      (anyPackage && names.length > 0) ||
+      (packages && packages.some((name) => names.includes(name))),
+  ).map(({ gate }) => gate),
 };
 
 if (explain) {

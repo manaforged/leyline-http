@@ -211,19 +211,15 @@ g_deny() {
 }
 
 g_semver() {
-    step "cargo semver-checks check-release -p leyline-http"
+    step "cargo semver-checks check-release -p leyline-http (against crates.io)"
     if ! command -v cargo-semver-checks >/dev/null; then
-        echo "  (cargo-semver-checks not installed; skipping. Install with"
-        echo "   'cargo install --locked cargo-semver-checks')"
-    elif [[ -z "$(git tag --list 'v*')" ]]; then
-        semver_status="skipped (no v* tag to compare against)"
-        echo "  (no v* tag exists yet; nothing to compare a release against)"
-    else
-        cargo semver-checks check-release -p leyline-http \
-            || fail "cargo-semver-checks found a breaking change"
-        semver_status="ran"
-        ok "semver-checks clean"
+        skip "cargo-semver-checks not installed: cargo install --locked cargo-semver-checks"
+        return 0
     fi
+    cargo semver-checks check-release -p leyline-http \
+        || fail "cargo-semver-checks found a breaking change against the published release"
+    semver_status="ran"
+    ok "semver-checks clean"
 }
 
 g_external_types() {
