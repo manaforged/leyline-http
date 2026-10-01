@@ -7,15 +7,13 @@ use crate::h2::error::{ErrorCode, H2Error};
 
 #[cfg(feature = "websocket")]
 use super::driver::PeerSettingsSnapshot;
-use super::driver::{
-    DriverCommand, DriverRequestBody, Head, ResponseSink, STREAM_REQ_BODY_CAPACITY,
-    pump_request_body,
-};
+use super::driver::{DriverCommand, DriverRequestBody, Head, ResponseSink};
 use super::types::{H2ResponseEx, RequestBody, ResponseBody};
 
 #[derive(Clone)]
 pub struct H2Client {
     pub(super) tx: mpsc::Sender<DriverCommand>,
+    pub(super) ping_tx: mpsc::Sender<oneshot::Sender<()>>,
     pub(super) closed: Arc<AtomicBool>,
     #[cfg(feature = "websocket")]
     pub(super) peer_settings: Arc<PeerSettingsSnapshot>,
@@ -38,11 +36,7 @@ impl H2Client {
         let body_in = match body {
             RequestBody::None => DriverRequestBody::None,
             RequestBody::Buffered(b) => DriverRequestBody::Buffered(b),
-            RequestBody::Streaming { stream, .. } => {
-                let (body_tx, body_rx) = mpsc::channel(STREAM_REQ_BODY_CAPACITY);
-                tokio::spawn(pump_request_body(stream, body_tx));
-                DriverRequestBody::Streaming(body_rx)
-            }
+            RequestBody::Streaming { stream, .. } => DriverRequestBody::Streaming(stream),
         };
 
         let (response_tx, response_rx) = oneshot::channel::<Result<H2ResponseEx, H2Error>>();
@@ -86,8 +80,8 @@ impl H2Client {
             });
         }
         let (ack_tx, ack_rx) = oneshot::channel();
-        self.tx
-            .send(DriverCommand::Ping { ack_tx })
+        self.ping_tx
+            .send(ack_tx)
             .await
             .map_err(|_| H2Error::Connection {
                 code: ErrorCode::NoError,

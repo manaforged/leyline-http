@@ -1,10 +1,11 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 #[cfg(feature = "http3")]
 use self::alt_svc::AltSvcCache;
+use self::expiring::ExpiringSet;
 use crate::pool::connect::Inflight;
 use tokio::sync::Semaphore;
 
@@ -25,6 +26,10 @@ pub const DEFAULT_MAX_H1_CONNS_PER_HOST: usize = 256;
 
 const POOL_REAP_INTERVAL: Duration = Duration::from_millis(250);
 
+pub(crate) const H1_ONLY_TTL: Duration = Duration::from_secs(600);
+
+type H1OnlyKey = (String, u16, Option<String>);
+
 pub struct Pool {
     pub(crate) inner: Mutex<HashMap<PoolKey, PooledConn>>,
     pub(crate) inflight_h2: Inflight<H2Client>,
@@ -32,7 +37,7 @@ pub struct Pool {
     pub(crate) inflight_h3: Inflight<H3Client>,
     #[cfg(feature = "http3")]
     pub(crate) alt_svc: Mutex<AltSvcCache>,
-    pub(crate) h1_only: Mutex<HashSet<(String, u16, Option<String>)>>,
+    pub(crate) h1_only: Mutex<ExpiringSet<H1OnlyKey>>,
     pub(crate) idle_timeout: Duration,
     pub(crate) max_connections: usize,
     pub(crate) max_h1_conns_per_host: usize,
@@ -47,11 +52,12 @@ pub struct Pool {
 
 impl Pool {
     pub(crate) fn note_h1_only(&self, host: &str, port: u16, proxy: Option<&str>) {
-        lock(&self.h1_only).insert((host.to_string(), port, proxy.map(str::to_string)));
+        let now = SystemTime::now();
+        lock(&self.h1_only).insert(h1_only_key(host, port, proxy), now + H1_ONLY_TTL, now);
     }
 
     pub(crate) fn is_h1_only(&self, host: &str, port: u16, proxy: Option<&str>) -> bool {
-        lock(&self.h1_only).contains(&(host.to_string(), port, proxy.map(str::to_string)))
+        lock(&self.h1_only).contains(&h1_only_key(host, port, proxy), SystemTime::now())
     }
 
     #[cfg(feature = "http3")]
@@ -72,7 +78,7 @@ impl Pool {
             inflight_h3: Inflight::default(),
             #[cfg(feature = "http3")]
             alt_svc: Mutex::new(AltSvcCache::default()),
-            h1_only: Mutex::new(HashSet::new()),
+            h1_only: Mutex::new(ExpiringSet::default()),
             idle_timeout: DEFAULT_IDLE_TIMEOUT,
             max_connections: DEFAULT_MAX_CONNECTIONS,
             max_h1_conns_per_host: DEFAULT_MAX_H1_CONNS_PER_HOST,
@@ -103,7 +109,7 @@ impl Pool {
             inflight_h3: Inflight::default(),
             #[cfg(feature = "http3")]
             alt_svc: Mutex::new(AltSvcCache::default()),
-            h1_only: Mutex::new(HashSet::new()),
+            h1_only: Mutex::new(ExpiringSet::default()),
             idle_timeout,
             max_connections,
             max_h1_conns_per_host,
@@ -282,6 +288,10 @@ impl Pool {
     }
 }
 
+fn h1_only_key(host: &str, port: u16, proxy: Option<&str>) -> H1OnlyKey {
+    (host.to_string(), port, proxy.map(str::to_string))
+}
+
 impl Default for Pool {
     fn default() -> Self {
         Self::new()
@@ -292,6 +302,8 @@ impl Default for Pool {
 mod tests;
 
 mod slots;
+
+mod expiring;
 
 #[cfg(feature = "http3")]
 mod alt_svc;

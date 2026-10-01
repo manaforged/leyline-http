@@ -177,6 +177,10 @@ name = "h2_body_cap"
 required-features = ["bench-internals"]
 
 [[test]]
+name = "h2_backpressure"
+required-features = ["bench-internals"]
+
+[[test]]
 name = "h2_cancel_safety"
 required-features = ["bench-internals"]
 

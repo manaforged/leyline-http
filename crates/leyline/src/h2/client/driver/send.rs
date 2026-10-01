@@ -1,10 +1,12 @@
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::h2::error::{ErrorCode, H2Error};
 use crate::h2::stream_state::StreamEvent;
 
 use super::*;
+
+mod headers;
 
 impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     pub(super) async fn on_body_chunk(&mut self, chunk: BodyChunkIn) -> Result<(), H2Error> {
@@ -145,14 +147,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         while !chunk.is_empty() {
             let window = self.effective_send_window(stream_id);
             if window == 0 {
-                if let Some(actor) = self.streams.get_mut(stream_id) {
-                    actor.pending_send = Some(PendingSend {
-                        remaining: chunk.clone(),
-                    });
-                    if !self.buffered_pending.contains(&stream_id) {
-                        self.buffered_pending.push_back(stream_id);
-                    }
-                }
+                self.park_stream(stream_id, PendingSend { remaining: chunk });
                 return Ok(());
             }
             let max_frame = self.peer_settings.max_frame_size as usize;
@@ -160,15 +155,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             let piece = chunk.slice(0..chunk_size);
             chunk = chunk.slice(chunk_size..);
 
-            let no_more_buffered = self
-                .streams
-                .get(stream_id)
-                .map(|a| match &a.send_body_input {
-                    SendBodyInput::Streaming { pending_buf, .. } => pending_buf.is_empty(),
-                    _ => true,
-                })
-                .unwrap_or(true);
-            let is_last = chunk.is_empty() && producer_closed && no_more_buffered;
+            let is_last = chunk.is_empty() && producer_closed && self.upload_drained(stream_id);
 
             if let Some(actor) = self.streams.get_mut(stream_id) {
                 if let Err(e) = actor.state.transition(StreamEvent::SendData {
@@ -191,10 +178,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 })
                 .await?;
 
-            self.conn_send_window -= chunk_size as i64;
-            if let Some(actor) = self.streams.get_mut(stream_id) {
-                actor.send_window -= chunk_size as i64;
-            }
+            self.note_upload_sent(stream_id, chunk_size);
             if is_last {
                 self.writer.flush().await?;
             }
@@ -202,78 +186,23 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         Ok(())
     }
 
-    pub(super) async fn write_headers_block(
-        &mut self,
-        stream_id: u32,
-        end_stream: bool,
-        fragment: Vec<u8>,
-        with_priority: bool,
-    ) -> Result<(), H2Error> {
-        let max_frame = self.peer_settings.max_frame_size as usize;
-        let priority = if with_priority {
-            self.config.default_priority.map(|p| StreamDependency {
-                exclusive: p.exclusive,
-                dependency_id: p.stream_dependency,
-                weight: p.weight,
+    fn upload_drained(&self, stream_id: u32) -> bool {
+        self.streams
+            .get(stream_id)
+            .is_none_or(|a| match &a.send_body_input {
+                SendBodyInput::Streaming { pending_buf, .. } => pending_buf.is_empty(),
+                SendBodyInput::None => true,
             })
-        } else {
-            None
-        };
-        let prio_overhead = if priority.is_some() { 5 } else { 0 };
-
-        if fragment.len() + prio_overhead <= max_frame {
-            self.writer
-                .write_headers(&HeadersFrame {
-                    stream_id,
-                    end_stream,
-                    end_headers: true,
-                    priority,
-                    fragment: Bytes::from(fragment),
-                })
-                .await?;
-        } else {
-            let first_cap = max_frame.saturating_sub(prio_overhead).max(1);
-            let first_len = first_cap.min(fragment.len());
-            let first = &fragment[..first_len];
-            self.writer
-                .write_headers(&HeadersFrame {
-                    stream_id,
-                    end_stream,
-                    end_headers: false,
-                    priority,
-                    fragment: Bytes::copy_from_slice(first),
-                })
-                .await?;
-            self.write_continuations(stream_id, &fragment, first_len, max_frame)
-                .await?;
-        }
-        Ok(())
     }
 
-    pub(super) async fn write_continuations(
-        &mut self,
-        stream_id: u32,
-        fragment: &[u8],
-        mut offset: usize,
-        max_frame: usize,
-    ) -> Result<(), H2Error> {
-        while offset < fragment.len() {
-            let end = (offset + max_frame).min(fragment.len());
-            let is_last = end == fragment.len();
-            let chunk = &fragment[offset..end];
-            let mut buf = BytesMut::with_capacity(9 + chunk.len());
-            let header = crate::h2::frame::FrameHeader {
-                length: chunk.len() as u32,
-                frame_type: 0x9,
-                flags: if is_last { 0x4 } else { 0 },
-                stream_id,
-            };
-            header.encode(&mut buf);
-            buf.extend_from_slice(chunk);
-            self.writer.write_raw(&buf).await?;
-            offset = end;
+    fn note_upload_sent(&mut self, stream_id: u32, sent: usize) {
+        self.conn_send_window -= sent as i64;
+        if let Some(actor) = self.streams.get_mut(stream_id) {
+            actor.send_window -= sent as i64;
+            if let Some(credit) = &actor.upload_credit {
+                credit.add_permits(sent);
+            }
         }
-        Ok(())
     }
 
     pub(super) async fn write_body_or_park(

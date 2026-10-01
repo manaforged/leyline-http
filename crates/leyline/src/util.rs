@@ -189,5 +189,7 @@ fn hex_val(b: u8) -> Option<u8> {
     }
 }
 
+pub(crate) mod upload;
+
 #[cfg(test)]
 mod tests;

@@ -1,8 +1,11 @@
+#[cfg(feature = "websocket")]
 use std::io;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use tokio::sync::{mpsc, oneshot};
+#[cfg(feature = "websocket")]
+use tokio::sync::mpsc;
+use tokio::sync::oneshot;
 
 use crate::h2::connection::{HeaderPair, PseudoHeaders};
 
@@ -22,7 +25,7 @@ pub(crate) fn checked_window_add(current: i64, delta: i64) -> Result<i64, i64> {
 pub(crate) enum DriverRequestBody {
     None,
     Buffered(Bytes),
-    Streaming(mpsc::Receiver<io::Result<Bytes>>),
+    Streaming(crate::util::upload::BodyStream),
 }
 
 pub struct Head {
@@ -49,6 +52,15 @@ pub(crate) enum DriverCommand {
 }
 
 impl DriverCommand {
+    pub(crate) fn is_cancelled(&self) -> bool {
+        match self {
+            DriverCommand::SendRequest { sink, .. } => sink.is_cancelled(),
+            #[cfg(feature = "websocket")]
+            DriverCommand::OpenConnect { sink, .. } => sink.is_cancelled(),
+            DriverCommand::Ping { ack_tx } => ack_tx.is_closed(),
+        }
+    }
+
     pub(crate) fn into_sink(self) -> Option<ResponseSink> {
         match self {
             DriverCommand::SendRequest { sink, .. } => Some(sink),

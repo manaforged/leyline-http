@@ -10,6 +10,23 @@ change or a higher minimum Rust version needs a new minor release, such as
 
 ## Unreleased
 
+### Fixed
+
+- HTTP/2: a request that the caller cancels while it waits for a stream slot
+  is not sent. Before, the driver sent it when a slot became free.
+- HTTP/2: a streaming request body buffers at most 256 KiB ahead of the
+  peer's flow-control window, the same limit HTTP/3 uses. Before, a stalled
+  peer let the driver buffer the whole body. The body stream is first polled
+  when the request starts on the wire, not when it is queued.
+- HTTP/2: when the caller drops a request whose upload has not finished, the
+  driver resets the stream with `CANCEL` and stops polling the body.
+- HTTP/2: when every stream slot is in use, at most one request waits inside
+  the driver. Later requests wait in the bounded command queue, and the
+  caller's timeout applies to that wait. Pings use their own queue, so a pool
+  liveness ping does not wait behind queued requests.
+- The pool remembers that an origin negotiated HTTP/1.1 for 10 minutes, then
+  offers HTTP/2 again. It keeps at most 1024 such origins.
+
 ### Build
 
 - The minimum `tokio` is 1.37 and the minimum `enum_dispatch` for

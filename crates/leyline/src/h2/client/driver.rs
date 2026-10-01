@@ -5,7 +5,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use bytes::{Bytes, BytesMut};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{Semaphore, mpsc, oneshot};
+use tokio::task::AbortHandle;
 
 use crate::h2::codec::{FrameReader, FrameWriter};
 use crate::h2::config::H2Config;
@@ -26,12 +27,13 @@ mod recv;
 mod send;
 mod stream_map;
 
-pub(super) use self::bootstrap::pump_request_body;
 pub use self::bootstrap::start;
 pub use protocol::Head;
 pub(crate) use protocol::{DriverCommand, DriverRequestBody, checked_window_add};
 
 const COMMAND_CHANNEL_CAPACITY: usize = 1024;
+
+const PING_CHANNEL_CAPACITY: usize = 16;
 
 pub(super) const STREAM_REQ_BODY_CAPACITY: usize = 32;
 
@@ -88,6 +90,17 @@ pub(crate) enum ResponseSink {
 }
 
 impl ResponseSink {
+    pub(super) fn is_cancelled(&self) -> bool {
+        match self {
+            Self::Buffered(tx) => tx.is_closed(),
+            Self::StreamingEx {
+                headers_tx,
+                body_tx,
+                ..
+            } => headers_tx.as_ref().is_none_or(oneshot::Sender::is_closed) && body_tx.is_closed(),
+        }
+    }
+
     pub(super) fn streaming(
         headers_tx: oneshot::Sender<Result<H2ResponseEx, H2Error>>,
     ) -> (Self, mpsc::Receiver<io::Result<Bytes>>) {
@@ -129,6 +142,8 @@ struct StreamActor {
     drop_body: bool,
     pending_send: Option<PendingSend>,
     send_body_input: SendBodyInput,
+    upload_credit: Option<Arc<Semaphore>>,
+    pump: Option<AbortHandle>,
     send_closed: bool,
     stalled: std::collections::VecDeque<Bytes>,
     remote_done: bool,
@@ -151,6 +166,8 @@ impl StreamActor {
             drop_body,
             pending_send: None,
             send_body_input: SendBodyInput::None,
+            upload_credit: None,
+            pump: None,
             send_closed: false,
             stalled: std::collections::VecDeque::new(),
             remote_done: false,
@@ -222,6 +239,9 @@ impl StreamActor {
 
 impl Drop for StreamActor {
     fn drop(&mut self) {
+        if let Some(pump) = self.pump.take() {
+            pump.abort();
+        }
         if self.response_tx.is_some() {
             self.deliver_err(H2Error::Connection {
                 code: ErrorCode::InternalError,
@@ -231,16 +251,7 @@ impl Drop for StreamActor {
     }
 }
 
-enum BodyChunkIn {
-    Chunk {
-        stream_id: u32,
-        data: Bytes,
-    },
-    Eof {
-        stream_id: u32,
-        error: Option<io::Error>,
-    },
-}
+type BodyChunkIn = crate::util::upload::BodyChunk<u32>;
 
 struct Driver<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> {
     reader: FrameReader<tokio::io::ReadHalf<T>>,
@@ -260,6 +271,7 @@ struct Driver<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> {
     control_flood: RstFloodDetector,
     config: H2Config,
     command_rx: mpsc::Receiver<DriverCommand>,
+    ping_rx: mpsc::Receiver<oneshot::Sender<()>>,
     closed: Arc<AtomicBool>,
     peer_goaway_last_stream: Option<u32>,
     pending: VecDeque<DriverCommand>,

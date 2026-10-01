@@ -75,8 +75,8 @@ pub(super) fn start_pending(
                 stream.retry = retry;
                 stream.expects_body = expects_body;
                 if let Some(body_stream) = body_stream {
-                    let credit = Arc::new(Semaphore::new(UPLOAD_WINDOW));
-                    let pump = tokio::spawn(pump_request_body(
+                    let credit = crate::util::upload::upload_credit();
+                    let pump = tokio::spawn(crate::util::upload::pump_request_body(
                         stream_id,
                         body_stream,
                         body_chunk_tx.clone(),

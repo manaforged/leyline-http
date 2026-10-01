@@ -1,13 +1,12 @@
-use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
+
+use super::expiring::ExpiringSet;
 
 const DEFAULT_MAX_AGE: Duration = Duration::from_secs(86_400);
 
-const MAX_ORIGINS: usize = 1024;
-
 #[derive(Default)]
 pub(crate) struct AltSvcCache {
-    h3: HashMap<(String, u16), SystemTime>,
+    h3: ExpiringSet<(String, u16)>,
 }
 
 impl AltSvcCache {
@@ -28,37 +27,11 @@ impl AltSvcCache {
             self.h3.remove(&key);
             return;
         };
-        if !self.h3.contains_key(&key) && self.h3.len() >= MAX_ORIGINS {
-            self.make_room(now);
-        }
-        self.h3.insert(key, expiry);
+        self.h3.insert(key, expiry, now);
     }
 
     pub(crate) fn knows_h3(&mut self, host: &str, port: u16, now: SystemTime) -> bool {
-        let key = (host.to_string(), port);
-        match self.h3.get(&key) {
-            Some(expiry) if *expiry > now => true,
-            Some(_) => {
-                self.h3.remove(&key);
-                false
-            }
-            None => false,
-        }
-    }
-
-    fn make_room(&mut self, now: SystemTime) {
-        self.h3.retain(|_, expiry| *expiry > now);
-        if self.h3.len() < MAX_ORIGINS {
-            return;
-        }
-        if let Some(oldest) = self
-            .h3
-            .iter()
-            .min_by_key(|(_, expiry)| **expiry)
-            .map(|(key, _)| key.clone())
-        {
-            self.h3.remove(&oldest);
-        }
+        self.h3.contains(&(host.to_string(), port), now)
     }
 }
 

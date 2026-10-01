@@ -76,56 +76,6 @@ fn send_queued_body(
     Ok(())
 }
 
-pub(super) async fn pump_request_body(
-    stream_id: u64,
-    mut body: H3RequestBodyStream,
-    tx: mpsc::Sender<H3BodyChunk>,
-    credit: Arc<Semaphore>,
-) {
-    use futures_util::StreamExt;
-    while let Some(item) = body.next().await {
-        match item {
-            Ok(mut data) => {
-                while !data.is_empty() {
-                    let take = data.len().min(UPLOAD_CHUNK);
-                    let slice = data.split_to(take);
-                    let Ok(permit) = credit.acquire_many(take as u32).await else {
-                        return;
-                    };
-                    permit.forget();
-                    if tx
-                        .send(H3BodyChunk::Chunk {
-                            stream_id,
-                            data: slice,
-                        })
-                        .await
-                        .is_err()
-                    {
-                        return;
-                    }
-                }
-            }
-            Err(error) => {
-                drop(
-                    tx.send(H3BodyChunk::Eof {
-                        stream_id,
-                        error: Some(error),
-                    })
-                    .await,
-                );
-                return;
-            }
-        }
-    }
-    drop(
-        tx.send(H3BodyChunk::Eof {
-            stream_id,
-            error: None,
-        })
-        .await,
-    );
-}
-
 pub(in crate::quic::pool) fn on_request_body_chunk(
     h3: &mut quiche::h3::Connection,
     conn: &mut quiche::Connection,

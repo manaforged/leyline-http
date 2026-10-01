@@ -18,10 +18,6 @@ use crate::quic::connection::{
 
 const STREAM_RESP_CAPACITY: usize = 32;
 
-const UPLOAD_WINDOW: usize = 256 * 1024;
-
-const UPLOAD_CHUNK: usize = 16 * 1024;
-
 const STREAM_PUMP_INTERVAL: Duration = Duration::from_millis(2);
 
 const CANCEL_SWEEP_INTERVAL: Duration = Duration::from_millis(100);
@@ -31,16 +27,7 @@ const LENGTH_MISMATCH: &str = "h3: response body length does not match content-l
 pub type H3RequestBodyStream =
     std::pin::Pin<Box<dyn futures_util::Stream<Item = std::io::Result<Bytes>> + Send + 'static>>;
 
-enum H3BodyChunk {
-    Chunk {
-        stream_id: u64,
-        data: Bytes,
-    },
-    Eof {
-        stream_id: u64,
-        error: Option<std::io::Error>,
-    },
-}
+type H3BodyChunk = crate::util::upload::BodyChunk<u64>;
 
 enum H3Command {
     Request {
