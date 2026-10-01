@@ -1,5 +1,13 @@
 # Contributing
 
+Leyline does not accept external pull requests until its API is more stable.
+Only accounts with write access can open a pull request. To report a bug or
+request a feature, open an
+[issue](https://github.com/manaforged/leyline-http/issues). To report a
+vulnerability, follow [SECURITY.md](SECURITY.md).
+
+The rest of this guide is the maintainers' workflow.
+
 ## Before you open a pull request
 
 1. Run the gates. `./scripts/verify.sh` with no flag runs three of them:
