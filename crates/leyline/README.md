@@ -1,94 +1,69 @@
 # Leyline
 
-An async Rust HTTP client that sends the TLS ClientHello, HTTP/2 SETTINGS, and
-request headers of a chosen browser profile. Leyline supports HTTP/1.1,
-HTTP/2, HTTP/3, and WebSocket on Tokio. Bundled profiles cover Chrome 145 to
-154, Brave 146 and 154, Firefox 148 to 156, Safari 18, 26, and 27, Safari on
-iOS 17, 18, and 27, OkHttp on Android, and CFNetwork on iOS 18, iOS 27, and
-macOS 26. Edge and Opera are brand overlays on the Chrome profiles. They apply
-to desktop platforms only, and the Opera overlay covers Chrome 145 to 152.
+Leyline is an async Rust HTTP client that connects the way a real browser
+does. The TLS ClientHello, HTTP/2 SETTINGS and priorities, HTTP/3 transport
+parameters, and request header order all come from captures of shipped
+browsers, so a server that fingerprints its clients sees Chrome, Firefox, or
+Safari, not a Rust library.
 
-## What it does
+```rust,no_run
+use leyline::{Browser, Session};
 
-- Each profile records the build it was captured from in `captured_against`
-  and the kind of capture in `capture`. Of the 31 bundled profiles, 25 are
-  captures of the shipped browser. The other six come from other sources:
-  Safari on iOS 17 and 18 (Mobile Safari in the iOS simulator), OkHttp (a
-  test app in an Android emulator), CFNetwork on iOS 18 (a test binary in the
-  iOS simulator), CFNetwork on iOS 27 (Shortcuts on an iPhone), and CFNetwork
-  on macOS 26 (a test binary in a macOS virtual machine). The raw captures
-  are in the repository under `crates/leyline/profiles/captures/`, and the
-  published crate does not include them. The
-  [profile reference](https://github.com/manaforged/leyline-http/blob/main/docs/guide/profiles.md#provenance)
-  lists the source of every profile.
-- `RequestBuilder::preset` selects the header list for a kind of request, such
-  as navigation, form submission, script, XHR, cross-origin, or same-site.
-  Chromium profiles also have frame, reload, and image lists. OkHttp and
-  CFNetwork profiles send one fixed list. Across a redirect chain,
-  `sec-fetch-site` covers the whole chain, `Origin` becomes `null` after a hop
-  to another origin, and `Referer` is set again for each hop.
-- With the `http3` feature, which is on by default, the QUIC ClientHello,
-  transport parameters, connection ID lengths, HTTP/3 SETTINGS, and the size
-  of the first datagram come from the `[h3]` table of each profile. Firefox
-  155 and 156 also list QUIC v2 as an available version. Five profiles have no
-  `[h3]` table: Safari on iOS 17, OkHttp, and the three CFNetwork profiles.
-  For those, `ProtocolPolicy::Http3` and `ProtocolPolicy::Race` make `build()`
-  fail with `Kind::Config`.
-- `Session::with_proxy` keeps the session's pool, which is keyed by proxy, so
-  connections to other proxies stay warm. `Session::fresh_pool` takes a new
-  pool and a new TLS session cache, so the next request opens new
-  connections.
-- Before it reuses an HTTP/2 connection that has been idle for 10 seconds, the
-  pool sends a PING. `PoolConfig::h2_ping_after_idle` changes the delay, and
-  `PoolStats::h2_ping_failures` counts the failures.
-  `SocketConfig::tcp_user_timeout` bounds unacknowledged writes on Linux and
-  Android.
-- Retries are off by default. When a response carries a `Retry-After` value
-  longer than `RetryPolicy::max_retry_after`, the retry stops and Leyline
-  returns that response.
-- `Error::kind` returns a `Kind` such as `Connect`, `Proxy`, `Tls`, or
-  `Timeout`. `Error::is_retryable` is true for timeouts, failed connections,
-  and closed connections, and for a proxy CONNECT answered with 502, 503, or
-  504. `TimeoutConfig` has four limits: `connect`, `response_header`, `read`,
-  and `total`.
-- `Debug` output masks passwords, query values, and the values of the
-  `Authorization`, `Proxy-Authorization`, `Cookie`, and `Set-Cookie` headers.
-- `TlsTrustConfig` sets the trust roots, certificate pins, a client
-  certificate, and a TLS version floor with `min_tls_version`.
-- The bundled BoringSSL prefixes every C export with `LEYLINE_`, the
-  `leyline-bssl-sys` crate declares `links = "leyline_bssl"`, and its build
-  reads `LEYLINE_BSSL_*` variables. Its link name and symbols therefore do not
-  collide with those of Cloudflare's `boring-sys`.
-- Chromium profiles derive `sec-ch-ua` from the major version and the
-  `ch_ua_brand` field of the profile, with the GREASE brand, version, and
-  order rule that Chromium uses. `Response::audit()` returns `Some` when the
-  session was built with `SessionBuilder::audit(true)`. It holds the JA3, JA4,
-  JA4T, and JA4H fingerprints and the HTTP/2 fingerprint.
-- `SessionBuilder::profile` sends a profile from `ProfileRegistry::load` or
-  `BrowserProfile::from_toml`. A profile that uses an existing header style
-  and needs no new BoringSSL patch works without a crate release. A new header
-  style or a new BoringSSL patch still needs a crate release.
+#[tokio::main]
+async fn main() -> leyline::Result<()> {
+    let session = Session::builder()
+        .browser(Browser::Chrome154)
+        .audit(true)
+        .build()?;
 
-## Requirements
+    let resp = session.get("https://example.com/").await?;
+    if let Some(audit) = resp.audit() {
+        // t13d1517h2_8daaf6152771_cb7bf5808d99, the JA4 of Chrome 154
+        println!("{}", audit.ja4);
+    }
+    Ok(())
+}
+```
 
-- Rust 1.96 or later.
-- Tokio.
-- One of these targets:
-  - `aarch64-apple-darwin`
-  - `x86_64-unknown-linux-gnu`
-  - `aarch64-unknown-linux-gnu`
-  - `x86_64-unknown-linux-musl`
-  - `aarch64-unknown-linux-musl`
-  - `x86_64-pc-windows-msvc`
-- The tools to build BoringSSL from source: CMake 3.22 or later, a C and C++
-  compiler, libclang for `bindgen`, and `git`. The build script applies the
-  BoringSSL patches with `git apply`. On Windows, also the MSVC build tools
-  and NASM. On musl, a musl C and C++ cross toolchain.
+For the profiles captured from shipped browsers, the live test suite checks
+that tls.peet.ws reports the same JA4 and HTTP/2 fingerprint for Leyline as
+for the browser.
 
-The first build compiles BoringSSL from source with CMake, so it takes longer
-than a pure Rust dependency. Later builds reuse the compiled library.
+## What it matches
 
-Other targets, including Intel macOS, are not supported.
+A user agent is one header. A fingerprinting server also reads the
+ClientHello, the HTTP/2 frames, and the header order. Leyline matches every
+layer a capture shows:
+
+| Layer | What Leyline sends |
+| --- | --- |
+| TLS | Cipher suites, extensions and their order, GREASE, key shares, and ALPN, from BoringSSL at the revision Chrome 154 ships. |
+| HTTP/2 | SETTINGS, window update, pseudo-header order, and stream priority. |
+| HTTP/3 | QUIC ClientHello, transport parameters, connection ID lengths, HTTP/3 SETTINGS, and the size of the first datagram. |
+| Headers | The browser's header set and order for each kind of request: navigation, form, script, image, XHR, frame, and reload. |
+| Fetch metadata | `sec-fetch-site`, `Origin`, and `Referer` follow the Fetch rules across redirect chains. |
+| Cookies | `SameSite` follows each browser: Chrome judges the final target, Firefox the whole redirect chain. |
+
+Of the 31 bundled profiles, 25 are captures of the shipped browser. Each
+profile names the build it came from in `captured_against`, and the
+[profile reference](https://github.com/manaforged/leyline-http/blob/main/docs/guide/profiles.md#provenance)
+lists the source of every one.
+
+## Profiles
+
+| Browser | Versions | Notes |
+| --- | --- | --- |
+| Chrome | 145 to 154 | Android is captured for Chrome 145 only. |
+| Brave | 146, 154 | |
+| Firefox | 148 to 156 | Firefox 155 and 156 offer QUIC v2. |
+| Safari | 18, 26, 27 | macOS. |
+| Safari on iOS | 17, 18, 27 | |
+| OkHttp | 4.12 | Android. |
+| CFNetwork | iOS 18, iOS 27, macOS 26 | Native app traffic, not Safari. |
+
+Edge and Opera are brand overlays on the Chrome profiles for desktop
+platforms. The Opera overlay covers Chrome 145 to 152. To send a profile that
+is not bundled, load it at runtime with `SessionBuilder::profile`.
 
 ## Install
 
@@ -102,32 +77,25 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 The package is `leyline-http`. The library is `leyline`.
 
-## Usage
+## Requirements
 
-```rust,no_run
-use leyline::Session;
+- Rust 1.96 or later, and Tokio.
+- One of these targets: `aarch64-apple-darwin`, `x86_64-unknown-linux-gnu`,
+  `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-musl`,
+  `aarch64-unknown-linux-musl`, or `x86_64-pc-windows-msvc`. Intel macOS is
+  not supported.
+- The tools to build BoringSSL from source: CMake 3.22 or later, a C and C++
+  compiler, libclang, and `git`. On Windows, also the MSVC build tools and
+  NASM. On musl, a musl C and C++ toolchain.
 
-#[tokio::main]
-async fn main() -> leyline::Result<()> {
-    let session = Session::new();
-    let body = session.get("https://example.com/").await?.text().await?;
-    println!("{body}");
-    Ok(())
-}
-```
+The first build compiles BoringSSL, so it takes longer than a pure Rust
+dependency. Later builds reuse it.
 
-Reuse one session to share connections and cookies. To select another
-browser or platform, use `Session::builder()`.
+## Choose a browser
 
-## What `Session::new()` sends
-
-`Session::new()` uses the newest bundled Chrome with a Windows identity. It
-sends that profile's ClientHello, HTTP/2 SETTINGS, user agent, `sec-ch-ua`
-headers, and header order. With the `http3` feature it races HTTP/3 against
-HTTP/2 for origins that advertised `h3` in an `Alt-Svc` header, because the
-bundled Chrome profiles set `race = true` in `[h3]`. A patch release can add a
-newer browser capture and move this default. To keep a fixed fingerprint, pin
-the browser:
+`Session::new()` sends the newest bundled Chrome with a Windows identity. A
+patch release can move that default to a newer capture. To keep one
+fingerprint, pin the browser and the platform:
 
 ```rust,no_run
 use leyline::{Browser, Platform, ProtocolPolicy, Session};
@@ -143,50 +111,51 @@ let session = Session::builder()
 # }
 ```
 
-`.platform()` selects the identity: `Windows`, `MacOS`, `Linux`, `Android`,
-or `IOS`, where the profile has one. `Session::builder().build()` with no
-browser is a bare session that impersonates no browser.
+Reuse one session to share connections and cookies. `Session::builder()` with
+no browser builds a plain client that imitates nothing.
+
+## Also included
+
+- Proxies: HTTP and HTTPS, and SOCKS5 with the `socks` feature. The pool
+  keeps connections per proxy, and HTTP/3 runs through SOCKS5
+  `UDP ASSOCIATE`.
+- Cookies: a jar with RFC 6265bis limits and `Secure` rules that you can save
+  and restore with serde.
+- WebSocket, streaming bodies, multipart forms, and gzip, deflate, Brotli,
+  and zstd decoding.
+- TLS trust: custom roots, certificate pins, client certificates, and a TLS
+  version floor through `TlsTrustConfig`.
+- Typed errors: `Error::kind()` names the failure, and `is_retryable()` says
+  whether to try again. Retries are off until you set a `RetryPolicy`.
+- `Debug` output masks passwords, tokens, cookies, and query values.
+- The bundled BoringSSL prefixes its symbols with `LEYLINE_`, so it links
+  beside OpenSSL and Cloudflare's `boring`.
 
 ## Limits
 
 - A profile covers the TLS, HTTP/2, HTTP/3, and header properties its capture
-  shows. It does not reproduce every byte a browser sends.
-- Chrome on Android is captured for Chrome 145 only. A profile has one TLS
-  table for all platforms, so Firefox on Android sends the desktop Firefox
-  ClientHello. Firefox 148 to 154 on Android omit
-  `signed_certificate_timestamp`, so Leyline's Android identity differs from
-  those versions of Firefox.
-- The TCP settings come from the platform rows in `platforms.toml`, which
-  exist for Windows, macOS, Linux, and iOS. Leyline sets TTL and `TCP_NODELAY`
-  on every OS, don't-fragment on Linux, macOS, and Windows, MSS on Linux and
-  macOS, and a window clamp on Linux. The kernel picks the TCP option order
-  and the window scale. The Android identity has no row and sets no TCP
-  options.
-- HTTP/3 does not send 0-RTT data.
-- HTTP/3 through a proxy needs the `socks` feature and a SOCKS5 proxy with
-  `UDP ASSOCIATE`. HTTP and HTTPS proxies cannot carry HTTP/3; MASQUE is not
-  supported.
-- A bundled Safari or CFNetwork browser switches to its per-platform variant
-  when you call `.platform()`. A profile loaded with `SessionBuilder::profile`
-  has no per-platform variant and is used as it is. Its header order comes
-  from `header_style` in `[meta]`, and the header styles in
-  `profiles/headers.toml` are part of the crate.
-- `Response::audit()` values come from the configured profile and request.
-  They are not packet captures.
+  shows. It does not reproduce every byte a browser sends, and it runs no
+  JavaScript.
+- Firefox on Android sends the desktop Firefox ClientHello.
+- The kernel picks the TCP option order and window scale. Leyline sets TTL,
+  `TCP_NODELAY`, and, where the OS allows, MSS, don't-fragment, and a window
+  clamp.
+- HTTP/3 sends no 0-RTT data, and it can't run through an HTTP or HTTPS
+  proxy. Safari on iOS 17, OkHttp, and the CFNetwork profiles have no HTTP/3
+  data.
+- `Response::audit()` reports what the configured profile sends. It is not a
+  packet capture.
 - Detection by a remote site is not a security defect. See
   [SECURITY.md](https://github.com/manaforged/leyline-http/blob/main/SECURITY.md).
-
-The [profile reference](https://github.com/manaforged/leyline-http/blob/main/docs/guide/profiles.md)
-lists the capture status of every profile.
 
 ## Documentation
 
 | Page | Contents |
 | --- | --- |
-| [User guide](https://manaforged.github.io/leyline-http/) | Task pages: sessions, requests, streaming, proxies, cookies, HTTP/3, and TLS trust. |
-| [API reference](https://manaforged.github.io/leyline-http/reference/leyline-http/index.html) | Every public item, generated from the compiler, and each task mapped to its one call. |
+| [User guide](https://manaforged.github.io/leyline-http/) | Sessions, requests, streaming, proxies, cookies, HTTP/3, and TLS trust. |
+| [API reference](https://manaforged.github.io/leyline-http/reference/leyline-http/index.html) | Every public item, and each task mapped to its one call. |
 | [Profile reference](https://manaforged.github.io/leyline-http/guide/profiles.html) | Bundled profiles and their capture status. |
-| [API map](https://manaforged.github.io/leyline-http/api.html) | How the API fits together, its semantics, and the error model. |
+| [Benchmarks](https://github.com/manaforged/leyline-http/blob/main/BENCHMARKS.md) | Paired runs against wreq, reqwest, and tls-client, losses included. |
 | [Changelog](https://github.com/manaforged/leyline-http/blob/main/CHANGELOG.md) | Release notes and the version policy. |
 
 ## Security
