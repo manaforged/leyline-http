@@ -78,7 +78,7 @@ multiple-versions = "warn"
 # crates carry an exact `=0.1.0` version, and `allow-wildcard-paths`
 # covers the unpublished bench and fuzz crates. A crates.io `"*"`
 # requirement still shows up as a warning.
-wildcards = "warn"
+wildcards = "deny"
 allow-wildcard-paths = true
 highlight = "all"
 workspace-default-features = "allow"
