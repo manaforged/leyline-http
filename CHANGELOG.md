@@ -8,6 +8,14 @@ change or a higher minimum Rust version needs a new minor release, such as
 `0.2.0`. The BoringSSL crates `leyline-bssl`, `leyline-bssl-sys`, and
 `leyline-bssl-tokio` share this version and publish as separate crates.
 
+## Unreleased
+
+### Build
+
+- The minimum `tokio` is 1.37 and the minimum `enum_dispatch` for
+  `leyline-quiche` is 0.3.13. Leyline did not compile against the older
+  versions the 0.1.0 manifests allowed.
+
 ## 0.1.0 - 2026-09-30
 
 First public release.
