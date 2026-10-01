@@ -70,6 +70,22 @@ const GLOBAL_RUST_INPUTS = new Set([
   ".config/nextest.toml",
 ]);
 
+const OWNED_PATHS = [
+  { path: "crates/leyline/README.md", package: "leyline-http" },
+  { path: "docs/", package: "leyline-http" },
+];
+
+const CI_LOGIC_FILES = new Set([
+  "scripts/affected-packages.mjs",
+  "scripts/verify.sh",
+  "scripts/feature-matrix.sh",
+]);
+
+const ownedBy = (file) =>
+  OWNED_PATHS.find((entry) =>
+    entry.path.endsWith("/") ? file.startsWith(entry.path) : file === entry.path,
+  );
+
 const isDoc = (file) =>
   file.endsWith(".md") || file.startsWith("docs/") || file.startsWith("book/");
 
@@ -83,7 +99,8 @@ const IGNORED_FILES = new Set([
   "SECURITY.md",
 ]);
 
-const docsOnly = !full && changed.length > 0 && changed.every(isDoc);
+const docsOnly =
+  !full && changed.length > 0 && changed.every(isDoc) && !changed.some(ownedBy);
 const workflows = changed.some(
   (file) => file.startsWith(".github/workflows/") || file === ".github/actionlint.yaml",
 );
@@ -91,11 +108,27 @@ const dependencyAudit = changed.some(
   (file) => /(^|\/)Cargo\.(toml|lock)$/.test(file) || file === "deny.toml",
 );
 
-if (changed.some((file) => GLOBAL_RUST_INPUTS.has(file) || file.startsWith(".cargo/"))) full = true;
+if (
+  changed.some(
+    (file) =>
+      GLOBAL_RUST_INPUTS.has(file) || CI_LOGIC_FILES.has(file) || file.startsWith(".cargo/"),
+  )
+)
+  full = true;
 
 const direct = new Set();
 if (!full) {
   for (const file of changed) {
+    const owned = ownedBy(file);
+    if (owned) {
+      const pkg = roots.find((entry) => entry.name === owned.package);
+      if (pkg) {
+        direct.add(pkg.id);
+        continue;
+      }
+      full = true;
+      break;
+    }
     if (isDoc(file)) continue;
     if (IGNORED_PREFIXES.some((prefix) => file.startsWith(prefix)) || IGNORED_FILES.has(file)) continue;
     const owner = roots.find((pkg) =>

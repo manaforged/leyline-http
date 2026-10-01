@@ -287,9 +287,56 @@ g_fuzz_timed() {
     ok "fuzz time-bounded runs clean"
 }
 
+SUBCRATE_MANIFESTS=(
+    crates/leyline-bssl-sys/Cargo.toml
+    crates/leyline-bssl/Cargo.toml
+    crates/leyline-bssl-tokio/Cargo.toml
+)
+PUBLISHED_MANIFESTS=(crates/leyline/Cargo.toml crates/leyline-quiche/Cargo.toml "${SUBCRATE_MANIFESTS[@]}")
+PIN_MANIFESTS=(Cargo.toml "${PUBLISHED_MANIFESTS[@]}")
+
+g_subcrates() {
+    for manifest in "${SUBCRATE_MANIFESTS[@]}"; do
+        step "cargo test --manifest-path $manifest"
+        cargo test --manifest-path "$manifest" || fail "tests failed in $manifest"
+    done
+    ok "sub-workspace crates clean"
+}
+
+g_release() {
+    step "release qualification (tag, manifests, changelog)"
+    local tag="${GITHUB_REF_NAME:-}"
+    [[ -n "$tag" ]] || fail "GITHUB_REF_NAME is unset; set it to the release tag (v<semver>)"
+    [[ "$tag" =~ ^v([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)$ ]] \
+        || fail "tag $tag is not v<semver>"
+    local version="${BASH_REMATCH[1]}"
+    local workspace_version
+    workspace_version="$(awk -F'"' '/^\[/{section=$0} section=="[workspace.package]" && /^version *= *"/{print $2; exit}' Cargo.toml)"
+    [[ "$workspace_version" == "$version" ]] \
+        || fail "tag $tag does not match [workspace.package] version $workspace_version"
+    local manifest pin crate_version
+    for manifest in "${PUBLISHED_MANIFESTS[@]}"; do
+        crate_version="$(awk -F'"' '/^\[/{section=$0} section=="[package]" && /^version\.workspace *= *true/{print "workspace"; exit} section=="[package]" && /^version *= *"/{print $2; exit}' "$manifest")"
+        [[ "$crate_version" == workspace ]] && crate_version="$workspace_version"
+        [[ "$crate_version" == "$version" ]] \
+            || fail "$manifest is version ${crate_version:-unset}, expected $version"
+    done
+    for manifest in "${PIN_MANIFESTS[@]}"; do
+        while read -r pin; do
+            [[ "$pin" == "$version" ]] \
+                || fail "$manifest pins a leyline crate to =$pin, expected =$version"
+        done < <(grep -E '^leyline-[a-z-]+ *= *\{.*version *= *"=' "$manifest" \
+            | sed -E 's/.*version *= *"=([^"]+)".*/\1/')
+    done
+    grep -qE "^## ${version//./\\.} - [0-9]{4}-[0-9]{2}-[0-9]{2}$" CHANGELOG.md \
+        || fail "CHANGELOG.md has no '## $version - YYYY-MM-DD' heading"
+    ok "release $tag qualified"
+}
+
 gate_order=(
     comments msrv package
     fmt clippy features doc api book test live deny semver external-types benches
+    subcrates release
     fuzz-replay fuzz-timed
 )
 quick_gates=(comments msrv package)

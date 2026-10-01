@@ -21,8 +21,10 @@
 
    The vendored `leyline-quiche` crate is excluded from the Clippy, rustdoc,
    and test gates. The `leyline-bssl*` crates sit outside the workspace: the
-   package gate packages them, and their own tests run with
-   `cargo test --manifest-path crates/<crate>/Cargo.toml`.
+   package gate packages them, and the `subcrates` gate runs their own tests
+   with `cargo test --manifest-path crates/<crate>/Cargo.toml`. The `release`
+   gate checks a tag against the crate versions, the `=` pins between them,
+   and a dated `CHANGELOG.md` heading.
 
    The gates need Python 3, Node, git, and rustup. The toolchain comes from
    `rust-toolchain.toml`, and the `msrv` gate also needs the MSRV toolchain.
