@@ -48,6 +48,16 @@ pub mod guide {
     pub struct Logging;
     #[doc = include_str!("../../../docs/guide/platforms.md")]
     pub struct Platforms;
+    #[doc = include_str!("../../../docs/guide/cancellation.md")]
+    pub struct Cancellation;
+    #[doc = include_str!("../../../docs/guide/testing.md")]
+    pub struct Testing;
+    #[doc = include_str!("../../../docs/guide/service-integration.md")]
+    pub struct ServiceIntegration;
+    #[doc = include_str!("../../../docs/guide/crawling.md")]
+    pub struct Crawling;
+    #[doc = include_str!("../../../docs/guide/accounts.md")]
+    pub struct Accounts;
 }
 
 macro_rules! bench_pub {
@@ -97,9 +107,13 @@ pub mod fuzz {
         crate::profile::permutation::extension_ids(tls)
     }
 }
+#[cfg(feature = "html")]
+pub mod html;
 #[cfg(feature = "http3")]
 pub(crate) mod quic;
 pub(crate) mod tcp;
+#[cfg(feature = "test-util")]
+pub mod testing;
 mod util;
 
 pub use http;
@@ -110,13 +124,20 @@ pub use crate::core::LeylineService;
 #[cfg(feature = "websocket")]
 pub use crate::core::WebSocketBuilder;
 pub use crate::core::{
-    Body, BodyStream, CompressionConfig, ContentEncoding, DigestAuth, DnsConfig, Error, FetchSite,
-    HttpVersion, Identity, IntoParamPair, IntoUrl, Kind, NoProxy, PoolConfig, ProtocolPolicy,
-    ProxyConfig, ProxyRule, ProxyUrl, RedirectAction, RedirectAttempt, RedirectPolicy,
-    RequestBuilder, Response, ResponseTiming, Result, RetryPolicy, RetryTrigger, Session,
-    SessionBuilder, SessionIdentity, SocketConfig, TimeoutConfig, WebSocketConfig,
+    BlockKind, BlockRules, BlockSignal, Body, BodyStream, CompressionConfig, ContentEncoding,
+    Device, DeviceAutosave, DigestAuth, DnsConfig, Error, ErrorCategory, FetchSite, HostLimits,
+    HostStats, HttpVersion, Identity, IntoParamPair, IntoUrl, Kind, Link, NoProxy, Pages,
+    PoolConfig, ProtocolPolicy, ProxyConfig, ProxyHealth, ProxyPool, ProxyRule, ProxyUrl,
+    RedirectAction, RedirectAttempt, RedirectPolicy, RelayBody, RequestBuilder, Response,
+    ResponseTiming, Result, RetryPolicy, RetryTrigger, Session, SessionBuilder, SessionIdentity,
+    SessionState, SocketConfig, Tab, TimeoutConfig, WaitFormat, WebSocketConfig, relay_headers,
 };
 pub use crate::pool::{PoolStats, TlsInfo};
+pub use crate::util::redact as redact_url;
+
+pub async fn get(url: impl IntoUrl) -> Result<Response> {
+    Session::builder().build()?.get(url).send().await
+}
 
 #[cfg(feature = "multipart")]
 pub mod multipart {
@@ -145,7 +166,7 @@ pub use crate::core::{CloseFrame, WsConnection, WsMessage, WsSink, WsStream};
 #[cfg(any(leyline_unstable_bssl, feature = "bench-internals"))]
 pub use crate::tls::TlsContext;
 pub use crate::tls::builder::TlsMinVersion;
-pub use crate::tls::error::TlsError;
+pub use crate::tls::error::{ProxyReply, TlsError};
 pub use crate::tls::trust::TlsTrustConfig;
 
 impl Browser {

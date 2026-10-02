@@ -35,6 +35,17 @@ impl fmt::Debug for SessionBuilder {
                         .map(|(k, v)| (k.as_str(), v.as_bytes())),
                 ),
             )
+            .field("bearer", &self.bearer.is_some())
+            .field(
+                "base_url",
+                &self
+                    .base_url
+                    .as_ref()
+                    .map(|url| crate::util::redact(url.as_str())),
+            )
+            .field("languages", &self.languages)
+            .field("host_limits", &self.host_limits)
+            .field("proxy_pool", &self.proxy_pool.is_some())
             .field("trace", &self.trace.is_some())
             .field("config_error", &self.config_error)
             .finish_non_exhaustive()

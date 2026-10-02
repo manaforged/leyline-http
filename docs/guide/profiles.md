@@ -1,38 +1,12 @@
 # Browser profiles
 
-A profile is one TOML file that describes a single browser build's TLS
-ClientHello, HTTP/2 SETTINGS, and per-platform identity. Leyline compiles the
-bundled profiles into the crate and indexes them in `ProfileRegistry`. You
-select a bundled profile with `SessionBuilder::browser`.
-
-Profiles live under `crates/leyline/profiles/<family>/<version>.toml`.
-
-## What the fingerprint columns mean
-
-A profile records a JA4 reference value under `[tls.fingerprint]` and an Akamai
-HTTP/2 reference value under `[h2.fingerprint]`. The offline
-`fingerprint_conformance` test computes both values from the profile's own
-`[tls]` and `[h2]` tables and compares them with the reference values. The
-`JA4` column of the table below shows how the JA4 check treats each profile:
-
-- **Gated.** The profile sets `extension_permutation`, so the ClientHello
-  extension order is fixed and the computed JA4 is exact. The test fails when
-  it differs from the reference value. The test gates the HTTP/2 value of
-  every profile the same way.
-- **Estimated.** The profile leaves the extension order to BoringSSL, so the
-  computed JA4 is an estimate. The test reports a difference and passes.
-
-The live `tls_peet` suite sends a request with each profile to a fingerprint
-echo server and compares the JA4 and HTTP/2 values that the server reports
-with the reference values.
-
-The reference values come from the capture that the profile's `capture` and
-`captured_against` keys name. Neither test captures a browser. A matching JA4
-does not prove that every ClientHello field is equal.
-
-`captured_against` records the exact browser build a profile was captured from.
-A profile without it logs a `tracing` warning when it loads. The warning says
-the capture build is unrecorded.
+A profile is one TOML file under
+`crates/leyline/profiles/<family>/<version>.toml` that describes one browser
+build: its TLS ClientHello, HTTP/2 SETTINGS, HTTP/3 transport, and
+per-platform identity. Leyline compiles the bundled profiles into the crate
+and indexes them in `ProfileRegistry`; `SessionBuilder::browser` selects
+one. This page lists what ships and where each value comes from, then covers
+profile stability and your own profiles.
 
 ## Bundled profiles
 
@@ -70,85 +44,96 @@ the capture build is unrecorded.
 | CFNetwork iOS 27 | `CfnetworkIOS27` | `cfnetwork-3892.100.1-ios27.0-device` | gated |
 | CFNetwork macOS 26 | `CfnetworkMacOS26` | `cfnetwork-3860.700.1-macos26.6.2-vm` | gated |
 
+Without `.platform()`, a session claims the first platform its profile
+covers, in the order Windows, macOS, Linux, Android, iOS, so a mobile-only
+browser such as `SafariIOS27` claims iOS. See
+[Sessions](sessions.md#platform-defaults-and-call-order).
+
+`Browser::latest(family)` returns the newest profile of a family whose
+`capture` is in the family's `latest_capture` list in `families.toml`. The
+list defaults to `browser`; Safari iOS and OkHttp add `emulator`, and
+CFNetwork uses `native` and `emulator`. The build fails when a family has no
+such profile. A `platform_browser` target resolves the same way.
+`Browser::default()` is `Browser::latest(Family::Chrome)`.
+
+Chromium-family profiles do not store `sec-ch-ua`. Leyline derives it from
+the major version and the `ch_ua_brand` field in `[meta]`, with Chromium's
+GREASE brand, version, and order rule.
+
+### What the JA4 column means
+
+A profile records a JA4 reference value under `[tls.fingerprint]` and an
+Akamai HTTP/2 reference value under `[h2.fingerprint]`. The offline
+`fingerprint_conformance` test computes both from the profile's `[tls]` and
+`[h2]` tables and compares them with the reference values. It gates the
+HTTP/2 value of every profile.
+
+- **Gated.** The profile sets `extension_permutation`, so the extension
+  order is fixed and the computed JA4 is exact. The test fails on a
+  difference.
+- **Estimated.** The profile leaves the extension order to BoringSSL, as
+  Chrome shuffles it on every connection, so the computed JA4 is an
+  estimate. The test reports a difference and passes. JA4 sorts the
+  extensions, so a live session still sends one JA4.
+
+The live `tls_peet` suite sends a request with each profile to a fingerprint
+echo server and compares the reported JA4 and HTTP/2 values with the
+reference values. Neither test captures a browser, and a matching JA4 does
+not prove that every ClientHello field is equal.
+
 ## Provenance
 
-Each profile comes from one of six sources:
+The reference values come from the capture that the profile's `capture` and
+`captured_against` keys in `[meta]` name. A profile without
+`captured_against` logs a `tracing` warning when it loads.
 
-- **Browser capture.** A capture of the named browser, with the build recorded
-  in `captured_against`.
-- **Native stack capture.** A capture of an operating system HTTP stack, such
-  as URLSession for CFNetwork, with the build recorded in `captured_against`.
-- **Non-browser build capture.** A capture of a related build that is not the
-  shipped browser, such as `chrome-headless-shell` or a WKWebView host.
-- **Emulator capture.** A capture of the shipped app on an Android emulator or
-  an iOS simulator. The app and the operating system's own TLS stack are real,
-  but the device is not a physical phone. The build and OS version are
-  recorded in `captured_against`.
-- **Inferred.** No capture of this version. Values come from a neighboring
-  version.
-- **Self-referential.** The reference values are Leyline's own past output, so
-  the offline test does not compare the profile with a browser.
+| `capture` | Source |
+| --- | --- |
+| `browser` | A capture of the named browser |
+| `native` | A capture of an OS HTTP stack, such as URLSession for CFNetwork |
+| `headless-shell`, `webview` | A related build that is not the shipped browser, such as `chrome-headless-shell` or a WKWebView host |
+| `emulator` | The shipped app on an Android emulator or iOS simulator: real app and OS TLS stack, not a physical phone |
+| `inferred` | No capture of this version. Values come from a neighboring version |
+| `self-referential` | The reference values are Leyline's own past output |
 
-The `capture` key in each profile's `[meta]` table records the source:
-`browser`, `native`, `headless-shell`, `webview`, `emulator`, `inferred`, or
-`self-referential`.
-
-| Profile | Provenance | `capture` | Source |
-| --- | --- | --- | --- |
-| Chrome 145 | Browser capture | `browser` | `chrome-145.0.7632.160` macOS and `145.0.7632.160` Windows headful; `145.0.7632.159` Linux headful |
-| Chrome 146 | Browser capture | `browser` | `chrome-146.0.7680.178` macOS and `146.0.7680.178` Windows headful; `146.0.7680.177` Linux headful |
-| Chrome 147 | Browser capture | `browser` | `chrome-147.0.7727.138` macOS and `147.0.7727.138` Windows headful; `147.0.7727.137` Linux headful |
-| Chrome 148 | Browser capture | `browser` | `chrome-148.0.7778.216` macOS and `148.0.7778.217` Windows headful; `148.0.7778.215` Linux headful |
-| Chrome 149 | Browser capture | `browser` | `chrome-149.0.7827.201` macOS and `149.0.7827.201` Windows headful; `149.0.7827.200` Linux headful |
-| Chrome 150 | Browser capture | `browser` | `chrome-150.0.7871.187` macOS and `150.0.7871.187` Windows headful; `150.0.7871.186` Linux headful |
-| Chrome 151 | Browser capture | `browser` | `chrome-151.0.7922.174` macOS and `151.0.7922.174` Windows headful; `151.0.7922.173` Linux headful |
-| Chrome 152 | Browser capture | `browser` | `chrome-152.0.7977.83` macOS and `152.0.7977.83` Windows headful; `152.0.7977.82` Linux headful |
-| Chrome 153 | Browser capture | `browser` | `chrome-153.0.8010.53` macOS and `153.0.8010.53` Windows headful; `153.0.8010.52` Linux headful |
-| Chrome 154 | Browser capture | `browser` | `chrome-154.0.8037.58` macOS and `154.0.8037.58` Windows headful; `154.0.8037.57` Linux headful |
-| Brave (Chromium 146) | Browser capture | `browser` | `brave-146.1.88.138`, macOS, Windows, and Linux headful |
-| Brave (Chromium 154) | Browser capture | `browser` | `brave-154.1.96.59`, macOS, Windows, and Linux headful |
-| Firefox 148 | Browser capture | `browser` | `firefox-148.0.2`, macOS and Linux `--headless`, Windows headful |
-| Firefox 149 | Browser capture | `browser` | `firefox-149.0.2`, macOS and Linux `--headless`, Windows headful |
-| Firefox 150 | Browser capture | `browser` | `firefox-150.0`, macOS and Linux `--headless`, Windows headful |
-| Firefox 151 | Browser capture | `browser` | `firefox-151.0.4`, macOS and Linux `--headless`, Windows headful |
-| Firefox 152 | Browser capture | `browser` | `firefox-152.0.6`, macOS and Linux `--headless`, Windows headful |
-| Firefox 153 | Browser capture | `browser` | `firefox-153.0.4`, macOS and Linux `--headless`, Windows headful |
-| Firefox 154 | Browser capture | `browser` | `firefox-154.0.1`, macOS and Linux `--headless`, Windows headful |
-| Firefox 155 | Browser capture | `browser` | `firefox-155.0.1`, macOS and Linux `--headless`, Windows headful |
-| Firefox 156 | Browser capture | `browser` | `firefox-156.0.1`, macOS and Linux `--headless`, Windows headful |
-| Safari 18 | Browser capture | `browser` | `safari-18.6-20621.3.11.11.3`, Safari.app on macOS 15.7.7 in a VM through safaridriver |
-| Safari 26 | Browser capture | `browser` | `safari-26.6.2-21624.5.1.11.3`, Safari.app on macOS 26.6.2 in a VM through safaridriver |
-| Safari 27 | Browser capture | `browser` | `safari-27.0-21625.1.29.18.28`, Safari.app 27.0 on macOS 26.6.2 in a VM through safaridriver |
-| Safari iOS 17 | Emulator capture | `emulator` | `safari-ios-17.5-21F79-simulator`, Mobile Safari in the iOS 17.5 simulator |
-| Safari iOS 18 | Emulator capture | `emulator` | `safari-ios-18.6-22G86-simulator`, Mobile Safari in the iOS 18.6 simulator |
-| Safari iOS 27 | Browser capture | `browser` | `safari-ios-27.0-iphone16,2-device`, Mobile Safari 27.0 on an iPhone 15 Pro Max (iOS 27.0); the iOS 27.0 simulator capture matches it |
-| OkHttp4 Android 10+ | Emulator capture | `emulator` | `okhttp-4.12.0`, test app on the platform TLS stack of an Android 17 emulator |
-| CFNetwork iOS 18 | Emulator capture | `emulator` | `cfnetwork-3826.600.41-ios18.6-simulator`, URLSession test binary in the iOS 18.6 simulator |
-| CFNetwork iOS 27 | Native stack capture | `native` | `cfnetwork-3892.100.1-ios27.0-device`, URLSession through Shortcuts on an iPhone 15 Pro Max (iOS 27.0) |
-| CFNetwork macOS 26 | Native stack capture | `native` | `cfnetwork-3860.700.1-macos26.6.2-vm`, URLSession test binary on macOS 26.6.2 in a VM; macOS 26.2 on hardware sends the same ClientHello |
-
-Chromium-family profiles do not store `sec-ch-ua`. Leyline derives it from the
-major version and the `ch_ua_brand` field in `[meta]`, with the same GREASE
-brand, version, and order rule that Chromium uses.
-
-`Browser::latest` returns the newest profile of a family whose `capture` is in
-the family's `latest_capture` list in `families.toml`. The list defaults to
-`browser`. CFNetwork uses `native` and `emulator`, and Safari iOS and OkHttp
-add `emulator`. The build fails when a family has no such profile. A
-`platform_browser` target resolves the same way, with the target family's
-`latest_capture` list. `Session::new()` uses `Browser::latest(Family::Chrome)`,
-the newest Chrome in the table above. You can pin the product line instead of
-a version:
-
-```rust
-use leyline::{Browser, Family};
-
-let chrome = Browser::latest(Family::Chrome);
-```
+| Profile | `capture` | Source |
+| --- | --- | --- |
+| Chrome 145 | `browser` | `chrome-145.0.7632.160` macOS and `145.0.7632.160` Windows headful; `145.0.7632.159` Linux headful |
+| Chrome 146 | `browser` | `chrome-146.0.7680.178` macOS and `146.0.7680.178` Windows headful; `146.0.7680.177` Linux headful |
+| Chrome 147 | `browser` | `chrome-147.0.7727.138` macOS and `147.0.7727.138` Windows headful; `147.0.7727.137` Linux headful |
+| Chrome 148 | `browser` | `chrome-148.0.7778.216` macOS and `148.0.7778.217` Windows headful; `148.0.7778.215` Linux headful |
+| Chrome 149 | `browser` | `chrome-149.0.7827.201` macOS and `149.0.7827.201` Windows headful; `149.0.7827.200` Linux headful |
+| Chrome 150 | `browser` | `chrome-150.0.7871.187` macOS and `150.0.7871.187` Windows headful; `150.0.7871.186` Linux headful |
+| Chrome 151 | `browser` | `chrome-151.0.7922.174` macOS and `151.0.7922.174` Windows headful; `151.0.7922.173` Linux headful |
+| Chrome 152 | `browser` | `chrome-152.0.7977.83` macOS and `152.0.7977.83` Windows headful; `152.0.7977.82` Linux headful |
+| Chrome 153 | `browser` | `chrome-153.0.8010.53` macOS and `153.0.8010.53` Windows headful; `153.0.8010.52` Linux headful |
+| Chrome 154 | `browser` | `chrome-154.0.8037.58` macOS and `154.0.8037.58` Windows headful; `154.0.8037.57` Linux headful |
+| Brave (Chromium 146) | `browser` | `brave-146.1.88.138`, macOS, Windows, and Linux headful |
+| Brave (Chromium 154) | `browser` | `brave-154.1.96.59`, macOS, Windows, and Linux headful |
+| Firefox 148 | `browser` | `firefox-148.0.2`, macOS and Linux `--headless`, Windows headful |
+| Firefox 149 | `browser` | `firefox-149.0.2`, macOS and Linux `--headless`, Windows headful |
+| Firefox 150 | `browser` | `firefox-150.0`, macOS and Linux `--headless`, Windows headful |
+| Firefox 151 | `browser` | `firefox-151.0.4`, macOS and Linux `--headless`, Windows headful |
+| Firefox 152 | `browser` | `firefox-152.0.6`, macOS and Linux `--headless`, Windows headful |
+| Firefox 153 | `browser` | `firefox-153.0.4`, macOS and Linux `--headless`, Windows headful |
+| Firefox 154 | `browser` | `firefox-154.0.1`, macOS and Linux `--headless`, Windows headful |
+| Firefox 155 | `browser` | `firefox-155.0.1`, macOS and Linux `--headless`, Windows headful |
+| Firefox 156 | `browser` | `firefox-156.0.1`, macOS and Linux `--headless`, Windows headful |
+| Safari 18 | `browser` | `safari-18.6-20621.3.11.11.3`, Safari.app on macOS 15.7.7 in a VM through safaridriver |
+| Safari 26 | `browser` | `safari-26.6.2-21624.5.1.11.3`, Safari.app on macOS 26.6.2 in a VM through safaridriver |
+| Safari 27 | `browser` | `safari-27.0-21625.1.29.18.28`, Safari.app 27.0 on macOS 26.6.2 in a VM through safaridriver |
+| Safari iOS 17 | `emulator` | `safari-ios-17.5-21F79-simulator`, Mobile Safari in the iOS 17.5 simulator |
+| Safari iOS 18 | `emulator` | `safari-ios-18.6-22G86-simulator`, Mobile Safari in the iOS 18.6 simulator |
+| Safari iOS 27 | `browser` | `safari-ios-27.0-iphone16,2-device`, Mobile Safari 27.0 on an iPhone 15 Pro Max (iOS 27.0); the iOS 27.0 simulator capture matches it |
+| OkHttp4 Android 10+ | `emulator` | `okhttp-4.12.0`, test app on the platform TLS stack of an Android 17 emulator |
+| CFNetwork iOS 18 | `emulator` | `cfnetwork-3826.600.41-ios18.6-simulator`, URLSession test binary in the iOS 18.6 simulator |
+| CFNetwork iOS 27 | `native` | `cfnetwork-3892.100.1-ios27.0-device`, URLSession through Shortcuts on an iPhone 15 Pro Max (iOS 27.0) |
+| CFNetwork macOS 26 | `native` | `cfnetwork-3860.700.1-macos26.6.2-vm`, URLSession test binary on macOS 26.6.2 in a VM; macOS 26.2 on hardware sends the same ClientHello |
 
 ## Capture notes
 
-These facts come from the captures behind the bundled profiles.
+The facts behind the bundled profiles, from their captures in
+`crates/leyline/profiles/captures/`.
 
 - **Chrome 145 to 154.** Branded Google Chrome builds from Google's update
   server and apt repository, captured on 2026-09-25. macOS and Windows ran
@@ -324,7 +309,6 @@ These facts come from the captures behind the bundled profiles.
   704) has one data point and is not confirmed. The iOS 18 build shares the
   duplicate 0x0805, zlib compression, the leading GREASE cipher, and the
   `m,s,p,a` pseudo-header order with macOS.
-
 - **GREASE signature algorithm.** Chrome 152 to 154, Brave 1.96.59, Edge
   153 and 154, and Opera 136 put one GREASE value first in
   `signature_algorithms` on every captured platform. Chrome 145 to 151 and
@@ -420,7 +404,8 @@ connection ID lengths, the SETTINGS list, the control stream frames, and the
 pseudo-header order. `[h3.tls]` lists only the TLS 1.3 ciphers, in the
 captured order, and no `min_tls_version` or `padding`, because QUIC sends
 neither. Values the browser picks at random per connection are random in
-Leyline in the same way. See [HTTP/3](http3.md) for the keys.
+Leyline in the same way. See [HTTP/3](http3.md#quic-fingerprint) for the
+keys.
 
 - **Chromium.** The transport parameters come in a random order. All builds
   send `version_information` with a GREASE version at a random position,
@@ -465,7 +450,7 @@ same extension ID, so the JA4 is the same.
 ## Uncaptured values
 
 These values have no capture of the official build on their own platform.
-Leyline keeps them so that the API stays complete, but no capture backs them.
+Leyline keeps them so the API stays complete.
 
 - Chrome `[identity.android]` 146 to 154: only Chrome 145 on Android is
   captured. The rows follow the reduced `Android 10; K` user agent.
@@ -474,22 +459,82 @@ Leyline keeps them so that the API stays complete, but no capture backs them.
 
 ## Update cadence
 
-- **Chrome and Firefox:** Leyline adds a profile for each new stable major
-  release. Both browsers ship a major release every four weeks.
-- **Safari:** Leyline adds a profile when Apple ships an OS release, because
-  Safari's TLS stack changes with macOS and iOS.
-- **Brave, OkHttp, and CFNetwork:** Leyline recaptures the profile when the
-  upstream engine version in `captured_against` changes.
+- **Chrome and Firefox:** a profile for each new stable major release. Both
+  ship a major release every four weeks.
+- **Safari:** a profile when Apple ships an OS release, because Safari's TLS
+  stack changes with macOS and iOS.
+- **Brave, OkHttp, and CFNetwork:** a recapture when the upstream engine
+  version in `captured_against` changes.
 
 Every new profile records the exact build in `captured_against`, and the JA4
 and HTTP/2 reference values from that capture.
 
+## Profile data stability
+
+A release can change the data behind a pinned variant such as
+`Browser::Chrome154` to correct a capture; the CHANGELOG names every such
+change. `Browser::latest` moves to newer captures in patch releases.
+
+`SessionIdentity::profile_id()` returns 16 hex characters: a hash of the
+profile data the session uses, with the platform and the brand. The same
+data gives the same id in every release, and any change gives a new id. It
+is `None` for a plain session. A profile loaded from TOML gets an id from its
+TOML text.
+
+To keep a device stable across upgrades, pin the variant, store
+`profile_id()`, and pass it to `SessionBuilder::expect_profile_id` on start.
+`build()` then fails with `Kind::Config` when the data changed, and
+`err.is_profile_changed()` is `true`.
+
+```rust,no_run
+use leyline::{Browser, Platform, Session};
+
+# fn run(saved_id: &str) -> leyline::Result<()> {
+let session = Session::builder()
+    .browser(Browser::Chrome154)
+    .platform(Platform::Windows)
+    .expect_profile_id(saved_id)
+    .build()?;
+# let _ = session;
+# Ok(())
+# }
+```
+
+### Freeze the profile data
+
+To keep a device across a data change, store the profile itself.
+`SessionIdentity::export_profile()` returns the profile TOML the session
+uses. A session built from that TOML sends the same data and has the same
+`profile_id()`. `Device::pin_profile` stores it in a `Device`; see
+[Accounts](accounts.md#create-the-device-once).
+
+```rust,no_run
+use leyline::{Browser, BrowserProfile, Platform, Session};
+
+# fn run() -> Result<(), Box<dyn std::error::Error>> {
+let session = Session::builder()
+    .browser(Browser::Chrome154)
+    .platform(Platform::Windows)
+    .build()?;
+let identity = session.identity();
+let frozen = identity.export_profile().ok_or("no profile to export")?;
+let again = Session::builder()
+    .profile(BrowserProfile::from_toml(&frozen)?)
+    .platform(Platform::Windows)
+    .build()?;
+assert_eq!(again.identity().profile_id(), identity.profile_id());
+# Ok(())
+# }
+```
+
 ## Load your own profile directory
 
-`ProfileRegistry::load` reads a directory laid out the same way as the bundled
-set, `<family>/<version>.toml`, and runs the same parse and extension-order
-validation as the compiled-in registry. `SessionBuilder::profile` sends a
-loaded profile:
+`ProfileRegistry::load(dir)` reads a directory laid out like the bundled
+set, `<family>/<version>.toml`, in sorted order, with the same parse and
+extension-order validation as the bundled registry. Use it for a browser
+release that your crate version does not bundle yet.
+`BrowserProfile::from_toml` parses one profile from a string with the same
+validation. `SessionBuilder::profile` sends either result.
 
 ```rust,no_run
 use std::path::Path;
@@ -509,92 +554,74 @@ let session = Session::builder()
 # }
 ```
 
-`BrowserProfile::from_toml` parses one profile from a string, and its result
-goes to `SessionBuilder::profile` the same way.
+`load` returns a `ProfileError`: `Io` when a directory or file cannot be
+read, `Parse` when a TOML file is invalid or its `extension_permutation`
+disagrees with the extensions its `[tls]` block turns on, and `Empty` when
+the directory holds no profile.
 
-`load` returns `ProfileError::Io` when a file cannot be read,
-`ProfileError::Parse` when a TOML file is invalid or its
-`extension_permutation` disagrees with the extensions its `[tls]` block turns
-on, and `ProfileError::Empty` when the directory holds no profile.
+A loaded profile carries its own `[identity.<platform>]` tables, which give
+the user agent, `sec-ch-ua`, and `accept_language` for the platform. A table
+without `accept_language` takes the value `profiles/bare.toml` sets for the
+platform. `build` returns `Kind::Config` when the profile has no table for
+the platform; without `.platform()`, the platform is Windows. A brand overlay
+(`SessionBuilder::brand`) needs `chromium_major` in `[meta]`.
 
-A loaded profile carries its own `[identity.<platform>]` tables. The session
-reads the user agent, `sec-ch-ua`, and `accept_language` for the chosen
-platform from those tables. A table without `accept_language` takes the value
-that `profiles/bare.toml` sets for the platform. `build` returns `Kind::Config`
-when the profile has no table for that platform. Without `.platform()`, the
-platform is Windows. A brand overlay (`SessionBuilder::brand`) needs
-`chromium_major` in `[meta]`.
-The request headers follow `header_style` in `[meta]`. `profiles/headers.toml`
-defines every header style. Each top-level table is one style, and its key is
-the `header_style` value: `chromium`, `gecko`, `webkit`, `webkit-26`,
-`webkit-17`, `okhttp`, `cfnetwork`, `cfnetwork-26`, `brave`, and `brave-154`.
-The build generates the `HeaderStyle` enum from this file, so a new style needs
-only a new table. The build fails when a profile or a brand names a style that
-the file does not define.
+### Header styles
 
-A style has these keys:
+The request headers follow `header_style` in `[meta]`. Each top-level table
+of `profiles/headers.toml` is one style, keyed by its `header_style` value:
+`chromium`, `gecko`, `webkit`, `webkit-26`, `webkit-17`, `okhttp`,
+`cfnetwork`, `cfnetwork-26`, `brave`, and `brave-154`. The build generates
+the `HeaderStyle` enum from this file, so a new style needs only a new
+table, and the build fails when a profile or a brand names a style the file
+does not define. A brand row in `profiles/brands.toml` can set
+`header_style` to replace the profile's style.
 
-- `variant`: the `HeaderStyle` variant name.
-- `default`: `true` on the one style that a profile without `header_style`
-  uses. That style is `chromium`.
-- `fallback`: the header list for a request without a preset, or for a preset
-  that the style does not list.
-- `presets`: one header list for each `Preset`, with names, order, and values.
-- `extends`: another style. The style takes each preset and the fallback that
-  it does not define from that style.
-- `append`: headers that every request of the style carries. A session or
-  request header of the same name wins.
-- `order`: a header order that the session applies after the merge, including
-  the cookie and caller headers. `RequestBuilder::header_order` and
-  `FingerprintSpec::header_order` replace it.
+| Key | Meaning |
+| --- | --- |
+| `variant` | The `HeaderStyle` variant name |
+| `default` | `true` on the one style a profile without `header_style` uses: `chromium` |
+| `fallback` | The header list for a request without a preset, or a preset the style does not list |
+| `presets` | One header list per `Preset`, with names, order, and values |
+| `extends` | Another style that supplies each preset and the fallback this style does not define |
+| `append` | Headers every request of the style carries. A session or request header of the same name wins |
+| `order` | A header order applied after the merge, including the cookie and caller headers. `RequestBuilder::header_order` and `FingerprintSpec::header_order` replace it |
 
 The placeholders `{user_agent}`, `{sec_ch_ua}`, `{sec_ch_ua_mobile}`,
 `{sec_ch_ua_platform}`, `{accept_language}`, `{origin}`, `{referer}`, and
 `{fetch_site}` take the values of the session and the request. The `brave`
-style extends `chromium`. It sends
-`sec-gpc: 1`, a navigate `accept` without `application/signed-exchange`, and
-the header order of the Brave 146 capture of 2026-09-25 from tls.peet.ws. The
-`brave-154` style carries every preset from the Brave 1.96.59 capture, with
-`sec-gpc` in the position that Brave sends it, and has no `order`. A brand row
-in `profiles/brands.toml` can set `header_style` to replace the profile's
-style.
+style extends `chromium`: it sends `sec-gpc: 1`, a navigate `accept` without
+`application/signed-exchange`, and the header order of the Brave 146 capture.
+The `brave-154` style carries every preset from the Brave 1.96.59 capture,
+with `sec-gpc` where Brave sends it, and has no `order`.
 
-`key_shares` in `[tls]` lists the groups that the ClientHello `key_share`
-extension carries, in order. Each group must also be in `curves`. Without it,
-BoringSSL sends key shares for the first one or two groups.
+### TLS keys
 
-A brand in `profiles/brands.toml` can set a `[<brand>.tls]` table. Its
-`request_trust_anchors` value replaces the base profile's value when the brand
-is active. Edge sets it to `false`: Edge 152 and 154 do not send the trust anchors
-extension that Chrome 153 sends.
+`key_shares` in `[tls]` lists the groups the `key_share` extension carries,
+in order; each must also be in `curves`. Without it, BoringSSL sends key
+shares for the first one or two groups.
+
+A brand in `profiles/brands.toml` can set a `[<brand>.tls]` table whose
+`request_trust_anchors` replaces the base profile's value. Edge sets it to
+`false`: Edge 152 and 154 do not send the Trust Anchor Identifiers extension
+that Chrome 152 and later send.
 
 ## Build a profile from a JA3 or Akamai string
 
 `BrowserProfile::from_fingerprint` builds a profile from fingerprint strings
-instead of a TOML file. It returns the same `BrowserProfile` type, and
-`SessionBuilder::profile` sends it the same way.
+instead of a TOML file. `SessionBuilder::profile` sends the result.
 
-`FingerprintSpec` takes these inputs:
+| `FingerprintSpec` input | Sets |
+| --- | --- |
+| `ja3(raw)` | From `version,ciphers,extensions,curves,point formats`: the cipher list, the curve list, and the exact extension order |
+| `ja4_r(raw)` | From a raw JA4_r or JA4_ro string: the cipher list, the extension set, and the signature algorithms. The hashed JA4 form cannot be inverted and is rejected |
+| `akamai(raw)` | From `SETTINGS\|WINDOW_UPDATE\|PRIORITY\|pseudo-header order`: the SETTINGS order and values, the connection window, and the pseudo-header order |
+| `base(profile)` | The starting profile. The result keeps every value the strings do not carry: the identity tables, the headers, HTTP/3, the signature algorithms for a JA3 string, and the curves for a JA4_r string. Without a base, the bare profile |
+| `header_order(names)` | Replaces the order of the profile's header style |
+| `name(name)` | The profile name in logs and errors |
 
-- `ja3(raw)`: a raw JA3 string, `version,ciphers,extensions,curves,point
-  formats`. It sets the cipher list, the curve list, and the exact extension
-  order.
-- `ja4_r(raw)`: a raw JA4_r or JA4_ro string. It sets the cipher list, the
-  extension set, and the signature algorithms. The hashed JA4 form
-  (`t13d1516h2_8daaf6152771_806a8c22fdea`) cannot be inverted, so
-  `from_fingerprint` rejects it.
-- `akamai(raw)`: an Akamai HTTP/2 string,
-  `SETTINGS|WINDOW_UPDATE|PRIORITY|pseudo-header order`. It sets the SETTINGS
-  order and values, the connection window, and the pseudo-header order.
-- `base(profile)`: the profile to start from. The result keeps every value
-  the strings do not carry: the identity tables, the headers, HTTP/3, the
-  signature algorithms for a JA3 string, and the curves for a JA4_r string.
-  Without a base, the bare profile is the start.
-- `header_order(names)`: replaces the order of the profile's header style.
-- `name(name)`: the profile name in logs and errors.
-
-This example takes the JA3 and Akamai values of the bundled Chrome 152
-profile and applies them to the Chrome 148 profile:
+This example applies the JA3 and Akamai values of the bundled Chrome 152
+profile to the Chrome 148 profile:
 
 ```rust
 use leyline::profile::FingerprintSpec;
@@ -622,37 +649,8 @@ let session = Session::builder().profile(profile).audit(true).build()?;
 # }
 ```
 
-`Response::audit` confirms the result. A session built from these strings
-reports the same JA3 and Akamai values as the Chrome 152 session:
-
-```rust,no_run
-# use leyline::profile::FingerprintSpec;
-# use leyline::{Browser, BrowserProfile, Session};
-# async fn run(ja3: &str, akamai: &str) -> leyline::Result<()> {
-let spec = FingerprintSpec::new()
-    .base(Browser::Chrome148.profile().clone())
-    .ja3(ja3)
-    .akamai(akamai);
-let custom = Session::builder()
-    .profile(BrowserProfile::from_fingerprint(spec)?)
-    .audit(true)
-    .build()?;
-let reference = Session::builder()
-    .browser(Browser::Chrome152)
-    .audit(true)
-    .build()?;
-
-let url = "https://tls.peet.ws/api/all";
-let custom = custom.get(url).await?;
-let reference = reference.get(url).await?;
-let (Some(custom), Some(reference)) = (custom.audit(), reference.audit()) else {
-    return Ok(());
-};
-assert_eq!(custom.ja3, reference.ja3);
-assert_eq!(custom.h2_fingerprint, reference.h2_fingerprint);
-# Ok(())
-# }
-```
+A session built from these strings reports the same `ja3` and
+`h2_fingerprint` in `Response::audit()` as a Chrome 152 session.
 
 These rules apply to the strings:
 
@@ -660,18 +658,17 @@ These rules apply to the strings:
   without GREASE keeps the base value.
 - Each extension ID turns on the `[tls]` setting that sends it. An extension
   that carries data (`application_settings`, `compress_certificate`,
-  `delegated_credentials`, `record_size_limit`) takes its value from the base
-  profile. `from_fingerprint` fails when the base has no value.
+  `delegated_credentials`, `record_size_limit`) takes its value from the
+  base, and `from_fingerprint` fails when the base has none.
 - `pre_shared_key` (41) sets `pre_shared_key = true`. `padding` (21) sets
   `padding = true` and must be the last extension.
-- The JA3 version must be 771 and the point formats must be `0`. The Akamai
-  PRIORITY field must be `0`.
-- A cipher, curve, or signature algorithm ID that is not in Leyline's
-  built-in table fails. An extension or SETTINGS ID that Leyline cannot send
-  also fails.
+- The JA3 version must be 771 and the point formats `0`. The Akamai PRIORITY
+  field must be `0`.
+- A cipher, curve, or signature algorithm ID outside Leyline's built-in
+  table fails, as does an extension or SETTINGS ID that Leyline cannot send.
 
-Every failure returns `Kind::Config` with a message that names the format and
-the field.
+Every failure returns `Kind::Config` with a message that names the format
+and the field.
 
 ## Next
 

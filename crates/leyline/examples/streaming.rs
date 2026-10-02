@@ -1,6 +1,6 @@
 use bytes::Bytes;
 use futures_util::StreamExt;
-use leyline::{Body, Browser, Session};
+use leyline::{Body, Session};
 use tokio::io::AsyncWriteExt;
 
 #[tokio::main]
@@ -10,7 +10,7 @@ async fn main() -> leyline::Result<()> {
         .unwrap_or_else(|| "https://httpbin.org/post".to_string());
     let file_path = std::env::args().nth(2);
 
-    let session = Session::builder().browser(Browser::Chrome147).build()?;
+    let session = Session::builder().build()?;
 
     let body = if let Some(path) = file_path {
         let meta = tokio::fs::metadata(&path).await.expect("stat input file");

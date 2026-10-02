@@ -1,10 +1,11 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 #[cfg(feature = "http3")]
 use self::alt_svc::AltSvcCache;
+use self::expiring::ExpiringSet;
 use crate::pool::connect::Inflight;
 use tokio::sync::Semaphore;
 
@@ -12,9 +13,9 @@ use crate::h2::client::H2Client;
 #[cfg(feature = "http3")]
 use crate::quic::H3Client;
 
-use crate::pool::types::{PoolCounters, PoolKey, PoolStats, PooledConn};
 #[cfg(feature = "bench-internals")]
-use crate::pool::types::{TlsInfo, Transport};
+use crate::pool::types::TlsInfo;
+use crate::pool::types::{PoolCounters, PoolKey, PoolStats, PooledConn, Transport};
 use crate::util::lock;
 
 pub const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
@@ -25,33 +26,45 @@ pub const DEFAULT_MAX_H1_CONNS_PER_HOST: usize = 256;
 
 const POOL_REAP_INTERVAL: Duration = Duration::from_millis(250);
 
+pub(crate) const H1_ONLY_TTL: Duration = Duration::from_secs(600);
+
+#[cfg(feature = "http3")]
+pub(crate) const H3_BROKEN_TTL: Duration = Duration::from_secs(300);
+
+type OriginProxyKey = (String, u16, Option<String>);
+
 pub struct Pool {
-    pub(crate) inner: Mutex<HashMap<PoolKey, PooledConn>>,
+    pub(crate) inner: Arc<Mutex<HashMap<PoolKey, PooledConn>>>,
     pub(crate) inflight_h2: Inflight<H2Client>,
     #[cfg(feature = "http3")]
     pub(crate) inflight_h3: Inflight<H3Client>,
     #[cfg(feature = "http3")]
-    pub(crate) alt_svc: Mutex<AltSvcCache>,
-    pub(crate) h1_only: Mutex<HashSet<(String, u16, Option<String>)>>,
+    pub(crate) alt_svc: Arc<Mutex<AltSvcCache>>,
+    pub(crate) h1_only: Arc<Mutex<ExpiringSet<OriginProxyKey>>>,
+    pub(crate) hsts: Arc<Mutex<crate::core::hsts::HstsStore>>,
+    #[cfg(feature = "http3")]
+    pub(crate) h3_broken: Arc<Mutex<ExpiringSet<OriginProxyKey>>>,
     pub(crate) idle_timeout: Duration,
     pub(crate) max_connections: usize,
     pub(crate) max_h1_conns_per_host: usize,
     pub(crate) h2_ping_after_idle: Option<Duration>,
     pub(crate) h2_ping_timeout: Duration,
     pub(crate) max_body_size: usize,
-    pub(crate) h1_permits: Mutex<HashMap<PoolKey, Arc<Semaphore>>>,
-    pub(crate) counters: PoolCounters,
+    pub(crate) h1_permits: Arc<Mutex<HashMap<PoolKey, Arc<Semaphore>>>>,
+    pub(crate) counters: Arc<PoolCounters>,
+    pub(crate) partition: u64,
     created: Instant,
-    next_reap_ms: AtomicU64,
+    next_reap_ms: Arc<AtomicU64>,
 }
 
 impl Pool {
     pub(crate) fn note_h1_only(&self, host: &str, port: u16, proxy: Option<&str>) {
-        lock(&self.h1_only).insert((host.to_string(), port, proxy.map(str::to_string)));
+        let now = SystemTime::now();
+        lock(&self.h1_only).insert(origin_proxy_key(host, port, proxy), now + H1_ONLY_TTL, now);
     }
 
     pub(crate) fn is_h1_only(&self, host: &str, port: u16, proxy: Option<&str>) -> bool {
-        lock(&self.h1_only).contains(&(host.to_string(), port, proxy.map(str::to_string)))
+        lock(&self.h1_only).contains(&origin_proxy_key(host, port, proxy), SystemTime::now())
     }
 
     #[cfg(feature = "http3")]
@@ -64,26 +77,46 @@ impl Pool {
         lock(&self.alt_svc).knows_h3(host, port, std::time::SystemTime::now())
     }
 
+    #[cfg(feature = "http3")]
+    pub(crate) fn alt_svc_entries(&self) -> Vec<(String, u16, SystemTime)> {
+        lock(&self.alt_svc).export(SystemTime::now())
+    }
+
+    #[cfg(feature = "http3")]
+    pub(crate) fn restore_alt_svc(&self, entries: &[(String, u16, SystemTime)]) {
+        lock(&self.alt_svc).import(entries, SystemTime::now());
+    }
+
+    #[cfg(feature = "http3")]
+    pub(crate) fn note_h3_broken(&self, host: &str, port: u16, proxy: Option<&str>) {
+        let now = SystemTime::now();
+        lock(&self.h3_broken).insert(
+            origin_proxy_key(host, port, proxy),
+            now + H3_BROKEN_TTL,
+            now,
+        );
+    }
+
+    #[cfg(feature = "http3")]
+    pub(crate) fn is_h3_broken(&self, host: &str, port: u16, proxy: Option<&str>) -> bool {
+        lock(&self.h3_broken).contains(&origin_proxy_key(host, port, proxy), SystemTime::now())
+    }
+
+    pub(crate) fn clear_h1_only(&self, host: &str, port: u16, proxy: Option<&str>) {
+        lock(&self.h1_only).remove(&origin_proxy_key(host, port, proxy));
+    }
+
+    #[cfg(feature = "http3")]
+    pub(crate) fn clear_h3_broken(&self, host: &str, port: u16, proxy: Option<&str>) {
+        lock(&self.h3_broken).remove(&origin_proxy_key(host, port, proxy));
+    }
+
     pub fn new() -> Self {
-        Self {
-            inner: Mutex::new(HashMap::new()),
-            inflight_h2: Inflight::default(),
-            #[cfg(feature = "http3")]
-            inflight_h3: Inflight::default(),
-            #[cfg(feature = "http3")]
-            alt_svc: Mutex::new(AltSvcCache::default()),
-            h1_only: Mutex::new(HashSet::new()),
-            idle_timeout: DEFAULT_IDLE_TIMEOUT,
-            max_connections: DEFAULT_MAX_CONNECTIONS,
-            max_h1_conns_per_host: DEFAULT_MAX_H1_CONNS_PER_HOST,
-            h2_ping_after_idle: super::liveness::DEFAULT_H2_PING_AFTER_IDLE,
-            h2_ping_timeout: super::liveness::DEFAULT_H2_PING_TIMEOUT,
-            max_body_size: crate::core::DEFAULT_MAX_BODY_SIZE,
-            h1_permits: Mutex::new(HashMap::new()),
-            counters: PoolCounters::default(),
-            created: Instant::now(),
-            next_reap_ms: AtomicU64::new(0),
-        }
+        Self::with_limits(
+            DEFAULT_IDLE_TIMEOUT,
+            DEFAULT_MAX_CONNECTIONS,
+            DEFAULT_MAX_H1_CONNS_PER_HOST,
+        )
     }
 
     pub fn with_limits(
@@ -97,30 +130,77 @@ impl Pool {
             "max_h1_conns_per_host must be at least 1"
         );
         Self {
-            inner: Mutex::new(HashMap::new()),
+            inner: Arc::default(),
             inflight_h2: Inflight::default(),
             #[cfg(feature = "http3")]
             inflight_h3: Inflight::default(),
             #[cfg(feature = "http3")]
-            alt_svc: Mutex::new(AltSvcCache::default()),
-            h1_only: Mutex::new(HashSet::new()),
+            alt_svc: Arc::default(),
+            h1_only: Arc::default(),
+            hsts: Arc::default(),
+            #[cfg(feature = "http3")]
+            h3_broken: Arc::default(),
             idle_timeout,
             max_connections,
             max_h1_conns_per_host,
             h2_ping_after_idle: super::liveness::DEFAULT_H2_PING_AFTER_IDLE,
             h2_ping_timeout: super::liveness::DEFAULT_H2_PING_TIMEOUT,
             max_body_size: crate::core::DEFAULT_MAX_BODY_SIZE,
-            h1_permits: Mutex::new(HashMap::new()),
-            counters: PoolCounters::default(),
+            h1_permits: Arc::default(),
+            counters: Arc::default(),
+            partition: 0,
             created: Instant::now(),
-            next_reap_ms: AtomicU64::new(0),
+            next_reap_ms: Arc::default(),
+        }
+    }
+
+    pub(crate) fn shared_view(&self, partition: u64) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner),
+            inflight_h2: self.inflight_h2.clone(),
+            #[cfg(feature = "http3")]
+            inflight_h3: self.inflight_h3.clone(),
+            #[cfg(feature = "http3")]
+            alt_svc: Arc::clone(&self.alt_svc),
+            h1_only: Arc::clone(&self.h1_only),
+            hsts: Arc::clone(&self.hsts),
+            #[cfg(feature = "http3")]
+            h3_broken: Arc::clone(&self.h3_broken),
+            idle_timeout: self.idle_timeout,
+            max_connections: self.max_connections,
+            max_h1_conns_per_host: self.max_h1_conns_per_host,
+            h2_ping_after_idle: self.h2_ping_after_idle,
+            h2_ping_timeout: self.h2_ping_timeout,
+            max_body_size: self.max_body_size,
+            h1_permits: Arc::clone(&self.h1_permits),
+            counters: Arc::clone(&self.counters),
+            partition,
+            created: self.created,
+            next_reap_ms: Arc::clone(&self.next_reap_ms),
+        }
+    }
+
+    pub(crate) fn key(
+        &self,
+        scheme: &str,
+        host: &str,
+        port: u16,
+        proxy: Option<&str>,
+        transport: Transport,
+    ) -> PoolKey {
+        PoolKey {
+            partition: self.partition,
+            ..super::make_key(scheme, host, port, proxy, transport)
         }
     }
 
     pub fn stats(&self) -> PoolStats {
         let entries = lock(&self.inner).len();
+        let counts = self.connection_counts();
         PoolStats {
             entries,
+            busy: counts.busy,
+            idle: counts.idle,
             max_connections: self.max_connections,
             h2_hits: self.counters.h2_hits.load(Ordering::Relaxed),
             h2_misses: self.counters.h2_misses.load(Ordering::Relaxed),
@@ -224,13 +304,15 @@ impl Pool {
     }
 
     pub(crate) fn fresh(&self) -> Self {
-        Self::with_limits(
+        let mut pool = Self::with_limits(
             self.idle_timeout,
             self.max_connections,
             self.max_h1_conns_per_host,
         )
         .with_h2_ping(self.h2_ping_after_idle, self.h2_ping_timeout)
-        .with_max_body_size(self.max_body_size)
+        .with_max_body_size(self.max_body_size);
+        pool.partition = self.partition;
+        pool
     }
 
     #[must_use]
@@ -258,6 +340,7 @@ impl Pool {
                     port: 443,
                     proxy: None,
                     transport: Transport::Tcp,
+                    partition: 0,
                 },
                 PooledConn::H2 {
                     handle: handle.clone(),
@@ -276,10 +359,15 @@ impl Pool {
             port: 443,
             proxy: None,
             transport: Transport::Tcp,
+            partition: 0,
         };
         self.evict_idle();
         self.checkout_h2(&key).is_some()
     }
+}
+
+fn origin_proxy_key(host: &str, port: u16, proxy: Option<&str>) -> OriginProxyKey {
+    (host.to_string(), port, proxy.map(str::to_string))
 }
 
 impl Default for Pool {
@@ -291,7 +379,10 @@ impl Default for Pool {
 #[cfg(test)]
 mod tests;
 
+mod counts;
 mod slots;
+
+pub(crate) mod expiring;
 
 #[cfg(feature = "http3")]
 mod alt_svc;

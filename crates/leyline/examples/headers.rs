@@ -4,7 +4,7 @@ const URL: &str = "https://example.com/protected";
 
 #[tokio::main]
 async fn main() -> leyline::Result<()> {
-    let session = Session::new();
+    let session = Session::builder().build()?;
 
     let resp = session
         .get(URL)

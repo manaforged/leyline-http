@@ -1,91 +1,112 @@
 # Responses
 
 A `Response` carries the status, the headers, the body, and the metadata
-Leyline collected while sending.
+Leyline collected while sending: the final URL, the redirect chain, the proxy,
+the timing, and the TLS facts. Read the metadata first, because every body
+call consumes the response.
 
-## Status
+## Status and headers
 
-`status()` returns an `http::StatusCode`. Its predicates answer the usual
-question without arithmetic: `is_success`, `is_redirection`,
-`is_client_error`, and `is_server_error`. Call `as_u16()` when you need the
-number.
+`status()` returns an `http::StatusCode`, with `is_success`,
+`is_redirection`, `is_client_error`, and `is_server_error`. `version()`
+returns `HttpVersion::Http1_1`, `Http2`, or `Http3`, and `as_str()` gives
+`"HTTP/1.1"`, `"HTTP/2"`, or `"HTTP/3"`.
+
+`headers()` returns the `http::HeaderMap`, duplicates included. Iteration
+does not follow wire order; `get_all` yields the values of one name in the
+order they arrived. `header(name)` returns the first value as `&str`, or
+`None` when it is missing or holds a byte outside visible ASCII. Read
+`headers()` for the raw bytes.
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
 let session = leyline::Session::new();
 let resp = session.get("https://example.com/").await?;
 if resp.status().is_success() {
-    println!("ok: {}", resp.status().as_u16());
+    println!("{} {}", resp.status().as_u16(), resp.version().as_str());
 }
-if resp.status() == leyline::http::StatusCode::NOT_MODIFIED {
-    println!("cached");
-}
-# Ok(())
-# }
-```
-
-`version()` returns `HttpVersion::Http1_1`, `Http2`, or `Http3`. `as_str()`
-turns it into `"HTTP/1.1"`, `"HTTP/2"`, or `"HTTP/3"`.
-
-## Headers
-
-`headers()` returns the `http::HeaderMap`, duplicates included. Use
-`get`, `get_all`, and iteration as with any `HeaderMap`. Iteration does not
-follow wire order. `get_all` yields the values of one name in the order they
-arrived.
-
-`header(name)` returns the first value for a name as a string slice,
-case-insensitively. It returns `None` when that first value has a byte outside
-visible ASCII, even if the bytes are valid UTF-8, and it does not look at later
-values. Read `headers()` for the raw bytes.
-
-```rust,no_run
-# async fn run() -> leyline::Result<()> {
-let session = leyline::Session::new();
-let resp = session.get("https://example.com/").await?;
-
-for (name, value) in resp.headers() {
-    println!("{name}: {}", value.to_str().unwrap_or_default());
-}
-
 let ctype = resp.header("content-type");
-let links: Vec<&str> = resp
+let cookies: Vec<&[u8]> = resp
     .headers()
-    .get_all(leyline::http::header::LINK)
+    .get_all("set-cookie")
     .iter()
-    .filter_map(|v| v.to_str().ok())
+    .map(|v| v.as_bytes())
     .collect();
-# let _ = (ctype, links);
+# let _ = (ctype, cookies);
 # Ok(())
 # }
 ```
 
-`content_length()` parses the `Content-Length` header. Reading the body does
-not change `headers()` or `content_length()`. When Leyline decodes a buffered
-body, it removes `Content-Encoding` and `Content-Length` before it returns the
-response. A `.stream()` response keeps the wire values.
+`content_length()` parses `Content-Length`. When Leyline decodes a buffered
+body, it removes `Content-Encoding` and `Content-Length` from the headers. A
+`.stream()` response keeps the wire values.
 
-`request_headers()` reports the headers the session prepared to send, in send
-order, after the preset block, the cookie jar, and your own headers were
-merged. It requires `.audit(true)` on the session; without audit it returns an
-empty list. The values are prepared before dispatch, not captured from the
-transport.
+`request_headers()` lists the headers the session prepared to send, in send
+order, after the preset, the cookie jar, and your headers were merged. It
+needs `.audit(true)` on the session and is empty otherwise. The values are
+prepared before dispatch, not captured from the transport.
 
-## Cookies
+`trailers()` iterates trailing headers in wire order. Buffered HTTP/2 and
+HTTP/3 responses carry them; a streamed response and HTTP/1.1 yield none.
 
-The session jar stores `Set-Cookie` automatically. `cookies()` iterates the
-`leyline::cookie::Cookie` records parsed from the `Set-Cookie` headers of the
-final response. It lists every header that parses, including a deletion (a
-`Max-Age=0` or a past `Expires`), and it skips a header that does not parse. It
-does not ask the jar, so it can include a cookie that the jar refuses, and it
-does not list cookies from redirect legs. The jar is the store: read it with
-`session.cookies().get_cookie(&url, name)`. See [Cookies](cookies.md).
+### Relay headers
 
-## Redirect chain
+`relay_headers(body)` returns the headers without the hop-by-hop ones:
+`connection`, each header that `connection` names, `keep-alive`,
+`proxy-connection`, `te`, `trailer`, `transfer-encoding`, and `upgrade` (RFC
+9110, section 7.6.1). `RelayBody::AsReceived` matches a body from
+`into_stream()`. `RelayBody::Decoded` matches a body from `bytes()`, `text()`,
+or `into_decoded_stream()`, and also drops `content-encoding` and
+`content-length` when the response was encoded. See
+[Service integration](service-integration.md#relay-an-upstream-body).
 
-`url()` returns the final URL as a `&url::Url`. `redirect_chain()` returns the
-URLs visited on the way as a `&[url::Url]`, in order, and is empty when nothing
-redirected. The chain holds each URL without its user name and password.
+## Bodies
+
+Without `.stream()`, Leyline reads, decodes, and caps the whole body before
+`send()` returns. With `.stream()`, `send()` returns at the headers. The
+reading calls work in both modes: a buffered body returns at once, and a
+streamed one is drained, with the `read` timeout on each chunk, then decoded.
+
+| Call | Returns | Notes |
+| --- | --- | --- |
+| `text().await` | `Result<String>` | Decodes with the `Content-Type` charset, default UTF-8 |
+| `text_with_charset(label).await` | `Result<String>` | Uses `label` when the response declares no charset |
+| `bytes().await` | `Result<bytes::Bytes>` | The decoded body |
+| `json::<T>().await` | `Result<T>` | Deserializes with serde. A failure is `Kind::Json`, in `ErrorCategory::Decode` |
+| `into_decoded_stream(limit)` | `Result<BodyStream>` | The decoded body as a stream, capped at `limit` |
+| `copy_decoded_to(writer, limit).await` | `Result<u64>` | Writes the decoded body, capped at `limit` |
+| `download_to(path, limit).await` | `Result<u64>` | Writes the decoded body to a file in one atomic step |
+| `into_stream()`, `copy_to(writer).await` | `Result<BodyStream>`, `Result<u64>` | The bytes as sent on a `.stream()` response; the decoded body on a buffered one |
+| `read_until(limit, done).await` | `Result<Vec<u8>>` | Stops early on a predicate or a byte limit |
+
+[Streaming](streaming.md) covers the streaming calls and downloads.
+
+`text()` replaces invalid sequences with U+FFFD, and a leading byte order mark
+overrides the declared charset. Without the `charset` feature, on by default,
+`text()` uses lossy UTF-8.
+
+### Size cap and content coding
+
+`CompressionConfig::max_body_size` (100 MiB by default) caps a buffered body
+and the decoded body, on every protocol. A body over the cap fails with
+`Kind::Body`, and the message names `max_body_size`.
+`SessionBuilder::max_body_size(bytes)` sets the same cap and wins over
+`CompressionConfig`.
+
+`CompressionConfig::new()` turns on gzip, deflate, br, and zstd, and a
+session decodes and advertises those that are also compiled in.
+`CompressionConfig::none()` turns them all off. Repeated `Content-Encoding`
+fields combine into one list. More than four codings fail with
+`Kind::Decode`. When a listed coding is turned off, the body comes back as
+received.
+
+## Final URL and redirects
+
+`url()` returns the final URL after redirects. `redirect_chain()` returns
+each URL that answered with a redirect Leyline followed, in order, without
+the final URL and without user name or password. It is empty when nothing
+redirected. `attempts()` returns the number of transport attempts, 1 when no
+retry ran.
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
@@ -94,92 +115,68 @@ let resp = session.get("https://example.com/old").await?;
 for url in resp.redirect_chain() {
     println!("via {url}");
 }
-println!("landed on {}", resp.url());
-if resp.url().host_str() != Some("example.com") {
-    println!("left the site");
+println!("landed on {} after {} attempts", resp.url(), resp.attempts());
+# Ok(())
+# }
+```
+
+See [Redirects](redirects.md).
+
+## Follow `Link` pagination
+
+`link(rel)` returns the URL of the first `Link` entry with that relation.
+`links()` returns every entry as a `Link` with `url`, `rel`, and `params`.
+Parsing follows RFC 8288: several headers, comma-separated entries, quoted
+parameters, and several relations in one `rel`. Relative URLs resolve
+against `url()`, and the `rel` match ignores case.
+
+`RequestBuilder::pages()` turns a request into a `Pages` sequence that
+follows `Link: rel="next"`. Await `pages.next()`, or use it as a
+`futures_util::Stream`. Each follow-up is a `GET` with the first request's
+headers, timeouts, retry policy, and `error_for_status()` setting. The
+sequence ends after a page with no `next` link, after an error, or at a
+`next` URL it already fetched.
+
+```rust,no_run
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+struct Item {
+    id: u64,
+    name: String,
+}
+
+# async fn run() -> leyline::Result<()> {
+let api = leyline::Session::builder().bearer_auth("my-token").build()?;
+let mut pages = api
+    .get("https://api.example/items")
+    .error_for_status()
+    .pages();
+while let Some(page) = pages.next().await {
+    for item in page?.json::<Vec<Item>>().await? {
+        println!("{} {}", item.id, item.name);
+    }
 }
 # Ok(())
 # }
 ```
 
-## Trailers
+## Cookies
 
-`trailers()` iterates trailing headers in wire order, as the same
-`HeaderName` and `HeaderValue` pairs. Buffered HTTP/2 and
-HTTP/3 responses carry them. A streaming response and HTTP/1.1 yield none.
-
-## Bodies
-
-The body is buffered unless the request called `.stream()`. The reading calls
-are async and work in both modes: a buffered body returns at once, and a
-streamed body is drained first, then decompressed. Draining honors the `read`
-timeout for each chunk.
-
-`CompressionConfig::max_body_size` (100 MiB by default) caps a buffered body:
-the bytes Leyline holds in memory for `bytes()`, `text()`, and `json()`, and
-the decoded body. It applies on HTTP/1.1, HTTP/2, and HTTP/3. A body over the
-cap fails with `Kind::Body`, and the message names `max_body_size`.
-
-A streamed body that you read with `into_stream()` or `copy_to()` has no cap.
-You read the chunks, so you control the memory, and Leyline does not decode the
-bytes.
-
-| Call | Returns | Notes |
-| --- | --- | --- |
-| `text().await` | `Result<String>` | Decodes with the `Content-Type` charset, default UTF-8. |
-| `text_with_charset(label).await` | `Result<String>` | Uses `label` when the response declares no charset. |
-| `bytes().await` | `Result<bytes::Bytes>` | Owned body bytes. |
-| `json::<T>().await` | `Result<T>` | Deserializes with serde. |
-| `into_stream()` | `Result<BodyStream>` | Takes the body as a stream. |
-| `copy_to(writer).await` | `Result<u64>` | Streams into any `AsyncWrite`, such as a file. Consumes the response. |
-| `read_until(..).await` | See [Streaming](streaming.md) | Stops early on a predicate or a byte limit. |
-
-Every reading call consumes the response, so
-`session.get(url).await?.text().await?` is one expression. Read `status()`,
-`headers()`, and other metadata before the body call.
-
-`text()` replaces invalid sequences with U+FFFD, and a leading byte order mark
-overrides the declared charset. The charset handling comes from the `charset`
-feature, on by default. Without it, `text()` falls back to lossy UTF-8.
-
-On a buffered response, `into_stream` hands back the decoded body as one chunk,
-and `copy_to` writes it. On a streamed response they give the bytes as sent,
-still compressed. The example below is buffered, so the file holds the decoded
-body.
-
-```rust,no_run
-# async fn run() -> leyline::Result<()> {
-let session = leyline::Session::new();
-let resp = session.get("https://example.com/report.csv").await?;
-let mut file = tokio::fs::File::create("report.csv").await?;
-let written = resp.copy_to(&mut file).await?;
-println!("{written} bytes");
-# Ok(())
-# }
-```
+The session jar stores `Set-Cookie` automatically. `cookies()` parses the
+`Set-Cookie` headers of the final response only. It lists every header that
+parses, deletions included, and does not ask the jar, so it can list a cookie
+the jar refused. Read the jar with `session.cookies().get_cookie(&url, name)`.
+See [Cookies](cookies.md).
 
 ## Turn a status into an error
 
-`error_for_status()` consumes the response and returns an error whose kind is
-`Kind::Status` for any status at or above 400. The error carries the code as a
-`StatusCode` and the final URL as a `url::Url`. `Display` and `Debug` hide the
-password and the query.
-
-`error_for_status_ref()` makes the same check on a borrowed response and
-returns `Ok(&Response)`. Use it when you need the headers or the body of an
-error response, such as a JSON error from an API or a `cf-ray` header.
-
-```rust,no_run
-# async fn run() -> leyline::Result<()> {
-let session = leyline::Session::new();
-match session.get("https://example.com/api").await?.error_for_status() {
-    Ok(resp) => println!("ok {}", resp.status()),
-    Err(e) if e.is_status() => println!("status {:?}", e.status()),
-    Err(e) => return Err(e),
-}
-# Ok(())
-# }
-```
+A 4xx or 5xx response is `Ok`. `error_for_status()` consumes the response and
+returns a `Kind::Status` error for a status of 400 or more, with the status,
+the headers, and the final URL. `error_for_status_ref()` makes the same check
+on a borrowed response, so you can still read the body of an error.
+`RequestBuilder::error_for_status()` checks during the send and also keeps up
+to 64 KiB of the body.
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
@@ -194,69 +191,58 @@ if let Err(e) = resp.error_for_status_ref() {
 # }
 ```
 
-`Error::status()` gives you back an `Option<http::StatusCode>`.
+[Errors](errors.md#status-codes-are-not-errors) covers the status error and
+its accessors.
 
-## Timing
+## Proxy, timing, and TLS
 
-`timing()` returns a `ResponseTiming` summed across redirect legs:
+`proxy()` returns the proxy that carried the response, with the password, or
+a user name without a password, replaced by `***`. It is `None` for a direct
+connection. Under a `ProxyPool` it names the proxy of the attempt that
+produced the response.
 
-- `reused`: every leg reused a pooled connection, so no handshake was paid.
-- `connect_ms`: DNS, TCP connect, TLS handshake, and HTTP/2 preface for the
-  legs that opened a fresh connection. `None` when every leg was warm.
-- `send_ms`: request sent to response, in milliseconds.
-- `total_ms`: connect plus send.
+### Timing
 
-An HTTP/3 leg records no timing. It adds nothing to `connect_ms`, `send_ms`, or
-`total_ms`, and it counts as not reused, so a response that includes an HTTP/3
-leg reports `reused` as `false`.
+`timing()` returns a `ResponseTiming` summed across redirect legs, on every
+protocol. It does not include the body read.
+
+| Field | Meaning |
+| --- | --- |
+| `reused` | Every leg reused a pooled connection |
+| `connect_ms` | DNS, TCP, TLS, and HTTP/2 preface over the legs that opened a connection; `None` when every leg was warm |
+| `send_ms` | Request sent to response head |
+| `total_ms` | Connect plus send |
+
+`tls()` returns a `TlsInfo` with the negotiated `version`, the `cipher`, and
+the peer certificate as DER (`peer_cert_der`). `audit()` returns the
+fingerprints the session presents when it was built with `.audit(true)`, and
+`None` otherwise. See [Fingerprints](fingerprints.md#audit-a-session).
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
-let session = leyline::Session::new();
+let session = leyline::Session::new().with_proxy("http://user:pass@proxy.example:8080");
 let resp = session.get("https://example.com/").await?;
 let t = resp.timing();
-println!("reused={} total={}ms", t.reused, t.total_ms);
+println!(
+    "{} reused={} total={}ms tls={:?}",
+    resp.proxy().unwrap_or("direct"),
+    t.reused,
+    t.total_ms,
+    resp.tls().and_then(|tls| tls.version.as_deref()),
+);
 # Ok(())
 # }
 ```
 
-## TLS facts and the audit block
+## Detect a block page
 
-`tls()` returns an `Option<&TlsInfo>` with the negotiated TLS `version`, the
-`cipher`, and the peer certificate in DER form (`peer_cert_der`). `version()`
-reports the negotiated protocol, which matches the ALPN value.
-
-`audit()` returns the fingerprints this session presents, but only when the
-session was built with `.audit(true)`. Otherwise it returns `None`. The block
-is computed once per response and cached.
-
-```rust,no_run
-# fn run() -> leyline::Result<()> {
-# tokio::runtime::Runtime::new().expect("runtime").block_on(async {
-let session = leyline::Session::builder()
-    .browser(leyline::Browser::default())
-    .audit(true)
-    .build()?;
-let resp = session.get("https://example.com/").await?;
-if let Some(a) = resp.audit() {
-    println!("ja3={} ja4={} ja4h={} h2={}", a.ja3, a.ja4, a.ja4h, a.h2_fingerprint);
-}
-# leyline::Result::Ok(())
-# })
-# }
-```
-
-See [Fingerprints](fingerprints.md) for what each field means and how far to
-trust it.
+`block()` returns a `BlockSignal` when the response matches a built-in rule
+for a bot challenge, a captcha, or a block page. `BlockRules` adds your own
+rules. See [Crawling](crawling.md#detect-a-block-page).
 
 ## Print a response
 
 `{:?}` prints the status, version, URL, redirect chain, headers, trailers,
-request headers, and timing. It does not print the body. The URL and each entry
-in the redirect chain print with the password and the query hidden. The value of
-an `Authorization`, `Proxy-Authorization`, `Cookie`, or `Set-Cookie` header
-prints as `***` wherever it appears.
-
-## Next
-
-Read [Streaming](streaming.md) for bodies too large to buffer.
+request headers, and timing, but not the body. URLs print with the password
+and the query hidden. `Authorization`, `Proxy-Authorization`, `Cookie`, and
+`Set-Cookie` values print as `***`.

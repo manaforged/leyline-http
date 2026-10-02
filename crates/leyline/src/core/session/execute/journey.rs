@@ -15,6 +15,7 @@ pub(super) struct Journey {
     pub(super) original_origin: String,
     pub(super) referrer: String,
     pub(super) initiator: Option<Url>,
+    pub(super) initiated: bool,
     pub(super) url: Arc<Url>,
     pub(super) method: String,
     pub(super) body: Body,
@@ -53,6 +54,7 @@ impl Journey {
         method: String,
         body: Body,
         extra: Option<HeaderList>,
+        page: Option<Url>,
         session_referer: Option<&str>,
     ) -> Self {
         let original_origin = url_origin(&url);
@@ -62,21 +64,27 @@ impl Journey {
             .and_then(|v| v.to_str().ok())
             .filter(|r| !r.is_empty())
             .map(str::to_owned);
-        let referrer = caller_referrer
-            .clone()
-            .unwrap_or_else(|| format!("{original_origin}/"));
         let caller_sets_referer = extra.as_ref().is_some_and(|h| h.get("referer").is_some());
-        let initiator = if caller_sets_referer {
+        let referred = if caller_sets_referer {
             caller_referrer.as_deref()
         } else {
             session_referer
         }
-        .and_then(|r| url.join(r).ok())
-        .or_else(|| Url::parse(&format!("{original_origin}/")).ok());
+        .and_then(|r| url.join(r).ok());
+        let initiated = page.is_some() || referred.is_some();
+        let referrer = page
+            .as_ref()
+            .map(|page| page.as_str().to_owned())
+            .or_else(|| caller_referrer.clone())
+            .unwrap_or_else(|| format!("{original_origin}/"));
+        let initiator = page
+            .or(referred)
+            .or_else(|| Url::parse(&format!("{original_origin}/")).ok());
         Self {
             original_origin,
             referrer,
             initiator,
+            initiated,
             url,
             method,
             body,

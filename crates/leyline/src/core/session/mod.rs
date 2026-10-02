@@ -71,6 +71,7 @@ pub(crate) struct SessionInner {
     accept_language: String,
     header_order: Option<Vec<String>>,
     default_headers: Vec<(String, String)>,
+    bearer: Option<builder::BearerToken>,
     proxy_config: ProxyConfig,
     timeouts: TimeoutConfig,
     redirect_policy: RedirectPolicy,
@@ -82,6 +83,7 @@ pub(crate) struct SessionInner {
     connector: FingerprintConnector,
     h2_config: H2Config,
     pool: Arc<Pool>,
+    shutdown: tokio_util::sync::CancellationToken,
     audit_tls: Option<Arc<crate::audit::AuditTlsCache>>,
     protocol_policy: ProtocolPolicy,
     default_retry: RetryPolicy,
@@ -90,6 +92,10 @@ pub(crate) struct SessionInner {
     #[cfg(feature = "http3")]
     tls_trust: TlsTrustConfig,
     profile: Arc<crate::profile::BrowserProfile>,
+    base_url: Option<Url>,
+    languages: Option<Vec<String>>,
+    host_limits: crate::core::config::HostLimits,
+    proxy_pool: Option<crate::core::proxy_pool::ProxyPool>,
     trace: Option<Arc<dyn crate::trace::Trace>>,
     #[expect(
         clippy::type_complexity,

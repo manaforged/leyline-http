@@ -634,6 +634,7 @@ dependencies = [
  "http",
  "leyline-bssl",
  "leyline-bssl-tokio",
+ "leyline-http",
  "leyline-quiche",
  "libc",
  "lru",
@@ -1437,6 +1438,7 @@ dependencies = [
  "idna",
  "percent-encoding",
  "serde",
+ "serde_derive",
 ]
 
 [[package]]

@@ -2,21 +2,25 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use tokio::sync::watch;
 use url::Url;
 
 use crate::cookie::parse;
 use crate::cookie::record::Cookie;
 use crate::util::lock;
 
-const MAX_COOKIES_PER_DOMAIN: usize = 180;
-const EVICT_PER_DOMAIN: usize = 30;
-const MAX_COOKIES_GLOBAL: usize = 3300;
-const EVICT_GLOBAL: usize = 300;
+use self::evict::settle;
+
+mod autosave;
+mod evict;
+mod persist;
+
+pub use autosave::JarAutosave;
 
 #[derive(Clone)]
 pub struct Jar {
     inner: Arc<Mutex<JarInner>>,
+    changes: Arc<watch::Sender<u64>>,
 }
 
 struct JarInner {
@@ -32,7 +36,16 @@ impl Jar {
     fn from_buckets(cookies: HashMap<String, Vec<Cookie>>, total: usize) -> Self {
         Self {
             inner: Arc::new(Mutex::new(JarInner { cookies, total })),
+            changes: Arc::new(watch::Sender::new(0)),
         }
+    }
+
+    pub fn changes(&self) -> watch::Receiver<u64> {
+        self.changes.subscribe()
+    }
+
+    fn changed(&self) {
+        self.changes.send_modify(|generation| *generation += 1);
     }
 
     pub fn snapshot(&self) -> Self {
@@ -50,6 +63,9 @@ impl Jar {
             .flatten()
             .cloned()
             .collect();
+        if incoming.is_empty() {
+            return;
+        }
         let mut jar = lock(&self.inner);
         for cookie in incoming {
             let domain = cookie.domain.to_lowercase();
@@ -66,6 +82,8 @@ impl Jar {
             };
             settle(&mut jar, &domain, added);
         }
+        drop(jar);
+        self.changed();
     }
 
     pub fn store_set_cookie(&self, set_cookie: &str, url: &Url) {
@@ -73,9 +91,14 @@ impl Jar {
     }
 
     fn store(&self, set_cookie: &str, url: &Url) {
-        let mut cookie = match parse::parse_set_cookie(set_cookie, url) {
-            Some(c) => c,
-            None => return,
+        if self.apply(set_cookie, url) {
+            self.changed();
+        }
+    }
+
+    fn apply(&self, set_cookie: &str, url: &Url) -> bool {
+        let Some(mut cookie) = parse::parse_set_cookie(set_cookie, url) else {
+            return false;
         };
         if !cookie.secure
             && url.scheme() != "https"
@@ -85,7 +108,7 @@ impl Jar {
                 .flatten()
                 .any(|existing| cookie.shadows_secure(existing))
         {
-            return;
+            return false;
         }
 
         if cookie.is_expired() {
@@ -95,11 +118,11 @@ impl Jar {
                 && let Some(pos) = entries.iter().position(|c| c.same_slot(&cookie))
             {
                 if entries[pos].secure && url.scheme() != "https" {
-                    return;
+                    return false;
                 }
-                jar.remove_in(&domain, |c| c.same_slot(&cookie));
+                return jar.remove_in(&domain, |c| c.same_slot(&cookie)) > 0;
             }
-            return;
+            return false;
         }
 
         let mut jar = lock(&self.inner);
@@ -110,7 +133,7 @@ impl Jar {
         let mut added = false;
         if let Some(pos) = entries.iter().position(|c| c.same_slot(&cookie)) {
             if entries[pos].secure && !cookie.secure {
-                return;
+                return false;
             }
             cookie.creation_time = entries[pos].creation_time;
             entries[pos] = cookie;
@@ -119,6 +142,7 @@ impl Jar {
             added = true;
         }
         settle(&mut jar, &domain, added);
+        true
     }
 
     pub(crate) fn store_response_cookies(&self, headers: &[&str], url: &Url) {
@@ -187,12 +211,22 @@ impl Jar {
     }
 
     pub fn remove_named(&self, name: &str) -> usize {
-        lock(&self.inner).remove_where(|c| c.name == name)
+        let removed = lock(&self.inner).remove_where(|c| c.name == name);
+        self.changed_if(removed)
     }
 
     pub fn remove(&self, url: &Url, name: &str) -> usize {
         let host = url.host_str().unwrap_or("");
-        lock(&self.inner).remove_where(|c| c.name == name && c.matches(host, &c.path, true))
+        let removed =
+            lock(&self.inner).remove_where(|c| c.name == name && c.matches(host, &c.path, true));
+        self.changed_if(removed)
+    }
+
+    fn changed_if(&self, removed: usize) -> usize {
+        if removed > 0 {
+            self.changed();
+        }
+        removed
     }
 
     pub fn all_cookies(&self) -> Vec<Cookie> {
@@ -230,9 +264,12 @@ impl Jar {
     }
 
     pub fn clear(&self) {
-        let mut jar = lock(&self.inner);
-        jar.cookies.clear();
-        jar.total = 0;
+        let removed = {
+            let mut jar = lock(&self.inner);
+            jar.cookies.clear();
+            std::mem::take(&mut jar.total)
+        };
+        self.changed_if(removed);
     }
 }
 
@@ -252,119 +289,8 @@ impl std::fmt::Debug for Jar {
     }
 }
 
-impl Serialize for Jar {
-    fn serialize<S: Serializer>(&self, ser: S) -> std::result::Result<S::Ok, S::Error> {
-        let jar = lock(&self.inner);
-        let mut flat: Vec<&Cookie> = jar.cookies.values().flatten().collect();
-        flat.sort_by(|a, b| {
-            a.domain
-                .cmp(&b.domain)
-                .then_with(|| a.path.cmp(&b.path))
-                .then_with(|| a.name.cmp(&b.name))
-                .then_with(|| a.creation_time.cmp(&b.creation_time))
-        });
-        flat.serialize(ser)
-    }
-}
-
-impl<'de> Deserialize<'de> for Jar {
-    fn deserialize<D: Deserializer<'de>>(de: D) -> std::result::Result<Self, D::Error> {
-        let cookies: Vec<Cookie> = Vec::deserialize(de)?;
-        let mut buckets: HashMap<String, Vec<Cookie>> = HashMap::new();
-        let mut total = 0;
-        for c in cookies {
-            let key = c.domain.to_lowercase();
-            buckets.entry(key).or_default().push(c);
-            total += 1;
-        }
-        Ok(Self::from_buckets(buckets, total))
-    }
-}
-
 fn plain_token(text: &str) -> bool {
     !text.chars().any(|c| c == ';' || c.is_control())
-}
-
-impl JarInner {
-    fn remove_where(&mut self, mut doomed: impl FnMut(&Cookie) -> bool) -> usize {
-        let mut removed = 0;
-        for entries in self.cookies.values_mut() {
-            let before = entries.len();
-            entries.retain(|c| !doomed(c));
-            removed += before - entries.len();
-        }
-        self.prune();
-        self.total -= removed;
-        removed
-    }
-
-    fn remove_in(&mut self, domain: &str, mut doomed: impl FnMut(&Cookie) -> bool) -> usize {
-        let Some(entries) = self.cookies.get_mut(domain) else {
-            return 0;
-        };
-        let before = entries.len();
-        entries.retain(|c| !doomed(c));
-        let removed = before - entries.len();
-        if entries.is_empty() {
-            self.cookies.remove(domain);
-        }
-        self.total -= removed;
-        removed
-    }
-
-    fn prune(&mut self) {
-        self.cookies.retain(|_, entries| !entries.is_empty());
-    }
-}
-
-fn settle(jar: &mut JarInner, domain: &str, added: bool) {
-    let mut evicted = 0;
-    if let Some(entries) = jar.cookies.get_mut(domain)
-        && entries.len() > MAX_COOKIES_PER_DOMAIN
-    {
-        evict_lru(entries, EVICT_PER_DOMAIN);
-        evicted = EVICT_PER_DOMAIN;
-    }
-    if added {
-        jar.total += 1;
-    }
-    jar.total -= evicted;
-    if jar.total > MAX_COOKIES_GLOBAL {
-        evict_global(&mut jar.cookies, EVICT_GLOBAL);
-        jar.prune();
-        jar.total = jar.cookies.values().map(|v| v.len()).sum();
-    }
-}
-
-fn evict_lru(cookies: &mut Vec<Cookie>, count: usize) {
-    cookies.sort_by_key(|a| a.last_access);
-    cookies.drain(..count.min(cookies.len()));
-}
-
-fn evict_global(all: &mut HashMap<String, Vec<Cookie>>, count: usize) {
-    let mut all_cookies: Vec<(String, usize, SystemTime)> = Vec::new();
-    for (domain, entries) in all.iter() {
-        for (i, cookie) in entries.iter().enumerate() {
-            all_cookies.push((domain.clone(), i, cookie.last_access));
-        }
-    }
-    all_cookies.sort_by_key(|a| a.2);
-
-    let to_remove = count.min(all_cookies.len());
-    let mut removals: HashMap<String, Vec<usize>> = HashMap::new();
-    for (domain, idx, _) in &all_cookies[..to_remove] {
-        removals.entry(domain.clone()).or_default().push(*idx);
-    }
-    for (domain, mut indices) in removals {
-        indices.sort_unstable_by(|a, b| b.cmp(a));
-        if let Some(entries) = all.get_mut(&domain) {
-            for idx in indices {
-                if idx < entries.len() {
-                    entries.remove(idx);
-                }
-            }
-        }
-    }
 }
 
 #[cfg(test)]

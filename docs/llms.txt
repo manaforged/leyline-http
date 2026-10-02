@@ -4,21 +4,29 @@
 
 ## leyline-http 0.1.0
 
-- [Every public item, one per line](reference/leyline-http/api.txt): 1281 lines
+- [Every public item, one per line](reference/leyline-http/api.txt): 1804 lines
 - [API overview](reference/leyline-http/index.html): tasks, modules, features, and examples
 - [API changes by release](reference/leyline-http/changes.html)
-- [leyline](reference/leyline-http/leyline.html): 472 items
-- [leyline::audit](reference/leyline-http/leyline-audit.html): 27 items
-- [leyline::cookie](reference/leyline-http/leyline-cookie.html): 29 items
-- [leyline::multipart](reference/leyline-http/leyline-multipart.html): 13 items
+- [leyline](reference/leyline-http/leyline.html): 665 items
+- [leyline::audit](reference/leyline-http/leyline-audit.html): 60 items
+- [leyline::cookie](reference/leyline-http/leyline-cookie.html): 36 items
+- [leyline::html](reference/leyline-http/leyline-html.html): 21 items
+- [leyline::multipart](reference/leyline-http/leyline-multipart.html): 14 items
 - [leyline::profile](reference/leyline-http/leyline-profile.html): 173 items
+- [leyline::testing](reference/leyline-http/leyline-testing.html): 27 items
 - [leyline::tls](reference/leyline-http/leyline-tls.html): 8 items
-- [leyline::trace](reference/leyline-http/leyline-trace.html): 45 items
+- [leyline::trace](reference/leyline-http/leyline-trace.html): 87 items
+- [Example api_client](reference/leyline-http/examples/api_client.html): `cargo run -p leyline-http --example api_client`
 - [Example audit](reference/leyline-http/examples/audit.html): `cargo run -p leyline-http --example audit`
+- [Example browser_tab](reference/leyline-http/examples/browser_tab.html): `cargo run -p leyline-http --example browser_tab --features html`
 - [Example concurrent](reference/leyline-http/examples/concurrent.html): `cargo run -p leyline-http --example concurrent`
 - [Example cookies](reference/leyline-http/examples/cookies.html): `cargo run -p leyline-http --example cookies`
+- [Example crawler](reference/leyline-http/examples/crawler.html): `cargo run -p leyline-http --example crawler`
+- [Example device](reference/leyline-http/examples/device.html): `cargo run -p leyline-http --example device --features html`
+- [Example download](reference/leyline-http/examples/download.html): `cargo run -p leyline-http --example download`
 - [Example headers](reference/leyline-http/examples/headers.html): `cargo run -p leyline-http --example headers`
 - [Example http3](reference/leyline-http/examples/http3.html): `cargo run -p leyline-http --example http3 --features http3`
+- [Example multipart](reference/leyline-http/examples/multipart.html): `cargo run -p leyline-http --example multipart --features multipart`
 - [Example oneliner](reference/leyline-http/examples/oneliner.html): `cargo run -p leyline-http --example oneliner`
 - [Example post_json](reference/leyline-http/examples/post_json.html): `cargo run -p leyline-http --example post_json`
 - [Example presets](reference/leyline-http/examples/presets.html): `cargo run -p leyline-http --example presets`
@@ -108,3 +116,4 @@
 - [WebSocket](reference/leyline-http/leyline.html#session): `Session::websocket`
 - [Set WebSocket limits](reference/leyline-http/leyline.html#sessionbuilder): `SessionBuilder::websocket_config`
 - [tower](reference/leyline-http/leyline.html#leylineservice): `LeylineService::new`
+- [Run a local test server](reference/leyline-http/leyline-testing.html#testserver): `testing::TestServer::http`

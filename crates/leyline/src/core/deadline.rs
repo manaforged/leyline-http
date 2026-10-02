@@ -11,6 +11,7 @@ pub(crate) struct Deadline {
     at: Option<Instant>,
     response_header: Option<Duration>,
     read: Option<Duration>,
+    body: Option<Duration>,
 }
 
 #[derive(Debug)]
@@ -25,6 +26,7 @@ impl Deadline {
                 .and_then(|total| Instant::now().checked_add(total)),
             response_header: merged.response_header_limit(),
             read: merged.read_limit(),
+            body: merged.body_limit(),
         }
     }
 
@@ -43,6 +45,10 @@ impl Deadline {
 
     pub(crate) fn read(&self) -> Option<Duration> {
         self.read
+    }
+
+    pub(crate) fn body(&self) -> Option<Duration> {
+        self.body
     }
 
     pub(crate) async fn sleep(&self, wait: Duration) {

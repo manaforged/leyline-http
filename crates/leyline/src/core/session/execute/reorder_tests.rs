@@ -20,6 +20,8 @@ fn firefox_navigate_order_matches_the_live_capture() {
         origin: "https://tls.peet.ws",
         referer: "",
         fetch_site: "same-origin",
+        navigation_site: "none",
+        navigation_referer: "",
     };
     let mut headers =
         crate::profile::HeaderStyle::Gecko.build_headers(Some(Preset::Navigate), &ctx);

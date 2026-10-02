@@ -1,40 +1,34 @@
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::tls::error::TlsError;
-use crate::tls::{SessionCache, TlsStream};
+use tokio::net::TcpStream;
+
+use crate::tls::error::{ProxyReply, TlsError};
+use crate::tls::{SessionCache, TlsIo, TlsStream};
 
 use crate::util::proxy_basic_auth;
 
-pub(crate) async fn connect<C: crate::tls::TlsHandshake>(
+const TARGET_UNREACHABLE_STATUSES: [u16; 2] = [502, 504];
+
+pub(crate) async fn tunnel<C: crate::tls::TlsHandshake>(
     connector: &C,
     host: &str,
     port: u16,
     proxy: &url::Url,
-    include_alps: bool,
-) -> Result<TlsStream, TlsError> {
+) -> Result<TcpStream, TlsError> {
     let mut tcp_stream = super::connect_to_proxy(connector, proxy).await?;
     write_connect_and_validate(&mut tcp_stream, host, port, proxy).await?;
-    let session_key = SessionCache::key(host, port, Some(proxy));
-    connector
-        .do_tls_handshake(tcp_stream, host, &session_key, include_alps)
-        .await
+    Ok(tcp_stream)
 }
 
-pub(crate) async fn connect_via_tls<C: crate::tls::TlsHandshake>(
+pub(crate) async fn tunnel_via_tls<C: crate::tls::TlsHandshake>(
     connector: &C,
     host: &str,
     port: u16,
     proxy: &url::Url,
-    include_alps: bool,
-) -> Result<TlsStream, TlsError> {
-    let proxy_tls = open_tls_to_proxy(connector, proxy).await?;
-    let mut tunnel = proxy_tls.stream;
+) -> Result<TlsIo, TlsError> {
+    let mut tunnel = open_tls_to_proxy(connector, proxy).await?.stream;
     write_connect_and_validate(&mut tunnel, host, port, proxy).await?;
-
-    let session_key = SessionCache::key(host, port, Some(proxy));
-    connector
-        .do_tls_handshake_nested(tunnel, host, &session_key, include_alps)
-        .await
+    Ok(tunnel)
 }
 
 pub(crate) async fn open_tls_to_proxy<C: crate::tls::TlsHandshake>(
@@ -125,10 +119,17 @@ pub fn validate_connect_response(buf: &[u8], end_idx: usize) -> Result<(), TlsEr
     let version = parts.next().unwrap_or("");
     let code = parts.next().unwrap_or("");
     if !matches!(version, "HTTP/1.1" | "HTTP/1.0") || code != "200" {
-        return Err(TlsError::Proxy {
-            status: code.parse().ok(),
-            detail: format!("proxy CONNECT failed: {status_line}"),
-            source: None,
+        let status = code.parse().ok();
+        let detail = format!("proxy CONNECT failed: {status_line}");
+        return Err(match status {
+            Some(code) if TARGET_UNREACHABLE_STATUSES.contains(&code) => {
+                TlsError::proxy_target(ProxyReply::HttpStatus(code), detail)
+            }
+            _ => TlsError::Proxy {
+                status,
+                detail,
+                source: None,
+            },
         });
     }
 

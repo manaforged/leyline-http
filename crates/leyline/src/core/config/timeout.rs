@@ -10,6 +10,7 @@ pub struct TimeoutConfig {
     connect: Option<Option<Duration>>,
     read: Option<Option<Duration>>,
     response_header: Option<Option<Duration>>,
+    body: Option<Option<Duration>>,
 }
 
 impl TimeoutConfig {
@@ -37,13 +38,23 @@ impl TimeoutConfig {
         self
     }
 
+    pub fn body(mut self, d: impl Into<Option<Duration>>) -> Self {
+        self.body = Some(d.into());
+        self
+    }
+
     pub(crate) fn over(self, base: &TimeoutConfig) -> TimeoutConfig {
         TimeoutConfig {
             total: self.total.or(base.total),
             connect: self.connect.or(base.connect),
             read: self.read.or(base.read),
             response_header: self.response_header.or(base.response_header),
+            body: self.body.or(base.body),
         }
+    }
+
+    pub(crate) fn body_limit(&self) -> Option<Duration> {
+        self.body.flatten()
     }
 
     pub(crate) fn total_limit(&self) -> Option<Duration> {

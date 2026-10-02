@@ -74,7 +74,7 @@ impl DatagramTransport {
         _: u16,
         _: &url::Url,
     ) -> Result<(Self, SocketAddr), String> {
-        Err("HTTP/3 through a SOCKS5 proxy requires the `socks` feature".to_string())
+        Err(SOCKS_FEATURE_OFF.to_string())
     }
 
     pub(crate) fn local_addr(&self) -> io::Result<SocketAddr> {
@@ -106,8 +106,21 @@ fn carries_udp(proxy_scheme: &str) -> bool {
     matches!(proxy_scheme, "socks5" | "socks5h")
 }
 
+const PROXY_NO_UDP: &str = "HTTP/3 needs a socks5:// or socks5h:// proxy with UDP ASSOCIATE; \
+                            http and https proxies cannot carry QUIC, use Auto or Http2";
+
+const SOCKS_FEATURE_OFF: &str = "HTTP/3 through a SOCKS5 proxy needs the `socks` feature of \
+                                 leyline-http; enable it, or use Auto or Http2";
+
+pub(crate) fn h3_proxy_blocker(proxy: Option<&str>) -> Option<&'static str> {
+    let udp = url::Url::parse(proxy?).is_ok_and(|url| carries_udp(url.scheme()));
+    match (udp, cfg!(feature = "socks")) {
+        (true, true) => None,
+        (true, false) => Some(SOCKS_FEATURE_OFF),
+        (false, _) => Some(PROXY_NO_UDP),
+    }
+}
+
 pub(crate) fn proxy_carries_h3(proxy: Option<&str>) -> bool {
-    proxy.is_none_or(|proxy| {
-        cfg!(feature = "socks") && url::Url::parse(proxy).is_ok_and(|url| carries_udp(url.scheme()))
-    })
+    h3_proxy_blocker(proxy).is_none()
 }

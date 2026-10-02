@@ -87,6 +87,11 @@ impl RawResponse {
         }
     }
 
+    pub fn body(mut self, body: impl Into<Vec<u8>>) -> Self {
+        self.body = body.into();
+        self
+    }
+
     pub fn header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.headers.push((name.into(), value.into()));
         self

@@ -1,7 +1,7 @@
 use http::Method;
 
 use crate::cookie::Jar;
-use crate::profile::{Browser, Platform, Preset};
+use crate::profile::{Browser, Preset};
 
 use super::{Session, SessionBuilder};
 use crate::core::request::RequestBuilder;
@@ -16,15 +16,15 @@ impl Session {
     }
 
     pub fn new() -> Self {
-        let browser = Browser::default_browser();
-        let builder = Self::builder().browser(browser).platform(Platform::Windows);
-        #[cfg(feature = "http3")]
-        let builder = if browser.profile().h3.as_ref().is_some_and(|h3| h3.race) {
-            builder.protocol(super::ProtocolPolicy::Race)
-        } else {
-            builder
-        };
-        builder.into_builtin()
+        Self::builder().into_builtin()
+    }
+
+    pub fn browser(browser: Browser) -> Self {
+        Self::builder().browser(browser).into_builtin()
+    }
+
+    pub fn tab(&self) -> crate::core::Tab {
+        crate::core::Tab::new(self.clone())
     }
 
     pub fn cookies(&self) -> &Jar {
@@ -55,15 +55,43 @@ impl Session {
         self.derive(|inner| inner.redirect_policy = policy)
     }
 
+    pub fn with_base_url(&self, url: impl IntoUrl) -> Result<Self> {
+        let url = base_url(url)?;
+        Ok(self.derive(|inner| inner.base_url = Some(url)))
+    }
+
+    pub(crate) fn base_url(&self) -> Option<&url::Url> {
+        self.inner.base_url.as_ref()
+    }
+
     fn derive(&self, change: impl FnOnce(&mut super::SessionInner)) -> Self {
         let mut s = self.clone();
         change(std::sync::Arc::make_mut(&mut s.inner));
         s
     }
 
-    #[cfg(test)]
-    pub(crate) fn browser(&self) -> Option<Browser> {
-        self.inner.browser
+    pub fn host_stats(&self) -> Vec<crate::core::config::HostStats> {
+        self.inner.host_limits.stats()
+    }
+
+    pub(crate) fn host_limits(&self) -> &crate::core::config::HostLimits {
+        &self.inner.host_limits
+    }
+
+    pub(crate) fn proxy_pool(&self) -> Option<&crate::core::proxy_pool::ProxyPool> {
+        self.inner.proxy_pool.as_ref()
+    }
+
+    pub(crate) fn without_proxy_pool(&self) -> Self {
+        self.derive(|inner| inner.proxy_pool = None)
+    }
+
+    pub(crate) fn downgrade(&self) -> std::sync::Weak<super::SessionInner> {
+        std::sync::Arc::downgrade(&self.inner)
+    }
+
+    pub(crate) fn is_inner(&self, weak: &std::sync::Weak<super::SessionInner>) -> bool {
+        std::ptr::eq(weak.as_ptr(), std::sync::Arc::as_ptr(&self.inner))
     }
 
     pub(crate) fn impersonates(&self) -> bool {
@@ -110,6 +138,10 @@ impl Session {
     }
 
     pub async fn execute(&self, req: http::Request<Body>) -> Result<Response> {
+        self.http_request(req).send().await
+    }
+
+    pub(crate) fn http_request(&self, req: http::Request<Body>) -> RequestBuilder {
         let (mut parts, body) = req.into_parts();
         let mut builder = RequestBuilder::new(self, parts.method, &parts.uri.to_string());
         for (name, value) in &parts.headers {
@@ -128,7 +160,10 @@ impl Session {
         if let Some(policy) = parts.extensions.remove::<RedirectPolicy>() {
             builder = builder.redirect(policy);
         }
-        builder.send().await
+        if let Some(proxy) = parts.extensions.remove::<ProxyConfig>() {
+            builder = builder.proxy(proxy);
+        }
+        builder
     }
 
     pub fn get(&self, url: impl IntoUrl) -> RequestBuilder {
@@ -154,6 +189,17 @@ impl Session {
     pub fn head(&self, url: impl IntoUrl) -> RequestBuilder {
         RequestBuilder::from_url(self, Method::HEAD, url)
     }
+}
+
+pub(super) fn base_url(url: impl IntoUrl) -> Result<url::Url> {
+    let url = url.into_url()?;
+    if url.cannot_be_a_base() {
+        return Err(
+            crate::core::error::Error::new(crate::core::error::Kind::Config)
+                .with_message(format!("base URL {url} cannot be a base")),
+        );
+    }
+    Ok(url)
 }
 
 impl Default for Session {

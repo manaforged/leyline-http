@@ -66,7 +66,7 @@ fn forward_chunk(actor: &mut StreamActor, d: &DataFrame) -> Result<usize, Failur
 fn buffer_chunk(actor: &mut StreamActor, d: &DataFrame, max_body: usize) -> Result<usize, Failure> {
     if actor.body.len() + d.data.len() > max_body {
         return Err((
-            H2Error::Io(BodyLimit(max_body).into_io()),
+            H2Error::Io(BodyLimit::session(max_body).into_io()),
             ErrorCode::Cancel,
         ));
     }

@@ -37,6 +37,7 @@ pub(crate) async fn open_fresh_h3(
     let (tx, command_rx) = mpsc::channel(COMMAND_CHANNEL_CAPACITY);
     let (body_chunk_tx, body_chunk_rx) = mpsc::channel(STREAM_REQ_CAPACITY);
     let closed = Arc::new(AtomicBool::new(false));
+    let open_streams = Arc::new(std::sync::atomic::AtomicUsize::new(0));
 
     let driver = H3Driver {
         established,
@@ -44,6 +45,7 @@ pub(crate) async fn open_fresh_h3(
         body_chunk_tx,
         body_chunk_rx,
         closed: Arc::clone(&closed),
+        open_streams: Arc::clone(&open_streams),
         streams: HashMap::new(),
     };
     drop(tokio::spawn(driver.run()));
@@ -52,6 +54,7 @@ pub(crate) async fn open_fresh_h3(
         H3Client {
             tx,
             closed,
+            open_streams,
             pseudo_order: h3_cfg.pseudo_order,
         },
         tls,

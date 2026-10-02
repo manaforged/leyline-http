@@ -32,7 +32,7 @@ async fn streamed_chunked_response_reassembles() {
         .unwrap();
     });
 
-    let resp = Session::new()
+    let resp = Session::browser(crate::Browser::default())
         .request(http::Method::GET, format!("http://{addr}/x"))
         .stream()
         .send()
@@ -66,7 +66,7 @@ async fn streamed_fixed_length_response_reassembles() {
         sock.write_all(&payload_srv).await.unwrap();
     });
 
-    let resp = Session::new()
+    let resp = Session::browser(crate::Browser::default())
         .request(http::Method::GET, format!("http://{addr}/x"))
         .stream()
         .send()
@@ -99,7 +99,7 @@ async fn streamed_connection_is_reused_after_full_drain() {
         }
     });
 
-    let session = Session::new();
+    let session = Session::browser(crate::Browser::default());
     let r1 = session
         .request(http::Method::GET, format!("http://{addr}/a"))
         .stream()
@@ -184,7 +184,7 @@ async fn streamed_connection_dropped_when_consumer_drops_early() {
         }
     });
 
-    let session = Session::new();
+    let session = Session::browser(crate::Browser::default());
     let r1 = session
         .request(http::Method::GET, format!("http://{addr}/a"))
         .stream()

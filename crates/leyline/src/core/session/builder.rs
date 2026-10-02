@@ -1,8 +1,10 @@
 use std::sync::Arc;
 
 use crate::cookie::Jar;
+use crate::core::config::HostLimits;
+use crate::core::proxy_pool::ProxyPool;
 use crate::core::{
-    CompressionConfig, DnsConfig, IntoParamPair, PoolConfig, ProxyConfig, RedirectPolicy,
+    CompressionConfig, DnsConfig, IntoParamPair, IntoUrl, PoolConfig, ProxyConfig, RedirectPolicy,
     SocketConfig, TimeoutConfig, WebSocketConfig,
 };
 use crate::profile::{Browser, BrowserProfile, ChromiumBrand, Platform};
@@ -10,12 +12,17 @@ use crate::tcp::TcpProfile;
 use crate::tls::TlsTrustConfig;
 use crate::trace::Trace;
 
+pub(crate) use self::bearer::BearerToken;
 use self::derive::{IdentityInputs, IdentitySource, derive_identity};
 use super::proxy::InvalidEnvProxy;
 use super::{Identity, ProtocolPolicy, Session};
 use crate::core::error::Result;
 
+const AUTHORIZATION: &str = "authorization";
+const USER_AGENT: &str = "user-agent";
+
 mod assemble;
+mod bearer;
 pub(super) mod connect;
 mod debug;
 pub(super) mod derive;
@@ -35,18 +42,27 @@ pub struct SessionBuilder {
     socket_config: SocketConfig,
     redirect_policy: RedirectPolicy,
     compression: CompressionConfig,
+    max_body_size: Option<usize>,
+    expected_profile_id: Option<String>,
     websocket_config: WebSocketConfig,
     https_only: bool,
     audit: bool,
     cookie_jar: Option<Jar>,
     tcp_profile: Option<TcpProfile>,
     protocol_policy: ProtocolPolicy,
+    #[cfg(feature = "http3")]
+    protocol_explicit: bool,
     config_error: Option<String>,
     default_headers: Vec<(String, String)>,
+    bearer: Option<BearerToken>,
     http_identity: Option<Browser>,
     tls_trust: TlsTrustConfig,
     default_retry: crate::core::retry::RetryPolicy,
     trace: Option<Arc<dyn Trace>>,
+    base_url: Option<url::Url>,
+    languages: Option<Vec<String>>,
+    host_limits: HostLimits,
+    proxy_pool: Option<ProxyPool>,
 }
 
 impl SessionBuilder {
@@ -64,18 +80,27 @@ impl SessionBuilder {
             socket_config: SocketConfig::default(),
             redirect_policy: RedirectPolicy::default(),
             compression: CompressionConfig::default(),
+            max_body_size: None,
+            expected_profile_id: None,
             websocket_config: WebSocketConfig::default(),
             https_only: false,
             audit: false,
             cookie_jar: None,
             tcp_profile: None,
             protocol_policy: ProtocolPolicy::Auto,
+            #[cfg(feature = "http3")]
+            protocol_explicit: false,
             config_error: None,
             default_headers: Vec::new(),
+            bearer: None,
             http_identity: None,
             tls_trust: TlsTrustConfig::default(),
             default_retry: crate::core::retry::RetryPolicy::none(),
             trace: None,
+            base_url: None,
+            languages: None,
+            host_limits: HostLimits::default(),
+            proxy_pool: None,
         }
     }
 
@@ -139,6 +164,7 @@ impl SessionBuilder {
             tcp,
             audit: self.audit,
             default_headers: &self.default_headers,
+            languages: self.languages.as_deref(),
         }
     }
 
@@ -188,6 +214,16 @@ impl SessionBuilder {
         self
     }
 
+    pub fn max_body_size(mut self, bytes: usize) -> Self {
+        self.max_body_size = Some(bytes);
+        self
+    }
+
+    pub fn expect_profile_id(mut self, id: &str) -> Self {
+        self.expected_profile_id = Some(id.to_owned());
+        self
+    }
+
     pub fn websocket_config(mut self, config: WebSocketConfig) -> Self {
         self.websocket_config = config;
         self
@@ -210,12 +246,70 @@ impl SessionBuilder {
 
     pub fn protocol(mut self, policy: ProtocolPolicy) -> Self {
         self.protocol_policy = policy;
+        #[cfg(feature = "http3")]
+        {
+            self.protocol_explicit = true;
+        }
         self
     }
 
     pub fn identity(mut self, id: Identity) -> Self {
         self = self.browser(id.tls()).platform(id.platform());
         self.http_identity = (id.http() != id.tls()).then(|| id.http());
+        if let Some(brand) = id.brand() {
+            self.brand = brand;
+        }
+        self
+    }
+
+    pub fn user_agent(mut self, value: &str) -> Self {
+        self.check_header(USER_AGENT, value);
+        self.remove_default(USER_AGENT);
+        self.default_headers
+            .push((USER_AGENT.to_owned(), value.to_owned()));
+        self
+    }
+
+    pub fn languages<I, S>(mut self, langs: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let tags: Vec<String> = langs
+            .into_iter()
+            .map(|tag| tag.as_ref().trim().to_owned())
+            .collect();
+        let checked = if tags.is_empty() {
+            Err("languages needs at least one language tag".to_owned())
+        } else {
+            tags.iter()
+                .try_for_each(|tag| crate::profile::languages::validate_language(tag))
+        };
+        if let Err(error) = checked {
+            self.config_error.get_or_insert(error);
+        }
+        self.languages = Some(tags);
+        self
+    }
+
+    pub fn host_limits(mut self, limits: HostLimits) -> Self {
+        self.host_limits = limits;
+        self
+    }
+
+    pub fn proxy_pool(mut self, pool: ProxyPool) -> Self {
+        self.proxy_pool = Some(pool);
+        self
+    }
+
+    pub fn base_url(mut self, url: impl IntoUrl) -> Self {
+        match super::helpers::base_url(url) {
+            Ok(url) => self.base_url = Some(url),
+            Err(error) => {
+                self.base_url = None;
+                self.config_error.get_or_insert(error.to_string());
+            }
+        }
         self
     }
 
@@ -227,7 +321,7 @@ impl SessionBuilder {
         for pair in headers {
             let (name, value) = pair.into_param_pair();
             self.check_header(&name, &value);
-            self.default_headers.push((name, value));
+            self.push_default(name, value);
         }
         self
     }
@@ -255,6 +349,9 @@ impl SessionBuilder {
         let tcp_profile = self.resolve_tcp_profile();
         let derived = derive_identity(self.identity_inputs(&tcp_profile))?;
         let connector = self.build_connector(&derived.profile, &tcp_profile)?;
-        Ok(self.into_session(derived, connector))
+        let expected = self.expected_profile_id.take();
+        let session = self.into_session(derived, connector);
+        Self::check_profile_id(expected.as_deref(), session.identity().profile_id())?;
+        Ok(session)
     }
 }

@@ -31,12 +31,31 @@ async fn capture_get_headers(session: Session) -> String {
 
 #[test]
 fn default_session_is_bare() {
-    assert_eq!(Session::builder().build().unwrap().browser(), None);
+    assert_eq!(
+        Session::builder().build().unwrap().identity().browser(),
+        None
+    );
 }
 
 #[test]
 fn chrome_helper_is_explicit_browser() {
-    assert_eq!(Session::new().browser(), Some(Browser::default_browser()));
+    assert_eq!(
+        Session::browser(Browser::default()).identity().browser(),
+        Some(Browser::default_browser())
+    );
+}
+
+#[test]
+fn builder_with_the_default_browser_matches_session_browser() {
+    let new = Session::browser(Browser::default());
+    let built = Session::builder()
+        .browser(Browser::default_browser())
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .unwrap();
+    assert_eq!(built.identity().browser(), new.identity().browser());
+    assert_eq!(built.platform(), new.platform());
+    assert_eq!(built.inner.protocol_policy, new.inner.protocol_policy);
 }
 
 #[test]
@@ -70,7 +89,7 @@ async fn bare_session_sends_generic_ua_and_no_client_hints() {
 
 #[tokio::test]
 async fn chrome_get_emits_navigate_headers() {
-    let req = capture_get_headers(Session::new()).await;
+    let req = capture_get_headers(Session::browser(Browser::default())).await;
     let lower = req.to_lowercase();
     assert!(
         lower.contains("sec-fetch-mode: navigate"),
@@ -119,7 +138,7 @@ fn chrome_linux_is_one_chain() {
         .platform(Platform::Linux)
         .build()
         .unwrap();
-    assert_eq!(s.browser(), Some(Browser::default_browser()));
+    assert_eq!(s.identity().browser(), Some(Browser::default_browser()));
     assert_eq!(s.platform(), Platform::Linux);
 }
 
@@ -130,7 +149,7 @@ fn safari_ios_picks_iphone_profile() {
         .platform(Platform::IOS)
         .build()
         .unwrap();
-    assert_eq!(s.browser(), Some(Browser::SafariIOS27));
+    assert_eq!(s.identity().browser(), Some(Browser::SafariIOS27));
     assert_eq!(s.platform(), Platform::IOS);
 }
 
@@ -141,7 +160,7 @@ fn ios_then_safari_still_iphone() {
         .browser(Browser::Safari26)
         .build()
         .unwrap();
-    assert_eq!(s.browser(), Some(Browser::SafariIOS27));
+    assert_eq!(s.identity().browser(), Some(Browser::SafariIOS27));
     assert_eq!(s.platform(), Platform::IOS);
 }
 
@@ -164,7 +183,7 @@ fn windows_then_brave_keeps_windows() {
         .browser(Browser::Brave146)
         .build()
         .unwrap();
-    assert_eq!(s.browser(), Some(Browser::Brave146));
+    assert_eq!(s.identity().browser(), Some(Browser::Brave146));
     assert_eq!(s.platform(), Platform::Windows);
 }
 
@@ -228,7 +247,10 @@ async fn execute_json_content_type_infers_xhr() {
         .header("content-type", "application/json")
         .body(Body::from("{}"))
         .unwrap();
-    Session::new().execute(req).await.unwrap();
+    Session::browser(Browser::default())
+        .execute(req)
+        .await
+        .unwrap();
     let wire = server.await.unwrap();
     let lower = wire.to_lowercase();
     assert!(
@@ -239,7 +261,10 @@ async fn execute_json_content_type_infers_xhr() {
 
 #[tokio::test]
 async fn json_body_infers_xhr_preset() {
-    let req = capture_post_headers(Session::new(), |b| b.json(&serde_json::json!({"a": 1}))).await;
+    let req = capture_post_headers(Session::browser(Browser::default()), |b| {
+        b.json(&serde_json::json!({"a": 1}))
+    })
+    .await;
     let lower = req.to_lowercase();
     assert!(
         lower.contains("sec-fetch-mode: cors"),
@@ -253,7 +278,10 @@ async fn json_body_infers_xhr_preset() {
 
 #[tokio::test]
 async fn form_body_infers_form_preset() {
-    let req = capture_post_headers(Session::new(), |b| b.form([("u", "alice")])).await;
+    let req = capture_post_headers(Session::browser(Browser::default()), |b| {
+        b.form([("u", "alice")])
+    })
+    .await;
     let lower = req.to_lowercase();
     assert!(
         lower.contains("sec-fetch-mode: cors"),
@@ -267,7 +295,7 @@ async fn form_body_infers_form_preset() {
 
 #[tokio::test]
 async fn user_preset_wins_over_json_inference() {
-    let req = capture_post_headers(Session::new(), |b| {
+    let req = capture_post_headers(Session::browser(Browser::default()), |b| {
         b.preset(Preset::Navigate)
             .json(&serde_json::json!({"a": 1}))
     })
@@ -294,7 +322,7 @@ async fn bare_json_has_no_sec_fetch() {
 
 #[tokio::test]
 async fn native_json_omits_browser_headers_and_preserves_app_headers() {
-    let session = Session::new();
+    let session = Session::browser(Browser::default());
     let wire = capture_post_headers(session, |request| {
         request
             .preset(Preset::Native)

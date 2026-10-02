@@ -15,7 +15,7 @@ mod httpbin_lite;
 #[tokio::test]
 async fn decompression_gzip() {
     let base = httpbin_lite::spawn().await;
-    let session = Session::new();
+    let session = Session::browser(leyline::Browser::default());
     let resp = session.get(format!("{base}/gzip")).await.unwrap();
     assert_eq!(resp.status(), 200);
     let json: Value =
@@ -26,7 +26,7 @@ async fn decompression_gzip() {
 #[tokio::test]
 async fn decompression_brotli() {
     let base = httpbin_lite::spawn().await;
-    let session = Session::new();
+    let session = Session::browser(leyline::Browser::default());
     let resp = session.get(format!("{base}/brotli")).await.unwrap();
     assert_eq!(resp.status(), 200);
     let json: Value =
@@ -37,7 +37,7 @@ async fn decompression_brotli() {
 #[tokio::test]
 async fn decompression_deflate() {
     let base = httpbin_lite::spawn().await;
-    let session = Session::new();
+    let session = Session::browser(leyline::Browser::default());
     let resp = session.get(format!("{base}/deflate")).await.unwrap();
     assert_eq!(resp.status(), 200);
     let json: Value =
@@ -48,7 +48,7 @@ async fn decompression_deflate() {
 #[tokio::test]
 async fn cookies_set_then_sent() {
     let base = httpbin_lite::spawn().await;
-    let session = Session::new();
+    let session = Session::browser(leyline::Browser::default());
     let resp1 = session
         .get(format!("{base}/cookies/set?token=abc123"))
         .await
@@ -68,7 +68,7 @@ async fn cookies_set_then_sent() {
 #[tokio::test]
 async fn response_cookies_use_the_rfc_parser_not_a_hand_parser() {
     let base = httpbin_lite::spawn().await;
-    let session = Session::new();
+    let session = Session::browser(leyline::Browser::default());
     let resp = session
         .get(format!("{base}/set-cookie-quoted"))
         .await
@@ -95,7 +95,7 @@ async fn response_cookies_use_the_rfc_parser_not_a_hand_parser() {
 #[tokio::test]
 async fn redirect_follows_and_rewrites_url() {
     let base = httpbin_lite::spawn().await;
-    let session = Session::new();
+    let session = Session::browser(leyline::Browser::default());
     let resp = session.get(format!("{base}/redirect/3")).await.unwrap();
     assert_eq!(resp.status(), 200);
     assert_eq!(
@@ -113,7 +113,7 @@ async fn redirect_follows_and_rewrites_url() {
 #[tokio::test]
 async fn redirect_preserves_auth_same_host() {
     let base = httpbin_lite::spawn().await;
-    let session = Session::new();
+    let session = Session::browser(leyline::Browser::default());
     let resp = session
         .request(
             http::Method::GET,
@@ -136,7 +136,7 @@ async fn redirect_preserves_auth_same_host() {
 async fn redirect_307_308_replays_buffered_body() {
     for status in [307u16, 308] {
         let base = httpbin_lite::spawn().await;
-        let session = Session::new();
+        let session = Session::browser(leyline::Browser::default());
         let payload = "replay-me-please-i-am-a-request-body";
         let resp = session
             .post(format!("{base}/redirect-to?url=/post&status_code={status}"))
@@ -165,7 +165,7 @@ async fn redirect_307_308_replays_buffered_body() {
 #[tokio::test]
 async fn redirect_to_non_http_scheme_is_refused() {
     let base = httpbin_lite::spawn().await;
-    let session = Session::new();
+    let session = Session::browser(leyline::Browser::default());
     let result = session
         .get(format!("{base}/redirect-to?url=file:///etc/passwd"))
         .await;
@@ -180,7 +180,7 @@ async fn redirect_to_non_http_scheme_is_refused() {
 #[tokio::test]
 async fn post_json_body_roundtrip() {
     let base = httpbin_lite::spawn().await;
-    let session = Session::new();
+    let session = Session::browser(leyline::Browser::default());
     let body = serde_json::json!({"test": "leyline", "n": 42});
     let resp = session
         .post(format!("{base}/post"))
@@ -196,7 +196,7 @@ async fn post_json_body_roundtrip() {
 #[tokio::test]
 async fn post_form_body_roundtrip() {
     let base = httpbin_lite::spawn().await;
-    let session = Session::new();
+    let session = Session::browser(leyline::Browser::default());
     let resp = session
         .post(format!("{base}/post"))
         .form([("u", "alice"), ("p", "s3cret")])

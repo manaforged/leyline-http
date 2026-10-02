@@ -49,6 +49,7 @@ default = [
     "multipart",
     "websocket",
     "http3",
+    "html",
 ]
 # Charset-aware response-body text decoding (Content-Type charset + BOM, via
 # encoding_rs). Off → Response::text falls back to UTF-8 lossy.
@@ -69,6 +70,9 @@ socks = []
 # (checkout + evict path). Off by default; only leyline-benches enables it.
 bench-internals = []
 tower = ["dep:tower-service"]
+test-util = []
+# HTML form extraction (leyline::html) and Tab::submit_form.
+html = []
 full = [
     "compression-gzip",
     "compression-brotli",
@@ -80,6 +84,7 @@ full = [
     "tower",
     "socks",
     "charset",
+    "html",
 ]
 
 [dependencies]
@@ -104,7 +109,7 @@ toml = { workspace = true }
 
 # -- networking / TLS
 socket2 = { workspace = true }
-url = { workspace = true }
+url = { workspace = true, features = ["serde"] }
 
 # -- tracing
 tracing = { workspace = true }
@@ -156,6 +161,18 @@ required-features = ["http3"]
 name = "websocket"
 required-features = ["websocket"]
 
+[[example]]
+name = "multipart"
+required-features = ["multipart"]
+
+[[example]]
+name = "device"
+required-features = ["html"]
+
+[[example]]
+name = "browser_tab"
+required-features = ["html"]
+
 [[test]]
 name = "websocket_subprotocol"
 required-features = ["websocket"]
@@ -174,6 +191,10 @@ required-features = ["bench-internals"]
 
 [[test]]
 name = "h2_body_cap"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_backpressure"
 required-features = ["bench-internals"]
 
 [[test]]
@@ -305,6 +326,7 @@ serde = { workspace = true }
 toml = { workspace = true }
 
 [dev-dependencies]
+leyline-http = { path = ".", features = ["test-util"] }
 bytes = { workspace = true }
 leyline-quiche = { path = "../leyline-quiche", version = "=0.1.0", default-features = false, features = [
     "boringssl-bssl-crate",

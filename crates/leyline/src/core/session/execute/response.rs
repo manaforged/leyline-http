@@ -1,12 +1,17 @@
+use std::sync::Arc;
+use std::time::SystemTime;
+
 use url::Url;
 
 use super::super::decompress::{decompress_and_strip, drain_stream_into_vec};
 use super::journey::Journey;
 use crate::core::Session;
 use crate::core::deadline::Deadline;
+use crate::core::device::{SessionState, StateParts, unix_secs};
 use crate::core::error::Result;
 use crate::core::response::Response;
 use crate::core::transport::TransportResponse;
+use crate::util::lock;
 
 impl Session {
     pub(super) fn store_cookies(
@@ -24,6 +29,51 @@ impl Session {
                 .cookie_jar
                 .store_response_cookies(set_cookies.as_slice(), url);
         }
+    }
+
+    #[must_use]
+    pub fn state(&self) -> SessionState {
+        let now = SystemTime::now();
+        SessionState::from_parts(StateParts {
+            tls_sessions: self.inner.connector.session_cache().export(unix_secs(now)),
+            #[cfg(feature = "http3")]
+            alt_svc: self.inner.pool.alt_svc_entries(),
+            #[cfg(not(feature = "http3"))]
+            alt_svc: Vec::new(),
+            hsts: lock(&self.inner.pool.hsts).export(now),
+        })
+    }
+
+    pub(crate) fn restore_state(&self, parts: &StateParts) {
+        let now = SystemTime::now();
+        self.inner
+            .connector
+            .session_cache()
+            .import(&parts.tls_sessions, unix_secs(now));
+        #[cfg(feature = "http3")]
+        self.inner.pool.restore_alt_svc(&parts.alt_svc);
+        lock(&self.inner.pool.hsts).import(&parts.hsts, now);
+    }
+
+    pub(super) fn note_hsts(
+        &self,
+        url: &Url,
+        resp_headers: &[(http::HeaderName, http::HeaderValue)],
+    ) {
+        let values: Vec<&str> = resp_headers
+            .iter()
+            .filter(|(k, _)| *k == "strict-transport-security")
+            .filter_map(|(_, v)| v.to_str().ok())
+            .collect();
+        if !values.is_empty() {
+            lock(&self.inner.pool.hsts).note(url, &values, SystemTime::now());
+        }
+    }
+
+    pub(super) fn hsts_upgrade(&self, url: &Arc<Url>) -> Arc<Url> {
+        lock(&self.inner.pool.hsts)
+            .upgrade(url, SystemTime::now())
+            .map_or_else(|| Arc::clone(url), Arc::new)
     }
 
     #[cfg(feature = "http3")]
@@ -95,6 +145,8 @@ impl Session {
             audit_cache: std::sync::OnceLock::new(),
             compression: self.inner.compression,
             timing: journey.timing,
+            attempts: 1,
+            proxy: None,
         })
     }
 
@@ -111,6 +163,9 @@ impl Session {
         Ok(match resp_body_shape {
             crate::core::transport::TransportBody::Streaming(mut bs) if stream_response => {
                 bs.set_read_timeout(deadline.read());
+                bs.set_body_timeout(deadline.body());
+                bs.stop_on(&self.inner.shutdown);
+                bs.watch_end();
                 (
                     crate::core::response::ResponseBody::Streaming(bs),
                     resp_headers,
@@ -118,6 +173,7 @@ impl Session {
             }
             crate::core::transport::TransportBody::Streaming(mut bs) => {
                 bs.set_read_timeout(deadline.read());
+                bs.set_body_timeout(deadline.body());
                 let buf = drain_stream_into_vec(bs, self.inner.compression.max_body_size).await?;
                 let (buf, resp_headers) =
                     decompress_and_strip(buf, resp_headers, &self.inner.compression)?;
@@ -128,12 +184,12 @@ impl Session {
             }
             crate::core::transport::TransportBody::Buffered(buf) => {
                 if stream_response {
+                    let mut bs =
+                        crate::core::body_stream::BodyStream::from_bytes(bytes::Bytes::from(buf));
+                    bs.stop_on(&self.inner.shutdown);
+                    bs.watch_end();
                     (
-                        crate::core::response::ResponseBody::Streaming(
-                            crate::core::body_stream::BodyStream::from_bytes(bytes::Bytes::from(
-                                buf,
-                            )),
-                        ),
+                        crate::core::response::ResponseBody::Streaming(bs),
                         resp_headers,
                     )
                 } else {

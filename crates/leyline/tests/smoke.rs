@@ -24,7 +24,13 @@ async fn smoke_suite() {
         "Default Chrome exact JA4 + H2",
         &mut passed,
         &mut failed,
-        smoke(async { exact_fingerprint(Session::new(), Browser::latest(Family::Chrome)).await }),
+        smoke(async {
+            exact_fingerprint(
+                Session::browser(Browser::default()),
+                Browser::latest(Family::Chrome),
+            )
+            .await
+        }),
     )
     .await;
 
@@ -41,7 +47,7 @@ async fn smoke_suite() {
         &mut passed,
         &mut failed,
         smoke(async {
-            let s = Session::new();
+            let s = Session::browser(Browser::default());
             let t = Instant::now();
             let r1 = s.get(PEET_URL).await?;
             let t1 = t.elapsed();
@@ -70,7 +76,7 @@ async fn smoke_suite() {
         &mut passed,
         &mut failed,
         smoke(async {
-            let s = Session::new();
+            let s = Session::browser(Browser::default());
             let r = s.get(PEET_URL).await?;
             let body = r.text().await.unwrap();
             let _: Value = serde_json::from_str(&body)?;
@@ -88,7 +94,7 @@ async fn smoke_suite() {
         &mut passed,
         &mut failed,
         smoke(async {
-            let s = Session::new();
+            let s = Session::browser(Browser::default());
             let r = s.get("https://httpbin.org/get").await?;
             let status = r.status();
             ensure(status == 200, format!("status={status}"))?;
@@ -104,7 +110,7 @@ async fn smoke_suite() {
         &mut passed,
         &mut failed,
         smoke(async {
-            let s = Session::new();
+            let s = Session::browser(Browser::default());
             let payload = serde_json::json!({"test": "leyline", "v": 2});
             let r = s.post("https://httpbin.org/post").json(&payload).await?;
             let v: Value = r.json().await?;
@@ -120,7 +126,7 @@ async fn smoke_suite() {
         &mut passed,
         &mut failed,
         smoke(async {
-            let s = Session::new();
+            let s = Session::browser(Browser::default());
             let r = s
                 .post("https://httpbin.org/post")
                 .form([("user", "alice"), ("pass", "s3cret!")])
@@ -142,7 +148,7 @@ async fn smoke_suite() {
         &mut passed,
         &mut failed,
         smoke(async {
-            let s = Session::new();
+            let s = Session::browser(Browser::default());
             let r = s
                 .request(http::Method::GET, "https://httpbin.org/get")
                 .query([("foo", "bar"), ("n", "42")])
@@ -161,7 +167,7 @@ async fn smoke_suite() {
         &mut passed,
         &mut failed,
         smoke(async {
-            let s = Session::new();
+            let s = Session::browser(Browser::default());
             let r = s
                 .request(http::Method::GET, "https://httpbin.org/get")
                 .bearer_auth("test-token-123")
@@ -180,7 +186,7 @@ async fn smoke_suite() {
         &mut passed,
         &mut failed,
         smoke(async {
-            let s = Session::new();
+            let s = Session::browser(Browser::default());
             let r = s.get("https://httpbin.org/status/404").await?;
             ensure(r.status() == 404, format!("status={}", r.status()))?;
             ensure(r.error_for_status().is_err(), "404 should be error")?;
@@ -194,7 +200,7 @@ async fn smoke_suite() {
         &mut passed,
         &mut failed,
         smoke(async {
-            let s = Session::new();
+            let s = Session::browser(Browser::default());
             let r = s.get("https://httpbin.org/redirect/2").await?;
             ensure(r.status() == 200, format!("status={}", r.status()))?;
             ensure(!r.redirect_chain().is_empty(), "redirect chain empty")?;
@@ -208,7 +214,7 @@ async fn smoke_suite() {
         &mut passed,
         &mut failed,
         smoke(async {
-            let c = Session::new().get(PEET_URL).await?;
+            let c = Session::browser(Browser::default()).get(PEET_URL).await?;
             let f = firefox()?.get(PEET_URL).await?;
             let s = safari()?.get(PEET_URL).await?;
             let ch: Value = c.json().await?;
@@ -264,7 +270,7 @@ async fn smoke_suite() {
         &mut passed,
         &mut failed,
         smoke(async {
-            let s = Session::new();
+            let s = Session::browser(Browser::default());
             let r = s.get("https://httpbin.org/bytes/50000").await?;
             ensure(r.status() == 200, format!("status={}", r.status()))?;
             let n = r.bytes().await?.len();
@@ -342,7 +348,7 @@ async fn h1_wire_shape() -> Result<String> {
         Ok::<_, String>(String::from_utf8_lossy(&req).into_owned())
     });
 
-    let session = Session::new();
+    let session = Session::browser(Browser::default());
     let resp = session
         .request(http::Method::GET, format!("http://{addr}/wire?q=1"))
         .header("x-proof", "smoke")

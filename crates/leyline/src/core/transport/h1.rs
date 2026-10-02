@@ -5,8 +5,9 @@ use crate::core::body::{Body, BodyKind};
 use crate::core::error::{Error, Kind, Result};
 use crate::core::response::HttpVersion;
 use crate::core::session::decompress::BodyLimit;
-use crate::pool::h1::h1err_to_io;
-use crate::pool::{H1Body, H1PooledError, H1ResponseBody, H1Target, Pool};
+use crate::h2::client::H2Client;
+use crate::pool::h1::{H1Dial, H1Outcome, H1Request, h1err_to_io, send_h1_pooled};
+use crate::pool::{H1Body, H1PooledError, H1ResponseBody, H1Slot, H1Target, Opened, Pool};
 use crate::tls::FingerprintConnector;
 
 fn body_to_h1(body: Body) -> H1Body {
@@ -24,6 +25,38 @@ fn body_to_h1(body: Body) -> H1Body {
     }
 }
 
+pub(crate) async fn send_request_h1(
+    pool: &Arc<Pool>,
+    connector: &FingerprintConnector,
+    dial: H1Dial<'_>,
+    req: Prepared<'_>,
+) -> Result<TransportResponse> {
+    match send_h1_on(pool, connector, dial, req, None).await? {
+        H1Sent::Done(resp) => Ok(*resp),
+        H1Sent::Upgraded(..) => Err(h1_error_to_core(H1Outcome::upgraded_error())),
+    }
+}
+
+pub(super) enum H1Sent {
+    Done(Box<TransportResponse>),
+    Upgraded(Opened<H2Client>, Body),
+}
+
+fn h1_to_body(body: H1Body) -> Body {
+    Body(match body {
+        H1Body::Empty => BodyKind::Empty,
+        H1Body::Buffered(b) => BodyKind::Bytes(b),
+        H1Body::FixedStream { stream, length } => BodyKind::Stream {
+            stream,
+            length_hint: Some(length),
+        },
+        H1Body::ChunkedStream { stream } => BodyKind::Stream {
+            stream,
+            length_hint: None,
+        },
+    })
+}
+
 #[tracing::instrument(
     name = "transport.h1",
     level = "debug",
@@ -34,11 +67,13 @@ fn body_to_h1(body: Body) -> H1Body {
         http.host = req.url.host_str().unwrap_or(""),
     )
 )]
-pub(crate) async fn send_request_h1(
+pub(super) async fn send_h1_on(
     pool: &Arc<Pool>,
     connector: &FingerprintConnector,
+    dial: H1Dial<'_>,
     req: Prepared<'_>,
-) -> Result<TransportResponse> {
+    opened: Option<Opened<H1Slot>>,
+) -> Result<H1Sent> {
     let Prepared {
         method,
         url,
@@ -85,32 +120,42 @@ pub(crate) async fn send_request_h1(
 
     let h1_body = body_to_h1(body);
 
-    let resp = crate::pool::send_request_h1_pooled(
+    let outcome = send_h1_pooled(
         pool,
         connector,
-        scheme,
-        host,
-        port,
-        method,
-        url,
-        headers
-            .into_iter()
-            .map(|(k, v)| (k.into_owned(), v.into_owned()))
-            .collect(),
+        H1Request {
+            scheme,
+            host,
+            port,
+            method,
+            url,
+            headers: headers
+                .into_iter()
+                .map(|(k, v)| (k.into_owned(), v.into_owned()))
+                .collect(),
+            proxy,
+            target,
+            stream: stream_response,
+            opened,
+        },
         h1_body,
-        proxy,
-        target,
-        stream_response,
+        dial,
     )
     .await
     .map_err(h1_error_to_core)?;
+    let resp = match outcome {
+        H1Outcome::Response(resp) => resp,
+        H1Outcome::Upgraded { opened, body } => {
+            return Ok(H1Sent::Upgraded(opened, h1_to_body(body)));
+        }
+    };
 
     let transport_body = match resp.body {
         H1ResponseBody::Buffered(b) => TransportBody::Buffered(b),
         H1ResponseBody::Streaming(s) => TransportBody::Streaming(s),
     };
 
-    Ok(TransportResponse {
+    Ok(H1Sent::Done(Box::new(TransportResponse {
         status: status(resp.status)?,
         headers: adopt(resp.headers),
         trailers: Vec::new(),
@@ -119,7 +164,7 @@ pub(crate) async fn send_request_h1(
         version: HttpVersion::Http1_1,
         tls: resp.tls,
         timing: resp.timing,
-    })
+    })))
 }
 
 pub(crate) fn h1_error_to_core(e: H1PooledError) -> Error {

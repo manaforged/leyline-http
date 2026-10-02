@@ -230,7 +230,7 @@ async fn opera_145_overlay_still_supported() {
 
 #[tokio::test]
 async fn chrome_default_has_no_brand_overlay() {
-    let session = Session::new();
+    let session = Session::browser(Browser::default());
     let req = capture_navigate_headers(session).await;
     assert!(!req.contains("Edg/"));
     assert!(!req.contains("OPR/"));

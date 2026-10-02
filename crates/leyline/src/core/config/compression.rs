@@ -63,6 +63,24 @@ impl CompressionConfig {
         self
     }
 
+    pub(crate) fn accept_encoding(&self) -> Option<String> {
+        let codecs = [
+            ("gzip", self.gzip && cfg!(feature = "compression-gzip")),
+            (
+                "deflate",
+                self.deflate && cfg!(feature = "compression-deflate"),
+            ),
+            ("br", self.brotli && cfg!(feature = "compression-brotli")),
+            ("zstd", self.zstd && cfg!(feature = "compression-zstd")),
+        ];
+        let enabled: Vec<&str> = codecs
+            .iter()
+            .filter(|(_, on)| *on)
+            .map(|(name, _)| *name)
+            .collect();
+        (!enabled.is_empty()).then(|| enabled.join(", "))
+    }
+
     pub(crate) fn allows(&self, encoding: &str) -> bool {
         match encoding {
             "gzip" | "x-gzip" => self.gzip,

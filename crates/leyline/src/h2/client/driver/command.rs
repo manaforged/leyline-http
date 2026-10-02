@@ -15,6 +15,9 @@ use super::*;
 
 impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     pub(super) async fn on_command(&mut self, cmd: DriverCommand) -> Result<(), H2Error> {
+        if cmd.is_cancelled() {
+            return Ok(());
+        }
         if !self.peer_ready() {
             self.pending.push_back(cmd);
             return Ok(());
@@ -82,12 +85,33 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     }
 
     pub(super) async fn drain_pending(&mut self) -> Result<(), H2Error> {
-        while !self.pending.is_empty() && self.peer_ready() && self.admit_new_stream().is_ok() {
-            if let Some(cmd) = self.pending.pop_front() {
-                self.on_command(cmd).await?;
+        while !self.pending.is_empty() && self.peer_ready() {
+            if let Err(e) = self.admit_new_stream()
+                && Self::deferrable_capacity_error(&e)
+            {
+                break;
             }
+            let Some(cmd) = self.pending.pop_front() else {
+                break;
+            };
+            self.on_command(cmd).await?;
         }
         Ok(())
+    }
+
+    fn start_upload(&mut self, stream_id: u32, body: crate::util::upload::BodyStream) {
+        let Some(actor) = self.streams.get_mut(stream_id) else {
+            return;
+        };
+        let credit = crate::util::upload::upload_credit();
+        let pump = tokio::spawn(crate::util::upload::pump_request_body(
+            stream_id,
+            body,
+            self.body_chunk_tx.clone(),
+            Arc::clone(&credit),
+        ));
+        actor.upload_credit = Some(credit);
+        actor.pump = Some(pump.abort_handle());
     }
 
     pub(super) async fn start_request(
@@ -156,7 +180,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 let body = if b.is_empty() { None } else { Some(b) };
                 self.start_request(pseudo, headers, body, sink).await
             }
-            DriverRequestBody::Streaming(rx) => {
+            DriverRequestBody::Streaming(body) => {
                 let stream_id = self.alloc_stream_id();
                 let is_head = pseudo.method.eq_ignore_ascii_case("HEAD");
 
@@ -199,11 +223,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                     return Ok(());
                 }
 
-                let chunk_tx = self.body_chunk_tx.clone();
-                tokio::spawn(super::bootstrap::relay_request_body(
-                    stream_id, rx, chunk_tx,
-                ));
-
+                self.start_upload(stream_id, body);
                 Ok(())
             }
         }
@@ -257,11 +277,13 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             return Ok(());
         }
 
-        let chunk_tx = self.body_chunk_tx.clone();
-        tokio::spawn(super::bootstrap::relay_request_body(
-            stream_id, write_rx, chunk_tx,
-        ));
-
+        self.start_upload(
+            stream_id,
+            Box::pin(futures_util::stream::unfold(
+                write_rx,
+                |mut rx| async move { rx.recv().await.map(|item| (item, rx)) },
+            )),
+        );
         Ok(())
     }
 }

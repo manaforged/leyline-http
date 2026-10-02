@@ -2,14 +2,56 @@ pub mod leyline
 pub use leyline::Url
 pub use leyline::http
 pub mod leyline::audit
+#[non_exhaustive] pub enum leyline::audit::FieldOutcome
+pub leyline::audit::FieldOutcome::Informational
+pub leyline::audit::FieldOutcome::Informational::expected: alloc::string::String
+pub leyline::audit::FieldOutcome::Informational::observed: alloc::string::String
+pub leyline::audit::FieldOutcome::Match
+pub leyline::audit::FieldOutcome::Mismatch
+pub leyline::audit::FieldOutcome::Mismatch::expected: alloc::string::String
+pub leyline::audit::FieldOutcome::Mismatch::observed: alloc::string::String
+pub leyline::audit::FieldOutcome::NotReported
+impl leyline::audit::FieldOutcome
+pub fn leyline::audit::FieldOutcome::is_mismatch(&self) -> bool
+impl core::clone::Clone for leyline::audit::FieldOutcome
+impl core::cmp::Eq for leyline::audit::FieldOutcome
+impl core::cmp::PartialEq for leyline::audit::FieldOutcome
+impl core::fmt::Debug for leyline::audit::FieldOutcome
+impl core::fmt::Display for leyline::audit::FieldOutcome
+impl core::marker::StructuralPartialEq for leyline::audit::FieldOutcome
 #[non_exhaustive] pub struct leyline::audit::AuditData
 pub leyline::audit::AuditData::h2_fingerprint: alloc::string::String
 pub leyline::audit::AuditData::ja3: alloc::string::String
 pub leyline::audit::AuditData::ja4: alloc::string::String
 pub leyline::audit::AuditData::ja4h: alloc::string::String
 pub leyline::audit::AuditData::ja4t: alloc::string::String
+pub leyline::audit::AuditData::permutes_extensions: bool
+pub leyline::audit::AuditData::request_headers: alloc::vec::Vec<(alloc::string::String, alloc::string::String)>
+impl leyline::audit::AuditData
+pub fn leyline::audit::AuditData::compare(&self, observed: &leyline::audit::Observed) -> leyline::audit::FingerprintReport
 impl core::clone::Clone for leyline::audit::AuditData
 impl core::fmt::Debug for leyline::audit::AuditData
+#[non_exhaustive] pub struct leyline::audit::FingerprintReport
+pub leyline::audit::FingerprintReport::h2_fingerprint: leyline::audit::FieldOutcome
+pub leyline::audit::FingerprintReport::headers: alloc::vec::Vec<leyline::audit::HeaderOutcome>
+pub leyline::audit::FingerprintReport::ja3: leyline::audit::FieldOutcome
+pub leyline::audit::FingerprintReport::ja4: leyline::audit::FieldOutcome
+impl leyline::audit::FingerprintReport
+pub fn leyline::audit::FingerprintReport::is_match(&self) -> bool
+impl core::clone::Clone for leyline::audit::FingerprintReport
+impl core::cmp::Eq for leyline::audit::FingerprintReport
+impl core::cmp::PartialEq for leyline::audit::FingerprintReport
+impl core::fmt::Debug for leyline::audit::FingerprintReport
+impl core::fmt::Display for leyline::audit::FingerprintReport
+impl core::marker::StructuralPartialEq for leyline::audit::FingerprintReport
+#[non_exhaustive] pub struct leyline::audit::HeaderOutcome
+pub leyline::audit::HeaderOutcome::name: alloc::string::String
+pub leyline::audit::HeaderOutcome::outcome: leyline::audit::FieldOutcome
+impl core::clone::Clone for leyline::audit::HeaderOutcome
+impl core::cmp::Eq for leyline::audit::HeaderOutcome
+impl core::cmp::PartialEq for leyline::audit::HeaderOutcome
+impl core::fmt::Debug for leyline::audit::HeaderOutcome
+impl core::marker::StructuralPartialEq for leyline::audit::HeaderOutcome
 pub struct leyline::audit::Ja3Input<'a>
 pub leyline::audit::Ja3Input::ciphers: &'a [alloc::string::String]
 pub leyline::audit::Ja3Input::curves: &'a [alloc::string::String]
@@ -30,6 +72,24 @@ pub leyline::audit::Ja4hInput::headers: &'a [(alloc::string::String, alloc::stri
 pub leyline::audit::Ja4hInput::http_version: &'a str
 pub leyline::audit::Ja4hInput::method: &'a str
 impl core::fmt::Debug for leyline::audit::Ja4hInput<'_>
+#[non_exhaustive] pub struct leyline::audit::Observed
+pub leyline::audit::Observed::h2_fingerprint: core::option::Option<alloc::string::String>
+pub leyline::audit::Observed::headers: alloc::vec::Vec<(alloc::string::String, alloc::string::String)>
+pub leyline::audit::Observed::ja3: core::option::Option<alloc::string::String>
+pub leyline::audit::Observed::ja4: core::option::Option<alloc::string::String>
+impl leyline::audit::Observed
+pub fn leyline::audit::Observed::from_json(text: &str) -> leyline::Result<leyline::audit::Observed>
+pub fn leyline::audit::Observed::h2_fingerprint(self, value: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn leyline::audit::Observed::header(self, name: &str, value: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn leyline::audit::Observed::ja3(self, value: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn leyline::audit::Observed::ja4(self, value: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn leyline::audit::Observed::new() -> Self
+impl core::clone::Clone for leyline::audit::Observed
+impl core::cmp::Eq for leyline::audit::Observed
+impl core::cmp::PartialEq for leyline::audit::Observed
+impl core::default::Default for leyline::audit::Observed
+impl core::fmt::Debug for leyline::audit::Observed
+impl core::marker::StructuralPartialEq for leyline::audit::Observed
 pub fn leyline::audit::compute_ja3(input: &leyline::audit::Ja3Input<'_>) -> alloc::string::String
 pub fn leyline::audit::compute_ja4(input: &leyline::audit::Ja4Input<'_>) -> alloc::string::String
 pub fn leyline::audit::compute_ja4h(input: &leyline::audit::Ja4hInput<'_>) -> alloc::string::String
@@ -67,6 +127,7 @@ impl<'de> serde_core::de::Deserialize<'de> for leyline::cookie::Cookie
 pub struct leyline::cookie::Jar
 impl leyline::cookie::Jar
 pub fn leyline::cookie::Jar::all_cookies(&self) -> alloc::vec::Vec<leyline::cookie::Cookie>
+pub fn leyline::cookie::Jar::changes(&self) -> tokio::sync::watch::Receiver<u64>
 pub fn leyline::cookie::Jar::clear(&self)
 pub fn leyline::cookie::Jar::cookie_header(&self, url: &url::Url) -> core::option::Option<alloc::string::String>
 pub fn leyline::cookie::Jar::extend_from(&self, other: &leyline::cookie::Jar)
@@ -78,11 +139,62 @@ pub fn leyline::cookie::Jar::remove_named(&self, name: &str) -> usize
 pub fn leyline::cookie::Jar::set_cookie(&self, url: &url::Url, name: &str, value: &str)
 pub fn leyline::cookie::Jar::snapshot(&self) -> Self
 pub fn leyline::cookie::Jar::store_set_cookie(&self, set_cookie: &str, url: &url::Url)
+pub fn leyline::cookie::Jar::autosave(&self, path: impl core::convert::Into<std::path::PathBuf>, debounce: core::time::Duration) -> leyline::cookie::JarAutosave
+pub fn leyline::cookie::Jar::load_from(path: impl core::convert::AsRef<std::path::Path>) -> leyline::Result<leyline::cookie::Jar>
+pub fn leyline::cookie::Jar::save_to(&self, path: impl core::convert::AsRef<std::path::Path>) -> leyline::Result<()>
 impl core::clone::Clone for leyline::cookie::Jar
 impl core::default::Default for leyline::cookie::Jar
 impl core::fmt::Debug for leyline::cookie::Jar
 impl serde_core::ser::Serialize for leyline::cookie::Jar
 impl<'de> serde_core::de::Deserialize<'de> for leyline::cookie::Jar
+pub struct leyline::cookie::JarAutosave
+impl leyline::cookie::JarAutosave
+pub async fn leyline::cookie::JarAutosave::flush(&self) -> leyline::Result<()>
+pub async fn leyline::cookie::JarAutosave::shutdown(self) -> leyline::Result<()>
+impl core::fmt::Debug for leyline::cookie::JarAutosave
+pub mod leyline::html
+#[non_exhaustive] pub enum leyline::html::FormMethod
+pub leyline::html::FormMethod::Get
+pub leyline::html::FormMethod::Post
+impl core::clone::Clone for leyline::html::FormMethod
+impl core::cmp::Eq for leyline::html::FormMethod
+impl core::cmp::PartialEq for leyline::html::FormMethod
+impl core::default::Default for leyline::html::FormMethod
+impl core::fmt::Debug for leyline::html::FormMethod
+impl core::hash::Hash for leyline::html::FormMethod
+impl core::marker::Copy for leyline::html::FormMethod
+impl core::marker::StructuralPartialEq for leyline::html::FormMethod
+#[non_exhaustive] pub struct leyline::html::Anchor
+impl leyline::html::Anchor
+pub fn leyline::html::Anchor::href(&self) -> &str
+pub fn leyline::html::Anchor::rel(&self) -> core::option::Option<&str>
+pub fn leyline::html::Anchor::text(&self) -> &str
+impl core::clone::Clone for leyline::html::Anchor
+impl core::cmp::Eq for leyline::html::Anchor
+impl core::cmp::PartialEq for leyline::html::Anchor
+impl core::fmt::Debug for leyline::html::Anchor
+impl core::marker::StructuralPartialEq for leyline::html::Anchor
+#[non_exhaustive] pub struct leyline::html::Form
+impl leyline::html::Form
+pub fn leyline::html::Form::action(&self) -> &str
+pub fn leyline::html::Form::buttons(&self) -> alloc::vec::Vec<&str>
+pub fn leyline::html::Form::field(&self, name: &str) -> core::option::Option<&str>
+pub fn leyline::html::Form::fields(&self) -> &[(alloc::string::String, alloc::string::String)]
+pub fn leyline::html::Form::find(document: &str, selector: &str) -> core::option::Option<leyline::html::Form>
+pub fn leyline::html::Form::id(&self) -> core::option::Option<&str>
+pub fn leyline::html::Form::method(&self) -> leyline::html::FormMethod
+pub fn leyline::html::Form::name(&self) -> core::option::Option<&str>
+pub fn leyline::html::Form::press(&mut self, button: &str) -> bool
+pub fn leyline::html::Form::set(&mut self, name: impl core::convert::Into<alloc::string::String>, value: impl core::convert::Into<alloc::string::String>) -> &mut Self
+impl core::clone::Clone for leyline::html::Form
+impl core::cmp::Eq for leyline::html::Form
+impl core::cmp::PartialEq for leyline::html::Form
+impl core::default::Default for leyline::html::Form
+impl core::fmt::Debug for leyline::html::Form
+impl core::marker::StructuralPartialEq for leyline::html::Form
+pub fn leyline::html::forms(document: &str) -> alloc::vec::Vec<leyline::html::Form>
+pub fn leyline::html::links(document: &str) -> alloc::vec::Vec<leyline::html::Anchor>
+pub fn leyline::html::meta(document: &str, name: &str) -> core::option::Option<alloc::string::String>
 #[cfg(feature = "multipart")] pub mod leyline::multipart
 #[cfg(feature = "multipart")] pub struct leyline::multipart::Form
 #[cfg(feature = "multipart")] impl leyline::multipart::Form
@@ -97,6 +209,7 @@ impl<'de> serde_core::de::Deserialize<'de> for leyline::cookie::Jar
 #[cfg(feature = "multipart")] pub struct leyline::multipart::Part
 #[cfg(feature = "multipart")] impl leyline::multipart::Part
 #[cfg(feature = "multipart")] pub fn leyline::multipart::Part::bytes(bytes: impl core::convert::Into<bytes::bytes::Bytes>) -> Self
+#[cfg(feature = "multipart")] pub fn leyline::multipart::Part::file(path: impl core::convert::AsRef<std::path::Path>) -> core::io::error::Result<Self>
 #[cfg(feature = "multipart")] pub fn leyline::multipart::Part::filename(self, name: impl core::convert::Into<alloc::string::String>) -> Self
 #[cfg(feature = "multipart")] pub fn leyline::multipart::Part::header(self, name: impl core::convert::Into<alloc::string::String>, value: impl core::convert::Into<alloc::string::String>) -> Self
 #[cfg(feature = "multipart")] pub fn leyline::multipart::Part::mime(self, mime: impl core::convert::Into<alloc::string::String>) -> Self
@@ -393,6 +506,50 @@ pub leyline::profile::TlsProfile::tls12_extensions: bool
 impl core::clone::Clone for leyline::profile::TlsProfile
 impl core::fmt::Debug for leyline::profile::TlsProfile
 impl<'de> serde_core::de::Deserialize<'de> for leyline::profile::TlsProfile
+#[cfg(feature = "test-util")] pub mod leyline::testing
+#[cfg(feature = "test-util")] #[non_exhaustive] pub struct leyline::testing::RecordedRequest
+#[cfg(feature = "test-util")] pub leyline::testing::RecordedRequest::body: alloc::vec::Vec<u8>
+#[cfg(feature = "test-util")] pub leyline::testing::RecordedRequest::headers: alloc::vec::Vec<(alloc::string::String, alloc::string::String)>
+#[cfg(feature = "test-util")] pub leyline::testing::RecordedRequest::method: alloc::string::String
+#[cfg(feature = "test-util")] pub leyline::testing::RecordedRequest::target: alloc::string::String
+#[cfg(feature = "test-util")] impl leyline::testing::RecordedRequest
+#[cfg(feature = "test-util")] pub fn leyline::testing::RecordedRequest::header(&self, name: &str) -> core::option::Option<&str>
+#[cfg(feature = "test-util")] impl core::clone::Clone for leyline::testing::RecordedRequest
+#[cfg(feature = "test-util")] impl core::cmp::Eq for leyline::testing::RecordedRequest
+#[cfg(feature = "test-util")] impl core::cmp::PartialEq for leyline::testing::RecordedRequest
+#[cfg(feature = "test-util")] impl core::fmt::Debug for leyline::testing::RecordedRequest
+#[cfg(feature = "test-util")] impl core::marker::StructuralPartialEq for leyline::testing::RecordedRequest
+#[cfg(feature = "test-util")] #[non_exhaustive] pub struct leyline::testing::TestResponse
+#[cfg(feature = "test-util")] pub leyline::testing::TestResponse::body: alloc::vec::Vec<u8>
+#[cfg(feature = "test-util")] pub leyline::testing::TestResponse::headers: alloc::vec::Vec<(alloc::string::String, alloc::string::String)>
+#[cfg(feature = "test-util")] pub leyline::testing::TestResponse::status: u16
+#[cfg(feature = "test-util")] impl leyline::testing::TestResponse
+#[cfg(feature = "test-util")] pub fn leyline::testing::TestResponse::body(self, body: impl core::convert::Into<alloc::vec::Vec<u8>>) -> Self
+#[cfg(feature = "test-util")] pub fn leyline::testing::TestResponse::chunks<I, B>(self, parts: I, pause: core::time::Duration) -> Self where I: core::iter::traits::collect::IntoIterator<Item = B>, B: core::convert::Into<alloc::vec::Vec<u8>>
+#[cfg(feature = "test-util")] pub fn leyline::testing::TestResponse::delay(self, delay: core::time::Duration) -> Self
+#[cfg(feature = "test-util")] pub fn leyline::testing::TestResponse::header(self, name: impl core::convert::Into<alloc::string::String>, value: impl core::convert::Into<alloc::string::String>) -> Self
+#[cfg(feature = "test-util")] pub fn leyline::testing::TestResponse::new(status: u16) -> Self
+#[cfg(feature = "test-util")] impl core::clone::Clone for leyline::testing::TestResponse
+#[cfg(feature = "test-util")] impl core::cmp::Eq for leyline::testing::TestResponse
+#[cfg(feature = "test-util")] impl core::cmp::PartialEq for leyline::testing::TestResponse
+#[cfg(feature = "test-util")] impl core::default::Default for leyline::testing::TestResponse
+#[cfg(feature = "test-util")] impl core::fmt::Debug for leyline::testing::TestResponse
+#[cfg(feature = "test-util")] impl core::marker::StructuralPartialEq for leyline::testing::TestResponse
+#[cfg(feature = "test-util")] pub struct leyline::testing::TestServer
+#[cfg(feature = "test-util")] impl leyline::testing::TestServer
+#[cfg(feature = "test-util")] pub fn leyline::testing::TestServer::addr(&self) -> core::net::socket_addr::SocketAddr
+#[cfg(feature = "test-util")] pub fn leyline::testing::TestServer::ca_der(&self) -> core::option::Option<&[u8]>
+#[cfg(feature = "test-util")] pub async fn leyline::testing::TestServer::http<F>(handler: F) -> core::io::error::Result<Self> where F: core::ops::function::Fn(&leyline::testing::RecordedRequest) -> leyline::testing::TestResponse + core::marker::Send + core::marker::Sync + 'static
+#[cfg(feature = "test-util")] pub async fn leyline::testing::TestServer::https<F>(handler: F) -> core::io::error::Result<Self> where F: core::ops::function::Fn(&leyline::testing::RecordedRequest) -> leyline::testing::TestResponse + core::marker::Send + core::marker::Sync + 'static
+#[cfg(feature = "test-util")] pub async fn leyline::testing::TestServer::next_request(&self) -> core::option::Option<leyline::testing::RecordedRequest>
+#[cfg(feature = "test-util")] pub async fn leyline::testing::TestServer::requests(&self) -> alloc::vec::Vec<leyline::testing::RecordedRequest>
+#[cfg(feature = "test-util")] pub async fn leyline::testing::TestServer::shutdown(self)
+#[cfg(feature = "test-util")] pub fn leyline::testing::TestServer::trust(&self) -> leyline::TlsTrustConfig
+#[cfg(feature = "test-util")] pub fn leyline::testing::TestServer::url(&self, path: &str) -> alloc::string::String
+#[cfg(feature = "test-util")] impl core::fmt::Debug for leyline::testing::TestServer
+#[cfg(feature = "test-util")] impl core::ops::drop::Drop for leyline::testing::TestServer
+#[cfg(feature = "test-util")] pub fn leyline::testing::queue(responses: impl core::iter::traits::collect::IntoIterator<Item = leyline::testing::TestResponse>) -> impl core::ops::function::Fn(&leyline::testing::RecordedRequest) -> leyline::testing::TestResponse + core::marker::Send + core::marker::Sync + 'static
+#[cfg(feature = "test-util")] pub type leyline::testing::Handler = alloc::sync::Arc<(dyn core::ops::function::Fn(&leyline::testing::RecordedRequest) -> leyline::testing::TestResponse + core::marker::Send + core::marker::Sync)>
 pub mod leyline::tls
 #[non_exhaustive] pub struct leyline::tls::HappyEyeballsConfig
 impl leyline::tls::HappyEyeballsConfig
@@ -416,6 +573,17 @@ pub trait leyline::tls::Resolver: core::marker::Send + core::marker::Sync + 'sta
 pub fn leyline::tls::Resolver::resolve<'a>(&'a self, host: &'a str, port: u16) -> leyline::tls::ResolveFuture<'a>
 pub type leyline::tls::ResolveFuture<'a> = core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::result::Result<alloc::vec::Vec<core::net::socket_addr::SocketAddr>, core::io::error::Error>> + core::marker::Send + 'a)>>
 pub mod leyline::trace
+#[non_exhaustive] pub enum leyline::trace::BodyOutcome<'a>
+pub leyline::trace::BodyOutcome::Complete
+pub leyline::trace::BodyOutcome::Dropped
+pub leyline::trace::BodyOutcome::Failed(&'a core::io::error::Error)
+impl<'a> core::fmt::Debug for leyline::trace::BodyOutcome<'a>
+#[non_exhaustive] pub struct leyline::trace::BodyEnd<'a>
+pub leyline::trace::BodyEnd::bytes: u64
+pub leyline::trace::BodyEnd::elapsed: core::time::Duration
+pub leyline::trace::BodyEnd::id: u64
+pub leyline::trace::BodyEnd::outcome: leyline::trace::BodyOutcome<'a>
+impl<'a> core::fmt::Debug for leyline::trace::BodyEnd<'a>
 #[non_exhaustive] pub struct leyline::trace::Connect<'a>
 pub leyline::trace::Connect::elapsed: core::time::Duration
 pub leyline::trace::Connect::host: &'a str
@@ -435,6 +603,14 @@ pub leyline::trace::Done::elapsed: core::time::Duration
 pub leyline::trace::Done::id: u64
 pub leyline::trace::Done::outcome: core::result::Result<(), &'a leyline::Error>
 impl<'a> core::fmt::Debug for leyline::trace::Done<'a>
+pub struct leyline::trace::Fanout
+impl leyline::trace::Fanout
+pub fn leyline::trace::Fanout::new() -> Self
+pub fn leyline::trace::Fanout::with(self, hook: impl leyline::trace::Trace) -> Self
+impl core::clone::Clone for leyline::trace::Fanout
+impl core::default::Default for leyline::trace::Fanout
+impl core::fmt::Debug for leyline::trace::Fanout
+impl leyline::trace::Trace for leyline::trace::Fanout
 #[non_exhaustive] pub struct leyline::trace::Head<'a>
 pub leyline::trace::Head::elapsed: core::time::Duration
 pub leyline::trace::Head::headers: &'a http::header::map::HeaderMap
@@ -443,6 +619,31 @@ pub leyline::trace::Head::id: u64
 pub leyline::trace::Head::protocol: leyline::HttpVersion
 pub leyline::trace::Head::status: u16
 impl core::fmt::Debug for leyline::trace::Head<'_>
+pub struct leyline::trace::Metrics
+impl leyline::trace::Metrics
+pub fn leyline::trace::Metrics::new() -> alloc::sync::Arc<Self>
+pub fn leyline::trace::Metrics::snapshot(&self) -> leyline::trace::MetricsSnapshot
+impl core::default::Default for leyline::trace::Metrics
+impl core::fmt::Debug for leyline::trace::Metrics
+impl leyline::trace::Trace for leyline::trace::Metrics
+pub struct leyline::trace::MetricsSnapshot
+impl leyline::trace::MetricsSnapshot
+pub fn leyline::trace::MetricsSnapshot::attempts(&self) -> u64
+pub fn leyline::trace::MetricsSnapshot::bodies_complete(&self) -> u64
+pub fn leyline::trace::MetricsSnapshot::bodies_dropped(&self) -> u64
+pub fn leyline::trace::MetricsSnapshot::bodies_failed(&self) -> u64
+pub fn leyline::trace::MetricsSnapshot::errors(&self, category: leyline::ErrorCategory) -> u64
+pub fn leyline::trace::MetricsSnapshot::errors_total(&self) -> u64
+pub fn leyline::trace::MetricsSnapshot::latency(&self) -> alloc::vec::Vec<(core::option::Option<core::time::Duration>, u64)>
+pub fn leyline::trace::MetricsSnapshot::requests(&self) -> u64
+pub fn leyline::trace::MetricsSnapshot::status_class(&self, class: u8) -> u64
+impl core::clone::Clone for leyline::trace::MetricsSnapshot
+impl core::cmp::Eq for leyline::trace::MetricsSnapshot
+impl core::cmp::PartialEq for leyline::trace::MetricsSnapshot
+impl core::default::Default for leyline::trace::MetricsSnapshot
+impl core::fmt::Debug for leyline::trace::MetricsSnapshot
+impl core::fmt::Display for leyline::trace::MetricsSnapshot
+impl core::marker::StructuralPartialEq for leyline::trace::MetricsSnapshot
 #[non_exhaustive] pub struct leyline::trace::Sent<'a>
 pub leyline::trace::Sent::elapsed: core::time::Duration
 pub leyline::trace::Sent::host: &'a str
@@ -451,6 +652,22 @@ pub leyline::trace::Sent::method: &'a str
 pub leyline::trace::Sent::path: &'a str
 pub leyline::trace::Sent::protocol: leyline::HttpVersion
 impl core::fmt::Debug for leyline::trace::Sent<'_>
+#[non_exhaustive] pub struct leyline::trace::Summary<'a>
+pub leyline::trace::Summary::attempts: u32
+pub leyline::trace::Summary::browser: core::option::Option<leyline::Browser>
+pub leyline::trace::Summary::elapsed: core::time::Duration
+pub leyline::trace::Summary::id: u64
+pub leyline::trace::Summary::method: &'a str
+pub leyline::trace::Summary::original_url: &'a str
+pub leyline::trace::Summary::outcome: core::result::Result<(), &'a leyline::Error>
+pub leyline::trace::Summary::proxy: core::option::Option<alloc::string::String>
+pub leyline::trace::Summary::redirects: usize
+pub leyline::trace::Summary::status: core::option::Option<http::status::StatusCode>
+pub leyline::trace::Summary::streamed: bool
+pub leyline::trace::Summary::tag: core::option::Option<&'a str>
+pub leyline::trace::Summary::url: core::option::Option<&'a url::Url>
+pub leyline::trace::Summary::version: core::option::Option<leyline::HttpVersion>
+impl core::fmt::Debug for leyline::trace::Summary<'_>
 #[non_exhaustive] pub struct leyline::trace::Tls<'a>
 pub leyline::trace::Tls::alpn: core::option::Option<&'a str>
 pub leyline::trace::Tls::cipher: core::option::Option<&'a str>
@@ -466,13 +683,27 @@ impl core::fmt::Debug for leyline::trace::TracingTrace
 impl core::marker::Copy for leyline::trace::TracingTrace
 impl leyline::trace::Trace for leyline::trace::TracingTrace
 pub trait leyline::trace::Trace: core::marker::Send + core::marker::Sync + 'static
+pub fn leyline::trace::Trace::body(&self, ev: &leyline::trace::BodyEnd<'_>)
 pub fn leyline::trace::Trace::connect(&self, ev: &leyline::trace::Connect<'_>)
 pub fn leyline::trace::Trace::dns(&self, ev: &leyline::trace::Dns<'_>)
 pub fn leyline::trace::Trace::done(&self, ev: &leyline::trace::Done<'_>)
 pub fn leyline::trace::Trace::head(&self, ev: &leyline::trace::Head<'_>)
 pub fn leyline::trace::Trace::sent(&self, ev: &leyline::trace::Sent<'_>)
+pub fn leyline::trace::Trace::summary(&self, ev: &leyline::trace::Summary<'_>)
 pub fn leyline::trace::Trace::tls(&self, ev: &leyline::trace::Tls<'_>)
 impl<T: leyline::trace::Trace> leyline::trace::Trace for alloc::sync::Arc<T>
+#[non_exhaustive] pub enum leyline::BlockKind
+pub leyline::BlockKind::Block
+pub leyline::BlockKind::Captcha
+pub leyline::BlockKind::Challenge
+impl core::clone::Clone for leyline::BlockKind
+impl core::cmp::Eq for leyline::BlockKind
+impl core::cmp::PartialEq for leyline::BlockKind
+impl core::fmt::Debug for leyline::BlockKind
+impl core::hash::Hash for leyline::BlockKind
+impl core::marker::Copy for leyline::BlockKind
+impl core::marker::StructuralPartialEq for leyline::BlockKind
+impl<'de> serde_core::de::Deserialize<'de> for leyline::BlockKind
 #[non_exhaustive] pub enum leyline::Browser
 pub leyline::Browser::Brave146
 pub leyline::Browser::Brave154
@@ -510,6 +741,7 @@ pub fn leyline::Browser::all() -> &'static [leyline::Browser]
 pub fn leyline::Browser::family(&self) -> leyline::Family
 pub fn leyline::Browser::for_platform(self, platform: leyline::Platform) -> Self
 pub fn leyline::Browser::get(family: leyline::Family, version: u32) -> core::option::Option<Self>
+pub fn leyline::Browser::id(&self) -> &'static str
 pub fn leyline::Browser::identity(self, platform: leyline::Platform, brand: core::option::Option<leyline::ChromiumBrand>) -> core::option::Option<leyline::profile::PlatformIdentity>
 pub fn leyline::Browser::latest(family: leyline::Family) -> Self
 pub fn leyline::Browser::version(&self) -> u32
@@ -523,12 +755,17 @@ impl core::fmt::Display for leyline::Browser
 impl core::hash::Hash for leyline::Browser
 impl core::marker::Copy for leyline::Browser
 impl core::marker::StructuralPartialEq for leyline::Browser
+impl core::str::traits::FromStr for leyline::Browser
+pub type leyline::Browser::Err = leyline::Error
+impl serde_core::ser::Serialize for leyline::Browser
+impl<'de> serde_core::de::Deserialize<'de> for leyline::Browser
 #[non_exhaustive] pub enum leyline::ChromiumBrand
 pub leyline::ChromiumBrand::Chrome
 pub leyline::ChromiumBrand::Edge
 pub leyline::ChromiumBrand::Opera
 impl leyline::ChromiumBrand
 pub fn leyline::ChromiumBrand::all() -> &'static [leyline::ChromiumBrand]
+pub fn leyline::ChromiumBrand::id(&self) -> &'static str
 impl core::clone::Clone for leyline::ChromiumBrand
 impl core::cmp::Eq for leyline::ChromiumBrand
 impl core::cmp::PartialEq for leyline::ChromiumBrand
@@ -540,6 +777,8 @@ impl core::marker::Copy for leyline::ChromiumBrand
 impl core::marker::StructuralPartialEq for leyline::ChromiumBrand
 impl core::str::traits::FromStr for leyline::ChromiumBrand
 pub type leyline::ChromiumBrand::Err = leyline::Error
+impl serde_core::ser::Serialize for leyline::ChromiumBrand
+impl<'de> serde_core::de::Deserialize<'de> for leyline::ChromiumBrand
 #[non_exhaustive] pub enum leyline::ContentEncoding
 pub leyline::ContentEncoding::Brotli
 pub leyline::ContentEncoding::Deflate
@@ -551,6 +790,34 @@ impl core::cmp::PartialEq for leyline::ContentEncoding
 impl core::fmt::Debug for leyline::ContentEncoding
 impl core::marker::Copy for leyline::ContentEncoding
 impl core::marker::StructuralPartialEq for leyline::ContentEncoding
+#[non_exhaustive] pub enum leyline::ErrorCategory
+pub leyline::ErrorCategory::Body
+pub leyline::ErrorCategory::BodyLimit
+pub leyline::ErrorCategory::Config
+pub leyline::ErrorCategory::Connect
+pub leyline::ErrorCategory::Decode
+pub leyline::ErrorCategory::Dns
+pub leyline::ErrorCategory::Other
+pub leyline::ErrorCategory::Protocol
+pub leyline::ErrorCategory::Proxy
+pub leyline::ErrorCategory::ProxyTarget
+pub leyline::ErrorCategory::Redirect
+pub leyline::ErrorCategory::Request
+pub leyline::ErrorCategory::Status
+pub leyline::ErrorCategory::Timeout
+pub leyline::ErrorCategory::Tls
+pub leyline::ErrorCategory::Url
+impl leyline::ErrorCategory
+pub fn leyline::ErrorCategory::as_str(self) -> &'static str
+pub fn leyline::ErrorCategory::gateway_status(self) -> core::option::Option<http::status::StatusCode>
+impl core::clone::Clone for leyline::ErrorCategory
+impl core::cmp::Eq for leyline::ErrorCategory
+impl core::cmp::PartialEq for leyline::ErrorCategory
+impl core::fmt::Debug for leyline::ErrorCategory
+impl core::fmt::Display for leyline::ErrorCategory
+impl core::hash::Hash for leyline::ErrorCategory
+impl core::marker::Copy for leyline::ErrorCategory
+impl core::marker::StructuralPartialEq for leyline::ErrorCategory
 #[non_exhaustive] #[repr(u32)] pub enum leyline::ErrorCode
 pub leyline::ErrorCode::Cancel = 8
 pub leyline::ErrorCode::CompressionError = 9
@@ -582,6 +849,9 @@ pub leyline::Family::Firefox
 pub leyline::Family::OkHttp
 pub leyline::Family::Safari
 pub leyline::Family::SafariIos
+impl leyline::Family
+pub fn leyline::Family::all() -> &'static [leyline::Family]
+pub fn leyline::Family::id(&self) -> &'static str
 impl core::clone::Clone for leyline::Family
 impl core::cmp::Eq for leyline::Family
 impl core::cmp::PartialEq for leyline::Family
@@ -590,6 +860,10 @@ impl core::fmt::Display for leyline::Family
 impl core::hash::Hash for leyline::Family
 impl core::marker::Copy for leyline::Family
 impl core::marker::StructuralPartialEq for leyline::Family
+impl core::str::traits::FromStr for leyline::Family
+pub type leyline::Family::Err = leyline::Error
+impl serde_core::ser::Serialize for leyline::Family
+impl<'de> serde_core::de::Deserialize<'de> for leyline::Family
 #[non_exhaustive] pub enum leyline::FetchSite
 pub leyline::FetchSite::CrossSite
 pub leyline::FetchSite::SameOrigin
@@ -685,6 +959,8 @@ pub leyline::Platform::Linux
 pub leyline::Platform::MacOS
 pub leyline::Platform::Windows
 impl leyline::Platform
+pub fn leyline::Platform::all() -> &'static [leyline::Platform]
+pub fn leyline::Platform::id(&self) -> &'static str
 pub fn leyline::Platform::tcp_profile(&self) -> leyline::TcpProfile
 impl core::clone::Clone for leyline::Platform
 impl core::cmp::Eq for leyline::Platform
@@ -695,6 +971,10 @@ impl core::fmt::Display for leyline::Platform
 impl core::hash::Hash for leyline::Platform
 impl core::marker::Copy for leyline::Platform
 impl core::marker::StructuralPartialEq for leyline::Platform
+impl core::str::traits::FromStr for leyline::Platform
+pub type leyline::Platform::Err = leyline::Error
+impl serde_core::ser::Serialize for leyline::Platform
+impl<'de> serde_core::de::Deserialize<'de> for leyline::Platform
 #[non_exhaustive] pub enum leyline::Preset
 pub leyline::Preset::CrossOrigin
 pub leyline::Preset::Form
@@ -727,6 +1007,15 @@ impl core::cmp::PartialEq for leyline::ProtocolPolicy
 impl core::fmt::Debug for leyline::ProtocolPolicy
 impl core::marker::Copy for leyline::ProtocolPolicy
 impl core::marker::StructuralPartialEq for leyline::ProtocolPolicy
+#[non_exhaustive] pub enum leyline::ProxyReply
+pub leyline::ProxyReply::HttpStatus(u16)
+pub leyline::ProxyReply::Socks5(u8)
+impl core::clone::Clone for leyline::ProxyReply
+impl core::cmp::Eq for leyline::ProxyReply
+impl core::cmp::PartialEq for leyline::ProxyReply
+impl core::fmt::Debug for leyline::ProxyReply
+impl core::marker::Copy for leyline::ProxyReply
+impl core::marker::StructuralPartialEq for leyline::ProxyReply
 #[non_exhaustive] pub enum leyline::RedirectAction
 pub leyline::RedirectAction::Follow
 pub leyline::RedirectAction::Stop
@@ -736,6 +1025,15 @@ impl core::cmp::PartialEq for leyline::RedirectAction
 impl core::fmt::Debug for leyline::RedirectAction
 impl core::marker::Copy for leyline::RedirectAction
 impl core::marker::StructuralPartialEq for leyline::RedirectAction
+pub enum leyline::RelayBody
+pub leyline::RelayBody::AsReceived
+pub leyline::RelayBody::Decoded
+impl core::clone::Clone for leyline::RelayBody
+impl core::cmp::Eq for leyline::RelayBody
+impl core::cmp::PartialEq for leyline::RelayBody
+impl core::fmt::Debug for leyline::RelayBody
+impl core::marker::Copy for leyline::RelayBody
+impl core::marker::StructuralPartialEq for leyline::RelayBody
 #[non_exhaustive] pub enum leyline::RetryTrigger
 pub leyline::RetryTrigger::ConnectionError
 pub leyline::RetryTrigger::ServerError
@@ -759,6 +1057,9 @@ pub leyline::TlsError::Proxy
 pub leyline::TlsError::Proxy::detail: alloc::string::String
 pub leyline::TlsError::Proxy::source: core::option::Option<core::io::error::Error>
 pub leyline::TlsError::Proxy::status: core::option::Option<u16>
+pub leyline::TlsError::ProxyTargetUnreachable
+pub leyline::TlsError::ProxyTargetUnreachable::detail: alloc::string::String
+pub leyline::TlsError::ProxyTargetUnreachable::reply: leyline::ProxyReply
 pub leyline::TlsError::Rejected(core::io::error::Error)
 pub leyline::TlsError::SslConfig(alloc::string::String)
 pub leyline::TlsError::TcpConnect(core::io::error::Error)
@@ -779,6 +1080,17 @@ impl core::cmp::PartialOrd for leyline::TlsMinVersion
 impl core::fmt::Debug for leyline::TlsMinVersion
 impl core::marker::Copy for leyline::TlsMinVersion
 impl core::marker::StructuralPartialEq for leyline::TlsMinVersion
+#[non_exhaustive] pub enum leyline::WaitFormat
+pub leyline::WaitFormat::HttpDate
+pub leyline::WaitFormat::Seconds
+pub leyline::WaitFormat::UnixSeconds
+impl core::clone::Clone for leyline::WaitFormat
+impl core::cmp::Eq for leyline::WaitFormat
+impl core::cmp::PartialEq for leyline::WaitFormat
+impl core::fmt::Debug for leyline::WaitFormat
+impl core::hash::Hash for leyline::WaitFormat
+impl core::marker::Copy for leyline::WaitFormat
+impl core::marker::StructuralPartialEq for leyline::WaitFormat
 #[cfg(feature = "websocket")] #[non_exhaustive] pub enum leyline::WsMessage
 #[cfg(feature = "websocket")] pub leyline::WsMessage::Binary(alloc::vec::Vec<u8>)
 #[cfg(feature = "websocket")] pub leyline::WsMessage::Close(core::option::Option<leyline::CloseFrame>)
@@ -790,6 +1102,24 @@ impl core::marker::StructuralPartialEq for leyline::TlsMinVersion
 #[cfg(feature = "websocket")] impl core::cmp::PartialEq for leyline::WsMessage
 #[cfg(feature = "websocket")] impl core::fmt::Debug for leyline::WsMessage
 #[cfg(feature = "websocket")] impl core::marker::StructuralPartialEq for leyline::WsMessage
+pub struct leyline::BlockRules
+impl leyline::BlockRules
+pub fn leyline::BlockRules::builtin() -> &'static leyline::BlockRules
+pub fn leyline::BlockRules::check(&self, response: &leyline::Response) -> core::option::Option<leyline::BlockSignal>
+pub fn leyline::BlockRules::extend(&mut self, other: leyline::BlockRules)
+pub fn leyline::BlockRules::from_toml(source: &str) -> leyline::Result<Self>
+pub fn leyline::BlockRules::statuses(statuses: impl core::iter::traits::collect::IntoIterator<Item = u16>) -> Self
+impl core::clone::Clone for leyline::BlockRules
+impl core::default::Default for leyline::BlockRules
+impl core::fmt::Debug for leyline::BlockRules
+#[non_exhaustive] pub struct leyline::BlockSignal
+pub leyline::BlockSignal::kind: leyline::BlockKind
+pub leyline::BlockSignal::vendor: alloc::string::String
+impl core::clone::Clone for leyline::BlockSignal
+impl core::cmp::Eq for leyline::BlockSignal
+impl core::cmp::PartialEq for leyline::BlockSignal
+impl core::fmt::Debug for leyline::BlockSignal
+impl core::marker::StructuralPartialEq for leyline::BlockSignal
 pub struct leyline::Body(_)
 impl leyline::Body
 pub fn leyline::Body::len_hint(&self) -> core::option::Option<u64>
@@ -848,6 +1178,45 @@ impl core::default::Default for leyline::CompressionConfig
 impl core::fmt::Debug for leyline::CompressionConfig
 impl core::marker::Copy for leyline::CompressionConfig
 impl core::marker::StructuralPartialEq for leyline::CompressionConfig
+#[non_exhaustive] pub struct leyline::Device
+pub leyline::Device::app: alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>
+pub leyline::Device::brand: core::option::Option<leyline::ChromiumBrand>
+pub leyline::Device::env_proxy: bool
+pub leyline::Device::identity: core::option::Option<leyline::Identity>
+pub leyline::Device::jar: core::option::Option<leyline::cookie::Jar>
+pub leyline::Device::jar_path: core::option::Option<std::path::PathBuf>
+pub leyline::Device::languages: core::option::Option<alloc::vec::Vec<alloc::string::String>>
+pub leyline::Device::page: core::option::Option<url::Url>
+pub leyline::Device::platform: leyline::Platform
+pub leyline::Device::profile_id: core::option::Option<alloc::string::String>
+pub leyline::Device::profile_toml: core::option::Option<alloc::string::String>
+pub leyline::Device::proxy: core::option::Option<leyline::ProxyUrl>
+pub leyline::Device::proxy_password_env: core::option::Option<alloc::string::String>
+pub leyline::Device::state: leyline::SessionState
+pub leyline::Device::strict: bool
+pub leyline::Device::user_agent: core::option::Option<alloc::string::String>
+impl leyline::Device
+pub fn leyline::Device::autosave(&self, session: &leyline::Session, path: impl core::convert::Into<std::path::PathBuf>, debounce: core::time::Duration) -> leyline::DeviceAutosave
+pub fn leyline::Device::capture(session: &leyline::Session, proxy: core::option::Option<leyline::ProxyUrl>) -> leyline::Device
+pub fn leyline::Device::load_from(path: impl core::convert::AsRef<std::path::Path>) -> leyline::Result<leyline::Device>
+pub fn leyline::Device::open(&self) -> leyline::Result<leyline::Session>
+pub fn leyline::Device::pin_profile(&mut self, session: &leyline::Session) -> leyline::Result<()>
+pub fn leyline::Device::save_to(&self, path: impl core::convert::AsRef<std::path::Path>) -> leyline::Result<()>
+pub fn leyline::Device::session_builder(&self) -> leyline::Result<leyline::SessionBuilder>
+pub fn leyline::Device::tab(&self, session: &leyline::Session) -> leyline::Tab
+pub fn leyline::Device::check(&self, session: &leyline::Session) -> leyline::Result<()>
+impl core::clone::Clone for leyline::Device
+impl core::fmt::Debug for leyline::Device
+impl serde_core::ser::Serialize for leyline::Device
+impl<'de> serde_core::de::Deserialize<'de> for leyline::Device
+pub struct leyline::DeviceAutosave
+impl leyline::DeviceAutosave
+pub fn leyline::DeviceAutosave::device(&self) -> leyline::Device
+pub async fn leyline::DeviceAutosave::flush(&self) -> leyline::Result<()>
+pub async fn leyline::DeviceAutosave::shutdown(self) -> leyline::Result<()>
+pub fn leyline::DeviceAutosave::track(&self, tab: &leyline::Tab)
+pub fn leyline::DeviceAutosave::update(&self, change: impl core::ops::function::FnOnce(&mut leyline::Device))
+impl core::fmt::Debug for leyline::DeviceAutosave
 pub struct leyline::DigestAuth
 impl leyline::DigestAuth
 pub fn leyline::DigestAuth::new(username: impl core::convert::Into<alloc::string::String>, password: impl core::convert::Into<alloc::string::String>) -> Self
@@ -864,26 +1233,65 @@ impl core::default::Default for leyline::DnsConfig
 impl core::fmt::Debug for leyline::DnsConfig
 pub struct leyline::Error
 impl leyline::Error
+pub fn leyline::Error::attempts(&self) -> u32
+pub fn leyline::Error::body(&self) -> core::option::Option<&[u8]>
+pub fn leyline::Error::body_text(&self) -> core::option::Option<alloc::borrow::Cow<'_, str>>
+pub fn leyline::Error::find<'a>(error: &'a (dyn core::error::Error + 'static)) -> core::option::Option<&'a leyline::Error>
 pub fn leyline::Error::h2(&self) -> core::option::Option<&leyline::H2Error>
+pub fn leyline::Error::header(&self, name: &str) -> core::option::Option<&str>
+pub fn leyline::Error::headers(&self) -> core::option::Option<&http::header::map::HeaderMap>
 pub fn leyline::Error::io(&self) -> core::option::Option<&core::io::error::Error>
-pub fn leyline::Error::is_connect(&self) -> bool
-pub fn leyline::Error::is_retryable(&self) -> bool
-pub fn leyline::Error::is_status(&self) -> bool
-pub fn leyline::Error::is_timeout(&self) -> bool
+pub fn leyline::Error::is_shut_down(&self) -> bool
 pub fn leyline::Error::kind(&self) -> leyline::Kind
+pub fn leyline::Error::proxy(&self) -> core::option::Option<&str>
+pub fn leyline::Error::retries_exhausted(&self) -> bool
+pub fn leyline::Error::retry_after(&self) -> core::option::Option<core::time::Duration>
 pub fn leyline::Error::status(&self) -> core::option::Option<http::status::StatusCode>
 pub fn leyline::Error::tls(&self) -> core::option::Option<&leyline::TlsError>
 pub fn leyline::Error::url(&self) -> core::option::Option<&url::Url>
+pub fn leyline::Error::category(&self) -> leyline::ErrorCategory
+pub fn leyline::Error::is_dns(&self) -> bool
+pub fn leyline::Error::is_body_limit(&self) -> bool
+pub fn leyline::Error::is_connect(&self) -> bool
+pub fn leyline::Error::is_proxy(&self) -> bool
+pub fn leyline::Error::is_retryable(&self) -> bool
+pub fn leyline::Error::is_status(&self) -> bool
+pub fn leyline::Error::is_timeout(&self) -> bool
+pub fn leyline::Error::is_profile_changed(&self) -> bool
 impl core::convert::From<core::io::error::Error> for leyline::Error
 impl core::convert::From<http::error::Error> for leyline::Error
 impl core::convert::From<http::header::name::InvalidHeaderName> for leyline::Error
 impl core::convert::From<http::header::value::InvalidHeaderValue> for leyline::Error
 impl core::convert::From<http::uri::InvalidUri> for leyline::Error
+impl core::convert::From<url::parser::ParseError> for leyline::Error
 impl core::error::Error for leyline::Error
 impl core::fmt::Debug for leyline::Error
 impl core::fmt::Display for leyline::Error
+#[non_exhaustive] pub struct leyline::HostLimits
+impl leyline::HostLimits
+pub fn leyline::HostLimits::host(self, host: &str, limits: leyline::HostLimits) -> Self
+pub fn leyline::HostLimits::max_in_flight(self, n: usize) -> Self
+pub fn leyline::HostLimits::max_total_in_flight(self, n: usize) -> Self
+pub fn leyline::HostLimits::new() -> Self
+pub fn leyline::HostLimits::pause_for(self, default: core::time::Duration) -> Self
+pub fn leyline::HostLimits::pause_on(self, statuses: impl core::iter::traits::collect::IntoIterator<Item = u16>) -> Self
+pub fn leyline::HostLimits::per_second(self, rate: f64) -> Self
+impl core::clone::Clone for leyline::HostLimits
+impl core::default::Default for leyline::HostLimits
+impl core::fmt::Debug for leyline::HostLimits
+#[non_exhaustive] pub struct leyline::HostStats
+impl leyline::HostStats
+pub fn leyline::HostStats::in_flight(&self) -> usize
+pub fn leyline::HostStats::origin(&self) -> &str
+pub fn leyline::HostStats::waiting(&self) -> usize
+impl core::clone::Clone for leyline::HostStats
+impl core::cmp::Eq for leyline::HostStats
+impl core::cmp::PartialEq for leyline::HostStats
+impl core::fmt::Debug for leyline::HostStats
+impl core::marker::StructuralPartialEq for leyline::HostStats
 pub struct leyline::Identity
 impl leyline::Identity
+pub fn leyline::Identity::brand(self) -> core::option::Option<leyline::ChromiumBrand>
 pub fn leyline::Identity::http(self) -> leyline::Browser
 pub fn leyline::Identity::locked(browser: leyline::Browser, platform: leyline::Platform) -> Self
 pub fn leyline::Identity::platform(self) -> leyline::Platform
@@ -891,6 +1299,7 @@ pub fn leyline::Identity::rotate_hello(self) -> leyline::Result<Self>
 pub fn leyline::Identity::rotate_tls(self, tls: leyline::Browser) -> leyline::Result<Self>
 pub fn leyline::Identity::switch_family(self, dest: leyline::Browser) -> leyline::Result<Self>
 pub fn leyline::Identity::tls(self) -> leyline::Browser
+pub fn leyline::Identity::with_brand(self, brand: leyline::ChromiumBrand) -> Self
 impl core::clone::Clone for leyline::Identity
 impl core::cmp::Eq for leyline::Identity
 impl core::cmp::PartialEq for leyline::Identity
@@ -898,6 +1307,8 @@ impl core::fmt::Debug for leyline::Identity
 impl core::hash::Hash for leyline::Identity
 impl core::marker::Copy for leyline::Identity
 impl core::marker::StructuralPartialEq for leyline::Identity
+impl serde_core::ser::Serialize for leyline::Identity
+impl<'de> serde_core::de::Deserialize<'de> for leyline::Identity
 #[cfg(feature = "tower")] pub struct leyline::LeylineService
 #[cfg(feature = "tower")] impl leyline::LeylineService
 #[cfg(feature = "tower")] pub fn leyline::LeylineService::new(session: leyline::Session) -> Self
@@ -907,6 +1318,17 @@ impl core::marker::StructuralPartialEq for leyline::Identity
 #[cfg(feature = "tower")] pub type leyline::LeylineService::Error = leyline::Error
 #[cfg(feature = "tower")] pub type leyline::LeylineService::Future = core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::result::Result<http::response::Response<leyline::Body>, leyline::Error>> + core::marker::Send)>>
 #[cfg(feature = "tower")] pub type leyline::LeylineService::Response = http::response::Response<leyline::Body>
+#[non_exhaustive] pub struct leyline::Link
+pub leyline::Link::params: alloc::vec::Vec<(alloc::string::String, alloc::string::String)>
+pub leyline::Link::rel: alloc::vec::Vec<alloc::string::String>
+pub leyline::Link::url: url::Url
+impl leyline::Link
+pub fn leyline::Link::has_rel(&self, rel: &str) -> bool
+impl core::clone::Clone for leyline::Link
+impl core::cmp::Eq for leyline::Link
+impl core::cmp::PartialEq for leyline::Link
+impl core::fmt::Debug for leyline::Link
+impl core::marker::StructuralPartialEq for leyline::Link
 #[non_exhaustive] pub struct leyline::NoProxy
 impl leyline::NoProxy
 pub fn leyline::NoProxy::new<I, S>(patterns: I) -> Self where I: core::iter::traits::collect::IntoIterator<Item = S>, S: core::convert::Into<alloc::string::String>
@@ -916,6 +1338,12 @@ impl core::cmp::PartialEq for leyline::NoProxy
 impl core::default::Default for leyline::NoProxy
 impl core::fmt::Debug for leyline::NoProxy
 impl core::marker::StructuralPartialEq for leyline::NoProxy
+pub struct leyline::Pages
+impl leyline::Pages
+pub async fn leyline::Pages::next(&mut self) -> core::option::Option<leyline::Result<leyline::Response>>
+impl core::fmt::Debug for leyline::Pages
+impl futures_core::stream::Stream for leyline::Pages
+pub type leyline::Pages::Item = core::result::Result<leyline::Response, leyline::Error>
 #[non_exhaustive] pub struct leyline::PoolConfig
 impl leyline::PoolConfig
 pub fn leyline::PoolConfig::h2_ping_after_idle(self, d: impl core::convert::Into<core::option::Option<core::time::Duration>>) -> Self
@@ -933,6 +1361,7 @@ impl core::fmt::Debug for leyline::PoolConfig
 impl core::marker::Copy for leyline::PoolConfig
 impl core::marker::StructuralPartialEq for leyline::PoolConfig
 #[non_exhaustive] pub struct leyline::PoolStats
+pub leyline::PoolStats::busy: usize
 pub leyline::PoolStats::entries: usize
 pub leyline::PoolStats::evictions_dead: u64
 pub leyline::PoolStats::evictions_idle: u64
@@ -944,6 +1373,7 @@ pub leyline::PoolStats::h2_misses: u64
 pub leyline::PoolStats::h2_ping_failures: u64
 pub leyline::PoolStats::h3_hits: u64
 pub leyline::PoolStats::h3_misses: u64
+pub leyline::PoolStats::idle: usize
 pub leyline::PoolStats::installs: u64
 pub leyline::PoolStats::max_connections: usize
 pub leyline::PoolStats::stale_probed: u64
@@ -967,6 +1397,24 @@ impl core::convert::From<alloc::string::String> for leyline::ProxyConfig
 impl core::convert::From<leyline::ProxyUrl> for leyline::ProxyConfig
 impl core::default::Default for leyline::ProxyConfig
 impl core::fmt::Debug for leyline::ProxyConfig
+#[non_exhaustive] pub struct leyline::ProxyHealth
+pub leyline::ProxyHealth::banned_until: core::option::Option<std::time::Instant>
+pub leyline::ProxyHealth::failures: u32
+pub leyline::ProxyHealth::in_use: u32
+pub leyline::ProxyHealth::proxy: alloc::string::String
+impl core::clone::Clone for leyline::ProxyHealth
+impl core::fmt::Debug for leyline::ProxyHealth
+pub struct leyline::ProxyPool
+impl leyline::ProxyPool
+pub fn leyline::ProxyPool::ban_after(self, failures: u32) -> Self
+pub fn leyline::ProxyPool::ban_for(self, duration: core::time::Duration) -> Self
+pub fn leyline::ProxyPool::identified<P: core::convert::Into<leyline::ProxyConfig>>(proxies: impl core::iter::traits::collect::IntoIterator<Item = (P, leyline::Identity)>) -> Self
+pub fn leyline::ProxyPool::new<P: core::convert::Into<leyline::ProxyConfig>>(proxies: impl core::iter::traits::collect::IntoIterator<Item = P>) -> Self
+pub fn leyline::ProxyPool::rotate_on_block(self, rules: leyline::BlockRules) -> Self
+pub fn leyline::ProxyPool::stats(&self) -> alloc::vec::Vec<leyline::ProxyHealth>
+pub fn leyline::ProxyPool::sticky_for(self, duration: core::time::Duration) -> Self
+impl core::clone::Clone for leyline::ProxyPool
+impl core::fmt::Debug for leyline::ProxyPool
 #[non_exhaustive] pub struct leyline::ProxyRule
 impl leyline::ProxyRule
 pub fn leyline::ProxyRule::all(proxy_url: impl core::convert::Into<alloc::string::String>) -> Self
@@ -984,10 +1432,14 @@ impl core::clone::Clone for leyline::ProxyUrl
 impl core::cmp::Eq for leyline::ProxyUrl
 impl core::cmp::PartialEq for leyline::ProxyUrl
 impl core::convert::From<leyline::ProxyUrl> for alloc::string::String
+impl core::convert::TryFrom<alloc::string::String> for leyline::ProxyUrl
+pub type leyline::ProxyUrl::Error = leyline::Error
 impl core::fmt::Debug for leyline::ProxyUrl
 impl core::fmt::Display for leyline::ProxyUrl
 impl core::hash::Hash for leyline::ProxyUrl
 impl core::marker::StructuralPartialEq for leyline::ProxyUrl
+impl serde_core::ser::Serialize for leyline::ProxyUrl
+impl<'de> serde_core::de::Deserialize<'de> for leyline::ProxyUrl
 #[non_exhaustive] pub struct leyline::RedirectAttempt<'a>
 pub leyline::RedirectAttempt::location: core::option::Option<&'a str>
 pub leyline::RedirectAttempt::previous: &'a [url::Url]
@@ -1025,6 +1477,12 @@ pub fn leyline::RequestBuilder::redirect(self, policy: leyline::RedirectPolicy) 
 pub fn leyline::RequestBuilder::retry(self, policy: leyline::RetryPolicy) -> Self
 pub fn leyline::RequestBuilder::stream(self) -> Self
 pub fn leyline::RequestBuilder::timeout(self, config: impl core::convert::Into<leyline::TimeoutConfig>) -> Self
+pub fn leyline::RequestBuilder::cookie_jar(self, jar: leyline::cookie::Jar) -> Self
+pub async fn leyline::RequestBuilder::download(self, path: impl core::convert::AsRef<std::path::Path>, limit: core::option::Option<u64>) -> leyline::Result<u64>
+pub fn leyline::RequestBuilder::error_for_status(self) -> Self
+pub fn leyline::RequestBuilder::initiator(self, page: impl leyline::IntoUrl) -> Self
+pub fn leyline::RequestBuilder::tag(self, tag: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn leyline::RequestBuilder::pages(self) -> leyline::Pages
 pub async fn leyline::RequestBuilder::send(self) -> leyline::Result<leyline::Response>
 impl core::fmt::Debug for leyline::RequestBuilder
 impl core::future::into_future::IntoFuture for leyline::RequestBuilder
@@ -1032,29 +1490,38 @@ pub type leyline::RequestBuilder::IntoFuture = core::pin::Pin<alloc::boxed::Box<
 pub type leyline::RequestBuilder::Output = core::result::Result<leyline::Response, leyline::Error>
 pub struct leyline::Response
 impl leyline::Response
+pub fn leyline::Response::attempts(&self) -> u32
 pub fn leyline::Response::audit(&self) -> core::option::Option<&leyline::audit::AuditData>
-pub async fn leyline::Response::bytes(self) -> leyline::Result<bytes::bytes::Bytes>
+pub fn leyline::Response::block(&self) -> core::option::Option<leyline::BlockSignal>
 pub fn leyline::Response::content_length(&self) -> core::option::Option<u64>
 pub fn leyline::Response::cookies(&self) -> impl core::iter::traits::iterator::Iterator<Item = leyline::cookie::Cookie> + '_
-pub async fn leyline::Response::copy_to<W>(self, writer: &mut W) -> leyline::Result<u64> where W: tokio::io::async_write::AsyncWrite + core::marker::Unpin
 pub fn leyline::Response::error_for_status(self) -> leyline::Result<Self>
 pub fn leyline::Response::error_for_status_ref(&self) -> leyline::Result<&Self>
 pub fn leyline::Response::header(&self, name: &str) -> core::option::Option<&str>
 pub fn leyline::Response::headers(&self) -> &http::header::map::HeaderMap
-pub fn leyline::Response::into_stream(self) -> leyline::Result<leyline::BodyStream>
-pub async fn leyline::Response::json<T: serde_core::de::DeserializeOwned>(self) -> leyline::Result<T>
-pub async fn leyline::Response::read_until<F>(self, limit: usize, done: F) -> leyline::Result<alloc::vec::Vec<u8>> where F: core::ops::function::FnMut(&[u8], usize) -> bool
+pub fn leyline::Response::proxy(&self) -> core::option::Option<&str>
 pub fn leyline::Response::redirect_chain(&self) -> &[url::Url]
 pub fn leyline::Response::request_headers(&self) -> impl core::iter::traits::iterator::Iterator<Item = (&str, &str)>
 pub fn leyline::Response::status(&self) -> http::status::StatusCode
-pub async fn leyline::Response::text(self) -> leyline::Result<alloc::string::String>
-#[cfg(feature = "charset")] pub async fn leyline::Response::text_with_charset(self, default_encoding: &str) -> leyline::Result<alloc::string::String>
-#[cfg(not(feature = "charset"))] pub async fn leyline::Response::text_with_charset(self, _default_encoding: &str) -> leyline::Result<alloc::string::String>
 pub fn leyline::Response::timing(&self) -> &leyline::ResponseTiming
 pub fn leyline::Response::tls(&self) -> core::option::Option<&leyline::TlsInfo>
 pub fn leyline::Response::trailers(&self) -> impl core::iter::traits::iterator::Iterator<Item = (&http::header::name::HeaderName, &http::header::value::HeaderValue)>
 pub fn leyline::Response::url(&self) -> &url::Url
 pub fn leyline::Response::version(&self) -> leyline::HttpVersion
+pub async fn leyline::Response::bytes(self) -> leyline::Result<bytes::bytes::Bytes>
+pub async fn leyline::Response::copy_decoded_to<W>(self, writer: &mut W, limit: core::option::Option<u64>) -> leyline::Result<u64> where W: tokio::io::async_write::AsyncWrite + core::marker::Unpin
+pub async fn leyline::Response::copy_to<W>(self, writer: &mut W) -> leyline::Result<u64> where W: tokio::io::async_write::AsyncWrite + core::marker::Unpin
+pub fn leyline::Response::into_decoded_stream(self, limit: core::option::Option<u64>) -> leyline::Result<leyline::BodyStream>
+pub fn leyline::Response::into_stream(self) -> leyline::Result<leyline::BodyStream>
+pub async fn leyline::Response::json<T: serde_core::de::DeserializeOwned>(self) -> leyline::Result<T>
+pub async fn leyline::Response::read_until<F>(self, limit: usize, done: F) -> leyline::Result<alloc::vec::Vec<u8>> where F: core::ops::function::FnMut(&[u8], usize) -> bool
+pub async fn leyline::Response::text(self) -> leyline::Result<alloc::string::String>
+#[cfg(feature = "charset")] pub async fn leyline::Response::text_with_charset(self, default_encoding: &str) -> leyline::Result<alloc::string::String>
+#[cfg(not(feature = "charset"))] pub async fn leyline::Response::text_with_charset(self, _default_encoding: &str) -> leyline::Result<alloc::string::String>
+pub async fn leyline::Response::download_to(self, path: impl core::convert::AsRef<std::path::Path>, limit: core::option::Option<u64>) -> leyline::Result<u64>
+pub fn leyline::Response::link(&self, rel: &str) -> core::option::Option<url::Url>
+pub fn leyline::Response::links(&self) -> alloc::vec::Vec<leyline::Link>
+pub fn leyline::Response::relay_headers(&self, body: leyline::RelayBody) -> http::header::map::HeaderMap
 impl core::fmt::Debug for leyline::Response
 #[non_exhaustive] pub struct leyline::ResponseTiming
 pub leyline::ResponseTiming::connect_ms: core::option::Option<u32>
@@ -1071,6 +1538,7 @@ impl core::marker::StructuralPartialEq for leyline::ResponseTiming
 #[non_exhaustive] pub struct leyline::RetryPolicy
 impl leyline::RetryPolicy
 pub fn leyline::RetryPolicy::allow_non_idempotent(self, allow: bool) -> Self
+pub fn leyline::RetryPolicy::backoff(&self, attempt: u32) -> core::time::Duration
 pub fn leyline::RetryPolicy::backoff_factor(self, factor: f64) -> Self
 pub fn leyline::RetryPolicy::initial_backoff(self, d: core::time::Duration) -> Self
 pub fn leyline::RetryPolicy::jitter(self, on: bool) -> Self
@@ -1079,13 +1547,19 @@ pub fn leyline::RetryPolicy::max_retries(self, n: u32) -> Self
 pub fn leyline::RetryPolicy::max_retry_after(self, d: core::time::Duration) -> Self
 pub fn leyline::RetryPolicy::none() -> Self
 pub fn leyline::RetryPolicy::on_status(self, code: u16) -> Self
+pub fn leyline::RetryPolicy::retry_if<F>(self, f: F) -> Self where F: core::ops::function::Fn(&leyline::Response) -> bool + core::marker::Send + core::marker::Sync + core::panic::unwind_safe::RefUnwindSafe + 'static
 pub fn leyline::RetryPolicy::retry_on(self, triggers: impl core::iter::traits::collect::IntoIterator<Item = leyline::RetryTrigger>) -> Self
+pub fn leyline::RetryPolicy::retry_unsent(self, enabled: bool) -> Self
+pub fn leyline::RetryPolicy::rotate_proxies<P: core::convert::Into<leyline::ProxyConfig>>(self, proxies: impl core::iter::traits::collect::IntoIterator<Item = P>) -> Self
+pub fn leyline::RetryPolicy::skip_blocks(self, rules: leyline::BlockRules) -> Self
 pub fn leyline::RetryPolicy::transient() -> Self
+pub fn leyline::RetryPolicy::wait_header(self, name: impl core::convert::Into<alloc::string::String>, format: leyline::WaitFormat) -> Self
 impl core::clone::Clone for leyline::RetryPolicy
 impl core::default::Default for leyline::RetryPolicy
 impl core::fmt::Debug for leyline::RetryPolicy
 pub struct leyline::Session
 impl leyline::Session
+pub fn leyline::Session::browser(browser: leyline::Browser) -> Self
 pub fn leyline::Session::builder() -> leyline::SessionBuilder
 pub fn leyline::Session::cookies(&self) -> &leyline::cookie::Jar
 pub fn leyline::Session::delete(&self, url: impl leyline::IntoUrl) -> leyline::RequestBuilder
@@ -1093,6 +1567,7 @@ pub async fn leyline::Session::execute(&self, req: http::request::Request<leylin
 pub fn leyline::Session::fresh_pool(&self) -> Self
 pub fn leyline::Session::get(&self, url: impl leyline::IntoUrl) -> leyline::RequestBuilder
 pub fn leyline::Session::head(&self, url: impl leyline::IntoUrl) -> leyline::RequestBuilder
+pub fn leyline::Session::host_stats(&self) -> alloc::vec::Vec<leyline::HostStats>
 pub fn leyline::Session::new() -> Self
 pub fn leyline::Session::patch(&self, url: impl leyline::IntoUrl) -> leyline::RequestBuilder
 pub fn leyline::Session::pool_stats(&self) -> leyline::PoolStats
@@ -1101,11 +1576,16 @@ pub async fn leyline::Session::preconnect(&self, url: impl leyline::IntoUrl) -> 
 pub fn leyline::Session::proxy_url(&self) -> core::option::Option<leyline::ProxyUrl>
 pub fn leyline::Session::put(&self, url: impl leyline::IntoUrl) -> leyline::RequestBuilder
 pub fn leyline::Session::request(&self, method: http::method::Method, url: impl leyline::IntoUrl) -> leyline::RequestBuilder
+pub fn leyline::Session::tab(&self) -> leyline::Tab
+pub fn leyline::Session::with_base_url(&self, url: impl leyline::IntoUrl) -> leyline::Result<Self>
 pub fn leyline::Session::with_cookie_jar(&self, jar: leyline::cookie::Jar) -> Self
 pub fn leyline::Session::with_proxy(&self, config: impl core::convert::Into<leyline::ProxyConfig>) -> Self
 pub fn leyline::Session::with_redirect(&self, policy: leyline::RedirectPolicy) -> Self
 pub fn leyline::Session::identity(&self) -> leyline::SessionIdentity
 pub fn leyline::Session::with_identity(&self, identity: leyline::Identity) -> leyline::Result<Self>
+pub fn leyline::Session::is_shut_down(&self) -> bool
+pub fn leyline::Session::shutdown(&self)
+pub fn leyline::Session::state(&self) -> leyline::SessionState
 #[cfg(feature = "websocket")] pub fn leyline::Session::websocket(&self, url: impl leyline::IntoUrl) -> leyline::WebSocketBuilder
 impl core::clone::Clone for leyline::Session
 impl core::default::Default for leyline::Session
@@ -1114,20 +1594,26 @@ impl core::fmt::Display for leyline::Session
 pub struct leyline::SessionBuilder
 impl leyline::SessionBuilder
 pub fn leyline::SessionBuilder::audit(self, enabled: bool) -> Self
+pub fn leyline::SessionBuilder::base_url(self, url: impl leyline::IntoUrl) -> Self
 pub fn leyline::SessionBuilder::brand(self, brand: leyline::ChromiumBrand) -> Self
 pub fn leyline::SessionBuilder::browser(self, browser: leyline::Browser) -> Self
 pub fn leyline::SessionBuilder::build(self) -> leyline::Result<leyline::Session>
 pub fn leyline::SessionBuilder::compression(self, config: leyline::CompressionConfig) -> Self
 pub fn leyline::SessionBuilder::cookie_jar(self, jar: leyline::cookie::Jar) -> Self
 pub fn leyline::SessionBuilder::dns(self, config: impl core::convert::Into<leyline::DnsConfig>) -> Self
+pub fn leyline::SessionBuilder::expect_profile_id(self, id: &str) -> Self
 pub fn leyline::SessionBuilder::headers<I, P>(self, headers: I) -> Self where I: core::iter::traits::collect::IntoIterator<Item = P>, P: leyline::IntoParamPair
+pub fn leyline::SessionBuilder::host_limits(self, limits: leyline::HostLimits) -> Self
 pub fn leyline::SessionBuilder::https_only(self, enabled: bool) -> Self
 pub fn leyline::SessionBuilder::identity(self, id: leyline::Identity) -> Self
+pub fn leyline::SessionBuilder::languages<I, S>(self, langs: I) -> Self where I: core::iter::traits::collect::IntoIterator<Item = S>, S: core::convert::AsRef<str>
+pub fn leyline::SessionBuilder::max_body_size(self, bytes: usize) -> Self
 pub fn leyline::SessionBuilder::platform(self, platform: leyline::Platform) -> Self
 pub fn leyline::SessionBuilder::pool(self, config: leyline::PoolConfig) -> Self
 pub fn leyline::SessionBuilder::profile(self, profile: leyline::BrowserProfile) -> Self
 pub fn leyline::SessionBuilder::protocol(self, policy: leyline::ProtocolPolicy) -> Self
 pub fn leyline::SessionBuilder::proxy(self, config: impl core::convert::Into<leyline::ProxyConfig>) -> Self
+pub fn leyline::SessionBuilder::proxy_pool(self, pool: leyline::ProxyPool) -> Self
 pub fn leyline::SessionBuilder::redirect(self, policy: leyline::RedirectPolicy) -> Self
 pub fn leyline::SessionBuilder::retry(self, policy: leyline::RetryPolicy) -> Self
 pub fn leyline::SessionBuilder::socket(self, config: leyline::SocketConfig) -> Self
@@ -1135,20 +1621,38 @@ pub fn leyline::SessionBuilder::tcp_profile(self, profile: leyline::TcpProfile) 
 pub fn leyline::SessionBuilder::timeout(self, config: impl core::convert::Into<leyline::TimeoutConfig>) -> Self
 pub fn leyline::SessionBuilder::tls_trust(self, trust: leyline::TlsTrustConfig) -> Self
 pub fn leyline::SessionBuilder::trace(self, hook: impl leyline::trace::Trace) -> Self
+pub fn leyline::SessionBuilder::user_agent(self, value: &str) -> Self
 pub fn leyline::SessionBuilder::websocket_config(self, config: leyline::WebSocketConfig) -> Self
+pub fn leyline::SessionBuilder::bearer_auth(self, token: &str) -> Self
 impl core::fmt::Debug for leyline::SessionBuilder
 #[non_exhaustive] pub struct leyline::SessionIdentity
 impl leyline::SessionIdentity
 pub fn leyline::SessionIdentity::brand(&self) -> core::option::Option<leyline::ChromiumBrand>
 pub fn leyline::SessionIdentity::browser(&self) -> core::option::Option<leyline::Browser>
+pub fn leyline::SessionIdentity::export_profile(&self) -> core::option::Option<alloc::string::String>
 pub fn leyline::SessionIdentity::identity(&self) -> core::option::Option<leyline::Identity>
+pub fn leyline::SessionIdentity::languages(&self) -> core::option::Option<&[alloc::string::String]>
 pub fn leyline::SessionIdentity::platform(&self) -> leyline::Platform
+pub fn leyline::SessionIdentity::profile_id(&self) -> core::option::Option<&str>
+pub fn leyline::SessionIdentity::to_identity(&self) -> core::option::Option<leyline::Identity>
 pub fn leyline::SessionIdentity::user_agent(&self) -> &str
 impl core::clone::Clone for leyline::SessionIdentity
 impl core::cmp::Eq for leyline::SessionIdentity
 impl core::cmp::PartialEq for leyline::SessionIdentity
 impl core::fmt::Debug for leyline::SessionIdentity
 impl core::marker::StructuralPartialEq for leyline::SessionIdentity
+#[non_exhaustive] pub struct leyline::SessionState
+impl leyline::SessionState
+pub fn leyline::SessionState::is_empty(&self) -> bool
+pub fn leyline::SessionState::restore_into(&self, session: &leyline::Session)
+impl core::clone::Clone for leyline::SessionState
+impl core::cmp::Eq for leyline::SessionState
+impl core::cmp::PartialEq for leyline::SessionState
+impl core::default::Default for leyline::SessionState
+impl core::fmt::Debug for leyline::SessionState
+impl core::marker::StructuralPartialEq for leyline::SessionState
+impl serde_core::ser::Serialize for leyline::SessionState
+impl<'de> serde_core::de::Deserialize<'de> for leyline::SessionState
 #[non_exhaustive] pub struct leyline::SocketConfig
 impl leyline::SocketConfig
 pub fn leyline::SocketConfig::happy_eyeballs(self, config: impl core::convert::Into<core::option::Option<leyline::tls::HappyEyeballsConfig>>) -> Self
@@ -1170,6 +1674,21 @@ impl core::cmp::PartialEq for leyline::SocketConfig
 impl core::default::Default for leyline::SocketConfig
 impl core::fmt::Debug for leyline::SocketConfig
 impl core::marker::StructuralPartialEq for leyline::SocketConfig
+pub struct leyline::Tab
+impl leyline::Tab
+pub fn leyline::Tab::current(&self) -> core::option::Option<url::Url>
+pub fn leyline::Tab::fetch(&self, method: http::method::Method, url: impl leyline::IntoUrl) -> leyline::RequestBuilder
+pub async fn leyline::Tab::follow(&self, url: impl leyline::IntoUrl) -> leyline::Result<leyline::Response>
+pub async fn leyline::Tab::open(&self, url: impl leyline::IntoUrl) -> leyline::Result<leyline::Response>
+pub fn leyline::Tab::post_json(&self, url: impl leyline::IntoUrl, body: &impl serde_core::ser::Serialize) -> leyline::RequestBuilder
+pub fn leyline::Tab::session(&self) -> &leyline::Session
+pub fn leyline::Tab::set_current(&self, page: core::option::Option<url::Url>)
+pub async fn leyline::Tab::submit<I, P>(&self, url: impl leyline::IntoUrl, fields: I) -> leyline::Result<leyline::Response> where I: core::iter::traits::collect::IntoIterator<Item = P>, P: leyline::IntoParamPair
+pub async fn leyline::Tab::submit_form(&self, form: &leyline::html::Form) -> leyline::Result<leyline::Response>
+pub fn leyline::Tab::subresource(&self, url: impl leyline::IntoUrl, preset: leyline::Preset) -> leyline::RequestBuilder
+pub fn leyline::Tab::xhr(&self, url: impl leyline::IntoUrl) -> leyline::RequestBuilder
+impl core::clone::Clone for leyline::Tab
+impl core::fmt::Debug for leyline::Tab
 #[non_exhaustive] pub struct leyline::TcpProfile
 pub leyline::TcpProfile::df: bool
 pub leyline::TcpProfile::mss: u32
@@ -1187,6 +1706,7 @@ impl core::marker::StructuralPartialEq for leyline::TcpProfile
 impl<'de> serde_core::de::Deserialize<'de> for leyline::TcpProfile
 #[non_exhaustive] pub struct leyline::TimeoutConfig
 impl leyline::TimeoutConfig
+pub fn leyline::TimeoutConfig::body(self, d: impl core::convert::Into<core::option::Option<core::time::Duration>>) -> Self
 pub fn leyline::TimeoutConfig::connect(self, d: impl core::convert::Into<core::option::Option<core::time::Duration>>) -> Self
 pub fn leyline::TimeoutConfig::new() -> Self
 pub fn leyline::TimeoutConfig::read(self, d: impl core::convert::Into<core::option::Option<core::time::Duration>>) -> Self
@@ -1278,4 +1798,7 @@ impl leyline::IntoUrl for &str
 impl leyline::IntoUrl for &url::Url
 impl leyline::IntoUrl for alloc::string::String
 impl leyline::IntoUrl for url::Url
+pub async fn leyline::get(url: impl leyline::IntoUrl) -> leyline::Result<leyline::Response>
+pub fn leyline::redact_url(raw: &str) -> alloc::string::String
+pub fn leyline::relay_headers(headers: &http::header::map::HeaderMap, body: leyline::RelayBody) -> http::header::map::HeaderMap
 pub type leyline::Result<T> = core::result::Result<T, leyline::Error>

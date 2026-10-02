@@ -10,6 +10,7 @@ fn h1_key(host: &str) -> PoolKey {
         port: 80,
         proxy: None,
         transport: Transport::Tcp,
+        partition: 0,
     }
 }
 
@@ -103,6 +104,29 @@ fn alpn_h1_memory_is_per_origin_and_proxy() {
     assert!(!pool.is_h1_only("example.com", 8443, None));
 }
 
+#[test]
+fn alpn_h1_memory_expires() {
+    let pool = Pool::new();
+    pool.note_h1_only("example.com", 443, None);
+    let key = ("example.com".to_string(), 443, None);
+    let now = std::time::SystemTime::now();
+    assert!(crate::util::lock(&pool.h1_only).contains(&key, now));
+    let later = now + super::H1_ONLY_TTL + Duration::from_secs(1);
+    assert!(!crate::util::lock(&pool.h1_only).contains(&key, later));
+}
+
+#[test]
+fn expiring_set_is_bounded() {
+    use super::expiring::{ExpiringSet, MAX_ENTRIES};
+    let now = std::time::SystemTime::now();
+    let mut set = ExpiringSet::default();
+    for i in 0..=MAX_ENTRIES {
+        set.insert(i, now + Duration::from_secs(i as u64 + 1), now);
+    }
+    assert!(!set.contains(&0, now));
+    assert!(set.contains(&MAX_ENTRIES, now));
+}
+
 #[cfg(feature = "http3")]
 #[test]
 fn alt_svc_withdrawal_forgets_h3() {
@@ -147,4 +171,16 @@ fn alt_svc_ignores_separators_inside_quoted_parameters() {
         Duration::ZERO,
     );
     assert!(pool.knows_h3("example.com", 443));
+}
+
+#[cfg(feature = "http3")]
+#[test]
+fn a_failed_http3_origin_is_skipped_until_cleared() {
+    let pool = Pool::new();
+    assert!(!pool.is_h3_broken("example.com", 443, Some("socks5://p:1")));
+    pool.note_h3_broken("example.com", 443, Some("socks5://p:1"));
+    assert!(pool.is_h3_broken("example.com", 443, Some("socks5://p:1")));
+    assert!(!pool.is_h3_broken("example.com", 443, None));
+    pool.clear_h3_broken("example.com", 443, Some("socks5://p:1"));
+    assert!(!pool.is_h3_broken("example.com", 443, Some("socks5://p:1")));
 }

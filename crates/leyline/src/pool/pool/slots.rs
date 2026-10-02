@@ -75,6 +75,7 @@ impl Pool {
         handle: H3Client,
         tls: TlsInfo,
     ) -> (H3Client, TlsInfo) {
+        self.clear_h3_broken(&key.host, key.port, key.proxy.as_deref());
         let mut map = lock(&self.inner);
         if let Some(PooledConn::H3 {
             handle: existing,
@@ -206,7 +207,10 @@ impl Pool {
         let sem = {
             let mut permits = lock(&self.h1_permits);
             permits
-                .entry(key.clone())
+                .entry(PoolKey {
+                    partition: 0,
+                    ..key.clone()
+                })
                 .or_insert_with(|| Arc::new(Semaphore::new(self.max_h1_conns_per_host)))
                 .clone()
         };

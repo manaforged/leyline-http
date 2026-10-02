@@ -1,10 +1,7 @@
 use std::collections::VecDeque;
-use std::io;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-use bytes::Bytes;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::mpsc;
 
@@ -19,60 +16,6 @@ use crate::h2::hpack;
 use super::super::handle::H2Client;
 
 use super::*;
-
-pub(crate) async fn pump_request_body(
-    mut stream: Pin<Box<dyn futures_util::Stream<Item = io::Result<Bytes>> + Send + 'static>>,
-    tx: mpsc::Sender<io::Result<Bytes>>,
-) {
-    use futures_util::StreamExt;
-    while let Some(chunk) = stream.next().await {
-        let is_err = chunk.is_err();
-        if tx.send(chunk).await.is_err() {
-            return;
-        }
-        if is_err {
-            return;
-        }
-    }
-}
-
-pub(super) async fn relay_request_body(
-    stream_id: u32,
-    mut rx: mpsc::Receiver<io::Result<Bytes>>,
-    chunk_tx: mpsc::Sender<BodyChunkIn>,
-) {
-    while let Some(item) = rx.recv().await {
-        match item {
-            Ok(data) => {
-                if data.is_empty() {
-                    continue;
-                }
-                if chunk_tx
-                    .send(BodyChunkIn::Chunk { stream_id, data })
-                    .await
-                    .is_err()
-                {
-                    return;
-                }
-            }
-            Err(e) => {
-                let _ = chunk_tx
-                    .send(BodyChunkIn::Eof {
-                        stream_id,
-                        error: Some(e),
-                    })
-                    .await;
-                return;
-            }
-        }
-    }
-    let _ = chunk_tx
-        .send(BodyChunkIn::Eof {
-            stream_id,
-            error: None,
-        })
-        .await;
-}
 
 pub async fn start<T>(io: T, config: H2Config) -> Result<H2Client, H2Error>
 where
@@ -139,7 +82,9 @@ where
     snapshot.set_enable_connect_protocol(peer_settings.enable_connect_protocol);
 
     let (tx, rx) = mpsc::channel(COMMAND_CHANNEL_CAPACITY);
+    let (ping_tx, ping_rx) = mpsc::channel(PING_CHANNEL_CAPACITY);
     let closed = Arc::new(AtomicBool::new(false));
+    let open_streams = Arc::new(std::sync::atomic::AtomicUsize::new(0));
 
     let (body_chunk_tx, body_chunk_rx) = mpsc::channel(STREAM_REQ_BODY_CAPACITY * 4);
 
@@ -153,7 +98,7 @@ where
         peer_snapshot: snapshot.clone(),
         conn_send_window: initial_send_window,
         conn_recv_window: config.initial_connection_window_size as i64,
-        streams: super::stream_map::StreamMap::new(),
+        streams: super::stream_map::StreamMap::new(Arc::clone(&open_streams)),
         next_stream_id: 1,
         buffered_pending: VecDeque::new(),
         rst_flood: RstFloodDetector::new(
@@ -174,6 +119,7 @@ where
         ),
         config: config.clone(),
         command_rx: rx,
+        ping_rx,
         closed: closed.clone(),
         peer_goaway_last_stream: None,
         pending: VecDeque::new(),
@@ -189,7 +135,9 @@ where
 
     Ok(H2Client {
         tx,
+        ping_tx,
         closed,
+        open_streams,
         #[cfg(feature = "websocket")]
         peer_settings: snapshot,
     })

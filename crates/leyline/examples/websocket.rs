@@ -6,7 +6,7 @@ async fn main() -> leyline::Result<()> {
         .nth(1)
         .unwrap_or_else(|| "wss://echo.websocket.org".to_string());
 
-    let session = Session::new();
+    let session = Session::browser(leyline::Browser::default());
     let mut ws = session.websocket(&url).connect().await?;
     ws.send(leyline::WsMessage::Text("hello from leyline".to_owned()))
         .await?;

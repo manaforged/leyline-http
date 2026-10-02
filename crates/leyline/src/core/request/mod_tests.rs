@@ -31,7 +31,7 @@ async fn crlf_url_fails_before_io() {
 #[test]
 fn content_type_infers_the_preset_on_the_builder_path() {
     use crate::profile::Preset;
-    let session = Session::new();
+    let session = Session::browser(crate::Browser::default());
     let mut json = session
         .post("https://example.test/")
         .header("content-type", "application/json")

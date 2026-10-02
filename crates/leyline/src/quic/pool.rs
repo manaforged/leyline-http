@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -18,10 +18,6 @@ use crate::quic::connection::{
 
 const STREAM_RESP_CAPACITY: usize = 32;
 
-const UPLOAD_WINDOW: usize = 256 * 1024;
-
-const UPLOAD_CHUNK: usize = 16 * 1024;
-
 const STREAM_PUMP_INTERVAL: Duration = Duration::from_millis(2);
 
 const CANCEL_SWEEP_INTERVAL: Duration = Duration::from_millis(100);
@@ -31,16 +27,7 @@ const LENGTH_MISMATCH: &str = "h3: response body length does not match content-l
 pub type H3RequestBodyStream =
     std::pin::Pin<Box<dyn futures_util::Stream<Item = std::io::Result<Bytes>> + Send + 'static>>;
 
-enum H3BodyChunk {
-    Chunk {
-        stream_id: u64,
-        data: Bytes,
-    },
-    Eof {
-        stream_id: u64,
-        error: Option<std::io::Error>,
-    },
-}
+type H3BodyChunk = crate::util::upload::BodyChunk<u64>;
 
 enum H3Command {
     Request {
@@ -93,10 +80,15 @@ impl H3SendError {
 pub struct H3Client {
     tx: mpsc::Sender<H3Command>,
     closed: Arc<AtomicBool>,
+    open_streams: Arc<AtomicUsize>,
     pseudo_order: [PseudoOrder; 4],
 }
 
 impl H3Client {
+    pub fn open_streams(&self) -> usize {
+        self.open_streams.load(Ordering::Relaxed)
+    }
+
     #[expect(
         clippy::too_many_arguments,
         reason = "flat per-request wire fields across one internal call path"
@@ -360,6 +352,7 @@ struct H3Driver {
     body_chunk_tx: mpsc::Sender<H3BodyChunk>,
     body_chunk_rx: mpsc::Receiver<H3BodyChunk>,
     closed: Arc<AtomicBool>,
+    open_streams: Arc<AtomicUsize>,
     streams: HashMap<u64, H3Stream>,
 }
 

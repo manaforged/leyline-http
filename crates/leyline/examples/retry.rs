@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use leyline::{Browser, RetryPolicy, Session};
+use leyline::{RetryPolicy, Session};
 
 #[tokio::main]
 async fn main() -> leyline::Result<()> {
@@ -8,7 +8,7 @@ async fn main() -> leyline::Result<()> {
         .nth(1)
         .unwrap_or_else(|| "https://httpbin.org/status/503,503,200".to_string());
 
-    let session = Session::builder().browser(Browser::Chrome147).build()?;
+    let session = Session::builder().build()?;
 
     let policy = RetryPolicy::transient()
         .max_retries(4)

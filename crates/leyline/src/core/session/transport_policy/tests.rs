@@ -34,7 +34,7 @@ fn race() {
 #[cfg(feature = "http3")]
 #[test]
 fn chrome_race() {
-    let session = Session::new();
+    let session = Session::browser(Browser::default());
     assert_eq!(session.protocol_policy(), ProtocolPolicy::Race);
 }
 

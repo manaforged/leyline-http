@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use http::header::HOST;
+use http::header::{AUTHORIZATION, HOST};
 use url::Url;
 
 use super::super::header_merge::apply_extra_headers;
@@ -28,44 +28,27 @@ impl Session {
         header_order: Option<&[String]>,
     ) -> Vec<HeaderPair> {
         let referer = request.referer;
-        let caller_referer = extra_headers
-            .and_then(|h| h.get("referer"))
-            .and_then(|v| v.to_str().ok())
-            .filter(|r| !r.is_empty());
-        let ctx = crate::profile::preset::HeaderContext {
-            user_agent: &self.inner.user_agent,
-            sec_ch_ua: &self.inner.sec_ch_ua,
-            sec_ch_ua_mobile: self.inner.platform.mobile_flag(),
-            sec_ch_ua_platform: self.inner.platform.sec_ch_platform(),
-            accept_language: &self.inner.accept_language,
-            origin: request.origin,
-            referer,
-            fetch_site: request.site.fetch_site.as_str(),
-        };
+        let ctx = self.header_context(&request);
         let mut headers = self.inner.header_style.build_headers(preset, &ctx);
+        self.shape_bare(&mut headers);
         if matches!(current_body.0, BodyKind::Empty) {
             headers.retain(|(k, _)| !is_request_body_header(k));
         }
         shape_origin(&mut headers, current_method, request.origin_downgrade);
-        if referer.is_empty() && caller_referer.is_none() {
-            headers.retain(|(k, _)| !k.eq_ignore_ascii_case("referer"));
-        }
         let caller_has = |name: &str| {
             extra_headers
                 .is_some_and(|h| h.iter().any(|(k, _)| k.as_str().eq_ignore_ascii_case(name)))
         };
-        self.merge_session_headers(&mut headers, &caller_has, strip_sensitive);
+        self.merge_session_headers(&mut headers, &caller_has, strip_sensitive, current_url);
 
         if let Some(extra) = extra_headers {
             apply_extra_headers(&mut headers, extra, strip_sensitive, &cross_origin_stripped);
         }
-
-        if let Some(len) = current_body.len_hint()
-            && (!matches!(current_body.0, BodyKind::Empty) || len > 0)
-        {
-            headers.retain(|(k, _)| !k.eq_ignore_ascii_case("content-length"));
-            headers.insert(0, ("content-length".into(), Cow::Owned(len.to_string())));
+        if request.initiated {
+            add_referer(&mut headers, referer);
         }
+
+        set_content_length(&mut headers, current_body);
 
         self.add_jar_cookie(&mut headers, current_url, &request.site, current_method);
 
@@ -77,6 +60,51 @@ impl Session {
         }
 
         headers
+    }
+
+    fn header_context<'a>(
+        &'a self,
+        request: &RequestContext<'a>,
+    ) -> crate::profile::preset::HeaderContext<'a> {
+        let hints = !self.inner.sec_ch_ua.is_empty();
+        let referer = request.referer;
+        crate::profile::preset::HeaderContext {
+            user_agent: &self.inner.user_agent,
+            sec_ch_ua: &self.inner.sec_ch_ua,
+            sec_ch_ua_mobile: if hints {
+                self.inner.platform.mobile_flag()
+            } else {
+                ""
+            },
+            sec_ch_ua_platform: if hints {
+                self.inner.platform.sec_ch_platform()
+            } else {
+                ""
+            },
+            accept_language: &self.inner.accept_language,
+            origin: request.origin,
+            referer,
+            fetch_site: request.site.fetch_site.as_str(),
+            navigation_site: if request.initiated {
+                request.site.fetch_site.as_str()
+            } else {
+                "none"
+            },
+            navigation_referer: if request.initiated { referer } else { "" },
+        }
+    }
+
+    fn shape_bare(&self, headers: &mut Vec<HeaderPair>) {
+        if !std::sync::Arc::ptr_eq(
+            &self.inner.profile,
+            &crate::profile::BrowserProfile::bare_shared(),
+        ) {
+            return;
+        }
+        advertise_codecs(headers, self.inner.compression.accept_encoding());
+        if self.inner.accept_language.is_empty() {
+            headers.retain(|(name, _)| !name.eq_ignore_ascii_case("accept-language"));
+        }
     }
 
     pub(super) fn leg_headers(
@@ -108,6 +136,7 @@ impl Session {
                 origin: request_origin,
                 origin_downgrade: downgrade,
                 referer: &referer,
+                initiated: journey.initiated,
                 site: SiteContext {
                     fetch_site,
                     initiator: journey.initiator.as_ref(),
@@ -138,14 +167,9 @@ impl Session {
         headers: &mut Vec<HeaderPair>,
         caller_has: &dyn Fn(&str) -> bool,
         strip_sensitive: bool,
+        target: &Url,
     ) {
-        for (k, v) in self
-            .inner
-            .header_style
-            .append()
-            .iter()
-            .chain(self.inner.default_headers.iter())
-        {
+        for (k, v) in self.session_defaults(target) {
             if caller_has(k) || (strip_sensitive && cross_origin_stripped(k)) {
                 continue;
             }
@@ -153,10 +177,36 @@ impl Session {
                 .iter()
                 .position(|(hk, _)| hk.eq_ignore_ascii_case(k))
             {
-                Some(pos) => headers[pos].1 = Cow::Owned(v.clone()),
-                None => headers.push((Cow::Owned(k.clone()), Cow::Owned(v.clone()))),
+                Some(pos) => headers[pos].1 = Cow::Owned(v.to_owned()),
+                None => headers.push((Cow::Owned(k.to_owned()), Cow::Owned(v.to_owned()))),
             }
         }
+    }
+
+    fn session_defaults<'a>(&'a self, target: &Url) -> impl Iterator<Item = (&'a str, &'a str)> {
+        let bearer = self
+            .inner
+            .bearer
+            .as_ref()
+            .filter(|_| self.bearer_in_scope(target));
+        let defaults = &self.inner.default_headers;
+        let slot = bearer.map_or(defaults.len(), |b| b.slot.min(defaults.len()));
+        let pair = |(k, v): &'a (String, String)| (k.as_str(), v.as_str());
+        self.inner
+            .header_style
+            .append()
+            .iter()
+            .map(pair)
+            .chain(defaults[..slot].iter().map(pair))
+            .chain(bearer.map(|b| (AUTHORIZATION.as_str(), b.value.as_str())))
+            .chain(defaults[slot..].iter().map(pair))
+    }
+
+    fn bearer_in_scope(&self, target: &Url) -> bool {
+        self.inner
+            .base_url
+            .as_ref()
+            .is_none_or(|base| base.origin() == target.origin())
     }
 
     pub(in crate::core::session) fn add_jar_cookie(
@@ -232,6 +282,34 @@ const REQUEST_BODY_HEADERS: [&str; 4] = [
 ];
 
 const CORS_MODES: [&str; 2] = ["cors", "websocket"];
+
+fn advertise_codecs(headers: &mut Vec<HeaderPair>, codecs: Option<String>) {
+    match codecs {
+        Some(list) => {
+            for (name, value) in headers.iter_mut() {
+                if name.eq_ignore_ascii_case("accept-encoding") {
+                    *value = Cow::Owned(list.clone());
+                }
+            }
+        }
+        None => headers.retain(|(name, _)| !name.eq_ignore_ascii_case("accept-encoding")),
+    }
+}
+
+fn add_referer(headers: &mut Vec<HeaderPair>, referer: &str) {
+    if !referer.is_empty() && header_value(headers, "referer").is_none() {
+        headers.push(("referer".into(), Cow::Owned(referer.to_owned())));
+    }
+}
+
+fn set_content_length(headers: &mut Vec<HeaderPair>, body: &Body) {
+    if let Some(len) = body.len_hint()
+        && (!matches!(body.0, BodyKind::Empty) || len > 0)
+    {
+        headers.retain(|(k, _)| !k.eq_ignore_ascii_case("content-length"));
+        headers.insert(0, ("content-length".into(), Cow::Owned(len.to_string())));
+    }
+}
 
 fn cross_origin_stripped(name: &str) -> bool {
     sensitive_header(name) || name.eq_ignore_ascii_case(HOST.as_str())

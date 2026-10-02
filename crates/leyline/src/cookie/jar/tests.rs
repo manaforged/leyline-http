@@ -1,3 +1,4 @@
+use super::evict::{MAX_COOKIES_GLOBAL, MAX_COOKIES_PER_DOMAIN};
 use super::*;
 
 #[test]

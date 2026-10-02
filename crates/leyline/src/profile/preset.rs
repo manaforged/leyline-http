@@ -18,6 +18,8 @@ pub struct HeaderContext<'a> {
     pub origin: &'a str,
     pub referer: &'a str,
     pub fetch_site: &'a str,
+    pub navigation_site: &'a str,
+    pub navigation_referer: &'a str,
 }
 
 pub type HeaderPair = (Cow<'static, str>, Cow<'static, str>);
@@ -76,7 +78,7 @@ fn resolve_shape(rows: &HashMap<HeaderStyle, ShapeRow>, style: HeaderStyle) -> H
 }
 
 impl HeaderContext<'_> {
-    fn placeholders(&self) -> [(&'static str, &str); 8] {
+    fn placeholders(&self) -> [(&'static str, &str); 10] {
         [
             ("{user_agent}", self.user_agent),
             ("{sec_ch_ua}", self.sec_ch_ua),
@@ -86,21 +88,27 @@ impl HeaderContext<'_> {
             ("{origin}", self.origin),
             ("{referer}", self.referer),
             ("{fetch_site}", self.fetch_site),
+            ("{navigation_site}", self.navigation_site),
+            ("{navigation_referer}", self.navigation_referer),
         ]
     }
 
-    fn expand(&self, template: &'static str) -> Cow<'static, str> {
+    fn expand(&self, template: &'static str) -> Option<Cow<'static, str>> {
         if !template.contains('{') {
-            return Cow::Borrowed(template);
+            return Some(Cow::Borrowed(template));
         }
         let placeholders = self.placeholders();
         let mut value = String::with_capacity(template.len());
+        let mut filled = false;
+        let mut seen = false;
         let mut rest = template;
         while let Some(start) = rest.find('{') {
             value.push_str(&rest[..start]);
             rest = &rest[start..];
             match placeholders.iter().find(|(key, _)| rest.starts_with(key)) {
                 Some((key, replacement)) => {
+                    seen = true;
+                    filled |= !replacement.is_empty();
                     value.push_str(replacement);
                     rest = &rest[key.len()..];
                 }
@@ -111,7 +119,7 @@ impl HeaderContext<'_> {
             }
         }
         value.push_str(rest);
-        Cow::Owned(value)
+        (filled || !seen).then_some(Cow::Owned(value))
     }
 }
 
@@ -141,7 +149,10 @@ impl HeaderStyle {
             .unwrap_or(&shape.fallback);
         template
             .iter()
-            .map(|(name, value)| (Cow::Borrowed(name.as_str()), ctx.expand(value.as_str())))
+            .filter_map(|(name, value)| {
+                ctx.expand(value.as_str())
+                    .map(|rendered| (Cow::Borrowed(name.as_str()), rendered))
+            })
             .collect()
     }
 }

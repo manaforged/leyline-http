@@ -1,9 +1,11 @@
 #![forbid(unsafe_code)]
+mod compare;
 mod ja3;
 mod ja4;
 mod ja4h;
 mod ja4t;
 
+pub use compare::{FieldOutcome, FingerprintReport, HeaderOutcome, Observed};
 pub use ja3::{Ja3Input, compute_ja3};
 pub use ja4::{Ja4Input, compute_ja4};
 pub use ja4h::{Ja4hInput, compute_ja4h};
@@ -54,6 +56,8 @@ pub struct AuditData {
     pub h2_fingerprint: String,
     pub ja4t: String,
     pub ja4h: String,
+    pub permutes_extensions: bool,
+    pub request_headers: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone)]
@@ -62,4 +66,5 @@ pub(crate) struct AuditTlsCache {
     pub(crate) ja3: String,
     pub(crate) h2_fingerprint: String,
     pub(crate) ja4t: String,
+    pub(crate) permutes_extensions: bool,
 }

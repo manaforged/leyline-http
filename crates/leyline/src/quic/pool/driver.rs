@@ -37,14 +37,18 @@ pub(super) fn start_pending(
     admit_cap: Option<usize>,
     priority_update: bool,
 ) {
-    while let Some(H3Command::Request {
-        headers,
-        body,
-        body_stream,
-        retried,
-        ..
-    }) = pending.front()
-    {
+    while let Some(cmd) = pending.front() {
+        if command_is_cancelled(cmd) {
+            drop(pending.pop_front());
+            continue;
+        }
+        let H3Command::Request {
+            headers,
+            body,
+            body_stream,
+            retried,
+            ..
+        } = cmd;
         if admit_cap.is_some_and(|cap| streams.len() >= cap) {
             break;
         }
@@ -75,8 +79,8 @@ pub(super) fn start_pending(
                 stream.retry = retry;
                 stream.expects_body = expects_body;
                 if let Some(body_stream) = body_stream {
-                    let credit = Arc::new(Semaphore::new(UPLOAD_WINDOW));
-                    let pump = tokio::spawn(pump_request_body(
+                    let credit = crate::util::upload::upload_credit();
+                    let pump = tokio::spawn(crate::util::upload::pump_request_body(
                         stream_id,
                         body_stream,
                         body_chunk_tx.clone(),
@@ -194,15 +198,23 @@ fn on_body_read_error(
     }
 }
 
-pub(super) fn stream_is_cancelled(stream: &H3Stream) -> bool {
-    match stream.resp_tx.as_ref() {
+fn caller_gone(
+    resp_tx: Option<&oneshot::Sender<Result<H3Response, H3SendError>>>,
+    stream_tx: Option<&mpsc::Sender<std::io::Result<Bytes>>>,
+) -> bool {
+    match resp_tx {
         Some(tx) => tx.is_closed(),
-        None => stream
-            .stream_tx
-            .as_ref()
-            .map(|tx| tx.is_closed())
-            .unwrap_or(false),
+        None => stream_tx.is_some_and(mpsc::Sender::is_closed),
     }
+}
+
+pub(super) fn stream_is_cancelled(stream: &H3Stream) -> bool {
+    caller_gone(stream.resp_tx.as_ref(), stream.stream_tx.as_ref())
+}
+
+pub(super) fn command_is_cancelled(cmd: &H3Command) -> bool {
+    let H3Command::Request { resp_tx, .. } = cmd;
+    caller_gone(Some(resp_tx), None)
 }
 
 pub(super) fn cancelled_stream_ids(streams: &HashMap<u64, H3Stream>) -> Vec<u64> {
@@ -217,7 +229,9 @@ pub(super) fn sweep_cancelled_streams(
     h3: &mut quiche::h3::Connection,
     conn: &mut quiche::Connection,
     streams: &mut HashMap<u64, H3Stream>,
+    pending: &mut VecDeque<H3Command>,
 ) {
+    pending.retain(|cmd| !command_is_cancelled(cmd));
     for id in cancelled_stream_ids(streams) {
         if let Some(mut stream) = streams.remove(&id) {
             abort_stream(

@@ -3,12 +3,180 @@
 The minimum supported Rust version is 1.96, two releases behind stable at
 release time.
 
-Within the `0.1.x` series, updates keep API compatibility. A breaking API
-change or a higher minimum Rust version needs a new minor release, such as
-`0.2.0`. The BoringSSL crates `leyline-bssl`, `leyline-bssl-sys`, and
-`leyline-bssl-tokio` share this version and publish as separate crates.
+Leyline is experimental: any `0.x` release can change the API and its
+behaviour, and each change is listed here. The BoringSSL crates
+`leyline-bssl`, `leyline-bssl-sys`, and `leyline-bssl-tokio` share this
+version and publish as separate crates.
 
 ## Unreleased
+
+### Changed
+
+- `Session::new()` and `Session::default()` build a plain session.
+  `Session::browser(browser)` is the one-line browser session:
+  `Session::browser(Browser::default())` is the newest bundled Chrome on
+  Windows, which `Session::new()` built before. A browser takes the first
+  platform its own profile covers, so a mobile browser gets its mobile
+  platform, with or without the builder.
+- A session with a browser and no `protocol` call takes its protocol policy
+  from the profile: it races HTTP/3 when the `http3` feature is on and the
+  profile's `[h3]` table sets `race = true`.
+- Sessions derived with `with_identity` share the parent's connection pool,
+  HSTS store, and `Alt-Svc` knowledge, in a partition per profile, instead of
+  opening a new pool.
+- Converting an `io::Error` that wraps a `leyline::Error` returns the wrapped
+  error with its own kind instead of `Kind::Io`.
+
+### Added
+
+#### Sessions and requests
+
+- `leyline::get(url)` sends one GET from a plain session.
+- `SessionBuilder::base_url`, `bearer_auth`, `user_agent`, `languages`, and
+  `max_body_size`. With a `base_url`, the session token goes only to the base
+  URL's origin. `Session::with_base_url` derives a session with another base.
+- `RequestBuilder::error_for_status()` turns a `4xx` or `5xx` into an error
+  that keeps the headers and up to 64 KiB of the body.
+- `RequestBuilder::download(path, limit)` and `Response::download_to` write
+  the decoded body through a temporary file, so the path holds the whole
+  body or nothing; a declared `Content-Length` over the cap is refused before
+  reading. `Response::into_decoded_stream` and `copy_decoded_to` stream the
+  decoded body under a limit.
+- `RequestBuilder::pages()` follows `Link: rel="next"`;
+  `Response::link(rel)` and `links()` parse `Link` headers.
+- `RequestBuilder::cookie_jar`, `initiator`, and `tag`. `Response::attempts()`
+  and `Response::proxy()`.
+- `TimeoutConfig::body(duration)` bounds the time to read a whole body.
+- `Session::shutdown()` stops every clone of a session, including bodies
+  being streamed; `Error::is_shut_down()` names that error.
+- `relay_headers(headers, RelayBody)` and `Response::relay_headers` return the
+  headers to forward from a proxy or a service.
+- `multipart::Part::file(path)` reads a file part that takes a MIME type.
+
+#### Errors and retries
+
+- `Error::category()` returns one `ErrorCategory` per failure, with
+  `as_str()` and `gateway_status()`. `Error::is_dns()`, `is_proxy()`, and
+  `is_body_limit()` refine it. `Error::find()` reaches a leyline error inside
+  any error chain, such as a tower `BoxError`. `leyline::Error` converts from
+  `url::ParseError`.
+- A status error keeps `headers()`, `header(name)`, `body()`, `body_text()`,
+  `attempts()`, and `proxy()`, and carries the retry policy's view of its last
+  response: `retry_after()` and `retries_exhausted()`.
+- `RetryPolicy::retry_if(predicate)`, `wait_header(name, WaitFormat)`,
+  `retry_unsent(true)` for a request that failed before it was sent,
+  `skip_blocks(rules)`, `backoff(attempt)`, and `rotate_proxies(list)`.
+
+#### Proxies, crawling, and blocks
+
+- `SessionBuilder::host_limits(HostLimits)`: requests in flight and per second
+  per origin, overrides per host, a total cap, and `pause_on(statuses)` to
+  stop new requests to an origin until its `Retry-After`. A streamed request
+  holds its slot until its body ends. `Session::host_stats()` reports requests
+  in flight and waiting per origin.
+- `ProxyPool`: sticky proxies, bans after repeated failures, rotation on block
+  rules, and `ProxyPool::identified` to pin a browser identity to each proxy,
+  each identity with its own cookie jar. `ProxyPool::stats()` reports health.
+  Identity sessions share one connection pool, partitioned by profile.
+- `Response::block()` reports a bot-protection challenge from vendors'
+  response headers. `BlockRules::from_toml`, `statuses([..])`, `extend`, and
+  `check` define and apply your own rules; one `BlockRules` value drives
+  `skip_blocks`, `rotate_on_block`, and `check`.
+- `PoolStats::busy` and `PoolStats::idle`.
+
+#### Browser sessions, tabs, and devices
+
+- `Session::tab()` returns a `Tab` that keeps the current page: `open`,
+  `follow`, `submit`, `submit_form`, `fetch`, `xhr`, `post_json`, and
+  `subresource` send the page as the initiator. A tab with no page refuses
+  script requests.
+- `Jar::save_to`, `load_from`, `autosave`, and `changes` keep a jar on disk.
+- `Device` holds a browser device (identity, frozen profile, `profile_id`,
+  user agent, proxy and `proxy_password_env`, languages, jar, browser state,
+  current page, and caller data in `app`) and reopens it as the same session.
+  `Device::check` refuses a session that differs, and `strict` refuses a
+  device without a pinned profile or a proxy. `Device::autosave` keeps the
+  device and its jar on disk; `DeviceAutosave::update` and `track` change it.
+  `SessionBuilder::expect_profile_id` and `Error::is_profile_changed()` catch
+  a changed profile.
+- `Session::state()` returns `SessionState`: TLS session tickets, HTTP/3
+  `Alt-Svc` knowledge, and the HSTS store. Sessions keep an HSTS store.
+- `Browser`, `Family`, `Platform`, `ChromiumBrand`, `Identity`, `ProxyUrl`,
+  and `leyline::Url` implement serde; the profile enums have stable string
+  ids. `SessionIdentity::to_identity()` and `profile_id()`.
+- The `html` feature (on by default): `html::forms`, `Form::find`,
+  `html::meta`, and `html::links`.
+
+#### Tracing, audit, and testing
+
+- `Trace::summary` receives one `trace::Summary` per request, and
+  `Trace::body` one `trace::BodyEnd` per streamed body. `trace::Metrics`
+  counts requests, statuses, error categories, attempts, body outcomes, and
+  latency; `trace::Fanout` sends events to several traces.
+- `AuditData::compare(&audit::Observed)` compares a session's JA4, JA3,
+  HTTP/2 fingerprint, and request headers with an echo service report.
+- The `test-util` feature adds `leyline::testing::TestServer`, a local HTTP or
+  HTTPS server with a private CA that records requests, with delayed and
+  chunked responses. `leyline::redact_url` exposes the crate's URL redaction.
+
+### Fixed
+
+- A browser session's connection to an origin that speaks only HTTP/1.1 sends
+  the profile's own ClientHello (its ALPN list and ALPS) and carries the
+  request on that connection, as a browser does. Before, Leyline dialed a
+  second connection that offered only `http/1.1`, a ClientHello no browser
+  sends, and a streamed request body to such an origin failed.
+- A plain session sends no `accept-language` unless you set languages or the
+  header. A `socks5://` proxy set on the builder or in a `ProxyPool` without
+  the `socks` feature fails at `build()`.
+- A request with an initiator page computes `sec-fetch-site` and `Origin`
+  from that page even when the referrer policy sends no `Referer`, as when an
+  https page requests an http URL. A navigation with an initiator is a link
+  navigation: it sends the computed `sec-fetch-site` and a `Referer` in the
+  position each browser sends it. A navigation without one is a typed URL, as
+  before.
+- A header template value whose placeholders all render empty is not sent. A
+  plain session no longer sends empty or Chromium-only client hints when a
+  preset is set.
+- A plain session's `accept-encoding` lists only the codings that are compiled
+  in and enabled in its `CompressionConfig`, and is omitted when none are.
+- HTTP/3: a queued request whose caller has gone is not sent, and responses
+  report their connection timing and reuse.
+- HTTP/2 and HTTP/3 do not send a caller's `host` header next to the
+  `:authority`.
+- `ProtocolPolicy::Race` skips HTTP/3 for 5 minutes for an origin and proxy
+  pair after an HTTP/3 connection to it fails. The `Http3` policy error names
+  the missing `socks` feature when that is the cause.
+- A proxy that reports it could not reach the origin (SOCKS5 replies 3 to 6,
+  `CONNECT` 502 or 504) gives `TlsError::ProxyTargetUnreachable` with a
+  `ProxyReply`; `Error::is_proxy()` is false for it. A timeout while reaching
+  a proxy on the TLS path is a proxy error and still a timeout.
+- A body-limit error names the limit that applied: the session's
+  `max_body_size` or the caller's limit.
+- Dropping an HTTP/1.1 streamed response releases its connection and the
+  per-host connection slot at once, even while the server sends nothing.
+- `LeylineService` streams the decoded body, reads a `ProxyConfig` from the
+  request extensions, and puts the final `Url`, `HttpVersion`, and
+  `ResponseTiming` in the response extensions. `Session::execute` reads the
+  same request extensions.
+- Saving a jar skips expired cookies, and loading one skips expired cookies,
+  keeps the newest of two cookies in one slot, and applies the cookie limits.
+  Each cookie's last-access time survives a save, so eviction order survives
+  a restart. Jars saved by 0.1.0 still load.
+- HTTP/2: a request that the caller cancels while it waits for a stream slot
+  is not sent. Before, the driver sent it when a slot became free.
+- HTTP/2: a streaming request body buffers at most 256 KiB ahead of the
+  peer's flow-control window, the same limit HTTP/3 uses. Before, a stalled
+  peer let the driver buffer the whole body. The body stream is first polled
+  when the request starts on the wire, not when it is queued.
+- HTTP/2: when the caller drops a request whose upload has not finished, the
+  driver resets the stream with `CANCEL` and stops polling the body.
+- HTTP/2: when every stream slot is in use, at most one request waits inside
+  the driver. Later requests wait in the bounded command queue, and the
+  caller's timeout applies to that wait. Pings use their own queue, so a pool
+  liveness ping does not wait behind queued requests.
+- The pool remembers that an origin negotiated HTTP/1.1 for 10 minutes, then
+  offers HTTP/2 again. It keeps at most 1024 such origins.
 
 ### Build
 

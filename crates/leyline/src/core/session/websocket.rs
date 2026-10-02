@@ -165,15 +165,19 @@ impl std::future::IntoFuture for WebSocketBuilder {
 impl Session {
     fn websocket_headers(&self, url: &url::Url, caller: &HeaderList) -> Vec<(String, String)> {
         let caller_has = |name: &str| caller.get(name).is_some();
-        let mut headers = Vec::new();
-        self.merge_session_headers(&mut headers, &caller_has, false);
-        apply_extra_headers(&mut headers, caller, false, &sensitive_header);
         let mut cookie_url = url.clone();
-        let lookup = if cookie_url.set_scheme("https").is_ok() {
+        let http_scheme = match url.scheme() {
+            "ws" => "http",
+            _ => "https",
+        };
+        let lookup = if cookie_url.set_scheme(http_scheme).is_ok() {
             &cookie_url
         } else {
             url
         };
+        let mut headers = Vec::new();
+        self.merge_session_headers(&mut headers, &caller_has, false, lookup);
+        apply_extra_headers(&mut headers, caller, false, &sensitive_header);
         let site = super::execute::SiteContext {
             fetch_site: crate::FetchSite::SameOrigin,
             initiator: Some(lookup),

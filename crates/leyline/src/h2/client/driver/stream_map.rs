@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::StreamActor;
 
 pub(super) struct StreamMap {
     inner: HashMap<u32, StreamActor, BuildHasherDefault<StreamIdHasher>>,
+    open: Arc<AtomicUsize>,
 }
 
 #[derive(Default)]
@@ -31,10 +34,15 @@ impl Hasher for StreamIdHasher {
 }
 
 impl StreamMap {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(open: Arc<AtomicUsize>) -> Self {
         Self {
             inner: HashMap::default(),
+            open,
         }
+    }
+
+    fn publish(&self) {
+        self.open.store(self.inner.len(), Ordering::Relaxed);
     }
 
     pub(super) fn get(&self, stream_id: u32) -> Option<&StreamActor> {
@@ -47,10 +55,13 @@ impl StreamMap {
 
     pub(super) fn insert(&mut self, stream_id: u32, actor: StreamActor) {
         self.inner.insert(stream_id, actor);
+        self.publish();
     }
 
     pub(super) fn remove(&mut self, stream_id: u32) -> Option<StreamActor> {
-        self.inner.remove(&stream_id)
+        let actor = self.inner.remove(&stream_id);
+        self.publish();
+        actor
     }
 
     pub(super) fn iter(&self) -> impl Iterator<Item = (u32, &StreamActor)> {
@@ -66,6 +77,7 @@ impl StreamMap {
     }
 
     pub(super) fn drain(&mut self) -> impl Iterator<Item = (u32, StreamActor)> {
+        self.open.store(0, Ordering::Relaxed);
         self.inner.drain()
     }
 

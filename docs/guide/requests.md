@@ -1,20 +1,15 @@
 # Requests
 
-`Session::get` and its siblings return a `RequestBuilder`. You chain settings
-on the builder and then await it.
+`Session::get` and its siblings return a `RequestBuilder`. Chain settings on
+the builder, then await it. This chapter covers methods, headers, bodies, the
+fetch context of a browser request, and per-request overrides. The API uses
+the `http` crate's types, re-exported as `leyline::http`.
 
-## The http types
+## Methods and URLs
 
-The public API uses the types of the `http` crate. Leyline re-exports the
-crate as `leyline::http`, so you and the client share one version of `Method`,
-`Uri`, `StatusCode`, `HeaderName`, and `HeaderValue`.
-
-## Methods
-
-The session has a function for each common HTTP method: `get`, `post`, `put`,
-`patch`, `delete`, and `head`. For any other HTTP method, call `request` with
-an `http::Method`. All of them take `impl IntoUrl`: a `&str`, a `String`, a
-`&String`, a `url::Url`, or a `&url::Url`.
+The session has `get`, `post`, `put`, `patch`, `delete`, and `head`. For any
+other method, call `request` with an `http::Method`. Each takes a `&str`, a
+`String`, a `&String`, a `url::Url`, or a `&url::Url`.
 
 ```rust,no_run
 use leyline::http::Method;
@@ -27,19 +22,18 @@ println!("{}", resp.status());
 # }
 ```
 
-A URL that does not parse does not panic and does not fail at the call. The
-builder records the error, and `send` returns it as `Kind::Url` with the
+A relative `&str` or `String` URL resolves against the session base URL; see
+[Set a token and a base URL](sessions.md#set-a-token-and-a-base-url). A URL
+that does not parse does not panic: `send` returns `Kind::Url` with the
 `url::ParseError` as its source.
 
 ## Headers
 
 Header setters take anything that converts to an `http::HeaderName` and an
-`http::HeaderValue`. That includes `&str` and `String`. A `HeaderName` constant
-costs no parse. An invalid name or value surfaces as an error from `send`, not
-at the call site.
-
-`header` appends. A second call with the same name adds a second value and
-keeps the first.
+`http::HeaderValue`, such as `&str`, `String`, or a `HeaderName` constant. An
+invalid name or value is an error from `send`. `header` appends: a second
+call with the same name adds a second value. `headers` takes an iterator of
+pairs. `bearer_auth` and `basic_auth` build the `Authorization` header.
 
 ```rust,no_run
 use leyline::http::header::ACCEPT_LANGUAGE;
@@ -58,26 +52,26 @@ let resp = session
 # }
 ```
 
-`headers` takes an iterator of pairs and appends each one the same way. Set
-`accept`, `user-agent`, `referer`, and other named headers with `header`.
-`bearer_auth` and `basic_auth` build the `Authorization` header for you.
+On a browser session, see
+[Override headers safely](fingerprints.md#override-headers-safely) for the
+headers you can change without breaking the fingerprint.
 
 ### Order
 
-Order matters to a fingerprint, so Leyline preserves it. Your headers merge
-into the profile's preset headers, and the profile's own order applies on the
-wire. A request header replaces a profile or `SessionBuilder::headers` header
-of the same name and takes its slot; repeated `header` calls for that name
-send every value there. See the header merge rule in the
-[API map](../api.md).
+Order matters to a fingerprint, so the profile's order applies on the wire. A
+request header replaces every session or profile header of the same name, in
+that header's position; repeated `header` calls for the name send every value
+there. A name the session does not send goes where a browser places it, such
+as `authorization` after `user-agent`, or else at the end.
 
-Two methods override the header order:
+Two methods override the order:
 
 - `header_order(&["a", "b"])` pins the wire order of the regular headers for
-  this request, on every protocol. It wins over the order of the profile's
-  header style.
-- `anchored(anchor, name, value)` inserts one header at a named slot, such as
-  immediately after `user-agent`.
+  this request, on every protocol.
+- `anchored(anchor, name, value)` inserts one header at a `HeaderAnchor`
+  slot: `AfterCchUa`, `AfterCchUaMobile`, `AfterCchUaPlatform`,
+  `AfterUserAgent`, `AfterAccept`, `AfterContentType`, `AfterFetchDest`, or
+  `BeforeAcceptEncoding`.
 
 ```rust,no_run
 use leyline::HeaderAnchor;
@@ -94,75 +88,52 @@ let resp = session
 # }
 ```
 
-The `HeaderAnchor` slots are `AfterCchUa`, `AfterCchUaMobile`,
-`AfterCchUaPlatform`, `AfterUserAgent`, `AfterAccept`, `AfterContentType`,
-`AfterFetchDest`, and `BeforeAcceptEncoding`.
+To see the headers a request was prepared with, build the session with
+`.audit(true)` and read `Response::request_headers`.
 
-To see the headers the session prepared for a request, build the session with
-`SessionBuilder::audit(true)` and read `Response::request_headers`. See
-[Responses](responses.md).
+## Query parameters and bodies
 
-## Query parameters
+`query` appends pairs to the URL after any query it already has. `form` sends
+pairs as `application/x-www-form-urlencoded`. Both take any iterator of
+`(K, V)` tuples, or references to them, where `K` and `V` are `AsRef<str>`.
+One request can carry both.
 
-`query` appends pairs to the URL's query string. Call it more than once to add
-more.
+`body` takes a `Body`, or anything that converts to one: `String`,
+`&'static str`, `Vec<u8>`, `&'static [u8]`, `Bytes`, or `()`. `json` sets
+`content-type: application/json`. `compress(encoding)` compresses a buffered
+body and sets `Content-Encoding`.
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
 let session = leyline::Session::new();
-let resp = session
-    .get("https://example.com/search")
-    .query([("q", "leyline"), ("page", "2")])
+let search = session
+    .post("https://example.com/search")
+    .query([("page", "2")])
+    .form([("q", "leyline"), ("sort", "new")])
     .await?;
-# let _ = resp;
-# Ok(())
-# }
-```
-
-## Bodies
-
-`Body` is either empty, a buffered `Bytes` buffer, or a stream. `From` impls
-cover `String`, `&'static str`, `Vec<u8>`, `&'static [u8]`, `Bytes`, and `()`,
-so `body` takes any of them directly.
-
-```rust,no_run
-# async fn run() -> leyline::Result<()> {
-let session = leyline::Session::new();
-
-// Raw bytes.
-let a = session
+let item = session
+    .post("https://example.com/items")
+    .json(&serde_json::json!({ "name": "leyline" }))
+    .await?;
+let raw = session
     .post("https://example.com/raw")
     .header("content-type", "application/octet-stream")
     .body(vec![0u8, 1, 2])
     .await?;
-
-// JSON. Sets content-type: application/json.
-let b = session
-    .post("https://example.com/items")
-    .json(&serde_json::json!({ "name": "leyline" }))
-    .await?;
-
-// URL-encoded form. Sets content-type: application/x-www-form-urlencoded.
-let c = session
-    .post("https://example.com/login")
-    .form([("user", "ada"), ("pass", "hunter2")])
-    .await?;
-
-# let _ = (a, b, c);
+# let _ = (search, item, raw);
 # Ok(())
 # }
 ```
 
-To send a form body you encoded yourself, set the
-`content-type: application/x-www-form-urlencoded` header and pass the string
-to `body`. `compress(encoding)`
-compresses a buffered body and sets the matching `Content-Encoding` header.
+To stream a request body, pass `Body::stream`; see
+[Streaming](streaming.md#stream-a-request-body).
 
-### Multipart
+### Upload multipart forms
 
 The `multipart` feature, on by default, adds `leyline::multipart::{Form, Part}`
-and the `multipart` builder method. `Form::file` streams the file from disk
-chunk by chunk, so a large upload is never fully materialized in memory.
+and `RequestBuilder::multipart`, which sets `content-type:
+multipart/form-data` with the form's boundary. A file part streams from disk
+chunk by chunk.
 
 ```rust,no_run
 use leyline::multipart::{Form, Part};
@@ -171,121 +142,195 @@ use leyline::multipart::{Form, Part};
 let session = leyline::Session::new();
 let form = Form::new()
     .text("name", "ada")
-    .part("note", Part::text("hello").mime("text/plain"));
-let resp = session.post("https://example.com/upload").multipart(form).await?;
+    .file("log", "server.log")?
+    .part("logo", Part::file("logo.png")?.mime("image/png"))
+    .part(
+        "photo",
+        Part::bytes(std::fs::read("photo.jpg")?)
+            .filename("photo.jpg")
+            .mime("image/jpeg"),
+    );
+let resp = session.post("https://api.example/upload").multipart(form).await?;
 # let _ = resp;
 # Ok(())
 # }
 ```
 
-### Streaming bodies
+`Form::file(name, path)` and `Part::file(path)` use the last component of
+`path` as the filename, or `file` when it has none or is not UTF-8. A
+`Form::file` part has no `Content-Type`, so the server reads it as
+`text/plain` (RFC 7578); use `Part::file(path)?.mime(..)` to send a type.
+Both return `std::io::Result`, which `?` converts into `leyline::Error`.
+[`examples/multipart.rs`](../../crates/leyline/examples/multipart.rs) is a
+complete program.
 
-`Body::stream(s, len)` wraps any `Stream` of `io::Result<Bytes>`. Pass
-`Some(n)` to declare an exact `Content-Length` on every protocol, or `None` to
-declare none. Give the length whenever you know it. On HTTP/1.1, a body with
-no length hint is sent with `Transfer-Encoding: chunked`. HTTP/2 and HTTP/3
-send it with no declared length. See [Streaming](streaming.md). The example
-needs `bytes` and `futures-util` in your manifest.
+## Presets
 
-```rust,no_run
-use bytes::Bytes;
-use leyline::Body;
-
-# async fn run() -> leyline::Result<()> {
-let session = leyline::Session::new();
-let chunks = (0..4).map(|_| Ok::<Bytes, std::io::Error>(Bytes::from_static(b"data")));
-let body = Body::stream(futures_util::stream::iter(chunks), Some(16));
-let resp = session
-    .post("https://example.com/upload")
-    .header("content-type", "application/octet-stream")
-    .body(body)
-    .await?;
-# let _ = resp;
-# Ok(())
-# }
-```
-
-## Presets and content-type inference
-
-A `Preset` decides the `sec-fetch-*` headers and the header order for a fetch
+A `Preset` sets the `sec-fetch-*` headers and the header order for a fetch
 context: `Native`, `Navigate`, `FrameNavigate`, `Reload`, `Script`, `Image`,
 `Xhr`, `Form`, `CrossOrigin`, `SameSite`, and `FormNavigate`.
+`Preset::Navigate` is the default for a GET from a browser session.
 
-When the session impersonates a browser and you set no preset, a POST, PUT, or
-PATCH infers one from the `content-type` header: `application/json` gives
-`Preset::Xhr`, and `application/x-www-form-urlencoded` gives `Preset::Form`.
-Any other content type leaves the preset unset. `json()` and `form()` set that
-header, so the common cases need no preset at all.
+On a browser session with no preset, a POST, PUT, or PATCH infers one from
+`content-type`: `application/json` gives `Xhr`, and
+`application/x-www-form-urlencoded` gives `Form`. Other types leave the
+preset unset. Set `.preset(..)` when the guess is wrong.
 
-Set one explicitly when the default guess is wrong.
+`Form` is a script that posts form data with `fetch()`. `FormNavigate` is a
+person who clicks the submit button of an HTML form, as on a login page;
+`form()` never infers it.
+
+| Preset | `sec-fetch-mode` | `sec-fetch-dest` | `sec-fetch-user` | Other headers |
+| --- | --- | --- | --- | --- |
+| `Form` | `cors` | `empty` | none | A script `accept`, `priority: u=1, i` |
+| `FormNavigate` | `navigate` | `document` | `?1` | An HTML `accept`, `upgrade-insecure-requests: 1`, `cache-control: max-age=0` |
+
+## Send the requests of a page
+
+Pass the page that sends a request to `initiator`. Leyline then sets
+`Referer`, `Origin`, and `sec-fetch-site` the way the browser does for the
+request's preset. A navigation with an initiator is a link click. A
+navigation without one is a typed URL: `sec-fetch-site: none` and no
+`Referer`.
 
 ```rust,no_run
 use leyline::Preset;
 
 # async fn run() -> leyline::Result<()> {
-let session = leyline::Session::new();
-let js = session
-    .get("https://example.com/app.js")
-    .preset(Preset::Script)
+let session = leyline::Session::browser(leyline::Browser::default());
+let page = session.get("https://shop.example/cart").await?;
+let page_url = page.url().clone();
+let cart = session
+    .get("https://shop.example/api/cart")
+    .preset(Preset::Xhr)
+    .initiator(page_url.clone())
     .await?;
-# let _ = js;
+let logo = session
+    .get("https://cdn.example/logo.png")
+    .preset(Preset::Image)
+    .initiator(page_url)
+    .await?;
+# drop((cart, logo));
 # Ok(())
 # }
 ```
 
-## Per-request proxy and timeouts
+`Referer` follows `strict-origin-when-cross-origin`. P is the page and T the
+target:
 
-`proxy` and `timeout` override the session for one request.
+| P and T | `Referer` |
+| --- | --- |
+| Same origin | The full page URL, without fragment and user info |
+| Same site or cross site | The page origin and `/` |
+| P is `https`, T is `http` | None |
+
+| Preset | No initiator | Same origin | Same site or cross site | P is `https`, T is `http` |
+| --- | --- | --- | --- | --- |
+| `Xhr` GET | None | None | P origin | P origin |
+| `Xhr` POST, `Form` | T origin | T origin | P origin | P origin |
+| `FormNavigate` | T origin | T origin | P origin | `null` |
+| `Image`, `Script` | None | None | None | None |
+
+The second table gives the `Origin` header. `sec-fetch-site` is computed from
+the page and every redirect, by the same rules for Chromium and Gecko
+profiles. `sec-fetch-user: ?1` goes only with `Navigate` and `FormNavigate`.
+A `referer` header you set wins over the computed value.
+
+## Keep the page with a tab
+
+A `Tab` keeps the current page, as a browser tab does: each request sends
+that page as its initiator, and each navigation sets the next page.
+`Session::tab()` makes one, and clones of a tab share the page.
+
+| Call | Sends | Changes the page |
+| --- | --- | --- |
+| `open(url)` | A typed URL: no initiator | Yes |
+| `follow(url)` | A link click from the current page | Yes |
+| `submit(url, fields)` | A clicked form, `Preset::FormNavigate` | Yes |
+| `submit_form(&form)` | A parsed `html::Form`, with its own method and action | Yes |
+| `xhr(url)`, `fetch(method, url)`, `post_json(url, &body)` | A script request, `Preset::Xhr` | No |
+| `subresource(url, preset)` | An image or script, for example `Preset::Image` | No |
+
+The page changes after each navigation response, 4xx and 5xx included, to
+the final URL after redirects. A transport error leaves it unchanged.
+Relative URLs resolve against the current page, or else the base URL. A
+`.stream()` navigation changes the page when the response head arrives.
+`set_current(page)` sets the page by hand. A script request or subresource on
+a tab with no page fails with `Kind::Request` and sends nothing: open a page
+first.
+
+```rust,no_run
+use leyline::Preset;
+
+# async fn run() -> leyline::Result<()> {
+let tab = leyline::Session::browser(leyline::Browser::default()).tab();
+tab.open("https://shop.example/").await?;
+tab.follow("/cart").await?;
+let cart = tab.xhr("/api/cart").await?;
+let logo = tab.subresource("https://cdn.example/logo.png", Preset::Image).await?;
+tab.submit("/checkout", [("step", "address")]).await?;
+println!("{:?}", tab.current());
+# drop((cart, logo));
+# Ok(())
+# }
+```
+
+[Accounts](accounts.md) uses a tab with a saved device and submits the forms
+of a page.
+
+## Override the session for one request
+
+| Call | Effect for this request |
+| --- | --- |
+| `proxy(url)` | Sends through this proxy |
+| `timeout(..)` | Overrides the session timeouts |
+| `redirect(policy)` | Overrides the redirect policy; see [Redirects](redirects.md) |
+| `retry(policy)` | Overrides the retry policy |
+| `cookie_jar(jar)` | Reads and writes `jar` for the request and its redirects; the session jar does not change |
+| `tag(text)` | Names the request in the trace summary and the `TracingTrace` line; see [Logging and tracing](logging.md) |
+
+`timeout` takes a `Duration` or a `TimeoutConfig`. A `Duration` sets `total`,
+which bounds the request up to the head of a streamed response; set
+`TimeoutConfig::body` to bound a streamed body or a download. A
+`TimeoutConfig` sets `total`, `read`, `body`, and `response_header`; an unset
+field keeps the session value, and `None` turns that timeout off. `connect`
+is session-wide, because connections are pooled. See
+[Retries and timeouts](retries-and-timeouts.md).
 
 ```rust,no_run
 use std::time::Duration;
 
-# async fn run() -> leyline::Result<()> {
-let session = leyline::Session::new();
-let resp = session
-    .get("https://example.com/ip")
-    .proxy("http://user:pass@proxy.example:8080")
-    .timeout(Duration::from_secs(10))
-    .await?;
-# let _ = resp;
-# Ok(())
-# }
-```
-
-`timeout` takes a `Duration` or a `TimeoutConfig`. A `Duration` sets the total
-request timeout alone. A `TimeoutConfig` sets `total`, `read`, and
-`response_header` for this one request. A field you leave unset keeps the
-session value. Pass `None` to a field to turn that timeout off for this
-request. `connect` stays session-wide, because connections are pooled and
-coalesced across requests.
-
-```rust,no_run
 use leyline::TimeoutConfig;
-use std::time::Duration;
+use leyline::cookie::Jar;
 
 # async fn run() -> leyline::Result<()> {
 let session = leyline::Session::new();
+let guest = Jar::new();
 let resp = session
     .get("https://example.com/slow")
+    .proxy("http://user:pass@proxy.example:8080")
     .timeout(
-        TimeoutConfig::default()
+        TimeoutConfig::new()
             .total(Duration::from_secs(30))
             .read(Duration::from_secs(5)),
     )
+    .cookie_jar(guest.clone())
+    .tag("account-7")
     .await?;
-# let _ = resp;
+println!("{} cookies", guest.all_cookies().len());
+# drop(resp);
 # Ok(())
 # }
 ```
 
-See [Retries and timeouts](retries-and-timeouts.md).
-
 ## Send an http::Request
 
-`Session::execute` sends an `http::Request<Body>`. It carries the method, the
-URI, the headers, and the body across. It reads four optional values from the
-request extensions: a `Preset`, a `TimeoutConfig`, a `RetryPolicy`, and a
-`RedirectPolicy`.
+`Session::execute` sends an `http::Request<Body>` with its method, URI,
+headers, and body. It reads an optional `Preset`, `TimeoutConfig`,
+`RetryPolicy`, `RedirectPolicy`, and `ProxyConfig` from the request
+extensions, infers the preset from `content-type` as the builder does, and
+reads the whole response before it returns. Digest authentication and
+response streaming need the `RequestBuilder`.
 
 ```rust,no_run
 use leyline::Body;
@@ -305,47 +350,6 @@ let resp = session.execute(req).await?;
 # }
 ```
 
-`execute` infers the preset from `content-type` the same way the builder does,
-unless the extensions already carry one. Digest authentication and response
-streaming are not available through `execute`. Use the `RequestBuilder` for
-them.
-
-## Tower service
-
-The `tower` feature, off by default, adds `LeylineService`. It wraps a session
-and implements `tower_service::Service<http::Request<Body>>`, answering with an
-`http::Response<Body>`, so a stack built on `http` types drops in unchanged.
-The error type is `leyline::Error`.
-
-The service sends each request through `Session::execute`. The version is
-dropped, because the profile picks the protocol. `execute` reads the whole
-response before it returns, so the response body is one chunk. To read a body
-in chunks, see [Streaming](streaming.md). To add middleware, wrap the service
-with any Tower layer. Redirects, retries, cookies, and tracing stay in the
-session, inside the service.
-
-```rust,no_run
-# #[cfg(feature = "tower")]
-# async fn run() -> leyline::Result<()> {
-use leyline::http::{Method, Request as HttpRequest};
-use leyline::{Body, LeylineService, Session};
-use tower_service::Service;
-
-let mut svc = LeylineService::new(Session::new());
-let req = HttpRequest::builder()
-    .method(Method::GET)
-    .uri("https://example.com/")
-    .body(Body::default())
-    .expect("valid request");
-let resp = svc.call(req).await?;
-println!("{}", resp.status());
-# Ok(())
-# }
-```
-
-Enable it with `features = ["tower"]`. The example also needs
-`tower-service = "0.3"` in your manifest; the feature does not re-export it.
-
-## Next
-
-Read [Responses](responses.md) to read what comes back.
+The `tower` feature adds `LeylineService`, a `tower_service::Service` over the
+same send path. See
+[Service integration](service-integration.md#use-the-tower-adapter).

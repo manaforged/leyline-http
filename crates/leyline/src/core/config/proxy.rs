@@ -3,8 +3,17 @@ use crate::util::redact;
 
 use super::host::{normalize_host, pattern_matches};
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(try_from = "String", into = "String")]
 pub struct ProxyUrl(String);
+
+impl TryFrom<String> for ProxyUrl {
+    type Error = crate::core::Error;
+
+    fn try_from(raw: String) -> crate::core::Result<Self> {
+        Self::parse(raw)
+    }
+}
 
 impl std::fmt::Debug for ProxyUrl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -30,6 +39,15 @@ impl ProxyUrl {
             );
         }
         Ok(Self(raw.to_string()))
+    }
+
+    #[cfg(not(feature = "socks"))]
+    pub(crate) fn socks_feature_error(raw: &str) -> crate::core::Error {
+        crate::core::Error::new(Kind::Config).with_message(format!(
+            "proxy {} needs the `socks` feature: enable `features = [\"socks\"]` or use an \
+             http or https proxy",
+            redact(raw)
+        ))
     }
 
     pub(crate) fn configured(raw: &str) -> Self {

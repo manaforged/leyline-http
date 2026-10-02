@@ -28,7 +28,29 @@ pub enum Platform {
     Host,
 }
 
+const PLATFORM_ALL: &[Platform] = &[
+    Platform::Windows,
+    Platform::MacOS,
+    Platform::Linux,
+    Platform::Android,
+    Platform::IOS,
+    Platform::Host,
+];
+
 impl Platform {
+    #[must_use]
+    pub fn all() -> &'static [Platform] {
+        PLATFORM_ALL
+    }
+
+    #[must_use]
+    pub fn id(&self) -> &'static str {
+        match self {
+            Self::Host => "host",
+            other => other.identity_key(),
+        }
+    }
+
     pub(crate) fn detect_host() -> Self {
         #[cfg(target_os = "windows")]
         {
@@ -116,3 +138,23 @@ impl std::fmt::Display for Platform {
         write!(f, "{}", self.sec_ch_platform())
     }
 }
+
+impl std::str::FromStr for Platform {
+    type Err = crate::Error;
+
+    fn from_str(id: &str) -> Result<Self, Self::Err> {
+        PLATFORM_ALL
+            .iter()
+            .copied()
+            .find(|platform| platform.id().eq_ignore_ascii_case(id))
+            .ok_or_else(|| {
+                crate::profile::browser::unknown(
+                    "platform",
+                    id,
+                    PLATFORM_ALL.iter().map(Platform::id),
+                )
+            })
+    }
+}
+
+string_id_serde!(Platform);

@@ -3,15 +3,21 @@ use std::error::Error as StdError;
 use std::fmt;
 use std::io;
 
-use http::StatusCode;
+use bytes::Bytes;
+use http::{HeaderMap, StatusCode};
 use url::Url;
 
-use crate::core::retry::GATEWAY_STATUSES;
 use crate::h2::H2Error;
-use crate::h2::error::ErrorCode;
-#[cfg(feature = "http3")]
-use crate::quic::H3SendError;
 use crate::tls::TlsError;
+
+mod category;
+mod classify;
+mod from;
+mod profile;
+
+pub(crate) use profile::ProfileChanged;
+
+pub use category::ErrorCategory;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -72,6 +78,12 @@ struct Inner {
     status: Option<StatusCode>,
     message: Option<Cow<'static, str>>,
     alpn: Option<String>,
+    body: Option<Bytes>,
+    headers: Option<HeaderMap>,
+    attempts: u32,
+    proxy: Option<String>,
+    policy_wait: Option<std::time::Duration>,
+    retries_exhausted: bool,
 }
 
 pub struct Error {
@@ -88,6 +100,12 @@ impl Error {
                 status: None,
                 message: None,
                 alpn: None,
+                body: None,
+                headers: None,
+                attempts: 0,
+                proxy: None,
+                policy_wait: None,
+                retries_exhausted: false,
             }),
         }
     }
@@ -117,8 +135,101 @@ impl Error {
         self
     }
 
+    pub(crate) fn with_body(mut self, body: impl Into<Bytes>) -> Self {
+        self.inner.body = Some(body.into());
+        self
+    }
+
+    pub(crate) fn with_headers(mut self, headers: HeaderMap) -> Self {
+        self.inner.headers = Some(headers);
+        self
+    }
+
+    pub fn headers(&self) -> Option<&HeaderMap> {
+        self.inner.headers.as_ref()
+    }
+
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers()?.get(name).and_then(|v| v.to_str().ok())
+    }
+
+    pub fn attempts(&self) -> u32 {
+        self.inner.attempts
+    }
+
+    pub(crate) fn set_attempts(&mut self, attempts: u32) {
+        self.inner.attempts = attempts.max(1);
+    }
+
+    pub fn proxy(&self) -> Option<&str> {
+        self.inner.proxy.as_deref()
+    }
+
+    pub(crate) fn set_proxy(&mut self, proxy: Option<&str>) {
+        self.inner.proxy = proxy.map(crate::util::redact);
+    }
+
+    pub(crate) fn with_trail(mut self, attempts: u32, proxy: Option<String>) -> Self {
+        self.inner.attempts = attempts;
+        self.inner.proxy = proxy;
+        self
+    }
+
+    pub fn retries_exhausted(&self) -> bool {
+        self.inner.retries_exhausted
+    }
+
+    pub(crate) fn set_retry_outcome(
+        &mut self,
+        policy_wait: Option<std::time::Duration>,
+        retries_exhausted: bool,
+    ) {
+        self.inner.policy_wait = policy_wait;
+        self.inner.retries_exhausted = retries_exhausted;
+    }
+
+    pub fn body(&self) -> Option<&[u8]> {
+        self.inner.body.as_deref()
+    }
+
+    pub fn body_text(&self) -> Option<Cow<'_, str>> {
+        self.body().map(String::from_utf8_lossy)
+    }
+
+    pub fn retry_after(&self) -> Option<std::time::Duration> {
+        self.status()?;
+        if self.inner.policy_wait.is_some() {
+            return self.inner.policy_wait;
+        }
+        self.header(http::header::RETRY_AFTER.as_str())
+            .and_then(crate::core::retry::parse_retry_after)
+    }
+
+    pub fn find<'a>(error: &'a (dyn StdError + 'static)) -> Option<&'a Error> {
+        let mut current = Some(error);
+        while let Some(err) = current {
+            if let Some(found) = err.downcast_ref::<Error>() {
+                return Some(found);
+            }
+            current = err.source();
+        }
+        None
+    }
+
+    pub(crate) fn into_io(self) -> io::Error {
+        match self.body_limit() {
+            Some(limit) => limit.into_io(),
+            None => io::Error::other(self),
+        }
+    }
+
     pub fn kind(&self) -> Kind {
         self.inner.kind
+    }
+
+    pub fn is_shut_down(&self) -> bool {
+        self.kind() == Kind::Request
+            && self.message() == Some(crate::core::session::execute::SHUT_DOWN_MESSAGE)
     }
 
     pub(crate) fn message(&self) -> Option<&str> {
@@ -131,97 +242,6 @@ impl Error {
 
     pub fn url(&self) -> Option<&Url> {
         self.inner.url.as_ref()
-    }
-
-    pub fn is_timeout(&self) -> bool {
-        self.inner.kind == Kind::Timeout
-            || self
-                .io_cause()
-                .is_some_and(|e| e.kind() == io::ErrorKind::TimedOut)
-    }
-
-    pub fn is_connect(&self) -> bool {
-        if self.inner.kind == Kind::Connect {
-            return true;
-        }
-        if matches!(
-            self.tls(),
-            Some(
-                TlsError::TcpConnect(_)
-                    | TlsError::Dns(_)
-                    | TlsError::Handshake(_)
-                    | TlsError::HandshakeIo(_)
-                    | TlsError::Rejected(_)
-            )
-        ) {
-            return true;
-        }
-        self.io().is_some_and(|e| {
-            matches!(
-                e.kind(),
-                io::ErrorKind::ConnectionRefused
-                    | io::ErrorKind::AddrNotAvailable
-                    | io::ErrorKind::NotConnected
-                    | io::ErrorKind::NetworkUnreachable
-            )
-        })
-    }
-
-    pub fn is_status(&self) -> bool {
-        self.inner.kind == Kind::Status
-    }
-
-    pub fn is_retryable(&self) -> bool {
-        self.is_timeout()
-            || self.is_connect()
-            || self.is_connection_closed()
-            || self.is_proxy_transient()
-    }
-
-    fn is_proxy_transient(&self) -> bool {
-        let Some(TlsError::Proxy { status, source, .. }) = self.tls() else {
-            return false;
-        };
-        source.is_some() || status.is_some_and(|code| GATEWAY_STATUSES.contains(&code))
-    }
-
-    pub(crate) fn is_connection_closed(&self) -> bool {
-        if self.io().is_some_and(|e| {
-            matches!(
-                e.kind(),
-                io::ErrorKind::UnexpectedEof
-                    | io::ErrorKind::ConnectionReset
-                    | io::ErrorKind::ConnectionAborted
-                    | io::ErrorKind::BrokenPipe
-            )
-        }) {
-            return true;
-        }
-        if matches!(
-            self.h2(),
-            Some(
-                H2Error::Io(_)
-                    | H2Error::Connection {
-                        code: ErrorCode::NoError,
-                        ..
-                    }
-                    | H2Error::Stream {
-                        code: ErrorCode::RefusedStream,
-                        ..
-                    }
-            )
-        ) {
-            return true;
-        }
-        matches!(
-            self.tls(),
-            Some(TlsError::Handshake(_) | TlsError::HandshakeIo(_) | TlsError::Rejected(_))
-        )
-    }
-
-    fn io_cause(&self) -> Option<&io::Error> {
-        self.io()
-            .or_else(|| self.tls().and_then(TlsError::io_source))
     }
 
     pub fn io(&self) -> Option<&io::Error> {
@@ -277,6 +297,21 @@ impl fmt::Debug for Error {
         if let Some(source) = &self.inner.source {
             out.field("source", source);
         }
+        if let Some(body) = &self.inner.body {
+            out.field("body_len", &body.len());
+        }
+        if let Some(headers) = &self.inner.headers {
+            out.field("header_count", &headers.len());
+        }
+        if self.inner.attempts > 0 {
+            out.field("attempts", &self.inner.attempts);
+        }
+        if let Some(proxy) = &self.inner.proxy {
+            out.field("proxy", proxy);
+        }
+        if self.inner.retries_exhausted {
+            out.field("retries_exhausted", &true);
+        }
         out.finish()
     }
 }
@@ -284,87 +319,6 @@ impl fmt::Debug for Error {
 impl StdError for Error {
     fn source(&self) -> Option<&(dyn StdError + 'static)> {
         self.inner.source.as_ref().map(|e| &**e as &dyn StdError)
-    }
-}
-
-impl Error {
-    pub(crate) fn from_url_parse(e: url::ParseError) -> Self {
-        Error::new(Kind::Url).with_source(e)
-    }
-
-    pub(crate) fn from_json(e: serde_json::Error) -> Self {
-        Error::new(Kind::Json).with_source(e)
-    }
-
-    pub(crate) fn from_request_body(e: io::Error) -> Self {
-        Error::new(Kind::Body)
-            .with_message("request body stream failed")
-            .with_source(e)
-    }
-}
-
-impl From<io::Error> for Error {
-    fn from(e: io::Error) -> Self {
-        Error::new(Kind::Io).with_source(e)
-    }
-}
-
-impl From<TlsError> for Error {
-    fn from(e: TlsError) -> Self {
-        let kind = match &e {
-            TlsError::Dns(_) | TlsError::TcpConnect(_) => Kind::Connect,
-            TlsError::Proxy { .. } => Kind::Proxy,
-            TlsError::SslConfig(_) | TlsError::Profile(_) | TlsError::TrustStore(_) => Kind::Config,
-            _ => Kind::Tls,
-        };
-        Error::new(kind).with_source(e)
-    }
-}
-
-impl From<H2Error> for Error {
-    fn from(e: H2Error) -> Self {
-        if let Some(limit) = e.body_limit() {
-            return limit.error();
-        }
-        match e {
-            H2Error::RequestBody(io) => Error::from_request_body(io),
-            other => Error::new(Kind::Http2).with_source(other),
-        }
-    }
-}
-
-#[cfg(feature = "http3")]
-impl From<H3SendError> for Error {
-    fn from(e: H3SendError) -> Self {
-        match e {
-            H3SendError::BodyLimit(limit) => limit.error(),
-            H3SendError::RequestBody(io) => Error::from_request_body(io),
-            other => Error::new(Kind::Http3).with_message(other.message().into_owned()),
-        }
-    }
-}
-
-impl From<http::Error> for Error {
-    fn from(e: http::Error) -> Self {
-        Error::new(Kind::Request).with_source(e)
-    }
-}
-
-impl From<http::header::InvalidHeaderName> for Error {
-    fn from(e: http::header::InvalidHeaderName) -> Self {
-        Error::new(Kind::Request).with_source(e)
-    }
-}
-
-impl From<http::header::InvalidHeaderValue> for Error {
-    fn from(e: http::header::InvalidHeaderValue) -> Self {
-        Error::new(Kind::Request).with_source(e)
-    }
-}
-
-impl From<http::uri::InvalidUri> for Error {
-    fn from(e: http::uri::InvalidUri) -> Self {
-        Error::new(Kind::Url).with_source(e)
     }
 }
 

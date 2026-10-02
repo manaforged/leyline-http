@@ -16,6 +16,33 @@ pub struct TlsInfo {
     pub cipher: Option<String>,
 }
 
+pub(crate) struct Opened<C> {
+    pub(crate) conn: C,
+    pub(crate) tls: TlsInfo,
+    pub(crate) started: Instant,
+    pub(crate) connect_ms: Option<u32>,
+}
+
+impl<C> Opened<C> {
+    pub(crate) fn pooled((conn, tls): (C, TlsInfo)) -> Self {
+        Self {
+            conn,
+            tls,
+            started: Instant::now(),
+            connect_ms: None,
+        }
+    }
+
+    pub(crate) fn fresh((conn, tls): (C, TlsInfo), started: Instant) -> Self {
+        Self {
+            conn,
+            tls,
+            started,
+            connect_ms: Some(crate::ResponseTiming::millis(started)),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub(crate) enum Transport {
     Tcp,
@@ -30,6 +57,7 @@ pub(crate) struct PoolKey {
     pub(crate) scheme: String,
     pub(crate) proxy: Option<String>,
     pub(crate) transport: Transport,
+    pub(crate) partition: u64,
 }
 
 pub struct H1Slot {
@@ -99,6 +127,8 @@ pub struct PoolStats {
     pub stale_probed: u64,
     pub h2_ping_failures: u64,
     pub installs: u64,
+    pub busy: usize,
+    pub idle: usize,
 }
 
 #[derive(Default)]

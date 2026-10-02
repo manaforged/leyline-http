@@ -1,3 +1,4 @@
+use std::ops::ControlFlow;
 use std::sync::atomic::Ordering;
 
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -49,132 +50,135 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 let _ = self.writer.flush().await;
                 return Ok(());
             }
-            let mut tick_fired = false;
-            for _ in 0..128 {
-                if !self.reader.buffered() {
-                    break;
-                }
-                match self.reader.next().await? {
-                    Some(f) => {
-                        self.on_inbound_frame(f).await?;
-                        if !self.pending.is_empty() {
-                            self.drain_pending().await?;
-                        }
-                    }
-                    None => {
-                        return if self.shutdown_started {
-                            Ok(())
-                        } else {
-                            Err(H2Error::Connection {
-                                code: ErrorCode::NoError,
-                                reason: "peer closed connection".into(),
-                            })
-                        };
-                    }
-                }
+            if self.read_buffered_frames().await?.is_break() {
+                return Ok(());
             }
-            for _ in 0..self.command_rx.len() {
-                let Ok(next) = self.command_rx.try_recv() else {
-                    break;
-                };
-                self.on_command(next).await?;
-            }
-            for _ in 0..self.body_chunk_rx.len() {
-                let Ok(chunk) = self.body_chunk_rx.try_recv() else {
-                    break;
-                };
-                self.on_body_chunk(chunk).await?;
-            }
-            if !self.pending.is_empty() {
-                self.drain_pending().await?;
-            }
-            self.try_drain_pending().await?;
-            if self.writer.pending() > 0 && !self.reader.buffered() {
-                self.writer.flush().await?;
-            }
-            tokio::select! {
-                biased;
-                frame = self.reader.next() => {
-                    match frame? {
-                        Some(f) => {
-                            self.on_inbound_frame(f).await?;
-                            self.drain_pending().await?;
-                        }
-                        None => {
-                            return if self.shutdown_started {
-                                Ok(())
-                            } else {
-                                Err(H2Error::Connection {
-                                    code: ErrorCode::NoError,
-                                    reason: "peer closed connection".into(),
-                                })
-                            };
-                        }
-                    }
-                }
-                maybe_cmd = self.command_rx.recv(), if !self.shutdown_started => {
-                    match maybe_cmd {
-                        Some(cmd) => {
-                            self.on_command(cmd).await?;
-                        }
-                        None => self.shutdown_started = true,
-                    }
-                }
-                maybe_chunk = self.body_chunk_rx.recv() => {
-                    if let Some(c) = maybe_chunk {
-                        self.on_body_chunk(c).await?;
-                    }
-                }
-                _ = sweep_tick.tick() => {
-                    tick_fired = true;
-                }
-                _ = flush_tick.tick(), if self.has_stalled() => {
-                    self.flush_stalled().await?;
-                }
-            }
+            self.run_ready_work().await?;
+            let Some(tick_fired) = self.wait_event(&mut sweep_tick, &mut flush_tick).await? else {
+                return Ok(());
+            };
+            self.after_event(tick_fired).await?;
+        }
+    }
 
-            for _ in 0..self.command_rx.len() {
-                let Ok(next) = self.command_rx.try_recv() else {
-                    break;
-                };
-                self.on_command(next).await?;
-            }
-            self.try_drain_pending().await?;
+    async fn run_ready_work(&mut self) -> Result<(), H2Error> {
+        self.take_queued_commands().await?;
+        self.take_queued_body_chunks().await?;
+        self.drain_pending().await?;
+        self.try_drain_pending().await?;
+        if self.writer.pending() > 0 && !self.reader.buffered() {
+            self.writer.flush().await?;
+        }
+        Ok(())
+    }
 
-            if tick_fired {
-                self.sweep_cancelled_streams().await?;
+    async fn after_event(&mut self, tick_fired: bool) -> Result<(), H2Error> {
+        self.take_queued_commands().await?;
+        self.try_drain_pending().await?;
+        if tick_fired {
+            self.sweep_cancelled_streams().await?;
+        }
+        Ok(())
+    }
+
+    async fn wait_event(
+        &mut self,
+        sweep_tick: &mut tokio::time::Interval,
+        flush_tick: &mut tokio::time::Interval,
+    ) -> Result<Option<bool>, H2Error> {
+        tokio::select! {
+            biased;
+            frame = self.reader.next() => return Ok(self.on_read(frame).await?.is_continue().then_some(false)),
+            maybe_cmd = self.command_rx.recv(), if self.accepting_commands() => {
+                self.on_command_received(maybe_cmd).await?;
+            }
+            Some(chunk) = self.body_chunk_rx.recv() => self.on_body_chunk(chunk).await?,
+            Some(ack_tx) = self.ping_rx.recv() => self.on_command(DriverCommand::Ping { ack_tx }).await?,
+            _ = sweep_tick.tick() => return Ok(Some(true)),
+            _ = flush_tick.tick(), if self.has_stalled() => self.flush_stalled().await?,
+        }
+        Ok(Some(false))
+    }
+
+    async fn on_command_received(&mut self, cmd: Option<DriverCommand>) -> Result<(), H2Error> {
+        match cmd {
+            Some(cmd) => self.on_command(cmd).await,
+            None => {
+                self.shutdown_started = true;
+                Ok(())
             }
         }
     }
 
+    async fn read_buffered_frames(&mut self) -> Result<ControlFlow<()>, H2Error> {
+        for _ in 0..128 {
+            if !self.reader.buffered() {
+                break;
+            }
+            let frame = self.reader.next().await;
+            if self.on_read(frame).await?.is_break() {
+                return Ok(ControlFlow::Break(()));
+            }
+        }
+        Ok(ControlFlow::Continue(()))
+    }
+
+    async fn on_read(
+        &mut self,
+        frame: Result<Option<Frame>, H2Error>,
+    ) -> Result<ControlFlow<()>, H2Error> {
+        let Some(frame) = frame? else {
+            if self.shutdown_started {
+                return Ok(ControlFlow::Break(()));
+            }
+            return Err(H2Error::Connection {
+                code: ErrorCode::NoError,
+                reason: "peer closed connection".into(),
+            });
+        };
+        self.on_inbound_frame(frame).await?;
+        self.drain_pending().await?;
+        Ok(ControlFlow::Continue(()))
+    }
+
+    async fn take_queued_body_chunks(&mut self) -> Result<(), H2Error> {
+        for _ in 0..self.body_chunk_rx.len() {
+            let Ok(chunk) = self.body_chunk_rx.try_recv() else {
+                break;
+            };
+            self.on_body_chunk(chunk).await?;
+        }
+        Ok(())
+    }
+
+    fn accepting_commands(&self) -> bool {
+        !self.shutdown_started && self.pending.is_empty()
+    }
+
+    async fn take_queued_commands(&mut self) -> Result<(), H2Error> {
+        for _ in 0..self.command_rx.len() {
+            if !self.pending.is_empty() {
+                break;
+            }
+            let Ok(next) = self.command_rx.try_recv() else {
+                break;
+            };
+            self.on_command(next).await?;
+        }
+        Ok(())
+    }
+
     pub(super) async fn sweep_cancelled_streams(&mut self) -> Result<(), H2Error> {
+        self.pending.retain(|cmd| !cmd.is_cancelled());
         let to_cancel: Vec<u32> = self
             .streams
             .iter()
             .filter(|(_, actor)| {
-                if actor.state.is_closed() {
-                    return false;
-                }
-                if matches!(
-                    actor.send_body_input,
-                    SendBodyInput::Streaming { closed: false, .. }
-                ) {
-                    return false;
-                }
-                match actor.response_tx.as_ref() {
-                    Some(ResponseSink::Buffered(tx)) => tx.is_closed(),
-                    Some(ResponseSink::StreamingEx {
-                        headers_tx,
-                        body_tx,
-                        ..
-                    }) => {
-                        let headers_dead =
-                            headers_tx.as_ref().map(|t| t.is_closed()).unwrap_or(true);
-                        let body_dead = body_tx.is_closed();
-                        headers_dead && body_dead
-                    }
-                    None => false,
-                }
+                !actor.state.is_closed()
+                    && actor
+                        .response_tx
+                        .as_ref()
+                        .is_some_and(ResponseSink::is_cancelled)
             })
             .map(|(id, _)| id)
             .collect();

@@ -1,7 +1,9 @@
 #![forbid(unsafe_code)]
 mod compress;
+mod context;
 mod debug;
 mod encode;
+mod route;
 mod send;
 
 pub use compress::ContentEncoding;
@@ -64,6 +66,9 @@ pub struct RequestBuilder {
     pub(super) header_order: Option<Vec<String>>,
     pub(super) preset_user: bool,
     pub(super) redirect: Option<RedirectPolicy>,
+    pub(super) initiator: Option<url::Url>,
+    pub(super) tag: Option<String>,
+    pub(super) status_errors: bool,
 }
 
 fn default_preset(session: &Session, method: &Method) -> Option<Preset> {
@@ -97,11 +102,14 @@ impl RequestBuilder {
             header_order: None,
             preset_user: false,
             redirect: None,
+            initiator: None,
+            tag: None,
+            status_errors: false,
         }
     }
 
     pub(crate) fn from_url(session: &Session, method: Method, url: impl IntoUrl) -> Self {
-        match url.into_url() {
+        match url.into_url_with_base(session.base_url()) {
             Ok(url) => Self::new(session, method, url.as_str()),
             Err(err) => {
                 let mut builder = Self::new(session, method, "");
@@ -111,7 +119,7 @@ impl RequestBuilder {
         }
     }
 
-    fn fail(&mut self, err: Error) {
+    pub(crate) fn fail(&mut self, err: Error) {
         if self.builder_error.is_none() {
             self.builder_error = Some(err);
         }

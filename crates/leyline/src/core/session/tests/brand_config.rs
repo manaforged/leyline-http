@@ -21,7 +21,7 @@ fn edge_keeps_explicit_chromium_browser() {
         .brand(ChromiumBrand::Edge)
         .build()
         .unwrap();
-    assert_eq!(s.browser(), Some(Browser::Chrome147));
+    assert_eq!(s.identity().browser(), Some(Browser::Chrome147));
     assert_eq!(s.brand(), Some(ChromiumBrand::Edge));
 }
 
@@ -71,20 +71,23 @@ fn opera_overlay_on_unverified_anchor_errors() {
 #[test]
 fn builder_edge_impersonates() {
     let s = branded(Browser::default_browser(), ChromiumBrand::Edge);
-    assert_eq!(s.browser(), Some(Browser::default_browser()));
+    assert_eq!(s.identity().browser(), Some(Browser::default_browser()));
     assert_eq!(s.brand(), Some(ChromiumBrand::Edge));
 }
 
 #[test]
 fn builder_opera_impersonates() {
     let s = branded(Browser::Chrome152, ChromiumBrand::Opera);
-    assert_eq!(s.browser(), Some(Browser::Chrome152));
+    assert_eq!(s.identity().browser(), Some(Browser::Chrome152));
     assert_eq!(s.brand(), Some(ChromiumBrand::Opera));
 }
 
 #[test]
 fn chrome_reports_stock_brand() {
-    assert_eq!(Session::new().brand(), Some(ChromiumBrand::Chrome));
+    assert_eq!(
+        Session::browser(Browser::default()).brand(),
+        Some(ChromiumBrand::Chrome)
+    );
 }
 
 #[test]

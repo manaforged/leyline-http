@@ -17,6 +17,7 @@ pub(super) struct H3Loop {
     body_chunk_tx: mpsc::Sender<H3BodyChunk>,
     body_chunk_rx: mpsc::Receiver<H3BodyChunk>,
     closed: Arc<AtomicBool>,
+    open_streams: Arc<AtomicUsize>,
     streams: HashMap<u64, H3Stream>,
     out: Vec<u8>,
     buf: Vec<u8>,
@@ -51,6 +52,7 @@ impl H3Loop {
             body_chunk_tx: driver.body_chunk_tx,
             body_chunk_rx: driver.body_chunk_rx,
             closed: driver.closed,
+            open_streams: driver.open_streams,
             streams: driver.streams,
             out: vec![0u8; max_udp_payload],
             buf: vec![0u8; 65_535],
@@ -63,12 +65,19 @@ impl H3Loop {
 
     pub(super) async fn turn(&mut self) -> ControlFlow<()> {
         let backpressured = self.advance();
+        self.open_streams
+            .store(self.streams.len(), Ordering::Relaxed);
         self.settle().await?;
         self.wait(backpressured).await
     }
 
     fn advance(&mut self) -> bool {
-        sweep_cancelled_streams(&mut self.h3, &mut self.conn, &mut self.streams);
+        sweep_cancelled_streams(
+            &mut self.h3,
+            &mut self.conn,
+            &mut self.streams,
+            &mut self.pending,
+        );
         start_pending(
             &mut self.h3,
             &mut self.conn,
@@ -97,6 +106,7 @@ impl H3Loop {
         }
         if self.is_idle() {
             self.closed.store(true, Ordering::Release);
+            self.open_streams.store(0, Ordering::Relaxed);
             return ControlFlow::Break(());
         }
         ControlFlow::Continue(())
@@ -129,6 +139,7 @@ impl H3Loop {
             &self.closed,
             reason,
         );
+        self.open_streams.store(0, Ordering::Relaxed);
         ControlFlow::Break(())
     }
 

@@ -1,5 +1,12 @@
 use std::io;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ProxyReply {
+    HttpStatus(u16),
+    Socks5(u8),
+}
+
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum TlsError {
@@ -47,6 +54,9 @@ pub enum TlsError {
         #[source]
         source: Option<io::Error>,
     },
+
+    #[error("proxy could not reach the target: {detail}")]
+    ProxyTargetUnreachable { reply: ProxyReply, detail: String },
 }
 
 fn peer_closed(kind: io::ErrorKind) -> bool {
@@ -104,9 +114,16 @@ impl TlsError {
         }
     }
 
+    pub(crate) fn proxy_target(reply: ProxyReply, detail: impl Into<String>) -> Self {
+        Self::ProxyTargetUnreachable {
+            reply,
+            detail: detail.into(),
+        }
+    }
+
     pub(crate) fn into_proxy(self) -> Self {
         match self {
-            Self::Proxy { .. } => self,
+            Self::Proxy { .. } | Self::ProxyTargetUnreachable { .. } => self,
             Self::Dns(e) | Self::TcpConnect(e) | Self::HandshakeIo(e) | Self::Rejected(e) => {
                 Self::proxy_io(e)
             }
@@ -154,6 +171,10 @@ impl TlsError {
                 status: *status,
                 detail: detail.clone(),
                 source: source.as_ref().map(io),
+            },
+            Self::ProxyTargetUnreachable { reply, detail } => Self::ProxyTargetUnreachable {
+                reply: *reply,
+                detail: detail.clone(),
             },
         }
     }

@@ -1,4 +1,9 @@
 use crate::profile::{BrowserProfile, ChromiumBrand, Platform, PlatformIdentity, resolve_identity};
+use crate::{Error, Kind};
+
+mod digest;
+
+pub(crate) use digest::digest;
 
 include!(concat!(env!("OUT_DIR"), "/browser.rs"));
 
@@ -6,13 +11,25 @@ struct Entry {
     family: Family,
     key: &'static str,
     version: u32,
+    id: &'static str,
     name: &'static str,
     hello: Browser,
     platforms: &'static [(&'static str, Browser)],
+    digest: u64,
     source: &'static str,
 }
 
 impl Family {
+    #[must_use]
+    pub fn all() -> &'static [Family] {
+        FAMILY_ALL
+    }
+
+    #[must_use]
+    pub fn id(&self) -> &'static str {
+        FAMILY_IDS[*self as usize]
+    }
+
     pub(crate) fn samesite_checks_redirect_chain(self) -> bool {
         FAMILY_SAMESITE_REDIRECT_CHAIN[self as usize]
     }
@@ -24,9 +41,52 @@ impl std::fmt::Display for Family {
     }
 }
 
+impl std::str::FromStr for Family {
+    type Err = Error;
+
+    fn from_str(id: &str) -> Result<Self, Self::Err> {
+        FAMILY_ALL
+            .iter()
+            .copied()
+            .find(|family| family.id().eq_ignore_ascii_case(id))
+            .ok_or_else(|| unknown("family", id, FAMILY_IDS.iter().copied()))
+    }
+}
+
+string_id_serde!(Family);
+
+impl std::str::FromStr for Browser {
+    type Err = Error;
+
+    fn from_str(id: &str) -> Result<Self, Self::Err> {
+        ALL.iter()
+            .copied()
+            .find(|browser| browser.id().eq_ignore_ascii_case(id))
+            .ok_or_else(|| unknown("browser", id, ALL.iter().map(Browser::id)))
+    }
+}
+
+string_id_serde!(Browser);
+
+pub(crate) fn unknown<'a>(kind: &str, id: &str, known: impl Iterator<Item = &'a str>) -> Error {
+    Error::new(Kind::Config).with_message(format!(
+        "unknown {kind} {id:?}; expected one of {}",
+        known.collect::<Vec<_>>().join(", ")
+    ))
+}
+
 impl Browser {
     pub fn all() -> &'static [Browser] {
         ALL
+    }
+
+    #[must_use]
+    pub fn id(&self) -> &'static str {
+        self.entry().id
+    }
+
+    pub(crate) fn profile_digest(self) -> u64 {
+        self.entry().digest
     }
 
     fn entry(self) -> &'static Entry {
@@ -96,6 +156,13 @@ impl Browser {
 
     pub(crate) fn profile_source(self) -> &'static str {
         self.entry().source
+    }
+
+    pub(crate) fn matching_source(text: &str) -> Option<Self> {
+        let wanted = digest(&[text.as_bytes()]);
+        ALL.iter()
+            .copied()
+            .find(|browser| digest(&[browser.profile_source().as_bytes()]) == wanted)
     }
 
     pub(crate) fn default_browser() -> Self {
