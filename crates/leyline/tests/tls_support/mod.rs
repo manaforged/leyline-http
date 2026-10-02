@@ -54,24 +54,53 @@ where
     F: Fn(SslStream<TcpStream>) -> Fut + Send + 'static,
     Fut: Future<Output = ()> + Send + 'static,
 {
+    tls_server_per_connection(
+        cert,
+        key,
+        connections,
+        |_| H2,
+        move |_, stream| serve(stream),
+    )
+    .await
+}
+
+pub const H2: &[u8] = b"\x02h2";
+pub const HTTP11: &[u8] = b"\x08http/1.1";
+
+pub async fn tls_server_per_connection<A, F, Fut>(
+    cert: X509,
+    key: PKey<Private>,
+    connections: Arc<AtomicUsize>,
+    alpn: A,
+    serve: F,
+) -> u16
+where
+    A: Fn(usize) -> &'static [u8] + Send + Sync + 'static,
+    F: Fn(usize, SslStream<TcpStream>) -> Fut + Send + 'static,
+    Fut: Future<Output = ()> + Send + 'static,
+{
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let port = listener.local_addr().expect("local address").port();
+    let accepted = Arc::new(AtomicUsize::new(0));
+    let current = Arc::clone(&accepted);
     let mut context = SslContextBuilder::new(SslMethod::tls()).expect("TLS context");
     context.set_certificate(&cert).expect("certificate");
     context.set_private_key(&key).expect("private key");
-    context.set_alpn_select_callback(|_, offered| {
-        select_next_proto(b"\x02h2", offered).ok_or(AlpnError::NOACK)
+    context.set_alpn_select_callback(move |_, offered| {
+        select_next_proto(alpn(current.load(Ordering::SeqCst)), offered).ok_or(AlpnError::NOACK)
     });
     let context = context.build();
     tokio::spawn(async move {
         while let Ok((tcp, _)) = listener.accept().await {
             connections.fetch_add(1, Ordering::SeqCst);
+            let index = accepted.load(Ordering::SeqCst);
             let ssl = Ssl::new(&context).expect("TLS session");
-            if let Ok(stream) = leyline_bssl_tokio::SslStreamBuilder::new(ssl, tcp)
+            let handshake = leyline_bssl_tokio::SslStreamBuilder::new(ssl, tcp)
                 .accept()
-                .await
-            {
-                tokio::spawn(serve(stream));
+                .await;
+            accepted.fetch_add(1, Ordering::SeqCst);
+            if let Ok(stream) = handshake {
+                tokio::spawn(serve(index, stream));
             }
         }
     });

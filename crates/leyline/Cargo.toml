@@ -254,6 +254,10 @@ name = "h2_refused_retry"
 required-features = ["bench-internals"]
 
 [[test]]
+name = "h2_fallback_upgrade"
+required-features = ["bench-internals"]
+
+[[test]]
 name = "h2_rst_flood_e2e"
 required-features = ["bench-internals"]
 
