@@ -1,15 +1,12 @@
 # Supported platforms
 
-This page lists the targets Leyline builds for and what a BoringSSL build
-from source needs. On every supported target the default build needs only
-Rust and Cargo.
+This page lists the targets Leyline builds for and the tools the BoringSSL
+build needs.
 
 ## Supported targets
 
-`leyline-bssl-sys` links prebuilt BoringSSL libraries from a
-`leyline-bssl-prebuilt-<target>` crate, with pregenerated bindings, so the
-build needs no CMake, C or C++ compiler, or libclang. On Windows the
-prebuilt libraries use the dynamic CRT, the Rust default.
+`leyline-bssl-sys` builds BoringSSL from source with CMake and generates its
+bindings with `bindgen` when it compiles.
 
 | Target | Notes |
 | --- | --- |
@@ -28,14 +25,11 @@ The platform a session claims is separate from the build target: a Linux
 build can claim Windows or macOS. See
 [Choose a platform](sessions.md#choose-a-platform).
 
-## Build from source
+## Build BoringSSL
 
-The build compiles BoringSSL with CMake when one of these holds:
-
-- `LEYLINE_BSSL_FROM_SOURCE=1` is set.
-- The Windows target has `+crt-static`.
-- `LEYLINE_BSSL_SOURCE_PATH` points at a BoringSSL source tree. The build
-  applies Leyline's patches to that tree in place.
+The build compiles the BoringSSL source that ships in `leyline-bssl-sys`.
+`LEYLINE_BSSL_SOURCE_PATH` points the build at another BoringSSL source tree.
+The build applies Leyline's patches to that tree in place.
 
 `LEYLINE_BSSL_PATH` links a BoringSSL that you built yourself. The build
 applies no patches to it, so it must carry Leyline's patches and be built
@@ -50,19 +44,18 @@ Other variables:
   Windows.
 - `LEYLINE_BSSL_SYSROOT` gives `bindgen` a sysroot.
 
-A source build needs:
+The build needs:
 
 - CMake 3.22 or later.
 - A C and C++ compiler: Xcode Command Line Tools on macOS, GCC or Clang on
   Linux, the MSVC build tools on Windows.
-- Git. Every source build runs `git apply` for Leyline's patches unless
+- Git. Every build runs `git apply` for Leyline's patches unless
   `LEYLINE_BSSL_ASSUME_PATCHED` is set. A source checkout also uses Git to
   fetch the BoringSSL submodule.
-- libclang, when `LEYLINE_BSSL_SOURCE_PATH` or `LEYLINE_BSSL_PATH` is set,
-  because `bindgen` then generates the bindings.
+- libclang, for `bindgen`.
 - NASM on Windows, for the BoringSSL assembly.
 
-A source build uses the macOS deployment target that Rust uses
+The build uses the macOS deployment target that Rust uses
 (`MACOSX_DEPLOYMENT_TARGET`, 11.0 by default), honors `+crt-static` on
 MSVC, and maps the source and output directories to `/build`, so the
 libraries embed no local paths. The first build compiles BoringSSL; later
@@ -80,7 +73,7 @@ CMake, then LLVM and NASM. A Developer Command Prompt is not required.
 
 ### musl
 
-BoringSSL has C++ code, so a musl source build needs a musl C and C++
+BoringSSL has C++ code, so a musl build needs a musl C and C++
 toolchain. The `musl-gcc` wrapper from `musl-tools` has no C++ compiler;
 use a full cross toolchain, such as the musl.cc builds or the one `cross`
 ships.
