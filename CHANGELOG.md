@@ -8,13 +8,6 @@ behaviour, and each change is listed here. The BoringSSL crates
 `leyline-bssl`, `leyline-bssl-sys`, and `leyline-bssl-tokio` share this
 version and publish as separate crates.
 
-## Unreleased
-
-### Added
-
-- `HeaderAnchor::BeforeCchUa` places a header before `sec-ch-ua`, where
-  Chrome sends the client hints a site asked for.
-
 ## 0.1.1 - 2026-10-02
 
 ### Changed
@@ -139,6 +132,8 @@ version and publish as separate crates.
 
 #### Browser sessions, tabs, and devices
 
+- `HeaderAnchor::BeforeCchUa` places a header before `sec-ch-ua`, where
+  Chrome sends the client hints a site asked for.
 - `Session::tab()` returns a `Tab` that keeps the current page: `open`,
   `follow`, `submit`, `submit_form`, `fetch`, `xhr`, `post_json`, and
   `subresource` send the page as the initiator. A tab with no page refuses
