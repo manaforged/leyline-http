@@ -932,6 +932,7 @@ pub leyline::HeaderAnchor::AfterContentType
 pub leyline::HeaderAnchor::AfterFetchDest
 pub leyline::HeaderAnchor::AfterUserAgent
 pub leyline::HeaderAnchor::BeforeAcceptEncoding
+pub leyline::HeaderAnchor::BeforeCchUa
 impl core::clone::Clone for leyline::HeaderAnchor
 impl core::cmp::Eq for leyline::HeaderAnchor
 impl core::cmp::PartialEq for leyline::HeaderAnchor

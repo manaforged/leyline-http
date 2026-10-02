@@ -1,6 +1,7 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum HeaderAnchor {
+    BeforeCchUa,
     AfterCchUa,
     AfterCchUaMobile,
     AfterCchUaPlatform,
@@ -14,7 +15,7 @@ pub enum HeaderAnchor {
 impl HeaderAnchor {
     pub(crate) fn anchor_name(&self) -> &'static str {
         match self {
-            Self::AfterCchUa => "sec-ch-ua",
+            Self::BeforeCchUa | Self::AfterCchUa => "sec-ch-ua",
             Self::AfterCchUaMobile => "sec-ch-ua-mobile",
             Self::AfterCchUaPlatform => "sec-ch-ua-platform",
             Self::AfterUserAgent => "user-agent",
@@ -26,7 +27,7 @@ impl HeaderAnchor {
     }
 
     pub(crate) fn is_before(&self) -> bool {
-        matches!(self, Self::BeforeAcceptEncoding)
+        matches!(self, Self::BeforeCchUa | Self::BeforeAcceptEncoding)
     }
 }
 

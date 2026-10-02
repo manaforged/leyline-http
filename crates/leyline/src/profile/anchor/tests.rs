@@ -16,6 +16,8 @@ fn anchor_names_match_chrome_slots() {
 
 #[test]
 fn before_anchor_flagged() {
+    assert!(HeaderAnchor::BeforeCchUa.is_before());
+    assert_eq!(HeaderAnchor::BeforeCchUa.anchor_name(), "sec-ch-ua");
     assert!(HeaderAnchor::BeforeAcceptEncoding.is_before());
     assert!(!HeaderAnchor::AfterCchUa.is_before());
 }
