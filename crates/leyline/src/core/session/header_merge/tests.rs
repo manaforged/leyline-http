@@ -130,6 +130,17 @@ fn before_anchor_inserts_before_target() {
 }
 
 #[test]
+fn client_hints_lead_the_client_hint_block_in_push_order() {
+    let mut headers = preset_xhr();
+    let mut extra = HeaderList::new();
+    drop(extra.append_anchored(HeaderAnchor::BeforeCchUa, "device-memory", "8"));
+    drop(extra.append_anchored(HeaderAnchor::BeforeCchUa, "dpr", "1"));
+    apply_extra_headers(&mut headers, &extra, false, &never_sensitive);
+    let names: Vec<&str> = headers.iter().take(3).map(|(k, _)| k.as_ref()).collect();
+    assert_eq!(names, ["device-memory", "dpr", "sec-ch-ua"]);
+}
+
+#[test]
 fn sensitive_stripped_on_cross_origin_redirect() {
     let mut headers = preset_xhr();
     let mut extra = HeaderList::new();

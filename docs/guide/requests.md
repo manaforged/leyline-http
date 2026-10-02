@@ -71,7 +71,7 @@ Two methods override the order:
 - `header_order(&["a", "b"])` pins the wire order of the regular headers for
   this request, on every protocol.
 - `anchored(anchor, name, value)` inserts one header at a `HeaderAnchor`
-  slot: `AfterCchUa`, `AfterCchUaMobile`, `AfterCchUaPlatform`,
+  slot: `BeforeCchUa`, `AfterCchUa`, `AfterCchUaMobile`, `AfterCchUaPlatform`,
   `AfterUserAgent`, `AfterAccept`, `AfterContentType`, `AfterFetchDest`, or
   `BeforeAcceptEncoding`.
 
