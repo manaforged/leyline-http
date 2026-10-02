@@ -1,15 +1,15 @@
 # WebSocket
 
-The `websocket` feature is on by default. A WebSocket uses the same session
-for its TLS fingerprint, its proxy rules, and its cookie jar. The HTTP/1.1
-upgrade opens a fresh connection instead of using the HTTP pool. Use `wss://`:
-a `ws://` URL fails with `Kind::Request` before Leyline picks a proxy or
+The `websocket` feature is on by default. A WebSocket uses the session's TLS
+fingerprint, proxy rules, and cookie jar. Use `wss://`: any other scheme,
+`ws://` included, fails with `Kind::Request` before Leyline picks a proxy or
 connects.
 
-## Connect
+## Connect, send, and receive
 
 `Session::websocket(url)` returns a `WebSocketBuilder`. Call `connect()`, or
-await the builder.
+await the builder. `send` takes a `WsMessage`: `Text`, `Binary`, `Ping`,
+`Pong`, or `Close`.
 
 ```rust,no_run
 use leyline::WsMessage;
@@ -17,48 +17,56 @@ use leyline::WsMessage;
 # async fn run() -> leyline::Result<()> {
 let session = leyline::Session::new();
 let mut ws = session.websocket("wss://example.com/live").connect().await?;
-ws.send(WsMessage::Text("hello".to_owned())).await?;
+
+ws.send(WsMessage::Text("ping".to_owned())).await?;
+ws.send(WsMessage::Binary(vec![1, 2, 3])).await?;
+
+if let Some(msg) = ws.recv().await? {
+    println!("{msg:?}");
+}
+ws.close().await?;
 # Ok(())
 # }
 ```
 
-Builder methods:
+When the peer closes the connection, `recv` first returns
+`Some(WsMessage::Close(frame))`, where `frame` is an `Option<CloseFrame>`
+with the close `code` and `reason`. The next `recv` returns `Ok(None)`.
+`close` sends a close frame and shuts the connection down.
 
-- `config(WebSocketConfig)` sets limits for this connection.
-- `header(name, value)` and `headers(pairs)` append handshake headers, as on a
-  request: a repeated name adds a value and keeps the earlier ones. An invalid
-  name or value fails `connect()` with `Kind::Request`. A `user-agent` or
-  `origin` header replaces the value that Leyline sends, so the handshake
-  carries one of each, with the last value.
-- `proxy(url)` overrides the session proxy.
+A `send`, `recv`, or `close` that fails on the transport or on a closed
+connection gives `Kind::Io`. A protocol violation, or a message over the
+`WebSocketConfig` limits, gives `Kind::Body`.
 
-## Cookies and proxies
+## Set handshake options
 
-The handshake sends the cookies that the session cookie jar holds for the URL,
-matched as for an `https://` request. A `Cookie` header from the session
-default headers or from `header()` replaces them. A `Set-Cookie` header in the
-handshake response does not update the jar.
+| Builder method | Effect |
+| --- | --- |
+| `config(WebSocketConfig)` | Limits and transport for this connection |
+| `header(name, value)`, `headers(pairs)` | Append handshake headers. A repeated name adds a value. An invalid name or value fails `connect()` with `Kind::Request`. A `user-agent` or `origin` header replaces the one Leyline sends |
+| `proxy(url)` | Overrides the session proxy |
 
-A `wss://` URL follows the same proxy rules as an `https://` URL: a rule for
-`https` or for all schemes applies. Environment discovery and `NO_PROXY` work as
-for any request. See [Proxies](proxies.md).
+The handshake sends the cookies that the jar holds for the URL, matched as
+for an `https://` request. A `Cookie` header from the session default headers
+or from `header()` replaces them. A `Set-Cookie` header in the handshake
+response does not update the jar.
+
+A `wss://` URL follows the proxy rules of an `https://` URL, including
+environment discovery and `NO_PROXY`. See [Proxies](proxies.md).
 
 ## HTTP/2 or HTTP/1.1
 
-`WebSocketConfig::prefer_http2` defaults to `true`. Leyline first tries RFC
-8441 extended `CONNECT` over HTTP/2, which reuses a pooled HTTP/2 connection.
-Leyline logs the reason and falls back to the RFC 6455 HTTP/1.1 upgrade in two
-cases:
+`WebSocketConfig::prefer_http2` defaults to `true`: Leyline first tries RFC
+8441 extended `CONNECT` on a pooled HTTP/2 connection. It falls back to the
+RFC 6455 HTTP/1.1 upgrade on a fresh connection in two cases, and logs the
+reason:
 
-- The TLS handshake does not select `h2`, for example because the origin
-  selects `http/1.1`. Leyline then remembers that the origin speaks HTTP/1.1
-  only, and later WebSockets to it skip the HTTP/2 attempt.
+- The TLS handshake does not select `h2`. Later WebSockets to that origin
+  skip the HTTP/2 attempt.
 - The peer does not advertise `SETTINGS_ENABLE_CONNECT_PROTOCOL`.
 
-Any other error is returned rather than retried.
-
-`WebSocketConfig::new().prefer_http2(false)` skips the HTTP/2 attempt.
-`protocol()` returns the subprotocol the origin selected, if any.
+Any other error is returned, not retried. `prefer_http2(false)` skips the
+HTTP/2 attempt. `protocol()` returns the subprotocol the origin selected.
 
 ```rust,no_run
 use leyline::WebSocketConfig;
@@ -79,36 +87,10 @@ println!("protocol={:?}", ws.protocol());
 # }
 ```
 
-## Send and receive
-
-`send` takes a `WsMessage`, Leyline's own message enum (`Text`, `Binary`,
-`Ping`, `Pong`, `Close`). When the peer closes the connection, `recv` first
-returns `Some(WsMessage::Close(frame))`, where `frame` is an
-`Option<CloseFrame>` with the close `code` and `reason`. The next `recv`
-returns `Ok(None)`. `close` sends a close frame and shuts the connection down.
-
-```rust,no_run
-use leyline::WsMessage;
-
-# async fn run() -> leyline::Result<()> {
-let session = leyline::Session::new();
-let mut ws = session.websocket("wss://example.com/live").connect().await?;
-
-ws.send(WsMessage::Text("ping".to_owned())).await?;
-ws.send(WsMessage::Binary(vec![1, 2, 3])).await?;
-
-if let Some(msg) = ws.recv().await? {
-    println!("{msg:?}");
-}
-ws.close().await?;
-# Ok(())
-# }
-```
-
 ## Split the connection
 
-`split()` divides the connection into a `WsSink` and a `WsStream`, so one task
-can write while another reads. The sink keeps `send` and `close`. The stream keeps `recv`.
+`split()` returns a `WsSink` with `send` and `close`, and a `WsStream` with
+`recv`, so one task can write while another reads.
 
 ```rust,no_run
 use leyline::WsMessage;

@@ -1,18 +1,18 @@
 # Streaming
 
 Stream when a body is larger than you want in memory, or when you want to act
-on the first bytes before the last ones arrive. Streaming needs no feature.
-The examples in this chapter also need `bytes`, `futures-util`, and
-`tokio-util` with the `io` feature in your manifest.
+on the first bytes before the last ones arrive. This chapter covers request
+bodies, response bodies, downloads, and flow control. Streaming needs no
+feature. The examples also need `bytes`, `futures-util`, and `tokio-util` with
+the `io` feature.
 
 ## Stream a request body
 
 `Body::stream(s, len)` takes any `Stream` of `io::Result<Bytes>` and an
-`Option<u64>` byte count.
-
-Give the length whenever you know it. With a length, Leyline sends
-`Content-Length`. Without one, the body is sent with no declared length, which
-some origins reject.
+`Option<u64>` length. Give the length whenever you know it: Leyline then
+sends `Content-Length` on every protocol. Without it, HTTP/1.1 sends
+`Transfer-Encoding: chunked` and HTTP/2 and HTTP/3 declare no length, which
+some origins reject. `Body::len_hint()` reports the declared length.
 
 ```rust,no_run
 use leyline::Body;
@@ -22,7 +22,6 @@ let session = leyline::Session::new();
 let file = tokio::fs::File::open("upload.bin").await?;
 let len = tokio::fs::metadata("upload.bin").await?.len();
 let body = Body::stream(tokio_util::io::ReaderStream::new(file), Some(len));
-
 let resp = session
     .post("https://example.com/upload")
     .header("content-type", "application/octet-stream")
@@ -33,21 +32,29 @@ println!("{}", resp.status());
 # }
 ```
 
-`Body::len_hint()` reports the declared length: the buffer size for a buffered
-body, `Some(0)` for an empty one, and the hint you supplied for a stream.
-
 When your stream returns an error, the request fails with `Kind::Body`, and
-`Error::io()` returns the error your stream gave. Leyline does not send the
-request again, because a stream cannot be replayed. The pool does not count
-the connection as dead. An HTTP/2 or HTTP/3 connection resets only that
-stream and stays open, and an HTTP/1.1 connection closes because it holds
-part of the request.
+`Error::io()` returns your error. Leyline does not resend, because a stream
+cannot be replayed. An HTTP/2 or HTTP/3 connection resets only that stream
+and stays open. An HTTP/1.1 connection closes, because it holds part of the
+request.
+
+### When a body cannot be replayed
+
+A streamed body is consumed by the first attempt, so:
+
+- **Redirects.** A redirect that turns the request into a GET follows
+  normally. A redirect that keeps the method and body, such as a 307 or 308,
+  fails with `Kind::Redirect`. See [Redirects](redirects.md).
+- **Retries.** The retry policy is skipped, and the first outcome is
+  returned.
+
+For retries or replayable redirects, buffer the body and send it as `Bytes`.
 
 ## Stream a response body
 
-Call `.stream()` on the request builder. The response then arrives as soon as
-the headers do, and `into_stream()` hands you the body as a `BodyStream`, which
-implements `futures_util::Stream<Item = io::Result<Bytes>>`.
+Call `.stream()` on the request builder. The response arrives with the
+headers, and `into_stream()` returns the body as a `BodyStream`, a
+`futures_util::Stream<Item = io::Result<Bytes>>`.
 
 ```rust,no_run
 use futures_util::StreamExt;
@@ -55,8 +62,7 @@ use futures_util::StreamExt;
 # async fn run() -> leyline::Result<()> {
 let session = leyline::Session::new();
 let resp = session.get("https://example.com/big").stream().await?;
-
-let mut body = resp.into_stream()?;
+let mut body = resp.into_decoded_stream(Some(64 * 1024 * 1024))?;
 let mut total = 0u64;
 while let Some(chunk) = body.next().await {
     total += chunk?.len() as u64;
@@ -66,46 +72,87 @@ println!("{total} bytes");
 # }
 ```
 
-`copy_to(writer)` does the same loop for you and returns the byte count. On a
-response from `.stream()`, `into_stream` and `copy_to` hand back the
-content-encoded bytes as they arrive. `bytes()`, `text()`, and `json()` decode
-compression when they drain a body. When you need decoded bytes from a stream,
-request identity encoding or use `read_until` (see
-[Stop at a marker](#stop-at-a-marker)).
+`text()`, `bytes()`, and `json()` also work on a `.stream()` response: they
+drain and decode it. A streamed response carries no trailers.
 
-A `.stream()` body has no size cap on HTTP/1.1, HTTP/2, or HTTP/3, and
-`into_stream` and `copy_to` add none. You read the chunks, so you decide how
-much stays in memory. `CompressionConfig::max_body_size` (100 MiB by default)
-caps what Leyline holds in memory: the bytes that `bytes()`, `text()`, and
-`json()` collect, and the decoded output of a compressed body. A body over the
-cap fails with `Kind::Body`, and the message names `max_body_size`.
+### Decoded or raw
 
-You do not have to stream it yourself. `bytes().await`, `text().await`, and
-`json().await` drain a streaming body for you and decompress it, so they work
-in both modes. They consume the response. Take the stream or drain it, not
-both: `into_stream()` consumes the response, so nothing is left to read after
-it. A streaming response also carries no trailers.
+| Calls | Bytes | Cap | Use it to |
+| --- | --- | --- | --- |
+| `into_decoded_stream(limit)`, `copy_decoded_to(writer, limit)` | Content coding removed | The smaller of `limit` and `max_body_size` | Save a file, parse the body |
+| `into_stream()`, `copy_to(writer)` | As sent, still encoded | None | Pass the body on with its `content-encoding`, as a proxy does |
+
+The decoded calls decode chunk by chunk and work on a buffered response too.
+`limit: None` means `max_body_size`. A body of exactly `limit` bytes passes. A
+longer one fails with `Error::is_body_limit()` true, and the chunk that
+crosses the limit is not written. A coding that `CompressionConfig` turns off
+passes through still encoded. See [Responses](responses.md#bodies).
+
+## Download a file
+
+`RequestBuilder::download(path, limit)` sends the request with `.stream()`
+and saves the decoded body to `path`. It returns the number of bytes written.
+`Response::download_to(path, limit)` does the same for a response you hold.
+
+| Step | What happens |
+| --- | --- |
+| Status | With `download`, a status of 400 or more is a `Kind::Status` error with the status, the URL, and the first 4096 bytes of the body. Nothing is written. `download_to` does not check the status; call `error_for_status()` first |
+| Write | The decoded body goes to a temporary file `.<name>.<16 hex>.part` in the same directory |
+| Limit | The smaller of `limit` and `max_body_size`, in decoded bytes. `content_length()` is the encoded size |
+| Commit | Leyline flushes and syncs the file, renames it to `path`, and on Unix syncs the directory |
+| Error or drop | Leyline removes the temporary file. `path` does not exist, or keeps its old content |
+
+A path with no file name fails with `Kind::Request`.
+
+### Bound the whole download
+
+For a `.stream()` request, `total` covers the request up to the response
+head. Two timeouts bound the body:
+
+- `read` limits the gap between two chunks. It stops a server that goes
+  quiet. A gap past it is an `io::ErrorKind::TimedOut` error from the stream.
+- `body` limits the whole body after the head. It stops a server that sends
+  slowly but never stops. A plain `Duration` passed to `.timeout` sets only
+  `total`, which ends at the head of a streamed response.
 
 ```rust,no_run
+use std::time::Duration;
+
+use leyline::TimeoutConfig;
+
 # async fn run() -> leyline::Result<()> {
 let session = leyline::Session::new();
-let body = session.get("https://example.com/big").stream().await?.text().await?;
-println!("{} bytes", body.len());
+match session
+    .get("https://example.com/image.iso")
+    .timeout(
+        TimeoutConfig::new()
+            .read(Duration::from_secs(30))
+            .body(Duration::from_secs(600)),
+    )
+    .download("image.iso", Some(8 * 1024 * 1024 * 1024))
+    .await
+{
+    Ok(n) => println!("{n} bytes"),
+    Err(e) if e.is_body_limit() => eprintln!("too large: {e}"),
+    Err(e) => return Err(e),
+}
 # Ok(())
 # }
 ```
 
+See [Retries and timeouts](retries-and-timeouts.md#the-timeouts). To stop a
+download from your code, drop the future; see
+[Cancellation](cancellation.md).
+
 ## Stop at a marker
 
-`read_until(limit, done)` reads a streamed body, decodes gzip, Brotli, zstd,
-and deflate as the chunks arrive, and stops when you tell it to. Use it when
-the value you need sits near the top of a large page.
-
-After each chunk, Leyline calls `done(body, from)`. `body` is every decoded
-byte so far. `from` is the offset where the newest chunk starts. Return `true`
-to stop. The read also stops when `body` reaches `limit` decoded bytes or the
-stream ends. The call returns the decoded prefix and drops the connection's
-remaining body.
+`read_until(limit, done)` reads and decodes a body as the chunks arrive and
+stops when you tell it to. Use it when the value you need sits near the top
+of a large page. After each chunk, Leyline calls `done(body, from)`: `body` is
+every decoded byte so far, and `from` is where the newest chunk starts.
+Return `true` to stop. The read also stops at `limit` decoded bytes or at the
+end of the stream. The call returns the decoded prefix and drops the rest of
+the body.
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
@@ -123,62 +170,25 @@ println!("{} decoded bytes", head.len());
 # }
 ```
 
-Scan from `from` minus the marker length, as the example does. A marker can
+Scan from `from` minus the marker length, as the example does: a marker can
 straddle two chunks, and a scan of the whole body on every chunk costs
-quadratic time on a large page.
+quadratic time.
 
-`read_until` consumes the response. Read the status, headers, `timing()`, and
-`audit()` before you call it.
-
-An unknown `Content-Encoding`, or one that the session's `CompressionConfig`
-turns off, is not decoded, and `read_until` returns the raw bytes. Corrupt
-compressed data fails with `Kind::Decode`. Decoded output over `max_body_size`
-fails with `Kind::Body`.
+Reaching `limit` is not an error, and the result does not say the body was
+longer; to enforce a size limit, use the decoded calls. An unknown or
+turned-off `Content-Encoding` is not decoded. Corrupt compressed data fails
+with `Kind::Decode`, and output over `max_body_size` with `Kind::Body`.
 
 ## Back-pressure
 
 A streamed response body reaches you through a bounded channel, so a slow
 reader slows the sender instead of growing a buffer.
 
-On HTTP/1.1, the task that reads the socket waits while the channel of 16
-chunks is full. The receive buffer of the socket then fills, and TCP flow
-control slows the peer.
+| Protocol | Channel | When you stop reading |
+| --- | --- | --- |
+| HTTP/1.1 | 16 chunks | The socket reader waits, the socket buffer fills, and TCP flow control slows the peer |
+| HTTP/2 | 32 chunks | The driver keeps serving other streams. It queues the stalled stream's data and sends no window update for it, so the queue stays within the stream's receive window |
+| HTTP/3 | 32 chunks | Leyline stops reading the QUIC stream, and QUIC flow control slows the peer |
 
-On HTTP/2, the response channel holds 32 chunks. When you stop polling the
-`BodyStream`, the driver keeps reading the connection, so other streams keep
-going. It queues the data of the stalled stream and sends no window updates for
-that stream while the queue is not empty. The queue cannot grow past the
-receive window of the stream, so the peer stops sending on it.
-
-On HTTP/3, Leyline stops reading the QUIC stream while the channel of 32
-chunks is full, and QUIC flow control slows the peer.
-
-The `read` timeout applies per chunk, not to the whole body. It measures the
-gap between chunks, so a slow but steady download does not trip it. A gap
-longer than the timeout yields an `io::ErrorKind::TimedOut` error from the
-stream. See [Retries and timeouts](retries-and-timeouts.md).
-
-## When a body cannot be replayed
-
-A buffered body can be sent again. A streaming body cannot: the stream has
-already been consumed by the first attempt. That has two consequences.
-
-**Redirects.** A redirect either changes the request to a GET or replays it.
-After a 301 or 302, only a POST becomes a GET with an empty body. After a 303,
-every method except HEAD does. A request that becomes a GET follows normally.
-Every other request keeps its method and its body, so a 307 or 308, or a 302
-for a PUT, must replay the body. A streaming body cannot be replayed. Leyline
-then stops and returns `Kind::Redirect`, telling you to buffer the body before
-sending or to set `RedirectPolicy::none()`.
-
-**Retries.** The retry loop checks the body before it sleeps. A streaming body
-is not retryable, so the policy is skipped and the first outcome is returned,
-whatever the policy says.
-
-If you need retries, or a request that a redirect can replay, buffer the body
-yourself and send it as `Bytes`.
-
-## Next
-
-Read [Redirects](redirects.md) to see what a redirect changes in the next
-request.
+Dropping a `BodyStream` before its end stops the transfer. See
+[Cancellation](cancellation.md) for what happens to the connection.

@@ -1,83 +1,64 @@
 # Redirects
 
-A session follows redirects by default, up to 10 per request. It follows a
-`301`, `302`, `303`, `307`, or `308` response that has a `Location` header.
+A session follows a `301`, `302`, `303`, `307`, or `308` response that has a
+`Location` header, up to 10 per request. This chapter covers what a redirect
+changes, how to limit or stop redirects, and how to decide each one.
 
 ## What a redirect changes
 
-- After a `301` or `302`, a `POST` becomes a `GET` with no body. Every other
-  method keeps its method and its body.
-- After a `303`, every method except `HEAD` becomes a `GET` with no body. A
-  `HEAD` request stays a `HEAD`.
-- After a `307` or `308`, the next request keeps the method and the body.
-- A streamed request body cannot be sent twice. When a redirect keeps the body
-  and the body is a stream, the request fails with `Kind::Redirect`.
+| Status | Next request |
+| --- | --- |
+| `301`, `302` | A `POST` becomes a `GET` with no body. Other methods keep the method and the body |
+| `303` | Every method except `HEAD` becomes a `GET` with no body |
+| `307`, `308` | Keeps the method and the body |
+
+- A redirect that keeps a streamed request body fails with `Kind::Redirect`,
+  because the stream cannot be sent twice.
 - A `Location` with a scheme other than `http` or `https` fails with
   `Kind::Redirect`.
 - When the redirect leaves the origin of the first request, the session
-  removes the `Authorization`, `Proxy-Authorization`, and `Cookie` headers
-  that you set. The cookie jar adds the cookies that match the new URL.
+  removes the `Authorization`, `Proxy-Authorization`, and `Cookie` headers you
+  set. The cookie jar adds the cookies that match the new URL.
 
-`Response::redirect_chain` lists the URLs that the session left, in order, as
-`url::Url` values without a user name or password. `Response::url` is the final
-URL, also a `url::Url`.
+`Response::url` is the final URL, and `Response::redirect_chain` lists the
+URLs the session left, in order. See
+[Responses](responses.md#final-url-and-redirects).
 
-## Set the limit
+## Limit or stop redirects
 
-`.redirect(RedirectPolicy::limited(n))` sets the limit.
-`RedirectPolicy::none()` turns redirects off.
-When the limit is reached, the session returns the last `3xx` response. It
-does not return an error.
+`RedirectPolicy::limited(n)` sets the limit; `limited(10)` is the default.
+`RedirectPolicy::none()` follows no redirect. At the limit, the session
+returns the last `3xx` response, not an error. Set the policy on the session
+with `SessionBuilder::redirect`, or on one request with
+`RequestBuilder::redirect`. `Session::execute` reads a `RedirectPolicy` from
+the request extensions, and `Session::with_redirect` derives a session with
+another policy.
 
 ```rust,no_run
 use leyline::{Browser, RedirectPolicy, Session};
 
-# fn run() -> leyline::Result<()> {
+# async fn run() -> leyline::Result<()> {
 let session = Session::builder()
     .browser(Browser::default())
     .redirect(RedirectPolicy::limited(3))
     .build()?;
-let no_redirects = Session::builder()
-    .browser(Browser::default())
-    .redirect(RedirectPolicy::none())
-    .build()?;
-# let _ = (session, no_redirects);
-# Ok(())
-# }
-```
-
-`RedirectPolicy::limited(10)` is the default. `RedirectPolicy::none()` follows
-no redirect. The session policy is set at build time.
-
-## Override one request
-
-`RequestBuilder::redirect` sets the policy for one request. The session
-default applies to every other request. `Session::execute` reads a
-`RedirectPolicy` from the request extensions in the same way.
-
-```rust,no_run
-use leyline::RedirectPolicy;
-
-# async fn run() -> leyline::Result<()> {
-let session = leyline::Session::new();
 let resp = session
     .post("https://example.com/login")
     .redirect(RedirectPolicy::none())
     .await?;
-let location = resp.header("location");
-# let _ = location;
+println!("{} {:?}", resp.status(), resp.header("location"));
 # Ok(())
 # }
 ```
 
 ## Decide each redirect
 
-`RedirectPolicy::custom` calls your function for each redirect. The function
-gets a `RedirectAttempt` with the status, the current URL as a `&url::Url`, the
-`Location` value as a string, and the URLs followed so far as a `&[url::Url]`.
-Both URL fields have no user name or password. The function returns
-`RedirectAction::Follow` or `RedirectAction::Stop`. On `Stop`, the session
-returns the `3xx` response.
+`RedirectPolicy::custom` calls your function for each redirect with a
+`RedirectAttempt`: the status, the current URL, the `Location` value as a
+string, and the URLs followed so far. The URLs carry no user name or
+password. Return `RedirectAction::Follow` or `RedirectAction::Stop`; on
+`Stop`, the session returns the `3xx` response. A custom policy follows at
+most 32 redirects; the next one fails with `Kind::Redirect`.
 
 ```rust,no_run
 use leyline::{Browser, RedirectAction, RedirectPolicy, Session};
@@ -102,10 +83,3 @@ let session = Session::builder()
 # Ok(())
 # }
 ```
-
-A custom policy can follow at most 32 redirects. The next redirect fails with
-`Kind::Redirect`.
-
-## Next
-
-Read [Retries and timeouts](retries-and-timeouts.md).

@@ -1,13 +1,15 @@
 # Sessions
 
 A `Session` owns everything a request needs: the browser profile, the TLS
-context, the connection pool, and the cookie jar. Build one and reuse it.
+context, the connection pool, and the cookie jar. Build one, reuse it, and
+clone it into tasks. This chapter covers building, deriving, stopping, and
+saving a session.
 
 ## Build a session
 
-`Session::builder()` returns a `SessionBuilder`. Each concern has one method.
-`build()` returns `Result<Session>`, because a bad proxy URL or an unknown
-profile fails here rather than at the first request.
+`Session::builder()` returns a `SessionBuilder`. `build()` returns
+`Result<Session>`, so a bad proxy URL or an unknown profile fails there
+rather than at the first request.
 
 ```rust,no_run
 use leyline::{Browser, Platform, Session};
@@ -16,90 +18,175 @@ use leyline::{Browser, Platform, Session};
 let session = Session::builder()
     .browser(Browser::Firefox154)
     .platform(Platform::MacOS)
+    .user_agent("my-tool/1.0 (+https://my-tool.example)")
+    .headers([("accept", "application/json")])
     .build()?;
 # let _ = session;
 # Ok(())
 # }
 ```
 
-`Session::new()` skips the builder. It selects `Browser::default()`
-with a Windows identity, and it uses `ProtocolPolicy::Race` when the `http3`
-feature is on, because the default Chrome profile sets `race = true` in
-`[h3]`. Race tries HTTP/3 only for an `https://` origin that
-advertised `h3` in an `Alt-Svc` header. A streamed request body, a streamed
-response, or an `http://` or `https://` proxy keeps the request on HTTP/2 or
-HTTP/1.1. `Session::default()` is the same session. Every other
-configuration goes through `Session::builder()`.
+`Session::new()` and `Session::default()` build a plain session and do not
+fail. `Session::browser(b)` builds a session for browser `b` and does not fail
+either. A trust-store problem then fails each request that needs it with
+`Kind::Tls`, and an invalid proxy in the environment fails each request with
+`Kind::Proxy`. To add settings to a browser session, start from
+`Session::builder().browser(b)`, whose `build()` reports those problems.
 
-`Session::builder().build()` with no browser builds a bare session. A bare
-session impersonates nothing.
+`SessionBuilder::headers` takes any iterator of `(name, value)` pairs, or
+references to pairs, where both sides are `AsRef<str>`. An entry replaces a
+default or profile header of the same name, compared without case.
+`user_agent(value)` replaces the default `user-agent`; it and a `user-agent`
+pair in `headers` set the same header, and the later call wins.
+
+When a session has a browser and you do not call `protocol`, it uses
+`ProtocolPolicy::Race` if the `http3` feature is on and the profile's `[h3]`
+table sets `race = true`, as the bundled Chrome profiles do, and
+`ProtocolPolicy::Auto` otherwise. See [HTTP/3](http3.md).
+
+## Plain and browser sessions
+
+| Session | Build it with | Imitates |
+| --- | --- | --- |
+| Plain | `Session::new()`, `Session::builder().build()`, or `leyline::get(url)` for one request | Nothing |
+| Browser | `Session::browser(b)`, or a builder with `.browser()`, `.profile()`, or `.identity()` | A captured browser |
+
+A plain HTTP/1.1 GET sends these headers, in this order:
+
+| Header | Value |
+| --- | --- |
+| `Host` | From the URL |
+| `user-agent` | `leyline/<crate version>` |
+| `accept` | `*/*` |
+| `accept-encoding` | The codings compiled in and on in `CompressionConfig`, in the order gzip, deflate, br, zstd. Left out when none is on |
+| `Connection` | `keep-alive`. Left out on HTTP/2 and HTTP/3 |
+
+A plain session sends no `accept-language`, no `sec-*` headers, and no client
+hints, even when you set a preset. `languages` turns `accept-language` on. A
+request adds the headers it needs, such as `content-type`, `origin`,
+`referer`, and `cookie`.
+
+## Set a token and a base URL
+
+`bearer_auth(token)` sends `authorization: Bearer <token>` and replaces an
+`authorization` header set earlier on the builder. With a `base_url`, the
+token goes only to requests whose origin (scheme, host, and port) matches the
+base URL. Without one, it goes to every host. A redirect to another origin
+drops it. `RequestBuilder::bearer_auth` overrides it for one request, which
+is how to reach a second host. An `authorization` header set with `headers`
+is not scoped. `Debug` output masks the token.
+
+`base_url(url)` resolves a relative `&str` or `String` request URL by the
+rules of `Url::join` (RFC 3986). A `Url` value goes out unchanged.
+
+| Base URL | Request URL | Result |
+| --- | --- | --- |
+| `https://api.example/v1/` | `repos/x` | `https://api.example/v1/repos/x` |
+| `https://api.example/v1/` | `/health` | `https://api.example/health` |
+| `https://api.example/v1` | `repos/x` | `https://api.example/repos/x` |
+| any | `https://example.com/a` | `https://example.com/a` |
+
+End the base URL with `/` to keep its last path segment. An invalid base URL
+fails `build()` with `Kind::Config`. A relative URL in a session with no base
+URL fails at `send()` with `Kind::Url`.
+
+```rust,no_run
+# async fn run() -> leyline::Result<()> {
+let api = leyline::Session::builder()
+    .base_url("https://api.example/v1/")
+    .bearer_auth("my-token")
+    .build()?;
+let repo = api.get("repos/leyline").await?;
+let staging = api.with_base_url("https://staging.api.example/v1/")?;
+let health = staging.get("/health").await?;
+# drop((repo, health));
+# Ok(())
+# }
+```
+
+`with_base_url(url)` derives a session with another base URL; the session
+token moves with it and goes to the new base URL's origin. It returns
+`Kind::Url` for a URL that does not parse, and `Kind::Config` for a URL that
+cannot be a base.
+
+## Set the languages
+
+`languages(tags)` sets `accept-language` in the format of the session's
+browser family. The first tag has the highest weight. An invalid tag or an
+empty list fails `build()` with `Kind::Config`. A plain session uses the
+Chromium format.
+
+| Family | Rule | Tags | `accept-language` |
+| --- | --- | --- | --- |
+| Chromium | Adds the base language after each region tag, unless the next tag has the same base. Removes duplicates. Weights go down by 0.1 from 1, to a minimum of 0.1 | `["de-DE", "de", "en-US"]` | `de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7` |
+| Firefox | No base language added. Canonical case. Same weights | `["fr", "en"]` | `fr,en;q=0.9` |
+| Safari | The first tag only | `["de-DE", "de"]` | `de-DE` |
+
+Without `languages`, a browser session sends the value captured with its
+profile. `SessionIdentity::languages()` returns the tags the session was built
+with.
+
+```rust,no_run
+use leyline::{Browser, Session};
+
+# fn run() -> leyline::Result<()> {
+let session = Session::builder()
+    .browser(Browser::default())
+    .languages(["de-DE", "de", "en-US"])
+    .build()?;
+let langs = session.identity().languages().map(<[String]>::to_vec);
+# let _ = langs;
+# Ok(())
+# }
+```
 
 ## Choose a browser
 
-The `Browser` enum has a variant for each bundled profile: Chrome, Brave,
-Firefox, Safari on macOS and iOS, OkHttp on Android, and the CFNetwork stacks
-on iOS and macOS. The [API reference](../reference/leyline-http/leyline.md#browser)
-lists every variant.
-
-These helpers select a profile without naming a variant:
+The `Browser` enum has a variant for each bundled profile. The
+[API reference](../reference/leyline-http/leyline.md#browser) lists them, and
+[Browser profiles](profiles.md) gives the capture kind of each.
 
 - `Browser::latest(Family)` is the newest profile of a product line that is
-  not deprecated and whose capture kind the line accepts. Most lines accept
-  only captures from a real browser. A newer profile with another capture kind
-  does not count. [Browser profiles](profiles.md) lists the capture kind of
-  each profile. You pin the line and take whatever the crate release carries.
-  The families are `Chrome`, `Brave`, `Firefox`, `Safari`, `SafariIos`,
-  `CfNetwork`, and `OkHttp`.
-- `Browser::default()` is what `Session::new()` selects:
-  `Browser::latest(Family::Chrome)`.
-- `Browser::get(Family, version)` returns the bundled profile for one version,
+  not deprecated and whose capture kind the line accepts. Pin the line and
+  take what the crate release carries.
+- `Browser::default()` is `Browser::latest(Family::Chrome)`.
+- `Browser::get(Family, version)` returns the profile for one major version,
   or `None`. `Browser::version()` returns the major version.
+- `Browser::family()` returns the product line. The engine family is the
+  `meta.family` field of `Browser::profile()`.
 
 ```rust
-use leyline::Browser;
-use leyline::Family;
+use leyline::{Browser, Family};
 
 let latest = Browser::latest(Family::Firefox);
 assert_eq!(latest.family(), Family::Firefox);
 assert_eq!(Browser::default().family(), Family::Chrome);
 ```
 
-`Browser::family` returns the product line as a `Family` value, for example
-`Family::Chrome` or `Family::SafariIos`. The engine family (`chromium`, `gecko`,
-`webkit`, `okhttp`, `cfnetwork`, or `bare` for the bare profile) is the
-`meta.family` field of the profile that
-`Browser::profile()` returns. `Browser::for_platform` maps a profile to the
-sibling that exists on a platform.
-
 ## Choose a platform
 
 `Platform` sets the operating system the session claims: `Windows`, `MacOS`,
 `Linux`, `Android`, `IOS`, or `Host`. `Platform::Host` resolves to the OS you
-compiled for, and falls back to `Windows` for an unrecognized target.
-
-The platform drives the `Sec-CH-UA-Platform` header, the `Sec-CH-UA-Mobile`
-flag, and the TCP fingerprint.
-
-Pass the platform to the builder with `.platform(Platform::MacOS)`.
+compiled for, or `Windows` for an unrecognized target. The platform drives
+`Sec-CH-UA-Platform`, `Sec-CH-UA-Mobile`, and the TCP fingerprint.
 
 ### Platform defaults and call order
 
-- If you select a browser and no platform, the session claims Windows. The
-  builder logs one `info` event under the `leyline::session` target the first
-  time this happens.
-- `Browser::Safari26` has a macOS identity only. `.browser(Browser::Safari26)`
-  with no platform fails at `build()` with `Kind::Config`. Add
-  `.platform(Platform::MacOS)`.
+- A browser with no platform claims the first platform, in the order Windows,
+  macOS, Linux, Android, iOS, that its profile covers. Chrome claims Windows,
+  `Browser::Safari26` macOS, and `Browser::SafariIOS27` iOS.
+  `Session::browser(b)` uses the same rule.
+- A `.profile()` with no `.platform()` claims Windows and logs one `info`
+  event under the `leyline::session` target.
 - `.browser()` and `.platform()` map the browser to its sibling for the
-  selected platform. The call order does not matter.
+  platform, in either call order. `Browser::for_platform` does the same.
 - A session with no browser claims the host platform.
 
 ## Apply a brand overlay
 
-Edge and Opera are Chromium browsers. Leyline treats them as an
-identity overlay on a Chrome profile: the HTTP/2 settings stay Chrome's,
-while the `User-Agent` and the `sec-ch-ua` brand list change. A brand can also
-change a ClientHello setting: Edge does not send the trust anchors extension.
+Edge and Opera are overlays on a Chrome profile: the HTTP/2 settings stay
+Chrome's, and the `User-Agent` and `sec-ch-ua` brand list change. Edge also
+leaves out the trust anchors extension of the ClientHello.
 
 ```rust,no_run
 use leyline::{Browser, ChromiumBrand, Session};
@@ -114,65 +201,43 @@ let session = Session::builder()
 # }
 ```
 
-`ChromiumBrand::Chrome` is stock Chrome. Put a brand on a Chrome profile whose
-Chromium version the brand supports. Edge takes its version from the Chromium
-version, so it fits every Chrome profile. Opera supports a fixed list of
-Chromium versions that can end before the newest Chrome, so
-`Browser::default()` with `ChromiumBrand::Opera` can fail at `build()`. For
-Opera, pin an older Chrome profile, for example `Browser::Chrome152`.
+Both brands exist on desktop platforms only; a mobile platform fails
+`build()`. Edge takes its version from Chromium and fits every desktop Chrome
+profile. Opera supports Chromium 145 to 152, so `Browser::default()` with
+`ChromiumBrand::Opera` can fail `build()`; pin an older Chrome such as
+`Browser::Chrome152`. Brave has its own profiles, such as
+`Browser::Brave146`.
 
-`ChromiumBrand::all()` lists the bundled brands. A brand prints as its
-lowercase name (`chrome`, `edge`, `opera`), and `str::parse` reads that name
-back without case. An unknown name returns an error of kind `Config`.
-
-Brave has its own profiles. `.browser(Browser::Brave146)` selects one.
-
-Edge and Opera exist on desktop platforms only; a mobile platform fails at
-`build()`. Opera also needs its Chromium version in the brand's version table
-(145 to 152). Edge follows the Chromium version and builds on every desktop
-Chrome profile.
+`ChromiumBrand::all()` lists the brands. A brand prints as its lowercase name
+(`chrome`, `edge`, `opera`), and `str::parse` reads it back without case. An
+unknown name is a `Kind::Config` error.
 
 `Browser::identity(platform, brand)` returns the `PlatformIdentity` a session
-sends for that browser, platform, and brand: `user_agent`, `sec_ch_ua`, and
-`accept_language`. The header style supplies every other header. Use it when a
-payload that is not a header must carry the same values. It returns `None`
-when the browser has no identity for the platform or the brand overlay does
-not apply.
+sends: `user_agent`, `sec_ch_ua`, and `accept_language`. Use it when a payload
+that is not a header must carry the same values. It returns `None` when the
+browser has no identity for the platform or the brand does not apply.
+
+`Session::identity()` returns a `SessionIdentity` with the values `build()`
+resolved: `identity()` (`None` for a plain or loaded-profile session),
+`browser()`, `platform()`, `brand()`, and `user_agent()`. A `user-agent` from
+`SessionBuilder::headers` is the value `user_agent()` returns.
 
 ```rust,no_run
 use leyline::{Browser, ChromiumBrand, Platform};
 
 let edge = Browser::default().identity(Platform::Windows, Some(ChromiumBrand::Edge));
 assert!(edge.is_some_and(|id| id.user_agent.contains("Edg/")));
-```
 
-`Session::identity()` returns a `SessionIdentity` with what a built session
-sends: `identity()` (the `Identity`, or `None` for a bare or loaded-profile
-session), `browser()`, `platform()`, `brand()`, and `user_agent()`. It reads
-the values that `build()` resolved, so it matches the request headers. A
-`user-agent` header from `SessionBuilder::headers` is the session's
-`User-Agent`: `user_agent()` returns it, and the `{user_agent}` placeholder of
-the header style expands to it.
-
-```rust,no_run
-# fn run() -> leyline::Result<()> {
-let session = leyline::Session::new();
+let session = leyline::Session::browser(Browser::default());
 let sent = session.identity();
 println!("{:?} on {} sends {}", sent.browser(), sent.platform(), sent.user_agent());
-# Ok(())
-# }
 ```
 
-## What a session shares
+## Share a session
 
-One session holds:
-
-- The cookie jar. Every request reads it and every response writes to it.
-- The connection pool, keyed by host, port, and proxy.
-- The TLS context built from the profile, plus the HTTP/2 and HTTP/3 settings.
-
-A clone is cheap and shares the pool, the jar, and the TLS context with the
-original. Pass clones into tasks instead of building a second session.
+A clone is an `Arc` clone: it shares the cookie jar, the connection pool, the
+TLS context, and every setting. `Session` is `Send + Sync`. Pass clones into
+tasks instead of building a second session.
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
@@ -185,26 +250,42 @@ tokio::spawn(async move { worker.get("https://example.com/").await })
 # }
 ```
 
+`host_limits(HostLimits)` and `proxy_pool(ProxyPool)` are shared by clones
+and derived sessions too. See [Crawling](crawling.md#limit-each-host) and
+[Proxies](proxies.md).
+
 ## Derive a session
 
-`with_proxy(config)` derives a new session from an existing one and keeps the
-expensive parts. It takes `impl Into<ProxyConfig>`, keeps the cookie jar, TLS,
-the identity, and the pool, and swaps only the proxy config. Pool entries are
-keyed by proxy URL, so connections never cross proxies, and a session with the
-same proxy reuses the warm connections. It does not fail: an invalid URL or an
-unsupported scheme fails the first `send()` that picks it, with
-`Kind::Config`.
+A derived session changes one setting and shares the rest with its parent.
+None of the calls below fail except `with_base_url` and `with_identity`.
 
-`fresh_pool()` derives a session with a new, empty pool and TLS session cache.
-Call it when the next request must open new connections.
+| Derive | Changes | Cookie jar | Pool | TLS session cache |
+| --- | --- | --- | --- | --- |
+| `clone()` | Nothing | Shared | Shared | Shared |
+| `with_proxy(config)` | The proxy | Shared | Shared | Shared |
+| `with_cookie_jar(jar)` | The jar | The new jar | Shared | Shared |
+| `with_redirect(policy)` | The redirect policy | Shared | Shared | Shared |
+| `with_base_url(url)` | The base URL | Shared | Shared | Shared |
+| `with_identity(identity)` | The browser identity | Shared | Shared, own partition | New |
+| `fresh_pool()` | Nothing | Shared | New | New |
 
-`with_cookie_jar(jar)` derives a session the same way and swaps only the
-cookie jar. The pool, TLS session cache, and every other setting stay shared.
-Use it to run one jar per task on a warm pool.
+Every derived session keeps the host limits, the proxy pool, the audit
+setting, and the shutdown state.
 
-`with_redirect(policy)` derives a session the same way and swaps only the
-redirect policy. Use it for a step that must read a redirect response itself,
-such as a login probe.
+- `with_proxy` takes `impl Into<ProxyConfig>`. Pool entries are keyed by
+  proxy, so connections never cross proxies. An invalid URL or an unsupported
+  scheme fails the first `send()` that uses it, with `Kind::Config`.
+- `with_identity` sends another `Identity`. Its connections sit in their own
+  partition of the parent's pool, so they never cross identities, and they
+  share the parent's pool limits and `pool_stats()`. It also shares the HSTS
+  store and the `Alt-Svc` knowledge. It returns `Kind::Config` for a plain
+  session. See
+  [Mix and rotate identities](fingerprints.md#mix-and-rotate-identities).
+- `fresh_pool` starts with an empty pool, TLS session cache, and HSTS store,
+  and has its own pool limits. Call it when the next request must open new
+  connections.
+- `tab()` returns a `Tab` that keeps the current page. See
+  [Requests](requests.md#keep-the-page-with-a-tab).
 
 ```rust,no_run
 use leyline::cookie::Jar;
@@ -220,53 +301,102 @@ let no_follow = session.with_redirect(leyline::RedirectPolicy::none());
 # }
 ```
 
-## Keep connections warm
+## Stop a session
 
-`preconnect(url)` opens the TCP, proxy, TLS, and HTTP/2 connection for an
-`https` origin and stores it in the pool. The first request to that origin
-then reuses it and skips the handshake. For an `http` URL, or when the session
-uses `ProtocolPolicy::Http1`, `preconnect` does nothing. It uses the session
-proxy config. To warm a connection through another proxy, call
-`session.with_proxy(proxy).preconnect(url)`: the derived session shares the
-pool. If the origin only speaks HTTP/1.1, the session records that and returns
-`Ok`.
-
-Before the pool reuses an HTTP/2 connection that has been idle for 10 seconds,
-it sends a PING. Chrome does the same. If no acknowledgement arrives within 2
-seconds, the pool drops the connection and opens a new one, so the request does
-not wait on a dead socket. `pool_stats().h2_ping_failures` counts the dropped
-connections. Change the thresholds with `PoolConfig::h2_ping_after_idle` and
-`PoolConfig::h2_ping_timeout`. Pass `None` to `h2_ping_after_idle` to turn the
-check off.
+`Session::shutdown()` stops a session, its clones, and every session derived
+from it. Requests in flight and new requests fail with `Kind::Request` and the
+message "session shut down", and a streamed body fails on its next read.
+`Error::is_shut_down()` is `true` for this error, and `Session::is_shut_down()`
+is `true` after the call. Shutdown does not close the pooled connections.
 
 ```rust,no_run
-use std::time::Duration;
+use leyline::Kind;
 
-use leyline::PoolConfig;
+# async fn run() {
+let session = leyline::Session::new();
+let worker = session.clone();
+session.shutdown();
+assert!(worker.is_shut_down());
+let err = worker.get("https://example.com/").await.unwrap_err();
+assert_eq!(err.kind(), Kind::Request);
+assert!(err.is_shut_down());
+# }
+```
 
-# async fn run() -> leyline::Result<()> {
-let session = leyline::Session::builder()
-    .browser(leyline::Browser::default())
-    .pool(PoolConfig::new().h2_ping_after_idle(Duration::from_secs(10)))
+## Save and restore an identity
+
+`Identity` implements `Serialize` and `Deserialize`. `Browser`, `Platform`,
+`Family`, and `ChromiumBrand` serialize as stable lowercase ids, such as
+`chrome-154`, `windows`, and `edge`; `id()` returns the id and `str::parse`
+reads it back. `Display` prints a label for people, not the id.
+
+`session.identity().to_identity()` returns the `Identity` that rebuilds the
+session, and `SessionBuilder::identity(id)` builds from it.
+
+`profile_id()` returns 16 hex characters: a hash of the profile data the
+session sends, with the platform and the brand. The same data gives the same
+id in every release. It is `None` for a plain session. A profile loaded from
+TOML gets an id from its TOML text. `SessionBuilder::expect_profile_id(id)`
+makes `build()` fail with `Kind::Config` when the id differs or is `None`;
+`Error::is_profile_changed()` is `true` for that error.
+
+```rust,no_run
+use leyline::{Browser, Identity, Platform, Session};
+
+# fn run() -> Result<(), Box<dyn std::error::Error>> {
+let session = Session::builder()
+    .browser(Browser::Chrome154)
+    .platform(Platform::MacOS)
     .build()?;
-session.preconnect("https://example.com/").await?;
+let sent = session.identity();
+let saved = serde_json::to_string(&sent.to_identity())?;
+let profile_id = sent.profile_id().map(str::to_owned).ok_or("plain session")?;
+
+let identity: Option<Identity> = serde_json::from_str(&saved)?;
+let restored = Session::builder()
+    .identity(identity.ok_or("plain session")?)
+    .expect_profile_id(&profile_id)
+    .build()?;
+# drop(restored);
 # Ok(())
 # }
 ```
 
-## Read back what you built
+To save the identity with the cookie jar and the proxy, use a `Device`; see
+[Accounts](accounts.md). `Session::state()` returns the TLS session tickets,
+the `Alt-Svc` entries, and the HSTS store as a `SessionState`; see
+[Accounts](accounts.md#keep-the-connection-state).
 
-`pool_stats()` reports the pool counters. The `Debug` output of a session
-shows its browser, platform, and proxy. Use them in logs instead of restating
-your own builder calls.
+## Keep connections warm
+
+`preconnect(url)` opens the TCP, proxy, TLS, and HTTP/2 connection for an
+`https` origin and stores it in the pool, so the first request skips the
+handshake. It does nothing for an `http` URL or under
+`ProtocolPolicy::Http1`. If the origin speaks only HTTP/1.1, the session
+records that and returns `Ok`. To warm a connection through another proxy,
+call `session.with_proxy(proxy).preconnect(url)`.
+
+Before the pool reuses an HTTP/2 connection idle for 10 seconds, it sends a
+PING, as Chrome does. Without an answer in 2 seconds it drops the connection
+and opens a new one, and `pool_stats().h2_ping_failures` counts it.
+[Network](network.md#connection-pool) lists the `PoolConfig` settings.
+
+```rust,no_run
+# async fn run() -> leyline::Result<()> {
+let session = leyline::Session::browser(leyline::Browser::default());
+session.preconnect("https://example.com/").await?;
+println!("{:?}", session.pool_stats());
+# Ok(())
+# }
+```
 
 ## Trace the request lifecycle
 
-`trace()` installs a listener that reports each phase of every request: name
-resolution, connect, TLS handshake, request send, response head, and
+`trace()` installs a listener for each phase of every request: name
+resolution, connect, TLS handshake, request sent, response head, and
 completion. Implement `leyline::trace::Trace` and override only the events you
-want; every method has a no-op default. The `Head` event carries the response
-headers as `&http::HeaderMap`, before decompression and redirect handling.
+want; every method has a no-op default. `TracingTrace` is the bundled
+listener; see [Logging and tracing](logging.md).
 
 ```rust,no_run
 use leyline::Session;
@@ -289,29 +419,18 @@ let session = Session::builder().trace(Slow).build()?;
 # }
 ```
 
-Every event carries an `id` that is unique per attempt, so a listener shared by
-concurrent requests can group phases. A retried request is a new attempt with a
-new `id`.
+- Every event carries an `id` unique per attempt. A retry is a new attempt
+  with a new `id`.
+- An event fires on the task that produced it. Leyline opens an HTTP/2 or
+  HTTP/3 connection on a task it spawns, so those events fire there, with the
+  `id` of the request that started the open. A listener that blocks slows
+  every request waiting for that connection.
+- `dns` fires each time Leyline resolves a name for a TCP connection. Through
+  a proxy it reports the proxy host. A direct HTTP/3 connection fires none.
+- `sent` carries the method and the path with the query. On HTTP/2 and
+  HTTP/3 it fires before the connection driver takes the request, and its
+  `elapsed` is zero.
+- `head` carries the response headers as received, before decompression and
+  redirect handling.
 
-One listener ships with the crate. `leyline::trace::TracingTrace` writes each
-event as a `tracing` debug event under the `leyline::trace` target.
-`Response::timing()` does not need a listener. It returns a `ResponseTiming`
-summed across redirect legs. See [Responses](responses.md).
-
-An event fires on the task that produced it. Most events fire on the request
-task. Leyline opens a new HTTP/2 or HTTP/3 connection on a task that it
-spawns, so an event from that open fires on the spawned task, with the `id` of
-the request that started the open. A listener that blocks, locks, or sleeps
-slows the task that produced the event. When that task opens a connection,
-every request that waits for the connection waits longer.
-
-`dns` fires each time Leyline resolves a name to open a TCP connection, for
-`http://` and `https://` alike. Through a proxy, `dns` reports the proxy host.
-A direct HTTP/3 connection fires no `dns` event. `sent` carries the request
-method and the path with the query. On HTTP/2 and HTTP/3, `sent` fires before
-Leyline hands the request to the connection driver, and its `elapsed` is zero.
-
-## Next
-
-Read [Choosing a profile](choosing-a-profile.md) to compare the bundled
-profiles.
+`Response::timing()` needs no listener. See [Responses](responses.md#timing).
