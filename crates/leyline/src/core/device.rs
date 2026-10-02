@@ -1,4 +1,3 @@
-use crate::util::atomic::write_atomic;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -9,17 +8,21 @@ use crate::cookie::Jar;
 use crate::core::error::{Error, Kind, Result};
 use crate::core::{Identity, ProxyConfig, ProxyUrl, Session, SessionBuilder, Tab};
 use crate::profile::{BrowserProfile, ChromiumBrand, Platform};
+use crate::util::atomic::{FileMode, write_atomic};
 
 mod autosave;
 mod check;
 mod secret;
 mod state;
+mod version;
+mod wire;
 
-pub use autosave::DeviceAutosave;
+pub use autosave::{DeviceAutosave, DeviceAutosaveOptions};
 pub use state::SessionState;
 pub(crate) use state::{StateParts, unix_secs};
+pub(crate) use version::FileVersion;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[non_exhaustive]
 pub struct Device {
     #[serde(default)]
@@ -127,13 +130,20 @@ impl Device {
     }
 
     pub fn save_to(&self, path: impl AsRef<Path>) -> Result<()> {
-        let bytes = serde_json::to_vec_pretty(&self.sanitized()).map_err(Error::from_json)?;
-        write_atomic(path.as_ref(), &bytes)
+        let file = DeviceFileOut {
+            version: FileVersion::default(),
+            device: self,
+        };
+        let bytes = serde_json::to_vec_pretty(&file).map_err(Error::from_json)?;
+        write_atomic(path.as_ref(), &bytes, FileMode::Private)
     }
 
     pub fn load_from(path: impl AsRef<Path>) -> Result<Device> {
         let bytes = std::fs::read(path)?;
-        serde_json::from_slice(&bytes).map_err(Error::from_json)
+        let file: DeviceFileIn = serde_json::from_slice(&bytes).map_err(Error::from_json)?;
+        match file.version {
+            FileVersion::V1 => Ok(file.device),
+        }
     }
 
     fn proxy_config(&self) -> Result<ProxyConfig> {
@@ -152,6 +162,20 @@ impl Device {
             _ => Ok(Jar::new()),
         }
     }
+}
+
+#[derive(Serialize)]
+struct DeviceFileOut<'a> {
+    version: FileVersion,
+    #[serde(flatten)]
+    device: &'a Device,
+}
+
+#[derive(Deserialize)]
+struct DeviceFileIn {
+    version: FileVersion,
+    #[serde(flatten)]
+    device: Device,
 }
 
 fn config(message: impl Into<String>) -> Error {

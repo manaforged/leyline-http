@@ -1,4 +1,5 @@
 [chromium]
+id = 4
 variant = "Chromium"
 default = true
 fallback = [
@@ -167,6 +168,7 @@ form-navigate = [
 ]
 
 [gecko]
+id = 5
 variant = "Gecko"
 order = ["user-agent", "accept", "accept-language", "accept-encoding", "referer", "upgrade-insecure-requests", "sec-fetch-dest", "sec-fetch-mode", "sec-fetch-site", "sec-fetch-user", "priority", "te"]
 fallback = [
@@ -283,6 +285,7 @@ form-navigate = [
 ]
 
 [webkit]
+id = 7
 variant = "WebKit"
 fallback = [
     ["user-agent", "{user_agent}"],
@@ -379,6 +382,7 @@ form-navigate = [
 ]
 
 [webkit-26]
+id = 9
 variant = "WebKit26"
 fallback = [
     ["user-agent", "{user_agent}"],
@@ -475,6 +479,7 @@ form-navigate = [
 ]
 
 [okhttp]
+id = 6
 variant = "OkHttp"
 fallback = [
     ["accept-encoding", "gzip"],
@@ -484,6 +489,7 @@ fallback = [
 [okhttp.presets]
 
 [cfnetwork]
+id = 2
 variant = "CfNetwork"
 fallback = [
     ["user-agent", "{user_agent}"],
@@ -495,6 +501,7 @@ fallback = [
 [cfnetwork.presets]
 
 [cfnetwork-26]
+id = 3
 variant = "CfNetwork26"
 fallback = [
     ["accept", "*/*"],
@@ -507,6 +514,7 @@ fallback = [
 [cfnetwork-26.presets]
 
 [webkit-17]
+id = 8
 variant = "WebKit17"
 extends = "webkit"
 
@@ -591,6 +599,7 @@ form-navigate = [
 ]
 
 [brave]
+id = 0
 variant = "Brave"
 extends = "chromium"
 append = [["sec-gpc", "1"]]
@@ -631,6 +640,7 @@ navigate = [
 ]
 
 [brave-154]
+id = 1
 variant = "Brave154"
 extends = "brave"
 append = [["sec-gpc", "1"]]
@@ -753,4 +763,96 @@ form-navigate = [
     ["accept-encoding", "gzip, deflate, br, zstd"],
     ["accept-language", "{accept_language}"],
     ["priority", "u=0, i"],
+]
+
+[bare]
+id = 10
+variant = "Bare"
+fallback = [
+    ["user-agent", "{user_agent}"],
+    ["accept", "*/*"],
+    ["accept-encoding", "gzip, deflate, br, zstd"],
+    ["accept-language", "{accept_language}"],
+]
+
+[bare.presets]
+navigate = [
+    ["user-agent", "{user_agent}"],
+    ["accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"],
+    ["referer", "{navigation_referer}"],
+    ["accept-encoding", "gzip, deflate, br, zstd"],
+    ["accept-language", "{accept_language}"],
+]
+frame-navigate = [
+    ["user-agent", "{user_agent}"],
+    ["accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"],
+    ["referer", "{referer}"],
+    ["accept-encoding", "gzip, deflate, br, zstd"],
+    ["accept-language", "{accept_language}"],
+]
+reload = [
+    ["user-agent", "{user_agent}"],
+    ["cache-control", "max-age=0"],
+    ["accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"],
+    ["referer", "{referer}"],
+    ["accept-encoding", "gzip, deflate, br, zstd"],
+    ["accept-language", "{accept_language}"],
+]
+image = [
+    ["user-agent", "{user_agent}"],
+    ["accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"],
+    ["referer", "{referer}"],
+    ["accept-encoding", "gzip, deflate, br, zstd"],
+    ["accept-language", "{accept_language}"],
+]
+script = [
+    ["user-agent", "{user_agent}"],
+    ["accept", "*/*"],
+    ["referer", "{referer}"],
+    ["accept-encoding", "gzip, deflate, br, zstd"],
+    ["accept-language", "{accept_language}"],
+]
+xhr = [
+    ["user-agent", "{user_agent}"],
+    ["accept", "application/json, text/plain, */*"],
+    ["content-type", "application/json"],
+    ["origin", "{origin}"],
+    ["referer", "{referer}"],
+    ["accept-encoding", "gzip, deflate, br, zstd"],
+    ["accept-language", "{accept_language}"],
+]
+form = [
+    ["user-agent", "{user_agent}"],
+    ["accept", "application/json, text/plain, */*"],
+    ["content-type", "application/x-www-form-urlencoded"],
+    ["origin", "{origin}"],
+    ["referer", "{referer}"],
+    ["accept-encoding", "gzip, deflate, br, zstd"],
+    ["accept-language", "{accept_language}"],
+]
+cross-origin = [
+    ["user-agent", "{user_agent}"],
+    ["accept", "application/json, text/plain, */*"],
+    ["origin", "{origin}"],
+    ["referer", "{referer}"],
+    ["accept-encoding", "gzip, deflate, br, zstd"],
+    ["accept-language", "{accept_language}"],
+]
+same-site = [
+    ["user-agent", "{user_agent}"],
+    ["accept", "application/json, text/plain, */*"],
+    ["origin", "{origin}"],
+    ["referer", "{referer}"],
+    ["accept-encoding", "gzip, deflate, br, zstd"],
+    ["accept-language", "{accept_language}"],
+]
+form-navigate = [
+    ["user-agent", "{user_agent}"],
+    ["cache-control", "max-age=0"],
+    ["content-type", "application/x-www-form-urlencoded"],
+    ["origin", "{origin}"],
+    ["accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"],
+    ["referer", "{referer}"],
+    ["accept-encoding", "gzip, deflate, br, zstd"],
+    ["accept-language", "{accept_language}"],
 ]

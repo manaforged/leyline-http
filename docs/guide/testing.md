@@ -33,6 +33,7 @@ leyline-http = { version = "0.1", features = ["test-util"] }
 | --- | --- |
 | `TestServer::http(handler)` | Starts an HTTP/1.1 server on `127.0.0.1` on a free port |
 | `TestServer::https(handler)` | The same over TLS with a private CA, `http/1.1` only |
+| `TestServer::http_on(listener, handler)` | An HTTP/1.1 server on a `tokio::net::TcpListener` you bound, for a fixed port or address. Call it inside a Tokio runtime |
 | `queue([..])` | A handler that answers with each `TestResponse` in turn, then 503 |
 | `url(path)` | `http://127.0.0.1:<port>/path`, or `https://`. `url("")` is the origin with a trailing `/`, for a `base_url` |
 | `addr()` | The bound address |
@@ -44,14 +45,28 @@ leyline-http = { version = "0.1", features = ["test-util"] }
 
 A handler is any `Fn(&RecordedRequest) -> TestResponse + Send + Sync +
 'static`. It runs on a blocking thread, so a handler that blocks delays only
-its own response. A `RecordedRequest` has `method`, `target`, `headers` in
-wire order, and `body`; `header(name)` ignores case.
+its own response.
+
+| `RecordedRequest` | Holds |
+| --- | --- |
+| `method`, `target`, `body` | The method, the request target, and the body |
+| `headers` | Every header in wire order, with the case the client sent |
+| `request_line` | The first line, such as `GET /items HTTP/1.1` |
+| `raw` | The request head as received: request line, headers, and the empty line, byte for byte |
+| `text()` | `raw` as text, with invalid UTF-8 replaced |
+| `header(name)` | The first value of a header. The name match ignores case |
+| `header_values(name)` | Every value of a header, in wire order |
+| `header_count(name)` | How many times a header was sent |
+
+Use `raw` or `header_count` to check what a parsed map hides: header case,
+order, and duplicates.
 
 | `TestResponse` | Does |
 | --- | --- |
 | `new(status)` | A response with this status and an empty body |
 | `header(name, value)` | Adds a header |
 | `body(bytes)` | Sets the body, sent with `content-length` |
+| `close()` | Adds `connection: close`. The server closes the connection after the response |
 | `delay(duration)` | Waits before the status line and headers |
 | `chunks(parts, pause)` | Sends a chunked body with `pause` between parts. It replaces `body`, skips empty parts, and adds `transfer-encoding: chunked` unless you set `content-length` or `transfer-encoding` |
 

@@ -6,7 +6,7 @@ use crate::core::session::{Identity, Session, SessionInner};
 
 struct Derived {
     base: Weak<SessionInner>,
-    identity: Identity,
+    index: usize,
     session: Session,
 }
 
@@ -24,37 +24,42 @@ impl std::fmt::Debug for IdentitySessions {
 }
 
 impl IdentitySessions {
-    pub(super) fn session(&self, base: &Session, identity: Identity) -> Result<Session> {
-        if let Some(session) = self.find(base, identity) {
+    pub(super) fn session(
+        &self,
+        base: &Session,
+        index: usize,
+        identity: Identity,
+    ) -> Result<Session> {
+        if let Some(session) = self.find(base, index) {
             return Ok(session);
         }
         let session = base
             .with_identity(identity)?
             .without_proxy_pool()
             .with_cookie_jar(Jar::new());
-        Ok(self.insert(base, identity, session))
+        Ok(self.insert(base, index, session))
     }
 
-    fn find(&self, base: &Session, identity: Identity) -> Option<Session> {
+    fn find(&self, base: &Session, index: usize) -> Option<Session> {
         let mut derived = self.lock();
         derived.retain(|entry| entry.base.strong_count() > 0);
         derived
             .iter()
-            .find(|entry| entry.identity == identity && base.is_inner(&entry.base))
+            .find(|entry| entry.index == index && base.is_inner(&entry.base))
             .map(|entry| entry.session.clone())
     }
 
-    fn insert(&self, base: &Session, identity: Identity, session: Session) -> Session {
+    fn insert(&self, base: &Session, index: usize, session: Session) -> Session {
         let mut derived = self.lock();
         if let Some(existing) = derived
             .iter()
-            .find(|entry| entry.identity == identity && base.is_inner(&entry.base))
+            .find(|entry| entry.index == index && base.is_inner(&entry.base))
         {
             return existing.session.clone();
         }
         derived.push(Derived {
             base: base.downgrade(),
-            identity,
+            index,
             session: session.clone(),
         });
         session

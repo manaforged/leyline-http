@@ -11,7 +11,8 @@ is off by default.
 `RetryPolicy::transient()` covers the failures that usually pass on their own:
 connection errors, timeouts, and status 429, 502, 503, and 504. It allows 3
 retries, so 4 attempts in total, with exponential backoff from 100 ms to 1 s,
-factor 2, and full jitter.
+factor 2, and full jitter. A server can ask for a wait of up to 60 s;
+`max_retry_after` changes that cap.
 
 ```rust,no_run
 use leyline::RetryPolicy;
@@ -87,11 +88,15 @@ assert_eq!(policy.backoff(10), Duration::from_secs(1));
 
 When a retried response carries `Retry-After`, its value replaces the
 computed backoff. Leyline reads delta-seconds and an IMF-fixdate with a `GMT`
-or `UTC` zone. An unparsable value falls back to the computed backoff.
+or `UTC` zone. An unparsable value falls back to the computed backoff. A
+header set with [`wait_header`](#retry-on-a-condition-and-wait-on-a-header)
+wins over `Retry-After`.
 
-`max_retry_after` caps the wait. When the server asks for longer than the
-cap, or for longer than the time left before the `total` timeout, Leyline
-stops and returns the response, or the last error, as when retries run out.
+`max_retry_after` caps the wait. `RetryPolicy::transient()` sets it to 60 s,
+and `RetryPolicy::none()` has no cap. When the server asks for longer than
+the cap, or a wait or backoff is longer than the time left before the `total`
+timeout, Leyline stops and returns the response, or the last error, as when
+retries run out. `Error::retries_exhausted()` is then `true`.
 
 A `Retry-After` on a status that no trigger or `retry_if` matches is not
 acted on. Read it after `error_for_status()` with `Error::retry_after()`:
@@ -127,8 +132,8 @@ predicate returns `true`.
 | `UnixSeconds` | The Unix time to wait until. A past time means no wait | `1767225600` |
 | `HttpDate` | The time to wait until, as an IMF-fixdate | `Thu, 01 Jan 2026 00:00:00 GMT` |
 
-Leyline reads `Retry-After` first, then the `wait_header` headers in the order
-you added them, and uses the first value that parses. `max_retry_after` caps
+Leyline reads the `wait_header` headers in the order you added them, then
+`Retry-After`, and uses the first value that parses. `max_retry_after` caps
 these waits too. They apply to every retried response, whichever trigger or
 predicate matched it. A retry after an error has no response, so it uses the
 computed backoff.
@@ -169,12 +174,16 @@ Blocks, `skip_blocks`, and retries through other proxies are covered in
 
 Leyline retries only idempotent methods by default: GET, HEAD, OPTIONS, PUT,
 DELETE, and TRACE (RFC 9110, section 9.2.2). A POST or PATCH is sent once. A
-retry also needs a body that can be sent again: a streaming request body is
-never retried. See [Streaming](streaming.md).
+retry also needs a body that can be sent again. A streaming request body is
+retried only when no byte of it was read, for example after a connect error.
+See [Streaming](streaming.md).
 
 `retry_unsent(true)` retries any method when the error happened before the
-request was sent: a DNS, connect, TLS, or proxy error, or a connect timeout.
-The server never saw the request, so a retry cannot repeat a write. The error
+request was sent: a DNS, connect, TLS, or proxy error, a connect timeout, an
+HTTP/2 `REFUSED_STREAM` reset, or an HTTP/3 request that the server reports
+it did not process. An HTTP/3 request that the server rejects twice is
+retried on the same connection. The server never processed the request, so a retry cannot
+repeat a write. The error
 must still match a trigger.
 
 ```rust,no_run
@@ -239,7 +248,8 @@ ALPN needs no second send. See
 | `connect` | 10 s | One new connection: DNS, TCP connect, proxy negotiation, and TLS, or on HTTP/3 the DNS lookup, UDP setup, and QUIC handshake. Each new connection gets a full window, and `total` bounds the sum. Pooled reuse is not covered |
 | `response_header` | none | From dispatch to the transport response, per redirect, connection setup included. On a buffered response the body arrives inside this window |
 | `read` | none | The longest gap between two body chunks of a `.stream()` response, or of a buffered body that arrives in pieces |
-| `body` | none | The whole body, counted from the response head, streamed or buffered |
+| `body` | none | The whole body, streamed or buffered, counted from the first read of the body |
+| `error_body` | 10 s | The body that `RequestBuilder::error_for_status()` keeps in a status error. `total` also bounds it. See [Responses](responses.md#turn-a-status-into-an-error) |
 
 ```rust,no_run
 use leyline::{Session, TimeoutConfig};
@@ -306,7 +316,7 @@ let streamed = session
 
 ## Bound a whole download
 
-`TimeoutConfig::body` bounds the whole body after the head, so it bounds a
+`TimeoutConfig::body` bounds the whole body from its first read, so it bounds a
 `.stream()` body and `RequestBuilder::download`, which streams. A plain
 `Duration` passed to `.timeout` sets only `total`, which ends at the head of
 a streamed response, so set `body` for a download. No outer timeout is

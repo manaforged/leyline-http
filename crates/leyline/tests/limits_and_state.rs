@@ -1,3 +1,6 @@
+#[path = "core_support/wait.rs"]
+mod wait;
+
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -34,26 +37,6 @@ async fn a_body_timeout_bounds_a_download() {
     drop(std::fs::remove_dir_all(&dir));
 }
 
-#[test]
-fn expect_profile_id_refuses_a_changed_profile() {
-    let id = Session::browser(Browser::Chrome154)
-        .identity()
-        .profile_id()
-        .unwrap()
-        .to_owned();
-    Session::builder()
-        .browser(Browser::Chrome154)
-        .expect_profile_id(&id)
-        .build()
-        .unwrap();
-    let err = Session::builder()
-        .browser(Browser::Chrome154)
-        .expect_profile_id("0000000000000000")
-        .build()
-        .unwrap_err();
-    assert_eq!(err.kind(), Kind::Config);
-}
-
 #[tokio::test]
 async fn a_tab_without_a_page_sends_no_script_request() {
     let server = TestServer::http(|_| TestResponse::new(200)).await.unwrap();
@@ -86,7 +69,13 @@ async fn a_streamed_body_holds_its_host_slot_until_it_ends() {
         let url = server.url("/b");
         async move { session.get(url).await }
     });
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    wait::until(|| {
+        session
+            .host_stats()
+            .first()
+            .is_some_and(|s| s.waiting() == 1)
+    })
+    .await;
     let stats = session.host_stats();
     assert_eq!(stats[0].in_flight(), 1);
     assert_eq!(stats[0].waiting(), 1);
@@ -141,18 +130,18 @@ async fn a_policy_reads_the_wait_from_an_error() {
     assert_eq!(err.retry_after(), Some(Duration::from_secs(9)));
 }
 
-fn parse_with_question_mark(raw: &str) -> leyline::Result<leyline::Url> {
-    Ok(leyline::Url::parse(raw)?)
-}
-
-#[test]
-fn url_parse_errors_convert_with_question_mark() {
-    let err = parse_with_question_mark("not a url").unwrap_err();
-    assert_eq!(err.kind(), Kind::Url);
-}
-
 #[test]
 fn a_changed_profile_is_named_as_such() {
+    let id = Session::browser(Browser::Chrome154)
+        .identity()
+        .profile_id()
+        .unwrap()
+        .to_owned();
+    Session::builder()
+        .browser(Browser::Chrome154)
+        .expect_profile_id(&id)
+        .build()
+        .unwrap();
     let err = Session::builder()
         .browser(Browser::Chrome154)
         .expect_profile_id("0000000000000000")

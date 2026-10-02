@@ -235,6 +235,7 @@ pub(super) async fn send_request_h1_streaming(
         }
     }
     tracing::Span::current().record("pool.hit", false);
+    let installed = legs.fresh.is_some();
 
     let (mut slot, tls, connect_ms) =
         match fresh_leg(pool, &key, connector, dial, legs.fresh).await? {
@@ -253,7 +254,7 @@ pub(super) async fn send_request_h1_streaming(
         framing: head.framing,
         initial_body: head.initial_body,
         reusable,
-        count_install: true,
+        count_install: !installed,
         tx,
     }));
     Ok(H1Outcome::Response(H1Response {

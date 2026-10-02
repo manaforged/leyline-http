@@ -1,14 +1,19 @@
+use std::pin::Pin;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::task::{Context, Poll};
+
+use bytes::Bytes;
+use futures_util::Stream;
+
 use super::RequestBuilder;
 use super::route::Route;
 use crate::core::Result;
-use crate::core::body::{Body, BodyKind};
+use crate::core::body::{Body, BodyKind, BoxedStream};
 use crate::core::deadline::Deadline;
 use crate::core::error::{Error, Kind};
 use crate::core::response::Response;
 use crate::core::session::execute::Attempt;
 use crate::util::is_idempotent;
-
-const STATUS_ERROR_BODY_LIMIT: usize = 64 * 1024;
 
 impl RequestBuilder {
     pub async fn send(mut self) -> Result<Response> {
@@ -43,7 +48,7 @@ impl RequestBuilder {
         }
         let policy_wait = retry_policy.server_wait(&response);
         response
-            .error_for_status_with_body(STATUS_ERROR_BODY_LIMIT, &deadline)
+            .error_for_status_with_body(&deadline)
             .await
             .map_err(|mut error| {
                 error.set_retry_outcome(policy_wait, exhausted);
@@ -70,6 +75,7 @@ impl RequestBuilder {
             redirect: self.redirect.take(),
             digest: self.digest_auth.take(),
             initiator: self.initiator.take(),
+            trusted_origin: self.trusted_origin.take(),
         }
     }
 
@@ -120,14 +126,14 @@ async fn run_attempts(
     exhausted: &mut bool,
 ) -> (Result<Response>, u32) {
     crate::trace::note_tag(tag);
-    let mut route = Route::new(session, &attempt);
+    let mut route = Route::new(session, &attempt, retry_policy);
     if retry_policy.is_none() {
         return (counted(route.send(attempt, None).await, 1), 1);
     }
     let retryable_method =
         retry_policy.allow_non_idempotent || is_idempotent(attempt.method.as_str());
     let replay = attempt.body.replay();
-    let body_retryable = replay.is_some();
+    let mut rewind = Rewind::wrap(&mut attempt.body);
     let base_headers = attempt.headers.clone();
 
     let mut n: u32 = 0;
@@ -139,13 +145,18 @@ async fn run_attempts(
         let this = attempt.again(attempt_body, base_headers.clone());
         let result = route.send(this, retry_policy.proxy_for_retry(n)).await;
 
+        let body_retryable = || replay.is_some() || rewind.as_mut().is_some_and(Rewind::reclaim);
         let sleep = match plan_retry(&result, retry_policy, n, retryable_method, body_retryable) {
             RetryPlan::Backoff(sleep) if sleep < deadline.remaining() => sleep,
             plan => {
-                *exhausted = matches!(plan, RetryPlan::Exhausted);
+                *exhausted = matches!(
+                    plan,
+                    RetryPlan::Exhausted | RetryPlan::Declined | RetryPlan::Backoff(_)
+                );
                 return (counted(result, n + 1), n + 1);
             }
         };
+        drop(result);
 
         let slept = session
             .unless_shut_down(async {
@@ -157,7 +168,11 @@ async fn run_attempts(
             return (counted(Err(err), n + 1), n + 1);
         }
         n += 1;
-        attempt.body = replay.as_ref().and_then(Body::replay).unwrap_or_default();
+        attempt.body = replay
+            .as_ref()
+            .and_then(Body::replay)
+            .or_else(|| rewind.as_mut().and_then(Rewind::again))
+            .unwrap_or_default();
     }
 }
 
@@ -176,6 +191,7 @@ fn counted(result: Result<Response>, attempts: u32) -> Result<Response> {
 enum RetryPlan {
     Stop,
     Exhausted,
+    Declined,
     Backoff(std::time::Duration),
 }
 
@@ -184,7 +200,7 @@ fn plan_retry(
     retry_policy: &crate::core::retry::RetryPolicy,
     attempt: u32,
     retryable_method: bool,
-    body_retryable: bool,
+    body_retryable: impl FnOnce() -> bool,
 ) -> RetryPlan {
     if retry_policy.is_none() {
         return RetryPlan::Stop;
@@ -197,7 +213,7 @@ fn plan_retry(
     }
     if !retry_wanted(result, retry_policy)
         || !(retryable_method || retry_policy.retries_unsent(result))
-        || !body_retryable
+        || !body_retryable()
     {
         return RetryPlan::Stop;
     }
@@ -206,7 +222,7 @@ fn plan_retry(
         .ok()
         .and_then(|r| retry_policy.server_wait(r))
     {
-        Some(wait) if wait > retry_policy.max_retry_after => RetryPlan::Stop,
+        Some(wait) if wait > retry_policy.max_retry_after => RetryPlan::Declined,
         Some(wait) => RetryPlan::Backoff(wait),
         None => RetryPlan::Backoff(retry_policy.backoff(attempt)),
     }
@@ -218,6 +234,88 @@ fn retry_wanted(result: &Result<Response>, retry_policy: &crate::core::retry::Re
         Err(err) if err.is_timeout() => retry_policy.matches_timeout(),
         Err(err) if err.is_retryable() => retry_policy.matches_connection_error(),
         Err(_) => false,
+    }
+}
+
+struct Slot {
+    stream: Option<BoxedStream>,
+    polled: bool,
+}
+
+type SharedSlot = Arc<Mutex<Slot>>;
+
+fn lock(slot: &SharedSlot) -> MutexGuard<'_, Slot> {
+    slot.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+struct Rewind {
+    slot: SharedSlot,
+    length_hint: Option<u64>,
+    held: Option<BoxedStream>,
+}
+
+impl Rewind {
+    fn wrap(body: &mut Body) -> Option<Self> {
+        if !matches!(body.0, BodyKind::Stream { .. }) {
+            return None;
+        }
+        let BodyKind::Stream {
+            stream,
+            length_hint,
+        } = std::mem::take(&mut body.0)
+        else {
+            return None;
+        };
+        let rewind = Self {
+            slot: Arc::new(Mutex::new(Slot {
+                stream: Some(stream),
+                polled: false,
+            })),
+            length_hint,
+            held: None,
+        };
+        *body = rewind.body();
+        Some(rewind)
+    }
+
+    fn body(&self) -> Body {
+        Body(BodyKind::Stream {
+            stream: Box::pin(Reclaim(Arc::clone(&self.slot))),
+            length_hint: self.length_hint,
+        })
+    }
+
+    fn reclaim(&mut self) -> bool {
+        let mut slot = lock(&self.slot);
+        if slot.polled {
+            return false;
+        }
+        self.held = slot.stream.take();
+        self.held.is_some()
+    }
+
+    fn again(&mut self) -> Option<Body> {
+        let stream = self.held.take()?;
+        self.slot = Arc::new(Mutex::new(Slot {
+            stream: Some(stream),
+            polled: false,
+        }));
+        Some(self.body())
+    }
+}
+
+struct Reclaim(SharedSlot);
+
+impl Stream for Reclaim {
+    type Item = std::io::Result<Bytes>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let mut slot = lock(&self.0);
+        slot.polled = true;
+        match slot.stream.as_mut() {
+            Some(stream) => stream.as_mut().poll_next(cx),
+            None => Poll::Ready(None),
+        }
     }
 }
 

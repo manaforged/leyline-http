@@ -12,6 +12,7 @@ pub(crate) struct Deadline {
     response_header: Option<Duration>,
     read: Option<Duration>,
     body: Option<Duration>,
+    error_body: Option<Duration>,
 }
 
 #[derive(Debug)]
@@ -27,6 +28,7 @@ impl Deadline {
             response_header: merged.response_header_limit(),
             read: merged.read_limit(),
             body: merged.body_limit(),
+            error_body: merged.error_body_limit(),
         }
     }
 
@@ -49,6 +51,10 @@ impl Deadline {
 
     pub(crate) fn body(&self) -> Option<Duration> {
         self.body
+    }
+
+    pub(crate) fn error_body(&self) -> Option<Duration> {
+        self.error_body
     }
 
     pub(crate) async fn sleep(&self, wait: Duration) {

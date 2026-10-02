@@ -1,12 +1,14 @@
-#[path = "core_support/raw_server.rs"]
-mod raw_server;
-
+use leyline::testing::{TestResponse, TestServer, queue};
 use leyline::{Browser, DnsConfig, Family, Preset, ProtocolPolicy, Session};
-use raw_server::{RawResponse, RawServer};
 
 #[tokio::test]
 async fn cross_site_initiator_withholds_samesite_cookies_by_destination() {
-    let mut server = RawServer::start(vec![RawResponse::ok(), RawResponse::ok()]).await;
+    let server = TestServer::http(queue(vec![
+        TestResponse::new(200).body("ok").close(),
+        TestResponse::new(200).body("ok").close(),
+    ]))
+    .await
+    .unwrap();
     let session = Session::builder()
         .browser(Browser::default())
         .protocol(ProtocolPolicy::Http1)
@@ -30,8 +32,8 @@ async fn cross_site_initiator_withholds_samesite_cookies_by_destination() {
             .unwrap();
     }
 
-    let navigation = server.next_request().await;
-    let subresource = server.next_request().await;
+    let navigation = server.next_request().await.unwrap();
+    let subresource = server.next_request().await.unwrap();
     assert_eq!(
         navigation.header_values("cookie"),
         vec!["lax=1"],
@@ -44,12 +46,17 @@ async fn cross_site_initiator_withholds_samesite_cookies_by_destination() {
         "{}",
         subresource.text()
     );
-    server.finish().await;
+    server.shutdown().await;
 }
 
 #[tokio::test]
 async fn samesite_follows_the_sent_fetch_site() {
-    let mut server = RawServer::start(vec![RawResponse::ok(), RawResponse::ok()]).await;
+    let server = TestServer::http(queue(vec![
+        TestResponse::new(200).body("ok").close(),
+        TestResponse::new(200).body("ok").close(),
+    ]))
+    .await
+    .unwrap();
     let site = url::Url::parse(&server.url("/")).unwrap();
     let preset_session = Session::builder()
         .browser(Browser::default())
@@ -79,16 +86,18 @@ async fn samesite_follows_the_sent_fetch_site() {
             .send()
             .await
             .unwrap();
-        let req = server.next_request().await;
+        let req = server.next_request().await.unwrap();
         assert_eq!(req.header_values("sec-fetch-site"), vec!["cross-site"]);
         assert_eq!(req.header_count("cookie"), 0, "{}", req.text());
     }
-    server.finish().await;
+    server.shutdown().await;
 }
 
 #[tokio::test]
 async fn the_last_session_referer_sets_the_fetch_site() {
-    let mut server = RawServer::start(vec![RawResponse::ok()]).await;
+    let server = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+        .await
+        .unwrap();
     let site = url::Url::parse(&server.url("/")).unwrap();
     let session = Session::builder()
         .browser(Browser::default())
@@ -110,7 +119,7 @@ async fn the_last_session_referer_sets_the_fetch_site() {
         .await
         .unwrap();
 
-    let req = server.next_request().await;
+    let req = server.next_request().await.unwrap();
     assert_eq!(req.header_values("sec-fetch-site"), vec!["same-origin"]);
     assert_eq!(
         req.header_values("cookie"),
@@ -118,10 +127,10 @@ async fn the_last_session_referer_sets_the_fetch_site() {
         "{}",
         req.text()
     );
-    server.finish().await;
+    server.shutdown().await;
 }
 
-fn port_of(server: &RawServer) -> u16 {
+fn port_of(server: &TestServer) -> u16 {
     url::Url::parse(&server.url("/")).unwrap().port().unwrap()
 }
 
@@ -134,13 +143,23 @@ fn two_sites() -> DnsConfig {
 
 #[tokio::test]
 async fn a_cross_site_redirect_chain_withholds_strict_cookies_for_firefox_only() {
-    let mut landing = RawServer::start(vec![RawResponse::ok(), RawResponse::ok()]).await;
+    let landing = TestServer::http(queue(vec![
+        TestResponse::new(200).body("ok").close(),
+        TestResponse::new(200).body("ok").close(),
+    ]))
+    .await
+    .unwrap();
     let land = format!("http://site-a.test:{}/land", port_of(&landing));
-    let mut start = RawServer::start(vec![
-        RawResponse::redirect(land.clone()),
-        RawResponse::redirect(land.clone()),
-    ])
-    .await;
+    let start = TestServer::http(queue(vec![
+        TestResponse::new(302)
+            .close()
+            .header("location", land.clone()),
+        TestResponse::new(302)
+            .close()
+            .header("location", land.clone()),
+    ]))
+    .await
+    .unwrap();
     let begin = format!("http://site-b.test:{}/start", port_of(&start));
     let site_a = url::Url::parse(&land).unwrap();
 
@@ -160,11 +179,11 @@ async fn a_cross_site_redirect_chain_withholds_strict_cookies_for_firefox_only()
             .send()
             .await
             .unwrap();
-        start.next_request().await;
+        start.next_request().await.unwrap();
     }
 
-    let firefox = landing.next_request().await;
-    let chrome = landing.next_request().await;
+    let firefox = landing.next_request().await.unwrap();
+    let chrome = landing.next_request().await.unwrap();
     assert_eq!(firefox.header_count("cookie"), 0, "{}", firefox.text());
     assert_eq!(
         chrome.header_values("cookie"),
@@ -172,13 +191,18 @@ async fn a_cross_site_redirect_chain_withholds_strict_cookies_for_firefox_only()
         "{}",
         chrome.text()
     );
-    landing.finish().await;
-    start.finish().await;
+    landing.shutdown().await;
+    start.shutdown().await;
 }
 
 #[tokio::test]
 async fn an_unusable_or_suppressed_session_referer_is_not_the_initiator() {
-    let mut server = RawServer::start(vec![RawResponse::ok(), RawResponse::ok()]).await;
+    let server = TestServer::http(queue(vec![
+        TestResponse::new(200).body("ok").close(),
+        TestResponse::new(200).body("ok").close(),
+    ]))
+    .await
+    .unwrap();
     let site = url::Url::parse(&server.url("/")).unwrap();
     let relative = Session::builder()
         .browser(Browser::default())
@@ -210,8 +234,8 @@ async fn an_unusable_or_suppressed_session_referer_is_not_the_initiator() {
         .await
         .unwrap();
 
-    let first = server.next_request().await;
-    let second = server.next_request().await;
+    let first = server.next_request().await.unwrap();
+    let second = server.next_request().await.unwrap();
     assert_eq!(first.header_values("sec-fetch-site"), vec!["same-origin"]);
     assert_eq!(second.header_values("sec-fetch-site"), vec!["same-origin"]);
     assert_eq!(
@@ -220,12 +244,14 @@ async fn an_unusable_or_suppressed_session_referer_is_not_the_initiator() {
         "{}",
         second.text()
     );
-    server.finish().await;
+    server.shutdown().await;
 }
 
 #[tokio::test]
 async fn origin_names_the_initiator() {
-    let mut server = RawServer::start(vec![RawResponse::ok()]).await;
+    let server = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+        .await
+        .unwrap();
     let session = Session::builder()
         .browser(Browser::default())
         .protocol(ProtocolPolicy::Http1)
@@ -240,7 +266,7 @@ async fn origin_names_the_initiator() {
         .await
         .unwrap();
 
-    let req = server.next_request().await;
+    let req = server.next_request().await.unwrap();
     assert_eq!(req.header_values("sec-fetch-site"), vec!["cross-site"]);
     assert_eq!(
         req.header_values("origin"),
@@ -248,21 +274,26 @@ async fn origin_names_the_initiator() {
         "{}",
         req.text()
     );
-    server.finish().await;
+    server.shutdown().await;
 }
 
 #[tokio::test]
 async fn chrome_judges_the_final_target_after_a_cross_site_bounce() {
-    let listener = RawServer::bind().await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
-    let mut server = RawServer::serve(
+    let server = TestServer::http_on(
         listener,
-        vec![
-            RawResponse::redirect(format!("http://site-b.test:{port}/hop")),
-            RawResponse::redirect(format!("http://site-a.test:{port}/end")),
-            RawResponse::ok(),
-        ],
-    );
+        queue(vec![
+            TestResponse::new(302)
+                .close()
+                .header("location", format!("http://site-b.test:{port}/hop")),
+            TestResponse::new(302)
+                .close()
+                .header("location", format!("http://site-a.test:{port}/end")),
+            TestResponse::new(200).body("ok").close(),
+        ]),
+    )
+    .unwrap();
     let site_a = url::Url::parse(&format!("http://site-a.test:{port}/")).unwrap();
     let session = Session::builder()
         .browser(Browser::default())
@@ -282,21 +313,23 @@ async fn chrome_judges_the_final_target_after_a_cross_site_bounce() {
         .await
         .unwrap();
 
-    server.next_request().await;
-    server.next_request().await;
-    let end = server.next_request().await;
+    server.next_request().await.unwrap();
+    server.next_request().await.unwrap();
+    let end = server.next_request().await.unwrap();
     assert_eq!(
         end.header_values("cookie"),
         vec!["strict=1"],
         "{}",
         end.text()
     );
-    server.finish().await;
+    server.shutdown().await;
 }
 
 #[tokio::test]
 async fn a_relative_request_referer_is_same_origin() {
-    let mut server = RawServer::start(vec![RawResponse::ok()]).await;
+    let server = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+        .await
+        .unwrap();
     let site = url::Url::parse(&server.url("/")).unwrap();
     let session = Session::builder()
         .browser(Browser::default())
@@ -315,7 +348,7 @@ async fn a_relative_request_referer_is_same_origin() {
         .await
         .unwrap();
 
-    let req = server.next_request().await;
+    let req = server.next_request().await.unwrap();
     assert_eq!(req.header_values("sec-fetch-site"), vec!["same-origin"]);
     assert_eq!(
         req.header_values("cookie"),
@@ -323,12 +356,14 @@ async fn a_relative_request_referer_is_same_origin() {
         "{}",
         req.text()
     );
-    server.finish().await;
+    server.shutdown().await;
 }
 
 #[tokio::test]
 async fn an_https_initiator_sends_a_null_origin_to_http() {
-    let mut server = RawServer::start(vec![RawResponse::ok()]).await;
+    let server = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+        .await
+        .unwrap();
     let session = Session::builder()
         .browser(Browser::default())
         .protocol(ProtocolPolicy::Http1)
@@ -344,7 +379,7 @@ async fn an_https_initiator_sends_a_null_origin_to_http() {
         .await
         .unwrap();
 
-    let req = server.next_request().await;
+    let req = server.next_request().await.unwrap();
     assert_eq!(req.header_values("origin"), vec!["null"], "{}", req.text());
-    server.finish().await;
+    server.shutdown().await;
 }

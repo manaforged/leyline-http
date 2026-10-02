@@ -20,6 +20,11 @@ changes, how to limit or stop redirects, and how to decide each one.
   removes the `Authorization`, `Proxy-Authorization`, and `Cookie` headers you
   set. The cookie jar adds the cookies that match the new URL.
 
+A request that follows a URL the server chose, such as a `pages()` next link,
+`Tab::follow`, or `Tab::submit_form`, drops the same credentials when its
+origin differs from the page it came from: the `Authorization`, `Cookie`, and
+`Proxy-Authorization` session defaults and the session bearer token.
+
 `Response::url` is the final URL, and `Response::redirect_chain` lists the
 URLs the session left, in order. See
 [Responses](responses.md#final-url-and-redirects).

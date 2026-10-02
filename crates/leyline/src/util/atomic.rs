@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 
 use crate::core::{Error, Kind, Result};
 
-pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) fn write_atomic(path: &Path, bytes: &[u8], mode: FileMode) -> Result<()> {
     let temp = temp_path(path)?;
-    let written = write_synced(&temp, path, bytes);
+    let written = write_synced(&temp, path, bytes, mode);
     if let Err(err) = written {
         drop(std::fs::remove_file(&temp));
         return Err(err);
@@ -22,10 +22,8 @@ pub(crate) fn commit(temp: &Path, path: &Path) -> Result<()> {
     sync_parent(path)
 }
 
-fn write_synced(temp: &Path, target: &Path, bytes: &[u8]) -> Result<()> {
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-    let mut file = open_private(&mut options, temp, target)?;
+fn write_synced(temp: &Path, target: &Path, bytes: &[u8], mode: FileMode) -> Result<()> {
+    let mut file = create_temp(temp, target, mode)?;
     file.write_all(bytes)?;
     file.flush()?;
     file.sync_all()?;
@@ -42,24 +40,37 @@ pub(crate) fn temp_path(path: &Path) -> Result<PathBuf> {
     Ok(path.with_file_name(temp_name))
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FileMode {
+    Private,
+    KeepExisting,
+}
+
 #[cfg(unix)]
-fn open_private(options: &mut OpenOptions, temp: &Path, target: &Path) -> Result<std::fs::File> {
+pub(crate) fn create_temp(temp: &Path, target: &Path, mode: FileMode) -> Result<std::fs::File> {
     use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-    let existing = std::fs::metadata(target)
-        .ok()
-        .map(|meta| meta.permissions());
-    let mode = existing
-        .as_ref()
-        .map_or(0o600, |perms| perms.mode() & 0o7777);
-    let file = options.mode(mode).open(temp)?;
-    if let Some(perms) = existing {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    let perms = match mode {
+        FileMode::Private => Some(std::fs::Permissions::from_mode(0o600)),
+        FileMode::KeepExisting => std::fs::metadata(target)
+            .ok()
+            .map(|meta| std::fs::Permissions::from_mode(meta.permissions().mode() & 0o777)),
+    };
+    if let Some(perms) = &perms {
+        options.mode(perms.mode());
+    }
+    let file = options.open(temp)?;
+    if let Some(perms) = perms {
         file.set_permissions(perms)?;
     }
     Ok(file)
 }
 
 #[cfg(not(unix))]
-fn open_private(options: &mut OpenOptions, temp: &Path, _target: &Path) -> Result<std::fs::File> {
+pub(crate) fn create_temp(temp: &Path, _target: &Path, _mode: FileMode) -> Result<std::fs::File> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
     Ok(options.open(temp)?)
 }
 

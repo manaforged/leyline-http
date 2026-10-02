@@ -18,6 +18,7 @@ pub struct BodyStream {
     rx: mpsc::Receiver<std::io::Result<Bytes>>,
     read_timeout: Option<Duration>,
     idle: Option<Pin<Box<Sleep>>>,
+    body_limit: Option<Duration>,
     body_deadline: Option<Pin<Box<Sleep>>>,
     decoded: Option<Box<Decoded>>,
     watch: Option<BodyWatch>,
@@ -69,6 +70,7 @@ impl BodyStream {
             rx,
             read_timeout: None,
             idle: None,
+            body_limit: None,
             body_deadline: None,
             decoded: None,
             watch: None,
@@ -108,10 +110,14 @@ impl BodyStream {
     }
 
     pub(crate) fn set_body_timeout(&mut self, timeout: Option<Duration>) {
-        self.body_deadline = timeout.map(|limit| Box::pin(tokio::time::sleep(limit)));
+        self.body_limit = timeout;
+        self.body_deadline = None;
     }
 
     fn poll_body_deadline(&mut self, cx: &mut Context<'_>) -> Poll<std::io::Error> {
+        if let Some(limit) = self.body_limit.take() {
+            self.body_deadline = Some(Box::pin(tokio::time::sleep(limit)));
+        }
         let Some(sleep) = self.body_deadline.as_mut() else {
             return Poll::Pending;
         };
@@ -188,8 +194,9 @@ impl Stream for BodyStream {
             return Poll::Ready(None);
         }
         if this.poll_shutdown(cx) {
+            this.ended = true;
             return Poll::Ready(Some(Err(std::io::Error::other(
-                crate::core::session::execute::shut_down(),
+                crate::core::error::Error::shut_down(),
             ))));
         }
         if let Poll::Ready(err) = this.poll_body_deadline(cx) {
@@ -204,6 +211,7 @@ impl Stream for BodyStream {
         }
         if matches!(polled, Poll::Ready(None | Some(Err(_)))) {
             this.pass = None;
+            this.ended = true;
         }
         polled
     }

@@ -1,12 +1,11 @@
-#[path = "core_support/raw_server.rs"]
-mod raw_server;
-
+use leyline::testing::{TestResponse, TestServer, queue};
 use leyline::{Browser, ChromiumBrand, HeaderAnchor, Platform, Preset, ProtocolPolicy, Session};
-use raw_server::{RawResponse, RawServer};
 
 #[tokio::test]
 async fn caller_user_agent_replaces_no_preset_default() {
-    let mut server = RawServer::start(vec![RawResponse::ok()]).await;
+    let server = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+        .await
+        .unwrap();
     let session = Session::builder()
         .protocol(ProtocolPolicy::Http1)
         .build()
@@ -20,16 +19,18 @@ async fn caller_user_agent_replaces_no_preset_default() {
         .unwrap();
 
     assert_eq!(resp.status(), 200);
-    let req = server.next_request().await;
+    let req = server.next_request().await.unwrap();
     assert!(req.request_line.starts_with("GET /ua HTTP/1.1"));
     assert_eq!(req.header_values("user-agent"), vec!["X"]);
     assert_eq!(req.header_count("user-agent"), 1, "{}", req.text());
-    server.finish().await;
+    server.shutdown().await;
 }
 
 #[tokio::test]
 async fn bulk_headers_replace_all_no_preset_defaults() {
-    let mut server = RawServer::start(vec![RawResponse::ok()]).await;
+    let server = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+        .await
+        .unwrap();
     let session = Session::builder()
         .protocol(ProtocolPolicy::Http1)
         .build()
@@ -48,7 +49,7 @@ async fn bulk_headers_replace_all_no_preset_defaults() {
         .unwrap();
 
     assert_eq!(resp.status(), 200);
-    let req = server.next_request().await;
+    let req = server.next_request().await.unwrap();
     assert_eq!(req.header_values("user-agent"), vec!["ua-x"]);
     assert_eq!(req.header_values("accept"), vec!["accept-y"]);
     assert_eq!(req.header_values("accept-encoding"), vec!["encoding-z"]);
@@ -57,12 +58,17 @@ async fn bulk_headers_replace_all_no_preset_defaults() {
     assert_eq!(req.header_count("accept"), 1, "{}", req.text());
     assert_eq!(req.header_count("accept-encoding"), 1, "{}", req.text());
     assert_eq!(req.header_count("accept-language"), 1, "{}", req.text());
-    server.finish().await;
+    server.shutdown().await;
 }
 
 #[tokio::test]
 async fn dx_helpers_accept_common_pair_shapes_and_header_shortcuts() {
-    let mut server = RawServer::start(vec![RawResponse::ok(), RawResponse::ok()]).await;
+    let server = TestServer::http(queue(vec![
+        TestResponse::new(200).body("ok").close(),
+        TestResponse::new(200).body("ok").close(),
+    ]))
+    .await
+    .unwrap();
 
     let client = Session::builder()
         .protocol(ProtocolPolicy::Http1)
@@ -100,7 +106,7 @@ async fn dx_helpers_accept_common_pair_shapes_and_header_shortcuts() {
         .unwrap();
 
     assert_eq!(resp.status(), 200);
-    let req = server.next_request().await;
+    let req = server.next_request().await.unwrap();
     assert!(
         req.request_line
             .starts_with("GET /dx?a=1&space=hello+world HTTP/1.1")
@@ -129,18 +135,20 @@ async fn dx_helpers_accept_common_pair_shapes_and_header_shortcuts() {
         .unwrap();
 
     assert_eq!(resp.status(), 200);
-    let req = server.next_request().await;
+    let req = server.next_request().await.unwrap();
     assert!(req.request_line.starts_with("POST /login HTTP/1.1"));
     assert_eq!(
         req.header_values("content-type"),
         vec!["application/x-www-form-urlencoded"]
     );
-    server.finish().await;
+    server.shutdown().await;
 }
 
 #[tokio::test]
 async fn append_header_preserves_duplicate_order() {
-    let mut server = RawServer::start(vec![RawResponse::ok()]).await;
+    let server = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+        .await
+        .unwrap();
     let session = Session::builder()
         .protocol(ProtocolPolicy::Http1)
         .build()
@@ -155,14 +163,16 @@ async fn append_header_preserves_duplicate_order() {
         .unwrap();
 
     assert_eq!(resp.status(), 200);
-    let req = server.next_request().await;
+    let req = server.next_request().await.unwrap();
     assert_eq!(req.header_values("x-dup"), vec!["a", "b"]);
-    server.finish().await;
+    server.shutdown().await;
 }
 
 #[tokio::test]
 async fn set_then_append_user_agent_preserves_caller_order() {
-    let mut server = RawServer::start(vec![RawResponse::ok()]).await;
+    let server = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+        .await
+        .unwrap();
     let session = Session::builder()
         .protocol(ProtocolPolicy::Http1)
         .build()
@@ -177,14 +187,16 @@ async fn set_then_append_user_agent_preserves_caller_order() {
         .unwrap();
 
     assert_eq!(resp.status(), 200);
-    let req = server.next_request().await;
+    let req = server.next_request().await.unwrap();
     assert_eq!(req.header_values("user-agent"), vec!["X", "Y"]);
-    server.finish().await;
+    server.shutdown().await;
 }
 
 #[tokio::test]
 async fn caller_referer_wins_over_navigate_preset_referer() {
-    let mut server = RawServer::start(vec![RawResponse::ok()]).await;
+    let server = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+        .await
+        .unwrap();
     let session = Session::builder()
         .protocol(ProtocolPolicy::Http1)
         .build()
@@ -199,20 +211,28 @@ async fn caller_referer_wins_over_navigate_preset_referer() {
         .unwrap();
 
     assert_eq!(resp.status(), 200);
-    let req = server.next_request().await;
+    let req = server.next_request().await.unwrap();
     assert_eq!(
         req.header_values("referer"),
         vec!["https://caller.example/from"]
     );
     assert_eq!(req.header_count("referer"), 1, "{}", req.text());
-    server.finish().await;
+    server.shutdown().await;
 }
 
 #[tokio::test]
 async fn redirect_cross_origin_strips_authorization_after_first_step() {
-    let mut target = RawServer::start(vec![RawResponse::ok()]).await;
+    let target = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+        .await
+        .unwrap();
     let target_url = target.url("/landing");
-    let mut redirector = RawServer::start(vec![RawResponse::redirect(target_url)]).await;
+    let redirector = TestServer::http(queue(vec![
+        TestResponse::new(302)
+            .close()
+            .header("location", target_url),
+    ]))
+    .await
+    .unwrap();
     let session = Session::builder()
         .protocol(ProtocolPolicy::Http1)
         .build()
@@ -226,22 +246,28 @@ async fn redirect_cross_origin_strips_authorization_after_first_step() {
         .unwrap();
 
     assert_eq!(resp.status(), 200);
-    let first = redirector.next_request().await;
-    let second = target.next_request().await;
+    let first = redirector.next_request().await.unwrap();
+    let second = target.next_request().await.unwrap();
     assert_eq!(first.header_values("authorization"), vec!["Bearer secret"]);
     assert!(
         second.header_values("authorization").is_empty(),
         "{}",
         second.text()
     );
-    redirector.finish().await;
-    target.finish().await;
+    redirector.shutdown().await;
+    target.shutdown().await;
 }
 
 #[tokio::test]
 async fn redirect_same_origin_preserves_authorization() {
-    let mut server =
-        RawServer::start(vec![RawResponse::redirect("/landing"), RawResponse::ok()]).await;
+    let server = TestServer::http(queue(vec![
+        TestResponse::new(302)
+            .close()
+            .header("location", "/landing"),
+        TestResponse::new(200).body("ok").close(),
+    ]))
+    .await
+    .unwrap();
     let session = Session::builder()
         .protocol(ProtocolPolicy::Http1)
         .build()
@@ -255,16 +281,18 @@ async fn redirect_same_origin_preserves_authorization() {
         .unwrap();
 
     assert_eq!(resp.status(), 200);
-    let first = server.next_request().await;
-    let second = server.next_request().await;
+    let first = server.next_request().await.unwrap();
+    let second = server.next_request().await.unwrap();
     assert_eq!(first.header_values("authorization"), vec!["Bearer secret"]);
     assert_eq!(second.header_values("authorization"), vec!["Bearer secret"]);
-    server.finish().await;
+    server.shutdown().await;
 }
 
 #[tokio::test]
 async fn caller_dnt_wins_over_edge_brand_overlay() {
-    let mut server = RawServer::start(vec![RawResponse::ok()]).await;
+    let server = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+        .await
+        .unwrap();
     let session = Session::builder()
         .browser(Browser::default())
         .brand(ChromiumBrand::Edge)
@@ -280,15 +308,17 @@ async fn caller_dnt_wins_over_edge_brand_overlay() {
         .unwrap();
 
     assert_eq!(resp.status(), 200);
-    let req = server.next_request().await;
+    let req = server.next_request().await.unwrap();
     assert_eq!(req.header_values("dnt"), vec!["0"]);
     assert_eq!(req.header_count("dnt"), 1, "{}", req.text());
-    server.finish().await;
+    server.shutdown().await;
 }
 
 #[tokio::test]
 async fn anchored_headers_interleave_at_preset_slots() {
-    let mut server = RawServer::start(vec![RawResponse::ok()]).await;
+    let server = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+        .await
+        .unwrap();
     let session = Session::builder()
         .browser(leyline::Browser::default())
         .protocol(ProtocolPolicy::Http1)
@@ -311,7 +341,7 @@ async fn anchored_headers_interleave_at_preset_slots() {
         .unwrap();
 
     assert_eq!(resp.status(), 200);
-    let req = server.next_request().await;
+    let req = server.next_request().await.unwrap();
 
     let names: Vec<String> = req.headers.iter().map(|(k, _)| k.clone()).collect();
     let wire = req.text();
@@ -333,12 +363,14 @@ async fn anchored_headers_interleave_at_preset_slots() {
         req.header_count("cookie") == 0 || pos("cookie") > pos("x-extra-7"),
         "cookie must ride at the tail if present: {wire}"
     );
-    server.finish().await;
+    server.shutdown().await;
 }
 
 #[tokio::test]
 async fn plain_authorization_rides_after_user_agent() {
-    let mut server = RawServer::start(vec![RawResponse::ok()]).await;
+    let server = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+        .await
+        .unwrap();
     let session = Session::builder()
         .protocol(ProtocolPolicy::Http1)
         .build()
@@ -353,7 +385,7 @@ async fn plain_authorization_rides_after_user_agent() {
         .unwrap();
 
     assert_eq!(resp.status(), 200);
-    let req = server.next_request().await;
+    let req = server.next_request().await.unwrap();
     let names: Vec<String> = req.headers.iter().map(|(k, _)| k.clone()).collect();
     let ua = names
         .iter()
@@ -364,5 +396,5 @@ async fn plain_authorization_rides_after_user_agent() {
         .position(|h| h.eq_ignore_ascii_case("authorization"))
         .expect("caller-set authorization on wire");
     assert_eq!(auth, ua + 1, "{}", req.text());
-    server.finish().await;
+    server.shutdown().await;
 }

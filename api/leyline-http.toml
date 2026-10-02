@@ -451,3 +451,463 @@ name = "Run a local test server"
 call = "testing::TestServer::http"
 owner = "testing::TestResponse"
 guide = "docs/guide/testing.md"
+
+[[task]]
+name = "One-line browser session"
+call = "Session::browser"
+guide = "docs/guide/sessions.md"
+
+[[task]]
+name = "Session base URL"
+call = "SessionBuilder::base_url"
+guide = "docs/guide/sessions.md"
+
+[[task]]
+name = "Derive a session with another base URL"
+call = "Session::with_base_url"
+guide = "docs/guide/sessions.md"
+
+[[task]]
+name = "Session bearer token"
+call = "SessionBuilder::bearer_auth"
+guide = "docs/guide/sessions.md"
+
+[[task]]
+name = "Session user agent"
+call = "SessionBuilder::user_agent"
+guide = "docs/guide/sessions.md"
+
+[[task]]
+name = "Session languages"
+call = "SessionBuilder::languages"
+guide = "docs/guide/sessions.md"
+
+[[task]]
+name = "Stop every clone of a session"
+call = "Session::shutdown"
+guide = "docs/guide/sessions.md"
+
+[[task]]
+name = "Detect a stopped session"
+call = "Error::is_shut_down"
+guide = "docs/guide/sessions.md"
+
+[[task]]
+name = "Save TLS tickets, Alt-Svc, and HSTS"
+call = "Session::state"
+guide = "docs/guide/sessions.md"
+
+[[task]]
+name = "Restore saved session state"
+call = "SessionState::restore_into"
+guide = "docs/guide/sessions.md"
+
+[[task]]
+name = "Keep the current page"
+call = "Session::tab"
+guide = "docs/guide/requests.md"
+
+[[task]]
+name = "Status check after retries, with the body"
+call = "RequestBuilder::error_for_status"
+guide = "docs/guide/responses.md"
+
+[[task]]
+name = "Download to a file"
+call = "RequestBuilder::download"
+guide = "docs/guide/streaming.md"
+
+[[task]]
+name = "Download a received response"
+call = "Response::download_to"
+guide = "docs/guide/streaming.md"
+
+[[task]]
+name = "Follow Link pagination"
+call = "RequestBuilder::pages"
+guide = "docs/guide/responses.md"
+
+[[task]]
+name = "Read Link headers"
+call = "Response::links"
+guide = "docs/guide/responses.md"
+
+[[task]]
+name = "Read one Link relation"
+call = "Response::link"
+guide = "docs/guide/responses.md"
+
+[[task]]
+name = "Relay response headers"
+call = "Response::relay_headers"
+guide = "docs/guide/service-integration.md"
+
+[[task]]
+name = "Relay a header map"
+call = "relay_headers"
+guide = "docs/guide/service-integration.md"
+
+[[task]]
+name = "Body read timeout"
+call = "TimeoutConfig::body"
+guide = "docs/guide/retries-and-timeouts.md"
+
+[[task]]
+name = "Status-error body read timeout"
+call = "TimeoutConfig::error_body"
+guide = "docs/guide/retries-and-timeouts.md"
+
+[[task]]
+name = "Status-error body cap"
+call = "CompressionConfig::max_error_body"
+guide = "docs/guide/responses.md"
+
+[[task]]
+name = "Error category"
+call = "Error::category"
+guide = "docs/guide/errors.md"
+
+[[task]]
+name = "Connect failure"
+call = "Error::is_connect"
+guide = "docs/guide/errors.md"
+
+[[task]]
+name = "Timeout"
+call = "Error::is_timeout"
+guide = "docs/guide/errors.md"
+
+[[task]]
+name = "DNS failure"
+call = "Error::is_dns"
+guide = "docs/guide/errors.md"
+
+[[task]]
+name = "Proxy failure"
+call = "Error::is_proxy"
+guide = "docs/guide/errors.md"
+
+[[task]]
+name = "Body limit"
+call = "Error::is_body_limit"
+guide = "docs/guide/errors.md"
+
+[[task]]
+name = "Status error"
+call = "Error::is_status"
+guide = "docs/guide/errors.md"
+
+[[task]]
+name = "Retryable error"
+call = "Error::is_retryable"
+guide = "docs/guide/errors.md"
+
+[[task]]
+name = "Find a leyline error in a chain"
+call = "Error::find"
+guide = "docs/guide/errors.md"
+
+[[task]]
+name = "Retry on a condition"
+call = "RetryPolicy::retry_if"
+guide = "docs/guide/retries-and-timeouts.md"
+
+[[task]]
+name = "Wait on a rate-limit header"
+call = "RetryPolicy::wait_header"
+guide = "docs/guide/retries-and-timeouts.md"
+
+[[task]]
+name = "Retry a request that was not sent"
+call = "RetryPolicy::retry_unsent"
+guide = "docs/guide/retries-and-timeouts.md"
+
+[[task]]
+name = "Return a block without a retry"
+call = "RetryPolicy::skip_blocks"
+guide = "docs/guide/crawling.md"
+
+[[task]]
+name = "Cap a server-requested wait"
+call = "RetryPolicy::max_retry_after"
+guide = "docs/guide/retries-and-timeouts.md"
+
+[[task]]
+name = "Limit each host"
+call = "SessionBuilder::host_limits"
+guide = "docs/guide/crawling.md"
+
+[[task]]
+name = "Requests in flight per host"
+call = "HostLimits::max_in_flight"
+guide = "docs/guide/crawling.md"
+
+[[task]]
+name = "Requests per second per host"
+call = "HostLimits::per_second"
+guide = "docs/guide/crawling.md"
+
+[[task]]
+name = "Limits for one host"
+call = "HostLimits::host"
+guide = "docs/guide/crawling.md"
+
+[[task]]
+name = "Requests in flight in total"
+call = "HostLimits::max_total_in_flight"
+guide = "docs/guide/crawling.md"
+
+[[task]]
+name = "Pause a host on a status"
+call = "HostLimits::pause_on"
+guide = "docs/guide/crawling.md"
+
+[[task]]
+name = "Default pause length"
+call = "HostLimits::pause_for"
+guide = "docs/guide/crawling.md"
+
+[[task]]
+name = "Cap a server-requested pause"
+call = "HostLimits::max_pause"
+guide = "docs/guide/crawling.md"
+
+[[task]]
+name = "Read per-host queues"
+call = "Session::host_stats"
+guide = "docs/guide/crawling.md"
+
+[[task]]
+name = "Proxy pool"
+call = "SessionBuilder::proxy_pool"
+guide = "docs/guide/proxies.md"
+
+[[task]]
+name = "Build a proxy pool"
+call = "ProxyPool::new"
+guide = "docs/guide/proxies.md"
+
+[[task]]
+name = "Pin an identity to each proxy"
+call = "ProxyPool::identified"
+guide = "docs/guide/proxies.md"
+
+[[task]]
+name = "Keep a proxy for a time"
+call = "ProxyPool::sticky_for"
+guide = "docs/guide/proxies.md"
+
+[[task]]
+name = "Ban a failing proxy"
+call = "ProxyPool::ban_after"
+guide = "docs/guide/proxies.md"
+
+[[task]]
+name = "Rotate the proxy on a block"
+call = "ProxyPool::rotate_on_block"
+guide = "docs/guide/crawling.md"
+
+[[task]]
+name = "Proxy health"
+call = "ProxyPool::stats"
+guide = "docs/guide/proxies.md"
+
+[[task]]
+name = "Block rules"
+call = "BlockRules::statuses"
+guide = "docs/guide/crawling.md"
+
+[[task]]
+name = "Detect a block page"
+call = "Response::block"
+guide = "docs/guide/crawling.md"
+
+[[task]]
+name = "Browse with a tab"
+call = "Tab::open"
+guide = "docs/guide/accounts.md"
+
+[[task]]
+name = "Submit a page form"
+call = "Tab::submit_form"
+guide = "docs/guide/accounts.md"
+
+[[task]]
+name = "Parse forms"
+call = "html::forms"
+guide = "docs/guide/accounts.md"
+
+[[task]]
+name = "Fill a form"
+call = "html::Form::set"
+guide = "docs/guide/accounts.md"
+
+[[task]]
+name = "Form encoding"
+call = "html::FormEnctype"
+guide = "docs/guide/accounts.md"
+
+[[task]]
+name = "Save a jar to a file"
+call = "cookie::Jar::save_to"
+guide = "docs/guide/cookies.md"
+
+[[task]]
+name = "Load a jar from a file"
+call = "cookie::Jar::load_from"
+guide = "docs/guide/cookies.md"
+
+[[task]]
+name = "Save a jar as it changes"
+call = "cookie::Jar::autosave"
+guide = "docs/guide/cookies.md"
+
+[[task]]
+name = "Capture a device"
+call = "Device::capture"
+guide = "docs/guide/accounts.md"
+
+[[task]]
+name = "Open a saved device"
+call = "Device::open"
+guide = "docs/guide/accounts.md"
+
+[[task]]
+name = "Save a device as it changes"
+call = "Device::autosave"
+guide = "docs/guide/accounts.md"
+
+[[task]]
+name = "Device save intervals"
+call = "DeviceAutosaveOptions::new"
+guide = "docs/guide/accounts.md"
+
+[[task]]
+name = "One event per request"
+call = "trace::Trace::summary"
+guide = "docs/guide/logging.md"
+
+[[task]]
+name = "Count requests"
+call = "trace::Metrics::new"
+guide = "docs/guide/crawling.md"
+
+[[task]]
+name = "Send events to several traces"
+call = "trace::Fanout::with"
+guide = "docs/guide/logging.md"
+
+[[task]]
+name = "Compare with an echo service"
+call = "audit::AuditData::compare"
+guide = "docs/guide/fingerprints.md"
+
+[[task]]
+name = "Run a local HTTPS test server"
+call = "testing::TestServer::https"
+guide = "docs/guide/testing.md"
+
+[[task]]
+name = "Run a test server on your listener"
+call = "testing::TestServer::http_on"
+guide = "docs/guide/testing.md"
+
+[[task]]
+name = "Read the request head as received"
+call = "testing::RecordedRequest::raw"
+guide = "docs/guide/testing.md"
+
+[[task]]
+name = "Read the request line"
+call = "testing::RecordedRequest::request_line"
+guide = "docs/guide/testing.md"
+
+[[task]]
+name = "Read every value of a header"
+call = "testing::RecordedRequest::header_values"
+guide = "docs/guide/testing.md"
+
+[[task]]
+name = "Count a header"
+call = "testing::RecordedRequest::header_count"
+guide = "docs/guide/testing.md"
+
+[[task]]
+name = "Send one GET"
+call = "get"
+guide = "docs/guide/quick-start.md"
+
+[[task]]
+name = "Stream the decoded body"
+call = "Response::into_decoded_stream"
+guide = "docs/guide/streaming.md"
+
+[[task]]
+name = "Copy the decoded body to a writer"
+call = "Response::copy_decoded_to"
+guide = "docs/guide/streaming.md"
+
+[[task]]
+name = "Rotate proxies on retry"
+call = "RetryPolicy::rotate_proxies"
+guide = "docs/guide/proxies.md"
+
+[[task]]
+name = "Check a session against a device"
+call = "Device::check"
+guide = "docs/guide/accounts.md"
+
+[[task]]
+name = "Expect a profile id"
+call = "SessionBuilder::expect_profile_id"
+guide = "docs/guide/profiles.md"
+
+[[task]]
+name = "Load block rules from TOML"
+call = "BlockRules::from_toml"
+guide = "docs/guide/crawling.md"
+
+[[task]]
+name = "Read the links of a page"
+call = "html::links"
+guide = "docs/guide/accounts.md"
+
+[[task]]
+name = "Read the meta tags of a page"
+call = "html::meta"
+guide = "docs/guide/accounts.md"
+
+[[task]]
+name = "Find a form by id or name"
+call = "html::Form::find"
+guide = "docs/guide/accounts.md"
+
+[[task]]
+name = "Name an error category"
+call = "ErrorCategory::as_str"
+guide = "docs/guide/errors.md"
+
+[[task]]
+name = "Send a script fetch from a tab"
+call = "Tab::fetch"
+guide = "docs/guide/requests.md"
+
+[[task]]
+name = "Send an XHR from a tab"
+call = "Tab::xhr"
+guide = "docs/guide/requests.md"
+
+[[task]]
+name = "Post JSON from a tab"
+call = "Tab::post_json"
+guide = "docs/guide/requests.md"
+
+[[task]]
+name = "Load a subresource from a tab"
+call = "Tab::subresource"
+guide = "docs/guide/requests.md"
+
+[[task]]
+name = "Limit pagination"
+call = "Pages::limit"
+guide = "docs/guide/api-clients.md"

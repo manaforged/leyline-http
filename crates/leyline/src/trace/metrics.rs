@@ -10,7 +10,33 @@ const LATENCY_BOUNDS_MS: [u64; 9] = [10, 50, 100, 250, 500, 1_000, 2_500, 5_000,
 const LATENCY_BUCKETS: usize = LATENCY_BOUNDS_MS.len() + 1;
 const STATUS_CLASSES: usize = 5;
 const CATEGORIES: usize = ErrorCategory::ALL.len();
-const BODY_LABELS: [&str; 3] = ["complete", "failed", "dropped"];
+
+#[derive(Clone, Copy)]
+enum BodyKind {
+    Complete,
+    Failed,
+    Dropped,
+}
+
+impl BodyKind {
+    const ALL: [Self; 3] = [Self::Complete, Self::Failed, Self::Dropped];
+
+    fn of(outcome: &BodyOutcome<'_>) -> Self {
+        match outcome {
+            BodyOutcome::Complete => Self::Complete,
+            BodyOutcome::Failed(_) => Self::Failed,
+            BodyOutcome::Dropped => Self::Dropped,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Complete => "complete",
+            Self::Failed => "failed",
+            Self::Dropped => "dropped",
+        }
+    }
+}
 
 #[derive(Debug, Default)]
 pub struct Metrics {
@@ -18,7 +44,7 @@ pub struct Metrics {
     attempts: AtomicU64,
     status: [AtomicU64; STATUS_CLASSES],
     errors: [AtomicU64; CATEGORIES],
-    bodies: [AtomicU64; BODY_LABELS.len()],
+    bodies: [AtomicU64; BodyKind::ALL.len()],
     latency: [AtomicU64; LATENCY_BUCKETS],
 }
 
@@ -28,7 +54,7 @@ pub struct MetricsSnapshot {
     attempts: u64,
     status: [u64; STATUS_CLASSES],
     errors: [u64; CATEGORIES],
-    bodies: [u64; BODY_LABELS.len()],
+    bodies: [u64; BodyKind::ALL.len()],
     latency: [u64; LATENCY_BUCKETS],
 }
 
@@ -46,14 +72,6 @@ fn latency_bucket(elapsed: Duration) -> usize {
         .iter()
         .position(|bound| ms <= *bound)
         .unwrap_or(LATENCY_BOUNDS_MS.len())
-}
-
-fn body_index(outcome: &BodyOutcome<'_>) -> usize {
-    match outcome {
-        BodyOutcome::Complete => 0,
-        BodyOutcome::Failed(_) => 1,
-        BodyOutcome::Dropped => 2,
-    }
 }
 
 impl Metrics {
@@ -91,7 +109,7 @@ impl Trace for Metrics {
     }
 
     fn body(&self, ev: &BodyEnd<'_>) {
-        bump(&self.bodies[body_index(&ev.outcome)], 1);
+        bump(&self.bodies[BodyKind::of(&ev.outcome) as usize], 1);
     }
 }
 
@@ -121,15 +139,15 @@ impl MetricsSnapshot {
     }
 
     pub fn bodies_complete(&self) -> u64 {
-        self.bodies[0]
+        self.bodies[BodyKind::Complete as usize]
     }
 
     pub fn bodies_failed(&self) -> u64 {
-        self.bodies[1]
+        self.bodies[BodyKind::Failed as usize]
     }
 
     pub fn bodies_dropped(&self) -> u64 {
-        self.bodies[2]
+        self.bodies[BodyKind::Dropped as usize]
     }
 
     pub fn latency(&self) -> Vec<(Option<Duration>, u64)> {
@@ -154,8 +172,8 @@ impl fmt::Display for MetricsSnapshot {
                 write!(f, " error_{}={count}", category.as_str())?;
             }
         }
-        for (label, count) in BODY_LABELS.iter().zip(self.bodies) {
-            write!(f, " body_{label}={count}")?;
+        for kind in BodyKind::ALL {
+            write!(f, " body_{}={}", kind.label(), self.bodies[kind as usize])?;
         }
         for (bound, count) in self.latency() {
             match bound {

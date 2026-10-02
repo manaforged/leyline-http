@@ -1,6 +1,3 @@
-#[path = "core_support/raw_server.rs"]
-mod raw_server;
-
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -9,7 +6,6 @@ use bytes::Bytes;
 use leyline::testing::{TestResponse, TestServer, queue};
 use leyline::trace::{Summary, Trace};
 use leyline::{Body, Browser, HostLimits, ProxyPool, RetryPolicy, Session};
-use raw_server::{RawResponse, RawServer};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -136,13 +132,14 @@ async fn host_limits_space_requests_per_second() {
 #[tokio::test]
 async fn a_proxy_pool_bans_a_dead_proxy_and_keeps_crawling() {
     let dead = format!("http://127.0.0.1:{}", dead_port().await);
-    let mut good = RawServer::start(vec![
-        RawResponse::ok(),
-        RawResponse::ok(),
-        RawResponse::ok(),
-    ])
-    .await;
-    let pool = ProxyPool::new([dead.clone(), good.url("")])
+    let good = TestServer::http(queue(vec![
+        TestResponse::new(200).body("ok").close(),
+        TestResponse::new(200).body("ok").close(),
+        TestResponse::new(200).body("ok").close(),
+    ]))
+    .await
+    .unwrap();
+    let pool = ProxyPool::new([dead.clone(), format!("http://{}", good.addr())])
         .ban_after(1)
         .ban_for(Duration::from_secs(60));
     let session = Session::builder()
@@ -159,7 +156,7 @@ async fn a_proxy_pool_bans_a_dead_proxy_and_keeps_crawling() {
     }
     for path in ["/a", "/b", "/c"] {
         assert_eq!(
-            good.next_request().await.request_line,
+            good.next_request().await.unwrap().request_line,
             format!("GET http://origin.test{path} HTTP/1.1")
         );
     }
@@ -175,11 +172,12 @@ async fn a_proxy_pool_bans_a_dead_proxy_and_keeps_crawling() {
 async fn download_writes_the_decoded_body_or_nothing() {
     let dir = std::env::temp_dir().join(format!("leyline-dl-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let server = RawServer::start(vec![
-        RawResponse::ok().body(vec![b'z'; 100]),
-        RawResponse::status(404, "Not Found").body(b"missing".to_vec()),
-    ])
-    .await;
+    let server = TestServer::http(queue(vec![
+        TestResponse::new(200).close().body(vec![b'z'; 100]),
+        TestResponse::new(404).close().body(b"missing".to_vec()),
+    ]))
+    .await
+    .unwrap();
     let session = Session::builder().build().unwrap();
     let saved = dir.join("file.bin");
     let written = session
@@ -223,14 +221,15 @@ impl Trace for Tags {
 
 #[tokio::test]
 async fn summaries_name_the_tag_proxy_and_attempts() {
-    let proxy = RawServer::start(vec![
-        RawResponse::status(503, "Service Unavailable"),
-        RawResponse::ok(),
-    ])
-    .await;
+    let proxy = TestServer::http(queue(vec![
+        TestResponse::new(503).close(),
+        TestResponse::new(200).body("ok").close(),
+    ]))
+    .await
+    .unwrap();
     let hook = Arc::new(Tags::default());
     let session = Session::builder()
-        .proxy(proxy.url(""))
+        .proxy(format!("http://{}", proxy.addr()))
         .trace(Arc::clone(&hook))
         .retry(fast_retry())
         .build()

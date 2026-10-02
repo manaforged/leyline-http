@@ -3,7 +3,9 @@ use std::sync::Arc;
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-use super::types::{ChunkedBody, Handler, RecordedRequest, Recorder, TestResponse};
+use super::types::{
+    CLOSE, CONNECTION, ChunkedBody, Handler, RecordedRequest, Recorder, TestResponse,
+};
 use crate::pool::H1PooledError;
 use crate::pool::h1::MAX_H1_HEADER_BYTES;
 use crate::pool::h1::parse::{parse_h1_head, read_chunked_body};
@@ -18,12 +20,13 @@ where
 {
     let mut buf = Vec::new();
     while let Ok(Some(request)) = read_request(&mut stream, &mut buf).await {
-        let close = request
-            .header("connection")
-            .is_some_and(|value| value.eq_ignore_ascii_case("close"));
+        let close_requested = request
+            .header(CONNECTION)
+            .is_some_and(|value| value.eq_ignore_ascii_case(CLOSE));
         let Some(response) = respond(&handler, &request).await else {
             return;
         };
+        let close = close_requested || response.closes();
         let head_only = request.method.eq_ignore_ascii_case("HEAD");
         if !recorder.record(request) {
             return;
@@ -56,8 +59,8 @@ where
     let Some(end) = read_head(stream, buf).await? else {
         return Ok(None);
     };
-    let head = String::from_utf8_lossy(&buf[..end]).into_owned();
-    buf.drain(..end + HEAD_END.len());
+    let raw: Vec<u8> = buf.drain(..end + HEAD_END.len()).collect();
+    let head = String::from_utf8_lossy(&raw[..end]).into_owned();
     let (request_line, header_block) = head.split_once("\r\n").unwrap_or((head.as_str(), ""));
     let mut parts = request_line.split(' ');
     let (Some(method), Some(target)) = (parts.next(), parts.next()) else {
@@ -70,6 +73,8 @@ where
         target: target.to_owned(),
         headers,
         body: Vec::new(),
+        request_line: request_line.to_owned(),
+        raw,
     };
     request.body = read_body(stream, buf, &request).await?;
     Ok(Some(request))

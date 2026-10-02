@@ -1,4 +1,4 @@
-use std::future::Future;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tokio::sync::{mpsc, oneshot, watch};
@@ -6,9 +6,106 @@ use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior};
 
 use crate::core::{Error, Kind, Result};
+use crate::util::lock;
+
+pub(crate) struct SaveJob {
+    pub(crate) generation: u64,
+    pub(crate) write: Box<dyn FnOnce() -> Result<()> + Send>,
+}
 
 pub(crate) trait SaveTarget: Send + 'static {
-    fn save(&mut self) -> impl Future<Output = Result<()>> + Send;
+    fn prepare(&mut self) -> Option<SaveJob>;
+    fn saved(&mut self, generation: u64);
+    fn unsaved(&self) -> bool {
+        false
+    }
+}
+
+struct Guard<T: SaveTarget> {
+    target: T,
+    changes: watch::Receiver<u64>,
+    commands: mpsc::UnboundedReceiver<Command>,
+    label: &'static str,
+    dirty: bool,
+    finished: bool,
+    order: WriteOrder,
+}
+
+#[derive(Default)]
+pub(crate) struct WriteOrder {
+    sequence: u64,
+    written: Arc<Mutex<u64>>,
+}
+
+impl WriteOrder {
+    pub(crate) fn order(
+        &mut self,
+        write: Box<dyn FnOnce() -> Result<()> + Send>,
+    ) -> impl FnOnce() -> Result<()> + Send + 'static {
+        self.sequence += 1;
+        let sequence = self.sequence;
+        let written = Arc::clone(&self.written);
+        move || {
+            let mut last = lock(&written);
+            if *last >= sequence {
+                return Ok(());
+            }
+            write()?;
+            *last = sequence;
+            Ok(())
+        }
+    }
+}
+
+impl<T: SaveTarget> Guard<T> {
+    async fn save(&mut self) -> Result<()> {
+        let Some(job) = self.begin() else {
+            return Ok(());
+        };
+        let generation = job.generation;
+        let written = tokio::task::spawn_blocking(self.order.order(job.write))
+            .await
+            .map_err(|_| stopped(self.label))
+            .and_then(|out| out);
+        self.end(generation, written)
+    }
+
+    fn save_now(&mut self) -> Result<()> {
+        let Some(job) = self.begin() else {
+            return Ok(());
+        };
+        let generation = job.generation;
+        let written = self.order.order(job.write)();
+        self.end(generation, written)
+    }
+
+    fn begin(&mut self) -> Option<SaveJob> {
+        self.dirty = false;
+        self.target.prepare()
+    }
+
+    fn end(&mut self, generation: u64, written: Result<()>) -> Result<()> {
+        match written {
+            Ok(()) => self.target.saved(generation),
+            Err(_) => self.dirty = true,
+        }
+        written
+    }
+
+    fn pending(&mut self) -> bool {
+        self.dirty
+            || self.changes.has_changed().unwrap_or(false)
+            || !self.commands.is_empty()
+            || self.target.unsaved()
+    }
+}
+
+impl<T: SaveTarget> Drop for Guard<T> {
+    fn drop(&mut self) {
+        if !self.finished && self.pending() {
+            drop(self.save_now());
+        }
+    }
 }
 
 type Reply = oneshot::Sender<Result<()>>;
@@ -26,8 +123,8 @@ pub(crate) struct Autosave {
 }
 
 pub(crate) struct Schedule {
-    pub(crate) debounce: Duration,
-    pub(crate) interval: Option<Duration>,
+    pub(crate) interval: Duration,
+    pub(crate) periodic: Option<Duration>,
     pub(crate) label: &'static str,
 }
 
@@ -75,35 +172,46 @@ pub(crate) fn stopped(label: &str) -> Error {
 }
 
 async fn run<T: SaveTarget>(
-    mut target: T,
-    mut changes: watch::Receiver<u64>,
+    target: T,
+    changes: watch::Receiver<u64>,
     schedule: Schedule,
-    mut commands: mpsc::UnboundedReceiver<Command>,
+    commands: mpsc::UnboundedReceiver<Command>,
 ) {
+    let mut guard = Guard {
+        target,
+        changes,
+        commands,
+        label: schedule.label,
+        dirty: false,
+        finished: false,
+        order: WriteOrder::default(),
+    };
     let mut watching = true;
     let mut due: Option<Instant> = None;
-    let mut ticker = schedule.interval.map(|period| {
+    let mut ticker = schedule.periodic.map(|period| {
         let mut ticker = tokio::time::interval_at(Instant::now() + period, period);
         ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
         ticker
     });
     loop {
         tokio::select! {
-            changed = changes.changed(), if watching => {
+            changed = guard.changes.changed(), if watching => {
                 watching = changed.is_ok();
                 if watching {
-                    due.get_or_insert_with(|| Instant::now() + schedule.debounce);
+                    guard.dirty = true;
+                    due.get_or_insert_with(|| Instant::now() + schedule.interval);
                 }
             }
             () = deadline(due) => {
                 due = None;
-                drop(target.save().await);
+                drop(guard.save().await);
             }
             () = tick(ticker.as_mut()) => {
-                drop(target.save().await);
+                drop(guard.save().await);
             }
-            command = commands.recv() => {
-                if !handle(command, &mut target, &mut due, schedule.debounce).await {
+            command = guard.commands.recv() => {
+                if !handle(command, &mut guard, &mut due, schedule.interval).await {
+                    guard.finished = true;
                     return;
                 }
             }
@@ -127,24 +235,25 @@ async fn tick(ticker: Option<&mut tokio::time::Interval>) {
 
 async fn handle<T: SaveTarget>(
     command: Option<Command>,
-    target: &mut T,
+    guard: &mut Guard<T>,
     due: &mut Option<Instant>,
-    debounce: Duration,
+    interval: Duration,
 ) -> bool {
     let reply = match command {
         Some(Command::Touch) => {
-            due.get_or_insert_with(|| Instant::now() + debounce);
+            guard.dirty = true;
+            due.get_or_insert_with(|| Instant::now() + interval);
             return true;
         }
         Some(Command::Flush(reply)) => Some(reply),
         Some(Command::Shutdown(reply)) => {
-            drop(reply.send(target.save().await));
+            drop(reply.send(guard.save().await));
             return false;
         }
         None => None,
     };
     *due = None;
-    let saved = target.save().await;
+    let saved = guard.save().await;
     match reply {
         Some(reply) => {
             drop(reply.send(saved));
@@ -153,3 +262,7 @@ async fn handle<T: SaveTarget>(
         None => false,
     }
 }
+
+#[cfg(test)]
+#[path = "autosave_tests.rs"]
+mod tests;

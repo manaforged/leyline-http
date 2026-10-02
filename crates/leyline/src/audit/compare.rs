@@ -23,6 +23,7 @@ pub enum FieldOutcome {
     Mismatch { expected: String, observed: String },
     Informational { expected: String, observed: String },
     NotReported,
+    Absent { expected: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,6 +33,7 @@ pub struct FingerprintReport {
     pub ja3: FieldOutcome,
     pub h2_fingerprint: FieldOutcome,
     pub headers: Vec<HeaderOutcome>,
+    pub header_order: FieldOutcome,
 }
 
 #[derive(Deserialize, Default)]
@@ -95,15 +97,23 @@ impl Observed {
 
 impl FieldOutcome {
     pub fn is_mismatch(&self) -> bool {
-        matches!(self, FieldOutcome::Mismatch { .. })
+        matches!(
+            self,
+            FieldOutcome::Mismatch { .. } | FieldOutcome::Absent { .. }
+        )
     }
 }
 
 impl FingerprintReport {
     pub fn is_match(&self) -> bool {
-        [&self.ja4, &self.ja3, &self.h2_fingerprint]
-            .iter()
-            .all(|outcome| !outcome.is_mismatch())
+        [
+            &self.ja4,
+            &self.ja3,
+            &self.h2_fingerprint,
+            &self.header_order,
+        ]
+        .iter()
+        .all(|outcome| !outcome.is_mismatch())
             && self.headers.iter().all(|h| !h.outcome.is_mismatch())
     }
 }
@@ -119,6 +129,7 @@ impl AuditData {
                 false,
             ),
             headers: headers::compare(&self.request_headers, &observed.headers),
+            header_order: headers::order(&self.request_headers, &observed.headers),
         }
     }
 }
@@ -153,6 +164,7 @@ impl std::fmt::Display for FieldOutcome {
                 )
             }
             FieldOutcome::NotReported => f.write_str("not reported"),
+            FieldOutcome::Absent { expected } => write!(f, "absent (expected {expected})"),
         }
     }
 }
@@ -162,6 +174,7 @@ impl std::fmt::Display for FingerprintReport {
         writeln!(f, "ja4: {}", self.ja4)?;
         writeln!(f, "ja3: {}", self.ja3)?;
         write!(f, "h2: {}", self.h2_fingerprint)?;
+        write!(f, "\nheader order: {}", self.header_order)?;
         for header in &self.headers {
             write!(f, "\nheader {}: {}", header.name, header.outcome)?;
         }

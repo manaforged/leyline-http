@@ -299,17 +299,17 @@ let session = Session::builder()
 # }
 ```
 
-On first use the pool derives the identity session from the request's
-session with `Session::with_identity`, and keeps it. Entries with the same
-identity share one derived session. That session shares the connection pool
-(in its own partition) and the host limits, and has its own TLS session
-cache. Unlike a plain `with_identity` session, it gets its own cookie jar,
-which starts empty, so one identity's cookies never go out under another.
-When an origin moves to a proxy with another identity, its cookies stay in
-the old identity's jar.
+On first use of a proxy, the pool derives a session for it from the request's
+session with `Session::with_identity`, and keeps it. That session shares the
+connection pool (in its own partition) and the host limits, and has its own
+TLS session cache. Unlike a plain `with_identity` session, it gets its own
+cookie jar, which starts empty. Each proxy has its own jar, also when two
+proxies share an `Identity`, so cookies set through one proxy never go out
+through another. When an origin moves to another proxy, its cookies stay in
+the old proxy's jar.
 
-The session must impersonate a browser: through `Session::new()`, the first
-request sent to an identified proxy fails with `Kind::Config`.
+The session must impersonate a browser. A session with `ProxyPool::identified`
+and no browser, profile, or identity fails at `build()` with `Kind::Config`.
 
 ## Proxy errors
 

@@ -2,6 +2,8 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
+use http::StatusCode;
+
 use crate::core::block::BlockRules;
 use crate::core::config::ProxyConfig;
 use crate::core::error::{Error, ErrorCategory, Kind, Result};
@@ -13,7 +15,17 @@ pub use wait::WaitFormat;
 pub(crate) use wait::parse_retry_after;
 use wait::{RETRY_AFTER, WaitHeader};
 
-pub(crate) const GATEWAY_STATUSES: [u16; 3] = [502, 503, 504];
+const GATEWAY_STATUSES: [StatusCode; 3] = [
+    StatusCode::BAD_GATEWAY,
+    StatusCode::SERVICE_UNAVAILABLE,
+    StatusCode::GATEWAY_TIMEOUT,
+];
+
+pub(crate) fn is_gateway_status(code: u16) -> bool {
+    GATEWAY_STATUSES
+        .iter()
+        .any(|status| status.as_u16() == code)
+}
 
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
@@ -83,14 +95,17 @@ impl RetryPolicy {
             max_retries: 3,
             initial_backoff: Duration::from_millis(100),
             max_backoff: Duration::from_secs(1),
-            max_retry_after: Duration::MAX,
+            max_retry_after: Duration::from_secs(60),
             backoff_factor: 2.0,
             jitter: true,
-            retry_on: [RetryTrigger::ConnectionError, RetryTrigger::Status(429)]
-                .into_iter()
-                .chain(GATEWAY_STATUSES.map(RetryTrigger::Status))
-                .chain([RetryTrigger::Timeout])
-                .collect(),
+            retry_on: [
+                RetryTrigger::ConnectionError,
+                RetryTrigger::Status(StatusCode::TOO_MANY_REQUESTS.as_u16()),
+            ]
+            .into_iter()
+            .chain(GATEWAY_STATUSES.map(|status| RetryTrigger::Status(status.as_u16())))
+            .chain([RetryTrigger::Timeout])
+            .collect(),
             allow_non_idempotent: false,
             proxies: Vec::new(),
             retry_if: Vec::new(),
@@ -205,12 +220,10 @@ impl RetryPolicy {
     }
 
     fn wait_in<'a>(&self, header: impl Fn(&str) -> Option<&'a str>) -> Option<Duration> {
-        if let Some(wait) = header(RETRY_AFTER).and_then(parse_retry_after) {
-            return Some(wait);
-        }
         self.wait_headers
             .iter()
             .find_map(|wait| header(&wait.name).and_then(|value| wait.format.parse(value)))
+            .or_else(|| header(RETRY_AFTER).and_then(parse_retry_after))
     }
 
     pub(crate) fn proxy_for_retry(&self, retry: u32) -> Option<&ProxyConfig> {
@@ -255,7 +268,7 @@ impl RetryPolicy {
         } else {
             capped
         };
-        Duration::from_secs_f64(jittered.max(0.0))
+        Duration::try_from_secs_f64(jittered.max(0.0)).unwrap_or(self.max_backoff)
     }
 }
 
@@ -265,6 +278,7 @@ fn unsent(err: &Error) -> bool {
             true
         }
         ErrorCategory::Timeout => err.kind() == Kind::Connect,
+        ErrorCategory::Protocol => err.is_refused_stream(),
         _ => false,
     }
 }

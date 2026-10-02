@@ -52,15 +52,19 @@ let session = Session::builder()
 
 Clone the session into each worker task. A clone is an `Arc` clone: it shares
 the connection pool, the cookie jar, the host limits, and the proxy pool.
-`TimeoutConfig::body` bounds each body read, so a slow page fails with a
+`TimeoutConfig::body` bounds each body from its first read, so a slow page fails with a
 timeout error. See
 [Retries and timeouts](retries-and-timeouts.md#bound-a-whole-download).
 
 ## Limit each host
 
 `HostLimits` applies per origin (scheme, host, and port), across HTTP/1.1,
-HTTP/2, and HTTP/3. `HostLimits::default()` has no limits. Clones and
-derived sessions share the same limits.
+HTTP/2, and HTTP/3. A host name with a trailing dot is the same host as the
+name without it. `HostLimits::default()` has no limits.
+
+`HostLimits` is configuration. Each session that you build from it keeps its
+own counters, queues, and pauses. Clones and derived sessions of that session
+share them; a second session built from the same `HostLimits` value does not.
 
 | Setter | Effect |
 | --- | --- |
@@ -68,8 +72,13 @@ derived sessions share the same limits.
 | `per_second(rate)` | Requests to the origin start at least `1 / rate` seconds apart. A rate of 0 or less turns the spacing off |
 | `max_total_in_flight(n)` | At most `n` requests at the same time across all hosts. The smallest value is 1 |
 | `host(host, limits)` | Replaces `max_in_flight` and `per_second` for one host. `*.example.com` matches every subdomain, not `example.com` itself. An exact host wins over a wildcard, and a longer wildcard over a shorter one |
-| `pause_on(statuses)` | A response with one of these statuses stops new requests to its origin until the time its `Retry-After` names. Requests in flight continue |
-| `pause_for(duration)` | The pause when the response has no usable `Retry-After`. The default is 60 s |
+| `pause_on(statuses)` | A response with one of these statuses stops new requests to the origin that sent it, for the wait the server asks for. Requests in flight continue |
+| `pause_for(duration)` | The pause when the response asks for no wait. The default is 60 s |
+| `max_pause(duration)` | The longest pause a server can ask for. A longer request is cut to this value. The default is 24 h |
+
+The server's wait comes from the same headers the retry policy reads: each
+`RetryPolicy::wait_header`, then `Retry-After`. See
+[Retries and timeouts](retries-and-timeouts.md#retry-on-a-condition-and-wait-on-a-header).
 
 ```rust
 use leyline::HostLimits;
@@ -87,12 +96,26 @@ An override uses only the `max_in_flight` and `per_second` you pass; a
 setting it leaves out has no limit for that host. The global cap applies to
 every host.
 
-A request waits for an in-flight slot of its origin, then for a global slot,
-then for its turn in the rate spacing and any pause. The wait counts against
-the request deadline, and ends in `Kind::Timeout` when the deadline passes.
-Each retry waits its turn again. A buffered request releases its slot when
+A request is admitted in this order:
+
+1. It waits for an in-flight slot of its origin.
+2. It waits while the origin is paused, then for the origin's next rate slot.
+3. It waits for a global slot. A request that loses its turn while it waits
+   for the global slot goes back to step 2.
+
+No request holds a global slot while it waits for a pause or the rate
+spacing. The rate spacing is measured when a request is admitted, and a pause
+is checked again just before admission.
+
+The wait counts against the request deadline, and ends in `Kind::Timeout`
+when the deadline passes. Each retry waits its turn again. Each redirect hop
+is admitted against the origin it goes to, and releases the slot of the hop
+before. `pause_on` and the proxy pool's strikes apply to the origin that sent
+the response, which after a redirect is not the origin of the first URL. A buffered request releases its slot when
 its body has been read; a `.stream()` request keeps it until the body ends,
-fails, or is dropped. Dropping a waiting request removes it from the queue.
+fails, or is dropped. A streamed body ends at its first error and releases
+the slot. A failed attempt releases its slot before the retry wait. Dropping
+a waiting request removes it from the queue.
 
 `max_in_flight` counts requests to one origin across every proxy. The
 connection pool then applies `PoolConfig::max_h1_conns_per_host` to each
@@ -235,8 +258,9 @@ async fn crawl_one(session: &Session, url: &str) -> Next {
 
 `RequestBuilder::download(path, limit)` streams the decoded body to a
 temporary file in the same directory, then renames it to `path`. A status of
-400 or more becomes an error with the status, the URL, and the first 4096
-bytes of the body. The limit is the smaller of `limit` and `max_body_size`.
+400 or more becomes an error with the status, the URL, the headers, and the
+start of the body, within the
+[status-error limits](responses.md#turn-a-status-into-an-error). The limit is the smaller of `limit` and `max_body_size`.
 When the body has no content coding and its `Content-Length` is over the
 limit, the download fails with a body-limit error before it reads the body.
 Any error or cancel removes the temporary file, so `path` never holds a
@@ -403,7 +427,8 @@ Pin the combined stream with `std::pin::pin!` before you call `.next()`.
 
 | Item | Bound |
 | --- | --- |
-| Buffered body | `SessionBuilder::max_body_size`, 100 MiB by default |
+| Buffered body | `CompressionConfig::max_body_size`, 100 MiB by default |
+| Body kept in a status error | `CompressionConfig::max_error_body`, 64 KiB by default |
 | Idle connections | `PoolConfig::idle_timeout`, 300 s by default |
 | Connections | `PoolConfig::max_connections` per pool, 2048 by default |
 | HTTP/1.1 connections per host | `PoolConfig::max_h1_conns_per_host`, 256 by default |

@@ -96,10 +96,10 @@ and saves the decoded body to `path`. It returns the number of bytes written.
 
 | Step | What happens |
 | --- | --- |
-| Status | With `download`, a status of 400 or more is a `Kind::Status` error with the status, the URL, and the first 4096 bytes of the body. Nothing is written. `download_to` does not check the status; call `error_for_status()` first |
+| Status | With `download`, a status of 400 or more is a `Kind::Status` error with the status, the URL, the headers, and the start of the body, within the [status-error limits](responses.md#turn-a-status-into-an-error). Nothing is written. `download_to` does not check the status; call `error_for_status()` first |
 | Write | The decoded body goes to a temporary file `.<name>.<16 hex>.part` in the same directory |
 | Limit | The smaller of `limit` and `max_body_size`, in decoded bytes. `content_length()` is the encoded size |
-| Commit | Leyline flushes and syncs the file, renames it to `path`, and on Unix syncs the directory |
+| Commit | Leyline flushes and syncs the file, renames it to `path`, and on Unix syncs the directory. When `path` already exists, the new file keeps its permission bits, without setuid, setgid, or sticky bits. |
 | Error or drop | Leyline removes the temporary file. `path` does not exist, or keeps its old content |
 
 A path with no file name fails with `Kind::Request`.
@@ -111,7 +111,7 @@ head. Two timeouts bound the body:
 
 - `read` limits the gap between two chunks. It stops a server that goes
   quiet. A gap past it is an `io::ErrorKind::TimedOut` error from the stream.
-- `body` limits the whole body after the head. It stops a server that sends
+- `body` limits the whole body, from its first read. It stops a server that sends
   slowly but never stops. A plain `Duration` passed to `.timeout` sets only
   `total`, which ends at the head of a streamed response.
 

@@ -63,7 +63,9 @@ impl BodyWatch {
 
 impl Drop for BodyWatch {
     fn drop(&mut self) {
-        self.end(BodyOutcome::Dropped);
+        if !std::thread::panicking() {
+            self.end(BodyOutcome::Dropped);
+        }
     }
 }
 

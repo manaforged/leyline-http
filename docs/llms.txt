@@ -4,16 +4,16 @@
 
 ## leyline-http 0.1.0
 
-- [Every public item, one per line](reference/leyline-http/api.txt): 1804 lines
+- [Every public item, one per line](reference/leyline-http/api.txt): 1846 lines
 - [API overview](reference/leyline-http/index.html): tasks, modules, features, and examples
 - [API changes by release](reference/leyline-http/changes.html)
-- [leyline](reference/leyline-http/leyline.html): 665 items
-- [leyline::audit](reference/leyline-http/leyline-audit.html): 60 items
-- [leyline::cookie](reference/leyline-http/leyline-cookie.html): 36 items
-- [leyline::html](reference/leyline-http/leyline-html.html): 21 items
+- [leyline](reference/leyline-http/leyline.html): 673 items
+- [leyline::audit](reference/leyline-http/leyline-audit.html): 63 items
+- [leyline::cookie](reference/leyline-http/leyline-cookie.html): 35 items
+- [leyline::html](reference/leyline-http/leyline-html.html): 28 items
 - [leyline::multipart](reference/leyline-http/leyline-multipart.html): 14 items
-- [leyline::profile](reference/leyline-http/leyline-profile.html): 173 items
-- [leyline::testing](reference/leyline-http/leyline-testing.html): 27 items
+- [leyline::profile](reference/leyline-http/leyline-profile.html): 174 items
+- [leyline::testing](reference/leyline-http/leyline-testing.html): 34 items
 - [leyline::tls](reference/leyline-http/leyline-tls.html): 8 items
 - [leyline::trace](reference/leyline-http/leyline-trace.html): 87 items
 - [Example api_client](reference/leyline-http/examples/api_client.html): `cargo run -p leyline-http --example api_client`
@@ -117,3 +117,95 @@
 - [Set WebSocket limits](reference/leyline-http/leyline.html#sessionbuilder): `SessionBuilder::websocket_config`
 - [tower](reference/leyline-http/leyline.html#leylineservice): `LeylineService::new`
 - [Run a local test server](reference/leyline-http/leyline-testing.html#testserver): `testing::TestServer::http`
+- [One-line browser session](reference/leyline-http/leyline.html#session): `Session::browser`
+- [Session base URL](reference/leyline-http/leyline.html#sessionbuilder): `SessionBuilder::base_url`
+- [Derive a session with another base URL](reference/leyline-http/leyline.html#session): `Session::with_base_url`
+- [Session bearer token](reference/leyline-http/leyline.html#sessionbuilder): `SessionBuilder::bearer_auth`
+- [Session user agent](reference/leyline-http/leyline.html#sessionbuilder): `SessionBuilder::user_agent`
+- [Session languages](reference/leyline-http/leyline.html#sessionbuilder): `SessionBuilder::languages`
+- [Stop every clone of a session](reference/leyline-http/leyline.html#session): `Session::shutdown`
+- [Detect a stopped session](reference/leyline-http/leyline.html#error): `Error::is_shut_down`
+- [Save TLS tickets, Alt-Svc, and HSTS](reference/leyline-http/leyline.html#session): `Session::state`
+- [Restore saved session state](reference/leyline-http/leyline.html#sessionstate): `SessionState::restore_into`
+- [Keep the current page](reference/leyline-http/leyline.html#session): `Session::tab`
+- [Status check after retries, with the body](reference/leyline-http/leyline.html#requestbuilder): `RequestBuilder::error_for_status`
+- [Download to a file](reference/leyline-http/leyline.html#requestbuilder): `RequestBuilder::download`
+- [Download a received response](reference/leyline-http/leyline.html#response): `Response::download_to`
+- [Follow Link pagination](reference/leyline-http/leyline.html#requestbuilder): `RequestBuilder::pages`
+- [Read Link headers](reference/leyline-http/leyline.html#response): `Response::links`
+- [Read one Link relation](reference/leyline-http/leyline.html#response): `Response::link`
+- [Relay response headers](reference/leyline-http/leyline.html#response): `Response::relay_headers`
+- [Relay a header map](reference/leyline-http/leyline.html#relay_headers): `relay_headers`
+- [Body read timeout](reference/leyline-http/leyline.html#timeoutconfig): `TimeoutConfig::body`
+- [Status-error body read timeout](reference/leyline-http/leyline.html#timeoutconfig): `TimeoutConfig::error_body`
+- [Status-error body cap](reference/leyline-http/leyline.html#compressionconfig): `CompressionConfig::max_error_body`
+- [Error category](reference/leyline-http/leyline.html#error): `Error::category`
+- [Connect failure](reference/leyline-http/leyline.html#error): `Error::is_connect`
+- [Timeout](reference/leyline-http/leyline.html#error): `Error::is_timeout`
+- [DNS failure](reference/leyline-http/leyline.html#error): `Error::is_dns`
+- [Proxy failure](reference/leyline-http/leyline.html#error): `Error::is_proxy`
+- [Body limit](reference/leyline-http/leyline.html#error): `Error::is_body_limit`
+- [Status error](reference/leyline-http/leyline.html#error): `Error::is_status`
+- [Retryable error](reference/leyline-http/leyline.html#error): `Error::is_retryable`
+- [Find a leyline error in a chain](reference/leyline-http/leyline.html#error): `Error::find`
+- [Retry on a condition](reference/leyline-http/leyline.html#retrypolicy): `RetryPolicy::retry_if`
+- [Wait on a rate-limit header](reference/leyline-http/leyline.html#retrypolicy): `RetryPolicy::wait_header`
+- [Retry a request that was not sent](reference/leyline-http/leyline.html#retrypolicy): `RetryPolicy::retry_unsent`
+- [Return a block without a retry](reference/leyline-http/leyline.html#retrypolicy): `RetryPolicy::skip_blocks`
+- [Cap a server-requested wait](reference/leyline-http/leyline.html#retrypolicy): `RetryPolicy::max_retry_after`
+- [Limit each host](reference/leyline-http/leyline.html#sessionbuilder): `SessionBuilder::host_limits`
+- [Requests in flight per host](reference/leyline-http/leyline.html#hostlimits): `HostLimits::max_in_flight`
+- [Requests per second per host](reference/leyline-http/leyline.html#hostlimits): `HostLimits::per_second`
+- [Limits for one host](reference/leyline-http/leyline.html#hostlimits): `HostLimits::host`
+- [Requests in flight in total](reference/leyline-http/leyline.html#hostlimits): `HostLimits::max_total_in_flight`
+- [Pause a host on a status](reference/leyline-http/leyline.html#hostlimits): `HostLimits::pause_on`
+- [Default pause length](reference/leyline-http/leyline.html#hostlimits): `HostLimits::pause_for`
+- [Cap a server-requested pause](reference/leyline-http/leyline.html#hostlimits): `HostLimits::max_pause`
+- [Read per-host queues](reference/leyline-http/leyline.html#session): `Session::host_stats`
+- [Proxy pool](reference/leyline-http/leyline.html#sessionbuilder): `SessionBuilder::proxy_pool`
+- [Build a proxy pool](reference/leyline-http/leyline.html#proxypool): `ProxyPool::new`
+- [Pin an identity to each proxy](reference/leyline-http/leyline.html#proxypool): `ProxyPool::identified`
+- [Keep a proxy for a time](reference/leyline-http/leyline.html#proxypool): `ProxyPool::sticky_for`
+- [Ban a failing proxy](reference/leyline-http/leyline.html#proxypool): `ProxyPool::ban_after`
+- [Rotate the proxy on a block](reference/leyline-http/leyline.html#proxypool): `ProxyPool::rotate_on_block`
+- [Proxy health](reference/leyline-http/leyline.html#proxypool): `ProxyPool::stats`
+- [Block rules](reference/leyline-http/leyline.html#blockrules): `BlockRules::statuses`
+- [Detect a block page](reference/leyline-http/leyline.html#response): `Response::block`
+- [Browse with a tab](reference/leyline-http/leyline.html#tab): `Tab::open`
+- [Submit a page form](reference/leyline-http/leyline.html#tab): `Tab::submit_form`
+- [Parse forms](reference/leyline-http/leyline-html.html#forms): `html::forms`
+- [Fill a form](reference/leyline-http/leyline-html.html#form): `html::Form::set`
+- [Form encoding](reference/leyline-http/leyline-html.html#formenctype): `html::FormEnctype`
+- [Save a jar to a file](reference/leyline-http/leyline-cookie.html#jar): `cookie::Jar::save_to`
+- [Load a jar from a file](reference/leyline-http/leyline-cookie.html#jar): `cookie::Jar::load_from`
+- [Save a jar as it changes](reference/leyline-http/leyline-cookie.html#jar): `cookie::Jar::autosave`
+- [Capture a device](reference/leyline-http/leyline.html#device): `Device::capture`
+- [Open a saved device](reference/leyline-http/leyline.html#device): `Device::open`
+- [Save a device as it changes](reference/leyline-http/leyline.html#device): `Device::autosave`
+- [Device save intervals](reference/leyline-http/leyline.html#deviceautosaveoptions): `DeviceAutosaveOptions::new`
+- [One event per request](reference/leyline-http/leyline-trace.html#trace): `trace::Trace::summary`
+- [Count requests](reference/leyline-http/leyline-trace.html#metrics): `trace::Metrics::new`
+- [Send events to several traces](reference/leyline-http/leyline-trace.html#fanout): `trace::Fanout::with`
+- [Compare with an echo service](reference/leyline-http/leyline-audit.html#auditdata): `audit::AuditData::compare`
+- [Run a local HTTPS test server](reference/leyline-http/leyline-testing.html#testserver): `testing::TestServer::https`
+- [Run a test server on your listener](reference/leyline-http/leyline-testing.html#testserver): `testing::TestServer::http_on`
+- [Read the request head as received](reference/leyline-http/leyline-testing.html#recordedrequest): `testing::RecordedRequest::raw`
+- [Read the request line](reference/leyline-http/leyline-testing.html#recordedrequest): `testing::RecordedRequest::request_line`
+- [Read every value of a header](reference/leyline-http/leyline-testing.html#recordedrequest): `testing::RecordedRequest::header_values`
+- [Count a header](reference/leyline-http/leyline-testing.html#recordedrequest): `testing::RecordedRequest::header_count`
+- [Send one GET](reference/leyline-http/leyline.html#get): `get`
+- [Stream the decoded body](reference/leyline-http/leyline.html#response): `Response::into_decoded_stream`
+- [Copy the decoded body to a writer](reference/leyline-http/leyline.html#response): `Response::copy_decoded_to`
+- [Rotate proxies on retry](reference/leyline-http/leyline.html#retrypolicy): `RetryPolicy::rotate_proxies`
+- [Check a session against a device](reference/leyline-http/leyline.html#device): `Device::check`
+- [Expect a profile id](reference/leyline-http/leyline.html#sessionbuilder): `SessionBuilder::expect_profile_id`
+- [Load block rules from TOML](reference/leyline-http/leyline.html#blockrules): `BlockRules::from_toml`
+- [Read the links of a page](reference/leyline-http/leyline-html.html#links): `html::links`
+- [Read the meta tags of a page](reference/leyline-http/leyline-html.html#meta): `html::meta`
+- [Find a form by id or name](reference/leyline-http/leyline-html.html#form): `html::Form::find`
+- [Name an error category](reference/leyline-http/leyline.html#errorcategory): `ErrorCategory::as_str`
+- [Send a script fetch from a tab](reference/leyline-http/leyline.html#tab): `Tab::fetch`
+- [Send an XHR from a tab](reference/leyline-http/leyline.html#tab): `Tab::xhr`
+- [Post JSON from a tab](reference/leyline-http/leyline.html#tab): `Tab::post_json`
+- [Load a subresource from a tab](reference/leyline-http/leyline.html#tab): `Tab::subresource`
+- [Limit pagination](reference/leyline-http/leyline.html#pages): `Pages::limit`

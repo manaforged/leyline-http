@@ -1,3 +1,4 @@
+pub(crate) mod alpn;
 pub(crate) mod builder;
 mod connector;
 pub(crate) mod error;

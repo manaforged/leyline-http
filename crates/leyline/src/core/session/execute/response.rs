@@ -60,6 +60,9 @@ impl Session {
         url: &Url,
         resp_headers: &[(http::HeaderName, http::HeaderValue)],
     ) {
+        if self.inner.tls_trust.accepts_invalid_certs() {
+            return;
+        }
         let values: Vec<&str> = resp_headers
             .iter()
             .filter(|(k, _)| *k == "strict-transport-security")
@@ -126,6 +129,8 @@ impl Session {
             .finalize_response_body(body, headers, stream_response, deadline)
             .await?;
         let audited = self.inner.audit_tls.is_some();
+        let mut audit_headers = audit_headers;
+        audit_headers.retain(|(name, value)| crate::core::transport::sent_on(version, name, value));
         Ok(Response {
             status,
             headers: headers.into_iter().collect(),

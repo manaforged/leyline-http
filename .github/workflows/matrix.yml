@@ -1,13 +1,8 @@
 name: matrix
 
 on:
-  schedule:
-    - cron: '37 6 * * *'
+  workflow_call:
   workflow_dispatch:
-
-concurrency:
-  group: leyline-matrix-${{ github.ref }}
-  cancel-in-progress: true
 
 permissions:
   contents: read

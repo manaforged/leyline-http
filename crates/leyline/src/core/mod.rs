@@ -34,7 +34,7 @@ pub use config::{
     TimeoutConfig, WebSocketConfig,
 };
 pub(crate) use config::{DEFAULT_MAX_BODY_SIZE, DEFAULT_MAX_HEADER_LIST_BYTES};
-pub use device::{Device, DeviceAutosave, SessionState};
+pub use device::{Device, DeviceAutosave, DeviceAutosaveOptions, SessionState};
 pub use digest::DigestAuth;
 pub use error::{Error, ErrorCategory, Kind, Result};
 pub use fetch_site::FetchSite;
@@ -42,6 +42,8 @@ pub use into_url::IntoUrl;
 pub use pages::Pages;
 pub use proxy_pool::{ProxyHealth, ProxyPool};
 pub use request::{ContentEncoding, IntoParamPair, RequestBuilder};
+#[cfg(feature = "bench-internals")]
+pub(crate) use response::parse_links;
 pub use response::{HttpVersion, Link, RelayBody, Response, ResponseTiming, relay_headers};
 pub use retry::{RetryPolicy, RetryTrigger, WaitFormat};
 #[cfg(feature = "tower")]

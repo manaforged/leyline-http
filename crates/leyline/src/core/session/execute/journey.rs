@@ -25,6 +25,7 @@ pub(super) struct Journey {
     pub(super) tainted: bool,
     pub(super) timing: ResponseTiming,
     caller_referrer: Option<String>,
+    trusted_origin: Option<String>,
 }
 
 pub(super) fn redirect_location(
@@ -94,6 +95,19 @@ impl Journey {
             tainted: false,
             timing: ResponseTiming::accumulator(),
             caller_referrer,
+            trusted_origin: None,
+        }
+    }
+
+    pub(super) fn trusting(mut self, trusted: Option<&Url>) -> Self {
+        self.trusted_origin = trusted.map(url_origin);
+        self
+    }
+
+    pub(super) fn strips_credentials(&self, origin: &str) -> bool {
+        match &self.trusted_origin {
+            Some(trusted) => origin != trusted,
+            None => !self.chain.is_empty() && origin != self.original_origin,
         }
     }
 

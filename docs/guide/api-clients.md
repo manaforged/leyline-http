@@ -69,9 +69,9 @@ exponential backoff. The setters in the example extend it:
 | Setter | Effect |
 | --- | --- |
 | `retry_if(predicate)` | Also retries a response for which the predicate returns `true` |
-| `wait_header(name, format)` | Reads the wait from a header, after `Retry-After` |
-| `max_retry_after(d)` | A longer requested wait ends the retries |
-| `retry_unsent(true)` | Retries any method when the request never left: a DNS, connect, TLS, or proxy error, or a connect timeout |
+| `wait_header(name, format)` | Reads the wait from a header. It wins over `Retry-After` |
+| `max_retry_after(d)` | A longer requested wait ends the retries. The default is 60 s |
+| `retry_unsent(true)` | Retries any method when the server did not process the request: a DNS, connect, TLS, or proxy error, a connect timeout, an HTTP/2 `REFUSED_STREAM` reset, or an HTTP/3 request the server reports it did not process |
 
 `total` spans every attempt of one send, waits included. A wait that does not
 fit in the time left ends the retries, so set `total` above `max_retry_after`
@@ -82,9 +82,12 @@ plus the time of the requests. See
 
 `error_for_status()` on the request turns a status of 400 or more into a
 `Kind::Status` error after the retries. The error keeps the status, the
-headers, and up to 64 KiB of the body. `err.retry_after()` returns the wait
-the policy read from the last response, and `err.retries_exhausted()` is
-`true` when that response still matched a retry trigger.
+headers, and up to 64 KiB of the body; see
+[Turn a status into an error](responses.md#turn-a-status-into-an-error).
+`err.retry_after()` returns the wait the policy read from the last response.
+`err.retries_exhausted()` is `true` when the policy wanted another try and
+did not make it; see
+[Status codes are not errors](errors.md#status-codes-are-not-errors).
 
 ```rust,no_run
 use leyline::{Error, ErrorCategory};
@@ -116,6 +119,11 @@ See [Errors](errors.md).
 each response with the same settings. See
 [Responses](responses.md#follow-link-pagination).
 
+There is no default page limit. Call `limit(max)` to stop after `max` pages.
+When a next link goes to another origin, the request drops the session
+credentials: the `Authorization`, `Cookie`, and `Proxy-Authorization`
+defaults and the session bearer token, as a redirect does.
+
 ```rust,no_run
 use serde::Deserialize;
 
@@ -126,7 +134,7 @@ struct Repo {
 
 # async fn run(api: leyline::Session) -> leyline::Result<()> {
 let mut repos = Vec::new();
-let mut pages = api.get("repos").error_for_status().pages();
+let mut pages = api.get("repos").error_for_status().pages().limit(100);
 while let Some(page) = pages.next().await {
     repos.extend(page?.json::<Vec<Repo>>().await?);
 }

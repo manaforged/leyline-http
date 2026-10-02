@@ -1,3 +1,6 @@
+#[path = "core_support/wait.rs"]
+mod wait;
+
 use std::time::{Duration, Instant};
 
 use leyline::testing::{TestResponse, TestServer};
@@ -88,7 +91,7 @@ async fn shutdown_interrupts_a_retry_backoff() {
         let url = server.url("/");
         async move { session.get(url).send().await }
     });
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    server.next_request().await.unwrap();
     session.shutdown();
     let err = tokio::time::timeout(Duration::from_secs(2), pending)
         .await
@@ -120,7 +123,14 @@ async fn a_paused_host_does_not_hold_the_total_cap() {
         let url = paused.url("/second");
         async move { session.get(url).await }
     });
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    let port = format!(":{}", paused.addr().port());
+    wait::until(|| {
+        session
+            .host_stats()
+            .iter()
+            .any(|s| s.origin().ends_with(&port) && s.in_flight() + s.waiting() > 0)
+    })
+    .await;
     let started = Instant::now();
     session.get(other.url("/")).await.unwrap();
     assert!(
@@ -189,7 +199,7 @@ async fn a_plaintext_websocket_is_refused_before_sending() {
 
 #[cfg(unix)]
 #[test]
-fn saved_jars_are_private_and_keep_the_file_mode() {
+fn saved_jars_are_always_private() {
     use std::os::unix::fs::PermissionsExt;
     let dir = scratch("jarmode");
     let jar = leyline::cookie::Jar::new();
@@ -199,7 +209,7 @@ fn saved_jars_are_private_and_keep_the_file_mode() {
     assert_eq!(mode(&fresh), 0o600);
     std::fs::set_permissions(&fresh, std::fs::Permissions::from_mode(0o640)).unwrap();
     jar.save_to(&fresh).unwrap();
-    assert_eq!(mode(&fresh), 0o640);
+    assert_eq!(mode(&fresh), 0o600);
     drop(std::fs::remove_dir_all(&dir));
 }
 
@@ -272,4 +282,24 @@ async fn a_body_stream_ends_after_its_deadline() {
     }
     assert_eq!(errors, 1);
     assert!(session.host_stats().iter().all(|s| s.in_flight() == 0));
+}
+
+#[tokio::test]
+async fn a_streamed_body_ends_at_its_first_error() {
+    let server =
+        TestServer::http(|_| TestResponse::new(200).chunks(["a", "b"], Duration::from_millis(500)))
+            .await
+            .unwrap();
+    let mut body = Session::new()
+        .get(server.url("/"))
+        .timeout(leyline::TimeoutConfig::new().read(Duration::from_millis(200)))
+        .stream()
+        .await
+        .unwrap()
+        .into_stream()
+        .unwrap();
+    use futures_util::StreamExt;
+    assert_eq!(&body.next().await.unwrap().unwrap()[..], b"a");
+    assert!(body.next().await.unwrap().is_err());
+    assert!(body.next().await.is_none());
 }

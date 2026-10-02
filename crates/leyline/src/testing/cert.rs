@@ -17,7 +17,6 @@ const LEAF_DNS_NAMES: &[&str] = &["localhost"];
 const LEAF_IP_ADDRESSES: &[&str] = &["127.0.0.1"];
 const VALID_DAYS: u32 = 2;
 const SERIAL_BITS: i32 = 159;
-const ALPN_HTTP11: &[u8] = b"\x08http/1.1";
 
 pub(super) struct TestTls {
     pub(super) acceptor: SslAcceptor,
@@ -30,15 +29,31 @@ pub(super) fn build() -> io::Result<TestTls> {
 
 fn build_inner() -> Result<TestTls, ErrorStack> {
     let ca_key = new_key()?;
+    let ca = ca_cert(&ca_key)?;
+    let leaf_key = new_key()?;
+    let leaf = leaf_cert(&ca, &ca_key, &leaf_key)?;
+    let ca_der = ca.to_der()?;
+    Ok(TestTls {
+        acceptor: acceptor(&leaf_key, &leaf, ca)?,
+        ca_der,
+    })
+}
+
+fn ca_cert(ca_key: &PKey<Private>) -> Result<X509, ErrorStack> {
     let ca_name = name(CA_COMMON_NAME)?;
-    let mut ca = base_cert(&ca_name, &ca_name, &ca_key)?;
+    let mut ca = base_cert(&ca_name, &ca_name, ca_key)?;
     let constraints = BasicConstraints::new().critical().ca().build()?;
     ca.append_extension(&constraints)?;
-    ca.sign(&ca_key, MessageDigest::sha256())?;
-    let ca = ca.build();
+    ca.sign(ca_key, MessageDigest::sha256())?;
+    Ok(ca.build())
+}
 
-    let leaf_key = new_key()?;
-    let mut leaf = base_cert(&name(LEAF_COMMON_NAME)?, ca.subject_name(), &leaf_key)?;
+fn leaf_cert(
+    ca: &X509,
+    ca_key: &PKey<Private>,
+    leaf_key: &PKey<Private>,
+) -> Result<X509, ErrorStack> {
+    let mut leaf = base_cert(&name(LEAF_COMMON_NAME)?, ca.subject_name(), leaf_key)?;
     let mut san = SubjectAlternativeName::new();
     for dns in LEAF_DNS_NAMES {
         san.dns(dns);
@@ -46,25 +61,23 @@ fn build_inner() -> Result<TestTls, ErrorStack> {
     for ip in LEAF_IP_ADDRESSES {
         san.ip(ip);
     }
-    let san = san.build(&leaf.x509v3_context(Some(&ca), None))?;
+    let san = san.build(&leaf.x509v3_context(Some(ca), None))?;
     leaf.append_extension(&san)?;
     let usage = ExtendedKeyUsage::new().server_auth().build()?;
     leaf.append_extension(&usage)?;
-    leaf.sign(&ca_key, MessageDigest::sha256())?;
-    let leaf = leaf.build();
+    leaf.sign(ca_key, MessageDigest::sha256())?;
+    Ok(leaf.build())
+}
 
-    let ca_der = ca.to_der()?;
+fn acceptor(leaf_key: &PKey<Private>, leaf: &X509, ca: X509) -> Result<SslAcceptor, ErrorStack> {
     let mut builder = SslAcceptor::mozilla_intermediate_v5(SslMethod::tls())?;
-    builder.set_private_key(&leaf_key)?;
-    builder.set_certificate(&leaf)?;
+    builder.set_private_key(leaf_key)?;
+    builder.set_certificate(leaf)?;
     builder.add_extra_chain_cert(ca)?;
     builder.set_alpn_select_callback(|_, client| {
-        select_next_proto(ALPN_HTTP11, client).ok_or(AlpnError::NOACK)
+        select_next_proto(crate::tls::alpn::HTTP11_WIRE, client).ok_or(AlpnError::NOACK)
     });
-    Ok(TestTls {
-        acceptor: builder.build(),
-        ca_der,
-    })
+    Ok(builder.build())
 }
 
 fn new_key() -> Result<PKey<Private>, ErrorStack> {

@@ -68,6 +68,8 @@ impl<'a> core::fmt::Debug for leyline::trace::Done<'a>
 
 ### `Fanout`
 
+- Task: Send events to several traces (`trace::Fanout::with`)
+
 ```rust,ignore
 pub struct leyline::trace::Fanout
 impl leyline::trace::Fanout
@@ -93,6 +95,8 @@ impl core::fmt::Debug for leyline::trace::Head<'_>
 ```
 
 ### `Metrics`
+
+- Task: Count requests (`trace::Metrics::new`)
 
 ```rust,ignore
 pub struct leyline::trace::Metrics
@@ -200,6 +204,8 @@ impl<'a> core::fmt::Debug for leyline::trace::BodyOutcome<'a>
 ## Traits
 
 ### `Trace`
+
+- Task: One event per request (`trace::Trace::summary`)
 
 ```rust,ignore
 pub trait leyline::trace::Trace: core::marker::Send + core::marker::Sync + 'static

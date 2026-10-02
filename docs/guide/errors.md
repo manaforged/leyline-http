@@ -94,7 +94,9 @@ if let Err(err) = session.get("https://api.example/").error_for_status().await {
 A `4xx` or `5xx` response is `Ok`. To get a status of 400 or more as an
 error, call `error_for_status()` on the request builder. A failed send and a
 bad status then arrive as one `Result`. The check runs after retries, so it
-sees the last response, and the error keeps up to 64 KiB of the decoded body.
+sees the last response, and the error keeps the start of the decoded body,
+within the limits in
+[Turn a status into an error](responses.md#turn-a-status-into-an-error).
 
 | Method on the error | Returns |
 | --- | --- |
@@ -105,12 +107,18 @@ sees the last response, and the error keeps up to 64 KiB of the decoded body.
 | `body()` | `Option<&[u8]>`, the start of the body, or `None` when the read failed |
 | `body_text()` | `Option<Cow<str>>`, the kept body as text, with invalid UTF-8 replaced |
 | `retry_after()` | `Option<Duration>`, the wait before the next try |
+| `retries_exhausted()` | `bool`, `true` when the retry policy wanted another try and did not make it |
 
-`retry_after()` returns the wait that the retry policy read, `Retry-After`
-first and then each `wait_header`, when the error comes from the
+`retry_after()` returns the wait that the retry policy read, each
+`wait_header` first and then `Retry-After`, when the error comes from the
 request-builder `error_for_status()`. Otherwise it parses `Retry-After`, in
 seconds or as an HTTP date. It is `None` for an error that is not a status
 error. See [Retries and timeouts](retries-and-timeouts.md#retry-after-wins).
+
+`retries_exhausted()` is `true` when the last response still matched a retry
+trigger and the policy stopped: no retries were left, the server asked for a
+wait longer than `max_retry_after`, or the wait or backoff was longer than the
+time left before the `total` timeout.
 
 Only a `Kind::Status` error carries a URL and headers. `Display` and `Debug`
 show the URL with the password and the query hidden.
@@ -143,7 +151,7 @@ The predicates look at the kind and at the source error:
 | Predicate | True for |
 | --- | --- |
 | `is_timeout()` | `Kind::Timeout`, and I/O or TLS errors with `TimedOut` |
-| `is_connect()` | `Kind::Connect`, DNS, TCP connect, and TLS handshake failures, and refused or unreachable sockets |
+| `is_connect()` | An error in category `Connect` or `Dns`, a TLS handshake failure, or a timeout while connecting. It agrees with `category()`: a TLS certificate, host name, or pin failure is false |
 | `is_dns()` | Name resolution failed. A session with `ProtocolPolicy::Http3` reports a DNS failure as a connect failure |
 | `is_status()` | `Kind::Status` |
 | `is_body_limit()` | A response body passed `max_body_size` or a limit you gave. The message names the limit. False for a body already taken, a failed request body stream, and corrupt compressed data |

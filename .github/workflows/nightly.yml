@@ -55,3 +55,11 @@ jobs:
 
       - name: verify gates
         run: scripts/verify.sh --only fuzz-timed
+
+  matrix:
+    name: matrix
+    uses: ./.github/workflows/matrix.yml
+
+  release-watch:
+    name: release watch
+    uses: ./.github/workflows/release-watch.yml

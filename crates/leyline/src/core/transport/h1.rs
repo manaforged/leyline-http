@@ -8,6 +8,7 @@ use crate::core::session::decompress::BodyLimit;
 use crate::h2::client::H2Client;
 use crate::pool::h1::{H1Dial, H1Outcome, H1Request, h1err_to_io, send_h1_pooled};
 use crate::pool::{H1Body, H1PooledError, H1ResponseBody, H1Slot, H1Target, Opened, Pool};
+use crate::profile::preset::HeaderPair;
 use crate::tls::FingerprintConnector;
 
 fn body_to_h1(body: Body) -> H1Body {
@@ -92,31 +93,7 @@ pub(super) async fn send_h1_on(
     })?;
     let scheme = url.scheme();
 
-    let (target, headers) = match (scheme, proxy) {
-        ("http", Some(proxy_url)) => {
-            let parsed = url::Url::parse(proxy_url).map_err(|e| {
-                Error::new(Kind::Config).with_message(format!("invalid proxy URL: {e}"))
-            })?;
-            let mut headers = headers;
-            headers.retain(|(k, _)| !k.eq_ignore_ascii_case("priority"));
-            if !matches!(parsed.scheme(), "http" | "https") {
-                (H1Target::OriginForm, headers)
-            } else {
-                if let Some(credentials) = crate::util::proxy_basic_auth(&parsed) {
-                    headers.push((
-                        "Proxy-Authorization".into(),
-                        std::borrow::Cow::Owned(credentials),
-                    ));
-                }
-                (H1Target::AbsoluteForm, headers)
-            }
-        }
-        _ => {
-            let mut headers = headers;
-            headers.retain(|(k, _)| !k.eq_ignore_ascii_case("priority"));
-            (H1Target::OriginForm, headers)
-        }
-    };
+    let (target, headers) = h1_target(scheme, proxy, headers)?;
 
     let h1_body = body_to_h1(body);
 
@@ -179,4 +156,27 @@ pub(crate) fn h1_error_to_core(e: H1PooledError) -> Error {
         H1PooledError::NotResendable(error) => error,
         other => Error::new(Kind::Io).with_source(h1err_to_io(other)),
     }
+}
+
+fn h1_target(
+    scheme: &str,
+    proxy: Option<&str>,
+    mut headers: Vec<HeaderPair>,
+) -> Result<(H1Target, Vec<HeaderPair>)> {
+    headers.retain(|(k, v)| super::sent_on(HttpVersion::Http1_1, k, v));
+    let Some(proxy_url) = proxy.filter(|_| scheme == "http") else {
+        return Ok((H1Target::OriginForm, headers));
+    };
+    let parsed = url::Url::parse(proxy_url)
+        .map_err(|e| Error::new(Kind::Config).with_message(format!("invalid proxy URL: {e}")))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Ok((H1Target::OriginForm, headers));
+    }
+    if let Some(credentials) = crate::util::proxy_basic_auth(&parsed) {
+        headers.push((
+            "Proxy-Authorization".into(),
+            std::borrow::Cow::Owned(credentials),
+        ));
+    }
+    Ok((H1Target::AbsoluteForm, headers))
 }

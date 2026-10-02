@@ -110,7 +110,8 @@ impl Error {
         match self.inner.kind {
             Kind::Proxy => ErrorCategory::Proxy,
             Kind::Tls => ErrorCategory::Tls,
-            _ if self.is_connect() => ErrorCategory::Connect,
+            Kind::Connect => ErrorCategory::Connect,
+            _ if self.is_socket_unreachable() => ErrorCategory::Connect,
             Kind::Status => ErrorCategory::Status,
             Kind::Body => ErrorCategory::Body,
             Kind::Decode | Kind::Json => ErrorCategory::Decode,

@@ -6,6 +6,8 @@ use super::HeaderStyle;
 const Q_START_TENTHS: u8 = 10;
 const Q_STEP_TENTHS: u8 = 1;
 const Q_FLOOR_TENTHS: u8 = 1;
+const GECKO_Q_ROUND: f32 = 0.005;
+const GECKO_TENTHS_BELOW: usize = 10;
 const PRIVATE_BASES: [&str; 2] = ["x", "i"];
 const SUBTAG_MAX: usize = 8;
 const PRIMARY_MIN: usize = 2;
@@ -15,24 +17,34 @@ struct LanguageRule {
     expand_base: bool,
     canonical_case: bool,
     limit: Option<usize>,
+    weights: Weights,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Weights {
+    Tenths,
+    Gecko,
 }
 
 const CHROMIUM: LanguageRule = LanguageRule {
     expand_base: true,
     canonical_case: false,
     limit: None,
+    weights: Weights::Tenths,
 };
 
 const GECKO: LanguageRule = LanguageRule {
     expand_base: false,
     canonical_case: true,
     limit: None,
+    weights: Weights::Gecko,
 };
 
 const WEBKIT: LanguageRule = LanguageRule {
     expand_base: false,
     canonical_case: false,
     limit: Some(1),
+    weights: Weights::Tenths,
 };
 
 const RULES: [(HeaderStyle, LanguageRule); 4] = [
@@ -84,7 +96,10 @@ pub(crate) fn accept_language(tags: &[String], style: HeaderStyle) -> String {
     } else {
         listed
     };
-    weighted(&ordered)
+    match rule.weights {
+        Weights::Tenths => weighted(&ordered),
+        Weights::Gecko => gecko_weighted(&ordered),
+    }
 }
 
 fn base_of(tag: &str) -> &str {
@@ -123,6 +138,28 @@ fn weighted(tags: &[String]) -> String {
         }
         if q > Q_STEP_TENTHS.max(Q_FLOOR_TENTHS) {
             q -= Q_STEP_TENTHS;
+        }
+    }
+    out
+}
+
+fn gecko_weighted(tags: &[String]) -> String {
+    let count = tags.len();
+    let mut out = String::new();
+    for (index, tag) in tags.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push_str(tag);
+        let q = 1.0_f32 - index as f32 / count as f32;
+        let hundredths = ((q + GECKO_Q_ROUND) * 100.0) as u32;
+        if hundredths >= 100 {
+            continue;
+        }
+        if count < GECKO_TENTHS_BELOW || hundredths.is_multiple_of(10) {
+            let _ = write!(out, ";q=0.{}", (hundredths + 5) / 10);
+        } else {
+            let _ = write!(out, ";q=0.{hundredths:02}");
         }
     }
     out

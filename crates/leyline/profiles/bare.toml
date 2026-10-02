@@ -5,6 +5,7 @@ version = 0
 family = "bare"
 verified_against = "n/a (synthetic non-impersonating profile)"
 captured_against = "n/a (synthetic non-impersonating profile)"
+header_style = "bare"
 
 [tls]
 ciphers = [

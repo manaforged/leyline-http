@@ -3,13 +3,40 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::core::error::Result;
-use crate::core::{Session, Tab};
-use crate::util::autosave::{Autosave, SaveTarget, Schedule, stopped};
+use crate::core::{Session, SessionState, Tab};
+use crate::util::autosave::{Autosave, SaveJob, SaveTarget, Schedule};
 use crate::util::lock;
 
 use super::Device;
 
-const STATE_INTERVAL: Duration = Duration::from_secs(300);
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct DeviceAutosaveOptions {
+    pub interval: Duration,
+    pub state_interval: Duration,
+}
+
+impl DeviceAutosaveOptions {
+    #[must_use]
+    pub const fn new(interval: Duration) -> Self {
+        Self {
+            interval,
+            state_interval: Duration::from_secs(300),
+        }
+    }
+
+    #[must_use]
+    pub const fn state_interval(mut self, state_interval: Duration) -> Self {
+        self.state_interval = state_interval;
+        self
+    }
+}
+
+impl From<Duration> for DeviceAutosaveOptions {
+    fn from(interval: Duration) -> Self {
+        Self::new(interval)
+    }
+}
 
 pub struct DeviceAutosave {
     path: Arc<Path>,
@@ -24,6 +51,8 @@ struct DeviceTarget {
     session: Session,
     path: Arc<Path>,
     saved: Option<u64>,
+    writing: Option<SessionState>,
+    saved_state: Option<SessionState>,
 }
 
 impl Device {
@@ -31,8 +60,9 @@ impl Device {
         &self,
         session: &Session,
         path: impl Into<PathBuf>,
-        debounce: Duration,
+        options: impl Into<DeviceAutosaveOptions>,
     ) -> DeviceAutosave {
+        let options = options.into();
         let path: Arc<Path> = Arc::from(path.into());
         let device = Arc::new(Mutex::new(self.clone()));
         let tab = Arc::new(Mutex::new(None));
@@ -42,10 +72,12 @@ impl Device {
             session: session.clone(),
             path: Arc::clone(&path),
             saved: None,
+            writing: None,
+            saved_state: None,
         };
         let schedule = Schedule {
-            debounce,
-            interval: Some(STATE_INTERVAL),
+            interval: options.interval,
+            periodic: Some(options.state_interval),
             label: "device",
         };
         DeviceAutosave {
@@ -91,25 +123,35 @@ impl std::fmt::Debug for DeviceAutosave {
 }
 
 impl SaveTarget for DeviceTarget {
-    async fn save(&mut self) -> Result<()> {
-        let jar = self.session.cookies().clone();
-        let generation = *jar.changes().borrow();
+    fn prepare(&mut self) -> Option<SaveJob> {
+        let live = self.session.cookies();
+        let generation = *live.changes().borrow();
+        let jar = live.snapshot();
         let jar_dirty = self.saved != Some(generation);
         let mut device = snapshot(&self.device, &self.tab);
         device.state = self.session.state();
+        self.writing = Some(device.state.clone());
         let jar_path = device.jar_path.clone();
         device.jar = jar_path.is_none().then(|| jar.clone());
         let path = Arc::clone(&self.path);
-        tokio::task::spawn_blocking(move || {
-            if let Some(jar_path) = jar_path.filter(|_| jar_dirty) {
-                jar.save_to(jar_path)?;
-            }
-            device.save_to(&*path)
+        Some(SaveJob {
+            generation,
+            write: Box::new(move || {
+                if let Some(jar_path) = jar_path.filter(|_| jar_dirty) {
+                    jar.save_to(jar_path)?;
+                }
+                device.save_to(&*path)
+            }),
         })
-        .await
-        .map_err(|_| stopped("device"))??;
+    }
+
+    fn saved(&mut self, generation: u64) {
         self.saved = Some(generation);
-        Ok(())
+        self.saved_state = self.writing.take();
+    }
+
+    fn unsaved(&self) -> bool {
+        self.saved_state.as_ref() != Some(&self.session.state())
     }
 }
 

@@ -3,6 +3,8 @@ pub use leyline::Url
 pub use leyline::http
 pub mod leyline::audit
 #[non_exhaustive] pub enum leyline::audit::FieldOutcome
+pub leyline::audit::FieldOutcome::Absent
+pub leyline::audit::FieldOutcome::Absent::expected: alloc::string::String
 pub leyline::audit::FieldOutcome::Informational
 pub leyline::audit::FieldOutcome::Informational::expected: alloc::string::String
 pub leyline::audit::FieldOutcome::Informational::observed: alloc::string::String
@@ -33,6 +35,7 @@ impl core::clone::Clone for leyline::audit::AuditData
 impl core::fmt::Debug for leyline::audit::AuditData
 #[non_exhaustive] pub struct leyline::audit::FingerprintReport
 pub leyline::audit::FingerprintReport::h2_fingerprint: leyline::audit::FieldOutcome
+pub leyline::audit::FingerprintReport::header_order: leyline::audit::FieldOutcome
 pub leyline::audit::FingerprintReport::headers: alloc::vec::Vec<leyline::audit::HeaderOutcome>
 pub leyline::audit::FingerprintReport::ja3: leyline::audit::FieldOutcome
 pub leyline::audit::FingerprintReport::ja4: leyline::audit::FieldOutcome
@@ -127,7 +130,6 @@ impl<'de> serde_core::de::Deserialize<'de> for leyline::cookie::Cookie
 pub struct leyline::cookie::Jar
 impl leyline::cookie::Jar
 pub fn leyline::cookie::Jar::all_cookies(&self) -> alloc::vec::Vec<leyline::cookie::Cookie>
-pub fn leyline::cookie::Jar::changes(&self) -> tokio::sync::watch::Receiver<u64>
 pub fn leyline::cookie::Jar::clear(&self)
 pub fn leyline::cookie::Jar::cookie_header(&self, url: &url::Url) -> core::option::Option<alloc::string::String>
 pub fn leyline::cookie::Jar::extend_from(&self, other: &leyline::cookie::Jar)
@@ -139,7 +141,7 @@ pub fn leyline::cookie::Jar::remove_named(&self, name: &str) -> usize
 pub fn leyline::cookie::Jar::set_cookie(&self, url: &url::Url, name: &str, value: &str)
 pub fn leyline::cookie::Jar::snapshot(&self) -> Self
 pub fn leyline::cookie::Jar::store_set_cookie(&self, set_cookie: &str, url: &url::Url)
-pub fn leyline::cookie::Jar::autosave(&self, path: impl core::convert::Into<std::path::PathBuf>, debounce: core::time::Duration) -> leyline::cookie::JarAutosave
+pub fn leyline::cookie::Jar::autosave(&self, path: impl core::convert::Into<std::path::PathBuf>, interval: core::time::Duration) -> leyline::cookie::JarAutosave
 pub fn leyline::cookie::Jar::load_from(path: impl core::convert::AsRef<std::path::Path>) -> leyline::Result<leyline::cookie::Jar>
 pub fn leyline::cookie::Jar::save_to(&self, path: impl core::convert::AsRef<std::path::Path>) -> leyline::Result<()>
 impl core::clone::Clone for leyline::cookie::Jar
@@ -152,49 +154,65 @@ impl leyline::cookie::JarAutosave
 pub async fn leyline::cookie::JarAutosave::flush(&self) -> leyline::Result<()>
 pub async fn leyline::cookie::JarAutosave::shutdown(self) -> leyline::Result<()>
 impl core::fmt::Debug for leyline::cookie::JarAutosave
-pub mod leyline::html
-#[non_exhaustive] pub enum leyline::html::FormMethod
-pub leyline::html::FormMethod::Get
-pub leyline::html::FormMethod::Post
-impl core::clone::Clone for leyline::html::FormMethod
-impl core::cmp::Eq for leyline::html::FormMethod
-impl core::cmp::PartialEq for leyline::html::FormMethod
-impl core::default::Default for leyline::html::FormMethod
-impl core::fmt::Debug for leyline::html::FormMethod
-impl core::hash::Hash for leyline::html::FormMethod
-impl core::marker::Copy for leyline::html::FormMethod
-impl core::marker::StructuralPartialEq for leyline::html::FormMethod
-#[non_exhaustive] pub struct leyline::html::Anchor
-impl leyline::html::Anchor
-pub fn leyline::html::Anchor::href(&self) -> &str
-pub fn leyline::html::Anchor::rel(&self) -> core::option::Option<&str>
-pub fn leyline::html::Anchor::text(&self) -> &str
-impl core::clone::Clone for leyline::html::Anchor
-impl core::cmp::Eq for leyline::html::Anchor
-impl core::cmp::PartialEq for leyline::html::Anchor
-impl core::fmt::Debug for leyline::html::Anchor
-impl core::marker::StructuralPartialEq for leyline::html::Anchor
-#[non_exhaustive] pub struct leyline::html::Form
-impl leyline::html::Form
-pub fn leyline::html::Form::action(&self) -> &str
-pub fn leyline::html::Form::buttons(&self) -> alloc::vec::Vec<&str>
-pub fn leyline::html::Form::field(&self, name: &str) -> core::option::Option<&str>
-pub fn leyline::html::Form::fields(&self) -> &[(alloc::string::String, alloc::string::String)]
-pub fn leyline::html::Form::find(document: &str, selector: &str) -> core::option::Option<leyline::html::Form>
-pub fn leyline::html::Form::id(&self) -> core::option::Option<&str>
-pub fn leyline::html::Form::method(&self) -> leyline::html::FormMethod
-pub fn leyline::html::Form::name(&self) -> core::option::Option<&str>
-pub fn leyline::html::Form::press(&mut self, button: &str) -> bool
-pub fn leyline::html::Form::set(&mut self, name: impl core::convert::Into<alloc::string::String>, value: impl core::convert::Into<alloc::string::String>) -> &mut Self
-impl core::clone::Clone for leyline::html::Form
-impl core::cmp::Eq for leyline::html::Form
-impl core::cmp::PartialEq for leyline::html::Form
-impl core::default::Default for leyline::html::Form
-impl core::fmt::Debug for leyline::html::Form
-impl core::marker::StructuralPartialEq for leyline::html::Form
-pub fn leyline::html::forms(document: &str) -> alloc::vec::Vec<leyline::html::Form>
-pub fn leyline::html::links(document: &str) -> alloc::vec::Vec<leyline::html::Anchor>
-pub fn leyline::html::meta(document: &str, name: &str) -> core::option::Option<alloc::string::String>
+#[cfg(feature = "html")] pub mod leyline::html
+#[cfg(feature = "html")] #[non_exhaustive] pub enum leyline::html::FormEnctype
+#[cfg(feature = "html")] pub leyline::html::FormEnctype::Multipart
+#[cfg(feature = "html")] pub leyline::html::FormEnctype::TextPlain
+#[cfg(feature = "html")] pub leyline::html::FormEnctype::UrlEncoded
+#[cfg(feature = "html")] impl leyline::html::FormEnctype
+#[cfg(feature = "html")] pub fn leyline::html::FormEnctype::as_str(self) -> &'static str
+#[cfg(feature = "html")] impl core::clone::Clone for leyline::html::FormEnctype
+#[cfg(feature = "html")] impl core::cmp::Eq for leyline::html::FormEnctype
+#[cfg(feature = "html")] impl core::cmp::PartialEq for leyline::html::FormEnctype
+#[cfg(feature = "html")] impl core::default::Default for leyline::html::FormEnctype
+#[cfg(feature = "html")] impl core::fmt::Debug for leyline::html::FormEnctype
+#[cfg(feature = "html")] impl core::hash::Hash for leyline::html::FormEnctype
+#[cfg(feature = "html")] impl core::marker::Copy for leyline::html::FormEnctype
+#[cfg(feature = "html")] impl core::marker::StructuralPartialEq for leyline::html::FormEnctype
+#[cfg(feature = "html")] #[non_exhaustive] pub enum leyline::html::FormMethod
+#[cfg(feature = "html")] pub leyline::html::FormMethod::Get
+#[cfg(feature = "html")] pub leyline::html::FormMethod::Post
+#[cfg(feature = "html")] impl core::clone::Clone for leyline::html::FormMethod
+#[cfg(feature = "html")] impl core::cmp::Eq for leyline::html::FormMethod
+#[cfg(feature = "html")] impl core::cmp::PartialEq for leyline::html::FormMethod
+#[cfg(feature = "html")] impl core::default::Default for leyline::html::FormMethod
+#[cfg(feature = "html")] impl core::fmt::Debug for leyline::html::FormMethod
+#[cfg(feature = "html")] impl core::hash::Hash for leyline::html::FormMethod
+#[cfg(feature = "html")] impl core::marker::Copy for leyline::html::FormMethod
+#[cfg(feature = "html")] impl core::marker::StructuralPartialEq for leyline::html::FormMethod
+#[cfg(feature = "html")] #[non_exhaustive] pub struct leyline::html::Anchor
+#[cfg(feature = "html")] impl leyline::html::Anchor
+#[cfg(feature = "html")] pub fn leyline::html::Anchor::href(&self) -> &str
+#[cfg(feature = "html")] pub fn leyline::html::Anchor::rel(&self) -> core::option::Option<&str>
+#[cfg(feature = "html")] pub fn leyline::html::Anchor::text(&self) -> &str
+#[cfg(feature = "html")] impl core::clone::Clone for leyline::html::Anchor
+#[cfg(feature = "html")] impl core::cmp::Eq for leyline::html::Anchor
+#[cfg(feature = "html")] impl core::cmp::PartialEq for leyline::html::Anchor
+#[cfg(feature = "html")] impl core::fmt::Debug for leyline::html::Anchor
+#[cfg(feature = "html")] impl core::marker::StructuralPartialEq for leyline::html::Anchor
+#[cfg(feature = "html")] #[non_exhaustive] pub struct leyline::html::Form
+#[cfg(feature = "html")] impl leyline::html::Form
+#[cfg(feature = "html")] pub fn leyline::html::Form::action(&self) -> &str
+#[cfg(feature = "html")] pub fn leyline::html::Form::base(&self) -> core::option::Option<&str>
+#[cfg(feature = "html")] pub fn leyline::html::Form::buttons(&self) -> alloc::vec::Vec<&str>
+#[cfg(feature = "html")] pub fn leyline::html::Form::enctype(&self) -> leyline::html::FormEnctype
+#[cfg(feature = "html")] pub fn leyline::html::Form::field(&self, name: &str) -> core::option::Option<&str>
+#[cfg(feature = "html")] pub fn leyline::html::Form::fields(&self) -> &[(alloc::string::String, alloc::string::String)]
+#[cfg(feature = "html")] pub fn leyline::html::Form::find(document: &str, selector: &str) -> core::option::Option<leyline::html::Form>
+#[cfg(feature = "html")] pub fn leyline::html::Form::id(&self) -> core::option::Option<&str>
+#[cfg(feature = "html")] pub fn leyline::html::Form::method(&self) -> leyline::html::FormMethod
+#[cfg(feature = "html")] pub fn leyline::html::Form::name(&self) -> core::option::Option<&str>
+#[cfg(feature = "html")] pub fn leyline::html::Form::press(&mut self, button: &str) -> bool
+#[cfg(feature = "html")] pub fn leyline::html::Form::set(&mut self, name: impl core::convert::Into<alloc::string::String>, value: impl core::convert::Into<alloc::string::String>) -> &mut Self
+#[cfg(feature = "html")] impl core::clone::Clone for leyline::html::Form
+#[cfg(feature = "html")] impl core::cmp::Eq for leyline::html::Form
+#[cfg(feature = "html")] impl core::cmp::PartialEq for leyline::html::Form
+#[cfg(feature = "html")] impl core::default::Default for leyline::html::Form
+#[cfg(feature = "html")] impl core::fmt::Debug for leyline::html::Form
+#[cfg(feature = "html")] impl core::marker::StructuralPartialEq for leyline::html::Form
+#[cfg(feature = "html")] pub fn leyline::html::forms(document: &str) -> alloc::vec::Vec<leyline::html::Form>
+#[cfg(feature = "html")] pub fn leyline::html::links(document: &str) -> alloc::vec::Vec<leyline::html::Anchor>
+#[cfg(feature = "html")] pub fn leyline::html::meta(document: &str, name: &str) -> core::option::Option<alloc::string::String>
 #[cfg(feature = "multipart")] pub mod leyline::multipart
 #[cfg(feature = "multipart")] pub struct leyline::multipart::Form
 #[cfg(feature = "multipart")] impl leyline::multipart::Form
@@ -272,16 +290,17 @@ impl core::marker::Copy for leyline::profile::H3VersionGrease
 impl core::marker::StructuralPartialEq for leyline::profile::H3VersionGrease
 impl<'de> serde_core::de::Deserialize<'de> for leyline::profile::H3VersionGrease
 #[non_exhaustive] pub enum leyline::profile::HeaderStyle
-pub leyline::profile::HeaderStyle::Brave
-pub leyline::profile::HeaderStyle::Brave154
-pub leyline::profile::HeaderStyle::CfNetwork
-pub leyline::profile::HeaderStyle::CfNetwork26
-pub leyline::profile::HeaderStyle::Chromium
-pub leyline::profile::HeaderStyle::Gecko
-pub leyline::profile::HeaderStyle::OkHttp
-pub leyline::profile::HeaderStyle::WebKit
-pub leyline::profile::HeaderStyle::WebKit17
-pub leyline::profile::HeaderStyle::WebKit26
+pub leyline::profile::HeaderStyle::Bare = 10
+pub leyline::profile::HeaderStyle::Brave = 0
+pub leyline::profile::HeaderStyle::Brave154 = 1
+pub leyline::profile::HeaderStyle::CfNetwork = 2
+pub leyline::profile::HeaderStyle::CfNetwork26 = 3
+pub leyline::profile::HeaderStyle::Chromium = 4
+pub leyline::profile::HeaderStyle::Gecko = 5
+pub leyline::profile::HeaderStyle::OkHttp = 6
+pub leyline::profile::HeaderStyle::WebKit = 7
+pub leyline::profile::HeaderStyle::WebKit17 = 8
+pub leyline::profile::HeaderStyle::WebKit26 = 9
 impl core::clone::Clone for leyline::profile::HeaderStyle
 impl core::cmp::Eq for leyline::profile::HeaderStyle
 impl core::cmp::PartialEq for leyline::profile::HeaderStyle
@@ -511,9 +530,14 @@ impl<'de> serde_core::de::Deserialize<'de> for leyline::profile::TlsProfile
 #[cfg(feature = "test-util")] pub leyline::testing::RecordedRequest::body: alloc::vec::Vec<u8>
 #[cfg(feature = "test-util")] pub leyline::testing::RecordedRequest::headers: alloc::vec::Vec<(alloc::string::String, alloc::string::String)>
 #[cfg(feature = "test-util")] pub leyline::testing::RecordedRequest::method: alloc::string::String
+#[cfg(feature = "test-util")] pub leyline::testing::RecordedRequest::raw: alloc::vec::Vec<u8>
+#[cfg(feature = "test-util")] pub leyline::testing::RecordedRequest::request_line: alloc::string::String
 #[cfg(feature = "test-util")] pub leyline::testing::RecordedRequest::target: alloc::string::String
 #[cfg(feature = "test-util")] impl leyline::testing::RecordedRequest
 #[cfg(feature = "test-util")] pub fn leyline::testing::RecordedRequest::header(&self, name: &str) -> core::option::Option<&str>
+#[cfg(feature = "test-util")] pub fn leyline::testing::RecordedRequest::header_count(&self, name: &str) -> usize
+#[cfg(feature = "test-util")] pub fn leyline::testing::RecordedRequest::header_values(&self, name: &str) -> alloc::vec::Vec<&str>
+#[cfg(feature = "test-util")] pub fn leyline::testing::RecordedRequest::text(&self) -> alloc::borrow::Cow<'_, str>
 #[cfg(feature = "test-util")] impl core::clone::Clone for leyline::testing::RecordedRequest
 #[cfg(feature = "test-util")] impl core::cmp::Eq for leyline::testing::RecordedRequest
 #[cfg(feature = "test-util")] impl core::cmp::PartialEq for leyline::testing::RecordedRequest
@@ -526,6 +550,7 @@ impl<'de> serde_core::de::Deserialize<'de> for leyline::profile::TlsProfile
 #[cfg(feature = "test-util")] impl leyline::testing::TestResponse
 #[cfg(feature = "test-util")] pub fn leyline::testing::TestResponse::body(self, body: impl core::convert::Into<alloc::vec::Vec<u8>>) -> Self
 #[cfg(feature = "test-util")] pub fn leyline::testing::TestResponse::chunks<I, B>(self, parts: I, pause: core::time::Duration) -> Self where I: core::iter::traits::collect::IntoIterator<Item = B>, B: core::convert::Into<alloc::vec::Vec<u8>>
+#[cfg(feature = "test-util")] pub fn leyline::testing::TestResponse::close(self) -> Self
 #[cfg(feature = "test-util")] pub fn leyline::testing::TestResponse::delay(self, delay: core::time::Duration) -> Self
 #[cfg(feature = "test-util")] pub fn leyline::testing::TestResponse::header(self, name: impl core::convert::Into<alloc::string::String>, value: impl core::convert::Into<alloc::string::String>) -> Self
 #[cfg(feature = "test-util")] pub fn leyline::testing::TestResponse::new(status: u16) -> Self
@@ -540,6 +565,7 @@ impl<'de> serde_core::de::Deserialize<'de> for leyline::profile::TlsProfile
 #[cfg(feature = "test-util")] pub fn leyline::testing::TestServer::addr(&self) -> core::net::socket_addr::SocketAddr
 #[cfg(feature = "test-util")] pub fn leyline::testing::TestServer::ca_der(&self) -> core::option::Option<&[u8]>
 #[cfg(feature = "test-util")] pub async fn leyline::testing::TestServer::http<F>(handler: F) -> core::io::error::Result<Self> where F: core::ops::function::Fn(&leyline::testing::RecordedRequest) -> leyline::testing::TestResponse + core::marker::Send + core::marker::Sync + 'static
+#[cfg(feature = "test-util")] pub fn leyline::testing::TestServer::http_on<F>(listener: tokio::net::tcp::listener::TcpListener, handler: F) -> core::io::error::Result<Self> where F: core::ops::function::Fn(&leyline::testing::RecordedRequest) -> leyline::testing::TestResponse + core::marker::Send + core::marker::Sync + 'static
 #[cfg(feature = "test-util")] pub async fn leyline::testing::TestServer::https<F>(handler: F) -> core::io::error::Result<Self> where F: core::ops::function::Fn(&leyline::testing::RecordedRequest) -> leyline::testing::TestResponse + core::marker::Send + core::marker::Sync + 'static
 #[cfg(feature = "test-util")] pub async fn leyline::testing::TestServer::next_request(&self) -> core::option::Option<leyline::testing::RecordedRequest>
 #[cfg(feature = "test-util")] pub async fn leyline::testing::TestServer::requests(&self) -> alloc::vec::Vec<leyline::testing::RecordedRequest>
@@ -1025,7 +1051,7 @@ impl core::cmp::PartialEq for leyline::RedirectAction
 impl core::fmt::Debug for leyline::RedirectAction
 impl core::marker::Copy for leyline::RedirectAction
 impl core::marker::StructuralPartialEq for leyline::RedirectAction
-pub enum leyline::RelayBody
+#[non_exhaustive] pub enum leyline::RelayBody
 pub leyline::RelayBody::AsReceived
 pub leyline::RelayBody::Decoded
 impl core::clone::Clone for leyline::RelayBody
@@ -1168,6 +1194,7 @@ pub fn leyline::CompressionConfig::brotli(self, on: bool) -> Self
 pub fn leyline::CompressionConfig::deflate(self, on: bool) -> Self
 pub fn leyline::CompressionConfig::gzip(self, on: bool) -> Self
 pub fn leyline::CompressionConfig::max_body_size(self, bytes: usize) -> Self
+pub fn leyline::CompressionConfig::max_error_body(self, bytes: usize) -> Self
 pub fn leyline::CompressionConfig::new() -> Self
 pub fn leyline::CompressionConfig::none() -> Self
 pub fn leyline::CompressionConfig::zstd(self, on: bool) -> Self
@@ -1196,7 +1223,7 @@ pub leyline::Device::state: leyline::SessionState
 pub leyline::Device::strict: bool
 pub leyline::Device::user_agent: core::option::Option<alloc::string::String>
 impl leyline::Device
-pub fn leyline::Device::autosave(&self, session: &leyline::Session, path: impl core::convert::Into<std::path::PathBuf>, debounce: core::time::Duration) -> leyline::DeviceAutosave
+pub fn leyline::Device::autosave(&self, session: &leyline::Session, path: impl core::convert::Into<std::path::PathBuf>, options: impl core::convert::Into<leyline::DeviceAutosaveOptions>) -> leyline::DeviceAutosave
 pub fn leyline::Device::capture(session: &leyline::Session, proxy: core::option::Option<leyline::ProxyUrl>) -> leyline::Device
 pub fn leyline::Device::load_from(path: impl core::convert::AsRef<std::path::Path>) -> leyline::Result<leyline::Device>
 pub fn leyline::Device::open(&self) -> leyline::Result<leyline::Session>
@@ -1217,6 +1244,19 @@ pub async fn leyline::DeviceAutosave::shutdown(self) -> leyline::Result<()>
 pub fn leyline::DeviceAutosave::track(&self, tab: &leyline::Tab)
 pub fn leyline::DeviceAutosave::update(&self, change: impl core::ops::function::FnOnce(&mut leyline::Device))
 impl core::fmt::Debug for leyline::DeviceAutosave
+#[non_exhaustive] pub struct leyline::DeviceAutosaveOptions
+pub leyline::DeviceAutosaveOptions::interval: core::time::Duration
+pub leyline::DeviceAutosaveOptions::state_interval: core::time::Duration
+impl leyline::DeviceAutosaveOptions
+pub const fn leyline::DeviceAutosaveOptions::new(interval: core::time::Duration) -> Self
+pub const fn leyline::DeviceAutosaveOptions::state_interval(self, state_interval: core::time::Duration) -> Self
+impl core::clone::Clone for leyline::DeviceAutosaveOptions
+impl core::cmp::Eq for leyline::DeviceAutosaveOptions
+impl core::cmp::PartialEq for leyline::DeviceAutosaveOptions
+impl core::convert::From<core::time::Duration> for leyline::DeviceAutosaveOptions
+impl core::fmt::Debug for leyline::DeviceAutosaveOptions
+impl core::marker::Copy for leyline::DeviceAutosaveOptions
+impl core::marker::StructuralPartialEq for leyline::DeviceAutosaveOptions
 pub struct leyline::DigestAuth
 impl leyline::DigestAuth
 pub fn leyline::DigestAuth::new(username: impl core::convert::Into<alloc::string::String>, password: impl core::convert::Into<alloc::string::String>) -> Self
@@ -1241,7 +1281,6 @@ pub fn leyline::Error::h2(&self) -> core::option::Option<&leyline::H2Error>
 pub fn leyline::Error::header(&self, name: &str) -> core::option::Option<&str>
 pub fn leyline::Error::headers(&self) -> core::option::Option<&http::header::map::HeaderMap>
 pub fn leyline::Error::io(&self) -> core::option::Option<&core::io::error::Error>
-pub fn leyline::Error::is_shut_down(&self) -> bool
 pub fn leyline::Error::kind(&self) -> leyline::Kind
 pub fn leyline::Error::proxy(&self) -> core::option::Option<&str>
 pub fn leyline::Error::retries_exhausted(&self) -> bool
@@ -1258,6 +1297,7 @@ pub fn leyline::Error::is_retryable(&self) -> bool
 pub fn leyline::Error::is_status(&self) -> bool
 pub fn leyline::Error::is_timeout(&self) -> bool
 pub fn leyline::Error::is_profile_changed(&self) -> bool
+pub fn leyline::Error::is_shut_down(&self) -> bool
 impl core::convert::From<core::io::error::Error> for leyline::Error
 impl core::convert::From<http::error::Error> for leyline::Error
 impl core::convert::From<http::header::name::InvalidHeaderName> for leyline::Error
@@ -1271,6 +1311,7 @@ impl core::fmt::Display for leyline::Error
 impl leyline::HostLimits
 pub fn leyline::HostLimits::host(self, host: &str, limits: leyline::HostLimits) -> Self
 pub fn leyline::HostLimits::max_in_flight(self, n: usize) -> Self
+pub fn leyline::HostLimits::max_pause(self, max: core::time::Duration) -> Self
 pub fn leyline::HostLimits::max_total_in_flight(self, n: usize) -> Self
 pub fn leyline::HostLimits::new() -> Self
 pub fn leyline::HostLimits::pause_for(self, default: core::time::Duration) -> Self
@@ -1340,6 +1381,7 @@ impl core::fmt::Debug for leyline::NoProxy
 impl core::marker::StructuralPartialEq for leyline::NoProxy
 pub struct leyline::Pages
 impl leyline::Pages
+pub fn leyline::Pages::limit(self, max: usize) -> Self
 pub async fn leyline::Pages::next(&mut self) -> core::option::Option<leyline::Result<leyline::Response>>
 impl core::fmt::Debug for leyline::Pages
 impl futures_core::stream::Stream for leyline::Pages
@@ -1607,7 +1649,6 @@ pub fn leyline::SessionBuilder::host_limits(self, limits: leyline::HostLimits) -
 pub fn leyline::SessionBuilder::https_only(self, enabled: bool) -> Self
 pub fn leyline::SessionBuilder::identity(self, id: leyline::Identity) -> Self
 pub fn leyline::SessionBuilder::languages<I, S>(self, langs: I) -> Self where I: core::iter::traits::collect::IntoIterator<Item = S>, S: core::convert::AsRef<str>
-pub fn leyline::SessionBuilder::max_body_size(self, bytes: usize) -> Self
 pub fn leyline::SessionBuilder::platform(self, platform: leyline::Platform) -> Self
 pub fn leyline::SessionBuilder::pool(self, config: leyline::PoolConfig) -> Self
 pub fn leyline::SessionBuilder::profile(self, profile: leyline::BrowserProfile) -> Self
@@ -1684,7 +1725,7 @@ pub fn leyline::Tab::post_json(&self, url: impl leyline::IntoUrl, body: &impl se
 pub fn leyline::Tab::session(&self) -> &leyline::Session
 pub fn leyline::Tab::set_current(&self, page: core::option::Option<url::Url>)
 pub async fn leyline::Tab::submit<I, P>(&self, url: impl leyline::IntoUrl, fields: I) -> leyline::Result<leyline::Response> where I: core::iter::traits::collect::IntoIterator<Item = P>, P: leyline::IntoParamPair
-pub async fn leyline::Tab::submit_form(&self, form: &leyline::html::Form) -> leyline::Result<leyline::Response>
+#[cfg(feature = "html")] pub async fn leyline::Tab::submit_form(&self, form: &leyline::html::Form) -> leyline::Result<leyline::Response>
 pub fn leyline::Tab::subresource(&self, url: impl leyline::IntoUrl, preset: leyline::Preset) -> leyline::RequestBuilder
 pub fn leyline::Tab::xhr(&self, url: impl leyline::IntoUrl) -> leyline::RequestBuilder
 impl core::clone::Clone for leyline::Tab
@@ -1708,6 +1749,7 @@ impl<'de> serde_core::de::Deserialize<'de> for leyline::TcpProfile
 impl leyline::TimeoutConfig
 pub fn leyline::TimeoutConfig::body(self, d: impl core::convert::Into<core::option::Option<core::time::Duration>>) -> Self
 pub fn leyline::TimeoutConfig::connect(self, d: impl core::convert::Into<core::option::Option<core::time::Duration>>) -> Self
+pub fn leyline::TimeoutConfig::error_body(self, d: impl core::convert::Into<core::option::Option<core::time::Duration>>) -> Self
 pub fn leyline::TimeoutConfig::new() -> Self
 pub fn leyline::TimeoutConfig::read(self, d: impl core::convert::Into<core::option::Option<core::time::Duration>>) -> Self
 pub fn leyline::TimeoutConfig::response_header(self, d: impl core::convert::Into<core::option::Option<core::time::Duration>>) -> Self

@@ -37,7 +37,9 @@ either. A trust-store problem then fails each request that needs it with
 references to pairs, where both sides are `AsRef<str>`. An entry replaces a
 default or profile header of the same name, compared without case.
 `user_agent(value)` replaces the default `user-agent`; it and a `user-agent`
-pair in `headers` set the same header, and the later call wins.
+pair in `headers` set the same header, and the later call wins. On a browser
+session, a session `user-agent` also removes the profile's `sec-ch-ua` client
+hint, so the user agent and the hint never name different browsers.
 
 When a session has a browser and you do not call `protocol`, it uses
 `ProtocolPolicy::Race` if the `http3` feature is on and the profile's `[h3]`
@@ -61,8 +63,9 @@ A plain HTTP/1.1 GET sends these headers, in this order:
 | `accept-encoding` | The codings compiled in and on in `CompressionConfig`, in the order gzip, deflate, br, zstd. Left out when none is on |
 | `Connection` | `keep-alive`. Left out on HTTP/2 and HTTP/3 |
 
-A plain session sends no `accept-language`, no `sec-*` headers, and no client
-hints, even when you set a preset. `languages` turns `accept-language` on. A
+A plain session sends no `accept-language` and no browser-only headers:
+`sec-*` headers, client hints, `upgrade-insecure-requests`, and `priority`.
+This is true for every preset. `languages` turns `accept-language` on. A
 request adds the headers it needs, such as `content-type`, `origin`,
 `referer`, and `cookie`.
 
@@ -119,7 +122,7 @@ Chromium format.
 | Family | Rule | Tags | `accept-language` |
 | --- | --- | --- | --- |
 | Chromium | Adds the base language after each region tag, unless the next tag has the same base. Removes duplicates. Weights go down by 0.1 from 1, to a minimum of 0.1 | `["de-DE", "de", "en-US"]` | `de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7` |
-| Firefox | No base language added. Canonical case. Same weights | `["fr", "en"]` | `fr,en;q=0.9` |
+| Firefox | No base language added. Canonical case. Weights go down in equal steps from 1, as Firefox computes them | `["fr", "en"]`, `["de-DE", "de", "en"]` | `fr,en;q=0.5`, `de-DE,de;q=0.7,en;q=0.3` |
 | Safari | The first tag only | `["de-DE", "de"]` | `de-DE` |
 
 Without `languages`, a browser session sends the value captured with its

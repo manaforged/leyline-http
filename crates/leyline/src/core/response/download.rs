@@ -34,7 +34,7 @@ impl Response {
     pub async fn download_to(self, path: impl AsRef<Path>, limit: Option<u64>) -> Result<u64> {
         let path = path.as_ref().to_path_buf();
         let partial = PartialFile::new(atomic::temp_path(&path)?);
-        let written = self.write_file(&partial.path, limit).await?;
+        let written = self.write_file(&partial.path, &path, limit).await?;
         let temp = partial.disarm();
         tokio::task::spawn_blocking(move || atomic::commit(&temp, &path))
             .await
@@ -42,12 +42,12 @@ impl Response {
         Ok(written)
     }
 
-    async fn write_file(self, temp: &Path, limit: Option<u64>) -> Result<u64> {
-        let mut file = tokio::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(temp)
-            .await?;
+    async fn write_file(self, temp: &Path, target: &Path, limit: Option<u64>) -> Result<u64> {
+        let mut file = tokio::fs::File::from_std(atomic::create_temp(
+            temp,
+            target,
+            atomic::FileMode::KeepExisting,
+        )?);
         let written = self.copy_decoded_to(&mut file, limit).await?;
         file.flush().await?;
         file.sync_all().await?;

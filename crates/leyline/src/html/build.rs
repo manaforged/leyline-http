@@ -1,19 +1,24 @@
+use std::collections::HashMap;
+
+use super::assign::{Entry, Item, Owner, assign};
 use super::entity::decode;
+use super::fieldset::Fieldsets;
 use super::scan::{Scanner, Tag};
-use super::{Button, Form, FormMethod};
+use super::{Button, Form, FormEnctype, FormMethod};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Control {
     Value,
-    Toggle,
+    Checkbox,
+    Radio,
     Submit,
     Image,
     Ignored,
 }
 
 const INPUT_TYPES: [(&str, Control); 7] = [
-    ("checkbox", Control::Toggle),
-    ("radio", Control::Toggle),
+    ("checkbox", Control::Checkbox),
+    ("radio", Control::Radio),
     ("submit", Control::Submit),
     ("image", Control::Image),
     ("button", Control::Ignored),
@@ -27,17 +32,23 @@ const BUTTON_TYPES: [(&str, Control); 2] =
 const TOGGLE_DEFAULT: &str = "on";
 
 struct Select {
-    name: Option<String>,
-    multiple: bool,
+    field: Option<(Owner, String)>,
+    single: bool,
+    listbox: bool,
+    group_disabled: bool,
     first: Option<String>,
     chosen: Vec<String>,
 }
 
 #[derive(Default)]
 struct Builder {
-    done: Vec<Form>,
-    form: Option<Form>,
+    forms: Vec<Form>,
+    open: Option<usize>,
+    entries: Vec<Entry>,
     select: Option<Select>,
+    fieldsets: Fieldsets,
+    base: Option<String>,
+    ids: HashMap<String, Option<usize>>,
 }
 
 pub(super) fn forms(document: &str) -> Vec<Form> {
@@ -45,17 +56,36 @@ pub(super) fn forms(document: &str) -> Vec<Form> {
     for tag in Scanner::new(document) {
         builder.tag(&tag);
     }
-    builder.close_form();
-    builder.done
+    builder.finish()
 }
 
 impl Builder {
     fn tag(&mut self, tag: &Tag<'_>) {
         match (tag.closing, tag.name.as_str()) {
-            (false, "form") if self.form.is_none() => self.form = Some(open(tag)),
+            (false, "form") if self.open.is_none() => {
+                self.close_select();
+                self.forms.push(open(tag));
+                self.open = Some(self.forms.len() - 1);
+                self.record(tag, self.open);
+            }
+            (false, "form") => {}
             (true, "form") => self.close_form(),
-            _ if self.form.is_some() => self.control(tag),
-            _ => {}
+            (false, "base") if self.base.is_none() => {
+                self.base = tag.attr("href").map(|href| href.trim().to_owned());
+            }
+            _ => {
+                if !tag.closing {
+                    self.record(tag, None);
+                }
+                self.fieldsets.tag(tag);
+                self.control(tag);
+            }
+        }
+    }
+
+    fn record(&mut self, tag: &Tag<'_>, form: Option<usize>) {
+        if let Some(id) = tag.attr("id").filter(|id| !id.is_empty()) {
+            self.ids.entry(id.to_owned()).or_insert(form);
         }
     }
 
@@ -66,57 +96,74 @@ impl Builder {
             (false, "textarea") => self.textarea(tag),
             (false, "select") => {
                 self.close_select();
-                self.select = Some(select(tag));
+                self.select = Some(open_select(self.field(tag), tag));
             }
+            (false, "optgroup") => self.optgroup(tag.has("disabled")),
+            (true, "optgroup") => self.optgroup(false),
             (false, "option") => self.option(tag),
             (true, "select") => self.close_select(),
             _ => {}
         }
     }
 
-    fn push(&mut self, name: String, value: String) {
-        if let Some(form) = self.form.as_mut() {
-            form.fields.push((name, value));
+    fn field(&self, tag: &Tag<'_>) -> Option<(Owner, String)> {
+        if tag.has("disabled") || self.fieldsets.disabled() {
+            return None;
         }
+        let name = tag.attr("name").filter(|name| !name.is_empty())?;
+        let owner = match tag.attr("form") {
+            Some("") => return None,
+            Some(id) => Owner::Id(id.to_owned()),
+            None => Owner::Open(self.open?),
+        };
+        Some((owner, name.to_owned()))
+    }
+
+    fn push(&mut self, owner: Owner, name: String, value: String, radio: bool) {
+        self.entries.push(Entry {
+            owner,
+            item: Item::Field { name, value, radio },
+        });
     }
 
     fn input(&mut self, tag: &Tag<'_>) {
-        let Some(name) = field_name(tag) else {
+        let Some((owner, name)) = self.field(tag) else {
             return;
         };
         let value = tag.attr("value");
+        let toggled = value.unwrap_or(TOGGLE_DEFAULT).to_owned();
         match kind(tag, &INPUT_TYPES, Control::Value) {
-            Control::Value => self.push(name, value.unwrap_or_default().to_owned()),
-            Control::Toggle if tag.has("checked") => {
-                self.push(name, value.unwrap_or(TOGGLE_DEFAULT).to_owned());
-            }
-            Control::Submit => self.add_button(name, value, false),
-            Control::Image => self.add_button(name, value, true),
-            Control::Toggle | Control::Ignored => {}
+            Control::Value => self.push(owner, name, value.unwrap_or_default().to_owned(), false),
+            Control::Checkbox if tag.has("checked") => self.push(owner, name, toggled, false),
+            Control::Radio if tag.has("checked") => self.push(owner, name, toggled, true),
+            Control::Submit => self.add_button(owner, name, value, false),
+            Control::Image => self.add_button(owner, name, value, true),
+            Control::Checkbox | Control::Radio | Control::Ignored => {}
         }
     }
 
     fn button(&mut self, tag: &Tag<'_>) {
-        let Some(name) = field_name(tag) else {
+        let Some((owner, name)) = self.field(tag) else {
             return;
         };
         if kind(tag, &BUTTON_TYPES, Control::Submit) == Control::Submit {
-            self.add_button(name, tag.attr("value"), false);
+            self.add_button(owner, name, tag.attr("value"), false);
         }
     }
 
-    fn add_button(&mut self, name: String, value: Option<&str>, image: bool) {
-        if let Some(form) = self.form.as_mut() {
-            form.buttons.push(Button {
+    fn add_button(&mut self, owner: Owner, name: String, value: Option<&str>, image: bool) {
+        self.entries.push(Entry {
+            owner,
+            item: Item::Button(Button {
                 name,
                 value: value.unwrap_or_default().to_owned(),
                 image,
-            });
-        }
+            }),
+        });
     }
 
     fn textarea(&mut self, tag: &Tag<'_>) {
-        let Some(name) = field_name(tag) else {
+        let Some((owner, name)) = self.field(tag) else {
             return;
         };
         let raw = tag.raw.unwrap_or_default();
@@ -124,14 +171,20 @@ impl Builder {
             .strip_prefix("\r\n")
             .or_else(|| raw.strip_prefix('\n'))
             .unwrap_or(raw);
-        self.push(name, decode(raw));
+        self.push(owner, name, decode(raw), false);
+    }
+
+    fn optgroup(&mut self, disabled: bool) {
+        if let Some(select) = self.select.as_mut() {
+            select.group_disabled = disabled;
+        }
     }
 
     fn option(&mut self, tag: &Tag<'_>) {
         let Some(select) = self.select.as_mut() else {
             return;
         };
-        if tag.has("disabled") {
+        if select.group_disabled || tag.has("disabled") {
             return;
         }
         let value = match tag.attr("value") {
@@ -150,24 +203,47 @@ impl Builder {
         let Some(select) = self.select.take() else {
             return;
         };
-        let Some(name) = select.name else {
+        let Some((owner, name)) = select.field else {
             return;
         };
-        let values = match (select.multiple, select.chosen.is_empty()) {
-            (true, _) => select.chosen,
-            (false, false) => select.chosen.last().cloned().into_iter().collect(),
-            (false, true) => select.first.into_iter().collect(),
+        let values = match (select.single, select.chosen.is_empty()) {
+            (false, _) => select.chosen,
+            (true, false) => select.chosen.last().cloned().into_iter().collect(),
+            (true, true) if select.listbox => Vec::new(),
+            (true, true) => select.first.into_iter().collect(),
         };
         for value in values {
-            self.push(name.clone(), value);
+            self.push(owner.clone(), name.clone(), value, false);
         }
     }
 
     fn close_form(&mut self) {
         self.close_select();
-        if let Some(form) = self.form.take() {
-            self.done.push(form);
+        self.open = None;
+    }
+
+    fn finish(mut self) -> Vec<Form> {
+        self.close_form();
+        assign(&mut self.forms, self.entries, &self.ids);
+        for form in &mut self.forms {
+            form.base.clone_from(&self.base);
         }
+        self.forms
+    }
+}
+
+fn open_select(field: Option<(Owner, String)>, tag: &Tag<'_>) -> Select {
+    let size = tag
+        .attr("size")
+        .and_then(|size| size.trim().parse::<u64>().ok())
+        .unwrap_or(0);
+    Select {
+        field,
+        single: !tag.has("multiple"),
+        listbox: size > 1,
+        group_disabled: false,
+        first: None,
+        chosen: Vec::new(),
     }
 }
 
@@ -179,29 +255,16 @@ fn open(tag: &Tag<'_>) -> Form {
     Form {
         action: tag.attr("action").unwrap_or_default().trim().to_owned(),
         method,
+        enctype: tag
+            .attr("enctype")
+            .map(FormEnctype::parse)
+            .unwrap_or_default(),
+        base: None,
         id: tag.attr("id").map(str::to_owned),
         name: tag.attr("name").map(str::to_owned),
         fields: Vec::new(),
         buttons: Vec::new(),
     }
-}
-
-fn select(tag: &Tag<'_>) -> Select {
-    Select {
-        name: field_name(tag),
-        multiple: tag.has("multiple"),
-        first: None,
-        chosen: Vec::new(),
-    }
-}
-
-fn field_name(tag: &Tag<'_>) -> Option<String> {
-    if tag.has("disabled") {
-        return None;
-    }
-    tag.attr("name")
-        .filter(|name| !name.is_empty())
-        .map(str::to_owned)
 }
 
 fn kind(tag: &Tag<'_>, table: &[(&str, Control)], default: Control) -> Control {

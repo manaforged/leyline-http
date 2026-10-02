@@ -13,6 +13,7 @@ use crate::tls::TlsError;
 mod category;
 mod classify;
 mod from;
+mod marker;
 mod profile;
 
 pub(crate) use profile::ProfileChanged;
@@ -225,11 +226,6 @@ impl Error {
 
     pub fn kind(&self) -> Kind {
         self.inner.kind
-    }
-
-    pub fn is_shut_down(&self) -> bool {
-        self.kind() == Kind::Request
-            && self.message() == Some(crate::core::session::execute::SHUT_DOWN_MESSAGE)
     }
 
     pub(crate) fn message(&self) -> Option<&str> {

@@ -49,8 +49,12 @@ impl SessionCache {
     }
 
     pub(crate) fn key(host: &str, port: u16, route: Option<&url::Url>) -> String {
-        let route = route.map(url::Url::as_str).unwrap_or_default();
-        format!("{host}:{port}|{route}")
+        let Some(route) = route else {
+            return format!("{host}:{port}|");
+        };
+        let mut bare = route.clone();
+        let _ = bare.set_password(None);
+        format!("{host}:{port}|{bare}")
     }
 
     pub(crate) fn register(builder: &mut SslConnectorBuilder) -> Result<(), TlsError> {

@@ -1,5 +1,7 @@
+mod assign;
 mod build;
 mod entity;
+mod fieldset;
 mod page;
 mod scan;
 
@@ -11,11 +13,43 @@ pub enum FormMethod {
     Post,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[non_exhaustive]
+pub enum FormEnctype {
+    #[default]
+    UrlEncoded,
+    Multipart,
+    TextPlain,
+}
+
+impl FormEnctype {
+    const ALL: [FormEnctype; 3] = [Self::UrlEncoded, Self::Multipart, Self::TextPlain];
+
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::UrlEncoded => "application/x-www-form-urlencoded",
+            Self::Multipart => "multipart/form-data",
+            Self::TextPlain => "text/plain",
+        }
+    }
+
+    fn parse(value: &str) -> Self {
+        let value = value.trim();
+        Self::ALL
+            .into_iter()
+            .find(|enctype| enctype.as_str().eq_ignore_ascii_case(value))
+            .unwrap_or_default()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub struct Form {
     action: String,
     method: FormMethod,
+    enctype: FormEnctype,
+    base: Option<String>,
     id: Option<String>,
     name: Option<String>,
     fields: Vec<(String, String)>,
@@ -88,6 +122,16 @@ impl Form {
     }
 
     #[must_use]
+    pub fn enctype(&self) -> FormEnctype {
+        self.enctype
+    }
+
+    #[must_use]
+    pub fn base(&self) -> Option<&str> {
+        self.base.as_deref()
+    }
+
+    #[must_use]
     pub fn id(&self) -> Option<&str> {
         self.id.as_deref()
     }
@@ -113,8 +157,16 @@ impl Form {
     pub fn set(&mut self, name: impl Into<String>, value: impl Into<String>) -> &mut Self {
         let name = name.into();
         let value = value.into();
-        match self.fields.iter_mut().find(|(key, _)| *key == name) {
-            Some(field) => field.1 = value,
+        match self.fields.iter().position(|(key, _)| *key == name) {
+            Some(first) => {
+                self.fields[first].1 = value;
+                let mut index = 0;
+                self.fields.retain(|(key, _)| {
+                    let keep = index <= first || *key != name;
+                    index += 1;
+                    keep
+                });
+            }
             None => self.fields.push((name, value)),
         }
         self

@@ -1,5 +1,7 @@
 use std::io;
 
+use leyline_bssl::ssl::ErrorCode;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ProxyReply {
@@ -69,14 +71,6 @@ fn peer_closed(kind: io::ErrorKind) -> bool {
     )
 }
 
-fn transport_eof(msg: &str) -> bool {
-    let lower = msg.to_ascii_lowercase();
-    lower.contains("unexpected eof")
-        || lower.contains("connection reset")
-        || lower.contains("broken pipe")
-        || lower.contains("connection aborted")
-}
-
 impl TlsError {
     pub(crate) fn from_handshake<S>(e: &leyline_bssl_tokio::HandshakeError<S>) -> Self {
         if let Some(io) = e.as_io_error() {
@@ -87,7 +81,7 @@ impl TlsError {
             return Self::HandshakeIo(copy);
         }
         let msg = e.to_string();
-        if transport_eof(&msg) {
+        if e.code() == Some(ErrorCode::SYSCALL) {
             Self::Rejected(io::Error::new(io::ErrorKind::UnexpectedEof, msg))
         } else {
             Self::Handshake(msg)
@@ -129,6 +123,17 @@ impl TlsError {
             }
             other => Self::proxy(other.to_string()),
         }
+    }
+
+    pub(crate) fn is_handshake(&self) -> bool {
+        matches!(
+            self,
+            Self::Handshake(_) | Self::HandshakeIo(_) | Self::Rejected(_)
+        )
+    }
+
+    pub(crate) fn is_connect_phase(&self) -> bool {
+        matches!(self, Self::Dns(_) | Self::TcpConnect(_)) || self.is_handshake()
     }
 
     pub(crate) fn io_source(&self) -> Option<&io::Error> {

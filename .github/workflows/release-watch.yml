@@ -1,16 +1,11 @@
 name: release-watch
 
 on:
-  schedule:
-    - cron: "17 13 * * *"
+  workflow_call:
   workflow_dispatch:
 
 permissions:
   contents: read
-
-concurrency:
-  group: release-watch
-  cancel-in-progress: true
 
 jobs:
   watch:

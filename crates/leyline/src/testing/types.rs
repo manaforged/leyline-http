@@ -1,8 +1,11 @@
+use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const QUEUE_EMPTY_STATUS: u16 = 503;
+pub(super) const CONNECTION: &str = "connection";
+pub(super) const CLOSE: &str = "close";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -11,14 +14,32 @@ pub struct RecordedRequest {
     pub target: String,
     pub headers: Vec<(String, String)>,
     pub body: Vec<u8>,
+    pub request_line: String,
+    pub raw: Vec<u8>,
 }
 
 impl RecordedRequest {
     pub fn header(&self, name: &str) -> Option<&str> {
+        self.header_values(name).into_iter().next()
+    }
+
+    pub fn header_values(&self, name: &str) -> Vec<&str> {
         self.headers
             .iter()
-            .find(|(key, _)| key.eq_ignore_ascii_case(name))
+            .filter(|(key, _)| key.eq_ignore_ascii_case(name))
             .map(|(_, value)| value.as_str())
+            .collect()
+    }
+
+    pub fn header_count(&self, name: &str) -> usize {
+        self.headers
+            .iter()
+            .filter(|(key, _)| key.eq_ignore_ascii_case(name))
+            .count()
+    }
+
+    pub fn text(&self) -> Cow<'_, str> {
+        String::from_utf8_lossy(&self.raw)
     }
 }
 
@@ -73,6 +94,16 @@ impl TestResponse {
     pub fn header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.headers.push((name.into(), value.into()));
         self
+    }
+
+    pub fn close(self) -> Self {
+        self.header(CONNECTION, CLOSE)
+    }
+
+    pub(super) fn closes(&self) -> bool {
+        self.headers.iter().any(|(name, value)| {
+            name.eq_ignore_ascii_case(CONNECTION) && value.eq_ignore_ascii_case(CLOSE)
+        })
     }
 
     pub fn body(mut self, body: impl Into<Vec<u8>>) -> Self {

@@ -3,8 +3,6 @@ use crate::cookie::Jar;
 use crate::core::Result;
 use crate::core::into_url::IntoUrl;
 
-const DOWNLOAD_ERROR_BODY_LIMIT: usize = 4096;
-
 impl RequestBuilder {
     pub fn cookie_jar(mut self, jar: Jar) -> Self {
         self.session = self.session.with_cookie_jar(jar);
@@ -38,7 +36,7 @@ impl RequestBuilder {
         self.stream()
             .send()
             .await?
-            .error_for_status_with_body(DOWNLOAD_ERROR_BODY_LIMIT, &deadline)
+            .error_for_status_with_body(&deadline)
             .await?
             .download_to(path, limit)
             .await

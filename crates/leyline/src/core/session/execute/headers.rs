@@ -95,15 +95,8 @@ impl Session {
     }
 
     fn shape_bare(&self, headers: &mut Vec<HeaderPair>) {
-        if !std::sync::Arc::ptr_eq(
-            &self.inner.profile,
-            &crate::profile::BrowserProfile::bare_shared(),
-        ) {
-            return;
-        }
-        advertise_codecs(headers, self.inner.compression.accept_encoding());
-        if self.inner.accept_language.is_empty() {
-            headers.retain(|(name, _)| !name.eq_ignore_ascii_case("accept-language"));
+        if self.inner.header_style == crate::profile::HeaderStyle::Bare {
+            advertise_codecs(headers, self.inner.compression.accept_encoding());
         }
     }
 
@@ -116,7 +109,7 @@ impl Session {
         let origin = url_origin(&journey.url);
         let referer = referer_for(Some(&journey.referrer), &origin);
         let fetch_site = fetch_site_for(journey.initiator.as_ref(), &journey.chain, &journey.url);
-        let strip_sensitive = !journey.chain.is_empty() && origin != journey.original_origin;
+        let strip_sensitive = journey.strips_credentials(&origin);
         let initiator_origin = journey
             .initiator
             .as_ref()

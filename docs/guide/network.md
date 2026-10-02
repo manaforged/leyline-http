@@ -203,7 +203,9 @@ which count connections. See [Limit each host](crawling.md#limit-each-host).
 Leyline keeps an HSTS store per session (RFC 6797). It records the first
 `Strict-Transport-Security` header of each `https` response. The header needs
 `max-age`; `includeSubDomains` also covers the subdomains, and `max-age=0`
-removes the host. IP addresses are ignored.
+removes the host. IP addresses are ignored. A session that turns off
+certificate verification records nothing, because it cannot trust the
+header.
 
 A later `http://` request or redirect to a recorded host, or a covered
 subdomain, goes to `https` instead, and an explicit port 80 becomes 443.

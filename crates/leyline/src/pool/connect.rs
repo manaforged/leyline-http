@@ -107,7 +107,7 @@ async fn open_fresh_h2(
         .await
         .map_err(Error::from)?;
     let tls = tls_info(&tls_stream);
-    if tls_stream.alpn.as_deref() != Some(b"h2") {
+    if tls_stream.alpn.as_deref() != Some(crate::tls::alpn::H2) {
         let negotiated = tls_stream
             .alpn
             .as_ref()

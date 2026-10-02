@@ -42,7 +42,6 @@ pub struct SessionBuilder {
     socket_config: SocketConfig,
     redirect_policy: RedirectPolicy,
     compression: CompressionConfig,
-    max_body_size: Option<usize>,
     expected_profile_id: Option<String>,
     websocket_config: WebSocketConfig,
     https_only: bool,
@@ -80,7 +79,6 @@ impl SessionBuilder {
             socket_config: SocketConfig::default(),
             redirect_policy: RedirectPolicy::default(),
             compression: CompressionConfig::default(),
-            max_body_size: None,
             expected_profile_id: None,
             websocket_config: WebSocketConfig::default(),
             https_only: false,
@@ -214,11 +212,6 @@ impl SessionBuilder {
         self
     }
 
-    pub fn max_body_size(mut self, bytes: usize) -> Self {
-        self.max_body_size = Some(bytes);
-        self
-    }
-
     pub fn expect_profile_id(mut self, id: &str) -> Self {
         self.expected_profile_id = Some(id.to_owned());
         self
@@ -293,6 +286,9 @@ impl SessionBuilder {
     }
 
     pub fn host_limits(mut self, limits: HostLimits) -> Self {
+        if let Some(error) = limits.config_error() {
+            self.config_error.get_or_insert(error);
+        }
         self.host_limits = limits;
         self
     }

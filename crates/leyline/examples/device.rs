@@ -17,7 +17,7 @@ const PASSWORD_FIELD: &str = "password";
 const EMAIL_ENV: &str = "ACCOUNT_EMAIL";
 const PASSWORD_ENV: &str = "ACCOUNT_PASSWORD";
 const EMAIL_KEY: &str = "email";
-const DEBOUNCE: Duration = Duration::from_secs(2);
+const SAVE_INTERVAL: Duration = Duration::from_secs(2);
 
 fn create() -> leyline::Result<(Session, Device)> {
     let proxy = ProxyUrl::parse(PROXY)?;
@@ -69,7 +69,7 @@ async fn main() -> leyline::Result<()> {
         create()?
     };
     let tab = device.tab(&session);
-    let autosave = device.autosave(&session, DEVICE, DEBOUNCE);
+    let autosave = device.autosave(&session, DEVICE, SAVE_INTERVAL);
     autosave.track(&tab);
 
     if device.page.is_none() {

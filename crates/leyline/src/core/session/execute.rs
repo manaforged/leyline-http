@@ -15,7 +15,7 @@ use crate::core::deadline::Deadline;
 use crate::core::digest::DigestAuth;
 use crate::core::error::{Error, Kind, Result};
 use crate::core::headers::HeaderList;
-use crate::core::response::Response;
+use crate::core::response::{Response, ResponseBody};
 use crate::core::{ProxyConfig, RedirectPolicy};
 use crate::trace;
 use crate::util::{lock, redact, without_userinfo};
@@ -38,6 +38,7 @@ pub(crate) struct Attempt {
     pub(crate) redirect: Option<RedirectPolicy>,
     pub(crate) digest: Option<DigestAuth>,
     pub(crate) initiator: Option<Url>,
+    pub(crate) trusted_origin: Option<Url>,
 }
 
 impl Attempt {
@@ -55,6 +56,7 @@ impl Attempt {
             redirect: self.redirect.clone(),
             digest: self.digest.clone(),
             initiator: self.initiator.clone(),
+            trusted_origin: self.trusted_origin.clone(),
         }
     }
 }
@@ -86,7 +88,7 @@ impl Session {
     ) -> Result<T> {
         tokio::select! {
             biased;
-            () = self.inner.shutdown.cancelled() => Err(shut_down()),
+            () = self.inner.shutdown.cancelled() => Err(Error::shut_down()),
             out = fut => out,
         }
     }
@@ -146,6 +148,7 @@ impl Session {
             redirect,
             digest,
             initiator,
+            trusted_origin,
         } = attempt;
         let redirect_policy = redirect.as_ref().unwrap_or(&self.inner.redirect_policy);
         let request_proxy = request_proxy.as_ref();
@@ -157,12 +160,16 @@ impl Session {
             extra_headers,
             initiator,
             self.session_referer(),
-        );
+        )
+        .trusting(trusted_origin.as_ref());
 
         let mut digest = digest.map(DigestLeg::new);
         let redirect_cap = redirect_policy.max_redirects_hint();
+        let mut pass = None;
         loop {
             journey.url = self.hsts_upgrade(&journey.url);
+            drop(pass.take());
+            pass = self.inner.host_limits.admit(&journey.url).await;
             let headers = self.leg_headers(&journey, preset, header_order);
             journey.authorized = None;
             let audit_headers = self.audit_copy(&headers);
@@ -187,35 +194,24 @@ impl Session {
             #[cfg(feature = "http3")]
             self.note_alt_svc(&journey.url, &leg.headers);
 
-            let code = leg.status.as_u16();
-            if let Some(location) = redirect_location(code, &leg.headers)
-                && let Some(hop) = journey.approved_hop(redirect_policy, code, &location)
-            {
+            let next = Turn {
+                code: leg.status.as_u16(),
+                headers: &leg.headers,
+                redirect_policy,
+                redirect_cap,
+            };
+            if next.take(&mut journey, digest.as_mut(), replay_body)? {
                 drop(leg.body);
-                journey.follow(hop, code, &location, replay_body)?;
-                if journey.chain.len() > redirect_cap {
-                    return Err(Error::new(Kind::Redirect)
-                        .with_message(format!("too many redirects (max {redirect_cap})")));
-                }
-                if let Some(digest) = digest.as_mut() {
-                    journey.authorized = digest.next_hop(&journey)?;
-                }
                 continue;
             }
 
-            if code == 401
-                && let Some(digest) = digest.as_mut()
-                && let Some(authorized) = digest.answer(&journey, &leg.headers)?
-            {
-                drop(leg.body);
-                journey.body = replay_body.ok_or_else(unreplayable_body)?;
-                journey.authorized = Some(authorized);
-                continue;
-            }
-
-            return self
+            let mut response = self
                 .assemble_response(leg, journey, audit_headers, stream_response, &deadline)
-                .await;
+                .await?;
+            if let ResponseBody::Streaming(body) = &mut response.body {
+                body.hold(pass.take());
+            }
+            return Ok(response);
         }
     }
 
@@ -253,12 +249,6 @@ pub(in crate::core::session) struct SiteContext<'a> {
     pub(in crate::core::session) fetch_site: FetchSite,
     pub(in crate::core::session) initiator: Option<&'a Url>,
     pub(in crate::core::session) chain: &'a [Url],
-}
-
-pub(crate) const SHUT_DOWN_MESSAGE: &str = "session shut down";
-
-pub(crate) fn shut_down() -> Error {
-    Error::new(Kind::Request).with_message(SHUT_DOWN_MESSAGE)
 }
 
 fn fetch_site_for(initiator: Option<&Url>, chain: &[Url], current: &Url) -> FetchSite {
@@ -303,3 +293,42 @@ mod redact_tests;
 mod referer_tests;
 #[cfg(test)]
 mod reorder_tests;
+
+struct Turn<'a> {
+    code: u16,
+    headers: &'a [(http::HeaderName, http::HeaderValue)],
+    redirect_policy: &'a RedirectPolicy,
+    redirect_cap: usize,
+}
+
+impl Turn<'_> {
+    fn take(
+        &self,
+        journey: &mut Journey,
+        digest: Option<&mut DigestLeg>,
+        replay_body: Option<Body>,
+    ) -> Result<bool> {
+        if let Some(location) = redirect_location(self.code, self.headers)
+            && let Some(hop) = journey.approved_hop(self.redirect_policy, self.code, &location)
+        {
+            journey.follow(hop, self.code, &location, replay_body)?;
+            if journey.chain.len() > self.redirect_cap {
+                return Err(Error::new(Kind::Redirect)
+                    .with_message(format!("too many redirects (max {})", self.redirect_cap)));
+            }
+            if let Some(digest) = digest {
+                journey.authorized = digest.next_hop(journey)?;
+            }
+            return Ok(true);
+        }
+        if self.code == 401
+            && let Some(digest) = digest
+            && let Some(authorized) = digest.answer(journey, self.headers)?
+        {
+            journey.body = replay_body.ok_or_else(unreplayable_body)?;
+            journey.authorized = Some(authorized);
+            return Ok(true);
+        }
+        Ok(false)
+    }
+}
