@@ -193,6 +193,8 @@ version and publish as separate crates.
 
 ### Fixed
 
+- `leyline-http` requires `tokio-util` 0.7.5, the first version with the
+  owned cancellation future it uses; 0.7.0 to 0.7.4 failed to build.
 - A request that follows a URL the server chose (a `pages()` next link,
   `Tab::follow`, or `Tab::submit_form`) drops the session credentials when
   its origin differs from the page it came from, as a redirect does: the
