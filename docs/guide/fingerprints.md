@@ -109,16 +109,18 @@ for header in &report.headers {
 ```
 
 `compare` returns a `FingerprintReport` with a `FieldOutcome` for `ja4`,
-`ja3`, and `h2_fingerprint`, and a `HeaderOutcome` (lowercase `name` and
-`outcome`) in `headers` for each header the session sent, pseudo-headers
-excluded.
+`ja3`, `h2_fingerprint`, and `header_order`, and a `HeaderOutcome`
+(lowercase `name` and `outcome`) in `headers` for each header the session
+sent, pseudo-headers excluded. `header_order` compares the order of the
+headers that both lists hold.
 
 | `FieldOutcome` | Meaning |
 | --- | --- |
 | `Match` | The values are equal, ignoring ASCII case |
 | `Mismatch { expected, observed }` | The values differ, and they must not |
 | `Informational { expected, observed }` | The values differ, and they can |
-| `NotReported` | The service did not report the field |
+| `NotReported` | The service did not report the field, or reported no headers at all |
+| `Absent { expected }` | The session sent the header and the service reports headers, but not this one. It counts as a mismatch |
 
 JA4 and the Akamai HTTP/2 fingerprint are fixed for every profile, so a
 difference is a `Mismatch`. JA3 hashes the extensions in the order sent, and
@@ -127,7 +129,7 @@ JA3 difference is `Informational`; for a fixed-order profile such as Firefox
 or Safari it is a `Mismatch`. A header that a proxy or middlebox rewrites
 shows as a `Mismatch`. A proxy that ends TLS changes the result.
 
-`is_match()` is `true` when nothing is a `Mismatch`;
+`is_match()` is `true` when nothing is a `Mismatch` or `Absent`;
 `FieldOutcome::is_mismatch()` tests one field. Both types implement
 `Display`: `println!("{report}")` prints one line per field and header.
 

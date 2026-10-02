@@ -42,7 +42,6 @@ assert_eq!(jar.remove(&url, "token"), 1);
 | `clear()` | Deletes every cookie |
 | `all_cookies()` | Every stored cookie, sorted by domain then name, expired ones included |
 | `snapshot()`, `extend_from(other)` | Fork and merge. See [Share or fork a jar](#share-or-fork-a-jar) |
-| `changes()` | A `tokio::sync::watch::Receiver<u64>` whose value increases each time a cookie is added, replaced, or removed through the jar or any clone of it. Sending a `Cookie` header does not change it |
 
 A `Cookie` has the public fields `name`, `value`, `domain`, `path`, `secure`,
 `http_only`, `same_site` (`Strict`, `Lax`, or `None`), `expires`,
@@ -130,7 +129,12 @@ cookie set by `www.example.co.uk` reaches that host only. A `Set-Cookie` with
 `Jar` and `Cookie` implement `Serialize` and `Deserialize`, with times as
 unix milliseconds. `Jar::save_to(path)` writes the jar as JSON and
 `Jar::load_from(path)` reads it back. The write is atomic: a temporary file,
-synced, renamed over `path`, and the directory synced.
+synced, renamed over `path`, and the directory synced. On Unix the file has
+mode `0600`; on Windows it takes the default ACLs of its directory.
+
+The file is a versioned object, `{ "version": 1, "cookies": [..] }`.
+`load_from` refuses a file with another version, or with no version, with
+`Kind::Json`.
 
 - Saving writes every cookie that has not expired, session cookies included,
   as a browser that restores its last session does.
@@ -140,15 +144,17 @@ synced, renamed over `path`, and the directory synced.
 - Each cookie keeps its last-access time, so eviction order survives a
   restart. A jar saved without that field loads with the load time.
 
-`Jar::autosave(path, debounce)` starts one writer task and returns a
-`JarAutosave` handle. It panics outside a Tokio runtime.
+`Jar::autosave(path, interval)` starts one writer task and returns a
+`JarAutosave` handle. It saves at most once per `interval` after a change.
+It panics outside a Tokio runtime.
 
 | Event | What the writer does |
 | --- | --- |
-| A cookie changes | Saves once `debounce` has passed since the first unsaved change, so a burst of `Set-Cookie` headers gives one write |
+| A cookie changes | Saves when `interval` has passed since the first unsaved change, so a burst of `Set-Cookie` headers gives one write. Later changes do not move the save |
 | `flush().await` | Saves now and returns the result |
 | `shutdown().await` | Saves, stops the task, and returns the result |
 | The handle is dropped | Saves once more in the background. The runtime must still run |
+| The runtime shuts down | The writer task saves unsaved changes as it stops |
 
 ```rust,no_run
 use std::time::Duration;

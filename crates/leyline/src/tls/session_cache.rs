@@ -49,8 +49,19 @@ impl SessionCache {
     }
 
     pub(crate) fn key(host: &str, port: u16, route: Option<&url::Url>) -> String {
-        let route = route.map(url::Url::as_str).unwrap_or_default();
-        format!("{host}:{port}|{route}")
+        let Some(route) = route else {
+            return format!("{host}:{port}|");
+        };
+        let mut bare = route.clone();
+        let user = bare.username().to_owned();
+        let password = bare.password().unwrap_or_default().to_owned();
+        if user.is_empty() && password.is_empty() {
+            return format!("{host}:{port}|{route}");
+        }
+        let _ = bare.set_username("");
+        let _ = bare.set_password(None);
+        let credentials = crate::profile::browser::digest(&[user.as_bytes(), password.as_bytes()]);
+        format!("{host}:{port}|{bare}#{credentials:016x}")
     }
 
     pub(crate) fn register(builder: &mut SslConnectorBuilder) -> Result<(), TlsError> {

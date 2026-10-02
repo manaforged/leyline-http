@@ -243,6 +243,7 @@ pub(crate) async fn send_h1_pooled(
         }
     }
     tracing::Span::current().record("pool.hit", false);
+    let installed = legs.fresh.is_some();
 
     let (mut slot, tls, connect_ms) =
         match fresh_leg(pool, &key, connector, dial, legs.fresh).await? {
@@ -261,7 +262,9 @@ pub(crate) async fn send_h1_pooled(
     .await?;
     if reusable {
         pool.return_h1(key, slot, tls.clone());
-        pool.note_h1_install();
+        if !installed {
+            pool.note_h1_install();
+        }
     }
     Ok(H1Outcome::Response(H1Response {
         status: resp.status,
@@ -356,8 +359,8 @@ pub(crate) mod parse;
 mod read;
 mod streaming;
 mod wire;
+pub(crate) use dial::H1Dial;
 use dial::tls_for_scheme;
-pub(crate) use dial::{H1Dial, NEGOTIATED_H2};
 use headers::*;
 pub(crate) use legs::H1Outcome;
 use legs::{FirstLegs, Leg, first_legs, fresh_leg};

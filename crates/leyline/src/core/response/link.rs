@@ -22,7 +22,7 @@ impl Response {
         let mut out = Vec::new();
         for value in self.headers.get_all(LINK) {
             if let Ok(text) = value.to_str() {
-                Parser::new(text).parse_into(&self.url, &mut out);
+                out.extend(parse_links(text, &self.url));
             }
         }
         out
@@ -34,6 +34,12 @@ impl Response {
             .find(|link| link.has_rel(rel))
             .map(|link| link.url)
     }
+}
+
+pub(crate) fn parse_links(text: &str, base: &Url) -> Vec<Link> {
+    let mut out = Vec::new();
+    Parser::new(text).parse_into(base, &mut out);
+    out
 }
 
 struct Parser<'a> {

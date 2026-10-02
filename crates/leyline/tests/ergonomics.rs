@@ -1,16 +1,13 @@
-#[path = "core_support/raw_server.rs"]
-mod raw_server;
-
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use leyline::testing::{TestResponse, TestServer, queue};
 use leyline::trace::{Summary, Trace};
 use leyline::{
     Browser, ChromiumBrand, CompressionConfig, Family, Identity, Kind, Platform, Preset,
     ProtocolPolicy, RetryPolicy, Session,
 };
-use raw_server::{RawResponse, RawServer};
 
 fn gzip(data: &[u8]) -> Vec<u8> {
     let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
@@ -26,11 +23,13 @@ fn plain() -> Session {
 async fn decoded_copy_writes_plain_bytes_and_stops_at_the_limit() {
     let text = b"leyline ".repeat(4_000);
     let gz = || {
-        RawResponse::ok()
+        TestResponse::new(200)
+            .body("ok")
+            .close()
             .header("content-encoding", "gzip")
             .body(gzip(&text))
     };
-    let server = RawServer::start(vec![gz(), gz()]).await;
+    let server = TestServer::http(queue(vec![gz(), gz()])).await.unwrap();
 
     let mut out = Vec::new();
     let written = plain()
@@ -59,11 +58,12 @@ async fn decoded_copy_writes_plain_bytes_and_stops_at_the_limit() {
 
 #[tokio::test]
 async fn body_limit_is_its_own_error() {
-    let server = RawServer::start(vec![
-        RawResponse::ok().body(vec![b'x'; 4_096]),
-        RawResponse::status(500, "Internal Server Error"),
-    ])
-    .await;
+    let server = TestServer::http(queue(vec![
+        TestResponse::new(200).close().body(vec![b'x'; 4_096]),
+        TestResponse::new(500).close(),
+    ]))
+    .await
+    .unwrap();
     let session = Session::builder()
         .compression(CompressionConfig::default().max_body_size(1_024))
         .build()
@@ -82,10 +82,13 @@ async fn body_limit_is_its_own_error() {
 
 #[tokio::test]
 async fn status_error_keeps_the_body() {
-    let server = RawServer::start(vec![
-        RawResponse::status(404, "Not Found").body(b"no such repo".to_vec()),
-    ])
-    .await;
+    let server = TestServer::http(queue(vec![
+        TestResponse::new(404)
+            .close()
+            .body(b"no such repo".to_vec()),
+    ]))
+    .await
+    .unwrap();
     let err = plain()
         .get(server.url("/repos/x"))
         .error_for_status()
@@ -97,7 +100,7 @@ async fn status_error_keeps_the_body() {
 
 #[tokio::test]
 async fn proxy_failures_are_told_apart_from_origin_failures() {
-    let dead = RawServer::bind().await;
+    let dead = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let dead_port = dead.local_addr().unwrap().port();
     drop(dead);
     let err = Session::builder()
@@ -109,9 +112,11 @@ async fn proxy_failures_are_told_apart_from_origin_failures() {
         .unwrap_err();
     assert!(err.is_proxy(), "{err:?}");
 
-    let gateway = RawServer::start(vec![RawResponse::status(502, "Bad Gateway")]).await;
+    let gateway = TestServer::http(queue(vec![TestResponse::new(502).close()]))
+        .await
+        .unwrap();
     let err = Session::builder()
-        .proxy(gateway.url(""))
+        .proxy(format!("http://{}", gateway.addr()))
         .build()
         .unwrap()
         .get("https://origin.invalid/")
@@ -174,7 +179,12 @@ fn saved_identity_rebuilds_the_same_device() {
 
 #[tokio::test]
 async fn session_bearer_auth_and_base_url() {
-    let mut server = RawServer::start(vec![RawResponse::ok(), RawResponse::ok()]).await;
+    let server = TestServer::http(queue(vec![
+        TestResponse::new(200).body("ok").close(),
+        TestResponse::new(200).body("ok").close(),
+    ]))
+    .await
+    .unwrap();
     let api = Session::builder()
         .base_url(server.url("/api/v1/"))
         .bearer_auth("session-token")
@@ -186,13 +196,13 @@ async fn session_bearer_auth_and_base_url() {
         .await
         .unwrap();
 
-    let first = server.next_request().await;
+    let first = server.next_request().await.unwrap();
     assert_eq!(first.request_line, "GET /api/v1/repos/x HTTP/1.1");
     assert_eq!(
         first.header_values("authorization"),
         ["Bearer session-token"]
     );
-    let second = server.next_request().await;
+    let second = server.next_request().await.unwrap();
     assert_eq!(second.request_line, "GET /health HTTP/1.1");
     assert_eq!(
         second.header_values("authorization"),
@@ -221,11 +231,12 @@ impl Trace for Summaries {
 
 #[tokio::test]
 async fn one_summary_per_request_counts_retries() {
-    let server = RawServer::start(vec![
-        RawResponse::status(503, "Service Unavailable"),
-        RawResponse::ok(),
-    ])
-    .await;
+    let server = TestServer::http(queue(vec![
+        TestResponse::new(503).close(),
+        TestResponse::new(200).body("ok").close(),
+    ]))
+    .await
+    .unwrap();
     let hook = Arc::new(Summaries::default());
     let session = Session::builder()
         .trace(Arc::clone(&hook))
@@ -246,10 +257,14 @@ async fn one_summary_per_request_counts_retries() {
 
 #[tokio::test]
 async fn request_cookie_jar_leaves_the_session_jar_alone() {
-    let server = RawServer::start(vec![
-        RawResponse::ok().header("set-cookie", "sid=abc; Path=/"),
-    ])
-    .await;
+    let server = TestServer::http(queue(vec![
+        TestResponse::new(200)
+            .body("ok")
+            .close()
+            .header("set-cookie", "sid=abc; Path=/"),
+    ]))
+    .await
+    .unwrap();
     let session = plain();
     let jar = leyline::cookie::Jar::new();
     session
@@ -264,7 +279,9 @@ async fn request_cookie_jar_leaves_the_session_jar_alone() {
 
 #[tokio::test]
 async fn initiator_sets_referer_origin_and_fetch_site() {
-    let mut server = RawServer::start(vec![RawResponse::ok()]).await;
+    let server = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+        .await
+        .unwrap();
     let session = Session::builder()
         .browser(Browser::default())
         .protocol(ProtocolPolicy::Http1)
@@ -277,7 +294,7 @@ async fn initiator_sets_referer_origin_and_fetch_site() {
         .initiator("http://shop.example/product/1")
         .await
         .unwrap();
-    let req = server.next_request().await;
+    let req = server.next_request().await.unwrap();
     assert_eq!(req.header_values("referer"), ["http://shop.example/"]);
     assert_eq!(req.header_values("origin"), ["http://shop.example"]);
     assert_eq!(req.header_values("sec-fetch-site"), ["cross-site"]);
@@ -285,17 +302,19 @@ async fn initiator_sets_referer_origin_and_fetch_site() {
 
 #[tokio::test]
 async fn retries_rotate_to_the_next_proxy() {
-    let dead = RawServer::bind().await;
+    let dead = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let dead_port = dead.local_addr().unwrap().port();
     drop(dead);
-    let mut good = RawServer::start(vec![RawResponse::ok()]).await;
+    let good = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+        .await
+        .unwrap();
     let resp = Session::builder()
         .proxy(format!("http://127.0.0.1:{dead_port}"))
         .retry(
             RetryPolicy::transient()
                 .initial_backoff(Duration::from_millis(1))
                 .jitter(false)
-                .rotate_proxies([good.url("")]),
+                .rotate_proxies([format!("http://{}", good.addr())]),
         )
         .build()
         .unwrap()
@@ -304,7 +323,7 @@ async fn retries_rotate_to_the_next_proxy() {
         .unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     assert_eq!(
-        good.next_request().await.request_line,
+        good.next_request().await.unwrap().request_line,
         "GET http://origin.test/item HTTP/1.1"
     );
 }
@@ -323,32 +342,34 @@ fn backoff_is_public_and_capped() {
 
 #[tokio::test]
 async fn top_level_get_is_a_plain_request() {
-    let mut server = RawServer::start(vec![RawResponse::ok()]).await;
+    let server = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+        .await
+        .unwrap();
     let resp = leyline::get(server.url("/hello")).await.unwrap();
     assert_eq!(resp.text().await.unwrap(), "ok");
-    assert!(
-        server
-            .next_request()
-            .await
-            .header_values("sec-ch-ua")
-            .is_empty()
-    );
+    let sent = server.next_request().await.unwrap();
+    assert!(sent.header_values("sec-ch-ua").is_empty());
 }
 
 #[tokio::test]
 async fn new_is_plain_and_browser_is_one_line() {
-    let mut server = RawServer::start(vec![RawResponse::ok(), RawResponse::ok()]).await;
+    let server = TestServer::http(queue(vec![
+        TestResponse::new(200).body("ok").close(),
+        TestResponse::new(200).body("ok").close(),
+    ]))
+    .await
+    .unwrap();
     let plain = Session::new();
     assert_eq!(plain.identity().browser(), None);
     plain.get(server.url("/plain")).await.unwrap();
-    let sent = server.next_request().await;
+    let sent = server.next_request().await.unwrap();
     assert!(sent.header_values("sec-ch-ua").is_empty());
     assert!(!sent.header_values("user-agent")[0].contains("Chrome"));
 
     let chrome = Session::browser(Browser::default());
     assert_eq!(chrome.identity().platform(), Platform::Windows);
     chrome.get(server.url("/chrome")).await.unwrap();
-    let sent = server.next_request().await;
+    let sent = server.next_request().await.unwrap();
     assert!(sent.header_values("user-agent")[0].contains("Chrome"));
     assert!(!sent.header_values("sec-ch-ua").is_empty());
 }

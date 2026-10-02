@@ -10,8 +10,6 @@ use crate::pool::{Pool, TlsInfo};
 use crate::tls::proxy;
 use crate::tls::{FingerprintConnector, TlsError, TlsStream};
 
-pub(crate) const NEGOTIATED_H2: &str = "h2";
-
 #[derive(Clone, Copy)]
 pub(crate) enum H1Dial<'a> {
     Browser(&'a H2Config),
@@ -63,7 +61,7 @@ async fn open_tls(
     };
     let tls = tls_info(&tls_stream);
     if let H1Dial::Browser(h2_config) = dial
-        && tls_stream.alpn.as_deref() == Some(NEGOTIATED_H2.as_bytes())
+        && tls_stream.alpn.as_deref() == Some(crate::tls::alpn::H2)
     {
         return hand_to_h2(pool, key, tls_stream, tls, h2_config).await;
     }

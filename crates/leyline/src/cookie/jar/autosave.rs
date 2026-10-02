@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::core::Result;
-use crate::util::autosave::{Autosave, SaveTarget, Schedule, stopped};
+use crate::util::autosave::{Autosave, SaveJob, SaveTarget, Schedule};
 
 use super::Jar;
 
@@ -19,7 +19,7 @@ struct JarTarget {
 }
 
 impl Jar {
-    pub fn autosave(&self, path: impl Into<PathBuf>, debounce: Duration) -> JarAutosave {
+    pub fn autosave(&self, path: impl Into<PathBuf>, interval: Duration) -> JarAutosave {
         let path: Arc<Path> = Arc::from(path.into());
         let target = JarTarget {
             jar: self.clone(),
@@ -27,8 +27,8 @@ impl Jar {
             saved: None,
         };
         let schedule = Schedule {
-            debounce,
-            interval: None,
+            interval,
+            periodic: None,
             label: "cookie jar",
         };
         JarAutosave {
@@ -57,17 +57,20 @@ impl std::fmt::Debug for JarAutosave {
 }
 
 impl SaveTarget for JarTarget {
-    async fn save(&mut self) -> Result<()> {
+    fn prepare(&mut self) -> Option<SaveJob> {
         let generation = *self.jar.changes.borrow();
         if self.saved == Some(generation) {
-            return Ok(());
+            return None;
         }
         let jar = self.jar.clone();
         let path = Arc::clone(&self.path);
-        tokio::task::spawn_blocking(move || jar.save_to(&*path))
-            .await
-            .map_err(|_| stopped("cookie jar"))??;
+        Some(SaveJob {
+            generation,
+            write: Box::new(move || jar.save_to(&*path)),
+        })
+    }
+
+    fn saved(&mut self, generation: u64) {
         self.saved = Some(generation);
-        Ok(())
     }
 }

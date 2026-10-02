@@ -2,6 +2,7 @@ use std::time::Duration;
 
 const DEFAULT_TOTAL: Option<Duration> = Some(Duration::from_secs(300));
 const DEFAULT_CONNECT: Option<Duration> = Some(Duration::from_secs(10));
+const DEFAULT_ERROR_BODY: Option<Duration> = Some(Duration::from_secs(10));
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
@@ -11,6 +12,7 @@ pub struct TimeoutConfig {
     read: Option<Option<Duration>>,
     response_header: Option<Option<Duration>>,
     body: Option<Option<Duration>>,
+    error_body: Option<Option<Duration>>,
 }
 
 impl TimeoutConfig {
@@ -43,6 +45,11 @@ impl TimeoutConfig {
         self
     }
 
+    pub fn error_body(mut self, d: impl Into<Option<Duration>>) -> Self {
+        self.error_body = Some(d.into());
+        self
+    }
+
     pub(crate) fn over(self, base: &TimeoutConfig) -> TimeoutConfig {
         TimeoutConfig {
             total: self.total.or(base.total),
@@ -50,11 +57,16 @@ impl TimeoutConfig {
             read: self.read.or(base.read),
             response_header: self.response_header.or(base.response_header),
             body: self.body.or(base.body),
+            error_body: self.error_body.or(base.error_body),
         }
     }
 
     pub(crate) fn body_limit(&self) -> Option<Duration> {
         self.body.flatten()
+    }
+
+    pub(crate) fn error_body_limit(&self) -> Option<Duration> {
+        self.error_body.unwrap_or(DEFAULT_ERROR_BODY)
     }
 
     pub(crate) fn total_limit(&self) -> Option<Duration> {

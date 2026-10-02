@@ -3,22 +3,42 @@ use std::path::Path;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::cookie::record::Cookie;
+use crate::core::device::FileVersion;
 use crate::core::{Error, Result};
-use crate::util::atomic::write_atomic;
+use crate::util::atomic::{FileMode, write_atomic};
 use crate::util::lock;
 
 use super::Jar;
 
 impl Jar {
     pub fn save_to(&self, path: impl AsRef<Path>) -> Result<()> {
-        let bytes = serde_json::to_vec_pretty(self).map_err(Error::from_json)?;
-        write_atomic(path.as_ref(), &bytes)
+        let file = JarFileOut {
+            version: FileVersion::default(),
+            cookies: self,
+        };
+        let bytes = serde_json::to_vec_pretty(&file).map_err(Error::from_json)?;
+        write_atomic(path.as_ref(), &bytes, FileMode::Private)
     }
 
     pub fn load_from(path: impl AsRef<Path>) -> Result<Jar> {
         let bytes = std::fs::read(path)?;
-        serde_json::from_slice(&bytes).map_err(Error::from_json)
+        let file: JarFileIn = serde_json::from_slice(&bytes).map_err(Error::from_json)?;
+        match file.version {
+            FileVersion::V1 => Ok(file.cookies),
+        }
     }
+}
+
+#[derive(Serialize)]
+struct JarFileOut<'a> {
+    version: FileVersion,
+    cookies: &'a Jar,
+}
+
+#[derive(Deserialize)]
+struct JarFileIn {
+    version: FileVersion,
+    cookies: Jar,
 }
 
 impl Serialize for Jar {

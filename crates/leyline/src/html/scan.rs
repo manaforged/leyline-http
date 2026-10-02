@@ -1,6 +1,8 @@
-use super::entity::decode;
+use super::entity::decode_attribute;
 
 const RAW_TEXT: [&str; 4] = ["script", "style", "textarea", "title"];
+
+const EMPTY_COMMENTS: [&str; 2] = [">", "->"];
 
 pub(super) struct Tag<'a> {
     pub(super) name: String,
@@ -46,7 +48,9 @@ impl<'a> Scanner<'a> {
         while let Some(found) = doc[from..].find("</") {
             let at = from + found;
             let tail = &doc.as_bytes()[at + 2..];
-            if tail.len() >= name.len() && tail[..name.len()].eq_ignore_ascii_case(name.as_bytes())
+            if tail.len() > name.len()
+                && tail[..name.len()].eq_ignore_ascii_case(name.as_bytes())
+                && ends_name(tail[name.len()])
             {
                 self.skip_past(at, ">");
                 return &doc[start..at];
@@ -59,8 +63,11 @@ impl<'a> Scanner<'a> {
 
     fn markup(&mut self, after: usize) -> bool {
         let rest = &self.doc[after..];
-        if rest.starts_with("!--") {
-            self.skip_past(after + 3, "-->");
+        if let Some(body) = rest.strip_prefix("!--") {
+            match EMPTY_COMMENTS.iter().find(|end| body.starts_with(**end)) {
+                Some(end) => self.pos = after + 3 + end.len(),
+                None => self.skip_past(after + 3, "-->"),
+            }
             return true;
         }
         if rest.starts_with('!') || rest.starts_with('?') {
@@ -157,7 +164,7 @@ fn value(doc: &str, from: usize) -> (String, usize) {
             let end = doc[start..]
                 .find(char::from(quote))
                 .map_or(doc.len(), |at| start + at);
-            (decode(&doc[start..end]), (end + 1).min(doc.len()))
+            (decode_attribute(&doc[start..end]), (end + 1).min(doc.len()))
         }
         _ => {
             let start = i;
@@ -167,7 +174,11 @@ fn value(doc: &str, from: usize) -> (String, usize) {
             {
                 i += 1;
             }
-            (decode(&doc[start..i]), i)
+            (decode_attribute(&doc[start..i]), i)
         }
     }
+}
+
+fn ends_name(byte: u8) -> bool {
+    byte.is_ascii_whitespace() || matches!(byte, b'/' | b'>')
 }

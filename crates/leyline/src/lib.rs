@@ -58,6 +58,8 @@ pub mod guide {
     pub struct Crawling;
     #[doc = include_str!("../../../docs/guide/accounts.md")]
     pub struct Accounts;
+    #[doc = include_str!("../../../docs/guide/api-clients.md")]
+    pub struct ApiClients;
 }
 
 macro_rules! bench_pub {
@@ -106,6 +108,12 @@ pub mod fuzz {
     pub fn extension_ids(tls: &crate::profile::TlsProfile) -> Vec<u16> {
         crate::profile::permutation::extension_ids(tls)
     }
+
+    pub fn parse_links(header: &str, base: &str) -> Vec<crate::Link> {
+        url::Url::parse(base)
+            .map(|base| crate::core::parse_links(header, &base))
+            .unwrap_or_default()
+    }
 }
 #[cfg(feature = "html")]
 pub mod html;
@@ -125,10 +133,10 @@ pub use crate::core::LeylineService;
 pub use crate::core::WebSocketBuilder;
 pub use crate::core::{
     BlockKind, BlockRules, BlockSignal, Body, BodyStream, CompressionConfig, ContentEncoding,
-    Device, DeviceAutosave, DigestAuth, DnsConfig, Error, ErrorCategory, FetchSite, HostLimits,
-    HostStats, HttpVersion, Identity, IntoParamPair, IntoUrl, Kind, Link, NoProxy, Pages,
-    PoolConfig, ProtocolPolicy, ProxyConfig, ProxyHealth, ProxyPool, ProxyRule, ProxyUrl,
-    RedirectAction, RedirectAttempt, RedirectPolicy, RelayBody, RequestBuilder, Response,
+    Device, DeviceAutosave, DeviceAutosaveOptions, DigestAuth, DnsConfig, Error, ErrorCategory,
+    FetchSite, HostLimits, HostStats, HttpVersion, Identity, IntoParamPair, IntoUrl, Kind, Link,
+    NoProxy, Pages, PoolConfig, ProtocolPolicy, ProxyConfig, ProxyHealth, ProxyPool, ProxyRule,
+    ProxyUrl, RedirectAction, RedirectAttempt, RedirectPolicy, RelayBody, RequestBuilder, Response,
     ResponseTiming, Result, RetryPolicy, RetryTrigger, Session, SessionBuilder, SessionIdentity,
     SessionState, SocketConfig, Tab, TimeoutConfig, WaitFormat, WebSocketConfig, relay_headers,
 };

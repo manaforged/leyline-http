@@ -1,7 +1,7 @@
 use std::io;
 
-use super::{Error, Kind};
-use crate::core::retry::GATEWAY_STATUSES;
+use super::{Error, ErrorCategory, Kind};
+use crate::core::retry::is_gateway_status;
 use crate::core::session::decompress::BodyLimit;
 use crate::h2::H2Error;
 use crate::h2::error::ErrorCode;
@@ -17,21 +17,18 @@ impl Error {
     }
 
     pub fn is_connect(&self) -> bool {
-        if self.inner.kind == Kind::Connect {
-            return true;
+        match self.category() {
+            ErrorCategory::Connect | ErrorCategory::Dns => true,
+            ErrorCategory::Tls => self.tls().is_some_and(TlsError::is_connect_phase),
+            ErrorCategory::Timeout => {
+                self.inner.kind == Kind::Connect
+                    || self.tls().is_some_and(TlsError::is_connect_phase)
+            }
+            _ => false,
         }
-        if matches!(
-            self.tls(),
-            Some(
-                TlsError::TcpConnect(_)
-                    | TlsError::Dns(_)
-                    | TlsError::Handshake(_)
-                    | TlsError::HandshakeIo(_)
-                    | TlsError::Rejected(_)
-            )
-        ) {
-            return true;
-        }
+    }
+
+    pub(super) fn is_socket_unreachable(&self) -> bool {
         self.io().is_some_and(|e| {
             matches!(
                 e.kind(),
@@ -57,12 +54,12 @@ impl Error {
     fn is_proxy_transient(&self) -> bool {
         match self.tls() {
             Some(TlsError::Proxy { status, source, .. }) => {
-                source.is_some() || status.is_some_and(|code| GATEWAY_STATUSES.contains(&code))
+                source.is_some() || status.is_some_and(is_gateway_status)
             }
             Some(TlsError::ProxyTargetUnreachable {
                 reply: ProxyReply::HttpStatus(code),
                 ..
-            }) => GATEWAY_STATUSES.contains(code),
+            }) => is_gateway_status(*code),
             _ => false,
         }
     }
@@ -87,18 +84,22 @@ impl Error {
                         code: ErrorCode::NoError,
                         ..
                     }
-                    | H2Error::Stream {
-                        code: ErrorCode::RefusedStream,
-                        ..
-                    }
             )
-        ) {
+        ) || self.is_refused_stream()
+        {
             return true;
         }
+        self.tls().is_some_and(TlsError::is_handshake)
+    }
+
+    pub(crate) fn is_refused_stream(&self) -> bool {
         matches!(
-            self.tls(),
-            Some(TlsError::Handshake(_) | TlsError::HandshakeIo(_) | TlsError::Rejected(_))
-        )
+            self.h2(),
+            Some(H2Error::Stream {
+                code: ErrorCode::RefusedStream,
+                ..
+            })
+        ) || self.not_processed()
     }
 
     pub fn is_body_limit(&self) -> bool {

@@ -168,9 +168,12 @@ pub(in crate::core::session) fn derive_identity(
         profile,
         header_style,
         header_order,
+        sec_ch_ua: match session_user_agent(input.default_headers) {
+            Some(_) => String::new(),
+            None => resolved.sec_ch_ua,
+        },
         user_agent: session_user_agent(input.default_headers)
             .map_or(resolved.user_agent, str::to_owned),
-        sec_ch_ua: resolved.sec_ch_ua,
         accept_language: session_accept_language(
             input.languages,
             header_style,

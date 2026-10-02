@@ -257,7 +257,7 @@ g_benches() {
     fi
 }
 
-FUZZ_TARGETS=(h2_frame hpack h2_continuation h1_head h1_chunked cookie connect_response qpack)
+FUZZ_TARGETS=(h2_frame hpack h2_continuation h1_head h1_chunked cookie connect_response qpack html link)
 
 fuzz_run() {
     local host

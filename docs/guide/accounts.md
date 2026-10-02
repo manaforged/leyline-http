@@ -28,12 +28,12 @@ reads the login form.
 | --- | --- |
 | `Device::capture(&session, proxy)` | Reads the device from a session, with the proxy URL you pass |
 | `pin_profile(&session)` | Stores the profile TOML in the device |
-| `save_to(path)`, `load_from(path)` | Writes and reads the device as JSON. The write is atomic |
+| `save_to(path)`, `load_from(path)` | Writes and reads the device as JSON, `{ "version": 1, .. }`. The write is atomic, and on Unix the file has mode `0600` |
 | `open()` | Builds the session, runs `check`, loads the jar, and restores `state` |
 | `session_builder()` | Returns the builder, for more settings before `build()` |
 | `check(&session)` | Returns `Kind::Config` when the session differs from the device |
 | `tab(&session)` | Returns a `Tab` whose current page is `page` |
-| `autosave(&session, path, debounce)` | Saves the device, its jar, and the session state as they change |
+| `autosave(&session, path, options)` | Saves the device, its jar, and the session state as they change |
 
 ## Create the device once
 
@@ -156,8 +156,16 @@ It is `false` when only the languages, the proxy, or a `strict` gap differ.
 
 ## Save the device as it changes
 
-`Device::autosave(&session, path, debounce)` starts one writer task and
-returns a `DeviceAutosave` handle. Each save writes the device file with the
+`Device::autosave(&session, path, options)` starts one writer task and
+returns a `DeviceAutosave` handle. `options` is a `DeviceAutosaveOptions`, or
+a `Duration` that sets its `interval`:
+
+| Option | Default | Effect |
+| --- | --- | --- |
+| `interval` | Set by `DeviceAutosaveOptions::new(interval)` | After a change, saves at most once per `interval` |
+| `state_interval` | 300 s | Saves at this period, so the connection state stays current |
+
+ Each save writes the device file with the
 session's current `SessionState`. With a `jar_path`, it also writes the jar
 file when a cookie changed; without one, the jar goes into the device file.
 For a jar without a device, use `Jar::autosave`; see
@@ -165,14 +173,16 @@ For a jar without a device, use `Jar::autosave`; see
 
 | Event | Effect |
 | --- | --- |
-| A cookie changes | A save runs once `debounce` has passed since the first unsaved change |
-| 5 minutes pass | A save runs, so new TLS tickets, `Alt-Svc`, and HSTS entries reach the file |
+| A cookie changes, or `update` or `track` runs | A save runs when `interval` has passed since the first unsaved change. Later changes do not move the save |
+| `state_interval` passes | A save runs, so new TLS tickets, `Alt-Svc`, and HSTS entries reach the file |
 | `flush().await` | Saves now and returns the result |
 | `shutdown().await` | Saves and stops the writer |
 | The handle is dropped | A last save runs in the background. The runtime must still run |
+| The runtime shuts down | The writer task saves unsaved changes as it stops |
 
 Each save writes a temporary file, syncs it, and renames it, so a crash never
-leaves a half-written file. `autosave` panics outside a Tokio runtime.
+leaves a half-written file. On Unix the files have mode `0600`; on Windows
+they take the default ACLs of their directory. `autosave` panics outside a Tokio runtime.
 
 The writer keeps its own copy of the device. Change it with
 `DeviceAutosave::update(|device| ..)`; the change reaches the file with the
@@ -221,9 +231,9 @@ service workers, because it runs no scripts. Send `if-none-match` or
 | The HSTS store | `http://` requests to a known host go to `https`. See [Network](network.md#hsts) |
 
 `Device::autosave` refreshes `device.state` on each save. Before a manual
-`save_to`, set `device.state = session.state()`. A ticket key includes the
-proxy route, which can hold the proxy password, so protect the state as you
-protect the proxy URL.
+`save_to`, set `device.state = session.state()`. A ticket key holds the
+proxy URL without its user name and password, and a hash of them, so the saved
+state never holds proxy credentials.
 
 ## Browse with a tab
 
@@ -260,25 +270,37 @@ println!("{} {}", orders.status(), logo.status());
 
 ## Log in with the page's form
 
-The `html` feature, on by default, adds `leyline::html`.
-`html::forms(document)` returns every `<form>` as an `html::Form` with the
-values a browser would submit: hidden inputs, checked checkboxes and radio
-buttons, text areas, and selected options; disabled controls are left out.
+The `html` feature, on by default, adds `leyline::html` and turns on the
+`multipart` feature. `html::forms(document)` returns every `<form>` as an
+`html::Form` with the values a browser would submit:
+
+- Hidden inputs, checked checkboxes, text areas, and selected options.
+- One checked radio button per name: the last one, as a browser keeps it.
+- Controls outside the `<form>` element that name it with `form="id"`.
+- No disabled controls, and no controls inside a disabled `<fieldset>`
+  except in its first `<legend>`.
+- Values with every HTML named character reference decoded, such as `&amp;`
+  and `&eacute;`.
+
 `Form::find(document, key)` returns the first form whose `id` or `name` is
 `key`.
 
 | Call | Effect |
 | --- | --- |
 | `action()`, `method()` | The `action` attribute and the `FormMethod`, `Get` or `Post` |
-| `fields()`, `field(name)` | Every `(name, value)` pair, or one field's value |
-| `set(name, value)` | Sets a field, or adds it |
+| `enctype()` | The `FormEnctype`: `UrlEncoded`, `Multipart`, or `TextPlain` |
+| `base()` | The `href` of the page's `<base>` element, if any |
+| `fields()`, `field(name)` | Every `(name, value)` pair, or the first value of one field |
+| `set(name, value)` | Replaces every value of the field with one value, or adds the field |
 | `buttons()`, `press(name)` | The submit button names; `press` adds one button's name and value. It returns `false` for an unknown name, and adds `name.x` and `name.y` for an image button |
 
 `Tab::submit_form(&form)` sends `form.fields()` as they are, with no submit
 button: call `form.press(name)` first when the site reads the button. The
-action resolves against the current page. A `Post` form sends the fields as
-`application/x-www-form-urlencoded` with `Preset::FormNavigate`; a `Get` form
-replaces the action's query with the fields. Both are navigations that carry
+action resolves against the page's `<base href>`, or the current page when
+there is none. A `Post` form sends the fields with `Preset::FormNavigate`,
+encoded as its `enctype()` says: `application/x-www-form-urlencoded`,
+`multipart/form-data`, or `text/plain`. A `Get` form replaces the action's
+query with the fields. Both are navigations that carry
 the page as the `Referer` and change the current page.
 
 The session redirect policy applies: after a login `POST`, a 301, 302, or

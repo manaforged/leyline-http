@@ -5,7 +5,7 @@ use http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 
 use crate::h2::client::H2Client;
 use crate::h2::config::H2Config;
-use crate::pool::h1::{H1Dial, NEGOTIATED_H2};
+use crate::pool::h1::H1Dial;
 use crate::pool::{H1Slot, Negotiated, Opened, Pool, negotiate};
 use crate::profile::preset::HeaderPair;
 use crate::tls::FingerprintConnector;
@@ -161,12 +161,12 @@ async fn send_h2_or_fall_back(
                      ProtocolPolicy::Http1",
                 ));
             };
-            let browser = H1Dial::Browser(h2_config);
-            Box::pin(send_request_h1(
+            Box::pin(send_h1_or_upgrade(
                 pool,
                 connector,
-                browser,
+                h2_config,
                 retry.with_body(body),
+                None,
             ))
             .await
         }
@@ -277,15 +277,34 @@ pub(crate) fn strip_connection_specific_headers(headers: &mut Vec<HeaderPair>) -
         if name.bytes().any(|b| b.is_ascii_uppercase()) {
             *name = name.to_lowercase().into();
         }
-        match name.as_ref() {
-            "transfer-encoding" | "connection" | "keep-alive" | "proxy-connection" | "upgrade"
-            | "http2-settings" | "host" => false,
-            "te" => value.eq_ignore_ascii_case("trailers"),
-            _ => true,
-        }
+        sent_on(HttpVersion::Http2, name, value)
     });
     Ok(())
 }
+
+pub(crate) fn sent_on(version: HttpVersion, name: &str, value: &str) -> bool {
+    match version {
+        HttpVersion::Http1_1 => !name.eq_ignore_ascii_case("priority"),
+        HttpVersion::Http2 | HttpVersion::Http3 => {
+            if name.eq_ignore_ascii_case("te") {
+                return value.eq_ignore_ascii_case("trailers");
+            }
+            !CONNECTION_SPECIFIC
+                .iter()
+                .any(|field| name.eq_ignore_ascii_case(field))
+        }
+    }
+}
+
+const CONNECTION_SPECIFIC: [&str; 7] = [
+    "transfer-encoding",
+    "connection",
+    "keep-alive",
+    "proxy-connection",
+    "upgrade",
+    "http2-settings",
+    "host",
+];
 
 #[cfg(feature = "http3")]
 #[tracing::instrument(
@@ -356,7 +375,8 @@ pub(crate) async fn send_request_h3(
 }
 
 pub(crate) fn is_h2_alpn_mismatch(err: &Error) -> bool {
-    err.alpn().is_some_and(|alpn| alpn != NEGOTIATED_H2)
+    err.alpn()
+        .is_some_and(|alpn| alpn.as_bytes() != crate::tls::alpn::H2)
 }
 
 #[cfg(test)]

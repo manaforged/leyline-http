@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
 use tokio::io::{AsyncWrite, AsyncWriteExt};
@@ -11,8 +9,6 @@ use crate::core::error::{Error, Kind, Result};
 use crate::core::session::decompress::{
     BodyLimit, Decoder, body_read_error, content_codings, decompress_body, drain_stream_into_vec,
 };
-
-const ERROR_BODY_WAIT: Duration = Duration::from_secs(10);
 
 impl Response {
     pub async fn text(self) -> crate::core::Result<String> {
@@ -108,15 +104,15 @@ impl Response {
         write_stream(self.into_decoded_stream(limit)?, writer, body_read_error).await
     }
 
-    pub(crate) async fn error_for_status_with_body(
-        self,
-        limit: usize,
-        deadline: &Deadline,
-    ) -> Result<Self> {
+    pub(crate) async fn error_for_status_with_body(self, deadline: &Deadline) -> Result<Self> {
         let Some(err) = self.status_error() else {
             return Ok(self);
         };
-        let wait = deadline.remaining().min(ERROR_BODY_WAIT);
+        let limit = self.compression.max_error_body;
+        let remaining = deadline.remaining();
+        let wait = deadline
+            .error_body()
+            .map_or(remaining, |cap| cap.min(remaining));
         match within(Some(wait), self.read_until(limit, |_, _| false)).await {
             Ok(Ok(body)) => Err(err.with_body(body)),
             _ => Err(err),
@@ -128,7 +124,7 @@ impl Response {
         F: FnMut(&[u8], usize) -> bool,
     {
         let encoding = content_codings(self.headers.get_all(http::header::CONTENT_ENCODING));
-        let mut decoder = Decoder::new(encoding.as_deref(), &self.compression)?;
+        let mut decoder = Decoder::truncated(encoding.as_deref(), &self.compression, limit)?;
         let mut stream = self.into_stream()?;
         let mut out = Vec::new();
         while let Some(chunk) = stream.next().await {

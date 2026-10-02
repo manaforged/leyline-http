@@ -1,13 +1,10 @@
-#[path = "core_support/raw_server.rs"]
-mod raw_server;
-
 use std::time::Duration;
 
+use leyline::testing::{TestResponse, TestServer, queue};
 use leyline::{
     BlockKind, BlockRules, Browser, CompressionConfig, ErrorCategory, Family, Platform,
     ProtocolPolicy, RelayBody, Session, TimeoutConfig,
 };
-use raw_server::{RawResponse, RawServer};
 use tokio::net::TcpListener;
 
 fn plain() -> Session {
@@ -64,11 +61,12 @@ async fn one_category_classifies_each_failure() {
         Some(500)
     );
 
-    let server = RawServer::start(vec![
-        RawResponse::status(404, "Not Found"),
-        RawResponse::ok().body(vec![b'x'; 4096]),
-    ])
-    .await;
+    let server = TestServer::http(queue(vec![
+        TestResponse::new(404).close(),
+        TestResponse::new(200).close().body(vec![b'x'; 4096]),
+    ]))
+    .await
+    .unwrap();
     let status = plain()
         .get(server.url("/missing"))
         .await
@@ -89,15 +87,18 @@ async fn one_category_classifies_each_failure() {
 
 #[tokio::test]
 async fn link_headers_resolve_against_the_response_url() {
-    let server = RawServer::start(vec![
-        RawResponse::ok()
+    let server = TestServer::http(queue(vec![
+        TestResponse::new(200)
+            .body("ok")
+            .close()
             .header(
                 "link",
                 "</items?page=2,3>; rel=\"next last\", <https://other.example/p>; rel=prev",
             )
             .header("link", "<../up>; rel=up"),
-    ])
-    .await;
+    ]))
+    .await
+    .unwrap();
     let resp = plain().get(server.url("/api/items")).await.unwrap();
     let next = server.url("/items?page=2,3");
     assert_eq!(resp.link("next").map(String::from), Some(next.clone()));
@@ -112,14 +113,17 @@ async fn link_headers_resolve_against_the_response_url() {
 
 #[tokio::test]
 async fn relay_headers_drop_hop_by_hop_fields() {
-    let server = RawServer::start(vec![
-        RawResponse::ok()
+    let server = TestServer::http(queue(vec![
+        TestResponse::new(200)
+            .body("ok")
+            .close()
             .header("connection", "x-hop")
             .header("keep-alive", "timeout=5")
             .header("x-hop", "1")
             .header("x-keep", "2"),
-    ])
-    .await;
+    ]))
+    .await
+    .unwrap();
     let headers = plain()
         .get(server.url("/"))
         .await
@@ -136,12 +140,15 @@ async fn relay_headers_describe_the_body_you_forward() {
     use std::io::Write;
     let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
     encoder.write_all(b"decoded body").unwrap();
-    let server = RawServer::start(vec![
-        RawResponse::ok()
+    let server = TestServer::http(queue(vec![
+        TestResponse::new(200)
+            .body("ok")
+            .close()
             .header("content-encoding", "gzip")
             .body(encoder.finish().unwrap()),
-    ])
-    .await;
+    ]))
+    .await
+    .unwrap();
     let resp = plain().get(server.url("/")).stream().send().await.unwrap();
     let raw = resp.relay_headers(RelayBody::AsReceived);
     assert_eq!(raw.get("content-encoding").unwrap(), "gzip");
@@ -154,11 +161,14 @@ async fn relay_headers_describe_the_body_you_forward() {
 
 #[tokio::test]
 async fn challenge_pages_are_detected_from_data() {
-    let server = RawServer::start(vec![
-        RawResponse::status(403, "Forbidden").header("cf-mitigated", "challenge"),
-        RawResponse::status(429, "Too Many Requests").header("x-shield", "blocked"),
-    ])
-    .await;
+    let server = TestServer::http(queue(vec![
+        TestResponse::new(403)
+            .close()
+            .header("cf-mitigated", "challenge"),
+        TestResponse::new(429).close().header("x-shield", "blocked"),
+    ]))
+    .await
+    .unwrap();
     let challenge = plain().get(server.url("/a")).await.unwrap();
     let signal = challenge.block().unwrap();
     assert_eq!(signal.vendor, "cloudflare");
@@ -179,7 +189,9 @@ async fn challenge_pages_are_detected_from_data() {
 
 #[tokio::test]
 async fn a_plain_session_sends_no_language_and_browsers_format_theirs() {
-    let mut server = RawServer::start(vec![RawResponse::ok(); 5]).await;
+    let server = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close(); 5]))
+        .await
+        .unwrap();
     plain().get(server.url("/plain")).await.unwrap();
     let langs = ["de-DE", "de", "en"];
     for (browser, platform) in [
@@ -209,18 +221,26 @@ async fn a_plain_session_sends_no_language_and_browsers_format_theirs() {
         .unwrap();
 
     assert_eq!(
-        server.next_request().await.header_count("accept-language"),
+        server
+            .next_request()
+            .await
+            .unwrap()
+            .header_count("accept-language"),
         0
     );
     let expected = [
         "de-DE,de;q=0.9,en;q=0.8",
-        "de-DE,de;q=0.9,en;q=0.8",
+        "de-DE,de;q=0.7,en;q=0.3",
         "de-DE",
         "en-GB,en;q=0.9,fr;q=0.8",
     ];
     for want in expected {
         assert_eq!(
-            server.next_request().await.header_values("accept-language"),
+            server
+                .next_request()
+                .await
+                .unwrap()
+                .header_values("accept-language"),
             [want]
         );
     }

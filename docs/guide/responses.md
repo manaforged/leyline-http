@@ -53,11 +53,14 @@ HTTP/3 responses carry them; a streamed response and HTTP/1.1 yield none.
 
 `relay_headers(body)` returns the headers without the hop-by-hop ones:
 `connection`, each header that `connection` names, `keep-alive`,
-`proxy-connection`, `te`, `trailer`, `transfer-encoding`, and `upgrade` (RFC
+`proxy-connection`, `proxy-authenticate`, `proxy-authorization`, `te`, `trailer`, `transfer-encoding`, and `upgrade` (RFC
 9110, section 7.6.1). `RelayBody::AsReceived` matches a body from
 `into_stream()`. `RelayBody::Decoded` matches a body from `bytes()`, `text()`,
 or `into_decoded_stream()`, and also drops `content-encoding` and
-`content-length` when the response was encoded. See
+`content-length` when Leyline decodes the body. When the session does not
+decode the coding, for example because `CompressionConfig` turns it off, the
+body arrives as sent and `content-encoding` stays. `proxy-authenticate` and
+`proxy-authorization` are dropped as hop-by-hop headers. See
 [Service integration](service-integration.md#relay-an-upstream-body).
 
 ## Bodies
@@ -89,9 +92,20 @@ overrides the declared charset. Without the `charset` feature, on by default,
 
 `CompressionConfig::max_body_size` (100 MiB by default) caps a buffered body
 and the decoded body, on every protocol. A body over the cap fails with
-`Kind::Body`, and the message names `max_body_size`.
-`SessionBuilder::max_body_size(bytes)` sets the same cap and wins over
-`CompressionConfig`.
+`Kind::Body`, and the message names `max_body_size`. Set the cap on the
+session with `SessionBuilder::compression`:
+
+```rust
+use leyline::{CompressionConfig, Session};
+
+# fn run() -> leyline::Result<()> {
+let session = Session::builder()
+    .compression(CompressionConfig::new().max_body_size(8 * 1024 * 1024))
+    .build()?;
+# let _ = session;
+# Ok(())
+# }
+```
 
 `CompressionConfig::new()` turns on gzip, deflate, br, and zstd, and a
 session decodes and advertises those that are also compiled in.
@@ -135,7 +149,8 @@ follows `Link: rel="next"`. Await `pages.next()`, or use it as a
 `futures_util::Stream`. Each follow-up is a `GET` with the first request's
 headers, timeouts, retry policy, and `error_for_status()` setting. The
 sequence ends after a page with no `next` link, after an error, or at a
-`next` URL it already fetched.
+`next` URL it already fetched. The first request URL and the final URL of
+each page, after redirects, count as fetched.
 
 ```rust,no_run
 use serde::Deserialize;
@@ -175,8 +190,19 @@ A 4xx or 5xx response is `Ok`. `error_for_status()` consumes the response and
 returns a `Kind::Status` error for a status of 400 or more, with the status,
 the headers, and the final URL. `error_for_status_ref()` makes the same check
 on a borrowed response, so you can still read the body of an error.
-`RequestBuilder::error_for_status()` checks during the send and also keeps up
-to 64 KiB of the body.
+
+`RequestBuilder::error_for_status()` checks the final response after the
+retry policy is done, and keeps the start of the body in the error:
+
+| Limit | Default | Set with |
+| --- | --- | --- |
+| Body bytes kept, after decoding | 64 KiB | `CompressionConfig::max_error_body` |
+| Time to read that body | 10 s, and never past the `total` timeout | `TimeoutConfig::error_body` |
+
+Decompression stops at the byte limit, so a small compressed body cannot
+expand past it. When the read fails or takes too long, the error has no body
+but keeps the status and headers. `download` uses the same limits for a
+status error.
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {

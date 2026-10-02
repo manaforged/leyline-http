@@ -159,12 +159,17 @@ impl Lease {
 
     pub(crate) fn session(&self, base: &Session) -> Result<Session> {
         match self.pool.entries[self.index].identity {
-            Some(identity) => self.pool.sessions.session(base, identity),
+            Some(identity) => self.pool.sessions.session(base, self.index, identity),
             None => Ok(base.clone()),
         }
     }
 
-    pub(crate) fn record(&self, result: &Result<Response>, origin: Option<&Origin>) {
+    pub(crate) fn record(
+        &self,
+        result: &Result<Response>,
+        origin: Option<&Origin>,
+        answered: Option<&Origin>,
+    ) {
         let strike = match result {
             Err(err) if err.is_proxy() => true,
             Ok(resp) => self.pool.settings.is_block(resp),
@@ -176,6 +181,9 @@ impl Lease {
             return;
         }
         state.unstick(origin, self.index);
+        if answered != origin {
+            state.unstick(answered, self.index);
+        }
         state.strike(self.index, &self.pool, Instant::now());
     }
 }

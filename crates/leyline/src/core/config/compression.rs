@@ -9,6 +9,7 @@ pub struct CompressionConfig {
     pub(crate) deflate: bool,
     pub(crate) zstd: bool,
     pub(crate) max_body_size: usize,
+    pub(crate) max_error_body: usize,
 }
 
 impl Default for CompressionConfig {
@@ -19,6 +20,7 @@ impl Default for CompressionConfig {
             deflate: true,
             zstd: true,
             max_body_size: DEFAULT_MAX_BODY_SIZE,
+            max_error_body: 64 * 1024,
         }
     }
 }
@@ -60,6 +62,11 @@ impl CompressionConfig {
 
     pub fn max_body_size(mut self, bytes: usize) -> Self {
         self.max_body_size = bytes;
+        self
+    }
+
+    pub fn max_error_body(mut self, bytes: usize) -> Self {
+        self.max_error_body = bytes;
         self
     }
 

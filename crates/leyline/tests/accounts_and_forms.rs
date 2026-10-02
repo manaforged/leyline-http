@@ -197,7 +197,7 @@ async fn device_autosave_saves_updates_to_the_device() {
             serde_json::json!("https://shop.example/cart"),
         );
     });
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    autosave.flush().await.unwrap();
     let saved = Device::load_from(&path).unwrap();
     assert_eq!(saved.app["last_page"], "https://shop.example/cart");
     autosave.shutdown().await.unwrap();

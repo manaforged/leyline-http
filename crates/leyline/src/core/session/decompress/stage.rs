@@ -6,6 +6,7 @@
 ))]
 use std::io::Write;
 
+use super::limit::Cap;
 #[cfg(any(
     feature = "compression-gzip",
     feature = "compression-brotli",
@@ -21,7 +22,7 @@ pub(super) enum Stage {
     Gzip(Box<flate2::write::MultiGzDecoder<Sink>>),
     #[cfg(feature = "compression-deflate")]
     DeflatePending {
-        limit: usize,
+        cap: Cap,
         head: Vec<u8>,
     },
     #[cfg(feature = "compression-deflate")]
@@ -78,6 +79,20 @@ fn pump(writer: &mut dyn Write, input: &[u8], name: &str) -> Result<()> {
     writer.flush().map_err(|e| decode_error(name, e))
 }
 
+#[cfg(any(
+    feature = "compression-gzip",
+    feature = "compression-brotli",
+    feature = "compression-deflate",
+    feature = "compression-zstd"
+))]
+fn settle(pumped: Result<()>, sink: &mut Sink) -> Result<Vec<u8>> {
+    let out = std::mem::take(&mut sink.buf);
+    if sink.truncated() {
+        return Ok(out);
+    }
+    pumped.map(|()| out)
+}
+
 #[cfg(feature = "compression-deflate")]
 fn is_zlib_header(cmf: u8, flg: u8) -> bool {
     cmf & 0x0f == 8 && cmf >> 4 <= 7 && (u16::from(cmf) << 8 | u16::from(flg)) % 31 == 0
@@ -85,30 +100,28 @@ fn is_zlib_header(cmf: u8, flg: u8) -> bool {
 
 impl Stage {
     #[cfg(feature = "compression-deflate")]
-    fn finish_pending(&mut self, limit: usize, head: &[u8]) -> Result<Vec<u8>> {
+    fn finish_pending(&mut self, cap: Cap, head: &[u8]) -> Result<Vec<u8>> {
         if head.is_empty() {
             return Ok(Vec::new());
         }
-        *self = Self::raw_deflate(limit);
+        *self = Self::raw_deflate(cap);
         let mut out = self.write(head)?;
         out.extend(self.finish()?);
         Ok(out)
     }
 
     #[cfg(feature = "compression-deflate")]
-    fn deflate_for(cmf: u8, flg: u8, limit: usize) -> Self {
+    fn deflate_for(cmf: u8, flg: u8, cap: Cap) -> Self {
         if is_zlib_header(cmf, flg) {
-            Self::Zlib(Box::new(flate2::write::ZlibDecoder::new(Sink::new(limit))))
+            Self::Zlib(Box::new(flate2::write::ZlibDecoder::new(Sink::new(cap))))
         } else {
-            Self::raw_deflate(limit)
+            Self::raw_deflate(cap)
         }
     }
 
     #[cfg(feature = "compression-deflate")]
-    fn raw_deflate(limit: usize) -> Self {
-        Self::RawDeflate(Box::new(flate2::write::DeflateDecoder::new(Sink::new(
-            limit,
-        ))))
+    fn raw_deflate(cap: Cap) -> Self {
+        Self::RawDeflate(Box::new(flate2::write::DeflateDecoder::new(Sink::new(cap))))
     }
 
     #[cfg_attr(
@@ -120,13 +133,13 @@ impl Stage {
         )),
         expect(unused_variables)
     )]
-    pub(super) fn new(encoding: &str, limit: usize) -> Result<Self> {
+    pub(super) fn new(encoding: &str, cap: Cap) -> Result<Self> {
         match encoding {
             "gzip" | "x-gzip" => {
                 #[cfg(feature = "compression-gzip")]
                 {
                     Ok(Self::Gzip(Box::new(flate2::write::MultiGzDecoder::new(
-                        Sink::new(limit),
+                        Sink::new(cap),
                     ))))
                 }
                 #[cfg(not(feature = "compression-gzip"))]
@@ -138,7 +151,7 @@ impl Stage {
                 #[cfg(feature = "compression-deflate")]
                 {
                     Ok(Self::DeflatePending {
-                        limit,
+                        cap,
                         head: Vec::new(),
                     })
                 }
@@ -151,7 +164,7 @@ impl Stage {
                 #[cfg(feature = "compression-brotli")]
                 {
                     Ok(Self::Brotli(Box::new(brotli::DecompressorWriter::new(
-                        Sink::new(limit),
+                        Sink::new(cap),
                         4096,
                     ))))
                 }
@@ -165,10 +178,7 @@ impl Stage {
                 {
                     zstd::stream::raw::Decoder::new()
                         .map(|d| {
-                            Self::Zstd(Box::new(zstd::stream::zio::Writer::new(
-                                Sink::new(limit),
-                                d,
-                            )))
+                            Self::Zstd(Box::new(zstd::stream::zio::Writer::new(Sink::new(cap), d)))
                         })
                         .map_err(|e| Error::new(Kind::Decode).with_message(format!("zstd: {e}")))
                 }
@@ -186,14 +196,14 @@ impl Stage {
             Self::Identity => Ok(input.to_vec()),
             #[cfg(feature = "compression-gzip")]
             Self::Gzip(d) => {
-                pump(&mut **d, input, "gzip")?;
-                Ok(std::mem::take(&mut d.get_mut().buf))
+                let pumped = pump(&mut **d, input, "gzip");
+                settle(pumped, d.get_mut())
             }
             #[cfg(feature = "compression-deflate")]
-            Self::DeflatePending { limit, head } => {
-                let limit = *limit;
+            Self::DeflatePending { cap, head } => {
+                let cap = *cap;
                 if head.is_empty() && input.len() >= 2 {
-                    *self = Self::deflate_for(input[0], input[1], limit);
+                    *self = Self::deflate_for(input[0], input[1], cap);
                     return self.write(input);
                 }
                 head.extend_from_slice(input);
@@ -201,28 +211,28 @@ impl Stage {
                     return Ok(Vec::new());
                 };
                 let head = std::mem::take(head);
-                *self = Self::deflate_for(cmf, flg, limit);
+                *self = Self::deflate_for(cmf, flg, cap);
                 self.write(&head)
             }
             #[cfg(feature = "compression-deflate")]
             Self::Zlib(d) => {
-                pump(&mut **d, input, "deflate")?;
-                Ok(std::mem::take(&mut d.get_mut().buf))
+                let pumped = pump(&mut **d, input, "deflate");
+                settle(pumped, d.get_mut())
             }
             #[cfg(feature = "compression-deflate")]
             Self::RawDeflate(d) => {
-                pump(&mut **d, input, "deflate")?;
-                Ok(std::mem::take(&mut d.get_mut().buf))
+                let pumped = pump(&mut **d, input, "deflate");
+                settle(pumped, d.get_mut())
             }
             #[cfg(feature = "compression-brotli")]
             Self::Brotli(d) => {
-                pump(&mut **d, input, "brotli")?;
-                Ok(std::mem::take(&mut d.get_mut().buf))
+                let pumped = pump(&mut **d, input, "brotli");
+                settle(pumped, d.get_mut())
             }
             #[cfg(feature = "compression-zstd")]
             Self::Zstd(d) => {
-                pump(&mut **d, input, "zstd")?;
-                Ok(std::mem::take(&mut d.writer_mut().buf))
+                let pumped = pump(&mut **d, input, "zstd");
+                settle(pumped, d.writer_mut())
             }
         }
     }
@@ -236,9 +246,9 @@ impl Stage {
                 Ok(std::mem::take(&mut d.get_mut().buf))
             }
             #[cfg(feature = "compression-deflate")]
-            Self::DeflatePending { limit, head } => {
-                let (limit, head) = (*limit, std::mem::take(head));
-                self.finish_pending(limit, &head)
+            Self::DeflatePending { cap, head } => {
+                let (cap, head) = (*cap, std::mem::take(head));
+                self.finish_pending(cap, &head)
             }
             #[cfg(feature = "compression-deflate")]
             Self::Zlib(d) => {

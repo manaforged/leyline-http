@@ -56,8 +56,9 @@ let for_handler = state.clone();
 ```
 
 See [Sessions](sessions.md) for what each kind sends. A buffered body is
-capped at 100 MiB by default; set `SessionBuilder::max_body_size(bytes)` to
-what your service accepts from an upstream.
+capped at 100 MiB by default; set `CompressionConfig::max_body_size(bytes)` to
+what your service accepts from an upstream. See
+[Responses](responses.md#size-cap-and-content-coding).
 
 Each request can override the session timeout and proxy with `.timeout(..)`
 and `.proxy(..)`. See
@@ -203,84 +204,95 @@ println!("{size} bytes");
 ```
 
 Enable it with `features = ["tower"]`; the example also needs
-`tower-service = "0.3"`. A `leyline::Body` is a
-`Stream<Item = std::io::Result<Bytes>>`, so `axum::body::Body::from_stream`
-takes it as it is:
+`tower-service = "0.3"`. The response body is a `leyline::Body`, a
+`Stream<Item = std::io::Result<Bytes>>`, so a framework that takes a byte
+stream, such as axum with `Body::from_stream`, forwards it as it is. To
+forward the response, keep the status and the body and filter the headers:
 
-```rust,ignore
-use leyline::RelayBody;
+```rust,no_run
+# #[cfg(feature = "tower")]
+# mod example {
+use leyline::http::{Request, Response};
+use leyline::{Body, LeylineService, RelayBody};
+use tower_service::Service;
 
-async fn proxy(
-    mut svc: leyline::LeylineService,
-    req: leyline::http::Request<leyline::Body>,
-) -> leyline::Result<axum::response::Response> {
-    let resp = tower_service::Service::call(&mut svc, req).await?;
-    let (parts, body) = resp.into_parts();
-    let mut out = axum::response::Response::new(axum::body::Body::from_stream(body));
-    *out.status_mut() = parts.status;
-    *out.headers_mut() = leyline::relay_headers(&parts.headers, RelayBody::AsReceived);
-    Ok(out)
+pub async fn relay(
+    mut svc: LeylineService,
+    req: Request<Body>,
+) -> leyline::Result<Response<Body>> {
+    let resp = svc.call(req).await?;
+    let (mut parts, body) = resp.into_parts();
+    parts.headers = leyline::relay_headers(&parts.headers, RelayBody::AsReceived);
+    Ok(Response::from_parts(parts, body))
 }
+# }
 ```
 
-### Add Tower layers
+### Limit and time out upstream calls
 
-`LeylineService` is `Clone`. Build the layer stack once and store it in the
-application state; each handler clones it and calls `oneshot`. Clones of a
-`ConcurrencyLimit` share one semaphore, so every handler counts against the
-same limit. This needs
-`tower = { version = "0.5", features = ["limit", "timeout", "util"] }`;
-Leyline does not depend on `tower`, so its tests do not compile this block.
+`LeylineService` is `Clone`, and a clone shares the session. Build it once,
+store it in the application state, and clone it in each handler. To limit
+the upstream calls in flight, share one `tokio::sync::Semaphore` in the same
+state. To bound one call, put a `TimeoutConfig` in the request extensions; a
+timeout is then a `leyline::Error` like any other, and `category()` maps it
+to a status:
 
-```rust,ignore
+```rust,no_run
+# #[cfg(feature = "tower")]
+# mod example {
+use std::sync::Arc;
 use std::time::Duration;
+
 use leyline::http::{Request, StatusCode};
-use leyline::{Body, LeylineService, Session};
-use tower::limit::ConcurrencyLimit;
-use tower::timeout::Timeout;
-use tower::{BoxError, ServiceBuilder, ServiceExt};
+use leyline::{Body, LeylineService, Session, TimeoutConfig};
+use tokio::sync::Semaphore;
+use tower_service::Service;
+
+const MAX_IN_FLIGHT: usize = 32;
+const UPSTREAM_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Clone)]
-struct AppState {
-    upstream: ConcurrencyLimit<Timeout<LeylineService>>,
+pub struct AppState {
+    upstream: LeylineService,
+    slots: Arc<Semaphore>,
 }
 
 impl AppState {
-    fn new(session: Session) -> Self {
-        let upstream = ServiceBuilder::new()
-            .concurrency_limit(32)
-            .timeout(Duration::from_secs(10))
-            .service(LeylineService::new(session));
-        Self { upstream }
+    pub fn new(session: Session) -> Self {
+        Self {
+            upstream: LeylineService::new(session),
+            slots: Arc::new(Semaphore::new(MAX_IN_FLIGHT)),
+        }
     }
 }
 
-async fn handler(state: AppState, url: String) -> StatusCode {
-    let Ok(request) = Request::builder().uri(url).body(Body::default()) else {
-        return StatusCode::INTERNAL_SERVER_ERROR;
+pub async fn handler(state: AppState, url: String) -> StatusCode {
+    let Ok(mut request) = Request::builder().uri(url).body(Body::default()) else {
+        return StatusCode::BAD_REQUEST;
     };
-    match state.upstream.clone().oneshot(request).await {
+    request
+        .extensions_mut()
+        .insert(TimeoutConfig::new().total(UPSTREAM_TIMEOUT));
+    let Ok(_slot) = state.slots.acquire().await else {
+        return StatusCode::SERVICE_UNAVAILABLE;
+    };
+    let mut upstream = state.upstream.clone();
+    match upstream.call(request).await {
         Ok(response) => response.status(),
-        Err(err) => status_for_box(err.as_ref()),
-    }
-}
-
-fn status_for_box(err: &(dyn std::error::Error + Send + Sync + 'static)) -> StatusCode {
-    match leyline::Error::find(err) {
-        Some(err) => err
+        Err(err) => err
             .category()
             .gateway_status()
             .or_else(|| err.status())
             .unwrap_or(StatusCode::BAD_GATEWAY),
-        None => StatusCode::GATEWAY_TIMEOUT,
     }
 }
+# }
 ```
 
-A layer returns `tower::BoxError` and can wrap the `leyline::Error` in its
-own error. `Error::find` walks the `source()` chain and returns the first
-`leyline::Error`. In this stack the only other error is the timeout layer's
-`Elapsed`, so the example answers 504 for it.
+`LeylineService` is a `tower_service::Service`, so `tower` layers can wrap it
+too. A layer returns `tower::BoxError` and can wrap the `leyline::Error` in
+its own error; `Error::find` walks the `source()` chain and returns the first
+`leyline::Error`. See [Map errors to HTTP statuses](#map-errors-to-http-statuses).
 
 ## Call a service on localhost
 
@@ -311,23 +323,34 @@ drop(session);
 # }
 ```
 
-In axum, let `with_graceful_shutdown` drain the open requests first, then
-call `shutdown()` on each session and drop it:
+`Session::shutdown()` is a plain call. The autosave handles of a cookie jar
+and a device are separate: `JarAutosave::shutdown()` and
+`DeviceAutosave::shutdown()` are `async`, save the last changes, and return
+the result of that save. Stop the server first so that the open requests
+finish, then stop the sessions, then await each autosave handle:
 
-```rust,ignore
-let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await?;
-axum::serve(listener, app)
-    .with_graceful_shutdown(async {
-        tokio::signal::ctrl_c().await.ok();
-    })
-    .await?;
+```rust,no_run
+use std::time::Duration;
+
+use leyline::{Browser, Session};
+
+# async fn run() -> leyline::Result<()> {
+let session = Session::browser(Browser::default());
+let cookies = session.cookies().autosave("cookies.json", Duration::from_secs(2));
+
+let worker = session.clone();
+let jobs = tokio::spawn(async move { worker.get("https://api.example/jobs").await });
+
+tokio::signal::ctrl_c().await?;
 session.shutdown();
-drop(session);
+drop(jobs.await);
+cookies.shutdown().await?;
+# Ok(())
+# }
 ```
 
-A cookie jar or a device saved with `autosave` has its own handle: call
-`shutdown().await` on it before the process exits so the last changes reach
-the file. See [Accounts](accounts.md).
+For a device, `Device::autosave` returns a `DeviceAutosave`; await its
+`shutdown()` in the same place. See [Accounts](accounts.md#save-the-device-as-it-changes).
 
 ## Test the service
 

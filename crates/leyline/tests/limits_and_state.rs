@@ -1,3 +1,6 @@
+#[path = "core_support/wait.rs"]
+mod wait;
+
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -86,7 +89,13 @@ async fn a_streamed_body_holds_its_host_slot_until_it_ends() {
         let url = server.url("/b");
         async move { session.get(url).await }
     });
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    wait::until(|| {
+        session
+            .host_stats()
+            .first()
+            .is_some_and(|s| s.waiting() == 1)
+    })
+    .await;
     let stats = session.host_stats();
     assert_eq!(stats[0].in_flight(), 1);
     assert_eq!(stats[0].waiting(), 1);

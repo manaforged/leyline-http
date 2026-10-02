@@ -9,6 +9,40 @@ pub(crate) enum LimitSource {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Overflow {
+    Fail,
+    Truncate,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Cap {
+    pub(crate) limit: BodyLimit,
+    pub(crate) overflow: Overflow,
+}
+
+impl Cap {
+    pub(crate) fn fail(limit: BodyLimit) -> Self {
+        Self {
+            limit,
+            overflow: Overflow::Fail,
+        }
+    }
+
+    pub(crate) fn truncate_at(session: BodyLimit, caller: usize) -> Self {
+        let limit = session.tighter(u64::try_from(caller).ok());
+        let overflow = match limit.source {
+            LimitSource::Caller => Overflow::Truncate,
+            LimitSource::Session => Overflow::Fail,
+        };
+        Self { limit, overflow }
+    }
+
+    pub(crate) fn room(self, used: usize) -> usize {
+        self.limit.bytes.saturating_sub(used)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BodyLimit {
     pub(crate) bytes: usize,
     pub(crate) source: LimitSource,

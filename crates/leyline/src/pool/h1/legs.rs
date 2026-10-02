@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use super::dial::{Dialed, H1Dial, NEGOTIATED_H2, open_new};
+use super::dial::{Dialed, H1Dial, open_new};
 use super::{H1Body, H1PooledError, H1Response, checkout_live_h1};
 use crate::ResponseTiming;
 use crate::h2::client::H2Client;
@@ -23,7 +23,7 @@ impl H1Outcome {
         H1PooledError::NotResendable(
             Error::new(Kind::Http2)
                 .with_message("the origin negotiated HTTP/2 on a new connection")
-                .with_alpn(NEGOTIATED_H2),
+                .with_alpn(String::from_utf8_lossy(crate::tls::alpn::H2)),
         )
     }
 

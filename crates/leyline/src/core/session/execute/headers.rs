@@ -95,15 +95,8 @@ impl Session {
     }
 
     fn shape_bare(&self, headers: &mut Vec<HeaderPair>) {
-        if !std::sync::Arc::ptr_eq(
-            &self.inner.profile,
-            &crate::profile::BrowserProfile::bare_shared(),
-        ) {
-            return;
-        }
-        advertise_codecs(headers, self.inner.compression.accept_encoding());
-        if self.inner.accept_language.is_empty() {
-            headers.retain(|(name, _)| !name.eq_ignore_ascii_case("accept-language"));
+        if self.inner.header_style == crate::profile::HeaderStyle::Bare {
+            advertise_codecs(headers, self.inner.compression.accept_encoding());
         }
     }
 

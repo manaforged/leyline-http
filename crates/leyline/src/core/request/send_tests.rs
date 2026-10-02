@@ -15,7 +15,7 @@ fn transient_retries_connection_loss_only() {
             &policy,
             0,
             true,
-            true
+            || true
         ),
         RetryPlan::Backoff(_)
     ));
@@ -25,12 +25,12 @@ fn transient_retries_connection_loss_only() {
             &policy,
             0,
             true,
-            true
+            || true
         ),
         RetryPlan::Stop
     ));
     assert!(matches!(
-        plan_retry(&Err(Error::new(Kind::Timeout)), &policy, 0, true, true),
+        plan_retry(&Err(Error::new(Kind::Timeout)), &policy, 0, true, || true),
         RetryPlan::Backoff(_)
     ));
 }
@@ -44,7 +44,7 @@ fn no_policy_never_retries() {
             &policy,
             0,
             true,
-            true
+            || true
         ),
         RetryPlan::Stop
     ));

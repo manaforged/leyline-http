@@ -50,10 +50,11 @@ struct Template {
 impl RequestBuilder {
     pub fn pages(self) -> Pages {
         let template = Template::of(&self);
+        let visited = template.first.iter().cloned().collect();
         Pages {
             template,
             pending: Some(Box::pin(self.send())),
-            visited: HashSet::new(),
+            visited,
         }
     }
 }

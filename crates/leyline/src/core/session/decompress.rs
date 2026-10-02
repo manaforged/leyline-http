@@ -9,6 +9,7 @@ mod sink;
 mod stage;
 
 pub(crate) use limit::BodyLimit;
+use limit::{Cap, Overflow};
 use stage::Stage;
 
 use crate::core::CompressionConfig;
@@ -22,11 +23,41 @@ pub(crate) struct Decoder {
     stages: Vec<Stage>,
     fed: bool,
     produced: usize,
-    limit: BodyLimit,
+    cap: Cap,
 }
 
 impl Decoder {
     pub(crate) fn new(encoding: Option<&str>, config: &CompressionConfig) -> Result<Option<Self>> {
+        Self::with_cap(
+            encoding,
+            config,
+            Cap::fail(BodyLimit::session(config.max_body_size)),
+        )
+    }
+
+    pub(crate) fn capped(
+        encoding: Option<&str>,
+        config: &CompressionConfig,
+        limit: Option<u64>,
+    ) -> Result<Self> {
+        let cap = Cap::fail(BodyLimit::session(config.max_body_size).tighter(limit));
+        Ok(Self::with_cap(encoding, config, cap)?.unwrap_or_else(|| Self::over(Vec::new(), cap)))
+    }
+
+    pub(crate) fn truncated(
+        encoding: Option<&str>,
+        config: &CompressionConfig,
+        limit: usize,
+    ) -> Result<Option<Self>> {
+        let cap = Cap::truncate_at(BodyLimit::session(config.max_body_size), limit);
+        Self::with_cap(encoding, config, cap)
+    }
+
+    fn with_cap(
+        encoding: Option<&str>,
+        config: &CompressionConfig,
+        cap: Cap,
+    ) -> Result<Option<Self>> {
         let Some(encoding) = encoding else {
             return Ok(None);
         };
@@ -44,29 +75,18 @@ impl Decoder {
             .iter()
             .rev()
             .copied()
-            .map(|enc| Stage::new(enc, config.max_body_size))
+            .map(|enc| Stage::new(enc, cap))
             .collect::<Result<Vec<_>>>()?;
-        Ok(Some(Self {
+        Ok(Some(Self::over(stages, cap)))
+    }
+
+    fn over(stages: Vec<Stage>, cap: Cap) -> Self {
+        Self {
             stages,
             fed: false,
             produced: 0,
-            limit: BodyLimit::session(config.max_body_size),
-        }))
-    }
-
-    pub(crate) fn capped(
-        encoding: Option<&str>,
-        config: &CompressionConfig,
-        limit: Option<u64>,
-    ) -> Result<Self> {
-        let mut decoder = Self::new(encoding, config)?.unwrap_or(Self {
-            stages: Vec::new(),
-            fed: false,
-            produced: 0,
-            limit: BodyLimit::session(config.max_body_size),
-        });
-        decoder.limit = decoder.limit.tighter(limit);
-        Ok(decoder)
+            cap,
+        }
     }
 
     pub(crate) fn feed(&mut self, chunk: &[u8], out: &mut Vec<u8>) -> Result<()> {
@@ -96,12 +116,19 @@ impl Decoder {
     }
 
     fn emit(&mut self, data: Vec<u8>, out: &mut Vec<u8>) -> Result<()> {
-        self.produced += data.len();
-        if self.produced > self.limit.bytes {
-            return Err(self.limit.error());
+        let room = self.cap.room(self.produced);
+        self.produced = self.produced.saturating_add(data.len());
+        if data.len() <= room {
+            out.extend_from_slice(&data);
+            return Ok(());
         }
-        out.extend_from_slice(&data);
-        Ok(())
+        match self.cap.overflow {
+            Overflow::Fail => Err(self.cap.limit.error()),
+            Overflow::Truncate => {
+                out.extend_from_slice(&data[..room]);
+                Ok(())
+            }
+        }
     }
 }
 

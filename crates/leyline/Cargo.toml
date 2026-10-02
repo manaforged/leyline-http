@@ -72,7 +72,7 @@ bench-internals = []
 tower = ["dep:tower-service"]
 test-util = []
 # HTML form extraction (leyline::html) and Tab::submit_form.
-html = []
+html = ["multipart"]
 full = [
     "compression-gzip",
     "compression-brotli",
@@ -247,6 +247,10 @@ required-features = ["bench-internals"]
 
 [[test]]
 name = "h2_resend"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_refused_retry"
 required-features = ["bench-internals"]
 
 [[test]]

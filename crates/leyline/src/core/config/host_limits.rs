@@ -23,7 +23,7 @@ impl Origin {
     pub(crate) fn of(url: &url::Url) -> Option<Self> {
         Some(Self {
             scheme: url.scheme().to_ascii_lowercase(),
-            host: url.host_str()?.to_ascii_lowercase(),
+            host: url.host_str()?.trim_end_matches('.').to_ascii_lowercase(),
             port: url.port_or_known_default()?,
         })
     }
@@ -67,7 +67,7 @@ impl HostPattern {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct HostLimits {
     rule: Rule,
@@ -77,28 +77,36 @@ pub struct HostLimits {
     gates: Arc<Gates>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 struct Pause {
-    statuses: Vec<u16>,
-    default: Option<Duration>,
-}
-
-const DEFAULT_PAUSE: Duration = Duration::from_secs(60);
-const MAX_WAIT: Duration = Duration::from_secs(24 * 60 * 60);
-
-fn later(from: Instant, wait: Duration) -> Instant {
-    from + wait.min(MAX_WAIT)
+    statuses: Vec<http::StatusCode>,
+    invalid: Option<u16>,
+    default: Duration,
+    max: Duration,
 }
 
 impl Pause {
-    fn length(&self, status: u16, retry_after: Option<&str>) -> Option<Duration> {
-        if !self.statuses.contains(&status) {
-            return None;
+    fn length(&self, status: http::StatusCode, wait: Option<Duration>) -> Option<Duration> {
+        self.statuses
+            .contains(&status)
+            .then(|| wait.unwrap_or(self.default).min(self.max))
+    }
+}
+
+impl Default for HostLimits {
+    fn default() -> Self {
+        Self {
+            rule: Rule::default(),
+            overrides: Vec::new(),
+            max_total: None,
+            pause: Pause {
+                statuses: Vec::new(),
+                invalid: None,
+                default: Duration::from_secs(60),
+                max: Duration::from_secs(24 * 60 * 60),
+            },
+            gates: Arc::default(),
         }
-        retry_after
-            .and_then(|value| crate::core::retry::parse_retry_after(value.trim()))
-            .or(self.default)
-            .or(Some(DEFAULT_PAUSE))
     }
 }
 
@@ -109,7 +117,7 @@ impl HostLimits {
 
     pub fn max_in_flight(mut self, n: usize) -> Self {
         self.rule.max_in_flight = Some(n.max(1));
-        self.reset()
+        self
     }
 
     pub fn per_second(mut self, rate: f64) -> Self {
@@ -118,47 +126,67 @@ impl HostLimits {
         } else {
             None
         };
-        self.reset()
+        self
     }
 
     pub fn host(mut self, host: &str, limits: HostLimits) -> Self {
         let pattern = HostPattern::parse(host);
         self.overrides.retain(|(held, _)| *held != pattern);
         self.overrides.push((pattern, limits.rule));
-        self.reset()
+        self
     }
 
     pub fn max_total_in_flight(mut self, n: usize) -> Self {
         self.max_total = Some(n.max(1));
-        self.reset()
+        self
     }
 
     pub fn pause_on(mut self, statuses: impl IntoIterator<Item = u16>) -> Self {
-        self.pause.statuses = statuses.into_iter().collect();
-        self.reset()
+        self.pause.statuses.clear();
+        self.pause.invalid = None;
+        for code in statuses {
+            match http::StatusCode::from_u16(code) {
+                Ok(status) => self.pause.statuses.push(status),
+                Err(_) => {
+                    self.pause.invalid.get_or_insert(code);
+                }
+            }
+        }
+        self
     }
 
     pub fn pause_for(mut self, default: Duration) -> Self {
-        self.pause.default = Some(default);
-        self.reset()
+        self.pause.default = default;
+        self
     }
 
-    pub(crate) fn observe(&self, url: &url::Url, status: u16, retry_after: Option<&str>) {
-        let Some(length) = self.pause.length(status, retry_after) else {
+    pub fn max_pause(mut self, max: Duration) -> Self {
+        self.pause.max = max;
+        self
+    }
+
+    pub(crate) fn config_error(&self) -> Option<String> {
+        self.pause
+            .invalid
+            .map(|code| format!("HostLimits::pause_on: {code} is not a valid HTTP status code"))
+    }
+
+    pub(crate) fn armed(mut self) -> Self {
+        self.gates = Arc::new(Gates::new(self.max_total));
+        self
+    }
+
+    pub(crate) fn observe(&self, url: &url::Url, status: http::StatusCode, wait: Option<Duration>) {
+        let Some(length) = self.pause.length(status, wait) else {
             return;
         };
         let Some(origin) = Origin::of(url) else {
             return;
         };
         let rule = self.rule_for(&origin.host);
-        self.gates
-            .gate(origin, rule.max_in_flight)
-            .pause_until(later(Instant::now(), length));
-    }
-
-    fn reset(mut self) -> Self {
-        self.gates = Arc::new(Gates::new(self.max_total));
-        self
+        let now = Instant::now();
+        let end = now.checked_add(length).unwrap_or(now);
+        self.gates.gate(origin, rule.max_in_flight).pause_until(end);
     }
 
     pub(crate) fn is_unlimited(&self) -> bool {
@@ -186,10 +214,11 @@ impl HostLimits {
         let waiting = Count::enter(&gate.waiting);
         let permit = acquire(gate.slots.as_ref()).await;
         gate.wait_unpaused().await;
+        let total = acquire(self.gates.total.as_ref()).await;
+        gate.wait_unpaused().await;
         if let Some(interval) = rule.interval {
             tokio::time::sleep_until(gate.reserve(interval)).await;
         }
-        let total = acquire(self.gates.total.as_ref()).await;
         drop(waiting);
         Some(HostPass {
             _in_flight: Count::enter(&gate.in_flight),
@@ -315,7 +344,7 @@ impl HostGate {
     fn reserve(&self, interval: Duration) -> Instant {
         let mut next = self.next.lock().unwrap_or_else(PoisonError::into_inner);
         let slot = (*next).max(Instant::now());
-        *next = later(slot, interval);
+        *next = slot.checked_add(interval).unwrap_or(slot);
         slot
     }
 

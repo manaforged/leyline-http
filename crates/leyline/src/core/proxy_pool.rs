@@ -62,6 +62,10 @@ impl ProxyPool {
         )
     }
 
+    pub(crate) fn needs_impersonation(&self) -> bool {
+        self.entries.iter().any(|entry| entry.identity.is_some())
+    }
+
     pub(crate) fn configs(&self) -> impl Iterator<Item = &ProxyConfig> {
         self.entries.iter().map(|entry| &entry.config)
     }

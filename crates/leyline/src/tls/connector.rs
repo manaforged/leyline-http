@@ -59,7 +59,7 @@ impl FingerprintConnector {
         let hello = HelloOptions::from_tls(&profile.tls)?;
 
         builder
-            .set_alpn_protos(b"\x02h2\x08http/1.1")
+            .set_alpn_protos(crate::tls::alpn::BROWSER_WIRE)
             .map_err(TlsError::from_stack)?;
 
         SessionCache::register(&mut builder)?;
@@ -169,8 +169,12 @@ impl FingerprintConnector {
         match proxy {
             Some(proxy_url) => self.connect_via_proxy(host, port, proxy_url, false).await,
             None => {
-                self.with_timeout(self.connect_direct_with_alpn(host, port, Some(b"\x08http/1.1")))
-                    .await
+                self.with_timeout(self.connect_direct_with_alpn(
+                    host,
+                    port,
+                    Some(crate::tls::alpn::HTTP11_WIRE),
+                ))
+                .await
             }
         }
     }

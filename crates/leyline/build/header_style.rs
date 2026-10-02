@@ -24,6 +24,7 @@ const PLACEHOLDERS: [&str; 10] = [
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Shape {
+    id: u8,
     variant: String,
     #[serde(default)]
     default: bool,
@@ -87,7 +88,11 @@ fn check_fields(key: &str, shape: &Shape) -> BuildResult<()> {
 
 pub(crate) fn check_shapes(shapes: &BTreeMap<String, Shape>) -> BuildResult<()> {
     let mut variants = HashSet::new();
+    let mut ids = HashSet::new();
     for (key, shape) in shapes {
+        if !ids.insert(shape.id) {
+            return Err(format!("headers.toml: {key} repeats id {}", shape.id).into());
+        }
         if !is_ident(&shape.variant) || !variants.insert(shape.variant.as_str()) {
             return Err(
                 format!("headers.toml: bad or repeated variant {:?}", shape.variant).into(),
@@ -120,14 +125,16 @@ pub(crate) fn render_shapes(shapes: &BTreeMap<String, Shape>) -> BuildResult<Str
     let mut out = String::from(
         "#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Deserialize)]\n#[non_exhaustive]\npub enum HeaderStyle {\n",
     );
-    for (key, shape) in shapes {
+    let mut ordered: Vec<_> = shapes.iter().collect();
+    ordered.sort_by_key(|(_, shape)| shape.id);
+    for (key, shape) in ordered {
         if shape.default {
             writeln!(out, "    #[default]")?;
         }
         writeln!(
             out,
-            "    #[serde(rename = {key:?})]\n    {},",
-            shape.variant
+            "    #[serde(rename = {key:?})]\n    {} = {},",
+            shape.variant, shape.id
         )?;
     }
     writeln!(out, "}}")?;

@@ -44,18 +44,32 @@ impl TestServer {
     where
         F: Fn(&RecordedRequest) -> TestResponse + Send + Sync + 'static,
     {
-        Self::start(Arc::new(handler), None).await
+        Self::start(TcpListener::bind(BIND_ADDR).await?, Arc::new(handler), None)
+    }
+
+    pub fn http_on<F>(listener: TcpListener, handler: F) -> io::Result<Self>
+    where
+        F: Fn(&RecordedRequest) -> TestResponse + Send + Sync + 'static,
+    {
+        Self::start(listener, Arc::new(handler), None)
     }
 
     pub async fn https<F>(handler: F) -> io::Result<Self>
     where
         F: Fn(&RecordedRequest) -> TestResponse + Send + Sync + 'static,
     {
-        Self::start(Arc::new(handler), Some(cert::build()?)).await
+        Self::start(
+            TcpListener::bind(BIND_ADDR).await?,
+            Arc::new(handler),
+            Some(cert::build()?),
+        )
     }
 
-    async fn start(handler: Handler, tls: Option<cert::TestTls>) -> io::Result<Self> {
-        let listener = TcpListener::bind(BIND_ADDR).await?;
+    fn start(
+        listener: TcpListener,
+        handler: Handler,
+        tls: Option<cert::TestTls>,
+    ) -> io::Result<Self> {
         let addr = listener.local_addr()?;
         let (sender, receiver) = unbounded_channel();
         let recorder = Recorder {

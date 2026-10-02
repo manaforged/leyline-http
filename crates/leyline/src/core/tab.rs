@@ -113,17 +113,32 @@ impl Tab {
 
     #[cfg(feature = "html")]
     pub async fn submit_form(&self, form: &crate::html::Form) -> Result<Response> {
-        match form.method() {
-            crate::html::FormMethod::Post => self.submit(form.action(), form.fields()).await,
-            crate::html::FormMethod::Get => {
-                let page = self.current();
-                let base = page.as_ref().or_else(|| self.session.base_url());
-                let mut url = form.action().into_url_with_base(base)?;
-                url.query_pairs_mut().clear().extend_pairs(form.fields());
-                self.navigate(self.request(Method::GET, url, Preset::Navigate))
-                    .await
+        let mut url = self.form_action(form)?;
+        let builder = match form.method() {
+            crate::html::FormMethod::Post => {
+                encode_form(self.request(Method::POST, url, Preset::FormNavigate), form)?
             }
-        }
+            crate::html::FormMethod::Get => {
+                url.query_pairs_mut().clear().extend_pairs(form.fields());
+                self.request(Method::GET, url, Preset::Navigate)
+            }
+        };
+        self.navigate(builder).await
+    }
+
+    #[cfg(feature = "html")]
+    fn form_action(&self, form: &crate::html::Form) -> Result<Url> {
+        let page = self.current().or_else(|| self.session.base_url().cloned());
+        let base = form
+            .base()
+            .and_then(|href| href.into_url_with_base(page.as_ref()).ok())
+            .or_else(|| page.clone());
+        let against = if form.action().is_empty() {
+            page.as_ref()
+        } else {
+            base.as_ref()
+        };
+        form.action().into_url_with_base(against)
     }
 
     pub(crate) async fn navigate(&self, builder: RequestBuilder) -> Result<Response> {
@@ -144,5 +159,27 @@ impl Tab {
                 builder
             }
         }
+    }
+}
+
+#[cfg(feature = "html")]
+fn encode_form(builder: RequestBuilder, form: &crate::html::Form) -> Result<RequestBuilder> {
+    use crate::html::FormEnctype;
+    match form.enctype() {
+        FormEnctype::UrlEncoded => Ok(builder.form(form.fields())),
+        FormEnctype::TextPlain => {
+            let body: String = form
+                .fields()
+                .iter()
+                .map(|(name, value)| format!("{name}={value}\r\n"))
+                .collect();
+            Ok(builder
+                .header(http::header::CONTENT_TYPE, FormEnctype::TextPlain.as_str())
+                .body(body))
+        }
+        FormEnctype::Multipart => Ok(builder.multipart(form.fields().iter().fold(
+            crate::core::multipart::Form::new(),
+            |body, (name, value)| body.text(name.clone(), value.clone()),
+        ))),
     }
 }

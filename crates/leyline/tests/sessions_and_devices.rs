@@ -1,12 +1,8 @@
-#[path = "core_support/raw_server.rs"]
-mod raw_server;
-
 use std::time::Duration;
 
 use leyline::multipart::{Form, Part};
-use leyline::testing::{TestResponse, TestServer};
+use leyline::testing::{TestResponse, TestServer, queue};
 use leyline::{BlockRules, Browser, Device, Kind, ProxyPool, ProxyUrl, RetryPolicy, Session};
-use raw_server::{RawResponse, RawServer};
 
 fn scratch(name: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("leyline-{name}-{}", std::process::id()));
@@ -16,14 +12,20 @@ fn scratch(name: &str) -> std::path::PathBuf {
 
 #[tokio::test]
 async fn user_agent_replaces_the_default_once() {
-    let mut server = RawServer::start(vec![RawResponse::ok(), RawResponse::ok()]).await;
+    let server = TestServer::http(queue(vec![
+        TestResponse::new(200).body("ok").close(),
+        TestResponse::new(200).body("ok").close(),
+    ]))
+    .await
+    .unwrap();
     for builder in [
         Session::builder(),
         Session::builder().browser(Browser::default()),
     ] {
         let session = builder.user_agent("my-tool/1.0").build().unwrap();
         session.get(server.url("/")).await.unwrap();
-        let agents = server.next_request().await.header_values("user-agent");
+        let sent = server.next_request().await.unwrap();
+        let agents = sent.header_values("user-agent");
         assert_eq!(agents, ["my-tool/1.0"]);
     }
 }
@@ -41,7 +43,7 @@ async fn shutdown_stops_requests_in_flight_and_new_ones() {
         let url = url.clone();
         async move { clone.get(url).send().await }
     });
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    server.next_request().await.unwrap();
     session.shutdown();
     let err = tokio::time::timeout(Duration::from_secs(1), pending)
         .await
@@ -55,11 +57,12 @@ async fn shutdown_stops_requests_in_flight_and_new_ones() {
 
 #[tokio::test]
 async fn skip_blocks_returns_a_block_without_retrying() {
-    let server = RawServer::start(vec![
-        RawResponse::status(429, "Too Many Requests"),
-        RawResponse::ok(),
-    ])
-    .await;
+    let server = TestServer::http(queue(vec![
+        TestResponse::new(429).close(),
+        TestResponse::new(200).body("ok").close(),
+    ]))
+    .await
+    .unwrap();
     let session = Session::builder()
         .retry(
             RetryPolicy::transient()
@@ -75,15 +78,27 @@ async fn skip_blocks_returns_a_block_without_retrying() {
 
 #[tokio::test]
 async fn rotate_on_block_moves_the_origin_to_another_proxy() {
-    let first = RawServer::start(vec![RawResponse::ok().header("cf-mitigated", "challenge")]).await;
-    let mut second = RawServer::start(vec![RawResponse::ok()]).await;
-    let pool = ProxyPool::new([first.url(""), second.url("")])
-        .rotate_on_block(BlockRules::builtin().clone());
+    let first = TestServer::http(queue(vec![
+        TestResponse::new(200)
+            .body("ok")
+            .close()
+            .header("cf-mitigated", "challenge"),
+    ]))
+    .await
+    .unwrap();
+    let second = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+        .await
+        .unwrap();
+    let pool = ProxyPool::new([
+        format!("http://{}", first.addr()),
+        format!("http://{}", second.addr()),
+    ])
+    .rotate_on_block(BlockRules::builtin().clone());
     let session = Session::builder().proxy_pool(pool).build().unwrap();
     session.get("http://origin.test/a").await.unwrap();
     session.get("http://origin.test/b").await.unwrap();
     assert_eq!(
-        second.next_request().await.request_line,
+        second.next_request().await.unwrap().request_line,
         "GET http://origin.test/b HTTP/1.1"
     );
 }

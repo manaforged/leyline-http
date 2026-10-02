@@ -18,6 +18,12 @@ version and publish as separate crates.
   Windows, which `Session::new()` built before. A browser takes the first
   platform its own profile covers, so a mobile browser gets its mobile
   platform, with or without the builder.
+- A plain session never sends browser-only headers (`sec-*`, client hints,
+  `upgrade-insecure-requests`, `priority`), for any preset.
+- On a browser session, `SessionBuilder::user_agent` drops the `sec-ch-ua`
+  client hint, so the user agent and the hint never disagree.
+- Firefox `accept-language` weights follow Firefox: equal steps from 1, as in
+  `en,ja;q=0.5` and `de-DE,de;q=0.7,en;q=0.3`.
 - A session with a browser and no `protocol` call takes its protocol policy
   from the profile: it races HTTP/3 when the `http3` feature is on and the
   profile's `[h3]` table sets `race = true`.
@@ -32,31 +38,41 @@ version and publish as separate crates.
 #### Sessions and requests
 
 - `leyline::get(url)` sends one GET from a plain session.
-- `SessionBuilder::base_url`, `bearer_auth`, `user_agent`, `languages`, and
-  `max_body_size`. With a `base_url`, the session token goes only to the base
-  URL's origin. `Session::with_base_url` derives a session with another base.
+- `SessionBuilder::base_url`, `bearer_auth`, `user_agent`, and `languages`.
+  With a `base_url`, the session token goes only to the base URL's origin. `Session::with_base_url` derives a session with another base.
 - `RequestBuilder::error_for_status()` turns a `4xx` or `5xx` into an error
-  that keeps the headers and up to 64 KiB of the body.
+  after the retries, and keeps the headers and the start of the body.
+  `CompressionConfig::max_error_body` caps the kept body (64 KiB by default)
+  for `error_for_status` and `download`, and `TimeoutConfig::error_body`
+  bounds its read (10 s by default, and never past the `total` timeout).
+  Decompression stops at the cap.
 - `RequestBuilder::download(path, limit)` and `Response::download_to` write
   the decoded body through a temporary file, so the path holds the whole
   body or nothing; a declared `Content-Length` over the cap is refused before
   reading. `Response::into_decoded_stream` and `copy_decoded_to` stream the
   decoded body under a limit.
-- `RequestBuilder::pages()` follows `Link: rel="next"`;
+- `RequestBuilder::pages()` follows `Link: rel="next"`, and counts the first
+  URL as fetched, so a redirect does not repeat the first page;
   `Response::link(rel)` and `links()` parse `Link` headers.
 - `RequestBuilder::cookie_jar`, `initiator`, and `tag`. `Response::attempts()`
   and `Response::proxy()`.
-- `TimeoutConfig::body(duration)` bounds the time to read a whole body.
+- `TimeoutConfig::body(duration)` bounds the time to read a whole body,
+  counted from the first read of the body.
 - `Session::shutdown()` stops every clone of a session, including bodies
   being streamed; `Error::is_shut_down()` names that error.
 - `relay_headers(headers, RelayBody)` and `Response::relay_headers` return the
-  headers to forward from a proxy or a service.
+  headers to forward from a proxy or a service. `proxy-authenticate` and
+  `proxy-authorization` are dropped as hop-by-hop. With `RelayBody::Decoded`,
+  `Response::relay_headers` keeps `content-encoding` when the session did not
+  decode the body.
+- `RequestBuilder::download` and `Response::download_to` keep the permissions
+  of a target file that already exists.
 - `multipart::Part::file(path)` reads a file part that takes a MIME type.
 
 #### Errors and retries
 
 - `Error::category()` returns one `ErrorCategory` per failure, with
-  `as_str()` and `gateway_status()`. `Error::is_dns()`, `is_proxy()`, and
+  `as_str()` and `gateway_status()`. `Error::is_connect()` agrees with it. `Error::is_dns()`, `is_proxy()`, and
   `is_body_limit()` refine it. `Error::find()` reaches a leyline error inside
   any error chain, such as a tower `BoxError`. `leyline::Error` converts from
   `url::ParseError`.
@@ -64,19 +80,39 @@ version and publish as separate crates.
   `attempts()`, and `proxy()`, and carries the retry policy's view of its last
   response: `retry_after()` and `retries_exhausted()`.
 - `RetryPolicy::retry_if(predicate)`, `wait_header(name, WaitFormat)`,
-  `retry_unsent(true)` for a request that failed before it was sent,
-  `skip_blocks(rules)`, `backoff(attempt)`, and `rotate_proxies(list)`.
+  `retry_unsent(true)`, `skip_blocks(rules)`, `backoff(attempt)`, and
+  `rotate_proxies(list)`. A `wait_header` wins over `Retry-After`.
+  `retry_unsent(true)` retries any method after an error the server did not
+  process: DNS, connect, TLS, proxy, a connect timeout, an HTTP/2
+  `REFUSED_STREAM` reset, or an HTTP/3 request the server reports as not
+  processed.
+- `RetryPolicy::transient()` caps a server-requested wait at 60 s
+  (`max_retry_after`). `Error::retries_exhausted()` is `true` when the policy
+  wanted another try and did not make it: no retries left, a server wait above
+  `max_retry_after`, or a wait or backoff longer than the time left.
+- A streaming request body that was never read, for example after a connect
+  error, is retried.
 
 #### Proxies, crawling, and blocks
 
 - `SessionBuilder::host_limits(HostLimits)`: requests in flight and per second
   per origin, overrides per host, a total cap, and `pause_on(statuses)` to
-  stop new requests to an origin until its `Retry-After`. A streamed request
-  holds its slot until its body ends. `Session::host_stats()` reports requests
-  in flight and waiting per origin.
+  stop new requests to an origin for the wait the server asks for, read from
+  the retry policy's wait headers or `Retry-After`. `pause_for` sets the pause
+  when the server asks for none (60 s), and `max_pause` caps a requested
+  pause (24 h). A streamed request holds its slot until its body ends.
+  `Session::host_stats()` reports requests in flight and waiting per origin.
+- Host limits admit each redirect hop against its own origin. `pause_on` and
+  proxy-pool strikes apply to the origin that sent the response. A request
+  waits for its origin slot, then a pause, then the total slot, then a pause
+  again, then its turn in the rate spacing. A host name with a trailing dot
+  is the same host. Each session built from a `HostLimits` value has its own
+  counters, shared by its clones and derived sessions.
 - `ProxyPool`: sticky proxies, bans after repeated failures, rotation on block
   rules, and `ProxyPool::identified` to pin a browser identity to each proxy,
-  each identity with its own cookie jar. `ProxyPool::stats()` reports health.
+  each proxy with its own cookie jar, also when two proxies share an
+  identity. `ProxyPool::identified` on a session without a browser fails at
+  `build()` with `Kind::Config`. `ProxyPool::stats()` reports health.
   Identity sessions share one connection pool, partitioned by profile.
 - `Response::block()` reports a bot-protection challenge from vendors'
   response headers. `BlockRules::from_toml`, `statuses([..])`, `extend`, and
@@ -90,22 +126,35 @@ version and publish as separate crates.
   `follow`, `submit`, `submit_form`, `fetch`, `xhr`, `post_json`, and
   `subresource` send the page as the initiator. A tab with no page refuses
   script requests.
-- `Jar::save_to`, `load_from`, `autosave`, and `changes` keep a jar on disk.
+- `Jar::save_to`, `load_from`, and `autosave` keep a jar on disk.
+  Jar and device files are versioned, `{ "version": 1, .. }`, and are written
+  with mode `0600` on Unix (default ACLs on Windows). `autosave(path,
+  interval)` saves at most once per `interval` after a change, and saves
+  again when the runtime shuts down.
 - `Device` holds a browser device (identity, frozen profile, `profile_id`,
   user agent, proxy and `proxy_password_env`, languages, jar, browser state,
   current page, and caller data in `app`) and reopens it as the same session.
   `Device::check` refuses a session that differs, and `strict` refuses a
   device without a pinned profile or a proxy. `Device::autosave` keeps the
   device and its jar on disk; `DeviceAutosave::update` and `track` change it.
+  It takes a `Duration` or `DeviceAutosaveOptions`, whose `state_interval`
+  (300 s by default) saves the connection state on a period.
   `SessionBuilder::expect_profile_id` and `Error::is_profile_changed()` catch
   a changed profile.
 - `Session::state()` returns `SessionState`: TLS session tickets, HTTP/3
-  `Alt-Svc` knowledge, and the HSTS store. Sessions keep an HSTS store.
+  `Alt-Svc` knowledge, and the HSTS store. Sessions keep an HSTS store, and
+  learn no HSTS entry when certificate verification is off. Saved TLS session
+  keys hold a hash of the proxy credentials, never the credentials.
 - `Browser`, `Family`, `Platform`, `ChromiumBrand`, `Identity`, `ProxyUrl`,
   and `leyline::Url` implement serde; the profile enums have stable string
   ids. `SessionIdentity::to_identity()` and `profile_id()`.
-- The `html` feature (on by default): `html::forms`, `Form::find`,
-  `html::meta`, and `html::links`.
+- The `html` feature (on by default, and it enables `multipart`):
+  `html::forms`, `Form::find`, `html::meta`, and `html::links`. Forms follow
+  the browser rules: `form="id"` controls, disabled fieldsets, one checked
+  radio button per name, and every HTML named character reference.
+  `Form::set` replaces every value of a name. `Tab::submit_form` encodes the
+  fields as the form's `FormEnctype` says (URL-encoded, `multipart/form-data`,
+  or `text/plain`) and resolves the action against `<base href>`.
 
 #### Tracing, audit, and testing
 
@@ -114,10 +163,17 @@ version and publish as separate crates.
   counts requests, statuses, error categories, attempts, body outcomes, and
   latency; `trace::Fanout` sends events to several traces.
 - `AuditData::compare(&audit::Observed)` compares a session's JA4, JA3,
-  HTTP/2 fingerprint, and request headers with an echo service report.
+  HTTP/2 fingerprint, request headers, and header order
+  (`FingerprintReport::header_order`) with an echo service report. A header
+  the service did not echo is `FieldOutcome::Absent`, which counts as a
+  mismatch.
 - The `test-util` feature adds `leyline::testing::TestServer`, a local HTTP or
   HTTPS server with a private CA that records requests, with delayed and
-  chunked responses. `leyline::redact_url` exposes the crate's URL redaction.
+  chunked responses. `TestServer::http_on(listener, handler)` serves on your
+  own listener. `RecordedRequest` has `raw` (the request head as received),
+  `request_line`, `header_values`, `header_count`, and `text`;
+  `TestResponse::close` closes the connection after the response.
+  `leyline::redact_url` exposes the crate's URL redaction.
 
 ### Fixed
 
@@ -162,7 +218,7 @@ version and publish as separate crates.
 - Saving a jar skips expired cookies, and loading one skips expired cookies,
   keeps the newest of two cookies in one slot, and applies the cookie limits.
   Each cookie's last-access time survives a save, so eviction order survives
-  a restart. Jars saved by 0.1.0 still load.
+  a restart. A jar that 0.1.0 serialized with serde still deserializes.
 - HTTP/2: a request that the caller cancels while it waits for a stream slot
   is not sent. Before, the driver sent it when a slot became free.
 - HTTP/2: a streaming request body buffers at most 256 KiB ahead of the

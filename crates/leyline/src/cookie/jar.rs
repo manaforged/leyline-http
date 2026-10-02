@@ -40,7 +40,7 @@ impl Jar {
         }
     }
 
-    pub fn changes(&self) -> watch::Receiver<u64> {
+    pub(crate) fn changes(&self) -> watch::Receiver<u64> {
         self.changes.subscribe()
     }
 

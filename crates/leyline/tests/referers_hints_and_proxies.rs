@@ -1,13 +1,10 @@
-#[path = "core_support/raw_server.rs"]
-mod raw_server;
-
 use std::time::Duration;
 
+use leyline::testing::{TestResponse, TestServer, queue};
 use leyline::{
     Browser, CompressionConfig, PoolConfig, Preset, ProtocolPolicy, ProxyReply, Session,
     TimeoutConfig, TlsError,
 };
-use raw_server::{RawResponse, RawServer};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -25,14 +22,16 @@ fn plain() -> Session {
 
 #[tokio::test]
 async fn https_page_to_http_target_is_cross_site_without_referer() {
-    let mut server = RawServer::start(vec![RawResponse::ok()]).await;
+    let server = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+        .await
+        .unwrap();
     chrome()
         .get(server.url("/api"))
         .preset(Preset::Xhr)
         .initiator("https://shop.example/product")
         .await
         .unwrap();
-    let req = server.next_request().await;
+    let req = server.next_request().await.unwrap();
     assert!(req.header_values("referer").is_empty(), "{}", req.text());
     assert_eq!(req.header_values("origin"), ["https://shop.example"]);
     assert_eq!(req.header_values("sec-fetch-site"), ["cross-site"]);
@@ -40,7 +39,12 @@ async fn https_page_to_http_target_is_cross_site_without_referer() {
 
 #[tokio::test]
 async fn link_navigation_differs_from_a_typed_url() {
-    let mut server = RawServer::start(vec![RawResponse::ok(), RawResponse::ok()]).await;
+    let server = TestServer::http(queue(vec![
+        TestResponse::new(200).body("ok").close(),
+        TestResponse::new(200).body("ok").close(),
+    ]))
+    .await
+    .unwrap();
     let session = chrome();
     session
         .get(server.url("/next"))
@@ -49,7 +53,7 @@ async fn link_navigation_differs_from_a_typed_url() {
         .unwrap();
     session.get(server.url("/typed")).await.unwrap();
 
-    let link = server.next_request().await;
+    let link = server.next_request().await.unwrap();
     assert_eq!(link.header_values("sec-fetch-site"), ["same-origin"]);
     assert_eq!(link.header_values("referer"), [server.url("/page")]);
     let names: Vec<&str> = link.headers.iter().map(|(n, _)| n.as_str()).collect();
@@ -61,35 +65,43 @@ async fn link_navigation_differs_from_a_typed_url() {
     };
     assert_eq!(at("referer"), at("sec-fetch-dest") + 1, "{}", link.text());
 
-    let typed = server.next_request().await;
+    let typed = server.next_request().await.unwrap();
     assert_eq!(typed.header_values("sec-fetch-site"), ["none"]);
     assert!(typed.header_values("referer").is_empty());
 }
 
 #[tokio::test]
 async fn plain_session_initiator_still_sends_a_referer() {
-    let mut server = RawServer::start(vec![RawResponse::ok()]).await;
+    let server = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+        .await
+        .unwrap();
     plain()
         .get(server.url("/x"))
         .initiator("http://shop.example/cart")
         .await
         .unwrap();
     assert_eq!(
-        server.next_request().await.header_values("referer"),
+        server
+            .next_request()
+            .await
+            .unwrap()
+            .header_values("referer"),
         ["http://shop.example/"]
     );
 }
 
 #[tokio::test]
 async fn plain_session_with_a_preset_sends_no_client_hints() {
-    let mut server = RawServer::start(vec![RawResponse::ok()]).await;
+    let server = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+        .await
+        .unwrap();
     plain()
         .post(server.url("/x"))
         .preset(Preset::Xhr)
         .json(&serde_json::json!({"a": 1}))
         .await
         .unwrap();
-    let req = server.next_request().await;
+    let req = server.next_request().await.unwrap();
     for hint in ["sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform"] {
         assert_eq!(req.header_count(hint), 0, "{hint}: {}", req.text());
     }
@@ -97,12 +109,13 @@ async fn plain_session_with_a_preset_sends_no_client_hints() {
 
 #[tokio::test]
 async fn plain_session_advertises_only_enabled_codecs() {
-    let mut server = RawServer::start(vec![
-        RawResponse::ok(),
-        RawResponse::ok(),
-        RawResponse::ok(),
-    ])
-    .await;
+    let server = TestServer::http(queue(vec![
+        TestResponse::new(200).body("ok").close(),
+        TestResponse::new(200).body("ok").close(),
+        TestResponse::new(200).body("ok").close(),
+    ]))
+    .await
+    .unwrap();
     for config in [
         CompressionConfig::default(),
         CompressionConfig::default().brotli(false),
@@ -117,15 +130,27 @@ async fn plain_session_advertises_only_enabled_codecs() {
             .unwrap();
     }
     assert_eq!(
-        server.next_request().await.header_values("accept-encoding"),
+        server
+            .next_request()
+            .await
+            .unwrap()
+            .header_values("accept-encoding"),
         ["gzip, deflate, br, zstd"]
     );
     assert_eq!(
-        server.next_request().await.header_values("accept-encoding"),
+        server
+            .next_request()
+            .await
+            .unwrap()
+            .header_values("accept-encoding"),
         ["gzip, deflate, zstd"]
     );
     assert_eq!(
-        server.next_request().await.header_count("accept-encoding"),
+        server
+            .next_request()
+            .await
+            .unwrap()
+            .header_count("accept-encoding"),
         0
     );
 }
@@ -195,7 +220,11 @@ async fn a_proxy_that_never_answers_connect_is_a_proxy_timeout() {
 
 #[tokio::test]
 async fn a_caller_limit_names_itself() {
-    let server = RawServer::start(vec![RawResponse::ok().body(vec![b'x'; 1_000])]).await;
+    let server = TestServer::http(queue(vec![
+        TestResponse::new(200).close().body(vec![b'x'; 1_000]),
+    ]))
+    .await
+    .unwrap();
     let mut out = Vec::new();
     let err = plain()
         .get(server.url("/"))
@@ -254,14 +283,19 @@ async fn dropping_a_streamed_http1_response_frees_the_host_slot() {
 #[tokio::test]
 async fn tower_service_streams_with_proxy_and_metadata() {
     use tower_service::Service;
-    let mut proxy = RawServer::start(vec![RawResponse::ok()]).await;
+    let proxy = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+        .await
+        .unwrap();
     let mut service = leyline::LeylineService::new(plain());
     let mut request = leyline::http::Request::get("http://origin.test/thing")
         .body(leyline::Body::default())
         .unwrap();
     request
         .extensions_mut()
-        .insert(leyline::ProxyConfig::from(proxy.url("")));
+        .insert(leyline::ProxyConfig::from(format!(
+            "http://{}",
+            proxy.addr()
+        )));
     let response = service.call(request).await.unwrap();
     assert_eq!(response.status().as_u16(), 200);
     assert_eq!(
@@ -282,7 +316,7 @@ async fn tower_service_streams_with_proxy_and_metadata() {
             .is_some()
     );
     assert_eq!(
-        proxy.next_request().await.request_line,
+        proxy.next_request().await.unwrap().request_line,
         "GET http://origin.test/thing HTTP/1.1"
     );
 }

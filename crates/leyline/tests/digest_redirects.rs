@@ -1,11 +1,8 @@
-#[path = "core_support/raw_server.rs"]
-mod raw_server;
-
+use leyline::testing::{TestResponse, TestServer, queue};
 use leyline::{DigestAuth, DnsConfig, ProtocolPolicy, Session};
-use raw_server::{RawResponse, RawServer};
 
-fn challenge(nonce: &str, extra: &str) -> RawResponse {
-    RawResponse::status(401, "Unauthorized").header(
+fn challenge(nonce: &str, extra: &str) -> TestResponse {
+    TestResponse::new(401).close().header(
         "www-authenticate",
         format!("Digest realm=\"r\", nonce=\"{nonce}\", qop=\"auth\"{extra}"),
     )
@@ -25,8 +22,9 @@ fn session() -> Session {
 
 #[tokio::test]
 async fn digest_skips_a_challenge_it_cannot_answer() {
-    let mut server = RawServer::start(vec![
-        RawResponse::status(401, "Unauthorized")
+    let server = TestServer::http(queue(vec![
+        TestResponse::new(401)
+            .close()
             .header(
                 "www-authenticate",
                 "Digest realm=\"r\", nonce=\"only-int\", qop=\"auth-int\"",
@@ -35,9 +33,10 @@ async fn digest_skips_a_challenge_it_cannot_answer() {
                 "www-authenticate",
                 "Digest realm=\"r\", nonce=\"plain\", qop=\"auth\"",
             ),
-        RawResponse::ok(),
-    ])
-    .await;
+        TestResponse::new(200).body("ok").close(),
+    ]))
+    .await
+    .unwrap();
 
     let resp = session()
         .get(server.url("/protected"))
@@ -47,21 +46,22 @@ async fn digest_skips_a_challenge_it_cannot_answer() {
         .unwrap();
 
     assert_eq!(resp.status(), 200);
-    server.next_request().await;
-    let retry = server.next_request().await;
+    server.next_request().await.unwrap();
+    let retry = server.next_request().await.unwrap();
     let auth = retry.header_values("authorization").join("");
     assert!(auth.contains("nonce=\"plain\""), "{auth}");
-    server.finish().await;
+    server.shutdown().await;
 }
 
 #[tokio::test]
 async fn digest_authorizes_a_same_origin_redirect_without_a_new_challenge() {
-    let mut server = RawServer::start(vec![
+    let server = TestServer::http(queue(vec![
         challenge("same-origin-step", ""),
-        RawResponse::redirect("/next"),
-        RawResponse::ok(),
-    ])
-    .await;
+        TestResponse::new(302).close().header("location", "/next"),
+        TestResponse::new(200).body("ok").close(),
+    ]))
+    .await
+    .unwrap();
 
     let resp = session()
         .get(server.url("/protected"))
@@ -71,26 +71,29 @@ async fn digest_authorizes_a_same_origin_redirect_without_a_new_challenge() {
         .unwrap();
 
     assert_eq!(resp.status(), 200);
-    server.next_request().await;
-    let answered = server.next_request().await;
+    server.next_request().await.unwrap();
+    let answered = server.next_request().await.unwrap();
     let first = answered.header_values("authorization").join("");
-    let redirected = server.next_request().await;
+    let redirected = server.next_request().await.unwrap();
     assert!(redirected.request_line.starts_with("GET /next "));
     let auth = redirected.header_values("authorization").join("");
     assert!(auth.contains("uri=\"/next\""), "{auth}");
     assert!(auth.contains("nonce=\"same-origin-step\""), "{auth}");
     assert_eq!(nc(&auth), nc(&first) + 1, "{first} then {auth}");
-    server.finish().await;
+    server.shutdown().await;
 }
 
 #[tokio::test]
 async fn digest_sends_no_credentials_outside_the_protection_space() {
-    let mut server = RawServer::start(vec![
+    let server = TestServer::http(queue(vec![
         challenge("protection-space", ", domain=\"/api/\""),
-        RawResponse::redirect("/admin/y"),
-        RawResponse::ok(),
-    ])
-    .await;
+        TestResponse::new(302)
+            .close()
+            .header("location", "/admin/y"),
+        TestResponse::new(200).body("ok").close(),
+    ]))
+    .await
+    .unwrap();
 
     let resp = session()
         .get(server.url("/api/x"))
@@ -100,9 +103,9 @@ async fn digest_sends_no_credentials_outside_the_protection_space() {
         .unwrap();
 
     assert_eq!(resp.status(), 200);
-    server.next_request().await;
-    server.next_request().await;
-    let outside = server.next_request().await;
+    server.next_request().await.unwrap();
+    server.next_request().await.unwrap();
+    let outside = server.next_request().await.unwrap();
     assert!(outside.request_line.starts_with("GET /admin/y "));
     assert_eq!(
         outside.header_count("authorization"),
@@ -110,22 +113,27 @@ async fn digest_sends_no_credentials_outside_the_protection_space() {
         "{}",
         outside.text()
     );
-    server.finish().await;
+    server.shutdown().await;
 }
 
 #[tokio::test]
 async fn digest_sends_no_credentials_after_a_cross_origin_bounce() {
-    let listener = RawServer::bind().await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
-    let mut server = RawServer::serve(
+    let server = TestServer::http_on(
         listener,
-        vec![
+        queue(vec![
             challenge("bounce", ""),
-            RawResponse::redirect(format!("http://b.test:{port}/hop")),
-            RawResponse::redirect(format!("http://a.test:{port}/back")),
-            RawResponse::ok(),
-        ],
-    );
+            TestResponse::new(302)
+                .close()
+                .header("location", format!("http://b.test:{port}/hop")),
+            TestResponse::new(302)
+                .close()
+                .header("location", format!("http://a.test:{port}/back")),
+            TestResponse::new(200).body("ok").close(),
+        ]),
+    )
+    .unwrap();
     let local = "127.0.0.1:0".parse().unwrap();
     let session = Session::builder()
         .protocol(ProtocolPolicy::Http1)
@@ -146,10 +154,10 @@ async fn digest_sends_no_credentials_after_a_cross_origin_bounce() {
 
     assert_eq!(resp.status(), 200);
     for _ in 0..3 {
-        server.next_request().await;
+        server.next_request().await.unwrap();
     }
-    let back = server.next_request().await;
+    let back = server.next_request().await.unwrap();
     assert!(back.request_line.starts_with("GET /back "));
     assert_eq!(back.header_count("authorization"), 0, "{}", back.text());
-    server.finish().await;
+    server.shutdown().await;
 }

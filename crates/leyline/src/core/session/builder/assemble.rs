@@ -54,7 +54,7 @@ impl SessionBuilder {
                 profile: derived.profile,
                 base_url: self.base_url,
                 languages: self.languages,
-                host_limits: self.host_limits,
+                host_limits: self.host_limits.armed(),
                 proxy_pool: self.proxy_pool,
             }),
         }

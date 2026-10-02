@@ -11,8 +11,8 @@ use super::SessionBuilder;
 impl SessionBuilder {
     pub(super) fn validate(&mut self, on_invalid: InvalidEnvProxy) -> Result<()> {
         self.check_config()?;
+        self.check_proxy_pool()?;
         self.resolve_platform();
-        self.resolve_body_cap();
         #[cfg(feature = "http3")]
         self.resolve_protocol();
         self.resolve_proxies(on_invalid)?;
@@ -26,6 +26,21 @@ impl SessionBuilder {
             Some(error) => Err(Error::new(Kind::Config).with_message(error)),
             None => Ok(()),
         }
+    }
+
+    fn check_proxy_pool(&self) -> Result<()> {
+        if !self.impersonates()
+            && self
+                .proxy_pool
+                .as_ref()
+                .is_some_and(ProxyPool::needs_impersonation)
+        {
+            return Err(Error::new(Kind::Config).with_message(
+                "ProxyPool::identified pins a browser identity per proxy and needs a browser \
+                 session: add `.browser(..)` or `.identity(..)`, or use ProxyPool::new",
+            ));
+        }
+        Ok(())
     }
 
     #[cfg(feature = "http3")]
@@ -63,12 +78,6 @@ impl SessionBuilder {
         } else {
             Platform::detect_host()
         };
-    }
-
-    fn resolve_body_cap(&mut self) {
-        if let Some(bytes) = self.max_body_size {
-            self.compression.max_body_size = bytes;
-        }
     }
 
     fn resolve_proxies(&mut self, on_invalid: InvalidEnvProxy) -> Result<()> {

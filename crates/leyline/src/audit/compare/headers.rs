@@ -43,29 +43,80 @@ pub(super) fn compare(
     sent: &[(String, String)],
     observed: &[(String, String)],
 ) -> Vec<HeaderOutcome> {
-    sent.iter()
-        .filter(|(name, _)| !name.starts_with(':'))
-        .map(|(name, value)| HeaderOutcome {
-            name: name.to_ascii_lowercase(),
-            outcome: header_outcome(name, value, observed),
+    let mut names: Vec<String> = Vec::new();
+    for name in field_names(sent) {
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    names
+        .into_iter()
+        .map(|name| {
+            let outcome = header_outcome(&name, sent, observed);
+            HeaderOutcome { name, outcome }
         })
         .collect()
 }
 
-fn header_outcome(name: &str, expected: &str, observed: &[(String, String)]) -> FieldOutcome {
-    let mut seen = observed
-        .iter()
-        .filter(|(held, _)| held.eq_ignore_ascii_case(name))
-        .map(|(_, value)| value.as_str())
-        .peekable();
-    let Some(first) = seen.peek().copied() else {
+pub(super) fn order(sent: &[(String, String)], observed: &[(String, String)]) -> FieldOutcome {
+    if observed.is_empty() {
         return FieldOutcome::NotReported;
-    };
-    if seen.any(|value| value == expected.trim()) {
+    }
+    let expected = shared_names(sent, observed).join(",");
+    let seen = shared_names(observed, sent).join(",");
+    if expected == seen {
+        FieldOutcome::Match
+    } else {
+        FieldOutcome::Mismatch {
+            expected,
+            observed: seen,
+        }
+    }
+}
+
+fn field_names(list: &[(String, String)]) -> impl Iterator<Item = String> + '_ {
+    list.iter()
+        .filter(|(name, _)| !name.starts_with(':'))
+        .map(|(name, _)| name.to_ascii_lowercase())
+}
+
+fn shared_names(from: &[(String, String)], other: &[(String, String)]) -> Vec<String> {
+    field_names(from)
+        .filter(|name| {
+            other
+                .iter()
+                .any(|(held, _)| held.eq_ignore_ascii_case(name))
+        })
+        .collect()
+}
+
+fn values<'a>(name: &str, list: &'a [(String, String)]) -> Vec<&'a str> {
+    list.iter()
+        .filter(|(held, _)| held.eq_ignore_ascii_case(name))
+        .map(|(_, value)| value.trim())
+        .collect()
+}
+
+fn header_outcome(
+    name: &str,
+    sent: &[(String, String)],
+    observed: &[(String, String)],
+) -> FieldOutcome {
+    if observed.is_empty() {
+        return FieldOutcome::NotReported;
+    }
+    let expected = values(name, sent);
+    let seen = values(name, observed);
+    if seen.is_empty() {
+        return FieldOutcome::Absent {
+            expected: expected.join(", "),
+        };
+    }
+    if seen == expected {
         return FieldOutcome::Match;
     }
     FieldOutcome::Mismatch {
-        expected: expected.to_owned(),
-        observed: first.to_owned(),
+        expected: expected.join(", "),
+        observed: seen.join(", "),
     }
 }

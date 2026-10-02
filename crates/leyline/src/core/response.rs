@@ -15,6 +15,8 @@ mod link;
 mod relay;
 
 pub use link::Link;
+#[cfg(feature = "bench-internals")]
+pub(crate) use link::parse_links;
 pub use relay::{RelayBody, relay_headers};
 
 pub(crate) enum ResponseBody {

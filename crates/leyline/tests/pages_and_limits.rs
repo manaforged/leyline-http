@@ -1,14 +1,10 @@
-#[path = "core_support/raw_server.rs"]
-mod raw_server;
-
 use std::time::Duration;
 
-use leyline::testing::{TestResponse, TestServer};
+use leyline::testing::{TestResponse, TestServer, queue};
 use leyline::{
     BlockKind, BlockRules, Browser, Error, ErrorCategory, Family, Identity, Platform, ProxyPool,
     Session, TimeoutConfig,
 };
-use raw_server::{RawResponse, RawServer};
 
 fn plain() -> Session {
     Session::new()
@@ -43,12 +39,14 @@ async fn pages_follow_next_links_and_stop_on_a_loop() {
 
 #[tokio::test]
 async fn a_status_error_gives_its_wait_and_body_text() {
-    let server = RawServer::start(vec![
-        RawResponse::status(429, "Too Many Requests")
+    let server = TestServer::http(queue(vec![
+        TestResponse::new(429)
+            .close()
             .header("retry-after", "7")
             .body(b"slow down".to_vec()),
-    ])
-    .await;
+    ]))
+    .await
+    .unwrap();
     let err = plain()
         .get(server.url("/"))
         .error_for_status()
@@ -103,15 +101,19 @@ async fn the_body_deadline_bounds_a_slow_body() {
 
 #[tokio::test]
 async fn identified_gives_each_proxy_its_identity() {
-    let first = RawServer::start(vec![RawResponse::status(403, "Forbidden")]).await;
-    let mut second = RawServer::start(vec![RawResponse::ok()]).await;
+    let first = TestServer::http(queue(vec![TestResponse::new(403).close()]))
+        .await
+        .unwrap();
+    let second = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+        .await
+        .unwrap();
     let pool = ProxyPool::identified([
         (
-            first.url(""),
+            format!("http://{}", first.addr()),
             Identity::locked(Browser::latest(Family::Chrome), Platform::Windows),
         ),
         (
-            second.url(""),
+            format!("http://{}", second.addr()),
             Identity::locked(Browser::latest(Family::Firefox), Platform::Windows),
         ),
     ])
@@ -123,13 +125,16 @@ async fn identified_gives_each_proxy_its_identity() {
         .unwrap();
     session.get("http://origin.test/a").await.unwrap();
     session.get("http://origin.test/b").await.unwrap();
-    let agent = second.next_request().await.header_values("user-agent");
+    let sent = second.next_request().await.unwrap();
+    let agent = sent.header_values("user-agent");
     assert!(agent[0].contains("Firefox"), "{agent:?}");
 }
 
 #[tokio::test]
 async fn status_rules_turn_a_bare_status_into_a_block() {
-    let server = RawServer::start(vec![RawResponse::status(429, "Too Many Requests")]).await;
+    let server = TestServer::http(queue(vec![TestResponse::new(429).close()]))
+        .await
+        .unwrap();
     let resp = plain().get(server.url("/")).await.unwrap();
     assert!(resp.block().is_none());
     let mut rules = BlockRules::builtin().clone();

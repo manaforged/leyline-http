@@ -1,7 +1,8 @@
 use crate::core::Result;
 use crate::core::config::{Origin, ProxyConfig};
 use crate::core::proxy_pool::{Lease, ProxyPool};
-use crate::core::response::{Response, ResponseBody};
+use crate::core::response::Response;
+use crate::core::retry::RetryPolicy;
 use crate::core::session::Session;
 use crate::core::session::execute::Attempt;
 
@@ -10,11 +11,12 @@ pub(super) struct Route<'a> {
     url: Option<url::Url>,
     origin: Option<Origin>,
     pool: Option<&'a ProxyPool>,
+    policy: &'a RetryPolicy,
     last: Option<usize>,
 }
 
 impl<'a> Route<'a> {
-    pub(super) fn new(session: &'a Session, attempt: &Attempt) -> Self {
+    pub(super) fn new(session: &'a Session, attempt: &Attempt, policy: &'a RetryPolicy) -> Self {
         let url = url::Url::parse(&attempt.url).ok();
         let origin = url.as_ref().and_then(Origin::of);
         let pool = session.proxy_pool().filter(|_| attempt.proxy.is_none());
@@ -23,6 +25,7 @@ impl<'a> Route<'a> {
             url,
             origin,
             pool,
+            policy,
             last: None,
         }
     }
@@ -40,23 +43,20 @@ impl<'a> Route<'a> {
             None => self.session.clone(),
         };
         crate::trace::note_browser(session.identity().browser());
-        let mut pass = self
-            .session
-            .unless_shut_down(this.deadline.total(self.admit()))
-            .await?;
         let mut result = session.attempt(this).await;
-        match result.as_mut() {
+        let answered = match result.as_mut() {
             Ok(response) => {
                 response.set_proxy(used.as_deref());
                 self.observe(response);
-                if let ResponseBody::Streaming(body) = &mut response.body {
-                    body.hold(pass.take());
-                }
+                Origin::of(response.url())
             }
-            Err(error) => error.set_proxy(used.as_deref()),
-        }
+            Err(error) => {
+                error.set_proxy(used.as_deref());
+                None
+            }
+        };
         if let Some(lease) = lease {
-            lease.record(&result, self.origin.as_ref());
+            lease.record(&result, self.origin.as_ref(), answered.as_ref());
             self.last = Some(lease.index());
         }
         result
@@ -74,22 +74,12 @@ impl<'a> Route<'a> {
         Some(lease)
     }
 
-    async fn admit(&self) -> Result<Option<crate::core::config::HostPass>> {
-        let limits = self.session.host_limits();
-        match &self.url {
-            Some(url) if !limits.is_unlimited() => Ok(limits.admit(url).await),
-            _ => Ok(None),
-        }
-    }
-
     fn observe(&self, response: &Response) {
-        if let Some(url) = &self.url {
-            self.session.host_limits().observe(
-                url,
-                response.status().as_u16(),
-                response.header("retry-after"),
-            );
-        }
+        self.session.host_limits().observe(
+            response.url(),
+            response.status(),
+            self.policy.server_wait(response),
+        );
     }
 
     fn used_proxy(&self, proxy: Option<&ProxyConfig>) -> Option<String> {

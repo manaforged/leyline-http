@@ -28,9 +28,10 @@ session     Session::new()                  plain client, cannot fail
             session.shutdown() · is_shut_down()   stop every clone and derived session
             session.state() → SessionState   TLS tickets, Alt-Svc, HSTS
             Device::capture / open / save_to / load_from   one saved account device
-            device.autosave(&session, path, debounce) → DeviceAutosave · update / track / device / flush / shutdown
+            device.autosave(&session, path, interval or DeviceAutosaveOptions) → DeviceAutosave · update / track / device / flush / shutdown
             device.tab(&session) → Tab        tab on the saved page
 crawl       SessionBuilder::host_limits(HostLimits) · proxy_pool(ProxyPool) · RequestBuilder::tag
+            HostLimits: max_in_flight · per_second · host · max_total_in_flight · pause_on · pause_for · max_pause
             ProxyPool::identified · rotate_on_block · Session::host_stats · BlockRules::statuses
 request     session.get / post / put / patch / delete / head / request(Method, url) → RequestBuilder
 send        RequestBuilder.send() or .await → Response
@@ -45,11 +46,14 @@ fail        Error · err.kind() → Kind · err.category() → ErrorCategory · 
             RequestBuilder::error_for_status · err.status / body / body_text / headers / header / retry_after / retries_exhausted / attempts / proxy
             Error::find(&dyn std::error::Error)   leyline error under other layers
 policy      TimeoutConfig · RetryPolicy · RedirectPolicy   (session default, request override)
+            RetryPolicy: retry_if · wait_header · retry_unsent · skip_blocks · max_retry_after
+            TimeoutConfig: body · error_body    CompressionConfig: max_body_size · max_error_body
 identity    Browser · Platform · ChromiumBrand · Identity
-observe     Trace hooks · trace::Metrics · trace::Fanout · Response::timing · Response::tls · Response::audit
+observe     Trace hooks · Trace::summary · trace::Metrics · trace::Fanout · Response::timing · Response::tls · Response::audit
 tower       LeylineService (feature `tower`) · relay_headers(&HeaderMap, RelayBody) · redact_url
-html        html::forms · Form::find · html::meta · html::links → Anchor (feature `html`)
-test        testing::TestServer · TestResponse::delay / chunks (feature `test-util`)
+html        html::forms · Form::find · FormEnctype · Tab::submit_form · html::meta · html::links → Anchor (feature `html`)
+test        testing::TestServer::http / https / http_on · TestResponse::delay / chunks / close
+            RecordedRequest: raw · request_line · header_values · header_count · text (feature `test-util`)
 ```
 
 One function per job. A setter that takes a config type accepts
@@ -103,6 +107,7 @@ let resp = session
 | Detect a profile change | `expect_profile_id`, `Error::is_profile_changed` | [Choosing a profile](guide/choosing-a-profile.md) |
 | Load or build a profile | `ProfileRegistry::load`, `BrowserProfile::from_toml`, `from_fingerprint` | [Profiles](guide/profiles.md) |
 | Saved account device | `Device`, `DeviceAutosave` | [Accounts](guide/accounts.md) |
+| Device save intervals | `Device::autosave`, `DeviceAutosaveOptions` | [Save the device as it changes](guide/accounts.md#save-the-device-as-it-changes) |
 
 ### Requests and responses
 
@@ -114,12 +119,14 @@ let resp = session
 | Prebuilt `http::Request` | `Session::execute` | [Requests](guide/requests.md#send-an-httprequest) |
 | Status, headers, bodies | `Response` | [Responses](guide/responses.md) |
 | Status as an error | `error_for_status`, `error_for_status_ref` | [Responses](guide/responses.md#turn-a-status-into-an-error) |
+| Body kept in a status error | `CompressionConfig::max_error_body`, `TimeoutConfig::error_body` | [Responses](guide/responses.md#turn-a-status-into-an-error) |
+| Response body cap | `CompressionConfig::max_body_size` | [Responses](guide/responses.md#size-cap-and-content-coding) |
 | `Link` pagination | `RequestBuilder::pages`, `Response::links` | [Responses](guide/responses.md#follow-link-pagination) |
 | Stream, download, stop at a marker | `.stream()`, `into_decoded_stream`, `download`, `read_until` | [Streaming](guide/streaming.md) |
 | Redirect policy | `RedirectPolicy` | [Redirects](guide/redirects.md) |
-| Cookies | `cookie::Jar`, `Jar::autosave` | [Cookies](guide/cookies.md) |
+| Cookies | `cookie::Jar`, `Jar::save_to`, `Jar::autosave` | [Cookies](guide/cookies.md) |
 | WebSocket | `Session::websocket` | [WebSocket](guide/websocket.md) |
-| HTML forms, meta, links | `html::forms`, `html::meta`, `html::links` | [Accounts](guide/accounts.md) |
+| HTML forms, meta, links | `html::forms`, `Form::set`, `FormEnctype`, `Tab::submit_form`, `html::meta`, `html::links` | [Log in with the page's form](guide/accounts.md#log-in-with-the-pages-form) |
 | Cancel a request | drop, `Session::shutdown` | [Cancellation](guide/cancellation.md) |
 
 ### Policy, transport, and observation
@@ -127,16 +134,23 @@ let resp = session
 | Job | Call | Guide |
 | --- | --- | --- |
 | Timeouts and retries | `TimeoutConfig`, `RetryPolicy` | [Retries and timeouts](guide/retries-and-timeouts.md) |
+| Retry on a condition, wait on a header | `RetryPolicy::retry_if`, `wait_header`, `WaitFormat` | [Retry on a condition](guide/retries-and-timeouts.md#retry-on-a-condition-and-wait-on-a-header) |
+| Retry a request the server did not process | `RetryPolicy::retry_unsent` | [The idempotency rule](guide/retries-and-timeouts.md#the-idempotency-rule) |
+| Cap a server-requested wait | `RetryPolicy::max_retry_after` | [Retry-After wins](guide/retries-and-timeouts.md#retry-after-wins) |
+| Return a block without a retry | `RetryPolicy::skip_blocks` | [Retry a block through another proxy](guide/crawling.md#retry-a-block-through-another-proxy) |
+| Bound the body read | `TimeoutConfig::body` | [The timeouts](guide/retries-and-timeouts.md#the-timeouts) |
 | Proxies and proxy pools | `ProxyConfig`, `ProxyUrl`, `ProxyPool` | [Proxies](guide/proxies.md) |
 | Host limits, blocks, crawl metrics | `HostLimits`, `BlockRules`, `host_stats`, `trace::Metrics` | [Crawling](guide/crawling.md) |
+| Pause a host on a status | `HostLimits::pause_on`, `pause_for`, `max_pause` | [Limit each host](guide/crawling.md#limit-each-host) |
 | DNS, sockets, pool, Happy Eyeballs | `DnsConfig`, `SocketConfig`, `PoolConfig`, `HappyEyeballsConfig` | [Network](guide/network.md) |
 | Trust roots, pins, TLS floor | `TlsTrustConfig` | [TLS trust](guide/tls-trust.md) |
 | HTTP/3 | `ProtocolPolicy` | [HTTP/3](guide/http3.md) |
 | Logs and trace hooks | `Trace`, `TracingTrace`, `trace::Fanout` | [Logging and tracing](guide/logging.md) |
+| One event per request | `Trace::summary`, `trace::Summary` | [One event per request](guide/logging.md#one-event-per-request) |
 | Fingerprint audit | `audit(true)`, `Response::audit`, `AuditData::compare` | [Fingerprints](guide/fingerprints.md) |
 | Errors | `Error`, `Kind`, `ErrorCategory` | [Errors](guide/errors.md) |
 | Services, Tower, axum | `LeylineService`, `relay_headers`, `redact_url` | [Service integration](guide/service-integration.md) |
-| Tests | `testing::TestServer` | [Testing](guide/testing.md) |
+| Tests | `testing::TestServer`, `RecordedRequest::raw`, `header_values` | [Testing](guide/testing.md) |
 
 ## Errors
 
@@ -186,8 +200,8 @@ Default: `charset`, `compression-gzip`, `compression-brotli`,
   `WebSocketConfig`) have private fields and consuming setters named after
   the field, with no `with_` prefix. A setter for an optional value takes
   `impl Into<Option<T>>`, and `None` turns the setting off;
-  `RetryPolicy::max_retry_after` takes a `Duration`, and its cap is off
-  until set. A setter that adds to a list starts with `add_` or appends one
+  `RetryPolicy::max_retry_after` takes a `Duration`: `transient()` sets it
+  to 60 s, and `none()` has no cap. A setter that adds to a list starts with `add_` or appends one
   item (`rule`, `on_status`).
 - Every `SessionBuilder` config setter replaces the whole value. Start from
   `::new()`, which carries the defaults. A request setter merges over the

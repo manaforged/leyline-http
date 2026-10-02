@@ -1,14 +1,13 @@
-#[path = "core_support/raw_server.rs"]
-mod raw_server;
+#[path = "core_support/wait.rs"]
+mod wait;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use leyline::testing::{TestResponse, TestServer};
+use leyline::testing::{TestResponse, TestServer, queue};
 use leyline::trace::{BodyEnd, BodyOutcome, Trace};
 use leyline::{BlockRules, Browser, Family, HostLimits, Identity, Platform, ProxyPool, Session};
-use raw_server::{RawResponse, RawServer};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -37,15 +36,21 @@ async fn identities_share_one_pool() {
 
 #[tokio::test]
 async fn a_proxy_entry_carries_its_identity() {
-    let mut proxy = RawServer::start(vec![RawResponse::ok()]).await;
+    let proxy = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+        .await
+        .unwrap();
     let firefox = Identity::locked(Browser::latest(Family::Firefox), Platform::Windows);
     let session = Session::builder()
         .browser(Browser::latest(Family::Chrome))
-        .proxy_pool(ProxyPool::identified([(proxy.url(""), firefox)]))
+        .proxy_pool(ProxyPool::identified([(
+            format!("http://{}", proxy.addr()),
+            firefox,
+        )]))
         .build()
         .unwrap();
     session.get("http://origin.test/").await.unwrap();
-    let agent = proxy.next_request().await.header_values("user-agent");
+    let sent = proxy.next_request().await.unwrap();
+    let agent = sent.header_values("user-agent");
     assert!(agent[0].contains("Firefox"), "{agent:?}");
 }
 
@@ -118,18 +123,19 @@ impl Trace for Ends {
 
 #[tokio::test]
 async fn streamed_bodies_report_how_they_ended() {
-    let server = RawServer::start(vec![
-        RawResponse::ok().body(vec![b'a'; 1000]),
-        RawResponse::ok().body(vec![b'b'; 1000]),
-    ])
-    .await;
+    let server = TestServer::http(queue(vec![
+        TestResponse::new(200).close().body(vec![b'a'; 1000]),
+        TestResponse::new(200).close().body(vec![b'b'; 1000]),
+    ]))
+    .await
+    .unwrap();
     let hook = Arc::new(Ends::default());
     let session = Session::builder().trace(Arc::clone(&hook)).build().unwrap();
     let full = session.get(server.url("/full")).stream().await.unwrap();
     assert_eq!(full.bytes().await.unwrap().len(), 1000);
     let dropped = session.get(server.url("/drop")).stream().await.unwrap();
     drop(dropped);
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    wait::until(|| hook.0.lock().unwrap().len() == 2).await;
     let ends = hook.0.lock().unwrap().clone();
     assert_eq!(ends[0], (1000, "complete".to_owned()));
     assert_eq!(ends[1].1, "dropped");
@@ -137,18 +143,23 @@ async fn streamed_bodies_report_how_they_ended() {
 
 #[tokio::test]
 async fn identity_sessions_keep_each_identity_cookies_apart() {
-    let first = RawServer::start(vec![
-        RawResponse::status(403, "Forbidden").header("set-cookie", "sid=1; Path=/"),
-    ])
-    .await;
-    let mut second = RawServer::start(vec![RawResponse::ok()]).await;
+    let first = TestServer::http(queue(vec![
+        TestResponse::new(403)
+            .close()
+            .header("set-cookie", "sid=1; Path=/"),
+    ]))
+    .await
+    .unwrap();
+    let second = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+        .await
+        .unwrap();
     let pool = ProxyPool::identified([
         (
-            first.url(""),
+            format!("http://{}", first.addr()),
             Identity::locked(Browser::latest(Family::Firefox), Platform::Windows),
         ),
         (
-            second.url(""),
+            format!("http://{}", second.addr()),
             Identity::locked(Browser::latest(Family::Chrome), Platform::Windows),
         ),
     ])
@@ -160,7 +171,7 @@ async fn identity_sessions_keep_each_identity_cookies_apart() {
         .unwrap();
     session.get("http://origin.test/a").await.unwrap();
     session.get("http://origin.test/b").await.unwrap();
-    let sent = second.next_request().await;
+    let sent = second.next_request().await.unwrap();
     assert!(
         sent.header_values("cookie").is_empty(),
         "{:?}",
@@ -176,11 +187,12 @@ async fn identity_sessions_keep_each_identity_cookies_apart() {
 
 #[tokio::test]
 async fn metrics_count_statuses_errors_and_attempts() {
-    let server = RawServer::start(vec![
-        RawResponse::ok(),
-        RawResponse::status(404, "Not Found"),
-    ])
-    .await;
+    let server = TestServer::http(queue(vec![
+        TestResponse::new(200).body("ok").close(),
+        TestResponse::new(404).close(),
+    ]))
+    .await
+    .unwrap();
     let metrics = leyline::trace::Metrics::new();
     let session = Session::builder()
         .trace(Arc::clone(&metrics))
