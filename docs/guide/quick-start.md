@@ -16,10 +16,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ```
 
-`serde` and `serde_json` are only for the JSON examples. On the six supported
-targets the build links prebuilt BoringSSL and needs only Rust and Cargo.
-[Supported platforms](platforms.md) lists the targets and the tools for a
-source build.
+`serde` and `serde_json` are only for the JSON examples. The first build
+compiles BoringSSL, so it needs CMake, a C and C++ compiler, libclang, and
+Git. [Supported platforms](platforms.md) lists the targets and the tools.
 
 ## Send a GET request
 
