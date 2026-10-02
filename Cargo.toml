@@ -11,7 +11,7 @@ exclude = [
     "crates/leyline-bssl-tokio",
 ]
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.96" # MSRV: two releases behind stable
 authors = ["Thomas Gardiner <thomas@manaforge.tech>"]
@@ -41,9 +41,9 @@ thiserror = "2"
 url = "2"
 sha2 = "0.10"
 md-5 = "0.10"
-leyline-bssl = { path = "crates/leyline-bssl", version = "=0.1.0" }
-leyline-bssl-sys = { path = "crates/leyline-bssl-sys", version = "=0.1.0" }
-leyline-bssl-tokio = { path = "crates/leyline-bssl-tokio", version = "=0.1.0" }
+leyline-bssl = { path = "crates/leyline-bssl", version = "=0.1.1" }
+leyline-bssl-sys = { path = "crates/leyline-bssl-sys", version = "=0.1.1" }
+leyline-bssl-tokio = { path = "crates/leyline-bssl-tokio", version = "=0.1.1" }
 socket2 = { version = "0.6", features = ["all"] }
 bytes = "1"
 tokio-tungstenite = "0.26"

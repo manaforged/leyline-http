@@ -570,7 +570,7 @@ dependencies = [
 
 [[package]]
 name = "leyline-http"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-stream",
  "base64",
@@ -608,7 +608,7 @@ dependencies = [
 
 [[package]]
 name = "leyline-quiche"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "debug_panic",
  "either",
