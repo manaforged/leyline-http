@@ -128,7 +128,7 @@ Before the first Safari capture, do these steps once:
 
 ### Keeping profiles current
 
-The `release-watch` workflow runs once a day. It compares each browser's
+The `release-watch` workflow runs in the nightly run. It compares each browser's
 stable release (Chrome, Firefox, Brave, Edge, Opera, and Safari and iOS)
 with the newest bundled profile, and checks the forked crates against upstream
 security advisories:
@@ -170,8 +170,13 @@ skips crates whose version is already on crates.io, so re-running a job that
 stopped partway finishes the same release. A published version cannot be
 replaced.
 
-`nightly.yml` runs the live fingerprint and smoke suites against public
-servers once a day. They do not block a release.
+Hosted CI runs only for a release tag and once a night. Pull requests and
+pushes to `main` start no workflow; the gates above run on the maintainer's
+machines before a push. `nightly.yml` is the one scheduled run: the live
+fingerprint and smoke suites against public servers, time-bounded fuzzing,
+the cross-platform matrix (`matrix.yml`), and the release watch. It does not
+block a release. `check.yml` and `scorecard.yml` run only when started by
+hand.
 
 ## Style
 
