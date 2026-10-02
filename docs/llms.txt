@@ -2,7 +2,7 @@
 
 > Public API reference that truesight generates from the compiler's rustdoc output, except the task names and calls, which come from the task file.
 
-## leyline-http 0.1.0
+## leyline-http 0.1.1
 
 - [Every public item, one per line](reference/leyline-http/api.txt): 1846 lines
 - [API overview](reference/leyline-http/index.html): tasks, modules, features, and examples

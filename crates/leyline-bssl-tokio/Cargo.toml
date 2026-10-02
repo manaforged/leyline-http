@@ -1,6 +1,6 @@
 [package]
 name = "leyline-bssl-tokio"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 rust-version = "1.96"
 authors = [
@@ -17,8 +17,8 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/manaforged/leyline-http"
 
 [dependencies]
-leyline-bssl = { path = "../leyline-bssl", version = "=0.1.0" }
-leyline-bssl-sys = { path = "../leyline-bssl-sys", version = "=0.1.0" }
+leyline-bssl = { path = "../leyline-bssl", version = "=0.1.1" }
+leyline-bssl-sys = { path = "../leyline-bssl-sys", version = "=0.1.1" }
 tokio = "1"
 
 [dev-dependencies]
