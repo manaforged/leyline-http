@@ -14,12 +14,13 @@ use crate::core::session::decompress::BodyLimit;
 use crate::tls::{FingerprintConnector, TlsError};
 use crate::trace;
 use crate::util::is_idempotent;
-use std::time::Instant;
 
+#[cfg(test)]
+use crate::pool::make_key;
 use crate::pool::send::not_resendable;
 use crate::pool::types::PoolKey;
-use crate::pool::types::Transport;
-use crate::pool::{H1Slot, Pool, TlsInfo, make_key};
+use crate::pool::types::{Opened, Transport};
+use crate::pool::{H1Slot, Pool, TlsInfo};
 
 pub const MAX_H1_HEADER_BYTES: usize = 64 * 1024;
 
@@ -109,18 +110,7 @@ fn checkout_live_h1(pool: &Arc<Pool>, key: &PoolKey) -> Option<(H1Slot, TlsInfo)
     None
 }
 
-#[tracing::instrument(
-    name = "pool.send_request_h1",
-    level = "debug",
-    skip_all,
-    fields(
-        http.method = method,
-        http.host = host,
-        http.port = port,
-        proxied = proxy.is_some(),
-        pool.hit = tracing::field::Empty,
-    )
-)]
+#[cfg(feature = "bench-internals")]
 #[expect(
     clippy::too_many_arguments,
     reason = "flat per-request wire fields across one internal call path"
@@ -139,26 +129,89 @@ pub async fn send_request_h1_pooled(
     target: H1Target,
     stream: bool,
 ) -> Result<H1Response, H1PooledError> {
-    validate(method, &headers)?;
+    send_h1_pooled(
+        pool,
+        connector,
+        H1Request {
+            scheme,
+            host,
+            port,
+            method,
+            url,
+            headers,
+            proxy,
+            target,
+            stream,
+            opened: None,
+        },
+        body,
+        H1Dial::Http1Only,
+    )
+    .await?
+    .into_response()
+}
+
+pub(crate) struct H1Request<'a> {
+    pub(crate) scheme: &'a str,
+    pub(crate) host: &'a str,
+    pub(crate) port: u16,
+    pub(crate) method: &'a str,
+    pub(crate) url: &'a url::Url,
+    pub(crate) headers: Vec<(String, String)>,
+    pub(crate) proxy: Option<&'a str>,
+    pub(crate) target: H1Target,
+    pub(crate) stream: bool,
+    pub(crate) opened: Option<Opened<H1Slot>>,
+}
+
+#[tracing::instrument(
+    name = "pool.send_request_h1",
+    level = "debug",
+    skip_all,
+    fields(
+        http.method = req.method,
+        http.host = req.host,
+        http.port = req.port,
+        proxied = req.proxy.is_some(),
+        pool.hit = tracing::field::Empty,
+    )
+)]
+pub(crate) async fn send_h1_pooled(
+    pool: &Arc<Pool>,
+    connector: &FingerprintConnector,
+    mut req: H1Request<'_>,
+    body: H1Body,
+    dial: H1Dial<'_>,
+) -> Result<H1Outcome, H1PooledError> {
+    validate(req.method, &req.headers)?;
     pool.evict_idle();
 
-    let key = make_key(scheme, host, port, proxy, Transport::Tcp);
+    let key = pool.key(req.scheme, req.host, req.port, req.proxy, Transport::Tcp);
 
-    let _permit = pool.acquire_h1_permit(&key).await;
+    let permit = pool.acquire_h1_permit(&key).await;
+    let legs = first_legs(pool, &key, req.opened.take());
 
-    if stream {
-        return send_request_h1_streaming(
-            pool, connector, scheme, host, port, method, url, headers, body, proxy, target,
-            _permit, key,
-        )
-        .await;
+    if req.stream {
+        return send_request_h1_streaming(pool, connector, req, body, permit, key, dial, legs)
+            .await;
     }
+    let _permit = permit;
+    let H1Request {
+        scheme,
+        host,
+        port,
+        method,
+        url,
+        headers,
+        target,
+        ..
+    } = req;
 
-    let started = Instant::now();
+    let started = legs.started;
     let replay = replay_body(&body);
     let mut body = body;
 
-    if let Some((slot, tls)) = checkout_live_h1(pool, &key) {
+    if let Some((slot, tls)) = legs.pooled {
         trace::connect(host, port, true, std::time::Duration::ZERO);
         let pooled_body = std::mem::replace(&mut body, H1Body::Empty);
         let mut io = slot.io;
@@ -178,26 +231,25 @@ pub async fn send_request_h1_pooled(
                 if reusable {
                     pool.return_h1(key.clone(), H1Slot { io }, tls.clone());
                 }
-                return Ok(H1Response {
+                return Ok(H1Outcome::Response(H1Response {
                     status: resp.status,
                     headers: resp.headers,
                     body: H1ResponseBody::Buffered(resp.body),
                     tls: tls_for_scheme(scheme, &tls),
                     timing: ResponseTiming::leg(started, None),
-                });
+                }));
             }
             Err(e) => body = resend_after_failure(pool, &key, method, replay, e)?,
         }
     }
     tracing::Span::current().record("pool.hit", false);
 
-    let connect_started = Instant::now();
-    let (io, tls): (Box<dyn H1Io>, TlsInfo) =
-        open_new(connector, scheme, host, port, proxy).await?;
-    let connect_ms = ResponseTiming::millis(connect_started);
-
-    let mut slot = H1Slot { io };
-    let result = exchange_on_stream(
+    let (mut slot, tls, connect_ms) =
+        match fresh_leg(pool, &key, connector, dial, legs.fresh).await? {
+            Leg::H1(slot, tls, connect_ms) => (slot, tls, connect_ms),
+            Leg::H2(opened) => return Ok(H1Outcome::Upgraded { opened, body }),
+        };
+    let (resp, reusable) = exchange_on_stream(
         slot.io.as_mut(),
         method,
         url,
@@ -206,24 +258,18 @@ pub async fn send_request_h1_pooled(
         target,
         pool.max_body_size,
     )
-    .await;
-
-    match result {
-        Ok((resp, reusable)) => {
-            if reusable {
-                pool.return_h1(key, slot, tls.clone());
-                pool.note_h1_install();
-            }
-            Ok(H1Response {
-                status: resp.status,
-                headers: resp.headers,
-                body: H1ResponseBody::Buffered(resp.body),
-                tls: tls_for_scheme(scheme, &tls),
-                timing: ResponseTiming::leg(started, Some(connect_ms)),
-            })
-        }
-        Err(e) => Err(e),
+    .await?;
+    if reusable {
+        pool.return_h1(key, slot, tls.clone());
+        pool.note_h1_install();
     }
+    Ok(H1Outcome::Response(H1Response {
+        status: resp.status,
+        headers: resp.headers,
+        body: H1ResponseBody::Buffered(resp.body),
+        tls: tls_for_scheme(scheme, &tls),
+        timing: ResponseTiming::leg(started, Some(connect_ms)),
+    }))
 }
 
 fn replay_body(body: &H1Body) -> Option<H1Body> {
@@ -259,42 +305,6 @@ fn resend_after_failure(
         )))),
         Some(_) if !is_idempotent(method) => Err(error),
         Some(body) => Ok(body),
-    }
-}
-
-fn tls_for_scheme(scheme: &str, tls: &TlsInfo) -> Option<TlsInfo> {
-    if scheme == "https" {
-        Some(tls.clone())
-    } else {
-        None
-    }
-}
-
-async fn open_new(
-    connector: &FingerprintConnector,
-    scheme: &str,
-    host: &str,
-    port: u16,
-    proxy: Option<&str>,
-) -> Result<(Box<dyn H1Io>, TlsInfo), H1PooledError> {
-    match scheme {
-        "https" => {
-            let tls_stream = connector.connect_h1(host, port, proxy).await?;
-            let tls = TlsInfo {
-                peer_cert_der: tls_stream.peer_cert_der.clone(),
-                version: tls_stream.tls_version.clone(),
-                cipher: tls_stream.tls_cipher.clone(),
-            };
-            let io: Box<dyn H1Io> = Box::new(tls_stream.stream);
-            Ok((io, tls))
-        }
-        "http" => Ok((
-            dial_plain(connector, host, port, proxy).await?,
-            TlsInfo::default(),
-        )),
-        other => Err(H1PooledError::Config(format!(
-            "unsupported URL scheme for HTTP/1.1: {other}"
-        ))),
     }
 }
 
@@ -341,12 +351,16 @@ const MAX_H1_INFORMATIONAL: usize = 16;
 
 mod dial;
 mod headers;
+mod legs;
 pub(crate) mod parse;
 mod read;
 mod streaming;
 mod wire;
-use dial::dial_plain;
+use dial::tls_for_scheme;
+pub(crate) use dial::{H1Dial, NEGOTIATED_H2};
 use headers::*;
+pub(crate) use legs::H1Outcome;
+use legs::{FirstLegs, Leg, first_legs, fresh_leg};
 use parse::*;
 use read::*;
 use streaming::*;

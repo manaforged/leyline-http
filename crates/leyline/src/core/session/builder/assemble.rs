@@ -29,6 +29,7 @@ impl SessionBuilder {
                 accept_language: derived.accept_language,
                 header_order: derived.header_order,
                 default_headers: self.default_headers,
+                bearer: self.bearer,
                 proxy_config: self.proxy_config,
                 timeouts: self.timeouts,
                 redirect_policy: self.redirect_policy,
@@ -41,6 +42,7 @@ impl SessionBuilder {
                 connector,
                 h2_config: derived.h2_config,
                 pool,
+                shutdown: tokio_util::sync::CancellationToken::new(),
                 audit_tls: derived.audit_tls,
                 protocol_policy: self.protocol_policy,
                 default_retry: self.default_retry,
@@ -50,6 +52,10 @@ impl SessionBuilder {
                 #[cfg(feature = "http3")]
                 h3_config: derived.h3_config,
                 profile: derived.profile,
+                base_url: self.base_url,
+                languages: self.languages,
+                host_limits: self.host_limits,
+                proxy_pool: self.proxy_pool,
             }),
         }
     }

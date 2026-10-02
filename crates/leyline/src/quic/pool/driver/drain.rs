@@ -108,7 +108,9 @@ impl Drain<'_> {
                     stream,
                     quiche::h3::WireErrorCode::RequestCancelled,
                 );
-                stream.deliver_body_limit(BodyLimit(usize::try_from(max).unwrap_or(usize::MAX)));
+                stream.deliver_body_limit(BodyLimit::session(
+                    usize::try_from(max).unwrap_or(usize::MAX),
+                ));
                 self.streams.remove(&id);
                 break;
             }

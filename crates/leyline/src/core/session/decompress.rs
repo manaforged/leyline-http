@@ -22,7 +22,7 @@ pub(crate) struct Decoder {
     stages: Vec<Stage>,
     fed: bool,
     produced: usize,
-    limit: usize,
+    limit: BodyLimit,
 }
 
 impl Decoder {
@@ -50,8 +50,23 @@ impl Decoder {
             stages,
             fed: false,
             produced: 0,
-            limit: config.max_body_size,
+            limit: BodyLimit::session(config.max_body_size),
         }))
+    }
+
+    pub(crate) fn capped(
+        encoding: Option<&str>,
+        config: &CompressionConfig,
+        limit: Option<u64>,
+    ) -> Result<Self> {
+        let mut decoder = Self::new(encoding, config)?.unwrap_or(Self {
+            stages: Vec::new(),
+            fed: false,
+            produced: 0,
+            limit: BodyLimit::session(config.max_body_size),
+        });
+        decoder.limit = decoder.limit.tighter(limit);
+        Ok(decoder)
     }
 
     pub(crate) fn feed(&mut self, chunk: &[u8], out: &mut Vec<u8>) -> Result<()> {
@@ -82,8 +97,8 @@ impl Decoder {
 
     fn emit(&mut self, data: Vec<u8>, out: &mut Vec<u8>) -> Result<()> {
         self.produced += data.len();
-        if self.produced > self.limit {
-            return Err(BodyLimit(self.limit).error());
+        if self.produced > self.limit.bytes {
+            return Err(self.limit.error());
         }
         out.extend_from_slice(&data);
         Ok(())
@@ -150,14 +165,25 @@ pub(crate) async fn drain_stream_into_vec(
     while let Some(chunk) = bs.next().await {
         let chunk = chunk.map_err(body_read_error)?;
         if out.len() + chunk.len() > limit {
-            return Err(BodyLimit(limit).error());
+            return Err(BodyLimit::session(limit).error());
         }
         out.extend_from_slice(&chunk);
     }
     Ok(out)
 }
 
-fn body_read_error(e: std::io::Error) -> Error {
+pub(crate) fn body_read_error(e: std::io::Error) -> Error {
+    if let Some(limit) = BodyLimit::of_io(&e) {
+        return limit.error();
+    }
+    if e.get_ref().is_some_and(|inner| inner.is::<Error>()) {
+        if let Some(inner) = e.into_inner()
+            && let Ok(err) = inner.downcast::<Error>()
+        {
+            return *err;
+        }
+        return Error::new(Kind::Body).with_message("response body stream failed");
+    }
     if e.kind() == std::io::ErrorKind::TimedOut {
         Error::new(Kind::Timeout).with_source(e)
     } else {

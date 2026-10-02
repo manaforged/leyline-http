@@ -1,17 +1,21 @@
 use std::fmt;
 use std::sync::{Arc, OnceLock};
 
-use bytes::Bytes;
 use http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 use url::Url;
 
 use crate::core::body_stream::BodyStream;
-use crate::core::error::{Error, Kind, Result};
-use crate::core::session::decompress::{
-    Decoder, content_codings, decompress_body, drain_stream_into_vec,
-};
+use crate::core::error::{Error, Kind};
 use crate::trace::masked;
 use crate::util::redact;
+
+mod body;
+mod download;
+mod link;
+mod relay;
+
+pub use link::Link;
+pub use relay::{RelayBody, relay_headers};
 
 pub(crate) enum ResponseBody {
     Buffered(Vec<u8>),
@@ -103,6 +107,8 @@ pub struct Response {
     pub(crate) audit_tls: Option<Arc<crate::audit::AuditTlsCache>>,
     pub(crate) audit_cache: OnceLock<crate::audit::AuditData>,
     pub(crate) compression: crate::core::CompressionConfig,
+    pub(crate) attempts: u32,
+    pub(crate) proxy: Option<String>,
 }
 
 impl Response {
@@ -116,6 +122,26 @@ impl Response {
 
     pub fn timing(&self) -> &ResponseTiming {
         &self.timing
+    }
+
+    pub fn attempts(&self) -> u32 {
+        self.attempts
+    }
+
+    pub(crate) fn set_attempts(&mut self, attempts: u32) {
+        self.attempts = attempts.max(1);
+    }
+
+    pub fn proxy(&self) -> Option<&str> {
+        self.proxy.as_deref()
+    }
+
+    pub(crate) fn set_proxy(&mut self, proxy: Option<&str>) {
+        self.proxy = proxy.map(redact);
+    }
+
+    pub fn block(&self) -> Option<crate::core::block::BlockSignal> {
+        crate::core::block::BlockRules::builtin().check(self)
     }
 
     pub fn url(&self) -> &Url {
@@ -154,84 +180,6 @@ impl Response {
             .map(|(k, v)| (k.as_str(), v.as_str()))
     }
 
-    pub async fn text(self) -> crate::core::Result<String> {
-        self.text_with_charset("utf-8").await
-    }
-
-    #[cfg(feature = "charset")]
-    pub async fn text_with_charset(self, default_encoding: &str) -> crate::core::Result<String> {
-        let label = self.charset_label().map(str::to_owned);
-        let bytes = self.bytes().await?;
-        let encoding = encoding_rs::Encoding::for_label(
-            label.as_deref().unwrap_or(default_encoding).as_bytes(),
-        )
-        .unwrap_or(encoding_rs::UTF_8);
-        Ok(encoding.decode(&bytes).0.into_owned())
-    }
-
-    #[cfg(not(feature = "charset"))]
-    pub async fn text_with_charset(self, _default_encoding: &str) -> crate::core::Result<String> {
-        Ok(String::from_utf8_lossy(&self.bytes().await?).into_owned())
-    }
-
-    #[cfg(feature = "charset")]
-    fn charset_label(&self) -> Option<&str> {
-        let ct = self.header("content-type")?;
-        ct.split(';').skip(1).find_map(|param| {
-            let (k, v) = param.split_once('=')?;
-            k.trim()
-                .eq_ignore_ascii_case("charset")
-                .then(|| v.trim().trim_matches('"'))
-        })
-    }
-
-    pub async fn bytes(self) -> crate::core::Result<Bytes> {
-        let stream = match self.body {
-            ResponseBody::Buffered(b) => return Ok(Bytes::from(b)),
-            ResponseBody::Taken => {
-                return Err(Error::new(Kind::Body).with_message(
-                    "response body stream was taken by `into_stream`; read the bytes from that stream",
-                ));
-            }
-            ResponseBody::Streaming(s) => s,
-        };
-        let buf = drain_stream_into_vec(stream, self.compression.max_body_size).await?;
-        let encoding = content_codings(self.headers.get_all(http::header::CONTENT_ENCODING));
-        let (buf, _) = decompress_body(buf, encoding.as_deref(), &self.compression)?;
-        Ok(Bytes::from(buf))
-    }
-
-    pub async fn json<T: serde::de::DeserializeOwned>(self) -> crate::core::Result<T> {
-        serde_json::from_slice(&self.bytes().await?).map_err(Error::from_json)
-    }
-
-    pub fn into_stream(mut self) -> Result<BodyStream> {
-        match std::mem::replace(&mut self.body, ResponseBody::Taken) {
-            ResponseBody::Streaming(s) => Ok(s),
-            ResponseBody::Buffered(b) => Ok(BodyStream::from_bytes(bytes::Bytes::from(b))),
-            ResponseBody::Taken => Err(Error::new(Kind::Body)
-                .with_message("response body has already been taken as a stream")),
-        }
-    }
-
-    pub async fn copy_to<W>(self, writer: &mut W) -> Result<u64>
-    where
-        W: tokio::io::AsyncWrite + Unpin,
-    {
-        use futures_util::StreamExt;
-        use tokio::io::AsyncWriteExt;
-
-        let mut stream = self.into_stream()?;
-        let mut total: u64 = 0;
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(Error::from)?;
-            writer.write_all(&chunk).await.map_err(Error::from)?;
-            total += chunk.len() as u64;
-        }
-        writer.flush().await.map_err(Error::from)?;
-        Ok(total)
-    }
-
     pub fn content_length(&self) -> Option<u64> {
         self.header("content-length").and_then(|v| v.parse().ok())
     }
@@ -257,7 +205,9 @@ impl Response {
         Some(
             Error::new(Kind::Status)
                 .with_status(self.status)
-                .with_url(self.url.clone()),
+                .with_url(self.url.clone())
+                .with_headers(self.headers.clone())
+                .with_trail(self.attempts, self.proxy.clone()),
         )
     }
 
@@ -275,41 +225,14 @@ impl Response {
                 h2_fingerprint: tls.h2_fingerprint.clone(),
                 ja4t: tls.ja4t.clone(),
                 ja4h,
+                permutes_extensions: tls.permutes_extensions,
+                request_headers: self.request_headers.clone(),
             }
         }))
     }
 
     pub fn header(&self, name: &str) -> Option<&str> {
         self.headers.get(name).and_then(|v| v.to_str().ok())
-    }
-
-    pub async fn read_until<F>(self, limit: usize, mut done: F) -> Result<Vec<u8>>
-    where
-        F: FnMut(&[u8], usize) -> bool,
-    {
-        use futures_util::StreamExt;
-
-        let encoding = content_codings(self.headers.get_all(http::header::CONTENT_ENCODING));
-        let mut decoder = Decoder::new(encoding.as_deref(), &self.compression)?;
-        let mut stream = self.into_stream()?;
-        let mut out = Vec::new();
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(Error::from)?;
-            let from = out.len();
-            match decoder.as_mut() {
-                Some(decoder) => decoder.feed(&chunk, &mut out)?,
-                None => out.extend_from_slice(&chunk),
-            }
-            out.truncate(limit);
-            if done(&out, from) || out.len() >= limit {
-                return Ok(out);
-            }
-        }
-        if let Some(decoder) = decoder.as_mut() {
-            decoder.finish(&mut out)?;
-            out.truncate(limit);
-        }
-        Ok(out)
     }
 }
 
@@ -346,6 +269,8 @@ impl fmt::Debug for Response {
                 ),
             )
             .field("timing", &self.timing)
+            .field("attempts", &self.attempts)
+            .field("proxy", &self.proxy)
             .finish_non_exhaustive()
     }
 }

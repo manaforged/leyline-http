@@ -37,6 +37,7 @@ pub(crate) struct Attempt {
     pub(crate) header_order: Option<Vec<String>>,
     pub(crate) redirect: Option<RedirectPolicy>,
     pub(crate) digest: Option<DigestAuth>,
+    pub(crate) initiator: Option<Url>,
 }
 
 impl Attempt {
@@ -53,6 +54,7 @@ impl Attempt {
             header_order: self.header_order.clone(),
             redirect: self.redirect.clone(),
             digest: self.digest.clone(),
+            initiator: self.initiator.clone(),
         }
     }
 }
@@ -68,11 +70,57 @@ impl Session {
             Box<dyn std::future::Future<Output = Result<Response>> + Send + '_>,
         > = Box::pin(self.execute_inner(attempt));
         trace::scope(self.inner.trace.as_ref(), async move {
-            let out = deadline.total(inner).await;
+            let out = self.unless_shut_down(deadline.total(inner)).await;
             trace::done(match &out {
                 Ok(_) => Ok(()),
                 Err(e) => Err(e),
             });
+            out
+        })
+        .await
+    }
+
+    pub(crate) async fn unless_shut_down<T>(
+        &self,
+        fut: impl std::future::Future<Output = Result<T>>,
+    ) -> Result<T> {
+        tokio::select! {
+            biased;
+            () = self.inner.shutdown.cancelled() => Err(shut_down()),
+            out = fut => out,
+        }
+    }
+
+    pub fn shutdown(&self) {
+        self.inner.shutdown.cancel();
+    }
+
+    pub fn is_shut_down(&self) -> bool {
+        self.inner.shutdown.is_cancelled()
+    }
+
+    pub(crate) async fn traced<F>(
+        &self,
+        method: &str,
+        original_url: &str,
+        streamed: bool,
+        request: F,
+    ) -> Result<Response>
+    where
+        F: std::future::Future<Output = (Result<Response>, u32)>,
+    {
+        let hook = self.inner.trace.as_ref();
+        trace::scope(hook, async move {
+            let (out, attempts) = request.await;
+            if hook.is_some() {
+                let finish = trace::Finish {
+                    method,
+                    original_url,
+                    attempts,
+                    streamed,
+                };
+                trace::summary(&finish, out.as_ref());
+            }
             out
         })
         .await
@@ -97,21 +145,24 @@ impl Session {
             header_order,
             redirect,
             digest,
+            initiator,
         } = attempt;
         let redirect_policy = redirect.as_ref().unwrap_or(&self.inner.redirect_policy);
         let request_proxy = request_proxy.as_ref();
         let header_order = header_order.as_deref();
         let mut journey = Journey::begin(
-            self.resolve_url(&raw_url)?,
+            self.hsts_upgrade(&self.resolve_url(&raw_url)?),
             method.to_string(),
             body,
             extra_headers,
+            initiator,
             self.session_referer(),
         );
 
         let mut digest = digest.map(DigestLeg::new);
         let redirect_cap = redirect_policy.max_redirects_hint();
         loop {
+            journey.url = self.hsts_upgrade(&journey.url);
             let headers = self.leg_headers(&journey, preset, header_order);
             journey.authorized = None;
             let audit_headers = self.audit_copy(&headers);
@@ -132,6 +183,7 @@ impl Session {
             journey.timing.add_leg(&leg.timing);
 
             self.store_cookies(&leg.headers, &journey.url);
+            self.note_hsts(&journey.url, &leg.headers);
             #[cfg(feature = "http3")]
             self.note_alt_svc(&journey.url, &leg.headers);
 
@@ -193,6 +245,7 @@ pub(super) struct RequestContext<'a> {
     pub(super) origin: &'a str,
     pub(super) origin_downgrade: bool,
     pub(super) referer: &'a str,
+    pub(super) initiated: bool,
     pub(super) site: SiteContext<'a>,
 }
 
@@ -202,6 +255,12 @@ pub(in crate::core::session) struct SiteContext<'a> {
     pub(in crate::core::session) chain: &'a [Url],
 }
 
+pub(crate) const SHUT_DOWN_MESSAGE: &str = "session shut down";
+
+pub(crate) fn shut_down() -> Error {
+    Error::new(Kind::Request).with_message(SHUT_DOWN_MESSAGE)
+}
+
 fn fetch_site_for(initiator: Option<&Url>, chain: &[Url], current: &Url) -> FetchSite {
     let Some(initiator) = initiator else {
         return FetchSite::CrossSite;
@@ -209,7 +268,7 @@ fn fetch_site_for(initiator: Option<&Url>, chain: &[Url], current: &Url) -> Fetc
     FetchSite::across(initiator, chain.iter().chain(std::iter::once(current)))
 }
 
-fn url_origin(url: &Url) -> String {
+pub(crate) fn url_origin(url: &Url) -> String {
     let host = url.host_str().unwrap_or("");
     match url.port() {
         Some(port) => format!("{}://{}:{}", url.scheme(), host, port),
@@ -217,7 +276,7 @@ fn url_origin(url: &Url) -> String {
     }
 }
 
-fn referer_for(prev: Option<&str>, current_origin: &str) -> String {
+pub(crate) fn referer_for(prev: Option<&str>, current_origin: &str) -> String {
     let Some(prev) = prev else {
         return format!("{current_origin}/");
     };

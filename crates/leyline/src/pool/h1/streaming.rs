@@ -33,6 +33,16 @@ pub(super) async fn stream_body_into(
         }
     }
 }
+async fn until_closed<T>(
+    tx: &mpsc::Sender<io::Result<Bytes>>,
+    work: impl std::future::Future<Output = T>,
+) -> Option<T> {
+    tokio::select! {
+        biased;
+        () = tx.closed() => None,
+        out = work => Some(out),
+    }
+}
 pub(super) async fn stream_fixed_into(
     stream: &mut dyn H1Io,
     initial: Vec<u8>,
@@ -56,7 +66,10 @@ pub(super) async fn stream_fixed_into(
     let mut tmp = vec![0u8; 8192];
     while remaining > 0 {
         let want = remaining.min(tmp.len() as u64) as usize;
-        let n = stream.read(&mut tmp[..want]).await?;
+        let Some(read) = until_closed(tx, stream.read(&mut tmp[..want])).await else {
+            return Ok(false);
+        };
+        let n = read?;
         if n == 0 {
             return Err(io::Error::new(
                 io::ErrorKind::UnexpectedEof,
@@ -84,7 +97,10 @@ pub(super) async fn stream_to_close_into(
     }
     let mut tmp = vec![0u8; 8192];
     loop {
-        let n = stream.read(&mut tmp).await?;
+        let Some(read) = until_closed(tx, stream.read(&mut tmp)).await else {
+            return Ok(false);
+        };
+        let n = read?;
         if n == 0 {
             return Ok(true);
         }
@@ -103,9 +119,10 @@ pub(super) async fn stream_chunked_into(
     tx: &mpsc::Sender<io::Result<Bytes>>,
 ) -> io::Result<bool> {
     loop {
-        let line_end = read_until_crlf(stream, &mut buf)
-            .await
-            .map_err(h1err_to_io)?;
+        let Some(line) = until_closed(tx, read_until_crlf(stream, &mut buf)).await else {
+            return Ok(false);
+        };
+        let line_end = line.map_err(h1err_to_io)?;
         let size_line = String::from_utf8_lossy(&buf[..line_end]);
         let size_token = size_line.split(';').next().unwrap_or("").trim();
         let mut remaining = u64::from_str_radix(size_token, 16).map_err(|e| {
@@ -117,15 +134,18 @@ pub(super) async fn stream_chunked_into(
         buf.drain(..line_end + 2);
 
         if remaining == 0 {
-            read_chunk_trailers(stream, &mut buf)
-                .await
-                .map_err(h1err_to_io)?;
-            return Ok(true);
+            return match until_closed(tx, read_chunk_trailers(stream, &mut buf)).await {
+                Some(trailers) => trailers.map(|()| true).map_err(h1err_to_io),
+                None => Ok(false),
+            };
         }
 
         while remaining > 0 {
             if buf.is_empty() {
-                read_more(stream, &mut buf).await.map_err(h1err_to_io)?;
+                let Some(more) = until_closed(tx, read_more(stream, &mut buf)).await else {
+                    return Ok(false);
+                };
+                more.map_err(h1err_to_io)?;
             }
             let take = usize::try_from(remaining).map_or(buf.len(), |wanted| wanted.min(buf.len()));
             let piece = Bytes::copy_from_slice(&buf[..take]);
@@ -136,9 +156,10 @@ pub(super) async fn stream_chunked_into(
             }
         }
 
-        read_until_available(stream, &mut buf, 2)
-            .await
-            .map_err(h1err_to_io)?;
+        let Some(tail) = until_closed(tx, read_until_available(stream, &mut buf, 2)).await else {
+            return Ok(false);
+        };
+        tail.map_err(h1err_to_io)?;
         if &buf[..2] != b"\r\n" {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -155,23 +176,26 @@ pub(super) async fn stream_chunked_into(
 pub(super) async fn send_request_h1_streaming(
     pool: &Arc<Pool>,
     connector: &FingerprintConnector,
-    scheme: &str,
-    host: &str,
-    port: u16,
-    method: &str,
-    url: &url::Url,
-    headers: Vec<(String, String)>,
+    req: H1Request<'_>,
     body: H1Body,
-    proxy: Option<&str>,
-    target: H1Target,
     permit: OwnedSemaphorePermit,
     key: PoolKey,
-) -> Result<H1Response, H1PooledError> {
-    let started = Instant::now();
+    dial: H1Dial<'_>,
+    legs: FirstLegs,
+) -> Result<H1Outcome, H1PooledError> {
+    let H1Request {
+        scheme,
+        method,
+        url,
+        headers,
+        target,
+        ..
+    } = req;
+    let started = legs.started;
     let replay = replay_body(&body);
     let mut body = body;
 
-    if let Some((slot, tls)) = checkout_live_h1(pool, &key) {
+    if let Some((slot, tls)) = legs.pooled {
         let pooled_body = std::mem::replace(&mut body, H1Body::Empty);
         let mut io = slot.io;
         match exchange_head_on_stream(
@@ -199,24 +223,24 @@ pub(super) async fn send_request_h1_streaming(
                     count_install: false,
                     tx,
                 }));
-                return Ok(H1Response {
+                return Ok(H1Outcome::Response(H1Response {
                     status: head.status,
                     headers: head.headers,
                     body: H1ResponseBody::Streaming(BodyStream::new(rx)),
                     tls: tls_for_scheme(scheme, &tls),
                     timing: ResponseTiming::leg(started, None),
-                });
+                }));
             }
             Err(e) => body = resend_after_failure(pool, &key, method, replay, e)?,
         }
     }
     tracing::Span::current().record("pool.hit", false);
 
-    let connect_started = Instant::now();
-    let (io, tls): (Box<dyn H1Io>, TlsInfo) =
-        open_new(connector, scheme, host, port, proxy).await?;
-    let connect_ms = ResponseTiming::millis(connect_started);
-    let mut slot = H1Slot { io };
+    let (mut slot, tls, connect_ms) =
+        match fresh_leg(pool, &key, connector, dial, legs.fresh).await? {
+            Leg::H1(slot, tls, connect_ms) => (slot, tls, connect_ms),
+            Leg::H2(opened) => return Ok(H1Outcome::Upgraded { opened, body }),
+        };
     let (head, reusable) =
         exchange_head_on_stream(slot.io.as_mut(), method, url, headers, body, target).await?;
     let (tx, rx) = mpsc::channel(STREAM_CHANNEL_DEPTH);
@@ -232,11 +256,11 @@ pub(super) async fn send_request_h1_streaming(
         count_install: true,
         tx,
     }));
-    Ok(H1Response {
+    Ok(H1Outcome::Response(H1Response {
         status: head.status,
         headers: head.headers,
         body: H1ResponseBody::Streaming(BodyStream::new(rx)),
         tls: tls_for_scheme(scheme, &tls),
         timing: ResponseTiming::leg(started, Some(connect_ms)),
-    })
+    }))
 }

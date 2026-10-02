@@ -16,7 +16,7 @@ fn bench_session_build_chrome147(c: &mut Criterion) {
 fn bench_session_build_chrome(c: &mut Criterion) {
     c.bench_function("session::chrome", |b| {
         b.iter(|| {
-            let session = Session::new();
+            let session = Session::browser(Browser::default());
             black_box(session);
         });
     });

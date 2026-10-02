@@ -99,5 +99,6 @@ pub(crate) fn audit_cache(
         ja3,
         h2_fingerprint: h2_fp,
         ja4t,
+        permutes_extensions: profile.tls.permute_extensions,
     }
 }

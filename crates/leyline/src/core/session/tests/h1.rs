@@ -40,7 +40,7 @@ async fn plaintext_http_uses_h1_and_preserves_duplicate_headers() {
                 .unwrap();
     });
 
-    let session = Session::new();
+    let session = Session::browser(crate::Browser::default());
     let resp = session
         .request(http::Method::GET, format!("http://{addr}/wire?q=1"))
         .header("x-dup", "one")
@@ -88,7 +88,10 @@ async fn owned() {
         .uri(format!("http://{addr}/owned"))
         .body(Body::from(Vec::new()))
         .unwrap();
-    let resp = Session::new().execute(req).await.unwrap();
+    let resp = Session::browser(crate::Browser::default())
+        .execute(req)
+        .await
+        .unwrap();
     assert_eq!(resp.status(), 200);
     assert_eq!(resp.text().await.unwrap(), "ok");
     server.await.unwrap();
@@ -203,7 +206,7 @@ async fn compress_sets_header_and_puts_compressed_bytes_on_the_wire() {
     });
 
     let payload = b"the quick brown fox jumps over the lazy dog. ".repeat(64);
-    let resp = Session::new()
+    let resp = Session::browser(crate::Browser::default())
         .post(format!("http://{addr}/upload"))
         .body(payload.clone())
         .compress(ContentEncoding::Gzip)
@@ -227,7 +230,7 @@ async fn compress_rejects_streaming_body() {
         ))]),
         None,
     );
-    let err = Session::new()
+    let err = Session::browser(crate::Browser::default())
         .post("http://127.0.0.1:9/x")
         .body(body)
         .compress(ContentEncoding::Gzip)
@@ -239,7 +242,7 @@ async fn compress_rejects_streaming_body() {
 
 #[tokio::test]
 async fn unsupported_scheme_proxy_is_refused_not_sent_in_cleartext() {
-    let err = Session::new()
+    let err = Session::browser(crate::Browser::default())
         .request(http::Method::GET, "https://example.test/")
         .proxy("ftp://user:secret@127.0.0.1:1")
         .send()
@@ -303,7 +306,7 @@ async fn compress_strips_stale_caller_content_length() {
     });
 
     let payload = b"the quick brown fox jumps over the lazy dog. ".repeat(64);
-    let resp = Session::new()
+    let resp = Session::browser(crate::Browser::default())
         .post(format!("http://{addr}/upload"))
         .header("content-length", "999999")
         .body(payload.clone())
@@ -319,7 +322,7 @@ async fn compress_strips_stale_caller_content_length() {
 
 #[tokio::test]
 async fn https_scheme_proxy_is_accepted_and_dialed_over_tls() {
-    let err = Session::new()
+    let err = Session::browser(crate::Browser::default())
         .request(http::Method::GET, "https://example.test/")
         .proxy("https://user:secret@127.0.0.1:1")
         .send()
@@ -345,7 +348,7 @@ async fn json_builder_returns_error_instead_of_panicking() {
         }
     }
 
-    let session = Session::new();
+    let session = Session::browser(crate::Browser::default());
     let err = session
         .post("http://127.0.0.1:9/no-network")
         .json(&BadJson)

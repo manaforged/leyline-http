@@ -1,6 +1,17 @@
+use std::fmt;
+use std::sync::Arc;
 use std::time::Duration;
 
-use crate::util::epoch_plus;
+use crate::core::block::BlockRules;
+use crate::core::config::ProxyConfig;
+use crate::core::error::{Error, ErrorCategory, Kind, Result};
+use crate::core::response::Response;
+
+mod wait;
+
+pub use wait::WaitFormat;
+pub(crate) use wait::parse_retry_after;
+use wait::{RETRY_AFTER, WaitHeader};
 
 pub(crate) const GATEWAY_STATUSES: [u16; 3] = [502, 503, 504];
 
@@ -24,6 +35,22 @@ pub struct RetryPolicy {
     pub(crate) jitter: bool,
     pub(crate) retry_on: Vec<RetryTrigger>,
     pub(crate) allow_non_idempotent: bool,
+    pub(crate) proxies: Vec<ProxyConfig>,
+    pub(crate) retry_if: Vec<RetryIf>,
+    pub(crate) wait_headers: Vec<WaitHeader>,
+    pub(crate) skip_blocks: Option<BlockRules>,
+    pub(crate) retry_unsent: bool,
+}
+
+type ResponsePredicate = dyn Fn(&Response) -> bool + Send + Sync + std::panic::RefUnwindSafe;
+
+#[derive(Clone)]
+pub(crate) struct RetryIf(Arc<ResponsePredicate>);
+
+impl fmt::Debug for RetryIf {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("RetryIf(..)")
+    }
 }
 
 impl Default for RetryPolicy {
@@ -43,6 +70,11 @@ impl RetryPolicy {
             jitter: false,
             retry_on: Vec::new(),
             allow_non_idempotent: false,
+            proxies: Vec::new(),
+            retry_if: Vec::new(),
+            wait_headers: Vec::new(),
+            skip_blocks: None,
+            retry_unsent: false,
         }
     }
 
@@ -60,6 +92,11 @@ impl RetryPolicy {
                 .chain([RetryTrigger::Timeout])
                 .collect(),
             allow_non_idempotent: false,
+            proxies: Vec::new(),
+            retry_if: Vec::new(),
+            wait_headers: Vec::new(),
+            skip_blocks: None,
+            retry_unsent: false,
         }
     }
 
@@ -108,6 +145,79 @@ impl RetryPolicy {
         self
     }
 
+    pub fn rotate_proxies<P: Into<ProxyConfig>>(
+        mut self,
+        proxies: impl IntoIterator<Item = P>,
+    ) -> Self {
+        self.proxies = proxies.into_iter().map(Into::into).collect();
+        self
+    }
+
+    pub fn retry_if<F>(mut self, f: F) -> Self
+    where
+        F: Fn(&Response) -> bool + Send + Sync + std::panic::RefUnwindSafe + 'static,
+    {
+        self.retry_if.push(RetryIf(Arc::new(f)));
+        self
+    }
+
+    pub fn wait_header(mut self, name: impl Into<String>, format: WaitFormat) -> Self {
+        self.wait_headers.push(WaitHeader {
+            name: name.into(),
+            format,
+        });
+        self
+    }
+
+    pub fn skip_blocks(mut self, rules: BlockRules) -> Self {
+        match &mut self.skip_blocks {
+            Some(held) => held.extend(rules),
+            None => self.skip_blocks = Some(rules),
+        }
+        self
+    }
+
+    pub fn retry_unsent(mut self, enabled: bool) -> Self {
+        self.retry_unsent = enabled;
+        self
+    }
+
+    pub(crate) fn matches_response(&self, response: &Response) -> bool {
+        if self.is_block(response) {
+            return false;
+        }
+        self.matches_status(response.status().as_u16())
+            || self.retry_if.iter().any(|RetryIf(f)| f(response))
+    }
+
+    fn is_block(&self, response: &Response) -> bool {
+        self.skip_blocks
+            .as_ref()
+            .is_some_and(|rules| rules.check(response).is_some())
+    }
+
+    pub(crate) fn retries_unsent(&self, result: &Result<Response>) -> bool {
+        self.retry_unsent && result.as_ref().err().is_some_and(unsent)
+    }
+
+    pub(crate) fn server_wait(&self, response: &Response) -> Option<Duration> {
+        self.wait_in(|name| response.header(name))
+    }
+
+    fn wait_in<'a>(&self, header: impl Fn(&str) -> Option<&'a str>) -> Option<Duration> {
+        if let Some(wait) = header(RETRY_AFTER).and_then(parse_retry_after) {
+            return Some(wait);
+        }
+        self.wait_headers
+            .iter()
+            .find_map(|wait| header(&wait.name).and_then(|value| wait.format.parse(value)))
+    }
+
+    pub(crate) fn proxy_for_retry(&self, retry: u32) -> Option<&ProxyConfig> {
+        let index = usize::try_from(retry.checked_sub(1)?).ok()?;
+        self.proxies.get(index.checked_rem(self.proxies.len())?)
+    }
+
     pub(crate) fn is_none(&self) -> bool {
         self.max_retries == 0
     }
@@ -135,7 +245,8 @@ impl RetryPolicy {
             .any(|t| matches!(t, RetryTrigger::Timeout))
     }
 
-    pub(crate) fn delay(&self, attempt: u32) -> Duration {
+    #[must_use]
+    pub fn backoff(&self, attempt: u32) -> Duration {
         let base = self.initial_backoff.as_secs_f64();
         let raw = base * self.backoff_factor.powi(attempt as i32);
         let capped = raw.min(self.max_backoff.as_secs_f64());
@@ -148,87 +259,19 @@ impl RetryPolicy {
     }
 }
 
+fn unsent(err: &Error) -> bool {
+    match err.category() {
+        ErrorCategory::Dns | ErrorCategory::Connect | ErrorCategory::Tls | ErrorCategory::Proxy => {
+            true
+        }
+        ErrorCategory::Timeout => err.kind() == Kind::Connect,
+        _ => false,
+    }
+}
+
 fn cheap_jitter() -> f64 {
     use rand::Rng;
     rand::rng().random_range(0.0..=1.0)
-}
-
-pub(crate) fn parse_retry_after(value: &str) -> Option<Duration> {
-    let value = value.trim();
-    if let Ok(secs) = value.parse::<u64>() {
-        return Some(Duration::from_secs(secs));
-    }
-    let when = parse_imf_fixdate(value)?;
-    Some(
-        when.duration_since(std::time::SystemTime::now())
-            .unwrap_or(Duration::ZERO),
-    )
-}
-
-fn parse_imf_fixdate(s: &str) -> Option<std::time::SystemTime> {
-    let rest = s.split_once(", ")?.1;
-    let mut parts = rest.split_whitespace();
-    let day: u32 = parts.next()?.parse().ok()?;
-    let month = month_num(parts.next()?)?;
-    let year: i32 = parts.next()?.parse().ok()?;
-    let hms = parts.next()?;
-    let tz = parts.next()?;
-    if !tz.eq_ignore_ascii_case("GMT") && !tz.eq_ignore_ascii_case("UTC") {
-        return None;
-    }
-    let mut t = hms.split(':');
-    let hour: u32 = t.next()?.parse().ok()?;
-    let min: u32 = t.next()?.parse().ok()?;
-    let sec: u32 = t.next()?.parse().ok()?;
-    unix_from_ymd_hms(year, month, day, hour, min, sec)
-}
-
-fn month_num(month: &str) -> Option<u32> {
-    Some(match month {
-        "Jan" => 1,
-        "Feb" => 2,
-        "Mar" => 3,
-        "Apr" => 4,
-        "May" => 5,
-        "Jun" => 6,
-        "Jul" => 7,
-        "Aug" => 8,
-        "Sep" => 9,
-        "Oct" => 10,
-        "Nov" => 11,
-        "Dec" => 12,
-        _ => return None,
-    })
-}
-
-fn unix_from_ymd_hms(
-    year: i32,
-    month: u32,
-    day: u32,
-    hour: u32,
-    min: u32,
-    sec: u32,
-) -> Option<std::time::SystemTime> {
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) || hour > 23 || min > 59 || sec > 59 {
-        return None;
-    }
-    let mut y = year;
-    if month <= 2 {
-        y -= 1;
-    }
-    let era = y.div_euclid(400);
-    let yoe = (y - era * 400) as u32;
-    let shifted = if month > 2 { month - 3 } else { month + 9 };
-    let doy = (153 * shifted + 2) / 5 + day - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    let days = i64::from(era) * 146097 + i64::from(doe) - 719468;
-    let secs = days
-        .checked_mul(86400)?
-        .checked_add(i64::from(hour) * 3600 + i64::from(min) * 60 + i64::from(sec))?;
-    if secs < 0 {
-        return None;
-    }
-    epoch_plus(Duration::from_secs(secs as u64))
 }
 
 #[cfg(test)]

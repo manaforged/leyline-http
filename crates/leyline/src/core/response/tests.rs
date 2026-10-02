@@ -20,6 +20,8 @@ fn bare_response(audit_tls: Option<Arc<crate::audit::AuditTlsCache>>) -> Respons
         audit_cache: OnceLock::new(),
         timing: ResponseTiming::default(),
         compression: crate::core::CompressionConfig::default(),
+        attempts: 1,
+        proxy: None,
     }
 }
 
@@ -29,6 +31,7 @@ fn sample_cache() -> Arc<crate::audit::AuditTlsCache> {
         ja3: "771,4865-4866,0-23,29-23,0".to_string(),
         h2_fingerprint: "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p".to_string(),
         ja4t: "64240_2-1-3-1-1-4_1460_8".to_string(),
+        permutes_extensions: false,
     })
 }
 

@@ -1,4 +1,4 @@
-use leyline::{Browser, Platform, Session};
+use leyline::Session;
 use serde::Serialize;
 
 const URL: &str = "https://example.com/users";
@@ -11,10 +11,7 @@ struct CreateUser {
 
 #[tokio::main]
 async fn main() -> leyline::Result<()> {
-    let session = Session::builder()
-        .browser(Browser::Chrome147)
-        .platform(Platform::Linux)
-        .build()?;
+    let session = Session::builder().build()?;
 
     let payload = CreateUser {
         name: "ada",
@@ -24,6 +21,6 @@ async fn main() -> leyline::Result<()> {
     let resp = session.post(URL).json(&payload).send().await?;
 
     println!("status: {}", resp.status());
-    println!("body:   {}", resp.text().await.unwrap());
+    println!("body:   {}", resp.text().await?);
     Ok(())
 }

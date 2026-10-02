@@ -3,8 +3,10 @@ use std::sync::Arc;
 use bytes::Bytes;
 use http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 
+use crate::h2::client::H2Client;
 use crate::h2::config::H2Config;
-use crate::pool::Pool;
+use crate::pool::h1::{H1Dial, NEGOTIATED_H2};
+use crate::pool::{H1Slot, Negotiated, Opened, Pool, negotiate};
 use crate::profile::preset::HeaderPair;
 use crate::tls::FingerprintConnector;
 
@@ -19,6 +21,7 @@ mod h2;
 #[cfg(feature = "websocket")]
 pub(crate) use h1::h1_error_to_core;
 pub(crate) use h1::send_request_h1;
+use h1::{H1Sent, send_h1_on};
 
 fn status(code: u16) -> Result<StatusCode> {
     StatusCode::from_u16(code)
@@ -75,6 +78,40 @@ pub(crate) struct Prepared<'a> {
     pub(crate) stream_response: bool,
 }
 
+struct Retry<'a> {
+    method: &'a str,
+    url: &'a url::Url,
+    headers: Vec<HeaderPair>,
+    proxy: Option<&'a str>,
+    stream_response: bool,
+}
+
+impl<'a> Prepared<'a> {
+    fn split_replay(&self) -> (Retry<'a>, Option<Body>) {
+        let retry = Retry {
+            method: self.method,
+            url: self.url,
+            headers: self.headers.clone(),
+            proxy: self.proxy,
+            stream_response: self.stream_response,
+        };
+        (retry, self.body.replay())
+    }
+}
+
+impl<'a> Retry<'a> {
+    fn with_body(self, body: Body) -> Prepared<'a> {
+        Prepared {
+            method: self.method,
+            url: self.url,
+            headers: self.headers,
+            body,
+            proxy: self.proxy,
+            stream_response: self.stream_response,
+        }
+    }
+}
+
 #[tracing::instrument(
     name = "transport.auto",
     level = "debug",
@@ -92,45 +129,31 @@ pub(crate) async fn send_request_auto(
     h2_config: &H2Config,
     req: Prepared<'_>,
 ) -> Result<TransportResponse> {
+    let browser = H1Dial::Browser(h2_config);
     if req.url.scheme() == "http" {
-        return Box::pin(send_request_h1(pool, connector, req)).await;
+        return Box::pin(send_request_h1(pool, connector, browser, req)).await;
     }
     let host = req.url.host_str().unwrap_or("").to_string();
     let port = req.url.port_or_known_default().unwrap_or(443);
-    let proxy_key = req.proxy.map(str::to_string);
-    if pool.is_h1_only(&host, port, proxy_key.as_deref()) {
-        return Box::pin(send_request_h1(pool, connector, req)).await;
+    match negotiate(pool, connector, h2_config, &host, port, req.proxy).await? {
+        Negotiated::H2(opened) => {
+            send_h2_or_fall_back(pool, connector, h2_config, req, opened).await
+        }
+        Negotiated::H1(opened) => send_h1_or_upgrade(pool, connector, h2_config, req, opened).await,
     }
-    let Prepared {
-        method,
-        url,
-        headers,
-        body,
-        proxy,
-        stream_response,
-    } = req;
+}
 
-    let replay = body.replay();
-
-    match send_request_h2(
-        pool,
-        connector,
-        h2_config,
-        Prepared {
-            method,
-            url,
-            headers: headers.clone(),
-            body,
-            proxy,
-            stream_response,
-        },
-    )
-    .await
-    {
-        Ok(resp) => Ok(resp),
+async fn send_h2_or_fall_back(
+    pool: &Arc<Pool>,
+    connector: &FingerprintConnector,
+    h2_config: &H2Config,
+    req: Prepared<'_>,
+    opened: Opened<H2Client>,
+) -> Result<TransportResponse> {
+    let (retry, replay) = req.split_replay();
+    match send_h2_on(pool, connector, h2_config, req, Some(opened)).await {
         Err(e) if is_h2_alpn_mismatch(&e) => {
             tracing::debug!(error = %e, "H2 ALPN mismatch, falling back to HTTP/1.1");
-            pool.note_h1_only(&host, port, proxy_key.as_deref());
             let Some(body) = replay else {
                 return Err(Error::new(Kind::Request).with_message(
                     "the origin negotiated HTTP/1.1 and a streaming request body cannot be \
@@ -138,22 +161,54 @@ pub(crate) async fn send_request_auto(
                      ProtocolPolicy::Http1",
                 ));
             };
+            let browser = H1Dial::Browser(h2_config);
             Box::pin(send_request_h1(
                 pool,
                 connector,
-                Prepared {
-                    method,
-                    url,
-                    headers,
-                    body,
-                    proxy,
-                    stream_response,
-                },
+                browser,
+                retry.with_body(body),
             ))
             .await
         }
-        Err(e) => Err(e),
+        other => other,
     }
+}
+
+async fn send_h1_or_upgrade(
+    pool: &Arc<Pool>,
+    connector: &FingerprintConnector,
+    h2_config: &H2Config,
+    req: Prepared<'_>,
+    opened: Option<Opened<H1Slot>>,
+) -> Result<TransportResponse> {
+    let (retry, _) = req.split_replay();
+    let browser = H1Dial::Browser(h2_config);
+    match Box::pin(send_h1_on(pool, connector, browser, req, opened)).await? {
+        H1Sent::Done(resp) => Ok(*resp),
+        H1Sent::Upgraded(opened, body) => {
+            if let Some(host) = retry.url.host_str() {
+                let port = retry.url.port_or_known_default().unwrap_or(443);
+                pool.clear_h1_only(host, port, retry.proxy);
+            }
+            send_h2_on(
+                pool,
+                connector,
+                h2_config,
+                retry.with_body(body),
+                Some(opened),
+            )
+            .await
+        }
+    }
+}
+
+pub(crate) async fn send_request_h2(
+    pool: &Arc<Pool>,
+    connector: &FingerprintConnector,
+    h2_config: &H2Config,
+    req: Prepared<'_>,
+) -> Result<TransportResponse> {
+    send_h2_on(pool, connector, h2_config, req, None).await
 }
 
 #[tracing::instrument(
@@ -162,11 +217,12 @@ pub(crate) async fn send_request_auto(
     skip_all,
     fields(http.method = req.method, http.host = req.url.host_str().unwrap_or(""))
 )]
-pub(crate) async fn send_request_h2(
+async fn send_h2_on(
     pool: &Arc<Pool>,
     connector: &FingerprintConnector,
     h2_config: &H2Config,
     req: Prepared<'_>,
+    opened: Option<Opened<H2Client>>,
 ) -> Result<TransportResponse> {
     let Prepared {
         method,
@@ -187,6 +243,7 @@ pub(crate) async fn send_request_h2(
         body,
         proxy,
         stream_response,
+        opened,
     )
     .await?;
     h2::transport_response(resp, tls, timing, url)
@@ -222,7 +279,7 @@ pub(crate) fn strip_connection_specific_headers(headers: &mut Vec<HeaderPair>) -
         }
         match name.as_ref() {
             "transfer-encoding" | "connection" | "keep-alive" | "proxy-connection" | "upgrade"
-            | "http2-settings" => false,
+            | "http2-settings" | "host" => false,
             "te" => value.eq_ignore_ascii_case("trailers"),
             _ => true,
         }
@@ -264,7 +321,7 @@ pub(crate) async fn send_request_h3(
         .iter()
         .map(|(k, v)| (k.to_string(), v.to_string()))
         .collect();
-    let (resp, tls) = crate::pool::send_request_h3_pooled(
+    let (resp, tls, timing) = crate::pool::send_request_h3_pooled(
         pool,
         target,
         host,
@@ -294,12 +351,12 @@ pub(crate) async fn send_request_h3(
         final_url: url.clone(),
         version: HttpVersion::Http3,
         tls: Some(tls),
-        timing: crate::core::ResponseTiming::default(),
+        timing,
     })
 }
 
 pub(crate) fn is_h2_alpn_mismatch(err: &Error) -> bool {
-    err.alpn().is_some()
+    err.alpn().is_some_and(|alpn| alpn != NEGOTIATED_H2)
 }
 
 #[cfg(test)]

@@ -7,6 +7,11 @@ use serde::Deserialize;
 
 use crate::{BuildResult, is_ident};
 
+#[path = "../src/profile/browser/digest.rs"]
+mod digest;
+
+const SHARED_DATA: &[&str] = &["bare.toml", "brands.toml", "headers.toml", "platforms.toml"];
+
 #[derive(Deserialize)]
 pub(crate) struct Families {
     family: Vec<FamilyRow>,
@@ -67,9 +72,30 @@ pub(crate) struct Row {
     pub(crate) meta: Meta,
     pub(crate) path: String,
     family: usize,
+    digest: u64,
+}
+
+fn shared_data(root: &Path) -> BuildResult<Vec<String>> {
+    println!("cargo:rerun-if-changed=src/profile/browser/digest.rs");
+    SHARED_DATA
+        .iter()
+        .map(|name| Ok(fs::read_to_string(root.join(name))?))
+        .collect()
+}
+
+fn family_id(family: &FamilyRow) -> String {
+    family.label.to_ascii_lowercase().replace(' ', "-")
+}
+
+fn is_id(id: &str) -> bool {
+    !id.is_empty()
+        && id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
 pub(crate) fn load_rows(root: &Path, families: &Families) -> BuildResult<Vec<Row>> {
+    let shared = shared_data(root)?;
     let mut rows = Vec::new();
     for dir in sorted(root)? {
         if !dir.is_dir() {
@@ -99,7 +125,15 @@ pub(crate) fn load_rows(root: &Path, families: &Families) -> BuildResult<Vec<Row
                 .to_str()
                 .ok_or("profile path is not UTF-8")?
                 .replace('\\', "/");
-            rows.push(Row { meta, path, family });
+            let mut parts: Vec<&[u8]> = shared.iter().map(String::as_bytes).collect();
+            parts.push(text.as_bytes());
+            let digest = digest::digest(&parts);
+            rows.push(Row {
+                meta,
+                path,
+                family,
+                digest,
+            });
         }
     }
     rows.sort_by(|a, b| {
@@ -139,6 +173,13 @@ pub(crate) fn check_unique(rows: &[Row], families: &Families) -> BuildResult<()>
             )
             .into());
         }
+        if !is_id(&row.meta.browser) {
+            return Err(format!(
+                "{}: browser {:?} is not a lowercase id",
+                row.path, row.meta.browser
+            )
+            .into());
+        }
         if !keys.insert((row.meta.browser.as_str(), row.meta.version)) {
             return Err(format!(
                 "{}: {} {} is declared twice",
@@ -148,8 +189,14 @@ pub(crate) fn check_unique(rows: &[Row], families: &Families) -> BuildResult<()>
         }
     }
     let mut family_names = HashSet::new();
+    let mut family_ids = HashSet::new();
     for family in &families.family {
-        if !is_ident(&family.variant) || !family_names.insert(family.variant.as_str()) {
+        let id = family_id(family);
+        if !is_ident(&family.variant)
+            || !family_names.insert(family.variant.as_str())
+            || !is_id(&id)
+            || !family_ids.insert(id)
+        {
             return Err(format!(
                 "families.toml: bad or repeated variant {:?}",
                 family.variant
@@ -222,6 +269,18 @@ pub(crate) fn render(rows: &[Row], families: &Families) -> BuildResult<String> {
         "const FAMILY_LABELS: &[&str] = &[{}];",
         labels.join(", ")
     )?;
+    let ids: Vec<String> = families
+        .family
+        .iter()
+        .map(|f| format!("{:?}", family_id(f)))
+        .collect();
+    writeln!(out, "const FAMILY_IDS: &[&str] = &[{}];", ids.join(", "))?;
+    let all: Vec<String> = families
+        .family
+        .iter()
+        .map(|f| format!("Family::{}", f.variant))
+        .collect();
+    writeln!(out, "const FAMILY_ALL: &[Family] = &[{}];", all.join(", "))?;
     let redirect_chain: Vec<String> = families
         .family
         .iter()
@@ -288,15 +347,18 @@ pub(crate) fn render(rows: &[Row], families: &Families) -> BuildResult<String> {
         }
         writeln!(
             out,
-            "    Entry {{ family: Family::{}, key: {:?}, version: {}, name: {:?}, hello: Browser::{}, \
-             platforms: &[{}], \
+            "    Entry {{ family: Family::{}, key: {:?}, version: {}, id: \"{}-{}\", name: {:?}, \
+             hello: Browser::{}, platforms: &[{}], digest: {:#018x}, \
              source: include_str!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/profiles/{}\")) }},",
             families.family[row.family].variant,
+            row.meta.browser,
+            row.meta.version,
             row.meta.browser,
             row.meta.version,
             row.meta.name,
             rep.meta.variant,
             platforms.join(", "),
+            row.digest,
             row.path,
         )?;
     }

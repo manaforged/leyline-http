@@ -102,6 +102,10 @@ impl FingerprintConnector {
         Ok(next)
     }
 
+    pub(crate) fn session_cache(&self) -> &SessionCache {
+        &self.session_cache
+    }
+
     #[cfg(feature = "http3")]
     pub(crate) fn resolver(&self) -> &Arc<dyn Resolver> {
         &self.resolver
@@ -147,16 +151,13 @@ impl FingerprintConnector {
         port: u16,
         proxy: Option<&str>,
     ) -> Result<TlsStream, TlsError> {
-        let fut = async {
-            match proxy {
-                Some(proxy_url) => {
-                    crate::tls::proxy::connect_through_proxy(self, host, port, proxy_url, true)
-                        .await
-                }
-                None => self.connect_direct_with_alpn(host, port, None).await,
+        match proxy {
+            Some(proxy_url) => self.connect_via_proxy(host, port, proxy_url, true).await,
+            None => {
+                self.with_timeout(self.connect_direct_with_alpn(host, port, None))
+                    .await
             }
-        };
-        self.with_timeout(fut).await
+        }
     }
 
     pub async fn connect_h1(
@@ -165,19 +166,36 @@ impl FingerprintConnector {
         port: u16,
         proxy: Option<&str>,
     ) -> Result<TlsStream, TlsError> {
-        let fut = async {
-            match proxy {
-                Some(proxy_url) => {
-                    crate::tls::proxy::connect_through_proxy(self, host, port, proxy_url, false)
-                        .await
-                }
-                None => {
-                    self.connect_direct_with_alpn(host, port, Some(b"\x08http/1.1"))
-                        .await
-                }
+        match proxy {
+            Some(proxy_url) => self.connect_via_proxy(host, port, proxy_url, false).await,
+            None => {
+                self.with_timeout(self.connect_direct_with_alpn(host, port, Some(b"\x08http/1.1")))
+                    .await
             }
-        };
-        self.with_timeout(fut).await
+        }
+    }
+
+    async fn connect_via_proxy(
+        &self,
+        host: &str,
+        port: u16,
+        proxy_url: &str,
+        include_alps: bool,
+    ) -> Result<TlsStream, TlsError> {
+        let proxy = crate::tls::proxy::parse(proxy_url)?;
+        let started = Instant::now();
+        let tunnel = self
+            .with_timeout(crate::tls::proxy::open_tunnel(self, host, port, &proxy))
+            .await
+            .map_err(TlsError::into_proxy)?;
+        let remaining = self
+            .connect_timeout
+            .map(|budget| budget.saturating_sub(started.elapsed()));
+        let handshake =
+            crate::tls::proxy::handshake(self, tunnel, host, port, &proxy, include_alps);
+        within(remaining, handshake)
+            .await
+            .map_err(|Elapsed| connect_timeout())?
     }
 
     pub(crate) fn tcp_profile(&self) -> &TcpProfile {
@@ -188,12 +206,9 @@ impl FingerprintConnector {
     where
         F: std::future::Future<Output = Result<T, TlsError>>,
     {
-        within(self.connect_timeout, fut).await.map_err(|Elapsed| {
-            TlsError::TcpConnect(std::io::Error::new(
-                std::io::ErrorKind::TimedOut,
-                "connect timeout",
-            ))
-        })?
+        within(self.connect_timeout, fut)
+            .await
+            .map_err(|Elapsed| connect_timeout())?
     }
 
     async fn connect_direct_with_alpn(
@@ -238,6 +253,13 @@ impl FingerprintConnector {
         trace::connect(host, port, false, started.elapsed());
         Ok(tcp_stream)
     }
+}
+
+fn connect_timeout() -> TlsError {
+    TlsError::TcpConnect(std::io::Error::new(
+        std::io::ErrorKind::TimedOut,
+        "connect timeout",
+    ))
 }
 
 impl std::fmt::Debug for FingerprintConnector {

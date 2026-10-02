@@ -6,9 +6,21 @@ use std::time::{Duration, Instant};
 
 use crate::{Error, HttpVersion};
 
+mod body;
+mod fanout;
 mod headers;
+mod metrics;
+mod notes;
+mod summary;
 
+pub(crate) use body::BodyWatch;
+pub use body::{BodyEnd, BodyOutcome};
+pub use fanout::Fanout;
 pub(crate) use headers::masked;
+pub use metrics::{Metrics, MetricsSnapshot};
+pub(crate) use notes::{note_browser, note_proxy, note_tag};
+pub use summary::Summary;
+pub(crate) use summary::{Finish, summary};
 
 #[derive(Debug)]
 #[non_exhaustive]
@@ -109,6 +121,8 @@ pub trait Trace: Send + Sync + 'static {
     fn sent(&self, ev: &Sent<'_>) {}
     fn head(&self, ev: &Head<'_>) {}
     fn done(&self, ev: &Done<'_>) {}
+    fn summary(&self, ev: &Summary<'_>) {}
+    fn body(&self, ev: &BodyEnd<'_>) {}
 }
 
 #[derive(Clone)]
@@ -116,6 +130,8 @@ pub(crate) struct Ctx {
     hook: Arc<dyn Trace>,
     id: u64,
     start: Instant,
+    root: (u64, Instant),
+    notes: notes::SharedNotes,
 }
 
 tokio::task_local! {
@@ -130,10 +146,15 @@ where
 {
     match hook {
         Some(hook) => {
+            let id = NEXT.fetch_add(1, Ordering::Relaxed);
+            let start = Instant::now();
+            let root = CURRENT.try_with(|outer| outer.root).unwrap_or((id, start));
             let ctx = Ctx {
                 hook: Arc::clone(hook),
-                id: NEXT.fetch_add(1, Ordering::Relaxed),
-                start: Instant::now(),
+                id,
+                start,
+                root,
+                notes: notes::SharedNotes::default(),
             };
             CURRENT.scope(ctx, fut).await
         }
@@ -286,6 +307,14 @@ impl Trace for TracingTrace {
             }
         }
     }
+
+    fn summary(&self, ev: &Summary<'_>) {
+        summary::render(ev);
+    }
+
+    fn body(&self, ev: &BodyEnd<'_>) {
+        body::render(ev);
+    }
 }
 
 fn ms(d: Duration) -> u32 {
@@ -315,6 +344,14 @@ impl<T: Trace> Trace for Arc<T> {
 
     fn done(&self, ev: &Done<'_>) {
         T::done(self, ev);
+    }
+
+    fn summary(&self, ev: &Summary<'_>) {
+        T::summary(self, ev);
+    }
+
+    fn body(&self, ev: &BodyEnd<'_>) {
+        T::body(self, ev);
     }
 }
 

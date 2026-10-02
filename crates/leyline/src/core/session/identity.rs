@@ -1,4 +1,5 @@
 use crate::core::error::{Error, Kind, Result};
+use crate::profile::browser::digest;
 use crate::profile::{Browser, ChromiumBrand, Family, Platform};
 
 use super::builder::derive::{
@@ -6,11 +7,52 @@ use super::builder::derive::{
 };
 use super::{Session, SessionInner};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(try_from = "SavedIdentity", into = "SavedIdentity")]
 pub struct Identity {
     http: Browser,
     tls: Browser,
     platform: Platform,
+    brand: Option<ChromiumBrand>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct SavedIdentity {
+    http: Browser,
+    tls: Browser,
+    platform: Platform,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    brand: Option<ChromiumBrand>,
+}
+
+impl From<Identity> for SavedIdentity {
+    fn from(id: Identity) -> Self {
+        Self {
+            http: id.http,
+            tls: id.tls,
+            platform: id.platform,
+            brand: id.brand,
+        }
+    }
+}
+
+impl TryFrom<SavedIdentity> for Identity {
+    type Error = Error;
+
+    fn try_from(saved: SavedIdentity) -> Result<Self> {
+        if saved.http.family() != saved.tls.family() {
+            return Err(Error::new(Kind::Config).with_message(format!(
+                "saved identity tls {} is not the same family as {}",
+                saved.tls, saved.http
+            )));
+        }
+        Ok(Self {
+            http: saved.http,
+            tls: saved.tls,
+            platform: saved.platform,
+            brand: saved.brand,
+        })
+    }
 }
 
 impl Identity {
@@ -20,7 +62,21 @@ impl Identity {
             http: browser,
             tls: browser.hello_rep(),
             platform,
+            brand: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_brand(self, brand: ChromiumBrand) -> Self {
+        Self {
+            brand: Some(brand),
+            ..self
+        }
+    }
+
+    #[must_use]
+    pub fn brand(self) -> Option<ChromiumBrand> {
+        self.brand
     }
 
     pub fn rotate_tls(self, tls: Browser) -> Result<Self> {
@@ -100,12 +156,36 @@ pub struct SessionIdentity {
     platform: Platform,
     brand: Option<ChromiumBrand>,
     user_agent: String,
+    saved: Option<Identity>,
+    profile_id: Option<String>,
+    profile_toml: Option<std::sync::Arc<str>>,
+    languages: Option<Vec<String>>,
 }
 
 impl SessionIdentity {
     #[must_use]
+    pub fn to_identity(&self) -> Option<Identity> {
+        self.saved
+    }
+
+    #[must_use]
+    pub fn profile_id(&self) -> Option<&str> {
+        self.profile_id.as_deref()
+    }
+
+    #[must_use]
     pub fn identity(&self) -> Option<Identity> {
         self.identity
+    }
+
+    #[must_use]
+    pub fn export_profile(&self) -> Option<String> {
+        self.profile_toml.as_deref().map(str::to_owned)
+    }
+
+    #[must_use]
+    pub fn languages(&self) -> Option<&[String]> {
+        self.languages.as_deref()
     }
 
     #[must_use]
@@ -140,12 +220,41 @@ impl Session {
                 .map(|_| ChromiumBrand::Chrome),
             other => Some(other),
         };
+        let saved = self.saved_identity(brand);
+        let profile_toml = self
+            .inner
+            .impersonates
+            .then(|| self.inner.profile.source())
+            .flatten()
+            .map(std::sync::Arc::from);
+        let profile_id = match (saved, profile_toml.as_deref()) {
+            (Some(id), _) => Some(profile_id(id, self.inner.brand)),
+            (None, Some(source)) => Some(source_profile_id(
+                source,
+                self.inner.platform,
+                self.inner.brand,
+            )),
+            (None, None) => None,
+        };
         SessionIdentity {
             identity: self.inner.identity,
             platform: self.inner.platform,
             brand,
             user_agent: self.inner.user_agent.clone(),
+            saved,
+            profile_id,
+            profile_toml,
+            languages: self.inner.languages.clone(),
         }
+    }
+
+    fn saved_identity(&self, brand: Option<ChromiumBrand>) -> Option<Identity> {
+        let identity = self.inner.identity?;
+        Some(Identity {
+            tls: self.inner.browser?,
+            brand,
+            ..identity
+        })
     }
 
     pub fn with_identity(&self, identity: Identity) -> Result<Self> {
@@ -155,27 +264,68 @@ impl Session {
         }
         let mut session = self.clone();
         let inner = std::sync::Arc::make_mut(&mut session.inner);
+        let brand = identity.brand().unwrap_or(inner.brand);
         let derived = derive_identity(IdentityInputs {
             source: IdentitySource::Browser {
                 tls: identity.tls(),
                 http: identity.http(),
             },
             platform: identity.platform(),
-            brand: inner.brand,
+            brand,
             compression: inner.compression,
             #[cfg(feature = "http3")]
             h3_required: inner.protocol_policy.requires_h3(),
             tcp: inner.connector.tcp_profile(),
             audit: inner.audit_tls.is_some(),
             default_headers: &inner.default_headers,
+            languages: inner.languages.as_deref(),
         })?;
         inner.connector = inner
             .connector
             .with_profile(&derived.profile)
             .map_err(Error::from)?;
-        inner.pool = std::sync::Arc::new(inner.pool.fresh());
+        inner.pool = std::sync::Arc::new(inner.pool.shared_view(profile_hash(identity, brand)));
         inner.adopt(derived);
+        inner.brand = brand;
         Ok(session)
+    }
+}
+
+fn profile_id(identity: Identity, brand: ChromiumBrand) -> String {
+    let hash = profile_hash(identity, brand);
+    format!("{hash:016x}")
+}
+
+fn profile_hash(identity: Identity, brand: ChromiumBrand) -> u64 {
+    let http = identity.http.profile_digest().to_le_bytes();
+    let tls = identity.tls.profile_digest().to_le_bytes();
+    digest(&[
+        &http,
+        &tls,
+        identity.platform.id().as_bytes(),
+        brand.id().as_bytes(),
+    ])
+}
+
+fn source_profile_id(source: &str, platform: Platform, brand: ChromiumBrand) -> String {
+    match Browser::matching_source(source) {
+        Some(browser) => profile_id(
+            Identity {
+                http: browser,
+                tls: browser,
+                platform,
+                brand: None,
+            },
+            brand,
+        ),
+        None => format!(
+            "{:016x}",
+            digest(&[
+                source.as_bytes(),
+                platform.id().as_bytes(),
+                brand.id().as_bytes()
+            ])
+        ),
     }
 }
 

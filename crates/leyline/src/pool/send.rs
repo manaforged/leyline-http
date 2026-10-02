@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use crate::HttpVersion;
 use crate::core::Body;
-use crate::h2::client::{H2ResponseEx, Head};
+use crate::h2::client::{H2Client, H2ResponseEx, Head};
 use crate::h2::config::H2Config;
 use crate::h2::connection::{HeaderPair, PseudoHeaders};
 use crate::h2::{ErrorCode, H2Error};
@@ -14,12 +14,12 @@ use crate::trace;
 use crate::util::is_idempotent;
 use crate::{Error, Kind, ResponseTiming};
 
+use super::checkout_live_h2;
 use super::connect::open_h2;
 #[cfg(feature = "http3")]
 use super::connect::{H3Target, open_h3};
 use super::pool::Pool;
-use super::types::{TlsInfo, Transport};
-use super::{checkout_live_h2, make_key};
+use super::types::{Opened, PoolKey, TlsInfo, Transport};
 
 #[cfg(feature = "http3")]
 pub(crate) struct H3Request<'a> {
@@ -39,8 +39,9 @@ pub(crate) async fn send_request_h3_pooled(
     request: H3Request<'_>,
     body: Body,
     stream_response: bool,
-) -> Result<(H3ResponseParts, TlsInfo), Error> {
-    let key = make_key("https", host, port, request.proxy, Transport::Quic);
+) -> Result<(H3ResponseParts, TlsInfo, ResponseTiming), Error> {
+    let request_started = Instant::now();
+    let key = pool.key("https", host, port, request.proxy, Transport::Quic);
 
     pool.evict_idle();
 
@@ -78,7 +79,13 @@ pub(crate) async fn send_request_h3_pooled(
                     started.elapsed(),
                     resp.headers.iter().cloned(),
                 );
-                return Ok((resp, tls));
+                let timing = ResponseTiming {
+                    reused: true,
+                    connect_ms: None,
+                    send_ms: ResponseTiming::millis(started),
+                    total_ms: ResponseTiming::millis(request_started),
+                };
+                return Ok((resp, tls, timing));
             }
             Err(e) if !e.is_retryable() => return Err(Error::from(e)),
             Err(e) => {
@@ -100,6 +107,7 @@ pub(crate) async fn send_request_h3_pooled(
 
     let connect_started = Instant::now();
     let (handle, tls) = open_h3(pool, target, key).await?;
+    let connect_ms = ResponseTiming::millis(connect_started);
     trace::connect(host, port, false, connect_started.elapsed());
     if trace::on() {
         trace::tls(
@@ -138,7 +146,16 @@ pub(crate) async fn send_request_h3_pooled(
         started.elapsed(),
         resp.headers.iter().cloned(),
     );
-    Ok((resp, tls))
+    Ok((
+        resp,
+        tls,
+        ResponseTiming {
+            reused: false,
+            connect_ms: Some(connect_ms),
+            send_ms: ResponseTiming::millis(started),
+            total_ms: ResponseTiming::millis(request_started),
+        },
+    ))
 }
 
 #[tracing::instrument(
@@ -164,136 +181,172 @@ pub(crate) async fn send_request(
     body: Body,
     proxy: Option<&str>,
     stream_response: bool,
+    opened: Option<Opened<H2Client>>,
 ) -> Result<(H2ResponseEx, TlsInfo, ResponseTiming), Error> {
-    let started = Instant::now();
+    let started = opened.as_ref().map_or_else(Instant::now, |o| o.started);
     let head = Arc::new(Head { pseudo, headers });
-    let pseudo = &head.pseudo;
-    let host = &pseudo.authority;
-    let port = if pseudo.scheme == "https" { 443 } else { 80 };
-
-    let (connect_host, connect_port) = parse_authority(host, port);
-
-    let key = make_key(
-        &pseudo.scheme,
-        connect_host,
-        connect_port,
-        proxy,
-        Transport::Tcp,
-    );
+    let default_port = if head.pseudo.scheme == "https" {
+        443
+    } else {
+        80
+    };
+    let (host, port) = parse_authority(&head.pseudo.authority, default_port);
+    let key = pool.key(&head.pseudo.scheme, host, port, proxy, Transport::Tcp);
 
     pool.evict_idle();
 
-    let replay = body.replay();
-    let mut body = Some(body);
-
-    if let Some((handle, tls)) = checkout_live_h2(pool, &key).await {
-        trace::connect(connect_host, connect_port, true, Duration::ZERO);
-        let pooled_body = body.take().unwrap_or_default().into_h2();
-        let send_started = Instant::now();
-        trace::sent(
-            connect_host,
-            pseudo.method.as_str(),
-            pseudo.path.as_str(),
-            HttpVersion::Http2,
-            Duration::ZERO,
-        );
-        match handle
-            .send_shared(Arc::clone(&head), pooled_body, stream_response)
-            .await
-        {
-            Ok(resp) => {
-                tracing::Span::current().record("pool.hit", true);
-                let send_ms = ResponseTiming::millis(send_started);
-                trace::head(
-                    connect_host,
-                    resp.status,
-                    HttpVersion::Http2,
-                    send_started.elapsed(),
-                    resp.headers.iter().cloned(),
-                );
-                let timing = ResponseTiming {
-                    reused: true,
-                    connect_ms: None,
-                    send_ms,
-                    total_ms: ResponseTiming::millis(started),
-                };
-                return Ok((resp, tls, timing));
-            }
-            Err(e) => {
-                if !e.connection_failed() {
-                    return Err(Error::from(e));
-                }
-                tracing::info!(
-                    target: "leyline::pool",
-                    host = %key.host,
-                    port = key.port,
-                    proxied = key.proxy.is_some(),
-                    error = %e,
-                    "pool stale hit -- pooled h2 connection failed mid-request, opening fresh"
-                );
-                pool.invalidate(&key);
-                let Some(replay) = replay else {
-                    return Err(not_resendable(e));
-                };
-                let refused = matches!(
-                    &e,
-                    H2Error::Stream {
-                        code: ErrorCode::RefusedStream,
-                        ..
-                    }
-                );
-                if !refused && !is_idempotent(&pseudo.method) {
-                    return Err(Error::from(e));
-                }
-                body = Some(replay);
-            }
-        }
-    }
-    tracing::Span::current().record("pool.hit", false);
+    let opened = match opened {
+        Some(opened) => Some(opened),
+        None => checkout_live_h2(pool, &key).await.map(Opened::pooled),
+    };
+    let ctx = H2Send {
+        pool,
+        head: &head,
+        key: &key,
+        host,
+        port,
+        stream_response,
+        started,
+    };
+    let body = match opened {
+        Some(opened) if opened.connect_ms.is_some() => return send_fresh(&ctx, opened, body).await,
+        Some(opened) => match send_pooled(&ctx, opened, body).await? {
+            PooledSend::Done(done) => return Ok(done),
+            PooledSend::Retry(body) => body,
+        },
+        None => body,
+    };
 
     let connect_started = Instant::now();
-    let (handle, tls) = open_h2(pool, connector, h2_config, key.clone()).await?;
-    let connect_ms = ResponseTiming::millis(connect_started);
+    let fresh = open_h2(pool, connector, h2_config, key.clone()).await?;
+    send_fresh(&ctx, Opened::fresh(fresh, connect_started), body).await
+}
 
-    let send_started = Instant::now();
-    let traced_host = trace::on().then(|| connect_host.to_string());
+struct H2Send<'a> {
+    pool: &'a Arc<Pool>,
+    head: &'a Arc<Head>,
+    key: &'a PoolKey,
+    host: &'a str,
+    port: u16,
+    stream_response: bool,
+    started: Instant,
+}
+
+enum PooledSend {
+    Done((H2ResponseEx, TlsInfo, ResponseTiming)),
+    Retry(Body),
+}
+
+fn trace_sent(ctx: &H2Send<'_>) {
     trace::sent(
-        connect_host,
-        pseudo.method.as_str(),
-        pseudo.path.as_str(),
+        ctx.host,
+        ctx.head.pseudo.method.as_str(),
+        ctx.head.pseudo.path.as_str(),
         HttpVersion::Http2,
         Duration::ZERO,
     );
-    let body = body.unwrap_or_default().into_h2();
-    let resp = match handle
-        .send_shared(Arc::clone(&head), body, stream_response)
+}
+
+async fn send_pooled(
+    ctx: &H2Send<'_>,
+    opened: Opened<H2Client>,
+    body: Body,
+) -> Result<PooledSend, Error> {
+    let replay = body.replay();
+    trace::connect(ctx.host, ctx.port, true, Duration::ZERO);
+    let send_started = Instant::now();
+    trace_sent(ctx);
+    match opened
+        .conn
+        .send_shared(Arc::clone(ctx.head), body.into_h2(), ctx.stream_response)
         .await
     {
-        Ok(r) => {
+        Ok(resp) => {
+            tracing::Span::current().record("pool.hit", true);
+            let send_ms = ResponseTiming::millis(send_started);
             trace::head(
-                traced_host.as_deref().unwrap_or_default(),
-                r.status,
+                ctx.host,
+                resp.status,
                 HttpVersion::Http2,
                 send_started.elapsed(),
-                r.headers.iter().cloned(),
+                resp.headers.iter().cloned(),
             );
-            r
+            let timing = ResponseTiming {
+                reused: true,
+                connect_ms: None,
+                send_ms,
+                total_ms: ResponseTiming::millis(ctx.started),
+            };
+            Ok(PooledSend::Done((resp, opened.tls, timing)))
         }
+        Err(e) => resend_after_failure(ctx, e, replay).map(PooledSend::Retry),
+    }
+}
+
+fn resend_after_failure(ctx: &H2Send<'_>, e: H2Error, replay: Option<Body>) -> Result<Body, Error> {
+    if !e.connection_failed() {
+        return Err(Error::from(e));
+    }
+    tracing::info!(
+        target: "leyline::pool",
+        host = %ctx.key.host,
+        port = ctx.key.port,
+        proxied = ctx.key.proxy.is_some(),
+        error = %e,
+        "pool stale hit -- pooled h2 connection failed mid-request, opening fresh"
+    );
+    ctx.pool.invalidate(ctx.key);
+    let Some(replay) = replay else {
+        return Err(not_resendable(e));
+    };
+    let refused = matches!(
+        &e,
+        H2Error::Stream {
+            code: ErrorCode::RefusedStream,
+            ..
+        }
+    );
+    if !refused && !is_idempotent(&ctx.head.pseudo.method) {
+        return Err(Error::from(e));
+    }
+    Ok(replay)
+}
+
+async fn send_fresh(
+    ctx: &H2Send<'_>,
+    opened: Opened<H2Client>,
+    body: Body,
+) -> Result<(H2ResponseEx, TlsInfo, ResponseTiming), Error> {
+    tracing::Span::current().record("pool.hit", false);
+    let send_started = Instant::now();
+    trace_sent(ctx);
+    let resp = match opened
+        .conn
+        .send_shared(Arc::clone(ctx.head), body.into_h2(), ctx.stream_response)
+        .await
+    {
+        Ok(r) => r,
         Err(e) => {
             if e.connection_failed() {
-                pool.invalidate(&key);
+                ctx.pool.invalidate(ctx.key);
             }
             return Err(Error::from(e));
         }
     };
-
+    trace::head(
+        ctx.host,
+        resp.status,
+        HttpVersion::Http2,
+        send_started.elapsed(),
+        resp.headers.iter().cloned(),
+    );
     let timing = ResponseTiming {
         reused: false,
-        connect_ms: Some(connect_ms),
+        connect_ms: opened.connect_ms,
         send_ms: ResponseTiming::millis(send_started),
-        total_ms: ResponseTiming::millis(started),
+        total_ms: ResponseTiming::millis(ctx.started),
     };
-    Ok((resp, tls, timing))
+    Ok((resp, opened.tls, timing))
 }
 
 pub(crate) fn not_resendable(cause: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> Error {

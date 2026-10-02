@@ -84,6 +84,7 @@ where
     let (tx, rx) = mpsc::channel(COMMAND_CHANNEL_CAPACITY);
     let (ping_tx, ping_rx) = mpsc::channel(PING_CHANNEL_CAPACITY);
     let closed = Arc::new(AtomicBool::new(false));
+    let open_streams = Arc::new(std::sync::atomic::AtomicUsize::new(0));
 
     let (body_chunk_tx, body_chunk_rx) = mpsc::channel(STREAM_REQ_BODY_CAPACITY * 4);
 
@@ -97,7 +98,7 @@ where
         peer_snapshot: snapshot.clone(),
         conn_send_window: initial_send_window,
         conn_recv_window: config.initial_connection_window_size as i64,
-        streams: super::stream_map::StreamMap::new(),
+        streams: super::stream_map::StreamMap::new(Arc::clone(&open_streams)),
         next_stream_id: 1,
         buffered_pending: VecDeque::new(),
         rst_flood: RstFloodDetector::new(
@@ -136,6 +137,7 @@ where
         tx,
         ping_tx,
         closed,
+        open_streams,
         #[cfg(feature = "websocket")]
         peer_settings: snapshot,
     })

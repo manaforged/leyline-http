@@ -1,5 +1,5 @@
 #![forbid(unsafe_code)]
-pub(crate) fn redact(raw: &str) -> String {
+pub fn redact(raw: &str) -> String {
     let Ok(mut parsed) = url::Url::parse(raw) else {
         return mask_userinfo(&mask_query(raw));
     };
@@ -90,6 +90,17 @@ pub(crate) fn lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, 
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+const FAR_FUTURE: std::time::Duration = std::time::Duration::from_secs(100 * 365 * 24 * 3600);
+
+pub(crate) fn saturating_after(
+    now: std::time::Instant,
+    after: std::time::Duration,
+) -> std::time::Instant {
+    now.checked_add(after)
+        .or_else(|| now.checked_add(FAR_FUTURE.min(after)))
+        .unwrap_or(now)
+}
+
 pub(crate) fn epoch_plus(after: std::time::Duration) -> Option<std::time::SystemTime> {
     std::time::SystemTime::UNIX_EPOCH.checked_add(after)
 }
@@ -165,7 +176,6 @@ pub(crate) fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-#[cfg(feature = "http3")]
 pub(crate) fn delta_seconds(value: &str) -> Option<u64> {
     let value = value.trim();
     if value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) {
@@ -189,6 +199,8 @@ fn hex_val(b: u8) -> Option<u8> {
     }
 }
 
+pub(crate) mod atomic;
+pub(crate) mod autosave;
 pub(crate) mod upload;
 
 #[cfg(test)]

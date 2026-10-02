@@ -22,6 +22,8 @@ pub struct BrowserProfile {
     pub identity: HashMap<String, PlatformIdentity>,
     #[serde(default)]
     pub h3: Option<H3Profile>,
+    #[serde(skip)]
+    source: Option<source::ProfileSource>,
 }
 
 #[expect(
@@ -254,6 +256,7 @@ impl BrowserProfile {
     pub fn from_toml(toml_str: &str) -> Result<Self, ProfileError> {
         let mut profile: Self = toml::from_str(toml_str).map_err(ProfileError::parse)?;
         profile.derive_sec_ch_ua();
+        profile.source = Some(source::ProfileSource::new(toml_str));
         crate::profile::permutation::validate(&profile.tls, false)
             .map_err(|why| ProfileError::parse(format!("{}: {why}", profile.meta.name)))?;
         if let Some(h3) = &profile.h3 {
@@ -302,6 +305,10 @@ impl BrowserProfile {
         fn identity_for(&self, platform: crate::profile::Platform) -> Option<&PlatformIdentity> {
             self.identity.get(platform.identity_key())
         }
+    }
+
+    pub(crate) fn source(&self) -> Option<&str> {
+        self.source.as_ref().map(source::ProfileSource::as_str)
     }
 
     pub fn expected_ja4(&self) -> Option<&str> {
@@ -381,6 +388,8 @@ impl H2Profile {
         }
     }
 }
+
+mod source;
 
 #[cfg(test)]
 mod tests;

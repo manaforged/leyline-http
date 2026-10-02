@@ -8,6 +8,19 @@ use crate::{BuildResult, is_ident};
 
 type Template = Vec<(String, String)>;
 
+const PLACEHOLDERS: [&str; 10] = [
+    "user_agent",
+    "sec_ch_ua",
+    "sec_ch_ua_mobile",
+    "sec_ch_ua_platform",
+    "accept_language",
+    "origin",
+    "referer",
+    "fetch_site",
+    "navigation_site",
+    "navigation_referer",
+];
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Shape {
@@ -39,6 +52,24 @@ fn check_names<'a>(key: &str, names: impl IntoIterator<Item = &'a str>) -> Build
     Ok(())
 }
 
+fn check_placeholders(key: &str, value: &str) -> BuildResult<()> {
+    let mut rest = value;
+    while let Some(start) = rest.find('{') {
+        let tail = &rest[start + 1..];
+        let end = tail.find('}').ok_or_else(|| {
+            format!("headers.toml: {key} has an unclosed placeholder in {value:?}")
+        })?;
+        let name = &tail[..end];
+        if !PLACEHOLDERS.contains(&name) {
+            return Err(
+                format!("headers.toml: {key} has an unknown placeholder {{{name}}}").into(),
+            );
+        }
+        rest = &tail[end + 1..];
+    }
+    Ok(())
+}
+
 fn check_fields(key: &str, shape: &Shape) -> BuildResult<()> {
     let templates = shape
         .fallback
@@ -47,6 +78,9 @@ fn check_fields(key: &str, shape: &Shape) -> BuildResult<()> {
         .chain(std::iter::once(&shape.append));
     for template in templates {
         check_names(key, template.iter().map(|(name, _)| name.as_str()))?;
+        for (_, value) in template {
+            check_placeholders(key, value)?;
+        }
     }
     check_names(key, shape.order.iter().flatten().map(String::as_str))
 }

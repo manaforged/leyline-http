@@ -273,5 +273,5 @@ where
 }
 
 fn body_too_large(limit: usize) -> H1PooledError {
-    H1PooledError::Io(BodyLimit(limit).into_io())
+    H1PooledError::Io(BodyLimit::session(limit).into_io())
 }

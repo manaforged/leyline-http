@@ -28,7 +28,7 @@ pub struct Cookie {
     pub expires: Option<SystemTime>,
     #[serde(with = "systime_ms")]
     pub creation_time: SystemTime,
-    #[serde(skip, default = "SystemTime::now")]
+    #[serde(with = "systime_ms", default = "SystemTime::now")]
     pub(crate) last_access: SystemTime,
     pub host_only: bool,
 }

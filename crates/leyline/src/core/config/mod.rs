@@ -1,6 +1,7 @@
 mod compression;
 mod dns;
 mod host;
+mod host_limits;
 mod pool;
 mod proxy;
 mod redirect;
@@ -11,6 +12,8 @@ mod websocket;
 pub use compression::CompressionConfig;
 pub(crate) use compression::{DEFAULT_MAX_BODY_SIZE, DEFAULT_MAX_HEADER_LIST_BYTES};
 pub use dns::DnsConfig;
+pub use host_limits::{HostLimits, HostStats};
+pub(crate) use host_limits::{HostPass, Origin};
 pub use pool::PoolConfig;
 pub use proxy::{NoProxy, ProxyConfig, ProxyRule, ProxyUrl};
 pub use redirect::{RedirectAction, RedirectAttempt, RedirectPolicy};

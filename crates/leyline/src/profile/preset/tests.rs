@@ -18,6 +18,8 @@ fn ctx() -> HeaderContext<'static> {
         origin: "https://x.com",
         referer: "https://x.com/",
         fetch_site: "same-origin",
+        navigation_site: "none",
+        navigation_referer: "",
     }
 }
 

@@ -24,7 +24,6 @@ impl<K: Eq + Hash + Clone> ExpiringSet<K> {
         self.entries.insert(key, expiry);
     }
 
-    #[cfg(feature = "http3")]
     pub(crate) fn remove(&mut self, key: &K) {
         self.entries.remove(key);
     }
@@ -38,6 +37,13 @@ impl<K: Eq + Hash + Clone> ExpiringSet<K> {
             }
             None => false,
         }
+    }
+
+    pub(crate) fn live(&self, now: SystemTime) -> impl Iterator<Item = (&K, SystemTime)> {
+        self.entries
+            .iter()
+            .filter(move |(_, expiry)| **expiry > now)
+            .map(|(key, expiry)| (key, *expiry))
     }
 
     fn make_room(&mut self, now: SystemTime) {

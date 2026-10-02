@@ -38,6 +38,11 @@ fn store(ssl: &mut SslRef, session: SslSession, index: Index<Ssl, Slot>) {
     }
 }
 
+fn fresh(der: &[u8], now_secs: u64) -> bool {
+    SslSession::from_der(der)
+        .is_ok_and(|session| session.time().saturating_add(u64::from(session.timeout())) > now_secs)
+}
+
 impl SessionCache {
     pub(crate) fn new() -> Self {
         Self(Arc::new(Mutex::new(LruCache::new(CAPACITY))))
@@ -54,6 +59,24 @@ impl SessionCache {
             .set_session_cache_mode(SslSessionCacheMode::CLIENT | SslSessionCacheMode::NO_INTERNAL);
         builder.set_new_session_callback(move |ssl, session| store(ssl, session, index));
         Ok(())
+    }
+
+    pub(crate) fn export(&self, now_secs: u64) -> Vec<(String, Vec<u8>)> {
+        let cache = lock(&self.0);
+        let mut entries: Vec<(String, Vec<u8>)> = cache
+            .iter()
+            .filter(|(_, der)| fresh(der, now_secs))
+            .map(|(key, der)| (key.clone(), der.clone()))
+            .collect();
+        entries.reverse();
+        entries
+    }
+
+    pub(crate) fn import(&self, entries: &[(String, Vec<u8>)], now_secs: u64) {
+        let mut cache = lock(&self.0);
+        for (key, der) in entries.iter().filter(|(_, der)| fresh(der, now_secs)) {
+            cache.put(key.clone(), der.clone());
+        }
     }
 
     pub(crate) fn attach(&self, ssl: &mut Ssl, key: &str) -> Result<(), TlsError> {

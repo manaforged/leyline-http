@@ -287,3 +287,19 @@ fn fail_all_answers_queued_commands_as_not_sent() {
     let err = queued.blocking_recv().unwrap().unwrap_err();
     assert!(err.is_retryable(), "{}", err.message());
 }
+
+#[test]
+fn a_queued_request_whose_caller_left_is_cancelled() {
+    let (resp_tx, resp_rx) = oneshot::channel();
+    let cmd = H3Command::Request {
+        headers: Vec::new(),
+        body: None,
+        body_stream: None,
+        stream_body_tx: None,
+        retried: false,
+        resp_tx,
+    };
+    assert!(!command_is_cancelled(&cmd));
+    drop(resp_rx);
+    assert!(command_is_cancelled(&cmd));
+}

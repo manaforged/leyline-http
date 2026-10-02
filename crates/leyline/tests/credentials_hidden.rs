@@ -28,7 +28,7 @@ fn session_builder_debug_hides_the_proxy_password() {
 
 #[test]
 fn request_builder_debug_hides_credentials() {
-    let session = Session::new();
+    let session = Session::browser(leyline::Browser::default());
     let request = session
         .get("https://example.com/")
         .bearer_auth(SECRET)
@@ -40,12 +40,12 @@ fn request_builder_debug_hides_credentials() {
 #[test]
 fn proxy_url_shows_the_exit_without_its_password() {
     let raw = format!("http://user:{SECRET}@127.0.0.1:9000");
-    let bound = Session::new().with_proxy(raw.as_str());
+    let bound = Session::browser(leyline::Browser::default()).with_proxy(raw.as_str());
     let exit = bound.proxy_url().unwrap();
     let shown = format!("{exit} {exit:?}");
     assert!(shown.contains("127.0.0.1:9000"), "{shown}");
     assert!(!shown.contains(SECRET), "{shown}");
-    let rebound = Session::new().with_proxy(exit);
+    let rebound = Session::browser(leyline::Browser::default()).with_proxy(exit);
     assert_eq!(rebound.proxy_url().map(String::from), Some(raw));
 }
 
@@ -117,7 +117,8 @@ async fn sent_event_debug_hides_the_query() {
 
 #[test]
 fn a_proxy_url_without_a_scheme_hides_its_password() {
-    let bound = Session::new().with_proxy(format!("user:{SECRET}@127.0.0.1:9000"));
+    let bound = Session::browser(leyline::Browser::default())
+        .with_proxy(format!("user:{SECRET}@127.0.0.1:9000"));
     let exit = bound.proxy_url().unwrap();
     let shown = format!("{exit} {exit:?}");
     assert!(!shown.contains(SECRET), "{shown}");
@@ -125,7 +126,7 @@ fn a_proxy_url_without_a_scheme_hides_its_password() {
 
 #[test]
 fn request_builder_debug_hides_query_values() {
-    let session = Session::new();
+    let session = Session::browser(leyline::Browser::default());
     let request = session
         .get(format!("https://example.com/?token={SECRET}"))
         .query([("key", SECRET)]);
@@ -136,7 +137,7 @@ fn request_builder_debug_hides_query_values() {
 #[cfg(feature = "websocket")]
 #[test]
 fn websocket_builder_debug_hides_query_values() {
-    let session = Session::new();
+    let session = Session::browser(leyline::Browser::default());
     let builder = session.websocket(format!("wss://example.com/socket?token={SECRET}"));
     let shown = format!("{builder:?}");
     assert!(!shown.contains(SECRET), "{shown}");

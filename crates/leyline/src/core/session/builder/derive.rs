@@ -30,6 +30,7 @@ pub(in crate::core::session) struct IdentityInputs<'a> {
     pub tcp: &'a TcpProfile,
     pub audit: bool,
     pub default_headers: &'a [(String, String)],
+    pub languages: Option<&'a [String]>,
 }
 
 pub(in crate::core::session) struct DerivedIdentity {
@@ -102,6 +103,19 @@ fn session_user_agent(default_headers: &[(String, String)]) -> Option<&str> {
         .map(|(_, value)| value.as_str())
 }
 
+fn session_accept_language(
+    languages: Option<&[String]>,
+    style: HeaderStyle,
+    bare: bool,
+    profile_value: Option<String>,
+) -> String {
+    match languages {
+        Some(tags) => crate::profile::languages::accept_language(tags, style),
+        None if bare => String::new(),
+        None => profile_value.unwrap_or_default(),
+    }
+}
+
 fn derive_h2(profile: &BrowserProfile, platform: Platform, max_body: usize) -> Result<H2Config> {
     let resolved = profile.h2.resolve_for_platform(platform)?;
     let mut config = H2Config::from_profile(&resolved)?;
@@ -131,6 +145,7 @@ pub(in crate::core::session) fn derive_identity(
     let platform = input.platform.resolve();
     let brand = input.brand;
     let max_body = input.compression.max_body_size;
+    let bare = matches!(input.source, IdentitySource::Bare);
     let selected = Selected::new(input.source, platform)?;
     let profile = brand.tls_profile(selected.base);
     let http_profile = selected.http_profile.unwrap_or(&*profile);
@@ -156,7 +171,12 @@ pub(in crate::core::session) fn derive_identity(
         user_agent: session_user_agent(input.default_headers)
             .map_or(resolved.user_agent, str::to_owned),
         sec_ch_ua: resolved.sec_ch_ua,
-        accept_language: resolved.accept_language.unwrap_or_default(),
+        accept_language: session_accept_language(
+            input.languages,
+            header_style,
+            bare,
+            resolved.accept_language,
+        ),
         h2_config,
         #[cfg(feature = "http3")]
         h3_config,

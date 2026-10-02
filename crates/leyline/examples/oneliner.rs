@@ -1,17 +1,7 @@
 #[tokio::main]
-async fn main() {
-    match leyline::Session::new()
-        .get("https://tls.peet.ws/api/all")
-        .await
-    {
-        Ok(resp) => {
-            println!("Status: {}", resp.status());
-            let text = resp.text().await.unwrap();
-            if text.len() > 100 {
-                println!("Body: {}... ({} bytes)", &text[..100], text.len());
-            }
-            println!("\nThat's it: the default Chrome profile, no builder, no config.");
-        }
-        Err(e) => eprintln!("Error: {e}"),
-    }
+async fn main() -> leyline::Result<()> {
+    let resp = leyline::get("https://httpbin.org/get").await?;
+    println!("status: {}", resp.status());
+    println!("{}", resp.text().await?);
+    Ok(())
 }

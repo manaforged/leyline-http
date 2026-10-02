@@ -36,7 +36,7 @@ fn origin_rejects_plaintext_ws() {
 
 #[test]
 fn headers_append_every_value() {
-    let builder = Session::new()
+    let builder = Session::browser(crate::Browser::default())
         .websocket("wss://example.com/socket")
         .headers([("a", "1")])
         .headers([("a", "2"), ("b", "3")]);

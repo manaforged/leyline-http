@@ -30,6 +30,21 @@ impl AltSvcCache {
         self.h3.insert(key, expiry, now);
     }
 
+    pub(crate) fn export(&self, now: SystemTime) -> Vec<(String, u16, SystemTime)> {
+        self.h3
+            .live(now)
+            .map(|((host, port), expiry)| (host.clone(), *port, expiry))
+            .collect()
+    }
+
+    pub(crate) fn import(&mut self, entries: &[(String, u16, SystemTime)], now: SystemTime) {
+        for (host, port, expiry) in entries {
+            if *expiry > now {
+                self.h3.insert((host.clone(), *port), *expiry, now);
+            }
+        }
+    }
+
     pub(crate) fn knows_h3(&mut self, host: &str, port: u16, now: SystemTime) -> bool {
         self.h3.contains(&(host.to_string(), port), now)
     }

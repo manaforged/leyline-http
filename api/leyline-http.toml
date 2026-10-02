@@ -445,3 +445,9 @@ name = "tower"
 call = "LeylineService::new"
 owner = "Session::execute"
 guide = "docs/guide/requests.md"
+
+[[task]]
+name = "Run a local test server"
+call = "testing::TestServer::http"
+owner = "testing::TestResponse"
+guide = "docs/guide/testing.md"

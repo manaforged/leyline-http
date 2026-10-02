@@ -1,0 +1,19 @@
+[[rule]]
+vendor = "cloudflare"
+kind = "challenge"
+header = "cf-mitigated"
+value = "challenge"
+
+[[rule]]
+vendor = "aws-waf"
+kind = "challenge"
+status = 202
+header = "x-amzn-waf-action"
+value = "challenge"
+
+[[rule]]
+vendor = "aws-waf"
+kind = "captcha"
+status = 405
+header = "x-amzn-waf-action"
+value = "captcha"

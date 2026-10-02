@@ -74,7 +74,7 @@ async fn dx_helpers_accept_common_pair_shapes_and_header_shortcuts() {
         .build()
         .unwrap();
     let _bare = Session::builder().build().unwrap();
-    let _chrome = Session::new();
+    let _chrome = Session::browser(Browser::default());
     let _firefox = Session::builder()
         .browser(Browser::latest(leyline::Family::Firefox))
         .protocol(ProtocolPolicy::Http1)
@@ -290,6 +290,7 @@ async fn caller_dnt_wins_over_edge_brand_overlay() {
 async fn anchored_headers_interleave_at_preset_slots() {
     let mut server = RawServer::start(vec![RawResponse::ok()]).await;
     let session = Session::builder()
+        .browser(leyline::Browser::default())
         .protocol(ProtocolPolicy::Http1)
         .build()
         .unwrap();

@@ -1,4 +1,5 @@
 use super::RequestBuilder;
+use super::route::Route;
 use crate::core::Result;
 use crate::core::body::{Body, BodyKind};
 use crate::core::deadline::Deadline;
@@ -7,41 +8,47 @@ use crate::core::response::Response;
 use crate::core::session::execute::Attempt;
 use crate::util::is_idempotent;
 
+const STATUS_ERROR_BODY_LIMIT: usize = 64 * 1024;
+
 impl RequestBuilder {
     pub async fn send(mut self) -> Result<Response> {
         self.prepare()?;
         let retry_policy = self.retry_policy.clone();
         let session = self.session.clone();
         let deadline = session.deadline(self.timeouts.as_ref());
-        let mut attempt = self.into_attempt(deadline);
-
-        if retry_policy.is_none() {
-            return session.attempt(attempt).await;
+        let tag = self.tag.take();
+        let status_errors = self.status_errors;
+        let attempt = self.into_attempt(deadline);
+        let method = attempt.method.clone();
+        let url = attempt.url.clone();
+        let streamed = attempt.stream_response;
+        let mut exhausted = false;
+        let response = session
+            .traced(
+                method.as_str(),
+                &url,
+                streamed,
+                run_attempts(
+                    &session,
+                    attempt,
+                    &retry_policy,
+                    deadline,
+                    tag,
+                    &mut exhausted,
+                ),
+            )
+            .await?;
+        if !status_errors {
+            return Ok(response);
         }
-
-        let retryable_method =
-            retry_policy.allow_non_idempotent || is_idempotent(attempt.method.as_str());
-        let replay = attempt.body.replay();
-        let body_retryable = replay.is_some();
-        let base_headers = attempt.headers.clone();
-
-        let mut n: u32 = 0;
-        loop {
-            deadline.check()?;
-            let attempt_body = std::mem::take(&mut attempt.body);
-            let this = attempt.again(attempt_body, base_headers.clone());
-            let result = session.attempt(this).await;
-
-            let sleep =
-                match plan_retry(&result, &retry_policy, n, retryable_method, body_retryable) {
-                    RetryPlan::Backoff(sleep) if sleep < deadline.remaining() => sleep,
-                    _ => return result,
-                };
-
-            deadline.sleep(sleep).await;
-            n += 1;
-            attempt.body = replay.as_ref().and_then(Body::replay).unwrap_or_default();
-        }
+        let policy_wait = retry_policy.server_wait(&response);
+        response
+            .error_for_status_with_body(STATUS_ERROR_BODY_LIMIT, &deadline)
+            .await
+            .map_err(|mut error| {
+                error.set_retry_outcome(policy_wait, exhausted);
+                error
+            })
     }
 
     fn into_attempt(mut self, deadline: Deadline) -> Attempt {
@@ -62,6 +69,7 @@ impl RequestBuilder {
             header_order: self.header_order.take(),
             redirect: self.redirect.take(),
             digest: self.digest_auth.take(),
+            initiator: self.initiator.take(),
         }
     }
 
@@ -103,8 +111,71 @@ impl RequestBuilder {
     }
 }
 
+async fn run_attempts(
+    session: &crate::core::session::Session,
+    mut attempt: Attempt,
+    retry_policy: &crate::core::retry::RetryPolicy,
+    deadline: Deadline,
+    tag: Option<String>,
+    exhausted: &mut bool,
+) -> (Result<Response>, u32) {
+    crate::trace::note_tag(tag);
+    let mut route = Route::new(session, &attempt);
+    if retry_policy.is_none() {
+        return (counted(route.send(attempt, None).await, 1), 1);
+    }
+    let retryable_method =
+        retry_policy.allow_non_idempotent || is_idempotent(attempt.method.as_str());
+    let replay = attempt.body.replay();
+    let body_retryable = replay.is_some();
+    let base_headers = attempt.headers.clone();
+
+    let mut n: u32 = 0;
+    loop {
+        if let Err(err) = deadline.check() {
+            return (Err(err), n);
+        }
+        let attempt_body = std::mem::take(&mut attempt.body);
+        let this = attempt.again(attempt_body, base_headers.clone());
+        let result = route.send(this, retry_policy.proxy_for_retry(n)).await;
+
+        let sleep = match plan_retry(&result, retry_policy, n, retryable_method, body_retryable) {
+            RetryPlan::Backoff(sleep) if sleep < deadline.remaining() => sleep,
+            plan => {
+                *exhausted = matches!(plan, RetryPlan::Exhausted);
+                return (counted(result, n + 1), n + 1);
+            }
+        };
+
+        let slept = session
+            .unless_shut_down(async {
+                deadline.sleep(sleep).await;
+                Ok(())
+            })
+            .await;
+        if let Err(err) = slept {
+            return (counted(Err(err), n + 1), n + 1);
+        }
+        n += 1;
+        attempt.body = replay.as_ref().and_then(Body::replay).unwrap_or_default();
+    }
+}
+
+fn counted(result: Result<Response>, attempts: u32) -> Result<Response> {
+    result
+        .map(|mut response| {
+            response.set_attempts(attempts);
+            response
+        })
+        .map_err(|mut error| {
+            error.set_attempts(attempts);
+            error
+        })
+}
+
 enum RetryPlan {
     Stop,
+    Exhausted,
     Backoff(std::time::Duration),
 }
 
@@ -115,28 +186,38 @@ fn plan_retry(
     retryable_method: bool,
     body_retryable: bool,
 ) -> RetryPlan {
-    if retry_policy.is_none() || attempt >= retry_policy.max_retries {
+    if retry_policy.is_none() {
         return RetryPlan::Stop;
     }
-    let should_retry = match result {
-        Ok(resp) => retry_policy.matches_status(resp.status().as_u16()),
+    if attempt >= retry_policy.max_retries {
+        return match result {
+            Ok(response) if retry_policy.matches_response(response) => RetryPlan::Exhausted,
+            _ => RetryPlan::Stop,
+        };
+    }
+    if !retry_wanted(result, retry_policy)
+        || !(retryable_method || retry_policy.retries_unsent(result))
+        || !body_retryable
+    {
+        return RetryPlan::Stop;
+    }
+    match result
+        .as_ref()
+        .ok()
+        .and_then(|r| retry_policy.server_wait(r))
+    {
+        Some(wait) if wait > retry_policy.max_retry_after => RetryPlan::Stop,
+        Some(wait) => RetryPlan::Backoff(wait),
+        None => RetryPlan::Backoff(retry_policy.backoff(attempt)),
+    }
+}
+
+fn retry_wanted(result: &Result<Response>, retry_policy: &crate::core::retry::RetryPolicy) -> bool {
+    match result {
+        Ok(resp) => retry_policy.matches_response(resp),
         Err(err) if err.is_timeout() => retry_policy.matches_timeout(),
         Err(err) if err.is_retryable() => retry_policy.matches_connection_error(),
         Err(_) => false,
-    };
-    if !should_retry || !retryable_method || !body_retryable {
-        return RetryPlan::Stop;
-    }
-    let retry_after = match result {
-        Ok(resp) => resp
-            .header("retry-after")
-            .and_then(crate::core::retry::parse_retry_after),
-        _ => None,
-    };
-    match retry_after {
-        Some(wait) if wait > retry_policy.max_retry_after => RetryPlan::Stop,
-        Some(wait) => RetryPlan::Backoff(wait),
-        None => RetryPlan::Backoff(retry_policy.delay(attempt)),
     }
 }
 

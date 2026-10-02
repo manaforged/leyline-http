@@ -1,3 +1,4 @@
+use super::wait::unix_from_ymd_hms;
 use super::*;
 
 #[test]
@@ -33,10 +34,12 @@ fn backoff_grows_and_caps() {
         jitter: false,
         retry_on: vec![RetryTrigger::ConnectionError],
         allow_non_idempotent: false,
+        proxies: Vec::new(),
+        ..RetryPolicy::transient()
     };
-    assert!(p.delay(0).as_millis() <= 100);
-    assert!(p.delay(1).as_millis() <= 200);
-    assert!(p.delay(10).as_millis() <= 800);
+    assert!(p.backoff(0).as_millis() <= 100);
+    assert!(p.backoff(1).as_millis() <= 200);
+    assert!(p.backoff(10).as_millis() <= 800);
 }
 
 #[test]
@@ -74,4 +77,17 @@ fn imf_fixdate_epoch() {
 fn a_retry_after_date_past_the_platform_clock_does_not_panic() {
     let wait = parse_retry_after("Fri, 01 Jan 99999 00:00:00 GMT");
     assert!(wait.is_none_or(|wait| wait > Duration::from_secs(1 << 40)));
+}
+
+#[test]
+fn wait_formats_parse_header_values() {
+    assert_eq!(WaitFormat::Seconds.parse("7"), Some(Duration::from_secs(7)));
+    let soon = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        + 60;
+    let wait = WaitFormat::UnixSeconds.parse(&soon.to_string()).unwrap();
+    assert!(wait > Duration::from_secs(50) && wait <= Duration::from_secs(60));
+    assert_eq!(WaitFormat::Seconds.parse("soon"), None);
 }

@@ -2,5 +2,5 @@ book = "docs"
 
 [[crate]]
 package = "leyline-http"
-features = ["full"]
-gates = ["charset", "multipart", "websocket", "http3", "socks", "tower"]
+features = ["full", "test-util"]
+gates = ["charset", "multipart", "websocket", "http3", "socks", "tower", "test-util"]

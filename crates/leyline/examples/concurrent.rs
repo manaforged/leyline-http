@@ -1,18 +1,15 @@
 use std::time::Instant;
 
 use http::StatusCode;
-use leyline::{Browser, Platform, Session};
+use leyline::Session;
 
 #[tokio::main]
 async fn main() -> leyline::Result<()> {
     let url = std::env::args()
         .nth(1)
-        .unwrap_or_else(|| "https://tls.peet.ws/api/all".to_string());
+        .unwrap_or_else(|| "https://httpbin.org/get".to_string());
 
-    let session = Session::builder()
-        .browser(Browser::Chrome147)
-        .platform(Platform::Linux)
-        .build()?;
+    let session = Session::builder().build()?;
 
     let n = 50usize;
     let started = Instant::now();

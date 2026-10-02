@@ -77,3 +77,11 @@ fn duplicate_transfer_encoding_detection_is_case_insensitive() {
     ]);
     assert!(strip_connection_specific_headers(&mut headers).is_err());
 }
+
+#[test]
+fn a_caller_host_header_is_not_sent_next_to_the_authority() {
+    let mut headers = pairs([("host", "evil.test"), ("user-agent", "x")]);
+    strip_connection_specific_headers(&mut headers).unwrap();
+    let names: Vec<&str> = headers.iter().map(|(n, _)| n.as_ref()).collect();
+    assert_eq!(names, ["user-agent"]);
+}

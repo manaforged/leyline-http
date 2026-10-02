@@ -3,27 +3,13 @@ use std::net::{IpAddr, SocketAddr};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-use crate::tls::error::TlsError;
-use crate::tls::{SessionCache, TlsStream};
+use crate::tls::error::{ProxyReply, TlsError};
 
 use crate::util::percent_decode;
 
 const CMD_CONNECT: u8 = 0x01;
 const CMD_UDP_ASSOCIATE: u8 = 0x03;
-
-pub(crate) async fn connect<C: crate::tls::TlsHandshake>(
-    connector: &C,
-    host: &str,
-    port: u16,
-    proxy: &url::Url,
-    include_alps: bool,
-) -> Result<TlsStream, TlsError> {
-    let tcp_stream = tunnel(connector, host, port, proxy).await?;
-    let session_key = SessionCache::key(host, port, Some(proxy));
-    connector
-        .do_tls_handshake(tcp_stream, host, &session_key, include_alps)
-        .await
-}
+const TARGET_UNREACHABLE_REPLIES: [u8; 4] = [0x03, 0x04, 0x05, 0x06];
 
 pub(crate) async fn tunnel<C: crate::tls::TlsHandshake>(
     connector: &C,
@@ -212,26 +198,39 @@ async fn request(
         return Err(TlsError::proxy("socks5: invalid reply version"));
     }
     if resp_buf[1] != 0x00 {
-        let reason = match resp_buf[1] {
-            0x01 => "general failure",
-            0x02 => "connection not allowed",
-            0x03 => "network unreachable",
-            0x04 => "host unreachable",
-            0x05 => "connection refused",
-            0x06 => "TTL expired",
-            0x07 => "command not supported",
-            0x08 => "address type not supported",
-            _ => "unknown error",
-        };
-        let name = if cmd == CMD_UDP_ASSOCIATE {
-            "UDP ASSOCIATE"
-        } else {
-            "CONNECT"
-        };
-        return Err(TlsError::proxy(format!("socks5: {name} failed: {reason}")));
+        return Err(reply_error(cmd, resp_buf[1]));
     }
+    read_bound_addr(tcp_stream, resp_buf[3]).await
+}
 
-    let atyp = resp_buf[3];
+fn reply_reason(reply: u8) -> &'static str {
+    match reply {
+        0x01 => "general failure",
+        0x02 => "connection not allowed",
+        0x03 => "network unreachable",
+        0x04 => "host unreachable",
+        0x05 => "connection refused",
+        0x06 => "TTL expired",
+        0x07 => "command not supported",
+        0x08 => "address type not supported",
+        _ => "unknown error",
+    }
+}
+
+fn reply_error(cmd: u8, reply: u8) -> TlsError {
+    let name = if cmd == CMD_UDP_ASSOCIATE {
+        "UDP ASSOCIATE"
+    } else {
+        "CONNECT"
+    };
+    let detail = format!("socks5: {name} failed: {}", reply_reason(reply));
+    if cmd == CMD_CONNECT && TARGET_UNREACHABLE_REPLIES.contains(&reply) {
+        return TlsError::proxy_target(ProxyReply::Socks5(reply), detail);
+    }
+    TlsError::proxy(detail)
+}
+
+async fn read_bound_addr(tcp_stream: &mut TcpStream, atyp: u8) -> Result<(u8, Vec<u8>), TlsError> {
     let mut first = [0u8; 1];
     let domain_len = if atyp == 0x03 {
         tcp_stream

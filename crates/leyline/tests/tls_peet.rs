@@ -250,7 +250,7 @@ async fn request_builder_timeout_overrides_session_default() {
 #[test]
 fn session_shortcuts_work() {
     assert_eq!(
-        format!("{}", leyline::Session::new()),
+        format!("{}", leyline::Session::browser(Browser::default())),
         format!(
             "Session({}, {}, proxy=none)",
             Browser::default(),
@@ -891,7 +891,7 @@ async fn live_tcp_windows_distinguishable_from_linux() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_chrome147_ciphers_match_profile_order() {
-    let session = leyline::Session::new();
+    let session = leyline::Session::browser(Browser::default());
     let json = peet(&session).await;
 
     let reg = leyline::profile::ProfileRegistry::builtin();
@@ -924,7 +924,7 @@ async fn live_chrome147_ciphers_match_profile_order() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_chrome147_has_alps_extension() {
-    let session = leyline::Session::new();
+    let session = leyline::Session::browser(Browser::default());
     let json = peet(&session).await;
 
     let extensions = json["tls"]["extensions"]
@@ -946,7 +946,7 @@ async fn live_chrome147_has_alps_extension() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_chrome147_has_cert_compression() {
-    let session = leyline::Session::new();
+    let session = leyline::Session::browser(Browser::default());
     let json = peet(&session).await;
 
     let extensions = json["tls"]["extensions"]
@@ -1093,7 +1093,7 @@ async fn live_chrome147_linux_identity_headers() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_chrome147_pseudo_header_order() {
-    let session = leyline::Session::new();
+    let session = leyline::Session::browser(Browser::default());
     let json = peet(&session).await;
     let headers = extract_sent_headers(&json);
 
@@ -1455,7 +1455,7 @@ async fn live_session_resumption_pre_shared_key() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_h2_connection_reuse() {
-    let session = leyline::Session::new();
+    let session = leyline::Session::browser(Browser::default());
     let resp1 = session.get(PEET_URL).await.unwrap();
     assert_eq!(resp1.status(), 200);
     let resp2 = session.get(PEET_URL).await.unwrap();
@@ -1468,7 +1468,7 @@ async fn live_h2_connection_reuse() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_tls_peer_certificate_exposed() {
-    let session = leyline::Session::new();
+    let session = leyline::Session::browser(Browser::default());
     let resp = session.get(PEET_URL).await.unwrap();
     assert_eq!(resp.status(), 200);
     let cert = resp
@@ -1552,7 +1552,7 @@ async fn live_socks5_proxy() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_websocket_echo() {
-    let session = leyline::Session::new();
+    let session = leyline::Session::browser(Browser::default());
     let mut ws = session
         .websocket("wss://ws.postman-echo.com/raw")
         .await

@@ -10,6 +10,7 @@ fn h1_key(host: &str) -> PoolKey {
         port: 80,
         proxy: None,
         transport: Transport::Tcp,
+        partition: 0,
     }
 }
 
@@ -170,4 +171,16 @@ fn alt_svc_ignores_separators_inside_quoted_parameters() {
         Duration::ZERO,
     );
     assert!(pool.knows_h3("example.com", 443));
+}
+
+#[cfg(feature = "http3")]
+#[test]
+fn a_failed_http3_origin_is_skipped_until_cleared() {
+    let pool = Pool::new();
+    assert!(!pool.is_h3_broken("example.com", 443, Some("socks5://p:1")));
+    pool.note_h3_broken("example.com", 443, Some("socks5://p:1"));
+    assert!(pool.is_h3_broken("example.com", 443, Some("socks5://p:1")));
+    assert!(!pool.is_h3_broken("example.com", 443, None));
+    pool.clear_h3_broken("example.com", 443, Some("socks5://p:1"));
+    assert!(!pool.is_h3_broken("example.com", 443, Some("socks5://p:1")));
 }

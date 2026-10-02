@@ -53,6 +53,28 @@ impl Part {
         }
     }
 
+    pub fn file(path: impl AsRef<Path>) -> io::Result<Self> {
+        let path = path.as_ref().to_path_buf();
+        let metadata = std::fs::metadata(&path)?;
+        let filename = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("file")
+            .to_string();
+        let stream = tokio::fs::File::open(path)
+            .map_ok(tokio_util::io::ReaderStream::new)
+            .try_flatten_stream();
+        let mut part = Part::stream(stream).filename(filename);
+        if let BodyKind::Stream {
+            ref mut length_hint,
+            ..
+        } = part.body.0
+        {
+            *length_hint = Some(metadata.len());
+        }
+        Ok(part)
+    }
+
     pub fn filename(mut self, name: impl Into<String>) -> Self {
         self.filename = Some(name.into());
         self
@@ -106,27 +128,8 @@ impl Form {
     }
 
     pub fn file(mut self, name: impl Into<String>, path: impl AsRef<Path>) -> io::Result<Self> {
-        let path = path.as_ref().to_path_buf();
-        let metadata = std::fs::metadata(&path)?;
-        let filename = path
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("file")
-            .to_string();
-
-        let stream = tokio::fs::File::open(path)
-            .map_ok(tokio_util::io::ReaderStream::new)
-            .try_flatten_stream();
-
-        let mut part = Part::stream(stream).filename(filename);
+        let mut part = Part::file(path)?;
         part.name = name.into();
-        if let BodyKind::Stream {
-            ref mut length_hint,
-            ..
-        } = part.body.0
-        {
-            *length_hint = Some(metadata.len());
-        }
         self.parts.push(part);
         Ok(self)
     }

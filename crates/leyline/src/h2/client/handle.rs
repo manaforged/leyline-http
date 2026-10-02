@@ -15,11 +15,16 @@ pub struct H2Client {
     pub(super) tx: mpsc::Sender<DriverCommand>,
     pub(super) ping_tx: mpsc::Sender<oneshot::Sender<()>>,
     pub(super) closed: Arc<AtomicBool>,
+    pub(super) open_streams: Arc<std::sync::atomic::AtomicUsize>,
     #[cfg(feature = "websocket")]
     pub(super) peer_settings: Arc<PeerSettingsSnapshot>,
 }
 
 impl H2Client {
+    pub fn open_streams(&self) -> usize {
+        self.open_streams.load(Ordering::Relaxed)
+    }
+
     pub async fn send_shared(
         &self,
         head: Arc<Head>,
