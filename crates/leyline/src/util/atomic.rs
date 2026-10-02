@@ -55,7 +55,7 @@ pub(crate) fn create_temp(temp: &Path, target: &Path, mode: FileMode) -> Result<
         FileMode::Private => Some(std::fs::Permissions::from_mode(0o600)),
         FileMode::KeepExisting => std::fs::metadata(target)
             .ok()
-            .map(|meta| std::fs::Permissions::from_mode(meta.permissions().mode() & 0o7777)),
+            .map(|meta| std::fs::Permissions::from_mode(meta.permissions().mode() & 0o777)),
     };
     if let Some(perms) = &perms {
         options.mode(perms.mode());

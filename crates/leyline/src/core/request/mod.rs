@@ -67,6 +67,7 @@ pub struct RequestBuilder {
     pub(super) preset_user: bool,
     pub(super) redirect: Option<RedirectPolicy>,
     pub(super) initiator: Option<url::Url>,
+    pub(crate) trusted_origin: Option<url::Url>,
     pub(super) tag: Option<String>,
     pub(super) status_errors: bool,
 }
@@ -103,6 +104,7 @@ impl RequestBuilder {
             preset_user: false,
             redirect: None,
             initiator: None,
+            trusted_origin: None,
             tag: None,
             status_errors: false,
         }

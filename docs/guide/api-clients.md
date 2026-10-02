@@ -119,6 +119,11 @@ See [Errors](errors.md).
 each response with the same settings. See
 [Responses](responses.md#follow-link-pagination).
 
+There is no default page limit. Call `limit(max)` to stop after `max` pages.
+When a next link goes to another origin, the request drops the session
+credentials: the `Authorization`, `Cookie`, and `Proxy-Authorization`
+defaults and the session bearer token, as a redirect does.
+
 ```rust,no_run
 use serde::Deserialize;
 
@@ -129,7 +134,7 @@ struct Repo {
 
 # async fn run(api: leyline::Session) -> leyline::Result<()> {
 let mut repos = Vec::new();
-let mut pages = api.get("repos").error_for_status().pages();
+let mut pages = api.get("repos").error_for_status().pages().limit(100);
 while let Some(page) = pages.next().await {
     repos.extend(page?.json::<Vec<Repo>>().await?);
 }

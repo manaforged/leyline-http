@@ -11,6 +11,7 @@ const KEEP_ALIVE: &str = "keep-alive";
 const PROXY_CONNECTION: &str = "proxy-connection";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RelayBody {
     AsReceived,
     Decoded,

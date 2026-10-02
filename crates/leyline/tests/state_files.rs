@@ -126,3 +126,60 @@ fn device_autosave_writes_new_session_state_when_the_runtime_stops() {
     assert!(state.contains("localhost"), "{state}");
     drop(std::fs::remove_dir_all(&dir));
 }
+
+#[test]
+fn serializing_a_device_never_writes_an_env_proxy_password() {
+    let session = Session::browser(Browser::default());
+    let mut device = Device::capture(&session, None);
+    device.proxy =
+        Some(leyline::ProxyUrl::parse("http://user:hunter2@proxy.example:8080").unwrap());
+    device.proxy_password_env = Some("LEYLINE_TEST_PROXY_PASSWORD".to_owned());
+    let text = serde_json::to_string(&device).unwrap();
+    assert!(!text.contains("hunter2"), "{text}");
+    assert!(text.contains("proxy.example"), "{text}");
+}
+
+#[tokio::test]
+async fn audit_matches_a_cookie_split_across_fields() {
+    let server = TestServer::https(queue([TestResponse::new(200)]))
+        .await
+        .unwrap();
+    let jar = Jar::new();
+    let url = server.url("/").parse().unwrap();
+    jar.set_cookie(&url, "a", "1");
+    jar.set_cookie(&url, "b", "2");
+    let resp = Session::builder()
+        .browser(Browser::default())
+        .tls_trust(server.trust())
+        .cookie_jar(jar)
+        .audit(true)
+        .build()
+        .unwrap()
+        .get(server.url("/"))
+        .await
+        .unwrap();
+    let audit = resp.audit().unwrap();
+    let sent = audit
+        .request_headers
+        .iter()
+        .find(|(name, _)| name == "cookie")
+        .map(|(_, value)| value.clone())
+        .unwrap();
+    let lines: Vec<String> = sent
+        .split("; ")
+        .map(|pair| format!("\"Cookie: {pair}\""))
+        .collect();
+    let echoed = Observed::from_json(&format!(
+        r#"{{"http1":{{"headers":[{}]}}}}"#,
+        lines.join(",")
+    ))
+    .unwrap();
+    let report = audit.compare(&echoed);
+    let cookie = report
+        .headers
+        .iter()
+        .find(|h| h.name == "cookie")
+        .map(|h| h.outcome.clone())
+        .unwrap();
+    assert_eq!(cookie, leyline::audit::FieldOutcome::Match);
+}

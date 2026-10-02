@@ -109,7 +109,7 @@ impl Session {
         let origin = url_origin(&journey.url);
         let referer = referer_for(Some(&journey.referrer), &origin);
         let fetch_site = fetch_site_for(journey.initiator.as_ref(), &journey.chain, &journey.url);
-        let strip_sensitive = !journey.chain.is_empty() && origin != journey.original_origin;
+        let strip_sensitive = journey.strips_credentials(&origin);
         let initiator_origin = journey
             .initiator
             .as_ref()

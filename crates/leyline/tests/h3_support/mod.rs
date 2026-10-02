@@ -74,6 +74,7 @@ enum Halves {
 struct Seen {
     stopped: Vec<u64>,
     peer_close: Option<u64>,
+    connections: usize,
 }
 
 pub struct H3Server {
@@ -110,6 +111,10 @@ impl H3Server {
             tokio::time::sleep(IDLE).await;
         }
         None
+    }
+
+    pub fn connections(&self) -> usize {
+        self.seen.lock().expect("seen").connections
     }
 
     pub fn peer_close(&self) -> Option<u64> {
@@ -290,6 +295,9 @@ async fn serve(
             Ok(Ok((len, from))) => {
                 if !peers.contains_key(&from) {
                     accept(&mut peers, &mut inbound[..len], from, local, &mut config);
+                    if peers.contains_key(&from) {
+                        seen.lock().expect("seen").connections += 1;
+                    }
                 }
                 if let Some(peer) = peers.get_mut(&from) {
                     let info = leyline_quiche::RecvInfo { from, to: local };

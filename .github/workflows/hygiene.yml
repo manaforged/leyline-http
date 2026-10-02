@@ -1,8 +1,7 @@
 name: hygiene
 
 on:
-  push:
-    tags: ['v*']
+  workflow_call:
   workflow_dispatch:
 
 permissions:
@@ -16,14 +15,11 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Check repository content and change metadata
+      - name: Check repository content and commit messages
         env:
           HYGIENE_PATTERNS: ${{ secrets.HYGIENE_PATTERNS }}
-          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
-          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         shell: bash
         run: |
           set -euo pipefail
@@ -49,14 +45,12 @@ jobs:
             [ "$type" = blob ] || continue
             git cat-file blob "$object" | strings > "$RUNNER_TEMP/hygiene-content"
             scan "$RUNNER_TEMP/hygiene-content" "Repository content"
-          done < <(git ls-tree -r -z "$HEAD")
-          if [ -z "$BASE" ] || [[ "$BASE" =~ ^0+$ ]] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
-            range="$HEAD"
+          done < <(git ls-tree -r -z HEAD)
+          if previous=$(git describe --tags --abbrev=0 --match 'v*' HEAD^ 2>/dev/null); then
+            range="$previous..HEAD"
           else
-            range="$BASE..$HEAD"
+            range=HEAD
           fi
           git log --format=%B "$range" > "$RUNNER_TEMP/hygiene-messages"
           scan "$RUNNER_TEMP/hygiene-messages" "Commit messages"
-          jq -r '.pull_request.title // "", .pull_request.body // ""' "$GITHUB_EVENT_PATH" > "$RUNNER_TEMP/hygiene-pr"
-          scan "$RUNNER_TEMP/hygiene-pr" "Pull request metadata"
           exit "$failed"

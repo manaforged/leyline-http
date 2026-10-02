@@ -283,3 +283,23 @@ async fn a_body_stream_ends_after_its_deadline() {
     assert_eq!(errors, 1);
     assert!(session.host_stats().iter().all(|s| s.in_flight() == 0));
 }
+
+#[tokio::test]
+async fn a_streamed_body_ends_at_its_first_error() {
+    let server =
+        TestServer::http(|_| TestResponse::new(200).chunks(["a", "b"], Duration::from_millis(500)))
+            .await
+            .unwrap();
+    let mut body = Session::new()
+        .get(server.url("/"))
+        .timeout(leyline::TimeoutConfig::new().read(Duration::from_millis(200)))
+        .stream()
+        .await
+        .unwrap()
+        .into_stream()
+        .unwrap();
+    use futures_util::StreamExt;
+    assert_eq!(&body.next().await.unwrap().unwrap()[..], b"a");
+    assert!(body.next().await.unwrap().is_err());
+    assert!(body.next().await.is_none());
+}

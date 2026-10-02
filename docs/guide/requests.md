@@ -34,6 +34,8 @@ Header setters take anything that converts to an `http::HeaderName` and an
 invalid name or value is an error from `send`. `header` appends: a second
 call with the same name adds a second value. `headers` takes an iterator of
 pairs. `bearer_auth` and `basic_auth` build the `Authorization` header.
+On HTTP/2 and HTTP/3 the session does not send a `Host` header you set,
+because the request authority carries the host.
 
 ```rust,no_run
 use leyline::http::header::ACCEPT_LANGUAGE;

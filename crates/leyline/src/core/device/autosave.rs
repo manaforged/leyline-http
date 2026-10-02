@@ -124,8 +124,9 @@ impl std::fmt::Debug for DeviceAutosave {
 
 impl SaveTarget for DeviceTarget {
     fn prepare(&mut self) -> Option<SaveJob> {
-        let jar = self.session.cookies().clone();
-        let generation = *jar.changes().borrow();
+        let live = self.session.cookies();
+        let generation = *live.changes().borrow();
+        let jar = live.snapshot();
         let jar_dirty = self.saved != Some(generation);
         let mut device = snapshot(&self.device, &self.tab);
         device.state = self.session.state();

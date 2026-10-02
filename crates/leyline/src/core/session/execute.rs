@@ -38,6 +38,7 @@ pub(crate) struct Attempt {
     pub(crate) redirect: Option<RedirectPolicy>,
     pub(crate) digest: Option<DigestAuth>,
     pub(crate) initiator: Option<Url>,
+    pub(crate) trusted_origin: Option<Url>,
 }
 
 impl Attempt {
@@ -55,6 +56,7 @@ impl Attempt {
             redirect: self.redirect.clone(),
             digest: self.digest.clone(),
             initiator: self.initiator.clone(),
+            trusted_origin: self.trusted_origin.clone(),
         }
     }
 }
@@ -146,6 +148,7 @@ impl Session {
             redirect,
             digest,
             initiator,
+            trusted_origin,
         } = attempt;
         let redirect_policy = redirect.as_ref().unwrap_or(&self.inner.redirect_policy);
         let request_proxy = request_proxy.as_ref();
@@ -157,7 +160,8 @@ impl Session {
             extra_headers,
             initiator,
             self.session_referer(),
-        );
+        )
+        .trusting(trusted_origin.as_ref());
 
         let mut digest = digest.map(DigestLeg::new);
         let redirect_cap = redirect_policy.max_redirects_hint();

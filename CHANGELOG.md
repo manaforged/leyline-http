@@ -45,14 +45,16 @@ version and publish as separate crates.
   `CompressionConfig::max_error_body` caps the kept body (64 KiB by default)
   for `error_for_status` and `download`, and `TimeoutConfig::error_body`
   bounds its read (10 s by default, and never past the `total` timeout).
-  Decompression stops at the cap.
+  Decompression stops at the cap. The kept body is cut at the smaller of
+  `max_error_body` and `max_body_size`, with or without content-encoding.
 - `RequestBuilder::download(path, limit)` and `Response::download_to` write
   the decoded body through a temporary file, so the path holds the whole
   body or nothing; a declared `Content-Length` over the cap is refused before
   reading. `Response::into_decoded_stream` and `copy_decoded_to` stream the
   decoded body under a limit.
 - `RequestBuilder::pages()` follows `Link: rel="next"`, and counts the first
-  URL as fetched, so a redirect does not repeat the first page;
+  URL as fetched, so a redirect does not repeat the first page.
+  `Pages::limit(max)` stops after `max` pages; there is no default limit;
   `Response::link(rel)` and `links()` parse `Link` headers.
 - `RequestBuilder::cookie_jar`, `initiator`, and `tag`. `Response::attempts()`
   and `Response::proxy()`.
@@ -62,11 +64,13 @@ version and publish as separate crates.
   being streamed; `Error::is_shut_down()` names that error.
 - `relay_headers(headers, RelayBody)` and `Response::relay_headers` return the
   headers to forward from a proxy or a service. `proxy-authenticate` and
-  `proxy-authorization` are dropped as hop-by-hop. With `RelayBody::Decoded`,
+  `proxy-authorization` are dropped as hop-by-hop. `RelayBody` is
+  `#[non_exhaustive]`. With `RelayBody::Decoded`,
   `Response::relay_headers` keeps `content-encoding` when the session did not
   decode the body.
-- `RequestBuilder::download` and `Response::download_to` keep the permissions
-  of a target file that already exists.
+- `RequestBuilder::download` and `Response::download_to` keep the permission
+  bits of a target file that already exists, never setuid, setgid, or sticky
+  bits.
 - `multipart::Part::file(path)` reads a file part that takes a MIME type.
 
 #### Errors and retries
@@ -85,7 +89,8 @@ version and publish as separate crates.
   `retry_unsent(true)` retries any method after an error the server did not
   process: DNS, connect, TLS, proxy, a connect timeout, an HTTP/2
   `REFUSED_STREAM` reset, or an HTTP/3 request the server reports as not
-  processed.
+  processed. An HTTP/3 request the server rejects twice is retried on the
+  same connection.
 - `RetryPolicy::transient()` caps a server-requested wait at 60 s
   (`max_retry_after`). `Error::retries_exhausted()` is `true` when the policy
   wanted another try and did not make it: no retries left, a server wait above
@@ -100,12 +105,17 @@ version and publish as separate crates.
   stop new requests to an origin for the wait the server asks for, read from
   the retry policy's wait headers or `Retry-After`. `pause_for` sets the pause
   when the server asks for none (60 s), and `max_pause` caps a requested
-  pause (24 h). A streamed request holds its slot until its body ends.
+  pause (24 h). A streamed request holds its slot until its body ends; a
+  streamed body ends at its first error and releases the slot. A failed
+  attempt releases its slot before the retry wait.
   `Session::host_stats()` reports requests in flight and waiting per origin.
 - Host limits admit each redirect hop against its own origin. `pause_on` and
   proxy-pool strikes apply to the origin that sent the response. A request
-  waits for its origin slot, then a pause, then the total slot, then a pause
-  again, then its turn in the rate spacing. A host name with a trailing dot
+  waits for its origin slot, then for any pause and its next rate slot, then
+  the total slot. No request holds a total slot while it waits for a pause or the rate spacing. The spacing is
+  measured at admission, and a pause is checked again just before admission.
+  A request that loses its turn while it waits for the total slot waits
+  again. A host name with a trailing dot
   is the same host. Each session built from a `HostLimits` value has its own
   counters, shared by its clones and derived sessions.
 - `ProxyPool`: sticky proxies, bans after repeated failures, rotation on block
@@ -136,7 +146,8 @@ version and publish as separate crates.
   current page, and caller data in `app`) and reopens it as the same session.
   `Device::check` refuses a session that differs, and `strict` refuses a
   device without a pinned profile or a proxy. `Device::autosave` keeps the
-  device and its jar on disk; `DeviceAutosave::update` and `track` change it.
+  device and its jar on disk. Serializing a `Device` with
+  `proxy_password_env` set never writes the proxy password; `DeviceAutosave::update` and `track` change it.
   It takes a `Duration` or `DeviceAutosaveOptions`, whose `state_interval`
   (300 s by default) saves the connection state on a period.
   `SessionBuilder::expect_profile_id` and `Error::is_profile_changed()` catch
@@ -144,14 +155,19 @@ version and publish as separate crates.
 - `Session::state()` returns `SessionState`: TLS session tickets, HTTP/3
   `Alt-Svc` knowledge, and the HSTS store. Sessions keep an HSTS store, and
   learn no HSTS entry when certificate verification is off. Saved TLS session
-  keys hold a hash of the proxy credentials, never the credentials.
+  keys for an authenticated proxy hold the proxy user name, never the
+  password or a value derived from it.
 - `Browser`, `Family`, `Platform`, `ChromiumBrand`, `Identity`, `ProxyUrl`,
   and `leyline::Url` implement serde; the profile enums have stable string
   ids. `SessionIdentity::to_identity()` and `profile_id()`.
 - The `html` feature (on by default, and it enables `multipart`):
   `html::forms`, `Form::find`, `html::meta`, and `html::links`. Forms follow
-  the browser rules: `form="id"` controls, disabled fieldsets, one checked
-  radio button per name, and every HTML named character reference.
+  the browser rules: `form="id"` controls (the first element with that id),
+  disabled fieldsets (only the first `<legend>` that is a direct child is
+  exempt), disabled `<optgroup>` options left out, a list-box `<select size>`
+  with no selected option left out, one checked radio button per name, line
+  breaks in names and values converted to CRLF, and every HTML named
+  character reference.
   `Form::set` replaces every value of a name. `Tab::submit_form` encodes the
   fields as the form's `FormEnctype` says (URL-encoded, `multipart/form-data`,
   or `text/plain`) and resolves the action against `<base href>`.
@@ -177,6 +193,15 @@ version and publish as separate crates.
 
 ### Fixed
 
+- A request that follows a URL the server chose (a `pages()` next link,
+  `Tab::follow`, or `Tab::submit_form`) drops the session credentials when
+  its origin differs from the page it came from, as a redirect does: the
+  `Authorization`, `Cookie`, and `Proxy-Authorization` defaults and the
+  session bearer token.
+- On HTTP/2 and HTTP/3, a `Host` header you set is not sent; the request
+  authority carries the host.
+- `HeaderStyle::Bare` is the header shape of a plain session. `HeaderStyle`
+  variants have fixed discriminants.
 - A browser session's connection to an origin that speaks only HTTP/1.1 sends
   the profile's own ClientHello (its ALPN list and ALPS) and carries the
   request on that connection, as a browser does. Before, Leyline dialed a

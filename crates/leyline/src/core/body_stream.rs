@@ -194,6 +194,7 @@ impl Stream for BodyStream {
             return Poll::Ready(None);
         }
         if this.poll_shutdown(cx) {
+            this.ended = true;
             return Poll::Ready(Some(Err(std::io::Error::other(
                 crate::core::error::Error::shut_down(),
             ))));
@@ -210,6 +211,7 @@ impl Stream for BodyStream {
         }
         if matches!(polled, Poll::Ready(None | Some(Err(_)))) {
             this.pass = None;
+            this.ended = true;
         }
         polled
     }

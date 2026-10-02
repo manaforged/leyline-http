@@ -89,3 +89,45 @@ async fn retry_unsent_resends_a_post_rejected_twice() {
         .unwrap();
     assert_eq!(body.len(), LENGTH);
 }
+
+#[tokio::test]
+async fn a_twice_rejected_request_keeps_the_pooled_connection() {
+    let rejected = || Reply::Reset(WireErrorCode::RequestRejected as u64);
+    let server = h3_server(
+        vec![
+            Reply::Body(LENGTH),
+            rejected(),
+            rejected(),
+            Reply::Body(LENGTH),
+        ],
+        Limits::default(),
+    )
+    .await;
+    let session = server
+        .session()
+        .retry(
+            leyline::RetryPolicy::transient()
+                .initial_backoff(std::time::Duration::from_millis(1))
+                .jitter(false)
+                .retry_unsent(true),
+        )
+        .build()
+        .unwrap();
+    session
+        .get(server.url())
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap();
+    let body = session
+        .post(server.url())
+        .body("order=1")
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap();
+    assert_eq!(body.len(), LENGTH);
+    assert_eq!(server.connections(), 1);
+}

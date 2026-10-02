@@ -16,6 +16,15 @@ jobs:
     name: qualify
     uses: ./.github/workflows/ci.yml
 
+  hygiene:
+    name: hygiene
+    uses: ./.github/workflows/hygiene.yml
+    secrets: inherit
+
+  matrix:
+    name: matrix
+    uses: ./.github/workflows/matrix.yml
+
   release-check:
     name: release qualification
     runs-on: ubuntu-24.04
@@ -31,7 +40,7 @@ jobs:
 
   package:
     name: package
-    needs: [qualify, release-check]
+    needs: [qualify, hygiene, matrix, release-check]
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:

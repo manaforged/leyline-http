@@ -46,3 +46,25 @@ async fn max_error_body_sets_the_kept_body() {
         .unwrap_err();
     assert_eq!(err.body().map(<[u8]>::len), Some(100));
 }
+
+#[tokio::test]
+async fn pages_limit_stops_an_endless_pagination() {
+    let served = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let count = std::sync::Arc::clone(&served);
+    let server = TestServer::http(move |_| {
+        let n = count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        TestResponse::new(200)
+            .close()
+            .header("link", format!("</items?page={}>; rel=\"next\"", n + 2))
+    })
+    .await
+    .unwrap();
+    let mut pages = Session::new().get(server.url("/items")).pages().limit(3);
+    let mut count = 0;
+    while let Some(page) = pages.next().await {
+        page.unwrap();
+        count += 1;
+    }
+    assert_eq!(count, 3);
+    assert_eq!(server.requests().await.len(), 3);
+}

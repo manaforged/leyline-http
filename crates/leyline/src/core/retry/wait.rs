@@ -73,6 +73,8 @@ const MONTHS: [&str; 12] = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
 
+const IMF_FIXDATE_YEARS: std::ops::RangeInclusive<i32> = 1970..=9999;
+
 fn month_num(month: &str) -> Option<u32> {
     let index = MONTHS.iter().position(|m| *m == month)?;
     u32::try_from(index + 1).ok()
@@ -86,24 +88,29 @@ pub(super) fn unix_from_ymd_hms(
     min: u32,
     sec: u32,
 ) -> Option<SystemTime> {
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) || hour > 23 || min > 59 || sec > 59 {
+    if !date_in_range(year, month, day) || hour > 23 || min > 59 || sec > 59 {
         return None;
     }
-    let mut y = year;
-    if month <= 2 {
-        y -= 1;
-    }
+    let secs = days_from_civil(year, month, day)?
+        .checked_mul(86400)?
+        .checked_add(i64::from(hour) * 3600 + i64::from(min) * 60 + i64::from(sec))?;
+    epoch_plus(Duration::from_secs(u64::try_from(secs).ok()?))
+}
+
+fn date_in_range(year: i32, month: u32, day: u32) -> bool {
+    IMF_FIXDATE_YEARS.contains(&year) && (1..=12).contains(&month) && (1..=31).contains(&day)
+}
+
+fn days_from_civil(year: i32, month: u32, day: u32) -> Option<i64> {
+    let y = if month <= 2 {
+        year.checked_sub(1)?
+    } else {
+        year
+    };
     let era = y.div_euclid(400);
-    let yoe = (y - era * 400) as u32;
+    let yoe = u32::try_from(y.checked_sub(era.checked_mul(400)?)?).ok()?;
     let shifted = if month > 2 { month - 3 } else { month + 9 };
     let doy = (153 * shifted + 2) / 5 + day - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    let days = i64::from(era) * 146097 + i64::from(doe) - 719468;
-    let secs = days
-        .checked_mul(86400)?
-        .checked_add(i64::from(hour) * 3600 + i64::from(min) * 60 + i64::from(sec))?;
-    if secs < 0 {
-        return None;
-    }
-    epoch_plus(Duration::from_secs(secs as u64))
+    Some(i64::from(era) * 146097 + i64::from(doe) - 719468)
 }

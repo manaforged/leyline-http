@@ -15,13 +15,14 @@ mod check;
 mod secret;
 mod state;
 mod version;
+mod wire;
 
 pub use autosave::{DeviceAutosave, DeviceAutosaveOptions};
 pub use state::SessionState;
 pub(crate) use state::{StateParts, unix_secs};
 pub(crate) use version::FileVersion;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[non_exhaustive]
 pub struct Device {
     #[serde(default)]
@@ -131,7 +132,7 @@ impl Device {
     pub fn save_to(&self, path: impl AsRef<Path>) -> Result<()> {
         let file = DeviceFileOut {
             version: FileVersion::default(),
-            device: &self.sanitized(),
+            device: self,
         };
         let bytes = serde_json::to_vec_pretty(&file).map_err(Error::from_json)?;
         write_atomic(path.as_ref(), &bytes, FileMode::Private)

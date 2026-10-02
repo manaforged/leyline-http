@@ -193,3 +193,107 @@ async fn rate_spacing_holds_when_the_total_cap_is_busy() {
         );
     }
 }
+
+#[tokio::test]
+async fn a_rate_limited_host_does_not_hold_the_total_cap() {
+    let slow = TestServer::http(|_| TestResponse::new(200).close())
+        .await
+        .unwrap();
+    let fast = TestServer::http(|_| TestResponse::new(200).close())
+        .await
+        .unwrap();
+    let session = Session::builder()
+        .host_limits(
+            HostLimits::new()
+                .max_total_in_flight(2)
+                .host("localhost", HostLimits::new().per_second(0.5)),
+        )
+        .build()
+        .unwrap();
+    let url = format!("http://localhost:{}/", slow.addr().port());
+    let waiting: Vec<_> = (0..3)
+        .map(|_| {
+            let session = session.clone();
+            let url = url.clone();
+            tokio::spawn(async move { session.get(url).await })
+        })
+        .collect();
+    slow.next_request().await.unwrap();
+    let started = Instant::now();
+    session.get(fast.url("/")).await.unwrap();
+    assert!(
+        started.elapsed() < Duration::from_millis(900),
+        "{:?}",
+        started.elapsed()
+    );
+    for task in waiting {
+        task.abort();
+    }
+}
+
+#[tokio::test]
+async fn a_pause_set_during_the_rate_wait_holds_the_next_request() {
+    let arrivals = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen = Arc::clone(&arrivals);
+    let server = TestServer::http(move |_| {
+        let mut times = seen.lock().unwrap();
+        times.push(Instant::now());
+        if times.len() == 1 {
+            TestResponse::new(429).close().header("retry-after", "3")
+        } else {
+            TestResponse::new(200).close()
+        }
+    })
+    .await
+    .unwrap();
+    let session = Session::builder()
+        .host_limits(HostLimits::new().per_second(1.0).pause_on([429]))
+        .build()
+        .unwrap();
+    let (a, b) = tokio::join!(
+        session.get(server.url("/a")).send(),
+        session.get(server.url("/b")).send()
+    );
+    a.unwrap();
+    b.unwrap();
+    let times = arrivals.lock().unwrap().clone();
+    assert!(
+        times[1] - times[0] >= Duration::from_millis(2500),
+        "{:?}",
+        times[1] - times[0]
+    );
+}
+
+#[tokio::test]
+async fn a_failed_streamed_attempt_frees_its_slot_during_the_retry_wait() {
+    let served = Arc::new(AtomicUsize::new(0));
+    let count = Arc::clone(&served);
+    let server = TestServer::http(move |req| {
+        if req.target == "/a" && count.fetch_add(1, Ordering::SeqCst) == 0 {
+            TestResponse::new(503).close().header("retry-after", "3")
+        } else {
+            TestResponse::new(200).close()
+        }
+    })
+    .await
+    .unwrap();
+    let session = Session::builder()
+        .host_limits(HostLimits::new().max_in_flight(1))
+        .retry(RetryPolicy::transient())
+        .build()
+        .unwrap();
+    let retrying = tokio::spawn({
+        let session = session.clone();
+        let url = server.url("/a");
+        async move { session.get(url).stream().send().await }
+    });
+    server.next_request().await.unwrap();
+    let started = Instant::now();
+    session.get(server.url("/b")).await.unwrap();
+    assert!(
+        started.elapsed() < Duration::from_millis(1500),
+        "{:?}",
+        started.elapsed()
+    );
+    retrying.abort();
+}

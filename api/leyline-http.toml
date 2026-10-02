@@ -831,3 +831,83 @@ guide = "docs/guide/testing.md"
 name = "Count a header"
 call = "testing::RecordedRequest::header_count"
 guide = "docs/guide/testing.md"
+
+[[task]]
+name = "Send one GET"
+call = "get"
+guide = "docs/guide/quick-start.md"
+
+[[task]]
+name = "Stream the decoded body"
+call = "Response::into_decoded_stream"
+guide = "docs/guide/streaming.md"
+
+[[task]]
+name = "Copy the decoded body to a writer"
+call = "Response::copy_decoded_to"
+guide = "docs/guide/streaming.md"
+
+[[task]]
+name = "Rotate proxies on retry"
+call = "RetryPolicy::rotate_proxies"
+guide = "docs/guide/proxies.md"
+
+[[task]]
+name = "Check a session against a device"
+call = "Device::check"
+guide = "docs/guide/accounts.md"
+
+[[task]]
+name = "Expect a profile id"
+call = "SessionBuilder::expect_profile_id"
+guide = "docs/guide/profiles.md"
+
+[[task]]
+name = "Load block rules from TOML"
+call = "BlockRules::from_toml"
+guide = "docs/guide/crawling.md"
+
+[[task]]
+name = "Read the links of a page"
+call = "html::links"
+guide = "docs/guide/accounts.md"
+
+[[task]]
+name = "Read the meta tags of a page"
+call = "html::meta"
+guide = "docs/guide/accounts.md"
+
+[[task]]
+name = "Find a form by id or name"
+call = "html::Form::find"
+guide = "docs/guide/accounts.md"
+
+[[task]]
+name = "Name an error category"
+call = "ErrorCategory::as_str"
+guide = "docs/guide/errors.md"
+
+[[task]]
+name = "Send a script fetch from a tab"
+call = "Tab::fetch"
+guide = "docs/guide/requests.md"
+
+[[task]]
+name = "Send an XHR from a tab"
+call = "Tab::xhr"
+guide = "docs/guide/requests.md"
+
+[[task]]
+name = "Post JSON from a tab"
+call = "Tab::post_json"
+guide = "docs/guide/requests.md"
+
+[[task]]
+name = "Load a subresource from a tab"
+call = "Tab::subresource"
+guide = "docs/guide/requests.md"
+
+[[task]]
+name = "Limit pagination"
+call = "Pages::limit"
+guide = "docs/guide/api-clients.md"

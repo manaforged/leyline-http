@@ -213,12 +213,14 @@ impl HostLimits {
         let gate = self.gates.gate(origin, rule.max_in_flight);
         let waiting = Count::enter(&gate.waiting);
         let permit = acquire(gate.slots.as_ref()).await;
-        gate.wait_unpaused().await;
-        let total = acquire(self.gates.total.as_ref()).await;
-        gate.wait_unpaused().await;
-        if let Some(interval) = rule.interval {
-            tokio::time::sleep_until(gate.reserve(interval)).await;
-        }
+        let total = loop {
+            gate.wait_unpaused().await;
+            gate.wait_spacing().await;
+            let total = acquire(self.gates.total.as_ref()).await;
+            if gate.try_admit(rule.interval) {
+                break total;
+            }
+        };
         drop(waiting);
         Some(HostPass {
             _in_flight: Count::enter(&gate.in_flight),
@@ -341,11 +343,21 @@ impl HostGate {
         }
     }
 
-    fn reserve(&self, interval: Duration) -> Instant {
+    fn try_admit(&self, interval: Option<Duration>) -> bool {
         let mut next = self.next.lock().unwrap_or_else(PoisonError::into_inner);
-        let slot = (*next).max(Instant::now());
-        *next = slot.checked_add(interval).unwrap_or(slot);
-        slot
+        let now = Instant::now();
+        if *next > now || self.paused_until() > now {
+            return false;
+        }
+        if let Some(interval) = interval {
+            *next = now.checked_add(interval).unwrap_or(now);
+        }
+        true
+    }
+
+    async fn wait_spacing(&self) {
+        let next = *self.next.lock().unwrap_or_else(PoisonError::into_inner);
+        tokio::time::sleep_until(next).await;
     }
 
     fn busy_after(&self, now: Instant) -> bool {

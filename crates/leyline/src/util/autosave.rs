@@ -1,3 +1,4 @@
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tokio::sync::{mpsc, oneshot, watch};
@@ -5,6 +6,7 @@ use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior};
 
 use crate::core::{Error, Kind, Result};
+use crate::util::lock;
 
 pub(crate) struct SaveJob {
     pub(crate) generation: u64,
@@ -26,6 +28,33 @@ struct Guard<T: SaveTarget> {
     label: &'static str,
     dirty: bool,
     finished: bool,
+    order: WriteOrder,
+}
+
+#[derive(Default)]
+pub(crate) struct WriteOrder {
+    sequence: u64,
+    written: Arc<Mutex<u64>>,
+}
+
+impl WriteOrder {
+    pub(crate) fn order(
+        &mut self,
+        write: Box<dyn FnOnce() -> Result<()> + Send>,
+    ) -> impl FnOnce() -> Result<()> + Send + 'static {
+        self.sequence += 1;
+        let sequence = self.sequence;
+        let written = Arc::clone(&self.written);
+        move || {
+            let mut last = lock(&written);
+            if *last >= sequence {
+                return Ok(());
+            }
+            write()?;
+            *last = sequence;
+            Ok(())
+        }
+    }
 }
 
 impl<T: SaveTarget> Guard<T> {
@@ -34,7 +63,7 @@ impl<T: SaveTarget> Guard<T> {
             return Ok(());
         };
         let generation = job.generation;
-        let written = tokio::task::spawn_blocking(job.write)
+        let written = tokio::task::spawn_blocking(self.order.order(job.write))
             .await
             .map_err(|_| stopped(self.label))
             .and_then(|out| out);
@@ -46,7 +75,7 @@ impl<T: SaveTarget> Guard<T> {
             return Ok(());
         };
         let generation = job.generation;
-        let written = (job.write)();
+        let written = self.order.order(job.write)();
         self.end(generation, written)
     }
 
@@ -155,6 +184,7 @@ async fn run<T: SaveTarget>(
         label: schedule.label,
         dirty: false,
         finished: false,
+        order: WriteOrder::default(),
     };
     let mut watching = true;
     let mut due: Option<Instant> = None;
@@ -232,3 +262,7 @@ async fn handle<T: SaveTarget>(
         None => false,
     }
 }
+
+#[cfg(test)]
+#[path = "autosave_tests.rs"]
+mod tests;

@@ -29,12 +29,10 @@ impl Cap {
     }
 
     pub(crate) fn truncate_at(session: BodyLimit, caller: usize) -> Self {
-        let limit = session.tighter(u64::try_from(caller).ok());
-        let overflow = match limit.source {
-            LimitSource::Caller => Overflow::Truncate,
-            LimitSource::Session => Overflow::Fail,
-        };
-        Self { limit, overflow }
+        Self {
+            limit: session.tighter(u64::try_from(caller).ok()),
+            overflow: Overflow::Truncate,
+        }
     }
 
     pub(crate) fn room(self, used: usize) -> usize {

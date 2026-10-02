@@ -186,3 +186,83 @@ async fn a_download_keeps_the_target_file_mode() {
     assert_eq!(std::fs::read_to_string(&target).unwrap(), "secret");
     drop(std::fs::remove_dir_all(&dir));
 }
+
+const TEXTAREA_PAGE: &str =
+    "<form id=\"t\" method=\"post\" action=\"/send\"><textarea name=\"t\">a\nb</textarea></form>";
+
+#[tokio::test]
+async fn a_textarea_line_break_is_sent_as_crlf() {
+    let server = TestServer::http(|req| {
+        if req.target == "/page" {
+            TestResponse::new(200).body(TEXTAREA_PAGE)
+        } else {
+            TestResponse::new(200)
+        }
+    })
+    .await
+    .unwrap();
+    let tab = Session::builder()
+        .browser(Browser::default())
+        .protocol(leyline::ProtocolPolicy::Http1)
+        .build()
+        .unwrap()
+        .tab();
+    let page = tab.open(server.url("/page")).await.unwrap();
+    let form = html::Form::find(&page.text().await.unwrap(), "t").unwrap();
+    tab.submit_form(&form).await.unwrap();
+    let posted = server.requests().await.pop().unwrap();
+    assert_eq!(posted.body, b"t=a%0D%0Ab");
+}
+
+#[test]
+fn a_form_attribute_naming_another_element_owns_nothing() {
+    let forms = html::forms(
+        r#"<div id="x"></div><form id="x" action="/f"></form><input form="x" name="t" value="1">"#,
+    );
+    assert_eq!(forms[0].field("t"), None);
+}
+
+#[test]
+fn options_in_a_disabled_optgroup_are_not_sent() {
+    let form = only(
+        r#"<form><select name="s"><optgroup disabled><option value="a" selected>A</option></optgroup><option value="b">B</option></select></form>"#,
+    );
+    assert_eq!(form.field("s"), Some("b"));
+}
+
+#[test]
+fn a_list_box_with_nothing_selected_sends_nothing() {
+    let form =
+        only(r#"<form><select name="s" size="3"><option value="a">A</option></select></form>"#);
+    assert_eq!(form.field("s"), None);
+}
+
+#[test]
+fn only_a_direct_child_legend_is_exempt_from_a_disabled_fieldset() {
+    let form = only(
+        r#"<form><fieldset disabled><div><legend><input name="a" value="1"></legend></div></fieldset></form>"#,
+    );
+    assert_eq!(form.field("a"), None);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_download_drops_setuid_bits_from_the_target() {
+    use std::os::unix::fs::PermissionsExt;
+    let server = TestServer::http(queue([TestResponse::new(200).close().body("bytes")]))
+        .await
+        .unwrap();
+    let dir = std::env::temp_dir().join(format!("leyline-dlsuid-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let target = dir.join("tool");
+    std::fs::write(&target, "old").unwrap();
+    std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o4755)).unwrap();
+    Session::new()
+        .get(server.url("/"))
+        .download(&target, None)
+        .await
+        .unwrap();
+    let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o7777;
+    assert_eq!(mode, 0o755);
+    drop(std::fs::remove_dir_all(&dir));
+}

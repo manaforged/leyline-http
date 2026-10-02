@@ -55,6 +55,7 @@ pub struct H3ResponseParts {
 #[derive(Debug)]
 pub enum H3SendError {
     NotSent(String),
+    Rejected(String),
     Failed(String),
     BodyLimit(BodyLimit),
     RequestBody(std::io::Error),
@@ -63,7 +64,9 @@ pub enum H3SendError {
 impl H3SendError {
     pub(crate) fn message(&self) -> Cow<'_, str> {
         match self {
-            H3SendError::NotSent(m) | H3SendError::Failed(m) => Cow::Borrowed(m.as_str()),
+            H3SendError::NotSent(m) | H3SendError::Rejected(m) | H3SendError::Failed(m) => {
+                Cow::Borrowed(m.as_str())
+            }
             H3SendError::BodyLimit(limit) => Cow::Owned(limit.to_string()),
             H3SendError::RequestBody(error) => {
                 Cow::Owned(format!("request body stream failed: {error}"))
@@ -304,6 +307,12 @@ impl H3Stream {
     fn deliver_unsent(&mut self, message: String) {
         if let Some(tx) = self.resp_tx.take() {
             drop(tx.send(Err(H3SendError::NotSent(message))));
+        }
+    }
+
+    fn deliver_rejected(&mut self, message: String) {
+        if let Some(tx) = self.resp_tx.take() {
+            drop(tx.send(Err(H3SendError::Rejected(message))));
         }
     }
 

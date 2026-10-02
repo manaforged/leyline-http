@@ -105,5 +105,5 @@ async fn saved_state_never_holds_the_proxy_password() {
         "no TLS session was saved: {saved}"
     );
     assert!(!saved.contains("hunter2secret"), "{saved}");
-    assert!(!saved.contains("alice"), "{saved}");
+    assert!(saved.contains("alice@127.0.0.1"), "{saved}");
 }

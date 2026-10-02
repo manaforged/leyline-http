@@ -79,8 +79,8 @@ your own IP echo service and keep it in `Device::app`.
 `ProxyUrl` serializes the full URL, password included. To keep the password
 out of the device file, set `proxy_password_env` to the name of an
 environment variable. `save_to` and `Device::autosave` then write the proxy
-URL without its password, and `open` and `session_builder` read it back from
-the variable. When the variable is not set, they return `Kind::Config` with
+URL without its password, and `open` and `session_builder` read it back
+from the variable. Serializing the `Device` never writes the password. When the variable is not set, they return `Kind::Config` with
 a message that names it.
 
 ```rust,no_run
@@ -277,13 +277,22 @@ The `html` feature, on by default, adds `leyline::html` and turns on the
 - Hidden inputs, checked checkboxes, text areas, and selected options.
 - One checked radio button per name: the last one, as a browser keeps it.
 - Controls outside the `<form>` element that name it with `form="id"`.
+  When two elements share the id, the first one is the form.
 - No disabled controls, and no controls inside a disabled `<fieldset>`
-  except in its first `<legend>`.
+  except in the first `<legend>` that is a direct child of that fieldset.
+- No options inside a disabled `<optgroup>`. A list box (`<select size>`)
+  with no selected option sends nothing.
+- Line breaks in names and values converted to CRLF, as a browser sends them.
 - Values with every HTML named character reference decoded, such as `&amp;`
   and `&eacute;`.
 
 `Form::find(document, key)` returns the first form whose `id` or `name` is
 `key`.
+
+`Tab::follow` and `Tab::submit_form` drop the session credentials when the
+target origin differs from the current page: the `Authorization`, `Cookie`,
+and `Proxy-Authorization` defaults and the session bearer token, as a
+redirect does.
 
 | Call | Effect |
 | --- | --- |

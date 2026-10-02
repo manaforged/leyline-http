@@ -96,7 +96,7 @@ impl Tab {
     }
 
     pub async fn follow(&self, url: impl IntoUrl) -> Result<Response> {
-        self.navigate(self.request(Method::GET, url, Preset::Navigate))
+        self.navigate(self.trusted(self.request(Method::GET, url, Preset::Navigate)))
             .await
     }
 
@@ -114,16 +114,19 @@ impl Tab {
     #[cfg(feature = "html")]
     pub async fn submit_form(&self, form: &crate::html::Form) -> Result<Response> {
         let mut url = self.form_action(form)?;
+        let fields = normalized_fields(form);
         let builder = match form.method() {
-            crate::html::FormMethod::Post => {
-                encode_form(self.request(Method::POST, url, Preset::FormNavigate), form)?
-            }
+            crate::html::FormMethod::Post => encode_form(
+                self.request(Method::POST, url, Preset::FormNavigate),
+                form.enctype(),
+                fields,
+            ),
             crate::html::FormMethod::Get => {
-                url.query_pairs_mut().clear().extend_pairs(form.fields());
+                url.query_pairs_mut().clear().extend_pairs(&fields);
                 self.request(Method::GET, url, Preset::Navigate)
             }
         };
-        self.navigate(builder).await
+        self.navigate(self.trusted(builder)).await
     }
 
     #[cfg(feature = "html")]
@@ -147,6 +150,11 @@ impl Tab {
         Ok(response)
     }
 
+    fn trusted(&self, mut builder: RequestBuilder) -> RequestBuilder {
+        builder.trusted_origin = self.current();
+        builder
+    }
+
     fn build(&self, method: Method, url: impl IntoUrl, page: Option<&Url>) -> RequestBuilder {
         let Some(page) = page else {
             return self.session.request(method, url);
@@ -163,23 +171,41 @@ impl Tab {
 }
 
 #[cfg(feature = "html")]
-fn encode_form(builder: RequestBuilder, form: &crate::html::Form) -> Result<RequestBuilder> {
+fn normalized_fields(form: &crate::html::Form) -> Vec<(String, String)> {
+    form.fields()
+        .iter()
+        .map(|(name, value)| (crlf(name), crlf(value)))
+        .collect()
+}
+
+#[cfg(feature = "html")]
+fn crlf(text: &str) -> String {
+    text.replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .replace('\n', "\r\n")
+}
+
+#[cfg(feature = "html")]
+fn encode_form(
+    builder: RequestBuilder,
+    enctype: crate::html::FormEnctype,
+    fields: Vec<(String, String)>,
+) -> RequestBuilder {
     use crate::html::FormEnctype;
-    match form.enctype() {
-        FormEnctype::UrlEncoded => Ok(builder.form(form.fields())),
+    match enctype {
+        FormEnctype::UrlEncoded => builder.form(fields),
         FormEnctype::TextPlain => {
-            let body: String = form
-                .fields()
+            let body: String = fields
                 .iter()
                 .map(|(name, value)| format!("{name}={value}\r\n"))
                 .collect();
-            Ok(builder
+            builder
                 .header(http::header::CONTENT_TYPE, FormEnctype::TextPlain.as_str())
-                .body(body))
+                .body(body)
         }
-        FormEnctype::Multipart => Ok(builder.multipart(form.fields().iter().fold(
+        FormEnctype::Multipart => builder.multipart(fields.into_iter().fold(
             crate::core::multipart::Form::new(),
-            |body, (name, value)| body.text(name.clone(), value.clone()),
-        ))),
+            |body, (name, value)| body.text(name, value),
+        )),
     }
 }

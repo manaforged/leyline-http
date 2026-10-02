@@ -4,3 +4,4 @@
 *.md text eol=lf
 *.rs text eol=lf
 *.patch text eol=lf
+*.tsv text eol=lf

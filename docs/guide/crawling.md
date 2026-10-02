@@ -99,11 +99,13 @@ every host.
 A request is admitted in this order:
 
 1. It waits for an in-flight slot of its origin.
-2. It waits while the origin is paused.
-3. It waits for a global slot.
-4. It waits again while the origin is paused, because a pause can start
-   during step 3.
-5. It waits for its turn in the rate spacing.
+2. It waits while the origin is paused, then for the origin's next rate slot.
+3. It waits for a global slot. A request that loses its turn while it waits
+   for the global slot goes back to step 2.
+
+No request holds a global slot while it waits for a pause or the rate
+spacing. The rate spacing is measured when a request is admitted, and a pause
+is checked again just before admission.
 
 The wait counts against the request deadline, and ends in `Kind::Timeout`
 when the deadline passes. Each retry waits its turn again. Each redirect hop
@@ -111,7 +113,9 @@ is admitted against the origin it goes to, and releases the slot of the hop
 before. `pause_on` and the proxy pool's strikes apply to the origin that sent
 the response, which after a redirect is not the origin of the first URL. A buffered request releases its slot when
 its body has been read; a `.stream()` request keeps it until the body ends,
-fails, or is dropped. Dropping a waiting request removes it from the queue.
+fails, or is dropped. A streamed body ends at its first error and releases
+the slot. A failed attempt releases its slot before the retry wait. Dropping
+a waiting request removes it from the queue.
 
 `max_in_flight` counts requests to one origin across every proxy. The
 connection pool then applies `PoolConfig::max_h1_conns_per_host` to each

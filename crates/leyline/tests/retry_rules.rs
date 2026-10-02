@@ -183,3 +183,60 @@ async fn the_body_timeout_starts_at_the_first_read() {
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert_eq!(resp.bytes().await.unwrap(), "fast");
 }
+
+#[tokio::test]
+async fn a_hostile_retry_after_year_is_ignored() {
+    let server = TestServer::http(queue([
+        TestResponse::new(503)
+            .close()
+            .header("retry-after", "Mon, 01 Jan -2147483648 00:00:00 GMT"),
+        TestResponse::new(200).close(),
+    ]))
+    .await
+    .unwrap();
+    let resp = Session::builder()
+        .retry(
+            RetryPolicy::transient()
+                .initial_backoff(Duration::from_millis(1))
+                .jitter(false),
+        )
+        .build()
+        .unwrap()
+        .get(server.url("/"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status().as_u16(), 200);
+}
+
+async fn error_body_len(gzip: bool) -> Option<usize> {
+    let payload = vec![b'e'; 20 * 1024];
+    let mut response = TestResponse::new(500).close();
+    response = if gzip {
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        encoder.write_all(&payload).unwrap();
+        response
+            .header("content-encoding", "gzip")
+            .body(encoder.finish().unwrap())
+    } else {
+        response.body(payload)
+    };
+    let server = TestServer::http(queue([response])).await.unwrap();
+    let err = Session::builder()
+        .retry(RetryPolicy::none())
+        .compression(CompressionConfig::new().max_body_size(16 * 1024))
+        .build()
+        .unwrap()
+        .get(server.url("/"))
+        .stream()
+        .error_for_status()
+        .send()
+        .await
+        .unwrap_err();
+    err.body().map(<[u8]>::len)
+}
+
+#[tokio::test]
+async fn an_error_body_is_cut_at_the_session_cap_with_or_without_encoding() {
+    assert_eq!(error_body_len(false).await, Some(16 * 1024));
+    assert_eq!(error_body_len(true).await, Some(16 * 1024));
+}

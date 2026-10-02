@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use super::assign::{Entry, Item, Owner, assign};
 use super::entity::decode;
 use super::fieldset::Fieldsets;
@@ -31,7 +33,9 @@ const TOGGLE_DEFAULT: &str = "on";
 
 struct Select {
     field: Option<(Owner, String)>,
-    multiple: bool,
+    single: bool,
+    listbox: bool,
+    group_disabled: bool,
     first: Option<String>,
     chosen: Vec<String>,
 }
@@ -44,6 +48,7 @@ struct Builder {
     select: Option<Select>,
     fieldsets: Fieldsets,
     base: Option<String>,
+    ids: HashMap<String, Option<usize>>,
 }
 
 pub(super) fn forms(document: &str) -> Vec<Form> {
@@ -61,15 +66,26 @@ impl Builder {
                 self.close_select();
                 self.forms.push(open(tag));
                 self.open = Some(self.forms.len() - 1);
+                self.record(tag, self.open);
             }
+            (false, "form") => {}
             (true, "form") => self.close_form(),
             (false, "base") if self.base.is_none() => {
                 self.base = tag.attr("href").map(|href| href.trim().to_owned());
             }
             _ => {
+                if !tag.closing {
+                    self.record(tag, None);
+                }
                 self.fieldsets.tag(tag);
                 self.control(tag);
             }
+        }
+    }
+
+    fn record(&mut self, tag: &Tag<'_>, form: Option<usize>) {
+        if let Some(id) = tag.attr("id").filter(|id| !id.is_empty()) {
+            self.ids.entry(id.to_owned()).or_insert(form);
         }
     }
 
@@ -80,13 +96,10 @@ impl Builder {
             (false, "textarea") => self.textarea(tag),
             (false, "select") => {
                 self.close_select();
-                self.select = Some(Select {
-                    field: self.field(tag),
-                    multiple: tag.has("multiple"),
-                    first: None,
-                    chosen: Vec::new(),
-                });
+                self.select = Some(open_select(self.field(tag), tag));
             }
+            (false, "optgroup") => self.optgroup(tag.has("disabled")),
+            (true, "optgroup") => self.optgroup(false),
             (false, "option") => self.option(tag),
             (true, "select") => self.close_select(),
             _ => {}
@@ -99,6 +112,7 @@ impl Builder {
         }
         let name = tag.attr("name").filter(|name| !name.is_empty())?;
         let owner = match tag.attr("form") {
+            Some("") => return None,
             Some(id) => Owner::Id(id.to_owned()),
             None => Owner::Open(self.open?),
         };
@@ -160,11 +174,17 @@ impl Builder {
         self.push(owner, name, decode(raw), false);
     }
 
+    fn optgroup(&mut self, disabled: bool) {
+        if let Some(select) = self.select.as_mut() {
+            select.group_disabled = disabled;
+        }
+    }
+
     fn option(&mut self, tag: &Tag<'_>) {
         let Some(select) = self.select.as_mut() else {
             return;
         };
-        if tag.has("disabled") {
+        if select.group_disabled || tag.has("disabled") {
             return;
         }
         let value = match tag.attr("value") {
@@ -186,10 +206,11 @@ impl Builder {
         let Some((owner, name)) = select.field else {
             return;
         };
-        let values = match (select.multiple, select.chosen.is_empty()) {
-            (true, _) => select.chosen,
-            (false, false) => select.chosen.last().cloned().into_iter().collect(),
-            (false, true) => select.first.into_iter().collect(),
+        let values = match (select.single, select.chosen.is_empty()) {
+            (false, _) => select.chosen,
+            (true, false) => select.chosen.last().cloned().into_iter().collect(),
+            (true, true) if select.listbox => Vec::new(),
+            (true, true) => select.first.into_iter().collect(),
         };
         for value in values {
             self.push(owner.clone(), name.clone(), value, false);
@@ -203,11 +224,26 @@ impl Builder {
 
     fn finish(mut self) -> Vec<Form> {
         self.close_form();
-        assign(&mut self.forms, self.entries);
+        assign(&mut self.forms, self.entries, &self.ids);
         for form in &mut self.forms {
             form.base.clone_from(&self.base);
         }
         self.forms
+    }
+}
+
+fn open_select(field: Option<(Owner, String)>, tag: &Tag<'_>) -> Select {
+    let size = tag
+        .attr("size")
+        .and_then(|size| size.trim().parse::<u64>().ok())
+        .unwrap_or(0);
+    Select {
+        field,
+        single: !tag.has("multiple"),
+        listbox: size > 1,
+        group_disabled: false,
+        first: None,
+        chosen: Vec::new(),
     }
 }
 

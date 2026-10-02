@@ -7,10 +7,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: release-watch
-  cancel-in-progress: true
-
 jobs:
   watch:
     name: browser releases and upstream advisories

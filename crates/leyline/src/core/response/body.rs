@@ -123,6 +123,7 @@ impl Response {
     where
         F: FnMut(&[u8], usize) -> bool,
     {
+        let limit = limit.min(self.compression.max_body_size);
         let encoding = content_codings(self.headers.get_all(http::header::CONTENT_ENCODING));
         let mut decoder = Decoder::truncated(encoding.as_deref(), &self.compression, limit)?;
         let mut stream = self.into_stream()?;

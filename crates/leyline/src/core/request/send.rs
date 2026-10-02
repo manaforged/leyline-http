@@ -75,6 +75,7 @@ impl RequestBuilder {
             redirect: self.redirect.take(),
             digest: self.digest_auth.take(),
             initiator: self.initiator.take(),
+            trusted_origin: self.trusted_origin.take(),
         }
     }
 
@@ -155,6 +156,7 @@ async fn run_attempts(
                 return (counted(result, n + 1), n + 1);
             }
         };
+        drop(result);
 
         let slept = session
             .unless_shut_down(async {

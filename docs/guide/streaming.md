@@ -99,7 +99,7 @@ and saves the decoded body to `path`. It returns the number of bytes written.
 | Status | With `download`, a status of 400 or more is a `Kind::Status` error with the status, the URL, the headers, and the start of the body, within the [status-error limits](responses.md#turn-a-status-into-an-error). Nothing is written. `download_to` does not check the status; call `error_for_status()` first |
 | Write | The decoded body goes to a temporary file `.<name>.<16 hex>.part` in the same directory |
 | Limit | The smaller of `limit` and `max_body_size`, in decoded bytes. `content_length()` is the encoded size |
-| Commit | Leyline flushes and syncs the file, renames it to `path`, and on Unix syncs the directory. When `path` already exists, the new file keeps its permissions |
+| Commit | Leyline flushes and syncs the file, renames it to `path`, and on Unix syncs the directory. When `path` already exists, the new file keeps its permission bits, without setuid, setgid, or sticky bits. |
 | Error or drop | Leyline removes the temporary file. `path` does not exist, or keeps its old content |
 
 A path with no file name fails with `Kind::Request`.

@@ -27,6 +27,7 @@ pub struct Pages {
     template: Template,
     pending: Option<PageFuture>,
     visited: HashSet<Url>,
+    remaining: Option<usize>,
 }
 
 struct Template {
@@ -55,6 +56,7 @@ impl RequestBuilder {
             template,
             pending: Some(Box::pin(self.send())),
             visited,
+            remaining: None,
         }
     }
 }
@@ -113,11 +115,20 @@ impl Template {
         next.initiator = self.initiator.clone();
         next.tag = self.tag.clone();
         next.status_errors = self.status_errors;
+        next.trusted_origin = self.first.clone();
         next
     }
 }
 
 impl Pages {
+    pub fn limit(mut self, max: usize) -> Self {
+        self.remaining = Some(max);
+        if max == 0 {
+            self.pending = None;
+        }
+        self
+    }
+
     pub async fn next(&mut self) -> Option<Result<Response>> {
         std::future::poll_fn(|cx| Pin::new(&mut *self).poll_next(cx)).await
     }
@@ -146,7 +157,10 @@ impl Stream for Pages {
         };
         let result = ready!(pending.as_mut().poll(cx));
         this.pending = None;
-        if let Ok(response) = &result {
+        if let Some(remaining) = this.remaining.as_mut() {
+            *remaining = remaining.saturating_sub(1);
+        }
+        if let (Ok(response), false) = (&result, this.remaining == Some(0)) {
             this.queue_next(response);
         }
         Poll::Ready(Some(result))

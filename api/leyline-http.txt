@@ -154,65 +154,65 @@ impl leyline::cookie::JarAutosave
 pub async fn leyline::cookie::JarAutosave::flush(&self) -> leyline::Result<()>
 pub async fn leyline::cookie::JarAutosave::shutdown(self) -> leyline::Result<()>
 impl core::fmt::Debug for leyline::cookie::JarAutosave
-#[cfg(feature = "multipart")] pub mod leyline::html
-#[cfg(feature = "multipart")] #[non_exhaustive] pub enum leyline::html::FormEnctype
-#[cfg(feature = "multipart")] pub leyline::html::FormEnctype::Multipart
-#[cfg(feature = "multipart")] pub leyline::html::FormEnctype::TextPlain
-#[cfg(feature = "multipart")] pub leyline::html::FormEnctype::UrlEncoded
-#[cfg(feature = "multipart")] impl leyline::html::FormEnctype
-#[cfg(feature = "multipart")] pub fn leyline::html::FormEnctype::as_str(self) -> &'static str
-#[cfg(feature = "multipart")] impl core::clone::Clone for leyline::html::FormEnctype
-#[cfg(feature = "multipart")] impl core::cmp::Eq for leyline::html::FormEnctype
-#[cfg(feature = "multipart")] impl core::cmp::PartialEq for leyline::html::FormEnctype
-#[cfg(feature = "multipart")] impl core::default::Default for leyline::html::FormEnctype
-#[cfg(feature = "multipart")] impl core::fmt::Debug for leyline::html::FormEnctype
-#[cfg(feature = "multipart")] impl core::hash::Hash for leyline::html::FormEnctype
-#[cfg(feature = "multipart")] impl core::marker::Copy for leyline::html::FormEnctype
-#[cfg(feature = "multipart")] impl core::marker::StructuralPartialEq for leyline::html::FormEnctype
-#[cfg(feature = "multipart")] #[non_exhaustive] pub enum leyline::html::FormMethod
-#[cfg(feature = "multipart")] pub leyline::html::FormMethod::Get
-#[cfg(feature = "multipart")] pub leyline::html::FormMethod::Post
-#[cfg(feature = "multipart")] impl core::clone::Clone for leyline::html::FormMethod
-#[cfg(feature = "multipart")] impl core::cmp::Eq for leyline::html::FormMethod
-#[cfg(feature = "multipart")] impl core::cmp::PartialEq for leyline::html::FormMethod
-#[cfg(feature = "multipart")] impl core::default::Default for leyline::html::FormMethod
-#[cfg(feature = "multipart")] impl core::fmt::Debug for leyline::html::FormMethod
-#[cfg(feature = "multipart")] impl core::hash::Hash for leyline::html::FormMethod
-#[cfg(feature = "multipart")] impl core::marker::Copy for leyline::html::FormMethod
-#[cfg(feature = "multipart")] impl core::marker::StructuralPartialEq for leyline::html::FormMethod
-#[cfg(feature = "multipart")] #[non_exhaustive] pub struct leyline::html::Anchor
-#[cfg(feature = "multipart")] impl leyline::html::Anchor
-#[cfg(feature = "multipart")] pub fn leyline::html::Anchor::href(&self) -> &str
-#[cfg(feature = "multipart")] pub fn leyline::html::Anchor::rel(&self) -> core::option::Option<&str>
-#[cfg(feature = "multipart")] pub fn leyline::html::Anchor::text(&self) -> &str
-#[cfg(feature = "multipart")] impl core::clone::Clone for leyline::html::Anchor
-#[cfg(feature = "multipart")] impl core::cmp::Eq for leyline::html::Anchor
-#[cfg(feature = "multipart")] impl core::cmp::PartialEq for leyline::html::Anchor
-#[cfg(feature = "multipart")] impl core::fmt::Debug for leyline::html::Anchor
-#[cfg(feature = "multipart")] impl core::marker::StructuralPartialEq for leyline::html::Anchor
-#[cfg(feature = "multipart")] #[non_exhaustive] pub struct leyline::html::Form
-#[cfg(feature = "multipart")] impl leyline::html::Form
-#[cfg(feature = "multipart")] pub fn leyline::html::Form::action(&self) -> &str
-#[cfg(feature = "multipart")] pub fn leyline::html::Form::base(&self) -> core::option::Option<&str>
-#[cfg(feature = "multipart")] pub fn leyline::html::Form::buttons(&self) -> alloc::vec::Vec<&str>
-#[cfg(feature = "multipart")] pub fn leyline::html::Form::enctype(&self) -> leyline::html::FormEnctype
-#[cfg(feature = "multipart")] pub fn leyline::html::Form::field(&self, name: &str) -> core::option::Option<&str>
-#[cfg(feature = "multipart")] pub fn leyline::html::Form::fields(&self) -> &[(alloc::string::String, alloc::string::String)]
-#[cfg(feature = "multipart")] pub fn leyline::html::Form::find(document: &str, selector: &str) -> core::option::Option<leyline::html::Form>
-#[cfg(feature = "multipart")] pub fn leyline::html::Form::id(&self) -> core::option::Option<&str>
-#[cfg(feature = "multipart")] pub fn leyline::html::Form::method(&self) -> leyline::html::FormMethod
-#[cfg(feature = "multipart")] pub fn leyline::html::Form::name(&self) -> core::option::Option<&str>
-#[cfg(feature = "multipart")] pub fn leyline::html::Form::press(&mut self, button: &str) -> bool
-#[cfg(feature = "multipart")] pub fn leyline::html::Form::set(&mut self, name: impl core::convert::Into<alloc::string::String>, value: impl core::convert::Into<alloc::string::String>) -> &mut Self
-#[cfg(feature = "multipart")] impl core::clone::Clone for leyline::html::Form
-#[cfg(feature = "multipart")] impl core::cmp::Eq for leyline::html::Form
-#[cfg(feature = "multipart")] impl core::cmp::PartialEq for leyline::html::Form
-#[cfg(feature = "multipart")] impl core::default::Default for leyline::html::Form
-#[cfg(feature = "multipart")] impl core::fmt::Debug for leyline::html::Form
-#[cfg(feature = "multipart")] impl core::marker::StructuralPartialEq for leyline::html::Form
-#[cfg(feature = "multipart")] pub fn leyline::html::forms(document: &str) -> alloc::vec::Vec<leyline::html::Form>
-#[cfg(feature = "multipart")] pub fn leyline::html::links(document: &str) -> alloc::vec::Vec<leyline::html::Anchor>
-#[cfg(feature = "multipart")] pub fn leyline::html::meta(document: &str, name: &str) -> core::option::Option<alloc::string::String>
+#[cfg(feature = "html")] pub mod leyline::html
+#[cfg(feature = "html")] #[non_exhaustive] pub enum leyline::html::FormEnctype
+#[cfg(feature = "html")] pub leyline::html::FormEnctype::Multipart
+#[cfg(feature = "html")] pub leyline::html::FormEnctype::TextPlain
+#[cfg(feature = "html")] pub leyline::html::FormEnctype::UrlEncoded
+#[cfg(feature = "html")] impl leyline::html::FormEnctype
+#[cfg(feature = "html")] pub fn leyline::html::FormEnctype::as_str(self) -> &'static str
+#[cfg(feature = "html")] impl core::clone::Clone for leyline::html::FormEnctype
+#[cfg(feature = "html")] impl core::cmp::Eq for leyline::html::FormEnctype
+#[cfg(feature = "html")] impl core::cmp::PartialEq for leyline::html::FormEnctype
+#[cfg(feature = "html")] impl core::default::Default for leyline::html::FormEnctype
+#[cfg(feature = "html")] impl core::fmt::Debug for leyline::html::FormEnctype
+#[cfg(feature = "html")] impl core::hash::Hash for leyline::html::FormEnctype
+#[cfg(feature = "html")] impl core::marker::Copy for leyline::html::FormEnctype
+#[cfg(feature = "html")] impl core::marker::StructuralPartialEq for leyline::html::FormEnctype
+#[cfg(feature = "html")] #[non_exhaustive] pub enum leyline::html::FormMethod
+#[cfg(feature = "html")] pub leyline::html::FormMethod::Get
+#[cfg(feature = "html")] pub leyline::html::FormMethod::Post
+#[cfg(feature = "html")] impl core::clone::Clone for leyline::html::FormMethod
+#[cfg(feature = "html")] impl core::cmp::Eq for leyline::html::FormMethod
+#[cfg(feature = "html")] impl core::cmp::PartialEq for leyline::html::FormMethod
+#[cfg(feature = "html")] impl core::default::Default for leyline::html::FormMethod
+#[cfg(feature = "html")] impl core::fmt::Debug for leyline::html::FormMethod
+#[cfg(feature = "html")] impl core::hash::Hash for leyline::html::FormMethod
+#[cfg(feature = "html")] impl core::marker::Copy for leyline::html::FormMethod
+#[cfg(feature = "html")] impl core::marker::StructuralPartialEq for leyline::html::FormMethod
+#[cfg(feature = "html")] #[non_exhaustive] pub struct leyline::html::Anchor
+#[cfg(feature = "html")] impl leyline::html::Anchor
+#[cfg(feature = "html")] pub fn leyline::html::Anchor::href(&self) -> &str
+#[cfg(feature = "html")] pub fn leyline::html::Anchor::rel(&self) -> core::option::Option<&str>
+#[cfg(feature = "html")] pub fn leyline::html::Anchor::text(&self) -> &str
+#[cfg(feature = "html")] impl core::clone::Clone for leyline::html::Anchor
+#[cfg(feature = "html")] impl core::cmp::Eq for leyline::html::Anchor
+#[cfg(feature = "html")] impl core::cmp::PartialEq for leyline::html::Anchor
+#[cfg(feature = "html")] impl core::fmt::Debug for leyline::html::Anchor
+#[cfg(feature = "html")] impl core::marker::StructuralPartialEq for leyline::html::Anchor
+#[cfg(feature = "html")] #[non_exhaustive] pub struct leyline::html::Form
+#[cfg(feature = "html")] impl leyline::html::Form
+#[cfg(feature = "html")] pub fn leyline::html::Form::action(&self) -> &str
+#[cfg(feature = "html")] pub fn leyline::html::Form::base(&self) -> core::option::Option<&str>
+#[cfg(feature = "html")] pub fn leyline::html::Form::buttons(&self) -> alloc::vec::Vec<&str>
+#[cfg(feature = "html")] pub fn leyline::html::Form::enctype(&self) -> leyline::html::FormEnctype
+#[cfg(feature = "html")] pub fn leyline::html::Form::field(&self, name: &str) -> core::option::Option<&str>
+#[cfg(feature = "html")] pub fn leyline::html::Form::fields(&self) -> &[(alloc::string::String, alloc::string::String)]
+#[cfg(feature = "html")] pub fn leyline::html::Form::find(document: &str, selector: &str) -> core::option::Option<leyline::html::Form>
+#[cfg(feature = "html")] pub fn leyline::html::Form::id(&self) -> core::option::Option<&str>
+#[cfg(feature = "html")] pub fn leyline::html::Form::method(&self) -> leyline::html::FormMethod
+#[cfg(feature = "html")] pub fn leyline::html::Form::name(&self) -> core::option::Option<&str>
+#[cfg(feature = "html")] pub fn leyline::html::Form::press(&mut self, button: &str) -> bool
+#[cfg(feature = "html")] pub fn leyline::html::Form::set(&mut self, name: impl core::convert::Into<alloc::string::String>, value: impl core::convert::Into<alloc::string::String>) -> &mut Self
+#[cfg(feature = "html")] impl core::clone::Clone for leyline::html::Form
+#[cfg(feature = "html")] impl core::cmp::Eq for leyline::html::Form
+#[cfg(feature = "html")] impl core::cmp::PartialEq for leyline::html::Form
+#[cfg(feature = "html")] impl core::default::Default for leyline::html::Form
+#[cfg(feature = "html")] impl core::fmt::Debug for leyline::html::Form
+#[cfg(feature = "html")] impl core::marker::StructuralPartialEq for leyline::html::Form
+#[cfg(feature = "html")] pub fn leyline::html::forms(document: &str) -> alloc::vec::Vec<leyline::html::Form>
+#[cfg(feature = "html")] pub fn leyline::html::links(document: &str) -> alloc::vec::Vec<leyline::html::Anchor>
+#[cfg(feature = "html")] pub fn leyline::html::meta(document: &str, name: &str) -> core::option::Option<alloc::string::String>
 #[cfg(feature = "multipart")] pub mod leyline::multipart
 #[cfg(feature = "multipart")] pub struct leyline::multipart::Form
 #[cfg(feature = "multipart")] impl leyline::multipart::Form
@@ -1051,7 +1051,7 @@ impl core::cmp::PartialEq for leyline::RedirectAction
 impl core::fmt::Debug for leyline::RedirectAction
 impl core::marker::Copy for leyline::RedirectAction
 impl core::marker::StructuralPartialEq for leyline::RedirectAction
-pub enum leyline::RelayBody
+#[non_exhaustive] pub enum leyline::RelayBody
 pub leyline::RelayBody::AsReceived
 pub leyline::RelayBody::Decoded
 impl core::clone::Clone for leyline::RelayBody
@@ -1381,6 +1381,7 @@ impl core::fmt::Debug for leyline::NoProxy
 impl core::marker::StructuralPartialEq for leyline::NoProxy
 pub struct leyline::Pages
 impl leyline::Pages
+pub fn leyline::Pages::limit(self, max: usize) -> Self
 pub async fn leyline::Pages::next(&mut self) -> core::option::Option<leyline::Result<leyline::Response>>
 impl core::fmt::Debug for leyline::Pages
 impl futures_core::stream::Stream for leyline::Pages
@@ -1724,7 +1725,7 @@ pub fn leyline::Tab::post_json(&self, url: impl leyline::IntoUrl, body: &impl se
 pub fn leyline::Tab::session(&self) -> &leyline::Session
 pub fn leyline::Tab::set_current(&self, page: core::option::Option<url::Url>)
 pub async fn leyline::Tab::submit<I, P>(&self, url: impl leyline::IntoUrl, fields: I) -> leyline::Result<leyline::Response> where I: core::iter::traits::collect::IntoIterator<Item = P>, P: leyline::IntoParamPair
-#[cfg(feature = "multipart")] pub async fn leyline::Tab::submit_form(&self, form: &leyline::html::Form) -> leyline::Result<leyline::Response>
+#[cfg(feature = "html")] pub async fn leyline::Tab::submit_form(&self, form: &leyline::html::Form) -> leyline::Result<leyline::Response>
 pub fn leyline::Tab::subresource(&self, url: impl leyline::IntoUrl, preset: leyline::Preset) -> leyline::RequestBuilder
 pub fn leyline::Tab::xhr(&self, url: impl leyline::IntoUrl) -> leyline::RequestBuilder
 impl core::clone::Clone for leyline::Tab

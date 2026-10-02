@@ -1,5 +1,10 @@
 use super::scan::Tag;
 
+const VOID: [&str; 13] = [
+    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track",
+    "wbr",
+];
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Legend {
     Before,
@@ -10,6 +15,7 @@ enum Legend {
 struct Level {
     disabled: bool,
     legend: Legend,
+    depth: usize,
 }
 
 #[derive(Default)]
@@ -23,13 +29,35 @@ impl Fieldsets {
             (false, "fieldset") => self.stack.push(Level {
                 disabled: tag.has("disabled"),
                 legend: Legend::Before,
+                depth: 0,
             }),
             (true, "fieldset") => {
                 self.stack.pop();
             }
-            (false, "legend") => self.step(Legend::Before, Legend::Inside),
-            (true, "legend") => self.step(Legend::Inside, Legend::After),
-            _ => {}
+            (false, name) => self.open(name),
+            (true, name) => self.close(name),
+        }
+    }
+
+    fn open(&mut self, name: &str) {
+        let Some(level) = self.stack.last_mut() else {
+            return;
+        };
+        if name == "legend" && level.depth == 0 && level.legend == Legend::Before {
+            level.legend = Legend::Inside;
+        }
+        if !VOID.contains(&name) {
+            level.depth += 1;
+        }
+    }
+
+    fn close(&mut self, name: &str) {
+        let Some(level) = self.stack.last_mut() else {
+            return;
+        };
+        level.depth = level.depth.saturating_sub(1);
+        if name == "legend" && level.depth == 0 && level.legend == Legend::Inside {
+            level.legend = Legend::After;
         }
     }
 
@@ -37,11 +65,5 @@ impl Fieldsets {
         self.stack
             .iter()
             .any(|level| level.disabled && level.legend != Legend::Inside)
-    }
-
-    fn step(&mut self, from: Legend, to: Legend) {
-        if let Some(level) = self.stack.last_mut().filter(|level| level.legend == from) {
-            level.legend = to;
-        }
     }
 }

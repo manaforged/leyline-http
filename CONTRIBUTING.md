@@ -150,11 +150,14 @@ captured on a schedule.
 A release is a `v*` tag on a commit on `main`. Pushing the tag runs
 `release.yml`:
 
-1. `qualify` runs every gate in `ci.yml`, and `release qualification` checks
-   that the tag is on `main` and matches the crate versions, the `=` pins
-   between the crates, and a dated `CHANGELOG.md` heading.
-2. `package` packages the five crates and runs the consumer check in a job
-   that holds no credentials.
+1. Four gates run in parallel. `qualify` runs every gate in `ci.yml`.
+   `hygiene` scans the tree and the commit messages since the previous `v*`
+   tag for denied text. `matrix` runs the cross-platform matrix
+   (`matrix.yml`) on Linux, macOS, and Windows. `release qualification`
+   checks that the tag is on `main` and matches the crate versions, the `=`
+   pins between the crates, and a dated `CHANGELOG.md` heading.
+2. `package` starts only when all four gates pass. It packages the five
+   crates and runs the consumer check in a job that holds no credentials.
 3. `publish` waits for a maintainer to approve the `release` environment. It
    repackages the crates, checks that every `.crate` file matches the one
    `package` tested, publishes them in dependency order with a short-lived

@@ -4,10 +4,10 @@
 
 ## leyline-http 0.1.0
 
-- [Every public item, one per line](reference/leyline-http/api.txt): 1845 lines
+- [Every public item, one per line](reference/leyline-http/api.txt): 1846 lines
 - [API overview](reference/leyline-http/index.html): tasks, modules, features, and examples
 - [API changes by release](reference/leyline-http/changes.html)
-- [leyline](reference/leyline-http/leyline.html): 672 items
+- [leyline](reference/leyline-http/leyline.html): 673 items
 - [leyline::audit](reference/leyline-http/leyline-audit.html): 63 items
 - [leyline::cookie](reference/leyline-http/leyline-cookie.html): 35 items
 - [leyline::html](reference/leyline-http/leyline-html.html): 28 items
@@ -193,3 +193,19 @@
 - [Read the request line](reference/leyline-http/leyline-testing.html#recordedrequest): `testing::RecordedRequest::request_line`
 - [Read every value of a header](reference/leyline-http/leyline-testing.html#recordedrequest): `testing::RecordedRequest::header_values`
 - [Count a header](reference/leyline-http/leyline-testing.html#recordedrequest): `testing::RecordedRequest::header_count`
+- [Send one GET](reference/leyline-http/leyline.html#get): `get`
+- [Stream the decoded body](reference/leyline-http/leyline.html#response): `Response::into_decoded_stream`
+- [Copy the decoded body to a writer](reference/leyline-http/leyline.html#response): `Response::copy_decoded_to`
+- [Rotate proxies on retry](reference/leyline-http/leyline.html#retrypolicy): `RetryPolicy::rotate_proxies`
+- [Check a session against a device](reference/leyline-http/leyline.html#device): `Device::check`
+- [Expect a profile id](reference/leyline-http/leyline.html#sessionbuilder): `SessionBuilder::expect_profile_id`
+- [Load block rules from TOML](reference/leyline-http/leyline.html#blockrules): `BlockRules::from_toml`
+- [Read the links of a page](reference/leyline-http/leyline-html.html#links): `html::links`
+- [Read the meta tags of a page](reference/leyline-http/leyline-html.html#meta): `html::meta`
+- [Find a form by id or name](reference/leyline-http/leyline-html.html#form): `html::Form::find`
+- [Name an error category](reference/leyline-http/leyline.html#errorcategory): `ErrorCategory::as_str`
+- [Send a script fetch from a tab](reference/leyline-http/leyline.html#tab): `Tab::fetch`
+- [Send an XHR from a tab](reference/leyline-http/leyline.html#tab): `Tab::xhr`
+- [Post JSON from a tab](reference/leyline-http/leyline.html#tab): `Tab::post_json`
+- [Load a subresource from a tab](reference/leyline-http/leyline.html#tab): `Tab::subresource`
+- [Limit pagination](reference/leyline-http/leyline.html#pages): `Pages::limit`

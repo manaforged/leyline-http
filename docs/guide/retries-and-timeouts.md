@@ -181,7 +181,8 @@ See [Streaming](streaming.md).
 `retry_unsent(true)` retries any method when the error happened before the
 request was sent: a DNS, connect, TLS, or proxy error, a connect timeout, an
 HTTP/2 `REFUSED_STREAM` reset, or an HTTP/3 request that the server reports
-it did not process. The server never processed the request, so a retry cannot
+it did not process. An HTTP/3 request that the server rejects twice is
+retried on the same connection. The server never processed the request, so a retry cannot
 repeat a write. The error
 must still match a trigger.
 

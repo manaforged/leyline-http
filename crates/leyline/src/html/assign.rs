@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use super::{Button, Form};
 
@@ -22,14 +22,16 @@ pub(super) struct Entry {
     pub(super) item: Item,
 }
 
-pub(super) fn assign(forms: &mut [Form], entries: Vec<Entry>) {
+pub(super) fn assign(
+    forms: &mut [Form],
+    entries: Vec<Entry>,
+    ids: &HashMap<String, Option<usize>>,
+) {
     let mut fields: Vec<Vec<(String, String, bool)>> = vec![Vec::new(); forms.len()];
     for entry in entries {
         let index = match &entry.owner {
             Owner::Open(index) => Some(*index),
-            Owner::Id(id) => forms
-                .iter()
-                .position(|form| form.id.as_deref() == Some(id.as_str())),
+            Owner::Id(id) => ids.get(id).copied().flatten(),
         };
         let Some(index) = index.filter(|index| *index < forms.len()) else {
             continue;

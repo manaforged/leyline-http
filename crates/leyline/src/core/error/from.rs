@@ -71,9 +71,11 @@ impl From<H3SendError> for Error {
         match e {
             H3SendError::BodyLimit(limit) => limit.error(),
             H3SendError::RequestBody(io) => Error::from_request_body(io),
-            H3SendError::NotSent(message) => Error::new(Kind::Http3)
-                .with_message(message)
-                .with_source(super::marker::NotProcessed),
+            H3SendError::NotSent(message) | H3SendError::Rejected(message) => {
+                Error::new(Kind::Http3)
+                    .with_message(message)
+                    .with_source(super::marker::NotProcessed)
+            }
             other => Error::new(Kind::Http3).with_message(other.message().into_owned()),
         }
     }

@@ -97,6 +97,17 @@ fn values<'a>(name: &str, list: &'a [(String, String)]) -> Vec<&'a str> {
         .collect()
 }
 
+const COOKIE: &str = "cookie";
+
+fn joined_cookie(list: &[(String, String)]) -> Vec<&str> {
+    values(COOKIE, list)
+        .into_iter()
+        .flat_map(|value| value.split(';'))
+        .map(str::trim)
+        .filter(|pair| !pair.is_empty())
+        .collect()
+}
+
 fn header_outcome(
     name: &str,
     sent: &[(String, String)],
@@ -105,8 +116,11 @@ fn header_outcome(
     if observed.is_empty() {
         return FieldOutcome::NotReported;
     }
-    let expected = values(name, sent);
-    let seen = values(name, observed);
+    let (expected, seen) = if name.eq_ignore_ascii_case(COOKIE) {
+        (joined_cookie(sent), joined_cookie(observed))
+    } else {
+        (values(name, sent), values(name, observed))
+    };
     if seen.is_empty() {
         return FieldOutcome::Absent {
             expected: expected.join(", "),
