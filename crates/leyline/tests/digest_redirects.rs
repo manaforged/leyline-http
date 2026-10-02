@@ -118,7 +118,7 @@ async fn digest_sends_no_credentials_outside_the_protection_space() {
 
 #[tokio::test]
 async fn digest_sends_no_credentials_after_a_cross_origin_bounce() {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     let server = TestServer::http_on(
         listener,

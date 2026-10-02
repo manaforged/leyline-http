@@ -33,7 +33,7 @@ leyline-http = { version = "0.1", features = ["test-util"] }
 | --- | --- |
 | `TestServer::http(handler)` | Starts an HTTP/1.1 server on `127.0.0.1` on a free port |
 | `TestServer::https(handler)` | The same over TLS with a private CA, `http/1.1` only |
-| `TestServer::http_on(listener, handler)` | An HTTP/1.1 server on a `tokio::net::TcpListener` you bound, for a fixed port or address. Call it inside a Tokio runtime |
+| `TestServer::http_on(listener, handler)` | An HTTP/1.1 server on a `std::net::TcpListener` you bound, for a fixed port or address. Call it inside a Tokio runtime |
 | `queue([..])` | A handler that answers with each `TestResponse` in turn, then 503 |
 | `url(path)` | `http://127.0.0.1:<port>/path`, or `https://`. `url("")` is the origin with a trailing `/`, for a `base_url` |
 | `addr()` | The bound address |

@@ -279,7 +279,7 @@ async fn origin_names_the_initiator() {
 
 #[tokio::test]
 async fn chrome_judges_the_final_target_after_a_cross_site_bounce() {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     let server = TestServer::http_on(
         listener,

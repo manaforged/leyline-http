@@ -47,11 +47,12 @@ impl TestServer {
         Self::start(TcpListener::bind(BIND_ADDR).await?, Arc::new(handler), None)
     }
 
-    pub fn http_on<F>(listener: TcpListener, handler: F) -> io::Result<Self>
+    pub fn http_on<F>(listener: std::net::TcpListener, handler: F) -> io::Result<Self>
     where
         F: Fn(&RecordedRequest) -> TestResponse + Send + Sync + 'static,
     {
-        Self::start(listener, Arc::new(handler), None)
+        listener.set_nonblocking(true)?;
+        Self::start(TcpListener::from_std(listener)?, Arc::new(handler), None)
     }
 
     pub async fn https<F>(handler: F) -> io::Result<Self>
