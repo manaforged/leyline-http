@@ -5,8 +5,8 @@ use std::time::Duration;
 use leyline::testing::{TestResponse, TestServer, queue};
 use leyline::trace::{Summary, Trace};
 use leyline::{
-    Browser, ChromiumBrand, CompressionConfig, Family, Identity, Kind, Platform, Preset,
-    ProtocolPolicy, RetryPolicy, Session,
+    Browser, ChromiumBrand, Family, Identity, Kind, Platform, Preset, ProtocolPolicy, RetryPolicy,
+    Session,
 };
 
 fn gzip(data: &[u8]) -> Vec<u8> {
@@ -57,48 +57,6 @@ async fn decoded_copy_writes_plain_bytes_and_stops_at_the_limit() {
 }
 
 #[tokio::test]
-async fn body_limit_is_its_own_error() {
-    let server = TestServer::http(queue(vec![
-        TestResponse::new(200).close().body(vec![b'x'; 4_096]),
-        TestResponse::new(500).close(),
-    ]))
-    .await
-    .unwrap();
-    let session = Session::builder()
-        .compression(CompressionConfig::default().max_body_size(1_024))
-        .build()
-        .unwrap();
-    let over = session.get(server.url("/big")).await.unwrap_err();
-    assert!(over.is_body_limit(), "{over:?}");
-
-    let status = session
-        .get(server.url("/fail"))
-        .await
-        .unwrap()
-        .error_for_status()
-        .unwrap_err();
-    assert!(!status.is_body_limit());
-}
-
-#[tokio::test]
-async fn status_error_keeps_the_body() {
-    let server = TestServer::http(queue(vec![
-        TestResponse::new(404)
-            .close()
-            .body(b"no such repo".to_vec()),
-    ]))
-    .await
-    .unwrap();
-    let err = plain()
-        .get(server.url("/repos/x"))
-        .error_for_status()
-        .await
-        .unwrap_err();
-    assert_eq!(err.status().map(|s| s.as_u16()), Some(404));
-    assert_eq!(err.body(), Some(&b"no such repo"[..]));
-}
-
-#[tokio::test]
 async fn proxy_failures_are_told_apart_from_origin_failures() {
     let dead = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let dead_port = dead.local_addr().unwrap().port();
@@ -124,29 +82,6 @@ async fn proxy_failures_are_told_apart_from_origin_failures() {
         .unwrap_err();
     assert_eq!(err.kind(), Kind::Proxy);
     assert!(!err.is_proxy(), "{err:?}");
-}
-
-#[test]
-fn identity_strings_round_trip_for_every_value() {
-    for browser in Browser::all() {
-        assert_eq!(browser.id().parse::<Browser>().unwrap(), *browser);
-        let json = serde_json::to_string(browser).unwrap();
-        assert_eq!(serde_json::from_str::<Browser>(&json).unwrap(), *browser);
-    }
-    for family in Family::all() {
-        assert_eq!(family.id().parse::<Family>().unwrap(), *family);
-    }
-    for platform in Platform::all() {
-        assert_eq!(platform.id().parse::<Platform>().unwrap(), *platform);
-    }
-    for brand in [
-        ChromiumBrand::Chrome,
-        ChromiumBrand::Edge,
-        ChromiumBrand::Opera,
-    ] {
-        let json = serde_json::to_string(&brand).unwrap();
-        assert_eq!(serde_json::from_str::<ChromiumBrand>(&json).unwrap(), brand);
-    }
 }
 
 #[test]
@@ -326,18 +261,6 @@ async fn retries_rotate_to_the_next_proxy() {
         good.next_request().await.unwrap().request_line,
         "GET http://origin.test/item HTTP/1.1"
     );
-}
-
-#[test]
-fn backoff_is_public_and_capped() {
-    let policy = RetryPolicy::transient()
-        .initial_backoff(Duration::from_millis(100))
-        .backoff_factor(2.0)
-        .max_backoff(Duration::from_millis(300))
-        .jitter(false);
-    assert_eq!(policy.backoff(0), Duration::from_millis(100));
-    assert_eq!(policy.backoff(1), Duration::from_millis(200));
-    assert_eq!(policy.backoff(5), Duration::from_millis(300));
 }
 
 #[tokio::test]

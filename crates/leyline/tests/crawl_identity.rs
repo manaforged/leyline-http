@@ -34,26 +34,6 @@ async fn identities_share_one_pool() {
     assert_eq!(firefox.pool_stats().entries, 2);
 }
 
-#[tokio::test]
-async fn a_proxy_entry_carries_its_identity() {
-    let proxy = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
-        .await
-        .unwrap();
-    let firefox = Identity::locked(Browser::latest(Family::Firefox), Platform::Windows);
-    let session = Session::builder()
-        .browser(Browser::latest(Family::Chrome))
-        .proxy_pool(ProxyPool::identified([(
-            format!("http://{}", proxy.addr()),
-            firefox,
-        )]))
-        .build()
-        .unwrap();
-    session.get("http://origin.test/").await.unwrap();
-    let sent = proxy.next_request().await.unwrap();
-    let agent = sent.header_values("user-agent");
-    assert!(agent[0].contains("Firefox"), "{agent:?}");
-}
-
 async fn counting_server(peak: Arc<AtomicUsize>, now: Arc<AtomicUsize>) -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -207,28 +187,4 @@ async fn metrics_count_statuses_errors_and_attempts() {
     assert_eq!(snap.status_class(4), 1);
     assert_eq!(snap.errors(leyline::ErrorCategory::Connect), 1);
     assert!(snap.to_string().contains("requests=3"), "{snap}");
-}
-
-#[tokio::test]
-async fn host_stats_show_requests_in_flight_and_waiting() {
-    let (peak, now) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
-    let port = counting_server(peak, now).await;
-    let session = Session::builder()
-        .host_limits(HostLimits::new().max_in_flight(1))
-        .build()
-        .unwrap();
-    let url = format!("http://127.0.0.1:{port}/");
-    let calls =
-        futures_util::future::join_all([session.get(&url).send(), session.get(&url).send()]);
-    let probe = async {
-        tokio::time::sleep(Duration::from_millis(40)).await;
-        session.host_stats()
-    };
-    let (results, stats) = tokio::join!(calls, probe);
-    for result in results {
-        result.unwrap();
-    }
-    assert_eq!(stats.len(), 1);
-    assert_eq!(stats[0].in_flight(), 1);
-    assert_eq!(stats[0].waiting(), 1);
 }

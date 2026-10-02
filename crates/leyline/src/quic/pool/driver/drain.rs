@@ -210,6 +210,10 @@ impl Drain<'_> {
             }
             return;
         }
+        if rejected && stream.response == H3ResponseState::Initial {
+            stream.deliver_unsent(stream_reset_message(e));
+            return;
+        }
         stream.deliver_error(stream_reset_message(e));
     }
 

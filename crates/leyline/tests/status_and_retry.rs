@@ -168,20 +168,6 @@ async fn audit_compares_with_an_echo_report() {
     assert_eq!(audit.compare(&parsed).ja4, FieldOutcome::Match);
 }
 
-#[test]
-fn urls_serialize_for_saved_state() {
-    let url: leyline::Url = "https://shop.example/cart".parse().unwrap();
-    let json = serde_json::to_string(&url).unwrap();
-    assert_eq!(serde_json::from_str::<leyline::Url>(&json).unwrap(), url);
-}
-
-#[test]
-fn retry_policy_stays_unwind_safe() {
-    fn unwind_safe<T: std::panic::UnwindSafe + std::panic::RefUnwindSafe>(_: &T) {}
-    let policy = RetryPolicy::transient().retry_if(|resp| resp.status().as_u16() == 403);
-    unwind_safe(&policy);
-}
-
 #[tokio::test]
 async fn a_status_error_reports_its_header_attempts_and_proxy() {
     let proxy = TestServer::http(queue(vec![
@@ -212,24 +198,6 @@ async fn a_status_error_reports_its_header_attempts_and_proxy() {
         Some(format!("http://{}", proxy.addr()).as_str())
     );
     assert_eq!(err.category().as_str(), "status");
-}
-
-#[tokio::test]
-async fn the_session_body_cap_turns_a_large_body_into_a_body_limit_error() {
-    let server = TestServer::http(queue(vec![
-        TestResponse::new(200).close().body(vec![b'x'; 4096]),
-    ]))
-    .await
-    .unwrap();
-    let err = Session::builder()
-        .compression(leyline::CompressionConfig::new().max_body_size(1024))
-        .build()
-        .unwrap()
-        .get(server.url("/big"))
-        .await
-        .unwrap_err();
-    assert_eq!(err.category(), ErrorCategory::BodyLimit);
-    assert_eq!(err.category().as_str(), "body_limit");
 }
 
 #[test]

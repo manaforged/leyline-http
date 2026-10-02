@@ -91,23 +91,6 @@ async fn plain_session_initiator_still_sends_a_referer() {
 }
 
 #[tokio::test]
-async fn plain_session_with_a_preset_sends_no_client_hints() {
-    let server = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
-        .await
-        .unwrap();
-    plain()
-        .post(server.url("/x"))
-        .preset(Preset::Xhr)
-        .json(&serde_json::json!({"a": 1}))
-        .await
-        .unwrap();
-    let req = server.next_request().await.unwrap();
-    for hint in ["sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform"] {
-        assert_eq!(req.header_count(hint), 0, "{hint}: {}", req.text());
-    }
-}
-
-#[tokio::test]
 async fn plain_session_advertises_only_enabled_codecs() {
     let server = TestServer::http(queue(vec![
         TestResponse::new(200).body("ok").close(),

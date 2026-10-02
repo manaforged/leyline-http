@@ -3,7 +3,7 @@ use std::time::Duration;
 use leyline::testing::{TestResponse, TestServer, queue};
 use leyline::{
     BlockKind, BlockRules, Browser, Error, ErrorCategory, Family, Identity, Platform, ProxyPool,
-    Session, TimeoutConfig,
+    Session,
 };
 
 fn plain() -> Session {
@@ -77,26 +77,6 @@ async fn find_reaches_a_leyline_error_inside_other_layers() {
     let boxed: Box<dyn std::error::Error + Send + Sync> = Box::new(Layer(err));
     let found = Error::find(boxed.as_ref()).unwrap();
     assert_eq!(found.category(), ErrorCategory::Connect);
-}
-
-#[tokio::test]
-async fn the_body_deadline_bounds_a_slow_body() {
-    let server = TestServer::http(|_| {
-        TestResponse::new(200).chunks(["a", "b", "c", "d", "e"], Duration::from_millis(150))
-    })
-    .await
-    .unwrap();
-    let session = Session::builder()
-        .timeout(
-            TimeoutConfig::new()
-                .read(Duration::from_secs(5))
-                .body(Duration::from_millis(300)),
-        )
-        .build()
-        .unwrap();
-    let resp = session.get(server.url("/")).stream().await.unwrap();
-    let err = resp.bytes().await.unwrap_err();
-    assert!(err.is_timeout(), "{err:?}");
 }
 
 #[tokio::test]

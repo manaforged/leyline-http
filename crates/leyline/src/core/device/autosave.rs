@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::core::error::Result;
-use crate::core::{Session, Tab};
+use crate::core::{Session, SessionState, Tab};
 use crate::util::autosave::{Autosave, SaveJob, SaveTarget, Schedule};
 use crate::util::lock;
 
@@ -51,6 +51,8 @@ struct DeviceTarget {
     session: Session,
     path: Arc<Path>,
     saved: Option<u64>,
+    writing: Option<SessionState>,
+    saved_state: Option<SessionState>,
 }
 
 impl Device {
@@ -70,6 +72,8 @@ impl Device {
             session: session.clone(),
             path: Arc::clone(&path),
             saved: None,
+            writing: None,
+            saved_state: None,
         };
         let schedule = Schedule {
             interval: options.interval,
@@ -125,6 +129,7 @@ impl SaveTarget for DeviceTarget {
         let jar_dirty = self.saved != Some(generation);
         let mut device = snapshot(&self.device, &self.tab);
         device.state = self.session.state();
+        self.writing = Some(device.state.clone());
         let jar_path = device.jar_path.clone();
         device.jar = jar_path.is_none().then(|| jar.clone());
         let path = Arc::clone(&self.path);
@@ -141,6 +146,11 @@ impl SaveTarget for DeviceTarget {
 
     fn saved(&mut self, generation: u64) {
         self.saved = Some(generation);
+        self.saved_state = self.writing.take();
+    }
+
+    fn unsaved(&self) -> bool {
+        self.saved_state.as_ref() != Some(&self.session.state())
     }
 }
 

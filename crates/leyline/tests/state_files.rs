@@ -4,7 +4,7 @@ use std::time::Duration;
 use leyline::audit::Observed;
 use leyline::cookie::Jar;
 use leyline::testing::{TestResponse, TestServer, queue};
-use leyline::{Browser, Session};
+use leyline::{Browser, Device, DeviceAutosaveOptions, Session};
 
 fn scratch(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("leyline-state-{name}-{}", std::process::id()));
@@ -90,4 +90,39 @@ async fn audit_flags_a_header_the_echo_did_not_see() {
         .unwrap();
     assert!(accept.is_mismatch(), "{accept:?}");
     assert!(!report.is_match());
+}
+
+#[test]
+fn device_autosave_writes_new_session_state_when_the_runtime_stops() {
+    let dir = scratch("devstate");
+    let path = dir.join("device.json");
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let server = runtime
+        .block_on(TestServer::https(queue([
+            TestResponse::new(200).header("strict-transport-security", "max-age=3600")
+        ])))
+        .unwrap();
+    let session = Session::builder()
+        .browser(Browser::default())
+        .tls_trust(server.trust())
+        .build()
+        .unwrap();
+    let device = Device::capture(&session, None);
+    let options = DeviceAutosaveOptions::new(Duration::from_secs(60))
+        .state_interval(Duration::from_secs(3600));
+    let handle = runtime.block_on(async {
+        let handle = device.autosave(&session, &path, options);
+        handle.flush().await.unwrap();
+        session
+            .get(format!("https://localhost:{}/", server.addr().port()))
+            .await
+            .unwrap();
+        handle
+    });
+    drop(runtime);
+    drop(handle);
+    let saved = Device::load_from(&path).unwrap();
+    let state = serde_json::to_string(&saved.state).unwrap();
+    assert!(state.contains("localhost"), "{state}");
+    drop(std::fs::remove_dir_all(&dir));
 }

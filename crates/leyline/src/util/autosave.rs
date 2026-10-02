@@ -14,6 +14,9 @@ pub(crate) struct SaveJob {
 pub(crate) trait SaveTarget: Send + 'static {
     fn prepare(&mut self) -> Option<SaveJob>;
     fn saved(&mut self, generation: u64);
+    fn unsaved(&self) -> bool {
+        false
+    }
 }
 
 struct Guard<T: SaveTarget> {
@@ -61,7 +64,10 @@ impl<T: SaveTarget> Guard<T> {
     }
 
     fn pending(&mut self) -> bool {
-        self.dirty || self.changes.has_changed().unwrap_or(false) || !self.commands.is_empty()
+        self.dirty
+            || self.changes.has_changed().unwrap_or(false)
+            || !self.commands.is_empty()
+            || self.target.unsaved()
     }
 }
 

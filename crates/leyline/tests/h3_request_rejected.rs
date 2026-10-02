@@ -60,3 +60,32 @@ async fn a_rejection_after_the_response_head_is_not_resent() {
     let session = server.session().build().unwrap();
     session.get(server.url()).await.unwrap_err();
 }
+
+#[tokio::test]
+async fn retry_unsent_resends_a_post_rejected_twice() {
+    let rejected = || Reply::Reset(WireErrorCode::RequestRejected as u64);
+    let server = h3_server(
+        vec![rejected(), rejected(), Reply::Body(LENGTH)],
+        Limits::default(),
+    )
+    .await;
+    let session = server
+        .session()
+        .retry(
+            leyline::RetryPolicy::transient()
+                .initial_backoff(std::time::Duration::from_millis(1))
+                .jitter(false)
+                .retry_unsent(true),
+        )
+        .build()
+        .unwrap();
+    let body = session
+        .post(server.url())
+        .body("order=1")
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap();
+    assert_eq!(body.len(), LENGTH);
+}
