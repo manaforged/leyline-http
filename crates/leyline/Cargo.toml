@@ -140,13 +140,13 @@ futures-util = "0.3"
 tokio-util = { version = "0.7.5", features = ["io"] }
 lru = "0.18"
 rand = "0.9"
-libc = "0.2"
+libc = "0.2.185"
 tower-service = { version = "0.3", optional = true }
 
 # -- compression (optional: each codec is pulled in by its own feature, for
 #    both HTTP body compression and RFC 8879 certificate decompression)
 flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"], optional = true }
-brotli = { version = "8", optional = true }
+brotli = { version = "8.0.2", optional = true }
 zstd = { version = "0.13", optional = true }
 
 # Windows: read the platform trust store via Win32 crypto API.
@@ -355,7 +355,7 @@ base64 = { workspace = true }
 # content-encoding. zstd is a normal dep of leyline but integration tests only
 # see dev-deps, so it is restated here.
 flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"] }
-brotli = "8"
+brotli = "8.0.2"
 zstd = "0.13"
 
 [package.metadata.cargo-machete]
