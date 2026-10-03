@@ -41,11 +41,11 @@ debug_panic = "0.2.1"
 either = { version = "1.8", default-features = false }
 foreign-types-shared = { version = "0.3.0", optional = true }
 intrusive-collections = "0.10.3"
-libc = { version = "0.2.76", default-features = false }
+libc = { version = "0.2.185", default-features = false }
 libm = "0.2"
 log = { version = "0.4.20", features = ["std"] }
 octets = { version = "0.3.7", features = ["huffman_hpack"] }
-slab = "0.4"
+slab = "0.4.2"
 smallvec = { version = "1.10", default-features = false, features = ["union"] }
 enum_dispatch = "0.3.13"
 
