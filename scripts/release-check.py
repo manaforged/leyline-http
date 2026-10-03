@@ -117,12 +117,14 @@ def main() -> int:
     try:
         stale += boringssl()
     except Exception as error:
-        print(f"::warning::boringssl: check failed: {error}")
+        print(f"::error::boringssl: check failed: {error}")
+        stale += 1
     for name, live, bundled in checks:
         try:
             latest, have = live(), bundled()
         except Exception as error:
-            print(f"::warning::{name}: check failed: {error}")
+            print(f"::error::{name}: check failed: {error}")
+            stale += 1
             continue
         newest = max(have) if have else 0
         status = "current" if newest >= latest else "NEW RELEASE, no profile"

@@ -24,6 +24,9 @@ jobs:
   matrix:
     name: matrix
     uses: ./.github/workflows/matrix.yml
+    permissions:
+      contents: read
+      issues: write
 
   release-check:
     name: release qualification

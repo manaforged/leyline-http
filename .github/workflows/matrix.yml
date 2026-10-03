@@ -84,9 +84,9 @@ jobs:
 
       - name: cargo minimal-versions check (nightly resolves, stable compiles)
         run: |
-          cargo +nightly update -Z minimal-versions
+          cargo +nightly update -Z direct-minimal-versions
           cargo update -p pkg-config --precise 0.3.34
-          cargo check -p leyline-http --locked
+          cargo check -p leyline-http --locked --features full
 
   external-types:
     name: external types
@@ -110,7 +110,7 @@ jobs:
           tool: cargo-check-external-types
 
       - name: cargo check-external-types (nightly rustdoc JSON)
-        run: cargo +nightly-2026-06-20 check-external-types --manifest-path crates/leyline/Cargo.toml
+        run: cargo +nightly-2026-06-20 check-external-types --manifest-path crates/leyline/Cargo.toml --features full
 
   cross:
     name: cross (${{ matrix.target }})
@@ -162,3 +162,29 @@ jobs:
 
       - name: cargo check
         run: cargo check -p leyline-http --locked --target ${{ matrix.target }}
+
+  alert:
+    name: open failure issue
+    needs: [msrv, toolchains, minimal-versions, external-types, cross]
+    if: failure() && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Open or update the failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TITLE: 'matrix workflow failed'
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          body="Run failed on $(date -u +%Y-%m-%d): $RUN_URL"
+          number="$(gh issue list --state open --search "\"$TITLE\" in:title" --json number,title \
+            --jq "map(select(.title == env.TITLE)) | .[0].number // empty")"
+          if [[ -n "$number" ]]; then
+            gh issue comment "$number" --body "$body"
+          else
+            gh issue create --title "$TITLE" --body "$body"
+          fi
