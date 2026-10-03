@@ -2,9 +2,10 @@ use std::time::Duration;
 
 use leyline::testing::{TestResponse, TestServer, queue};
 use leyline::{
-    Browser, CompressionConfig, PoolConfig, Preset, ProtocolPolicy, ProxyReply, Session,
-    TimeoutConfig, TlsError,
+    Browser, CompressionConfig, PoolConfig, Preset, ProtocolPolicy, Session, TimeoutConfig,
 };
+#[cfg(feature = "socks")]
+use leyline::{ProxyReply, TlsError};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -138,6 +139,7 @@ async fn plain_session_advertises_only_enabled_codecs() {
     );
 }
 
+#[cfg(feature = "socks")]
 #[tokio::test]
 async fn socks5_proxy_that_cannot_reach_the_origin_is_not_a_proxy_failure() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

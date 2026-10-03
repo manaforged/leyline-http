@@ -137,7 +137,8 @@ def main() -> int:
             try:
                 failed |= check(*args)
             except Exception as error:
-                print(f"::warning::{package['name']}: check failed: {error}")
+                print(f"::error::{package['name']}: check failed: {error}")
+                failed = True
     return 1 if failed else 0
 
 

@@ -73,6 +73,8 @@ g_msrv() {
 
     step "cargo +$msrv check"
     cargo +"$msrv" check --workspace || fail "MSRV cargo check failed"
+    step "cargo +$msrv check -p leyline-http --features full"
+    cargo +"$msrv" check -p leyline-http --features full || fail "MSRV cargo check with feature full failed"
     ok "MSRV compile sanity"
 }
 
@@ -120,8 +122,22 @@ g_package() {
     [[ -n "$leyline_package" && -n "$bssl_sys_package" && -n "$bssl_package" \
         && -n "$bssl_tokio_package" && -n "$quiche_package" ]] \
         || fail "packaged crate archive is missing"
-    mkdir "$package_root/consumer"
-    cat >"$package_root/consumer/Cargo.toml" <<EOF
+    mkdir -p "$package_root/consumer/src"
+    printf 'fn main() {}\n' >"$package_root/consumer/src/main.rs"
+    local smoke_features smoke_set smoke_spec smoke_failed=()
+    smoke_features="$(cargo metadata --manifest-path "$leyline_package/Cargo.toml" --no-deps --format-version 1 \
+        | python3 -c '
+import json, sys
+pkg = next(p for p in json.load(sys.stdin)["packages"] if p["name"] == "leyline-http")
+print(" ".join(sorted(f for f in pkg["features"] if f not in ("default", "full", "bench-internals", "test-util"))))
+')" || fail "cargo metadata failed on the packaged leyline-http"
+    for smoke_set in none default full $smoke_features; do
+        case "$smoke_set" in
+            none) smoke_spec='default-features = false' ;;
+            default) smoke_spec='default-features = true' ;;
+            *) smoke_spec="default-features = false, features = [\"$smoke_set\"]" ;;
+        esac
+        cat >"$package_root/consumer/Cargo.toml" <<EOF
 [package]
 name = "leyline-package-smoke"
 version = "0.0.0"
@@ -129,7 +145,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
-leyline-http = { path = "$leyline_package" }
+leyline-http = { path = "$leyline_package", $smoke_spec }
 
 [patch.crates-io]
 leyline-bssl-sys = { path = "$bssl_sys_package" }
@@ -137,10 +153,12 @@ leyline-bssl = { path = "$bssl_package" }
 leyline-bssl-tokio = { path = "$bssl_tokio_package" }
 leyline-quiche = { path = "$quiche_package" }
 EOF
-    mkdir "$package_root/consumer/src"
-    printf 'fn main() {}\n' >"$package_root/consumer/src/main.rs"
-    cargo +"$msrv" check --manifest-path "$package_root/consumer/Cargo.toml" \
-        || fail "packaged leyline consumer smoke check failed"
+        printf '  consumer [%s]\n' "$smoke_set"
+        cargo +"$msrv" check --manifest-path "$package_root/consumer/Cargo.toml" \
+            || smoke_failed+=("$smoke_set")
+    done
+    (( ${#smoke_failed[@]} == 0 )) \
+        || fail "packaged leyline consumer smoke check failed for: ${smoke_failed[*]}"
     ok "packaged leyline consumer smoke check"
 }
 

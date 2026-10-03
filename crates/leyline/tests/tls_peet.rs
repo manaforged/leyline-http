@@ -1487,13 +1487,10 @@ async fn live_tls_peer_certificate_exposed() {
 #[tokio::test]
 #[ignore = "live: needs network + $LEYLINE_TEST_HTTP_PROXY"]
 async fn live_http_connect_proxy() {
-    let proxy_url = match std::env::var("LEYLINE_TEST_HTTP_PROXY") {
-        Ok(v) if !v.is_empty() => v,
-        _ => {
-            eprintln!("skipping: LEYLINE_TEST_HTTP_PROXY not set");
-            return;
-        }
-    };
+    let proxy_url = std::env::var("LEYLINE_TEST_HTTP_PROXY")
+        .ok()
+        .filter(|v| !v.is_empty())
+        .expect("LEYLINE_TEST_HTTP_PROXY must name an HTTP proxy for this live test");
 
     let session = leyline::Session::builder()
         .browser(Browser::Chrome147)
@@ -1520,13 +1517,10 @@ async fn live_http_connect_proxy() {
 #[tokio::test]
 #[ignore = "live: needs network + $LEYLINE_TEST_SOCKS5_PROXY"]
 async fn live_socks5_proxy() {
-    let proxy_url = match std::env::var("LEYLINE_TEST_SOCKS5_PROXY") {
-        Ok(v) if !v.is_empty() => v,
-        _ => {
-            eprintln!("skipping: LEYLINE_TEST_SOCKS5_PROXY not set");
-            return;
-        }
-    };
+    let proxy_url = std::env::var("LEYLINE_TEST_SOCKS5_PROXY")
+        .ok()
+        .filter(|v| !v.is_empty())
+        .expect("LEYLINE_TEST_SOCKS5_PROXY must name a SOCKS5 proxy for this live test");
 
     let session = leyline::Session::builder()
         .browser(Browser::Chrome147)
