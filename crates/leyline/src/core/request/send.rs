@@ -16,7 +16,11 @@ use crate::core::session::execute::Attempt;
 use crate::util::is_idempotent;
 
 impl RequestBuilder {
-    pub async fn send(mut self) -> Result<Response> {
+    pub async fn send(self) -> Result<Response> {
+        Box::pin(self.run()).await
+    }
+
+    async fn run(mut self) -> Result<Response> {
         self.prepare()?;
         let retry_policy = self.retry_policy.clone();
         let session = self.session.clone();
