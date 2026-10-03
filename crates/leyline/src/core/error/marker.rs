@@ -14,7 +14,6 @@ impl fmt::Display for ShutDown {
 impl std::error::Error for ShutDown {}
 
 #[derive(Debug)]
-#[cfg_attr(not(feature = "http3"), expect(dead_code))]
 pub(crate) struct NotProcessed;
 
 impl fmt::Display for NotProcessed {

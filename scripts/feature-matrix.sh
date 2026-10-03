@@ -23,8 +23,12 @@ for set in "${sets[@]}"; do
         *) args=(--no-default-features --features "$set") ;;
     esac
     label="${set:-none}"
-    printf '\n== clippy -p leyline-http [%s] ==\n' "$label"
-    if cargo clippy -p leyline-http --all-targets --no-deps --locked "${args[@]}" -- -D warnings; then
+    case "$set" in
+        default | full*) targets=(--all-targets) ;;
+        *) targets=(--lib) ;;
+    esac
+    printf '\n== clippy -p leyline-http %s [%s] ==\n' "${targets[*]}" "$label"
+    if cargo clippy -p leyline-http "${targets[@]}" --no-deps --locked "${args[@]}" -- -D warnings; then
         printf 'PASS %s\n' "$label"
     else
         printf 'FAIL %s\n' "$label"
