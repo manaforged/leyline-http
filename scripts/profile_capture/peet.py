@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import json
 import re
 from pathlib import Path
@@ -32,7 +33,6 @@ def headers_from_peet(peet: dict) -> list[str]:
 
 
 def chrome_grease(peet: dict, major: int) -> str:
-    """GREASE token from the dump; Google Chrome in Chrome slot order. Not HeadlessChrome."""
     grease = None
     for line in headers_from_peet(peet):
         if not line.lower().startswith("sec-ch-ua:"):
@@ -72,6 +72,7 @@ def require_browser_ua(peet: dict, product: str, source: str) -> str:
     return ua
 
 
+@functools.cache
 def iana_names() -> dict[str, dict[int, str]]:
     src = (ROOT / "crates/leyline/src/iana.rs").read_text()
     sigalgs = {

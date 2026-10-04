@@ -35,7 +35,12 @@ def fingerprint(capture: dict) -> dict:
         (param.get("id"), [v["id"] for v in param.get("available_versions", []) if not is_grease(v["id"])])
         for param in transport_parameters(capture["tls"])
     ]
-    return {"ja4_r": capture["ja4_r"].split("_"), "h3_text": capture["h3_text"], "params": params}
+    return {
+        "ja4_r": capture["ja4_r"].split("_"),
+        "h3_text": capture["h3_text"],
+        "params": params,
+        "delegated": algorithm_names(capture, "delegated_credential"),
+    }
 
 
 def qpack(capture: dict) -> tuple[int, int]:

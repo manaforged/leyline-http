@@ -57,7 +57,7 @@ def land_all(items: list[tuple[str, int, str]], date: str, sync: bool) -> int:
     return NEEDS_REVIEW if review else 0
 
 
-def main(argv: list[str]) -> int:
+def parse(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
         "target",
@@ -74,27 +74,35 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
     if args.target == "safari" and plat.system() != "Darwin":
         parser.error("Safari collection requires macOS")
+    if args.land and (args.target not in {"chrome", "firefox", "safari"} or len(args.major or []) != 1):
+        parser.error("--land needs one family and one --major")
+    return args
+
+
+def capture(target: str, dry: bool, majors: list[int] | None) -> list[tuple[str, int, str]]:
+    captured: list[tuple[str, int, str]] = []
+    if target in {"all", "chrome"}:
+        captured += fill_chrome(dry, majors)
+    if target in {"all", "firefox"}:
+        captured += fill_firefox(dry, majors)
+    if target in {"all", "safari"} and plat.system() == "Darwin":
+        captured += fill_safari(dry, majors)
+    if target in {"all", "edge"}:
+        captured += fill_edge(dry, {major for family, major, _ in captured if family == "chrome"})
+    return captured
+
+
+def main(argv: list[str]) -> int:
+    args = parse(argv)
     if args.land:
-        if args.target not in {"chrome", "firefox", "safari"} or len(args.major or []) != 1:
-            parser.error("--land needs one family and one --major")
         return land_all([(args.target, args.major[0], args.land)], args.date, args.sync)
     CACHE.mkdir(parents=True, exist_ok=True)
     OUT.mkdir(parents=True, exist_ok=True)
-
     rows = catalog()
     print_catalog(rows)
     if args.target == "status":
         return 1 if any(r[3] == "fill" for r in rows) else 0
-
-    captured: list[tuple[str, int, str]] = []
-    if args.target in {"all", "chrome"}:
-        captured += fill_chrome(args.dry_run, args.major)
-    if args.target in {"all", "firefox"}:
-        captured += fill_firefox(args.dry_run, args.major)
-    if args.target in {"all", "safari"} and plat.system() == "Darwin":
-        captured += fill_safari(args.dry_run, args.major)
-    if args.target in {"all", "edge"}:
-        captured += fill_edge(args.dry_run)
+    captured = capture(args.target, args.dry_run, args.major)
     if args.capture_only or args.dry_run:
         return 0
     return land_all(captured, args.date, args.sync)

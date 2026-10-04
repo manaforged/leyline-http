@@ -7,7 +7,8 @@ from pathlib import Path
 
 from .config import CAPTURES, KEPT_IP_KEYS, ROOT
 
-IP_TEXT = re.compile(r"(?<![\w/.:-])[0-9a-fA-F:.]{7,}(?![\w.])")
+IPV4 = re.compile(r"(?<![\d./])(?:\d{1,3}\.){3}\d{1,3}(?![\d]|\.\d)")
+IPV6 = re.compile(r"(?<![\w:])[0-9a-fA-F]{0,4}(?::[0-9a-fA-F]{0,4}){2,7}(?![\w:])")
 
 
 def scrub(capture: dict, h3: bool) -> dict:
@@ -43,10 +44,9 @@ def public_ips(value: object, key: str = "") -> set[str]:
     if not isinstance(value, str) or key in KEPT_IP_KEYS:
         return set()
     found = set()
-    for token in IP_TEXT.findall(value):
-        host = token.rsplit(":", 1)[0] if token.count(":") == 1 else token
+    for token in IPV4.findall(value) + IPV6.findall(value):
         try:
-            address = ipaddress.ip_address(host)
+            address = ipaddress.ip_address(token)
         except ValueError:
             continue
         if address.is_global:

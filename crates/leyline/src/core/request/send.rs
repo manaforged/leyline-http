@@ -161,7 +161,12 @@ async fn run_attempts(
                 return (counted(result, n + 1), n + 1);
             }
         };
-        drop(result);
+        match result {
+            Ok(response) if attempt.response == ResponseMode::ErrorPrefix => {
+                drop(response.read_error_prefix(&deadline).await);
+            }
+            other => drop(other),
+        }
 
         let slept = session
             .unless_shut_down(async {

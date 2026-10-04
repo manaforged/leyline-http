@@ -425,7 +425,7 @@ keys.
   GREASE setting, followed by a GREASE frame of 0 to 3 bytes and a
   PRIORITY_UPDATE frame. The connection IDs are 8 and 0 bytes. Each Initial
   packet is 1250 bytes (`initial_datagram_size = 1250`).
-- **Firefox.** The transport parameter order is fixed. Firefox 155 and 156
+- **Firefox.** The transport parameter order is fixed. Firefox 155 to 157
   add parameter 29 and offer QUICv2 in `version_information` (GREASE, QUICv2,
   QUICv1); Firefox 148 to 154 offer GREASE and QUICv1. Every run of every
   build, 27 in all, sends GREASE-form parameter 4278378010 with the value

@@ -6,11 +6,11 @@ use url::Url;
 use super::super::decompress::{decompress_and_strip, drain_stream_into_vec};
 use super::journey::Journey;
 use crate::core::Session;
-use crate::core::deadline::Deadline;
+use crate::core::deadline::{Deadline, within};
 use crate::core::device::{SessionState, StateParts, unix_secs};
 use crate::core::error::Result;
 use crate::core::response::Response;
-use crate::core::transport::{ResponseMode, TransportResponse};
+use crate::core::transport::{ResponseMode, TransportBody, TransportResponse};
 use crate::util::lock;
 
 impl Session {
@@ -104,6 +104,36 @@ impl Session {
             && let Some(port) = url.port_or_known_default()
         {
             self.inner.pool.note_alt_svc(host, port, &fields, age);
+        }
+    }
+
+    pub(super) async fn settle_leg(
+        &self,
+        send: impl std::future::Future<Output = Result<TransportResponse>>,
+        response: ResponseMode,
+        deadline: &Deadline,
+    ) -> Result<TransportResponse> {
+        let mut leg = send.await?;
+        if response == ResponseMode::ErrorPrefix && !response.keeps_stream(leg.status) {
+            leg.body = match leg.body {
+                TransportBody::Streaming(mut bs) => {
+                    bs.set_read_timeout(deadline.read());
+                    bs.set_body_timeout(deadline.body());
+                    TransportBody::Buffered(
+                        drain_stream_into_vec(bs, self.inner.compression.max_body_size).await?,
+                    )
+                }
+                buffered => buffered,
+            };
+        }
+        Ok(leg)
+    }
+
+    pub(super) async fn release_leg_body(&self, body: TransportBody, deadline: &Deadline) {
+        if let TransportBody::Streaming(bs) = body {
+            let limit = self.inner.compression.max_error_body;
+            let wait = Some(deadline.error_body_wait());
+            drop(within(wait, drain_stream_into_vec(bs, limit)).await);
         }
     }
 

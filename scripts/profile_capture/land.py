@@ -78,69 +78,128 @@ def tcp_values(capture: dict) -> dict[str, object]:
     }
 
 
-def land(family: str, major: int, captured: str, date: str = TODAY) -> Landed:
-    spec = FAMILIES[family]
-    label = spec["label"]
+FINGERPRINT_KEYS = ("ja4", "akamai", "ciphers", "curves", "sigalgs")
+
+
+@dataclass
+class Draft:
+    family: str
+    major: int
+    captured: str
+    text: str
+    before: dict
+    tcp: dict[str, dict]
+    oses: list[str]
+    seen: dict[str, object]
+    landed: Landed
+
+    @property
+    def label(self) -> str:
+        return FAMILIES[self.family]["label"]
+
+
+def read_captures(family: str, major: int, captured: str) -> Draft:
     source = skeleton_toml(family, major)
-    previous = int(source.stem)
-    text = source.read_text()
-    before = tomllib.loads(text)
     tcp = load_tcp(captured)
     if not tcp:
         raise SystemExit(f"no TCP capture named {captured}-<os>.json in the captures directory")
     oses = [key for key in OS_LABELS if key in tcp]
     values = [tcp_values(tcp[key]) for key in oses]
-    landed = Landed(path=PROFILES / family / f"{major}.toml", previous=previous, oses=oses)
-    for key in ("ja4", "akamai", "ciphers", "curves", "sigalgs"):
-        if any(value[key] != values[0][key] for value in values[1:]):
-            landed.review.append(f"the {key} differs between the {os_phrase(oses)} captures")
-    seen = values[0]
+    empty = [key for key in FINGERPRINT_KEYS if not all(value[key] for value in values)]
+    if empty:
+        raise SystemExit(f"{captured}: the capture has no {', '.join(empty)}; refusing to land it")
+    landed = Landed(path=PROFILES / family / f"{major}.toml", previous=int(source.stem), oses=oses)
+    landed.review += [
+        f"the {key} differs between the {os_phrase(oses)} captures"
+        for key in FINGERPRINT_KEYS
+        if any(value[key] != values[0][key] for value in values[1:])
+    ]
+    text = source.read_text()
+    return Draft(family, major, captured, text, tomllib.loads(text), tcp, oses, values[0], landed)
 
-    text = set_meta(text, "name", f'"{label} {major}"')
-    text = set_meta(text, "version", str(major))
-    text = set_meta(text, "variant", f'"{label}{major}"')
-    text = set_meta(text, "hello", None)
-    if "chromium_major" in before["meta"]:
-        text = set_meta(text, "chromium_major", str(major))
-    text = set_meta(text, "captured_against", f'"{captured}"')
-    text = set_meta(text, "verified_at", f'"{date}"')
 
+def land_meta(draft: Draft, date: str) -> None:
+    text = draft.text
+    for key, value in (
+        ("name", f'"{draft.label} {draft.major}"'),
+        ("version", str(draft.major)),
+        ("variant", f'"{draft.label}{draft.major}"'),
+        ("hello", None),
+        ("captured_against", f'"{draft.captured}"'),
+        ("verified_at", f'"{date}"'),
+    ):
+        text = set_meta(text, key, value)
+    if "chromium_major" in draft.before["meta"]:
+        text = set_meta(text, "chromium_major", str(draft.major))
+    draft.text = text
+
+
+def land_tls(draft: Draft) -> None:
+    seen, before, review = draft.seen, draft.before, draft.landed.review
     for key in ("ciphers", "curves", "sigalgs"):
-        if seen[key] and seen[key] != current(text, "tls", key):
-            text = replace_list(text, "tls", key, seen[key])
-            landed.review.append(f"[tls] {key} changed from {label} {previous}")
+        if seen[key] != current(draft.text, "tls", key):
+            draft.text = replace_list(draft.text, "tls", key, seen[key])
+            review.append(f"[tls] {key} changed from {draft.label} {draft.landed.previous}")
     if seen["ja4"] != before["tls"]["fingerprint"]["ja4"]:
-        text = replace_value(text, "tls.fingerprint", "ja4", f'"{seen["ja4"]}"')
-        landed.review.append("JA4 changed; check the extension order and resumed_ja4 by hand")
+        draft.text = replace_value(draft.text, "tls.fingerprint", "ja4", f'"{seen["ja4"]}"')
+        review.append("JA4 changed; check the extension order and resumed_ja4 by hand")
     if seen["akamai"] != before["h2"]["fingerprint"]["akamai"]:
-        text = replace_value(text, "h2.fingerprint", "akamai", f'"{seen["akamai"]}"')
-        landed.review.append("the HTTP/2 fingerprint changed; check [h2] by hand")
+        draft.text = replace_value(draft.text, "h2.fingerprint", "akamai", f'"{seen["akamai"]}"')
+        review.append("the HTTP/2 fingerprint changed; check [h2] by hand")
     order = before["tls"].get("extension_permutation")
     if order and seen["extensions"] and seen["extensions"] != order:
-        landed.review.append("the TLS extension order changed; check extension_permutation by hand")
+        review.append("the TLS extension order changed; check extension_permutation by hand")
 
-    text = bump_versions(text, previous, major)
-    if family == "chrome":
-        sch = chrome_grease(tcp[oses[0]], major)
-        text = re.sub(r"(?m)^sec_ch_ua = .*$", lambda _: f"sec_ch_ua = '{sch}'", text)
 
-    runs = load_h3(captured)
-    if "h3" in before and spec["h3"] and runs:
-        previous_id = before["meta"].get("captured_against", "")
-        text, notes, review = apply_h3(text, runs, load_h3(previous_id))
-        landed.notes += notes
-        landed.review += review
-        landed.h3_oses = sorted({path_os(run) for run in runs})
-        landed.qpack = qpack(runs[0])
-    elif "h3" in before:
-        landed.review.append(f"no HTTP/3 capture; [h3] is a copy of {label} {previous}")
+def land_identity(draft: Draft) -> None:
+    first = draft.tcp[draft.oses[0]]
+    draft.text = bump_versions(draft.text, draft.landed.previous, draft.major)
+    if FAMILIES[draft.family]["ua_from_capture"]:
+        agent = first.get("user_agent", "")
+        draft.text = replace_value(draft.text, f"identity.{draft.oses[0]}", "user_agent", f'"{agent}"')
+    if draft.family == "chrome":
+        sch = chrome_grease(first, draft.major)
+        draft.text = re.sub(r"(?m)^sec_ch_ua = .*$", lambda _: f"sec_ch_ua = '{sch}'", draft.text)
+    draft.landed.review += [
+        f"user agent still names another version: {agent}"
+        for agent in re.findall(r'(?m)^user_agent = "([^"]*)"$', draft.text)
+        if str(draft.major) not in agent
+    ]
 
-    verified = f"tls.peet.ws {date} {label} {captured.removeprefix(family + '-')} {os_phrase(oses)} {spec['tcp_method']}"
-    if landed.h3_oses:
-        verified += f"; quic.browserleaks.com {os_phrase(landed.h3_oses)} headful"
-    text = set_meta(text, "verified_against", f'"{verified}"')
-    landed.path.write_text(text)
-    return landed
+
+def land_h3(draft: Draft) -> None:
+    if "h3" not in draft.before:
+        return
+    runs = load_h3(draft.captured)
+    if not (FAMILIES[draft.family]["h3"] and runs):
+        draft.landed.review.append(f"no HTTP/3 capture; [h3] is a copy of {draft.label} {draft.landed.previous}")
+        return
+    previous_runs = load_h3(draft.before["meta"].get("captured_against", ""))
+    draft.text, notes, review = apply_h3(draft.text, runs, previous_runs)
+    draft.landed.notes += notes
+    draft.landed.review += review
+    draft.landed.h3_oses = sorted({path_os(run) for run in runs})
+    draft.landed.qpack = qpack(runs[0])
+
+
+def verified_against(draft: Draft, date: str) -> str:
+    method = FAMILIES[draft.family]["tcp_method"]
+    version = draft.captured.removeprefix(draft.family + "-")
+    verified = f"tls.peet.ws {date} {draft.label} {version} {os_phrase(draft.oses)} {method}"
+    if draft.landed.h3_oses:
+        verified += f"; quic.browserleaks.com {os_phrase(draft.landed.h3_oses)} headful"
+    return verified
+
+
+def land(family: str, major: int, captured: str, date: str = TODAY) -> Landed:
+    draft = read_captures(family, major, captured)
+    land_meta(draft, date)
+    land_tls(draft)
+    land_identity(draft)
+    land_h3(draft)
+    draft.text = set_meta(draft.text, "verified_against", f'"{verified_against(draft, date)}"')
+    draft.landed.path.write_text(draft.text)
+    return draft.landed
 
 
 def path_os(run: dict) -> str:

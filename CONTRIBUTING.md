@@ -151,7 +151,8 @@ Before the first Safari capture, do these steps once:
 The `release-watch` workflow runs daily. It compares each browser's stable
 release (Chrome, Firefox, Brave, Edge, Opera, and Safari and iOS) with the
 newest bundled profile, and checks the forked crates, the pinned BoringSSL
-revision, and the OpenSSL advisories published after that revision:
+revision, and the OpenSSL advisories published since the `since` date in
+`crates/leyline-bssl-sys/Cargo.toml`:
 
 ```sh
 python3 scripts/release-check.py
