@@ -199,8 +199,10 @@ retry policy is done, and keeps the start of the body in the error:
 | Body bytes kept, after decoding | 64 KiB, and never more than `max_body_size` | `CompressionConfig::max_error_body` |
 | Time to read that body | 10 s, and never past the `total` timeout | `TimeoutConfig::error_body` |
 
-Decompression stops at the byte limit, so a small compressed body cannot
-expand past it. When the read fails or takes too long, the error has no body
+Leyline reads only these bytes of an error response, so a large or slow
+error body cannot hold the request up to the `body` timeout or exceed
+`max_body_size`. Decompression stops at the byte limit, so a small
+compressed body cannot expand past it. When the read fails or takes too long, the error has no body
 but keeps the status and headers. `download` uses the same limits for a
 status error.
 

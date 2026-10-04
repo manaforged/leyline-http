@@ -10,6 +10,13 @@ version and publish as separate crates.
 
 ## Unreleased
 
+### Security
+
+- `leyline-bssl-sys` carries BoringSSL's fix for CVE-2026-35189. A peer
+  certificate with many `nameRelativeToCRLIssuer` CRL distribution points
+  could make certificate verification allocate memory without bound. CRL
+  distribution points that use a relative name are now ignored.
+
 ### Added
 
 - A Firefox 157 profile, `Browser::Firefox157`, from captures of Firefox 157.0
@@ -24,6 +31,25 @@ version and publish as separate crates.
   example for another target, enable the new `bindgen` feature. CMake uses
   the Ninja generator when `ninja` is on `PATH` and `CMAKE_GENERATOR` is
   not set.
+
+### Fixed
+
+- `leyline-http` builds again with default features off and `http3` left
+  out. 0.1.1 did not compile in that configuration.
+- `RequestBuilder::send` boxes its request state, so nesting a few requests
+  in one task no longer overflows a 2 MB thread stack.
+- `RetryPolicy::retry_unsent(true)` no longer replays a non-idempotent
+  request after a redirect or authentication leg got a response. A
+  connection failure on a later leg used to resend the original request,
+  for example a POST that the server had already processed and answered
+  with a 303.
+- `error_for_status` reads at most `max_error_body` bytes of an error
+  response, within the error-body timeout. It used to collect and decode
+  the whole body first, so a large or slow error body could take the full
+  body timeout or fail with a body-limit error instead of the status error.
+- The `leyline-bssl-sys` build script reruns when a patch is added to
+  `patches/`. Before, a new patch was not applied to an existing build
+  directory.
 
 ## 0.1.1 - 2026-10-02
 

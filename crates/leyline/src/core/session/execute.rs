@@ -1,7 +1,7 @@
 use url::Url;
 
 use crate::FetchSite;
-use crate::core::transport::Prepared;
+use crate::core::transport::{Prepared, ResponseMode};
 use std::sync::Arc;
 
 use crate::profile::Preset;
@@ -32,7 +32,7 @@ pub(crate) struct Attempt {
     pub(crate) body: Body,
     pub(crate) headers: Option<HeaderList>,
     pub(crate) deadline: Deadline,
-    pub(crate) stream_response: bool,
+    pub(crate) response: ResponseMode,
     pub(crate) proxy: Option<ProxyConfig>,
     pub(crate) header_order: Option<Vec<String>>,
     pub(crate) redirect: Option<RedirectPolicy>,
@@ -50,7 +50,7 @@ impl Attempt {
             body,
             headers,
             deadline: self.deadline,
-            stream_response: self.stream_response,
+            response: self.response,
             proxy: self.proxy.clone(),
             header_order: self.header_order.clone(),
             redirect: self.redirect.clone(),
@@ -142,7 +142,7 @@ impl Session {
             body,
             headers: extra_headers,
             deadline,
-            stream_response,
+            response,
             proxy: request_proxy,
             header_order,
             redirect,
@@ -166,6 +166,7 @@ impl Session {
         let mut digest = digest.map(DigestLeg::new);
         let redirect_cap = redirect_policy.max_redirects_hint();
         let mut pass = None;
+        let mut answered = false;
         loop {
             journey.url = self.hsts_upgrade(&journey.url);
             drop(pass.take());
@@ -177,16 +178,22 @@ impl Session {
             let step_body = std::mem::take(&mut journey.body);
             let replay_body = step_body.replay();
 
-            let proxy = self.proxy_for(&journey.url, request_proxy)?;
+            let proxy = self
+                .proxy_for(&journey.url, request_proxy)
+                .map_err(leg_error(answered))?;
             let send = self.send_with_policy(Prepared {
                 method: &journey.method,
                 url: &journey.url,
                 headers,
                 body: step_body,
                 proxy,
-                stream_response,
+                response,
             });
-            let leg = deadline.response_header(send).await?;
+            let leg = deadline
+                .response_header(send)
+                .await
+                .map_err(leg_error(answered))?;
+            answered = true;
             journey.timing.add_leg(&leg.timing);
 
             self.store_cookies(&leg.headers, &journey.url);
@@ -206,7 +213,7 @@ impl Session {
             }
 
             let mut response = self
-                .assemble_response(leg, journey, audit_headers, stream_response, &deadline)
+                .assemble_response(leg, journey, audit_headers, response, &deadline)
                 .await?;
             if let ResponseBody::Streaming(body) = &mut response.body {
                 body.hold(pass.take());
@@ -256,6 +263,10 @@ fn fetch_site_for(initiator: Option<&Url>, chain: &[Url], current: &Url) -> Fetc
         return FetchSite::CrossSite;
     };
     FetchSite::across(initiator, chain.iter().chain(std::iter::once(current)))
+}
+
+fn leg_error(answered: bool) -> impl Fn(Error) -> Error {
+    move |err| if answered { err.after_response() } else { err }
 }
 
 pub(crate) fn url_origin(url: &Url) -> String {

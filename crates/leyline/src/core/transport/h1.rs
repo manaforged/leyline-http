@@ -81,7 +81,7 @@ pub(super) async fn send_h1_on(
         headers,
         body,
         proxy,
-        stream_response,
+        response,
     } = req;
     check_framing(&headers)?;
     let host = url
@@ -112,7 +112,7 @@ pub(super) async fn send_h1_on(
                 .collect(),
             proxy,
             target,
-            stream: stream_response,
+            stream: response.reads_incrementally(),
             opened,
         },
         h1_body,
