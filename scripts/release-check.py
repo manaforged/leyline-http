@@ -12,6 +12,8 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+from update_notice import notify
+
 ROOT = Path(__file__).resolve().parent.parent
 PROFILES = ROOT / "crates/leyline/profiles"
 AGENT = {"User-Agent": "leyline-release-check"}
@@ -99,7 +101,12 @@ def boringssl() -> int:
     have = tree.stdout.split()[2]
     status = "matches" if have == wanted else "DIFFERS"
     print(f"boringssl: bundled {have[:12]}, Chrome {version} ships {wanted[:12]}: {status}")
-    return 0
+    if have != wanted:
+        notify(
+            f"Update BoringSSL to {wanted[:12]} from Chrome {version}",
+            f"Chrome {version} ships BoringSSL {wanted}. leyline-bssl-sys bundles {have}. "
+            "Move crates/leyline-bssl-sys/deps/boringssl to the Chrome revision.",
+        )
 
 
 def main() -> int:
@@ -113,24 +120,29 @@ def main() -> int:
         ("safari ios", apple, lambda: profile_majors("safari", "ios")),
         ("cfnetwork ios", apple, lambda: profile_majors("cfnetwork", "ios")),
     ]
-    stale = 0
+    failed = 0
     try:
-        stale += boringssl()
+        boringssl()
     except Exception as error:
         print(f"::error::boringssl: check failed: {error}")
-        stale += 1
+        failed += 1
     for name, live, bundled in checks:
         try:
             latest, have = live(), bundled()
         except Exception as error:
             print(f"::error::{name}: check failed: {error}")
-            stale += 1
+            failed += 1
             continue
         newest = max(have) if have else 0
         status = "current" if newest >= latest else "NEW RELEASE, no profile"
-        stale += newest < latest
         print(f"{name}: stable {latest}, newest profile {newest}: {status}")
-    return 1 if stale else 0
+        if newest < latest:
+            notify(
+                f"Add a {name} {latest} profile",
+                f"{name} {latest} is the current stable release. The newest Leyline profile is "
+                f"{name} {newest}. Capture {name} {latest} and add its profile under crates/leyline/profiles/.",
+            )
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

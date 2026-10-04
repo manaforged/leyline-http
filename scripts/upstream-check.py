@@ -12,6 +12,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from update_notice import notify
+
 ROOT = Path(__file__).resolve().parent.parent
 GITHUB = "https://api.github.com"
 OSV = "https://api.osv.dev/v1/query"
@@ -98,7 +100,7 @@ def repo_hits(repo: str, crate: str, version: str) -> list[str]:
     return hits
 
 
-def check_crate(name: str, meta: dict) -> bool:
+def check_crate(name: str, meta: dict) -> None:
     repo, crate, version = meta["repo"], meta["crate"], meta["version"]
     hits = repo_hits(repo, crate, version)
     hits += osv({"version": version, "package": {"name": crate, "ecosystem": "crates.io"}})
@@ -107,10 +109,15 @@ def check_crate(name: str, meta: dict) -> bool:
     behind = version_key(newest) > version_key(version)
     status = "behind" if behind else "current"
     print(f"{name}: {repo} {crate} base {version} latest {newest} ({status}) advisories: {', '.join(hits) or 'none'}")
-    return bool(hits)
+    if hits:
+        notify(
+            f"Security advisory for {name}: {', '.join(hits)}",
+            f"{', '.join(hits)} applies to {repo} {crate} {version}, the base of {name}. "
+            f"The latest {crate} is {newest}. Rebase {name} on a fixed release.",
+        )
 
 
-def check_boringssl(crate_dir: Path, meta: dict) -> bool:
+def check_boringssl(crate_dir: Path, meta: dict) -> None:
     repo, gitlink = meta["repo"], meta["gitlink"]
     rel = (crate_dir / gitlink).relative_to(ROOT).as_posix()
     tree = subprocess.run(["git", "-C", str(ROOT), "ls-tree", "HEAD", rel], capture_output=True, text=True, check=True)
@@ -121,7 +128,12 @@ def check_boringssl(crate_dir: Path, meta: dict) -> bool:
         f"{crate_dir.name}: {repo} gitlink {revision[:12]} behind main by {compare['ahead_by']} commits"
         f" advisories: {', '.join(hits) or 'none'}"
     )
-    return bool(hits)
+    if hits:
+        notify(
+            f"Security advisory for {crate_dir.name} BoringSSL: {', '.join(hits)}",
+            f"{', '.join(hits)} applies to {repo} {revision}, the BoringSSL revision {crate_dir.name} bundles. "
+            f"Move {rel} to a fixed revision.",
+        )
 
 
 def main() -> int:
@@ -135,7 +147,7 @@ def main() -> int:
             if args[1] is None:
                 continue
             try:
-                failed |= check(*args)
+                check(*args)
             except Exception as error:
                 print(f"::error::{package['name']}: check failed: {error}")
                 failed = True
