@@ -273,6 +273,9 @@ impl RetryPolicy {
 }
 
 fn unsent(err: &Error) -> bool {
+    if err.follows_response() {
+        return false;
+    }
     match err.category() {
         ErrorCategory::Dns | ErrorCategory::Connect | ErrorCategory::Tls | ErrorCategory::Proxy => {
             true

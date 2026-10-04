@@ -85,6 +85,7 @@ struct Inner {
     proxy: Option<String>,
     policy_wait: Option<std::time::Duration>,
     retries_exhausted: bool,
+    after_response: bool,
 }
 
 pub struct Error {
@@ -107,6 +108,7 @@ impl Error {
                 proxy: None,
                 policy_wait: None,
                 retries_exhausted: false,
+                after_response: false,
             }),
         }
     }
@@ -144,6 +146,15 @@ impl Error {
     pub(crate) fn with_headers(mut self, headers: HeaderMap) -> Self {
         self.inner.headers = Some(headers);
         self
+    }
+
+    pub(crate) fn after_response(mut self) -> Self {
+        self.inner.after_response = true;
+        self
+    }
+
+    pub(crate) fn follows_response(&self) -> bool {
+        self.inner.after_response
     }
 
     pub fn headers(&self) -> Option<&HeaderMap> {

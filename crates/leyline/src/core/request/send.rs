@@ -13,6 +13,7 @@ use crate::core::deadline::Deadline;
 use crate::core::error::{Error, Kind};
 use crate::core::response::Response;
 use crate::core::session::execute::Attempt;
+use crate::core::transport::ResponseMode;
 use crate::util::is_idempotent;
 
 impl RequestBuilder {
@@ -30,7 +31,7 @@ impl RequestBuilder {
         let attempt = self.into_attempt(deadline);
         let method = attempt.method.clone();
         let url = attempt.url.clone();
-        let streamed = attempt.stream_response;
+        let streamed = attempt.response == ResponseMode::Streamed;
         let mut exhausted = false;
         let response = session
             .traced(
@@ -73,7 +74,7 @@ impl RequestBuilder {
             body: std::mem::take(&mut self.body),
             headers,
             deadline,
-            stream_response: self.stream_response,
+            response: ResponseMode::new(self.stream_response, self.status_errors),
             proxy: self.proxy.take(),
             header_order: self.header_order.take(),
             redirect: self.redirect.take(),

@@ -71,7 +71,7 @@ exponential backoff. The setters in the example extend it:
 | `retry_if(predicate)` | Also retries a response for which the predicate returns `true` |
 | `wait_header(name, format)` | Reads the wait from a header. It wins over `Retry-After` |
 | `max_retry_after(d)` | A longer requested wait ends the retries. The default is 60 s |
-| `retry_unsent(true)` | Retries any method when the server did not process the request: a DNS, connect, TLS, or proxy error, a connect timeout, an HTTP/2 `REFUSED_STREAM` reset, or an HTTP/3 request the server reports it did not process |
+| `retry_unsent(true)` | Retries any method when the server did not process the request: a DNS, connect, TLS, or proxy error, a connect timeout, an HTTP/2 `REFUSED_STREAM` reset, or an HTTP/3 request the server reports it did not process. Not after a redirect or authentication leg got a response |
 
 `total` spans every attempt of one send, waits included. A wait that does not
 fit in the time left ends the retries, so set `total` above `max_retry_after`

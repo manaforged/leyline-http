@@ -10,7 +10,7 @@ use crate::core::deadline::Deadline;
 use crate::core::device::{SessionState, StateParts, unix_secs};
 use crate::core::error::Result;
 use crate::core::response::Response;
-use crate::core::transport::TransportResponse;
+use crate::core::transport::{ResponseMode, TransportResponse};
 use crate::util::lock;
 
 impl Session {
@@ -112,7 +112,7 @@ impl Session {
         leg: TransportResponse,
         journey: Journey,
         audit_headers: Vec<(String, String)>,
-        stream_response: bool,
+        response: ResponseMode,
         deadline: &Deadline,
     ) -> Result<Response> {
         let TransportResponse {
@@ -126,7 +126,7 @@ impl Session {
             ..
         } = leg;
         let (body, headers) = self
-            .finalize_response_body(body, headers, stream_response, deadline)
+            .finalize_response_body(body, headers, response.keeps_stream(status), deadline)
             .await?;
         let audited = self.inner.audit_tls.is_some();
         let mut audit_headers = audit_headers;
@@ -159,14 +159,14 @@ impl Session {
         &self,
         resp_body_shape: crate::core::transport::TransportBody,
         resp_headers: Vec<(http::HeaderName, http::HeaderValue)>,
-        stream_response: bool,
+        keep_stream: bool,
         deadline: &Deadline,
     ) -> Result<(
         crate::core::response::ResponseBody,
         Vec<(http::HeaderName, http::HeaderValue)>,
     )> {
         Ok(match resp_body_shape {
-            crate::core::transport::TransportBody::Streaming(mut bs) if stream_response => {
+            crate::core::transport::TransportBody::Streaming(mut bs) if keep_stream => {
                 bs.set_read_timeout(deadline.read());
                 bs.set_body_timeout(deadline.body());
                 bs.stop_on(&self.inner.shutdown);
@@ -188,7 +188,7 @@ impl Session {
                 )
             }
             crate::core::transport::TransportBody::Buffered(buf) => {
-                if stream_response {
+                if keep_stream {
                     let mut bs =
                         crate::core::body_stream::BodyStream::from_bytes(bytes::Bytes::from(buf));
                     bs.stop_on(&self.inner.shutdown);

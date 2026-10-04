@@ -184,7 +184,9 @@ HTTP/2 `REFUSED_STREAM` reset, or an HTTP/3 request that the server reports
 it did not process. An HTTP/3 request that the server rejects twice is
 retried on the same connection. The server never processed the request, so a retry cannot
 repeat a write. The error
-must still match a trigger.
+must still match a trigger. After a redirect or an authentication challenge
+got a response, an error on a later leg does not count: the server already
+answered the original request, so `retry_unsent` does not replay it.
 
 ```rust,no_run
 use leyline::RetryPolicy;

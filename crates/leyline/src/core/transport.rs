@@ -17,11 +17,13 @@ use crate::core::response::HttpVersion;
 
 mod h1;
 mod h2;
+mod mode;
 
 #[cfg(feature = "websocket")]
 pub(crate) use h1::h1_error_to_core;
 pub(crate) use h1::send_request_h1;
 use h1::{H1Sent, send_h1_on};
+pub(crate) use mode::ResponseMode;
 
 fn status(code: u16) -> Result<StatusCode> {
     StatusCode::from_u16(code)
@@ -75,7 +77,7 @@ pub(crate) struct Prepared<'a> {
     pub(crate) headers: Vec<HeaderPair>,
     pub(crate) body: Body,
     pub(crate) proxy: Option<&'a str>,
-    pub(crate) stream_response: bool,
+    pub(crate) response: ResponseMode,
 }
 
 struct Retry<'a> {
@@ -83,7 +85,7 @@ struct Retry<'a> {
     url: &'a url::Url,
     headers: Vec<HeaderPair>,
     proxy: Option<&'a str>,
-    stream_response: bool,
+    response: ResponseMode,
 }
 
 impl<'a> Prepared<'a> {
@@ -93,7 +95,7 @@ impl<'a> Prepared<'a> {
             url: self.url,
             headers: self.headers.clone(),
             proxy: self.proxy,
-            stream_response: self.stream_response,
+            response: self.response,
         };
         (retry, self.body.replay())
     }
@@ -107,7 +109,7 @@ impl<'a> Retry<'a> {
             headers: self.headers,
             body,
             proxy: self.proxy,
-            stream_response: self.stream_response,
+            response: self.response,
         }
     }
 }
@@ -230,8 +232,9 @@ async fn send_h2_on(
         mut headers,
         body,
         proxy,
-        stream_response,
+        response,
     } = req;
+    let stream_response = response.reads_incrementally();
     let pseudo = h2::request_pseudo(method, url)?;
     strip_connection_specific_headers(&mut headers)?;
     let (resp, tls, timing) = crate::pool::send_request(
@@ -323,10 +326,11 @@ pub(crate) async fn send_request_h3(
         url,
         mut headers,
         body,
-        stream_response,
+        response,
         proxy,
         ..
     } = req;
+    let stream_response = response.reads_incrementally();
     let host = url
         .host_str()
         .ok_or_else(|| Error::new(Kind::Config).with_message("no host in URL"))?;

@@ -1,10 +1,10 @@
 use super::{ProtocolPolicy, Session};
 use crate::core::error::{Error, Kind, Result};
-#[cfg(feature = "http3")]
-use crate::core::transport::send_request_h3;
 use crate::core::transport::{
     Prepared, TransportResponse, send_request_auto, send_request_h1, send_request_h2,
 };
+#[cfg(feature = "http3")]
+use crate::core::transport::{ResponseMode, send_request_h3};
 use crate::core::{ProxyConfig, ProxyUrl};
 #[cfg(feature = "http3")]
 use crate::pool::checkout_handle;
@@ -116,7 +116,9 @@ impl Session {
             log_race_proxy_fallback(cause);
             return false;
         }
-        !req.body.is_stream() && !req.stream_response && req.url.scheme() == "https"
+        !req.body.is_stream()
+            && req.response != ResponseMode::Streamed
+            && req.url.scheme() == "https"
     }
 
     #[cfg(feature = "http3")]
