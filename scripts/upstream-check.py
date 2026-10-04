@@ -117,6 +117,22 @@ def check_crate(name: str, meta: dict) -> None:
         )
 
 
+def shared_advisories(meta: dict, repo: str, revision: str) -> list[str]:
+    feed = meta.get("shared_advisories")
+    if not feed:
+        return []
+    since = request(f"{GITHUB}/repos/{repo}/commits/{revision}")["commit"]["committer"]["date"]
+    commits = request(f"{GITHUB}/repos/{feed['repo']}/commits?path={feed['path']}&since={since}&per_page=100")
+    pattern = re.compile(rf"{re.escape(feed['path'])}/(CVE-\d+-\d+)\.json")
+    found = set()
+    for commit in commits:
+        for changed in request(f"{GITHUB}/repos/{feed['repo']}/commits/{commit['sha']}").get("files", []):
+            match = pattern.fullmatch(changed["filename"])
+            if match and changed["status"] == "added":
+                found.add(match.group(1))
+    return sorted(found - set(meta.get("reviewed", [])))
+
+
 def check_boringssl(crate_dir: Path, meta: dict) -> None:
     repo, gitlink = meta["repo"], meta["gitlink"]
     rel = (crate_dir / gitlink).relative_to(ROOT).as_posix()
@@ -124,10 +140,20 @@ def check_boringssl(crate_dir: Path, meta: dict) -> None:
     revision = tree.stdout.split()[2]
     compare = request(f"{GITHUB}/repos/{repo}/compare/{revision}...main")
     hits = osv({"commit": revision})
+    shared = shared_advisories(meta, repo, revision)
     print(
         f"{crate_dir.name}: {repo} gitlink {revision[:12]} behind main by {compare['ahead_by']} commits"
-        f" advisories: {', '.join(hits) or 'none'}"
+        f" advisories: {', '.join(hits) or 'none'} shared to review: {', '.join(shared) or 'none'}"
     )
+    feed = meta.get("shared_advisories", {}).get("repo")
+    for cve in shared:
+        notify(
+            f"Review {cve} against the bundled BoringSSL",
+            f"{feed} published {cve} after BoringSSL {revision[:12]}, the revision {crate_dir.name} bundles. "
+            "BoringSSL shares code with OpenSSL. Check whether BoringSSL is affected. If it is, carry the fix "
+            f"as a patch in {crate_dir.relative_to(ROOT).as_posix()}/patches/. Then add {cve} to `reviewed` "
+            f"in {crate_dir.relative_to(ROOT).as_posix()}/Cargo.toml.",
+        )
     if hits:
         notify(
             f"Security advisory for {crate_dir.name} BoringSSL: {', '.join(hits)}",

@@ -82,6 +82,12 @@ step. The patches are:
      commit `eae46df1e6c1df0556ee4106bcab75657eb8181e`. A ClientHello
      without a post-quantum key share, such as Safari 18's, falls in that
      range, and the browser sends the extension.
+6. `0006-leyline-crl-relative-name.patch`
+   - Backports BoringSSL commit `9b639f5b3b086508c03f6a4a1792e4a6043777ac`,
+     which removes `nameRelativeToCRLIssuer` support from CRL distribution
+     points. A certificate with many such distribution points grew the heap
+     without bound (CVE-2026-35189). A distribution point that uses a relative
+     name is now ignored. The upstream test changes are not carried.
 
 BoringSSL provides `SSL_CTX_set_grease_sigalgs_enabled` since commit
 `29e593e29165df578ab778269a1f04da2055c32f`. It puts one GREASE value

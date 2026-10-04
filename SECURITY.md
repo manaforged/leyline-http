@@ -41,5 +41,8 @@ Chromium's DEPS at tag `154.0.8037.58`. See
 for the carried patches and the build notes.
 
 A daily workflow checks the forked crates and the pinned BoringSSL revision
-against upstream security advisories. `PROVENANCE.md` records the pinned
-revision.
+against upstream security advisories. It also lists each OpenSSL advisory
+published after the pinned revision, because BoringSSL shares code with
+OpenSSL, and opens an issue for each one not yet reviewed. The reviewed
+advisories and their outcome are in `crates/leyline-bssl-sys/Cargo.toml`.
+`PROVENANCE.md` records the pinned revision and the carried patches.
