@@ -113,14 +113,32 @@ from these sources only:
 - Safari: Safari.app, driven by `safaridriver`. Mobile Safari has no automated
   capture.
 
-The script runs Chrome with `--headless=new` and Firefox with `--headless`. It
-sets Chrome's user agent itself with `--user-agent`. Before it lands a
+The script runs Chrome with `--headless=new` and Firefox with `--headless`.
+On Linux it also captures Firefox's HTTP/3 fingerprint headful under Xvfb
+(`xvfb-run`), twice. It sets Chrome's user agent itself with `--user-agent`. Before it lands a
 profile, it checks the Chrome binary's `--version` output or the Safari bundle
 identifier. It also checks that the user agent the capture server saw names
 the expected browser and contains no `Headless`; for Chrome, that check
 confirms the script's own flag. The script records the exact build in
 `captured_against` and writes `capture = "browser"`. It exits with an error
 instead of landing a profile from another source.
+
+Each capture is stored in `crates/leyline/profiles/captures/` with the client
+address removed; the script refuses to store a capture that still holds a
+public address outside `dst_ip`. To capture on several hosts, run
+`scripts/profile-oneshot.sh firefox --capture-only` on each, copy the capture
+files to one checkout, and land them with
+`scripts/profile-oneshot.sh firefox --major 157 --land firefox-157.0`.
+
+Landing starts from the previous profile of the family and changes only what
+the captures show: the version, the user agents, the build in
+`captured_against`, and any TLS list, JA4, or HTTP/2 value that differs. It
+also adds the two rows in `docs/guide/profiles.md`, the README version range,
+the changelog entry, and the row in `crates/leyline/tests/data/h3_qpack.toml`.
+It does not change any other profile. It exits with status 2 and lists what a
+person must review when the TLS extension order, JA4, HTTP/2, or HTTP/3
+fingerprint changed in a way it cannot write, and always for the guide prose
+and `cargo truesight sync` (or pass `--sync`).
 
 Before the first Safari capture, do these steps once:
 
@@ -130,22 +148,21 @@ Before the first Safari capture, do these steps once:
 
 ### Keeping profiles current
 
-The `release-watch` workflow runs in the nightly run. It compares each browser's
-stable release (Chrome, Firefox, Brave, Edge, Opera, and Safari and iOS)
-with the newest bundled profile, and checks the forked crates against upstream
-security advisories:
+The `release-watch` workflow runs daily. It compares each browser's stable
+release (Chrome, Firefox, Brave, Edge, Opera, and Safari and iOS) with the
+newest bundled profile, and checks the forked crates, the pinned BoringSSL
+revision, and the OpenSSL advisories published after that revision:
 
 ```sh
 python3 scripts/release-check.py
 python3 scripts/upstream-check.py
 ```
 
-Either command exits with status 1 when a new major release has no profile or
-an advisory applies to a fork's base version. The workflow then fails, and
-GitHub notifies the maintainers. A BoringSSL revision behind Chrome's, a newer
-upstream release, or a vendor API error is only reported in the run log. A new
-release is captured on request with the capture scripts above; nothing is
-captured on a schedule.
+When a release has no profile, the BoringSSL revision differs from Chrome's,
+or an advisory applies or is not yet reviewed, the scripts open an issue for
+it, assigned to the maintainer, and exit with status 0. They exit with status
+1 only when a check cannot run; the workflow then fails and opens a failure
+issue. A new release is captured with the capture scripts above.
 
 ## Releasing
 
