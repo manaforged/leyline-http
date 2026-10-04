@@ -111,35 +111,9 @@ fn firefox_profile_carries_firefox_h3_not_chrome() {
 #[cfg(feature = "http3")]
 #[test]
 fn qpack() {
-    let captured = [
-        (Browser::Chrome145, 65536, 100),
-        (Browser::Chrome146, 65536, 100),
-        (Browser::Chrome147, 65536, 100),
-        (Browser::Chrome148, 65536, 100),
-        (Browser::Chrome149, 65536, 100),
-        (Browser::Chrome150, 65536, 100),
-        (Browser::Chrome151, 65536, 100),
-        (Browser::Chrome152, 65536, 100),
-        (Browser::Chrome153, 65536, 100),
-        (Browser::Chrome154, 65536, 100),
-        (Browser::Brave146, 65536, 100),
-        (Browser::Brave154, 65536, 100),
-        (Browser::Firefox148, 65536, 20),
-        (Browser::Firefox149, 65536, 20),
-        (Browser::Firefox150, 65536, 20),
-        (Browser::Firefox151, 65536, 20),
-        (Browser::Firefox152, 65536, 20),
-        (Browser::Firefox153, 65536, 20),
-        (Browser::Firefox154, 65536, 20),
-        (Browser::Firefox155, 65536, 20),
-        (Browser::Firefox156, 65536, 20),
-        (Browser::Firefox157, 65536, 20),
-        (Browser::Safari18, 16383, 100),
-        (Browser::Safari26, 16383, 100),
-        (Browser::Safari27, 16383, 100),
-        (Browser::SafariIOS18, 16383, 100),
-        (Browser::SafariIOS27, 16383, 100),
-    ];
+    let captured: std::collections::BTreeMap<String, (u64, u64)> =
+        toml::from_str(include_str!("data/h3_qpack.toml"))
+            .expect("tests/data/h3_qpack.toml parses");
     for browser in Browser::all().iter().copied() {
         let Some(h3) = browser.profile().h3.as_ref() else {
             continue;
@@ -161,10 +135,7 @@ fn qpack() {
         } else {
             legacy
         };
-        let expected = captured
-            .iter()
-            .find(|(b, _, _)| *b == browser)
-            .map_or((0, 0), |(_, cap, blocked)| (*cap, *blocked));
+        let expected = captured.get(browser.id()).copied().unwrap_or((0, 0));
         assert_eq!(advertised, expected, "{browser}");
     }
 }

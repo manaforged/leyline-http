@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Drive headless Firefox via Marionette and print tls.peet.ws JSON.
+"""Drive Firefox via Marionette and print the JSON a fingerprint page returns.
 
 Firefox has no Chrome-style --dump-dom. --marionette is the control channel.
 """
@@ -53,9 +53,11 @@ def wait_port(host: str, port: int, timeout: float) -> None:
 
 
 def main() -> int:
-    ff = sys.argv[1]
-    url = sys.argv[2] if len(sys.argv) > 2 else "https://tls.peet.ws/api/all"
-    out = sys.argv[3] if len(sys.argv) > 3 else ""
+    headful = "--headful" in sys.argv
+    args = [arg for arg in sys.argv[1:] if arg != "--headful"]
+    ff = args[0]
+    url = args[1] if len(args) > 1 else "https://tls.peet.ws/api/all"
+    out = args[2] if len(args) > 2 else ""
     port = int(os.environ.get("MARIONETTE_PORT", "29228"))
     profile = tempfile.mkdtemp(prefix="leyline-ff-")
     with open(os.path.join(profile, "user.js"), "w", encoding="utf-8") as fh:
@@ -69,7 +71,7 @@ def main() -> int:
     proc = subprocess.Popen(
         [
             ff,
-            "--headless",
+            *([] if headful else ["--headless"]),
             "--marionette",
             "--profile",
             profile,
