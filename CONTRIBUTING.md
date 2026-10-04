@@ -40,8 +40,10 @@ The rest of this guide is the maintainers' workflow.
    `cargo-truesight` with
    `cargo install --locked --git https://github.com/manaforged/truesight`.
    Every build compiles BoringSSL from source, so you also need CMake 3.22 or
-   later, a C and C++ compiler, and libclang; on Windows, the MSVC build tools
-   and NASM. The live suites need network access.
+   later and a C and C++ compiler; on Windows, the MSVC build tools and NASM.
+   Regenerating the committed bindings with
+   `scripts/regen-bssl-bindings.sh` also needs libclang. The live suites need
+   network access.
 
    The BoringSSL patches live in `crates/leyline-bssl-sys/patches/` as a
    numbered series. The build applies them in order. List a new patch in

@@ -1,12 +1,14 @@
 use std::process::ExitCode;
 
 use crate::archive::emit_link_directives;
-use crate::bindings::generate_bindings;
+use crate::bindings_file::provide_bindings;
 use crate::config::Config;
 use crate::source::ensure_patches_applied;
 
 mod archive;
+#[cfg(feature = "bindgen")]
 mod bindings;
+mod bindings_file;
 mod cmake;
 mod config;
 mod prefix;
@@ -34,6 +36,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if !config.env.docs_rs {
         emit_link_directives(&config)?;
     }
-    generate_bindings(&config).map_err(|e| format!("could not generate bindings: {e}"))?;
+    provide_bindings(&config).map_err(|e| format!("could not provide bindings: {e}"))?;
     Ok(())
 }

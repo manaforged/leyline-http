@@ -1,5 +1,8 @@
+#[cfg(feature = "bindgen")]
 use std::ffi::OsString;
+#[cfg(feature = "bindgen")]
 use std::io;
+#[cfg(feature = "bindgen")]
 use std::path::Path;
 
 use crate::config::Config;
@@ -104,6 +107,7 @@ pub(crate) fn cmake_params_apple(config: &Config) -> &'static [(&'static str, &'
     &[]
 }
 
+#[cfg(feature = "bindgen")]
 pub(crate) fn get_apple_sdk_name(config: &Config) -> &'static str {
     for (name, value) in cmake_params_apple(config) {
         if *name == "CMAKE_OSX_SYSROOT" {
@@ -117,6 +121,7 @@ pub(crate) fn get_apple_sdk_name(config: &Config) -> &'static str {
     );
 }
 
+#[cfg(feature = "bindgen")]
 pub(crate) fn pick_best_android_ndk_toolchain(toolchains_dir: &Path) -> io::Result<OsString> {
     let toolchains = std::fs::read_dir(toolchains_dir)?.collect::<Result<Vec<_>, _>>()?;
     for known_toolchain in ["linux-x86_64", "darwin-x86_64", "windows-x86_64"] {

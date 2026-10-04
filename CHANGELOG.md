@@ -8,6 +8,18 @@ behaviour, and each change is listed here. The BoringSSL crates
 `leyline-bssl`, `leyline-bssl-sys`, and `leyline-bssl-tokio` share this
 version and publish as separate crates.
 
+## Unreleased
+
+### Changed
+
+- `leyline-bssl-sys` ships pre-generated BoringSSL bindings for each
+  supported target, so a build no longer compiles or runs `bindgen`, and
+  links the BoringSSL source into the build directory instead of copying
+  it. Cold builds are faster. To generate the bindings at build time, for
+  example for another target, enable the new `bindgen` feature. CMake uses
+  the Ninja generator when `ninja` is on `PATH` and `CMAKE_GENERATOR` is
+  not set.
+
 ## 0.1.1 - 2026-10-02
 
 ### Changed

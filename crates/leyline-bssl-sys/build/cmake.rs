@@ -9,6 +9,21 @@ use crate::targets::{
     cmake_params_android, cmake_params_apple, should_use_cmake_cross_compilation,
 };
 
+const NINJA_GENERATOR: &str = "Ninja";
+const NINJA_PROGRAM: &str = if cfg!(windows) { "ninja.exe" } else { "ninja" };
+
+fn ninja_on_path() -> bool {
+    std::env::var_os("PATH").is_some_and(|paths| {
+        std::env::split_paths(&paths).any(|dir| dir.join(NINJA_PROGRAM).is_file())
+    })
+}
+
+fn select_generator(config: &Config, cmake: &mut cmake::Config) {
+    if config.env.cmake_generator.is_none() && ninja_on_path() {
+        cmake.generator(NINJA_GENERATOR);
+    }
+}
+
 fn map_build_paths(config: &Config, cmake: &mut cmake::Config) {
     let source = get_boringssl_source_path(config);
     let mut maps = vec![(config.out_dir.as_path(), "/build")];
@@ -237,6 +252,7 @@ pub(crate) fn build_boringssl_or_get_prebuilt(config: &Config) -> &Path {
 
         cfg.define("BORINGSSL_PREFIX", PREFIX);
         map_build_paths(config, &mut cfg);
+        select_generator(config, &mut cfg);
 
         cfg.build_target("ssl").build();
         let path = cfg.build_target("crypto").build();
