@@ -76,6 +76,7 @@ pub(crate) fn ensure_patches_applied(config: &Config) -> io::Result<()> {
         run_command(git(src_path).arg("init"))?;
     }
 
+    println!("cargo:rerun-if-changed={PATCHES_DIR}");
     let patches = patch_names(config)?;
     for patch in patches {
         println!(

@@ -76,5 +76,22 @@ version = "5.2.0"
 [package.metadata.upstream.boringssl]
 repo = "google/boringssl"
 gitlink = "deps/boringssl"
+shared_advisories = { repo = "openssl/release-metadata", path = "secjson" }
+
+[package.metadata.upstream.boringssl.reviewed]
+CVE-2026-35189 = "affected; fixed by patches/0006-leyline-crl-relative-name.patch"
+CVE-2026-35191 = "OpenSSL QUIC server; BoringSSL has no QUIC stack"
+CVE-2026-42772 = "OpenSSL QUIC stream reassembly; BoringSSL has no QUIC stack"
+CVE-2026-54872 = "generic scalar multiplication for non-NIST curves; BoringSSL has none"
+CVE-2026-54873 = "OpenSSL QUIC stream frames; BoringSSL has no QUIC stack"
+CVE-2026-54875 = "SM2; BoringSSL has no SM2"
+CVE-2026-72897 = "TLS server SSL_set_SSL_CTX during a handshake; Leyline is a client"
+CVE-2026-75804 = "OpenSSL QUIC flow control; BoringSSL has no QUIC stack"
+CVE-2026-75805 = "CMP client; BoringSSL has no CMP"
+CVE-2026-75806 = "DTLS 1.2; Leyline does not use DTLS"
+CVE-2026-77696 = "SM2; BoringSSL has no SM2"
+CVE-2026-84782 = "DTLS retransmission; Leyline does not use DTLS"
+CVE-2026-84783 = "OpenSSL 4.0 two-phase extension cache; BoringSSL builds the cache under the write lock"
+CVE-2026-84784 = "OpenSSL QUIC connection IDs; BoringSSL has no QUIC stack"
 
 [workspace]
