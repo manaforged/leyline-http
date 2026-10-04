@@ -36,12 +36,30 @@ Changes from upstream:
 
 ## BoringSSL revision
 
-- Commit `ac39ea6853833c1f18fd23614091d11855e71752`, vendored as the
-  `deps/boringssl` submodule.
-- It is the `boringssl_revision` in Chromium's DEPS at tag `154.0.8037.58`.
-  Cloudflare v5.2.0 pins `e2a57cfb4d915b4ba820585aef9fdee7bca13fe5`, 372
-  commits older. Leyline keeps the Chrome revision so that the TLS wire
-  output stays the same.
+- Commit `427ec40cc8edc545253289232e885708c409e5ea`, tag `0.20260929.0`,
+  vendored as the `deps/boringssl` submodule.
+- It contains `9b639f5b3b086508c03f6a4a1792e4a6043777ac`, the fix for
+  CVE-2026-35189. That bug is a memory-exhaustion denial of service while
+  caching extensions of a certificate whose CRL distribution points use
+  `nameRelativeToCRLIssuer`. The fix drops that expansion. URI distribution
+  points are unchanged.
+- The previous pin was `ac39ea6853833c1f18fd23614091d11855e71752`, the
+  `boringssl_revision` in Chromium's DEPS at tag `154.0.8037.58`. Chromium
+  stable `154.0.8037.97` still uses that commit. Chromium beta
+  `155.0.8059.12` (`b780f192ce515ed8ed358f6c0947bd7acce438b9`) and
+  `156.0.8078.4` (`2ea3200c3a3ec176613ab7a0b9a4ffc6db846120`) are also older
+  than the fix. Dev `157.0.8081.0` (`5e1bfb45c353b2bb36bdf26b006ea8f5566c82d5`)
+  is eight commits after this tag; those commits are Rust bindings, a pki
+  OCSP check, and the advisory text. Leyline does not build pki, so the
+  release tag is the pin.
+- Cloudflare v5.2.0 pins `e2a57cfb4d915b4ba820585aef9fdee7bca13fe5`.
+- The default ClientHello is unchanged between the two pins: extension
+  order, named groups, signature algorithms, and the TLS 1.3 cipher list.
+  New APIs in this range (`SSL_CTX_set1_tls13_ciphers`,
+  `SSL_CTX_set_cert_cb_ex`, and `ssl_compliance_policy_fips_202609`) are
+  opt-in. The trust-anchor draft-05 update does not change the TLS wire
+  format. `SSL_SESSION` is now an opaque public type; its implementation
+  type, `SSLSession`, lives in the prefixed `bssl` namespace.
 
 ## Carried patches
 
@@ -57,7 +75,9 @@ step. The patches are:
    - `SSL_CTX_set_delegated_credentials` (RFC 9345).
    - `SSL_CTX_set_extension_order` and `SSL_CTX_set_tls13_cipher_order`.
    - The ECDHE-ECDSA and ECDHE-RSA 3DES cipher suites.
-   - The FFDHE2048 and FFDHE3072 groups.
+   - The FFDHE2048 and FFDHE3072 groups. Their NIDs stay 973 and 974.
+     Tag `0.20260929.0` still leaves those numbers unused; SLH-DSA took
+     979-981, so the defines now follow that block.
    - Duplicate signature algorithms are allowed in the preference list.
    - `prefix_symbols.h` entries for the new exports.
 

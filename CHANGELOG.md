@@ -8,6 +8,18 @@ behaviour, and each change is listed here. The BoringSSL crates
 `leyline-bssl`, `leyline-bssl-sys`, and `leyline-bssl-tokio` share this
 version and publish as separate crates.
 
+## Unreleased
+
+### Security
+
+- BoringSSL is pinned to `427ec40` (tag `0.20260929.0`). This includes the
+  fix for CVE-2026-35189, a memory-exhaustion denial of service when
+  certificate verification expands a CRL distribution point that uses
+  `nameRelativeToCRLIssuer`. Those distribution points are now ignored. URI
+  distribution points are unchanged. The previous pin, `ac39ea6` (Chromium
+  `154.0.8037.58`), did not include the fix. Leyline reaches it from the
+  server-certificate verify callback.
+
 ## 0.1.1 - 2026-10-02
 
 ### Changed

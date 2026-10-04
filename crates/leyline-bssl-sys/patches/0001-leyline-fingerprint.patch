@@ -2,9 +2,9 @@ diff --git a/include/openssl/nid.h b/include/openssl/nid.h
 index 216c06603..b5d528566 100644
 --- a/include/openssl/nid.h
 +++ b/include/openssl/nid.h
-@@ -5531,6 +5531,12 @@ extern "C" {
- #define OBJ_ENC_pe_mtcCertificationAuthority_draft \
-   0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0xda, 0x4b, 0x2f, 0x02
+@@ -5553,6 +5553,12 @@ extern "C" {
+ #define OBJ_ENC_SLH_DSA_SHA2_128s_WITH_SHA256 \
+   0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, 0x23
  
 +#define SN_ffdhe2048 "ffdhe2048"
 +#define NID_ffdhe2048 973
