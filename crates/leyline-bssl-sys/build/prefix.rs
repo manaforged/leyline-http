@@ -1,17 +1,24 @@
+#[cfg(feature = "bindgen")]
 use bindgen::callbacks::{ItemInfo, ParseCallbacks};
+#[cfg(feature = "bindgen")]
 use std::collections::HashSet;
+#[cfg(feature = "bindgen")]
 use std::fs;
+#[cfg(feature = "bindgen")]
 use std::io;
+#[cfg(feature = "bindgen")]
 use std::path::Path;
 
 pub const PREFIX: &str = "LEYLINE";
 
+#[cfg(feature = "bindgen")]
 #[derive(Debug)]
 pub struct PrefixCallback {
     syms: HashSet<String>,
     label: &'static str,
 }
 
+#[cfg(feature = "bindgen")]
 impl PrefixCallback {
     pub fn read(include: &Path, target_os: &str) -> io::Result<Self> {
         let text = fs::read_to_string(include.join("openssl").join("prefix_symbols.h"))?;
@@ -37,6 +44,7 @@ impl PrefixCallback {
     }
 }
 
+#[cfg(feature = "bindgen")]
 impl ParseCallbacks for PrefixCallback {
     fn generated_link_name_override(&self, item: ItemInfo<'_>) -> Option<String> {
         self.syms

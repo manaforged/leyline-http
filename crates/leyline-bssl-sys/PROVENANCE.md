@@ -99,9 +99,11 @@ compiler support symbols (weak or COMDAT), which do not clash.
 
 ## Build
 
-The build compiles BoringSSL from source with CMake and runs `bindgen`.
-It needs CMake 3.22 or later, a C and C++ compiler, libclang, and Git. On
-Windows it also needs the MSVC build tools and NASM.
+The build compiles BoringSSL from source with CMake and uses the bindings
+committed under `bindings/` for the target. It needs CMake 3.22 or later, a
+C and C++ compiler, and Git. On Windows it also needs the MSVC build tools
+and NASM. The `bindgen` feature generates the bindings at build time
+instead and needs libclang.
 
 - Build paths: `-ffile-prefix-map` (MSVC: `/d1trimfile`) maps `OUT_DIR` to
   `/build`, and the source tree to `/build/boringssl`.

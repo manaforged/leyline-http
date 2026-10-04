@@ -2,6 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
+use crate::bindings_file::OUT_BINDINGS_FILE;
 use crate::config::Config;
 use crate::prefix::PrefixCallback;
 use crate::process::run_command;
@@ -189,7 +190,7 @@ pub(crate) fn generate_bindings(config: &Config) -> Result<PathBuf, Box<dyn std:
         .write(Box::new(&mut source_code))
         .map_err(|e| format!("Couldn't serialize bindings: {e}"))?;
     ensure_err_lib_enum_is_named(&mut source_code);
-    let bindings_path = config.out_dir.join("bindings.rs");
+    let bindings_path = config.out_dir.join(OUT_BINDINGS_FILE);
     fs::write(&bindings_path, source_code).map_err(|e| {
         format!(
             "Couldn't write bindings to {}: {e}",

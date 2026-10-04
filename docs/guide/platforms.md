@@ -5,8 +5,8 @@ build needs.
 
 ## Supported targets
 
-`leyline-bssl-sys` builds BoringSSL from source with CMake and generates its
-bindings with `bindgen` when it compiles.
+`leyline-bssl-sys` builds BoringSSL from source with CMake and uses the Rust
+bindings committed for the target, so a build needs no libclang.
 
 | Target | Notes |
 | --- | --- |
@@ -42,7 +42,14 @@ Other variables:
 - `LEYLINE_BSSL_RUST_CPPLIB` replaces the C++ standard library that the
   build links: by default `c++` on macOS, `stdc++` on Linux, none on
   Windows.
-- `LEYLINE_BSSL_SYSROOT` gives `bindgen` a sysroot.
+- `LEYLINE_BSSL_SYSROOT` gives `bindgen` a sysroot when the `bindgen`
+  feature is on.
+
+The committed bindings match the headers that ship in `leyline-bssl-sys`.
+`LEYLINE_BSSL_INCLUDE_PATH` needs the `bindgen` feature of
+`leyline-bssl-sys`; without it the build stops with an error. When
+`LEYLINE_BSSL_PATH` links a BoringSSL whose headers differ, turn on the
+`bindgen` feature too.
 
 The build needs:
 
@@ -52,7 +59,6 @@ The build needs:
 - Git. Every build runs `git apply` for Leyline's patches unless
   `LEYLINE_BSSL_ASSUME_PATCHED` is set. A source checkout also uses Git to
   fetch the BoringSSL submodule.
-- libclang, for `bindgen`.
 - NASM on Windows, for the BoringSSL assembly.
 
 The build uses the macOS deployment target that Rust uses
@@ -64,12 +70,11 @@ builds reuse it.
 ### Windows
 
 Install Visual Studio Build Tools with the C++ workload, which includes
-CMake, then LLVM and NASM. A Developer Command Prompt is not required.
+CMake, then NASM. A Developer Command Prompt is not required. Put the NASM
+directory and the CMake `bin` directory on `PATH`.
 
-1. Put the LLVM `bin` directory, the NASM directory, and the CMake `bin`
-   directory on `PATH`.
-2. Set `LIBCLANG_PATH` to the LLVM `bin` directory, so `bindgen` finds
-   `libclang.dll`.
+With the `bindgen` feature, also install LLVM and set `LIBCLANG_PATH` to
+its `bin` directory, so `bindgen` finds `libclang.dll`.
 
 ### musl
 
