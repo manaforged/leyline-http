@@ -33,6 +33,7 @@ profile stability and your own profiles.
 | Firefox 154 | `Firefox154` | `firefox-154.0.1` | gated |
 | Firefox 155 | `Firefox155` | `firefox-155.0.1` | gated |
 | Firefox 156 | `Firefox156` | `firefox-156.0.1` | gated |
+| Firefox 157 | `Firefox157` | `firefox-157.0` | gated |
 | Safari 18 | `Safari18` | `safari-18.6-20621.3.11.11.3` | gated |
 | Safari 26 | `Safari26` | `safari-26.6.2-21624.5.1.11.3` | gated |
 | Safari 27 | `Safari27` | `safari-27.0-21625.1.29.18.28` | gated |
@@ -119,6 +120,7 @@ The reference values come from the capture that the profile's `capture` and
 | Firefox 154 | `browser` | `firefox-154.0.1`, macOS and Linux `--headless`, Windows headful |
 | Firefox 155 | `browser` | `firefox-155.0.1`, macOS and Linux `--headless`, Windows headful |
 | Firefox 156 | `browser` | `firefox-156.0.1`, macOS and Linux `--headless`, Windows headful |
+| Firefox 157 | `browser` | `firefox-157.0`, macOS and Linux `--headless` |
 | Safari 18 | `browser` | `safari-18.6-20621.3.11.11.3`, Safari.app on macOS 15.7.7 in a VM through safaridriver |
 | Safari 26 | `browser` | `safari-26.6.2-21624.5.1.11.3`, Safari.app on macOS 26.6.2 in a VM through safaridriver |
 | Safari 27 | `browser` | `safari-27.0-21625.1.29.18.28`, Safari.app 27.0 on macOS 26.6.2 in a VM through safaridriver |
@@ -205,6 +207,11 @@ The facts behind the bundled profiles, from their captures in
   the same Chromium major (145 to 151), `OPR/<major>.0.0.0`, the `Opera`
   brand in `sec-ch-ua`, and `sec-ch-ua-platform: "Linux"`
   (`opera-<version>-linux-headful-run<n>.json`).
+- **Firefox 157.** Firefox 157.0 captured on macOS and Linux with
+  `--headless` on 2026-10-04 sends the same ClientHello, HTTP/2 frames, and
+  header order as Firefox 156.0.1. Over QUIC it drops the ML-DSA signature
+  schemes that 156 sends. No Windows or session resumption capture of 157
+  exists; those values come from Firefox 156.
 - **Firefox 148 to 156.** Official Mozilla builds captured on macOS and
   Linux with `--headless` on 2026-09-25, and on Windows headful from the
   `win64` installers, with the SHA256SUMS signature and the Authenticode
@@ -388,7 +395,8 @@ Every `[h3]` table comes from QUIC captures against
 
 - Chrome 145 to 154, Brave 1.88.138 and 1.96.59, and Firefox 148 to 156:
   official Linux builds, headful under Xvfb, two fresh processes each, eight
-  for Chrome 154 and Firefox 156, on 2026-09-25. Every build used HTTP/3 on
+  for Chrome 154 and Firefox 156, on 2026-09-25. Firefox 157.0 the same way, two
+  runs, on 2026-10-04. Every build used HTTP/3 on
   the first navigation with no QUIC flag or preference.
 - Chrome 154.0.8037.58 and Firefox 156.0.1 on Windows, two runs each. The
   HTTP/3 HEADERS carry `sec-ch-ua-platform: "Windows"`.
@@ -425,7 +433,8 @@ keys.
   destination connection ID length varies per connection; `dcid_length`
   weights are the 27 observed lengths: 8 (12), 10 (4), 11 (1), 13 (5), 15
   (2), 16 (1), 19 (1), 20 (1). Firefox 156 adds the ML-DSA schemes to the
-  QUIC signature algorithms and delegated credentials; 148 to 155 do not.
+  QUIC signature algorithms and delegated credentials; 148 to 155 and 157 do
+  not.
   The QUIC ClientHello keeps `extended_master_secret` and
   `renegotiation_info`. Firefox shuffles the QUIC ClientHello extensions on
   every connection and keeps `quic_transport_parameters` and ECH last, so
