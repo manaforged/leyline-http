@@ -133,6 +133,7 @@ fn qpack() {
         (Browser::Firefox154, 65536, 20),
         (Browser::Firefox155, 65536, 20),
         (Browser::Firefox156, 65536, 20),
+        (Browser::Firefox157, 65536, 20),
         (Browser::Safari18, 16383, 100),
         (Browser::Safari26, 16383, 100),
         (Browser::Safari27, 16383, 100),

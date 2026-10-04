@@ -755,6 +755,7 @@ pub leyline::Browser::Firefox153
 pub leyline::Browser::Firefox154
 pub leyline::Browser::Firefox155
 pub leyline::Browser::Firefox156
+pub leyline::Browser::Firefox157
 pub leyline::Browser::OkHttpAndroid10
 pub leyline::Browser::Safari18
 pub leyline::Browser::Safari26

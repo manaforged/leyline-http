@@ -10,6 +10,11 @@ version and publish as separate crates.
 
 ## Unreleased
 
+### Added
+
+- A Firefox 157 profile, `Browser::Firefox157`, from captures of Firefox 157.0
+  on macOS and Linux.
+
 ### Changed
 
 - `leyline-bssl-sys` ships pre-generated BoringSSL bindings for each
