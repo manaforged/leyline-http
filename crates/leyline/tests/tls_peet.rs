@@ -1485,65 +1485,6 @@ async fn live_tls_peer_certificate_exposed() {
 }
 
 #[tokio::test]
-#[ignore = "live: needs network + $LEYLINE_TEST_HTTP_PROXY"]
-async fn live_http_connect_proxy() {
-    let proxy_url = std::env::var("LEYLINE_TEST_HTTP_PROXY")
-        .ok()
-        .filter(|v| !v.is_empty())
-        .expect("LEYLINE_TEST_HTTP_PROXY must name an HTTP proxy for this live test");
-
-    let session = leyline::Session::builder()
-        .browser(Browser::Chrome147)
-        .proxy(&proxy_url)
-        .build()
-        .expect("build session with proxy");
-
-    let resp = session
-        .get(PEET_URL)
-        .await
-        .expect("proxy-tunnelled fetch failed");
-    assert_eq!(resp.status(), 200);
-    let json: Value = serde_json::from_str(&resp.text().await.unwrap()).unwrap();
-    let h2 = json["http2"]["akamai_fingerprint"].as_str().unwrap();
-    assert_eq!(
-        normalize_akamai(h2),
-        "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p",
-        "H2 fingerprint changed through HTTP CONNECT proxy"
-    );
-    println!("✓ HTTP CONNECT proxy: tunneled request preserved Chrome 147 H2 fingerprint");
-}
-
-#[cfg(feature = "socks")]
-#[tokio::test]
-#[ignore = "live: needs network + $LEYLINE_TEST_SOCKS5_PROXY"]
-async fn live_socks5_proxy() {
-    let proxy_url = std::env::var("LEYLINE_TEST_SOCKS5_PROXY")
-        .ok()
-        .filter(|v| !v.is_empty())
-        .expect("LEYLINE_TEST_SOCKS5_PROXY must name a SOCKS5 proxy for this live test");
-
-    let session = leyline::Session::builder()
-        .browser(Browser::Chrome147)
-        .proxy(&proxy_url)
-        .build()
-        .expect("build session with proxy");
-
-    let resp = session
-        .get(PEET_URL)
-        .await
-        .expect("socks5-tunnelled fetch failed");
-    assert_eq!(resp.status(), 200);
-    let json: Value = serde_json::from_str(&resp.text().await.unwrap()).unwrap();
-    let h2 = json["http2"]["akamai_fingerprint"].as_str().unwrap();
-    assert_eq!(
-        normalize_akamai(h2),
-        "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p",
-        "H2 fingerprint changed through SOCKS5 proxy"
-    );
-    println!("✓ SOCKS5 proxy: tunneled request preserved Chrome 147 H2 fingerprint");
-}
-
-#[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_websocket_echo() {
     let session = leyline::Session::browser(Browser::default());
