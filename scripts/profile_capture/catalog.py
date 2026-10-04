@@ -9,7 +9,6 @@ from .land import bundled_majors, missing_majors
 from .safari import safari_host_version
 
 def catalog() -> list[tuple[str, str, str, str, str]]:
-    """family, bundled, live, action (fill/skip/ok), note"""
     rows: list[tuple[str, str, str, str, str]] = []
     chrome_have = bundled_majors("chrome")
     cmaj, cver = live_chrome_major()
@@ -72,10 +71,6 @@ def live_edge_major() -> tuple[int, str]:
         return cmaj, f"Chromium {cver} lockstep"
 
 
-def sudo_ok() -> bool:
-    return subprocess.run(["sudo", "-n", "true"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
-
-
 def print_catalog(rows: list[tuple[str, str, str, str, str]]) -> None:
     print(f"{'family':<12} {'bundled':<28} {'live':<22} {'do':<10} note")
     print("-" * 110)
@@ -84,9 +79,9 @@ def print_catalog(rows: list[tuple[str, str, str, str, str]]) -> None:
     print("suite: " + ", ".join(row[0] for row in rows))
 
 
-def fill_edge(dry: bool) -> list[tuple[str, int, str]]:
+def fill_edge(dry: bool, pending_chrome: set[int]) -> list[tuple[str, int, str]]:
     chrome_have = bundled_majors("chrome")
-    newest = chrome_have[-1] if chrome_have else 0
+    newest = max(chrome_have + list(pending_chrome), default=0)
     edge_maj, edge_ver = live_edge_major()
     if edge_maj > newest:
         print(f"edge: Chrome {newest} behind Edge/Chromium {edge_ver}; fill chrome first")

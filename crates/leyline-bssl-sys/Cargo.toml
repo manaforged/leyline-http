@@ -76,9 +76,20 @@ version = "5.2.0"
 [package.metadata.upstream.boringssl]
 repo = "google/boringssl"
 gitlink = "deps/boringssl"
-shared_advisories = { repo = "openssl/release-metadata", path = "secjson" }
+shared_advisories = { repo = "openssl/release-metadata", path = "secjson", since = "2026-06-21" }
 
 [package.metadata.upstream.boringssl.reviewed]
+CVE-2026-14456 = "OpenSSL QUIC server; BoringSSL has no QUIC stack"
+CVE-2026-14457 = "raw public keys; BoringSSL offers them only for configured non-X.509 credentials and Leyline configures none"
+CVE-2026-18798 = "OpenSSL QUIC server; BoringSSL has no QUIC stack"
+CVE-2026-54874 = "DTLS; Leyline does not use DTLS"
+CVE-2026-54876 = "OCSP response checking; BoringSSL does not parse OCSP responses"
+CVE-2026-63072 = "CMS decryption; BoringSSL CMS only signs"
+CVE-2026-63073 = "CMP; BoringSSL has no CMP"
+CVE-2026-63074 = "CMP; BoringSSL has no CMP"
+CVE-2026-63075 = "OpenSSL QUIC ACK handling; BoringSSL has no QUIC stack"
+CVE-2026-63076 = "CMP server; BoringSSL has no CMP"
+CVE-2026-75803 = "EVP_Cipher ChaCha20-Poly1305 and AES-OCB; BoringSSL's EVP_CIPHER has neither"
 CVE-2026-35189 = "affected; fixed by patches/0006-leyline-crl-relative-name.patch"
 CVE-2026-35191 = "OpenSSL QUIC server; BoringSSL has no QUIC stack"
 CVE-2026-42772 = "OpenSSL QUIC stream reassembly; BoringSSL has no QUIC stack"

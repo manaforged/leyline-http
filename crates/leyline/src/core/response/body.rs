@@ -108,15 +108,21 @@ impl Response {
         let Some(err) = self.status_error() else {
             return Ok(self);
         };
-        let limit = self.compression.max_error_body;
-        let remaining = deadline.remaining();
-        let wait = deadline
-            .error_body()
-            .map_or(remaining, |cap| cap.min(remaining));
-        match within(Some(wait), self.read_until(limit, |_, _| false)).await {
-            Ok(Ok(body)) => Err(err.with_body(body)),
-            _ => Err(err),
+        match self.read_error_prefix(deadline).await {
+            Some(body) => Err(err.with_body(body)),
+            None => Err(err),
         }
+    }
+
+    pub(crate) async fn read_error_prefix(self, deadline: &Deadline) -> Option<Vec<u8>> {
+        let limit = self.compression.max_error_body;
+        within(
+            Some(deadline.error_body_wait()),
+            self.read_until(limit, |_, _| false),
+        )
+        .await
+        .ok()?
+        .ok()
     }
 
     pub async fn read_until<F>(self, limit: usize, mut done: F) -> Result<Vec<u8>>

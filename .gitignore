@@ -3,7 +3,7 @@
 *.swo
 .DS_Store
 /node_modules/
-scripts/__pycache__/
+__pycache__/
 fuzz/target/
 fuzz/artifacts/
 benches/target/
