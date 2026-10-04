@@ -17,30 +17,25 @@ jobs:
     name: browser releases and upstream advisories
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      NOTIFY: thomgardiner
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
 
       - name: Browser releases without a profile
-        id: releases
-        continue-on-error: true
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
         run: python3 scripts/release-check.py
 
       - name: Advisories against the forked crates
-        id: upstream
-        continue-on-error: true
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
+        if: ${{ !cancelled() }}
         run: python3 scripts/upstream-check.py
-
-      - name: Report
-        if: steps.releases.outcome == 'failure' || steps.upstream.outcome == 'failure'
-        run: |
-          echo "::error::A browser release has no profile or an upstream advisory applies. See the steps above."
-          exit 1
 
   alert:
     name: open failure issue
