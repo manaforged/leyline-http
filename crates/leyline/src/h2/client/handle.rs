@@ -54,7 +54,7 @@ impl H2Client {
                 (sink, Some(receiver))
             }
             ResponseMode::ErrorPrefix => {
-                let (sink, receiver) = ResponseSink::adaptive(response_tx);
+                let (sink, receiver) = ResponseSink::adaptive(response_tx, mode);
                 (sink, Some(receiver))
             }
         };

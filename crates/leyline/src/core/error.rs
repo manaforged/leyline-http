@@ -151,6 +151,12 @@ impl Error {
     pub(crate) fn without_content_coding(mut self) -> Self {
         if let Some(headers) = self.inner.headers.as_mut() {
             headers.remove(http::header::CONTENT_ENCODING);
+        }
+        self.without_content_length()
+    }
+
+    pub(crate) fn without_content_length(mut self) -> Self {
+        if let Some(headers) = self.inner.headers.as_mut() {
             headers.remove(http::header::CONTENT_LENGTH);
         }
         self

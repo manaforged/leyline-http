@@ -15,7 +15,7 @@ import urllib.request
 from pathlib import Path
 
 from .captures import store, tcp_path
-from .config import CACHE, CHROME_DEB_BASE, CHROME_STABLE_URL, CHROME_DEB_INDEX, HOST_OS, MAC_CHROME, OUT, PEET_URL
+from .config import CACHE, CHROME_DEB_BASE, CHROME_DEB_INDEX, CHROME_STABLE_URL, HOST_OS, MAC_CHROME, OUT, PEET_URL, WAITS
 from .land import missing_majors
 from .net import http_bytes, http_json
 from .peet import extract_json_blob, require_browser_ua
@@ -80,7 +80,7 @@ class CdpPipe:
             return reply.get("result") or {}
 
 
-def page_text_via_cdp(cmd: list[str], url: str, errp: Path, timeout: float = 45) -> str:
+def page_text_via_cdp(cmd: list[str], url: str, errp: Path, timeout: float = WAITS["page_load"]) -> str:
     chrome_in, send_fd = os.pipe()
     recv_fd, chrome_out = os.pipe()
     with errp.open("wb") as err:
@@ -111,15 +111,15 @@ def page_text_via_cdp(cmd: list[str], url: str, errp: Path, timeout: float = 45)
             text = (result.get("result") or {}).get("value") or ""
             if text.strip().startswith("{"):
                 return text
-            time.sleep(0.5)
+            time.sleep(WAITS["page_poll"])
         raise SystemExit(f"{url} did not load within {timeout}s")
     finally:
         try:
-            cdp.call("Browser.close", {}, time.monotonic() + 5)
+            cdp.call("Browser.close", {}, time.monotonic() + WAITS["browser_close"])
         except (SystemExit, OSError):
             pass
         try:
-            proc.wait(timeout=10)
+            proc.wait(timeout=WAITS["browser_exit"])
         except subprocess.TimeoutExpired:
             os.killpg(proc.pid, signal.SIGKILL)
             proc.wait()
@@ -144,11 +144,7 @@ def dump_chrome(chrome: Path, version: str, dump: Path) -> dict:
         text = page_text_via_cdp(cmd, PEET_URL, dump.with_suffix(".stderr"))
     finally:
         shutil.rmtree(udd, ignore_errors=True)
-    raw.write_text(text)
-    try:
-        obj = extract_json_blob(raw)
-    finally:
-        raw.unlink(missing_ok=True)
+    obj = extract_json_blob(text, f"Chrome {version} page")
     require_browser_ua(obj, f"Chrome/{version.split('.', 1)[0]}", f"Chrome {version}")
     return obj
 
@@ -165,7 +161,7 @@ def installed_chrome(major: int) -> tuple[str, Path] | None:
 
 
 def stable_chrome_deb() -> tuple[str, str, str]:
-    with urllib.request.urlopen(CHROME_DEB_INDEX, timeout=30) as resp:
+    with urllib.request.urlopen(CHROME_DEB_INDEX, timeout=WAITS["metadata_fetch"]) as resp:
         index = resp.read().decode()
     for block in index.split("\n\n"):
         fields = dict(line.split(": ", 1) for line in block.splitlines() if ": " in line)

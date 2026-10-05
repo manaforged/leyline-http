@@ -428,11 +428,12 @@ keys.
 - **Firefox.** The transport parameter order is fixed. Firefox 155 to 157
   add parameter 29 and offer QUICv2 in `version_information` (GREASE, QUICv2,
   QUICv1); Firefox 148 to 154 offer GREASE and QUICv1. Every run of every
-  build, 27 in all, sends GREASE-form parameter 4278378010 with the value
+  build, 29 in all, sends GREASE-form parameter 4278378010 with the value
   1000, so the profiles pin it. The source connection ID has 3 bytes. The
   destination connection ID length varies per connection; `dcid_length`
-  weights are the 27 observed lengths: 8 (12), 10 (4), 11 (1), 13 (5), 15
-  (2), 16 (1), 19 (1), 20 (1). Firefox 156 adds the ML-DSA schemes to the
+  weights are the 27 lengths observed for Firefox 148 to 156: 8 (12), 10
+  (4), 11 (1), 13 (5), 15 (2), 16 (1), 19 (1), 20 (1). Both Firefox 157
+  runs used 8. Firefox 156 adds the ML-DSA schemes to the
   QUIC signature algorithms and delegated credentials; 148 to 155 and 157 do
   not.
   The QUIC ClientHello keeps `extended_master_secret` and

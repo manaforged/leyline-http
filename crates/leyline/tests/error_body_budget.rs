@@ -143,6 +143,7 @@ async fn an_error_body_larger_than_the_body_limit_is_a_status_error() {
 
     assert_eq!(err.status().map(|s| s.as_u16()), Some(500), "{err}");
     assert_eq!(err.body().map(<[u8]>::len), Some(64 * 1024));
+    assert_eq!(err.header("content-length"), None);
 }
 
 #[tokio::test]

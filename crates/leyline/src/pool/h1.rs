@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::io;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 
 use bytes::Bytes;
 use futures_util::StreamExt;
@@ -11,6 +12,7 @@ use tokio::sync::{OwnedSemaphorePermit, mpsc};
 use crate::BodyStream;
 use crate::ResponseTiming;
 use crate::core::ResponseMode;
+use crate::core::deadline::within;
 use crate::core::session::decompress::BodyLimit;
 use crate::tls::{FingerprintConnector, TlsError};
 use crate::trace;
@@ -338,7 +340,7 @@ struct H1Head {
 
 struct H1StreamPump {
     io: Box<dyn H1Io>,
-    permit: OwnedSemaphorePermit,
+    permit: Option<OwnedSemaphorePermit>,
     pool: Arc<Pool>,
     key: PoolKey,
     tls: TlsInfo,

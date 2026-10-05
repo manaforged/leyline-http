@@ -37,3 +37,14 @@ FAMILIES = {
     "firefox": {"label": "Firefox", "tcp_method": "--headless", "h3_hosts": ("linux",), "ua_from_capture": False, "ua_marker": "rv:{major}."},
     "safari": {"label": "Safari", "tcp_method": "safaridriver", "h3_hosts": (), "ua_from_capture": True, "ua_marker": "Version/{major}."},
 }
+WAITS = {
+    "page_load": 45.0,
+    "page_poll": 0.5,
+    "browser_close": 5.0,
+    "browser_exit": 10.0,
+    "driver_ready": 10.0,
+    "driver_poll": 0.2,
+    "webdriver_request": 60.0,
+    "metadata_fetch": 30.0,
+    "download": 300.0,
+}
