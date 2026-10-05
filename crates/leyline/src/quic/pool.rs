@@ -11,7 +11,6 @@ use tokio::sync::{Semaphore, mpsc, oneshot};
 use tokio::task::AbortHandle;
 
 use crate::core::ResponseMode;
-use crate::core::is_error_status;
 use crate::core::session::decompress::BodyLimit;
 use crate::h2::config::PseudoOrder;
 use crate::quic::connection::{
@@ -37,7 +36,7 @@ enum H3Command {
         body: Option<Bytes>,
         body_stream: Option<H3RequestBodyStream>,
         stream_body_tx: Option<mpsc::Sender<std::io::Result<Bytes>>>,
-        errors_only: bool,
+        mode: ResponseMode,
         retried: bool,
         resp_tx: oneshot::Sender<Result<H3Response, H3SendError>>,
     },
@@ -142,7 +141,7 @@ impl H3Client {
                 body,
                 body_stream,
                 stream_body_tx,
-                errors_only: mode == ResponseMode::ErrorPrefix,
+                mode,
                 resp_tx,
                 retried: false,
             })
@@ -179,7 +178,7 @@ struct H3Stream {
     trailers: Vec<(String, String)>,
     body: Vec<u8>,
     stream_tx: Option<mpsc::Sender<std::io::Result<Bytes>>>,
-    errors_only: bool,
+    mode: ResponseMode,
     head_sent: bool,
     stalled: Option<Bytes>,
     peer_finished: bool,

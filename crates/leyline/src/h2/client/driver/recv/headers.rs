@@ -1,7 +1,6 @@
 use bytes::Bytes;
 
 use crate::core::deadline::within;
-use crate::core::is_error_status;
 use crate::header_str::HeaderStr;
 
 use super::*;
@@ -184,8 +183,8 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             return Ok(());
         }
         actor.got_headers = true;
-        let stream = is_error_status(actor.status);
-        actor.response_tx = actor.response_tx.take().map(|sink| sink.settle(stream));
+        let status = actor.status;
+        actor.response_tx = actor.response_tx.take().map(|sink| sink.settle(status));
         if matches!(actor.status, 204 | 304) {
             actor.drop_body = true;
         }

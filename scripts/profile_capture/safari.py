@@ -2,16 +2,15 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import signal
 import subprocess
 import time
 import urllib.request
 
 from .captures import store, tcp_path
-from .config import PEET_URL, SAFARIDRIVER, SAFARIDRIVER_PORT, SAFARI_APP
+from .config import PEET_URL, SAFARIDRIVER, SAFARIDRIVER_PORT, SAFARI_APP, WAITS
 from .land import bundled_majors
-from .peet import require_browser_ua
+from .peet import extract_json_blob, require_browser_ua
 
 def safari_host_version() -> str:
     try:
@@ -41,7 +40,7 @@ def webdriver(method: str, path: str, body: dict | None = None) -> dict:
         method=method,
         headers={"Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=60) as resp:
+    with urllib.request.urlopen(req, timeout=WAITS["webdriver_request"]) as resp:
         return json.loads(resp.read()).get("value") or {}
 
 
@@ -52,12 +51,15 @@ def dump_safari(short: str) -> dict:
         [str(SAFARIDRIVER), "--port", str(SAFARIDRIVER_PORT)], start_new_session=True
     )
     try:
-        for _ in range(50):
+        ready_by = time.monotonic() + WAITS["driver_ready"]
+        while True:
             try:
                 webdriver("GET", "/status")
                 break
             except OSError:
-                time.sleep(0.2)
+                if time.monotonic() > ready_by:
+                    raise SystemExit("safaridriver did not start") from None
+                time.sleep(WAITS["driver_poll"])
         session = webdriver("POST", "/session", {"capabilities": {"alwaysMatch": {"browserName": "safari"}}})
         sid = session["sessionId"]
         caps = session.get("capabilities") or {}
@@ -73,10 +75,7 @@ def dump_safari(short: str) -> dict:
     finally:
         os.killpg(driver.pid, signal.SIGTERM)
         driver.wait()
-    m = re.search(r"(\{.*\})", str(text), re.S)
-    if not m:
-        raise SystemExit(f"Safari dump was not JSON: {str(text)[:200]!r}")
-    peet = json.loads(m.group(1))
+    peet = extract_json_blob(str(text), f"Safari {short} page")
     require_browser_ua(peet, f"Version/{short.split('.', 1)[0]}", f"Safari {short}")
     return peet
 

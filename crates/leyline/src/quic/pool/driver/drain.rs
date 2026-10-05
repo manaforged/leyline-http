@@ -200,7 +200,7 @@ impl Drain<'_> {
                 body,
                 body_stream: None,
                 stream_body_tx: stream.stream_tx.take(),
-                errors_only: stream.errors_only,
+                mode: stream.mode,
                 resp_tx,
                 retried: true,
             };

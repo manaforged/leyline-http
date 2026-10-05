@@ -161,15 +161,7 @@ async fn run_attempts(
                 return (counted(result, n + 1), n + 1);
             }
         };
-        match result {
-            Ok(response) if attempt.response == ResponseMode::ErrorPrefix => {
-                let budget = deadline.remaining().saturating_sub(sleep);
-                response
-                    .discard_error_prefix(deadline.error_body_wait().min(budget))
-                    .await;
-            }
-            other => drop(other),
-        }
+        drop(result);
 
         let slept = session
             .unless_shut_down(async {

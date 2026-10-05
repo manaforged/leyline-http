@@ -62,13 +62,6 @@ impl Response {
         serde_json::from_slice(&self.bytes().await?).map_err(Error::from_json)
     }
 
-    pub(crate) async fn discard_error_prefix(self, wait: std::time::Duration) {
-        let limit = self.compression.max_error_body;
-        if let Ok(stream) = self.into_stream() {
-            stream.discard_prefix(limit, wait).await;
-        }
-    }
-
     pub fn into_stream(mut self) -> Result<BodyStream> {
         match std::mem::replace(&mut self.body, ResponseBody::Taken) {
             ResponseBody::Streaming(s) => Ok(s),
@@ -117,8 +110,12 @@ impl Response {
         };
         let limit = self.compression.max_error_body;
         let wait = deadline.error_body_wait();
+        let declared = self.content_length();
         match within(Some(wait), self.read_decoded(limit, |_, _| false)).await {
             Ok(Ok((body, true))) => Err(err.with_body(body).without_content_coding()),
+            Ok(Ok((body, false))) if declared != Some(body.len() as u64) => {
+                Err(err.with_body(body).without_content_length())
+            }
             Ok(Ok((body, false))) => Err(err.with_body(body)),
             _ => Err(err),
         }

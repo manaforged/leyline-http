@@ -208,7 +208,7 @@ impl Session {
                 redirect_cap,
             };
             if next.take(&mut journey, digest.as_mut(), replay_body)? {
-                self.release_leg_body(leg.body, response, &deadline).await;
+                drop(leg.body);
                 continue;
             }
 

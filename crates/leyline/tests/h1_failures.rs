@@ -13,6 +13,7 @@ use tokio::net::{TcpListener, TcpStream};
 
 const OK: &[u8] = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok";
 const TWO_LENGTHS: &[u8] = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nContent-Length: 3\r\n\r\nok";
+const TRUNCATED: &[u8] = b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nabc";
 
 #[derive(Default)]
 struct Counts {
@@ -38,7 +39,7 @@ async fn answer(mut socket: TcpStream, replies: Arc<[Option<&'static [u8]>]>, co
         let Some(reply) = replies[index.min(replies.len() - 1)] else {
             return;
         };
-        if socket.write_all(reply).await.is_err() {
+        if socket.write_all(reply).await.is_err() || reply == TRUNCATED {
             return;
         }
     }
@@ -138,4 +139,62 @@ async fn a_failing_request_body_stream_is_not_a_dead_connection() {
     let err = session.put(&url).body(failing_body()).await.unwrap_err();
     assert_eq!(err.kind(), Kind::Body, "{err:?}");
     assert_eq!(session.pool_stats().evictions_dead, 0);
+}
+
+#[tokio::test]
+async fn error_for_status_resends_a_success_cut_short_on_a_stale_pooled_connection() {
+    let (addr, counts) = server(&[Some(OK), Some(TRUNCATED), Some(OK)]).await;
+    let session = session();
+    let url = format!("http://{addr}/");
+    session
+        .get(&url)
+        .error_for_status()
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap();
+    let body = session
+        .get(&url)
+        .error_for_status()
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap();
+    assert_eq!(&body[..], b"ok");
+    assert_eq!(counts.connections.load(Ordering::SeqCst), 2);
+}
+
+#[derive(Clone, Default)]
+struct Reuse(Arc<std::sync::Mutex<Vec<bool>>>);
+
+impl leyline::trace::Trace for Reuse {
+    fn connect(&self, event: &leyline::trace::Connect<'_>) {
+        self.0.lock().unwrap().push(event.reused);
+    }
+}
+
+#[tokio::test]
+async fn error_for_status_traces_a_reused_pooled_connection() {
+    let (addr, _) = server(&[Some(OK)]).await;
+    let reuse = Reuse::default();
+    let session = Session::builder()
+        .protocol(ProtocolPolicy::Http1)
+        .proxy(ProxyConfig::new().env(false))
+        .trace(reuse.clone())
+        .build()
+        .unwrap();
+    let url = format!("http://{addr}/");
+    for _ in 0..2 {
+        session
+            .get(&url)
+            .error_for_status()
+            .await
+            .unwrap()
+            .bytes()
+            .await
+            .unwrap();
+    }
+    assert_eq!(reuse.0.lock().unwrap().as_slice(), &[false, true]);
 }

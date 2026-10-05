@@ -96,6 +96,8 @@ async fn a_digest_challenge_does_not_block_retrying_an_unsent_post() {
             stream.read_exact(&mut byte).await.unwrap();
             head.push(byte[0]);
         }
+        let mut body = [0u8; 5];
+        stream.read_exact(&mut body).await.unwrap();
         stream
             .write_all(
                 b"HTTP/1.1 401 Unauthorized\r\n\

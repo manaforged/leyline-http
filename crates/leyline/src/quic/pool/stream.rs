@@ -34,8 +34,8 @@ impl H3Stream {
             headers: Vec::new(),
             trailers: Vec::new(),
             body: Vec::new(),
+            mode: ResponseMode::from(stream_tx.is_some()),
             stream_tx,
-            errors_only: false,
             head_sent: false,
             stalled: None,
             peer_finished: false,
@@ -78,7 +78,7 @@ impl H3Stream {
             H3HeaderBlock::Informational => {}
             H3HeaderBlock::Final { status, headers } => {
                 self.status = status;
-                if self.errors_only && !is_error_status(status) {
+                if !self.mode.keeps_stream(status) {
                     self.stream_tx = None;
                 }
                 self.declared_len = headers

@@ -42,7 +42,6 @@ pub use into_url::IntoUrl;
 pub use pages::Pages;
 pub use proxy_pool::{ProxyHealth, ProxyPool};
 pub use request::{ContentEncoding, IntoParamPair, RequestBuilder};
-pub(crate) use response::is_error_status;
 #[cfg(feature = "bench-internals")]
 pub(crate) use response::parse_links;
 pub use response::{HttpVersion, Link, RelayBody, Response, ResponseTiming, relay_headers};

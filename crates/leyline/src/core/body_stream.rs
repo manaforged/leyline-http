@@ -150,20 +150,6 @@ impl BodyStream {
         self.shut
     }
 
-    pub(crate) async fn discard_prefix(mut self, limit: usize, wait: Duration) {
-        use futures_util::StreamExt;
-        let mut read = 0usize;
-        let drain = async {
-            while read <= limit {
-                match self.next().await {
-                    Some(Ok(chunk)) => read += chunk.len(),
-                    _ => return,
-                }
-            }
-        };
-        drop(tokio::time::timeout(wait, drain).await);
-    }
-
     pub(crate) fn watch_end(&mut self) {
         self.watch = BodyWatch::begin();
     }

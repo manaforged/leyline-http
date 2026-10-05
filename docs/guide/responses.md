@@ -202,7 +202,8 @@ retry policy is done, and keeps the start of the body in the error:
 Leyline decides after the status line: a response below 400 is read in full
 as usual, and an error response is read only up to these limits, so a large
 or slow error body cannot hold the request to the `body` timeout or exceed
-`max_body_size`. Decompression stops at the byte limit, so a small compressed
+`max_body_size`. Over HTTP/1.1, an error body that declares a length of 64
+KiB or less is read with the response, so its connection can be reused. Decompression stops at the byte limit, so a small compressed
 body cannot expand past it, and the error's headers drop `content-encoding`
 and `content-length` when the body was decoded. When the read fails or takes too long, the error has no body
 but keeps the status and headers. `download` uses the same limits for a

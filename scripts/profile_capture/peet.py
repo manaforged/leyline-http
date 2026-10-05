@@ -3,7 +3,6 @@ from __future__ import annotations
 import functools
 import json
 import re
-from pathlib import Path
 
 from .config import ROOT
 
@@ -16,11 +15,10 @@ def peet_get(obj: dict, *keys: str) -> str:
     return cur if isinstance(cur, str) else ""
 
 
-def extract_json_blob(raw: Path) -> dict:
-    text = raw.read_text(errors="replace")
+def extract_json_blob(text: str, source: str) -> dict:
     m = re.search(r"(\{.*\})", text, re.S)
     if not m:
-        raise SystemExit(f"no JSON object in {raw}")
+        raise SystemExit(f"{source} was not JSON: {text[:200]!r}")
     return json.loads(m.group(1))
 
 

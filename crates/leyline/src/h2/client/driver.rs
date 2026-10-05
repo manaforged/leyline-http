@@ -8,6 +8,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{Semaphore, mpsc, oneshot};
 use tokio::task::AbortHandle;
 
+use crate::core::ResponseMode;
 use crate::h2::codec::{FrameReader, FrameWriter};
 use crate::h2::config::H2Config;
 use crate::h2::connection::{PeerSettings, RstFloodDetector};
@@ -91,6 +92,7 @@ pub(crate) enum ResponseSink {
         tx: oneshot::Sender<Result<H2ResponseEx, H2Error>>,
         body_tx: mpsc::Sender<io::Result<Bytes>>,
         terminal: mpsc::OwnedPermit<io::Result<Bytes>>,
+        mode: ResponseMode,
     },
 }
 
@@ -109,12 +111,13 @@ impl ResponseSink {
     pub(super) fn streaming(
         headers_tx: oneshot::Sender<Result<H2ResponseEx, H2Error>>,
     ) -> (Self, mpsc::Receiver<io::Result<Bytes>>) {
-        let (sink, body_rx) = Self::adaptive(headers_tx);
-        (sink.settle(true), body_rx)
+        let (sink, body_rx) = Self::adaptive(headers_tx, ResponseMode::Streamed);
+        (sink.settle(0), body_rx)
     }
 
     pub(super) fn adaptive(
         tx: oneshot::Sender<Result<H2ResponseEx, H2Error>>,
+        mode: ResponseMode,
     ) -> (Self, mpsc::Receiver<io::Result<Bytes>>) {
         let (body_tx, body_rx) = mpsc::channel(STREAM_RESP_BODY_CAPACITY + 1);
         let terminal = body_tx
@@ -126,18 +129,20 @@ impl ResponseSink {
                 tx,
                 body_tx,
                 terminal,
+                mode,
             },
             body_rx,
         )
     }
 
-    pub(super) fn settle(self, stream: bool) -> Self {
+    pub(super) fn settle(self, status: u16) -> Self {
         match self {
             Self::Adaptive {
                 tx,
                 body_tx,
                 terminal,
-            } if stream => Self::StreamingEx {
+                mode,
+            } if mode.keeps_stream(status) => Self::StreamingEx {
                 headers_tx: Some(tx),
                 body_tx,
                 terminal,

@@ -107,26 +107,6 @@ impl Session {
         }
     }
 
-    pub(super) async fn release_leg_body(
-        &self,
-        body: crate::core::transport::TransportBody,
-        response: ResponseMode,
-        deadline: &Deadline,
-    ) {
-        if response != ResponseMode::ErrorPrefix {
-            return;
-        }
-        if let crate::core::transport::TransportBody::Streaming(mut bs) = body {
-            bs.set_read_timeout(deadline.read());
-            bs.set_body_timeout(deadline.body());
-            bs.discard_prefix(
-                self.inner.compression.max_error_body,
-                deadline.error_body_wait(),
-            )
-            .await;
-        }
-    }
-
     pub(super) async fn assemble_response(
         &self,
         leg: TransportResponse,

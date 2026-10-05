@@ -135,7 +135,10 @@ def shared_advisories(meta: dict) -> list[str]:
         if not match or match.group(1) in reviewed or int(match.group(2)) < feed["id_year_floor"]:
             continue
         record = request(feed["record_url"].format(cve=match.group(1)))
-        published = record["containers"]["cna"].get("datePublic", "")[:10]
+        try:
+            published = str(record["containers"]["cna"].get("datePublic", ""))[:10]
+        except (KeyError, TypeError, AttributeError):
+            published = ""
         if not published or published >= feed["since"]:
             found.append(match.group(1))
     return sorted(found)
