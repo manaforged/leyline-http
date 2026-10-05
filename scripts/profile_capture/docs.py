@@ -5,7 +5,7 @@ import textwrap
 import tomllib
 from pathlib import Path
 
-from .config import FAMILIES, PROFILES, QPACK_GOLDEN, ROOT
+from .config import BROWSER_IDS, FAMILIES, PROFILES, QPACK_GOLDEN, ROOT
 
 GUIDE = ROOT / "docs/guide/profiles.md"
 README = ROOT / "crates/leyline/README.md"
@@ -89,6 +89,13 @@ def qpack_row(text: str, family: str, major: int, previous: int, values: tuple[i
     return text[: after.end()] + row + "\n" + text[after.end():]
 
 
+def browser_id_row(text: str, variant: str) -> str:
+    ids = tomllib.loads(text)
+    if variant in ids:
+        return text
+    return text.rstrip("\n") + f"\n{variant} = {max(ids.values(), default=-1) + 1}\n"
+
+
 def update(path: Path, edit) -> bool:
     before = path.read_text()
     after = edit(before)
@@ -111,6 +118,8 @@ def document(family: str, major: int, previous: int, captured: str, phrase: str,
     if update(GUIDE, lambda t: guide_rows(t, family, major, previous, captured, phrase)):
         changed.append(str(GUIDE.relative_to(ROOT)))
     label = FAMILIES[family]["label"]
+    if update(BROWSER_IDS, lambda t: browser_id_row(t, f"{label}{major}")):
+        changed.append(str(BROWSER_IDS.relative_to(ROOT)))
     if update(README, lambda t: readme_range(t, family, major, previous)):
         changed.append(str(README.relative_to(ROOT)))
     if not re.search(rf"(?m)^\| {label} \| (\d+ to {major}|[^|]*\b{major}\b)", README.read_text()):

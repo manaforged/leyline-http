@@ -11,6 +11,8 @@ mod browser;
 mod entities;
 #[path = "build/header_style.rs"]
 mod header_style;
+#[path = "build/ids.rs"]
+mod ids;
 #[path = "src/profile/preset/kind.rs"]
 mod preset_kind;
 
@@ -41,8 +43,11 @@ fn main() -> BuildResult<()> {
 fn write_browsers(root: &Path, out: &Path) -> BuildResult<Vec<browser::Row>> {
     let families: browser::Families =
         toml::from_str(&fs::read_to_string(root.join("families.toml"))?)?;
-    let rows = browser::load_rows(root, &families)?;
+    let mut rows = browser::load_rows(root, &families)?;
     browser::check_unique(&rows, &families)?;
+    let browser_ids: BTreeMap<String, u32> =
+        toml::from_str(&fs::read_to_string(root.join("browser_ids.toml"))?)?;
+    ids::assign(&mut rows, &browser_ids)?;
     fs::write(out.join("browser.rs"), browser::render(&rows, &families)?)?;
     Ok(rows)
 }

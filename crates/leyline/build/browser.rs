@@ -57,7 +57,7 @@ pub(crate) struct Meta {
     browser: String,
     version: u32,
     capture: Capture,
-    variant: String,
+    pub(crate) variant: String,
     #[serde(default)]
     hello: Option<u32>,
     #[serde(default)]
@@ -71,6 +71,7 @@ pub(crate) struct Meta {
 pub(crate) struct Row {
     pub(crate) meta: Meta,
     pub(crate) path: String,
+    pub(crate) id: u32,
     family: usize,
     digest: u64,
 }
@@ -131,6 +132,7 @@ pub(crate) fn load_rows(root: &Path, families: &Families) -> BuildResult<Vec<Row
             rows.push(Row {
                 meta,
                 path,
+                id: 0,
                 family,
                 digest,
             });
@@ -251,7 +253,7 @@ pub(crate) fn render(rows: &[Row], families: &Families) -> BuildResult<String> {
         out,
         "#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]\n#[non_exhaustive]\npub enum Browser {{"
     )?;
-    for row in rows {
+    for row in crate::ids::by_id(rows) {
         if let Some(note) = &row.meta.deprecated {
             writeln!(out, "    #[deprecated(note = {note:?})]")?;
         }
@@ -326,7 +328,7 @@ pub(crate) fn render(rows: &[Row], families: &Families) -> BuildResult<String> {
     )?;
 
     writeln!(out, "#[allow(deprecated)]\nconst ENTRIES: &[Entry] = &[")?;
-    for row in rows {
+    for row in crate::ids::by_id(rows) {
         let rep = hello(rows, row)?;
         let mut platforms = Vec::new();
         for (platform, browser) in &row.meta.platform_browser {

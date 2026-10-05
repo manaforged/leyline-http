@@ -134,7 +134,8 @@ Landing starts from the previous profile of the family and changes only what
 the captures show: the version, the user agents, the build in
 `captured_against`, and any TLS list, JA4, or HTTP/2 value that differs. It
 also adds the two rows in `docs/guide/profiles.md`, the README version range,
-the changelog entry, and the row in `crates/leyline/tests/data/h3_qpack.toml`.
+the changelog entry, the row in `crates/leyline/tests/data/h3_qpack.toml`, and
+the new variant's id in `crates/leyline/profiles/browser_ids.toml`.
 It does not change any other profile. It exits with status 2 and lists what a
 person must review when the TLS extension order, JA4, HTTP/2, or HTTP/3
 fingerprint changed in a way it cannot write, and always for the guide prose

@@ -51,6 +51,9 @@ version and publish as separate crates.
   error instead of the status error. A response below 400 is still read in
   full, with its trailers and connection reuse. The error's headers no longer
   list a `content-encoding` that its decoded body does not have.
+- Each `Browser` variant keeps a fixed discriminant, listed in
+  `profiles/browser_ids.toml`, so adding a profile no longer changes the
+  value of the variants after it.
 - The `leyline-bssl-sys` build script reruns when a patch is added to
   `patches/`. Before, a new patch was not applied to an existing build
   directory.

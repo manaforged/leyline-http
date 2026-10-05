@@ -29,6 +29,7 @@ H3_RUNS = 2
 PROFILES = ROOT / "crates/leyline/profiles"
 CAPTURES = PROFILES / "captures"
 QPACK_GOLDEN = ROOT / "crates/leyline/tests/data/h3_qpack.toml"
+BROWSER_IDS = PROFILES / "browser_ids.toml"
 KEPT_IP_KEYS = frozenset({"dst_ip"})
 OS_LABELS = {"macos": "macOS", "linux": "Linux", "windows": "Windows"}
 HOST_OS = {"Darwin": "macos", "Linux": "linux", "Windows": "windows"}
