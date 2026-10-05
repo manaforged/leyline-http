@@ -236,6 +236,7 @@ fn fail_all_drains_streams_and_pending_and_marks_closed() {
         body: None,
         body_stream: None,
         stream_body_tx: None,
+        errors_only: false,
         resp_tx: tx2,
         retried: false,
     });
@@ -273,6 +274,7 @@ fn fail_all_answers_queued_commands_as_not_sent() {
             body: None,
             body_stream: None,
             stream_body_tx: None,
+            errors_only: false,
             resp_tx,
             retried: false,
         })
@@ -296,6 +298,7 @@ fn a_queued_request_whose_caller_left_is_cancelled() {
         body: None,
         body_stream: None,
         stream_body_tx: None,
+        errors_only: false,
         retried: false,
         resp_tx,
     };

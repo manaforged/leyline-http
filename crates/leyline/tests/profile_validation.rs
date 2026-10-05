@@ -114,6 +114,12 @@ fn qpack() {
     let captured: std::collections::BTreeMap<String, (u64, u64)> =
         toml::from_str(include_str!("data/h3_qpack.toml"))
             .expect("tests/data/h3_qpack.toml parses");
+    for key in captured.keys() {
+        assert!(
+            Browser::all().iter().any(|browser| browser.id() == key),
+            "h3_qpack.toml names {key}, which is not a bundled profile"
+        );
+    }
     for browser in Browser::all().iter().copied() {
         let Some(h3) = browser.profile().h3.as_ref() else {
             continue;

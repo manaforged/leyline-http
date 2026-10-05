@@ -1,9 +1,7 @@
-use http::StatusCode;
-
 use crate::core::response::is_error_status;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ResponseMode {
+pub enum ResponseMode {
     Buffered,
     Streamed,
     ErrorPrefix,
@@ -18,15 +16,17 @@ impl ResponseMode {
         }
     }
 
-    pub(crate) fn reads_incrementally(self) -> bool {
-        self == Self::Streamed
-    }
-
-    pub(crate) fn keeps_stream(self, status: StatusCode) -> bool {
+    pub(crate) fn keeps_stream(self, status: u16) -> bool {
         match self {
             Self::Buffered => false,
             Self::Streamed => true,
             Self::ErrorPrefix => is_error_status(status),
         }
+    }
+}
+
+impl From<bool> for ResponseMode {
+    fn from(stream: bool) -> Self {
+        Self::new(stream, false)
     }
 }

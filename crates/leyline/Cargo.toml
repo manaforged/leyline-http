@@ -274,6 +274,10 @@ name = "h2_stream_delivery"
 required-features = ["bench-internals"]
 
 [[test]]
+name = "h2_error_prefix"
+required-features = ["bench-internals"]
+
+[[test]]
 name = "h2_stream_state"
 required-features = ["bench-internals"]
 

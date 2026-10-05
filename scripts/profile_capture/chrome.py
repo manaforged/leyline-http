@@ -5,6 +5,7 @@ import json
 import os
 import platform as plat
 import re
+import select
 import shutil
 import signal
 import subprocess
@@ -54,7 +55,8 @@ class CdpPipe:
 
     def read_message(self, deadline: float) -> dict:
         while b"\0" not in self.buf:
-            if time.monotonic() > deadline:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not select.select([self.recv_fd], [], [], remaining)[0]:
                 raise SystemExit("Chrome DevTools pipe timed out")
             chunk = os.read(self.recv_fd, 65536)
             if not chunk:

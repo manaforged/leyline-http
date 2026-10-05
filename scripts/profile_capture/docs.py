@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import re
 import textwrap
+import tomllib
 from pathlib import Path
 
-from .config import FAMILIES, QPACK_GOLDEN, ROOT
+from .config import FAMILIES, PROFILES, QPACK_GOLDEN, ROOT
 
 GUIDE = ROOT / "docs/guide/profiles.md"
 README = ROOT / "crates/leyline/README.md"
@@ -68,6 +69,10 @@ def changelog_entry(text: str, family: str, major: int, version: str, phrase: st
     return text[:at] + f"### Added\n\n{bullet}\n\n" + text[at:]
 
 
+def profile_has_h3(family: str, major: int) -> bool:
+    return "h3" in tomllib.loads((PROFILES / family / f"{major}.toml").read_text())
+
+
 def previous_qpack(family: str, previous: int) -> tuple[int, int] | None:
     match = re.search(rf'(?m)^"{re.escape(family)}-{previous}" = \[(\d+), (\d+)\]$', QPACK_GOLDEN.read_text())
     return (int(match.group(1)), int(match.group(2))) if match else None
@@ -96,10 +101,13 @@ def document(family: str, major: int, previous: int, captured: str, phrase: str,
              qpack: tuple[int, int] | None) -> tuple[list[str], list[str]]:
     version = captured.removeprefix(f"{family}-")
     changed, review = [], []
-    if qpack is None:
+    if qpack is None and profile_has_h3(family, major):
         qpack = previous_qpack(family, previous)
-        if qpack:
-            review.append(f"the QPACK golden row for {family}-{major} is a copy of {family}-{previous}")
+        review.append(
+            f"the QPACK golden row for {family}-{major} is a copy of {family}-{previous}"
+            if qpack
+            else f"add a QPACK golden row for {family}-{major} to {QPACK_GOLDEN.relative_to(ROOT)}"
+        )
     if update(GUIDE, lambda t: guide_rows(t, family, major, previous, captured, phrase)):
         changed.append(str(GUIDE.relative_to(ROOT)))
     label = FAMILIES[family]["label"]

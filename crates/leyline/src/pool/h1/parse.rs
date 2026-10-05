@@ -69,6 +69,18 @@ where
     S: AsyncRead + Unpin + ?Sized,
 {
     let mut head = read_h1_head(stream, method).await?;
+    let (body, excess) = read_h1_body(stream, &mut head, limit).await?;
+    Ok((head, body, excess))
+}
+
+pub(super) async fn read_h1_body<S>(
+    stream: &mut S,
+    head: &mut H1Head,
+    limit: usize,
+) -> Result<(Vec<u8>, bool), H1PooledError>
+where
+    S: AsyncRead + Unpin + ?Sized,
+{
     let buf = std::mem::take(&mut head.initial_body);
     let excess = has_excess(head.framing, buf.len());
     let body = match head.framing {
@@ -80,7 +92,7 @@ where
         }
         BodyFraming::ToClose => read_to_close(stream, buf, limit).await?,
     };
-    Ok((head, body, excess))
+    Ok((body, excess))
 }
 
 pub(super) fn has_excess(framing: BodyFraming, buffered: usize) -> bool {

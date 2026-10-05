@@ -112,7 +112,7 @@ pub(super) async fn send_h1_on(
                 .collect(),
             proxy,
             target,
-            stream: response.reads_incrementally(),
+            response,
             opened,
         },
         h1_body,

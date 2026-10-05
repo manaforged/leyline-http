@@ -9,6 +9,7 @@ use crate::h2::error::{ErrorCode, H2Error};
 use super::driver::PeerSettingsSnapshot;
 use super::driver::{DriverCommand, DriverRequestBody, Head, ResponseSink};
 use super::types::{H2ResponseEx, RequestBody, ResponseBody};
+use crate::core::ResponseMode;
 
 #[derive(Clone)]
 pub struct H2Client {
@@ -29,8 +30,9 @@ impl H2Client {
         &self,
         head: Arc<Head>,
         body: RequestBody,
-        stream_response: bool,
+        mode: impl Into<ResponseMode>,
     ) -> Result<H2ResponseEx, H2Error> {
+        let mode = mode.into();
         if self.closed.load(Ordering::Acquire) {
             return Err(H2Error::Stream {
                 stream_id: 0,
@@ -45,11 +47,16 @@ impl H2Client {
         };
 
         let (response_tx, response_rx) = oneshot::channel::<Result<H2ResponseEx, H2Error>>();
-        let (sink, stream_body_rx) = if stream_response {
-            let (sink, receiver) = ResponseSink::streaming(response_tx);
-            (sink, Some(receiver))
-        } else {
-            (ResponseSink::Buffered(response_tx), None)
+        let (sink, stream_body_rx) = match mode {
+            ResponseMode::Buffered => (ResponseSink::Buffered(response_tx), None),
+            ResponseMode::Streamed => {
+                let (sink, receiver) = ResponseSink::streaming(response_tx);
+                (sink, Some(receiver))
+            }
+            ResponseMode::ErrorPrefix => {
+                let (sink, receiver) = ResponseSink::adaptive(response_tx);
+                (sink, Some(receiver))
+            }
         };
 
         let cmd = DriverCommand::SendRequest {
@@ -64,7 +71,9 @@ impl H2Client {
 
         match response_rx.await {
             Ok(Ok(mut resp)) => {
-                if let Some(rx) = stream_body_rx {
+                if let Some(rx) = stream_body_rx
+                    && mode.keeps_stream(resp.status)
+                {
                     resp.body = ResponseBody::Streaming(rx);
                 }
                 Ok(resp)

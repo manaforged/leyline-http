@@ -72,10 +72,12 @@ def parse(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--date", default=TODAY, help="date for verified_at and verified_against")
     parser.add_argument("--sync", action="store_true", help="run cargo truesight sync after landing")
     args = parser.parse_args(argv)
-    if args.target == "safari" and plat.system() != "Darwin":
-        parser.error("Safari collection requires macOS")
     if args.land and (args.target not in {"chrome", "firefox", "safari"} or len(args.major or []) != 1):
         parser.error("--land needs one family and one --major")
+    if args.land and args.dry_run:
+        parser.error("--land writes the profile and docs; it has no dry run")
+    if not args.land and args.target == "safari" and plat.system() != "Darwin":
+        parser.error("Safari collection requires macOS")
     return args
 
 

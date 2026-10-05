@@ -189,6 +189,7 @@ pub(super) async fn send_request_h1_streaming(
         url,
         headers,
         target,
+        response,
         ..
     } = req;
     let started = legs.started;
@@ -210,23 +211,19 @@ pub(super) async fn send_request_h1_streaming(
         {
             Ok((head, reusable)) => {
                 tracing::Span::current().record("pool.hit", true);
-                let (tx, rx) = mpsc::channel(STREAM_CHANNEL_DEPTH);
-                tokio::spawn(run_h1_stream_pump(H1StreamPump {
+                let leg = HeadLeg {
                     io,
                     permit,
-                    pool: pool.clone(),
-                    key,
                     tls: tls.clone(),
-                    framing: head.framing,
-                    initial_body: head.initial_body,
+                    head,
                     reusable,
                     count_install: false,
-                    tx,
-                }));
+                };
+                let (status, headers, body) = deliver_head(pool, key, leg, response).await?;
                 return Ok(H1Outcome::Response(H1Response {
-                    status: head.status,
-                    headers: head.headers,
-                    body: H1ResponseBody::Streaming(BodyStream::new(rx)),
+                    status,
+                    headers,
+                    body,
                     tls: tls_for_scheme(scheme, &tls),
                     timing: ResponseTiming::leg(started, None),
                 }));
@@ -244,24 +241,76 @@ pub(super) async fn send_request_h1_streaming(
         };
     let (head, reusable) =
         exchange_head_on_stream(slot.io.as_mut(), method, url, headers, body, target).await?;
-    let (tx, rx) = mpsc::channel(STREAM_CHANNEL_DEPTH);
-    tokio::spawn(run_h1_stream_pump(H1StreamPump {
+    let leg = HeadLeg {
         io: slot.io,
         permit,
-        pool: pool.clone(),
-        key,
         tls: tls.clone(),
-        framing: head.framing,
-        initial_body: head.initial_body,
+        head,
         reusable,
         count_install: !installed,
-        tx,
-    }));
+    };
+    let (status, headers, body) = deliver_head(pool, key, leg, response).await?;
     Ok(H1Outcome::Response(H1Response {
-        status: head.status,
-        headers: head.headers,
-        body: H1ResponseBody::Streaming(BodyStream::new(rx)),
+        status,
+        headers,
+        body,
         tls: tls_for_scheme(scheme, &tls),
         timing: ResponseTiming::leg(started, Some(connect_ms)),
     }))
+}
+
+pub(super) struct HeadLeg {
+    io: Box<dyn H1Io>,
+    permit: OwnedSemaphorePermit,
+    tls: TlsInfo,
+    head: H1Head,
+    reusable: bool,
+    count_install: bool,
+}
+
+async fn deliver_head(
+    pool: &Arc<Pool>,
+    key: PoolKey,
+    leg: HeadLeg,
+    response: ResponseMode,
+) -> Result<(u16, Vec<(String, String)>, H1ResponseBody), H1PooledError> {
+    let HeadLeg {
+        mut io,
+        permit,
+        tls,
+        mut head,
+        reusable,
+        count_install,
+    } = leg;
+    let status = head.status;
+    let headers = std::mem::take(&mut head.headers);
+    if !response.keeps_stream(status) {
+        let (body, excess) = read_h1_body(io.as_mut(), &mut head, pool.max_body_size).await?;
+        if reusable && !excess {
+            pool.return_h1(key, H1Slot { io }, tls);
+            if count_install {
+                pool.note_h1_install();
+            }
+        }
+        drop(permit);
+        return Ok((status, headers, H1ResponseBody::Buffered(body)));
+    }
+    let (tx, rx) = mpsc::channel(STREAM_CHANNEL_DEPTH);
+    tokio::spawn(run_h1_stream_pump(H1StreamPump {
+        io,
+        permit,
+        pool: pool.clone(),
+        key,
+        tls,
+        framing: head.framing,
+        initial_body: head.initial_body,
+        reusable,
+        count_install,
+        tx,
+    }));
+    Ok((
+        status,
+        headers,
+        H1ResponseBody::Streaming(BodyStream::new(rx)),
+    ))
 }

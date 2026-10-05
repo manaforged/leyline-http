@@ -87,7 +87,9 @@ def fill_safari(dry: bool, majors: list[int] | None = None) -> list[tuple[str, i
         print("safari: no Safari.app")
         return []
     major = int(host.split(".", 1)[0])
-    if major in bundled_majors("safari") and major not in (majors or []):
+    if majors and set(majors) != {major}:
+        raise SystemExit(f"safari: this host has Safari {major}; it cannot capture {sorted(set(majors))}")
+    if major in bundled_majors("safari") and not majors:
         print(f"safari: current ({host})")
         return []
     print(f"safari: fill {major} (host {host})")

@@ -33,7 +33,7 @@ KEPT_IP_KEYS = frozenset({"dst_ip"})
 OS_LABELS = {"macos": "macOS", "linux": "Linux", "windows": "Windows"}
 HOST_OS = {"Darwin": "macos", "Linux": "linux", "Windows": "windows"}
 FAMILIES = {
-    "chrome": {"label": "Chrome", "tcp_method": "--headless=new", "h3_hosts": (), "ua_from_capture": False},
-    "firefox": {"label": "Firefox", "tcp_method": "--headless", "h3_hosts": ("linux",), "ua_from_capture": False},
-    "safari": {"label": "Safari", "tcp_method": "safaridriver", "h3_hosts": (), "ua_from_capture": True},
+    "chrome": {"label": "Chrome", "tcp_method": "--headless=new", "h3_hosts": (), "ua_from_capture": False, "ua_marker": "Chrome/{major}."},
+    "firefox": {"label": "Firefox", "tcp_method": "--headless", "h3_hosts": ("linux",), "ua_from_capture": False, "ua_marker": "rv:{major}."},
+    "safari": {"label": "Safari", "tcp_method": "safaridriver", "h3_hosts": (), "ua_from_capture": True, "ua_marker": "Version/{major}."},
 }

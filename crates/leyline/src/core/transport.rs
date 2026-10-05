@@ -23,7 +23,7 @@ mod mode;
 pub(crate) use h1::h1_error_to_core;
 pub(crate) use h1::send_request_h1;
 use h1::{H1Sent, send_h1_on};
-pub(crate) use mode::ResponseMode;
+pub use mode::ResponseMode;
 
 fn status(code: u16) -> Result<StatusCode> {
     StatusCode::from_u16(code)
@@ -234,19 +234,10 @@ async fn send_h2_on(
         proxy,
         response,
     } = req;
-    let stream_response = response.reads_incrementally();
     let pseudo = h2::request_pseudo(method, url)?;
     strip_connection_specific_headers(&mut headers)?;
     let (resp, tls, timing) = crate::pool::send_request(
-        pool,
-        connector,
-        h2_config,
-        pseudo,
-        headers,
-        body,
-        proxy,
-        stream_response,
-        opened,
+        pool, connector, h2_config, pseudo, headers, body, proxy, response, opened,
     )
     .await?;
     h2::transport_response(resp, tls, timing, url)
@@ -330,7 +321,6 @@ pub(crate) async fn send_request_h3(
         proxy,
         ..
     } = req;
-    let stream_response = response.reads_incrementally();
     let host = url
         .host_str()
         .ok_or_else(|| Error::new(Kind::Config).with_message("no host in URL"))?;
@@ -357,7 +347,7 @@ pub(crate) async fn send_request_h3(
             proxy,
         },
         body,
-        stream_response,
+        response,
     )
     .await?;
 

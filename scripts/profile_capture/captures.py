@@ -7,7 +7,7 @@ from pathlib import Path
 
 from .config import CAPTURES, KEPT_IP_KEYS, ROOT
 
-IPV4 = re.compile(r"(?<![\d./])(?:\d{1,3}\.){3}\d{1,3}(?![\d]|\.\d)")
+IPV4 = re.compile(r"(?<![\d.])(?<![A-Za-z]/)(?:\d{1,3}\.){3}\d{1,3}(?!\d|\.\d)")
 IPV6 = re.compile(r"(?<![\w:])[0-9a-fA-F]{0,4}(?::[0-9a-fA-F]{0,4}){2,7}(?![\w:])")
 
 

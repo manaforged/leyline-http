@@ -126,7 +126,12 @@ impl Session {
             ..
         } = leg;
         let (body, headers) = self
-            .finalize_response_body(body, headers, response.keeps_stream(status), deadline)
+            .finalize_response_body(
+                body,
+                headers,
+                response.keeps_stream(status.as_u16()),
+                deadline,
+            )
             .await?;
         let audited = self.inner.audit_tls.is_some();
         let mut audit_headers = audit_headers;
