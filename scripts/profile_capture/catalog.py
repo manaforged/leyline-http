@@ -8,52 +8,51 @@ from .firefox import live_firefox_version
 from .land import bundled_majors, missing_majors
 from .safari import safari_host_version
 
-def catalog() -> list[tuple[str, str, str, str, str]]:
-    rows: list[tuple[str, str, str, str, str]] = []
+Row = tuple[str, str, str, str, str]
+
+
+def bundled_text(majors: list[int]) -> str:
+    return ",".join(str(m) for m in majors) or "none"
+
+
+def version_row(family: str, live: str, missing: list[int]) -> Row:
+    note = f"missing {missing}" if missing else "current"
+    return (family, bundled_text(bundled_majors(family)), live, "fill" if missing else "ok", note)
+
+
+def chrome_row() -> Row:
+    major, version = live_chrome_major()
+    return version_row("chrome", version, missing_majors("chrome", major))
+
+
+def firefox_row() -> Row:
+    version = live_firefox_version()
+    return version_row("firefox", version, missing_majors("firefox", int(version.split(".", 1)[0])))
+
+
+def safari_row() -> Row:
+    host = safari_host_version()
+    major = int(host.split(".", 1)[0]) if host[:1].isdigit() else 0
+    have = bundled_majors("safari")
+    gap = [] if major in have else [major]
+    note = f"Safari.app capture {gap}" if gap else "current"
+    return ("safari", bundled_text(have), host, "fill" if gap else "ok", note)
+
+
+def edge_row(chrome_behind: bool) -> Row:
     chrome_have = bundled_majors("chrome")
-    cmaj, cver = live_chrome_major()
-    chrome_miss = missing_majors("chrome", cmaj)
-    rows.append((
-        "chrome",
-        ",".join(str(m) for m in chrome_have) or "none",
-        cver,
-        "fill" if chrome_miss else "ok",
-        f"missing {chrome_miss}" if chrome_miss else "current",
-    ))
-    ff_have = bundled_majors("firefox")
-    ff_ver = live_firefox_version()
-    ff_maj = int(ff_ver.split(".", 1)[0])
-    firefox_miss = missing_majors("firefox", ff_maj)
-    rows.append((
-        "firefox",
-        ",".join(str(m) for m in ff_have) or "none",
-        ff_ver,
-        "fill" if firefox_miss else "ok",
-        f"missing {firefox_miss}" if firefox_miss else "current",
-    ))
+    newest = chrome_have[-1] if chrome_have else 0
+    edge_major, edge_version = live_edge_major()
+    gap = edge_major > newest
+    note = f"needs Chrome {edge_major}" if gap else "ChromiumBrand::Edge on current Chrome TLS"
+    return ("edge", f"overlay Chrome{newest}", edge_version, "fill" if chrome_behind or gap else "ok", note)
+
+
+def catalog() -> list[Row]:
+    rows = [chrome_row(), firefox_row()]
     if plat.system() == "Darwin":
-        safari_host = safari_host_version()
-        safari_maj = int(safari_host.split(".", 1)[0]) if safari_host[:1].isdigit() else 0
-        safari_have = bundled_majors("safari")
-        safari_gap = [] if safari_maj in safari_have else [safari_maj]
-        rows.append((
-            "safari",
-            ",".join(str(m) for m in safari_have) or "none",
-            safari_host,
-            "fill" if safari_gap else "ok",
-            f"Safari.app capture {safari_gap}" if safari_gap else "current",
-        ))
-    chrome_newest = chrome_have[-1] if chrome_have else 0
-    edge_maj, edge_ver = live_edge_major()
-    edge_gap = edge_maj > chrome_newest
-    rows.append((
-        "edge",
-        f"overlay Chrome{chrome_newest}",
-        edge_ver,
-        "fill" if chrome_miss or edge_gap else "ok",
-        "ChromiumBrand::Edge on current Chrome TLS" if not edge_gap
-        else f"needs Chrome {edge_maj}",
-    ))
+        rows.append(safari_row())
+    rows.append(edge_row(rows[0][3] == "fill"))
     return rows
 
 

@@ -39,10 +39,11 @@ version and publish as separate crates.
 - `RequestBuilder::send` boxes its request state, so nesting a few requests
   in one task no longer overflows a 2 MB thread stack.
 - `RetryPolicy::retry_unsent(true)` no longer replays a non-idempotent
-  request after a redirect or authentication leg got a response. A
-  connection failure on a later leg used to resend the original request,
-  for example a POST that the server had already processed and answered
-  with a 303.
+  request after a redirect leg got a response. A connection failure on a
+  later leg used to resend the original request, for example a POST that
+  the server had already processed and answered with a 303. A 401 digest
+  challenge does not count as an answer, so a request whose authorized leg
+  could not connect is still retried.
 - `error_for_status` reads and decodes at most `max_error_body` bytes of an
   error response, within the error-body timeout, on HTTP/1.1, HTTP/2, and
   HTTP/3. It used to read and decode the whole body first, so a large, slow,

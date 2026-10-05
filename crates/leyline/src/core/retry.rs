@@ -277,8 +277,9 @@ fn unsent(err: &Error) -> bool {
         return false;
     }
     match err.category() {
-        ErrorCategory::Dns | ErrorCategory::Connect | ErrorCategory::Proxy => true,
-        ErrorCategory::Tls => err.kind() == Kind::Connect,
+        ErrorCategory::Dns | ErrorCategory::Connect | ErrorCategory::Tls | ErrorCategory::Proxy => {
+            true
+        }
         ErrorCategory::Timeout => err.kind() == Kind::Connect,
         ErrorCategory::Protocol => err.is_refused_stream(),
         _ => false,

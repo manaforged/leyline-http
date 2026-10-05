@@ -57,6 +57,12 @@ impl Deadline {
         self.error_body
     }
 
+    pub(crate) fn error_body_wait(&self) -> Duration {
+        let remaining = self.remaining();
+        self.error_body()
+            .map_or(remaining, |cap| cap.min(remaining))
+    }
+
     pub(crate) async fn sleep(&self, wait: Duration) {
         tokio::time::sleep(wait.min(self.remaining())).await;
     }

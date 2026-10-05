@@ -6,18 +6,39 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use leyline::testing::{TestResponse, TestServer};
+use leyline::tls::{ResolveFuture, Resolver};
 use leyline::{RetryPolicy, Session};
 
-fn closed_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
+const UNRESOLVABLE: &str = "http://leyline-test.invalid";
+
+struct ResolvesOnce {
+    target: std::net::SocketAddr,
+    used: std::sync::atomic::AtomicBool,
+}
+
+impl Resolver for ResolvesOnce {
+    fn resolve<'a>(&'a self, _host: &'a str, _port: u16) -> ResolveFuture<'a> {
+        let first = !self.used.swap(true, std::sync::atomic::Ordering::SeqCst);
+        let target = self.target;
+        Box::pin(async move {
+            if first {
+                Ok(vec![target])
+            } else {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "no such host",
+                ))
+            }
+        })
+    }
 }
 
 fn unsent_retries() -> Session {
-    Session::builder()
+    unsent_retries_with(Session::builder())
+}
+
+fn unsent_retries_with(builder: leyline::SessionBuilder) -> Session {
+    builder
         .retry(
             RetryPolicy::transient()
                 .initial_backoff(Duration::from_millis(1))
@@ -37,10 +58,7 @@ async fn a_post_answered_with_a_redirect_is_not_replayed_when_the_next_leg_fails
     })
     .await
     .unwrap();
-    let port = closed_port();
-    location
-        .set(format!("http://127.0.0.1:{port}/result"))
-        .unwrap();
+    location.set(format!("{UNRESOLVABLE}/result")).unwrap();
 
     let err = unsent_retries()
         .post(server.url("/create-job"))
@@ -54,9 +72,8 @@ async fn a_post_answered_with_a_redirect_is_not_replayed_when_the_next_leg_fails
 
 #[tokio::test]
 async fn a_post_whose_first_leg_never_connects_is_still_retried() {
-    let port = closed_port();
     let err = unsent_retries()
-        .post(format!("http://127.0.0.1:{port}/create-job"))
+        .post(format!("{UNRESOLVABLE}/create-job"))
         .body("job=1")
         .await
         .unwrap_err();
@@ -89,8 +106,13 @@ async fn a_digest_challenge_does_not_block_retrying_an_unsent_post() {
             .unwrap();
     });
 
-    let err = unsent_retries()
-        .post(format!("http://127.0.0.1:{port}/create-job"))
+    let resolver = Arc::new(ResolvesOnce {
+        target: std::net::SocketAddr::from(([127, 0, 0, 1], port)),
+        used: std::sync::atomic::AtomicBool::new(false),
+    });
+    let session = unsent_retries_with(Session::builder().dns(resolver as Arc<dyn Resolver>));
+    let err = session
+        .post(format!("http://challenge.invalid:{port}/create-job"))
         .digest_auth(leyline::DigestAuth::new("user", "pass"))
         .body("job=1")
         .await
