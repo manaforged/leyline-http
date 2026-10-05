@@ -38,13 +38,13 @@ def land_all(items: list[tuple[str, int, str]], date: str, sync: bool) -> int:
     review = []
     for family, major, captured in items:
         landed = land(family, major, captured, date)
-        changed = document(family, major, landed.previous, captured, os_phrase(landed.oses), landed.qpack)
+        changed, notes = document(family, major, landed.previous, captured, os_phrase(landed.oses), landed.qpack)
         print(f"landed {landed.path.relative_to(ROOT)} from {captured} ({os_phrase(landed.oses)})")
         for line in landed.notes:
             print(f"  {line}")
         for path in changed:
             print(f"  updated {path}")
-        review += [f"{family} {major}: {line}" for line in landed.review]
+        review += [f"{family} {major}: {line}" for line in landed.review + notes]
     if items:
         review.append("docs/guide/profiles.md prose: describe what changed, if anything")
     if items and sync:

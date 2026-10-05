@@ -190,7 +190,7 @@ impl Session {
                 response,
             });
             let leg = deadline
-                .response_header(self.settle_leg(send, response, &deadline))
+                .response_header(send)
                 .await
                 .map_err(leg_error(answered))?;
             answered = true;
@@ -208,7 +208,7 @@ impl Session {
                 redirect_cap,
             };
             if next.take(&mut journey, digest.as_mut(), replay_body)? {
-                self.release_leg_body(leg.body, &deadline).await;
+                drop(leg.body);
                 continue;
             }
 

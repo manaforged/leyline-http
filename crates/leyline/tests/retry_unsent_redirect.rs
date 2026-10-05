@@ -2,9 +2,10 @@
     clippy::unwrap_used,
     reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
 )]
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use leyline::testing::{TestResponse, TestServer, queue};
+use leyline::testing::{TestResponse, TestServer};
 use leyline::{RetryPolicy, Session};
 
 fn closed_port() -> u16 {
@@ -29,9 +30,15 @@ fn unsent_retries() -> Session {
 
 #[tokio::test]
 async fn a_post_answered_with_a_redirect_is_not_replayed_when_the_next_leg_fails() {
-    let result = format!("http://127.0.0.1:{}/result", closed_port());
-    let server = TestServer::http(queue([TestResponse::new(303).header("location", result)]))
-        .await
+    let location = Arc::new(OnceLock::new());
+    let target = Arc::clone(&location);
+    let server = TestServer::http(move |_| {
+        TestResponse::new(303).header("location", target.get().cloned().unwrap_or_default())
+    })
+    .await
+    .unwrap();
+    location
+        .set(format!("http://127.0.0.1:{}/result", closed_port()))
         .unwrap();
 
     let err = unsent_retries()

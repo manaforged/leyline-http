@@ -24,31 +24,6 @@ def extract_json_blob(raw: Path) -> dict:
     return json.loads(m.group(1))
 
 
-def headers_from_peet(peet: dict) -> list[str]:
-    frames = (peet.get("http2") or {}).get("sent_frames") or []
-    for frame in frames:
-        if frame.get("frame_type") == "HEADERS":
-            return list(frame.get("headers") or [])
-    return []
-
-
-def chrome_grease(peet: dict, major: int) -> str:
-    grease = None
-    for line in headers_from_peet(peet):
-        if not line.lower().startswith("sec-ch-ua:"):
-            continue
-        value = line.split(":", 1)[1].strip()
-        for brand, ver in re.findall(r'"([^"]+)";v="(\d+)"', value):
-            if brand in {"Chromium", "Google Chrome", "HeadlessChrome"}:
-                continue
-            grease = (brand, ver)
-            break
-    if grease is None:
-        grease = ("Not?A_Brand", "24")
-    brand, ver = grease
-    return f'"{brand}";v="{ver}", "Chromium";v="{major}", "Google Chrome";v="{major}"'
-
-
 def ciphers_from_peet(peet: dict) -> list[str]:
     raw = (peet.get("tls") or {}).get("ciphers") or []
     out = []

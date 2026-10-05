@@ -19,7 +19,7 @@ impl ResponseMode {
     }
 
     pub(crate) fn reads_incrementally(self) -> bool {
-        self != Self::Buffered
+        self == Self::Streamed
     }
 
     pub(crate) fn keeps_stream(self, status: StatusCode) -> bool {

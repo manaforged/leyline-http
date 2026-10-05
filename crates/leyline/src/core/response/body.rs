@@ -108,24 +108,26 @@ impl Response {
         let Some(err) = self.status_error() else {
             return Ok(self);
         };
-        match self.read_error_prefix(deadline).await {
-            Some(body) => Err(err.with_body(body)),
-            None => Err(err),
+        let limit = self.compression.max_error_body;
+        let remaining = deadline.remaining();
+        let wait = deadline
+            .error_body()
+            .map_or(remaining, |cap| cap.min(remaining));
+        match within(Some(wait), self.read_decoded(limit, |_, _| false)).await {
+            Ok(Ok((body, true))) => Err(err.with_body(body).without_content_coding()),
+            Ok(Ok((body, false))) => Err(err.with_body(body)),
+            _ => Err(err),
         }
     }
 
-    pub(crate) async fn read_error_prefix(self, deadline: &Deadline) -> Option<Vec<u8>> {
-        let limit = self.compression.max_error_body;
-        within(
-            Some(deadline.error_body_wait()),
-            self.read_until(limit, |_, _| false),
-        )
-        .await
-        .ok()?
-        .ok()
+    pub async fn read_until<F>(self, limit: usize, done: F) -> Result<Vec<u8>>
+    where
+        F: FnMut(&[u8], usize) -> bool,
+    {
+        self.read_decoded(limit, done).await.map(|(body, _)| body)
     }
 
-    pub async fn read_until<F>(self, limit: usize, mut done: F) -> Result<Vec<u8>>
+    async fn read_decoded<F>(self, limit: usize, mut done: F) -> Result<(Vec<u8>, bool)>
     where
         F: FnMut(&[u8], usize) -> bool,
     {
@@ -143,14 +145,14 @@ impl Response {
             }
             out.truncate(limit);
             if done(&out, from) || out.len() >= limit {
-                return Ok(out);
+                return Ok((out, decoder.is_some()));
             }
         }
         if let Some(decoder) = decoder.as_mut() {
             decoder.finish(&mut out)?;
             out.truncate(limit);
         }
-        Ok(out)
+        Ok((out, decoder.is_some()))
     }
 }
 
