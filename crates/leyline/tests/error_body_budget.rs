@@ -144,3 +144,60 @@ async fn an_error_body_larger_than_the_body_limit_is_a_status_error() {
     assert_eq!(err.status().map(|s| s.as_u16()), Some(500), "{err}");
     assert_eq!(err.body().map(<[u8]>::len), Some(64 * 1024));
 }
+
+#[tokio::test]
+async fn error_for_status_reuses_the_connection_across_a_status_retry() {
+    let server = TestServer::http(queue([
+        TestResponse::new(503)
+            .header("retry-after", "0")
+            .body("busy"),
+        TestResponse::new(200).body("ok"),
+    ]))
+    .await
+    .unwrap();
+    let (port, accepted) = counting_forwarder(server.addr()).await;
+    let session = Session::builder()
+        .retry(
+            leyline::RetryPolicy::transient()
+                .initial_backoff(Duration::from_millis(1))
+                .jitter(false),
+        )
+        .build()
+        .unwrap();
+
+    let response = session
+        .get(format!("http://127.0.0.1:{port}/"))
+        .error_for_status()
+        .await
+        .unwrap();
+
+    assert_eq!(response.text().await.unwrap(), "ok");
+    assert_eq!(accepted.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn error_for_status_reuses_the_connection_across_a_digest_challenge() {
+    let server = TestServer::http(queue([
+        TestResponse::new(401)
+            .header(
+                "www-authenticate",
+                "Digest realm=\"r\", nonce=\"n1\", qop=\"auth\", algorithm=MD5",
+            )
+            .body("denied"),
+        TestResponse::new(200).body("ok"),
+    ]))
+    .await
+    .unwrap();
+    let (port, accepted) = counting_forwarder(server.addr()).await;
+    let session = Session::builder().build().unwrap();
+
+    let response = session
+        .get(format!("http://127.0.0.1:{port}/"))
+        .digest_auth(leyline::DigestAuth::new("user", "pass"))
+        .error_for_status()
+        .await
+        .unwrap();
+
+    assert_eq!(response.text().await.unwrap(), "ok");
+    assert_eq!(accepted.load(Ordering::SeqCst), 1);
+}

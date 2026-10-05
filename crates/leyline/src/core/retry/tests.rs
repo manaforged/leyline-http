@@ -91,3 +91,11 @@ fn wait_formats_parse_header_values() {
     assert!(wait > Duration::from_secs(50) && wait <= Duration::from_secs(60));
     assert_eq!(WaitFormat::Seconds.parse("soon"), None);
 }
+
+#[test]
+fn a_failed_tls_handshake_is_unsent() {
+    let policy = RetryPolicy::transient().retry_unsent(true);
+    let handshake: Result<Response> =
+        Err(Error::from(crate::tls::TlsError::Handshake("alert".into())));
+    assert!(policy.retries_unsent(&handshake));
+}

@@ -314,6 +314,10 @@ name = "profile_validation"
 required-features = ["bench-internals"]
 
 [[test]]
+name = "profile_builtin"
+required-features = ["bench-internals"]
+
+[[test]]
 name = "tls_peet"
 required-features = ["bench-internals", "http3", "websocket"]
 
