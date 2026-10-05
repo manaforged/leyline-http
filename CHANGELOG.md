@@ -8,7 +8,7 @@ behaviour, and each change is listed here. The BoringSSL crates
 `leyline-bssl`, `leyline-bssl-sys`, and `leyline-bssl-tokio` share this
 version and publish as separate crates.
 
-## Unreleased
+## 0.1.2 - 2026-10-05
 
 ### Security
 

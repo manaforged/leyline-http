@@ -90,7 +90,7 @@ full = [
 [dependencies]
 # External deps absorbed from sub-crates
 # -- from leyline-quiche (external BSD-2 fork, stays as path dep)
-leyline-quiche = { path = "../leyline-quiche", version = "=0.1.1", default-features = false, optional = true, features = [
+leyline-quiche = { path = "../leyline-quiche", version = "=0.1.2", default-features = false, optional = true, features = [
     "boringssl-bssl-crate",
 ] }
 
@@ -344,7 +344,7 @@ toml = { workspace = true }
 [dev-dependencies]
 leyline-http = { path = ".", features = ["test-util"] }
 bytes = { workspace = true }
-leyline-quiche = { path = "../leyline-quiche", version = "=0.1.1", default-features = false, features = [
+leyline-quiche = { path = "../leyline-quiche", version = "=0.1.2", default-features = false, features = [
     "boringssl-bssl-crate",
     "internal",
 ] }
