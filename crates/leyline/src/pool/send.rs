@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 
 use crate::HttpVersion;
 use crate::core::Body;
+use crate::core::ResponseMode;
 use crate::h2::client::{H2Client, H2ResponseEx, Head};
 use crate::h2::config::H2Config;
 use crate::h2::connection::{HeaderPair, PseudoHeaders};
@@ -38,7 +39,7 @@ pub(crate) async fn send_request_h3_pooled(
     port: u16,
     request: H3Request<'_>,
     body: Body,
-    stream_response: bool,
+    mode: ResponseMode,
 ) -> Result<(H3ResponseParts, TlsInfo, ResponseTiming), Error> {
     let request_started = Instant::now();
     let key = pool.key("https", host, port, request.proxy, Transport::Quic);
@@ -67,7 +68,7 @@ pub(crate) async fn send_request_h3_pooled(
                 request.headers,
                 bytes,
                 stream,
-                stream_response,
+                mode,
             )
             .await
         {
@@ -135,7 +136,7 @@ pub(crate) async fn send_request_h3_pooled(
             request.headers,
             bytes,
             stream,
-            stream_response,
+            mode,
         )
         .await
         .map_err(Error::from)?;
@@ -180,7 +181,7 @@ pub(crate) async fn send_request(
     headers: Vec<HeaderPair>,
     body: Body,
     proxy: Option<&str>,
-    stream_response: bool,
+    mode: ResponseMode,
     opened: Option<Opened<H2Client>>,
 ) -> Result<(H2ResponseEx, TlsInfo, ResponseTiming), Error> {
     let started = opened.as_ref().map_or_else(Instant::now, |o| o.started);
@@ -205,7 +206,7 @@ pub(crate) async fn send_request(
         key: &key,
         host,
         port,
-        stream_response,
+        mode,
         started,
     };
     let body = match opened {
@@ -228,7 +229,7 @@ struct H2Send<'a> {
     key: &'a PoolKey,
     host: &'a str,
     port: u16,
-    stream_response: bool,
+    mode: ResponseMode,
     started: Instant,
 }
 
@@ -258,7 +259,7 @@ async fn send_pooled(
     trace_sent(ctx);
     match opened
         .conn
-        .send_shared(Arc::clone(ctx.head), body.into_h2(), ctx.stream_response)
+        .send_shared(Arc::clone(ctx.head), body.into_h2(), ctx.mode)
         .await
     {
         Ok(resp) => {
@@ -322,7 +323,7 @@ async fn send_fresh(
     trace_sent(ctx);
     let resp = match opened
         .conn
-        .send_shared(Arc::clone(ctx.head), body.into_h2(), ctx.stream_response)
+        .send_shared(Arc::clone(ctx.head), body.into_h2(), ctx.mode)
         .await
     {
         Ok(r) => r,

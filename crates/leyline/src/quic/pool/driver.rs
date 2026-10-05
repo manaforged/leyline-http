@@ -69,6 +69,7 @@ pub(super) fn start_pending(
                     body,
                     body_stream,
                     stream_body_tx,
+                    errors_only,
                     resp_tx,
                     ..
                 }) = pending.pop_front()
@@ -76,6 +77,7 @@ pub(super) fn start_pending(
                     unreachable!("front matched Request above");
                 };
                 let mut stream = H3Stream::new(resp_tx, body, stream_body_tx, streaming);
+                stream.errors_only = errors_only;
                 stream.retry = retry;
                 stream.expects_body = expects_body;
                 if let Some(body_stream) = body_stream {

@@ -10,6 +10,7 @@ use tokio::sync::{OwnedSemaphorePermit, mpsc};
 
 use crate::BodyStream;
 use crate::ResponseTiming;
+use crate::core::ResponseMode;
 use crate::core::session::decompress::BodyLimit;
 use crate::tls::{FingerprintConnector, TlsError};
 use crate::trace;
@@ -141,7 +142,7 @@ pub async fn send_request_h1_pooled(
             headers,
             proxy,
             target,
-            stream,
+            response: ResponseMode::from(stream),
             opened: None,
         },
         body,
@@ -160,7 +161,7 @@ pub(crate) struct H1Request<'a> {
     pub(crate) headers: Vec<(String, String)>,
     pub(crate) proxy: Option<&'a str>,
     pub(crate) target: H1Target,
-    pub(crate) stream: bool,
+    pub(crate) response: ResponseMode,
     pub(crate) opened: Option<Opened<H1Slot>>,
 }
 
@@ -191,7 +192,7 @@ pub(crate) async fn send_h1_pooled(
     let permit = pool.acquire_h1_permit(&key).await;
     let legs = first_legs(pool, &key, req.opened.take());
 
-    if req.stream {
+    if req.response != ResponseMode::Buffered {
         return send_request_h1_streaming(pool, connector, req, body, permit, key, dial, legs)
             .await;
     }

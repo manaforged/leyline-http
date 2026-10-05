@@ -10,6 +10,8 @@ use quiche::h3::NameValue;
 use tokio::sync::{Semaphore, mpsc, oneshot};
 use tokio::task::AbortHandle;
 
+use crate::core::ResponseMode;
+use crate::core::is_error_status;
 use crate::core::session::decompress::BodyLimit;
 use crate::h2::config::PseudoOrder;
 use crate::quic::connection::{
@@ -35,6 +37,7 @@ enum H3Command {
         body: Option<Bytes>,
         body_stream: Option<H3RequestBodyStream>,
         stream_body_tx: Option<mpsc::Sender<std::io::Result<Bytes>>>,
+        errors_only: bool,
         retried: bool,
         resp_tx: oneshot::Sender<Result<H3Response, H3SendError>>,
     },
@@ -104,7 +107,7 @@ impl H3Client {
         headers: &[(String, String)],
         body: Option<Bytes>,
         body_stream: Option<H3RequestBodyStream>,
-        stream_response: bool,
+        mode: ResponseMode,
     ) -> Result<H3ResponseParts, H3SendError> {
         if self.closed.load(Ordering::Acquire) {
             return Err(H3SendError::NotSent("h3 connection closed".into()));
@@ -125,11 +128,11 @@ impl H3Client {
             h3_headers.push(quiche::h3::Header::new(k.as_bytes(), v.as_bytes()));
         }
 
-        let (stream_body_tx, stream_body_rx) = if stream_response {
+        let (stream_body_tx, stream_body_rx) = if mode == ResponseMode::Buffered {
+            (None, None)
+        } else {
             let (tx, rx) = mpsc::channel(STREAM_RESP_CAPACITY);
             (Some(tx), Some(rx))
-        } else {
-            (None, None)
         };
 
         let (resp_tx, resp_rx) = oneshot::channel();
@@ -139,6 +142,7 @@ impl H3Client {
                 body,
                 body_stream,
                 stream_body_tx,
+                errors_only: mode == ResponseMode::ErrorPrefix,
                 resp_tx,
                 retried: false,
             })
@@ -151,8 +155,8 @@ impl H3Client {
                 headers: head.headers,
                 trailers: head.trailers,
                 body: match stream_body_rx {
-                    Some(rx) => H3RespBody::Streaming(rx),
-                    None => H3RespBody::Buffered(head.body),
+                    Some(rx) if mode.keeps_stream(head.status) => H3RespBody::Streaming(rx),
+                    _ => H3RespBody::Buffered(head.body),
                 },
             }),
             Ok(Err(e)) => Err(e),
@@ -175,6 +179,7 @@ struct H3Stream {
     trailers: Vec<(String, String)>,
     body: Vec<u8>,
     stream_tx: Option<mpsc::Sender<std::io::Result<Bytes>>>,
+    errors_only: bool,
     head_sent: bool,
     stalled: Option<Bytes>,
     peer_finished: bool,
@@ -225,6 +230,7 @@ impl H3Stream {
             trailers: Vec::new(),
             body: Vec::new(),
             stream_tx,
+            errors_only: false,
             head_sent: false,
             stalled: None,
             peer_finished: false,
@@ -267,6 +273,9 @@ impl H3Stream {
             H3HeaderBlock::Informational => {}
             H3HeaderBlock::Final { status, headers } => {
                 self.status = status;
+                if self.errors_only && !is_error_status(status) {
+                    self.stream_tx = None;
+                }
                 self.declared_len = headers
                     .iter()
                     .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))

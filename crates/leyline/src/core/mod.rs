@@ -42,6 +42,7 @@ pub use into_url::IntoUrl;
 pub use pages::Pages;
 pub use proxy_pool::{ProxyHealth, ProxyPool};
 pub use request::{ContentEncoding, IntoParamPair, RequestBuilder};
+pub(crate) use response::is_error_status;
 #[cfg(feature = "bench-internals")]
 pub(crate) use response::parse_links;
 pub use response::{HttpVersion, Link, RelayBody, Response, ResponseTiming, relay_headers};
@@ -52,6 +53,7 @@ pub use service::LeylineService;
 pub use session::WebSocketBuilder;
 pub use session::{Identity, ProtocolPolicy, Session, SessionBuilder, SessionIdentity};
 pub use tab::Tab;
+pub use transport::ResponseMode;
 pub(crate) use transport::header_map;
 #[cfg(feature = "websocket")]
 pub use websocket::{CloseFrame, WsConnection, WsMessage, WsSink, WsStream};

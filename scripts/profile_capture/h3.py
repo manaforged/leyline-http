@@ -3,6 +3,7 @@ from __future__ import annotations
 from .toml_text import replace_list, replace_value
 
 QPACK_SETTINGS = (1, 7)
+CONNECTION_ID_PARAMS = frozenset({0, 15, 16})
 
 
 def extension(capture: dict, name: str) -> dict:
@@ -32,7 +33,12 @@ def is_grease(version: int) -> bool:
 
 def fingerprint(capture: dict) -> dict:
     params = [
-        (param.get("id"), [v["id"] for v in param.get("available_versions", []) if not is_grease(v["id"])])
+        (
+            param.get("id"),
+            None if param.get("id") in CONNECTION_ID_PARAMS else param.get("value", param.get("raw")),
+            (param.get("chosen_version") or {}).get("id"),
+            [v["id"] for v in param.get("available_versions", []) if not is_grease(v["id"])],
+        )
         for param in transport_parameters(capture["tls"])
     ]
     return {
@@ -44,7 +50,8 @@ def fingerprint(capture: dict) -> dict:
 
 
 def qpack(capture: dict) -> tuple[int, int]:
-    settings = dict(item.split(":", 1) for item in capture["h3_text"].split("|", 1)[0].split(";"))
+    items = capture["h3_text"].split("|", 1)[0].split(";")
+    settings = dict(item.split(":", 1) for item in items if ":" in item)
     first, second = (int(settings.get(str(key), 0)) for key in QPACK_SETTINGS)
     return first, second
 

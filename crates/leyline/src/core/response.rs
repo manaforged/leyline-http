@@ -201,7 +201,7 @@ impl Response {
     }
 
     fn status_error(&self) -> Option<Error> {
-        if !is_error_status(self.status) {
+        if !is_error_status(self.status.as_u16()) {
             return None;
         }
         Some(
@@ -280,6 +280,6 @@ impl fmt::Debug for Response {
 #[cfg(test)]
 mod tests;
 
-pub(crate) fn is_error_status(status: StatusCode) -> bool {
-    status.as_u16() >= 400
+pub(crate) fn is_error_status(status: u16) -> bool {
+    status >= 400
 }

@@ -158,10 +158,11 @@ def land_identity(draft: Draft) -> None:
     if FAMILIES[draft.family]["ua_from_capture"]:
         agent = first.get("user_agent", "")
         draft.text = replace_value(draft.text, f"identity.{draft.oses[0]}", "user_agent", f'"{agent}"')
+    marker = FAMILIES[draft.family]["ua_marker"].format(major=draft.major)
     draft.landed.review += [
         f"user agent still names another version: {agent}"
         for agent in re.findall(r'(?m)^user_agent = "([^"]*)"$', draft.text)
-        if str(draft.major) not in agent
+        if marker not in agent
     ]
 
 

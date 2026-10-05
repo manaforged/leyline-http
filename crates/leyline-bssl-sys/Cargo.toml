@@ -76,7 +76,13 @@ version = "5.2.0"
 [package.metadata.upstream.boringssl]
 repo = "google/boringssl"
 gitlink = "deps/boringssl"
-shared_advisories = { repo = "openssl/release-metadata", path = "secjson", since = "2026-06-21", lookback_days = 30 }
+
+[package.metadata.upstream.boringssl.shared_advisories]
+repo = "openssl/release-metadata"
+path = "secjson"
+since = "2026-06-21"
+id_year_floor = 2025
+record_url = "https://raw.githubusercontent.com/openssl/release-metadata/HEAD/secjson/{cve}.json"
 
 [package.metadata.upstream.boringssl.reviewed]
 CVE-2026-14456 = "OpenSSL QUIC server; BoringSSL has no QUIC stack"

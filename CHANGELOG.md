@@ -43,10 +43,12 @@ version and publish as separate crates.
   connection failure on a later leg used to resend the original request,
   for example a POST that the server had already processed and answered
   with a 303.
-- `error_for_status` decodes at most `max_error_body` bytes of an error
-  response. It used to decode the whole body first, so a compressed error
-  body that inflated past `max_body_size`, or that failed to decode, returned
-  a body error instead of the status error. The error's headers no longer
+- `error_for_status` reads and decodes at most `max_error_body` bytes of an
+  error response, within the error-body timeout, on HTTP/1.1, HTTP/2, and
+  HTTP/3. It used to read and decode the whole body first, so a large, slow,
+  or highly compressed error body ran to the body timeout or returned a body
+  error instead of the status error. A response below 400 is still read in
+  full, with its trailers and connection reuse. The error's headers no longer
   list a `content-encoding` that its decoded body does not have.
 - The `leyline-bssl-sys` build script reruns when a patch is added to
   `patches/`. Before, a new patch was not applied to an existing build

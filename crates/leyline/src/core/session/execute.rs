@@ -193,7 +193,7 @@ impl Session {
                 .response_header(send)
                 .await
                 .map_err(leg_error(answered))?;
-            answered = true;
+            answered |= leg.status != http::StatusCode::UNAUTHORIZED;
             journey.timing.add_leg(&leg.timing);
 
             self.store_cookies(&leg.headers, &journey.url);
