@@ -68,6 +68,11 @@ def changelog_entry(text: str, family: str, major: int, version: str, phrase: st
     return text[:at] + f"### Added\n\n{bullet}\n\n" + text[at:]
 
 
+def previous_qpack(family: str, previous: int) -> tuple[int, int] | None:
+    match = re.search(rf'(?m)^"{re.escape(family)}-{previous}" = \[(\d+), (\d+)\]$', QPACK_GOLDEN.read_text())
+    return (int(match.group(1)), int(match.group(2))) if match else None
+
+
 def qpack_row(text: str, family: str, major: int, previous: int, values: tuple[int, int]) -> str:
     key = f'"{family}-{major}"'
     if re.search(rf"(?m)^{re.escape(key)} = ", text):
@@ -88,15 +93,22 @@ def update(path: Path, edit) -> bool:
 
 
 def document(family: str, major: int, previous: int, captured: str, phrase: str,
-             qpack: tuple[int, int] | None) -> list[str]:
+             qpack: tuple[int, int] | None) -> tuple[list[str], list[str]]:
     version = captured.removeprefix(f"{family}-")
-    changed = []
+    changed, review = [], []
+    if qpack is None:
+        qpack = previous_qpack(family, previous)
+        if qpack:
+            review.append(f"the QPACK golden row for {family}-{major} is a copy of {family}-{previous}")
     if update(GUIDE, lambda t: guide_rows(t, family, major, previous, captured, phrase)):
         changed.append(str(GUIDE.relative_to(ROOT)))
+    label = FAMILIES[family]["label"]
     if update(README, lambda t: readme_range(t, family, major, previous)):
         changed.append(str(README.relative_to(ROOT)))
+    if not re.search(rf"(?m)^\| {label} \| (\d+ to {major}|[^|]*\b{major}\b)", README.read_text()):
+        review.append(f"{README.relative_to(ROOT)}: add {label} {major} to the profile table")
     if update(CHANGELOG, lambda t: changelog_entry(t, family, major, version, phrase)):
         changed.append(str(CHANGELOG.relative_to(ROOT)))
     if qpack and update(QPACK_GOLDEN, lambda t: qpack_row(t, family, major, previous, qpack)):
         changed.append(str(QPACK_GOLDEN.relative_to(ROOT)))
-    return changed
+    return changed, review

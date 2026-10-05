@@ -10,6 +10,7 @@ import sys
 import tomllib
 import urllib.error
 import urllib.request
+from datetime import date, timedelta
 from pathlib import Path
 
 from update_notice import notify
@@ -117,28 +118,37 @@ def check_crate(name: str, meta: dict) -> None:
         )
 
 
-def shared_advisories(meta: dict) -> list[str]:
-    feed = meta.get("shared_advisories")
-    if not feed:
-        return []
+def feed_commits(feed: dict) -> list[dict]:
+    window = date.fromisoformat(feed["since"]) - timedelta(days=feed["lookback_days"])
     commits, page = [], 1
     while True:
         batch = request(
             f"{GITHUB}/repos/{feed['repo']}/commits?path={feed['path']}"
-            f"&since={feed['since']}T00:00:00Z&per_page=100&page={page}"
+            f"&since={window.isoformat()}T00:00:00Z&per_page=100&page={page}"
         )
         commits += batch
         if len(batch) < 100:
-            break
+            return commits
         page += 1
+
+
+def shared_advisories(meta: dict) -> list[str]:
+    feed = meta.get("shared_advisories")
+    if not feed:
+        return []
     pattern = re.compile(rf"{re.escape(feed['path'])}/(CVE-\d+-\d+)\.json")
-    found = set()
-    for commit in commits:
+    touched = set()
+    for commit in feed_commits(feed):
         for changed in request(f"{GITHUB}/repos/{feed['repo']}/commits/{commit['sha']}").get("files", []):
             match = pattern.fullmatch(changed["filename"])
-            if match and changed["status"] == "added":
-                found.add(match.group(1))
-    return sorted(found - set(meta.get("reviewed", [])))
+            if match and changed["status"] != "removed":
+                touched.add(match.group(1))
+    found = []
+    for cve in sorted(touched - set(meta.get("reviewed", {}))):
+        record = request(f"https://raw.githubusercontent.com/{feed['repo']}/HEAD/{feed['path']}/{cve}.json")
+        if record["containers"]["cna"].get("datePublic", "")[:10] >= feed["since"]:
+            found.append(cve)
+    return found
 
 
 def check_boringssl(crate_dir: Path, meta: dict) -> None:

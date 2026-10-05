@@ -14,7 +14,7 @@ import urllib.request
 from pathlib import Path
 
 from .captures import store, tcp_path
-from .config import CACHE, CHROME_DEB_BASE, CHROME_DEB_INDEX, HOST_OS, MAC_CHROME, OUT, PEET_URL
+from .config import CACHE, CHROME_DEB_BASE, CHROME_STABLE_URL, CHROME_DEB_INDEX, HOST_OS, MAC_CHROME, OUT, PEET_URL
 from .land import missing_majors
 from .net import http_bytes, http_json
 from .peet import extract_json_blob, require_browser_ua
@@ -211,9 +211,7 @@ def chrome_for_major(major: int) -> tuple[str, Path]:
 
 
 def live_chrome_major() -> tuple[int, str]:
-    data = http_json(
-        "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions.json"
-    )
+    data = http_json(CHROME_STABLE_URL)
     ver = data["channels"]["Stable"]["version"]
     return int(ver.split(".", 1)[0]), ver
 

@@ -4,11 +4,12 @@ import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlparse
 
 from .captures import load_h3, load_tcp
-from .config import FAMILIES, OS_LABELS, PROFILES, TODAY
+from .config import FAMILIES, H3_URL, OS_LABELS, PEET_URL, PROFILES, TODAY
 from .h3 import apply_h3, qpack
-from .peet import chrome_grease, ciphers_from_peet, names_from_peet_ext, peet_get
+from .peet import ciphers_from_peet, names_from_peet_ext, peet_get
 from .toml_text import current, replace_list, replace_value, set_meta
 
 
@@ -72,7 +73,7 @@ def tcp_values(capture: dict) -> dict[str, object]:
         or names_from_peet_ext(capture, "signature_algs"),
         "extensions": [
             int(ext["name"].rsplit("(", 1)[1].rstrip(")"))
-            for ext in capture["tls"].get("extensions", [])
+            for ext in (capture.get("tls") or {}).get("extensions", [])
             if "GREASE" not in ext.get("name", "") and "(" in ext.get("name", "")
         ],
     }
@@ -157,9 +158,6 @@ def land_identity(draft: Draft) -> None:
     if FAMILIES[draft.family]["ua_from_capture"]:
         agent = first.get("user_agent", "")
         draft.text = replace_value(draft.text, f"identity.{draft.oses[0]}", "user_agent", f'"{agent}"')
-    if draft.family == "chrome":
-        sch = chrome_grease(first, draft.major)
-        draft.text = re.sub(r"(?m)^sec_ch_ua = .*$", lambda _: f"sec_ch_ua = '{sch}'", draft.text)
     draft.landed.review += [
         f"user agent still names another version: {agent}"
         for agent in re.findall(r'(?m)^user_agent = "([^"]*)"$', draft.text)
@@ -171,7 +169,7 @@ def land_h3(draft: Draft) -> None:
     if "h3" not in draft.before:
         return
     runs = load_h3(draft.captured)
-    if not (FAMILIES[draft.family]["h3"] and runs):
+    if not (FAMILIES[draft.family]["h3_hosts"] and runs):
         draft.landed.review.append(f"no HTTP/3 capture; [h3] is a copy of {draft.label} {draft.landed.previous}")
         return
     previous_runs = load_h3(draft.before["meta"].get("captured_against", ""))
@@ -185,9 +183,10 @@ def land_h3(draft: Draft) -> None:
 def verified_against(draft: Draft, date: str) -> str:
     method = FAMILIES[draft.family]["tcp_method"]
     version = draft.captured.removeprefix(draft.family + "-")
-    verified = f"tls.peet.ws {date} {draft.label} {version} {os_phrase(draft.oses)} {method}"
+    tcp_host, h3_host = urlparse(PEET_URL).hostname, urlparse(H3_URL).hostname
+    verified = f"{tcp_host} {date} {draft.label} {version} {os_phrase(draft.oses)} {method}"
     if draft.landed.h3_oses:
-        verified += f"; quic.browserleaks.com {os_phrase(draft.landed.h3_oses)} headful"
+        verified += f"; {h3_host} {os_phrase(draft.landed.h3_oses)} headful"
     return verified
 
 

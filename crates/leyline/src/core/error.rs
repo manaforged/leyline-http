@@ -148,6 +148,14 @@ impl Error {
         self
     }
 
+    pub(crate) fn without_content_coding(mut self) -> Self {
+        if let Some(headers) = self.inner.headers.as_mut() {
+            headers.remove(http::header::CONTENT_ENCODING);
+            headers.remove(http::header::CONTENT_LENGTH);
+        }
+        self
+    }
+
     pub(crate) fn after_response(mut self) -> Self {
         self.inner.after_response = true;
         self

@@ -11,7 +11,7 @@ import tarfile
 from pathlib import Path
 
 from .captures import h3_path, store, tcp_path
-from .config import CACHE, FAMILIES, FF_RELEASES_URL, FF_URL, H3_RUNS, H3_URL, HOST_OS, OUT, PEET_URL, ROOT
+from .config import CACHE, FAMILIES, FF_ARCHIVES, FF_DOWNLOAD_URL, FF_RELEASES_URL, FF_URL, H3_RUNS, H3_URL, HOST_OS, OUT, PEET_URL, ROOT
 from .land import missing_majors
 from .net import http_bytes, http_json
 from .peet import require_browser_ua
@@ -29,10 +29,7 @@ def firefox_bin_for(ver: str) -> Path:
         if binary.is_file() and os.access(binary, os.X_OK):
             return binary
         archive = CACHE / f"firefox-{ver}-linux-x86_64.tar.xz"
-        url = (
-            "https://download-installer.cdn.mozilla.net/pub/firefox/releases/"
-            f"{ver}/linux-x86_64/en-US/firefox-{ver}.tar.xz"
-        )
+        url = FF_DOWNLOAD_URL + FF_ARCHIVES["linux"].format(ver=ver)
         print(f"downloading Firefox {ver}")
         http_bytes(url, archive)
         with tarfile.open(archive) as bundle:
@@ -45,10 +42,7 @@ def firefox_bin_for(ver: str) -> Path:
     if binary.is_file() and os.access(binary, os.X_OK):
         return binary
     dmg = CACHE / f"Firefox-{ver}.dmg"
-    url = (
-        "https://download-installer.cdn.mozilla.net/pub/firefox/releases/"
-        f"{ver}/mac/en-US/Firefox%20{ver}.dmg"
-    )
+    url = FF_DOWNLOAD_URL + FF_ARCHIVES["macos"].format(ver=ver)
     print(f"downloading Firefox {ver}")
     http_bytes(url, dmg)
     attached = subprocess.check_output(
@@ -104,7 +98,7 @@ def capture_firefox(major: int, ver: str, binary: Path) -> str:
     peet = firefox_dump(binary, PEET_URL, OUT / f"{captured}.peet.json")
     require_browser_ua(peet, f"Firefox/{major}", f"Firefox {ver}")
     store(tcp_path(captured, host), peet, h3=False)
-    if FAMILIES["firefox"]["h3"] and host == "linux":
+    if host in FAMILIES["firefox"]["h3_hosts"]:
         for run in range(1, H3_RUNS + 1):
             print(f"capturing Firefox {ver} HTTP/3, run {run}")
             capture = firefox_dump(binary, H3_URL, OUT / f"{captured}-h3-run{run}.json", headful=True)
