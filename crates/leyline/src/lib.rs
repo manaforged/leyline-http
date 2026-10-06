@@ -135,10 +135,11 @@ pub use crate::core::{
     BlockKind, BlockRules, BlockSignal, Body, BodyStream, CompressionConfig, ContentEncoding,
     Device, DeviceAutosave, DeviceAutosaveOptions, DigestAuth, DnsConfig, Error, ErrorCategory,
     FetchSite, HostLimits, HostStats, HttpVersion, Identity, IntoParamPair, IntoUrl, Kind, Link,
-    NoProxy, Pages, PoolConfig, ProtocolPolicy, ProxyConfig, ProxyHealth, ProxyPool, ProxyRule,
-    ProxyUrl, RedirectAction, RedirectAttempt, RedirectPolicy, RelayBody, RequestBuilder, Response,
-    ResponseTiming, Result, RetryPolicy, RetryTrigger, Session, SessionBuilder, SessionIdentity,
-    SessionState, SocketConfig, Tab, TimeoutConfig, WaitFormat, WebSocketConfig, relay_headers,
+    NoProxy, Pages, PoolConfig, PrefixRead, ProtocolPolicy, ProxyConfig, ProxyHealth, ProxyPool,
+    ProxyRule, ProxyUrl, RedirectAction, RedirectAttempt, RedirectPolicy, RelayBody,
+    RequestBuilder, Response, ResponseTiming, Result, RetryPolicy, RetryTrigger, Session,
+    SessionBuilder, SessionIdentity, SessionState, SocketConfig, StopReason, Tab, TimeoutConfig,
+    WaitFormat, WebSocketConfig, relay_headers,
 };
 pub use crate::pool::{PoolStats, TlsInfo};
 pub use crate::util::redact as redact_url;

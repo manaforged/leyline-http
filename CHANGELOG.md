@@ -8,6 +8,40 @@ behaviour, and each change is listed here. The BoringSSL crates
 `leyline-bssl`, `leyline-bssl-sys`, and `leyline-bssl-tokio` share this
 version and publish as separate crates.
 
+## Unreleased
+
+### Added
+
+- `RequestBuilder::read_until(limit, done)` streams the response and returns
+  a `PrefixRead`: the decoded prefix and a `StopReason` (`PredicateMatched`,
+  `LimitReached`, or `EndOfBody`). It keeps the request's redirects, retries,
+  authentication, host limits, and `error_for_status()`.
+  `Response::read_until` keeps its signature, and now calls `done` only
+  after a chunk that adds decoded bytes, as `RequestBuilder::read_until`
+  does.
+- `examples/stock_monitor.rs`.
+
+### Fixed
+
+- `error_for_status` over HTTP/1.1 waited for a small error body with no
+  error-body timeout, so a stalled 500 with a short `Content-Length` ran to
+  the `total` timeout and returned `Kind::Timeout` without the status. The
+  error-body window now bounds that read, and the error keeps the status and
+  the bytes received.
+- `error_for_status` over HTTP/1.1 read error bodies up to 64 KiB regardless
+  of `max_error_body`. It now reads at most `max_error_body` bytes with the
+  response, and never more than `max_body_size`. An error body that Leyline
+  does not decode, with compression turned off or an unknown coding, keeps
+  its `Content-Encoding` header.
+- A status error whose body read timed out or failed dropped the bytes
+  already decoded. It now keeps them.
+
+### Changed
+
+- Over HTTP/1.1, a `.stream()` body dropped before its end closes the
+  connection. Leyline drains the rest only for `error_for_status` error
+  bodies, up to `max_error_body` bytes.
+
 ## 0.1.2 - 2026-10-05
 
 ### Security

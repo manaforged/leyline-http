@@ -74,7 +74,11 @@ impl RequestBuilder {
             body: std::mem::take(&mut self.body),
             headers,
             deadline,
-            response: ResponseMode::new(self.stream_response, self.status_errors),
+            response: ResponseMode::new(
+                self.stream_response,
+                self.status_errors
+                    .then(|| self.session.error_budget(&deadline)),
+            ),
             proxy: self.proxy.take(),
             header_order: self.header_order.take(),
             redirect: self.redirect.take(),

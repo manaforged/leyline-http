@@ -210,6 +210,19 @@ where
     if len > limit {
         return Err(body_too_large(limit));
     }
+    read_fixed_into(stream, &mut body, len).await?;
+    body.truncate(len);
+    Ok(body)
+}
+
+pub(super) async fn read_fixed_into<S>(
+    stream: &mut S,
+    body: &mut Vec<u8>,
+    len: usize,
+) -> Result<(), H1PooledError>
+where
+    S: AsyncRead + Unpin + ?Sized,
+{
     while body.len() < len {
         let remaining = len - body.len();
         let mut tmp = vec![0u8; remaining.min(8192)];
@@ -221,8 +234,7 @@ where
         }
         body.extend_from_slice(&tmp[..n]);
     }
-    body.truncate(len);
-    Ok(body)
+    Ok(())
 }
 pub(super) async fn read_to_close<S>(
     stream: &mut S,

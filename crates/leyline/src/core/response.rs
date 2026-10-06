@@ -12,11 +12,13 @@ use crate::util::redact;
 mod body;
 mod download;
 mod link;
+mod prefix;
 mod relay;
 
 pub use link::Link;
 #[cfg(feature = "bench-internals")]
 pub(crate) use link::parse_links;
+pub use prefix::{PrefixRead, StopReason};
 pub use relay::{RelayBody, relay_headers};
 
 pub(crate) enum ResponseBody {

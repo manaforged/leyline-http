@@ -23,7 +23,7 @@ mod mode;
 pub(crate) use h1::h1_error_to_core;
 pub(crate) use h1::send_request_h1;
 use h1::{H1Sent, send_h1_on};
-pub use mode::ResponseMode;
+pub use mode::{ErrorBudget, ResponseMode};
 
 fn status(code: u16) -> Result<StatusCode> {
     StatusCode::from_u16(code)

@@ -80,7 +80,7 @@ streamed one is drained, with the `read` timeout on each chunk, then decoded.
 | `copy_decoded_to(writer, limit).await` | `Result<u64>` | Writes the decoded body, capped at `limit` |
 | `download_to(path, limit).await` | `Result<u64>` | Writes the decoded body to a file in one atomic step |
 | `into_stream()`, `copy_to(writer).await` | `Result<BodyStream>`, `Result<u64>` | The bytes as sent on a `.stream()` response; the decoded body on a buffered one |
-| `read_until(limit, done).await` | `Result<Vec<u8>>` | Stops early on a predicate or a byte limit |
+| `read_until(limit, done).await` | `Result<Vec<u8>>` | Stops early on a predicate or a byte limit. `RequestBuilder::read_until` streams for you and also says why it stopped; see [Streaming](streaming.md#stop-at-a-marker) |
 
 [Streaming](streaming.md) covers the streaming calls and downloads.
 
@@ -199,14 +199,29 @@ retry policy is done, and keeps the start of the body in the error:
 | Body bytes kept, after decoding | 64 KiB, and never more than `max_body_size` | `CompressionConfig::max_error_body` |
 | Time to read that body | 10 s, and never past the `total` timeout | `TimeoutConfig::error_body` |
 
-Leyline decides after the status line: a response below 400 is read in full
-as usual, and an error response is read only up to these limits, so a large
-or slow error body cannot hold the request to the `body` timeout or exceed
-`max_body_size`. Over HTTP/1.1, an error body that declares a length of 64
-KiB or less is read with the response, so its connection can be reused. Decompression stops at the byte limit, so a small compressed
-body cannot expand past it, and the error's headers drop `content-encoding`
-and `content-length` when the body was decoded. When the read fails or takes too long, the error has no body
-but keeps the status and headers. `download` uses the same limits for a
+Leyline decides after the status line. A response below 400 is read in full
+as usual. An error response is read only up to these limits, so a large or
+slow error body cannot hold the request to the `body` timeout or exceed
+`max_body_size`. Decompression stops at the byte limit, so a small
+compressed body cannot expand past it.
+
+The error-body timeout starts when the response head arrives, and each error
+response gets one window, however its body is read. If the read fails or the
+window ends first, the error keeps the bytes decoded so far, or no body if
+none arrived, with the status and headers. The error's headers drop
+`content-encoding` when Leyline decoded the body, and `content-length` when
+the kept body is not the full declared length.
+
+`max_error_body` counts decoded bytes. Over HTTP/1.1, an error body that
+declares a length of `max_error_body` or less is read with the response. If
+it arrives within the window, the connection goes back to the pool;
+otherwise Leyline closes it. A larger or unframed error body is read only
+until `max_error_body` decoded bytes. If the rest of a fixed-length error
+body is no larger than `max_error_body`, Leyline reads and discards it in the
+background, within the pool's idle timeout, so the connection can be reused;
+this never extends the error-body window. Otherwise it closes the connection.
+Over HTTP/2 and HTTP/3, the stream is reset and the connection stays open.
+`download` uses the same limits for a
 status error.
 
 ```rust,no_run

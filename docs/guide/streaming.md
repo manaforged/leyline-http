@@ -146,38 +146,70 @@ download from your code, drop the future; see
 
 ## Stop at a marker
 
-`read_until(limit, done)` reads and decodes a body as the chunks arrive and
-stops when you tell it to. Use it when the value you need sits near the top
-of a large page. After each chunk, Leyline calls `done(body, from)`: `body` is
-every decoded byte so far, and `from` is where the newest chunk starts.
-Return `true` to stop. The read also stops at `limit` decoded bytes or at the
-end of the stream. The call returns the decoded prefix and drops the rest of
-the body.
+`RequestBuilder::read_until(limit, done)` sends the request, reads and decodes
+the body as the chunks arrive, and stops when you tell it to. Use it when the
+value you need sits near the top of a large page. It streams the response
+itself, so the body is not buffered first, and it keeps the request's
+redirects, retries, authentication, host limits, and `error_for_status()`.
+
+After each chunk that adds decoded bytes, Leyline calls `done(body, from)`:
+`body` is every decoded byte so far, and `from` is where the new bytes start.
+Return `true` to stop. The call returns a `PrefixRead`: the decoded prefix in
+`bytes`, and why the read stopped in `stopped_by`.
+
+| `StopReason` | Meaning |
+| --- | --- |
+| `PredicateMatched` | `done` returned `true`. A match inside the first `limit` bytes wins over the limit |
+| `LimitReached` | The prefix reached `limit` decoded bytes. The body may or may not continue; Leyline reads no further to find out |
+| `EndOfBody` | The body ended first |
+
+`LimitReached` and `EndOfBody` mean that `done` found no answer, not that the
+answer is "no". A zero `limit` reads nothing and returns `LimitReached`, and
+`done` is never called for an empty body.
 
 ```rust,no_run
+use leyline::StopReason;
+
 # async fn run() -> leyline::Result<()> {
 let session = leyline::Session::new();
 let marker = b"</head>";
-let resp = session.get("https://example.com/big").stream().await?;
-let head = resp
+let read = session
+    .get("https://example.com/big")
     .read_until(256 * 1024, |body, from| {
-        let start = from.saturating_sub(marker.len());
+        let start = from.saturating_sub(marker.len() - 1);
         body[start..].windows(marker.len()).any(|w| w == marker)
     })
     .await?;
-println!("{} decoded bytes", head.len());
+match read.stopped_by {
+    StopReason::PredicateMatched => println!("head is {} bytes", read.bytes.len()),
+    other => println!("no </head> found: {other:?}"),
+}
 # Ok(())
 # }
 ```
 
-Scan from `from` minus the marker length, as the example does: a marker can
-straddle two chunks, and a scan of the whole body on every chunk costs
-quadratic time.
+Scan from `from` minus the marker length plus one, as the example does: a
+marker can straddle two chunks, and a scan of the whole body on every chunk
+costs quadratic time. `examples/stock_monitor.rs` reports a product as in
+stock, out of stock, or unknown with the same pattern.
 
-Reaching `limit` is not an error, and the result does not say the body was
-longer; to enforce a size limit, use the decoded calls. An unknown or
-turned-off `Content-Encoding` is not decoded. Corrupt compressed data fails
-with `Kind::Decode`, and output over `max_body_size` with `Kind::Body`.
+The limit counts decoded bytes. The bytes received from the network differ:
+fewer for a compressed body, and more by whatever the socket had already
+received when the read stopped. Leyline does not stop at the exact network
+byte where the marker ends. When it stops early, it drops the rest of the
+body: over HTTP/1.1 it closes the connection, and over HTTP/2 and HTTP/3 it
+resets the stream and keeps the connection.
+
+`total` and `response_header` bound the request up to the response head.
+`read` bounds each wait for a chunk, and `body` the whole read. See
+[Retries and timeouts](retries-and-timeouts.md#the-timeouts).
+
+`Response::read_until` does the same on a response you already have and
+returns only the bytes. Send that request with `.stream()` first; without
+it, the body is already buffered, and stopping early saves nothing.
+
+Corrupt compressed data fails with `Kind::Decode`, a body cut short with
+`Kind::Io`, and an unknown or turned-off `Content-Encoding` is not decoded.
 
 ## Back-pressure
 

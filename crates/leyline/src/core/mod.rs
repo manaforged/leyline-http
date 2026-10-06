@@ -44,7 +44,9 @@ pub use proxy_pool::{ProxyHealth, ProxyPool};
 pub use request::{ContentEncoding, IntoParamPair, RequestBuilder};
 #[cfg(feature = "bench-internals")]
 pub(crate) use response::parse_links;
-pub use response::{HttpVersion, Link, RelayBody, Response, ResponseTiming, relay_headers};
+pub use response::{
+    HttpVersion, Link, PrefixRead, RelayBody, Response, ResponseTiming, StopReason, relay_headers,
+};
 pub use retry::{RetryPolicy, RetryTrigger, WaitFormat};
 #[cfg(feature = "tower")]
 pub use service::LeylineService;
@@ -52,7 +54,7 @@ pub use service::LeylineService;
 pub use session::WebSocketBuilder;
 pub use session::{Identity, ProtocolPolicy, Session, SessionBuilder, SessionIdentity};
 pub use tab::Tab;
-pub use transport::ResponseMode;
 pub(crate) use transport::header_map;
+pub use transport::{ErrorBudget, ResponseMode};
 #[cfg(feature = "websocket")]
 pub use websocket::{CloseFrame, WsConnection, WsMessage, WsSink, WsStream};
