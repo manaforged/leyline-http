@@ -23,9 +23,12 @@ The rest of this guide is the maintainers' workflow.
    `--full` adds formatting, workspace Clippy with warnings denied, the
    feature matrix, rustdoc with warnings denied, `cargo truesight check`, the
    mdbook build, the workspace test suite, the live fingerprint and smoke
-   suites, `cargo-deny`, and the benchmark build. The `semver`,
-   `external-types`, and `fuzz-replay` gates skip themselves when their tool
-   is not installed. `--only` takes a comma-separated list of gates.
+   suites, `cargo-deny`, the benchmark build, and the `subcrates` gate. The
+   `semver`, `external-types`, and `fuzz-replay` gates skip themselves when
+   their tool is not installed; in CI a skip is a failure. A run with a
+   skipped gate, `--only` runs included, ends with "Verify incomplete" and
+   exit code 2, and is never reported as passed. A failed gate exits 1.
+   `--only` takes a comma-separated list of gates.
 
    The vendored `leyline-quiche` crate is excluded from the Clippy, rustdoc,
    and test gates. The `leyline-bssl*` crates sit outside the workspace: the
