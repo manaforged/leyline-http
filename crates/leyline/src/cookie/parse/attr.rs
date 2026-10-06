@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::cookie::record::SameSite;
+use crate::cookie::record::{MAX_ATTRIBUTE_OCTETS, SameSite};
 
 use super::{CookieAttributes, parse_cookie_date};
 
@@ -8,6 +8,7 @@ pub(super) fn set(a: &mut CookieAttributes, name: &str, value: Option<&str>) {
     match (name.to_lowercase().as_str(), value) {
         ("secure", _) => a.secure = true,
         ("httponly", _) => a.http_only = true,
+        (_, Some(value)) if value.len() > MAX_ATTRIBUTE_OCTETS => {}
         (name, Some(value)) => set_valued(a, name, value),
         _ => {}
     }

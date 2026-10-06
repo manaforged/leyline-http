@@ -42,6 +42,9 @@ impl JarInner {
     }
 
     pub(super) fn insert_loaded(&mut self, cookie: Cookie) {
+        if !cookie.within_limits() {
+            return;
+        }
         let domain = cookie.domain.to_lowercase();
         let entries = self.cookies.entry(domain.clone()).or_default();
         let added = match entries.iter().position(|c| c.same_slot(&cookie)) {

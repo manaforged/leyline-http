@@ -113,6 +113,12 @@ The jar follows Chrome:
   redirect chain crosses sites.
 - A cookie lives at most 400 days. A later `Max-Age` or `Expires`, or an
   `Expires` past the range of the platform clock, is cut to 400 days.
+- A cookie whose name and value together pass 4096 octets is refused. An
+  attribute whose value passes 1024 octets is ignored, so an oversized
+  `Path` falls back to the default path, which comes from the request URL
+  and has no cap. A cookie whose stored domain passes 1024 octets is
+  refused. `extend_from` and loading a saved jar apply the same limits
+  and skip a cookie that fails them.
 - The limits are 180 cookies per exact domain and 3300 overall. Crossing a
   limit evicts the least recently accessed entries, 30 per domain or 300
   overall.
@@ -138,7 +144,7 @@ The file is a versioned object, `{ "version": 1, "cookies": [..] }`.
 
 - Saving writes every cookie that has not expired, session cookies included,
   as a browser that restores its last session does.
-- Loading skips expired cookies, keeps the newest of two cookies with the
+- Loading skips expired cookies and cookies past the size limits, keeps the newest of two cookies with the
   same name, path, and domain, applies the 180 and 3300 limits, and cuts a
   stored expiry to at most 400 days after the load.
 - Each cookie keeps its last-access time, so eviction order survives a

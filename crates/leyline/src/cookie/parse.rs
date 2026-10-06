@@ -1,6 +1,6 @@
 use std::time::{Duration, SystemTime};
 
-use crate::cookie::record::{Cookie, SameSite, capped_expiry};
+use crate::cookie::record::{Cookie, MAX_NAME_VALUE_OCTETS, SameSite, capped_expiry};
 use crate::util::epoch_plus;
 
 mod attr;
@@ -91,7 +91,11 @@ fn split_pair(header: &str) -> Option<(&str, &str, &str)> {
     let (name, value) = name_value.split_once('=')?;
     let (name, value) = (name.trim(), value.trim());
     let has_ctl = |s: &str| s.bytes().any(|b| b < 0x20 || b == 0x7F);
-    if name.is_empty() || has_ctl(name) || has_ctl(value) || name.len() + value.len() > 4096 {
+    if name.is_empty()
+        || has_ctl(name)
+        || has_ctl(value)
+        || name.len() + value.len() > MAX_NAME_VALUE_OCTETS
+    {
         return None;
     }
     Some((name, value, attrs))

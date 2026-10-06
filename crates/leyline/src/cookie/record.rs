@@ -5,6 +5,8 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::util::epoch_plus;
 
 const MAX_LIFETIME: Duration = Duration::from_secs(400 * 24 * 60 * 60);
+pub(crate) const MAX_NAME_VALUE_OCTETS: usize = 4096;
+pub(crate) const MAX_ATTRIBUTE_OCTETS: usize = 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -50,6 +52,11 @@ impl std::fmt::Debug for Cookie {
 }
 
 impl Cookie {
+    pub(crate) fn within_limits(&self) -> bool {
+        self.name.len() + self.value.len() <= MAX_NAME_VALUE_OCTETS
+            && self.domain.len() <= MAX_ATTRIBUTE_OCTETS
+    }
+
     pub fn is_expired(&self) -> bool {
         if let Some(expires) = self.expires {
             SystemTime::now() > expires

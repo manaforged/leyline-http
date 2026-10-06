@@ -72,6 +72,9 @@ version and publish as separate crates.
   without pausing kept its upload task running after the request was
   cancelled. The upload task now yields on an empty chunk and stops when
   the request is gone.
+- A cookie attribute value over 1024 octets is now ignored, as RFC 6265bis
+  requires, and the jar refuses cookies past the size limits from every
+  source, including `extend_from` and saved jars.
 - An HTTP/2 response that ended with trailers skipped the
   `Content-Length` check, so a short body arrived as a success. It now
   fails like a short body without trailers.
