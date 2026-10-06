@@ -10,6 +10,22 @@ version and publish as separate crates.
 
 ## Unreleased
 
+### Security
+
+- A saved TLS session restored into a session with different trust
+  settings could resume there, and a resumed handshake skips the
+  certificate check, so pins and custom roots did not apply to it. Each
+  saved TLS session is now bound to the trust its session loaded: the
+  pins, the contents of every root from `add_ca_der`, `add_ca_file`,
+  `SSL_CERT_FILE`, and `SSL_CERT_DIR`, and the contents of the client
+  certificate and key, hashed from the same bytes the TLS context loaded.
+  It resumes only in a session that loaded the same trust, and
+  `Session::fresh_pool` keeps the trust of the session it copies. Saved
+  state contains TLS session secrets; store it with the same protection
+  as credentials. A saved ticket for a proxied connection no longer holds
+  the proxy user name; it holds a hash of the proxy credentials, as the
+  accounts guide states.
+
 ### Added
 
 - `RequestBuilder::read_until(limit, done)` streams the response and returns

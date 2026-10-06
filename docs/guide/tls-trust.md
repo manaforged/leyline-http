@@ -64,6 +64,10 @@ session. Add a pin for each certificate you expect, including the next one
 before a rotation. To read the digest of a live certificate, hash the
 `peer_cert_der` field of `Response::tls()`.
 
+A saved TLS session resumes only in a session that loaded the same pins,
+roots, and client certificate, compared by content; any other session makes a
+full handshake.
+
 A pin failure is a `Kind::Tls` error, and `err.tls()` returns the `TlsError`.
 With `ProtocolPolicy::Http3` it is a `Kind::Http3` error with a message and
 no source, so `err.tls()` returns `None`.

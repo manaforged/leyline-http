@@ -11,7 +11,7 @@ use crate::profile::{BrowserProfile, TlsProfile};
 
 use crate::tls::error::TlsError;
 use crate::tls::keylog::install_from_env;
-use crate::tls::trust::{TlsTrustConfig, wire_configured_trust};
+use crate::tls::trust::{TlsTrustConfig, TrustIdentity, wire_configured_trust};
 
 mod phase;
 
@@ -30,12 +30,13 @@ pub(crate) fn build_ssl_context(
 ) -> Result<SslContextBuilder, TlsError> {
     let mut builder = SslContextBuilder::new(leyline_bssl::ssl::SslMethod::tls())
         .map_err(TlsError::from_stack)?;
-    apply_profile_with_trust(
+    let identity = apply_profile_with_trust(
         &mut builder,
         profile,
         min_version,
         &TlsTrustConfig::default(),
     )?;
+    drop(identity);
     Ok(builder)
 }
 
@@ -44,7 +45,7 @@ pub(crate) fn apply_profile_with_trust(
     profile: &BrowserProfile,
     min_version: TlsMinVersion,
     trust: &TlsTrustConfig,
-) -> Result<(), TlsError> {
+) -> Result<TrustIdentity, TlsError> {
     apply_tls_with_trust(builder, &profile.tls, min_version, trust)
 }
 
@@ -53,19 +54,19 @@ pub(crate) fn apply_tls_with_trust(
     tls: &TlsProfile,
     min_version: TlsMinVersion,
     trust: &TlsTrustConfig,
-) -> Result<(), TlsError> {
+) -> Result<TrustIdentity, TlsError> {
     phase::ciphers(builder, tls)?;
     phase::curves(builder, tls)?;
     phase::sigalgs(builder, tls)?;
     phase::extensions(builder, tls)?;
     phase::versions(builder, tls, min_version, trust.min_tls_version)?;
 
-    wire_configured_trust(builder, trust)?;
+    let identity = wire_configured_trust(builder, trust)?;
     builder.set_verify(SslVerifyMode::PEER);
 
     install_from_env(builder);
 
-    Ok(())
+    Ok(identity)
 }
 
 fn tls13_cipher_ids(ciphers: &[String]) -> Result<Vec<u16>, TlsError> {

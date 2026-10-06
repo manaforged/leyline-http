@@ -1,3 +1,4 @@
+use crate::bio::MemBioSlice;
 use crate::error::ErrorStack;
 use crate::ffi;
 use crate::stack::StackRef;
@@ -7,6 +8,7 @@ use crate::{cvt, cvt_p};
 use foreign_types::{ForeignType, ForeignTypeRef};
 use openssl_macros::corresponds;
 use std::mem::ManuallyDrop;
+use std::ptr;
 
 foreign_type_and_impl_send_sync! {
     type CType = ffi::X509_STORE;
@@ -35,6 +37,49 @@ impl X509StoreBuilderRef {
     pub fn add_cert(&mut self, cert: impl AsRef<X509Ref>) -> Result<(), ErrorStack> {
         let cert = cert.as_ref();
         unsafe { cvt(ffi::X509_STORE_add_cert(self.as_ptr(), cert.as_ptr())) }
+    }
+
+    #[corresponds(PEM_X509_INFO_read_bio)]
+    pub fn add_pem(&mut self, pem: &[u8]) -> Result<usize, ErrorStack> {
+        unsafe {
+            ffi::init();
+            let bio = MemBioSlice::new(pem)?;
+            let infos = cvt_p(ffi::PEM_X509_INFO_read_bio(
+                bio.as_ptr(),
+                ptr::null_mut(),
+                None,
+                ptr::null_mut(),
+            ))?;
+            let stack = infos.cast::<ffi::_STACK>();
+            let mut added = Ok(0);
+            for index in 0..ffi::sk_num(stack) {
+                let info = ffi::sk_value(stack, index).cast::<ffi::X509_INFO>();
+                added = added.and_then(|count| self.add_info(&*info).map(|more| count + more));
+            }
+            for index in 0..ffi::sk_num(stack) {
+                ffi::X509_INFO_free(ffi::sk_value(stack, index).cast());
+            }
+            ffi::sk_free(stack);
+            match added {
+                Ok(0) => Err(ErrorStack::get()),
+                other => other,
+            }
+        }
+    }
+
+    fn add_info(&mut self, info: &ffi::X509_INFO) -> Result<usize, ErrorStack> {
+        let mut count = 0;
+        if !info.x509.is_null() {
+            // SAFETY: `info.x509` is a live certificate owned by the X509_INFO stack, and the store takes its own reference.
+            cvt(unsafe { ffi::X509_STORE_add_cert(self.as_ptr(), info.x509) })?;
+            count += 1;
+        }
+        if !info.crl.is_null() {
+            // SAFETY: `info.crl` is a live CRL owned by the X509_INFO stack, and the store takes its own reference.
+            cvt(unsafe { ffi::X509_STORE_add_crl(self.as_ptr(), info.crl) })?;
+            count += 1;
+        }
+        Ok(count)
     }
 
     #[corresponds(X509_STORE_set_default_paths)]

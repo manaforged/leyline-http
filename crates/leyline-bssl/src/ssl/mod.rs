@@ -54,6 +54,7 @@ pub use self::error::{Error, ErrorCode, HandshakeError};
 mod async_callbacks;
 mod bio;
 mod callbacks;
+mod chain_pem;
 mod connector;
 mod ech;
 mod error;
