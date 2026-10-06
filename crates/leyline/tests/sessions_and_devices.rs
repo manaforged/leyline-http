@@ -55,6 +55,18 @@ async fn shutdown_stops_requests_in_flight_and_new_ones() {
     assert_eq!(clone.get(url).await.unwrap_err().kind(), Kind::Request);
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn the_test_server_reports_a_request_before_its_delayed_reply() {
+    let server = TestServer::http(|_| TestResponse::new(200).delay(Duration::from_secs(5)))
+        .await
+        .unwrap();
+    let url = server.url("/slow");
+    let pending = tokio::spawn(async move { Session::new().get(url).send().await });
+    let seen = tokio::time::timeout(Duration::from_secs(2), server.next_request()).await;
+    assert!(matches!(seen, Ok(Some(_))), "{seen:?}");
+    pending.abort();
+}
+
 #[tokio::test]
 async fn skip_blocks_returns_a_block_without_retrying() {
     let server = TestServer::http(queue(vec![

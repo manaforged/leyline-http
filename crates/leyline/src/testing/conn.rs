@@ -23,14 +23,14 @@ where
         let close_requested = request
             .header(CONNECTION)
             .is_some_and(|value| value.eq_ignore_ascii_case(CLOSE));
+        let head_only = request.method.eq_ignore_ascii_case("HEAD");
+        if !recorder.record(request.clone()) {
+            return;
+        }
         let Some(response) = respond(&handler, &request).await else {
             return;
         };
         let close = close_requested || response.closes();
-        let head_only = request.method.eq_ignore_ascii_case("HEAD");
-        if !recorder.record(request) {
-            return;
-        }
         if write_response(&mut stream, &response, head_only)
             .await
             .is_err()

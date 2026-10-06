@@ -136,7 +136,16 @@ impl Autosave {
     ) -> Self {
         let (control, commands) = mpsc::unbounded_channel();
         let label = schedule.label;
-        let task = tokio::spawn(run(target, changes, schedule, commands));
+        let guard = Guard {
+            target,
+            changes,
+            commands,
+            label,
+            dirty: false,
+            finished: false,
+            order: WriteOrder::default(),
+        };
+        let task = tokio::spawn(run(guard, schedule));
         Self {
             control,
             task,
@@ -171,21 +180,7 @@ pub(crate) fn stopped(label: &str) -> Error {
     Error::new(Kind::Io).with_message(format!("{label} autosave task stopped"))
 }
 
-async fn run<T: SaveTarget>(
-    target: T,
-    changes: watch::Receiver<u64>,
-    schedule: Schedule,
-    commands: mpsc::UnboundedReceiver<Command>,
-) {
-    let mut guard = Guard {
-        target,
-        changes,
-        commands,
-        label: schedule.label,
-        dirty: false,
-        finished: false,
-        order: WriteOrder::default(),
-    };
+async fn run<T: SaveTarget>(mut guard: Guard<T>, schedule: Schedule) {
     let mut watching = true;
     let mut due: Option<Instant> = None;
     let mut ticker = schedule.periodic.map(|period| {

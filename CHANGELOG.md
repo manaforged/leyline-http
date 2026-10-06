@@ -82,6 +82,12 @@ version and publish as separate crates.
   bytes sent a malformed request over HTTP/2 and HTTP/3. Every protocol
   now fails the request with a body error and sends nothing past the
   declared length.
+- `Jar::autosave` and `Device::autosave` lost the last change when the
+  runtime stopped before the autosave task first ran. The final save now
+  runs in that case too.
+- `TestServer::next_request` returned a request only after the
+  response's `delay`, just before the reply went out. It now returns the
+  request when it arrives, as documented.
 - `error_for_status` over HTTP/1.1 waited for a small error body with no
   error-body timeout, so a stalled 500 with a short `Content-Length` ran to
   the `total` timeout and returned `Kind::Timeout` without the status. The
