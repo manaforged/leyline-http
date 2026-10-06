@@ -247,13 +247,6 @@ pub(super) fn sweep_cancelled_streams(
     }
 }
 
-pub(super) fn deliver_stream_error(tx: &mpsc::Sender<std::io::Result<Bytes>>, err: std::io::Error) {
-    let tx = tx.clone();
-    tokio::spawn(async move {
-        drop(tx.send(Err(err)).await);
-    });
-}
-
 pub(super) fn fail_all(
     streams: &mut HashMap<u64, H3Stream>,
     pending: &mut VecDeque<H3Command>,

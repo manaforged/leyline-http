@@ -127,7 +127,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 wire_len: 0,
             })
             .await?;
-        self.writer.flush().await?;
         Ok(())
     }
 
@@ -146,12 +145,16 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     ) -> Result<(), H2Error> {
         while !chunk.is_empty() {
             let window = self.effective_send_window(stream_id);
-            if window == 0 {
+            if window == 0 || self.writer.congested() {
                 self.park_stream(stream_id, PendingSend { remaining: chunk });
                 return Ok(());
             }
             let max_frame = self.peer_settings.max_frame_size as usize;
-            let chunk_size = chunk.len().min(max_frame).min(window);
+            let chunk_size = chunk
+                .len()
+                .min(max_frame)
+                .min(window)
+                .min(self.writer.allowance());
             let piece = chunk.slice(0..chunk_size);
             chunk = chunk.slice(chunk_size..);
 
@@ -179,9 +182,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 .await?;
 
             self.note_upload_sent(stream_id, chunk_size);
-            if is_last {
-                self.writer.flush().await?;
-            }
         }
         Ok(())
     }
@@ -213,12 +213,16 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         let mut remaining = body;
         while !remaining.is_empty() {
             let window = self.effective_send_window(stream_id);
-            if window == 0 {
+            if window == 0 || self.writer.congested() {
                 self.park_stream(stream_id, PendingSend { remaining });
                 return Ok(());
             }
             let max_frame = self.peer_settings.max_frame_size as usize;
-            let chunk_size = remaining.len().min(max_frame).min(window);
+            let chunk_size = remaining
+                .len()
+                .min(max_frame)
+                .min(window)
+                .min(self.writer.allowance());
             let chunk = remaining.slice(0..chunk_size);
             remaining = remaining.slice(chunk_size..);
             let data_end_stream = remaining.is_empty();
@@ -255,7 +259,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             return Ok(());
         }
         let mut progress_count = self.buffered_pending.len();
-        while progress_count > 0 && !self.buffered_pending.is_empty() {
+        while progress_count > 0 && !self.buffered_pending.is_empty() && !self.writer.congested() {
             progress_count -= 1;
             let sid = match self.buffered_pending.pop_front() {
                 Some(s) => s,
@@ -284,20 +288,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 }
                 if let Err(e) = self.try_pump_streaming_body(sid).await {
                     self.fail_stream(sid, e);
-                } else {
-                    self.writer.flush().await?;
                 }
                 continue;
             }
 
-            let result = self.write_body_or_park(sid, pending.remaining).await;
-            match result {
-                Ok(()) => {
-                    self.writer.flush().await?;
-                }
-                Err(e) => {
-                    self.fail_stream(sid, e);
-                }
+            if let Err(e) = self.write_body_or_park(sid, pending.remaining).await {
+                self.fail_stream(sid, e);
             }
         }
         Ok(())

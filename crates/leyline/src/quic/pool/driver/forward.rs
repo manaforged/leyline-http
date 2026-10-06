@@ -34,7 +34,7 @@ pub(in crate::quic::pool) fn forward_stream_body(
     }
 
     match pull_body(h3, conn, stream_id, stream, scratch, &tx) {
-        Pull::Drained => finish_stream(conn, stream_id, stream, &tx),
+        Pull::Drained => finish_stream(conn, stream_id, stream),
         Pull::Stalled => false,
         Pull::Closed => true,
     }
@@ -91,19 +91,14 @@ fn pull_body(
             }
             Err(e) => {
                 let message = on_body_read_error(h3, conn, stream_id, stream, e);
-                deliver_stream_error(tx, std::io::Error::other(message));
+                stream.deliver_terminal(std::io::Error::other(message));
                 return Pull::Closed;
             }
         }
     }
 }
 
-fn finish_stream(
-    conn: &mut quiche::Connection,
-    stream_id: u64,
-    stream: &mut H3Stream,
-    tx: &mpsc::Sender<std::io::Result<Bytes>>,
-) -> bool {
+fn finish_stream(conn: &mut quiche::Connection, stream_id: u64, stream: &mut H3Stream) -> bool {
     let finished = stream.stalled.is_none()
         && (stream.peer_finished
             || (conn.stream_finished(stream_id) && !conn.stream_readable(stream_id)));
@@ -117,9 +112,10 @@ fn finish_stream(
         quiche::h3::WireErrorCode::RequestCancelled,
     );
     if stream.length_mismatch() {
-        deliver_stream_error(tx, std::io::Error::other(LENGTH_MISMATCH));
+        stream.deliver_terminal(std::io::Error::other(LENGTH_MISMATCH));
     }
     stream.stream_tx = None;
+    stream.terminal = None;
     true
 }
 

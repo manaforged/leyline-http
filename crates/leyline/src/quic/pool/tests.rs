@@ -1,3 +1,4 @@
+use super::driver::{cancelled_stream_ids, command_is_cancelled, fail_all, stream_is_cancelled};
 use super::*;
 
 fn headers(fields: &[(&str, &str)]) -> Vec<(String, String)> {

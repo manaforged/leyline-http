@@ -129,6 +129,7 @@ where
         ping_seq: 0,
         pings: VecDeque::new(),
         stalled: 0,
+        output: output::OutputState::default(),
     };
 
     drop(tokio::spawn(driver.run()));

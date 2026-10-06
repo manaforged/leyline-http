@@ -130,7 +130,7 @@ impl H3Client {
         let (stream_body_tx, stream_body_rx) = if mode == ResponseMode::Buffered {
             (None, None)
         } else {
-            let (tx, rx) = mpsc::channel(STREAM_RESP_CAPACITY);
+            let (tx, rx) = mpsc::channel(STREAM_RESP_CAPACITY + 1);
             (Some(tx), Some(rx))
         };
 
@@ -178,6 +178,7 @@ struct H3Stream {
     trailers: Vec<(String, String)>,
     body: Vec<u8>,
     stream_tx: Option<mpsc::Sender<std::io::Result<Bytes>>>,
+    terminal: Option<mpsc::OwnedPermit<std::io::Result<Bytes>>>,
     mode: ResponseMode,
     head_sent: bool,
     stalled: Option<Bytes>,
@@ -205,7 +206,6 @@ struct H3Driver {
 }
 
 mod driver;
-use driver::*;
 mod open;
 pub(crate) use open::open_fresh_h3;
 mod response;

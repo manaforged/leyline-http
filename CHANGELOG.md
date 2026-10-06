@@ -48,6 +48,33 @@ version and publish as separate crates.
   shutdown, including a preconnect that would do nothing, and a WebSocket
   handshake takes a host-limit slot while it runs. An established
   WebSocket connection stays open.
+- An HTTP/2 connection whose peer stopped reading blocked the whole
+  connection inside a socket write: no response, reset, ping, or shutdown
+  got through. The connection now keeps reading and cancelling while
+  output waits, stops taking new work and reading new frames while its
+  write buffer is full, and parks an upload instead of queuing it past
+  that budget. After a second without write progress it takes no new
+  requests, so the pool opens a fresh connection and queued requests are
+  refused unsent and retried there; it closes once no stream needs it.
+- An HTTP/3 connection waiting for stream credit moved every queued
+  request into an unbounded queue, and each failed stream started a task
+  that could wait forever on a full body channel. Queued requests now stay
+  in the bounded request channel, and a failed stream reports its error
+  through a reserved slot.
+- An HTTP/1.1 upload did not read the response until the whole request
+  body was sent, so a server that answered 413 early and stopped reading
+  left the request hanging until its timeout. Leyline now reads the
+  response while it uploads, stops the upload at a final response or when
+  the server closes its side, and closes that connection. A body that
+  yields many chunks without pausing no longer keeps the request from
+  seeing the response, its timeout, or shutdown.
+- A streamed HTTP/2 or HTTP/3 upload whose body yielded empty chunks
+  without pausing kept its upload task running after the request was
+  cancelled. The upload task now yields on an empty chunk and stops when
+  the request is gone.
+- An HTTP/2 response that ended with trailers skipped the
+  `Content-Length` check, so a short body arrived as a success. It now
+  fails like a short body without trailers.
 - A `Body::stream` with a declared length that produced more or fewer
   bytes sent a malformed request over HTTP/2 and HTTP/3. Every protocol
   now fails the request with a body error and sends nothing past the
@@ -67,6 +94,13 @@ version and publish as separate crates.
 
 ### Changed
 
+- An HTTP/2 request whose header list size (RFC 7541 §4.1: name, value,
+  and 32 octets per field) is larger than the server's
+  `SETTINGS_MAX_HEADER_LIST_SIZE`, or than 256 KiB when the server sets
+  none, now fails before any of it is encoded or sent. Buffered
+  HTTP/2 uploads use DATA frames no larger than the free space in the
+  connection's 64 KiB output budget, even when the server allows larger
+  frames.
 - The timeout guide now states that `read` and `body` apply to a
   `.stream()` response and to a body the transport delivers in pieces; a
   body the transport buffers is bounded by `response_header` and `total`.

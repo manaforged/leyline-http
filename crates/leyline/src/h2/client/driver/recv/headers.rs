@@ -76,16 +76,13 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         if first {
             self.respond(&h, decoded).await
         } else {
-            self.on_trailers(&h, decoded)
+            self.on_trailers(&h, decoded).await
         }
     }
 
     async fn reassemble(&mut self, h: &HeadersFrame) -> Result<Bytes, H2Error> {
         if h.end_headers {
             return Ok(h.fragment.clone());
-        }
-        if self.writer.pending() > 0 {
-            self.writer.flush().await?;
         }
         let max_header_block = self.config.max_header_block_bytes;
         let reassembly_timeout = self.config.header_block_reassembly_timeout;
@@ -134,7 +131,19 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         remaining: std::time::Duration,
         limit: std::time::Duration,
     ) -> Result<Frame, H2Error> {
-        let next = within(Some(remaining), self.reader.next())
+        let reader = &mut self.reader;
+        let writer = &mut self.writer;
+        let output = &mut self.output;
+        let read_while_writing = async {
+            loop {
+                tokio::select! {
+                    biased;
+                    written = writer.write_some(), if writer.has_output() => output.wrote(written)?,
+                    frame = reader.next(), if !writer.saturated() => return frame,
+                }
+            }
+        };
+        let next = within(Some(remaining), read_while_writing)
             .await
             .map_err(|_| H2Error::Connection {
                 code: ErrorCode::ProtocolError,
@@ -198,7 +207,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         Ok(())
     }
 
-    fn on_trailers(
+    async fn on_trailers(
         &mut self,
         h: &HeadersFrame,
         decoded: Vec<(Bytes, Bytes)>,
@@ -230,7 +239,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             ));
         }
         actor.trailers = Some(th);
-        self.complete_stream(stream_id);
-        Ok(())
+        self.finish_remote(stream_id).await
     }
 }

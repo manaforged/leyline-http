@@ -78,3 +78,54 @@ async fn a_response_that_ends_before_the_upload_returns_the_stream_credit() {
     assert_eq!(read, LENGTH);
     assert_credit_returned(&session, &url).await;
 }
+
+struct Unpolled(std::sync::Arc<std::sync::atomic::AtomicBool>);
+
+impl futures_util::Stream for Unpolled {
+    type Item = std::io::Result<Bytes>;
+
+    fn poll_next(
+        self: std::pin::Pin<&mut Self>,
+        _: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        std::task::Poll::Pending
+    }
+}
+
+impl Drop for Unpolled {
+    fn drop(&mut self) {
+        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_request_waiting_past_the_full_queue_still_owns_its_body() {
+    let server = h3_server(vec![Reply::Hold(LENGTH), Reply::Body(LENGTH)], ONE_STREAM).await;
+    let session = server.session().build().unwrap();
+    let url = server.url();
+    let held = session.get(&url).stream().await.unwrap();
+    let queued: Vec<_> = (0..1100)
+        .map(|_| {
+            let session = session.clone();
+            let url = url.clone();
+            tokio::spawn(async move { session.get(url).await })
+        })
+        .collect();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let dropped = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let late = tokio::spawn({
+        let session = session.clone();
+        let url = url.clone();
+        let body = Body::stream(Unpolled(std::sync::Arc::clone(&dropped)), None);
+        async move { session.post(url).body(body).await }
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    late.abort();
+    drop(late.await);
+    assert!(
+        dropped.load(std::sync::atomic::Ordering::SeqCst),
+        "the connection took a request it had no stream for"
+    );
+    queued.iter().for_each(tokio::task::JoinHandle::abort);
+    drop(held);
+}

@@ -45,9 +45,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         let mut flush_tick = tokio::time::interval(std::time::Duration::from_millis(1));
         flush_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
-            if self.shutdown_started && self.streams.is_empty() {
-                let _ = self.writer.write_goaway(0, ErrorCode::NoError).await;
-                let _ = self.writer.flush().await;
+            if self.shutdown_started && self.streams.is_empty() && self.goaway_drained().await? {
                 return Ok(());
             }
             if self.read_buffered_frames().await?.is_break() {
@@ -66,9 +64,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         self.take_queued_body_chunks().await?;
         self.drain_pending().await?;
         self.try_drain_pending().await?;
-        if self.writer.pending() > 0 && !self.reader.buffered() {
-            self.writer.flush().await?;
-        }
         Ok(())
     }
 
@@ -77,30 +72,15 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         self.try_drain_pending().await?;
         if tick_fired {
             self.sweep_cancelled_streams().await?;
+            self.check_write_stall()?;
         }
         Ok(())
     }
 
-    async fn wait_event(
+    pub(super) async fn on_command_received(
         &mut self,
-        sweep_tick: &mut tokio::time::Interval,
-        flush_tick: &mut tokio::time::Interval,
-    ) -> Result<Option<bool>, H2Error> {
-        tokio::select! {
-            biased;
-            frame = self.reader.next() => return Ok(self.on_read(frame).await?.is_continue().then_some(false)),
-            maybe_cmd = self.command_rx.recv(), if self.accepting_commands() => {
-                self.on_command_received(maybe_cmd).await?;
-            }
-            Some(chunk) = self.body_chunk_rx.recv() => self.on_body_chunk(chunk).await?,
-            Some(ack_tx) = self.ping_rx.recv() => self.on_command(DriverCommand::Ping { ack_tx }).await?,
-            _ = sweep_tick.tick() => return Ok(Some(true)),
-            _ = flush_tick.tick(), if self.has_stalled() => self.flush_stalled().await?,
-        }
-        Ok(Some(false))
-    }
-
-    async fn on_command_received(&mut self, cmd: Option<DriverCommand>) -> Result<(), H2Error> {
+        cmd: Option<DriverCommand>,
+    ) -> Result<(), H2Error> {
         match cmd {
             Some(cmd) => self.on_command(cmd).await,
             None => {
@@ -112,7 +92,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
 
     async fn read_buffered_frames(&mut self) -> Result<ControlFlow<()>, H2Error> {
         for _ in 0..128 {
-            if !self.reader.buffered() {
+            if !self.reader.buffered() || self.writer.saturated() {
                 break;
             }
             let frame = self.reader.next().await;
@@ -123,7 +103,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         Ok(ControlFlow::Continue(()))
     }
 
-    async fn on_read(
+    pub(super) async fn on_read(
         &mut self,
         frame: Result<Option<Frame>, H2Error>,
     ) -> Result<ControlFlow<()>, H2Error> {
@@ -143,6 +123,9 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
 
     async fn take_queued_body_chunks(&mut self) -> Result<(), H2Error> {
         for _ in 0..self.body_chunk_rx.len() {
+            if self.writer.congested() {
+                break;
+            }
             let Ok(chunk) = self.body_chunk_rx.try_recv() else {
                 break;
             };
@@ -151,13 +134,15 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         Ok(())
     }
 
-    fn accepting_commands(&self) -> bool {
-        !self.shutdown_started && self.pending.is_empty()
+    pub(super) fn accepting_commands(&self) -> bool {
+        !self.shutdown_started
+            && self.pending.is_empty()
+            && (!self.writer.congested() || self.output.stalled())
     }
 
     async fn take_queued_commands(&mut self) -> Result<(), H2Error> {
         for _ in 0..self.command_rx.len() {
-            if !self.pending.is_empty() {
+            if !self.pending.is_empty() || self.writer.congested() {
                 break;
             }
             let Ok(next) = self.command_rx.try_recv() else {
@@ -189,7 +174,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 stream_id = sid,
                 "caller cancelled — RST_STREAM(CANCEL) to release the slot"
             );
-            let _ = self.writer.write_rst_stream(sid, ErrorCode::Cancel).await;
+            self.writer.write_rst_stream(sid, ErrorCode::Cancel).await?;
             let err = H2Error::Stream {
                 stream_id: sid,
                 code: ErrorCode::Cancel,
@@ -200,7 +185,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     }
 
     pub(super) fn reject_after_goaway(&self) -> Result<(), H2Error> {
-        if self.peer_goaway_last_stream.is_some() {
+        if self.peer_goaway_last_stream.is_some() || self.output.stalled() {
             return Err(H2Error::Stream {
                 stream_id: 0,
                 code: ErrorCode::RefusedStream,
@@ -268,11 +253,9 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             .get(stream_id)
             .is_some_and(StreamActor::length_mismatch)
         {
-            drop(
-                self.writer
-                    .write_rst_stream(stream_id, ErrorCode::ProtocolError)
-                    .await,
-            );
+            self.writer
+                .write_rst_stream(stream_id, ErrorCode::ProtocolError)
+                .await?;
             self.fail_stream(
                 stream_id,
                 H2Error::Stream {
@@ -287,10 +270,9 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             .get(stream_id)
             .is_some_and(|a| !a.state.is_closed());
         if local_open {
-            let _ = self
-                .writer
+            self.writer
                 .write_rst_stream(stream_id, ErrorCode::NoError)
-                .await;
+                .await?;
         }
         if let Some(actor) = self.streams.get_mut(stream_id)
             && !actor.stalled.is_empty()

@@ -115,7 +115,7 @@ impl H3Loop {
     async fn wait(&mut self, backpressured: bool) -> ControlFlow<()> {
         let timeout = self.wake_timeout(backpressured);
         tokio::select! {
-            cmd = self.command_rx.recv(), if !self.commands_closed => self.on_command(cmd),
+            cmd = self.command_rx.recv(), if self.accepting_commands() => self.on_command(cmd),
             chunk = self.body_chunk_rx.recv() => self.on_body_chunk(chunk),
             recv = self.socket.recv(&mut self.buf) => {
                 if let Err(reason) = self.on_datagram(recv) {
@@ -147,12 +147,16 @@ impl H3Loop {
         self.commands_closed && self.streams.is_empty() && self.pending.is_empty()
     }
 
+    fn accepting_commands(&self) -> bool {
+        !self.commands_closed && (self.draining || self.pending.is_empty())
+    }
+
     fn wake_timeout(&self, backpressured: bool) -> Duration {
         let mut timeout = self.conn.timeout().unwrap_or(Duration::from_secs(5));
         if backpressured {
             timeout = timeout.min(STREAM_PUMP_INTERVAL);
         }
-        if !self.streams.is_empty() {
+        if !self.streams.is_empty() || !self.pending.is_empty() {
             timeout = timeout.min(CANCEL_SWEEP_INTERVAL);
         }
         timeout

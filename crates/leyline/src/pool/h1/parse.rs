@@ -1,11 +1,14 @@
 use super::*;
 use crate::core::session::decompress::BodyLimit;
 
-pub(super) async fn read_h1_head<S>(stream: &mut S, method: &str) -> Result<H1Head, H1PooledError>
+pub(super) async fn read_h1_head<S>(
+    stream: &mut S,
+    method: &str,
+    mut buf: Vec<u8>,
+) -> Result<H1Head, H1PooledError>
 where
     S: AsyncRead + Unpin + ?Sized,
 {
-    let mut buf = Vec::with_capacity(4096);
     let mut informational = 0usize;
     let mut head_bytes = 0usize;
     loop {
@@ -58,19 +61,6 @@ where
             initial_body: buf,
         });
     }
-}
-
-pub(super) async fn read_h1_response<S>(
-    stream: &mut S,
-    method: &str,
-    limit: usize,
-) -> Result<(H1Head, Vec<u8>, bool), H1PooledError>
-where
-    S: AsyncRead + Unpin + ?Sized,
-{
-    let mut head = read_h1_head(stream, method).await?;
-    let (body, excess) = read_h1_body(stream, &mut head, limit).await?;
-    Ok((head, body, excess))
 }
 
 pub(super) async fn read_h1_body<S>(
