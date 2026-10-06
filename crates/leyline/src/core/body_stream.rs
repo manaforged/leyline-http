@@ -23,7 +23,6 @@ pub struct BodyStream {
     decoded: Option<Box<Decoded>>,
     watch: Option<BodyWatch>,
     shutdown: Option<Pin<Box<WaitForCancellationFutureOwned>>>,
-    shut: bool,
     ended: bool,
     pass: Option<HostPass>,
 }
@@ -75,7 +74,6 @@ impl BodyStream {
             decoded: None,
             watch: None,
             shutdown: None,
-            shut: false,
             ended: false,
             pass: None,
         }
@@ -122,9 +120,6 @@ impl BodyStream {
             return Poll::Pending;
         };
         ready!(sleep.as_mut().poll(cx));
-        self.body_deadline = None;
-        self.ended = true;
-        self.pass = None;
         Poll::Ready(timed_out(
             "body timeout: response body not complete within the configured body timeout",
         ))
@@ -139,15 +134,34 @@ impl BodyStream {
     }
 
     fn poll_shutdown(&mut self, cx: &mut Context<'_>) -> bool {
-        if !self.shut
-            && let Some(wait) = self.shutdown.as_mut()
-            && wait.as_mut().poll(cx).is_ready()
-        {
-            self.shutdown = None;
-            self.shut = true;
-            self.pass = None;
+        self.shutdown
+            .as_mut()
+            .is_some_and(|wait| wait.as_mut().poll(cx).is_ready())
+    }
+
+    fn finish(&mut self, item: Option<&std::io::Result<Bytes>>) {
+        if self.ended {
+            return;
         }
-        self.shut
+        self.ended = true;
+        self.rx.close();
+        let (_, closed) = mpsc::channel(1);
+        drop(std::mem::replace(&mut self.rx, closed));
+        self.decoded = None;
+        self.idle = None;
+        self.body_limit = None;
+        self.body_deadline = None;
+        self.shutdown = None;
+        self.pass = None;
+        if let Some(mut watch) = self.watch.take() {
+            watch.observe(item);
+        }
+    }
+
+    fn end_with(&mut self, err: std::io::Error) -> Poll<Option<std::io::Result<Bytes>>> {
+        let item = Some(Err(err));
+        self.finish(item.as_ref());
+        Poll::Ready(item)
     }
 
     pub(crate) fn watch_end(&mut self) {
@@ -194,24 +208,23 @@ impl Stream for BodyStream {
             return Poll::Ready(None);
         }
         if this.poll_shutdown(cx) {
-            this.ended = true;
-            return Poll::Ready(Some(Err(std::io::Error::other(
-                crate::core::error::Error::shut_down(),
-            ))));
+            return this.end_with(std::io::Error::other(crate::core::error::Error::shut_down()));
         }
         if let Poll::Ready(err) = this.poll_body_deadline(cx) {
-            return Poll::Ready(Some(Err(err)));
+            return this.end_with(err);
         }
         let polled = match this.decoded.as_mut() {
             Some(decoded) => decoded.poll(cx),
             None => this.poll_raw(cx),
         };
-        if let (Poll::Ready(item), Some(watch)) = (&polled, this.watch.as_mut()) {
-            watch.observe(item.as_ref());
-        }
-        if matches!(polled, Poll::Ready(None | Some(Err(_)))) {
-            this.pass = None;
-            this.ended = true;
+        match &polled {
+            Poll::Ready(item @ Some(Ok(_))) => {
+                if let Some(watch) = this.watch.as_mut() {
+                    watch.observe(item.as_ref());
+                }
+            }
+            Poll::Ready(item) => this.finish(item.as_ref()),
+            Poll::Pending => {}
         }
         polled
     }

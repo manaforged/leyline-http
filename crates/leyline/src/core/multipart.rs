@@ -64,15 +64,13 @@ impl Part {
         let stream = tokio::fs::File::open(path)
             .map_ok(tokio_util::io::ReaderStream::new)
             .try_flatten_stream();
-        let mut part = Part::stream(stream).filename(filename);
-        if let BodyKind::Stream {
-            ref mut length_hint,
-            ..
-        } = part.body.0
-        {
-            *length_hint = Some(metadata.len());
-        }
-        Ok(part)
+        Ok(Self {
+            name: String::new(),
+            body: Body::stream(stream, Some(metadata.len())),
+            filename: Some(filename),
+            mime: None,
+            extra_headers: Vec::new(),
+        })
     }
 
     pub fn filename(mut self, name: impl Into<String>) -> Self {

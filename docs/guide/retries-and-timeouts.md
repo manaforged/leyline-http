@@ -250,8 +250,8 @@ ALPN needs no second send. See
 | `total` | 300 s | One `send`: every redirect, retry, backoff sleep, and buffered body read. For a `.stream()` response it ends at the response head. Expiry gives `Kind::Timeout` |
 | `connect` | 10 s | One new connection: DNS, TCP connect, proxy negotiation, and TLS, or on HTTP/3 the DNS lookup, UDP setup, and QUIC handshake. Each new connection gets a full window, and `total` bounds the sum. Pooled reuse is not covered |
 | `response_header` | none | From dispatch to the transport response, per redirect, connection setup included. On a buffered response the body arrives inside this window |
-| `read` | none | The longest gap between two body chunks of a `.stream()` response, or of a buffered body that arrives in pieces |
-| `body` | none | The whole body, streamed or buffered, counted from the first read of the body |
+| `read` | none | The longest gap between two body chunks of a `.stream()` response, or of a body that the transport delivers in pieces. It does not apply to a body that the transport buffers; `response_header` and `total` bound that body |
+| `body` | none | The whole body of a `.stream()` response, or of a body that the transport delivers in pieces, counted from the first read of the body. It does not apply to a body that the transport buffers; `response_header` and `total` bound that body |
 | `error_body` | 10 s | The body that `RequestBuilder::error_for_status()` keeps in a status error. `total` also bounds it. See [Responses](responses.md#turn-a-status-into-an-error) |
 
 ```rust,no_run

@@ -310,7 +310,12 @@ let no_follow = session.with_redirect(leyline::RedirectPolicy::none());
 from it. Requests in flight and new requests fail with `Kind::Request` and the
 message "session shut down", and a streamed body fails on its next read.
 `Error::is_shut_down()` is `true` for this error, and `Session::is_shut_down()`
-is `true` after the call. Shutdown does not close the pooled connections.
+is `true` after the call.
+
+WebSocket handshakes and `Session::preconnect` follow the same rule: a call
+after shutdown fails with the shut-down error before it sends any bytes, and a
+call in flight ends with that error. An established `WsConnection` stays open
+until the caller closes it. Shutdown does not close idle pooled connections.
 
 ```rust,no_run
 use leyline::Kind;

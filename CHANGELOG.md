@@ -39,6 +39,19 @@ version and publish as separate crates.
 
 ### Fixed
 
+- A `.stream()` body that failed on a timeout, a decode error, or shutdown
+  kept its connection and, for a decoded body, its host-limit slot until
+  the caller dropped the stream. The failed stream now releases both at
+  once, and the trace reports the real outcome instead of `Dropped`.
+- `WebSocketBuilder::connect` and `Session::preconnect` ignored
+  `Session::shutdown()`. Both now fail with the shut-down error after
+  shutdown, including a preconnect that would do nothing, and a WebSocket
+  handshake takes a host-limit slot while it runs. An established
+  WebSocket connection stays open.
+- A `Body::stream` with a declared length that produced more or fewer
+  bytes sent a malformed request over HTTP/2 and HTTP/3. Every protocol
+  now fails the request with a body error and sends nothing past the
+  declared length.
 - `error_for_status` over HTTP/1.1 waited for a small error body with no
   error-body timeout, so a stalled 500 with a short `Content-Length` ran to
   the `total` timeout and returned `Kind::Timeout` without the status. The
@@ -54,6 +67,14 @@ version and publish as separate crates.
 
 ### Changed
 
+- The timeout guide now states that `read` and `body` apply to a
+  `.stream()` response and to a body the transport delivers in pieces; a
+  body the transport buffers is bounded by `response_header` and `total`.
+- `Response::download_to` commits on a blocking thread after the body is
+  written and synced: a future dropped before the commit starts leaves the
+  target unchanged, and a commit that has started finishes. A
+  directory-sync failure after the rename says that the target was
+  already replaced.
 - Over HTTP/1.1, a `.stream()` body dropped before its end closes the
   connection. Leyline drains the rest only for `error_for_status` error
   bodies, up to `max_error_body` bytes.

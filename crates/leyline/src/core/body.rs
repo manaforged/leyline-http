@@ -51,6 +51,59 @@ impl Stream for Body {
     }
 }
 
+const EXCEEDED_DECLARED: &str = "streaming body exceeded declared content-length";
+const ENDED_BEFORE_DECLARED: &str = "streaming body ended before declared content-length";
+
+struct Declared {
+    inner: BoxedStream,
+    declared: u64,
+    sent: u64,
+    done: bool,
+}
+
+impl Declared {
+    fn fail(&mut self, message: String) -> Poll<Option<io::Result<Bytes>>> {
+        self.done = true;
+        Poll::Ready(Some(Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            message,
+        ))))
+    }
+}
+
+impl Stream for Declared {
+    type Item = io::Result<Bytes>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if self.done {
+            return Poll::Ready(None);
+        }
+        match self.inner.as_mut().poll_next(cx) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(Some(Ok(chunk))) => {
+                let sent = self.sent.saturating_add(chunk.len() as u64);
+                if sent > self.declared {
+                    return self.fail(EXCEEDED_DECLARED.to_owned());
+                }
+                self.sent = sent;
+                Poll::Ready(Some(Ok(chunk)))
+            }
+            Poll::Ready(Some(Err(err))) => {
+                self.done = true;
+                Poll::Ready(Some(Err(err)))
+            }
+            Poll::Ready(None) if self.sent < self.declared => {
+                let message = format!("{ENDED_BEFORE_DECLARED} ({}/{})", self.sent, self.declared);
+                self.fail(message)
+            }
+            Poll::Ready(None) => {
+                self.done = true;
+                Poll::Ready(None)
+            }
+        }
+    }
+}
+
 impl Body {
     pub(crate) fn bytes(bytes: Bytes) -> Self {
         Body(BodyKind::Bytes(bytes))
@@ -60,8 +113,17 @@ impl Body {
     where
         S: Stream<Item = io::Result<Bytes>> + Send + 'static,
     {
+        let stream: BoxedStream = match length {
+            Some(declared) => Box::pin(Declared {
+                inner: Box::pin(stream),
+                declared,
+                sent: 0,
+                done: false,
+            }),
+            None => Box::pin(stream),
+        };
         Body(BodyKind::Stream {
-            stream: Box::pin(stream),
+            stream,
             length_hint: length,
         })
     }
