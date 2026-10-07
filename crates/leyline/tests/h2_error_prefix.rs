@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use leyline::BrowserProfile;
 use leyline::h2::frame::FrameType;
-use leyline::h2::{H2Client, H2Config, RequestBody, ResponseBody, ResponseMode};
+use leyline::h2::{ErrorBudget, H2Client, H2Config, RequestBody, ResponseBody, ResponseMode};
 use support::{
     get_head, read_frame, read_preface, write_data, write_raw_headers, write_server_settings,
     write_settings_ack,
@@ -52,7 +52,7 @@ async fn an_error_prefix_success_is_buffered_with_its_trailers() {
         handle.send_shared(
             Arc::new(get_head("/")),
             RequestBody::None,
-            ResponseMode::ErrorPrefix,
+            ResponseMode::ErrorPrefix(ErrorBudget::new(Duration::from_secs(5), 64 * 1024)),
         ),
     )
     .await
@@ -86,7 +86,7 @@ async fn an_error_prefix_error_streams_before_the_body_ends() {
         handle.send_shared(
             Arc::new(get_head("/")),
             RequestBody::None,
-            ResponseMode::ErrorPrefix,
+            ResponseMode::ErrorPrefix(ErrorBudget::new(Duration::from_secs(5), 64 * 1024)),
         ),
     )
     .await

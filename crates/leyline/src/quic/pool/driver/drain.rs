@@ -195,6 +195,7 @@ impl Drain<'_> {
             && let Some((headers, body)) = stream.retry.take()
             && let Some(resp_tx) = stream.resp_tx.take()
         {
+            stream.terminal = None;
             let cmd = H3Command::Request {
                 headers,
                 body,

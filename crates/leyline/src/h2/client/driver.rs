@@ -22,7 +22,9 @@ use super::types::{H2ResponseEx, ResponseBody};
 
 mod bootstrap;
 mod command;
+mod event;
 mod lifecycle;
+mod output;
 mod protocol;
 mod recv;
 mod send;
@@ -312,6 +314,7 @@ struct Driver<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> {
     body_chunk_tx: mpsc::Sender<BodyChunkIn>,
     body_chunk_rx: mpsc::Receiver<BodyChunkIn>,
     stalled: usize,
+    output: output::OutputState,
     ping_seq: u64,
     pings: VecDeque<([u8; 8], oneshot::Sender<()>)>,
 }

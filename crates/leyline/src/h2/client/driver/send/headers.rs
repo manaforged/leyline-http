@@ -1,18 +1,52 @@
 use bytes::{Bytes, BytesMut};
 use tokio::io::{AsyncRead, AsyncWrite};
 
+use crate::h2::connection::{HeaderPair, encode_request_pseudos};
 use crate::h2::error::H2Error;
+
+const HPACK_ENTRY_OVERHEAD: usize = 32;
+const OUTBOUND_HEADER_LIST: usize = crate::core::DEFAULT_MAX_HEADER_LIST_BYTES;
 
 use super::*;
 
 impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
+    pub(in crate::h2::client::driver) fn check_header_list(
+        &self,
+        pseudo: &[(&str, &str)],
+        headers: &[HeaderPair],
+    ) -> Result<(), H2Error> {
+        let pseudo_size: usize = pseudo
+            .iter()
+            .map(|(name, value)| name.len() + value.len() + HPACK_ENTRY_OVERHEAD)
+            .sum();
+        let header_size: usize = headers
+            .iter()
+            .map(|(name, value)| name.as_ref().len() + value.as_ref().len() + HPACK_ENTRY_OVERHEAD)
+            .sum();
+        let size = pseudo_size + header_size;
+        let limit = self
+            .peer_settings
+            .max_header_list_size
+            .map_or(OUTBOUND_HEADER_LIST, |peer| {
+                usize::try_from(peer)
+                    .map_or(OUTBOUND_HEADER_LIST, |peer| peer.min(OUTBOUND_HEADER_LIST))
+            });
+        if size > limit {
+            return Err(H2Error::Hpack(format!(
+                "request header list of {size} bytes exceeds the peer's header list limit ({limit})"
+            )));
+        }
+        Ok(())
+    }
+
     pub(in crate::h2::client::driver) async fn write_headers_block(
         &mut self,
         stream_id: u32,
         end_stream: bool,
-        fragment: Vec<u8>,
+        (pseudo, headers): (&[(&str, &str)], &[HeaderPair]),
         with_priority: bool,
     ) -> Result<(), H2Error> {
+        let fragment = encode_request_pseudos(&mut self.encoder, pseudo, headers);
         let max_frame = self.peer_settings.max_frame_size as usize;
         let priority = if with_priority {
             self.config.default_priority.map(|p| StreamDependency {

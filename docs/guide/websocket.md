@@ -54,6 +54,14 @@ response does not update the jar.
 A `wss://` URL follows the proxy rules of an `https://` URL, including
 environment discovery and `NO_PROXY`. See [Proxies](proxies.md).
 
+## Shutdown and host limits
+
+The handshake takes a host-limit slot for its origin, the same slot an
+`https://` request to that host takes, and releases it when the handshake
+completes or fails. An open connection holds no slot. `Session::shutdown()`
+stops a handshake in flight and fails new ones with the shut-down error. It
+does not close an established connection.
+
 ## HTTP/2 or HTTP/1.1
 
 `WebSocketConfig::prefer_http2` defaults to `true`: Leyline first tries RFC

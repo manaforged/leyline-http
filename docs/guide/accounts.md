@@ -80,8 +80,10 @@ your own IP echo service and keep it in `Device::app`.
 out of the device file, set `proxy_password_env` to the name of an
 environment variable. `save_to` and `Device::autosave` then write the proxy
 URL without its password, and `open` and `session_builder` read it back
-from the variable. Serializing the `Device` never writes the password. When the variable is not set, they return `Kind::Config` with
-a message that names it.
+from the variable. With `proxy_password_env` set, serializing the `Device`
+never writes the password. When the variable is not set in the
+environment, `open` and `session_builder` return `Kind::Config` with a
+message that names it.
 
 ```rust,no_run
 use leyline::{Browser, Device, Platform, ProxyConfig, ProxyUrl, Session, Url};
@@ -138,6 +140,17 @@ autosave.shutdown().await?;
 To add settings before the build, call `device.session_builder()?`, change
 the builder, build the session, then call `device.check(&session)?` and
 `device.state.restore_into(&session)`.
+
+Saved TLS sessions are bound to the trust that the session loaded when it was
+built: the pins, the contents of every root it loaded from `add_ca_der`,
+`add_ca_file`, `SSL_CERT_FILE`, and `SSL_CERT_DIR`, the contents of the client
+certificate and key files, and whether system roots are on. A saved TLS
+session resumes only in a session that loaded the same trust. Otherwise the
+connection makes a full handshake and checks the certificate again.
+`Session::fresh_pool` keeps the trust of the session it copies. Changes to the
+operating system's root store are not part of the binding. The saved
+state contains TLS session secrets, so store it with the same protection as
+credentials.
 
 `check` returns `Kind::Config` and names each field that differs:
 

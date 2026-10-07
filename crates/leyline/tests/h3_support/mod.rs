@@ -62,6 +62,8 @@ pub enum Reply {
     ResetResponse(u64),
     GoawayThenReset(u64),
     Truncate(usize, u64),
+    Encoded(usize),
+    Flood(usize),
 }
 
 #[derive(Clone, Copy)]
@@ -134,6 +136,7 @@ struct Peer {
     h3: Option<leyline_quiche::h3::Connection>,
     held: Vec<u64>,
     deferred: Vec<Deferred>,
+    flooding: Vec<(u64, usize)>,
 }
 
 fn status(code: &[u8]) -> [leyline_quiche::h3::Header; 1] {
@@ -190,6 +193,27 @@ impl Peer {
                         due: Instant::now() + GOAWAY_LAG,
                     });
                 }
+                Reply::Encoded(length) => {
+                    let declared = (length * 2).to_string();
+                    let head = [
+                        leyline_quiche::h3::Header::new(b":status", b"200"),
+                        leyline_quiche::h3::Header::new(b"content-encoding", b"gzip"),
+                        leyline_quiche::h3::Header::new(b"content-length", declared.as_bytes()),
+                    ];
+                    h3.send_response(quic, stream, &head, false)
+                        .expect("response head");
+                    let mut body = vec![0x1f, 0x8b, 0x07, 0x00];
+                    body.resize(length, b'x');
+                    h3.send_body(quic, stream, &body, false)
+                        .expect("response body");
+                    self.held.push(stream);
+                }
+                Reply::Flood(length) => {
+                    h3.send_response(quic, stream, &status(b"200"), false)
+                        .expect("response head");
+                    self.flooding.push((stream, length));
+                    self.held.push(stream);
+                }
                 Reply::Truncate(length, code) => {
                     h3.send_response(quic, stream, &status(b"200"), false)
                         .expect("response head");
@@ -204,6 +228,23 @@ impl Peer {
             }
             *answered += 1;
         }
+    }
+
+    fn flood(&mut self) {
+        let (Some(h3), quic) = (self.h3.as_mut(), &mut self.quic) else {
+            return;
+        };
+        let chunk = vec![b'x'; 16 * 1024];
+        self.flooding.retain_mut(|(stream, remaining)| {
+            while *remaining > 0 {
+                let take = (*remaining).min(chunk.len());
+                match h3.send_body(quic, *stream, &chunk[..take], false) {
+                    Ok(written) if written > 0 => *remaining -= written,
+                    _ => return true,
+                }
+            }
+            false
+        });
     }
 
     fn reset_due(&mut self) {
@@ -245,6 +286,7 @@ impl Peer {
         }
         self.reset_due();
         self.respond(replies, answered);
+        self.flood();
         self.watch(seen);
     }
 }
@@ -269,6 +311,7 @@ fn accept(
         quic,
         h3: None,
         held: Vec::new(),
+        flooding: Vec::new(),
         deferred: Vec::new(),
     };
     peers.insert(from, peer);

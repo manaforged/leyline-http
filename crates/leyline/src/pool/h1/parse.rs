@@ -1,11 +1,14 @@
 use super::*;
 use crate::core::session::decompress::BodyLimit;
 
-pub(super) async fn read_h1_head<S>(stream: &mut S, method: &str) -> Result<H1Head, H1PooledError>
+pub(super) async fn read_h1_head<S>(
+    stream: &mut S,
+    method: &str,
+    mut buf: Vec<u8>,
+) -> Result<H1Head, H1PooledError>
 where
     S: AsyncRead + Unpin + ?Sized,
 {
-    let mut buf = Vec::with_capacity(4096);
     let mut informational = 0usize;
     let mut head_bytes = 0usize;
     loop {
@@ -58,19 +61,6 @@ where
             initial_body: buf,
         });
     }
-}
-
-pub(super) async fn read_h1_response<S>(
-    stream: &mut S,
-    method: &str,
-    limit: usize,
-) -> Result<(H1Head, Vec<u8>, bool), H1PooledError>
-where
-    S: AsyncRead + Unpin + ?Sized,
-{
-    let mut head = read_h1_head(stream, method).await?;
-    let (body, excess) = read_h1_body(stream, &mut head, limit).await?;
-    Ok((head, body, excess))
 }
 
 pub(super) async fn read_h1_body<S>(
@@ -210,6 +200,19 @@ where
     if len > limit {
         return Err(body_too_large(limit));
     }
+    read_fixed_into(stream, &mut body, len).await?;
+    body.truncate(len);
+    Ok(body)
+}
+
+pub(super) async fn read_fixed_into<S>(
+    stream: &mut S,
+    body: &mut Vec<u8>,
+    len: usize,
+) -> Result<(), H1PooledError>
+where
+    S: AsyncRead + Unpin + ?Sized,
+{
     while body.len() < len {
         let remaining = len - body.len();
         let mut tmp = vec![0u8; remaining.min(8192)];
@@ -221,8 +224,7 @@ where
         }
         body.extend_from_slice(&tmp[..n]);
     }
-    body.truncate(len);
-    Ok(body)
+    Ok(())
 }
 pub(super) async fn read_to_close<S>(
     stream: &mut S,

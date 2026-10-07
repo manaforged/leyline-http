@@ -67,7 +67,7 @@ pub(super) fn frame(method: &str, headers: &mut Vec<(String, String)>, body: H1B
             if !has_cl && !has_te {
                 headers.push(("Content-Length".into(), length.to_string()));
             }
-            Framing::Fixed { stream, length }
+            Framing::Fixed { stream }
         }
         H1Body::ChunkedStream { stream } => {
             if !has_te {

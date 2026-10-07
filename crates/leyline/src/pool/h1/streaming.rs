@@ -3,7 +3,10 @@ use super::*;
 pub(super) async fn run_h1_stream_pump(mut pump: H1StreamPump) {
     let initial = std::mem::take(&mut pump.initial_body);
     let excess = has_excess(pump.framing, initial.len());
-    let drain = pump.pool.idle_timeout;
+    let drain = Drain {
+        limit: pump.drain_limit,
+        wait: pump.pool.idle_timeout,
+    };
     let drained_clean =
         stream_body_into(pump.io.as_mut(), pump.framing, initial, &pump.tx, drain).await;
     if drained_clean && pump.reusable && !excess {
@@ -20,7 +23,7 @@ pub(super) async fn stream_body_into(
     framing: BodyFraming,
     initial: Vec<u8>,
     tx: &mpsc::Sender<io::Result<Bytes>>,
-    drain: Duration,
+    drain: Drain,
 ) -> bool {
     let result = match framing {
         BodyFraming::None => Ok(true),
@@ -46,14 +49,18 @@ async fn until_closed<T>(
         out = work => Some(out),
     }
 }
-pub(super) const H1_DRAIN_LIMIT: u64 = 64 * 1024;
+#[derive(Clone, Copy)]
+pub(super) struct Drain {
+    limit: u64,
+    wait: Duration,
+}
 
 pub(super) async fn stream_fixed_into(
     stream: &mut dyn H1Io,
     initial: Vec<u8>,
     len: u64,
     tx: &mpsc::Sender<io::Result<Bytes>>,
-    drain: Duration,
+    drain: Drain,
 ) -> io::Result<bool> {
     let take = (initial.len() as u64).min(len) as usize;
     let mut remaining = len - take as u64;
@@ -90,8 +97,8 @@ pub(super) async fn stream_fixed_into(
     Ok(true)
 }
 
-async fn drain_fixed(stream: &mut dyn H1Io, mut remaining: u64, drain: Duration) -> bool {
-    if remaining > H1_DRAIN_LIMIT {
+async fn drain_fixed(stream: &mut dyn H1Io, mut remaining: u64, drain: Drain) -> bool {
+    if remaining > drain.limit {
         return false;
     }
     let mut tmp = vec![0u8; 8192];
@@ -105,7 +112,7 @@ async fn drain_fixed(stream: &mut dyn H1Io, mut remaining: u64, drain: Duration)
         }
         true
     };
-    within(Some(drain), read_rest).await.unwrap_or(false)
+    within(Some(drain.wait), read_rest).await.unwrap_or(false)
 }
 pub(super) async fn stream_to_close_into(
     stream: &mut dyn H1Io,
@@ -294,16 +301,14 @@ pub(super) struct HeadLeg {
     count_install: bool,
 }
 
-fn reads_inline(response: ResponseMode, head: &H1Head) -> bool {
-    if !response.keeps_stream(head.status) {
-        return true;
-    }
-    response == ResponseMode::ErrorPrefix
-        && match head.framing {
-            BodyFraming::None => true,
-            BodyFraming::Fixed(len) => len <= H1_DRAIN_LIMIT,
-            BodyFraming::Chunked | BodyFraming::ToClose => false,
-        }
+fn inline_error_len(response: ResponseMode, head: &H1Head) -> Option<(ErrorBudget, usize)> {
+    let budget = response.error_budget()?;
+    let len = match head.framing {
+        BodyFraming::None => 0,
+        BodyFraming::Fixed(len) => usize::try_from(len).ok()?,
+        BodyFraming::Chunked | BodyFraming::ToClose => return None,
+    };
+    (len <= budget.bytes).then_some((budget, len))
 }
 
 async fn deliver_head(
@@ -322,9 +327,20 @@ async fn deliver_head(
     } = leg;
     let status = head.status;
     let headers = std::mem::take(&mut head.headers);
-    if reads_inline(response, &head) {
-        let (body, excess) = read_h1_body(io.as_mut(), &mut head, pool.max_body_size).await?;
-        if reusable && !excess {
+    let inline_error = response
+        .keeps_stream(status)
+        .then(|| inline_error_len(response, &head))
+        .flatten();
+    if !response.keeps_stream(status) || inline_error.is_some() {
+        let (body, complete) = match inline_error {
+            Some((budget, len)) => read_error_prefix(io.as_mut(), &mut head, budget, len).await,
+            None => (
+                read_h1_body(io.as_mut(), &mut head, pool.max_body_size).await?,
+                true,
+            ),
+        };
+        let (body, excess) = body;
+        if complete && reusable && !excess {
             pool.return_h1(key, H1Slot { io }, tls);
             if count_install {
                 pool.note_h1_install();
@@ -343,6 +359,9 @@ async fn deliver_head(
         initial_body: head.initial_body,
         reusable,
         count_install,
+        drain_limit: response
+            .error_budget()
+            .map_or(0, |budget| budget.bytes as u64),
         tx,
     }));
     Ok((
@@ -350,4 +369,20 @@ async fn deliver_head(
         headers,
         H1ResponseBody::Streaming(BodyStream::new(rx)),
     ))
+}
+
+async fn read_error_prefix(
+    io: &mut dyn H1Io,
+    head: &mut H1Head,
+    budget: ErrorBudget,
+    len: usize,
+) -> ((Vec<u8>, bool), bool) {
+    let mut body = std::mem::take(&mut head.initial_body);
+    let excess = has_excess(head.framing, body.len());
+    let complete = matches!(
+        within(Some(budget.wait), read_fixed_into(io, &mut body, len)).await,
+        Ok(Ok(()))
+    );
+    body.truncate(len);
+    ((body, excess), complete)
 }

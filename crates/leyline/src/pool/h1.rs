@@ -11,9 +11,9 @@ use tokio::sync::{OwnedSemaphorePermit, mpsc};
 
 use crate::BodyStream;
 use crate::ResponseTiming;
-use crate::core::ResponseMode;
 use crate::core::deadline::within;
 use crate::core::session::decompress::BodyLimit;
+use crate::core::{ErrorBudget, ResponseMode};
 use crate::tls::{FingerprintConnector, TlsError};
 use crate::trace;
 use crate::util::is_idempotent;
@@ -348,6 +348,7 @@ struct H1StreamPump {
     initial_body: Vec<u8>,
     reusable: bool,
     count_install: bool,
+    drain_limit: u64,
     tx: mpsc::Sender<io::Result<Bytes>>,
 }
 

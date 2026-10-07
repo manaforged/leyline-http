@@ -1070,6 +1070,17 @@ pub leyline::RetryTrigger::Timeout
 impl core::clone::Clone for leyline::RetryTrigger
 impl core::fmt::Debug for leyline::RetryTrigger
 impl core::marker::Copy for leyline::RetryTrigger
+#[non_exhaustive] pub enum leyline::StopReason
+pub leyline::StopReason::EndOfBody
+pub leyline::StopReason::LimitReached
+pub leyline::StopReason::PredicateMatched
+impl core::clone::Clone for leyline::StopReason
+impl core::cmp::Eq for leyline::StopReason
+impl core::cmp::PartialEq for leyline::StopReason
+impl core::fmt::Debug for leyline::StopReason
+impl core::hash::Hash for leyline::StopReason
+impl core::marker::Copy for leyline::StopReason
+impl core::marker::StructuralPartialEq for leyline::StopReason
 #[non_exhaustive] pub enum leyline::TlsError
 pub leyline::TlsError::Certificate
 pub leyline::TlsError::Certificate::detail: alloc::string::String
@@ -1428,6 +1439,14 @@ impl core::default::Default for leyline::PoolStats
 impl core::fmt::Debug for leyline::PoolStats
 impl core::marker::Copy for leyline::PoolStats
 impl core::marker::StructuralPartialEq for leyline::PoolStats
+#[non_exhaustive] pub struct leyline::PrefixRead
+pub leyline::PrefixRead::bytes: alloc::vec::Vec<u8>
+pub leyline::PrefixRead::stopped_by: leyline::StopReason
+impl core::clone::Clone for leyline::PrefixRead
+impl core::cmp::Eq for leyline::PrefixRead
+impl core::cmp::PartialEq for leyline::PrefixRead
+impl core::fmt::Debug for leyline::PrefixRead
+impl core::marker::StructuralPartialEq for leyline::PrefixRead
 #[non_exhaustive] pub struct leyline::ProxyConfig
 impl leyline::ProxyConfig
 pub fn leyline::ProxyConfig::env(self, on: bool) -> Self
@@ -1525,6 +1544,7 @@ pub fn leyline::RequestBuilder::cookie_jar(self, jar: leyline::cookie::Jar) -> S
 pub async fn leyline::RequestBuilder::download(self, path: impl core::convert::AsRef<std::path::Path>, limit: core::option::Option<u64>) -> leyline::Result<u64>
 pub fn leyline::RequestBuilder::error_for_status(self) -> Self
 pub fn leyline::RequestBuilder::initiator(self, page: impl leyline::IntoUrl) -> Self
+pub async fn leyline::RequestBuilder::read_until<F>(self, limit: usize, done: F) -> leyline::Result<leyline::PrefixRead> where F: core::ops::function::FnMut(&[u8], usize) -> bool
 pub fn leyline::RequestBuilder::tag(self, tag: impl core::convert::Into<alloc::string::String>) -> Self
 pub fn leyline::RequestBuilder::pages(self) -> leyline::Pages
 pub async fn leyline::RequestBuilder::send(self) -> leyline::Result<leyline::Response>

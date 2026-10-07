@@ -2,7 +2,15 @@ name: book
 
 on:
   workflow_call:
+    inputs:
+      deploy:
+        type: boolean
+        default: true
   workflow_dispatch:
+    inputs:
+      deploy:
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -44,6 +52,7 @@ jobs:
 
   deploy:
     needs: build
+    if: inputs.deploy != false
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:

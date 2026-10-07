@@ -143,13 +143,20 @@ impl WebSocketBuilder {
     pub async fn connect(self) -> Result<crate::core::websocket::WsConnection> {
         let url = self.url?;
         let headers = self.headers?;
-        let handshake = self.session.websocket_with_options(
-            url.as_str(),
-            self.config,
-            self.proxy.as_ref(),
-            &headers,
-        );
-        self.session.deadline(None).total(handshake).await
+        let session = &self.session;
+        let handshake = async {
+            let _pass = session
+                .inner
+                .host_limits
+                .admit(&http_equivalent(&url))
+                .await;
+            session
+                .websocket_with_options(url.as_str(), self.config, self.proxy.as_ref(), &headers)
+                .await
+        };
+        session
+            .unless_shut_down(session.deadline(None).total(handshake))
+            .await
     }
 }
 
@@ -165,16 +172,8 @@ impl std::future::IntoFuture for WebSocketBuilder {
 impl Session {
     fn websocket_headers(&self, url: &url::Url, caller: &HeaderList) -> Vec<(String, String)> {
         let caller_has = |name: &str| caller.get(name).is_some();
-        let mut cookie_url = url.clone();
-        let http_scheme = match url.scheme() {
-            "ws" => "http",
-            _ => "https",
-        };
-        let lookup = if cookie_url.set_scheme(http_scheme).is_ok() {
-            &cookie_url
-        } else {
-            url
-        };
+        let cookie_url = http_equivalent(url);
+        let lookup = &cookie_url;
         let mut headers = Vec::new();
         self.merge_session_headers(&mut headers, &caller_has, false, lookup);
         apply_extra_headers(&mut headers, caller, false, &sensitive_header);
@@ -189,6 +188,18 @@ impl Session {
             .map(|(k, v)| (k.into_owned(), v.into_owned()))
             .collect()
     }
+}
+
+fn http_equivalent(url: &url::Url) -> url::Url {
+    let mut http = url.clone();
+    let scheme = match url.scheme() {
+        "ws" => "http",
+        _ => "https",
+    };
+    if http.set_scheme(scheme).is_err() {
+        return url.clone();
+    }
+    http
 }
 
 fn ws_origin(url: &str) -> Result<String> {

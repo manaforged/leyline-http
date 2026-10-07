@@ -1,43 +1,40 @@
 use super::*;
 
-pub(super) async fn fixed(
-    stream: &mut dyn H1Io,
-    mut body: BodyStream,
-    length: u64,
-) -> Result<(), H1PooledError> {
-    let mut sent: u64 = 0;
-    while let Some(chunk) = body.next().await {
-        let chunk: Bytes = chunk.map_err(H1PooledError::RequestBody)?;
-        if sent + chunk.len() as u64 > length {
-            return Err(H1PooledError::Http(
-                "streaming body exceeded declared content-length".into(),
-            ));
-        }
-        stream.write_all(&chunk).await?;
-        sent += chunk.len() as u64;
-    }
-    if sent != length {
-        return Err(H1PooledError::Http(format!(
-            "streaming body ended before declared content-length ({sent}/{length})"
-        )));
-    }
-    Ok(())
+pub(super) enum Encoder {
+    Fixed,
+    Chunked,
 }
 
-pub(super) async fn chunked(
-    stream: &mut dyn H1Io,
-    mut body: BodyStream,
-) -> Result<(), H1PooledError> {
-    while let Some(chunk) = body.next().await {
-        let chunk: Bytes = chunk.map_err(H1PooledError::RequestBody)?;
-        if chunk.is_empty() {
-            continue;
+impl Encoder {
+    pub(super) fn encode(
+        &mut self,
+        chunk: Bytes,
+        out: &mut VecDeque<Bytes>,
+    ) -> Result<(), H1PooledError> {
+        match self {
+            Encoder::Fixed => {
+                if !chunk.is_empty() {
+                    out.push_back(chunk);
+                }
+            }
+            Encoder::Chunked => {
+                if !chunk.is_empty() {
+                    out.push_back(Bytes::from(format!("{:X}\r\n", chunk.len())));
+                    out.push_back(chunk);
+                    out.push_back(Bytes::from_static(b"\r\n"));
+                }
+            }
         }
-        let hdr = format!("{:X}\r\n", chunk.len());
-        stream.write_all(hdr.as_bytes()).await?;
-        stream.write_all(&chunk).await?;
-        stream.write_all(b"\r\n").await?;
+        Ok(())
     }
-    stream.write_all(b"0\r\n\r\n").await?;
-    Ok(())
+
+    pub(super) fn finish(&self, out: &mut VecDeque<Bytes>) -> Result<(), H1PooledError> {
+        match self {
+            Encoder::Fixed => Ok(()),
+            Encoder::Chunked => {
+                out.push_back(Bytes::from_static(b"0\r\n\r\n"));
+                Ok(())
+            }
+        }
+    }
 }

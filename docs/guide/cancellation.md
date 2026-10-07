@@ -21,8 +21,11 @@ dropping its future also stops the body read.
   it is ready, the pool keeps it for the next request.
 - A request that waits for a `HostLimits` slot leaves the wait, and one that
   holds a slot gives it back. See [Crawling](crawling.md#limit-each-host).
-- A dropped `download` removes its temporary `.part` file and leaves the
-  target path as it was.
+- A `download` dropped before its commit starts removes its temporary
+  `.part` file and leaves the target path as it was. The commit starts on a
+  blocking thread after the body is written and synced. Once it has
+  started, it renames the file over the target even if the future is
+  dropped.
 - A request with a streaming body stops polling the body. On HTTP/2 and
   HTTP/3, Leyline resets the stream with `CANCEL`. It polls the body only
   after the request starts and buffers at most 256 KiB ahead of the peer's

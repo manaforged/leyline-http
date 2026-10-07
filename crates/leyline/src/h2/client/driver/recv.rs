@@ -200,7 +200,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         err: H2Error,
         code: ErrorCode,
     ) -> Result<(), H2Error> {
-        let _ = self.writer.write_rst_stream(stream_id, code).await;
+        drop(self.writer.write_rst_stream(stream_id, code).await);
         self.fail_stream(stream_id, err);
         self.maybe_top_up_conn_window().await
     }

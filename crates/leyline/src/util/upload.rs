@@ -38,6 +38,12 @@ pub(crate) async fn pump_request_body<Id, S>(
 {
     while let Some(item) = body.next().await {
         match item {
+            Ok(data) if data.is_empty() => {
+                if tx.is_closed() {
+                    return;
+                }
+                tokio::task::yield_now().await;
+            }
             Ok(mut data) => {
                 while !data.is_empty() {
                     let take = data.len().min(UPLOAD_CHUNK);

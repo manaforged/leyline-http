@@ -2,9 +2,7 @@ use std::sync::{Arc, Mutex};
 
 #[cfg(any(target_os = "macos", feature = "http3"))]
 use leyline_bssl::ssl::NameType;
-use leyline_bssl::ssl::{
-    Ssl, SslAlert, SslContextBuilder, SslFiletype, SslRef, SslVerifyError, SslVerifyMode,
-};
+use leyline_bssl::ssl::{Ssl, SslAlert, SslContextBuilder, SslRef, SslVerifyError, SslVerifyMode};
 use leyline_bssl::x509::{X509, X509Purpose, X509StoreContext};
 use sha2::{Digest, Sha256};
 
@@ -12,6 +10,8 @@ use crate::tls::error::TlsError;
 
 mod config;
 mod env;
+mod files;
+mod identity;
 #[cfg(not(target_os = "macos"))]
 mod system;
 
@@ -22,6 +22,8 @@ use env::wire_env_trust;
 use system::wire_system_trust_cached;
 
 pub use config::TlsTrustConfig;
+use identity::LoadedTrust;
+pub(crate) use identity::TrustIdentity;
 
 pub(crate) type VerificationFailure = Arc<Mutex<Option<TrustFailure>>>;
 
@@ -113,14 +115,15 @@ fn record_verification_failure(failure: &VerificationFailure, reason: TrustFailu
 pub(crate) fn wire_configured_trust(
     builder: &mut SslContextBuilder,
     config: &TlsTrustConfig,
-) -> Result<(), TlsError> {
+) -> Result<TrustIdentity, TlsError> {
+    let mut loaded = LoadedTrust::default();
     #[cfg(target_os = "macos")]
     if config.use_env_roots {
-        wire_env_trust(builder);
+        wire_env_trust(builder, &mut loaded);
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let env_roots_loaded = config.use_env_roots && wire_env_trust(builder);
+        let env_roots_loaded = config.use_env_roots && wire_env_trust(builder, &mut loaded);
         if config.use_system_roots
             && let Err(err) = wire_system_trust_cached(builder, config, env_roots_loaded)
         {
@@ -133,7 +136,7 @@ pub(crate) fn wire_configured_trust(
     }
 
     for path in &config.ca_files {
-        builder.set_ca_file(path).map_err(TlsError::from_stack)?;
+        files::add_root_file(builder, path, &mut loaded)?;
     }
 
     if !config.ca_der.is_empty() {
@@ -142,6 +145,7 @@ pub(crate) fn wire_configured_trust(
             store
                 .add_cert(X509::from_der(der).map_err(TlsError::from_stack)?)
                 .map_err(TlsError::from_stack)?;
+            loaded.root_bytes(der);
         }
     }
 
@@ -151,15 +155,10 @@ pub(crate) fn wire_configured_trust(
     }
 
     if let Some(identity) = &config.client_identity {
-        builder
-            .set_certificate_chain_file(&identity.certificate_chain_file)
-            .map_err(TlsError::from_stack)?;
-        builder
-            .set_private_key_file(&identity.private_key_file, SslFiletype::PEM)
-            .map_err(TlsError::from_stack)?;
+        files::set_client_identity(builder, identity, &mut loaded)?;
     }
 
-    Ok(())
+    Ok(loaded.finish(config))
 }
 
 pub(crate) fn install_verifier(

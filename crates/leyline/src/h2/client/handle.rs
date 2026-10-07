@@ -53,7 +53,7 @@ impl H2Client {
                 let (sink, receiver) = ResponseSink::streaming(response_tx);
                 (sink, Some(receiver))
             }
-            ResponseMode::ErrorPrefix => {
+            ResponseMode::ErrorPrefix(_) => {
                 let (sink, receiver) = ResponseSink::adaptive(response_tx, mode);
                 (sink, Some(receiver))
             }

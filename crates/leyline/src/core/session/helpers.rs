@@ -108,6 +108,10 @@ impl Session {
 
     pub async fn preconnect(&self, url: impl IntoUrl) -> Result<()> {
         let url = url.into_url()?;
+        self.unless_shut_down(self.warm(url)).await
+    }
+
+    async fn warm(&self, url: url::Url) -> Result<()> {
         if url.scheme() != "https" || self.inner.protocol_policy == super::ProtocolPolicy::Http1 {
             return Ok(());
         }

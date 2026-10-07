@@ -24,6 +24,7 @@
 | [`Pages`](#pages) | struct |  |
 | [`PoolConfig`](#poolconfig) | struct |  |
 | [`PoolStats`](#poolstats) | struct |  |
+| [`PrefixRead`](#prefixread) | struct |  |
 | [`ProxyConfig`](#proxyconfig) | struct |  |
 | [`ProxyHealth`](#proxyhealth) | struct |  |
 | [`ProxyPool`](#proxypool) | struct |  |
@@ -69,6 +70,7 @@
 | [`RedirectAction`](#redirectaction) | enum |  |
 | [`RelayBody`](#relaybody) | enum |  |
 | [`RetryTrigger`](#retrytrigger) | enum |  |
+| [`StopReason`](#stopreason) | enum |  |
 | [`TlsError`](#tlserror) | enum |  |
 | [`TlsMinVersion`](#tlsminversion) | enum |  |
 | [`WaitFormat`](#waitformat) | enum |  |
@@ -476,6 +478,18 @@ Requires feature `tower`.
 **Trait implementations:** <code>Clone</code>, <code>Eq</code>, <code>PartialEq</code>, <code>Default</code>, <code>Debug</code>, <code>Copy</code>, <code>StructuralPartialEq</code>
 
 
+### `PrefixRead`
+
+**Fields**
+
+| Field | Description |
+| --- | --- |
+| <code>bytes: Vec&lt;u8&gt;</code> |  |
+| <code>stopped_by: <a href="#stopreason">StopReason</a></code> |  |
+
+**Trait implementations:** <code>Clone</code>, <code>Eq</code>, <code>PartialEq</code>, <code>Debug</code>, <code>StructuralPartialEq</code>
+
+
 ### `ProxyConfig`
 
 **Methods**
@@ -601,6 +615,7 @@ Requires feature `tower`.
 | <code>async download(self, path: impl AsRef&lt;Path&gt;, limit: Option&lt;u64&gt;) -&gt; <a href="#result">Result</a>&lt;u64&gt;</code> | Download to a file. |
 | <code>error_for_status(self) -&gt; Self</code> | Status check after retries, with the body. |
 | <code>initiator(self, page: impl <a href="#intourl">IntoUrl</a>) -&gt; Self</code> |  |
+| <code>async read_until&lt;F&gt;(self, limit: usize, done: F) -&gt; <a href="#result">Result</a>&lt;<a href="#prefixread">PrefixRead</a>&gt; where F: FnMut(&amp;[u8], usize) -&gt; bool</code> |  |
 | <code>tag(self, tag: impl Into&lt;String&gt;) -&gt; Self</code> |  |
 | <code>pages(self) -&gt; <a href="#pages">Pages</a></code> | Follow Link pagination. |
 | <code>async send(self) -&gt; <a href="#result">Result</a>&lt;<a href="#response">Response</a>&gt;</code> | Send. |
@@ -1406,6 +1421,19 @@ Requires feature `websocket`.
 | <code>Timeout</code> |  |
 
 **Trait implementations:** <code>Clone</code>, <code>Debug</code>, <code>Copy</code>
+
+
+### `StopReason`
+
+**Variants**
+
+| Variant | Description |
+| --- | --- |
+| <code>EndOfBody</code> |  |
+| <code>LimitReached</code> |  |
+| <code>PredicateMatched</code> |  |
+
+**Trait implementations:** <code>Clone</code>, <code>Eq</code>, <code>PartialEq</code>, <code>Debug</code>, <code>Hash</code>, <code>Copy</code>, <code>StructuralPartialEq</code>
 
 
 ### `TlsError`

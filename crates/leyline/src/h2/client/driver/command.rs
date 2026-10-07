@@ -7,7 +7,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 #[cfg(feature = "websocket")]
 use tokio::sync::mpsc;
 
-use crate::h2::connection::{PseudoHeaders, encode_request_pseudos};
+use crate::h2::connection::PseudoHeaders;
 use crate::h2::error::{ErrorCode, H2Error};
 use crate::h2::stream_state::StreamEvent;
 
@@ -131,8 +131,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 return Ok(());
             }
         };
-        let fragment =
-            encode_request_pseudos(&mut self.encoder, &pseudo_list[..pseudo_len], headers);
+        if let Err(e) = self.check_header_list(&pseudo_list[..pseudo_len], headers) {
+            send_err_to_sink(sink, e);
+            return Ok(());
+        }
 
         let end_stream_on_headers = body.is_none();
 
@@ -151,7 +153,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         self.streams.insert(stream_id, actor);
 
         if let Err(e) = self
-            .write_headers_block(stream_id, end_stream_on_headers, fragment, true)
+            .write_headers_block(
+                stream_id,
+                end_stream_on_headers,
+                (&pseudo_list[..pseudo_len], headers),
+                true,
+            )
             .await
         {
             self.fail_stream(stream_id, e);
@@ -192,8 +199,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                             return Ok(());
                         }
                     };
-                let fragment =
-                    encode_request_pseudos(&mut self.encoder, &pseudo_list[..pseudo_len], headers);
+                if let Err(e) = self.check_header_list(&pseudo_list[..pseudo_len], headers) {
+                    send_err_to_sink(sink, e);
+                    return Ok(());
+                }
 
                 let initial_send = self.peer_settings.initial_window_size as i64;
                 let initial_recv = self.config.advertised_initial_window_size() as i64;
@@ -216,7 +225,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 self.streams.insert(stream_id, actor);
 
                 if let Err(e) = self
-                    .write_headers_block(stream_id, false, fragment, true)
+                    .write_headers_block(
+                        stream_id,
+                        false,
+                        (&pseudo_list[..pseudo_len], headers),
+                        true,
+                    )
                     .await
                 {
                     self.fail_stream(stream_id, e);
@@ -246,8 +260,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 return Ok(());
             }
         };
-        let fragment =
-            encode_request_pseudos(&mut self.encoder, &pseudo_list[..pseudo_len], headers);
+        if let Err(e) = self.check_header_list(&pseudo_list[..pseudo_len], headers) {
+            send_err_to_sink(sink, e);
+            return Ok(());
+        }
 
         let initial_send = self.peer_settings.initial_window_size as i64;
         let initial_recv = self.config.advertised_initial_window_size() as i64;
@@ -270,7 +286,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         self.streams.insert(stream_id, actor);
 
         if let Err(e) = self
-            .write_headers_block(stream_id, false, fragment, true)
+            .write_headers_block(
+                stream_id,
+                false,
+                (&pseudo_list[..pseudo_len], headers),
+                true,
+            )
             .await
         {
             self.fail_stream(stream_id, e);

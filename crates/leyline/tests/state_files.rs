@@ -42,6 +42,24 @@ fn autosave_writes_the_last_change_when_the_runtime_stops() {
     drop(std::fs::remove_dir_all(&dir));
 }
 
+#[test]
+fn autosave_writes_a_change_made_before_its_task_first_runs() {
+    let dir = scratch("unpolled");
+    let path = dir.join("jar.json");
+    let url = "https://shop.example/".parse().unwrap();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    let jar = Jar::new();
+    let handle = runtime.block_on(async { jar.autosave(&path, Duration::from_secs(60)) });
+    jar.set_cookie(&url, "sid", "1");
+    drop(runtime);
+    drop(handle);
+    let loaded = Jar::load_from(&path).unwrap();
+    assert_eq!(loaded.get_cookie(&url, "sid").as_deref(), Some("1"));
+    drop(std::fs::remove_dir_all(&dir));
+}
+
 #[tokio::test]
 async fn one_http1_origin_counts_one_install() {
     let server = TestServer::https(queue([TestResponse::new(200)]))

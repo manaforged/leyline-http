@@ -8,6 +8,120 @@ behaviour, and each change is listed here. The BoringSSL crates
 `leyline-bssl`, `leyline-bssl-sys`, and `leyline-bssl-tokio` share this
 version and publish as separate crates.
 
+## Unreleased
+
+### Security
+
+- A saved TLS session restored into a session with different trust
+  settings could resume there, and a resumed handshake skips the
+  certificate check, so pins and custom roots did not apply to it. Each
+  saved TLS session is now bound to the trust its session loaded: the
+  pins, the contents of every root from `add_ca_der`, `add_ca_file`,
+  `SSL_CERT_FILE`, and `SSL_CERT_DIR`, and the contents of the client
+  certificate and key, hashed from the same bytes the TLS context loaded.
+  It resumes only in a session that loaded the same trust, and
+  `Session::fresh_pool` keeps the trust of the session it copies. Saved
+  state contains TLS session secrets; store it with the same protection
+  as credentials. A saved ticket for a proxied connection no longer holds
+  the proxy user name; it holds a hash of the proxy credentials, as the
+  accounts guide states.
+
+### Added
+
+- `RequestBuilder::read_until(limit, done)` streams the response and returns
+  a `PrefixRead`: the decoded prefix and a `StopReason` (`PredicateMatched`,
+  `LimitReached`, or `EndOfBody`). It keeps the request's redirects, retries,
+  authentication, host limits, and `error_for_status()`.
+  `Response::read_until` keeps its signature, and now calls `done` only
+  after a chunk that adds decoded bytes, as `RequestBuilder::read_until`
+  does.
+- `examples/stock_monitor.rs`.
+
+### Fixed
+
+- A `.stream()` body that failed on a timeout, a decode error, or shutdown
+  kept its connection and, for a decoded body, its host-limit slot until
+  the caller dropped the stream. The failed stream now releases both at
+  once, and the trace reports the real outcome instead of `Dropped`.
+- `WebSocketBuilder::connect` and `Session::preconnect` ignored
+  `Session::shutdown()`. Both now fail with the shut-down error after
+  shutdown, including a preconnect that would do nothing, and a WebSocket
+  handshake takes a host-limit slot while it runs. An established
+  WebSocket connection stays open.
+- An HTTP/2 connection whose peer stopped reading blocked the whole
+  connection inside a socket write: no response, reset, ping, or shutdown
+  got through. The connection now keeps reading and cancelling while
+  output waits, stops taking new work and reading new frames while its
+  write buffer is full, and parks an upload instead of queuing it past
+  that budget. After a second without write progress it takes no new
+  requests, so the pool opens a fresh connection and queued requests are
+  refused unsent and retried there; it closes once no stream needs it.
+- An HTTP/3 connection waiting for stream credit moved every queued
+  request into an unbounded queue, and each failed stream started a task
+  that could wait forever on a full body channel. Queued requests now stay
+  in the bounded request channel, and a failed stream reports its error
+  through a reserved slot.
+- An HTTP/1.1 upload did not read the response until the whole request
+  body was sent, so a server that answered 413 early and stopped reading
+  left the request hanging until its timeout. Leyline now reads the
+  response while it uploads, stops the upload at a final response or when
+  the server closes its side, and closes that connection. A body that
+  yields many chunks without pausing no longer keeps the request from
+  seeing the response, its timeout, or shutdown.
+- A streamed HTTP/2 or HTTP/3 upload whose body yielded empty chunks
+  without pausing kept its upload task running after the request was
+  cancelled. The upload task now yields on an empty chunk and stops when
+  the request is gone.
+- A cookie attribute value over 1024 octets is now ignored, as RFC 6265bis
+  requires, and the jar refuses cookies past the size limits from every
+  source, including `extend_from` and saved jars.
+- An HTTP/2 response that ended with trailers skipped the
+  `Content-Length` check, so a short body arrived as a success. It now
+  fails like a short body without trailers.
+- A `Body::stream` with a declared length that produced more or fewer
+  bytes sent a malformed request over HTTP/2 and HTTP/3. Every protocol
+  now fails the request with a body error and sends nothing past the
+  declared length.
+- `Jar::autosave` and `Device::autosave` lost the last change when the
+  runtime stopped before the autosave task first ran. The final save now
+  runs in that case too.
+- `TestServer::next_request` returned a request only after the
+  response's `delay`, just before the reply went out. It now returns the
+  request when it arrives, as documented.
+- `error_for_status` over HTTP/1.1 waited for a small error body with no
+  error-body timeout, so a stalled 500 with a short `Content-Length` ran to
+  the `total` timeout and returned `Kind::Timeout` without the status. The
+  error-body window now bounds that read, and the error keeps the status and
+  the bytes received.
+- `error_for_status` over HTTP/1.1 read error bodies up to 64 KiB regardless
+  of `max_error_body`. It now reads at most `max_error_body` bytes with the
+  response, and never more than `max_body_size`. An error body that Leyline
+  does not decode, with compression turned off or an unknown coding, keeps
+  its `Content-Encoding` header.
+- A status error whose body read timed out or failed dropped the bytes
+  already decoded. It now keeps them.
+
+### Changed
+
+- An HTTP/2 request whose header list size (RFC 7541 §4.1: name, value,
+  and 32 octets per field) is larger than the server's
+  `SETTINGS_MAX_HEADER_LIST_SIZE`, or than 256 KiB when the server sets
+  none, now fails before any of it is encoded or sent. Buffered
+  HTTP/2 uploads use DATA frames no larger than the free space in the
+  connection's 64 KiB output budget, even when the server allows larger
+  frames.
+- The timeout guide now states that `read` and `body` apply to a
+  `.stream()` response and to a body the transport delivers in pieces; a
+  body the transport buffers is bounded by `response_header` and `total`.
+- `Response::download_to` commits on a blocking thread after the body is
+  written and synced: a future dropped before the commit starts leaves the
+  target unchanged, and a commit that has started finishes. A
+  directory-sync failure after the rename says that the target was
+  already replaced.
+- Over HTTP/1.1, a `.stream()` body dropped before its end closes the
+  connection. Leyline drains the rest only for `error_for_status` error
+  bodies, up to `max_error_body` bytes.
+
 ## 0.1.2 - 2026-10-05
 
 ### Security

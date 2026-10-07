@@ -19,8 +19,11 @@ pub(crate) fn commit(temp: &Path, path: &Path) -> Result<()> {
         drop(std::fs::remove_file(temp));
         return Err(err.into());
     }
-    sync_parent(path)
+    sync_parent(path).map_err(|err| err.with_message(SYNC_AFTER_REPLACE))
 }
+
+const SYNC_AFTER_REPLACE: &str =
+    "target file was replaced, but syncing its parent directory failed";
 
 fn write_synced(temp: &Path, target: &Path, bytes: &[u8], mode: FileMode) -> Result<()> {
     let mut file = create_temp(temp, target, mode)?;

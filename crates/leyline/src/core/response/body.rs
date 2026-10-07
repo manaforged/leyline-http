@@ -2,7 +2,8 @@ use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
-use super::{Response, ResponseBody};
+use super::prefix::stop_reason;
+use super::{PrefixRead, Response, ResponseBody, StopReason};
 use crate::core::body_stream::BodyStream;
 use crate::core::deadline::{Deadline, within};
 use crate::core::error::{Error, Kind, Result};
@@ -109,51 +110,80 @@ impl Response {
             return Ok(self);
         };
         let limit = self.compression.max_error_body;
-        let wait = deadline.error_body_wait();
         let declared = self.content_length();
-        match within(Some(wait), self.read_decoded(limit, |_, _| false)).await {
-            Ok(Ok((body, true))) => Err(err.with_body(body).without_content_coding()),
-            Ok(Ok((body, false))) if declared != Some(body.len() as u64) => {
-                Err(err.with_body(body).without_content_length())
-            }
-            Ok(Ok((body, false))) => Err(err.with_body(body)),
-            _ => Err(err),
+        let mut body = Vec::new();
+        let mut decodes = false;
+        let read = within(
+            Some(deadline.error_body_wait()),
+            self.read_prefix_into(limit, |_, _| false, &mut body, &mut decodes),
+        )
+        .await;
+        if !matches!(read, Ok(Ok(_))) && body.is_empty() {
+            return Err(err);
         }
+        let complete = declared == Some(body.len() as u64);
+        let err = err.with_body(body);
+        Err(match (decodes, complete) {
+            (true, _) => err.without_content_coding(),
+            (false, false) => err.without_content_length(),
+            (false, true) => err,
+        })
     }
 
     pub async fn read_until<F>(self, limit: usize, done: F) -> Result<Vec<u8>>
     where
         F: FnMut(&[u8], usize) -> bool,
     {
-        self.read_decoded(limit, done).await.map(|(body, _)| body)
+        Ok(self.read_prefix(limit, done).await?.bytes)
     }
 
-    async fn read_decoded<F>(self, limit: usize, mut done: F) -> Result<(Vec<u8>, bool)>
+    pub(crate) async fn read_prefix<F>(self, limit: usize, done: F) -> Result<PrefixRead>
+    where
+        F: FnMut(&[u8], usize) -> bool,
+    {
+        let mut bytes = Vec::new();
+        let stopped_by = self
+            .read_prefix_into(limit, done, &mut bytes, &mut false)
+            .await?;
+        Ok(PrefixRead { bytes, stopped_by })
+    }
+
+    async fn read_prefix_into<F>(
+        self,
+        limit: usize,
+        mut done: F,
+        out: &mut Vec<u8>,
+        decodes: &mut bool,
+    ) -> Result<StopReason>
     where
         F: FnMut(&[u8], usize) -> bool,
     {
         let limit = limit.min(self.compression.max_body_size);
+        if limit == 0 {
+            return Ok(StopReason::LimitReached);
+        }
         let encoding = content_codings(self.headers.get_all(http::header::CONTENT_ENCODING));
         let mut decoder = Decoder::truncated(encoding.as_deref(), &self.compression, limit)?;
+        *decodes = decoder.is_some();
         let mut stream = self.into_stream()?;
-        let mut out = Vec::new();
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(Error::from)?;
             let from = out.len();
             match decoder.as_mut() {
-                Some(decoder) => decoder.feed(&chunk, &mut out)?,
+                Some(decoder) => decoder.feed(&chunk, out)?,
                 None => out.extend_from_slice(&chunk),
             }
             out.truncate(limit);
-            if done(&out, from) || out.len() >= limit {
-                return Ok((out, decoder.is_some()));
+            if let Some(reason) = stop_reason(out, from, limit, &mut done) {
+                return Ok(reason);
             }
         }
+        let from = out.len();
         if let Some(decoder) = decoder.as_mut() {
-            decoder.finish(&mut out)?;
+            decoder.finish(out)?;
             out.truncate(limit);
         }
-        Ok((out, decoder.is_some()))
+        Ok(stop_reason(out, from, limit, &mut done).unwrap_or(StopReason::EndOfBody))
     }
 }
 

@@ -1,29 +1,23 @@
 #[path = "h2_support/mod.rs"]
 mod support;
 
-use std::io;
-use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::task::{Context, Poll};
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use bytes::Bytes;
-use futures_util::{FutureExt, Stream};
+use futures_util::FutureExt;
 use support::*;
 use tokio::io::{AsyncReadExt, DuplexStream, WriteHalf};
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 
-use leyline::h2::connection::PseudoHeaders;
 use leyline::h2::frame::{FRAME_HEADER_LEN, FrameHeader, FrameType};
-use leyline::h2::{H2Client, Head, RequestBody};
+use leyline::h2::{H2Client, RequestBody};
 
 const MAX_CONCURRENT_STREAMS: u16 = 0x3;
 const PEER_WINDOW: usize = 65_535;
 const UPLOAD_BUDGET: usize = 256 * 1024;
-const CHUNK: usize = 16 * 1024;
-static ZEROS: [u8; CHUNK] = [0; CHUNK];
 
 type Frames = mpsc::UnboundedReceiver<(FrameHeader, Vec<u8>)>;
 
@@ -66,57 +60,6 @@ async fn next_of(frames: &mut Frames, kind: FrameType) -> (FrameHeader, Vec<u8>)
     })
     .await
     .expect("expected frame")
-}
-
-fn head(method: &str) -> Arc<Head> {
-    Arc::new(Head {
-        pseudo: PseudoHeaders {
-            method: method.into(),
-            scheme: "https".into(),
-            authority: "example.com".into(),
-            path: "/".into(),
-            protocol: None,
-        },
-        headers: vec![],
-    })
-}
-
-fn send(handle: &H2Client, method: &str, body: RequestBody) -> tokio::task::JoinHandle<()> {
-    let handle = handle.clone();
-    let head = head(method);
-    tokio::spawn(async move {
-        let _ = handle.send_shared(head, body, false).await;
-    })
-}
-
-#[derive(Default)]
-struct Producer {
-    produced: AtomicUsize,
-    dropped: AtomicBool,
-}
-
-struct Endless(Arc<Producer>);
-
-impl Stream for Endless {
-    type Item = io::Result<Bytes>;
-
-    fn poll_next(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.0.produced.fetch_add(CHUNK, Ordering::SeqCst);
-        Poll::Ready(Some(Ok(Bytes::from_static(&ZEROS))))
-    }
-}
-
-impl Drop for Endless {
-    fn drop(&mut self) {
-        self.0.dropped.store(true, Ordering::SeqCst);
-    }
-}
-
-fn endless(producer: &Arc<Producer>) -> RequestBody {
-    RequestBody::Streaming {
-        stream: Box::pin(Endless(Arc::clone(producer))),
-        length_hint: None,
-    }
 }
 
 #[tokio::test]

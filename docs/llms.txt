@@ -4,10 +4,10 @@
 
 ## leyline-http 0.1.2
 
-- [Every public item, one per line](reference/leyline-http/api.txt): 1848 lines
+- [Every public item, one per line](reference/leyline-http/api.txt): 1868 lines
 - [API overview](reference/leyline-http/index.html): tasks, modules, features, and examples
 - [API changes by release](reference/leyline-http/changes.html)
-- [leyline](reference/leyline-http/leyline.html): 675 items
+- [leyline](reference/leyline-http/leyline.html): 683 items
 - [leyline::audit](reference/leyline-http/leyline-audit.html): 63 items
 - [leyline::cookie](reference/leyline-http/leyline-cookie.html): 35 items
 - [leyline::html](reference/leyline-http/leyline-html.html): 28 items
@@ -31,6 +31,7 @@
 - [Example post_json](reference/leyline-http/examples/post_json.html): `cargo run -p leyline-http --example post_json`
 - [Example presets](reference/leyline-http/examples/presets.html): `cargo run -p leyline-http --example presets`
 - [Example retry](reference/leyline-http/examples/retry.html): `cargo run -p leyline-http --example retry`
+- [Example stock_monitor](reference/leyline-http/examples/stock_monitor.html): `cargo run -p leyline-http --example stock_monitor`
 - [Example streaming](reference/leyline-http/examples/streaming.html): `cargo run -p leyline-http --example streaming`
 - [Example trace](reference/leyline-http/examples/trace.html): `cargo run -p leyline-http --example trace`
 - [Example websocket](reference/leyline-http/examples/websocket.html): `cargo run -p leyline-http --example websocket --features websocket`

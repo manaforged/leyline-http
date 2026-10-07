@@ -37,7 +37,13 @@ export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$repo_root/target/verify}"
 step() { printf '\n\033[1;34m== %s ==\033[0m\n' "$*"; }
 ok()   { printf '\033[1;32m✓ %s\033[0m\n'  "$*"; }
 fail() { printf '\033[1;31m✗ %s\033[0m\n'  "$*" >&2; exit 1; }
-skip() { [[ -z "${CI:-}" ]] || fail "$1"; printf '  (%s; skipping)\n' "$1"; }
+skipped=""
+current_gate=""
+skip() {
+    [[ -z "${CI:-}" ]] || fail "$1"
+    printf '  (%s; skipping)\n' "$1"
+    [[ " $skipped " == *" $current_gate "* ]] || skipped="${skipped:+$skipped }$current_gate"
+}
 
 msrv="$(awk -F'"' '/^rust-version *= *"/{print $2; exit}' Cargo.toml)"
 
@@ -249,13 +255,10 @@ g_external_types() {
     external_types_nightly="nightly-2026-06-20"
     step "cargo check-external-types leyline-http --features full ($external_types_nightly)"
     if ! command -v cargo-check-external-types >/dev/null; then
-        echo "  (cargo-check-external-types not installed; skipping. Install with"
-        echo "   'cargo install --locked cargo-check-external-types')"
+        skip "cargo-check-external-types not installed: cargo install --locked cargo-check-external-types"
     elif ! rustup toolchain list 2>/dev/null | grep -q "^$external_types_nightly"; then
         external_types_status="skipped ($external_types_nightly toolchain not installed)"
-        echo "  ($external_types_nightly not installed; skipping. Rustdoc JSON format"
-        echo "   57 requires this nightly. Install with"
-        echo "   'rustup toolchain install $external_types_nightly')"
+        skip "$external_types_nightly not installed (rustdoc JSON format 57): rustup toolchain install $external_types_nightly"
     else
         cargo "+$external_types_nightly" check-external-types \
             --manifest-path crates/leyline/Cargo.toml --features full \
@@ -427,7 +430,7 @@ gate_order=(
 )
 quick_gates=(comments msrv package)
 full_gates=(comments msrv package fmt clippy features doc api book test live
-    deny semver external-types benches fuzz-replay)
+    deny semver external-types benches subcrates fuzz-replay)
 
 if [[ -n "$only" ]]; then
     IFS=',' read -ra want <<<"$only"
@@ -446,7 +449,10 @@ semver_status="skipped (cargo install --locked cargo-semver-checks)"
 external_types_status="skipped (cargo install --locked cargo-check-external-types)"
 
 for g in "${gate_order[@]}"; do
-    [[ " ${want[*]} " == *" $g "* ]] && "g_${g//-/_}"
+    if [[ " ${want[*]} " == *" $g "* ]]; then
+        current_gate="$g"
+        "g_${g//-/_}"
+    fi
 done
 
 if [[ -z "$only" && $full -eq 1 ]]; then
@@ -463,6 +469,11 @@ if [[ -z "$only" && $full -eq 1 ]]; then
         'cross aarch64-linux' 'matrix only' \
         'cross x86_64-windows' 'matrix only'
     echo "  Run the rest with: gh workflow run matrix.yml"
+fi
+
+if [[ -n "$skipped" ]]; then
+    printf '\n\033[1;33mVerify incomplete: skipped %s\033[0m\n' "$skipped" >&2
+    exit 2
 fi
 
 if [[ -z "$only" && $full -eq 0 ]]; then

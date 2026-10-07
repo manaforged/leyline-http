@@ -1,3 +1,5 @@
+use tokio::sync::mpsc::error::TrySendError;
+
 use super::*;
 
 impl Drop for H3Stream {
@@ -27,6 +29,7 @@ impl H3Stream {
                 _ => (true, true),
             }
         };
+        let terminal = stream_tx.as_ref().and_then(reserve_terminal);
         Self {
             resp_tx: Some(resp_tx),
             response: H3ResponseState::Initial,
@@ -36,6 +39,7 @@ impl H3Stream {
             body: Vec::new(),
             mode: ResponseMode::from(stream_tx.is_some()),
             stream_tx,
+            terminal,
             head_sent: false,
             stalled: None,
             peer_finished: false,
@@ -80,6 +84,7 @@ impl H3Stream {
                 self.status = status;
                 if !self.mode.keeps_stream(status) {
                     self.stream_tx = None;
+                    self.terminal = None;
                 }
                 self.declared_len = headers
                     .iter()
@@ -150,9 +155,7 @@ impl H3Stream {
 
     pub(super) fn deliver_request_body_error(&mut self, error: std::io::Error) {
         if self.head_sent {
-            if let Some(tx) = &self.stream_tx {
-                deliver_stream_error(tx, error);
-            }
+            self.deliver_terminal(error);
         } else if let Some(tx) = self.resp_tx.take() {
             drop(tx.send(Err(H3SendError::RequestBody(error))));
         }
@@ -160,11 +163,28 @@ impl H3Stream {
 
     pub(super) fn deliver_error(&mut self, message: String) {
         if self.head_sent {
-            if let Some(tx) = &self.stream_tx {
-                deliver_stream_error(tx, std::io::Error::other(message));
-            }
+            self.deliver_terminal(std::io::Error::other(message));
         } else {
             self.deliver(Err(message));
         }
+    }
+
+    pub(super) fn deliver_terminal(&mut self, error: std::io::Error) {
+        if let Some(permit) = self.terminal.take() {
+            drop(permit.send(Err(error)));
+        } else if let Some(tx) = &self.stream_tx {
+            match tx.try_send(Err(error)) {
+                Ok(()) | Err(TrySendError::Full(_)) | Err(TrySendError::Closed(_)) => {}
+            }
+        }
+    }
+}
+
+fn reserve_terminal(
+    tx: &mpsc::Sender<std::io::Result<Bytes>>,
+) -> Option<mpsc::OwnedPermit<std::io::Result<Bytes>>> {
+    match tx.clone().try_reserve_owned() {
+        Ok(permit) => Some(permit),
+        Err(TrySendError::Full(_)) | Err(TrySendError::Closed(_)) => None,
     }
 }

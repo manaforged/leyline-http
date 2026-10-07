@@ -198,6 +198,18 @@ name = "h2_backpressure"
 required-features = ["bench-internals"]
 
 [[test]]
+name = "h2_message_length"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_pool_stall"
+required-features = ["bench-internals"]
+
+[[test]]
+name = "h2_output_budget"
+required-features = ["bench-internals"]
+
+[[test]]
 name = "h2_cancel_safety"
 required-features = ["bench-internals"]
 

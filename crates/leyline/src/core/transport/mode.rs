@@ -1,18 +1,33 @@
+use std::time::Duration;
+
 use crate::core::response::is_error_status;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ErrorBudget {
+    pub(crate) wait: Duration,
+    pub(crate) bytes: usize,
+}
+
+impl ErrorBudget {
+    #[must_use]
+    pub fn new(wait: Duration, bytes: usize) -> Self {
+        Self { wait, bytes }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ResponseMode {
     Buffered,
     Streamed,
-    ErrorPrefix,
+    ErrorPrefix(ErrorBudget),
 }
 
 impl ResponseMode {
-    pub(crate) fn new(stream: bool, status_errors: bool) -> Self {
-        match (stream, status_errors) {
+    pub(crate) fn new(stream: bool, error_budget: Option<ErrorBudget>) -> Self {
+        match (stream, error_budget) {
             (true, _) => Self::Streamed,
-            (false, true) => Self::ErrorPrefix,
-            (false, false) => Self::Buffered,
+            (false, Some(budget)) => Self::ErrorPrefix(budget),
+            (false, None) => Self::Buffered,
         }
     }
 
@@ -20,13 +35,20 @@ impl ResponseMode {
         match self {
             Self::Buffered => false,
             Self::Streamed => true,
-            Self::ErrorPrefix => is_error_status(status),
+            Self::ErrorPrefix(_) => is_error_status(status),
+        }
+    }
+
+    pub(crate) fn error_budget(self) -> Option<ErrorBudget> {
+        match self {
+            Self::ErrorPrefix(budget) => Some(budget),
+            Self::Buffered | Self::Streamed => None,
         }
     }
 }
 
 impl From<bool> for ResponseMode {
     fn from(stream: bool) -> Self {
-        Self::new(stream, false)
+        Self::new(stream, None)
     }
 }

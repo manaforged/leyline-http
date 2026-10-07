@@ -67,6 +67,7 @@
         - [post_json](reference/leyline-http/examples/post_json.md)
         - [presets](reference/leyline-http/examples/presets.md)
         - [retry](reference/leyline-http/examples/retry.md)
+        - [stock_monitor](reference/leyline-http/examples/stock_monitor.md)
         - [streaming](reference/leyline-http/examples/streaming.md)
         - [trace](reference/leyline-http/examples/trace.md)
         - [websocket](reference/leyline-http/examples/websocket.md)

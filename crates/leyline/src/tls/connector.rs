@@ -54,7 +54,8 @@ impl FingerprintConnector {
         let mut builder = SslConnector::bare_builder(leyline_bssl::ssl::SslMethod::tls())
             .map_err(TlsError::from_stack)?;
 
-        apply_profile_with_trust(&mut builder, profile, TlsMinVersion::Tls12, &trust)?;
+        let identity =
+            apply_profile_with_trust(&mut builder, profile, TlsMinVersion::Tls12, &trust)?;
 
         let hello = HelloOptions::from_tls(&profile.tls)?;
 
@@ -69,7 +70,7 @@ impl FingerprintConnector {
             ssl_connector: builder.build(),
             tcp_profile: tcp,
             hello,
-            session_cache: SessionCache::new(),
+            session_cache: SessionCache::new(identity),
             accept_invalid_certs,
             resolver: Arc::new(SystemResolver),
             happy_eyeballs: HappyEyeballsConfig::default(),
@@ -84,7 +85,7 @@ impl FingerprintConnector {
 
     pub(crate) fn with_fresh_session_cache(&self) -> Self {
         Self {
-            session_cache: SessionCache::new(),
+            session_cache: self.session_cache.cleared(),
             ..self.clone()
         }
     }

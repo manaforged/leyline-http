@@ -1,7 +1,7 @@
 use url::Url;
 
 use crate::FetchSite;
-use crate::core::transport::{Prepared, ResponseMode};
+use crate::core::transport::{ErrorBudget, Prepared, ResponseMode};
 use std::sync::Arc;
 
 use crate::profile::Preset;
@@ -64,6 +64,14 @@ impl Attempt {
 impl Session {
     pub(crate) fn deadline(&self, request: Option<&TimeoutConfig>) -> Deadline {
         Deadline::new(&self.inner.timeouts, request)
+    }
+
+    pub(crate) fn error_budget(&self, deadline: &Deadline) -> ErrorBudget {
+        let compression = &self.inner.compression;
+        ErrorBudget::new(
+            deadline.error_body_wait(),
+            compression.max_error_body.min(compression.max_body_size),
+        )
     }
 
     pub(crate) async fn attempt(&self, attempt: Attempt) -> Result<Response> {

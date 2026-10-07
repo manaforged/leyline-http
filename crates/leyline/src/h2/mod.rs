@@ -9,7 +9,7 @@ pub mod hpack;
 pub mod stream_state;
 
 #[cfg(feature = "bench-internals")]
-pub use crate::core::ResponseMode;
+pub use crate::core::{ErrorBudget, ResponseMode};
 pub use client::start;
 #[cfg(feature = "bench-internals")]
 pub use client::{H2Client, H2ResponseEx, Head, RequestBody, ResponseBody};

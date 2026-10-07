@@ -1,7 +1,7 @@
 use super::RequestBuilder;
 use crate::cookie::Jar;
-use crate::core::Result;
 use crate::core::into_url::IntoUrl;
+use crate::core::{PrefixRead, Result};
 
 impl RequestBuilder {
     pub fn cookie_jar(mut self, jar: Jar) -> Self {
@@ -25,6 +25,13 @@ impl RequestBuilder {
     pub fn error_for_status(mut self) -> Self {
         self.status_errors = true;
         self
+    }
+
+    pub async fn read_until<F>(self, limit: usize, done: F) -> Result<PrefixRead>
+    where
+        F: FnMut(&[u8], usize) -> bool,
+    {
+        self.stream().send().await?.read_prefix(limit, done).await
     }
 
     pub async fn download(

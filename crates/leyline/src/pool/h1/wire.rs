@@ -1,5 +1,6 @@
 use super::*;
 
+use std::collections::VecDeque;
 use std::time::Instant;
 
 use crate::HttpVersion;
@@ -7,6 +8,9 @@ use crate::trace;
 
 mod body;
 mod head;
+mod upload;
+
+use upload::{Sent, Upload};
 
 pub(super) use head::validate;
 
@@ -16,18 +20,18 @@ type BodyStream =
 enum Framing {
     None,
     Buffered(Bytes),
-    Fixed { stream: BodyStream, length: u64 },
+    Fixed { stream: BodyStream },
     Chunked { stream: BodyStream },
 }
 
-pub(super) async fn send_h1_request(
+async fn send_h1_request(
     stream: &mut dyn H1Io,
     method: &str,
     url: &url::Url,
     mut headers: Vec<(String, String)>,
     body: H1Body,
     target: H1Target,
-) -> Result<bool, H1PooledError> {
+) -> Result<(bool, Upload), H1PooledError> {
     head::validate(method, &headers)?;
     let (request_target, authority) = head::target(url, target)?;
 
@@ -45,21 +49,44 @@ pub(super) async fn send_h1_request(
         .write_all(&head::head(method, &request_target, &headers))
         .await?;
 
-    match framing {
-        Framing::None => {}
-        Framing::Buffered(b) => {
-            stream.write_all(&b).await?;
+    let sent = match framing {
+        Framing::None => {
+            stream.flush().await?;
+            Upload::idle()
         }
-        Framing::Fixed {
-            stream: chunks,
-            length,
-        } => body::fixed(stream, chunks, length).await?,
-        Framing::Chunked { stream: chunks } => body::chunked(stream, chunks).await?,
+        Framing::Buffered(b) => upload::upload(stream, VecDeque::from([b]), None).await?,
+        Framing::Fixed { stream: chunks } => {
+            upload::upload(
+                stream,
+                VecDeque::new(),
+                Some((chunks, body::Encoder::Fixed)),
+            )
+            .await?
+        }
+        Framing::Chunked { stream: chunks } => {
+            let encoder = body::Encoder::Chunked;
+            upload::upload(stream, VecDeque::new(), Some((chunks, encoder))).await?
+        }
+    };
+
+    Ok((header_contains_token(&headers, "connection", "close"), sent))
+}
+async fn response_head(
+    stream: &mut dyn H1Io,
+    method: &str,
+    sent: Upload,
+) -> Result<(H1Head, bool), H1PooledError> {
+    match sent.sent {
+        Sent::Complete => Ok((read_h1_head(stream, method, sent.received).await?, true)),
+        Sent::Answered => Ok((read_h1_head(stream, method, sent.received).await?, false)),
+        Sent::Broken(write) => match read_h1_head(stream, method, sent.received).await {
+            Ok(head) => Ok((head, false)),
+            Err(read) => {
+                drop(read);
+                Err(H1PooledError::Io(write))
+            }
+        },
     }
-
-    stream.flush().await?;
-
-    Ok(header_contains_token(&headers, "connection", "close"))
 }
 pub(super) fn compute_reusable(
     client_asked_close: bool,
@@ -87,7 +114,8 @@ pub(super) async fn exchange_on_stream(
 ) -> Result<(WireResponse, bool), H1PooledError> {
     let host = url.host_str().unwrap_or("");
     let started = Instant::now();
-    let client_asked_close = send_h1_request(stream, method, url, headers, body, target).await?;
+    let (client_asked_close, sent) =
+        send_h1_request(stream, method, url, headers, body, target).await?;
     trace::sent(
         host,
         method,
@@ -96,7 +124,8 @@ pub(super) async fn exchange_on_stream(
         started.elapsed(),
     );
     let started = Instant::now();
-    let (head, resp_body, excess) = read_h1_response(stream, method, limit).await?;
+    let (mut head, complete) = response_head(stream, method, sent).await?;
+    let (resp_body, excess) = read_h1_body(stream, &mut head, limit).await?;
     trace::head(
         host,
         head.status,
@@ -106,7 +135,8 @@ pub(super) async fn exchange_on_stream(
     );
     let reusable = compute_reusable(client_asked_close, &head.headers, head.minor)
         && !matches!(head.framing, BodyFraming::ToClose)
-        && !excess;
+        && !excess
+        && complete;
     Ok((
         WireResponse {
             status: head.status,
@@ -126,7 +156,8 @@ pub(super) async fn exchange_head_on_stream(
 ) -> Result<(H1Head, bool), H1PooledError> {
     let host = url.host_str().unwrap_or("");
     let started = Instant::now();
-    let client_asked_close = send_h1_request(stream, method, url, headers, body, target).await?;
+    let (client_asked_close, sent) =
+        send_h1_request(stream, method, url, headers, body, target).await?;
     trace::sent(
         host,
         method,
@@ -135,7 +166,7 @@ pub(super) async fn exchange_head_on_stream(
         started.elapsed(),
     );
     let started = Instant::now();
-    let head = read_h1_head(stream, method).await?;
+    let (head, complete) = response_head(stream, method, sent).await?;
     trace::head(
         host,
         head.status,
@@ -144,7 +175,8 @@ pub(super) async fn exchange_head_on_stream(
         head.headers.iter().cloned(),
     );
     let reusable = compute_reusable(client_asked_close, &head.headers, head.minor)
-        && !matches!(head.framing, BodyFraming::ToClose);
+        && !matches!(head.framing, BodyFraming::ToClose)
+        && complete;
     Ok((head, reusable))
 }
 pub(crate) fn h1err_to_io(e: H1PooledError) -> io::Error {
@@ -214,7 +246,7 @@ pub(crate) async fn upgrade_on_stream(
     url: &url::Url,
     headers: Vec<(String, String)>,
 ) -> Result<(ParsedHead, Vec<u8>), H1PooledError> {
-    send_h1_request(
+    let (_, sent) = send_h1_request(
         stream,
         "GET",
         url,
@@ -223,7 +255,7 @@ pub(crate) async fn upgrade_on_stream(
         H1Target::OriginForm,
     )
     .await?;
-    let mut buf = Vec::with_capacity(4096);
+    let mut buf = sent.received;
     let header_end = read_h1_headers(stream, &mut buf).await?;
     let head = parse_h1_head(&String::from_utf8_lossy(&buf[..header_end]))?;
     buf.drain(..header_end + 4);

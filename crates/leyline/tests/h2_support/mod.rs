@@ -1,8 +1,14 @@
 #![allow(dead_code)]
 
+use std::io;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::task::{Context, Poll};
 use std::time::Duration;
 
-use bytes::BytesMut;
+use bytes::{Bytes, BytesMut};
+use futures_util::Stream;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
@@ -11,7 +17,7 @@ use leyline::h2::frame::{
     DataFrame, FRAME_HEADER_LEN, FrameHeader, FrameType, HeadersFrame, SettingsFrame,
     WindowUpdateFrame,
 };
-use leyline::h2::{Head, hpack};
+use leyline::h2::{H2Client, Head, RequestBody, hpack};
 
 const PREFACE: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
 const END_HEADERS: u8 = 0x4;
@@ -212,4 +218,58 @@ pub async fn write_window_update<S: AsyncWrite + Unpin>(s: &mut S, stream_id: u3
     let mut buf = BytesMut::new();
     w.encode(&mut buf);
     s.write_all(&buf).await.expect("window update write");
+}
+
+pub const CHUNK: usize = 16 * 1024;
+pub static ZEROS: [u8; CHUNK] = [0; CHUNK];
+
+pub fn head(method: &str) -> Arc<Head> {
+    Arc::new(Head {
+        pseudo: PseudoHeaders {
+            method: method.into(),
+            scheme: "https".into(),
+            authority: "example.com".into(),
+            path: "/".into(),
+            protocol: None,
+        },
+        headers: vec![],
+    })
+}
+
+pub fn send(handle: &H2Client, method: &str, body: RequestBody) -> tokio::task::JoinHandle<()> {
+    let handle = handle.clone();
+    let head = head(method);
+    tokio::spawn(async move {
+        let _ = handle.send_shared(head, body, false).await;
+    })
+}
+
+#[derive(Default)]
+pub struct Producer {
+    pub produced: AtomicUsize,
+    pub dropped: AtomicBool,
+}
+
+pub struct Endless(Arc<Producer>);
+
+impl Stream for Endless {
+    type Item = io::Result<Bytes>;
+
+    fn poll_next(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.0.produced.fetch_add(CHUNK, Ordering::SeqCst);
+        Poll::Ready(Some(Ok(Bytes::from_static(&ZEROS))))
+    }
+}
+
+impl Drop for Endless {
+    fn drop(&mut self) {
+        self.0.dropped.store(true, Ordering::SeqCst);
+    }
+}
+
+pub fn endless(producer: &Arc<Producer>) -> RequestBody {
+    RequestBody::Streaming {
+        stream: Box::pin(Endless(Arc::clone(producer))),
+        length_hint: None,
+    }
 }

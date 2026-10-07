@@ -61,6 +61,7 @@ impl Jar {
             .cookies
             .values()
             .flatten()
+            .filter(|c| c.within_limits())
             .cloned()
             .collect();
         if incoming.is_empty() {
@@ -97,7 +98,9 @@ impl Jar {
     }
 
     fn apply(&self, set_cookie: &str, url: &Url) -> bool {
-        let Some(mut cookie) = parse::parse_set_cookie(set_cookie, url) else {
+        let Some(mut cookie) =
+            parse::parse_set_cookie(set_cookie, url).filter(Cookie::within_limits)
+        else {
             return false;
         };
         if !cookie.secure

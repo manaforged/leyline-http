@@ -133,8 +133,31 @@ jobs:
       - name: cargo test (default features)
         run: cargo test -p leyline-http --locked
 
+  api:
+    name: API reference
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: ci-api
+          workspaces: ". -> target/verify"
+
+      - name: Install cargo-truesight
+        run: cargo install --locked --git https://github.com/manaforged/truesight --rev d7248e66b77adb9d50d92f5a38075cb9ece8581b cargo-truesight
+
+      - name: verify gates
+        run: scripts/verify.sh --only api
+
   platforms:
-    name: lib tests (${{ matrix.os }})
+    name: tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
@@ -157,8 +180,8 @@ jobs:
         with:
           key: ci-platforms-${{ matrix.os }}
 
-      - name: cargo test
-        run: cargo test -p leyline-http --lib --locked
+      - name: cargo test (full features)
+        run: cargo test -p leyline-http --locked --features full,bench-internals
 
   musl:
     name: musl (${{ matrix.target }})
