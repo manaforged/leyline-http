@@ -288,17 +288,10 @@ impl Drop for Hasher {
 ///
 /// This type derefs to a byte slice - it exists to avoid allocating memory to
 /// store the digest data.
-#[derive(Copy)]
+#[derive(Clone, Copy)]
 pub struct DigestBytes {
     pub(crate) buf: [u8; ffi::EVP_MAX_MD_SIZE as usize],
     pub(crate) len: usize,
-}
-
-impl Clone for DigestBytes {
-    #[inline]
-    fn clone(&self) -> DigestBytes {
-        *self
-    }
 }
 
 impl Deref for DigestBytes {

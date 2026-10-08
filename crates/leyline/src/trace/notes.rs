@@ -1,7 +1,5 @@
 use std::sync::{Arc, Mutex, PoisonError};
 
-use super::CURRENT;
-
 #[derive(Debug, Default)]
 pub(crate) struct Notes {
     pub(crate) tag: Option<String>,
@@ -37,6 +35,5 @@ pub(crate) fn take(shared: &SharedNotes) -> Notes {
 }
 
 fn edit(change: impl FnOnce(&mut Notes)) {
-    let _ = CURRENT
-        .try_with(|ctx| change(&mut ctx.notes.lock().unwrap_or_else(PoisonError::into_inner)));
+    super::with(|ctx| change(&mut ctx.notes.lock().unwrap_or_else(PoisonError::into_inner)));
 }

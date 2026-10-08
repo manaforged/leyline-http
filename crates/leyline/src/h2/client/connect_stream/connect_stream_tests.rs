@@ -48,7 +48,7 @@ fn poll_write_backpressure_wakes_when_capacity_frees() {
         "first write must hit backpressure"
     );
 
-    assert!(write_rx.try_recv().is_ok());
+    let _frame = write_rx.try_recv().expect("a queued write frees capacity");
     assert!(
         woken.0.load(Ordering::SeqCst) > 0,
         "freeing channel capacity must wake the parked writer"

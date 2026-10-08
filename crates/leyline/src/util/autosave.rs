@@ -65,7 +65,7 @@ impl<T: SaveTarget> Guard<T> {
         let generation = job.generation;
         let written = tokio::task::spawn_blocking(self.order.order(job.write))
             .await
-            .map_err(|_| stopped(self.label))
+            .map_err(|e| stopped(self.label).with_source(e.to_string()))
             .and_then(|out| out);
         self.end(generation, written)
     }
@@ -161,16 +161,20 @@ impl Autosave {
         let (reply, answer) = oneshot::channel();
         self.control
             .send(Command::Flush(reply))
-            .map_err(|_| stopped(self.label))?;
-        answer.await.map_err(|_| stopped(self.label))?
+            .map_err(|e| stopped(self.label).with_source(e.to_string()))?;
+        answer
+            .await
+            .map_err(|e| stopped(self.label).with_source(e.to_string()))?
     }
 
     pub(crate) async fn shutdown(self) -> Result<()> {
         let (reply, answer) = oneshot::channel();
         self.control
             .send(Command::Shutdown(reply))
-            .map_err(|_| stopped(self.label))?;
-        let out = answer.await.map_err(|_| stopped(self.label))?;
+            .map_err(|e| stopped(self.label).with_source(e.to_string()))?;
+        let out = answer
+            .await
+            .map_err(|e| stopped(self.label).with_source(e.to_string()))?;
         drop(self.task.await);
         out
     }

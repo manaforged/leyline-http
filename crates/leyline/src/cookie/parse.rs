@@ -6,7 +6,6 @@ use crate::util::epoch_plus;
 mod attr;
 mod date;
 
-use attr::set;
 use date::{Date, stamp, token};
 
 #[derive(Default)]
@@ -31,7 +30,7 @@ fn parse_attributes(attrs_str: &str) -> CookieAttributes {
             Some(i) => (attr[..i].trim(), Some(attr[i + 1..].trim())),
             None => (attr, None),
         };
-        set(&mut a, name, value);
+        a.set(name, value);
     }
     a
 }

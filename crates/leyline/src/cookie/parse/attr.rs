@@ -4,33 +4,35 @@ use crate::cookie::record::{MAX_ATTRIBUTE_OCTETS, SameSite};
 
 use super::{CookieAttributes, parse_cookie_date};
 
-pub(super) fn set(a: &mut CookieAttributes, name: &str, value: Option<&str>) {
-    match (name.to_lowercase().as_str(), value) {
-        ("secure", _) => a.secure = true,
-        ("httponly", _) => a.http_only = true,
-        (_, Some(value)) if value.len() > MAX_ATTRIBUTE_OCTETS => {}
-        (name, Some(value)) => set_valued(a, name, value),
-        _ => {}
+impl CookieAttributes {
+    pub(super) fn set(&mut self, name: &str, value: Option<&str>) {
+        match (name.to_lowercase().as_str(), value) {
+            ("secure", _) => self.secure = true,
+            ("httponly", _) => self.http_only = true,
+            (_, Some(value)) if value.len() > MAX_ATTRIBUTE_OCTETS => {}
+            (name, Some(value)) => self.set_valued(name, value),
+            _ => {}
+        }
     }
-}
 
-fn set_valued(a: &mut CookieAttributes, name: &str, value: &str) {
-    match name {
-        "domain" => {
-            let d = value.strip_prefix('.').unwrap_or(value);
-            if !d.is_empty() {
-                a.domain = Some(d.to_lowercase());
+    fn set_valued(&mut self, name: &str, value: &str) {
+        match name {
+            "domain" => {
+                let d = value.strip_prefix('.').unwrap_or(value);
+                if !d.is_empty() {
+                    self.domain = Some(d.to_lowercase());
+                }
             }
-        }
-        "path" if value.starts_with('/') => a.path = Some(value.to_string()),
-        "samesite" => a.same_site = same_site(value),
-        "max-age" => {
-            if let Some(d) = max_age(value) {
-                a.max_age = Some(d);
+            "path" if value.starts_with('/') => self.path = Some(value.to_string()),
+            "samesite" => self.same_site = same_site(value),
+            "max-age" => {
+                if let Some(d) = max_age(value) {
+                    self.max_age = Some(d);
+                }
             }
+            "expires" => self.expires_after_epoch = parse_cookie_date(value),
+            _ => {}
         }
-        "expires" => a.expires_after_epoch = parse_cookie_date(value),
-        _ => {}
     }
 }
 

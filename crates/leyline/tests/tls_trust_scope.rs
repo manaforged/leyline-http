@@ -124,9 +124,11 @@ async fn spawn_tls_server(chain: &Chain) -> SocketAddr {
                 return;
             };
             let ssl = leyline_bssl::ssl::Ssl::new(acceptor.context()).unwrap();
-            let _ = leyline_bssl_tokio::SslStreamBuilder::new(ssl, tcp)
-                .accept()
-                .await;
+            drop(
+                leyline_bssl_tokio::SslStreamBuilder::new(ssl, tcp)
+                    .accept()
+                    .await,
+            );
         }
     });
 
@@ -204,5 +206,9 @@ async fn without_env_roots_excludes_environment_roots() {
             None => std::env::remove_var("SSL_CERT_FILE"),
         }
     }
-    let _ = std::fs::remove_file(&ca_path);
+    if let Err(e) = std::fs::remove_file(&ca_path)
+        && e.kind() != std::io::ErrorKind::NotFound
+    {
+        eprintln!("cleanup failed: {e}");
+    }
 }

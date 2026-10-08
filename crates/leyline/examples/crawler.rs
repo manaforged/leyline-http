@@ -117,7 +117,9 @@ async fn main() -> leyline::Result<()> {
         .map(|(index, url)| tokio::spawn(fetch(session.clone(), index, url)))
         .collect();
     for task in tasks {
-        let _ = task.await;
+        if let Err(e) = task.await {
+            eprintln!("fetch task failed: {e}");
+        }
     }
 
     println!("{}", metrics.snapshot());

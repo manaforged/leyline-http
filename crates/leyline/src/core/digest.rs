@@ -105,7 +105,7 @@ pub(crate) fn parse_challenge(header: &str) -> Result<Challenge> {
 
     let mut ch = Challenge::default();
     for pair in pairs(body) {
-        fill(&mut ch, pair)?;
+        ch.fill(pair)?;
     }
 
     if ch.nonce.is_empty() {
@@ -117,19 +117,21 @@ pub(crate) fn parse_challenge(header: &str) -> Result<Challenge> {
     Ok(ch)
 }
 
-fn fill(ch: &mut Challenge, pair: Pair<'_>) -> Result<()> {
-    let Pair { key, val } = pair;
-    match key.trim().to_ascii_lowercase().as_str() {
-        "realm" => ch.realm = val,
-        "nonce" => ch.nonce = val,
-        "qop" => ch.qop = Some(val),
-        "opaque" => ch.opaque = Some(val),
-        "stale" => ch.stale = val.eq_ignore_ascii_case("true"),
-        "algorithm" => ch.algorithm = algorithm(val.trim())?,
-        "domain" => ch.domain = val.split_whitespace().map(str::to_owned).collect(),
-        _ => {}
+impl Challenge {
+    fn fill(&mut self, pair: Pair<'_>) -> Result<()> {
+        let Pair { key, val } = pair;
+        match key.trim().to_ascii_lowercase().as_str() {
+            "realm" => self.realm = val,
+            "nonce" => self.nonce = val,
+            "qop" => self.qop = Some(val),
+            "opaque" => self.opaque = Some(val),
+            "stale" => self.stale = val.eq_ignore_ascii_case("true"),
+            "algorithm" => self.algorithm = algorithm(val.trim())?,
+            "domain" => self.domain = val.split_whitespace().map(str::to_owned).collect(),
+            _ => {}
+        }
+        Ok(())
     }
-    Ok(())
 }
 
 fn algorithm(val: &str) -> Result<Algorithm> {
@@ -145,83 +147,85 @@ fn algorithm(val: &str) -> Result<Algorithm> {
     }
 }
 
-pub(crate) fn build_auth_header(
-    challenge: &Challenge,
-    auth: &DigestAuth,
-    method: &str,
-    uri: &str,
-    nc: u32,
-    cnonce: &str,
-) -> Option<String> {
-    let qop = match challenge.qop.as_deref() {
-        Some(offered) => pick_supported_qop(offered)?,
-        None => "",
-    };
+impl Challenge {
+    pub(crate) fn build_auth_header(
+        &self,
+        auth: &DigestAuth,
+        method: &str,
+        uri: &str,
+        nc: u32,
+        cnonce: &str,
+    ) -> Option<String> {
+        let qop = match self.qop.as_deref() {
+            Some(offered) => pick_supported_qop(offered)?,
+            None => "",
+        };
 
-    let alg = challenge.algorithm;
-    let ha1_base =
-        alg.hash_hex(format!("{}:{}:{}", auth.username, challenge.realm, auth.password).as_bytes());
-    let ha1 = if alg.is_sess() {
-        alg.hash_hex(format!("{}:{}:{}", ha1_base, challenge.nonce, cnonce).as_bytes())
-    } else {
-        ha1_base
-    };
-    let ha2 = alg.hash_hex(format!("{}:{}", method, uri).as_bytes());
+        let alg = self.algorithm;
+        let ha1_base =
+            alg.hash_hex(format!("{}:{}:{}", auth.username, self.realm, auth.password).as_bytes());
+        let ha1 = if alg.is_sess() {
+            alg.hash_hex(format!("{}:{}:{}", ha1_base, self.nonce, cnonce).as_bytes())
+        } else {
+            ha1_base
+        };
+        let ha2 = alg.hash_hex(format!("{}:{}", method, uri).as_bytes());
 
-    let nc_hex = format!("{:08x}", nc);
+        let nc_hex = format!("{:08x}", nc);
 
-    let response = if !qop.is_empty() {
-        alg.hash_hex(
-            format!(
-                "{}:{}:{}:{}:{}:{}",
-                ha1, challenge.nonce, nc_hex, cnonce, qop, ha2
+        let response = if !qop.is_empty() {
+            alg.hash_hex(
+                format!(
+                    "{}:{}:{}:{}:{}:{}",
+                    ha1, self.nonce, nc_hex, cnonce, qop, ha2
+                )
+                .as_bytes(),
             )
-            .as_bytes(),
-        )
-    } else {
-        alg.hash_hex(format!("{}:{}:{}", ha1, challenge.nonce, ha2).as_bytes())
-    };
+        } else {
+            alg.hash_hex(format!("{}:{}:{}", ha1, self.nonce, ha2).as_bytes())
+        };
 
-    let quoted = |s: &str| {
-        let mut esc = String::with_capacity(s.len() + 2);
-        esc.push('"');
-        for c in s.chars() {
-            if c == '"' || c == '\\' {
-                esc.push('\\');
+        let quoted = |s: &str| {
+            let mut esc = String::with_capacity(s.len() + 2);
+            esc.push('"');
+            for c in s.chars() {
+                if c == '"' || c == '\\' {
+                    esc.push('\\');
+                }
+                esc.push(c);
             }
-            esc.push(c);
+            esc.push('"');
+            esc
+        };
+
+        let mut out = format!(
+            "Digest username={u}, realm={r}, nonce={n}, uri={uri}, algorithm={alg}, response={resp}",
+            u = quoted(&auth.username),
+            r = quoted(&self.realm),
+            n = quoted(&self.nonce),
+            uri = quoted(uri),
+            alg = alg.wire_name(),
+            resp = quoted(&response),
+        );
+        if !qop.is_empty() {
+            out.push_str(&format!(
+                ", qop={qop}, nc={nc_hex}, cnonce={}",
+                quoted(cnonce)
+            ));
         }
-        esc.push('"');
-        esc
-    };
-
-    let mut out = format!(
-        "Digest username={u}, realm={r}, nonce={n}, uri={uri}, algorithm={alg}, response={resp}",
-        u = quoted(&auth.username),
-        r = quoted(&challenge.realm),
-        n = quoted(&challenge.nonce),
-        uri = quoted(uri),
-        alg = alg.wire_name(),
-        resp = quoted(&response),
-    );
-    if !qop.is_empty() {
-        out.push_str(&format!(
-            ", qop={qop}, nc={nc_hex}, cnonce={}",
-            quoted(cnonce)
-        ));
+        if let Some(opaque) = &self.opaque {
+            out.push_str(&format!(", opaque={}", quoted(opaque)));
+        }
+        Some(out)
     }
-    if let Some(opaque) = &challenge.opaque {
-        out.push_str(&format!(", opaque={}", quoted(opaque)));
-    }
-    Some(out)
-}
 
-pub(crate) fn covers(challenge: &Challenge, url: &url::Url) -> bool {
-    challenge.domain.is_empty()
-        || challenge.domain.iter().any(|space| match url.join(space) {
-            Ok(space) => space.origin() == url.origin() && url.path().starts_with(space.path()),
-            Err(_) => false,
-        })
+    pub(crate) fn covers(&self, url: &url::Url) -> bool {
+        self.domain.is_empty()
+            || self.domain.iter().any(|space| match url.join(space) {
+                Ok(space) => space.origin() == url.origin() && url.path().starts_with(space.path()),
+                Err(_) => false,
+            })
+    }
 }
 
 pub(crate) fn pick_supported_qop(qop: &str) -> Option<&'static str> {

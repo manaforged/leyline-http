@@ -6,14 +6,18 @@ import tomllib
 from pathlib import Path
 
 from .config import BROWSER_IDS, FAMILIES, PROFILES, QPACK_GOLDEN, ROOT
+from .land import build_label, profile_name
 
 GUIDE = ROOT / "docs/guide/profiles.md"
 README = ROOT / "crates/leyline/README.md"
 CHANGELOG = ROOT / "CHANGELOG.md"
 
 
-def insert_after_row(text: str, previous_row: str, row: str) -> str:
-    if row in text:
+CHANGELOG_SECTIONS = ("Security", "Added", "Changed", "Deprecated", "Removed", "Fixed")
+
+
+def insert_after_row(text: str, previous_row: str, row: str, key: str) -> str:
+    if re.search(rf"(?m)^{re.escape(key)}", text):
         return text
     match = re.search(rf"(?m)^{re.escape(previous_row)}.*\n", text)
     if not match:
@@ -24,24 +28,33 @@ def insert_after_row(text: str, previous_row: str, row: str) -> str:
 def guide_rows(text: str, family: str, major: int, previous: int, captured: str, phrase: str) -> str:
     label = FAMILIES[family]["label"]
     method = FAMILIES[family]["tcp_method"]
-    status = re.search(rf"(?m)^\| {label} {previous} \| `{label}{previous}` \| `[^`]*` \| (\w+) \|$", text)
+    name, old = profile_name(family, major), profile_name(family, previous)
+    status = re.search(rf"(?m)^\| {re.escape(old)} \| `{label}{previous}` \| `[^`]*` \| (\w+) \|$", text)
     if not status:
-        raise SystemExit(f"no {label} {previous} row in the profile table")
+        raise SystemExit(f"no {old} row in the profile table")
     text = insert_after_row(
         text,
-        f"| {label} {previous} | `{label}{previous}` |",
-        f"| {label} {major} | `{label}{major}` | `{captured}` | {status.group(1)} |",
+        f"| {old} | `{label}{previous}` |",
+        f"| {name} | `{label}{major}` | `{captured}` | {status.group(1)} |",
+        f"| {name} | `{label}{major}` |",
     )
     return insert_after_row(
         text,
-        f"| {label} {previous} | `browser` |",
-        f"| {label} {major} | `browser` | `{captured}`, {phrase} `{method}` |",
+        f"| {old} | `browser` |",
+        f"| {name} | `browser` | `{captured}`, {phrase} `{method}` |",
+        f"| {name} | `browser` |",
     )
 
 
 def readme_range(text: str, family: str, major: int, previous: int) -> str:
     label = FAMILIES[family]["label"]
-    return re.sub(rf"(?m)^(\| {label} \| \d+ to ){previous}( \|)", rf"\g<1>{major}\g<2>", text, count=1)
+    span = rf"(?m)^(\| {label} \| \d+ to ){previous}( \|)"
+    if re.search(span, text):
+        return re.sub(span, rf"\g<1>{major}\g<2>", text, count=1)
+    listed = re.search(rf"(?m)^\| {label} \| ((?:\d+, )*\d+) \|", text)
+    if not listed or str(major) in listed.group(1).split(", "):
+        return text
+    return f"{text[: listed.end(1)]}, {major}{text[listed.end(1):]}"
 
 
 def changelog_entry(text: str, family: str, major: int, version: str, phrase: str) -> str:
@@ -50,23 +63,31 @@ def changelog_entry(text: str, family: str, major: int, version: str, phrase: st
     if marker in text:
         return text
     bullet = textwrap.fill(
-        f"- A {label} {major} profile, {marker}, from captures of {label} {version} on {phrase}.",
+        f"- A {profile_name(family, major)} profile, {marker}, from captures of {label} {version} on {phrase}.",
         width=79,
         subsequent_indent="  ",
         break_on_hyphens=False,
     )
+    return changelog_add(text, "Added", bullet)
+
+
+def changelog_add(text: str, section: str, bullet: str) -> str:
+    if not re.search(r"(?m)^## Unreleased\n", text):
+        first = re.search(r"(?m)^## ", text)
+        if not first:
+            raise SystemExit("CHANGELOG.md has no release heading")
+        text = text[: first.start()] + "## Unreleased\n\n" + text[first.start() :]
     unreleased = re.search(r"(?m)^## Unreleased\n", text)
-    if not unreleased:
-        raise SystemExit("CHANGELOG.md has no ## Unreleased section")
-    end = re.search(r"(?m)^## ", text[unreleased.end():])
+    end = re.search(r"(?m)^## ", text[unreleased.end() :])
     stop = unreleased.end() + end.start() if end else len(text)
-    added = re.search(r"(?m)^### Added\n\n", text[unreleased.end():stop])
-    if added:
-        at = unreleased.end() + added.end()
+    found = re.search(rf"(?m)^### {section}\n\n", text[unreleased.end() : stop])
+    if found:
+        at = unreleased.end() + found.end()
         return text[:at] + bullet + "\n" + text[at:]
-    changed = re.search(r"(?m)^### (Changed|Fixed)\n", text[unreleased.end():stop])
-    at = unreleased.end() + changed.start() if changed else stop
-    return text[:at] + f"### Added\n\n{bullet}\n\n" + text[at:]
+    later = "|".join(CHANGELOG_SECTIONS[CHANGELOG_SECTIONS.index(section) + 1 :])
+    after = re.search(rf"(?m)^### ({later})\n", text[unreleased.end() : stop]) if later else None
+    at = unreleased.end() + after.start() if after else stop
+    return text[:at] + f"### {section}\n\n{bullet}\n\n" + text[at:]
 
 
 def profile_has_h3(family: str, major: int) -> bool:
@@ -106,7 +127,7 @@ def update(path: Path, edit) -> bool:
 
 def document(family: str, major: int, previous: int, captured: str, phrase: str,
              qpack: tuple[int, int] | None) -> tuple[list[str], list[str]]:
-    version = captured.removeprefix(f"{family}-")
+    version = build_label(family, captured)
     changed, review = [], []
     if qpack is None and profile_has_h3(family, major):
         qpack = previous_qpack(family, previous)

@@ -34,7 +34,7 @@ pub(super) async fn stream_body_into(
     match result {
         Ok(clean) => clean,
         Err(e) => {
-            let _ = tx.send(Err(e)).await;
+            drop(tx.send(Err(e)).await);
             false
         }
     }

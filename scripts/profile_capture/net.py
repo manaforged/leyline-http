@@ -8,12 +8,20 @@ from pathlib import Path
 from .config import WAITS
 
 
-def http_json(url: str, timeout: float = WAITS["metadata_fetch"]) -> dict:
-    with urllib.request.urlopen(url, timeout=timeout) as resp:
-        return json.loads(resp.read())
+def open_url(url: str, timeout: float, headers: dict[str, str] | None = None):
+    return urllib.request.urlopen(urllib.request.Request(url, headers=headers or {}), timeout=timeout)
+
+
+def http_text(url: str, timeout: float = WAITS["metadata_fetch"], headers: dict[str, str] | None = None) -> str:
+    with open_url(url, timeout, headers) as resp:
+        return resp.read().decode()
+
+
+def http_json(url: str, timeout: float = WAITS["metadata_fetch"], headers: dict[str, str] | None = None) -> dict:
+    return json.loads(http_text(url, timeout, headers))
 
 
 def http_bytes(url: str, dest: Path, timeout: float = WAITS["download"]) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
-    with urllib.request.urlopen(url, timeout=timeout) as resp, dest.open("wb") as out:
+    with open_url(url, timeout) as resp, dest.open("wb") as out:
         shutil.copyfileobj(resp, out)

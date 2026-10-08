@@ -26,8 +26,11 @@ use h1::{H1Sent, send_h1_on};
 pub use mode::{ErrorBudget, ResponseMode};
 
 fn status(code: u16) -> Result<StatusCode> {
-    StatusCode::from_u16(code)
-        .map_err(|_| Error::new(Kind::Request).with_message(format!("invalid status code {code}")))
+    StatusCode::from_u16(code).map_err(|e| {
+        Error::new(Kind::Request)
+            .with_message(format!("invalid status code {code}"))
+            .with_source(e)
+    })
 }
 
 fn adopt<I, N, V>(headers: I) -> Vec<(HeaderName, HeaderValue)>

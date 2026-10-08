@@ -64,9 +64,12 @@ impl H2Client {
             body: body_in,
             sink,
         };
-        self.tx.send(cmd).await.map_err(|_| H2Error::Stream {
-            stream_id: 0,
-            code: ErrorCode::RefusedStream,
+        self.tx.send(cmd).await.map_err(|e| {
+            tracing::debug!(error = %e, "h2 driver command channel closed");
+            H2Error::Stream {
+                stream_id: 0,
+                code: ErrorCode::RefusedStream,
+            }
         })?;
 
         match response_rx.await {
@@ -97,13 +100,13 @@ impl H2Client {
         self.ping_tx
             .send(ack_tx)
             .await
-            .map_err(|_| H2Error::Connection {
+            .map_err(|e| H2Error::Connection {
                 code: ErrorCode::NoError,
-                reason: "driver task has exited".into(),
+                reason: format!("driver task has exited: {e}"),
             })?;
-        ack_rx.await.map_err(|_| H2Error::Connection {
+        ack_rx.await.map_err(|e| H2Error::Connection {
             code: ErrorCode::NoError,
-            reason: "connection closed before the ping was acknowledged".into(),
+            reason: format!("connection closed before the ping was acknowledged: {e}"),
         })
     }
 

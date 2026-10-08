@@ -127,7 +127,7 @@ impl TestServer {
     pub async fn shutdown(mut self) {
         if let Some(task) = self.task.take() {
             task.abort();
-            let _ = task.await;
+            drop(task.await);
         }
     }
 }
@@ -164,7 +164,9 @@ async fn connection(
     handler: Handler,
     recorder: Recorder,
 ) {
-    let _ = tcp.set_nodelay(true);
+    if let Err(e) = tcp.set_nodelay(true) {
+        tracing::warn!(error = %e, "test server could not set TCP_NODELAY");
+    }
     match acceptor {
         Some(acceptor) => {
             if let Ok(stream) = leyline_bssl_tokio::accept(&acceptor, tcp).await {

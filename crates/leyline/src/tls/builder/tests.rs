@@ -50,7 +50,7 @@ fn decompression_bomb_is_capped() {
 
 #[test]
 fn unknown_min_tls_version_is_a_profile_error() {
-    assert!(profile_min_version(&Some("1.1".into())).is_err());
+    profile_min_version(&Some("1.1".into())).expect_err("expected Err");
     assert_eq!(
         profile_min_version(&Some("1.2".into())).unwrap(),
         Some(TlsMinVersion::Tls12)

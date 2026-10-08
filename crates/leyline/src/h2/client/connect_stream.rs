@@ -233,9 +233,12 @@ impl H2Client {
             write_rx,
             sink,
         };
-        self.tx.send(cmd).await.map_err(|_| H2Error::Stream {
-            stream_id: 0,
-            code: ErrorCode::RefusedStream,
+        self.tx.send(cmd).await.map_err(|e| {
+            tracing::debug!(error = %e, "h2 driver command channel closed");
+            H2Error::Stream {
+                stream_id: 0,
+                code: ErrorCode::RefusedStream,
+            }
         })?;
 
         let resp = match headers_rx.await {

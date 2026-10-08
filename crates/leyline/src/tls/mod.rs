@@ -31,8 +31,6 @@ pub(crate) use connector::FingerprintConnector;
 pub(crate) use builder::TlsMinVersion;
 #[cfg(feature = "http3")]
 pub(crate) use builder::apply_tls_with_trust;
-#[cfg(any(leyline_unstable_bssl, feature = "bench-internals"))]
-pub(crate) use builder::build_ssl_context;
 #[cfg(feature = "http3")]
 pub(crate) use hello::HelloOptions;
 pub(crate) use session_cache::SessionCache;
@@ -63,7 +61,7 @@ impl TlsContext {
         profile: &crate::profile::BrowserProfile,
         min_version: TlsMinVersion,
     ) -> Result<Self, TlsError> {
-        build_ssl_context(profile, min_version).map(Self)
+        profile.build_ssl_context(min_version).map(Self)
     }
 
     #[cfg(leyline_unstable_bssl)]

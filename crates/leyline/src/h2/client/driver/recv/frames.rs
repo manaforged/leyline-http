@@ -82,8 +82,9 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             .iter()
             .position(|(payload, _)| *payload == p.payload)
             && let Some((_, ack_tx)) = self.pings.remove(index)
+            && ack_tx.send(()).is_err()
         {
-            let _ = ack_tx.send(());
+            tracing::trace!("ping ack receiver dropped");
         }
         Ok(())
     }
@@ -124,10 +125,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             });
         }
         self.rst_flood.record(Instant::now())?;
-        if let Some(actor) = self.streams.get_mut(r.stream_id) {
-            let _ = actor
+        if let Some(actor) = self.streams.get_mut(r.stream_id)
+            && let Err(e) = actor
                 .state
-                .transition(StreamEvent::RecvRstStream(r.error_code));
+                .transition(StreamEvent::RecvRstStream(r.error_code))
+        {
+            tracing::debug!(error = ?e, stream_id = r.stream_id, "h2 RST_STREAM on stream in unexpected state");
         }
         let err = H2Error::Stream {
             stream_id: r.stream_id,

@@ -9,35 +9,37 @@ pub struct Ja3Input<'a> {
 }
 
 pub fn compute_ja3(input: &Ja3Input<'_>) -> String {
-    let raw = compute_ja3_raw(input);
+    let raw = input.compute_ja3_raw();
     use md5::Digest as _;
     format!("{:x}", md5::Md5::digest(raw.as_bytes()))
 }
 
-pub(crate) fn compute_ja3_raw(input: &Ja3Input<'_>) -> String {
-    let version = input.tls_record_version;
+impl Ja3Input<'_> {
+    pub(crate) fn compute_ja3_raw(&self) -> String {
+        let version = self.tls_record_version;
 
-    let ciphers: String = non_grease_cipher_ids(input.ciphers)
-        .iter()
-        .map(|id| id.to_string())
-        .collect::<Vec<_>>()
-        .join("-");
+        let ciphers: String = non_grease_cipher_ids(self.ciphers)
+            .iter()
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>()
+            .join("-");
 
-    let extensions: String = non_grease_ext_ids(input.extension_ids)
-        .iter()
-        .map(|id| id.to_string())
-        .collect::<Vec<_>>()
-        .join("-");
+        let extensions: String = non_grease_ext_ids(self.extension_ids)
+            .iter()
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>()
+            .join("-");
 
-    let curves: String = non_grease_curve_ids(input.curves)
-        .iter()
-        .map(|id| id.to_string())
-        .collect::<Vec<_>>()
-        .join("-");
+        let curves: String = non_grease_curve_ids(self.curves)
+            .iter()
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>()
+            .join("-");
 
-    let point_formats = "0";
+        let point_formats = "0";
 
-    format!("{version},{ciphers},{extensions},{curves},{point_formats}")
+        format!("{version},{ciphers},{extensions},{curves},{point_formats}")
+    }
 }
 
 #[cfg(test)]

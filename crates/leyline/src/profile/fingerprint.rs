@@ -78,15 +78,26 @@ impl BrowserProfile {
             profile.tls.fingerprint = None;
         }
         if let Some(raw) = spec.ja4_r.as_deref() {
-            ja4::apply(&mut profile.tls, raw).map_err(|why| config_error("JA4_r", why))?;
+            profile
+                .tls
+                .apply_ja4(raw)
+                .map_err(|why| config_error("JA4_r", why))?;
         }
         if let Some(raw) = spec.ja3.as_deref() {
-            ja3::apply(&mut profile.tls, raw).map_err(|why| config_error("JA3", why))?;
+            profile
+                .tls
+                .apply_ja3(raw)
+                .map_err(|why| config_error("JA3", why))?;
         }
-        crate::profile::permutation::validate(&profile.tls, false)
+        profile
+            .tls
+            .validate(false)
             .map_err(|why| config_error("TLS", why))?;
         if let Some(raw) = spec.akamai.as_deref() {
-            akamai::apply(&mut profile.h2, raw).map_err(|why| config_error("Akamai", why))?;
+            profile
+                .h2
+                .apply_akamai(raw)
+                .map_err(|why| config_error("Akamai", why))?;
         }
         if spec.header_order.is_some() {
             profile.meta.header_order = spec.header_order;
@@ -101,26 +112,28 @@ fn parse_list(field: &str, radix: u32, what: &str) -> Result<Vec<u16>, String> {
         .filter(|item| !item.is_empty())
         .map(|item| {
             u16::from_str_radix(item.trim(), radix)
-                .map_err(|_| format!("{what} value {item:?} is not a 16-bit number"))
+                .map_err(|e| format!("{what} value {item:?} is not a 16-bit number: {e}"))
         })
         .collect()
 }
 
-fn iana_names(
-    tls: &mut TlsProfile,
-    ids: &[u16],
-    lookup: fn(u16) -> Option<&'static str>,
-    what: &str,
-) -> Result<Vec<String>, String> {
-    let mut names = Vec::with_capacity(ids.len());
-    for &id in ids {
-        if is_grease(id) {
-            tls.grease = true;
-            continue;
+impl TlsProfile {
+    fn iana_names(
+        &mut self,
+        ids: &[u16],
+        lookup: fn(u16) -> Option<&'static str>,
+        what: &str,
+    ) -> Result<Vec<String>, String> {
+        let mut names = Vec::with_capacity(ids.len());
+        for &id in ids {
+            if is_grease(id) {
+                self.grease = true;
+                continue;
+            }
+            let name = lookup(id)
+                .ok_or_else(|| format!("{what} 0x{id:04x} ({id}) is not in the IANA registry"))?;
+            names.push(name.to_owned());
         }
-        let name = lookup(id)
-            .ok_or_else(|| format!("{what} 0x{id:04x} ({id}) is not in the IANA registry"))?;
-        names.push(name.to_owned());
+        Ok(names)
     }
-    Ok(names)
 }

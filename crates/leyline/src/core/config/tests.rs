@@ -147,8 +147,8 @@ fn proxy_url_validates_supported_schemes_and_hosts() {
             .as_str(),
         "http://proxy.example:8080"
     );
-    assert!(ProxyUrl::parse("ftp://proxy.example:21").is_err());
-    assert!(ProxyUrl::parse("http://").is_err());
+    ProxyUrl::parse("ftp://proxy.example:21").expect_err("expected Err");
+    ProxyUrl::parse("http://").expect_err("expected Err");
     assert_eq!(
         ProxyUrl::parse("https://proxy.example:8443")
             .unwrap()

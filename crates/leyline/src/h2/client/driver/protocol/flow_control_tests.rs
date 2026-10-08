@@ -20,7 +20,7 @@ fn cap_plus_one_errors_with_post_add_value() {
 #[test]
 fn two_max_increments_reject() {
     let step1 = checked_window_add(0, MAX_FLOW_WINDOW).unwrap();
-    assert!(checked_window_add(step1, MAX_FLOW_WINDOW).is_err());
+    checked_window_add(step1, MAX_FLOW_WINDOW).expect_err("expected Err");
 }
 
 #[test]
@@ -35,5 +35,5 @@ fn negative_delta_from_settings_is_permitted() {
 #[test]
 fn saturating_add_prevents_signed_overflow() {
     let res = checked_window_add(i64::MAX - 10, 100);
-    assert!(res.is_err());
+    res.expect_err("expected Err");
 }

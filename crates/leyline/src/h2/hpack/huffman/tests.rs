@@ -112,7 +112,7 @@ fn empty_input() {
 #[test]
 fn rejects_bad_padding() {
     let result = decode(&[0x00]);
-    assert!(result.is_err());
+    result.expect_err("expected Err");
 }
 
 #[test]

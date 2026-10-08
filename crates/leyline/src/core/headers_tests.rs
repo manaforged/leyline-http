@@ -3,19 +3,19 @@ use http::Method;
 
 #[test]
 fn method_rejects_crlf() {
-    assert!(Method::from_bytes(b"GET").is_ok());
-    assert!(Method::from_bytes(b"GET\r\nHost: evil").is_err());
-    assert!(Method::from_bytes(b"").is_err());
-    assert!(Method::from_bytes(b"GET /").is_err());
+    Method::from_bytes(b"GET").expect("expected Ok");
+    Method::from_bytes(b"GET\r\nHost: evil").expect_err("expected Err");
+    Method::from_bytes(b"").expect_err("expected Err");
+    Method::from_bytes(b"GET /").expect_err("expected Err");
 }
 
 #[test]
 fn header_rejects_crlf_injection() {
-    assert!(name("x-request-id").is_ok());
-    assert!(value("1").is_ok());
-    assert!(value("1\r\nHost: evil").is_err());
-    assert!(name("x-a\r\nHost").is_err());
-    assert!(name("x a").is_err());
-    assert!(name("x-a\n").is_err());
-    assert!(value("a\nb").is_err());
+    name("x-request-id").expect("expected Ok");
+    value("1").expect("expected Ok");
+    value("1\r\nHost: evil").expect_err("expected Err");
+    name("x-a\r\nHost").expect_err("expected Err");
+    name("x a").expect_err("expected Err");
+    name("x-a\n").expect_err("expected Err");
+    value("a\nb").expect_err("expected Err");
 }

@@ -469,12 +469,19 @@ Leyline keeps them so the API stays complete.
 
 ## Update cadence
 
-- **Chrome and Firefox:** a profile for each new stable major release. Both
-  ship a major release every four weeks.
+- **Chrome, Brave, and Firefox:** a profile for each new stable major
+  release. Chrome and Firefox ship a major release every four weeks, and
+  Brave follows Chromium. A daily job captures each new major on Linux,
+  macOS, and Windows and opens a pull request with the profile.
+- **Opera:** a brand row for each new Opera release, from the Chromium
+  version its user agent names. The same daily job adds it.
+- **BoringSSL:** the bundled revision follows the revision that the newest
+  Chrome profile ships. The daily job moves it, and a Chrome profile and its
+  BoringSSL update land together.
 - **Safari:** a profile when Apple ships an OS release, because Safari's TLS
   stack changes with macOS and iOS.
-- **Brave, OkHttp, and CFNetwork:** a recapture when the upstream engine
-  version in `captured_against` changes.
+- **OkHttp and CFNetwork:** a recapture when the upstream engine version in
+  `captured_against` changes.
 
 Every new profile records the exact build in `captured_against`, and the JA4
 and HTTP/2 reference values from that capture.

@@ -1,0 +1,317 @@
+name: capture
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+concurrency:
+  group: leyline-capture
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+  PYTHONPATH: scripts
+  GITHUB_TOKEN: ${{ github.token }}
+  GIT_AUTHOR_NAME: Thomas Gardiner
+  GIT_AUTHOR_EMAIL: thomgardiner@gmail.com
+  GIT_COMMITTER_NAME: Thomas Gardiner
+  GIT_COMMITTER_EMAIL: thomgardiner@gmail.com
+
+jobs:
+  plan:
+    name: missing profiles
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      capture: ${{ steps.plan.outputs.capture }}
+      brand: ${{ steps.plan.outputs.brand }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - id: plan
+        run: |
+          plan="$(python -m profile_capture plan)"
+          echo "capture=$(jq -c .capture <<<"$plan")" >> "$GITHUB_OUTPUT"
+          echo "brand=$(jq -c .brand <<<"$plan")" >> "$GITHUB_OUTPUT"
+
+  capture:
+    name: capture ${{ matrix.target.family }} ${{ matrix.target.major }} (${{ matrix.os }})
+    needs: plan
+    if: needs.plan.outputs.capture != '[]'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+        target: ${{ fromJSON(needs.plan.outputs.capture) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Xvfb
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
+      - name: capture
+        shell: bash
+        run: >-
+          python -m profile_capture
+          ${{ matrix.target.family }} --major ${{ matrix.target.major }} --capture-only
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: captures-${{ matrix.target.family }}-${{ matrix.target.major }}-${{ runner.os }}
+          path: crates/leyline/profiles/captures/${{ matrix.target.family }}-${{ matrix.target.major }}.*
+          if-no-files-found: error
+
+  land:
+    name: land ${{ matrix.target.family }} ${{ matrix.target.major }}
+    needs: [plan, capture]
+    if: ${{ !cancelled() && needs.plan.outputs.capture != '[]' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      pull-requests: write
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.plan.outputs.capture) }}
+    env:
+      FAMILY: ${{ matrix.target.family }}
+      MAJOR: ${{ matrix.target.major }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: captures-${{ matrix.target.family }}-${{ matrix.target.major }}-*
+          path: crates/leyline/profiles/captures
+          merge-multiple: true
+
+      - name: captures from every OS
+        run: |
+          for os in linux macos windows; do
+            compgen -G "crates/leyline/profiles/captures/$FAMILY-$MAJOR.*-$os.json" >/dev/null || { echo "no $FAMILY $MAJOR capture from $os"; exit 1; }
+          done
+
+      - name: Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: capture-land
+          cache-workspace-crates: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install cargo-truesight
+        run: cargo install --locked --git https://github.com/manaforged/truesight --rev d7248e66b77adb9d50d92f5a38075cb9ece8581b cargo-truesight
+
+      - name: land
+        run: |
+          set +e
+          python -m profile_capture "$FAMILY" --major "$MAJOR" --land --sync | tee "$RUNNER_TEMP/land.txt"
+          status=${PIPESTATUS[0]}
+          if [[ $status -ne 0 && $status -ne 2 ]]; then exit "$status"; fi
+
+      - name: profile tests
+        run: |
+          cargo test -p leyline-http --locked --features bench-internals --test it -- fingerprint_conformance:: profile_validation:: profile_builtin::
+
+      - name: open or update the pull request
+        run: python scripts/capture-pr.py profile "$RUNNER_TEMP/land.txt" --family "$FAMILY" --major "$MAJOR"
+
+  brand:
+    name: brand row ${{ matrix.target.family }} ${{ matrix.target.major }}
+    needs: plan
+    if: needs.plan.outputs.brand != '[]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      pull-requests: write
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.plan.outputs.brand) }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: capture the brand row
+        shell: bash
+        run: python -m profile_capture ${{ matrix.target.family }} | tee "$RUNNER_TEMP/brand.txt"
+
+      - name: open or update the pull request
+        run: python scripts/capture-pr.py brand "$RUNNER_TEMP/brand.txt" --major ${{ matrix.target.major }}
+
+  boringssl:
+    name: BoringSSL revision
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write
+    outputs:
+      bumped: ${{ steps.bump.outputs.bumped }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - id: bump
+        run: |
+          set +e
+          python scripts/bssl-bump.py > "$RUNNER_TEMP/bssl.txt" 2>&1
+          status=$?
+          cat "$RUNNER_TEMP/bssl.txt"
+          if [[ $status -eq 3 ]]; then
+            number="$(gh issue list --state open --search '"Update BoringSSL to" in:title' --json number --jq '.[0].number // empty')"
+            if [[ -n "$number" ]]; then
+              { echo "The patches do not apply to the new revision, so the capture workflow cannot move it."; echo; echo '```'; cat "$RUNNER_TEMP/bssl.txt"; echo '```'; } > "$RUNNER_TEMP/issue.md"
+              gh issue comment "$number" --edit-last --body-file "$RUNNER_TEMP/issue.md" || gh issue comment "$number" --body-file "$RUNNER_TEMP/issue.md"
+            fi
+            echo "bumped=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ $status -ne 0 ]]; then exit "$status"; fi
+          if grep -q '^current' "$RUNNER_TEMP/bssl.txt"; then echo "bumped=false" >> "$GITHUB_OUTPUT"; else echo "bumped=true" >> "$GITHUB_OUTPUT"; fi
+
+  bindings:
+    name: bindings (${{ matrix.target }})
+    needs: boringssl
+    if: needs.boringssl.outputs.bumped == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-24.04 }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-24.04-arm }
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-24.04 }
+          - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04 }
+          - { target: aarch64-apple-darwin, os: macos-15 }
+          - { target: x86_64-pc-windows-msvc, os: windows-2025 }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - name: Rust target
+        run: rustup target add ${{ matrix.target }}
+
+      - uses: ilammy/setup-nasm@72793074d3c8cdda771dba85f6deafe00623038b # v1.5.2
+        if: runner.os == 'Windows'
+
+      - name: Install the musl toolchain
+        if: endsWith(matrix.target, '-linux-musl')
+        uses: taiki-e/setup-cross-toolchain-action@12b7ad4acfa95a1476779d6c06699b96ec1691f8 # v1
+        with:
+          target: ${{ matrix.target }}
+
+      - name: move BoringSSL
+        shell: bash
+        run: python scripts/bssl-bump.py
+
+      - name: regenerate the bindings
+        shell: bash
+        run: scripts/regen-bssl-bindings.sh ${{ matrix.target }}
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bindings-${{ matrix.target }}
+          path: crates/leyline-bssl-sys/bindings/${{ matrix.target }}.rs
+          if-no-files-found: error
+
+  boringssl-land:
+    name: land the BoringSSL revision
+    needs: [boringssl, bindings]
+    if: needs.boringssl.outputs.bumped == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: move BoringSSL
+        shell: bash
+        run: python scripts/bssl-bump.py | tee "$RUNNER_TEMP/bssl.txt"
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: bindings-*
+          path: crates/leyline-bssl-sys/bindings
+          merge-multiple: true
+
+      - name: Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: capture-boringssl
+          cache-workspace-crates: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: tests
+        run: cargo test -p leyline-http --locked --features full,bench-internals
+
+      - name: open or update the pull request
+        run: python scripts/capture-pr.py boringssl "$RUNNER_TEMP/bssl.txt"

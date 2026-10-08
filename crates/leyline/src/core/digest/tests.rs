@@ -22,15 +22,15 @@ fn rfc7616_md5_vector() {
         domain: Vec::new(),
     };
     let auth = DigestAuth::new("Mufasa", "Circle of Life");
-    let h = build_auth_header(
-        &challenge,
-        &auth,
-        "GET",
-        "/dir/index.html",
-        1,
-        "f2/wE4q74E6zIJEtWaHKaf5wv/H5QzzpXusqGemxURZJ",
-    )
-    .expect("auth-only qop is supported");
+    let h = challenge
+        .build_auth_header(
+            &auth,
+            "GET",
+            "/dir/index.html",
+            1,
+            "f2/wE4q74E6zIJEtWaHKaf5wv/H5QzzpXusqGemxURZJ",
+        )
+        .expect("auth-only qop is supported");
     assert!(h.starts_with("Digest username=\"Mufasa\""));
     assert!(h.contains("algorithm=MD5"));
     assert!(h.contains("qop=auth"));
@@ -51,7 +51,9 @@ fn refuses_auth_int_only_challenge() {
     };
     let auth = DigestAuth::new("u", "p");
     assert!(
-        build_auth_header(&challenge, &auth, "GET", "/x", 1, "cn").is_none(),
+        challenge
+            .build_auth_header(&auth, "GET", "/x", 1, "cn")
+            .is_none(),
         "auth-int-only challenge must be refused, not answered with a fake auth HA2"
     );
 }
@@ -68,7 +70,9 @@ fn quoted_values_escape_backslash_and_quote() {
         domain: Vec::new(),
     };
     let auth = DigestAuth::new("fo\"o", "p");
-    let header = build_auth_header(&challenge, &auth, "GET", "/x", 1, "cn\\").expect("auth qop");
+    let header = challenge
+        .build_auth_header(&auth, "GET", "/x", 1, "cn\\")
+        .expect("auth qop");
     assert!(header.contains("username=\"fo\\\"o\""), "{header}");
     assert!(header.contains("opaque=\"o\\\"p\""), "{header}");
     assert!(header.contains("cnonce=\"cn\\\\\""), "{header}");
@@ -127,8 +131,9 @@ fn sha256_response_matches_manual_computation() {
         domain: Vec::new(),
     };
     let auth = DigestAuth::new("u", "p");
-    let header =
-        build_auth_header(&challenge, &auth, "GET", "/x", 1, "cn").expect("qop=auth is supported");
+    let header = challenge
+        .build_auth_header(&auth, "GET", "/x", 1, "cn")
+        .expect("qop=auth is supported");
 
     let ha1 = Algorithm::Sha256.hash_hex(b"u:r:p");
     let ha2 = Algorithm::Sha256.hash_hex(b"GET:/x");

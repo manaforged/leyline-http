@@ -4,11 +4,19 @@ use crate::core::error::{Error, Kind, Result};
 use crate::profile::HeaderAnchor;
 use crate::profile::preset::HeaderPair;
 
+#[expect(
+    clippy::map_err_ignore,
+    reason = "the public HeaderList API takes impl TryInto with no bound on the error type, so the source cannot be kept"
+)]
 pub(crate) fn name(n: impl TryInto<HeaderName>) -> Result<HeaderName> {
     n.try_into()
         .map_err(|_| Error::new(Kind::Request).with_message("invalid header name"))
 }
 
+#[expect(
+    clippy::map_err_ignore,
+    reason = "the public HeaderList API takes impl TryInto with no bound on the error type, so the source cannot be kept"
+)]
 pub(crate) fn value(v: impl TryInto<HeaderValue>) -> Result<HeaderValue> {
     v.try_into()
         .map_err(|_| Error::new(Kind::Request).with_message("invalid header value"))

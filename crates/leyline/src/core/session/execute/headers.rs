@@ -15,7 +15,10 @@ use crate::profile::preset::HeaderPair;
 use crate::util::sensitive_header;
 
 impl Session {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "each argument is a distinct per-attempt input with no shared owner"
+    )]
     pub(super) fn attempt_headers(
         &self,
         preset: Option<Preset>,

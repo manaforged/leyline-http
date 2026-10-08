@@ -219,24 +219,24 @@ impl StreamActor {
         if let Some(ResponseSink::StreamingEx { headers_tx, .. }) = self.response_tx.as_mut()
             && let Some(tx) = headers_tx.take()
         {
-            let _ = tx.send(Ok(H2ResponseEx {
+            drop(tx.send(Ok(H2ResponseEx {
                 status: self.status,
                 headers: std::mem::take(&mut self.resp_headers),
                 body: ResponseBody::Buffered(Vec::new()),
                 trailers: None,
-            }));
+            })));
         }
     }
 
     fn deliver_ok(&mut self) {
         match self.response_tx.take() {
             Some(ResponseSink::Buffered(tx)) => {
-                let _ = tx.send(Ok(H2ResponseEx {
+                drop(tx.send(Ok(H2ResponseEx {
                     status: self.status,
                     headers: std::mem::take(&mut self.resp_headers),
                     body: ResponseBody::Buffered(std::mem::take(&mut self.body)),
                     trailers: self.trailers.take(),
-                }));
+                })));
             }
             Some(ResponseSink::StreamingEx {
                 body_tx, terminal, ..
@@ -254,7 +254,7 @@ impl StreamActor {
     fn deliver_err(&mut self, err: H2Error) {
         match self.response_tx.take() {
             Some(ResponseSink::Buffered(tx) | ResponseSink::Adaptive { tx, .. }) => {
-                let _ = tx.send(Err(err));
+                drop(tx.send(Err(err)));
             }
             Some(ResponseSink::StreamingEx {
                 headers_tx,
@@ -262,7 +262,7 @@ impl StreamActor {
                 ..
             }) => {
                 if let Some(tx) = headers_tx {
-                    let _ = tx.send(Err(err));
+                    drop(tx.send(Err(err)));
                 } else {
                     drop(terminal.send(Err(io::Error::other(format!("h2 stream failed: {err}")))));
                 }
@@ -322,11 +322,11 @@ struct Driver<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> {
 fn send_err_to_sink(sink: ResponseSink, err: H2Error) {
     match sink {
         ResponseSink::Buffered(tx) | ResponseSink::Adaptive { tx, .. } => {
-            let _ = tx.send(Err(err));
+            drop(tx.send(Err(err)));
         }
         ResponseSink::StreamingEx { headers_tx, .. } => {
             if let Some(tx) = headers_tx {
-                let _ = tx.send(Err(err));
+                drop(tx.send(Err(err)));
             }
         }
     }

@@ -5,7 +5,7 @@ use crate::core::error::{Error, Kind, Result};
 use crate::core::proxy_pool::ProxyPool;
 use crate::profile::{Browser, Platform};
 
-use super::super::proxy::{InvalidEnvProxy, apply_env_proxy};
+use super::super::proxy::InvalidEnvProxy;
 use super::SessionBuilder;
 
 impl SessionBuilder {
@@ -86,7 +86,7 @@ impl SessionBuilder {
         }
         #[cfg(not(feature = "socks"))]
         self.check_socks_feature()?;
-        self.proxy_config = apply_env_proxy(std::mem::take(&mut self.proxy_config), on_invalid)?;
+        self.proxy_config = std::mem::take(&mut self.proxy_config).apply_env_proxy(on_invalid)?;
         Ok(())
     }
 

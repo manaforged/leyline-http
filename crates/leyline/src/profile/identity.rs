@@ -22,29 +22,31 @@ impl std::fmt::Display for IdentityError {
     }
 }
 
-pub(crate) fn resolve_identity(
-    profile: &BrowserProfile,
-    platform: Platform,
-    brand: ChromiumBrand,
-) -> Result<PlatformIdentity, IdentityError> {
-    let mut identity = profile
-        .identity_for(platform)
-        .ok_or_else(|| IdentityError::NoPlatform(profile.meta.name.clone(), platform))?
-        .clone();
-    if identity.accept_language.is_none() {
-        identity.accept_language = BrowserProfile::bare_shared()
+impl BrowserProfile {
+    pub(crate) fn resolve_identity(
+        &self,
+        platform: Platform,
+        brand: ChromiumBrand,
+    ) -> Result<PlatformIdentity, IdentityError> {
+        let mut identity = self
             .identity_for(platform)
-            .and_then(|bare| bare.accept_language.clone());
+            .ok_or_else(|| IdentityError::NoPlatform(self.meta.name.clone(), platform))?
+            .clone();
+        if identity.accept_language.is_none() {
+            identity.accept_language = BrowserProfile::bare_shared()
+                .identity_for(platform)
+                .and_then(|bare| bare.accept_language.clone());
+        }
+        if brand == ChromiumBrand::Chrome {
+            return Ok(identity);
+        }
+        let chromium_major = self
+            .meta
+            .chromium_major
+            .ok_or(IdentityError::NotChromium(brand))?;
+        brand
+            .apply(chromium_major, platform, &mut identity)
+            .map_err(IdentityError::Brand)?;
+        Ok(identity)
     }
-    if brand == ChromiumBrand::Chrome {
-        return Ok(identity);
-    }
-    let chromium_major = profile
-        .meta
-        .chromium_major
-        .ok_or(IdentityError::NotChromium(brand))?;
-    brand
-        .apply(chromium_major, platform, &mut identity)
-        .map_err(IdentityError::Brand)?;
-    Ok(identity)
 }

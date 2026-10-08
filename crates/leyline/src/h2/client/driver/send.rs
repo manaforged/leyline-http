@@ -89,10 +89,13 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             if next_chunk.is_none()
                 && let Some(cause) = self.take_body_error(stream_id)
             {
-                let _ = self
+                if let Err(e) = self
                     .writer
                     .write_rst_stream(stream_id, ErrorCode::InternalError)
-                    .await;
+                    .await
+                {
+                    tracing::warn!(error = %e, stream_id, "h2 RST_STREAM write failed");
+                }
                 self.fail_stream(stream_id, H2Error::RequestBody(cause));
                 return Ok(());
             }

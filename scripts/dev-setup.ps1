@@ -62,8 +62,8 @@ Ok "leyline-http all-features check passed"
 
 if (-not $SkipTests) {
     Step "offline smoke tests"
-    Run "cargo" @("test", "-p", "leyline-http", "--test", "parity_builder")
-    Run "cargo" @("test", "-p", "leyline-http", "--test", "tls_happy_eyeballs")
+    Run "cargo" @("test", "-p", "leyline-http", "--test", "it", "parity_builder::")
+    Run "cargo" @("test", "-p", "leyline-http", "--test", "it", "tls_happy_eyeballs::")
     Ok "developer setup looks ready"
 }
 
@@ -71,4 +71,4 @@ Write-Host ""
 Write-Host "Next useful commands:"
 Write-Host "  ./scripts/verify.sh"
 Write-Host "  cargo test --workspace --exclude leyline-quiche"
-Write-Host "  cargo test -p leyline-http --test tls_peet -- --ignored"
+Write-Host "  cargo test -p leyline-http --features bench-internals --test it tls_peet:: -- --ignored"

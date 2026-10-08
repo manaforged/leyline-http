@@ -131,7 +131,10 @@ impl Stage {
             feature = "compression-deflate",
             feature = "compression-zstd"
         )),
-        expect(unused_variables)
+        expect(
+            unused_variables,
+            reason = "the cap is read only by an enabled decoder"
+        )
     )]
     pub(super) fn new(encoding: &str, cap: Cap) -> Result<Self> {
         match encoding {

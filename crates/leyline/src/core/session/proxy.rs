@@ -25,41 +25,39 @@ pub(crate) struct EnvProxy {
     pub(crate) value: String,
 }
 
-pub(super) fn apply_env_proxy(
-    config: ProxyConfig,
-    on_invalid: InvalidEnvProxy,
-) -> Result<ProxyConfig> {
-    apply_env_proxy_from(
-        config,
-        on_invalid,
-        |k| std::env::var(k).ok(),
-        |k| std::env::var_os(k).is_some(),
-    )
-}
+impl ProxyConfig {
+    pub(super) fn apply_env_proxy(self, on_invalid: InvalidEnvProxy) -> Result<ProxyConfig> {
+        self.apply_env_proxy_from(
+            on_invalid,
+            |k| std::env::var(k).ok(),
+            |k| std::env::var_os(k).is_some(),
+        )
+    }
 
-pub(super) fn apply_env_proxy_from<F, G>(
-    config: ProxyConfig,
-    on_invalid: InvalidEnvProxy,
-    get_var: F,
-    has_var: G,
-) -> Result<ProxyConfig>
-where
-    F: Fn(&str) -> Option<String>,
-    G: Fn(&str) -> bool,
-{
-    if !config.rules().is_empty() || !config.uses_env() {
-        return Ok(config);
-    }
-    let Some(EnvProxy { variable, value }) = env_proxy_from(get_var, has_var) else {
-        return Ok(config);
-    };
-    if ProxyUrl::parse(&value).is_ok() {
-        return Ok(config.set_default_proxy(value).set_from_env());
-    }
-    let config = config.reject_env(variable);
-    match (on_invalid, config.rejection(Kind::Config)) {
-        (InvalidEnvProxy::FailBuild, Some(error)) => Err(error),
-        _ => Ok(config),
+    pub(super) fn apply_env_proxy_from<F, G>(
+        self,
+        on_invalid: InvalidEnvProxy,
+        get_var: F,
+        has_var: G,
+    ) -> Result<ProxyConfig>
+    where
+        F: Fn(&str) -> Option<String>,
+        G: Fn(&str) -> bool,
+    {
+        if !self.rules().is_empty() || !self.uses_env() {
+            return Ok(self);
+        }
+        let Some(EnvProxy { variable, value }) = env_proxy_from(get_var, has_var) else {
+            return Ok(self);
+        };
+        if ProxyUrl::parse(&value).is_ok() {
+            return Ok(self.set_default_proxy(value).set_from_env());
+        }
+        let config = self.reject_env(variable);
+        match (on_invalid, config.rejection(Kind::Config)) {
+            (InvalidEnvProxy::FailBuild, Some(error)) => Err(error),
+            _ => Ok(config),
+        }
     }
 }
 

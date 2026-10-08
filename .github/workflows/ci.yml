@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -46,6 +46,8 @@ jobs:
         with:
           key: ci-msrv
           workspaces: ". -> target/verify"
+          cache-workspace-crates: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: verify gates
         run: scripts/verify.sh --only msrv
@@ -55,7 +57,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -66,6 +68,8 @@ jobs:
         with:
           key: ci-clippy
           workspaces: ". -> target/verify"
+          cache-workspace-crates: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: verify gates
         run: scripts/verify.sh --only clippy
@@ -75,7 +79,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -86,6 +90,8 @@ jobs:
         with:
           key: ci-features
           workspaces: ". -> target/verify"
+          cache-workspace-crates: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: verify gates
         run: scripts/verify.sh --only features
@@ -95,7 +101,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -106,6 +112,8 @@ jobs:
         with:
           key: ci-rustdoc
           workspaces: ". -> target/verify"
+          cache-workspace-crates: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: verify gates
         run: scripts/verify.sh --only doc
@@ -115,7 +123,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -126,6 +134,8 @@ jobs:
         with:
           key: ci-test
           workspaces: ". -> target/verify"
+          cache-workspace-crates: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: verify gates
         run: scripts/verify.sh --only test
@@ -138,7 +148,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -151,6 +161,8 @@ jobs:
         with:
           key: ci-api
           workspaces: ". -> target/verify"
+          cache-workspace-crates: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-truesight
         run: cargo install --locked --git https://github.com/manaforged/truesight --rev d7248e66b77adb9d50d92f5a38075cb9ece8581b cargo-truesight
@@ -167,7 +179,7 @@ jobs:
       matrix:
         os: [macos-15, windows-2025]
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
           persist-credentials: false
@@ -181,6 +193,8 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: ci-platforms-${{ matrix.os }}
+          cache-workspace-crates: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: cargo test (full features)
         run: cargo test -p leyline-http --locked --features full,bench-internals
@@ -194,7 +208,7 @@ jobs:
       matrix:
         target: [x86_64-unknown-linux-musl, aarch64-unknown-linux-musl]
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -207,6 +221,8 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: ci-musl-${{ matrix.target }}
+          cache-workspace-crates: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - uses: taiki-e/setup-cross-toolchain-action@12b7ad4acfa95a1476779d6c06699b96ec1691f8 # v1
         with:
@@ -223,7 +239,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           submodules: recursive
@@ -240,6 +256,8 @@ jobs:
         with:
           key: ci-package
           workspaces: ". -> target/verify"
+          cache-workspace-crates: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: verify gates
         run: scripts/verify.sh --only package
@@ -249,7 +267,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -268,7 +286,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -279,6 +297,8 @@ jobs:
         with:
           key: ci-semver
           workspaces: ". -> target/verify"
+          cache-workspace-crates: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - uses: taiki-e/install-action@0758d235715de2f3551eacc980d9ae8fce9342c3 # v2.87.3
         with:
@@ -292,7 +312,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -303,6 +323,8 @@ jobs:
         with:
           key: ci-benches
           workspaces: ". -> target/verify"
+          cache-workspace-crates: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: verify gates
         run: scripts/verify.sh --only benches
@@ -312,7 +334,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -332,7 +354,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -343,6 +365,8 @@ jobs:
         with:
           key: ci-subcrates
           workspaces: ". -> target/verify"
+          cache-workspace-crates: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: verify gates
         run: scripts/verify.sh --only subcrates

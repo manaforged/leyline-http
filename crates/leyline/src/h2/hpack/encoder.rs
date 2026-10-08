@@ -4,6 +4,7 @@ use super::huffman;
 use super::integer;
 use super::table::{self, DynamicTable};
 
+#[derive(Default)]
 pub struct Encoder {
     dynamic: DynamicTable,
     pending_size_update: Option<usize>,
@@ -136,12 +137,6 @@ impl Encoder {
                 .map(|(n, _)| n.clone())
                 .unwrap_or_default()
         }
-    }
-}
-
-impl Default for Encoder {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

@@ -256,7 +256,7 @@ guide = "docs/guide/cookies.md"
 [[task]]
 name = "Identity values"
 call = "Browser::identity"
-owner = "profile::identity::resolve_identity"
+owner = "BrowserProfile::resolve_identity"
 guide = "docs/guide/sessions.md"
 
 [[task]]

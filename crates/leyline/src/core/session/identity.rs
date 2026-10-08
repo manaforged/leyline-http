@@ -2,9 +2,7 @@ use crate::core::error::{Error, Kind, Result};
 use crate::profile::browser::digest;
 use crate::profile::{Browser, ChromiumBrand, Family, Platform};
 
-use super::builder::derive::{
-    DerivedIdentity, IdentityInputs, IdentitySource, derive_identity, resolve_presented,
-};
+use super::builder::derive::{DerivedIdentity, IdentityInputs, IdentitySource, derive_identity};
 use super::{Session, SessionInner};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -140,12 +138,10 @@ impl Identity {
     }
 
     pub(crate) fn user_agent(self) -> Result<String> {
-        resolve_presented(
-            self.http.platform_profile(self.platform),
-            self.platform,
-            ChromiumBrand::Chrome,
-        )
-        .map(|identity| identity.user_agent)
+        self.http
+            .platform_profile(self.platform)
+            .resolve_presented(self.platform, ChromiumBrand::Chrome)
+            .map(|identity| identity.user_agent)
     }
 }
 

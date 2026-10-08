@@ -85,8 +85,8 @@ cargo check -p leyline-http --all-features
 ok "leyline-http all-features check passed"
 
 step "offline smoke tests"
-cargo test -p leyline-http --test parity_builder
-cargo test -p leyline-http --test tls_happy_eyeballs
+cargo test -p leyline-http --test it parity_builder::
+cargo test -p leyline-http --features bench-internals --test it tls_happy_eyeballs::
 ok "developer setup looks ready"
 
 cat <<'EOF'
@@ -94,5 +94,5 @@ cat <<'EOF'
 Next useful commands:
   ./scripts/verify.sh
   cargo test --workspace --exclude leyline-quiche
-  cargo test -p leyline-http --test tls_peet -- --ignored
+  cargo test -p leyline-http --features bench-internals --test it tls_peet:: -- --ignored
 EOF

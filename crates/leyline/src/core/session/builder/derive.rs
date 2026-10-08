@@ -8,11 +8,8 @@ use crate::core::{CompressionConfig, Identity};
 use crate::h2::H2Config;
 use crate::profile::{
     Browser, BrowserProfile, ChromiumBrand, HeaderStyle, Platform, PlatformIdentity,
-    resolve_identity,
 };
 use crate::tcp::TcpProfile;
-
-use super::connect::audit_cache;
 
 pub(in crate::core::session) enum IdentitySource {
     Bare,
@@ -86,13 +83,15 @@ impl Selected {
     }
 }
 
-pub(in crate::core::session) fn resolve_presented(
-    profile: &BrowserProfile,
-    platform: Platform,
-    brand: ChromiumBrand,
-) -> Result<PlatformIdentity> {
-    resolve_identity(profile, platform, brand)
-        .map_err(|e| Error::new(Kind::Config).with_message(e.to_string()))
+impl BrowserProfile {
+    pub(in crate::core::session) fn resolve_presented(
+        &self,
+        platform: Platform,
+        brand: ChromiumBrand,
+    ) -> Result<PlatformIdentity> {
+        self.resolve_identity(platform, brand)
+            .map_err(|e| Error::new(Kind::Config).with_message(e.to_string()))
+    }
 }
 
 fn session_user_agent(default_headers: &[(String, String)]) -> Option<&str> {
@@ -116,26 +115,26 @@ fn session_accept_language(
     }
 }
 
-fn derive_h2(profile: &BrowserProfile, platform: Platform, max_body: usize) -> Result<H2Config> {
-    let resolved = profile.h2.resolve_for_platform(platform)?;
-    let mut config = H2Config::from_profile(&resolved)?;
-    config.max_response_body_bytes = max_body;
-    Ok(config)
+impl BrowserProfile {
+    fn derive_h2(&self, platform: Platform, max_body: usize) -> Result<H2Config> {
+        let resolved = self.h2.resolve_for_platform(platform)?;
+        let mut config = H2Config::from_profile(&resolved)?;
+        config.max_response_body_bytes = max_body;
+        Ok(config)
+    }
 }
 
 #[cfg(feature = "http3")]
-fn derive_h3(
-    profile: &BrowserProfile,
-    max_body: usize,
-    required: bool,
-) -> Result<Option<crate::quic::H3Config>> {
-    match crate::quic::H3Config::from_profile(profile) {
-        Ok(mut config) => {
-            config.max_response_body_bytes = max_body as u64;
-            Ok(Some(config))
+impl BrowserProfile {
+    fn derive_h3(&self, max_body: usize, required: bool) -> Result<Option<crate::quic::H3Config>> {
+        match crate::quic::H3Config::from_profile(self) {
+            Ok(mut config) => {
+                config.max_response_body_bytes = max_body as u64;
+                Ok(Some(config))
+            }
+            Err(error) if required => Err(error),
+            Err(_) => Ok(None),
         }
-        Err(error) if required => Err(error),
-        Err(_) => Ok(None),
     }
 }
 
@@ -153,13 +152,13 @@ pub(in crate::core::session) fn derive_identity(
         .header_style()
         .unwrap_or(http_profile.meta.header_style);
     let header_order = http_profile.meta.header_order.clone();
-    let resolved = resolve_presented(http_profile, platform, brand)?;
-    let h2_config = derive_h2(&profile, platform, max_body)?;
+    let resolved = http_profile.resolve_presented(platform, brand)?;
+    let h2_config = profile.derive_h2(platform, max_body)?;
     #[cfg(feature = "http3")]
-    let h3_config = derive_h3(&profile, max_body, input.h3_required)?;
+    let h3_config = profile.derive_h3(max_body, input.h3_required)?;
     let audit_tls = input
         .audit
-        .then(|| Arc::new(audit_cache(&profile, &h2_config, input.tcp)));
+        .then(|| Arc::new(profile.audit_cache(&h2_config, input.tcp)));
 
     Ok(DerivedIdentity {
         browser: selected.browser,

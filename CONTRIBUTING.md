@@ -85,7 +85,7 @@ default, `browser` and `emulator` for Safari on iOS and OkHttp, and `native`
 and `emulator` for CFNetwork. Keep the `ja4` and `akamai` recorded reference
 values next to the fields that produce them.
 
-The offline conformance test, `crates/leyline/tests/fingerprint_conformance.rs`,
+The offline conformance test, `crates/leyline/tests/it/fingerprint_conformance.rs`,
 compares each profile's HTTP/2 fingerprint with its `akamai` value and its JA4
 with its `ja4` value. It puts each result into one of five states:
 
@@ -107,20 +107,32 @@ check runs `cargo truesight check` and fails when a file is stale.
 profiles; run it with `status` to see which versions are missing. It captures
 from these sources only:
 
-- Chrome: the Chrome binary named by `LEYLINE_CHROME`, the installed Google
-  Chrome on macOS, or the stable package from Google's apt repository on
-  Linux. On Linux, the script compares the package with the SHA-256 in the
-  repository's `Packages` index. It refuses Chrome for Testing and
-  `chrome-headless-shell`.
-- Firefox: the official release build from Mozilla's download server.
+- Chrome: the Chrome binary named by `LEYLINE_CHROME`, or Google's stable
+  package for the host: the apt repository on Linux, the disk image on macOS,
+  and the enterprise installer on Windows. On Linux, the script compares the
+  package with the SHA-256 in the repository's `Packages` index. On macOS and
+  Windows, it checks Google's code signature. It refuses Chrome for Testing
+  and `chrome-headless-shell`.
+- Firefox: the official release build from Mozilla's download server. On
+  macOS and Windows, the script checks Mozilla's code signature.
+- Brave: `LEYLINE_BRAVE`, Brave's apt repository on Linux, or the disk image
+  and standalone installer of Brave's GitHub release on macOS and Windows,
+  checked against the SHA-256 digest of the release asset and Brave's code
+  signature.
+- Opera: the Linux package from Opera's download server, checked against the
+  SHA-256 file next to it. Opera is a brand on the Chrome profiles, so
+  `scripts/profile-oneshot.sh opera` reads the Chromium version from the user
+  agent and adds the row to `crates/leyline/profiles/brands.toml`.
 - Safari: Safari.app, driven by `safaridriver`. Mobile Safari has no automated
   capture.
 
-The script runs Chrome with `--headless=new` and Firefox with `--headless`.
-On Linux it also captures Firefox's HTTP/3 fingerprint headful under Xvfb
-(`xvfb-run`), twice. It sets Chrome's user agent itself with `--user-agent`. Before it lands a
-profile, it checks the Chrome binary's `--version` output or the Safari bundle
-identifier. It also checks that the user agent the capture server saw names
+The script drives Chrome, Brave, and Opera with `--headless=new` through the
+DevTools protocol, and Firefox with `--headless` through Marionette. For
+Chrome and Brave it also captures HTTP/3 twice on every host, with QUIC forced
+for the HTTP/3 capture server. On Linux it captures Firefox's HTTP/3
+fingerprint headful under Xvfb (`xvfb-run`), twice. It sets the Chrome and
+Brave user agent itself with `--user-agent`. Before it lands a profile, it
+checks the browser's version output or the Safari bundle identifier. It also checks that the user agent the capture server saw names
 the expected browser and contains no `Headless`; for Chrome, that check
 confirms the script's own flag. The script records the exact build in
 `captured_against` and writes `capture = "browser"`. It exits with an error
@@ -132,6 +144,8 @@ public address outside `dst_ip`. To capture on several hosts, run
 `scripts/profile-oneshot.sh firefox --capture-only` on each, copy the capture
 files to one checkout, and land them with
 `scripts/profile-oneshot.sh firefox --major 157 --land firefox-157.0`.
+`--land` with no build lands the newest stored build for each OS, so Chrome
+builds that differ by patch version per OS land as one profile.
 
 Landing starts from the previous profile of the family and changes only what
 the captures show: the version, the user agents, the build in
@@ -167,7 +181,28 @@ When a release has no profile, the BoringSSL revision differs from Chrome's,
 or an advisory applies or is not yet reviewed, the scripts open an issue for
 it, assigned to the maintainer, and exit with status 0. They exit with status
 1 only when a check cannot run; the workflow then fails and opens a failure
-issue. A new release is captured with the capture scripts above.
+issue.
+
+`release-watch` then calls the `capture` workflow:
+
+- It lists the Chrome, Brave, and Firefox majors that have no profile and the
+  Opera release that has no brand row (`scripts/profile-oneshot.sh plan`).
+- It captures each major on Linux, macOS, and Windows runners with
+  `--capture-only`, lands the profile from those captures with `--sync`, runs
+  the profile tests, and opens a pull request from `capture/<family>-<major>`.
+- It adds the Opera row on a Linux runner and opens a pull request from
+  `capture/opera-<major>`.
+- It moves BoringSSL to the revision Chrome stable ships with
+  `scripts/bssl-bump.py`, regenerates the bindings for each target on that
+  target's runner, runs the tests, and opens a pull request. When a patch in
+  `crates/leyline-bssl-sys/patches/` does not apply to the new revision, the
+  script leaves BoringSSL where it is and the workflow posts the rejected
+  hunks on the BoringSSL issue. Rebase that patch by hand.
+
+Each pull request lists the items to review and closes its release issue.
+Until it is merged, each daily run captures again and updates the same branch
+and pull request. Edge follows the Chrome profiles and needs no capture.
+Safari and Mobile Safari are captured by hand.
 
 ## Releasing
 

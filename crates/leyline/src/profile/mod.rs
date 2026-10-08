@@ -40,7 +40,6 @@ pub use h3::{
     H3ConnectionIdLength, H3CryptoReorder, H3CryptoSplit, H3Grease, H3Order, H3Profile, H3Setting,
     H3TransportParam, H3VersionGrease, H3VersionInformation,
 };
-pub(crate) use identity::resolve_identity;
 pub(crate) use platform::Platform;
 pub use preset::HeaderStyle;
 pub(crate) use preset::Preset;

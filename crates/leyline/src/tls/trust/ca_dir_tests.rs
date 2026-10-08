@@ -17,7 +17,11 @@ impl TempDir {
             std::process::id(),
             id
         ));
-        let _ = fs::remove_dir_all(&p);
+        if let Err(e) = fs::remove_dir_all(&p)
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            eprintln!("cleanup failed: {e}");
+        }
         fs::create_dir_all(&p).unwrap();
         TempDir(p)
     }
@@ -27,7 +31,11 @@ impl TempDir {
 }
 impl Drop for TempDir {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
+        if let Err(e) = fs::remove_dir_all(&self.0)
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            eprintln!("cleanup failed: {e}");
+        }
     }
 }
 

@@ -26,9 +26,7 @@ impl DigestLeg {
         self.answers = 0;
         match &self.challenge {
             Some(challenge)
-                if !journey.tainted
-                    && in_scope(journey)
-                    && digest::covers(challenge, &journey.url) =>
+                if !journey.tainted && in_scope(journey) && challenge.covers(&journey.url) =>
             {
                 self.authorized_headers(journey, challenge).map(Some)
             }
@@ -52,7 +50,7 @@ impl DigestLeg {
             .collect();
         let Some(challenge) = challenges
             .iter()
-            .find(|c| answerable(c))
+            .find(|c| c.answerable())
             .or(challenges.first())
             .cloned()
         else {
@@ -77,22 +75,22 @@ impl DigestLeg {
     fn authorized_headers(&self, journey: &Journey, challenge: &Challenge) -> Result<HeaderList> {
         let cnonce = digest::generate_cnonce();
         let nc = digest::next_nc_for_nonce(&challenge.nonce);
-        let header = digest::build_auth_header(
-            challenge,
-            &self.auth,
-            &journey.method,
-            request_target(&journey.url),
-            nc,
-            &cnonce,
-        )
-        .ok_or_else(|| {
-            Error::new(Kind::Request).with_message(
-                "digest auth: server offered only qop=auth-int, \
+        let header = challenge
+            .build_auth_header(
+                &self.auth,
+                &journey.method,
+                request_target(&journey.url),
+                nc,
+                &cnonce,
+            )
+            .ok_or_else(|| {
+                Error::new(Kind::Request).with_message(
+                    "digest auth: server offered only qop=auth-int, \
                  which Leyline does not implement (RFC 7616 §3.4.3 \
                  requires the entity-body hash in HA2). Pass through \
                  the 401 or remove digest_auth().",
-            )
-        })?;
+                )
+            })?;
         let mut headers = journey.extra.clone().unwrap_or_default();
         headers.set("authorization", header)?;
         Ok(headers)
@@ -103,11 +101,12 @@ fn in_scope(journey: &Journey) -> bool {
     journey.chain.is_empty() || url_origin(&journey.url) == journey.original_origin
 }
 
-fn answerable(challenge: &Challenge) -> bool {
-    challenge
-        .qop
-        .as_deref()
-        .is_none_or(|qop| digest::pick_supported_qop(qop).is_some())
+impl Challenge {
+    fn answerable(&self) -> bool {
+        self.qop
+            .as_deref()
+            .is_none_or(|qop| digest::pick_supported_qop(qop).is_some())
+    }
 }
 
 pub(super) fn unreplayable_body() -> Error {

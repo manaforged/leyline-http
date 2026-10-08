@@ -5,7 +5,8 @@ import json
 import re
 from pathlib import Path
 
-from .config import CAPTURES, KEPT_IP_KEYS, ROOT
+from .binaries import numeric_key
+from .config import CAPTURES, KEPT_IP_KEYS, OS_LABELS, ROOT, TCP_SUFFIXES
 
 IPV4 = re.compile(r"(?<![\d.])(?<![A-Za-z]/)(?:\d{1,3}\.){3}\d{1,3}(?!\d|\.\d)")
 IPV6 = re.compile(r"(?<![\w:])[0-9a-fA-F]{0,4}(?::[0-9a-fA-F]{0,4}){2,7}(?![\w:])")
@@ -68,14 +69,38 @@ def store(path: Path, capture: dict, h3: bool) -> Path:
     return path
 
 
+def tcp_stem(stem: str) -> tuple[str, str, int] | None:
+    for rank, suffix in enumerate(TCP_SUFFIXES):
+        found = re.fullmatch(rf"(.+)-({'|'.join(OS_LABELS)}){re.escape(suffix)}", stem)
+        if found:
+            return found.group(1), found.group(2), rank
+    return None
+
+
 def load_tcp(captured: str) -> dict[str, dict]:
-    found = {}
-    for path in sorted(CAPTURES.glob(f"{captured}-*.json")):
-        os_name = path.stem.removeprefix(f"{captured}-")
-        if "-" not in os_name:
-            found[os_name] = json.loads(path.read_text())
-    return found
+    found: dict[str, tuple[int, Path]] = {}
+    for path in CAPTURES.glob(f"{captured}-*.json"):
+        parsed = tcp_stem(path.stem)
+        if parsed and parsed[0] == captured and (parsed[1] not in found or parsed[2] < found[parsed[1]][0]):
+            found[parsed[1]] = (parsed[2], path)
+    return {os_name: json.loads(path.read_text()) for os_name, (_, path) in sorted(found.items())}
 
 
 def load_h3(captured: str) -> list[dict]:
     return [json.loads(path.read_text()) for path in sorted(CAPTURES.glob(f"{captured}-*-h3-run*.json"))]
+
+
+def version_key(build: str) -> list[int]:
+    return numeric_key(build.split("-", 1)[1])
+
+
+def stored_builds(family: str, major: int) -> list[str]:
+    newest: dict[str, str] = {}
+    for path in CAPTURES.glob(f"{family}-{major}.*-*.json"):
+        parsed = tcp_stem(path.stem)
+        if not parsed:
+            continue
+        build, os_name, _ = parsed
+        if os_name not in newest or version_key(build) > version_key(newest[os_name]):
+            newest[os_name] = build
+    return sorted(set(newest.values()), key=version_key)

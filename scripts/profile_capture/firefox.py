@@ -4,66 +4,19 @@ import json
 import os
 import platform as plat
 import re
-import shutil
 import subprocess
 import sys
-import tarfile
 from pathlib import Path
 
+from .binaries import firefox_binary
 from .captures import h3_path, store, tcp_path
-from .config import CACHE, FAMILIES, FF_ARCHIVES, FF_DOWNLOAD_URL, FF_RELEASES_URL, FF_URL, H3_RUNS, H3_URL, HOST_OS, OUT, PEET_URL, ROOT
+from .config import FAMILIES, FF_RELEASES_URL, FF_URL, H3_RUNS, H3_URL, HOST_OS, OUT, PEET_URL, ROOT
 from .land import missing_majors
-from .net import http_bytes, http_json
+from .net import http_json
 from .peet import require_browser_ua
 
 def live_firefox_version() -> str:
     return http_json(FF_URL)["LATEST_FIREFOX_VERSION"]
-
-
-def firefox_bin_for(ver: str) -> Path:
-    if plat.system() == "Linux":
-        if plat.machine().lower() not in {"x86_64", "amd64"}:
-            raise SystemExit("Firefox collection on Linux requires x86_64")
-        directory = CACHE / f"firefox-{ver}-linux-x86_64"
-        binary = directory / "firefox" / "firefox"
-        if binary.is_file() and os.access(binary, os.X_OK):
-            return binary
-        archive = CACHE / f"firefox-{ver}-linux-x86_64.tar.xz"
-        url = FF_DOWNLOAD_URL + FF_ARCHIVES["linux"].format(ver=ver)
-        print(f"downloading Firefox {ver}")
-        http_bytes(url, archive)
-        with tarfile.open(archive) as bundle:
-            bundle.extractall(directory, filter="data")
-        if not binary.is_file() or not os.access(binary, os.X_OK):
-            raise SystemExit(f"Firefox executable missing under {directory}")
-        return binary
-    app = CACHE / f"Firefox-{ver}.app"
-    binary = app / "Contents/MacOS/firefox"
-    if binary.is_file() and os.access(binary, os.X_OK):
-        return binary
-    dmg = CACHE / f"Firefox-{ver}.dmg"
-    url = FF_DOWNLOAD_URL + FF_ARCHIVES["macos"].format(ver=ver)
-    print(f"downloading Firefox {ver}")
-    http_bytes(url, dmg)
-    attached = subprocess.check_output(
-        ["hdiutil", "attach", "-nobrowse", "-readonly", str(dmg)], text=True
-    )
-    mount = None
-    for line in attached.splitlines():
-        if "/Volumes/" in line:
-            mount = line.split("/Volumes/", 1)[-1]
-            mount = "/Volumes/" + mount.strip()
-            break
-    if not mount:
-        raise SystemExit("hdiutil did not mount Firefox dmg")
-    try:
-        src = Path(mount) / "Firefox.app"
-        if app.exists():
-            shutil.rmtree(app)
-        shutil.copytree(src, app)
-    finally:
-        subprocess.run(["hdiutil", "detach", mount], check=False, stdout=subprocess.DEVNULL)
-    return binary
 
 
 def firefox_try_versions(major: int, latest: str) -> list[str]:
@@ -123,7 +76,7 @@ def fill_firefox(dry: bool, majors: list[int] | None = None) -> list[tuple[str, 
         last_err = None
         for ver in firefox_try_versions(major, live):
             try:
-                binary = firefox_bin_for(ver)
+                binary = firefox_binary(ver)
             except Exception as exc:
                 last_err = exc
                 continue

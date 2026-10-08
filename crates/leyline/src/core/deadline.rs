@@ -18,6 +18,12 @@ pub(crate) struct Deadline {
 #[derive(Debug)]
 pub(crate) struct Elapsed;
 
+impl From<tokio::time::error::Elapsed> for Elapsed {
+    fn from(_: tokio::time::error::Elapsed) -> Self {
+        Self
+    }
+}
+
 impl Deadline {
     pub(crate) fn new(session: &TimeoutConfig, request: Option<&TimeoutConfig>) -> Self {
         let merged = request.map_or(*session, |request| request.over(session));
@@ -71,7 +77,7 @@ impl Deadline {
         match self.at {
             Some(at) => tokio::time::timeout_at(at, fut)
                 .await
-                .map_err(|_| Error::new(Kind::Timeout))?,
+                .map_err(|e| Error::new(Kind::Timeout).with_source(e))?,
             None => fut.await,
         }
     }
@@ -91,7 +97,9 @@ pub(crate) async fn within<F: Future>(
     fut: F,
 ) -> std::result::Result<F::Output, Elapsed> {
     match limit {
-        Some(limit) => tokio::time::timeout(limit, fut).await.map_err(|_| Elapsed),
+        Some(limit) => tokio::time::timeout(limit, fut)
+            .await
+            .map_err(Elapsed::from),
         None => Ok(fut.await),
     }
 }

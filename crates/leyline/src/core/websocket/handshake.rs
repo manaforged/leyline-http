@@ -79,11 +79,15 @@ pub(super) fn wire_error(op: &'static str, e: WireError) -> Error {
 }
 
 pub(super) fn ws_header_pair(name: &str, value: &str) -> Result<(HeaderName, HeaderValue)> {
-    let hn = HeaderName::from_bytes(name.as_bytes()).map_err(|_| {
-        Error::new(Kind::Request).with_message(format!("invalid websocket header name: {name}"))
+    let hn = HeaderName::from_bytes(name.as_bytes()).map_err(|e| {
+        Error::new(Kind::Request)
+            .with_message(format!("invalid websocket header name: {name}"))
+            .with_source(e)
     })?;
-    let hv = HeaderValue::from_str(value).map_err(|_| {
-        Error::new(Kind::Request).with_message(format!("invalid websocket header value for {name}"))
+    let hv = HeaderValue::from_str(value).map_err(|e| {
+        Error::new(Kind::Request)
+            .with_message(format!("invalid websocket header value for {name}"))
+            .with_source(e)
     })?;
     Ok((hn, hv))
 }

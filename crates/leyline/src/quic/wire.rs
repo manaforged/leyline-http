@@ -35,23 +35,25 @@ pub(crate) fn random_bytes(len: usize) -> Vec<u8> {
     out
 }
 
-pub(crate) fn sends_datagrams(h3: &H3Profile) -> bool {
-    h3.transport_parameters
-        .iter()
-        .flatten()
-        .any(|p| p.id == Some(MAX_DATAGRAM_FRAME_SIZE))
-}
+impl H3Profile {
+    pub(crate) fn sends_datagrams(&self) -> bool {
+        self.transport_parameters
+            .iter()
+            .flatten()
+            .any(|p| p.id == Some(MAX_DATAGRAM_FRAME_SIZE))
+    }
 
-pub(crate) fn transport_plan(h3: &H3Profile) -> Result<Option<Vec<TransportParamEntry>>, String> {
-    let Some(params) = &h3.transport_parameters else {
-        return Ok(None);
-    };
-    let entries = params
-        .iter()
-        .map(transport_entry)
-        .collect::<Result<Vec<_>, String>>()?;
-    let pinned: Vec<bool> = params.iter().map(|p| p.pinned).collect();
-    Ok(Some(reorder(entries, &pinned, h3.transport_order)))
+    pub(crate) fn transport_plan(&self) -> Result<Option<Vec<TransportParamEntry>>, String> {
+        let Some(params) = &self.transport_parameters else {
+            return Ok(None);
+        };
+        let entries = params
+            .iter()
+            .map(transport_entry)
+            .collect::<Result<Vec<_>, String>>()?;
+        let pinned: Vec<bool> = params.iter().map(|p| p.pinned).collect();
+        Ok(Some(reorder(entries, &pinned, self.transport_order)))
+    }
 }
 
 fn transport_entry(param: &H3TransportParam) -> Result<TransportParamEntry, String> {
@@ -99,28 +101,30 @@ fn reorder<T>(entries: Vec<T>, pinned: &[bool], order: H3Order) -> Vec<T> {
         .collect()
 }
 
-pub(crate) fn initial_crypto_split(wire: &H3Profile) -> quiche::InitialCryptoSplit {
-    match (wire.initial_crypto_split, wire.initial_crypto_reorder) {
-        (H3CryptoSplit::Fill, _) => quiche::InitialCryptoSplit::Fill,
-        (H3CryptoSplit::Even, H3CryptoReorder::None) => quiche::InitialCryptoSplit::Even,
-        (H3CryptoSplit::Even, H3CryptoReorder::SniMidpoint) => {
-            quiche::InitialCryptoSplit::EvenSniSlice
+impl H3Profile {
+    pub(crate) fn crypto_split(&self) -> quiche::InitialCryptoSplit {
+        match (self.initial_crypto_split, self.initial_crypto_reorder) {
+            (H3CryptoSplit::Fill, _) => quiche::InitialCryptoSplit::Fill,
+            (H3CryptoSplit::Even, H3CryptoReorder::None) => quiche::InitialCryptoSplit::Even,
+            (H3CryptoSplit::Even, H3CryptoReorder::SniMidpoint) => {
+                quiche::InitialCryptoSplit::EvenSniSlice
+            }
         }
     }
-}
 
-pub(crate) fn compatible_versions(wire: &H3Profile) -> Vec<u32> {
-    let versions: Vec<u32> = wire
-        .transport_parameters
-        .iter()
-        .flatten()
-        .filter_map(|param| param.versions.as_ref())
-        .flat_map(|info| info.available.iter().copied())
-        .collect();
-    if versions.is_empty() {
-        vec![quiche::PROTOCOL_VERSION]
-    } else {
-        versions
+    pub(crate) fn compatible_versions(&self) -> Vec<u32> {
+        let versions: Vec<u32> = self
+            .transport_parameters
+            .iter()
+            .flatten()
+            .filter_map(|param| param.versions.as_ref())
+            .flat_map(|info| info.available.iter().copied())
+            .collect();
+        if versions.is_empty() {
+            vec![quiche::PROTOCOL_VERSION]
+        } else {
+            versions
+        }
     }
 }
 

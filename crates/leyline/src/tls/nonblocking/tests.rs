@@ -9,7 +9,7 @@ fn default_keepalive_retries_never_fatal_under_strict() {
         ..SocketConfig::default()
     };
     assert!(config.tcp_keepalive_retries.is_some());
-    assert!(apply_socket_config(&socket, &config).is_ok());
+    apply_socket_config(&socket, &config).expect("expected Ok");
 }
 
 #[cfg(any(target_os = "linux", target_os = "android"))]

@@ -24,20 +24,18 @@ pub enum TlsMinVersion {
 }
 
 #[cfg(any(leyline_unstable_bssl, feature = "bench-internals"))]
-pub(crate) fn build_ssl_context(
-    profile: &BrowserProfile,
-    min_version: TlsMinVersion,
-) -> Result<SslContextBuilder, TlsError> {
-    let mut builder = SslContextBuilder::new(leyline_bssl::ssl::SslMethod::tls())
-        .map_err(TlsError::from_stack)?;
-    let identity = apply_profile_with_trust(
-        &mut builder,
-        profile,
-        min_version,
-        &TlsTrustConfig::default(),
-    )?;
-    drop(identity);
-    Ok(builder)
+impl BrowserProfile {
+    pub(crate) fn build_ssl_context(
+        &self,
+        min_version: TlsMinVersion,
+    ) -> Result<SslContextBuilder, TlsError> {
+        let mut builder = SslContextBuilder::new(leyline_bssl::ssl::SslMethod::tls())
+            .map_err(TlsError::from_stack)?;
+        let identity =
+            apply_profile_with_trust(&mut builder, self, min_version, &TlsTrustConfig::default())?;
+        drop(identity);
+        Ok(builder)
+    }
 }
 
 pub(crate) fn apply_profile_with_trust(

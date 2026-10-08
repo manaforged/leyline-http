@@ -34,7 +34,7 @@ fn section_a_format() {
         http_version: "2",
         headers: &headers,
     };
-    let a = section_a(&input);
+    let a = input.section_a();
     assert!(a.starts_with("po20cr"));
     assert!(a.ends_with("enUS"));
 }
