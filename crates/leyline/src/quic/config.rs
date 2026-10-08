@@ -60,17 +60,20 @@ impl H3Config {
             tls: h3.tls.clone().unwrap_or_else(|| profile.tls.clone()),
             wire: h3.clone(),
             pseudo_order,
-            max_header_list_bytes: advertised_field_section_size(h3)
+            max_header_list_bytes: h3
+                .advertised_field_section_size()
                 .unwrap_or(crate::core::DEFAULT_MAX_HEADER_LIST_BYTES as u64),
         })
     }
 }
 
-fn advertised_field_section_size(h3: &H3Profile) -> Option<u64> {
-    h3.settings
-        .iter()
-        .flatten()
-        .find(|setting| setting.id == Some(SETTINGS_MAX_FIELD_SECTION_SIZE))
-        .and_then(|setting| setting.value)
-        .or(h3.max_field_section_size)
+impl H3Profile {
+    fn advertised_field_section_size(&self) -> Option<u64> {
+        self.settings
+            .iter()
+            .flatten()
+            .find(|setting| setting.id == Some(SETTINGS_MAX_FIELD_SECTION_SIZE))
+            .and_then(|setting| setting.value)
+            .or(self.max_field_section_size)
+    }
 }

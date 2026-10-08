@@ -213,7 +213,7 @@ impl H3Profile {
             validate_settings(settings)?;
         }
         if let Some(tls) = &self.tls {
-            crate::profile::permutation::validate(tls, true)?;
+            tls.validate(true)?;
         }
         if let Some(params) = &self.transport_parameters {
             validate_transport_parameters(params)?;

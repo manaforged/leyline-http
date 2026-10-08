@@ -31,85 +31,88 @@ pub(crate) struct EstablishedH3 {
     pub(crate) tls: crate::pool::TlsInfo,
 }
 
-fn build_quic_config(
-    h3_cfg: &H3Config,
-    trust: &TlsTrustConfig,
-    host: &str,
-) -> Result<quiche::Config, String> {
-    let mut ssl_builder =
-        leyline_bssl::ssl::SslContextBuilder::new(leyline_bssl::ssl::SslMethod::tls())
+impl H3Config {
+    fn build_quic_config(
+        &self,
+        trust: &TlsTrustConfig,
+        host: &str,
+    ) -> Result<quiche::Config, String> {
+        let mut ssl_builder =
+            leyline_bssl::ssl::SslContextBuilder::new(leyline_bssl::ssl::SslMethod::tls())
+                .map_err(|e| format!("quic ssl ctx: {e}"))?;
+        apply_tls_with_trust(&mut ssl_builder, &self.tls, TlsMinVersion::Tls13, trust)
             .map_err(|e| format!("quic ssl ctx: {e}"))?;
-    apply_tls_with_trust(&mut ssl_builder, &h3_cfg.tls, TlsMinVersion::Tls13, trust)
-        .map_err(|e| format!("quic ssl ctx: {e}"))?;
 
-    let pins = trust.pinned_leaf_sha256();
-    let ip_host = host.parse::<std::net::IpAddr>().is_ok();
-    if !pins.is_empty() || ip_host || cfg!(target_os = "macos") && trust.uses_system_roots() {
-        crate::tls::install_verifier_ctx(
-            &mut ssl_builder,
-            pins,
-            Some(host),
-            trust.uses_system_roots(),
-        );
-    }
-
-    let mut config =
-        quiche::Config::with_boring_ssl_ctx_builder(quiche::PROTOCOL_VERSION, ssl_builder)
-            .map_err(|e| format!("quic config: {e}"))?;
-    config.verify_peer(true);
-    config
-        .set_application_protos(quiche::h3::APPLICATION_PROTOCOL)
-        .map_err(|e| format!("quic alpn: {e}"))?;
-    config.set_max_idle_timeout(h3_cfg.max_idle_timeout.as_millis() as u64);
-    config.set_max_recv_udp_payload_size(h3_cfg.max_udp_payload_size as usize);
-    config.set_max_send_udp_payload_size(h3_cfg.max_udp_payload_size as usize);
-    config.set_initial_max_data(h3_cfg.initial_max_data);
-    config.set_initial_max_stream_data_bidi_local(h3_cfg.initial_max_stream_data_bidi_local);
-    config.set_initial_max_stream_data_bidi_remote(h3_cfg.initial_max_stream_data_bidi_remote);
-    config.set_initial_max_stream_data_uni(h3_cfg.initial_max_stream_data_uni);
-    config.set_initial_max_streams_bidi(h3_cfg.initial_max_streams_bidi);
-    config.set_initial_max_streams_uni(h3_cfg.initial_max_streams_uni);
-    config.set_active_connection_id_limit(h3_cfg.active_connection_id_limit);
-    config.set_disable_active_migration(true);
-    let wire = &h3_cfg.wire;
-    if let Some(ms) = wire.max_ack_delay_ms {
-        config.set_max_ack_delay(ms);
-    }
-    if wire::sends_datagrams(wire) {
-        config.enable_dgram(true, DGRAM_QUEUE_LEN, DGRAM_QUEUE_LEN);
-    }
-    if let Some(plan) = wire::transport_plan(wire)? {
-        config.set_transport_params_plan(plan);
-    }
-    config.set_compatible_versions(&wire::compatible_versions(wire));
-    config.set_initial_crypto_split(wire::initial_crypto_split(wire));
-    if let Some(size) = wire.initial_datagram_size {
-        config.set_initial_datagram_size(usize::from(size));
-    }
-    if wire.settings.is_some() {
-        config.grease(false);
-    }
-    Ok(config)
-}
-
-fn build_h3_config(h3_cfg: &H3Config) -> Result<quiche::h3::Config, String> {
-    let wire = &h3_cfg.wire;
-    let mut h3_config = quiche::h3::Config::new().map_err(|e| format!("h3 config: {e}"))?;
-    h3_config.set_field_section_limit(h3_cfg.max_header_list_bytes);
-    match &wire.settings {
-        Some(settings) => {
-            h3_config.set_settings_plan(wire::settings_plan(settings));
-            h3_config.set_control_frames(wire::control_frames(wire.control_grease_frame.as_ref()));
+        let pins = trust.pinned_leaf_sha256();
+        let ip_host = host.parse::<std::net::IpAddr>().is_ok();
+        if !pins.is_empty() || ip_host || cfg!(target_os = "macos") && trust.uses_system_roots() {
+            crate::tls::install_verifier_ctx(
+                &mut ssl_builder,
+                pins,
+                Some(host),
+                trust.uses_system_roots(),
+            );
         }
-        None => {
-            h3_config.set_qpack_max_table_capacity(wire.qpack_max_table_capacity.unwrap_or(0));
-            h3_config.set_qpack_blocked_streams(wire.qpack_blocked_streams.unwrap_or(0));
-            if let Some(size) = wire.max_field_section_size {
-                h3_config.set_max_field_section_size(size);
+
+        let mut config =
+            quiche::Config::with_boring_ssl_ctx_builder(quiche::PROTOCOL_VERSION, ssl_builder)
+                .map_err(|e| format!("quic config: {e}"))?;
+        config.verify_peer(true);
+        config
+            .set_application_protos(quiche::h3::APPLICATION_PROTOCOL)
+            .map_err(|e| format!("quic alpn: {e}"))?;
+        config.set_max_idle_timeout(self.max_idle_timeout.as_millis() as u64);
+        config.set_max_recv_udp_payload_size(self.max_udp_payload_size as usize);
+        config.set_max_send_udp_payload_size(self.max_udp_payload_size as usize);
+        config.set_initial_max_data(self.initial_max_data);
+        config.set_initial_max_stream_data_bidi_local(self.initial_max_stream_data_bidi_local);
+        config.set_initial_max_stream_data_bidi_remote(self.initial_max_stream_data_bidi_remote);
+        config.set_initial_max_stream_data_uni(self.initial_max_stream_data_uni);
+        config.set_initial_max_streams_bidi(self.initial_max_streams_bidi);
+        config.set_initial_max_streams_uni(self.initial_max_streams_uni);
+        config.set_active_connection_id_limit(self.active_connection_id_limit);
+        config.set_disable_active_migration(true);
+        let wire = &self.wire;
+        if let Some(ms) = wire.max_ack_delay_ms {
+            config.set_max_ack_delay(ms);
+        }
+        if wire.sends_datagrams() {
+            config.enable_dgram(true, DGRAM_QUEUE_LEN, DGRAM_QUEUE_LEN);
+        }
+        if let Some(plan) = wire.transport_plan()? {
+            config.set_transport_params_plan(plan);
+        }
+        config.set_compatible_versions(&wire.compatible_versions());
+        config.set_initial_crypto_split(wire.crypto_split());
+        if let Some(size) = wire.initial_datagram_size {
+            config.set_initial_datagram_size(usize::from(size));
+        }
+        if wire.settings.is_some() {
+            config.grease(false);
+        }
+        Ok(config)
+    }
+
+    fn build_h3_config(&self) -> Result<quiche::h3::Config, String> {
+        let wire = &self.wire;
+        let mut h3_config = quiche::h3::Config::new().map_err(|e| format!("h3 config: {e}"))?;
+        h3_config.set_field_section_limit(self.max_header_list_bytes);
+        match &wire.settings {
+            Some(settings) => {
+                h3_config.set_settings_plan(wire::settings_plan(settings));
+                h3_config
+                    .set_control_frames(wire::control_frames(wire.control_grease_frame.as_ref()));
+            }
+            None => {
+                h3_config.set_qpack_max_table_capacity(wire.qpack_max_table_capacity.unwrap_or(0));
+                h3_config.set_qpack_blocked_streams(wire.qpack_blocked_streams.unwrap_or(0));
+                if let Some(size) = wire.max_field_section_size {
+                    h3_config.set_max_field_section_size(size);
+                }
             }
         }
+        Ok(h3_config)
     }
-    Ok(h3_config)
 }
 
 pub(crate) async fn connect_and_handshake(
@@ -131,7 +134,7 @@ pub(crate) async fn connect_and_handshake(
     }
     let host = crate::util::bare_host(host);
 
-    let mut config = build_quic_config(h3_cfg, trust, host)?;
+    let mut config = h3_cfg.build_quic_config(trust, host)?;
     let hello = HelloOptions::from_tls(&h3_cfg.tls).map_err(|e| format!("quic hello: {e}"))?;
     let (socket, peer_addr) = DatagramTransport::open(connector, host, port, proxy).await?;
     let local_addr = socket
@@ -159,7 +162,7 @@ pub(crate) async fn connect_and_handshake(
         .apply(conn.ssl_mut(), true)
         .map_err(|e| format!("quic hello: {e}"))?;
 
-    let h3_config = build_h3_config(h3_cfg)?;
+    let h3_config = h3_cfg.build_h3_config()?;
 
     let mut out = vec![0u8; h3_cfg.max_udp_payload_size as usize];
     let mut buf = vec![0u8; 65_535];

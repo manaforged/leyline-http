@@ -168,41 +168,43 @@ fn carried<T>(on: bool, base: Option<T>) -> Result<Option<T>, &'static str> {
     }
 }
 
-pub(crate) fn advertised_extensions(tls: &TlsProfile, quic: bool) -> Vec<(u16, &'static str)> {
-    EXTENSIONS
-        .iter()
-        .filter(|ext| ext.switch.advertised(tls, quic))
-        .map(|ext| (ext.id, ext.name))
-        .collect()
-}
+impl TlsProfile {
+    pub(crate) fn advertised_extensions(&self, quic: bool) -> Vec<(u16, &'static str)> {
+        EXTENSIONS
+            .iter()
+            .filter(|ext| ext.switch.advertised(self, quic))
+            .map(|ext| (ext.id, ext.name))
+            .collect()
+    }
 
-pub(crate) fn apply_extensions(tls: &mut TlsProfile, ids: &[u16]) -> Result<Vec<u16>, String> {
-    let base = tls.clone();
-    let mut order = Vec::new();
-    for (index, &id) in ids.iter().enumerate() {
-        if is_grease(id) {
-            tls.grease = true;
-        } else if id == PADDING {
-            if index + 1 != ids.len() {
+    pub(crate) fn apply_extensions(&mut self, ids: &[u16]) -> Result<Vec<u16>, String> {
+        let base = self.clone();
+        let mut order = Vec::new();
+        for (index, &id) in ids.iter().enumerate() {
+            if is_grease(id) {
+                self.grease = true;
+            } else if id == PADDING {
+                if index + 1 != ids.len() {
+                    return Err(format!(
+                        "padding (0x{PADDING:04x}) is at entry {index}; BoringSSL always sends it last"
+                    ));
+                }
+            } else if id == PRE_SHARED_KEY {
+                self.pre_shared_key = true;
+            } else if EXTENSIONS.iter().any(|ext| ext.id == id) {
+                order.push(id);
+            } else {
                 return Err(format!(
-                    "padding (0x{PADDING:04x}) is at entry {index}; BoringSSL always sends it last"
+                    "extension 0x{id:04x} ({id}) is not one leyline can send"
                 ));
             }
-        } else if id == PRE_SHARED_KEY {
-            tls.pre_shared_key = true;
-        } else if EXTENSIONS.iter().any(|ext| ext.id == id) {
-            order.push(id);
-        } else {
-            return Err(format!(
-                "extension 0x{id:04x} ({id}) is not one leyline can send"
-            ));
         }
+        self.padding = ids.contains(&PADDING);
+        for ext in EXTENSIONS {
+            ext.switch
+                .set(self, &base, order.contains(&ext.id))
+                .map_err(|why| format!("{} (0x{:04x}) is missing: {why}", ext.name, ext.id))?;
+        }
+        Ok(order)
     }
-    tls.padding = ids.contains(&PADDING);
-    for ext in EXTENSIONS {
-        ext.switch
-            .set(tls, &base, order.contains(&ext.id))
-            .map_err(|why| format!("{} (0x{:04x}) is missing: {why}", ext.name, ext.id))?;
-    }
-    Ok(order)
 }

@@ -1,4 +1,4 @@
-use crate::profile::{BrowserProfile, ChromiumBrand, Platform, PlatformIdentity, resolve_identity};
+use crate::profile::{BrowserProfile, ChromiumBrand, Platform, PlatformIdentity};
 use crate::{Error, Kind};
 
 mod digest;
@@ -142,12 +142,9 @@ impl Browser {
         platform: Platform,
         brand: Option<ChromiumBrand>,
     ) -> Option<PlatformIdentity> {
-        resolve_identity(
-            self.platform_profile(platform),
-            platform,
-            brand.unwrap_or_default(),
-        )
-        .ok()
+        self.platform_profile(platform)
+            .resolve_identity(platform, brand.unwrap_or_default())
+            .ok()
     }
 
     pub(crate) fn platform_profile(self, platform: Platform) -> &'static BrowserProfile {

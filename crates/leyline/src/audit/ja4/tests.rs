@@ -30,7 +30,7 @@ fn section_a_chrome147() {
         has_sni: true,
         alpn: "h2",
     };
-    let a = compute_section_a(&input);
+    let a = input.compute_section_a();
     assert_eq!(&a[..3], "t13");
     assert_eq!(&a[3..4], "d");
     assert_eq!(&a[4..6], "15");
@@ -74,6 +74,6 @@ fn section_b_chrome147() {
         has_sni: true,
         alpn: "h2",
     };
-    let b = compute_section_b(&input);
+    let b = input.compute_section_b();
     assert_eq!(b, "8daaf6152771");
 }

@@ -132,7 +132,7 @@ impl Builder {
         };
         let value = tag.attr("value");
         let toggled = value.unwrap_or(TOGGLE_DEFAULT).to_owned();
-        match kind(tag, &INPUT_TYPES, Control::Value) {
+        match tag.kind(&INPUT_TYPES, Control::Value) {
             Control::Value => self.push(owner, name, value.unwrap_or_default().to_owned(), false),
             Control::Checkbox if tag.has("checked") => self.push(owner, name, toggled, false),
             Control::Radio if tag.has("checked") => self.push(owner, name, toggled, true),
@@ -146,7 +146,7 @@ impl Builder {
         let Some((owner, name)) = self.field(tag) else {
             return;
         };
-        if kind(tag, &BUTTON_TYPES, Control::Submit) == Control::Submit {
+        if tag.kind(&BUTTON_TYPES, Control::Submit) == Control::Submit {
             self.add_button(owner, name, tag.attr("value"), false);
         }
     }
@@ -267,14 +267,16 @@ fn open(tag: &Tag<'_>) -> Form {
     }
 }
 
-fn kind(tag: &Tag<'_>, table: &[(&str, Control)], default: Control) -> Control {
-    let Some(kind) = tag.attr("type").map(str::trim) else {
-        return default;
-    };
-    table
-        .iter()
-        .find(|(name, _)| name.eq_ignore_ascii_case(kind))
-        .map_or(default, |(_, control)| *control)
+impl Tag<'_> {
+    fn kind(&self, table: &[(&str, Control)], default: Control) -> Control {
+        let Some(kind) = self.attr("type").map(str::trim) else {
+            return default;
+        };
+        table
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(kind))
+            .map_or(default, |(_, control)| *control)
+    }
 }
 
 pub(super) fn collapse(text: &str) -> String {

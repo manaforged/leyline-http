@@ -257,7 +257,9 @@ impl BrowserProfile {
         let mut profile: Self = toml::from_str(toml_str).map_err(ProfileError::parse)?;
         profile.derive_sec_ch_ua();
         profile.source = Some(source::ProfileSource::new(toml_str));
-        crate::profile::permutation::validate(&profile.tls, false)
+        profile
+            .tls
+            .validate(false)
             .map_err(|why| ProfileError::parse(format!("{}: {why}", profile.meta.name)))?;
         if let Some(h3) = &profile.h3 {
             h3.validate()

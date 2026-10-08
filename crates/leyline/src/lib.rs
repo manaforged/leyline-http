@@ -106,7 +106,7 @@ pub mod fuzz {
     }
 
     pub fn extension_ids(tls: &crate::profile::TlsProfile) -> Vec<u16> {
-        crate::profile::permutation::extension_ids(tls)
+        tls.extension_ids()
     }
 
     pub fn parse_links(header: &str, base: &str) -> Vec<crate::Link> {

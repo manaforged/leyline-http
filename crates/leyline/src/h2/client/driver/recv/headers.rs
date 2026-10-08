@@ -5,55 +5,59 @@ use crate::header_str::HeaderStr;
 
 use super::*;
 
-fn pseudo(actor: &mut StreamActor, decoded: Vec<(Bytes, Bytes)>) -> Option<u16> {
-    let mut status = None;
-    let mut saw_regular = false;
-    let mut bad_status = false;
-    for (name, value) in decoded {
-        if name.starts_with(b":") {
-            let digits = value.as_ref();
-            if saw_regular
-                || name.as_ref() != b":status"
-                || status.is_some()
-                || digits.len() != 3
-                || !digits.iter().all(u8::is_ascii_digit)
-            {
-                bad_status = true;
-                break;
+impl StreamActor {
+    fn pseudo(&mut self, decoded: Vec<(Bytes, Bytes)>) -> Option<u16> {
+        let mut status = None;
+        let mut saw_regular = false;
+        let mut bad_status = false;
+        for (name, value) in decoded {
+            if name.starts_with(b":") {
+                let digits = value.as_ref();
+                if saw_regular
+                    || name.as_ref() != b":status"
+                    || status.is_some()
+                    || digits.len() != 3
+                    || !digits.iter().all(u8::is_ascii_digit)
+                {
+                    bad_status = true;
+                    break;
+                }
+                status = Some(
+                    digits
+                        .iter()
+                        .fold(0_u16, |code, digit| code * 10 + u16::from(*digit - b'0')),
+                );
+            } else {
+                saw_regular = true;
+                self.resp_headers.push((
+                    HeaderStr::from_bytes_lossy(name),
+                    HeaderStr::from_bytes_lossy(value),
+                ));
             }
-            status = Some(
-                digits
-                    .iter()
-                    .fold(0_u16, |code, digit| code * 10 + u16::from(*digit - b'0')),
-            );
-        } else {
-            saw_regular = true;
-            actor.resp_headers.push((
-                HeaderStr::from_bytes_lossy(name),
-                HeaderStr::from_bytes_lossy(value),
-            ));
         }
+        status.filter(|status| !bad_status && *status != 101)
     }
-    status.filter(|status| !bad_status && *status != 101)
 }
 
 const BODY_RESERVE_CAP: usize = 64 * 1024;
 
-fn reserve_body(actor: &mut StreamActor, cap: usize) {
-    if actor.drop_body {
-        return;
-    }
-    actor.declared_len = actor
-        .resp_headers
-        .iter()
-        .find(|(name, _)| name.as_str() == "content-length")
-        .and_then(|(_, value)| value.as_str().parse::<u64>().ok());
-    if matches!(actor.response_tx, Some(ResponseSink::StreamingEx { .. })) {
-        return;
-    }
-    if let Some(len) = actor.declared_len {
-        let len = usize::try_from(len).unwrap_or(usize::MAX);
-        actor.body.reserve(len.min(cap).min(BODY_RESERVE_CAP));
+impl StreamActor {
+    fn reserve_body(&mut self, cap: usize) {
+        if self.drop_body {
+            return;
+        }
+        self.declared_len = self
+            .resp_headers
+            .iter()
+            .find(|(name, _)| name.as_str() == "content-length")
+            .and_then(|(_, value)| value.as_str().parse::<u64>().ok());
+        if matches!(self.response_tx, Some(ResponseSink::StreamingEx { .. })) {
+            return;
+        }
+        if let Some(len) = self.declared_len {
+            let len = usize::try_from(len).unwrap_or(usize::MAX);
+            self.body.reserve(len.min(cap).min(BODY_RESERVE_CAP));
+        }
     }
 }
 
@@ -175,7 +179,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 .await;
             return Ok(());
         }
-        let Some(status) = pseudo(actor, decoded) else {
+        let Some(status) = actor.pseudo(decoded) else {
             self.fail_stream(
                 stream_id,
                 H2Error::Stream {
@@ -197,7 +201,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         if matches!(actor.status, 204 | 304) {
             actor.drop_body = true;
         }
-        reserve_body(actor, self.config.max_response_body_bytes);
+        actor.reserve_body(self.config.max_response_body_bytes);
         if matches!(actor.response_tx, Some(ResponseSink::StreamingEx { .. })) {
             actor.deliver_headers_streaming();
         }

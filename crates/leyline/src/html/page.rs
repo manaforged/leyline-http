@@ -8,15 +8,17 @@ const META_KEYS: [&str; 2] = ["name", "property"];
 pub(super) fn meta(document: &str, name: &str) -> Option<String> {
     Scanner::new(document)
         .filter(|tag| !tag.closing && tag.name == "meta")
-        .find(|tag| names(tag, name))
+        .find(|tag| tag.names(name))
         .and_then(|tag| tag.attr("content").map(str::to_owned))
 }
 
-fn names(tag: &Tag<'_>, name: &str) -> bool {
-    META_KEYS
-        .iter()
-        .filter_map(|key| tag.attr(key))
-        .any(|value| value.trim().eq_ignore_ascii_case(name))
+impl Tag<'_> {
+    fn names(&self, name: &str) -> bool {
+        META_KEYS
+            .iter()
+            .filter_map(|key| self.attr(key))
+            .any(|value| value.trim().eq_ignore_ascii_case(name))
+    }
 }
 
 struct Open {

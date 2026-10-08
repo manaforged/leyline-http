@@ -1,4 +1,3 @@
-use super::build_quic_config;
 use super::{check_body_budget, resolve_peer, validate_connection_id_len};
 use crate::profile::BrowserProfile;
 use crate::quic::config::H3Config;
@@ -66,8 +65,10 @@ fn quic_verifier_checks_host_ca_and_pin() {
         if let Some(pin) = pinned {
             trust = trust.add_pinned_leaf_sha256(pin);
         }
-        let mut client =
-            build_quic_config(&H3Config::from_profile(&profile).unwrap(), &trust, host).unwrap();
+        let mut client = H3Config::from_profile(&profile)
+            .unwrap()
+            .build_quic_config(&trust, host)
+            .unwrap();
         let mut server = SslContextBuilder::new(SslMethod::tls()).unwrap();
         server.set_certificate(&certificate).unwrap();
         server.set_private_key(&key).unwrap();
