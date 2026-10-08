@@ -8,6 +8,13 @@ behaviour, and each change is listed here. The BoringSSL crates
 `leyline-bssl`, `leyline-bssl-sys`, and `leyline-bssl-tokio` share this
 version and publish as separate crates.
 
+## Unreleased
+
+### Changed
+
+- BoringSSL is pinned to `b780f19`, the `boringssl_revision` in Chromium's DEPS
+  at tag `155.0.8059.39`, and carries 6 patches.
+
 ## 0.1.3 - 2026-10-06
 
 ### Security
