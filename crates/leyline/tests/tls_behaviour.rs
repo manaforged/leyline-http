@@ -2,7 +2,7 @@
     clippy::unwrap_used,
     reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
 )]
-#[path = "tls_support/mod.rs"]
+#[path = "it/tls_support/mod.rs"]
 mod tls_support;
 
 use std::net::SocketAddr;

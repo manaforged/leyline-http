@@ -85,7 +85,7 @@ default, `browser` and `emulator` for Safari on iOS and OkHttp, and `native`
 and `emulator` for CFNetwork. Keep the `ja4` and `akamai` recorded reference
 values next to the fields that produce them.
 
-The offline conformance test, `crates/leyline/tests/fingerprint_conformance.rs`,
+The offline conformance test, `crates/leyline/tests/it/fingerprint_conformance.rs`,
 compares each profile's HTTP/2 fingerprint with its `akamai` value and its JA4
 with its `ja4` value. It puts each result into one of five states:
 

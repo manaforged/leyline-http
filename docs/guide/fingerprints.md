@@ -289,7 +289,7 @@ against its recorded reference values without the network. It needs the
 `bench-internals` feature:
 
 ```sh
-cargo test -p leyline-http --features bench-internals --test fingerprint_conformance
+cargo test -p leyline-http --features bench-internals --test it fingerprint_conformance::
 ```
 
 It checks the profile data against the reference values; it does not capture

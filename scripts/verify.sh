@@ -221,12 +221,12 @@ g_test() {
 }
 
 g_live() {
-    step "cargo test -p leyline-http --features bench-internals --test tls_peet --release -- --ignored"
-    cargo test -p leyline-http --features bench-internals --test tls_peet --release -- --ignored || fail "live tls_peet tests failed"
+    step "cargo test -p leyline-http --features bench-internals --test it tls_peet:: --release -- --ignored"
+    cargo test -p leyline-http --features bench-internals --test it tls_peet:: --release -- --ignored || fail "live tls_peet tests failed"
     ok "live tls_peet pass"
 
-    step "cargo test -p leyline-http --test smoke -- --ignored --nocapture"
-    cargo test -p leyline-http --test smoke -- --ignored --nocapture || fail "smoke suite failed"
+    step "cargo test -p leyline-http --test it smoke:: -- --ignored --nocapture"
+    cargo test -p leyline-http --test it smoke:: -- --ignored --nocapture || fail "smoke suite failed"
     ok "smoke pass"
 }
 
