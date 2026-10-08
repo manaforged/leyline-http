@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import urllib.request
 from pathlib import Path
 
-from .config import WAITS
+from .config import GITHUB_TOKEN_ENV, WAITS
 
 
 def open_url(url: str, timeout: float, headers: dict[str, str] | None = None):
@@ -25,3 +26,8 @@ def http_bytes(url: str, dest: Path, timeout: float = WAITS["download"]) -> None
     dest.parent.mkdir(parents=True, exist_ok=True)
     with open_url(url, timeout) as resp, dest.open("wb") as out:
         shutil.copyfileobj(resp, out)
+
+
+def github_json(url: str) -> dict:
+    token = os.environ.get(GITHUB_TOKEN_ENV)
+    return http_json(url, headers={"Authorization": f"Bearer {token}"} if token else None)

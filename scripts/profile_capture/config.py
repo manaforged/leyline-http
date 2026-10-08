@@ -16,6 +16,8 @@ FF_ARCHIVES = {
     "windows": "{ver}/win64/en-US/Firefox%20Setup%20{ver}.exe",
 }
 CHROME_STABLE_URL = "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions.json"
+CHROMIUM_DEPS_URL = "https://chromium.googlesource.com/chromium/src/+/refs/tags/{version}/DEPS?format=TEXT"
+BORINGSSL_REVISION = r"'boringssl_revision':\s*'([0-9a-f]{40})'"
 CACHE = Path(os.environ.get("LEYLINE_CFT_CACHE", Path.home() / ".cache/leyline-cft"))
 OUT = Path(os.environ.get("LEYLINE_ONESHOT_OUT", Path(tempfile.gettempdir()) / "leyline-oneshot"))
 TODAY = date.today().isoformat()

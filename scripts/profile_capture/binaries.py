@@ -16,12 +16,11 @@ from .config import (
     CHROMIUM_BUILDS,
     FF_ARCHIVES,
     FF_DOWNLOAD_URL,
-    GITHUB_TOKEN_ENV,
     HOST_OS,
     OPERA,
     SIGNERS,
 )
-from .net import http_bytes, http_json, http_text
+from .net import github_json, http_bytes, http_text
 
 Build = tuple[str, Path]
 
@@ -123,8 +122,7 @@ def apt_package(base: str, index: str, package: str) -> dict[str, str]:
 @functools.cache
 def chromium_release(family: str) -> dict[str, object]:
     spec = CHROMIUM_BUILDS[family]["release"]
-    token = os.environ.get(GITHUB_TOKEN_ENV)
-    release = http_json(spec["url"], headers={"Authorization": f"Bearer {token}"} if token else None)
+    release = github_json(spec["url"])
     found = re.fullmatch(spec["name"], (release.get("name") or "").strip())
     if release.get("prerelease") or not found:
         raise SystemExit(f"latest {family} release {release.get('name')!r} is not a stable release")
