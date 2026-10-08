@@ -54,7 +54,9 @@ def verify_signer(family: str, path: Path) -> None:
             "$s = Get-AuthenticodeSignature -LiteralPath '{path}'; \"$($s.Status)|$($s.SignerCertificate.Subject)\"",
             path,
         ).partition("|")
-        if status != "Valid" or expected not in subject:
+        organization = re.search(r'(?:^|,\s*)O=(?:"([^"]*)"|([^,]*))', subject)
+        signer = (organization.group(1) or organization.group(2)).strip() if organization else ""
+        if status != "Valid" or signer != expected:
             raise SystemExit(f"{path} signature is {status} by {subject!r}, not {expected!r}; refusing to capture")
 
 

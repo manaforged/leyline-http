@@ -83,9 +83,9 @@ OPERA = {
 }
 GITHUB_TOKEN_ENV = "GITHUB_TOKEN"
 SIGNERS = {
-    "chrome": {"macos": "EQHXZ8M8AV", "windows": "O=Google LLC"},
-    "brave": {"macos": "KL8N8XSYF4", "windows": "O=Brave Software, Inc."},
-    "firefox": {"macos": "43AQ936H96", "windows": "O=Mozilla Corporation"},
+    "chrome": {"macos": "EQHXZ8M8AV", "windows": "Google LLC"},
+    "brave": {"macos": "KL8N8XSYF4", "windows": "Brave Software, Inc."},
+    "firefox": {"macos": "43AQ936H96", "windows": "Mozilla Corporation"},
 }
 SAFARI_APP = Path("/Applications/Safari.app")
 SAFARIDRIVER = Path("/usr/bin/safaridriver")
