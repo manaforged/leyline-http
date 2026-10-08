@@ -2,9 +2,10 @@ diff --git a/include/openssl/nid.h b/include/openssl/nid.h
 index 216c06603..b5d528566 100644
 --- a/include/openssl/nid.h
 +++ b/include/openssl/nid.h
-@@ -5531,6 +5531,12 @@ extern "C" {
- #define OBJ_ENC_pe_mtcCertificationAuthority_draft \
-   0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0xda, 0x4b, 0x2f, 0x02
+@@ -5522,6 +5522,12 @@ extern "C" {
+ #define OBJ_rdna_trustAnchorID_draft 1L, 3L, 6L, 1L, 4L, 1L, 44363L, 47L, 1L
+ #define OBJ_ENC_rdna_trustAnchorID_draft \
+   0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0xda, 0x4b, 0x2f, 0x01
  
 +#define SN_ffdhe2048 "ffdhe2048"
 +#define NID_ffdhe2048 973
@@ -12,9 +13,9 @@ index 216c06603..b5d528566 100644
 +#define SN_ffdhe3072 "ffdhe3072"
 +#define NID_ffdhe3072 974
 +
- 
- #if defined(__cplusplus)
- } /* extern C */
+ #define SN_pe_mtcCertificationAuthority_draft \
+   "pe-mtcCertificationAuthority-draft"
+ #define NID_pe_mtcCertificationAuthority_draft 978
 diff --git a/include/openssl/prefix_symbols.h b/include/openssl/prefix_symbols.h
 index ad6faef10..8a39e7e17 100644
 --- a/include/openssl/prefix_symbols.h
