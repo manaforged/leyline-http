@@ -61,10 +61,22 @@ def publish(branch: str, title: str, commit: str, text: str) -> int:
     return 0
 
 
+def landed_lines(lines: list[str]) -> list[str]:
+    report: list[str] = []
+    for line in lines:
+        if line.startswith("landed "):
+            report.append(line)
+        elif report and line.startswith("  "):
+            report.append(line.strip())
+        elif report:
+            break
+    return report
+
+
 def profile(family: str, major: int, lines: list[str]) -> int:
     label = FAMILIES[family]["label"]
     builds = stored_builds(family, major)
-    report = [line.strip() for line in lines if line.startswith(("landed ", "  "))]
+    report = landed_lines(lines)
     review = [line.removeprefix("review: ") for line in lines if line.startswith("review: ")]
     if family in CHROMIUM_BUILDS:
         review += [f"the BoringSSL update in #{number} lands with this profile" for number in open_issues("Update BoringSSL to ")]
