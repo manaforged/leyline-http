@@ -2,8 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import importlib.util
-import json
 import re
 import subprocess
 import sys
@@ -16,7 +14,9 @@ SCRIPTS = Path(__file__).resolve().parent
 ROOT = SCRIPTS.parent
 sys.path.insert(0, str(SCRIPTS))
 
+from profile_capture.chrome import boringssl_revision, live_chrome_major
 from profile_capture.docs import changelog_add
+from profile_capture.net import github_json
 
 CRATE = ROOT / "crates/leyline-bssl-sys"
 SUBMODULE = CRATE / "deps/boringssl"
@@ -25,7 +25,6 @@ PATCHES = CRATE / "patches"
 PATCH_GLOB = "*.patch"
 APPLY_ARGS = ["apply", "-v", "--whitespace=fix"]
 REJECT_ARGS = ["apply", "--reject", "--whitespace=fix"]
-RELEASE_CHECK = SCRIPTS / "release-check.py"
 PROVENANCE = CRATE / "PROVENANCE.md"
 SECURITY = ROOT / "SECURITY.md"
 CHANGELOG = ROOT / "CHANGELOG.md"
@@ -56,13 +55,6 @@ class Pin:
         return int(self.tag.split(".")[0])
 
 
-def release_check():
-    spec = importlib.util.spec_from_file_location("release_check", RELEASE_CHECK)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
 def git(cwd: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     return subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True, check=check)
 
@@ -73,9 +65,9 @@ def bundled() -> Pin:
     return Pin(have, tag)
 
 
-def wanted(rc, revision: str | None) -> Pin:
-    tag = rc.chrome_release()
-    return Pin(revision or rc.boringssl_revision(tag), tag)
+def wanted(revision: str | None) -> Pin:
+    tag = live_chrome_major()[1]
+    return Pin(revision or boringssl_revision(tag), tag)
 
 
 def move_submodule(revision: str) -> None:
@@ -116,9 +108,8 @@ def failing_patch() -> tuple[Path, str] | None:
         git(SUBMODULE, "clean", "-fdq")
 
 
-def commits_after_base(rc, revision: str) -> int:
-    url = COMPARE_URL.format(base=UPSTREAM_BASE, head=revision)
-    return json.loads(rc.fetch(url))["ahead_by"]
+def commits_after_base(revision: str) -> int:
+    return github_json(COMPARE_URL.format(base=UPSTREAM_BASE, head=revision))["ahead_by"]
 
 
 def rewrite(path: Path, edits: list[tuple[str, str]]) -> bool:
@@ -154,8 +145,8 @@ def changelog_bullet(new: Pin, patches: int) -> str:
     )
 
 
-def update_docs(rc, old: Pin, new: Pin) -> list[Path]:
-    ahead = commits_after_base(rc, new.revision)
+def update_docs(old: Pin, new: Pin) -> list[Path]:
+    ahead = commits_after_base(new.revision)
     changed = [path for path, edits in doc_edits(old, new, ahead).items() if rewrite(path, edits)]
     bullet = changelog_bullet(new, len(list(PATCHES.glob(PATCH_GLOB))))
     text = CHANGELOG.read_text()
@@ -181,9 +172,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Move the bundled BoringSSL to Chrome stable's revision.")
     parser.add_argument("--revision", help="BoringSSL commit to pin instead of Chrome stable's")
     args = parser.parse_args()
-    rc = release_check()
     old = bundled()
-    new = wanted(rc, args.revision)
+    new = wanted(args.revision)
     if new.revision == old.revision:
         print("current")
         return Exit.CURRENT
@@ -195,7 +185,7 @@ def main() -> int:
         print(f"{patch.name} does not apply to BoringSSL {new.revision} (Chrome {new.tag})")
         print(detail)
         return Exit.PATCH_FAILED
-    report(old, new, update_docs(rc, old, new))
+    report(old, new, update_docs(old, new))
     return Exit.BUMPED
 
 

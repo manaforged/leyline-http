@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 import platform as plat
+import re
 import shutil
 import tempfile
 from pathlib import Path
@@ -9,9 +11,9 @@ from urllib.parse import urlparse
 from .binaries import chromium_binary, chromium_release, major_of
 from .captures import h3_path, store, tcp_path
 from .cdp import page_text
-from .config import CHROME_STABLE_URL, CHROMIUM_BUILDS, CHROMIUM_H3_FLAGS, FAMILIES, H3_RUNS, H3_URL, HOST_OS, OUT, PEET_URL
+from .config import BORINGSSL_REVISION, CHROME_STABLE_URL, CHROMIUM_DEPS_URL, CHROMIUM_BUILDS, CHROMIUM_H3_FLAGS, FAMILIES, H3_RUNS, H3_URL, HOST_OS, OUT, PEET_URL
 from .land import bundled_majors, missing_majors
-from .net import http_json
+from .net import http_json, http_text
 from .peet import extract_json_blob, require_browser_ua
 
 
@@ -53,6 +55,14 @@ def dump_chrome(
 def live_chrome_major() -> tuple[int, str]:
     ver = http_json(CHROME_STABLE_URL)["channels"]["Stable"]["version"]
     return major_of(ver), ver
+
+
+def boringssl_revision(version: str) -> str:
+    deps = base64.b64decode(http_text(CHROMIUM_DEPS_URL.format(version=version))).decode()
+    found = re.search(BORINGSSL_REVISION, deps)
+    if not found:
+        raise SystemExit(f"Chrome {version} DEPS names no boringssl_revision")
+    return found.group(1)
 
 
 def live_brave_major() -> tuple[int, str]:
