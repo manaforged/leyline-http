@@ -12,6 +12,7 @@ from pathlib import Path
 from .config import WAITS
 from .proc import spawn, stop_tree
 
+STDERR_LINES = 20
 PAGE_TEXT = "document.readyState === 'complete' && document.body ? document.body.innerText : ''"
 
 
@@ -103,17 +104,25 @@ def page_text(cmd: list[str], profile: Path, url: str, errp: Path) -> str:
             stderr=err,
         )
     try:
-        port, path = devtools_port(profile, proc)
-        devtools = Socket(port, path, WAITS["page_load"])
-        target = devtools.call("Target.createTarget", {"url": url})["targetId"]
-        session = devtools.call("Target.attachToTarget", {"targetId": target, "flatten": True})["sessionId"]
-        deadline = time.monotonic() + WAITS["page_load"]
-        while time.monotonic() < deadline:
-            result = devtools.call("Runtime.evaluate", {"expression": PAGE_TEXT, "returnByValue": True}, session)
-            text = (result.get("result") or {}).get("value") or ""
-            if text.strip().startswith("{"):
-                return text
-            time.sleep(WAITS["page_poll"])
-        raise SystemExit(f"{url} did not load within {WAITS['page_load']}s")
+        return read_page(proc, profile, url)
+    except SystemExit as failure:
+        stop_tree(proc, WAITS["browser_exit"])
+        tail = errp.read_text(errors="replace").strip().splitlines()[-STDERR_LINES:] if errp.is_file() else []
+        raise SystemExit("\n".join([str(failure), *tail])) from None
     finally:
         stop_tree(proc, WAITS["browser_exit"])
+
+
+def read_page(proc: subprocess.Popen, profile: Path, url: str) -> str:
+    port, path = devtools_port(profile, proc)
+    devtools = Socket(port, path, WAITS["page_load"])
+    target = devtools.call("Target.createTarget", {"url": url})["targetId"]
+    session = devtools.call("Target.attachToTarget", {"targetId": target, "flatten": True})["sessionId"]
+    deadline = time.monotonic() + WAITS["page_load"]
+    while time.monotonic() < deadline:
+        result = devtools.call("Runtime.evaluate", {"expression": PAGE_TEXT, "returnByValue": True}, session)
+        text = (result.get("result") or {}).get("value") or ""
+        if text.strip().startswith("{"):
+            return text
+        time.sleep(WAITS["page_poll"])
+    raise SystemExit(f"{url} did not load within {WAITS['page_load']}s")
