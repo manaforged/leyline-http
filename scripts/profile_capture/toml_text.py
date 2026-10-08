@@ -52,6 +52,18 @@ def replace_list(text: str, section: str, key: str, items: list[str]) -> str:
     return edited
 
 
+def add_list_item(text: str, section: str, key: str, item: str) -> str:
+    start, end = section_span(text, section)
+    match = re.search(rf"(?m)^{re.escape(key)} = (\[[^\]]*\])$", text[start:end])
+    if not match:
+        return f'{text[:start]}{key} = ["{item}"]\n{text[start:]}'
+    items = tomllib.loads(f"v = {match.group(1)}")["v"]
+    if item in items:
+        return text
+    rendered = ", ".join(f'"{value}"' for value in [item, *items])
+    return f"{text[:start + match.start()]}{key} = [{rendered}]{text[start + match.end():]}"
+
+
 def set_meta(text: str, key: str, value: str | None) -> str:
     start, end = section_span(text, "meta")
     meta = text[start:end]

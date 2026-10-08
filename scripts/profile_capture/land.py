@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse
 
-from .captures import load_h3, load_tcp
+from .captures import load_h3, load_tcp, version_key
 from .config import FAMILIES, H3_URL, OS_LABELS, PEET_URL, PROFILES, TODAY
 from .h3 import apply_h3, qpack
 from .peet import ciphers_from_peet, names_from_peet_ext, peet_get
@@ -39,6 +39,16 @@ def skeleton_toml(family: str, major: int) -> Path:
     if not lower:
         raise SystemExit(f"no {family} profile older than {major} to start from")
     return PROFILES / family / f"{lower[-1]}.toml"
+
+
+def profile_name(family: str, major: int) -> str:
+    return FAMILIES[family]["name"].format(label=FAMILIES[family]["label"], major=major)
+
+
+def build_label(family: str, build: str) -> str:
+    version = build.removeprefix(f"{family}-")
+    major, _, rest = version.partition(".")
+    return FAMILIES[family]["build_label"].format(version=version, major=major, rest=rest)
 
 
 def missing_majors(family: str, live_major: int) -> list[int]:
@@ -87,6 +97,7 @@ class Draft:
     family: str
     major: int
     captured: str
+    builds: dict[str, str]
     text: str
     before: dict
     tcp: dict[str, dict]
@@ -99,16 +110,20 @@ class Draft:
         return FAMILIES[self.family]["label"]
 
 
-def read_captures(family: str, major: int, captured: str) -> Draft:
+def read_captures(family: str, major: int, captured: list[str]) -> Draft:
     source = skeleton_toml(family, major)
-    tcp = load_tcp(captured)
+    tcp: dict[str, dict] = {}
+    builds: dict[str, str] = {}
+    for build in captured:
+        for os_name, capture in load_tcp(build).items():
+            tcp[os_name], builds[os_name] = capture, build
     if not tcp:
-        raise SystemExit(f"no TCP capture named {captured}-<os>.json in the captures directory")
+        raise SystemExit(f"no TCP capture named {' or '.join(captured)}-<os>.json in the captures directory")
     oses = [key for key in OS_LABELS if key in tcp]
     values = [tcp_values(tcp[key]) for key in oses]
     empty = [key for key in FINGERPRINT_KEYS if not all(value[key] for value in values)]
     if empty:
-        raise SystemExit(f"{captured}: the capture has no {', '.join(empty)}; refusing to land it")
+        raise SystemExit(f"{captured[-1]}: the capture has no {', '.join(empty)}; refusing to land it")
     landed = Landed(path=PROFILES / family / f"{major}.toml", previous=int(source.stem), oses=oses)
     landed.review += [
         f"the {key} differs between the {os_phrase(oses)} captures"
@@ -116,13 +131,13 @@ def read_captures(family: str, major: int, captured: str) -> Draft:
         if any(value[key] != values[0][key] for value in values[1:])
     ]
     text = source.read_text()
-    return Draft(family, major, captured, text, tomllib.loads(text), tcp, oses, values[0], landed)
+    return Draft(family, major, captured[-1], builds, text, tomllib.loads(text), tcp, oses, values[0], landed)
 
 
 def land_meta(draft: Draft, date: str) -> None:
     text = draft.text
     for key, value in (
-        ("name", f'"{draft.label} {draft.major}"'),
+        ("name", f'"{profile_name(draft.family, draft.major)}"'),
         ("version", str(draft.major)),
         ("variant", f'"{draft.label}{draft.major}"'),
         ("hello", None),
@@ -169,7 +184,7 @@ def land_identity(draft: Draft) -> None:
 def land_h3(draft: Draft) -> None:
     if "h3" not in draft.before:
         return
-    runs = load_h3(draft.captured)
+    runs = [run for build in sorted(set(draft.builds.values())) for run in load_h3(build)]
     if not (FAMILIES[draft.family]["h3_hosts"] and runs):
         draft.landed.review.append(f"no HTTP/3 capture; [h3] is a copy of {draft.label} {draft.landed.previous}")
         return
@@ -183,15 +198,19 @@ def land_h3(draft: Draft) -> None:
 
 def verified_against(draft: Draft, date: str) -> str:
     method = FAMILIES[draft.family]["tcp_method"]
-    version = draft.captured.removeprefix(draft.family + "-")
     tcp_host, h3_host = urlparse(PEET_URL).hostname, urlparse(H3_URL).hostname
-    verified = f"{tcp_host} {date} {draft.label} {version} {os_phrase(draft.oses)} {method}"
+    by_build = {
+        build_label(draft.family, build): os_phrase([key for key in draft.oses if draft.builds[key] == build])
+        for build in sorted(set(draft.builds.values()), key=version_key, reverse=True)
+    }
+    builds = ", ".join(f"{version} {phrase}" for version, phrase in by_build.items())
+    verified = f"{tcp_host} {date} {draft.label} {builds} {method}"
     if draft.landed.h3_oses:
-        verified += f"; {h3_host} {os_phrase(draft.landed.h3_oses)} headful"
+        verified += f"; {h3_host} {os_phrase(draft.landed.h3_oses)} {FAMILIES[draft.family]['h3_method']}"
     return verified
 
 
-def land(family: str, major: int, captured: str, date: str = TODAY) -> Landed:
+def land(family: str, major: int, captured: list[str], date: str = TODAY) -> Landed:
     draft = read_captures(family, major, captured)
     land_meta(draft, date)
     land_tls(draft)

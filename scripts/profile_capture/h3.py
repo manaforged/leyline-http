@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import tomllib
+
 from .toml_text import replace_list, replace_value
 
 QPACK_SETTINGS = (1, 7)
@@ -31,7 +33,11 @@ def is_grease(version: int) -> bool:
     return version & 0x0F0F0F0F == 0x0A0A0A0A
 
 
-def fingerprint(capture: dict) -> dict:
+def is_grease_param(param_id: int) -> bool:
+    return param_id % 31 == 27
+
+
+def fingerprint(capture: dict, shuffled: bool = False) -> dict:
     params = [
         (
             param.get("id"),
@@ -40,7 +46,10 @@ def fingerprint(capture: dict) -> dict:
             [v["id"] for v in param.get("available_versions", []) if not is_grease(v["id"])],
         )
         for param in transport_parameters(capture["tls"])
+        if not (shuffled and is_grease_param(param.get("id", 0)))
     ]
+    if shuffled:
+        params.sort(key=repr)
     return {
         "ja4_r": capture["ja4_r"].split("_"),
         "h3_text": capture["h3_text"],
@@ -57,12 +66,13 @@ def qpack(capture: dict) -> tuple[int, int]:
 
 
 def apply_h3(text: str, runs: list[dict], previous: list[dict]) -> tuple[str, list[str], list[str]]:
-    prints = [fingerprint(run) for run in runs]
+    shuffled = tomllib.loads(text).get("h3", {}).get("transport_order") == "shuffle"
+    prints = [fingerprint(run, shuffled) for run in runs]
     if any(fp != prints[0] for fp in prints[1:]):
         return text, [], ["the HTTP/3 runs disagree with each other"]
     if not previous:
         return text, [], ["no HTTP/3 capture of the previous version to compare against"]
-    new, old = prints[0], fingerprint(previous[0])
+    new, old = prints[0], fingerprint(previous[0], shuffled)
     if new == old:
         return text, ["HTTP/3 matches the previous version"], []
     sigalgs_only = (

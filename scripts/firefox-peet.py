@@ -7,12 +7,13 @@ from __future__ import annotations
 
 import json
 import os
-import signal
 import socket
 import subprocess
 import sys
 import tempfile
 import time
+
+from profile_capture.proc import spawn, stop_tree
 
 
 def read_msg(sock: socket.socket) -> object:
@@ -68,7 +69,7 @@ def main() -> int:
         fh.write('user_pref("browser.shell.checkDefaultBrowser", false);\n')
         fh.write('user_pref("devtools.jsonview.enabled", false);\n')
 
-    proc = subprocess.Popen(
+    proc = spawn(
         [
             ff,
             *([] if headful else ["--headless"]),
@@ -80,7 +81,6 @@ def main() -> int:
         ],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
-        start_new_session=True,
     )
     try:
         wait_port("127.0.0.1", port, 25)
@@ -113,11 +113,7 @@ def main() -> int:
             sys.stdout.write("\n")
         return 0
     finally:
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except OSError:
-            pass
-        proc.wait(timeout=5)
+        stop_tree(proc, 5)
 
 
 if __name__ == "__main__":

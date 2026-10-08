@@ -13,30 +13,98 @@ FF_DOWNLOAD_URL = os.environ.get("LEYLINE_FF_DOWNLOAD", "https://download-instal
 FF_ARCHIVES = {
     "linux": "{ver}/linux-x86_64/en-US/firefox-{ver}.tar.xz",
     "macos": "{ver}/mac/en-US/Firefox%20{ver}.dmg",
+    "windows": "{ver}/win64/en-US/Firefox%20Setup%20{ver}.exe",
 }
 CHROME_STABLE_URL = "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions.json"
 CACHE = Path(os.environ.get("LEYLINE_CFT_CACHE", Path.home() / ".cache/leyline-cft"))
 OUT = Path(os.environ.get("LEYLINE_ONESHOT_OUT", Path(tempfile.gettempdir()) / "leyline-oneshot"))
 TODAY = date.today().isoformat()
-CHROME_DEB_BASE = "https://dl.google.com/linux/chrome/deb/"
-CHROME_DEB_INDEX = CHROME_DEB_BASE + "dists/stable/main/binary-amd64/Packages"
-MAC_CHROME = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+CHROMIUM_BUILDS = {
+    "chrome": {
+        "product": "Google Chrome",
+        "env": "LEYLINE_CHROME",
+        "apt": {
+            "base": "https://dl.google.com/linux/chrome/deb/",
+            "index": "dists/stable/main/binary-amd64/Packages",
+            "package": "google-chrome-stable",
+            "binary": "opt/google/chrome/chrome",
+        },
+        "macos": {
+            "url": "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg",
+            "app": "Google Chrome.app",
+            "exe": "Contents/MacOS/Google Chrome",
+        },
+        "windows": {
+            "url": "https://dl.google.com/dl/chrome/install/googlechromestandaloneenterprise64.msi",
+            "install": ["msiexec", "/i", "{installer}", "/qn", "/norestart"],
+            "paths": [r"C:\Program Files\Google\Chrome\Application\chrome.exe"],
+        },
+    },
+    "brave": {
+        "product": "Brave Browser",
+        "env": "LEYLINE_BRAVE",
+        "release": {
+            "url": "https://api.github.com/repos/brave/brave-browser/releases/latest",
+            "name": r"Release v(?P<version>\d+\.\d+\.\d+) \(Chromium (?P<chromium>\d+)(?:\.\d+)*\)",
+        },
+        "apt": {
+            "base": "https://brave-browser-apt-release.s3.brave.com/",
+            "index": "dists/stable/main/binary-amd64/Packages",
+            "package": "brave-browser",
+            "binary": "opt/brave.com/brave/brave",
+        },
+        "macos": {
+            "asset": "Brave-Browser-universal.dmg",
+            "app": "Brave Browser.app",
+            "exe": "Contents/MacOS/Brave Browser",
+        },
+        "windows": {
+            "asset": "BraveBrowserStandaloneSetup.exe",
+            "install": ["{installer}", "/silent", "/install"],
+            "paths": [
+                r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
+                r"%LOCALAPPDATA%\BraveSoftware\Brave-Browser\Application\brave.exe",
+            ],
+        },
+    },
+}
+OPERA = {
+    "index": "https://get.geo.opera.com/pub/opera/desktop/",
+    "version": r'href="(\d+\.\d+\.\d+\.\d+)/"',
+    "deb": "{ver}/linux/opera-stable_{ver}_amd64.deb",
+    "checksum": ".sha256sum",
+    "binary": "usr/lib/x86_64-linux-gnu/opera-stable/opera",
+    "brand": "Opera",
+    "ua_chromium": r"Chrome/(\d+)\.",
+    "ua_brand": r"OPR/(\d+)\.",
+    "brand_version": "{major}.0.0.0",
+}
+GITHUB_TOKEN_ENV = "GITHUB_TOKEN"
+SIGNERS = {
+    "chrome": {"macos": "EQHXZ8M8AV", "windows": "O=Google LLC"},
+    "brave": {"macos": "KL8N8XSYF4", "windows": "O=Brave Software, Inc."},
+    "firefox": {"macos": "43AQ936H96", "windows": "O=Mozilla Corporation"},
+}
 SAFARI_APP = Path("/Applications/Safari.app")
 SAFARIDRIVER = Path("/usr/bin/safaridriver")
 SAFARIDRIVER_PORT = int(os.environ.get("LEYLINE_SAFARIDRIVER_PORT", "4444"))
 H3_URL = os.environ.get("LEYLINE_H3_URL", "https://quic.browserleaks.com/?minify=1")
 H3_RUNS = 2
+CHROMIUM_H3_FLAGS = ("--enable-quic", "--origin-to-force-quic-on={host}:443")
 PROFILES = ROOT / "crates/leyline/profiles"
+BRANDS = PROFILES / "brands.toml"
 CAPTURES = PROFILES / "captures"
 QPACK_GOLDEN = ROOT / "crates/leyline/tests/data/h3_qpack.toml"
 BROWSER_IDS = PROFILES / "browser_ids.toml"
+TCP_SUFFIXES = ("", "-headful")
 KEPT_IP_KEYS = frozenset({"dst_ip"})
 OS_LABELS = {"macos": "macOS", "linux": "Linux", "windows": "Windows"}
 HOST_OS = {"Darwin": "macos", "Linux": "linux", "Windows": "windows"}
 FAMILIES = {
-    "chrome": {"label": "Chrome", "tcp_method": "--headless=new", "h3_hosts": (), "ua_from_capture": False, "ua_marker": "Chrome/{major}."},
-    "firefox": {"label": "Firefox", "tcp_method": "--headless", "h3_hosts": ("linux",), "ua_from_capture": False, "ua_marker": "rv:{major}."},
-    "safari": {"label": "Safari", "tcp_method": "safaridriver", "h3_hosts": (), "ua_from_capture": True, "ua_marker": "Version/{major}."},
+    "chrome": {"label": "Chrome", "name": "{label} {major}", "build_label": "{version}", "fill_gaps": False, "tcp_method": "--headless=new", "h3_method": "--headless=new", "h3_hosts": ("macos", "linux", "windows"), "ua_from_capture": False, "ua_marker": "Chrome/{major}."},
+    "firefox": {"label": "Firefox", "name": "{label} {major}", "build_label": "{version}", "fill_gaps": True, "tcp_method": "--headless", "h3_method": "headful", "h3_hosts": ("linux",), "ua_from_capture": False, "ua_marker": "rv:{major}."},
+    "brave": {"label": "Brave", "name": "{label} (Chromium {major})", "build_label": "{rest} (Chromium {major})", "fill_gaps": False, "tcp_method": "--headless=new", "h3_method": "--headless=new", "h3_hosts": ("macos", "linux", "windows"), "ua_from_capture": False, "ua_marker": "Chrome/{major}."},
+    "safari": {"label": "Safari", "name": "{label} {major}", "build_label": "{version}", "fill_gaps": True, "tcp_method": "safaridriver", "h3_method": "headful", "h3_hosts": (), "ua_from_capture": True, "ua_marker": "Version/{major}."},
 }
 WAITS = {
     "page_load": 45.0,

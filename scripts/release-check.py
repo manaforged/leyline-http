@@ -88,12 +88,16 @@ def apple() -> int:
     return max(major(t.split()[1]) for t in stable)
 
 
-def boringssl() -> int:
-    version = chrome_release()
+def boringssl_revision(version: str) -> str:
     deps = base64.b64decode(
         fetch(f"https://chromium.googlesource.com/chromium/src/+/refs/tags/{version}/DEPS?format=TEXT")
     ).decode()
-    wanted = re.search(r"'boringssl_revision':\s*'([0-9a-f]{40})'", deps).group(1)
+    return re.search(r"'boringssl_revision':\s*'([0-9a-f]{40})'", deps).group(1)
+
+
+def boringssl() -> int:
+    version = chrome_release()
+    wanted = boringssl_revision(version)
     tree = subprocess.run(
         ["git", "-C", str(ROOT), "ls-tree", "HEAD", "crates/leyline-bssl-sys/deps/boringssl"],
         capture_output=True, text=True, check=True,

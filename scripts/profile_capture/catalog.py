@@ -3,7 +3,9 @@ from __future__ import annotations
 import platform as plat
 import subprocess
 
-from .chrome import fill_chrome, live_chrome_major
+from .binaries import major_of
+from .chrome import fill_chromium, live_brave_major, live_chrome_major, live_gap
+from .opera import live_opera_version, opera_has
 from .firefox import live_firefox_version
 from .land import bundled_majors, missing_majors
 from .safari import safari_host_version
@@ -48,8 +50,31 @@ def edge_row(chrome_behind: bool) -> Row:
     return ("edge", f"overlay Chrome{newest}", edge_version, "fill" if chrome_behind or gap else "ok", note)
 
 
+def brave_row() -> Row:
+    major, name = live_brave_major()
+    return version_row("brave", name, live_gap("brave", major))
+
+
+def opera_row() -> Row:
+    version = live_opera_version()
+    gap = not opera_has(major_of(version))
+    return ("opera", "brands.toml", version, "fill" if gap else "ok", "brand row missing" if gap else "current")
+
+
+def plan() -> dict[str, list[dict[str, object]]]:
+    firefox = major_of(live_firefox_version())
+    majors = [("chrome", major) for major in live_gap("chrome", live_chrome_major()[0])]
+    majors += [("brave", major) for major in live_gap("brave", live_brave_major()[0])]
+    majors += [("firefox", major) for major in missing_majors("firefox", firefox)]
+    opera = major_of(live_opera_version())
+    return {
+        "capture": [{"family": family, "major": major} for family, major in majors],
+        "brand": [] if opera_has(opera) else [{"family": "opera", "major": opera}],
+    }
+
+
 def catalog() -> list[Row]:
-    rows = [chrome_row(), firefox_row()]
+    rows = [chrome_row(), firefox_row(), brave_row(), opera_row()]
     if plat.system() == "Darwin":
         rows.append(safari_row())
     rows.append(edge_row(rows[0][3] == "fill"))
@@ -84,6 +109,6 @@ def fill_edge(dry: bool, pending_chrome: set[int]) -> list[tuple[str, int, str]]
     edge_maj, edge_ver = live_edge_major()
     if edge_maj > newest:
         print(f"edge: Chrome {newest} behind Edge/Chromium {edge_ver}; fill chrome first")
-        return fill_chrome(dry)
+        return fill_chromium("chrome", dry)
     print(f"edge: overlay on Chrome {newest} (TLS/H2 Chrome, HTTP Edg/{newest})")
     return []
