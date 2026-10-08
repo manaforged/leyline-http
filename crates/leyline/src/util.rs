@@ -63,7 +63,7 @@ pub(crate) fn without_userinfo(mut url: url::Url) -> url::Url {
         .and_then(|()| url.set_password(None))
         .is_err()
     {
-        tracing::trace!("url has no userinfo to strip");
+        tracing::trace!("url cannot carry userinfo");
     }
     url
 }

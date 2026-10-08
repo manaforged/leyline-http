@@ -4,7 +4,7 @@ use std::time::Duration;
 use http::StatusCode;
 use url::Url;
 
-use super::{CURRENT, ms};
+use super::ms;
 use crate::profile::Browser;
 use crate::{Error, HttpVersion};
 
@@ -55,7 +55,7 @@ pub(crate) struct Finish<'a> {
 }
 
 pub(crate) fn summary(finish: &Finish<'_>, out: Result<&crate::Response, &Error>) {
-    if let Err(error) = CURRENT.try_with(|ctx| {
+    super::with(|ctx| {
         let notes = super::notes::take(&ctx.notes);
         let parsed;
         let (url, redirects, status, version, outcome) = match out {
@@ -87,9 +87,7 @@ pub(crate) fn summary(finish: &Finish<'_>, out: Result<&crate::Response, &Error>
             proxy: notes.proxy,
             browser: notes.browser,
         });
-    }) {
-        tracing::trace!(%error, "trace context unavailable");
-    }
+    });
 }
 
 pub(super) fn render(ev: &Summary<'_>) {
