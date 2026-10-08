@@ -90,7 +90,7 @@ vendored in-tree as a trimmed fork of Cloudflare's `boring`, `boring-sys`, and
 6fdd0a54e81a1eecc76e587c685439d3f2ffdd09), over Google's BoringSSL C library.
 `leyline-bssl-sys` builds BoringSSL from source at build time with CMake. The
 fork keeps the modules Leyline uses, pins BoringSSL to the revision in
-Chromium 154's DEPS, and carries these BoringSSL patches:
+Chromium 155's DEPS, and carries these BoringSSL patches:
 
 - `0001-leyline-fingerprint.patch`: `SSL_CTX_set_record_size_limit`
   (RFC 8449), `SSL_CTX_set_delegated_credentials` (RFC 9345),

@@ -302,11 +302,6 @@ pub const __MAC_15_2: i32 = 150200;
 pub const __MAC_15_3: i32 = 150300;
 pub const __MAC_15_4: i32 = 150400;
 pub const __MAC_15_5: i32 = 150500;
-pub const __MAC_15_6: i32 = 150600;
-pub const __MAC_16_0: i32 = 160000;
-pub const __MAC_26_0: i32 = 260000;
-pub const __MAC_26_1: i32 = 260100;
-pub const __MAC_26_2: i32 = 260200;
 pub const __IPHONE_2_0: i32 = 20000;
 pub const __IPHONE_2_1: i32 = 20100;
 pub const __IPHONE_2_2: i32 = 20200;
@@ -359,6 +354,7 @@ pub const __IPHONE_14_1: i32 = 140100;
 pub const __IPHONE_14_2: i32 = 140200;
 pub const __IPHONE_14_3: i32 = 140300;
 pub const __IPHONE_14_5: i32 = 140500;
+pub const __IPHONE_14_4: i32 = 140400;
 pub const __IPHONE_14_6: i32 = 140600;
 pub const __IPHONE_14_7: i32 = 140700;
 pub const __IPHONE_14_8: i32 = 140800;
@@ -393,11 +389,6 @@ pub const __IPHONE_18_2: i32 = 180200;
 pub const __IPHONE_18_3: i32 = 180300;
 pub const __IPHONE_18_4: i32 = 180400;
 pub const __IPHONE_18_5: i32 = 180500;
-pub const __IPHONE_18_6: i32 = 180600;
-pub const __IPHONE_19_0: i32 = 190000;
-pub const __IPHONE_26_0: i32 = 260000;
-pub const __IPHONE_26_1: i32 = 260100;
-pub const __IPHONE_26_2: i32 = 260200;
 pub const __WATCHOS_1_0: i32 = 10000;
 pub const __WATCHOS_2_0: i32 = 20000;
 pub const __WATCHOS_2_1: i32 = 20100;
@@ -453,11 +444,6 @@ pub const __WATCHOS_11_2: i32 = 110200;
 pub const __WATCHOS_11_3: i32 = 110300;
 pub const __WATCHOS_11_4: i32 = 110400;
 pub const __WATCHOS_11_5: i32 = 110500;
-pub const __WATCHOS_11_6: i32 = 110600;
-pub const __WATCHOS_12_0: i32 = 120000;
-pub const __WATCHOS_26_0: i32 = 260000;
-pub const __WATCHOS_26_1: i32 = 260100;
-pub const __WATCHOS_26_2: i32 = 260200;
 pub const __TVOS_9_0: i32 = 90000;
 pub const __TVOS_9_1: i32 = 90100;
 pub const __TVOS_9_2: i32 = 90200;
@@ -513,11 +499,6 @@ pub const __TVOS_18_2: i32 = 180200;
 pub const __TVOS_18_3: i32 = 180300;
 pub const __TVOS_18_4: i32 = 180400;
 pub const __TVOS_18_5: i32 = 180500;
-pub const __TVOS_18_6: i32 = 180600;
-pub const __TVOS_19_0: i32 = 190000;
-pub const __TVOS_26_0: i32 = 260000;
-pub const __TVOS_26_1: i32 = 260100;
-pub const __TVOS_26_2: i32 = 260200;
 pub const __BRIDGEOS_2_0: i32 = 20000;
 pub const __BRIDGEOS_3_0: i32 = 30000;
 pub const __BRIDGEOS_3_1: i32 = 30100;
@@ -551,10 +532,6 @@ pub const __BRIDGEOS_9_2: i32 = 90200;
 pub const __BRIDGEOS_9_3: i32 = 90300;
 pub const __BRIDGEOS_9_4: i32 = 90400;
 pub const __BRIDGEOS_9_5: i32 = 90500;
-pub const __BRIDGEOS_9_6: i32 = 90600;
-pub const __BRIDGEOS_10_0: i32 = 100000;
-pub const __BRIDGEOS_10_1: i32 = 100100;
-pub const __BRIDGEOS_10_2: i32 = 100200;
 pub const __DRIVERKIT_19_0: i32 = 190000;
 pub const __DRIVERKIT_20_0: i32 = 200000;
 pub const __DRIVERKIT_21_0: i32 = 210000;
@@ -575,10 +552,6 @@ pub const __DRIVERKIT_24_2: i32 = 240200;
 pub const __DRIVERKIT_24_3: i32 = 240300;
 pub const __DRIVERKIT_24_4: i32 = 240400;
 pub const __DRIVERKIT_24_5: i32 = 240500;
-pub const __DRIVERKIT_24_6: i32 = 240600;
-pub const __DRIVERKIT_25_0: i32 = 250000;
-pub const __DRIVERKIT_25_1: i32 = 250100;
-pub const __DRIVERKIT_25_2: i32 = 250200;
 pub const __VISIONOS_1_0: i32 = 10000;
 pub const __VISIONOS_1_1: i32 = 10100;
 pub const __VISIONOS_1_2: i32 = 10200;
@@ -589,11 +562,6 @@ pub const __VISIONOS_2_2: i32 = 20200;
 pub const __VISIONOS_2_3: i32 = 20300;
 pub const __VISIONOS_2_4: i32 = 20400;
 pub const __VISIONOS_2_5: i32 = 20500;
-pub const __VISIONOS_2_6: i32 = 20600;
-pub const __VISIONOS_3_0: i32 = 30000;
-pub const __VISIONOS_26_0: i32 = 260000;
-pub const __VISIONOS_26_1: i32 = 260100;
-pub const __VISIONOS_26_2: i32 = 260200;
 pub const MAC_OS_X_VERSION_10_0: i32 = 1000;
 pub const MAC_OS_X_VERSION_10_1: i32 = 1010;
 pub const MAC_OS_X_VERSION_10_2: i32 = 1020;
@@ -664,15 +632,10 @@ pub const MAC_OS_VERSION_15_2: i32 = 150200;
 pub const MAC_OS_VERSION_15_3: i32 = 150300;
 pub const MAC_OS_VERSION_15_4: i32 = 150400;
 pub const MAC_OS_VERSION_15_5: i32 = 150500;
-pub const MAC_OS_VERSION_15_6: i32 = 150600;
-pub const MAC_OS_VERSION_16_0: i32 = 160000;
-pub const MAC_OS_VERSION_26_0: i32 = 260000;
-pub const MAC_OS_VERSION_26_1: i32 = 260100;
-pub const MAC_OS_VERSION_26_2: i32 = 260200;
 pub const __AVAILABILITY_VERSIONS_VERSION_HASH: i32 = 93585900;
 pub const __AVAILABILITY_VERSIONS_VERSION_STRING: &[u8; 6] = b"Local\0";
 pub const __AVAILABILITY_FILE: &[u8; 23] = b"AvailabilityVersions.h\0";
-pub const __MAC_OS_X_VERSION_MAX_ALLOWED: i32 = 260200;
+pub const __MAC_OS_X_VERSION_MAX_ALLOWED: i32 = 150500;
 pub const __ENABLE_LEGACY_MAC_AVAILABILITY: i32 = 1;
 pub const __DARWIN_WCHAR_MIN: i32 = -2147483648;
 pub const _FORTIFY_SOURCE: i32 = 2;
@@ -716,7 +679,6 @@ pub const USE_CLANG_STDDEF: i32 = 0;
 pub const SIGEV_NONE: i32 = 0;
 pub const SIGEV_SIGNAL: i32 = 1;
 pub const SIGEV_THREAD: i32 = 3;
-pub const SIGEV_KEVENT: i32 = 4;
 pub const ILL_NOOP: i32 = 0;
 pub const ILL_ILLOPC: i32 = 1;
 pub const ILL_ILLTRP: i32 = 2;
@@ -838,7 +800,6 @@ pub const IOPOL_TYPE_VFS_IGNORE_PERMISSIONS: i32 = 7;
 pub const IOPOL_TYPE_VFS_SKIP_MTIME_UPDATE: i32 = 8;
 pub const IOPOL_TYPE_VFS_ALLOW_LOW_SPACE_WRITES: i32 = 9;
 pub const IOPOL_TYPE_VFS_DISALLOW_RW_FOR_O_EVTONLY: i32 = 10;
-pub const IOPOL_TYPE_VFS_ENTITLED_RESERVE_ACCESS: i32 = 14;
 pub const IOPOL_SCOPE_PROCESS: i32 = 0;
 pub const IOPOL_SCOPE_THREAD: i32 = 1;
 pub const IOPOL_SCOPE_DARWIN_BG: i32 = 2;
@@ -855,8 +816,6 @@ pub const IOPOL_ATIME_UPDATES_OFF: i32 = 1;
 pub const IOPOL_MATERIALIZE_DATALESS_FILES_DEFAULT: i32 = 0;
 pub const IOPOL_MATERIALIZE_DATALESS_FILES_OFF: i32 = 1;
 pub const IOPOL_MATERIALIZE_DATALESS_FILES_ON: i32 = 2;
-pub const IOPOL_MATERIALIZE_DATALESS_FILES_ORIG: i32 = 4;
-pub const IOPOL_MATERIALIZE_DATALESS_FILES_BASIC_MASK: i32 = 3;
 pub const IOPOL_VFS_STATFS_NO_DATA_VOLUME_DEFAULT: i32 = 0;
 pub const IOPOL_VFS_STATFS_FORCE_NO_DATA_VOLUME: i32 = 1;
 pub const IOPOL_VFS_TRIGGER_RESOLVE_DEFAULT: i32 = 0;
@@ -874,8 +833,6 @@ pub const IOPOL_VFS_DISALLOW_RW_FOR_O_EVTONLY_DEFAULT: i32 = 0;
 pub const IOPOL_VFS_DISALLOW_RW_FOR_O_EVTONLY_ON: i32 = 1;
 pub const IOPOL_VFS_NOCACHE_WRITE_FS_BLKSIZE_DEFAULT: i32 = 0;
 pub const IOPOL_VFS_NOCACHE_WRITE_FS_BLKSIZE_ON: i32 = 1;
-pub const IOPOL_VFS_ENTITLED_RESERVE_ACCESS_OFF: i32 = 0;
-pub const IOPOL_VFS_ENTITLED_RESERVE_ACCESS_ON: i32 = 1;
 pub const WNOHANG: i32 = 1;
 pub const WUNTRACED: i32 = 2;
 pub const WCOREFLAG: i32 = 128;
@@ -899,7 +856,6 @@ pub const BYTE_ORDER: i32 = 1234;
 pub const EXIT_FAILURE: i32 = 1;
 pub const EXIT_SUCCESS: i32 = 0;
 pub const RAND_MAX: i32 = 2147483647;
-pub const _MALLOC_TYPE_MALLOC_BACKDEPLOY_PUBLIC: i32 = 1;
 pub const __DARWIN_FD_SETSIZE: i32 = 1024;
 pub const __DARWIN_NBBY: i32 = 8;
 pub const NBBY: i32 = 8;
@@ -934,7 +890,6 @@ pub const RENAME_SWAP: i32 = 2;
 pub const RENAME_EXCL: i32 = 4;
 pub const RENAME_RESERVED1: i32 = 8;
 pub const RENAME_NOFOLLOW_ANY: i32 = 16;
-pub const RENAME_RESOLVE_BENEATH: i32 = 32;
 pub const SEEK_SET: i32 = 0;
 pub const SEEK_CUR: i32 = 1;
 pub const SEEK_END: i32 = 2;
@@ -1819,6 +1774,7 @@ pub const EVP_R_PRIVATE_KEY_WAS_NOT_SEED: i32 = 139;
 pub const EVP_R_MISSING_PUBLIC_KEY: i32 = 140;
 pub const EVP_R_INVALID_CIPHERTEXT_LENGTH: i32 = 141;
 pub const EVP_R_INVALID_SECRET_LENGTH: i32 = 142;
+pub const EVP_R_INVALID_ENTROPY_LENGTH: i32 = 143;
 pub const EVP_R_OPERATON_NOT_INITIALIZED: i32 = 126;
 pub const SN_undef: &[u8; 6] = b"UNDEF\0";
 pub const LN_undef: &[u8; 10] = b"undefined\0";
@@ -4136,13 +4092,22 @@ pub const SN_alg_mtcProof_draft: &[u8; 19] = b"alg-mtcProof-draft\0";
 pub const NID_alg_mtcProof_draft: i32 = 976;
 pub const SN_rdna_trustAnchorID_draft: &[u8; 25] = b"rdna-trustAnchorID-draft\0";
 pub const NID_rdna_trustAnchorID_draft: i32 = 977;
-pub const SN_pe_mtcCertificationAuthority_draft: &[u8; 35] =
-    b"pe-mtcCertificationAuthority-draft\0";
-pub const NID_pe_mtcCertificationAuthority_draft: i32 = 978;
 pub const SN_ffdhe2048: &[u8; 10] = b"ffdhe2048\0";
 pub const NID_ffdhe2048: i32 = 973;
 pub const SN_ffdhe3072: &[u8; 10] = b"ffdhe3072\0";
 pub const NID_ffdhe3072: i32 = 974;
+pub const SN_pe_mtcCertificationAuthority_draft: &[u8; 35] =
+    b"pe-mtcCertificationAuthority-draft\0";
+pub const NID_pe_mtcCertificationAuthority_draft: i32 = 978;
+pub const SN_SLH_DSA_SHA2_128s: &[u8; 21] = b"id-slh-dsa-sha2-128s\0";
+pub const LN_SLH_DSA_SHA2_128s: &[u8; 18] = b"SLH-DSA-SHA2-128s\0";
+pub const NID_SLH_DSA_SHA2_128s: i32 = 979;
+pub const SN_SLH_DSA_SHAKE_256f: &[u8; 22] = b"id-slh-dsa-shake-256f\0";
+pub const LN_SLH_DSA_SHAKE_256f: &[u8; 19] = b"SLH-DSA-SHAKE-256f\0";
+pub const NID_SLH_DSA_SHAKE_256f: i32 = 980;
+pub const SN_SLH_DSA_SHA2_128s_WITH_SHA256: &[u8; 38] = b"id-hash-slh-dsa-sha2-128s-with-sha256\0";
+pub const LN_SLH_DSA_SHA2_128s_WITH_SHA256: &[u8; 30] = b"SLH-DSA-SHA2-128s-WITH-SHA256\0";
+pub const NID_SLH_DSA_SHA2_128s_WITH_SHA256: i32 = 981;
 pub const EVP_PKEY_NONE: i32 = 0;
 pub const EVP_PKEY_RSA: i32 = 6;
 pub const EVP_PKEY_RSA_PSS: i32 = 912;
@@ -5046,6 +5011,7 @@ pub const SSL_CIPHER_RSA_WITH_3DES_EDE_CBC_SHA: i32 = 10;
 pub const SSL_CIPHER_EMPTY_RENEGOTIATION_INFO_SCSV: i32 = 255;
 pub const SSL_CIPHER_FALLBACK_SCSV: i32 = 22016;
 pub const SSL_DEFAULT_CIPHER_LIST: &[u8; 4] = b"ALL\0";
+pub const SSL_CIPHER_FLAG_EQUAL_PREFERENCE_WITH_NEXT: i32 = 1;
 pub const SSL_MAX_SSL_SESSION_ID_LENGTH: i32 = 32;
 pub const SSL_MAX_MASTER_KEY_LENGTH: i32 = 48;
 pub const SSL_SESS_CACHE_OFF: i32 = 0;
@@ -5476,6 +5442,8 @@ pub const SSL_R_UNSUPPORTED_CERTIFICATE: i32 = 334;
 pub const SSL_R_MISSING_KEY: i32 = 335;
 pub const SSL_R_INVALID_RAW_PUBLIC_KEY: i32 = 336;
 pub const SSL_R_UNUSABLE_ECH_CONFIG_LIST: i32 = 337;
+pub const SSL_R_INVALID_CIPHER_FLAGS: i32 = 338;
+pub const SSL_R_DUPLICATE_CIPHER: i32 = 339;
 pub const SSL_R_SSLV3_ALERT_CLOSE_NOTIFY: i32 = 1000;
 pub const SSL_R_SSLV3_ALERT_UNEXPECTED_MESSAGE: i32 = 1010;
 pub const SSL_R_SSLV3_ALERT_BAD_RECORD_MAC: i32 = 1020;
@@ -9645,10 +9613,11 @@ pub struct evp_hpke_key_st {
     pub kem: *const EVP_HPKE_KEM,
     pub private_key: [u8; 64usize],
     pub public_key: [u8; 1568usize],
+    pub pkey: *mut EVP_PKEY,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of evp_hpke_key_st"][::std::mem::size_of::<evp_hpke_key_st>() - 1640usize];
+    ["Size of evp_hpke_key_st"][::std::mem::size_of::<evp_hpke_key_st>() - 1648usize];
     ["Alignment of evp_hpke_key_st"][::std::mem::align_of::<evp_hpke_key_st>() - 8usize];
     ["Offset of field: evp_hpke_key_st::kem"]
         [::std::mem::offset_of!(evp_hpke_key_st, kem) - 0usize];
@@ -9656,6 +9625,8 @@ const _: () = {
         [::std::mem::offset_of!(evp_hpke_key_st, private_key) - 8usize];
     ["Offset of field: evp_hpke_key_st::public_key"]
         [::std::mem::offset_of!(evp_hpke_key_st, public_key) - 72usize];
+    ["Offset of field: evp_hpke_key_st::pkey"]
+        [::std::mem::offset_of!(evp_hpke_key_st, pkey) - 1640usize];
 };
 impl Default for evp_hpke_key_st {
     fn default() -> Self {
@@ -13042,14 +13013,16 @@ impl ssl_compliance_policy_t {
     pub const ssl_compliance_policy_none: ssl_compliance_policy_t = ssl_compliance_policy_t(0);
     pub const ssl_compliance_policy_fips_202205: ssl_compliance_policy_t =
         ssl_compliance_policy_t(1);
-    pub const ssl_compliance_policy_wpa3_192_202304: ssl_compliance_policy_t =
+    pub const ssl_compliance_policy_fips_202609: ssl_compliance_policy_t =
         ssl_compliance_policy_t(2);
-    pub const ssl_compliance_policy_cnsa_202407: ssl_compliance_policy_t =
+    pub const ssl_compliance_policy_wpa3_192_202304: ssl_compliance_policy_t =
         ssl_compliance_policy_t(3);
-    pub const ssl_compliance_policy_cnsa1_202603: ssl_compliance_policy_t =
+    pub const ssl_compliance_policy_cnsa_202407: ssl_compliance_policy_t =
         ssl_compliance_policy_t(4);
-    pub const ssl_compliance_policy_cnsa2_202603: ssl_compliance_policy_t =
+    pub const ssl_compliance_policy_cnsa1_202603: ssl_compliance_policy_t =
         ssl_compliance_policy_t(5);
+    pub const ssl_compliance_policy_cnsa2_202603: ssl_compliance_policy_t =
+        ssl_compliance_policy_t(6);
 }
 #[repr(transparent)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
@@ -13995,6 +13968,13 @@ unsafe extern "C" {
             unsafe extern "C" fn(arg1: *mut ::std::os::raw::c_void) -> ::std::os::raw::c_int,
         >,
     ) -> *mut FILE;
+    pub fn __sprintf_chk(
+        arg1: *mut ::std::os::raw::c_char,
+        arg2: ::std::os::raw::c_int,
+        arg3: usize,
+        arg4: *const ::std::os::raw::c_char,
+        ...
+    ) -> ::std::os::raw::c_int;
     pub fn __snprintf_chk(
         arg1: *mut ::std::os::raw::c_char,
         __maxlen: usize,
@@ -14003,23 +13983,16 @@ unsafe extern "C" {
         arg4: *const ::std::os::raw::c_char,
         ...
     ) -> ::std::os::raw::c_int;
-    pub fn __vsnprintf_chk(
+    pub fn __vsprintf_chk(
         arg1: *mut ::std::os::raw::c_char,
-        __maxlen: usize,
         arg2: ::std::os::raw::c_int,
         arg3: usize,
         arg4: *const ::std::os::raw::c_char,
         arg5: va_list,
     ) -> ::std::os::raw::c_int;
-    pub fn __sprintf_chk(
+    pub fn __vsnprintf_chk(
         arg1: *mut ::std::os::raw::c_char,
-        arg2: ::std::os::raw::c_int,
-        arg3: usize,
-        arg4: *const ::std::os::raw::c_char,
-        ...
-    ) -> ::std::os::raw::c_int;
-    pub fn __vsprintf_chk(
-        arg1: *mut ::std::os::raw::c_char,
+        __maxlen: usize,
         arg2: ::std::os::raw::c_int,
         arg3: usize,
         arg4: *const ::std::os::raw::c_char,
@@ -19183,6 +19156,8 @@ unsafe extern "C" {
     pub fn EVP_KEM_ciphertext_len(kem: *const EVP_KEM) -> usize;
     #[link_name = "\u{1}_LEYLINE_EVP_KEM_secret_len"]
     pub fn EVP_KEM_secret_len(kem: *const EVP_KEM) -> usize;
+    #[link_name = "\u{1}_LEYLINE_EVP_KEM_entropy_len_for_testing"]
+    pub fn EVP_KEM_entropy_len_for_testing(kem: *const EVP_KEM) -> usize;
     #[link_name = "\u{1}_LEYLINE_EVP_KEM_encap"]
     pub fn EVP_KEM_encap(
         kem: *const EVP_KEM,
@@ -19191,6 +19166,17 @@ unsafe extern "C" {
         out_secret: *mut u8,
         secret_len: usize,
         peer_key: *const EVP_PKEY,
+    ) -> ::std::os::raw::c_int;
+    #[link_name = "\u{1}_LEYLINE_EVP_KEM_encap_external_entropy_for_testing"]
+    pub fn EVP_KEM_encap_external_entropy_for_testing(
+        kem: *const EVP_KEM,
+        out_ciphertext: *mut u8,
+        ciphertext_len: usize,
+        out_secret: *mut u8,
+        secret_len: usize,
+        peer_key: *const EVP_PKEY,
+        entropy: *const u8,
+        entropy_len: usize,
     ) -> ::std::os::raw::c_int;
     #[link_name = "\u{1}_LEYLINE_EVP_KEM_decap"]
     pub fn EVP_KEM_decap(
@@ -24023,6 +24009,18 @@ unsafe extern "C" {
         >,
         arg: *mut ::std::os::raw::c_void,
     );
+    #[link_name = "\u{1}_LEYLINE_SSL_CTX_set_cert_cb_ex"]
+    pub fn SSL_CTX_set_cert_cb_ex(
+        ctx: *mut SSL_CTX,
+        cb: ::std::option::Option<
+            unsafe extern "C" fn(
+                ssl: *mut SSL,
+                arg: *mut ::std::os::raw::c_void,
+                out_alert: *mut u8,
+            ) -> ::std::os::raw::c_int,
+        >,
+        arg: *mut ::std::os::raw::c_void,
+    );
     #[link_name = "\u{1}_LEYLINE_SSL_set_cert_cb"]
     pub fn SSL_set_cert_cb(
         ssl: *mut SSL,
@@ -24030,6 +24028,18 @@ unsafe extern "C" {
             unsafe extern "C" fn(
                 ssl: *mut SSL,
                 arg: *mut ::std::os::raw::c_void,
+            ) -> ::std::os::raw::c_int,
+        >,
+        arg: *mut ::std::os::raw::c_void,
+    );
+    #[link_name = "\u{1}_LEYLINE_SSL_set_cert_cb_ex"]
+    pub fn SSL_set_cert_cb_ex(
+        ssl: *mut SSL,
+        cb: ::std::option::Option<
+            unsafe extern "C" fn(
+                ssl: *mut SSL,
+                arg: *mut ::std::os::raw::c_void,
+                out_alert: *mut u8,
             ) -> ::std::os::raw::c_int,
         >,
         arg: *mut ::std::os::raw::c_void,
@@ -24317,6 +24327,20 @@ unsafe extern "C" {
     pub fn SSL_CTX_cipher_in_group(ctx: *const SSL_CTX, i: usize) -> ::std::os::raw::c_int;
     #[link_name = "\u{1}_LEYLINE_SSL_get_ciphers"]
     pub fn SSL_get_ciphers(ssl: *const SSL) -> *mut stack_st_SSL_CIPHER;
+    #[link_name = "\u{1}_LEYLINE_SSL_CTX_set1_tls13_ciphers"]
+    pub fn SSL_CTX_set1_tls13_ciphers(
+        ctx: *mut SSL_CTX,
+        cipher_ids: *const u16,
+        flags: *const u32,
+        num_cipher_ids: usize,
+    ) -> ::std::os::raw::c_int;
+    #[link_name = "\u{1}_LEYLINE_SSL_set1_tls13_ciphers"]
+    pub fn SSL_set1_tls13_ciphers(
+        ssl: *mut SSL,
+        cipher_ids: *const u16,
+        flags: *const u32,
+        num_cipher_ids: usize,
+    ) -> ::std::os::raw::c_int;
     #[link_name = "\u{1}_LEYLINE_SSL_is_init_finished"]
     pub fn SSL_is_init_finished(ssl: *const SSL) -> ::std::os::raw::c_int;
     #[link_name = "\u{1}_LEYLINE_SSL_in_init"]

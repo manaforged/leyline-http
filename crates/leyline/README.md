@@ -66,7 +66,7 @@ layer a capture shows:
 
 | Layer | What Leyline sends |
 | --- | --- |
-| TLS | Cipher suites, extensions and their order, GREASE, key shares, and ALPN, from BoringSSL at the revision Chrome 154 ships. |
+| TLS | Cipher suites, extensions and their order, GREASE, key shares, and ALPN, from BoringSSL at the revision Chrome 155 ships. |
 | HTTP/2 | SETTINGS, window update, pseudo-header order, and stream priority. |
 | HTTP/3 | QUIC ClientHello, transport parameters, connection ID lengths, HTTP/3 SETTINGS, and the size of the first datagram. |
 | Headers | The browser's header set and order for each kind of request: navigation, form, script, image, XHR, frame, and reload. |
