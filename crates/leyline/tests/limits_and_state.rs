@@ -169,10 +169,12 @@ async fn a_download_refuses_a_declared_length_over_the_cap() {
     tokio::spawn(async move {
         let (mut socket, _) = listener.accept().await.unwrap();
         let mut buf = [0u8; 2048];
-        let _ = socket.read(&mut buf).await;
-        let _ = socket
-            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 1000000\r\n\r\nabc")
-            .await;
+        drop(socket.read(&mut buf).await);
+        drop(
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 1000000\r\n\r\nabc")
+                .await,
+        );
         tokio::time::sleep(Duration::from_secs(10)).await;
     });
     let dir = scratch("dlcap");

@@ -31,5 +31,5 @@ fn unpadded_frame_wire_len_equals_data_len() {
 #[test]
 fn padding_equal_to_payload_is_protocol_error() {
     let payload = vec![10u8, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-    assert!(DataFrame::parse(header(10, flags::PADDED), Bytes::from(payload)).is_err());
+    DataFrame::parse(header(10, flags::PADDED), Bytes::from(payload)).expect_err("expected Err");
 }

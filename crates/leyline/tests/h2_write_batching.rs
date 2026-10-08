@@ -87,7 +87,10 @@ fn test_config() -> H2Config {
     }
 }
 
-#[allow(clippy::type_complexity)]
+#[expect(
+    clippy::type_complexity,
+    reason = "test fixture returns the raw frame parts as a tuple"
+)]
 fn get_req(
     path: &str,
 ) -> (
@@ -195,7 +198,7 @@ async fn eight_concurrent_requests_share_one_write() {
     );
 
     drop(handle);
-    let _ = server.await;
+    drop(server.await);
 }
 
 #[tokio::test]

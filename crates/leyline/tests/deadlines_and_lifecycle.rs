@@ -300,6 +300,6 @@ async fn a_streamed_body_ends_at_its_first_error() {
         .unwrap();
     use futures_util::StreamExt;
     assert_eq!(&body.next().await.unwrap().unwrap()[..], b"a");
-    assert!(body.next().await.unwrap().is_err());
+    body.next().await.unwrap().expect_err("expected Err");
     assert!(body.next().await.is_none());
 }

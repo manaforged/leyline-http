@@ -51,7 +51,10 @@ fn test_config() -> H2Config {
     }
 }
 
-#[allow(clippy::type_complexity)]
+#[expect(
+    clippy::type_complexity,
+    reason = "test fixture returns the raw frame parts as a tuple"
+)]
 fn connect_pseudo() -> (
     PseudoHeaders,
     Vec<(
@@ -210,13 +213,11 @@ async fn h2_extended_connect_happy_path_echoes_payload() {
             }
             other => panic!("expected DATA frame, got {other:?}"),
         };
-        #[allow(dropping_references, clippy::drop_non_drop)]
-        drop(reader);
 
         write_data(&mut server_io, sid, &data_bytes, false).await;
 
         let mut sink = [0u8; 4096];
-        let _ = tokio::time::timeout(Duration::from_millis(100), server_io.read(&mut sink)).await;
+        drop(tokio::time::timeout(Duration::from_millis(100), server_io.read(&mut sink)).await);
     });
 
     let handle = leyline::h2::start(client_io, test_config())
@@ -294,7 +295,7 @@ async fn h2_without_connect_protocol_falls_back() {
     );
 
     drop(handle);
-    let _ = tokio::time::timeout(Duration::from_millis(200), server).await;
+    drop(tokio::time::timeout(Duration::from_millis(200), server).await);
 }
 
 #[tokio::test]

@@ -178,8 +178,8 @@ async fn handle(mut sock: TcpStream) {
         _ => json_status(404, "Not Found", serde_json::json!({"error": "not found"})),
     };
 
-    let _ = sock.write_all(&resp).await;
-    let _ = sock.flush().await;
+    drop(sock.write_all(&resp).await);
+    drop(sock.flush().await);
 }
 
 fn build(status: u16, reason: &str, extra: Vec<(&str, String)>, body: Vec<u8>) -> Vec<u8> {

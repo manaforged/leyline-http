@@ -12,7 +12,7 @@ async fn response_header_timeout_fires_when_upstream_goes_silent() {
     let server = tokio::spawn(async move {
         let (mut sock, _) = listener.accept().await.unwrap();
         let mut buf = [0u8; 1024];
-        let _ = sock.read(&mut buf).await;
+        drop(sock.read(&mut buf).await);
         tokio::time::sleep(Duration::from_secs(30)).await;
         drop(sock);
     });
@@ -52,13 +52,14 @@ async fn no_response_header_timeout_means_request_survives_past_the_ttfb_window(
     let server = tokio::spawn(async move {
         let (mut sock, _) = listener.accept().await.unwrap();
         let mut buf = [0u8; 1024];
-        let _ = sock.read(&mut buf).await;
+        drop(sock.read(&mut buf).await);
         tokio::time::sleep(Duration::from_millis(600)).await;
         use tokio::io::AsyncWriteExt;
-        let _ = sock
-            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
-            .await;
-        let _ = sock.flush().await;
+        drop(
+            sock.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+                .await,
+        );
+        drop(sock.flush().await);
     });
 
     let session = Session::builder()
@@ -74,7 +75,7 @@ async fn no_response_header_timeout_means_request_survives_past_the_ttfb_window(
         .expect("request without a TTFB cap survives the 600ms stall");
     assert_eq!(resp.status(), 200);
 
-    let _ = server.await;
+    drop(server.await);
 }
 
 #[tokio::test]
@@ -90,15 +91,16 @@ async fn session_recovers_after_ttfb_timeout_no_pool_wedge() {
             let stall = n == 1;
             tokio::spawn(async move {
                 let mut buf = [0u8; 1024];
-                let _ = sock.read(&mut buf).await;
+                drop(sock.read(&mut buf).await);
                 if stall {
                     tokio::time::sleep(Duration::from_secs(5)).await;
                 } else {
                     use tokio::io::AsyncWriteExt;
-                    let _ = sock
-                        .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
-                        .await;
-                    let _ = sock.flush().await;
+                    drop(
+                        sock.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+                            .await,
+                    );
+                    drop(sock.flush().await);
                 }
             });
         }
@@ -138,7 +140,7 @@ async fn total_backstop_bounds_silence_when_ttfb_unset() {
     let server = tokio::spawn(async move {
         let (mut sock, _) = listener.accept().await.unwrap();
         let mut buf = [0u8; 1024];
-        let _ = sock.read(&mut buf).await;
+        drop(sock.read(&mut buf).await);
         tokio::time::sleep(Duration::from_secs(30)).await;
         drop(sock);
     });

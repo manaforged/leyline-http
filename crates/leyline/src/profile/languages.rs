@@ -134,7 +134,7 @@ fn weighted(tags: &[String]) -> String {
         if q == Q_START_TENTHS {
             out.push_str(tag);
         } else {
-            let _ = write!(out, ",{tag};q=0.{q}");
+            write!(out, ",{tag};q=0.{q}").expect("writing to a String cannot fail");
         }
         if q > Q_STEP_TENTHS.max(Q_FLOOR_TENTHS) {
             q -= Q_STEP_TENTHS;
@@ -157,9 +157,9 @@ fn gecko_weighted(tags: &[String]) -> String {
             continue;
         }
         if count < GECKO_TENTHS_BELOW || hundredths.is_multiple_of(10) {
-            let _ = write!(out, ";q=0.{}", (hundredths + 5) / 10);
+            write!(out, ";q=0.{}", (hundredths + 5) / 10).expect("writing to a String cannot fail");
         } else {
-            let _ = write!(out, ";q=0.{hundredths:02}");
+            write!(out, ";q=0.{hundredths:02}").expect("writing to a String cannot fail");
         }
     }
     out

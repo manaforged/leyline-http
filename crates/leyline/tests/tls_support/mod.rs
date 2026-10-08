@@ -1,4 +1,7 @@
-#![allow(dead_code)]
+#![allow(
+    dead_code,
+    reason = "shared by several test binaries; each binary uses a subset"
+)]
 
 use std::future::Future;
 use std::sync::Arc;

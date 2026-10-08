@@ -30,9 +30,11 @@ async fn gateway_proxy() -> (String, Arc<Mutex<Vec<String>>>) {
                 .unwrap_or_default()
                 .to_owned();
             log.lock().unwrap().push(line);
-            let _ = socket
-                .write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
-                .await;
+            drop(
+                socket
+                    .write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
+                    .await,
+            );
         }
     });
     (url, seen)
@@ -46,10 +48,12 @@ async fn a_websocket_uses_an_https_proxy_rule() {
         .proxy(ProxyConfig::new().env(false).rule(ProxyRule::https(proxy)))
         .build()
         .unwrap();
-    let _ = session
-        .websocket("wss://127.0.0.1:9/socket")
-        .connect()
-        .await;
+    drop(
+        session
+            .websocket("wss://127.0.0.1:9/socket")
+            .connect()
+            .await,
+    );
     let lines = seen.lock().unwrap().clone();
     assert!(
         lines.iter().any(|line| line.starts_with("CONNECT ")),

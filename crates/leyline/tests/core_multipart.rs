@@ -197,7 +197,11 @@ impl TempFile {
 
 impl Drop for TempFile {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
+        if let Err(e) = std::fs::remove_file(&self.path)
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            eprintln!("cleanup failed: {e}");
+        }
     }
 }
 

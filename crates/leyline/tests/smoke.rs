@@ -13,7 +13,7 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 type SmokeFuture<'a> = Pin<Box<dyn Future<Output = Result<String>> + 'a>>;
 
 #[tokio::test]
-#[ignore]
+#[ignore = "reaches public internet endpoints"]
 async fn smoke_suite() {
     println!("=== Leyline Smoke Suite ===\n");
 

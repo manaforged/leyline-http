@@ -58,8 +58,13 @@ fn is_scheme(text: &str) -> bool {
 }
 
 pub(crate) fn without_userinfo(mut url: url::Url) -> url::Url {
-    let _ = url.set_username("");
-    let _ = url.set_password(None);
+    if url
+        .set_username("")
+        .and_then(|()| url.set_password(None))
+        .is_err()
+    {
+        tracing::trace!("url has no userinfo to strip");
+    }
     url
 }
 

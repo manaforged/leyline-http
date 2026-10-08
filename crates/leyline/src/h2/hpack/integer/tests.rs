@@ -67,7 +67,7 @@ fn roundtrip_various_values() {
 fn decode_overflow_rejected() {
     let src = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x0F];
     let result = decode(0x1F, 5, &src, 0);
-    assert!(result.is_err());
+    result.expect_err("expected Err");
 }
 
 #[test]

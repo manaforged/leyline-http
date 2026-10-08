@@ -1,6 +1,6 @@
 use bytes::Bytes;
 
-use crate::core::deadline::within;
+use crate::core::deadline::{Elapsed, within};
 use crate::header_str::HeaderStr;
 
 use super::*;
@@ -149,7 +149,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         };
         let next = within(Some(remaining), read_while_writing)
             .await
-            .map_err(|_| H2Error::Connection {
+            .map_err(|Elapsed| H2Error::Connection {
                 code: ErrorCode::ProtocolError,
                 reason: format!("CONTINUATION reassembly exceeded {limit:?}"),
             })??;
@@ -173,10 +173,13 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         }) {
             let err = map_state_err(stream_id, e);
             self.fail_stream(stream_id, err);
-            let _ = self
+            if let Err(e) = self
                 .writer
                 .write_rst_stream(stream_id, ErrorCode::StreamClosed)
-                .await;
+                .await
+            {
+                tracing::warn!(error = %e, stream_id, "h2 RST_STREAM write failed");
+            }
             return Ok(());
         }
         let Some(status) = actor.pseudo(decoded) else {

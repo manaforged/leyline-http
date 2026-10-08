@@ -18,16 +18,18 @@ async fn slow_origin(delay: Duration) -> (u16, Arc<AtomicUsize>) {
             let (n, p) = (Arc::clone(&n), Arc::clone(&p));
             tokio::spawn(async move {
                 let mut buf = [0u8; 2048];
-                let _ = socket.read(&mut buf).await;
+                drop(socket.read(&mut buf).await);
                 let inside = n.fetch_add(1, Ordering::SeqCst) + 1;
                 p.fetch_max(inside, Ordering::SeqCst);
                 tokio::time::sleep(delay).await;
                 n.fetch_sub(1, Ordering::SeqCst);
-                let _ = socket
-                    .write_all(
-                        b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\nok",
-                    )
-                    .await;
+                drop(
+                    socket
+                        .write_all(
+                            b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\nok",
+                        )
+                        .await,
+                );
             });
         }
     });

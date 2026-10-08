@@ -126,7 +126,7 @@ async fn a_header_block_over_the_limit_is_refused_before_the_wire() {
     )
     .await
     .expect("the oversized request fails without waiting for a response");
-    assert!(sent.is_err());
+    sent.expect_err("expected Err");
     let headers_seen = timeout(Duration::from_millis(300), async {
         loop {
             let (header, _) = read_frame(&mut server_io).await;
@@ -209,7 +209,7 @@ async fn a_refused_header_block_leaves_the_peer_able_to_decode_the_next_request(
     )
     .await
     .expect("the oversized request fails without waiting for a response");
-    assert!(refused.is_err());
+    refused.expect_err("expected Err");
 
     let client = handle.clone();
     let next = head_with(vec![("x-h299".into(), value.clone())]);
@@ -312,7 +312,7 @@ async fn the_header_list_limit_follows_the_peer_not_the_inbound_limit() {
     )
     .await
     .expect("a request over the peer's limit fails without waiting");
-    assert!(refused.is_err());
+    refused.expect_err("expected Err");
 
     let mut config = test_config();
     config.max_header_block_bytes = 1024;

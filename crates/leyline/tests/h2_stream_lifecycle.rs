@@ -38,7 +38,7 @@ async fn goaway_no_error_refuses_streams_above_last_id() {
         assert_eq!(h.stream_id, 1);
         write_goaway(&mut server_io, 0, 0).await;
         let mut sink = [0u8; 256];
-        let _ = server_io.read(&mut sink).await;
+        drop(server_io.read(&mut sink).await);
     });
 
     let handle = leyline::h2::start(client_io, test_config())
@@ -121,7 +121,8 @@ async fn early_end_stream_resets_open_request_body() {
             if h.frame_type == FrameType::RstStream as u8 && h.stream_id == 1 {
                 let code = u32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]]);
                 if let Some(tx) = seen_tx.take() {
-                    let _ = tx.send(code);
+                    tx.send(code)
+                        .expect("the RST_STREAM listener is still waiting");
                 }
                 break;
             }

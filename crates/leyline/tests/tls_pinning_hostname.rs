@@ -153,9 +153,11 @@ async fn spawn_tls_server(r#gen: &Generated) -> SocketAddr {
                 return;
             };
             let ssl = leyline_bssl::ssl::Ssl::new(acceptor.context()).unwrap();
-            let _ = leyline_bssl_tokio::SslStreamBuilder::new(ssl, tcp)
-                .accept()
-                .await;
+            drop(
+                leyline_bssl_tokio::SslStreamBuilder::new(ssl, tcp)
+                    .accept()
+                    .await,
+            );
         }
     });
 

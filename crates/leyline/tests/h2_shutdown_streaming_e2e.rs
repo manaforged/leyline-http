@@ -107,7 +107,7 @@ async fn streaming_upload_completes_after_last_handle_drops() {
         buf.clear();
         done.encode(&mut buf);
         server_io.write_all(&buf).await.expect("resp data");
-        let _ = server_io.shutdown().await;
+        drop(server_io.shutdown().await);
     });
 
     let handle = leyline::h2::start(client_io, config())

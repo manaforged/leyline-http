@@ -12,12 +12,13 @@ async fn connect_timeout_does_not_bound_the_response_phase() {
     let server = tokio::spawn(async move {
         let (mut sock, _) = listener.accept().await.unwrap();
         let mut buf = [0u8; 1024];
-        let _ = sock.read(&mut buf).await;
+        drop(sock.read(&mut buf).await);
         tokio::time::sleep(Duration::from_millis(600)).await;
-        let _ = sock
-            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
-            .await;
-        let _ = sock.flush().await;
+        drop(
+            sock.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+                .await,
+        );
+        drop(sock.flush().await);
     });
 
     let session = Session::builder()
@@ -44,7 +45,7 @@ async fn connect_timeout_does_not_bound_the_response_phase() {
         "returned in {elapsed:?}, before the server's 600ms think time — the response was short-circuited, not served"
     );
 
-    let _ = server.await;
+    drop(server.await);
 }
 
 #[tokio::test]

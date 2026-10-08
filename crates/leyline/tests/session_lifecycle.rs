@@ -45,12 +45,10 @@ async fn a_failed_body_stream_that_is_kept_releases_its_connection_and_host_slot
         .unwrap()
         .into_stream()
         .unwrap();
-    assert!(
-        futures_util::StreamExt::next(&mut body)
-            .await
-            .unwrap()
-            .is_err()
-    );
+    futures_util::StreamExt::next(&mut body)
+        .await
+        .unwrap()
+        .expect_err("expected Err");
     let closed = tokio::time::timeout(Duration::from_secs(2), closed_rx).await;
     assert!(
         matches!(closed, Ok(Ok(true))),

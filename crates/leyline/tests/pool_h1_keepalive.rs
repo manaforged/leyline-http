@@ -203,8 +203,8 @@ async fn h1_pool_recovers_when_server_drops_connection() {
                             Err(_) => return,
                         }
                     }
-                    let _ = socket.write_all(&ok_response()).await;
-                    let _ = socket.shutdown().await;
+                    drop(socket.write_all(&ok_response()).await);
+                    drop(socket.shutdown().await);
                 });
             }
         });
@@ -464,17 +464,19 @@ async fn post_is_not_replayed_after_mid_response_close() {
         conns_srv.fetch_add(1, Ordering::SeqCst);
 
         let mut buf = [0u8; 1024];
-        let _ = sock.read(&mut buf).await;
-        let _ = sock
-            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
-            .await;
-        let _ = sock.flush().await;
+        drop(sock.read(&mut buf).await);
+        drop(
+            sock.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+                .await,
+        );
+        drop(sock.flush().await);
 
-        let _ = sock.read(&mut buf).await;
-        let _ = sock
-            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nabc")
-            .await;
-        let _ = sock.flush().await;
+        drop(sock.read(&mut buf).await);
+        drop(
+            sock.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nabc")
+                .await,
+        );
+        drop(sock.flush().await);
         drop(sock);
     });
 

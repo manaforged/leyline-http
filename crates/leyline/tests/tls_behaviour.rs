@@ -25,9 +25,11 @@ async fn reply_ok(mut stream: SslStream<TcpStream>) {
             Ok(read) => head.extend_from_slice(&buf[..read]),
         }
     }
-    let _ = stream
-        .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\nok")
-        .await;
+    drop(
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\nok")
+            .await,
+    );
 }
 
 async fn self_signed_server() -> (u16, Vec<u8>) {
@@ -66,7 +68,9 @@ async fn a_self_signed_server_is_refused_without_trust_and_reached_with_danger_a
     let (port, _) = self_signed_server().await;
     let url = format!("https://127.0.0.1:{port}/");
 
-    assert!(fetch(bare_trust(), url.clone()).await.is_err());
+    fetch(bare_trust(), url.clone())
+        .await
+        .expect_err("expected Err");
     assert_eq!(
         fetch(bare_trust().danger_accept_invalid_certs(true), url)
             .await
@@ -94,14 +98,12 @@ async fn a_pinned_leaf_connects_only_when_the_pin_matches() {
         .unwrap(),
         "ok"
     );
-    assert!(
-        fetch(
-            bare_trust().add_ca_der(der).add_pinned_leaf_sha256([7; 32]),
-            url
-        )
-        .await
-        .is_err()
-    );
+    fetch(
+        bare_trust().add_ca_der(der).add_pinned_leaf_sha256([7; 32]),
+        url,
+    )
+    .await
+    .expect_err("expected Err");
 }
 
 struct Recording {

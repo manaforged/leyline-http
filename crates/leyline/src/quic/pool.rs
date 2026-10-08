@@ -146,7 +146,7 @@ impl H3Client {
                 retried: false,
             })
             .await
-            .map_err(|_| H3SendError::NotSent("h3 driver task has exited".into()))?;
+            .map_err(|e| H3SendError::NotSent(format!("h3 driver task has exited: {e}")))?;
 
         match resp_rx.await {
             Ok(Ok(head)) => Ok(H3ResponseParts {

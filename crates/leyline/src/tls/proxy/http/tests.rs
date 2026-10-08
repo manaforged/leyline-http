@@ -9,19 +9,19 @@ fn buf(s: &str) -> (Vec<u8>, usize) {
 #[test]
 fn accepts_minimal_200() {
     let (b, e) = buf("HTTP/1.1 200 OK\r\n\r\n");
-    assert!(validate_connect_response(&b, e).is_ok());
+    validate_connect_response(&b, e).expect("expected Ok");
 }
 
 #[test]
 fn accepts_http10_200_with_reason() {
     let (b, e) = buf("HTTP/1.0 200 Connection established\r\n\r\n");
-    assert!(validate_connect_response(&b, e).is_ok());
+    validate_connect_response(&b, e).expect("expected Ok");
 }
 
 #[test]
 fn accepts_200_with_benign_headers() {
     let (b, e) = buf("HTTP/1.1 200 OK\r\nVia: 1.1 proxy\r\nX-Foo: bar\r\n\r\n");
-    assert!(validate_connect_response(&b, e).is_ok());
+    validate_connect_response(&b, e).expect("expected Ok");
 }
 
 #[test]

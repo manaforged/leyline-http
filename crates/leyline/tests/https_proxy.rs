@@ -142,7 +142,7 @@ async fn spawn_mock_https_proxy(r#gen: &Generated) -> (SocketAddr, oneshot::Rece
             .unwrap();
 
         let connect_req = read_head(&mut proxy_tls).await;
-        let _ = tx.send(connect_req);
+        drop(tx.send(connect_req));
 
         proxy_tls
             .write_all(b"HTTP/1.1 200 Connection established\r\n\r\n")
@@ -151,9 +151,11 @@ async fn spawn_mock_https_proxy(r#gen: &Generated) -> (SocketAddr, oneshot::Rece
         proxy_tls.flush().await.unwrap();
 
         let ssl2 = Ssl::new(acceptor.context()).unwrap();
-        let _ = leyline_bssl_tokio::SslStreamBuilder::new(ssl2, proxy_tls)
-            .accept()
-            .await;
+        drop(
+            leyline_bssl_tokio::SslStreamBuilder::new(ssl2, proxy_tls)
+                .accept()
+                .await,
+        );
     });
 
     (addr, rx)

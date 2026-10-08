@@ -125,7 +125,7 @@ async fn device_autosave_writes_the_device_and_its_jar() {
         .cookies()
         .store_set_cookie("sid=1; Path=/; Max-Age=3600", &url);
     autosave.flush().await.unwrap();
-    assert!(Device::load_from(&path).is_ok());
+    Device::load_from(&path).expect("expected Ok");
     let jar = Jar::load_from(dir.join("jar.json")).unwrap();
     assert_eq!(jar.get_cookie(&url, "sid").as_deref(), Some("1"));
     autosave.shutdown().await.unwrap();

@@ -127,7 +127,7 @@ async fn connection_window_update_overflow_kills_connection() {
         other => panic!("expected Connection error, got {other:?}"),
     }
 
-    let _ = server.await;
+    drop(server.await);
 }
 
 #[tokio::test]
@@ -167,7 +167,7 @@ async fn settings_initial_window_overflow_kills_connection() {
                 break;
             }
         }
-        let _ = server_io.shutdown().await;
+        drop(server_io.shutdown().await);
     });
 
     let handle = leyline::h2::start(client_io, test_config())
@@ -208,5 +208,5 @@ async fn settings_initial_window_overflow_kills_connection() {
         other => panic!("expected Connection error, got {other:?}"),
     }
 
-    let _ = server.await;
+    drop(server.await);
 }

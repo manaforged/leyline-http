@@ -109,7 +109,7 @@ async fn rst_stream_flood_trips_enhance_your_calm() {
                 Ok(Err(_)) => break,
             }
         }
-        let _ = server_io.shutdown().await;
+        drop(server_io.shutdown().await);
     });
 
     let handle = leyline::h2::start(client_io, flood_config())
@@ -158,5 +158,5 @@ async fn rst_stream_flood_trips_enhance_your_calm() {
         other => panic!("expected Connection error, got {other:?}"),
     }
 
-    let _ = server.await;
+    drop(server.await);
 }

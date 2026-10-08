@@ -34,12 +34,14 @@ async fn tls11_server(cert: X509, key: PKey<leyline_bssl::pkey::Private>) -> u16
                 .await
             {
                 let mut buf = [0u8; 4096];
-                let _ = stream.read(&mut buf).await;
-                let _ = stream
-                    .write_all(
-                        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
-                    )
-                    .await;
+                drop(stream.read(&mut buf).await);
+                drop(
+                    stream
+                        .write_all(
+                            b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                        )
+                        .await,
+                );
             }
         }
     });

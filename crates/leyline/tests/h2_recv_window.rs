@@ -141,7 +141,7 @@ async fn connection_recv_window_overrun_kills_connection() {
         other => panic!("expected Connection error, got {other:?}"),
     }
 
-    let _ = server.await;
+    drop(server.await);
 }
 
 #[tokio::test]
@@ -216,5 +216,5 @@ async fn stream_recv_window_overrun_rsts_stream_and_survives() {
     );
     drop(handle);
 
-    let _ = server.await;
+    drop(server.await);
 }

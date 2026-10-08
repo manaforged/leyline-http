@@ -37,6 +37,9 @@ pub(crate) fn take(shared: &SharedNotes) -> Notes {
 }
 
 fn edit(change: impl FnOnce(&mut Notes)) {
-    let _ = CURRENT
-        .try_with(|ctx| change(&mut ctx.notes.lock().unwrap_or_else(PoisonError::into_inner)));
+    if let Err(error) = CURRENT
+        .try_with(|ctx| change(&mut ctx.notes.lock().unwrap_or_else(PoisonError::into_inner)))
+    {
+        tracing::trace!(%error, "trace context unavailable");
+    }
 }

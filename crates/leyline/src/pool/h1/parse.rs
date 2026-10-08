@@ -77,7 +77,7 @@ where
         BodyFraming::None => Vec::new(),
         BodyFraming::Chunked => read_chunked_body(stream, buf, limit).await?,
         BodyFraming::Fixed(len) => {
-            let len = usize::try_from(len).map_err(|_| body_too_large(limit))?;
+            let len = usize::try_from(len).map_err(|e| oversized(&e, limit))?;
             read_fixed_body(stream, buf, len, limit).await?
         }
         BodyFraming::ToClose => read_to_close(stream, buf, limit).await?,
@@ -261,7 +261,7 @@ where
         let size_token = size_line.split(';').next().unwrap_or("").trim();
         let size_u64 = u64::from_str_radix(size_token, 16)
             .map_err(|e| H1PooledError::Http(format!("invalid chunk size: {e}")))?;
-        let size = usize::try_from(size_u64).map_err(|_| body_too_large(limit))?;
+        let size = usize::try_from(size_u64).map_err(|e| oversized(&e, limit))?;
         let total = out
             .len()
             .checked_add(size)
@@ -284,6 +284,11 @@ where
         }
         buf.drain(..chunk_end);
     }
+}
+
+fn oversized(e: &std::num::TryFromIntError, limit: usize) -> H1PooledError {
+    tracing::debug!(error = %e, "h1 body length does not fit in usize");
+    body_too_large(limit)
 }
 
 fn body_too_large(limit: usize) -> H1PooledError {

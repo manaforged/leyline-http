@@ -43,7 +43,9 @@ fn opera_overlay_matches_live_capture() {
 #[test]
 fn edge_overlay_on_desktop_ok_for_all_three_platforms() {
     for p in [Platform::Windows, Platform::MacOS, Platform::Linux] {
-        assert!(ChromiumBrand::Edge.overlay(147, p, "ua").is_ok());
+        ChromiumBrand::Edge
+            .overlay(147, p, "ua")
+            .expect("expected Ok");
     }
 }
 
@@ -79,14 +81,14 @@ fn opera_overlay_only_accepts_verified_anchors() {
         );
     }
     for bad in [144u32, 153] {
-        assert!(
-            ChromiumBrand::Opera
-                .overlay(bad, Platform::Windows, "ua")
-                .is_err()
-        );
+        ChromiumBrand::Opera
+            .overlay(bad, Platform::Windows, "ua")
+            .expect_err("expected Err");
     }
     for p in [Platform::Android, Platform::IOS] {
-        assert!(ChromiumBrand::Opera.overlay(147, p, "ua").is_err());
+        ChromiumBrand::Opera
+            .overlay(147, p, "ua")
+            .expect_err("expected Err");
     }
 }
 

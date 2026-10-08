@@ -323,7 +323,7 @@ async fn offline_http_connect_proxy_wire_bytes() {
             .write_all(b"HTTP/1.1 200 Connection established\r\n\r\n")
             .await
             .unwrap();
-        let _ = stream.shutdown().await;
+        drop(stream.shutdown().await);
         Ok(req)
     });
 
@@ -339,7 +339,7 @@ async fn offline_http_connect_proxy_wire_bytes() {
         .build()
         .unwrap();
 
-    let _ = session.get("https://target.example.com/").await;
+    drop(session.get("https://target.example.com/").await);
 
     let recv = server.await.unwrap();
     match recv {
@@ -409,7 +409,7 @@ async fn offline_socks5_proxy_wire_bytes() {
             .write_all(&[0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0])
             .await
             .unwrap();
-        let _ = stream.shutdown().await;
+        drop(stream.shutdown().await);
     });
 
     let proxy_url = format!(
@@ -424,7 +424,7 @@ async fn offline_socks5_proxy_wire_bytes() {
         .build()
         .unwrap();
 
-    let _ = session.get("https://target.example.com/").await;
+    drop(session.get("https://target.example.com/").await);
 
     server.await.unwrap();
     println!("✓ offline SOCKS5 wire bytes OK (RFC 1928 greet + auth + CONNECT)");

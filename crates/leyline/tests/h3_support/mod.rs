@@ -1,4 +1,7 @@
-#![allow(dead_code)]
+#![allow(
+    dead_code,
+    reason = "shared by several test binaries; each binary uses a subset"
+)]
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -144,9 +147,13 @@ fn status(code: &[u8]) -> [leyline_quiche::h3::Header; 1] {
 }
 
 fn reset(quic: &mut leyline_quiche::Connection, stream: u64, code: u64, halves: Halves) {
-    let _ = quic.stream_shutdown(stream, leyline_quiche::Shutdown::Write, code);
-    if let Halves::Both = halves {
-        let _ = quic.stream_shutdown(stream, leyline_quiche::Shutdown::Read, code);
+    if let Err(e) = quic.stream_shutdown(stream, leyline_quiche::Shutdown::Write, code) {
+        eprintln!("h3 test peer: {e:?}");
+    }
+    if let Halves::Both = halves
+        && let Err(e) = quic.stream_shutdown(stream, leyline_quiche::Shutdown::Read, code)
+    {
+        eprintln!("h3 test peer: {e:?}");
     }
 }
 
@@ -217,7 +224,9 @@ impl Peer {
                 Reply::Truncate(length, code) => {
                     h3.send_response(quic, stream, &status(b"200"), false)
                         .expect("response head");
-                    let _ = h3.send_body(quic, stream, &vec![b'x'; length], false);
+                    if let Err(e) = h3.send_body(quic, stream, &vec![b'x'; length], false) {
+                        eprintln!("h3 test peer: {e:?}");
+                    }
                     self.deferred.push(Deferred {
                         stream,
                         code,
@@ -344,7 +353,9 @@ async fn serve(
                 }
                 if let Some(peer) = peers.get_mut(&from) {
                     let info = leyline_quiche::RecvInfo { from, to: local };
-                    let _ = peer.quic.recv(&mut inbound[..len], info);
+                    if let Err(e) = peer.quic.recv(&mut inbound[..len], info) {
+                        eprintln!("h3 test peer: {e:?}");
+                    }
                 }
             }
             Ok(Err(_)) => return,
@@ -353,7 +364,7 @@ async fn serve(
         for (address, peer) in &mut peers {
             peer.advance(&replies, &mut answered, &seen);
             while let Ok((len, _)) = peer.quic.send(&mut outbound) {
-                let _ = socket.send_to(&outbound[..len], *address).await;
+                drop(socket.send_to(&outbound[..len], *address).await);
             }
         }
         peers.retain(|_, peer| !peer.quic.is_closed());

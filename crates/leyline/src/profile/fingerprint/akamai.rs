@@ -39,10 +39,14 @@ impl H2Profile {
     }
 }
 
-fn number<T: std::str::FromStr>(text: &str, what: &str) -> Result<T, String> {
+fn number<T>(text: &str, what: &str) -> Result<T, String>
+where
+    T: std::str::FromStr,
+    T::Err: std::fmt::Display,
+{
     text.trim()
         .parse()
-        .map_err(|_| format!("{what} {text:?} is not a number"))
+        .map_err(|e| format!("{what} {text:?} is not a number: {e}"))
 }
 
 impl H2Profile {

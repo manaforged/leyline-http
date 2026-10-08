@@ -26,8 +26,8 @@ async fn peer_max_frame_size_does_not_raise_our_inbound_cap() {
         assert_eq!(h.frame_type, FrameType::Headers as u8);
         assert_eq!(h.stream_id, 1);
         let oversized = [0x01u8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01];
-        let _ = server_io.write_all(&oversized).await;
-        let _ = server_io.shutdown().await;
+        drop(server_io.write_all(&oversized).await);
+        drop(server_io.shutdown().await);
     });
 
     let handle = leyline::h2::start(client_io, test_config())
@@ -100,7 +100,7 @@ async fn bad_status_fails_stream_but_not_connection() {
             write_response(&mut server_io, 3, b"ok").await;
 
             let mut sink = [0u8; 256];
-            let _ = server_io.read(&mut sink).await;
+            drop(server_io.read(&mut sink).await);
         });
 
         let handle = leyline::h2::start(client_io, test_config())
@@ -144,7 +144,7 @@ async fn trailers_without_end_stream_fail_the_stream() {
         write_raw_headers(&mut server_io, 1, &[("x-trailer", "late")], false).await;
 
         let mut sink = [0u8; 256];
-        let _ = server_io.read(&mut sink).await;
+        drop(server_io.read(&mut sink).await);
     });
 
     let handle = leyline::h2::start(client_io, test_config())
@@ -182,7 +182,7 @@ async fn pseudo_header_in_trailers_fails_the_stream() {
         write_raw_headers(&mut server_io, 1, &[(":status", "204")], true).await;
 
         let mut sink = [0_u8; 256];
-        let _ = server_io.read(&mut sink).await;
+        drop(server_io.read(&mut sink).await);
     });
 
     let handle = leyline::h2::start(client_io, test_config())
@@ -282,7 +282,7 @@ async fn trailers_with_end_stream_reach_the_response() {
         write_raw_headers(&mut server_io, 1, &[("grpc-status", "0")], true).await;
 
         let mut sink = [0u8; 256];
-        let _ = server_io.read(&mut sink).await;
+        drop(server_io.read(&mut sink).await);
     });
 
     let handle = leyline::h2::start(client_io, test_config())

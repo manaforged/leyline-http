@@ -55,7 +55,7 @@ pub(crate) struct Finish<'a> {
 }
 
 pub(crate) fn summary(finish: &Finish<'_>, out: Result<&crate::Response, &Error>) {
-    let _ = CURRENT.try_with(|ctx| {
+    if let Err(error) = CURRENT.try_with(|ctx| {
         let notes = super::notes::take(&ctx.notes);
         let parsed;
         let (url, redirects, status, version, outcome) = match out {
@@ -87,7 +87,9 @@ pub(crate) fn summary(finish: &Finish<'_>, out: Result<&crate::Response, &Error>
             proxy: notes.proxy,
             browser: notes.browser,
         });
-    });
+    }) {
+        tracing::trace!(%error, "trace context unavailable");
+    }
 }
 
 pub(super) fn render(ev: &Summary<'_>) {

@@ -24,10 +24,9 @@ async fn read_headers(sock: &mut tokio::net::TcpStream) -> String {
 fn extract_authorization(headers: &str) -> Option<String> {
     for line in headers.split("\r\n") {
         let lower = line.to_ascii_lowercase();
-        if let Some(rest) = lower.strip_prefix("authorization: ") {
-            let _ = rest;
-            let v = line.split_once(": ").unwrap().1.to_string();
-            return Some(v);
+        if lower.starts_with("authorization: ") {
+            let (_, v) = line.split_once(": ")?;
+            return Some(v.to_string());
         }
     }
     None

@@ -25,7 +25,7 @@ async fn authenticate_rejects_wrong_subnegotiation_version() {
         res.is_err(),
         "malformed auth VER byte must be rejected, got {res:?}"
     );
-    let _ = server_task.await;
+    drop(server_task.await);
 }
 
 #[test]

@@ -146,7 +146,7 @@ async fn capture_client_hello(browser: Browser, route: Route) -> (Vec<u16>, Vec<
         }
         None => format!("https://localhost:{port}/"),
     };
-    let _ = builder.build().unwrap().get(url).await;
+    drop(builder.build().unwrap().get(url).await);
 
     let record = server.await.unwrap();
     parse_client_hello(&record).expect("valid ClientHello")

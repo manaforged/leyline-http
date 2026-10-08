@@ -112,7 +112,7 @@ async fn early_hints_103_is_skipped_final_status_wins() {
         let mut buf = BytesMut::new();
         d.encode(&mut buf);
         server_io.write_all(&buf).await.expect("data write");
-        let _ = server_io.shutdown().await;
+        drop(server_io.shutdown().await);
     });
 
     let handle = leyline::h2::start(client_io, config())

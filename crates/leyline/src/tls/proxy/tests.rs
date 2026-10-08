@@ -50,5 +50,7 @@ async fn connect_to_proxy_routes_through_connector_resolver() {
 #[tokio::test]
 async fn connect_to_proxy_requires_host() {
     let url: url::Url = "mailto:a@b".parse().unwrap();
-    assert!(connect_to_proxy(&base_connector(), &url).await.is_err());
+    connect_to_proxy(&base_connector(), &url)
+        .await
+        .expect_err("expected Err");
 }

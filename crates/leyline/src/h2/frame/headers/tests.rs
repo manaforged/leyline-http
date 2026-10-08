@@ -20,7 +20,7 @@ fn padding_consuming_all_but_the_octet_leaves_empty_fragment() {
 #[test]
 fn padding_overwriting_the_octet_is_protocol_error() {
     let payload = vec![6u8, 0, 0, 0, 0, 0];
-    assert!(HeadersFrame::parse(header(6, flags::PADDED), Bytes::from(payload)).is_err());
+    HeadersFrame::parse(header(6, flags::PADDED), Bytes::from(payload)).expect_err("expected Err");
 }
 
 #[test]

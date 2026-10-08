@@ -84,7 +84,7 @@ async fn cancelled_send_request_rst_streams_the_slot() {
         );
 
         let mut sink = [0u8; 256];
-        let _ = server_io.read(&mut sink).await;
+        drop(server_io.read(&mut sink).await);
     });
 
     let handle = leyline::h2::start(client_io, test_config())
@@ -101,16 +101,18 @@ async fn cancelled_send_request_rst_streams_the_slot() {
 
     let handle_clone = handle.clone();
     let pending = tokio::spawn(async move {
-        let _ = handle_clone
-            .send_shared(
-                Arc::new(Head {
-                    pseudo,
-                    headers: vec![],
-                }),
-                RequestBody::None,
-                false,
-            )
-            .await;
+        drop(
+            handle_clone
+                .send_shared(
+                    Arc::new(Head {
+                        pseudo,
+                        headers: vec![],
+                    }),
+                    RequestBody::None,
+                    false,
+                )
+                .await,
+        );
     });
 
     tokio::time::sleep(Duration::from_millis(100)).await;

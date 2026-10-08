@@ -295,7 +295,11 @@ async fn download_to_writes_body_to_file() {
 
     let on_disk = tokio::fs::read(&path).await.unwrap();
     assert_eq!(on_disk, payload, "downloaded bytes must match the body");
-    let _ = tokio::fs::remove_file(&path).await;
+    if let Err(e) = tokio::fs::remove_file(&path).await
+        && e.kind() != std::io::ErrorKind::NotFound
+    {
+        eprintln!("cleanup failed: {e}");
+    }
     server.await.unwrap();
 }
 

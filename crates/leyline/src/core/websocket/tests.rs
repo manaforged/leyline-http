@@ -46,7 +46,7 @@ fn invalid_header_value_is_err() {
 
 #[test]
 fn valid_header_pair_ok() {
-    assert!(ws_header_pair("x-request-id", "1").is_ok());
+    ws_header_pair("x-request-id", "1").expect("expected Ok");
 }
 
 #[test]

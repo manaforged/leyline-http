@@ -29,7 +29,7 @@ async fn serve(reply: String, heads: Heads) -> SocketAddr {
                 .lock()
                 .unwrap()
                 .push(String::from_utf8_lossy(&head).into_owned());
-            let _ = socket.write_all(reply.as_bytes()).await;
+            drop(socket.write_all(reply.as_bytes()).await);
         }
     });
     addr

@@ -42,9 +42,11 @@ async fn chrome_pq_key_shares_use_distinct_x25519_ephemerals() {
         .timeout(std::time::Duration::from_secs(3))
         .build()
         .unwrap();
-    let _ = session
-        .get(format!("https://{}:{}/", addr.ip(), addr.port()))
-        .await;
+    drop(
+        session
+            .get(format!("https://{}:{}/", addr.ip(), addr.port()))
+            .await,
+    );
 
     let bytes = server.await.unwrap();
     assert!(

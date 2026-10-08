@@ -36,7 +36,7 @@ where
             .is_err()
             || close
         {
-            let _ = stream.shutdown().await;
+            drop(stream.shutdown().await);
             return;
         }
     }

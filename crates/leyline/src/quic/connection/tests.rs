@@ -116,21 +116,21 @@ async fn resolve_peer_falls_back_on_ipv6_only_hosts() {
 
 #[test]
 fn validates_profile_connection_id_lengths() {
-    assert!(validate_connection_id_len(8).is_ok());
+    validate_connection_id_len(8).expect("expected Ok");
     assert!(validate_connection_id_len(0).is_err());
     assert!(validate_connection_id_len(leyline_quiche::MAX_CONN_ID_LEN + 1).is_err());
 }
 
 #[test]
 fn body_budget_allows_zero_chunks() {
-    assert!(check_body_budget(0, 0, 1024).is_ok());
-    assert!(check_body_budget(1024, 0, 1024).is_ok());
+    check_body_budget(0, 0, 1024).expect("expected Ok");
+    check_body_budget(1024, 0, 1024).expect("expected Ok");
 }
 
 #[test]
 fn body_budget_allows_exactly_max() {
-    assert!(check_body_budget(0, 1024, 1024).is_ok());
-    assert!(check_body_budget(512, 512, 1024).is_ok());
+    check_body_budget(0, 1024, 1024).expect("expected Ok");
+    check_body_budget(512, 512, 1024).expect("expected Ok");
 }
 
 #[test]

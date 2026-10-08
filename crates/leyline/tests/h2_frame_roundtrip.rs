@@ -243,7 +243,7 @@ fn settings_rejects_nonzero_stream() {
         stream_id: 1,
     };
     let result = SettingsFrame::parse(header, bytes::Bytes::new());
-    assert!(result.is_err());
+    result.expect_err("expected Err");
 }
 
 #[test]
@@ -255,7 +255,7 @@ fn data_rejects_stream_zero() {
         stream_id: 0,
     };
     let result = DataFrame::parse(header, bytes::Bytes::new());
-    assert!(result.is_err());
+    result.expect_err("expected Err");
 }
 
 #[test]
@@ -268,5 +268,5 @@ fn window_update_rejects_zero_increment() {
     };
     let payload = bytes::Bytes::from_static(&[0, 0, 0, 0]);
     let result = WindowUpdateFrame::parse(header, payload);
-    assert!(result.is_err());
+    result.expect_err("expected Err");
 }

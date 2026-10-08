@@ -65,7 +65,10 @@ fn buffered(body: ResponseBody) -> Vec<u8> {
     body
 }
 
-#[allow(clippy::type_complexity)]
+#[expect(
+    clippy::type_complexity,
+    reason = "test fixture returns the raw frame parts as a tuple"
+)]
 fn get_req(
     path: &str,
 ) -> (
@@ -112,7 +115,7 @@ async fn two_concurrent_requests_respond_out_of_order() {
         write_response(&mut server_io, 1, b"first-response").await;
 
         let mut sink = [0u8; 256];
-        let _ = server_io.read(&mut sink).await;
+        drop(server_io.read(&mut sink).await);
     });
 
     let handle = leyline::h2::start(client_io, test_config())
@@ -144,7 +147,7 @@ async fn two_concurrent_requests_respond_out_of_order() {
     assert_eq!(buffered(b.body), b"second-response");
 
     drop(handle);
-    let _ = server.await;
+    drop(server.await);
 }
 
 #[tokio::test]
@@ -218,7 +221,7 @@ async fn parked_stream_does_not_block_others() {
         write_response(&mut server_io, 1, b"aaa").await;
 
         let mut sink = [0u8; 256];
-        let _ = server_io.read(&mut sink).await;
+        drop(server_io.read(&mut sink).await);
     });
 
     let handle = leyline::h2::start(client_io, test_config())
@@ -277,7 +280,7 @@ async fn parked_stream_does_not_block_others() {
     assert_eq!(buffered(a.body), b"aaa");
 
     drop(handle);
-    let _ = server.await;
+    drop(server.await);
 }
 
 #[tokio::test]
@@ -349,7 +352,7 @@ async fn reader_eof_fails_pending_requests() {
     assert!(a.unwrap().is_err(), "req A must fail on EOF");
     assert!(b.unwrap().is_err(), "req B must fail on EOF");
 
-    let _ = tokio::time::timeout(Duration::from_secs(1), server).await;
+    drop(tokio::time::timeout(Duration::from_secs(1), server).await);
     let _ = BytesMut::new();
 }
 
@@ -513,18 +516,16 @@ async fn queued_request_uses_acknowledged_settings() {
         assert_eq!(payload.first(), Some(&0x20));
         write_response(&mut peer, request.stream_id, b"configured").await;
         let mut closed = [0; 9];
-        let _ = peer.read(&mut closed).await;
+        drop(peer.read(&mut closed).await);
     });
     let handle = leyline::h2::start(client, test_config())
         .await
         .expect("start client");
     let (pseudo, headers) = get_req("/");
     let mut request = Box::pin(handle.send_shared(head(pseudo, headers), RequestBody::None, false));
-    assert!(
-        timeout(Duration::from_millis(10), request.as_mut())
-            .await
-            .is_err()
-    );
+    timeout(Duration::from_millis(10), request.as_mut())
+        .await
+        .expect_err("expected Err");
     ready.send(()).expect("release settings");
     let response = timeout(Duration::from_secs(2), request.as_mut())
         .await

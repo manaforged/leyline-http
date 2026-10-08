@@ -308,7 +308,7 @@ pub(crate) fn render(rows: &[Row], families: &Families) -> BuildResult<String> {
     }
     writeln!(
         out,
-        "#[allow(deprecated)]\nconst FAMILY_LATEST: &[Browser] = &[{}];",
+        "#[allow(deprecated, reason = \"tables list every browser, including deprecated ones\")]\nconst FAMILY_LATEST: &[Browser] = &[{}];",
         variant_list(family_latest.iter().copied())
     )?;
     let default = families
@@ -323,11 +323,14 @@ pub(crate) fn render(rows: &[Row], families: &Families) -> BuildResult<String> {
     )?;
     writeln!(
         out,
-        "#[allow(deprecated)]\nconst ALL: &[Browser] = &[{}];",
+        "#[allow(deprecated, reason = \"tables list every browser, including deprecated ones\")]\nconst ALL: &[Browser] = &[{}];",
         variant_list(rows)
     )?;
 
-    writeln!(out, "#[allow(deprecated)]\nconst ENTRIES: &[Entry] = &[")?;
+    writeln!(
+        out,
+        "#[allow(deprecated, reason = \"tables list every browser, including deprecated ones\")]\nconst ENTRIES: &[Entry] = &["
+    )?;
     for row in crate::ids::by_id(rows) {
         let rep = hello(rows, row)?;
         let mut platforms = Vec::new();

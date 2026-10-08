@@ -1,4 +1,7 @@
-#![allow(dead_code)]
+#![allow(
+    dead_code,
+    reason = "shared by several test binaries; each binary uses a subset"
+)]
 
 use std::io;
 use std::pin::Pin;
@@ -240,7 +243,7 @@ pub fn send(handle: &H2Client, method: &str, body: RequestBody) -> tokio::task::
     let handle = handle.clone();
     let head = head(method);
     tokio::spawn(async move {
-        let _ = handle.send_shared(head, body, false).await;
+        drop(handle.send_shared(head, body, false).await);
     })
 }
 

@@ -128,19 +128,21 @@ fn table_size_update() {
 fn invalid_index_rejected() {
     let mut dec = Decoder::new();
     let result = dec.decode_header_block(&[0xFF, 0x49]);
-    assert!(result.is_err());
+    result.expect_err("expected Err");
 }
 
 #[test]
 fn a_table_size_update_after_a_header_is_rejected() {
     let mut dec = Decoder::new();
-    assert!(dec.decode_header_block(&[0x88, 0x20]).is_err());
+    dec.decode_header_block(&[0x88, 0x20])
+        .expect_err("expected Err");
 }
 
 #[test]
 fn a_third_table_size_update_in_one_block_is_rejected() {
     let mut dec = Decoder::new();
-    assert!(dec.decode_header_block(&[0x20, 0x20, 0x20, 0x88]).is_err());
+    dec.decode_header_block(&[0x20, 0x20, 0x20, 0x88])
+        .expect_err("expected Err");
 }
 
 #[test]

@@ -48,21 +48,28 @@ pub(crate) fn install_verifier_ctx(
             .as_deref()
             .or_else(|| ssl.servername(NameType::HOST_NAME))
             .ok_or(SslVerifyError::Invalid(SslAlert::CERTIFICATE_UNKNOWN))?;
-        verify(ssl, hostname, &pins, system_roots)
-            .map_err(|_| SslVerifyError::Invalid(SslAlert::CERTIFICATE_UNKNOWN))
+        verify(ssl, hostname, &pins, system_roots).map_err(|failure| {
+            tracing::debug!(target: "leyline::tls::trust", ?failure, "peer certificate rejected");
+            SslVerifyError::Invalid(SslAlert::CERTIFICATE_UNKNOWN)
+        })
     });
+}
+
+fn rejected(error: &leyline_bssl::error::ErrorStack, failure: TrustFailure) -> TrustFailure {
+    tracing::debug!(target: "leyline::tls::trust", %error, ?failure, "certificate check failed");
+    failure
 }
 
 fn trusted(ssl: &SslRef, _host: &str, _system_roots: bool) -> Result<bool, TrustFailure> {
     let cert = ssl.peer_certificate().ok_or(TrustFailure::Certificate)?;
     let chain = ssl.peer_cert_chain().ok_or(TrustFailure::Certificate)?;
     let configured = X509StoreContext::new()
-        .map_err(|_| TrustFailure::Certificate)?
+        .map_err(|error| rejected(&error, TrustFailure::Certificate))?
         .init(ssl.ssl_context().cert_store(), &cert, chain, |context| {
             context.set_purpose(X509Purpose::SSL_SERVER)?;
             Ok(context.verify_cert()? && context.verify_result().is_ok())
         })
-        .map_err(|_| TrustFailure::Certificate)?;
+        .map_err(|error| rejected(&error, TrustFailure::Certificate))?;
     if configured {
         return Ok(true);
     }
@@ -87,7 +94,7 @@ fn verify(
         Ok(_) => cert.check_ip_asc(host),
         Err(_) => cert.check_host(host),
     }
-    .map_err(|_| TrustFailure::Hostname)?;
+    .map_err(|error| rejected(&error, TrustFailure::Hostname))?;
     if !hostname_matches {
         return Err(TrustFailure::Hostname);
     }
@@ -95,7 +102,9 @@ fn verify(
         return Err(TrustFailure::Certificate);
     }
     if !pins.is_empty() {
-        let der = cert.to_der().map_err(|_| TrustFailure::Certificate)?;
+        let der = cert
+            .to_der()
+            .map_err(|error| rejected(&error, TrustFailure::Certificate))?;
         let digest: [u8; 32] = Sha256::digest(&der).into();
         if !pins.contains(&digest) {
             return Err(TrustFailure::Pinning);

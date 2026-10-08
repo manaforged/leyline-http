@@ -189,10 +189,13 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
 
     async fn reject_data(&mut self, stream_id: u32, err: H2Error) -> Result<(), H2Error> {
         self.fail_stream(stream_id, err);
-        let _ = self
+        if let Err(e) = self
             .writer
             .write_rst_stream(stream_id, ErrorCode::StreamClosed)
-            .await;
+            .await
+        {
+            tracing::warn!(error = %e, stream_id, "h2 RST_STREAM write failed");
+        }
         self.maybe_top_up_conn_window().await
     }
 

@@ -21,11 +21,11 @@ async fn fixed_length_server() -> String {
     tokio::spawn(async move {
         while let Ok((mut socket, _)) = listener.accept().await {
             let mut buf = [0u8; 4096];
-            let _ = socket.read(&mut buf).await;
+            drop(socket.read(&mut buf).await);
             let head =
                 format!("HTTP/1.1 200 OK\r\nContent-Length: {LENGTH}\r\nConnection: close\r\n\r\n");
-            let _ = socket.write_all(head.as_bytes()).await;
-            let _ = socket.write_all(&[b'x'; LENGTH]).await;
+            drop(socket.write_all(head.as_bytes()).await);
+            drop(socket.write_all(&[b'x'; LENGTH]).await);
         }
     });
     base
@@ -39,13 +39,13 @@ async fn stalled_chunked_server() -> String {
             return;
         };
         let mut buf = [0u8; 4096];
-        let _ = socket.read(&mut buf).await;
+        drop(socket.read(&mut buf).await);
         let head =
             format!("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n{FIRST_CHUNK:x}\r\n");
-        let _ = socket.write_all(head.as_bytes()).await;
-        let _ = socket.write_all(&[b'x'; FIRST_CHUNK]).await;
+        drop(socket.write_all(head.as_bytes()).await);
+        drop(socket.write_all(&[b'x'; FIRST_CHUNK]).await);
         let next = format!("\r\n{SECOND_CHUNK:x}\r\n");
-        let _ = socket.write_all(next.as_bytes()).await;
+        drop(socket.write_all(next.as_bytes()).await);
         tokio::time::sleep(STALL).await;
     });
     base

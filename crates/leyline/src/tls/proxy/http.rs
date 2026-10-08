@@ -111,7 +111,7 @@ pub fn validate_connect_response(buf: &[u8], end_idx: usize) -> Result<(), TlsEr
     }
 
     let response = std::str::from_utf8(&buf[..end_idx])
-        .map_err(|_| TlsError::proxy("proxy CONNECT response is not UTF-8"))?;
+        .map_err(|e| TlsError::proxy(format!("proxy CONNECT response is not UTF-8: {e}")))?;
     let mut lines = response.split("\r\n");
     let status_line = lines.next().unwrap_or("");
 

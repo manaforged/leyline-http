@@ -40,13 +40,13 @@ fn whitespace_before_colon_drops_the_line() {
                     Transfer-Encoding : chunked\r\n\
                     X-Ok: 1\r\n\
                     \r\n";
-    assert!(parse_h1_head(head).is_err());
+    parse_h1_head(head).expect_err("expected Err");
 }
 
 #[test]
 fn empty_header_name_dropped() {
     let head = "HTTP/1.1 200 OK\r\n: value\r\nX-Real: ok\r\n\r\n";
-    assert!(parse_h1_head(head).is_err());
+    parse_h1_head(head).expect_err("expected Err");
 }
 
 async fn tcp_pair() -> (TcpStream, TcpStream) {

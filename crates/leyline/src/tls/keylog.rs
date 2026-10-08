@@ -48,8 +48,9 @@ fn keylog_writer(path: &str) -> std::io::Result<impl Fn(&str) + Send + Sync + 's
     let file = Arc::new(Mutex::new(file));
     Ok(move |line: &str| {
         let mut file = crate::util::lock(&file);
-        let _ = writeln!(file, "{line}");
-        let _ = file.flush();
+        if let Err(e) = writeln!(file, "{line}").and_then(|()| file.flush()) {
+            tracing::warn!(error = %e, "keylog write failed");
+        }
     })
 }
 

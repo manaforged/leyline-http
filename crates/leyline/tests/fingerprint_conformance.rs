@@ -147,7 +147,9 @@ fn fingerprint_conformance() {
     let report = render(&rows);
     println!("{report}");
     let path = format!("{}/fingerprint-conformance.md", env!("CARGO_TARGET_TMPDIR"));
-    let _ = std::fs::write(&path, &report);
+    if let Err(e) = std::fs::write(&path, &report) {
+        eprintln!("could not write {path}: {e}");
+    }
     println!("(full map also written to {path})");
 
     let regressions = rows
@@ -208,55 +210,65 @@ fn render(rows: &[Row]) -> String {
     use std::fmt::Write;
     let mut s = String::new();
     let mut cur = "";
-    let _ = writeln!(s, "\n# Fingerprint trust map (offline)\n");
-    let _ = writeln!(
+    writeln!(s, "\n# Fingerprint trust map (offline)\n").expect("writing to a String cannot fail");
+    writeln!(
         s,
         "Wire truth = the live `tls_peet` suite. This shows trust status, not wire correctness.\n"
-    );
+    )
+    .expect("writing to a String cannot fail");
     for r in rows {
         if r.profile != cur {
-            let _ = writeln!(s, "\n## {}", r.profile);
+            writeln!(s, "\n## {}", r.profile).expect("writing to a String cannot fail");
             cur = &r.profile;
         }
-        let _ = writeln!(
+        writeln!(
             s,
             "  {:<22} {:<28} {}",
             r.dimension,
             r.status.tag(),
             r.detail
-        );
+        )
+        .expect("writing to a String cannot fail");
     }
 
     let count = |st: Status| rows.iter().filter(|r| r.status == st).count();
-    let _ = writeln!(s, "\n# Summary");
-    let _ = writeln!(s, "  GATED ok            : {}", count(Status::Gated));
-    let _ = writeln!(s, "  GATED FAIL          : {}", count(Status::GatedFail));
-    let _ = writeln!(
+    writeln!(s, "\n# Summary").expect("writing to a String cannot fail");
+    writeln!(s, "  GATED ok            : {}", count(Status::Gated))
+        .expect("writing to a String cannot fail");
+    writeln!(s, "  GATED FAIL          : {}", count(Status::GatedFail))
+        .expect("writing to a String cannot fail");
+    writeln!(
         s,
         "  recon matches wire  : {}",
         count(Status::ReconAccurate)
-    );
-    let _ = writeln!(
+    )
+    .expect("writing to a String cannot fail");
+    writeln!(
         s,
         "  recon diverges      : {}",
         count(Status::ReconDiverges)
-    );
-    let _ = writeln!(s, "  unanchored          : {}", count(Status::Unanchored));
+    )
+    .expect("writing to a String cannot fail");
+    writeln!(s, "  unanchored          : {}", count(Status::Unanchored))
+        .expect("writing to a String cannot fail");
 
-    let _ = writeln!(
+    writeln!(
         s,
         "\n# audit() reconstructions that diverge from the wire golden (not bugs — use live tls_peet for wire truth)"
-    );
+    ).expect("writing to a String cannot fail");
     for r in rows.iter().filter(|r| r.status == Status::ReconDiverges) {
-        let _ = writeln!(s, "  [{}] {} — {}", r.profile, r.dimension, r.detail);
+        writeln!(s, "  [{}] {} — {}", r.profile, r.dimension, r.detail)
+            .expect("writing to a String cannot fail");
     }
 
-    let _ = writeln!(
+    writeln!(
         s,
         "\n# Unanchored (no offline golden — wire truth needs a live capture)"
-    );
+    )
+    .expect("writing to a String cannot fail");
     for r in rows.iter().filter(|r| r.status == Status::Unanchored) {
-        let _ = writeln!(s, "  [{}] {} — {}", r.profile, r.dimension, r.detail);
+        writeln!(s, "  [{}] {} — {}", r.profile, r.dimension, r.detail)
+            .expect("writing to a String cannot fail");
     }
     s
 }

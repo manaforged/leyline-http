@@ -67,16 +67,18 @@ async fn slow_server(delay: Duration) -> (u16, Arc<AtomicUsize>, Arc<AtomicUsize
             let (now, max) = (Arc::clone(&now), Arc::clone(&max));
             tokio::spawn(async move {
                 let mut buf = [0u8; 2048];
-                let _ = socket.read(&mut buf).await;
+                drop(socket.read(&mut buf).await);
                 let inside = now.fetch_add(1, Ordering::SeqCst) + 1;
                 max.fetch_max(inside, Ordering::SeqCst);
                 tokio::time::sleep(delay).await;
                 now.fetch_sub(1, Ordering::SeqCst);
-                let _ = socket
-                    .write_all(
-                        b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\nok",
-                    )
-                    .await;
+                drop(
+                    socket
+                        .write_all(
+                            b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\nok",
+                        )
+                        .await,
+                );
             });
         }
     });
@@ -249,10 +251,12 @@ async fn a_cancelled_download_leaves_no_partial_file() {
     tokio::spawn(async move {
         let (mut socket, _) = listener.accept().await.unwrap();
         let mut buf = [0u8; 2048];
-        let _ = socket.read(&mut buf).await;
-        let _ = socket
-            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 100000\r\n\r\npartial")
-            .await;
+        drop(socket.read(&mut buf).await);
+        drop(
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 100000\r\n\r\npartial")
+                .await,
+        );
         tokio::time::sleep(Duration::from_secs(30)).await;
     });
     let target = dir.join("stalled.bin");
@@ -264,7 +268,7 @@ async fn a_cancelled_download_leaves_no_partial_file() {
             .download(&target, None),
     )
     .await;
-    assert!(outcome.is_err());
+    outcome.expect_err("expected Err");
     let leftovers: Vec<_> = std::fs::read_dir(&dir)
         .unwrap()
         .filter_map(|e| e.ok())

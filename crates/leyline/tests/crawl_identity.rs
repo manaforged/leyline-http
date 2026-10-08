@@ -42,14 +42,18 @@ async fn counting_server(peak: Arc<AtomicUsize>, now: Arc<AtomicUsize>) -> u16 {
             let (peak, now) = (Arc::clone(&peak), Arc::clone(&now));
             tokio::spawn(async move {
                 let mut buf = [0u8; 2048];
-                let _ = socket.read(&mut buf).await;
+                drop(socket.read(&mut buf).await);
                 let inside = now.fetch_add(1, Ordering::SeqCst) + 1;
                 peak.fetch_max(inside, Ordering::SeqCst);
                 tokio::time::sleep(Duration::from_millis(80)).await;
                 now.fetch_sub(1, Ordering::SeqCst);
-                let _ = socket
-                    .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n")
-                    .await;
+                drop(
+                    socket
+                        .write_all(
+                            b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+                        )
+                        .await,
+                );
             });
         }
     });

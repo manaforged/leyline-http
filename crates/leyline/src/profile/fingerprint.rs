@@ -112,7 +112,7 @@ fn parse_list(field: &str, radix: u32, what: &str) -> Result<Vec<u16>, String> {
         .filter(|item| !item.is_empty())
         .map(|item| {
             u16::from_str_radix(item.trim(), radix)
-                .map_err(|_| format!("{what} value {item:?} is not a 16-bit number"))
+                .map_err(|e| format!("{what} value {item:?} is not a 16-bit number: {e}"))
         })
         .collect()
 }

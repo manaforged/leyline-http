@@ -46,7 +46,10 @@ impl<C> Opened<C> {
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub(crate) enum Transport {
     Tcp,
-    #[cfg_attr(not(feature = "http3"), allow(dead_code))]
+    #[cfg_attr(
+        not(feature = "http3"),
+        allow(dead_code, reason = "QUIC transport exists only with http3")
+    )]
     Quic,
 }
 

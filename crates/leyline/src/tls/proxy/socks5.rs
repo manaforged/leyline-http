@@ -133,9 +133,9 @@ pub(crate) fn encode_addr(host: &str, port: u16) -> Result<Vec<u8>, TlsError> {
         return Ok(encode_socket_addr(SocketAddr::new(ip, port)));
     }
     let host_bytes = host.as_bytes();
-    let len = u8::try_from(host_bytes.len()).map_err(|_| {
+    let len = u8::try_from(host_bytes.len()).map_err(|e| {
         TlsError::proxy(format!(
-            "socks5: hostname too long ({} bytes, max 255)",
+            "socks5: hostname too long ({} bytes, max 255): {e}",
             host_bytes.len()
         ))
     })?;

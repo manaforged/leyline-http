@@ -16,7 +16,7 @@ fn from_string_takes_buffer() {
 
 #[test]
 fn rejects_non_utf8() {
-    assert!(HeaderStr::from_utf8(Bytes::from_static(&[0xff, 0xfe])).is_err());
+    HeaderStr::from_utf8(Bytes::from_static(&[0xff, 0xfe])).expect_err("expected Err");
 }
 
 #[test]

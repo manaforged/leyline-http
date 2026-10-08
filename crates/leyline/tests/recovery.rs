@@ -17,15 +17,16 @@ async fn explicit_retry_policy_recovers_from_transient_connection_drop() {
         let mut buf = [0u8; 1024];
         let (mut s1, _) = listener.accept().await.unwrap();
         conns_srv.fetch_add(1, Ordering::SeqCst);
-        let _ = s1.read(&mut buf).await;
+        drop(s1.read(&mut buf).await);
         drop(s1);
         let (mut s2, _) = listener.accept().await.unwrap();
         conns_srv.fetch_add(1, Ordering::SeqCst);
-        let _ = s2.read(&mut buf).await;
-        let _ = s2
-            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
-            .await;
-        let _ = s2.flush().await;
+        drop(s2.read(&mut buf).await);
+        drop(
+            s2.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+                .await,
+        );
+        drop(s2.flush().await);
     });
 
     let session = Session::builder()
@@ -64,11 +65,11 @@ async fn default_session_does_not_retry_a_transient_connection_drop() {
         let mut buf = [0u8; 1024];
         let (mut s1, _) = listener.accept().await.unwrap();
         conns_srv.fetch_add(1, Ordering::SeqCst);
-        let _ = s1.read(&mut buf).await;
+        drop(s1.read(&mut buf).await);
         drop(s1);
         if let Ok((mut s2, _)) = listener.accept().await {
             conns_srv.fetch_add(1, Ordering::SeqCst);
-            let _ = s2.read(&mut buf).await;
+            drop(s2.read(&mut buf).await);
         }
     });
 
