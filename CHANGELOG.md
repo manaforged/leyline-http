@@ -8,7 +8,7 @@ behaviour, and each change is listed here. The BoringSSL crates
 `leyline-bssl`, `leyline-bssl-sys`, and `leyline-bssl-tokio` share this
 version and publish as separate crates.
 
-## Unreleased
+## 0.1.4 - 2026-10-08
 
 ### Added
 
@@ -16,9 +16,12 @@ version and publish as separate crates.
   1.97.56 (Chromium 155) on macOS, Linux, and Windows.
 - A Chrome 155 profile, `Browser::Chrome155`, from captures of Chrome
   155.0.8059.40 on macOS, Linux, and Windows.
+- `ChromiumBrand::Opera` covers Chrome 153 and sends Opera 137 there.
 
 ### Changed
 
+- `Browser::default()` and `Browser::latest(Family::Chrome)` send Chrome 155, and
+  `Browser::latest(Family::Brave)` sends Brave 155.
 - BoringSSL is pinned to `b780f19`, the `boringssl_revision` in Chromium's DEPS
   at tag `155.0.8059.39`, and carries 6 patches.
 
