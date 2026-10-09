@@ -25,6 +25,7 @@ profile stability and your own profiles.
 | Chrome 155 | `Chrome155` | `chrome-155.0.8059.40` | estimated |
 | Brave (Chromium 146) | `Brave146` | `brave-146.1.88.138` | estimated |
 | Brave (Chromium 154) | `Brave154` | `brave-154.1.96.59` | estimated |
+| Brave (Chromium 155) | `Brave155` | `brave-155.1.97.56` | estimated |
 | Firefox 148 | `Firefox148` | `firefox-148.0.2` | gated |
 | Firefox 149 | `Firefox149` | `firefox-149.0.2` | gated |
 | Firefox 150 | `Firefox150` | `firefox-150.0` | gated |
@@ -113,6 +114,7 @@ The reference values come from the capture that the profile's `capture` and
 | Chrome 155 | `browser` | `chrome-155.0.8059.40`, macOS, Linux, and Windows `--headless=new` |
 | Brave (Chromium 146) | `browser` | `brave-146.1.88.138`, macOS, Windows, and Linux headful |
 | Brave (Chromium 154) | `browser` | `brave-154.1.96.59`, macOS, Windows, and Linux headful |
+| Brave (Chromium 155) | `browser` | `brave-155.1.97.56`, macOS, Linux, and Windows `--headless=new` |
 | Firefox 148 | `browser` | `firefox-148.0.2`, macOS and Linux `--headless`, Windows headful |
 | Firefox 149 | `browser` | `firefox-149.0.2`, macOS and Linux `--headless`, Windows headful |
 | Firefox 150 | `browser` | `firefox-150.0`, macOS and Linux `--headless`, Windows headful |

@@ -4,10 +4,10 @@
 
 ## leyline-http 0.1.3
 
-- [Every public item, one per line](reference/leyline-http/api.txt): 1869 lines
+- [Every public item, one per line](reference/leyline-http/api.txt): 1870 lines
 - [API overview](reference/leyline-http/index.html): tasks, modules, features, and examples
 - [API changes by release](reference/leyline-http/changes.html)
-- [leyline](reference/leyline-http/leyline.html): 684 items
+- [leyline](reference/leyline-http/leyline.html): 685 items
 - [leyline::audit](reference/leyline-http/leyline-audit.html): 63 items
 - [leyline::cookie](reference/leyline-http/leyline-cookie.html): 35 items
 - [leyline::html](reference/leyline-http/leyline-html.html): 28 items

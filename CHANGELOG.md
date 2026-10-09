@@ -12,6 +12,8 @@ version and publish as separate crates.
 
 ### Added
 
+- A Brave (Chromium 155) profile, `Browser::Brave155`, from captures of Brave
+  1.97.56 (Chromium 155) on macOS, Linux, and Windows.
 - A Chrome 155 profile, `Browser::Chrome155`, from captures of Chrome
   155.0.8059.40 on macOS, Linux, and Windows.
 
