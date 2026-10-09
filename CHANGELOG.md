@@ -10,6 +10,11 @@ version and publish as separate crates.
 
 ## Unreleased
 
+### Added
+
+- A Chrome 155 profile, `Browser::Chrome155`, from captures of Chrome
+  155.0.8059.40 on macOS, Linux, and Windows.
+
 ### Changed
 
 - BoringSSL is pinned to `b780f19`, the `boringssl_revision` in Chromium's DEPS

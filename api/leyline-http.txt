@@ -746,6 +746,7 @@ pub leyline::Browser::Chrome151
 pub leyline::Browser::Chrome152
 pub leyline::Browser::Chrome153
 pub leyline::Browser::Chrome154
+pub leyline::Browser::Chrome155
 pub leyline::Browser::Firefox148
 pub leyline::Browser::Firefox149
 pub leyline::Browser::Firefox150

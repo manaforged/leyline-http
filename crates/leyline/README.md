@@ -82,7 +82,7 @@ lists the source of every one.
 
 | Browser | Versions | Notes |
 | --- | --- | --- |
-| Chrome | 145 to 154 | Android is captured for Chrome 145 only. |
+| Chrome | 145 to 155 | Android is captured for Chrome 145 only. |
 | Brave | 146, 154 | |
 | Firefox | 148 to 157 | Firefox 155 to 157 offer QUIC v2. |
 | Safari | 18, 26, 27 | macOS. |
