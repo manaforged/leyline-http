@@ -206,9 +206,9 @@ let session = Session::builder()
 
 Both brands exist on desktop platforms only; a mobile platform fails
 `build()`. Edge takes its version from Chromium and fits every desktop Chrome
-profile. Opera supports Chromium 145 to 152, so `Browser::default()` with
+profile. Opera supports Chromium 145 to 153, so `Browser::default()` with
 `ChromiumBrand::Opera` can fail `build()`; pin an older Chrome such as
-`Browser::Chrome152`. Brave has its own profiles, such as
+`Browser::Chrome153`. Brave has its own profiles, such as
 `Browser::Brave146`.
 
 `ChromiumBrand::all()` lists the brands. A brand prints as its lowercase name

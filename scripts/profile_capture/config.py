@@ -80,6 +80,11 @@ OPERA = {
     "ua_chromium": r"Chrome/(\d+)\.",
     "ua_brand": r"OPR/(\d+)\.",
     "brand_version": "{major}.0.0.0",
+    "docs": (
+        ("crates/leyline/README.md", r"(The Opera overlay covers Chrome )\d+ to \d+", "{low} to {high}"),
+        ("docs/guide/sessions.md", r"(Opera supports Chromium )\d+ to \d+", "{low} to {high}"),
+        ("docs/guide/sessions.md", r"(pin an older Chrome such as\s+`Browser::Chrome)\d+", "{high}"),
+    ),
 }
 GITHUB_TOKEN_ENV = "GITHUB_TOKEN"
 SIGNERS = {

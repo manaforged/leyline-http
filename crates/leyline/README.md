@@ -91,7 +91,7 @@ lists the source of every one.
 | CFNetwork | iOS 18, iOS 27, macOS 26 | Native app traffic, not Safari. |
 
 Edge and Opera are brand overlays on the Chrome profiles for desktop
-platforms. The Opera overlay covers Chrome 145 to 152. To send a profile that
+platforms. The Opera overlay covers Chrome 145 to 153. To send a profile that
 is not bundled, load it at runtime with `SessionBuilder::profile`.
 
 ## Install
