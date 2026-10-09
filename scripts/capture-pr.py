@@ -14,8 +14,8 @@ from profile_capture.config import CHROMIUM_BUILDS, FAMILIES, OPERA, ROOT
 
 ISSUE_NAMES = {"brave": "brave (chromium)"}
 PROFILE_TEST = (
-    "cargo test -p leyline-http --locked --features bench-internals --test it --"
-    " fingerprint_conformance:: profile_validation:: profile_builtin:: → test result: ok"
+    "cargo test -p leyline-http --locked --features bench-internals --lib --test it --"
+    " profile fingerprint_conformance:: → test result: ok"
 )
 BORINGSSL_TEST = "cargo test -p leyline-http --locked --features full,bench-internals → test result: ok"
 BORINGSSL_PIN = re.compile(r"BoringSSL (\w+) \(Chrome ([\d.]+)\) -> (\w+) \(Chrome ([\d.]+)\)")
@@ -107,7 +107,7 @@ def brand(major: int, lines: list[str]) -> int:
             f"Problem: {name} {major} is the stable release, and brands.toml has no row for it.",
             f"Fix: Map Chromium {chromium} to {name} {major}, from the user agent of the shipped build.",
             f"Impact: The {name} brand on Chrome {chromium} sends {name} {major}.",
-            "Test: python3 -m profile_capture opera → the row is written once, and a rerun changes nothing",
+            "Test: cargo test -p leyline-http --locked --lib -- profile::brand → test result: ok",
         ],
     )
     issues = open_issues(f"Add a {name.lower()} {major} profile")

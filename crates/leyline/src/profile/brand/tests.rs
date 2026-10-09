@@ -59,18 +59,18 @@ fn edge_overlay_on_mobile_errors() {
 
 #[test]
 fn opera_overlay_only_accepts_verified_anchors() {
-    for (chromium, expected_opera) in [
-        (145u32, 129u32),
-        (146, 130),
-        (147, 131),
-        (148, 132),
-        (149, 133),
-        (150, 134),
-        (151, 135),
-        (152, 136),
-    ] {
+    let row = brand_row(ChromiumBrand::Opera).expect("Opera brand row");
+    let mut anchors: Vec<u32> = row
+        .versions
+        .keys()
+        .map(|k| k.parse().expect("Chromium major"))
+        .collect();
+    anchors.sort_unstable();
+    for chromium in &anchors {
+        let expected_opera =
+            version_major(&row.versions[&chromium.to_string()][0]).expect("Opera major");
         let o = ChromiumBrand::Opera
-            .overlay(chromium, Platform::Windows, "ua")
+            .overlay(*chromium, Platform::Windows, "ua")
             .unwrap()
             .unwrap();
         assert!(
@@ -80,7 +80,8 @@ fn opera_overlay_only_accepts_verified_anchors() {
             o.user_agent
         );
     }
-    for bad in [144u32, 153] {
+    let (first, last) = (anchors[0], anchors[anchors.len() - 1]);
+    for bad in [first - 1, last + 1] {
         ChromiumBrand::Opera
             .overlay(bad, Platform::Windows, "ua")
             .expect_err("expected Err");
