@@ -170,6 +170,9 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: GNOME settings schemas
+        run: sudo apt-get update && sudo apt-get install -y gsettings-desktop-schemas
+
       - name: capture the brand row
         shell: bash
         run: python -m profile_capture ${{ matrix.target.family }} | tee "$RUNNER_TEMP/brand.txt"
