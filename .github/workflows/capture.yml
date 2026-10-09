@@ -142,7 +142,7 @@ jobs:
 
       - name: profile tests
         run: |
-          cargo test -p leyline-http --locked --features bench-internals --test it -- fingerprint_conformance:: profile_validation:: profile_builtin::
+          cargo test -p leyline-http --locked --features bench-internals --lib --test it -- profile fingerprint_conformance::
 
       - name: open or update the pull request
         run: python scripts/capture-pr.py profile "$RUNNER_TEMP/land.txt" --family "$FAMILY" --major "$MAJOR"
@@ -166,6 +166,8 @@ jobs:
       GH_REPO: ${{ github.repository }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -177,6 +179,18 @@ jobs:
       - name: capture the brand row
         shell: bash
         run: python -m profile_capture ${{ matrix.target.family }} | tee "$RUNNER_TEMP/brand.txt"
+
+      - name: Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: capture-brand
+          cache-workspace-crates: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: brand tests
+        run: cargo test -p leyline-http --locked --lib -- profile::brand
 
       - name: open or update the pull request
         run: python scripts/capture-pr.py brand "$RUNNER_TEMP/brand.txt" --major ${{ matrix.target.major }}
