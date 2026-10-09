@@ -15,13 +15,11 @@ pub(crate) struct Config {
     pub(crate) manifest_dir: PathBuf,
     pub(crate) out_dir: PathBuf,
     pub(crate) is_bazel: bool,
-    pub(crate) host: String,
     pub(crate) target: String,
     pub(crate) target_arch: String,
     pub(crate) target_os: String,
     pub(crate) unix: bool,
     pub(crate) target_env: String,
-    pub(crate) target_features: Vec<String>,
     pub(crate) env: Env,
 }
 
@@ -30,16 +28,14 @@ pub(crate) struct Env {
     pub(crate) include_path: Option<PathBuf>,
     pub(crate) source_path: Option<PathBuf>,
     pub(crate) assume_patched: bool,
+    #[cfg(feature = "bindgen")]
     pub(crate) sysroot: Option<PathBuf>,
-    pub(crate) compiler_external_toolchain: Option<PathBuf>,
     pub(crate) debug: Option<OsString>,
     pub(crate) opt_level: Option<OsString>,
+    #[cfg(feature = "bindgen")]
     pub(crate) android_ndk_home: Option<PathBuf>,
-    pub(crate) cmake_toolchain_file: Option<PathBuf>,
-    pub(crate) cmake_generator: Option<OsString>,
     pub(crate) cpp_runtime_lib: Option<OsString>,
-    pub(crate) cc: Option<OsString>,
-    pub(crate) cxx: Option<OsString>,
+    pub(crate) prebuilt_nasm_out: Option<PathBuf>,
     pub(crate) docs_rs: bool,
 }
 
@@ -55,12 +51,6 @@ impl Config {
         let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
         let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap();
         let unix = env::var("CARGO_CFG_UNIX").is_ok();
-
-        let target_features = env::var("CARGO_CFG_TARGET_FEATURE")
-            .unwrap_or_default()
-            .split(',')
-            .map(|s| s.to_owned())
-            .collect();
 
         let env = Env::from_env(&host, &target);
 
@@ -78,13 +68,11 @@ impl Config {
             manifest_dir,
             out_dir,
             is_bazel,
-            host,
             target,
             target_arch,
             target_os,
             unix,
             target_env,
-            target_features,
             env,
         };
 
@@ -137,17 +125,16 @@ impl Env {
             source_path: target_var("LEYLINE_BSSL_SOURCE_PATH").map(PathBuf::from),
             assume_patched: target_var("LEYLINE_BSSL_ASSUME_PATCHED")
                 .is_some_and(|v| !v.is_empty()),
+            #[cfg(feature = "bindgen")]
             sysroot: target_var("LEYLINE_BSSL_SYSROOT").map(PathBuf::from),
-            compiler_external_toolchain: target_var("LEYLINE_BSSL_COMPILER_EXTERNAL_TOOLCHAIN")
-                .map(PathBuf::from),
             debug: target_var("DEBUG"),
             opt_level: target_var("OPT_LEVEL"),
+            #[cfg(feature = "bindgen")]
             android_ndk_home: target_var("ANDROID_NDK_HOME").map(Into::into),
-            cmake_toolchain_file: target_var("CMAKE_TOOLCHAIN_FILE").map(Into::into),
-            cmake_generator: target_var("CMAKE_GENERATOR"),
             cpp_runtime_lib: target_var("LEYLINE_BSSL_RUST_CPPLIB"),
-            cc: target_only_var("CC"),
-            cxx: target_only_var("CXX"),
+            prebuilt_nasm_out: target_var("LEYLINE_BSSL_PREBUILT_NASM_OUT")
+                .filter(|v| !v.is_empty())
+                .map(PathBuf::from),
             docs_rs: var("DOCS_RS").is_some(),
         }
     }

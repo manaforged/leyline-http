@@ -17,7 +17,7 @@ serde_json = "1"
 ```
 
 `serde` and `serde_json` are only for the JSON examples. The first build
-compiles BoringSSL, so it needs CMake, a C and C++ compiler, and Git. [Supported platforms](platforms.md) lists the targets and the tools.
+compiles BoringSSL, so it needs a C and C++ compiler and Git. [Supported platforms](platforms.md) lists the targets and the tools.
 
 ## Send a GET request
 

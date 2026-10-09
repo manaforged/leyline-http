@@ -51,8 +51,6 @@ if ($Msrv) {
 }
 
 Step "native build prerequisites"
-Need "cmake" "Install Visual Studio Build Tools with C++ CMake tools, or install CMake separately." | Out-Null
-Need "nasm" "Install NASM: choco install nasm" | Out-Null
 Need "clang" "Install LLVM for libclang: choco install llvm" | Out-Null
 Ok "prerequisite scan complete"
 

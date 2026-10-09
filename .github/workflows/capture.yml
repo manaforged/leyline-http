@@ -269,6 +269,8 @@ jobs:
 
       - uses: ilammy/setup-nasm@72793074d3c8cdda771dba85f6deafe00623038b # v1.5.2
         if: runner.os == 'Windows'
+        with:
+          version: 2.16.01
 
       - name: Install the musl toolchain
         if: endsWith(matrix.target, '-linux-musl')
@@ -276,13 +278,28 @@ jobs:
         with:
           target: ${{ matrix.target }}
 
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: bindings-${{ matrix.target }}
+          cache-workspace-crates: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
       - name: move BoringSSL
         shell: bash
         run: python scripts/bssl-bump.py
 
       - name: regenerate the bindings
         shell: bash
+        env:
+          LEYLINE_BSSL_PREBUILT_NASM_OUT: ${{ runner.os == 'Windows' && format('{0}/crates/leyline-bssl-sys/prebuilt/{1}', github.workspace, matrix.target) || '' }}
         run: scripts/regen-bssl-bindings.sh ${{ matrix.target }}
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: runner.os == 'Windows'
+        with:
+          name: prebuilt-nasm
+          path: crates/leyline-bssl-sys/prebuilt/
+          if-no-files-found: error
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -321,6 +338,11 @@ jobs:
           pattern: bindings-*
           path: crates/leyline-bssl-sys/bindings
           merge-multiple: true
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: prebuilt-nasm
+          path: crates/leyline-bssl-sys/prebuilt
 
       - name: Rust toolchain
         run: rustup show active-toolchain || rustup toolchain install

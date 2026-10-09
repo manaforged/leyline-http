@@ -4,7 +4,8 @@ Raw FFI bindings to the BoringSSL build that
 [`leyline-http`](https://crates.io/crates/leyline-http) uses. The crate is a
 trimmed fork of Cloudflare's
 [`boring-sys`](https://github.com/cloudflare/boring). It ships the BoringSSL
-source, applies the patches in `patches/`, and builds it with CMake. The
+source, applies the patches in `patches/`, and compiles it with the `cc`
+crate from BoringSSL's own source lists, so no CMake, Go, or Perl is needed. The
 bindings for each supported target are pre-generated in `bindings/`. Enable the
 `bindgen` feature to generate them at build time; that path needs libclang.
 
@@ -17,9 +18,10 @@ Supported targets:
 - `aarch64-unknown-linux-musl`
 - `x86_64-pc-windows-msvc`
 
-The build needs CMake 3.22 or later, Git, and a C and C++ compiler. On
-Windows it also needs the MSVC build tools and NASM. On musl it needs a musl
-C and C++ toolchain, such as `x86_64-linux-musl-g++` from musl.cc. Every export carries the
+The build needs Git and a C and C++ compiler. On Windows that is the MSVC
+build tools; NASM is optional, because the crate ships the assembled objects
+in `prebuilt/` and uses NASM only when it is on `PATH`. On musl it needs a
+musl C and C++ toolchain, such as `x86_64-linux-musl-g++` from musl.cc. Every export carries the
 `LEYLINE` symbol prefix, so the library can share a binary with `openssl-sys`
 or another BoringSSL.
 

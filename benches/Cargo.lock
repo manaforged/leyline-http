@@ -1112,8 +1112,8 @@ name = "leyline-bssl-sys"
 version = "0.1.4"
 dependencies = [
  "cc",
- "cmake",
  "fslock",
+ "serde_json",
 ]
 
 [[package]]
