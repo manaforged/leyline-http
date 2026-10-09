@@ -6,6 +6,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
+use crate::compile::SOURCES_JSON;
 use crate::config::Config;
 use crate::process::{git, run_command};
 
@@ -34,7 +35,7 @@ pub(crate) fn get_boringssl_source_path(config: &Config) -> &Path {
 
         let submodule_path = config.manifest_dir.join("deps").join(submodule_dir);
 
-        if !submodule_path.join("CMakeLists.txt").exists() {
+        if !submodule_path.join(SOURCES_JSON).exists() {
             println!("cargo:warning=fetching boringssl git submodule");
 
             run_command(

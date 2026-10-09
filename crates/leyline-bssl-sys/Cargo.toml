@@ -9,7 +9,7 @@ authors = [
     "Steven Fackler <sfackler@gmail.com>",
     "Ivan Nikulin <ifaaan@gmail.com>",
 ]
-description = "BoringSSL built from source with CMake, and raw FFI bindings, for leyline-http"
+description = "BoringSSL built from source with a C++ compiler, and raw FFI bindings, for leyline-http"
 homepage = "https://github.com/manaforged/leyline-http"
 documentation = "https://docs.rs/leyline-bssl-sys"
 readme = "README.md"
@@ -31,25 +31,12 @@ include = [
     "/src",
     "/bindings/*.rs",
     "/patches",
-    "/cmake/*.cmake",
-    "/deps/boringssl/**/*.[chS]",
+    "/prebuilt/**/*.obj",
+    "/deps/boringssl/gen/sources.json",
+    "/deps/boringssl/**/*.[hS]",
     "/deps/boringssl/**/*.inc",
     "/deps/boringssl/**/*.asm",
-    "/deps/boringssl/**/*.pl",
-    "/deps/boringssl/**/*.go",
-    "/deps/boringssl/**/*.cmake",
-    "/deps/boringssl/**/go.mod",
-    "/deps/boringssl/**/go.sum",
-    "/deps/boringssl/crypto/obj/obj_mac.num",
-    "/deps/boringssl/crypto/obj/objects.txt",
-    "/deps/boringssl/crypto/err/*.errordata",
-    "/deps/boringssl/**/*.bzl",
     "/deps/boringssl/**/*.cc",
-    "/deps/boringssl/**/*.cpp",
-    "/deps/boringssl/**/*.in",
-    "/deps/boringssl/**/CMakeLists.txt",
-    "/deps/boringssl/**/sources.cmake",
-    "/deps/boringssl/**/util/go_tests.txt",
     "/deps/boringssl/LICENSE",
 ]
 
@@ -61,9 +48,9 @@ bindgen = ["dep:bindgen"]
 
 [build-dependencies]
 bindgen = { version = "0.72.0", default-features = false, features = ["runtime"], optional = true }
-cc = "1.2"
-cmake = "0.1.58"
+cc = { version = "1.2", features = ["parallel"] }
 fslock = "0.2"
+serde_json = "1"
 
 [lints.rust]
 unexpected_cfgs = { level = "allow", check-cfg = ["cfg(const_fn)"] }

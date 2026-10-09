@@ -67,16 +67,12 @@ case "$triple" in
 esac
 echo "  leyline-bssl-sys builds BoringSSL from source. It needs:"
 case "$uname_s" in
-    Darwin)  need cmake || warn "install with: brew install cmake"
-             need clang || warn "install the Xcode Command Line Tools" ;;
-    Linux)   need cmake || warn "Debian/Ubuntu: sudo apt-get install cmake"
-             need c++   || warn "Debian/Ubuntu: sudo apt-get install build-essential"
-             need clang || warn "Debian/Ubuntu: sudo apt-get install clang libclang-dev" ;;
+    Darwin)  need clang || warn "install the Xcode Command Line Tools" ;;
+    Linux)   need c++   || warn "Debian/Ubuntu: sudo apt-get install build-essential"
+             need clang || warn "for scripts/regen-bssl-bindings.sh, Debian/Ubuntu: sudo apt-get install clang libclang-dev" ;;
     Windows|MINGW*|MSYS*|CYGWIN*)
-             need cmake || warn "install Visual Studio Build Tools with C++ CMake tools"
-             need nasm  || warn "install NASM: choco install nasm"
-             need clang || warn "install LLVM for libclang: choco install llvm" ;;
-    *)       need cmake || true ;;
+             need clang || warn "for scripts/regen-bssl-bindings.sh, install LLVM: choco install llvm" ;;
+    *)       need c++   || true ;;
 esac
 ok "prerequisite scan complete"
 

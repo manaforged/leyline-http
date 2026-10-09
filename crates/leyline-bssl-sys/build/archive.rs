@@ -2,7 +2,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::cmake::build_boringssl_or_get_prebuilt;
+use crate::compile::build_boringssl_or_get_prebuilt;
 use crate::config::Config;
 
 const ARCHIVES: [(&str, &str); 2] = [
@@ -10,7 +10,7 @@ const ARCHIVES: [(&str, &str); 2] = [
     ("crypto", "leyline_bssl_crypto"),
 ];
 
-fn archive_file(config: &Config, name: &str) -> String {
+pub(crate) fn archive_file(config: &Config, name: &str) -> String {
     if config.target_env == "msvc" {
         format!("{name}.lib")
     } else {
@@ -100,7 +100,7 @@ fn get_cpp_runtime_lib(config: &Config) -> Option<String> {
 }
 
 pub(crate) fn emit_link_directives(config: &Config) -> io::Result<()> {
-    let bssl_dir = build_boringssl_or_get_prebuilt(config);
+    let bssl_dir = build_boringssl_or_get_prebuilt(config)?;
     let msvc_lib_subdir = msvc_lib_subdir(config);
 
     let subdirs = if config.is_bazel {

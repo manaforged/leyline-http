@@ -9,11 +9,13 @@ mod archive;
 #[cfg(feature = "bindgen")]
 mod bindings;
 mod bindings_file;
-mod cmake;
+mod compile;
 mod config;
+mod fingerprint;
 mod prefix;
 mod process;
 mod source;
+#[cfg(feature = "bindgen")]
 mod targets;
 
 fn main() -> ExitCode {

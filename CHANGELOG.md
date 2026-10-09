@@ -8,6 +8,20 @@ behaviour, and each change is listed here. The BoringSSL crates
 `leyline-bssl`, `leyline-bssl-sys`, and `leyline-bssl-tokio` share this
 version and publish as separate crates.
 
+## Unreleased
+
+### Changed
+
+- `leyline-bssl-sys` compiles BoringSSL with the `cc` crate from the source
+  lists BoringSSL ships, so a build needs only a C and C++ compiler and Git:
+  no CMake. On Windows, NASM is optional; without it the build links the
+  NASM objects that ship in the crate. The CMake-only variables
+  `CMAKE_TOOLCHAIN_FILE`, `CMAKE_GENERATOR`, and
+  `LEYLINE_BSSL_COMPILER_EXTERNAL_TOOLCHAIN` no longer apply; use `CC`,
+  `CXX`, `CFLAGS`, and `CXXFLAGS`. The build rebuilds BoringSSL when its
+  source, the compiler, or the compiler flags change, and reuses the cached
+  library otherwise, so a restored build cache never links a stale BoringSSL.
+
 ## 0.1.4 - 2026-10-08
 
 ### Added

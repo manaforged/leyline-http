@@ -189,6 +189,8 @@ jobs:
 
       - uses: ilammy/setup-nasm@72793074d3c8cdda771dba85f6deafe00623038b # v1.5.2
         if: runner.os == 'Windows'
+        with:
+          version: 2.16.01
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -197,7 +199,35 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: cargo test (full features)
+        env:
+          LEYLINE_BSSL_PREBUILT_NASM_OUT: ${{ runner.os == 'Windows' && format('{0}/crates/leyline-bssl-sys/prebuilt/x86_64-pc-windows-msvc', github.workspace) || '' }}
         run: cargo test -p leyline-http --locked --features full,bench-internals
+
+      - name: committed NASM objects are current
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          git add -N crates/leyline-bssl-sys/prebuilt
+          git diff --exit-code --stat -- crates/leyline-bssl-sys/prebuilt
+
+      - name: build without NASM from the committed objects
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          kept=()
+          IFS=: read -ra dirs <<<"$PATH"
+          for dir in "${dirs[@]}"; do
+            [ -e "$dir/nasm" ] || [ -e "$dir/nasm.exe" ] || kept+=("$dir")
+          done
+          PATH=$(IFS=:; printf '%s' "${kept[*]}")
+          if command -v nasm; then echo "nasm is still on PATH"; exit 1; fi
+          cargo build -p leyline-bssl-sys --locked --target-dir target/no-nasm
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure() && runner.os == 'Windows'
+        with:
+          name: prebuilt-nasm
+          path: crates/leyline-bssl-sys/prebuilt/
 
   musl:
     name: musl (${{ matrix.target }})
@@ -345,6 +375,13 @@ jobs:
       - uses: taiki-e/install-action@0758d235715de2f3551eacc980d9ae8fce9342c3 # v2.87.3
         with:
           tool: cargo-fuzz
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: fuzz
+          workspaces: "fuzz -> target"
+          cache-workspace-crates: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: verify gates
         run: scripts/verify.sh --only fuzz-replay

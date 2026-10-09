@@ -113,9 +113,10 @@ The package is `leyline-http`. The library is `leyline`.
   `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-musl`,
   `aarch64-unknown-linux-musl`, or `x86_64-pc-windows-msvc`. Intel macOS is
   not supported.
-- The tools to build BoringSSL from source: CMake 3.22 or later, a C and C++
-  compiler, and `git`. On Windows, also the MSVC build tools and NASM. On
-  musl, a musl C and C++ toolchain.
+- A C and C++ compiler and `git`, to build BoringSSL from source: Xcode
+  Command Line Tools on macOS, GCC or Clang on Linux, the MSVC build tools on
+  Windows. On musl, a musl C and C++ toolchain. No CMake, NASM, Go, or
+  libclang is needed.
 
 The first build compiles BoringSSL, so it takes longer than a pure Rust
 dependency. Later builds reuse it.

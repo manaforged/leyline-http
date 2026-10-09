@@ -5,8 +5,10 @@ build needs.
 
 ## Supported targets
 
-`leyline-bssl-sys` builds BoringSSL from source with CMake and uses the Rust
-bindings committed for the target, so a build needs no libclang.
+`leyline-bssl-sys` compiles BoringSSL from source with the `cc` crate, from
+the source lists BoringSSL ships in `gen/sources.json`, and uses the Rust
+bindings committed for the target. A build needs no CMake, Go, Perl, or
+libclang.
 
 | Target | Notes |
 | --- | --- |
@@ -53,13 +55,19 @@ The committed bindings match the headers that ship in `leyline-bssl-sys`.
 
 The build needs:
 
-- CMake 3.22 or later.
 - A C and C++ compiler: Xcode Command Line Tools on macOS, GCC or Clang on
-  Linux, the MSVC build tools on Windows.
+  Linux, the MSVC build tools on Windows. The `cc` crate finds it, and
+  `CC`, `CXX`, `CFLAGS`, and `CXXFLAGS` work as they do for any `cc` build.
 - Git. Every build runs `git apply` for Leyline's patches unless
   `LEYLINE_BSSL_ASSUME_PATCHED` is set. A source checkout also uses Git to
   fetch the BoringSSL submodule.
-- NASM on Windows, for the BoringSSL assembly.
+
+On Windows, the x86_64 assembly is NASM source. When NASM is on `PATH`, or
+`NASM` names it, the build assembles it. Otherwise it links the objects that
+ship in `prebuilt/x86_64-pc-windows-msvc/`, which CI assembles with NASM
+2.16.01 from the same source and checks on every run.
+`LEYLINE_BSSL_SOURCE_PATH` needs NASM, because the shipped objects match only
+the bundled BoringSSL.
 
 The build uses the macOS deployment target that Rust uses
 (`MACOSX_DEPLOYMENT_TARGET`, 11.0 by default), honors `+crt-static` on
@@ -69,9 +77,8 @@ builds reuse it.
 
 ### Windows
 
-Install Visual Studio Build Tools with the C++ workload, which includes
-CMake, then NASM. A Developer Command Prompt is not required. Put the NASM
-directory and the CMake `bin` directory on `PATH`.
+Install Visual Studio Build Tools with the C++ workload. A Developer Command
+Prompt is not required, and NASM is optional.
 
 With the `bindgen` feature, also install LLVM and set `LIBCLANG_PATH` to
 its `bin` directory, so `bindgen` finds `libclang.dll`.
