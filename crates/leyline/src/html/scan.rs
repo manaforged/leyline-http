@@ -7,6 +7,7 @@ const EMPTY_COMMENTS: [&str; 2] = [">", "->"];
 pub(super) struct Tag<'a> {
     pub(super) name: String,
     pub(super) closing: bool,
+    pub(super) self_closing: bool,
     pub(super) attrs: Vec<(String, String)>,
     pub(super) raw: Option<&'a str>,
     pub(super) text: &'a str,
@@ -100,12 +101,14 @@ impl<'a> Iterator for Scanner<'a> {
                 .count();
             let name = self.doc[start..start + len].to_ascii_lowercase();
             let (attrs, end) = attributes(self.doc, start + len);
+            let self_closing = self.doc[..end].ends_with("/>");
             self.pos = end;
             let raw = (!closing && RAW_TEXT.contains(&name.as_str())).then(|| self.raw_text(&name));
             let text = self.doc[self.pos..].split('<').next().unwrap_or_default();
             return Some(Tag {
                 name,
                 closing,
+                self_closing,
                 attrs,
                 raw,
                 text,

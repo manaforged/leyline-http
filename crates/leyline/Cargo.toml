@@ -196,7 +196,7 @@ leyline-quiche = { path = "../leyline-quiche", version = "=0.1.4", default-featu
 # pinning hostname-verification integration test.
 leyline-bssl = { workspace = true }
 leyline-bssl-tokio = { workspace = true }
-tokio = { workspace = true, features = ["full"] }
+tokio = { workspace = true, features = ["full", "test-util"] }
 tokio-util = { version = "0.7.5", features = ["io"] }
 futures-util = "0.3"
 serde_json = { workspace = true }

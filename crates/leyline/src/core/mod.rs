@@ -2,6 +2,8 @@ mod block;
 mod body;
 mod body_stream;
 mod config;
+#[cfg(feature = "html")]
+mod crawl;
 pub(crate) mod deadline;
 pub(crate) mod device;
 mod digest;
@@ -17,6 +19,7 @@ mod proxy_pool;
 mod request;
 mod response;
 pub(crate) mod retry;
+mod robots;
 #[cfg(feature = "tower")]
 mod service;
 pub(crate) mod session;
@@ -34,6 +37,8 @@ pub use config::{
     TimeoutConfig, WebSocketConfig,
 };
 pub(crate) use config::{DEFAULT_MAX_BODY_SIZE, DEFAULT_MAX_HEADER_LIST_BYTES};
+#[cfg(feature = "html")]
+pub use crawl::{Crawl, CrawlPage, CrawlStats, Respect, Scope, SkipReason};
 pub use device::{Device, DeviceAutosave, DeviceAutosaveOptions, SessionState};
 pub use digest::DigestAuth;
 pub use error::{Error, ErrorCategory, Kind, Result};
@@ -48,6 +53,7 @@ pub use response::{
     HttpVersion, Link, PrefixRead, RelayBody, Response, ResponseTiming, StopReason, relay_headers,
 };
 pub use retry::{RetryPolicy, RetryTrigger, WaitFormat};
+pub use robots::{Purpose, Robots, RobotsSource};
 #[cfg(feature = "tower")]
 pub use service::LeylineService;
 #[cfg(feature = "websocket")]

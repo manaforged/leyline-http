@@ -1,6 +1,7 @@
 mod compression;
 mod dns;
 mod host;
+mod host_gate;
 mod host_limits;
 mod pool;
 mod proxy;

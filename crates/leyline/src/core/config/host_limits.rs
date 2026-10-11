@@ -1,10 +1,11 @@
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::atomic::Ordering;
+use std::sync::{Arc, PoisonError};
 use std::time::Duration;
 
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::Instant;
+
+pub(crate) use super::host_gate::HostPass;
+use super::host_gate::{Count, Gates, acquire};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct Origin {
@@ -194,6 +195,14 @@ impl HostLimits {
             && self.overrides.is_empty()
             && self.max_total.is_none()
             && self.pause.statuses.is_empty()
+            && !self.gates.has_floors()
+    }
+
+    #[cfg(feature = "html")]
+    pub(crate) fn raise_floor(&self, url: &url::Url, gap: Duration) {
+        if let Some(origin) = Origin::of(url) {
+            self.gates.raise_floor(origin, gap);
+        }
     }
 
     fn rule_for(&self, host: &str) -> Rule {
@@ -210,6 +219,7 @@ impl HostLimits {
         }
         let origin = Origin::of(url)?;
         let rule = self.rule_for(&origin.host);
+        let interval = rule.interval.max(self.gates.floor(&origin));
         let gate = self.gates.gate(origin, rule.max_in_flight);
         let waiting = Count::enter(&gate.waiting);
         let permit = acquire(gate.slots.as_ref()).await;
@@ -217,7 +227,7 @@ impl HostLimits {
             gate.wait_unpaused().await;
             gate.wait_spacing().await;
             let total = acquire(self.gates.total.as_ref()).await;
-            if gate.try_admit(rule.interval) {
+            if gate.try_admit(interval) {
                 break total;
             }
         };
@@ -264,122 +274,5 @@ impl HostStats {
 
     pub fn waiting(&self) -> usize {
         self.waiting
-    }
-}
-
-struct Count(Arc<AtomicUsize>);
-
-impl Count {
-    fn enter(counter: &Arc<AtomicUsize>) -> Self {
-        counter.fetch_add(1, Ordering::Relaxed);
-        Self(Arc::clone(counter))
-    }
-}
-
-impl Drop for Count {
-    fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::Relaxed);
-    }
-}
-
-async fn acquire(slots: Option<&Arc<Semaphore>>) -> Option<OwnedSemaphorePermit> {
-    Arc::clone(slots?).acquire_owned().await.ok()
-}
-
-pub(crate) struct HostPass {
-    _in_flight: Count,
-    _permit: Option<OwnedSemaphorePermit>,
-    _total: Option<OwnedSemaphorePermit>,
-    _gate: Arc<HostGate>,
-}
-
-#[derive(Debug, Default)]
-struct Gates {
-    by_origin: Mutex<HashMap<Origin, Arc<HostGate>>>,
-    total: Option<Arc<Semaphore>>,
-}
-
-impl Gates {
-    fn new(max_total: Option<usize>) -> Self {
-        Self {
-            by_origin: Mutex::default(),
-            total: max_total.map(|n| Arc::new(Semaphore::new(n))),
-        }
-    }
-
-    fn gate(&self, origin: Origin, max_in_flight: Option<usize>) -> Arc<HostGate> {
-        let mut map = self
-            .by_origin
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        if let Some(gate) = map.get(&origin) {
-            return Arc::clone(gate);
-        }
-        let now = Instant::now();
-        map.retain(|_, gate| Arc::strong_count(gate) > 1 || gate.busy_after(now));
-        let gate = Arc::new(HostGate::new(max_in_flight));
-        map.insert(origin, Arc::clone(&gate));
-        gate
-    }
-}
-
-#[derive(Debug)]
-struct HostGate {
-    slots: Option<Arc<Semaphore>>,
-    next: Mutex<Instant>,
-    paused: Mutex<Instant>,
-    in_flight: Arc<AtomicUsize>,
-    waiting: Arc<AtomicUsize>,
-}
-
-impl HostGate {
-    fn new(max_in_flight: Option<usize>) -> Self {
-        Self {
-            slots: max_in_flight.map(|n| Arc::new(Semaphore::new(n))),
-            next: Mutex::new(Instant::now()),
-            paused: Mutex::new(Instant::now()),
-            in_flight: Arc::default(),
-            waiting: Arc::default(),
-        }
-    }
-
-    fn try_admit(&self, interval: Option<Duration>) -> bool {
-        let mut next = self.next.lock().unwrap_or_else(PoisonError::into_inner);
-        let now = Instant::now();
-        if *next > now || self.paused_until() > now {
-            return false;
-        }
-        if let Some(interval) = interval {
-            *next = now.checked_add(interval).unwrap_or(now);
-        }
-        true
-    }
-
-    async fn wait_spacing(&self) {
-        let next = *self.next.lock().unwrap_or_else(PoisonError::into_inner);
-        tokio::time::sleep_until(next).await;
-    }
-
-    fn busy_after(&self, now: Instant) -> bool {
-        *self.next.lock().unwrap_or_else(PoisonError::into_inner) > now || self.paused_until() > now
-    }
-
-    fn paused_until(&self) -> Instant {
-        *self.paused.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    fn pause_until(&self, end: Instant) {
-        let mut paused = self.paused.lock().unwrap_or_else(PoisonError::into_inner);
-        *paused = (*paused).max(end);
-    }
-
-    async fn wait_unpaused(&self) {
-        loop {
-            let end = self.paused_until();
-            if end <= Instant::now() {
-                return;
-            }
-            tokio::time::sleep_until(end).await;
-        }
     }
 }

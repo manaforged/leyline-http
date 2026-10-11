@@ -1,9 +1,117 @@
 # Crawling
 
-This page builds a crawler from session settings: per-host limits, a proxy
-pool, retries, block detection, capped downloads, one log line per request,
-and counters for the whole crawl. Every task that shares the session shares
-the limits and the proxy health.
+`Session::crawl` crawls a site for you: it follows links in scope, obeys each
+page's own rules, drops copies, and reads robots.txt when you ask it to. The rest of this page
+covers the session settings every crawl uses: per-host limits, a proxy pool,
+retries, block detection, capped downloads, one log line per request, and
+counters for the whole crawl. Every task that shares the session shares the
+limits and the proxy health.
+
+## Crawl a site
+
+`session.crawl(seed)` returns a `Crawl`, a lazy stream of `CrawlPage`s. The
+defaults are polite, so the short form is a complete crawler:
+
+```rust,no_run
+use leyline::Session;
+
+# async fn run() -> leyline::Result<()> {
+let mut crawl = Session::new().crawl("https://docs.example/");
+while let Some(page) = crawl.next().await {
+    let page = page?;
+    println!("{} {} words", page.url(), page.text().split_whitespace().count());
+}
+# Ok(())
+# }
+```
+
+That crawl stays on the seed's host, sends one request at a time to each host
+and at most one a second, pauses a host that answers 429 or 503, reads the
+site's sitemaps, follows redirects through the same checks as links, skips
+error pages, files, and block pages, and drops copies. It obeys no robots
+rules until you ask. Four settings change the rest:
+
+```rust,no_run
+use leyline::{HostLimits, Respect, Scope, Session};
+
+# async fn run() -> leyline::Result<()> {
+let mut crawl = Session::new()
+    .crawl("https://docs.example/guide/")
+    .respect(Respect::AiTraining)
+    .scope(Scope::Prefix)
+    .limit(500)
+    .host_limits(HostLimits::new().max_in_flight(2).per_second(2.0));
+while let Some(page) = crawl.next().await {
+    match page {
+        Ok(page) => println!("{}", page.url()),
+        Err(err) => eprintln!("{}: {}", err.url().map_or("-", |url| url.as_str()), err.category()),
+    }
+}
+println!("{}", crawl.stats());
+# Ok(())
+# }
+```
+
+| Setter | Default | Effect |
+| --- | --- | --- |
+| `respect(Respect)` | none | `Robots` obeys robots.txt `Disallow` and `Crawl-delay`, the page's `noindex` and `nofollow`, and `rel="nofollow"`. `AiTraining` does all of that and also obeys the site's AI-training opt-outs |
+| `scope(Scope)` | `Host` | `Host`: the seed's host. `Domain`: its registrable domain. `Prefix`: its host and directory |
+| `limit(n)` | none | Stops after `n` kept pages |
+| `host_limits(HostLimits)` | the session's, or one in flight and one a second per host | Paces each host. The value is used as given; `HostLimits::new()` has no limits |
+
+The crawl reads each site's robots.txt once, and again after 24 hours, for
+its `Sitemap` lines; it obeys the rest only with `respect`. Robots groups are
+matched for the `*` agent. To read the group for a named crawler, call
+`Session::robots(url, agent)`. At most 16 requests are in flight across all
+hosts.
+
+For each URL, in order, the crawl:
+
+1. Skips a URL that is not `http` or `https`, is out of scope, or was queued
+   before. URLs are compared after the fragment is dropped, the query
+   parameters are sorted, and percent-encoding is normalized; the request
+   goes out as written.
+2. With `respect`, skips a URL that robots.txt disallows, and uses the site's
+   `Crawl-delay` as the least spacing between its requests, up to 30
+   seconds. With `Respect::AiTraining`, it skips a URL whose site refuses AI
+   training in a `Content-Signal` line
+   ([Cloudflare's format](https://developers.cloudflare.com/bots/additional-configurations/managed-robots-txt/))
+   or a `Content-Usage` line (the IETF
+   [aipref draft](https://datatracker.ietf.org/doc/draft-ietf-aipref-attach/)).
+3. Sends the request without following redirects. A redirect is queued like
+   a link, so its target passes the same checks; a redirected seed adds the
+   scope of its target. A chain longer than five redirects is skipped.
+4. Skips a block page (`Response::block()`), an error status, and a response
+   whose `Content-Type` is not HTML. A response without a `Content-Type` is
+   kept when its body starts like HTML, by the
+   [MIME Sniffing](https://mimesniff.spec.whatwg.org/) rules.
+5. Queues the page's links. With `respect`, it reads the page's directives
+   with `html::Directives::read`, queues nothing from a `nofollow` page, and
+   skips links marked `rel="nofollow"`.
+6. With `respect`, skips a `noindex` page. With `Respect::AiTraining`, it
+   also skips a `noai` page and a page whose `Content-Usage` header refuses
+   AI training. `noai` is a convention some sites use, not a standard. It
+   skips a page whose canonical URL, when that URL is in scope, was kept
+   before, or whose text, compared word by word, matches a kept page.
+
+The crawl reads the sitemaps that each site's robots.txt lists, or
+`/sitemap.xml` when it lists none (and, with `respect`, when robots.txt
+allows it). It follows a sitemap index to the sitemaps it names, reads
+gzipped sitemaps, and reads at most 50 sitemap files and 50 MiB per file;
+with a `limit`, it opens no new sitemap file once it has queued that many
+URLs. Each `<loc>` URL passes the same checks as a link.
+
+A request that fails comes out of the stream as an `Err`, and the crawl goes
+on. `crawl.stats()` returns `CrawlStats`: `requests()`, `pages()`,
+`errors()`, and `skipped(SkipReason)` for each reason above. Its `Display`
+prints one `key=value` line. `CrawlPage` has `url()`, the address after
+redirects, `depth()`, `status()`, `html()`, `text()` from `html::text`, and
+`meta(name)`. A page body is capped by the session's
+`CompressionConfig::max_body_size`, 100 MiB by default.
+
+`Session::shutdown()` ends the crawl: requests in flight fail with the
+shut-down error and nothing new starts. Dropping the `Crawl` cancels its
+requests. `Session::crawl` needs the `html` feature, which is on by default.
 
 ## Build the crawl session
 
@@ -124,6 +232,54 @@ direct, the smaller limit bounds the requests in flight. HTTP/2 and HTTP/3
 multiplex on one connection, so only `max_in_flight` bounds them. See
 [Connection pool](network.md#connection-pool).
 
+## Obey robots.txt
+
+`Session::robots(url, agent)` fetches `/robots.txt` for the origin of `url`
+and returns `Robots`, the rules for the product token `agent`. Pass `"*"` to
+read only the group for every crawler. The rules follow RFC 9309:
+
+| Robots.txt fetch | `Robots::source()` | Result |
+| --- | --- | --- |
+| 2xx | `Parsed` | The rules of the matching groups |
+| 4xx | `Unavailable` | Every path is allowed |
+| 5xx, or the request failed | `Unreachable` | Every path is disallowed |
+
+Up to five redirects are followed, and the rules apply to the origin you
+asked about. The first 512 KiB of the file are parsed. `Session::robots`
+returns an error only for an invalid URL or a shut-down session.
+
+The groups that name `agent`, compared without case, are merged; with no such
+group, the `*` groups apply. A path matches the longest rule, and `Allow`
+wins a tie. `*` matches any run of characters, `$` ends a pattern, and both
+sides are compared with percent-encoding normalized. `/robots.txt` itself is
+always allowed.
+
+```rust,no_run
+use leyline::{Purpose, Url};
+
+# async fn run(session: leyline::Session) -> leyline::Result<()> {
+let robots = session.robots("https://shop.example/", "examplebot").await?;
+let page = Url::parse("https://shop.example/private/report.html")?;
+if robots.allows(&page) && robots.allows_use(&page, Purpose::AiTrain) {
+    let _ = session.get(page.as_str()).send().await?;
+}
+println!("delay {:?}, sitemaps {:?}", robots.crawl_delay(), robots.sitemaps());
+# Ok(())
+# }
+```
+
+`Robots::parse(text, agent)` reads a file you already have.
+`allows_use(url, purpose)` reads the AI-use preferences of the matching
+group. A `Content-Signal` line uses `search`, `ai-input`, and `ai-train` with
+`yes` or `no`; a `Content-Usage` line, from the IETF aipref draft, uses
+`search`, `ai-use`, and `train-ai` with `y` or `n`, and can start with a path
+pattern that limits it to matching URLs. Both map to `Purpose`. A use is
+refused when any line that applies to the URL says no, and allowed
+otherwise; unknown labels are ignored. The aipref labels are a draft and may
+change. `crawl_delay()` returns the group's `Crawl-delay`; `Session::crawl`
+applies it with `respect`. `sitemaps()` lists every `Sitemap` line in
+the file.
+
 ## Rotate proxies with a pool
 
 A `ProxyPool` keeps an origin on one proxy, strikes and bans failing proxies,
@@ -199,6 +355,69 @@ is a 403, so a policy with `on_status(403)` retries it before you see it.
 Without a pool, `RetryPolicy::rotate_proxies` with `on_status(403)` sends
 each retry through the next proxy in a list. See
 [Rotate proxies on retry](proxies.md#rotate-proxies-on-retry).
+
+## Read the text of a page
+
+`html::text(document)` returns the text a reader sees, one block per line:
+each heading, paragraph, list item, and table cell starts a new line, and
+`<br>` breaks a line. Runs of whitespace collapse to one space, except inside
+`<pre>`, which keeps its lines and indentation. Entities are decoded. The text
+of `<head>`, `<script>`, `<style>`, `<noscript>`, `<template>`, `<svg>`, and
+`<textarea>` is left out. It needs the `html` feature, which is on by default.
+
+```rust,no_run
+use leyline::html;
+
+# async fn run(session: leyline::Session) -> leyline::Result<()> {
+let page = session.get("https://shop.example/about").send().await?.text().await?;
+for line in html::text(&page).lines() {
+    println!("{line}");
+}
+# Ok(())
+# }
+```
+
+`html::text` keeps navigation, footers, and other text that repeats on every
+page of a site. To drop it, compare lines across pages and remove the lines
+that most pages share.
+
+## Obey a page's own rules
+
+A page can carry rules of its own, in `<meta name="robots">` tags and in
+`X-Robots-Tag` headers. `html::Directives::read(document, headers, agent)`
+reads both and returns `Directives`:
+
+| Method | `false` when the page says |
+| --- | --- |
+| `index()` | `noindex` or `none`: do not keep the page |
+| `follow()` | `nofollow` or `none`: do not follow its links |
+| `ai()` | `noai`: keep the page out of AI datasets |
+
+A meta tag named `robots`, or named for `agent` without case, applies. An
+`X-Robots-Tag` value that starts with a product token and a colon, such as
+`examplebot: noindex`, applies only to that token. Other directives, such as
+`noarchive` or `max-snippet`, are read and ignored.
+
+`html::canonical(document)` returns the `href` of the first
+`<link rel="canonical">`, as written in the page. Join it with
+`Response::url()` before you compare URLs.
+
+```rust,no_run
+use leyline::html::{self, Directives};
+
+# async fn run(session: leyline::Session) -> leyline::Result<()> {
+let resp = session.get("https://shop.example/item/1").send().await?;
+let url = resp.url().clone();
+let headers = resp.headers().clone();
+let page = resp.text().await?;
+let rules = Directives::read(&page, &headers, "examplebot");
+if rules.index() && rules.ai() {
+    let canonical = html::canonical(&page).and_then(|href| url.join(&href).ok());
+    println!("keep {}", canonical.unwrap_or(url));
+}
+# Ok(())
+# }
+```
 
 ## Group errors
 

@@ -3,12 +3,15 @@
 | Item | Kind | Description |
 | --- | --- | --- |
 | [`Anchor`](#anchor) | struct | Requires feature `html`. |
+| [`Directives`](#directives) | struct | Requires feature `html`. |
 | [`Form`](#form) | struct | Requires feature `html`. |
 | [`FormEnctype`](#formenctype) | enum | Form encoding. Requires feature `html`. |
 | [`FormMethod`](#formmethod) | enum | Requires feature `html`. |
+| [`canonical`](#canonical) | fn | Read a page's canonical URL. Requires feature `html`. |
 | [`forms`](#forms) | fn | Parse forms. Requires feature `html`. |
 | [`links`](#links) | fn | Read the links of a page. Requires feature `html`. |
 | [`meta`](#meta) | fn | Read the meta tags of a page. Requires feature `html`. |
+| [`text`](#text) | fn | Read the visible text of a page. Requires feature `html`. |
 
 ## Structs
 
@@ -25,6 +28,22 @@ Requires feature `html`.
 | <code>text(&amp;self) -&gt; &amp;str</code> | Requires feature `html`. |
 
 **Trait implementations:** <code>Clone</code>, <code>Eq</code>, <code>PartialEq</code>, <code>Debug</code>, <code>StructuralPartialEq</code>
+
+
+### `Directives`
+
+Requires feature `html`.
+
+**Methods**
+
+| Method | Description |
+| --- | --- |
+| <code>ai(&amp;self) -&gt; bool</code> | Requires feature `html`. |
+| <code>follow(&amp;self) -&gt; bool</code> | Requires feature `html`. |
+| <code>index(&amp;self) -&gt; bool</code> | Requires feature `html`. |
+| <code>read(document: &amp;str, headers: &amp;HeaderMap, agent: &amp;str) -&gt; <a href="#directives">Directives</a></code> | Read a page's robots directives. Requires feature `html`. |
+
+**Trait implementations:** <code>Clone</code>, <code>Eq</code>, <code>PartialEq</code>, <code>Debug</code>, <code>Copy</code>, <code>StructuralPartialEq</code>
 
 
 ### `Form`
@@ -90,6 +109,13 @@ Requires feature `html`.
 
 ## Functions
 
+### `canonical`
+
+<pre>pub fn <a href="#canonical">canonical</a>(document: &amp;str) -&gt; Option&lt;String&gt;</pre>
+
+Read a page's canonical URL. Requires feature `html`.
+
+
 ### `forms`
 
 <pre>pub fn <a href="#forms">forms</a>(document: &amp;str) -&gt; Vec&lt;<a href="#form">Form</a>&gt;</pre>
@@ -109,6 +135,13 @@ Read the links of a page. Requires feature `html`.
 <pre>pub fn <a href="#meta">meta</a>(document: &amp;str, name: &amp;str) -&gt; Option&lt;String&gt;</pre>
 
 Read the meta tags of a page. Requires feature `html`.
+
+
+### `text`
+
+<pre>pub fn <a href="#text">text</a>(document: &amp;str) -&gt; String</pre>
+
+Read the visible text of a page. Requires feature `html`.
 
 
 ---

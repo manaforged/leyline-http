@@ -261,6 +261,72 @@ fn pages_give_meta_tokens_and_links() {
     assert_eq!(links[0].rel(), Some("next"));
 }
 
+#[cfg(feature = "html")]
+#[test]
+fn pages_give_readable_text() {
+    let page = r#"<!doctype html><html><head><title>Guide</title>
+<style>p { color: red }</style></head><body>
+<svg viewBox="0 0 8 8"><text>icon</text></svg>
+<h1>Install &amp; run</h1>
+<p>Read the <a href="/g">guide</a>, then
+   <code>cargo run</code>.<br>Done.</p>
+<script>var x = "<p>fake</p>";</script>
+<noscript><p>Enable scripts</p></noscript>
+<ul><li>fast</li><li>small</li></ul>
+<pre>
+fn main() {
+    run();
+}
+</pre>
+</body></html>"#;
+    assert_eq!(
+        html::text(page),
+        "Install & run\nRead the guide, then cargo run.\nDone.\nfast\nsmall\nfn main() {\n    run();\n}"
+    );
+    assert_eq!(
+        html::text("<html><head><title>T</title><meta charset=utf-8><p>Body text<p>More"),
+        "Body text\nMore"
+    );
+}
+
+#[cfg(feature = "html")]
+#[test]
+fn pages_give_robots_directives_and_canonical() {
+    let page = r#"<html><head>
+<meta name="robots" content="noindex">
+<meta name="ExampleBot" content="nofollow, noai">
+<meta name="otherbot" content="none">
+<link rel="alternate stylesheet" href="/dark.css">
+<link rel="Canonical" href="/guide/">
+</head><body><p>x</p></body></html>"#;
+    let headers = http::HeaderMap::new();
+    let directives = html::Directives::read(page, &headers, "examplebot");
+    assert!(!directives.index());
+    assert!(!directives.follow());
+    assert!(!directives.ai());
+    let plain = html::Directives::read(page, &headers, "*");
+    assert!(!plain.index());
+    assert!(plain.follow());
+    assert!(plain.ai());
+    assert_eq!(html::canonical(page).as_deref(), Some("/guide/"));
+
+    let mut headers = http::HeaderMap::new();
+    headers.append("x-robots-tag", "otherbot: noindex".parse().unwrap());
+    headers.append("x-robots-tag", "examplebot: nofollow".parse().unwrap());
+    headers.append(
+        "x-robots-tag",
+        "unavailable_after: 25 Jun 2030 15:00:00 PST, noai"
+            .parse()
+            .unwrap(),
+    );
+    let bare = "<p>no meta</p>";
+    let directives = html::Directives::read(bare, &headers, "ExampleBot");
+    assert!(directives.index());
+    assert!(!directives.follow());
+    assert!(!directives.ai());
+    assert_eq!(html::canonical(bare), None);
+}
+
 #[test]
 fn a_strict_device_needs_a_pin_and_a_proxy() {
     let session = Session::browser(Browser::Chrome154);

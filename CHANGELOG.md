@@ -10,6 +10,28 @@ version and publish as separate crates.
 
 ## Unreleased
 
+### Added
+
+- `Session::crawl` returns `Crawl`, a polite stream of `CrawlPage`s with four
+  settings: `respect(Respect)` obeys robots.txt and the page's robots rules
+  (`Robots`), and AI-training opt-outs too (`AiTraining`); `scope(Scope)`;
+  `limit(pages)`; and `host_limits(HostLimits)`. By default it sends one
+  request at a time and one a second per host, pauses a host on 429 or 503,
+  reads sitemaps, follows redirects as links, and drops error pages, files,
+  block pages, and copies by canonical URL or text. `CrawlStats` counts each
+  `SkipReason`.
+- `Session::robots` and `Robots` read robots.txt by RFC 9309: group
+  matching, longest match with `*` and `$`, percent-encoding, the 4xx and 5xx
+  rules, up to five redirects, and a 512 KiB limit. `Robots` also reads
+  `Content-Signal` and the IETF draft `Content-Usage` as `Purpose`,
+  `Crawl-delay`, and `Sitemap` lines; `Robots::allows_use` takes the URL.
+- `html::text` returns the visible text of a page, one block per line, with
+  `<pre>` kept as written and script, style, and head text left out. An
+  unclosed `<head>` ends at the first element that cannot be in it.
+- `html::Directives` reads `noindex`, `nofollow`, `none`, and `noai` from
+  `<meta name="robots">`, a meta tag named for the agent, and
+  `X-Robots-Tag`. `html::canonical` returns the page's canonical link.
+
 ### Changed
 
 - `leyline-bssl-sys` compiles BoringSSL with the `cc` crate from the source

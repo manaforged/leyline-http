@@ -10,6 +10,9 @@
 | [`BrowserProfile`](#browserprofile) | struct |  |
 | [`CloseFrame`](#closeframe) | struct | Requires feature `websocket`. |
 | [`CompressionConfig`](#compressionconfig) | struct |  |
+| [`Crawl`](#crawl) | struct | Requires feature `html`. |
+| [`CrawlPage`](#crawlpage) | struct | Requires feature `html`. |
+| [`CrawlStats`](#crawlstats) | struct | Requires feature `html`. |
 | [`Device`](#device) | struct |  |
 | [`DeviceAutosave`](#deviceautosave) | struct |  |
 | [`DeviceAutosaveOptions`](#deviceautosaveoptions) | struct |  |
@@ -36,6 +39,7 @@
 | [`Response`](#response) | struct |  |
 | [`ResponseTiming`](#responsetiming) | struct |  |
 | [`RetryPolicy`](#retrypolicy) | struct |  |
+| [`Robots`](#robots) | struct |  |
 | [`Session`](#session) | struct |  |
 | [`SessionBuilder`](#sessionbuilder) | struct |  |
 | [`SessionIdentity`](#sessionidentity) | struct |  |
@@ -67,9 +71,14 @@
 | [`Preset`](#preset) | enum |  |
 | [`ProtocolPolicy`](#protocolpolicy) | enum |  |
 | [`ProxyReply`](#proxyreply) | enum |  |
+| [`Purpose`](#purpose) | enum |  |
 | [`RedirectAction`](#redirectaction) | enum |  |
 | [`RelayBody`](#relaybody) | enum |  |
+| [`Respect`](#respect) | enum | Requires feature `html`. |
 | [`RetryTrigger`](#retrytrigger) | enum |  |
+| [`RobotsSource`](#robotssource) | enum |  |
+| [`Scope`](#scope) | enum | Requires feature `html`. |
+| [`SkipReason`](#skipreason) | enum | Requires feature `html`. |
 | [`StopReason`](#stopreason) | enum |  |
 | [`TlsError`](#tlserror) | enum |  |
 | [`TlsMinVersion`](#tlsminversion) | enum |  |
@@ -230,6 +239,59 @@ Requires feature `websocket`.
 | <code>zstd(self, on: bool) -&gt; Self</code> |  |
 
 **Trait implementations:** <code>Clone</code>, <code>Eq</code>, <code>PartialEq</code>, <code>Default</code>, <code>Debug</code>, <code>Copy</code>, <code>StructuralPartialEq</code>
+
+
+### `Crawl`
+
+Requires feature `html`.
+
+**Methods**
+
+| Method | Description |
+| --- | --- |
+| <code>host_limits(self, limits: <a href="#hostlimits">HostLimits</a>) -&gt; Self</code> | Pace a crawl per host. Requires feature `html`. |
+| <code>limit(self, pages: usize) -&gt; Self</code> | Limit a crawl's pages. Requires feature `html`. |
+| <code>async next(&amp;mut self) -&gt; Option&lt;<a href="#result">Result</a>&lt;<a href="#crawlpage">CrawlPage</a>&gt;&gt;</code> | Requires feature `html`. |
+| <code>respect(self, respect: <a href="#respect">Respect</a>) -&gt; Self</code> | Obey robots rules in a crawl. Requires feature `html`. |
+| <code>scope(self, scope: <a href="#scope">Scope</a>) -&gt; Self</code> | Requires feature `html`. |
+| <code>stats(&amp;self) -&gt; &amp;<a href="#crawlstats">CrawlStats</a></code> | Count what a crawl skipped. Requires feature `html`. |
+
+**Trait implementations:** <code>Debug</code>, <code>Stream</code>
+
+
+### `CrawlPage`
+
+Requires feature `html`.
+
+**Methods**
+
+| Method | Description |
+| --- | --- |
+| <code>depth(&amp;self) -&gt; usize</code> | Requires feature `html`. |
+| <code>html(&amp;self) -&gt; &amp;str</code> | Requires feature `html`. |
+| <code>into_html(self) -&gt; String</code> | Requires feature `html`. |
+| <code>meta(&amp;self, name: &amp;str) -&gt; Option&lt;String&gt;</code> | Requires feature `html`. |
+| <code>status(&amp;self) -&gt; StatusCode</code> | Requires feature `html`. |
+| <code>text(&amp;self) -&gt; &amp;str</code> | Requires feature `html`. |
+| <code>url(&amp;self) -&gt; &amp;Url</code> | Requires feature `html`. |
+
+**Trait implementations:** <code>Clone</code>, <code>Debug</code>
+
+
+### `CrawlStats`
+
+Requires feature `html`.
+
+**Methods**
+
+| Method | Description |
+| --- | --- |
+| <code>errors(&amp;self) -&gt; u64</code> | Requires feature `html`. |
+| <code>pages(&amp;self) -&gt; u64</code> | Requires feature `html`. |
+| <code>requests(&amp;self) -&gt; u64</code> | Requires feature `html`. |
+| <code>skipped(&amp;self, reason: <a href="#skipreason">SkipReason</a>) -&gt; u64</code> | Requires feature `html`. |
+
+**Trait implementations:** <code>Clone</code>, <code>Default</code>, <code>Debug</code>, <code>Display</code>
 
 
 ### `Device`
@@ -706,6 +768,22 @@ Requires feature `tower`.
 **Trait implementations:** <code>Clone</code>, <code>Default</code>, <code>Debug</code>
 
 
+### `Robots`
+
+**Methods**
+
+| Method | Description |
+| --- | --- |
+| <code>allows(&amp;self, url: &amp;Url) -&gt; bool</code> |  |
+| <code>allows_use(&amp;self, url: &amp;Url, purpose: <a href="#purpose">Purpose</a>) -&gt; bool</code> |  |
+| <code>crawl_delay(&amp;self) -&gt; Option&lt;Duration&gt;</code> |  |
+| <code>parse(text: &amp;str, agent: &amp;str) -&gt; <a href="#robots">Robots</a></code> | Parse a robots.txt file. |
+| <code>sitemaps(&amp;self) -&gt; &amp;[String]</code> |  |
+| <code>source(&amp;self) -&gt; <a href="#robotssource">RobotsSource</a></code> |  |
+
+**Trait implementations:** <code>Clone</code>, <code>Debug</code>
+
+
 ### `Session`
 
 **Methods**
@@ -734,10 +812,12 @@ Requires feature `tower`.
 | <code>with_cookie_jar(&amp;self, jar: <a href="leyline-cookie.html#jar">Jar</a>) -&gt; Self</code> | Derive a session with another jar. |
 | <code>with_proxy(&amp;self, config: impl Into&lt;<a href="#proxyconfig">ProxyConfig</a>&gt;) -&gt; Self</code> | Derive a session with another proxy. |
 | <code>with_redirect(&amp;self, policy: <a href="#redirectpolicy">RedirectPolicy</a>) -&gt; Self</code> |  |
+| <code>crawl(&amp;self, seed: impl <a href="#intourl">IntoUrl</a>) -&gt; <a href="#crawl">Crawl</a></code> | Crawl a site. Requires feature `html`. |
 | <code>identity(&amp;self) -&gt; <a href="#sessionidentity">SessionIdentity</a></code> | What a session sends. |
 | <code>with_identity(&amp;self, identity: <a href="#identity">Identity</a>) -&gt; <a href="#result">Result</a>&lt;Self&gt;</code> | Derive a session with another identity. |
 | <code>is_shut_down(&amp;self) -&gt; bool</code> |  |
 | <code>shutdown(&amp;self)</code> | Stop every clone of a session. |
+| <code>async robots(&amp;self, url: impl <a href="#intourl">IntoUrl</a>, agent: &amp;str) -&gt; <a href="#result">Result</a>&lt;<a href="#robots">Robots</a>&gt;</code> | Fetch and obey robots.txt. |
 | <code>state(&amp;self) -&gt; <a href="#sessionstate">SessionState</a></code> | Save TLS tickets, Alt-Svc, and HSTS. |
 | <code>websocket(&amp;self, url: impl <a href="#intourl">IntoUrl</a>) -&gt; <a href="#websocketbuilder">WebSocketBuilder</a></code> | WebSocket. Requires feature `websocket`. |
 
@@ -1387,6 +1467,25 @@ Requires feature `websocket`.
 **Trait implementations:** <code>Clone</code>, <code>Eq</code>, <code>PartialEq</code>, <code>Debug</code>, <code>Copy</code>, <code>StructuralPartialEq</code>
 
 
+### `Purpose`
+
+**Methods**
+
+| Method | Description |
+| --- | --- |
+| <code>as_str(self) -&gt; &amp;'static str</code> |  |
+
+**Variants**
+
+| Variant | Description |
+| --- | --- |
+| <code>AiInput</code> |  |
+| <code>AiTrain</code> |  |
+| <code>Search</code> |  |
+
+**Trait implementations:** <code>Clone</code>, <code>Eq</code>, <code>PartialEq</code>, <code>Debug</code>, <code>Hash</code>, <code>Copy</code>, <code>StructuralPartialEq</code>
+
+
 ### `RedirectAction`
 
 **Variants**
@@ -1411,6 +1510,20 @@ Requires feature `websocket`.
 **Trait implementations:** <code>Clone</code>, <code>Eq</code>, <code>PartialEq</code>, <code>Debug</code>, <code>Copy</code>, <code>StructuralPartialEq</code>
 
 
+### `Respect`
+
+Requires feature `html`.
+
+**Variants**
+
+| Variant | Description |
+| --- | --- |
+| <code>AiTraining</code> | Requires feature `html`. |
+| <code>Robots</code> | Requires feature `html`. |
+
+**Trait implementations:** <code>Clone</code>, <code>Eq</code>, <code>PartialEq</code>, <code>Debug</code>, <code>Copy</code>, <code>StructuralPartialEq</code>
+
+
 ### `RetryTrigger`
 
 **Variants**
@@ -1423,6 +1536,61 @@ Requires feature `websocket`.
 | <code>Timeout</code> |  |
 
 **Trait implementations:** <code>Clone</code>, <code>Debug</code>, <code>Copy</code>
+
+
+### `RobotsSource`
+
+**Variants**
+
+| Variant | Description |
+| --- | --- |
+| <code>Parsed</code> |  |
+| <code>Unavailable</code> |  |
+| <code>Unreachable</code> |  |
+
+**Trait implementations:** <code>Clone</code>, <code>Eq</code>, <code>PartialEq</code>, <code>Debug</code>, <code>Hash</code>, <code>Copy</code>, <code>StructuralPartialEq</code>
+
+
+### `Scope`
+
+Requires feature `html`.
+
+**Variants**
+
+| Variant | Description |
+| --- | --- |
+| <code>Domain</code> | Requires feature `html`. |
+| <code>Host</code> | Requires feature `html`. |
+| <code>Prefix</code> | Requires feature `html`. |
+
+**Trait implementations:** <code>Clone</code>, <code>Eq</code>, <code>PartialEq</code>, <code>Default</code>, <code>Debug</code>, <code>Copy</code>, <code>StructuralPartialEq</code>
+
+
+### `SkipReason`
+
+Requires feature `html`.
+
+**Methods**
+
+| Method | Description |
+| --- | --- |
+| <code>as_str(self) -&gt; &amp;'static str</code> | Requires feature `html`. |
+
+**Variants**
+
+| Variant | Description |
+| --- | --- |
+| <code>Blocked</code> | Requires feature `html`. |
+| <code>Duplicate</code> | Requires feature `html`. |
+| <code>NoAi</code> | Requires feature `html`. |
+| <code>NoIndex</code> | Requires feature `html`. |
+| <code>NotHtml</code> | Requires feature `html`. |
+| <code>Redirects</code> | Requires feature `html`. |
+| <code>Robots</code> | Requires feature `html`. |
+| <code>Signal</code> | Requires feature `html`. |
+| <code>Status</code> | Requires feature `html`. |
+
+**Trait implementations:** <code>Clone</code>, <code>Eq</code>, <code>PartialEq</code>, <code>Debug</code>, <code>Hash</code>, <code>Copy</code>, <code>StructuralPartialEq</code>
 
 
 ### `StopReason`
