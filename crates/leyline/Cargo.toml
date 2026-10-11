@@ -1,6 +1,6 @@
 [package]
 name = "leyline-http"
-description = "HTTP client that mimics browsers on the wire"
+description = "HTTP client that impersonates Chrome, Firefox, and Safari on the wire: TLS (JA3/JA4), HTTP/2, and HTTP/3 fingerprints"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
