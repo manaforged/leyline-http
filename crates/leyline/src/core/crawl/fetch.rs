@@ -112,7 +112,7 @@ pub(super) async fn fetch(
     if let RetryPlan::Backoff(wait) = retry.plan(&result, attempt, true, || true) {
         return Ok(Fetched::Later(wait));
     }
-    read(result?, &url).await
+    session.deadline(None).total(read(result?, &url)).await
 }
 
 async fn read(response: Response, url: &Url) -> Result<Fetched> {

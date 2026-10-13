@@ -80,7 +80,6 @@ pub struct Crawl {
     sitemap_queue: VecDeque<SitemapFile>,
     sitemaps_in_flight: usize,
     trusted: Option<Url>,
-    plain: Session,
     page_retry: RetryPolicy,
     clock: clock::Clock,
     holding: usize,
@@ -123,7 +122,6 @@ impl Session {
             sitemap_queue: VecDeque::new(),
             sitemaps_in_flight: 0,
             trusted: None,
-            plain: self.clone(),
             page_retry: RetryPolicy::none(),
             clock: clock::Clock::default(),
             holding: 0,
@@ -202,7 +200,6 @@ impl Crawl {
             Some(_) => pace,
             None => pace.without_floors(),
         };
-        self.plain = self.session.clone();
         self.session = self.session.with_crawl_pace(pace.clone());
         self.page_retry = self
             .session

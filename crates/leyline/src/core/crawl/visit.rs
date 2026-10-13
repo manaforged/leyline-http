@@ -44,7 +44,8 @@ impl Crawl {
             .and_then(|href| url.join(&href).ok())
             .unwrap_or_else(|| url.clone());
         let rules = Directives::read(&html, &headers, ANY_AGENT);
-        if self.respect.is_none() || rules.follow() {
+        let may_follow = self.respect.is_none() || rules.follow();
+        if may_follow {
             self.follow(&base, &html, depth + 1);
         }
         if let Some(reason) = self.excluded(rules, &headers) {
@@ -66,6 +67,7 @@ impl Crawl {
             page: CrawlPage::new(url, depth, status, html, text),
         };
         if let (Some(key), Some(link)) = (held.claimed.clone(), canonical)
+            && may_follow
             && key != held.own
             && !self.kept.contains(&key)
             && !self.settled.contains(&key)

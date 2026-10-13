@@ -200,6 +200,12 @@ impl Crawl {
             }
             if self.respect.is_some() {
                 match self.sites.get(&origin) {
+                    Some(Site::Ready(_, read)) if read.elapsed() >= ROBOTS_MAX_AGE => {
+                        self.read_robots(origin, file.url.clone());
+                        waiting.push_back(file);
+                        opened = true;
+                        continue;
+                    }
                     Some(Site::Ready(robots, _)) if !robots.allows(&file.url) => {
                         self.stats.skip(SkipReason::Robots);
                         continue;

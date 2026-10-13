@@ -73,7 +73,8 @@ pub(super) async fn read(
     if !response.status().is_success() {
         return SitemapRead::Failed;
     }
-    let Ok(bytes) = response.read_until(MAX_BYTES, |_, _| false).await else {
+    let body = response.read_until(MAX_BYTES, |_, _| false);
+    let Ok(bytes) = session.deadline(None).total(body).await else {
         return SitemapRead::Failed;
     };
     let bytes = if bytes.starts_with(&GZIP_MAGIC) {

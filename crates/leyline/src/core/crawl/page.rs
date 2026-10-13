@@ -5,14 +5,27 @@ use http::StatusCode;
 use url::Url;
 
 use crate::html;
+use crate::util::redact;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct CrawlPage {
     url: Url,
     depth: usize,
     status: StatusCode,
     html: String,
     text: String,
+}
+
+impl fmt::Debug for CrawlPage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CrawlPage")
+            .field("url", &redact(self.url.as_str()))
+            .field("depth", &self.depth)
+            .field("status", &self.status)
+            .field("html_bytes", &self.html.len())
+            .field("text_bytes", &self.text.len())
+            .finish()
+    }
 }
 
 impl CrawlPage {

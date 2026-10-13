@@ -41,7 +41,8 @@ impl Session {
         if !status.is_success() {
             return Ok(Robots::empty(RobotsSource::Unavailable));
         }
-        match response.read_until(MAX_BYTES, |_, _| false).await {
+        let body = response.read_until(MAX_BYTES, |_, _| false);
+        match self.deadline(None).total(body).await {
             Ok(bytes) => {
                 let body = String::from_utf8_lossy(&bytes);
                 let whole = match bytes.len() >= MAX_BYTES {
