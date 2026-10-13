@@ -181,6 +181,12 @@ impl Frontier {
         true
     }
 
+    pub(super) fn rekey(&mut self, mut queued: Queued, to: Url) {
+        self.seen.remove(&page_key(&queued.url));
+        queued.url = to;
+        self.add(queued);
+    }
+
     pub(super) fn has_seen(&self, url: &Url) -> bool {
         self.seen.contains(&page_key(url))
     }

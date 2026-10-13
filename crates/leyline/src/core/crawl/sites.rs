@@ -68,9 +68,7 @@ impl Crawl {
             };
             let upgraded = self.session.upgraded(&queued.url);
             if upgraded != queued.url {
-                let mut queued = queued;
-                queued.url = upgraded;
-                self.frontier.add(queued);
+                self.frontier.rekey(queued, upgraded);
                 continue;
             }
             let known = match self.sites.get(&origin) {
