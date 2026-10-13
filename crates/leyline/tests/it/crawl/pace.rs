@@ -141,3 +141,52 @@ async fn a_paused_host_leaves_room_for_other_hosts() {
     .await;
     assert_eq!(reached, Ok(true));
 }
+
+#[tokio::test]
+async fn a_crawl_with_its_own_limits_still_obeys_the_sessions_limits() {
+    let stamps = Stamps::default();
+    let seen = stamps.clone();
+    let server = TestServer::http(move |request| {
+        stamp(&seen, &request.target);
+        match request.target.as_str() {
+            "/" => html(r#"<a href="/a">A</a>"#),
+            _ => html("<p>a</p>"),
+        }
+    })
+    .await
+    .unwrap();
+    let session = Session::builder()
+        .host_limits(HostLimits::new().per_second(1.0))
+        .build()
+        .unwrap();
+    let mut crawl = session
+        .crawl(server.url("/"))
+        .host_limits(HostLimits::new());
+    while let Some(page) = crawl.next().await {
+        page.unwrap();
+    }
+    let gap = at(&stamps, "/a") - at(&stamps, "/");
+    assert!(gap >= Duration::from_millis(900), "{gap:?}");
+}
+
+#[tokio::test]
+async fn a_crawl_waits_out_a_robots_txt_outage() {
+    let started = Instant::now();
+    let server = TestServer::http(move |request| match request.target.as_str() {
+        "/robots.txt" if started.elapsed() < Duration::from_secs(2) => TestResponse::new(503),
+        "/robots.txt" => TestResponse::new(200).body("User-agent: *\nDisallow: /never\n"),
+        "/" => html(r#"<a href="/a">A</a>"#),
+        _ => html("<p>a</p>"),
+    })
+    .await
+    .unwrap();
+    let mut crawl = Session::new()
+        .crawl(server.url("/"))
+        .respect(Respect::Robots)
+        .host_limits(HostLimits::new());
+    let mut kept = BTreeSet::new();
+    while let Some(page) = crawl.next().await {
+        kept.insert(page.unwrap().url().path().to_owned());
+    }
+    assert_eq!(kept, BTreeSet::from(["/", "/a"].map(String::from)));
+}

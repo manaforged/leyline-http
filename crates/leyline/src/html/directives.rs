@@ -3,6 +3,7 @@ use http::HeaderMap;
 use super::page::Element;
 use super::scan::Scanner;
 use super::{Directives, lookup};
+use crate::core::product_token;
 
 const META_NAME: &str = "robots";
 const HEADER: &str = "x-robots-tag";
@@ -52,9 +53,10 @@ pub(super) fn read(document: &str, headers: &HeaderMap, agent: &str) -> Directiv
         if tag.closing || Element::of(&tag.name) != Element::Meta {
             continue;
         }
-        let names_us = tag.attr("name").map(str::trim).is_some_and(|name| {
-            name.eq_ignore_ascii_case(META_NAME) || name.eq_ignore_ascii_case(agent)
-        });
+        let names_us = tag
+            .attr("name")
+            .map(str::trim)
+            .is_some_and(|name| name.eq_ignore_ascii_case(META_NAME) || names_agent(name, agent));
         if let (true, Some(content)) = (names_us, tag.attr("content")) {
             apply(&mut found, content);
         }
@@ -65,11 +67,16 @@ pub(super) fn read(document: &str, headers: &HeaderMap, agent: &str) -> Directiv
         .filter_map(|v| v.to_str().ok())
     {
         let (scope, list) = scoped(value);
-        if scope.is_none_or(|scope| scope.eq_ignore_ascii_case(agent)) {
+        if scope.is_none_or(|scope| names_agent(scope, agent)) {
             apply(&mut found, list);
         }
     }
     found
+}
+
+fn names_agent(name: &str, agent: &str) -> bool {
+    let wanted = product_token(agent);
+    !wanted.is_empty() && product_token(name).eq_ignore_ascii_case(wanted)
 }
 
 fn scoped(value: &str) -> (Option<&str>, &str) {

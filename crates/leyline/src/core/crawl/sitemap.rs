@@ -38,11 +38,15 @@ pub(super) async fn read(session: Session, url: Url) -> Sitemap {
         return Sitemap::default();
     };
     let bytes = if bytes.starts_with(&GZIP_MAGIC) {
-        gunzip(&bytes)
+        let plain = gunzip(&bytes);
+        drop(bytes);
+        plain
     } else {
         bytes
     };
-    html::sitemap(&String::from_utf8_lossy(&bytes))
+    let text = String::from_utf8(bytes)
+        .unwrap_or_else(|err| String::from_utf8_lossy(err.as_bytes()).into_owned());
+    html::sitemap(&text)
 }
 
 fn gunzip(bytes: &[u8]) -> Vec<u8> {

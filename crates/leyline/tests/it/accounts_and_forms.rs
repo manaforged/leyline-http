@@ -304,6 +304,18 @@ fn pages_keep_text_around_comments_brackets_and_empty_templates() {
 
 #[cfg(feature = "html")]
 #[test]
+fn pages_apply_rules_named_for_the_agents_product_token() {
+    let page = r#"<meta name="ExampleBot" content="noindex">"#;
+    let rules = html::Directives::read(
+        page,
+        &http::HeaderMap::new(),
+        "ExampleBot/2.1 (+https://example.com/bot)",
+    );
+    assert!(!rules.index());
+}
+
+#[cfg(feature = "html")]
+#[test]
 fn pages_give_robots_directives_and_canonical() {
     let page = r#"<html><head>
 <meta name="robots" content="noindex">

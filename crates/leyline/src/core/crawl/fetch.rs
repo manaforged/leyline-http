@@ -1,4 +1,4 @@
-use http::header::{CONTENT_TYPE, LOCATION};
+use http::header::LOCATION;
 use http::{HeaderMap, HeaderName, StatusCode};
 use url::Url;
 
@@ -34,16 +34,12 @@ const RETRY_LATER: [StatusCode; 2] = [
     StatusCode::TOO_MANY_REQUESTS,
     StatusCode::SERVICE_UNAVAILABLE,
 ];
-const PERMANENT: [StatusCode; 2] = [
-    StatusCode::MOVED_PERMANENTLY,
-    StatusCode::PERMANENT_REDIRECT,
-];
 pub(super) const X_ROBOTS_TAG: HeaderName = HeaderName::from_static("x-robots-tag");
 pub(super) const CONTENT_USAGE: HeaderName = HeaderName::from_static("content-usage");
 const KEPT_HEADERS: [HeaderName; 2] = [X_ROBOTS_TAG, CONTENT_USAGE];
 
 pub(super) enum Fetched {
-    Redirect { to: Url, permanent: bool },
+    Redirect { to: Url },
     Later,
     Skip(SkipReason),
     Page(Box<Loaded>),
@@ -56,8 +52,7 @@ pub(super) struct Loaded {
     pub(super) html: String,
 }
 
-fn is_html(content_type: &str) -> bool {
-    let media = content_type.split(';').next().unwrap_or_default().trim();
+fn is_html(media: &str) -> bool {
     HTML_TYPES
         .iter()
         .any(|kind| kind.eq_ignore_ascii_case(media))
@@ -99,10 +94,7 @@ pub(super) async fn fetch(session: Session, url: Url) -> Result<Fetched> {
             .header(LOCATION.as_str())
             .and_then(|to| url.join(to).ok());
         return Ok(match target {
-            Some(to) => Fetched::Redirect {
-                to,
-                permanent: PERMANENT.contains(&status),
-            },
+            Some(to) => Fetched::Redirect { to },
             None => Fetched::Skip(SkipReason::Status),
         });
     }
@@ -115,7 +107,7 @@ pub(super) async fn fetch(session: Session, url: Url) -> Result<Fetched> {
     if !status.is_success() {
         return Ok(Fetched::Skip(SkipReason::Status));
     }
-    let declared = response.header(CONTENT_TYPE.as_str()).map(is_html);
+    let declared = response.media_type().map(is_html);
     if declared == Some(false) {
         return Ok(Fetched::Skip(SkipReason::NotHtml));
     }

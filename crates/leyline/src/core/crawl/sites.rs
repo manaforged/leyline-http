@@ -3,8 +3,8 @@ use std::time::Duration;
 use tokio::time::Instant;
 use url::Url;
 
-use super::frontier::Queued;
-use super::{ANY_AGENT, Crawl, Event, MAX_IN_FLIGHT, SkipReason, Task, sitemap};
+use super::frontier::{Queued, page_key};
+use super::{ANY_AGENT, Crawl, Event, MAX_ATTEMPTS, MAX_IN_FLIGHT, SkipReason, Task, sitemap};
 use crate::core::config::{Origin, normal_host};
 use crate::core::robots::{Robots, RobotsSource};
 
@@ -12,6 +12,7 @@ const ROBOTS_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 const MAX_CRAWL_DELAY: Duration = Duration::from_secs(30);
 const MAX_SITEMAP_FILES: usize = 50;
 const MAX_SITEMAP_TASKS: usize = 2;
+const ROBOTS_RETRY: Duration = Duration::from_secs(5);
 
 pub(super) enum Site {
     Pending,
@@ -67,20 +68,27 @@ impl Crawl {
             };
             match known {
                 None => {
-                    self.tasks
-                        .push(self.robots_task(origin.clone(), queued.url.clone()));
+                    self.tasks.push(self.robots_task(
+                        origin.clone(),
+                        queued.url.clone(),
+                        Duration::ZERO,
+                    ));
                     self.sites.insert(origin, Site::Pending);
                     self.frontier.push_front(queued);
                 }
-                Some(Some(reason)) => self.stats.skip(reason),
+                Some(Some(reason)) => {
+                    self.stats.skip(reason);
+                    self.settle(page_key(&queued.url));
+                }
                 Some(None) => self.fetch(origin, queued),
             }
         }
     }
 
-    fn robots_task(&self, origin: Origin, url: Url) -> Task {
+    fn robots_task(&self, origin: Origin, url: Url, after: Duration) -> Task {
         let session = self.session.clone();
         Box::pin(async move {
+            session.deadline(None).sleep(after).await;
             let robots = match session.robots(url.as_str(), ANY_AGENT).await {
                 Ok(robots) => robots,
                 Err(_) => Robots::empty(RobotsSource::Unreachable),
@@ -94,6 +102,16 @@ impl Crawl {
     }
 
     pub(super) fn robots_read(&mut self, origin: Origin, url: Url, robots: Robots) {
+        if robots.source() == RobotsSource::Unreachable {
+            let tries = self.robots_tries.entry(origin.clone()).or_default();
+            *tries += 1;
+            if *tries < MAX_ATTEMPTS {
+                let after = ROBOTS_RETRY * u32::from(*tries);
+                self.tasks.push(self.robots_task(origin, url, after));
+                return;
+            }
+        }
+        self.robots_tries.remove(&origin);
         for sitemap in sitemap::listed(&url, &robots, self.respect.is_some()) {
             self.queue_sitemap(sitemap, None);
         }

@@ -56,6 +56,8 @@ impl SessionBuilder {
                 host_limits: self.host_limits.armed(),
                 #[cfg(feature = "html")]
                 crawl_limits: Arc::default(),
+                #[cfg(feature = "html")]
+                crawl_pace: None,
                 proxy_pool: self.proxy_pool,
             }),
         }

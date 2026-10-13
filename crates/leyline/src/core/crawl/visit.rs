@@ -5,7 +5,7 @@ use url::Url;
 
 use super::fetch::{CONTENT_USAGE, Loaded};
 use super::frontier::{Queued, page_key};
-use super::{ANY_AGENT, Crawl, CrawlPage, NOFOLLOW, SkipReason};
+use super::{ANY_AGENT, Crawl, CrawlPage, MIN_PRINT_WORDS, NOFOLLOW, SkipReason};
 use crate::core::robots::{Purpose, header_uses};
 use crate::html::{self, Directives};
 
@@ -57,7 +57,33 @@ impl Crawl {
         let own = page_key(&url);
         let claimed = canonical.as_ref().map(page_key);
         let text = html::text(&html);
-        let print = (!text.trim().is_empty()).then(|| fingerprint(&text));
+        let print = (text.split_whitespace().nth(MIN_PRINT_WORDS - 1).is_some())
+            .then(|| fingerprint(&text));
+        let held = Held {
+            own,
+            claimed,
+            print,
+            page: CrawlPage::new(url, depth, status, html, text),
+        };
+        if let (Some(key), Some(link)) = (held.claimed.clone(), canonical)
+            && key != held.own
+            && !self.kept.contains(&key)
+            && !self.settled.contains(&key)
+        {
+            self.frontier.add(Queued::link(link, depth));
+            self.held.entry(key).or_default().push(held);
+            return;
+        }
+        self.keep(held);
+    }
+
+    fn keep(&mut self, held: Held) {
+        let Held {
+            own,
+            claimed,
+            print,
+            page,
+        } = held;
         let duplicate = self.kept.contains(&own)
             || claimed.as_ref().is_some_and(|key| self.kept.contains(key))
             || print.is_some_and(|print| self.texts.contains(&print));
@@ -66,16 +92,35 @@ impl Crawl {
             return;
         }
         self.kept.insert(own);
-        if let (Some(key), Some(link)) = (claimed, canonical) {
+        if let Some(key) = claimed {
             self.kept.insert(key);
-            self.frontier.mark(&link);
         }
         if let Some(print) = print {
             self.texts.insert(print);
         }
         self.stats.page();
-        self.ready
-            .push_back(Ok(CrawlPage::new(url, depth, status, html, text)));
+        self.ready.push_back(Ok(page));
+    }
+
+    pub(super) fn settle(&mut self, key: String) {
+        let kept = self.kept.contains(&key);
+        let waiting = self.held.remove(&key).unwrap_or_default();
+        self.settled.insert(key);
+        for held in waiting {
+            if kept {
+                self.stats.skip(SkipReason::Duplicate);
+            } else {
+                self.keep(held);
+            }
+        }
+    }
+
+    pub(super) fn release_held(&mut self) -> bool {
+        let keys: Vec<String> = self.held.keys().cloned().collect();
+        for key in &keys {
+            self.settle(key.clone());
+        }
+        !keys.is_empty()
     }
 
     fn follow(&mut self, base: &Url, html: &str, depth: usize) {
@@ -90,6 +135,13 @@ impl Crawl {
             }
         }
     }
+}
+
+pub(super) struct Held {
+    own: String,
+    claimed: Option<String>,
+    print: Option<u64>,
+    page: CrawlPage,
 }
 
 fn uses_ai(purpose: Purpose) -> bool {

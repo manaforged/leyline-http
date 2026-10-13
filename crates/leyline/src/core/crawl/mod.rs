@@ -18,6 +18,7 @@ pub use frontier::Scope;
 use frontier::{Frontier, Queued, page_key, same_site};
 pub use page::{CrawlPage, CrawlStats, SkipReason};
 use sites::{Site, SitemapFile};
+use visit::Held;
 
 use crate::core::config::{HostLimits, Origin};
 use crate::core::error::{Error, Kind, Result};
@@ -30,6 +31,7 @@ const ANY_AGENT: &str = "*";
 const NOFOLLOW: &str = "nofollow";
 const MAX_REDIRECTS: usize = 5;
 const MAX_ATTEMPTS: u8 = 3;
+const MIN_PRINT_WORDS: usize = 20;
 const MAX_IN_FLIGHT: usize = 16;
 const POLITE_IN_FLIGHT: usize = 1;
 const POLITE_PER_SECOND: f64 = 1.0;
@@ -72,6 +74,7 @@ pub struct Crawl {
     started: bool,
     frontier: Frontier,
     sites: HashMap<Origin, Site>,
+    robots_tries: HashMap<Origin, u8>,
     busy: HashMap<Origin, usize>,
     sitemap_files: HashSet<String>,
     sitemap_queue: VecDeque<SitemapFile>,
@@ -81,6 +84,8 @@ pub struct Crawl {
     ready: VecDeque<Result<CrawlPage>>,
     kept: HashSet<String>,
     texts: HashSet<u64>,
+    held: HashMap<String, Vec<Held>>,
+    settled: HashSet<String>,
     stats: CrawlStats,
 }
 
@@ -107,6 +112,7 @@ impl Session {
             started: false,
             frontier: Frontier::default(),
             sites: HashMap::new(),
+            robots_tries: HashMap::new(),
             busy: HashMap::new(),
             sitemap_files: HashSet::new(),
             sitemap_queue: VecDeque::new(),
@@ -116,6 +122,8 @@ impl Session {
             ready: VecDeque::new(),
             kept: HashSet::new(),
             texts: HashSet::new(),
+            held: HashMap::new(),
+            settled: HashSet::new(),
             stats: CrawlStats::default(),
         }
     }
@@ -174,7 +182,7 @@ impl Crawl {
             },
             None => self.session.crawl_limits(|| inherited(&self.session)),
         };
-        self.session = self.session.with_host_limits(pace.clone());
+        self.session = self.session.with_crawl_pace(pace.clone());
         self.pace = pace;
         for seed in std::mem::take(&mut self.seeds) {
             match seed {
@@ -184,6 +192,11 @@ impl Crawl {
                 Err(err) => self.ready.push_back(Err(err)),
             }
         }
+    }
+
+    fn limit_met(&self) -> bool {
+        self.max_pages
+            .is_some_and(|max| self.stats.pages() as usize >= max)
     }
 
     fn budget_spent(&self) -> bool {
@@ -216,7 +229,7 @@ impl Crawl {
         }
     }
 
-    fn redirect(&mut self, queued: Queued, to: Url, permanent: bool) {
+    fn redirect(&mut self, queued: Queued, to: Url) {
         if queued.hops >= MAX_REDIRECTS {
             self.stats.skip(SkipReason::Redirects);
             return;
@@ -226,7 +239,7 @@ impl Crawl {
         if target == from || queued.chain.contains(&target) {
             self.frontier.redirected(&to);
         }
-        let widen = queued.seed && (permanent || same_site(&queued.url, &to));
+        let widen = queued.seed && same_site(&queued.url, &to);
         let seen = self.frontier.has_seen(&to);
         let mut chain = queued.chain;
         chain.push(from);
@@ -247,6 +260,7 @@ impl Crawl {
     fn later(&mut self, mut queued: Queued) {
         if queued.attempts + 1 >= MAX_ATTEMPTS {
             self.stats.skip(SkipReason::Status);
+            self.settle(page_key(&queued.url));
             return;
         }
         queued.attempts += 1;
@@ -267,16 +281,18 @@ impl Crawl {
                 fetched,
             } => {
                 self.release(&origin);
+                let key = page_key(&queued.url);
                 match fetched {
                     Err(err) => {
                         self.stats.error();
                         self.ready.push_back(Err(err));
                     }
-                    Ok(Fetched::Redirect { to, permanent }) => self.redirect(queued, to, permanent),
-                    Ok(Fetched::Later) => self.later(queued),
+                    Ok(Fetched::Redirect { to }) => self.redirect(queued, to),
+                    Ok(Fetched::Later) => return self.later(queued),
                     Ok(Fetched::Skip(reason)) => self.stats.skip(reason),
                     Ok(Fetched::Page(loaded)) => self.page(queued.depth, *loaded),
                 }
+                self.settle(key);
             }
         }
     }
@@ -293,8 +309,12 @@ impl Stream for Crawl {
             if let Some(item) = this.ready.pop_front() {
                 return Poll::Ready(Some(item));
             }
+            if this.limit_met() && this.pages_in_flight == 0 {
+                return Poll::Ready(None);
+            }
             match this.tasks.poll_next_unpin(cx) {
                 Poll::Ready(Some(event)) => this.handle(event),
+                Poll::Ready(None) if this.release_held() => {}
                 Poll::Ready(None) => return Poll::Ready(None),
                 Poll::Pending => return Poll::Pending,
             }

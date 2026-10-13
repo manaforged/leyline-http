@@ -9,6 +9,10 @@ mod sitemap;
 
 pub(crate) use sitemap::Sitemap;
 
+use crate::core::lookup;
+
+pub(crate) const WEB_SCHEMES: [&str; 2] = ["http", "https"];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[non_exhaustive]
 pub enum FormMethod {
@@ -92,13 +96,6 @@ pub fn text(document: &str) -> String {
 
 pub(crate) fn base(document: &str) -> Option<String> {
     page::base(document)
-}
-
-fn lookup<T: Copy>(table: &[(&str, T)], name: &str) -> Option<T> {
-    table
-        .iter()
-        .find(|(key, _)| key.eq_ignore_ascii_case(name))
-        .map(|(_, value)| *value)
 }
 
 #[must_use]

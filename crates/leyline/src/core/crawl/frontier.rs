@@ -5,8 +5,8 @@ use url::{Host, Url};
 use crate::cookie::parse::registrable_domain;
 use crate::core::config::{Origin, normal_host};
 use crate::core::robots::normalize;
+use crate::html::WEB_SCHEMES;
 
-const WEB_SCHEMES: [&str; 2] = ["http", "https"];
 const MAX_URL_BYTES: usize = 2048;
 pub(super) const MAX_DEPTH: usize = 64;
 
@@ -180,10 +180,6 @@ impl Frontier {
 
     pub(super) fn has_seen(&self, url: &Url) -> bool {
         self.seen.contains(&page_key(url))
-    }
-
-    pub(super) fn mark(&mut self, url: &Url) {
-        self.seen.insert(page_key(url));
     }
 
     pub(super) fn redirected(&mut self, url: &Url) {

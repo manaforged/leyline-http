@@ -74,13 +74,39 @@ impl Session {
         self.inner.host_limits.stats()
     }
 
+    #[cfg(feature = "html")]
     pub(crate) fn host_limits(&self) -> &crate::core::config::HostLimits {
         &self.inner.host_limits
     }
 
     #[cfg(feature = "html")]
-    pub(crate) fn with_host_limits(&self, limits: crate::core::config::HostLimits) -> Self {
-        self.derive(|inner| inner.host_limits = limits)
+    pub(crate) fn with_crawl_pace(&self, pace: crate::core::config::HostLimits) -> Self {
+        self.derive(|inner| inner.crawl_pace = Some(pace))
+    }
+
+    pub(crate) async fn admit_host(&self, url: &url::Url) -> Option<crate::core::config::HostPass> {
+        #[cfg(feature = "html")]
+        let paced = match &self.inner.crawl_pace {
+            Some(pace) => pace.admit(url).await,
+            None => None,
+        };
+        let own = self.inner.host_limits.admit(url).await;
+        #[cfg(feature = "html")]
+        let own = crate::core::config::HostPass::join(own, paced);
+        own
+    }
+
+    pub(crate) fn observe_host(
+        &self,
+        url: &url::Url,
+        status: http::StatusCode,
+        wait: Option<std::time::Duration>,
+    ) {
+        self.inner.host_limits.observe(url, status, wait);
+        #[cfg(feature = "html")]
+        if let Some(pace) = &self.inner.crawl_pace {
+            pace.observe(url, status, wait);
+        }
     }
 
     #[cfg(feature = "html")]

@@ -58,7 +58,7 @@ println!("{}", crawl.stats());
 | `respect(Respect)` | none | `Robots` obeys robots.txt `Disallow` and `Crawl-delay`, the page's `noindex` and `nofollow`, and `rel="nofollow"`. `AiTraining` does all of that and also obeys the site's AI-training opt-outs |
 | `scope(Scope)` | `Host` | `Host`: the seed's host. `Domain`: its registrable domain. `Prefix`: its host and directory |
 | `limit(n)` | none | Stops after `n` kept pages |
-| `host_limits(HostLimits)` | the session's, with one in flight, one a second, and a 429/503 pause per host wherever the session's leave them unset | Paces each host. The value is used as given; `HostLimits::new()` has no limits |
+| `host_limits(HostLimits)` | one in flight, one a second, and a 429/503 pause per host, wherever the session's own limits leave them unset | The crawl's pace per host, on top of the session's own limits, which every crawl and request of the session share. The value is used as given; `HostLimits::new()` adds no limits |
 
 The crawl reads each site's robots.txt once, and again after 24 hours, for
 its `Sitemap` lines; it obeys the rest only with `respect`. Robots groups are
@@ -80,8 +80,10 @@ For each URL, in order, the crawl:
    or a `Content-Usage` line (the IETF
    [aipref draft](https://datatracker.ietf.org/doc/draft-ietf-aipref-attach/)).
 3. Sends the request without following redirects. A redirect is queued like
-   a link, so its target passes the same checks; a redirected seed adds the
-   scope of its target. A chain longer than five redirects is skipped.
+   a link, so its target passes the same checks; a seed redirected to
+   another host of the same site adds the scope of its target, and a seed
+   redirected to another site yields only that page. A chain longer than
+   five redirects is skipped.
 4. Skips a block page (`Response::block()`), an error status, and a response
    whose `Content-Type` is not HTML. A response without a `Content-Type` is
    kept when its body starts like HTML, by the
@@ -91,9 +93,12 @@ For each URL, in order, the crawl:
    skips links marked `rel="nofollow"`.
 6. With `respect`, skips a `noindex` page. With `Respect::AiTraining`, it
    also skips a `noai` page and a page whose `Content-Usage` header refuses
-   AI training. `noai` is a convention some sites use, not a standard. It
-   skips a page whose canonical URL, when that URL is in scope, was kept
-   before, or whose text, compared word by word, matches a kept page.
+   AI training. `noai` is a convention some sites use, not a standard. A
+   page that names another in-scope page as its canonical URL waits until
+   the crawl has that page: it is dropped when the canonical page is kept,
+   and kept when the canonical page is skipped or cannot be fetched. A page
+   of 20 words or more is skipped when its text, compared word by word,
+   matches a kept page.
 
 The crawl reads the sitemaps that each site's robots.txt lists, or
 `/sitemap.xml` when it lists none (and, with `respect`, when robots.txt
@@ -245,6 +250,10 @@ read only the group for every crawler. The rules follow RFC 9309:
 | 2xx | `Parsed` | The rules of the matching groups |
 | 4xx | `Unavailable` | Every path is allowed |
 | 5xx, or the request failed | `Unreachable` | Every path is disallowed |
+
+A crawl that finds robots.txt `Unreachable` holds that site's pages and reads
+robots.txt again after 5 and then 10 seconds; only after the third failure
+does it skip the site.
 
 Up to five redirects are followed, and the rules apply to the origin you
 asked about. The first 512 KiB of the file are parsed. `Session::robots`

@@ -54,6 +54,8 @@ pub use response::{
 };
 pub use retry::{RetryPolicy, RetryTrigger, WaitFormat};
 pub use robots::{Purpose, Robots, RobotsSource};
+#[cfg(feature = "html")]
+pub(crate) use robots::{lookup, product_token};
 #[cfg(feature = "tower")]
 pub use service::LeylineService;
 #[cfg(feature = "websocket")]

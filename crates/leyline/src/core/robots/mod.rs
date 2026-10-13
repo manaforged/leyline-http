@@ -55,7 +55,7 @@ impl Purpose {
     }
 }
 
-fn lookup<T: Copy>(table: &[(&str, T)], key: &str) -> Option<T> {
+pub(crate) fn lookup<T: Copy>(table: &[(&str, T)], key: &str) -> Option<T> {
     table
         .iter()
         .find(|(name, _)| name.eq_ignore_ascii_case(key.trim()))
@@ -131,17 +131,20 @@ enum Agent {
 
 impl Agent {
     fn parse(token: &str) -> Option<Agent> {
-        let token = token.trim();
-        if token == ANY_AGENT {
+        if token.trim() == ANY_AGENT {
             return Some(Agent::Any);
         }
-        let name: String = token
-            .chars()
-            .take_while(|c| c.is_ascii_alphabetic() || matches!(c, '_' | '-'))
-            .map(|c| c.to_ascii_lowercase())
-            .collect();
+        let name = product_token(token).to_ascii_lowercase();
         (!name.is_empty()).then_some(Agent::Named(name))
     }
+}
+
+pub(crate) fn product_token(agent: &str) -> &str {
+    let agent = agent.trim();
+    let end = agent
+        .find(|c: char| !(c.is_ascii_alphabetic() || matches!(c, '_' | '-')))
+        .unwrap_or(agent.len());
+    &agent[..end]
 }
 
 #[derive(Default)]

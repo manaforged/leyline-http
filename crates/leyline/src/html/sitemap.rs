@@ -1,6 +1,6 @@
 use super::entity::decode;
-use super::lookup;
 use super::scan::Scanner;
+use super::{WEB_SCHEMES, lookup};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Field {
@@ -9,8 +9,6 @@ enum Field {
 }
 
 const FIELDS: [(&str, Field); 2] = [("loc", Field::Loc), ("sitemapindex", Field::Index)];
-
-const TEXT_SCHEMES: [&str; 2] = ["http://", "https://"];
 
 impl Field {
     fn of(name: &str) -> Option<Field> {
@@ -49,8 +47,10 @@ fn plain(document: &str) -> Sitemap {
     let locs = document
         .lines()
         .map(str::trim)
-        // complexity: bounded by the two URL schemes in TEXT_SCHEMES
-        .filter(|line| TEXT_SCHEMES.iter().any(|scheme| line.starts_with(scheme)))
+        .filter(|line| {
+            line.split_once("://")
+                .is_some_and(|(scheme, _)| WEB_SCHEMES.contains(&scheme))
+        })
         .map(str::to_owned)
         .collect();
     Sitemap { index: false, locs }

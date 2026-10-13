@@ -95,3 +95,31 @@ async fn a_crawl_reads_every_sitemap_form_and_only_the_ones_it_may() {
         assert!(!sent.contains(never), "{never} was requested");
     }
 }
+
+#[tokio::test]
+async fn a_crawl_ends_at_its_limit_without_waiting_for_sitemaps() {
+    let server = TestServer::http(|request| match request.target.as_str() {
+        "/sitemap.xml" => TestResponse::new(200)
+            .body("<urlset></urlset>")
+            .delay(Duration::from_secs(10)),
+        "/" => html(r#"<p>home</p><a href="/a">A</a>"#),
+        _ => html("<p>a</p>"),
+    })
+    .await
+    .unwrap();
+    let mut crawl = Session::new()
+        .crawl(server.url("/"))
+        .limit(2)
+        .host_limits(leyline::HostLimits::new());
+    let ended = tokio::time::timeout(Duration::from_secs(5), async {
+        let mut pages = 0;
+        while let Some(page) = crawl.next().await {
+            page.unwrap();
+            pages += 1;
+        }
+        pages
+    })
+    .await;
+    assert_eq!(ended, Ok(2));
+    assert!(targets(&server).await.contains("/sitemap.xml"));
+}

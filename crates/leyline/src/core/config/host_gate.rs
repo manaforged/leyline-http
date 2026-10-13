@@ -34,6 +34,20 @@ pub(crate) struct HostPass {
     pub(super) _permit: Option<OwnedSemaphorePermit>,
     pub(super) _total: Option<OwnedSemaphorePermit>,
     pub(super) _gate: Arc<HostGate>,
+    pub(super) _also: Option<Box<HostPass>>,
+}
+
+impl HostPass {
+    #[cfg(feature = "html")]
+    pub(crate) fn join(first: Option<HostPass>, second: Option<HostPass>) -> Option<HostPass> {
+        match (first, second) {
+            (Some(mut first), Some(second)) => {
+                first._also = Some(Box::new(second));
+                Some(first)
+            }
+            (first, second) => first.or(second),
+        }
+    }
 }
 
 #[derive(Debug, Default)]
