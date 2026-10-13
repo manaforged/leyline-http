@@ -24,7 +24,7 @@ use visit::Held;
 use crate::core::config::{HostLimits, Origin};
 use crate::core::error::{Error, Kind, Result};
 use crate::core::into_url::IntoUrl;
-use crate::core::retry::RetryPolicy;
+use crate::core::retry::{RetryPolicy, RetryTrigger};
 use crate::core::robots::{Purpose, Robots};
 use crate::core::session::Session;
 
@@ -32,6 +32,12 @@ const ANY_AGENT: &str = "*";
 const NOFOLLOW: &str = "nofollow";
 const MAX_REDIRECTS: usize = 5;
 const PAGE_RETRIES: u32 = 2;
+const PAGE_RETRY_ON: [RetryTrigger; 4] = [
+    RetryTrigger::ConnectionError,
+    RetryTrigger::Timeout,
+    RetryTrigger::Status(502),
+    RetryTrigger::Status(504),
+];
 const MIN_PRINT_WORDS: usize = 20;
 const MAX_IN_FLIGHT: usize = 16;
 const POLITE_IN_FLIGHT: usize = 1;
@@ -81,6 +87,7 @@ pub struct Crawl {
     sitemap_queue: VecDeque<SitemapFile>,
     sitemaps_in_flight: usize,
     trusted: Option<Url>,
+    plain: Session,
     page_retry: RetryPolicy,
     waking: Option<tokio::time::Instant>,
     holding: usize,
@@ -123,6 +130,7 @@ impl Session {
             sitemap_queue: VecDeque::new(),
             sitemaps_in_flight: 0,
             trusted: None,
+            plain: self.clone(),
             page_retry: RetryPolicy::none(),
             waking: None,
             holding: 0,
@@ -201,12 +209,15 @@ impl Crawl {
             Some(_) => pace,
             None => pace.without_floors(),
         };
+        self.plain = self.session.clone();
         self.session = self.session.with_crawl_pace(pace.clone());
         self.page_retry = self
             .session
             .default_retry()
             .clone()
-            .or(RetryPolicy::transient().max_retries(PAGE_RETRIES));
+            .or(RetryPolicy::transient()
+                .retry_on(PAGE_RETRY_ON)
+                .max_retries(PAGE_RETRIES));
         self.pace = pace;
         for seed in std::mem::take(&mut self.seeds) {
             match seed {
@@ -278,11 +289,19 @@ impl Crawl {
             hops: queued.hops + 1,
             seed,
             widen,
+            attempts: 0,
             chain,
         });
-        if seen && !admitted {
-            self.stats.skip(SkipReason::Duplicate);
+        match (admitted, seen) {
+            (false, true) => self.stats.skip(SkipReason::Duplicate),
+            (false, false) => self.stats.skip(SkipReason::Scope),
+            (true, _) => {}
         }
+    }
+
+    fn later(&mut self, mut queued: Queued) {
+        queued.attempts += 1;
+        self.frontier.push_back(queued);
     }
 
     fn handle(&mut self, event: Event) {
@@ -311,6 +330,10 @@ impl Crawl {
                         self.redirect(queued, to);
                         return self.forward(key, target);
                     }
+                    Ok(Fetched::Later) if queued.attempts < PAGE_RETRIES as u8 => {
+                        return self.later(queued);
+                    }
+                    Ok(Fetched::Later) => self.stats.skip(SkipReason::Status),
                     Ok(Fetched::Skip(reason)) => self.stats.skip(reason),
                     Ok(Fetched::Page(loaded)) => self.page(queued.depth, *loaded),
                 }

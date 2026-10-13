@@ -34,6 +34,7 @@ pub(super) fn listed(site: &Url, robots: &Robots, obey: bool) -> Vec<Url> {
 pub(super) enum SitemapRead {
     Found(Sitemap),
     Moved(Url),
+    Failed,
 }
 
 pub(super) async fn read(
@@ -42,13 +43,12 @@ pub(super) async fn read(
     retry: RetryPolicy,
     trusted: Option<Url>,
 ) -> SitemapRead {
-    let empty = SitemapRead::Found(Sitemap::default());
     let Ok(response) = request(&session, &url, retry, trusted)
         .stream()
         .send()
         .await
     else {
-        return empty;
+        return SitemapRead::Failed;
     };
     if response.status().is_redirection() {
         return match response
@@ -56,17 +56,19 @@ pub(super) async fn read(
             .and_then(|to| url.join(to).ok())
         {
             Some(to) => SitemapRead::Moved(to),
-            None => empty,
+            None => SitemapRead::Failed,
         };
     }
     if !response.status().is_success() {
-        return empty;
+        return SitemapRead::Failed;
     }
     let Ok(bytes) = response.read_until(MAX_BYTES, |_, _| false).await else {
-        return empty;
+        return SitemapRead::Failed;
     };
     let bytes = if bytes.starts_with(&GZIP_MAGIC) {
-        let plain = gunzip(&bytes);
+        let Some(plain) = gunzip(&bytes) else {
+            return SitemapRead::Failed;
+        };
         drop(bytes);
         plain
     } else {
@@ -77,17 +79,18 @@ pub(super) async fn read(
     SitemapRead::Found(html::sitemap(&text))
 }
 
-fn gunzip(bytes: &[u8]) -> Vec<u8> {
+fn gunzip(bytes: &[u8]) -> Option<Vec<u8>> {
     let mut out = Vec::new();
     let limit = Some(MAX_BYTES as u64);
-    let Ok(mut decoder) = Decoder::capped(Some(GZIP), &CompressionConfig::new(), limit) else {
-        return out;
-    };
+    let mut decoder = Decoder::capped(Some(GZIP), &CompressionConfig::new(), limit).ok()?;
     let decoded = decoder
         .feed(bytes, &mut out)
         .and_then(|()| decoder.finish(&mut out));
-    if let Err(err) = decoded {
-        tracing::debug!(%err, kept = out.len(), "sitemap gzip ended early");
+    match decoded {
+        Ok(()) => Some(out),
+        Err(err) => {
+            tracing::debug!(%err, "sitemap gzip did not finish");
+            None
+        }
     }
-    out
 }

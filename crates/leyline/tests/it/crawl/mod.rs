@@ -1,5 +1,6 @@
 mod copies;
 mod defaults;
+mod limits;
 mod links;
 mod pace;
 mod rules;
@@ -32,4 +33,11 @@ pub(super) async fn page_targets(server: &TestServer) -> BTreeSet<String> {
     sent.remove("/robots.txt");
     sent.remove("/sitemap.xml");
     sent
+}
+
+pub(super) fn gzip(text: &str) -> Vec<u8> {
+    use std::io::Write;
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder.write_all(text.as_bytes()).unwrap();
+    encoder.finish().unwrap()
 }

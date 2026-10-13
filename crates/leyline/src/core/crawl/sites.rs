@@ -5,6 +5,8 @@ use tokio::time::Instant;
 use url::Url;
 
 use super::frontier::{Queued, page_key, same_site};
+use futures_util::stream::FuturesUnordered;
+
 use super::sitemap::SitemapRead;
 use super::{ANY_AGENT, Crawl, Event, MAX_IN_FLIGHT, SkipReason, Task, sitemap};
 use crate::core::config::{Origin, normalize_host};
@@ -44,6 +46,7 @@ impl Crawl {
         if self.session.is_shut_down() {
             self.frontier.clear();
             self.sitemap_queue.clear();
+            self.tasks = FuturesUnordered::new();
             return;
         }
         while self.active() < MAX_IN_FLIGHT {
@@ -76,9 +79,13 @@ impl Crawl {
                 _ => None,
             };
             match known {
-                None if self.respect.is_none() => {
+                None if self.respect.is_none() && self.active() + 1 < MAX_IN_FLIGHT => {
                     self.read_robots(origin.clone(), queued.url.clone());
                     self.fetch(origin, queued);
+                }
+                None if self.respect.is_none() => {
+                    self.frontier.push_front(queued);
+                    break;
                 }
                 None => {
                     self.read_robots(origin, queued.url.clone());
@@ -95,8 +102,7 @@ impl Crawl {
     }
 
     fn active(&self) -> usize {
-        let parked = self.pace.parked() + self.session.host_limits().parked();
-        self.tasks.len().saturating_sub(parked)
+        self.tasks.len()
     }
 
     fn wake_later(&mut self) {
@@ -129,7 +135,10 @@ impl Crawl {
     }
 
     fn robots_task(&self, origin: Origin, url: Url) -> Task {
-        let session = self.session.clone();
+        let session = match self.respect {
+            Some(_) => self.session.clone(),
+            None => self.plain.clone(),
+        };
         let trusted = self.trusted.clone();
         let retry = match self.respect {
             Some(_) => RetryPolicy::transient()
@@ -167,6 +176,7 @@ impl Crawl {
         if self.respect.is_some() {
             let gap = robots.crawl_delay().map(|gap| gap.min(MAX_CRAWL_DELAY));
             self.pace.set_floor(&url, gap);
+            self.pace.set_floor(&self.session.upgraded(&url), gap);
         }
         self.sites
             .insert(origin, Site::Ready(robots, Instant::now()));
@@ -249,6 +259,7 @@ impl Crawl {
         let found = match read {
             SitemapRead::Found(found) => found,
             SitemapRead::Moved(to) => return self.queue_sitemap(to, Some(url)),
+            SitemapRead::Failed => return self.stats.error(),
         };
         for loc in found.locs.iter().filter_map(|loc| Url::parse(loc).ok()) {
             if found.index {

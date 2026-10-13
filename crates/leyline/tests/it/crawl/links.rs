@@ -105,3 +105,21 @@ async fn a_crawl_sniffs_html_that_breaks_its_first_tag_with_a_newline() {
     }
     assert!(kept.contains("/bare"), "{kept:?}");
 }
+
+#[tokio::test]
+async fn a_crawl_sniffs_html_that_starts_with_a_comment() {
+    let server = TestServer::http(|request| match request.target.as_str() {
+        "/" => html(r#"<a href="/bare">B</a>"#),
+        _ => TestResponse::new(200).body("<!--generated--><p>no content type</p>"),
+    })
+    .await
+    .unwrap();
+    let mut crawl = Session::new()
+        .crawl(server.url("/"))
+        .host_limits(leyline::HostLimits::new());
+    let mut kept = BTreeSet::new();
+    while let Some(page) = crawl.next().await {
+        kept.insert(page.unwrap().url().path().to_owned());
+    }
+    assert!(kept.contains("/bare"), "{kept:?}");
+}

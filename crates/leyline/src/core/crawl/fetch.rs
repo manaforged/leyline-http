@@ -30,6 +30,11 @@ const HTML_SIGNATURES: [&[u8]; 17] = [
     b"<!--",
 ];
 const SNIFF_WHITESPACE: [u8; 5] = [b'\t', b'\n', 0x0c, b'\r', b' '];
+pub(super) const LATER: [StatusCode; 2] = [
+    StatusCode::TOO_MANY_REQUESTS,
+    StatusCode::SERVICE_UNAVAILABLE,
+];
+const COMMENT: &[u8] = b"<!--";
 const TAG_ENDS: [u8; 6] = [b'\t', b'\n', 0x0c, b'\r', b' ', b'>'];
 const SNIFF_BYTES: usize = 512;
 const MAX_UNTYPED_BYTES: usize = 8 * 1024 * 1024;
@@ -39,6 +44,7 @@ const KEPT_HEADERS: [HeaderName; 2] = [X_ROBOTS_TAG, CONTENT_USAGE];
 
 pub(super) enum Fetched {
     Redirect { to: Url },
+    Later,
     Skip(SkipReason),
     Page(Box<Loaded>),
 }
@@ -65,7 +71,7 @@ fn sniffs_html(body: &[u8]) -> bool {
     HTML_SIGNATURES.iter().any(|signature| {
         start.len() > signature.len()
             && start[..signature.len()].eq_ignore_ascii_case(signature)
-            && TAG_ENDS.contains(&start[signature.len()])
+            && (*signature == COMMENT || TAG_ENDS.contains(&start[signature.len()]))
     })
 }
 
@@ -115,6 +121,9 @@ pub(super) async fn fetch(
     }
     if response.block().is_some() {
         return Ok(Fetched::Skip(SkipReason::Blocked));
+    }
+    if LATER.contains(&status) {
+        return Ok(Fetched::Later);
     }
     if !status.is_success() {
         return Ok(Fetched::Skip(SkipReason::Status));

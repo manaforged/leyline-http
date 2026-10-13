@@ -200,3 +200,28 @@ async fn a_crawl_does_not_follow_a_sitemap_redirect_past_robots() {
     }
     assert!(!targets(&server).await.contains("/private/map.xml"));
 }
+
+#[tokio::test]
+async fn a_crawl_counts_a_failed_sitemap_and_skips_a_cut_gzip() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let robots = format!("User-agent: *\nSitemap: {base}/broken.xml\nSitemap: {base}/cut.xml.gz\n");
+    let full = gzip(&format!(
+        "<urlset><url><loc>{base}/listed</loc></url></urlset>"
+    ));
+    let cut = full[..full.len() - 12].to_vec();
+    let server = TestServer::http_on(listener, move |request| match request.target.as_str() {
+        "/robots.txt" => TestResponse::new(200).body(robots.clone()),
+        "/broken.xml" => TestResponse::new(500),
+        "/cut.xml.gz" => TestResponse::new(200).body(cut.clone()),
+        path => html(&format!("<p>{path}</p>")),
+    })
+    .unwrap();
+    let mut crawl = Session::new()
+        .crawl(server.url("/"))
+        .host_limits(leyline::HostLimits::new());
+    while let Some(page) = crawl.next().await {
+        page.unwrap();
+    }
+    assert_eq!(crawl.stats().errors(), 2);
+}

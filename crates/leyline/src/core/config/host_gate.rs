@@ -111,6 +111,7 @@ impl Gates {
 pub(super) struct HostGate {
     pub(super) slots: Option<Arc<Semaphore>>,
     last: Mutex<Option<Instant>>,
+    quiet: Mutex<Instant>,
     paused: Mutex<Instant>,
     pub(super) in_flight: Arc<AtomicUsize>,
     pub(super) waiting: Arc<AtomicUsize>,
@@ -121,6 +122,7 @@ impl HostGate {
         Self {
             slots: max_in_flight.map(|n| Arc::new(Semaphore::new(n))),
             last: Mutex::new(None),
+            quiet: Mutex::new(Instant::now()),
             paused: Mutex::new(Instant::now()),
             in_flight: Arc::default(),
             waiting: Arc::default(),
@@ -134,6 +136,8 @@ impl HostGate {
             return false;
         }
         *last = Some(now);
+        let mut quiet = self.quiet.lock().unwrap_or_else(PoisonError::into_inner);
+        *quiet = (*quiet).max(spaced_until(*last, interval, now));
         true
     }
 
@@ -150,9 +154,8 @@ impl HostGate {
     }
 
     pub(super) fn busy_after(&self, now: Instant) -> bool {
-        let last = *self.last.lock().unwrap_or_else(PoisonError::into_inner);
-        let recent = last.is_some_and(|last| now.saturating_duration_since(last) < MAX_SPACING);
-        recent || self.paused_until() > now
+        *self.quiet.lock().unwrap_or_else(PoisonError::into_inner) > now
+            || self.paused_until() > now
     }
 
     pub(super) fn paused_until(&self) -> Instant {

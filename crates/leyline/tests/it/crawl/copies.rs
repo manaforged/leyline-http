@@ -199,3 +199,31 @@ async fn held_aliases_count_toward_the_page_limit() {
     assert_eq!(pages, 3);
     assert_eq!(crawl.stats().requests(), 3);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_canonical_page_that_redirects_back_to_its_alias_ends_the_crawl() {
+    let server = TestServer::http(|request| match request.target.as_str() {
+        "/" => html(r#"<a href="/alias">A</a>"#),
+        "/alias" => html(r#"<link rel="canonical" href="/canonical"><p>loop</p>"#),
+        "/canonical" => TestResponse::new(301).header("location", "/alias"),
+        _ => TestResponse::new(404),
+    })
+    .await
+    .unwrap();
+    let crawl = Session::new()
+        .crawl(server.url("/"))
+        .host_limits(leyline::HostLimits::new());
+    let run = tokio::spawn(async move {
+        let mut crawl = crawl;
+        let mut kept = BTreeSet::new();
+        while let Some(page) = crawl.next().await {
+            kept.insert(page.unwrap().url().path().to_owned());
+        }
+        kept
+    });
+    let kept = tokio::time::timeout(Duration::from_secs(5), run)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(kept, BTreeSet::from(["/", "/alias"].map(String::from)));
+}

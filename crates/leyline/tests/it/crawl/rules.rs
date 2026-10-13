@@ -86,13 +86,6 @@ async fn a_crawl_for_ai_training_obeys_content_signals() {
     crawl.next().await.unwrap().unwrap();
 }
 
-fn gzip(text: &str) -> Vec<u8> {
-    use std::io::Write;
-    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-    encoder.write_all(text.as_bytes()).unwrap();
-    encoder.finish().unwrap()
-}
-
 #[tokio::test]
 async fn a_crawl_reads_sitemaps_from_robots_and_indexes() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();

@@ -80,10 +80,11 @@ pub enum SkipReason {
     NoAi,
     Duplicate,
     Redirects,
+    Scope,
 }
 
 impl SkipReason {
-    const ALL: [SkipReason; 9] = [
+    const ALL: [SkipReason; 10] = [
         SkipReason::Robots,
         SkipReason::Signal,
         SkipReason::Status,
@@ -93,6 +94,7 @@ impl SkipReason {
         SkipReason::NoAi,
         SkipReason::Duplicate,
         SkipReason::Redirects,
+        SkipReason::Scope,
     ];
 
     #[must_use]
@@ -107,6 +109,7 @@ impl SkipReason {
             SkipReason::NoAi => "noai",
             SkipReason::Duplicate => "duplicate",
             SkipReason::Redirects => "redirects",
+            SkipReason::Scope => "scope",
         }
     }
 }

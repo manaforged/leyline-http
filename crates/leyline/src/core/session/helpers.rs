@@ -80,17 +80,22 @@ impl Session {
     }
 
     #[cfg(feature = "html")]
+    pub(crate) fn upgraded(&self, url: &url::Url) -> url::Url {
+        url::Url::clone(&self.hsts_upgrade(&std::sync::Arc::new(url.clone())))
+    }
+
+    #[cfg(feature = "html")]
     pub(crate) fn with_crawl_pace(&self, pace: crate::core::config::HostLimits) -> Self {
         self.derive(|inner| inner.crawl_pace = Some(pace))
     }
 
     pub(crate) async fn admit_host(&self, url: &url::Url) -> Option<crate::core::config::HostPass> {
+        let own = self.inner.host_limits.admit(url).await;
         #[cfg(feature = "html")]
         let paced = match &self.inner.crawl_pace {
             Some(pace) => pace.admit(url).await,
             None => None,
         };
-        let own = self.inner.host_limits.admit(url).await;
         #[cfg(feature = "html")]
         let own = crate::core::config::HostPass::join(own, paced);
         own

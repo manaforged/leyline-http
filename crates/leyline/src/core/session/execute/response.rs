@@ -73,7 +73,7 @@ impl Session {
         }
     }
 
-    pub(super) fn hsts_upgrade(&self, url: &Arc<Url>) -> Arc<Url> {
+    pub(in crate::core::session) fn hsts_upgrade(&self, url: &Arc<Url>) -> Arc<Url> {
         lock(&self.inner.pool.hsts)
             .upgrade(url, SystemTime::now())
             .map_or_else(|| Arc::clone(url), Arc::new)

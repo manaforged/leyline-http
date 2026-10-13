@@ -171,3 +171,45 @@ async fn a_prefix_crawl_keeps_a_dotted_directory_as_its_prefix() {
     assert!(sent.contains("/v2.0/page"));
     assert!(!sent.contains("/other"));
 }
+
+#[tokio::test]
+async fn a_prefix_crawl_keeps_a_named_dotted_directory_as_its_prefix() {
+    let server = TestServer::http(|request| match request.target.as_str() {
+        "/docs.old" => html(r#"<a href="/docs.old/page">P</a><a href="/other">O</a>"#),
+        _ => html("<p>page</p>"),
+    })
+    .await
+    .unwrap();
+    let mut crawl = Session::new()
+        .crawl(server.url("/docs.old"))
+        .scope(Scope::Prefix)
+        .host_limits(leyline::HostLimits::new());
+    while let Some(page) = crawl.next().await {
+        page.unwrap();
+    }
+    let sent = page_targets(&server).await;
+    assert!(sent.contains("/docs.old/page"));
+    assert!(!sent.contains("/other"));
+}
+
+#[tokio::test]
+async fn a_crawl_counts_a_redirect_that_leaves_its_scope() {
+    let other = TestServer::http(|_| html("<p>elsewhere</p>"))
+        .await
+        .unwrap();
+    let away = format!("http://localhost:{}/x", other.addr().port());
+    let server = TestServer::http(move |request| match request.target.as_str() {
+        "/" => html(r#"<a href="/out">O</a>"#),
+        "/out" => TestResponse::new(302).header("location", away.as_str()),
+        _ => TestResponse::new(404),
+    })
+    .await
+    .unwrap();
+    let mut crawl = Session::new()
+        .crawl(server.url("/"))
+        .host_limits(leyline::HostLimits::new());
+    while let Some(page) = crawl.next().await {
+        page.unwrap();
+    }
+    assert_eq!(crawl.stats().skipped(SkipReason::Scope), 1);
+}

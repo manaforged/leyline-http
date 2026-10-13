@@ -133,16 +133,24 @@ impl Crawl {
         if waiting.is_empty() {
             return;
         }
-        for held in &waiting {
+        let (cycle, onward): (Vec<Held>, Vec<Held>) =
+            waiting.into_iter().partition(|held| held.own == to);
+        for held in cycle {
+            self.holding -= 1;
+            self.waiting_on.remove(&held.own);
+            self.keep(held);
+        }
+        for held in &onward {
             self.waiting_on.insert(held.own.clone(), to.clone());
         }
-        self.held.entry(to.clone()).or_default().extend(waiting);
+        self.held.entry(to.clone()).or_default().extend(onward);
         if self.settled.contains(&to) {
             self.settle(to);
         }
     }
 
     pub(super) fn release_held(&mut self) -> bool {
+        self.waiting_on.clear();
         let keys: Vec<String> = self.held.keys().cloned().collect();
         for key in &keys {
             self.settle(key.clone());

@@ -250,16 +250,6 @@ impl HostLimits {
     }
 
     #[cfg(feature = "html")]
-    pub(crate) fn parked(&self) -> usize {
-        self.gates
-            .by_origin
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .values()
-            .map(|gate| gate.waiting.load(Ordering::Relaxed))
-            .sum()
-    }
-
     fn interval_for(&self, origin: &Origin, rule: Rule) -> Option<Duration> {
         let floor = self.floors.then(|| self.gates.floor(origin)).flatten();
         rule.interval.max(floor)

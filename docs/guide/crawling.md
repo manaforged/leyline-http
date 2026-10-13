@@ -258,11 +258,13 @@ read only the group for every crawler. The rules follow RFC 9309:
 | 4xx | `Unavailable` | Every path is allowed |
 | 5xx, or the request failed | `Unreachable` | Every path is disallowed |
 
-Every request a crawl sends carries the session's credentials, such as
-`bearer_auth` and default headers, only to the seed's origin; requests to
-other hosts go without them. A host that is paused or waiting for its next
-turn holds no crawl slot. A request that waits inside a host's limits after
-a retry does not count toward the 16.
+A crawl sends the session's `Authorization` header (including
+`bearer_auth`) and its cookie header only to the seed's origin; requests to
+other hosts go without them. Other default headers go to every host, so do not
+put a credential in a custom default header for a crawl. A host that is paused
+or waiting for its next turn holds no crawl slot: a page that gets 429 or 503
+goes back in the queue until the host's pause ends. A redirect that leaves the
+scope counts as `SkipReason::Scope`.
 
 A crawl that obeys robots rules holds a site's pages until its robots.txt is
 read, and retries an unreachable robots.txt four times, 1, 2, 4, and 8

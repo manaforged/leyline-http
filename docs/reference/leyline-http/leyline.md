@@ -1588,6 +1588,7 @@ Requires feature `html`.
 | <code>NotHtml</code> | Requires feature `html`. |
 | <code>Redirects</code> | Requires feature `html`. |
 | <code>Robots</code> | Requires feature `html`. |
+| <code>Scope</code> | Requires feature `html`. |
 | <code>Signal</code> | Requires feature `html`. |
 | <code>Status</code> | Requires feature `html`. |
 
