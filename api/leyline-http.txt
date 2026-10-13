@@ -1138,6 +1138,7 @@ impl core::marker::StructuralPartialEq for leyline::RobotsSource
 #[cfg(feature = "html")] pub leyline::SkipReason::NotHtml
 #[cfg(feature = "html")] pub leyline::SkipReason::Redirects
 #[cfg(feature = "html")] pub leyline::SkipReason::Robots
+#[cfg(feature = "html")] pub leyline::SkipReason::Scope
 #[cfg(feature = "html")] pub leyline::SkipReason::Signal
 #[cfg(feature = "html")] pub leyline::SkipReason::Status
 #[cfg(feature = "html")] impl leyline::SkipReason
