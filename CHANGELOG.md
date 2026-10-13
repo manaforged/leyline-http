@@ -10,6 +10,11 @@ version and publish as separate crates.
 
 ## Unreleased
 
+### Added
+
+- A Firefox 158 profile, `Browser::Firefox158`, from captures of Firefox 158.0
+  on macOS, Linux, and Windows.
+
 ### Changed
 
 - `leyline-bssl-sys` compiles BoringSSL with the `cc` crate from the source
