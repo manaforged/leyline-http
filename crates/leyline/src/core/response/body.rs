@@ -32,10 +32,22 @@ impl Response {
         Ok(String::from_utf8_lossy(&self.bytes().await?).into_owned())
     }
 
+    #[cfg(any(feature = "charset", feature = "html"))]
+    fn content_type(&self) -> Option<(&str, &str)> {
+        let ct = self.header("content-type")?;
+        let (media, params) = ct.split_once(';').unwrap_or((ct, ""));
+        Some((media.trim(), params))
+    }
+
+    #[cfg(feature = "html")]
+    pub(crate) fn media_type(&self) -> Option<&str> {
+        self.content_type().map(|(media, _)| media)
+    }
+
     #[cfg(feature = "charset")]
     fn charset_label(&self) -> Option<&str> {
-        let ct = self.header("content-type")?;
-        ct.split(';').skip(1).find_map(|param| {
+        let (_, params) = self.content_type()?;
+        params.split(';').find_map(|param| {
             let (k, v) = param.split_once('=')?;
             k.trim()
                 .eq_ignore_ascii_case("charset")

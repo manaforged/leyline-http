@@ -178,7 +178,7 @@ impl Session {
         loop {
             journey.url = self.hsts_upgrade(&journey.url);
             drop(pass.take());
-            pass = self.inner.host_limits.admit(&journey.url).await;
+            pass = self.admit_host(&journey.url).await;
             let headers = self.leg_headers(&journey, preset, header_order);
             journey.authorized = None;
             let audit_headers = self.audit_copy(&headers);

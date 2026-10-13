@@ -93,6 +93,10 @@ pub(crate) struct SessionInner {
     base_url: Option<Url>,
     languages: Option<Vec<String>>,
     host_limits: crate::core::config::HostLimits,
+    #[cfg(feature = "html")]
+    crawl_limits: Arc<std::sync::OnceLock<crate::core::config::HostLimits>>,
+    #[cfg(feature = "html")]
+    crawl_pace: Option<crate::core::config::HostLimits>,
     proxy_pool: Option<crate::core::proxy_pool::ProxyPool>,
     trace: Option<Arc<dyn crate::trace::Trace>>,
     #[expect(

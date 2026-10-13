@@ -74,8 +74,56 @@ impl Session {
         self.inner.host_limits.stats()
     }
 
+    #[cfg(feature = "html")]
     pub(crate) fn host_limits(&self) -> &crate::core::config::HostLimits {
         &self.inner.host_limits
+    }
+
+    #[cfg(feature = "html")]
+    pub(crate) fn upgraded(&self, url: &url::Url) -> url::Url {
+        url::Url::clone(&self.hsts_upgrade(&std::sync::Arc::new(url.clone())))
+    }
+
+    #[cfg(feature = "html")]
+    pub(crate) fn with_crawl_pace(&self, pace: crate::core::config::HostLimits) -> Self {
+        self.derive(|inner| inner.crawl_pace = Some(pace))
+    }
+
+    pub(crate) async fn admit_host(&self, url: &url::Url) -> Option<crate::core::config::HostPass> {
+        #[cfg(feature = "html")]
+        let pace = self.inner.crawl_pace.as_ref();
+        #[cfg(not(feature = "html"))]
+        let pace = None;
+        self.inner.host_limits.admit_with(pace, url).await
+    }
+
+    #[cfg(feature = "html")]
+    pub(crate) fn shut_down_signal(&self) -> tokio_util::sync::WaitForCancellationFutureOwned {
+        self.inner.shutdown.clone().cancelled_owned()
+    }
+
+    pub(crate) fn observe_host(
+        &self,
+        url: &url::Url,
+        status: http::StatusCode,
+        wait: Option<std::time::Duration>,
+    ) {
+        self.inner.host_limits.observe(url, status, wait);
+        #[cfg(feature = "html")]
+        if let Some(pace) = &self.inner.crawl_pace {
+            pace.observe(url, status, wait);
+        }
+    }
+
+    #[cfg(feature = "html")]
+    pub(crate) fn crawl_limits(
+        &self,
+        polite: impl FnOnce() -> crate::core::config::HostLimits,
+    ) -> crate::core::config::HostLimits {
+        self.inner
+            .crawl_limits
+            .get_or_init(|| polite().armed())
+            .clone()
     }
 
     pub(crate) fn proxy_pool(&self) -> Option<&crate::core::proxy_pool::ProxyPool> {

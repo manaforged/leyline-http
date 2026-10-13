@@ -1,33 +1,13 @@
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::atomic::Ordering;
+use std::sync::{Arc, PoisonError};
 use std::time::Duration;
 
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::Instant;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct Origin {
-    scheme: String,
-    host: String,
-    port: u16,
-}
-
-impl std::fmt::Display for Origin {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}://{}:{}", self.scheme, self.host, self.port)
-    }
-}
-
-impl Origin {
-    pub(crate) fn of(url: &url::Url) -> Option<Self> {
-        Some(Self {
-            scheme: url.scheme().to_ascii_lowercase(),
-            host: url.host_str()?.trim_end_matches('.').to_ascii_lowercase(),
-            port: url.port_or_known_default()?,
-        })
-    }
-}
+use super::host::normalize_host;
+pub(crate) use super::host_gate::HostPass;
+use super::host_gate::{Count, Gates, HostGate, acquire};
+pub(crate) use super::origin::Origin;
 
 #[derive(Debug, Clone, Copy, Default)]
 struct Rule {
@@ -49,7 +29,7 @@ enum HostPattern {
 
 impl HostPattern {
     fn parse(host: &str) -> Self {
-        let host = host.trim().trim_end_matches('.').to_ascii_lowercase();
+        let host = normalize_host(host);
         match host.strip_prefix("*.") {
             Some(domain) => Self::Subdomains(domain.to_owned()),
             None => Self::Exact(host),
@@ -75,6 +55,7 @@ pub struct HostLimits {
     max_total: Option<usize>,
     pause: Pause,
     gates: Arc<Gates>,
+    floors: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -106,6 +87,7 @@ impl Default for HostLimits {
                 max: Duration::from_secs(24 * 60 * 60),
             },
             gates: Arc::default(),
+            floors: true,
         }
     }
 }
@@ -194,6 +176,77 @@ impl HostLimits {
             && self.overrides.is_empty()
             && self.max_total.is_none()
             && self.pause.statuses.is_empty()
+            && !(self.floors && self.gates.has_floors())
+    }
+
+    #[cfg(feature = "html")]
+    pub(crate) fn set_floor(&self, url: &url::Url, gap: Option<Duration>) {
+        if let Some(origin) = Origin::of(url) {
+            self.gates.set_floor(origin, gap);
+        }
+    }
+
+    #[cfg(feature = "html")]
+    pub(crate) fn filled_from(mut self, defaults: &HostLimits) -> Self {
+        for rule in
+            std::iter::once(&mut self.rule).chain(self.overrides.iter_mut().map(|(_, rule)| rule))
+        {
+            rule.max_in_flight = rule.max_in_flight.or(defaults.rule.max_in_flight);
+            rule.interval = rule.interval.or(defaults.rule.interval);
+        }
+        if self.pause.statuses.is_empty() {
+            self.pause.statuses.clone_from(&defaults.pause.statuses);
+        }
+        self
+    }
+
+    #[cfg(feature = "html")]
+    pub(crate) fn without_floors(mut self) -> Self {
+        self.floors = false;
+        self
+    }
+
+    #[cfg(feature = "html")]
+    pub(crate) fn ready(&self, origin: &Origin) -> bool {
+        self.ready_at(origin).is_none() && self.has_room(origin)
+    }
+
+    #[cfg(feature = "html")]
+    fn has_room(&self, origin: &Origin) -> bool {
+        let free = |slots: Option<&Arc<tokio::sync::Semaphore>>| {
+            slots.is_none_or(|slots| slots.available_permits() > 0)
+        };
+        let gate = self
+            .gates
+            .by_origin
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(origin)
+            .cloned();
+        free(self.gates.total.as_ref()) && gate.is_none_or(|gate| free(gate.slots.as_ref()))
+    }
+
+    #[cfg(feature = "html")]
+    pub(crate) fn ready_at(&self, origin: &Origin) -> Option<Instant> {
+        let gate = self
+            .gates
+            .by_origin
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(origin)
+            .cloned()?;
+        let interval = self.interval_for(origin, self.rule_for(&origin.host));
+        gate.ready_at(interval, Instant::now())
+    }
+
+    fn interval_for(&self, origin: &Origin, rule: Rule) -> Option<Duration> {
+        let floor = self.floors.then(|| self.gates.floor(origin)).flatten();
+        rule.interval.max(floor)
+    }
+
+    #[cfg(feature = "html")]
+    pub(crate) fn max_in_flight_for(&self, origin: &Origin) -> Option<usize> {
+        self.rule_for(&origin.host).max_in_flight
     }
 
     fn rule_for(&self, host: &str) -> Rule {
@@ -204,30 +257,77 @@ impl HostLimits {
             .map_or(self.rule, |(_, rule)| rule)
     }
 
+    #[cfg(feature = "websocket")]
     pub(crate) async fn admit(&self, url: &url::Url) -> Option<HostPass> {
-        if self.is_unlimited() {
+        self.admit_with(None, url).await
+    }
+
+    pub(crate) async fn admit_with(
+        &self,
+        extra: Option<&HostLimits>,
+        url: &url::Url,
+    ) -> Option<HostPass> {
+        let origin = Origin::of(url)?;
+        let sides: Vec<Side<'_>> = std::iter::once(self)
+            .chain(extra)
+            .filter(|limits| !limits.is_unlimited())
+            .map(|limits| limits.side(&origin))
+            .collect();
+        if sides.is_empty() {
             return None;
         }
-        let origin = Origin::of(url)?;
-        let rule = self.rule_for(&origin.host);
-        let gate = self.gates.gate(origin, rule.max_in_flight);
-        let waiting = Count::enter(&gate.waiting);
-        let permit = acquire(gate.slots.as_ref()).await;
-        let total = loop {
-            gate.wait_unpaused().await;
-            gate.wait_spacing().await;
-            let total = acquire(self.gates.total.as_ref()).await;
-            if gate.try_admit(rule.interval) {
-                break total;
+        let waiting: Vec<Count> = sides
+            .iter()
+            .map(|side| Count::enter(&side.gate.waiting))
+            .collect();
+        let mut permits = Vec::with_capacity(sides.len());
+        for side in &sides {
+            permits.push(acquire(side.gate.slots.as_ref()).await);
+        }
+        let totals = loop {
+            let now = Instant::now();
+            let due = sides
+                .iter()
+                .filter_map(|side| side.gate.ready_at(side.interval(&origin), now))
+                .max();
+            if let Some(at) = due {
+                HostGate::wait_until(at).await;
+                continue;
+            }
+            let mut totals = Vec::with_capacity(sides.len());
+            for side in &sides {
+                totals.push(acquire(side.limits.gates.total.as_ref()).await);
+            }
+            let clocks: Vec<_> = sides
+                .iter()
+                .map(|side| (side.gate.as_ref(), side.interval(&origin)))
+                .collect();
+            if HostGate::commit(&clocks) {
+                break totals;
             }
         };
         drop(waiting);
-        Some(HostPass {
-            _in_flight: Count::enter(&gate.in_flight),
-            _permit: permit,
-            _total: total,
-            _gate: gate,
-        })
+        sides.into_iter().zip(permits).zip(totals).rev().fold(
+            None,
+            |also, ((side, permit), total)| {
+                Some(HostPass {
+                    _in_flight: Count::enter(&side.gate.in_flight),
+                    _permit: permit,
+                    _total: total,
+                    _gate: side.gate,
+                    _also: also.map(Box::new),
+                })
+            },
+        )
+    }
+
+    fn side(&self, origin: &Origin) -> Side<'_> {
+        let rule = self.rule_for(&origin.host);
+        Side {
+            limits: self,
+            rule,
+            gate: self.gates.gate(origin.clone(), rule.max_in_flight),
+        }
     }
 
     pub(crate) fn stats(&self) -> Vec<HostStats> {
@@ -267,119 +367,14 @@ impl HostStats {
     }
 }
 
-struct Count(Arc<AtomicUsize>);
-
-impl Count {
-    fn enter(counter: &Arc<AtomicUsize>) -> Self {
-        counter.fetch_add(1, Ordering::Relaxed);
-        Self(Arc::clone(counter))
-    }
+struct Side<'a> {
+    limits: &'a HostLimits,
+    rule: Rule,
+    gate: Arc<HostGate>,
 }
 
-impl Drop for Count {
-    fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::Relaxed);
-    }
-}
-
-async fn acquire(slots: Option<&Arc<Semaphore>>) -> Option<OwnedSemaphorePermit> {
-    Arc::clone(slots?).acquire_owned().await.ok()
-}
-
-pub(crate) struct HostPass {
-    _in_flight: Count,
-    _permit: Option<OwnedSemaphorePermit>,
-    _total: Option<OwnedSemaphorePermit>,
-    _gate: Arc<HostGate>,
-}
-
-#[derive(Debug, Default)]
-struct Gates {
-    by_origin: Mutex<HashMap<Origin, Arc<HostGate>>>,
-    total: Option<Arc<Semaphore>>,
-}
-
-impl Gates {
-    fn new(max_total: Option<usize>) -> Self {
-        Self {
-            by_origin: Mutex::default(),
-            total: max_total.map(|n| Arc::new(Semaphore::new(n))),
-        }
-    }
-
-    fn gate(&self, origin: Origin, max_in_flight: Option<usize>) -> Arc<HostGate> {
-        let mut map = self
-            .by_origin
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        if let Some(gate) = map.get(&origin) {
-            return Arc::clone(gate);
-        }
-        let now = Instant::now();
-        map.retain(|_, gate| Arc::strong_count(gate) > 1 || gate.busy_after(now));
-        let gate = Arc::new(HostGate::new(max_in_flight));
-        map.insert(origin, Arc::clone(&gate));
-        gate
-    }
-}
-
-#[derive(Debug)]
-struct HostGate {
-    slots: Option<Arc<Semaphore>>,
-    next: Mutex<Instant>,
-    paused: Mutex<Instant>,
-    in_flight: Arc<AtomicUsize>,
-    waiting: Arc<AtomicUsize>,
-}
-
-impl HostGate {
-    fn new(max_in_flight: Option<usize>) -> Self {
-        Self {
-            slots: max_in_flight.map(|n| Arc::new(Semaphore::new(n))),
-            next: Mutex::new(Instant::now()),
-            paused: Mutex::new(Instant::now()),
-            in_flight: Arc::default(),
-            waiting: Arc::default(),
-        }
-    }
-
-    fn try_admit(&self, interval: Option<Duration>) -> bool {
-        let mut next = self.next.lock().unwrap_or_else(PoisonError::into_inner);
-        let now = Instant::now();
-        if *next > now || self.paused_until() > now {
-            return false;
-        }
-        if let Some(interval) = interval {
-            *next = now.checked_add(interval).unwrap_or(now);
-        }
-        true
-    }
-
-    async fn wait_spacing(&self) {
-        let next = *self.next.lock().unwrap_or_else(PoisonError::into_inner);
-        tokio::time::sleep_until(next).await;
-    }
-
-    fn busy_after(&self, now: Instant) -> bool {
-        *self.next.lock().unwrap_or_else(PoisonError::into_inner) > now || self.paused_until() > now
-    }
-
-    fn paused_until(&self) -> Instant {
-        *self.paused.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    fn pause_until(&self, end: Instant) {
-        let mut paused = self.paused.lock().unwrap_or_else(PoisonError::into_inner);
-        *paused = (*paused).max(end);
-    }
-
-    async fn wait_unpaused(&self) {
-        loop {
-            let end = self.paused_until();
-            if end <= Instant::now() {
-                return;
-            }
-            tokio::time::sleep_until(end).await;
-        }
+impl Side<'_> {
+    fn interval(&self, origin: &Origin) -> Option<Duration> {
+        self.limits.interval_for(origin, self.rule)
     }
 }

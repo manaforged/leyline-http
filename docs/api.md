@@ -33,6 +33,8 @@ session     Session::new()                  plain client, cannot fail
 crawl       SessionBuilder::host_limits(HostLimits) · proxy_pool(ProxyPool) · RequestBuilder::tag
             HostLimits: max_in_flight · per_second · host · max_total_in_flight · pause_on · pause_for · max_pause
             ProxyPool::identified · rotate_on_block · Session::host_stats · BlockRules::statuses
+            Session::robots(url, agent) → Robots: allows · allows_use(url, Purpose) · crawl_delay · sitemaps · source
+            Session::crawl(seed) → Crawl: respect(Respect) · ignore_robots · scope(Scope) · limit · host_limits · next → CrawlPage · stats → CrawlStats (feature `html`)
 request     session.get / post / put / patch / delete / head / request(Method, url) → RequestBuilder
 send        RequestBuilder.send() or .await → Response
             RequestBuilder.download(path, limit) → bytes written
@@ -51,7 +53,7 @@ policy      TimeoutConfig · RetryPolicy · RedirectPolicy   (session default, r
 identity    Browser · Platform · ChromiumBrand · Identity
 observe     Trace hooks · Trace::summary · trace::Metrics · trace::Fanout · Response::timing · Response::tls · Response::audit
 tower       LeylineService (feature `tower`) · relay_headers(&HeaderMap, RelayBody) · redact_url
-html        html::forms · Form::find · FormEnctype · Tab::submit_form · html::meta · html::links → Anchor (feature `html`)
+html        html::forms · Form::find · FormEnctype · Tab::submit_form · html::meta · html::links → Anchor · html::text · html::canonical · html::Directives (feature `html`)
 test        testing::TestServer::http / https / http_on · TestResponse::delay / chunks / close
             RecordedRequest: raw · request_line · header_values · header_count · text (feature `test-util`)
 ```
@@ -127,6 +129,8 @@ let resp = session
 | Cookies | `cookie::Jar`, `Jar::save_to`, `Jar::autosave` | [Cookies](guide/cookies.md) |
 | WebSocket | `Session::websocket` | [WebSocket](guide/websocket.md) |
 | HTML forms, meta, links | `html::forms`, `Form::set`, `FormEnctype`, `Tab::submit_form`, `html::meta`, `html::links` | [Log in with the page's form](guide/accounts.md#log-in-with-the-pages-form) |
+| Visible text of a page | `html::text` | [Read the text of a page](guide/crawling.md#read-the-text-of-a-page) |
+| Page robots directives, canonical URL | `html::Directives::read`, `html::canonical` | [Obey a page's own rules](guide/crawling.md#obey-a-pages-own-rules) |
 | Cancel a request | drop, `Session::shutdown` | [Cancellation](guide/cancellation.md) |
 
 ### Policy, transport, and observation
@@ -142,6 +146,8 @@ let resp = session
 | Proxies and proxy pools | `ProxyConfig`, `ProxyUrl`, `ProxyPool` | [Proxies](guide/proxies.md) |
 | Host limits, blocks, crawl metrics | `HostLimits`, `BlockRules`, `host_stats`, `trace::Metrics` | [Crawling](guide/crawling.md) |
 | Pause a host on a status | `HostLimits::pause_on`, `pause_for`, `max_pause` | [Limit each host](guide/crawling.md#limit-each-host) |
+| Read and obey robots.txt | `Session::robots`, `Robots::parse`, `Robots::allows`, `Purpose` | [Obey robots.txt](guide/crawling.md#obey-robotstxt) |
+| Crawl a site | `Session::crawl`, `Crawl`, `Respect`, `Scope`, `CrawlPage`, `CrawlStats`, `SkipReason` | [Crawl a site](guide/crawling.md#crawl-a-site) |
 | DNS, sockets, pool, Happy Eyeballs | `DnsConfig`, `SocketConfig`, `PoolConfig`, `HappyEyeballsConfig` | [Network](guide/network.md) |
 | Trust roots, pins, TLS floor | `TlsTrustConfig` | [TLS trust](guide/tls-trust.md) |
 | HTTP/3 | `ProtocolPolicy` | [HTTP/3](guide/http3.md) |

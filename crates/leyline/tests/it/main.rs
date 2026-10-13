@@ -6,6 +6,8 @@ mod core_support {
 mod h2_support;
 #[cfg(feature = "http3")]
 mod h3_support;
+#[cfg(feature = "html")]
+mod html_pages;
 mod http_support {
     pub mod httpbin_lite;
 }
@@ -24,6 +26,8 @@ mod core_multipart;
 mod core_retry;
 mod core_streaming;
 mod core_wire_fidelity;
+#[cfg(feature = "html")]
+mod crawl;
 mod crawl_identity;
 mod crawling;
 mod credentials_hidden;
@@ -137,6 +141,7 @@ mod response_header_timeout;
 mod responses_and_errors;
 mod retry_rules;
 mod retry_unsent_redirect;
+mod robots;
 mod samesite_cookies;
 mod server_chosen_urls;
 mod session_clone;

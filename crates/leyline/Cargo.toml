@@ -1,6 +1,6 @@
 [package]
 name = "leyline-http"
-description = "HTTP client that mimics browsers on the wire"
+description = "HTTP client that impersonates Chrome, Firefox, and Safari on the wire: TLS (JA3/JA4), HTTP/2, and HTTP/3 fingerprints"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -90,7 +90,7 @@ full = [
 [dependencies]
 # External deps absorbed from sub-crates
 # -- from leyline-quiche (external BSD-2 fork, stays as path dep)
-leyline-quiche = { path = "../leyline-quiche", version = "=0.1.4", default-features = false, optional = true, features = [
+leyline-quiche = { path = "../leyline-quiche", version = "=0.1.5", default-features = false, optional = true, features = [
     "boringssl-bssl-crate",
 ] }
 
@@ -188,7 +188,7 @@ toml = { workspace = true }
 [dev-dependencies]
 leyline-http = { path = ".", features = ["test-util"] }
 bytes = { workspace = true }
-leyline-quiche = { path = "../leyline-quiche", version = "=0.1.4", default-features = false, features = [
+leyline-quiche = { path = "../leyline-quiche", version = "=0.1.5", default-features = false, features = [
     "boringssl-bssl-crate",
     "internal",
 ] }
@@ -196,7 +196,7 @@ leyline-quiche = { path = "../leyline-quiche", version = "=0.1.4", default-featu
 # pinning hostname-verification integration test.
 leyline-bssl = { workspace = true }
 leyline-bssl-tokio = { workspace = true }
-tokio = { workspace = true, features = ["full"] }
+tokio = { workspace = true, features = ["full", "test-util"] }
 tokio-util = { version = "0.7.5", features = ["io"] }
 futures-util = "0.3"
 serde_json = { workspace = true }

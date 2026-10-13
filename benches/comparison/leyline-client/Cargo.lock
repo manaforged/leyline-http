@@ -500,7 +500,7 @@ dependencies = [
 
 [[package]]
 name = "leyline-bssl"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "bitflags",
  "foreign-types",
@@ -511,7 +511,7 @@ dependencies = [
 
 [[package]]
 name = "leyline-bssl-sys"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "cc",
  "fslock",
@@ -520,7 +520,7 @@ dependencies = [
 
 [[package]]
 name = "leyline-bssl-tokio"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "leyline-bssl",
  "leyline-bssl-sys",
@@ -538,7 +538,7 @@ dependencies = [
 
 [[package]]
 name = "leyline-http"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "base64",
  "brotli",
@@ -573,7 +573,7 @@ dependencies = [
 
 [[package]]
 name = "leyline-quiche"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "bytes",
  "debug_panic",

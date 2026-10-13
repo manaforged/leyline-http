@@ -1,9 +1,17 @@
 mod assign;
 mod build;
+mod directives;
 mod entity;
 mod fieldset;
 mod page;
 mod scan;
+mod sitemap;
+
+pub(crate) use sitemap::Sitemap;
+
+use crate::core::lookup;
+
+pub(crate) const WEB_SCHEMES: [&str; 2] = ["http", "https"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[non_exhaustive]
@@ -79,6 +87,54 @@ pub fn meta(document: &str, name: &str) -> Option<String> {
 #[must_use]
 pub fn links(document: &str) -> Vec<Anchor> {
     page::links(document)
+}
+
+#[must_use]
+pub fn text(document: &str) -> String {
+    page::text(document)
+}
+
+pub(crate) fn base(document: &str) -> Option<String> {
+    page::base(document)
+}
+
+#[must_use]
+pub fn canonical(document: &str) -> Option<String> {
+    page::canonical(document)
+}
+
+pub(crate) fn sitemap(document: &str) -> Sitemap {
+    sitemap::read(document)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Directives {
+    index: bool,
+    follow: bool,
+    ai: bool,
+}
+
+impl Directives {
+    #[must_use]
+    pub fn read(document: &str, headers: &http::HeaderMap, agent: &str) -> Directives {
+        directives::read(document, headers, agent)
+    }
+
+    #[must_use]
+    pub fn index(&self) -> bool {
+        self.index
+    }
+
+    #[must_use]
+    pub fn follow(&self) -> bool {
+        self.follow
+    }
+
+    #[must_use]
+    pub fn ai(&self) -> bool {
+        self.ai
+    }
 }
 
 impl Anchor {

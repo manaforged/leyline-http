@@ -1,10 +1,11 @@
-# Leyline
+# leyline-http
 
-Leyline is an async Rust HTTP client that can mimic browsers on the wire.
+Leyline is an async Rust HTTP client that impersonates browsers on the wire.
 The TLS ClientHello, HTTP/2 SETTINGS and priorities, HTTP/3 transport
 parameters, and request header order all come from captures of shipped
-browsers, so a server that fingerprints its clients sees Chrome, Firefox, or
-Safari, not a Rust library.
+browsers, so a server that reads JA3, JA4, or HTTP/2 fingerprints sees
+Chrome, Firefox, or Safari, not a Rust library. It does for Rust what
+curl-impersonate does for curl.
 
 ```rust,no_run
 use leyline::{Browser, Session};

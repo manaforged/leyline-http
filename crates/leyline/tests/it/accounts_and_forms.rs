@@ -240,27 +240,6 @@ fn a_socks_proxy_in_a_pool_needs_the_feature_at_build() {
     assert!(err.to_string().contains("socks"), "{err}");
 }
 
-#[cfg(feature = "html")]
-#[test]
-fn pages_give_meta_tokens_and_links() {
-    let page = r#"<html><head>
-<meta name="CSRF-Token" content="a&amp;b">
-<meta property="og:title" content="Cart">
-</head><body>
-<script>var s = "<a href='/fake'>x</a>";</script>
-<a href="/p/1" rel="next">First
-  product</a>
-<a name="anchor">no href</a>
-</body></html>"#;
-    assert_eq!(html::meta(page, "csrf-token").as_deref(), Some("a&b"));
-    assert_eq!(html::meta(page, "og:title").as_deref(), Some("Cart"));
-    let links = html::links(page);
-    assert_eq!(links.len(), 1);
-    assert_eq!(links[0].href(), "/p/1");
-    assert_eq!(links[0].text(), "First product");
-    assert_eq!(links[0].rel(), Some("next"));
-}
-
 #[test]
 fn a_strict_device_needs_a_pin_and_a_proxy() {
     let session = Session::browser(Browser::Chrome154);

@@ -75,7 +75,7 @@ impl<'a> Route<'a> {
     }
 
     fn observe(&self, response: &Response) {
-        self.session.host_limits().observe(
+        self.session.observe_host(
             response.url(),
             response.status(),
             self.policy.server_wait(response),

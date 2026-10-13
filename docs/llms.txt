@@ -2,15 +2,15 @@
 
 > Public API reference that truesight generates from the compiler's rustdoc output, except the task names and calls, which come from the task file.
 
-## leyline-http 0.1.4
+## leyline-http 0.1.5
 
-- [Every public item, one per line](reference/leyline-http/api.txt): 1871 lines
+- [Every public item, one per line](reference/leyline-http/api.txt): 1994 lines
 - [API overview](reference/leyline-http/index.html): tasks, modules, features, and examples
 - [API changes by release](reference/leyline-http/changes.html)
-- [leyline](reference/leyline-http/leyline.html): 686 items
+- [leyline](reference/leyline-http/leyline.html): 744 items
 - [leyline::audit](reference/leyline-http/leyline-audit.html): 63 items
 - [leyline::cookie](reference/leyline-http/leyline-cookie.html): 35 items
-- [leyline::html](reference/leyline-http/leyline-html.html): 28 items
+- [leyline::html](reference/leyline-http/leyline-html.html): 35 items
 - [leyline::multipart](reference/leyline-http/leyline-multipart.html): 14 items
 - [leyline::profile](reference/leyline-http/leyline-profile.html): 174 items
 - [leyline::testing](reference/leyline-http/leyline-testing.html): 34 items
@@ -203,6 +203,7 @@
 - [Load block rules from TOML](reference/leyline-http/leyline.html#blockrules): `BlockRules::from_toml`
 - [Read the links of a page](reference/leyline-http/leyline-html.html#links): `html::links`
 - [Read the meta tags of a page](reference/leyline-http/leyline-html.html#meta): `html::meta`
+- [Read the visible text of a page](reference/leyline-http/leyline-html.html#text): `html::text`
 - [Find a form by id or name](reference/leyline-http/leyline-html.html#form): `html::Form::find`
 - [Name an error category](reference/leyline-http/leyline.html#errorcategory): `ErrorCategory::as_str`
 - [Send a script fetch from a tab](reference/leyline-http/leyline.html#tab): `Tab::fetch`
@@ -210,3 +211,12 @@
 - [Post JSON from a tab](reference/leyline-http/leyline.html#tab): `Tab::post_json`
 - [Load a subresource from a tab](reference/leyline-http/leyline.html#tab): `Tab::subresource`
 - [Limit pagination](reference/leyline-http/leyline.html#pages): `Pages::limit`
+- [Fetch and obey robots.txt](reference/leyline-http/leyline.html#session): `Session::robots`
+- [Parse a robots.txt file](reference/leyline-http/leyline.html#robots): `Robots::parse`
+- [Read a page's robots directives](reference/leyline-http/leyline-html.html#directives): `html::Directives::read`
+- [Read a page's canonical URL](reference/leyline-http/leyline-html.html#canonical): `html::canonical`
+- [Crawl a site](reference/leyline-http/leyline.html#session): `Session::crawl`
+- [Count what a crawl skipped](reference/leyline-http/leyline.html#crawl): `Crawl::stats`
+- [Pace a crawl per host](reference/leyline-http/leyline.html#crawl): `Crawl::host_limits`
+- [Obey robots rules in a crawl](reference/leyline-http/leyline.html#crawl): `Crawl::respect`
+- [Limit a crawl's pages](reference/leyline-http/leyline.html#crawl): `Crawl::limit`

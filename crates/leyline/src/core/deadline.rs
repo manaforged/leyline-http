@@ -69,6 +69,11 @@ impl Deadline {
             .map_or(remaining, |cap| cap.min(remaining))
     }
 
+    #[cfg(feature = "html")]
+    pub(crate) fn alarm(at: Instant) -> std::pin::Pin<Box<tokio::time::Sleep>> {
+        Box::pin(tokio::time::sleep_until(at))
+    }
+
     pub(crate) async fn sleep(&self, wait: Duration) {
         tokio::time::sleep(wait.min(self.remaining())).await;
     }

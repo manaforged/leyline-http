@@ -190,6 +190,18 @@ impl core::fmt::Debug for leyline::cookie::JarAutosave
 #[cfg(feature = "html")] impl core::cmp::PartialEq for leyline::html::Anchor
 #[cfg(feature = "html")] impl core::fmt::Debug for leyline::html::Anchor
 #[cfg(feature = "html")] impl core::marker::StructuralPartialEq for leyline::html::Anchor
+#[cfg(feature = "html")] #[non_exhaustive] pub struct leyline::html::Directives
+#[cfg(feature = "html")] impl leyline::html::Directives
+#[cfg(feature = "html")] pub fn leyline::html::Directives::ai(&self) -> bool
+#[cfg(feature = "html")] pub fn leyline::html::Directives::follow(&self) -> bool
+#[cfg(feature = "html")] pub fn leyline::html::Directives::index(&self) -> bool
+#[cfg(feature = "html")] pub fn leyline::html::Directives::read(document: &str, headers: &http::header::map::HeaderMap, agent: &str) -> leyline::html::Directives
+#[cfg(feature = "html")] impl core::clone::Clone for leyline::html::Directives
+#[cfg(feature = "html")] impl core::cmp::Eq for leyline::html::Directives
+#[cfg(feature = "html")] impl core::cmp::PartialEq for leyline::html::Directives
+#[cfg(feature = "html")] impl core::fmt::Debug for leyline::html::Directives
+#[cfg(feature = "html")] impl core::marker::Copy for leyline::html::Directives
+#[cfg(feature = "html")] impl core::marker::StructuralPartialEq for leyline::html::Directives
 #[cfg(feature = "html")] #[non_exhaustive] pub struct leyline::html::Form
 #[cfg(feature = "html")] impl leyline::html::Form
 #[cfg(feature = "html")] pub fn leyline::html::Form::action(&self) -> &str
@@ -210,9 +222,11 @@ impl core::fmt::Debug for leyline::cookie::JarAutosave
 #[cfg(feature = "html")] impl core::default::Default for leyline::html::Form
 #[cfg(feature = "html")] impl core::fmt::Debug for leyline::html::Form
 #[cfg(feature = "html")] impl core::marker::StructuralPartialEq for leyline::html::Form
+#[cfg(feature = "html")] pub fn leyline::html::canonical(document: &str) -> core::option::Option<alloc::string::String>
 #[cfg(feature = "html")] pub fn leyline::html::forms(document: &str) -> alloc::vec::Vec<leyline::html::Form>
 #[cfg(feature = "html")] pub fn leyline::html::links(document: &str) -> alloc::vec::Vec<leyline::html::Anchor>
 #[cfg(feature = "html")] pub fn leyline::html::meta(document: &str, name: &str) -> core::option::Option<alloc::string::String>
+#[cfg(feature = "html")] pub fn leyline::html::text(document: &str) -> alloc::string::String
 #[cfg(feature = "multipart")] pub mod leyline::multipart
 #[cfg(feature = "multipart")] pub struct leyline::multipart::Form
 #[cfg(feature = "multipart")] impl leyline::multipart::Form
@@ -1047,6 +1061,19 @@ impl core::cmp::PartialEq for leyline::ProxyReply
 impl core::fmt::Debug for leyline::ProxyReply
 impl core::marker::Copy for leyline::ProxyReply
 impl core::marker::StructuralPartialEq for leyline::ProxyReply
+#[non_exhaustive] pub enum leyline::Purpose
+pub leyline::Purpose::AiInput
+pub leyline::Purpose::AiTrain
+pub leyline::Purpose::Search
+impl leyline::Purpose
+pub fn leyline::Purpose::as_str(self) -> &'static str
+impl core::clone::Clone for leyline::Purpose
+impl core::cmp::Eq for leyline::Purpose
+impl core::cmp::PartialEq for leyline::Purpose
+impl core::fmt::Debug for leyline::Purpose
+impl core::hash::Hash for leyline::Purpose
+impl core::marker::Copy for leyline::Purpose
+impl core::marker::StructuralPartialEq for leyline::Purpose
 #[non_exhaustive] pub enum leyline::RedirectAction
 pub leyline::RedirectAction::Follow
 pub leyline::RedirectAction::Stop
@@ -1065,6 +1092,15 @@ impl core::cmp::PartialEq for leyline::RelayBody
 impl core::fmt::Debug for leyline::RelayBody
 impl core::marker::Copy for leyline::RelayBody
 impl core::marker::StructuralPartialEq for leyline::RelayBody
+#[cfg(feature = "html")] #[non_exhaustive] pub enum leyline::Respect
+#[cfg(feature = "html")] pub leyline::Respect::AiTraining
+#[cfg(feature = "html")] pub leyline::Respect::Robots
+#[cfg(feature = "html")] impl core::clone::Clone for leyline::Respect
+#[cfg(feature = "html")] impl core::cmp::Eq for leyline::Respect
+#[cfg(feature = "html")] impl core::cmp::PartialEq for leyline::Respect
+#[cfg(feature = "html")] impl core::fmt::Debug for leyline::Respect
+#[cfg(feature = "html")] impl core::marker::Copy for leyline::Respect
+#[cfg(feature = "html")] impl core::marker::StructuralPartialEq for leyline::Respect
 #[non_exhaustive] pub enum leyline::RetryTrigger
 pub leyline::RetryTrigger::ConnectionError
 pub leyline::RetryTrigger::ServerError
@@ -1073,6 +1109,48 @@ pub leyline::RetryTrigger::Timeout
 impl core::clone::Clone for leyline::RetryTrigger
 impl core::fmt::Debug for leyline::RetryTrigger
 impl core::marker::Copy for leyline::RetryTrigger
+#[non_exhaustive] pub enum leyline::RobotsSource
+pub leyline::RobotsSource::Parsed
+pub leyline::RobotsSource::Unavailable
+pub leyline::RobotsSource::Unreachable
+impl core::clone::Clone for leyline::RobotsSource
+impl core::cmp::Eq for leyline::RobotsSource
+impl core::cmp::PartialEq for leyline::RobotsSource
+impl core::fmt::Debug for leyline::RobotsSource
+impl core::hash::Hash for leyline::RobotsSource
+impl core::marker::Copy for leyline::RobotsSource
+impl core::marker::StructuralPartialEq for leyline::RobotsSource
+#[cfg(feature = "html")] #[non_exhaustive] pub enum leyline::Scope
+#[cfg(feature = "html")] pub leyline::Scope::Domain
+#[cfg(feature = "html")] pub leyline::Scope::Host
+#[cfg(feature = "html")] pub leyline::Scope::Prefix
+#[cfg(feature = "html")] impl core::clone::Clone for leyline::Scope
+#[cfg(feature = "html")] impl core::cmp::Eq for leyline::Scope
+#[cfg(feature = "html")] impl core::cmp::PartialEq for leyline::Scope
+#[cfg(feature = "html")] impl core::default::Default for leyline::Scope
+#[cfg(feature = "html")] impl core::fmt::Debug for leyline::Scope
+#[cfg(feature = "html")] impl core::marker::Copy for leyline::Scope
+#[cfg(feature = "html")] impl core::marker::StructuralPartialEq for leyline::Scope
+#[cfg(feature = "html")] #[non_exhaustive] pub enum leyline::SkipReason
+#[cfg(feature = "html")] pub leyline::SkipReason::Blocked
+#[cfg(feature = "html")] pub leyline::SkipReason::Duplicate
+#[cfg(feature = "html")] pub leyline::SkipReason::NoAi
+#[cfg(feature = "html")] pub leyline::SkipReason::NoIndex
+#[cfg(feature = "html")] pub leyline::SkipReason::NotHtml
+#[cfg(feature = "html")] pub leyline::SkipReason::Redirects
+#[cfg(feature = "html")] pub leyline::SkipReason::Robots
+#[cfg(feature = "html")] pub leyline::SkipReason::Scope
+#[cfg(feature = "html")] pub leyline::SkipReason::Signal
+#[cfg(feature = "html")] pub leyline::SkipReason::Status
+#[cfg(feature = "html")] impl leyline::SkipReason
+#[cfg(feature = "html")] pub fn leyline::SkipReason::as_str(self) -> &'static str
+#[cfg(feature = "html")] impl core::clone::Clone for leyline::SkipReason
+#[cfg(feature = "html")] impl core::cmp::Eq for leyline::SkipReason
+#[cfg(feature = "html")] impl core::cmp::PartialEq for leyline::SkipReason
+#[cfg(feature = "html")] impl core::fmt::Debug for leyline::SkipReason
+#[cfg(feature = "html")] impl core::hash::Hash for leyline::SkipReason
+#[cfg(feature = "html")] impl core::marker::Copy for leyline::SkipReason
+#[cfg(feature = "html")] impl core::marker::StructuralPartialEq for leyline::SkipReason
 #[non_exhaustive] pub enum leyline::StopReason
 pub leyline::StopReason::EndOfBody
 pub leyline::StopReason::LimitReached
@@ -1221,6 +1299,39 @@ impl core::default::Default for leyline::CompressionConfig
 impl core::fmt::Debug for leyline::CompressionConfig
 impl core::marker::Copy for leyline::CompressionConfig
 impl core::marker::StructuralPartialEq for leyline::CompressionConfig
+#[cfg(feature = "html")] pub struct leyline::Crawl
+#[cfg(feature = "html")] impl leyline::Crawl
+#[cfg(feature = "html")] pub fn leyline::Crawl::host_limits(self, limits: leyline::HostLimits) -> Self
+#[cfg(feature = "html")] pub fn leyline::Crawl::ignore_robots(self) -> Self
+#[cfg(feature = "html")] pub fn leyline::Crawl::limit(self, pages: usize) -> Self
+#[cfg(feature = "html")] pub async fn leyline::Crawl::next(&mut self) -> core::option::Option<leyline::Result<leyline::CrawlPage>>
+#[cfg(feature = "html")] pub fn leyline::Crawl::respect(self, respect: leyline::Respect) -> Self
+#[cfg(feature = "html")] pub fn leyline::Crawl::scope(self, scope: leyline::Scope) -> Self
+#[cfg(feature = "html")] pub fn leyline::Crawl::stats(&self) -> &leyline::CrawlStats
+#[cfg(feature = "html")] impl core::fmt::Debug for leyline::Crawl
+#[cfg(feature = "html")] impl futures_core::stream::Stream for leyline::Crawl
+#[cfg(feature = "html")] pub type leyline::Crawl::Item = core::result::Result<leyline::CrawlPage, leyline::Error>
+#[cfg(feature = "html")] pub struct leyline::CrawlPage
+#[cfg(feature = "html")] impl leyline::CrawlPage
+#[cfg(feature = "html")] pub fn leyline::CrawlPage::depth(&self) -> usize
+#[cfg(feature = "html")] pub fn leyline::CrawlPage::html(&self) -> &str
+#[cfg(feature = "html")] pub fn leyline::CrawlPage::into_html(self) -> alloc::string::String
+#[cfg(feature = "html")] pub fn leyline::CrawlPage::meta(&self, name: &str) -> core::option::Option<alloc::string::String>
+#[cfg(feature = "html")] pub fn leyline::CrawlPage::status(&self) -> http::status::StatusCode
+#[cfg(feature = "html")] pub fn leyline::CrawlPage::text(&self) -> &str
+#[cfg(feature = "html")] pub fn leyline::CrawlPage::url(&self) -> &url::Url
+#[cfg(feature = "html")] impl core::clone::Clone for leyline::CrawlPage
+#[cfg(feature = "html")] impl core::fmt::Debug for leyline::CrawlPage
+#[cfg(feature = "html")] pub struct leyline::CrawlStats
+#[cfg(feature = "html")] impl leyline::CrawlStats
+#[cfg(feature = "html")] pub fn leyline::CrawlStats::errors(&self) -> u64
+#[cfg(feature = "html")] pub fn leyline::CrawlStats::pages(&self) -> u64
+#[cfg(feature = "html")] pub fn leyline::CrawlStats::requests(&self) -> u64
+#[cfg(feature = "html")] pub fn leyline::CrawlStats::skipped(&self, reason: leyline::SkipReason) -> u64
+#[cfg(feature = "html")] impl core::clone::Clone for leyline::CrawlStats
+#[cfg(feature = "html")] impl core::default::Default for leyline::CrawlStats
+#[cfg(feature = "html")] impl core::fmt::Debug for leyline::CrawlStats
+#[cfg(feature = "html")] impl core::fmt::Display for leyline::CrawlStats
 #[non_exhaustive] pub struct leyline::Device
 pub leyline::Device::app: alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>
 pub leyline::Device::brand: core::option::Option<leyline::ChromiumBrand>
@@ -1624,6 +1735,16 @@ pub fn leyline::RetryPolicy::wait_header(self, name: impl core::convert::Into<al
 impl core::clone::Clone for leyline::RetryPolicy
 impl core::default::Default for leyline::RetryPolicy
 impl core::fmt::Debug for leyline::RetryPolicy
+pub struct leyline::Robots
+impl leyline::Robots
+pub fn leyline::Robots::allows(&self, url: &url::Url) -> bool
+pub fn leyline::Robots::allows_use(&self, url: &url::Url, purpose: leyline::Purpose) -> bool
+pub fn leyline::Robots::crawl_delay(&self) -> core::option::Option<core::time::Duration>
+pub fn leyline::Robots::parse(text: &str, agent: &str) -> leyline::Robots
+pub fn leyline::Robots::sitemaps(&self) -> &[alloc::string::String]
+pub fn leyline::Robots::source(&self) -> leyline::RobotsSource
+impl core::clone::Clone for leyline::Robots
+impl core::fmt::Debug for leyline::Robots
 pub struct leyline::Session
 impl leyline::Session
 pub fn leyline::Session::browser(browser: leyline::Browser) -> Self
@@ -1648,10 +1769,12 @@ pub fn leyline::Session::with_base_url(&self, url: impl leyline::IntoUrl) -> ley
 pub fn leyline::Session::with_cookie_jar(&self, jar: leyline::cookie::Jar) -> Self
 pub fn leyline::Session::with_proxy(&self, config: impl core::convert::Into<leyline::ProxyConfig>) -> Self
 pub fn leyline::Session::with_redirect(&self, policy: leyline::RedirectPolicy) -> Self
+#[cfg(feature = "html")] pub fn leyline::Session::crawl(&self, seed: impl leyline::IntoUrl) -> leyline::Crawl
 pub fn leyline::Session::identity(&self) -> leyline::SessionIdentity
 pub fn leyline::Session::with_identity(&self, identity: leyline::Identity) -> leyline::Result<Self>
 pub fn leyline::Session::is_shut_down(&self) -> bool
 pub fn leyline::Session::shutdown(&self)
+pub async fn leyline::Session::robots(&self, url: impl leyline::IntoUrl, agent: &str) -> leyline::Result<leyline::Robots>
 pub fn leyline::Session::state(&self) -> leyline::SessionState
 #[cfg(feature = "websocket")] pub fn leyline::Session::websocket(&self, url: impl leyline::IntoUrl) -> leyline::WebSocketBuilder
 impl core::clone::Clone for leyline::Session

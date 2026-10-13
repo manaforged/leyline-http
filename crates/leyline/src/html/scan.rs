@@ -1,15 +1,24 @@
+use std::borrow::Cow;
+
 use super::entity::decode_attribute;
 
 const RAW_TEXT: [&str; 4] = ["script", "style", "textarea", "title"];
 
+const FOREIGN: [&str; 2] = ["svg", "math"];
+
 const EMPTY_COMMENTS: [&str; 2] = [">", "->"];
+const COMMENT_OPEN: &str = "!--";
+const COMMENT_CLOSE: &str = "-->";
+const CDATA_OPEN: &str = "![CDATA[";
+const CDATA_CLOSE: &str = "]]>";
 
 pub(super) struct Tag<'a> {
     pub(super) name: String,
     pub(super) closing: bool,
+    pub(super) self_closing: bool,
     pub(super) attrs: Vec<(String, String)>,
     pub(super) raw: Option<&'a str>,
-    pub(super) text: &'a str,
+    pub(super) text: Cow<'a, str>,
 }
 
 impl Tag<'_> {
@@ -28,11 +37,25 @@ impl Tag<'_> {
 pub(super) struct Scanner<'a> {
     doc: &'a str,
     pos: usize,
+    started: bool,
+    xml: bool,
 }
 
 impl<'a> Scanner<'a> {
     pub(super) fn new(doc: &'a str) -> Self {
-        Self { doc, pos: 0 }
+        Self {
+            doc,
+            pos: 0,
+            started: false,
+            xml: false,
+        }
+    }
+
+    pub(super) fn xml(doc: &'a str) -> Self {
+        Self {
+            xml: true,
+            ..Self::new(doc)
+        }
     }
 
     fn skip_past(&mut self, from: usize, end: &str) {
@@ -61,20 +84,107 @@ impl<'a> Scanner<'a> {
         &doc[start..]
     }
 
-    fn markup(&mut self, after: usize) -> bool {
-        let rest = &self.doc[after..];
-        if let Some(body) = rest.strip_prefix("!--") {
+    fn markup(&mut self, open: usize) -> Markup<'a> {
+        let doc = self.doc;
+        let after = open + 1;
+        let rest = &doc[after..];
+        if let Some(body) = rest.strip_prefix(COMMENT_OPEN) {
+            let from = after + COMMENT_OPEN.len();
             match EMPTY_COMMENTS.iter().find(|end| body.starts_with(**end)) {
-                Some(end) => self.pos = after + 3 + end.len(),
-                None => self.skip_past(after + 3, "-->"),
+                Some(end) => self.pos = from + end.len(),
+                None => self.skip_past(from, COMMENT_CLOSE),
             }
-            return true;
+            return Markup::Skipped;
+        }
+        if self.xml && rest.starts_with(CDATA_OPEN) {
+            let from = after + CDATA_OPEN.len();
+            let to = doc[from..]
+                .find(CDATA_CLOSE)
+                .map_or(doc.len(), |at| from + at);
+            self.skip_past(to, CDATA_CLOSE);
+            return Markup::Cdata(&doc[from..to]);
         }
         if rest.starts_with('!') || rest.starts_with('?') {
             self.skip_past(after, ">");
-            return true;
+            return Markup::Skipped;
         }
-        false
+        let closing = rest.starts_with('/');
+        let named = rest.as_bytes()[usize::from(closing)..]
+            .first()
+            .is_some_and(u8::is_ascii_alphabetic);
+        match (named, closing) {
+            (true, _) => {
+                self.pos = open;
+                Markup::Tag
+            }
+            (false, true) => {
+                self.skip_past(after, ">");
+                Markup::Skipped
+            }
+            (false, false) => {
+                self.pos = after;
+                Markup::Literal
+            }
+        }
+    }
+
+    fn gather(&mut self) -> Cow<'a, str> {
+        let doc = self.doc;
+        let mut spliced: Option<String> = None;
+        loop {
+            let rest = &doc[self.pos..];
+            let Some(at) = rest.find('<') else {
+                self.pos = doc.len();
+                return joined(spliced, rest);
+            };
+            let chunk = &rest[..at];
+            match self.markup(self.pos + at) {
+                Markup::Tag => return joined(spliced, chunk),
+                Markup::Literal => {
+                    let text = spliced.get_or_insert_with(String::new);
+                    text.push_str(chunk);
+                    text.push('<');
+                }
+                Markup::Skipped => spliced.get_or_insert_with(String::new).push_str(chunk),
+                Markup::Cdata(body) => {
+                    let text = spliced.get_or_insert_with(String::new);
+                    text.push_str(chunk);
+                    escape(body, text);
+                }
+            }
+        }
+    }
+
+    pub(super) fn lead(&mut self) -> String {
+        self.started = true;
+        self.gather().into_owned()
+    }
+}
+
+enum Markup<'a> {
+    Tag,
+    Literal,
+    Skipped,
+    Cdata(&'a str),
+}
+
+fn joined<'a>(spliced: Option<String>, tail: &'a str) -> Cow<'a, str> {
+    match spliced {
+        Some(mut text) => {
+            text.push_str(tail);
+            Cow::Owned(text)
+        }
+        None => Cow::Borrowed(tail),
+    }
+}
+
+fn escape(body: &str, out: &mut String) {
+    for ch in body.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            other => out.push(other),
+        }
     }
 }
 
@@ -82,35 +192,34 @@ impl<'a> Iterator for Scanner<'a> {
     type Item = Tag<'a>;
 
     fn next(&mut self) -> Option<Tag<'a>> {
-        loop {
-            let at = self.pos + self.doc[self.pos..].find('<')?;
-            self.pos = at + 1;
-            if self.markup(self.pos) {
-                continue;
-            }
-            let closing = self.doc[self.pos..].starts_with('/');
-            let start = self.pos + usize::from(closing);
-            let bytes = &self.doc.as_bytes()[start..];
-            if !bytes.first().is_some_and(u8::is_ascii_alphabetic) {
-                continue;
-            }
-            let len = bytes
-                .iter()
-                .take_while(|b| b.is_ascii_alphanumeric() || **b == b'-')
-                .count();
-            let name = self.doc[start..start + len].to_ascii_lowercase();
-            let (attrs, end) = attributes(self.doc, start + len);
-            self.pos = end;
-            let raw = (!closing && RAW_TEXT.contains(&name.as_str())).then(|| self.raw_text(&name));
-            let text = self.doc[self.pos..].split('<').next().unwrap_or_default();
-            return Some(Tag {
-                name,
-                closing,
-                attrs,
-                raw,
-                text,
-            });
+        if !self.started {
+            self.lead();
         }
+        if self.pos >= self.doc.len() {
+            return None;
+        }
+        let closing = self.doc[self.pos + 1..].starts_with('/');
+        let start = self.pos + 1 + usize::from(closing);
+        let len = self.doc.as_bytes()[start..]
+            .iter()
+            .take_while(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b':'))
+            .count();
+        let name = self.doc[start..start + len].to_ascii_lowercase();
+        let (attrs, end) = attributes(self.doc, start + len);
+        let self_closing =
+            FOREIGN.iter().any(|foreign| *foreign == name) && self.doc[..end].ends_with("/>");
+        self.pos = end;
+        let raw =
+            (!closing && RAW_TEXT.iter().any(|raw| *raw == name)).then(|| self.raw_text(&name));
+        let text = self.gather();
+        Some(Tag {
+            name,
+            closing,
+            self_closing,
+            attrs,
+            raw,
+            text,
+        })
     }
 }
 

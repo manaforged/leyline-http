@@ -136,11 +136,13 @@ pub use crate::core::{
     Device, DeviceAutosave, DeviceAutosaveOptions, DigestAuth, DnsConfig, Error, ErrorCategory,
     FetchSite, HostLimits, HostStats, HttpVersion, Identity, IntoParamPair, IntoUrl, Kind, Link,
     NoProxy, Pages, PoolConfig, PrefixRead, ProtocolPolicy, ProxyConfig, ProxyHealth, ProxyPool,
-    ProxyRule, ProxyUrl, RedirectAction, RedirectAttempt, RedirectPolicy, RelayBody,
-    RequestBuilder, Response, ResponseTiming, Result, RetryPolicy, RetryTrigger, Session,
-    SessionBuilder, SessionIdentity, SessionState, SocketConfig, StopReason, Tab, TimeoutConfig,
-    WaitFormat, WebSocketConfig, relay_headers,
+    ProxyRule, ProxyUrl, Purpose, RedirectAction, RedirectAttempt, RedirectPolicy, RelayBody,
+    RequestBuilder, Response, ResponseTiming, Result, RetryPolicy, RetryTrigger, Robots,
+    RobotsSource, Session, SessionBuilder, SessionIdentity, SessionState, SocketConfig, StopReason,
+    Tab, TimeoutConfig, WaitFormat, WebSocketConfig, relay_headers,
 };
+#[cfg(feature = "html")]
+pub use crate::core::{Crawl, CrawlPage, CrawlStats, Respect, Scope, SkipReason};
 pub use crate::pool::{PoolStats, TlsInfo};
 pub use crate::util::redact as redact_url;
 

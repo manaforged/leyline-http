@@ -12,6 +12,7 @@ use crate::core::body::{Body, BodyKind, BoxedStream};
 use crate::core::deadline::Deadline;
 use crate::core::error::{Error, Kind};
 use crate::core::response::Response;
+use crate::core::retry::RetryPlan;
 use crate::core::session::execute::Attempt;
 use crate::core::transport::ResponseMode;
 use crate::util::is_idempotent;
@@ -155,7 +156,7 @@ async fn run_attempts(
         let result = route.send(this, retry_policy.proxy_for_retry(n)).await;
 
         let body_retryable = || replay.is_some() || rewind.as_mut().is_some_and(Rewind::reclaim);
-        let sleep = match plan_retry(&result, retry_policy, n, retryable_method, body_retryable) {
+        let sleep = match retry_policy.plan(&result, n, retryable_method, body_retryable) {
             RetryPlan::Backoff(sleep) if sleep < deadline.remaining() => sleep,
             plan => {
                 *exhausted = matches!(
@@ -195,55 +196,6 @@ fn counted(result: Result<Response>, attempts: u32) -> Result<Response> {
             error.set_attempts(attempts);
             error
         })
-}
-
-enum RetryPlan {
-    Stop,
-    Exhausted,
-    Declined,
-    Backoff(std::time::Duration),
-}
-
-fn plan_retry(
-    result: &Result<Response>,
-    retry_policy: &crate::core::retry::RetryPolicy,
-    attempt: u32,
-    retryable_method: bool,
-    body_retryable: impl FnOnce() -> bool,
-) -> RetryPlan {
-    if retry_policy.is_none() {
-        return RetryPlan::Stop;
-    }
-    if attempt >= retry_policy.max_retries {
-        return match result {
-            Ok(response) if retry_policy.matches_response(response) => RetryPlan::Exhausted,
-            _ => RetryPlan::Stop,
-        };
-    }
-    if !retry_wanted(result, retry_policy)
-        || !(retryable_method || retry_policy.retries_unsent(result))
-        || !body_retryable()
-    {
-        return RetryPlan::Stop;
-    }
-    match result
-        .as_ref()
-        .ok()
-        .and_then(|r| retry_policy.server_wait(r))
-    {
-        Some(wait) if wait > retry_policy.max_retry_after => RetryPlan::Declined,
-        Some(wait) => RetryPlan::Backoff(wait),
-        None => RetryPlan::Backoff(retry_policy.backoff(attempt)),
-    }
-}
-
-fn retry_wanted(result: &Result<Response>, retry_policy: &crate::core::retry::RetryPolicy) -> bool {
-    match result {
-        Ok(resp) => retry_policy.matches_response(resp),
-        Err(err) if err.is_timeout() => retry_policy.matches_timeout(),
-        Err(err) if err.is_retryable() => retry_policy.matches_connection_error(),
-        Err(_) => false,
-    }
 }
 
 struct Slot {

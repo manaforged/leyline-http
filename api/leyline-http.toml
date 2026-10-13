@@ -878,6 +878,11 @@ call = "html::meta"
 guide = "docs/guide/accounts.md"
 
 [[task]]
+name = "Read the visible text of a page"
+call = "html::text"
+guide = "docs/guide/crawling.md"
+
+[[task]]
 name = "Find a form by id or name"
 call = "html::Form::find"
 guide = "docs/guide/accounts.md"
@@ -911,3 +916,52 @@ guide = "docs/guide/requests.md"
 name = "Limit pagination"
 call = "Pages::limit"
 guide = "docs/guide/api-clients.md"
+
+[[task]]
+name = "Fetch and obey robots.txt"
+call = "Session::robots"
+guide = "docs/guide/crawling.md"
+
+[[task]]
+name = "Parse a robots.txt file"
+call = "Robots::parse"
+guide = "docs/guide/crawling.md"
+
+[[task]]
+name = "Read a page's robots directives"
+call = "html::Directives::read"
+guide = "docs/guide/crawling.md"
+
+[[task]]
+name = "Read a page's canonical URL"
+call = "html::canonical"
+guide = "docs/guide/crawling.md"
+
+[[task]]
+name = "Crawl a site"
+call = "Session::crawl"
+guide = "docs/guide/crawling.md"
+
+[[task]]
+name = "Count what a crawl skipped"
+call = "Crawl::stats"
+guide = "docs/guide/crawling.md"
+
+
+
+
+
+[[task]]
+name = "Pace a crawl per host"
+call = "Crawl::host_limits"
+guide = "docs/guide/crawling.md"
+
+[[task]]
+name = "Obey robots rules in a crawl"
+call = "Crawl::respect"
+guide = "docs/guide/crawling.md"
+
+[[task]]
+name = "Limit a crawl's pages"
+call = "Crawl::limit"
+guide = "docs/guide/crawling.md"
