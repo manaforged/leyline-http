@@ -291,6 +291,19 @@ fn main() {
 
 #[cfg(feature = "html")]
 #[test]
+fn pages_keep_text_around_comments_brackets_and_empty_templates() {
+    assert_eq!(
+        html::text("Lead text<p>one <!-- note --> two</p><p>a < b and 1<2</p>"),
+        "Lead text\none two\na < b and 1<2"
+    );
+    assert_eq!(
+        html::text("<p>shown</p><template/><p>hidden</p></template><p>after</p>"),
+        "shown\nafter"
+    );
+}
+
+#[cfg(feature = "html")]
+#[test]
 fn pages_give_robots_directives_and_canonical() {
     let page = r#"<html><head>
 <meta name="robots" content="noindex">

@@ -13,6 +13,12 @@ pub(super) fn meta(document: &str, name: &str) -> Option<String> {
         .and_then(|tag| tag.attr("content").map(str::to_owned))
 }
 
+pub(super) fn base(document: &str) -> Option<String> {
+    Scanner::new(document)
+        .filter(|tag| !tag.closing && Element::of(&tag.name) == Element::Base)
+        .find_map(|tag| tag.attr("href").map(|href| href.trim().to_owned()))
+}
+
 pub(super) fn canonical(document: &str) -> Option<String> {
     Scanner::new(document)
         .filter(|tag| !tag.closing && Element::of(&tag.name) == Element::Link)
@@ -49,7 +55,7 @@ pub(super) fn links(document: &str) -> Vec<Anchor> {
             open = (!tag.closing).then(|| start(&tag)).flatten();
         }
         if let Some(anchor) = open.as_mut() {
-            anchor.text.push_str(tag.text);
+            anchor.text.push_str(&tag.text);
         }
     }
     done.extend(open.map(finish));
@@ -81,6 +87,7 @@ pub(super) enum Element {
     Head,
     HeadContent,
     Link,
+    Base,
     Meta,
     Hidden,
 }
@@ -90,7 +97,7 @@ const ELEMENTS: &[(&str, Element)] = &[
     ("title", Element::HeadContent),
     ("style", Element::HeadContent),
     ("script", Element::HeadContent),
-    ("base", Element::HeadContent),
+    ("base", Element::Base),
     ("link", Element::Link),
     ("meta", Element::Meta),
     ("noscript", Element::Hidden),
@@ -178,10 +185,14 @@ impl Text {
             Element::Hidden if tag.self_closing => {}
             Element::Hidden if tag.closing => self.hidden = self.hidden.saturating_sub(1),
             Element::Hidden => self.hidden += 1,
-            Element::Inline | Element::HeadContent | Element::Link | Element::Meta => {}
+            Element::Inline
+            | Element::HeadContent
+            | Element::Link
+            | Element::Base
+            | Element::Meta => {}
         }
         if self.hidden == 0 && !self.in_head {
-            self.block.push_str(tag.text);
+            self.block.push_str(&tag.text);
         }
     }
 
@@ -200,7 +211,9 @@ impl Text {
 
 pub(super) fn text(document: &str) -> String {
     let mut text = Text::default();
-    for tag in Scanner::new(document) {
+    let mut scanner = Scanner::new(document);
+    text.block = scanner.lead();
+    for tag in scanner {
         text.tag(&tag);
     }
     text.flush();

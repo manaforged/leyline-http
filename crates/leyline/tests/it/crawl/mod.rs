@@ -1,6 +1,8 @@
 mod defaults;
 mod links;
+mod pace;
 mod rules;
+mod sitemaps;
 
 pub(super) use std::collections::BTreeSet;
 pub(super) use std::time::Duration;

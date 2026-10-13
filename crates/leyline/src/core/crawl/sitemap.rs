@@ -11,7 +11,7 @@ const MAX_BYTES: usize = 50 * 1024 * 1024;
 const GZIP_MAGIC: [u8; 2] = [0x1f, 0x8b];
 const GZIP: &str = "gzip";
 
-pub(super) fn listed(site: &str, robots: &Robots, obey: bool) -> Vec<Url> {
+pub(super) fn listed(site: &Url, robots: &Robots, obey: bool) -> Vec<Url> {
     let listed: Vec<Url> = robots
         .sitemaps()
         .iter()
@@ -20,8 +20,7 @@ pub(super) fn listed(site: &str, robots: &Robots, obey: bool) -> Vec<Url> {
     if !listed.is_empty() {
         return listed;
     }
-    Url::parse(site)
-        .and_then(|origin| origin.join(SITEMAP_PATH))
+    site.join(SITEMAP_PATH)
         .ok()
         .filter(|url| !obey || robots.allows(url))
         .into_iter()
@@ -29,26 +28,34 @@ pub(super) fn listed(site: &str, robots: &Robots, obey: bool) -> Vec<Url> {
 }
 
 pub(super) async fn read(session: Session, url: Url) -> Sitemap {
-    let Ok(read) = session
-        .get(url.as_str())
-        .read_until(MAX_BYTES, |_, _| false)
-        .await
-    else {
+    let Ok(response) = session.get(url.as_str()).stream().send().await else {
         return Sitemap::default();
     };
-    let bytes = if read.bytes.starts_with(&GZIP_MAGIC) {
-        gunzip(&read.bytes).unwrap_or_default()
+    if !response.status().is_success() {
+        return Sitemap::default();
+    }
+    let Ok(bytes) = response.read_until(MAX_BYTES, |_, _| false).await else {
+        return Sitemap::default();
+    };
+    let bytes = if bytes.starts_with(&GZIP_MAGIC) {
+        gunzip(&bytes)
     } else {
-        read.bytes
+        bytes
     };
     html::sitemap(&String::from_utf8_lossy(&bytes))
 }
 
-fn gunzip(bytes: &[u8]) -> Option<Vec<u8>> {
-    let limit = Some(MAX_BYTES as u64);
-    let mut decoder = Decoder::capped(Some(GZIP), &CompressionConfig::new(), limit).ok()?;
+fn gunzip(bytes: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
-    decoder.feed(bytes, &mut out).ok()?;
-    decoder.finish(&mut out).ok()?;
-    Some(out)
+    let limit = Some(MAX_BYTES as u64);
+    let Ok(mut decoder) = Decoder::capped(Some(GZIP), &CompressionConfig::new(), limit) else {
+        return out;
+    };
+    let decoded = decoder
+        .feed(bytes, &mut out)
+        .and_then(|()| decoder.finish(&mut out));
+    if let Err(err) = decoded {
+        tracing::debug!(%err, kept = out.len(), "sitemap gzip ended early");
+    }
+    out
 }

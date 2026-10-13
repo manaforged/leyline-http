@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -7,6 +7,8 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::Instant;
 
 use super::host_limits::Origin;
+
+const MAX_SPACING: Duration = Duration::from_secs(365 * 24 * 60 * 60);
 
 pub(super) struct Count(Arc<AtomicUsize>);
 
@@ -39,6 +41,7 @@ pub(super) struct Gates {
     pub(super) by_origin: Mutex<HashMap<Origin, Arc<HostGate>>>,
     pub(super) total: Option<Arc<Semaphore>>,
     floors: Mutex<HashMap<Origin, Duration>>,
+    floored: AtomicBool,
 }
 
 impl Gates {
@@ -47,6 +50,7 @@ impl Gates {
             by_origin: Mutex::default(),
             total: max_total.map(|n| Arc::new(Semaphore::new(n))),
             floors: Mutex::default(),
+            floored: AtomicBool::new(false),
         }
     }
 
@@ -56,18 +60,30 @@ impl Gates {
     }
 
     pub(super) fn has_floors(&self) -> bool {
-        !self
-            .floors
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .is_empty()
+        self.floored.load(Ordering::Acquire)
     }
 
     #[cfg(feature = "html")]
-    pub(super) fn raise_floor(&self, origin: Origin, gap: Duration) {
+    pub(super) fn set_floor(&self, origin: Origin, gap: Option<Duration>) {
         let mut floors = self.floors.lock().unwrap_or_else(PoisonError::into_inner);
-        let floor = floors.entry(origin).or_insert(gap);
-        *floor = (*floor).max(gap);
+        match gap {
+            Some(gap) => {
+                let gate = self
+                    .by_origin
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .get(&origin)
+                    .cloned();
+                if let Some(gate) = gate {
+                    gate.push_next(Instant::now().checked_add(gap));
+                }
+                floors.insert(origin, gap);
+            }
+            None => {
+                floors.remove(&origin);
+            }
+        }
+        self.floored.store(!floors.is_empty(), Ordering::Release);
     }
 
     pub(super) fn gate(&self, origin: Origin, max_in_flight: Option<usize>) -> Arc<HostGate> {
@@ -113,9 +129,20 @@ impl HostGate {
             return false;
         }
         if let Some(interval) = interval {
-            *next = now.checked_add(interval).unwrap_or(now);
+            *next = now
+                .checked_add(interval)
+                .or_else(|| now.checked_add(MAX_SPACING))
+                .unwrap_or(now);
         }
         true
+    }
+
+    #[cfg(feature = "html")]
+    fn push_next(&self, at: Option<Instant>) {
+        if let Some(at) = at {
+            let mut next = self.next.lock().unwrap_or_else(PoisonError::into_inner);
+            *next = (*next).max(at);
+        }
     }
 
     pub(super) async fn wait_spacing(&self) {

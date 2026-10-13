@@ -80,7 +80,18 @@ impl Session {
 
     #[cfg(feature = "html")]
     pub(crate) fn with_host_limits(&self, limits: crate::core::config::HostLimits) -> Self {
-        self.derive(|inner| inner.host_limits = limits.armed())
+        self.derive(|inner| inner.host_limits = limits)
+    }
+
+    #[cfg(feature = "html")]
+    pub(crate) fn crawl_limits(
+        &self,
+        polite: impl FnOnce() -> crate::core::config::HostLimits,
+    ) -> crate::core::config::HostLimits {
+        self.inner
+            .crawl_limits
+            .get_or_init(|| polite().armed())
+            .clone()
     }
 
     pub(crate) fn proxy_pool(&self) -> Option<&crate::core::proxy_pool::ProxyPool> {

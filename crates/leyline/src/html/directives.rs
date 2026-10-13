@@ -1,8 +1,8 @@
 use http::HeaderMap;
 
-use super::Directives;
 use super::page::Element;
 use super::scan::Scanner;
+use super::{Directives, lookup};
 
 const META_NAME: &str = "robots";
 const HEADER: &str = "x-robots-tag";
@@ -38,10 +38,7 @@ const DIRECTIVES: [(&str, Directive); 17] = [
 
 impl Directive {
     fn parse(token: &str) -> Option<Directive> {
-        DIRECTIVES
-            .iter()
-            .find(|(name, _)| name.eq_ignore_ascii_case(token))
-            .map(|(_, directive)| *directive)
+        lookup(&DIRECTIVES, token)
     }
 }
 

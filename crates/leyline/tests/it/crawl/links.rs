@@ -149,3 +149,82 @@ async fn a_crawl_sniffs_a_page_without_a_content_type() {
     assert_eq!(kept, BTreeSet::from(["/".to_owned(), "/plain".to_owned()]));
     assert_eq!(crawl.stats().skipped(SkipReason::NotHtml), 1);
 }
+
+#[tokio::test]
+async fn a_crawl_keeps_a_page_that_redirects_back_to_itself_through_a_check() {
+    let visits = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let count = visits.clone();
+    let server = TestServer::http(move |request| match request.target.as_str() {
+        "/" => html(r#"<a href="/article">A</a>"#),
+        "/article" if count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 => {
+            TestResponse::new(302).header("location", "/check")
+        }
+        "/article" => html("<p>article</p>"),
+        "/check" => TestResponse::new(302).header("location", "/article"),
+        _ => TestResponse::new(404),
+    })
+    .await
+    .unwrap();
+    let mut crawl = Session::new().crawl(server.url("/"));
+    let mut kept = BTreeSet::new();
+    while let Some(page) = crawl.next().await {
+        kept.insert(page.unwrap().url().path().to_owned());
+    }
+    assert_eq!(kept, BTreeSet::from(["/", "/article"].map(String::from)));
+}
+
+#[tokio::test]
+async fn a_crawl_resolves_links_against_the_base_element() {
+    let server = TestServer::http(|request| match request.target.as_str() {
+        "/" => html(r#"<base href="/docs/"><a href="guide">G</a>"#),
+        "/docs/guide" => html("<p>guide</p>"),
+        _ => TestResponse::new(404),
+    })
+    .await
+    .unwrap();
+    let mut crawl = Session::new().crawl(server.url("/"));
+    while let Some(page) = crawl.next().await {
+        page.unwrap();
+    }
+    assert_eq!(
+        page_targets(&server).await,
+        BTreeSet::from(["/", "/docs/guide"].map(String::from))
+    );
+}
+
+#[tokio::test]
+async fn a_domain_crawl_from_an_address_stays_on_that_address() {
+    let server = TestServer::http(|request| match request.target.as_str() {
+        "/" => html(r#"<a href="http://127.1.0.1:9/x">X</a><a href="/y">Y</a>"#),
+        _ => html("<p>y</p>"),
+    })
+    .await
+    .unwrap();
+    let mut crawl = Session::new()
+        .crawl(server.url("/"))
+        .scope(Scope::Domain)
+        .host_limits(leyline::HostLimits::new());
+    while let Some(page) = crawl.next().await {
+        page.unwrap();
+    }
+    assert_eq!(crawl.stats().requests(), 2);
+}
+
+#[tokio::test]
+async fn a_crawl_keeps_a_page_whose_text_matched_only_a_skipped_copy() {
+    let server = TestServer::http(|request| match request.target.as_str() {
+        "/" => html(r#"<a href="/x">X</a><a href="/z">Z</a><a href="/w">W</a>"#),
+        "/x" => html("<p>original words</p>"),
+        "/z" => html(r#"<link rel="canonical" href="/x"><p>other words</p>"#),
+        "/w" => html("<p>other words</p>"),
+        _ => TestResponse::new(404),
+    })
+    .await
+    .unwrap();
+    let mut crawl = Session::new().crawl(server.url("/"));
+    let mut kept = BTreeSet::new();
+    while let Some(page) = crawl.next().await {
+        kept.insert(page.unwrap().url().path().to_owned());
+    }
+    assert_eq!(kept, BTreeSet::from(["/", "/x", "/w"].map(String::from)));
+}

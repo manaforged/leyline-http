@@ -20,11 +20,15 @@ impl std::fmt::Display for Origin {
     }
 }
 
+pub(crate) fn normal_host(host: &str) -> String {
+    host.trim().trim_end_matches('.').to_ascii_lowercase()
+}
+
 impl Origin {
     pub(crate) fn of(url: &url::Url) -> Option<Self> {
         Some(Self {
             scheme: url.scheme().to_ascii_lowercase(),
-            host: url.host_str()?.trim_end_matches('.').to_ascii_lowercase(),
+            host: normal_host(url.host_str()?),
             port: url.port_or_known_default()?,
         })
     }
@@ -50,7 +54,7 @@ enum HostPattern {
 
 impl HostPattern {
     fn parse(host: &str) -> Self {
-        let host = host.trim().trim_end_matches('.').to_ascii_lowercase();
+        let host = normal_host(host);
         match host.strip_prefix("*.") {
             Some(domain) => Self::Subdomains(domain.to_owned()),
             None => Self::Exact(host),
@@ -199,10 +203,37 @@ impl HostLimits {
     }
 
     #[cfg(feature = "html")]
-    pub(crate) fn raise_floor(&self, url: &url::Url, gap: Duration) {
+    pub(crate) fn set_floor(&self, url: &url::Url, gap: Option<Duration>) {
         if let Some(origin) = Origin::of(url) {
-            self.gates.raise_floor(origin, gap);
+            self.gates.set_floor(origin, gap);
         }
+    }
+
+    #[cfg(feature = "html")]
+    pub(crate) fn filled_from(mut self, defaults: &HostLimits) -> Self {
+        self.rule.max_in_flight = self.rule.max_in_flight.or(defaults.rule.max_in_flight);
+        self.rule.interval = self.rule.interval.or(defaults.rule.interval);
+        if self.pause.statuses.is_empty() {
+            self.pause.statuses.clone_from(&defaults.pause.statuses);
+        }
+        self
+    }
+
+    #[cfg(feature = "html")]
+    pub(crate) fn ready(&self, origin: &Origin) -> bool {
+        let gate = self
+            .gates
+            .by_origin
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(origin)
+            .cloned();
+        gate.is_none_or(|gate| !gate.busy_after(Instant::now()))
+    }
+
+    #[cfg(feature = "html")]
+    pub(crate) fn max_in_flight_for(&self, origin: &Origin) -> Option<usize> {
+        self.rule_for(&origin.host).max_in_flight
     }
 
     fn rule_for(&self, host: &str) -> Rule {
@@ -219,14 +250,14 @@ impl HostLimits {
         }
         let origin = Origin::of(url)?;
         let rule = self.rule_for(&origin.host);
-        let interval = rule.interval.max(self.gates.floor(&origin));
-        let gate = self.gates.gate(origin, rule.max_in_flight);
+        let gate = self.gates.gate(origin.clone(), rule.max_in_flight);
         let waiting = Count::enter(&gate.waiting);
         let permit = acquire(gate.slots.as_ref()).await;
         let total = loop {
             gate.wait_unpaused().await;
             gate.wait_spacing().await;
             let total = acquire(self.gates.total.as_ref()).await;
+            let interval = rule.interval.max(self.gates.floor(&origin));
             if gate.try_admit(interval) {
                 break total;
             }

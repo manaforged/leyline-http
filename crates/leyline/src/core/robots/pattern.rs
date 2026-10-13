@@ -30,7 +30,7 @@ impl Pattern {
                 tokens.push(Token::Any);
             }
             let mut bytes = Vec::new();
-            encode(piece, &mut bytes, false);
+            encode(piece, &mut bytes, true);
             tokens.extend(bytes.into_iter().map(Token::Byte));
         }
         Some(Pattern { tokens, anchored })
@@ -114,6 +114,9 @@ fn encode(text: &str, out: &mut Vec<u8>, escape_specials: bool) {
 }
 
 fn hex_pair(pair: &[u8]) -> Option<u8> {
+    if !pair.iter().all(u8::is_ascii_hexdigit) {
+        return None;
+    }
     let text = std::str::from_utf8(pair).ok()?;
     u8::from_str_radix(text, 16).ok()
 }

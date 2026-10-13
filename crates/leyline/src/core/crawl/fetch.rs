@@ -1,4 +1,5 @@
-use http::{HeaderMap, StatusCode};
+use http::header::{CONTENT_TYPE, LOCATION};
+use http::{HeaderMap, HeaderName, StatusCode};
 use url::Url;
 
 use super::SkipReason;
@@ -7,31 +8,43 @@ use crate::core::error::Result;
 use crate::core::session::Session;
 
 const HTML_TYPES: [&str; 2] = ["text/html", "application/xhtml+xml"];
-const HTML_SIGNATURES: [&str; 17] = [
-    "<!DOCTYPE HTML",
-    "<HTML",
-    "<HEAD",
-    "<SCRIPT",
-    "<IFRAME",
-    "<H1",
-    "<DIV",
-    "<FONT",
-    "<TABLE",
-    "<A",
-    "<STYLE",
-    "<TITLE",
-    "<B",
-    "<BODY",
-    "<BR",
-    "<P",
-    "<!--",
+const HTML_SIGNATURES: [&[u8]; 17] = [
+    b"<!DOCTYPE HTML",
+    b"<HTML",
+    b"<HEAD",
+    b"<SCRIPT",
+    b"<IFRAME",
+    b"<H1",
+    b"<DIV",
+    b"<FONT",
+    b"<TABLE",
+    b"<A",
+    b"<STYLE",
+    b"<TITLE",
+    b"<B",
+    b"<BODY",
+    b"<BR",
+    b"<P",
+    b"<!--",
 ];
-const SNIFF_WHITESPACE: [char; 5] = ['\t', '\n', '\x0c', '\r', ' '];
-const LOCATION: &str = "location";
-const CONTENT_TYPE: &str = "content-type";
+const SNIFF_WHITESPACE: [u8; 5] = [b'\t', b'\n', 0x0c, b'\r', b' '];
+const SNIFF_BYTES: usize = 512;
+const MAX_UNTYPED_BYTES: usize = 8 * 1024 * 1024;
+const RETRY_LATER: [StatusCode; 2] = [
+    StatusCode::TOO_MANY_REQUESTS,
+    StatusCode::SERVICE_UNAVAILABLE,
+];
+const PERMANENT: [StatusCode; 2] = [
+    StatusCode::MOVED_PERMANENTLY,
+    StatusCode::PERMANENT_REDIRECT,
+];
+pub(super) const X_ROBOTS_TAG: HeaderName = HeaderName::from_static("x-robots-tag");
+pub(super) const CONTENT_USAGE: HeaderName = HeaderName::from_static("content-usage");
+const KEPT_HEADERS: [HeaderName; 2] = [X_ROBOTS_TAG, CONTENT_USAGE];
 
 pub(super) enum Fetched {
-    Redirect(Url),
+    Redirect { to: Url, permanent: bool },
+    Later,
     Skip(SkipReason),
     Page(Box<Loaded>),
 }
@@ -50,14 +63,27 @@ fn is_html(content_type: &str) -> bool {
         .any(|kind| kind.eq_ignore_ascii_case(media))
 }
 
-fn sniffs_html(body: &str) -> bool {
-    let start = body.trim_start_matches(SNIFF_WHITESPACE).as_bytes();
+fn sniffs_html(body: &[u8]) -> bool {
+    let skip = body
+        .iter()
+        .take_while(|byte| SNIFF_WHITESPACE.contains(byte))
+        .count();
+    let start = &body[skip..];
     HTML_SIGNATURES.iter().any(|signature| {
-        let signature = signature.as_bytes();
         start.len() > signature.len()
             && start[..signature.len()].eq_ignore_ascii_case(signature)
             && matches!(start[signature.len()], b' ' | b'>')
     })
+}
+
+fn kept_headers(all: &HeaderMap) -> HeaderMap {
+    let mut kept = HeaderMap::new();
+    for name in KEPT_HEADERS {
+        for value in all.get_all(&name) {
+            kept.append(name.clone(), value.clone());
+        }
+    }
+    kept
 }
 
 pub(super) async fn fetch(session: Session, url: Url) -> Result<Fetched> {
@@ -69,25 +95,46 @@ pub(super) async fn fetch(session: Session, url: Url) -> Result<Fetched> {
         .await?;
     let status = response.status();
     if status.is_redirection() {
-        let target = response.header(LOCATION).and_then(|to| url.join(to).ok());
-        return Ok(target.map_or(Fetched::Skip(SkipReason::Status), Fetched::Redirect));
+        let target = response
+            .header(LOCATION.as_str())
+            .and_then(|to| url.join(to).ok());
+        return Ok(match target {
+            Some(to) => Fetched::Redirect {
+                to,
+                permanent: PERMANENT.contains(&status),
+            },
+            None => Fetched::Skip(SkipReason::Status),
+        });
     }
     if response.block().is_some() {
         return Ok(Fetched::Skip(SkipReason::Blocked));
     }
+    if RETRY_LATER.contains(&status) {
+        return Ok(Fetched::Later);
+    }
     if !status.is_success() {
         return Ok(Fetched::Skip(SkipReason::Status));
     }
-    let declared = response.header(CONTENT_TYPE).map(is_html);
+    let declared = response.header(CONTENT_TYPE.as_str()).map(is_html);
     if declared == Some(false) {
         return Ok(Fetched::Skip(SkipReason::NotHtml));
     }
     let url = response.url().clone();
-    let headers = response.headers().clone();
-    let html = response.text().await?;
-    if declared.is_none() && !sniffs_html(&html) {
-        return Ok(Fetched::Skip(SkipReason::NotHtml));
-    }
+    let headers = kept_headers(response.headers());
+    let html = match declared {
+        Some(_) => response.text().await?,
+        None => {
+            let body = response
+                .read_until(MAX_UNTYPED_BYTES, |body, _| {
+                    body.len() >= SNIFF_BYTES && !sniffs_html(body)
+                })
+                .await?;
+            if !sniffs_html(&body) {
+                return Ok(Fetched::Skip(SkipReason::NotHtml));
+            }
+            String::from_utf8_lossy(&body).into_owned()
+        }
+    };
     Ok(Fetched::Page(Box::new(Loaded {
         url,
         status,

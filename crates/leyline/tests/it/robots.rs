@@ -162,13 +162,13 @@ async fn session_robots_reads_at_least_500_kib() {
 }
 
 #[test]
-fn robots_read_content_usage_by_path_and_keep_the_strictest_answer() {
+fn robots_read_content_usage_by_the_longest_matching_path() {
     let robots = Robots::parse(
         "User-agent: *\nContent-Usage: train-ai=n, search=y, unknown-label=y\nContent-Usage: /ai-ok/ train-ai=y\nContent-Usage: /no-search/ search=n\nContent-Signal: ai-input=yes\n",
         "*",
     );
     assert!(!robots.allows_use(&at("/page"), Purpose::AiTrain));
-    assert!(!robots.allows_use(&at("/ai-ok/page"), Purpose::AiTrain));
+    assert!(robots.allows_use(&at("/ai-ok/page"), Purpose::AiTrain));
     assert!(robots.allows_use(&at("/page"), Purpose::Search));
     assert!(!robots.allows_use(&at("/no-search/page"), Purpose::Search));
     assert!(robots.allows_use(&at("/page"), Purpose::AiInput));
@@ -176,4 +176,65 @@ fn robots_read_content_usage_by_path_and_keep_the_strictest_answer() {
     let open = Robots::parse("User-agent: *\nContent-Usage: /ai-ok/ train-ai=y\n", "*");
     assert!(open.allows_use(&at("/ai-ok/page"), Purpose::AiTrain));
     assert!(open.allows_use(&at("/other"), Purpose::AiTrain));
+}
+
+#[test]
+fn robots_survive_a_huge_crawl_delay() {
+    let robots = Robots::parse("User-agent: *\nCrawl-delay: 1e300\n", "*");
+    assert!(
+        robots
+            .crawl_delay()
+            .is_some_and(|gap| gap > Duration::from_secs(3600))
+    );
+}
+
+#[test]
+fn robots_keep_a_group_open_across_crawl_delay() {
+    let robots = Robots::parse(
+        "User-agent: a\nCrawl-delay: 5\nUser-agent: *\nDisallow: /p\n",
+        "*",
+    );
+    assert_eq!(robots.crawl_delay(), Some(Duration::from_secs(5)));
+    assert!(!robots.allows(&at("/p")));
+}
+
+#[test]
+fn robots_match_a_dollar_inside_a_pattern_literally() {
+    let robots = Robots::parse("User-agent: *\nDisallow: /price$list\n", "*");
+    assert!(!robots.allows(&at("/price$list")));
+    assert!(robots.allows(&at("/price")));
+}
+
+#[test]
+fn robots_reject_a_sign_inside_a_percent_escape() {
+    let robots = Robots::parse("User-agent: *\nDisallow: /a%+41\n", "*");
+    assert!(robots.allows(&at("/a%041")));
+    assert!(!robots.allows(&at("/a%+41")));
+}
+
+#[test]
+fn robots_read_usage_values_with_parameters() {
+    let robots = Robots::parse("User-agent: *\nContent-Usage: train-ai=n;src=site\n", "*");
+    assert!(!robots.allows_use(&at("/page"), Purpose::AiTrain));
+}
+
+#[test]
+fn robots_match_the_product_token_and_only_a_star_means_everyone() {
+    let text = "User-agent: Googlebot/2.1\nDisallow: /g\n\nUser-agent: 123\nDisallow: /\n\nUser-agent: *\nDisallow: /all\n";
+    let google = Robots::parse(text, "Googlebot/2.1 (+http://www.google.com/bot.html)");
+    assert!(!google.allows(&at("/g")));
+    assert!(google.allows(&at("/all")));
+    let anyone = Robots::parse(text, "*");
+    assert!(anyone.allows(&at("/g")));
+    assert!(!anyone.allows(&at("/all")));
+}
+
+#[tokio::test]
+async fn session_robots_treats_rate_limiting_as_unreachable() {
+    let server = TestServer::http(|_| TestResponse::new(429).header("retry-after", "0"))
+        .await
+        .unwrap();
+    let robots = Session::new().robots(server.url("/"), "*").await.unwrap();
+    assert_eq!(robots.source(), RobotsSource::Unreachable);
+    assert!(!robots.allows(&at("/page")));
 }

@@ -12,6 +12,7 @@ pub(crate) use pattern::{Pattern, path_bytes};
 
 const ROBOTS_PATH: &str = "/robots.txt";
 const BYTE_ORDER_MARK: char = '\u{feff}';
+const ANY_AGENT: &str = "*";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
@@ -43,9 +44,10 @@ impl Purpose {
     }
 
     fn parse(key: &str) -> Option<Purpose> {
-        Purpose::ALL
-            .into_iter()
-            .find(|purpose| purpose.as_str().eq_ignore_ascii_case(key))
+        lookup(
+            &Purpose::ALL.map(|purpose| (purpose.as_str(), purpose)),
+            key,
+        )
     }
 
     fn from_label(label: &str) -> Option<Purpose> {
@@ -117,10 +119,7 @@ const FIELDS: [(&str, Field); 11] = [
 
 impl Field {
     fn parse(key: &str) -> Option<Field> {
-        FIELDS
-            .iter()
-            .find(|(name, _)| name.eq_ignore_ascii_case(key))
-            .map(|(_, field)| *field)
+        lookup(&FIELDS, key)
     }
 }
 
@@ -131,11 +130,17 @@ enum Agent {
 }
 
 impl Agent {
-    fn parse(token: &str) -> Agent {
-        match token.trim() {
-            "*" => Agent::Any,
-            name => Agent::Named(name.to_ascii_lowercase()),
+    fn parse(token: &str) -> Option<Agent> {
+        let token = token.trim();
+        if token == ANY_AGENT {
+            return Some(Agent::Any);
         }
+        let name: String = token
+            .chars()
+            .take_while(|c| c.is_ascii_alphabetic() || matches!(c, '_' | '-'))
+            .map(|c| c.to_ascii_lowercase())
+            .collect();
+        (!name.is_empty()).then_some(Agent::Named(name))
     }
 }
 
@@ -161,7 +166,9 @@ impl Group {
                     .parse::<f64>()
                     .ok()
                     .filter(|s| s.is_finite() && *s >= 0.0);
-                self.crawl_delay = self.crawl_delay.or(seconds.map(Duration::from_secs_f64));
+                self.crawl_delay = self
+                    .crawl_delay
+                    .or(seconds.map(|s| Duration::try_from_secs_f64(s).unwrap_or(Duration::MAX)));
             }
             Field::ContentSignal => {
                 let prefs = value
@@ -197,6 +204,7 @@ fn pref(
     values: &[(&str, bool)],
 ) -> Option<(Purpose, bool)> {
     let (key, value) = entry.split_once('=')?;
+    let value = value.split(';').next().unwrap_or_default();
     Some((purpose(key)?, lookup(values, value)?))
 }
 
@@ -239,23 +247,24 @@ impl Robots {
                         groups.push(Group::default());
                         collecting_agents = true;
                     }
-                    if let Some(group) = groups.last_mut() {
-                        group.agents.insert(Agent::parse(value));
+                    if let (Some(group), Some(agent)) = (groups.last_mut(), Agent::parse(value)) {
+                        group.agents.insert(agent);
                     }
                 }
                 Field::Sitemap if !value.is_empty() => sitemaps.push(value.to_owned()),
                 Field::Sitemap => {}
                 field => {
-                    collecting_agents = false;
+                    if matches!(field, Field::Allow | Field::Disallow) {
+                        collecting_agents = false;
+                    }
                     if let Some(group) = groups.last_mut() {
                         group.apply(field, value);
                     }
                 }
             }
         }
-        let named = Agent::parse(agent);
-        let wanted = match named {
-            Agent::Named(_) if groups.iter().any(|group| group.agents.contains(&named)) => named,
+        let wanted = match Agent::parse(agent) {
+            Some(named) if groups.iter().any(|group| group.agents.contains(&named)) => named,
             _ => Agent::Any,
         };
         let mut robots = Robots::empty(RobotsSource::Parsed);
@@ -303,14 +312,18 @@ impl Robots {
     #[must_use]
     pub fn allows_use(&self, url: &Url, purpose: Purpose) -> bool {
         let path = path_bytes(url);
-        !self.uses.iter().any(|rule| {
-            rule.purpose == purpose
-                && !rule.allowed
-                && rule
-                    .pattern
-                    .as_ref()
-                    .is_none_or(|pattern| pattern.matches(&path))
-        })
+        self.uses
+            .iter()
+            .filter(|rule| rule.purpose == purpose)
+            .filter_map(|rule| match &rule.pattern {
+                None => Some((0, rule.allowed)),
+                Some(pattern) if pattern.matches(&path) => {
+                    Some((pattern.specificity(), rule.allowed))
+                }
+                Some(_) => None,
+            })
+            .max_by_key(|(specificity, allowed)| (*specificity, !allowed))
+            .is_none_or(|(_, allowed)| allowed)
     }
 
     #[must_use]

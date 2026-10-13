@@ -26,7 +26,8 @@ while let Some(page) = crawl.next().await {
 ```
 
 That crawl stays on the seed's host, sends one request at a time to each host
-and at most one a second, pauses a host that answers 429 or 503, reads the
+and at most one a second, pauses a host that answers 429 or 503 and tries
+that page up to three times, reads the
 site's sitemaps, follows redirects through the same checks as links, skips
 error pages, files, and block pages, and drops copies. It obeys no robots
 rules until you ask. Four settings change the rest:
@@ -57,7 +58,7 @@ println!("{}", crawl.stats());
 | `respect(Respect)` | none | `Robots` obeys robots.txt `Disallow` and `Crawl-delay`, the page's `noindex` and `nofollow`, and `rel="nofollow"`. `AiTraining` does all of that and also obeys the site's AI-training opt-outs |
 | `scope(Scope)` | `Host` | `Host`: the seed's host. `Domain`: its registrable domain. `Prefix`: its host and directory |
 | `limit(n)` | none | Stops after `n` kept pages |
-| `host_limits(HostLimits)` | the session's, or one in flight and one a second per host | Paces each host. The value is used as given; `HostLimits::new()` has no limits |
+| `host_limits(HostLimits)` | the session's, with one in flight, one a second, and a 429/503 pause per host wherever the session's leave them unset | Paces each host. The value is used as given; `HostLimits::new()` has no limits |
 
 The crawl reads each site's robots.txt once, and again after 24 hours, for
 its `Sitemap` lines; it obeys the rest only with `respect`. Robots groups are
@@ -96,8 +97,9 @@ For each URL, in order, the crawl:
 
 The crawl reads the sitemaps that each site's robots.txt lists, or
 `/sitemap.xml` when it lists none (and, with `respect`, when robots.txt
-allows it). It follows a sitemap index to the sitemaps it names, reads
-gzipped sitemaps, and reads at most 50 sitemap files and 50 MiB per file;
+allows it). With `respect`, it opens only sitemap files that their own
+site's robots.txt allows. It follows a sitemap index to the sitemaps it
+names on the same host, reads gzipped and plain-text sitemaps, and reads at most 50 sitemap files and 50 MiB per file;
 with a `limit`, it opens no new sitemap file once it has queued that many
 URLs. Each `<loc>` URL passes the same checks as a link.
 

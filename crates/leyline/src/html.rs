@@ -90,6 +90,17 @@ pub fn text(document: &str) -> String {
     page::text(document)
 }
 
+pub(crate) fn base(document: &str) -> Option<String> {
+    page::base(document)
+}
+
+fn lookup<T: Copy>(table: &[(&str, T)], name: &str) -> Option<T> {
+    table
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case(name))
+        .map(|(_, value)| *value)
+}
+
 #[must_use]
 pub fn canonical(document: &str) -> Option<String> {
     page::canonical(document)

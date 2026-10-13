@@ -4,7 +4,7 @@ use super::assign::{Entry, Item, Owner, assign};
 use super::entity::decode;
 use super::fieldset::Fieldsets;
 use super::scan::{Scanner, Tag};
-use super::{Button, Form, FormEnctype, FormMethod};
+use super::{Button, Form, FormEnctype, FormMethod, lookup};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Control {
@@ -52,7 +52,10 @@ struct Builder {
 }
 
 pub(super) fn forms(document: &str) -> Vec<Form> {
-    let mut builder = Builder::default();
+    let mut builder = Builder {
+        base: super::base(document),
+        ..Builder::default()
+    };
     for tag in Scanner::new(document) {
         builder.tag(&tag);
     }
@@ -70,9 +73,6 @@ impl Builder {
             }
             (false, "form") => {}
             (true, "form") => self.close_form(),
-            (false, "base") if self.base.is_none() => {
-                self.base = tag.attr("href").map(|href| href.trim().to_owned());
-            }
             _ => {
                 if !tag.closing {
                     self.record(tag, None);
@@ -189,7 +189,7 @@ impl Builder {
         }
         let value = match tag.attr("value") {
             Some(value) => value.to_owned(),
-            None => collapse(&decode(tag.text)),
+            None => collapse(&decode(&tag.text)),
         };
         if select.first.is_none() {
             select.first = Some(value.clone());
@@ -272,10 +272,7 @@ impl Tag<'_> {
         let Some(kind) = self.attr("type").map(str::trim) else {
             return default;
         };
-        table
-            .iter()
-            .find(|(name, _)| name.eq_ignore_ascii_case(kind))
-            .map_or(default, |(_, control)| *control)
+        lookup(table, kind).unwrap_or(default)
     }
 }
 
