@@ -257,6 +257,7 @@ impl HostLimits {
             .map_or(self.rule, |(_, rule)| rule)
     }
 
+    #[cfg(feature = "websocket")]
     pub(crate) async fn admit(&self, url: &url::Url) -> Option<HostPass> {
         self.admit_with(None, url).await
     }

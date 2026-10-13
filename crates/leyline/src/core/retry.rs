@@ -276,6 +276,7 @@ impl RetryPolicy {
         }
     }
 
+    #[cfg(feature = "html")]
     pub(crate) fn or(self, fallback: RetryPolicy) -> RetryPolicy {
         match self.is_none() {
             true => fallback,
