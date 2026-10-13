@@ -310,3 +310,24 @@ async fn a_crawl_keeps_short_pages_that_share_their_text() {
     }
     assert_eq!(kept, BTreeSet::from(["/", "/a", "/b"].map(String::from)));
 }
+
+#[tokio::test]
+async fn a_crawl_follows_a_chain_of_canonical_pages_to_its_end() {
+    let server = TestServer::http(|request| match request.target.as_str() {
+        "/" => html(r#"<a href="/a">A</a>"#),
+        "/a" => html(r#"<link rel="canonical" href="/b"><p>story</p>"#),
+        "/b" => html(r#"<link rel="canonical" href="/c"><p>story</p>"#),
+        "/c" => html(r#"<link rel="canonical" href="/c"><p>story</p>"#),
+        _ => TestResponse::new(404),
+    })
+    .await
+    .unwrap();
+    let mut crawl = Session::new()
+        .crawl(server.url("/"))
+        .host_limits(leyline::HostLimits::new());
+    let mut kept = BTreeSet::new();
+    while let Some(page) = crawl.next().await {
+        kept.insert(page.unwrap().url().path().to_owned());
+    }
+    assert_eq!(kept, BTreeSet::from(["/", "/c"].map(String::from)));
+}

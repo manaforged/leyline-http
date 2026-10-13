@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use url::{Host, Url};
 
 use crate::cookie::parse::registrable_domain;
-use crate::core::config::{Origin, normal_host};
+use crate::core::config::{Origin, normalize_host};
 use crate::core::robots::normalize;
 use crate::html::WEB_SCHEMES;
 
@@ -26,7 +26,7 @@ enum Bound {
 }
 
 fn host(url: &Url) -> Option<String> {
-    Some(normal_host(url.host_str()?))
+    Some(normalize_host(url.host_str()?))
 }
 
 fn is_ip(url: &Url) -> bool {
@@ -82,7 +82,6 @@ pub(super) struct Queued {
     pub(super) hops: usize,
     pub(super) seed: bool,
     pub(super) widen: bool,
-    pub(super) attempts: u8,
     pub(super) chain: Vec<String>,
 }
 
@@ -94,7 +93,6 @@ impl Queued {
             hops: 0,
             seed: false,
             widen: false,
-            attempts: 0,
             chain: Vec::new(),
         }
     }

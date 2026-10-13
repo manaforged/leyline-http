@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use super::entity::decode_attribute;
 
 const RAW_TEXT: [&str; 4] = ["script", "style", "textarea", "title"];
@@ -16,7 +18,7 @@ pub(super) struct Tag<'a> {
     pub(super) self_closing: bool,
     pub(super) attrs: Vec<(String, String)>,
     pub(super) raw: Option<&'a str>,
-    pub(super) text: String,
+    pub(super) text: Cow<'a, str>,
 }
 
 impl Tag<'_> {
@@ -126,28 +128,36 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    fn gather(&mut self) -> String {
-        let mut text = String::new();
+    fn gather(&mut self) -> Cow<'a, str> {
+        let doc = self.doc;
+        let mut spliced: Option<String> = None;
         loop {
-            let rest = &self.doc[self.pos..];
+            let rest = &doc[self.pos..];
             let Some(at) = rest.find('<') else {
-                text.push_str(rest);
-                self.pos = self.doc.len();
-                return text;
+                self.pos = doc.len();
+                return joined(spliced, rest);
             };
-            text.push_str(&rest[..at]);
+            let chunk = &rest[..at];
             match self.markup(self.pos + at) {
-                Markup::Tag => return text,
-                Markup::Literal => text.push('<'),
-                Markup::Skipped => {}
-                Markup::Cdata(body) => escape(body, &mut text),
+                Markup::Tag => return joined(spliced, chunk),
+                Markup::Literal => {
+                    let text = spliced.get_or_insert_with(String::new);
+                    text.push_str(chunk);
+                    text.push('<');
+                }
+                Markup::Skipped => spliced.get_or_insert_with(String::new).push_str(chunk),
+                Markup::Cdata(body) => {
+                    let text = spliced.get_or_insert_with(String::new);
+                    text.push_str(chunk);
+                    escape(body, text);
+                }
             }
         }
     }
 
     pub(super) fn lead(&mut self) -> String {
         self.started = true;
-        self.gather()
+        self.gather().into_owned()
     }
 }
 
@@ -156,6 +166,16 @@ enum Markup<'a> {
     Literal,
     Skipped,
     Cdata(&'a str),
+}
+
+fn joined<'a>(spliced: Option<String>, tail: &'a str) -> Cow<'a, str> {
+    match spliced {
+        Some(mut text) => {
+            text.push_str(tail);
+            Cow::Owned(text)
+        }
+        None => Cow::Borrowed(tail),
+    }
 }
 
 fn escape(body: &str, out: &mut String) {

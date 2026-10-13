@@ -190,3 +190,82 @@ async fn a_crawl_waits_out_a_robots_txt_outage() {
     }
     assert_eq!(kept, BTreeSet::from(["/", "/a"].map(String::from)));
 }
+
+#[tokio::test]
+async fn a_crawl_paces_a_host_the_session_overrides() {
+    let stamps = Stamps::default();
+    let seen = stamps.clone();
+    let server = TestServer::http(move |request| {
+        stamp(&seen, &request.target);
+        match request.target.as_str() {
+            "/" => html(r#"<a href="/a">A</a>"#),
+            _ => html("<p>a</p>"),
+        }
+    })
+    .await
+    .unwrap();
+    let session = Session::builder()
+        .host_limits(HostLimits::new().host("127.0.0.1", HostLimits::new().max_in_flight(8)))
+        .build()
+        .unwrap();
+    let mut crawl = session.crawl(server.url("/"));
+    while let Some(page) = crawl.next().await {
+        page.unwrap();
+    }
+    let gap = at(&stamps, "/a") - at(&stamps, "/");
+    assert!(gap >= Duration::from_millis(900), "{gap:?}");
+}
+
+#[tokio::test]
+async fn a_crawl_that_ignores_robots_ignores_an_earlier_crawl_delay() {
+    let stamps = Stamps::default();
+    let seen = stamps.clone();
+    let server = TestServer::http(move |request| {
+        stamp(&seen, &request.target);
+        match request.target.as_str() {
+            "/robots.txt" => TestResponse::new(200).body("User-agent: *\nCrawl-delay: 4\n"),
+            "/" | "/again" => html(r#"<a href="/b">B</a>"#),
+            _ => html("<p>b</p>"),
+        }
+    })
+    .await
+    .unwrap();
+    let session = Session::new();
+    let mut first = session.crawl(server.url("/")).limit(1);
+    while let Some(page) = first.next().await {
+        page.unwrap();
+    }
+    let mut second = session.crawl(server.url("/again")).ignore_robots();
+    while let Some(page) = second.next().await {
+        page.unwrap();
+    }
+    let gap = at(&stamps, "/b") - at(&stamps, "/again");
+    assert!(gap < Duration::from_millis(2500), "{gap:?}");
+}
+
+#[tokio::test]
+async fn a_crawl_that_ignores_robots_does_not_wait_for_robots_txt() {
+    let server = TestServer::http(|request| match request.target.as_str() {
+        "/robots.txt" => TestResponse::new(503),
+        "/" => html(r#"<a href="/a">A</a>"#),
+        _ => html("<p>a</p>"),
+    })
+    .await
+    .unwrap();
+    let mut crawl = Session::new()
+        .crawl(server.url("/"))
+        .ignore_robots()
+        .host_limits(HostLimits::new());
+    let started = Instant::now();
+    let mut pages = 0;
+    while let Some(page) = crawl.next().await {
+        page.unwrap();
+        pages += 1;
+    }
+    assert_eq!(pages, 2);
+    assert!(
+        started.elapsed() < Duration::from_secs(4),
+        "{:?}",
+        started.elapsed()
+    );
+}

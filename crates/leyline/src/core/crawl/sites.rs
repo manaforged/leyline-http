@@ -1,18 +1,22 @@
+use std::collections::VecDeque;
 use std::time::Duration;
 
 use tokio::time::Instant;
 use url::Url;
 
 use super::frontier::{Queued, page_key};
-use super::{ANY_AGENT, Crawl, Event, MAX_ATTEMPTS, MAX_IN_FLIGHT, SkipReason, Task, sitemap};
-use crate::core::config::{Origin, normal_host};
+use super::{ANY_AGENT, Crawl, Event, MAX_IN_FLIGHT, SkipReason, Task, sitemap};
+use crate::core::config::{Origin, normalize_host};
+use crate::core::retry::RetryPolicy;
 use crate::core::robots::{Robots, RobotsSource};
 
 const ROBOTS_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 const MAX_CRAWL_DELAY: Duration = Duration::from_secs(30);
 const MAX_SITEMAP_FILES: usize = 50;
 const MAX_SITEMAP_TASKS: usize = 2;
-const ROBOTS_RETRY: Duration = Duration::from_secs(5);
+const ROBOTS_RETRIES: u32 = 4;
+const ROBOTS_BACKOFF: Duration = Duration::from_secs(1);
+const ROBOTS_MAX_BACKOFF: Duration = Duration::from_secs(8);
 
 pub(super) enum Site {
     Pending,
@@ -48,10 +52,11 @@ impl Crawl {
                 break;
             }
             let (sites, busy, pace) = (&self.sites, &self.busy, &self.pace);
+            let obey = self.respect.is_some();
             let Some(queued) = self.frontier.pop_where(|origin| {
                 let cap = pace.max_in_flight_for(origin).unwrap_or(MAX_IN_FLIGHT);
                 let busy = busy.get(origin).copied().unwrap_or(0);
-                !matches!(sites.get(origin), Some(Site::Pending))
+                !(obey && matches!(sites.get(origin), Some(Site::Pending)))
                     && busy < cap
                     && (busy == 0 || pace.ready(origin))
             }) else {
@@ -64,16 +69,16 @@ impl Crawl {
                 Some(Site::Ready(robots, read)) if read.elapsed() < ROBOTS_MAX_AGE => {
                     Some(self.verdict(robots, &queued.url))
                 }
+                Some(Site::Pending) if self.respect.is_none() => Some(None),
                 _ => None,
             };
             match known {
+                None if self.respect.is_none() => {
+                    self.read_robots(origin.clone(), queued.url.clone());
+                    self.fetch(origin, queued);
+                }
                 None => {
-                    self.tasks.push(self.robots_task(
-                        origin.clone(),
-                        queued.url.clone(),
-                        Duration::ZERO,
-                    ));
-                    self.sites.insert(origin, Site::Pending);
+                    self.read_robots(origin, queued.url.clone());
                     self.frontier.push_front(queued);
                 }
                 Some(Some(reason)) => {
@@ -85,11 +90,23 @@ impl Crawl {
         }
     }
 
-    fn robots_task(&self, origin: Origin, url: Url, after: Duration) -> Task {
+    fn read_robots(&mut self, origin: Origin, url: Url) {
+        self.tasks.push(self.robots_task(origin.clone(), url));
+        self.sites.insert(origin, Site::Pending);
+    }
+
+    fn robots_task(&self, origin: Origin, url: Url) -> Task {
         let session = self.session.clone();
+        let retry = match self.respect {
+            Some(_) => RetryPolicy::transient()
+                .max_retries(ROBOTS_RETRIES)
+                .initial_backoff(ROBOTS_BACKOFF)
+                .max_backoff(ROBOTS_MAX_BACKOFF)
+                .jitter(false),
+            None => RetryPolicy::transient(),
+        };
         Box::pin(async move {
-            session.deadline(None).sleep(after).await;
-            let robots = match session.robots(url.as_str(), ANY_AGENT).await {
+            let robots = match session.robots_with(url.as_str(), ANY_AGENT, retry).await {
                 Ok(robots) => robots,
                 Err(_) => Robots::empty(RobotsSource::Unreachable),
             };
@@ -102,18 +119,10 @@ impl Crawl {
     }
 
     pub(super) fn robots_read(&mut self, origin: Origin, url: Url, robots: Robots) {
-        if robots.source() == RobotsSource::Unreachable {
-            let tries = self.robots_tries.entry(origin.clone()).or_default();
-            *tries += 1;
-            if *tries < MAX_ATTEMPTS {
-                let after = ROBOTS_RETRY * u32::from(*tries);
-                self.tasks.push(self.robots_task(origin, url, after));
-                return;
+        if self.frontier.in_scope(&url) {
+            for sitemap in sitemap::listed(&url, &robots, self.respect.is_some()) {
+                self.queue_sitemap(sitemap, None);
             }
-        }
-        self.robots_tries.remove(&origin);
-        for sitemap in sitemap::listed(&url, &robots, self.respect.is_some()) {
-            self.queue_sitemap(sitemap, None);
         }
         if self.respect.is_some() {
             let gap = robots.crawl_delay().map(|gap| gap.min(MAX_CRAWL_DELAY));
@@ -125,7 +134,7 @@ impl Crawl {
 
     pub(super) fn queue_sitemap(&mut self, url: Url, parent: Option<Url>) {
         let same_site = parent.as_ref().is_none_or(|parent| {
-            parent.host_str().map(normal_host) == url.host_str().map(normal_host)
+            parent.host_str().map(normalize_host) == url.host_str().map(normalize_host)
         });
         if same_site
             && self.sitemap_files.len() < MAX_SITEMAP_FILES
@@ -148,15 +157,30 @@ impl Crawl {
             self.sitemap_queue.clear();
             return false;
         }
+        let mut waiting = VecDeque::new();
+        let mut opened = false;
         while let Some(file) = self.sitemap_queue.pop_front() {
-            let refused = self.respect.is_some()
-                && match Origin::of(&file.url).and_then(|origin| self.sites.get(&origin)) {
-                    Some(Site::Ready(robots, _)) => !robots.allows(&file.url),
-                    _ => true,
-                };
-            if refused {
-                self.stats.skip(SkipReason::Robots);
+            let Some(origin) = Origin::of(&file.url) else {
                 continue;
+            };
+            if self.respect.is_some() {
+                match self.sites.get(&origin) {
+                    Some(Site::Ready(robots, _)) if !robots.allows(&file.url) => {
+                        self.stats.skip(SkipReason::Robots);
+                        continue;
+                    }
+                    Some(Site::Ready(..)) => {}
+                    Some(Site::Pending) => {
+                        waiting.push_back(file);
+                        continue;
+                    }
+                    None => {
+                        self.read_robots(origin, file.url.clone());
+                        waiting.push_back(file);
+                        opened = true;
+                        continue;
+                    }
+                }
             }
             self.sitemaps_in_flight += 1;
             let session = self.session.clone();
@@ -167,9 +191,12 @@ impl Crawl {
                     found,
                 }
             }));
-            return true;
+            opened = true;
+            break;
         }
-        false
+        waiting.append(&mut self.sitemap_queue);
+        self.sitemap_queue = waiting;
+        opened
     }
 
     pub(super) fn sitemap_read(&mut self, url: Url, index: bool, locs: Vec<String>) {

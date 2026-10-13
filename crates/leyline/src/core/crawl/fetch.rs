@@ -5,6 +5,7 @@ use url::Url;
 use super::SkipReason;
 use crate::core::config::RedirectPolicy;
 use crate::core::error::Result;
+use crate::core::retry::RetryPolicy;
 use crate::core::session::Session;
 
 const HTML_TYPES: [&str; 2] = ["text/html", "application/xhtml+xml"];
@@ -30,17 +31,12 @@ const HTML_SIGNATURES: [&[u8]; 17] = [
 const SNIFF_WHITESPACE: [u8; 5] = [b'\t', b'\n', 0x0c, b'\r', b' '];
 const SNIFF_BYTES: usize = 512;
 const MAX_UNTYPED_BYTES: usize = 8 * 1024 * 1024;
-const RETRY_LATER: [StatusCode; 2] = [
-    StatusCode::TOO_MANY_REQUESTS,
-    StatusCode::SERVICE_UNAVAILABLE,
-];
 pub(super) const X_ROBOTS_TAG: HeaderName = HeaderName::from_static("x-robots-tag");
 pub(super) const CONTENT_USAGE: HeaderName = HeaderName::from_static("content-usage");
 const KEPT_HEADERS: [HeaderName; 2] = [X_ROBOTS_TAG, CONTENT_USAGE];
 
 pub(super) enum Fetched {
     Redirect { to: Url },
-    Later,
     Skip(SkipReason),
     Page(Box<Loaded>),
 }
@@ -81,10 +77,11 @@ fn kept_headers(all: &HeaderMap) -> HeaderMap {
     kept
 }
 
-pub(super) async fn fetch(session: Session, url: Url) -> Result<Fetched> {
+pub(super) async fn fetch(session: Session, url: Url, retry: RetryPolicy) -> Result<Fetched> {
     let response = session
         .get(url.as_str())
         .redirect(RedirectPolicy::none())
+        .retry(retry)
         .stream()
         .send()
         .await?;
@@ -100,9 +97,6 @@ pub(super) async fn fetch(session: Session, url: Url) -> Result<Fetched> {
     }
     if response.block().is_some() {
         return Ok(Fetched::Skip(SkipReason::Blocked));
-    }
-    if RETRY_LATER.contains(&status) {
-        return Ok(Fetched::Later);
     }
     if !status.is_success() {
         return Ok(Fetched::Skip(SkipReason::Status));

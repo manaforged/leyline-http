@@ -1,4 +1,4 @@
-pub(super) fn normalize_host(host: &str) -> String {
+pub(crate) fn normalize_host(host: &str) -> String {
     let stripped = host.trim().trim_end_matches('.');
     let stripped = stripped
         .strip_prefix('[')

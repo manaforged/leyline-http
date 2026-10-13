@@ -71,6 +71,7 @@ impl Crawl {
             && !self.settled.contains(&key)
         {
             self.frontier.add(Queued::link(link, depth));
+            self.waiting_on.insert(held.own.clone(), key.clone());
             self.held.entry(key).or_default().push(held);
             return;
         }
@@ -105,8 +106,14 @@ impl Crawl {
     pub(super) fn settle(&mut self, key: String) {
         let kept = self.kept.contains(&key);
         let waiting = self.held.remove(&key).unwrap_or_default();
+        if let Some(next) = self.waiting_on.get(&key).cloned() {
+            self.held.entry(next).or_default().extend(waiting);
+            self.settled.insert(key);
+            return;
+        }
         self.settled.insert(key);
         for held in waiting {
+            self.waiting_on.remove(&held.own);
             if kept {
                 self.stats.skip(SkipReason::Duplicate);
             } else {

@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use tokio::time::Instant;
 
+use super::host::normalize_host;
 pub(crate) use super::host_gate::HostPass;
 use super::host_gate::{Count, Gates, acquire};
 
@@ -16,19 +17,18 @@ pub(crate) struct Origin {
 
 impl std::fmt::Display for Origin {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}://{}:{}", self.scheme, self.host, self.port)
+        match self.host.contains(':') {
+            true => write!(f, "{}://[{}]:{}", self.scheme, self.host, self.port),
+            false => write!(f, "{}://{}:{}", self.scheme, self.host, self.port),
+        }
     }
-}
-
-pub(crate) fn normal_host(host: &str) -> String {
-    host.trim().trim_end_matches('.').to_ascii_lowercase()
 }
 
 impl Origin {
     pub(crate) fn of(url: &url::Url) -> Option<Self> {
         Some(Self {
             scheme: url.scheme().to_ascii_lowercase(),
-            host: normal_host(url.host_str()?),
+            host: normalize_host(url.host_str()?),
             port: url.port_or_known_default()?,
         })
     }
@@ -54,7 +54,7 @@ enum HostPattern {
 
 impl HostPattern {
     fn parse(host: &str) -> Self {
-        let host = normal_host(host);
+        let host = normalize_host(host);
         match host.strip_prefix("*.") {
             Some(domain) => Self::Subdomains(domain.to_owned()),
             None => Self::Exact(host),
@@ -80,6 +80,7 @@ pub struct HostLimits {
     max_total: Option<usize>,
     pause: Pause,
     gates: Arc<Gates>,
+    floors: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -111,6 +112,7 @@ impl Default for HostLimits {
                 max: Duration::from_secs(24 * 60 * 60),
             },
             gates: Arc::default(),
+            floors: true,
         }
     }
 }
@@ -199,7 +201,7 @@ impl HostLimits {
             && self.overrides.is_empty()
             && self.max_total.is_none()
             && self.pause.statuses.is_empty()
-            && !self.gates.has_floors()
+            && !(self.floors && self.gates.has_floors())
     }
 
     #[cfg(feature = "html")]
@@ -211,11 +213,21 @@ impl HostLimits {
 
     #[cfg(feature = "html")]
     pub(crate) fn filled_from(mut self, defaults: &HostLimits) -> Self {
-        self.rule.max_in_flight = self.rule.max_in_flight.or(defaults.rule.max_in_flight);
-        self.rule.interval = self.rule.interval.or(defaults.rule.interval);
+        for rule in
+            std::iter::once(&mut self.rule).chain(self.overrides.iter_mut().map(|(_, rule)| rule))
+        {
+            rule.max_in_flight = rule.max_in_flight.or(defaults.rule.max_in_flight);
+            rule.interval = rule.interval.or(defaults.rule.interval);
+        }
         if self.pause.statuses.is_empty() {
             self.pause.statuses.clone_from(&defaults.pause.statuses);
         }
+        self
+    }
+
+    #[cfg(feature = "html")]
+    pub(crate) fn without_floors(mut self) -> Self {
+        self.floors = false;
         self
     }
 
@@ -257,7 +269,8 @@ impl HostLimits {
             gate.wait_unpaused().await;
             gate.wait_spacing().await;
             let total = acquire(self.gates.total.as_ref()).await;
-            let interval = rule.interval.max(self.gates.floor(&origin));
+            let floor = self.floors.then(|| self.gates.floor(&origin)).flatten();
+            let interval = rule.interval.max(floor);
             if gate.try_admit(interval) {
                 break total;
             }

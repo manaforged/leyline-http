@@ -123,3 +123,48 @@ async fn a_crawl_ends_at_its_limit_without_waiting_for_sitemaps() {
     assert_eq!(ended, Ok(2));
     assert!(targets(&server).await.contains("/sitemap.xml"));
 }
+
+#[tokio::test]
+async fn a_crawl_reads_a_sitemap_listed_on_another_host() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let robots = format!("User-agent: *\nSitemap: http://localhost:{port}/map.xml\n");
+    let map = format!("<urlset><url><loc>http://127.0.0.1:{port}/listed</loc></url></urlset>");
+    let server = TestServer::http_on(listener, move |request| match request.target.as_str() {
+        "/robots.txt" => TestResponse::new(200).body(robots.clone()),
+        "/map.xml" => TestResponse::new(200).body(map.clone()),
+        path => html(&format!("<p>{path}</p>")),
+    })
+    .unwrap();
+    let mut crawl = Session::new()
+        .crawl(server.url("/"))
+        .host_limits(leyline::HostLimits::new());
+    let mut kept = BTreeSet::new();
+    while let Some(page) = crawl.next().await {
+        kept.insert(page.unwrap().url().path().to_owned());
+    }
+    assert!(kept.contains("/listed"), "{kept:?}");
+}
+
+#[tokio::test]
+async fn a_crawl_skips_image_locations_in_a_sitemap() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let map = format!(
+        r#"<urlset xmlns:image="http://www.google.com/schemas/sitemap-image/1.1"><url><loc>{base}/page</loc><image:image><image:loc>{base}/photo.jpg</image:loc></image:image></url></urlset>"#
+    );
+    let server = TestServer::http_on(listener, move |request| match request.target.as_str() {
+        "/sitemap.xml" => TestResponse::new(200).body(map.clone()),
+        path => html(&format!("<p>{path}</p>")),
+    })
+    .unwrap();
+    let mut crawl = Session::new()
+        .crawl(server.url("/"))
+        .host_limits(leyline::HostLimits::new());
+    while let Some(page) = crawl.next().await {
+        page.unwrap();
+    }
+    let sent = targets(&server).await;
+    assert!(sent.contains("/page"));
+    assert!(!sent.contains("/photo.jpg"));
+}
