@@ -25,11 +25,13 @@ version and publish as separate crates.
   follows redirects as links, and drops error pages, files, block pages, and
   copies by canonical URL or text, preferring the canonical page over an alias
   found first. `CrawlStats` counts each `SkipReason`.
-- `Session::robots` and `Robots` read robots.txt by RFC 9309: group
-  matching, longest match with `*` and `$`, percent-encoding, the 4xx and 5xx
-  rules, up to five redirects, and a 512 KiB limit. `Robots` also reads
-  `Content-Signal` and the IETF draft `Content-Usage` as `Purpose`,
-  `Crawl-delay`, and `Sitemap` lines; `Robots::allows_use` takes the URL.
+- `Session::robots` and `Robots` read robots.txt by RFC 9309: group matching,
+  with every group record (including `Crawl-delay`, `Content-Signal`, and
+  `Content-Usage`) closing the run of `User-agent` lines, longest match with
+  `*` and `$`, percent-encoding, the 4xx and 5xx rules, up to five redirects,
+  and a 512 KiB limit. `Robots` also reads `Content-Signal` and the IETF draft
+  `Content-Usage` as `Purpose`, `Crawl-delay`, and `Sitemap` lines;
+  `Robots::allows_use` takes the URL.
 - `html::text` returns the visible text of a page, one block per line, with
   `<pre>` kept as written and script, style, and head text left out. An
   unclosed `<head>` ends at the first element that cannot be in it.

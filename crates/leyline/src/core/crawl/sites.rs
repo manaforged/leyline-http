@@ -4,7 +4,8 @@ use std::time::Duration;
 use tokio::time::Instant;
 use url::Url;
 
-use super::frontier::{Queued, page_key};
+use super::frontier::{Queued, page_key, same_site};
+use super::sitemap::SitemapRead;
 use super::{ANY_AGENT, Crawl, Event, MAX_IN_FLIGHT, SkipReason, Task, sitemap};
 use crate::core::config::{Origin, normalize_host};
 use crate::core::retry::RetryPolicy;
@@ -15,6 +16,7 @@ const MAX_CRAWL_DELAY: Duration = Duration::from_secs(30);
 const MAX_SITEMAP_FILES: usize = 50;
 const MAX_SITEMAP_TASKS: usize = 2;
 const ROBOTS_RETRIES: u32 = 4;
+const ROBOTS_FAILED: u16 = 500;
 const ROBOTS_BACKOFF: Duration = Duration::from_secs(1);
 const ROBOTS_MAX_BACKOFF: Duration = Duration::from_secs(8);
 
@@ -44,7 +46,7 @@ impl Crawl {
             self.sitemap_queue.clear();
             return;
         }
-        while self.tasks.len() < MAX_IN_FLIGHT {
+        while self.active() < MAX_IN_FLIGHT {
             if self.open_sitemap() {
                 continue;
             }
@@ -52,13 +54,14 @@ impl Crawl {
                 break;
             }
             let (sites, busy, pace) = (&self.sites, &self.busy, &self.pace);
+            let own = self.session.host_limits();
             let obey = self.respect.is_some();
             let Some(queued) = self.frontier.pop_where(|origin| {
                 let cap = pace.max_in_flight_for(origin).unwrap_or(MAX_IN_FLIGHT);
-                let busy = busy.get(origin).copied().unwrap_or(0);
                 !(obey && matches!(sites.get(origin), Some(Site::Pending)))
-                    && busy < cap
-                    && (busy == 0 || pace.ready(origin))
+                    && busy.get(origin).copied().unwrap_or(0) < cap
+                    && pace.ready(origin)
+                    && own.ready(origin)
             }) else {
                 break;
             };
@@ -88,6 +91,36 @@ impl Crawl {
                 Some(None) => self.fetch(origin, queued),
             }
         }
+        self.wake_later();
+    }
+
+    fn active(&self) -> usize {
+        let parked = self.pace.parked() + self.session.host_limits().parked();
+        self.tasks.len().saturating_sub(parked)
+    }
+
+    fn wake_later(&mut self) {
+        if self.budget_spent() {
+            return;
+        }
+        let own = self.session.host_limits();
+        let next = self
+            .frontier
+            .origins()
+            .filter_map(|origin| self.pace.ready_at(origin).max(own.ready_at(origin)))
+            .min();
+        let Some(at) = next.filter(|at| self.waking.is_none_or(|waking| at < &waking)) else {
+            return;
+        };
+        self.waking = Some(at);
+        let session = self.session.clone();
+        self.tasks.push(Box::pin(async move {
+            session
+                .deadline(None)
+                .sleep(at.saturating_duration_since(Instant::now()))
+                .await;
+            Event::Wake
+        }));
     }
 
     fn read_robots(&mut self, origin: Origin, url: Url) {
@@ -97,8 +130,10 @@ impl Crawl {
 
     fn robots_task(&self, origin: Origin, url: Url) -> Task {
         let session = self.session.clone();
+        let trusted = self.trusted.clone();
         let retry = match self.respect {
             Some(_) => RetryPolicy::transient()
+                .on_status(ROBOTS_FAILED)
                 .max_retries(ROBOTS_RETRIES)
                 .initial_backoff(ROBOTS_BACKOFF)
                 .max_backoff(ROBOTS_MAX_BACKOFF)
@@ -106,7 +141,10 @@ impl Crawl {
             None => RetryPolicy::transient(),
         };
         Box::pin(async move {
-            let robots = match session.robots_with(url.as_str(), ANY_AGENT, retry).await {
+            let robots = match session
+                .robots_with(url.as_str(), ANY_AGENT, retry, trusted)
+                .await
+            {
                 Ok(robots) => robots,
                 Err(_) => Robots::empty(RobotsSource::Unreachable),
             };
@@ -121,7 +159,9 @@ impl Crawl {
     pub(super) fn robots_read(&mut self, origin: Origin, url: Url, robots: Robots) {
         if self.frontier.in_scope(&url) {
             for sitemap in sitemap::listed(&url, &robots, self.respect.is_some()) {
-                self.queue_sitemap(sitemap, None);
+                if same_site(&url, &sitemap) {
+                    self.queue_sitemap(sitemap, None);
+                }
             }
         }
         if self.respect.is_some() {
@@ -163,6 +203,10 @@ impl Crawl {
             let Some(origin) = Origin::of(&file.url) else {
                 continue;
             };
+            if self.active() >= MAX_IN_FLIGHT {
+                waiting.push_back(file);
+                continue;
+            }
             if self.respect.is_some() {
                 match self.sites.get(&origin) {
                     Some(Site::Ready(robots, _)) if !robots.allows(&file.url) => {
@@ -184,11 +228,12 @@ impl Crawl {
             }
             self.sitemaps_in_flight += 1;
             let session = self.session.clone();
+            let (retry, trusted) = (self.page_retry.clone(), self.trusted.clone());
             self.tasks.push(Box::pin(async move {
-                let found = sitemap::read(session, file.url.clone()).await;
+                let read = sitemap::read(session, file.url.clone(), retry, trusted).await;
                 Event::Sitemap {
                     url: file.url,
-                    found,
+                    read,
                 }
             }));
             opened = true;
@@ -199,10 +244,14 @@ impl Crawl {
         opened
     }
 
-    pub(super) fn sitemap_read(&mut self, url: Url, index: bool, locs: Vec<String>) {
+    pub(super) fn sitemap_read(&mut self, url: Url, read: SitemapRead) {
         self.sitemaps_in_flight -= 1;
-        for loc in locs.iter().filter_map(|loc| Url::parse(loc).ok()) {
-            if index {
+        let found = match read {
+            SitemapRead::Found(found) => found,
+            SitemapRead::Moved(to) => return self.queue_sitemap(to, Some(url)),
+        };
+        for loc in found.locs.iter().filter_map(|loc| Url::parse(loc).ok()) {
+            if found.index {
                 self.queue_sitemap(loc, Some(url.clone()));
             } else {
                 self.frontier.add(Queued::link(loc, 0));

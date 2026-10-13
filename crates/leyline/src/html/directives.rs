@@ -89,8 +89,11 @@ fn scoped(value: &str) -> (Option<&str>, &str) {
 }
 
 fn apply(found: &mut Directives, list: &str) {
-    for word in list.split(',').flat_map(str::split_whitespace) {
-        let name = word.split(':').next().unwrap_or_default();
+    for name in list
+        .split(',')
+        .filter_map(|item| item.split(':').next())
+        .flat_map(str::split_whitespace)
+    {
         match Directive::parse(name) {
             Some(Directive::NoIndex) => found.index = false,
             Some(Directive::NoFollow) => found.follow = false,

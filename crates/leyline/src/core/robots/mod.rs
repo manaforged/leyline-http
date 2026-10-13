@@ -257,9 +257,7 @@ impl Robots {
                 Field::Sitemap if !value.is_empty() => sitemaps.push(value.to_owned()),
                 Field::Sitemap => {}
                 field => {
-                    if matches!(field, Field::Allow | Field::Disallow) {
-                        collecting_agents = false;
-                    }
+                    collecting_agents = false;
                     if let Some(group) = groups.last_mut() {
                         group.apply(field, value);
                     }

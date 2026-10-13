@@ -6,6 +6,8 @@ mod core_support {
 mod h2_support;
 #[cfg(feature = "http3")]
 mod h3_support;
+#[cfg(feature = "html")]
+mod html_pages;
 mod http_support {
     pub mod httpbin_lite;
 }

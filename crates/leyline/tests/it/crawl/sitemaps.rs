@@ -125,25 +125,39 @@ async fn a_crawl_ends_at_its_limit_without_waiting_for_sitemaps() {
 }
 
 #[tokio::test]
-async fn a_crawl_reads_a_sitemap_listed_on_another_host() {
+async fn a_crawl_reads_a_sitemap_on_another_host_of_the_same_site_only() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let robots = format!("User-agent: *\nSitemap: http://localhost:{port}/map.xml\n");
-    let map = format!("<urlset><url><loc>http://127.0.0.1:{port}/listed</loc></url></urlset>");
+    let local = listener.local_addr().unwrap();
+    let port = local.port();
+    let robots = format!(
+        "User-agent: *\nSitemap: http://maps.example.test:{port}/map.xml\nSitemap: http://other.test:{port}/far.xml\n"
+    );
+    let map =
+        format!("<urlset><url><loc>http://www.example.test:{port}/listed</loc></url></urlset>");
     let server = TestServer::http_on(listener, move |request| match request.target.as_str() {
         "/robots.txt" => TestResponse::new(200).body(robots.clone()),
         "/map.xml" => TestResponse::new(200).body(map.clone()),
         path => html(&format!("<p>{path}</p>")),
     })
     .unwrap();
-    let mut crawl = Session::new()
-        .crawl(server.url("/"))
+    let session = Session::builder()
+        .dns(
+            leyline::DnsConfig::new()
+                .resolve_host("www.example.test", [local])
+                .resolve_host("maps.example.test", [local])
+                .resolve_host("other.test", [local]),
+        )
+        .build()
+        .unwrap();
+    let mut crawl = session
+        .crawl(format!("http://www.example.test:{port}/"))
         .host_limits(leyline::HostLimits::new());
     let mut kept = BTreeSet::new();
     while let Some(page) = crawl.next().await {
         kept.insert(page.unwrap().url().path().to_owned());
     }
     assert!(kept.contains("/listed"), "{kept:?}");
+    assert!(!targets(&server).await.contains("/far.xml"));
 }
 
 #[tokio::test]
@@ -167,4 +181,22 @@ async fn a_crawl_skips_image_locations_in_a_sitemap() {
     let sent = targets(&server).await;
     assert!(sent.contains("/page"));
     assert!(!sent.contains("/photo.jpg"));
+}
+
+#[tokio::test]
+async fn a_crawl_does_not_follow_a_sitemap_redirect_past_robots() {
+    let server = TestServer::http(|request| match request.target.as_str() {
+        "/robots.txt" => TestResponse::new(200).body("User-agent: *\nDisallow: /private\n"),
+        "/sitemap.xml" => TestResponse::new(301).header("location", "/private/map.xml"),
+        path => html(&format!("<p>{path}</p>")),
+    })
+    .await
+    .unwrap();
+    let mut crawl = Session::new()
+        .crawl(server.url("/"))
+        .host_limits(leyline::HostLimits::new());
+    while let Some(page) = crawl.next().await {
+        page.unwrap();
+    }
+    assert!(!targets(&server).await.contains("/private/map.xml"));
 }

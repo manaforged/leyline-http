@@ -12,7 +12,8 @@ const MAX_BYTES: usize = 512 * 1024;
 
 impl Session {
     pub async fn robots(&self, url: impl IntoUrl, agent: &str) -> Result<Robots> {
-        self.robots_with(url, agent, RetryPolicy::transient()).await
+        self.robots_with(url, agent, RetryPolicy::transient(), None)
+            .await
     }
 
     pub(crate) async fn robots_with(
@@ -20,16 +21,15 @@ impl Session {
         url: impl IntoUrl,
         agent: &str,
         retry: RetryPolicy,
+        trusted: Option<url::Url>,
     ) -> Result<Robots> {
         let target = url.into_url_with_base(self.base_url())?.join(ROBOTS_PATH)?;
-        let response = match self
+        let mut builder = self
             .get(target.as_str())
             .redirect(RedirectPolicy::limited(MAX_REDIRECTS))
-            .retry(retry)
-            .stream()
-            .send()
-            .await
-        {
+            .retry(retry);
+        builder.trusted_origin = trusted;
+        let response = match builder.stream().send().await {
             Ok(response) => response,
             Err(err) if err.is_shut_down() => return Err(err),
             Err(_) => return Ok(Robots::empty(RobotsSource::Unreachable)),

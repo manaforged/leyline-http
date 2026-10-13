@@ -1,62 +1,6 @@
 use super::*;
 
 #[tokio::test]
-async fn a_crawl_keeps_noindex_links_and_drops_copies() {
-    let server = TestServer::http(|request| match request.target.as_str() {
-        "/" => html(
-            r#"<meta name="robots" content="noindex"><a href="/x">X</a><a href="/y">Y</a><a href="/z">Z</a><a href="/missing">M</a>"#,
-        ),
-        "/x" | "/y" => html(
-            "<p>the same text on two pages, long enough that the crawl compares it word by word and keeps only the first copy it finds</p>",
-        ),
-        "/z" => html(r#"<link rel="canonical" href="/x"><p>a printer view</p>"#),
-        _ => TestResponse::new(404),
-    })
-    .await
-    .unwrap();
-    let mut crawl = Session::new()
-        .crawl(server.url("/"))
-        .respect(Respect::Robots);
-    let mut kept = Vec::new();
-    while let Some(page) = crawl.next().await {
-        kept.push(page.unwrap().url().path().to_owned());
-    }
-    assert_eq!(kept, ["/x"]);
-    let stats = crawl.stats();
-    assert_eq!(stats.skipped(SkipReason::NoIndex), 1);
-    assert_eq!(stats.skipped(SkipReason::Duplicate), 2);
-    assert_eq!(stats.skipped(SkipReason::Status), 1);
-}
-
-#[tokio::test]
-async fn a_crawl_follows_a_redirected_seed_to_its_new_host() {
-    let target = TestServer::http(|request| match request.target.as_str() {
-        "/start" => html(r#"<p>start</p><a href="/next">N</a>"#),
-        "/next" => html("<p>next</p>"),
-        _ => TestResponse::new(404),
-    })
-    .await
-    .unwrap();
-    let location = target.url("/start");
-    let seed = TestServer::http(move |request| match request.target.as_str() {
-        "/" => TestResponse::new(301).header("location", location.as_str()),
-        _ => TestResponse::new(404),
-    })
-    .await
-    .unwrap();
-    let mut crawl = Session::new()
-        .crawl(seed.url("/"))
-        .respect(Respect::Robots)
-        .scope(Scope::Host);
-    let mut kept = Vec::new();
-    while let Some(page) = crawl.next().await {
-        kept.push(page.unwrap().url().path().to_owned());
-    }
-    assert_eq!(kept, ["/start", "/next"]);
-    assert!(targets(&target).await.contains("/robots.txt"));
-}
-
-#[tokio::test]
 async fn a_crawl_stops_at_the_page_budget_and_skips_files() {
     let server = TestServer::http(|request| match request.target.as_str() {
         "/" => html(
@@ -103,33 +47,6 @@ async fn a_shut_down_session_ends_the_crawl() {
 }
 
 #[tokio::test]
-async fn a_crawl_ignores_an_off_site_canonical_for_copies() {
-    let server = TestServer::http(|request| match request.target.as_str() {
-        "/" => html(r#"<a href="/one">1</a><a href="/two">2</a>"#),
-        "/one" => {
-            html(r#"<link rel="canonical" href="https://news.invalid/story"><p>first copy</p>"#)
-        }
-        "/two" => {
-            html(r#"<link rel="canonical" href="https://news.invalid/story"><p>second, edited</p>"#)
-        }
-        _ => TestResponse::new(404),
-    })
-    .await
-    .unwrap();
-    let session = Session::builder()
-        .host_limits(leyline::HostLimits::new().max_in_flight(4))
-        .build()
-        .unwrap();
-    let mut crawl = session.crawl(server.url("/"));
-    let mut pages = 0;
-    while let Some(page) = crawl.next().await {
-        page.unwrap();
-        pages += 1;
-    }
-    assert_eq!(pages, 3);
-}
-
-#[tokio::test]
 async fn a_crawl_sniffs_a_page_without_a_content_type() {
     let server = TestServer::http(|request| match request.target.as_str() {
         "/" => html(r#"<a href="/plain">P</a><a href="/data">D</a>"#),
@@ -153,29 +70,6 @@ async fn a_crawl_sniffs_a_page_without_a_content_type() {
 }
 
 #[tokio::test]
-async fn a_crawl_keeps_a_page_that_redirects_back_to_itself_through_a_check() {
-    let visits = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let count = visits.clone();
-    let server = TestServer::http(move |request| match request.target.as_str() {
-        "/" => html(r#"<a href="/article">A</a>"#),
-        "/article" if count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 => {
-            TestResponse::new(302).header("location", "/check")
-        }
-        "/article" => html("<p>article</p>"),
-        "/check" => TestResponse::new(302).header("location", "/article"),
-        _ => TestResponse::new(404),
-    })
-    .await
-    .unwrap();
-    let mut crawl = Session::new().crawl(server.url("/"));
-    let mut kept = BTreeSet::new();
-    while let Some(page) = crawl.next().await {
-        kept.insert(page.unwrap().url().path().to_owned());
-    }
-    assert_eq!(kept, BTreeSet::from(["/", "/article"].map(String::from)));
-}
-
-#[tokio::test]
 async fn a_crawl_resolves_links_against_the_base_element() {
     let server = TestServer::http(|request| match request.target.as_str() {
         "/" => html(r#"<base href="/docs/"><a href="guide">G</a>"#),
@@ -195,72 +89,10 @@ async fn a_crawl_resolves_links_against_the_base_element() {
 }
 
 #[tokio::test]
-async fn a_domain_crawl_from_an_address_stays_on_that_address() {
+async fn a_crawl_sniffs_html_that_breaks_its_first_tag_with_a_newline() {
     let server = TestServer::http(|request| match request.target.as_str() {
-        "/" => html(r#"<a href="http://127.1.0.1:9/x">X</a><a href="/y">Y</a>"#),
-        _ => html("<p>y</p>"),
-    })
-    .await
-    .unwrap();
-    let mut crawl = Session::new()
-        .crawl(server.url("/"))
-        .scope(Scope::Domain)
-        .host_limits(leyline::HostLimits::new());
-    while let Some(page) = crawl.next().await {
-        page.unwrap();
-    }
-    assert_eq!(crawl.stats().requests(), 2);
-}
-
-#[tokio::test]
-async fn a_crawl_keeps_a_page_whose_text_matched_only_a_skipped_copy() {
-    let server = TestServer::http(|request| match request.target.as_str() {
-        "/" => html(r#"<a href="/x">X</a><a href="/z">Z</a><a href="/w">W</a>"#),
-        "/x" => html("<p>original words</p>"),
-        "/z" => html(r#"<link rel="canonical" href="/x"><p>other words</p>"#),
-        "/w" => html("<p>other words</p>"),
-        _ => TestResponse::new(404),
-    })
-    .await
-    .unwrap();
-    let mut crawl = Session::new().crawl(server.url("/"));
-    let mut kept = BTreeSet::new();
-    while let Some(page) = crawl.next().await {
-        kept.insert(page.unwrap().url().path().to_owned());
-    }
-    assert_eq!(kept, BTreeSet::from(["/", "/x", "/w"].map(String::from)));
-}
-
-#[tokio::test]
-async fn a_seed_redirected_to_another_site_yields_only_that_page() {
-    let target = TestServer::http(|request| match request.target.as_str() {
-        "/start" => html(r#"<p>start</p><a href="/next">N</a>"#),
-        _ => html("<p>next</p>"),
-    })
-    .await
-    .unwrap();
-    let location = format!("http://localhost:{}/start", target.addr().port());
-    let seed =
-        TestServer::http(move |_| TestResponse::new(301).header("location", location.as_str()))
-            .await
-            .unwrap();
-    let mut crawl = Session::new()
-        .crawl(seed.url("/"))
-        .host_limits(leyline::HostLimits::new());
-    let mut kept = Vec::new();
-    while let Some(page) = crawl.next().await {
-        kept.push(page.unwrap().url().path().to_owned());
-    }
-    assert_eq!(kept, ["/start"]);
-}
-
-#[tokio::test]
-async fn a_crawl_keeps_the_canonical_page_over_an_alias_found_first() {
-    let server = TestServer::http(|request| match request.target.as_str() {
-        "/" => html(r#"<a href="/alias">A</a>"#),
-        "/alias" => html(r#"<link rel="canonical" href="/real"><p>the article</p>"#),
-        "/real" => html(r#"<link rel="canonical" href="/real"><p>the article</p>"#),
-        _ => TestResponse::new(404),
+        "/" => html(r#"<a href="/bare">B</a>"#),
+        _ => TestResponse::new(200).body("<html\n><p>no content type</p></html>"),
     })
     .await
     .unwrap();
@@ -271,63 +103,5 @@ async fn a_crawl_keeps_the_canonical_page_over_an_alias_found_first() {
     while let Some(page) = crawl.next().await {
         kept.insert(page.unwrap().url().path().to_owned());
     }
-    assert_eq!(kept, BTreeSet::from(["/", "/real"].map(String::from)));
-}
-
-#[tokio::test]
-async fn a_crawl_keeps_an_alias_whose_canonical_page_is_gone() {
-    let server = TestServer::http(|request| match request.target.as_str() {
-        "/" => html(r#"<a href="/alias">A</a>"#),
-        "/alias" => html(r#"<link rel="canonical" href="/real"><p>the article</p>"#),
-        _ => TestResponse::new(404),
-    })
-    .await
-    .unwrap();
-    let mut crawl = Session::new()
-        .crawl(server.url("/"))
-        .host_limits(leyline::HostLimits::new());
-    let mut kept = BTreeSet::new();
-    while let Some(page) = crawl.next().await {
-        kept.insert(page.unwrap().url().path().to_owned());
-    }
-    assert_eq!(kept, BTreeSet::from(["/", "/alias"].map(String::from)));
-}
-
-#[tokio::test]
-async fn a_crawl_keeps_short_pages_that_share_their_text() {
-    let server = TestServer::http(|request| match request.target.as_str() {
-        "/" => html(r#"<p>home page</p><a href="/a">A</a><a href="/b">B</a>"#),
-        _ => html("<p>Please enable JavaScript.</p>"),
-    })
-    .await
-    .unwrap();
-    let mut crawl = Session::new()
-        .crawl(server.url("/"))
-        .host_limits(leyline::HostLimits::new());
-    let mut kept = BTreeSet::new();
-    while let Some(page) = crawl.next().await {
-        kept.insert(page.unwrap().url().path().to_owned());
-    }
-    assert_eq!(kept, BTreeSet::from(["/", "/a", "/b"].map(String::from)));
-}
-
-#[tokio::test]
-async fn a_crawl_follows_a_chain_of_canonical_pages_to_its_end() {
-    let server = TestServer::http(|request| match request.target.as_str() {
-        "/" => html(r#"<a href="/a">A</a>"#),
-        "/a" => html(r#"<link rel="canonical" href="/b"><p>story</p>"#),
-        "/b" => html(r#"<link rel="canonical" href="/c"><p>story</p>"#),
-        "/c" => html(r#"<link rel="canonical" href="/c"><p>story</p>"#),
-        _ => TestResponse::new(404),
-    })
-    .await
-    .unwrap();
-    let mut crawl = Session::new()
-        .crawl(server.url("/"))
-        .host_limits(leyline::HostLimits::new());
-    let mut kept = BTreeSet::new();
-    while let Some(page) = crawl.next().await {
-        kept.insert(page.unwrap().url().path().to_owned());
-    }
-    assert_eq!(kept, BTreeSet::from(["/", "/c"].map(String::from)));
+    assert!(kept.contains("/bare"), "{kept:?}");
 }

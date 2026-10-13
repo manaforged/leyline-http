@@ -17,6 +17,7 @@ use fetch::{Fetched, fetch};
 pub use frontier::Scope;
 use frontier::{Frontier, Queued, page_key, same_site};
 pub use page::{CrawlPage, CrawlStats, SkipReason};
+use sitemap::SitemapRead;
 use sites::{Site, SitemapFile};
 use visit::Held;
 
@@ -26,7 +27,6 @@ use crate::core::into_url::IntoUrl;
 use crate::core::retry::RetryPolicy;
 use crate::core::robots::{Purpose, Robots};
 use crate::core::session::Session;
-use crate::html::Sitemap;
 
 const ANY_AGENT: &str = "*";
 const NOFOLLOW: &str = "nofollow";
@@ -53,8 +53,9 @@ enum Event {
     },
     Sitemap {
         url: Url,
-        found: Sitemap,
+        read: SitemapRead,
     },
+    Wake,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -79,6 +80,10 @@ pub struct Crawl {
     sitemap_files: HashSet<String>,
     sitemap_queue: VecDeque<SitemapFile>,
     sitemaps_in_flight: usize,
+    trusted: Option<Url>,
+    page_retry: RetryPolicy,
+    waking: Option<tokio::time::Instant>,
+    holding: usize,
     tasks: FuturesUnordered<Task>,
     pages_in_flight: usize,
     ready: VecDeque<Result<CrawlPage>>,
@@ -117,6 +122,10 @@ impl Session {
             sitemap_files: HashSet::new(),
             sitemap_queue: VecDeque::new(),
             sitemaps_in_flight: 0,
+            trusted: None,
+            page_retry: RetryPolicy::none(),
+            waking: None,
+            holding: 0,
             tasks: FuturesUnordered::new(),
             pages_in_flight: 0,
             ready: VecDeque::new(),
@@ -193,10 +202,16 @@ impl Crawl {
             None => pace.without_floors(),
         };
         self.session = self.session.with_crawl_pace(pace.clone());
+        self.page_retry = self
+            .session
+            .default_retry()
+            .clone()
+            .or(RetryPolicy::transient().max_retries(PAGE_RETRIES));
         self.pace = pace;
         for seed in std::mem::take(&mut self.seeds) {
             match seed {
                 Ok(url) => {
+                    self.trusted.get_or_insert_with(|| url.clone());
                     self.frontier.add(Queued::seed(url));
                 }
                 Err(err) => self.ready.push_back(Err(err)),
@@ -210,8 +225,9 @@ impl Crawl {
     }
 
     fn budget_spent(&self) -> bool {
-        self.max_pages
-            .is_some_and(|max| self.stats.pages() as usize + self.pages_in_flight >= max)
+        self.max_pages.is_some_and(|max| {
+            self.stats.pages() as usize + self.pages_in_flight + self.holding >= max
+        })
     }
 
     fn fetch(&mut self, origin: Origin, queued: Queued) {
@@ -219,12 +235,9 @@ impl Crawl {
         *self.busy.entry(origin.clone()).or_default() += 1;
         self.stats.request();
         let session = self.session.clone();
-        let retry = match self.session.default_retry() {
-            retry if retry.is_none() => RetryPolicy::transient().max_retries(PAGE_RETRIES),
-            retry => retry.clone(),
-        };
+        let (retry, trusted) = (self.page_retry.clone(), self.trusted.clone());
         self.tasks.push(Box::pin(async move {
-            let fetched = fetch(session, queued.url.clone(), retry).await;
+            let fetched = fetch(session, queued.url.clone(), retry, trusted).await;
             Event::Page {
                 origin,
                 queued,
@@ -253,7 +266,9 @@ impl Crawl {
         if target == from || queued.chain.contains(&target) {
             self.frontier.redirected(&to);
         }
-        let widen = queued.seed && same_site(&queued.url, &to);
+        let widen =
+            queued.seed && same_site(&queued.url, &to) && self.frontier.in_scope(&queued.url);
+        let seed = queued.seed && (queued.hops == 0 || widen || self.frontier.in_scope(&to));
         let seen = self.frontier.has_seen(&to);
         let mut chain = queued.chain;
         chain.push(from);
@@ -261,7 +276,7 @@ impl Crawl {
             url: to,
             depth: queued.depth,
             hops: queued.hops + 1,
-            seed: queued.seed,
+            seed,
             widen,
             chain,
         });
@@ -277,7 +292,8 @@ impl Crawl {
                 url,
                 robots,
             } => self.robots_read(origin, url, *robots),
-            Event::Sitemap { url, found } => self.sitemap_read(url, found.index, found.locs),
+            Event::Sitemap { url, read } => self.sitemap_read(url, read),
+            Event::Wake => self.waking = None,
             Event::Page {
                 origin,
                 queued,
@@ -290,7 +306,11 @@ impl Crawl {
                         self.stats.error();
                         self.ready.push_back(Err(err));
                     }
-                    Ok(Fetched::Redirect { to }) => self.redirect(queued, to),
+                    Ok(Fetched::Redirect { to }) => {
+                        let target = page_key(&to);
+                        self.redirect(queued, to);
+                        return self.forward(key, target);
+                    }
                     Ok(Fetched::Skip(reason)) => self.stats.skip(reason),
                     Ok(Fetched::Page(loaded)) => self.page(queued.depth, *loaded),
                 }
@@ -312,6 +332,7 @@ impl Stream for Crawl {
                 return Poll::Ready(Some(item));
             }
             if this.limit_met() && this.pages_in_flight == 0 {
+                this.tasks = FuturesUnordered::new();
                 return Poll::Ready(None);
             }
             match this.tasks.poll_next_unpin(cx) {

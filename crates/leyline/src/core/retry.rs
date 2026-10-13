@@ -231,6 +231,13 @@ impl RetryPolicy {
         self.proxies.get(index.checked_rem(self.proxies.len())?)
     }
 
+    pub(crate) fn or(self, fallback: RetryPolicy) -> RetryPolicy {
+        match self.is_none() {
+            true => fallback,
+            false => self,
+        }
+    }
+
     pub(crate) fn is_none(&self) -> bool {
         self.max_retries == 0
     }

@@ -35,7 +35,10 @@ fn is_ip(url: &Url) -> bool {
 
 fn directory(path: &str) -> String {
     let last = path.rsplit('/').next().unwrap_or_default();
-    if last.contains('.') {
+    let named_file = last
+        .rsplit_once('.')
+        .is_some_and(|(_, ext)| ext.bytes().any(|byte| byte.is_ascii_alphabetic()));
+    if named_file {
         let end = path.rfind('/').map_or(0, |end| end + 1);
         return path[..end].to_owned();
     }
@@ -231,6 +234,10 @@ impl Frontier {
             return queued;
         }
         None
+    }
+
+    pub(super) fn origins(&self) -> impl Iterator<Item = &Origin> {
+        self.queues.keys()
     }
 
     pub(super) fn clear(&mut self) {

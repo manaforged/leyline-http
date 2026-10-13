@@ -73,6 +73,7 @@ impl Crawl {
             self.frontier.add(Queued::link(link, depth));
             self.waiting_on.insert(held.own.clone(), key.clone());
             self.held.entry(key).or_default().push(held);
+            self.holding += 1;
             return;
         }
         self.keep(held);
@@ -113,12 +114,31 @@ impl Crawl {
         }
         self.settled.insert(key);
         for held in waiting {
+            self.holding -= 1;
             self.waiting_on.remove(&held.own);
             if kept {
                 self.stats.skip(SkipReason::Duplicate);
             } else {
                 self.keep(held);
             }
+        }
+    }
+
+    pub(super) fn forward(&mut self, from: String, to: String) {
+        if from == to {
+            return;
+        }
+        let waiting = self.held.remove(&from).unwrap_or_default();
+        self.settled.insert(from);
+        if waiting.is_empty() {
+            return;
+        }
+        for held in &waiting {
+            self.waiting_on.insert(held.own.clone(), to.clone());
+        }
+        self.held.entry(to.clone()).or_default().extend(waiting);
+        if self.settled.contains(&to) {
+            self.settle(to);
         }
     }
 

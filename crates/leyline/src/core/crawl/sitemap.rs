@@ -1,4 +1,8 @@
+use http::header::LOCATION;
 use url::Url;
+
+use super::fetch::request;
+use crate::core::retry::RetryPolicy;
 
 use crate::core::config::CompressionConfig;
 use crate::core::robots::Robots;
@@ -27,15 +31,39 @@ pub(super) fn listed(site: &Url, robots: &Robots, obey: bool) -> Vec<Url> {
         .collect()
 }
 
-pub(super) async fn read(session: Session, url: Url) -> Sitemap {
-    let Ok(response) = session.get(url.as_str()).stream().send().await else {
-        return Sitemap::default();
+pub(super) enum SitemapRead {
+    Found(Sitemap),
+    Moved(Url),
+}
+
+pub(super) async fn read(
+    session: Session,
+    url: Url,
+    retry: RetryPolicy,
+    trusted: Option<Url>,
+) -> SitemapRead {
+    let empty = SitemapRead::Found(Sitemap::default());
+    let Ok(response) = request(&session, &url, retry, trusted)
+        .stream()
+        .send()
+        .await
+    else {
+        return empty;
     };
+    if response.status().is_redirection() {
+        return match response
+            .header(LOCATION.as_str())
+            .and_then(|to| url.join(to).ok())
+        {
+            Some(to) => SitemapRead::Moved(to),
+            None => empty,
+        };
+    }
     if !response.status().is_success() {
-        return Sitemap::default();
+        return empty;
     }
     let Ok(bytes) = response.read_until(MAX_BYTES, |_, _| false).await else {
-        return Sitemap::default();
+        return empty;
     };
     let bytes = if bytes.starts_with(&GZIP_MAGIC) {
         let plain = gunzip(&bytes);
@@ -46,7 +74,7 @@ pub(super) async fn read(session: Session, url: Url) -> Sitemap {
     };
     let text = String::from_utf8(bytes)
         .unwrap_or_else(|err| String::from_utf8_lossy(err.as_bytes()).into_owned());
-    html::sitemap(&text)
+    SitemapRead::Found(html::sitemap(&text))
 }
 
 fn gunzip(bytes: &[u8]) -> Vec<u8> {

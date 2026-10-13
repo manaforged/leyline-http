@@ -273,3 +273,28 @@ async fn a_crawl_obeys_robots_rules_by_default() {
     assert_eq!(kept, BTreeSet::from(["/", "/open"].map(String::from)));
     assert!(!targets(&server).await.contains("/private"));
 }
+
+#[tokio::test]
+async fn a_crawl_retries_a_robots_txt_that_fails_with_500() {
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let count = calls.clone();
+    let server = TestServer::http(move |request| match request.target.as_str() {
+        "/robots.txt" if count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 => {
+            TestResponse::new(500)
+        }
+        "/robots.txt" => TestResponse::new(200).body("User-agent: *\nDisallow: /never\n"),
+        "/" => html(r#"<a href="/a">A</a>"#),
+        _ => html("<p>a</p>"),
+    })
+    .await
+    .unwrap();
+    let mut crawl = Session::new()
+        .crawl(server.url("/"))
+        .host_limits(leyline::HostLimits::new());
+    let mut pages = 0;
+    while let Some(page) = crawl.next().await {
+        page.unwrap();
+        pages += 1;
+    }
+    assert_eq!(pages, 2);
+}

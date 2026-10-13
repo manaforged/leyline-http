@@ -1,7 +1,9 @@
+mod copies;
 mod defaults;
 mod links;
 mod pace;
 mod rules;
+mod scope;
 mod sitemaps;
 
 pub(super) use std::collections::BTreeSet;

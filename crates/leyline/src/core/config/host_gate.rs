@@ -82,15 +82,6 @@ impl Gates {
         let mut floors = self.floors.lock().unwrap_or_else(PoisonError::into_inner);
         match gap {
             Some(gap) => {
-                let gate = self
-                    .by_origin
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .get(&origin)
-                    .cloned();
-                if let Some(gate) = gate {
-                    gate.push_next(Instant::now().checked_add(gap));
-                }
                 floors.insert(origin, gap);
             }
             None => {
@@ -119,7 +110,7 @@ impl Gates {
 #[derive(Debug)]
 pub(super) struct HostGate {
     pub(super) slots: Option<Arc<Semaphore>>,
-    next: Mutex<Instant>,
+    last: Mutex<Option<Instant>>,
     paused: Mutex<Instant>,
     pub(super) in_flight: Arc<AtomicUsize>,
     pub(super) waiting: Arc<AtomicUsize>,
@@ -129,7 +120,7 @@ impl HostGate {
     fn new(max_in_flight: Option<usize>) -> Self {
         Self {
             slots: max_in_flight.map(|n| Arc::new(Semaphore::new(n))),
-            next: Mutex::new(Instant::now()),
+            last: Mutex::new(None),
             paused: Mutex::new(Instant::now()),
             in_flight: Arc::default(),
             waiting: Arc::default(),
@@ -137,35 +128,31 @@ impl HostGate {
     }
 
     pub(super) fn try_admit(&self, interval: Option<Duration>) -> bool {
-        let mut next = self.next.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut last = self.last.lock().unwrap_or_else(PoisonError::into_inner);
         let now = Instant::now();
-        if *next > now || self.paused_until() > now {
+        if spaced_until(*last, interval, now) > now || self.paused_until() > now {
             return false;
         }
-        if let Some(interval) = interval {
-            *next = now
-                .checked_add(interval)
-                .or_else(|| now.checked_add(MAX_SPACING))
-                .unwrap_or(now);
-        }
+        *last = Some(now);
         true
     }
 
     #[cfg(feature = "html")]
-    fn push_next(&self, at: Option<Instant>) {
-        if let Some(at) = at {
-            let mut next = self.next.lock().unwrap_or_else(PoisonError::into_inner);
-            *next = (*next).max(at);
-        }
+    pub(super) fn ready_at(&self, interval: Option<Duration>, now: Instant) -> Option<Instant> {
+        let last = *self.last.lock().unwrap_or_else(PoisonError::into_inner);
+        let end = spaced_until(last, interval, now).max(self.paused_until());
+        (end > now).then_some(end)
     }
 
-    pub(super) async fn wait_spacing(&self) {
-        let next = *self.next.lock().unwrap_or_else(PoisonError::into_inner);
-        tokio::time::sleep_until(next).await;
+    pub(super) async fn wait_spacing(&self, interval: Option<Duration>) {
+        let last = *self.last.lock().unwrap_or_else(PoisonError::into_inner);
+        tokio::time::sleep_until(spaced_until(last, interval, Instant::now())).await;
     }
 
     pub(super) fn busy_after(&self, now: Instant) -> bool {
-        *self.next.lock().unwrap_or_else(PoisonError::into_inner) > now || self.paused_until() > now
+        let last = *self.last.lock().unwrap_or_else(PoisonError::into_inner);
+        let recent = last.is_some_and(|last| now.saturating_duration_since(last) < MAX_SPACING);
+        recent || self.paused_until() > now
     }
 
     pub(super) fn paused_until(&self) -> Instant {
@@ -185,5 +172,14 @@ impl HostGate {
             }
             tokio::time::sleep_until(end).await;
         }
+    }
+}
+
+fn spaced_until(last: Option<Instant>, interval: Option<Duration>, now: Instant) -> Instant {
+    match (last, interval) {
+        (Some(last), Some(interval)) => last
+            .checked_add(interval)
+            .unwrap_or_else(|| now.checked_add(MAX_SPACING).unwrap_or(now)),
+        _ => now,
     }
 }

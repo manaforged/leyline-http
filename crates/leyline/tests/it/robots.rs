@@ -189,13 +189,19 @@ fn robots_survive_a_huge_crawl_delay() {
 }
 
 #[test]
-fn robots_keep_a_group_open_across_crawl_delay() {
+fn robots_start_a_new_group_after_any_group_record() {
     let robots = Robots::parse(
         "User-agent: a\nCrawl-delay: 5\nUser-agent: *\nDisallow: /p\n",
         "*",
     );
-    assert_eq!(robots.crawl_delay(), Some(Duration::from_secs(5)));
+    assert_eq!(robots.crawl_delay(), None);
     assert!(!robots.allows(&at("/p")));
+    let robots = Robots::parse(
+        "User-agent: *\nCrawl-delay: 10\n\nUser-agent: MJ12bot\nDisallow: /\n",
+        "*",
+    );
+    assert_eq!(robots.crawl_delay(), Some(Duration::from_secs(10)));
+    assert!(robots.allows(&at("/page")));
 }
 
 #[test]

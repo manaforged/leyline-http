@@ -5,6 +5,7 @@ use url::Url;
 use super::SkipReason;
 use crate::core::config::RedirectPolicy;
 use crate::core::error::Result;
+use crate::core::request::RequestBuilder;
 use crate::core::retry::RetryPolicy;
 use crate::core::session::Session;
 
@@ -29,6 +30,7 @@ const HTML_SIGNATURES: [&[u8]; 17] = [
     b"<!--",
 ];
 const SNIFF_WHITESPACE: [u8; 5] = [b'\t', b'\n', 0x0c, b'\r', b' '];
+const TAG_ENDS: [u8; 6] = [b'\t', b'\n', 0x0c, b'\r', b' ', b'>'];
 const SNIFF_BYTES: usize = 512;
 const MAX_UNTYPED_BYTES: usize = 8 * 1024 * 1024;
 pub(super) const X_ROBOTS_TAG: HeaderName = HeaderName::from_static("x-robots-tag");
@@ -63,8 +65,22 @@ fn sniffs_html(body: &[u8]) -> bool {
     HTML_SIGNATURES.iter().any(|signature| {
         start.len() > signature.len()
             && start[..signature.len()].eq_ignore_ascii_case(signature)
-            && matches!(start[signature.len()], b' ' | b'>')
+            && TAG_ENDS.contains(&start[signature.len()])
     })
+}
+
+pub(super) fn request(
+    session: &Session,
+    url: &Url,
+    retry: RetryPolicy,
+    trusted: Option<Url>,
+) -> RequestBuilder {
+    let mut builder = session
+        .get(url.as_str())
+        .redirect(RedirectPolicy::none())
+        .retry(retry);
+    builder.trusted_origin = trusted;
+    builder
 }
 
 fn kept_headers(all: &HeaderMap) -> HeaderMap {
@@ -77,11 +93,13 @@ fn kept_headers(all: &HeaderMap) -> HeaderMap {
     kept
 }
 
-pub(super) async fn fetch(session: Session, url: Url, retry: RetryPolicy) -> Result<Fetched> {
-    let response = session
-        .get(url.as_str())
-        .redirect(RedirectPolicy::none())
-        .retry(retry)
+pub(super) async fn fetch(
+    session: Session,
+    url: Url,
+    retry: RetryPolicy,
+    trusted: Option<Url>,
+) -> Result<Fetched> {
+    let response = request(&session, &url, retry, trusted)
         .stream()
         .send()
         .await?;

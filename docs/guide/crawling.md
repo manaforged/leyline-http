@@ -102,14 +102,16 @@ For each URL, in order, the crawl:
    of 20 words or more is skipped when its text, compared word by word,
    matches a kept page.
 
-The crawl reads the sitemaps that each site's robots.txt lists, or
+The crawl reads the sitemaps that each site's robots.txt lists on the same
+site, or
 `/sitemap.xml` when it lists none (and, unless robots are ignored, when robots.txt
 allows it). Unless robots are ignored, it opens only sitemap files that their own
 site's robots.txt allows, and reads that robots.txt first for a sitemap on
 another host. It follows a sitemap index to the sitemaps it
 names on the same host, reads gzipped and plain-text sitemaps, and reads at most 50 sitemap files and 50 MiB per file;
 with a `limit`, it opens no new sitemap file once it has queued that many
-URLs. Each `<loc>` URL passes the same checks as a link; image, video, and
+URLs. A sitemap that redirects is queued again at its new address and
+passes the same checks. Each `<loc>` URL passes the same checks as a link; image, video, and
 news `<loc>` entries in a sitemap's extension namespaces are not pages and
 are skipped.
 
@@ -255,6 +257,12 @@ read only the group for every crawler. The rules follow RFC 9309:
 | 2xx | `Parsed` | The rules of the matching groups |
 | 4xx | `Unavailable` | Every path is allowed |
 | 5xx, or the request failed | `Unreachable` | Every path is disallowed |
+
+Every request a crawl sends carries the session's credentials, such as
+`bearer_auth` and default headers, only to the seed's origin; requests to
+other hosts go without them. A host that is paused or waiting for its next
+turn holds no crawl slot. A request that waits inside a host's limits after
+a retry does not count toward the 16.
 
 A crawl that obeys robots rules holds a site's pages until its robots.txt is
 read, and retries an unreachable robots.txt four times, 1, 2, 4, and 8

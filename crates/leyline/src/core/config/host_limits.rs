@@ -233,14 +233,36 @@ impl HostLimits {
 
     #[cfg(feature = "html")]
     pub(crate) fn ready(&self, origin: &Origin) -> bool {
+        self.ready_at(origin).is_none()
+    }
+
+    #[cfg(feature = "html")]
+    pub(crate) fn ready_at(&self, origin: &Origin) -> Option<Instant> {
         let gate = self
             .gates
             .by_origin
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .get(origin)
-            .cloned();
-        gate.is_none_or(|gate| !gate.busy_after(Instant::now()))
+            .cloned()?;
+        let interval = self.interval_for(origin, self.rule_for(&origin.host));
+        gate.ready_at(interval, Instant::now())
+    }
+
+    #[cfg(feature = "html")]
+    pub(crate) fn parked(&self) -> usize {
+        self.gates
+            .by_origin
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .values()
+            .map(|gate| gate.waiting.load(Ordering::Relaxed))
+            .sum()
+    }
+
+    fn interval_for(&self, origin: &Origin, rule: Rule) -> Option<Duration> {
+        let floor = self.floors.then(|| self.gates.floor(origin)).flatten();
+        rule.interval.max(floor)
     }
 
     #[cfg(feature = "html")]
@@ -266,11 +288,10 @@ impl HostLimits {
         let waiting = Count::enter(&gate.waiting);
         let permit = acquire(gate.slots.as_ref()).await;
         let total = loop {
+            let interval = self.interval_for(&origin, rule);
             gate.wait_unpaused().await;
-            gate.wait_spacing().await;
+            gate.wait_spacing(interval).await;
             let total = acquire(self.gates.total.as_ref()).await;
-            let floor = self.floors.then(|| self.gates.floor(&origin)).flatten();
-            let interval = rule.interval.max(floor);
             if gate.try_admit(interval) {
                 break total;
             }
