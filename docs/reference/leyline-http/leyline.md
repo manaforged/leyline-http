@@ -250,6 +250,7 @@ Requires feature `html`.
 | Method | Description |
 | --- | --- |
 | <code>host_limits(self, limits: <a href="#hostlimits">HostLimits</a>) -&gt; Self</code> | Pace a crawl per host. Requires feature `html`. |
+| <code>ignore_robots(self) -&gt; Self</code> | Requires feature `html`. |
 | <code>limit(self, pages: usize) -&gt; Self</code> | Limit a crawl's pages. Requires feature `html`. |
 | <code>async next(&amp;mut self) -&gt; Option&lt;<a href="#result">Result</a>&lt;<a href="#crawlpage">CrawlPage</a>&gt;&gt;</code> | Requires feature `html`. |
 | <code>respect(self, respect: <a href="#respect">Respect</a>) -&gt; Self</code> | Obey robots rules in a crawl. Requires feature `html`. |

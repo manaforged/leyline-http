@@ -29,8 +29,9 @@ That crawl stays on the seed's host, sends one request at a time to each host
 and at most one a second, pauses a host that answers 429 or 503 and tries
 that page up to three times, reads the
 site's sitemaps, follows redirects through the same checks as links, skips
-error pages, files, and block pages, and drops copies. It obeys no robots
-rules until you ask. Four settings change the rest:
+error pages, files, and block pages, and drops copies. It obeys robots.txt
+and each page's robots rules unless you call `ignore_robots()`. Five
+settings change the rest:
 
 ```rust,no_run
 use leyline::{HostLimits, Respect, Scope, Session};
@@ -55,13 +56,14 @@ println!("{}", crawl.stats());
 
 | Setter | Default | Effect |
 | --- | --- | --- |
-| `respect(Respect)` | none | `Robots` obeys robots.txt `Disallow` and `Crawl-delay`, the page's `noindex` and `nofollow`, and `rel="nofollow"`. `AiTraining` does all of that and also obeys the site's AI-training opt-outs |
+| `respect(Respect)` | `Robots` | `Robots` obeys robots.txt `Disallow` and `Crawl-delay`, the page's `noindex` and `nofollow`, and `rel="nofollow"`. `AiTraining` does all of that and also obeys the site's AI-training opt-outs |
+| `ignore_robots()` | off | Obeys no robots rules: no `Disallow`, `Crawl-delay`, `noindex`, or `nofollow` |
 | `scope(Scope)` | `Host` | `Host`: the seed's host. `Domain`: its registrable domain. `Prefix`: its host and directory |
 | `limit(n)` | none | Stops after `n` kept pages |
 | `host_limits(HostLimits)` | one in flight, one a second, and a 429/503 pause per host, wherever the session's own limits leave them unset | The crawl's pace per host, on top of the session's own limits, which every crawl and request of the session share. The value is used as given; `HostLimits::new()` adds no limits |
 
 The crawl reads each site's robots.txt once, and again after 24 hours, for
-its `Sitemap` lines; it obeys the rest only with `respect`. Robots groups are
+its `Sitemap` lines; it obeys the rest unless you call `ignore_robots()`. Robots groups are
 matched for the `*` agent. To read the group for a named crawler, call
 `Session::robots(url, agent)`. At most 16 requests are in flight across all
 hosts.
@@ -72,7 +74,7 @@ For each URL, in order, the crawl:
    before. URLs are compared after the fragment is dropped, the query
    parameters are sorted, and percent-encoding is normalized; the request
    goes out as written.
-2. With `respect`, skips a URL that robots.txt disallows, and uses the site's
+2. Unless robots are ignored, skips a URL that robots.txt disallows, and uses the site's
    `Crawl-delay` as the least spacing between its requests, up to 30
    seconds. With `Respect::AiTraining`, it skips a URL whose site refuses AI
    training in a `Content-Signal` line
@@ -88,10 +90,10 @@ For each URL, in order, the crawl:
    whose `Content-Type` is not HTML. A response without a `Content-Type` is
    kept when its body starts like HTML, by the
    [MIME Sniffing](https://mimesniff.spec.whatwg.org/) rules.
-5. Queues the page's links. With `respect`, it reads the page's directives
+5. Queues the page's links. Unless robots are ignored, it reads the page's directives
    with `html::Directives::read`, queues nothing from a `nofollow` page, and
    skips links marked `rel="nofollow"`.
-6. With `respect`, skips a `noindex` page. With `Respect::AiTraining`, it
+6. Unless robots are ignored, skips a `noindex` page. With `Respect::AiTraining`, it
    also skips a `noai` page and a page whose `Content-Usage` header refuses
    AI training. `noai` is a convention some sites use, not a standard. A
    page that names another in-scope page as its canonical URL waits until
@@ -101,8 +103,8 @@ For each URL, in order, the crawl:
    matches a kept page.
 
 The crawl reads the sitemaps that each site's robots.txt lists, or
-`/sitemap.xml` when it lists none (and, with `respect`, when robots.txt
-allows it). With `respect`, it opens only sitemap files that their own
+`/sitemap.xml` when it lists none (and, unless robots are ignored, when robots.txt
+allows it). Unless robots are ignored, it opens only sitemap files that their own
 site's robots.txt allows. It follows a sitemap index to the sitemaps it
 names on the same host, reads gzipped and plain-text sitemaps, and reads at most 50 sitemap files and 50 MiB per file;
 with a `limit`, it opens no new sitemap file once it has queued that many
@@ -284,11 +286,12 @@ println!("delay {:?}, sitemaps {:?}", robots.crawl_delay(), robots.sitemaps());
 group. A `Content-Signal` line uses `search`, `ai-input`, and `ai-train` with
 `yes` or `no`; a `Content-Usage` line, from the IETF aipref draft, uses
 `search`, `ai-use`, and `train-ai` with `y` or `n`, and can start with a path
-pattern that limits it to matching URLs. Both map to `Purpose`. A use is
-refused when any line that applies to the URL says no, and allowed
-otherwise; unknown labels are ignored. The aipref labels are a draft and may
+pattern that limits it to matching URLs. Both map to `Purpose`. For a
+use, the line with the longest path pattern that matches the URL decides;
+on a tie, no wins, and a use no line names is allowed. Unknown labels are
+ignored. The aipref labels are a draft and may
 change. `crawl_delay()` returns the group's `Crawl-delay`; `Session::crawl`
-applies it with `respect`. `sitemaps()` lists every `Sitemap` line in
+applies it unless robots are ignored. `sitemaps()` lists every `Sitemap` line in
 the file.
 
 ## Rotate proxies with a pool

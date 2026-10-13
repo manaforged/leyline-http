@@ -107,7 +107,7 @@ impl Session {
             limits: None,
             pace: HostLimits::new(),
             seeds: vec![seed.into_url_with_base(self.base_url())],
-            respect: None,
+            respect: Some(Respect::Robots),
             max_pages: None,
             started: false,
             frontier: Frontier::default(),
@@ -132,6 +132,11 @@ impl Session {
 impl Crawl {
     pub fn respect(mut self, respect: Respect) -> Self {
         self.respect = Some(respect);
+        self
+    }
+
+    pub fn ignore_robots(mut self) -> Self {
+        self.respect = None;
         self
     }
 

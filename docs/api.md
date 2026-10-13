@@ -34,7 +34,7 @@ crawl       SessionBuilder::host_limits(HostLimits) · proxy_pool(ProxyPool) · 
             HostLimits: max_in_flight · per_second · host · max_total_in_flight · pause_on · pause_for · max_pause
             ProxyPool::identified · rotate_on_block · Session::host_stats · BlockRules::statuses
             Session::robots(url, agent) → Robots: allows · allows_use(url, Purpose) · crawl_delay · sitemaps · source
-            Session::crawl(seed) → Crawl: respect(Respect) · scope(Scope) · limit · host_limits · next → CrawlPage · stats → CrawlStats (feature `html`)
+            Session::crawl(seed) → Crawl: respect(Respect) · ignore_robots · scope(Scope) · limit · host_limits · next → CrawlPage · stats → CrawlStats (feature `html`)
 request     session.get / post / put / patch / delete / head / request(Method, url) → RequestBuilder
 send        RequestBuilder.send() or .await → Response
             RequestBuilder.download(path, limit) → bytes written

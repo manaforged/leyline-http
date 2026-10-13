@@ -41,7 +41,7 @@ async fn a_crawl_that_respects_robots_obeys_robots_txt_and_nofollow() {
 }
 
 #[tokio::test]
-async fn a_crawl_ignores_robots_rules_unless_asked() {
+async fn a_crawl_ignores_robots_rules_when_told() {
     let server = TestServer::http(|request| match request.target.as_str() {
         "/robots.txt" => TestResponse::new(200).body("User-agent: *\nDisallow: /\n"),
         "/" => html(
@@ -51,7 +51,7 @@ async fn a_crawl_ignores_robots_rules_unless_asked() {
     })
     .await
     .unwrap();
-    let mut crawl = Session::new().crawl(server.url("/"));
+    let mut crawl = Session::new().crawl(server.url("/")).ignore_robots();
     let mut pages = 0;
     while let Some(page) = crawl.next().await {
         page.unwrap();
@@ -251,4 +251,25 @@ async fn a_crawl_for_ai_training_obeys_content_usage_by_path_and_header() {
     assert_eq!(kept, BTreeSet::from(["/".to_owned(), "/open".to_owned()]));
     assert!(!page_targets(&server).await.contains("/closed/x"));
     assert_eq!(crawl.stats().skipped(SkipReason::Signal), 2);
+}
+
+#[tokio::test]
+async fn a_crawl_obeys_robots_rules_by_default() {
+    let server = TestServer::http(|request| match request.target.as_str() {
+        "/robots.txt" => TestResponse::new(200).body("User-agent: *\nDisallow: /private\n"),
+        "/" => html(r#"<a href="/private">P</a><a href="/open">O</a><a href="/hidden">H</a>"#),
+        "/hidden" => html(r#"<meta name="robots" content="noindex"><p>hidden</p>"#),
+        _ => html("<p>page</p>"),
+    })
+    .await
+    .unwrap();
+    let mut crawl = Session::new()
+        .crawl(server.url("/"))
+        .host_limits(leyline::HostLimits::new());
+    let mut kept = BTreeSet::new();
+    while let Some(page) = crawl.next().await {
+        kept.insert(page.unwrap().url().path().to_owned());
+    }
+    assert_eq!(kept, BTreeSet::from(["/", "/open"].map(String::from)));
+    assert!(!targets(&server).await.contains("/private"));
 }

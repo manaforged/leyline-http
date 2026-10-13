@@ -12,19 +12,19 @@ version and publish as separate crates.
 
 ### Added
 
-- `Session::crawl` returns `Crawl`, a polite stream of `CrawlPage`s with four
-  settings: `respect(Respect)` obeys robots.txt and the page's robots rules
-  (`Robots`), and AI-training opt-outs too (`AiTraining`); `scope(Scope)`;
-  `limit(pages)`; and `host_limits(HostLimits)`. By default it sends one
-  request at a time and one a second per host where the session's own
-  `HostLimits` leave it unset, pauses a host on 429 or 503 and tries the page
-  up to three times, sends every request through both the session's own
-  `HostLimits` and the crawl's pace, keeps the site's `Crawl-delay` out of the
-  session's own requests, waits out a robots.txt outage before it skips a
-  site, reads sitemaps, follows redirects as links, and drops error pages,
-  files, block pages, and copies by canonical URL or text, preferring the
-  canonical page over an alias found first. `CrawlStats` counts each
-  `SkipReason`.
+- `Session::crawl` returns `Crawl`, a polite stream of `CrawlPage`s that obeys
+  robots.txt and each page's robots rules by default, with five settings:
+  `ignore_robots()` turns them off; `respect(Respect)` adds AI-training
+  opt-outs (`AiTraining`); `scope(Scope)`; `limit(pages)`; and
+  `host_limits(HostLimits)`. By default it sends one request at a time and one
+  a second per host where the session's own `HostLimits` leave it unset,
+  pauses a host on 429 or 503 and tries the page up to three times, sends
+  every request through both the session's own `HostLimits` and the crawl's
+  pace, keeps the site's `Crawl-delay` out of the session's own requests,
+  waits out a robots.txt outage before it skips a site, reads sitemaps,
+  follows redirects as links, and drops error pages, files, block pages, and
+  copies by canonical URL or text, preferring the canonical page over an alias
+  found first. `CrawlStats` counts each `SkipReason`.
 - `Session::robots` and `Robots` read robots.txt by RFC 9309: group
   matching, longest match with `*` and `$`, percent-encoding, the 4xx and 5xx
   rules, up to five redirects, and a 512 KiB limit. `Robots` also reads

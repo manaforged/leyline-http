@@ -1300,6 +1300,7 @@ impl core::marker::StructuralPartialEq for leyline::CompressionConfig
 #[cfg(feature = "html")] pub struct leyline::Crawl
 #[cfg(feature = "html")] impl leyline::Crawl
 #[cfg(feature = "html")] pub fn leyline::Crawl::host_limits(self, limits: leyline::HostLimits) -> Self
+#[cfg(feature = "html")] pub fn leyline::Crawl::ignore_robots(self) -> Self
 #[cfg(feature = "html")] pub fn leyline::Crawl::limit(self, pages: usize) -> Self
 #[cfg(feature = "html")] pub async fn leyline::Crawl::next(&mut self) -> core::option::Option<leyline::Result<leyline::CrawlPage>>
 #[cfg(feature = "html")] pub fn leyline::Crawl::respect(self, respect: leyline::Respect) -> Self
