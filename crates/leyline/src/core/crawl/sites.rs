@@ -70,7 +70,7 @@ impl Crawl {
             if upgraded != queued.url {
                 let mut queued = queued;
                 queued.url = upgraded;
-                self.frontier.push_back(queued);
+                self.frontier.add(queued);
                 continue;
             }
             let known = match self.sites.get(&origin) {
@@ -190,6 +190,11 @@ impl Crawl {
                 waiting.push_back(file);
                 continue;
             }
+            let ready = self.pace.ready(&origin) && self.session.host_limits().ready(&origin);
+            if !ready {
+                waiting.push_back(file);
+                continue;
+            }
             if self.respect.is_some() {
                 match self.sites.get(&origin) {
                     Some(Site::Ready(robots, _)) if !robots.allows(&file.url) => {
@@ -201,16 +206,10 @@ impl Crawl {
                         waiting.push_back(file);
                         continue;
                     }
-                    None if self.pace.ready(&origin)
-                        && self.session.host_limits().ready(&origin) =>
-                    {
+                    None => {
                         self.read_robots(origin, file.url.clone());
                         waiting.push_back(file);
                         opened = true;
-                        continue;
-                    }
-                    None => {
-                        waiting.push_back(file);
                         continue;
                     }
                 }
@@ -237,8 +236,10 @@ impl Crawl {
             SitemapRead::Found(found) => found,
             SitemapRead::Moved(to) => return self.queue_sitemap(to, Some(file.url)),
             SitemapRead::Later(wait) => {
+                let Some(at) = Instant::now().checked_add(wait) else {
+                    return self.stats.error();
+                };
                 file.attempts += 1;
-                let at = Instant::now() + wait;
                 file.not_before = Some(at);
                 self.sitemap_queue.push_back(file);
                 return self.set_alarm(at);

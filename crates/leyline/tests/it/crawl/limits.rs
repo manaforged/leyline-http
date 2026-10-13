@@ -265,3 +265,66 @@ async fn an_ignore_robots_crawl_never_asks_for_robots_txt() {
     }
     assert!(!targets(&server).await.contains("/robots.txt"));
 }
+
+#[tokio::test]
+async fn a_huge_retry_wait_skips_the_page_instead_of_crashing() {
+    let server = TestServer::http(|request| match request.target.as_str() {
+        "/" => html(r#"<a href="/busy">B</a>"#),
+        "/busy" => TestResponse::new(503).header("retry-after", "18446744073709551615"),
+        _ => TestResponse::new(404),
+    })
+    .await
+    .unwrap();
+    let session = Session::builder()
+        .retry(leyline::RetryPolicy::none().max_retries(1).on_status(503))
+        .build()
+        .unwrap();
+    let mut crawl = session
+        .crawl(server.url("/"))
+        .host_limits(HostLimits::new());
+    while let Some(page) = crawl.next().await {
+        page.unwrap();
+    }
+    assert_eq!(crawl.stats().skipped(SkipReason::Status), 1);
+}
+
+#[tokio::test]
+async fn a_custom_wait_header_pauses_the_host_for_the_crawl() {
+    let stamps = Stamps::default();
+    let seen = stamps.clone();
+    let server = TestServer::http(move |request| {
+        seen.lock()
+            .unwrap()
+            .push((request.target.clone(), Instant::now()));
+        match request.target.as_str() {
+            "/" => html(r#"<a href="/busy">B</a><a href="/other">O</a>"#),
+            "/busy" => TestResponse::new(503).header("x-wait", "4"),
+            _ => html("<p>page</p>"),
+        }
+    })
+    .await
+    .unwrap();
+    let session = Session::builder()
+        .retry(
+            leyline::RetryPolicy::transient()
+                .max_retries(1)
+                .wait_header("x-wait", leyline::WaitFormat::Seconds),
+        )
+        .host_limits(
+            HostLimits::new()
+                .max_in_flight(1)
+                .pause_on([503])
+                .pause_for(Duration::from_secs(1)),
+        )
+        .build()
+        .unwrap();
+    let mut crawl = session
+        .crawl(server.url("/"))
+        .ignore_robots()
+        .host_limits(HostLimits::new().max_in_flight(1));
+    while let Some(page) = crawl.next().await {
+        page.unwrap();
+    }
+    let gap = sent_at(&stamps, "/other") - sent_at(&stamps, "/busy");
+    assert!(gap >= Duration::from_millis(3500), "{gap:?}");
+}

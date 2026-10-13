@@ -1,12 +1,13 @@
 use std::time::Duration;
 
+use http::StatusCode;
 use http::header::LOCATION;
 use url::Url;
 
 use super::fetch::request;
-use crate::core::retry::{RetryPlan, RetryPolicy};
 
 use crate::core::config::CompressionConfig;
+use crate::core::retry::{RetryPlan, RetryPolicy};
 use crate::core::robots::Robots;
 use crate::core::session::Session;
 use crate::core::session::decompress::Decoder;
@@ -47,7 +48,7 @@ pub(super) async fn read(
     attempt: u32,
     trusted: Option<Url>,
 ) -> SitemapRead {
-    let result = request(&session, &url, RetryPolicy::none(), trusted)
+    let result = request(&session, &url, retry.clone().max_retries(0), trusted)
         .stream()
         .send()
         .await;
@@ -66,7 +67,7 @@ pub(super) async fn read(
             None => SitemapRead::Failed,
         };
     }
-    if response.status().is_client_error() {
+    if response.status().is_client_error() && response.status() != StatusCode::TOO_MANY_REQUESTS {
         return SitemapRead::Found(Sitemap::default());
     }
     if !response.status().is_success() {

@@ -7,12 +7,14 @@ use futures_util::stream::{FuturesUnordered, Stream, StreamExt};
 use tokio::time::{Instant, Sleep};
 use tokio_util::sync::WaitForCancellationFutureOwned;
 
-use super::frontier::Queued;
-use super::{Crawl, CrawlPage};
+use super::frontier::{Queued, page_key};
+use super::{Crawl, CrawlPage, SkipReason};
+use crate::core::config::Origin;
 use crate::core::deadline::Deadline;
 use crate::core::error::Result;
 
 const ROOM_RECHECK: Duration = Duration::from_millis(250);
+const ALARM_FLOOR: Duration = Duration::from_millis(10);
 
 #[derive(Default)]
 pub(super) struct Clock {
@@ -24,8 +26,11 @@ pub(super) struct Clock {
 
 impl Crawl {
     pub(super) fn later(&mut self, mut queued: Queued, wait: Duration) {
+        let Some(at) = Instant::now().checked_add(wait) else {
+            self.stats.skip(SkipReason::Status);
+            return self.settle(page_key(&queued.url));
+        };
         queued.attempts += 1;
-        let at = Instant::now() + wait;
         self.clock.delayed.push((at, queued));
         self.set_alarm(at);
     }
@@ -42,6 +47,7 @@ impl Crawl {
     }
 
     pub(super) fn set_alarm(&mut self, at: Instant) {
+        let at = at.max(Instant::now() + ALARM_FLOOR);
         if self.clock.alarm_at.is_none_or(|current| at < current) {
             self.clock.alarm = Some(Deadline::alarm(at));
             self.clock.alarm_at = Some(at);
@@ -49,24 +55,39 @@ impl Crawl {
     }
 
     pub(super) fn plan_alarm(&mut self) {
-        let own = self.session.host_limits();
+        let now = Instant::now();
+        let sitemap_hosts: Vec<Origin> = self
+            .sitemap_queue
+            .iter()
+            .filter(|file| file.not_before.is_none_or(|at| at <= now))
+            .filter_map(|file| Origin::of(&file.url))
+            .collect();
         let blocked = self
             .frontier
             .origins()
-            .map(|origin| (self.pace.ready_at(origin).max(own.ready_at(origin)), origin))
-            .map(|(at, origin)| match at {
-                Some(at) => Some(at),
-                None if !(self.pace.ready(origin) && own.ready(origin)) => {
-                    Some(Instant::now() + ROOM_RECHECK)
-                }
-                None => None,
-            })
+            .chain(sitemap_hosts.iter())
+            .map(|origin| self.host_wait(origin))
             .chain(self.clock.delayed.iter().map(|(at, _)| Some(*at)))
-            .chain(self.sitemap_queue.iter().map(|file| file.not_before))
+            .chain(
+                self.sitemap_queue
+                    .iter()
+                    .map(|file| file.not_before.filter(|at| *at > now)),
+            )
             .flatten()
             .min();
         if let Some(at) = blocked.filter(|_| !self.budget_spent()) {
             self.set_alarm(at);
+        }
+    }
+
+    fn host_wait(&self, origin: &Origin) -> Option<Instant> {
+        let own = self.session.host_limits();
+        match self.pace.ready_at(origin).max(own.ready_at(origin)) {
+            Some(at) => Some(at),
+            None if !(self.pace.ready(origin) && own.ready(origin)) => {
+                Some(Instant::now() + ROOM_RECHECK)
+            }
+            None => None,
         }
     }
 

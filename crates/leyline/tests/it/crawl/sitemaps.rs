@@ -267,3 +267,47 @@ async fn a_site_without_a_sitemap_is_not_an_error() {
     }
     assert_eq!(crawl.stats().errors(), 0);
 }
+
+#[test]
+fn a_sitemap_retry_waiting_for_a_free_sitemap_slot_does_not_spin() {
+    let (done, finished) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let kept = runtime.block_on(async {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let base = format!("http://{}", listener.local_addr().unwrap());
+            let robots = format!(
+                "User-agent: *\nSitemap: {base}/busy.xml\nSitemap: {base}/slow1.xml\nSitemap: {base}/slow2.xml\n"
+            );
+            let map = format!("<urlset><url><loc>{base}/listed</loc></url></urlset>");
+            let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let count = calls.clone();
+            let server = TestServer::http_on(listener, move |request| match request.target.as_str() {
+                "/robots.txt" => TestResponse::new(200).body(robots.clone()),
+                "/busy.xml" if count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 => {
+                    TestResponse::new(503)
+                }
+                "/busy.xml" => TestResponse::new(200).body(map.clone()),
+                "/slow1.xml" | "/slow2.xml" => TestResponse::new(200)
+                    .body("<urlset></urlset>")
+                    .delay(Duration::from_secs(2)),
+                path => html(&format!("<p>{path}</p>")),
+            })
+            .unwrap();
+            let mut crawl = Session::new()
+                .crawl(server.url("/"))
+                .host_limits(leyline::HostLimits::new());
+            let mut kept = BTreeSet::new();
+            while let Some(page) = crawl.next().await {
+                kept.insert(page.unwrap().url().path().to_owned());
+            }
+            kept
+        });
+        done.send(kept).unwrap();
+    });
+    let kept = finished.recv_timeout(Duration::from_secs(10)).unwrap();
+    assert!(kept.contains("/listed"), "{kept:?}");
+}

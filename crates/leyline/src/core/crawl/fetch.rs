@@ -105,7 +105,7 @@ pub(super) async fn fetch(
     attempt: u32,
     trusted: Option<Url>,
 ) -> Result<Fetched> {
-    let result = request(&session, &url, RetryPolicy::none(), trusted)
+    let result = request(&session, &url, retry.clone().max_retries(0), trusted)
         .stream()
         .send()
         .await;
