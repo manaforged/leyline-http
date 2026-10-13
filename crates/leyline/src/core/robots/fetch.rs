@@ -42,7 +42,14 @@ impl Session {
             return Ok(Robots::empty(RobotsSource::Unavailable));
         }
         match response.read_until(MAX_BYTES, |_, _| false).await {
-            Ok(bytes) => Ok(Robots::parse(&String::from_utf8_lossy(&bytes), agent)),
+            Ok(bytes) => {
+                let body = String::from_utf8_lossy(&bytes);
+                let whole = match bytes.len() >= MAX_BYTES {
+                    true => body.rfind('\n').map_or("", |end| &body[..end]),
+                    false => &body,
+                };
+                Ok(Robots::parse(whole, agent))
+            }
             Err(err) if err.is_shut_down() => Err(err),
             Err(_) => Ok(Robots::empty(RobotsSource::Unreachable)),
         }

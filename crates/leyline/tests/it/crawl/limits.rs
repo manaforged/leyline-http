@@ -328,3 +328,28 @@ async fn a_custom_wait_header_pauses_the_host_for_the_crawl() {
     let gap = sent_at(&stamps, "/other") - sent_at(&stamps, "/busy");
     assert!(gap >= Duration::from_millis(3500), "{gap:?}");
 }
+
+#[tokio::test]
+async fn a_default_crawl_pauses_a_host_that_answers_429() {
+    let stamps = Stamps::default();
+    let seen = stamps.clone();
+    let server = TestServer::http(move |request| {
+        seen.lock()
+            .unwrap()
+            .push((request.target.clone(), Instant::now()));
+        match request.target.as_str() {
+            "/robots.txt" => TestResponse::new(404),
+            "/" => html(r#"<a href="/busy">B</a><a href="/other">O</a>"#),
+            "/busy" => TestResponse::new(429).header("retry-after", "3"),
+            _ => html("<p>page</p>"),
+        }
+    })
+    .await
+    .unwrap();
+    let mut crawl = Session::new().crawl(server.url("/"));
+    while let Some(page) = crawl.next().await {
+        page.unwrap();
+    }
+    let gap = sent_at(&stamps, "/other") - sent_at(&stamps, "/busy");
+    assert!(gap >= Duration::from_millis(2700), "{gap:?}");
+}

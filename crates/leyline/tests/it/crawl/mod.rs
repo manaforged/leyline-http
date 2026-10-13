@@ -6,6 +6,7 @@ mod pace;
 mod rules;
 mod scope;
 mod sitemaps;
+mod skips;
 
 pub(super) use std::collections::BTreeSet;
 pub(super) use std::time::Duration;

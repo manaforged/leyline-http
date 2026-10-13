@@ -244,3 +244,20 @@ async fn session_robots_treats_rate_limiting_as_unreachable() {
     assert_eq!(robots.source(), RobotsSource::Unreachable);
     assert!(!robots.allows(&at("/page")));
 }
+
+#[tokio::test]
+async fn session_robots_drops_the_line_cut_at_the_size_limit() {
+    let head = "User-agent: *\nDisallow: /p\n#";
+    let tail = "\nAllow: /private-ok\n";
+    let cut = 512 * 1024;
+    let filler = "x".repeat(cut - head.len() - "\nAllow: /p".len());
+    let body = format!("{head}{filler}{tail}");
+    let server = TestServer::http(move |request| match request.target.as_str() {
+        "/robots.txt" => TestResponse::new(200).body(body.clone()),
+        _ => TestResponse::new(404),
+    })
+    .await
+    .unwrap();
+    let robots = Session::new().robots(server.url("/"), "*").await.unwrap();
+    assert!(!robots.allows(&at("/private-x")));
+}

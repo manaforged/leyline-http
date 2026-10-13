@@ -62,8 +62,9 @@ println!("{}", crawl.stats());
 | `limit(n)` | none | Stops after `n` kept pages |
 | `host_limits(HostLimits)` | one in flight, one a second, and a 429/503 pause per host, wherever the session's own limits leave them unset | The crawl's pace per host, on top of the session's own limits, which every crawl and request of the session share. The value is used as given; `HostLimits::new()` adds no limits |
 
-The crawl reads each site's robots.txt once, and again after 24 hours, for
-its `Sitemap` lines; it obeys the rest unless you call `ignore_robots()`. Robots groups are
+Unless you call `ignore_robots()`, the crawl reads each site's robots.txt
+once, and again after 24 hours, obeys its rules, and reads its `Sitemap`
+lines. Robots groups are
 matched for the `*` agent. To read the group for a named crawler, call
 `Session::robots(url, agent)`. At most 16 requests are in flight across all
 hosts.
@@ -266,13 +267,16 @@ section 8.5). Other default headers go to every host, so do not put a
 credential in a custom default header for a crawl.
 
 A crawl request waits for the session's own host limits and the crawl's pace
-together, and is sent only when both allow it. A host that is paused, waiting
+together, and is sent only when both allow it. A 429 or 503 that the crawl gets pauses the
+host in both, so the session's own requests to that host wait out the same
+pause. A host that is paused, waiting
 for its next turn, or out of free slots holds no crawl slot. When a page or a
 sitemap fails in a way the retry policy retries (the session's
 `RetryPolicy`, or three tries on transient errors, 429, and 503 when it has
 none), the crawl puts it back in the queue and tries again after the policy's
 wait, without holding a slot. A redirect that leaves the scope counts as
-`SkipReason::Scope`.
+`SkipReason::Scope`. A URL longer than 2048 bytes, or more than 64 links from
+the seed, is dropped without a count.
 
 A crawl that obeys robots rules holds a site's pages until its robots.txt is
 read, and retries an unreachable robots.txt four times, 1, 2, 4, and 8

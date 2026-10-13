@@ -290,4 +290,11 @@ async fn a_crawl_retries_a_robots_txt_that_fails_with_500() {
         pages += 1;
     }
     assert_eq!(pages, 2);
+    let asked = server
+        .requests()
+        .await
+        .iter()
+        .filter(|request| request.target == "/robots.txt")
+        .count();
+    assert!(asked >= 2, "{asked}");
 }

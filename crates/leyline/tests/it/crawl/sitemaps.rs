@@ -311,3 +311,24 @@ fn a_sitemap_retry_waiting_for_a_free_sitemap_slot_does_not_spin() {
     let kept = finished.recv_timeout(Duration::from_secs(10)).unwrap();
     assert!(kept.contains("/listed"), "{kept:?}");
 }
+
+#[tokio::test]
+async fn a_crawl_follows_a_sitemap_to_its_new_address() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let map = format!("<urlset><url><loc>{base}/orphan</loc></url></urlset>");
+    let server = TestServer::http_on(listener, move |request| match request.target.as_str() {
+        "/sitemap.xml" => TestResponse::new(301).header("location", "/maps/real.xml"),
+        "/maps/real.xml" => TestResponse::new(200).body(map.clone()),
+        path => html(&format!("<p>{path}</p>")),
+    })
+    .unwrap();
+    let mut crawl = Session::new()
+        .crawl(server.url("/"))
+        .host_limits(leyline::HostLimits::new());
+    let mut kept = BTreeSet::new();
+    while let Some(page) = crawl.next().await {
+        kept.insert(page.unwrap().url().path().to_owned());
+    }
+    assert!(kept.contains("/orphan"), "{kept:?}");
+}

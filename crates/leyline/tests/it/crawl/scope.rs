@@ -213,3 +213,46 @@ async fn a_crawl_counts_a_redirect_that_leaves_its_scope() {
     }
     assert_eq!(crawl.stats().skipped(SkipReason::Scope), 1);
 }
+
+#[tokio::test]
+async fn a_domain_crawl_keeps_other_hosts_of_its_site_and_its_credentials_on_the_seed() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let local = listener.local_addr().unwrap();
+    let port = local.port();
+    let links = format!(
+        r#"<a href="http://blog.example.test:{port}/post">B</a><a href="http://other.test:{port}/away">O</a>"#
+    );
+    let server = TestServer::http_on(listener, move |request| match request.target.as_str() {
+        "/" => html(&links),
+        _ => html("<p>page</p>"),
+    })
+    .unwrap();
+    let session = Session::builder()
+        .dns(
+            leyline::DnsConfig::new()
+                .resolve_host("www.example.test", [local])
+                .resolve_host("blog.example.test", [local])
+                .resolve_host("other.test", [local]),
+        )
+        .bearer_auth("secret-token")
+        .headers([("cookie", "session=secret")])
+        .build()
+        .unwrap();
+    let mut crawl = session
+        .crawl(format!("http://www.example.test:{port}/"))
+        .scope(Scope::Domain)
+        .host_limits(leyline::HostLimits::new());
+    while let Some(page) = crawl.next().await {
+        page.unwrap();
+    }
+    let sent = server.requests().await;
+    let post = sent
+        .iter()
+        .find(|request| request.target == "/post")
+        .unwrap();
+    assert!(post.header("authorization").is_none());
+    assert!(post.header("cookie").is_none());
+    assert!(!sent.iter().any(|request| request.target == "/away"));
+    let home = sent.iter().find(|request| request.target == "/").unwrap();
+    assert_eq!(home.header("authorization"), Some("Bearer secret-token"));
+}

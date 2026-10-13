@@ -43,6 +43,13 @@ version and publish as separate crates.
 
 ### Changed
 
+- `html::links`, `html::forms`, and other readers built on the HTML scanner
+  now keep text after a comment or a bare `<` (`<a>a < b</a>` gives `a < b`),
+  skip `</` followed by a non-letter to the next `>`, and keep a namespace
+  prefix in tag names (`fb:like`), as the HTML standard does.
+- A `HostLimits::host` override now applies to IPv6 literal hosts; before, it
+  never matched them.
+
 - `leyline-bssl-sys` compiles BoringSSL with the `cc` crate from the source
   lists BoringSSL ships, so a build needs only a C and C++ compiler and Git:
   no CMake. On Windows, NASM is optional; without it the build links the
