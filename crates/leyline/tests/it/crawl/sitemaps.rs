@@ -225,3 +225,45 @@ async fn a_crawl_counts_a_failed_sitemap_and_skips_a_cut_gzip() {
     }
     assert_eq!(crawl.stats().errors(), 2);
 }
+
+#[tokio::test]
+async fn a_crawl_tries_a_busy_sitemap_again() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let map = format!("<urlset><url><loc>{base}/listed</loc></url></urlset>");
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let count = calls.clone();
+    let server = TestServer::http_on(listener, move |request| match request.target.as_str() {
+        "/sitemap.xml" if count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 => {
+            TestResponse::new(503)
+        }
+        "/sitemap.xml" => TestResponse::new(200).body(map.clone()),
+        path => html(&format!("<p>{path}</p>")),
+    })
+    .unwrap();
+    let mut crawl = Session::new()
+        .crawl(server.url("/"))
+        .host_limits(leyline::HostLimits::new());
+    let mut kept = BTreeSet::new();
+    while let Some(page) = crawl.next().await {
+        kept.insert(page.unwrap().url().path().to_owned());
+    }
+    assert!(kept.contains("/listed"), "{kept:?}");
+}
+
+#[tokio::test]
+async fn a_site_without_a_sitemap_is_not_an_error() {
+    let server = TestServer::http(|request| match request.target.as_str() {
+        "/" => html("<p>home</p>"),
+        _ => TestResponse::new(404),
+    })
+    .await
+    .unwrap();
+    let mut crawl = Session::new()
+        .crawl(server.url("/"))
+        .host_limits(leyline::HostLimits::new());
+    while let Some(page) = crawl.next().await {
+        page.unwrap();
+    }
+    assert_eq!(crawl.stats().errors(), 0);
+}

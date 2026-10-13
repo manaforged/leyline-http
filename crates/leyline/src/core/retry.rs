@@ -15,6 +15,13 @@ pub use wait::WaitFormat;
 pub(crate) use wait::parse_retry_after;
 use wait::{RETRY_AFTER, WaitHeader};
 
+pub(crate) enum RetryPlan {
+    Stop,
+    Exhausted,
+    Declined,
+    Backoff(Duration),
+}
+
 const GATEWAY_STATUSES: [StatusCode; 3] = [
     StatusCode::BAD_GATEWAY,
     StatusCode::SERVICE_UNAVAILABLE,
@@ -229,6 +236,44 @@ impl RetryPolicy {
     pub(crate) fn proxy_for_retry(&self, retry: u32) -> Option<&ProxyConfig> {
         let index = usize::try_from(retry.checked_sub(1)?).ok()?;
         self.proxies.get(index.checked_rem(self.proxies.len())?)
+    }
+
+    pub(crate) fn plan(
+        &self,
+        result: &Result<Response>,
+        attempt: u32,
+        retryable_method: bool,
+        body_retryable: impl FnOnce() -> bool,
+    ) -> RetryPlan {
+        if self.is_none() {
+            return RetryPlan::Stop;
+        }
+        if attempt >= self.max_retries {
+            return match result {
+                Ok(response) if self.matches_response(response) => RetryPlan::Exhausted,
+                _ => RetryPlan::Stop,
+            };
+        }
+        if !self.wanted(result)
+            || !(retryable_method || self.retries_unsent(result))
+            || !body_retryable()
+        {
+            return RetryPlan::Stop;
+        }
+        match result.as_ref().ok().and_then(|r| self.server_wait(r)) {
+            Some(wait) if wait > self.max_retry_after => RetryPlan::Declined,
+            Some(wait) => RetryPlan::Backoff(wait),
+            None => RetryPlan::Backoff(self.backoff(attempt)),
+        }
+    }
+
+    fn wanted(&self, result: &Result<Response>) -> bool {
+        match result {
+            Ok(resp) => self.matches_response(resp),
+            Err(err) if err.is_timeout() => self.matches_timeout(),
+            Err(err) if err.is_retryable() => self.matches_connection_error(),
+            Err(_) => false,
+        }
     }
 
     pub(crate) fn or(self, fallback: RetryPolicy) -> RetryPolicy {

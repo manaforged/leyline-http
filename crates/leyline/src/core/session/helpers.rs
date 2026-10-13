@@ -90,15 +90,16 @@ impl Session {
     }
 
     pub(crate) async fn admit_host(&self, url: &url::Url) -> Option<crate::core::config::HostPass> {
-        let own = self.inner.host_limits.admit(url).await;
         #[cfg(feature = "html")]
-        let paced = match &self.inner.crawl_pace {
-            Some(pace) => pace.admit(url).await,
-            None => None,
-        };
-        #[cfg(feature = "html")]
-        let own = crate::core::config::HostPass::join(own, paced);
-        own
+        let pace = self.inner.crawl_pace.as_ref();
+        #[cfg(not(feature = "html"))]
+        let pace = None;
+        self.inner.host_limits.admit_with(pace, url).await
+    }
+
+    #[cfg(feature = "html")]
+    pub(crate) fn shut_down_signal(&self) -> tokio_util::sync::WaitForCancellationFutureOwned {
+        self.inner.shutdown.clone().cancelled_owned()
     }
 
     pub(crate) fn observe_host(

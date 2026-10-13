@@ -58,7 +58,7 @@ println!("{}", crawl.stats());
 | --- | --- | --- |
 | `respect(Respect)` | `Robots` | `Robots` obeys robots.txt `Disallow` and `Crawl-delay`, the page's `noindex` and `nofollow`, and `rel="nofollow"`. `AiTraining` does all of that and also obeys the site's AI-training opt-outs |
 | `ignore_robots()` | off | Obeys no robots rules: no `Disallow`, `Crawl-delay`, `noindex`, or `nofollow` |
-| `scope(Scope)` | `Host` | `Host`: the seed's host. `Domain`: its registrable domain. `Prefix`: its host and directory |
+| `scope(Scope)` | `Host` | `Host`: the seed's host. `Domain`: its registrable domain. `Prefix`: its host and directory; a last path segment with a dot and a letter after it is a file, so end a directory seed with a slash |
 | `limit(n)` | none | Stops after `n` kept pages |
 | `host_limits(HostLimits)` | one in flight, one a second, and a 429/503 pause per host, wherever the session's own limits leave them unset | The crawl's pace per host, on top of the session's own limits, which every crawl and request of the session share. The value is used as given; `HostLimits::new()` adds no limits |
 
@@ -259,17 +259,26 @@ read only the group for every crawler. The rules follow RFC 9309:
 | 5xx, or the request failed | `Unreachable` | Every path is disallowed |
 
 A crawl sends the session's `Authorization` header (including
-`bearer_auth`) and its cookie header only to the seed's origin; requests to
-other hosts go without them. Other default headers go to every host, so do not
-put a credential in a custom default header for a crawl. A host that is paused
-or waiting for its next turn holds no crawl slot: a page that gets 429 or 503
-goes back in the queue until the host's pause ends. A redirect that leaves the
-scope counts as `SkipReason::Scope`.
+`bearer_auth`) and a `Cookie` default header only to the seed's origin;
+requests to other hosts go without them. Cookies from the session's cookie jar
+follow cookie rules, which match by host and path but not by port (RFC 6265,
+section 8.5). Other default headers go to every host, so do not put a
+credential in a custom default header for a crawl.
+
+A crawl request waits for the session's own host limits and the crawl's pace
+together, and is sent only when both allow it. A host that is paused, waiting
+for its next turn, or out of free slots holds no crawl slot. When a page or a
+sitemap fails in a way the retry policy retries (the session's
+`RetryPolicy`, or three tries on transient errors, 429, and 503 when it has
+none), the crawl puts it back in the queue and tries again after the policy's
+wait, without holding a slot. A redirect that leaves the scope counts as
+`SkipReason::Scope`.
 
 A crawl that obeys robots rules holds a site's pages until its robots.txt is
 read, and retries an unreachable robots.txt four times, 1, 2, 4, and 8
-seconds apart, before it skips the site. A crawl with `ignore_robots()` does
-not wait for robots.txt; it reads the file only for its `Sitemap` lines.
+seconds apart, before it skips the site. A crawl with `ignore_robots()` never
+asks for robots.txt; it reads `/sitemap.xml` directly. A missing sitemap is not
+an error; a sitemap that fails after its retries counts in `errors()`.
 
 Up to five redirects are followed, and the rules apply to the origin you
 asked about. The first 512 KiB of the file are parsed. `Session::robots`

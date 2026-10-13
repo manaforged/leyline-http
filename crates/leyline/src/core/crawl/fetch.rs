@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use http::header::LOCATION;
 use http::{HeaderMap, HeaderName, StatusCode};
 use url::Url;
@@ -6,7 +8,8 @@ use super::SkipReason;
 use crate::core::config::RedirectPolicy;
 use crate::core::error::Result;
 use crate::core::request::RequestBuilder;
-use crate::core::retry::RetryPolicy;
+use crate::core::response::Response;
+use crate::core::retry::{RetryPlan, RetryPolicy};
 use crate::core::session::Session;
 
 const HTML_TYPES: [&str; 2] = ["text/html", "application/xhtml+xml"];
@@ -30,10 +33,6 @@ const HTML_SIGNATURES: [&[u8]; 17] = [
     b"<!--",
 ];
 const SNIFF_WHITESPACE: [u8; 5] = [b'\t', b'\n', 0x0c, b'\r', b' '];
-pub(super) const LATER: [StatusCode; 2] = [
-    StatusCode::TOO_MANY_REQUESTS,
-    StatusCode::SERVICE_UNAVAILABLE,
-];
 const COMMENT: &[u8] = b"<!--";
 const TAG_ENDS: [u8; 6] = [b'\t', b'\n', 0x0c, b'\r', b' ', b'>'];
 const SNIFF_BYTES: usize = 512;
@@ -44,7 +43,7 @@ const KEPT_HEADERS: [HeaderName; 2] = [X_ROBOTS_TAG, CONTENT_USAGE];
 
 pub(super) enum Fetched {
     Redirect { to: Url },
-    Later,
+    Later(Duration),
     Skip(SkipReason),
     Page(Box<Loaded>),
 }
@@ -103,12 +102,20 @@ pub(super) async fn fetch(
     session: Session,
     url: Url,
     retry: RetryPolicy,
+    attempt: u32,
     trusted: Option<Url>,
 ) -> Result<Fetched> {
-    let response = request(&session, &url, retry, trusted)
+    let result = request(&session, &url, RetryPolicy::none(), trusted)
         .stream()
         .send()
-        .await?;
+        .await;
+    if let RetryPlan::Backoff(wait) = retry.plan(&result, attempt, true, || true) {
+        return Ok(Fetched::Later(wait));
+    }
+    read(result?, &url).await
+}
+
+async fn read(response: Response, url: &Url) -> Result<Fetched> {
     let status = response.status();
     if status.is_redirection() {
         let target = response
@@ -122,9 +129,6 @@ pub(super) async fn fetch(
     if response.block().is_some() {
         return Ok(Fetched::Skip(SkipReason::Blocked));
     }
-    if LATER.contains(&status) {
-        return Ok(Fetched::Later);
-    }
     if !status.is_success() {
         return Ok(Fetched::Skip(SkipReason::Status));
     }
@@ -134,19 +138,8 @@ pub(super) async fn fetch(
     }
     let url = response.url().clone();
     let headers = kept_headers(response.headers());
-    let html = match declared {
-        Some(_) => response.text().await?,
-        None => {
-            let body = response
-                .read_until(MAX_UNTYPED_BYTES, |body, _| {
-                    body.len() >= SNIFF_BYTES && !sniffs_html(body)
-                })
-                .await?;
-            if !sniffs_html(&body) {
-                return Ok(Fetched::Skip(SkipReason::NotHtml));
-            }
-            String::from_utf8_lossy(&body).into_owned()
-        }
+    let Some(html) = body(response, declared).await? else {
+        return Ok(Fetched::Skip(SkipReason::NotHtml));
     };
     Ok(Fetched::Page(Box::new(Loaded {
         url,
@@ -154,4 +147,16 @@ pub(super) async fn fetch(
         headers,
         html,
     })))
+}
+
+async fn body(response: Response, declared: Option<bool>) -> Result<Option<String>> {
+    if declared.is_some() {
+        return response.text().await.map(Some);
+    }
+    let body = response
+        .read_until(MAX_UNTYPED_BYTES, |body, _| {
+            body.len() >= SNIFF_BYTES && !sniffs_html(body)
+        })
+        .await?;
+    Ok(sniffs_html(&body).then(|| String::from_utf8_lossy(&body).into_owned()))
 }

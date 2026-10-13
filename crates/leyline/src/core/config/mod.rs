@@ -3,6 +3,7 @@ mod dns;
 mod host;
 mod host_gate;
 mod host_limits;
+mod origin;
 mod pool;
 mod proxy;
 mod redirect;

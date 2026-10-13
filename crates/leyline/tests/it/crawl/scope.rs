@@ -173,15 +173,15 @@ async fn a_prefix_crawl_keeps_a_dotted_directory_as_its_prefix() {
 }
 
 #[tokio::test]
-async fn a_prefix_crawl_keeps_a_named_dotted_directory_as_its_prefix() {
+async fn a_prefix_crawl_from_a_dotted_directory_ending_in_a_slash_stays_inside_it() {
     let server = TestServer::http(|request| match request.target.as_str() {
-        "/docs.old" => html(r#"<a href="/docs.old/page">P</a><a href="/other">O</a>"#),
+        "/docs.old/" => html(r#"<a href="/docs.old/page">P</a><a href="/other">O</a>"#),
         _ => html("<p>page</p>"),
     })
     .await
     .unwrap();
     let mut crawl = Session::new()
-        .crawl(server.url("/docs.old"))
+        .crawl(server.url("/docs.old/"))
         .scope(Scope::Prefix)
         .host_limits(leyline::HostLimits::new());
     while let Some(page) = crawl.next().await {

@@ -1,8 +1,10 @@
+use std::time::Duration;
+
 use http::header::LOCATION;
 use url::Url;
 
 use super::fetch::request;
-use crate::core::retry::RetryPolicy;
+use crate::core::retry::{RetryPlan, RetryPolicy};
 
 use crate::core::config::CompressionConfig;
 use crate::core::robots::Robots;
@@ -34,6 +36,7 @@ pub(super) fn listed(site: &Url, robots: &Robots, obey: bool) -> Vec<Url> {
 pub(super) enum SitemapRead {
     Found(Sitemap),
     Moved(Url),
+    Later(Duration),
     Failed,
 }
 
@@ -41,13 +44,17 @@ pub(super) async fn read(
     session: Session,
     url: Url,
     retry: RetryPolicy,
+    attempt: u32,
     trusted: Option<Url>,
 ) -> SitemapRead {
-    let Ok(response) = request(&session, &url, retry, trusted)
+    let result = request(&session, &url, RetryPolicy::none(), trusted)
         .stream()
         .send()
-        .await
-    else {
+        .await;
+    if let RetryPlan::Backoff(wait) = retry.plan(&result, attempt, true, || true) {
+        return SitemapRead::Later(wait);
+    }
+    let Ok(response) = result else {
         return SitemapRead::Failed;
     };
     if response.status().is_redirection() {
@@ -58,6 +65,9 @@ pub(super) async fn read(
             Some(to) => SitemapRead::Moved(to),
             None => SitemapRead::Failed,
         };
+    }
+    if response.status().is_client_error() {
+        return SitemapRead::Found(Sitemap::default());
     }
     if !response.status().is_success() {
         return SitemapRead::Failed;

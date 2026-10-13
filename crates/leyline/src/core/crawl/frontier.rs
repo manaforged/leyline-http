@@ -8,10 +8,6 @@ use crate::core::robots::normalize;
 use crate::html::WEB_SCHEMES;
 
 const MAX_URL_BYTES: usize = 2048;
-const FILE_EXTENSIONS: [&str; 14] = [
-    "html", "htm", "xhtml", "shtml", "php", "asp", "aspx", "jsp", "cgi", "xml", "txt", "md", "pdf",
-    "json",
-];
 pub(super) const MAX_DEPTH: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -39,11 +35,9 @@ fn is_ip(url: &Url) -> bool {
 
 fn directory(path: &str) -> String {
     let last = path.rsplit('/').next().unwrap_or_default();
-    let named_file = last.rsplit_once('.').is_some_and(|(_, ext)| {
-        FILE_EXTENSIONS
-            .iter()
-            .any(|known| known.eq_ignore_ascii_case(ext))
-    });
+    let named_file = last
+        .rsplit_once('.')
+        .is_some_and(|(_, ext)| ext.bytes().any(|byte| byte.is_ascii_alphabetic()));
     if named_file {
         let end = path.rfind('/').map_or(0, |end| end + 1);
         return path[..end].to_owned();
@@ -91,7 +85,7 @@ pub(super) struct Queued {
     pub(super) hops: usize,
     pub(super) seed: bool,
     pub(super) widen: bool,
-    pub(super) attempts: u8,
+    pub(super) attempts: u32,
     pub(super) chain: Vec<String>,
 }
 
@@ -246,6 +240,10 @@ impl Frontier {
 
     pub(super) fn origins(&self) -> impl Iterator<Item = &Origin> {
         self.queues.keys()
+    }
+
+    pub(super) fn is_empty(&self) -> bool {
+        self.queues.is_empty()
     }
 
     pub(super) fn clear(&mut self) {

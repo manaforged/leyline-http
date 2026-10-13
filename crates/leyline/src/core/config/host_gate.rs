@@ -37,19 +37,6 @@ pub(crate) struct HostPass {
     pub(super) _also: Option<Box<HostPass>>,
 }
 
-impl HostPass {
-    #[cfg(feature = "html")]
-    pub(crate) fn join(first: Option<HostPass>, second: Option<HostPass>) -> Option<HostPass> {
-        match (first, second) {
-            (Some(mut first), Some(second)) => {
-                first._also = Some(Box::new(second));
-                Some(first)
-            }
-            (first, second) => first.or(second),
-        }
-    }
-}
-
 #[derive(Debug, Default)]
 pub(super) struct Gates {
     pub(super) by_origin: Mutex<HashMap<Origin, Arc<HostGate>>>,
@@ -100,7 +87,11 @@ impl Gates {
             return Arc::clone(gate);
         }
         let now = Instant::now();
-        map.retain(|_, gate| Arc::strong_count(gate) > 1 || gate.busy_after(now));
+        let floors = self.floors.lock().unwrap_or_else(PoisonError::into_inner);
+        map.retain(|kept, gate| {
+            Arc::strong_count(gate) > 1 || gate.busy_after(now, floors.get(kept).copied())
+        });
+        drop(floors);
         let gate = Arc::new(HostGate::new(max_in_flight));
         map.insert(origin, Arc::clone(&gate));
         gate
@@ -129,32 +120,40 @@ impl HostGate {
         }
     }
 
-    pub(super) fn try_admit(&self, interval: Option<Duration>) -> bool {
-        let mut last = self.last.lock().unwrap_or_else(PoisonError::into_inner);
+    pub(super) fn commit(gates: &[(&HostGate, Option<Duration>)]) -> bool {
         let now = Instant::now();
-        if spaced_until(*last, interval, now) > now || self.paused_until() > now {
-            return false;
+        let mut locks = Vec::with_capacity(gates.len());
+        for (gate, interval) in gates {
+            if locks
+                .iter()
+                .any(|(held, _, _): &(&HostGate, _, _)| std::ptr::eq(*held, *gate))
+            {
+                continue;
+            }
+            let last = gate.last.lock().unwrap_or_else(PoisonError::into_inner);
+            if spaced_until(*last, *interval, now) > now || gate.paused_until() > now {
+                return false;
+            }
+            locks.push((*gate, last, *interval));
         }
-        *last = Some(now);
-        let mut quiet = self.quiet.lock().unwrap_or_else(PoisonError::into_inner);
-        *quiet = (*quiet).max(spaced_until(*last, interval, now));
+        for (gate, mut last, interval) in locks {
+            *last = Some(now);
+            let mut quiet = gate.quiet.lock().unwrap_or_else(PoisonError::into_inner);
+            *quiet = (*quiet).max(spaced_until(*last, interval, now));
+        }
         true
     }
 
-    #[cfg(feature = "html")]
     pub(super) fn ready_at(&self, interval: Option<Duration>, now: Instant) -> Option<Instant> {
         let last = *self.last.lock().unwrap_or_else(PoisonError::into_inner);
         let end = spaced_until(last, interval, now).max(self.paused_until());
         (end > now).then_some(end)
     }
 
-    pub(super) async fn wait_spacing(&self, interval: Option<Duration>) {
+    pub(super) fn busy_after(&self, now: Instant, floor: Option<Duration>) -> bool {
         let last = *self.last.lock().unwrap_or_else(PoisonError::into_inner);
-        tokio::time::sleep_until(spaced_until(last, interval, Instant::now())).await;
-    }
-
-    pub(super) fn busy_after(&self, now: Instant) -> bool {
         *self.quiet.lock().unwrap_or_else(PoisonError::into_inner) > now
+            || spaced_until(last, floor, now) > now
             || self.paused_until() > now
     }
 
@@ -167,14 +166,8 @@ impl HostGate {
         *paused = (*paused).max(end);
     }
 
-    pub(super) async fn wait_unpaused(&self) {
-        loop {
-            let end = self.paused_until();
-            if end <= Instant::now() {
-                return;
-            }
-            tokio::time::sleep_until(end).await;
-        }
+    pub(super) async fn wait_until(at: Instant) {
+        tokio::time::sleep_until(at).await;
     }
 }
 

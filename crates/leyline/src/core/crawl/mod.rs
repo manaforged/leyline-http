@@ -1,3 +1,4 @@
+mod clock;
 mod fetch;
 mod frontier;
 mod page;
@@ -8,9 +9,8 @@ mod visit;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::pin::Pin;
-use std::task::{Context, Poll};
 
-use futures_util::stream::{FuturesUnordered, Stream, StreamExt};
+use futures_util::stream::{FuturesUnordered, Stream};
 use url::Url;
 
 use fetch::{Fetched, fetch};
@@ -24,7 +24,7 @@ use visit::Held;
 use crate::core::config::{HostLimits, Origin};
 use crate::core::error::{Error, Kind, Result};
 use crate::core::into_url::IntoUrl;
-use crate::core::retry::{RetryPolicy, RetryTrigger};
+use crate::core::retry::RetryPolicy;
 use crate::core::robots::{Purpose, Robots};
 use crate::core::session::Session;
 
@@ -32,12 +32,6 @@ const ANY_AGENT: &str = "*";
 const NOFOLLOW: &str = "nofollow";
 const MAX_REDIRECTS: usize = 5;
 const PAGE_RETRIES: u32 = 2;
-const PAGE_RETRY_ON: [RetryTrigger; 4] = [
-    RetryTrigger::ConnectionError,
-    RetryTrigger::Timeout,
-    RetryTrigger::Status(502),
-    RetryTrigger::Status(504),
-];
 const MIN_PRINT_WORDS: usize = 20;
 const MAX_IN_FLIGHT: usize = 16;
 const POLITE_IN_FLIGHT: usize = 1;
@@ -58,10 +52,9 @@ enum Event {
         fetched: Result<Fetched>,
     },
     Sitemap {
-        url: Url,
+        file: SitemapFile,
         read: SitemapRead,
     },
-    Wake,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,7 +82,7 @@ pub struct Crawl {
     trusted: Option<Url>,
     plain: Session,
     page_retry: RetryPolicy,
-    waking: Option<tokio::time::Instant>,
+    clock: clock::Clock,
     holding: usize,
     tasks: FuturesUnordered<Task>,
     pages_in_flight: usize,
@@ -132,7 +125,7 @@ impl Session {
             trusted: None,
             plain: self.clone(),
             page_retry: RetryPolicy::none(),
-            waking: None,
+            clock: clock::Clock::default(),
             holding: 0,
             tasks: FuturesUnordered::new(),
             pages_in_flight: 0,
@@ -215,9 +208,8 @@ impl Crawl {
             .session
             .default_retry()
             .clone()
-            .or(RetryPolicy::transient()
-                .retry_on(PAGE_RETRY_ON)
-                .max_retries(PAGE_RETRIES));
+            .or(RetryPolicy::transient().max_retries(PAGE_RETRIES));
+        self.clock.stopped = Some(Box::pin(self.session.shut_down_signal()));
         self.pace = pace;
         for seed in std::mem::take(&mut self.seeds) {
             match seed {
@@ -247,8 +239,9 @@ impl Crawl {
         self.stats.request();
         let session = self.session.clone();
         let (retry, trusted) = (self.page_retry.clone(), self.trusted.clone());
+        let attempt = queued.attempts;
         self.tasks.push(Box::pin(async move {
-            let fetched = fetch(session, queued.url.clone(), retry, trusted).await;
+            let fetched = fetch(session, queued.url.clone(), retry, attempt, trusted).await;
             Event::Page {
                 origin,
                 queued,
@@ -299,11 +292,6 @@ impl Crawl {
         }
     }
 
-    fn later(&mut self, mut queued: Queued) {
-        queued.attempts += 1;
-        self.frontier.push_back(queued);
-    }
-
     fn handle(&mut self, event: Event) {
         match event {
             Event::Robots {
@@ -311,8 +299,7 @@ impl Crawl {
                 url,
                 robots,
             } => self.robots_read(origin, url, *robots),
-            Event::Sitemap { url, read } => self.sitemap_read(url, read),
-            Event::Wake => self.waking = None,
+            Event::Sitemap { file, read } => self.sitemap_read(file, read),
             Event::Page {
                 origin,
                 queued,
@@ -330,39 +317,11 @@ impl Crawl {
                         self.redirect(queued, to);
                         return self.forward(key, target);
                     }
-                    Ok(Fetched::Later) if queued.attempts < PAGE_RETRIES as u8 => {
-                        return self.later(queued);
-                    }
-                    Ok(Fetched::Later) => self.stats.skip(SkipReason::Status),
+                    Ok(Fetched::Later(wait)) => return self.later(queued, wait),
                     Ok(Fetched::Skip(reason)) => self.stats.skip(reason),
                     Ok(Fetched::Page(loaded)) => self.page(queued.depth, *loaded),
                 }
                 self.settle(key);
-            }
-        }
-    }
-}
-
-impl Stream for Crawl {
-    type Item = Result<CrawlPage>;
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let this = self.get_mut();
-        this.start();
-        loop {
-            this.schedule();
-            if let Some(item) = this.ready.pop_front() {
-                return Poll::Ready(Some(item));
-            }
-            if this.limit_met() && this.pages_in_flight == 0 {
-                this.tasks = FuturesUnordered::new();
-                return Poll::Ready(None);
-            }
-            match this.tasks.poll_next_unpin(cx) {
-                Poll::Ready(Some(event)) => this.handle(event),
-                Poll::Ready(None) if this.release_held() => {}
-                Poll::Ready(None) => return Poll::Ready(None),
-                Poll::Pending => return Poll::Pending,
             }
         }
     }
