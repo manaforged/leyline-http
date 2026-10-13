@@ -73,6 +73,7 @@ impl Crawl {
             };
             let upgraded = self.session.upgraded(&queued.url);
             if upgraded != queued.url {
+                self.forward(page_key(&queued.url), page_key(&upgraded));
                 self.frontier.rekey(queued, upgraded);
                 continue;
             }

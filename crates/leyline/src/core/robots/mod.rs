@@ -275,7 +275,7 @@ impl Robots {
             .filter(|group| group.agents.contains(&wanted))
         {
             robots.rules.extend(group.rules);
-            robots.crawl_delay = robots.crawl_delay.or(group.crawl_delay);
+            robots.crawl_delay = robots.crawl_delay.max(group.crawl_delay);
             robots.uses.extend(group.uses);
         }
         robots

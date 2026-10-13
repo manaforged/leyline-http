@@ -99,7 +99,9 @@ For each URL, in order, the crawl:
    AI training. `noai` is a convention some sites use, not a standard. A
    page that names another in-scope page as its canonical URL waits until
    the crawl has that page: it is dropped when the canonical page is kept,
-   and kept when the canonical page is skipped or cannot be fetched. A page
+   and kept when the canonical page is skipped or cannot be fetched. A held page counts
+   toward `limit`; when the limit leaves no room to fetch the canonical page,
+   the held page is kept. A page
    of 20 words or more is skipped when its text, compared word by word,
    matches a kept page.
 

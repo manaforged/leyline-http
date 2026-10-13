@@ -261,3 +261,12 @@ async fn session_robots_drops_the_line_cut_at_the_size_limit() {
     let robots = Session::new().robots(server.url("/"), "*").await.unwrap();
     assert!(!robots.allows(&at("/private-x")));
 }
+
+#[test]
+fn robots_keep_the_longest_crawl_delay_of_matching_groups() {
+    let robots = Robots::parse(
+        "User-agent: *\nCrawl-delay: 1\n\nUser-agent: other\nDisallow: /x\n\nUser-agent: *\nCrawl-delay: 5\n",
+        "*",
+    );
+    assert_eq!(robots.crawl_delay(), Some(Duration::from_secs(5)));
+}
