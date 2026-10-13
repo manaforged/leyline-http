@@ -326,6 +326,23 @@ g_fuzz_timed() {
 
 MAX_CRATE_BYTES=10485760
 CRATES_INDEX=https://index.crates.io
+INDEX_WAIT=900
+INDEX_POLL=10
+PUBLISH_ORDER='
+import json, sys
+packages = [p for p in json.load(sys.stdin)["packages"] if p.get("publish") != []]
+names = {p["name"] for p in packages}
+needs = {p["name"]: {d["name"] for d in p["dependencies"] if d["name"] in names and d.get("kind") != "dev"} for p in packages}
+done = []
+while len(done) < len(packages):
+    for p in packages:
+        if p["name"] not in done and needs[p["name"]] <= set(done):
+            done.append(p["name"])
+            print(p["name"], p["version"])
+            break
+    else:
+        sys.exit("dependency cycle among publishable crates")
+'
 SUBCRATE_MANIFESTS=(
     crates/leyline-bssl-sys/Cargo.toml
     crates/leyline-bssl/Cargo.toml
@@ -389,36 +406,64 @@ published_on_crates_io() {
     curl -fsS "$CRATES_INDEX/$path" 2>/dev/null | grep -q "\"vers\":\"$version\""
 }
 
+wait_for_index() {
+    local name="$1" version="$2" waited=0
+    until published_on_crates_io "$name" "$version"; do
+        (( waited >= INDEX_WAIT )) && return 1
+        sleep "$INDEX_POLL"
+        waited=$(( waited + INDEX_POLL ))
+    done
+}
+
+publish_failed() {
+    local failed="$1"; shift
+    if (( $# > 0 )); then
+        echo "  already on crates.io from this run; yank them with:"
+        local crate
+        for crate in "$@"; do
+            echo "    cargo yank --version ${crate#*@} ${crate%@*}"
+        done
+    fi
+    fail "cargo publish failed at $failed"
+}
+
 g_publish() {
-    step "cargo publish (every publishable crate not yet on crates.io, in dependency order)"
+    step "cargo publish (each crate not yet on crates.io, one at a time, in dependency order)"
     [[ -n "${CARGO_REGISTRY_TOKEN:-}" ]] || fail "CARGO_REGISTRY_TOKEN is unset; publish runs from the release workflow"
     stage_workspace
-    local name version pending=() excluded=()
+    local crate name version pending=() excluded=() published=()
     while read -r name version; do
         if published_on_crates_io "$name" "$version"; then
             excluded+=(--exclude "$name")
         else
-            pending+=("$name")
+            pending+=("$name@$version")
         fi
     done < <(cargo metadata --manifest-path "$package_stage/Cargo.toml" --no-deps --format-version 1 \
-        | python3 -c 'import json, sys; [print(p["name"], p["version"]) for p in json.load(sys.stdin)["packages"] if p.get("publish") != []]')
+        | python3 -c "$PUBLISH_ORDER")
     if (( ${#pending[@]} == 0 )); then
         ok "every crate is already on crates.io"
         return 0
     fi
-    echo "  publishing: ${pending[*]}"
+    echo "  publishing, in order: ${pending[*]}"
     rm -rf "$CARGO_TARGET_DIR/package"
     cargo package --manifest-path "$package_stage/Cargo.toml" --workspace --no-verify "${excluded[@]}" \
-        || fail "cargo package failed"
+        || fail "cargo package failed; nothing was published"
     if [[ -n "${RELEASE_PACKAGES:-}" ]]; then
         local archive
         for archive in "$CARGO_TARGET_DIR"/package/*.crate; do
             cmp -s "$archive" "$RELEASE_PACKAGES/$(basename "$archive")" \
-                || fail "$(basename "$archive") differs from the package the release job tested"
+                || fail "$(basename "$archive") differs from the package the release job tested; nothing was published"
         done
     fi
-    cargo publish --manifest-path "$package_stage/Cargo.toml" --workspace --no-verify "${excluded[@]}" \
-        || fail "cargo publish failed"
+    for crate in "${pending[@]}"; do
+        name="${crate%@*}"
+        version="${crate#*@}"
+        cargo publish --manifest-path "$package_stage/Cargo.toml" -p "$name" --no-verify \
+            || publish_failed "$crate" "${published[@]}"
+        published+=("$crate")
+        wait_for_index "$name" "$version" \
+            || publish_failed "$crate (not in the crates.io index after ${INDEX_WAIT}s)" "${published[@]}"
+    done
     ok "crates published"
 }
 
