@@ -36,6 +36,7 @@ profile stability and your own profiles.
 | Firefox 155 | `Firefox155` | `firefox-155.0.1` | gated |
 | Firefox 156 | `Firefox156` | `firefox-156.0.1` | gated |
 | Firefox 157 | `Firefox157` | `firefox-157.0` | gated |
+| Firefox 158 | `Firefox158` | `firefox-158.0` | gated |
 | Safari 18 | `Safari18` | `safari-18.6-20621.3.11.11.3` | gated |
 | Safari 26 | `Safari26` | `safari-26.6.2-21624.5.1.11.3` | gated |
 | Safari 27 | `Safari27` | `safari-27.0-21625.1.29.18.28` | gated |
@@ -125,6 +126,7 @@ The reference values come from the capture that the profile's `capture` and
 | Firefox 155 | `browser` | `firefox-155.0.1`, macOS and Linux `--headless`, Windows headful |
 | Firefox 156 | `browser` | `firefox-156.0.1`, macOS and Linux `--headless`, Windows headful |
 | Firefox 157 | `browser` | `firefox-157.0`, macOS and Linux `--headless` |
+| Firefox 158 | `browser` | `firefox-158.0`, macOS, Linux, and Windows `--headless` |
 | Safari 18 | `browser` | `safari-18.6-20621.3.11.11.3`, Safari.app on macOS 15.7.7 in a VM through safaridriver |
 | Safari 26 | `browser` | `safari-26.6.2-21624.5.1.11.3`, Safari.app on macOS 26.6.2 in a VM through safaridriver |
 | Safari 27 | `browser` | `safari-27.0-21625.1.29.18.28`, Safari.app 27.0 on macOS 26.6.2 in a VM through safaridriver |

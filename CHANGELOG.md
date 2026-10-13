@@ -38,6 +38,8 @@ version and publish as separate crates.
 - `html::Directives` reads `noindex`, `nofollow`, `none`, and `noai` from
   `<meta name="robots">`, a meta tag named for the agent, and
   `X-Robots-Tag`. `html::canonical` returns the page's canonical link.
+- A Firefox 158 profile, `Browser::Firefox158`, from captures of Firefox 158.0
+  on macOS, Linux, and Windows.
 
 ### Changed
 

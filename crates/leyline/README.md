@@ -85,7 +85,7 @@ lists the source of every one.
 | --- | --- | --- |
 | Chrome | 145 to 155 | Android is captured for Chrome 145 only. |
 | Brave | 146, 154, 155 | |
-| Firefox | 148 to 157 | Firefox 155 to 157 offer QUIC v2. |
+| Firefox | 148 to 158 | Firefox 155 to 157 offer QUIC v2. |
 | Safari | 18, 26, 27 | macOS. |
 | Safari on iOS | 17, 18, 27 | |
 | OkHttp | 4.12 | Android. |
