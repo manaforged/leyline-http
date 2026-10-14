@@ -229,10 +229,15 @@ A release is a `v*` tag on a commit on `main`. Pushing the tag runs
    the guide.
 
 crates.io publishes in dependency order: `leyline-bssl-sys`, `leyline-bssl`,
-`leyline-bssl-tokio` and `leyline-quiche`, then `leyline-http`. `publish`
-skips crates whose version is already on crates.io, so re-running a job that
-stopped partway finishes the same release. A published version cannot be
-replaced.
+`leyline-bssl-tokio` and `leyline-quiche`, then `leyline-http`. Cargo uploads
+a crate only after its dependencies appear in the crates.io index, and on
+stable it waits 60 seconds for that. `publish` runs Cargo from the pinned
+nightly in `PUBLISH_TOOLCHAIN` (`scripts/verify.sh`) with `publish.timeout`
+set to `PUBLISH_INDEX_WAIT` seconds, so a slow index does not stop the
+release between crates. The `.crate` comparison uses the same toolchain, so
+the files compared are the files uploaded. `publish` skips crates whose
+version is already on crates.io, so re-running a job that stopped partway
+finishes the same release. A published version cannot be replaced.
 
 Hosted CI runs only for a release tag and once a night. Pull requests and
 pushes to `main` start no workflow; the gates above run on the maintainer's
