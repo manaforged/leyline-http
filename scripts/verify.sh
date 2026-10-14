@@ -55,10 +55,14 @@ cleanup() {
 }
 trap cleanup EXIT
 
+ensure_toolchain() {
+    rustup toolchain list | grep -q "^$1" || rustup toolchain install "$1" --profile minimal \
+        || fail "could not install Rust $1"
+}
+
 ensure_msrv() {
     [[ -n "$msrv" ]] || return 0
-    rustup toolchain list | grep -q "^$msrv" || rustup toolchain install "$msrv" --profile minimal \
-        || fail "could not install Rust $msrv"
+    ensure_toolchain "$msrv"
 }
 
 g_comments() {
@@ -326,6 +330,8 @@ g_fuzz_timed() {
 
 MAX_CRATE_BYTES=10485760
 CRATES_INDEX=https://index.crates.io
+PUBLISH_TOOLCHAIN=nightly-2026-09-16
+PUBLISH_INDEX_WAIT=900
 SUBCRATE_MANIFESTS=(
     crates/leyline-bssl-sys/Cargo.toml
     crates/leyline-bssl/Cargo.toml
@@ -390,8 +396,9 @@ published_on_crates_io() {
 }
 
 g_publish() {
-    step "cargo publish (every publishable crate not yet on crates.io, in dependency order)"
+    step "cargo publish (every publishable crate not yet on crates.io, in dependency order, waiting up to ${PUBLISH_INDEX_WAIT}s for each in the index)"
     [[ -n "${CARGO_REGISTRY_TOKEN:-}" ]] || fail "CARGO_REGISTRY_TOKEN is unset; publish runs from the release workflow"
+    ensure_toolchain "$PUBLISH_TOOLCHAIN"
     stage_workspace
     local name version pending=() excluded=()
     while read -r name version; do
@@ -408,17 +415,18 @@ g_publish() {
     fi
     echo "  publishing: ${pending[*]}"
     rm -rf "$CARGO_TARGET_DIR/package"
-    cargo package --manifest-path "$package_stage/Cargo.toml" --workspace --no-verify "${excluded[@]}" \
-        || fail "cargo package failed"
+    cargo +"$PUBLISH_TOOLCHAIN" package --manifest-path "$package_stage/Cargo.toml" --workspace --no-verify "${excluded[@]}" \
+        || fail "cargo package failed; nothing was uploaded"
     if [[ -n "${RELEASE_PACKAGES:-}" ]]; then
         local archive
         for archive in "$CARGO_TARGET_DIR"/package/*.crate; do
             cmp -s "$archive" "$RELEASE_PACKAGES/$(basename "$archive")" \
-                || fail "$(basename "$archive") differs from the package the release job tested"
+                || fail "$(basename "$archive") differs from the package the release job tested; nothing was uploaded"
         done
     fi
-    cargo publish --manifest-path "$package_stage/Cargo.toml" --workspace --no-verify "${excluded[@]}" \
-        || fail "cargo publish failed"
+    cargo +"$PUBLISH_TOOLCHAIN" publish --manifest-path "$package_stage/Cargo.toml" --workspace --no-verify "${excluded[@]}" \
+        -Zpublish-timeout --config "publish.timeout=$PUBLISH_INDEX_WAIT" \
+        || fail "cargo publish failed; re-running the publish job publishes only the crates not yet on crates.io"
     ok "crates published"
 }
 
