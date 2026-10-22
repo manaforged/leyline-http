@@ -1138,6 +1138,7 @@ Requires feature `websocket`.
 | <code>Chrome153</code> |  |
 | <code>Chrome154</code> |  |
 | <code>Chrome155</code> |  |
+| <code>Chrome156</code> |  |
 | <code>Firefox148</code> |  |
 | <code>Firefox149</code> |  |
 | <code>Firefox150</code> |  |
