@@ -35,8 +35,8 @@ Security fixes go to the latest 0.1.x release.
 ## Bundled BoringSSL and quiche
 
 `leyline-bssl-sys` builds BoringSSL from source, pinned to commit
-`b780f192ce515ed8ed358f6c0947bd7acce438b9`, the `boringssl_revision` in
-Chromium's DEPS at tag `155.0.8059.39`. See
+`2ea3200c3a3ec176613ab7a0b9a4ffc6db846120`, the `boringssl_revision` in
+Chromium's DEPS at tag `156.0.8078.47`. See
 [`crates/leyline-bssl-sys/PROVENANCE.md`](crates/leyline-bssl-sys/PROVENANCE.md)
 for the carried patches and the build notes.
 
