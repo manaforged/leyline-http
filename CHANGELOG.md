@@ -8,6 +8,13 @@ behaviour, and each change is listed here. The BoringSSL crates
 `leyline-bssl`, `leyline-bssl-sys`, and `leyline-bssl-tokio` share this
 version and publish as separate crates.
 
+## Unreleased
+
+### Added
+
+- A Brave (Chromium 156) profile, `Browser::Brave156`, from captures of Brave
+  1.98.60 (Chromium 156) on macOS, Linux, and Windows.
+
 ## 0.1.5 - 2026-10-13
 
 ### Added

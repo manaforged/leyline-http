@@ -748,6 +748,7 @@ impl<'de> serde_core::de::Deserialize<'de> for leyline::BlockKind
 pub leyline::Browser::Brave146
 pub leyline::Browser::Brave154
 pub leyline::Browser::Brave155
+pub leyline::Browser::Brave156
 pub leyline::Browser::CfnetworkIOS18
 pub leyline::Browser::CfnetworkIOS27
 pub leyline::Browser::CfnetworkMacOS26

@@ -1124,6 +1124,7 @@ Requires feature `websocket`.
 | <code>Brave146</code> |  |
 | <code>Brave154</code> |  |
 | <code>Brave155</code> |  |
+| <code>Brave156</code> |  |
 | <code>CfnetworkIOS18</code> |  |
 | <code>CfnetworkIOS27</code> |  |
 | <code>CfnetworkMacOS26</code> |  |
