@@ -29,6 +29,7 @@ pub mod derive;
 pub mod dh;
 pub mod dsa;
 pub mod ec;
+pub mod ed25519;
 pub mod error;
 pub mod ex_data;
 pub mod hash;

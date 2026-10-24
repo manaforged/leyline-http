@@ -2,6 +2,7 @@
 
 | Item | Kind | Description |
 | --- | --- | --- |
+| [`BundleSource`](#bundlesource) | struct |  |
 | [`FingerprintSpec`](#fingerprintspec) | struct |  |
 | [`H2Fingerprint`](#h2fingerprint) | struct |  |
 | [`H2PlatformOverride`](#h2platformoverride) | struct |  |
@@ -13,8 +14,10 @@
 | [`H3TransportParam`](#h3transportparam) | struct |  |
 | [`H3VersionInformation`](#h3versioninformation) | struct |  |
 | [`PlatformIdentity`](#platformidentity) | struct |  |
+| [`ProfileBundle`](#profilebundle) | struct |  |
 | [`ProfileMeta`](#profilemeta) | struct |  |
 | [`ProfileRegistry`](#profileregistry) | struct |  |
+| [`SkippedProfile`](#skippedprofile) | struct |  |
 | [`TlsFingerprint`](#tlsfingerprint) | struct |  |
 | [`TlsProfile`](#tlsprofile) | struct |  |
 | [`H3ConnectionIdLength`](#h3connectionidlength) | enum |  |
@@ -26,6 +29,19 @@
 | [`ProfileError`](#profileerror) | enum |  |
 
 ## Structs
+
+### `BundleSource`
+
+**Methods**
+
+| Method | Description |
+| --- | --- |
+| <code>max_bytes(self, bytes: usize) -&gt; Self</code> |  |
+| <code>new(url: impl Into&lt;String&gt;, public_keys: Vec&lt;[u8; 32]&gt;) -&gt; Self</code> |  |
+| <code>url(&amp;self) -&gt; &amp;str</code> |  |
+
+**Trait implementations:** <code>Clone</code>, <code>Eq</code>, <code>PartialEq</code>, <code>Default</code>, <code>Debug</code>, <code>StructuralPartialEq</code>
+
 
 ### `FingerprintSpec`
 
@@ -219,6 +235,21 @@
 **Trait implementations:** <code>Clone</code>, <code>Debug</code>, <code>Deserialize&lt;'de&gt;</code>
 
 
+### `ProfileBundle`
+
+**Methods**
+
+| Method | Description |
+| --- | --- |
+| <code>async fetch(session: &amp;<a href="leyline.html#session">Session</a>, source: &amp;<a href="#bundlesource">BundleSource</a>) -&gt; <a href="leyline.html#result">Result</a>&lt;Self&gt;</code> |  |
+| <code>from_bytes(bundle: &amp;[u8], source: &amp;<a href="#bundlesource">BundleSource</a>) -&gt; Result&lt;Self, <a href="#profileerror">ProfileError</a>&gt;</code> |  |
+| <code>generated(&amp;self) -&gt; &amp;str</code> |  |
+| <code>profiles(&amp;self) -&gt; &amp;<a href="#profileregistry">ProfileRegistry</a></code> |  |
+| <code>skipped(&amp;self) -&gt; &amp;[<a href="#skippedprofile">SkippedProfile</a>]</code> |  |
+
+**Trait implementations:** <code>Debug</code>
+
+
 ### `ProfileMeta`
 
 **Fields**
@@ -246,9 +277,23 @@
 | --- | --- |
 | <code>get(&amp;self, browser: &amp;str, version: u32) -&gt; Option&lt;&amp;<a href="leyline.html#browserprofile">BrowserProfile</a>&gt;</code> |  |
 | <code>global() -&gt; &amp;'static Self</code> |  |
+| <code>latest(&amp;self, family: <a href="leyline.html#family">Family</a>) -&gt; Option&lt;&amp;<a href="leyline.html#browserprofile">BrowserProfile</a>&gt;</code> |  |
 | <code>load(dir: &amp;Path) -&gt; Result&lt;Self, <a href="#profileerror">ProfileError</a>&gt;</code> | Load profiles from a directory. |
 
 **Trait implementations:** <code>Default</code>, <code>Debug</code>
+
+
+### `SkippedProfile`
+
+**Fields**
+
+| Field | Description |
+| --- | --- |
+| <code>browser: String</code> |  |
+| <code>error: <a href="#profileerror">ProfileError</a></code> |  |
+| <code>version: u32</code> |  |
+
+**Trait implementations:** <code>Debug</code>
 
 
 ### `TlsFingerprint`
@@ -395,6 +440,7 @@
 | Field | Description |
 | --- | --- |
 | <code>Empty::path: PathBuf</code> |  |
+| <code>Format::format: u32</code> |  |
 | <code>Io::path: PathBuf</code> |  |
 | <code>Io::source: Error</code> |  |
 | <code>Parse::path: Option&lt;PathBuf&gt;</code> |  |
@@ -405,8 +451,10 @@
 | Variant | Description |
 | --- | --- |
 | <code>Empty</code> |  |
+| <code>Format</code> |  |
 | <code>Io</code> |  |
 | <code>Parse</code> |  |
+| <code>Signature</code> |  |
 
 **Trait implementations:** <code>Error</code>, <code>Debug</code>, <code>Display</code>
 

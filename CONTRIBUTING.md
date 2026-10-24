@@ -206,6 +206,19 @@ Until it is merged, each daily run captures again and updates the same branch
 and pull request. Edge follows the Chrome profiles and needs no capture.
 Safari and Mobile Safari are captured by hand.
 
+After a profile is merged, the next daily run, and every release tag, runs
+the `profile-bundle` workflow. It signs every profile into `profiles.json`
+with the `PROFILE_SIGNING_KEY` secret of the `profile-bundle` environment,
+checks the signature against the keys in `crates/leyline/profiles/bundle.toml`,
+and replaces the file on the `profiles` release when it changed:
+
+```sh
+PYTHONPATH=scripts python3 -m profile_capture.bundle verify <dir>
+```
+
+To rotate the key, add the new public key to `public_keys` in a release,
+then change the secret after that release is published.
+
 ## Releasing
 
 A release is a `v*` tag on a commit on `main`. Pushing the tag runs

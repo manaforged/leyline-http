@@ -1,0 +1,63 @@
+name: profile-bundle
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+concurrency:
+  group: leyline-profile-bundle
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: publish the signed profile bundle
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment:
+      name: profile-bundle
+      url: https://github.com/${{ github.repository }}/releases/tag/profiles
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      PYTHONPATH: scripts
+      TAG: profiles
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Sign the bundle
+        env:
+          PROFILE_SIGNING_KEY: ${{ secrets.PROFILE_SIGNING_KEY }}
+        run: python3 -m profile_capture.bundle sign "$RUNNER_TEMP/bundle"
+
+      - name: Upload when the bundle changed
+        run: |
+          set -euo pipefail
+          file="$(find "$RUNNER_TEMP/bundle" -maxdepth 1 -name '*.json' -print -quit)"
+          name="$(basename "$file")"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --prerelease --latest=false --target main \
+              --title "Browser profiles" \
+              --notes "The signed browser profile bundle that ProfileBundle::fetch reads. CI replaces it when a profile lands on main."
+          fi
+          mkdir -p "$RUNNER_TEMP/current"
+          if gh release download "$TAG" --pattern "$name" --dir "$RUNNER_TEMP/current" 2>/dev/null \
+            && cmp -s "$file" "$RUNNER_TEMP/current/$name"; then
+            echo "$name is unchanged"
+            exit 0
+          fi
+          gh release upload "$TAG" "$file" --clobber
+          echo "uploaded $name"

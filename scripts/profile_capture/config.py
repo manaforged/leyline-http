@@ -87,6 +87,7 @@ OPERA = {
     ),
 }
 GITHUB_TOKEN_ENV = "GITHUB_TOKEN"
+BUNDLE_KEY_ENV = "PROFILE_SIGNING_KEY"
 SIGNERS = {
     "chrome": {"macos": "EQHXZ8M8AV", "windows": "Google LLC"},
     "brave": {"macos": "KL8N8XSYF4", "windows": "Brave Software, Inc."},
@@ -103,6 +104,9 @@ BRANDS = PROFILES / "brands.toml"
 CAPTURES = PROFILES / "captures"
 QPACK_GOLDEN = ROOT / "crates/leyline/tests/data/h3_qpack.toml"
 BROWSER_IDS = PROFILES / "browser_ids.toml"
+BUNDLE_SOURCE = PROFILES / "bundle.toml"
+BUNDLE_SKIP = frozenset({"captures"})
+ED25519_SPKI_PREFIX = bytes.fromhex("302a300506032b6570032100")
 TCP_SUFFIXES = ("", "-headful")
 KEPT_IP_KEYS = frozenset({"dst_ip"})
 OS_LABELS = {"macos": "macOS", "linux": "Linux", "windows": "Windows"}

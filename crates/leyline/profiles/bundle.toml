@@ -1,0 +1,4 @@
+url = "https://github.com/manaforged/leyline-http/releases/download/profiles/profiles.json"
+public_keys = ["e6f3f3fc68c76f0bd905c7c385b8e571506cb60440abe3f09165e9a944592c0d"]
+max_bytes = 4194304
+format = 1

@@ -17,6 +17,12 @@ version and publish as separate crates.
 - A Chrome 156 profile, `Browser::Chrome156`, from captures of Chrome
   156.0.8078.48 on macOS, Linux, and Windows.
 - `ChromiumBrand::Opera` covers Chrome 154 and sends Opera 138 there.
+- `ProfileBundle::fetch` downloads the signed profile bundle that CI publishes
+  on the `profiles` GitHub release, so profiles captured after this release
+  reach you without a crate update. It checks the Ed25519 signature against
+  the keys in `profiles/bundle.toml`. `ProfileBundle::from_bytes` loads a saved
+  copy, and `ProfileRegistry::latest` returns the newest profile of a family.
+- `leyline_bssl::ed25519::verify` checks an Ed25519 signature.
 
 ### Changed
 
