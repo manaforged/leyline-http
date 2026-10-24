@@ -35,7 +35,7 @@ pub(crate) async fn checkout_live_h2(
     let Some(after_idle) = pool.h2_ping_after_idle else {
         return Some((handle, tls));
     };
-    if idle.is_none_or(|idle| idle < after_idle) {
+    if !handle.take_unanswered_timeout() && idle.is_none_or(|idle| idle < after_idle) {
         return Some((handle, tls));
     }
     match tokio::time::timeout(pool.h2_ping_timeout, handle.ping()).await {

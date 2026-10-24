@@ -39,6 +39,15 @@ version and publish as separate crates.
 - BoringSSL is pinned to `2ea3200`, the `boringssl_revision` in Chromium's DEPS
   at tag `156.0.8078.47`, and carries 6 patches.
 
+### Fixed
+
+- An HTTP/2 connection whose peer stopped reading kept taking new requests
+  when the request it stalled was small enough for the socket buffers to
+  hold, so each later request on it waited for its own timeout. A request
+  that times out before its response headers arrive now makes the pool send
+  a `PING` before it reuses that connection, and the pool opens a new
+  connection when the `PING` gets no answer within `h2_ping_timeout`.
+
 ## 0.1.5 - 2026-10-13
 
 ### Added

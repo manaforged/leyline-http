@@ -16,6 +16,7 @@ pub struct H2Client {
     pub(super) tx: mpsc::Sender<DriverCommand>,
     pub(super) ping_tx: mpsc::Sender<oneshot::Sender<()>>,
     pub(super) closed: Arc<AtomicBool>,
+    pub(super) unanswered_timeout: Arc<AtomicBool>,
     pub(super) open_streams: Arc<std::sync::atomic::AtomicUsize>,
     #[cfg(feature = "websocket")]
     pub(super) peer_settings: Arc<PeerSettingsSnapshot>,
@@ -112,5 +113,9 @@ impl H2Client {
 
     pub fn is_closed(&self) -> bool {
         self.closed.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn take_unanswered_timeout(&self) -> bool {
+        self.unanswered_timeout.swap(false, Ordering::AcqRel)
     }
 }

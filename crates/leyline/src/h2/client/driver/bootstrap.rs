@@ -84,6 +84,7 @@ where
     let (tx, rx) = mpsc::channel(COMMAND_CHANNEL_CAPACITY);
     let (ping_tx, ping_rx) = mpsc::channel(PING_CHANNEL_CAPACITY);
     let closed = Arc::new(AtomicBool::new(false));
+    let unanswered_timeout = Arc::new(AtomicBool::new(false));
     let open_streams = Arc::new(std::sync::atomic::AtomicUsize::new(0));
 
     let (body_chunk_tx, body_chunk_rx) = mpsc::channel(STREAM_REQ_BODY_CAPACITY * 4);
@@ -121,6 +122,7 @@ where
         command_rx: rx,
         ping_rx,
         closed: closed.clone(),
+        unanswered_timeout: Arc::clone(&unanswered_timeout),
         peer_goaway_last_stream: None,
         pending: VecDeque::new(),
         shutdown_started: false,
@@ -138,6 +140,7 @@ where
         tx,
         ping_tx,
         closed,
+        unanswered_timeout,
         open_streams,
         #[cfg(feature = "websocket")]
         peer_settings: snapshot,

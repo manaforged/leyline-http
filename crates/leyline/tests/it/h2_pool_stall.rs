@@ -67,6 +67,15 @@ async fn answers(mut stream: SslStream<TcpStream>) {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn new_requests_leave_a_connection_whose_peer_stopped_reading() {
+    leaves_a_stopped_peer(16 * 1024 * 1024).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_request_that_timed_out_unanswered_checks_the_connection_before_reuse() {
+    leaves_a_stopped_peer(256 * 1024).await;
+}
+
+async fn leaves_a_stopped_peer(body_len: usize) {
     let (cert, key) = tls_support::self_signed();
     let der = cert.to_der().unwrap();
     let connections = Arc::new(AtomicUsize::new(0));
@@ -98,7 +107,7 @@ async fn new_requests_leave_a_connection_whose_peer_stopped_reading() {
 
     let blocked = session
         .post(&url)
-        .body(vec![0u8; 16 * 1024 * 1024])
+        .body(vec![0u8; body_len])
         .timeout(TimeoutConfig::new().total(Duration::from_millis(500)))
         .send()
         .await;

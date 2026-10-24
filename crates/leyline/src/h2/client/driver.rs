@@ -308,6 +308,7 @@ struct Driver<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> {
     command_rx: mpsc::Receiver<DriverCommand>,
     ping_rx: mpsc::Receiver<oneshot::Sender<()>>,
     closed: Arc<AtomicBool>,
+    unanswered_timeout: Arc<AtomicBool>,
     peer_goaway_last_stream: Option<u32>,
     pending: VecDeque<DriverCommand>,
     shutdown_started: bool,
