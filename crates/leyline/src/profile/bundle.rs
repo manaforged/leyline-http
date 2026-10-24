@@ -1,8 +1,8 @@
 use std::sync::LazyLock;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use bytes::Bytes;
 use leyline_bssl::ed25519::{self, PUBLIC_KEY_LEN, SIGNATURE_LEN};
 use serde::Deserialize;
 
@@ -11,6 +11,8 @@ use crate::profile::registry::{ProfileError, ProfileRegistry};
 use crate::profile::types::BrowserProfile;
 use crate::{Error, Kind};
 
+mod policy;
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SourceData {
@@ -18,6 +20,18 @@ struct SourceData {
     public_keys: Vec<String>,
     max_bytes: usize,
     format: u32,
+    min_serial: u64,
+    clock_skew_secs: u64,
+    max_lifetime_secs: u64,
+    policy: PolicyData,
+    #[serde(rename = "signer")]
+    _signer: serde::de::IgnoredAny,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PolicyData {
+    min_tls_version: String,
 }
 
 static OFFICIAL: LazyLock<SourceData> = LazyLock::new(|| {
@@ -34,7 +48,8 @@ struct Envelope {
 #[derive(Deserialize)]
 struct Wire {
     format: u32,
-    generated: String,
+    serial: u64,
+    expires: u64,
     profiles: Vec<WireProfile>,
 }
 
@@ -50,6 +65,8 @@ pub struct BundleSource {
     url: String,
     public_keys: Vec<[u8; PUBLIC_KEY_LEN]>,
     max_bytes: usize,
+    min_serial: u64,
+    max_lifetime: Duration,
 }
 
 impl BundleSource {
@@ -59,7 +76,21 @@ impl BundleSource {
             url: url.into(),
             public_keys,
             max_bytes: OFFICIAL.max_bytes,
+            min_serial: 0,
+            max_lifetime: Duration::from_secs(OFFICIAL.max_lifetime_secs),
         }
+    }
+
+    #[must_use]
+    pub fn max_lifetime(mut self, lifetime: Duration) -> Self {
+        self.max_lifetime = lifetime;
+        self
+    }
+
+    #[must_use]
+    pub fn min_serial(mut self, serial: u64) -> Self {
+        self.min_serial = self.min_serial.max(serial);
+        self
     }
 
     #[must_use]
@@ -85,7 +116,7 @@ impl Default for BundleSource {
                 raw
             })
             .collect();
-        Self::new(&OFFICIAL.url, keys)
+        Self::new(&OFFICIAL.url, keys).min_serial(OFFICIAL.min_serial)
     }
 }
 
@@ -100,7 +131,8 @@ pub struct SkippedProfile {
 #[derive(Debug)]
 pub struct ProfileBundle {
     profiles: ProfileRegistry,
-    generated: String,
+    serial: u64,
+    expires: SystemTime,
     skipped: Vec<SkippedProfile>,
 }
 
@@ -128,15 +160,17 @@ impl ProfileBundle {
             return Err(ProfileError::Signature);
         }
         let wire: Wire = serde_json::from_slice(&payload).map_err(ProfileError::parse)?;
-        if wire.format != OFFICIAL.format {
-            return Err(ProfileError::Format {
-                format: wire.format,
-            });
-        }
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |since| since.as_secs());
+        let expires = check_current(&wire, source, now)?;
         let mut profiles = ProfileRegistry::new();
         let mut skipped = Vec::new();
         for entry in wire.profiles {
-            match BrowserProfile::from_toml(&entry.toml) {
+            let loaded = BrowserProfile::from_toml(&entry.toml).and_then(|profile| {
+                policy::check(&entry.browser, entry.version, &profile).map(|()| profile)
+            });
+            match loaded {
                 Ok(profile) => profiles.insert(profile),
                 Err(error) => skipped.push(SkippedProfile {
                     browser: entry.browser,
@@ -147,7 +181,8 @@ impl ProfileBundle {
         }
         Ok(Self {
             profiles,
-            generated: wire.generated,
+            serial: wire.serial,
+            expires,
             skipped,
         })
     }
@@ -158,8 +193,13 @@ impl ProfileBundle {
     }
 
     #[must_use]
-    pub fn generated(&self) -> &str {
-        &self.generated
+    pub fn serial(&self) -> u64 {
+        self.serial
+    }
+
+    #[must_use]
+    pub fn expires(&self) -> SystemTime {
+        self.expires
     }
 
     #[must_use]
@@ -168,22 +208,48 @@ impl ProfileBundle {
     }
 }
 
-async fn download(session: &Session, url: &str, max_bytes: usize) -> crate::Result<Bytes> {
-    let response = session.get(url).send().await?.error_for_status()?;
-    let too_large =
-        || Error::new(Kind::Body).with_message(format!("{url} is larger than {max_bytes} bytes"));
-    if response
-        .content_length()
-        .is_some_and(|length| length > max_bytes as u64)
-    {
-        return Err(too_large());
+fn check_current(wire: &Wire, source: &BundleSource, now: u64) -> Result<SystemTime, ProfileError> {
+    if wire.format != OFFICIAL.format {
+        return Err(ProfileError::Format {
+            format: wire.format,
+        });
     }
-    let body = response.bytes().await?;
-    if body.len() > max_bytes {
-        return Err(too_large());
+    if wire.serial < source.min_serial {
+        return Err(ProfileError::Rollback {
+            serial: wire.serial,
+            min_serial: source.min_serial,
+        });
     }
+    if wire.serial > now.saturating_add(OFFICIAL.clock_skew_secs) {
+        return Err(ProfileError::FutureSerial {
+            serial: wire.serial,
+        });
+    }
+    if now >= wire.expires {
+        return Err(ProfileError::Expired {
+            expires: wire.expires,
+        });
+    }
+    let lifetime = Duration::from_secs(wire.expires.saturating_sub(wire.serial));
+    match UNIX_EPOCH.checked_add(Duration::from_secs(wire.expires)) {
+        Some(expires) if lifetime <= source.max_lifetime => Ok(expires),
+        _ => Err(ProfileError::Lifetime {
+            serial: wire.serial,
+            expires: wire.expires,
+        }),
+    }
+}
+
+async fn download(session: &Session, url: &str, max_bytes: usize) -> crate::Result<Vec<u8>> {
+    let response = session.get(url).stream().send().await?.error_for_status()?;
+    let mut body = Vec::new();
+    response
+        .copy_decoded_to(&mut body, Some(max_bytes as u64))
+        .await?;
     Ok(body)
 }
 
+#[cfg(test)]
+mod policy_tests;
 #[cfg(test)]
 mod tests;

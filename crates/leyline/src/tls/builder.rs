@@ -82,7 +82,9 @@ fn tls13_cipher_ids(ciphers: &[String]) -> Result<Vec<u16>, TlsError> {
         .collect()
 }
 
-fn profile_min_version(declared: &Option<String>) -> Result<Option<TlsMinVersion>, TlsError> {
+pub(crate) fn profile_min_version(
+    declared: &Option<String>,
+) -> Result<Option<TlsMinVersion>, TlsError> {
     match declared.as_deref() {
         None => Ok(None),
         Some("1.0") => Ok(Some(TlsMinVersion::Tls10)),

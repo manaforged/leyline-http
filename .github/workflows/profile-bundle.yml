@@ -11,22 +11,22 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  GH_REPO: ${{ github.repository }}
+  PYTHONPATH: scripts
+  TAG: profiles
+
 jobs:
-  publish:
-    name: publish the signed profile bundle
+  plan:
+    name: decide whether the bundle needs a new signature
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    environment:
-      name: profile-bundle
-      url: https://github.com/${{ github.repository }}/releases/tag/profiles
-    permissions:
-      contents: write
+    timeout-minutes: 5
+    outputs:
+      needed: ${{ steps.plan.outputs.needed }}
+      commit: ${{ steps.plan.outputs.commit }}
     env:
       GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
-      PYTHONPATH: scripts
-      TAG: profiles
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -38,26 +38,99 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Compare main with the published bundle
+        id: plan
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/current"
+          if view="$(gh release view "$TAG" 2>&1)"; then
+            gh release download "$TAG" --dir "$RUNNER_TEMP/current"
+          elif [[ "$view" != *"release not found"* ]]; then
+            echo "$view"
+            exit 1
+          fi
+          python3 -m profile_capture.bundle plan "$RUNNER_TEMP/current"
+
+  sign:
+    name: sign the profile bundle
+    needs: plan
+    if: needs.plan.outputs.needed == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment:
+      name: profile-bundle
+      url: https://github.com/${{ github.repository }}/releases/tag/profiles
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
       - name: Sign the bundle
         env:
           PROFILE_SIGNING_KEY: ${{ secrets.PROFILE_SIGNING_KEY }}
-        run: python3 -m profile_capture.bundle sign "$RUNNER_TEMP/bundle"
+        run: python3 -m profile_capture.bundle sign "$RUNNER_TEMP/bundle" | tee -a "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload when the bundle changed
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: profile-bundle
+          path: ${{ runner.temp }}/bundle/
+          if-no-files-found: error
+          retention-days: 7
+
+  check:
+    name: check the bundle with the released crate
+    needs: [plan, sign]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: profile-bundle
+          path: ${{ runner.temp }}/bundle
+
+      - name: Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - name: Verify with the released crate
         run: |
           set -euo pipefail
           file="$(find "$RUNNER_TEMP/bundle" -maxdepth 1 -name '*.json' -print -quit)"
-          name="$(basename "$file")"
+          scripts/bundle-check/run.sh file "$file"
+
+  upload:
+    name: upload the profile bundle
+    needs: check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: profile-bundle
+          path: ${{ runner.temp }}/bundle
+
+      - name: Upload the bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          file="$(find "$RUNNER_TEMP/bundle" -maxdepth 1 -name '*.json' -print -quit)"
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --prerelease --latest=false --target main \
               --title "Browser profiles" \
-              --notes "The signed browser profile bundle that ProfileBundle::fetch reads. CI replaces it when a profile lands on main."
-          fi
-          mkdir -p "$RUNNER_TEMP/current"
-          if gh release download "$TAG" --pattern "$name" --dir "$RUNNER_TEMP/current" 2>/dev/null \
-            && cmp -s "$file" "$RUNNER_TEMP/current/$name"; then
-            echo "$name is unchanged"
-            exit 0
+              --notes "The signed browser profile bundle that ProfileBundle::fetch reads. CI re-signs it when a profile lands on main and before it expires."
           fi
           gh release upload "$TAG" "$file" --clobber
-          echo "uploaded $name"
+          echo "uploaded $(basename "$file")"

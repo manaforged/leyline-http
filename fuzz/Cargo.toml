@@ -20,6 +20,9 @@ libfuzzer-sys = "0.4"
 bytes = "1"
 leyline = { package = "leyline-http", path = "../crates/leyline", features = ["bench-internals"] }
 leyline-quiche = { path = "../crates/leyline-quiche" }
+leyline-bssl-sys = { path = "../crates/leyline-bssl-sys" }
+base64 = "0.22"
+hex = "0.4"
 tokio = { version = "1", features = ["rt", "io-util"] }
 url = "2"
 
@@ -89,6 +92,13 @@ bench = false
 [[bin]]
 name = "link"
 path = "fuzz_targets/link.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "profile_bundle"
+path = "fuzz_targets/profile_bundle.rs"
 test = false
 doc = false
 bench = false
