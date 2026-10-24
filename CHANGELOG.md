@@ -17,20 +17,6 @@ version and publish as separate crates.
 - A Chrome 156 profile, `Browser::Chrome156`, from captures of Chrome
   156.0.8078.48 on macOS, Linux, and Windows.
 - `ChromiumBrand::Opera` covers Chrome 154 and sends Opera 138 there.
-- `ProfileBundle::fetch` downloads the signed profile bundle that CI publishes
-  on the `profiles` GitHub release, so profiles captured after this release
-  reach you without a crate update. It checks the Ed25519 signature against
-  the keys in `profiles/bundle.toml`. `ProfileBundle::from_bytes` loads a saved
-  copy, and `ProfileRegistry::latest` returns the newest profile of a family.
-  Each bundle carries a serial and an expiry: `from_bytes` refuses an expired
-  bundle, a serial below `BundleSource::min_serial` (which defaults to the
-  profiles built into the crate), and an expiry beyond
-  `BundleSource::max_lifetime`. A remote profile that sets TLS below 1.2, a
-  TLS name that no built-in profile of the same browser uses, or an invalid
-  header value is listed in `skipped()` and not loaded. `fetch` stops reading at `max_bytes`. The
-  crate trusts the signing key and a successor key, so a key rotation needs no
-  emergency release.
-- `leyline_bssl::ed25519::verify` checks an Ed25519 signature.
 
 ### Changed
 

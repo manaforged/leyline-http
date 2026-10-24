@@ -87,7 +87,6 @@ OPERA = {
     ),
 }
 GITHUB_TOKEN_ENV = "GITHUB_TOKEN"
-BUNDLE_KEY_ENV = "PROFILE_SIGNING_KEY"
 SIGNERS = {
     "chrome": {"macos": "EQHXZ8M8AV", "windows": "Google LLC"},
     "brave": {"macos": "KL8N8XSYF4", "windows": "Brave Software, Inc."},
@@ -104,21 +103,6 @@ BRANDS = PROFILES / "brands.toml"
 CAPTURES = PROFILES / "captures"
 QPACK_GOLDEN = ROOT / "crates/leyline/tests/data/h3_qpack.toml"
 BROWSER_IDS = PROFILES / "browser_ids.toml"
-BUNDLE_SOURCE = PROFILES / "bundle.toml"
-BUNDLE_SKIP = frozenset({"captures"})
-ED25519_SPKI_PREFIX = bytes.fromhex("302a300506032b6570032100")
-ED25519_PKCS8_PREFIX = bytes.fromhex("302e020100300506032b657004220420")
-RFC8032_TEST1_SEED = bytes.fromhex("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60")
-TLS_VERSIONS = ("1.0", "1.2", "1.3")
-BUNDLE_FIXTURES = ROOT / "crates/leyline/tests/data/bundle"
-BUNDLE_FIXTURE_PROFILES = (("chrome", 155), ("chrome", 156))
-BUNDLE_FIXTURE_TIMES = {
-    "serial": 1760000000,
-    "older": 1750000000,
-    "future": 4000000000,
-    "expires": 4102444800,
-    "expired": 1760000001,
-}
 TCP_SUFFIXES = ("", "-headful")
 KEPT_IP_KEYS = frozenset({"dst_ip"})
 OS_LABELS = {"macos": "macOS", "linux": "Linux", "windows": "Windows"}

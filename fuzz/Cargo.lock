@@ -525,10 +525,7 @@ dependencies = [
 name = "leyline-fuzz"
 version = "0.0.0"
 dependencies = [
- "base64",
  "bytes",
- "hex",
- "leyline-bssl-sys",
  "leyline-http",
  "leyline-quiche",
  "libfuzzer-sys",
