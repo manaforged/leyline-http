@@ -143,13 +143,6 @@ jobs:
           ${{ contains(github.ref_name, '-') && '--prerelease' || '' }}
           dist/package/*.crate
 
-  bundle:
-    name: profile bundle
-    needs: publish
-    permissions:
-      contents: write
-    uses: ./.github/workflows/profile-bundle.yml
-
   pages:
     name: pages
     needs: publish

@@ -3,8 +3,8 @@ use std::fs::{read_dir, read_to_string};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 
+use crate::profile::Browser;
 use crate::profile::types::BrowserProfile;
-use crate::profile::{Browser, Family};
 
 #[derive(Debug)]
 #[non_exhaustive]
@@ -19,27 +19,6 @@ pub enum ProfileError {
     },
     Empty {
         path: PathBuf,
-    },
-    Signature,
-    Format {
-        format: u32,
-    },
-    Rollback {
-        serial: u64,
-        min_serial: u64,
-    },
-    FutureSerial {
-        serial: u64,
-    },
-    Expired {
-        expires: u64,
-    },
-    Lifetime {
-        serial: u64,
-        expires: u64,
-    },
-    Policy {
-        reason: String,
     },
 }
 
@@ -76,24 +55,6 @@ impl std::fmt::Display for ProfileError {
                  subdirectory per family, each with one TOML file per version",
                 path.display()
             ),
-            Self::Signature => f.write_str("profile bundle signature does not match a trusted key"),
-            Self::Format { format } => write!(f, "profile bundle format {format} is not supported"),
-            Self::Rollback { serial, min_serial } => write!(
-                f,
-                "profile bundle serial {serial} is older than the trusted serial {min_serial}"
-            ),
-            Self::FutureSerial { serial } => write!(
-                f,
-                "profile bundle serial {serial} is later than the local clock allows"
-            ),
-            Self::Expired { expires } => {
-                write!(f, "profile bundle expired at unix time {expires}")
-            }
-            Self::Lifetime { serial, expires } => write!(
-                f,
-                "profile bundle lifetime from serial {serial} to expiry {expires} is longer than the source allows"
-            ),
-            Self::Policy { reason } => write!(f, "profile breaks the bundle policy: {reason}"),
         }
     }
 }
@@ -103,14 +64,7 @@ impl std::error::Error for ProfileError {
         match self {
             Self::Io { source, .. } => Some(source),
             Self::Parse { source, .. } => Some(source.as_ref()),
-            Self::Empty { .. }
-            | Self::Signature
-            | Self::Format { .. }
-            | Self::Rollback { .. }
-            | Self::FutureSerial { .. }
-            | Self::Expired { .. }
-            | Self::Lifetime { .. }
-            | Self::Policy { .. } => None,
+            Self::Empty { .. } => None,
         }
     }
 }
@@ -141,7 +95,7 @@ impl ProfileRegistry {
         &BUILTIN
     }
 
-    pub(crate) fn new() -> Self {
+    fn new() -> Self {
         Self {
             profiles: HashMap::new(),
         }
@@ -171,7 +125,9 @@ impl ProfileRegistry {
                     path: file.clone(),
                     source,
                 })?;
-                reg.insert(BrowserProfile::from_toml(&text).map_err(|e| e.at(&file))?);
+                let profile = BrowserProfile::from_toml(&text).map_err(|e| e.at(&file))?;
+                let key = (profile.meta.browser.clone(), profile.meta.version);
+                drop(reg.profiles.insert(key, Arc::new(profile)));
             }
         }
         if reg.is_empty() {
@@ -183,28 +139,10 @@ impl ProfileRegistry {
     }
 
     fn load_toml(&mut self, toml_str: &str) {
-        self.insert(
-            BrowserProfile::from_toml(toml_str)
-                .expect("built-in profile is statically valid (profile_validation)"),
-        );
-    }
-
-    pub(crate) fn insert(&mut self, profile: BrowserProfile) {
+        let profile = BrowserProfile::from_toml(toml_str)
+            .expect("built-in profile is statically valid (profile_validation)");
         let key = (profile.meta.browser.clone(), profile.meta.version);
-        drop(self.profiles.insert(key, Arc::new(profile)));
-    }
-
-    pub(crate) fn iter(&self) -> impl Iterator<Item = &BrowserProfile> {
-        self.profiles.values().map(|profile| &**profile)
-    }
-
-    #[must_use]
-    pub fn latest(&self, family: Family) -> Option<&BrowserProfile> {
-        self.profiles
-            .iter()
-            .filter(|((browser, _), _)| browser == family.id())
-            .max_by_key(|((_, version), _)| *version)
-            .map(|(_, profile)| &**profile)
+        self.profiles.insert(key, Arc::new(profile));
     }
 
     pub fn get(&self, browser: &str, version: u32) -> Option<&BrowserProfile> {

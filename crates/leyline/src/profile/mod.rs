@@ -20,7 +20,6 @@ pub(crate) mod anchor;
 mod bare;
 pub(crate) mod brand;
 pub(crate) mod browser;
-mod bundle;
 mod extension;
 mod fingerprint;
 mod h3;
@@ -36,7 +35,6 @@ pub(crate) use anchor::HeaderAnchor;
 pub(crate) use anchor::infer_anchor;
 pub(crate) use brand::ChromiumBrand;
 pub(crate) use browser::{Browser, Family};
-pub use bundle::{BundleSource, ProfileBundle, SkippedProfile};
 pub use fingerprint::FingerprintSpec;
 pub use h3::{
     H3ConnectionIdLength, H3CryptoReorder, H3CryptoSplit, H3Grease, H3Order, H3Profile, H3Setting,

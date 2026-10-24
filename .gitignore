@@ -7,4 +7,3 @@ __pycache__/
 fuzz/target/
 fuzz/artifacts/
 benches/target/
-/scripts/bundle-check/Cargo.lock

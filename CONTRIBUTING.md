@@ -206,36 +206,6 @@ Until it is merged, each daily run captures again and updates the same branch
 and pull request. Edge follows the Chrome profiles and needs no capture.
 Safari and Mobile Safari are captured by hand.
 
-After a profile is merged, the next daily run, and every release tag, runs
-the `profile-bundle` workflow. Its `plan` job compares `main` with the
-published `profiles.json` and asks for a new signature only when a profile
-changed or the published bundle expires within `renew_secs`, and writes the
-profile changes to the run summary. The `sign` job runs in the
-`profile-bundle` environment, which needs a maintainer's approval, and signs
-every profile with the `PROFILE_SIGNING_KEY` secret at the commit that `plan`
-reported, so the approval covers exactly what gets signed. The `check` job verifies
-the file with the released crate (`scripts/bundle-check`) without the secret
-or a write token, and the `upload` job replaces the file on the `profiles`
-release. The serial is the signing time. Profiles below the TLS floor in
-`bundle.toml` are left out. To check a file by hand:
-
-```sh
-PYTHONPATH=scripts python3 -m profile_capture.bundle verify <file>
-```
-
-Before a release, set `min_serial` in `crates/leyline/profiles/bundle.toml` to
-the commit time of the newest profile change, which
-`python3 -m profile_capture.bundle floor` prints; the release
-gate refuses a stale value. After a change to the bundle checks, regenerate the
-signed fixtures with `python3 -m profile_capture.bundle fixtures
-crates/leyline/tests/data/bundle`. They are signed with the public RFC 8032
-test key, which no release trusts.
-
-`public_keys` holds the active key and a successor key whose private half is
-kept outside GitHub. Both keys are trusted equally. To rotate, put the successor into the `PROFILE_SIGNING_KEY`
-secret, generate a new successor, and ship its public key in place of the old
-active key in the next release.
-
 ## Releasing
 
 A release is a `v*` tag on a commit on `main`. Pushing the tag runs
