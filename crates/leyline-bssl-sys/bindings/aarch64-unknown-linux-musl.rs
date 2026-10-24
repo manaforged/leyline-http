@@ -11244,6 +11244,8 @@ unsafe extern "C" {
     pub fn OPENSSL_sk_zero(sk: *mut OPENSSL_STACK);
     #[link_name = "\u{1}LEYLINE_OPENSSL_sk_value"]
     pub fn OPENSSL_sk_value(sk: *const OPENSSL_STACK, i: usize) -> *mut ::std::os::raw::c_void;
+    #[link_name = "\u{1}LEYLINE_OPENSSL_sk_last"]
+    pub fn OPENSSL_sk_last(sk: *const OPENSSL_STACK) -> *mut ::std::os::raw::c_void;
     #[link_name = "\u{1}LEYLINE_OPENSSL_sk_set"]
     pub fn OPENSSL_sk_set(
         sk: *mut OPENSSL_STACK,
@@ -13622,6 +13624,22 @@ unsafe extern "C" {
         signature: *const u8,
         public_key: *const u8,
     ) -> ::std::os::raw::c_int;
+    #[link_name = "\u{1}LEYLINE_ED25519_sign_prehashed"]
+    pub fn ED25519_sign_prehashed(
+        out_sig: *mut u8,
+        context: *const u8,
+        context_len: usize,
+        sha512_digest: *const u8,
+        private_key: *const u8,
+    ) -> ::std::os::raw::c_int;
+    #[link_name = "\u{1}LEYLINE_ED25519_verify_prehashed"]
+    pub fn ED25519_verify_prehashed(
+        context: *const u8,
+        context_len: usize,
+        sha512_digest: *const u8,
+        signature: *const u8,
+        public_key: *const u8,
+    ) -> ::std::os::raw::c_int;
     #[link_name = "\u{1}LEYLINE_ED25519_keypair_from_seed"]
     pub fn ED25519_keypair_from_seed(
         out_public_key: *mut u8,
@@ -14136,6 +14154,8 @@ unsafe extern "C" {
     pub fn EVP_HPKE_KEM_private_key_len(kem: *const EVP_HPKE_KEM) -> usize;
     #[link_name = "\u{1}LEYLINE_EVP_HPKE_KEM_enc_len"]
     pub fn EVP_HPKE_KEM_enc_len(kem: *const EVP_HPKE_KEM) -> usize;
+    #[link_name = "\u{1}LEYLINE_EVP_HPKE_KEM_shared_secret_len"]
+    pub fn EVP_HPKE_KEM_shared_secret_len(kem: *const EVP_HPKE_KEM) -> usize;
     #[link_name = "\u{1}LEYLINE_EVP_hpke_hkdf_sha256"]
     pub fn EVP_hpke_hkdf_sha256() -> *const EVP_HPKE_KDF;
     #[link_name = "\u{1}LEYLINE_EVP_hpke_hkdf_sha384"]
@@ -14250,6 +14270,17 @@ unsafe extern "C" {
         aead: *const EVP_HPKE_AEAD,
         enc: *const u8,
         enc_len: usize,
+        info: *const u8,
+        info_len: usize,
+    ) -> ::std::os::raw::c_int;
+    #[link_name = "\u{1}LEYLINE_EVP_HPKE_CTX_setup_recipient_with_shared_secret"]
+    pub fn EVP_HPKE_CTX_setup_recipient_with_shared_secret(
+        ctx: *mut EVP_HPKE_CTX,
+        kem: *const EVP_HPKE_KEM,
+        kdf: *const EVP_HPKE_KDF,
+        aead: *const EVP_HPKE_AEAD,
+        shared_secret: *const u8,
+        shared_secret_len: usize,
         info: *const u8,
         info_len: usize,
     ) -> ::std::os::raw::c_int;

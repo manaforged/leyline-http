@@ -123,4 +123,6 @@ WAITS = {
     "webdriver_request": 60.0,
     "metadata_fetch": 30.0,
     "download": 300.0,
+    "fetch_retry": 5.0,
 }
+FETCH_RETRY = {"attempts": 3, "statuses": frozenset({500, 502, 503, 504})}
