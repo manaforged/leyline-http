@@ -282,7 +282,7 @@ g_benches() {
     fi
 }
 
-FUZZ_TARGETS=(h2_frame hpack h2_continuation h1_head h1_chunked cookie connect_response qpack html link)
+FUZZ_TARGETS=(h2_frame hpack h2_continuation h1_head h1_chunked cookie connect_response qpack html link profile_bundle)
 
 fuzz_run() {
     local host
@@ -375,6 +375,8 @@ g_release() {
     done
     grep -qE "^## ${version//./\\.} - [0-9]{4}-[0-9]{2}-[0-9]{2}$" CHANGELOG.md \
         || fail "CHANGELOG.md has no '## $version - YYYY-MM-DD' heading"
+    PYTHONPATH=scripts python3 -m profile_capture.bundle floor \
+        || fail "min_serial in crates/leyline/profiles/bundle.toml is not the newest profile change; set it to the printed serial"
     git fetch --quiet origin main 2>/dev/null || true
     git rev-parse --quiet --verify origin/main >/dev/null || fail "origin/main is unknown; fetch it before qualifying a release"
     git merge-base --is-ancestor HEAD origin/main || fail "tag $tag is on a commit that is not on main"

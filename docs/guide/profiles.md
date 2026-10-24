@@ -581,20 +581,66 @@ let session = Session::builder()
 ```
 
 Leyline never fetches the bundle on its own; nothing changes until you call
-`fetch`. Store the bytes and call `ProfileBundle::from_bytes` to start from a
-saved copy without a network request. A profile that needs a field this crate
-version does not know is listed in `skipped()` instead of failing the whole
-bundle.
+`fetch`. Fetch with a plain session that has a timeout, not with a session
+that impersonates a browser or uses your proxies. `fetch` reads at most
+`BundleSource::max_bytes` and stops reading as soon as the file passes it.
+Store the bytes and call `ProfileBundle::from_bytes` to start from a saved
+copy without a network request.
 
-`fetch` returns `Kind::Decode` when the signature matches no trusted key or
-the bundle format is newer than this version reads, and `Kind::Body` when
-the file is larger than `BundleSource::max_bytes`. `from_bytes` returns the
-`ProfileError` directly: `Signature` or `Format`. To serve your own bundle,
-pass its URL and your public keys to `BundleSource::new`.
+Each bundle carries a serial, the time it was signed, and an expiry.
+`from_bytes` refuses a bundle whose serial is older than the profiles built
+into your crate version, a bundle at or past its expiry, and a bundle whose
+expiry is further from its serial than `BundleSource::max_lifetime` allows. CI signs a new bundle before the old one
+expires, so a bundle that stops updating fails loudly instead of going stale.
+To refuse anything older than the last bundle you accepted, store
+`bundle.serial()` and pass it back:
+
+```rust,no_run
+use leyline::Session;
+use leyline::profile::{BundleSource, ProfileBundle};
+
+# async fn run(stored_serial: u64) -> leyline::Result<()> {
+let session = Session::builder().build()?;
+let source = BundleSource::default().min_serial(stored_serial);
+let bundle = ProfileBundle::fetch(&session, &source).await?;
+let next_serial = bundle.serial();
+# drop(next_serial);
+# Ok(())
+# }
+```
+
+A remote profile cannot weaken TLS. `from_bytes` refuses a profile whose
+minimum TLS version is below 1.2, or whose cipher, curve, key share,
+signature algorithm, delegated-credential algorithm, certificate compression,
+or ALPS name appears in no built-in profile of the same browser in your crate
+version. A Chrome profile can only use names that built-in Chrome profiles
+use. It
+also refuses identity strings that are not valid header values. A refused
+profile, and a profile that needs a field this crate version does not know,
+is listed in `skipped()` with its error; the rest of the bundle loads.
+Certificate verification comes from your session's TLS settings and never
+from a profile.
+
+`fetch` returns `Kind::Decode` when the bundle fails any check below, and
+`Kind::Body` when the file is larger than `BundleSource::max_bytes`.
+`from_bytes` returns the `ProfileError` directly:
+
+| Error | Cause |
+| --- | --- |
+| `Signature` | The signature matches no trusted key. |
+| `Format` | The bundle format is newer than this version reads. |
+| `Rollback` | The serial is older than the source's minimum serial. |
+| `FutureSerial` | The serial is later than your clock allows. |
+| `Expired` | The bundle is at or past its expiry. |
+| `Lifetime` | The expiry is further from the serial than `max_lifetime`. |
+
+To serve your own bundle, pass its URL and your public keys to
+`BundleSource::new`. A custom source starts with a minimum serial of 0.
 
 The bundle carries profile data only. Brand rows such as a new Opera version,
 a new BoringSSL revision, and a browser change that needs new TLS or QUIC
-code still ship in a crate release.
+code still ship in a crate release. The Safari and CFNetwork profiles that
+allow TLS 1.0 are not in the bundle.
 
 ## Load your own profile directory
 

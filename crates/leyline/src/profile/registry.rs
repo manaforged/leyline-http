@@ -24,6 +24,23 @@ pub enum ProfileError {
     Format {
         format: u32,
     },
+    Rollback {
+        serial: u64,
+        min_serial: u64,
+    },
+    FutureSerial {
+        serial: u64,
+    },
+    Expired {
+        expires: u64,
+    },
+    Lifetime {
+        serial: u64,
+        expires: u64,
+    },
+    Policy {
+        reason: String,
+    },
 }
 
 impl ProfileError {
@@ -61,6 +78,22 @@ impl std::fmt::Display for ProfileError {
             ),
             Self::Signature => f.write_str("profile bundle signature does not match a trusted key"),
             Self::Format { format } => write!(f, "profile bundle format {format} is not supported"),
+            Self::Rollback { serial, min_serial } => write!(
+                f,
+                "profile bundle serial {serial} is older than the trusted serial {min_serial}"
+            ),
+            Self::FutureSerial { serial } => write!(
+                f,
+                "profile bundle serial {serial} is later than the local clock allows"
+            ),
+            Self::Expired { expires } => {
+                write!(f, "profile bundle expired at unix time {expires}")
+            }
+            Self::Lifetime { serial, expires } => write!(
+                f,
+                "profile bundle lifetime from serial {serial} to expiry {expires} is longer than the source allows"
+            ),
+            Self::Policy { reason } => write!(f, "profile breaks the bundle policy: {reason}"),
         }
     }
 }
@@ -70,7 +103,14 @@ impl std::error::Error for ProfileError {
         match self {
             Self::Io { source, .. } => Some(source),
             Self::Parse { source, .. } => Some(source.as_ref()),
-            Self::Empty { .. } | Self::Signature | Self::Format { .. } => None,
+            Self::Empty { .. }
+            | Self::Signature
+            | Self::Format { .. }
+            | Self::Rollback { .. }
+            | Self::FutureSerial { .. }
+            | Self::Expired { .. }
+            | Self::Lifetime { .. }
+            | Self::Policy { .. } => None,
         }
     }
 }
@@ -152,6 +192,10 @@ impl ProfileRegistry {
     pub(crate) fn insert(&mut self, profile: BrowserProfile) {
         let key = (profile.meta.browser.clone(), profile.meta.version);
         drop(self.profiles.insert(key, Arc::new(profile)));
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &BrowserProfile> {
+        self.profiles.values().map(|profile| &**profile)
     }
 
     #[must_use]
