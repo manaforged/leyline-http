@@ -10,8 +10,18 @@ version and publish as separate crates.
 
 ## Unreleased
 
+### Added
+
+- A Brave (Chromium 156) profile, `Browser::Brave156`, from captures of Brave
+  1.98.60 (Chromium 156) on macOS, Linux, and Windows.
+- A Chrome 156 profile, `Browser::Chrome156`, from captures of Chrome
+  156.0.8078.48 on macOS, Linux, and Windows.
+- `ChromiumBrand::Opera` covers Chrome 154 and sends Opera 138 there.
+
 ### Changed
 
+- `Browser::default()` and `Browser::latest(Family::Chrome)` send Chrome 156, and
+  `Browser::latest(Family::Brave)` sends Brave 156.
 - BoringSSL is pinned to `2ea3200`, the `boringssl_revision` in Chromium's DEPS
   at tag `156.0.8078.47`, and carries 6 patches.
 

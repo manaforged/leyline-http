@@ -83,8 +83,8 @@ lists the source of every one.
 
 | Browser | Versions | Notes |
 | --- | --- | --- |
-| Chrome | 145 to 155 | Android is captured for Chrome 145 only. |
-| Brave | 146, 154, 155 | |
+| Chrome | 145 to 156 | Android is captured for Chrome 145 only. |
+| Brave | 146, 154, 155, 156 | |
 | Firefox | 148 to 158 | Firefox 155 to 157 offer QUIC v2. |
 | Safari | 18, 26, 27 | macOS. |
 | Safari on iOS | 17, 18, 27 | |
@@ -92,7 +92,7 @@ lists the source of every one.
 | CFNetwork | iOS 18, iOS 27, macOS 26 | Native app traffic, not Safari. |
 
 Edge and Opera are brand overlays on the Chrome profiles for desktop
-platforms. The Opera overlay covers Chrome 145 to 153. To send a profile that
+platforms. The Opera overlay covers Chrome 145 to 154. To send a profile that
 is not bundled, load it at runtime with `SessionBuilder::profile`.
 
 ## Install
