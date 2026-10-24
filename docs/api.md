@@ -108,6 +108,7 @@ let resp = session
 | Mix and rotate identities | `Identity::locked`, `rotate_tls`, `rotate_hello`, `switch_family` | [Fingerprints](guide/fingerprints.md#mix-and-rotate-identities) |
 | Detect a profile change | `expect_profile_id`, `Error::is_profile_changed` | [Choosing a profile](guide/choosing-a-profile.md) |
 | Load or build a profile | `ProfileRegistry::load`, `BrowserProfile::from_toml`, `from_fingerprint` | [Profiles](guide/profiles.md) |
+| Fetch profiles newer than the crate | `ProfileBundle::fetch`, `ProfileBundle::from_bytes`, `BundleSource`, `ProfileRegistry::latest` | [Fetch new profiles without a release](guide/profiles.md#fetch-new-profiles-without-a-release) |
 | Saved account device | `Device`, `DeviceAutosave` | [Accounts](guide/accounts.md) |
 | Device save intervals | `Device::autosave`, `DeviceAutosaveOptions` | [Save the device as it changes](guide/accounts.md#save-the-device-as-it-changes) |
 

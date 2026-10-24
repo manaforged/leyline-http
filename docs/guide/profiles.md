@@ -554,6 +554,48 @@ assert_eq!(again.identity().profile_id(), identity.profile_id());
 # }
 ```
 
+## Fetch new profiles without a release
+
+New browser releases reach you between crate releases through the profile
+bundle. When a captured profile lands on `main`, CI signs every profile into
+one file and publishes it on the repository's `profiles` release.
+`ProfileBundle::fetch` downloads that file through your session, checks its
+Ed25519 signature against the keys built into the crate, and parses each
+profile with the same validation as `BrowserProfile::from_toml`.
+
+```rust,no_run
+use leyline::{Family, Platform, Session};
+use leyline::profile::{BundleSource, ProfileBundle};
+
+# async fn run() -> leyline::Result<()> {
+let session = Session::builder().build()?;
+let bundle = ProfileBundle::fetch(&session, &BundleSource::default()).await?;
+let chrome = bundle.profiles().latest(Family::Chrome).expect("a Chrome profile").clone();
+let session = Session::builder()
+    .profile(chrome)
+    .platform(Platform::Windows)
+    .build()?;
+# drop(session);
+# Ok(())
+# }
+```
+
+Leyline never fetches the bundle on its own; nothing changes until you call
+`fetch`. Store the bytes and call `ProfileBundle::from_bytes` to start from a
+saved copy without a network request. A profile that needs a field this crate
+version does not know is listed in `skipped()` instead of failing the whole
+bundle.
+
+`fetch` returns `Kind::Decode` when the signature matches no trusted key or
+the bundle format is newer than this version reads, and `Kind::Body` when
+the file is larger than `BundleSource::max_bytes`. `from_bytes` returns the
+`ProfileError` directly: `Signature` or `Format`. To serve your own bundle,
+pass its URL and your public keys to `BundleSource::new`.
+
+The bundle carries profile data only. Brand rows such as a new Opera version,
+a new BoringSSL revision, and a browser change that needs new TLS or QUIC
+code still ship in a crate release.
+
 ## Load your own profile directory
 
 `ProfileRegistry::load(dir)` reads a directory laid out like the bundled

@@ -3,8 +3,8 @@ use std::fs::{read_dir, read_to_string};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 
-use crate::profile::Browser;
 use crate::profile::types::BrowserProfile;
+use crate::profile::{Browser, Family};
 
 #[derive(Debug)]
 #[non_exhaustive]
@@ -19,6 +19,10 @@ pub enum ProfileError {
     },
     Empty {
         path: PathBuf,
+    },
+    Signature,
+    Format {
+        format: u32,
     },
 }
 
@@ -55,6 +59,8 @@ impl std::fmt::Display for ProfileError {
                  subdirectory per family, each with one TOML file per version",
                 path.display()
             ),
+            Self::Signature => f.write_str("profile bundle signature does not match a trusted key"),
+            Self::Format { format } => write!(f, "profile bundle format {format} is not supported"),
         }
     }
 }
@@ -64,7 +70,7 @@ impl std::error::Error for ProfileError {
         match self {
             Self::Io { source, .. } => Some(source),
             Self::Parse { source, .. } => Some(source.as_ref()),
-            Self::Empty { .. } => None,
+            Self::Empty { .. } | Self::Signature | Self::Format { .. } => None,
         }
     }
 }
@@ -95,7 +101,7 @@ impl ProfileRegistry {
         &BUILTIN
     }
 
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             profiles: HashMap::new(),
         }
@@ -125,9 +131,7 @@ impl ProfileRegistry {
                     path: file.clone(),
                     source,
                 })?;
-                let profile = BrowserProfile::from_toml(&text).map_err(|e| e.at(&file))?;
-                let key = (profile.meta.browser.clone(), profile.meta.version);
-                drop(reg.profiles.insert(key, Arc::new(profile)));
+                reg.insert(BrowserProfile::from_toml(&text).map_err(|e| e.at(&file))?);
             }
         }
         if reg.is_empty() {
@@ -139,10 +143,24 @@ impl ProfileRegistry {
     }
 
     fn load_toml(&mut self, toml_str: &str) {
-        let profile = BrowserProfile::from_toml(toml_str)
-            .expect("built-in profile is statically valid (profile_validation)");
+        self.insert(
+            BrowserProfile::from_toml(toml_str)
+                .expect("built-in profile is statically valid (profile_validation)"),
+        );
+    }
+
+    pub(crate) fn insert(&mut self, profile: BrowserProfile) {
         let key = (profile.meta.browser.clone(), profile.meta.version);
-        self.profiles.insert(key, Arc::new(profile));
+        drop(self.profiles.insert(key, Arc::new(profile)));
+    }
+
+    #[must_use]
+    pub fn latest(&self, family: Family) -> Option<&BrowserProfile> {
+        self.profiles
+            .iter()
+            .filter(|((browser, _), _)| browser == family.id())
+            .max_by_key(|((_, version), _)| *version)
+            .map(|(_, profile)| &**profile)
     }
 
     pub fn get(&self, browser: &str, version: u32) -> Option<&BrowserProfile> {

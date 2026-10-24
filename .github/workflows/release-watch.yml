@@ -47,9 +47,17 @@ jobs:
       issues: write
     uses: ./.github/workflows/capture.yml
 
+  bundle:
+    name: profile bundle
+    needs: [capture]
+    if: ${{ !cancelled() }}
+    permissions:
+      contents: write
+    uses: ./.github/workflows/profile-bundle.yml
+
   alert:
     name: open failure issue
-    needs: [watch, capture]
+    needs: [watch, capture, bundle]
     if: failure() && github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 5

@@ -327,15 +327,29 @@ impl<'de> serde_core::de::Deserialize<'de> for leyline::profile::HeaderStyle
 #[non_exhaustive] pub enum leyline::profile::ProfileError
 pub leyline::profile::ProfileError::Empty
 pub leyline::profile::ProfileError::Empty::path: std::path::PathBuf
+pub leyline::profile::ProfileError::Format
+pub leyline::profile::ProfileError::Format::format: u32
 pub leyline::profile::ProfileError::Io
 pub leyline::profile::ProfileError::Io::path: std::path::PathBuf
 pub leyline::profile::ProfileError::Io::source: core::io::error::Error
 pub leyline::profile::ProfileError::Parse
 pub leyline::profile::ProfileError::Parse::path: core::option::Option<std::path::PathBuf>
 pub leyline::profile::ProfileError::Parse::source: alloc::boxed::Box<(dyn core::error::Error + core::marker::Send + core::marker::Sync)>
+pub leyline::profile::ProfileError::Signature
 impl core::error::Error for leyline::profile::ProfileError
 impl core::fmt::Debug for leyline::profile::ProfileError
 impl core::fmt::Display for leyline::profile::ProfileError
+pub struct leyline::profile::BundleSource
+impl leyline::profile::BundleSource
+pub fn leyline::profile::BundleSource::max_bytes(self, bytes: usize) -> Self
+pub fn leyline::profile::BundleSource::new(url: impl core::convert::Into<alloc::string::String>, public_keys: alloc::vec::Vec<[u8; 32]>) -> Self
+pub fn leyline::profile::BundleSource::url(&self) -> &str
+impl core::clone::Clone for leyline::profile::BundleSource
+impl core::cmp::Eq for leyline::profile::BundleSource
+impl core::cmp::PartialEq for leyline::profile::BundleSource
+impl core::default::Default for leyline::profile::BundleSource
+impl core::fmt::Debug for leyline::profile::BundleSource
+impl core::marker::StructuralPartialEq for leyline::profile::BundleSource
 #[non_exhaustive] pub struct leyline::profile::FingerprintSpec
 impl leyline::profile::FingerprintSpec
 pub fn leyline::profile::FingerprintSpec::akamai(self, raw: impl core::convert::Into<alloc::string::String>) -> Self
@@ -483,6 +497,14 @@ pub leyline::profile::PlatformIdentity::user_agent: alloc::string::String
 impl core::clone::Clone for leyline::profile::PlatformIdentity
 impl core::fmt::Debug for leyline::profile::PlatformIdentity
 impl<'de> serde_core::de::Deserialize<'de> for leyline::profile::PlatformIdentity
+pub struct leyline::profile::ProfileBundle
+impl leyline::profile::ProfileBundle
+pub async fn leyline::profile::ProfileBundle::fetch(session: &leyline::Session, source: &leyline::profile::BundleSource) -> leyline::Result<Self>
+pub fn leyline::profile::ProfileBundle::from_bytes(bundle: &[u8], source: &leyline::profile::BundleSource) -> core::result::Result<Self, leyline::profile::ProfileError>
+pub fn leyline::profile::ProfileBundle::generated(&self) -> &str
+pub fn leyline::profile::ProfileBundle::profiles(&self) -> &leyline::profile::ProfileRegistry
+pub fn leyline::profile::ProfileBundle::skipped(&self) -> &[leyline::profile::SkippedProfile]
+impl core::fmt::Debug for leyline::profile::ProfileBundle
 #[non_exhaustive] pub struct leyline::profile::ProfileMeta
 pub leyline::profile::ProfileMeta::browser: alloc::string::String
 pub leyline::profile::ProfileMeta::captured_against: core::option::Option<alloc::string::String>
@@ -500,9 +522,15 @@ pub struct leyline::profile::ProfileRegistry
 impl leyline::profile::ProfileRegistry
 pub fn leyline::profile::ProfileRegistry::get(&self, browser: &str, version: u32) -> core::option::Option<&leyline::BrowserProfile>
 pub fn leyline::profile::ProfileRegistry::global() -> &'static Self
+pub fn leyline::profile::ProfileRegistry::latest(&self, family: leyline::Family) -> core::option::Option<&leyline::BrowserProfile>
 pub fn leyline::profile::ProfileRegistry::load(dir: &std::path::Path) -> core::result::Result<Self, leyline::profile::ProfileError>
 impl core::default::Default for leyline::profile::ProfileRegistry
 impl core::fmt::Debug for leyline::profile::ProfileRegistry
+#[non_exhaustive] pub struct leyline::profile::SkippedProfile
+pub leyline::profile::SkippedProfile::browser: alloc::string::String
+pub leyline::profile::SkippedProfile::error: leyline::profile::ProfileError
+pub leyline::profile::SkippedProfile::version: u32
+impl core::fmt::Debug for leyline::profile::SkippedProfile
 #[non_exhaustive] pub struct leyline::profile::TlsFingerprint
 pub leyline::profile::TlsFingerprint::ja4: core::option::Option<alloc::string::String>
 pub leyline::profile::TlsFingerprint::platforms: std::collections::hash::map::HashMap<alloc::string::String, leyline::profile::TlsFingerprint>
