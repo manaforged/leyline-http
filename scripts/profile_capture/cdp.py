@@ -82,11 +82,18 @@ class Socket:
             return reply.get("result") or {}
 
 
+def port_file_lines(active: Path) -> list[str]:
+    try:
+        return active.read_text().split()
+    except (FileNotFoundError, PermissionError):
+        return []
+
+
 def devtools_port(profile: Path, proc: subprocess.Popen) -> tuple[int, str]:
     active = profile / "DevToolsActivePort"
     deadline = time.monotonic() + WAITS["driver_ready"]
     while time.monotonic() < deadline:
-        lines = active.read_text().split() if active.is_file() else []
+        lines = port_file_lines(active)
         if len(lines) == 2:
             return int(lines[0]), lines[1]
         if proc.poll() is not None:

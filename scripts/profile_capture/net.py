@@ -3,14 +3,23 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
-from .config import GITHUB_TOKEN_ENV, WAITS
+from .config import FETCH_RETRY, GITHUB_TOKEN_ENV, WAITS
 
 
 def open_url(url: str, timeout: float, headers: dict[str, str] | None = None):
-    return urllib.request.urlopen(urllib.request.Request(url, headers=headers or {}), timeout=timeout)
+    for attempt in range(1, FETCH_RETRY["attempts"] + 1):
+        try:
+            return urllib.request.urlopen(urllib.request.Request(url, headers=headers or {}), timeout=timeout)
+        except urllib.error.HTTPError as error:
+            if error.code not in FETCH_RETRY["statuses"] or attempt == FETCH_RETRY["attempts"]:
+                raise
+            print(f"{url}: HTTP {error.code}, retry {attempt} of {FETCH_RETRY['attempts'] - 1}")
+            time.sleep(WAITS["fetch_retry"] * attempt)
 
 
 def http_text(url: str, timeout: float = WAITS["metadata_fetch"], headers: dict[str, str] | None = None) -> str:
