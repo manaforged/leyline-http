@@ -155,7 +155,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
 
     pub(super) async fn sweep_cancelled_streams(&mut self) -> Result<(), H2Error> {
         self.pending.retain(|cmd| !cmd.is_cancelled());
-        let to_cancel: Vec<u32> = self
+        let to_cancel: Vec<(u32, bool)> = self
             .streams
             .iter()
             .filter(|(_, actor)| {
@@ -165,10 +165,13 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                         .as_ref()
                         .is_some_and(ResponseSink::is_cancelled)
             })
-            .map(|(id, _)| id)
+            .map(|(id, actor)| (id, actor.got_headers))
             .collect();
+        if to_cancel.iter().any(|&(_, answered)| !answered) {
+            self.unanswered_timeout.store(true, Ordering::Release);
+        }
 
-        for sid in to_cancel {
+        for (sid, _) in to_cancel {
             tracing::debug!(
                 target: "leyline::h2",
                 stream_id = sid,

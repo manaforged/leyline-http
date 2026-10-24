@@ -149,7 +149,7 @@ limit applies to one pool.
 | `max_h1_conns_per_host` | 256 | HTTP/1.1 connections per host, port, scheme, proxy, and transport. A request over the limit waits for a free slot |
 | `idle_timeout` | 300 s | An idle connection closes after this time |
 | `keepalive` | `true` | Keep connections open for reuse |
-| `h2_ping_after_idle` | 10 s | An idle HTTP/2 connection gets a `PING` after this time. `None` turns it off |
+| `h2_ping_after_idle` | 10 s | An idle HTTP/2 connection gets a `PING` after this time, and so does a connection where a request timed out before its response headers arrived. `None` turns both off |
 | `h2_ping_timeout` | 2 s | The wait for the answer to that `PING` |
 
 ```rust,no_run
