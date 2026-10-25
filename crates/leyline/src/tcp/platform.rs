@@ -81,19 +81,6 @@ pub(super) fn apply_platform_options(socket: &Socket, profile: &TcpProfile, is_v
     use std::os::unix::io::AsRawFd;
     let fd = socket.as_raw_fd();
 
-    if profile.mss > 0 {
-        // SAFETY: see module-level SAFETY. macOS TCP_MAXSEG = 2.
-        unsafe {
-            set_int_opt(
-                fd,
-                libc::IPPROTO_TCP,
-                2,
-                profile.mss as libc::c_int,
-                "TCP_MAXSEG",
-            )
-        };
-    }
-
     if profile.df {
         let (level, opt, label) = if is_v6 {
             (libc::IPPROTO_IPV6, 62, "IPV6_DONTFRAG")
