@@ -8,6 +8,13 @@ behaviour, and each change is listed here. The BoringSSL crates
 `leyline-bssl`, `leyline-bssl-sys`, and `leyline-bssl-tokio` share this
 version and publish as separate crates.
 
+## Unreleased
+
+### Added
+
+- A Firefox 159 profile, `Browser::Firefox159`, from captures of Firefox 159.0
+  on macOS, Linux, and Windows.
+
 ## 0.1.6 - 2026-10-23
 
 ### Added
