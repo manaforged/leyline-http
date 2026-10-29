@@ -1151,6 +1151,7 @@ Requires feature `websocket`.
 | <code>Firefox156</code> |  |
 | <code>Firefox157</code> |  |
 | <code>Firefox158</code> |  |
+| <code>Firefox159</code> |  |
 | <code>OkHttpAndroid10</code> |  |
 | <code>Safari18</code> |  |
 | <code>Safari26</code> |  |
