@@ -14,6 +14,8 @@ This page keeps one session across runs the way a browser profile keeps it: the 
 | `jar` | The cookies |
 | `state` | The TLS session tickets, the `Alt-Svc` entries, and the HSTS store. See [The connection state](#the-connection-state) |
 
+A save holds only these fields. Headers, host limits, retry, timeout, redirect, and trace hooks are code, so set them again on the builder that `load` returns.
+
 A session file is a credential: its cookies and TLS session tickets resume the account, and its proxy setting routes every request. Whoever can write the file controls the session, so keep it as private as a password and load only files that your program wrote.
 
 ## Save and load
@@ -34,7 +36,7 @@ session.save("account/session.json")?;
 # }
 ```
 
-`Session::load(path)` returns a `SessionBuilder` with the saved identity, proxy, and cookies. Add any setter, then call `build()`. A loaded builder does not read the proxy environment variables, so a save without a proxy goes direct.
+`Session::load(path)` returns a `SessionBuilder` with the saved identity, proxy, and cookies. Add any setter, then call `build()`. On a first run the file does not exist and `load` fails with `Kind::Io`, so build a new session when `path.exists()` is false. A loaded builder does not read the proxy environment variables, so a save without a proxy goes direct.
 
 ```rust,no_run
 use std::time::Duration;
@@ -64,7 +66,7 @@ let session = Session::load("account/session.json")?
 | --- | --- |
 | A cookie changes | A save runs, at most once per `every` |
 | `every` passes and the connection state changed | A save runs, so new TLS tickets, `Alt-Svc`, and HSTS entries reach the file |
-| `session.shutdown()` | A last save runs and the writer stops |
+| `session.shutdown()` | A last save runs and the writer stops. `shutdown` returns at once; the save completes even when the runtime stops right after |
 | The runtime drops the task | The writer saves unsaved changes as it stops |
 
 Each save writes a temporary file, syncs it, and renames it, so a crash never leaves a half-written file. On Unix the file has mode `0600`; on Windows it takes the default ACLs of its directory. `autosave` panics outside a Tokio runtime.
@@ -180,26 +182,15 @@ Saved TLS sessions are bound to the trust that the session loaded when it was bu
 `ca_file`, `SSL_CERT_FILE`, and `SSL_CERT_DIR`, the contents of the client
 certificate and key files, and whether system roots are on. A saved TLS
 session resumes only in a session that loaded the same trust. Otherwise the
-connection makes a full handshake and checks the certificate again.
-A session from `to_builder()` keeps its parent's trust. One with a new pool,
-such as `to_builder().share_connections(false)`, loads the CA files again. Changes to the
-operating system's root store are not part of the binding.
+connection makes a full handshake and checks the certificate again. A session from `to_builder()` keeps its parent's trust. One with a new pool, such as `to_builder().share_connections(false)`, loads the CA files again. Changes to the operating system's root store are not part of the binding.
 
 ## Browse with a tab
 
-A `Tab` sends each request with the current page as its `from_page`, so the
-`Referer`, `Origin`, and `sec-fetch-site` headers match a real click.
-[Requests](requests.md#keep-the-page-with-a-tab) lists the calls. For an
-account:
+A `Tab` sends each request with the current page as its `from_page`, so the `Referer`, `Origin`, and `sec-fetch-site` headers match a real click. [Requests](requests.md#keep-the-page-with-a-tab) lists the calls. For an account:
 
-- `fetch` on a tab with no page fails
-  with `Kind::Request` ("the tab has no page; open one first") and send
-  nothing. Open a page first.
-- A `.stream()` navigation changes the page at the response head.
-  `current()` reads the page, and `set_current(..)` sets it.
-- A page script sets its own `accept`. Set it on the `fetch` builder when the
-  site's script does. See
-  [Fingerprints](fingerprints.md#set-accept-on-a-script-request).
+- `fetch` on a tab with no page fails with `Kind::Request` ("the tab has no page; open one first") and sends nothing. Open a page first.
+- A `.stream()` navigation changes the page at the response head. `current()` reads the page, and `set_current(..)` sets it.
+- A page script sets its own `accept`. Set it on the `fetch` builder when the site's script does. See [Fingerprints](fingerprints.md#set-accept-on-a-script-request).
 
 ```rust,no_run
 use leyline::RequestKind;
@@ -220,29 +211,19 @@ println!("{} {}", orders.status(), logo.status());
 
 ## Log in with the page's form
 
-The `html` feature, on by default, adds `leyline::html` and turns on the
-`multipart` feature. `html::forms(document)` returns every `<form>` as an
-`html::Form` with the values a browser would submit:
+The `html` feature, on by default, adds `leyline::html` and turns on the `multipart` feature. `html::forms(document)` returns every `<form>` as an `html::Form` with the values a browser would submit:
 
 - Hidden inputs, checked checkboxes, text areas, and selected options.
 - One checked radio button per name: the last one, as a browser keeps it.
-- Controls outside the `<form>` element that name it with `form="id"`.
-  When two elements share the id, the first one is the form.
-- No disabled controls, and no controls inside a disabled `<fieldset>`
-  except in the first `<legend>` that is a direct child of that fieldset.
-- No options inside a disabled `<optgroup>`. A list box (`<select size>`)
-  with no selected option sends nothing.
+- Controls outside the `<form>` element that name it with `form="id"`. When two elements share the id, the first one is the form.
+- No disabled controls, and no controls inside a disabled `<fieldset>` except in the first `<legend>` that is a direct child of that fieldset.
+- No options inside a disabled `<optgroup>`. A list box (`<select size>`) with no selected option sends nothing.
 - Line breaks in names and values converted to CRLF, as a browser sends them.
-- Values with every HTML named character reference decoded, such as `&amp;`
-  and `&eacute;`.
+- Values with every HTML named character reference decoded, such as `&amp;` and `&eacute;`.
 
-`Form::find(document, name)` returns the first form whose `id` or `name`
-attribute is `name`.
+`Form::find(document, name)` returns the first form whose `id` or `name` attribute is `name`.
 
-`Tab::follow` and `Tab::submit_form` drop the session credentials when the
-target origin differs from the current page: the `Authorization`, `Cookie`,
-and `Proxy-Authorization` defaults and the session bearer token, as a
-redirect does.
+`Tab::follow` and `Tab::submit_form` drop the session credentials when the target origin differs from the current page: the `Authorization`, `Cookie`, and `Proxy-Authorization` defaults and the session bearer token, as a redirect does.
 
 | Call | Effect |
 | --- | --- |
@@ -253,18 +234,9 @@ redirect does.
 | `set(name, value)` | Replaces every value of the field with one value, or adds the field |
 | `buttons()`, `press(name)` | The submit button names; `press` adds one button's name and value. It returns `false` for an unknown name, and adds `name.x` and `name.y` for an image button |
 
-`Tab::submit_form(&form)` sends `form.fields()` as they are, with no submit
-button: call `form.press(name)` first when the site reads the button. The
-action resolves against the page's `<base href>`, or the current page when
-there is none. A `Post` form sends the fields with `RequestKind::FormNavigate`,
-encoded as its `enctype()` says: `application/x-www-form-urlencoded`,
-`multipart/form-data`, or `text/plain`. A `Get` form replaces the action's
-query with the fields. Both are navigations that carry
-the page as the `Referer` and change the current page.
+`Tab::submit_form(&form)` sends `form.fields()` as they are, with no submit button: call `form.press(name)` first when the site reads the button. The action resolves against the page's `<base href>`, or the current page when there is none. A `Post` form sends the fields with `RequestKind::FormNavigate`, encoded as its `enctype()` says: `application/x-www-form-urlencoded`, `multipart/form-data`, or `text/plain`. A `Get` form replaces the action's query with the fields. Both are navigations that carry the page as the `Referer` and change the current page.
 
-The session redirect policy applies: after a login `POST`, a 301, 302, or
-303 continues as a `GET` without the body, and a 307 or 308 repeats the
-`POST`. The response and the current page are those of the final URL.
+The session redirect policy applies: after a login `POST`, a 301, 302, or 303 continues as a `GET` without the body, and a 307 or 308 repeats the `POST`. The response and the current page are those of the final URL.
 
 ```rust,no_run
 use leyline::html::{self, Form};
@@ -284,17 +256,11 @@ println!("{}", cart.status());
 # }
 ```
 
-`html::meta(document, name)` returns the `content` of the first `<meta>`
-whose `name` or `property` equals `name`, without case; many sites put a CSRF
-token there. `html::links(document)` returns every `<a href>` as an
-`html::Anchor` with `href()`, `text()`, and `rel()`. `href()` is the raw
-attribute; pass it to `Tab::follow`, which resolves it.
+`html::meta(document, name)` returns the `content` of the first `<meta>` whose `name` or `property` equals `name`, without case; many sites put a CSRF token there. `html::links(document)` returns every `<a href>` as an `html::Anchor` with `href()`, `text()`, and `rel()`. `href()` is the raw attribute; pass it to `Tab::follow`, which resolves it.
 
 ## Check the login, log in again
 
-Leyline cannot tell whether a site considers you logged in. Request an
-endpoint that only a logged-in user can read, and log in again when it says
-no. The jar and `Session::autosave` keep the new cookies.
+Leyline cannot tell whether a site considers you logged in. Request an endpoint that only a logged-in user can read, and log in again when it says no. The jar and `Session::autosave` keep the new cookies.
 
 ```rust,no_run
 use leyline::html::Form;
@@ -313,18 +279,11 @@ if me.status() == StatusCode::UNAUTHORIZED {
 # }
 ```
 
-When several tasks share the session, each can see the 401 at once. Hold one
-lock, such as a `tokio::sync::Mutex`, around the check and the login, and
-check again after you take it, so one task logs in and the others reuse its
-cookies. `examples/accounts.rs` combines save and load, autosave, the login form,
-and the tab.
+When several tasks share the session, each can see the 401 at once. Hold one lock, such as a `tokio::sync::Mutex`, around the check and the login, and check again after you take it, so one task logs in and the others reuse its cookies. `examples/accounts.rs` combines save and load, autosave, the login form, and the tab.
 
 ## Run tasks at the same time
 
-`Session` and `Tab` are `Clone`, `Send`, and `Sync`. Session clones share the
-pool, the jar, the identity, and the state, so one `Session::autosave` covers
-every task. Tab clones share the current page, so give each parallel page its
-own `session.tab()`.
+`Session` and `Tab` are `Clone`, `Send`, and `Sync`. Session clones share the pool, the jar, the identity, and the state, so one `Session::autosave` covers every task. Tab clones share the current page, so give each parallel page its own `session.tab()`.
 
 ```rust,no_run
 # async fn run(session: leyline::Session) -> leyline::Result<()> {
@@ -339,8 +298,7 @@ println!("{} {}", a?.status(), b?.status());
 # }
 ```
 
-To stop every task of the account and run the last autosave, call `session.shutdown()`. See
-[Sessions](sessions.md#stop-a-session).
+To stop every task of the account and run the last autosave, call `session.shutdown()`. See [Sessions](sessions.md#stop-a-session).
 
 ## Next
 

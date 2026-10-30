@@ -59,7 +59,7 @@ println!("{} pages, {} errors", crawl.pages(), crawl.errors());
 | `respect(Respect)` or `respect(None)` | `Robots` | `Robots` obeys robots.txt `Disallow` and `Crawl-delay`, the page's `noindex` and `nofollow`, and `rel="nofollow"`. `AiTraining` does all of that and also obeys the site's AI-training opt-outs. `None` obeys no robots rules: no `Disallow`, `Crawl-delay`, `noindex`, or `nofollow` |
 | `scope(Scope)` | `Host` | `Host`: the seed's host. `Domain`: its registrable domain. `Prefix`: its host and directory; a last path segment with a dot and a letter after it is a file, so end a directory seed with a slash |
 | `limit(n)` | none | Stops after `n` kept pages |
-| `host_limits(HostLimits)` | one in flight, one a second, and a 429/503 pause per host, wherever the session's own limits leave them unset | The crawl's pace per host, on top of the session's own limits, which every crawl and request of the session share. The value is used as given; `HostLimits::new()` adds no limits |
+| `host_limits(HostLimits)` | one in flight, one a second, and a 429/503 pause per host, wherever the session's own limits leave them unset | The crawl's pace per host. A value you pass replaces the crawl's defaults, so `HostLimits::new()` adds no limits. The session's own limits, which every crawl and request of the session share, still apply on top |
 
 Unless you call `respect(None)`, the crawl reads each site's robots.txt
 once, and again after 24 hours, obeys its rules, and reads its `Sitemap`
@@ -81,6 +81,7 @@ For each URL, in order, the crawl:
    ([Cloudflare's format](https://developers.cloudflare.com/bots/additional-configurations/managed-robots-txt/))
    or a `Content-Usage` line (the IETF
    [aipref draft](https://datatracker.ietf.org/doc/draft-ietf-aipref-attach/)).
+   Both count as `SkipReason::Signal`.
 3. Sends the request without following redirects. A redirect is queued like
    a link, so its target passes the same checks; a seed redirected to
    another host of the same site adds the scope of its target, and a seed
@@ -95,7 +96,7 @@ For each URL, in order, the crawl:
    skips links marked `rel="nofollow"`.
 6. Unless robots are ignored, skips a `noindex` page. With `Respect::AiTraining`, it
    also skips a `noai` page and a page whose `Content-Usage` header refuses
-   AI training. `noai` is a convention some sites use, not a standard. A
+   AI training, counted as `SkipReason::NoAi` and `SkipReason::Signal`. `noai` is a convention some sites use, not a standard. A
    page that names another in-scope page as its canonical URL waits until
    the crawl has that page: it is dropped when the canonical page is kept,
    and kept when the canonical page is skipped or cannot be fetched. A held page counts
