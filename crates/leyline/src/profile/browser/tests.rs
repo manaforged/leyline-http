@@ -27,6 +27,7 @@ fn latest_is_the_newest_browser_capture() {
         let better = Browser::all().iter().find(|b| {
             let (captured, live) = meta(b);
             b.family() == family
+                && b.brand().is_none()
                 && live
                 && if latest_captured {
                     captured && b.version() > version
@@ -55,11 +56,9 @@ fn latest_covers_every_bundled_family() {
 
 #[test]
 fn latest_matches_the_builder_defaults() {
-    assert_eq!(Browser::latest(Family::Chrome), Browser::default_browser());
-    assert_eq!(
-        Browser::get(Family::Firefox, Browser::latest(Family::Firefox).version()),
-        Some(Browser::latest(Family::Firefox))
-    );
+    assert_eq!(Browser::chrome(), Browser::default_browser());
+    assert_eq!(Browser::edge().base(), Browser::chrome());
+    assert_eq!(Browser::edge().version(), Browser::chrome().version());
 }
 
 #[test]
@@ -84,7 +83,7 @@ fn every_bundled_identity_sends_an_accept_language() {
     ];
     for browser in Browser::all() {
         for platform in platforms {
-            if let Some(identity) = browser.identity(platform, None) {
+            if let Some(identity) = browser.identity_headers(platform) {
                 assert!(
                     identity.accept_language.is_some(),
                     "{browser} on {platform:?}"

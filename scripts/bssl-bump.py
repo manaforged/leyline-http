@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 import argparse
-import re
 import subprocess
 import sys
 import textwrap
+import tomllib
 from dataclasses import dataclass
 from enum import IntEnum
 from pathlib import Path
@@ -16,7 +16,6 @@ sys.path.insert(0, str(SCRIPTS))
 
 from profile_capture.chrome import boringssl_revision, live_chrome_major
 from profile_capture.docs import changelog_add
-from profile_capture.net import github_json
 
 CRATE = ROOT / "crates/leyline-bssl-sys"
 SUBMODULE = CRATE / "deps/boringssl"
@@ -25,13 +24,8 @@ PATCHES = CRATE / "patches"
 PATCH_GLOB = "*.patch"
 APPLY_ARGS = ["apply", "-v", "--whitespace=fix"]
 REJECT_ARGS = ["apply", "--reject", "--whitespace=fix"]
-PROVENANCE = CRATE / "PROVENANCE.md"
-SECURITY = ROOT / "SECURITY.md"
+PIN = CRATE / "boringssl.toml"
 CHANGELOG = ROOT / "CHANGELOG.md"
-NOTICES = (ROOT / "NOTICE", CRATE / "NOTICE")
-README = ROOT / "crates/leyline/README.md"
-UPSTREAM_BASE = "e2a57cfb4d915b4ba820585aef9fdee7bca13fe5"
-COMPARE_URL = "https://api.github.com/repos/google/boringssl/compare/{base}...{head}"
 REGEN_COMMAND = "scripts/regen-bssl-bindings.sh <target>"
 BINDINGS = CRATE / "bindings"
 CHANGELOG_SECTION = "Changed"
@@ -61,8 +55,10 @@ def git(cwd: Path, *args: str, check: bool = True) -> subprocess.CompletedProces
 
 def bundled() -> Pin:
     have = git(ROOT, "ls-tree", "HEAD", SUBMODULE_REL).stdout.split()[2]
-    tag = re.search(r"DEPS at tag `([0-9.]+)`", PROVENANCE.read_text()).group(1)
-    return Pin(have, tag)
+    pin = tomllib.loads(PIN.read_text())
+    if pin["revision"] != have:
+        raise SystemExit(f"{PIN.relative_to(ROOT)} names {pin['revision']}, the submodule is at {have}")
+    return Pin(have, pin["chromium_tag"])
 
 
 def wanted(revision: str | None) -> Pin:
@@ -108,33 +104,6 @@ def failing_patch() -> tuple[Path, str] | None:
         git(SUBMODULE, "clean", "-fdq")
 
 
-def commits_after_base(revision: str) -> int:
-    return github_json(COMPARE_URL.format(base=UPSTREAM_BASE, head=revision))["ahead_by"]
-
-
-def rewrite(path: Path, edits: list[tuple[str, str]]) -> bool:
-    before = path.read_text()
-    after = before
-    for pattern, replacement in edits:
-        after = re.sub(pattern, replacement, after)
-    if after == before:
-        return False
-    path.write_text(after)
-    return True
-
-
-def doc_edits(old: Pin, new: Pin, ahead: int) -> dict[Path, list[tuple[str, str]]]:
-    pin = [(re.escape(old.revision), new.revision), (re.escape(f"tag `{old.tag}`"), f"tag `{new.tag}`")]
-    chromium = [(rf"Chromium {old.major}'s DEPS", f"Chromium {new.major}'s DEPS")]
-    edits = {
-        PROVENANCE: pin + [(r"(`" + UPSTREAM_BASE + r"`, )\d+(\s+commits older)", rf"\g<1>{ahead}\g<2>")],
-        SECURITY: pin,
-        README: [(rf"revision Chrome {old.major} ships", f"revision Chrome {new.major} ships")],
-    }
-    edits.update({path: chromium for path in NOTICES})
-    return edits
-
-
 def changelog_bullet(new: Pin, patches: int) -> str:
     return textwrap.fill(
         f"- BoringSSL is pinned to `{new.revision[:SHORT]}`, the `boringssl_revision` in "
@@ -146,8 +115,8 @@ def changelog_bullet(new: Pin, patches: int) -> str:
 
 
 def update_docs(old: Pin, new: Pin) -> list[Path]:
-    ahead = commits_after_base(new.revision)
-    changed = [path for path, edits in doc_edits(old, new, ahead).items() if rewrite(path, edits)]
+    PIN.write_text(f'revision = "{new.revision}"\nchromium_tag = "{new.tag}"\n')
+    changed = [PIN]
     bullet = changelog_bullet(new, len(list(PATCHES.glob(PATCH_GLOB))))
     text = CHANGELOG.read_text()
     updated = changelog_add(text, CHANGELOG_SECTION, bullet)

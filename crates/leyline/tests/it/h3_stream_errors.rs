@@ -19,9 +19,10 @@ async fn a_dropped_response_body_stops_the_stream_as_request_cancelled() {
     let mut body = session
         .get(server.url())
         .stream()
+        .send()
         .await
         .unwrap()
-        .into_stream()
+        .bytes_stream()
         .unwrap();
     body.next().await.unwrap().unwrap();
     drop(body);
@@ -35,7 +36,7 @@ async fn a_dropped_response_body_stops_the_stream_as_request_cancelled() {
 async fn a_malformed_response_head_stops_the_stream_as_a_protocol_error() {
     let server = h3_server(vec![Reply::Status(b"abc")], Limits::default()).await;
     let session = server.session().build().unwrap();
-    session.get(server.url()).await.unwrap_err();
+    session.get(server.url()).send().await.unwrap_err();
     assert_eq!(
         server.stop_code().await,
         Some(WireErrorCode::GeneralProtocolError as u64)
@@ -48,6 +49,7 @@ async fn dropping_an_idle_session_sends_no_connection_close() {
     let session = server.session().build().unwrap();
     session
         .get(server.url())
+        .send()
         .await
         .unwrap()
         .bytes()
@@ -66,9 +68,10 @@ async fn a_reset_in_the_middle_of_a_streamed_body_is_an_error() {
     let mut body = session
         .get(server.url())
         .stream()
+        .send()
         .await
         .unwrap()
-        .into_stream()
+        .bytes_stream()
         .unwrap();
     let mut failed = false;
     while let Some(chunk) = body.next().await {
@@ -89,11 +92,15 @@ async fn a_failing_request_body_stream_is_a_body_error() {
     let err = session
         .post(server.url())
         .body(Body::stream(chunks, None))
+        .send()
         .await
         .unwrap_err();
     assert_eq!(err.kind(), Kind::Body, "{err:?}");
     assert_eq!(
-        err.io().map(ToString::to_string).as_deref(),
+        std::error::Error::source(&err)
+            .and_then(|s| s.downcast_ref::<std::io::Error>())
+            .map(ToString::to_string)
+            .as_deref(),
         Some("caller body failed"),
         "{err:?}"
     );
@@ -107,7 +114,7 @@ async fn an_h3_upload_must_match_its_declared_length() {
         let session = server.session().build().unwrap();
         let chunks = [Ok::<_, std::io::Error>(Bytes::from(vec![b'u'; produced]))];
         let body = Body::stream(futures_util::stream::iter(chunks), Some(DECLARED as u64));
-        let sent = session.post(server.url()).body(body).await;
+        let sent = session.post(server.url()).body(body).send().await;
         assert!(
             sent.is_err(),
             "{produced} bytes under a declared {DECLARED}: {sent:?}"
@@ -126,9 +133,10 @@ async fn a_failed_decoded_h3_stream_that_is_kept_releases_its_host_slot() {
     let mut body = session
         .get(server.url())
         .stream()
+        .send()
         .await
         .unwrap()
-        .into_decoded_stream(None)
+        .bytes_stream()
         .unwrap();
     let mut failed = false;
     while let Some(chunk) = body.next().await {
@@ -138,7 +146,10 @@ async fn a_failed_decoded_h3_stream_that_is_kept_releases_its_host_slot() {
         }
     }
     assert!(failed, "a body that is not gzip must fail to decode");
-    assert!(session.host_stats().iter().all(|s| s.in_flight() == 0));
+    assert!({
+        let stats = session.stats();
+        stats.hosts().all(|h| stats.in_flight(h) == 0)
+    });
     assert_eq!(
         server.stop_code().await,
         Some(WireErrorCode::RequestCancelled as u64)
@@ -162,9 +173,10 @@ async fn an_upload_that_fails_behind_a_full_unread_body_leaves_no_task_waiting_o
         .post(server.url())
         .body(Body::stream(first.chain(failure), None))
         .stream()
+        .send()
         .await
         .unwrap()
-        .into_stream()
+        .bytes_stream()
         .unwrap();
     tokio::time::sleep(Duration::from_millis(500)).await;
     fail_tx.send(()).unwrap();

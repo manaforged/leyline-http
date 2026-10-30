@@ -19,7 +19,12 @@ async fn main() -> leyline::Result<()> {
     let home = tab.open(HOME).await?;
     println!("home: {} {}", home.status(), home.url());
 
-    let cart: Value = tab.xhr(CART_API).send().await?.json().await?;
+    let cart: Value = tab
+        .fetch(leyline::http::Method::GET, CART_API)
+        .send()
+        .await?
+        .json()
+        .await?;
     println!("cart: {cart}");
 
     let page = tab.follow(LOGIN).await?.text().await?;

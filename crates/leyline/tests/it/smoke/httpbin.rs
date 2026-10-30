@@ -3,7 +3,7 @@ use std::future::Future;
 use std::time::Duration;
 
 use http::StatusCode;
-use leyline::{Browser, Error, ErrorCategory, Kind, Response, Session, TimeoutConfig};
+use leyline::{Browser, Error, Kind, Response, Session, Timeout};
 use serde_json::Value;
 
 use super::Result;
@@ -53,7 +53,7 @@ impl From<Error> for HttpbinAttempt {
 }
 
 fn httpbin_transport_down(err: &Error) -> bool {
-    err.is_timeout() || matches!(err.category(), ErrorCategory::Connect | ErrorCategory::Dns)
+    err.kind() == Kind::Timeout || matches!(err.kind(), Kind::Connect | Kind::Dns)
 }
 
 pub(super) fn httpbin_budget() -> Duration {
@@ -72,7 +72,7 @@ fn httpbin_session() -> leyline::Result<Session> {
 pub(super) fn session_with_timeout(total: Duration) -> leyline::Result<Session> {
     Session::builder()
         .browser(Browser::default())
-        .timeout(TimeoutConfig::new().total(total).connect(total))
+        .timeout(Timeout::new().total(total).connect(total))
         .build()
 }
 
@@ -170,7 +170,7 @@ pub(super) async fn read_httpbin_json(
 pub(super) async fn httpbin_cdn_get() -> Result<String> {
     with_httpbin(|| async {
         let session = httpbin_session()?;
-        let response = session.get(format!("{HTTPBIN}/get")).await?;
+        let response = session.get(format!("{HTTPBIN}/get")).send().await?;
         let body = read_httpbin_text(response, StatusCode::OK).await?;
         httpbin_eq(body.contains("headers"), "httpbin body missing headers")?;
         Ok(format!("status=200 body={}B", body.len()))
@@ -185,6 +185,7 @@ pub(super) async fn httpbin_post_json() -> Result<String> {
         let response = session
             .post(format!("{HTTPBIN}/post"))
             .json(&payload)
+            .send()
             .await?;
         let value = read_httpbin_json(response).await?;
         let echoed = httpbin_str(&value["json"]["test"], "json.test")?;
@@ -200,6 +201,7 @@ pub(super) async fn httpbin_post_form() -> Result<String> {
         let response = session
             .post(format!("{HTTPBIN}/post"))
             .form([("user", "alice"), ("pass", "s3cret!")])
+            .send()
             .await?;
         let value = read_httpbin_json(response).await?;
         let user = httpbin_str(&value["form"]["user"], "form.user")?;
@@ -248,7 +250,7 @@ pub(super) async fn httpbin_bearer() -> Result<String> {
 pub(super) async fn httpbin_status_404() -> Result<String> {
     with_httpbin(|| async {
         let session = httpbin_session()?;
-        let response = session.get(format!("{HTTPBIN}/status/404")).await?;
+        let response = session.get(format!("{HTTPBIN}/status/404")).send().await?;
         expect_httpbin_status(response.status(), StatusCode::NOT_FOUND)?;
         httpbin_eq(response.error_for_status().is_err(), "404 should be error")?;
         Ok("404 -> Err".to_string())
@@ -259,7 +261,7 @@ pub(super) async fn httpbin_status_404() -> Result<String> {
 pub(super) async fn httpbin_redirect() -> Result<String> {
     with_httpbin(|| async {
         let session = httpbin_session()?;
-        let response = session.get(format!("{HTTPBIN}/redirect/2")).await?;
+        let response = session.get(format!("{HTTPBIN}/redirect/2")).send().await?;
         expect_httpbin_status(response.status(), StatusCode::OK)?;
         let hops = response.redirect_chain().len();
         httpbin_eq(hops > 0, "redirect chain empty")?;
@@ -271,7 +273,7 @@ pub(super) async fn httpbin_redirect() -> Result<String> {
 pub(super) async fn httpbin_large() -> Result<String> {
     with_httpbin(|| async {
         let session = httpbin_session()?;
-        let response = session.get(format!("{HTTPBIN}/bytes/50000")).await?;
+        let response = session.get(format!("{HTTPBIN}/bytes/50000")).send().await?;
         expect_httpbin_status(response.status(), StatusCode::OK)?;
         let n = response.bytes().await?.len();
         httpbin_eq(n == 50_000, format!("got {n} bytes"))?;

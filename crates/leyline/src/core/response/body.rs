@@ -3,19 +3,28 @@ use futures_util::{Stream, StreamExt};
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
 use super::prefix::stop_reason;
-use super::{PrefixRead, Response, ResponseBody, StopReason};
+use super::{Response, ResponseBody, StopReason};
 use crate::core::body_stream::BodyStream;
 use crate::core::deadline::{Deadline, within};
-use crate::core::error::{Error, Kind, Result};
+use crate::core::error::{Cause, Error, Result};
 use crate::core::session::decompress::{
-    BodyLimit, Decoder, body_read_error, content_codings, decompress_body, drain_stream_into_vec,
+    BodyLimit, Decoder, body_read_error, buffer_decoded, content_codings,
 };
 
 impl Response {
+    /// Reads the body as text in the charset from `content-type`, defaulting to UTF-8.
+    #[cfg(feature = "charset")]
     pub async fn text(self) -> crate::core::Result<String> {
         self.text_with_charset("utf-8").await
     }
 
+    /// Reads the body as UTF-8 text and replaces invalid bytes.
+    #[cfg(not(feature = "charset"))]
+    pub async fn text(self) -> crate::core::Result<String> {
+        Ok(String::from_utf8_lossy(&self.bytes().await?).into_owned())
+    }
+
+    /// Reads the body as text in the charset from `content-type`, defaulting to `default_encoding`.
     #[cfg(feature = "charset")]
     pub async fn text_with_charset(self, default_encoding: &str) -> crate::core::Result<String> {
         let label = self.charset_label().map(str::to_owned);
@@ -25,11 +34,6 @@ impl Response {
         )
         .unwrap_or(encoding_rs::UTF_8);
         Ok(encoding.decode(&bytes).0.into_owned())
-    }
-
-    #[cfg(not(feature = "charset"))]
-    pub async fn text_with_charset(self, _default_encoding: &str) -> crate::core::Result<String> {
-        Ok(String::from_utf8_lossy(&self.bytes().await?).into_owned())
     }
 
     #[cfg(any(feature = "charset", feature = "html"))]
@@ -55,53 +59,60 @@ impl Response {
         })
     }
 
+    /// Reads the whole decoded body and fails when it exceeds the size limit.
     pub async fn bytes(self) -> crate::core::Result<Bytes> {
+        let encoding = self.content_coding();
         let stream = match self.body {
             ResponseBody::Buffered(b) => return Ok(Bytes::from(b)),
             ResponseBody::Taken => {
-                return Err(Error::new(Kind::Body).with_message(
-                    "response body stream was taken by `into_stream`; read the bytes from that stream",
+                return Err(Error::new(Cause::Body).with_message(
+                    "response body stream was taken by `bytes_stream`; read the bytes from that stream",
                 ));
             }
             ResponseBody::Streaming(s) => s,
         };
-        let buf = drain_stream_into_vec(stream, self.compression.max_body_size).await?;
-        let encoding = content_codings(self.headers.get_all(http::header::CONTENT_ENCODING));
-        let (buf, _) = decompress_body(buf, encoding.as_deref(), &self.compression)?;
+        let (buf, _) = buffer_decoded(stream, encoding.as_deref(), &self.compression).await?;
         Ok(Bytes::from(buf))
     }
 
+    /// Reads the body and deserializes it from JSON.
     pub async fn json<T: serde::de::DeserializeOwned>(self) -> crate::core::Result<T> {
         serde_json::from_slice(&self.bytes().await?).map_err(Error::from_json)
     }
 
-    pub fn into_stream(mut self) -> Result<BodyStream> {
+    fn take_stream(mut self) -> Result<BodyStream> {
         match std::mem::replace(&mut self.body, ResponseBody::Taken) {
             ResponseBody::Streaming(s) => Ok(s),
             ResponseBody::Buffered(b) => Ok(BodyStream::from_bytes(bytes::Bytes::from(b))),
-            ResponseBody::Taken => Err(Error::new(Kind::Body)
+            ResponseBody::Taken => Err(Error::new(Cause::Body)
                 .with_message("response body has already been taken as a stream")),
         }
     }
 
-    pub async fn copy_to<W>(self, writer: &mut W) -> Result<u64>
-    where
-        W: tokio::io::AsyncWrite + Unpin,
-    {
-        write_stream(self.into_stream()?, writer, Error::from).await
+    pub(super) fn content_coding(&self) -> Option<String> {
+        content_codings(self.headers.get_all(http::header::CONTENT_ENCODING))
     }
 
-    pub fn into_decoded_stream(self, limit: Option<u64>) -> Result<BodyStream> {
-        let encoding = content_codings(self.headers.get_all(http::header::CONTENT_ENCODING));
-        if encoding.is_none() {
-            self.refuse_declared_overflow(limit)?;
+    /// Returns the decoded body as a stream and fails when the declared length exceeds the size limit.
+    pub fn bytes_stream(
+        self,
+    ) -> Result<impl Stream<Item = Result<Bytes>> + Send + Unpin + 'static> {
+        Ok(self
+            .body_stream()?
+            .map(|chunk| chunk.map_err(body_read_error)))
+    }
+
+    pub(crate) fn body_stream(self) -> Result<BodyStream> {
+        let encoding = self.content_coding();
+        if encoding.is_none() || !self.compression.decode {
+            self.refuse_declared_overflow()?;
         }
-        let decoder = Decoder::capped(encoding.as_deref(), &self.compression, limit)?;
-        Ok(BodyStream::decoded(self.into_stream()?, decoder))
+        let decoder = Decoder::capped(encoding.as_deref(), &self.compression)?;
+        Ok(BodyStream::decoded(self.take_stream()?, decoder))
     }
 
-    fn refuse_declared_overflow(&self, limit: Option<u64>) -> Result<()> {
-        let cap = BodyLimit::session(self.compression.max_body_size).tighter(limit);
+    fn refuse_declared_overflow(&self) -> Result<()> {
+        let cap = BodyLimit::session(self.compression.max_body_size);
         match self.content_length() {
             Some(declared) if declared > u64::try_from(cap.bytes).unwrap_or(u64::MAX) => {
                 Err(cap.error())
@@ -110,11 +121,12 @@ impl Response {
         }
     }
 
-    pub async fn copy_decoded_to<W>(self, writer: &mut W, limit: Option<u64>) -> Result<u64>
+    /// Writes the decoded body to `writer` and returns the number of bytes written.
+    pub async fn write_to<W>(self, writer: &mut W) -> Result<u64>
     where
         W: AsyncWrite + Unpin,
     {
-        write_stream(self.into_decoded_stream(limit)?, writer, body_read_error).await
+        write_stream(self.body_stream()?, writer, body_read_error).await
     }
 
     pub(crate) async fn error_for_status_with_body(self, deadline: &Deadline) -> Result<Self> {
@@ -142,14 +154,8 @@ impl Response {
         })
     }
 
-    pub async fn read_until<F>(self, limit: usize, done: F) -> Result<Vec<u8>>
-    where
-        F: FnMut(&[u8], usize) -> bool,
-    {
-        Ok(self.read_prefix(limit, done).await?.bytes)
-    }
-
-    pub(crate) async fn read_prefix<F>(self, limit: usize, done: F) -> Result<PrefixRead>
+    /// Reads the body until `done` returns `true` or `limit` bytes arrive, and returns the bytes with `true` when `done` matched.
+    pub async fn read_until<F>(self, limit: usize, done: F) -> Result<(Vec<u8>, bool)>
     where
         F: FnMut(&[u8], usize) -> bool,
     {
@@ -157,7 +163,7 @@ impl Response {
         let stopped_by = self
             .read_prefix_into(limit, done, &mut bytes, &mut false)
             .await?;
-        Ok(PrefixRead { bytes, stopped_by })
+        Ok((bytes, stopped_by == StopReason::PredicateMatched))
     }
 
     async fn read_prefix_into<F>(
@@ -174,10 +180,10 @@ impl Response {
         if limit == 0 {
             return Ok(StopReason::LimitReached);
         }
-        let encoding = content_codings(self.headers.get_all(http::header::CONTENT_ENCODING));
+        let encoding = self.content_coding();
         let mut decoder = Decoder::truncated(encoding.as_deref(), &self.compression, limit)?;
         *decodes = decoder.is_some();
-        let mut stream = self.into_stream()?;
+        let mut stream = self.take_stream()?;
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(Error::from)?;
             let from = out.len();

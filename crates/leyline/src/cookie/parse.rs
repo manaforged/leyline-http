@@ -175,6 +175,7 @@ fn default_path(request_path: &str) -> String {
     }
 }
 
+/// Parses a cookie date and returns its time since the Unix epoch, or `None` when it is not a valid RFC 6265 date.
 pub fn parse_cookie_date(s: &str) -> Option<Duration> {
     let mut d = Date::default();
     for tok in s.trim().split([' ', '-', ',']) {
@@ -185,16 +186,6 @@ pub fn parse_cookie_date(s: &str) -> Option<Duration> {
         token(&mut d, tok);
     }
     stamp(&d)
-}
-
-fn days_since_epoch(year: u32, month: u32, day: u32) -> Option<i64> {
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
-        return None;
-    }
-    let y = if month <= 2 { year - 1 } else { year } as i64;
-    let m = if month <= 2 { month + 9 } else { month - 3 } as i64;
-    let d = day as i64;
-    Some(365 * y + y / 4 - y / 100 + y / 400 + (m * 306 + 5) / 10 + d - 719469)
 }
 
 #[cfg(test)]

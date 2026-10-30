@@ -4,8 +4,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 pub(super) fn branded(browser: Browser, brand: ChromiumBrand) -> Session {
     Session::builder()
-        .browser(browser)
-        .brand(brand)
+        .identity(crate::core::Identity::from(browser).with_brand(brand))
         .build()
         .unwrap()
 }
@@ -32,13 +31,13 @@ pub(super) async fn capture_navigate_headers(session: Session) -> String {
             .unwrap();
         String::from_utf8_lossy(&req).to_string()
     });
-    let _ = session.get(format!("http://{addr}/")).await.unwrap();
+    let _ = session.get(format!("http://{addr}/")).send().await.unwrap();
     server.await.unwrap()
 }
 
 #[tokio::test]
 async fn identity_keeps_ua_when_tls_rotates() {
-    let id = crate::Identity::locked(Browser::Chrome150, Platform::Windows)
+    let id = crate::core::Identity::new(Browser::Chrome150, Platform::Windows)
         .rotate_tls(Browser::Chrome146)
         .expect("same family");
     let mixed = Session::builder().identity(id).build().unwrap();
@@ -55,12 +54,11 @@ async fn identity_keeps_ua_when_tls_rotates() {
 
 #[tokio::test]
 async fn brand_overlay_follows_http_major_not_tls() {
-    let id = crate::Identity::locked(Browser::Chrome150, Platform::Windows)
+    let id = crate::core::Identity::new(Browser::Chrome150, Platform::Windows)
         .rotate_tls(Browser::Chrome145)
         .expect("same family");
     let session = Session::builder()
-        .identity(id)
-        .brand(ChromiumBrand::Edge)
+        .identity(id.with_brand(ChromiumBrand::Edge))
         .build()
         .unwrap();
     let headers = capture_navigate_headers(session).await;
@@ -95,8 +93,10 @@ async fn edge_brand_overlay_matches_capture() {
 #[tokio::test]
 async fn brave_first_class_profile_matches_capture() {
     let session = Session::builder()
-        .browser(Browser::Brave146)
-        .platform(Platform::MacOS)
+        .identity(crate::core::Identity::new(
+            Browser::Brave146,
+            Platform::MacOS,
+        ))
         .build()
         .unwrap();
     let req = capture_navigate_headers(session).await;
@@ -155,8 +155,7 @@ async fn opera_brand_overlay_matches_capture() {
 #[tokio::test]
 async fn opera_146_overlay_emits_130() {
     let session = Session::builder()
-        .browser(Browser::Chrome146)
-        .brand(ChromiumBrand::Opera)
+        .identity(crate::core::Identity::from(Browser::Chrome146).with_brand(ChromiumBrand::Opera))
         .build()
         .unwrap();
     let req = capture_navigate_headers(session).await;
@@ -174,8 +173,7 @@ async fn opera_146_overlay_emits_130() {
 #[tokio::test]
 async fn opera_148_overlay_emits_132() {
     let session = Session::builder()
-        .browser(Browser::Chrome148)
-        .brand(ChromiumBrand::Opera)
+        .identity(crate::core::Identity::from(Browser::Chrome148).with_brand(ChromiumBrand::Opera))
         .build()
         .unwrap();
     let req = capture_navigate_headers(session).await;
@@ -193,8 +191,7 @@ async fn opera_148_overlay_emits_132() {
 #[tokio::test]
 async fn opera_150_overlay_emits_134() {
     let session = Session::builder()
-        .browser(Browser::Chrome150)
-        .brand(ChromiumBrand::Opera)
+        .identity(crate::core::Identity::from(Browser::Chrome150).with_brand(ChromiumBrand::Opera))
         .build()
         .unwrap();
     let req = capture_navigate_headers(session).await;
@@ -212,8 +209,7 @@ async fn opera_150_overlay_emits_134() {
 #[tokio::test]
 async fn opera_145_overlay_still_supported() {
     let session = Session::builder()
-        .browser(Browser::Chrome145)
-        .brand(ChromiumBrand::Opera)
+        .identity(crate::core::Identity::from(Browser::Chrome145).with_brand(ChromiumBrand::Opera))
         .build()
         .unwrap();
     let req = capture_navigate_headers(session).await;
@@ -230,7 +226,7 @@ async fn opera_145_overlay_still_supported() {
 
 #[tokio::test]
 async fn chrome_default_has_no_brand_overlay() {
-    let session = Session::browser(Browser::default());
+    let session = Session::from(Browser::default());
     let req = capture_navigate_headers(session).await;
     assert!(!req.contains("Edg/"));
     assert!(!req.contains("OPR/"));

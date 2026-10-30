@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use leyline::h2::frame::{FRAME_HEADER_LEN, FrameHeader, FrameType};
-use leyline::{Session, TimeoutConfig, TlsTrustConfig};
+use leyline::{Session, Timeout, Tls};
 use leyline_bssl_tokio::SslStream;
 use support::{
     read_preface, write_data, write_raw_headers, write_server_settings, write_server_settings_with,
@@ -94,21 +94,16 @@ async fn leaves_a_stopped_peer(body_len: usize) {
     )
     .await;
     let session = Session::builder()
-        .tls_trust(
-            TlsTrustConfig::new()
-                .env_roots(false)
-                .system_roots(false)
-                .add_ca_der(der),
-        )
+        .tls(Tls::new().env_roots(false).system_roots(false).ca_der(der))
         .build()
         .unwrap();
     let url = format!("https://127.0.0.1:{port}/");
-    let retained = session.get(&url).stream().await.unwrap();
+    let retained = session.get(&url).stream().send().await.unwrap();
 
     let blocked = session
         .post(&url)
         .body(vec![0u8; body_len])
-        .timeout(TimeoutConfig::new().total(Duration::from_millis(500)))
+        .timeout(Timeout::new().total(Duration::from_millis(500)))
         .send()
         .await;
     assert!(blocked.is_err(), "{blocked:?}");
@@ -116,7 +111,7 @@ async fn leaves_a_stopped_peer(body_len: usize) {
 
     let next = session
         .get(&url)
-        .timeout(TimeoutConfig::new().total(Duration::from_secs(3)))
+        .timeout(Timeout::new().total(Duration::from_secs(3)))
         .send()
         .await
         .unwrap();

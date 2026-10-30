@@ -3,7 +3,7 @@ use std::fmt::Write as _;
 
 use serde::Deserialize;
 
-use crate::preset_kind::Preset;
+use crate::preset_kind::RequestKind;
 use crate::{BuildResult, is_ident};
 
 type Template = Vec<(String, String)>;
@@ -31,7 +31,7 @@ pub(crate) struct Shape {
     extends: Option<String>,
     fallback: Option<Template>,
     #[serde(default)]
-    presets: HashMap<Preset, Template>,
+    presets: HashMap<RequestKind, Template>,
     #[serde(default)]
     append: Template,
     order: Option<Vec<String>>,

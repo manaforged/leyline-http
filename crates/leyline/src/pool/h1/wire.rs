@@ -32,7 +32,6 @@ async fn send_h1_request(
     body: H1Body,
     target: H1Target,
 ) -> Result<(bool, Upload), H1PooledError> {
-    head::validate(method, &headers)?;
     let (request_target, authority) = head::target(url, target)?;
 
     if !contains_header(&headers, "host") {
@@ -246,6 +245,7 @@ pub(crate) async fn upgrade_on_stream(
     url: &url::Url,
     headers: Vec<(String, String)>,
 ) -> Result<(ParsedHead, Vec<u8>), H1PooledError> {
+    head::validate("GET", &headers)?;
     let (_, sent) = send_h1_request(
         stream,
         "GET",

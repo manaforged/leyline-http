@@ -7,6 +7,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 #[cfg(feature = "websocket")]
 use tokio::sync::mpsc;
 
+use crate::h2::client::RequestBody;
 use crate::h2::connection::PseudoHeaders;
 use crate::h2::error::{ErrorCode, H2Error};
 use crate::h2::stream_state::StreamEvent;
@@ -26,7 +27,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             DriverCommand::Ping { ack_tx } => {
                 self.ping_seq = self.ping_seq.wrapping_add(1);
                 let payload = self.ping_seq.to_be_bytes();
-                self.writer.write_ping(payload).await?;
+                self.writer
+                    .write_frame(&PingFrame {
+                        ack: false,
+                        payload,
+                    })
+                    .await?;
                 self.pings.push_back((payload, ack_tx));
                 Ok(())
             }
@@ -178,16 +184,16 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         &mut self,
         pseudo: &PseudoHeaders,
         headers: &[crate::h2::connection::HeaderPair],
-        body: DriverRequestBody,
+        body: RequestBody,
         sink: ResponseSink,
     ) -> Result<(), H2Error> {
         match body {
-            DriverRequestBody::None => self.start_request(pseudo, headers, None, sink).await,
-            DriverRequestBody::Buffered(b) => {
+            RequestBody::None => self.start_request(pseudo, headers, None, sink).await,
+            RequestBody::Buffered(b) => {
                 let body = if b.is_empty() { None } else { Some(b) };
                 self.start_request(pseudo, headers, body, sink).await
             }
-            DriverRequestBody::Streaming(body) => {
+            RequestBody::Streaming { stream: body, .. } => {
                 let stream_id = self.alloc_stream_id();
                 let is_head = pseudo.method.eq_ignore_ascii_case("HEAD");
 

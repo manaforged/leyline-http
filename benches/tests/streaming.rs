@@ -51,17 +51,18 @@ async fn receive(delay: Duration, abandon: bool) {
     let response = timeout(
         Duration::from_secs(3),
         Session::builder()
-            .protocol(leyline::ProtocolPolicy::Http2)
-            .tls_trust(
-                leyline::TlsTrustConfig::new()
+            .protocol(leyline::Protocol::Http2)
+            .tls(
+                leyline::Tls::new()
                     .system_roots(false)
                     .env_roots(false)
-                    .add_ca_der(certificate.to_vec()),
+                    .ca_der(certificate.to_vec()),
             )
             .build()
             .expect("session")
             .get(&url)
-            .stream(),
+            .stream()
+            .send(),
     )
     .await
     .expect("response deadline")

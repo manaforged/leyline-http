@@ -4,34 +4,39 @@
     feature = "compression-zstd",
     feature = "compression-deflate"
 )))]
-use crate::core::error::Kind;
+use crate::core::error::Cause;
 use crate::core::error::{Error, Result};
 
+/// A content encoding for compressing a request body.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum ContentEncoding {
+pub enum Encoding {
+    /// The gzip encoding.
     Gzip,
+    /// The Brotli encoding.
     Brotli,
+    /// The Zstandard encoding.
     Zstd,
+    /// The deflate encoding.
     Deflate,
 }
 
-impl ContentEncoding {
+impl Encoding {
     pub(crate) fn header_value(self) -> &'static str {
         match self {
-            ContentEncoding::Gzip => "gzip",
-            ContentEncoding::Brotli => "br",
-            ContentEncoding::Zstd => "zstd",
-            ContentEncoding::Deflate => "deflate",
+            Encoding::Gzip => "gzip",
+            Encoding::Brotli => "br",
+            Encoding::Zstd => "zstd",
+            Encoding::Deflate => "deflate",
         }
     }
 
     pub(crate) fn encode(self, data: &[u8]) -> Result<Vec<u8>> {
         match self {
-            ContentEncoding::Gzip => gzip(data),
-            ContentEncoding::Brotli => brotli(data),
-            ContentEncoding::Zstd => zstd(data),
-            ContentEncoding::Deflate => deflate(data),
+            Encoding::Gzip => gzip(data),
+            Encoding::Brotli => brotli(data),
+            Encoding::Zstd => zstd(data),
+            Encoding::Deflate => deflate(data),
         }
     }
 }
@@ -100,7 +105,7 @@ fn deflate(_data: &[u8]) -> Result<Vec<u8>> {
     feature = "compression-deflate"
 )))]
 fn feature_off(codec: &str, feature: &str) -> Error {
-    Error::new(Kind::Body).with_message(format!(
+    Error::new(Cause::Body).with_message(format!(
         "{codec} request compression requested but the `{feature}` feature is not compiled in"
     ))
 }

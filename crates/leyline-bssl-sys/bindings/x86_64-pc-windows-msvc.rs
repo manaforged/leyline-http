@@ -10219,28 +10219,18 @@ unsafe extern "C" {
         _Reserved: usize,
     ) -> !;
     pub fn _calloc_base(_Count: usize, _Size: usize) -> *mut ::std::os::raw::c_void;
-    pub fn calloc(
-        _Count: ::std::os::raw::c_ulonglong,
-        _Size: ::std::os::raw::c_ulonglong,
-    ) -> *mut ::std::os::raw::c_void;
     pub fn _callnewh(_Size: usize) -> ::std::os::raw::c_int;
     pub fn _expand(
         _Block: *mut ::std::os::raw::c_void,
         _Size: usize,
     ) -> *mut ::std::os::raw::c_void;
     pub fn _free_base(_Block: *mut ::std::os::raw::c_void);
-    pub fn free(_Block: *mut ::std::os::raw::c_void);
     pub fn _malloc_base(_Size: usize) -> *mut ::std::os::raw::c_void;
-    pub fn malloc(_Size: ::std::os::raw::c_ulonglong) -> *mut ::std::os::raw::c_void;
     pub fn _msize_base(_Block: *mut ::std::os::raw::c_void) -> usize;
     pub fn _msize(_Block: *mut ::std::os::raw::c_void) -> usize;
     pub fn _realloc_base(
         _Block: *mut ::std::os::raw::c_void,
         _Size: usize,
-    ) -> *mut ::std::os::raw::c_void;
-    pub fn realloc(
-        _Block: *mut ::std::os::raw::c_void,
-        _Size: ::std::os::raw::c_ulonglong,
     ) -> *mut ::std::os::raw::c_void;
     pub fn _recalloc_base(
         _Block: *mut ::std::os::raw::c_void,

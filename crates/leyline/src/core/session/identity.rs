@@ -1,35 +1,73 @@
-use crate::core::error::{Error, Kind, Result};
-use crate::profile::browser::digest;
-use crate::profile::{Browser, ChromiumBrand, Family, Platform};
+use std::sync::Arc;
 
-use super::builder::derive::{DerivedIdentity, IdentityInputs, IdentitySource, derive_identity};
+use crate::core::error::{Cause, Error, Result};
+use crate::profile::browser::digest;
+use crate::profile::{Browser, BrowserProfile, ChromiumBrand, Family, Platform};
+
 use super::{Session, SessionInner};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(try_from = "SavedIdentity", into = "SavedIdentity")]
-pub struct Identity {
-    http: Browser,
-    tls: Browser,
+pub(crate) struct Identity {
+    source: Source,
     platform: Platform,
     brand: Option<ChromiumBrand>,
+    languages: Option<Vec<String>>,
 }
+
+#[derive(Debug, Clone)]
+pub(super) enum Source {
+    Plain,
+    Browser { http: Browser, tls: Browser },
+    Profile(Arc<BrowserProfile>),
+}
+
+impl PartialEq for Source {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Plain, Self::Plain) => true,
+            (Self::Browser { http, tls }, Self::Browser { http: h, tls: t }) => {
+                http == h && tls == t
+            }
+            (Self::Profile(a), Self::Profile(b)) => {
+                Arc::ptr_eq(a, b) || a.source().is_some() && a.source() == b.source()
+            }
+            _ => false,
+        }
+    }
+}
+
+impl Eq for Source {}
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct SavedIdentity {
-    http: Browser,
-    tls: Browser,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    http: Option<Browser>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tls: Option<Browser>,
     platform: Platform,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     brand: Option<ChromiumBrand>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    profile: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    languages: Option<Vec<String>>,
 }
 
 impl From<Identity> for SavedIdentity {
     fn from(id: Identity) -> Self {
+        let (http, tls, profile) = match id.source {
+            Source::Plain => (None, None, None),
+            Source::Browser { http, tls } => (Some(http), Some(tls), None),
+            Source::Profile(profile) => (None, None, profile.source().map(str::to_owned)),
+        };
         Self {
-            http: id.http,
-            tls: id.tls,
+            http,
+            tls,
             platform: id.platform,
             brand: id.brand,
+            profile,
+            languages: id.languages,
         }
     }
 }
@@ -38,34 +76,86 @@ impl TryFrom<SavedIdentity> for Identity {
     type Error = Error;
 
     fn try_from(saved: SavedIdentity) -> Result<Self> {
-        if saved.http.family() != saved.tls.family() {
-            return Err(Error::new(Kind::Config).with_message(format!(
-                "saved identity tls {} is not the same family as {}",
-                saved.tls, saved.http
-            )));
-        }
+        let source = match (saved.http, saved.tls, saved.profile) {
+            (Some(http), Some(tls), None) => {
+                if http.family() != tls.family() {
+                    return Err(Error::new(Cause::Config).with_message(format!(
+                        "saved identity tls {tls} is not the same family as {http}"
+                    )));
+                }
+                Source::Browser { http, tls }
+            }
+            (None, None, Some(toml)) => {
+                Source::Profile(Arc::new(BrowserProfile::from_toml(&toml)?))
+            }
+            (None, None, None) => Source::Plain,
+            _ => {
+                return Err(Error::new(Cause::Config).with_message(
+                    "saved identity needs both http and tls, or a profile, or neither",
+                ));
+            }
+        };
         Ok(Self {
-            http: saved.http,
-            tls: saved.tls,
+            source,
             platform: saved.platform,
             brand: saved.brand,
+            languages: saved.languages,
         })
+    }
+}
+
+impl From<Browser> for Identity {
+    fn from(browser: Browser) -> Self {
+        let platform = Platform::all()
+            .iter()
+            .copied()
+            .find(|&platform| {
+                platform != Platform::Host
+                    && browser.for_platform(platform) == browser
+                    && browser.headers(platform).is_some()
+            })
+            .unwrap_or(Platform::Windows);
+        Self::new(browser, platform)
     }
 }
 
 impl Identity {
     #[must_use]
-    pub fn locked(browser: Browser, platform: Platform) -> Self {
+    pub(crate) fn new(browser: Browser, platform: Platform) -> Self {
+        let base = browser.base();
         Self {
-            http: browser,
-            tls: browser.hello_rep(),
-            platform,
-            brand: None,
+            brand: browser.brand(),
+            ..Self::with_source(
+                Source::Browser {
+                    http: base,
+                    tls: base,
+                },
+                platform,
+            )
         }
     }
 
     #[must_use]
-    pub fn with_brand(self, brand: ChromiumBrand) -> Self {
+    pub(crate) fn from_profile(profile: BrowserProfile, platform: Platform) -> Self {
+        Self::with_source(Source::Profile(Arc::new(profile)), platform)
+    }
+
+    #[must_use]
+    pub(crate) fn plain(platform: Platform) -> Self {
+        Self::with_source(Source::Plain, platform)
+    }
+
+    fn with_source(source: Source, platform: Platform) -> Self {
+        Self {
+            source,
+            platform,
+            brand: None,
+            languages: None,
+        }
+    }
+
+    #[must_use]
+    pub(crate) fn with_brand(self, brand: ChromiumBrand) -> Self {
         Self {
             brand: Some(brand),
             ..self
@@ -73,289 +163,193 @@ impl Identity {
     }
 
     #[must_use]
-    pub fn brand(self) -> Option<ChromiumBrand> {
-        self.brand
+    pub(crate) fn with_languages<I, S>(self, languages: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let languages = languages
+            .into_iter()
+            .map(|tag| tag.as_ref().to_owned())
+            .collect();
+        Self {
+            languages: Some(languages),
+            ..self
+        }
     }
 
-    pub fn rotate_tls(self, tls: Browser) -> Result<Self> {
-        if self.http.family() != tls.family() {
-            return Err(Error::new(Kind::Config).with_message(format!(
-                "tls rotate {tls} is not the same family as {}",
-                self.http
-            )));
+    pub(crate) fn rotate_tls(self, tls: Browser) -> Result<Self> {
+        let tls = tls.base();
+        let Source::Browser { http, .. } = self.source else {
+            return Err(Error::new(Cause::Config)
+                .with_message("tls rotate needs a browser identity, not a profile or plain one"));
+        };
+        if http.family() != tls.family() {
+            return Err(Error::new(Cause::Config)
+                .with_message(format!("tls rotate {tls} is not the same family as {http}")));
         }
         Ok(Self {
-            tls: tls.hello_rep(),
+            source: Source::Browser {
+                http,
+                tls: tls.hello_rep(),
+            },
             ..self
         })
     }
 
-    pub fn rotate_hello(self) -> Result<Self> {
-        let mut hellos: Vec<Browser> = Vec::new();
-        for candidate in Browser::all() {
-            if candidate.family() != self.http.family() {
-                continue;
+    #[must_use]
+    pub(crate) fn http(&self) -> Option<Browser> {
+        match self.source {
+            Source::Browser { http, .. } => {
+                Some(self.brand.map_or(http, |brand| http.branded(brand)))
             }
-            let rep = candidate.hello_rep();
-            if !hellos.contains(&rep) {
-                hellos.push(rep);
-            }
+            _ => None,
         }
-        if hellos.len() < 2 {
-            return Err(Error::new(Kind::Config)
-                .with_message(format!("no other hello in family {}", self.http.family())));
-        }
-        let current = self.tls.hello_rep();
-        let index = hellos.iter().position(|&h| h == current).unwrap_or(0);
-        self.rotate_tls(hellos[(index + 1) % hellos.len()])
-    }
-
-    pub fn switch_family(self, dest: Browser) -> Result<Self> {
-        if dest.family() == self.http.family() {
-            return Err(Error::new(Kind::Config).with_message(format!(
-                "switch_family {dest} is the same family as {} — rotate_tls instead",
-                self.http
-            )));
-        }
-        let id = Self::locked(dest, self.platform);
-        drop(id.user_agent()?);
-        Ok(id)
     }
 
     #[must_use]
-    pub fn http(self) -> Browser {
-        self.http
+    pub(crate) fn tls(&self) -> Option<Browser> {
+        match self.source {
+            Source::Browser { tls, .. } => Some(tls),
+            _ => None,
+        }
     }
 
     #[must_use]
-    pub fn tls(self) -> Browser {
-        self.tls
-    }
-
-    #[must_use]
-    pub fn platform(self) -> Platform {
+    pub(crate) fn platform(&self) -> Platform {
         self.platform
     }
 
-    pub(crate) fn user_agent(self) -> Result<String> {
-        self.http
-            .platform_profile(self.platform)
-            .resolve_presented(self.platform, ChromiumBrand::Chrome)
-            .map(|identity| identity.user_agent)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct SessionIdentity {
-    identity: Option<Identity>,
-    platform: Platform,
-    brand: Option<ChromiumBrand>,
-    user_agent: String,
-    saved: Option<Identity>,
-    profile_id: Option<String>,
-    profile_toml: Option<std::sync::Arc<str>>,
-    languages: Option<Vec<String>>,
-}
-
-impl SessionIdentity {
-    #[must_use]
-    pub fn to_identity(&self) -> Option<Identity> {
-        self.saved
-    }
-
-    #[must_use]
-    pub fn profile_id(&self) -> Option<&str> {
-        self.profile_id.as_deref()
-    }
-
-    #[must_use]
-    pub fn identity(&self) -> Option<Identity> {
-        self.identity
-    }
-
-    #[must_use]
-    pub fn export_profile(&self) -> Option<String> {
-        self.profile_toml.as_deref().map(str::to_owned)
-    }
-
-    #[must_use]
-    pub fn languages(&self) -> Option<&[String]> {
-        self.languages.as_deref()
-    }
-
-    #[must_use]
-    pub fn browser(&self) -> Option<Browser> {
-        self.identity.map(Identity::http)
-    }
-
-    #[must_use]
-    pub fn platform(&self) -> Platform {
-        self.platform
-    }
-
-    #[must_use]
-    pub fn brand(&self) -> Option<ChromiumBrand> {
+    #[cfg(test)]
+    pub(crate) fn brand(&self) -> Option<ChromiumBrand> {
         self.brand
     }
 
-    #[must_use]
-    pub fn user_agent(&self) -> &str {
-        &self.user_agent
+    pub(super) fn into_parts(
+        self,
+    ) -> (Source, Platform, Option<ChromiumBrand>, Option<Vec<String>>) {
+        (self.source, self.platform, self.brand, self.languages)
     }
 }
 
 impl Session {
+    /// Returns the browser the session sends HTTP headers as.
     #[must_use]
-    pub fn identity(&self) -> SessionIdentity {
-        let brand = match self.inner.brand {
-            ChromiumBrand::Chrome => self
-                .inner
-                .browser
-                .filter(|browser| browser.family() == Family::Chrome)
-                .map(|_| ChromiumBrand::Chrome),
-            other => Some(other),
+    pub fn browser(&self) -> Option<Browser> {
+        self.identity().http()
+    }
+
+    /// Returns the browser whose TLS ClientHello the session sends.
+    #[must_use]
+    pub fn hello(&self) -> Option<Browser> {
+        self.identity().tls()
+    }
+
+    /// Returns the operating system the session reports.
+    #[must_use]
+    pub fn platform(&self) -> Platform {
+        self.inner.platform
+    }
+
+    /// Returns the language tags set on the session, if any.
+    #[must_use]
+    pub fn languages(&self) -> Option<&[String]> {
+        self.inner.languages.as_deref()
+    }
+
+    #[must_use]
+    pub(crate) fn identity(&self) -> Identity {
+        let inner = &self.inner;
+        let mut identity = match (inner.saved_identity(), inner.inputs.loaded_profile()) {
+            (Some(saved), _) => saved,
+            (None, Some(profile)) => {
+                Identity::with_source(Source::Profile(Arc::clone(profile)), inner.platform)
+            }
+            (None, None) => Identity::plain(inner.platform),
         };
-        let saved = self.saved_identity(brand);
-        let profile_toml = self
-            .inner
-            .impersonates
-            .then(|| self.inner.profile.source())
-            .flatten()
-            .map(std::sync::Arc::from);
-        let profile_id = match (saved, profile_toml.as_deref()) {
-            (Some(id), _) => Some(profile_id(id, self.inner.brand)),
-            (None, Some(source)) => Some(source_profile_id(
-                source,
-                self.inner.platform,
-                self.inner.brand,
-            )),
-            (None, None) => None,
-        };
-        SessionIdentity {
-            identity: self.inner.identity,
-            platform: self.inner.platform,
-            brand,
-            user_agent: self.inner.user_agent.clone(),
-            saved,
-            profile_id,
-            profile_toml,
-            languages: self.inner.languages.clone(),
-        }
+        identity.brand = inner.shown_brand();
+        identity.languages = inner.languages.clone();
+        identity
     }
 
-    fn saved_identity(&self, brand: Option<ChromiumBrand>) -> Option<Identity> {
-        let identity = self.inner.identity?;
-        Some(Identity {
-            tls: self.inner.browser?,
-            brand,
-            ..identity
-        })
+    /// Returns the `User-Agent` header value the session sends.
+    #[must_use]
+    pub fn user_agent(&self) -> &str {
+        &self.inner.user_agent
     }
 
-    pub fn with_identity(&self, identity: Identity) -> Result<Self> {
-        if self.inner.browser.is_none() {
-            return Err(Error::new(Kind::Config)
-                .with_message("with_identity requires an impersonating session"));
-        }
-        let mut session = self.clone();
-        let inner = std::sync::Arc::make_mut(&mut session.inner);
-        let brand = identity.brand().unwrap_or(inner.brand);
-        let derived = derive_identity(IdentityInputs {
-            source: IdentitySource::Browser {
-                tls: identity.tls(),
-                http: identity.http(),
-            },
-            platform: identity.platform(),
-            brand,
-            compression: inner.compression,
-            #[cfg(feature = "http3")]
-            h3_required: inner.protocol_policy.requires_h3(),
-            tcp: inner.connector.tcp_profile(),
-            audit: inner.audit_tls.is_some(),
-            default_headers: &inner.default_headers,
-            languages: inner.languages.as_deref(),
-        })?;
-        inner.connector = inner
-            .connector
-            .with_profile(&derived.profile)
-            .map_err(Error::from)?;
-        inner.pool = std::sync::Arc::new(inner.pool.shared_view(profile_hash(identity, brand)));
-        inner.adopt(derived);
-        inner.brand = brand;
-        Ok(session)
+    /// Returns the profile hash as 16 hex digits when the session has a profile.
+    #[must_use]
+    pub fn profile_id(&self) -> Option<String> {
+        self.inner.profile_hash().map(|hash| format!("{hash:016x}"))
     }
-}
 
-fn profile_id(identity: Identity, brand: ChromiumBrand) -> String {
-    let hash = profile_hash(identity, brand);
-    format!("{hash:016x}")
-}
+    /// Returns the TOML source of the session's base profile, before any brand overlay, when it has one.
+    #[must_use]
+    pub fn profile(&self) -> Option<&str> {
+        self.inner.profile_source()
+    }
 
-fn profile_hash(identity: Identity, brand: ChromiumBrand) -> u64 {
-    let http = identity.http.profile_digest().to_le_bytes();
-    let tls = identity.tls.profile_digest().to_le_bytes();
-    digest(&[
-        &http,
-        &tls,
-        identity.platform.id().as_bytes(),
-        brand.id().as_bytes(),
-    ])
-}
-
-fn source_profile_id(source: &str, platform: Platform, brand: ChromiumBrand) -> String {
-    match Browser::matching_source(source) {
-        Some(browser) => profile_id(
-            Identity {
-                http: browser,
-                tls: browser,
-                platform,
-                brand: None,
-            },
-            brand,
-        ),
-        None => format!(
-            "{:016x}",
-            digest(&[
-                source.as_bytes(),
-                platform.id().as_bytes(),
-                brand.id().as_bytes()
-            ])
-        ),
+    pub(crate) fn http_browser(&self) -> Option<Browser> {
+        self.inner.identity.as_ref().and_then(Identity::http)
     }
 }
 
 impl SessionInner {
-    fn adopt(&mut self, derived: DerivedIdentity) {
-        let DerivedIdentity {
-            browser,
-            identity,
-            platform,
-            profile,
-            header_style,
-            header_order,
-            user_agent,
-            sec_ch_ua,
-            accept_language,
-            h2_config,
-            #[cfg(feature = "http3")]
-            h3_config,
-            audit_tls,
-        } = derived;
-        self.browser = browser;
-        self.identity = identity;
-        self.platform = platform;
-        self.profile = profile;
-        self.header_style = header_style;
-        self.header_order = header_order;
-        self.user_agent = user_agent;
-        self.sec_ch_ua = sec_ch_ua;
-        self.accept_language = accept_language;
-        self.h2_config = h2_config;
-        #[cfg(feature = "http3")]
-        {
-            self.h3_config = h3_config;
+    fn shown_brand(&self) -> Option<ChromiumBrand> {
+        match self.brand {
+            ChromiumBrand::Chrome => self
+                .browser
+                .filter(|browser| browser.family() == Family::Chrome)
+                .map(|_| ChromiumBrand::Chrome),
+            other => Some(other),
         }
-        self.audit_tls = audit_tls;
+    }
+
+    fn saved_identity(&self) -> Option<Identity> {
+        let http = self.identity.as_ref()?.http()?.base();
+        Some(Identity {
+            source: Source::Browser {
+                http,
+                tls: self.browser?,
+            },
+            platform: self.identity.as_ref()?.platform(),
+            brand: self.shown_brand(),
+            languages: None,
+        })
+    }
+
+    fn profile_source(&self) -> Option<&str> {
+        self.impersonates.then(|| self.profile.source()).flatten()
+    }
+
+    pub(super) fn profile_hash(&self) -> Option<u64> {
+        match (self.saved_identity(), self.profile_source()) {
+            (Some(id), _) => Some(profile_hash(
+                id.http()?.base(),
+                id.tls()?,
+                id.platform,
+                self.brand,
+            )),
+            (None, Some(source)) => Some(source_profile_hash(source, self.platform, self.brand)),
+            (None, None) => None,
+        }
+    }
+}
+
+fn profile_hash(http: Browser, tls: Browser, platform: Platform, brand: ChromiumBrand) -> u64 {
+    let http = http.profile_digest().to_le_bytes();
+    let tls = tls.profile_digest().to_le_bytes();
+    digest(&[&http, &tls, platform.id().as_bytes(), brand.id().as_bytes()])
+}
+
+fn source_profile_hash(source: &str, platform: Platform, brand: ChromiumBrand) -> u64 {
+    match Browser::matching_source(source) {
+        Some(browser) => profile_hash(browser, browser, platform, brand),
+        None => digest(&[
+            source.as_bytes(),
+            platform.id().as_bytes(),
+            brand.id().as_bytes(),
+        ]),
     }
 }

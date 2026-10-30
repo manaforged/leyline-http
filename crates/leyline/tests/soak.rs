@@ -6,21 +6,23 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use futures_util::StreamExt;
-use leyline::testing::{RecordedRequest, TestResponse, TestServer};
-use leyline::{Body, HostLimits, Session, TimeoutConfig};
+use leyline::testing;
+use leyline::{Body, HostLimits, Session, Timeout};
 
 const CYCLES: usize = 12;
 const REQUESTS: usize = 60;
 const SLACK_TASKS: usize = 4;
 const SLACK_FDS: usize = 8;
 
-fn reply(request: &RecordedRequest) -> TestResponse {
+fn reply(request: &testing::Request) -> testing::Response {
     match request.target.as_str() {
-        "/ok" => TestResponse::new(200).body(vec![b'o'; 2048]),
-        "/slow" => TestResponse::new(200).chunks(["a", "b", "c", "d"], Duration::from_millis(150)),
-        "/error" => TestResponse::new(503).body(vec![b'e'; 512]),
-        "/stall" => TestResponse::new(200).delay(Duration::from_millis(300)),
-        _ => TestResponse::new(200),
+        "/ok" => testing::Response::new(200).body(vec![b'o'; 2048]),
+        "/slow" => {
+            testing::Response::new(200).chunks(["a", "b", "c", "d"], Duration::from_millis(150))
+        }
+        "/error" => testing::Response::new(503).body(vec![b'e'; 512]),
+        "/stall" => testing::Response::new(200).delay(Duration::from_millis(300)),
+        _ => testing::Response::new(200),
     }
 }
 
@@ -41,7 +43,7 @@ async fn settle() -> (usize, usize) {
     (tasks, open_fds())
 }
 
-async fn cycle(session: &Session, server: &TestServer) {
+async fn cycle(session: &Session, server: &testing::Server) {
     let mut work = Vec::new();
     for index in 0..REQUESTS {
         let session = session.clone();
@@ -54,17 +56,19 @@ async fn cycle(session: &Session, server: &TestServer) {
                     let mut body = session
                         .get(url("/slow"))
                         .stream()
+                        .send()
                         .await
                         .unwrap()
-                        .into_stream()
+                        .bytes_stream()
                         .unwrap();
                     drop(body.next().await);
                 }
                 2 => drop(
                     session
                         .get(url("/slow"))
-                        .timeout(TimeoutConfig::new().body(Duration::from_millis(100)))
+                        .timeout(Timeout::new().body(Duration::from_millis(100)))
                         .stream()
+                        .send()
                         .await
                         .unwrap()
                         .bytes()
@@ -101,9 +105,9 @@ async fn cycle(session: &Session, server: &TestServer) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "soak qualification: run with --ignored"]
 async fn mixed_failures_return_tasks_and_sockets_to_their_baseline() {
-    let server = TestServer::https(reply).await.unwrap();
+    let server = testing::Server::https(reply).await.unwrap();
     let session = Session::builder()
-        .tls_trust(server.trust())
+        .tls(server.tls())
         .host_limits(HostLimits::new().max_in_flight(16))
         .build()
         .unwrap();
@@ -129,5 +133,8 @@ async fn mixed_failures_return_tasks_and_sockets_to_their_baseline() {
         fds <= base_fds + SLACK_FDS,
         "open sockets grew from {base_fds} to {fds}"
     );
-    assert!(session.host_stats().iter().all(|s| s.in_flight() == 0));
+    assert!({
+        let stats = session.stats();
+        stats.hosts().all(|h| stats.in_flight(h) == 0)
+    });
 }

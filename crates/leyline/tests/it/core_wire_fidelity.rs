@@ -1,13 +1,13 @@
-use leyline::testing::{TestResponse, TestServer, queue};
-use leyline::{Browser, ChromiumBrand, HeaderAnchor, Platform, Preset, ProtocolPolicy, Session};
+use leyline::testing::{self, queue};
+use leyline::{Browser, HeaderPosition, Platform, Protocol, RequestKind, Session};
 
 #[tokio::test]
 async fn caller_user_agent_replaces_no_preset_default() {
-    let server = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+    let server = testing::Server::http(queue(vec![testing::Response::new(200).body("ok").close()]))
         .await
         .unwrap();
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .build()
         .unwrap();
 
@@ -22,17 +22,22 @@ async fn caller_user_agent_replaces_no_preset_default() {
     let req = server.next_request().await.unwrap();
     assert!(req.request_line.starts_with("GET /ua HTTP/1.1"));
     assert_eq!(req.header_values("user-agent"), vec!["X"]);
-    assert_eq!(req.header_count("user-agent"), 1, "{}", req.text());
+    assert_eq!(
+        req.header_values("user-agent").len(),
+        1,
+        "{}",
+        String::from_utf8_lossy(&req.raw)
+    );
     server.shutdown().await;
 }
 
 #[tokio::test]
 async fn bulk_headers_replace_all_no_preset_defaults() {
-    let server = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+    let server = testing::Server::http(queue(vec![testing::Response::new(200).body("ok").close()]))
         .await
         .unwrap();
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .build()
         .unwrap();
 
@@ -54,24 +59,44 @@ async fn bulk_headers_replace_all_no_preset_defaults() {
     assert_eq!(req.header_values("accept"), vec!["accept-y"]);
     assert_eq!(req.header_values("accept-encoding"), vec!["encoding-z"]);
     assert_eq!(req.header_values("accept-language"), vec!["language-w"]);
-    assert_eq!(req.header_count("user-agent"), 1, "{}", req.text());
-    assert_eq!(req.header_count("accept"), 1, "{}", req.text());
-    assert_eq!(req.header_count("accept-encoding"), 1, "{}", req.text());
-    assert_eq!(req.header_count("accept-language"), 1, "{}", req.text());
+    assert_eq!(
+        req.header_values("user-agent").len(),
+        1,
+        "{}",
+        String::from_utf8_lossy(&req.raw)
+    );
+    assert_eq!(
+        req.header_values("accept").len(),
+        1,
+        "{}",
+        String::from_utf8_lossy(&req.raw)
+    );
+    assert_eq!(
+        req.header_values("accept-encoding").len(),
+        1,
+        "{}",
+        String::from_utf8_lossy(&req.raw)
+    );
+    assert_eq!(
+        req.header_values("accept-language").len(),
+        1,
+        "{}",
+        String::from_utf8_lossy(&req.raw)
+    );
     server.shutdown().await;
 }
 
 #[tokio::test]
 async fn dx_helpers_accept_common_pair_shapes_and_header_shortcuts() {
-    let server = TestServer::http(queue(vec![
-        TestResponse::new(200).body("ok").close(),
-        TestResponse::new(200).body("ok").close(),
+    let server = testing::Server::http(queue(vec![
+        testing::Response::new(200).body("ok").close(),
+        testing::Response::new(200).body("ok").close(),
     ]))
     .await
     .unwrap();
 
     let client = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .build()
         .unwrap();
     let _explicit = Session::builder()
@@ -80,10 +105,10 @@ async fn dx_helpers_accept_common_pair_shapes_and_header_shortcuts() {
         .build()
         .unwrap();
     let _bare = Session::builder().build().unwrap();
-    let _chrome = Session::browser(Browser::default());
+    let _chrome = Session::from(Browser::default());
     let _firefox = Session::builder()
-        .browser(Browser::latest(leyline::Family::Firefox))
-        .protocol(ProtocolPolicy::Http1)
+        .browser(Browser::firefox())
+        .protocol(Protocol::Http1)
         .build()
         .unwrap();
 
@@ -95,7 +120,7 @@ async fn dx_helpers_accept_common_pair_shapes_and_header_shortcuts() {
     let resp = client
         .request(http::Method::GET, server.url("/dx"))
         .query([("a", "1"), ("space", "hello world")])
-        .headers(&owned_headers)
+        .headers(owned_headers)
         .header("accept", "application/json")
         .header("accept-language", "en-US,en;q=0.9")
         .header("referer", "https://example.test/from")
@@ -146,11 +171,11 @@ async fn dx_helpers_accept_common_pair_shapes_and_header_shortcuts() {
 
 #[tokio::test]
 async fn append_header_preserves_duplicate_order() {
-    let server = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+    let server = testing::Server::http(queue(vec![testing::Response::new(200).body("ok").close()]))
         .await
         .unwrap();
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .build()
         .unwrap();
 
@@ -170,11 +195,11 @@ async fn append_header_preserves_duplicate_order() {
 
 #[tokio::test]
 async fn set_then_append_user_agent_preserves_caller_order() {
-    let server = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+    let server = testing::Server::http(queue(vec![testing::Response::new(200).body("ok").close()]))
         .await
         .unwrap();
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .build()
         .unwrap();
 
@@ -194,17 +219,17 @@ async fn set_then_append_user_agent_preserves_caller_order() {
 
 #[tokio::test]
 async fn caller_referer_wins_over_navigate_preset_referer() {
-    let server = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+    let server = testing::Server::http(queue(vec![testing::Response::new(200).body("ok").close()]))
         .await
         .unwrap();
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .build()
         .unwrap();
 
     let resp = session
         .request(http::Method::GET, server.url("/nav"))
-        .preset(Preset::Navigate)
+        .kind(RequestKind::Navigate)
         .header("referer", "https://caller.example/from")
         .send()
         .await
@@ -216,25 +241,30 @@ async fn caller_referer_wins_over_navigate_preset_referer() {
         req.header_values("referer"),
         vec!["https://caller.example/from"]
     );
-    assert_eq!(req.header_count("referer"), 1, "{}", req.text());
+    assert_eq!(
+        req.header_values("referer").len(),
+        1,
+        "{}",
+        String::from_utf8_lossy(&req.raw)
+    );
     server.shutdown().await;
 }
 
 #[tokio::test]
 async fn redirect_cross_origin_strips_authorization_after_first_step() {
-    let target = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+    let target = testing::Server::http(queue(vec![testing::Response::new(200).body("ok").close()]))
         .await
         .unwrap();
     let target_url = target.url("/landing");
-    let redirector = TestServer::http(queue(vec![
-        TestResponse::new(302)
+    let redirector = testing::Server::http(queue(vec![
+        testing::Response::new(302)
             .close()
             .header("location", target_url),
     ]))
     .await
     .unwrap();
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .build()
         .unwrap();
 
@@ -260,16 +290,16 @@ async fn redirect_cross_origin_strips_authorization_after_first_step() {
 
 #[tokio::test]
 async fn redirect_same_origin_preserves_authorization() {
-    let server = TestServer::http(queue(vec![
-        TestResponse::new(302)
+    let server = testing::Server::http(queue(vec![
+        testing::Response::new(302)
             .close()
             .header("location", "/landing"),
-        TestResponse::new(200).body("ok").close(),
+        testing::Response::new(200).body("ok").close(),
     ]))
     .await
     .unwrap();
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .build()
         .unwrap();
 
@@ -290,13 +320,12 @@ async fn redirect_same_origin_preserves_authorization() {
 
 #[tokio::test]
 async fn caller_dnt_wins_over_edge_brand_overlay() {
-    let server = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+    let server = testing::Server::http(queue(vec![testing::Response::new(200).body("ok").close()]))
         .await
         .unwrap();
     let session = Session::builder()
-        .browser(Browser::default())
-        .brand(ChromiumBrand::Edge)
-        .protocol(ProtocolPolicy::Http1)
+        .browser(Browser::edge())
+        .protocol(Protocol::Http1)
         .build()
         .unwrap();
 
@@ -310,31 +339,36 @@ async fn caller_dnt_wins_over_edge_brand_overlay() {
     assert_eq!(resp.status(), 200);
     let req = server.next_request().await.unwrap();
     assert_eq!(req.header_values("dnt"), vec!["0"]);
-    assert_eq!(req.header_count("dnt"), 1, "{}", req.text());
+    assert_eq!(
+        req.header_values("dnt").len(),
+        1,
+        "{}",
+        String::from_utf8_lossy(&req.raw)
+    );
     server.shutdown().await;
 }
 
 #[tokio::test]
 async fn anchored_headers_interleave_at_preset_slots() {
-    let server = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+    let server = testing::Server::http(queue(vec![testing::Response::new(200).body("ok").close()]))
         .await
         .unwrap();
     let session = Session::builder()
         .browser(leyline::Browser::default())
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .build()
         .unwrap();
 
     let resp = session
         .post(server.url("/submit"))
-        .preset(Preset::Form)
-        .anchored(HeaderAnchor::AfterCchUa, "x-extra-1", "1")
-        .anchored(HeaderAnchor::AfterCchUaMobile, "x-extra-2", "2")
-        .anchored(HeaderAnchor::AfterCchUaMobile, "x-extra-3", "3")
-        .anchored(HeaderAnchor::AfterCchUaMobile, "x-extra-4", "4")
-        .anchored(HeaderAnchor::AfterCchUaPlatform, "x-extra-5", "5")
-        .anchored(HeaderAnchor::AfterUserAgent, "x-extra-6", "6")
-        .anchored(HeaderAnchor::AfterContentType, "x-extra-7", "7")
+        .kind(RequestKind::Form)
+        .header_at(HeaderPosition::AfterCchUa, "x-extra-1", "1")
+        .header_at(HeaderPosition::AfterCchUaMobile, "x-extra-2", "2")
+        .header_at(HeaderPosition::AfterCchUaMobile, "x-extra-3", "3")
+        .header_at(HeaderPosition::AfterCchUaMobile, "x-extra-4", "4")
+        .header_at(HeaderPosition::AfterCchUaPlatform, "x-extra-5", "5")
+        .header_at(HeaderPosition::AfterUserAgent, "x-extra-6", "6")
+        .header_at(HeaderPosition::AfterContentType, "x-extra-7", "7")
         .body("field=payload")
         .send()
         .await
@@ -360,7 +394,7 @@ async fn anchored_headers_interleave_at_preset_slots() {
     assert_eq!(pos("x-extra-6"), pos("user-agent") + 1);
     assert_eq!(pos("x-extra-7"), pos("content-type") + 1);
     assert!(
-        req.header_count("cookie") == 0 || pos("cookie") > pos("x-extra-7"),
+        req.header_values("cookie").is_empty() || pos("cookie") > pos("x-extra-7"),
         "cookie must ride at the tail if present: {wire}"
     );
     server.shutdown().await;
@@ -368,17 +402,17 @@ async fn anchored_headers_interleave_at_preset_slots() {
 
 #[tokio::test]
 async fn plain_authorization_rides_after_user_agent() {
-    let server = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+    let server = testing::Server::http(queue(vec![testing::Response::new(200).body("ok").close()]))
         .await
         .unwrap();
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .build()
         .unwrap();
 
     let resp = session
         .request(http::Method::GET, server.url("/auth"))
-        .preset(Preset::Xhr)
+        .kind(RequestKind::Xhr)
         .header("authorization", "Bearer tok")
         .send()
         .await
@@ -395,6 +429,6 @@ async fn plain_authorization_rides_after_user_agent() {
         .iter()
         .position(|h| h.eq_ignore_ascii_case("authorization"))
         .expect("caller-set authorization on wire");
-    assert_eq!(auth, ua + 1, "{}", req.text());
+    assert_eq!(auth, ua + 1, "{}", String::from_utf8_lossy(&req.raw));
     server.shutdown().await;
 }

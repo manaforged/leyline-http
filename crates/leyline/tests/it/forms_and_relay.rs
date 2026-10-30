@@ -1,28 +1,30 @@
 #![cfg(feature = "html")]
+use futures_util::StreamExt;
 
+use futures_util::TryFutureExt;
 use std::time::Duration;
 
-use leyline::testing::{RecordedRequest, TestResponse, TestServer, queue};
-use leyline::{Browser, CompressionConfig, RelayBody, Session, html};
+use leyline::testing::{self, queue};
+use leyline::{Browser, Session, html};
 
 const UPLOAD_PAGE: &str = r#"<html><head><base href="/app/"></head><body>
 <form id="up" method="post" action="send" enctype="multipart/form-data">
 <input name="title" value="hello">
 </form></body></html>"#;
 
-fn upload_site(req: &RecordedRequest) -> TestResponse {
+fn upload_site(req: &testing::Request) -> testing::Response {
     match req.target.as_str() {
-        "/pages/upload" => TestResponse::new(200).body(UPLOAD_PAGE),
-        _ => TestResponse::new(200),
+        "/pages/upload" => testing::Response::new(200).body(UPLOAD_PAGE),
+        _ => testing::Response::new(200),
     }
 }
 
 #[tokio::test]
 async fn submit_form_follows_enctype_and_base_href() {
-    let server = TestServer::http(upload_site).await.unwrap();
+    let server = testing::Server::http(upload_site).await.unwrap();
     let tab = Session::builder()
         .browser(Browser::default())
-        .protocol(leyline::ProtocolPolicy::Http1)
+        .protocol(leyline::Protocol::Http1)
         .build()
         .unwrap()
         .tab();
@@ -105,20 +107,21 @@ fn named_and_numeric_references_decode_like_a_browser() {
 
 #[tokio::test]
 async fn relay_keeps_content_encoding_on_a_body_that_was_not_decoded() {
-    let server = TestServer::http(queue([TestResponse::new(200)
+    let server = testing::Server::http(queue([testing::Response::new(200)
         .close()
         .header("content-encoding", "gzip")
         .body(b"\x1f\x8braw".to_vec())]))
     .await
     .unwrap();
     let resp = Session::builder()
-        .compression(CompressionConfig::none())
+        .accept_encoding([])
         .build()
         .unwrap()
         .get(server.url("/"))
+        .send()
         .await
         .unwrap();
-    let relayed = resp.relay_headers(RelayBody::Decoded);
+    let relayed = resp.relay_headers();
     assert_eq!(
         relayed.get("content-encoding").map(|v| v.to_str().unwrap()),
         Some("gzip")
@@ -132,7 +135,7 @@ fn relay_drops_proxy_authentication_fields() {
     headers.insert("proxy-authenticate", "Basic realm=x".parse().unwrap());
     headers.insert("proxy-authorization", "Basic eDp5".parse().unwrap());
     headers.insert("x-kept", "1".parse().unwrap());
-    let relayed = leyline::relay_headers(&headers, RelayBody::AsReceived);
+    let relayed = leyline::relay_headers(&headers);
     assert!(relayed.get("proxy-authenticate").is_none());
     assert!(relayed.get("proxy-authorization").is_none());
     assert!(relayed.get("x-kept").is_some());
@@ -140,11 +143,13 @@ fn relay_drops_proxy_authentication_fields() {
 
 #[tokio::test]
 async fn pages_does_not_repeat_the_first_page_after_a_redirect() {
-    let server = TestServer::http(|req| {
+    let server = testing::Server::http(|req| {
         if req.target == "/items" {
-            TestResponse::new(302).close().header("location", "/items/")
+            testing::Response::new(302)
+                .close()
+                .header("location", "/items/")
         } else {
-            TestResponse::new(200)
+            testing::Response::new(200)
                 .close()
                 .header("link", "</items>; rel=\"next\"")
         }
@@ -168,7 +173,7 @@ async fn pages_does_not_repeat_the_first_page_after_a_redirect() {
 #[tokio::test]
 async fn a_download_keeps_the_target_file_mode() {
     use std::os::unix::fs::PermissionsExt;
-    let server = TestServer::http(queue([TestResponse::new(200).close().body("secret")]))
+    let server = testing::Server::http(queue([testing::Response::new(200).close().body("secret")]))
         .await
         .unwrap();
     let dir = std::env::temp_dir().join(format!("leyline-dlmode-{}", std::process::id()));
@@ -178,7 +183,10 @@ async fn a_download_keeps_the_target_file_mode() {
     std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o600)).unwrap();
     Session::new()
         .get(server.url("/"))
-        .download(&target, None)
+        .error_for_status()
+        .stream()
+        .send()
+        .and_then(|resp| resp.download_to(&target))
         .await
         .unwrap();
     let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o777;
@@ -192,18 +200,18 @@ const TEXTAREA_PAGE: &str =
 
 #[tokio::test]
 async fn a_textarea_line_break_is_sent_as_crlf() {
-    let server = TestServer::http(|req| {
+    let server = testing::Server::http(|req| {
         if req.target == "/page" {
-            TestResponse::new(200).body(TEXTAREA_PAGE)
+            testing::Response::new(200).body(TEXTAREA_PAGE)
         } else {
-            TestResponse::new(200)
+            testing::Response::new(200)
         }
     })
     .await
     .unwrap();
     let tab = Session::builder()
         .browser(Browser::default())
-        .protocol(leyline::ProtocolPolicy::Http1)
+        .protocol(leyline::Protocol::Http1)
         .build()
         .unwrap()
         .tab();
@@ -249,7 +257,7 @@ fn only_a_direct_child_legend_is_exempt_from_a_disabled_fieldset() {
 #[tokio::test]
 async fn a_download_drops_setuid_bits_from_the_target() {
     use std::os::unix::fs::PermissionsExt;
-    let server = TestServer::http(queue([TestResponse::new(200).close().body("bytes")]))
+    let server = testing::Server::http(queue([testing::Response::new(200).close().body("bytes")]))
         .await
         .unwrap();
     let dir = std::env::temp_dir().join(format!("leyline-dlsuid-{}", std::process::id()));
@@ -259,7 +267,10 @@ async fn a_download_drops_setuid_bits_from_the_target() {
     std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o4755)).unwrap();
     Session::new()
         .get(server.url("/"))
-        .download(&target, None)
+        .error_for_status()
+        .stream()
+        .send()
+        .and_then(|resp| resp.download_to(&target))
         .await
         .unwrap();
     let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o7777;

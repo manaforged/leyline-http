@@ -18,9 +18,57 @@ pub use rst_stream::RstStreamFrame;
 pub use settings::SettingsFrame;
 pub use window_update::WindowUpdateFrame;
 
-#[cfg(test)]
-use bytes::BytesMut;
-use bytes::{BufMut, Bytes};
+use bytes::{BufMut, Bytes, BytesMut};
+
+pub(crate) trait Encode {
+    fn encode(&self, buf: &mut BytesMut);
+}
+
+macro_rules! impl_encode {
+    ($($ty:ty),+ $(,)?) => {
+        $(
+            impl Encode for $ty {
+                fn encode(&self, buf: &mut BytesMut) {
+                    <$ty>::encode(self, buf);
+                }
+            }
+        )+
+    };
+}
+
+impl_encode!(
+    SettingsFrame,
+    WindowUpdateFrame,
+    HeadersFrame,
+    ContinuationFrame<'_>,
+    DataFrame,
+    PingFrame,
+    RstStreamFrame,
+    GoAwayFrame,
+);
+
+pub(crate) struct ContinuationFrame<'a> {
+    pub(crate) stream_id: u32,
+    pub(crate) end_headers: bool,
+    pub(crate) fragment: &'a [u8],
+}
+
+impl ContinuationFrame<'_> {
+    pub(crate) fn encode(&self, buf: &mut impl BufMut) {
+        FrameHeader {
+            length: self.fragment.len() as u32,
+            frame_type: FrameType::Continuation as u8,
+            flags: if self.end_headers {
+                headers::flags::END_HEADERS
+            } else {
+                0
+            },
+            stream_id: self.stream_id,
+        }
+        .encode(buf);
+        buf.put_slice(self.fragment);
+    }
+}
 
 #[inline]
 pub(crate) fn be_u16(b: &[u8]) -> u16 {

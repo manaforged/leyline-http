@@ -1,5 +1,5 @@
 use super::Session;
-use crate::profile::{ChromiumBrand, Platform};
+use crate::profile::ChromiumBrand;
 
 mod bare;
 mod brand;
@@ -19,11 +19,7 @@ impl Session {
         self.identity().brand()
     }
 
-    pub(crate) fn platform(&self) -> Platform {
-        self.inner.platform
-    }
-
-    pub(crate) fn protocol_policy(&self) -> crate::core::ProtocolPolicy {
+    pub(crate) fn protocol_policy(&self) -> crate::core::Protocol {
         self.inner.protocol_policy
     }
 }

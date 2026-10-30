@@ -4,20 +4,21 @@ use std::time::{Duration, Instant};
 use leyline_bssl::ssl::SslConnector;
 use tokio::net::TcpStream;
 
-use crate::core::SocketConfig;
+use crate::core::SocketOptions;
 use crate::core::deadline::{Elapsed, within};
 use crate::profile::BrowserProfile;
 use crate::tcp::TcpProfile;
 
 use crate::tls::TlsStream;
-use crate::tls::builder::{TlsMinVersion, apply_profile_with_trust};
+use crate::tls::alpn::AlpnPlan;
+use crate::tls::builder::{TlsMinVersion, apply_tls_with_trust};
 use crate::tls::error::TlsError;
-use crate::tls::happy_eyeballs::{HappyEyeballsConfig, happy_eyeballs_connect};
+use crate::tls::happy_eyeballs::{HappyEyeballs, happy_eyeballs_connect};
 use crate::tls::hello::HelloOptions;
 use crate::tls::nonblocking::connect_one;
 use crate::tls::resolver::{Resolver, SystemResolver};
 use crate::tls::session_cache::SessionCache;
-use crate::tls::trust::TlsTrustConfig;
+use crate::tls::trust::Tls;
 use crate::trace;
 
 mod handshake;
@@ -26,36 +27,32 @@ mod handshake;
 pub struct FingerprintConnector {
     ssl_connector: SslConnector,
     tcp_profile: TcpProfile,
-    trust: TlsTrustConfig,
+    trust: Tls,
     hello: HelloOptions,
     session_cache: SessionCache,
-    accept_invalid_certs: std::sync::Arc<std::sync::atomic::AtomicBool>,
     resolver: Arc<dyn Resolver>,
-    happy_eyeballs: HappyEyeballsConfig,
+    happy_eyeballs: HappyEyeballs,
     connect_timeout: Option<Duration>,
-    socket_config: SocketConfig,
-    pins: Vec<[u8; 32]>,
-    system_roots: bool,
-    has_client_identity: bool,
+    socket_config: SocketOptions,
 }
 
 impl FingerprintConnector {
     #[cfg(any(test, feature = "bench-internals"))]
     pub fn new(profile: &BrowserProfile, tcp: TcpProfile) -> Result<Self, TlsError> {
-        Self::new_with_trust(profile, tcp, &TlsTrustConfig::default())
+        Self::new_with_trust(profile, tcp, &Tls::default())
     }
 
     pub fn new_with_trust(
         profile: &BrowserProfile,
         tcp: TcpProfile,
-        trust: &TlsTrustConfig,
+        trust: &Tls,
     ) -> Result<Self, TlsError> {
         let trust = trust.clone();
         let mut builder = SslConnector::bare_builder(leyline_bssl::ssl::SslMethod::tls())
             .map_err(TlsError::from_stack)?;
 
         let identity =
-            apply_profile_with_trust(&mut builder, profile, TlsMinVersion::Tls12, &trust)?;
+            apply_tls_with_trust(&mut builder, &profile.tls, TlsMinVersion::Tls12, &trust)?;
 
         let hello = HelloOptions::from_tls(&profile.tls)?;
 
@@ -64,42 +61,30 @@ impl FingerprintConnector {
             .map_err(TlsError::from_stack)?;
 
         SessionCache::register(&mut builder)?;
-        let accept_invalid_certs = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 
         Ok(Self {
             ssl_connector: builder.build(),
             tcp_profile: tcp,
             hello,
             session_cache: SessionCache::new(identity),
-            accept_invalid_certs,
             resolver: Arc::new(SystemResolver),
-            happy_eyeballs: HappyEyeballsConfig::default(),
+            happy_eyeballs: HappyEyeballs::default(),
             connect_timeout: None,
-            socket_config: SocketConfig::default(),
-            pins: trust.pinned_leaf_sha256().to_vec(),
-            system_roots: trust.uses_system_roots(),
-            has_client_identity: trust.has_client_identity(),
+            socket_config: SocketOptions::default(),
             trust,
         })
     }
 
-    pub(crate) fn with_fresh_session_cache(&self) -> Self {
-        Self {
-            session_cache: self.session_cache.cleared(),
-            ..self.clone()
-        }
-    }
-
-    pub(crate) fn with_profile(&self, profile: &BrowserProfile) -> Result<Self, TlsError> {
-        use std::sync::atomic::Ordering;
-        let mut next = Self::new_with_trust(profile, self.tcp_profile.clone(), &self.trust)?;
+    pub(crate) fn with_profile(
+        &self,
+        profile: &BrowserProfile,
+        tcp: TcpProfile,
+    ) -> Result<Self, TlsError> {
+        let mut next = Self::new_with_trust(profile, tcp, &self.trust)?;
         next.resolver = self.resolver.clone();
         next.happy_eyeballs = self.happy_eyeballs;
         next.connect_timeout = self.connect_timeout;
         next.socket_config = self.socket_config.clone();
-        if self.accept_invalid_certs.load(Ordering::Relaxed) {
-            next.set_accept_invalid_certs(true);
-        }
         Ok(next)
     }
 
@@ -113,17 +98,7 @@ impl FingerprintConnector {
     }
 
     pub(crate) fn has_origin_tls_identity(&self) -> bool {
-        !self.pins.is_empty() || self.has_client_identity
-    }
-
-    pub fn set_accept_invalid_certs(&mut self, accept: bool) {
-        use std::sync::atomic::Ordering;
-        self.accept_invalid_certs.store(accept, Ordering::Relaxed);
-    }
-
-    fn insecure_mode(&self) -> bool {
-        use std::sync::atomic::Ordering;
-        self.accept_invalid_certs.load(Ordering::Relaxed)
+        !self.trust.pinned_leaf_sha256().is_empty() || self.trust.has_client_identity()
     }
 
     pub fn with_resolver(mut self, resolver: Arc<dyn Resolver>) -> Self {
@@ -131,7 +106,7 @@ impl FingerprintConnector {
         self
     }
 
-    pub fn with_happy_eyeballs_config(mut self, config: HappyEyeballsConfig) -> Self {
+    pub(crate) fn with_happy_eyeballs_config(mut self, config: HappyEyeballs) -> Self {
         self.happy_eyeballs = config;
         self
     }
@@ -141,7 +116,7 @@ impl FingerprintConnector {
         self
     }
 
-    pub fn with_socket_config(mut self, config: SocketConfig) -> Self {
+    pub(crate) fn with_socket_config(mut self, config: SocketOptions) -> Self {
         self.socket_config = config;
         self
     }
@@ -153,9 +128,12 @@ impl FingerprintConnector {
         proxy: Option<&str>,
     ) -> Result<TlsStream, TlsError> {
         match proxy {
-            Some(proxy_url) => self.connect_via_proxy(host, port, proxy_url, true).await,
+            Some(proxy_url) => {
+                self.connect_via_proxy(host, port, proxy_url, AlpnPlan::Browser)
+                    .await
+            }
             None => {
-                self.with_timeout(self.connect_direct_with_alpn(host, port, None))
+                self.with_timeout(self.connect_direct(host, port, AlpnPlan::Browser))
                     .await
             }
         }
@@ -168,14 +146,13 @@ impl FingerprintConnector {
         proxy: Option<&str>,
     ) -> Result<TlsStream, TlsError> {
         match proxy {
-            Some(proxy_url) => self.connect_via_proxy(host, port, proxy_url, false).await,
+            Some(proxy_url) => {
+                self.connect_via_proxy(host, port, proxy_url, AlpnPlan::Http11)
+                    .await
+            }
             None => {
-                self.with_timeout(self.connect_direct_with_alpn(
-                    host,
-                    port,
-                    Some(crate::tls::alpn::HTTP11_WIRE),
-                ))
-                .await
+                self.with_timeout(self.connect_direct(host, port, AlpnPlan::Http11))
+                    .await
             }
         }
     }
@@ -185,7 +162,7 @@ impl FingerprintConnector {
         host: &str,
         port: u16,
         proxy_url: &str,
-        include_alps: bool,
+        plan: AlpnPlan,
     ) -> Result<TlsStream, TlsError> {
         let proxy = crate::tls::proxy::parse(proxy_url)?;
         let started = Instant::now();
@@ -196,8 +173,7 @@ impl FingerprintConnector {
         let remaining = self
             .connect_timeout
             .map(|budget| budget.saturating_sub(started.elapsed()));
-        let handshake =
-            crate::tls::proxy::handshake(self, tunnel, host, port, &proxy, include_alps);
+        let handshake = crate::tls::proxy::handshake(self, tunnel, host, port, &proxy, plan);
         within(remaining, handshake)
             .await
             .map_err(|Elapsed| connect_timeout())?
@@ -216,15 +192,15 @@ impl FingerprintConnector {
             .map_err(|Elapsed| connect_timeout())?
     }
 
-    async fn connect_direct_with_alpn(
+    async fn connect_direct(
         &self,
         host: &str,
         port: u16,
-        alpn_override: Option<&[u8]>,
+        plan: AlpnPlan,
     ) -> Result<TlsStream, TlsError> {
         let tcp_stream = self.dial_tcp(host, port).await?;
         let session_key = SessionCache::key(host, port, None);
-        self.tls_handshake(tcp_stream, host, &session_key, alpn_override.is_none())
+        self.tls_handshake(tcp_stream, host, &session_key, plan)
             .await
     }
 

@@ -1,7 +1,7 @@
 # Cancellation
 
 To cancel a request, drop it: the request future, the `Response` of a
-`.stream()` request, or its `BodyStream`. Leyline then stops the request and
+`.stream()` request, or its `bytes_stream()`. Leyline then stops the request and
 frees what it holds. A timeout, `tokio::select!`, and `JoinHandle::abort` all
 cancel by dropping. What happens on the wire depends on the protocol and on
 how far the request got.
@@ -34,7 +34,7 @@ dropping its future also stops the body read.
 ## Drop a streamed response
 
 With `.stream()`, `send()` returns at the response head. Drop the `Response`
-or its `BodyStream` to stop the body. A drop is a cheap way to skip a body
+or its `bytes_stream()` to stop the body. A drop is a cheap way to skip a body
 you do not want.
 
 | Protocol | Effect |
@@ -48,14 +48,14 @@ use futures_util::StreamExt;
 
 # async fn run() -> leyline::Result<()> {
 let session = leyline::Session::new();
-let resp = session.get("https://example.com/file").stream().await?;
+let resp = session.get("https://example.com/file").stream().send().await?;
 if !resp
     .header("content-type")
     .is_some_and(|value| value.starts_with("text/html"))
 {
     return Ok(());
 }
-let mut body = resp.into_stream()?;
+let mut body = resp.bytes_stream()?;
 let mut seen = 0usize;
 while let Some(chunk) = body.next().await {
     seen += chunk?.len();
@@ -70,7 +70,7 @@ while let Some(chunk) = body.next().await {
 ## Cancel from your code
 
 Prefer a timeout: `.timeout(duration)` bounds the request, and
-`TimeoutConfig::body` bounds a streamed body. See
+`Timeout::body` bounds a streamed body. See
 [Retries and timeouts](retries-and-timeouts.md#the-timeouts). To stop a
 request on another event, such as a shutdown signal, use `tokio::select!`; the
 branch that loses is dropped.
@@ -94,5 +94,5 @@ To stop every request of a session and its clones at once, call
 `Session::shutdown()`; see [Sessions](sessions.md#stop-a-session).
 
 A dropped request future returns no error, because nothing polls it, and the
-`Trace::summary` hook does not fire for it. See
+`Event::Summary` does not fire for it. See
 [Logging and tracing](logging.md).

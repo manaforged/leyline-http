@@ -7,56 +7,55 @@ use futures_util::Stream;
 use http::Method;
 use url::Url;
 
-use crate::core::config::{Origin, ProxyConfig, RedirectPolicy, TimeoutConfig};
+use crate::core::config::{BodyRules, Origin, Proxy, Redirect, Timeout};
 use crate::core::digest::DigestAuth;
 use crate::core::error::Result;
 use crate::core::headers::HeaderList;
 use crate::core::request::RequestBuilder;
 use crate::core::response::Response;
-use crate::core::retry::RetryPolicy;
+use crate::core::retry::Retry;
 use crate::core::session::Session;
-use crate::profile::Preset;
+use crate::profile::RequestKind;
 use crate::util::sensitive_header;
 
 const NEXT: &str = "next";
 
 type PageFuture = Pin<Box<dyn Future<Output = Result<Response>> + Send>>;
 
-#[must_use = "pages are lazy: nothing happens until `.next()` is awaited"]
-pub struct Pages {
+pub(crate) struct Pages {
     template: Template,
     pending: Option<PageFuture>,
     visited: HashSet<Url>,
-    remaining: Option<usize>,
 }
 
 struct Template {
     session: Session,
     first: Option<Url>,
-    preset: Option<Preset>,
+    preset: Option<RequestKind>,
     preset_user: bool,
     headers: HeaderList,
-    timeouts: Option<TimeoutConfig>,
+    timeouts: Option<Timeout>,
     stream_response: bool,
-    retry_policy: RetryPolicy,
+    retry_policy: Retry,
     digest_auth: Option<DigestAuth>,
-    proxy: Option<ProxyConfig>,
+    proxy: Option<Proxy>,
     header_order: Option<Vec<String>>,
-    redirect: Option<RedirectPolicy>,
+    redirect: Option<Redirect>,
     initiator: Option<Url>,
-    tag: Option<String>,
+    label: Option<String>,
     status_errors: bool,
+    body_rules: BodyRules,
 }
 
 impl RequestBuilder {
-    pub fn pages(self) -> Pages {
+    /// Sends the request and follows each `Link: rel="next"` header, yielding one response per page.
+    pub fn pages(self) -> impl Stream<Item = Result<Response>> + Send + Unpin + use<> {
         let template = Template::of(&self);
         let visited = template.first.iter().cloned().collect();
         Pages {
             template,
             pending: Some(Box::pin(self.send())),
             visited,
-            remaining: None,
         }
     }
 }
@@ -77,8 +76,9 @@ impl Template {
             header_order: first.header_order.clone(),
             redirect: first.redirect.clone(),
             initiator: first.initiator.clone(),
-            tag: first.tag.clone(),
+            label: first.label.clone(),
             status_errors: first.status_errors,
+            body_rules: first.body_rules,
         }
     }
 
@@ -113,26 +113,15 @@ impl Template {
         next.header_order = self.header_order.clone();
         next.redirect = self.redirect.clone();
         next.initiator = self.initiator.clone();
-        next.tag = self.tag.clone();
+        next.label = self.label.clone();
         next.status_errors = self.status_errors;
+        next.body_rules = self.body_rules;
         next.trusted_origin = self.first.clone();
         next
     }
 }
 
 impl Pages {
-    pub fn limit(mut self, max: usize) -> Self {
-        self.remaining = Some(max);
-        if max == 0 {
-            self.pending = None;
-        }
-        self
-    }
-
-    pub async fn next(&mut self) -> Option<Result<Response>> {
-        std::future::poll_fn(|cx| Pin::new(&mut *self).poll_next(cx)).await
-    }
-
     fn queue_next(&mut self, response: &Response) {
         self.visited.insert(response.url().clone());
         let Some(url) = response.link(NEXT) else {
@@ -157,10 +146,7 @@ impl Stream for Pages {
         };
         let result = ready!(pending.as_mut().poll(cx));
         this.pending = None;
-        if let Some(remaining) = this.remaining.as_mut() {
-            *remaining = remaining.saturating_sub(1);
-        }
-        if let (Ok(response), false) = (&result, this.remaining == Some(0)) {
+        if let Ok(response) = &result {
             this.queue_next(response);
         }
         Poll::Ready(Some(result))

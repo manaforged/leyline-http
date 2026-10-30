@@ -1,3 +1,13 @@
+#[cfg(any(
+    feature = "compression-gzip",
+    feature = "compression-deflate",
+    feature = "compression-zstd"
+))]
+use super::cert::CertDecompressor;
+#[cfg(feature = "compression-zstd")]
+use super::cert::Zstd;
+#[cfg(any(feature = "compression-gzip", feature = "compression-deflate"))]
+use super::cert::{MAX_CERT_DECOMPRESSED_BYTES, Zlib};
 use super::*;
 #[cfg(any(
     feature = "compression-gzip",
@@ -7,6 +17,12 @@ use super::*;
 use leyline_bssl::ssl::CertificateCompressor;
 #[cfg(any(feature = "compression-gzip", feature = "compression-deflate"))]
 use std::io::Write;
+#[cfg(any(
+    feature = "compression-gzip",
+    feature = "compression-deflate",
+    feature = "compression-zstd"
+))]
+use std::marker::PhantomData;
 
 #[cfg(any(feature = "compression-gzip", feature = "compression-deflate"))]
 #[test]
@@ -17,7 +33,9 @@ fn zlib_decompressor_round_trips() {
     let compressed = enc.finish().unwrap();
 
     let mut out = Vec::new();
-    ZlibDecompressor.decompress(&compressed, &mut out).unwrap();
+    CertDecompressor(PhantomData::<Zlib>)
+        .decompress(&compressed, &mut out)
+        .unwrap();
     assert_eq!(out, original);
 }
 
@@ -28,7 +46,9 @@ fn zstd_decompressor_round_trips() {
     let compressed = zstd::stream::encode_all(&original[..], 3).unwrap();
 
     let mut out = Vec::new();
-    ZstdDecompressor.decompress(&compressed, &mut out).unwrap();
+    CertDecompressor(PhantomData::<Zstd>)
+        .decompress(&compressed, &mut out)
+        .unwrap();
     assert_eq!(out, original);
 }
 
@@ -41,7 +61,7 @@ fn decompression_bomb_is_capped() {
     let compressed = enc.finish().unwrap();
 
     let mut out = Vec::new();
-    let err = ZlibDecompressor
+    let err = CertDecompressor(PhantomData::<Zlib>)
         .decompress(&compressed, &mut out)
         .unwrap_err();
     assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);

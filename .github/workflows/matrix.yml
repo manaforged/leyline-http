@@ -113,7 +113,7 @@ jobs:
 
       - uses: taiki-e/install-action@0758d235715de2f3551eacc980d9ae8fce9342c3 # v2.87.3
         with:
-          tool: cargo-check-external-types
+          tool: cargo-check-external-types@0.5.0
 
       - name: cargo check-external-types (nightly rustdoc JSON)
         run: cargo +nightly-2026-06-20 check-external-types --manifest-path crates/leyline/Cargo.toml --features full

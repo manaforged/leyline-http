@@ -8,56 +8,61 @@ use tokio::sync::Mutex;
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 use tokio::task::{JoinHandle, JoinSet};
 
-use crate::tls::trust::TlsTrustConfig;
+use crate::tls::trust::Tls;
 
 mod cert;
 mod conn;
 mod types;
 
+use types::Handler;
 use types::Recorder;
-pub use types::{Handler, RecordedRequest, TestResponse, queue};
+pub use types::{Request, Response, queue};
 
 const BIND_ADDR: &str = "127.0.0.1:0";
 const HTTP_SCHEME: &str = "http";
 const HTTPS_SCHEME: &str = "https";
 
-pub struct TestServer {
+/// A local HTTP or HTTPS server for tests that answers each request with a handler and records it.
+pub struct Server {
     addr: SocketAddr,
     scheme: &'static str,
     ca_der: Option<Vec<u8>>,
     recorder: Recorder,
-    incoming: Mutex<UnboundedReceiver<RecordedRequest>>,
+    incoming: Mutex<UnboundedReceiver<Request>>,
     task: Option<JoinHandle<()>>,
 }
 
-impl std::fmt::Debug for TestServer {
+impl std::fmt::Debug for Server {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TestServer")
+        f.debug_struct("Server")
             .field("addr", &self.addr)
             .field("scheme", &self.scheme)
             .finish_non_exhaustive()
     }
 }
 
-impl TestServer {
+impl Server {
+    /// Starts a plain HTTP server on a free loopback port.
     pub async fn http<F>(handler: F) -> io::Result<Self>
     where
-        F: Fn(&RecordedRequest) -> TestResponse + Send + Sync + 'static,
+        F: Fn(&Request) -> Response + Send + Sync + 'static,
     {
         Self::start(TcpListener::bind(BIND_ADDR).await?, Arc::new(handler), None)
     }
 
+    /// Starts a plain HTTP server on a listener the caller already bound.
     pub fn http_on<F>(listener: std::net::TcpListener, handler: F) -> io::Result<Self>
     where
-        F: Fn(&RecordedRequest) -> TestResponse + Send + Sync + 'static,
+        F: Fn(&Request) -> Response + Send + Sync + 'static,
     {
         listener.set_nonblocking(true)?;
         Self::start(TcpListener::from_std(listener)?, Arc::new(handler), None)
     }
 
+    /// Starts an HTTPS server on a free loopback port with a fresh self-signed certificate.
     pub async fn https<F>(handler: F) -> io::Result<Self>
     where
-        F: Fn(&RecordedRequest) -> TestResponse + Send + Sync + 'static,
+        F: Fn(&Request) -> Response + Send + Sync + 'static,
     {
         Self::start(
             TcpListener::bind(BIND_ADDR).await?,
@@ -95,35 +100,42 @@ impl TestServer {
         })
     }
 
+    /// Returns the address the server listens on.
     pub fn addr(&self) -> SocketAddr {
         self.addr
     }
 
+    /// Returns the URL of `path` on this server.
     pub fn url(&self, path: &str) -> String {
         let slash = if path.starts_with('/') { "" } else { "/" };
         format!("{}://{}{slash}{path}", self.scheme, self.addr)
     }
 
-    pub fn trust(&self) -> TlsTrustConfig {
-        let base = TlsTrustConfig::new().system_roots(false).env_roots(false);
+    /// Returns TLS settings that trust only this server's certificate, for `SessionBuilder::tls`.
+    pub fn tls(&self) -> Tls {
+        let base = Tls::new().system_roots(false).env_roots(false);
         match &self.ca_der {
-            Some(der) => base.add_ca_der(der.clone()),
+            Some(der) => base.ca_der(der.clone()),
             None => base,
         }
     }
 
+    /// Returns the DER certificate of an HTTPS server, or `None` for plain HTTP.
     pub fn ca_der(&self) -> Option<&[u8]> {
         self.ca_der.as_deref()
     }
 
-    pub async fn requests(&self) -> Vec<RecordedRequest> {
+    /// Returns every request the server has received so far, in arrival order.
+    pub async fn requests(&self) -> Vec<Request> {
         self.recorder.snapshot()
     }
 
-    pub async fn next_request(&self) -> Option<RecordedRequest> {
+    /// Waits for the next request the server receives, or `None` after it stops.
+    pub async fn next_request(&self) -> Option<Request> {
         self.incoming.lock().await.recv().await
     }
 
+    /// Stops the server and waits for its task to end.
     pub async fn shutdown(mut self) {
         if let Some(task) = self.task.take() {
             task.abort();
@@ -132,7 +144,7 @@ impl TestServer {
     }
 }
 
-impl Drop for TestServer {
+impl Drop for Server {
     fn drop(&mut self) {
         if let Some(task) = self.task.take() {
             task.abort();

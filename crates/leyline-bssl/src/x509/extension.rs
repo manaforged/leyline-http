@@ -38,11 +38,6 @@ impl BasicConstraints {
         self
     }
 
-    pub fn pathlen(&mut self, pathlen: u32) -> &mut BasicConstraints {
-        self.pathlen = Some(pathlen);
-        self
-    }
-
     pub fn build(&self) -> Result<X509Extension, ErrorStack> {
         let mut value = String::new();
         if self.critical {
@@ -99,51 +94,6 @@ impl KeyUsage {
 
     pub fn critical(&mut self) -> &mut KeyUsage {
         self.critical = true;
-        self
-    }
-
-    pub fn digital_signature(&mut self) -> &mut KeyUsage {
-        self.digital_signature = true;
-        self
-    }
-
-    pub fn non_repudiation(&mut self) -> &mut KeyUsage {
-        self.non_repudiation = true;
-        self
-    }
-
-    pub fn key_encipherment(&mut self) -> &mut KeyUsage {
-        self.key_encipherment = true;
-        self
-    }
-
-    pub fn data_encipherment(&mut self) -> &mut KeyUsage {
-        self.data_encipherment = true;
-        self
-    }
-
-    pub fn key_agreement(&mut self) -> &mut KeyUsage {
-        self.key_agreement = true;
-        self
-    }
-
-    pub fn key_cert_sign(&mut self) -> &mut KeyUsage {
-        self.key_cert_sign = true;
-        self
-    }
-
-    pub fn crl_sign(&mut self) -> &mut KeyUsage {
-        self.crl_sign = true;
-        self
-    }
-
-    pub fn encipher_only(&mut self) -> &mut KeyUsage {
-        self.encipher_only = true;
-        self
-    }
-
-    pub fn decipher_only(&mut self) -> &mut KeyUsage {
-        self.decipher_only = true;
         self
     }
 
@@ -215,38 +165,6 @@ impl ExtendedKeyUsage {
 
     pub fn client_auth(&mut self) -> &mut ExtendedKeyUsage {
         self.other("clientAuth")
-    }
-
-    pub fn code_signing(&mut self) -> &mut ExtendedKeyUsage {
-        self.other("codeSigning")
-    }
-
-    pub fn time_stamping(&mut self) -> &mut ExtendedKeyUsage {
-        self.other("timeStamping")
-    }
-
-    pub fn ms_code_ind(&mut self) -> &mut ExtendedKeyUsage {
-        self.other("msCodeInd")
-    }
-
-    pub fn ms_code_com(&mut self) -> &mut ExtendedKeyUsage {
-        self.other("msCodeCom")
-    }
-
-    pub fn ms_ctl_sign(&mut self) -> &mut ExtendedKeyUsage {
-        self.other("msCTLSign")
-    }
-
-    pub fn ms_sgc(&mut self) -> &mut ExtendedKeyUsage {
-        self.other("msSGC")
-    }
-
-    pub fn ms_efs(&mut self) -> &mut ExtendedKeyUsage {
-        self.other("msEFS")
-    }
-
-    pub fn ns_sgc(&mut self) -> &mut ExtendedKeyUsage {
-        self.other("nsSGC")
     }
 
     pub fn other(&mut self, other: &str) -> &mut ExtendedKeyUsage {
@@ -322,11 +240,6 @@ impl AuthorityKeyIdentifier {
         self
     }
 
-    pub fn keyid(&mut self, always: bool) -> &mut AuthorityKeyIdentifier {
-        self.keyid = Some(always);
-        self
-    }
-
     pub fn issuer(&mut self, always: bool) -> &mut AuthorityKeyIdentifier {
         self.issuer = Some(always);
         self
@@ -355,7 +268,6 @@ enum RustGeneralName {
     Email(String),
     Uri(String),
     Ip(String),
-    Rid(String),
 }
 
 pub struct SubjectAlternativeName {
@@ -398,28 +310,9 @@ impl SubjectAlternativeName {
         self
     }
 
-    pub fn rid(&mut self, rid: &str) -> &mut SubjectAlternativeName {
-        self.items.push(RustGeneralName::Rid(rid.to_owned()));
-        self
-    }
-
     pub fn ip(&mut self, ip: &str) -> &mut SubjectAlternativeName {
         self.items.push(RustGeneralName::Ip(ip.to_owned()));
         self
-    }
-
-    #[deprecated = "dir_name is deprecated and always panics. Please file a bug if you have a use case for this."]
-    pub fn dir_name(&mut self, _dir_name: &str) -> &mut SubjectAlternativeName {
-        unimplemented!(
-            "This has not yet been adapted for the new internals. File a bug if you need this."
-        );
-    }
-
-    #[deprecated = "other_name is deprecated and always panics. Please file a bug if you have a use case for this."]
-    pub fn other_name(&mut self, _other_name: &str) -> &mut SubjectAlternativeName {
-        unimplemented!(
-            "This has not yet been adapted for the new internals. File a bug if you need this."
-        );
     }
 
     pub fn build(&self, _ctx: &X509v3Context<'_>) -> Result<X509Extension, ErrorStack> {
@@ -432,7 +325,6 @@ impl SubjectAlternativeName {
                 RustGeneralName::Ip(s) => {
                     GeneralName::new_ip(s.parse().map_err(|_| ErrorStack::get())?)?
                 }
-                RustGeneralName::Rid(s) => GeneralName::new_rid(Asn1Object::from_str(s)?)?,
             };
             stack.push(gn)?;
         }

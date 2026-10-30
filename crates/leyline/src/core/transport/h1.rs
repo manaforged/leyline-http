@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use super::{Prepared, TransportBody, TransportResponse, adopt, check_framing, status};
 use crate::core::body::{Body, BodyKind};
-use crate::core::error::{Error, Kind, Result};
+use crate::core::error::{Cause, Error, Result};
 use crate::core::response::HttpVersion;
 use crate::core::session::decompress::BodyLimit;
 use crate::h2::client::H2Client;
@@ -86,9 +86,9 @@ pub(super) async fn send_h1_on(
     check_framing(&headers)?;
     let host = url
         .host_str()
-        .ok_or_else(|| Error::new(Kind::Config).with_message("no host in URL"))?;
+        .ok_or_else(|| Error::new(Cause::Config).with_message("no host in URL"))?;
     let port = url.port_or_known_default().ok_or_else(|| {
-        Error::new(Kind::Config)
+        Error::new(Cause::Config)
             .with_message(format!("no default port for scheme {}", url.scheme()))
     })?;
     let scheme = url.scheme();
@@ -146,15 +146,15 @@ pub(super) async fn send_h1_on(
 
 pub(crate) fn h1_error_to_core(e: H1PooledError) -> Error {
     match e {
-        H1PooledError::Config(m) => Error::new(Kind::Config).with_message(m),
+        H1PooledError::Config(m) => Error::new(Cause::Config).with_message(m),
         H1PooledError::Tls(error) => Error::from(error),
         H1PooledError::Io(io) => match BodyLimit::of_io(&io) {
             Some(limit) => limit.error(),
-            None => Error::new(Kind::Io).with_source(io),
+            None => Error::new(Cause::Io).with_source(io),
         },
         H1PooledError::RequestBody(io) => Error::from_request_body(io),
         H1PooledError::NotResendable(error) => error,
-        other => Error::new(Kind::Io).with_source(h1err_to_io(other)),
+        other => Error::new(Cause::Io).with_source(h1err_to_io(other)),
     }
 }
 
@@ -168,7 +168,7 @@ fn h1_target(
         return Ok((H1Target::OriginForm, headers));
     };
     let parsed = url::Url::parse(proxy_url)
-        .map_err(|e| Error::new(Kind::Config).with_message(format!("invalid proxy URL: {e}")))?;
+        .map_err(|e| Error::new(Cause::Config).with_message(format!("invalid proxy URL: {e}")))?;
     if !matches!(parsed.scheme(), "http" | "https") {
         return Ok((H1Target::OriginForm, headers));
     }

@@ -175,7 +175,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             self.fail_stream(stream_id, err);
             if let Err(e) = self
                 .writer
-                .write_rst_stream(stream_id, ErrorCode::StreamClosed)
+                .write_frame(&RstStreamFrame {
+                    stream_id,
+                    error_code: ErrorCode::StreamClosed,
+                })
                 .await
             {
                 tracing::warn!(error = %e, stream_id, "h2 RST_STREAM write failed");
@@ -194,6 +197,17 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         };
         actor.status = status;
         if matches!(actor.status, 100..=199) && actor.status != 101 && !h.end_stream {
+            actor.informational += 1;
+            if actor.informational > crate::util::MAX_INFORMATIONAL {
+                self.fail_stream(
+                    stream_id,
+                    H2Error::Stream {
+                        stream_id,
+                        code: ErrorCode::ProtocolError,
+                    },
+                );
+                return Ok(());
+            }
             actor.status = 0;
             actor.resp_headers.clear();
             return Ok(());

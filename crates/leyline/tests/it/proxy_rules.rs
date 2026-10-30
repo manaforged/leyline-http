@@ -5,7 +5,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use leyline::{ProxyConfig, ProxyRule, RetryPolicy, Session};
+use leyline::{Proxy, Retry, Session};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -45,15 +45,10 @@ async fn gateway_proxy() -> (String, Arc<Mutex<Vec<String>>>) {
 async fn a_websocket_uses_an_https_proxy_rule() {
     let (proxy, seen) = gateway_proxy().await;
     let session = Session::builder()
-        .proxy(ProxyConfig::new().env(false).rule(ProxyRule::https(proxy)))
+        .proxy(Proxy::new().env(false).https(proxy))
         .build()
         .unwrap();
-    drop(
-        session
-            .websocket("wss://127.0.0.1:9/socket")
-            .connect()
-            .await,
-    );
+    drop(session.get("wss://127.0.0.1:9/socket").websocket().await);
     let lines = seen.lock().unwrap().clone();
     assert!(
         lines.iter().any(|line| line.starts_with("CONNECT ")),
@@ -65,15 +60,15 @@ async fn a_websocket_uses_an_https_proxy_rule() {
 async fn a_proxy_answering_502_is_retried() {
     let (proxy, seen) = gateway_proxy().await;
     let session = Session::builder()
-        .proxy(ProxyConfig::new().env(false).rule(ProxyRule::all(proxy)))
-        .retry(
-            RetryPolicy::transient()
-                .max_retries(2)
-                .initial_backoff(Duration::from_millis(1)),
-        )
+        .proxy(Proxy::new().env(false).all(proxy))
+        .retry(Retry::new(2).backoff(Duration::from_millis(1), Duration::from_secs(1)))
         .build()
         .unwrap();
-    let err = session.get("https://127.0.0.1:9/").await.unwrap_err();
+    let err = session
+        .get("https://127.0.0.1:9/")
+        .send()
+        .await
+        .unwrap_err();
     let connects = seen.lock().unwrap().len();
     assert!(connects >= 2, "{connects} CONNECT attempts, {err:?}");
 }

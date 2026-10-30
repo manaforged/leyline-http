@@ -3,21 +3,27 @@ use url::Url;
 
 use super::Response;
 
+/// One entry of a `Link` response header.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Link {
+    /// The target URL, resolved against the response URL.
     pub url: Url,
+    /// The `rel` values of the link.
     pub rel: Vec<String>,
+    /// The other parameters of the link.
     pub params: Vec<(String, String)>,
 }
 
 impl Link {
+    /// Returns `true` when the link has the given `rel` value, ignoring case.
     pub fn has_rel(&self, rel: &str) -> bool {
         self.rel.iter().any(|r| r.eq_ignore_ascii_case(rel))
     }
 }
 
 impl Response {
+    /// Parses every `Link` header of the response.
     pub fn links(&self) -> Vec<Link> {
         let mut out = Vec::new();
         for value in self.headers.get_all(LINK) {
@@ -28,7 +34,7 @@ impl Response {
         out
     }
 
-    pub fn link(&self, rel: &str) -> Option<Url> {
+    pub(crate) fn link(&self, rel: &str) -> Option<Url> {
         self.links()
             .into_iter()
             .find(|link| link.has_rel(rel))

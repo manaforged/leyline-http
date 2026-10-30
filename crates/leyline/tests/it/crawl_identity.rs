@@ -4,33 +4,35 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use leyline::testing::{TestResponse, TestServer, queue};
-use leyline::trace::{BodyEnd, BodyOutcome, Trace};
-use leyline::{BlockRules, Browser, Family, HostLimits, Identity, Platform, ProxyPool, Session};
+use leyline::testing::{self, queue};
+use leyline::trace::{Event, Trace};
+use leyline::{Browser, HostLimits, Platform, Proxy, Session};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 fn chrome() -> Session {
     Session::builder()
-        .browser(Browser::latest(Family::Chrome))
+        .browser(Browser::chrome())
         .build()
         .unwrap()
 }
 
 #[tokio::test]
 async fn identities_share_one_pool() {
-    let server = TestServer::http(|_| TestResponse::new(200)).await.unwrap();
+    let server = testing::Server::http(|_| testing::Response::new(200))
+        .await
+        .unwrap();
     let base = chrome();
     let firefox = base
-        .with_identity(Identity::locked(
-            Browser::latest(Family::Firefox),
-            Platform::Windows,
-        ))
+        .to_builder()
+        .browser(Browser::firefox())
+        .platform(Platform::Windows)
+        .build()
         .unwrap();
-    base.get(server.url("/a")).await.unwrap();
-    firefox.get(server.url("/b")).await.unwrap();
-    assert_eq!(base.pool_stats().entries, 2);
-    assert_eq!(firefox.pool_stats().entries, 2);
+    base.get(server.url("/a")).send().await.unwrap();
+    firefox.get(server.url("/b")).send().await.unwrap();
+    assert_eq!(base.stats().entries(), 2);
+    assert_eq!(firefox.stats().entries(), 2);
 }
 
 async fn counting_server(peak: Arc<AtomicUsize>, now: Arc<AtomicUsize>) -> u16 {
@@ -80,7 +82,7 @@ async fn host_overrides_and_a_total_cap_limit_in_flight_requests() {
     let (peak, now) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
     let port = counting_server(Arc::clone(&peak), now).await;
     let session = Session::builder()
-        .host_limits(HostLimits::new().host("127.0.0.1", HostLimits::new().max_in_flight(1)))
+        .host_limits(HostLimits::new().host_max_in_flight("127.0.0.1", 1))
         .build()
         .unwrap();
     let calls = (0..3).map(|_| session.get(format!("http://127.0.0.1:{port}/")).send());
@@ -94,29 +96,42 @@ async fn host_overrides_and_a_total_cap_limit_in_flight_requests() {
 struct Ends(Mutex<Vec<(u64, String)>>);
 
 impl Trace for Ends {
-    fn body(&self, ev: &BodyEnd<'_>) {
-        let outcome = match ev.outcome {
-            BodyOutcome::Complete => "complete",
-            BodyOutcome::Dropped => "dropped",
-            _ => "failed",
+    fn event(&self, event: &Event<'_>) {
+        let Event::Body { bytes, outcome, .. } = event else {
+            return;
         };
-        self.0.lock().unwrap().push((ev.bytes, outcome.to_owned()));
+        let outcome = match outcome {
+            Ok(()) => "complete",
+            Err(None) => "dropped",
+            Err(Some(_)) => "failed",
+        };
+        self.0.lock().unwrap().push((*bytes, outcome.to_owned()));
     }
 }
 
 #[tokio::test]
 async fn streamed_bodies_report_how_they_ended() {
-    let server = TestServer::http(queue(vec![
-        TestResponse::new(200).close().body(vec![b'a'; 1000]),
-        TestResponse::new(200).close().body(vec![b'b'; 1000]),
+    let server = testing::Server::http(queue(vec![
+        testing::Response::new(200).close().body(vec![b'a'; 1000]),
+        testing::Response::new(200).close().body(vec![b'b'; 1000]),
     ]))
     .await
     .unwrap();
     let hook = Arc::new(Ends::default());
     let session = Session::builder().trace(Arc::clone(&hook)).build().unwrap();
-    let full = session.get(server.url("/full")).stream().await.unwrap();
+    let full = session
+        .get(server.url("/full"))
+        .stream()
+        .send()
+        .await
+        .unwrap();
     assert_eq!(full.bytes().await.unwrap().len(), 1000);
-    let dropped = session.get(server.url("/drop")).stream().await.unwrap();
+    let dropped = session
+        .get(server.url("/drop"))
+        .stream()
+        .send()
+        .await
+        .unwrap();
     drop(dropped);
     wait::until(|| hook.0.lock().unwrap().len() == 2).await;
     let ends = hook.0.lock().unwrap().clone();
@@ -126,34 +141,36 @@ async fn streamed_bodies_report_how_they_ended() {
 
 #[tokio::test]
 async fn identity_sessions_keep_each_identity_cookies_apart() {
-    let first = TestServer::http(queue(vec![
-        TestResponse::new(403)
+    let first = testing::Server::http(queue(vec![
+        testing::Response::new(403)
             .close()
             .header("set-cookie", "sid=1; Path=/"),
     ]))
     .await
     .unwrap();
-    let second = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+    let second = testing::Server::http(queue(vec![testing::Response::new(200).body("ok").close()]))
         .await
         .unwrap();
-    let pool = ProxyPool::identified([
+    let pool = Proxy::identified([
         (
             format!("http://{}", first.addr()),
-            Identity::locked(Browser::latest(Family::Firefox), Platform::Windows),
+            Browser::firefox(),
+            Platform::Windows,
         ),
         (
             format!("http://{}", second.addr()),
-            Identity::locked(Browser::latest(Family::Chrome), Platform::Windows),
+            Browser::chrome(),
+            Platform::Windows,
         ),
-    ])
-    .rotate_on_block(BlockRules::statuses([403]));
+    ]);
     let session = Session::builder()
-        .browser(Browser::latest(Family::Chrome))
-        .proxy_pool(pool)
+        .browser(Browser::chrome())
+        .proxy(pool)
+        .block_statuses([403])
         .build()
         .unwrap();
-    session.get("http://origin.test/a").await.unwrap();
-    session.get("http://origin.test/b").await.unwrap();
+    session.get("http://origin.test/a").send().await.unwrap();
+    session.get("http://origin.test/b").send().await.unwrap();
     let sent = second.next_request().await.unwrap();
     assert!(
         sent.header_values("cookie").is_empty(),
@@ -163,16 +180,16 @@ async fn identity_sessions_keep_each_identity_cookies_apart() {
     assert!(
         session
             .cookies()
-            .get_cookie(&"http://origin.test/".parse().unwrap(), "sid")
+            .get(&"http://origin.test/".parse().unwrap(), "sid")
             .is_none()
     );
 }
 
 #[tokio::test]
 async fn metrics_count_statuses_errors_and_attempts() {
-    let server = TestServer::http(queue(vec![
-        TestResponse::new(200).body("ok").close(),
-        TestResponse::new(404).close(),
+    let server = testing::Server::http(queue(vec![
+        testing::Response::new(200).body("ok").close(),
+        testing::Response::new(404).close(),
     ]))
     .await
     .unwrap();
@@ -181,13 +198,30 @@ async fn metrics_count_statuses_errors_and_attempts() {
         .trace(Arc::clone(&metrics))
         .build()
         .unwrap();
-    session.get(server.url("/a")).await.unwrap();
-    session.get(server.url("/b")).await.unwrap();
-    session.get("http://127.0.0.1:9/").await.unwrap_err();
-    let snap = metrics.snapshot();
+    session.get(server.url("/a")).send().await.unwrap();
+    session.get(server.url("/b")).send().await.unwrap();
+    session.get("http://127.0.0.1:9/").send().await.unwrap_err();
+    let snap = &metrics;
     assert_eq!(snap.requests(), 3);
     assert_eq!(snap.status_class(2), 1);
     assert_eq!(snap.status_class(4), 1);
-    assert_eq!(snap.errors(leyline::ErrorCategory::Connect), 1);
+    assert_eq!(snap.errors(leyline::Kind::Connect), 1);
     assert!(snap.to_string().contains("requests=3"), "{snap}");
+}
+
+#[tokio::test]
+async fn each_trace_call_adds_a_hook() {
+    let server = testing::Server::http(queue(vec![testing::Response::new(200).body("ok").close()]))
+        .await
+        .unwrap();
+    let first = leyline::trace::Metrics::new();
+    let second = leyline::trace::Metrics::new();
+    let session = Session::builder()
+        .trace(Arc::clone(&first))
+        .trace(Arc::clone(&second))
+        .build()
+        .unwrap();
+    session.get(server.url("/")).send().await.unwrap();
+    assert_eq!(first.requests(), 1);
+    assert_eq!(second.requests(), 1);
 }

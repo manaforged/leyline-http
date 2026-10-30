@@ -1,5 +1,6 @@
 use super::*;
 use crate::core::session::decompress::BodyLimit;
+use crate::util::MAX_INFORMATIONAL;
 
 pub(super) async fn read_h1_head<S>(
     stream: &mut S,
@@ -31,9 +32,9 @@ where
         }
         if (100..200).contains(&status) {
             informational += 1;
-            if informational > MAX_H1_INFORMATIONAL {
+            if informational > MAX_INFORMATIONAL {
                 return Err(H1PooledError::Http(format!(
-                    "more than {MAX_H1_INFORMATIONAL} informational responses"
+                    "more than {MAX_INFORMATIONAL} informational responses"
                 )));
             }
             continue;
@@ -257,10 +258,7 @@ where
     let mut out = Vec::new();
     loop {
         let line_end = read_until_crlf(stream, &mut buf).await?;
-        let size_line = String::from_utf8_lossy(&buf[..line_end]);
-        let size_token = size_line.split(';').next().unwrap_or("").trim();
-        let size_u64 = u64::from_str_radix(size_token, 16)
-            .map_err(|e| H1PooledError::Http(format!("invalid chunk size: {e}")))?;
+        let size_u64 = chunk_size(&buf[..line_end]).map_err(H1PooledError::Http)?;
         let size = usize::try_from(size_u64).map_err(|e| oversized(&e, limit))?;
         let total = out
             .len()
@@ -293,4 +291,13 @@ fn oversized(e: &std::num::TryFromIntError, limit: usize) -> H1PooledError {
 
 fn body_too_large(limit: usize) -> H1PooledError {
     H1PooledError::Io(BodyLimit::session(limit).into_io())
+}
+
+pub(super) fn chunk_size(line: &[u8]) -> Result<u64, String> {
+    let line = String::from_utf8_lossy(line);
+    let token = line.split(';').next().unwrap_or("").trim();
+    if token.is_empty() || !token.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(format!("invalid chunk size: {token:?}"));
+    }
+    u64::from_str_radix(token, 16).map_err(|e| format!("invalid chunk size: {e}"))
 }

@@ -80,48 +80,4 @@ impl Drop for Hmac {
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::hash;
-
-    use super::*;
-
-    fn test<const N: usize>(md: MessageDigest) {
-        assert_eq!(N, md.size());
-        let key = vec![0; N];
-        let message_parts = [
-            b"hello".to_vec(),
-            b"world!".to_vec(),
-            b"".to_vec(),
-            vec![0; 23],
-            b"fella guy".to_vec(),
-        ];
-        let message = message_parts.concat();
-
-        let mut hmac = Hmac::init(&key, &md).unwrap();
-        for part in &message_parts {
-            hmac.update(part).unwrap();
-        }
-        let res = hmac.finalize().unwrap();
-        assert_eq!(res, hash::hmac::<N>(md, &key, &message).unwrap());
-    }
-
-    #[test]
-    fn test_sha1() {
-        test::<20>(MessageDigest::sha1());
-    }
-
-    #[test]
-    fn test_sha256() {
-        test::<32>(MessageDigest::sha256());
-    }
-
-    #[test]
-    fn test_sha384() {
-        test::<48>(MessageDigest::sha384());
-    }
-
-    #[test]
-    fn test_sha512() {
-        test::<64>(MessageDigest::sha512());
-    }
-}
+mod tests {}

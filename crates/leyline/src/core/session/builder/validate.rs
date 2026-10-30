@@ -1,9 +1,9 @@
 #[cfg(feature = "http3")]
-use crate::core::ProtocolPolicy;
+use crate::core::Protocol;
 use crate::core::ProxyUrl;
-use crate::core::error::{Error, Kind, Result};
+use crate::core::error::{Cause, Error, Result};
 use crate::core::proxy_pool::ProxyPool;
-use crate::profile::{Browser, Platform};
+use crate::profile::Platform;
 
 use super::super::proxy::InvalidEnvProxy;
 use super::SessionBuilder;
@@ -23,7 +23,7 @@ impl SessionBuilder {
 
     fn check_config(&mut self) -> Result<()> {
         match self.config_error.take() {
-            Some(error) => Err(Error::new(Kind::Config).with_message(error)),
+            Some(error) => Err(Error::new(Cause::Config).with_message(error)),
             None => Ok(()),
         }
     }
@@ -35,9 +35,9 @@ impl SessionBuilder {
                 .as_ref()
                 .is_some_and(ProxyPool::needs_impersonation)
         {
-            return Err(Error::new(Kind::Config).with_message(
-                "ProxyPool::identified pins a browser identity per proxy and needs a browser \
-                 session: add `.browser(..)` or `.identity(..)`, or use ProxyPool::new",
+            return Err(Error::new(Cause::Config).with_message(
+                "Proxy::identified pins a browser per proxy and needs a browser \
+                 session: add `.browser(..)`, or use Proxy::list",
             ));
         }
         Ok(())
@@ -46,7 +46,7 @@ impl SessionBuilder {
     #[cfg(feature = "http3")]
     fn resolve_protocol(&mut self) {
         if !self.protocol_explicit && self.profile_races_h3() {
-            self.protocol_policy = ProtocolPolicy::Race;
+            self.protocol_policy = Protocol::Race;
         }
     }
 
@@ -63,18 +63,6 @@ impl SessionBuilder {
     fn resolve_platform(&mut self) {
         self.platform = if self.platform_explicit {
             self.platform.resolve()
-        } else if let Some(platform) = self.browser.and_then(native_platform) {
-            platform
-        } else if self.impersonates() {
-            static NOTICE: std::sync::Once = std::sync::Once::new();
-            NOTICE.call_once(|| {
-                tracing::info!(
-                    target: "leyline::session",
-                    "no .platform() set on an impersonation profile: defaulting to \
-                     Windows; call .platform(...) to pin the OS identity"
-                );
-            });
-            Platform::Windows
         } else {
             Platform::detect_host()
         };
@@ -109,25 +97,13 @@ impl SessionBuilder {
         }
     }
 
-    pub(super) fn check_profile_id(expected: Option<&str>, actual: Option<&str>) -> Result<()> {
-        match expected {
-            Some(id) if actual != Some(id) => Err(Error::new(Kind::Config)
-                .with_message(format!(
-                    "the session profile_id {} differs from the expected {id}",
-                    actual.unwrap_or("(none)")
-                ))
-                .with_source(crate::core::error::ProfileChanged)),
-            _ => Ok(()),
-        }
-    }
-
     #[cfg(feature = "http3")]
     fn check_h3_proxy(&self) -> Result<()> {
         if self.proxy_config.proxies_every_url()
-            && matches!(self.protocol_policy, ProtocolPolicy::Http3)
+            && matches!(self.protocol_policy, Protocol::Http3)
             && !crate::quic::proxy_carries_h3(self.proxy_config.primary())
         {
-            return Err(Error::new(Kind::Config).with_message(
+            return Err(Error::new(Cause::Config).with_message(
                 "HTTP/3 needs a socks5:// or socks5h:// proxy with UDP ASSOCIATE; http and \
                  https proxies cannot carry QUIC: use another `.protocol(..)` to run HTTP/2 \
                  over the proxy's CONNECT tunnel, or use a SOCKS5 proxy",
@@ -135,12 +111,4 @@ impl SessionBuilder {
         }
         Ok(())
     }
-}
-
-fn native_platform(browser: Browser) -> Option<Platform> {
-    Platform::all().iter().copied().find(|&platform| {
-        platform != Platform::Host
-            && browser.for_platform(platform) == browser
-            && browser.identity(platform, None).is_some()
-    })
 }

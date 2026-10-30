@@ -32,7 +32,7 @@ impl H3Stream {
         let terminal = stream_tx.as_ref().and_then(reserve_terminal);
         Self {
             resp_tx: Some(resp_tx),
-            response: H3ResponseState::Initial,
+            response: H3ResponseState::Initial(0),
             status: 0,
             headers: Vec::new(),
             trailers: Vec::new(),
@@ -117,38 +117,21 @@ impl H3Stream {
                 .is_some_and(|len| len != self.body_bytes_seen as u64)
     }
 
-    pub(super) fn deliver(&mut self, result: Result<H3Response, String>) {
+    pub(super) fn reply(&mut self, result: Result<H3Response, H3SendError>) {
         if let Some(tx) = self.resp_tx.take() {
-            drop(tx.send(result.map_err(H3SendError::Failed)));
-        }
-    }
-
-    pub(super) fn deliver_unsent(&mut self, message: String) {
-        if let Some(tx) = self.resp_tx.take() {
-            drop(tx.send(Err(H3SendError::NotSent(message))));
-        }
-    }
-
-    pub(super) fn deliver_rejected(&mut self, message: String) {
-        if let Some(tx) = self.resp_tx.take() {
-            drop(tx.send(Err(H3SendError::Rejected(message))));
-        }
-    }
-
-    pub(super) fn deliver_body_limit(&mut self, limit: BodyLimit) {
-        if let Some(tx) = self.resp_tx.take() {
-            drop(tx.send(Err(H3SendError::BodyLimit(limit))));
+            drop(tx.send(result));
         }
     }
 
     pub(super) fn deliver_head(&mut self) {
-        if let Some(tx) = self.resp_tx.take() {
-            drop(tx.send(Ok(H3Response {
+        if self.resp_tx.is_some() {
+            let head = H3Response {
                 status: self.status,
                 headers: std::mem::take(&mut self.headers),
                 body: Vec::new(),
                 trailers: Vec::new(),
-            })));
+            };
+            self.reply(Ok(head));
         }
         self.head_sent = true;
     }
@@ -156,8 +139,8 @@ impl H3Stream {
     pub(super) fn deliver_request_body_error(&mut self, error: std::io::Error) {
         if self.head_sent {
             self.deliver_terminal(error);
-        } else if let Some(tx) = self.resp_tx.take() {
-            drop(tx.send(Err(H3SendError::RequestBody(error))));
+        } else {
+            self.reply(Err(H3SendError::RequestBody(error)));
         }
     }
 
@@ -165,7 +148,7 @@ impl H3Stream {
         if self.head_sent {
             self.deliver_terminal(std::io::Error::other(message));
         } else {
-            self.deliver(Err(message));
+            self.reply(Err(H3SendError::Failed(message)));
         }
     }
 

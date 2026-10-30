@@ -1,6 +1,6 @@
 [package]
 name = "leyline-bssl-sys"
-version = "0.1.6"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.96"
 authors = [
@@ -10,7 +10,6 @@ authors = [
     "Ivan Nikulin <ifaaan@gmail.com>",
 ]
 description = "BoringSSL built from source with a C++ compiler, and raw FFI bindings, for leyline-http"
-homepage = "https://github.com/manaforged/leyline-http"
 documentation = "https://docs.rs/leyline-bssl-sys"
 readme = "README.md"
 keywords = ["boringssl", "tls", "ffi"]
@@ -23,6 +22,7 @@ include = [
     "/Cargo.toml",
     "/README.md",
     "/PROVENANCE.md",
+    "/boringssl.toml",
     "/LICENSE-MIT",
     "/NOTICE",
     "/LICENSE-BORINGSSL",

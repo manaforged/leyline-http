@@ -7,7 +7,7 @@ use serde::Deserialize;
 include!(concat!(env!("OUT_DIR"), "/header_style.rs"));
 
 mod kind;
-pub use kind::Preset;
+pub use kind::RequestKind;
 
 pub struct HeaderContext<'a> {
     pub user_agent: &'a str,
@@ -30,7 +30,7 @@ type HeaderTemplate = Vec<(String, String)>;
 struct ShapeRow {
     fallback: Option<HeaderTemplate>,
     #[serde(default)]
-    presets: HashMap<Preset, HeaderTemplate>,
+    presets: HashMap<RequestKind, HeaderTemplate>,
     extends: Option<HeaderStyle>,
     #[serde(default)]
     append: HeaderTemplate,
@@ -40,7 +40,7 @@ struct ShapeRow {
 #[derive(Debug)]
 struct HeaderShape {
     fallback: HeaderTemplate,
-    presets: HashMap<Preset, HeaderTemplate>,
+    presets: HashMap<RequestKind, HeaderTemplate>,
     append: HeaderTemplate,
     order: Option<Vec<String>>,
 }
@@ -140,7 +140,7 @@ impl HeaderStyle {
 
     pub(crate) fn build_headers(
         self,
-        preset: Option<Preset>,
+        preset: Option<RequestKind>,
         ctx: &HeaderContext<'_>,
     ) -> Vec<HeaderPair> {
         let shape = self.shape();

@@ -2,11 +2,13 @@
 use std::io;
 use std::sync::Arc;
 
+#[cfg(feature = "websocket")]
 use bytes::Bytes;
 #[cfg(feature = "websocket")]
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 
+use crate::h2::client::RequestBody;
 use crate::h2::connection::{HeaderPair, PseudoHeaders};
 
 use super::ResponseSink;
@@ -22,12 +24,6 @@ pub(crate) fn checked_window_add(current: i64, delta: i64) -> Result<i64, i64> {
     }
 }
 
-pub(crate) enum DriverRequestBody {
-    None,
-    Buffered(Bytes),
-    Streaming(crate::util::upload::BodyStream),
-}
-
 pub struct Head {
     pub pseudo: PseudoHeaders,
     pub headers: Vec<HeaderPair>,
@@ -36,7 +32,7 @@ pub struct Head {
 pub(crate) enum DriverCommand {
     SendRequest {
         head: Arc<Head>,
-        body: DriverRequestBody,
+        body: RequestBody,
         sink: ResponseSink,
     },
     #[cfg(feature = "websocket")]

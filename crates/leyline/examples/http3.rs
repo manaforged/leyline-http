@@ -5,9 +5,9 @@ const SECOND_URL: &str = "https://www.cloudflare.com/cdn-cgi/trace";
 
 #[tokio::main]
 async fn main() -> leyline::Result<()> {
-    let session = Session::browser(Browser::default());
+    let session = Session::from(Browser::default());
 
-    let first = session.get(URL).await?;
+    let first = session.get(URL).send().await?;
     println!(
         "first: {} over {:?}, alt-svc {:?}",
         first.status(),
@@ -15,7 +15,7 @@ async fn main() -> leyline::Result<()> {
         first.header("alt-svc")
     );
 
-    let second = session.get(SECOND_URL).await?;
+    let second = session.get(SECOND_URL).send().await?;
     println!("second: {} over {:?}", second.status(), second.version());
     Ok(())
 }

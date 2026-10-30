@@ -77,7 +77,7 @@ async fn hand_to_h2(
 ) -> Result<Dialed, H1PooledError> {
     match crate::h2::start(tls_stream.stream, h2_config.clone()).await {
         Ok(handle) => {
-            let (handle, tls) = pool.install_h2(key.clone(), handle, tls);
+            let (handle, tls) = pool.install_mux(key.clone(), handle, tls);
             Ok(Dialed::H2(handle, tls))
         }
         Err(e) => Err(H1PooledError::NotResendable(Error::from(e))),

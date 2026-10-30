@@ -12,7 +12,7 @@ use crate::tls::FingerprintConnector;
 
 use crate::core::body::Body;
 use crate::core::body_stream::BodyStream;
-use crate::core::error::{Error, Kind, Result};
+use crate::core::error::{Cause, Error, Result};
 use crate::core::response::HttpVersion;
 
 mod h1;
@@ -27,7 +27,7 @@ pub use mode::{ErrorBudget, ResponseMode};
 
 fn status(code: u16) -> Result<StatusCode> {
     StatusCode::from_u16(code).map_err(|e| {
-        Error::new(Kind::Request)
+        Error::new(Cause::Request)
             .with_message(format!("invalid status code {code}"))
             .with_source(e)
     })
@@ -74,6 +74,34 @@ pub(crate) struct TransportResponse {
     pub(crate) timing: crate::core::ResponseTiming,
 }
 
+impl TransportResponse {
+    fn mux<I, N, V>(
+        version: HttpVersion,
+        code: u16,
+        headers: I,
+        trailers: I,
+        body: TransportBody,
+        (tls, timing): (crate::pool::TlsInfo, crate::core::ResponseTiming),
+        url: &url::Url,
+    ) -> Result<Self>
+    where
+        I: IntoIterator<Item = (N, V)>,
+        N: AsRef<[u8]>,
+        V: Into<Bytes>,
+    {
+        Ok(Self {
+            status: status(code)?,
+            headers: adopt(headers),
+            trailers: adopt(trailers),
+            body,
+            final_url: url.clone(),
+            version,
+            tls: Some(tls),
+            timing,
+        })
+    }
+}
+
 pub(crate) struct Prepared<'a> {
     pub(crate) method: &'a str,
     pub(crate) url: &'a url::Url,
@@ -83,7 +111,7 @@ pub(crate) struct Prepared<'a> {
     pub(crate) response: ResponseMode,
 }
 
-struct Retry<'a> {
+struct Replay<'a> {
     method: &'a str,
     url: &'a url::Url,
     headers: Vec<HeaderPair>,
@@ -92,8 +120,8 @@ struct Retry<'a> {
 }
 
 impl<'a> Prepared<'a> {
-    fn split_replay(&self) -> (Retry<'a>, Option<Body>) {
-        let retry = Retry {
+    fn split_replay(&self) -> (Replay<'a>, Option<Body>) {
+        let retry = Replay {
             method: self.method,
             url: self.url,
             headers: self.headers.clone(),
@@ -104,7 +132,7 @@ impl<'a> Prepared<'a> {
     }
 }
 
-impl<'a> Retry<'a> {
+impl<'a> Replay<'a> {
     fn with_body(self, body: Body) -> Prepared<'a> {
         Prepared {
             method: self.method,
@@ -160,10 +188,10 @@ async fn send_h2_or_fall_back(
         Err(e) if is_h2_alpn_mismatch(&e) => {
             tracing::debug!(error = %e, "H2 ALPN mismatch, falling back to HTTP/1.1");
             let Some(body) = replay else {
-                return Err(Error::new(Kind::Request).with_message(
+                return Err(Error::new(Cause::Request).with_message(
                     "the origin negotiated HTTP/1.1 and a streaming request body cannot be \
                      replayed; send the request again, buffer the body, or use \
-                     ProtocolPolicy::Http1",
+                     Protocol::Http1",
                 ));
             };
             Box::pin(send_h1_or_upgrade(
@@ -193,7 +221,7 @@ async fn send_h1_or_upgrade(
         H1Sent::Upgraded(opened, body) => {
             if let Some(host) = retry.url.host_str() {
                 let port = retry.url.port_or_known_default().unwrap_or(443);
-                pool.clear_h1_only(host, port, retry.proxy);
+                pool.forget(crate::pool::OriginFlag::H1Only, host, port, retry.proxy);
             }
             send_h2_on(
                 pool,
@@ -256,12 +284,12 @@ pub(crate) fn check_framing(headers: &[HeaderPair]) -> Result<()> {
         .filter(|(k, _)| k.eq_ignore_ascii_case("content-length"))
         .count();
     if te > 1 {
-        return Err(Error::new(Kind::Config).with_message(format!(
+        return Err(Error::new(Cause::Config).with_message(format!(
             "{te} Transfer-Encoding headers on one request: framing would be ambiguous"
         )));
     }
     if te > 0 && cl > 0 {
-        return Err(Error::new(Kind::Config).with_message(
+        return Err(Error::new(Cause::Config).with_message(
             "Transfer-Encoding together with Content-Length on one request: framing would be ambiguous"
         ));
     }
@@ -280,17 +308,15 @@ pub(crate) fn strip_connection_specific_headers(headers: &mut Vec<HeaderPair>) -
 }
 
 pub(crate) fn sent_on(version: HttpVersion, name: &str, value: &str) -> bool {
-    match version {
-        HttpVersion::Http1_1 => !name.eq_ignore_ascii_case("priority"),
-        HttpVersion::Http2 | HttpVersion::Http3 => {
-            if name.eq_ignore_ascii_case("te") {
-                return value.eq_ignore_ascii_case("trailers");
-            }
-            !CONNECTION_SPECIFIC
-                .iter()
-                .any(|field| name.eq_ignore_ascii_case(field))
-        }
+    if version == HttpVersion::Http1_1 {
+        return !name.eq_ignore_ascii_case("priority");
     }
+    if name.eq_ignore_ascii_case("te") {
+        return value.eq_ignore_ascii_case("trailers");
+    }
+    !CONNECTION_SPECIFIC
+        .iter()
+        .any(|field| name.eq_ignore_ascii_case(field))
 }
 
 const CONNECTION_SPECIFIC: [&str; 7] = [
@@ -326,7 +352,7 @@ pub(crate) async fn send_request_h3(
     } = req;
     let host = url
         .host_str()
-        .ok_or_else(|| Error::new(Kind::Config).with_message("no host in URL"))?;
+        .ok_or_else(|| Error::new(Cause::Config).with_message("no host in URL"))?;
     let port = url.port_or_known_default().unwrap_or(443);
     let authority = crate::util::authority(url, host, port);
     let full_path = crate::util::request_target(url);
@@ -359,16 +385,15 @@ pub(crate) async fn send_request_h3(
         crate::quic::H3RespBody::Streaming(rx) => TransportBody::Streaming(BodyStream::new(rx)),
     };
 
-    Ok(TransportResponse {
-        status: status(resp.status)?,
-        headers: adopt(resp.headers),
-        trailers: adopt(resp.trailers),
-        body: transport_body,
-        final_url: url.clone(),
-        version: HttpVersion::Http3,
-        tls: Some(tls),
-        timing,
-    })
+    TransportResponse::mux(
+        HttpVersion::Http3,
+        resp.status,
+        resp.headers,
+        resp.trailers,
+        transport_body,
+        (tls, timing),
+        url,
+    )
 }
 
 pub(crate) fn is_h2_alpn_mismatch(err: &Error) -> bool {

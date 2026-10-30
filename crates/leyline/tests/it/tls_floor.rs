@@ -4,7 +4,7 @@
 )]
 use crate::tls_support;
 
-use leyline::{Browser, Platform, Session, TlsMinVersion, TlsTrustConfig};
+use leyline::{Browser, Platform, Session, Tls};
 use leyline_bssl::pkey::PKey;
 use leyline_bssl::ssl::{Ssl, SslContextBuilder, SslMethod, SslVersion};
 use leyline_bssl::x509::X509;
@@ -47,11 +47,11 @@ async fn tls11_server(cert: X509, key: PKey<leyline_bssl::pkey::Private>) -> u16
     port
 }
 
-fn safari(trust: TlsTrustConfig) -> Session {
+fn safari(trust: Tls) -> Session {
     Session::builder()
         .browser(Browser::Safari18)
         .platform(Platform::MacOS)
-        .tls_trust(trust)
+        .tls(trust)
         .build()
         .unwrap()
 }
@@ -62,14 +62,16 @@ async fn a_tls_floor_refuses_a_server_below_it() {
     let der = cert.to_der().unwrap();
     let port = tls11_server(cert, key).await;
     let url = format!("https://127.0.0.1:{port}/");
-    let trust = TlsTrustConfig::new()
+    let trust = Tls::new()
         .env_roots(false)
         .system_roots(false)
-        .add_ca_der(der);
-    let open = safari(trust.clone()).get(&url).await;
-    assert!(open.is_ok(), "{open:?}");
-    let floored = safari(trust.min_tls_version(TlsMinVersion::Tls12))
-        .get(&url)
-        .await;
-    assert!(floored.is_err(), "{floored:?}");
+        .ca_der(der.clone());
+    let open = safari(trust.clone()).get(&url).send().await.unwrap();
+    assert_eq!(open.tls_version(), Some("TLSv1.1"));
+    assert!(open.tls_cipher().is_some());
+    assert_eq!(open.peer_certificate(), Some(&der[..]));
+    for floor in [trust.clone().tls12_min(), trust.tls13_only()] {
+        let floored = safari(floor).get(&url).send().await;
+        assert!(floored.is_err(), "{floored:?}");
+    }
 }

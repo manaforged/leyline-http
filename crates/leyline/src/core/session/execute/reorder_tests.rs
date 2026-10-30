@@ -9,7 +9,7 @@ fn h(name: &str, value: &str) -> HeaderPair {
 #[test]
 fn firefox_navigate_order_matches_the_live_capture() {
     use crate::profile::Browser;
-    use crate::profile::Preset;
+    use crate::profile::RequestKind;
     use crate::profile::preset::HeaderContext;
     let ctx = HeaderContext {
         user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:153.0) Gecko/20100101 Firefox/153.0",
@@ -24,7 +24,7 @@ fn firefox_navigate_order_matches_the_live_capture() {
         navigation_referer: "",
     };
     let mut headers =
-        crate::profile::HeaderStyle::Gecko.build_headers(Some(Preset::Navigate), &ctx);
+        crate::profile::HeaderStyle::Gecko.build_headers(Some(RequestKind::Navigate), &ctx);
     let order = Browser::Firefox153
         .profile()
         .meta

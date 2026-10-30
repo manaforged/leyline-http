@@ -5,27 +5,38 @@ mod debug;
 mod encode;
 mod route;
 mod send;
+#[cfg(feature = "websocket")]
+mod websocket;
 
-pub use compress::ContentEncoding;
+pub use compress::Encoding;
 
 use http::{HeaderName, HeaderValue, Method};
 
-use crate::profile::{HeaderAnchor, Preset};
+use crate::profile::{HeaderPosition, RequestKind};
 
 use crate::core::body::Body;
-use crate::core::config::{ProxyConfig, RedirectPolicy, TimeoutConfig};
+use crate::core::config::{BodyRules, Proxy, Redirect, Timeout};
 use crate::core::digest::DigestAuth;
-use crate::core::error::{Error, Kind};
+use crate::core::error::{Cause, Error};
 use crate::core::headers::HeaderList;
 use crate::core::into_url::IntoUrl;
 #[cfg(feature = "multipart")]
 use crate::core::multipart::Form;
-use crate::core::retry::RetryPolicy;
+use crate::core::retry::Retry;
 use crate::core::session::Session;
 
-pub trait IntoParamPair {
+mod sealed {
+    pub trait Sealed {}
+}
+
+/// Converts a value into a name and value string pair.
+pub trait IntoParamPair: sealed::Sealed {
+    /// Returns the pair as owned strings.
     fn into_param_pair(self) -> (String, String);
 }
+
+impl<K: AsRef<str>, V: AsRef<str>> sealed::Sealed for (K, V) {}
+impl<K: AsRef<str>, V: AsRef<str>> sealed::Sealed for &(K, V) {}
 
 impl<K, V> IntoParamPair for (K, V)
 where
@@ -47,37 +58,39 @@ where
     }
 }
 
+#[doc = include_str!("../../../docs/request.md")]
 #[must_use = "builders are lazy: nothing happens until `.send()` / `.build()`"]
 pub struct RequestBuilder {
     pub(super) session: Session,
     pub(super) method: Method,
     pub(super) url: String,
-    pub(super) preset: Option<Preset>,
+    pub(super) preset: Option<RequestKind>,
     pub(super) body: Body,
     pub(super) headers: HeaderList,
     pub(super) query_params: Vec<(String, String)>,
-    pub(super) timeouts: Option<TimeoutConfig>,
+    pub(super) timeouts: Option<Timeout>,
     pub(super) builder_error: Option<Error>,
     pub(super) stream_response: bool,
-    pub(super) compress: Option<ContentEncoding>,
-    pub(super) retry_policy: RetryPolicy,
+    pub(super) compress: Option<Encoding>,
+    pub(super) retry_policy: Retry,
     pub(super) digest_auth: Option<DigestAuth>,
-    pub(super) proxy: Option<ProxyConfig>,
+    pub(super) proxy: Option<Proxy>,
     pub(super) header_order: Option<Vec<String>>,
     pub(super) preset_user: bool,
-    pub(super) redirect: Option<RedirectPolicy>,
+    pub(super) redirect: Option<Redirect>,
     pub(super) initiator: Option<url::Url>,
     pub(crate) trusted_origin: Option<url::Url>,
-    pub(super) tag: Option<String>,
+    pub(super) label: Option<String>,
     pub(super) status_errors: bool,
+    pub(super) body_rules: BodyRules,
 }
 
-fn default_preset(session: &Session, method: &Method) -> Option<Preset> {
+fn default_preset(session: &Session, method: &Method) -> Option<RequestKind> {
     if !session.impersonates() {
         return None;
     }
     match *method {
-        Method::GET | Method::HEAD => Some(Preset::Navigate),
+        Method::GET | Method::HEAD => Some(RequestKind::Navigate),
         _ => None,
     }
 }
@@ -105,8 +118,9 @@ impl RequestBuilder {
             redirect: None,
             initiator: None,
             trusted_origin: None,
-            tag: None,
+            label: None,
             status_errors: false,
+            body_rules: session.body_rules(),
         }
     }
 
@@ -139,33 +153,42 @@ impl RequestBuilder {
         };
         let ct = String::from_utf8_lossy(ct.as_bytes()).to_ascii_lowercase();
         if ct.starts_with("application/json") {
-            self.preset = Some(Preset::Xhr);
+            self.preset = Some(RequestKind::Xhr);
         } else if ct.starts_with("application/x-www-form-urlencoded") {
-            self.preset = Some(Preset::Form);
+            self.preset = Some(RequestKind::Form);
         }
     }
 
-    pub fn timeout(mut self, config: impl Into<TimeoutConfig>) -> Self {
+    /// Sets the timeouts for this request, overriding the session timeouts.
+    pub fn timeout(mut self, config: impl Into<Timeout>) -> Self {
         self.timeouts = Some(config.into());
         self
     }
 
-    pub fn preset(mut self, preset: Preset) -> Self {
-        self.preset = Some(preset);
+    /// Sets the browser request kind that selects the header preset.
+    pub fn kind(mut self, kind: RequestKind) -> Self {
+        self.preset = Some(kind);
         self.preset_user = true;
         self
     }
 
-    pub fn header_order(mut self, order: &[&str]) -> Self {
-        self.header_order = Some(order.iter().map(|s| (*s).to_string()).collect());
+    /// Sets the order in which the named headers are sent.
+    pub fn header_order<I, S>(mut self, order: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        self.header_order = Some(order.into_iter().map(|s| s.as_ref().to_owned()).collect());
         self
     }
 
+    /// Sets the request body.
     pub fn body(mut self, body: impl Into<Body>) -> Self {
         self.body = body.into();
         self
     }
 
+    /// Serializes `value` as the JSON body and sets `content-type` to `application/json`.
     pub fn json(mut self, value: &impl serde::Serialize) -> Self {
         match serde_json::to_vec(value) {
             Ok(bytes) => {
@@ -173,12 +196,13 @@ impl RequestBuilder {
                 self.body = Body::from(bytes);
             }
             Err(e) => {
-                self.builder_error = Some(Error::new(Kind::Json).with_source(e));
+                self.builder_error = Some(Error::new(Cause::Json).with_source(e));
             }
         }
         self
     }
 
+    /// Encodes `params` as a URL-encoded form body and sets the matching `content-type`.
     pub fn form<I, P>(mut self, params: I) -> Self
     where
         I: IntoIterator<Item = P>,
@@ -191,16 +215,31 @@ impl RequestBuilder {
         self
     }
 
+    /// Sets whether the response body is decompressed, overriding the session setting.
+    pub fn decode(mut self, on: bool) -> Self {
+        self.body_rules.decode = on;
+        self
+    }
+
+    /// Sets the maximum response body size in bytes, overriding the session setting.
+    pub fn max_body_size(mut self, bytes: usize) -> Self {
+        self.body_rules.max_body_size = bytes;
+        self
+    }
+
+    /// Returns the response as soon as the headers arrive and leaves the body to stream.
     pub fn stream(mut self) -> Self {
         self.stream_response = true;
         self
     }
 
-    pub fn compress(mut self, encoding: ContentEncoding) -> Self {
+    /// Compresses the request body with the given encoding before sending.
+    pub fn compress_body(mut self, encoding: Encoding) -> Self {
         self.compress = Some(encoding);
         self
     }
 
+    /// Appends `params` to the URL query string.
     pub fn query<I, P>(mut self, params: I) -> Self
     where
         I: IntoIterator<Item = P>,
@@ -212,6 +251,7 @@ impl RequestBuilder {
         self
     }
 
+    /// Appends a header and records an error for `send` when the name or value is invalid.
     pub fn header(
         mut self,
         name: impl TryInto<HeaderName>,
@@ -229,14 +269,15 @@ impl RequestBuilder {
         }
     }
 
-    pub fn headers<I, P>(mut self, headers: I) -> Self
+    /// Appends each name and value pair as a header.
+    pub fn headers<I, K, V>(mut self, headers: I) -> Self
     where
-        I: IntoIterator<Item = P>,
-        P: IntoParamPair,
+        I: IntoIterator<Item = (K, V)>,
+        K: TryInto<HeaderName>,
+        V: TryInto<HeaderValue>,
     {
-        for pair in headers {
-            let (k, v) = pair.into_param_pair();
-            if let Err(err) = self.headers.append(k, v) {
+        for (name, value) in headers {
+            if let Err(err) = self.headers.append(name, value) {
                 self.fail(err);
                 return self;
             }
@@ -244,9 +285,10 @@ impl RequestBuilder {
         self
     }
 
-    pub fn anchored(
+    /// Inserts a header at the given position in the header order.
+    pub fn header_at(
         mut self,
-        anchor: HeaderAnchor,
+        anchor: HeaderPosition,
         name: impl TryInto<HeaderName>,
         value: impl TryInto<HeaderValue>,
     ) -> Self {
@@ -256,32 +298,38 @@ impl RequestBuilder {
         self
     }
 
+    /// Sets the `authorization` header to a bearer token.
     pub fn bearer_auth(mut self, token: &str) -> Self {
         self.put("authorization", format!("Bearer {token}"));
         self
     }
 
+    /// Sets the `authorization` header to HTTP Basic credentials.
     pub fn basic_auth(mut self, username: &str, password: &str) -> Self {
         let encoded = crate::util::base64_encode(&format!("{username}:{password}"));
         self.put("authorization", format!("Basic {encoded}"));
         self
     }
 
-    pub fn retry(mut self, policy: RetryPolicy) -> Self {
-        self.retry_policy = policy;
+    /// Sets the retry policy for this request, overriding the session default.
+    pub fn retry(mut self, retry: impl Into<Retry>) -> Self {
+        self.retry_policy = retry.into();
         self
     }
 
-    pub fn redirect(mut self, policy: RedirectPolicy) -> Self {
-        self.redirect = Some(policy);
+    /// Sets the redirect policy for this request, overriding the session policy.
+    pub fn redirect(mut self, policy: impl Into<Redirect>) -> Self {
+        self.redirect = Some(policy.into());
         self
     }
 
-    pub fn digest_auth(mut self, auth: DigestAuth) -> Self {
-        self.digest_auth = Some(auth);
+    /// Answers an HTTP Digest challenge with the given credentials.
+    pub fn digest_auth(mut self, username: &str, password: &str) -> Self {
+        self.digest_auth = Some(DigestAuth::new(username, password));
         self
     }
 
+    /// Sets a multipart form as the streamed body and sets the matching `content-type`.
     #[cfg(feature = "multipart")]
     pub fn multipart(mut self, form: Form) -> Self {
         self.put("content-type", form.content_type());
@@ -289,8 +337,16 @@ impl RequestBuilder {
         self
     }
 
-    pub fn proxy(mut self, config: impl Into<ProxyConfig>) -> Self {
-        self.proxy = Some(config.into());
+    /// Sends this request through the given proxy, and fails at send when the proxy is a pool.
+    pub fn proxy(mut self, config: impl Into<Proxy>) -> Self {
+        let config = config.into();
+        if config.pool.is_some() {
+            self.fail(
+                Error::new(Cause::Config)
+                    .with_message("a request takes one proxy; set a proxy list on the session"),
+            );
+        }
+        self.proxy = Some(config);
         self
     }
 }

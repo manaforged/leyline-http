@@ -2,6 +2,10 @@ use std::collections::VecDeque;
 
 use bytes::Bytes;
 
+use crate::h2::config::DEFAULT_HEADER_TABLE_SIZE;
+
+pub(crate) const ENTRY_OVERHEAD: usize = 32;
+
 pub static STATIC_TABLE: &[(&str, &str)] = &[
     ("", ""),
     (":authority", ""),
@@ -78,7 +82,7 @@ impl DynamicTable {
         Self {
             entries: VecDeque::new(),
             size: 0,
-            max_size: 4096,
+            max_size: DEFAULT_HEADER_TABLE_SIZE as usize,
         }
     }
 
@@ -88,7 +92,7 @@ impl DynamicTable {
     }
 
     pub fn insert(&mut self, name: Bytes, value: Bytes) {
-        let entry_size = name.len() + value.len() + 32;
+        let entry_size = name.len() + value.len() + ENTRY_OVERHEAD;
 
         if entry_size > self.max_size {
             self.entries.clear();
@@ -96,16 +100,9 @@ impl DynamicTable {
             return;
         }
 
-        while self.size + entry_size > self.max_size {
-            if let Some(old) = self.entries.pop_back() {
-                self.size -= old.0.len() + old.1.len() + 32;
-            } else {
-                break;
-            }
-        }
-
         self.entries.push_front((name, value));
         self.size += entry_size;
+        self.evict();
     }
 
     pub fn get(&self, index: usize) -> Option<(&Bytes, &Bytes)> {
@@ -119,7 +116,7 @@ impl DynamicTable {
     fn evict(&mut self) {
         while self.size > self.max_size {
             if let Some(old) = self.entries.pop_back() {
-                self.size -= old.0.len() + old.1.len() + 32;
+                self.size -= old.0.len() + old.1.len() + ENTRY_OVERHEAD;
             } else {
                 break;
             }

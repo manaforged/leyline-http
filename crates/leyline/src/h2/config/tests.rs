@@ -90,7 +90,12 @@ fn all_profiles_produce_expected_fingerprint() {
         let profile = reg
             .get(browser.0, browser.1)
             .unwrap_or_else(|| panic!("missing profile: {} {}", browser.0, browser.1));
-        if let Some(expected) = profile.expected_h2_fingerprint() {
+        if let Some(expected) = profile
+            .h2
+            .fingerprint
+            .as_ref()
+            .and_then(|f| f.akamai.as_deref())
+        {
             let h2 = H2Config::from_profile(&profile.h2).unwrap();
             let actual = h2.akamai_fingerprint();
             assert_eq!(

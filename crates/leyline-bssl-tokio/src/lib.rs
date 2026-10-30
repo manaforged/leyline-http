@@ -214,22 +214,6 @@ impl<S> HandshakeError<S> {
     }
 
     #[must_use]
-    pub fn into_source_stream(self) -> Option<S> {
-        match self.0 {
-            ssl::HandshakeError::Failure(s) => Some(s.into_source_stream().stream),
-            _ => None,
-        }
-    }
-
-    #[must_use]
-    pub fn as_source_stream(&self) -> Option<&S> {
-        match &self.0 {
-            ssl::HandshakeError::Failure(s) => Some(&s.get_ref().stream),
-            _ => None,
-        }
-    }
-
-    #[must_use]
     pub fn code(&self) -> Option<ErrorCode> {
         match &self.0 {
             ssl::HandshakeError::Failure(s) => Some(s.error().code()),

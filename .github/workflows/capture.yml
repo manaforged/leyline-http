@@ -130,13 +130,10 @@ jobs:
           cache-workspace-crates: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install cargo-truesight
-        run: cargo install --locked --git https://github.com/manaforged/truesight --rev d7248e66b77adb9d50d92f5a38075cb9ece8581b cargo-truesight
-
       - name: land
         run: |
           set +e
-          python -m profile_capture "$FAMILY" --major "$MAJOR" --land --sync | tee "$RUNNER_TEMP/land.txt"
+          python -m profile_capture "$FAMILY" --major "$MAJOR" --land | tee "$RUNNER_TEMP/land.txt"
           status=${PIPESTATUS[0]}
           if [[ $status -ne 0 && $status -ne 2 ]]; then exit "$status"; fi
 

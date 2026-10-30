@@ -90,7 +90,7 @@ async fn absolute_form_target_strips_userinfo_and_fragment() {
 
 async fn run_against_with_stats(
     server_response: &'static [u8],
-) -> (String, leyline::pool::PoolStats) {
+) -> (String, leyline::pool::ConnectionStats) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
 

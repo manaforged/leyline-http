@@ -1,110 +1,90 @@
 # Retries and timeouts
 
-A `RetryPolicy` decides whether a whole request runs again, and a
-`TimeoutConfig` bounds how long each part of it may take. Retries are off by
-default: `RetryPolicy::default()` is `RetryPolicy::none()`, so a request is
-sent once unless you ask for more. Every timeout except `total` and `connect`
-is off by default.
+A `Retry` decides whether a whole request runs again, and a `Timeout`
+bounds how long each part of it may take. Retries are off by default: a
+request is sent once unless you set a retry count. Every timeout except
+`total` and `connect` is off by default.
 
-## The transient policy
+## Retry a request
 
-`RetryPolicy::transient()` covers the failures that usually pass on their own:
-connection errors, timeouts, and status 429, 502, 503, and 504. It allows 3
-retries, so 4 attempts in total, with exponential backoff from 100 ms to 1 s,
-factor 2, and full jitter. A server can ask for a wait of up to 60 s;
-`max_retry_after` changes that cap.
+`.retry(n)` retries up to `n` times on the failures that usually pass on
+their own: connection errors, timeouts, and status 429, 502, 503, and 504.
+The wait between tries doubles from 100 ms to 1 s with equal jitter. A server
+can ask for a wait of up to 60 s.
 
 ```rust,no_run
-use leyline::RetryPolicy;
-
 # async fn run() -> leyline::Result<()> {
-let session = leyline::Session::builder()
-    .retry(RetryPolicy::transient())
-    .build()?;
-let resp = session
-    .get("https://example.com/flaky")
-    .retry(RetryPolicy::transient().max_retries(4))
-    .await?;
+let session = leyline::Session::builder().retry(3).build()?;
+let resp = session.get("https://example.com/flaky").retry(4).send().await?;
 # let _ = resp;
 # Ok(())
 # }
 ```
 
 `SessionBuilder::retry` sets the session default. `RequestBuilder::retry`
-replaces it for one request.
+replaces it for one request. `.retry(0)` turns retries off. Both take a
+number or a `Retry`.
 
-## Custom triggers
+## Choose what to retry
 
-`RetryTrigger` has four variants:
+`Retry::new(n).when(rule)` replaces the default rule. The rule gets a
+`Attempt` and returns `true` to try again:
 
-| Trigger | Matches |
+| `Attempt` | Returns |
 | --- | --- |
-| `Status(u16)` | A response with that status |
-| `ServerError` | A response with any 5xx status |
-| `Timeout` | An error for which `Error::is_timeout()` is true |
-| `ConnectionError` | Any other error for which `Error::is_retryable()` is true: a failed connect, a reset, aborted, or closed connection, an I/O error on the way to a proxy, and a proxy answer of 502, 503, or 504 to `CONNECT` |
-
-A `CONNECT` answer ends the request with an error, not a response, so only
-`ConnectionError` matches it. Other `CONNECT` answers, such as 407, and a
-SOCKS5 reply from 3 to 6, are not retried. No other error is retried.
-
-Start from `none()` or `transient()`. `retry_on(triggers)` replaces the
-trigger set and `on_status(code)` adds one status. Every other setting has a
-setter named after it: `max_retries`, `initial_backoff`, `max_backoff`,
-`backoff_factor`, `jitter`, `max_retry_after`, and `allow_non_idempotent`.
+| `status()` | The response status, or `None` after an error |
+| `response()`, `error()` | The response or the error of this try |
+| `is_transient()` | The default rule: `Error::is_retryable()`, or status 429, 502, 503, or 504 |
+| `is_block()` | `response().block()` is `Some`; see [blocks](crawling.md#blocks-retries-and-proxies) |
 
 ```rust
-use leyline::{RetryPolicy, RetryTrigger};
-use std::time::Duration;
+use leyline::Retry;
 
-let policy = RetryPolicy::none()
-    .max_retries(5)
-    .initial_backoff(Duration::from_millis(50))
-    .max_backoff(Duration::from_secs(2))
-    .backoff_factor(1.5)
-    .jitter(true)
-    .retry_on([RetryTrigger::ServerError, RetryTrigger::ConnectionError]);
-
-let also = RetryPolicy::transient().on_status(408);
-# let _ = (policy, also);
+let also_408 = Retry::new(3).when(|attempt| {
+    attempt.is_transient() || attempt.status().is_some_and(|s| s.as_u16() == 408)
+});
+let not_blocks = Retry::new(3).when(|attempt| attempt.is_transient() && !attempt.is_block());
+# let _ = (also_408, not_blocks);
 ```
 
-Backoff for attempt `n` is `initial_backoff * backoff_factor.powi(n)`, capped at
-`max_backoff`. With `jitter` set, the result is multiplied by a uniform random
-factor between 0 and 1 (full jitter). `RetryPolicy::backoff(attempt)` returns
-that value, so a retry loop of your own can wait the same way. With `jitter`
-on, each call draws a new factor.
+`Error::is_retryable()` is true for a failed connect, a timeout, a reset,
+aborted, or closed connection, an I/O error on the way to a proxy, and a
+proxy answer of 502, 503, or 504 to `CONNECT`.
+
+## Backoff
+
+`Retry::backoff(min, max)` waits between half of and all of
+`min * 2^n` before try `n + 1`, capped at `max` (equal jitter). The fixed
+half bounds how fast retries come; the random half spreads them out.
 
 ```rust
-use leyline::RetryPolicy;
 use std::time::Duration;
 
-let policy = RetryPolicy::transient().jitter(false);
-assert!(policy.backoff(1) > policy.backoff(0));
-assert_eq!(policy.backoff(10), Duration::from_secs(1));
+use leyline::Retry;
+
+let retry = Retry::new(5).backoff(Duration::from_millis(50), Duration::from_secs(2));
+# let _ = retry;
 ```
 
 ## Retry-After wins
 
 When a retried response carries `Retry-After`, its value replaces the
-computed backoff. Leyline reads delta-seconds and an IMF-fixdate with a `GMT`
-or `UTC` zone. An unparsable value falls back to the computed backoff. A
-header set with [`wait_header`](#retry-on-a-condition-and-wait-on-a-header)
-wins over `Retry-After`.
+backoff. Leyline reads delta-seconds and an IMF-fixdate with a `GMT` or `UTC`
+zone. An unparsable value falls back to the backoff. A header set with
+[`wait_header`](#wait-on-a-header) wins over `Retry-After`.
 
-`max_retry_after` caps the wait. `RetryPolicy::transient()` sets it to 60 s,
-and `RetryPolicy::none()` has no cap. When the server asks for longer than
-the cap, or a wait or backoff is longer than the time left before the `total`
-timeout, Leyline stops and returns the response, or the last error, as when
-retries run out. `Error::retries_exhausted()` is then `true`.
+`max_wait` caps the wait; the default is 60 s. When the server asks for
+longer than the cap, or a wait is longer than the time left before the
+`total` timeout, Leyline stops and returns the response, or the last error,
+as when retries run out. `Error::retries_exhausted()` is then `true`.
 
-A `Retry-After` on a status that no trigger or `retry_if` matches is not
-acted on. Read it after `error_for_status()` with `Error::retry_after()`:
+A `Retry-After` on a response the rule does not retry is not acted on. Read
+it after `error_for_status()` with `Error::retry_after()`:
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
 let session = leyline::Session::new();
-match session.get("https://api.example/jobs").error_for_status().await {
+match session.get("https://api.example/jobs").error_for_status().send().await {
     Ok(resp) => println!("{}", resp.status()),
     Err(err) => match err.retry_after() {
         Some(wait) => println!("come back in {wait:?}"),
@@ -117,98 +97,80 @@ match session.get("https://api.example/jobs").error_for_status().await {
 
 See [Status codes are not errors](errors.md#status-codes-are-not-errors).
 
-## Retry on a condition and wait on a header
+## Wait on a header
 
-`retry_if(predicate)` adds a test on the response head: the status and the
-headers. A response is retried when a trigger matches its status or when any
-predicate returns `true`.
+`wait_header(name)` names a header that says how long to wait. Leyline reads
+any of these forms:
 
-`wait_header(name, format)` names a header that says how long to wait.
-`WaitFormat` says how to read it:
+| Value | Example |
+| --- | --- |
+| Seconds to wait | `30` |
+| The Unix time to wait until: any number of at least `1000000000`. A past time means no wait | `1767225600` |
+| The time to wait until, as an IMF-fixdate | `Thu, 01 Jan 2026 00:00:00 GMT` |
 
-| `WaitFormat` | Value | Example |
-| --- | --- | --- |
-| `Seconds` | Seconds to wait, whole or fractional | `30` |
-| `UnixSeconds` | The Unix time to wait until. A past time means no wait | `1767225600` |
-| `HttpDate` | The time to wait until, as an IMF-fixdate | `Thu, 01 Jan 2026 00:00:00 GMT` |
+`wait_header_ms(name)` names a header that holds milliseconds to wait.
 
 Leyline reads the `wait_header` headers in the order you added them, then
-`Retry-After`, and uses the first value that parses. `max_retry_after` caps
-these waits too. They apply to every retried response, whichever trigger or
-predicate matched it. A retry after an error has no response, so it uses the
-computed backoff.
+`Retry-After`, and uses the first value that parses. `max_wait` caps these
+waits too. A retry after an error has no response, so it uses the backoff.
 
-This policy retries a 403 that reports a used-up quota, and only that one,
-after the reset time:
+This retries a 403 that reports a used-up quota, and only that one, after
+the reset time:
 
 ```rust,no_run
 use std::time::Duration;
 
-use leyline::{RetryPolicy, WaitFormat};
+use leyline::Retry;
 use leyline::http::StatusCode;
 
 const REMAINING: &str = "x-ratelimit-remaining";
 const RESET: &str = "x-ratelimit-reset";
 
 # async fn run() -> leyline::Result<()> {
-let policy = RetryPolicy::transient()
-    .retry_if(|resp| {
-        resp.status() == StatusCode::FORBIDDEN && resp.header(REMAINING) == Some("0")
+let retry = Retry::new(3)
+    .when(|attempt| {
+        attempt.response().is_some_and(|resp| {
+            resp.status() == StatusCode::FORBIDDEN && resp.header(REMAINING) == Some("0")
+        })
     })
-    .wait_header(RESET, WaitFormat::UnixSeconds)
-    .max_retry_after(Duration::from_secs(120));
-let session = leyline::Session::builder().retry(policy).build()?;
-let resp = session.get("https://api.example/repos").error_for_status().await?;
+    .wait_header(RESET)
+    .max_wait(Duration::from_secs(120));
+let session = leyline::Session::builder().retry(retry).build()?;
+let resp = session.get("https://api.example/repos").error_for_status().send().await?;
 # let _ = resp;
 # Ok(())
 # }
 ```
 
-A policy with `max_retries(0)`, such as `none()`, never retries, so start
-from `transient()` or set `max_retries`.
-
-Blocks, `skip_blocks`, and retries through other proxies are covered in
-[Crawling](crawling.md#retry-a-block-through-another-proxy).
+Blocks and retries through other proxies are covered in
+[Crawling](crawling.md#blocks-retries-and-proxies).
 
 ## The idempotency rule
 
 Leyline retries only idempotent methods by default: GET, HEAD, OPTIONS, PUT,
-DELETE, and TRACE (RFC 9110, section 9.2.2). A POST or PATCH is sent once. A
-retry also needs a body that can be sent again. A streaming request body is
-retried only when no byte of it was read, for example after a connect error.
-See [Streaming](streaming.md).
+DELETE, and TRACE (RFC 9110, section 9.2.2). A retry also needs a body that
+can be sent again. A streaming request body is retried only when no byte of
+it was read, for example after a connect error. See
+[Streaming](streaming.md).
 
-`retry_unsent(true)` retries any method when the error happened before the
-request was sent: a DNS, connect, TLS, or proxy error, a connect timeout, an
+A request of any method that never reached the server is retried when the
+rule allows it: a DNS, connect, TLS, or proxy error, a connect timeout, an
 HTTP/2 `REFUSED_STREAM` reset, or an HTTP/3 request that the server reports
-it did not process. An HTTP/3 request that the server rejects twice is
-retried on the same connection. The server never processed the request, so a retry cannot
-repeat a write. The error
-must still match a trigger. After a redirect got a response, an error on a
-later leg does not count: the server may already have processed the
-original request, so `retry_unsent` does not replay it. A 401 digest
-challenge is not an answer, so an error on the authorized leg still counts.
+it did not process. The server never processed it, so a retry cannot repeat
+a write. After a redirect got a response, an error on a later leg does not
+count: the server may already have processed the original request. A 401
+digest challenge is not an answer, so an error on the authorized leg still
+counts.
 
-```rust,no_run
-use leyline::RetryPolicy;
-
-# fn run() -> leyline::Result<()> {
-let policy = RetryPolicy::transient().retry_unsent(true);
-let session = leyline::Session::builder().retry(policy).build()?;
-# drop(session);
-# Ok(())
-# }
-```
-
-`allow_non_idempotent(true)` retries every failure of any method. Use it only
-when the endpoint is safe to repeat.
+`any_method(true)` retries every failure of any method. Use it only when the
+endpoint is safe to repeat.
 
 ## Count the attempts
 
 `Response::attempts()` returns the number of attempts that produced the
 response: 1 without retries. When retries run out on a retryable status, the
 response carries the full count. `Error::attempts()` and
-`trace::Summary::attempts` carry the same count. See
+the `attempts` field of `Event::Summary` carry the same count. See
 [Logging and tracing](logging.md#one-event-per-request).
 
 ## Retries and streamed responses
@@ -221,7 +183,7 @@ not retried. To try again, send a new request.
 
 Connection setup has no retry loop of its own. These cases send a request or
 connect again without asking the policy. Each happens at most once for one
-attempt, and the result then goes to `RetryPolicy` like any other:
+attempt, and the result then goes to `Retry` like any other:
 
 - HTTP/1.1: a pooled keep-alive connection fails before the response. An
   idempotent request with a buffered or empty body goes once more on a new
@@ -234,7 +196,7 @@ attempt, and the result then goes to `RetryPolicy` like any other:
   more on a new connection, for any method. After an `H3_REQUEST_REJECTED`
   reset before the response head, a buffered request goes once more on the
   same connection.
-- `ProtocolPolicy::Race`: when both the HTTP/3 and the HTTP/2 connect fail,
+- `Protocol::Race`: when both the HTTP/3 and the HTTP/2 connect fail,
   Leyline falls back to `Auto` and connects again.
 
 ALPN needs no second send. See
@@ -242,7 +204,7 @@ ALPN needs no second send. See
 
 ## The timeouts
 
-`TimeoutConfig` holds every timeout. Each setter takes a `Duration` or
+`Timeout` holds every timeout. Each setter takes a `Duration` or
 `None`, and `None` turns that timeout off.
 
 | Setter | Default | Covers |
@@ -254,14 +216,16 @@ ALPN needs no second send. See
 | `body` | none | The whole body of a `.stream()` response, or of a body that the transport delivers in pieces, counted from the first read of the body. It does not apply to a body that the transport buffers; `response_header` and `total` bound that body |
 | `error_body` | 10 s | The body that `RequestBuilder::error_for_status()` keeps in a status error. `total` also bounds it. See [Responses](responses.md#turn-a-status-into-an-error) |
 
+`Timeout::total`, and `.timeout(duration)`, bound the whole call, every retry and wait included. To bound each attempt, set `Timeout::response_header` or `read`.
+
 ```rust,no_run
-use leyline::{Session, TimeoutConfig};
+use leyline::{Session, Timeout};
 use std::time::Duration;
 
 # fn run() -> leyline::Result<()> {
 let session = Session::builder()
     .timeout(
-        TimeoutConfig::new()
+        Timeout::new()
             .total(Duration::from_secs(60))
             .connect(Duration::from_secs(5))
             .read(Duration::from_secs(15))
@@ -274,13 +238,13 @@ let session = Session::builder()
 # }
 ```
 
-`SessionBuilder::timeout` takes a `Duration` or a `TimeoutConfig`. A
+`SessionBuilder::timeout` takes a `Duration` or a `Timeout`. A
 `Duration` sets `total`, and the other settings keep their
 defaults. A later `timeout` call replaces the whole configuration, so to
-change `connect` alone, pass `TimeoutConfig::new().connect(duration)`.
+change `connect` alone, pass `Timeout::new().connect(duration)`.
 
-Every timeout gives an error whose `is_timeout()` is true. The kind depends
-on which one elapsed; see [Fine-grained kinds](errors.md#fine-grained-kinds).
+Every timeout gives an error of kind `Kind::Timeout`. For a connect timeout,
+`is_connect()` is also true; see [Errors](errors.md#match-on-the-kind).
 
 ## Per-request timeouts
 
@@ -290,7 +254,7 @@ keep the session value. A `Duration` sets `total`. `connect` stays
 session-wide, because connections are pooled across requests.
 
 ```rust,no_run
-use leyline::TimeoutConfig;
+use leyline::Timeout;
 use std::time::Duration;
 
 # async fn run() -> leyline::Result<()> {
@@ -299,18 +263,18 @@ let session = leyline::Session::new();
 let quick = session
     .get("https://example.com/slow")
     .timeout(Duration::from_secs(5))
-    .await?;
+    .send().await?;
 
 let streamed = session
     .get("https://example.com/feed")
     .stream()
     .timeout(
-        TimeoutConfig::new()
+        Timeout::new()
             .total(None)
             .read(Duration::from_secs(10))
             .response_header(Duration::from_secs(15)),
     )
-    .await?;
+    .send().await?;
 
 # let _ = (quick, streamed);
 # Ok(())
@@ -319,8 +283,8 @@ let streamed = session
 
 ## Bound a whole download
 
-`TimeoutConfig::body` bounds the whole body from its first read, so it bounds a
-`.stream()` body and `RequestBuilder::download`, which streams. A plain
+`Timeout::body` bounds the whole body from its first read, so it bounds a
+`.stream()` body and `Response::download_to`, which streams. A plain
 `Duration` passed to `.timeout` sets only `total`, which ends at the head of
 a streamed response, so set `body` for a download. No outer timeout is
 needed.
@@ -328,17 +292,21 @@ needed.
 ```rust,no_run
 use std::time::Duration;
 
-use leyline::TimeoutConfig;
+use leyline::Timeout;
 
 # async fn run(session: leyline::Session) -> leyline::Result<()> {
 let written = session
     .get("https://example.com/archive.zip")
-    .timeout(TimeoutConfig::new().body(Duration::from_secs(600)))
-    .download("archive.zip", None)
+    .timeout(Timeout::new().body(Duration::from_secs(600)))
+    .error_for_status()
+    .stream()
+    .send()
+    .await?
+    .download_to("archive.zip")
     .await;
 match written {
     Ok(bytes) => println!("{bytes} bytes"),
-    Err(err) if err.is_timeout() => println!("download took too long"),
+    Err(err) if err.kind() == leyline::Kind::Timeout => println!("download took too long"),
     Err(err) => return Err(err),
 }
 # Ok(())
@@ -351,4 +319,4 @@ the target path as it was. See [Streaming](streaming.md) and
 
 ## Next
 
-Read [Errors](errors.md) to match on `ErrorCategory` and `Kind`.
+Read [Errors](errors.md) to match on `Kind`.

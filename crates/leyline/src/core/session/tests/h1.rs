@@ -1,7 +1,7 @@
 use super::super::{Session, SessionBuilder};
-use crate::core::error::Kind;
-use crate::core::response::{HttpVersion, Response};
-use crate::{Body, ContentEncoding};
+use crate::core::error::Cause;
+use crate::core::response::Response;
+use crate::{Body, Encoding};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[tokio::test]
@@ -40,7 +40,7 @@ async fn plaintext_http_uses_h1_and_preserves_duplicate_headers() {
                 .unwrap();
     });
 
-    let session = Session::browser(crate::Browser::default());
+    let session = Session::from(crate::Browser::default());
     let resp = session
         .request(http::Method::GET, format!("http://{addr}/wire?q=1"))
         .header("x-dup", "one")
@@ -49,7 +49,7 @@ async fn plaintext_http_uses_h1_and_preserves_duplicate_headers() {
         .await
         .unwrap();
 
-    assert_eq!(resp.version(), HttpVersion::Http1_1);
+    assert_eq!(resp.version(), http::Version::HTTP_11);
     assert_eq!(
         resp.headers()
             .get_all(http::header::SET_COOKIE)
@@ -88,7 +88,7 @@ async fn owned() {
         .uri(format!("http://{addr}/owned"))
         .body(Body::from(Vec::new()))
         .unwrap();
-    let resp = Session::browser(crate::Browser::default())
+    let resp = Session::from(crate::Browser::default())
         .execute(req)
         .await
         .unwrap();
@@ -120,7 +120,11 @@ async fn one_shot_get(builder: SessionBuilder, path: &str) -> Response {
             .unwrap();
     });
     let session = builder.build().unwrap();
-    let resp = session.get(format!("http://{addr}{path}")).await.unwrap();
+    let resp = session
+        .get(format!("http://{addr}{path}"))
+        .send()
+        .await
+        .unwrap();
     server.await.unwrap();
     resp
 }
@@ -129,7 +133,7 @@ async fn one_shot_get(builder: SessionBuilder, path: &str) -> Response {
 async fn audit_is_off_by_default() {
     let resp = one_shot_get(Session::builder(), "/x").await;
     assert!(
-        resp.audit().is_none(),
+        resp.fingerprint().is_none(),
         "audit() should be None unless opted in"
     );
     assert!(
@@ -142,7 +146,7 @@ async fn audit_is_off_by_default() {
 async fn audit_opt_in_populates_fingerprints_and_headers() {
     let resp = one_shot_get(Session::builder().audit(true), "/x").await;
     let audit = resp
-        .audit()
+        .fingerprint()
         .expect("audit() should be Some when .audit(true) is set");
     assert!(!audit.ja4.is_empty(), "JA4 should be populated");
     assert_eq!(
@@ -206,10 +210,10 @@ async fn compress_sets_header_and_puts_compressed_bytes_on_the_wire() {
     });
 
     let payload = b"the quick brown fox jumps over the lazy dog. ".repeat(64);
-    let resp = Session::browser(crate::Browser::default())
+    let resp = Session::from(crate::Browser::default())
         .post(format!("http://{addr}/upload"))
         .body(payload.clone())
-        .compress(ContentEncoding::Gzip)
+        .compress_body(Encoding::Gzip)
         .send()
         .await
         .unwrap();
@@ -230,19 +234,19 @@ async fn compress_rejects_streaming_body() {
         ))]),
         None,
     );
-    let err = Session::browser(crate::Browser::default())
+    let err = Session::from(crate::Browser::default())
         .post("http://127.0.0.1:9/x")
         .body(body)
-        .compress(ContentEncoding::Gzip)
+        .compress_body(Encoding::Gzip)
         .send()
         .await
         .unwrap_err();
-    assert_eq!(err.kind(), Kind::Body, "got: {err:?}");
+    assert_eq!(err.cause(), Cause::Body, "got: {err:?}");
 }
 
 #[tokio::test]
 async fn unsupported_scheme_proxy_is_refused_not_sent_in_cleartext() {
-    let err = Session::browser(crate::Browser::default())
+    let err = Session::from(crate::Browser::default())
         .request(http::Method::GET, "https://example.test/")
         .proxy("ftp://user:secret@127.0.0.1:1")
         .send()
@@ -306,11 +310,11 @@ async fn compress_strips_stale_caller_content_length() {
     });
 
     let payload = b"the quick brown fox jumps over the lazy dog. ".repeat(64);
-    let resp = Session::browser(crate::Browser::default())
+    let resp = Session::from(crate::Browser::default())
         .post(format!("http://{addr}/upload"))
         .header("content-length", "999999")
         .body(payload.clone())
-        .compress(ContentEncoding::Gzip)
+        .compress_body(Encoding::Gzip)
         .send()
         .await
         .unwrap();
@@ -322,7 +326,7 @@ async fn compress_strips_stale_caller_content_length() {
 
 #[tokio::test]
 async fn https_scheme_proxy_is_accepted_and_dialed_over_tls() {
-    let err = Session::browser(crate::Browser::default())
+    let err = Session::from(crate::Browser::default())
         .request(http::Method::GET, "https://example.test/")
         .proxy("https://user:secret@127.0.0.1:1")
         .send()
@@ -348,12 +352,12 @@ async fn json_builder_returns_error_instead_of_panicking() {
         }
     }
 
-    let session = Session::browser(crate::Browser::default());
+    let session = Session::from(crate::Browser::default());
     let err = session
         .post("http://127.0.0.1:9/no-network")
         .json(&BadJson)
         .send()
         .await
         .unwrap_err();
-    assert_eq!(err.kind(), Kind::Json);
+    assert_eq!(err.cause(), Cause::Json);
 }

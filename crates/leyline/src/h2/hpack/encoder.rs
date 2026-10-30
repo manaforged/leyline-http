@@ -112,7 +112,9 @@ impl Encoder {
     fn encode_literal_indexed_name(&mut self, name_index: usize, value: &str, dst: &mut Vec<u8>) {
         integer::encode(name_index, 6, 0x40, dst);
         encode_string(value, dst);
-        let name = self.resolve_name(name_index);
+        let name = table::lookup(name_index, &self.dynamic)
+            .map(|(name, _)| name)
+            .unwrap_or_default();
         self.dynamic
             .insert(name, Bytes::copy_from_slice(value.as_bytes()));
     }
@@ -125,18 +127,6 @@ impl Encoder {
             Bytes::copy_from_slice(name.as_bytes()),
             Bytes::copy_from_slice(value.as_bytes()),
         );
-    }
-
-    fn resolve_name(&self, index: usize) -> Bytes {
-        if index < table::STATIC_TABLE.len() {
-            Bytes::from_static(table::STATIC_TABLE[index].0.as_bytes())
-        } else {
-            let dyn_idx = index - table::STATIC_TABLE.len();
-            self.dynamic
-                .get(dyn_idx)
-                .map(|(n, _)| n.clone())
-                .unwrap_or_default()
-        }
     }
 }
 

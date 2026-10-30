@@ -5,9 +5,8 @@
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use leyline::testing::{TestResponse, TestServer};
-use leyline::tls::{ResolveFuture, Resolver};
-use leyline::{RetryPolicy, Session};
+use leyline::testing;
+use leyline::{Resolver, Retry, Session};
 
 const UNRESOLVABLE: &str = "http://leyline-test.invalid";
 
@@ -17,7 +16,17 @@ struct ResolvesOnce {
 }
 
 impl Resolver for ResolvesOnce {
-    fn resolve<'a>(&'a self, _host: &'a str, _port: u16) -> ResolveFuture<'a> {
+    fn resolve<'a>(
+        &'a self,
+        _host: &'a str,
+        _port: u16,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = std::io::Result<Vec<std::net::SocketAddr>>>
+                + Send
+                + 'a,
+        >,
+    > {
         let first = !self.used.swap(true, std::sync::atomic::Ordering::SeqCst);
         let target = self.target;
         Box::pin(async move {
@@ -39,12 +48,7 @@ fn unsent_retries() -> Session {
 
 fn unsent_retries_with(builder: leyline::SessionBuilder) -> Session {
     builder
-        .retry(
-            RetryPolicy::transient()
-                .initial_backoff(Duration::from_millis(1))
-                .jitter(false)
-                .retry_unsent(true),
-        )
+        .retry(Retry::new(3).backoff(Duration::from_millis(1), Duration::from_secs(1)))
         .build()
         .unwrap()
 }
@@ -53,8 +57,8 @@ fn unsent_retries_with(builder: leyline::SessionBuilder) -> Session {
 async fn a_post_answered_with_a_redirect_is_not_replayed_when_the_next_leg_fails() {
     let location = Arc::new(OnceLock::new());
     let target = Arc::clone(&location);
-    let server = TestServer::http(move |_| {
-        TestResponse::new(303).header("location", target.get().cloned().unwrap_or_default())
+    let server = testing::Server::http(move |_| {
+        testing::Response::new(303).header("location", target.get().cloned().unwrap_or_default())
     })
     .await
     .unwrap();
@@ -63,6 +67,7 @@ async fn a_post_answered_with_a_redirect_is_not_replayed_when_the_next_leg_fails
     let err = unsent_retries()
         .post(server.url("/create-job"))
         .body("job=1")
+        .send()
         .await
         .unwrap_err();
 
@@ -75,6 +80,7 @@ async fn a_post_whose_first_leg_never_connects_is_still_retried() {
     let err = unsent_retries()
         .post(format!("{UNRESOLVABLE}/create-job"))
         .body("job=1")
+        .send()
         .await
         .unwrap_err();
 
@@ -112,11 +118,12 @@ async fn a_digest_challenge_does_not_block_retrying_an_unsent_post() {
         target: std::net::SocketAddr::from(([127, 0, 0, 1], port)),
         used: std::sync::atomic::AtomicBool::new(false),
     });
-    let session = unsent_retries_with(Session::builder().dns(resolver as Arc<dyn Resolver>));
+    let session = unsent_retries_with(Session::builder().dns_resolver(resolver));
     let err = session
         .post(format!("http://challenge.invalid:{port}/create-job"))
-        .digest_auth(leyline::DigestAuth::new("user", "pass"))
+        .digest_auth("user", "pass")
         .body("job=1")
+        .send()
         .await
         .unwrap_err();
     challenger.await.unwrap();

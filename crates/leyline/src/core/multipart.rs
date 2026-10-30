@@ -10,6 +10,8 @@ use crate::core::body::{Body, BodyKind};
 
 mod debug;
 
+/// One part of a multipart form body, with an optional filename, MIME type, and extra headers.
+#[must_use]
 pub struct Part {
     pub(crate) name: String,
     pub(crate) body: Body,
@@ -19,6 +21,7 @@ pub struct Part {
 }
 
 impl Part {
+    /// Creates a text part with MIME type `text/plain; charset=utf-8`.
     pub fn text(value: impl Into<String>) -> Self {
         let s = value.into();
         Self {
@@ -30,6 +33,7 @@ impl Part {
         }
     }
 
+    /// Creates a part from raw bytes with no MIME type set.
     pub fn bytes(bytes: impl Into<Bytes>) -> Self {
         Self {
             name: String::new(),
@@ -40,6 +44,7 @@ impl Part {
         }
     }
 
+    /// Creates a part from a byte stream of unknown length with no MIME type set.
     pub fn stream<S>(stream: S) -> Self
     where
         S: Stream<Item = io::Result<Bytes>> + Send + 'static,
@@ -53,6 +58,7 @@ impl Part {
         }
     }
 
+    /// Creates a part that streams the file at `path`, using its file name, or `file` when it has none.
     pub fn file(path: impl AsRef<Path>) -> io::Result<Self> {
         let path = path.as_ref().to_path_buf();
         let metadata = std::fs::metadata(&path)?;
@@ -73,22 +79,27 @@ impl Part {
         })
     }
 
+    /// Sets the filename sent in the part's `Content-Disposition`.
     pub fn filename(mut self, name: impl Into<String>) -> Self {
         self.filename = Some(name.into());
         self
     }
 
+    /// Sets the part's MIME type.
     pub fn mime(mut self, mime: impl Into<String>) -> Self {
         self.mime = Some(mime.into());
         self
     }
 
+    /// Adds an extra header to the part.
     pub fn header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.extra_headers.push((name.into(), value.into()));
         self
     }
 }
 
+/// A `multipart/form-data` body built from named parts.
+#[must_use]
 pub struct Form {
     pub(crate) parts: Vec<Part>,
     pub(crate) boundary: String,
@@ -101,6 +112,7 @@ impl Default for Form {
 }
 
 impl Form {
+    /// Creates an empty form with a random boundary.
     pub fn new() -> Self {
         Self {
             parts: Vec::new(),
@@ -108,28 +120,11 @@ impl Form {
         }
     }
 
-    pub fn boundary(&self) -> &str {
-        &self.boundary
-    }
-
-    pub fn text(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
-        let mut part = Part::text(value);
-        part.name = name.into();
-        self.parts.push(part);
-        self
-    }
-
+    /// Appends `part` under the field `name`.
     pub fn part(mut self, name: impl Into<String>, mut part: Part) -> Self {
         part.name = name.into();
         self.parts.push(part);
         self
-    }
-
-    pub fn file(mut self, name: impl Into<String>, path: impl AsRef<Path>) -> io::Result<Self> {
-        let mut part = Part::file(path)?;
-        part.name = name.into();
-        self.parts.push(part);
-        Ok(self)
     }
 
     pub(crate) fn len_hint(&self) -> Option<u64> {
@@ -173,12 +168,6 @@ impl Form {
 
     pub(crate) fn content_type(&self) -> String {
         format!("multipart/form-data; boundary={}", self.boundary)
-    }
-}
-
-impl From<Form> for Body {
-    fn from(form: Form) -> Body {
-        form.into_stream_body()
     }
 }
 

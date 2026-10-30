@@ -29,7 +29,13 @@ impl DataFrame {
         let end_stream = header.flags & flags::END_STREAM != 0;
         let padded = header.flags & flags::PADDED != 0;
 
-        let data = if padded && !payload.is_empty() {
+        if padded && payload.is_empty() {
+            return Err(H2Error::Connection {
+                code: ErrorCode::ProtocolError,
+                reason: "padded DATA frame has no pad length".into(),
+            });
+        }
+        let data = if padded {
             let pad_len = payload[0] as usize;
             if pad_len >= payload.len() {
                 return Err(H2Error::Connection {

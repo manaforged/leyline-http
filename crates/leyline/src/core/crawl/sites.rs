@@ -8,7 +8,7 @@ use super::frontier::{Queued, page_key, same_site};
 use super::sitemap::SitemapRead;
 use super::{ANY_AGENT, Crawl, Event, MAX_IN_FLIGHT, SkipReason, Task, sitemap};
 use crate::core::config::{Origin, normalize_host};
-use crate::core::retry::{RetryPolicy, RetryTrigger};
+use crate::core::retry::Retry;
 use crate::core::robots::{Robots, RobotsSource};
 
 const ROBOTS_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
@@ -16,12 +16,6 @@ const MAX_CRAWL_DELAY: Duration = Duration::from_secs(30);
 const MAX_SITEMAP_FILES: usize = 50;
 const MAX_SITEMAP_TASKS: usize = 2;
 const ROBOTS_RETRIES: u32 = 4;
-const ROBOTS_RETRY_ON: [RetryTrigger; 4] = [
-    RetryTrigger::ConnectionError,
-    RetryTrigger::Timeout,
-    RetryTrigger::Status(429),
-    RetryTrigger::ServerError,
-];
 const ROBOTS_BACKOFF: Duration = Duration::from_secs(1);
 const ROBOTS_MAX_BACKOFF: Duration = Duration::from_secs(8);
 
@@ -115,12 +109,11 @@ impl Crawl {
     fn robots_task(&self, origin: Origin, url: Url) -> Task {
         let session = self.session.clone();
         let trusted = self.trusted.clone();
-        let retry = RetryPolicy::transient()
-            .retry_on(ROBOTS_RETRY_ON)
-            .max_retries(ROBOTS_RETRIES)
-            .initial_backoff(ROBOTS_BACKOFF)
-            .max_backoff(ROBOTS_MAX_BACKOFF)
-            .jitter(false);
+        let retry = Retry::new(ROBOTS_RETRIES)
+            .when(|attempt| {
+                attempt.is_transient() || attempt.status().is_some_and(|s| s.is_server_error())
+            })
+            .backoff(ROBOTS_BACKOFF, ROBOTS_MAX_BACKOFF);
         Box::pin(async move {
             let robots = match session
                 .robots_with(url.as_str(), ANY_AGENT, retry, trusted)

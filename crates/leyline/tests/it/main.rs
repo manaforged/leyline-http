@@ -18,6 +18,8 @@ mod body_cap;
 mod cfnetwork_live;
 mod claim_guard;
 mod connect_timeout;
+#[cfg(feature = "bench-internals")]
+mod connection_stats;
 mod content_encoding;
 mod cookie_lifetime;
 mod core_digest;
@@ -110,8 +112,15 @@ mod http_semantics;
 #[cfg(feature = "bench-internals")]
 mod https_proxy;
 mod identity_switch;
+mod identity_table;
 mod limit_settings;
 mod limits_and_state;
+#[cfg(all(feature = "bench-internals", feature = "http3", feature = "websocket"))]
+mod live_connection_reuse;
+#[cfg(all(feature = "bench-internals", feature = "http3", feature = "websocket"))]
+mod live_protocols;
+#[cfg(all(feature = "bench-internals", feature = "http3", feature = "websocket"))]
+mod live_tcp_ttl;
 mod pages_and_limits;
 mod parity_builder;
 #[cfg(feature = "bench-internals")]
@@ -122,9 +131,9 @@ mod pool_h1_injection;
 mod pool_h1_keepalive;
 #[cfg(feature = "bench-internals")]
 mod pool_reconnect_storm;
-#[cfg(feature = "bench-internals")]
-mod pool_stats;
 mod pq_key_shares;
+#[cfg(all(feature = "bench-internals", feature = "http3", feature = "websocket"))]
+mod profile_and_builder_checks;
 #[cfg(feature = "bench-internals")]
 mod profile_builtin;
 #[cfg(feature = "bench-internals")]
@@ -132,6 +141,8 @@ mod profile_validation;
 mod proxy_identity;
 mod proxy_rebind;
 mod proxy_rules;
+#[cfg(all(feature = "bench-internals", feature = "http3", feature = "websocket"))]
+mod proxy_wire_bytes;
 mod public_debug;
 mod read_until;
 mod recovery;
@@ -147,11 +158,12 @@ mod server_chosen_urls;
 mod session_clone;
 mod session_lifecycle;
 mod sessions_and_devices;
-#[cfg(feature = "http3")]
+#[cfg(all(feature = "http3", feature = "bench-internals"))]
 mod smoke;
 mod state_files;
 mod status_and_retry;
 mod timeouts;
+#[cfg(feature = "bench-internals")]
 mod tls_client_hello_order;
 mod tls_floor;
 #[cfg(feature = "bench-internals")]
@@ -165,4 +177,6 @@ mod trace_unwind;
 mod websocket_messages;
 #[cfg(feature = "websocket")]
 mod websocket_subprotocol;
+#[cfg(feature = "bench-internals")]
+mod wire_golden;
 mod wire_headers;

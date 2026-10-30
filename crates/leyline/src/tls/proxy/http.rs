@@ -2,6 +2,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use tokio::net::TcpStream;
 
+use crate::tls::alpn::AlpnPlan;
 use crate::tls::error::{ProxyReply, TlsError};
 use crate::tls::{SessionCache, TlsIo, TlsStream};
 
@@ -9,8 +10,8 @@ use crate::util::proxy_basic_auth;
 
 const TARGET_UNREACHABLE_STATUSES: [u16; 2] = [502, 504];
 
-pub(crate) async fn tunnel<C: crate::tls::TlsHandshake>(
-    connector: &C,
+pub(crate) async fn tunnel(
+    connector: &crate::tls::FingerprintConnector,
     host: &str,
     port: u16,
     proxy: &url::Url,
@@ -20,8 +21,8 @@ pub(crate) async fn tunnel<C: crate::tls::TlsHandshake>(
     Ok(tcp_stream)
 }
 
-pub(crate) async fn tunnel_via_tls<C: crate::tls::TlsHandshake>(
-    connector: &C,
+pub(crate) async fn tunnel_via_tls(
+    connector: &crate::tls::FingerprintConnector,
     host: &str,
     port: u16,
     proxy: &url::Url,
@@ -31,8 +32,8 @@ pub(crate) async fn tunnel_via_tls<C: crate::tls::TlsHandshake>(
     Ok(tunnel)
 }
 
-pub(crate) async fn open_tls_to_proxy<C: crate::tls::TlsHandshake>(
-    connector: &C,
+pub(crate) async fn open_tls_to_proxy(
+    connector: &crate::tls::FingerprintConnector,
     proxy: &url::Url,
 ) -> Result<TlsStream, TlsError> {
     if connector.has_origin_tls_identity() {
@@ -48,13 +49,9 @@ pub(crate) async fn open_tls_to_proxy<C: crate::tls::TlsHandshake>(
         .ok_or_else(|| TlsError::proxy("https proxy has no host"))?;
     let tcp_stream = super::connect_to_proxy(connector, proxy).await?;
 
-    let proxy_key = SessionCache::key(
-        proxy_host,
-        proxy.port_or_known_default().unwrap_or(443),
-        None,
-    );
+    let proxy_key = SessionCache::key(proxy_host, super::port(proxy), None);
     connector
-        .do_tls_handshake(tcp_stream, proxy_host, &proxy_key, false)
+        .tls_handshake(tcp_stream, proxy_host, &proxy_key, AlpnPlan::Http11)
         .await
         .map_err(TlsError::into_proxy)
 }

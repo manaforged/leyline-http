@@ -2,7 +2,6 @@ use crate::bio::MemBioSlice;
 use crate::error::ErrorStack;
 use crate::ffi;
 use crate::stack::StackRef;
-use crate::x509::verify::{X509VerifyFlags, X509VerifyParamRef};
 use crate::x509::{X509Object, X509Ref};
 use crate::{cvt, cvt_p};
 use foreign_types::{ForeignType, ForeignTypeRef};
@@ -80,31 +79,6 @@ impl X509StoreBuilderRef {
             count += 1;
         }
         Ok(count)
-    }
-
-    #[corresponds(X509_STORE_set_default_paths)]
-    pub fn set_default_paths(&mut self) -> Result<(), ErrorStack> {
-        unsafe { cvt(ffi::X509_STORE_set_default_paths(self.as_ptr())) }
-    }
-
-    #[corresponds(X509_STORE_set_flags)]
-    pub fn try_set_flags(&mut self, flags: X509VerifyFlags) -> Result<(), ErrorStack> {
-        unsafe { cvt(ffi::X509_STORE_set_flags(self.as_ptr(), flags.bits())) }
-    }
-
-    #[corresponds(X509_STORE_set_flags)]
-    pub fn set_flags(&mut self, flags: X509VerifyFlags) {
-        self.try_set_flags(flags).expect("use try_set_flags");
-    }
-
-    #[corresponds(X509_STORE_get0_param)]
-    pub fn verify_param_mut(&mut self) -> &mut X509VerifyParamRef {
-        unsafe { X509VerifyParamRef::from_ptr_mut(ffi::X509_STORE_get0_param(self.as_ptr())) }
-    }
-
-    #[corresponds(X509_STORE_set1_param)]
-    pub fn set_param(&mut self, param: &X509VerifyParamRef) -> Result<(), ErrorStack> {
-        unsafe { cvt(ffi::X509_STORE_set1_param(self.as_ptr(), param.as_ptr())) }
     }
 
     #[cfg(test)]

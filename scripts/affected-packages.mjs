@@ -73,7 +73,7 @@ const GLOBAL_RUST_INPUTS = new Set([
 ]);
 
 const OWNED_PATHS = [
-  { path: "crates/leyline/README.md", package: "leyline-http" },
+  { path: "README.md", package: "leyline-http" },
   { path: "docs/", package: "leyline-http" },
 ];
 
@@ -86,12 +86,12 @@ const PR_GATES = [
   { gate: "doc", packages: ["leyline-http"] },
   { gate: "features", packages: ["leyline-http"] },
   { gate: "book", pattern: /^docs\// },
+  { gate: "links", pattern: /\.md$/ },
   { gate: "benches", pattern: /^benches\// },
   { gate: "fuzz-replay", pattern: /^fuzz\// },
 ];
 
 const CI_LOGIC_FILES = new Set([
-  ".github/workflows/check.yml",
   ".github/workflows/ci.yml",
   ".github/workflows/release.yml",
   ".github/workflows/book.yml",

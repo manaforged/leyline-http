@@ -1,12 +1,9 @@
-use std::sync::LazyLock;
 use std::time::Duration;
 
-use leyline::trace::{BodyEnd, BodyOutcome, Fanout, Metrics, Summary, Trace};
-use leyline::{
-    BlockRules, Browser, ErrorCategory, HostLimits, ProxyPool, RetryPolicy, Session, TimeoutConfig,
-};
+use leyline::trace::{Event, Metrics, Trace};
+use leyline::{Browser, HostLimits, Kind, Proxy, Retry, Session, Timeout};
 
-const BODY_LIMIT: u64 = 5 * 1024 * 1024;
+const BODY_LIMIT: usize = 5 * 1024 * 1024;
 const MAX_IN_FLIGHT: usize = 16;
 const PROXIES: [&str; 2] = [
     "http://user:pass@proxy1.example:8080",
@@ -16,47 +13,52 @@ const PAGES: usize = 40;
 const BLOCK_STATUSES: [u16; 2] = [403, 429];
 const BODY_TIMEOUT: Duration = Duration::from_secs(30);
 
-static BLOCKS: LazyLock<BlockRules> = LazyLock::new(|| {
-    let mut rules = BlockRules::builtin().clone();
-    rules.extend(BlockRules::statuses(BLOCK_STATUSES));
-    rules
-});
-
 struct Log;
 
 impl Trace for Log {
-    fn summary(&self, ev: &Summary<'_>) {
-        let status = ev.status.map(|s| s.as_u16()).unwrap_or(0);
-        println!(
-            "#{} [{}] {} {} via {} -> {status} in {:?} ({} attempts)",
-            ev.id,
-            ev.tag.unwrap_or("-"),
-            ev.method,
-            leyline::redact_url(ev.original_url),
-            ev.proxy.as_deref().unwrap_or("direct"),
-            ev.elapsed,
-            ev.attempts,
-        );
-    }
-
-    fn body(&self, ev: &BodyEnd<'_>) {
-        let outcome = match ev.outcome {
-            BodyOutcome::Complete => "complete".to_owned(),
-            BodyOutcome::Failed(err) => format!("failed: {err}"),
-            BodyOutcome::Dropped => "dropped".to_owned(),
-            _ => "ended".to_owned(),
-        };
-        println!(
-            "#{} body {} bytes in {:?}: {outcome}",
-            ev.id, ev.bytes, ev.elapsed
-        );
+    fn event(&self, event: &Event<'_>) {
+        match event {
+            Event::Summary {
+                id,
+                label,
+                method,
+                original_url,
+                proxy,
+                status,
+                elapsed,
+                attempts,
+                ..
+            } => println!(
+                "#{id} [{}] {method} {} via {} -> {} in {elapsed:?} ({attempts} attempts)",
+                label.unwrap_or("-"),
+                leyline::redact_url(original_url),
+                proxy.as_deref().unwrap_or("direct"),
+                status.map_or(0, |s| s.as_u16()),
+            ),
+            Event::Body {
+                id,
+                bytes,
+                elapsed,
+                outcome,
+                ..
+            } => {
+                let outcome = match outcome {
+                    Ok(()) => "complete".to_owned(),
+                    Err(Some(err)) => format!("failed: {err}"),
+                    Err(None) => "dropped".to_owned(),
+                };
+                println!("#{id} body {bytes} bytes in {elapsed:?}: {outcome}");
+            }
+            _ => {}
+        }
     }
 }
 
 async fn fetch(session: Session, index: usize, url: String) {
     let resp = match session
         .get(&url)
-        .tag(format!("page-{index}"))
+        .label(format!("page-{index}"))
+        .max_body_size(BODY_LIMIT)
         .stream()
         .send()
         .await
@@ -65,12 +67,12 @@ async fn fetch(session: Session, index: usize, url: String) {
         Err(e) => return report(&url, &e),
     };
     let via = resp.proxy().unwrap_or("direct").to_owned();
-    if let Some(signal) = BLOCKS.check(&resp) {
-        println!("{url} via {via}: {:?} by {}", signal.kind, signal.vendor);
+    if let Some(block) = resp.block() {
+        println!("{url} via {via}: {block:?}");
         return;
     }
     let mut sink = tokio::io::sink();
-    match resp.copy_decoded_to(&mut sink, Some(BODY_LIMIT)).await {
+    match resp.write_to(&mut sink).await {
         Ok(n) => println!("{url} via {via}: {n} bytes"),
         Err(e) => report(&url, &e),
     }
@@ -79,22 +81,21 @@ async fn fetch(session: Session, index: usize, url: String) {
 fn report(url: &str, e: &leyline::Error) {
     let via = e.proxy().unwrap_or("direct");
     let attempts = e.attempts();
-    match e.category() {
-        ErrorCategory::Proxy => {
+    match e.kind() {
+        Kind::Proxy => {
             eprintln!("{url}: proxy {via} failed after {attempts} attempts, the pool will rotate")
         }
-        ErrorCategory::BodyLimit => eprintln!("{url}: page larger than {BODY_LIMIT} bytes"),
+        Kind::BodyLimit => eprintln!("{url}: page larger than {BODY_LIMIT} bytes"),
         other => eprintln!("{url}: {other} via {via} after {attempts} attempts: {e}"),
     }
 }
 
 #[tokio::main]
 async fn main() -> leyline::Result<()> {
-    let proxies = ProxyPool::new(PROXIES)
+    let proxies = Proxy::list(PROXIES)
         .sticky_for(Duration::from_secs(300))
         .ban_after(3)
-        .ban_for(Duration::from_secs(120))
-        .rotate_on_block(BLOCKS.clone());
+        .ban_for(Duration::from_secs(120));
     let metrics = Metrics::new();
 
     let session = Session::builder()
@@ -105,10 +106,12 @@ async fn main() -> leyline::Result<()> {
                 .per_second(2.0)
                 .max_total_in_flight(MAX_IN_FLIGHT),
         )
-        .proxy_pool(proxies.clone())
-        .retry(RetryPolicy::transient().skip_blocks(BLOCKS.clone()))
-        .timeout(TimeoutConfig::new().body(BODY_TIMEOUT))
-        .trace(Fanout::new().with(Log).with(metrics.clone()))
+        .proxy(proxies.clone())
+        .block_statuses(BLOCK_STATUSES)
+        .retry(Retry::new(3).when(|attempt| attempt.is_transient() && !attempt.is_block()))
+        .timeout(Timeout::new().body(BODY_TIMEOUT))
+        .trace(Log)
+        .trace(metrics.clone())
         .build()?;
 
     let tasks: Vec<_> = (1..=PAGES)
@@ -122,11 +125,13 @@ async fn main() -> leyline::Result<()> {
         }
     }
 
-    println!("{}", metrics.snapshot());
-    for health in proxies.stats() {
+    println!("{metrics}");
+    let stats = session.stats();
+    for proxy in stats.proxies() {
         println!(
-            "{}: {} failures, banned until {:?}",
-            health.proxy, health.failures, health.banned_until
+            "{proxy}: {} failures, banned until {:?}",
+            stats.proxy_failures(proxy),
+            stats.proxy_banned_until(proxy)
         );
     }
     Ok(())

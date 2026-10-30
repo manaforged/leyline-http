@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use leyline::http::StatusCode;
-use leyline::{Error, ErrorCategory, RetryPolicy, Session, WaitFormat};
+use leyline::{Error, Kind, Retry, Session};
 use serde::{Deserialize, Serialize};
 
 const BASE_URL: &str = "https://api.example/v1/";
@@ -26,13 +26,16 @@ struct Client {
 
 impl Client {
     fn new(token: &str) -> leyline::Result<Self> {
-        let retry = RetryPolicy::transient()
-            .max_retries(3)
-            .retry_if(|resp| {
-                resp.status() == StatusCode::FORBIDDEN && resp.header(RATE_REMAINING) == Some("0")
-            })
-            .wait_header(RATE_RESET, WaitFormat::UnixSeconds)
-            .max_retry_after(MAX_RATE_WAIT);
+        let retry = Retry::new(3)
+            .wait_header(RATE_RESET)
+            .max_wait(MAX_RATE_WAIT)
+            .when(|attempt| {
+                attempt.is_transient()
+                    || attempt.response().is_some_and(|resp| {
+                        resp.status() == StatusCode::FORBIDDEN
+                            && resp.header(RATE_REMAINING) == Some("0")
+                    })
+            });
         let session = Session::builder()
             .base_url(BASE_URL)
             .bearer_auth(token)
@@ -43,6 +46,7 @@ impl Client {
 
     async fn repos(&self) -> leyline::Result<Vec<Repo>> {
         let mut all = Vec::new();
+        use futures_util::StreamExt;
         let mut pages = self.session.get("repos").error_for_status().pages();
         while let Some(page) = pages.next().await {
             all.extend(page?.json::<Vec<Repo>>().await?);
@@ -61,19 +65,19 @@ impl Client {
     }
 
     fn explain(e: &Error) -> String {
-        match e.category() {
-            ErrorCategory::Status => match e.retry_after() {
+        match e.kind() {
+            Kind::Status => match e.retry_after() {
                 Some(wait) if e.retries_exhausted() => {
                     format!("rate limited for {wait:?} after {} attempts", e.attempts())
                 }
                 Some(wait) => format!("busy, retry in {wait:?}"),
                 None => {
-                    let body = e.body_text().unwrap_or_default();
+                    let body = e.body().map(String::from_utf8_lossy).unwrap_or_default();
                     format!("api error {:?}: {body}", e.status())
                 }
             },
-            ErrorCategory::Timeout => "the api timed out".to_string(),
-            ErrorCategory::Dns | ErrorCategory::Connect | ErrorCategory::Tls => {
+            Kind::Timeout => "the api timed out".to_string(),
+            Kind::Dns | Kind::Connect | Kind::Tls => {
                 format!("network error: {e}")
             }
             other => format!("{other:?}: {e}"),

@@ -6,27 +6,11 @@
 //!
 //! OpenSSL wiki describes the [`BIGNUM`] data structure.
 //!
-//! # Examples
-//!
-//! ```
-//! use leyline_bssl::bn::BigNum;
-//! use leyline_bssl::error::ErrorStack;
-//!
-//! fn main() -> Result<(), ErrorStack> {
-//!   let a = BigNum::new()?; // a = 0
-//!   let b = BigNum::from_dec_str("1234567890123456789012345")?;
-//!   let c = &a * &b;
-//!   assert_eq!(a, c);
-//!   Ok(())
-//! }
-//! ```
-//!
 //! [`BIGNUM`]: https://wiki.openssl.org/index.php/Manual:Bn_internal(3)
 use crate::ffi;
 use foreign_types::{ForeignType, ForeignTypeRef};
 use libc::c_int;
 use std::cmp::Ordering;
-use std::ffi::CString;
 use std::ops::{Add, Deref, Div, Mul, Neg, Rem, Shl, Shr, Sub};
 use std::{fmt, ptr};
 
@@ -34,7 +18,7 @@ use crate::asn1::Asn1Integer;
 use crate::error::ErrorStack;
 use crate::ffi::BN_is_negative;
 use crate::string::OpensslString;
-use crate::{cvt, cvt_n, cvt_p};
+use crate::{cvt, cvt_p};
 use openssl_macros::corresponds;
 
 /// Options for the most significant bits of a randomly generated `BigNum`.
@@ -46,12 +30,6 @@ impl MsbOption {
 
     /// The most significant bit of the number must be 1.
     pub const ONE: MsbOption = MsbOption(0);
-
-    /// The most significant two bits of the number must be 1.
-    ///
-    /// The number of bits in the product of two such numbers will always be exactly twice the
-    /// number of bits in the original numbers.
-    pub const TWO_ONES: MsbOption = MsbOption(1);
 }
 
 foreign_type_and_impl_send_sync! {
@@ -118,112 +96,6 @@ impl BigNumRef {
         unsafe { ffi::BN_clear(self.as_ptr()) }
     }
 
-    /// Adds a `u32` to `self`.
-    #[corresponds(BN_add_word)]
-    pub fn add_word(&mut self, w: u32) -> Result<(), ErrorStack> {
-        unsafe { cvt(ffi::BN_add_word(self.as_ptr(), ffi::BN_ULONG::from(w))) }
-    }
-
-    /// Subtracts a `u32` from `self`.
-    #[corresponds(BN_sub_word)]
-    pub fn sub_word(&mut self, w: u32) -> Result<(), ErrorStack> {
-        unsafe { cvt(ffi::BN_sub_word(self.as_ptr(), ffi::BN_ULONG::from(w))) }
-    }
-
-    /// Multiplies a `u32` by `self`.
-    #[corresponds(BN_mul_word)]
-    pub fn mul_word(&mut self, w: u32) -> Result<(), ErrorStack> {
-        unsafe { cvt(ffi::BN_mul_word(self.as_ptr(), ffi::BN_ULONG::from(w))) }
-    }
-
-    /// Divides `self` by a `u32`, returning the remainder.
-    #[corresponds(BN_div_word)]
-    #[allow(clippy::useless_conversion)]
-    pub fn div_word(&mut self, w: u32) -> Result<u64, ErrorStack> {
-        unsafe {
-            let r = ffi::BN_div_word(self.as_ptr(), w.into());
-            if r == ffi::BN_ULONG::MAX {
-                Err(ErrorStack::get())
-            } else {
-                Ok(r.into())
-            }
-        }
-    }
-
-    /// Returns the result of `self` modulo `w`.
-    #[corresponds(BN_mod_word)]
-    #[allow(clippy::useless_conversion)]
-    pub fn mod_word(&self, w: u32) -> Result<u64, ErrorStack> {
-        unsafe {
-            let r = ffi::BN_mod_word(self.as_ptr(), w.into());
-            if r == ffi::BN_ULONG::MAX {
-                Err(ErrorStack::get())
-            } else {
-                Ok(r.into())
-            }
-        }
-    }
-
-    /// Places a cryptographically-secure pseudo-random nonnegative
-    /// number less than `self` in `rnd`.
-    #[corresponds(BN_rand_range)]
-    pub fn rand_range(&self, rnd: &mut BigNumRef) -> Result<(), ErrorStack> {
-        unsafe { cvt(ffi::BN_rand_range(rnd.as_ptr(), self.as_ptr())) }
-    }
-
-    /// The cryptographically weak counterpart to `rand_in_range`.
-    #[corresponds(BN_pseudo_rand_range)]
-    pub fn pseudo_rand_range(&self, rnd: &mut BigNumRef) -> Result<(), ErrorStack> {
-        unsafe { cvt(ffi::BN_pseudo_rand_range(rnd.as_ptr(), self.as_ptr())) }
-    }
-
-    /// Sets bit `n`. Equivalent to `self |= (1 << n)`.
-    ///
-    /// When setting a bit outside of `self`, it is expanded.
-    #[corresponds(BN_set_bit)]
-    #[allow(clippy::useless_conversion)]
-    pub fn set_bit(&mut self, n: i32) -> Result<(), ErrorStack> {
-        unsafe { cvt(ffi::BN_set_bit(self.as_ptr(), n.into())) }
-    }
-
-    /// Clears bit `n`, setting it to 0. Equivalent to `self &= ~(1 << n)`.
-    ///
-    /// When clearing a bit outside of `self`, an error is returned.
-    #[corresponds(BN_clear_bit)]
-    #[allow(clippy::useless_conversion)]
-    pub fn clear_bit(&mut self, n: i32) -> Result<(), ErrorStack> {
-        unsafe { cvt(ffi::BN_clear_bit(self.as_ptr(), n.into())) }
-    }
-
-    /// Returns `true` if the `n`th bit of `self` is set to 1, `false` otherwise.
-    #[corresponds(BN_is_bit_set)]
-    #[allow(clippy::useless_conversion)]
-    #[must_use]
-    pub fn is_bit_set(&self, n: i32) -> bool {
-        unsafe { ffi::BN_is_bit_set(self.as_ptr(), n.into()) == 1 }
-    }
-
-    /// Truncates `self` to the lowest `n` bits.
-    ///
-    /// An error occurs if `self` is already shorter than `n` bits.
-    #[corresponds(BN_mask_bits)]
-    #[allow(clippy::useless_conversion)]
-    pub fn mask_bits(&mut self, n: i32) -> Result<(), ErrorStack> {
-        unsafe { cvt(ffi::BN_mask_bits(self.as_ptr(), n.into())) }
-    }
-
-    /// Places `a << 1` in `self`.  Equivalent to `self * 2`.
-    #[corresponds(BN_lshift1)]
-    pub fn lshift1(&mut self, a: &BigNumRef) -> Result<(), ErrorStack> {
-        unsafe { cvt(ffi::BN_lshift1(self.as_ptr(), a.as_ptr())) }
-    }
-
-    /// Places `a >> 1` in `self`. Equivalent to `self / 2`.
-    #[corresponds(BN_rshift1)]
-    pub fn rshift1(&mut self, a: &BigNumRef) -> Result<(), ErrorStack> {
-        unsafe { cvt(ffi::BN_rshift1(self.as_ptr(), a.as_ptr())) }
-    }
-
     /// Places `a + b` in `self`.  [`core::ops::Add`] is also implemented for `BigNumRef`.
     ///
     /// [`core::ops::Add`]: struct.BigNumRef.html#method.add
@@ -265,24 +137,6 @@ impl BigNumRef {
     #[corresponds(BN_set_negative)]
     pub fn set_negative(&mut self, negative: bool) {
         unsafe { ffi::BN_set_negative(self.as_ptr(), c_int::from(negative)) }
-    }
-
-    /// Compare the absolute values of `self` and `oth`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use leyline_bssl::bn::BigNum;
-    /// # use std::cmp::Ordering;
-    /// let s = -BigNum::from_u32(8).unwrap();
-    /// let o = BigNum::from_u32(8).unwrap();
-    ///
-    /// assert_eq!(s.ucmp(&o), Ordering::Equal);
-    /// ```
-    #[corresponds(BN_ucmp)]
-    #[must_use]
-    pub fn ucmp(&self, oth: &BigNumRef) -> Ordering {
-        unsafe { ffi::BN_ucmp(self.as_ptr(), oth.as_ptr()).cmp(&0) }
     }
 
     /// Returns `true` if `self` is negative.
@@ -338,63 +192,6 @@ impl BigNumRef {
                 bits.into(),
                 msb.0,
                 c_int::from(odd),
-            ))
-        }
-    }
-
-    /// The cryptographically weak counterpart to `rand`.  Not suitable for key generation.
-    #[corresponds(BN_pseudo_rand)]
-    #[allow(clippy::useless_conversion)]
-    pub fn pseudo_rand(&mut self, bits: i32, msb: MsbOption, odd: bool) -> Result<(), ErrorStack> {
-        unsafe {
-            cvt(ffi::BN_pseudo_rand(
-                self.as_ptr(),
-                bits.into(),
-                msb.0,
-                c_int::from(odd),
-            ))
-        }
-    }
-
-    /// Generates a prime number, placing it in `self`.
-    ///
-    /// # Parameters
-    ///
-    /// * `bits`: The length of the prime in bits (lower bound).
-    /// * `safe`: If true, returns a "safe" prime `p` so that `(p-1)/2` is also prime.
-    /// * `add`/`rem`: If `add` is set to `Some(add)`, `p % add == rem` will hold, where `p` is the
-    ///   generated prime and `rem` is `1` if not specified (`None`).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use leyline_bssl::bn::BigNum;
-    /// use leyline_bssl::error::ErrorStack;
-    ///
-    /// fn generate_weak_prime() -> Result< BigNum, ErrorStack > {
-    ///    let mut big = BigNum::new()?;
-    ///
-    ///    // Generates a 128-bit simple prime number
-    ///    big.generate_prime(128, false, None, None);
-    ///    Ok((big))
-    /// }
-    /// ```
-    #[corresponds(BN_generate_prime_ex)]
-    pub fn generate_prime(
-        &mut self,
-        bits: i32,
-        safe: bool,
-        add: Option<&BigNumRef>,
-        rem: Option<&BigNumRef>,
-    ) -> Result<(), ErrorStack> {
-        unsafe {
-            cvt(ffi::BN_generate_prime_ex(
-                self.as_ptr(),
-                c_int::from(bits),
-                c_int::from(safe),
-                add.map(|n| n.as_ptr()).unwrap_or(ptr::null_mut()),
-                rem.map(|n| n.as_ptr()).unwrap_or(ptr::null_mut()),
-                ptr::null_mut(),
             ))
         }
     }
@@ -461,129 +258,6 @@ impl BigNumRef {
         }
     }
 
-    /// Places the result of `a / b` in `self` and `a % b` in `rem`.
-    #[corresponds(BN_div)]
-    pub fn div_rem(
-        &mut self,
-        rem: &mut BigNumRef,
-        a: &BigNumRef,
-        b: &BigNumRef,
-        ctx: &mut BigNumContextRef,
-    ) -> Result<(), ErrorStack> {
-        unsafe {
-            cvt(ffi::BN_div(
-                self.as_ptr(),
-                rem.as_ptr(),
-                a.as_ptr(),
-                b.as_ptr(),
-                ctx.as_ptr(),
-            ))
-        }
-    }
-
-    /// Places the result of `a²` in `self`.
-    #[corresponds(BN_sqr)]
-    pub fn sqr(&mut self, a: &BigNumRef, ctx: &mut BigNumContextRef) -> Result<(), ErrorStack> {
-        unsafe { cvt(ffi::BN_sqr(self.as_ptr(), a.as_ptr(), ctx.as_ptr())) }
-    }
-
-    /// Places the result of `a mod m` in `self`.  As opposed to `div_rem`
-    /// the result is non-negative.
-    #[corresponds(BN_nnmod)]
-    pub fn nnmod(
-        &mut self,
-        a: &BigNumRef,
-        m: &BigNumRef,
-        ctx: &mut BigNumContextRef,
-    ) -> Result<(), ErrorStack> {
-        unsafe {
-            cvt(ffi::BN_nnmod(
-                self.as_ptr(),
-                a.as_ptr(),
-                m.as_ptr(),
-                ctx.as_ptr(),
-            ))
-        }
-    }
-
-    /// Places the result of `(a + b) mod m` in `self`.
-    #[corresponds(BN_mod_add)]
-    pub fn mod_add(
-        &mut self,
-        a: &BigNumRef,
-        b: &BigNumRef,
-        m: &BigNumRef,
-        ctx: &mut BigNumContextRef,
-    ) -> Result<(), ErrorStack> {
-        unsafe {
-            cvt(ffi::BN_mod_add(
-                self.as_ptr(),
-                a.as_ptr(),
-                b.as_ptr(),
-                m.as_ptr(),
-                ctx.as_ptr(),
-            ))
-        }
-    }
-
-    /// Places the result of `(a - b) mod m` in `self`.
-    #[corresponds(BN_mod_sub)]
-    pub fn mod_sub(
-        &mut self,
-        a: &BigNumRef,
-        b: &BigNumRef,
-        m: &BigNumRef,
-        ctx: &mut BigNumContextRef,
-    ) -> Result<(), ErrorStack> {
-        unsafe {
-            cvt(ffi::BN_mod_sub(
-                self.as_ptr(),
-                a.as_ptr(),
-                b.as_ptr(),
-                m.as_ptr(),
-                ctx.as_ptr(),
-            ))
-        }
-    }
-
-    /// Places the result of `(a * b) mod m` in `self`.
-    #[corresponds(BN_mod_mul)]
-    pub fn mod_mul(
-        &mut self,
-        a: &BigNumRef,
-        b: &BigNumRef,
-        m: &BigNumRef,
-        ctx: &mut BigNumContextRef,
-    ) -> Result<(), ErrorStack> {
-        unsafe {
-            cvt(ffi::BN_mod_mul(
-                self.as_ptr(),
-                a.as_ptr(),
-                b.as_ptr(),
-                m.as_ptr(),
-                ctx.as_ptr(),
-            ))
-        }
-    }
-
-    /// Places the result of `a² mod m` in `self`.
-    #[corresponds(BN_mod_sqr)]
-    pub fn mod_sqr(
-        &mut self,
-        a: &BigNumRef,
-        m: &BigNumRef,
-        ctx: &mut BigNumContextRef,
-    ) -> Result<(), ErrorStack> {
-        unsafe {
-            cvt(ffi::BN_mod_sqr(
-                self.as_ptr(),
-                a.as_ptr(),
-                m.as_ptr(),
-                ctx.as_ptr(),
-            ))
-        }
-    }
-
     /// Places the result of `a^p` in `self`.
     #[corresponds(BN_exp)]
     pub fn exp(
@@ -599,113 +273,6 @@ impl BigNumRef {
                 p.as_ptr(),
                 ctx.as_ptr(),
             ))
-        }
-    }
-
-    /// Places the result of `a^p mod m` in `self`.
-    #[corresponds(BN_mod_exp)]
-    pub fn mod_exp(
-        &mut self,
-        a: &BigNumRef,
-        p: &BigNumRef,
-        m: &BigNumRef,
-        ctx: &mut BigNumContextRef,
-    ) -> Result<(), ErrorStack> {
-        unsafe {
-            cvt(ffi::BN_mod_exp(
-                self.as_ptr(),
-                a.as_ptr(),
-                p.as_ptr(),
-                m.as_ptr(),
-                ctx.as_ptr(),
-            ))
-        }
-    }
-
-    /// Places the inverse of `a` modulo `n` in `self`.
-    #[corresponds(BN_mod_inverse)]
-    pub fn mod_inverse(
-        &mut self,
-        a: &BigNumRef,
-        n: &BigNumRef,
-        ctx: &mut BigNumContextRef,
-    ) -> Result<(), ErrorStack> {
-        unsafe {
-            cvt_p(ffi::BN_mod_inverse(
-                self.as_ptr(),
-                a.as_ptr(),
-                n.as_ptr(),
-                ctx.as_ptr(),
-            ))
-            .map(|_| ())
-        }
-    }
-
-    /// Places the greatest common denominator of `a` and `b` in `self`.
-    #[corresponds(BN_gcd)]
-    pub fn gcd(
-        &mut self,
-        a: &BigNumRef,
-        b: &BigNumRef,
-        ctx: &mut BigNumContextRef,
-    ) -> Result<(), ErrorStack> {
-        unsafe {
-            cvt(ffi::BN_gcd(
-                self.as_ptr(),
-                a.as_ptr(),
-                b.as_ptr(),
-                ctx.as_ptr(),
-            ))
-        }
-    }
-
-    /// Checks whether `self` is prime.
-    ///
-    /// Performs a Miller-Rabin probabilistic primality test with `checks` iterations.
-    ///
-    /// # Return Value
-    ///
-    /// Returns `true` if `self` is prime with an error probability of less than `0.25 ^ checks`.
-    #[corresponds(BN_is_prime_ex)]
-    #[allow(clippy::useless_conversion)]
-    pub fn is_prime(&self, checks: i32, ctx: &mut BigNumContextRef) -> Result<bool, ErrorStack> {
-        unsafe {
-            cvt_n(ffi::BN_is_prime_ex(
-                self.as_ptr(),
-                checks.into(),
-                ctx.as_ptr(),
-                ptr::null_mut(),
-            ))
-            .map(|r| r != 0)
-        }
-    }
-
-    /// Checks whether `self` is prime with optional trial division.
-    ///
-    /// If `do_trial_division` is `true`, first performs trial division by a number of small primes.
-    /// Then, like `is_prime`, performs a Miller-Rabin probabilistic primality test with `checks`
-    /// iterations.
-    ///
-    /// # Return Value
-    ///
-    /// Returns `true` if `self` is prime with an error probability of less than `0.25 ^ checks`.
-    #[corresponds(BN_is_prime_fasttest_ex)]
-    #[allow(clippy::useless_conversion)]
-    pub fn is_prime_fasttest(
-        &self,
-        checks: i32,
-        ctx: &mut BigNumContextRef,
-        do_trial_division: bool,
-    ) -> Result<bool, ErrorStack> {
-        unsafe {
-            cvt_n(ffi::BN_is_prime_fasttest_ex(
-                self.as_ptr(),
-                checks.into(),
-                ctx.as_ptr(),
-                c_int::from(do_trial_division),
-                ptr::null_mut(),
-            ))
-            .map(|r| r != 0)
         }
     }
 
@@ -731,36 +298,6 @@ impl BigNumRef {
             v.set_len(size);
         }
         v
-    }
-
-    /// Returns a big-endian byte vector representation of the absolute value of `self` padded
-    /// to `pad_to` bytes.
-    ///
-    /// If `pad_to` is less than `self.num_bytes()` then an error is returned.
-    ///
-    /// `self` can be recreated by using `from_slice`.
-    ///
-    /// ```
-    /// # use leyline_bssl::bn::BigNum;
-    /// let bn = BigNum::from_u32(0x4543).unwrap();
-    ///
-    /// let bn_vec = bn.to_vec_padded(4).unwrap();
-    /// assert_eq!(&bn_vec, &[0, 0, 0x45, 0x43]);
-    ///
-    /// let r = bn.to_vec_padded(1);
-    /// assert!(r.is_err());
-    ///
-    /// let bn = -BigNum::from_u32(0x4543).unwrap();
-    /// let bn_vec = bn.to_vec_padded(4).unwrap();
-    /// assert_eq!(&bn_vec, &[0, 0, 0x45, 0x43]);
-    /// ```
-    pub fn to_vec_padded(&self, pad_to: usize) -> Result<Vec<u8>, ErrorStack> {
-        let mut v = Vec::with_capacity(pad_to);
-        unsafe {
-            cvt(ffi::BN_bn2bin_padded(v.as_mut_ptr(), pad_to, self.as_ptr()))?;
-            v.set_len(pad_to);
-        }
-        Ok(v)
     }
 
     /// Returns a decimal string representation of `self`.
@@ -822,30 +359,6 @@ impl BigNum {
         BigNum::new().and_then(|v| unsafe {
             cvt(ffi::BN_set_word(v.as_ptr(), ffi::BN_ULONG::from(n))).map(|_| v)
         })
-    }
-
-    /// Creates a `BigNum` from a decimal string.
-    #[corresponds(BN_dec2bn)]
-    pub fn from_dec_str(s: &str) -> Result<BigNum, ErrorStack> {
-        unsafe {
-            ffi::init();
-            let c_str = CString::new(s.as_bytes()).map_err(ErrorStack::internal_error)?;
-            let mut bn = ptr::null_mut();
-            cvt(ffi::BN_dec2bn(&mut bn, c_str.as_ptr()))?;
-            Ok(BigNum::from_ptr(bn))
-        }
-    }
-
-    /// Creates a `BigNum` from a hexadecimal string.
-    #[corresponds(BN_hex2bn)]
-    pub fn from_hex_str(s: &str) -> Result<BigNum, ErrorStack> {
-        unsafe {
-            ffi::init();
-            let c_str = CString::new(s.as_bytes()).map_err(ErrorStack::internal_error)?;
-            let mut bn = ptr::null_mut();
-            cvt(ffi::BN_hex2bn(&mut bn, c_str.as_ptr()))?;
-            Ok(BigNum::from_ptr(bn))
-        }
     }
 
     /// Creates a new `BigNum` from an unsigned, big-endian encoded number of arbitrary length.
@@ -1125,7 +638,7 @@ impl Neg for BigNum {
 
 #[cfg(test)]
 mod tests {
-    use crate::bn::{BigNum, BigNumContext};
+    use crate::bn::BigNum;
 
     #[test]
     fn test_to_from_slice() {
@@ -1149,32 +662,5 @@ mod tests {
         let a = BigNum::from_u32(909_829_283).unwrap();
 
         assert_eq!(a, &(&a << 1) >> 1);
-    }
-
-    #[test]
-    fn test_rand_range() {
-        let range = BigNum::from_u32(909_829_283).unwrap();
-        let mut result = BigNum::from_dec_str(&range.to_dec_str().unwrap()).unwrap();
-        range.rand_range(&mut result).unwrap();
-        assert!(result >= BigNum::from_u32(0).unwrap() && result < range);
-    }
-
-    #[test]
-    fn test_pseudo_rand_range() {
-        let range = BigNum::from_u32(909_829_283).unwrap();
-        let mut result = BigNum::from_dec_str(&range.to_dec_str().unwrap()).unwrap();
-        range.pseudo_rand_range(&mut result).unwrap();
-        assert!(result >= BigNum::from_u32(0).unwrap() && result < range);
-    }
-
-    #[test]
-    fn test_prime_numbers() {
-        let a = BigNum::from_u32(19_029_017).unwrap();
-        let mut p = BigNum::new().unwrap();
-        p.generate_prime(128, true, None, Some(&a)).unwrap();
-
-        let mut ctx = BigNumContext::new().unwrap();
-        assert!(p.is_prime(100, &mut ctx).unwrap());
-        assert!(p.is_prime_fasttest(100, &mut ctx, true).unwrap());
     }
 }

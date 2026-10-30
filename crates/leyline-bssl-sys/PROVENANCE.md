@@ -36,12 +36,11 @@ Changes from upstream:
 
 ## BoringSSL revision
 
-- Commit `2ea3200c3a3ec176613ab7a0b9a4ffc6db846120`, vendored as the
-  `deps/boringssl` submodule.
-- It is the `boringssl_revision` in Chromium's DEPS at tag `156.0.8078.47`.
-  Cloudflare v5.2.0 pins `e2a57cfb4d915b4ba820585aef9fdee7bca13fe5`, 435
-  commits older. Leyline keeps the Chrome revision so that the TLS wire
-  output stays the same.
+- `boringssl.toml` names the commit, vendored as the `deps/boringssl`
+  submodule, and the Chrome tag whose DEPS lists it as
+  `boringssl_revision`. Cloudflare v5.2.0 pins an older revision,
+  `e2a57cfb4d915b4ba820585aef9fdee7bca13fe5`. Leyline keeps the Chrome
+  revision so that the TLS wire output stays the same.
 
 ## Carried patches
 

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use leyline::{RetryPolicy, Session};
+use leyline::{Retry, Session};
 
 #[tokio::main]
 async fn main() -> leyline::Result<()> {
@@ -10,10 +10,7 @@ async fn main() -> leyline::Result<()> {
 
     let session = Session::builder().build()?;
 
-    let policy = RetryPolicy::transient()
-        .max_retries(4)
-        .initial_backoff(Duration::from_millis(100))
-        .max_backoff(Duration::from_secs(2));
+    let policy = Retry::new(4).backoff(Duration::from_millis(100), Duration::from_secs(2));
 
     let resp = session
         .request(http::Method::GET, url)

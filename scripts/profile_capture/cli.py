@@ -6,10 +6,11 @@
     scripts/profile-oneshot.sh firefox --major 157 --land firefox-157.0
     scripts/profile-oneshot.sh chrome --major 155 --land  # newest stored build per OS
     scripts/profile-oneshot.sh plan                       # JSON list of missing majors
+    scripts/profile-oneshot.sh docs [--check]             # render or check docs/guide/bundled-profiles.md
 
 A capture stores scrubbed JSON in crates/leyline/profiles/captures/. Landing
 starts from the previous profile, changes only what the captures show, adds
-the guide rows, README range, changelog entry, and QPACK golden row, and
+the profile table, changelog entry, and QPACK golden row, and
 leaves every other profile alone. Exit status 2 means a person must review
 the listed items before the change is merged.
 
@@ -30,13 +31,12 @@ from __future__ import annotations
 import argparse
 import json
 import platform as plat
-import subprocess
 
 from .captures import stored_builds, version_key
 from .catalog import catalog, fill_edge, plan, print_catalog
 from .chrome import fill_chromium
 from .config import CACHE, OUT, ROOT, TODAY
-from .docs import document
+from .docs import check_profiles, document, write_profiles
 from .firefox import fill_firefox
 from .land import land, os_phrase
 from .opera import fill_opera
@@ -45,7 +45,7 @@ from .safari import fill_safari
 NEEDS_REVIEW = 2
 
 
-def land_all(items: list[tuple[str, int, list[str]]], date: str, sync: bool) -> int:
+def land_all(items: list[tuple[str, int, list[str]]], date: str) -> int:
     review = []
     for family, major, builds in items:
         builds = sorted(builds or stored_builds(family, major), key=version_key)
@@ -60,12 +60,7 @@ def land_all(items: list[tuple[str, int, list[str]]], date: str, sync: bool) -> 
             print(f"  updated {path}")
         review += [f"{family} {major}: {line}" for line in landed.review + notes]
     if items:
-        review.append("docs/guide/profiles.md prose: describe what changed, if anything")
-    if items and sync:
-        if subprocess.run(["cargo", "truesight", "sync"], cwd=ROOT).returncode != 0:
-            review.append("cargo truesight sync failed")
-    elif items:
-        review.append("run cargo truesight sync")
+        review.append("docs/guide/profiles.md capture notes: describe what changed, if anything")
     for line in review:
         print(f"review: {line}")
     return NEEDS_REVIEW if review else 0
@@ -77,7 +72,7 @@ def parse(argv: list[str]) -> argparse.Namespace:
         "target",
         nargs="?",
         default="all",
-        choices=["all", "status", "plan", "chrome", "brave", "firefox", "safari", "edge", "opera"],
+        choices=["all", "status", "plan", "docs", "chrome", "brave", "firefox", "safari", "edge", "opera"],
     )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--major", type=int, action="append", help="major to recapture")
@@ -89,7 +84,7 @@ def parse(argv: list[str]) -> argparse.Namespace:
         help="land --major from stored captures, e.g. firefox-157.0; with no build, the newest stored build per OS",
     )
     parser.add_argument("--date", default=TODAY, help="date for verified_at and verified_against")
-    parser.add_argument("--sync", action="store_true", help="run cargo truesight sync after landing")
+    parser.add_argument("--check", action="store_true", help="with docs: fail when the profile table is stale")
     args = parser.parse_args(argv)
     if args.land is not None and (args.target not in {"chrome", "brave", "firefox", "safari"} or len(args.major or []) != 1):
         parser.error("--land needs one family and one --major")
@@ -122,7 +117,12 @@ def capture(target: str, dry: bool, majors: list[int] | None) -> list[tuple[str,
 def main(argv: list[str]) -> int:
     args = parse(argv)
     if args.land is not None:
-        return land_all([(args.target, args.major[0], args.land)], args.date, args.sync)
+        return land_all([(args.target, args.major[0], args.land)], args.date)
+    if args.target == "docs":
+        if args.check:
+            return check_profiles()
+        write_profiles()
+        return 0
     if args.target == "plan":
         print(json.dumps(plan()))
         return 0
@@ -135,4 +135,4 @@ def main(argv: list[str]) -> int:
     captured = capture(args.target, args.dry_run, args.major)
     if args.capture_only or args.dry_run:
         return 0
-    return land_all([(family, major, [build]) for family, major, build in captured], args.date, args.sync)
+    return land_all([(family, major, [build]) for family, major, build in captured], args.date)

@@ -1,11 +1,11 @@
-use crate::core::SocketConfig;
+use crate::core::SocketOptions;
 use crate::tcp::TcpProfile;
 use tokio::net::TcpStream;
 
 pub(crate) async fn connect_one(
     sock_addr: std::net::SocketAddr,
     tcp_profile: &TcpProfile,
-    socket_config: &SocketConfig,
+    socket_config: &SocketOptions,
 ) -> Result<TcpStream, std::io::Error> {
     let is_v6 = matches!(sock_addr, std::net::SocketAddr::V6(_));
     let domain = if is_v6 {
@@ -37,7 +37,7 @@ pub(crate) async fn connect_one(
 fn bind_local_address(
     socket: &socket2::Socket,
     peer: std::net::SocketAddr,
-    config: &SocketConfig,
+    config: &SocketOptions,
 ) -> Result<(), std::io::Error> {
     let local_ip = match (
         peer,
@@ -58,7 +58,7 @@ fn bind_local_address(
 
 fn apply_socket_config(
     socket: &socket2::Socket,
-    config: &SocketConfig,
+    config: &SocketOptions,
 ) -> Result<(), std::io::Error> {
     if let Some(enabled) = config.tcp_nodelay {
         socket.set_tcp_nodelay(enabled)?;

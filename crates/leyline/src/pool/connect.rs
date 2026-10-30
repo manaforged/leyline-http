@@ -11,14 +11,14 @@ use crate::h2::config::H2Config;
 #[cfg(feature = "http3")]
 use crate::quic::{H3Client, H3Config, open_fresh_h3};
 #[cfg(feature = "http3")]
-use crate::tls::TlsTrustConfig;
+use crate::tls::Tls;
 use crate::tls::{FingerprintConnector, TlsStream};
 use crate::trace;
 use crate::util::lock;
-use crate::{Error, Kind};
+use crate::{Cause, Error};
 
 use super::checkout_live_h2;
-use super::pool::Pool;
+use super::pool::{OriginFlag, Pool};
 use super::types::{H1Slot, Opened, PoolKey, TlsInfo, Transport};
 
 type SharedConnect<C> = Shared<BoxFuture<'static, Result<(C, TlsInfo), Arc<Error>>>>;
@@ -43,7 +43,7 @@ impl<C: Clone + Send + Sync + 'static> Inflight<C> {
     fn join_or_spawn<Fut>(
         &self,
         key: &PoolKey,
-        failed: Kind,
+        failed: Cause,
         open: impl FnOnce() -> Fut,
     ) -> SharedConnect<C>
     where
@@ -78,7 +78,7 @@ impl<C: Clone + Send + Sync + 'static> Inflight<C> {
 async fn open_coalesced<C, Fut>(
     inflight: &Inflight<C>,
     key: &PoolKey,
-    failed: Kind,
+    failed: Cause,
     checkout: impl Fn() -> Option<(C, TlsInfo)>,
     open: impl Fn() -> Fut,
 ) -> Result<(C, TlsInfo), Error>
@@ -114,7 +114,7 @@ async fn open_fresh_h2(
             .map(|p| String::from_utf8_lossy(p).to_string())
             .unwrap_or_else(|| "none".to_string());
         park_h1(&pool, key, tls_stream, tls);
-        return Err(Error::new(Kind::Http2)
+        return Err(Error::new(Cause::Http2)
             .with_message(format!("alpn: negotiated {negotiated}, expected h2"))
             .with_alpn(negotiated));
     }
@@ -123,7 +123,7 @@ async fn open_fresh_h2(
         .await
         .map_err(Error::from)?;
 
-    Ok(pool.install_h2(key, handle, tls))
+    Ok(pool.install_mux(key, handle, tls))
 }
 
 pub(crate) fn tls_info(tls_stream: &TlsStream) -> TlsInfo {
@@ -135,7 +135,12 @@ pub(crate) fn tls_info(tls_stream: &TlsStream) -> TlsInfo {
 }
 
 fn park_h1(pool: &Pool, key: PoolKey, tls_stream: TlsStream, tls: TlsInfo) {
-    pool.note_h1_only(&key.host, key.port, key.proxy.as_deref());
+    pool.remember(
+        OriginFlag::H1Only,
+        &key.host,
+        key.port,
+        key.proxy.as_deref(),
+    );
     pool.return_h1(
         key,
         H1Slot {
@@ -159,22 +164,34 @@ pub(crate) async fn negotiate(
     port: u16,
     proxy: Option<&str>,
 ) -> Result<Negotiated, Error> {
-    if pool.is_h1_only(host, port, proxy) {
+    if pool.recalls(OriginFlag::H1Only, host, port, proxy) {
         return Ok(Negotiated::H1(None));
     }
     let key = pool.key("https", host, port, proxy, Transport::Tcp);
-    pool.evict_idle();
-    if let Some(hit) = checkout_live_h2(pool, &key).await {
-        return Ok(Negotiated::H2(Opened::pooled(hit)));
-    }
-    let started = Instant::now();
-    match open_h2(pool, connector, h2_config, key.clone()).await {
-        Ok(opened) => Ok(Negotiated::H2(Opened::fresh(opened, started))),
-        Err(e) if e.alpn().is_some() => Ok(Negotiated::H1(
+    match checkout_h2_opened(pool, connector, h2_config, key.clone()).await {
+        Ok(opened) => Ok(Negotiated::H2(opened)),
+        Err((e, started)) if e.alpn().is_some() => Ok(Negotiated::H1(
             pool.checkout_h1(&key)
                 .map(|parked| Opened::fresh(parked, started)),
         )),
-        Err(e) => Err(e),
+        Err((e, _)) => Err(e),
+    }
+}
+
+pub(crate) async fn checkout_h2_opened(
+    pool: &Arc<Pool>,
+    connector: &FingerprintConnector,
+    h2_config: &H2Config,
+    key: PoolKey,
+) -> Result<Opened<H2Client>, (Error, Instant)> {
+    pool.evict_idle();
+    if let Some(hit) = checkout_live_h2(pool, &key).await {
+        return Ok(Opened::pooled(hit));
+    }
+    let started = Instant::now();
+    match open_h2(pool, connector, h2_config, key).await {
+        Ok(opened) => Ok(Opened::fresh(opened, started)),
+        Err(e) => Err((e, started)),
     }
 }
 
@@ -187,8 +204,8 @@ pub(crate) async fn open_h2(
     open_coalesced(
         &pool.inflight_h2,
         &key,
-        Kind::Http2,
-        || pool.checkout_h2(&key),
+        Cause::Http2,
+        || pool.checkout_mux::<H2Client>(&key),
         || {
             open_fresh_h2(
                 Arc::clone(pool),
@@ -217,20 +234,16 @@ pub async fn checkout_handle(
     proxy: Option<&str>,
 ) -> Result<(H2Client, TlsInfo), Error> {
     let key = pool.key("https", host, port, proxy, Transport::Tcp);
-
-    pool.evict_idle();
-
-    if let Some((handle, tls)) = checkout_live_h2(pool, &key).await {
-        return Ok((handle, tls));
+    match checkout_h2_opened(pool, connector, h2_config, key).await {
+        Ok(opened) => Ok((opened.conn, opened.tls)),
+        Err((e, _)) => Err(e),
     }
-
-    open_h2(pool, connector, h2_config, key).await
 }
 
 #[cfg(feature = "http3")]
 pub(crate) struct H3Target<'a> {
     pub(crate) config: &'a H3Config,
-    pub(crate) trust: &'a TlsTrustConfig,
+    pub(crate) trust: &'a Tls,
     pub(crate) connector: &'a FingerprintConnector,
 }
 
@@ -238,7 +251,7 @@ pub(crate) struct H3Target<'a> {
 async fn open_fresh_h3_installed(
     pool: Arc<Pool>,
     config: H3Config,
-    trust: TlsTrustConfig,
+    trust: Tls,
     connector: FingerprintConnector,
     key: PoolKey,
 ) -> Result<(H3Client, TlsInfo), Error> {
@@ -251,7 +264,13 @@ async fn open_fresh_h3_installed(
         key.proxy.as_deref(),
     )
     .await?;
-    Ok(pool.install_or_get_h3(key, handle, tls))
+    pool.forget(
+        OriginFlag::H3Broken,
+        &key.host,
+        key.port,
+        key.proxy.as_deref(),
+    );
+    Ok(pool.install_mux(key, handle, tls))
 }
 
 #[cfg(feature = "http3")]
@@ -263,8 +282,8 @@ pub(crate) async fn open_h3(
     open_coalesced(
         &pool.inflight_h3,
         &key,
-        Kind::Http3,
-        || pool.checkout_h3(&key),
+        Cause::Http3,
+        || pool.checkout_mux::<H3Client>(&key),
         || {
             open_fresh_h3_installed(
                 Arc::clone(pool),
@@ -285,26 +304,34 @@ pub(crate) async fn open_h3(
     skip_all,
     fields(host, port, proxied = proxy.is_some())
 )]
-pub async fn checkout_h3_handle(
+pub(crate) async fn checkout_h3_handle(
     pool: &Arc<Pool>,
     target: &H3Target<'_>,
     host: &str,
     port: u16,
     proxy: Option<&str>,
-) -> Result<(H3Client, TlsInfo), Error> {
+) -> Result<Opened<H3Client>, Error> {
     let key = pool.key("https", host, port, proxy, Transport::Quic);
+    checkout_h3_opened(pool, target, key).await
+}
 
+#[cfg(feature = "http3")]
+pub(crate) async fn checkout_h3_opened(
+    pool: &Arc<Pool>,
+    target: &H3Target<'_>,
+    key: PoolKey,
+) -> Result<Opened<H3Client>, Error> {
     pool.evict_idle();
-
-    if let Some(hit) = pool.checkout_h3(&key) {
-        return Ok(hit);
+    if let Some(hit) = pool.checkout_mux::<H3Client>(&key) {
+        return Ok(Opened::pooled(hit));
     }
-
-    open_h3(pool, target, key).await
+    let started = Instant::now();
+    let opened = open_h3(pool, target, key).await?;
+    Ok(Opened::fresh(opened, started))
 }
 
 pub(super) fn connect_err(err: &Error) -> Error {
-    let mut out = Error::new(err.kind());
+    let mut out = Error::new(err.cause());
     let mut sourced = true;
     if let Some(tls) = err.tls() {
         out = out.with_source(tls.duplicate());

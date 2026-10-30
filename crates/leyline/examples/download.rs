@@ -1,6 +1,6 @@
-use leyline::{ErrorCategory, Session};
+use leyline::{Kind, Session};
 
-const LIMIT: u64 = 50 * 1024 * 1024;
+const LIMIT: usize = 50 * 1024 * 1024;
 
 #[tokio::main]
 async fn main() -> leyline::Result<()> {
@@ -12,13 +12,25 @@ async fn main() -> leyline::Result<()> {
         .unwrap_or_else(|| "download.bin".to_string());
 
     let session = Session::builder().build()?;
-    match session.get(&url).download(&path, Some(LIMIT)).await {
+    match async {
+        session
+            .get(&url)
+            .error_for_status()
+            .max_body_size(LIMIT)
+            .stream()
+            .send()
+            .await?
+            .download_to(&path)
+            .await
+    }
+    .await
+    {
         Ok(written) => println!("saved {written} bytes to {path}"),
-        Err(e) => match e.category() {
-            ErrorCategory::Status => eprintln!("server answered {:?}", e.status()),
-            ErrorCategory::BodyLimit => eprintln!("file is larger than {LIMIT} bytes"),
-            ErrorCategory::Timeout => eprintln!("timed out: {e}"),
-            ErrorCategory::Dns | ErrorCategory::Connect => eprintln!("network: {e}"),
+        Err(e) => match e.kind() {
+            Kind::Status => eprintln!("server answered {:?}", e.status()),
+            Kind::BodyLimit => eprintln!("file is larger than {LIMIT} bytes"),
+            Kind::Timeout => eprintln!("timed out: {e}"),
+            Kind::Dns | Kind::Connect => eprintln!("network: {e}"),
             _ => return Err(e),
         },
     }

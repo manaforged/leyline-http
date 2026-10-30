@@ -31,24 +31,34 @@ fn main() -> BuildResult<()> {
     println!("cargo:rerun-if-changed={}", root.display());
     println!("cargo:rerun-if-changed=build");
     println!("cargo:rerun-if-changed=src/profile/preset/kind.rs");
-    let entity_data = manifest.join("data").join("entities.tsv");
+    let entity_data = manifest.join("build").join("entities.tsv");
     println!("cargo:rerun-if-changed={}", entity_data.display());
     let out = PathBuf::from(std::env::var("OUT_DIR")?);
-    let rows = write_browsers(&root, &out)?;
+    let brands: BTreeMap<String, brand::Brand> =
+        toml::from_str(&fs::read_to_string(root.join("brands.toml"))?)?;
+    let rows = write_browsers(&root, &out, &brands)?;
     let shapes = write_header_styles(&root, &out, &rows)?;
-    write_brands(&root, &out, &shapes)?;
+    write_brands(&brands, &out, &shapes)?;
     write_entities(&entity_data, &out)
 }
 
-fn write_browsers(root: &Path, out: &Path) -> BuildResult<Vec<browser::Row>> {
+fn write_browsers(
+    root: &Path,
+    out: &Path,
+    brands: &BTreeMap<String, brand::Brand>,
+) -> BuildResult<Vec<browser::Row>> {
     let families: browser::Families =
         toml::from_str(&fs::read_to_string(root.join("families.toml"))?)?;
     let mut rows = browser::load_rows(root, &families)?;
     browser::check_unique(&rows, &families)?;
     let browser_ids: BTreeMap<String, u32> =
         toml::from_str(&fs::read_to_string(root.join("browser_ids.toml"))?)?;
-    ids::assign(&mut rows, &browser_ids)?;
-    fs::write(out.join("browser.rs"), browser::render(&rows, &families)?)?;
+    let mut variants = brand::variants(brands, &rows)?;
+    ids::assign(&mut rows, &mut variants, &browser_ids)?;
+    fs::write(
+        out.join("browser.rs"),
+        browser::render(&rows, &variants, &families)?,
+    )?;
     Ok(rows)
 }
 
@@ -81,14 +91,13 @@ fn check_row_styles(rows: &[browser::Row], shapes: &Shapes) -> BuildResult<()> {
     }
 }
 
-fn write_brands(root: &Path, out: &Path, shapes: &Shapes) -> BuildResult<()> {
-    let brands: BTreeMap<String, brand::Brand> =
-        toml::from_str(&fs::read_to_string(root.join("brands.toml"))?)?;
-    brand::check_brands(&brands, shapes)?;
-    fs::write(
-        out.join("chromium_brand.rs"),
-        brand::render_brands(&brands)?,
-    )?;
+fn write_brands(
+    brands: &BTreeMap<String, brand::Brand>,
+    out: &Path,
+    shapes: &Shapes,
+) -> BuildResult<()> {
+    brand::check_brands(brands, shapes)?;
+    fs::write(out.join("chromium_brand.rs"), brand::render_brands(brands)?)?;
     Ok(())
 }
 

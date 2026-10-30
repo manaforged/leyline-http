@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use bytes::Bytes;
 use leyline::h2::frame::FrameType;
-use leyline::{Body, Kind, Session, TlsTrustConfig};
+use leyline::{Body, Kind, Session, Tls};
 use leyline_bssl_tokio::SslStream;
 use support::{
     read_frame, read_preface, write_data, write_response_headers, write_server_settings,
@@ -69,12 +69,7 @@ where
     let connections = Arc::new(AtomicUsize::new(0));
     let port = tls_support::tls_server(cert, key, Arc::clone(&connections), serve).await;
     let session = Session::builder()
-        .tls_trust(
-            TlsTrustConfig::new()
-                .env_roots(false)
-                .system_roots(false)
-                .add_ca_der(der),
-        )
+        .tls(Tls::new().env_roots(false).system_roots(false).ca_der(der))
         .build()
         .unwrap();
     (session, format!("https://127.0.0.1:{port}/"), connections)
@@ -83,12 +78,20 @@ where
 #[tokio::test]
 async fn a_streaming_body_on_a_dead_pooled_h2_connection_is_a_body_error() {
     let (session, url, connections) = start(answer_once_then_drop).await;
-    session.get(&url).await.unwrap().bytes().await.unwrap();
+    session
+        .get(&url)
+        .send()
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap();
     let chunks =
         futures_util::stream::iter([Ok::<_, std::io::Error>(Bytes::from_static(b"payload"))]);
     let err = session
         .put(&url)
         .body(Body::stream(chunks, None))
+        .send()
         .await
         .unwrap_err();
     assert_eq!(err.kind(), Kind::Body, "{err:?}");
@@ -98,15 +101,58 @@ async fn a_streaming_body_on_a_dead_pooled_h2_connection_is_a_body_error() {
 #[tokio::test]
 async fn a_failing_request_body_stream_keeps_the_pooled_h2_connection() {
     let (session, url, connections) = start(answer_finished_requests).await;
-    session.get(&url).await.unwrap().bytes().await.unwrap();
+    session
+        .get(&url)
+        .send()
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap();
     let chunks =
         futures_util::stream::iter([Err::<Bytes, _>(std::io::Error::other("caller body failed"))]);
     let err = session
         .put(&url)
         .body(Body::stream(chunks, None))
+        .send()
         .await
         .unwrap_err();
     assert_eq!(err.kind(), Kind::Body, "{err:?}");
-    session.get(&url).await.unwrap().bytes().await.unwrap();
+    session
+        .get(&url)
+        .send()
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap();
     assert_eq!(connections.load(Ordering::SeqCst), 1);
+}
+
+async fn reset_every_request<S: AsyncRead + AsyncWrite + Unpin>(mut stream: S) {
+    read_preface(&mut stream).await;
+    write_server_settings(&mut stream).await;
+    loop {
+        let (frame, _) = read_frame(&mut stream).await;
+        if frame.frame_type == FrameType::Settings as u8 && frame.flags & SETTINGS_ACK == 0 {
+            write_settings_ack(&mut stream).await;
+        }
+        if frame.frame_type == FrameType::Headers as u8 {
+            let mut reset = vec![0, 0, 4, FrameType::RstStream as u8, 0];
+            reset.extend_from_slice(&frame.stream_id.to_be_bytes());
+            reset.extend_from_slice(&2u32.to_be_bytes());
+            tokio::io::AsyncWriteExt::write_all(&mut stream, &reset)
+                .await
+                .unwrap();
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_reset_stream_reports_its_h2_code() {
+    let (session, url, _) = start(reset_every_request).await;
+    let err = session.get(&url).send().await.unwrap_err();
+    assert_eq!(err.kind(), Kind::Http2, "{err:?}");
+    assert_eq!(err.h2_code(), Some(2), "{err:?}");
+    assert_eq!(err.proxy_status(), None, "{err:?}");
 }

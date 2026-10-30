@@ -1,16 +1,8 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub enum StopReason {
+pub(crate) enum StopReason {
     PredicateMatched,
     LimitReached,
     EndOfBody,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct PrefixRead {
-    pub bytes: Vec<u8>,
-    pub stopped_by: StopReason,
 }
 
 pub(super) fn stop_reason<F>(

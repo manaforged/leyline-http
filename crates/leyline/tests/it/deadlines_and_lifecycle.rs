@@ -1,9 +1,10 @@
 use crate::core_support::wait;
+use futures_util::StreamExt;
 
 use std::time::{Duration, Instant};
 
-use leyline::testing::{TestResponse, TestServer};
-use leyline::{HostLimits, ProxyPool, RetryPolicy, Session};
+use leyline::testing;
+use leyline::{HostLimits, Proxy, Retry, Session};
 
 fn scratch(name: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("leyline-{name}-{}", std::process::id()));
@@ -13,8 +14,8 @@ fn scratch(name: &str) -> std::path::PathBuf {
 
 #[tokio::test]
 async fn a_duration_timeout_does_not_bound_a_streamed_body() {
-    let server = TestServer::http(|_| {
-        TestResponse::new(200).chunks(["a", "b", "c", "d"], Duration::from_millis(150))
+    let server = testing::Server::http(|_| {
+        testing::Response::new(200).chunks(["a", "b", "c", "d"], Duration::from_millis(150))
     })
     .await
     .unwrap();
@@ -25,6 +26,7 @@ async fn a_duration_timeout_does_not_bound_a_streamed_body() {
     let body = session
         .get(server.url("/feed"))
         .stream()
+        .send()
         .await
         .unwrap()
         .bytes()
@@ -35,26 +37,27 @@ async fn a_duration_timeout_does_not_bound_a_streamed_body() {
 
 #[tokio::test]
 async fn a_huge_retry_after_pauses_without_panicking() {
-    let server =
-        TestServer::http(|_| TestResponse::new(429).header("retry-after", "18446744073709551615"))
-            .await
-            .unwrap();
+    let server = testing::Server::http(|_| {
+        testing::Response::new(429).header("retry-after", "18446744073709551615")
+    })
+    .await
+    .unwrap();
     let session = Session::builder()
         .host_limits(HostLimits::new().pause_on([429]))
         .build()
         .unwrap();
-    let resp = session.get(server.url("/")).await.unwrap();
+    let resp = session.get(server.url("/")).send().await.unwrap();
     assert_eq!(resp.status().as_u16(), 429);
 }
 
 #[tokio::test]
 async fn pages_drop_credentials_when_the_next_page_is_on_another_origin() {
-    let other = TestServer::http(|_| TestResponse::new(200).body("two"))
+    let other = testing::Server::http(|_| testing::Response::new(200).body("two"))
         .await
         .unwrap();
     let next = other.url("/page2");
-    let first = TestServer::http(move |_| {
-        TestResponse::new(200)
+    let first = testing::Server::http(move |_| {
+        testing::Response::new(200)
             .header("link", format!("<{next}>; rel=\"next\""))
             .body("one")
     })
@@ -78,13 +81,10 @@ async fn pages_drop_credentials_when_the_next_page_is_on_another_origin() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn shutdown_interrupts_a_retry_backoff() {
-    let server = TestServer::http(|_| TestResponse::new(503).header("retry-after", "60"))
+    let server = testing::Server::http(|_| testing::Response::new(503).header("retry-after", "60"))
         .await
         .unwrap();
-    let session = Session::builder()
-        .retry(RetryPolicy::transient())
-        .build()
-        .unwrap();
+    let session = Session::builder().retry(3).build().unwrap();
     let pending = tokio::spawn({
         let session = session.clone();
         let url = server.url("/");
@@ -102,36 +102,38 @@ async fn shutdown_interrupts_a_retry_backoff() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_paused_host_does_not_hold_the_total_cap() {
-    let paused = TestServer::http(|req| {
+    let paused = testing::Server::http(|req| {
         if req.target == "/first" {
-            TestResponse::new(429).header("retry-after", "5")
+            testing::Response::new(429).header("retry-after", "5")
         } else {
-            TestResponse::new(200)
+            testing::Response::new(200)
         }
     })
     .await
     .unwrap();
-    let other = TestServer::http(|_| TestResponse::new(200)).await.unwrap();
+    let other = testing::Server::http(|_| testing::Response::new(200))
+        .await
+        .unwrap();
     let session = Session::builder()
         .host_limits(HostLimits::new().max_total_in_flight(1).pause_on([429]))
         .build()
         .unwrap();
-    session.get(paused.url("/first")).await.unwrap();
+    session.get(paused.url("/first")).send().await.unwrap();
     let waiting = tokio::spawn({
         let session = session.clone();
         let url = paused.url("/second");
-        async move { session.get(url).await }
+        async move { session.get(url).send().await }
     });
     let port = format!(":{}", paused.addr().port());
     wait::until(|| {
-        session
-            .host_stats()
-            .iter()
-            .any(|s| s.origin().ends_with(&port) && s.in_flight() + s.waiting() > 0)
+        let stats = session.stats();
+        stats
+            .hosts()
+            .any(|h| h.ends_with(&port) && stats.in_flight(h) + stats.waiting(h) > 0)
     })
     .await;
     let started = Instant::now();
-    session.get(other.url("/")).await.unwrap();
+    session.get(other.url("/")).send().await.unwrap();
     assert!(
         started.elapsed() < Duration::from_secs(2),
         "{:?}",
@@ -142,8 +144,8 @@ async fn a_paused_host_does_not_hold_the_total_cap() {
 
 #[tokio::test]
 async fn a_status_error_body_that_never_ends_does_not_hang_the_request() {
-    let server = TestServer::http(|_| {
-        TestResponse::new(401).chunks(["denied", "never"], Duration::from_secs(30))
+    let server = testing::Server::http(|_| {
+        testing::Response::new(401).chunks(["denied", "never"], Duration::from_secs(30))
     })
     .await
     .unwrap();
@@ -166,14 +168,17 @@ async fn a_status_error_body_that_never_ends_does_not_hang_the_request() {
 
 #[tokio::test]
 async fn a_post_that_was_never_retried_is_not_exhausted() {
-    let server = TestServer::http(|_| TestResponse::new(503)).await.unwrap();
+    let server = testing::Server::http(|_| testing::Response::new(503))
+        .await
+        .unwrap();
     let err = Session::builder()
-        .retry(RetryPolicy::transient().initial_backoff(Duration::from_millis(1)))
+        .retry(Retry::new(3).backoff(Duration::from_millis(1), Duration::from_secs(1)))
         .build()
         .unwrap()
         .post(server.url("/"))
         .body("x")
         .error_for_status()
+        .send()
         .await
         .unwrap_err();
     assert_eq!(err.attempts(), 1);
@@ -188,8 +193,8 @@ async fn a_plaintext_websocket_is_refused_before_sending() {
         .build()
         .unwrap();
     let err = session
-        .websocket("ws://127.0.0.1:9/feed")
-        .connect()
+        .get("ws://127.0.0.1:9/feed")
+        .websocket()
         .await
         .err()
         .unwrap();
@@ -198,65 +203,54 @@ async fn a_plaintext_websocket_is_refused_before_sending() {
 
 #[cfg(unix)]
 #[test]
-fn saved_jars_are_always_private() {
+fn saved_devices_are_always_private() {
     use std::os::unix::fs::PermissionsExt;
     let dir = scratch("jarmode");
-    let jar = leyline::cookie::Jar::new();
+    let session = Session::new();
     let fresh = dir.join("fresh.json");
-    jar.save_to(&fresh).unwrap();
+    session.save(&fresh).unwrap();
     let mode = |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode(&fresh), 0o600);
     std::fs::set_permissions(&fresh, std::fs::Permissions::from_mode(0o640)).unwrap();
-    jar.save_to(&fresh).unwrap();
+    session.save(&fresh).unwrap();
     assert_eq!(mode(&fresh), 0o600);
     drop(std::fs::remove_dir_all(&dir));
 }
 
 #[tokio::test]
 async fn a_ban_of_any_length_still_bans() {
-    let pool = ProxyPool::new(["http://127.0.0.1:9"])
+    let pool = Proxy::list(["http://127.0.0.1:9"])
         .ban_after(1)
         .ban_for(Duration::MAX);
-    let session = Session::builder().proxy_pool(pool.clone()).build().unwrap();
-    drop(session.get("http://origin.test/").await);
-    let health = pool.stats();
-    assert!(health[0].banned_until.is_some(), "{health:?}");
-}
-
-#[tokio::test]
-async fn the_first_autosave_flush_writes_the_file() {
-    let dir = scratch("firstflush");
-    let path = dir.join("jar.json");
-    let autosave = leyline::cookie::Jar::new().autosave(&path, Duration::from_secs(60));
-    autosave.flush().await.unwrap();
-    assert!(path.exists());
-    autosave.shutdown().await.unwrap();
-    drop(std::fs::remove_dir_all(&dir));
+    let session = Session::builder().proxy(pool.clone()).build().unwrap();
+    drop(session.get("http://origin.test/").send().await);
+    let stats = session.stats();
+    let proxy = stats.proxies().next().unwrap();
+    assert!(stats.proxy_banned_until(proxy).is_some(), "{stats:?}");
 }
 
 #[tokio::test]
 async fn the_first_https_request_reports_a_fresh_connection() {
-    let server = TestServer::https(|_| TestResponse::new(200)).await.unwrap();
-    let session = Session::builder()
-        .tls_trust(server.trust())
-        .build()
+    let server = testing::Server::https(|_| testing::Response::new(200))
+        .await
         .unwrap();
-    let first = session.get(server.url("/a")).await.unwrap();
-    assert!(!first.timing().reused, "{:?}", first.timing());
-    assert!(first.timing().connect_ms.is_some(), "{:?}", first.timing());
-    let misses = session.pool_stats().h2_misses;
-    let second = session.get(server.url("/b")).await.unwrap();
-    assert!(second.timing().reused, "{:?}", second.timing());
-    session.get(server.url("/c")).await.unwrap();
-    let stats = session.pool_stats();
-    assert_eq!(stats.h2_misses, misses, "{stats:?}");
-    assert_eq!(stats.evictions_dead, 0, "{stats:?}");
+    let session = Session::builder().tls(server.tls()).build().unwrap();
+    let first = session.get(server.url("/a")).send().await.unwrap();
+    assert!(!first.reused());
+    assert!(first.connect_time().is_some());
+    let misses = session.stats().h2_misses();
+    let second = session.get(server.url("/b")).send().await.unwrap();
+    assert!(second.reused());
+    session.get(server.url("/c")).send().await.unwrap();
+    let stats = session.stats();
+    assert_eq!(stats.h2_misses(), misses, "{stats:?}");
+    assert_eq!(stats.evictions_dead(), 0, "{stats:?}");
 }
 
 #[tokio::test]
 async fn a_body_stream_ends_after_its_deadline() {
-    let server = TestServer::http(|_| {
-        TestResponse::new(200).chunks(["a", "b", "c"], Duration::from_millis(400))
+    let server = testing::Server::http(|_| {
+        testing::Response::new(200).chunks(["a", "b", "c"], Duration::from_millis(400))
     })
     .await
     .unwrap();
@@ -266,38 +260,43 @@ async fn a_body_stream_ends_after_its_deadline() {
         .unwrap();
     let mut body = session
         .get(server.url("/"))
-        .timeout(leyline::TimeoutConfig::new().body(Duration::from_millis(200)))
+        .timeout(leyline::Timeout::new().body(Duration::from_millis(200)))
         .stream()
+        .send()
         .await
         .unwrap()
-        .into_stream()
+        .bytes_stream()
         .unwrap();
     let mut errors = 0;
-    while let Some(chunk) = futures_util::StreamExt::next(&mut body).await {
+    while let Some(chunk) = body.next().await {
         if chunk.is_err() {
             errors += 1;
         }
         assert!(errors <= 1, "the stream kept failing");
     }
     assert_eq!(errors, 1);
-    assert!(session.host_stats().iter().all(|s| s.in_flight() == 0));
+    assert!({
+        let stats = session.stats();
+        stats.hosts().all(|h| stats.in_flight(h) == 0)
+    });
 }
 
 #[tokio::test]
 async fn a_streamed_body_ends_at_its_first_error() {
-    let server =
-        TestServer::http(|_| TestResponse::new(200).chunks(["a", "b"], Duration::from_millis(500)))
-            .await
-            .unwrap();
+    let server = testing::Server::http(|_| {
+        testing::Response::new(200).chunks(["a", "b"], Duration::from_millis(500))
+    })
+    .await
+    .unwrap();
     let mut body = Session::new()
         .get(server.url("/"))
-        .timeout(leyline::TimeoutConfig::new().read(Duration::from_millis(200)))
+        .timeout(leyline::Timeout::new().read(Duration::from_millis(200)))
         .stream()
+        .send()
         .await
         .unwrap()
-        .into_stream()
+        .bytes_stream()
         .unwrap();
-    use futures_util::StreamExt;
     assert_eq!(&body.next().await.unwrap().unwrap()[..], b"a");
     body.next().await.unwrap().expect_err("expected Err");
     assert!(body.next().await.is_none());

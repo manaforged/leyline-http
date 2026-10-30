@@ -11,7 +11,13 @@ fn expected_h2_for(profile: &BrowserProfile, platform: Platform) -> Option<&str>
         .get(platform.identity_key())
         .and_then(|over| over.fingerprint.as_ref())
         .and_then(|fp| fp.akamai.as_deref())
-        .or_else(|| profile.expected_h2_fingerprint())
+        .or_else(|| {
+            profile
+                .h2
+                .fingerprint
+                .as_ref()
+                .and_then(|f| f.akamai.as_deref())
+        })
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -67,7 +73,7 @@ fn fingerprint_conformance() {
             &name,
             "Akamai-H2",
             &h2.akamai_fingerprint(),
-            p.expected_h2_fingerprint(),
+            p.h2.fingerprint.as_ref().and_then(|f| f.akamai.as_deref()),
         ));
         for plat in ALL_PLATFORMS {
             if p.h2.platforms.contains_key(plat.identity_key()) {
@@ -88,16 +94,25 @@ fn fingerprint_conformance() {
         let ja4 = compute_ja4(&Ja4Input {
             ciphers: &p.tls.ciphers,
             sigalgs: &p.tls.sigalgs,
-            curves: &p.tls.curves,
             extension_ids: &ext,
             tls_version: "1.3",
             has_sni: true,
             alpn: "h2",
         });
         rows.push(if p.tls.extension_permutation.is_some() {
-            gated(&name, "JA4 (audit)", &ja4, p.expected_ja4())
+            gated(
+                &name,
+                "JA4 (audit)",
+                &ja4,
+                p.tls.fingerprint.as_ref().and_then(|f| f.ja4.as_deref()),
+            )
         } else {
-            recon(&name, "JA4 (audit)", &ja4, p.expected_ja4())
+            recon(
+                &name,
+                "JA4 (audit)",
+                &ja4,
+                p.tls.fingerprint.as_ref().and_then(|f| f.ja4.as_deref()),
+            )
         });
 
         let ja3 = compute_ja3(&Ja3Input {

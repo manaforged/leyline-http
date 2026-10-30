@@ -7,7 +7,7 @@ QUIC fingerprint keys of a profile, and HTTP/3 through a proxy.
 
 ## Protocol policy
 
-`SessionBuilder::protocol` sets the `ProtocolPolicy`.
+`SessionBuilder::protocol` sets the `Protocol`.
 
 | Variant | Behavior |
 | --- | --- |
@@ -19,7 +19,7 @@ QUIC fingerprint keys of a profile, and HTTP/3 through a proxy.
 
 Without a `protocol` call, a session selects `Race` when its profile sets
 `race = true` in `[h3]`, as the bundled Chrome profiles do, and `Auto`
-otherwise. `Session::browser(Browser::default())` selects `Race`;
+otherwise. `Session::from(Browser::default())` selects `Race`;
 `Session::new()` and a build without the `http3` feature select `Auto`.
 
 Keep that default for a browser session: `Race` uses HTTP/3 where a browser
@@ -34,20 +34,20 @@ The first request to an origin never uses HTTP/3. As in Chrome, `Race` opens
 no speculative QUIC connection: it races only an origin that advertised `h3`
 in an `Alt-Svc` response header. The first request goes over HTTP/2 or
 HTTP/1.1 and records the header; the next one can race.
-`Response::version()` returns the `HttpVersion` that carried each response.
+`Response::version()` returns the `http::Version` that carried each response.
 
 ```rust,no_run
-use leyline::{Browser, HttpVersion, Session};
+use leyline::{Browser, Session};
 
 # async fn run() -> leyline::Result<()> {
-let session = Session::browser(Browser::default());
+let session = Session::from(Browser::default());
 let url = "https://www.cloudflare.com/";
 
 let first = session.get(url).send().await?;
 println!("first: {:?}", first.version());
 
 let second = session.get(url).send().await?;
-if second.version() == HttpVersion::Http3 {
+if second.version() == leyline::http::Version::HTTP_3 {
     println!("second: HTTP/3");
 }
 # Ok(())
@@ -72,9 +72,8 @@ When an HTTP/3 connection to an origin fails, `Race` skips HTTP/3 for that
 origin and proxy pair for 5 minutes. A successful HTTP/3 connection to the
 pair ends the skip.
 
-`Session::state()` saves the known origins, so a restored session can race
-on its first request. See
-[Accounts](accounts.md#keep-the-connection-state).
+`Session::save` keeps the known origins, so a loaded session can race on its first request. See
+[Accounts](accounts.md#the-connection-state).
 
 ### How Alt-Svc is read
 
@@ -88,8 +87,8 @@ origins and drops the one that expires first to make room.
 
 ## Body limits and cancellation
 
-HTTP/3 uses `CompressionConfig::max_body_size`, as HTTP/1.1 and HTTP/2 do.
-It caps a buffered body and fails with `Kind::Body`; a `.stream()` response
+HTTP/3 uses `max_body_size`, as HTTP/1.1 and HTTP/2 do.
+It caps a buffered body and fails with `Kind::BodyLimit`; a `.stream()` response
 has no cap. See [Responses](responses.md#bodies).
 
 A request that ends early resets its stream with the code Chrome sends:

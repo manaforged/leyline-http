@@ -7,7 +7,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::time::{Duration, Instant};
 
-use leyline::{Browser, Family, Session};
+use leyline::{Browser, Session};
 use serde_json::Value;
 
 use httpbin::{
@@ -36,11 +36,7 @@ async fn smoke_suite() {
         &mut failed,
         &mut skipped,
         smoke(async {
-            exact_fingerprint(
-                Session::browser(Browser::default()),
-                Browser::latest(Family::Chrome),
-            )
-            .await
+            exact_fingerprint(Session::from(Browser::default()), Browser::chrome()).await
         }),
     )
     .await;
@@ -60,13 +56,13 @@ async fn smoke_suite() {
         &mut failed,
         &mut skipped,
         smoke(async {
-            let s = Session::browser(Browser::default());
+            let s = Session::from(Browser::default());
             let t = Instant::now();
-            let r1 = s.get(PEET_URL).await?;
+            let r1 = s.get(PEET_URL).send().await?;
             let t1 = t.elapsed();
-            let r2 = s.get(PEET_URL).await?;
+            let r2 = s.get(PEET_URL).send().await?;
             let t2 = t.elapsed();
-            let r3 = s.get(PEET_URL).await?;
+            let r3 = s.get(PEET_URL).send().await?;
             let t3 = t.elapsed();
             ensure(
                 r1.status() == 200 && r2.status() == 200 && r3.status() == 200,
@@ -90,8 +86,8 @@ async fn smoke_suite() {
         &mut failed,
         &mut skipped,
         smoke(async {
-            let s = Session::browser(Browser::default());
-            let r = s.get(PEET_URL).await?;
+            let s = Session::from(Browser::default());
+            let r = s.get(PEET_URL).send().await?;
             let body = r.text().await.unwrap();
             let _: Value = serde_json::from_str(&body)?;
             ensure(
@@ -172,9 +168,12 @@ async fn smoke_suite() {
         &mut failed,
         &mut skipped,
         smoke(async {
-            let c = Session::browser(Browser::default()).get(PEET_URL).await?;
-            let f = firefox()?.get(PEET_URL).await?;
-            let s = safari()?.get(PEET_URL).await?;
+            let c = Session::from(Browser::default())
+                .get(PEET_URL)
+                .send()
+                .await?;
+            let f = firefox()?.get(PEET_URL).send().await?;
+            let s = safari()?.get(PEET_URL).send().await?;
             let ch: Value = c.json().await?;
             let fh: Value = f.json().await?;
             let sh: Value = s.json().await?;

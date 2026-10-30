@@ -24,13 +24,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 }
             }
         }
-        self.peer_snapshot
-            .set_max_concurrent_streams(self.peer_settings.max_concurrent_streams);
         self.peer_greeted = true;
         self.peer_snapshot
             .set_enable_connect_protocol(self.peer_settings.enable_connect_protocol);
-        self.writer.write_settings_ack().await?;
-        let encoder_cap = (self.peer_settings.header_table_size as usize).min(4096);
+        self.writer.write_frame(&SettingsFrame::ack()).await?;
+        let encoder_cap = (self.peer_settings.header_table_size as usize)
+            .min(crate::h2::config::DEFAULT_HEADER_TABLE_SIZE as usize);
         self.encoder.set_max_table_size(encoder_cap);
         Ok(())
     }
@@ -56,7 +55,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 Ok(v) => actor.send_window = v,
                 Err(_) => {
                     self.writer
-                        .write_rst_stream(w.stream_id, ErrorCode::FlowControlError)
+                        .write_frame(&RstStreamFrame {
+                            stream_id: w.stream_id,
+                            error_code: ErrorCode::FlowControlError,
+                        })
                         .await?;
                     let err = H2Error::Stream {
                         stream_id: w.stream_id,
@@ -74,7 +76,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     pub(super) async fn on_ping(&mut self, p: PingFrame) -> Result<(), H2Error> {
         if !p.ack {
             self.control_flood.record(Instant::now())?;
-            self.writer.write_ping_ack(p.payload).await?;
+            self.writer
+                .write_frame(&PingFrame {
+                    ack: true,
+                    payload: p.payload,
+                })
+                .await?;
             return Ok(());
         }
         if let Some(index) = self
@@ -143,7 +150,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     pub(super) async fn on_push(&mut self, pp: PushPromiseFrame) -> Result<(), H2Error> {
         let decoded = self.decoder.decode_header_block(&pp.fragment);
         self.writer
-            .write_rst_stream(pp.promised_stream_id, ErrorCode::Cancel)
+            .write_frame(&RstStreamFrame {
+                stream_id: pp.promised_stream_id,
+                error_code: ErrorCode::Cancel,
+            })
             .await?;
         decoded.map_err(H2Error::Hpack)?;
         Ok(())

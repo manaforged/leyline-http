@@ -1,7 +1,6 @@
-
 use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use bytes::BytesMut;
@@ -12,13 +11,12 @@ use tokio::runtime::Runtime;
 
 use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
 use leyline::h2::connection::PseudoHeaders;
-use leyline::h2::{H2Client, H2ResponseEx, Head, RequestBody};
 use leyline::h2::frame::{
     DataFrame, FRAME_HEADER_LEN, FrameHeader, FrameType, HeadersFrame, SettingsFrame,
 };
 use leyline::h2::hpack;
+use leyline::h2::{H2Client, H2ResponseEx, Head, RequestBody};
 use leyline::{Browser, Session};
-
 
 struct Counting;
 
@@ -89,7 +87,6 @@ static GLOBAL: Counting = Counting;
 fn reset_peak() {
     PEAK_BYTES.store(LIVE_BYTES.load(Ordering::Relaxed), Ordering::Relaxed);
 }
-
 
 fn test_config() -> H2Config {
     H2Config {
@@ -262,7 +259,6 @@ fn req() -> (
     )
 }
 
-
 fn bench_per_request(c: &mut Criterion) {
     let mut g = c.benchmark_group("allocs");
     g.sample_size(10);
@@ -322,7 +318,6 @@ fn per_request_profile(
     });
 }
 
-
 fn bench_concurrent_footprint(c: &mut Criterion) {
     let rt = Runtime::new().expect("tokio runtime");
     const N: usize = 100;
@@ -377,7 +372,6 @@ fn bench_concurrent_footprint(c: &mut Criterion) {
     g.finish();
 }
 
-
 fn bench_session_build_allocs(c: &mut Criterion) {
     let mut g = c.benchmark_group("allocs");
     g.sample_size(10);
@@ -401,7 +395,6 @@ fn bench_session_build_allocs(c: &mut Criterion) {
     });
     g.finish();
 }
-
 
 fn bench_response_header_materialize(c: &mut Criterion) {
     let mut enc = hpack::Encoder::new();
@@ -477,10 +470,17 @@ criterion_main!(alloc_benches);
 async fn send(
     handle: &H2Client,
     pseudo: PseudoHeaders,
-    headers: Vec<(std::borrow::Cow<'static, str>, std::borrow::Cow<'static, str>)>,
+    headers: Vec<(
+        std::borrow::Cow<'static, str>,
+        std::borrow::Cow<'static, str>,
+    )>,
 ) -> H2ResponseEx {
     handle
-        .send_shared(Arc::new(Head { pseudo, headers }), RequestBody::from(None::<bytes::Bytes>), false)
+        .send_shared(
+            Arc::new(Head { pseudo, headers }),
+            RequestBody::from(None::<bytes::Bytes>),
+            false,
+        )
         .await
         .expect("req ok")
 }

@@ -32,7 +32,13 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     pub(super) async fn goaway_drained(&mut self) -> Result<bool, H2Error> {
         if !self.output.goaway_sent {
             self.output.goaway_sent = true;
-            self.writer.write_goaway(0, ErrorCode::NoError).await?;
+            self.writer
+                .write_frame(&GoAwayFrame {
+                    last_stream_id: 0,
+                    error_code: ErrorCode::NoError,
+                    debug_data: Bytes::new(),
+                })
+                .await?;
         }
         Ok(!self.writer.has_output())
     }

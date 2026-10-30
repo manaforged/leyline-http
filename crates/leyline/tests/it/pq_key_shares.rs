@@ -45,6 +45,7 @@ async fn chrome_pq_key_shares_use_distinct_x25519_ephemerals() {
     drop(
         session
             .get(format!("https://{}:{}/", addr.ip(), addr.port()))
+            .send()
             .await,
     );
 

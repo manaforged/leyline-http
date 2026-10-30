@@ -83,7 +83,7 @@ async fn socket_with_pending_bytes_probes_as_dead() {
 #[tokio::test]
 async fn checkout_live_h1_drains_dead_and_counts_stale() {
     let pool = Arc::new(Pool::new());
-    let key = make_key("http", "127.0.0.1", 1, None, Transport::Tcp);
+    let key = pool.key("http", "127.0.0.1", 1, None, Transport::Tcp);
 
     let (client, server) = tcp_pair().await;
     drop(server);
@@ -105,7 +105,7 @@ async fn checkout_live_h1_drains_dead_and_counts_stale() {
 #[tokio::test]
 async fn checkout_live_h1_returns_a_live_connection_uncounted() {
     let pool = Arc::new(Pool::new());
-    let key = make_key("http", "127.0.0.1", 2, None, Transport::Tcp);
+    let key = pool.key("http", "127.0.0.1", 2, None, Transport::Tcp);
 
     let (client, _server) = tcp_pair().await;
     pool.return_h1(
@@ -125,4 +125,12 @@ async fn checkout_live_h1_returns_a_live_connection_uncounted() {
         0,
         "a live connection is not a probe catch"
     );
+}
+
+#[test]
+fn a_chunk_size_must_be_hex_digits_only() {
+    assert_eq!(parse::chunk_size(b"1a;ext=1"), Ok(26));
+    for bad in [&b"+5"[..], b"-0", b"", b"0x5", b" "] {
+        parse::chunk_size(bad).unwrap_err();
+    }
 }

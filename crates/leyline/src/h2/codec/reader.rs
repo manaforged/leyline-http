@@ -4,7 +4,7 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 use crate::h2::H2Error;
 use crate::h2::frame::{FRAME_HEADER_LEN, Frame, FrameHeader};
 
-use super::DEFAULT_MAX_FRAME_SIZE;
+use crate::h2::config::DEFAULT_MAX_FRAME_SIZE;
 
 const SLACK: usize = 16 * 1024;
 

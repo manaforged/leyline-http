@@ -1,10 +1,9 @@
 use std::time::{Duration, Instant};
 
-use leyline::cookie::Jar;
 #[cfg(feature = "html")]
-use leyline::html::{self, FormMethod};
-use leyline::testing::{RecordedRequest, TestResponse, TestServer};
-use leyline::{Browser, Device, Kind, Platform, Session};
+use leyline::html;
+use leyline::testing;
+use leyline::{Browser, Kind, Session};
 
 #[cfg(feature = "html")]
 const LOGIN_PAGE: &str = r#"<html><body>
@@ -34,7 +33,7 @@ fn forms_parse_hidden_fields_and_controls() {
     assert_eq!(found.len(), 1);
     let form = &found[0];
     assert_eq!(form.action(), "/session");
-    assert_eq!(form.method(), FormMethod::Post);
+    assert_eq!(form.method(), http::Method::POST);
     assert_eq!(form.field("csrf"), Some("tok&en"));
     assert_eq!(form.field("remember"), Some("on"));
     assert_eq!(form.field("news"), None);
@@ -45,20 +44,20 @@ fn forms_parse_hidden_fields_and_controls() {
 }
 
 #[cfg(feature = "html")]
-fn site(req: &RecordedRequest) -> TestResponse {
+fn site(req: &testing::Request) -> testing::Response {
     match req.target.as_str() {
-        "/login" => TestResponse::new(200).body(LOGIN_PAGE),
-        _ => TestResponse::new(200),
+        "/login" => testing::Response::new(200).body(LOGIN_PAGE),
+        _ => testing::Response::new(200),
     }
 }
 
 #[cfg(feature = "html")]
 #[tokio::test]
 async fn a_tab_submits_a_parsed_form_like_a_click() {
-    let server = TestServer::http(site).await.unwrap();
+    let server = testing::Server::http(site).await.unwrap();
     let tab = Session::builder()
         .browser(Browser::default())
-        .protocol(leyline::ProtocolPolicy::Http1)
+        .protocol(leyline::Protocol::Http1)
         .build()
         .unwrap()
         .tab();
@@ -84,51 +83,47 @@ async fn a_tab_submits_a_parsed_form_like_a_click() {
     );
 }
 
-#[test]
-fn an_unpinned_device_still_refuses_a_different_session() {
-    let session = Session::builder()
-        .browser(Browser::Chrome154)
-        .platform(Platform::Windows)
-        .build()
-        .unwrap();
-    let mut device = Device::capture(&session, None);
-    device.profile_id = None;
-    device
-        .app
-        .insert("email".to_owned(), serde_json::json!("a@shop.example"));
-    let json = serde_json::to_string(&device).unwrap();
-    let device: Device = serde_json::from_str(&json).unwrap();
-    assert_eq!(device.app["email"], "a@shop.example");
-    device.check(&session).unwrap();
-
-    let moved = Session::builder()
-        .browser(Browser::Chrome154)
-        .platform(Platform::MacOS)
-        .build()
-        .unwrap();
-    assert_eq!(device.check(&moved).unwrap_err().kind(), Kind::Config);
+async fn saved_cookie_soon(path: &std::path::Path, url: &url::Url) -> Option<String> {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        let saved = Session::load(path)
+            .ok()
+            .and_then(|builder| builder.build().ok())
+            .and_then(|session| session.cookies().get(url, "sid"));
+        if saved.is_some() {
+            return saved;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    None
 }
 
 #[tokio::test]
-async fn device_autosave_writes_the_device_and_its_jar() {
+async fn autosave_writes_a_cookie_change() {
     let dir = scratch("devsave");
     let session = Session::builder()
         .browser(Browser::Chrome154)
         .build()
         .unwrap();
-    let mut device = Device::capture(&session, None);
-    device.jar_path = Some(dir.join("jar.json"));
     let path = dir.join("device.json");
-    let autosave = device.autosave(&session, &path, Duration::from_millis(20));
+    session.autosave(&path, Duration::from_millis(20));
     let url = url::Url::parse("https://shop.example/").unwrap();
-    session
-        .cookies()
-        .store_set_cookie("sid=1; Path=/; Max-Age=3600", &url);
-    autosave.flush().await.unwrap();
-    Device::load_from(&path).expect("expected Ok");
-    let jar = Jar::load_from(dir.join("jar.json")).unwrap();
-    assert_eq!(jar.get_cookie(&url, "sid").as_deref(), Some("1"));
-    autosave.shutdown().await.unwrap();
+    session.cookies().store("sid=1; Path=/; Max-Age=3600", &url);
+    assert_eq!(saved_cookie_soon(&path, &url).await.as_deref(), Some("1"));
+    session.shutdown();
+    drop(std::fs::remove_dir_all(&dir));
+}
+
+#[tokio::test]
+async fn autosave_writes_a_final_save_on_shutdown() {
+    let dir = scratch("devshutdown");
+    let session = Session::from(Browser::Chrome154);
+    let path = dir.join("device.json");
+    session.autosave(&path, Duration::from_secs(3600));
+    let url = url::Url::parse("https://shop.example/").unwrap();
+    session.cookies().store("sid=2; Path=/; Max-Age=3600", &url);
+    session.shutdown();
+    assert_eq!(saved_cookie_soon(&path, &url).await.as_deref(), Some("2"));
     drop(std::fs::remove_dir_all(&dir));
 }
 
@@ -138,9 +133,9 @@ async fn device_autosave_writes_the_device_and_its_jar() {
     reason = "the handler must block its thread to prove the test server isolates it"
 )]
 async fn a_blocking_test_handler_does_not_stall_client_timeouts() {
-    let server = TestServer::http(|_| {
+    let server = testing::Server::http(|_| {
         std::thread::sleep(Duration::from_secs(2));
-        TestResponse::new(200)
+        testing::Response::new(200)
     })
     .await
     .unwrap();
@@ -150,19 +145,20 @@ async fn a_blocking_test_handler_does_not_stall_client_timeouts() {
         .unwrap()
         .get(server.url("/slow"))
         .timeout(Duration::from_millis(200))
+        .send()
         .await
         .unwrap_err();
-    assert!(err.is_timeout());
+    assert!(err.kind() == Kind::Timeout);
     assert!(started.elapsed() < Duration::from_secs(1));
 }
 
 #[tokio::test]
 async fn test_responses_can_wait_and_arrive_in_chunks() {
-    let server = TestServer::http(|req: &RecordedRequest| {
+    let server = testing::Server::http(|req: &testing::Request| {
         if req.target == "/slow" {
-            TestResponse::new(200).delay(Duration::from_secs(2))
+            testing::Response::new(200).delay(Duration::from_secs(2))
         } else {
-            TestResponse::new(200).chunks(["ab", "cd", "ef"], Duration::from_millis(10))
+            testing::Response::new(200).chunks(["ab", "cd", "ef"], Duration::from_millis(10))
         }
     })
     .await
@@ -171,11 +167,13 @@ async fn test_responses_can_wait_and_arrive_in_chunks() {
     let err = session
         .get(server.url("/slow"))
         .timeout(Duration::from_millis(200))
+        .send()
         .await
         .unwrap_err();
-    assert!(err.is_timeout());
+    assert!(err.kind() == Kind::Timeout);
     let text = session
         .get(server.url("/chunks"))
+        .send()
         .await
         .unwrap()
         .text()
@@ -184,100 +182,13 @@ async fn test_responses_can_wait_and_arrive_in_chunks() {
     assert_eq!(text, "abcdef");
 }
 
-#[tokio::test]
-async fn device_autosave_saves_updates_to_the_device() {
-    let dir = scratch("devupdate");
-    let session = Session::browser(Browser::Chrome154);
-    let device = Device::capture(&session, None);
-    let path = dir.join("device.json");
-    let autosave = device.autosave(&session, &path, Duration::from_millis(20));
-    autosave.update(|device| {
-        device.app.insert(
-            "last_page".to_owned(),
-            serde_json::json!("https://shop.example/cart"),
-        );
-    });
-    autosave.flush().await.unwrap();
-    let saved = Device::load_from(&path).unwrap();
-    assert_eq!(saved.app["last_page"], "https://shop.example/cart");
-    autosave.shutdown().await.unwrap();
-    drop(std::fs::remove_dir_all(&dir));
-}
-
-#[test]
-fn a_device_refuses_other_languages_or_another_proxy() {
-    let session = Session::builder()
-        .browser(Browser::Chrome154)
-        .languages(["de-DE", "de"])
-        .proxy("http://proxy-a.example:8080")
-        .build()
-        .unwrap();
-    let device = Device::capture(&session, session.proxy_url());
-    device.check(&session).unwrap();
-
-    let english = Session::builder()
-        .browser(Browser::Chrome154)
-        .languages(["en-US", "en"])
-        .proxy("http://proxy-a.example:8080")
-        .build()
-        .unwrap();
-    let err = device.check(&english).unwrap_err();
-    assert!(err.to_string().contains("languages"), "{err}");
-
-    let moved = session.with_proxy("http://proxy-b.example:8080");
-    let err = device.check(&moved).unwrap_err();
-    assert!(err.to_string().contains("proxy"), "{err}");
-}
-
 #[cfg(not(feature = "socks"))]
 #[test]
 fn a_socks_proxy_in_a_pool_needs_the_feature_at_build() {
     let err = Session::builder()
-        .proxy_pool(leyline::ProxyPool::new(["socks5://127.0.0.1:1080"]))
+        .proxy(leyline::Proxy::list(["socks5://127.0.0.1:1080"]))
         .build()
         .unwrap_err();
     assert_eq!(err.kind(), Kind::Config);
     assert!(err.to_string().contains("socks"), "{err}");
-}
-
-#[test]
-fn a_strict_device_needs_a_pin_and_a_proxy() {
-    let session = Session::browser(Browser::Chrome154);
-    let mut device = Device::capture(&session, None);
-    device.check(&session).unwrap();
-    device.strict = true;
-    device.profile_id = None;
-    let err = device.check(&session).unwrap_err();
-    assert_eq!(err.kind(), Kind::Config);
-    let text = err.to_string();
-    assert!(
-        text.contains("profile_id") && text.contains("proxy"),
-        "{text}"
-    );
-}
-
-#[tokio::test]
-async fn device_autosave_tracks_the_tab_page() {
-    let dir = scratch("devtab");
-    let server = TestServer::http(|_| TestResponse::new(200)).await.unwrap();
-    let session = Session::browser(Browser::Chrome154);
-    let device = Device::capture(&session, None);
-    let path = dir.join("device.json");
-    let autosave = device.autosave(&session, &path, Duration::from_millis(20));
-    let tab = session.tab();
-    autosave.track(&tab);
-    tab.open(server.url("/cart")).await.unwrap();
-    assert_eq!(
-        autosave.device().page.map(String::from),
-        Some(server.url("/cart"))
-    );
-    autosave.flush().await.unwrap();
-    let saved = Device::load_from(&path).unwrap();
-    let restored = saved.tab(&session);
-    assert_eq!(
-        restored.current().map(String::from),
-        Some(server.url("/cart"))
-    );
-    autosave.shutdown().await.unwrap();
-    drop(std::fs::remove_dir_all(&dir));
 }

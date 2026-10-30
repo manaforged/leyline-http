@@ -1,6 +1,6 @@
 use std::fmt;
 
-use super::{WsConnection, WsInner, WsSink, WsSinkInner, WsStream, WsStreamInner};
+use super::{WebSocket, WsInner, WsSink, WsSinkInner, WsStream, WsStreamInner};
 use crate::HttpVersion;
 use crate::trace::masked;
 
@@ -13,9 +13,9 @@ impl WsInner {
     }
 }
 
-impl fmt::Debug for WsConnection {
+impl fmt::Debug for WebSocket {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("WsConnection")
+        f.debug_struct("WebSocket")
             .field("transport", &self.inner.version())
             .field("protocol", &self.protocol)
             .field(

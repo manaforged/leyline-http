@@ -18,7 +18,15 @@ const ONE_STREAM: Limits = Limits { streams: 1 };
 const CREDIT: Duration = Duration::from_secs(5);
 
 async fn fetch(session: &Session, url: &str) -> usize {
-    session.get(url).await.unwrap().bytes().await.unwrap().len()
+    session
+        .get(url)
+        .send()
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap()
+        .len()
 }
 
 async fn assert_credit_returned(session: &Session, url: &str) {
@@ -51,7 +59,12 @@ async fn a_reset_during_the_upload_returns_the_stream_credit() {
     let server = h3_server(vec![reset, Reply::Body(LENGTH)], ONE_STREAM).await;
     let session = server.session().build().unwrap();
     let url = server.url();
-    session.post(&url).body(open_upload()).await.unwrap_err();
+    session
+        .post(&url)
+        .body(open_upload())
+        .send()
+        .await
+        .unwrap_err();
     assert_credit_returned(&session, &url).await;
 }
 
@@ -64,9 +77,10 @@ async fn a_response_that_ends_before_the_upload_returns_the_stream_credit() {
         .post(&url)
         .body(open_upload())
         .stream()
+        .send()
         .await
         .unwrap()
-        .into_stream()
+        .bytes_stream()
         .unwrap();
     let mut read = 0;
     while let Some(chunk) = body.next().await {
@@ -100,12 +114,12 @@ async fn a_request_waiting_past_the_full_queue_still_owns_its_body() {
     let server = h3_server(vec![Reply::Hold(LENGTH), Reply::Body(LENGTH)], ONE_STREAM).await;
     let session = server.session().build().unwrap();
     let url = server.url();
-    let held = session.get(&url).stream().await.unwrap();
+    let held = session.get(&url).stream().send().await.unwrap();
     let queued: Vec<_> = (0..1100)
         .map(|_| {
             let session = session.clone();
             let url = url.clone();
-            tokio::spawn(async move { session.get(url).await })
+            tokio::spawn(async move { session.get(url).send().await })
         })
         .collect();
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -114,7 +128,7 @@ async fn a_request_waiting_past_the_full_queue_still_owns_its_body() {
         let session = session.clone();
         let url = url.clone();
         let body = Body::stream(Unpolled(std::sync::Arc::clone(&dropped)), None);
-        async move { session.post(url).body(body).await }
+        async move { session.post(url).body(body).send().await }
     });
     tokio::time::sleep(Duration::from_millis(300)).await;
     late.abort();

@@ -3,5 +3,5 @@ mod jar;
 pub(crate) mod parse;
 mod record;
 
-pub use jar::{Jar, JarAutosave};
+pub use jar::Jar;
 pub use record::{Cookie, SameSite};

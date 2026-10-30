@@ -1,18 +1,28 @@
+/// Names where an extra header goes, relative to an anchor header in the profile's header order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
-pub enum HeaderAnchor {
+pub enum HeaderPosition {
+    /// Inserts the header before `sec-ch-ua`.
     BeforeCchUa,
+    /// Inserts the header after `sec-ch-ua`.
     AfterCchUa,
+    /// Inserts the header after `sec-ch-ua-mobile`.
     AfterCchUaMobile,
+    /// Inserts the header after `sec-ch-ua-platform`.
     AfterCchUaPlatform,
+    /// Inserts the header after `user-agent`.
     AfterUserAgent,
+    /// Inserts the header after `accept`.
     AfterAccept,
+    /// Inserts the header after `content-type`.
     AfterContentType,
+    /// Inserts the header after `sec-fetch-dest`.
     AfterFetchDest,
+    /// Inserts the header before `accept-encoding`.
     BeforeAcceptEncoding,
 }
 
-impl HeaderAnchor {
+impl HeaderPosition {
     pub(crate) fn anchor_name(&self) -> &'static str {
         match self {
             Self::BeforeCchUa | Self::AfterCchUa => "sec-ch-ua",
@@ -31,13 +41,13 @@ impl HeaderAnchor {
     }
 }
 
-pub(crate) fn infer_anchor(name: &str) -> Option<HeaderAnchor> {
+pub(crate) fn infer_anchor(name: &str) -> Option<HeaderPosition> {
     let lower = name.to_ascii_lowercase();
     match lower.as_str() {
-        "origin" => Some(HeaderAnchor::AfterContentType),
+        "origin" => Some(HeaderPosition::AfterContentType),
 
         "authorization" | "x-requested-with" | "x-csrf-token" | "x-requested-by" | "x-api-key" => {
-            Some(HeaderAnchor::AfterUserAgent)
+            Some(HeaderPosition::AfterUserAgent)
         }
 
         _ => None,

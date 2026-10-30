@@ -1,16 +1,16 @@
-use super::{ProtocolPolicy, Session};
-use crate::core::error::{Error, Kind, Result};
+use super::{Protocol, Session};
+use crate::core::error::{Cause, Error, Result};
 use crate::core::transport::{
     Prepared, TransportResponse, send_request_auto, send_request_h1, send_request_h2,
 };
 #[cfg(feature = "http3")]
 use crate::core::transport::{ResponseMode, send_request_h3};
-use crate::core::{ProxyConfig, ProxyUrl};
-#[cfg(feature = "http3")]
-use crate::pool::checkout_handle;
+use crate::core::{Proxy, ProxyUrl};
 use crate::pool::h1::H1Dial;
 #[cfg(feature = "http3")]
 use crate::pool::{H3Target, checkout_h3_handle};
+#[cfg(feature = "http3")]
+use crate::pool::{OriginFlag, checkout_handle};
 #[cfg(feature = "http3")]
 use crate::quic::{H3Config, h3_proxy_blocker};
 
@@ -32,7 +32,7 @@ impl Session {
     pub(crate) fn proxy_for<'a>(
         &'a self,
         url: &url::Url,
-        request: Option<&'a ProxyConfig>,
+        request: Option<&'a Proxy>,
     ) -> Result<Option<&'a str>> {
         let proxy = request.unwrap_or(&self.inner.proxy_config).proxy_for(url)?;
         if let Some(proxy) = proxy {
@@ -56,32 +56,42 @@ impl Session {
     ) -> Result<TransportResponse> {
         if self.inner.https_only && req.url.scheme() != "https" {
             return Err(
-                Error::new(Kind::Config).with_message("https_only session rejected non-HTTPS URL")
+                Error::new(Cause::Config).with_message("https_only session rejected non-HTTPS URL")
             );
         }
         let pool = &self.inner.pool;
         let connector = &self.inner.connector;
         let h2_config = &self.inner.h2_config;
         match self.inner.protocol_policy {
-            ProtocolPolicy::Auto => send_request_auto(pool, connector, h2_config, req).await,
-            ProtocolPolicy::Http1 => {
+            Protocol::Auto => self.send_auto(req).await,
+            Protocol::Http1 => {
                 Box::pin(send_request_h1(pool, connector, H1Dial::Http1Only, req)).await
             }
-            ProtocolPolicy::Http2 => send_request_h2(pool, connector, h2_config, req).await,
+            Protocol::Http2 => send_request_h2(pool, connector, h2_config, req).await,
             #[cfg(feature = "http3")]
-            ProtocolPolicy::Http3 => self.send_h3_only(req).await,
+            Protocol::Http3 => self.send_h3_only(req).await,
             #[cfg(feature = "http3")]
-            ProtocolPolicy::Race => self.send_race_policy(req).await,
+            Protocol::Race => self.send_race_policy(req).await,
         }
+    }
+
+    async fn send_auto(&self, req: Prepared<'_>) -> Result<TransportResponse> {
+        send_request_auto(
+            &self.inner.pool,
+            &self.inner.connector,
+            &self.inner.h2_config,
+            req,
+        )
+        .await
     }
 
     #[cfg(feature = "http3")]
     async fn send_h3_only(&self, req: Prepared<'_>) -> Result<TransportResponse> {
         if let Some(cause) = h3_proxy_blocker(req.proxy) {
-            return Err(Error::new(Kind::Config).with_message(cause));
+            return Err(Error::new(Cause::Config).with_message(cause));
         }
         let h3_config = self.inner.h3_config.as_ref().ok_or_else(|| {
-            Error::new(Kind::Config).with_message("this browser profile has no HTTP/3 fingerprint")
+            Error::new(Cause::Config).with_message("this browser profile has no HTTP/3 fingerprint")
         })?;
         Box::pin(send_request_h3(
             &self.inner.pool,
@@ -95,15 +105,7 @@ impl Session {
     async fn send_race_policy(&self, req: Prepared<'_>) -> Result<TransportResponse> {
         match (self.race_wanted(&req), self.inner.h3_config.as_ref()) {
             (true, Some(h3_config)) => self.send_raced(h3_config, req).await,
-            _ => {
-                send_request_auto(
-                    &self.inner.pool,
-                    &self.inner.connector,
-                    &self.inner.h2_config,
-                    req,
-                )
-                .await
-            }
+            _ => self.send_auto(req).await,
         }
     }
 
@@ -128,7 +130,8 @@ impl Session {
             .host_str()
             .zip(req.url.port_or_known_default())
             .is_some_and(|(host, port)| {
-                pool.knows_h3(host, port) && !pool.is_h3_broken(host, port, req.proxy)
+                pool.knows_h3(host, port)
+                    && !pool.recalls(OriginFlag::H3Broken, host, port, req.proxy)
             })
     }
 
@@ -142,7 +145,7 @@ impl Session {
         let connector = &self.inner.connector;
         let h2_config = &self.inner.h2_config;
         let Some(host) = req.url.host_str() else {
-            return send_request_auto(pool, connector, h2_config, req).await;
+            return self.send_auto(req).await;
         };
         let port = req.url.port_or_known_default().unwrap_or(443);
 
@@ -171,7 +174,7 @@ impl Session {
                             error = %error,
                             "HTTP/3 connection setup failed; Race skips HTTP/3 for this origin and proxy"
                         );
-                        pool.note_h3_broken(host, port, req.proxy);
+                        pool.remember(OriginFlag::H3Broken, host, port, req.proxy);
                         h3_done = true;
                         if h2_done {
                             break None;
@@ -193,7 +196,7 @@ impl Session {
         match winner {
             Some(Winner::H3) => Box::pin(send_request_h3(pool, &target, req)).await,
             Some(Winner::H2) => send_request_h2(pool, connector, h2_config, req).await,
-            None => send_request_auto(pool, connector, h2_config, req).await,
+            None => self.send_auto(req).await,
         }
     }
 }

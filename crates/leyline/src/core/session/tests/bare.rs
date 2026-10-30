@@ -1,6 +1,6 @@
 use crate::Session;
-use crate::profile::{Browser, Platform, Preset};
-use crate::{Body, Kind, RequestBuilder};
+use crate::profile::{Browser, Platform, RequestKind};
+use crate::{Body, Cause, RequestBuilder};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 async fn capture_get_headers(session: Session) -> String {
@@ -25,35 +25,32 @@ async fn capture_get_headers(session: Session) -> String {
             .unwrap();
         String::from_utf8_lossy(&req).to_string()
     });
-    let _ = session.get(format!("http://{addr}/")).await.unwrap();
+    let _ = session.get(format!("http://{addr}/")).send().await.unwrap();
     server.await.unwrap()
 }
 
 #[test]
 fn default_session_is_bare() {
-    assert_eq!(
-        Session::builder().build().unwrap().identity().browser(),
-        None
-    );
+    assert_eq!(Session::builder().build().unwrap().identity().http(), None);
 }
 
 #[test]
 fn chrome_helper_is_explicit_browser() {
     assert_eq!(
-        Session::browser(Browser::default()).identity().browser(),
+        Session::from(Browser::default()).identity().http(),
         Some(Browser::default_browser())
     );
 }
 
 #[test]
 fn builder_with_the_default_browser_matches_session_browser() {
-    let new = Session::browser(Browser::default());
+    let new = Session::from(Browser::default());
     let built = Session::builder()
-        .browser(Browser::default_browser())
+        .identity(Browser::default_browser())
         .timeout(std::time::Duration::from_secs(5))
         .build()
         .unwrap();
-    assert_eq!(built.identity().browser(), new.identity().browser());
+    assert_eq!(built.identity().http(), new.identity().http());
     assert_eq!(built.platform(), new.platform());
     assert_eq!(built.inner.protocol_policy, new.inner.protocol_policy);
 }
@@ -63,7 +60,7 @@ fn bare_default_platform_follows_host() {
     let s = Session::builder().build().unwrap();
     assert_eq!(s.platform(), Platform::detect_host());
     let chrome = Session::builder()
-        .browser(Browser::Chrome148)
+        .identity(Browser::Chrome148)
         .build()
         .unwrap();
     assert_eq!(chrome.platform(), Platform::Windows);
@@ -89,7 +86,7 @@ async fn bare_session_sends_generic_ua_and_no_client_hints() {
 
 #[tokio::test]
 async fn chrome_get_emits_navigate_headers() {
-    let req = capture_get_headers(Session::browser(Browser::default())).await;
+    let req = capture_get_headers(Session::from(Browser::default())).await;
     let lower = req.to_lowercase();
     assert!(
         lower.contains("sec-fetch-mode: navigate"),
@@ -103,20 +100,20 @@ async fn chrome_get_emits_navigate_headers() {
 
 #[test]
 fn session_retry_default_is_inherited_by_requests() {
-    use crate::RetryPolicy;
-    let policy = RetryPolicy::transient().max_retries(7);
+    use crate::Retry;
+    let policy = Retry::new(7);
     let session = Session::builder().retry(policy).build().unwrap();
     let req = session.request(http::Method::GET, "https://example.test/");
-    assert_eq!(req.retry_policy.max_retries, 7);
+    assert_eq!(req.retry_policy.count(), 7);
     let overridden = session
         .request(http::Method::GET, "https://example.test/")
-        .retry(RetryPolicy::none());
-    assert_eq!(overridden.retry_policy.max_retries, 0);
+        .retry(0);
+    assert_eq!(overridden.retry_policy.count(), 0);
     let bare = Session::builder()
         .build()
         .unwrap()
         .request(http::Method::GET, "https://example.test/");
-    assert_eq!(bare.retry_policy.max_retries, 0);
+    assert_eq!(bare.retry_policy.count(), 0);
 }
 
 #[test]
@@ -124,8 +121,10 @@ fn platform_host_resolves_and_never_leaks() {
     assert_eq!(Platform::Host.resolve(), Platform::detect_host());
     assert_ne!(Platform::detect_host(), Platform::Host);
     let s = Session::builder()
-        .browser(Browser::Chrome148)
-        .platform(Platform::MacOS)
+        .identity(crate::core::Identity::new(
+            Browser::Chrome148,
+            Platform::MacOS,
+        ))
         .build()
         .unwrap();
     assert_eq!(s.platform(), Platform::MacOS);
@@ -134,44 +133,46 @@ fn platform_host_resolves_and_never_leaks() {
 #[test]
 fn chrome_linux_is_one_chain() {
     let s = Session::builder()
-        .browser(Browser::default_browser())
-        .platform(Platform::Linux)
+        .identity(crate::core::Identity::new(
+            Browser::default_browser(),
+            Platform::Linux,
+        ))
         .build()
         .unwrap();
-    assert_eq!(s.identity().browser(), Some(Browser::default_browser()));
+    assert_eq!(s.identity().http(), Some(Browser::default_browser()));
     assert_eq!(s.platform(), Platform::Linux);
 }
 
 #[test]
 fn safari_ios_picks_iphone_profile() {
     let s = Session::builder()
-        .browser(Browser::Safari26)
-        .platform(Platform::IOS)
+        .identity(crate::core::Identity::new(Browser::Safari26, Platform::IOS))
         .build()
         .unwrap();
-    assert_eq!(s.identity().browser(), Some(Browser::SafariIOS27));
+    assert_eq!(s.identity().http(), Some(Browser::SafariIOS27));
     assert_eq!(s.platform(), Platform::IOS);
 }
 
 #[test]
-fn ios_then_safari_still_iphone() {
+fn safari_on_ios_is_the_iphone_sibling() {
     let s = Session::builder()
-        .platform(Platform::IOS)
-        .browser(Browser::Safari26)
+        .identity(crate::core::Identity::new(Browser::Safari26, Platform::IOS))
         .build()
         .unwrap();
-    assert_eq!(s.identity().browser(), Some(Browser::SafariIOS27));
+    assert_eq!(s.identity().http(), Some(Browser::SafariIOS27));
     assert_eq!(s.platform(), Platform::IOS);
 }
 
 #[test]
 fn safari_windows_profile_is_err() {
     let err = Session::builder()
-        .browser(Browser::Safari26)
-        .platform(Platform::Windows)
+        .identity(crate::core::Identity::new(
+            Browser::Safari26,
+            Platform::Windows,
+        ))
         .build()
         .expect_err("safari on windows is not a profile");
-    assert_eq!(err.kind(), Kind::Config, "expected Config, got {err:?}");
+    assert_eq!(err.cause(), Cause::Config, "expected Config, got {err:?}");
     let message = err.message().expect("config errors carry a message");
     assert!(message.contains("Windows"), "unexpected config: {message}");
 }
@@ -179,11 +180,13 @@ fn safari_windows_profile_is_err() {
 #[test]
 fn windows_then_brave_keeps_windows() {
     let s = Session::builder()
-        .platform(Platform::Windows)
-        .browser(Browser::Brave146)
+        .identity(crate::core::Identity::new(
+            Browser::Brave146,
+            Platform::Windows,
+        ))
         .build()
         .unwrap();
-    assert_eq!(s.identity().browser(), Some(Browser::Brave146));
+    assert_eq!(s.identity().http(), Some(Browser::Brave146));
     assert_eq!(s.platform(), Platform::Windows);
 }
 
@@ -213,6 +216,7 @@ async fn capture_post_headers(
         String::from_utf8_lossy(&req).to_string()
     });
     let _ = finish(session.post(format!("http://{addr}/")))
+        .send()
         .await
         .unwrap();
     server.await.unwrap()
@@ -247,7 +251,7 @@ async fn execute_json_content_type_infers_xhr() {
         .header("content-type", "application/json")
         .body(Body::from("{}"))
         .unwrap();
-    Session::browser(Browser::default())
+    Session::from(Browser::default())
         .execute(req)
         .await
         .unwrap();
@@ -261,7 +265,7 @@ async fn execute_json_content_type_infers_xhr() {
 
 #[tokio::test]
 async fn json_body_infers_xhr_preset() {
-    let req = capture_post_headers(Session::browser(Browser::default()), |b| {
+    let req = capture_post_headers(Session::from(Browser::default()), |b| {
         b.json(&serde_json::json!({"a": 1}))
     })
     .await;
@@ -278,7 +282,7 @@ async fn json_body_infers_xhr_preset() {
 
 #[tokio::test]
 async fn form_body_infers_form_preset() {
-    let req = capture_post_headers(Session::browser(Browser::default()), |b| {
+    let req = capture_post_headers(Session::from(Browser::default()), |b| {
         b.form([("u", "alice")])
     })
     .await;
@@ -295,8 +299,8 @@ async fn form_body_infers_form_preset() {
 
 #[tokio::test]
 async fn user_preset_wins_over_json_inference() {
-    let req = capture_post_headers(Session::browser(Browser::default()), |b| {
-        b.preset(Preset::Navigate)
+    let req = capture_post_headers(Session::from(Browser::default()), |b| {
+        b.kind(RequestKind::Navigate)
             .json(&serde_json::json!({"a": 1}))
     })
     .await;
@@ -322,10 +326,10 @@ async fn bare_json_has_no_sec_fetch() {
 
 #[tokio::test]
 async fn native_json_omits_browser_headers_and_preserves_app_headers() {
-    let session = Session::browser(Browser::default());
+    let session = Session::from(Browser::default());
     let wire = capture_post_headers(session, |request| {
         request
-            .preset(Preset::Native)
+            .kind(RequestKind::Native)
             .header("user-agent", "ExampleApp/1.0")
             .header("authorization", "Bearer test-token")
             .json(&serde_json::json!({"id": 1}))

@@ -1,39 +1,28 @@
 use serde::Deserialize;
 
-use crate::audit::AuditData;
+use crate::audit::Fingerprint;
 use crate::core::{Error, Result};
 
 mod headers;
 
-pub use headers::HeaderOutcome;
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct Observed {
-    pub ja4: Option<String>,
-    pub ja3: Option<String>,
-    pub h2_fingerprint: Option<String>,
-    pub headers: Vec<(String, String)>,
-}
+pub(crate) use headers::HeaderOutcome;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum FieldOutcome {
+pub(crate) enum FieldOutcome {
     Match,
     Mismatch { expected: String, observed: String },
-    Informational { expected: String, observed: String },
+    Informational,
     NotReported,
     Absent { expected: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct FingerprintReport {
-    pub ja4: FieldOutcome,
-    pub ja3: FieldOutcome,
-    pub h2_fingerprint: FieldOutcome,
-    pub headers: Vec<HeaderOutcome>,
-    pub header_order: FieldOutcome,
+pub(crate) struct FingerprintReport {
+    pub(crate) ja4: FieldOutcome,
+    pub(crate) ja3: FieldOutcome,
+    pub(crate) h2_fingerprint: FieldOutcome,
+    pub(crate) headers: Vec<HeaderOutcome>,
+    pub(crate) header_order: FieldOutcome,
 }
 
 #[derive(Deserialize, Default)]
@@ -59,125 +48,80 @@ struct EchoHttp2 {
     sent_frames: Vec<headers::EchoFrame>,
 }
 
-impl Observed {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn ja4(mut self, value: impl Into<String>) -> Self {
-        self.ja4 = Some(value.into());
-        self
-    }
-
-    pub fn ja3(mut self, value: impl Into<String>) -> Self {
-        self.ja3 = Some(value.into());
-        self
-    }
-
-    pub fn h2_fingerprint(mut self, value: impl Into<String>) -> Self {
-        self.h2_fingerprint = Some(value.into());
-        self
-    }
-
-    pub fn header(mut self, name: &str, value: impl Into<String>) -> Self {
-        self.headers.push((name.to_ascii_lowercase(), value.into()));
-        self
-    }
-
-    pub fn from_json(text: &str) -> Result<Observed> {
-        let echo: EchoAll = serde_json::from_str(text).map_err(Error::from_json)?;
-        Ok(Observed {
-            headers: headers::echoed(&echo.http2.sent_frames, &echo.http1),
-            ja4: echo.tls.ja4,
-            ja3: echo.tls.ja3_hash,
-            h2_fingerprint: echo.http2.akamai_fingerprint,
-        })
-    }
-}
-
 impl FieldOutcome {
-    pub fn is_mismatch(&self) -> bool {
-        matches!(
-            self,
-            FieldOutcome::Mismatch { .. } | FieldOutcome::Absent { .. }
-        )
-    }
-}
-
-impl FingerprintReport {
-    pub fn is_match(&self) -> bool {
-        [
-            &self.ja4,
-            &self.ja3,
-            &self.h2_fingerprint,
-            &self.header_order,
-        ]
-        .iter()
-        .all(|outcome| !outcome.is_mismatch())
-            && self.headers.iter().all(|h| !h.outcome.is_mismatch())
-    }
-}
-
-impl AuditData {
-    pub fn compare(&self, observed: &Observed) -> FingerprintReport {
-        FingerprintReport {
-            ja4: outcome(&self.ja4, observed.ja4.as_deref(), false),
-            ja3: outcome(&self.ja3, observed.ja3.as_deref(), self.permutes_extensions),
-            h2_fingerprint: outcome(
-                &self.h2_fingerprint,
-                observed.h2_fingerprint.as_deref(),
-                false,
-            ),
-            headers: headers::compare(&self.request_headers, &observed.headers),
-            header_order: headers::order(&self.request_headers, &observed.headers),
+    fn mismatch(&self) -> Option<(String, String)> {
+        match self {
+            FieldOutcome::Mismatch { expected, observed } => {
+                Some((expected.clone(), observed.clone()))
+            }
+            FieldOutcome::Absent { expected } => Some((expected.clone(), String::new())),
+            _ => None,
         }
     }
 }
 
-fn outcome(expected: &str, observed: Option<&str>, order_varies: bool) -> FieldOutcome {
-    let Some(observed) = observed else {
+impl Fingerprint {
+    /// Parses an echo service's JSON report into the fingerprint it observed.
+    pub fn from_json(text: &str) -> Result<Fingerprint> {
+        let echo: EchoAll = serde_json::from_str(text).map_err(Error::from_json)?;
+        Ok(Fingerprint {
+            request_headers: headers::echoed(&echo.http2.sent_frames, &echo.http1),
+            ja4: echo.tls.ja4.unwrap_or_default(),
+            ja3: echo.tls.ja3_hash.unwrap_or_default(),
+            h2_fingerprint: echo.http2.akamai_fingerprint.unwrap_or_default(),
+            ..Fingerprint::default()
+        })
+    }
+
+    /// Returns one `(field, expected, observed)` entry per mismatched field, and an empty list when the fingerprints match.
+    pub fn diff(&self, observed: &Fingerprint) -> Vec<(String, String, String)> {
+        let report = self.compare(observed);
+        [
+            ("ja4", &report.ja4),
+            ("ja3", &report.ja3),
+            ("akamai", &report.h2_fingerprint),
+            ("header order", &report.header_order),
+        ]
+        .into_iter()
+        .map(|(name, outcome)| (name.to_owned(), outcome))
+        .chain(
+            report
+                .headers
+                .iter()
+                .map(|header| (header.name.clone(), &header.outcome)),
+        )
+        .filter_map(|(name, outcome)| {
+            outcome
+                .mismatch()
+                .map(|(expected, seen)| (name, expected, seen))
+        })
+        .collect()
+    }
+
+    pub(crate) fn compare(&self, observed: &Fingerprint) -> FingerprintReport {
+        FingerprintReport {
+            ja4: outcome(&self.ja4, &observed.ja4, false),
+            ja3: outcome(&self.ja3, &observed.ja3, self.permutes_extensions),
+            h2_fingerprint: outcome(&self.h2_fingerprint, &observed.h2_fingerprint, false),
+            headers: headers::compare(&self.request_headers, &observed.request_headers),
+            header_order: headers::order(&self.request_headers, &observed.request_headers),
+        }
+    }
+}
+
+fn outcome(expected: &str, observed: &str, order_varies: bool) -> FieldOutcome {
+    if observed.is_empty() {
         return FieldOutcome::NotReported;
-    };
+    }
     if expected.eq_ignore_ascii_case(observed.trim()) {
         return FieldOutcome::Match;
     }
-    let expected = expected.to_owned();
-    let observed = observed.to_owned();
     if order_varies {
-        FieldOutcome::Informational { expected, observed }
+        FieldOutcome::Informational
     } else {
-        FieldOutcome::Mismatch { expected, observed }
-    }
-}
-
-impl std::fmt::Display for FieldOutcome {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            FieldOutcome::Match => f.write_str("match"),
-            FieldOutcome::Mismatch { expected, observed } => {
-                write!(f, "mismatch (expected {expected}, observed {observed})")
-            }
-            FieldOutcome::Informational { expected, observed } => {
-                write!(
-                    f,
-                    "informational (expected {expected}, observed {observed})"
-                )
-            }
-            FieldOutcome::NotReported => f.write_str("not reported"),
-            FieldOutcome::Absent { expected } => write!(f, "absent (expected {expected})"),
+        FieldOutcome::Mismatch {
+            expected: expected.to_owned(),
+            observed: observed.to_owned(),
         }
-    }
-}
-
-impl std::fmt::Display for FingerprintReport {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "ja4: {}", self.ja4)?;
-        writeln!(f, "ja3: {}", self.ja3)?;
-        write!(f, "h2: {}", self.h2_fingerprint)?;
-        write!(f, "\nheader order: {}", self.header_order)?;
-        for header in &self.headers {
-            write!(f, "\nheader {}: {}", header.name, header.outcome)?;
-        }
-        Ok(())
     }
 }

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use leyline::testing::{TestResponse, TestServer};
+use leyline::testing;
 use leyline::{Purpose, Robots, RobotsSource, Session, Url};
 
 const RFC_EXAMPLE: &str = "User-Agent: *
@@ -110,10 +110,10 @@ fn robots_read_signals_delay_and_sitemaps() {
 
 #[tokio::test]
 async fn session_robots_applies_the_status_rules() {
-    let server = TestServer::http(|request| match request.target.as_str() {
-        "/robots.txt" => TestResponse::new(301).header("location", "/moved.txt"),
-        "/moved.txt" => TestResponse::new(200).body("User-agent: *\nDisallow: /secret\n"),
-        _ => TestResponse::new(404),
+    let server = testing::Server::http(|request| match request.target.as_str() {
+        "/robots.txt" => testing::Response::new(301).header("location", "/moved.txt"),
+        "/moved.txt" => testing::Response::new(200).body("User-agent: *\nDisallow: /secret\n"),
+        _ => testing::Response::new(404),
     })
     .await
     .unwrap();
@@ -132,12 +132,16 @@ async fn session_robots_applies_the_status_rules() {
         .collect();
     assert_eq!(targets, ["/robots.txt", "/moved.txt"]);
 
-    let missing = TestServer::http(|_| TestResponse::new(404)).await.unwrap();
+    let missing = testing::Server::http(|_| testing::Response::new(404))
+        .await
+        .unwrap();
     let robots = session.robots(missing.url("/"), "*").await.unwrap();
     assert_eq!(robots.source(), RobotsSource::Unavailable);
     assert!(robots.allows(&Url::parse(&missing.url("/anything")).unwrap()));
 
-    let broken = TestServer::http(|_| TestResponse::new(503)).await.unwrap();
+    let broken = testing::Server::http(|_| testing::Response::new(503))
+        .await
+        .unwrap();
     let robots = session.robots(broken.url("/"), "*").await.unwrap();
     assert_eq!(robots.source(), RobotsSource::Unreachable);
     assert!(!robots.allows(&Url::parse(&broken.url("/anything")).unwrap()));
@@ -154,7 +158,7 @@ async fn session_robots_applies_the_status_rules() {
 async fn session_robots_reads_at_least_500_kib() {
     let mut body = "#".repeat(450 * 1024);
     body.push_str("\nUser-agent: *\nDisallow: /late\n");
-    let server = TestServer::http(move |_| TestResponse::new(200).body(body.clone()))
+    let server = testing::Server::http(move |_| testing::Response::new(200).body(body.clone()))
         .await
         .unwrap();
     let robots = Session::new().robots(server.url("/"), "*").await.unwrap();
@@ -237,7 +241,7 @@ fn robots_match_the_product_token_and_only_a_star_means_everyone() {
 
 #[tokio::test]
 async fn session_robots_treats_rate_limiting_as_unreachable() {
-    let server = TestServer::http(|_| TestResponse::new(429).header("retry-after", "0"))
+    let server = testing::Server::http(|_| testing::Response::new(429).header("retry-after", "0"))
         .await
         .unwrap();
     let robots = Session::new().robots(server.url("/"), "*").await.unwrap();
@@ -252,9 +256,9 @@ async fn session_robots_drops_the_line_cut_at_the_size_limit() {
     let cut = 512 * 1024;
     let filler = "x".repeat(cut - head.len() - "\nAllow: /p".len());
     let body = format!("{head}{filler}{tail}");
-    let server = TestServer::http(move |request| match request.target.as_str() {
-        "/robots.txt" => TestResponse::new(200).body(body.clone()),
-        _ => TestResponse::new(404),
+    let server = testing::Server::http(move |request| match request.target.as_str() {
+        "/robots.txt" => testing::Response::new(200).body(body.clone()),
+        _ => testing::Response::new(404),
     })
     .await
     .unwrap();

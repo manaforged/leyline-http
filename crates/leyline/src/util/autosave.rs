@@ -5,7 +5,7 @@ use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior};
 
-use crate::core::{Error, Kind, Result};
+use crate::core::{Cause, Error, Result};
 use crate::util::lock;
 
 pub(crate) struct SaveJob {
@@ -18,6 +18,9 @@ pub(crate) trait SaveTarget: Send + 'static {
     fn saved(&mut self, generation: u64);
     fn unsaved(&self) -> bool {
         false
+    }
+    fn alive(&self) -> bool {
+        true
     }
 }
 
@@ -85,9 +88,12 @@ impl<T: SaveTarget> Guard<T> {
     }
 
     fn end(&mut self, generation: u64, written: Result<()>) -> Result<()> {
-        match written {
+        match &written {
             Ok(()) => self.target.saved(generation),
-            Err(_) => self.dirty = true,
+            Err(error) => {
+                self.dirty = true;
+                tracing::warn!(target: "leyline::autosave", label = self.label, %error, "autosave write failed");
+            }
         }
         written
     }
@@ -111,8 +117,6 @@ impl<T: SaveTarget> Drop for Guard<T> {
 type Reply = oneshot::Sender<Result<()>>;
 
 enum Command {
-    Touch,
-    Flush(Reply),
     Shutdown(Reply),
 }
 
@@ -153,20 +157,6 @@ impl Autosave {
         }
     }
 
-    pub(crate) fn touch(&self) {
-        drop(self.control.send(Command::Touch));
-    }
-
-    pub(crate) async fn flush(&self) -> Result<()> {
-        let (reply, answer) = oneshot::channel();
-        self.control
-            .send(Command::Flush(reply))
-            .map_err(|e| stopped(self.label).with_source(e.to_string()))?;
-        answer
-            .await
-            .map_err(|e| stopped(self.label).with_source(e.to_string()))?
-    }
-
     pub(crate) async fn shutdown(self) -> Result<()> {
         let (reply, answer) = oneshot::channel();
         self.control
@@ -178,10 +168,17 @@ impl Autosave {
         drop(self.task.await);
         out
     }
+
+    pub(crate) async fn until(mut self, stop: impl std::future::Future<Output = ()>) {
+        tokio::select! {
+            () = stop => drop(self.shutdown().await),
+            _ = &mut self.task => {}
+        }
+    }
 }
 
 pub(crate) fn stopped(label: &str) -> Error {
-    Error::new(Kind::Io).with_message(format!("{label} autosave task stopped"))
+    Error::new(Cause::Io).with_message(format!("{label} autosave task stopped"))
 }
 
 async fn run<T: SaveTarget>(mut guard: Guard<T>, schedule: Schedule) {
@@ -206,13 +203,18 @@ async fn run<T: SaveTarget>(mut guard: Guard<T>, schedule: Schedule) {
                 drop(guard.save().await);
             }
             () = tick(ticker.as_mut()) => {
-                drop(guard.save().await);
-            }
-            command = guard.commands.recv() => {
-                if !handle(command, &mut guard, &mut due, schedule.interval).await {
+                if !guard.target.alive() {
                     guard.finished = true;
                     return;
                 }
+                if guard.pending() {
+                    drop(guard.save().await);
+                }
+            }
+            command = guard.commands.recv() => {
+                handle(command, &mut guard).await;
+                guard.finished = true;
+                return;
             }
         }
     }
@@ -232,33 +234,13 @@ async fn tick(ticker: Option<&mut tokio::time::Interval>) {
     }
 }
 
-async fn handle<T: SaveTarget>(
-    command: Option<Command>,
-    guard: &mut Guard<T>,
-    due: &mut Option<Instant>,
-    interval: Duration,
-) -> bool {
-    let reply = match command {
-        Some(Command::Touch) => {
-            guard.dirty = true;
-            due.get_or_insert_with(|| Instant::now() + interval);
-            return true;
-        }
-        Some(Command::Flush(reply)) => Some(reply),
-        Some(Command::Shutdown(reply)) => {
-            drop(reply.send(guard.save().await));
-            return false;
-        }
-        None => None,
+async fn handle<T: SaveTarget>(command: Option<Command>, guard: &mut Guard<T>) {
+    let saved = match guard.save().await {
+        Err(_) if guard.dirty => guard.save_now(),
+        saved => saved,
     };
-    *due = None;
-    let saved = guard.save().await;
-    match reply {
-        Some(reply) => {
-            drop(reply.send(saved));
-            true
-        }
-        None => false,
+    if let Some(Command::Shutdown(reply)) = command {
+        drop(reply.send(saved));
     }
 }
 

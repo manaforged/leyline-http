@@ -18,9 +18,7 @@ use crate::tls::{FingerprintConnector, TlsError};
 use crate::trace;
 use crate::util::is_idempotent;
 
-#[cfg(test)]
-use crate::pool::make_key;
-use crate::pool::send::not_resendable;
+use crate::pool::send::{not_resendable, resend};
 use crate::pool::types::PoolKey;
 use crate::pool::types::{Opened, Transport};
 use crate::pool::{H1Slot, Pool, TlsInfo};
@@ -248,11 +246,12 @@ pub(crate) async fn send_h1_pooled(
     tracing::Span::current().record("pool.hit", false);
     let installed = legs.fresh.is_some();
 
-    let (mut slot, tls, connect_ms) =
-        match fresh_leg(pool, &key, connector, dial, legs.fresh).await? {
-            Leg::H1(slot, tls, connect_ms) => (slot, tls, connect_ms),
-            Leg::H2(opened) => return Ok(H1Outcome::Upgraded { opened, body }),
-        };
+    let opened = match fresh_leg(pool, &key, connector, dial, legs.fresh).await? {
+        Leg::H1(opened) => opened,
+        Leg::H2(opened) => return Ok(H1Outcome::Upgraded { opened, body }),
+    };
+    let connect_ms = opened.connect_ms.unwrap_or_default();
+    let (mut slot, tls) = (opened.conn, opened.tls);
     let (resp, reusable) = exchange_on_stream(
         slot.io.as_mut(),
         method,
@@ -305,13 +304,13 @@ fn resend_after_failure(
         "pool stale hit -- pooled h1 connection failed, opening fresh"
     );
     pool.note_h1_dead();
-    match replay {
-        None => Err(H1PooledError::NotResendable(not_resendable(h1err_to_io(
-            error,
-        )))),
-        Some(_) if !is_idempotent(method) => Err(error),
-        Some(body) => Ok(body),
-    }
+    resend(
+        replay,
+        is_idempotent(method),
+        error,
+        |error| H1PooledError::NotResendable(not_resendable(h1err_to_io(error))),
+        |error| error,
+    )
 }
 
 struct WireResponse {
@@ -353,8 +352,6 @@ struct H1StreamPump {
 }
 
 type ParsedHead = (u16, Vec<(String, String)>, u8);
-
-const MAX_H1_INFORMATIONAL: usize = 16;
 
 mod dial;
 mod headers;

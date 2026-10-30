@@ -3,7 +3,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use futures_util::StreamExt;
 use futures_util::stream;
-use leyline::{Body, ProtocolPolicy, Session};
+use leyline::{Body, Protocol, Session};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[tokio::test]
@@ -78,7 +78,7 @@ async fn streaming_request_body_chunked_over_h1() {
     });
 
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .build()
         .unwrap();
     let chunks: Vec<std::io::Result<Bytes>> = (0..384)
@@ -142,7 +142,7 @@ async fn streaming_request_body_fixed_length_content_length() {
     });
 
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .build()
         .unwrap();
     let chunks: Vec<std::io::Result<Bytes>> = vec![
@@ -189,7 +189,7 @@ async fn response_into_stream_on_buffered_returns_single_chunk() {
     });
 
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .build()
         .unwrap();
     let resp = session
@@ -199,7 +199,7 @@ async fn response_into_stream_on_buffered_returns_single_chunk() {
         .await
         .unwrap();
     assert_eq!(resp.status(), 200);
-    let mut body = resp.into_stream().unwrap();
+    let mut body = resp.bytes_stream().unwrap();
     let mut total = 0usize;
     while let Some(chunk) = body.next().await {
         let c = chunk.unwrap();
@@ -236,7 +236,7 @@ async fn one_shot(body: &'static str) -> std::net::SocketAddr {
 async fn text_drains_a_streamed_body() {
     let addr = one_shot("hello stream").await;
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .build()
         .unwrap();
     let resp = session
@@ -252,10 +252,14 @@ async fn text_drains_a_streamed_body() {
 async fn buffered_body_is_visible_to_as_bytes() {
     let addr = one_shot("buffered").await;
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .build()
         .unwrap();
-    let resp = session.get(format!("http://{addr}/x")).await.unwrap();
+    let resp = session
+        .get(format!("http://{addr}/x"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.bytes().await.unwrap(), &b"buffered"[..]);
 }
 
@@ -285,12 +289,16 @@ async fn download_to_writes_body_to_file() {
 
     let path = std::env::temp_dir().join(format!("leyline-dl-{}.bin", addr.port()));
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .build()
         .unwrap();
-    let resp = session.get(format!("http://{addr}/file")).await.unwrap();
+    let resp = session
+        .get(format!("http://{addr}/file"))
+        .send()
+        .await
+        .unwrap();
     let mut file = tokio::fs::File::create(&path).await.unwrap();
-    let n = resp.copy_to(&mut file).await.unwrap();
+    let n = resp.write_to(&mut file).await.unwrap();
     assert_eq!(n, payload.len() as u64);
 
     let on_disk = tokio::fs::read(&path).await.unwrap();
@@ -323,7 +331,7 @@ async fn into_stream_twice_returns_error() {
     });
 
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .build()
         .unwrap();
     let resp = session
@@ -332,7 +340,7 @@ async fn into_stream_twice_returns_error() {
         .send()
         .await
         .unwrap();
-    let mut s1 = match resp.into_stream() {
+    let mut s1 = match resp.bytes_stream() {
         Ok(s) => s,
         Err(e) => panic!("unexpected error: {e}"),
     };
@@ -370,7 +378,7 @@ async fn redirect_with_streaming_body_errors() {
     });
 
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .build()
         .unwrap();
     let chunks: Vec<std::io::Result<Bytes>> = vec![Ok(Bytes::from_static(b"hello"))];

@@ -3,13 +3,15 @@ use std::time::SystemTime;
 
 use url::Url;
 
-use super::super::decompress::{decompress_and_strip, drain_stream_into_vec};
+use super::super::decompress::{buffer_and_strip, decompress_and_strip};
+use super::super::helpers::header_values;
 use super::journey::Journey;
+use crate::core::BodyRules;
 use crate::core::Session;
 use crate::core::deadline::Deadline;
-use crate::core::device::{SessionState, StateParts, unix_secs};
 use crate::core::error::Result;
 use crate::core::response::Response;
+use crate::core::saved::{ConnectionState, StateParts, unix_secs};
 use crate::core::transport::{ResponseMode, TransportResponse};
 use crate::util::lock;
 
@@ -19,10 +21,8 @@ impl Session {
         resp_headers: &[(http::HeaderName, http::HeaderValue)],
         url: &Url,
     ) {
-        let set_cookies: Vec<&str> = resp_headers
-            .iter()
-            .filter(|(k, _)| *k == "set-cookie")
-            .filter_map(|(_, v)| v.to_str().ok())
+        let set_cookies: Vec<&str> = header_values(resp_headers, "set-cookie")
+            .filter_map(|v| v.to_str().ok())
             .collect();
         if !set_cookies.is_empty() {
             self.inner
@@ -31,10 +31,11 @@ impl Session {
         }
     }
 
+    bench_pub! {
     #[must_use]
-    pub fn state(&self) -> SessionState {
+    fn connection_state(&self) -> ConnectionState {
         let now = SystemTime::now();
-        SessionState::from_parts(StateParts {
+        ConnectionState::from_parts(StateParts {
             tls_sessions: self.inner.connector.session_cache().export(unix_secs(now)),
             #[cfg(feature = "http3")]
             alt_svc: self.inner.pool.alt_svc_entries(),
@@ -42,6 +43,13 @@ impl Session {
             alt_svc: Vec::new(),
             hsts: lock(&self.inner.pool.hsts).export(now),
         })
+    }
+    }
+
+    bench_pub! {
+    fn restore(&self, state: &ConnectionState) {
+        self.restore_state(&state.parts());
+    }
     }
 
     pub(crate) fn restore_state(&self, parts: &StateParts) {
@@ -63,10 +71,8 @@ impl Session {
         if self.inner.tls_trust.accepts_invalid_certs() {
             return;
         }
-        let values: Vec<&str> = resp_headers
-            .iter()
-            .filter(|(k, _)| *k == "strict-transport-security")
-            .filter_map(|(_, v)| v.to_str().ok())
+        let values: Vec<&str> = header_values(resp_headers, "strict-transport-security")
+            .filter_map(|v| v.to_str().ok())
             .collect();
         if !values.is_empty() {
             lock(&self.inner.pool.hsts).note(url, &values, SystemTime::now());
@@ -85,19 +91,16 @@ impl Session {
         url: &Url,
         resp_headers: &[(http::HeaderName, http::HeaderValue)],
     ) {
-        let owned: Vec<String> = resp_headers
-            .iter()
-            .filter(|(k, _)| *k == "alt-svc")
-            .map(|(_, v)| String::from_utf8_lossy(v.as_bytes()).into_owned())
+        let owned: Vec<String> = header_values(resp_headers, "alt-svc")
+            .map(|v| String::from_utf8_lossy(v.as_bytes()).into_owned())
             .collect();
         let fields: Vec<&str> = owned.iter().map(String::as_str).collect();
         if fields.is_empty() {
             return;
         }
-        let age = resp_headers
-            .iter()
-            .find(|(k, _)| *k == "age")
-            .and_then(|(_, v)| v.to_str().ok())
+        let age = header_values(resp_headers, "age")
+            .next()
+            .and_then(|v| v.to_str().ok())
             .and_then(|v| crate::util::delta_seconds(v.split(',').next().unwrap_or_default()))
             .map_or(std::time::Duration::ZERO, std::time::Duration::from_secs);
         if let Some(host) = url.host_str()
@@ -113,6 +116,7 @@ impl Session {
         journey: Journey,
         audit_headers: Vec<(String, String)>,
         response: ResponseMode,
+        rules: BodyRules,
         deadline: &Deadline,
     ) -> Result<Response> {
         let TransportResponse {
@@ -130,13 +134,14 @@ impl Session {
                 body,
                 headers,
                 response.keeps_stream(status.as_u16()),
+                &rules,
                 deadline,
             )
             .await?;
         let audited = self.inner.audit_tls.is_some();
         let mut audit_headers = audit_headers;
         audit_headers.retain(|(name, value)| crate::core::transport::sent_on(version, name, value));
-        Ok(Response {
+        let mut response = Response {
             status,
             headers: headers.into_iter().collect(),
             body,
@@ -153,11 +158,14 @@ impl Session {
             },
             audit_tls: self.inner.audit_tls.clone(),
             audit_cache: std::sync::OnceLock::new(),
-            compression: self.inner.compression,
+            compression: rules,
             timing: journey.timing,
             attempts: 1,
             proxy: None,
-        })
+            block: None,
+        };
+        response.block = self.inner.block_rules.check(&response);
+        Ok(response)
     }
 
     pub(super) async fn finalize_response_body(
@@ -165,6 +173,7 @@ impl Session {
         resp_body_shape: crate::core::transport::TransportBody,
         resp_headers: Vec<(http::HeaderName, http::HeaderValue)>,
         keep_stream: bool,
+        rules: &BodyRules,
         deadline: &Deadline,
     ) -> Result<(
         crate::core::response::ResponseBody,
@@ -184,9 +193,7 @@ impl Session {
             crate::core::transport::TransportBody::Streaming(mut bs) => {
                 bs.set_read_timeout(deadline.read());
                 bs.set_body_timeout(deadline.body());
-                let buf = drain_stream_into_vec(bs, self.inner.compression.max_body_size).await?;
-                let (buf, resp_headers) =
-                    decompress_and_strip(buf, resp_headers, &self.inner.compression)?;
+                let (buf, resp_headers) = buffer_and_strip(bs, resp_headers, rules).await?;
                 (
                     crate::core::response::ResponseBody::Buffered(buf),
                     resp_headers,
@@ -203,8 +210,7 @@ impl Session {
                         resp_headers,
                     )
                 } else {
-                    let (buf, resp_headers) =
-                        decompress_and_strip(buf, resp_headers, &self.inner.compression)?;
+                    let (buf, resp_headers) = decompress_and_strip(buf, resp_headers, rules)?;
                     (
                         crate::core::response::ResponseBody::Buffered(buf),
                         resp_headers,

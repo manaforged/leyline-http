@@ -1,7 +1,7 @@
 use super::{check_body_budget, resolve_peer, validate_connection_id_len};
 use crate::profile::BrowserProfile;
 use crate::quic::config::H3Config;
-use crate::tls::TlsTrustConfig;
+use crate::tls::Tls;
 use leyline_bssl::asn1::Asn1Time;
 use leyline_bssl::bn::BigNum;
 use leyline_bssl::hash::MessageDigest;
@@ -58,12 +58,12 @@ fn quic_verifier_checks_host_ca_and_pin() {
         ("quic.tech", true, Some([0; 32]), false),
         ("quic.tech", false, None, false),
     ] {
-        let mut trust = TlsTrustConfig::new().env_roots(false);
+        let mut trust = Tls::new().env_roots(false);
         if anchor {
-            trust = trust.add_ca_der(der.clone());
+            trust = trust.ca_der(der.clone());
         }
         if let Some(pin) = pinned {
-            trust = trust.add_pinned_leaf_sha256(pin);
+            trust = trust.pin_sha256(pin);
         }
         let mut client = H3Config::from_profile(&profile)
             .unwrap()

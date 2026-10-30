@@ -6,8 +6,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 #[test]
 fn brand_overlay_on_non_chromium_profile_is_err() {
     let err = Session::builder()
-        .browser(Browser::Firefox148)
-        .brand(ChromiumBrand::Edge)
+        .identity(crate::core::Identity::from(Browser::Firefox148).with_brand(ChromiumBrand::Edge))
         .build()
         .expect_err("Edge overlay on Firefox must fail");
     let message = format!("{err}");
@@ -17,19 +16,17 @@ fn brand_overlay_on_non_chromium_profile_is_err() {
 #[test]
 fn edge_keeps_explicit_chromium_browser() {
     let s = Session::builder()
-        .browser(Browser::Chrome147)
-        .brand(ChromiumBrand::Edge)
+        .identity(crate::core::Identity::from(Browser::Chrome147).with_brand(ChromiumBrand::Edge))
         .build()
         .unwrap();
-    assert_eq!(s.identity().browser(), Some(Browser::Chrome147));
+    assert_eq!(s.identity().http(), Some(Browser::Edge147));
     assert_eq!(s.brand(), Some(ChromiumBrand::Edge));
 }
 
 #[tokio::test]
 async fn edge_overlay_on_chrome_145_preserves_chrome_145_grease_token() {
     let session = Session::builder()
-        .browser(Browser::Chrome145)
-        .brand(ChromiumBrand::Edge)
+        .identity(crate::core::Identity::from(Browser::Chrome145).with_brand(ChromiumBrand::Edge))
         .build()
         .unwrap();
     let req = capture_navigate_headers(session).await;
@@ -52,9 +49,10 @@ async fn edge_overlay_on_chrome_145_preserves_chrome_145_grease_token() {
 #[test]
 fn edge_overlay_on_mobile_platform_errors() {
     let err = Session::builder()
-        .browser(Browser::Chrome147)
-        .platform(Platform::Android)
-        .brand(ChromiumBrand::Edge)
+        .identity(
+            crate::core::Identity::new(Browser::Chrome147, Platform::Android)
+                .with_brand(ChromiumBrand::Edge),
+        )
         .build()
         .expect_err("mobile Edge overlay must be rejected");
     assert!(format!("{err}").contains("not verified"));
@@ -71,21 +69,21 @@ fn opera_overlay_on_unverified_anchor_errors() {
 #[test]
 fn builder_edge_impersonates() {
     let s = branded(Browser::default_browser(), ChromiumBrand::Edge);
-    assert_eq!(s.identity().browser(), Some(Browser::default_browser()));
+    assert_eq!(s.identity().http(), Some(Browser::edge()));
     assert_eq!(s.brand(), Some(ChromiumBrand::Edge));
 }
 
 #[test]
 fn builder_opera_impersonates() {
     let s = branded(Browser::Chrome152, ChromiumBrand::Opera);
-    assert_eq!(s.identity().browser(), Some(Browser::Chrome152));
+    assert_eq!(s.identity().http(), Some(Browser::Opera136));
     assert_eq!(s.brand(), Some(ChromiumBrand::Opera));
 }
 
 #[test]
 fn chrome_reports_stock_brand() {
     assert_eq!(
-        Session::browser(Browser::default()).brand(),
+        Session::from(Browser::default()).brand(),
         Some(ChromiumBrand::Chrome)
     );
 }
@@ -94,7 +92,7 @@ fn chrome_reports_stock_brand() {
 fn firefox_and_bare_have_no_chromium_brand() {
     assert_eq!(
         Session::builder()
-            .browser(Browser::latest(crate::profile::Family::Firefox))
+            .identity(Browser::firefox())
             .build()
             .unwrap()
             .brand(),

@@ -57,8 +57,8 @@ async fn redirect_retains_url_when_another_request_replaces_cache() {
             .unwrap();
     });
     let session = Session::builder()
-        .protocol(crate::ProtocolPolicy::Http1)
-        .tls_trust(crate::TlsTrustConfig::new().system_roots(false))
+        .protocol(crate::Protocol::Http1)
+        .tls(crate::Tls::new().system_roots(false))
         .timeout(Duration::from_secs(3))
         .build()
         .unwrap();

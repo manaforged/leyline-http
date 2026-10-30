@@ -1,41 +1,30 @@
 use crate::h2::H2Config;
-use crate::h2::config::{PseudoOrder, SettingId};
+use crate::h2::config::{DEFAULT_WINDOW_SIZE, PseudoOrder, SettingId};
 use crate::profile::H2Profile;
-
-const DEFAULT_CONNECTION_WINDOW: u32 = 65_535;
 
 const NO_PRIORITY_FRAMES: &str = "0";
 
-impl H2Profile {
-    fn clear_settings(&mut self) {
-        self.header_table_size = None;
-        self.enable_push = None;
-        self.max_concurrent_streams = None;
-        self.initial_stream_window_size = None;
-        self.max_frame_size = None;
-        self.max_header_list_size = None;
-        self.unknown_setting8 = None;
-        self.unknown_setting9 = None;
-    }
+impl H2Config {
+    pub fn akamai_fingerprint(&self) -> String {
+        let settings_str: String = self
+            .settings_order
+            .iter()
+            .filter_map(|&id| self.setting(id).map(|val| format!("{}:{}", id as u16, val)))
+            .collect::<Vec<_>>()
+            .join(";");
 
-    fn set_setting(&mut self, id: SettingId, value: u32) -> Result<(), String> {
-        match id {
-            SettingId::HeaderTableSize => self.header_table_size = Some(value),
-            SettingId::EnablePush => {
-                self.enable_push = Some(match value {
-                    0 => false,
-                    1 => true,
-                    other => return Err(format!("ENABLE_PUSH value {other} is not 0 or 1")),
-                });
-            }
-            SettingId::MaxConcurrentStreams => self.max_concurrent_streams = Some(value),
-            SettingId::InitialWindowSize => self.initial_stream_window_size = Some(value),
-            SettingId::MaxFrameSize => self.max_frame_size = Some(value),
-            SettingId::MaxHeaderListSize => self.max_header_list_size = Some(value),
-            SettingId::Unknown8 => self.unknown_setting8 = Some(value),
-            SettingId::Unknown9 => self.unknown_setting9 = Some(value),
-        }
-        Ok(())
+        let window_update = self
+            .initial_connection_window_size
+            .saturating_sub(DEFAULT_WINDOW_SIZE);
+
+        let pseudo_str: String = self
+            .pseudo_order
+            .iter()
+            .map(|p| p.label())
+            .collect::<Vec<_>>()
+            .join(",");
+
+        format!("{settings_str}|{window_update}|{NO_PRIORITY_FRAMES}|{pseudo_str}")
     }
 }
 
@@ -59,7 +48,9 @@ impl H2Profile {
                 parts.len()
             ));
         };
-        self.clear_settings();
+        for id in SettingId::all() {
+            self.set_setting(id, None)?;
+        }
         self.settings_order.clear();
         for entry in settings.split([';', ',']).filter(|e| !e.is_empty()) {
             let (code, value) = entry
@@ -71,13 +62,13 @@ impl H2Profile {
             if self.settings_order.iter().any(|key| key == id.key()) {
                 return Err(format!("SETTINGS id {code} appears twice"));
             }
-            self.set_setting(id, number(value, "SETTINGS value")?)?;
+            self.set_setting(id, Some(number(value, "SETTINGS value")?))?;
             self.settings_order.push(id.key().to_owned());
         }
         let increment: u32 = number(window, "WINDOW_UPDATE")?;
         self.initial_connection_window_size = Some(
             increment
-                .checked_add(DEFAULT_CONNECTION_WINDOW)
+                .checked_add(DEFAULT_WINDOW_SIZE)
                 .ok_or_else(|| format!("WINDOW_UPDATE {increment} overflows the window"))?,
         );
         if *priority != NO_PRIORITY_FRAMES {

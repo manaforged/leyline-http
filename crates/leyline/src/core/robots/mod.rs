@@ -14,11 +14,15 @@ const ROBOTS_PATH: &str = "/robots.txt";
 const BYTE_ORDER_MARK: char = '\u{feff}';
 const ANY_AGENT: &str = "*";
 
+/// A use of fetched content that robots.txt content signals can allow or deny.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Purpose {
+    /// Building a search index and showing links or snippets.
     Search,
+    /// Feeding content to an AI model as input, such as for grounding answers.
     AiInput,
+    /// Training or fine-tuning an AI model.
     AiTrain,
 }
 
@@ -34,8 +38,9 @@ const USAGE_VALUES: [(&str, bool); 2] = [("y", true), ("n", false)];
 impl Purpose {
     const ALL: [Purpose; 3] = [Purpose::Search, Purpose::AiInput, Purpose::AiTrain];
 
+    /// Returns the content-signal key: `search`, `ai-input`, or `ai-train`.
     #[must_use]
-    pub fn as_str(self) -> &'static str {
+    pub fn id(self) -> &'static str {
         match self {
             Purpose::Search => "search",
             Purpose::AiInput => "ai-input",
@@ -44,10 +49,7 @@ impl Purpose {
     }
 
     fn parse(key: &str) -> Option<Purpose> {
-        lookup(
-            &Purpose::ALL.map(|purpose| (purpose.as_str(), purpose)),
-            key,
-        )
+        lookup(&Purpose::ALL.map(|purpose| (purpose.id(), purpose)), key)
     }
 
     fn from_label(label: &str) -> Option<Purpose> {
@@ -62,14 +64,19 @@ pub(crate) fn lookup<T: Copy>(table: &[(&str, T)], key: &str) -> Option<T> {
         .map(|(_, value)| *value)
 }
 
+/// Where a `Robots` value came from, which decides the default when no rule matches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum RobotsSource {
+    /// The rules were parsed from a fetched robots.txt.
     Parsed,
+    /// The server returned a non-success status other than 5xx or 429, so every path is allowed.
     Unavailable,
+    /// The fetch failed, timed out, or returned 5xx or 429, so every path except robots.txt is disallowed.
     Unreachable,
 }
 
+/// The robots.txt rules that apply to one user agent, with crawl delay, sitemaps, and content signals.
 #[derive(Debug, Clone)]
 pub struct Robots {
     source: RobotsSource,
@@ -230,6 +237,7 @@ pub(crate) fn header_uses(value: &str) -> impl Iterator<Item = (Purpose, bool)> 
 }
 
 impl Robots {
+    /// Parses robots.txt text and keeps the groups for `agent`, falling back to the `*` groups.
     #[must_use]
     pub fn parse(text: &str, agent: &str) -> Robots {
         let mut groups: Vec<Group> = Vec::new();
@@ -291,6 +299,7 @@ impl Robots {
         }
     }
 
+    /// Returns whether `url` may be crawled, using the longest matching rule; robots.txt itself is always allowed.
     #[must_use]
     pub fn allows(&self, url: &Url) -> bool {
         if url.path() == ROBOTS_PATH {
@@ -310,6 +319,7 @@ impl Robots {
         }
     }
 
+    /// Returns whether content at `url` may be used for `purpose`; allowed when no content signal matches.
     #[must_use]
     pub fn allows_use(&self, url: &Url, purpose: Purpose) -> bool {
         let path = path_bytes(url);
@@ -327,16 +337,19 @@ impl Robots {
             .is_none_or(|(_, allowed)| allowed)
     }
 
+    /// Returns the largest crawl delay among the matched groups, or `None` when none sets one.
     #[must_use]
     pub fn crawl_delay(&self) -> Option<Duration> {
         self.crawl_delay
     }
 
+    /// Returns every sitemap URL listed in the file, regardless of user-agent group.
     #[must_use]
     pub fn sitemaps(&self) -> &[String] {
         &self.sitemaps
     }
 
+    /// Returns where these rules came from.
     #[must_use]
     pub fn source(&self) -> RobotsSource {
         self.source

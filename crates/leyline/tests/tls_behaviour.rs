@@ -6,11 +6,11 @@
 mod tls_support;
 
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use leyline::tls::{ResolveFuture, Resolver};
-use leyline::{ProtocolPolicy, Session, TlsTrustConfig};
+use leyline::{Protocol, Resolver, Session, Tls};
 use leyline_bssl::hash::{MessageDigest, hash};
 use leyline_bssl_tokio::SslStream;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -46,14 +46,14 @@ async fn self_signed_server() -> (u16, Vec<u8>) {
     (port, der)
 }
 
-fn bare_trust() -> TlsTrustConfig {
-    TlsTrustConfig::new().env_roots(false).system_roots(false)
+fn bare_trust() -> Tls {
+    Tls::new().env_roots(false).system_roots(false)
 }
 
-async fn fetch(trust: TlsTrustConfig, url: String) -> leyline::Result<String> {
+async fn fetch(trust: Tls, url: String) -> leyline::Result<String> {
     Session::builder()
-        .protocol(ProtocolPolicy::Http1)
-        .tls_trust(trust)
+        .protocol(Protocol::Http1)
+        .tls(trust)
         .build()
         .unwrap()
         .get(url)
@@ -89,21 +89,16 @@ async fn a_pinned_leaf_connects_only_when_the_pin_matches() {
 
     assert_eq!(
         fetch(
-            bare_trust()
-                .add_ca_der(der.clone())
-                .add_pinned_leaf_sha256(pin),
+            bare_trust().ca_der(der.clone()).pin_sha256(pin),
             url.clone()
         )
         .await
         .unwrap(),
         "ok"
     );
-    fetch(
-        bare_trust().add_ca_der(der).add_pinned_leaf_sha256([7; 32]),
-        url,
-    )
-    .await
-    .expect_err("expected Err");
+    fetch(bare_trust().ca_der(der).pin_sha256([7; 32]), url)
+        .await
+        .expect_err("expected Err");
 }
 
 struct Recording {
@@ -112,7 +107,11 @@ struct Recording {
 }
 
 impl Resolver for Recording {
-    fn resolve<'a>(&'a self, host: &'a str, port: u16) -> ResolveFuture<'a> {
+    fn resolve<'a>(
+        &'a self,
+        host: &'a str,
+        port: u16,
+    ) -> Pin<Box<dyn Future<Output = std::io::Result<Vec<SocketAddr>>> + Send + 'a>> {
         self.asked.lock().unwrap().push((host.to_owned(), port));
         let target = self.target;
         Box::pin(async move { Ok(vec![target]) })
@@ -128,13 +127,9 @@ async fn a_custom_resolver_decides_where_a_hostname_connects() {
     });
 
     let body = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
-        .tls_trust(
-            bare_trust()
-                .add_ca_der(der)
-                .danger_accept_invalid_certs(true),
-        )
-        .dns(Arc::clone(&resolver) as Arc<dyn Resolver>)
+        .protocol(Protocol::Http1)
+        .tls(bare_trust().ca_der(der).danger_accept_invalid_certs(true))
+        .dns_resolver(Arc::clone(&resolver) as Arc<dyn Resolver>)
         .build()
         .unwrap()
         .get(format!("https://shop.invalid:{port}/"))
@@ -152,10 +147,10 @@ async fn a_custom_resolver_decides_where_a_hostname_connects() {
     );
 }
 
-fn http1_session(trust: TlsTrustConfig) -> Session {
+fn http1_session(trust: Tls) -> Session {
     Session::builder()
-        .protocol(ProtocolPolicy::Http1)
-        .tls_trust(trust)
+        .protocol(Protocol::Http1)
+        .tls(trust)
         .build()
         .unwrap()
 }
@@ -212,43 +207,68 @@ fn unrelated_pem() -> Vec<u8> {
 #[tokio::test]
 async fn a_saved_tls_session_resumes_only_under_the_trust_that_made_it() {
     let server = resuming_server().await;
-    let unpinned = http1_session(bare_trust().add_ca_der(server.der.clone()));
+    let unpinned = http1_session(bare_trust().ca_der(server.der.clone()));
     let first = unpinned.get(server.url.clone()).send().await.unwrap();
     assert_eq!(first.text().await.unwrap(), "ok");
-    let state = unpinned.state();
+    let state = unpinned.connection_state();
 
-    let pinned = http1_session(
-        bare_trust()
-            .add_ca_der(server.der.clone())
-            .add_pinned_leaf_sha256([7; 32]),
-    );
-    state.restore_into(&pinned);
+    let pinned = http1_session(bare_trust().ca_der(server.der.clone()).pin_sha256([7; 32]));
+    pinned.restore(&state);
     let refused = pinned.get(server.url.clone()).send().await.unwrap_err();
-    assert!(refused.tls().is_some(), "{refused:?}");
+    assert!(
+        std::error::Error::source(&refused)
+            .and_then(|s| s.downcast_ref::<leyline::TlsError>())
+            .is_some(),
+        "{refused:?}"
+    );
     assert_eq!(server.resumed.load(Ordering::SeqCst), 0);
 
-    let same = http1_session(bare_trust().add_ca_der(server.der));
-    state.restore_into(&same);
+    let same = http1_session(bare_trust().ca_der(server.der));
+    same.restore(&state);
     let again = same.get(server.url).send().await.unwrap();
     assert_eq!(again.text().await.unwrap(), "ok");
     assert_eq!(server.resumed.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]
+async fn a_derived_session_keeps_the_trust_its_parent_loaded() {
+    let server = resuming_server().await;
+    let ca_file = scratch_file("derived-ca.pem", &server.pem);
+    let parent = http1_session(bare_trust().ca_file(&ca_file));
+    std::fs::remove_file(&ca_file).unwrap();
+    let child = parent
+        .to_builder()
+        .cookies(leyline::cookie::Jar::new())
+        .build()
+        .unwrap();
+    let resp = child.get(server.url).send().await.unwrap();
+    assert_eq!(resp.text().await.unwrap(), "ok");
+}
+
+#[tokio::test]
 async fn a_fresh_pool_labels_its_tickets_with_the_roots_it_loaded() {
     let server = resuming_server().await;
     let ca_file = scratch_file("fresh-pool-ca.pem", &server.pem);
-    let original = http1_session(bare_trust().add_ca_file(&ca_file));
+    let original = http1_session(bare_trust().ca_file(&ca_file));
+    let copy = original
+        .to_builder()
+        .share_connections(false)
+        .build()
+        .unwrap();
     std::fs::write(&ca_file, unrelated_pem()).unwrap();
-    let copy = original.fresh_pool();
     let first = copy.get(server.url.clone()).send().await.unwrap();
     assert_eq!(first.text().await.unwrap(), "ok");
-    let state = copy.state();
+    let state = copy.connection_state();
 
-    let rotated = http1_session(bare_trust().add_ca_file(&ca_file));
-    state.restore_into(&rotated);
+    let rotated = http1_session(bare_trust().ca_file(&ca_file));
+    rotated.restore(&state);
     let refused = rotated.get(server.url).send().await.unwrap_err();
-    assert!(refused.tls().is_some(), "{refused:?}");
+    assert!(
+        std::error::Error::source(&refused)
+            .and_then(|s| s.downcast_ref::<leyline::TlsError>())
+            .is_some(),
+        "{refused:?}"
+    );
     assert_eq!(server.resumed.load(Ordering::SeqCst), 0);
 }
 
@@ -257,22 +277,27 @@ async fn a_saved_tls_session_does_not_resume_after_environment_roots_change() {
     let server = resuming_server().await;
     let trusted = scratch_file("env-trusted.pem", &server.pem);
     let other = scratch_file("env-other.pem", &unrelated_pem());
-    let env_trust = || TlsTrustConfig::new().system_roots(false).env_roots(true);
+    let env_trust = || Tls::new().system_roots(false).env_roots(true);
     // SAFETY: no other test in this binary builds a session with environment roots, so no thread reads SSL_CERT_FILE while it changes.
     unsafe { std::env::set_var("SSL_CERT_FILE", &trusted) };
     let before = http1_session(env_trust());
     let first = before.get(server.url.clone()).send().await.unwrap();
     assert_eq!(first.text().await.unwrap(), "ok");
-    let state = before.state();
+    let state = before.connection_state();
 
     // SAFETY: see above.
     unsafe { std::env::set_var("SSL_CERT_FILE", &other) };
     let after = http1_session(env_trust());
     // SAFETY: see above.
     unsafe { std::env::remove_var("SSL_CERT_FILE") };
-    state.restore_into(&after);
+    after.restore(&state);
     let refused = after.get(server.url).send().await.unwrap_err();
-    assert!(refused.tls().is_some(), "{refused:?}");
+    assert!(
+        std::error::Error::source(&refused)
+            .and_then(|s| s.downcast_ref::<leyline::TlsError>())
+            .is_some(),
+        "{refused:?}"
+    );
     assert_eq!(server.resumed.load(Ordering::SeqCst), 0);
 }
 
@@ -285,20 +310,20 @@ async fn a_saved_tls_session_does_not_resume_after_the_client_certificate_rotate
     let with_identity = || {
         http1_session(
             bare_trust()
-                .add_ca_der(server.der.clone())
-                .client_identity(&chain, &private),
+                .ca_der(server.der.clone())
+                .client_cert(&chain, &private),
         )
     };
     let before = with_identity();
     let first = before.get(server.url.clone()).send().await.unwrap();
     assert_eq!(first.text().await.unwrap(), "ok");
-    let state = before.state();
+    let state = before.connection_state();
 
     let (next_cert, next_key) = tls_support::self_signed();
     std::fs::write(&chain, next_cert.to_pem().unwrap()).unwrap();
     std::fs::write(&private, next_key.private_key_to_pem_pkcs8().unwrap()).unwrap();
     let after = with_identity();
-    state.restore_into(&after);
+    after.restore(&state);
     let again = after.get(server.url.clone()).send().await.unwrap();
     assert_eq!(again.text().await.unwrap(), "ok");
     assert_eq!(server.resumed.load(Ordering::SeqCst), 0);
@@ -317,11 +342,11 @@ async fn a_client_certificate_in_a_trusted_certificate_block_loads() {
         &key.private_key_to_pem_pkcs8().unwrap(),
     );
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
-        .tls_trust(
+        .protocol(Protocol::Http1)
+        .tls(
             bare_trust()
-                .add_ca_der(server.der.clone())
-                .client_identity(&chain, &private),
+                .ca_der(server.der.clone())
+                .client_cert(&chain, &private),
         )
         .build()
         .unwrap();
@@ -372,8 +397,8 @@ async fn the_server_receives_the_client_leaf_and_its_chain_in_order() {
     );
     let session = http1_session(
         bare_trust()
-            .add_ca_der(server_der)
-            .client_identity(&chain, &private),
+            .ca_der(server_der)
+            .client_cert(&chain, &private),
     );
     let response = session
         .get(format!("https://127.0.0.1:{port}/"))
@@ -394,20 +419,16 @@ async fn the_server_receives_the_client_leaf_and_its_chain_in_order() {
 #[tokio::test]
 async fn restored_tickets_for_other_trust_are_not_kept() {
     let server = resuming_server().await;
-    let unpinned = http1_session(bare_trust().add_ca_der(server.der.clone()));
+    let unpinned = http1_session(bare_trust().ca_der(server.der.clone()));
     let first = unpinned.get(server.url.clone()).send().await.unwrap();
     assert_eq!(first.text().await.unwrap(), "ok");
-    let state = unpinned.state();
+    let state = unpinned.connection_state();
     let saved = serde_json::to_value(&state).unwrap();
     assert!(!saved["tls_sessions"].as_array().unwrap().is_empty());
 
-    let pinned = http1_session(
-        bare_trust()
-            .add_ca_der(server.der)
-            .add_pinned_leaf_sha256([7; 32]),
-    );
-    state.restore_into(&pinned);
-    let kept = serde_json::to_value(pinned.state()).unwrap();
+    let pinned = http1_session(bare_trust().ca_der(server.der).pin_sha256([7; 32]));
+    pinned.restore(&state);
+    let kept = serde_json::to_value(pinned.connection_state()).unwrap();
     assert_eq!(kept["tls_sessions"].as_array().map(Vec::len), Some(0));
 }
 
@@ -455,20 +476,18 @@ async fn saved_tickets_through_a_proxy_hold_no_proxy_credentials() {
     let server = resuming_server().await;
     let proxy = tunnel_proxy().await;
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
-        .tls_trust(bare_trust().add_ca_der(server.der))
+        .protocol(Protocol::Http1)
+        .tls(bare_trust().ca_der(server.der))
         .proxy(
-            leyline::ProxyConfig::new()
+            leyline::Proxy::new()
                 .env(false)
-                .rule(leyline::ProxyRule::all(format!(
-                    "http://tunneluser:tunnelsecret@127.0.0.1:{proxy}"
-                ))),
+                .all(format!("http://tunneluser:tunnelsecret@127.0.0.1:{proxy}")),
         )
         .build()
         .unwrap();
     let response = session.get(server.url).send().await.unwrap();
     assert_eq!(response.text().await.unwrap(), "ok");
-    let saved = serde_json::to_string(&session.state()).unwrap();
+    let saved = serde_json::to_string(&session.connection_state()).unwrap();
     assert!(saved.contains("tls_sessions"), "{saved}");
     assert!(
         !saved.contains("tunneluser"),

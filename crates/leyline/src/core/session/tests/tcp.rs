@@ -1,7 +1,7 @@
 use socket2::{Domain, SockRef, Socket, Type};
 use tokio::net::{TcpListener, TcpStream};
 
-use crate::{Browser, Platform, Session, SocketConfig};
+use crate::{Browser, Platform, Session};
 
 async fn limits(session: Option<Session>) -> (u32, usize, bool) {
     let listener = TcpListener::bind("127.0.0.1:0")
@@ -38,8 +38,10 @@ async fn bare_tcp_uses_os_limits() {
 async fn tcp_profiles_keep_mss_and_nodelay() {
     let profile = Platform::Linux.tcp_profile();
     let browser = Session::builder()
-        .browser(Browser::Chrome149)
-        .platform(Platform::Linux)
+        .identity(crate::core::Identity::new(
+            Browser::Chrome149,
+            Platform::Linux,
+        ))
         .build()
         .expect("Chrome session");
     let explicit = Session::builder()
@@ -69,7 +71,7 @@ async fn socket_config_keeps_explicit_buffer() {
         .set_recv_buffer_size(262_144)
         .expect("receive buffer override");
     let session = Session::builder()
-        .socket(SocketConfig::default().recv_buffer_size(262_144))
+        .recv_buffer_size(262_144)
         .build()
         .expect("socket configuration");
     let (_, buffer, _) = limits(Some(session)).await;

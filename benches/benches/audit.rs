@@ -35,13 +35,12 @@ fn bench_ja3(c: &mut Criterion) {
 }
 
 fn bench_ja4(c: &mut Criterion) {
-    let (ciphers, sigalgs, curves, ext_ids) = chrome_147_inputs();
+    let (ciphers, sigalgs, _, ext_ids) = chrome_147_inputs();
     c.bench_function("audit::compute_ja4", |b| {
         b.iter(|| {
             let input = Ja4Input {
                 ciphers: black_box(&ciphers),
                 sigalgs: black_box(&sigalgs),
-                curves: black_box(&curves),
                 extension_ids: black_box(&ext_ids),
                 tls_version: "1.3",
                 has_sni: true,

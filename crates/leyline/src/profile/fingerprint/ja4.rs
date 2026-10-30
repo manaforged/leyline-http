@@ -1,13 +1,10 @@
+use crate::audit::JA4_TCP;
 use crate::iana::{cipher_name, sigalg_name};
-use crate::profile::TlsProfile;
+use crate::profile::{ALPN, SERVER_NAME, TlsProfile};
 
 use super::parse_list;
 
 const HASH_LEN: usize = 12;
-
-const SERVER_NAME: u16 = 0x0000;
-
-const ALPN: u16 = 0x0010;
 
 fn is_hash(part: &str) -> bool {
     part.len() == HASH_LEN && part.bytes().all(|b| b.is_ascii_hexdigit())
@@ -30,9 +27,9 @@ impl TlsProfile {
             ));
         };
         let mut flags = header.chars();
-        if flags.next() != Some('t') {
+        if flags.next() != Some(JA4_TCP) {
             return Err(format!(
-                "header {header:?} is not a TCP TLS fingerprint (it must start with 't')"
+                "header {header:?} is not a TCP TLS fingerprint (it must start with '{JA4_TCP}')"
             ));
         }
         if flags.nth(2) != Some('d') {

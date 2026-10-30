@@ -1,14 +1,15 @@
-use leyline::testing::{TestResponse, TestServer};
+use futures_util::StreamExt;
+use leyline::testing;
 use leyline::{Browser, Session};
 
 #[tokio::test]
 async fn a_next_page_on_another_origin_gets_no_session_token() {
-    let other = TestServer::http(|_| TestResponse::new(200).close())
+    let other = testing::Server::http(|_| testing::Response::new(200).close())
         .await
         .unwrap();
     let next = other.url("/page2");
-    let first = TestServer::http(move |_| {
-        TestResponse::new(200)
+    let first = testing::Server::http(move |_| {
+        testing::Response::new(200)
             .close()
             .header("link", format!("<{next}>; rel=\"next\""))
     })
@@ -33,15 +34,15 @@ async fn a_next_page_on_another_origin_gets_no_session_token() {
 
 #[tokio::test]
 async fn a_tab_follow_to_another_origin_drops_a_default_authorization() {
-    let other = TestServer::http(|_| TestResponse::new(200).close())
+    let other = testing::Server::http(|_| testing::Response::new(200).close())
         .await
         .unwrap();
-    let first = TestServer::http(|_| TestResponse::new(200).close())
+    let first = testing::Server::http(|_| testing::Response::new(200).close())
         .await
         .unwrap();
     let tab = Session::builder()
         .browser(Browser::default())
-        .protocol(leyline::ProtocolPolicy::Http1)
+        .protocol(leyline::Protocol::Http1)
         .headers([("authorization", "Bearer default-token")])
         .build()
         .unwrap()

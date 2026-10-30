@@ -94,7 +94,7 @@ async fn wrong_body_fails_without_retry_and_outage_skips() {
             async move {
                 calls.fetch_add(1, Ordering::SeqCst);
                 let session = session_with_timeout(std::time::Duration::from_secs(2))?;
-                let response = session.post(&url).await?;
+                let response = session.post(&url).send().await?;
                 let value = read_httpbin_json(response).await?;
                 let echoed = value["json"]["test"].as_str().unwrap_or("");
                 httpbin_eq(echoed == "leyline", format!("echoed={echoed}"))?;
@@ -124,7 +124,7 @@ async fn wrong_body_fails_without_retry_and_outage_skips() {
             async move {
                 calls.fetch_add(1, Ordering::SeqCst);
                 let session = session_with_timeout(std::time::Duration::from_secs(2))?;
-                let response = session.get(&url).await?;
+                let response = session.get(&url).send().await?;
                 let body = read_httpbin_text(response, StatusCode::OK).await?;
                 httpbin_eq(body.contains("headers"), "httpbin body missing headers")?;
                 Ok(body)
@@ -165,7 +165,7 @@ async fn non_json_retries_then_skips_and_bad_gzip_fails() {
             async move {
                 calls.fetch_add(1, Ordering::SeqCst);
                 let session = session_with_timeout(std::time::Duration::from_secs(2))?;
-                let response = session.get(&url).await?;
+                let response = session.get(&url).send().await?;
                 let value = read_httpbin_json(response).await?;
                 let foo = value["args"]["foo"].as_str().unwrap_or("");
                 httpbin_eq(foo == "bar", format!("foo={foo}"))?;
@@ -193,7 +193,7 @@ async fn non_json_retries_then_skips_and_bad_gzip_fails() {
             async move {
                 calls.fetch_add(1, Ordering::SeqCst);
                 let session = session_with_timeout(std::time::Duration::from_secs(2))?;
-                let response = session.get(&url).await?;
+                let response = session.get(&url).send().await?;
                 let _ = read_httpbin_json(response).await?;
                 Ok("ok".to_string())
             }
@@ -222,7 +222,7 @@ async fn non_json_retries_then_skips_and_bad_gzip_fails() {
             async move {
                 calls.fetch_add(1, Ordering::SeqCst);
                 let session = session_with_timeout(std::time::Duration::from_secs(2))?;
-                let response = session.get(&url).await?;
+                let response = session.get(&url).send().await?;
                 let _ = read_httpbin_text(response, StatusCode::OK).await?;
                 Ok("ok".to_string())
             }
@@ -248,7 +248,7 @@ async fn connect_and_read_timeouts_skip() {
             async move {
                 calls.fetch_add(1, Ordering::SeqCst);
                 let session = session_with_timeout(std::time::Duration::from_secs(2))?;
-                let response = session.get(format!("http://{addr}/get")).await?;
+                let response = session.get(format!("http://{addr}/get")).send().await?;
                 let _ = read_httpbin_text(response, StatusCode::OK).await?;
                 Ok("ok".to_string())
             }
@@ -269,7 +269,7 @@ async fn connect_and_read_timeouts_skip() {
             async move {
                 calls.fetch_add(1, Ordering::SeqCst);
                 let session = session_with_timeout(std::time::Duration::from_millis(200))?;
-                let response = session.get(&url).await?;
+                let response = session.get(&url).send().await?;
                 let _ = read_httpbin_text(response, StatusCode::OK).await?;
                 Ok("ok".to_string())
             }
@@ -308,7 +308,7 @@ async fn recovery_after_a_5xx_checks_the_body() {
             async move {
                 calls.fetch_add(1, Ordering::SeqCst);
                 let session = session_with_timeout(std::time::Duration::from_secs(2))?;
-                let response = session.get(&url).await?;
+                let response = session.get(&url).send().await?;
                 let value = read_httpbin_json(response).await?;
                 let auth = value["headers"]["Authorization"].as_str().unwrap_or("");
                 httpbin_eq(auth.contains("test-token-123"), format!("auth={auth}"))?;

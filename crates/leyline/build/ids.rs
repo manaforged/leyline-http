@@ -1,34 +1,35 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::BuildResult;
+use crate::brand::Variant;
 use crate::browser::Row;
 
-pub(crate) fn assign(rows: &mut [Row], ids: &BTreeMap<String, u32>) -> BuildResult<()> {
+pub(crate) fn assign(
+    rows: &mut [Row],
+    variants: &mut [Variant],
+    ids: &BTreeMap<String, u32>,
+) -> BuildResult<()> {
     let mut seen = BTreeSet::new();
-    for row in rows.iter_mut() {
-        let id = *ids.get(&row.meta.variant).ok_or_else(|| {
-            format!(
-                "browser_ids.toml has no id for {}; add it with the next free number",
-                row.meta.variant
-            )
+    let names = rows
+        .iter_mut()
+        .map(|row| (row.meta.variant.clone(), &mut row.id))
+        .chain(variants.iter_mut().map(|v| (v.name.clone(), &mut v.id)));
+    for (name, slot) in names {
+        let id = *ids.get(&name).ok_or_else(|| {
+            format!("browser_ids.toml has no id for {name}; add it with the next free number")
         })?;
         if !seen.insert(id) {
             return Err(format!("browser_ids.toml gives id {id} to more than one variant").into());
         }
-        row.id = id;
+        *slot = id;
     }
-    let expected: BTreeSet<u32> = (0..u32::try_from(rows.len())?).collect();
+    let total = rows.len() + variants.len();
+    let expected: BTreeSet<u32> = (0..u32::try_from(total)?).collect();
     if seen != expected {
         return Err("browser_ids.toml ids must run from 0 with no gaps".into());
     }
-    if ids.len() != rows.len() {
+    if ids.len() != total {
         return Err("browser_ids.toml names a variant that has no profile".into());
     }
     Ok(())
-}
-
-pub(crate) fn by_id(rows: &[Row]) -> Vec<&Row> {
-    let mut ordered: Vec<&Row> = rows.iter().collect();
-    ordered.sort_by_key(|row| row.id);
-    ordered
 }

@@ -6,8 +6,8 @@ use url::Url;
 
 use super::fetch::request;
 
-use crate::core::config::CompressionConfig;
-use crate::core::retry::{RetryPlan, RetryPolicy};
+use crate::core::config::BodyRules;
+use crate::core::retry::{Retry, RetryPlan};
 use crate::core::robots::Robots;
 use crate::core::session::Session;
 use crate::core::session::decompress::Decoder;
@@ -44,11 +44,11 @@ pub(super) enum SitemapRead {
 pub(super) async fn read(
     session: Session,
     url: Url,
-    retry: RetryPolicy,
+    retry: Retry,
     attempt: u32,
     trusted: Option<Url>,
 ) -> SitemapRead {
-    let result = request(&session, &url, retry.clone().max_retries(0), trusted)
+    let result = request(&session, &url, retry.once(), trusted)
         .stream()
         .send()
         .await;
@@ -73,7 +73,12 @@ pub(super) async fn read(
     if !response.status().is_success() {
         return SitemapRead::Failed;
     }
-    let body = response.read_until(MAX_BYTES, |_, _| false);
+    let body = async {
+        response
+            .read_until(MAX_BYTES, |_, _| false)
+            .await
+            .map(|(bytes, _)| bytes)
+    };
     let Ok(bytes) = session.deadline(None).total(body).await else {
         return SitemapRead::Failed;
     };
@@ -93,8 +98,11 @@ pub(super) async fn read(
 
 fn gunzip(bytes: &[u8]) -> Option<Vec<u8>> {
     let mut out = Vec::new();
-    let limit = Some(MAX_BYTES as u64);
-    let mut decoder = Decoder::capped(Some(GZIP), &CompressionConfig::new(), limit).ok()?;
+    let rules = BodyRules {
+        max_body_size: MAX_BYTES,
+        ..BodyRules::default()
+    };
+    let mut decoder = Decoder::capped(Some(GZIP), &rules).ok()?;
     let decoded = decoder
         .feed(bytes, &mut out)
         .and_then(|()| decoder.finish(&mut out));

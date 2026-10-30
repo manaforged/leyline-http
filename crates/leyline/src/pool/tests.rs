@@ -2,28 +2,29 @@ use super::connect::connect_err;
 use super::*;
 use crate::h2::{ErrorCode, H2Error};
 use crate::tls::TlsError;
-use crate::{Error, Kind};
+use crate::{Cause, Error};
 
 #[test]
 fn transport_separates_the_keyspace() {
-    let tcp = make_key("http", "example.com", 443, None, Transport::Tcp);
-    let quic = make_key("https", "example.com", 443, None, Transport::Quic);
+    let keys = Pool::new();
+    let tcp = keys.key("http", "example.com", 443, None, Transport::Tcp);
+    let quic = keys.key("https", "example.com", 443, None, Transport::Quic);
     assert_ne!(tcp, quic, "H2 (Tcp) and H3 (Quic) must not share a key");
 
     assert_eq!(
         tcp,
-        make_key("http", "example.com", 443, None, Transport::Tcp)
+        keys.key("http", "example.com", 443, None, Transport::Tcp)
     );
 
     assert_ne!(
         tcp,
-        make_key("http", "example.com", 443, Some("p:8080"), Transport::Tcp)
+        keys.key("http", "example.com", 443, Some("p:8080"), Transport::Tcp)
     );
 }
 
 #[test]
 fn kinds() {
-    let tcp = Error::new(Kind::Tls).with_source(TlsError::TcpConnect(
+    let tcp = Error::new(Cause::Tls).with_source(TlsError::TcpConnect(
         std::io::ErrorKind::ConnectionRefused.into(),
     ));
     let tcp = connect_err(&tcp);
@@ -32,7 +33,7 @@ fn kinds() {
         Some(TlsError::TcpConnect(err)) if err.kind() == std::io::ErrorKind::ConnectionRefused
     ));
 
-    let handshake = Error::new(Kind::Tls).with_source(TlsError::HandshakeIo(
+    let handshake = Error::new(Cause::Tls).with_source(TlsError::HandshakeIo(
         std::io::ErrorKind::UnexpectedEof.into(),
     ));
     let handshake = connect_err(&handshake);
@@ -41,7 +42,7 @@ fn kinds() {
         Some(TlsError::HandshakeIo(err)) if err.kind() == std::io::ErrorKind::UnexpectedEof
     ));
 
-    let io = Error::new(Kind::Io)
+    let io = Error::new(Cause::Io)
         .with_source(std::io::Error::from(std::io::ErrorKind::ConnectionAborted));
     let io = connect_err(&io);
     assert!(
@@ -52,7 +53,7 @@ fn kinds() {
 
 #[test]
 fn a_joined_connect_error_keeps_its_http2_cause() {
-    let goaway = Error::new(Kind::Http2).with_source(H2Error::Connection {
+    let goaway = Error::new(Cause::Http2).with_source(H2Error::Connection {
         code: ErrorCode::NoError,
         reason: "server shutting down".into(),
     });

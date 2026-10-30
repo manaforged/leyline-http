@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
 
-use super::TlsTrustConfig;
+use super::Tls;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct TrustIdentity(Arc<str>);
@@ -28,7 +28,7 @@ impl LoadedTrust {
         self.identity.push(Sha256::digest(bytes).into());
     }
 
-    pub(crate) fn finish(mut self, config: &TlsTrustConfig) -> TrustIdentity {
+    pub(crate) fn finish(mut self, config: &Tls) -> TrustIdentity {
         let mut pins = config.pinned_leaf_sha256.clone();
         pins.sort_unstable();
         pins.dedup();

@@ -18,61 +18,14 @@ pseudo_order = ["method", "authority", "scheme", "path"]
 settings_order = ["header_table_size"]
 "#;
 
-fn scratch(name: &str) -> std::path::PathBuf {
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("clock after epoch")
-        .as_nanos();
-    let dir = std::env::temp_dir().join(format!("leyline-{name}-{stamp}"));
-    std::fs::create_dir_all(&dir).expect("create scratch dir");
-    dir
-}
-
 #[test]
-fn load_reads_a_family_directory() {
-    let dir = scratch("load");
-    let family = dir.join("test");
-    std::fs::create_dir_all(&family).expect("create family dir");
-    std::fs::write(family.join("1.toml"), MINIMAL).expect("write profile");
-
-    let reg = ProfileRegistry::load(&dir).expect("load scratch registry");
-    assert_eq!(reg.profiles.len(), 1);
-    let profile = reg.get("test", 1).expect("test 1 not found");
-    assert_eq!(profile.meta.name, "Test 1");
-    assert_eq!(profile.tls.ciphers, vec!["TLS_AES_128_GCM_SHA256"]);
-
-    std::fs::remove_dir_all(&dir).expect("clean scratch dir");
-}
-
-#[test]
-fn load_rejects_an_invalid_permutation() {
-    let dir = scratch("invalid");
-    let family = dir.join("test");
-    std::fs::create_dir_all(&family).expect("create family dir");
+fn from_toml_rejects_an_invalid_permutation() {
     let bad = MINIMAL.replace(
         "sigalgs = [\"ecdsa_secp256r1_sha256\"]",
         "sigalgs = [\"ecdsa_secp256r1_sha256\"]\nextension_permutation = [0]",
     );
-    std::fs::write(family.join("1.toml"), bad).expect("write profile");
-
-    match ProfileRegistry::load(&dir) {
-        Err(ProfileError::Parse { .. }) => {}
-        Err(other) => panic!("expected a Parse error, got {other}"),
-        Ok(_) => panic!("permutation must be validated"),
-    }
-
-    std::fs::remove_dir_all(&dir).expect("clean scratch dir");
-}
-
-#[test]
-fn load_rejects_an_empty_directory() {
-    let dir = scratch("empty");
-    match ProfileRegistry::load(&dir) {
-        Err(ProfileError::Empty { .. }) => {}
-        Err(other) => panic!("expected an Empty error, got {other}"),
-        Ok(_) => panic!("empty directory must not load"),
-    }
-    std::fs::remove_dir_all(&dir).expect("clean scratch dir");
+    let err = BrowserProfile::from_toml(&bad).expect_err("permutation must be validated");
+    assert!(err.to_string().contains("invalid profile"), "{err}");
 }
 
 #[test]
@@ -87,7 +40,10 @@ fn builtin_loads_all_profiles() {
     let reg = ProfileRegistry::builtin();
     assert_eq!(
         reg.profiles.len(),
-        crate::profile::Browser::all().len(),
+        crate::profile::Browser::all()
+            .iter()
+            .filter(|browser| browser.brand().is_none())
+            .count(),
         "registry count != Browser::all() length"
     );
 }
@@ -108,8 +64,18 @@ fn every_profile_has_fingerprint() {
     let reg = ProfileRegistry::builtin();
     for browser in crate::profile::Browser::all().iter().copied() {
         let profile = reg.get_browser(browser).unwrap();
-        let has_ja4 = profile.expected_ja4().is_some();
-        let has_h2 = profile.expected_h2_fingerprint().is_some();
+        let has_ja4 = profile
+            .tls
+            .fingerprint
+            .as_ref()
+            .and_then(|f| f.ja4.as_deref())
+            .is_some();
+        let has_h2 = profile
+            .h2
+            .fingerprint
+            .as_ref()
+            .and_then(|f| f.akamai.as_deref())
+            .is_some();
         assert!(
             has_ja4 || has_h2,
             "{browser} has no expected fingerprints in TOML"
@@ -156,7 +122,11 @@ fn firefox151_profile_parses() {
         vec!["method", "path", "authority", "scheme"]
     );
     assert_eq!(
-        profile.expected_ja4(),
+        profile
+            .tls
+            .fingerprint
+            .as_ref()
+            .and_then(|f| f.ja4.as_deref()),
         Some("t13d1617h2_86a278354501_3cbfd9057e0d")
     );
 }
@@ -168,7 +138,11 @@ fn firefox152_profile_parses() {
     assert_eq!(profile.meta.name, "Firefox 152");
     assert_eq!(profile.tls.ciphers.len(), 16);
     assert_eq!(
-        profile.expected_ja4(),
+        profile
+            .tls
+            .fingerprint
+            .as_ref()
+            .and_then(|f| f.ja4.as_deref()),
         Some("t13d1617h2_86a278354501_3cbfd9057e0d")
     );
 }
@@ -184,7 +158,11 @@ fn firefox150_profile_parses() {
         vec!["method", "path", "authority", "scheme"]
     );
     assert_eq!(
-        profile.expected_ja4(),
+        profile
+            .tls
+            .fingerprint
+            .as_ref()
+            .and_then(|f| f.ja4.as_deref()),
         Some("t13d1717h2_5b57614c22b0_3cbfd9057e0d")
     );
     assert_eq!(

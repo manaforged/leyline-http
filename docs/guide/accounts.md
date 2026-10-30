@@ -1,281 +1,216 @@
 # Accounts
 
-This page keeps one logged-in account the way a browser profile keeps it:
-the same browser, platform, languages, proxy, cookies, and connection state
-on every run. A `Device` holds all of them in one file. `Device::autosave`
-keeps the file current, a `Tab` keeps the current page, and `leyline::html`
-reads the login form.
+This page keeps one session across runs the way a browser profile keeps it: the same browser, platform, languages, proxy, cookies, and connection state on every run. `Session::save` writes all of them to one file, `Session::load` reads it back, and `Session::autosave` keeps the file current. A `Tab` keeps the current page, and `leyline::html` reads the login form.
 
-## What a device holds
+## What a save holds
+
+`session.save(path)` writes one JSON file, `{ "version": 1, .. }`. The write is atomic, and on Unix the file has mode `0600`.
 
 | Field | Holds |
 | --- | --- |
-| `identity`, `platform`, `brand` | The browser the session sends. `Device::capture` stores `Some(ChromiumBrand::Chrome)` for a Chrome session with no `.brand()`, and `None` for another family |
-| `profile_toml` | The frozen profile, after `pin_profile` |
-| `profile_id` | The id that `check` compares |
-| `user_agent` | The `User-Agent` of the session |
-| `languages` | The tags from `SessionBuilder::languages` |
-| `proxy` | The proxy URL, password included. `Debug` and `Display` mask the password |
-| `proxy_password_env` | An environment variable that holds the proxy password |
-| `env_proxy` | Whether to read proxy environment variables. Off by default |
-| `strict` | When `true`, `check` refuses a device with no `profile_id`, or with no `proxy` while `env_proxy` is `false`. Off by default |
-| `jar_path`, `jar` | The jar file, or a jar kept in the device file |
-| `state` | The `SessionState`. See [Keep the connection state](#keep-the-connection-state) |
-| `page` | The current page of the account's tab |
-| `app` | Data of your own, a `BTreeMap<String, serde_json::Value>` |
+| `identity`, `platform` | The browser, platform, and languages the session sends, or the profile TOML of a session built with `.profile(..)` |
+| `profile_id` | The session's profile id, which `build()` compares on load |
+| `proxy` | The proxy URL without its password |
+| `jar` | The cookies |
+| `state` | The TLS session tickets, the `Alt-Svc` entries, and the HSTS store. See [The connection state](#the-connection-state) |
 
-| Call | Does |
-| --- | --- |
-| `Device::capture(&session, proxy)` | Reads the device from a session, with the proxy URL you pass |
-| `pin_profile(&session)` | Stores the profile TOML in the device |
-| `save_to(path)`, `load_from(path)` | Writes and reads the device as JSON, `{ "version": 1, .. }`. The write is atomic, and on Unix the file has mode `0600` |
-| `open()` | Builds the session, runs `check`, loads the jar, and restores `state` |
-| `session_builder()` | Returns the builder, for more settings before `build()` |
-| `check(&session)` | Returns `Kind::Config` when the session differs from the device |
-| `tab(&session)` | Returns a `Tab` whose current page is `page` |
-| `autosave(&session, path, options)` | Saves the device, its jar, and the session state as they change |
+## Save and load
 
-## Create the device once
-
-Pin a browser variant, set the languages and one proxy, and turn the proxy
-environment variables off. Then capture the device and freeze its profile.
+Pin a browser variant, set the languages and one proxy, and turn the proxy environment variables off. Then save the session.
 
 ```rust,no_run
-use leyline::{Browser, Device, Platform, ProxyConfig, ProxyUrl, Session};
+use leyline::{Browser, Platform, Proxy, Session};
 
 # fn run() -> leyline::Result<()> {
-let proxy = ProxyUrl::parse("http://user:secret@proxy.example:8080")?;
+let proxy = "http://user:secret@proxy.example:8080";
 let session = Session::builder()
-    .browser(Browser::Chrome154)
-    .platform(Platform::Windows)
-    .languages(["de-DE", "de", "en"])
-    .proxy(ProxyConfig::from(proxy.clone()).env(false))
+    .browser(Browser::Chrome154).platform(Platform::Windows).languages(["de-DE", "de", "en"])
+    .proxy(Proxy::from(proxy).env(false))
     .build()?;
-
-let mut device = Device::capture(&session, Some(proxy));
-device.pin_profile(&session)?;
-device.strict = true;
-device.jar_path = Some("account/cookies.json".into());
-device.save_to("account/device.json")?;
+session.save("account/session.json")?;
 # Ok(())
 # }
 ```
 
-| Choice | Why |
-| --- | --- |
-| `Browser::Chrome154`, not `Browser::latest` | `latest` moves to newer captures in patch releases |
-| `pin_profile` | A crate upgrade cannot change the ClientHello or the headers: a pinned device loads its own profile TOML and keeps its `profile_id`. It fails for a session whose TLS hello comes from another browser. See [Profile data stability](profiles.md#profile-data-stability) |
-| `env_proxy` stays `false` | The device never picks up `HTTPS_PROXY` or `ALL_PROXY` from another machine, and a device without a proxy goes direct |
-| `strict` | A strict device cannot go direct by mistake |
-
-`Session::proxy_url()` returns the configured proxy, password included, so
-`Device::capture(&session, session.proxy_url())` captures it too. `check`
-compares the configured URL, not the exit IP the proxy assigns: a rotating
-proxy behind one URL passes with a new IP. To pin the exit IP, fetch it from
-your own IP echo service and keep it in `Device::app`.
-
-### Keep the proxy password out of the file
-
-`ProxyUrl` serializes the full URL, password included. To keep the password
-out of the device file, set `proxy_password_env` to the name of an
-environment variable. `save_to` and `Device::autosave` then write the proxy
-URL without its password, and `open` and `session_builder` read it back
-from the variable. With `proxy_password_env` set, serializing the `Device`
-never writes the password. When the variable is not set in the
-environment, `open` and `session_builder` return `Kind::Config` with a
-message that names it.
-
-```rust,no_run
-use leyline::{Browser, Device, Platform, ProxyConfig, ProxyUrl, Session, Url};
-
-const PROXY: &str = "http://user@proxy.example:8080";
-const PASSWORD_VAR: &str = "ACCOUNT_PROXY_PASSWORD";
-
-# async fn run() -> Result<(), Box<dyn std::error::Error>> {
-let mut url = Url::parse(PROXY)?;
-url.set_password(Some(&std::env::var(PASSWORD_VAR)?))
-    .map_err(|()| "the proxy URL cannot carry a password")?;
-let proxy = ProxyUrl::parse(url.as_str())?;
-
-let session = Session::builder()
-    .browser(Browser::Chrome154)
-    .platform(Platform::Windows)
-    .proxy(ProxyConfig::from(proxy).env(false))
-    .build()?;
-session.get("https://shop.example/login").await?;
-
-let mut device = Device::capture(&session, session.proxy_url());
-device.proxy_password_env = Some(PASSWORD_VAR.to_owned());
-device.pin_profile(&session)?;
-device.save_to("account/device.json")?;
-# Ok(())
-# }
-```
-
-## Open the device on each run
-
-`Device::open` builds the session, runs `check`, loads the cookies, and
-restores the saved connection state. A `jar_path` whose file does not exist
-yet gives an empty jar. A device with no `jar_path` uses the jar in the
-device file, or an empty jar. Then start `Device::autosave` and call its
-`shutdown` before the process exits.
+`Session::load(path)` returns a `SessionBuilder` with the saved identity, proxy, and cookies. Add any setter, then call `build()`. A loaded builder does not read the proxy environment variables, so a save without a proxy goes direct.
 
 ```rust,no_run
 use std::time::Duration;
-use leyline::Device;
+use leyline::Session;
 
-# async fn run() -> leyline::Result<()> {
-let device = Device::load_from("account/device.json")?;
-let session = device.open()?;
-let tab = device.tab(&session);
-let autosave = device.autosave(&session, "account/device.json", Duration::from_secs(2));
-autosave.track(&tab);
-
-tab.follow("/account/orders").await?;
-autosave.shutdown().await?;
+# fn run() -> leyline::Result<()> {
+let session = Session::load("account/session.json")?
+    .timeout(Duration::from_secs(30))
+    .build()?;
+# let _ = session;
 # Ok(())
 # }
 ```
 
-To add settings before the build, call `device.session_builder()?`, change
-the builder, build the session, then call `device.check(&session)?` and
-`device.state.restore_into(&session)`.
+`build()` returns `Kind::Config` with `err.is_profile_changed()` set to `true` when the session's profile id differs from the saved one, for example after a crate upgrade changed the bundled profile. Otherwise it restores the connection state. Files that older Leyline versions wrote with `SavedSession` load the same way.
 
-Saved TLS sessions are bound to the trust that the session loaded when it was
-built: the pins, the contents of every root it loaded from `add_ca_der`,
-`add_ca_file`, `SSL_CERT_FILE`, and `SSL_CERT_DIR`, the contents of the client
-certificate and key files, and whether system roots are on. A saved TLS
-session resumes only in a session that loaded the same trust. Otherwise the
-connection makes a full handshake and checks the certificate again.
-`Session::fresh_pool` keeps the trust of the session it copies. Changes to the
-operating system's root store are not part of the binding. The saved
-state contains TLS session secrets, so store it with the same protection as
-credentials.
-
-`check` returns `Kind::Config` and names each field that differs:
-
-| Field | Compared with |
+| Choice | Why |
 | --- | --- |
-| `profile_id` | The session's profile id, when the device has one. It covers the profile data, the platform, and the brand |
-| `identity`, `platform`, `brand` | The session's HTTP profile, TLS profile, platform, and brand. Only without a `profile_id` |
-| `user_agent` | The session's `User-Agent`, when the device has one and no `profile_id` |
-| `languages` | The session's languages |
-| `proxy` | `Session::proxy_url()`, unless `env_proxy` is set. The scheme, user name, host, and port must match; the password is not compared |
-| `strict` | When `true`: a `profile_id` is present, and a `proxy` is present unless `env_proxy` is set |
+| `Browser::Chrome154`, not `Browser::chrome()` | `chrome()` moves to newer captures in a release |
+| `env(false)` | The session never picks up `HTTPS_PROXY` or `ALL_PROXY` from another machine |
 
-`Error::is_profile_changed()` is `true` when the profile differs: the
-`profile_id`, or, without one, the identity, platform, brand, or user agent.
-It is `false` when only the languages, the proxy, or a `strict` gap differ.
+## Save the session as it changes
 
-## Save the device as it changes
-
-`Device::autosave(&session, path, options)` starts one writer task and
-returns a `DeviceAutosave` handle. `options` is a `DeviceAutosaveOptions`, or
-a `Duration` that sets its `interval`:
-
-| Option | Default | Effect |
-| --- | --- | --- |
-| `interval` | Set by `DeviceAutosaveOptions::new(interval)` | After a change, saves at most once per `interval` |
-| `state_interval` | 300 s | Saves at this period, so the connection state stays current |
-
- Each save writes the device file with the
-session's current `SessionState`. With a `jar_path`, it also writes the jar
-file when a cookie changed; without one, the jar goes into the device file.
-For a jar without a device, use `Jar::autosave`; see
-[Cookies](cookies.md#save-the-jar-to-a-file).
+`session.autosave(path, every)` starts one writer task and returns nothing. `every` is a `Duration`.
 
 | Event | Effect |
 | --- | --- |
-| A cookie changes, or `update` or `track` runs | A save runs when `interval` has passed since the first unsaved change. Later changes do not move the save |
-| `state_interval` passes | A save runs, so new TLS tickets, `Alt-Svc`, and HSTS entries reach the file |
-| `flush().await` | Saves now and returns the result |
-| `shutdown().await` | Saves and stops the writer |
-| The handle is dropped | A last save runs in the background. The runtime must still run |
-| The runtime shuts down | The writer task saves unsaved changes as it stops |
+| A cookie changes | A save runs, at most once per `every` |
+| `every` passes and the connection state changed | A save runs, so new TLS tickets, `Alt-Svc`, and HSTS entries reach the file |
+| `session.shutdown()` | A last save runs and the writer stops |
+| The runtime drops the task | The writer saves unsaved changes as it stops |
 
-Each save writes a temporary file, syncs it, and renames it, so a crash never
-leaves a half-written file. On Unix the files have mode `0600`; on Windows
-they take the default ACLs of their directory. `autosave` panics outside a Tokio runtime.
-
-The writer keeps its own copy of the device. Change it with
-`DeviceAutosave::update(|device| ..)`; the change reaches the file with the
-next save. A change to the `Device` you called `autosave` on does not.
-`DeviceAutosave::device()` returns a snapshot of the writer's copy.
-
-`DeviceAutosave::track(&tab)` stores the tab's current page in
-`Device::page` on each save. The writer keeps one tab: a second `track`
-replaces the first. On the next run, `Device::tab(&session)` returns a tab
-on that page, so the next request carries it as its `Referer`.
-
-## Keep your own data
-
-`Device::app` holds your own data in the same atomic save, such as the
-account email or values a site keeps in `localStorage`. Leyline does not
-read it.
+Each save writes a temporary file, syncs it, and renames it, so a crash never leaves a half-written file. On Unix the file has mode `0600`; on Windows it takes the default ACLs of its directory. `autosave` panics outside a Tokio runtime.
 
 ```rust,no_run
-use leyline::Device;
-use serde_json::json;
+use std::time::Duration;
+use leyline::Session;
 
-# fn run(mut device: Device) -> leyline::Result<()> {
-device.app.insert("email".into(), json!("me@example.com"));
-device.app.insert("local_storage".into(), json!({ "cart_id": "c-1842" }));
-let email = device.app.get("email").and_then(|v| v.as_str());
-# let _ = email;
-device.save_to("account/device.json")?;
+# async fn run() -> leyline::Result<()> {
+let session = Session::load("account/session.json")?.build()?;
+session.autosave("account/session.json", Duration::from_secs(2));
+let tab = session.tab();
+tab.open("https://shop.example/account/orders").await?;
+session.shutdown();
 # Ok(())
 # }
 ```
 
-Leyline keeps no HTTP cache, `localStorage`, `sessionStorage`, IndexedDB, or
-service workers, because it runs no scripts. Send `if-none-match` or
-`if-modified-since` yourself.
+## Keep your own data
 
-## Keep the connection state
+`Session` implements `Serialize`, and `SessionBuilder` implements `Deserialize`, with the same format as `save`. To keep your own data with the session, such as the account email, the tab's page, or values a site keeps in `localStorage`, put the session in your own struct and write it however you like. Leyline does not read your fields.
 
-`Session::state()` returns a `SessionState`, which implements `Serialize` and
-`Deserialize`. `state.restore_into(&session)` loads it, and `is_empty()` is
-`true` when there is nothing to save.
+```rust,no_run
+use leyline::{Session, SessionBuilder, Tab, Url};
+use serde::{Deserialize, Serialize};
 
-| Part | Effect after a restore |
+#[derive(Serialize)]
+struct AccountOut<'a> {
+    session: &'a Session,
+    email: String,
+    page: Option<Url>,
+}
+
+#[derive(Deserialize)]
+struct AccountIn {
+    session: SessionBuilder,
+    email: String,
+    page: Option<Url>,
+}
+
+# fn run(session: Session, tab: Tab) -> Result<(), Box<dyn std::error::Error>> {
+let out = AccountOut { session: &session, email: "me@example.com".into(), page: tab.current() };
+std::fs::write("account/account.json", serde_json::to_vec(&out)?)?;
+
+let account: AccountIn = serde_json::from_slice(&std::fs::read("account/account.json")?)?;
+let session = account.session.build()?;
+let tab = session.tab();
+tab.set_current(account.page);
+# let _ = account.email;
+# Ok(())
+# }
+```
+
+`tab.set_current(page)` starts the tab on the saved page, so the next request carries it as its `Referer`. `autosave` writes only the session; write your struct yourself.
+
+Leyline keeps no HTTP cache, `localStorage`, `sessionStorage`, IndexedDB, or service workers, because it runs no scripts. Send `if-none-match` or `if-modified-since` yourself.
+
+## Keep the proxy password out
+
+`save`, `autosave`, and `Serialize` never write the proxy password. To use the password again, read it from your own secret store or an environment variable and set the full proxy URL on the loaded builder.
+
+```rust,no_run
+use leyline::{Proxy, Session};
+
+# fn run() -> Result<(), Box<dyn std::error::Error>> {
+let password = std::env::var("ACCOUNT_PROXY_PASSWORD")?;
+let proxy = format!("http://user:{password}@proxy.example:8080");
+let session = Session::load("account/session.json")?
+    .proxy(Proxy::from(proxy).env(false))
+    .build()?;
+# let _ = session;
+# Ok(())
+# }
+```
+
+The saved proxy URL is the configured URL, not the exit IP the proxy assigns. To keep the exit IP, fetch it from your own IP echo service and keep it in your own struct.
+
+## Freeze a profile
+
+A crate upgrade can change a bundled profile, and the profile id check on load then fails. To keep the profile data itself, build the session from the data with `.profile(..)`. The save then stores the profile TOML, and a later load uses it instead of the bundled profile.
+
+```rust,no_run
+use leyline::{Browser, Platform, Session};
+
+# fn run() -> leyline::Result<()> {
+let bundled = Session::builder()
+    .browser(Browser::Chrome154).platform(Platform::Windows)
+    .build()?;
+let toml = bundled.profile().expect("bundled profile");
+let session = Session::builder()
+    .profile(toml).platform(Platform::Windows)
+    .build()?;
+session.save("account/session.json")?;
+# Ok(())
+# }
+```
+
+See [Profile data stability](profiles.md#profile-data-stability).
+
+## The connection state
+
+Each save writes the connection state, and `build()` on a loaded builder restores it.
+
+| Part | Effect after load |
 | --- | --- |
 | TLS session tickets that have not expired | The first handshake resumes, as a returning browser does |
 | HTTP/3 `Alt-Svc` entries and their expiry | HTTP/3 is possible on the first request to a known origin |
 | The HSTS store | `http://` requests to a known host go to `https`. See [Network](network.md#hsts) |
 
-`Device::autosave` refreshes `device.state` on each save. Before a manual
-`save_to`, set `device.state = session.state()`. A ticket key holds the
-proxy URL without its user name and password, and a hash of them, so the saved
-state never holds proxy credentials.
+A ticket key holds the proxy URL without its user name and password, and a hash of them, so the saved state never holds proxy credentials. The saved state contains TLS session secrets, so store the file with the same protection as credentials.
+
+Saved TLS sessions are bound to the trust that the session loaded when it was built: the pins, the contents of every root it loaded from `ca_der`,
+`ca_file`, `SSL_CERT_FILE`, and `SSL_CERT_DIR`, the contents of the client
+certificate and key files, and whether system roots are on. A saved TLS
+session resumes only in a session that loaded the same trust. Otherwise the
+connection makes a full handshake and checks the certificate again.
+A session from `to_builder()` keeps its parent's trust. One with a new pool,
+such as `to_builder().share_connections(false)`, loads the CA files again. Changes to the
+operating system's root store are not part of the binding.
 
 ## Browse with a tab
 
-A `Tab` sends each request with the current page as its initiator, so the
+A `Tab` sends each request with the current page as its `from_page`, so the
 `Referer`, `Origin`, and `sec-fetch-site` headers match a real click.
 [Requests](requests.md#keep-the-page-with-a-tab) lists the calls. For an
 account:
 
-- `xhr`, `fetch`, `post_json`, and `subresource` on a tab with no page fail
+- `fetch` on a tab with no page fails
   with `Kind::Request` ("the tab has no page; open one first") and send
   nothing. Open a page first.
 - A `.stream()` navigation changes the page at the response head.
   `current()` reads the page, and `set_current(..)` sets it.
-- A page script sets its own `accept`. Set it on the `xhr` builder when the
+- A page script sets its own `accept`. Set it on the `fetch` builder when the
   site's script does. See
   [Fingerprints](fingerprints.md#set-accept-on-a-script-request).
 
 ```rust,no_run
-use leyline::Preset;
+use leyline::RequestKind;
 
 # async fn run(session: leyline::Session) -> leyline::Result<()> {
 let tab = session.tab();
 tab.open("https://shop.example/account").await?;
 let orders = tab
-    .xhr("/api/orders?page=1")
+    .fetch(leyline::http::Method::GET, "/api/orders?page=1")
     .header("accept", "application/json")
     .send()
     .await?;
-let logo = tab.subresource("/static/logo.png", Preset::Image).send().await?;
+let logo = tab.fetch(leyline::http::Method::GET, "/static/logo.png").kind(RequestKind::Image).send().await?;
 println!("{} {}", orders.status(), logo.status());
 # Ok(())
 # }
@@ -299,8 +234,8 @@ The `html` feature, on by default, adds `leyline::html` and turns on the
 - Values with every HTML named character reference decoded, such as `&amp;`
   and `&eacute;`.
 
-`Form::find(document, key)` returns the first form whose `id` or `name` is
-`key`.
+`Form::find(document, name)` returns the first form whose `id` or `name`
+attribute is `name`.
 
 `Tab::follow` and `Tab::submit_form` drop the session credentials when the
 target origin differs from the current page: the `Authorization`, `Cookie`,
@@ -309,8 +244,8 @@ redirect does.
 
 | Call | Effect |
 | --- | --- |
-| `action()`, `method()` | The `action` attribute and the `FormMethod`, `Get` or `Post` |
-| `enctype()` | The `FormEnctype`: `UrlEncoded`, `Multipart`, or `TextPlain` |
+| `action()`, `method()` | The `action` attribute and the method, `http::Method::GET` or `POST` |
+| `enctype()` | The encoding as a MIME type: `application/x-www-form-urlencoded`, `multipart/form-data`, or `text/plain` |
 | `base()` | The `href` of the page's `<base>` element, if any |
 | `fields()`, `field(name)` | Every `(name, value)` pair, or the first value of one field |
 | `set(name, value)` | Replaces every value of the field with one value, or adds the field |
@@ -319,7 +254,7 @@ redirect does.
 `Tab::submit_form(&form)` sends `form.fields()` as they are, with no submit
 button: call `form.press(name)` first when the site reads the button. The
 action resolves against the page's `<base href>`, or the current page when
-there is none. A `Post` form sends the fields with `Preset::FormNavigate`,
+there is none. A `Post` form sends the fields with `RequestKind::FormNavigate`,
 encoded as its `enctype()` says: `application/x-www-form-urlencoded`,
 `multipart/form-data`, or `text/plain`. A `Get` form replaces the action's
 query with the fields. Both are navigations that carry
@@ -341,7 +276,7 @@ if let Some(mut form) = Form::find(&page, "login") {
     let resp = tab.submit_form(&form).await?;
     println!("{} at {}", resp.status(), resp.url());
 }
-let cart = tab.xhr("/api/cart").header("x-csrf-token", token).send().await?;
+let cart = tab.fetch(leyline::http::Method::GET, "/api/cart").header("x-csrf-token", token).send().await?;
 println!("{}", cart.status());
 # Ok(())
 # }
@@ -357,14 +292,14 @@ attribute; pass it to `Tab::follow`, which resolves it.
 
 Leyline cannot tell whether a site considers you logged in. Request an
 endpoint that only a logged-in user can read, and log in again when it says
-no. The jar and `Device::autosave` keep the new cookies.
+no. The jar and `Session::autosave` keep the new cookies.
 
 ```rust,no_run
 use leyline::html::Form;
 use leyline::http::StatusCode;
 
 # async fn run(tab: leyline::Tab) -> leyline::Result<()> {
-let me = tab.xhr("https://shop.example/api/me").send().await?;
+let me = tab.fetch(leyline::http::Method::GET, "https://shop.example/api/me").send().await?;
 if me.status() == StatusCode::UNAUTHORIZED {
     let page = tab.open("https://shop.example/login").await?.text().await?;
     if let Some(mut form) = Form::find(&page, "login") {
@@ -379,13 +314,13 @@ if me.status() == StatusCode::UNAUTHORIZED {
 When several tasks share the session, each can see the 401 at once. Hold one
 lock, such as a `tokio::sync::Mutex`, around the check and the login, and
 check again after you take it, so one task logs in and the others reuse its
-cookies. `examples/device.rs` combines the device, autosave, the login form,
+cookies. `examples/accounts.rs` combines save and load, autosave, the login form,
 and the tab.
 
 ## Run tasks at the same time
 
 `Session` and `Tab` are `Clone`, `Send`, and `Sync`. Session clones share the
-pool, the jar, the identity, and the state, so one `Device::autosave` covers
+pool, the jar, the identity, and the state, so one `Session::autosave` covers
 every task. Tab clones share the current page, so give each parallel page its
 own `session.tab()`.
 
@@ -402,8 +337,7 @@ println!("{} {}", a?.status(), b?.status());
 # }
 ```
 
-To stop every task of the account, call `session.shutdown()`, then
-`autosave.shutdown().await` for the last save. See
+To stop every task of the account and run the last autosave, call `session.shutdown()`. See
 [Sessions](sessions.md#stop-a-session).
 
 ## Next

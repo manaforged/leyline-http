@@ -177,7 +177,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 stream_id = sid,
                 "caller cancelled — RST_STREAM(CANCEL) to release the slot"
             );
-            self.writer.write_rst_stream(sid, ErrorCode::Cancel).await?;
+            self.writer
+                .write_frame(&RstStreamFrame {
+                    stream_id: sid,
+                    error_code: ErrorCode::Cancel,
+                })
+                .await?;
             let err = H2Error::Stream {
                 stream_id: sid,
                 code: ErrorCode::Cancel,
@@ -257,7 +262,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             .is_some_and(StreamActor::length_mismatch)
         {
             self.writer
-                .write_rst_stream(stream_id, ErrorCode::ProtocolError)
+                .write_frame(&RstStreamFrame {
+                    stream_id,
+                    error_code: ErrorCode::ProtocolError,
+                })
                 .await?;
             self.fail_stream(
                 stream_id,
@@ -274,7 +282,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             .is_some_and(|a| !a.state.is_closed());
         if local_open {
             self.writer
-                .write_rst_stream(stream_id, ErrorCode::NoError)
+                .write_frame(&RstStreamFrame {
+                    stream_id,
+                    error_code: ErrorCode::NoError,
+                })
                 .await?;
         }
         if let Some(actor) = self.streams.get_mut(stream_id)

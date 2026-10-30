@@ -84,24 +84,20 @@ impl DecodeTable {
         for bucket in &mut by_length {
             bucket.sort_unstable_by_key(|&(code, _)| code);
         }
-        let lookup = |code: u32, len: u8| -> Option<u16> {
-            let bucket = &by_length[(len - 5) as usize];
-            bucket
-                .binary_search_by_key(&code, |&(c, _)| c)
-                .ok()
-                .map(|idx| bucket[idx].1)
+        let empty = Fast8 { sym: 0, len: 0 };
+        let mut table = Self {
+            by_length,
+            fast8: [empty; 256],
         };
-        let mut fast8 = [Fast8 { sym: 0, len: 0 }; 256];
-        for (v, slot) in fast8.iter_mut().enumerate() {
-            for len in 5u8..=8 {
-                let candidate = (v as u32) >> (8 - len);
-                if let Some(sym) = lookup(candidate, len) {
-                    *slot = Fast8 { sym, len };
-                    break;
-                }
-            }
-        }
-        Self { by_length, fast8 }
+        table.fast8 = std::array::from_fn(|v| {
+            (5u8..=8)
+                .find_map(|len| {
+                    let candidate = (v as u32) >> (8 - len);
+                    table.lookup(candidate, len).map(|sym| Fast8 { sym, len })
+                })
+                .unwrap_or(empty)
+        });
+        table
     }
 
     fn lookup(&self, code: u32, len: u8) -> Option<u16> {

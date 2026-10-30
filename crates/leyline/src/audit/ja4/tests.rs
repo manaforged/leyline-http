@@ -21,7 +21,6 @@ fn section_a_chrome147() {
             "TLS_RSA_WITH_AES_256_CBC_SHA".into(),
         ],
         sigalgs: &[],
-        curves: &[],
         extension_ids: &[
             0x0000, 0x0017, 0xff01, 0x000a, 0x000b, 0x0023, 0x0010, 0x0005, 0x0033, 0x002b, 0x000d,
             0x002d, 0x001b, 0x0012, 0x4469, 0xfe0d, 0x0029,
@@ -68,7 +67,6 @@ fn section_b_chrome147() {
     let input = Ja4Input {
         ciphers: &ciphers,
         sigalgs: &[],
-        curves: &[],
         extension_ids: &[],
         tls_version: "1.3",
         has_sni: true,

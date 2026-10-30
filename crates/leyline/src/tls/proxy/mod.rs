@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 use tokio::net::TcpStream;
 
+use crate::tls::alpn::AlpnPlan;
 use crate::tls::error::TlsError;
 use crate::tls::{SessionCache, TlsIo, TlsStream};
 
@@ -10,18 +11,21 @@ pub(crate) mod socks5;
 
 const SOCKS5_DEFAULT_PORT: u16 = 1080;
 
-pub(crate) async fn connect_to_proxy<C: crate::tls::TlsHandshake>(
-    connector: &C,
+pub(crate) async fn connect_to_proxy(
+    connector: &crate::tls::FingerprintConnector,
     proxy: &url::Url,
 ) -> Result<TcpStream, TlsError> {
     let host = proxy
         .host_str()
         .ok_or_else(|| TlsError::proxy(format!("{} proxy has no host", proxy.scheme())))?;
-    let port = proxy.port_or_known_default().unwrap_or(SOCKS5_DEFAULT_PORT);
     connector
-        .dial_tcp(host, port)
+        .dial_tcp(host, port(proxy))
         .await
         .map_err(TlsError::into_proxy)
+}
+
+fn port(proxy: &url::Url) -> u16 {
+    proxy.port_or_known_default().unwrap_or(SOCKS5_DEFAULT_PORT)
 }
 
 pub(crate) enum Tunnel {
@@ -33,8 +37,8 @@ pub(crate) fn parse(proxy_url: &str) -> Result<url::Url, TlsError> {
     url::Url::parse(proxy_url).map_err(|e| TlsError::proxy(format!("invalid proxy URL: {e}")))
 }
 
-pub(crate) async fn open_tunnel<C: crate::tls::TlsHandshake>(
-    connector: &C,
+pub(crate) async fn open_tunnel(
+    connector: &crate::tls::FingerprintConnector,
     host: &str,
     port: u16,
     proxy: &url::Url,
@@ -62,24 +66,20 @@ pub(crate) async fn open_tunnel<C: crate::tls::TlsHandshake>(
     }
 }
 
-pub(crate) async fn handshake<C: crate::tls::TlsHandshake>(
-    connector: &C,
+pub(crate) async fn handshake(
+    connector: &crate::tls::FingerprintConnector,
     tunnel: Tunnel,
     host: &str,
     port: u16,
     proxy: &url::Url,
-    include_alps: bool,
+    plan: AlpnPlan,
 ) -> Result<TlsStream, TlsError> {
     let session_key = SessionCache::key(host, port, Some(proxy));
     match tunnel {
-        Tunnel::Plain(tcp) => {
-            connector
-                .do_tls_handshake(tcp, host, &session_key, include_alps)
-                .await
-        }
+        Tunnel::Plain(tcp) => connector.tls_handshake(tcp, host, &session_key, plan).await,
         Tunnel::Tls(io) => {
             connector
-                .do_tls_handshake_nested(io, host, &session_key, include_alps)
+                .tls_handshake_nested(io, host, &session_key, plan)
                 .await
         }
     }

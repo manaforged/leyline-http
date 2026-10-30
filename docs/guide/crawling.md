@@ -1,7 +1,7 @@
 # Crawling
 
 `Session::crawl` crawls a site for you: it follows links in scope, obeys each
-page's own rules, drops copies, and reads robots.txt when you ask it to. The rest of this page
+page's own rules, drops copies, and obeys robots.txt unless you turn it off. The rest of this page
 covers the session settings every crawl uses: per-host limits, a proxy pool,
 retries, block detection, capped downloads, one log line per request, and
 counters for the whole crawl. Every task that shares the session shares the
@@ -9,7 +9,7 @@ limits and the proxy health.
 
 ## Crawl a site
 
-`session.crawl(seed)` returns a `Crawl`, a lazy stream of `CrawlPage`s. The
+`session.crawl(seed)` returns a `Crawl`, a lazy stream of `Page`s. The
 defaults are polite, so the short form is a complete crawler:
 
 ```rust,no_run
@@ -30,7 +30,7 @@ and at most one a second, pauses a host that answers 429 or 503 and tries
 that page up to three times, reads the
 site's sitemaps, follows redirects through the same checks as links, skips
 error pages, files, and block pages, and drops copies. It obeys robots.txt
-and each page's robots rules unless you call `ignore_robots()`. Five
+and each page's robots rules unless you call `respect(None)`. Five
 settings change the rest:
 
 ```rust,no_run
@@ -46,23 +46,22 @@ let mut crawl = Session::new()
 while let Some(page) = crawl.next().await {
     match page {
         Ok(page) => println!("{}", page.url()),
-        Err(err) => eprintln!("{}: {}", err.url().map_or("-", |url| url.as_str()), err.category()),
+        Err(err) => eprintln!("{}: {}", err.url().map_or("-", |url| url.as_str()), err.kind()),
     }
 }
-println!("{}", crawl.stats());
+println!("{} pages, {} errors", crawl.pages(), crawl.errors());
 # Ok(())
 # }
 ```
 
 | Setter | Default | Effect |
 | --- | --- | --- |
-| `respect(Respect)` | `Robots` | `Robots` obeys robots.txt `Disallow` and `Crawl-delay`, the page's `noindex` and `nofollow`, and `rel="nofollow"`. `AiTraining` does all of that and also obeys the site's AI-training opt-outs |
-| `ignore_robots()` | off | Obeys no robots rules: no `Disallow`, `Crawl-delay`, `noindex`, or `nofollow` |
+| `respect(Respect)` or `respect(None)` | `Robots` | `Robots` obeys robots.txt `Disallow` and `Crawl-delay`, the page's `noindex` and `nofollow`, and `rel="nofollow"`. `AiTraining` does all of that and also obeys the site's AI-training opt-outs. `None` obeys no robots rules: no `Disallow`, `Crawl-delay`, `noindex`, or `nofollow` |
 | `scope(Scope)` | `Host` | `Host`: the seed's host. `Domain`: its registrable domain. `Prefix`: its host and directory; a last path segment with a dot and a letter after it is a file, so end a directory seed with a slash |
 | `limit(n)` | none | Stops after `n` kept pages |
 | `host_limits(HostLimits)` | one in flight, one a second, and a 429/503 pause per host, wherever the session's own limits leave them unset | The crawl's pace per host, on top of the session's own limits, which every crawl and request of the session share. The value is used as given; `HostLimits::new()` adds no limits |
 
-Unless you call `ignore_robots()`, the crawl reads each site's robots.txt
+Unless you call `respect(None)`, the crawl reads each site's robots.txt
 once, and again after 24 hours, obeys its rules, and reads its `Sitemap`
 lines. Robots groups are
 matched for the `*` agent. To read the group for a named crawler, call
@@ -119,12 +118,11 @@ news `<loc>` entries in a sitemap's extension namespaces are not pages and
 are skipped.
 
 A request that fails comes out of the stream as an `Err`, and the crawl goes
-on. `crawl.stats()` returns `CrawlStats`: `requests()`, `pages()`,
-`errors()`, and `skipped(SkipReason)` for each reason above. Its `Display`
-prints one `key=value` line. `CrawlPage` has `url()`, the address after
+on. `Crawl` counts as it goes: `requests()`, `pages()`, `errors()`, and
+`skipped(SkipReason)` for each reason above. `Page` has `url()`, the address after
 redirects, `depth()`, `status()`, `html()`, `text()` from `html::text`, and
-`meta(name)`. A page body is capped by the session's
-`CompressionConfig::max_body_size`, 100 MiB by default.
+`into_html()`, which returns the body as an owned `String`. A page body is capped by the session's `max_body_size`, 100 MiB
+by default.
 
 `Session::shutdown()` ends the crawl: requests in flight fail with the
 shut-down error and nothing new starts. Dropping the `Crawl` cancels its
@@ -134,26 +132,20 @@ requests. `Session::crawl` needs the `html` feature, which is on by default.
 
 ```rust,no_run
 use std::time::Duration;
-use leyline::trace::{Fanout, Metrics, TracingTrace};
+use leyline::trace::{Metrics, Log};
 use leyline::{
-    BlockRules, Browser, HostLimits, ProxyPool, RetryPolicy, Session, TimeoutConfig,
+    Browser, HostLimits, Proxy, Retry, Session, Timeout,
 };
 
 # fn run() -> leyline::Result<()> {
-let blocks = {
-    let mut rules = BlockRules::builtin().clone();
-    rules.extend(BlockRules::statuses([403, 429]));
-    rules
-};
-let proxies = ProxyPool::new([
+let proxies = Proxy::list([
     "http://user:pass@proxy-a.example:8080",
     "http://user:pass@proxy-b.example:8080",
     "http://user:pass@proxy-c.example:8080",
 ])
 .sticky_for(Duration::from_secs(600))
 .ban_after(3)
-.ban_for(Duration::from_secs(120))
-.rotate_on_block(blocks.clone());
+.ban_for(Duration::from_secs(120));
 let metrics = Metrics::new();
 
 let session = Session::builder()
@@ -165,10 +157,12 @@ let session = Session::builder()
             .max_total_in_flight(64)
             .pause_on([429, 503]),
     )
-    .proxy_pool(proxies.clone())
-    .retry(RetryPolicy::transient().skip_blocks(blocks))
-    .timeout(TimeoutConfig::new().body(Duration::from_secs(60)))
-    .trace(Fanout::new().with(TracingTrace).with(metrics.clone()))
+    .proxy(proxies.clone())
+    .block_statuses([403, 429])
+    .retry(Retry::new(3).when(|attempt| attempt.is_transient() && !attempt.is_block()))
+    .timeout(Timeout::new().body(Duration::from_secs(60)))
+    .trace(Log)
+    .trace(metrics.clone())
     .build()?;
 # let _ = session;
 # Ok(())
@@ -177,7 +171,7 @@ let session = Session::builder()
 
 Clone the session into each worker task. A clone is an `Arc` clone: it shares
 the connection pool, the cookie jar, the host limits, and the proxy pool.
-`TimeoutConfig::body` bounds each body from its first read, so a slow page fails with a
+`Timeout::body` bounds each body from its first read, so a slow page fails with a
 timeout error. See
 [Retries and timeouts](retries-and-timeouts.md#bound-a-whole-download).
 
@@ -202,8 +196,8 @@ share them; a second session built from the same `HostLimits` value does not.
 | `max_pause(duration)` | The longest pause a server can ask for. A longer request is cut to this value. The default is 24 h |
 
 The server's wait comes from the same headers the retry policy reads: each
-`RetryPolicy::wait_header`, then `Retry-After`. See
-[Retries and timeouts](retries-and-timeouts.md#retry-on-a-condition-and-wait-on-a-header).
+`Retry::wait_header`, then `Retry-After`. See
+[Retries and timeouts](retries-and-timeouts.md#wait-on-a-header).
 
 ```rust
 use leyline::HostLimits;
@@ -211,13 +205,14 @@ use leyline::HostLimits;
 let limits = HostLimits::new()
     .max_in_flight(4)
     .per_second(2.0)
-    .host("api.shop.example", HostLimits::new().max_in_flight(1).per_second(0.5))
-    .host("*.cdn.example", HostLimits::new().max_in_flight(16))
+    .host_max_in_flight("api.shop.example", 1)
+    .host_per_second("api.shop.example", 0.5)
+    .host_max_in_flight("*.cdn.example", 16)
     .max_total_in_flight(64);
 # let _ = limits;
 ```
 
-An override uses only the `max_in_flight` and `per_second` you pass; a
+A host override uses only the `host_max_in_flight` and `host_per_second` set for it; a
 setting it leaves out has no limit for that host. The global cap applies to
 every host.
 
@@ -243,7 +238,7 @@ the slot. A failed attempt releases its slot before the retry wait. Dropping
 a waiting request removes it from the queue.
 
 `max_in_flight` counts requests to one origin across every proxy. The
-connection pool then applies `PoolConfig::max_h1_conns_per_host` to each
+connection pool then applies `max_connections_per_host` to each
 host, port, scheme, proxy, and transport. For HTTP/1.1 through one proxy, or
 direct, the smaller limit bounds the requests in flight. HTTP/2 and HTTP/3
 multiplex on one connection, so only `max_in_flight` bounds them. See
@@ -274,15 +269,15 @@ host in both, so the session's own requests to that host wait out the same
 pause. A host that is paused, waiting
 for its next turn, or out of free slots holds no crawl slot. When a page or a
 sitemap fails in a way the retry policy retries (the session's
-`RetryPolicy`, or three tries on transient errors, 429, and 503 when it has
+`Retry`, or three tries on transient errors, 429, and 503 when it has
 none), the crawl puts it back in the queue and tries again after the policy's
 wait, without holding a slot. A redirect that leaves the scope counts as
 `SkipReason::Scope`. A URL longer than 2048 bytes, or more than 64 links from
 the seed, is dropped without a count.
 
 A crawl that obeys robots rules holds a site's pages until its robots.txt is
-read, and retries an unreachable robots.txt four times, 1, 2, 4, and 8
-seconds apart, before it skips the site. A crawl with `ignore_robots()` never
+read, and retries an unreachable robots.txt four times, waiting up to 1, 2,
+4, and 8 seconds, before it skips the site. A crawl with `respect(None)` never
 asks for robots.txt; it reads `/sitemap.xml` directly. A missing sitemap is not
 an error; a sitemap that fails after its retries counts in `errors()`.
 
@@ -325,79 +320,71 @@ the file.
 
 ## Rotate proxies with a pool
 
-A `ProxyPool` keeps an origin on one proxy, strikes and bans failing proxies,
+A proxy list keeps an origin on one proxy, strikes and bans failing proxies,
 and moves each retry to another healthy proxy. Its settings, strike rules,
-`stats()`, and `ProxyPool::identified` are described in
-[Use a proxy pool](proxies.md#use-a-proxy-pool).
+its counters in `Session::stats()`, and `Proxy::identified` are described in
+[Use a proxy list](proxies.md#use-a-proxy-list).
 
-## Detect a block page
+## Classify a block response
 
-A block is a response, not an error. `Response::block()` checks it against
-built-in vendor rules and returns a `BlockSignal` with a `vendor` and a
-`kind`. A bare 403 or 429 is not a block signal.
+`Response::block()` returns a `Block` when the response matches a block
+rule, and `None` otherwise. A block is a response, not an error. A crawl skips
+block pages and counts them under `SkipReason::Blocked`.
 
-| Vendor rule | Status | Header | Kind |
+| Vendor | Status | Header | `Block` |
 | --- | --- | --- | --- |
-| Cloudflare | any | `cf-mitigated: challenge` | `BlockKind::Challenge` |
-| AWS WAF | 202 | `x-amzn-waf-action: challenge` | `BlockKind::Challenge` |
-| AWS WAF | 405 | `x-amzn-waf-action: captcha` | `BlockKind::Captcha` |
+| Cloudflare | any | `cf-mitigated: challenge` | `Challenge("cloudflare")` |
+| AWS WAF | 202 | `x-amzn-waf-action: challenge` | `Challenge("aws-waf")` |
+| AWS WAF | 405 | `x-amzn-waf-action: captcha` | `Captcha("aws-waf")` |
 
-`BlockRules::from_toml` adds rules of your own. Each `[[rule]]` table has
-`vendor` and `kind` (`challenge`, `captcha`, or `block`), and optional
-`status`, `header`, and `value`. The value match ignores ASCII case.
-`BlockRules::statuses([403, 429])` makes bare statuses count as blocks, with
-`BlockKind::Block` and vendor `"status"`. Rules match in order, so add them
-after the vendor rules. `BlockRules::builtin()` returns a reference: clone it
-before `extend`. `rules.check(&resp)` checks a response against a set. Clones
-are cheap, because the rules sit behind an `Arc`.
+`SessionBuilder::block_statuses([403, 429])` makes bare statuses blocks, as
+`Block::Denied("status")`. `SessionBuilder::block_rules(toml)` adds rules.
+Each `[[rule]]` table has `vendor` and `kind` (`challenge`, `captcha`, or
+`denied`), and optional `status`, `header`, and `value`. The value match
+ignores ASCII case. Rules match in order, after the built-in rules. Invalid
+TOML fails at `build()` with `Kind::Config`.
 
 ```rust,no_run
-use leyline::{BlockKind, BlockRules};
+use leyline::{Block, Session};
 
-# async fn run(session: leyline::Session) -> leyline::Result<()> {
-let mut rules = BlockRules::builtin().clone();
-rules.extend(BlockRules::from_toml(
-    r#"
+# async fn run() -> leyline::Result<()> {
+let session = Session::builder()
+    .block_rules(
+        r#"
 [[rule]]
 vendor = "shop"
-kind = "block"
+kind = "denied"
 status = 403
 header = "x-shop-block"
 value = "1"
 "#,
-)?);
-rules.extend(BlockRules::statuses([403, 429]));
+    )
+    .block_statuses([403, 429])
+    .build()?;
 
 let resp = session.get("https://shop.example/item/1").send().await?;
-match rules.check(&resp) {
-    Some(signal) if signal.kind == BlockKind::Captcha => println!("captcha from {}", signal.vendor),
-    Some(signal) => println!("blocked by {}", signal.vendor),
+match resp.block() {
+    Some(Block::Captcha(vendor)) => println!("captcha from {vendor}"),
+    Some(block) => println!("blocked by {}", block.vendor()),
     None => println!("{} bytes", resp.text().await?.len()),
 }
 # Ok(())
 # }
 ```
 
-### Retry a block through another proxy
+### Blocks, retries, and proxies
 
-One `BlockRules` value drives three settings, in this order on each attempt:
+On each attempt:
 
-1. `ProxyPool::rotate_on_block` sees every attempt. A block is a strike on
-   the proxy that carried it and moves the origin off that proxy.
-2. `RetryPolicy` decides whether to send again, through another proxy.
-   `skip_blocks(rules)` returns a block at once, without a retry, even when
-   its status is a trigger such as 429. Calling it again adds rules.
-3. `rules.check(&resp)` in your code reports the block on the last response.
+1. A block response counts as a failure for its proxy in a proxy list.
+2. `Retry` decides whether to send again. `Attempt::is_block()` is true for a
+   block response, so a rule with `!attempt.is_block()` returns blocks without
+   a retry, as in [Build the crawl session](#build-the-crawl-session).
+3. `resp.block()` returns the block for the response you get.
 
-Use `skip_blocks` when a retry only repeats the block, as in
-[Build the crawl session](#build-the-crawl-session): the pool moves the
-origin and your code decides what to do. A status that the retry policy
-retries never reaches your code while retries remain. A Cloudflare challenge
-is a 403, so a policy with `on_status(403)` retries it before you see it.
-
-Without a pool, `RetryPolicy::rotate_proxies` with `on_status(403)` sends
-each retry through the next proxy in a list. See
-[Rotate proxies on retry](proxies.md#rotate-proxies-on-retry).
+A status that the retry rule retries reaches your code only after the
+retries run out. [Which proxy an attempt uses](proxies.md#which-proxy-an-attempt-uses)
+covers how a retry picks its proxy.
 
 ## Read the text of a page
 
@@ -464,8 +451,8 @@ if rules.index() && rules.ai() {
 
 ## Group errors
 
-`Error::category()` tells you what to do with a failed URL. See
-[Errors](errors.md) for every category.
+`Error::kind()` tells you what to do with a failed URL. See
+[Errors](errors.md) for every kind.
 
 | Category | Typical action |
 | --- | --- |
@@ -478,7 +465,7 @@ if rules.index() && rules.ai() {
 | Other categories | Log the error and drop the URL |
 
 ```rust,no_run
-use leyline::{ErrorCategory, Session};
+use leyline::{Kind, Session};
 
 enum Next {
     Done(String),
@@ -487,21 +474,21 @@ enum Next {
 }
 
 async fn crawl_one(session: &Session, url: &str) -> Next {
-    let resp = match session.get(url).tag("listing").send().await {
+    let resp = match session.get(url).label("listing").send().await {
         Ok(resp) => resp,
         Err(err) => {
             eprintln!(
                 "{url}: {} after {} attempts via {}",
-                err.category(),
+                err.kind(),
                 err.attempts(),
                 err.proxy().unwrap_or("direct"),
             );
-            return match err.category() {
-                ErrorCategory::Timeout
-                | ErrorCategory::Connect
-                | ErrorCategory::Tls
-                | ErrorCategory::Proxy
-                | ErrorCategory::ProxyTarget => Next::RetryLater,
+            return match err.kind() {
+                leyline::Kind::Timeout
+                | leyline::Kind::Connect
+                | Kind::Tls
+                | Kind::Proxy
+                | Kind::ProxyTarget => Next::RetryLater,
                 _ => Next::Drop,
             };
         }
@@ -518,13 +505,14 @@ async fn crawl_one(session: &Session, url: &str) -> Next {
 
 ## Download files with a cap
 
-`RequestBuilder::download(path, limit)` streams the decoded body to a
-temporary file in the same directory, then renames it to `path`. A status of
-400 or more becomes an error with the status, the URL, the headers, and the
-start of the body, within the
-[status-error limits](responses.md#turn-a-status-into-an-error). The limit is the smaller of `limit` and `max_body_size`.
-When the body has no content coding and its `Content-Length` is over the
-limit, the download fails with a body-limit error before it reads the body.
+`Response::download_to(path)` streams the decoded body to a temporary file
+in the same directory, then renames it to `path`. With
+`RequestBuilder::error_for_status`, a status of 400 or more becomes an error
+with the status, the URL, the headers, and the start of the body, within the
+[status-error limits](responses.md#turn-a-status-into-an-error).
+`RequestBuilder::max_body_size` sets the limit for this request. When the
+body has no content coding and its `Content-Length` is over the limit, the
+download fails with a body-limit error before it reads the body.
 Any error or cancel removes the temporary file, so `path` never holds a
 partial file. See [Streaming](streaming.md).
 
@@ -534,13 +522,18 @@ use std::time::Duration;
 # async fn run(session: leyline::Session) -> leyline::Result<()> {
 let written = session
     .get("https://shop.example/catalog.csv")
-    .tag("catalog")
+    .label("catalog")
     .timeout(Duration::from_secs(300))
-    .download("catalog.csv", Some(50 * 1024 * 1024))
+    .error_for_status()
+    .max_body_size(50 * 1024 * 1024)
+    .stream()
+    .send()
+    .await?
+    .download_to("catalog.csv")
     .await;
 match written {
     Ok(bytes) => println!("{bytes} bytes"),
-    Err(err) if err.is_timeout() => println!("download took too long"),
+    Err(err) if err.kind() == leyline::Kind::Timeout => println!("download took too long"),
     Err(err) => return Err(err),
 }
 # Ok(())
@@ -549,13 +542,13 @@ match written {
 
 ## Log each request with a tag
 
-`RequestBuilder::tag(tag)` names a request, and `TracingTrace` writes one line
+`RequestBuilder::label(text)` names a request, and `Log` writes one line
 per request with the tag, the redacted proxy, and the browser of the session
-that sent it. With `ProxyPool::identified`, that is the identity of the
+that sent it. With `Proxy::identified`, that is the identity of the
 proxy.
 
 ```text
-INFO leyline::trace: request id=12 method="GET" url=https://shop.example/item/1 redirects=0 status=200 version=Http2 attempts=1 elapsed_ms=210 streamed=false tag="listing" proxy="http://user:***@proxy-a.example:8080/" browser=Chrome154 outcome="ok"
+INFO leyline::trace: request id=12 method="GET" url=https://shop.example/item/1 redirects=0 status=200 version=Http2 attempts=1 elapsed_ms=210 streamed=false label="listing" proxy="http://user:***@proxy-a.example:8080/" browser=Chrome154 outcome="ok"
 ```
 
 A `.stream()` request logs its body end as a separate event with the same
@@ -564,67 +557,61 @@ A `.stream()` request logs its body end as a separate event with the same
 ## Count requests and watch the queues
 
 `trace::Metrics` counts what a session does. `Metrics::new()` returns an
-`Arc<Metrics>`; pass a clone to the session, through `trace::Fanout` when you
-also log, and keep one to read. `snapshot()` returns a `MetricsSnapshot`:
+`Arc<Metrics>`; pass a clone to `trace`, which adds it beside any other
+hook, and keep one to read it:
 
 | Method | Count |
 | --- | --- |
 | `requests()`, `attempts()` | Requests, and attempts with retries |
 | `status_class(n)` | Responses with status `n`xx |
-| `errors(category)`, `errors_total()` | Errors per `ErrorCategory`, and all errors |
+| `errors(category)`, `errors_total()` | Errors per `Kind`, and all errors |
 | `bodies_complete()`, `bodies_failed()`, `bodies_dropped()` | Streamed body outcomes |
 | `latency()` | `(Option<Duration>, u64)` pairs: the upper bound of each bucket and its count |
 
 The latency bounds are 10, 50, 100, 250, 500, 1000, 2500, 5000, and 10000 ms;
 a request falls in the first bucket whose bound is at least its elapsed time,
 and the last pair, with bound `None`, counts every request over 10 s.
-`Display` of a snapshot prints one `key=value` line.
+`Display` of `Metrics` prints one `key=value` line.
 
-`Session::host_stats()` returns one `HostStats` per origin that the host
-limits track, with `origin()`, `in_flight()`, and `waiting()`. A paused
-origin's requests count as `waiting`. `Session::pool_stats()` returns
-`PoolStats` with `busy` and `idle` connections. An HTTP/2 or HTTP/3
+`Session::stats()` returns a `Stats` for the moment of the call. `hosts()`
+lists each origin the host limits track, and `in_flight(host)` and
+`waiting(host)` count its requests. A paused origin's requests count as
+`waiting`. `busy()` and `idle()` count connections. An HTTP/2 or HTTP/3
 connection is busy while it has an open stream; on HTTP/1.1, `busy` counts
 the requests that hold a connection permit.
 
 ```rust,no_run
 use std::time::Duration;
 
-use leyline::ErrorCategory;
+use leyline::Kind;
 use leyline::trace::Metrics;
 
 # async fn run(session: leyline::Session, metrics: std::sync::Arc<Metrics>) {
 loop {
     tokio::time::sleep(Duration::from_secs(10)).await;
-    let snapshot = metrics.snapshot();
-    println!("{snapshot}");
-    if snapshot.errors(ErrorCategory::Proxy) > 100 {
+    println!("{metrics}");
+    if metrics.errors(Kind::Proxy) > 100 {
         break;
     }
-    for host in session.host_stats() {
-        println!("{} in_flight={} waiting={}", host.origin(), host.in_flight(), host.waiting());
+    let stats = session.stats();
+    for host in stats.hosts() {
+        println!("{host} in_flight={} waiting={}", stats.in_flight(host), stats.waiting(host));
     }
 }
 # }
 ```
 
-## Rotate identities
+## Rotate browsers
 
-`Session::with_identity` derives a session with another browser identity.
-Use one session per identity and spread the URLs over them.
+`session.to_builder().browser(..).platform(..)` makes a session with another browser and platform.
+Use one session per browser and spread the URLs over them.
 
 ```rust,no_run
-use leyline::{Browser, Family, Identity, Platform};
+use leyline::{Browser, Platform};
 
 # fn run(session: leyline::Session) -> leyline::Result<()> {
-let firefox = session.with_identity(Identity::locked(
-    Browser::latest(Family::Firefox),
-    Platform::Windows,
-))?;
-let mac_chrome = session.with_identity(Identity::locked(
-    Browser::latest(Family::Chrome),
-    Platform::MacOS,
-))?;
+let firefox = session.to_builder().browser(Browser::firefox()).platform(Platform::Windows).build()?;
+let mac_chrome = session.to_builder().browser(Browser::chrome()).platform(Platform::MacOS).build()?;
 # let _ = (firefox, mac_chrome);
 # Ok(())
 # }
@@ -632,11 +619,11 @@ let mac_chrome = session.with_identity(Identity::locked(
 
 A derived session shares its parent's connection pool, in a partition of its
 own, so an identity never reuses another identity's connection. One
-`PoolConfig` budget covers every identity, and `pool_stats()` counts them
+pool budget covers every identity, and `stats()` counts them
 all. The cookie jar, the HSTS store, the `Alt-Svc` knowledge, the host
 limits, and the proxy pool are shared too. Each identity has its own TLS
-session cache. To give an identity its own cookies, add `with_cookie_jar`, or
-use `ProxyPool::identified`. See [Sessions](sessions.md#derive-a-session).
+session cache. To give an identity its own cookies, add
+`to_builder().cookies`, or use `Proxy::identified`. See [Sessions](sessions.md#derive-a-session).
 
 ## Stop the crawl
 
@@ -669,14 +656,14 @@ let mut results = stream::iter(urls)
     .take_while(move |_| future::ready(!open.is_shut_down()))
     .map(|url| {
         let session = session.clone();
-        async move { (session.get(&url).await, url) }
+        async move { (session.get(&url).send().await, url) }
     })
     .buffer_unordered(32);
 while let Some((result, url)) = results.next().await {
     match result {
         Ok(resp) => println!("{url}: {}", resp.status()),
         Err(err) if err.is_shut_down() => {}
-        Err(err) => eprintln!("{url}: {}", err.category()),
+        Err(err) => eprintln!("{url}: {}", err.kind()),
     }
 }
 # }
@@ -689,17 +676,17 @@ Pin the combined stream with `std::pin::pin!` before you call `.next()`.
 
 | Item | Bound |
 | --- | --- |
-| Buffered body | `CompressionConfig::max_body_size`, 100 MiB by default |
-| Body kept in a status error | `CompressionConfig::max_error_body`, 64 KiB by default |
-| Idle connections | `PoolConfig::idle_timeout`, 300 s by default |
-| Connections | `PoolConfig::max_connections` per pool, 2048 by default |
-| HTTP/1.1 connections per host | `PoolConfig::max_h1_conns_per_host`, 256 by default |
+| Buffered body | `max_body_size`, 100 MiB by default |
+| Body kept in a status error | `max_error_body_size`, 64 KiB by default |
+| Idle connections | `pool_idle_timeout`, 300 s by default |
+| Connections | `max_connections` per pool, 2048 by default |
+| HTTP/1.1 connections per host | `max_connections_per_host`, 256 by default |
 | Requests that wait for an HTTP/2 stream | 1024 per connection |
 | Origins remembered as HTTP/3 | 1024 per pool |
 | Origins remembered as HTTP/1.1-only | 1024 per pool |
 
-Stream large bodies with `download` or `copy_decoded_to`, so only one chunk is
-in memory.
+Stream large bodies with `download_to` or `write_to`, so only one chunk is in
+memory.
 
 ## Next
 

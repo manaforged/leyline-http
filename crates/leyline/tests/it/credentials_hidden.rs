@@ -4,8 +4,8 @@
 )]
 use std::sync::{Arc, Mutex};
 
-use leyline::trace::{Sent, Trace};
-use leyline::{DigestAuth, RedirectAction, RedirectPolicy, Session};
+use leyline::trace::{Event, Trace};
+use leyline::{Redirect, Session};
 
 use crate::http_support::httpbin_lite;
 
@@ -13,8 +13,10 @@ const SECRET: &str = "s3cret-value";
 
 #[test]
 fn digest_auth_debug_hides_the_password() {
-    let shown = format!("{:?}", DigestAuth::new("alice", SECRET));
-    assert!(shown.contains("alice"), "{shown}");
+    let request = Session::from(leyline::Browser::default())
+        .get("https://example.com/")
+        .digest_auth("alice", SECRET);
+    let shown = format!("{request:?}");
     assert!(!shown.contains(SECRET), "{shown}");
 }
 
@@ -27,7 +29,7 @@ fn session_builder_debug_hides_the_proxy_password() {
 
 #[test]
 fn request_builder_debug_hides_credentials() {
-    let session = Session::browser(leyline::Browser::default());
+    let session = Session::from(leyline::Browser::default());
     let request = session
         .get("https://example.com/")
         .bearer_auth(SECRET)
@@ -39,13 +41,16 @@ fn request_builder_debug_hides_credentials() {
 #[test]
 fn proxy_url_shows_the_exit_without_its_password() {
     let raw = format!("http://user:{SECRET}@127.0.0.1:9000");
-    let bound = Session::browser(leyline::Browser::default()).with_proxy(raw.as_str());
-    let exit = bound.proxy_url().unwrap();
-    let shown = format!("{exit} {exit:?}");
+    let bound = Session::from(leyline::Browser::default())
+        .to_builder()
+        .proxy(raw.as_str())
+        .build()
+        .unwrap();
+    let shown = bound.proxy().unwrap();
     assert!(shown.contains("127.0.0.1:9000"), "{shown}");
     assert!(!shown.contains(SECRET), "{shown}");
-    let rebound = Session::browser(leyline::Browser::default()).with_proxy(exit);
-    assert_eq!(rebound.proxy_url().map(String::from), Some(raw));
+    let rebound = bound.to_builder().build().unwrap();
+    assert_eq!(rebound.proxy(), Some(shown));
 }
 
 #[tokio::test]
@@ -56,6 +61,7 @@ async fn response_debug_hides_the_credentials_it_sent() {
         .get(format!("{base}/get"))
         .bearer_auth(SECRET)
         .header("cookie", format!("sid={SECRET}"))
+        .send()
         .await
         .unwrap();
     let shown = format!("{resp:?}");
@@ -63,12 +69,35 @@ async fn response_debug_hides_the_credentials_it_sent() {
     assert!(!shown.contains(SECRET), "{shown}");
 }
 
+#[tokio::test]
+async fn fingerprint_debug_hides_the_credentials_it_sent() {
+    use leyline::testing::{self, queue};
+    let server = testing::Server::https(queue([testing::Response::new(200)]))
+        .await
+        .unwrap();
+    let resp = Session::builder()
+        .browser(leyline::Browser::default())
+        .tls(server.tls())
+        .audit(true)
+        .build()
+        .unwrap()
+        .get(server.url("/"))
+        .bearer_auth(SECRET)
+        .header("cookie", format!("sid={SECRET}"))
+        .send()
+        .await
+        .unwrap();
+    let shown = format!("{:?}", resp.fingerprint().unwrap());
+    assert!(shown.contains("authorization"), "{shown}");
+    assert!(!shown.contains(SECRET), "{shown}");
+}
+
 #[test]
 fn cookie_debug_hides_the_value() {
     let jar = leyline::cookie::Jar::new();
     let url = url::Url::parse("https://example.com/").unwrap();
-    jar.store_set_cookie(&format!("sid={SECRET}; Path=/"), &url);
-    let shown = format!("{:?}", jar.all_cookies());
+    jar.store(&format!("sid={SECRET}; Path=/"), &url);
+    let shown = format!("{:?}", jar.all());
     assert!(shown.contains("sid"), "{shown}");
     assert!(!shown.contains(SECRET), "{shown}");
 }
@@ -77,11 +106,12 @@ fn cookie_debug_hides_the_value() {
 async fn response_debug_hides_a_received_set_cookie() {
     let base = httpbin_lite::spawn().await;
     let session = Session::builder()
-        .redirect(RedirectPolicy::none())
+        .redirect(Redirect::none())
         .build()
         .unwrap();
     let resp = session
         .get(format!("{base}/cookies/set?sid={SECRET}"))
+        .send()
         .await
         .unwrap();
     let shown = format!("{resp:?}");
@@ -92,8 +122,10 @@ async fn response_debug_hides_a_received_set_cookie() {
 struct Capture(Arc<Mutex<Vec<String>>>);
 
 impl Trace for Capture {
-    fn sent(&self, ev: &Sent<'_>) {
-        self.0.lock().unwrap().push(format!("{ev:?}"));
+    fn event(&self, event: &Event<'_>) {
+        if let Event::Sent { .. } = event {
+            self.0.lock().unwrap().push(format!("{event:?}"));
+        }
     }
 }
 
@@ -107,6 +139,7 @@ async fn sent_event_debug_hides_the_query() {
         .unwrap();
     session
         .get(format!("{base}/get?token={SECRET}"))
+        .send()
         .await
         .unwrap();
     let shown = seen.lock().unwrap().join("\n");
@@ -116,29 +149,22 @@ async fn sent_event_debug_hides_the_query() {
 
 #[test]
 fn a_proxy_url_without_a_scheme_hides_its_password() {
-    let bound = Session::browser(leyline::Browser::default())
-        .with_proxy(format!("user:{SECRET}@127.0.0.1:9000"));
-    let exit = bound.proxy_url().unwrap();
-    let shown = format!("{exit} {exit:?}");
+    let refused = Session::from(leyline::Browser::default())
+        .to_builder()
+        .proxy(format!("user:{SECRET}@127.0.0.1:9000"))
+        .build()
+        .unwrap_err();
+    let shown = format!("{refused} {refused:?}");
     assert!(!shown.contains(SECRET), "{shown}");
 }
 
 #[test]
 fn request_builder_debug_hides_query_values() {
-    let session = Session::browser(leyline::Browser::default());
+    let session = Session::from(leyline::Browser::default());
     let request = session
         .get(format!("https://example.com/?token={SECRET}"))
         .query([("key", SECRET)]);
     let shown = format!("{request:?}");
-    assert!(!shown.contains(SECRET), "{shown}");
-}
-
-#[cfg(feature = "websocket")]
-#[test]
-fn websocket_builder_debug_hides_query_values() {
-    let session = Session::browser(leyline::Browser::default());
-    let builder = session.websocket(format!("wss://example.com/socket?token={SECRET}"));
-    let shown = format!("{builder:?}");
     assert!(!shown.contains(SECRET), "{shown}");
 }
 
@@ -148,14 +174,15 @@ async fn redirect_attempt_debug_hides_the_location_query() {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&seen);
     let session = Session::builder()
-        .redirect(RedirectPolicy::custom(move |attempt| {
+        .redirect(Redirect::custom(move |attempt| {
             sink.lock().unwrap().push(format!("{attempt:?}"));
-            RedirectAction::Stop
+            false
         }))
         .build()
         .unwrap();
     session
         .get(format!("{base}/redirect-to?url=/get?token={SECRET}"))
+        .send()
         .await
         .unwrap();
     let shown = seen.lock().unwrap().join("\n");

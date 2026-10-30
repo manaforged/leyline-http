@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use leyline::{ProtocolPolicy, ProxyConfig, RetryPolicy, Session, TimeoutConfig};
+use leyline::{Protocol, Proxy, Retry, Session, Timeout};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -30,18 +30,15 @@ async fn explicit_retry_policy_recovers_from_transient_connection_drop() {
     });
 
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
-        .proxy(ProxyConfig::new().env(false))
-        .retry(
-            RetryPolicy::transient()
-                .initial_backoff(Duration::from_millis(1))
-                .max_backoff(Duration::from_millis(5)),
-        )
+        .protocol(Protocol::Http1)
+        .proxy(Proxy::new().env(false))
+        .retry(Retry::new(3).backoff(Duration::from_millis(1), Duration::from_millis(5)))
         .build()
         .unwrap();
 
     let resp = session
         .get(format!("http://{addr}/"))
+        .send()
         .await
         .expect("explicit retries should recover from the first-connection drop");
     assert_eq!(resp.status(), 200);
@@ -74,12 +71,12 @@ async fn default_session_does_not_retry_a_transient_connection_drop() {
     });
 
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
-        .proxy(ProxyConfig::new().env(false))
+        .protocol(Protocol::Http1)
+        .proxy(Proxy::new().env(false))
         .build()
         .unwrap();
 
-    let result = session.get(format!("http://{addr}/")).await;
+    let result = session.get(format!("http://{addr}/")).send().await;
     assert!(
         result.is_err(),
         "the no-retry default must surface the connection drop"
@@ -104,9 +101,9 @@ async fn connect_timeout_bounds_a_stalled_tls_handshake() {
     });
 
     let session = Session::builder()
-        .proxy(ProxyConfig::new().env(false))
+        .proxy(Proxy::new().env(false))
         .timeout(
-            TimeoutConfig::new()
+            Timeout::new()
                 .total(Duration::from_secs(30))
                 .connect(Duration::from_millis(400)),
         )
@@ -116,6 +113,7 @@ async fn connect_timeout_bounds_a_stalled_tls_handshake() {
     let start = Instant::now();
     let result = session
         .get(format!("https://127.0.0.1:{}/", addr.port()))
+        .send()
         .await;
     let elapsed = start.elapsed();
 

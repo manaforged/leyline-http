@@ -6,9 +6,9 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::mpsc;
 
 use crate::h2::codec::{FrameReader, FrameWriter};
-use crate::h2::config::H2Config;
+use crate::h2::config::{DEFAULT_HEADER_TABLE_SIZE, DEFAULT_WINDOW_SIZE, H2Config, SettingId};
 use crate::h2::connection::{
-    CONTROL_FLOOD_THRESHOLD, CONTROL_FLOOD_WINDOW, PeerSettings, RstFloodDetector, id_to_u16,
+    CONTROL_FLOOD_THRESHOLD, CONTROL_FLOOD_WINDOW, PeerSettings, RstFloodDetector,
 };
 use crate::h2::error::H2Error;
 use crate::h2::hpack;
@@ -32,16 +32,15 @@ where
         params: config
             .settings
             .iter()
-            .map(|(id, val)| (id_to_u16(id), *val))
+            .map(|&(id, val)| (id as u16, val))
             .collect(),
     };
     writer.write_settings(&settings_frame).await?;
 
-    let default_window: u32 = 65535;
-    if config.initial_connection_window_size > default_window {
-        let increment = config.initial_connection_window_size - default_window;
+    if config.initial_connection_window_size > DEFAULT_WINDOW_SIZE {
+        let increment = config.initial_connection_window_size - DEFAULT_WINDOW_SIZE;
         writer
-            .write_window_update(&WindowUpdateFrame {
+            .write_frame(&WindowUpdateFrame {
                 stream_id: 0,
                 increment,
             })
@@ -50,35 +49,24 @@ where
     writer.flush().await?;
 
     let peer_settings = PeerSettings::default();
-    let initial_send_window: i64 = 65535;
+    let initial_send_window = i64::from(DEFAULT_WINDOW_SIZE);
 
-    if let Some((_, ours)) = config
-        .settings
-        .iter()
-        .find(|(id, _)| matches!(id, crate::h2::config::SettingId::MaxFrameSize))
-    {
-        reader.set_max_frame_size(*ours);
+    if let Some(ours) = config.setting(SettingId::MaxFrameSize) {
+        reader.set_max_frame_size(ours);
     }
 
     let encoder = hpack::Encoder::new();
     let mut decoder = hpack::Decoder::new();
     let max_hdr = config
-        .settings
-        .iter()
-        .find(|(id, _)| matches!(id, crate::h2::config::SettingId::MaxHeaderListSize))
-        .map(|(_, v)| *v as usize)
-        .unwrap_or(crate::core::DEFAULT_MAX_HEADER_LIST_BYTES);
+        .setting(SettingId::MaxHeaderListSize)
+        .map_or(crate::core::DEFAULT_MAX_HEADER_LIST_BYTES, |v| v as usize);
     let our_header_table_size = config
-        .settings
-        .iter()
-        .find(|(id, _)| matches!(id, crate::h2::config::SettingId::HeaderTableSize))
-        .map(|(_, v)| *v as usize)
-        .unwrap_or(4096);
+        .setting(SettingId::HeaderTableSize)
+        .unwrap_or(DEFAULT_HEADER_TABLE_SIZE) as usize;
     decoder.set_max_header_list_size(max_hdr);
     decoder.set_max_table_size(our_header_table_size);
 
     let snapshot = Arc::new(PeerSettingsSnapshot::new());
-    snapshot.set_max_concurrent_streams(peer_settings.max_concurrent_streams);
     snapshot.set_enable_connect_protocol(peer_settings.enable_connect_protocol);
 
     let (tx, rx) = mpsc::channel(COMMAND_CHANNEL_CAPACITY);

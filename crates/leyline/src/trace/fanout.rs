@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
-use super::{BodyEnd, Connect, Dns, Done, Head, Sent, Summary, Tls, Trace};
+use super::{Event, Trace};
 
-#[derive(Clone, Default)]
-pub struct Fanout {
+#[derive(Clone)]
+pub(crate) struct Fanout {
     hooks: Vec<Arc<dyn Trace>>,
 }
 
@@ -16,52 +16,15 @@ impl std::fmt::Debug for Fanout {
 }
 
 impl Fanout {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn with(mut self, hook: impl Trace) -> Self {
-        self.hooks.push(Arc::new(hook));
-        self
-    }
-
-    fn each(&self, emit: impl Fn(&dyn Trace)) {
-        for hook in &self.hooks {
-            emit(hook.as_ref());
-        }
+    pub(crate) fn new(hooks: Vec<Arc<dyn Trace>>) -> Self {
+        Self { hooks }
     }
 }
 
 impl Trace for Fanout {
-    fn dns(&self, ev: &Dns<'_>) {
-        self.each(|hook| hook.dns(ev));
-    }
-
-    fn connect(&self, ev: &Connect<'_>) {
-        self.each(|hook| hook.connect(ev));
-    }
-
-    fn tls(&self, ev: &Tls<'_>) {
-        self.each(|hook| hook.tls(ev));
-    }
-
-    fn sent(&self, ev: &Sent<'_>) {
-        self.each(|hook| hook.sent(ev));
-    }
-
-    fn head(&self, ev: &Head<'_>) {
-        self.each(|hook| hook.head(ev));
-    }
-
-    fn done(&self, ev: &Done<'_>) {
-        self.each(|hook| hook.done(ev));
-    }
-
-    fn summary(&self, ev: &Summary<'_>) {
-        self.each(|hook| hook.summary(ev));
-    }
-
-    fn body(&self, ev: &BodyEnd<'_>) {
-        self.each(|hook| hook.body(ev));
+    fn event(&self, event: &Event<'_>) {
+        for hook in &self.hooks {
+            hook.event(event);
+        }
     }
 }

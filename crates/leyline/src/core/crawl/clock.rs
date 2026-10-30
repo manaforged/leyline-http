@@ -8,7 +8,7 @@ use tokio::time::{Instant, Sleep};
 use tokio_util::sync::WaitForCancellationFutureOwned;
 
 use super::frontier::{Queued, page_key};
-use super::{Crawl, CrawlPage, SkipReason};
+use super::{Crawl, Page, SkipReason};
 use crate::core::config::Origin;
 use crate::core::deadline::Deadline;
 use crate::core::error::Result;
@@ -118,7 +118,7 @@ impl Crawl {
 }
 
 impl Stream for Crawl {
-    type Item = Result<CrawlPage>;
+    type Item = Result<Page>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();

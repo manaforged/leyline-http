@@ -3,41 +3,54 @@ use std::sync::{Arc, LazyLock};
 use http::{HeaderName, StatusCode};
 use serde::Deserialize;
 
-use crate::core::error::{Error, Kind, Result};
+use crate::core::error::{Cause, Error, Result};
 use crate::core::response::Response;
 
 const STATUS_VENDOR: &str = "status";
 const BUILTIN: &str = include_str!("../../profiles/blocks.toml");
 
-static BUILTIN_RULES: LazyLock<BlockRules> = LazyLock::new(|| {
-    BlockRules::from_toml(BUILTIN).expect("bundled block rules are statically valid")
-});
+static BUILTIN_RULES: LazyLock<Rules> =
+    LazyLock::new(|| Rules::from_toml(BUILTIN).expect("bundled block rules are statically valid"));
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
-#[serde(rename_all = "lowercase")]
+/// A bot-protection page detected in a response, with the vendor name.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
-pub enum BlockKind {
-    Challenge,
-    Captcha,
-    Block,
+pub enum Block {
+    /// The vendor served a challenge page.
+    Challenge(String),
+    /// The vendor served a captcha.
+    Captcha(String),
+    /// The vendor denied the request.
+    Denied(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct BlockSignal {
-    pub vendor: String,
-    pub kind: BlockKind,
+impl Block {
+    /// Returns the name of the vendor that served the block.
+    pub fn vendor(&self) -> &str {
+        match self {
+            Block::Challenge(vendor) | Block::Captcha(vendor) | Block::Denied(vendor) => vendor,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum Kind {
+    Challenge,
+    Captcha,
+    #[serde(alias = "block")]
+    Denied,
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct BlockRules {
+pub(crate) struct Rules {
     rules: Arc<Vec<BlockRule>>,
 }
 
 #[derive(Debug, Clone)]
 struct BlockRule {
     vendor: String,
-    kind: BlockKind,
+    kind: Kind,
     status: Option<StatusCode>,
     header: Option<HeaderName>,
     value: Option<String>,
@@ -54,20 +67,20 @@ struct RulesFile {
 #[serde(deny_unknown_fields)]
 struct RuleEntry {
     vendor: String,
-    kind: BlockKind,
+    kind: Kind,
     status: Option<u16>,
     header: Option<String>,
     value: Option<String>,
 }
 
-impl BlockRules {
-    pub fn builtin() -> &'static BlockRules {
-        &BUILTIN_RULES
+impl Rules {
+    pub(crate) fn builtin() -> Self {
+        BUILTIN_RULES.clone()
     }
 
-    pub fn from_toml(source: &str) -> Result<Self> {
+    pub(crate) fn from_toml(source: &str) -> Result<Self> {
         let file: RulesFile =
-            toml::from_str(source).map_err(|e| Error::new(Kind::Config).with_source(e))?;
+            toml::from_str(source).map_err(|e| Error::new(Cause::Config).with_source(e))?;
         let rules = file
             .rule
             .into_iter()
@@ -78,13 +91,13 @@ impl BlockRules {
         })
     }
 
-    pub fn statuses(statuses: impl IntoIterator<Item = u16>) -> Self {
+    pub(crate) fn statuses(statuses: impl IntoIterator<Item = u16>) -> Self {
         let rules = statuses
             .into_iter()
             .filter_map(|code| StatusCode::from_u16(code).ok())
             .map(|status| BlockRule {
                 vendor: STATUS_VENDOR.to_string(),
-                kind: BlockKind::Block,
+                kind: Kind::Denied,
                 status: Some(status),
                 header: None,
                 value: None,
@@ -95,18 +108,15 @@ impl BlockRules {
         }
     }
 
-    pub fn extend(&mut self, other: BlockRules) {
+    pub(crate) fn extend(&mut self, other: Rules) {
         Arc::make_mut(&mut self.rules).extend(other.rules.iter().cloned());
     }
 
-    pub fn check(&self, response: &Response) -> Option<BlockSignal> {
+    pub(crate) fn check(&self, response: &Response) -> Option<Block> {
         self.rules
             .iter()
             .find(|rule| rule.matches(response))
-            .map(|rule| BlockSignal {
-                vendor: rule.vendor.clone(),
-                kind: rule.kind,
-            })
+            .map(BlockRule::block)
     }
 }
 
@@ -114,7 +124,7 @@ impl TryFrom<RuleEntry> for BlockRule {
     type Error = Error;
 
     fn try_from(entry: RuleEntry) -> Result<Self> {
-        let invalid = |message: String| Error::new(Kind::Config).with_message(message);
+        let invalid = |message: String| Error::new(Cause::Config).with_message(message);
         if entry.status.is_none() && entry.header.is_none() {
             return Err(invalid(format!(
                 "block rule for {} needs a status or a header",
@@ -131,12 +141,12 @@ impl TryFrom<RuleEntry> for BlockRule {
             .status
             .map(StatusCode::from_u16)
             .transpose()
-            .map_err(|e| Error::new(Kind::Config).with_source(e))?;
+            .map_err(|e| Error::new(Cause::Config).with_source(e))?;
         let header = entry
             .header
             .map(|name| HeaderName::from_bytes(name.as_bytes()))
             .transpose()
-            .map_err(|e| Error::new(Kind::Config).with_source(e))?;
+            .map_err(|e| Error::new(Cause::Config).with_source(e))?;
         Ok(Self {
             vendor: entry.vendor,
             kind: entry.kind,
@@ -148,6 +158,15 @@ impl TryFrom<RuleEntry> for BlockRule {
 }
 
 impl BlockRule {
+    fn block(&self) -> Block {
+        let vendor = self.vendor.clone();
+        match self.kind {
+            Kind::Challenge => Block::Challenge(vendor),
+            Kind::Captcha => Block::Captcha(vendor),
+            Kind::Denied => Block::Denied(vendor),
+        }
+    }
+
     fn matches(&self, response: &Response) -> bool {
         if self
             .status

@@ -133,7 +133,9 @@ fn qpack() {
         } else {
             legacy
         };
-        let expected = captured.get(browser.id()).copied().unwrap_or((0, 0));
+        let meta = &browser.profile().meta;
+        let base = format!("{}-{}", meta.browser, meta.version);
+        let expected = captured.get(base.as_str()).copied().unwrap_or((0, 0));
         assert_eq!(advertised, expected, "{browser}");
     }
 }

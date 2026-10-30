@@ -31,21 +31,29 @@ pub(crate) mod preset;
 mod registry;
 pub(crate) mod types;
 
-pub(crate) use anchor::HeaderAnchor;
+pub(crate) use anchor::HeaderPosition;
 pub(crate) use anchor::infer_anchor;
 pub(crate) use brand::ChromiumBrand;
 pub(crate) use browser::{Browser, Family};
+pub(crate) use extension::{ALPN, SERVER_NAME};
 pub use fingerprint::FingerprintSpec;
+pub use h3::H3Profile;
+#[cfg(any(feature = "http3", feature = "bench-internals"))]
 pub use h3::{
-    H3ConnectionIdLength, H3CryptoReorder, H3CryptoSplit, H3Grease, H3Order, H3Profile, H3Setting,
+    H3ConnectionIdLength, H3CryptoReorder, H3CryptoSplit, H3Grease, H3Order, H3Setting,
     H3TransportParam, H3VersionGrease, H3VersionInformation,
 };
 pub(crate) use platform::Platform;
 pub use preset::HeaderStyle;
-pub(crate) use preset::Preset;
-pub use registry::{ProfileError, ProfileRegistry};
+pub(crate) use preset::RequestKind;
+#[cfg(feature = "bench-internals")]
+#[doc(hidden)]
+pub use registry::ProfileRegistry;
+#[cfg(not(feature = "bench-internals"))]
+pub(crate) use registry::ProfileRegistry;
 pub(crate) use types::BrowserProfile;
+pub use types::{BrowserHeaders, H2Profile, TlsProfile};
+#[cfg(feature = "bench-internals")]
 pub use types::{
-    H2Fingerprint, H2PlatformOverride, H2PriorityProfile, H2Profile, PlatformIdentity, ProfileMeta,
-    TlsFingerprint, TlsProfile,
+    H2Fingerprint, H2PlatformOverride, H2PriorityProfile, ProfileMeta, TlsFingerprint,
 };

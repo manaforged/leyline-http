@@ -1,7 +1,0 @@
-Problem:
-
-Fix:
-
-Impact:
-
-Test:

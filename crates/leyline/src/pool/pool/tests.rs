@@ -1,4 +1,4 @@
-use super::Pool;
+use super::{OriginFlag, Pool};
 use crate::pool::types::{PoolKey, PooledConn, TlsInfo, Transport};
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
@@ -97,22 +97,33 @@ fn alt_svc_marks_h3_origin() {
 #[test]
 fn alpn_h1_memory_is_per_origin_and_proxy() {
     let pool = Pool::new();
-    assert!(!pool.is_h1_only("example.com", 443, None));
-    pool.note_h1_only("example.com", 443, None);
-    assert!(pool.is_h1_only("example.com", 443, None));
-    assert!(!pool.is_h1_only("example.com", 443, Some("http://proxy:1")));
-    assert!(!pool.is_h1_only("example.com", 8443, None));
+    assert!(!pool.recalls(OriginFlag::H1Only, "example.com", 443, None));
+    pool.remember(OriginFlag::H1Only, "example.com", 443, None);
+    assert!(pool.recalls(OriginFlag::H1Only, "example.com", 443, None));
+    assert!(!pool.recalls(
+        OriginFlag::H1Only,
+        "example.com",
+        443,
+        Some("http://proxy:1")
+    ));
+    assert!(!pool.recalls(OriginFlag::H1Only, "example.com", 8443, None));
 }
 
 #[test]
 fn alpn_h1_memory_expires() {
     let pool = Pool::new();
-    pool.note_h1_only("example.com", 443, None);
+    pool.remember(OriginFlag::H1Only, "example.com", 443, None);
     let key = ("example.com".to_string(), 443, None);
     let now = std::time::SystemTime::now();
-    assert!(crate::util::lock(&pool.h1_only).contains(&key, now));
-    let later = now + super::H1_ONLY_TTL + Duration::from_secs(1);
-    assert!(!crate::util::lock(&pool.h1_only).contains(&key, later));
+    assert!(
+        crate::util::lock(&pool.origin_memory)[super::OriginFlag::H1Only as usize]
+            .contains(&key, now)
+    );
+    let later = now + super::OriginFlag::H1Only.ttl() + Duration::from_secs(1);
+    assert!(
+        !crate::util::lock(&pool.origin_memory)[super::OriginFlag::H1Only as usize]
+            .contains(&key, later)
+    );
 }
 
 #[test]
@@ -177,10 +188,35 @@ fn alt_svc_ignores_separators_inside_quoted_parameters() {
 #[test]
 fn a_failed_http3_origin_is_skipped_until_cleared() {
     let pool = Pool::new();
-    assert!(!pool.is_h3_broken("example.com", 443, Some("socks5://p:1")));
-    pool.note_h3_broken("example.com", 443, Some("socks5://p:1"));
-    assert!(pool.is_h3_broken("example.com", 443, Some("socks5://p:1")));
-    assert!(!pool.is_h3_broken("example.com", 443, None));
-    pool.clear_h3_broken("example.com", 443, Some("socks5://p:1"));
-    assert!(!pool.is_h3_broken("example.com", 443, Some("socks5://p:1")));
+    assert!(!pool.recalls(
+        OriginFlag::H3Broken,
+        "example.com",
+        443,
+        Some("socks5://p:1")
+    ));
+    pool.remember(
+        OriginFlag::H3Broken,
+        "example.com",
+        443,
+        Some("socks5://p:1"),
+    );
+    assert!(pool.recalls(
+        OriginFlag::H3Broken,
+        "example.com",
+        443,
+        Some("socks5://p:1")
+    ));
+    assert!(!pool.recalls(OriginFlag::H3Broken, "example.com", 443, None));
+    pool.forget(
+        super::OriginFlag::H3Broken,
+        "example.com",
+        443,
+        Some("socks5://p:1"),
+    );
+    assert!(!pool.recalls(
+        OriginFlag::H3Broken,
+        "example.com",
+        443,
+        Some("socks5://p:1")
+    ));
 }

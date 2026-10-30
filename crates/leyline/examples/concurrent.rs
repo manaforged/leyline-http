@@ -19,7 +19,7 @@ async fn main() -> leyline::Result<()> {
         let session = session.clone();
         let url = url.clone();
         handles.push(tokio::spawn(async move {
-            let resp = session.get(&url).await?;
+            let resp = session.get(&url).send().await?;
             Ok::<(usize, StatusCode), leyline::Error>((i, resp.status()))
         }));
     }

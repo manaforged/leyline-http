@@ -1,11 +1,12 @@
 use crate::core_support::wait;
 
+use futures_util::TryFutureExt;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use leyline::testing::{TestResponse, TestServer};
-use leyline::trace::{Summary, Trace};
-use leyline::{Browser, Device, HostLimits, Kind, Session, WaitFormat};
+use leyline::testing;
+use leyline::trace::{Event, Trace};
+use leyline::{Browser, HostLimits, Kind, Session};
 
 fn scratch(name: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("leyline-{name}-{}", std::process::id()));
@@ -13,9 +14,10 @@ fn scratch(name: &str) -> std::path::PathBuf {
     dir
 }
 
-async fn slow_body() -> TestServer {
-    TestServer::http(|_| {
-        TestResponse::new(200).chunks(["a", "b", "c", "d", "e", "f"], Duration::from_millis(150))
+async fn slow_body() -> testing::Server {
+    testing::Server::http(|_| {
+        testing::Response::new(200)
+            .chunks(["a", "b", "c", "d", "e", "f"], Duration::from_millis(150))
     })
     .await
     .unwrap()
@@ -27,20 +29,29 @@ async fn a_body_timeout_bounds_a_download() {
     let dir = scratch("dltimeout");
     let err = Session::new()
         .get(server.url("/file"))
-        .timeout(leyline::TimeoutConfig::new().body(Duration::from_millis(300)))
-        .download(dir.join("file"), None)
+        .timeout(leyline::Timeout::new().body(Duration::from_millis(300)))
+        .error_for_status()
+        .stream()
+        .send()
+        .and_then(|resp| resp.download_to(dir.join("file")))
         .await
         .unwrap_err();
-    assert!(err.is_timeout(), "{err:?}");
+    assert!(err.kind() == Kind::Timeout, "{err:?}");
     assert!(!dir.join("file").exists());
     drop(std::fs::remove_dir_all(&dir));
 }
 
 #[tokio::test]
 async fn a_tab_without_a_page_sends_no_script_request() {
-    let server = TestServer::http(|_| TestResponse::new(200)).await.unwrap();
-    let tab = Session::browser(Browser::default()).tab();
-    let err = tab.xhr(server.url("/api")).await.unwrap_err();
+    let server = testing::Server::http(|_| testing::Response::new(200))
+        .await
+        .unwrap();
+    let tab = Session::from(Browser::default()).tab();
+    let err = tab
+        .fetch(leyline::http::Method::GET, server.url("/api"))
+        .send()
+        .await
+        .unwrap_err();
     assert_eq!(err.kind(), Kind::Request);
     assert!(server.requests().await.is_empty());
 }
@@ -49,7 +60,7 @@ async fn a_tab_without_a_page_sends_no_script_request() {
 async fn shutdown_stops_a_body_being_streamed() {
     let server = slow_body().await;
     let session = Session::new();
-    let resp = session.get(server.url("/")).stream().await.unwrap();
+    let resp = session.get(server.url("/")).stream().send().await.unwrap();
     session.shutdown();
     let err = resp.bytes().await.unwrap_err();
     assert!(err.is_shut_down(), "{err:?}");
@@ -62,22 +73,21 @@ async fn a_streamed_body_holds_its_host_slot_until_it_ends() {
         .host_limits(HostLimits::new().max_in_flight(1))
         .build()
         .unwrap();
-    let held = session.get(server.url("/a")).stream().await.unwrap();
+    let held = session.get(server.url("/a")).stream().send().await.unwrap();
     let second = tokio::spawn({
         let session = session.clone();
         let url = server.url("/b");
-        async move { session.get(url).await }
+        async move { session.get(url).send().await }
     });
     wait::until(|| {
-        session
-            .host_stats()
-            .first()
-            .is_some_and(|s| s.waiting() == 1)
+        let stats = session.stats();
+        stats.hosts().any(|h| stats.waiting(h) == 1)
     })
     .await;
-    let stats = session.host_stats();
-    assert_eq!(stats[0].in_flight(), 1);
-    assert_eq!(stats[0].waiting(), 1);
+    let stats = session.stats();
+    let host = stats.hosts().next().unwrap();
+    assert_eq!(stats.in_flight(host), 1);
+    assert_eq!(stats.waiting(host), 1);
     drop(held);
     second.await.unwrap().unwrap();
 }
@@ -86,44 +96,49 @@ async fn a_streamed_body_holds_its_host_slot_until_it_ends() {
 struct Browsers(Mutex<Vec<Option<Browser>>>);
 
 impl Trace for Browsers {
-    fn summary(&self, ev: &Summary<'_>) {
-        self.0.lock().unwrap().push(ev.browser);
+    fn event(&self, event: &Event<'_>) {
+        if let Event::Summary { browser, .. } = event {
+            self.0.lock().unwrap().push(*browser);
+        }
     }
 }
 
 #[tokio::test]
 async fn summaries_name_the_browser_and_pools_count_idle_connections() {
-    let server = TestServer::http(|_| TestResponse::new(200)).await.unwrap();
+    let server = testing::Server::http(|_| testing::Response::new(200))
+        .await
+        .unwrap();
     let hook = Arc::new(Browsers::default());
     let session = Session::builder()
         .browser(Browser::Chrome154)
         .trace(Arc::clone(&hook))
         .build()
         .unwrap();
-    session.get(server.url("/")).await.unwrap();
+    session.get(server.url("/")).send().await.unwrap();
     assert_eq!(
         hook.0.lock().unwrap().as_slice(),
         [Some(Browser::Chrome154)]
     );
-    let stats = session.pool_stats();
-    assert_eq!(stats.busy, 0);
-    assert!(stats.idle >= 1, "{stats:?}");
+    let stats = session.stats();
+    assert_eq!(stats.busy(), 0);
+    assert!(stats.idle() >= 1, "{stats:?}");
 }
 
 #[tokio::test]
 async fn a_policy_reads_the_wait_from_an_error() {
-    let server = TestServer::http(|_| {
-        TestResponse::new(403)
+    let server = testing::Server::http(|_| {
+        testing::Response::new(403)
             .header("x-ratelimit-remaining", "0")
             .header("x-wait", "9")
     })
     .await
     .unwrap();
-    let policy = leyline::RetryPolicy::none().wait_header("x-wait", WaitFormat::Seconds);
+    let policy = leyline::Retry::new(0).wait_header("x-wait");
     let err = Session::new()
         .get(server.url("/"))
         .retry(policy)
         .error_for_status()
+        .send()
         .await
         .unwrap_err();
     assert_eq!(err.retry_after(), Some(Duration::from_secs(9)));
@@ -131,33 +146,17 @@ async fn a_policy_reads_the_wait_from_an_error() {
 
 #[test]
 fn a_changed_profile_is_named_as_such() {
-    let id = Session::browser(Browser::Chrome154)
-        .identity()
-        .profile_id()
+    let dir = scratch("profilechanged");
+    let path = dir.join("device.json");
+    Session::from(Browser::Chrome154).save(&path).unwrap();
+    let err = Session::load(&path)
         .unwrap()
-        .to_owned();
-    Session::builder()
-        .browser(Browser::Chrome154)
-        .expect_profile_id(&id)
-        .build()
-        .unwrap();
-    let err = Session::builder()
-        .browser(Browser::Chrome154)
-        .expect_profile_id("0000000000000000")
+        .browser(Browser::firefox())
         .build()
         .unwrap_err();
-    assert!(err.is_profile_changed());
-
-    let device = Device::capture(&Session::browser(Browser::Chrome154), None);
-    let firefox = Session::browser(Browser::latest(leyline::Family::Firefox));
-    assert!(device.check(&firefox).unwrap_err().is_profile_changed());
-
-    let german = Session::builder()
-        .browser(Browser::Chrome154)
-        .languages(["de-DE"])
-        .build()
-        .unwrap();
-    assert!(!device.check(&german).unwrap_err().is_profile_changed());
+    assert_eq!(err.kind(), Kind::Config);
+    assert!(err.is_profile_changed(), "{err}");
+    drop(std::fs::remove_dir_all(&dir));
 }
 
 #[tokio::test]
@@ -181,30 +180,39 @@ async fn a_download_refuses_a_declared_length_over_the_cap() {
         Duration::from_secs(2),
         Session::new()
             .get(format!("http://{addr}/big"))
-            .download(dir.join("big"), Some(1024)),
+            .error_for_status()
+            .max_body_size(1024)
+            .stream()
+            .send()
+            .and_then(|resp| resp.download_to(dir.join("big"))),
     )
     .await
     .expect("refused before reading the body")
     .unwrap_err();
-    assert!(err.is_body_limit(), "{err:?}");
+    assert!(err.kind() == Kind::BodyLimit, "{err:?}");
     assert!(!dir.join("big").exists());
     drop(std::fs::remove_dir_all(&dir));
 }
 
 #[tokio::test]
 async fn the_session_token_stays_on_the_base_url_origin() {
-    let api = TestServer::http(|_| TestResponse::new(200)).await.unwrap();
-    let other = TestServer::http(|_| TestResponse::new(200)).await.unwrap();
+    let api = testing::Server::http(|_| testing::Response::new(200))
+        .await
+        .unwrap();
+    let other = testing::Server::http(|_| testing::Response::new(200))
+        .await
+        .unwrap();
     let session = Session::builder()
         .base_url(api.url("/"))
         .bearer_auth("secret-token")
         .build()
         .unwrap();
-    session.get("repos").await.unwrap();
-    session.get(other.url("/upload")).await.unwrap();
+    session.get("repos").send().await.unwrap();
+    session.get(other.url("/upload")).send().await.unwrap();
     session
         .get(other.url("/explicit"))
         .bearer_auth("other-token")
+        .send()
         .await
         .unwrap();
     let api_seen = api.requests().await;
@@ -222,8 +230,8 @@ async fn the_session_token_stays_on_the_base_url_origin() {
 
 #[tokio::test]
 async fn a_status_error_carries_the_policy_wait_and_exhaustion() {
-    let server = TestServer::http(|_| {
-        TestResponse::new(403)
+    let server = testing::Server::http(|_| {
+        testing::Response::new(403)
             .header("x-ratelimit-remaining", "0")
             .header("x-wait", "0")
     })
@@ -231,17 +239,21 @@ async fn a_status_error_carries_the_policy_wait_and_exhaustion() {
     .unwrap();
     let session = Session::builder()
         .retry(
-            leyline::RetryPolicy::none()
-                .max_retries(1)
-                .initial_backoff(Duration::from_millis(1))
-                .retry_if(|resp| resp.header("x-ratelimit-remaining") == Some("0"))
-                .wait_header("x-wait", WaitFormat::Seconds),
+            leyline::Retry::new(1)
+                .backoff(Duration::from_millis(1), Duration::from_secs(1))
+                .wait_header("x-wait")
+                .when(|attempt| {
+                    attempt
+                        .response()
+                        .is_some_and(|resp| resp.header("x-ratelimit-remaining") == Some("0"))
+                }),
         )
         .build()
         .unwrap();
     let err = session
         .get(server.url("/"))
         .error_for_status()
+        .send()
         .await
         .unwrap_err();
     assert!(err.retries_exhausted());
@@ -252,15 +264,15 @@ async fn a_status_error_carries_the_policy_wait_and_exhaustion() {
 #[tokio::test]
 async fn a_429_pauses_its_host_until_retry_after() {
     let served = Arc::new(Mutex::new(0u32));
-    let server = TestServer::http({
+    let server = testing::Server::http({
         let served = Arc::clone(&served);
         move |_| {
             let mut n = served.lock().unwrap();
             *n += 1;
             if *n == 1 {
-                TestResponse::new(429).header("retry-after", "1")
+                testing::Response::new(429).header("retry-after", "1")
             } else {
-                TestResponse::new(200)
+                testing::Response::new(200)
             }
         }
     })
@@ -273,6 +285,7 @@ async fn a_429_pauses_its_host_until_retry_after() {
     assert_eq!(
         session
             .get(server.url("/a"))
+            .send()
             .await
             .unwrap()
             .status()
@@ -283,6 +296,7 @@ async fn a_429_pauses_its_host_until_retry_after() {
     assert_eq!(
         session
             .get(server.url("/b"))
+            .send()
             .await
             .unwrap()
             .status()

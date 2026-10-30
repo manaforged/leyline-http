@@ -1,5 +1,3 @@
-use openssl_macros::corresponds;
-use std::ffi::c_uint;
 use std::fmt;
 use std::io;
 use std::io::prelude::*;
@@ -9,7 +7,6 @@ use std::ptr;
 use crate::error::ErrorStack;
 use crate::ffi;
 use crate::ffi::{EVP_MD_CTX_free, EVP_MD_CTX_new};
-use crate::nid::Nid;
 use crate::try_int;
 use crate::{cvt, cvt_p};
 
@@ -27,20 +24,6 @@ impl MessageDigest {
         MessageDigest(x)
     }
 
-    /// Returns the `MessageDigest` corresponding to an `Nid`.
-    #[corresponds(EVP_get_digestbynid)]
-    #[must_use]
-    pub fn from_nid(type_: Nid) -> Option<MessageDigest> {
-        unsafe {
-            let ptr = ffi::EVP_get_digestbynid(type_.as_raw());
-            if ptr.is_null() {
-                None
-            } else {
-                Some(MessageDigest(ptr))
-            }
-        }
-    }
-
     #[must_use]
     pub fn md5() -> MessageDigest {
         unsafe { MessageDigest(ffi::EVP_md5()) }
@@ -52,28 +35,8 @@ impl MessageDigest {
     }
 
     #[must_use]
-    pub fn sha224() -> MessageDigest {
-        unsafe { MessageDigest(ffi::EVP_sha224()) }
-    }
-
-    #[must_use]
     pub fn sha256() -> MessageDigest {
         unsafe { MessageDigest(ffi::EVP_sha256()) }
-    }
-
-    #[must_use]
-    pub fn sha384() -> MessageDigest {
-        unsafe { MessageDigest(ffi::EVP_sha384()) }
-    }
-
-    #[must_use]
-    pub fn sha512() -> MessageDigest {
-        unsafe { MessageDigest(ffi::EVP_sha512()) }
-    }
-
-    #[must_use]
-    pub fn sha512_256() -> MessageDigest {
-        unsafe { MessageDigest(ffi::EVP_sha512_256()) }
     }
 
     #[allow(clippy::trivially_copy_pass_by_ref)]
@@ -87,13 +50,6 @@ impl MessageDigest {
     #[must_use]
     pub fn size(&self) -> usize {
         unsafe { ffi::EVP_MD_size(self.0) }
-    }
-
-    /// The name of the digest.
-    #[allow(clippy::trivially_copy_pass_by_ref)]
-    #[must_use]
-    pub fn type_(&self) -> Nid {
-        Nid::from_raw(unsafe { ffi::EVP_MD_type(self.0) })
     }
 }
 
@@ -224,23 +180,6 @@ impl Hasher {
             })
         }
     }
-
-    /// Writes the hash of the data into the supplied buf and resets the XOF hasher.
-    /// The hash will be as long as the buf.
-    pub fn finish_xof(&mut self, buf: &mut [u8]) -> Result<(), ErrorStack> {
-        if self.state == Finalized {
-            self.init()?;
-        }
-        unsafe {
-            cvt(ffi::EVP_DigestFinalXOF(
-                self.ctx,
-                buf.as_mut_ptr(),
-                buf.len(),
-            ))?;
-            self.state = Finalized;
-            Ok(())
-        }
-    }
 }
 
 impl Write for Hasher {
@@ -330,53 +269,6 @@ pub fn hash(t: MessageDigest, data: &[u8]) -> Result<DigestBytes, ErrorStack> {
     h.finish()
 }
 
-/// Computes the hash of the `data` with the XOF hasher `t` and stores it in `buf`.
-pub fn hash_xof(t: MessageDigest, data: &[u8], buf: &mut [u8]) -> Result<(), ErrorStack> {
-    let mut h = Hasher::new(t)?;
-    h.update(data)?;
-    h.finish_xof(buf)
-}
-
-/// Computes HMAC with SHA-256 digest.
-pub fn hmac_sha256(key: &[u8], data: &[u8]) -> Result<[u8; 32], ErrorStack> {
-    hmac(MessageDigest::sha256(), key, data)
-}
-
-/// Computes HMAC with SHA-512 digest.
-pub fn hmac_sha512(key: &[u8], data: &[u8]) -> Result<[u8; 64], ErrorStack> {
-    hmac(MessageDigest::sha512(), key, data)
-}
-
-/// Computes HMAC with SHA-1 digest.
-pub fn hmac_sha1(key: &[u8], data: &[u8]) -> Result<[u8; 20], ErrorStack> {
-    hmac(MessageDigest::sha1(), key, data)
-}
-
-pub(crate) fn hmac<const N: usize>(
-    digest: MessageDigest,
-    key: &[u8],
-    data: &[u8],
-) -> Result<[u8; N], ErrorStack> {
-    let mut out = [0u8; N];
-    let mut out_len: c_uint = 0;
-
-    cvt_p(unsafe {
-        ffi::HMAC(
-            digest.as_ptr(),
-            key.as_ptr().cast(),
-            key.len(),
-            data.as_ptr(),
-            data.len(),
-            out.as_mut_ptr(),
-            &mut out_len,
-        )
-    })?;
-
-    assert_eq!(out_len as usize, N);
-
-    Ok(out)
-}
-
 #[cfg(test)]
 mod tests {
     use hex::{self, FromHex};
@@ -412,49 +304,6 @@ mod tests {
             "6f80fb775f27e0a4ce5c2f42fc72c5f1",
         ),
     ];
-
-    #[test]
-    fn test_hmac_sha256() {
-        let hmac = hmac_sha256(b"That's a secret".as_slice(), b"Hello world!".as_slice()).unwrap();
-
-        assert_eq!(
-            hmac,
-            [
-                0x50, 0xbb, 0x7d, 0xd2, 0xb8, 0xd2, 0x51, 0x5d, 0xb4, 0x2b, 0x70, 0xc3, 0x0b, 0xfd,
-                0xf5, 0x4c, 0x38, 0xa7, 0xae, 0x99, 0x07, 0xe5, 0x80, 0x0f, 0x8b, 0xe8, 0x34, 0x83,
-                0x55, 0x5f, 0xd0, 0xd4
-            ]
-        );
-    }
-
-    #[test]
-    fn test_hmac_sha512() {
-        let hmac = hmac_sha512(b"That's a secret".as_slice(), b"Hello world!".as_slice()).unwrap();
-
-        assert_eq!(
-            hmac,
-            [
-                0xc2, 0x7a, 0x7f, 0x7c, 0x17, 0x4c, 0x87, 0x70, 0x7f, 0x8c, 0xb7, 0x90, 0x01, 0xba,
-                0x23, 0x0e, 0xb7, 0xd6, 0x1a, 0xfd, 0x50, 0xea, 0x40, 0x43, 0x5f, 0x03, 0x25, 0x5a,
-                0x22, 0xb7, 0x8d, 0x0e, 0xba, 0x0d, 0x47, 0xb8, 0xef, 0xaa, 0xbf, 0xb1, 0xe7, 0xad,
-                0xc5, 0xd1, 0xe5, 0xba, 0x4d, 0xa5, 0xd1, 0xbb, 0x5e, 0xe3, 0xc7, 0x27, 0x0c, 0x57,
-                0x76, 0xd4, 0x2f, 0xb6, 0x5c, 0x21, 0xb7, 0x3a
-            ]
-        );
-    }
-
-    #[test]
-    fn test_hmac_sha1() {
-        let hmac = hmac_sha1(b"That's a secret".as_slice(), b"Hello world!".as_slice()).unwrap();
-
-        assert_eq!(
-            hmac,
-            [
-                0xe1, 0x06, 0x76, 0x46, 0x3b, 0x82, 0x67, 0xa1, 0xae, 0xe5, 0x1c, 0xfa, 0xee, 0x36,
-                0x1d, 0x4b, 0xd4, 0x41, 0x6e, 0x37
-            ]
-        );
-    }
 
     #[test]
     fn test_md5() {
@@ -523,18 +372,6 @@ mod tests {
     }
 
     #[test]
-    fn test_sha224() {
-        let tests = [(
-            "616263",
-            "23097d223405d8228642a477bda255b32aadbce4bda0b3f7e36c9da7",
-        )];
-
-        for test in &tests {
-            hash_test(MessageDigest::sha224(), test);
-        }
-    }
-
-    #[test]
     fn test_sha256() {
         let tests = [(
             "616263",
@@ -544,38 +381,5 @@ mod tests {
         for test in &tests {
             hash_test(MessageDigest::sha256(), test);
         }
-    }
-
-    #[test]
-    fn test_sha512() {
-        let tests = [(
-            "616263",
-            "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2\
-             192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f",
-        )];
-
-        for test in &tests {
-            hash_test(MessageDigest::sha512(), test);
-        }
-    }
-
-    #[test]
-    fn test_sha512_256() {
-        let tests = [(
-            "616263",
-            "53048e2681941ef99b2e29b76b4c7dabe4c2d0c634fc6d46e0e2f13107e7af23",
-        )];
-
-        for test in &tests {
-            hash_test(MessageDigest::sha512_256(), test);
-        }
-    }
-
-    #[test]
-    fn from_nid() {
-        assert_eq!(
-            MessageDigest::from_nid(Nid::SHA256).unwrap().as_ptr(),
-            MessageDigest::sha256().as_ptr()
-        );
     }
 }

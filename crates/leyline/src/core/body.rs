@@ -19,6 +19,7 @@ pub(crate) enum BodyKind {
     },
 }
 
+/// A request body: empty, in-memory bytes, or a stream.
 #[derive(Default)]
 pub struct Body(pub(crate) BodyKind);
 
@@ -109,6 +110,7 @@ impl Body {
         Body(BodyKind::Bytes(bytes))
     }
 
+    /// Wraps a byte stream as a body, and fails the stream when it sends more or fewer bytes than a given `length`.
     pub fn stream<S>(stream: S, length: Option<u64>) -> Self
     where
         S: Stream<Item = io::Result<Bytes>> + Send + 'static,
@@ -128,7 +130,7 @@ impl Body {
         })
     }
 
-    pub fn len_hint(&self) -> Option<u64> {
+    pub(crate) fn len_hint(&self) -> Option<u64> {
         match &self.0 {
             BodyKind::Empty => Some(0),
             BodyKind::Bytes(b) => Some(b.len() as u64),

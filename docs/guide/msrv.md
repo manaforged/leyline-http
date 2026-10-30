@@ -20,4 +20,4 @@ a patch release never raises the MSRV.
 
 ## Next
 
-Read the [API map](../api.md) to see how the public API fits together.
+Read the [API reference](https://docs.rs/leyline-http) to see how the public API fits together.

@@ -11,12 +11,12 @@ async fn main() -> leyline::Result<()> {
     let session = Session::builder()
         .browser(Browser::Chrome147)
         .platform(Platform::Linux)
-        .cookie_jar(jar)
+        .cookies(jar)
         .build()?;
 
-    drop(session.get(URL_SET).await?);
+    drop(session.get(URL_SET).send().await?);
 
-    let resp = session.get(URL_READ).await?;
+    let resp = session.get(URL_READ).send().await?;
     println!("status: {}", resp.status());
 
     Ok(())

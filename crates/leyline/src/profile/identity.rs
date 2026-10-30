@@ -1,36 +1,14 @@
-use crate::profile::brand::BrandOverlayError;
-use crate::profile::{BrowserProfile, ChromiumBrand, Platform, PlatformIdentity};
-
-#[derive(Debug)]
-pub(crate) enum IdentityError {
-    NoPlatform(String, Platform),
-    NotChromium(ChromiumBrand),
-    Brand(BrandOverlayError),
-}
-
-impl std::fmt::Display for IdentityError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NoPlatform(label, platform) => write!(f, "no {platform} identity for {label}"),
-            Self::NotChromium(brand) => write!(
-                f,
-                "{} overlay requires a Chromium HTTP identity",
-                brand.label()
-            ),
-            Self::Brand(error) => std::fmt::Display::fmt(error, f),
-        }
-    }
-}
+use crate::profile::{BrowserHeaders, BrowserProfile, ChromiumBrand, Platform};
 
 impl BrowserProfile {
     pub(crate) fn resolve_identity(
         &self,
         platform: Platform,
         brand: ChromiumBrand,
-    ) -> Result<PlatformIdentity, IdentityError> {
+    ) -> Result<BrowserHeaders, String> {
         let mut identity = self
             .identity_for(platform)
-            .ok_or_else(|| IdentityError::NoPlatform(self.meta.name.clone(), platform))?
+            .ok_or_else(|| format!("no {platform} identity for {}", self.meta.name))?
             .clone();
         if identity.accept_language.is_none() {
             identity.accept_language = BrowserProfile::bare_shared()
@@ -40,13 +18,15 @@ impl BrowserProfile {
         if brand == ChromiumBrand::Chrome {
             return Ok(identity);
         }
-        let chromium_major = self
-            .meta
-            .chromium_major
-            .ok_or(IdentityError::NotChromium(brand))?;
+        let chromium_major = self.meta.chromium_major.ok_or_else(|| {
+            format!(
+                "{} overlay requires a Chromium HTTP identity",
+                brand.label()
+            )
+        })?;
         brand
             .apply(chromium_major, platform, &mut identity)
-            .map_err(IdentityError::Brand)?;
+            .map_err(|error| error.to_string())?;
         Ok(identity)
     }
 }

@@ -19,7 +19,7 @@ fn decompress_multi_encoding_in_reverse_order() {
     br.read_to_end(&mut encoded).unwrap();
 
     let (decoded, decoded_flag) =
-        decompress_body(encoded, Some("gzip, br"), &CompressionConfig::default()).unwrap();
+        decompress_body(encoded, Some("gzip, br"), &BodyRules::default()).unwrap();
     assert!(decoded_flag);
     assert_eq!(decoded, body);
 }
@@ -27,45 +27,33 @@ fn decompress_multi_encoding_in_reverse_order() {
 #[cfg(not(feature = "compression-gzip"))]
 #[test]
 fn gzip_without_feature_is_an_error() {
-    let err = decompress_body(
-        vec![0x1f, 0x8b],
-        Some("gzip"),
-        &CompressionConfig::default(),
-    )
-    .expect_err("disabled response codec must fail");
-    assert_eq!(err.kind(), crate::core::Kind::Decode, "got: {err:?}");
+    let err = decompress_body(vec![0x1f, 0x8b], Some("gzip"), &BodyRules::default())
+        .expect_err("disabled response codec must fail");
+    assert_eq!(err.kind(), crate::core::Cause::Decode, "got: {err:?}");
 }
 
 #[cfg(not(feature = "compression-brotli"))]
 #[test]
 fn brotli_without_feature_is_an_error() {
-    let err = decompress_body(vec![0x0b], Some("br"), &CompressionConfig::default())
+    let err = decompress_body(vec![0x0b], Some("br"), &BodyRules::default())
         .expect_err("disabled response codec must fail");
-    assert_eq!(err.kind(), crate::core::Kind::Decode, "got: {err:?}");
+    assert_eq!(err.kind(), crate::core::Cause::Decode, "got: {err:?}");
 }
 
 #[cfg(not(feature = "compression-deflate"))]
 #[test]
 fn deflate_without_feature_is_an_error() {
-    let err = decompress_body(
-        vec![0x78, 0x9c],
-        Some("deflate"),
-        &CompressionConfig::default(),
-    )
-    .expect_err("disabled response codec must fail");
-    assert_eq!(err.kind(), crate::core::Kind::Decode, "got: {err:?}");
+    let err = decompress_body(vec![0x78, 0x9c], Some("deflate"), &BodyRules::default())
+        .expect_err("disabled response codec must fail");
+    assert_eq!(err.kind(), crate::core::Cause::Decode, "got: {err:?}");
 }
 
 #[cfg(not(feature = "compression-zstd"))]
 #[test]
 fn zstd_without_feature_is_an_error() {
-    let err = decompress_body(
-        vec![0x28, 0xb5],
-        Some("zstd"),
-        &CompressionConfig::default(),
-    )
-    .expect_err("disabled response codec must fail");
-    assert_eq!(err.kind(), crate::core::Kind::Decode, "got: {err:?}");
+    let err = decompress_body(vec![0x28, 0xb5], Some("zstd"), &BodyRules::default())
+        .expect_err("disabled response codec must fail");
+    assert_eq!(err.kind(), crate::core::Cause::Decode, "got: {err:?}");
 }
 
 #[cfg(feature = "compression-gzip")]
@@ -91,7 +79,7 @@ fn decompress_and_strip_drops_stale_framing_headers() {
         ),
     ];
     let (decoded, headers) =
-        decompress_and_strip(gzip_body, headers, &CompressionConfig::default()).unwrap();
+        decompress_and_strip(gzip_body, headers, &BodyRules::default()).unwrap();
 
     assert_eq!(decoded, body);
     assert!(!headers.iter().any(|(k, _)| *k == "content-encoding"));
@@ -115,12 +103,8 @@ fn decompress_and_strip_preserves_headers_when_not_decoded() {
             HeaderValue::from_static("text/plain"),
         ),
     ];
-    let (body, out) = decompress_and_strip(
-        b"plain".to_vec(),
-        headers.clone(),
-        &CompressionConfig::default(),
-    )
-    .unwrap();
+    let (body, out) =
+        decompress_and_strip(b"plain".to_vec(), headers.clone(), &BodyRules::default()).unwrap();
     assert_eq!(body, b"plain");
     assert_eq!(out, headers);
 }
@@ -130,7 +114,7 @@ fn decompress_and_strip_preserves_headers_when_not_decoded() {
 fn zlib_with_a_small_window_decodes_when_the_header_is_split() {
     let zlib_13_bit_window =
         hex::decode("58854b2aca2f2f4e2dd22dce482c484d5148aa2c492d56481a7c820060c74069").unwrap();
-    let mut decoder = Decoder::new(Some("deflate"), &CompressionConfig::default())
+    let mut decoder = Decoder::new(Some("deflate"), &BodyRules::default())
         .unwrap()
         .unwrap();
     let mut out = Vec::new();
@@ -139,4 +123,24 @@ fn zlib_with_a_small_window_decodes_when_the_header_is_split() {
     }
     decoder.finish(&mut out).unwrap();
     assert_eq!(out, b"browser-shaped bytes ".repeat(8));
+}
+
+#[cfg(feature = "compression-zstd")]
+#[test]
+fn zstd_rejects_a_window_over_eight_mib() {
+    let encode = |window_log: u32| {
+        let mut encoder = zstd::stream::Encoder::new(Vec::new(), 3).unwrap();
+        encoder
+            .set_parameter(zstd::stream::raw::CParameter::WindowLog(window_log))
+            .unwrap();
+        encoder.include_contentsize(false).unwrap();
+        encoder.write_all(b"hello").unwrap();
+        encoder.finish().unwrap()
+    };
+    let rules = BodyRules::default();
+    assert_eq!(
+        decompress_body(encode(23), Some("zstd"), &rules).unwrap().0,
+        b"hello"
+    );
+    decompress_body(encode(24), Some("zstd"), &rules).unwrap_err();
 }

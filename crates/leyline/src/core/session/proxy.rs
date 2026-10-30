@@ -1,4 +1,4 @@
-use crate::core::{Kind, ProxyConfig, ProxyUrl, Result};
+use crate::core::{Cause, Proxy, ProxyUrl, Result};
 
 pub(crate) const CGI_SIGNAL_ENV_VARS: &[&str] = &[
     "GATEWAY_INTERFACE",
@@ -25,8 +25,8 @@ pub(crate) struct EnvProxy {
     pub(crate) value: String,
 }
 
-impl ProxyConfig {
-    pub(super) fn apply_env_proxy(self, on_invalid: InvalidEnvProxy) -> Result<ProxyConfig> {
+impl Proxy {
+    pub(super) fn apply_env_proxy(self, on_invalid: InvalidEnvProxy) -> Result<Proxy> {
         self.apply_env_proxy_from(
             on_invalid,
             |k| std::env::var(k).ok(),
@@ -39,7 +39,7 @@ impl ProxyConfig {
         on_invalid: InvalidEnvProxy,
         get_var: F,
         has_var: G,
-    ) -> Result<ProxyConfig>
+    ) -> Result<Proxy>
     where
         F: Fn(&str) -> Option<String>,
         G: Fn(&str) -> bool,
@@ -54,12 +54,21 @@ impl ProxyConfig {
             return Ok(self.set_default_proxy(value).set_from_env());
         }
         let config = self.reject_env(variable);
-        match (on_invalid, config.rejection(Kind::Config)) {
+        match (on_invalid, config.rejection(Cause::Config)) {
             (InvalidEnvProxy::FailBuild, Some(error)) => Err(error),
             _ => Ok(config),
         }
     }
 }
+
+const ENV_PROXY_VARS: [&str; 6] = [
+    "HTTPS_PROXY",
+    "https_proxy",
+    "HTTP_PROXY",
+    "http_proxy",
+    "ALL_PROXY",
+    "all_proxy",
+];
 
 pub(crate) fn env_proxy_from<F, G>(get_var: F, has_var: G) -> Option<EnvProxy>
 where
@@ -75,26 +84,10 @@ where
         );
     }
 
-    let candidates: &[&'static str] = if in_cgi {
-        &[
-            "HTTPS_PROXY",
-            "https_proxy",
-            "http_proxy",
-            "ALL_PROXY",
-            "all_proxy",
-        ]
-    } else {
-        &[
-            "HTTPS_PROXY",
-            "https_proxy",
-            "HTTP_PROXY",
-            "http_proxy",
-            "ALL_PROXY",
-            "all_proxy",
-        ]
-    };
-
-    for &variable in candidates {
+    for variable in ENV_PROXY_VARS
+        .into_iter()
+        .filter(|&variable| !(in_cgi && variable == "HTTP_PROXY"))
+    {
         if let Some(val) = get_var(variable) {
             let trimmed = val.trim();
             if !trimmed.is_empty() {

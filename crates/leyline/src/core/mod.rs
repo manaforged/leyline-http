@@ -1,3 +1,4 @@
+mod attempt;
 mod block;
 mod body;
 mod body_stream;
@@ -5,7 +6,6 @@ mod config;
 #[cfg(feature = "html")]
 mod crawl;
 pub(crate) mod deadline;
-pub(crate) mod device;
 mod digest;
 mod error;
 mod fetch_site;
@@ -20,49 +20,46 @@ mod request;
 mod response;
 pub(crate) mod retry;
 mod robots;
+pub(crate) mod saved;
 #[cfg(feature = "tower")]
 mod service;
 pub(crate) mod session;
+mod stats;
 mod tab;
 mod transport;
 #[cfg(feature = "websocket")]
 mod websocket;
 
-pub use block::{BlockKind, BlockRules, BlockSignal};
+pub use attempt::Attempt;
+pub use block::Block;
 pub use body::Body;
-pub use body_stream::BodyStream;
-pub use config::{
-    CompressionConfig, DnsConfig, HostLimits, HostStats, NoProxy, PoolConfig, ProxyConfig,
-    ProxyRule, ProxyUrl, RedirectAction, RedirectAttempt, RedirectPolicy, SocketConfig,
-    TimeoutConfig, WebSocketConfig,
-};
+pub(crate) use body_stream::BodyStream;
+pub(crate) use config::ProxyUrl;
+pub(crate) use config::{BodyRules, DnsConfig, PoolConfig};
 pub(crate) use config::{DEFAULT_MAX_BODY_SIZE, DEFAULT_MAX_HEADER_LIST_BYTES};
+pub use config::{HostLimits, Proxy, Redirect, Timeout};
+pub(crate) use config::{SocketOptions, WebSocketOptions};
 #[cfg(feature = "html")]
-pub use crawl::{Crawl, CrawlPage, CrawlStats, Respect, Scope, SkipReason};
-pub use device::{Device, DeviceAutosave, DeviceAutosaveOptions, SessionState};
-pub use digest::DigestAuth;
-pub use error::{Error, ErrorCategory, Kind, Result};
-pub use fetch_site::FetchSite;
+pub use crawl::{Crawl, Page, Respect, Scope, SkipReason};
+pub(crate) use error::Cause;
+pub use error::{Error, Kind, Result};
+pub(crate) use fetch_site::FetchSite;
 pub use into_url::IntoUrl;
-pub use pages::Pages;
-pub use proxy_pool::{ProxyHealth, ProxyPool};
-pub use request::{ContentEncoding, IntoParamPair, RequestBuilder};
+pub use request::{Encoding, IntoParamPair, RequestBuilder};
+pub(crate) use response::HttpVersion;
+pub(crate) use response::ResponseTiming;
 #[cfg(feature = "bench-internals")]
 pub(crate) use response::parse_links;
-pub use response::{
-    HttpVersion, Link, PrefixRead, RelayBody, Response, ResponseTiming, StopReason, relay_headers,
-};
-pub use retry::{RetryPolicy, RetryTrigger, WaitFormat};
+pub use response::{Link, Response, relay_headers};
+pub use retry::Retry;
 pub use robots::{Purpose, Robots, RobotsSource};
 #[cfg(feature = "html")]
 pub(crate) use robots::{lookup, product_token};
-#[cfg(feature = "tower")]
-pub use service::LeylineService;
-#[cfg(feature = "websocket")]
-pub use session::WebSocketBuilder;
-pub use session::{Identity, ProtocolPolicy, Session, SessionBuilder, SessionIdentity};
+pub(crate) use session::Identity;
+pub use session::{Protocol, Session, SessionBuilder};
+pub use stats::Stats;
 pub use tab::Tab;
 pub(crate) use transport::header_map;
 pub use transport::{ErrorBudget, ResponseMode};
 #[cfg(feature = "websocket")]
-pub use websocket::{CloseFrame, WsConnection, WsMessage, WsSink, WsStream};
+pub use websocket::{Message, WebSocket};

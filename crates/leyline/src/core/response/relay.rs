@@ -5,29 +5,24 @@ use http::header::{
 };
 
 use super::Response;
-use crate::core::session::decompress::{Decoder, content_codings};
+use crate::core::session::decompress::Decoder;
 
 const KEEP_ALIVE: &str = "keep-alive";
 const PROXY_CONNECTION: &str = "proxy-connection";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum RelayBody {
-    AsReceived,
-    Decoded,
-}
-
 impl Response {
-    pub fn relay_headers(&self, body: RelayBody) -> HeaderMap {
-        let body = match body {
-            RelayBody::Decoded if !self.decodes_body() => RelayBody::AsReceived,
-            other => other,
-        };
-        relay_headers(&self.headers, body)
+    /// Returns the headers to forward to a client, without hop-by-hop headers and encoding headers for a decoded body.
+    pub fn relay_headers(&self) -> HeaderMap {
+        let mut out = relay_headers(&self.headers);
+        if self.decodes_body() && out.contains_key(CONTENT_ENCODING) {
+            out.remove(CONTENT_ENCODING);
+            out.remove(CONTENT_LENGTH);
+        }
+        out
     }
 
-    fn decodes_body(&self) -> bool {
-        let encoding = content_codings(self.headers.get_all(CONTENT_ENCODING));
+    pub(crate) fn decodes_body(&self) -> bool {
+        let encoding = self.content_coding();
         Decoder::new(encoding.as_deref(), &self.compression).is_ok_and(|decoder| decoder.is_some())
     }
 }
@@ -46,12 +41,9 @@ fn hop_by_hop() -> [HeaderName; 9] {
     ]
 }
 
-pub fn relay_headers(headers: &HeaderMap, body: RelayBody) -> HeaderMap {
+/// Returns a copy of `headers` without hop-by-hop headers.
+pub fn relay_headers(headers: &HeaderMap) -> HeaderMap {
     let mut out = headers.clone();
-    if body == RelayBody::Decoded && out.contains_key(CONTENT_ENCODING) {
-        out.remove(CONTENT_ENCODING);
-        out.remove(CONTENT_LENGTH);
-    }
     let listed: Vec<String> = headers
         .get_all(CONNECTION)
         .iter()

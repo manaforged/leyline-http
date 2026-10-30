@@ -3,12 +3,14 @@ use std::sync::Arc;
 use http::{HeaderName, HeaderValue};
 use url::Url;
 
+use super::super::helpers::header_values;
 use super::{referer_for, url_origin};
+use crate::core::Redirect;
+use crate::core::attempt::Attempt;
 use crate::core::body::Body;
-use crate::core::error::{Error, Kind, Result};
+use crate::core::error::{Cause, Error, Result};
 use crate::core::headers::HeaderList;
 use crate::core::response::ResponseTiming;
-use crate::core::{RedirectAction, RedirectAttempt, RedirectPolicy};
 use crate::util::without_userinfo;
 
 pub(super) struct Journey {
@@ -35,10 +37,9 @@ pub(super) fn redirect_location(
     if !matches!(code, 301 | 302 | 303 | 307 | 308) {
         return None;
     }
-    headers
-        .iter()
-        .find(|(k, _)| *k == "location")
-        .map(|(_, v)| String::from_utf8_lossy(v.as_bytes()).into_owned())
+    header_values(headers, "location")
+        .next()
+        .map(|v| String::from_utf8_lossy(v.as_bytes()).into_owned())
 }
 
 fn rewrites_to_get(code: u16, method: &str) -> bool {
@@ -113,18 +114,18 @@ impl Journey {
 
     pub(super) fn approved_hop(
         &self,
-        policy: &RedirectPolicy,
+        policy: &Redirect,
         status: u16,
         location: &str,
     ) -> Option<Url> {
         let hop = without_userinfo(Url::clone(&self.url));
-        let action = policy.action(RedirectAttempt {
+        let follows = policy.follows(&Attempt::redirect(
             status,
-            url: &hop,
-            location: Some(location),
-            previous: &self.chain,
-        });
-        (action != RedirectAction::Stop).then_some(hop)
+            &hop,
+            Some(location),
+            &self.chain,
+        ));
+        follows.then_some(hop)
     }
 
     pub(super) fn follow(
@@ -141,7 +142,7 @@ impl Journey {
         self.tainted |= from != to && self.original_origin != to;
         self.retarget_referer(&to)?;
         if !matches!(self.url.scheme(), "http" | "https") {
-            return Err(Error::new(Kind::Redirect).with_message(format!(
+            return Err(Error::new(Cause::Redirect).with_message(format!(
                 "refusing to follow redirect to non-http(s) scheme `{}`",
                 self.url.scheme()
             )));
@@ -174,10 +175,10 @@ impl Journey {
         } else if let Some(replay) = replay {
             self.body = replay;
         } else {
-            return Err(Error::new(Kind::Redirect).with_message(format!(
+            return Err(Error::new(Cause::Redirect).with_message(format!(
                 "cannot follow {status} redirect: streaming request bodies are \
                  not replayable. Buffer the body before sending, or set \
-                 RedirectPolicy::none()."
+                 Redirect::none()."
             )));
         }
         Ok(())

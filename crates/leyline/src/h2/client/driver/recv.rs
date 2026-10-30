@@ -191,7 +191,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         self.fail_stream(stream_id, err);
         if let Err(e) = self
             .writer
-            .write_rst_stream(stream_id, ErrorCode::StreamClosed)
+            .write_frame(&RstStreamFrame {
+                stream_id,
+                error_code: ErrorCode::StreamClosed,
+            })
             .await
         {
             tracing::warn!(error = %e, stream_id, "h2 RST_STREAM write failed");
@@ -205,7 +208,14 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         err: H2Error,
         code: ErrorCode,
     ) -> Result<(), H2Error> {
-        drop(self.writer.write_rst_stream(stream_id, code).await);
+        drop(
+            self.writer
+                .write_frame(&RstStreamFrame {
+                    stream_id,
+                    error_code: code,
+                })
+                .await,
+        );
         self.fail_stream(stream_id, err);
         self.maybe_top_up_conn_window().await
     }
@@ -223,10 +233,9 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
 impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     pub(super) async fn maybe_top_up_conn_window(&mut self) -> Result<(), H2Error> {
         let initial = self.config.initial_connection_window_size as i64;
-        if self.conn_recv_window < initial / 2 {
-            let increment = (initial - self.conn_recv_window).clamp(1, 0x7FFF_FFFF) as u32;
+        if let Some(increment) = refill(initial, self.conn_recv_window) {
             self.writer
-                .write_window_update(&WindowUpdateFrame {
+                .write_frame(&WindowUpdateFrame {
                     stream_id: 0,
                     increment,
                 })
@@ -241,20 +250,14 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         stream_id: u32,
     ) -> Result<(), H2Error> {
         let initial = self.config.advertised_initial_window_size() as i64;
-        let needs_update = self
+        let increment = self
             .streams
             .get(stream_id)
-            .map(|a| a.stalled.is_empty() && a.recv_window < initial / 2)
-            .unwrap_or(false);
-        if needs_update {
-            let current = self
-                .streams
-                .get(stream_id)
-                .map(|a| a.recv_window)
-                .unwrap_or(0);
-            let increment = (initial - current).clamp(1, 0x7FFF_FFFF) as u32;
+            .filter(|a| a.stalled.is_empty())
+            .and_then(|a| refill(initial, a.recv_window));
+        if let Some(increment) = increment {
             self.writer
-                .write_window_update(&WindowUpdateFrame {
+                .write_frame(&WindowUpdateFrame {
                     stream_id,
                     increment,
                 })
@@ -265,4 +268,8 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         }
         Ok(())
     }
+}
+
+fn refill(initial: i64, current: i64) -> Option<u32> {
+    (current < initial / 2).then(|| (initial - current).clamp(1, 0x7FFF_FFFF) as u32)
 }

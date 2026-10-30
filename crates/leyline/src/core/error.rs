@@ -18,15 +18,15 @@ mod profile;
 
 pub(crate) use profile::ProfileChanged;
 
-pub use category::ErrorCategory;
+pub use category::Kind;
 
+/// A result whose error type is the crate's `Error`.
 pub type Result<T> = std::result::Result<T, Error>;
 
 type Source = Box<dyn StdError + Send + Sync>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub enum Kind {
+pub(crate) enum Cause {
     Request,
     Redirect,
     Status,
@@ -36,6 +36,7 @@ pub enum Kind {
     Connect,
     Tls,
     Http2,
+    #[cfg(feature = "http3")]
     Http3,
     Proxy,
     Io,
@@ -44,36 +45,8 @@ pub enum Kind {
     Json,
 }
 
-impl Kind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Kind::Request => "request",
-            Kind::Redirect => "redirect",
-            Kind::Status => "status",
-            Kind::Body => "body",
-            Kind::Decode => "decode",
-            Kind::Timeout => "timeout",
-            Kind::Connect => "connect",
-            Kind::Tls => "tls",
-            Kind::Http2 => "http2",
-            Kind::Http3 => "http3",
-            Kind::Proxy => "proxy",
-            Kind::Io => "io",
-            Kind::Config => "config",
-            Kind::Url => "url",
-            Kind::Json => "json",
-        }
-    }
-}
-
-impl fmt::Display for Kind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
 struct Inner {
-    kind: Kind,
+    kind: Cause,
     source: Option<Source>,
     url: Option<Url>,
     status: Option<StatusCode>,
@@ -88,12 +61,13 @@ struct Inner {
     after_response: bool,
 }
 
+#[doc = include_str!("../../docs/error.md")]
 pub struct Error {
     inner: Box<Inner>,
 }
 
 impl Error {
-    pub(crate) fn new(kind: Kind) -> Self {
+    pub(crate) fn new(kind: Cause) -> Self {
         Self {
             inner: Box::new(Inner {
                 kind,
@@ -171,14 +145,12 @@ impl Error {
         self.inner.after_response
     }
 
+    /// Returns the response headers when the error came after a response.
     pub fn headers(&self) -> Option<&HeaderMap> {
         self.inner.headers.as_ref()
     }
 
-    pub fn header(&self, name: &str) -> Option<&str> {
-        self.headers()?.get(name).and_then(|v| v.to_str().ok())
-    }
-
+    /// Returns how many attempts were made before the error.
     pub fn attempts(&self) -> u32 {
         self.inner.attempts
     }
@@ -187,6 +159,7 @@ impl Error {
         self.inner.attempts = attempts.max(1);
     }
 
+    /// Returns the redacted URL of the proxy the last attempt used.
     pub fn proxy(&self) -> Option<&str> {
         self.inner.proxy.as_deref()
     }
@@ -201,6 +174,7 @@ impl Error {
         self
     }
 
+    /// Returns true when the retry policy ran out of attempts.
     pub fn retries_exhausted(&self) -> bool {
         self.inner.retries_exhausted
     }
@@ -214,23 +188,24 @@ impl Error {
         self.inner.retries_exhausted = retries_exhausted;
     }
 
+    /// Returns the error response body when one was read.
     pub fn body(&self) -> Option<&[u8]> {
         self.inner.body.as_deref()
     }
 
-    pub fn body_text(&self) -> Option<Cow<'_, str>> {
-        self.body().map(String::from_utf8_lossy)
-    }
-
+    /// Returns the server's requested wait for a status error, from the retry policy or the `Retry-After` header.
     pub fn retry_after(&self) -> Option<std::time::Duration> {
         self.status()?;
         if self.inner.policy_wait.is_some() {
             return self.inner.policy_wait;
         }
-        self.header(http::header::RETRY_AFTER.as_str())
+        self.headers()?
+            .get(http::header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok())
             .and_then(crate::core::retry::parse_retry_after)
     }
 
+    /// Returns the first `Error` in the source chain of `error`, starting with `error` itself.
     pub fn find<'a>(error: &'a (dyn StdError + 'static)) -> Option<&'a Error> {
         let mut current = Some(error);
         while let Some(err) = current {
@@ -249,7 +224,7 @@ impl Error {
         }
     }
 
-    pub fn kind(&self) -> Kind {
+    pub(crate) fn cause(&self) -> Cause {
         self.inner.kind
     }
 
@@ -257,23 +232,25 @@ impl Error {
         self.inner.message.as_deref()
     }
 
+    /// Returns the HTTP status for a status error.
     pub fn status(&self) -> Option<StatusCode> {
         self.inner.status
     }
 
+    /// Returns the request URL when it is known.
     pub fn url(&self) -> Option<&Url> {
         self.inner.url.as_ref()
     }
 
-    pub fn io(&self) -> Option<&io::Error> {
+    pub(crate) fn io(&self) -> Option<&io::Error> {
         self.source_as()
     }
 
-    pub fn tls(&self) -> Option<&TlsError> {
+    pub(crate) fn tls(&self) -> Option<&TlsError> {
         self.source_as()
     }
 
-    pub fn h2(&self) -> Option<&H2Error> {
+    pub(crate) fn h2(&self) -> Option<&H2Error> {
         self.source_as()
     }
 
@@ -288,7 +265,7 @@ impl Error {
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.inner.kind.as_str())?;
+        f.write_str(self.kind().as_str())?;
         if let Some(status) = self.inner.status {
             write!(f, " {}", status.as_u16())?;
         }
@@ -305,7 +282,7 @@ impl fmt::Display for Error {
 impl fmt::Debug for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut out = f.debug_struct("leyline::Error");
-        out.field("kind", &self.inner.kind);
+        out.field("kind", &self.kind());
         if let Some(status) = self.inner.status {
             out.field("status", &status.as_u16());
         }

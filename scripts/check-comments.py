@@ -14,10 +14,10 @@ ROOTS = [
     Path("crates/leyline/build"),
     Path("crates/leyline-bssl-sys/build"),
     Path("benches"),
-    Path("tools"),
+    Path("scripts/capture"),
     Path("fuzz/fuzz_targets"),
 ]
-SKIP_PARTS = ("leyline-quiche", "leyline-bssl")
+SKIP_PARTS = ("leyline-quiche", "leyline-bssl", "target")
 GATE = "runtime-bounds: allow"
 HANG = re.compile(
     r"\b(a|an|the|and|or|of|to|for|with|plus|from|that|which|when|via)\s*$",

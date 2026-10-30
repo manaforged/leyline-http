@@ -6,28 +6,20 @@ fn debug<T: Debug>() {}
 fn every_public_type_implements_debug() {
     debug::<leyline::SessionBuilder>();
     debug::<leyline::RequestBuilder>();
-    debug::<leyline::profile::ProfileRegistry>();
-    debug::<leyline::trace::Dns<'static>>();
-    debug::<leyline::trace::Connect<'static>>();
-    debug::<leyline::trace::Tls<'static>>();
-    debug::<leyline::trace::Sent<'static>>();
-    debug::<leyline::trace::Head<'static>>();
-    debug::<leyline::trace::Done<'static>>();
-    debug::<leyline::audit::Ja3Input<'static>>();
-    debug::<leyline::audit::Ja4Input<'static>>();
-    debug::<leyline::audit::Ja4hInput<'static>>();
+    debug::<leyline::trace::Event<'static>>();
+    debug::<leyline::Fingerprint>();
     #[cfg(feature = "multipart")]
     {
         debug::<leyline::multipart::Form>();
         debug::<leyline::multipart::Part>();
     }
     #[cfg(feature = "websocket")]
-    {
-        debug::<leyline::WebSocketBuilder>();
-        debug::<leyline::WsConnection>();
-        debug::<leyline::WsSink>();
-        debug::<leyline::WsStream>();
-    }
-    #[cfg(feature = "tower")]
-    debug::<leyline::LeylineService>();
+    debug::<leyline::WebSocket>();
+}
+
+#[test]
+fn tls_debug_shows_ca_lengths_not_bytes() {
+    let shown = format!("{:?}", leyline::Tls::new().ca_der(vec![0xab; 300]));
+    assert!(shown.contains("ca_der_lengths: [300]"), "{shown}");
+    assert!(!shown.contains("171"), "{shown}");
 }

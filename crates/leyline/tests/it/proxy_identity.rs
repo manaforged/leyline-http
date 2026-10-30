@@ -1,33 +1,32 @@
-use leyline::testing::{TestResponse, TestServer, queue};
-use leyline::{Browser, Family, Identity, Kind, Platform, ProxyPool, Session};
+use leyline::testing::{self, queue};
+use leyline::{Browser, Kind, Platform, Proxy, Session};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
-fn proxy_url(server: &TestServer) -> String {
+fn proxy_url(server: &testing::Server) -> String {
     format!("http://{}", server.addr())
 }
 
 #[tokio::test]
 async fn proxies_that_share_an_identity_keep_separate_jars() {
-    let first = TestServer::http(queue([TestResponse::new(200)
+    let first = testing::Server::http(queue([testing::Response::new(200)
         .close()
         .header("set-cookie", "sid=1; Path=/")]))
     .await
     .unwrap();
-    let second = TestServer::http(queue([TestResponse::new(200).close()]))
+    let second = testing::Server::http(queue([testing::Response::new(200).close()]))
         .await
         .unwrap();
-    let id = Identity::locked(Browser::latest(Family::Firefox), Platform::Windows);
     let session = Session::builder()
-        .browser(Browser::latest(Family::Chrome))
-        .proxy_pool(ProxyPool::identified([
-            (proxy_url(&first), id),
-            (proxy_url(&second), id),
+        .browser(Browser::chrome())
+        .proxy(Proxy::identified([
+            (proxy_url(&first), Browser::firefox(), Platform::Windows),
+            (proxy_url(&second), Browser::firefox(), Platform::Windows),
         ]))
         .build()
         .unwrap();
-    session.get("http://origin.test/a").await.unwrap();
-    session.get("http://origin.test/b").await.unwrap();
+    session.get("http://origin.test/a").send().await.unwrap();
+    session.get("http://origin.test/b").send().await.unwrap();
     let sent = second.next_request().await.unwrap();
     assert_eq!(sent.target, "http://origin.test/b");
     assert!(
@@ -39,12 +38,18 @@ async fn proxies_that_share_an_identity_keep_separate_jars() {
 
 #[test]
 fn an_identified_pool_needs_a_browser_session() {
-    let id = Identity::locked(Browser::latest(Family::Firefox), Platform::Windows);
     let err = Session::builder()
-        .proxy_pool(ProxyPool::identified([("http://127.0.0.1:9", id)]))
+        .proxy(Proxy::identified([(
+            "http://127.0.0.1:9",
+            Browser::firefox(),
+            Platform::Windows,
+        )]))
         .build()
         .unwrap_err();
     assert_eq!(err.kind(), Kind::Config);
+    let message = err.to_string();
+    assert!(message.contains("Proxy::list"), "{message}");
+    assert!(!message.contains("ProxyPool"), "{message}");
 }
 
 async fn connect_proxy() -> u16 {
@@ -81,25 +86,29 @@ async fn connect_proxy() -> u16 {
 
 #[tokio::test]
 async fn saved_state_never_holds_the_proxy_password() {
-    let server = TestServer::https(queue([TestResponse::new(200), TestResponse::new(200)]))
-        .await
-        .unwrap();
+    let server = testing::Server::https(queue([
+        testing::Response::new(200),
+        testing::Response::new(200),
+    ]))
+    .await
+    .unwrap();
     let port = connect_proxy().await;
     let session = Session::builder()
         .browser(Browser::default())
         .proxy(format!("http://alice:hunter2secret@127.0.0.1:{port}"))
-        .tls_trust(server.trust())
+        .tls(server.tls())
         .build()
         .unwrap();
     session
         .get(server.url("/"))
+        .send()
         .await
         .unwrap()
         .bytes()
         .await
         .unwrap();
-    session.get(server.url("/again")).await.unwrap();
-    let saved = serde_json::to_string(&session.state()).unwrap();
+    session.get(server.url("/again")).send().await.unwrap();
+    let saved = serde_json::to_value(&session).unwrap()["state"].to_string();
     assert!(
         saved.contains("127.0.0.1"),
         "no TLS session was saved: {saved}"

@@ -6,7 +6,7 @@ import tomllib
 from .binaries import major_of, numeric_key, opera_linux
 from .chrome import dump_chrome
 from .config import BRANDS, OPERA, PEET_URL, ROOT
-from .docs import update
+from .docs import TABLE, write_profiles
 from .net import http_text
 from .toml_text import add_list_item
 
@@ -52,11 +52,4 @@ def fill_opera(dry: bool) -> list[tuple[str, int, str]]:
 
 
 def document_brand() -> list[str]:
-    rows = tomllib.loads(BRANDS.read_text())[OPERA["brand"]].get("versions", {})
-    low, high = min(map(int, rows)), max(map(int, rows))
-    changed = []
-    for rel, pattern, template in OPERA["docs"]:
-        value = template.format(low=low, high=high)
-        if update(ROOT / rel, lambda text: re.sub(pattern, lambda found: found.group(1) + value, text, count=1)):
-            changed.append(rel)
-    return sorted(set(changed))
+    return [str(TABLE.relative_to(ROOT))] if write_profiles() else []

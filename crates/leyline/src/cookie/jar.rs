@@ -11,12 +11,10 @@ use crate::util::lock;
 
 use self::evict::settle;
 
-mod autosave;
 mod evict;
 mod persist;
 
-pub use autosave::JarAutosave;
-
+#[doc = include_str!("../../docs/jar.md")]
 #[derive(Clone)]
 pub struct Jar {
     inner: Arc<Mutex<JarInner>>,
@@ -29,6 +27,7 @@ struct JarInner {
 }
 
 impl Jar {
+    /// Creates an empty cookie jar.
     pub fn new() -> Self {
         Self::from_buckets(HashMap::new(), 0)
     }
@@ -48,12 +47,14 @@ impl Jar {
         self.changes.send_modify(|generation| *generation += 1);
     }
 
+    /// Returns an independent copy of the jar's current cookies.
     pub fn snapshot(&self) -> Self {
         let jar = lock(&self.inner);
         Self::from_buckets(jar.cookies.clone(), jar.total)
     }
 
-    pub fn extend_from(&self, other: &Jar) {
+    /// Copies every cookie from `other` into this jar, replacing cookies with the same name and path.
+    pub fn merge(&self, other: &Jar) {
         if Arc::ptr_eq(&self.inner, &other.inner) {
             return;
         }
@@ -87,11 +88,8 @@ impl Jar {
         self.changed();
     }
 
-    pub fn store_set_cookie(&self, set_cookie: &str, url: &Url) {
-        self.store(set_cookie, url);
-    }
-
-    fn store(&self, set_cookie: &str, url: &Url) {
+    /// Parses a `Set-Cookie` header value received from `url` and stores the cookie.
+    pub fn store(&self, set_cookie: &str, url: &Url) {
         if self.apply(set_cookie, url) {
             self.changed();
         }
@@ -154,7 +152,8 @@ impl Jar {
         }
     }
 
-    pub fn cookie_header(&self, url: &Url) -> Option<String> {
+    /// Returns the `Cookie` header value to send to `url`, or `None` when no cookie matches.
+    pub fn header_for(&self, url: &Url) -> Option<String> {
         self.cookie_header_for(url, false, true)
     }
 
@@ -213,11 +212,13 @@ impl Jar {
         Some(header)
     }
 
-    pub fn remove_named(&self, name: &str) -> usize {
+    /// Removes every cookie with the given name on all domains and returns the count removed.
+    pub fn remove_everywhere(&self, name: &str) -> usize {
         let removed = lock(&self.inner).remove_where(|c| c.name == name);
         self.changed_if(removed)
     }
 
+    /// Removes cookies with the given name that match the host of `url` and returns the count removed.
     pub fn remove(&self, url: &Url, name: &str) -> usize {
         let host = url.host_str().unwrap_or("");
         let removed =
@@ -232,14 +233,16 @@ impl Jar {
         removed
     }
 
-    pub fn all_cookies(&self) -> Vec<Cookie> {
+    /// Returns every stored cookie, sorted by domain and then name.
+    pub fn all(&self) -> Vec<Cookie> {
         let jar = lock(&self.inner);
         let mut out: Vec<Cookie> = jar.cookies.values().flatten().cloned().collect();
         out.sort_by(|a, b| a.domain.cmp(&b.domain).then_with(|| a.name.cmp(&b.name)));
         out
     }
 
-    pub fn get_cookie(&self, url: &Url, name: &str) -> Option<String> {
+    /// Returns the value of the unexpired cookie named `name` that would be sent to `url`.
+    pub fn get(&self, url: &Url, name: &str) -> Option<String> {
         let domain = url.host_str().unwrap_or("");
         let path = url.path();
         let is_secure = url.scheme() == "https";
@@ -252,20 +255,14 @@ impl Jar {
             .map(|c| c.value.clone())
     }
 
-    pub fn set_cookie(&self, url: &Url, name: &str, value: &str) {
+    /// Stores a cookie with path `/` for `url`, and ignores names or values that contain `;` or control characters.
+    pub fn set(&self, url: &Url, name: &str, value: &str) {
         if plain_token(name) && !name.contains('=') && plain_token(value) {
             self.store(&format!("{name}={value}; Path=/"), url);
         }
     }
 
-    pub fn load_cookies(&self, cookie_str: &str, url: &Url) {
-        for pair in cookie_str.split(';') {
-            if let Some((name, value)) = pair.trim().split_once('=') {
-                self.set_cookie(url, name, value);
-            }
-        }
-    }
-
+    /// Removes every cookie from the jar.
     pub fn clear(&self) {
         let removed = {
             let mut jar = lock(&self.inner);

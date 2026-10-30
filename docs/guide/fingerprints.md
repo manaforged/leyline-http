@@ -9,9 +9,9 @@ are safe to override, and how to mix and rotate identities.
 
 | Layer | Holds |
 | --- | --- |
-| TLS (`TlsProfile`) | The cipher list, supported groups, signature algorithms, certificate compression, and extension behavior: GREASE, ECH GREASE, extension permutation or a fixed order, ALPS, record size limit, delegated credentials, OCSP stapling, signed certificate timestamps, session tickets, pre-shared key, padding, trust anchor requests, and the minimum TLS version |
-| HTTP/2 (`H2Profile`) | The SETTINGS values and their order, the pseudo-header order, the default priority frame, and per-platform overrides |
-| Headers | The `User-Agent` and `sec-ch-ua` of each platform block. The header style in `profiles/headers.toml` and the `Preset` decide the other headers and their order. See [Requests](requests.md) |
+| TLS (`[tls]`) | The cipher list, supported groups, signature algorithms, certificate compression, and extension behavior: GREASE, ECH GREASE, extension permutation or a fixed order, ALPS, record size limit, delegated credentials, OCSP stapling, signed certificate timestamps, session tickets, pre-shared key, padding, trust anchor requests, and the minimum TLS version |
+| HTTP/2 (`[h2]`) | The SETTINGS values and their order, the pseudo-header order, the default priority frame, and per-platform overrides |
+| Headers | The `User-Agent` and `sec-ch-ua` of each platform block. The header style in `profiles/headers.toml` and the `RequestKind` decide the other headers and their order. See [Requests](requests.md) |
 | TCP (`TcpProfile`) | The socket options that shape the SYN: TTL, MSS, window size, window scale, the don't-fragment bit, and `TCP_NODELAY` |
 
 The session takes its `TcpProfile` from `profiles/platforms.toml` through
@@ -32,57 +32,45 @@ kernel defaults apply.
 
 ## Audit a session
 
-Build the session with `.audit(true)`, then read `Response::audit()`.
-Without the flag, `audit()` returns `None`.
+Build the session with `.audit(true)`, then read `Response::fingerprint()`.
+Without the flag, `fingerprint()` returns `None`.
 
 ```rust,no_run
 use leyline::{Browser, Platform, Session};
 
 # async fn run() -> leyline::Result<()> {
 let session = Session::builder()
-    .browser(Browser::Chrome152)
-    .platform(Platform::Linux)
+    .browser(Browser::Chrome152).platform(Platform::Linux)
     .audit(true)
     .build()?;
 
-let resp = session.get("https://example.com/").await?;
-if let Some(a) = resp.audit() {
-    println!("JA4 {} JA4H {} H2 {}", a.ja4, a.ja4h, a.h2_fingerprint);
+let resp = session.get("https://example.com/").send().await?;
+if let Some(sent) = resp.fingerprint() {
+    println!("JA4 {} JA4H {} H2 {}", sent.ja4(), sent.ja4h(), sent.akamai());
 }
 # Ok(())
 # }
 ```
 
-| `AuditData` field | What it is |
+| `Fingerprint` method | What it returns |
 | --- | --- |
-| `ja3` | JA3, the MD5 form. It hashes the extensions in the order sent |
-| `ja4` | JA4. It sorts the extensions before it hashes them |
-| `ja4t` | JA4T from the session's `TcpProfile` values, including fields the running OS does not apply |
-| `ja4h` | JA4H over the request line and headers of this response's request. Computed on the first `audit()` call and cached |
-| `h2_fingerprint` | The Akamai HTTP/2 fingerprint |
-| `permutes_extensions` | `true` when the profile shuffles the TLS extension order on each connection, as Chrome does |
-| `request_headers` | The headers the session prepared for the request, in order, before the transport sent them |
-
-The connection fields are computed once per session from the profile. They
-report what Leyline built; a packet capture shows what the connection sent,
-and the kernel decides what the SYN carries.
-
-## Check a fingerprint with an echo service
+| `ja3()` | JA3, the MD5 form. It hashes the extensions in the order sent |
+| `ja4()` | JA4. It sorts the extensions before it hashes them |
+| `ja4t()` | JA4T from the session's `TcpProfile` values, including fields the running OS does not apply |
+| `ja4h()` | JA4H over the request line and headers of this response's request. Computed on the first `fingerprint()` call and cached |
+| `akamai()` | The Akamai HTTP/2 fingerprint |
+| `headers()` | The request headers as sent, lowercase names |
 
 A TLS echo service answers with the fingerprints of the connection it
-received. `AuditData::compare` checks them against the audit of the same
-session.
-
-`audit::Observed::from_json` reads `tls.ja4`, `tls.ja3_hash`,
+received. `Fingerprint::from_json` reads `tls.ja4`, `tls.ja3_hash`,
 `http2.akamai_fingerprint`, and the echoed request headers from
 `http2.sent_frames[*].headers` and `http1.headers`: the shape that
-`https://tls.peet.ws/api/all` returns. A missing field stays `None`. For
-another service, build it with
-`Observed::new().ja4(..).ja3(..).h2_fingerprint(..).header(name, value)`.
+`https://tls.peet.ws/api/all` returns. A field the service leaves out stays
+empty. `sent.diff(&observed)` lists each difference as a
+`(field, expected, observed)` tuple; an empty list means a match.
 
 ```rust,no_run
-use leyline::audit::{FieldOutcome, Observed};
-use leyline::{Browser, Session};
+use leyline::{Browser, Fingerprint, Session};
 
 # async fn run() -> leyline::Result<()> {
 let session = Session::builder()
@@ -90,48 +78,29 @@ let session = Session::builder()
     .audit(true)
     .build()?;
 let resp = session.get("https://tls.peet.ws/api/all").send().await?;
-let Some(audit) = resp.audit().cloned() else {
+let Some(sent) = resp.fingerprint().cloned() else {
     return Ok(());
 };
-let observed = Observed::from_json(&resp.text().await?)?;
-let report = audit.compare(&observed);
-println!("match: {}", report.is_match());
-if let FieldOutcome::Mismatch { expected, observed } = &report.ja4 {
-    println!("ja4 sent {expected}, service saw {observed}");
-}
-for header in &report.headers {
-    if let FieldOutcome::Mismatch { expected, observed } = &header.outcome {
-        println!("{} sent {expected}, service saw {observed}", header.name);
-    }
+let observed = Fingerprint::from_json(&resp.text().await?)?;
+for (field, expected, seen) in sent.diff(&observed) {
+    println!("{field}: sent {expected}, service saw {seen}");
 }
 # Ok(())
 # }
 ```
 
-`compare` returns a `FingerprintReport` with a `FieldOutcome` for `ja4`,
-`ja3`, `h2_fingerprint`, and `header_order`, and a `HeaderOutcome`
-(lowercase `name` and `outcome`) in `headers` for each header the session
-sent, pseudo-headers excluded. `header_order` compares the order of the
-headers that both lists hold.
+`diff` compares `ja4`, `ja3`, `akamai`, the header order of the headers both
+sides hold, and each header the session sent, pseudo-headers excluded. Values
+match when they are equal ignoring ASCII case. A field the service did not
+report is skipped. A header the session sent that the service does not list,
+while it lists others, appears with an empty observed value.
 
-| `FieldOutcome` | Meaning |
-| --- | --- |
-| `Match` | The values are equal, ignoring ASCII case |
-| `Mismatch { expected, observed }` | The values differ, and they must not |
-| `Informational { expected, observed }` | The values differ, and they can |
-| `NotReported` | The service did not report the field, or reported no headers at all |
-| `Absent { expected }` | The session sent the header and the service reports headers, but not this one. It counts as a mismatch |
-
-JA4 and the Akamai HTTP/2 fingerprint are fixed for every profile, so a
-difference is a `Mismatch`. JA3 hashes the extensions in the order sent, and
-Chrome shuffles that order, so for a profile with `permutes_extensions` a
-JA3 difference is `Informational`; for a fixed-order profile such as Firefox
-or Safari it is a `Mismatch`. A header that a proxy or middlebox rewrites
-shows as a `Mismatch`. A proxy that ends TLS changes the result.
-
-`is_match()` is `true` when nothing is a `Mismatch` or `Absent`;
-`FieldOutcome::is_mismatch()` tests one field. Both types implement
-`Display`: `println!("{report}")` prints one line per field and header.
+JA4 and the Akamai HTTP/2 fingerprint are fixed for every profile, so any
+difference is listed. JA3 hashes the extensions in the order sent, and Chrome
+shuffles that order, so for a Chrome-family profile a JA3 difference is not
+listed; for a fixed-order profile such as Firefox or Safari it is. A header
+that a proxy or middlebox rewrites is listed. A proxy that ends TLS changes
+the result.
 
 ## Override headers safely
 
@@ -142,13 +111,13 @@ of a new name.
 | Header | Effect of an override |
 | --- | --- |
 | `accept-language` | Safe. Prefer [`languages`](sessions.md#set-the-languages) |
-| `referer` | Safe. `RequestBuilder::initiator` is better: it also sets `origin` and `sec-fetch-site` |
+| `referer` | Safe. `RequestBuilder::from_page` is better: it also sets `origin` and `sec-fetch-site` |
 | `authorization`, `content-type`, application headers such as `x-api-key` | Safe |
 | `cookie` | Safe. The jar adds no cookies to that request |
-| `user-agent` | Changes the fingerprint. The `sec-ch-ua*` hints still come from the profile, so the two can disagree |
+| `user-agent` | Changes the fingerprint. A session `user-agent` drops the profile's `sec-ch-ua*` hints, so the two never name different browsers |
 | `sec-ch-ua*`, `accept-encoding`, header order | Changes the fingerprint |
 | `accept` | Changes the fingerprint on a navigation. See [Set accept on a script request](#set-accept-on-a-script-request) |
-| `sec-fetch-*` | Your value replaces the computed one. Use `preset` and `initiator` instead |
+| `sec-fetch-*` | Your value replaces the computed one. Use `kind` and `from_page` instead |
 | `content-length` | Computed by Leyline. Your value is replaced |
 | `host` | Computed from the URL. Your value is kept on HTTP/1.1 and dropped on HTTP/2 and HTTP/3 |
 
@@ -156,7 +125,7 @@ of a new name.
 
 Keep the profile's `accept` on `open`, `follow`, and the navigation presets.
 A page script sets its own `accept` on a `fetch()` or an XHR, for example
-`application/json`. The `Xhr` preset sends what a `fetch()` without an
+`application/json`. The `Xhr` kind sends what a `fetch()` without an
 explicit `accept` sends. When the site's script sets one, set the same value:
 the browser sends it too, so the fingerprint does not change.
 
@@ -165,7 +134,7 @@ the browser sends it too, so the fingerprint does not change.
 let tab = session.tab();
 tab.open("https://shop.example/cart").await?;
 let cart = tab
-    .xhr("/api/cart")
+    .fetch(leyline::http::Method::GET, "/api/cart")
     .header("accept", "application/json")
     .send()
     .await?;
@@ -174,114 +143,121 @@ let cart = tab
 # }
 ```
 
-## Mix and rotate identities
+## Mix the hello and the headers
 
-An `Identity` holds two browsers and a platform. The `tls()` browser supplies
-the ClientHello, the HTTP/2 and HTTP/3 settings, and the `ja3`, `ja4`, and
-`h2_fingerprint` audit values. The `http()` browser supplies the
+A browser session sends two browsers and a platform. The hello browser
+supplies the ClientHello, the HTTP/2 and HTTP/3 settings, and the `ja3`,
+`ja4`, and `h2_fingerprint` audit values. The header browser supplies the
 `User-Agent`, `sec-ch-ua`, `Accept-Language`, the header shape, and the
 header order. The platform selects the OS that the `User-Agent` names, the
 HTTP/2 platform overrides, and the `TcpProfile`.
 
-| Function | `tls()` side | `http()` side | `Kind::Config` when |
+| Setter | Hello side | Header side | `Kind::Config` at `build()` when |
 | --- | --- | --- | --- |
-| `Identity::locked(browser, platform)` | `browser` | `browser` | Never; the build checks the platform |
-| `rotate_tls(tls)` | `tls` | unchanged | `tls` is of another `Family` than `http()` |
-| `rotate_hello()` | the next ClientHello of the family | unchanged | The family has one ClientHello |
-| `switch_family(dest)` | `dest` | `dest` | `dest` is of the same `Family`, or has no identity for the platform |
+| `browser(b)` | `b` | `b` | `b` has no profile for the platform |
+| `hello(b)` | `b` | unchanged | `b` is of another product family than the header browser |
+| `platform(p)` | unchanged | unchanged | The header browser has no profile for `p` |
 
-`rotate_hello` moves through `Browser::all()` order and wraps. A profile can
-share its ClientHello with another version; its `[meta]` table names that
-version in `hello`, `tls()` returns it, and `rotate_hello` counts shared
-ClientHellos once.
+`.browser(b)` picks the browser's native platform unless `.platform(p)` is
+set, before or after; `.platform(p)` always wins. A second `.browser(..)`
+replaces the first. Call `.hello(..)` after `.browser(..)`.
 
-### Build a session from an identity
+`Browser::next_hello()` returns the next distinct ClientHello of the same
+product in `Browser::all()` order, and wraps. It returns `None` when the
+product has one ClientHello. A profile can share its ClientHello with
+another version; its `[meta]` table names that version in `hello`.
+`next_hello` returns that version and counts shared ClientHellos once.
 
-`SessionBuilder::identity(identity)` sets both browsers and the platform.
+### Set the browser and platform
+
 This session sends the headers of Chrome 154 on Linux over the ClientHello,
 HTTP/2 settings, and HTTP/3 settings of Chrome 152:
 
 ```rust,no_run
-use leyline::{Browser, Identity, Platform, Session};
+use leyline::{Browser, Platform, Session};
 
 # fn run() -> leyline::Result<()> {
-let identity = Identity::locked(Browser::Chrome154, Platform::Linux)
-    .rotate_tls(Browser::Chrome152)?;
-let session = Session::builder().identity(identity).build()?;
-assert_eq!(session.identity().browser(), Some(Browser::Chrome154));
+let session = Session::builder()
+    .browser(Browser::Chrome154)
+    .platform(Platform::Linux)
+    .hello(Browser::Chrome152)
+    .build()?;
+assert_eq!(session.browser(), Some(Browser::Chrome154));
+assert_eq!(session.hello(), Some(Browser::Chrome152));
 # Ok(())
 # }
 ```
 
-`browser`, `profile`, and `identity` replace each other; the last call wins.
-`browser` and `profile` keep the platform in either order. `identity` sets
-the platform too, so a `platform` call before it has no effect and one after
-it replaces the identity's platform. `build()` returns `Kind::Config` when
-the `http()` browser has no identity for the platform, for example Safari 26
-on Windows. A session built with `SessionBuilder::profile` sends that one
-profile on both sides.
+`build()` returns `Kind::Config` when the header browser has no profile
+for the platform, for example Safari 26 on Windows. A session built with
+`.profile(..)` sends that one profile on both sides.
 
-### Change the identity of a session
+### Change the browser of a session
 
-`Session::with_identity(identity)` derives a session that sends another
-identity; the parent keeps its own. The derived session takes the
-ClientHello, the HTTP/2 and HTTP/3 settings, the headers, and the audit
-values from the identity, as `SessionBuilder::identity` does.
+`session.to_builder().browser(b).build()` derives a session that sends
+another browser; the parent keeps its own. `hello` and `platform` work on
+the derived builder as they do on `Session::builder()`. The derived session
+takes the ClientHello, the HTTP/2 and HTTP/3 settings, the headers, and the
+audit values from the new setters.
 
 | Part | In the derived session |
 | --- | --- |
 | Connection pool | Shared with the parent, in its own partition, so connections never cross identities |
 | HSTS store and `Alt-Svc` knowledge | Shared with the parent |
 | TLS session cache | Its own, empty |
-| Cookie jar | The parent's. Give it another with `with_cookie_jar` |
-| Brand, proxy, timeouts, `TcpProfile`, other settings | Kept |
+| Cookie jar | The parent's. Give it another with `to_builder().cookies` |
+| Proxy, timeouts, `TcpProfile`, other settings | Kept |
 
 A `user-agent` header from `SessionBuilder::headers` still replaces the
-identity's `User-Agent`. `Session::identity()` reports the identity the
-derived session sends. See [Sessions](sessions.md#derive-a-session).
+browser's `User-Agent`. `Session::browser()`, `hello()`, and `platform()`
+report what the derived session sends. See [Sessions](sessions.md#derive-a-session).
 
 ```rust,no_run
-use leyline::{Browser, Family, Identity, Platform, Session};
+use leyline::{Browser, Platform, Session};
 
 # fn run() -> leyline::Result<()> {
-let chrome = Identity::locked(Browser::latest(Family::Chrome), Platform::Linux);
-let session = Session::builder().identity(chrome).build()?;
+let chrome = Browser::chrome();
+let session = Session::builder()
+    .browser(chrome)
+    .platform(Platform::Linux)
+    .build()?;
 
-let next_hello = session.with_identity(chrome.rotate_hello()?)?;
+let mut next_hello = session.to_builder();
+if let Some(hello) = chrome.next_hello() {
+    next_hello = next_hello.hello(hello);
+}
+let next_hello = next_hello.build()?;
 
-let firefox = chrome.switch_family(Browser::latest(Family::Firefox))?;
-let switched = session.with_identity(firefox)?;
+let switched = session.to_builder().browser(Browser::firefox()).build()?;
 # let _ = (next_hello, switched);
 # Ok(())
 # }
 ```
 
-`with_identity` returns `Kind::Config` when:
+`build()` after `to_builder()` returns `Kind::Config` when:
 
-- The session has no `Browser`: a plain session, or one built with
-  `SessionBuilder::profile`.
-- The `http()` browser has no identity for the platform.
-- The session brand, Edge or Opera, has no overlay for the `http()` browser
-  on the platform. Only Chromium browsers have one.
-- The policy is `ProtocolPolicy::Http3` or `Race` and the `tls()` browser has
+- The header browser has no profile for the platform, such as Edge or
+  Opera on Android or iOS.
+- The policy is `Protocol::Http3` or `Race` and the hello browser has
   no `[h3]` table. Under `Auto`, `Http1`, or `Http2` that is accepted. See
   [HTTP/3](http3.md).
 
 ## Read and test the bundled profiles
 
-`ProfileRegistry::global().get(name, version)` looks up a bundled profile;
-`Browser::profile()` is the short path. The
+A variant such as `Browser::Chrome152` names a bundled browser, and
+`profiles/chrome/152.toml` in the repository holds its profile.
+`Session::profile()` returns the profile TOML a session uses. The
 [profile reference](profiles.md) lists what ships and how to load your own.
 
-```rust
-use leyline::Browser;
-use leyline::profile::ProfileRegistry;
+```rust,no_run
+use leyline::{Browser, Session};
 
-let profile = ProfileRegistry::global()
-    .get("chrome", 152)
-    .expect("chrome 152 is bundled");
-assert_eq!(profile.meta.version, 152);
-assert_eq!(Browser::Chrome152.profile().meta.browser, "chrome");
+# fn main() -> leyline::Result<()> {
+let session = Session::builder().browser(Browser::Chrome152).build()?;
+let toml = session.profile().expect("bundled profile");
+assert!(toml.contains("[tls]"));
+# Ok(())
+# }
 ```
 
 The offline conformance test checks each profile's JA4 and HTTP/2 values

@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use crate::h2::config::{PseudoOrder, parse_pseudo_order};
 use crate::profile::{BrowserProfile, H3Profile, TlsProfile};
-use crate::{Error, Kind};
+use crate::{Cause, Error};
 
 const SETTINGS_MAX_FIELD_SECTION_SIZE: u64 = 0x06;
 
@@ -13,19 +13,30 @@ const DEFAULT_PSEUDO_ORDER: [PseudoOrder; 4] = [
     PseudoOrder::Path,
 ];
 
+/// The QUIC transport parameters and limits for one HTTP/3 connection, derived from a browser profile.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct H3Config {
+    /// The connection-level flow control limit in bytes.
     pub initial_max_data: u64,
+    /// The flow control limit for locally opened bidirectional streams.
     pub initial_max_stream_data_bidi_local: u64,
+    /// The flow control limit for peer-opened bidirectional streams.
     pub initial_max_stream_data_bidi_remote: u64,
+    /// The flow control limit for unidirectional streams.
     pub initial_max_stream_data_uni: u64,
+    /// The number of bidirectional streams the peer may open.
     pub initial_max_streams_bidi: u64,
+    /// The number of unidirectional streams the peer may open.
     pub initial_max_streams_uni: u64,
+    /// The idle time after which the connection closes.
     pub max_idle_timeout: Duration,
+    /// The largest UDP payload the client accepts.
     pub max_udp_payload_size: u16,
+    /// The number of connection IDs the client keeps.
     pub active_connection_id_limit: u64,
 
+    /// The largest response body the client reads.
     pub max_response_body_bytes: u64,
 
     pub(crate) wire: H3Profile,
@@ -35,9 +46,10 @@ pub struct H3Config {
 }
 
 impl H3Config {
+    /// Builds the config from the `[h3]` table of a browser profile, and fails when the profile has none.
     pub fn from_profile(profile: &BrowserProfile) -> Result<Self, Error> {
         let h3 = profile.h3.as_ref().ok_or_else(|| {
-            Error::new(Kind::Config).with_message(format!(
+            Error::new(Cause::Config).with_message(format!(
                 "profile {} has no [h3] table, so it has no HTTP/3 transport",
                 profile.meta.name
             ))

@@ -7,22 +7,31 @@ const QUEUE_EMPTY_STATUS: u16 = 503;
 pub(super) const CONNECTION: &str = "connection";
 pub(super) const CLOSE: &str = "close";
 
+/// A request the test server received.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct RecordedRequest {
+pub struct Request {
+    /// The request method.
     pub method: String,
+    /// The request target as sent, such as `/path?query`.
     pub target: String,
+    /// The request headers in the order received.
     pub headers: Vec<(String, String)>,
+    /// The request body after any chunked decoding.
     pub body: Vec<u8>,
+    /// The request line, such as `GET /path HTTP/1.1`.
     pub request_line: String,
+    /// The request line and headers as received, without the body.
     pub raw: Vec<u8>,
 }
 
-impl RecordedRequest {
+impl Request {
+    /// Returns the first value of the named header, ignoring case.
     pub fn header(&self, name: &str) -> Option<&str> {
         self.header_values(name).into_iter().next()
     }
 
+    /// Returns every value of the named header, ignoring case.
     pub fn header_values(&self, name: &str) -> Vec<&str> {
         self.headers
             .iter()
@@ -31,24 +40,19 @@ impl RecordedRequest {
             .collect()
     }
 
-    pub fn header_count(&self, name: &str) -> usize {
-        self.headers
-            .iter()
-            .filter(|(key, _)| key.eq_ignore_ascii_case(name))
-            .count()
-    }
-
+    /// Returns the request line and headers as text, with invalid UTF-8 replaced.
     pub fn text(&self) -> Cow<'_, str> {
         String::from_utf8_lossy(&self.raw)
     }
 }
 
+/// A response the test server sends, built with `Response::new` and its setters.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct TestResponse {
-    pub status: u16,
-    pub headers: Vec<(String, String)>,
-    pub body: Vec<u8>,
+pub struct Response {
+    pub(super) status: u16,
+    pub(super) headers: Vec<(String, String)>,
+    pub(super) body: Vec<u8>,
     pub(super) delay: Duration,
     pub(super) chunks: Option<ChunkedBody>,
 }
@@ -59,13 +63,14 @@ pub(super) struct ChunkedBody {
     pub(super) pause: Duration,
 }
 
-impl Default for TestResponse {
+impl Default for Response {
     fn default() -> Self {
         Self::new(200)
     }
 }
 
-impl TestResponse {
+impl Response {
+    /// Returns a response with the given status, no headers, and an empty body.
     pub fn new(status: u16) -> Self {
         Self {
             status,
@@ -76,11 +81,13 @@ impl TestResponse {
         }
     }
 
+    /// Waits this long before sending the response.
     pub fn delay(mut self, delay: Duration) -> Self {
         self.delay = delay;
         self
     }
 
+    /// Sends a chunked body with `pause` between parts, in place of `body`.
     pub fn chunks<I, B>(mut self, parts: I, pause: Duration) -> Self
     where
         I: IntoIterator<Item = B>,
@@ -91,11 +98,13 @@ impl TestResponse {
         self
     }
 
+    /// Adds a response header.
     pub fn header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.headers.push((name.into(), value.into()));
         self
     }
 
+    /// Adds `connection: close`, so the server closes the connection after this response.
     pub fn close(self) -> Self {
         self.header(CONNECTION, CLOSE)
     }
@@ -106,42 +115,44 @@ impl TestResponse {
         })
     }
 
+    /// Sets the response body.
     pub fn body(mut self, body: impl Into<Vec<u8>>) -> Self {
         self.body = body.into();
         self
     }
 }
 
-pub type Handler = Arc<dyn Fn(&RecordedRequest) -> TestResponse + Send + Sync>;
+pub(crate) type Handler = Arc<dyn Fn(&Request) -> Response + Send + Sync>;
 
+/// Returns a handler that answers each request with the next response from `responses`, then 503.
 pub fn queue(
-    responses: impl IntoIterator<Item = TestResponse>,
-) -> impl Fn(&RecordedRequest) -> TestResponse + Send + Sync + 'static {
+    responses: impl IntoIterator<Item = Response>,
+) -> impl Fn(&Request) -> Response + Send + Sync + 'static {
     let pending = Mutex::new(responses.into_iter().collect::<VecDeque<_>>());
     move |_| {
         pending
             .lock()
             .ok()
             .and_then(|mut queue| queue.pop_front())
-            .unwrap_or_else(|| TestResponse::new(QUEUE_EMPTY_STATUS))
+            .unwrap_or_else(|| Response::new(QUEUE_EMPTY_STATUS))
     }
 }
 
 #[derive(Clone)]
 pub(super) struct Recorder {
-    pub(super) log: Arc<Mutex<Vec<RecordedRequest>>>,
-    pub(super) sender: tokio::sync::mpsc::UnboundedSender<RecordedRequest>,
+    pub(super) log: Arc<Mutex<Vec<Request>>>,
+    pub(super) sender: tokio::sync::mpsc::UnboundedSender<Request>,
 }
 
 impl Recorder {
-    pub(super) fn record(&self, request: RecordedRequest) -> bool {
+    pub(super) fn record(&self, request: Request) -> bool {
         if let Ok(mut log) = self.log.lock() {
             log.push(request.clone());
         }
         self.sender.send(request).is_ok()
     }
 
-    pub(super) fn snapshot(&self) -> Vec<RecordedRequest> {
+    pub(super) fn snapshot(&self) -> Vec<Request> {
         self.log.lock().map(|log| log.clone()).unwrap_or_default()
     }
 }

@@ -14,18 +14,18 @@ to each call.
 ```rust,no_run
 # async fn run() -> Result<(), Box<dyn std::error::Error>> {
 let session = leyline::Session::new();
-session.get("https://www.example.com/login").await?;
+session.get("https://www.example.com/login").send().await?;
 
 let jar = session.cookies();
 let url = leyline::Url::parse("https://www.example.com/")?;
-if let Some(id) = jar.get_cookie(&url, "session_id") {
+if let Some(id) = jar.get(&url, "session_id") {
     println!("session_id={id}");
 }
-if let Some(header) = jar.cookie_header(&url) {
+if let Some(header) = jar.header_for(&url) {
     println!("cookie: {header}");
 }
 
-jar.store_set_cookie("token=abc; Domain=.example.com; Path=/; Secure", &url);
+jar.store("token=abc; Domain=.example.com; Path=/; Secure", &url);
 assert_eq!(jar.remove(&url, "token"), 1);
 # Ok(())
 # }
@@ -33,15 +33,14 @@ assert_eq!(jar.remove(&url, "token"), 1);
 
 | Method | Does |
 | --- | --- |
-| `get_cookie(url, name)`, `set_cookie(url, name, value)` | Read or set one cookie scoped to a URL |
-| `cookie_header(url)` | The `Cookie` header the jar sends to a URL |
-| `store_set_cookie(set_cookie, url)` | Stores a full `Set-Cookie` value, with `Domain`, `Path`, `Secure`, `HttpOnly`, `SameSite`, `Max-Age`, and `Expires`, through the parser the session uses. `Max-Age=0` deletes the matching cookie |
-| `load_cookies(header, url)` | Loads a `Cookie` header string |
+| `get(url, name)`, `set(url, name, value)` | Read or set one cookie scoped to a URL |
+| `header_for(url)` | The `Cookie` header the jar sends to a URL |
+| `store(set_cookie, url)` | Stores a full `Set-Cookie` value, with `Domain`, `Path`, `Secure`, `HttpOnly`, `SameSite`, `Max-Age`, and `Expires`, through the parser the session uses. `Max-Age=0` deletes the matching cookie |
 | `remove(url, name)` | Deletes every cookie of that name the host of `url` receives, on every path. Returns the number removed |
-| `remove_named(name)` | Deletes every cookie of that name on every host. Returns the number removed |
+| `remove_everywhere(name)` | Deletes every cookie of that name on every host. Returns the number removed |
 | `clear()` | Deletes every cookie |
-| `all_cookies()` | Every stored cookie, sorted by domain then name, expired ones included |
-| `snapshot()`, `extend_from(other)` | Fork and merge. See [Share or fork a jar](#share-or-fork-a-jar) |
+| `all()` | Every stored cookie, sorted by domain then name, expired ones included |
+| `snapshot()`, `merge(other)` | Fork and merge. See [Share or fork a jar](#share-or-fork-a-jar) |
 
 A `Cookie` has the public fields `name`, `value`, `domain`, `path`, `secure`,
 `http_only`, `same_site` (`Strict`, `Lax`, or `None`), `expires`,
@@ -59,7 +58,7 @@ jar.
 ```rust,no_run
 # async fn run() -> Result<(), Box<dyn std::error::Error>> {
 let session = leyline::Session::new();
-let resp = session.get("https://shop.example/login").await?;
+let resp = session.get("https://shop.example/login").send().await?;
 for cookie in resp.cookies() {
     println!("set {}={} for {}", cookie.name, cookie.value, cookie.domain);
 }
@@ -72,23 +71,23 @@ for cookie in resp.cookies() {
 `Jar` is a handle over shared state: `jar.clone()` and session clones see the
 same cookies, so a cookie one task receives reaches every other task at once.
 
-`SessionBuilder::cookie_jar(jar)` starts a session from a jar you built.
-`session.with_cookie_jar(jar)` derives a session that shares the pool and
-every other setting but reads and writes the given jar; use it for a second
+`SessionBuilder::cookies(jar)` starts a session from a jar you built.
+`session.to_builder().cookies(jar).build()?` makes a session that shares
+the pool and every other setting but reads and writes the given jar; use it for a second
 identity on warm connections. See [Sessions](sessions.md#derive-a-session).
 
 `snapshot()` is a fork: a new store with a copy of every cookie and all its
 attributes. A write to the copy does not reach the original.
-`extend_from(&other)` merges the cookies of `other` with their attributes; on
+`merge(&other)` merges the cookies of `other` with their attributes; on
 the same name, domain, and path, the cookie from `other` wins. Together they
 try a step without touching a stored login:
 
 ```rust,no_run
 # async fn run(session: leyline::Session) -> leyline::Result<()> {
 let probe_jar = session.cookies().snapshot();
-let probe = session.with_cookie_jar(probe_jar.clone());
-if probe.get("https://example.com/check").await?.status().is_success() {
-    session.cookies().extend_from(&probe_jar);
+let probe = session.to_builder().cookies(probe_jar.clone()).build()?;
+if probe.get("https://example.com/check").send().await?.status().is_success() {
+    session.cookies().merge(&probe_jar);
 }
 # Ok(())
 # }
@@ -102,10 +101,10 @@ The jar follows Chrome:
   `Domain=` value, or the request host.
 - `Secure` cookies go only over HTTPS.
 - `SameSite` uses the `sec-fetch-site` value the request sends. Leyline
-  computes it from the initiator and every URL in the redirect chain, schemes
+  computes it from the sending page and every URL in the redirect chain, schemes
   included, so `http://` to `https://` on one host is cross-site. The
-  initiator is the request's `Referer`; without one, the session's `Referer`
-  when it is an absolute URL; otherwise the first URL. A preset or header
+  sending page is the request's `Referer`; without one, the session's `Referer`
+  when it is an absolute URL; otherwise the first URL. A request kind or header
   that sets `sec-fetch-site` sets it for cookies too.
 - A cross-site request sends no `Strict` cookie, and sends `Lax` cookies only
   on a top-level navigation (`sec-fetch-dest: document`, or none) with `GET`
@@ -117,89 +116,59 @@ The jar follows Chrome:
   attribute whose value passes 1024 octets is ignored, so an oversized
   `Path` falls back to the default path, which comes from the request URL
   and has no cap. A cookie whose stored domain passes 1024 octets is
-  refused. `extend_from` and loading a saved jar apply the same limits
+  refused. `merge` and loading a saved jar apply the same limits
   and skip a cookie that fails them.
 - The limits are 180 cookies per exact domain and 3300 overall. Crossing a
   limit evicts the least recently accessed entries, 30 per domain or 300
   overall.
-- An expired cookie stays in memory but is never sent. `get_cookie` skips
-  it; `all_cookies()` and `snapshot()` include it.
+- An expired cookie stays in memory but is never sent. `get` skips
+  it; `all()` and `snapshot()` include it.
 
 Domain scoping uses the Mozilla Public Suffix List, compiled into the crate.
 A cookie with `Domain=example.co.uk` reaches `shop.example.co.uk`; a host-only
 cookie set by `www.example.co.uk` reaches that host only. A `Set-Cookie` with
 `Domain=co.uk`, or with a domain that has no dot, is refused.
 
-## Save the jar to a file
+## Save cookies between runs
 
-`Jar` and `Cookie` implement `Serialize` and `Deserialize`, with times as
-unix milliseconds. `Jar::save_to(path)` writes the jar as JSON and
-`Jar::load_from(path)` reads it back. The write is atomic: a temporary file,
-synced, renamed over `path`, and the directory synced. On Unix the file has
-mode `0600`; on Windows it takes the default ACLs of its directory.
-
-The file is a versioned object, `{ "version": 1, "cookies": [..] }`.
-`load_from` refuses a file with another version, or with no version, with
-`Kind::Json`.
-
-- Saving writes every cookie that has not expired, session cookies included,
-  as a browser that restores its last session does.
-- Loading skips expired cookies and cookies past the size limits, keeps the newest of two cookies with the
-  same name, path, and domain, applies the 180 and 3300 limits, and cuts a
-  stored expiry to at most 400 days after the load.
-- Each cookie keeps its last-access time, so eviction order survives a
-  restart. A jar saved without that field loads with the load time.
-
-`Jar::autosave(path, interval)` starts one writer task and returns a
-`JarAutosave` handle. It saves at most once per `interval` after a change.
-It panics outside a Tokio runtime.
-
-| Event | What the writer does |
-| --- | --- |
-| A cookie changes | Saves when `interval` has passed since the first unsaved change, so a burst of `Set-Cookie` headers gives one write. Later changes do not move the save |
-| `flush().await` | Saves now and returns the result |
-| `shutdown().await` | Saves, stops the task, and returns the result |
-| The handle is dropped | Saves once more in the background. The runtime must still run |
-| The runtime shuts down | The writer task saves unsaved changes as it stops |
+`session.save(path)` writes one file that holds the jar with the browser, platform, proxy, languages, and connection state, so a site that ties a login to more than the cookies sees the same client after a restart. `Session::load(path)?.build()?` brings the session back, and `session.autosave(path, every)` saves it as it changes. See [Accounts](accounts.md).
 
 ```rust,no_run
 use std::time::Duration;
 
-use leyline::cookie::Jar;
+use leyline::Session;
 
 # async fn run() -> leyline::Result<()> {
-let jar = if std::path::Path::new("cookies.json").exists() {
-    Jar::load_from("cookies.json")?
-} else {
-    Jar::new()
+let session = match Session::load("session.json") {
+    Ok(builder) => builder.build()?,
+    Err(_) => Session::from(leyline::Browser::default()),
 };
-let session = leyline::Session::builder()
-    .browser(leyline::Browser::default())
-    .cookie_jar(jar)
-    .build()?;
-let saver = session.cookies().autosave("cookies.json", Duration::from_secs(2));
+session.autosave("session.json", Duration::from_secs(2));
 
-session.get("https://shop.example/account").await?;
+session.get("https://shop.example/account").send().await?;
 
-saver.shutdown().await?;
+session.shutdown();
 # Ok(())
 # }
 ```
 
-Call `shutdown().await` before the program exits, so the last save is not
-lost.
+`Jar` and `Cookie` implement `Serialize` and `Deserialize`, with times as
+unix milliseconds, for a store of your own.
 
-## Keep a logged-in device between runs
-
-A site can tie a login to the browser, platform, proxy, and languages as well
-as the cookies. `Device` saves all of them with the jar, and
-`Device::autosave` replaces `Jar::autosave`. See [Accounts](accounts.md).
+- Saving writes every cookie that has not expired, session cookies included,
+  as a browser that restores its last session does.
+- Loading skips expired cookies and cookies past the size limits, keeps the
+  newest of two cookies with the same name, path, and domain, applies the 180
+  and 3300 limits, and cuts a stored expiry to at most 400 days after the
+  load.
+- Each cookie keeps its last-access time, so eviction order survives a
+  restart. A jar saved without that field loads with the load time.
 
 ## Save the connection state
 
 TLS session tickets, `Alt-Svc` entries, and the HSTS store live in
-`SessionState`, beside the jar. See
-[Accounts](accounts.md#keep-the-connection-state).
+the same saved file as the jar. See
+[Accounts](accounts.md#the-connection-state).
 
 ## Next
 

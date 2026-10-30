@@ -32,7 +32,7 @@ mod stream_map;
 
 pub use self::bootstrap::start;
 pub use protocol::Head;
-pub(crate) use protocol::{DriverCommand, DriverRequestBody, checked_window_add};
+pub(crate) use protocol::{DriverCommand, checked_window_add};
 
 const COMMAND_CHANNEL_CAPACITY: usize = 1024;
 
@@ -45,27 +45,13 @@ pub(super) const STREAM_RESP_BODY_CAPACITY: usize = 32;
 #[doc(hidden)]
 #[derive(Debug)]
 pub struct PeerSettingsSnapshot {
-    max_concurrent_streams: std::sync::atomic::AtomicU32,
-    has_max_streams: std::sync::atomic::AtomicBool,
     enable_connect_protocol: std::sync::atomic::AtomicBool,
 }
 
 impl PeerSettingsSnapshot {
     fn new() -> Self {
         Self {
-            max_concurrent_streams: std::sync::atomic::AtomicU32::new(0),
-            has_max_streams: std::sync::atomic::AtomicBool::new(false),
             enable_connect_protocol: std::sync::atomic::AtomicBool::new(false),
-        }
-    }
-
-    fn set_max_concurrent_streams(&self, value: Option<u32>) {
-        match value {
-            Some(v) => {
-                self.max_concurrent_streams.store(v, Ordering::Relaxed);
-                self.has_max_streams.store(true, Ordering::Relaxed);
-            }
-            None => self.has_max_streams.store(false, Ordering::Relaxed),
         }
     }
 
@@ -171,6 +157,7 @@ struct StreamActor {
     response_tx: Option<ResponseSink>,
     status: u16,
     got_headers: bool,
+    informational: usize,
     resp_headers: Vec<(HeaderStr, HeaderStr)>,
     body: Vec<u8>,
     trailers: Option<Vec<(HeaderStr, HeaderStr)>>,
@@ -195,6 +182,7 @@ impl StreamActor {
             response_tx: Some(sink),
             status: 0,
             got_headers: false,
+            informational: 0,
             resp_headers: Vec::new(),
             body: Vec::new(),
             trailers: None,

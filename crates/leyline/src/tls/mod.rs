@@ -17,9 +17,10 @@ pub(crate) mod trust;
 mod windows_trust;
 
 pub(crate) use error::TlsError;
-pub use happy_eyeballs::HappyEyeballsConfig;
-pub use resolver::{ResolveFuture, Resolver, SystemResolver};
-pub(crate) use trust::TlsTrustConfig;
+pub(crate) use happy_eyeballs::HappyEyeballs;
+pub use resolver::Resolver;
+pub(crate) use resolver::{ResolveFuture, SystemResolver};
+pub(crate) use trust::Tls;
 
 #[cfg(feature = "bench-internals")]
 #[doc(hidden)]
@@ -72,63 +73,5 @@ impl TlsContext {
     #[cfg(leyline_unstable_bssl)]
     pub fn into_inner(self) -> leyline_bssl::ssl::SslContextBuilder {
         self.0
-    }
-}
-
-pub(crate) trait TlsHandshake {
-    fn do_tls_handshake(
-        &self,
-        tcp_stream: tokio::net::TcpStream,
-        host: &str,
-        session_key: &str,
-        include_alps: bool,
-    ) -> impl std::future::Future<Output = Result<TlsStream, TlsError>> + Send;
-
-    fn do_tls_handshake_nested(
-        &self,
-        inner: TlsIo,
-        host: &str,
-        session_key: &str,
-        include_alps: bool,
-    ) -> impl std::future::Future<Output = Result<TlsStream, TlsError>> + Send;
-
-    fn has_origin_tls_identity(&self) -> bool;
-
-    fn dial_tcp(
-        &self,
-        host: &str,
-        port: u16,
-    ) -> impl std::future::Future<Output = Result<tokio::net::TcpStream, TlsError>> + Send;
-}
-
-impl TlsHandshake for FingerprintConnector {
-    async fn do_tls_handshake(
-        &self,
-        tcp_stream: tokio::net::TcpStream,
-        host: &str,
-        session_key: &str,
-        include_alps: bool,
-    ) -> Result<TlsStream, TlsError> {
-        self.tls_handshake(tcp_stream, host, session_key, include_alps)
-            .await
-    }
-
-    async fn do_tls_handshake_nested(
-        &self,
-        inner: TlsIo,
-        host: &str,
-        session_key: &str,
-        include_alps: bool,
-    ) -> Result<TlsStream, TlsError> {
-        self.tls_handshake_nested(inner, host, session_key, include_alps)
-            .await
-    }
-
-    fn has_origin_tls_identity(&self) -> bool {
-        FingerprintConnector::has_origin_tls_identity(self)
-    }
-
-    async fn dial_tcp(&self, host: &str, port: u16) -> Result<tokio::net::TcpStream, TlsError> {
-        FingerprintConnector::dial_tcp(self, host, port).await
     }
 }

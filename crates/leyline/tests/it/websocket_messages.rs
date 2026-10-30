@@ -11,18 +11,18 @@ use std::sync::{Arc, Mutex};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use futures_util::{SinkExt, StreamExt};
-use leyline::{CloseFrame, ProtocolPolicy, Session, TlsTrustConfig, WsConnection, WsMessage};
+use leyline::{Message, Protocol, Session, Tls, WebSocket};
 use leyline_bssl::hash::{MessageDigest, hash};
 use leyline_bssl_tokio::SslStream;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio_tungstenite::WebSocketStream;
-use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::Message as Wire;
 use tokio_tungstenite::tungstenite::protocol::Role;
 
 const GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
-type Seen = Arc<Mutex<Vec<Message>>>;
+type Seen = Arc<Mutex<Vec<Wire>>>;
 
 async fn read_key(stream: &mut SslStream<TcpStream>) -> Option<String> {
     let mut head = Vec::new();
@@ -55,14 +55,14 @@ async fn echo(mut stream: SslStream<TcpStream>, seen: Seen) {
     while let Some(Ok(message)) = socket.next().await {
         seen.lock().unwrap().push(message.clone());
         match message {
-            Message::Text(_) | Message::Binary(_) => socket.send(message).await.unwrap(),
-            Message::Close(_) => break,
+            Wire::Text(_) | Wire::Binary(_) => socket.send(message).await.unwrap(),
+            Wire::Close(_) => break,
             _ => {}
         }
     }
 }
 
-async fn connect(seen: Seen) -> WsConnection {
+async fn connect(seen: Seen) -> WebSocket {
     let (cert, key) = tls_support::self_signed();
     let der = cert.to_der().unwrap();
     let port = tls_support::tls_server(cert, key, Arc::new(AtomicUsize::new(0)), move |stream| {
@@ -70,17 +70,12 @@ async fn connect(seen: Seen) -> WsConnection {
     })
     .await;
     Session::builder()
-        .protocol(ProtocolPolicy::Http1)
-        .tls_trust(
-            TlsTrustConfig::new()
-                .env_roots(false)
-                .system_roots(false)
-                .add_ca_der(der),
-        )
+        .protocol(Protocol::Http1)
+        .tls(Tls::new().env_roots(false).system_roots(false).ca_der(der))
         .build()
         .unwrap()
-        .websocket(format!("wss://127.0.0.1:{port}/"))
-        .connect()
+        .get(format!("wss://127.0.0.1:{port}/"))
+        .websocket()
         .await
         .unwrap()
 }
@@ -90,44 +85,46 @@ async fn text_and_binary_frames_round_trip_and_close_reaches_the_server() {
     let seen = Seen::default();
     let mut socket = connect(Arc::clone(&seen)).await;
 
-    socket.send(WsMessage::Text("hello".into())).await.unwrap();
+    socket.send(Message::Text("hello".into())).await.unwrap();
     socket
-        .send(WsMessage::Binary(vec![0, 1, 254, 255]))
+        .send(Message::Binary(vec![0, 1, 254, 255]))
         .await
         .unwrap();
     assert_eq!(
         socket.recv().await.unwrap(),
-        Some(WsMessage::Text("hello".into()))
+        Some(Message::Text("hello".into()))
     );
     assert_eq!(
         socket.recv().await.unwrap(),
-        Some(WsMessage::Binary(vec![0, 1, 254, 255]))
+        Some(Message::Binary(vec![0, 1, 254, 255]))
     );
     socket.close().await.unwrap();
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let seen = seen.lock().unwrap().clone();
-    assert_eq!(seen[0], Message::Text("hello".into()));
-    assert_eq!(seen[1], Message::Binary(vec![0, 1, 254, 255].into()));
-    assert!(matches!(seen[2], Message::Close(_)), "{seen:?}");
+    assert_eq!(seen[0], Wire::Text("hello".into()));
+    assert_eq!(seen[1], Wire::Binary(vec![0, 1, 254, 255].into()));
+    assert!(matches!(seen[2], Wire::Close(_)), "{seen:?}");
 }
 
 #[tokio::test]
 async fn a_split_socket_sends_on_the_sink_and_reads_on_the_stream() {
     let seen = Seen::default();
-    let (mut sink, mut stream) = connect(Arc::clone(&seen)).await.split();
+    let (sink, stream) = connect(Arc::clone(&seen)).await.split();
+    let mut sink = std::pin::pin!(sink);
+    let mut stream = std::pin::pin!(stream);
 
-    sink.send(WsMessage::Text("split".into())).await.unwrap();
+    sink.send(Message::Text("split".into())).await.unwrap();
     assert_eq!(
-        stream.recv().await.unwrap(),
-        Some(WsMessage::Text("split".into()))
+        stream.next().await.transpose().unwrap(),
+        Some(Message::Text("split".into()))
     );
-    sink.close().await.unwrap();
+    sink.send(Message::Close(None)).await.unwrap();
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let seen = seen.lock().unwrap().clone();
-    assert_eq!(seen[0], Message::Text("split".into()));
-    assert!(matches!(seen.last(), Some(Message::Close(_))), "{seen:?}");
+    assert_eq!(seen[0], Wire::Text("split".into()));
+    assert!(matches!(seen.last(), Some(Wire::Close(_))), "{seen:?}");
 }
 
 #[tokio::test]
@@ -136,13 +133,13 @@ async fn a_close_frame_carries_its_code_and_reason_to_the_server() {
     let mut socket = connect(Arc::clone(&seen)).await;
 
     socket
-        .send(WsMessage::Close(Some(CloseFrame::new(4001, "done"))))
+        .send(Message::Close(Some((4001, "done".into()))))
         .await
         .unwrap();
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     let seen = seen.lock().unwrap().clone();
-    let Some(Message::Close(Some(frame))) = seen.last() else {
+    let Some(Wire::Close(Some(frame))) = seen.last() else {
         panic!("no close frame: {seen:?}");
     };
     assert_eq!(u16::from(frame.code), 4001);

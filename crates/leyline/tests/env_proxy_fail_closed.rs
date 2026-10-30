@@ -9,6 +9,10 @@ async fn an_invalid_environment_proxy_fails_closed() {
     }
     let err = Session::builder().build().unwrap_err();
     assert_eq!(err.kind(), Kind::Config, "{err:?}");
-    let err = Session::new().get("http://127.0.0.1:9/").await.unwrap_err();
+    let err = Session::new()
+        .get("http://127.0.0.1:9/")
+        .send()
+        .await
+        .unwrap_err();
     assert_eq!(err.kind(), Kind::Proxy, "{err:?}");
 }

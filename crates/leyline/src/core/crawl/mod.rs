@@ -16,15 +16,16 @@ use url::Url;
 use fetch::{Fetched, fetch};
 pub use frontier::Scope;
 use frontier::{Frontier, Queued, page_key, same_site};
-pub use page::{CrawlPage, CrawlStats, SkipReason};
+use page::CrawlStats;
+pub use page::{Page, SkipReason};
 use sitemap::SitemapRead;
 use sites::{Site, SitemapFile};
 use visit::Held;
 
 use crate::core::config::{HostLimits, Origin};
-use crate::core::error::{Error, Kind, Result};
+use crate::core::error::{Cause, Error, Result};
 use crate::core::into_url::IntoUrl;
-use crate::core::retry::RetryPolicy;
+use crate::core::retry::Retry;
 use crate::core::robots::{Purpose, Robots};
 use crate::core::session::Session;
 
@@ -57,13 +58,17 @@ enum Event {
     },
 }
 
+/// Which site signals a crawl obeys.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Respect {
+    /// Obeys robots.txt rules and noindex directives.
     Robots,
+    /// Obeys robots.txt and also skips pages that refuse AI training use.
     AiTraining,
 }
 
+#[doc = include_str!("../../../docs/crawl.md")]
 #[must_use = "a crawl is lazy: nothing happens until `.next()` is awaited"]
 pub struct Crawl {
     session: Session,
@@ -80,12 +85,12 @@ pub struct Crawl {
     sitemap_queue: VecDeque<SitemapFile>,
     sitemaps_in_flight: usize,
     trusted: Option<Url>,
-    page_retry: RetryPolicy,
+    page_retry: Retry,
     clock: clock::Clock,
     holding: usize,
     tasks: FuturesUnordered<Task>,
     pages_in_flight: usize,
-    ready: VecDeque<Result<CrawlPage>>,
+    ready: VecDeque<Result<Page>>,
     kept: HashSet<String>,
     texts: HashSet<u64>,
     held: HashMap<String, Vec<Held>>,
@@ -106,6 +111,7 @@ fn inherited(session: &Session) -> HostLimits {
 }
 
 impl Session {
+    /// Starts a lazy crawl from `seed`, resolved against the session's base URL, that respects robots.txt by default.
     pub fn crawl(&self, seed: impl IntoUrl) -> Crawl {
         Crawl {
             session: self.clone(),
@@ -122,7 +128,7 @@ impl Session {
             sitemap_queue: VecDeque::new(),
             sitemaps_in_flight: 0,
             trusted: None,
-            page_retry: RetryPolicy::none(),
+            page_retry: Retry::new(0),
             clock: clock::Clock::default(),
             holding: 0,
             tasks: FuturesUnordered::new(),
@@ -139,37 +145,56 @@ impl Session {
 }
 
 impl Crawl {
-    pub fn respect(mut self, respect: Respect) -> Self {
-        self.respect = Some(respect);
+    /// Sets which site signals the crawl obeys; `None` ignores them all.
+    pub fn respect(mut self, respect: impl Into<Option<Respect>>) -> Self {
+        self.respect = respect.into();
         self
     }
 
-    pub fn ignore_robots(mut self) -> Self {
-        self.respect = None;
-        self
-    }
-
+    /// Sets which URLs the crawl follows, `Scope::Host` by default.
     pub fn scope(mut self, scope: Scope) -> Self {
         self.frontier.scope = scope;
         self
     }
 
+    /// Stops the crawl after it yields `pages` pages; unlimited by default.
     pub fn limit(mut self, pages: usize) -> Self {
         self.max_pages = Some(pages);
         self
     }
 
+    /// Replaces the session's host limits for this crawl.
     pub fn host_limits(mut self, limits: HostLimits) -> Self {
         self.limits = Some(limits);
         self
     }
 
+    /// Returns how many page requests the crawl has sent.
     #[must_use]
-    pub fn stats(&self) -> &CrawlStats {
-        &self.stats
+    pub fn requests(&self) -> u64 {
+        self.stats.requests()
     }
 
-    pub async fn next(&mut self) -> Option<Result<CrawlPage>> {
+    /// Returns how many pages the crawl has yielded.
+    #[must_use]
+    pub fn pages(&self) -> u64 {
+        self.stats.pages()
+    }
+
+    /// Returns how many fetches the crawl has failed.
+    #[must_use]
+    pub fn errors(&self) -> u64 {
+        self.stats.errors()
+    }
+
+    /// Returns how many URLs the crawl has skipped for `reason`.
+    #[must_use]
+    pub fn skipped(&self, reason: SkipReason) -> u64 {
+        self.stats.skipped(reason)
+    }
+
+    /// Returns the next crawled page or error, or `None` when the crawl is done.
+    pub async fn next(&mut self) -> Option<Result<Page>> {
         std::future::poll_fn(|cx| Pin::new(&mut *self).poll_next(cx)).await
     }
 
@@ -187,7 +212,7 @@ impl Crawl {
         let pace = match self.limits.take() {
             Some(limits) => match limits.config_error() {
                 Some(message) => {
-                    let error = Error::new(Kind::Config).with_message(message);
+                    let error = Error::new(Cause::Config).with_message(message);
                     self.ready.push_back(Err(error));
                     self.seeds.clear();
                     return;
@@ -205,7 +230,7 @@ impl Crawl {
             .session
             .default_retry()
             .clone()
-            .or(RetryPolicy::transient().max_retries(PAGE_RETRIES));
+            .or(Retry::new(PAGE_RETRIES));
         self.clock.stopped = Some(Box::pin(self.session.shut_down_signal()));
         self.pace = pace;
         for seed in std::mem::take(&mut self.seeds) {

@@ -7,11 +7,10 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 documentation = "https://docs.rs/leyline-http"
-readme = "README.md"
+readme = "../../README.md"
 exclude = ["profiles/captures/"]
 
 [lib]
@@ -28,8 +27,8 @@ allowed_external_types = [
     "http::*",
     "bytes::*",
     "serde_core::*",
-    "serde_json::*",
     "futures_core::*",
+    "futures_sink::Sink",
     "url::*",
     "tokio::io::async_write::AsyncWrite",
     "tower_service::*",
@@ -38,6 +37,7 @@ allowed_external_types = [
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]
 features = ["full"]
+rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 default = [
@@ -73,26 +73,12 @@ tower = ["dep:tower-service"]
 test-util = []
 # HTML form extraction (leyline::html) and Tab::submit_form.
 html = ["multipart"]
-full = [
-    "compression-gzip",
-    "compression-brotli",
-    "compression-deflate",
-    "compression-zstd",
-    "multipart",
-    "websocket",
-    "http3",
-    "tower",
-    "socks",
-    "charset",
-    "html",
-]
+full = ["default", "tower", "socks"]
 
 [dependencies]
 # External deps absorbed from sub-crates
 # -- from leyline-quiche (external BSD-2 fork, stays as path dep)
-leyline-quiche = { path = "../leyline-quiche", version = "=0.1.6", default-features = false, optional = true, features = [
-    "boringssl-bssl-crate",
-] }
+leyline-quiche = { workspace = true, optional = true }
 
 # -- BoringSSL (leyline-owned stack). leyline talks only to the safe wrapper;
 # the FFI crate (leyline-bssl-sys) is pulled transitively by leyline-bssl.
@@ -134,10 +120,10 @@ encoding_rs = { version = "0.8", optional = true }
 # registrable-domain + public-suffix checks. Non-optional: the cookie module
 # compiles unconditionally and the list cannot be hand-rolled.
 psl = "2.1"
-futures-util = "0.3"
+futures-util = { workspace = true }
 # Non-optional: h2::client::H2ConnectStream needs PollSender for
 # cancel-safe AsyncWrite backpressure (waker survives across polls).
-tokio-util = { version = "0.7.5", features = ["io"] }
+tokio-util = { workspace = true }
 lru = "0.18"
 rand = "0.9"
 libc = "0.2.185"
@@ -145,9 +131,9 @@ tower-service = { version = "0.3", optional = true }
 
 # -- compression (optional: each codec is pulled in by its own feature, for
 #    both HTTP body compression and RFC 8879 certificate decompression)
-flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"], optional = true }
-brotli = { version = "8.0.2", optional = true }
-zstd = { version = "0.13", optional = true }
+flate2 = { workspace = true, optional = true }
+brotli = { workspace = true, optional = true }
+zstd = { workspace = true, optional = true }
 
 # Windows: read the platform trust store via Win32 crypto API.
 [target.'cfg(windows)'.dependencies]
@@ -166,7 +152,7 @@ name = "multipart"
 required-features = ["multipart"]
 
 [[example]]
-name = "device"
+name = "accounts"
 required-features = ["html"]
 
 [[example]]
@@ -181,6 +167,10 @@ path = "tests/it/main.rs"
 name = "tls_trust_scope"
 required-features = ["bench-internals"]
 
+[[test]]
+name = "tls_behaviour"
+required-features = ["bench-internals"]
+
 [build-dependencies]
 serde = { workspace = true }
 toml = { workspace = true }
@@ -188,17 +178,14 @@ toml = { workspace = true }
 [dev-dependencies]
 leyline-http = { path = ".", features = ["test-util"] }
 bytes = { workspace = true }
-leyline-quiche = { path = "../leyline-quiche", version = "=0.1.6", default-features = false, features = [
-    "boringssl-bssl-crate",
-    "internal",
-] }
+leyline-quiche = { workspace = true, features = ["internal"] }
 # In-test cert generation + a localhost TLS acceptor for the
 # pinning hostname-verification integration test.
 leyline-bssl = { workspace = true }
 leyline-bssl-tokio = { workspace = true }
 tokio = { workspace = true, features = ["full", "test-util"] }
-tokio-util = { version = "0.7.5", features = ["io"] }
-futures-util = "0.3"
+tokio-util = { workspace = true }
+futures-util = { workspace = true }
 serde_json = { workspace = true }
 url = { workspace = true }
 base64 = { workspace = true }
@@ -206,9 +193,9 @@ base64 = { workspace = true }
 # live H3 streaming test, which decodes the raw streamed body per its
 # content-encoding. zstd is a normal dep of leyline but integration tests only
 # see dev-deps, so it is restated here.
-flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"] }
-brotli = "8.0.2"
-zstd = "0.13"
+flate2 = { workspace = true }
+brotli = { workspace = true }
+zstd = { workspace = true }
 
 [package.metadata.cargo-machete]
 # imported as `md5` (crate `md-5`); used by the digest-auth MD5 algorithm

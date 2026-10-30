@@ -1,10 +1,10 @@
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::h2::connection::{HeaderPair, encode_request_pseudos};
 use crate::h2::error::H2Error;
+use crate::h2::hpack::ENTRY_OVERHEAD as HPACK_ENTRY_OVERHEAD;
 
-const HPACK_ENTRY_OVERHEAD: usize = 32;
 const OUTBOUND_HEADER_LIST: usize = crate::core::DEFAULT_MAX_HEADER_LIST_BYTES;
 
 use super::*;
@@ -49,11 +49,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         let fragment = encode_request_pseudos(&mut self.encoder, pseudo, headers);
         let max_frame = self.peer_settings.max_frame_size as usize;
         let priority = if with_priority {
-            self.config.default_priority.map(|p| StreamDependency {
-                exclusive: p.exclusive,
-                dependency_id: p.stream_dependency,
-                weight: p.weight,
-            })
+            self.config.default_priority
         } else {
             None
         };
@@ -61,7 +57,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
 
         if fragment.len() + prio_overhead <= max_frame {
             self.writer
-                .write_headers(&HeadersFrame {
+                .write_frame(&HeadersFrame {
                     stream_id,
                     end_stream,
                     end_headers: true,
@@ -74,7 +70,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             let first_len = first_cap.min(fragment.len());
             let first = &fragment[..first_len];
             self.writer
-                .write_headers(&HeadersFrame {
+                .write_frame(&HeadersFrame {
                     stream_id,
                     end_stream,
                     end_headers: false,
@@ -97,18 +93,13 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     ) -> Result<(), H2Error> {
         while offset < fragment.len() {
             let end = (offset + max_frame).min(fragment.len());
-            let is_last = end == fragment.len();
-            let chunk = &fragment[offset..end];
-            let mut buf = BytesMut::with_capacity(9 + chunk.len());
-            let header = crate::h2::frame::FrameHeader {
-                length: chunk.len() as u32,
-                frame_type: 0x9,
-                flags: if is_last { 0x4 } else { 0 },
-                stream_id,
-            };
-            header.encode(&mut buf);
-            buf.extend_from_slice(chunk);
-            self.writer.write_raw(&buf).await?;
+            self.writer
+                .write_frame(&ContinuationFrame {
+                    stream_id,
+                    end_headers: end == fragment.len(),
+                    fragment: &fragment[offset..end],
+                })
+                .await?;
             offset = end;
         }
         Ok(())

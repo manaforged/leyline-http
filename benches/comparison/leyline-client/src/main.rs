@@ -8,8 +8,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
-use leyline::trace::{Connect, Dns, Head, Tls, Trace};
-use leyline::{Browser, ProtocolPolicy, Session, TlsTrustConfig};
+use leyline::trace::{Event, Trace};
+use leyline::{Browser, Protocol, Session, Tls};
 
 fn build(ca: Option<&[u8]>, stages: Option<Arc<Stages>>) -> Session {
     let browser = match std::env::var("LEYLINE_CHROME").as_deref() {
@@ -17,16 +17,11 @@ fn build(ca: Option<&[u8]>, stages: Option<Arc<Stages>>) -> Session {
         Ok("149") => Some(Browser::Chrome149),
         _ => Some(Browser::Chrome152),
     };
-    let mut b = Session::builder().protocol(ProtocolPolicy::Http2);
+    let mut b = Session::builder().protocol(Protocol::Http2);
     if let Some(ca) = ca {
-        b = b.tls_trust(
-            TlsTrustConfig::new()
-                .system_roots(false)
-                .env_roots(false)
-                .add_ca_der(ca),
-        );
+        b = b.tls(Tls::new().system_roots(false).env_roots(false).ca_der(ca));
     } else {
-        b = b.tls_trust(TlsTrustConfig::new().danger_accept_invalid_certs(true));
+        b = b.tls(Tls::new().danger_accept_invalid_certs(true));
     }
     if let Some(browser) = browser {
         b = b.browser(browser);
@@ -68,30 +63,16 @@ struct Stages {
 }
 
 impl Trace for Stages {
-    fn dns(&self, ev: &Dns<'_>) {
-        self.dns.fetch_add(
-            u64::try_from(ev.elapsed.as_nanos()).expect("duration"),
-            Ordering::Relaxed,
-        );
-    }
-
-    fn connect(&self, ev: &Connect<'_>) {
-        self.tcp.fetch_add(
-            u64::try_from(ev.elapsed.as_nanos()).expect("duration"),
-            Ordering::Relaxed,
-        );
-    }
-
-    fn tls(&self, ev: &Tls<'_>) {
-        self.tls.fetch_add(
-            u64::try_from(ev.elapsed.as_nanos()).expect("duration"),
-            Ordering::Relaxed,
-        );
-    }
-
-    fn head(&self, ev: &Head<'_>) {
-        self.head.fetch_add(
-            u64::try_from(ev.elapsed.as_nanos()).expect("duration"),
+    fn event(&self, event: &Event<'_>) {
+        let (stage, elapsed) = match event {
+            Event::Dns { elapsed, .. } => (&self.dns, elapsed),
+            Event::Connect { elapsed, .. } => (&self.tcp, elapsed),
+            Event::Tls { elapsed, .. } => (&self.tls, elapsed),
+            Event::Head { elapsed, .. } => (&self.head, elapsed),
+            _ => return,
+        };
+        stage.fetch_add(
+            u64::try_from(elapsed.as_nanos()).expect("duration"),
             Ordering::Relaxed,
         );
     }
@@ -127,7 +108,7 @@ async fn main() {
             let started = Instant::now();
             let session = build(ca.as_deref(), Some(Arc::clone(&stages)));
             build_ns += started.elapsed().as_nanos();
-            let response = session.get(url.as_str()).await.expect("trace request");
+            let response = session.get(url.as_str()).send().await.expect("trace request");
             assert_eq!(response.status().as_u16(), 200);
             assert!(
                 response.bytes().await.expect("trace body") == expected.as_ref(),
@@ -149,6 +130,7 @@ async fn main() {
     if args.get(2).map(|s| s.as_str()) == Some("print") {
         let resp = build(ca.as_deref(), None)
             .get(url.as_str())
+            .send()
             .await
             .expect("print req");
         println!("{}", resp.text().await.expect("body"));
@@ -158,13 +140,14 @@ async fn main() {
     if args.get(2).map(|s| s.as_str()) == Some("equiv") {
         let resp = build(ca.as_deref(), None)
             .get(url.as_str())
+            .send()
             .await
             .expect("equiv req");
         let status = resp.status().as_u16();
         let body = resp.bytes().await.expect("body");
         println!(
             "EQUIV leyline status={status} fnv={:016x} len={}",
-            fnv1a(body),
+            fnv1a(&body),
             body.len()
         );
         return;
@@ -176,7 +159,7 @@ async fn main() {
         let concurrency: usize = args.get(5).and_then(|s| s.parse().ok()).expect("concurrency");
         assert!(rate > 0 && seconds > 0 && concurrency > 0);
         let session = build(ca.as_deref(), None);
-        let r = session.get(url.as_str()).await.expect("paced warmup");
+        let r = session.get(url.as_str()).send().await.expect("paced warmup");
         assert_eq!(r.status().as_u16(), 200);
         assert!(r.bytes().await.expect("paced warmup body") == expected.as_ref(), "response body mismatch");
         let (tx, rx) = tokio::sync::mpsc::channel::<tokio::time::Instant>(concurrency);
@@ -199,7 +182,7 @@ async fn main() {
                         }
                     };
                     let actual = tokio::time::Instant::now();
-                    let resp = s.get(u.as_str()).await.expect("paced req");
+                    let resp = s.get(u.as_str()).send().await.expect("paced req");
                     assert_eq!(resp.status().as_u16(), 200);
                     assert!(resp.bytes().await.expect("paced body") == expected.as_ref(), "response body mismatch");
                     let done = tokio::time::Instant::now();
@@ -254,14 +237,14 @@ async fn main() {
     let connections: usize = env::var("CMP_CONNECTIONS").ok().and_then(|v| v.parse().ok()).unwrap_or(1).max(1);
     let sessions: Vec<Session> = (0..connections).map(|_| build(ca.as_deref(), None)).collect();
     let session = sessions[0].clone();
-    let response = session.get(url.as_str()).await.expect("warmup");
+    let response = session.get(url.as_str()).send().await.expect("warmup");
     assert_eq!(response.status().as_u16(), 200);
     assert!(
         response.bytes().await.expect("warmup body") == expected.as_ref(),
         "response body mismatch"
     );
     for extra in sessions.iter().skip(1) {
-        let response = extra.get(url.as_str()).await.expect("connection warmup");
+        let response = extra.get(url.as_str()).send().await.expect("connection warmup");
         assert_eq!(response.status().as_u16(), 200);
         assert!(
             response.bytes().await.expect("connection warmup body") == expected.as_ref(),
@@ -273,7 +256,7 @@ async fn main() {
     let start = Instant::now();
     for _ in 0..warm_n {
         let t0 = Instant::now();
-        let resp = session.get(url.as_str()).await.expect("warm req");
+        let resp = session.get(url.as_str()).send().await.expect("warm req");
         assert_eq!(resp.status().as_u16(), 200);
         assert!(
             resp.bytes().await.expect("body") == expected.as_ref(),
@@ -302,7 +285,7 @@ async fn main() {
             let mut lat = Vec::with_capacity(per);
             for _ in 0..per {
                 let t0 = Instant::now();
-                let resp = s.get(u.as_str()).await.expect("conc req");
+                let resp = s.get(u.as_str()).send().await.expect("conc req");
                 assert_eq!(resp.status().as_u16(), 200);
                 assert!(
                     resp.bytes().await.expect("body") == expected.as_ref(),
@@ -332,6 +315,7 @@ async fn main() {
     for _ in 0..cold_n {
         let resp = build(ca.as_deref(), None)
             .get(url.as_str())
+            .send()
             .await
             .expect("cold req");
         assert_eq!(resp.status().as_u16(), 200);

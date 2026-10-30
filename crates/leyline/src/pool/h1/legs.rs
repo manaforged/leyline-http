@@ -3,12 +3,11 @@ use std::time::Instant;
 
 use super::dial::{Dialed, H1Dial, open_new};
 use super::{H1Body, H1PooledError, H1Response, checkout_live_h1};
-use crate::ResponseTiming;
 use crate::h2::client::H2Client;
 use crate::pool::types::{Opened, PoolKey};
 use crate::pool::{H1Slot, Pool, TlsInfo};
 use crate::tls::FingerprintConnector;
-use crate::{Error, Kind};
+use crate::{Cause, Error};
 
 pub(crate) enum H1Outcome {
     Response(H1Response),
@@ -21,7 +20,7 @@ pub(crate) enum H1Outcome {
 impl H1Outcome {
     pub(crate) fn upgraded_error() -> H1PooledError {
         H1PooledError::NotResendable(
-            Error::new(Kind::Http2)
+            Error::new(Cause::Http2)
                 .with_message("the origin negotiated HTTP/2 on a new connection")
                 .with_alpn(String::from_utf8_lossy(crate::tls::alpn::H2)),
         )
@@ -67,7 +66,7 @@ pub(super) fn first_legs(
 }
 
 pub(super) enum Leg {
-    H1(H1Slot, TlsInfo, u32),
+    H1(Opened<H1Slot>),
     H2(Opened<H2Client>),
 }
 
@@ -79,12 +78,11 @@ pub(super) async fn fresh_leg(
     fresh: Option<Opened<H1Slot>>,
 ) -> Result<Leg, H1PooledError> {
     if let Some(opened) = fresh {
-        let connect_ms = opened.connect_ms.unwrap_or_default();
-        return Ok(Leg::H1(opened.conn, opened.tls, connect_ms));
+        return Ok(Leg::H1(opened));
     }
     let started = Instant::now();
     match open_new(pool, key, connector, dial).await? {
-        Dialed::H1(io, tls) => Ok(Leg::H1(H1Slot { io }, tls, ResponseTiming::millis(started))),
+        Dialed::H1(io, tls) => Ok(Leg::H1(Opened::fresh((H1Slot { io }, tls), started))),
         Dialed::H2(conn, tls) => Ok(Leg::H2(Opened::fresh((conn, tls), started))),
     }
 }

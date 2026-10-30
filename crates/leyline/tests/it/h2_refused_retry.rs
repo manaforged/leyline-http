@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use leyline::h2::frame::FrameType;
-use leyline::{RetryPolicy, Session, TlsTrustConfig};
+use leyline::{Retry, Session, Tls};
 use leyline_bssl_tokio::SslStream;
 use support::{
     read_frame, read_preface, write_data, write_response_headers, write_server_settings,
@@ -61,23 +61,14 @@ async fn retry_unsent_resends_a_refused_post() {
     })
     .await;
     let session = Session::builder()
-        .tls_trust(
-            TlsTrustConfig::new()
-                .env_roots(false)
-                .system_roots(false)
-                .add_ca_der(der),
-        )
-        .retry(
-            RetryPolicy::transient()
-                .initial_backoff(Duration::from_millis(1))
-                .jitter(false)
-                .retry_unsent(true),
-        )
+        .tls(Tls::new().env_roots(false).system_roots(false).ca_der(der))
+        .retry(Retry::new(3).backoff(Duration::from_millis(1), Duration::from_secs(1)))
         .build()
         .unwrap();
     let resp = session
         .post(format!("https://127.0.0.1:{port}/order"))
         .body("item=1")
+        .send()
         .await
         .unwrap();
     assert_eq!(resp.status().as_u16(), 200);

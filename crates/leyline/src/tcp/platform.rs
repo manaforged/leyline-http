@@ -3,17 +3,18 @@ use socket2::Socket;
 use crate::tcp::{TcpProfile, log_once};
 
 #[cfg(unix)]
-unsafe fn set_int_opt(
-    fd: libc::c_int,
+fn set_int_opt(
+    socket: &Socket,
     level: libc::c_int,
     opt: libc::c_int,
     val: libc::c_int,
     label: &'static str,
 ) {
-    // SAFETY: see the `# Safety` contract above — `fd` is a live socket and `&val` outlives the call. Edition 2024 requires the unsafe op to sit in an explicit `unsafe` block even inside an `unsafe fn`.
+    use std::os::unix::io::AsRawFd;
+    // SAFETY: `socket` is borrowed for the whole call, so its fd stays open, and `val` lives on this stack frame with its exact size passed as the option length.
     let ret = unsafe {
         libc::setsockopt(
-            fd,
+            socket.as_raw_fd(),
             level,
             opt,
             &val as *const _ as *const libc::c_void,
@@ -27,20 +28,14 @@ unsafe fn set_int_opt(
 
 #[cfg(target_os = "linux")]
 pub(super) fn apply_platform_options(socket: &Socket, profile: &TcpProfile, is_v6: bool) {
-    use std::os::unix::io::AsRawFd;
-    let fd = socket.as_raw_fd();
-
     if profile.mss > 0 {
-        // SAFETY: see module-level SAFETY; fd lives for the call.
-        unsafe {
-            set_int_opt(
-                fd,
-                libc::IPPROTO_TCP,
-                libc::TCP_MAXSEG,
-                profile.mss as libc::c_int,
-                "TCP_MAXSEG",
-            )
-        };
+        set_int_opt(
+            socket,
+            libc::IPPROTO_TCP,
+            libc::TCP_MAXSEG,
+            profile.mss as libc::c_int,
+            "TCP_MAXSEG",
+        );
     }
 
     if profile.df {
@@ -53,8 +48,7 @@ pub(super) fn apply_platform_options(socket: &Socket, profile: &TcpProfile, is_v
         } else {
             (libc::IPPROTO_IP, libc::IP_MTU_DISCOVER, "IP_MTU_DISCOVER")
         };
-        // SAFETY: see module-level SAFETY.
-        unsafe { set_int_opt(fd, level, opt, 2, label) };
+        set_int_opt(socket, level, opt, 2, label);
     }
 
     if profile.window_scale > 0 {
@@ -63,32 +57,25 @@ pub(super) fn apply_platform_options(socket: &Socket, profile: &TcpProfile, is_v
             .checked_shl(profile.window_scale)
             .unwrap_or(u32::MAX as u64)
             .min(i32::MAX as u64) as libc::c_int;
-        // SAFETY: see module-level SAFETY.
-        unsafe {
-            set_int_opt(
-                fd,
-                libc::IPPROTO_TCP,
-                TCP_WINDOW_CLAMP,
-                clamp,
-                "TCP_WINDOW_CLAMP",
-            )
-        };
+        set_int_opt(
+            socket,
+            libc::IPPROTO_TCP,
+            TCP_WINDOW_CLAMP,
+            clamp,
+            "TCP_WINDOW_CLAMP",
+        );
     }
 }
 
 #[cfg(target_os = "macos")]
 pub(super) fn apply_platform_options(socket: &Socket, profile: &TcpProfile, is_v6: bool) {
-    use std::os::unix::io::AsRawFd;
-    let fd = socket.as_raw_fd();
-
     if profile.df {
         let (level, opt, label) = if is_v6 {
             (libc::IPPROTO_IPV6, 62, "IPV6_DONTFRAG")
         } else {
             (libc::IPPROTO_IP, 28, "IP_DONTFRAG")
         };
-        // SAFETY: see module-level SAFETY.
-        unsafe { set_int_opt(fd, level, opt, 1, label) };
+        set_int_opt(socket, level, opt, 1, label);
     }
 }
 
