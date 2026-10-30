@@ -62,6 +62,6 @@ async fn to_builder_shares_the_pool_until_a_connection_setting_changes() {
     let fresh = separate.get(server.url("/separate")).send().await.unwrap();
     assert!(!fresh.reused());
 
-    parent.shutdown();
+    parent.shutdown().await;
     assert!(headed.is_shut_down() && separate.is_shut_down());
 }

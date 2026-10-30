@@ -5,7 +5,7 @@ use url::Url;
 
 use super::fetch::{CONTENT_USAGE, Loaded};
 use super::frontier::{Queued, page_key};
-use super::{ANY_AGENT, Crawl, MIN_PRINT_WORDS, NOFOLLOW, Page, SkipReason};
+use super::{Crawl, MIN_PRINT_WORDS, NOFOLLOW, Page, SkipReason};
 use crate::core::robots::{Purpose, header_uses};
 use crate::html::{self, Directives};
 
@@ -43,7 +43,7 @@ impl Crawl {
         let base = html::base(&html)
             .and_then(|href| url.join(&href).ok())
             .unwrap_or_else(|| url.clone());
-        let rules = Directives::read(&html, &headers, ANY_AGENT);
+        let rules = Directives::read(&html, &headers, &self.agent);
         let may_follow = self.respect.is_none() || rules.follow();
         if may_follow {
             self.follow(&base, &html, depth + 1);

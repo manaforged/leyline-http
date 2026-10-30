@@ -48,7 +48,7 @@ async fn shutdown_stops_requests_in_flight_and_new_ones() {
         async move { clone.get(url).send().await }
     });
     server.next_request().await.unwrap();
-    session.shutdown();
+    session.shutdown().await;
     let err = tokio::time::timeout(Duration::from_secs(1), pending)
         .await
         .unwrap()

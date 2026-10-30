@@ -297,3 +297,43 @@ async fn a_crawl_retries_a_robots_txt_that_fails_with_500() {
         .count();
     assert!(asked >= 2, "{asked}");
 }
+
+#[tokio::test]
+async fn a_crawl_obeys_the_robots_group_of_its_agent() {
+    let server = testing::Server::http(|request| match request.target.as_str() {
+        "/robots.txt" => testing::Response::new(200)
+            .body("User-agent: mybot\nDisallow: /private\n\nUser-agent: *\nAllow: /\n"),
+        "/" => html(r#"<a href="/private">P</a><a href="/public">Q</a>"#),
+        path => html(&format!("<p>{path}</p>")),
+    })
+    .await
+    .unwrap();
+    let mut crawl = Session::new()
+        .crawl(server.url("/"))
+        .agent("mybot/1.0 (+https://example.com/bot)")
+        .host_limits(leyline::HostLimits::new());
+    while let Some(page) = crawl.next().await {
+        page.unwrap();
+    }
+    let sent = page_targets(&server).await;
+    assert!(sent.contains("/public"), "{sent:?}");
+    assert!(!sent.contains("/private"), "{sent:?}");
+}
+
+#[tokio::test]
+async fn a_crawl_reads_a_page_larger_than_the_session_cap() {
+    let big = format!("<p>{}</p>", "x".repeat(2000));
+    let server = testing::Server::http(move |request| match request.target.as_str() {
+        "/robots.txt" => testing::Response::new(404),
+        _ => html(&big),
+    })
+    .await
+    .unwrap();
+    let session = Session::builder().max_body_size(1024).build().unwrap();
+    let mut crawl = session
+        .crawl(server.url("/"))
+        .max_body_size(4096)
+        .host_limits(leyline::HostLimits::new());
+    let page = crawl.next().await.unwrap().unwrap();
+    assert!(page.html().len() > 2000);
+}

@@ -59,13 +59,15 @@ println!("{} pages, {} errors", crawl.pages(), crawl.errors());
 | `respect(Respect)` or `respect(None)` | `Robots` | `Robots` obeys robots.txt `Disallow` and `Crawl-delay`, the page's `noindex` and `nofollow`, and `rel="nofollow"`. `AiTraining` does all of that and also obeys the site's AI-training opt-outs. `None` obeys no robots rules: no `Disallow`, `Crawl-delay`, `noindex`, or `nofollow` |
 | `scope(Scope)` | `Host` | `Host`: the seed's host. `Domain`: its registrable domain. `Prefix`: its host and directory; a last path segment with a dot and a letter after it is a file, so end a directory seed with a slash |
 | `limit(n)` | none | Stops after `n` kept pages |
+| `agent(name)` | `*` | The robots.txt group and meta robots name the crawl obeys. A full user agent works; its product token is matched. A site with no group for the name falls back to `*` |
+| `max_body_size(n)` | the session's | The largest page body the crawl reads, without a new session |
 | `host_limits(HostLimits)` | one in flight, one a second, and a 429/503 pause per host, wherever the session's own limits leave them unset | The crawl's pace per host. A value you pass replaces the crawl's defaults, so `HostLimits::new()` adds no limits. The session's own limits, which every crawl and request of the session share, still apply on top |
 
 Unless you call `respect(None)`, the crawl reads each site's robots.txt
 once, and again after 24 hours, obeys its rules, and reads its `Sitemap`
-lines. Robots groups are
-matched for the `*` agent. To read the group for a named crawler, call
-`Session::robots(url, agent)`. At most 16 requests are in flight across all
+lines. Robots groups and meta robots names are matched for the `*` agent
+unless `agent(name)` names the crawler; a site with no group for that name
+falls back to `*`. At most 16 requests are in flight across all
 hosts.
 
 For each URL, in order, the crawl:
@@ -122,7 +124,7 @@ A request that fails comes out of the stream as an `Err`, and the crawl goes
 on. `Crawl` counts as it goes: `requests()`, `pages()`, `errors()`, and
 `skipped(SkipReason)` for each reason above. `Page` has `url()`, the address after
 redirects, `depth()`, `status()`, `html()`, `text()` from `html::text`, and
-`into_html()`, which returns the body as an owned `String`. A page body is capped by the session's `max_body_size`, 100 MiB
+`into_html()`, which returns the body as an owned `String`. A page body is capped by the crawl's `max_body_size(n)`, else the session's, 100 MiB
 by default.
 
 `Session::shutdown()` ends the crawl: requests in flight fail with the
@@ -648,7 +650,7 @@ use futures_util::stream::{self, StreamExt};
 let stop = session.clone();
 tokio::spawn(async move {
     if tokio::signal::ctrl_c().await.is_ok() {
-        stop.shutdown();
+        stop.shutdown().await;
     }
 });
 

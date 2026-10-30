@@ -66,7 +66,7 @@ let session = Session::load("account/session.json")?
 | --- | --- |
 | A cookie changes | A save runs, at most once per `every` |
 | `every` passes and the connection state changed | A save runs, so new TLS tickets, `Alt-Svc`, and HSTS entries reach the file |
-| `session.shutdown()` | A last save runs and the writer stops. `shutdown` returns at once; the save completes even when the runtime stops right after |
+| `session.shutdown()` | A last save runs and the writer stops. `shutdown` cancels at once; `.await` it to wait until the save is on disk |
 | The runtime drops the task | The writer saves unsaved changes as it stops |
 
 Each save writes a temporary file, syncs it, and renames it, so a crash never leaves a half-written file. On Unix the file has mode `0600`; on Windows it takes the default ACLs of its directory. `autosave` panics outside a Tokio runtime.
@@ -80,7 +80,7 @@ let session = Session::load("account/session.json")?.build()?;
 session.autosave("account/session.json", Duration::from_secs(2));
 let tab = session.tab();
 tab.open("https://shop.example/account/orders").await?;
-session.shutdown();
+session.shutdown().await;
 # Ok(())
 # }
 ```

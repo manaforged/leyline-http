@@ -102,9 +102,28 @@ impl Session {
         }
     }
 
-    /// Shuts the session down so that pending and new requests fail.
-    pub fn shutdown(&self) {
+    /// Shuts the session down so that pending and new requests fail; await it to wait for the last autosave.
+    pub fn shutdown(&self) -> impl std::future::Future<Output = ()> + Send + 'static {
         self.inner.shutdown.cancel();
+        let writers = std::mem::take(&mut *self.writers());
+        async move {
+            for writer in writers {
+                drop(writer.await);
+            }
+        }
+    }
+
+    pub(crate) fn track_writer(&self, writer: tokio::task::JoinHandle<()>) {
+        let mut writers = self.writers();
+        writers.retain(|running| !running.is_finished());
+        writers.push(writer);
+    }
+
+    fn writers(&self) -> std::sync::MutexGuard<'_, Vec<tokio::task::JoinHandle<()>>> {
+        self.inner
+            .writers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     pub(crate) fn stopped(&self) -> impl std::future::Future<Output = ()> + Send + 'static {

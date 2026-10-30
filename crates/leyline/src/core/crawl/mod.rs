@@ -76,6 +76,8 @@ pub struct Crawl {
     pace: HostLimits,
     seeds: Vec<Result<Url>>,
     respect: Option<Respect>,
+    agent: String,
+    max_body: Option<usize>,
     max_pages: Option<usize>,
     started: bool,
     frontier: Frontier,
@@ -119,6 +121,8 @@ impl Session {
             pace: HostLimits::new(),
             seeds: vec![seed.into_url_with_base(self.base_url())],
             respect: Some(Respect::Robots),
+            agent: ANY_AGENT.to_owned(),
+            max_body: None,
             max_pages: None,
             started: false,
             frontier: Frontier::default(),
@@ -148,6 +152,18 @@ impl Crawl {
     /// Sets which site signals the crawl obeys; `None` ignores them all.
     pub fn respect(mut self, respect: impl Into<Option<Respect>>) -> Self {
         self.respect = respect.into();
+        self
+    }
+
+    /// Sets the robots.txt group and meta robots name the crawl obeys, falling back to `*`.
+    pub fn agent(mut self, agent: impl Into<String>) -> Self {
+        self.agent = agent.into();
+        self
+    }
+
+    /// Sets the largest page body the crawl reads, overriding the session's `max_body_size`.
+    pub fn max_body_size(mut self, bytes: usize) -> Self {
+        self.max_body = Some(bytes);
         self
     }
 
@@ -261,9 +277,17 @@ impl Crawl {
         self.stats.request();
         let session = self.session.clone();
         let (retry, trusted) = (self.page_retry.clone(), self.trusted.clone());
-        let attempt = queued.attempts;
+        let (attempt, max_body) = (queued.attempts, self.max_body);
         self.tasks.push(Box::pin(async move {
-            let fetched = fetch(session, queued.url.clone(), retry, attempt, trusted).await;
+            let fetched = fetch(
+                session,
+                queued.url.clone(),
+                retry,
+                attempt,
+                trusted,
+                max_body,
+            )
+            .await;
             Event::Page {
                 origin,
                 queued,

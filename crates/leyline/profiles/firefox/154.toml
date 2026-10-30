@@ -82,6 +82,7 @@ accept_language = "en-US"
 sec_ch_ua = ""
 
 [h3]
+race = true
 initial_max_data = 25165824
 initial_max_stream_data_bidi_local = 12582912
 initial_max_stream_data_bidi_remote = 1048576

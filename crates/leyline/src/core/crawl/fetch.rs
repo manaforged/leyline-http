@@ -104,11 +104,13 @@ pub(super) async fn fetch(
     retry: Retry,
     attempt: u32,
     trusted: Option<Url>,
+    max_body: Option<usize>,
 ) -> Result<Fetched> {
-    let result = request(&session, &url, retry.once(), trusted)
-        .stream()
-        .send()
-        .await;
+    let mut builder = request(&session, &url, retry.once(), trusted);
+    if let Some(bytes) = max_body {
+        builder = builder.max_body_size(bytes);
+    }
+    let result = builder.stream().send().await;
     if let RetryPlan::Backoff(wait) = retry.plan(&result, attempt, true, || true) {
         return Ok(Fetched::Later(wait));
     }

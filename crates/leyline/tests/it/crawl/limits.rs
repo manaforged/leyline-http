@@ -131,7 +131,7 @@ async fn a_shut_down_session_ends_a_crawl_waiting_on_a_paused_host() {
     tokio::time::sleep(Duration::from_secs(4)).await;
     assert!(!run.is_finished());
     let stopped = Instant::now();
-    session.shutdown();
+    session.shutdown().await;
     run.await.unwrap();
     assert!(
         stopped.elapsed() < Duration::from_secs(1),

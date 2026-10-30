@@ -110,7 +110,7 @@ async fn autosave_writes_a_cookie_change() {
     let url = url::Url::parse("https://shop.example/").unwrap();
     session.cookies().store("sid=1; Path=/; Max-Age=3600", &url);
     assert_eq!(saved_cookie_soon(&path, &url).await.as_deref(), Some("1"));
-    session.shutdown();
+    session.shutdown().await;
     drop(std::fs::remove_dir_all(&dir));
 }
 
@@ -122,7 +122,7 @@ async fn autosave_writes_a_final_save_on_shutdown() {
     session.autosave(&path, Duration::from_secs(3600));
     let url = url::Url::parse("https://shop.example/").unwrap();
     session.cookies().store("sid=2; Path=/; Max-Age=3600", &url);
-    session.shutdown();
+    session.shutdown().await;
     assert_eq!(saved_cookie_soon(&path, &url).await.as_deref(), Some("2"));
     drop(std::fs::remove_dir_all(&dir));
 }

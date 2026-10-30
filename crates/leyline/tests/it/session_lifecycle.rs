@@ -63,7 +63,7 @@ async fn a_shut_down_session_opens_no_websocket_and_no_preconnect() {
         .await
         .unwrap();
     let session = Session::builder().tls(server.tls()).build().unwrap();
-    session.shutdown();
+    session.shutdown().await;
     let port = server.addr().port();
     let ws = session
         .get(format!("wss://localhost:{port}/feed"))
@@ -132,7 +132,7 @@ async fn shutdown_ends_a_websocket_handshake_in_flight() {
     let mut seen_rx = seen_rx;
     let seen = tokio::time::timeout(Duration::from_secs(5), seen_rx.recv()).await;
     assert!(matches!(seen, Ok(Some(read)) if read > 0), "{seen:?}");
-    session.shutdown();
+    session.shutdown().await;
     let err = tokio::time::timeout(Duration::from_secs(2), handshake)
         .await
         .expect("shutdown ends the stalled handshake")

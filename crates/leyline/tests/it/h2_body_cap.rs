@@ -69,3 +69,36 @@ async fn an_h2_body_over_the_cap_fails_on_the_kept_connection() {
     assert_eq!(err.kind(), Kind::BodyLimit, "{err:?}");
     assert_eq!(connections.load(Ordering::SeqCst), 1);
 }
+
+#[tokio::test]
+async fn an_h2_request_can_raise_the_session_body_cap() {
+    let (cert, key) = tls_support::self_signed();
+    let der = cert.to_der().unwrap();
+    let connections = Arc::new(AtomicUsize::new(0));
+    let port = tls_support::tls_server(cert, key, Arc::clone(&connections), serve).await;
+    let session = Session::builder()
+        .max_body_size(CAP)
+        .tls(Tls::new().env_roots(false).system_roots(false).ca_der(der))
+        .build()
+        .unwrap();
+    let url = format!("https://127.0.0.1:{port}/");
+    let small = session
+        .get(&url)
+        .send()
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap();
+    assert_eq!(small.len(), SMALL);
+    let large = session
+        .get(&url)
+        .max_body_size(LARGE)
+        .send()
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap();
+    assert_eq!(large.len(), LARGE);
+}
