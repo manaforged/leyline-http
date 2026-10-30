@@ -18,7 +18,7 @@ maintainer tells you the new date in the advisory thread.
 
 ## Supported versions
 
-Security fixes go to the latest 0.1.x release.
+Security fixes go to the latest 0.2.x release.
 
 ## Scope
 
@@ -29,6 +29,9 @@ Security fixes go to the latest 0.1.x release.
 
 - Detection of the client by a remote site. Leyline mimics browsers on the
   wire, but a site that can tell the difference is not a security defect.
+- A session file from an untrusted source. A file that `Session::load` reads
+  sets the cookies, TLS session tickets, and proxy of the session, so whoever
+  writes it controls the session.
 - Vulnerabilities in upstream BoringSSL or quiche. Report them to the
   upstream project.
 

@@ -151,7 +151,7 @@ let session = leyline::Session::builder()
 ```
 
 Clones and every derived session share the pool, except one built after a
-connection setting changed, or `to_builder().share_connections(false)`, which
+connection setting changed (the [list](sessions.md#derive-a-session)), or `to_builder().share_connections(false)`, which
 starts a new, empty one. A session with another identity keeps its connections in a
 partition of its own, inside the shared pool and its limits. See
 [Sessions](sessions.md#derive-a-session).
