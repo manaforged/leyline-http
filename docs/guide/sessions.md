@@ -267,10 +267,10 @@ settings as it does for a new session.
 | Change | Cookie jar | Pool | TLS session cache |
 | --- | --- | --- | --- |
 | None (`clone()`) | Shared | Shared | Shared |
-| `proxy`, `redirect`, `base_url`, `headers`, `retry`, `timeout`, and other request settings | Shared | Shared | Shared |
+| `proxy`, `redirect`, `base_url`, `headers`, `retry`, `timeout` with the same connect limit, and other request settings | Shared | Shared | Shared |
 | `cookies(jar)` | The new jar | Shared | Shared |
 | `identity` | Shared | Shared, own partition | New |
-| `max_connections`, `pool_idle_timeout`, `dns_resolver`, `socket`, `tls`, `tcp_profile`, `accept_encoding`, or `protocol` | Shared | New | New |
+| A connection setting: `max_connections`, `max_connections_per_host`, `pool_idle_timeout`, `keep_alive`, `http2_ping_after_idle`, `http2_ping_timeout`, `dns_resolver`, `resolve`, a socket setter such as `local_address`, `tcp_nodelay`, or `happy_eyeballs_delay`, `tls`, `tcp_profile`, `accept_encoding`, `max_body_size`, `protocol`, or a `timeout` with another connect limit | Shared | New | New |
 
 Every derived session keeps the shutdown state. It keeps the host limits
 unless you set `host_limits`.

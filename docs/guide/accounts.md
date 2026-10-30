@@ -14,6 +14,8 @@ This page keeps one session across runs the way a browser profile keeps it: the 
 | `jar` | The cookies |
 | `state` | The TLS session tickets, the `Alt-Svc` entries, and the HSTS store. See [The connection state](#the-connection-state) |
 
+A session file is a credential: its cookies and TLS session tickets resume the account, and its proxy setting routes every request. Whoever can write the file controls the session, so keep it as private as a password and load only files that your program wrote.
+
 ## Save and load
 
 Pin a browser variant, set the languages and one proxy, and turn the proxy environment variables off. Then save the session.
