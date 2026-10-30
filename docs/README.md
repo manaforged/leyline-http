@@ -8,7 +8,7 @@ Leyline has two kinds of session:
 | You want | Call | What the server sees |
 | --- | --- | --- |
 | Plain HTTP | `Session::new()` | A plain client with a `leyline/<version>` user agent. |
-| Browser profile | `Session::browser(Browser::default())` or `Session::builder().identity(Browser::Chrome154)` | The TLS, HTTP/2, and headers of a captured browser. |
+| Browser profile | `Session::browser(Browser::default())` or `Session::builder().browser(Browser::Chrome154)` | The TLS, HTTP/2, and headers of a captured browser. |
 
 `Session::browser(Browser::default())` sends the newest bundled Chrome profile
 on Windows. `Session::new()` and a builder with no browser build a plain client.
